@@ -24,7 +24,7 @@ Get common python extensions such as PyQt, NumPy, OpenCV, Pillow here:
 https://github.com/RockLakeGrass/Windows-on-ARM64-Toolchain/tree/main/Python/packages
 
 ### 3. MSVC library: 
-You need 'msvcp140.dll' from MSFT too.
+You need ARM64 version 'msvcp140.dll' from Microsoft Visual C++ Redistributable Package.
 
 
 ## API from 'libQNNHelper.dll' for C++ projects.
