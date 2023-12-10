@@ -17,15 +17,25 @@ C:\Qualcomm\AIStack\QNN\2.16.0.231029\lib\hexagon-v73\unsigned\libQnnHtpV73Skel.
 We can copy these libraries to one folder, for example: ```C:\<Project Name>\QNN_binaries\``` <br>
 
 ### 2. Python and common python extensions: 
-Get ARM64 version 'python-3.10.5-arm64.exe' from below link and install it:
-https://github.com/RockLakeGrass/Windows-on-ARM64-Toolchain/tree/main/Python/installer
+Get ARM64 version 'python-3.11.5-arm64.exe' from below link and install it:
+https://www.python.org/ftp/python/3.11.5/python-3.11.5-arm64.exe
 
-Get common python extensions such as PyQt, NumPy, OpenCV, Pillow here:
-https://github.com/RockLakeGrass/Windows-on-ARM64-Toolchain/tree/main/Python/packages
+Get common python extensions such as NumPy, OpenCV, Pillow from here:
+https://github.com/cgohlke/win_arm64-wheels/
+
+Get PyQt6 from here:
+https://github.com/RockLakeGrass/Windows-on-ARM64-Toolchain/tree/main/Python/packages/PyQt/PyQt6 
 
 ### 3. MSVC library: 
-You need ARM64 version 'msvcp140.dll' from Microsoft Visual C++ Redistributable Package.
+You need ARM64 version 'msvcp140.dll' from 'Microsoft Visual C++ 2022 Redistributable (Arm64)'. You can download it from here:
+https://aka.ms/arm64previewredist/
 
+
+###4. Notes: <br>
+a. For C++(Visual Studio) projects, you need to set 'Runtime Library' to 'Multi-threaded DLL (/MD)'. Please refer to below link for detailed information:
+https://learn.microsoft.com/en-us/cpp/build/reference/md-mt-ld-use-run-time-library?view=msvc-170
+
+b. Plese use the API *qnnhelper.set_log_level()* for Python and *SetLogLevel()* for C++ to initialize the log function before you call any other APIs. 
 
 ## API from 'libQNNHelper.dll' for C++ projects.
 
