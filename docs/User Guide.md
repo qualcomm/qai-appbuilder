@@ -26,12 +26,14 @@ https://github.com/cgohlke/win_arm64-wheels/
 Get PyQt6 from here:
 https://github.com/RockLakeGrass/Windows-on-ARM64-Toolchain/tree/main/Python/packages/PyQt/PyQt6 
 
-### 3. MSVC library: 
+### 3. PyTorch, TorchVision, ONNX, ONNX Runtime:
+If need these Python extensioin for ARM64 Python, you need compile them by yourselves. If need support on how to compile them, you can contact with us.
+
+### 4. MSVC library: 
 You need ARM64 version 'msvcp140.dll' from 'Microsoft Visual C++ 2022 Redistributable (Arm64)'. You can download it from here:
 https://aka.ms/arm64previewredist/
 
-
-###4. Notes: <br>
+### 5. Notes: <br>
 a. For C++(Visual Studio) projects, you need to set 'Runtime Library' to 'Multi-threaded DLL (/MD)'. Please refer to below link for detailed information:
 https://learn.microsoft.com/en-us/cpp/build/reference/md-mt-ld-use-run-time-library?view=msvc-170
 
