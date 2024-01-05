@@ -7,12 +7,12 @@
 <b>We need the below libraries from QNN SDK for using QNNHelper on Snapdragon X Elite device:</b> <br>
 
 ```
-C:\Qualcomm\AIStack\QNN\2.16.0.231029\lib\aarch64-windows-msvc\QnnHtp.dll
-C:\Qualcomm\AIStack\QNN\2.16.0.231029\lib\aarch64-windows-msvc\QnnHtpNetRunExtensions.dll
-C:\Qualcomm\AIStack\QNN\2.16.0.231029\lib\aarch64-windows-msvc\QnnHtpPrepare.dll
-C:\Qualcomm\AIStack\QNN\2.16.0.231029\lib\aarch64-windows-msvc\QnnSystem.dll
-C:\Qualcomm\AIStack\QNN\2.16.0.231029\lib\aarch64-windows-msvc\QnnHtpV73Stub.dll
-C:\Qualcomm\AIStack\QNN\2.16.0.231029\lib\hexagon-v73\unsigned\libQnnHtpV73Skel.so
+C:\Qualcomm\AIStack\QNN\{SDK Version}\lib\aarch64-windows-msvc\QnnHtp.dll
+C:\Qualcomm\AIStack\QNN\{SDK Version}\lib\aarch64-windows-msvc\QnnHtpNetRunExtensions.dll
+C:\Qualcomm\AIStack\QNN\{SDK Version}\lib\aarch64-windows-msvc\QnnHtpPrepare.dll
+C:\Qualcomm\AIStack\QNN\{SDK Version}\lib\aarch64-windows-msvc\QnnSystem.dll
+C:\Qualcomm\AIStack\QNN\{SDK Version}\lib\aarch64-windows-msvc\QnnHtpV73Stub.dll
+C:\Qualcomm\AIStack\QNN\{SDK Version}\lib\hexagon-v73\unsigned\libQnnHtpV73Skel.so
 ```
 We can copy these libraries to one folder, for example: ```C:\<Project Name>\QNN_binaries\``` <br>
 
