@@ -17,7 +17,7 @@
 #include <winbase.h>
 #include <unordered_map>
 
-#include "libQNNHelper.hpp"
+#include "LibQNNHelper.hpp"
 
 
 #define PRINT_MEMINFO (0)

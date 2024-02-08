@@ -1,0 +1,216 @@
+#=============================================================================
+#
+# Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+# 
+# SPDX-License-Identifier: BSD-3-Clause
+#
+#=============================================================================
+
+import os
+import sys
+import functools
+import time
+from qnnhelper import pyqnnhelper
+
+
+QNN_SYSTEM_LIB            = "QnnSystem.dll"
+
+g_backend_lib_path        = "None"
+g_system_lib_path         = "None"
+
+base_path = os.path.dirname(os.path.abspath(__file__))
+env_path = os.getenv('PATH') + base_path + ";"
+os.putenv('PATH', env_path)
+
+
+def timer(func):
+    @functools.wraps(func)
+    def wrapper_timer(*args, **kwargs):
+        tic = time.perf_counter()
+        value = func(*args, **kwargs)
+        toc = time.perf_counter()
+        elapsed_time = toc - tic
+        print(f"Elapsed time: {elapsed_time:0.4f} seconds")
+        return value
+    return wrapper_timer
+
+class LogLevel():
+    ERROR = 1
+    WARN = 2
+    INFO = 3
+    VERBOSE = 4
+    DEBUG = 5
+    
+    def SetLogLevel(log_level):
+        pyqnnhelper.set_log_level(log_level)
+
+class ProfilingLevel():
+    """
+        file:///C:/Qualcomm/AIStack/QNN/2.19.0.240124/docs/QNN/general/htp/htp_backend.html?highlight=rpc_control_latency#qnn-htp-profiling
+    """
+    OFF = 0
+    BASIC = 1
+    DETAILED = 2
+    INVALID = 3
+    
+    def SetProfilingLevel(profiling_level):
+        pyqnnhelper.set_profiling_level(profiling_level)
+
+class Runtime():
+    """Available runtimes for model execution on Qualcomm harwdware."""
+    CPU = "Cpu"
+    HTP = "Htp"
+
+class PerfProfile():
+    """
+        Set the HTP perf profile.
+        file:///C:/Qualcomm/AIStack/QNN/2.19.0.240124/docs/QNN/general/htp/htp_backend.html?highlight=rpc_control_latency#qnn-htp-performance-infrastructure-api
+    """
+    DEFAULT             = "default"     # not change the perf profile.
+    HIGH_PERFORMANCE    = "high_performance"
+    BURST               = "burst"
+
+    def SetPerfProfileGlobal(perf_profile):
+        """
+        Set the perf profile globally. We can set HTP to 'burst' and keep it for running inference several times, the use RelPerfProfileGlobal to reset it.
+        You should keep the 'perf_profile' parameter of function 'Inference()' as 'PerfProfile.DEFAULT' for the class QNNContext & QNNContextProc. If not, this
+        global setting will be overwrited.
+        """
+        pyqnnhelper.set_perf_profile(perf_profile)
+
+    def RelPerfProfileGlobal():
+        """
+        Release the perf profile which set by function SetPerfProfileGlobal().
+        """
+        pyqnnhelper.rel_perf_profile()
+
+
+class QNNConfig():
+    """Config QNN SDK libraries path, runtime(CPU/HTP), log leverl, profiling level."""
+    def Config(qnn_lib_path: str = "None",
+               runtime : str = Runtime.HTP,
+               log_level : int = LogLevel.ERROR,
+               profiling_level : int = ProfilingLevel.OFF,
+    ):
+        global g_backend_lib_path, g_system_lib_path
+
+        if not os.path.exists(qnn_lib_path):
+            raise ValueError(f"qnn_lib_path does not exist: {qnn_lib_path}")
+
+        if (qnn_lib_path != "None"):
+            g_backend_lib_path = qnn_lib_path + "\\" + "Qnn" + runtime + ".dll"
+            g_system_lib_path = qnn_lib_path + "\\" + QNN_SYSTEM_LIB
+
+        if not os.path.exists(g_backend_lib_path):
+            raise ValueError(f"backend library does not exist: {g_backend_lib_path}")
+                
+        if not os.path.exists(g_system_lib_path):
+            raise ValueError(f"system library does not exist: {g_system_lib_path}")
+
+        LogLevel.SetLogLevel(log_level)
+        ProfilingLevel.SetProfilingLevel(profiling_level)
+
+
+class QNNContext:
+    """High-level Python wrapper for a QNNHelper model."""
+    def __init__(self,
+                model_name: str = "None",
+                model_path: str = "None",
+                backend_lib_path: str = "None",
+                system_lib_path: str = "None",
+                runtime : str = Runtime.HTP
+    ) -> None:
+        """Load a QNN model from `model_path`
+
+        Args:
+            model_path (str): model path
+        """
+        self.model_path = model_path
+
+        if self.model_path is None:
+            raise ValueError("model_path must be specified!")
+
+        if not os.path.exists(self.model_path):
+            raise ValueError(f"Model path does not exist: {self.model_path}")
+
+        if (backend_lib_path == "None"):
+            backend_lib_path = g_backend_lib_path
+        if (system_lib_path == "None"):
+            system_lib_path = g_system_lib_path
+
+        self.m_context = pyqnnhelper.QNNContext(model_name, model_path, backend_lib_path, system_lib_path)
+
+    #@timer
+    def Inference(self, input, perf_profile = PerfProfile.DEFAULT):
+        return self.m_context.Inference(input, perf_profile)
+
+    #@timer
+    def __del__(self):
+        if hasattr(self, "m_context") and self.m_context is not None:
+            del(self.m_context)
+            m_context = None
+
+
+class QNNContextProc:
+    """High-level Python wrapper for a QNNHelper model. Load and run the model in separate process."""
+    def __init__(self,
+                 model_name: str = "None",
+                 proc_name: str = "None",
+                 model_path: str = "None",
+                 backend_lib_path: str = "None",
+                 system_lib_path: str = "None",
+                 runtime : str = Runtime.HTP
+    ) -> None:
+        """Load a QNN model from `model_path`
+
+        Args:
+            model_path (str): model path
+        """
+        self.model_path = model_path
+        self.proc_name = proc_name
+
+        if self.model_path is None:
+            raise ValueError("model_path must be specified!")
+
+        if not os.path.exists(self.model_path):
+            raise ValueError(f"Model path does not exist: {self.model_path}")
+
+        if (backend_lib_path == "None"):
+            backend_lib_path = g_backend_lib_path
+        if (system_lib_path == "None"):
+            system_lib_path = g_system_lib_path
+
+        self.m_context = pyqnnhelper.QNNContext(model_name, proc_name, model_path, backend_lib_path, system_lib_path)
+
+    #@timer
+    def Inference(self, shareMemory, input, perf_profile = PerfProfile.DEFAULT):
+        return self.m_context.Inference(shareMemory.m_memory, input, perf_profile)
+
+    #@timer
+    def __del__(self):
+        if hasattr(self, "m_context") and self.m_context is not None:
+            del(self.m_context)
+            m_context = None
+
+
+class QNNShareMemory:
+    """High-level Python wrapper for a QNNHelper model."""
+    def __init__(self,
+                 share_memory_name: str = "None",
+                 share_memory_size: int = 0,
+    ) -> None:
+        """Load a QNN model from `model_path`
+
+        Args:
+            model_path (str): model path
+        """
+        self.share_memory_name = share_memory_name
+
+        self.m_memory = pyqnnhelper.ShareMemory(share_memory_name, share_memory_size)
+
+    #@timer
+    def __del__(self):
+        if hasattr(self, "m_memory") and self.m_memory is not None:
+            del(self.m_memory)
+            m_memory = None
+

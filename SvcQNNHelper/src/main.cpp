@@ -8,9 +8,6 @@
 
 #pragma once
 
-// #define _CRTDBG_MAP_ALLOC       // TODO: Debug memory leak.
-// #include <stdlib.h>
-// #include <crtdbg.h>
 
 #include "Utils/Utils.hpp"
 
@@ -73,12 +70,10 @@ void ModelLoad(std::string cmdBuf, HANDLE hSvcPipeOutWrite) {
     std::string model_path                  = commands[1];
     std::string backend_lib_path            = commands[2];
     std::string system_lib_path             = commands[3];
-    std::string backend_ext_lib_path        = commands[4];
-    std::string backend_ext_config_path     = commands[5];
 
     Print_MemInfo("ModelLoad::ModelInitialize Start.");
     QNN_INF("ModelLoad::ModelInitialize::Model name %s\n", model_name.c_str());
-    bSuccess = g_LibQNNHelper.ModelInitialize(model_name.c_str(), model_path, backend_lib_path, system_lib_path, backend_ext_lib_path, backend_ext_config_path);
+    bSuccess = g_LibQNNHelper.ModelInitialize(model_name.c_str(), model_path, backend_lib_path, system_lib_path);
     QNN_INF("ModelLoad::ModelInitialize End ret = %d\n", bSuccess);
     Print_MemInfo("ModelLoad::ModelInitialize End.");
 
@@ -101,7 +96,9 @@ void ModelRun(std::string cmdBuf, HANDLE hSvcPipeOutWrite) {
     std::string model_name        = commands[0];
     std::string share_memory_name = commands[1];
     size_t share_memory_size      = std::stoull(commands[2]);
-    std::string strBufferArray      = commands[3];
+    std::string strBufferArray    = commands[3];
+    std::string perfProfile       = commands[4];
+
 
     // Open share memory and read the inference data from share memory.
     LPVOID lpBase = OpenShareMem(share_memory_name, share_memory_size);
@@ -113,16 +110,15 @@ void ModelRun(std::string cmdBuf, HANDLE hSvcPipeOutWrite) {
     outputSize.push_back(12345);
 
     // Fill data from 'pShareMemInfo->lpBase' to 'inputBuffers' vector before inference the model.
-    // TODO: check if can optimize it
     ShareMemToVector(strBufferArray, (uint8_t*)lpBase, inputBuffers, inputSize);
 
     Print_MemInfo("ModelRun::ModelInference Start.");
     //QNN_INF("ModelRun::ModelInference %s\n", model_name.c_str());
-    bSuccess = g_LibQNNHelper.ModelInference(model_name.c_str(), inputBuffers, outputBuffers, outputSize);
+    bSuccess = g_LibQNNHelper.ModelInference(model_name.c_str(), inputBuffers, outputBuffers, outputSize, perfProfile);
     //QNN_INF("ModelRun::ModelInference End ret = %d\n", bSuccess);
     Print_MemInfo("ModelRun::ModelInference End.");
 
-    // TODO: fill data from outputBuffers to 'pShareMemInfo->lpBase' and send back to client.
+    // Fill data from outputBuffers to 'pShareMemInfo->lpBase' and send back to client.
     std::pair<std::string, std::string> strResultArray = VectorToShareMem(share_memory_size, (uint8_t*)lpBase, outputBuffers, outputSize);
 
     outputBuffers.clear();
@@ -180,7 +176,7 @@ int svcprocess_run(HANDLE hSvcPipeInRead, HANDLE hSvcPipeOutWrite) {
         bSuccess = ReadFile(hSvcPipeInRead, g_buffer, GLOBAL_BUFSIZE, &dwRead, NULL);
 
         if (!bSuccess || dwRead == 0) {
-            QNN_WAR("Svc::Failed to read from hSvcPipeInRead, perhaps parent process closed pipe or died.");
+            QNN_WAR("Svc::Failed to read from hSvcPipeInRead, perhaps parent process closed pipe or died.\n");
             break;
         }
 
@@ -204,31 +200,27 @@ int svcprocess_run(HANDLE hSvcPipeInRead, HANDLE hSvcPipeOutWrite) {
 }
 
 
-// ============================== Client / libQNNHelper ============================== //
-#define MODEL_SHAREMEM_SIZE      (1024 * 1024 * 50)  // 50M
+// ============================== Client / SvcQNNHelper ============================== //
+#define BUFSIZE             (256)
 
-#define MODEL_DATA_PATH_IN       "C:\\Source\\Projects\\QNNHelper\\build\\Release\\temp\\input_%d.raw"
-#define MODEL_DATA_PATH_OUT      "C:\\Source\\Projects\\QNNHelper\\build\\Release\\temp\\output_%d.raw"
-#define MODEL_DATA_INPUT_CNT     1
-#define BUFSIZE                 256
-
-int hostprocess_run() {
+// test code, load and run model.
+int hostprocess_run(std::string qnn_lib_path, std::string model_path, 
+                    std::string input_raw_path, int input_count, int memory_size,
+                    std::string perf_profile) {
     BOOL result = false;
 
-    std::string MODEL_NAME = "unet";
-    std::string PROC_NAME = "~unet";
-    std::string WORK_PATH = "C:\\Source\\SD_QC\\ControlNet\\controlnet_workspace_V2\\qnn_assets\\";
-    std::string qnn_binary_path = WORK_PATH + "QNN_binaries\\";
+    std::string MODEL_NAME = "<model_name>";
+    std::string PROC_NAME = "<proc_name>";
 
     std::string model_memory_name = MODEL_NAME;
     std::string model_name = MODEL_NAME;
     std::string proc_name = PROC_NAME;
-    std::string model_path = WORK_PATH + "models\\realesrgan\\realesrgan_x4_512_quantized.serialized.v68.bin";
-    std::string backend_lib_path = qnn_binary_path + "QnnHtp.dll";
-    std::string system_lib_path = qnn_binary_path + "QnnSystem.dll";
-    std::string backend_ext_lib_path = qnn_binary_path + "QnnHtpNetRunExtensions.dll";
-    std::string backend_ext_config_path = qnn_binary_path + "htp_backend_ext_config_V68.json";
 
+    std::string backend_lib_path = qnn_lib_path + "\\QnnHtp.dll";
+    std::string system_lib_path = qnn_lib_path + "\\QnnSystem.dll";
+
+    std::string input_data_path = input_raw_path + "\\input_%d.raw";
+    std::string output_data_path = input_raw_path + "\\output_%d.raw";
 
     QNN_INF("Load data from raw data file to vector Start.\n");
     std::vector<uint8_t*> inputBuffers;
@@ -237,8 +229,8 @@ int hostprocess_run() {
     std::vector<size_t> outputSize;
     char dataPath[BUFSIZE];
 
-    for (int i = 0; i < MODEL_DATA_INPUT_CNT; i++) {
-        sprintf_s(dataPath, BUFSIZE, MODEL_DATA_PATH_IN, i);
+    for (int i = 0; i < input_count; i++) {
+        sprintf_s(dataPath, BUFSIZE, input_data_path.c_str(), i);
         std::ifstream in(dataPath, std::ifstream::binary);
         if (!in) {
             QNN_ERR("Failed to open input file: %s", dataPath);
@@ -261,64 +253,82 @@ int hostprocess_run() {
     QNN_INF("Load data from raw data file to vector End.\n");
 
     Print_MemInfo("Load data from raw data file End.");
+
     LibQNNHelper libQNNHelper;
 
-    // TODO: test code, load and run model locally.
-//#define TEST_MODEL_LOCAL        1
-#ifdef TEST_MODEL_LOCAL
-#define INFERENCE_TIMES     (1)
-    {
+    if (0 == memory_size) {    // Load & run model locally.
         QNN_INF("Load and run model locally Start.\n");
-        result = libQNNHelper.ModelInitialize(model_name, model_path, backend_lib_path, system_lib_path, backend_ext_lib_path, backend_ext_config_path);
+        result = libQNNHelper.ModelInitialize(model_name, model_path, backend_lib_path, system_lib_path);
         Print_MemInfo("ModelInitialize End.");
-        
-        for(int i = 0; i < INFERENCE_TIMES; i++) {
-            result = libQNNHelper.ModelInference(model_name, inputBuffers, outputBuffers, outputSize);
-            for (int j = 0; j < outputBuffers.size(); j++) {
-                free(outputBuffers[j]);
+
+        // SetPerfProfileGlobal("burst");
+
+        {
+            // Inference.
+            result = libQNNHelper.ModelInference(model_name, inputBuffers, outputBuffers, outputSize, perf_profile);
+            
+            // Verify the output data here. Free the data in vector.
+            for (int i = 0; i < outputSize.size(); i++) {
+                sprintf_s(dataPath, BUFSIZE, output_data_path.c_str(), i);
+                std::ofstream os(dataPath, std::ofstream::binary);
+                if (!os) {
+                    QNN_ERR("Failed to open output file for writing: %s", dataPath);
+                }
+                else {
+                    os.write(reinterpret_cast<char*>(&(*(outputBuffers[i]))), outputSize[i]);
+                }
+                os.close();
+            }
+            
+            for (int i = 0; i < outputBuffers.size(); i++) {
+                free(outputBuffers[i]);
             }
             outputBuffers.clear();
             outputSize.clear();
-            Print_MemInfo("ModelInference End." + std::to_string(i));
+            Print_MemInfo("ModelInference End.");
         }
 
         result = libQNNHelper.ModelDestroy(model_name);
+        
         QNN_INF("Load and run model locally End.\n");
+
         Print_MemInfo("Load and run model locally End.");
     }
-#endif
+    else {    // Load & run model in remote process.
+        libQNNHelper.CreateShareMemory(model_memory_name, memory_size);
 
-    libQNNHelper.CreateShareMemory(model_memory_name, MODEL_SHAREMEM_SIZE);
-    // memset(pShareMemInfo->lpBase, 0, MODEL_SHAREMEM_SIZE);
+        // Add 'TalkToSvc_*' function to 'libQNNHelper'.
+        QNN_INF("TalkToSvc_Initialize Start.\n");
+        result = libQNNHelper.ModelInitialize(model_name, proc_name, model_path, backend_lib_path, system_lib_path);
+        QNN_INF("TalkToSvc_Initialize End %d.\n", result);
 
-    // Add 'TalkToSvc_*' function to 'libQNNHelper'.
-    QNN_INF("TalkToSvc_Initialize Start.\n");
-    result = libQNNHelper.ModelInitialize(model_name, proc_name, model_path, backend_lib_path, system_lib_path, backend_ext_lib_path, backend_ext_config_path);
-    QNN_INF("TalkToSvc_Initialize End %d.\n", result);
+        QNN_INF("TalkToSvc_Inference Start.\n");
+        result = libQNNHelper.ModelInference(model_name, proc_name, model_memory_name, inputBuffers, inputSize, outputBuffers, outputSize, perf_profile);
+        QNN_INF("TalkToSvc_Inference End %d.\n", result);
 
-    QNN_INF("TalkToSvc_Inference Start.\n");
-    result = libQNNHelper.ModelInference(model_name, proc_name, model_memory_name, inputBuffers, inputSize, outputBuffers, outputSize);
-    QNN_INF("TalkToSvc_Inference End %d.\n", result);
-
-    // TODO: Verify the output data here. Free the data in vector.
-    for (int i = 0; i < outputSize.size(); i++) {
-        sprintf_s(dataPath, BUFSIZE, MODEL_DATA_PATH_OUT, i);
-        std::ofstream os(dataPath, std::ofstream::binary);
-        if (!os) {
-            QNN_ERR("Failed to open output file for writing: %s", dataPath);
+        // Verify the output data here. Free the data in vector.
+        for (int i = 0; i < outputSize.size(); i++) {
+            sprintf_s(dataPath, BUFSIZE, output_data_path.c_str(), i);
+            std::ofstream os(dataPath, std::ofstream::binary);
+            if (!os) {
+                QNN_ERR("Failed to open output file for writing: %s", dataPath);
+            }
+            else {
+                os.write(reinterpret_cast<char*>(&(*(outputBuffers[i]))), outputSize[i]);
+            }
+            os.close();
         }
-        else {
-            os.write(reinterpret_cast<char*>(&(*(outputBuffers[i]))), outputSize[i]);
-        }
-        os.close();
+
+        result = libQNNHelper.ModelDestroy(model_name, proc_name);
+        QNN_INF("TalkToSvc_Destroy End.\n");
+
+        libQNNHelper.DeleteShareMemory(model_memory_name);
+        QNN_INF("DeleteShareMem End.\n");
+
+        // outputBuffers is in ShareMemory, so we don't need to free this memory.
     }
 
-    result = libQNNHelper.ModelDestroy(model_name, proc_name);
-    QNN_INF("TalkToSvc_Destroy End.\n");
-    
-    libQNNHelper.DeleteShareMemory(model_memory_name);
-    QNN_INF("DeleteShareMem End.\n");
-
+    // Release input buffer.
     for (int i = 0; i < inputBuffers.size(); i++) {
         free(inputBuffers[i]);
     }
@@ -330,32 +340,55 @@ int hostprocess_run() {
 
 
 int main(int argc, char** argv) {
-    /*
-    QNN_LOG_LEVEL_ERROR = 1
-    QNN_LOG_LEVEL_WARN = 2
-    QNN_LOG_LEVEL_INFO = 3
-    QNN_LOG_LEVEL_VERBOSE = 4
-    QNN_LOG_LEVEL_DEBUG = 5
-    */
-    // SetLogLevel(1);
 
     if(argc > 1 && argv[1] && argv[1][0] == 's') {
         HANDLE hSvcPipeInRead = (HANDLE)std::stoull(argv[2]);
         HANDLE hSvcPipeOutWrite = (HANDLE)std::stoull(argv[3]);
         SetLogLevel(std::stoi(argv[5]));
-        SetProcInfo(argv[6], std::stoull(argv[4]));
-        QNN_INF("Svc App Start proc %s.\n", argv[6]);
+        SetProfilingLevel(std::stoi(argv[6]));
+        SetProcInfo(argv[7], std::stoull(argv[4]));
+        QNN_INF("Svc App Start proc %s.\n", argv[7]);
         Print_MemInfo("Svc App Start.");
         svcprocess_run(hSvcPipeInRead, hSvcPipeOutWrite);
         Print_MemInfo("Svc App End.");
     }
     else {
-        SetLogLevel(2);
-        Print_MemInfo("Main App Start.");
-        hostprocess_run();
+        // SvcQNNHelper.exe <1:int:log_level> <2:str:QNN_Libraries_Path> <3:str:model_path> <4:str:perf_profile> 
+        //                  <5:str:input_raw_path> <6:int:input_count> <7:int:memory_size>
+        // input files are under 'input_raw_path' and the file names format are 'input_%d.raw'.
+        // SvcQNNHelper.exe 5 ""
+
+        if (argc <= 6) {
+            printf("Command formant: SvcQNNHelper.exe <1:int:log_level> <2:str:QNN_Libraries_Path> <3:str:model_path> <4:str:perf_profile> <5:str:input_raw_path> <6:int:input_count> <7:int:memory_size>\n");
+            printf("'memory_size' is an option parameter, only needed while running the model in remote process.\n");
+            printf("Example: SvcQNNHelper.exe 5 \"C:\\test_model\\QNN_binaries\" \"C:\\test_model\\qnn_model\\InceptionV3_quantized.serialized.v73.bin\" \"bust\" \"C:\\test_model\\input\" 1 102400000");
+            return 0;
+        }
+
+        int log_level = std::stoi(argv[1]);
+        char* qnn_lib_path = argv[2];
+        char* model_path = argv[3];
+        char* perf_profile = argv[4];
+        char* input_list_path = argv[5];
+        int input_count = std::stoi(argv[6]);
+        int memory_size = 0;
+        if (argc > 7) {
+            memory_size = std::stoi(argv[7]);
+        }
+
+        SetLogLevel(log_level);
+
+        if(log_level >= 5) {
+            SetProfilingLevel(2);
+        }
+        else if(log_level >= 3) {
+            SetProfilingLevel(1);
+        }
+        
+        hostprocess_run(qnn_lib_path, model_path, input_list_path, input_count, memory_size, perf_profile);
+
         Print_MemInfo("Main App End.");
     }
 
-    // _CrtDumpMemoryLeaks();      // TODO: Debug memory leak, output to 'debug output' window.
-    // Sleep(1000);
 }
+

@@ -1,0 +1,2 @@
+setuptools==65.5.1
+pybind11==2.11.1

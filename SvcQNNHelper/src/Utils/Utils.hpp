@@ -20,13 +20,14 @@
 #define GLOBAL_BUFSIZE      4096
 
 #ifdef UNICODE  
-#define SVC_QNNHELPER_CMD   TEXT("SvcQNNHelper.exe svc %llu %llu %llu %d \"%S\"")
+#define SVC_QNNHELPER_CMD   TEXT("SvcQNNHelper.exe svc %llu %llu %llu %d %d \"%S\"")
 #else  
-#define SVC_QNNHELPER_CMD   TEXT("SvcQNNHelper.exe svc %llu %llu %llu %d \"%s\"")
+#define SVC_QNNHELPER_CMD   TEXT("SvcQNNHelper.exe svc %llu %llu %llu %d %d \"%s\"")
 #endif
 
 uint64_t g_logEpoch = 0;
 int g_logLevel = 0;
+int g_profilingLevel = 0;
 std::string g_ProcName = "^main";
 
 char g_buffer[GLOBAL_BUFSIZE];
@@ -116,7 +117,7 @@ ProcInfo_t* CreateSvcProcess(std::string proc_name) {
     siStartInfo.cb = sizeof(STARTUPINFO);
 
     _stprintf_s((TCHAR*)g_buffer, GLOBAL_BUFSIZE, SVC_QNNHELPER_CMD, (uint64_t)hSvcPipeInRead, (uint64_t)hSvcPipeOutWrite, 
-                g_logEpoch, g_logLevel, proc_name.c_str());
+                g_logEpoch, g_logLevel, g_profilingLevel, proc_name.c_str());
 
     bSuccess = CreateProcess(NULL, (TCHAR*)g_buffer, NULL, NULL, TRUE, 0, NULL, NULL, &siStartInfo, &piSvcProcInfo);
 
@@ -158,9 +159,8 @@ BOOL StopSvcProcess(std::string proc_name) {
 }
 
 // Send model data to the Svc through share meoory and receive model generated data from share memory.
-BOOL TalkToSvc_Initialize(std::string model_name, std::string proc_name, std::string model_path,
-                          std::string backend_lib_path, std::string system_lib_path,
-                          std::string backend_ext_lib_path, std::string backend_ext_config_path) {
+BOOL TalkToSvc_Initialize(const std::string& model_name, const std::string& proc_name, const std::string& model_path,
+                          const std::string& backend_lib_path, const std::string& system_lib_path) {
     ProcInfo_t* pProcInfo = FindProcInfo(proc_name);
     if (!pProcInfo) {
         pProcInfo = CreateSvcProcess(proc_name);
@@ -173,8 +173,7 @@ BOOL TalkToSvc_Initialize(std::string model_name, std::string proc_name, std::st
     DWORD dwRead = 0, dwWrite = 0;
     BOOL bSuccess;
 
-    std::string command = "l" + model_name + ";" + model_path + ";" + backend_lib_path + 
-                           ";" + system_lib_path + ";" + backend_ext_lib_path + ";" + backend_ext_config_path;
+    std::string command = "l" + model_name + ";" + model_path + ";" + backend_lib_path + ";" + system_lib_path;
     dwRead = (DWORD)command.length() + 1;
 
     TimerHelper timerHelper;
@@ -310,7 +309,8 @@ std::pair<std::string, std::string> VectorToShareMem(size_t share_memory_size, u
 // Send model data to the Svc through share memory and receive model generated data from share memory.
 BOOL TalkToSvc_Inference(std::string model_name, std::string proc_name, std::string share_memory_name, 
                          std::vector<uint8_t*>& inputBuffers, std::vector<size_t>& inputSize,
-                         std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize) {
+                         std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
+                         std::string perfProfile) {
     ProcInfo_t* pProcInfo = FindProcInfo(proc_name);
     if (!pProcInfo) {
         QNN_ERR("TalkToSvc_Inference::Cant find this process %s.\n", proc_name.c_str());
@@ -331,7 +331,8 @@ BOOL TalkToSvc_Inference(std::string model_name, std::string proc_name, std::str
     std::string command = "g" + model_name + ";" + share_memory_name + ";" + std::to_string(pShareMemInfo->size) + ";";
     // 'offset' in share memory(according to 'inputBuffers' data size, so that we can restore this data to 'std::vector<uint8_t*>' in Svc).
     std::pair<std::string, std::string> strResultArray = VectorToShareMem(pShareMemInfo->size, (uint8_t*)pShareMemInfo->lpBase, inputBuffers, inputSize);
-    command = command + strResultArray.first + "=" + strResultArray.second;
+    command = command + strResultArray.first + "=" + strResultArray.second + ";";
+    command = command + perfProfile;
     dwRead = (DWORD)command.length() + 1;
 
     // start_time();
@@ -352,7 +353,7 @@ BOOL TalkToSvc_Inference(std::string model_name, std::string proc_name, std::str
     if (!bSuccess || dwRead == 0) return false;
     //print_time("TalkToSvc_Inference::Pipe talk");
 
-    // TODO: read the output data from 'share_memory_name'.
+    // Read the output data from 'share_memory_name'.
     if (dwRead) {
         if (g_buffer[0] == 'F') {  // ACTION_FAILED == Failed.
             return false;
@@ -365,3 +366,4 @@ BOOL TalkToSvc_Inference(std::string model_name, std::string proc_name, std::str
 }
 
 #endif
+
