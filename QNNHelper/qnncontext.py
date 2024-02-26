@@ -18,10 +18,8 @@ QNN_SYSTEM_LIB            = "QnnSystem.dll"
 g_backend_lib_path        = "None"
 g_system_lib_path         = "None"
 
-base_path = os.path.dirname(os.path.abspath(__file__))
-env_path = os.getenv('PATH') + base_path + ";"
-os.putenv('PATH', env_path)
-
+g_base_path = os.path.dirname(os.path.abspath(__file__))
+g_base_path = os.getenv('PATH') + ";" + g_base_path + ";"
 
 def timer(func):
     @functools.wraps(func)
@@ -180,6 +178,7 @@ class QNNContextProc:
         if (system_lib_path == "None"):
             system_lib_path = g_system_lib_path
 
+        os.putenv('PATH', g_base_path)
         self.m_context = pyqnnhelper.QNNContext(model_name, proc_name, model_path, backend_lib_path, system_lib_path)
 
     #@timer
