@@ -24,8 +24,6 @@ dsp_arch = "73" # For Hamoa device.
 
 execution_ws = os.getcwd()
 des_dir = execution_ws + "\\qnn_assets\\QNN_binaries"
-lib_backend = des_dir + "\\QnnHtp.dll"
-lib_system = des_dir + "\\QnnSystem.dll"
 
 #Model pathes.
 stablediffusion_dir = execution_ws + "\\qnn_assets\\models\\stablediffusion"
@@ -55,12 +53,12 @@ user_high_resolution = False
 
 def setup_env():            # Only needs to executed once for copying SDK binaries to app folder.
     # Preparing all the binaries and libraries for execution.
-    SDK_dir = "C:\\Qualcomm\\AIStack\\QNN\\2.19.0.240124"       # Specify what's QNN SDK used
+    SDK_dir = "C:\\Qualcomm\\AIStack\\QNN\\2.20.0.240223"       # Specify what's QNN SDK used
     SDK_lib_dir = SDK_dir + "\\lib\\aarch64-windows-msvc"
     SDK_skel = SDK_dir + "\\lib\\hexagon-v{}\\unsigned\\libQnnHtpV{}Skel.so".format(dsp_arch, dsp_arch)
 
     # Copy necessary libraries to a common location
-    libs = ["QnnHtp.dll", "QnnSystem.dll", "QnnHtpNetRunExtensions.dll", "QnnHtpPrepare.dll", "QnnHtpV{}Stub.dll".format(dsp_arch)]
+    libs = ["QnnHtp.dll", "QnnSystem.dll", "QnnHtpPrepare.dll", "QnnHtpV{}Stub.dll".format(dsp_arch)]
     for lib in libs:
         shutil.copy(SDK_lib_dir + "\\" + lib, des_dir)
 
@@ -132,11 +130,9 @@ def model_initialize():
     model_realesrgan    = "realesrgan"
 
     # process names
-    model_unet_proc = "~unet"
     model_realesrgan_proc = "~realesrgan"
 
     # share memory names.
-    model_unet_mem  = model_unet + "~memory"
     model_realesrgan_mem  = model_realesrgan + "~memory"
 
     # models' path.
@@ -146,16 +142,16 @@ def model_initialize():
     realesrgan_model = '{}\\{}_quantized.serialized.v{}.bin'.format(realesrgan_dir, "realesrgan_x4_512", dsp_arch)
 
     # Instance for Unet 
-    unet = Unet(model_unet, unet_model, lib_backend, lib_system)
+    unet = Unet(model_unet, unet_model)
 
     # Instance for TextEncoder 
-    text_encoder = TextEncoder(model_text_encoder, text_encoder_model, lib_backend, lib_system)
+    text_encoder = TextEncoder(model_text_encoder, text_encoder_model)
 
     # Instance for VaeDecoder 
-    vae_decoder = VaeDecoder(model_vae_decoder, vae_decoder_model, lib_backend, lib_system)
+    vae_decoder = VaeDecoder(model_vae_decoder, vae_decoder_model)
 
     # Instance for RealESRGan which inherited from the class QNNContextProc, the model will be loaded into a separate process.
-    realesrgan = RealESRGan(model_realesrgan, model_realesrgan_proc, realesrgan_model, lib_backend, lib_system)
+    realesrgan = RealESRGan(model_realesrgan, model_realesrgan_proc, realesrgan_model)
     realesrgan_mem = QNNShareMemory(model_realesrgan_mem, 1024 * 1024 * 50) # 50M
 
     # Initializing the Tokenizer
@@ -224,6 +220,8 @@ def get_timestep(step):
 
 # Execute the Stable Diffusion pipeline
 def model_execute(callback):
+    PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
+
     scheduler.set_timesteps(user_step)  # Setting up user provided time steps for Scheduler
 
     # Run Tokenizer
@@ -278,6 +276,8 @@ def model_execute(callback):
 
         callback(image_path)
 
+    PerfProfile.RelPerfProfileGlobal()
+
 # Release all the models.
 def model_destroy():
     global text_encoder
@@ -331,9 +331,7 @@ user_high_resolution = True
 
 setup_parameters(user_prompt, uncond_prompt, user_seed, user_step, user_text_guidance, user_high_resolution)
 
-PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
 model_execute(modelExecuteCallback)
-PerfProfile.RelPerfProfileGlobal()
 
 time_end = time.time()
 print("time consumes for inference {}(s)".format(str(time_end - time_start)))

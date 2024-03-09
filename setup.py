@@ -17,7 +17,7 @@ import zipfile
 from setuptools import Extension, setup, find_packages
 from setuptools.command.build_ext import build_ext
 
-VERSION = "2.19.0"
+VERSION = "2.20.0"
 package_name = "qnnhelper"
 python_path = "QNNHelper"
 PACKAGE_ZIP  = "QNNHelper-win_arm64-QNN" + VERSION + "-Release.zip"

@@ -79,6 +79,8 @@ bool boostPerformance(QnnHtpDevice_PerfInfrastructure_t perfInfra, std::string p
     QnnHtpPerfInfrastructure_PowerConfig_t powerConfig;
     memset(&powerConfig, 0, sizeof(powerConfig));
 
+    QNN_INF("PERF::boostPerformance");
+
     powerConfig.option                     = QNN_HTP_PERF_INFRASTRUCTURE_POWER_CONFIGOPTION_DCVS_V3;
     powerConfig.dcvsV3Config.dcvsEnable    = 0;
     powerConfig.dcvsV3Config.setDcvsEnable = 1;
@@ -131,6 +133,8 @@ bool resetPerformance(QnnHtpDevice_PerfInfrastructure_t perfInfra) {
     // Initialize the power config and select the voltage corner values for the performance setting.
     QnnHtpPerfInfrastructure_PowerConfig_t powerConfig;
     memset(&powerConfig, 0, sizeof(powerConfig));
+
+    QNN_INF("PERF::resetPerformance");
 
     powerConfig.option                       = QNN_HTP_PERF_INFRASTRUCTURE_POWER_CONFIGOPTION_DCVS_V3;
     powerConfig.dcvsV3Config.dcvsEnable      = 1;
@@ -379,7 +383,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::createContext() {
   if (QNN_CONTEXT_NO_ERROR != m_qnnFunctionPointers.qnnInterface.contextCreate(
                                   m_backendHandle,
                                   m_deviceHandle,
-                                  (const QnnContext_Config_t**)&m_contextConfig,
+                                  (const QnnContext_Config_t**)m_contextConfig,
                                   &m_context)) {
     QNN_ERROR("Could not create context");
     return StatusCode::FAILURE;
@@ -521,7 +525,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::createFromBinary() {
       m_qnnFunctionPointers.qnnInterface.contextCreateFromBinary(
           m_backendHandle,
           m_deviceHandle,
-          (const QnnContext_Config_t**)&m_contextConfig,
+          (const QnnContext_Config_t**)m_contextConfig,
           static_cast<void*>(buffer.get()),
           bufferSize,
           &m_context,

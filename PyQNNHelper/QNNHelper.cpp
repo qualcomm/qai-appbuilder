@@ -8,7 +8,7 @@
 
 #include "QNNHelper.h"
 
-#define QNNHELPER_VERSION    "2.19.0"
+#define QNNHELPER_VERSION    "2.20.0"
 
 
 ShareMemory::ShareMemory(const std::string& share_memory_name, const size_t share_memory_size) {
