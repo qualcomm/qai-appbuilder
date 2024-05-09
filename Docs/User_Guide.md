@@ -7,12 +7,13 @@
 <b>We need below libraries from QNN SDK for using QNNHelper on Snapdragon X Elite(Windows on Snapdragon device):</b>
 
 ```
-C:\Qualcomm\AIStack\QNN\{SDK Version}\lib\aarch64-windows-msvc\QnnHtp.dll  (backend for running model on HTP)
-C:\Qualcomm\AIStack\QNN\{SDK Version}\lib\aarch64-windows-msvc\QnnCpu.dll  (backend for running model on CPU)
-C:\Qualcomm\AIStack\QNN\{SDK Version}\lib\aarch64-windows-msvc\QnnHtpPrepare.dll
-C:\Qualcomm\AIStack\QNN\{SDK Version}\lib\aarch64-windows-msvc\QnnSystem.dll
-C:\Qualcomm\AIStack\QNN\{SDK Version}\lib\aarch64-windows-msvc\QnnHtpV73Stub.dll
-C:\Qualcomm\AIStack\QNN\{SDK Version}\lib\hexagon-v73\unsigned\libQnnHtpV73Skel.so
+C:\Qualcomm\AIStack\QAIRT\{SDK Version}\lib\aarch64-windows-msvc\QnnHtp.dll  (backend for running model on HTP)
+C:\Qualcomm\AIStack\QAIRT\{SDK Version}\lib\aarch64-windows-msvc\QnnCpu.dll  (backend for running model on CPU)
+C:\Qualcomm\AIStack\QAIRT\{SDK Version}\lib\aarch64-windows-msvc\QnnHtpPrepare.dll
+C:\Qualcomm\AIStack\QAIRT\{SDK Version}\lib\aarch64-windows-msvc\QnnSystem.dll
+C:\Qualcomm\AIStack\QAIRT\{SDK Version}\lib\aarch64-windows-msvc\QnnHtpV73Stub.dll
+C:\Qualcomm\AIStack\QAIRT\{SDK Version}\lib\hexagon-v73\unsigned\libQnnHtpV73Skel.so
+C:\Qualcomm\AIStack\QAIRT\{SDK Version}\lib\hexagon-v73\unsigned\libqnnhtpv73.cat
 ```
 
 We can copy these libraries to one folder. E.g.: ```C:\<Project Name>\qnn_assets\QNN_binaries\``` <br>
