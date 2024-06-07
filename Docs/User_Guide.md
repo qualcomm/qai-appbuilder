@@ -19,11 +19,14 @@ C:\Qualcomm\AIStack\QAIRT\{SDK Version}\lib\hexagon-v73\unsigned\libqnnhtpv73.ca
 We can copy these libraries to one folder. E.g.: ```C:\<Project Name>\qnn_assets\QNN_binaries\``` <br>
 
 ### 2. Python and common python extensions: 
-Get ARM64 version 'python-3.11.5-arm64.exe' from below link and install it:
+Get ARM64 version 'python-3.11.5-arm64.exe' from below link and install it. Make sure to add Python to your PATH environment.
 https://www.python.org/ftp/python/3.11.5/python-3.11.5-arm64.exe
 
-Get common Python extensions such as NumPy, OpenCV, Pillow from here:
+Get common Python extensions such as NumPy, Pillow from here:
 https://github.com/cgohlke/win_arm64-wheels/
+
+Get OpenCV from here:
+https://github.com/RockLakeGrass/Windows-on-ARM64-Toolchain/tree/main/Python/packages/opencv-python
 
 Get PyQt6 from here:
 https://github.com/RockLakeGrass/Windows-on-ARM64-Toolchain/tree/main/Python/packages/PyQt/PyQt6 
