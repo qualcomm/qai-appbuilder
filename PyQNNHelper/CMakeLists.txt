@@ -9,7 +9,7 @@
 cmake_minimum_required(VERSION 3.4...3.18)
 project(pyqnnhelper LANGUAGES CXX)
 
-LINK_DIRECTORIES(../lib/Release)
+LINK_DIRECTORIES(../lib/Release ../lib/RelWithDebInfo)
 INCLUDE_DIRECTORIES(../LibQNNHelper/src)
 
 SET(LIBRARY_OUTPUT_PATH "${PROJECT_SOURCE_DIR}/../lib")
