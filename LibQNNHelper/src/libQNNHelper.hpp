@@ -11,7 +11,7 @@
 #include <memory>
 #include <string>
 #include <vector>
-#include<chrono>
+#include <chrono>
 
 #define LIBQNNHELPER_API __declspec(dllexport)
 
@@ -30,7 +30,7 @@ extern "C" LIBQNNHELPER_API void QNN_WAR(const char* fmt, ...);
 extern "C" LIBQNNHELPER_API void QNN_INF(const char* fmt, ...);
 extern "C" LIBQNNHELPER_API void QNN_VEB(const char* fmt, ...);
 extern "C" LIBQNNHELPER_API void QNN_DBG(const char* fmt, ...);
-extern "C" LIBQNNHELPER_API bool SetLogLevel(int32_t log_level);
+extern "C" LIBQNNHELPER_API bool SetLogLevel(int32_t log_level, const std::string log_path = "None");
 extern "C" LIBQNNHELPER_API bool SetProfilingLevel(int32_t profiling_level);
 extern "C" LIBQNNHELPER_API bool SetPerfProfileGlobal(const std::string& perf_profile);
 extern "C" LIBQNNHELPER_API bool RelPerfProfileGlobal();
