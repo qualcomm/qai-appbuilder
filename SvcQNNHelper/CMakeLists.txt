@@ -11,7 +11,7 @@ project(SvcQNNHelper)
 set(APP "SvcQNNHelper")
 set(APP_SOURCES "src/main.cpp")
 
-LINK_DIRECTORIES(../lib/Release)
+LINK_DIRECTORIES(../lib/Release ../lib/RelWithDebInfo)
 
 add_executable(${APP} ${APP_SOURCES})
 
