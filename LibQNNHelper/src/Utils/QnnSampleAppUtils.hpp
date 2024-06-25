@@ -16,6 +16,7 @@
 #include <tuple>
 #include <unordered_map>
 #include <vector>
+#include "Logger.hpp"
 
 #include "SampleApp.hpp"
 
@@ -71,7 +72,8 @@ bool deepCopyQnnTensorInfo(Qnn_Tensor_t *dst, const Qnn_Tensor_t *src);
 QnnLog_Level_t parseLogLevel(std::string logLevelString);
 
 void inline exitWithMessage(std::string &&msg, int code) {
-  std::cerr << msg << std::endl;
+  // std::cerr << msg << std::endl;
+  QNN_ERROR(msg.c_str());
   std::exit(code);
 }
 
