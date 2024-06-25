@@ -9,9 +9,13 @@
 #include <iostream>
 #include <memory>
 #include <string>
-#include<chrono>
+#include <chrono>
 #include <unordered_map>
 #include <iostream>
+#include <stdio.h>
+#include <stdlib.h>
+#include <io.h>
+#include <fcntl.h>
 
 #include "BuildId.hpp"
 #include "DynamicLoadUtil.hpp"
@@ -127,7 +131,17 @@ bool SetProfilingLevel(int32_t profiling_level) {
     return true;
 }
 
-bool SetLogLevel(int32_t log_level) {
+bool SetLogLevel(int32_t log_level, const std::string log_path) {
+  if(log_path != "" && log_path != "None") {
+    if (_access(log_path.c_str(), 0) == 0) {
+        std::string STD_OUT = log_path + "\\log_out.txt";
+        std::string STD_ERR = log_path + "\\log_err.txt";
+
+        freopen(STD_OUT.c_str(), "w+", stdout);
+        freopen(STD_ERR.c_str(), "w+", stderr);
+    }
+  }
+
   if (!qnn::log::initializeLogging()) {
     QNN_ERROR("ERROR: Unable to initialize logging!\n");
     return false;
@@ -159,11 +173,11 @@ bool SetPerfProfileGlobal(const std::string& perf_profile) {
             return false;
         }
         gs_htpInfra = static_cast<QnnHtpDevice_Infrastructure_t *>(deviceInfra);
-        sg_perf_global = true;
     }
 
     QnnHtpDevice_PerfInfrastructure_t perfInfra = gs_htpInfra->perfInfra;
     QNN_INF("PERF::SetPerfProfileGlobal");
+    sg_perf_global = true;
 
     return boostPerformance(perfInfra, perf_profile);
 }
