@@ -579,7 +579,7 @@ iotensor::StatusCode iotensor::IOTensor::convertToFloat(float** out, Qnn_Tensor_
   auto returnStatus   = StatusCode::SUCCESS;
   size_t elementCount = datautil::calculateElementCount(dims);
 
-  if(!(*out)) {  // zw: If (*out != nullptr), *out point to share memory.
+  if(!(*out)) {  // zw: If (*out != nullptr), *out point to share memory, don't need to allocate buffer.
     returnStatus = allocateBuffer<float>(out, elementCount);
   }
 
