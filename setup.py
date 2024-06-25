@@ -17,10 +17,12 @@ import zipfile
 from setuptools import Extension, setup, find_packages
 from setuptools.command.build_ext import build_ext
 
-VERSION = "2.20.0"
+VERSION = "2.23.0"
+CONFIG = "Release"  # Release, RelWithDebInfo
+
 package_name = "qnnhelper"
 python_path = "QNNHelper"
-PACKAGE_ZIP  = "QNNHelper-win_arm64-QNN" + VERSION + "-Release.zip"
+PACKAGE_ZIP  = "QNNHelper-win_arm64-QNN" + VERSION + "-" + CONFIG + ".zip"
 
 def zip_package(dirpath, outFullName):
     zip = zipfile.ZipFile(outFullName, "w", zipfile.ZIP_DEFLATED)
@@ -36,6 +38,8 @@ def build_clean():
     shutil.rmtree("lib")
     os.remove(python_path + "/libqnnhelper.dll")
     os.remove(python_path + "/SvcQNNHelper.exe")
+    if os.path.exists(python_path + "/libqnnhelper.pdb"):
+        os.remove(python_path + "/libqnnhelper.pdb")
 
 def build_cmake():
     if not os.path.exists("build"):
@@ -45,11 +49,13 @@ def build_cmake():
     vs_version = " \"Visual Studio 17 2022\""
 
     subprocess.run("cmake .. -G " + vs_version + " -A ARM64")
-    subprocess.run("cmake --build ./ --config Release ")
+    subprocess.run("cmake --build ./ --config " + CONFIG)
     os.chdir("../")
 
-    shutil.copy("lib/Release/libqnnhelper.dll", python_path)
-    shutil.copy("lib/Release/SvcQNNHelper.exe", python_path)
+    shutil.copy("lib/" + CONFIG +"/libqnnhelper.dll", python_path)
+    shutil.copy("lib/" + CONFIG + "/SvcQNNHelper.exe", python_path)
+    if os.path.exists("lib/" + CONFIG + "/libqnnhelper.pdb"):
+        shutil.copy("lib/" + CONFIG + "/libqnnhelper.pdb", python_path)
 
 build_cmake()
 
@@ -59,9 +65,13 @@ def build_release():
     include_path = "lib/package/include"
     if not os.path.exists(tmp_path):
         os.mkdir(tmp_path)
-    shutil.copy("lib/Release/libqnnhelper.dll", tmp_path)
-    shutil.copy("lib/Release/libqnnhelper.lib", tmp_path)
-    shutil.copy("lib/Release/SvcQNNHelper.exe", tmp_path)
+    shutil.copy("lib/" + CONFIG + "/libqnnhelper.dll", tmp_path)
+    shutil.copy("lib/" + CONFIG + "/libqnnhelper.lib", tmp_path)
+    if os.path.exists("lib/" + CONFIG + "/libqnnhelper.pdb"):
+        shutil.copy("lib/" + CONFIG + "/libqnnhelper.pdb", tmp_path)
+    shutil.copy("lib/" + CONFIG + "/SvcQNNHelper.exe", tmp_path)
+    if os.path.exists("lib/" + CONFIG + "/SvcQNNHelper.pdb"):
+        shutil.copy("lib/" + CONFIG + "/SvcQNNHelper.pdb", tmp_path)
 
     if not os.path.exists(include_path):
         os.mkdir(include_path)
@@ -79,8 +89,7 @@ class CMakeBuild(build_ext):
         ext_fullpath = Path.cwd() / self.get_ext_fullpath(ext.name)
         extdir = ext_fullpath.parent.resolve()
 
-        debug = int(os.environ.get("DEBUG", 0)) if self.debug is None else self.debug
-        cfg = "Debug" if debug else "Release"
+        cfg = CONFIG
 
         cmake_generator = os.environ.get("CMAKE_GENERATOR", "")
 
@@ -135,7 +144,7 @@ setup(
     name=package_name,
     version=VERSION,
     packages=[package_name],
-    package_data={"": ["*.dll", "*.exe"]},
+    package_data={"": ["*.dll", "*.pdb", "*.exe"]},
     ext_modules=[CMakeExtension("qnnhelper.pyqnnhelper", "PyQNNHelper")],
     cmdclass={"build_ext": CMakeBuild},
     zip_safe=False,
