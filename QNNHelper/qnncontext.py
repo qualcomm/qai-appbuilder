@@ -39,8 +39,8 @@ class LogLevel():
     VERBOSE = 4
     DEBUG = 5
     
-    def SetLogLevel(log_level):
-        pyqnnhelper.set_log_level(log_level)
+    def SetLogLevel(log_level, log_path):
+        pyqnnhelper.set_log_level(log_level, log_path)
 
 class ProfilingLevel():
     """
@@ -89,6 +89,7 @@ class QNNConfig():
                runtime : str = Runtime.HTP,
                log_level : int = LogLevel.ERROR,
                profiling_level : int = ProfilingLevel.OFF,
+               log_path : str = "None"
     ):
         global g_backend_lib_path, g_system_lib_path
 
@@ -105,7 +106,7 @@ class QNNConfig():
         if not os.path.exists(g_system_lib_path):
             raise ValueError(f"system library does not exist: {g_system_lib_path}")
 
-        LogLevel.SetLogLevel(log_level)
+        LogLevel.SetLogLevel(log_level, log_path)
         ProfilingLevel.SetProfilingLevel(profiling_level)
 
 
