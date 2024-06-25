@@ -1,4 +1,4 @@
-﻿//==============================================================================
+//==============================================================================
 //
 // Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 // 
@@ -815,7 +815,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vecto
                                                                                std::string perfProfile) {
   auto returnStatus = StatusCode::SUCCESS;
   
-  // We push '12345' to 'outputSize' in function 'ModelRun@main.cpp@SvcQNNHelpper.exe'.
+  // We push '12345' to 'outputSize' in function 'ModelRun@main.cpp@SvcQNNHelpper.exe'. In this case, share memory will not be freed, we can use the share memory as output buffer directly.
   bool shareMemory = false;
   uint8_t* pShareBuffer = inputBuffers[0];
   if (outputSize.size() == 1 && outputSize[0] == 12345) {
