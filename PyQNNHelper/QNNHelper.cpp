@@ -8,7 +8,7 @@
 
 #include "QNNHelper.h"
 
-#define QNNHELPER_VERSION    "2.20.0"
+#define QNNHELPER_VERSION    "2.23.0"
 
 
 ShareMemory::ShareMemory(const std::string& share_memory_name, const size_t share_memory_size) {
@@ -40,6 +40,7 @@ QNNContext::~QNNContext() {
     else
         g_LibQNNHelper.ModelDestroy(m_model_name, m_proc_name);
 }
+
 
 std::vector<py::array_t<float>> 
 QNNContext::Inference(const std::vector<py::array_t<float>>& input, const std::string& perf_profile) {
