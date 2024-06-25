@@ -103,7 +103,7 @@ bool qnn::log::initializeLogging() {
 
 QnnLog_Callback_t qnn::log::getLogCallback() {
   if (g_logger == nullptr) {
-    printf("Logger hasn't been initialized!\n");
+    fprintf(stdout, "Logger hasn't been initialized!\n");
     return nullptr;
   }
 
