@@ -15,6 +15,9 @@ qnn_wrapper_api::ModelError_t qnn_wrapper_api::freeQnnTensor(Qnn_Tensor_t &tenso
   // free all pointer allocations in struct
   free((void *)QNN_TENSOR_GET_NAME(tensor));
   free(QNN_TENSOR_GET_DIMENSIONS(tensor));
+  if (QNN_TENSOR_GET_IS_DYNAMIC_DIMENSIONS(tensor)) {
+    free(QNN_TENSOR_GET_IS_DYNAMIC_DIMENSIONS(tensor));
+  }
   return MODEL_NO_ERROR;
 }
 
