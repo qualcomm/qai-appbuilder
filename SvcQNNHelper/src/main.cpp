@@ -341,7 +341,7 @@ int hostprocess_run(std::string qnn_lib_path, std::string model_path,
 
 int main(int argc, char** argv) {
 
-    if(argc > 1 && argv[1] && argv[1][0] == 's') {
+    if(argc > 1 && argv[1] && argv[1][0] == 's') {  // Start server.
         HANDLE hSvcPipeInRead = (HANDLE)std::stoull(argv[2]);
         HANDLE hSvcPipeOutWrite = (HANDLE)std::stoull(argv[3]);
         SetLogLevel(std::stoi(argv[5]));
@@ -352,7 +352,7 @@ int main(int argc, char** argv) {
         svcprocess_run(hSvcPipeInRead, hSvcPipeOutWrite);
         Print_MemInfo("Svc App End.");
     }
-    else {
+    else {  // Start test mode to load & run model.
         // SvcQNNHelper.exe <1:int:log_level> <2:str:QNN_Libraries_Path> <3:str:model_path> <4:str:perf_profile> 
         //                  <5:str:input_raw_path> <6:int:input_count> <7:int:memory_size>
         // input files are under 'input_raw_path' and the file names format are 'input_%d.raw'.
@@ -390,5 +390,6 @@ int main(int argc, char** argv) {
         Print_MemInfo("Main App End.");
     }
 
+    return 0;
 }
 
