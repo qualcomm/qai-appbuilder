@@ -29,10 +29,9 @@ LibQNNHelper g_LibQNNHelper;
     QNN_LOG_LEVEL_VERBOSE = 4,
     QNN_LOG_LEVEL_DEBUG = 5,
 */
-int set_log_level(int32_t log_level) {
-    return SetLogLevel(log_level);
+int set_log_level(int32_t log_level, std::string log_path = "None") {
+    return SetLogLevel(log_level, log_path);
 }
-
 
 /*
     OFF = 0,
