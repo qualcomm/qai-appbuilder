@@ -6,7 +6,12 @@
 #
 #=============================================================================
 
+# Compile Commands: 
+# Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.23.0.240531\
+# python setup.py bdist_wheel
+
 import os
+import platform
 import re
 import subprocess
 import sys
@@ -17,12 +22,21 @@ import zipfile
 from setuptools import Extension, setup, find_packages
 from setuptools.command.build_ext import build_ext
 
-VERSION = "2.23.0"
+VERSION = "2.24.0"
 CONFIG = "Release"  # Release, RelWithDebInfo
+package_name = "qai_appbuilder"
 
-package_name = "qnnhelper"
-python_path = "QNNHelper"
-PACKAGE_ZIP  = "QNNHelper-win_arm64-QNN" + VERSION + "-" + CONFIG + ".zip"
+machine = platform.machine()
+arch = "ARM64"
+if machine == "AMD64":
+    arch = "ARM64EC"
+print("-- Arch: " + arch)
+
+python_path = "script"
+binary_path = python_path + "/" + package_name
+PACKAGE_ZIP  = "QAI_AppBuilder-win_arm64-QNN" + VERSION + "-" + CONFIG + ".zip"
+if arch == "ARM64EC":
+    PACKAGE_ZIP  = "QAI_AppBuilder-win_arm64ec-QNN" + VERSION + "-" + CONFIG + ".zip"
 
 def zip_package(dirpath, outFullName):
     zip = zipfile.ZipFile(outFullName, "w", zipfile.ZIP_DEFLATED)
@@ -33,13 +47,13 @@ def zip_package(dirpath, outFullName):
     zip.close()
 
 def build_clean():
-    shutil.rmtree("qnnhelper.egg-info")
+    shutil.rmtree(python_path + "/qai_appbuilder.egg-info")
     shutil.rmtree("build")
     shutil.rmtree("lib")
-    os.remove(python_path + "/libqnnhelper.dll")
-    os.remove(python_path + "/SvcQNNHelper.exe")
-    if os.path.exists(python_path + "/libqnnhelper.pdb"):
-        os.remove(python_path + "/libqnnhelper.pdb")
+    os.remove(binary_path + "/libappbuilder.dll")
+    os.remove(binary_path + "/QAIAppSvc.exe")
+    if os.path.exists(binary_path + "/libappbuilder.pdb"):
+        os.remove(binary_path + "/libappbuilder.pdb")
 
 def build_cmake():
     if not os.path.exists("build"):
@@ -48,14 +62,14 @@ def build_cmake():
 
     vs_version = " \"Visual Studio 17 2022\""
 
-    subprocess.run("cmake .. -G " + vs_version + " -A ARM64")
+    subprocess.run("cmake .. -G " + vs_version + " -A " + arch)
     subprocess.run("cmake --build ./ --config " + CONFIG)
     os.chdir("../")
 
-    shutil.copy("lib/" + CONFIG +"/libqnnhelper.dll", python_path)
-    shutil.copy("lib/" + CONFIG + "/SvcQNNHelper.exe", python_path)
-    if os.path.exists("lib/" + CONFIG + "/libqnnhelper.pdb"):
-        shutil.copy("lib/" + CONFIG + "/libqnnhelper.pdb", python_path)
+    shutil.copy("lib/" + CONFIG +"/libappbuilder.dll", binary_path)
+    shutil.copy("lib/" + CONFIG + "/QAIAppSvc.exe", binary_path)
+    if os.path.exists("lib/" + CONFIG + "/libappbuilder.pdb"):
+        shutil.copy("lib/" + CONFIG + "/libappbuilder.pdb", binary_path)
 
 build_cmake()
 
@@ -65,17 +79,17 @@ def build_release():
     include_path = "lib/package/include"
     if not os.path.exists(tmp_path):
         os.mkdir(tmp_path)
-    shutil.copy("lib/" + CONFIG + "/libqnnhelper.dll", tmp_path)
-    shutil.copy("lib/" + CONFIG + "/libqnnhelper.lib", tmp_path)
-    if os.path.exists("lib/" + CONFIG + "/libqnnhelper.pdb"):
-        shutil.copy("lib/" + CONFIG + "/libqnnhelper.pdb", tmp_path)
-    shutil.copy("lib/" + CONFIG + "/SvcQNNHelper.exe", tmp_path)
-    if os.path.exists("lib/" + CONFIG + "/SvcQNNHelper.pdb"):
-        shutil.copy("lib/" + CONFIG + "/SvcQNNHelper.pdb", tmp_path)
+    shutil.copy("lib/" + CONFIG + "/libappbuilder.dll", tmp_path)
+    shutil.copy("lib/" + CONFIG + "/libappbuilder.lib", tmp_path)
+    if os.path.exists("lib/" + CONFIG + "/libappbuilder.pdb"):
+        shutil.copy("lib/" + CONFIG + "/libappbuilder.pdb", tmp_path)
+    shutil.copy("lib/" + CONFIG + "/QAIAppSvc.exe", tmp_path)
+    if os.path.exists("lib/" + CONFIG + "/QAIAppSvc.pdb"):
+        shutil.copy("lib/" + CONFIG + "/QAIAppSvc.pdb", tmp_path)
 
     if not os.path.exists(include_path):
         os.mkdir(include_path)
-    shutil.copy("LibQNNHelper/src/LibQNNHelper.hpp", include_path)
+    shutil.copy("src/LibAppBuilder.hpp", include_path)
 
     zip_package(tmp_path, "dist/" + PACKAGE_ZIP)
 
@@ -112,7 +126,7 @@ class CMakeBuild(build_ext):
         contains_arch = any(x in cmake_generator for x in {"ARM", "Win64"})
 
         if not single_config and not contains_arch:
-            cmake_args += ["-A", "ARM64"]
+            cmake_args += ["-A", arch]
 
         # Multi-config generators have a different way to specify configs
         if not single_config:
@@ -144,11 +158,12 @@ setup(
     name=package_name,
     version=VERSION,
     packages=[package_name],
+    package_dir={'': 'script'},
     package_data={"": ["*.dll", "*.pdb", "*.exe"]},
-    ext_modules=[CMakeExtension("qnnhelper.pyqnnhelper", "PyQNNHelper")],
+    ext_modules=[CMakeExtension("qai_appbuilder.appbuilder", "pybind")],
     cmdclass={"build_ext": CMakeBuild},
     zip_safe=False,
-    description='QNNHelper is Python & C++ extension that simplifies the process of developing AI prototype & App on WoS. It provides several APIs for running QNN models in WoS CPU & HTP, making it easier to manage AI models.',
+    description='AppBuilder is Python & C++ extension that simplifies the process of developing AI prototype & App on WoS. It provides several APIs for running QNN models in WoS CPU & HTP, making it easier to manage AI models.',
     long_description=long_description,
     long_description_content_type="text/markdown",
     url='https://github.com/quic/ai-engine-direct-helper',
