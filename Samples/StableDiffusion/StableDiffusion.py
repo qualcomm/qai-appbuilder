@@ -20,15 +20,14 @@ from qai_appbuilder import (QNNContext, QNNContextProc, QNNShareMemory, Runtime,
 
 ####################################################################
 
-dsp_arch = "73" # For Hamoa device.
-
 execution_ws = os.getcwd()
-des_dir = execution_ws + "\\qnn_assets\\QNN_binaries"
+qnn_dir = execution_ws + "\\qnn"
 
 #Model pathes.
-stablediffusion_dir = execution_ws + "\\qnn_assets\\models\\stablediffusion"
-realesrgan_dir = execution_ws + "\\qnn_assets\\models\\realesrgan"
-cache_dir = execution_ws + "\\qnn_assets\\models\\cache"
+model_dir = execution_ws + "\\models"
+sd_dir = model_dir
+clip_dir = model_dir + "\\clip-vit-large-patch14\\"
+time_embedding_dir = model_dir + "\\time-embedding_v1.5\\"
 
 tokenizer = None
 scheduler = None
@@ -38,8 +37,6 @@ tokenizer_max_length = 77   # Define Tokenizer output max length (must be 77)
 text_encoder = None
 unet = None
 vae_decoder = None
-realesrgan = None
-realesrgan_mem = None
 
 # Any user defined prompt
 user_prompt = ""
@@ -47,28 +44,10 @@ uncond_prompt = ""
 user_seed = np.int64(0)
 user_step = 20              # User defined step value, any integer value in {20, 30, 50}
 user_text_guidance = 7.5    # User define text guidance, any float value in [5.0, 15.0]
-user_high_resolution = False
-
-####################################################################
-
-def setup_env():            # Only needs to executed once for copying SDK binaries to app folder.
-    # Preparing all the binaries and libraries for execution.
-    SDK_dir = "C:\\Qualcomm\\AIStack\\QNN\\2.20.0.240223"       # Specify what's QNN SDK used
-    SDK_lib_dir = SDK_dir + "\\lib\\aarch64-windows-msvc"
-    SDK_skel = SDK_dir + "\\lib\\hexagon-v{}\\unsigned\\libQnnHtpV{}Skel.so".format(dsp_arch, dsp_arch)
-
-    # Copy necessary libraries to a common location
-    libs = ["QnnHtp.dll", "QnnSystem.dll", "QnnHtpPrepare.dll", "QnnHtpV{}Stub.dll".format(dsp_arch)]
-    for lib in libs:
-        shutil.copy(SDK_lib_dir + "\\" + lib, des_dir)
-
-    # Copy Skel
-    shutil.copy(SDK_skel, des_dir)
 
 ####################################################################
 
 class TextEncoder(QNNContext):
-    #@timer
     def Inference(self, input_data):
         input_datas=[input_data]
         output_data = super().Inference(input_datas)[0]
@@ -78,7 +57,6 @@ class TextEncoder(QNNContext):
         return output_data
 
 class Unet(QNNContext):
-    #@timer
     def Inference(self, input_data_1, input_data_2, input_data_3):
         # We need to reshape the array to 1 dimensionality before send it to the network. 'input_data_2' already is 1 dimensionality, so doesn't need to reshape.
         input_data_1 = input_data_1.reshape(input_data_1.size)
@@ -91,22 +69,12 @@ class Unet(QNNContext):
         return output_data
 
 class VaeDecoder(QNNContext):
-    #@timer
     def Inference(self, input_data):
         input_data = input_data.reshape(input_data.size)
         input_datas=[input_data]
 
         output_data = super().Inference(input_datas)[0]
         
-        return output_data
-        
-class RealESRGan(QNNContextProc):
-    #@timer
-    def Inference(self, realesrgan_mem, input_data):
-        input_datas=[input_data]
-
-        output_data = super().Inference(realesrgan_mem, input_datas)[0]        
-
         return output_data
 
 ####################################################################
@@ -118,8 +86,6 @@ def model_initialize():
     global text_encoder
     global unet
     global vae_decoder
-    global realesrgan
-    global realesrgan_mem
 
     result = True
 
@@ -127,40 +93,26 @@ def model_initialize():
     model_text_encoder  = "text_encoder"
     model_unet          = "model_unet"
     model_vae_decoder   = "vae_decoder"
-    model_realesrgan    = "realesrgan"
-
-    # process names
-    model_realesrgan_proc = "~realesrgan"
-
-    # share memory names.
-    model_realesrgan_mem  = model_realesrgan + "~memory"
 
     # models' path.
-    text_encoder_model = '{}\\{}_quantized.serialized.v{}.bin'.format(stablediffusion_dir, "text_encoder", dsp_arch)
-    unet_model = '{}\\{}_quantized.serialized.v{}.bin'.format(stablediffusion_dir, "unet", dsp_arch)
-    vae_decoder_model = '{}\\{}_quantized.serialized.v{}.bin'.format(stablediffusion_dir, "vae_decoder", dsp_arch)
-    realesrgan_model = '{}\\{}_quantized.serialized.v{}.bin'.format(realesrgan_dir, "realesrgan_x4_512", dsp_arch)
-
-    # Instance for Unet 
-    unet = Unet(model_unet, unet_model)
+    text_encoder_model = sd_dir + "\\stable_diffusion_v1_5_quantized-textencoder_quantized.bin"
+    unet_model = sd_dir + "\\stable_diffusion_v1_5_quantized-unet_quantized.bin"
+    vae_decoder_model = sd_dir + "\\stable_diffusion_v1_5_quantized-vaedecoder_quantized.bin"
 
     # Instance for TextEncoder 
     text_encoder = TextEncoder(model_text_encoder, text_encoder_model)
 
+    # Instance for Unet 
+    unet = Unet(model_unet, unet_model)
+
     # Instance for VaeDecoder 
     vae_decoder = VaeDecoder(model_vae_decoder, vae_decoder_model)
 
-    # Instance for RealESRGan which inherited from the class QNNContextProc, the model will be loaded into a separate process.
-    realesrgan = RealESRGan(model_realesrgan, model_realesrgan_proc, realesrgan_model)
-    realesrgan_mem = QNNShareMemory(model_realesrgan_mem, 1024 * 1024 * 50) # 50M
-
     # Initializing the Tokenizer
-    tokenizer = CLIPTokenizer.from_pretrained(cache_dir + '\\clip-vit-base-patch32\\', local_files_only=True)
+    tokenizer = CLIPTokenizer.from_pretrained(clip_dir, local_files_only=True)
 
     # Scheduler - initializing the Scheduler.
     scheduler = DPMSolverMultistepScheduler(num_train_timesteps=1000, beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear")
-    
-    torch.from_numpy(np.array([1]))  # Let LazyImport to import the torch & numpy lib here.
 
     return result
 
@@ -170,21 +122,19 @@ def run_tokenizer(prompt):
     return text_input
 
 # These parameters can be configured through GUI 'settings'.
-def setup_parameters(prompt, un_prompt, seed, step, text_guidance, high_resolution):
+def setup_parameters(prompt, un_prompt, seed, step, text_guidance):
 
     global user_prompt
     global uncond_prompt
     global user_seed
     global user_step
     global user_text_guidance
-    global user_high_resolution
 
     user_prompt = prompt
     uncond_prompt = un_prompt
     user_seed = seed
     user_step = step
     user_text_guidance = text_guidance
-    user_high_resolution = high_resolution
 
     assert isinstance(user_seed, np.int64) == True, "user_seed should be of type int64"
     assert isinstance(user_step, int) == True, "user_step should be of type int"
@@ -236,7 +186,7 @@ def model_execute(callback):
     random_init_latent = torch.randn((1, 4, 64, 64), generator=torch.manual_seed(user_seed)).numpy()
     latent_in = random_init_latent.transpose(0, 2, 3, 1)
 
-    time_emb_path = cache_dir + "\\time-embedding\\" + str(user_step) + "\\"
+    time_emb_path = time_embedding_dir + str(user_step) + "\\"
 
     # Run the loop for user_step times
     for step in range(user_step):
@@ -262,16 +212,11 @@ def model_execute(callback):
         callback(None)
     else:
         image_size = 512
-
-        # Run RealESRGan
-        if user_high_resolution:
-            output_image = realesrgan.Inference(realesrgan_mem, [output_image])
-            image_size = 2048
-
+        if not os.path.exists("images"):
+            os.mkdir("images")
         image_path = "images\\%s_%s_%s.jpg"%(formatted_time, str(user_seed), str(image_size))
         output_image = np.clip(output_image * 255.0, 0.0, 255.0).astype(np.uint8)
         output_image = output_image.reshape(image_size, image_size, -1)
-        #cv2.imwrite(image_path, output_image)
         Image.fromarray(output_image, mode="RGB").save(image_path)
 
         callback(image_path)
@@ -283,38 +228,30 @@ def model_destroy():
     global text_encoder
     global unet
     global vae_decoder
-    global realesrgan
-    global realesrgan_mem
 
     del(text_encoder)
     del(unet)
     del(vae_decoder)
-    del(realesrgan)
-    del(realesrgan_mem)
 
 ####################################################################
 
 def SetQNNConfig():
-    QNNConfig.Config(des_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
 
 ####################################################################
-
 
 def modelExecuteCallback(result):
     if ((None == result) or isinstance(result, str)):   # None == Image generates failed. 'str' == image_path: generated new image path.
         if (None == result):
             result = "None"
         print("modelExecuteCallback result: " + result)
-
     else:
         result = (result + 1) * 100
         result = int(result / user_step)
         result = str(result)
         print("modelExecuteCallback result: " + result)
 
-
-setup_env()
 
 SetQNNConfig()
 
@@ -324,12 +261,11 @@ time_start = time.time()
 
 user_prompt = "Big white bird near river in high resolution, 4K"
 uncond_prompt = "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry"
-user_seed = np.int64(1.36477711e+14)
+user_seed = np.random.randint(low=0, high=9999999999, size=None, dtype=np.int64)
 user_step = 20
 user_text_guidance = 7.5
-user_high_resolution = True
 
-setup_parameters(user_prompt, uncond_prompt, user_seed, user_step, user_text_guidance, user_high_resolution)
+setup_parameters(user_prompt, uncond_prompt, user_seed, user_step, user_text_guidance)
 
 model_execute(modelExecuteCallback)
 
