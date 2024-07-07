@@ -16,7 +16,7 @@ import torch
 from transformers import CLIPTokenizer
 from diffusers import DPMSolverMultistepScheduler
 
-from qnnhelper import (QNNContext, QNNContextProc, QNNShareMemory, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig, timer)
+from qai_appbuilder import (QNNContext, QNNContextProc, QNNShareMemory, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig, timer)
 
 ####################################################################
 
