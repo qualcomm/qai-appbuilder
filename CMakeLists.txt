@@ -7,8 +7,6 @@
 #=============================================================================
 
 cmake_minimum_required(VERSION 3.4...3.18)
-project(QNNHelper)
+project(QAIAppBuilder)
 
-add_subdirectory(LibQNNHelper)
-add_subdirectory(SvcQNNHelper)
-#add_subdirectory(PyQNNHelper)
+add_subdirectory(src)
