@@ -26,7 +26,7 @@
 #include "QnnTypeMacros.hpp"
 #include "IOTensor.hpp"
 #include "LibAppBuilder.hpp"
-
+#include "set"
 
 using namespace qnn;
 using namespace qnn::tools;
@@ -36,7 +36,14 @@ static const int sg_lowerLatency  = 40;    // Should be used on V66 and above on
 static const int sg_lowLatency    = 100;   // This will limit sleep modes available while running
 static const int sg_mediumLatency = 1000;  // This will limit sleep modes available while running
 static const int sg_highLatency   = 2000;
-static const uint32_t sg_powerConfigId = 1;
+static std::set<uint32_t> sg_powerConfigIds = {};
+
+uint32_t getPowerConfigId() {
+  if (sg_powerConfigIds.size() > 0) {
+    return *sg_powerConfigIds.begin();
+  }
+  return 1;
+}
 
 bool disableDcvs(QnnHtpDevice_PerfInfrastructure_t perfInfra) {
   QnnHtpPerfInfrastructure_PowerConfig_t powerConfig;
@@ -45,11 +52,11 @@ bool disableDcvs(QnnHtpDevice_PerfInfrastructure_t perfInfra) {
   powerConfig.dcvsV3Config.dcvsEnable    = 0;  // FALSE
   powerConfig.dcvsV3Config.setDcvsEnable = 1;
   powerConfig.dcvsV3Config.powerMode     = QNN_HTP_PERF_INFRASTRUCTURE_POWERMODE_ADJUST_UP_DOWN;
-  powerConfig.dcvsV3Config.contextId     = sg_powerConfigId;
+  powerConfig.dcvsV3Config.contextId     = getPowerConfigId();
 
   const QnnHtpPerfInfrastructure_PowerConfig_t *powerConfigs[] = {&powerConfig, NULL};
 
-  if (QNN_SUCCESS != perfInfra.setPowerConfig(sg_powerConfigId, powerConfigs)) {
+  if (QNN_SUCCESS != perfInfra.setPowerConfig(getPowerConfigId(), powerConfigs)) {
     QNN_ERROR("Failure in setPowerConfig() from disableDcvs");
     return false;
   }
@@ -63,11 +70,11 @@ bool enableDcvs(QnnHtpDevice_PerfInfrastructure_t perfInfra) {
   powerConfig.dcvsV3Config.dcvsEnable    = 1;
   powerConfig.dcvsV3Config.setDcvsEnable = 1;
   powerConfig.dcvsV3Config.powerMode     = QNN_HTP_PERF_INFRASTRUCTURE_POWERMODE_ADJUST_UP_DOWN;
-  powerConfig.dcvsV3Config.contextId     = sg_powerConfigId;
+  powerConfig.dcvsV3Config.contextId     = getPowerConfigId();
 
   const QnnHtpPerfInfrastructure_PowerConfig_t *powerConfigs[] = {&powerConfig, NULL};
 
-  if (QNN_SUCCESS != perfInfra.setPowerConfig(sg_powerConfigId, powerConfigs)) {
+  if (QNN_SUCCESS != perfInfra.setPowerConfig(getPowerConfigId(), powerConfigs)) {
     QNN_ERROR("Failure in setPowerConfig() from disableDcvs");
     return false;
   }
@@ -84,7 +91,7 @@ bool boostPerformance(QnnHtpDevice_PerfInfrastructure_t perfInfra, std::string p
     powerConfig.option                     = QNN_HTP_PERF_INFRASTRUCTURE_POWER_CONFIGOPTION_DCVS_V3;
     powerConfig.dcvsV3Config.dcvsEnable    = 0;
     powerConfig.dcvsV3Config.setDcvsEnable = 1;
-    powerConfig.dcvsV3Config.contextId     = sg_powerConfigId;
+    powerConfig.dcvsV3Config.contextId     = getPowerConfigId();
   
     // refer QnnHtpPerfInfrastructure.h
     powerConfig.dcvsV3Config.powerMode = QNN_HTP_PERF_INFRASTRUCTURE_POWERMODE_PERFORMANCE_MODE;
@@ -121,7 +128,7 @@ bool boostPerformance(QnnHtpDevice_PerfInfrastructure_t perfInfra, std::string p
     
     // Set power config with different performance parameters
     const QnnHtpPerfInfrastructure_PowerConfig_t* powerConfigs[] = { &powerConfig, NULL };
-    if (QNN_SUCCESS != perfInfra.setPowerConfig(sg_powerConfigId, powerConfigs)) {
+    if (QNN_SUCCESS != perfInfra.setPowerConfig(getPowerConfigId(), powerConfigs)) {
         QNN_ERROR("Failure in setPowerConfig() from boostPerformance");
         return false;
     }
@@ -139,7 +146,7 @@ bool resetPerformance(QnnHtpDevice_PerfInfrastructure_t perfInfra) {
     powerConfig.option                       = QNN_HTP_PERF_INFRASTRUCTURE_POWER_CONFIGOPTION_DCVS_V3;
     powerConfig.dcvsV3Config.dcvsEnable      = 1;
     powerConfig.dcvsV3Config.setDcvsEnable   = 1;
-    powerConfig.dcvsV3Config.contextId       = sg_powerConfigId;
+    powerConfig.dcvsV3Config.contextId       = getPowerConfigId();
     powerConfig.dcvsV3Config.sleepLatency    = sg_highLatency;
     powerConfig.dcvsV3Config.setSleepLatency = 1;
     powerConfig.dcvsV3Config.sleepDisable    = 0;
@@ -156,7 +163,7 @@ bool resetPerformance(QnnHtpDevice_PerfInfrastructure_t perfInfra) {
 
     // Set power config with different performance parameters
     const QnnHtpPerfInfrastructure_PowerConfig_t* powerConfigs[] = { &powerConfig, NULL };
-    if (QNN_SUCCESS != perfInfra.setPowerConfig(sg_powerConfigId, powerConfigs)) {
+    if (QNN_SUCCESS != perfInfra.setPowerConfig(getPowerConfigId(), powerConfigs)) {
         QNN_ERROR("Failure in setPowerConfig() from resetPerformance");
         return false;
     }
@@ -1007,7 +1014,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::initializePerformance() {
         QNN_ERROR("Failure in createPowerConfigId()");
         return StatusCode::FAILURE;
     }
-
+    sg_powerConfigIds.insert(m_powerConfigId);
     return StatusCode::SUCCESS;
 }
 
@@ -1019,7 +1026,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::destroyPerformance() {
         QNN_ERROR("Failure in destroyPowerConfigId()");
         return StatusCode::FAILURE;
     }
-
+    sg_powerConfigIds.erase(m_powerConfigId);
     return StatusCode::SUCCESS;
 }
 
