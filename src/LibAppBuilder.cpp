@@ -14,7 +14,6 @@
 #include <iostream>
 #include <stdio.h>
 #include <stdlib.h>
-#include <io.h>
 #include <fcntl.h>
 
 #include "BuildId.hpp"
@@ -25,7 +24,10 @@
 #include "QnnSampleApp.hpp"
 #include "QnnSampleAppUtils.hpp"
 #include "LibAppBuilder.hpp"
+#ifdef _WIN32
+#include <io.h>
 #include "Utils/Utils.hpp"
+#endif
 
 using namespace qnn;
 using namespace qnn::log;
@@ -121,26 +123,30 @@ std::unique_ptr<sample_app::QnnSampleApp> getQnnSampleApp(std::string model_name
 
 void SetProcInfo(std::string proc_name, uint64_t epoch) {
     setEpoch(epoch);
+#ifdef _WIN32
     g_ProcName = proc_name;
+#endif
 }
 
 bool SetProfilingLevel(int32_t profiling_level) {
     sg_parsedProfilingLevel = (sample_app::ProfilingLevel)profiling_level;
-
+#ifdef _WIN32
     g_profilingLevel = profiling_level;
+#endif
     return true;
 }
 
 bool SetLogLevel(int32_t log_level, const std::string log_path) {
+#ifdef _WIN32
   if(log_path != "" && log_path != "None") {
     if (_access(log_path.c_str(), 0) == 0) {
         std::string STD_OUT = log_path + "\\log_out.txt";
         std::string STD_ERR = log_path + "\\log_err.txt";
-
         freopen(STD_OUT.c_str(), "w+", stdout);
         freopen(STD_ERR.c_str(), "w+", stderr);
     }
   }
+#endif
 
   if (!qnn::log::initializeLogging()) {
     QNN_ERROR("ERROR: Unable to initialize logging!\n");
@@ -152,9 +158,10 @@ bool SetLogLevel(int32_t log_level, const std::string log_path) {
     return false;
   }
 
+#ifdef _WIN32
   g_logEpoch = getEpoch();
   g_logLevel = log_level;
-
+#endif
   return true;
 }
 
@@ -262,24 +269,34 @@ void QNN_DBG(const char* fmt, ...) {
 }
 
 bool CreateShareMemory(std::string share_memory_name, size_t share_memory_size) {
+#ifdef _WIN32
     return CreateShareMem(share_memory_name, share_memory_size);
+#else
+    return true;
+#endif
 }
 
 bool DeleteShareMemory(std::string share_memory_name) {
+#ifdef _WIN32
     return DeleteShareMem(share_memory_name);
+#else
+    return true;
+#endif
 }
 
 bool ModelInitializeEx(const std::string& model_name, const std::string& proc_name, const std::string& model_path,
                        const std::string& backend_lib_path, const std::string& system_lib_path) {
-  BOOL result = false;
+  bool result = false;
 
   QNN_INF("LibAppBuilder::ModelInitialize: %s \n", model_name.c_str());
 
+#ifdef _WIN32
   if(!proc_name.empty()) {
     // If proc_name, create process and save process info & model name to map, load model in new process.
     result = TalkToSvc_Initialize(model_name, proc_name, model_path, backend_lib_path, system_lib_path);
     return result;
   }
+#endif
 
   TimerHelper timerHelper;
 
@@ -381,15 +398,17 @@ bool ModelInferenceEx(std::string model_name, std::string proc_name, std::string
                       std::vector<uint8_t*>& inputBuffers, std::vector<size_t>& inputSize,
                       std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
                       std::string& perfProfile) {
-    BOOL result = true;
+    bool result = true;
 
     //QNN_INF("LibAppBuilder::ModelInference: %s \n", model_name.c_str());
 
+#ifdef _WIN32
     if (!proc_name.empty()) {
         // If proc_name, run the model in that process.
         result = TalkToSvc_Inference(model_name, proc_name, share_memory_name, inputBuffers, inputSize, outputBuffers, outputSize, perfProfile);
         return result;
     }
+#endif
 
     TimerHelper timerHelper;
 
@@ -413,15 +432,17 @@ bool ModelInferenceEx(std::string model_name, std::string proc_name, std::string
 }
 
 bool ModelDestroyEx(std::string model_name, std::string proc_name) {
-    BOOL result = false;
+    bool result = false;
 
     QNN_INF("LibAppBuilder::ModelDestroy: %s \n", model_name.c_str());
 
+#ifdef _WIN32
     if (!proc_name.empty()) {
         // If proc_name, desctroy the model in that process.
         result = TalkToSvc_Destroy(model_name, proc_name);
         return result;
     }
+#endif
 
     TimerHelper timerHelper;
 
@@ -467,10 +488,11 @@ bool ModelDestroyEx(std::string model_name, std::string proc_name) {
 
 bool LibAppBuilder::ModelInitialize(const std::string& model_name, const std::string& proc_name, const std::string& model_path,
                                          const std::string& backend_lib_path, const std::string& system_lib_path) {
+#ifdef _WIN32
     if (!proc_name.empty()) {   // Create process and save process info & model name to map, load model in new process.
         return TalkToSvc_Initialize(model_name, proc_name, model_path, backend_lib_path, system_lib_path);
     }
-
+#endif
     return false;
 }
 
@@ -483,10 +505,11 @@ bool LibAppBuilder::ModelInference(std::string model_name, std::string proc_name
                                         std::vector<uint8_t*>& inputBuffers, std::vector<size_t>& inputSize,
                                         std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
                                         std::string& perfProfile) {
+#ifdef _WIN32
     if (!proc_name.empty()) {   // If proc_name, run the model in that process.
         return TalkToSvc_Inference(model_name, proc_name, share_memory_name, inputBuffers, inputSize, outputBuffers, outputSize, perfProfile);
     }
-
+#endif
     return false;
 }
 
@@ -498,10 +521,11 @@ bool LibAppBuilder::ModelInference(std::string model_name, std::vector<uint8_t*>
 }
 
 bool LibAppBuilder::ModelDestroy(std::string model_name, std::string proc_name) {
+#ifdef _WIN32
     if (!proc_name.empty()) {   // If proc_name, desctroy the model in that process.
         return TalkToSvc_Destroy(model_name, proc_name);
     }
-
+#endif
     return false;
 }
 
@@ -510,11 +534,20 @@ bool LibAppBuilder::ModelDestroy(std::string model_name) {
 }
 
 bool LibAppBuilder::CreateShareMemory(std::string share_memory_name, size_t share_memory_size) {
+#ifdef _WIN32
     return CreateShareMem(share_memory_name, share_memory_size);
+#else
+    return true;
+#endif 
 }
 
 bool LibAppBuilder::DeleteShareMemory(std::string share_memory_name) {
+#ifdef _WIN32
     return DeleteShareMem(share_memory_name);
+#else
+        return true;
+#endif
+
 }
 
 int main(int argc, char** argv) {
