@@ -7,17 +7,20 @@
 //==============================================================================
 
 #include "LogUtils.hpp"
-#include "windows.h"		// zw.
 
 
 void qnn::log::utils::logCreateLock() {		// zw: We need share the lock between processes.
+#ifdef _WIN32
     sg_logUtilMutex = OpenMutexA(MUTEX_ALL_ACCESS, FALSE, "logStdoutCallbackSharedMutex");
     if (!sg_logUtilMutex) {
         sg_logUtilMutex = CreateMutexA(NULL, FALSE, "logStdoutCallbackSharedMutex");
     }
+#endif
 }
 
+#ifdef _WIN32
 extern std::string g_ProcName;
+#endif
 
 void qnn::log::utils::logStdoutCallback(const char* fmt,
                                         QnnLog_Level_t level,
@@ -47,7 +50,8 @@ void qnn::log::utils::logStdoutCallback(const char* fmt,
 
   double ms = (double)timestamp / 1000000.0;
   // To avoid interleaved messages
-  {		// zw: enhance the log print.
+#ifdef _WIN32
+  {    // zw: enhance the log print.
     DWORD dwWaitResult = WaitForSingleObject(sg_logUtilMutex, INFINITE);
     if (WAIT_OBJECT_0 == dwWaitResult) {
         //std::lock_guard<std::mutex> lock(sg_logUtilMutex);
@@ -60,4 +64,12 @@ void qnn::log::utils::logStdoutCallback(const char* fmt,
     }
     ReleaseMutex(sg_logUtilMutex);
   }
+#else
+  {
+    std::lock_guard<std::mutex> lock(sg_logUtilMutex);
+    fprintf(stdout, "%8.1fms [%-7s] ", ms, levelStr);
+    vfprintf(stdout, fmt, argp);
+    fprintf(stdout, "\n");
+  }
+#endif
 }
