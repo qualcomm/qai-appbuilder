@@ -10,13 +10,22 @@ import os
 import sys
 import functools
 import time
+import platform
 from qai_appbuilder import appbuilder
 
+machine = platform.machine()
+QNN_SYSTEM_LIB = "QnnSystem.dll"
+QNN_LIB_EXT = ".dll"
+QNN_LIB_PRE = ""
+PATH_SLASH = "\\"
+if machine == "aarch64": # linux
+    QNN_SYSTEM_LIB = "libQnnSystem.so"
+    QNN_LIB_EXT = ".so"
+    QNN_LIB_PRE = "lib"
+    PATH_SLASH = "/"
 
-QNN_SYSTEM_LIB            = "QnnSystem.dll"
-
-g_backend_lib_path        = "None"
-g_system_lib_path         = "None"
+g_backend_lib_path = "None"
+g_system_lib_path = "None"
 
 g_base_path = os.path.dirname(os.path.abspath(__file__))
 g_base_path = os.getenv('PATH') + ";" + g_base_path + ";"
@@ -97,8 +106,8 @@ class QNNConfig():
             raise ValueError(f"qnn_lib_path does not exist: {qnn_lib_path}")
 
         if (qnn_lib_path != "None"):
-            g_backend_lib_path = qnn_lib_path + "\\" + "Qnn" + runtime + ".dll"
-            g_system_lib_path = qnn_lib_path + "\\" + QNN_SYSTEM_LIB
+            g_backend_lib_path = qnn_lib_path + PATH_SLASH + QNN_LIB_PRE + "Qnn" + runtime + QNN_LIB_EXT
+            g_system_lib_path = qnn_lib_path + PATH_SLASH + QNN_SYSTEM_LIB
 
         if not os.path.exists(g_backend_lib_path):
             raise ValueError(f"backend library does not exist: {g_backend_lib_path}")
