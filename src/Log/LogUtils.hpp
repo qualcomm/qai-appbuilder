@@ -12,8 +12,9 @@
 #include <cstdio>
 #include <mutex>
 #include <string>
-#include <windows.h>		// zw.
-
+#ifdef _WIN32
+#include <windows.h>    // zw.
+#endif
 #include "QnnLog.h"
 
 namespace qnn {
@@ -22,9 +23,11 @@ namespace utils {
 
 void logStdoutCallback(const char* fmt, QnnLog_Level_t level, uint64_t timestamp, va_list argp);
 void logCreateLock();
-// static std::mutex sg_logUtilMutex;		// zw.
+#ifdef _WIN32
 static HANDLE sg_logUtilMutex = nullptr;	// zw: We need share the lock between processes.
-
+#else
+static std::mutex sg_logUtilMutex;
+#endif
 }  // namespace utils
 }  // namespace log
 }  // namespace qnn
