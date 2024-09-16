@@ -1,4 +1,4 @@
-﻿//==============================================================================
+//==============================================================================
 //
 // Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 // 
@@ -817,6 +817,32 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphs() {
   return returnStatus;
 }
 
+// #define DEBUG_INFERENCE 1
+#ifdef DEBUG_INFERENCE
+
+#define BUFSIZE             (256)
+
+void bufferToFile(std::vector<uint8_t*>& buffers, std::vector<size_t>& size, std::string& data_name) {
+    char data_path[BUFSIZE];
+    
+    QNN_DEBUG("Dump input data, input count = %d", size.size());
+
+    for (int i = 0; i < size.size(); i++) {
+        QNN_DEBUG("Dump input data, size = %d", size[i]);
+
+        sprintf_s(data_path, BUFSIZE, data_name.c_str(), i);
+        std::ofstream os(data_path, std::ofstream::binary);
+        if (!os) {
+            QNN_ERR("Failed to open file for writing: %s", data_path);
+        }
+        else {
+            os.write(reinterpret_cast<char*>(&(*(buffers[i]))), size[i]);
+        }
+        os.close();
+    }
+}
+#endif
+
 sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vector<uint8_t*>& inputBuffers, 
                                                                                std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
                                                                                std::string perfProfile) {
@@ -862,6 +888,13 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vecto
             m_ioTensor.populateInputTensors((uint32_t)graphIdx, inputBuffers, inputs, graphInfo, m_inputDataType)) {
             returnStatus = StatusCode::FAILURE;
           }
+
+#ifdef DEBUG_INFERENCE
+          std::vector<size_t> inputSize;
+          m_ioTensor.getTensorsSize(&inputs, (*m_graphsInfo)[graphIdx].numInputTensors, (*m_graphsInfo)[graphIdx].inputTensors, inputSize);
+          std::string data_name = "input_%d.raw";
+          bufferToFile(inputBuffers, inputSize, data_name);
+#endif
 
         if (StatusCode::SUCCESS == returnStatus) {
           QNN_DEBUG("Successfully populated input tensors for graphIdx: %d", graphIdx);
@@ -948,6 +981,11 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vecto
                 }
             }
             // QNN_ERROR("output buffer size: %d\n", outputBuffers.size());
+
+#ifdef DEBUG_INFERENCE
+                      std::string data_name = "output_%d.raw";
+                      bufferToFile(outputBuffers, outputSize, data_name);
+#endif
           }
         }
         if (StatusCode::SUCCESS != returnStatus) {
