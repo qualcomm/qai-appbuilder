@@ -1,7 +1,12 @@
 # StableDiffusion Sample Code
 
 ## Introduction
-This is sample code for using QNNHelper to load Stable Diffusion 1.5 QNN models, run the inference and free the resource. 
+This is sample code for using QAI AppBuilder to load Stable Diffusion 1.5 QNN models, run the inference and free the resource. 
+
+## Python Environment
+Please setup the Python environment according to the guide below:<br>
+https://github.com/quic/ai-engine-direct-helper/blob/main/docs/user_guide.md<br>
+Make sure to use the right QAI AppBuilder version according to the QNN SDK version which the models were generated.
 
 ## Stable Diffusion QNN models
 You need to generate Stable Diffusion QNN models according to the guide below before you running it with this sample code:
@@ -9,9 +14,9 @@ https://docs.qualcomm.com/bundle/publicresource/topics/80-64748-1/introduction.h
 
 After the models are ready, please copy them to the following path:
 ```
-c:\ai-hub\SD_1.5\models\sd_v1.5\stable_diffusion_v1_5_quantized-textencoder_quantized.bin
-c:\ai-hub\SD_1.5\models\sd_v1.5\stable_diffusion_v1_5_quantized-unet_quantized.bin
-c:\ai-hub\SD_1.5\models\sd_v1.5\stable_diffusion_v1_5_quantized-vaedecoder_quantized.bin
+c:\ai-app\SD_1.5\models\sd_v1.5\stable_diffusion_v1_5_quantized-textencoder_quantized.bin
+c:\ai-app\SD_1.5\models\sd_v1.5\stable_diffusion_v1_5_quantized-unet_quantized.bin
+c:\ai-app\SD_1.5\models\sd_v1.5\stable_diffusion_v1_5_quantized-vaedecoder_quantized.bin
 ```
 
 ## time-embedding
@@ -63,9 +68,9 @@ gen_time_embedding()
 
 After generated the 'time-embedding' data, please copy them to the following path:
 ```
-c:\ai-hub\SD_1.5\models\time-embedding\20
-c:\ai-hub\SD_1.5\models\time-embedding\30
-c:\ai-hub\SD_1.5\models\time-embedding\50
+c:\ai-app\SD_1.5\models\time-embedding\20
+c:\ai-app\SD_1.5\models\time-embedding\30
+c:\ai-app\SD_1.5\models\time-embedding\50
 ```
 
 ## CLIP ViT-L/14 model
@@ -80,7 +85,7 @@ vocab.json
 
 After downloaded the model, please copy them to the following path:
 ```
-c:\ai-hub\SD_1.5\models\clip-vit-large-patch14
+c:\ai-app\SD_1.5\models\clip-vit-large-patch14
 ```
 
 ## Run the sample code
@@ -89,7 +94,7 @@ https://github.com/quic/ai-engine-direct-helper/blob/main/Samples/StableDiffusio
 
 After downloaded the sample code, please copy them to the following path:
 ```
-c:\ai-hub\SD_1.5\
+c:\ai-app\SD_1.5\
 ```
 
 Run the sample code:
@@ -100,11 +105,10 @@ python StableDiffusion.py
 ## Output
 The output image will be saved to the following path:
 ```
-c:\ai-hub\SD_1.5\images\
+c:\ai-app\SD_1.5\images\
 ```
 
 ## Reference
-You need to setup the QNNHelper environment before you run the sample code. Below is the guide on how to setup the QNNHelper environment:<br>
+You need to setup the QAI AppBuilder environment before you run the sample code. Below is the guide on how to setup the QAI AppBuilder environment:<br>
 https://github.com/quic/ai-engine-direct-helper/blob/main/README.md <br>
 https://github.com/quic/ai-engine-direct-helper/blob/main/Docs/User_Guide.md
-
