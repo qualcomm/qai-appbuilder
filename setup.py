@@ -7,7 +7,7 @@
 #=============================================================================
 
 # Compile Commands: 
-# Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.23.0.240531\
+# Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.26.0.240828\
 # python setup.py bdist_wheel
 
 import os
@@ -22,7 +22,7 @@ import zipfile
 from setuptools import Extension, setup, find_packages
 from setuptools.command.build_ext import build_ext
 
-VERSION = "2.24.0"
+VERSION = "2.26.0"
 CONFIG = "Release"  # Release, RelWithDebInfo
 package_name = "qai_appbuilder"
 
