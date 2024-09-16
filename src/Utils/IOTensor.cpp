@@ -359,6 +359,32 @@ iotensor::StatusCode iotensor::IOTensor::populateInputTensors(
   return StatusCode::SUCCESS;
 }
 
+iotensor::StatusCode iotensor::IOTensor::getTensorsSize(Qnn_Tensor_t** tensors, uint32_t tensorCount, Qnn_Tensor_t* tensorWrappers, std::vector<size_t>& size) {
+  if (nullptr == tensorWrappers) {
+    QNN_ERROR("tensorWrappers is nullptr");
+    return StatusCode::FAILURE;
+  }
+  if (0 == tensorCount) {
+    QNN_INFO("tensor count is 0. Nothing to setup.");
+    return StatusCode::SUCCESS;
+  }
+  auto returnStatus = StatusCode::SUCCESS;
+  for (size_t tensorIdx = 0; tensorIdx < tensorCount; tensorIdx++) {
+    Qnn_Tensor_t wrapperTensor = tensorWrappers[tensorIdx];
+    std::vector<size_t> dims;
+    fillDims(dims, QNN_TENSOR_GET_DIMENSIONS(wrapperTensor), QNN_TENSOR_GET_RANK(wrapperTensor));
+    datautil::StatusCode datautilStatus{datautil::StatusCode::SUCCESS};
+    size_t length{0};
+    std::tie(datautilStatus, length) =
+        datautil::calculateLength(dims, QNN_TENSOR_GET_DATA_TYPE(wrapperTensor));
+    if (datautilStatus != datautil::StatusCode::SUCCESS) {
+      returnStatus = StatusCode::FAILURE;
+    }
+    size.push_back(length);
+  }
+  return returnStatus;
+}
+
 // Setup details for Qnn_Tensor_t for execution
 // based on information in Qnn_TensorWrapper_t provided by model.so.
 iotensor::StatusCode iotensor::IOTensor::setupTensors(Qnn_Tensor_t** tensors,
