@@ -76,6 +76,8 @@ class IOTensor {
  
   StatusCode fillDims(std::vector<size_t> &dims, uint32_t *inDimensions, uint32_t rank);	// zw: change it to public function.
 
+  StatusCode getTensorsSize(Qnn_Tensor_t** tensors, uint32_t tensorCount, Qnn_Tensor_t* tensorWrappers, std::vector<size_t>& size);
+
  private:
   PopulateInputTensorsRetType_t populateInputTensor(const std::vector<std::string> &filePaths,
                                                     const size_t filePathsIndexOffset,
@@ -114,6 +116,7 @@ class IOTensor {
   StatusCode copyFromFloatToNative(float *floatBuffer, Qnn_Tensor_t *tensor);
 
   StatusCode setupTensors(Qnn_Tensor_t **tensors, uint32_t tensorCount, Qnn_Tensor_t *tensorsInfo);
+
 };
 }  // namespace iotensor
 }  // namespace tools
