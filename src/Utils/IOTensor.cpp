@@ -71,6 +71,21 @@ iotensor::StatusCode iotensor::IOTensor::copyFromFloatToNative(float* floatBuffe
   fillDims(dims, QNN_TENSOR_GET_DIMENSIONS(tensor), QNN_TENSOR_GET_RANK(tensor));
 
   switch (QNN_TENSOR_GET_DATA_TYPE(tensor)) {
+    case QNN_DATATYPE_FLOAT_16:
+#ifdef __hexagon__
+      QNN_ERROR("failure in aiswutility::float32ToFloatN, not supported on Hexagon");
+      returnStatus = StatusCode::FAILURE;
+#else
+      if (!datautil::float32ToFloatN(static_cast<uint8_t*>(QNN_TENSOR_GET_CLIENT_BUF(tensor).data),
+                                        floatBuffer,
+                                        datautil::calculateElementCount(dims),
+                                        16)) {
+        QNN_ERROR("failure in aiswutility::float32ToFloatN");
+        returnStatus = StatusCode::FAILURE;
+      }
+#endif
+      break;
+    
     case QNN_DATATYPE_UFIXED_POINT_8:
       datautil::floatToTfN<uint8_t>(static_cast<uint8_t*>(QNN_TENSOR_GET_CLIENT_BUF(tensor).data),
                                     floatBuffer,
@@ -527,6 +542,7 @@ iotensor::StatusCode iotensor::IOTensor::allocateBuffer(uint8_t** buffer,
   size_t elementCount = datautil::calculateElementCount(dims);
   auto returnStatus   = StatusCode::SUCCESS;
   switch (dataType) {
+    case QNN_DATATYPE_FLOAT_16:
     case QNN_DATATYPE_FLOAT_32:
       QNN_DEBUG("allocating float buffer");
       returnStatus = allocateBuffer<float>(reinterpret_cast<float**>(buffer), elementCount);
@@ -614,6 +630,14 @@ iotensor::StatusCode iotensor::IOTensor::convertToFloat(float** out, Qnn_Tensor_
     return returnStatus;
   }
   switch (QNN_TENSOR_GET_DATA_TYPE(tensor)) {
+    case QNN_DATATYPE_FLOAT_16:
+      if (!datautil::floatNToFloat32(
+              *out, reinterpret_cast<uint8_t*>(QNN_TENSOR_GET_CLIENT_BUF(tensor).data), elementCount, 16)) {
+        QNN_ERROR("failure in aiswutility::floatNToFloat32");
+        returnStatus = StatusCode::FAILURE;
+      }
+      break;
+    
     case QNN_DATATYPE_UFIXED_POINT_8:
       if (datautil::StatusCode::SUCCESS !=
           datautil::tfNToFloat<uint8_t>(

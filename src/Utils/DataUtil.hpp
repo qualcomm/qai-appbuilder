@@ -86,6 +86,22 @@ StatusCode writeBinaryToFile(std::string fileDir,
                              uint8_t* buffer,
                              size_t bufferSize);
 
+static inline uint16_t fp16_ieee_from_fp32_value(float f);
+static inline float fp16_ieee_to_fp32_value(uint16_t h);
+
+static inline uint32_t fp32_to_bits(float f);
+static inline float fp32_from_bits(uint32_t w);
+
+bool floatNToFloat32(float* out,
+                     uint8_t* in,
+                     size_t numElements,
+                     uint8_t bitWidth);
+
+bool float32ToFloatN(uint8_t* out,
+                       float* in,
+                       size_t numElements,
+                       uint8_t bitWidth);
+
 template <typename T_QuantType>
 datautil::StatusCode floatToTfN(
     T_QuantType* out, float* in, int32_t offset, float scale, size_t numElements);
