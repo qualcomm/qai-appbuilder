@@ -122,6 +122,10 @@ typedef struct GraphInfo {
   uint32_t numInputTensors;
   Qnn_Tensor_t *outputTensors;
   uint32_t numOutputTensors;
+
+  // improve performance.
+  Qnn_Tensor_t* m_inputs;
+  Qnn_Tensor_t* m_outputs;
 } GraphInfo_t;
 typedef GraphInfo_t *GraphInfoPtr_t;
 

@@ -377,6 +377,12 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
       }
     }
 
+    // improve performance.
+    if (sample_app::StatusCode::SUCCESS != app->setupInputAndOutputTensors()) {
+      app->reportError("Setup Input and Output Tensors failure");
+      return false;
+    }
+
     if (loadFromCachedBinary) {
         if (sample_app::StatusCode::SUCCESS != app->initializePerformance()) {
             app->reportError("Performance initialization failure");
@@ -449,6 +455,12 @@ bool ModelDestroyEx(std::string model_name, std::string proc_name) {
     std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
     if (nullptr == app) {
         app->reportError("Can't find the model with model_name: " + model_name);
+        return false;
+    }
+
+    // improve performance.
+    if (sample_app::StatusCode::SUCCESS != app->tearDownInputAndOutputTensors()) {
+        app->reportError("Input and Output Tensors destroy failure");
         return false;
     }
 

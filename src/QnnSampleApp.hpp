@@ -93,6 +93,9 @@ class QnnSampleApp {
 
   StatusCode verifyFailReturnStatus(Qnn_ErrorHandle_t errCode);
 
+// improve performance.
+  StatusCode setupInputAndOutputTensors();
+  StatusCode tearDownInputAndOutputTensors();
 
 // zw.
   StatusCode executeGraphsBuffers(std::vector<uint8_t*>& inputBuffers,

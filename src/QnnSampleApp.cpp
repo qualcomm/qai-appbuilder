@@ -843,6 +843,46 @@ void bufferToFile(std::vector<uint8_t*>& buffers, std::vector<size_t>& size, std
 }
 #endif
 
+// improve performance.
+sample_app::StatusCode sample_app::QnnSampleApp::setupInputAndOutputTensors()
+{
+  auto returnStatus = qnn::tools::iotensor::StatusCode::SUCCESS;
+
+  for (size_t graphIdx = 0; graphIdx < m_graphsCount; graphIdx++) {
+    auto& graphInfo = (*m_graphsInfo)[graphIdx];
+    Qnn_Tensor_t** inputs  = &(graphInfo.m_inputs );
+    Qnn_Tensor_t** outputs = &(graphInfo.m_outputs);
+    returnStatus = m_ioTensor.setupInputAndOutputTensors(inputs, outputs, graphInfo);
+    if (qnn::tools::iotensor::StatusCode::SUCCESS != returnStatus) {
+      QNN_ERROR("Error in setting up Input and output Tensors for graphIdx: %d", graphIdx);
+      break;
+    }
+  }
+
+  return static_cast<sample_app::StatusCode>(returnStatus);
+}
+
+// improve performance.
+sample_app::StatusCode sample_app::QnnSampleApp::tearDownInputAndOutputTensors()
+{
+  auto returnStatus = qnn::tools::iotensor::StatusCode::SUCCESS;
+
+  for (size_t graphIdx = 0; graphIdx < m_graphsCount; graphIdx++) {
+    auto& graphInfo = (*m_graphsInfo)[graphIdx];
+    Qnn_Tensor_t* inputs  = graphInfo.m_inputs ;
+    Qnn_Tensor_t* outputs = graphInfo.m_outputs;
+    returnStatus = m_ioTensor.tearDownInputAndOutputTensors(inputs, outputs, graphInfo.numInputTensors, graphInfo.numOutputTensors);
+    graphInfo.m_inputs  = nullptr;
+    graphInfo.m_outputs = nullptr;
+    if (qnn::tools::iotensor::StatusCode::SUCCESS != returnStatus) {
+      QNN_ERROR("Error in tear down Input and output Tensors for graphIdx: %d", graphIdx);
+      break;
+    }
+  }
+
+  return static_cast<sample_app::StatusCode>(returnStatus);
+}
+
 sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vector<uint8_t*>& inputBuffers, 
                                                                                std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
                                                                                std::string perfProfile) {
@@ -870,13 +910,10 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vecto
       break;
     }
 
-    Qnn_Tensor_t* inputs  = nullptr;
-    Qnn_Tensor_t* outputs = nullptr;
-    if (iotensor::StatusCode::SUCCESS != m_ioTensor.setupInputAndOutputTensors(&inputs, &outputs, (*m_graphsInfo)[graphIdx])) {
-      QNN_ERROR("Error in setting up Input and output Tensors for graphIdx: %d", graphIdx);
-      returnStatus = StatusCode::FAILURE;
-      break;
-    }
+    // improve performance.
+
+    Qnn_Tensor_t* inputs  = (*m_graphsInfo)[graphIdx].m_inputs ;
+    Qnn_Tensor_t* outputs = (*m_graphsInfo)[graphIdx].m_outputs;
 
     auto graphInfo = (*m_graphsInfo)[graphIdx];
     if (!inputBuffers.empty()) {
@@ -993,12 +1030,6 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vecto
           break;
         }
       }
-    }
-    m_ioTensor.tearDownInputAndOutputTensors(inputs, outputs, graphInfo.numInputTensors, graphInfo.numOutputTensors);
-    inputs  = nullptr;
-    outputs = nullptr;
-    if (StatusCode::SUCCESS != returnStatus) {
-      break;
     }
   }
 
