@@ -63,6 +63,9 @@ bool copyGraphsInfo(const QnnSystemContext_GraphInfo_t *graphsInput,
 bool copyGraphsInfoV1(const QnnSystemContext_GraphInfoV1_t *graphInfoSrc,
                       qnn_wrapper_api::GraphInfo_t *graphInfoDst);
 
+bool copyGraphsInfoV3(const QnnSystemContext_GraphInfoV3_t *graphInfoSrc,
+                      qnn_wrapper_api::GraphInfo_t *graphInfoDst);
+
 bool copyTensorsInfo(const Qnn_Tensor_t *tensorsInfoSrc,
                      Qnn_Tensor_t *&tensorWrappers,
                      uint32_t tensorsCount);
