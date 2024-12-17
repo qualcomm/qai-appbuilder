@@ -8,7 +8,7 @@
 
 #include "AppBuilder.h"
 
-#define APPBUILDER_VERSION    "2.26.0"
+#define APPBUILDER_VERSION    "2.28.0"
 
 ShareMemory::ShareMemory(const std::string& share_memory_name, const size_t share_memory_size) {
     m_share_memory_name = share_memory_name;

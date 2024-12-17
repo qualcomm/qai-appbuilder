@@ -12,7 +12,7 @@
 #include <iostream>
 #include <numeric>
 #include <queue>
-
+#include <intrin.h>
 #include "DataUtil.hpp"
 #include "Logger.hpp"
 #include "PAL/Directory.hpp"

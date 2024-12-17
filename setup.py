@@ -7,7 +7,7 @@
 #=============================================================================
 
 # Compile Commands: 
-# Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.26.0.240828\
+# Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.28.0.241029\
 # python setup.py bdist_wheel
 
 import os
@@ -22,17 +22,19 @@ import zipfile
 from setuptools import Extension, setup, find_packages
 from setuptools.command.build_ext import build_ext
 
-VERSION = "2.26.0"
+VERSION = "2.28.0"
 CONFIG = "Release"  # Release, RelWithDebInfo
 package_name = "qai_appbuilder"
 
 machine = platform.machine()
+sysinfo = sys.version
+
 generate = "-G \"Visual Studio 17 2022\""
 arch = "ARM64"
 
-if machine == "AMD64":
+if machine == "AMD64" or "AMD64" in sysinfo:
     arch = "ARM64EC"
-generate += " -A " + arch
+    generate += " -A " + arch
 
 if machine == "aarch64":
     arch = "aarch64"

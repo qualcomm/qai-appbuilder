@@ -9,11 +9,11 @@ https://github.com/quic/ai-engine-direct-helper/blob/main/Docs/User_Guide.md
 
 Copy the QNN libraries from QNN SDK to below path:
 ```
-C:\ai-hub\Riffusion\qnn\libQnnHtpV73Skel.so
-C:\ai-hub\Riffusion\qnn\QnnHtp.dll
-C:\ai-hub\Riffusion\qnn\QnnHtpV73Stub.dll
-C:\ai-hub\Riffusion\qnn\QnnSystem.dll
-C:\ai-hub\Riffusion\qnn\libqnnhtpv73.cat
+C:\ai-hub\Riffusion\qai_libs\libQnnHtpV73Skel.so
+C:\ai-hub\Riffusion\qai_libs\QnnHtp.dll
+C:\ai-hub\Riffusion\qai_libs\QnnHtpV73Stub.dll
+C:\ai-hub\Riffusion\qai_libs\QnnSystem.dll
+C:\ai-hub\Riffusion\qai_libs\libqnnhtpv73.cat
 ```
 
 ## Riffusion QNN models
@@ -76,13 +76,13 @@ gen_time_embedding()
 
 After generated the 'time-embedding' data, please copy them to the following path:
 ```
-C:\ai-hub\Riffusion\models\time-embedding_riffusion\20
-C:\ai-hub\Riffusion\models\time-embedding_riffusion\30
-C:\ai-hub\Riffusion\models\time-embedding_riffusion\50
+C:\ai-hub\Riffusion\models\time-embedding\20
+C:\ai-hub\Riffusion\models\time-embedding\30
+C:\ai-hub\Riffusion\models\time-embedding\50
 ```
 
 ## CLIP ViT-L/14 model
-In this sample code, we need CLIP ViT-L/14 as text encoder. You can download the file below from 'https://huggingface.co/riffusion/riffusion-model-v1/tree/main/tokenizer' and save them to foldet 'clip-vit-large-patch14'.
+In this sample code, we need CLIP ViT-L/14 as text encoder. You can download the file below from 'https://huggingface.co/openai/clip-vit-large-patch14/tree/main' and save them to foldet 'clip-vit-large-patch14'. 
 Rename the files to below:
 ```
 merges.txt
@@ -93,7 +93,7 @@ vocab.json
 
 After downloaded the model, please copy them to the following path:
 ```
-C:\ai-hub\Riffusion\models\tokenizer_riffusion
+C:\ai-hub\Riffusion\models\tokenizer
 ```
 
 ## Run the sample code

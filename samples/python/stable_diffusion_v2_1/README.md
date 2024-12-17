@@ -9,11 +9,11 @@ https://github.com/quic/ai-engine-direct-helper/blob/main/Docs/User_Guide.md
 
 Copy the QNN libraries from QNN SDK to below path:
 ```
-C:\ai-hub\stable_diffusion_v2_1\qnn\libQnnHtpV73Skel.so
-C:\ai-hub\stable_diffusion_v2_1\qnn\QnnHtp.dll
-C:\ai-hub\stable_diffusion_v2_1\qnn\QnnHtpV73Stub.dll
-C:\ai-hub\stable_diffusion_v2_1\qnn\QnnSystem.dll
-C:\ai-hub\stable_diffusion_v2_1\qnn\libqnnhtpv73.cat
+C:\ai-hub\stable_diffusion_v2_1\qai_libs\libQnnHtpV73Skel.so
+C:\ai-hub\stable_diffusion_v2_1\qai_libs\QnnHtp.dll
+C:\ai-hub\stable_diffusion_v2_1\qai_libs\QnnHtpV73Stub.dll
+C:\ai-hub\stable_diffusion_v2_1\qai_libs\QnnSystem.dll
+C:\ai-hub\stable_diffusion_v2_1\qai_libs\libqnnhtpv73.cat
 ```
 
 ## Stable Diffusion 2.1 QNN models
@@ -76,9 +76,9 @@ gen_time_embedding()
 
 After generated the 'time-embedding' data, please copy them to the following path:
 ```
-C:\ai-hub\stable_diffusion_v2_1\models\time-embedding_v2.1\20
-C:\ai-hub\stable_diffusion_v2_1\models\time-embedding_v2.1\30
-C:\ai-hub\stable_diffusion_v2_1\models\time-embedding_v2.1\50
+C:\ai-hub\stable_diffusion_v2_1\models\time-embedding\20
+C:\ai-hub\stable_diffusion_v2_1\models\time-embedding\30
+C:\ai-hub\stable_diffusion_v2_1\models\time-embedding\50
 ```
 
 ## CLIP ViT-L/14 model
@@ -93,7 +93,7 @@ vocab.json
 
 After downloaded the model, please copy them to the following path:
 ```
-C:\ai-hub\stable_diffusion_v2_1\models\tokenizer_2.1
+C:\ai-hub\stable_diffusion_v2_1\models\tokenizer
 ```
 
 ## Run the sample code
