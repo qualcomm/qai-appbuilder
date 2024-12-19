@@ -10,11 +10,11 @@ https://github.com/quic/ai-engine-direct-helper/blob/main/Docs/User_Guide.md
 
 Copy the QNN libraries from QNN SDK to below path:
 ```
-C:\ai-hub\inception_v3\qnn\libQnnHtpV73Skel.so
-C:\ai-hub\inception_v3\qnn\QnnHtp.dll
-C:\ai-hub\inception_v3\qnn\QnnHtpV73Stub.dll
-C:\ai-hub\inception_v3\qnn\QnnSystem.dll
-C:\ai-hub\inception_v3\qnn\libqnnhtpv73.cat
+C:\ai-hub\inception_v3\qai_libs\libQnnHtpV73Skel.so
+C:\ai-hub\inception_v3\qai_libs\QnnHtp.dll
+C:\ai-hub\inception_v3\qai_libs\QnnHtpV73Stub.dll
+C:\ai-hub\inception_v3\qai_libs\QnnSystem.dll
+C:\ai-hub\inception_v3\qai_libs\libqnnhtpv73.cat
 ```
 
 ## inception_v3 QNN models

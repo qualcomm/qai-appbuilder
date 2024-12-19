@@ -70,7 +70,7 @@ def Init():
     global lamadilated
 
     # Config AppBuilder environment.
-    QNNConfig.Config(os.getcwd() + "\\qnn", Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(os.getcwd() + "\\qai_libs", Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for LamaDilated objects.
     lamadilated_model = "models\\lama_dilated.bin"

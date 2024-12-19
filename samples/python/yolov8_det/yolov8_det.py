@@ -288,7 +288,7 @@ def Init():
     global yolov8
 
     # Config AppBuilder environment.
-    QNNConfig.Config(os.getcwd() + "\\qnn", Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(os.getcwd() + "\\qai_libs", Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for YoloV8 objects.
     yolov8_model = "models\\yolov8_det.bin"

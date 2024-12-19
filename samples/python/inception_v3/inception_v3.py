@@ -50,7 +50,7 @@ def Init():
     global inceptionV3
 
     # Config AppBuilder environment.
-    QNNConfig.Config(os.getcwd() + "\\qnn", Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(os.getcwd() + "\\qai_libs", Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for InceptionV3 objects.
     inceptionV3_model = "models\\inception_v3.bin"

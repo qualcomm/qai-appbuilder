@@ -9,11 +9,11 @@ https://github.com/quic/ai-engine-direct-helper/blob/main/Docs/User_Guide.md
 
 Copy the QNN libraries from QNN SDK to below path:
 ```
-C:\ai-hub\aotgan\qnn\libQnnHtpV73Skel.so
-C:\ai-hub\aotgan\qnn\QnnHtp.dll
-C:\ai-hub\aotgan\qnn\QnnHtpV73Stub.dll
-C:\ai-hub\aotgan\qnn\QnnSystem.dll
-C:\ai-hub\aotgan\qnn\libqnnhtpv73.cat
+C:\ai-hub\aotgan\qai_libs\libQnnHtpV73Skel.so
+C:\ai-hub\aotgan\qai_libs\QnnHtp.dll
+C:\ai-hub\aotgan\qai_libs\QnnHtpV73Stub.dll
+C:\ai-hub\aotgan\qai_libs\QnnSystem.dll
+C:\ai-hub\aotgan\qai_libs\libqnnhtpv73.cat
 ```
 
 ## aotgan QNN models

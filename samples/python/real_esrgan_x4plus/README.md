@@ -9,11 +9,11 @@ https://github.com/quic/ai-engine-direct-helper/blob/main/Docs/User_Guide.md
 
 Copy the QNN libraries from QNN SDK to below path:
 ```
-C:\ai-hub\real_esrgan_x4plus\qnn\libQnnHtpV73Skel.so
-C:\ai-hub\real_esrgan_x4plus\qnn\QnnHtp.dll
-C:\ai-hub\real_esrgan_x4plus\qnn\QnnHtpV73Stub.dll
-C:\ai-hub\real_esrgan_x4plus\qnn\QnnSystem.dll
-C:\ai-hub\real_esrgan_x4plus\qnn\libqnnhtpv73.cat
+C:\ai-hub\real_esrgan_x4plus\qai_libs\libQnnHtpV73Skel.so
+C:\ai-hub\real_esrgan_x4plus\qai_libs\QnnHtp.dll
+C:\ai-hub\real_esrgan_x4plus\qai_libs\QnnHtpV73Stub.dll
+C:\ai-hub\real_esrgan_x4plus\qai_libs\QnnSystem.dll
+C:\ai-hub\real_esrgan_x4plus\qai_libs\libqnnhtpv73.cat
 ```
 
 ## real_esrgan_x4plus QNN models
@@ -25,10 +25,9 @@ You can refer to below links on how to setup AI Hub envirinment and how to use A
 https://aihub.qualcomm.com/get-started
 http://app.aihub.qualcomm.com/docs/
 
-a. Download the latest 'ai-hub-models' code and install it to Python environment:
+a. Install the AI Hub Python packages:
 ```
-git clone --recursive https://github.com/quic/ai-hub-models.git
-pip install -e .
+pip install qai-hub qai_hub_models
 ```
 
 b. Use below commmand to generate QNN model which suppor 515x512 input resolution:
@@ -45,7 +44,7 @@ Scheduled compile job (j1p86jxog) successfully. To see the status and results:
 ```
 After downloaded the model, copy it to the following path:
 ```
-C:\ai-hub\real_esrgan_x4plus\models\realesrgan_x4_512.bin
+C:\ai-hub\real_esrgan_x4plus\models\real_esrgan_x4plus.bin
 ```
 
 ## Run the sample code

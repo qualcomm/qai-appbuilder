@@ -68,6 +68,7 @@ ReadBatchDataRetType_t readBatchData(const std::vector<std::string>& filePaths,
 
 StatusCode readBinaryFromFile(std::string filePath, uint8_t* buffer, size_t bufferSize);
 
+#ifndef __hexagon__
 StatusCode writeDataToFile(std::string fileDir,
                            std::string fileName,
                            std::vector<size_t> dims,
@@ -85,22 +86,15 @@ StatusCode writeBinaryToFile(std::string fileDir,
                              std::string fileName,
                              uint8_t* buffer,
                              size_t bufferSize);
+#endif
 
+// Enabling fp16 execution
 static inline uint16_t fp16_ieee_from_fp32_value(float f);
 static inline float fp16_ieee_to_fp32_value(uint16_t h);
-
 static inline uint32_t fp32_to_bits(float f);
 static inline float fp32_from_bits(uint32_t w);
-
-bool floatNToFloat32(float* out,
-                     uint8_t* in,
-                     size_t numElements,
-                     uint8_t bitWidth);
-
-bool float32ToFloatN(uint8_t* out,
-                       float* in,
-                       size_t numElements,
-                       uint8_t bitWidth);
+bool floatNToFloat32(float* out, uint8_t* in, size_t numElements, uint8_t bitWidth);
+bool float32ToFloatN(uint8_t* out, float* in, size_t numElements, uint8_t bitWidth);
 
 template <typename T_QuantType>
 datautil::StatusCode floatToTfN(

@@ -55,5 +55,7 @@ python stable_diffusion_v2_1\stable_diffusion_v2_1.py --prompt "spectacular view
 | stable_diffusion_v1_5  | 2.24 | python stable_diffusion_v2_1\stable_diffusion_v2_1.py --prompt "the prompt string ..." |
 | stable_diffusion_v2_1  | 2.24 | python stable_diffusion_v1_5\stable_diffusion_v1_5.py --prompt "the prompt string ..." |
 | riffusion  | 2.24 | python riffusion\riffusion.py --prompt "the prompt string ..." |
+| real_esrgan_x4plus  | 2.28 | python real_esrgan_x4plus\real_esrgan_x4plus.py |
+| real_esrgan_general_x4v3  | 2.28 | python real_esrgan_general_x4v3\real_esrgan_general_x4v3.py |
 
 *More models will be supported soon!*

@@ -17,13 +17,11 @@ C:\ai-hub\model_name\
 
 Set up a new folder called `qnn` and copy the QNN libraries from QNN SDK to below path:
 ```
-C:\ai-hub\model_name\qnn\libqnnhtpv73.cat
-C:\ai-hub\model_name\qnn\libQnnHtpV73Skel.so
-C:\ai-hub\model_name\qnn\QnnCpu.dll
-C:\ai-hub\model_name\qnn\QnnHtp.dll
-C:\ai-hub\model_name\qnn\QnnHtpPrepare.dll
-C:\ai-hub\model_name\qnn\QnnHtpV73Stub.dll
-C:\ai-hub\model_name\qnn\QnnSystem.dll
+C:\ai-hub\model_name\qai_libs\libqnnhtpv73.cat
+C:\ai-hub\model_name\qai_libs\libQnnHtpV73Skel.so
+C:\ai-hub\model_name\qai_libs\QnnHtp.dll
+C:\ai-hub\model_name\qai_libs\QnnHtpV73Stub.dll
+C:\ai-hub\model_name\qai_libs\QnnSystem.dll
 ```
 
 ## Prepare the QNN model
@@ -174,7 +172,7 @@ def Init():
     global lamadilated
 
     # Config AppBuilder environment.
-    QNNConfig.Config(os.getcwd() + "\\qnn", Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(os.getcwd() + "\\qai_libs", Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for LamaDilated objects.
     lamadilated_model = "models\\lama_dilated.bin"

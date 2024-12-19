@@ -15,9 +15,11 @@
 #include <intrin.h>
 #include "DataUtil.hpp"
 #include "Logger.hpp"
+#ifndef __hexagon__
 #include "PAL/Directory.hpp"
 #include "PAL/FileOp.hpp"
 #include "PAL/Path.hpp"
+#endif
 
 using namespace qnn;
 using namespace qnn::tools;
@@ -186,6 +188,7 @@ datautil::StatusCode datautil::readBinaryFromFile(std::string filePath,
   return StatusCode::SUCCESS;
 }
 
+#ifndef __hexagon__
 datautil::StatusCode datautil::writeDataToFile(std::string fileDir,
                                                std::string fileName,
                                                std::vector<size_t> dims,
@@ -275,8 +278,9 @@ datautil::StatusCode datautil::writeBinaryToFile(std::string fileDir,
   os.write(reinterpret_cast<char*>(buffer), bufferSize);
   return StatusCode::SUCCESS;
 }
+#endif
 
-
+// Enabling fp16 execution
 static inline float datautil::fp16_ieee_to_fp32_value(uint16_t h) {
     const uint32_t w = (uint32_t) h << 16;
     const uint32_t sign = w & UINT32_C(0x80000000);
@@ -297,6 +301,7 @@ static inline float datautil::fp16_ieee_to_fp32_value(uint16_t h) {
     return fp32_from_bits(result);
 }
 
+// Enabling fp16 execution
 /*
  * Convert a 32-bit floating-point number in IEEE single-precision format to a 16-bit floating-point number in
  * IEEE half-precision format, in bit representation.
@@ -304,8 +309,6 @@ static inline float datautil::fp16_ieee_to_fp32_value(uint16_t h) {
  * @note The implementation relies on IEEE-like (no assumption about rounding mode and no operations on denormals)
  * floating-point operations and bitcasts between integer and floating-point variables.
  */
-
-
 bool datautil::floatNToFloat32(float* out,
                      uint8_t* in,
                      size_t numElements,
@@ -338,6 +341,7 @@ bool datautil::floatNToFloat32(float* out,
     return true;
 }
 
+// Enabling fp16 execution
 static inline float datautil::fp32_from_bits(uint32_t w) {
 #if defined(__OPENCL_VERSION__)
     return as_float(w);
@@ -356,6 +360,7 @@ static inline float datautil::fp32_from_bits(uint32_t w) {
 #endif
 }
 
+// Enabling fp16 execution
 static inline uint32_t datautil::fp32_to_bits(float f) {
 #if defined(__OPENCL_VERSION__)
     return as_uint(f);
@@ -374,6 +379,7 @@ static inline uint32_t datautil::fp32_to_bits(float f) {
 #endif
 }
 
+// Enabling fp16 execution
 static inline uint16_t datautil::fp16_ieee_from_fp32_value(float f) {
  #if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901L) || defined(__GNUC__) && !defined(__STRICT_ANSI__)
      const float scale_to_inf = 0x1.0p+112f;
@@ -400,6 +406,7 @@ static inline uint16_t datautil::fp16_ieee_from_fp32_value(float f) {
      return (sign >> 16) | (shl1_w > UINT32_C(0xFF000000) ? UINT16_C(0x7E00) : nonsign);
  }
 
+// Enabling fp16 execution
 bool datautil::float32ToFloatN(uint8_t* out,
                        float* in,
                        size_t numElements,
@@ -514,6 +521,10 @@ template datautil::StatusCode datautil::castToFloat<uint32_t>(float* out,
                                                               uint32_t* in,
                                                               size_t numElements);
 
+template datautil::StatusCode datautil::castToFloat<uint64_t>(float* out,
+                                                              uint64_t* in,
+                                                              size_t numElements);
+
 template datautil::StatusCode datautil::castToFloat<int8_t>(float* out,
                                                             int8_t* in,
                                                             size_t numElements);
@@ -524,6 +535,10 @@ template datautil::StatusCode datautil::castToFloat<int16_t>(float* out,
 
 template datautil::StatusCode datautil::castToFloat<int32_t>(float* out,
                                                              int32_t* in,
+                                                             size_t numElements);
+
+template datautil::StatusCode datautil::castToFloat<int64_t>(float* out,
+                                                             int64_t* in,
                                                              size_t numElements);
 
 template <typename T_QuantType>
@@ -550,6 +565,10 @@ template datautil::StatusCode datautil::castFromFloat<uint32_t>(uint32_t* out,
                                                                 float* in,
                                                                 size_t numElements);
 
+template datautil::StatusCode datautil::castFromFloat<uint64_t>(uint64_t* out,
+                                                                float* in,
+                                                                size_t numElements);
+
 template datautil::StatusCode datautil::castFromFloat<int8_t>(int8_t* out,
                                                               float* in,
                                                               size_t numElements);
@@ -559,5 +578,9 @@ template datautil::StatusCode datautil::castFromFloat<int16_t>(int16_t* out,
                                                                size_t numElements);
 
 template datautil::StatusCode datautil::castFromFloat<int32_t>(int32_t* out,
+                                                               float* in,
+                                                               size_t numElements);
+
+template datautil::StatusCode datautil::castFromFloat<int64_t>(int64_t* out,
                                                                float* in,
                                                                size_t numElements);

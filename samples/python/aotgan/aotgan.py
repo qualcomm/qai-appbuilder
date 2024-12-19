@@ -70,7 +70,7 @@ def Init():
     global aotgan
 
     # Config AppBuilder environment.
-    QNNConfig.Config(os.getcwd() + "\\qnn", Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(os.getcwd() + "\\qai_libs", Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for AotGan objects.
     aotgan_model = "models\\aotgan.bin"

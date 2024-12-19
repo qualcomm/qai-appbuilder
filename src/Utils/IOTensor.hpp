@@ -40,6 +40,7 @@ class IOTensor {
                                         Qnn_Tensor_t **outputs,
                                         qnn_wrapper_api::GraphInfo_t graphInfo);
 
+#ifndef __hexagon__
   StatusCode writeOutputTensors(uint32_t graphIdx,
                                 size_t startIdx,
                                 char *graphName,
@@ -50,6 +51,7 @@ class IOTensor {
                                 std::string outputPath,
                                 size_t numInputFilesPopulated,
                                 size_t outputBatchSize);
+#endif
 
   PopulateInputTensorsRetType_t populateInputTensors(
       uint32_t graphIdx,
@@ -61,6 +63,7 @@ class IOTensor {
       qnn_wrapper_api::GraphInfo_t graphInfo,
       iotensor::InputDataType inputDataType);
 
+  // zw. Optimize performance.
   StatusCode populateInputTensors(uint32_t graphIdx,
                                   std::vector<uint8_t *> inputBuffers,
                                   Qnn_Tensor_t *inputs,
@@ -72,11 +75,13 @@ class IOTensor {
                                            size_t numInputTensors,
                                            size_t numOutputTensors);
 
+#ifndef __hexagon__
   StatusCode convertToFloat(float **out, Qnn_Tensor_t *output);		// zw: change it to public function.
+ #endif
  
   StatusCode fillDims(std::vector<size_t> &dims, uint32_t *inDimensions, uint32_t rank);	// zw: change it to public function.
 
-  StatusCode getTensorsSize(Qnn_Tensor_t** tensors, uint32_t tensorCount, Qnn_Tensor_t* tensorWrappers, std::vector<size_t>& size);
+  StatusCode getTensorsSize(Qnn_Tensor_t** tensors, uint32_t tensorCount, Qnn_Tensor_t* tensorWrappers, std::vector<size_t>& size);     // zw. Optimize performance.
 
  private:
   PopulateInputTensorsRetType_t populateInputTensor(const std::vector<std::string> &filePaths,
@@ -85,7 +90,7 @@ class IOTensor {
                                                     Qnn_Tensor_t *input,
                                                     InputDataType inputDataType);
 
-  StatusCode populateInputTensor(uint8_t *buffer, Qnn_Tensor_t *input, InputDataType inputDataType);
+  StatusCode populateInputTensor(uint8_t *buffer, Qnn_Tensor_t *input, InputDataType inputDataType);    // zw. Optimize performance.
 
   PopulateInputTensorsRetType_t readDataAndAllocateBuffer(const std::vector<std::string> &filePaths,
                                                           const size_t filePathsIndexOffset,
@@ -97,6 +102,7 @@ class IOTensor {
   template <typename T>
   StatusCode allocateBuffer(T **buffer, size_t &elementCount);
 
+#ifndef __hexagon__
   StatusCode convertAndWriteOutputTensorInFloat(Qnn_Tensor_t *output,
                                                 std::vector<std::string> outputPaths,
                                                 std::string fileName,
@@ -106,6 +112,7 @@ class IOTensor {
                                std::vector<std::string> outputPaths,
                                std::string fileName,
                                size_t outputBatchSize);
+#endif
 
   StatusCode allocateAndCopyBuffer(uint8_t **buffer, Qnn_Tensor_t *tensor);
 

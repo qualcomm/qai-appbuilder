@@ -9,11 +9,11 @@ https://github.com/quic/ai-engine-direct-helper/blob/main/Docs/User_Guide.md
 
 Copy the QNN libraries from QNN SDK to below path:
 ```
-C:\ai-hub\unet_segmentation\qnn\libQnnHtpV73Skel.so
-C:\ai-hub\unet_segmentation\qnn\QnnHtp.dll
-C:\ai-hub\unet_segmentation\qnn\QnnHtpV73Stub.dll
-C:\ai-hub\unet_segmentation\qnn\QnnSystem.dll
-C:\ai-hub\unet_segmentation\qnn\libqnnhtpv73.cat
+C:\ai-hub\unet_segmentation\qai_libs\libQnnHtpV73Skel.so
+C:\ai-hub\unet_segmentation\qai_libs\QnnHtp.dll
+C:\ai-hub\unet_segmentation\qai_libs\QnnHtpV73Stub.dll
+C:\ai-hub\unet_segmentation\qai_libs\QnnSystem.dll
+C:\ai-hub\unet_segmentation\qai_libs\libqnnhtpv73.cat
 ```
 
 ## unet_segmentation QNN models

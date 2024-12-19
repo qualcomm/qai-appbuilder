@@ -9,11 +9,11 @@ https://github.com/quic/ai-engine-direct-helper/blob/main/Docs/User_Guide.md
 
 Copy the QNN libraries from QNN SDK to below path:
 ```
-C:\ai-hub\openpose\qnn\libQnnHtpV73Skel.so
-C:\ai-hub\openpose\qnn\QnnHtp.dll
-C:\ai-hub\openpose\qnn\QnnHtpV73Stub.dll
-C:\ai-hub\openpose\qnn\QnnSystem.dll
-C:\ai-hub\openpose\qnn\libqnnhtpv73.cat
+C:\ai-hub\openpose\qai_libs\libQnnHtpV73Skel.so
+C:\ai-hub\openpose\qai_libs\QnnHtp.dll
+C:\ai-hub\openpose\qai_libs\QnnHtpV73Stub.dll
+C:\ai-hub\openpose\qai_libs\QnnSystem.dll
+C:\ai-hub\openpose\qai_libs\libqnnhtpv73.cat
 ```
 
 ## openpose QNN models

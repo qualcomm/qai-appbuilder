@@ -109,7 +109,7 @@ def Init():
     global unetsegmentation
 
     # Config AppBuilder environment.
-    QNNConfig.Config(os.getcwd() + "\\qnn", Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(os.getcwd() + "\\qai_libs", Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for UnetSegmentation objects.
     unetsegmentation_model = "models\\unet_segmentation.bin"

@@ -9,11 +9,11 @@ https://github.com/quic/ai-engine-direct-helper/blob/main/Docs/User_Guide.md
 
 Copy the QNN libraries from QNN SDK to below path:
 ```
-C:\ai-hub\yolov8_det\qnn\libQnnHtpV73Skel.so
-C:\ai-hub\yolov8_det\qnn\QnnHtp.dll
-C:\ai-hub\yolov8_det\qnn\QnnHtpV73Stub.dll
-C:\ai-hub\yolov8_det\qnn\QnnSystem.dll
-C:\ai-hub\yolov8_det\qnn\libqnnhtpv73.cat
+C:\ai-hub\yolov8_det\qai_libs\libQnnHtpV73Skel.so
+C:\ai-hub\yolov8_det\qai_libs\QnnHtp.dll
+C:\ai-hub\yolov8_det\qai_libs\QnnHtpV73Stub.dll
+C:\ai-hub\yolov8_det\qai_libs\QnnSystem.dll
+C:\ai-hub\yolov8_det\qai_libs\libqnnhtpv73.cat
 ```
 
 ## yolov8_det QNN models

@@ -30,15 +30,16 @@ QNN_DOWNLOAD_URL = "https://softwarecenter.qualcomm.com/#/catalog/item/a0844287-
 TEXT_RUN_SCRIPT_AGAIN = "Then run this Python script again."
 
 QNN_SDK_ROOT="C:\\Qualcomm\\AIStack\\QAIRT\\"
-HUB_ID="aac24f12d047e7f558d8effe4b2fdad0f5c2c341"
+HUB_ID_T="aac24f12d047e7f558d8effe4b2fdad0f5c2c341"
+HUB_ID_Q="a916bc04400e033f60fdd73c615e5780e2ba206a"
 QAI_HUB_CONFIG = os.path.join(Path.home(), ".qai_hub", "client.ini")
 QAI_HUB_CONFIG_BACKUP = os.path.join(Path.home(), ".qai_hub", "client.ini.bk")
 
 
-def setup_qai_hub():
+def setup_qai_hub(hub_id):
     if os.path.isfile(QAI_HUB_CONFIG):
         shutil.copy(QAI_HUB_CONFIG, QAI_HUB_CONFIG_BACKUP)
-    run_command(f"qai-hub.exe configure --api_token {HUB_ID} > NUL", False)
+    run_command(f"qai-hub.exe configure --api_token {hub_id} > NUL", False)
 
 
 def reset_qai_hub():
@@ -51,7 +52,7 @@ def is_file_exists(filepath):
         return True
     return False
 
-def download_qai_hubmodel(model_id, filepath, desc=None, fail=None):
+def download_qai_hubmodel(model_id, filepath, desc=None, fail=None, hub_id=HUB_ID_Q):
     ret = True
 
     if is_file_exists(filepath):
@@ -65,7 +66,7 @@ def download_qai_hubmodel(model_id, filepath, desc=None, fail=None):
     else:
         print(f"Downloading {os.path.basename(filepath)}...")
 
-    setup_qai_hub()
+    setup_qai_hub(hub_id)
     try:
         model = qai_hub.get_model(model_id)
         model.download(filename=filepath)
@@ -279,13 +280,13 @@ def is_installed(package):
         import importlib.metadata
         import importlib.util
         dist = importlib.metadata.distribution(package)
-    except importlib.metadata.PackageNotFoundError:
+    except importlib.metadata.PackageNotFoundError as e:
+        # print(e)
         try:
             spec = importlib.util.find_spec(package)
         except ModuleNotFoundError:
-            return False
-
-        return spec is not None
+            return None
+        return None
 
     return dist
 

@@ -14,9 +14,11 @@
 #include "DataUtil.hpp"
 #include "IOTensor.hpp"
 #include "Logger.hpp"
+#ifndef __hexagon__
 #include "PAL/Directory.hpp"
 #include "PAL/FileOp.hpp"
 #include "PAL/Path.hpp"
+#endif
 #include "PAL/StringOp.hpp"
 #include "QnnTypeMacros.hpp"
 
@@ -71,7 +73,7 @@ iotensor::StatusCode iotensor::IOTensor::copyFromFloatToNative(float* floatBuffe
   fillDims(dims, QNN_TENSOR_GET_DIMENSIONS(tensor), QNN_TENSOR_GET_RANK(tensor));
 
   switch (QNN_TENSOR_GET_DATA_TYPE(tensor)) {
-    case QNN_DATATYPE_FLOAT_16:
+    case QNN_DATATYPE_FLOAT_16:     // zw. Enabling fp16 execution
 #ifdef __hexagon__
       QNN_ERROR("failure in aiswutility::float32ToFloatN, not supported on Hexagon");
       returnStatus = StatusCode::FAILURE;
@@ -135,6 +137,17 @@ iotensor::StatusCode iotensor::IOTensor::copyFromFloatToNative(float* floatBuffe
       }
       break;
 
+    case QNN_DATATYPE_UINT_64:
+      if (datautil::StatusCode::SUCCESS !=
+          datautil::castFromFloat<uint64_t>(
+              static_cast<uint64_t*>(QNN_TENSOR_GET_CLIENT_BUF(tensor).data),
+              floatBuffer,
+              datautil::calculateElementCount(dims))) {
+        QNN_ERROR("failure in castFromFloat<uint64_t>");
+        returnStatus = StatusCode::FAILURE;
+      }
+      break;
+
     case QNN_DATATYPE_INT_8:
       if (datautil::StatusCode::SUCCESS !=
           datautil::castFromFloat<int8_t>(
@@ -164,6 +177,17 @@ iotensor::StatusCode iotensor::IOTensor::copyFromFloatToNative(float* floatBuffe
               floatBuffer,
               datautil::calculateElementCount(dims))) {
         QNN_ERROR("failure in castFromFloat<int32_t>");
+        returnStatus = StatusCode::FAILURE;
+      }
+      break;
+
+    case QNN_DATATYPE_INT_64:
+      if (datautil::StatusCode::SUCCESS !=
+          datautil::castFromFloat<int64_t>(
+              static_cast<int64_t*>(QNN_TENSOR_GET_CLIENT_BUF(tensor).data),
+              floatBuffer,
+              datautil::calculateElementCount(dims))) {
+        QNN_ERROR("failure in castFromFloat<int64_t>");
         returnStatus = StatusCode::FAILURE;
       }
       break;
@@ -314,6 +338,7 @@ iotensor::PopulateInputTensorsRetType_t iotensor::IOTensor::populateInputTensors
   return {StatusCode::SUCCESS, numFilesPopulated, numBatchSize};
 }
 
+// zw. Optimize performance.
 // Helper method to populate an input tensor in the graph during execution.
 // It relies on reading data from buffer provided during executeGraph() call.
 iotensor::StatusCode iotensor::IOTensor::populateInputTensor(
@@ -345,6 +370,7 @@ iotensor::StatusCode iotensor::IOTensor::populateInputTensor(
   return StatusCode::SUCCESS;
 }
 
+// zw. Optimize performance.
 // Helper method to populate all input tensors.
 iotensor::StatusCode iotensor::IOTensor::populateInputTensors(
     uint32_t graphIdx,
@@ -374,6 +400,7 @@ iotensor::StatusCode iotensor::IOTensor::populateInputTensors(
   return StatusCode::SUCCESS;
 }
 
+// zw. Optimize performance.
 iotensor::StatusCode iotensor::IOTensor::getTensorsSize(Qnn_Tensor_t** tensors, uint32_t tensorCount, Qnn_Tensor_t* tensorWrappers, std::vector<size_t>& size) {
   if (nullptr == tensorWrappers) {
     QNN_ERROR("tensorWrappers is nullptr");
@@ -542,7 +569,7 @@ iotensor::StatusCode iotensor::IOTensor::allocateBuffer(uint8_t** buffer,
   size_t elementCount = datautil::calculateElementCount(dims);
   auto returnStatus   = StatusCode::SUCCESS;
   switch (dataType) {
-    case QNN_DATATYPE_FLOAT_16:
+    case QNN_DATATYPE_FLOAT_16:     // zw. Enabling fp16 execution
     case QNN_DATATYPE_FLOAT_32:
       QNN_DEBUG("allocating float buffer");
       returnStatus = allocateBuffer<float>(reinterpret_cast<float**>(buffer), elementCount);
@@ -565,6 +592,11 @@ iotensor::StatusCode iotensor::IOTensor::allocateBuffer(uint8_t** buffer,
       returnStatus = allocateBuffer<uint32_t>(reinterpret_cast<uint32_t**>(buffer), elementCount);
       break;
 
+    case QNN_DATATYPE_UINT_64:
+      QNN_DEBUG("allocating uint64_t buffer");
+      returnStatus = allocateBuffer<uint64_t>(reinterpret_cast<uint64_t**>(buffer), elementCount);
+      break;
+
     case QNN_DATATYPE_INT_8:
       QNN_DEBUG("allocating int8_t buffer");
       returnStatus = allocateBuffer<int8_t>(reinterpret_cast<int8_t**>(buffer), elementCount);
@@ -578,6 +610,11 @@ iotensor::StatusCode iotensor::IOTensor::allocateBuffer(uint8_t** buffer,
     case QNN_DATATYPE_INT_32:
       QNN_DEBUG("allocating int32_t buffer");
       returnStatus = allocateBuffer<int32_t>(reinterpret_cast<int32_t**>(buffer), elementCount);
+      break;
+
+    case QNN_DATATYPE_INT_64:
+      QNN_DEBUG("allocating int64_t buffer");
+      returnStatus = allocateBuffer<int64_t>(reinterpret_cast<int64_t**>(buffer), elementCount);
       break;
 
     case QNN_DATATYPE_BOOL_8:
@@ -611,6 +648,7 @@ iotensor::StatusCode iotensor::IOTensor::allocateBuffer(T** buffer, size_t& elem
 // Convert data to float or de-quantization. This is used when
 // user requests for float output and the model produces
 // non-float output.
+#ifndef __hexagon__
 iotensor::StatusCode iotensor::IOTensor::convertToFloat(float** out, Qnn_Tensor_t* tensor) {
   if (nullptr == tensor) {
     QNN_ERROR("tensors is nullptr");
@@ -630,7 +668,7 @@ iotensor::StatusCode iotensor::IOTensor::convertToFloat(float** out, Qnn_Tensor_
     return returnStatus;
   }
   switch (QNN_TENSOR_GET_DATA_TYPE(tensor)) {
-    case QNN_DATATYPE_FLOAT_16:
+    case QNN_DATATYPE_FLOAT_16:     // zw. Enabling fp16 execution
       if (!datautil::floatNToFloat32(
               *out, reinterpret_cast<uint8_t*>(QNN_TENSOR_GET_CLIENT_BUF(tensor).data), elementCount, 16)) {
         QNN_ERROR("failure in aiswutility::floatNToFloat32");
@@ -697,6 +735,17 @@ iotensor::StatusCode iotensor::IOTensor::convertToFloat(float** out, Qnn_Tensor_
       }
       break;
 
+    case QNN_DATATYPE_UINT_64:
+      if (datautil::StatusCode::SUCCESS !=
+          datautil::castToFloat<uint64_t>(
+              *out,
+              reinterpret_cast<uint64_t*>(QNN_TENSOR_GET_CLIENT_BUF(tensor).data),
+              elementCount)) {
+        QNN_ERROR("failure in castToFloat<uint64_t>");
+        returnStatus = StatusCode::FAILURE;
+      }
+      break;
+
     case QNN_DATATYPE_INT_8:
       if (datautil::StatusCode::SUCCESS !=
           datautil::castToFloat<int8_t>(
@@ -726,6 +775,17 @@ iotensor::StatusCode iotensor::IOTensor::convertToFloat(float** out, Qnn_Tensor_
               reinterpret_cast<int32_t*>(QNN_TENSOR_GET_CLIENT_BUF(tensor).data),
               elementCount)) {
         QNN_ERROR("failure in castToFloat<int32_t>");
+        returnStatus = StatusCode::FAILURE;
+      }
+      break;
+
+    case QNN_DATATYPE_INT_64:
+      if (datautil::StatusCode::SUCCESS !=
+          datautil::castToFloat<int64_t>(
+              *out,
+              reinterpret_cast<int64_t*>(QNN_TENSOR_GET_CLIENT_BUF(tensor).data),
+              elementCount)) {
+        QNN_ERROR("failure in castToFloat<int64_t>");
         returnStatus = StatusCode::FAILURE;
       }
       break;
@@ -888,6 +948,7 @@ iotensor::StatusCode iotensor::IOTensor::writeOutputTensors(uint32_t graphIdx,
   }
   return returnStatus;
 }
+#endif
 
 // Helper method to allocate a buffer and copy data to it.
 iotensor::StatusCode iotensor::IOTensor::allocateAndCopyBuffer(uint8_t** buffer,

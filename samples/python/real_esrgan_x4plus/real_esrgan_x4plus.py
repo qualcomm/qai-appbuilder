@@ -3,10 +3,13 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
 
+import sys
 import os
+sys.path.append(".")
+sys.path.append("..")
+import utils.install as install
 import cv2
 import numpy as np
-
 import torch
 import torchvision.transforms as transforms
 from PIL import Image
@@ -16,17 +19,29 @@ from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfP
 
 ####################################################################
 
-execution_ws = os.getcwd()
-qnn_dir = execution_ws + "\\qnn"
+MODEL_ID = "m7qk01okn"
+MODEL_NAME = "real_esrgan_x4plus"
+MODEL_HELP_URL = "https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+IMAGE_SIZE = 512
 
-image_size = 512
+####################################################################
+
+execution_ws = os.getcwd()
+qnn_dir = execution_ws + "\\qai_libs"
+
+if not MODEL_NAME in execution_ws:
+    execution_ws = execution_ws + "\\" + MODEL_NAME
+
+model_dir = execution_ws + "\\models"
+madel_path = model_dir + "\\" + MODEL_NAME + ".bin"
+
 image_buffer = None
 realesrgan = None
 
 def preprocess_PIL_image(image: Image) -> torch.Tensor:
     """Convert a PIL image into a pyTorch tensor with range [0, 1] and shape NCHW."""
-    transform = transforms.Compose([transforms.Resize(image_size),      # bgr image
-                                    transforms.CenterCrop(image_size),
+    transform = transforms.Compose([transforms.Resize(IMAGE_SIZE),      # bgr image
+                                    transforms.CenterCrop(IMAGE_SIZE),
                                     transforms.PILToTensor()])
     img: torch.Tensor = transform(image)  # type: ignore
     img = img.float().unsqueeze(0) / 255.0  # int 0 - 255 to float 0.0 - 1.0
@@ -47,15 +62,26 @@ class RealESRGan(QNNContext):
         output_data = super().Inference(input_datas)[0]        
         return output_data
 
+def model_download():
+    ret = True
+
+    desc = f"Downloading {MODEL_NAME} model... "
+    fail = f"\nFailed to download {MODEL_NAME} model. Please prepare the model according to the steps in below link:\n{MODEL_HELP_URL}"
+    ret = install.download_qai_hubmodel(MODEL_ID, madel_path, desc=desc, fail=fail)
+
+    if not ret:
+        exit()
+
 def Init():
     global realesrgan
+
+    model_download()
 
     # Config AppBuilder environment.
     QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for RealESRGan objects.
-    realesrgan_model = "models\\realesrgan_x4_512.bin"
-    realesrgan = RealESRGan("realesrgan", realesrgan_model)
+    realesrgan = RealESRGan("realesrgan", madel_path)
 
 def Inference(input_image_path, output_image_path):
     global image_buffer
@@ -74,11 +100,12 @@ def Inference(input_image_path, output_image_path):
     PerfProfile.RelPerfProfileGlobal()
 
     output_image = torch.from_numpy(output_image)
-    output_image = output_image.reshape(3, image_size * 4, image_size * 4)
+    output_image = output_image.reshape(3, IMAGE_SIZE * 4, IMAGE_SIZE * 4)
     output_image = torch.unsqueeze(output_image, 0)
     output_image = [torch_tensor_to_PIL_image(img) for img in output_image]
     image_buffer = output_image[0]
     image_buffer.save(output_image_path)
+    image_buffer.show()
 
 def Release():
     global realesrgan
@@ -89,7 +116,7 @@ def Release():
 
 Init()
 
-Inference("input.png", "output.png")
+Inference(execution_ws + "\\input.png", execution_ws + "\\output.png")
 
 Release()
 

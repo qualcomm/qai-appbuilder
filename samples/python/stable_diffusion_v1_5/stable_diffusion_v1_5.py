@@ -307,7 +307,7 @@ def model_download():
 
     desc = "Downloading timestep_embedding model... "
     fail = "\nFailed to download timestep_embedding model. Please prepare the timestep_embedding data according to the guide below:\n" + TIMESTEP_HTLP_URL + "\n"
-    ret = install.download_qai_hubmodel(TIMESTEP_EMBEDDING_MODEL_ID, time_embedding_model_path, desc=desc, fail=fail)
+    ret = install.download_qai_hubmodel(TIMESTEP_EMBEDDING_MODEL_ID, time_embedding_model_path, desc=desc, fail=fail, hub_id=install.HUB_ID_T)
 
     if not ret:
         if not os.path.exists(time_embedding_dir):  # There is no timestep_embedding data, exit process.
