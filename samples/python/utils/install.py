@@ -124,7 +124,7 @@ class tqdmWget(tqdm):
 def download_url_pywget(url, filepath, desc=None, fail=None):
     ret = True
 
-    # Disable warning for insecure request since we set 'verify=False'.
+    # Create an unverified SSLContext - a context with disables all certificate verification.
     import ssl
     ssl._create_default_https_context = ssl._create_unverified_context
 

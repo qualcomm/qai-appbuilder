@@ -10,15 +10,13 @@ import os
 import sys
 import functools
 import time
-import platform
 from qai_appbuilder import appbuilder
 
-machine = platform.machine()
 QNN_SYSTEM_LIB = "QnnSystem.dll"
 QNN_LIB_EXT = ".dll"
 QNN_LIB_PRE = ""
 PATH_SLASH = "\\"
-if machine == "aarch64": # linux
+if sys.platform.startswith('linux'):
     QNN_SYSTEM_LIB = "libQnnSystem.so"
     QNN_LIB_EXT = ".so"
     QNN_LIB_PRE = "lib"
