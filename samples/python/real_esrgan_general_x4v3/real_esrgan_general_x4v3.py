@@ -117,7 +117,7 @@ def Release():
 
 Init()
 
-Inference(execution_ws + "\\input.png", execution_ws + "\\output.png")
+Inference(execution_ws + "\\input.jpg", execution_ws + "\\output.jpg")
 
 Release()
 

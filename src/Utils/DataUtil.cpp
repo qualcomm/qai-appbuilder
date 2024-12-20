@@ -12,7 +12,9 @@
 #include <iostream>
 #include <numeric>
 #include <queue>
+#ifdef _WIN32
 #include <intrin.h>
+#endif
 #include "DataUtil.hpp"
 #include "Logger.hpp"
 #ifndef __hexagon__

@@ -76,11 +76,17 @@ PYBIND11_MODULE(appbuilder, m) {
     m.attr("__license__") = "BSD-3-Clause";
 
     m.def("model_initialize", &initialize, "Initialize models.");
+#ifdef _WIN32
     m.def("model_initialize", &initialize_P, "Initialize models.");
+#endif
     m.def("model_inference", &inference, "Inference models.");
+#ifdef _WIN32
     m.def("model_inference", &inference_P, "Inference models.");
+#endif
     m.def("model_destroy", &destroy, "Destroy models.");
+#ifdef _WIN32
     m.def("model_destroy", &destroy_P, "Destroy models.");
+#endif
     m.def("memory_create", &create_memory, "Create share memory.");
     m.def("memory_delete", &delete_memory, "Delete share memory.");
     m.def("set_log_level", &set_log_level, "Set QNN log level.");
