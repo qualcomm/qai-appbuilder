@@ -84,7 +84,7 @@ def download_qai_hubmodel(model_id, filepath, desc=None, fail=None, hub_id=HUB_I
     return ret
 
 
-def verify_package(url, filepath, desc=None, fail=None):
+def verify_package(url, filepath, filesize, desc=None, fail=None):
      # verify if package is ready.
      #  1. package exists.
      #  2. package size is correct.
@@ -92,11 +92,16 @@ def verify_package(url, filepath, desc=None, fail=None):
     is_continue = False
 
     if os.path.exists(filepath):
-        response = request.urlopen(url)
-        remote_size = int(response.headers["Content-Length"])
         local_size = os.path.getsize(filepath)
+        actual_size = 0
 
-        if remote_size == local_size:   # file is ready for using.
+        if filesize is not None:
+            actual_size = filesize
+        else:
+            response = request.urlopen(url)
+            actual_size = int(response.headers["Content-Length"])
+
+        if actual_size == local_size:   # file is ready for using.
             # print(f"{filepath} is ready for using.")
             return True
         else:
@@ -121,14 +126,14 @@ class tqdmWget(tqdm):
         self.update((block_num - self.last_block) * block_size)
         self.last_block = block_num
 
-def download_url_pywget(url, filepath, desc=None, fail=None):
+def download_url_pywget(url, filepath, filesize=None, desc=None, fail=None):
     ret = True
 
     # Create an unverified SSLContext - a context with disables all certificate verification.
     import ssl
     ssl._create_default_https_context = ssl._create_unverified_context
 
-    if verify_package(url, filepath):
+    if verify_package(url, filepath, filesize):
         return ret
 
     path = os.path.dirname(filepath)
@@ -155,14 +160,14 @@ def download_url_pywget(url, filepath, desc=None, fail=None):
     return ret
 
 
-def download_url_requests(url, filepath, desc=None, fail=None, chunk_size=8192):
+def download_url_requests(url, filepath, filesize=None, desc=None, fail=None, chunk_size=8192):
     ret = True
 
     # Disable warning for insecure request since we set 'verify=False'.
     from requests.packages.urllib3.exceptions import InsecureRequestWarning
     requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-    if verify_package(url, filepath):
+    if verify_package(url, filepath, filesize):
         return ret
 
     path = os.path.dirname(filepath)
@@ -194,10 +199,10 @@ def download_url_requests(url, filepath, desc=None, fail=None, chunk_size=8192):
     return ret
 
 
-def download_url_wget(url, filepath, desc=None, fail=None):
+def download_url_wget(url, filepath, filesize=None, desc=None, fail=None):
     ret = True
 
-    if verify_package(url, filepath):
+    if verify_package(url, filepath, filesize):
         return ret
 
     if fail is None:

@@ -7,6 +7,7 @@ import os
 sys.path.append(".")
 sys.path.append("..")
 os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = "1"  # Disable 'cache-system uses symlinks' warning.
+os.environ['HF_ENDPOINT'] = "https://hf-api.gitee.com"
 import utils.install as install
 import time
 from PIL import Image
@@ -23,6 +24,7 @@ from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfP
 
 
 ####################################################################
+
 MODEL_NAME                  = "stable_diffusion_v1_5"
 TEXT_ENCODER_MODEL_LINK     = MODEL_NAME + "_quantized/v1/QNN224/text_encoder.serialized.bin"
 UNET_MODEL_LINK             = MODEL_NAME + "_quantized/v1/QNN224/unet.serialized.bin"
@@ -30,6 +32,11 @@ VAE_DECODER_MODEL_LINK      = MODEL_NAME + "_quantized/v1/QNN224/vae_decoder.ser
 TEXT_ENCODER_MODEL_NAME     = MODEL_NAME + "_quantized-textencoder_quantized.bin"
 UNET_MODEL_NAME             = MODEL_NAME + "_quantized-unet_quantized.bin"
 VAE_DECODER_MODEL_NAME      = MODEL_NAME + "_quantized-vaedecoder_quantized.bin"
+
+TEXT_ENCODER_MODEL_SIZE     = 163275152
+UNET_MODEL_SIZE             = 878473240
+VAE_DECODER_MODEL_SIZE      = 59072424
+
 TIMESTEP_EMBEDDING_MODEL_ID = "m7mrzdgxn"
 TOKENIZER_MODEL_NAME        = "openai/clip-vit-large-patch14"
 TOKENIZER_HELP_URL          = "https://github.com/quic/ai-engine-direct-helper/blob/main/samples/python/" + MODEL_NAME + "/README.md#clip-vit-l14-model"
@@ -119,6 +126,8 @@ def model_initialize():
     try:
         if os.path.exists(tokenizer_dir) and not os.path.exists(tokenizer_dir + "\\.locks") :
             tokenizer = CLIPTokenizer.from_pretrained(tokenizer_dir, local_files_only=True)
+        elif os.path.exists(tokenizer_dir):     # Speed up the model loading if the model is ready. Avoiding to check it through network.
+            tokenizer = CLIPTokenizer.from_pretrained(TOKENIZER_MODEL_NAME, cache_dir=tokenizer_dir, local_files_only=True)
         else:
             tokenizer = CLIPTokenizer.from_pretrained(TOKENIZER_MODEL_NAME, cache_dir=tokenizer_dir)
     except Exception as e:
@@ -301,9 +310,9 @@ def model_download():
     unet_model_url =         "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/" + UNET_MODEL_LINK
     vae_decoder_model_url =  "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/" + VAE_DECODER_MODEL_LINK
 
-    ret = install.download_url(text_encoder_model_url, text_encoder_model_path)
-    ret = install.download_url(unet_model_url, unet_model_path)
-    ret = install.download_url(vae_decoder_model_url, vae_decoder_model_path)
+    ret = install.download_url(text_encoder_model_url, text_encoder_model_path, TEXT_ENCODER_MODEL_SIZE)
+    ret = install.download_url(unet_model_url, unet_model_path, UNET_MODEL_SIZE)
+    ret = install.download_url(vae_decoder_model_url, vae_decoder_model_path, VAE_DECODER_MODEL_SIZE)
 
     desc = "Downloading timestep_embedding model... "
     fail = "\nFailed to download timestep_embedding model. Please prepare the timestep_embedding data according to the guide below:\n" + TIMESTEP_HTLP_URL + "\n"
