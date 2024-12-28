@@ -55,14 +55,14 @@ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MD /O2 /Ob2")
 endif()
 
 target_include_directories(${APP} PUBLIC CachingUtil
-                                           Log
-                                           PAL/include
-                                           Utils
-                                           WrapperUtils
-                                           ${CMAKE_BINARY_DIR}
-                                           $ENV{QNN_SDK_ROOT}/include/QNN
-                                           SVC
-                                           ./)
+                                         Log
+                                         PAL/include
+                                         Utils
+                                         WrapperUtils
+                                         ${CMAKE_BINARY_DIR}
+                                         $ENV{QNN_SDK_ROOT}/include/QNN
+                                         SVC
+                                         ./)
 if (WIN32)
 add_subdirectory(SVC)
 endif()

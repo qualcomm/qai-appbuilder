@@ -39,8 +39,13 @@ dynamicloadutil::StatusCode dynamicloadutil::getQnnFunctionPointers(
     void** backendHandleRtn,
     bool loadModelLib,
     void** modelHandleRtn) {
+#if defined(__ANDROID__)
+  void* libBackendHandle = pal::dynamicloading::dlOpen(
+      backendPath.c_str(), pal::dynamicloading::DL_NOW | pal::dynamicloading::DL_LOCAL);
+#else
   void* libBackendHandle = pal::dynamicloading::dlOpen(
       backendPath.c_str(), pal::dynamicloading::DL_NOW | pal::dynamicloading::DL_GLOBAL);
+#endif
   if (nullptr == libBackendHandle) {
     QNN_ERROR("Unable to load backend. pal::dynamicloading::dlError(): %s",
               pal::dynamicloading::dlError());

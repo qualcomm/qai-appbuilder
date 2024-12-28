@@ -264,10 +264,12 @@ std::string sample_app::QnnSampleApp::getBackendBuildId() {
 //      during creation.
 sample_app::StatusCode sample_app::QnnSampleApp::initialize() {
   // Create Output Directory
+#ifndef __hexagon__
   if (m_dumpOutputs && !::pal::FileOp::checkFileExists(m_outputPath) &&
       !pal::Directory::makePath(m_outputPath)) {
     exitWithMessage("Could not create output directory: " + m_outputPath, EXIT_FAILURE);
   }
+#endif
   // Read Input File List
   bool readSuccess;
   std::tie(m_inputFileLists, m_inputNameToIndex, readSuccess) = readInputLists(m_inputListPaths);
@@ -387,11 +389,11 @@ sample_app::StatusCode sample_app::QnnSampleApp::registerOpPackages() {
 
 // Create a Context in a backend.
 sample_app::StatusCode sample_app::QnnSampleApp::createContext() {
-  if (QNN_CONTEXT_NO_ERROR != m_qnnFunctionPointers.qnnInterface.contextCreate(
-                                  m_backendHandle,
-                                  m_deviceHandle,
-                                  (const QnnContext_Config_t**)m_contextConfig,
-                                  &m_context)) {
+  if (QNN_CONTEXT_NO_ERROR !=
+      m_qnnFunctionPointers.qnnInterface.contextCreate(m_backendHandle,
+                                                       m_deviceHandle,
+                                                       (const QnnContext_Config_t**)m_contextConfig,
+                                                       &m_context)) {
     QNN_ERROR("Could not create context");
     return StatusCode::FAILURE;
   }
@@ -406,6 +408,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::freeContext() {
     QNN_ERROR("Could not free context");
     return StatusCode::FAILURE;
   }
+
   if (ProfilingLevel::OFF != m_profilingLevel) {
     extractBackendProfilingInfo(m_profileBackendHandle);
   }
@@ -604,12 +607,14 @@ sample_app::StatusCode sample_app::QnnSampleApp::saveBinary() {
         requiredBufferSize);
     return StatusCode::FAILURE;
   }
+#ifndef __hexagon__
   auto dataUtilStatus = tools::datautil::writeBinaryToFile(
       m_outputPath, m_saveBinaryName + ".bin", (uint8_t*)saveBuffer.get(), writtenBufferSize);
   if (tools::datautil::StatusCode::SUCCESS != dataUtilStatus) {
     QNN_ERROR("Error while writing binary to file.");
     return StatusCode::FAILURE;
   }
+#endif
   return StatusCode::SUCCESS;
 }
 
@@ -783,6 +788,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphs() {
           }
           if (StatusCode::SUCCESS == returnStatus) {
             QNN_DEBUG("Successfully executed graphIdx: %d ", graphIdx);
+#ifndef __hexagon__
             if (iotensor::StatusCode::SUCCESS !=
                 m_ioTensor.writeOutputTensors(graphIdx,
                                               inputFileIndexOffset,
@@ -796,6 +802,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphs() {
                                               batchSize)) {
               returnStatus = StatusCode::FAILURE;
             }
+#endif
           }
           inputFileIndexOffset += numInputFilesPopulated;
         }
