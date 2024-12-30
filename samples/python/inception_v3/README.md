@@ -5,7 +5,7 @@ This is sample code for using AppBuilder to load inception_v3 QNN model to HTP a
 It can also be used as a backbone in building more complex models for specific use cases.
 
 ## Setup AppBuilder environment and prepare QNN SDK libraries by referring to the links below: 
-https://github.com/quic/ai-engine-direct-helper/blob/main/README.md
+https://github.com/quic/ai-engine-direct-helper/blob/main/README.md <br>
 https://github.com/quic/ai-engine-direct-helper/blob/main/Docs/User_Guide.md
 
 Copy the QNN libraries from QNN SDK to below path:

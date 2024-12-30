@@ -57,5 +57,8 @@ python stable_diffusion_v2_1\stable_diffusion_v2_1.py --prompt "spectacular view
 | riffusion  | 2.24 | python riffusion\riffusion.py --prompt "the prompt string ..." |
 | real_esrgan_x4plus  | 2.28 | python real_esrgan_x4plus\real_esrgan_x4plus.py |
 | real_esrgan_general_x4v3  | 2.28 | python real_esrgan_general_x4v3\real_esrgan_general_x4v3.py |
+| inception_v3  | 2.28 | python inception_v3\inception_v3.py |
+| yolov8_det  | 2.28 | python yolov8_det\yolov8_det.py |
+| unet_segmentation  | 2.28 | python unet_segmentation\unet_segmentation.py |
 
 *More models will be supported soon!*

@@ -21,8 +21,9 @@ qnn_sdk_version =  {
     "2.28": "2.28.0.241029",
 }
 
-DSP_ARCH = "73"  # For X-Elite device.
-QNN_LIBS_DIR = "qai_libs"
+DEFAULT_DSP_ARCH    = "73"  # For X-Elite device.
+DEFAULT_LIB_VERSION = "arm64x-windows-msvc" # "aarch64-windows-msvc" # For X-Elite device.
+QNN_LIBS_DIR        = "qai_libs"
 
 QNN_SDK_URL = "https://softwarecenter.qualcomm.com/api/download/software/qualcomm_neural_processing_sdk/"
 QAI_APPBUILDER_WHEEL = "https://github.com/quic/ai-engine-direct-helper/releases/download/vversion.0/qai_appbuilder-version.0-cp312-cp312-win_amd64.whl"
@@ -211,7 +212,9 @@ def download_url_wget(url, filepath, filesize=None, desc=None, fail=None):
 
     path = os.path.dirname(filepath)
     name = os.path.basename(filepath)
-    os.makedirs(path, exist_ok=True)
+
+    if len(path) > 0:
+        os.makedirs(path, exist_ok=True)
 
     try:
         wget_exe_path = "tools\\wget\\wget.exe"
@@ -300,18 +303,19 @@ def run_pip(command, desc=None, live=False):
     python = sys.executable
     return run(f'"{python}" -m pip {command} ', desc=f"Installing {desc}", errdesc=f"Couldn't install {desc}", live=live)
 
+
 def run_uninstall_pip(command, desc=None, live=False):
     python = sys.executable
     return run(f'"{python}" -m pip {command} ', desc=f"Uninstalling {desc}", errdesc=f"Couldn't install {desc}", live=live)
 
 
-def setup_qai_env(version):
+def setup_qai_env(version, lib_version = DEFAULT_LIB_VERSION, dsp_arch = DEFAULT_DSP_ARCH,):
     if version in qnn_sdk_version:
         full_version = qnn_sdk_version[version]
         qnn_root_path = QNN_SDK_ROOT + full_version
 
-        SDK_lib_dir = qnn_root_path + "\\lib\\arm64x-windows-msvc"
-        SDK_hexagon_dir = qnn_root_path + "\\lib\\hexagon-v{}\\unsigned".format(DSP_ARCH)
+        SDK_lib_dir = qnn_root_path + "\\lib\\" + lib_version
+        SDK_hexagon_dir = qnn_root_path + "\\lib\\hexagon-v{}\\unsigned".format(dsp_arch)
 
         os.makedirs(QNN_LIBS_DIR, exist_ok=True)
 
@@ -319,11 +323,11 @@ def setup_qai_env(version):
             "QnnHtp.dll",
             "QnnSystem.dll",
             "QnnHtpPrepare.dll",
-            "QnnHtpV{}Stub.dll".format(DSP_ARCH),
+            "QnnHtpV{}Stub.dll".format(dsp_arch),
         ]
 
         hexagon_libs = [
-            "libQnnHtpV{}Skel.so".format(DSP_ARCH),
+            "libQnnHtpV{}Skel.so".format(dsp_arch),
             "libqnnhtpv73.cat",
         ]
 
@@ -419,9 +423,12 @@ def install_qai_sdk(version):
         return None
 
 
-def install_qai_appbuilder(version):
+def install_qai_appbuilder(version, lib_version):
     if version in qnn_sdk_version:
         qai_appbuilder_wheel = QAI_APPBUILDER_WHEEL.replace("version", version)
+        if lib_version == "aarch64-windows-msvc":
+            qai_appbuilder_wheel = qai_appbuilder_wheel.replace("win_amd64", "win_arm64")
+
         dist = is_installed("qai_appbuilder")
         version_install = version + ".0"
 

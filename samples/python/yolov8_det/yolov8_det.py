@@ -3,21 +3,46 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
 
+import sys
 import os
+sys.path.append(".")
+sys.path.append("..")
+import utils.install as install
 import cv2
 import numpy as np
 import torch
-from torch.nn.functional import interpolate, pad
-from torchvision.ops import nms # nms from torch is not avaliable
 import torchvision.transforms as transforms
 from PIL import Image
 from PIL.Image import fromarray as ImageFromArray
+from torch.nn.functional import interpolate, pad
+from torchvision.ops import nms
 from typing import List, Tuple, Optional, Union, Callable
 from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig)
 
+####################################################################
+
+MODEL_ID = "mqp35e9lm"
+MODEL_NAME = "yolov8_det"
+MODEL_HELP_URL = "https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+IMAGE_SIZE = 640
+
+####################################################################
+
+execution_ws = os.getcwd()
+qnn_dir = execution_ws + "\\qai_libs"
+
+if not MODEL_NAME in execution_ws:
+    execution_ws = execution_ws + "\\" + MODEL_NAME
+
+model_dir = execution_ws + "\\models"
+madel_path = model_dir + "\\" + MODEL_NAME + ".bin"
+
+####################################################################
+
+yolov8 = None
+
 nms_score_threshold: float = 0.45
 nms_iou_threshold: float = 0.7
-yolov8 = None
 
 # define class type
 class_map = {
@@ -118,47 +143,6 @@ def torch_tensor_to_PIL_image(data: torch.Tensor) -> Image:
     np_out = (out.permute(1, 2, 0).detach().numpy() * 255).astype(np.uint8)
     return ImageFromArray(np_out)
 
-def custom_nms(boxes, scores, iou_threshold):
-    '''
-    self definition of nms function cause nms from torch is not avaliable on this device without cuda
-    '''
-    
-    if len(boxes) == 0:
-        return torch.empty((0,), dtype=torch.int64)
-    
-    # transfer to numpy array
-    boxes_np = boxes.cpu().numpy()
-    scores_np = scores.cpu().numpy()
-
-    # get the coor of boxes
-    x1 = boxes_np[:, 0]
-    y1 = boxes_np[:, 1]
-    x2 = boxes_np[:, 2]
-    y2 = boxes_np[:, 3]
-
-    # compute the area of each single boxes
-    areas = (x2 - x1 + 1) * (y2 - y1 + 1)
-    order = scores_np.argsort()[::-1]
-
-    keep = []
-    while order.size > 0:
-        i = order[0]
-        keep.append(i)
-        xx1 = np.maximum(x1[i], x1[order[1:]])
-        yy1 = np.maximum(y1[i], y1[order[1:]])
-        xx2 = np.minimum(x2[i], x2[order[1:]])
-        yy2 = np.minimum(y2[i], y2[order[1:]])
-
-        w = np.maximum(0.0, xx2 - xx1 + 1)
-        h = np.maximum(0.0, yy2 - yy1 + 1)
-        inter = w * h
-        ovr = inter / (areas[i] + areas[order[1:]] - inter)
-
-        inds = np.where(ovr <= iou_threshold)[0]
-        order = order[inds + 1]
-
-    return torch.tensor(keep, dtype=torch.int64)
-
 def batched_nms(
     iou_threshold: float,
     score_threshold: float,
@@ -218,7 +202,7 @@ def batched_nms(
         )
 
         if len(batch_scores > 0):
-            nms_indices = custom_nms(batch_boxes[..., :4], batch_scores, iou_threshold)
+            nms_indices = nms(batch_boxes[..., :4], batch_scores, iou_threshold)
             batch_boxes = batch_boxes[nms_indices]
             batch_scores = batch_scores[nms_indices]
             batch_args = [arg[nms_indices] for arg in batch_args]
@@ -284,24 +268,35 @@ class YoloV8(QNNContext):
         output_data = super().Inference(input_datas)    
         return output_data
 
+def model_download():
+    ret = True
+
+    desc = f"Downloading {MODEL_NAME} model... "
+    fail = f"\nFailed to download {MODEL_NAME} model. Please prepare the model according to the steps in below link:\n{MODEL_HELP_URL}"
+    ret = install.download_qai_hubmodel(MODEL_ID, madel_path, desc=desc, fail=fail)
+
+    if not ret:
+        exit()
+
 def Init():
     global yolov8
+
+    model_download()
 
     # Config AppBuilder environment.
     QNNConfig.Config(os.getcwd() + "\\qai_libs", Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for YoloV8 objects.
-    yolov8_model = "models\\yolov8_det.bin"
-    yolov8 = YoloV8("yolov8", yolov8_model)
+    yolov8 = YoloV8("yolov8", madel_path)
 
 def Inference(input_image_path, output_image_path):
     global image_buffer, nms_iou_threshold, nms_score_threshold
 
     # Read and preprocess the image.
     image = Image.open(input_image_path)
-    image = image.resize((640, 640))
+    image = image.resize((IMAGE_SIZE, IMAGE_SIZE))
     outputImg = Image.open(input_image_path)
-    outputImg = outputImg.resize((640, 640))
+    outputImg = outputImg.resize((IMAGE_SIZE, IMAGE_SIZE))
     image = preprocess_PIL_image(image) # transfer raw image to torch tensor format
     image  = image.permute(0, 2, 3, 1)
     image = image.numpy()
@@ -313,6 +308,7 @@ def Inference(input_image_path, output_image_path):
 
     # Run the inference.
     model_output = yolov8.Inference([image])
+
     pred_boxes = torch.tensor(model_output[0].reshape(1, -1, 4))
     pred_scores = torch.tensor(model_output[1].reshape(1, -1))
     pred_class_idx = torch.tensor(model_output[2].reshape(1, -1))
@@ -328,7 +324,7 @@ def Inference(input_image_path, output_image_path):
         pred_scores,
         pred_class_idx,
     )
-    
+
     # Add boxes to each batch
     for batch_idx in range(len(pred_boxes)):
         pred_boxes_batch = pred_boxes[batch_idx]
@@ -361,6 +357,7 @@ def Release():
 
 Init()
 
-Inference("input.jpg", "output.jpg")
+Inference(execution_ws + "\\input.jpg", execution_ws + "\\output.jpg")
 
 Release()
+
