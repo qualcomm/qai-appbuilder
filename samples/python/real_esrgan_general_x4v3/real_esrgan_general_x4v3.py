@@ -102,6 +102,7 @@ def Inference(input_image_path, output_image_path):
     # Reset the HTP.
     PerfProfile.RelPerfProfileGlobal()
 
+    # show & save the result
     output_image = torch.from_numpy(output_image)
     output_image = output_image.reshape(IMAGE_SIZE * 4, IMAGE_SIZE * 4, 3)
     output_image = torch.unsqueeze(output_image, 0)

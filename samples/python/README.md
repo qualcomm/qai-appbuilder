@@ -18,7 +18,7 @@ Download and install [git](https://github.com/dennisameling/git/releases/downloa
 ### Step 2: Install basic Python dependencies:
 Run below commands in Windows terminal:
 ```
-pip install requests wget tqdm importlib-metadata qai-hub qai_hub_models huggingface_hub Pillow numpy opencv-python torch torchvision torchaudio transformers diffusers
+pip install requests wget tqdm importlib-metadata qai-hub qai_hub_models huggingface_hub Pillow numpy opencv-python torch torchvision torchaudio transformers diffusers ultralytics==8.0.193
 ```
 
 ### Step 3: Download QAI AppBuilder repository:
@@ -60,5 +60,8 @@ python stable_diffusion_v2_1\stable_diffusion_v2_1.py --prompt "spectacular view
 | inception_v3  | 2.28 | python inception_v3\inception_v3.py |
 | yolov8_det  | 2.28 | python yolov8_det\yolov8_det.py |
 | unet_segmentation  | 2.28 | python unet_segmentation\unet_segmentation.py |
+| openpose  | 2.28 | python openpose\openpose.py |
+| lama_dilated  | 2.28 | python lama_dilated\lama_dilated.py |
+| aotgan  | 2.28 | python aotgan\aotgan.py |
 
 *More models will be supported soon!*

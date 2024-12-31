@@ -3,136 +3,50 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
 
+import sys
 import os
+sys.path.append(".")
+sys.path.append("..")
+import utils.install as install
 import numpy as np
 import math
-import torch
-import PIL
-import torchvision.transforms as transforms
-
-from PIL import Image
+from PIL import Image, ImageDraw
 from PIL.Image import fromarray as ImageFromArray
+import torch
 import torch.nn.functional as F
 from torch.nn.functional import interpolate, pad
 from torchvision import transforms
-from typing import Callable, Dict, List, Tuple
-from scipy.ndimage.filters import gaussian_filter
-
+from scipy.ndimage import gaussian_filter
+from typing import Tuple
+from utils.image_processing import (
+    preprocess_PIL_image,
+    torch_tensor_to_PIL_image,
+    pil_resize_pad,
+    pil_undo_resize_pad
+)
 from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig)
 
+####################################################################
+
+MODEL_ID = "mqv65e1xm"
+MODEL_NAME = "openpose"
+MODEL_HELP_URL = "https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+IMAGE_SIZE = 224
+
+####################################################################
+
+execution_ws = os.getcwd()
+qnn_dir = execution_ws + "\\qai_libs"
+
+if not MODEL_NAME in execution_ws:
+    execution_ws = execution_ws + "\\" + MODEL_NAME
+
+model_dir = execution_ws + "\\models"
+madel_path = model_dir + "\\" + MODEL_NAME + ".bin"
+
+####################################################################
+
 openpose = None
-
-
-def preprocess_PIL_image(image: Image) -> torch.Tensor:
-    """Convert a PIL image into a pyTorch tensor with range [0, 1] and shape NCHW."""
-    transform = transforms.Compose([transforms.PILToTensor()])  # bgr image
-    img: torch.Tensor = transform(image)  # type: ignore
-    img = img.unsqueeze(0) / 255.0  # int 0 - 255 to float 0.0 - 1.0
-    return img
-
-def torch_tensor_to_PIL_image(data: torch.Tensor) -> Image:
-    """
-    Convert a Torch tensor (dtype float32) with range [0, 1] and shape CHW into PIL image CHW
-    """
-    out = torch.clip(data, min=0.0, max=1.0)
-    np_out = (out.permute(1, 2, 0).detach().numpy() * 255).astype(np.uint8)
-    return ImageFromArray(np_out)
-
-def resize_pad(image: torch.Tensor, dst_size: Tuple[int, int]):
-    """
-    Resize and pad image to be shape [..., dst_size[0], dst_size[1]]
-
-    Parameters:
-        image: (..., H, W)
-            Image to reshape.
-
-        dst_size: (height, width)
-            Size to which the image should be reshaped.
-
-    Returns:
-        rescaled_padded_image: torch.Tensor (..., dst_size[0], dst_size[1])
-        scale: scale factor between original image and dst_size image, (w, h)
-        pad: pixels of padding added to the rescaled image: (left_padding, top_padding)
-
-    Based on https://github.com/zmurez/MediaPipePyTorch/blob/master/blazebase.py
-    """
-    height, width = image.shape[-2:]
-    dst_frame_height, dst_frame_width = dst_size
-
-    h_ratio = dst_frame_height / height
-    w_ratio = dst_frame_width / width
-    scale = min(h_ratio, w_ratio)
-    if h_ratio < w_ratio:
-        scale = h_ratio
-        new_height = dst_frame_height
-        new_width = math.floor(width * scale)
-    else:
-        scale = w_ratio
-        new_height = math.floor(height * scale)
-        new_width = dst_frame_width
-
-    new_height = math.floor(height * scale)
-    new_width = math.floor(width * scale)
-    pad_h = dst_frame_height - new_height
-    pad_w = dst_frame_width - new_width
-
-    pad_top = int(pad_h // 2)
-    pad_bottom = int(pad_h // 2 + pad_h % 2)
-    pad_left = int(pad_w // 2)
-    pad_right = int(pad_w // 2 + pad_w % 2)
-
-    rescaled_image = interpolate(
-        image, size=[int(new_height), int(new_width)], mode="bilinear"
-    )
-    rescaled_padded_image = pad(
-        rescaled_image, (pad_left, pad_right, pad_top, pad_bottom)
-    )
-    padding = (pad_left, pad_top)
-
-    return rescaled_padded_image, scale, padding
-
-def undo_resize_pad(
-    image: torch.Tensor,
-    orig_size_wh: Tuple[int, int],
-    scale: float,
-    padding: Tuple[int, int],
-):
-    """
-    Undos the efffect of resize_pad. Instead of scale, the original size
-    (in order width, height) is provided to prevent an off-by-one size.
-    """
-    width, height = orig_size_wh
-
-    rescaled_image = interpolate(image, scale_factor=1 / scale, mode="bilinear")
-
-    scaled_padding = [int(round(padding[0] / scale)), int(round(padding[1] / scale))]
-
-    cropped_image = rescaled_image[
-        ...,
-        scaled_padding[1] : scaled_padding[1] + height,
-        scaled_padding[0] : scaled_padding[0] + width,
-    ]
-
-    return cropped_image
-
-def pil_resize_pad(
-    image: Image, dst_size: Tuple[int, int]
-) -> Tuple[Image, float, Tuple[int, int]]:
-    torch_image = preprocess_PIL_image(image)
-    torch_out_image, scale, padding = resize_pad(
-        torch_image,
-        dst_size,
-    )
-    pil_out_image = torch_tensor_to_PIL_image(torch_out_image[0])
-    return (pil_out_image, scale, padding)
-
-def pil_undo_resize_pad(
-    image: Image, orig_size_wh: Tuple[int, int], scale: float, padding: Tuple[int, int]
-) -> Image:
-    torch_image = preprocess_PIL_image(image)
-    torch_out_image = undo_resize_pad(torch_image, orig_size_wh, scale, padding)
-    pil_out_image = torch_tensor_to_PIL_image(torch_out_image[0])
-    return pil_out_image
 
 def getKeypointsFromPredictions(
     paf: torch.Tensor, heatmap: torch.Tensor, h, w
@@ -397,10 +311,9 @@ def getKeypointsFromPredictions(
     # candidate: x, y, score, id
     return candidate, subset
 
-
 def draw_keypoints(image: Image, keypoints: np.ndarray, radius=1, alpha=1.0):
     overlay = image.copy()
-    draw = PIL.ImageDraw.Draw(overlay)
+    draw = ImageDraw.Draw(overlay)
     confidence_threshold = 0.8
     for kp in keypoints:
         x, y, v, i = kp
@@ -414,7 +327,8 @@ def draw_keypoints(image: Image, keypoints: np.ndarray, radius=1, alpha=1.0):
                 fill=(0, 255, 0),
             )
 
-    return PIL.Image.blend(overlay, image, alpha)
+    return Image.blend(overlay, image, alpha)
+
 
 # OpenPose class which inherited from the class QNNContext.
 class OpenPose(QNNContext):
@@ -422,48 +336,58 @@ class OpenPose(QNNContext):
         input_datas=[input_data]
         output_data = super().Inference(input_datas)
         return output_data
-        
+
+def model_download():
+    ret = True
+
+    desc = f"Downloading {MODEL_NAME} model... "
+    fail = f"\nFailed to download {MODEL_NAME} model. Please prepare the model according to the steps in below link:\n{MODEL_HELP_URL}"
+    ret = install.download_qai_hubmodel(MODEL_ID, madel_path, desc=desc, fail=fail)
+
+    if not ret:
+        exit()
+
 def Init():
     global openpose
+
+    model_download()
 
     # Config AppBuilder environment.
     QNNConfig.Config(os.getcwd() + "\\qai_libs", Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for OpnPose objects.
-    openpose_model = "models\\openpose.bin"
-    openpose = OpenPose("openpose", openpose_model)
+    openpose = OpenPose("openpose", madel_path)
 
 def Inference(input_image_path, output_image_path): 
-    # Load image
-    orig_image = Image.open(input_image_path)
-    image, scale, padding = pil_resize_pad(orig_image, (224, 224))
-       
-    # preprocess
+    # Read and preprocess the image.
+    image_input = Image.open(input_image_path)
+    image, scale, padding = pil_resize_pad(image_input, (IMAGE_SIZE, IMAGE_SIZE))
+
     pixel_tensor = preprocess_PIL_image(image).numpy()
     pixel_values = np.transpose(pixel_tensor, (0, 2, 3, 1))
-   
+
     # Burst the HTP.
     PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
-    
-    # Run prediction
-    model_output = openpose.Inference([pixel_values])
-    
+
+    # Run the inference.
+    output = openpose.Inference([pixel_values])
+
     # Reset the HTP.
     PerfProfile.RelPerfProfileGlobal()
-    
+
     # postprocess the result
-    paf = model_output[0]
-    heatmap = model_output[1]
-    
+    paf = output[0]
+    heatmap = output[1]
+
     paf = paf.reshape(1, 28, 28, 38)
     heatmap = heatmap.reshape(1, 28, 28, 19)  
-    
+
     paf_tensor = torch.from_numpy(paf)
     heatmap_tensor = torch.from_numpy(heatmap)
-    
+
     paf_tensor = paf_tensor.permute(0, 3, 1, 2)
     heatmap_tensor = heatmap_tensor.permute(0, 3, 1, 2)
-   
+
     # post process heatmaps and paf to get keypoints
     keypoints, subset = getKeypointsFromPredictions(
         paf_tensor, heatmap_tensor, pixel_tensor.shape[2], pixel_tensor.shape[3]
@@ -472,13 +396,13 @@ def Inference(input_image_path, output_image_path):
     output_image = draw_keypoints(image, keypoints, radius=4, alpha=0.8)
 
     # Resize / unpad annotated image
-    pred_image = pil_undo_resize_pad(output_image, orig_image.size, scale, padding)
-    
-    # show&save the result
+    pred_image = pil_undo_resize_pad(output_image, image_input.size, scale, padding)
+
+    # show & save the result
     pred_image.save(output_image_path)
     pred_image.show()
-    
-  
+
+
 def Release():
     global openpose
 
@@ -488,6 +412,7 @@ def Release():
 
 Init()
 
-Inference("input.png", "output.png")
+Inference(execution_ws + "\\input.png", execution_ws + "\\output.png")
 
 Release()
+

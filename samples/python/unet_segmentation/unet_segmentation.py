@@ -73,8 +73,10 @@ def Init():
 def Inference(input_image_path, output_image_path): 
     # Read and preprocess the image.
     image = Image.open(input_image_path)
-    image_input, _, _ = pil_resize_pad(image, (IMAGE_SIZE_H, IMAGE_SIZE_W))
-    image = preprocess_PIL_image(image_input).numpy()
+    image, _, _ = pil_resize_pad(image, (IMAGE_SIZE_H, IMAGE_SIZE_W))
+    image_input = image
+
+    image = preprocess_PIL_image(image).numpy()
     image = np.transpose(image, (0, 2, 3, 1))
 
     # Burst the HTP.

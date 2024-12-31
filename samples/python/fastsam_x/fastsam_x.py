@@ -4,13 +4,15 @@
 # ---------------------------------------------------------------------
 
 from __future__ import annotations
-
+import sys
 import os
+sys.path.append(".")
+sys.path.append("..")
+import utils.install as install
 import numpy as np
 import math
 import torch
 import torchvision.transforms as transforms
-
 from typing import Callable, Dict, List, Tuple
 from PIL import Image
 from PIL.Image import fromarray as ImageFromArray
@@ -23,7 +25,27 @@ from ultralytics.utils import ops
 
 from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig)
 
+####################################################################
+
+MODEL_ID = "mn7x79pvq"
+MODEL_NAME = "fastsam_x"
+MODEL_HELP_URL = "https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+
+####################################################################
+
+execution_ws = os.getcwd()
+qnn_dir = execution_ws + "\\qai_libs"
+
+if not MODEL_NAME in execution_ws:
+    execution_ws = execution_ws + "\\" + MODEL_NAME
+
+model_dir = execution_ws + "\\models"
+madel_path = model_dir + "\\" + MODEL_NAME + ".bin"
+
+####################################################################
+
 fastsam = None
+
 confidence: float = 0.4,
 iou_threshold: float = 0.9,
 retina_masks: bool = True,
@@ -146,16 +168,27 @@ class FastSam(QNNContext):
         input_datas=[input_data]
         output_data = super().Inference(input_datas)
         return output_data
-        
+
+def model_download():
+    ret = True
+
+    desc = f"Downloading {MODEL_NAME} model... "
+    fail = f"\nFailed to download {MODEL_NAME} model. Please prepare the model according to the steps in below link:\n{MODEL_HELP_URL}"
+    ret = install.download_qai_hubmodel(MODEL_ID, madel_path, desc=desc, fail=fail)
+
+    if not ret:
+        exit()
+
 def Init():
     global fastsam
+
+    model_download()
 
     # Config AppBuilder environment.
     QNNConfig.Config(os.getcwd() + "\\qai_libs", Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for FastSam_x objects.
-    fastsam_model = "models\\fastsam_x.bin"
-    fastsam = FastSam("fastsam", fastsam_model)
+    fastsam = FastSam("fastsam", madel_path)
 
 def Inference(input_image_path, output_image_path): 
     global confidence, iou_threshold, retina_masks, model_image_input_shape
@@ -188,11 +221,11 @@ def Inference(input_image_path, output_image_path):
         torch.tensor(preds[4]).reshape(1, 105, 20, 20),
         torch.tensor(preds[5]).reshape(1, 37, 8400)
     ]
-    
+
     preds = tuple(
         (preds[5], tuple(([preds[2], preds[3], preds[4]], preds[1], preds[0])))
     )
-    
+
     p = ops.non_max_suppression(
         preds[0],
         0.4,
@@ -202,7 +235,7 @@ def Inference(input_image_path, output_image_path):
         nc=1,  # set to 1 class since SAM has no class predictions
         classes=None,
     )
-    
+
     full_box = torch.zeros(p[0].shape[1], device=p[0].device)
     full_box[2], full_box[3], full_box[4], full_box[6:] = (
         Img.shape[3],
@@ -266,9 +299,12 @@ def Inference(input_image_path, output_image_path):
     binary_mask = segmented_result[0].masks.data.squeeze().cpu().numpy().astype(np.uint8)
     binary_mask = binary_mask * 255
     mask_image = Image.fromarray(binary_mask)
-    mask_image.show()
+
+    #save and display the output_image
     mask_image.save(output_image_path)
-        
+    mask_image.show()
+
+
 def Release():
     global fastsam
 
@@ -278,6 +314,7 @@ def Release():
 
 Init()
 
-Inference("input.jpg", "output.jpg")
+Inference(execution_ws + "\\input.jpg", execution_ws + "\\output.jpg")
 
 Release()
+

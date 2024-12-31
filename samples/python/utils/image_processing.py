@@ -5,7 +5,7 @@ from PIL import Image
 from PIL.Image import fromarray as ImageFromArray
 from torch.nn.functional import interpolate, pad
 import torch
-from typing import Callable, Dict, List, Tuple
+from typing import Tuple, Dict
 
 def preprocess_PIL_image(image: Image) -> torch.Tensor:
     """Convert a PIL image into a pyTorch tensor with range [0, 1] and shape NCHW."""
@@ -75,6 +75,30 @@ def resize_pad(image: torch.Tensor, dst_size: Tuple[int, int]):
 
     return rescaled_padded_image, scale, padding
 
+def undo_resize_pad(
+    image: torch.Tensor,
+    orig_size_wh: Tuple[int, int],
+    scale: float,
+    padding: Tuple[int, int],
+):
+    """
+    Undos the efffect of resize_pad. Instead of scale, the original size
+    (in order width, height) is provided to prevent an off-by-one size.
+    """
+    width, height = orig_size_wh
+
+    rescaled_image = interpolate(image, scale_factor=1 / scale, mode="bilinear")
+
+    scaled_padding = [int(round(padding[0] / scale)), int(round(padding[1] / scale))]
+
+    cropped_image = rescaled_image[
+        ...,
+        scaled_padding[1] : scaled_padding[1] + height,
+        scaled_padding[0] : scaled_padding[0] + width,
+    ]
+
+    return cropped_image
+
 def pil_resize_pad(
     image: Image, dst_size: Tuple[int, int]
 ) -> Tuple[Image, float, Tuple[int, int]]:
@@ -85,3 +109,32 @@ def pil_resize_pad(
     )
     pil_out_image = torch_tensor_to_PIL_image(torch_out_image[0])
     return (pil_out_image, scale, padding)
+
+def pil_undo_resize_pad(
+    image: Image, orig_size_wh: Tuple[int, int], scale: float, padding: Tuple[int, int]
+) -> Image:
+    torch_image = preprocess_PIL_image(image)
+    torch_out_image = undo_resize_pad(torch_image, orig_size_wh, scale, padding)
+    pil_out_image = torch_tensor_to_PIL_image(torch_out_image[0])
+    return pil_out_image
+
+def preprocess_inputs(
+    pixel_values_or_image: Image,
+    mask_pixel_values_or_image: Image,
+) -> Dict[str, torch.Tensor]:
+
+    NCHW_fp32_torch_frames = preprocess_PIL_image(pixel_values_or_image)
+    NCHW_fp32_torch_masks = preprocess_PIL_image(mask_pixel_values_or_image)
+    
+    # The number of input images should equal the number of input masks.
+    if NCHW_fp32_torch_masks.shape[0] != 1:
+        NCHW_fp32_torch_masks = NCHW_fp32_torch_masks.tile(
+            (NCHW_fp32_torch_frames.shape[0], 1, 1, 1)
+        )
+  
+    # Mask input image
+    image_masked = (
+        NCHW_fp32_torch_frames * (1 - NCHW_fp32_torch_masks) + NCHW_fp32_torch_masks
+    )
+    
+    return {"image": image_masked, "mask": NCHW_fp32_torch_masks}
