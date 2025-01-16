@@ -16,6 +16,7 @@
 #include <pybind11/stl.h>
 
 #include "LibAppBuilder.hpp"
+#include "Lora.hpp"
 
 using namespace std;
 namespace py = pybind11;
@@ -159,12 +160,19 @@ class QNNContext {
 public:
     std::string m_model_name;
     std::string m_proc_name;
+    std::vector<LoraAdaptor> m_lora_adapters;  
 
     QNNContext(const std::string& model_name,
-       	       const std::string& model_path, const std::string& backend_lib_path, const std::string& system_lib_path);
+       	       const std::string& model_path, const std::string& backend_lib_path, 
+               const std::string& system_lib_path);
+
+    QNNContext(const std::string& model_name,
+       	       const std::string& model_path, const std::string& backend_lib_path, 
+               const std::string& system_lib_path, const std::vector<LoraAdaptor>& lora_adapters);   
 
     QNNContext(const std::string& model_name, const std::string& proc_name,
-       	       const std::string& model_path, const std::string& backend_lib_path, const std::string& system_lib_path);
+       	       const std::string& model_path, const std::string& backend_lib_path, 
+               const std::string& system_lib_path);
 
     std::vector<py::array_t<float>> Inference(const std::vector<py::array_t<float>>& input, const std::string& perf_profile = "default");
     std::vector<py::array_t<float>> Inference(const ShareMemory& share_memory, const std::vector<py::array_t<float>>& input, const std::string& perf_profile = "default");

@@ -7,8 +7,10 @@
 //==============================================================================
 
 #include "AppBuilder.h"
+#include "Lora.hpp"
+#include <ostream>
 
-#define APPBUILDER_VERSION    "2.28.0"
+#define APPBUILDER_VERSION "2.28.2"
 
 ShareMemory::ShareMemory(const std::string& share_memory_name, const size_t share_memory_size) {
     m_share_memory_name = share_memory_name;
@@ -30,6 +32,16 @@ QNNContext::QNNContext(const std::string& model_name, const std::string& proc_na
     m_model_name = model_name;
     m_proc_name = proc_name;
     g_LibAppBuilder.ModelInitialize(model_name, proc_name, model_path, backend_lib_path, system_lib_path);
+}
+
+QNNContext::QNNContext(const std::string& model_name,
+                       const std::string& model_path, const std::string& backend_lib_path, 
+                       const std::string& system_lib_path, const std::vector<LoraAdaptor>& lora_adapters) {
+    
+    m_model_name = model_name;
+    m_lora_adapters = lora_adapters;
+
+    g_LibAppBuilder.ModelInitialize(model_name, model_path, backend_lib_path, system_lib_path, m_lora_adapters);
 }
 
 QNNContext::~QNNContext() {
@@ -100,9 +112,13 @@ PYBIND11_MODULE(appbuilder, m) {
     
     py::class_<QNNContext>(m, "QNNContext")
         .def(py::init<const std::string&, const std::string&, const std::string&, const std::string&>())
+        .def(py::init<const std::string&, const std::string&, const std::string&, const std::string&, const std::vector<LoraAdaptor>&>())
         .def(py::init<const std::string&, const std::string&, const std::string&, const std::string&, const std::string&>())
         .def("Inference", py::overload_cast<const std::vector<py::array_t<float>>&, const std::string&>(&QNNContext::Inference))
         .def("Inference", py::overload_cast<const ShareMemory&, const std::vector<py::array_t<float>>&, const std::string&>(&QNNContext::Inference));
+
+    py::class_<LoraAdaptor>(m, "LoraAdaptor")
+        .def(py::init<const std::string &, const std::vector<std::string> &>());
 
 }
 

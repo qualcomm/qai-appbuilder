@@ -22,7 +22,7 @@ import zipfile
 from setuptools import Extension, setup, find_packages
 from setuptools.command.build_ext import build_ext
 
-VERSION = "2.28.0"
+VERSION = "2.28.2"
 CONFIG = "Release"  # Release, RelWithDebInfo
 package_name = "qai_appbuilder"
 

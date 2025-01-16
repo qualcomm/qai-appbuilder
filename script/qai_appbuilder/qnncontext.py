@@ -117,6 +117,55 @@ class QNNConfig():
         ProfilingLevel.SetProfilingLevel(profiling_level)
 
 
+class QNNLoraContext:
+    """High-level Python wrapper for a AppBuilder model."""
+    def __init__(self,
+                model_name: str = "None",
+                model_path: str = "None",
+                backend_lib_path: str = "None",
+                system_lib_path: str = "None",
+                lora_adapters= None,
+                runtime : str = Runtime.HTP
+    ) -> None:
+        """Load a QNN model from `model_path`
+
+        Args:
+            model_path (str): model path
+            bin_files (str) : 
+        """
+        self.model_path = model_path
+        self.lora_adapters = lora_adapters
+        
+        m_lora_adapters = []
+        for adapter in lora_adapters:
+            m_lora_adapters.append(adapter.m_adapter)
+
+        if self.model_path is None:
+            raise ValueError("model_path must be specified!")
+
+        if not os.path.exists(self.model_path):
+            raise ValueError(f"Model path does not exist: {self.model_path}")
+
+        if (backend_lib_path == "None"):
+            backend_lib_path = g_backend_lib_path
+        if (system_lib_path == "None"):
+            system_lib_path = g_system_lib_path
+       
+        self.m_context = appbuilder.QNNContext(model_name, model_path,
+                                               backend_lib_path, system_lib_path,
+                                               m_lora_adapters)
+
+    #@timer
+    def Inference(self, input, perf_profile = PerfProfile.DEFAULT):
+        return self.m_context.Inference(input, perf_profile)
+
+    #@timer
+    def __del__(self):
+        if hasattr(self, "m_context") and self.m_context is not None:
+            del(self.m_context)
+            m_context = None
+
+
 class QNNContext:
     """High-level Python wrapper for a AppBuilder model."""
     def __init__(self,
@@ -144,7 +193,7 @@ class QNNContext:
         if (system_lib_path == "None"):
             system_lib_path = g_system_lib_path
 
-        self.m_context = appbuilder.QNNContext(model_name, model_path, backend_lib_path, system_lib_path)
+        self.m_context = appbuilder.QNNContext(model_name, model_path, backend_lib_path, system_lib_path, [])
 
     #@timer
     def Inference(self, input, perf_profile = PerfProfile.DEFAULT):
@@ -220,4 +269,10 @@ class QNNShareMemory:
         if hasattr(self, "m_memory") and self.m_memory is not None:
             del(self.m_memory)
             m_memory = None
-
+            
+class LoraAdaptor:   # this will just hold data
+    m_adapter = None
+    
+    def __init__(self, graph_name, lora_file_paths):
+        self.m_adapter = appbuilder.LoraAdaptor(graph_name, lora_file_paths)  # cpp object
+    

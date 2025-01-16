@@ -24,7 +24,8 @@ namespace qnn {
 namespace tools {
 namespace sample_app {
 
-enum class ProfilingLevel { OFF, BASIC, DETAILED, INVALID };
+enum class ProfilingLevel { OFF, BASIC, DETAILED, INVALID, CLIENT};
+enum class ProfilingOption { NONE, OPTRACE, INVALID };
 
 using ReadInputListRetType_t = std::
     tuple<std::vector<std::vector<std::string>>, std::unordered_map<std::string, uint32_t>, bool>;

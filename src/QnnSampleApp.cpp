@@ -187,11 +187,13 @@ sample_app::QnnSampleApp::QnnSampleApp(QnnFunctionPointers qnnFunctionPointers,
                                        sample_app::ProfilingLevel profilingLevel,
                                        bool dumpOutputs,
                                        std::string cachedBinaryPath,
-                                       std::string saveBinaryName)
+                                       std::string saveBinaryName, 
+                                       const std::vector<LoraAdaptor>& lora_adapters)
     : m_qnnFunctionPointers(qnnFunctionPointers),
       m_outputPath(outputPath),
       m_saveBinaryName(saveBinaryName),
       m_cachedBinaryPath(cachedBinaryPath),
+      m_lora_adapters(lora_adapters),
       m_debug(debug),
       m_outputDataType(outputDataType),
       m_inputDataType(inputDataType),
@@ -463,6 +465,282 @@ sample_app::StatusCode sample_app::QnnSampleApp::finalizeGraphs() {
   return returnStatus;
 }
 
+sample_app::StatusCode sample_app::QnnSampleApp::contextApplyBinarySection(QnnContext_SectionType_t section) {
+    sample_app::StatusCode returnStatus = sample_app::StatusCode::SUCCESS;
+      for(auto loraadapter = m_lora_adapters.begin(); loraadapter != m_lora_adapters.end(); ++loraadapter){
+        std::string model_name = loraadapter->m_graph_name;  
+        std::vector<std::string> bin_paths = loraadapter->m_bin_paths;  
+
+        for (std::string binaryUpdatesPath : bin_paths){
+          m_profilingOption = ProfilingOption::NONE;   
+          auto returnStatus = applyBinarySection(
+              model_name, binaryUpdatesPath, section, m_useMmap,
+              m_profilingLevel, m_profilingOption);
+
+          if (returnStatus != sample_app::StatusCode::SUCCESS) {
+              QNN_ERROR("Error during call to applyBinarySection.");
+              return returnStatus;
+          }
+        }
+    }
+  
+    return returnStatus;
+}
+
+sample_app::StatusCode sample_app::QnnSampleApp::applyBinarySection(
+    std::string graphName,
+    std::string binaryPath,
+    QnnContext_SectionType_t sectionType,
+    bool useMmap,
+    ProfilingLevel profilingLevel,
+    ProfilingOption profilingOption) {
+
+    QNN_FUNCTION_ENTRY_LOG;
+    // Get Graph handle
+    if (m_qnnFunctionPointers.qnnInterface.propertyHasCapability(QNN_PROPERTY_CONTEXT_SUPPORT_BINARY_UPDATES) !=
+        QNN_PROPERTY_SUPPORTED) {
+        QNN_ERROR("Backend does not support updates to context binary.");
+        return sample_app::StatusCode::FAILURE;
+    }
+    Qnn_GraphHandle_t graphHandle{ nullptr };
+    for (size_t graphIdx = 0; graphIdx < m_graphInfoPtrList.size(); graphIdx++) {
+        auto graphInfo = *(m_graphInfoPtrList[graphIdx]);
+        if (strcmp(graphInfo.graphName, graphName.c_str()) == 0) {
+            graphHandle = graphInfo.graph;
+            break;
+        }
+    }
+    if (graphHandle == nullptr) {
+        QNN_ERROR("Unable to find the graph with name = %s", graphName.c_str());
+        return sample_app::StatusCode::FAILURE;
+    }
+
+    uint64_t bufferSize{ 0 };
+    // Read serialized binary into a byte buffer
+    tools::datautil::StatusCode status{ tools::datautil::StatusCode::SUCCESS };
+    std::tie(status, bufferSize) = tools::datautil::getFileSize(binaryPath);
+    if (0 == bufferSize) {
+        QNN_ERROR("Received path to an empty file. Nothing to deserialize.");
+        return StatusCode::FAILURE;
+    }
+
+    std::unique_ptr<uint8_t[]> buffer;
+    uint8_t* bufferPtr;
+
+#ifdef QNN_ENABLE_MMAP
+    std::unique_ptr<mmapped::File> mmappedFile{ nullptr };
+#endif
+
+    try {
+#ifdef QNN_ENABLE_MMAP
+        if (!useMmap) {
+#endif
+            buffer = std::unique_ptr<uint8_t[]>(new uint8_t[bufferSize]);
+            bufferPtr = buffer.get();
+
+            status = tools::datautil::readBinaryFromFile(binaryPath, bufferPtr, bufferSize);
+            if (status != tools::datautil::StatusCode::SUCCESS) {
+                QNN_ERROR("Failed to read binary data.");
+                return StatusCode::FAILURE;
+            }
+#ifdef QNN_ENABLE_MMAP
+        }
+        else {
+            QNN_VERBOSE("Using mmap for loading the cached binary file at %s", binaryPath.c_str());
+            mmappedFile = std::unique_ptr<mmapped::File>(new mmapped::File(binaryPath, false));
+            bufferPtr = mmappedFile->data();
+        }
+#endif
+    }
+    catch (std::bad_alloc&) {
+        QNN_ERROR("Failed to allocate memory.");
+        return StatusCode::FAILURE;
+    }
+
+    void* voidBufferPtr = static_cast<void*>(bufferPtr);
+    QnnContext_Buffer_t contextBuffer{ QNN_CONTEXT_BUFFER_VERSION_1,
+                                      {QNN_CONTEXTMEMTYPE_RAW, {voidBufferPtr, bufferSize}} };
+
+    // Get Profile Handle
+    Qnn_ProfileHandle_t profileBackendHandle{ nullptr };
+    bool isProfileHandleCreated = false;
+    if (profilingLevel != ProfilingLevel::OFF && profilingLevel != ProfilingLevel::CLIENT &&
+        sample_app::StatusCode::SUCCESS == initializeProfileHandle(&m_qnnFunctionPointers.qnnInterface,
+            profilingLevel,
+            &profileBackendHandle,
+            m_numMaxEvents)) {
+        isProfileHandleCreated = true;
+    }
+    if (profilingOption != ProfilingOption::NONE && isProfileHandleCreated) {
+        if (sample_app::StatusCode::SUCCESS != initializeProfileConfigOption(
+            &m_qnnFunctionPointers.qnnInterface, profilingOption, profileBackendHandle)) {
+            QNN_ERROR("Unable to set Profiling Option: %d", profilingOption);
+            return sample_app::StatusCode::FAILURE;
+        }
+    }
+
+    Qnn_ErrorHandle_t executeStatus = QNN_GRAPH_NO_ERROR;
+
+    // Make API CALL
+    // TODO: Re-enable profile + signal. For now use wall clock
+    auto start = std::chrono::system_clock::now();
+    executeStatus = m_qnnFunctionPointers.qnnInterface.contextApplyBinarySection(
+        m_context, graphHandle, sectionType, &contextBuffer, nullptr, nullptr);
+
+    auto end = std::chrono::system_clock::now();
+    auto elapsed = end - start;
+    QNN_VERBOSE("Updated binary with an approximate time %u", elapsed.count());
+
+    if (QNN_GET_ERROR_CODE(executeStatus) != QNN_SUCCESS) {
+        if (QNN_GET_ERROR_CODE(executeStatus) == QNN_CONTEXT_ERROR_UNSUPPORTED_FEATURE) {
+            QNN_ERROR("Backend does not support application of binary section.");
+        }
+        else if (QNN_GET_ERROR_CODE(executeStatus) == QNN_CONTEXT_ERROR_MEM_ALLOC) {
+            QNN_ERROR("Memory allocation error while creating context update.");
+        }
+        return sample_app::StatusCode::FAILURE;
+    }
+    else {
+        QNN_VERBOSE("Binary section retrieved from %s and applied to graph %s.\n",
+            binaryPath.c_str(),
+            graphName.c_str());
+    }
+
+    if (isProfileHandleCreated) {
+        terminateProfileHandle(&m_qnnFunctionPointers.qnnInterface, profileBackendHandle);
+    }
+    QNN_FUNCTION_EXIT_LOG;
+    return sample_app::StatusCode::SUCCESS;
+}
+
+sample_app::StatusCode sample_app::QnnSampleApp::initializeProfileHandle(
+    const QNN_INTERFACE_VER_TYPE* qnnInterfaceHandle,
+    ProfilingLevel profilingLevel,
+    Qnn_ProfileHandle_t* profileHandle,
+    const uint64_t numMaxEvents) {
+    QNN_FUNCTION_ENTRY_LOG;
+    if (nullptr == qnnInterfaceHandle->profileCreate) {
+        if (ProfilingLevel::CLIENT != profilingLevel) {
+            QNN_ERROR(
+                "Profiling not supported by this backend. Cannot capture basic profiling "
+                "information from backend. Only net run captured stats are present.");
+            return StatusCode::FAILURE;
+        }
+        else {
+            return StatusCode::SUCCESS;
+        }
+    }
+
+    if (ProfilingLevel::BASIC == profilingLevel) {
+        auto qnnStatus =
+            qnnInterfaceHandle->profileCreate(m_backendHandle, QNN_PROFILE_LEVEL_BASIC, profileHandle);
+        if (QNN_PROFILE_NO_ERROR != qnnStatus) {
+            QNN_ERROR(
+                "Unable to create Basic profile handle in the backend.");
+            return verifyFailReturnStatus(qnnStatus);
+        }
+    }
+    else {
+        auto qnnStatus = qnnInterfaceHandle->profileCreate(
+            m_backendHandle, QNN_PROFILE_LEVEL_DETAILED, profileHandle);
+        if (QNN_PROFILE_NO_ERROR != qnnStatus) {
+            QNN_ERROR(
+                "Unable to create Detailed profile handle in the backend.");
+            return verifyFailReturnStatus(qnnStatus);
+        }
+    }
+
+    if (numMaxEvents != std::numeric_limits<uint64_t>::max()) {
+        if (qnnInterfaceHandle->propertyHasCapability(QNN_PROPERTY_PROFILE_SUPPORT_MAX_EVENTS_CONFIG) ==
+            QNN_PROPERTY_SUPPORTED) {
+            QnnProfile_Config_t numMaxEventsConfig = QNN_PROFILE_CONFIG_INIT;
+            numMaxEventsConfig.option = QNN_PROFILE_CONFIG_OPTION_MAX_EVENTS;
+            numMaxEventsConfig.numMaxEvents = numMaxEvents;
+            const QnnProfile_Config_t* profileConfigs[] = { &numMaxEventsConfig, nullptr };
+            Qnn_ErrorHandle_t qnnProfileError =
+                qnnInterfaceHandle->profileSetConfig(*profileHandle, profileConfigs);
+            if (qnnProfileError != QNN_PROFILE_NO_ERROR) {
+                QNN_ERROR(
+                    "Failed to set profile config option: %d, with error: %d",
+                    numMaxEventsConfig.option,
+                    qnnProfileError);
+                return StatusCode::FAILURE;
+            }
+        }
+        else {
+            QNN_ERROR("Unsupported profile config supplied: set number of max profiling events.");
+            return StatusCode::FAILURE;
+        }
+    }
+
+    QNN_FUNCTION_EXIT_LOG;
+    return StatusCode::SUCCESS;
+}
+
+bool sample_app::QnnSampleApp::binaryUpdates() { 
+    return m_lora_adapters.size() > 0; }
+
+sample_app::StatusCode sample_app::QnnSampleApp::initializeProfileConfigOption(
+    const QNN_INTERFACE_VER_TYPE* qnnInterfaceHandle,
+    ProfilingOption profilingOption,
+    Qnn_ProfileHandle_t profileHandle) {
+    QNN_FUNCTION_ENTRY_LOG;
+    sample_app::StatusCode returnStatus;
+    QnnProfile_Config_t optraceConfig = QNN_PROFILE_CONFIG_INIT;
+    if (profilingOption == sample_app::ProfilingOption::OPTRACE) {
+        optraceConfig.option = QNN_PROFILE_CONFIG_OPTION_ENABLE_OPTRACE;
+        optraceConfig.enableOptrace = true;
+        const QnnProfile_Config_t* profileConfigs[] = { &optraceConfig, nullptr };
+        Qnn_ErrorHandle_t qnnStatus =
+            qnnInterfaceHandle->profileSetConfig(profileHandle, profileConfigs);
+        QNN_ERROR(
+            "Failed to set profile config option: %d, with error: %d",
+            profilingOption,
+            qnnStatus);
+        returnStatus = verifyFailReturnStatus(qnnStatus);
+
+    }
+    else {
+        QNN_ERROR("Unknown config option: %d", profilingOption);
+        returnStatus = sample_app::StatusCode::FAILURE;
+    }
+
+    QNN_FUNCTION_EXIT_LOG;
+    return returnStatus;
+}
+
+sample_app::StatusCode sample_app::QnnSampleApp::terminateProfileHandle(
+    const QNN_INTERFACE_VER_TYPE* qnnInterfaceHandle, Qnn_ProfileHandle_t profileHandle) {
+    QNN_FUNCTION_ENTRY_LOG;
+    auto returnStatus = sample_app::StatusCode::SUCCESS;
+    if (nullptr != profileHandle && nullptr != qnnInterfaceHandle->profileFree) {
+        QNN_DEBUG("Freeing backend profile object.");
+        auto result = qnnInterfaceHandle->profileFree(profileHandle);
+        QNN_ERROR("Could not free backend profile handle.");
+        returnStatus = verifyFailReturnStatus(result);
+    }
+    QNN_FUNCTION_EXIT_LOG;
+    return returnStatus;
+}
+
+sample_app::StatusCode sample_app::QnnSampleApp::addGraphToContext(
+    qnn_wrapper_api::GraphInfo_t* graphInfo) {
+    QNN_FUNCTION_ENTRY_LOG;
+    m_graphInfoPtrList.push_back(graphInfo);
+    QNN_FUNCTION_EXIT_LOG;
+    return StatusCode::SUCCESS;
+}
+
+sample_app::StatusCode sample_app::QnnSampleApp::addGraphsToContext(
+    qnn_wrapper_api::GraphInfo_t** graphInfos, uint32_t numGraphs) {
+    QNN_FUNCTION_ENTRY_LOG;
+    for (uint32_t i = 0; i < numGraphs; i++) {
+        m_graphInfoPtrList.push_back(graphInfos[i]);
+    }
+    QNN_FUNCTION_EXIT_LOG;
+    return StatusCode::SUCCESS;
+}
+
 sample_app::StatusCode sample_app::QnnSampleApp::createFromBinary() {
   QNN_FUNCTION_ENTRY_LOG;
   if (m_cachedBinaryPath.empty()) {
@@ -525,6 +803,11 @@ sample_app::StatusCode sample_app::QnnSampleApp::createFromBinary() {
   }
   m_qnnFunctionPointers.qnnSystemInterface.systemContextFree(sysCtxHandle);
   sysCtxHandle = nullptr;
+
+  if (StatusCode::SUCCESS != addGraphsToContext(m_graphsInfo, m_graphsCount)) {
+      QNN_ERROR("Unable to add the retrieved Graphs into ContextWrapper");
+      returnStatus = StatusCode::FAILURE;
+  }
 
   if (StatusCode::SUCCESS == returnStatus &&
       nullptr == m_qnnFunctionPointers.qnnInterface.contextCreateFromBinary) {

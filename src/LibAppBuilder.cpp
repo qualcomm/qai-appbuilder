@@ -22,6 +22,7 @@
 #include "PAL/DynamicLoading.hpp"
 #include "PAL/GetOpt.hpp"
 #include "QnnSampleApp.hpp"
+#include "Lora.hpp"
 #include "QnnSampleAppUtils.hpp"
 #include "LibAppBuilder.hpp"
 #ifdef _WIN32
@@ -50,7 +51,8 @@ namespace libappbuilder {
 std::unique_ptr<sample_app::QnnSampleApp> initQnnSampleApp(std::string cachedBinaryPath,
                                                            std::string backEndPath,
                                                            std::string systemLibraryPath,
-                                                           bool loadFromCachedBinary) {
+                                                           bool loadFromCachedBinary,
+                                                           const std::vector<LoraAdaptor>& lora_adapters) {
   // Just keep blank for below paths.
   std::string modelPath;
   std::string cachedBinaryPath2;
@@ -100,7 +102,7 @@ std::unique_ptr<sample_app::QnnSampleApp> initQnnSampleApp(std::string cachedBin
   sg_qnnInterface = qnnFunctionPointers.qnnInterface;
   std::unique_ptr<sample_app::QnnSampleApp> app(new sample_app::QnnSampleApp(qnnFunctionPointers, "null", opPackagePaths, sg_backendHandle, "null",
                                                                              debug, parsedOutputDataType, parsedInputDataType, sg_parsedProfilingLevel,
-                                                                             dumpOutputs, cachedBinaryPath2, saveBinaryName));
+                                                                             dumpOutputs, cachedBinaryPath2, saveBinaryName, lora_adapters));
     return app;
 }
 
@@ -285,9 +287,9 @@ bool DeleteShareMemory(std::string share_memory_name) {
 }
 
 bool ModelInitializeEx(const std::string& model_name, const std::string& proc_name, const std::string& model_path,
-                       const std::string& backend_lib_path, const std::string& system_lib_path) {
+                       const std::string& backend_lib_path, const std::string& system_lib_path, 
+                       const std::vector<LoraAdaptor>& lora_adapters) {
   bool result = false;
-
   QNN_INF("LibAppBuilder::ModelInitialize: %s \n", model_name.c_str());
 
 #ifdef _WIN32
@@ -322,7 +324,7 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
   }
 
   {
-    std::unique_ptr<sample_app::QnnSampleApp> app = libappbuilder::initQnnSampleApp(cachedBinaryPath, backEndPath, systemLibraryPath, loadFromCachedBinary);
+    std::unique_ptr<sample_app::QnnSampleApp> app = libappbuilder::initQnnSampleApp(cachedBinaryPath, backEndPath, systemLibraryPath, loadFromCachedBinary, lora_adapters);
 
     if (nullptr == app) {
       return false;
@@ -388,6 +390,12 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
             app->reportError("Performance initialization failure");
             return false;
         }
+    }
+
+    // apply lora adaptor on graph
+    if (app->binaryUpdates() &&
+        sample_app::StatusCode::SUCCESS != app->contextApplyBinarySection(QNN_CONTEXT_SECTION_UPDATABLE)) {
+        return app->reportError("Binary update/execution failure");
     }
 
     timerHelper.Print("model_initialize");
@@ -510,7 +518,13 @@ bool LibAppBuilder::ModelInitialize(const std::string& model_name, const std::st
 
 bool LibAppBuilder::ModelInitialize(const std::string& model_name, const std::string& model_path,
                                          const std::string& backend_lib_path, const std::string& system_lib_path) {
-    return ModelInitializeEx(model_name, "", model_path, backend_lib_path, system_lib_path);
+    std::vector<LoraAdaptor> adaptors = std::vector<LoraAdaptor>();
+    return ModelInitializeEx(model_name, "", model_path, backend_lib_path, system_lib_path, adaptors);   
+}
+
+bool LibAppBuilder::ModelInitialize(const std::string& model_name, const std::string& model_path,
+                                         const std::string& backend_lib_path, const std::string& system_lib_path,const std::vector<LoraAdaptor>& lora_adapters) {
+    return ModelInitializeEx(model_name, "", model_path, backend_lib_path, system_lib_path, lora_adapters);
 }
 
 bool LibAppBuilder::ModelInference(std::string model_name, std::string proc_name, std::string share_memory_name,

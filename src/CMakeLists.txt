@@ -26,7 +26,8 @@ set(APP_SOURCES "QnnSampleApp.cpp"
                 "Utils/IOTensor.cpp"
                 "Utils/QnnSampleAppUtils.cpp"
                 "WrapperUtils/QnnWrapperUtils.cpp"
-                "LibAppBuilder.cpp")
+                "LibAppBuilder.cpp"
+                "Lora.cpp")
 
 if (WIN32)
 set(APP_SOURCES_ARCH "PAL/src/windows/Common.cpp"

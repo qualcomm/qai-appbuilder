@@ -10,6 +10,10 @@
 
 
 #include "Utils/Utils.hpp"
+#include "Lora.hpp"
+#include <string>
+#include <sstream>
+#include <map>
 
 
 // ============================== Service / QAIAppSvc ============================== //
@@ -66,18 +70,19 @@ void ModelLoad(std::string cmdBuf, HANDLE hSvcPipeOutWrite) {
     std::vector<std::string> commands;
     split_string(commands, cmdBuf, ';');
 
-    std::string model_name                  = commands[0];
-    std::string model_path                  = commands[1];
-    std::string backend_lib_path            = commands[2];
-    std::string system_lib_path             = commands[3];
+    std::string model_name = commands[0];
+    std::string model_path = commands[1];
+    std::string backend_lib_path = commands[2];
+    std::string system_lib_path = commands[3];
 
     Print_MemInfo("ModelLoad::ModelInitialize Start.");
     QNN_INF("ModelLoad::ModelInitialize::Model name %s\n", model_name.c_str());
-    bSuccess = g_LibAppBuilder.ModelInitialize(model_name.c_str(), model_path, backend_lib_path, system_lib_path);
+    std::vector<LoraAdaptor> adaptors ;
+    bSuccess = g_LibAppBuilder.ModelInitialize(model_name.c_str(), model_path, backend_lib_path, system_lib_path, adaptors);
     QNN_INF("ModelLoad::ModelInitialize End ret = %d\n", bSuccess);
     Print_MemInfo("ModelLoad::ModelInitialize End.");
 
-    if(bSuccess) {
+    if (bSuccess) {
         bSuccess = WriteFile(hSvcPipeOutWrite, ACTION_OK, (DWORD)strlen(ACTION_OK) + 1, NULL, NULL);
     }
     else {
@@ -182,17 +187,17 @@ int svcprocess_run(HANDLE hSvcPipeInRead, HANDLE hSvcPipeOutWrite) {
 
         char* cmdBuf = g_buffer + 1;
         switch (g_buffer[0]) {
-            case 'l':   // load model.
-                ModelLoad(cmdBuf, hSvcPipeOutWrite);
-                break;
+        case 'l':   // load model.
+            ModelLoad(cmdBuf, hSvcPipeOutWrite);
+            break;
 
-            case 'g':   // run Graphs.
-                ModelRun(cmdBuf, hSvcPipeOutWrite);
-                break;
+        case 'g':   // run Graphs.
+            ModelRun(cmdBuf, hSvcPipeOutWrite);
+            break;
 
-            case 'r':   // release model.
-                ModelRelease(cmdBuf, hSvcPipeOutWrite);
-                break;
+        case 'r':   // release model.
+            ModelRelease(cmdBuf, hSvcPipeOutWrite);
+            break;
         }
     }
 
@@ -204,9 +209,9 @@ int svcprocess_run(HANDLE hSvcPipeInRead, HANDLE hSvcPipeOutWrite) {
 #define BUFSIZE             (256)
 
 // test code, load and run model.
-int hostprocess_run(std::string qnn_lib_path, std::string model_path, 
-                    std::string input_raw_path, int input_count, int memory_size,
-                    std::string perf_profile) {
+int hostprocess_run(std::string qnn_lib_path, std::string model_path,
+    std::string input_raw_path, int input_count, int memory_size,
+    std::string perf_profile, const std::vector <LoraAdaptor>& adaptors ) {
     BOOL result = false;
 
     std::string MODEL_NAME = "<model_name>";
@@ -258,7 +263,7 @@ int hostprocess_run(std::string qnn_lib_path, std::string model_path,
 
     if (0 == memory_size) {    // Load & run model locally.
         QNN_INF("Load and run model locally Start.\n");
-        result = libAppBuilder.ModelInitialize(model_name, model_path, backend_lib_path, system_lib_path);
+        result = libAppBuilder.ModelInitialize(model_name, model_path, backend_lib_path, system_lib_path, adaptors);
         Print_MemInfo("ModelInitialize End.");
 
         // SetPerfProfileGlobal("burst");
@@ -266,7 +271,7 @@ int hostprocess_run(std::string qnn_lib_path, std::string model_path,
         {
             // Inference.
             result = libAppBuilder.ModelInference(model_name, inputBuffers, outputBuffers, outputSize, perf_profile);
-            
+
             // Verify the output data here. Free the data in vector.
             for (int i = 0; i < outputSize.size(); i++) {
                 sprintf_s(dataPath, BUFSIZE, output_data_path.c_str(), i);
@@ -279,7 +284,7 @@ int hostprocess_run(std::string qnn_lib_path, std::string model_path,
                 }
                 os.close();
             }
-            
+
             for (int i = 0; i < outputBuffers.size(); i++) {
                 free(outputBuffers[i]);
             }
@@ -289,7 +294,7 @@ int hostprocess_run(std::string qnn_lib_path, std::string model_path,
         }
 
         result = libAppBuilder.ModelDestroy(model_name);
-        
+
         QNN_INF("Load and run model locally End.\n");
 
         Print_MemInfo("Load and run model locally End.");
@@ -339,9 +344,68 @@ int hostprocess_run(std::string qnn_lib_path, std::string model_path,
 }
 
 
-int main(int argc, char** argv) {
+// Function to parse arguments
+std::map<std::string, std::vector<std::string>> parse_arguments(int argc, char* argv[]) {
+    std::map<std::string, std::vector<std::string>> args;
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg.find("--") == 0) { // Check if it's a named argument
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                args[arg].push_back(argv[++i]); // Add to the vector for the corresponding key
+            }
+            else {
+                args[arg].emplace_back(""); // Handle flags or arguments without values
+            }
+        }
+        else {
+            throw std::invalid_argument("Invalid argument format: " + arg);
+        }
+    }
+    return args;
+}
 
-    if(argc > 1 && argv[1] && argv[1][0] == 's') {  // Start server.
+// Function to parse binary_updates into a map
+std::map<std::string, std::vector<std::string>> parse_binary_updates(
+    const std::vector<std::string>& binary_update_args) {
+    std::map<std::string, std::vector<std::string>> binary_updates;
+
+    for (const auto& update : binary_update_args) {
+        std::istringstream ss(update);
+        std::string graph_name, path_list;
+
+        // Extract graph name (before the comma)
+        if (!std::getline(ss, graph_name, ',')) {
+            throw std::invalid_argument("Invalid format for binary update (missing graph name)");
+        }
+
+        // Extract the paths (semicolon-separated after the comma)
+        if (!std::getline(ss, path_list)) {
+            throw std::invalid_argument("Invalid format for binary update (missing paths)");
+        }
+
+        // Split the paths by ';'
+        std::vector<std::string> paths;
+        std::istringstream path_stream(path_list);
+        std::string path;
+        while (std::getline(path_stream, path, ';')) {
+            paths.push_back(path);
+        }
+
+        if (paths.empty()) {
+            throw std::invalid_argument("Invalid format for binary update (missing paths)");
+        }
+
+        binary_updates[graph_name] = paths;
+    }
+
+    return binary_updates;
+}
+
+
+
+
+int main(int argc, char** argv) {
+    if (argc > 1 && argv[1] && argv[1][0] == 's') {  // Start server.
         HANDLE hSvcPipeInRead = (HANDLE)std::stoull(argv[2]);
         HANDLE hSvcPipeOutWrite = (HANDLE)std::stoull(argv[3]);
         SetLogLevel(std::stoi(argv[5]));
@@ -353,43 +417,69 @@ int main(int argc, char** argv) {
         Print_MemInfo("Svc App End.");
     }
     else {  // Start test mode to load & run model.
-        // QAIAppSvc.exe <1:int:log_level> <2:str:QNN_Libraries_Path> <3:str:model_path> <4:str:perf_profile> 
-        //                  <5:str:input_raw_path> <6:int:input_count> <7:int:memory_size>
-        // input files are under 'input_raw_path' and the file names format are 'input_%d.raw'.
-        // QAIAppSvc.exe 5 ""
+        /* Command formant: QAIAppSvc.exe --log_level <int:log_level> --QNN_Libraries_Path <str:QNN_Libraries_Path> 
+                                          --model_path <str:model_path> --perf_profile <str:perf_profile> --input_path <str:input_raw_path> 
+                                          --input_count <int:input_count> --memory_size<int:memory_size> 
+                                          --binary_updates<str:graph_name,binary_update_path_1;binary_update_path_2>
+         input files are under 'input_raw_path' and the file names format are 'input_%d.raw'.  */
 
-        if (argc <= 6) {
-            printf("Command formant: QAIAppSvc.exe <1:int:log_level> <2:str:QNN_Libraries_Path> <3:str:model_path> <4:str:perf_profile> <5:str:input_raw_path> <6:int:input_count> <7:int:memory_size>\n");
+        try {
+            // Parse command-line arguments
+            auto args = parse_arguments(argc, argv);
+
+            // Extract and validate required parameters
+            int log_level = std::stoi(args["--log_level"][0]);
+            std::string qnn_lib_path = args["--QNN_Libraries_Path"][0];
+            std::string model_path = args["--model_path"][0];
+            std::string perf_profile = args["--perf_profile"][0];
+            std::string input_list_path = args["--input_path"][0];
+            int input_count = std::stoi(args["--input_count"][0]);
+
+            // Handle optional parameters
+            int memory_size = 0;
+            if (args.count("--memory_size")) {
+                memory_size = std::stoi(args["--memory_size"][0]);
+            }
+
+            std::map<std::string, std::vector<std::string>> binary_updates;
+            if (args.count("--binary_updates")) {
+                binary_updates = parse_binary_updates(args["--binary_updates"]);
+            }
+
+            SetLogLevel(log_level);
+
+            if (log_level >= 5) {
+                SetProfilingLevel(2);
+            }
+            else if (log_level >= 3) {
+                SetProfilingLevel(1);
+            }
+
+            // Creating list of adapters 
+            std::vector<LoraAdaptor> adaptors;
+            for (const auto& update : binary_updates) {
+                std::string graph_name = update.first;
+                std::vector<std::string> bin_path = update.second;
+                LoraAdaptor adaptor(graph_name, bin_path);
+                adaptors.push_back(adaptor);
+            }
+            
+
+            hostprocess_run(qnn_lib_path, model_path, input_list_path, input_count, memory_size, perf_profile, adaptors);
+
+        }
+        catch (const std::exception& e) {
+            std::cerr << "Error: " << e.what() << "\n";
+
+            printf("Command formant: QAIAppSvc.exe --log_level <int:log_level> --QNN_Libraries_Path <str:QNN_Libraries_Path> --model_path <str:model_path> --perf_profile <str:perf_profile> --input_path <str:input_raw_path> --input_count <int:input_count> --memory_size<int:memory_size> --binary_updates<str:graph_name,binary_update_path_1;binary_update_path_2>\n");
             printf("'memory_size' is an option parameter, only needed while running the model in remote process.\n");
-            printf("Example: QAIAppSvc.exe 5 \"C:\\test_model\\QNN_binaries\" \"C:\\test_model\\qnn_model\\InceptionV3_quantized.serialized.v73.bin\" \"bust\" \"C:\\test_model\\input\" 1 102400000");
-            return 0;
+            printf("--binary_updates is an optional parameter that can be passed if you want to apply adapters to the graph. This parameter can be specified multiple times if needed.\n");
+            printf("Example: --log_level 2 --QNN_Libraries_Path C:\\user\\lorav2\\qnn_assets\\2.28.2 --model_path C:\\user\\lorav2\\running_sample_app\\models_and_input\\text_encoder.serialized_qnn_2.28.bin --perf_profile burst --input_path C:\\user\\lorav2\\runnig_qai_helper\\text_encoder_inputs --input_count 2 --binary_updates text_encoder,C:\\user\\lorav2\\running_sample_app\\models_and_input\\text_encoder_Stickers_qnn_2.28.bin;C:\\user\\lorav2\\running_sample_app\\models_and_input\\text_encoder_TShirtDesignAF.bin  --memory_size 102400000\n");
+            return 1;
         }
-
-        int log_level = std::stoi(argv[1]);
-        char* qnn_lib_path = argv[2];
-        char* model_path = argv[3];
-        char* perf_profile = argv[4];
-        char* input_list_path = argv[5];
-        int input_count = std::stoi(argv[6]);
-        int memory_size = 0;
-        if (argc > 7) {
-            memory_size = std::stoi(argv[7]);
-        }
-
-        SetLogLevel(log_level);
-
-        if(log_level >= 5) {
-            SetProfilingLevel(2);
-        }
-        else if(log_level >= 3) {
-            SetProfilingLevel(1);
-        }
-        
-        hostprocess_run(qnn_lib_path, model_path, input_list_path, input_count, memory_size, perf_profile);
 
         Print_MemInfo("Main App End.");
     }
 
     return 0;
 }
-

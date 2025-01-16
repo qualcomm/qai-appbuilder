@@ -12,6 +12,7 @@
 
 #include "IOTensor.hpp"
 #include "SampleApp.hpp"
+#include "Lora.hpp"
 
 // zw: For supporting BackendExtensions.
 #include "HTP/QnnHtpPerfInfrastructure.h"
@@ -26,6 +27,15 @@ bool resetPerformance(QnnHtpDevice_PerfInfrastructure_t perfInfra);
 namespace qnn {
 namespace tools {
 namespace sample_app {
+
+struct RunTimeAppKeys {
+    std::string backendLibKey{ "NetRunBackendLibKeyDefault" };
+    std::string backendHandlerKey{ "NetRunBackendHandlerDefault" };
+    std::string modelLibKey{ "NetRunModelKeyDefault" };
+    std::string loggerKey{ "NetRunLoggerKeyDefault" };
+    std::string deviceKey{ "NetRunDeviceKeyDefault" };
+    std::string contextKey{ "NetRunContextKeyDefault" };
+};
 
 enum class StatusCode {
   SUCCESS,
@@ -49,7 +59,8 @@ class QnnSampleApp {
                ProfilingLevel profilingLevel           = ProfilingLevel::OFF,
                bool dumpOutputs                        = false,
                std::string cachedBinaryPath            = "",
-               std::string saveBinaryName              = "");
+               std::string saveBinaryName              = "",
+               const std::vector<LoraAdaptor>& lora_adapters = std::vector<LoraAdaptor>());
 
   // @brief Print a message to STDERR then return a nonzero
   //  exit status.
@@ -88,6 +99,40 @@ class QnnSampleApp {
   StatusCode isDevicePropertySupported();
 
   StatusCode createDevice();
+
+  StatusCode contextApplyBinarySection(QnnContext_SectionType_t section);
+  bool binaryUpdates();
+
+  const std::vector<LoraAdaptor>& m_lora_adapters = {};
+
+  StatusCode applyBinarySection(
+      std::string graphName,
+      std::string binaryPath,
+      QnnContext_SectionType_t sectionType,
+      bool useMmap,
+      ProfilingLevel profilingLevel,
+      ProfilingOption profilingOption);
+
+  StatusCode initializeProfileHandle(
+      const QNN_INTERFACE_VER_TYPE* qnnInterfaceHandle,
+      ProfilingLevel profilingLevel,
+      Qnn_ProfileHandle_t* profileHandle,
+      const uint64_t numMaxEvents);
+
+  StatusCode initializeProfileConfigOption(
+      const QNN_INTERFACE_VER_TYPE* qnnInterfaceHandle,
+      ProfilingOption profilingOption,
+      Qnn_ProfileHandle_t profileHandle);
+
+  StatusCode terminateProfileHandle(
+      const QNN_INTERFACE_VER_TYPE* qnnInterfaceHandle, Qnn_ProfileHandle_t profileHandle);
+
+  StatusCode addGraphsToContext(
+      qnn_wrapper_api::GraphInfo_t** graphInfos, uint32_t numGraphs);
+
+  StatusCode addGraphToContext(
+      qnn_wrapper_api::GraphInfo_t* graphInfo);
+
 
   StatusCode freeDevice();
 
@@ -147,6 +192,11 @@ class QnnSampleApp {
   Qnn_LogHandle_t m_logHandle         = nullptr;
   Qnn_BackendHandle_t m_backendHandle = nullptr;
   Qnn_DeviceHandle_t m_deviceHandle   = nullptr;
+  RunTimeAppKeys m_runTimeAppKeys;
+  uint64_t m_numMaxEvents = std::numeric_limits<uint64_t>::max();
+  std::vector<qnn_wrapper_api::GraphInfo_t*> m_graphInfoPtrList;
+  bool m_useMmap;
+  ProfilingOption m_profilingOption;
 
   // zw.
   uint32_t m_powerConfigId = 1;
