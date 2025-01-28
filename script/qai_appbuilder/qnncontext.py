@@ -248,7 +248,6 @@ class QNNContextProc:
             del(self.m_context)
             m_context = None
 
-
 class QNNShareMemory:
     """High-level Python wrapper for a AppBuilder model."""
     def __init__(self,
@@ -270,9 +269,9 @@ class QNNShareMemory:
             del(self.m_memory)
             m_memory = None
             
-class LoraAdaptor:   # this will just hold data
+class LoraAdapter:   # this will just hold data
     m_adapter = None
     
     def __init__(self, graph_name, lora_file_paths):
-        self.m_adapter = appbuilder.LoraAdaptor(graph_name, lora_file_paths)  # cpp object
+        self.m_adapter = appbuilder.LoraAdapter(graph_name, lora_file_paths)  # cpp object
     

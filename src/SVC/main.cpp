@@ -70,19 +70,19 @@ void ModelLoad(std::string cmdBuf, HANDLE hSvcPipeOutWrite) {
     std::vector<std::string> commands;
     split_string(commands, cmdBuf, ';');
 
-    std::string model_name = commands[0];
-    std::string model_path = commands[1];
-    std::string backend_lib_path = commands[2];
-    std::string system_lib_path = commands[3];
+    std::string model_name                  = commands[0];
+    std::string model_path                  = commands[1];
+    std::string backend_lib_path            = commands[2];
+    std::string system_lib_path             = commands[3];
 
     Print_MemInfo("ModelLoad::ModelInitialize Start.");
     QNN_INF("ModelLoad::ModelInitialize::Model name %s\n", model_name.c_str());
-    std::vector<LoraAdaptor> adaptors ;
-    bSuccess = g_LibAppBuilder.ModelInitialize(model_name.c_str(), model_path, backend_lib_path, system_lib_path, adaptors);
+    std::vector<LoraAdapter> Adapters ;
+    bSuccess = g_LibAppBuilder.ModelInitialize(model_name.c_str(), model_path, backend_lib_path, system_lib_path, Adapters);
     QNN_INF("ModelLoad::ModelInitialize End ret = %d\n", bSuccess);
     Print_MemInfo("ModelLoad::ModelInitialize End.");
 
-    if (bSuccess) {
+    if(bSuccess) {
         bSuccess = WriteFile(hSvcPipeOutWrite, ACTION_OK, (DWORD)strlen(ACTION_OK) + 1, NULL, NULL);
     }
     else {
@@ -210,9 +210,9 @@ int svcprocess_run(HANDLE hSvcPipeInRead, HANDLE hSvcPipeOutWrite) {
 
 // test code, load and run model.
 int hostprocess_run(std::string qnn_lib_path, std::string model_path,
-    std::string input_raw_path, int input_count, int memory_size,
-    std::string perf_profile, const std::vector <LoraAdaptor>& adaptors ) {
-    BOOL result = false;
+                    std::string input_raw_path, int input_count, int memory_size,
+                    std::string perf_profile, const std::vector <LoraAdapter>& Adapters ) {
+                    BOOL result = false;
 
     std::string MODEL_NAME = "<model_name>";
     std::string PROC_NAME = "<proc_name>";
@@ -263,7 +263,7 @@ int hostprocess_run(std::string qnn_lib_path, std::string model_path,
 
     if (0 == memory_size) {    // Load & run model locally.
         QNN_INF("Load and run model locally Start.\n");
-        result = libAppBuilder.ModelInitialize(model_name, model_path, backend_lib_path, system_lib_path, adaptors);
+        result = libAppBuilder.ModelInitialize(model_name, model_path, backend_lib_path, system_lib_path, Adapters);
         Print_MemInfo("ModelInitialize End.");
 
         // SetPerfProfileGlobal("burst");
@@ -284,7 +284,6 @@ int hostprocess_run(std::string qnn_lib_path, std::string model_path,
                 }
                 os.close();
             }
-
             for (int i = 0; i < outputBuffers.size(); i++) {
                 free(outputBuffers[i]);
             }
@@ -456,16 +455,16 @@ int main(int argc, char** argv) {
             }
 
             // Creating list of adapters 
-            std::vector<LoraAdaptor> adaptors;
+            std::vector<LoraAdapter> Adapters;
             for (const auto& update : binary_updates) {
                 std::string graph_name = update.first;
                 std::vector<std::string> bin_path = update.second;
-                LoraAdaptor adaptor(graph_name, bin_path);
-                adaptors.push_back(adaptor);
+                LoraAdapter Adapter(graph_name, bin_path);
+                Adapters.push_back(Adapter);
             }
             
 
-            hostprocess_run(qnn_lib_path, model_path, input_list_path, input_count, memory_size, perf_profile, adaptors);
+            hostprocess_run(qnn_lib_path, model_path, input_list_path, input_count, memory_size, perf_profile, Adapters);
 
         }
         catch (const std::exception& e) {

@@ -56,7 +56,7 @@ public:
                                const std::string& backend_lib_path, const std::string& system_lib_path);
 
     bool ModelInitialize(const std::string& model_name, const std::string& model_path,
-                               const std::string& backend_lib_path, const std::string& system_lib_path, const std::vector<LoraAdaptor>& lora_adapters);
+                               const std::string& backend_lib_path, const std::string& system_lib_path, const std::vector<LoraAdapter>& lora_adapters);
 
     bool ModelInference(std::string model_name, std::vector<uint8_t*>& inputBuffers, 
                               std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,

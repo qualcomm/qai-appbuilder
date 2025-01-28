@@ -24,7 +24,7 @@ namespace qnn {
 namespace tools {
 namespace sample_app {
 
-enum class ProfilingLevel { OFF, BASIC, DETAILED, INVALID, CLIENT};
+enum class ProfilingLevel { OFF, BASIC, DETAILED, INVALID, CLIENT };
 enum class ProfilingOption { NONE, OPTRACE, INVALID };
 
 using ReadInputListRetType_t = std::

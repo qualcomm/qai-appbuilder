@@ -36,7 +36,7 @@ QNNContext::QNNContext(const std::string& model_name, const std::string& proc_na
 
 QNNContext::QNNContext(const std::string& model_name,
                        const std::string& model_path, const std::string& backend_lib_path, 
-                       const std::string& system_lib_path, const std::vector<LoraAdaptor>& lora_adapters) {
+                       const std::string& system_lib_path, const std::vector<LoraAdapter>& lora_adapters) {
     
     m_model_name = model_name;
     m_lora_adapters = lora_adapters;
@@ -112,13 +112,12 @@ PYBIND11_MODULE(appbuilder, m) {
     
     py::class_<QNNContext>(m, "QNNContext")
         .def(py::init<const std::string&, const std::string&, const std::string&, const std::string&>())
-        .def(py::init<const std::string&, const std::string&, const std::string&, const std::string&, const std::vector<LoraAdaptor>&>())
+        .def(py::init<const std::string&, const std::string&, const std::string&, const std::string&, const std::vector<LoraAdapter>&>())
         .def(py::init<const std::string&, const std::string&, const std::string&, const std::string&, const std::string&>())
         .def("Inference", py::overload_cast<const std::vector<py::array_t<float>>&, const std::string&>(&QNNContext::Inference))
         .def("Inference", py::overload_cast<const ShareMemory&, const std::vector<py::array_t<float>>&, const std::string&>(&QNNContext::Inference));
 
-    py::class_<LoraAdaptor>(m, "LoraAdaptor")
+    py::class_<LoraAdapter>(m, "LoraAdapter")
         .def(py::init<const std::string &, const std::vector<std::string> &>());
-
 }
 

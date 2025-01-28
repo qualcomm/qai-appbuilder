@@ -188,7 +188,7 @@ sample_app::QnnSampleApp::QnnSampleApp(QnnFunctionPointers qnnFunctionPointers,
                                        bool dumpOutputs,
                                        std::string cachedBinaryPath,
                                        std::string saveBinaryName, 
-                                       const std::vector<LoraAdaptor>& lora_adapters)
+                                       const std::vector<LoraAdapter>& lora_adapters)
     : m_qnnFunctionPointers(qnnFunctionPointers),
       m_outputPath(outputPath),
       m_saveBinaryName(saveBinaryName),
@@ -677,8 +677,10 @@ sample_app::StatusCode sample_app::QnnSampleApp::initializeProfileHandle(
     return StatusCode::SUCCESS;
 }
 
-bool sample_app::QnnSampleApp::binaryUpdates() { 
-    return m_lora_adapters.size() > 0; }
+bool sample_app::QnnSampleApp::binaryUpdates() {
+    return m_lora_adapters.size() > 0;
+}
+
 
 sample_app::StatusCode sample_app::QnnSampleApp::initializeProfileConfigOption(
     const QNN_INTERFACE_VER_TYPE* qnnInterfaceHandle,

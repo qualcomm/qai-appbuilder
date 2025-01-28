@@ -160,7 +160,7 @@ class QNNContext {
 public:
     std::string m_model_name;
     std::string m_proc_name;
-    std::vector<LoraAdaptor> m_lora_adapters;  
+    std::vector<LoraAdapter> m_lora_adapters;  
 
     QNNContext(const std::string& model_name,
        	       const std::string& model_path, const std::string& backend_lib_path, 
@@ -168,7 +168,7 @@ public:
 
     QNNContext(const std::string& model_name,
        	       const std::string& model_path, const std::string& backend_lib_path, 
-               const std::string& system_lib_path, const std::vector<LoraAdaptor>& lora_adapters);   
+               const std::string& system_lib_path, const std::vector<LoraAdapter>& lora_adapters);   
 
     QNNContext(const std::string& model_name, const std::string& proc_name,
        	       const std::string& model_path, const std::string& backend_lib_path, 

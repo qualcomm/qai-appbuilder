@@ -52,7 +52,7 @@ std::unique_ptr<sample_app::QnnSampleApp> initQnnSampleApp(std::string cachedBin
                                                            std::string backEndPath,
                                                            std::string systemLibraryPath,
                                                            bool loadFromCachedBinary,
-                                                           const std::vector<LoraAdaptor>& lora_adapters) {
+                                                           const std::vector<LoraAdapter>& lora_adapters) {
   // Just keep blank for below paths.
   std::string modelPath;
   std::string cachedBinaryPath2;
@@ -288,7 +288,7 @@ bool DeleteShareMemory(std::string share_memory_name) {
 
 bool ModelInitializeEx(const std::string& model_name, const std::string& proc_name, const std::string& model_path,
                        const std::string& backend_lib_path, const std::string& system_lib_path, 
-                       const std::vector<LoraAdaptor>& lora_adapters) {
+                       const std::vector<LoraAdapter>& lora_adapters) {
   bool result = false;
   QNN_INF("LibAppBuilder::ModelInitialize: %s \n", model_name.c_str());
 
@@ -392,7 +392,7 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
         }
     }
 
-    // apply lora adaptor on graph
+    // apply lora Adapter on graph
     if (app->binaryUpdates() &&
         sample_app::StatusCode::SUCCESS != app->contextApplyBinarySection(QNN_CONTEXT_SECTION_UPDATABLE)) {
         return app->reportError("Binary update/execution failure");
@@ -518,12 +518,12 @@ bool LibAppBuilder::ModelInitialize(const std::string& model_name, const std::st
 
 bool LibAppBuilder::ModelInitialize(const std::string& model_name, const std::string& model_path,
                                          const std::string& backend_lib_path, const std::string& system_lib_path) {
-    std::vector<LoraAdaptor> adaptors = std::vector<LoraAdaptor>();
-    return ModelInitializeEx(model_name, "", model_path, backend_lib_path, system_lib_path, adaptors);   
+    std::vector<LoraAdapter> Adapters = std::vector<LoraAdapter>();
+    return ModelInitializeEx(model_name, "", model_path, backend_lib_path, system_lib_path, Adapters);   
 }
 
 bool LibAppBuilder::ModelInitialize(const std::string& model_name, const std::string& model_path,
-                                         const std::string& backend_lib_path, const std::string& system_lib_path,const std::vector<LoraAdaptor>& lora_adapters) {
+                                         const std::string& backend_lib_path, const std::string& system_lib_path,const std::vector<LoraAdapter>& lora_adapters) {
     return ModelInitializeEx(model_name, "", model_path, backend_lib_path, system_lib_path, lora_adapters);
 }
 

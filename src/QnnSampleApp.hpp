@@ -60,7 +60,7 @@ class QnnSampleApp {
                bool dumpOutputs                        = false,
                std::string cachedBinaryPath            = "",
                std::string saveBinaryName              = "",
-               const std::vector<LoraAdaptor>& lora_adapters = std::vector<LoraAdaptor>());
+               const std::vector<LoraAdapter>& lora_adapters = std::vector<LoraAdapter>());
 
   // @brief Print a message to STDERR then return a nonzero
   //  exit status.
@@ -103,7 +103,7 @@ class QnnSampleApp {
   StatusCode contextApplyBinarySection(QnnContext_SectionType_t section);
   bool binaryUpdates();
 
-  const std::vector<LoraAdaptor>& m_lora_adapters = {};
+  const std::vector<LoraAdapter>& m_lora_adapters = {};
 
   StatusCode applyBinarySection(
       std::string graphName,
@@ -132,7 +132,6 @@ class QnnSampleApp {
 
   StatusCode addGraphToContext(
       qnn_wrapper_api::GraphInfo_t* graphInfo);
-
 
   StatusCode freeDevice();
 
