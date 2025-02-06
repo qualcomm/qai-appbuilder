@@ -31,11 +31,7 @@ cd ai-engine-direct-helper\samples\python
 ### Step 4: Setup QAI AppBuilder Python Environment:
 Run below commands in Windows terminal:
 ```
-python setup.py --qnn-sdk-version <version of QNN SDK>
-```
-Where `<version of QNN SDK>` is the version of QNN SDK you want to use. For example, if you want to use QNN SDK 2.24.0, you can run:
-```
-python setup.py --qnn-sdk-version 2.24
+python setup.py
 ```
 
 ### Step 5: Run Model:

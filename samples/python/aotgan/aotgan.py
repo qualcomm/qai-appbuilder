@@ -8,6 +8,7 @@ import os
 sys.path.append(".")
 sys.path.append("..")
 import utils.install as install
+install.install_qai_appbuilder("2.28")
 import numpy as np
 import torch
 import torchvision.transforms as transforms

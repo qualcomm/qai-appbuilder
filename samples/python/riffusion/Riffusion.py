@@ -9,6 +9,7 @@ sys.path.append("..")
 os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = "1"  # Disable 'cache-system uses symlinks' warning.
 os.environ['HF_ENDPOINT'] = "https://hf-api.gitee.com"
 import utils.install as install
+install.install_qai_appbuilder("2.24")
 import time
 from PIL import Image
 import shutil
@@ -45,7 +46,7 @@ TIMESTEP_HTLP_URL           = "https://github.com/quic/ai-engine-direct-helper/b
 ####################################################################
 
 execution_ws = os.getcwd()
-qnn_dir = execution_ws + "\\qai_libs"
+qnn_dir = execution_ws + "\\qai_libs_2.24"
 
 if not MODEL_NAME in execution_ws:
     execution_ws = execution_ws + "\\" + MODEL_NAME

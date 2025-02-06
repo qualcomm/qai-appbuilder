@@ -4,6 +4,7 @@
 # ---------------------------------------------------------------------
 import os
 import sys
+import platform
 import subprocess
 import zipfile
 import requests
@@ -17,13 +18,11 @@ import urllib.request as request
 
 qnn_sdk_version =  {
     "2.24": "2.24.0.240626",
-    "2.26": "2.26.0.240828",
     "2.28": "2.28.0.241029",
 }
 
 DEFAULT_DSP_ARCH    = "73"  # For X-Elite device.
-DEFAULT_LIB_VERSION = "arm64x-windows-msvc" # "aarch64-windows-msvc" # For X-Elite device.
-QNN_LIBS_DIR        = "qai_libs"
+DEFAULT_LIB_ARCH = "arm64x-windows-msvc" # "aarch64-windows-msvc" # For X-Elite device.
 
 QNN_SDK_URL = "https://softwarecenter.qualcomm.com/api/download/software/qualcomm_neural_processing_sdk/"
 QAI_APPBUILDER_WHEEL = "https://github.com/quic/ai-engine-direct-helper/releases/download/vversion.0/qai_appbuilder-version.0-cp312-cp312-win_amd64.whl"
@@ -309,39 +308,6 @@ def run_uninstall_pip(command, desc=None, live=False):
     return run(f'"{python}" -m pip {command} ', desc=f"Uninstalling {desc}", errdesc=f"Couldn't install {desc}", live=live)
 
 
-def setup_qai_env(version, lib_version = DEFAULT_LIB_VERSION, dsp_arch = DEFAULT_DSP_ARCH,):
-    if version in qnn_sdk_version:
-        full_version = qnn_sdk_version[version]
-        qnn_root_path = QNN_SDK_ROOT + full_version
-
-        SDK_lib_dir = qnn_root_path + "\\lib\\" + lib_version
-        SDK_hexagon_dir = qnn_root_path + "\\lib\\hexagon-v{}\\unsigned".format(dsp_arch)
-
-        os.makedirs(QNN_LIBS_DIR, exist_ok=True)
-
-        libs = [
-            "QnnHtp.dll",
-            "QnnSystem.dll",
-            "QnnHtpPrepare.dll",
-            "QnnHtpV{}Stub.dll".format(dsp_arch),
-        ]
-
-        hexagon_libs = [
-            "libQnnHtpV{}Skel.so".format(dsp_arch),
-            "libqnnhtpv73.cat",
-        ]
-
-        for lib in libs:
-            if os.path.isfile(os.path.join(QNN_LIBS_DIR, lib)):
-                os.remove(os.path.join(QNN_LIBS_DIR, lib)) 
-            shutil.copy(os.path.join(SDK_lib_dir, lib), QNN_LIBS_DIR)
-
-        for lib in hexagon_libs:
-            if os.path.isfile(os.path.join(QNN_LIBS_DIR, lib)):
-                os.remove(os.path.join(QNN_LIBS_DIR, lib))
-            shutil.copy(os.path.join(SDK_hexagon_dir, lib), QNN_LIBS_DIR)
-
-
 def install_tools():
     tool_path = "tools"
     wget_path = tool_path + "\\wget"
@@ -373,6 +339,39 @@ def install_clean(directory, zip_name):
             filepath = os.path.join(directory, filename)
             os.remove(filepath)
             print(f"Deleted file: {filepath}")
+
+
+def setup_qai_env(version, lib_arch = DEFAULT_LIB_ARCH, dsp_arch = DEFAULT_DSP_ARCH, qnn_libs_dir="qai_libs"):
+    if version in qnn_sdk_version:
+        full_version = qnn_sdk_version[version]
+        qnn_root_path = QNN_SDK_ROOT + full_version
+
+        SDK_lib_dir = qnn_root_path + "\\lib\\" + lib_arch
+        SDK_hexagon_dir = qnn_root_path + "\\lib\\hexagon-v{}\\unsigned".format(dsp_arch)
+
+        os.makedirs(qnn_libs_dir, exist_ok=True)
+
+        libs = [
+            "QnnHtp.dll",
+            "QnnSystem.dll",
+            "QnnHtpPrepare.dll",
+            "QnnHtpV{}Stub.dll".format(dsp_arch),
+        ]
+
+        hexagon_libs = [
+            "libQnnHtpV{}Skel.so".format(dsp_arch),
+            "libqnnhtpv73.cat",
+        ]
+
+        for lib in libs:
+            if os.path.isfile(os.path.join(qnn_libs_dir, lib)):
+                os.remove(os.path.join(qnn_libs_dir, lib)) 
+            shutil.copy(os.path.join(SDK_lib_dir, lib), qnn_libs_dir)
+
+        for lib in hexagon_libs:
+            if os.path.isfile(os.path.join(qnn_libs_dir, lib)):
+                os.remove(os.path.join(qnn_libs_dir, lib))
+            shutil.copy(os.path.join(SDK_hexagon_dir, lib), qnn_libs_dir)
 
 
 def install_qai_sdk(version):
@@ -423,10 +422,16 @@ def install_qai_sdk(version):
         return None
 
 
-def install_qai_appbuilder(version, lib_version):
+def install_qai_appbuilder(version):
+    lib_arch = "aarch64-windows-msvc"
+    machine = platform.machine()
+    sysinfo = sys.version
+    if machine == "AMD64" or "AMD64" in sysinfo:
+        lib_arch = DEFAULT_LIB_ARCH
+
     if version in qnn_sdk_version:
         qai_appbuilder_wheel = QAI_APPBUILDER_WHEEL.replace("version", version)
-        if lib_version == "aarch64-windows-msvc":
+        if lib_arch == "aarch64-windows-msvc":
             qai_appbuilder_wheel = qai_appbuilder_wheel.replace("win_amd64", "win_arm64")
 
         dist = is_installed("qai_appbuilder")
@@ -437,4 +442,3 @@ def install_qai_appbuilder(version, lib_version):
 
         if (not dist) or (dist.version != version_install) :
             run_pip(f"install {qai_appbuilder_wheel}", "QAI AppBuilder " + version_install)
-
