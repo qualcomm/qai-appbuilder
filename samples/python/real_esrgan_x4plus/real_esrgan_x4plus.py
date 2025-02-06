@@ -14,8 +14,14 @@ import torch
 import torchvision.transforms as transforms
 from PIL import Image
 from PIL.Image import fromarray as ImageFromArray
-
+from utils.image_processing import (
+    preprocess_PIL_image,
+    torch_tensor_to_PIL_image,
+    pil_resize_pad,
+    pil_undo_resize_pad
+)
 from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig)
+
 
 ####################################################################
 
@@ -27,6 +33,10 @@ IMAGE_SIZE = 512
 ####################################################################
 
 execution_ws = os.getcwd()
+
+if not "python" in execution_ws:
+    execution_ws = execution_ws + "\\..\\" + "python"
+
 qnn_dir = execution_ws + "\\qai_libs"
 
 if not MODEL_NAME in execution_ws:
@@ -35,27 +45,12 @@ if not MODEL_NAME in execution_ws:
 model_dir = execution_ws + "\\models"
 madel_path = model_dir + "\\" + MODEL_NAME + ".bin"
 
+
 ####################################################################
 
 image_buffer = None
 realesrgan = None
 
-def preprocess_PIL_image(image: Image) -> torch.Tensor:
-    """Convert a PIL image into a pyTorch tensor with range [0, 1] and shape NCHW."""
-    transform = transforms.Compose([transforms.Resize(IMAGE_SIZE),      # bgr image
-                                    transforms.CenterCrop(IMAGE_SIZE),
-                                    transforms.PILToTensor()])
-    img: torch.Tensor = transform(image)  # type: ignore
-    img = img.float() / 255.0  # int 0 - 255 to float 0.0 - 1.0
-    return img
-
-def torch_tensor_to_PIL_image(data: torch.Tensor) -> Image:
-    """
-    Convert a Torch tensor (dtype float32) with range [0, 1] and shape CHW into PIL image CHW
-    """
-    out = torch.clip(data, min=0.0, max=1.0)
-    np_out = (out.detach().numpy() * 255).astype(np.uint8)
-    return ImageFromArray(np_out)
 
 # RealESRGan class which inherited from the class QNNContext.
 class RealESRGan(QNNContext):
@@ -85,13 +80,15 @@ def Init():
     # Instance for RealESRGan objects.
     realesrgan = RealESRGan("realesrgan", madel_path)
 
-def Inference(input_image_path, output_image_path):
+def Inference(input_image_path, output_image_path, show_image = True):
     global image_buffer
 
     # Read and preprocess the image.
-    image = Image.open(input_image_path)
-    image = preprocess_PIL_image(image).numpy()
-    image = np.transpose(image, (1, 2, 0))  # CHW -> HWC
+    orig_image = Image.open(input_image_path)
+    image, scale, padding = pil_resize_pad(orig_image, (IMAGE_SIZE, IMAGE_SIZE))
+
+    image = np.array(image)
+    image = np.clip(image, 0, 255) / 255.0  # normalization
 
     # Burst the HTP.
     PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
@@ -102,14 +99,21 @@ def Inference(input_image_path, output_image_path):
     # Reset the HTP.
     PerfProfile.RelPerfProfileGlobal()
 
-    # show & save the result
-    output_image = torch.from_numpy(output_image)
     output_image = output_image.reshape(IMAGE_SIZE * 4, IMAGE_SIZE * 4, 3)
-    output_image = torch.unsqueeze(output_image, 0)
-    output_image = [torch_tensor_to_PIL_image(img) for img in output_image]
-    image_buffer = output_image[0]
+    
+    output_image = np.clip(output_image, 0.0, 1.0)
+    output_image = (output_image * 255).astype(np.uint8) # un-normalization
+    output_image = ImageFromArray(output_image)
+
+    image_size = (orig_image.size[0] * 4, orig_image.size[1] * 4)
+    image_padding = (padding[0] * 4, padding[1] * 4)
+    image_buffer = pil_undo_resize_pad(output_image, image_size, scale, image_padding)
+
+    # show & save the result
     image_buffer.save(output_image_path)
-    image_buffer.show()
+    
+    if show_image:
+        image_buffer.show()
 
 def Release():
     global realesrgan
@@ -117,10 +121,9 @@ def Release():
     # Release the resources.
     del(realesrgan)
 
+if __name__ == '__main__':
+    Init()
 
-Init()
+    Inference(execution_ws + "\\input.jpg", execution_ws + "\\output.jpg")
 
-Inference(execution_ws + "\\input.jpg", execution_ws + "\\output.jpg")
-
-Release()
-
+    Release()

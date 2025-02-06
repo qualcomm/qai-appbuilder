@@ -45,6 +45,10 @@ TIMESTEP_HTLP_URL           = "https://github.com/quic/ai-engine-direct-helper/b
 ####################################################################
 
 execution_ws = os.getcwd()
+
+if not "python" in execution_ws:
+    execution_ws = execution_ws + "\\..\\" + "python"
+
 qnn_dir = execution_ws + "\\qai_libs"
 
 if not MODEL_NAME in execution_ws:
@@ -117,6 +121,10 @@ def model_initialize():
 
     result = True
 
+    SetQNNConfig()
+
+    model_download()
+
     # model names
     model_text_encoder  = "text_encoder"
     model_unet          = "model_unet"
@@ -166,13 +174,15 @@ def setup_parameters(prompt, un_prompt, seed, step, text_guidance):
 
     user_prompt = prompt
     uncond_prompt = un_prompt
-    user_seed = seed
+    user_seed = np.int64(seed)
     user_step = step
     user_text_guidance = text_guidance
+    
+    if user_seed == -1:
+        user_seed = np.random.randint(low=0, high=9999999999, size=None, dtype=np.int64)
 
     assert isinstance(user_seed, np.int64) == True, "user_seed should be of type int64"
     assert isinstance(user_step, int) == True, "user_step should be of type int"
-    assert user_step == 20 or user_step == 30 or user_step == 50, "user_step should be either 20, 30 or 50"
     assert isinstance(user_text_guidance, float) == True, "user_text_guidance should be of type float"
     assert user_text_guidance >= 5.0 and user_text_guidance <= 15.0, "user_text_guidance should be a float from [5.0, 15.0]"
 
@@ -201,7 +211,7 @@ def get_time_embedding(timestep, time_embeddings):
     return emb
 
 # Execute the Stable Diffusion pipeline
-def model_execute(callback):
+def model_execute(callback, image_path, show_image = True):
     PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
 
     scheduler.set_timesteps(user_step)  # Setting up user provided time steps for Scheduler
@@ -250,7 +260,7 @@ def model_execute(callback):
         callback(None)
     else:
         image_size = 512
-        image_path = execution_ws + "\\images"
+
         if not os.path.exists(image_path):
             os.makedirs(image_path, exist_ok=True)
         image_path = image_path + "\\%s_%s_%s.jpg"%(formatted_time, str(user_seed), str(image_size))
@@ -259,11 +269,15 @@ def model_execute(callback):
         output_image = output_image.reshape(image_size, image_size, -1)
         output_image = Image.fromarray(output_image, mode="RGB")
         output_image.save(image_path)
-        output_image.show()
+        
+        if show_image:
+            output_image.show()
 
         callback(image_path)
 
     PerfProfile.RelPerfProfileGlobal()
+
+    return image_path
 
 # Release all the models.
 def model_destroy():
@@ -323,10 +337,6 @@ if __name__ == "__main__":
     parser.add_argument("--prompt", default=DEFAULT_PROMPT, type=str)
     args = parser.parse_args()
 
-    SetQNNConfig()
-
-    model_download()
-
     model_initialize()
 
     time_start = time.time()
@@ -338,7 +348,7 @@ if __name__ == "__main__":
     user_text_guidance = 7.5
 
     setup_parameters(user_prompt, uncond_prompt, user_seed, user_step, user_text_guidance)
-    model_execute(modelExecuteCallback)
+    model_execute(modelExecuteCallback, execution_ws + "\\images")
 
     time_end = time.time()
     print("time consumes for inference {}(s)".format(str(time_end - time_start)))
