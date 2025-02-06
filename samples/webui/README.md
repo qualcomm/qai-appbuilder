@@ -5,7 +5,7 @@ This guide helps developers use QAI AppBuilder + Python Gradio extension to buil
 
 ## Setting Up Environment For WebUI Apps:
 ### Step 1: Install basic dependencies
-Refer below link to setup basic dependencies: <br>
+Refer to below link to setup basic dependencies: <br>
 https://github.com/quic/ai-engine-direct-helper/blob/main/samples/python/README.md#setting-up-qai-appbuilder-python-environment-automatically-for-x64-python <br>
 
 ### Step 2: Install basic Python dependencies
