@@ -217,6 +217,9 @@ def download_url_wget(url, filepath, filesize=None, desc=None, fail=None):
 
     try:
         wget_exe_path = "tools\\wget\\wget.exe"
+        if not os.path.exists(wget_exe_path):
+            wget_exe_path = "..\\python\\tools\\wget\\wget.exe"
+
         wget_url = "https://eternallybored.org/misc/wget/releases/wget-1.21.4-winarm64.zip"
 
         if not os.path.exists(wget_exe_path):
