@@ -290,6 +290,7 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
                        const std::string& backend_lib_path, const std::string& system_lib_path, 
                        const std::vector<LoraAdapter>& lora_adapters) {
   bool result = false;
+
   QNN_INF("LibAppBuilder::ModelInitialize: %s \n", model_name.c_str());
 
 #ifdef _WIN32

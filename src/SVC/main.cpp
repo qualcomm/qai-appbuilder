@@ -187,17 +187,17 @@ int svcprocess_run(HANDLE hSvcPipeInRead, HANDLE hSvcPipeOutWrite) {
 
         char* cmdBuf = g_buffer + 1;
         switch (g_buffer[0]) {
-        case 'l':   // load model.
-            ModelLoad(cmdBuf, hSvcPipeOutWrite);
-            break;
+            case 'l':   // load model.
+                ModelLoad(cmdBuf, hSvcPipeOutWrite);
+                break;
 
-        case 'g':   // run Graphs.
-            ModelRun(cmdBuf, hSvcPipeOutWrite);
-            break;
+            case 'g':   // run Graphs.
+                ModelRun(cmdBuf, hSvcPipeOutWrite);
+                break;
 
-        case 'r':   // release model.
-            ModelRelease(cmdBuf, hSvcPipeOutWrite);
-            break;
+            case 'r':   // release model.
+                ModelRelease(cmdBuf, hSvcPipeOutWrite);
+                break;
         }
     }
 
@@ -212,7 +212,7 @@ int svcprocess_run(HANDLE hSvcPipeInRead, HANDLE hSvcPipeOutWrite) {
 int hostprocess_run(std::string qnn_lib_path, std::string model_path,
                     std::string input_raw_path, int input_count, int memory_size,
                     std::string perf_profile, const std::vector <LoraAdapter>& Adapters ) {
-                    BOOL result = false;
+    BOOL result = false;
 
     std::string MODEL_NAME = "<model_name>";
     std::string PROC_NAME = "<proc_name>";
@@ -284,6 +284,7 @@ int hostprocess_run(std::string qnn_lib_path, std::string model_path,
                 }
                 os.close();
             }
+
             for (int i = 0; i < outputBuffers.size(); i++) {
                 free(outputBuffers[i]);
             }
@@ -420,7 +421,8 @@ int main(int argc, char** argv) {
                                           --model_path <str:model_path> --perf_profile <str:perf_profile> --input_path <str:input_raw_path> 
                                           --input_count <int:input_count> --memory_size<int:memory_size> 
                                           --binary_updates<str:graph_name,binary_update_path_1;binary_update_path_2>
-         input files are under 'input_raw_path' and the file names format are 'input_%d.raw'.  */
+         input files are under 'input_raw_path' and the file names format are 'input_%d.raw'. 
+         */
 
         try {
             // Parse command-line arguments
@@ -482,3 +484,4 @@ int main(int argc, char** argv) {
 
     return 0;
 }
+
