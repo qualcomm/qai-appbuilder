@@ -8,7 +8,7 @@ import os
 sys.path.append(".")
 sys.path.append("..")
 import utils.install as install
-install.install_qai_appbuilder("2.28")
+install.install_qai_appbuilder(install.DEFAULT_SDK_VER)
 import numpy as np
 import math
 from PIL import Image, ImageDraw

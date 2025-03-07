@@ -23,9 +23,13 @@ cd ai-engine-direct-helper\samples\webui
 ### Step 4: Run WebUI Apps:
 Run the commands in below table to start WebUI apps.
 
-### Support AI App List:
+### WebUI App List:
 
 |  Model   | QNN SDK Version  | Command  |
 |  ----  | :----:   |  ----  |
 | ImageRepairApp | 2.28 | python ImageRepairApp.py |
 | StableDiffusionApp | 2.24 | python StableDiffusionApp.py |
+
+### Screenshots:
+![image](screenshot/ImageRepairApp.jpg)
+![image](screenshot/StableDiffusionApp.jpg)

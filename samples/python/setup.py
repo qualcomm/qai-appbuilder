@@ -28,7 +28,7 @@ if __name__ == "__main__":
         install.install_tools()
 
         if qnn_sdk_version == "both":
-            qnn_sdk_version = "2.28"
+            qnn_sdk_version = "2.31"
             install.install_qai_sdk(qnn_sdk_version)
             install.setup_qai_env(qnn_sdk_version, lib_arch, dsp_arch, "qai_libs")
 

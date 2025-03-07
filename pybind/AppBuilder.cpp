@@ -7,10 +7,9 @@
 //==============================================================================
 
 #include "AppBuilder.h"
+#include "common.h"
 #include "Lora.hpp"
 #include <ostream>
-
-#define APPBUILDER_VERSION "2.28.2"
 
 ShareMemory::ShareMemory(const std::string& share_memory_name, const size_t share_memory_size) {
     m_share_memory_name = share_memory_name;
@@ -109,7 +108,7 @@ PYBIND11_MODULE(appbuilder, m) {
 
     py::class_<ShareMemory>(m, "ShareMemory")
         .def(py::init<const std::string&, const size_t>());
-    
+
     py::class_<QNNContext>(m, "QNNContext")
         .def(py::init<const std::string&, const std::string&, const std::string&, const std::string&>())
         .def(py::init<const std::string&, const std::string&, const std::string&, const std::string&, const std::vector<LoraAdapter>&>())

@@ -13,3 +13,4 @@ if sys.platform.startswith('linux'):
     ctypes.CDLL(g_base_path + "/libappbuilder.so", ctypes.RTLD_GLOBAL)
 
 from .qnncontext import *
+from .geniecontext import *

@@ -8,7 +8,7 @@ import os
 sys.path.append(".")
 sys.path.append("..")
 import utils.install as install
-install.install_qai_appbuilder("2.28")
+install.install_qai_appbuilder(install.DEFAULT_SDK_VER)
 import cv2
 import numpy as np
 import torch
@@ -90,7 +90,7 @@ def Init():
     model_download()
 
     # Config AppBuilder environment.
-    QNNConfig.Config(os.getcwd() + "\\qai_libs", Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for InceptionV3 objects.
     inceptionV3 = InceptionV3("inceptionV3", madel_path)

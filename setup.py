@@ -7,7 +7,7 @@
 #=============================================================================
 
 # Compile Commands: 
-# Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.28.0.241029\
+# Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.31.0.250130\
 # python setup.py bdist_wheel
 
 import os
@@ -22,7 +22,7 @@ import zipfile
 from setuptools import Extension, setup, find_packages
 from setuptools.command.build_ext import build_ext
 
-VERSION = "2.28.2"
+VERSION = "2.31.0"
 CONFIG = "Release"  # Release, RelWithDebInfo
 package_name = "qai_appbuilder"
 
@@ -50,6 +50,10 @@ if arch == "ARM64EC":
 elif arch == "aarch64":
     PACKAGE_ZIP  = "QAI_AppBuilder-linux_arm64-QNN" + VERSION + "-" + CONFIG + ".zip"
 
+QNN_SDK_ROOT = os.environ.get("QNN_SDK_ROOT")
+print("-- QNN_SDK_ROOT: ", QNN_SDK_ROOT)
+
+
 def zip_package(dirpath, outFullName):
     zip = zipfile.ZipFile(outFullName, "w", zipfile.ZIP_DEFLATED)
     for path, dirnames, filenames in os.walk(dirpath):
@@ -69,6 +73,8 @@ def build_clean():
         os.remove(binary_path + "/libappbuilder.pdb")
     if os.path.exists(binary_path + "/libappbuilder.so"):
         os.remove(binary_path + "/libappbuilder.so")
+    if os.path.exists(binary_path + "/Genie.dll"):
+        os.remove(binary_path + "/Genie.dll")
 
 def build_cmake():
     if not os.path.exists("build"):
@@ -86,6 +92,16 @@ def build_cmake():
         shutil.copy("lib/" + CONFIG + "/libappbuilder.pdb", binary_path)
     if os.path.exists("lib/" + "libappbuilder.so"):
         shutil.copy("lib/" + "libappbuilder.so", binary_path)
+
+    if sys.platform.startswith('win'): # Copy Genie library to 'lib' folder for compiling GenieBuilder pyd.
+        LIB_PATH = QNN_SDK_ROOT + "/lib/aarch64-windows-msvc"
+        if arch == "ARM64EC": # TODO: No ARM64EC support in Genie SDK yet.
+            LIB_PATH = QNN_SDK_ROOT + "/lib/arm64x-windows-msvc"
+
+    if os.path.exists(LIB_PATH + "/Genie.dll"):
+        shutil.copy(LIB_PATH + "/Genie.dll", binary_path)
+        shutil.copy(LIB_PATH + "/Genie.dll", "lib/Release")
+        shutil.copy(LIB_PATH + "/Genie.lib", "lib/Release")
 
 build_cmake()
 
@@ -132,8 +148,6 @@ class CMakeBuild(build_ext):
         cmake_args = f" -DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}{os.sep}" + f" -DPYTHON_EXECUTABLE={sys.executable}" + f" -DCMAKE_BUILD_TYPE={cfg}"  # not used on MSVC, but no harm
 
         build_args = ""
-        #if "CMAKE_ARGS" in os.environ:
-        #    cmake_args += [item for item in os.environ["CMAKE_ARGS"].split(" ") if item]
 
         # We pass in the version to C++. You might not need to.
         cmake_args += f" -DVERSION_INFO={self.distribution.get_version()}"
@@ -187,15 +201,14 @@ setup(
     author='quic-zhanweiw',
     author_email='quic_zhanweiw@quicinc.com',
     license='BSD-3-Clause',
-    python_requires='>=3.8',
-    install_requires=['pybind11>=2.11.1'
-                      ],
+    python_requires='>=3.10',
+    # install_requires=['pybind11>=2.13.6'],
     classifiers=[
         'Development Status :: 3 - Alpha',
         'Intended Audience :: Qualcomm CE',
         'License :: OSI Approved :: BSD License',
         'Operating System :: Windows On Snapdragon"',
-        'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
     ],
 )
 
