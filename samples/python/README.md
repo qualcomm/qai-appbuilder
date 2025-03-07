@@ -3,12 +3,7 @@
 ## Introduction 
 This guide helps developers use QAI AppBuilder with the QNN SDK to execute models on Windows on Snapdragon (WoS) platforms.
 
-## Setting Up QAI AppBuilder Python Environment Manually For ARM64 Python:
-https://github.com/quic/ai-engine-direct-helper/blob/main/README.md <br>
-https://github.com/quic/ai-engine-direct-helper/blob/main/Docs/User_Guide.md <br>
-https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python/docs/guide.md
-
-## Setting Up QAI AppBuilder Python Environment Automatically For X64 Python:
+## Setting Up QAI AppBuilder Python Environment:
 
 ### Step 1: Install Dependencies
 Download and install [git](https://github.com/dennisameling/git/releases/download/v2.47.0.windows.2/Git-2.47.0.2-arm64.exe) and [x64 Python 3.12.8](https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe)
