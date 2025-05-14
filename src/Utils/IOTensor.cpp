@@ -10,6 +10,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <random>
 
 #include "DataUtil.hpp"
 #include "IOTensor.hpp"
@@ -425,6 +426,40 @@ iotensor::StatusCode iotensor::IOTensor::getTensorsSize(Qnn_Tensor_t** tensors, 
     size.push_back(length);
   }
   return returnStatus;
+}
+
+// Helper method to populate all input tensors with random values during execution.
+iotensor::StatusCode iotensor::IOTensor::populateInputTensorsWithRandValues(
+    uint32_t graphIdx, Qnn_Tensor_t* inputs, qnn_wrapper_api::GraphInfo_t graphInfo) {
+  QNN_DEBUG("populateInputTensorsWithRandValues() graphIndx %d", graphIdx);
+  if (nullptr == inputs) {
+    QNN_ERROR("inputs is nullptr");
+    return StatusCode::FAILURE;
+  }
+  auto inputCount = graphInfo.numInputTensors;
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<> distrib(0, 255);
+
+  for (size_t inputIdx = 0; inputIdx < inputCount; inputIdx++) {
+    // Get tensor length in bytes
+    size_t tensorLength{0};
+    const Qnn_Tensor_t& inputTensor = graphInfo.inputTensors[inputIdx];
+    std::vector<size_t> dims;
+    fillDims(dims, QNN_TENSOR_GET_DIMENSIONS(inputTensor), QNN_TENSOR_GET_RANK(inputTensor));
+    datautil::StatusCode datautilStatus{datautil::StatusCode::SUCCESS};
+    std::tie(datautilStatus, tensorLength) =
+        datautil::calculateLength(dims, QNN_TENSOR_GET_DATA_TYPE(inputTensor));
+    if (datautilStatus != datautil::StatusCode::SUCCESS) {
+      return StatusCode::FAILURE;
+    }
+
+    for (size_t byteIndex = 0; byteIndex < tensorLength; ++byteIndex) {
+      reinterpret_cast<uint8_t*>(QNN_TENSOR_GET_CLIENT_BUF(inputs[inputIdx]).data)[byteIndex] =
+          static_cast<uint8_t>(distrib(gen));
+    }
+  }
+  return StatusCode::SUCCESS;
 }
 
 // Setup details for Qnn_Tensor_t for execution

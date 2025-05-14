@@ -5,7 +5,7 @@
 import os
 import sys
 sys.path.append(".")
-sys.path.append("../python")
+sys.path.append("python")
 import stable_diffusion_v2_1.stable_diffusion_v2_1 as stable_diffusion_v2_1 # We need add this line before import 'gradio'.
 import gradio as gr
 

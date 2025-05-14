@@ -6,17 +6,16 @@
 import sys
 import os
 sys.path.append(".")
-sys.path.append("..")
+sys.path.append("python")
 import utils.install as install
-install.install_qai_appbuilder(install.DEFAULT_SDK_VER)
 import numpy as np
-import math
 from PIL import Image
 import torch
 from utils.image_processing import (
     preprocess_PIL_image,
     torch_tensor_to_PIL_image,
-    pil_resize_pad
+    pil_resize_pad,
+    pil_undo_resize_pad
 )
 from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig)
 
@@ -32,6 +31,9 @@ IMAGE_SIZE_W = 1280
 
 execution_ws = os.getcwd()
 qnn_dir = execution_ws + "\\qai_libs"
+
+if not "python" in execution_ws:
+    execution_ws = execution_ws + "\\" + "python"
 
 if not MODEL_NAME in execution_ws:
     execution_ws = execution_ws + "\\" + MODEL_NAME
@@ -74,7 +76,8 @@ def Init():
 def Inference(input_image_path, output_image_path): 
     # Read and preprocess the image.
     image = Image.open(input_image_path)
-    image, _, _ = pil_resize_pad(image, (IMAGE_SIZE_H, IMAGE_SIZE_W))
+    width, height = image.size
+    image, _scale, _padding = pil_resize_pad(image, (IMAGE_SIZE_H, IMAGE_SIZE_W), "reflect")
     image_input = image
 
     image = preprocess_PIL_image(image).numpy()
@@ -97,9 +100,16 @@ def Inference(input_image_path, output_image_path):
 
     #save and display the output_image
     mask = Image.fromarray(mask)
-    mask.save(execution_ws + "\\output_mask.jpg")
-    mask.show()
+    image_size = (width, height)
+    image_padding = (_padding[0],_padding[1])
+
+    mask_image = Image.blend(image_input.convert("RGBA"), mask.convert("RGBA"), alpha=1.0)
+    mask_image = pil_undo_resize_pad(mask_image,image_size,_scale,image_padding)
+    mask_image.save(execution_ws + "\\output_mask.png")
+    mask_image.show()
+
     output_image = Image.blend(image_input.convert("RGBA"), mask.convert("RGBA"), alpha=0.5)
+    output_image = pil_undo_resize_pad(output_image,image_size,_scale,image_padding)
     output_image.save(output_image_path)
     output_image.show()
 

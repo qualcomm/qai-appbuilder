@@ -88,15 +88,14 @@ class QnnSampleApp {
 
   StatusCode terminateBackend();
 
-  StatusCode freeGraphs();
-
-  Qnn_ContextHandle_t getContext();
-
+  StatusCode freeGraphs();  // zw.
   StatusCode initializeProfiling();
 
   std::string getBackendBuildId();
 
   StatusCode isDevicePropertySupported();
+
+  StatusCode isFinalizeDeserializedGraphSupported();
 
   StatusCode createDevice();
 

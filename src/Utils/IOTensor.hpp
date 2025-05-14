@@ -70,6 +70,10 @@ class IOTensor {
                                   qnn_wrapper_api::GraphInfo_t graphInfo,
                                   InputDataType inputDataType);
 
+  StatusCode populateInputTensorsWithRandValues(uint32_t graphIdx,
+                                                Qnn_Tensor_t *inputs,
+                                                qnn_wrapper_api::GraphInfo_t graphInfo);
+
   StatusCode tearDownInputAndOutputTensors(Qnn_Tensor_t *inputs,
                                            Qnn_Tensor_t *outputs,
                                            size_t numInputTensors,

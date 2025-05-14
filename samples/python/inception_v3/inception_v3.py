@@ -6,9 +6,8 @@
 import sys
 import os
 sys.path.append(".")
-sys.path.append("..")
+sys.path.append("python")
 import utils.install as install
-install.install_qai_appbuilder(install.DEFAULT_SDK_VER)
 import cv2
 import numpy as np
 import torch
@@ -31,6 +30,9 @@ IMAGE_SIZE = 224
 
 execution_ws = os.getcwd()
 qnn_dir = execution_ws + "\\qai_libs"
+
+if not "python" in execution_ws:
+    execution_ws = execution_ws + "\\" + "python"
 
 if not MODEL_NAME in execution_ws:
     execution_ws = execution_ws + "\\" + MODEL_NAME
@@ -95,7 +97,7 @@ def Init():
     # Instance for InceptionV3 objects.
     inceptionV3 = InceptionV3("inceptionV3", madel_path)
 
-def Inference(input_image_path, output_image_path):
+def Inference(input_image_path):
     # Read and preprocess the image.
     image = Image.open(input_image_path)
     image = preprocess_PIL_image(image).numpy()
@@ -125,7 +127,7 @@ def Release():
 
 Init()
 
-Inference(execution_ws + "\\input.jpg", "output.jpg")
+Inference(execution_ws + "\\input.jpg")
 
 Release()
 

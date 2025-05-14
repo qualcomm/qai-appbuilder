@@ -74,6 +74,7 @@ void ModelLoad(std::string cmdBuf, HANDLE hSvcPipeOutWrite) {
     std::string model_path                  = commands[1];
     std::string backend_lib_path            = commands[2];
     std::string system_lib_path             = commands[3];
+    std::string async_str                   = commands[4];
 
     Print_MemInfo("ModelLoad::ModelInitialize Start.");
     QNN_INF("ModelLoad::ModelInitialize::Model name %s\n", model_name.c_str());
@@ -82,11 +83,13 @@ void ModelLoad(std::string cmdBuf, HANDLE hSvcPipeOutWrite) {
     QNN_INF("ModelLoad::ModelInitialize End ret = %d\n", bSuccess);
     Print_MemInfo("ModelLoad::ModelInitialize End.");
 
-    if(bSuccess) {
-        bSuccess = WriteFile(hSvcPipeOutWrite, ACTION_OK, (DWORD)strlen(ACTION_OK) + 1, NULL, NULL);
-    }
-    else {
-        bSuccess = WriteFile(hSvcPipeOutWrite, ACTION_FAILED, (DWORD)strlen(ACTION_FAILED) + 1, NULL, NULL);
+    if (!(async_str == "async")) {
+        if(bSuccess) {
+            bSuccess = WriteFile(hSvcPipeOutWrite, ACTION_OK, (DWORD)strlen(ACTION_OK) + 1, NULL, NULL);
+        }
+        else {
+            bSuccess = WriteFile(hSvcPipeOutWrite, ACTION_FAILED, (DWORD)strlen(ACTION_FAILED) + 1, NULL, NULL);
+        }
     }
 }
 

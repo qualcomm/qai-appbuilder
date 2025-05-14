@@ -1,4 +1,4 @@
-//==============================================================================
+﻿//==============================================================================
 //
 // Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 // 
@@ -27,6 +27,7 @@
 #include "IOTensor.hpp"
 #include "LibAppBuilder.hpp"
 #include "set"
+#include <windows.h>
 
 using namespace qnn;
 using namespace qnn::tools;
@@ -405,6 +406,25 @@ sample_app::StatusCode sample_app::QnnSampleApp::createContext() {
 
 // Free context after done.
 sample_app::StatusCode sample_app::QnnSampleApp::freeContext() {
+  // clear graph info first
+  if (m_graphsInfo) {
+    for (uint32_t gIdx = 0; gIdx < m_graphsCount; gIdx++) {
+      if (m_graphsInfo[gIdx]) {
+        if (nullptr != m_graphsInfo[gIdx]->graphName) {
+          free(m_graphsInfo[gIdx]->graphName);
+          m_graphsInfo[gIdx]->graphName = nullptr;
+        }
+        qnn_wrapper_api::freeQnnTensors(m_graphsInfo[gIdx]->inputTensors,
+                                        m_graphsInfo[gIdx]->numInputTensors);
+        qnn_wrapper_api::freeQnnTensors(m_graphsInfo[gIdx]->outputTensors,
+                                        m_graphsInfo[gIdx]->numOutputTensors);
+      }
+    }
+    free(*m_graphsInfo);
+  }
+  free(m_graphsInfo);
+  m_graphsInfo = nullptr;
+
   if (QNN_CONTEXT_NO_ERROR !=
       m_qnnFunctionPointers.qnnInterface.contextFree(m_context, m_profileBackendHandle)) {
     QNN_ERROR("Could not free context");
@@ -756,14 +776,40 @@ sample_app::StatusCode sample_app::QnnSampleApp::createFromBinary() {
     return StatusCode::FAILURE;
   }
   uint64_t bufferSize{0};
-  std::shared_ptr<uint8_t> buffer{nullptr};
-  // read serialized binary into a byte buffer
+
+  TimerHelper timerHelper;
+
   tools::datautil::StatusCode status{tools::datautil::StatusCode::SUCCESS};
   std::tie(status, bufferSize) = tools::datautil::getFileSize(m_cachedBinaryPath);
   if (0 == bufferSize) {
     QNN_ERROR("Received path to an empty file. Nothing to deserialize.");
     return StatusCode::FAILURE;
   }
+
+#define MMAP_FILE
+#ifdef MMAP_FILE
+  HANDLE hFile = CreateFile(m_cachedBinaryPath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+  if (hFile == INVALID_HANDLE_VALUE) {
+    printf("Failed to open file %s. err: %s\n", m_cachedBinaryPath.c_str(), strerror(errno));
+    return StatusCode::FAILURE;
+  }
+
+  HANDLE hFileMap = CreateFileMapping(hFile, NULL, PAGE_READONLY, 0, bufferSize, NULL);
+  if (hFileMap == NULL) {
+    printf("Failed to create file mapping of file %s. err: %s\n", m_cachedBinaryPath.c_str(), strerror(errno));
+    return StatusCode::FAILURE;
+  }
+
+  uint8_t* buffer = (uint8_t*)MapViewOfFile(hFileMap, FILE_MAP_READ, 0, 0, 0);
+  if (buffer == NULL) {
+    printf("MapViewOfFile fail %s. err: %s\n", m_cachedBinaryPath.c_str(), strerror(errno));
+    return StatusCode::FAILURE;
+  }
+
+#else
+  std::shared_ptr<uint8_t> buffer{nullptr};
+  // read serialized binary into a byte buffer
+
   buffer = std::shared_ptr<uint8_t>(new uint8_t[bufferSize], std::default_delete<uint8_t[]>());
   if (!buffer) {
     QNN_ERROR("Failed to allocate memory.");
@@ -776,6 +822,10 @@ sample_app::StatusCode sample_app::QnnSampleApp::createFromBinary() {
     QNN_ERROR("Failed to read binary data.");
     return StatusCode::FAILURE;
   }
+#endif
+
+  timerHelper.Print("Read model file to memory.");
+  timerHelper.Reset();
 
   // inspect binary info
   auto returnStatus = StatusCode::SUCCESS;
@@ -789,7 +839,11 @@ sample_app::StatusCode sample_app::QnnSampleApp::createFromBinary() {
   if (StatusCode::SUCCESS == returnStatus &&
       QNN_SUCCESS != m_qnnFunctionPointers.qnnSystemInterface.systemContextGetBinaryInfo(
                          sysCtxHandle,
+#ifdef MMAP_FILE
+                         static_cast<void*>(buffer),
+#else
                          static_cast<void*>(buffer.get()),
+#endif
                          bufferSize,
                          &binaryInfo,
                          &binaryInfoSize)) {
@@ -821,7 +875,11 @@ sample_app::StatusCode sample_app::QnnSampleApp::createFromBinary() {
           m_backendHandle,
           m_deviceHandle,
           (const QnnContext_Config_t**)m_contextConfig,
+#ifdef MMAP_FILE
+          static_cast<void*>(buffer),
+#else
           static_cast<void*>(buffer.get()),
+#endif
           bufferSize,
           &m_context,
           m_profileBackendHandle)) {
@@ -851,7 +909,19 @@ sample_app::StatusCode sample_app::QnnSampleApp::createFromBinary() {
     QNN_DEBUG("Cleaning up graph Info structures.");
     qnn_wrapper_api::freeGraphsInfo(&m_graphsInfo, m_graphsCount);
   }
-  QNN_FUNCTION_EXIT_LOG;
+
+  timerHelper.Print("contextCreateFromBinary.");
+  timerHelper.Reset();
+
+#ifdef MMAP_FILE
+  UnmapViewOfFile(buffer);
+  CloseHandle(hFile);
+  CloseHandle(hFileMap);
+#endif
+
+  timerHelper.Print("UnmapViewOfFile.");
+
+QNN_FUNCTION_EXIT_LOG;
   return returnStatus;
 }
 
@@ -991,6 +1061,20 @@ sample_app::StatusCode sample_app::QnnSampleApp::isDevicePropertySupported() {
     }
   }
   return StatusCode::SUCCESS;
+}
+
+sample_app::StatusCode sample_app::QnnSampleApp::isFinalizeDeserializedGraphSupported() {
+  auto returnStatus = StatusCode::FAILURE;
+  if (nullptr != m_qnnFunctionPointers.qnnInterface.propertyHasCapability) {
+    auto qnnStatus = m_qnnFunctionPointers.qnnInterface.propertyHasCapability(
+        QNN_PROPERTY_GRAPH_SUPPORT_FINALIZE_DESERIALIZED_GRAPH);
+    if (QNN_PROPERTY_SUPPORTED != qnnStatus) {
+      QNN_ERROR("Device property is not supported");
+      return returnStatus;
+    }
+    returnStatus = StatusCode::SUCCESS;
+  }
+  return returnStatus;
 }
 
 sample_app::StatusCode sample_app::QnnSampleApp::createDevice() {
@@ -1328,11 +1412,12 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vecto
   return returnStatus;
 }
 
+// zw.
 sample_app::StatusCode sample_app::QnnSampleApp::freeGraphs() {
-    qnn_wrapper_api::freeGraphsInfo(&m_graphsInfo, m_graphsCount);
-    m_graphsInfo = nullptr;
+  qnn_wrapper_api::freeGraphsInfo(&m_graphsInfo, m_graphsCount);
+  m_graphsInfo = nullptr;
 
-    return StatusCode::SUCCESS;
+  return StatusCode::SUCCESS;
 }
 
 sample_app::StatusCode sample_app::QnnSampleApp::initializeLog() {

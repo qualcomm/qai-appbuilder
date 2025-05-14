@@ -9,20 +9,12 @@
 #include <fstream>
 #include <iostream>
 #include "GenieBuilder.h"
-#include "common.h"
 
 // #define GENIE_BUILDER_DEBUG 1
 #define CONTENT_LENGTH 4096  // TODO. need to calculate.
 
 static int g_CurLength = 0;
 static int g_MaxLength = CONTENT_LENGTH;
-
-void SamplerProcess(const uint32_t logitsSize, const void* logits, const uint32_t numTokens, int32_t* tokens) {
-//    g_CurLength += numTokens;
-// #ifdef GENIE_BUILDER_DEBUG
-    std::cerr << "SamplerProcess: logitsSize=" << logitsSize << ", numTokens=" << numTokens << ", curLength=" << g_CurLength << std::endl;
-// #endif
-}
 
 void GenieCallBack(const char* response, const GenieDialog_SentenceCode_t sentence_code, const void* user_data) {
     GenieContext* self = static_cast<GenieContext*>(const_cast<void*>(user_data));
@@ -32,8 +24,7 @@ void GenieCallBack(const char* response, const GenieDialog_SentenceCode_t senten
         // std::cout << response << std::flush;
     }
 
-    g_CurLength += self->TokenLength(response);    // TODO: We need use 'SamplerProcess' to calculate the length of the tokens when Genie 'GenieSampler_registerCallback' works.
-                                            //      We should calculate the input length together. input + output < CONTENT_LENGTH.
+    g_CurLength += self->TokenLength(response);    // TODO: We should calculate the input length together. input + output < CONTENT_LENGTH.
     // printf("g_CurLength = %d, g_MaxLength = %d\n", g_CurLength, g_MaxLength);
 
     if(g_CurLength >= g_MaxLength) { // Stop current generation.
@@ -99,7 +90,7 @@ bool GenieContext::Query(const std::string& prompt, const Callback callback) {
         }
 
         response = "";
-        Sleep(10);
+        std::this_thread::sleep_for(std::chrono::milliseconds(10)); // sleep 10 ms.
     }
 
     // Sleep(10);
@@ -113,10 +104,11 @@ bool GenieContext::Query(const std::string& prompt, const Callback callback) {
     return true;
 }
 
-GenieContext::GenieContext(const std::string& config) {
+GenieContext::GenieContext(const std::string& config, bool debug) {
     std::string config_str;
     std::string sample_config_str = "{\n  \"sampler\" : {\n      \"version\" : 1,\n      \"temp\" : 1.2,\n      \"top-k\" : 25,\n      \"top-p\" : 0.8\n  }\n}";
     int32_t status = 0;
+    m_debug = debug;
 
     std::ifstream config_file(config);
     if (!config_file) {
@@ -131,6 +123,19 @@ GenieContext::GenieContext(const std::string& config) {
     if (GENIE_STATUS_SUCCESS != GenieDialogConfig_createFromJson(config_str.c_str(), &m_ConfigHandle)) {
         std::cerr << "Failed to create the Genie Dialog config.\n";
         return;
+    }
+
+    if (m_debug) {
+        GenieLog_Callback_t callback = nullptr;
+        status = GenieLog_create(nullptr, callback, GENIE_LOG_LEVEL_VERBOSE, &m_LogHandle);
+        if ((GENIE_STATUS_SUCCESS != status) || (!m_LogHandle)) {
+        throw std::runtime_error("Failed to create the Log handle.");
+        }
+
+        status = GenieDialogConfig_bindLogger(m_ConfigHandle, m_LogHandle);
+        if (GENIE_STATUS_SUCCESS != status) {
+        throw std::runtime_error("Failed to bind the log handle with the dialog config.");
+        }
     }
 
     status = GenieProfile_create(nullptr, &m_ProfileHandle);
@@ -163,12 +168,6 @@ GenieContext::GenieContext(const std::string& config) {
       return;
     }
 
-    status = GenieSampler_registerCallback("GenieBuilder", SamplerProcess);
-    if (GENIE_STATUS_SUCCESS != status) {
-      std::cerr <<  "Failed to register sampler callback.\n";
-      return;
-    }
-
     if(!m_stream_thread) {
         m_stream_thread = std::make_unique<std::thread>(&GenieContext::inference_thread, this);
     }
@@ -176,7 +175,7 @@ GenieContext::GenieContext(const std::string& config) {
 
 GenieContext::~GenieContext() {
 #ifdef GENIE_BUILDER_DEBUG
-    std::cout << "\nGenieContext::~GenieContext():\n";
+    std::cout << "INFO: GenieContext::~GenieContext():\n";
 #endif
 
     int32_t status = 0;
@@ -203,6 +202,13 @@ GenieContext::~GenieContext() {
     status = GenieSamplerConfig_free(m_SamplerConfigHandle);
     if (GENIE_STATUS_SUCCESS != status) {
       std::cerr << "Failed to free the sampler config." << std::endl;
+    }
+
+    if (m_LogHandle != nullptr) {
+        status = GenieLog_free(m_LogHandle);
+        if (GENIE_STATUS_SUCCESS != status) {
+          std::cerr << "Failed to free the Log handle." << std::endl;
+        }
     }
 
     status = GenieProfile_free(m_ProfileHandle);
@@ -284,10 +290,26 @@ std::string GenieContext::GetProfile() {
     return strProfileData;
 }
 
+bool GenieContext::SetStopSequence(const std::string& stop_sequences) {
+    if (GENIE_STATUS_SUCCESS != GenieDialog_setStopSequence(m_DialogHandle, stop_sequences.c_str())) {
+        std::cerr << "Failed to set stop sequence.\n";
+        return false;
+    }
+
+    return true;
+}
+
 size_t GenieContext::TokenLength(const std::string& text) {
+#ifdef CUSTOM_GENIE
     std::vector<int32_t> tokens;
     return GenieDialog_encode(m_DialogHandle, text, tokens);
+#else
+    return text.length();
+#endif
 }
+
+
+#include "common.h"
 
 PYBIND11_MODULE(geniebuilder, m) {
     m.doc() = R"pbdoc(
@@ -306,10 +328,11 @@ PYBIND11_MODULE(geniebuilder, m) {
     m.attr("__name__") = "qai_geniebuilder";
 
     py::class_<GenieContext>(m, "GenieContext")
-        .def(py::init<const std::string&>())
+        .def(py::init<const std::string&, bool>())
         .def("Query", &GenieContext::Query)
         .def("SetParams", &GenieContext::SetParams)
         .def("GetProfile", &GenieContext::GetProfile)
         .def("TokenLength", &GenieContext::TokenLength)
+        .def("SetStopSequence", &GenieContext::SetStopSequence)
         .def("Stop", &GenieContext::Stop);
 }

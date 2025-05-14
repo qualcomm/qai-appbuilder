@@ -7,7 +7,10 @@
 #=============================================================================
 
 # Compile Commands: 
-# Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.31.0.250130\
+# [windows]
+# Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.34.0.250424\
+# [linux]
+# Set QNN_SDK_ROOT=C:/Qualcomm/AIStack/QAIRT/2.34.0.250424/
 # python setup.py bdist_wheel
 
 import os
@@ -22,7 +25,7 @@ import zipfile
 from setuptools import Extension, setup, find_packages
 from setuptools.command.build_ext import build_ext
 
-VERSION = "2.31.0"
+VERSION = "2.34.0"
 CONFIG = "Release"  # Release, RelWithDebInfo
 package_name = "qai_appbuilder"
 
@@ -97,11 +100,19 @@ def build_cmake():
         LIB_PATH = QNN_SDK_ROOT + "/lib/aarch64-windows-msvc"
         if arch == "ARM64EC": # TODO: No ARM64EC support in Genie SDK yet.
             LIB_PATH = QNN_SDK_ROOT + "/lib/arm64x-windows-msvc"
+    else: # TODO: linux or android.
+        LIB_PATH = QNN_SDK_ROOT + "/lib/aarch64-oe-linux-gcc11.2"
+        if arch == "android": # TODO: for android.
+            LIB_PATH = QNN_SDK_ROOT + "/lib/aarch64-android"
 
     if os.path.exists(LIB_PATH + "/Genie.dll"):
         shutil.copy(LIB_PATH + "/Genie.dll", binary_path)
         shutil.copy(LIB_PATH + "/Genie.dll", "lib/Release")
         shutil.copy(LIB_PATH + "/Genie.lib", "lib/Release")
+
+    if os.path.exists(LIB_PATH + "/libGenie.so"):
+        shutil.copy(LIB_PATH + "/libGenie.so", binary_path)
+        shutil.copy(LIB_PATH + "/libGenie.so", "lib/Release")
 
 build_cmake()
 
@@ -150,7 +161,7 @@ class CMakeBuild(build_ext):
         build_args = ""
 
         # We pass in the version to C++. You might not need to.
-        cmake_args += f" -DVERSION_INFO={self.distribution.get_version()}"
+        # cmake_args += f" -DVERSION_INFO={self.distribution.get_version()}"
 
         # Single config generators are handled "normally"
         single_config = any(x in cmake_generator for x in {"NMake", "Ninja"})

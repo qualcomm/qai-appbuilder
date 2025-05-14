@@ -18,12 +18,12 @@ qnn_wrapper_api::ModelError_t qnn_wrapper_api::freeQnnTensor(Qnn_Tensor_t &tenso
   if (QNN_TENSOR_GET_IS_DYNAMIC_DIMENSIONS(tensor)) {
     free(QNN_TENSOR_GET_IS_DYNAMIC_DIMENSIONS(tensor));
   }
-  auto quant = QNN_TENSOR_GET_QUANT_PARAMS(tensor);
+  auto quant    = QNN_TENSOR_GET_QUANT_PARAMS(tensor);
   auto encoding = quant.quantizationEncoding;
   if (encoding == QNN_QUANTIZATION_ENCODING_AXIS_SCALE_OFFSET) {
-      if (quant.axisScaleOffsetEncoding.scaleOffset != nullptr) {
-          free(quant.axisScaleOffsetEncoding.scaleOffset);
-      }
+    if (quant.axisScaleOffsetEncoding.scaleOffset != nullptr) {
+      free(quant.axisScaleOffsetEncoding.scaleOffset);
+    }
   }
   return MODEL_NO_ERROR;
 }

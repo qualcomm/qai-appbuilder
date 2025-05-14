@@ -160,7 +160,7 @@ BOOL StopSvcProcess(std::string proc_name) {
 
 // Send model data to the Svc through share meoory and receive model generated data from share memory.
 BOOL TalkToSvc_Initialize(const std::string& model_name, const std::string& proc_name, const std::string& model_path,
-                          const std::string& backend_lib_path, const std::string& system_lib_path) {
+                          const std::string& backend_lib_path, const std::string& system_lib_path, bool async) {
     ProcInfo_t* pProcInfo = FindProcInfo(proc_name);
     if (!pProcInfo) {
         pProcInfo = CreateSvcProcess(proc_name);
@@ -172,8 +172,13 @@ BOOL TalkToSvc_Initialize(const std::string& model_name, const std::string& proc
     HANDLE hSvcPipeOutRead = pProcInfo->hSvcPipeOutRead;
     DWORD dwRead = 0, dwWrite = 0;
     BOOL bSuccess;
+    std::string async_str = "sync";
 
-    std::string command = "l" + model_name + ";" + model_path + ";" + backend_lib_path + ";" + system_lib_path;
+    if (async) {
+        async_str = "async";
+    }
+
+    std::string command = "l" + model_name + ";" + model_path + ";" + backend_lib_path + ";" + system_lib_path + ";" + async_str;
     dwRead = (DWORD)command.length() + 1;
 
     TimerHelper timerHelper;
@@ -182,16 +187,19 @@ BOOL TalkToSvc_Initialize(const std::string& model_name, const std::string& proc
     // QNN_INF("TalkToSvc_Initialize::WriteToPipe: %s dwRead = %d dwWrite = %d\n", command.c_str(), dwRead, dwWrite);
     if (!bSuccess) return false;
 
-    // Read command from Svc.
-    bSuccess = ReadFile(hSvcPipeOutRead, g_buffer, GLOBAL_BUFSIZE, &dwRead, NULL);
-    if(dwRead) {
-        g_buffer[dwRead] = 0;
-        QNN_INF("TalkToSvc_Initialize::ReadFromPipe: %s dwRead = %d\n", g_buffer, dwRead);
+    if (!async) {
+        // Read command from Svc.
+        bSuccess = ReadFile(hSvcPipeOutRead, g_buffer, GLOBAL_BUFSIZE, &dwRead, NULL);
+        if(dwRead) {
+            g_buffer[dwRead] = 0;
+            QNN_INF("TalkToSvc_Initialize::ReadFromPipe: %s dwRead = %d\n", g_buffer, dwRead);
+        }
+        else {
+            QNN_ERR("TalkToSvc_Initialize::ReadFromPipe: Failed to read from hSvcPipeOutRead, perhaps child process died.\n");
+        }
+        if (!bSuccess || dwRead == 0) return false;
     }
-    else {
-        QNN_ERR("TalkToSvc_Initialize::ReadFromPipe: Failed to read from hSvcPipeOutRead, perhaps child process died.\n");
-    }
-    if (!bSuccess || dwRead == 0) return false;
+
     timerHelper.Print("TalkToSvc_Initialize::Pipe talk");
 
     // Add "model_name" to "sg_model_info_map".

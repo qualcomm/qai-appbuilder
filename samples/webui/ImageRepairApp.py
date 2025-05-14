@@ -5,7 +5,7 @@
 import os
 import sys
 sys.path.append(".")
-sys.path.append("../python")
+sys.path.append("python")
 import numpy as np
 from PIL import Image
 import datetime

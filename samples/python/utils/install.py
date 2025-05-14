@@ -13,16 +13,14 @@ from tqdm import tqdm
 from pathlib import Path
 import qai_hub
 import wget
-import threading
 import urllib.request as request
 
 qnn_sdk_version =  {
     "2.24": "2.24.0.240626",
-    "2.28": "2.28.0.241029",
-    "2.31": "2.31.0.250130",
+    "2.34": "2.34.0.250424",
 }
 
-DEFAULT_SDK_VER     = "2.31"
+DEFAULT_SDK_VER     = "2.34"
 DEFAULT_DSP_ARCH    = "73"  # For X-Elite device.
 DEFAULT_LIB_ARCH = "arm64x-windows-msvc" # "aarch64-windows-msvc" # For X-Elite device.
 

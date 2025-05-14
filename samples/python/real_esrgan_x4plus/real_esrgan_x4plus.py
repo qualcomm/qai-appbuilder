@@ -6,18 +6,14 @@
 import sys
 import os
 sys.path.append(".")
-sys.path.append("..")
+sys.path.append("python")
 import utils.install as install
-install.install_qai_appbuilder(install.DEFAULT_SDK_VER)
 import cv2
 import numpy as np
-import torch
 import torchvision.transforms as transforms
 from PIL import Image
 from PIL.Image import fromarray as ImageFromArray
 from utils.image_processing import (
-    preprocess_PIL_image,
-    torch_tensor_to_PIL_image,
     pil_resize_pad,
     pil_undo_resize_pad
 )
@@ -35,10 +31,10 @@ IMAGE_SIZE = 512
 
 execution_ws = os.getcwd()
 
-if not "python" in execution_ws:
-    execution_ws = execution_ws + "\\..\\" + "python"
-
 qnn_dir = execution_ws + "\\qai_libs"
+
+if not "python" in execution_ws:
+    execution_ws = execution_ws + "\\" + "python"
 
 if not MODEL_NAME in execution_ws:
     execution_ws = execution_ws + "\\" + MODEL_NAME

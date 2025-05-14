@@ -288,7 +288,8 @@ bool DeleteShareMemory(std::string share_memory_name) {
 
 bool ModelInitializeEx(const std::string& model_name, const std::string& proc_name, const std::string& model_path,
                        const std::string& backend_lib_path, const std::string& system_lib_path, 
-                       const std::vector<LoraAdapter>& lora_adapters) {
+                       const std::vector<LoraAdapter>& lora_adapters,
+                       bool async) {
   bool result = false;
 
   QNN_INF("LibAppBuilder::ModelInitialize: %s \n", model_name.c_str());
@@ -296,7 +297,7 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
 #ifdef _WIN32
   if(!proc_name.empty()) {
     // If proc_name, create process and save process info & model name to map, load model in new process.
-    result = TalkToSvc_Initialize(model_name, proc_name, model_path, backend_lib_path, system_lib_path);
+    result = TalkToSvc_Initialize(model_name, proc_name, model_path, backend_lib_path, system_lib_path, async);
     return result;
   }
 #endif
@@ -399,7 +400,7 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
         return app->reportError("Binary update/execution failure");
     }
 
-    timerHelper.Print("model_initialize");
+    timerHelper.Print("model_initialize " + model_name);
 
     sg_model_map.insert(std::make_pair(model_name, std::move(app)));
 
@@ -441,7 +442,7 @@ bool ModelInferenceEx(std::string model_name, std::string proc_name, std::string
 
     sg_model_map.insert(std::make_pair(model_name, std::move(app)));
 
-    timerHelper.Print("model_inference");
+    timerHelper.Print("model_inference " + model_name);
 
     return result;
 }
@@ -497,7 +498,7 @@ bool ModelDestroyEx(std::string model_name, std::string proc_name) {
         }
     }
 
-    timerHelper.Print("model_destroy");
+    timerHelper.Print("model_destroy " + model_name);
 
     return true;
 }
@@ -508,24 +509,28 @@ bool ModelDestroyEx(std::string model_name, std::string proc_name) {
 /////////////////////////////////////////////////////////////////////////////
 
 bool LibAppBuilder::ModelInitialize(const std::string& model_name, const std::string& proc_name, const std::string& model_path,
-                                         const std::string& backend_lib_path, const std::string& system_lib_path) {
+                                    const std::string& backend_lib_path, const std::string& system_lib_path,
+                                    bool async) {
 #ifdef _WIN32
     if (!proc_name.empty()) {   // Create process and save process info & model name to map, load model in new process.
-        return TalkToSvc_Initialize(model_name, proc_name, model_path, backend_lib_path, system_lib_path);
+        return TalkToSvc_Initialize(model_name, proc_name, model_path, backend_lib_path, system_lib_path, async);
     }
 #endif
     return false;
 }
 
 bool LibAppBuilder::ModelInitialize(const std::string& model_name, const std::string& model_path,
-                                         const std::string& backend_lib_path, const std::string& system_lib_path) {
+                                    const std::string& backend_lib_path, const std::string& system_lib_path,
+                                    bool async) {
     std::vector<LoraAdapter> Adapters = std::vector<LoraAdapter>();
-    return ModelInitializeEx(model_name, "", model_path, backend_lib_path, system_lib_path, Adapters);   
+    return ModelInitializeEx(model_name, "", model_path, backend_lib_path, system_lib_path, Adapters, async);   
 }
 
 bool LibAppBuilder::ModelInitialize(const std::string& model_name, const std::string& model_path,
-                                         const std::string& backend_lib_path, const std::string& system_lib_path,const std::vector<LoraAdapter>& lora_adapters) {
-    return ModelInitializeEx(model_name, "", model_path, backend_lib_path, system_lib_path, lora_adapters);
+                                    const std::string& backend_lib_path, const std::string& system_lib_path,
+                                    const std::vector<LoraAdapter>& lora_adapters,
+                                    bool async) {
+    return ModelInitializeEx(model_name, "", model_path, backend_lib_path, system_lib_path, lora_adapters, async);
 }
 
 bool LibAppBuilder::ModelInference(std::string model_name, std::string proc_name, std::string share_memory_name,

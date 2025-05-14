@@ -8,16 +8,23 @@
 
 import os
 import sys
-from qai_appbuilder import geniebuilder
+import importlib.util
+
+spec = importlib.util.find_spec("qai_appbuilder.geniebuilder")
+if spec is not None:
+    from qai_appbuilder import geniebuilder
+# else:
+#    print("geniebuilder is not exist.")
 
 class GenieContext:
     """High-level Python wrapper for a GenieBuilder model."""
     def __init__(self,
-                config: str = "None"
+                config: str = "None",
+                debug: bool = False
     ) -> None:
         self.config = config
-        self.m_context = geniebuilder.GenieContext(config)
-
+        self.debug = debug
+        self.m_context = geniebuilder.GenieContext(config, debug)
 
     def Query(self, prompt, callback):
         return self.m_context.Query(prompt, callback)
@@ -27,6 +34,9 @@ class GenieContext:
 
     def SetParams(self, max_length, temp, top_k, top_p):
         return self.m_context.SetParams(max_length, temp, top_k, top_p)
+
+    def SetStopSequence(self, stop_sequences):
+        return self.m_context.SetStopSequence(stop_sequences)
 
     def GetProfile(self):
         return self.m_context.GetProfile()

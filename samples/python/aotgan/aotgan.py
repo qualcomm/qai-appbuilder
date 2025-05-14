@@ -6,9 +6,8 @@
 import sys
 import os
 sys.path.append(".")
-sys.path.append("..")
+sys.path.append("python")
 import utils.install as install
-install.install_qai_appbuilder(install.DEFAULT_SDK_VER)
 import numpy as np
 import torch
 import torchvision.transforms as transforms
@@ -31,6 +30,9 @@ IMAGE_SIZE = 512
 
 execution_ws = os.getcwd()
 qnn_dir = execution_ws + "\\qai_libs"
+
+if not "python" in execution_ws:
+    execution_ws = execution_ws + "\\" + "python"
 
 if not MODEL_NAME in execution_ws:
     execution_ws = execution_ws + "\\" + MODEL_NAME

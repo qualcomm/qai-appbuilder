@@ -7,7 +7,7 @@ import utils.install as install
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--qnn-sdk-version", default="both", type=str)
+    parser.add_argument("--qnn-sdk-version", default=install.DEFAULT_SDK_VER, type=str)
     parser.add_argument("--lib-arch", default="arm64x-windows-msvc", type=str)
     parser.add_argument("--dsp-arch", default=73, type=int)
     args = parser.parse_args()
@@ -28,8 +28,9 @@ if __name__ == "__main__":
         install.install_tools()
 
         if qnn_sdk_version == "both":
-            qnn_sdk_version = "2.31"
+            qnn_sdk_version = "2.34"
             install.install_qai_sdk(qnn_sdk_version)
+            install.install_qai_appbuilder(install.DEFAULT_SDK_VER)
             install.setup_qai_env(qnn_sdk_version, lib_arch, dsp_arch, "qai_libs")
 
             qnn_sdk_version = "2.24"

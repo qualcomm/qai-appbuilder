@@ -124,8 +124,9 @@ class QNNLoraContext:
                 model_path: str = "None",
                 backend_lib_path: str = "None",
                 system_lib_path: str = "None",
-                lora_adapters= None,
-                runtime : str = Runtime.HTP
+                lora_adapters = None,
+                runtime : str = Runtime.HTP,
+                is_async: bool = False
     ) -> None:
         """Load a QNN model from `model_path`
 
@@ -140,7 +141,7 @@ class QNNLoraContext:
         for adapter in lora_adapters:
             m_lora_adapters.append(adapter.m_adapter)
 
-        if self.model_path is None:
+        if self.model_path == "None":
             raise ValueError("model_path must be specified!")
 
         if not os.path.exists(self.model_path):
@@ -153,7 +154,7 @@ class QNNLoraContext:
        
         self.m_context = appbuilder.QNNContext(model_name, model_path,
                                                backend_lib_path, system_lib_path,
-                                               m_lora_adapters)
+                                               m_lora_adapters, is_async)
 
     #@timer
     def Inference(self, input, perf_profile = PerfProfile.DEFAULT):
@@ -173,7 +174,8 @@ class QNNContext:
                 model_path: str = "None",
                 backend_lib_path: str = "None",
                 system_lib_path: str = "None",
-                runtime : str = Runtime.HTP
+                runtime: str = Runtime.HTP,
+                is_async: bool = False
     ) -> None:
         """Load a QNN model from `model_path`
 
@@ -182,7 +184,7 @@ class QNNContext:
         """
         self.model_path = model_path
 
-        if self.model_path is None:
+        if self.model_path == "None":
             raise ValueError("model_path must be specified!")
 
         if not os.path.exists(self.model_path):
@@ -193,7 +195,7 @@ class QNNContext:
         if (system_lib_path == "None"):
             system_lib_path = g_system_lib_path
 
-        self.m_context = appbuilder.QNNContext(model_name, model_path, backend_lib_path, system_lib_path, [])
+        self.m_context = appbuilder.QNNContext(model_name, model_path, backend_lib_path, system_lib_path, is_async)
 
     #@timer
     def Inference(self, input, perf_profile = PerfProfile.DEFAULT):
@@ -214,7 +216,8 @@ class QNNContextProc:
                  model_path: str = "None",
                  backend_lib_path: str = "None",
                  system_lib_path: str = "None",
-                 runtime : str = Runtime.HTP
+                 runtime : str = Runtime.HTP,
+                 is_async: bool = False
     ) -> None:
         """Load a QNN model from `model_path`
 
@@ -224,7 +227,10 @@ class QNNContextProc:
         self.model_path = model_path
         self.proc_name = proc_name
 
-        if self.model_path is None:
+        if self.proc_name == "None":
+            raise ValueError("proc_name must be specified!")
+
+        if self.model_path == "None":
             raise ValueError("model_path must be specified!")
 
         if not os.path.exists(self.model_path):
@@ -236,7 +242,7 @@ class QNNContextProc:
             system_lib_path = g_system_lib_path
 
         os.putenv('PATH', g_base_path)
-        self.m_context = appbuilder.QNNContext(model_name, proc_name, model_path, backend_lib_path, system_lib_path)
+        self.m_context = appbuilder.QNNContext(model_name, proc_name, model_path, backend_lib_path, system_lib_path, is_async)
 
     #@timer
     def Inference(self, shareMemory, input, perf_profile = PerfProfile.DEFAULT):

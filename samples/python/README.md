@@ -20,13 +20,13 @@ pip install requests wget tqdm importlib-metadata qai-hub qai_hub_models hugging
 Run below commands in Windows terminal:
 ```
 git clone https://github.com/quic/ai-engine-direct-helper.git
-cd ai-engine-direct-helper\samples\python
+cd ai-engine-direct-helper\samples
 ```
 
 ### Step 4: Setup QAI AppBuilder Python Environment:
 Run below commands in Windows terminal:
 ```
-python setup.py
+python python\setup.py
 ```
 
 ### Step 5: Run Model:
@@ -36,22 +36,34 @@ python <Python script for running model> <Parameter of Python script>
 ```
 Where `<Python script for running model>` is the Python script you want to run. For example, if you want to run `stable_diffusion_v2_1`, you can run below command:
 ```
-python stable_diffusion_v2_1\stable_diffusion_v2_1.py --prompt "spectacular view of northern lights from Alaska"
+python python\stable_diffusion_v2_1\stable_diffusion_v2_1.py --prompt "spectacular view of northern lights from Alaska"
 ```
 
 ### Support Automatically Setting Up Model List:
 
-|  Model   | QNN SDK Version  | Command  |
-|  ----  | :----:   |  ----  |
-| stable_diffusion_v2_1 | 2.24 | python stable_diffusion_v2_1\stable_diffusion_v2_1.py --prompt "the prompt string ..." |
-| stable_diffusion_v1_5 | 2.24 | python stable_diffusion_v1_5\stable_diffusion_v1_5.py --prompt "the prompt string ..." |
-| real_esrgan_x4plus  | 2.31 | python real_esrgan_x4plus\real_esrgan_x4plus.py |
-| real_esrgan_general_x4v3  | 2.31 | python real_esrgan_general_x4v3\real_esrgan_general_x4v3.py |
-| inception_v3  | 2.31 | python inception_v3\inception_v3.py |
-| yolov8_det  | 2.31 | python yolov8_det\yolov8_det.py |
-| unet_segmentation  | 2.31 | python unet_segmentation\unet_segmentation.py |
-| openpose  | 2.31 | python openpose\openpose.py |
-| lama_dilated  | 2.31 | python lama_dilated\lama_dilated.py |
-| aotgan  | 2.31 | python aotgan\aotgan.py |
+|  Model   | Command  |
+|  ----  | :---- |
+| stable_diffusion_v2_1 * | python python\stable_diffusion_v2_1\stable_diffusion_v2_1.py --prompt "the prompt string ..." |
+| stable_diffusion_v1_5 * | python python\stable_diffusion_v1_5\stable_diffusion_v1_5.py --prompt "the prompt string ..." |
+| real_esrgan_x4plus  | python python\real_esrgan_x4plus\real_esrgan_x4plus.py |
+| real_esrgan_general_x4v3  | python python\real_esrgan_general_x4v3\real_esrgan_general_x4v3.py |
+| inception_v3  | python python\inception_v3\inception_v3.py |
+| yolov8_det  | python python\yolov8_det\yolov8_det.py |
+| unet_segmentation  | python python\unet_segmentation\unet_segmentation.py |
+| openpose  | python python\openpose\openpose.py |
+| lama_dilated  | python python\lama_dilated\lama_dilated.py |
+| aotgan  | python python\aotgan\aotgan.py |
+| | |
+
+*. Before running Stable Diffusion app, please download Stable Diffusion models from following AI-Hub website and save them to path: samples\python\stable_diffusion_v1_5\models & samples\python\stable_diffusion_v2_1\models.<br>
+
+There're 3 models for each Stable Diffusion need to be downloaded: TextEncoderQuantizable, UnetQuantizable, VaeDecoderQuantizable <br>
+
+Choose runtime: Qualcomm® AI Engine Direct<br>
+Choose device: Snapdragon® X Elite<br>
+
+Models:<br>
+[stable_diffusion_v1_5](https://aihub.qualcomm.com/compute/models/stable_diffusion_v1_5_w8a16_quantized)<br>
+[stable_diffusion_v2_1](https://aihub.qualcomm.com/compute/models/stable_diffusion_v2_1_quantized)<br>
 
 *More models will be supported soon!*

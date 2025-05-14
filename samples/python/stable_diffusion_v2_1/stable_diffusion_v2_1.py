@@ -5,15 +5,12 @@
 import sys
 import os
 sys.path.append(".")
-sys.path.append("..")
+sys.path.append("python")
 os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = "1"  # Disable 'cache-system uses symlinks' warning.
 os.environ['HF_ENDPOINT'] = "https://hf-api.gitee.com"
 import utils.install as install
-install.install_qai_appbuilder("2.24")
 import time
 from PIL import Image
-import shutil
-import cv2
 import numpy as np
 import torch
 from transformers import CLIPTokenizer
@@ -21,36 +18,28 @@ from diffusers import DPMSolverMultistepScheduler
 from diffusers.models.embeddings import get_timestep_embedding, TimestepEmbedding
 import argparse
 
-from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig, timer)
+from qai_appbuilder import (QNNContext, QNNContextProc, QNNShareMemory, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig, timer)
 
 
 ####################################################################
 
 MODEL_NAME                  = "stable_diffusion_v2_1"
-TEXT_ENCODER_MODEL_LINK     = MODEL_NAME + "_quantized/v1/QNN224/text_encoder.serialized.bin"
-UNET_MODEL_LINK             = MODEL_NAME + "_quantized/v1/QNN224/unet.serialized.bin"
-VAE_DECODER_MODEL_LINK      = MODEL_NAME + "_quantized/v1/QNN224/vae_channel_last.serialized.bin"
-TEXT_ENCODER_MODEL_NAME     = MODEL_NAME + "_quantized-textencoder_quantized.bin"
-UNET_MODEL_NAME             = MODEL_NAME + "_quantized-unet_quantized.bin"
-VAE_DECODER_MODEL_NAME      = MODEL_NAME + "_quantized-vaedecoder_quantized.bin"
-
-TEXT_ENCODER_MODEL_SIZE     = 396149600
-UNET_MODEL_SIZE             = 878546608
-VAE_DECODER_MODEL_SIZE      = 59518976
+TEXT_ENCODER_MODEL_NAME     = MODEL_NAME + "_quantized-textencoderquantizable-qualcomm_snapdragon_x_elite.bin"
+UNET_MODEL_NAME             = MODEL_NAME + "_quantized-unetquantizable-qualcomm_snapdragon_x_elite.bin"
+VAE_DECODER_MODEL_NAME      = MODEL_NAME + "_quantized-vaedecoderquantizable-qualcomm_snapdragon_x_elite.bin"
 
 TIMESTEP_EMBEDDING_MODEL_ID = "m0q96xyyq"
 TOKENIZER_MODEL_NAME        = "stabilityai/stable-diffusion-2-1-base"
 TOKENIZER_HELP_URL          = "https://github.com/quic/ai-engine-direct-helper/blob/main/samples/python/" + MODEL_NAME + "/README.md#clip-vit-l14-model"
-TIMESTEP_HTLP_URL           = "https://github.com/quic/ai-engine-direct-helper/blob/main/samples/python/" + MODEL_NAME + "/README.md#time-embedding"
 
 ####################################################################
 
 execution_ws = os.getcwd()
 
-if not "python" in execution_ws:
-    execution_ws = execution_ws + "\\..\\" + "python"
+qnn_dir = execution_ws + "\\qai_libs"
 
-qnn_dir = execution_ws + "\\qai_libs_2.24"
+if not "python" in execution_ws:
+    execution_ws = execution_ws + "\\" + "python"
 
 if not MODEL_NAME in execution_ws:
     execution_ws = execution_ws + "\\" + MODEL_NAME
@@ -64,7 +53,6 @@ time_embedding_dir = model_dir + "\\time-embedding\\"
 text_encoder_model_path = sd_dir + "\\" + TEXT_ENCODER_MODEL_NAME
 unet_model_path = sd_dir + "\\" + UNET_MODEL_NAME
 vae_decoder_model_path = sd_dir + "\\" + VAE_DECODER_MODEL_NAME
-time_embedding_model_path = sd_dir + "\\" + MODEL_NAME + "_time-embedding.pt"
 
 tokenizer = None
 scheduler = None
@@ -74,7 +62,7 @@ tokenizer_max_length = 77   # Define Tokenizer output max length (must be 77)
 text_encoder = None
 unet = None
 vae_decoder = None
-time_embeddings = None
+share_memory = None
 
 # Any user defined prompt
 user_prompt = ""
@@ -83,27 +71,29 @@ user_seed = np.int64(0)
 user_step = 20              # User defined step value, any integer value in {20, 30, 50}
 user_text_guidance = 7.5    # User define text guidance, any float value in [5.0, 15.0]
 
+model_inited = False
+
 ####################################################################
 
-class TextEncoder(QNNContext):
-    def Inference(self, input_data):
+class TextEncoder(QNNContextProc):
+    def Inference(self, share_mem, input_data):
         input_datas=[input_data]
-        output_data = super().Inference(input_datas)[0]
+        output_data = super().Inference(share_mem, input_datas)[0]
 
         # Output of Text encoder should be of shape (1, 77, 1024)
         output_data = output_data.reshape((1, 77, 1024))
         return output_data
 
-class Unet(QNNContext):
-    def Inference(self, input_data_1, input_data_2, input_data_3):
+class Unet(QNNContextProc):
+    def Inference(self, share_mem, input_data_1, input_data_2, input_data_3):
         # We need to reshape the array to 1 dimensionality before send it to the network. 'input_data_2' already is 1 dimensionality, so doesn't need to reshape.
         input_data_1 = input_data_1.reshape(input_data_1.size)
         input_data_3 = input_data_3.reshape(input_data_3.size)
 
         input_datas=[input_data_1, input_data_2, input_data_3]
-        output_data = super().Inference(input_datas)[0]
+        output_data = super().Inference(share_mem, input_datas)[0]
 
-        output_data = output_data.reshape(1, 4, 64, 64)
+        output_data = output_data.reshape(1, 64, 64, 4)
         return output_data
 
 class VaeDecoder(QNNContext):
@@ -118,7 +108,11 @@ class VaeDecoder(QNNContext):
 ####################################################################
 
 def model_initialize():
-    global scheduler, tokenizer, text_encoder, unet, vae_decoder, time_embeddings
+    global model_inited
+    global scheduler, tokenizer, text_encoder, unet, vae_decoder, share_memory
+
+    if model_inited == True:
+        return True
 
     result = True
 
@@ -146,20 +140,21 @@ def model_initialize():
         exit()
 
     # Instance for TextEncoder 
-    text_encoder = TextEncoder(model_text_encoder, text_encoder_model_path)
+
+    text_encoder = TextEncoder(model_text_encoder, "model_process", text_encoder_model_path)
 
     # Instance for Unet 
-    unet = Unet(model_unet, unet_model_path)
+    unet = Unet(model_unet, "model_process", unet_model_path)
 
     # Instance for VaeDecoder 
     vae_decoder = VaeDecoder(model_vae_decoder, vae_decoder_model_path)
 
-    if os.path.exists(time_embedding_model_path):
-        time_embeddings = TimestepEmbedding(320, 1280)
-        time_embeddings.load_state_dict(torch.load(time_embedding_model_path, weights_only=True))
+    share_memory = QNNShareMemory("share_memory", 1024 * 1024 * 50) # 50M
 
     # Scheduler - initializing the Scheduler.
     scheduler = DPMSolverMultistepScheduler(num_train_timesteps=1000, beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear")
+
+    model_inited = True
 
     return result
 
@@ -188,6 +183,11 @@ def setup_parameters(prompt, un_prompt, seed, step, text_guidance):
     assert user_text_guidance >= 5.0 and user_text_guidance <= 15.0, "user_text_guidance should be a float from [5.0, 15.0]"
 
 def run_scheduler(noise_pred_uncond, noise_pred_text, latent_in, timestep):
+    # Convert all inputs from NHWC to NCHW
+    noise_pred_uncond = np.transpose(noise_pred_uncond, (0, 3, 1, 2)).copy()
+    noise_pred_text = np.transpose(noise_pred_text, (0, 3, 1, 2)).copy()
+    latent_in = np.transpose(latent_in, (0, 3, 1, 2)).copy()
+
     # Convert all inputs to torch tensors
     noise_pred_uncond = torch.from_numpy(noise_pred_uncond)
     noise_pred_text = torch.from_numpy(noise_pred_text)
@@ -199,17 +199,14 @@ def run_scheduler(noise_pred_uncond, noise_pred_text, latent_in, timestep):
     # Run Scheduler step
     latent_out = scheduler.step(noise_pred, timestep, latent_in).prev_sample.numpy()
 
+    # Convert latent_out from NCHW to NHWC
+    latent_out = np.transpose(latent_out, (0, 2, 3, 1)).copy()
+
     return latent_out
 
 # Function to get timesteps
 def get_timestep(step):
     return np.int32(scheduler.timesteps.numpy()[step])
-
-def get_time_embedding(timestep, time_embeddings):
-    timestep = torch.tensor([timestep])
-    t_emb = get_timestep_embedding(timestep, 320, True, 0)
-    emb = time_embeddings(t_emb).detach().numpy()
-    return emb
 
 # Execute the Stable Diffusion pipeline
 def model_execute(callback, image_path, show_image = True):
@@ -222,11 +219,15 @@ def model_execute(callback, image_path, show_image = True):
     uncond_tokens = run_tokenizer(uncond_prompt)
 
     # Run Text Encoder on Tokens
-    uncond_text_embedding = text_encoder.Inference(uncond_tokens)
-    user_text_embedding = text_encoder.Inference(cond_tokens)
+    uncond_text_embedding = text_encoder.Inference(share_memory, uncond_tokens)
+    uncond_text_embedding = uncond_text_embedding.copy()
 
+    user_text_embedding = text_encoder.Inference(share_memory, cond_tokens)
+    user_text_embedding = user_text_embedding.copy()
+	
     # Initialize the latent input with random initial latent
-    latent_in = torch.randn((1, 4, 64, 64), generator=torch.manual_seed(user_seed)).numpy()
+    random_init_latent = torch.randn((1, 4, 64, 64), generator=torch.manual_seed(user_seed)).numpy()
+    latent_in = random_init_latent.transpose(0, 2, 3, 1)
 
     time_emb_path = time_embedding_dir + str(user_step) + "\\"
 
@@ -238,14 +239,11 @@ def model_execute(callback, image_path, show_image = True):
 
         time_step = get_timestep(step)
 
-        if time_embeddings:
-            time_embedding = get_time_embedding(time_step, time_embeddings)
-        else:
-            file_path = time_emb_path + str(step) + ".raw"
-            time_embedding = np.fromfile(file_path, dtype=np.float32)
+        unconditional_noise_pred = unet.Inference(share_memory, latent_in, time_step, uncond_text_embedding)
+        unconditional_noise_pred = unconditional_noise_pred.copy()
 
-        unconditional_noise_pred = unet.Inference(latent_in, time_embedding, uncond_text_embedding)
-        conditional_noise_pred = unet.Inference(latent_in, time_embedding, user_text_embedding)
+        conditional_noise_pred = unet.Inference(share_memory, latent_in, time_step, user_text_embedding)
+        conditional_noise_pred = conditional_noise_pred.copy()
 
         latent_in = run_scheduler(unconditional_noise_pred, conditional_noise_pred, latent_in, time_step)
 
@@ -282,13 +280,13 @@ def model_execute(callback, image_path, show_image = True):
 
 # Release all the models.
 def model_destroy():
-    global text_encoder
-    global unet
-    global vae_decoder
+    global text_encoder, unet, vae_decoder, share_memory
 
     del(text_encoder)
     del(unet)
     del(vae_decoder)
+
+    del(share_memory)
 
 def SetQNNConfig():
     QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.ERROR, ProfilingLevel.BASIC)
@@ -312,17 +310,10 @@ def modelExecuteCallback(result):
 def model_download():
     ret = True
 
-    text_encoder_model_url = "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/" + TEXT_ENCODER_MODEL_LINK
-    unet_model_url =         "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/" + UNET_MODEL_LINK
-    vae_decoder_model_url =  "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/" + VAE_DECODER_MODEL_LINK
-
-    ret = install.download_url(text_encoder_model_url, text_encoder_model_path, TEXT_ENCODER_MODEL_SIZE)
-    ret = install.download_url(unet_model_url, unet_model_path, UNET_MODEL_SIZE)
-    ret = install.download_url(vae_decoder_model_url, vae_decoder_model_path, VAE_DECODER_MODEL_SIZE)
-
-    desc = "Downloading timestep_embedding model... "
-    fail = "\nFailed to download timestep_embedding model. Please prepare the timestep_embedding data according to the guide below:\n" + TIMESTEP_HTLP_URL + "\n"
-    ret = install.download_qai_hubmodel(TIMESTEP_EMBEDDING_MODEL_ID, time_embedding_model_path, desc=desc, fail=fail, hub_id=install.HUB_ID_T)
+    desc = "Please download Stable-Diffusion-v2.1 model from https://aihub.qualcomm.com/compute/models/stable_diffusion_v2_1_quantized and save them to path 'samples\\python\\stable_diffusion_v2_1\\models'.\n"
+    if not os.path.exists(text_encoder_model_path) or not os.path.exists(unet_model_path) or not os.path.exists(vae_decoder_model_path):
+        print(desc)
+        exit()
 
     if not ret:
         if not os.path.exists(time_embedding_dir):  # There is no timestep_embedding data, exit process.

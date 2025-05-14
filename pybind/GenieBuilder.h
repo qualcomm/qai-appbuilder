@@ -16,29 +16,28 @@
 #include <vector> // vector
 #include <fstream>
 #include <string>
-#include <direct.h>
 #include <stdio.h>
 #include <streambuf>
 #include <istream>
 #include <thread>
 #include <mutex>
 #include <condition_variable>
-#include <windows.h>
+
+#include "GenieCommon.h"
+#include "GenieDialog.h"
 
 #include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#include "GenieCommon.h"
-#include "GenieDialog.h"
 
-using namespace std;
 namespace py = pybind11;
+using namespace std;
 
 using Callback = std::function<bool(const std::string&)>;
 
 class GenieContext {
     public:
-        GenieContext(const std::string& config);
+        GenieContext(const std::string& config, bool debug=false);
         ~GenieContext();
 
         bool Query(const std::string& prompt, const Callback callback);
@@ -46,6 +45,7 @@ class GenieContext {
         bool SetParams(const std::string max_length, const std::string temp, const std::string top_k, const std::string top_p);
         std::string GetProfile();
         size_t TokenLength(const std::string& text);
+        bool SetStopSequence(const std::string& stop_sequences);
 
     public:
         std::mutex m_stream_lock;
@@ -59,6 +59,7 @@ class GenieContext {
         GenieSamplerConfig_Handle_t m_SamplerConfigHandle = NULL;
         GenieSampler_Handle_t m_SamplerHandle = NULL;
         GenieProfile_Handle_t m_ProfileHandle = NULL;
+        GenieLog_Handle_t m_LogHandle = NULL;
 
         // Inference thread.
         std::unique_ptr<std::thread> m_stream_thread {nullptr};
@@ -69,6 +70,7 @@ class GenieContext {
         bool m_inference_busy {false};
 
         std::string m_prompt {""};
+        bool m_debug {false};
 };
 
 #endif

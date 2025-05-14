@@ -5,15 +5,12 @@
 import sys
 import os
 sys.path.append(".")
-sys.path.append("..")
+sys.path.append("python")
 os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = "1"  # Disable 'cache-system uses symlinks' warning.
 os.environ['HF_ENDPOINT'] = "https://hf-api.gitee.com"
 import utils.install as install
-install.install_qai_appbuilder("2.24")
 import time
 from PIL import Image
-import shutil
-import cv2
 import numpy as np
 import torch
 from transformers import CLIPTokenizer
@@ -27,30 +24,22 @@ from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfP
 ####################################################################
 
 MODEL_NAME                  = "stable_diffusion_v1_5"
-TEXT_ENCODER_MODEL_LINK     = MODEL_NAME + "_quantized/v1/QNN224/text_encoder.serialized.bin"
-UNET_MODEL_LINK             = MODEL_NAME + "_quantized/v1/QNN224/unet.serialized.bin"
-VAE_DECODER_MODEL_LINK      = MODEL_NAME + "_quantized/v1/QNN224/vae_decoder.serialized.bin"
-TEXT_ENCODER_MODEL_NAME     = MODEL_NAME + "_quantized-textencoder_quantized.bin"
-UNET_MODEL_NAME             = MODEL_NAME + "_quantized-unet_quantized.bin"
-VAE_DECODER_MODEL_NAME      = MODEL_NAME + "_quantized-vaedecoder_quantized.bin"
-
-TEXT_ENCODER_MODEL_SIZE     = 163275152
-UNET_MODEL_SIZE             = 878473240
-VAE_DECODER_MODEL_SIZE      = 59072424
+TEXT_ENCODER_MODEL_NAME     = MODEL_NAME + "_w8a16_quantized-textencoderquantizable-qualcomm_snapdragon_x_elite.bin"
+UNET_MODEL_NAME             = MODEL_NAME + "_w8a16_quantized-unetquantizable-qualcomm_snapdragon_x_elite.bin"
+VAE_DECODER_MODEL_NAME      = MODEL_NAME + "_w8a16_quantized-vaedecoderquantizable-qualcomm_snapdragon_x_elite.bin"
 
 TIMESTEP_EMBEDDING_MODEL_ID = "m7mrzdgxn"
 TOKENIZER_MODEL_NAME        = "openai/clip-vit-large-patch14"
 TOKENIZER_HELP_URL          = "https://github.com/quic/ai-engine-direct-helper/blob/main/samples/python/" + MODEL_NAME + "/README.md#clip-vit-l14-model"
-TIMESTEP_HTLP_URL           = "https://github.com/quic/ai-engine-direct-helper/blob/main/samples/python/" + MODEL_NAME + "/README.md#time-embedding"
 
 ####################################################################
 
 execution_ws = os.getcwd()
 
-if not "python" in execution_ws:
-    execution_ws = execution_ws + "\\..\\" + "python"
+qnn_dir = execution_ws + "\\qai_libs"
 
-qnn_dir = execution_ws + "\\qai_libs_2.24"
+if not "python" in execution_ws:
+    execution_ws = execution_ws + "\\" + "python"
 
 if not MODEL_NAME in execution_ws:
     execution_ws = execution_ws + "\\" + MODEL_NAME
@@ -64,7 +53,6 @@ time_embedding_dir = model_dir + "\\time-embedding\\"
 text_encoder_model_path = sd_dir + "\\" + TEXT_ENCODER_MODEL_NAME
 unet_model_path = sd_dir + "\\" + UNET_MODEL_NAME
 vae_decoder_model_path = sd_dir + "\\" + VAE_DECODER_MODEL_NAME
-time_embedding_model_path = sd_dir + "\\" + MODEL_NAME + "_time-embedding.pt"
 
 tokenizer = None
 scheduler = None
@@ -74,7 +62,6 @@ tokenizer_max_length = 77   # Define Tokenizer output max length (must be 77)
 text_encoder = None
 unet = None
 vae_decoder = None
-time_embeddings = None
 
 # Any user defined prompt
 user_prompt = ""
@@ -118,7 +105,7 @@ class VaeDecoder(QNNContext):
 ####################################################################
 
 def model_initialize():
-    global scheduler, tokenizer, text_encoder, unet, vae_decoder, time_embeddings
+    global scheduler, tokenizer, text_encoder, unet, vae_decoder
 
     result = True
 
@@ -153,10 +140,6 @@ def model_initialize():
 
     # Instance for VaeDecoder 
     vae_decoder = VaeDecoder(model_vae_decoder, vae_decoder_model_path)
-
-    if os.path.exists(time_embedding_model_path):
-        time_embeddings = TimestepEmbedding(320, 1280)
-        time_embeddings.load_state_dict(torch.load(time_embedding_model_path, weights_only=True))
 
     # Scheduler - initializing the Scheduler.
     scheduler = DPMSolverMultistepScheduler(num_train_timesteps=1000, beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear")
@@ -213,12 +196,6 @@ def run_scheduler(noise_pred_uncond, noise_pred_text, latent_in, timestep):
 def get_timestep(step):
     return np.int32(scheduler.timesteps.numpy()[step])
 
-def get_time_embedding(timestep, time_embeddings):
-    timestep = torch.tensor([timestep])
-    t_emb = get_timestep_embedding(timestep, 320, True, 0)
-    emb = time_embeddings(t_emb).detach().numpy()
-    return emb
-
 # Execute the Stable Diffusion pipeline
 def model_execute(callback, image_path, show_image = True):
     PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
@@ -247,14 +224,8 @@ def model_execute(callback, image_path, show_image = True):
 
         time_step = get_timestep(step)
 
-        if time_embeddings:
-            time_embedding = get_time_embedding(time_step, time_embeddings)
-        else:
-            file_path = time_emb_path + str(step) + ".raw"
-            time_embedding = np.fromfile(file_path, dtype=np.float32)
-
-        unconditional_noise_pred = unet.Inference(latent_in, time_embedding, uncond_text_embedding)
-        conditional_noise_pred = unet.Inference(latent_in, time_embedding, user_text_embedding)
+        unconditional_noise_pred = unet.Inference(latent_in, time_step, uncond_text_embedding)
+        conditional_noise_pred = unet.Inference(latent_in, time_step, user_text_embedding)
 
         latent_in = run_scheduler(unconditional_noise_pred, conditional_noise_pred, latent_in, time_step)
 
@@ -321,17 +292,10 @@ def modelExecuteCallback(result):
 def model_download():
     ret = True
 
-    text_encoder_model_url = "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/" + TEXT_ENCODER_MODEL_LINK
-    unet_model_url =         "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/" + UNET_MODEL_LINK
-    vae_decoder_model_url =  "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/" + VAE_DECODER_MODEL_LINK
-
-    ret = install.download_url(text_encoder_model_url, text_encoder_model_path, TEXT_ENCODER_MODEL_SIZE)
-    ret = install.download_url(unet_model_url, unet_model_path, UNET_MODEL_SIZE)
-    ret = install.download_url(vae_decoder_model_url, vae_decoder_model_path, VAE_DECODER_MODEL_SIZE)
-
-    desc = "Downloading timestep_embedding model... "
-    fail = "\nFailed to download timestep_embedding model. Please prepare the timestep_embedding data according to the guide below:\n" + TIMESTEP_HTLP_URL + "\n"
-    ret = install.download_qai_hubmodel(TIMESTEP_EMBEDDING_MODEL_ID, time_embedding_model_path, desc=desc, fail=fail, hub_id=install.HUB_ID_T)
+    desc = "Please download Stable-Diffusion-v2.1 model from https://aihub.qualcomm.com/compute/models/stable_diffusion_v2_1_quantized and save them to path 'samples\\python\\stable_diffusion_v2_1\\models'.\n"
+    if not os.path.exists(text_encoder_model_path) or not os.path.exists(unet_model_path) or not os.path.exists(vae_decoder_model_path):
+        print(desc)
+        exit()
 
     if not ret:
         if not os.path.exists(time_embedding_dir):  # There is no timestep_embedding data, exit process.

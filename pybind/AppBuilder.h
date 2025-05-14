@@ -53,13 +53,13 @@ int rel_perf_profile() {
 }
 
 int initialize(const std::string& model_name,
-               const std::string& model_path, const std::string& backend_lib_path, const std::string& system_lib_path) {
-    return g_LibAppBuilder.ModelInitialize(model_name, model_path, backend_lib_path, system_lib_path);
+               const std::string& model_path, const std::string& backend_lib_path, const std::string& system_lib_path, bool async) {
+    return g_LibAppBuilder.ModelInitialize(model_name, model_path, backend_lib_path, system_lib_path, async);
 }
 
 int initialize_P(const std::string& model_name, const std::string& proc_name,
-                 const std::string& model_path, const std::string& backend_lib_path, const std::string& system_lib_path) {
-    return g_LibAppBuilder.ModelInitialize(model_name, proc_name, model_path, backend_lib_path, system_lib_path);
+                 const std::string& model_path, const std::string& backend_lib_path, const std::string& system_lib_path, bool async) {
+    return g_LibAppBuilder.ModelInitialize(model_name, proc_name, model_path, backend_lib_path, system_lib_path, async);
 }
 
 int destroy(std::string model_name) {
@@ -164,15 +164,15 @@ public:
 
     QNNContext(const std::string& model_name,
        	       const std::string& model_path, const std::string& backend_lib_path, 
-               const std::string& system_lib_path);
+               const std::string& system_lib_path, bool async = false);
 
     QNNContext(const std::string& model_name,
        	       const std::string& model_path, const std::string& backend_lib_path, 
-               const std::string& system_lib_path, const std::vector<LoraAdapter>& lora_adapters);   
+               const std::string& system_lib_path, const std::vector<LoraAdapter>& lora_adapters, bool async = false);   
 
     QNNContext(const std::string& model_name, const std::string& proc_name,
        	       const std::string& model_path, const std::string& backend_lib_path, 
-               const std::string& system_lib_path);
+               const std::string& system_lib_path, bool async = false);
 
     std::vector<py::array_t<float>> Inference(const std::vector<py::array_t<float>>& input, const std::string& perf_profile = "default");
     std::vector<py::array_t<float>> Inference(const ShareMemory& share_memory, const std::vector<py::array_t<float>>& input, const std::string& perf_profile = "default");
