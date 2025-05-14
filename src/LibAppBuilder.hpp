@@ -59,7 +59,7 @@ public:
 
     bool ModelInitialize(const std::string& model_name, const std::string& model_path,
                          const std::string& backend_lib_path, const std::string& system_lib_path,
-                         const std::vector<LoraAdapter>& lora_adapters,
+                         std::vector<LoraAdapter>& lora_adapters,
                          bool async = false);
 
     bool ModelInference(std::string model_name, std::vector<uint8_t*>& inputBuffers, 
@@ -69,6 +69,8 @@ public:
                               std::vector<uint8_t*>& inputBuffers, std::vector<size_t>& inputSize,
                               std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
                               std::string& perfProfile);
+
+    bool ModelApplyBinaryUpdate(const std::string model_name, std::vector<LoraAdapter>& lora_adapters);
 
     bool ModelDestroy(std::string model_name);
     bool ModelDestroy(std::string model_name, std::string proc_name);

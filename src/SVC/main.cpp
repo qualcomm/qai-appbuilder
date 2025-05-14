@@ -214,7 +214,7 @@ int svcprocess_run(HANDLE hSvcPipeInRead, HANDLE hSvcPipeOutWrite) {
 // test code, load and run model.
 int hostprocess_run(std::string qnn_lib_path, std::string model_path,
                     std::string input_raw_path, int input_count, int memory_size,
-                    std::string perf_profile, const std::vector <LoraAdapter>& Adapters ) {
+                    std::string perf_profile, std::vector <LoraAdapter>& Adapters ) {
     BOOL result = false;
 
     std::string MODEL_NAME = "<model_name>";

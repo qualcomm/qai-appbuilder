@@ -139,6 +139,8 @@ std::vector<py::array_t<float>> inference_P(std::string model_name, std::string 
     return output;
 }
 
+bool ApplyBinaryUpdate(const std::vector<LoraAdapter>& lora_adapters);
+
 int create_memory(std::string share_memory_name, size_t share_memory_size) {
     return g_LibAppBuilder.CreateShareMemory(share_memory_name, share_memory_size);
 }
@@ -176,6 +178,8 @@ public:
 
     std::vector<py::array_t<float>> Inference(const std::vector<py::array_t<float>>& input, const std::string& perf_profile = "default");
     std::vector<py::array_t<float>> Inference(const ShareMemory& share_memory, const std::vector<py::array_t<float>>& input, const std::string& perf_profile = "default");
+    
+    bool ApplyBinaryUpdate(const std::vector<LoraAdapter>& lora_adapters);
 
     ~QNNContext();
 };

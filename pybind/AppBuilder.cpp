@@ -63,6 +63,9 @@ QNNContext::Inference(const ShareMemory& share_memory, const std::vector<py::arr
     return inference_P(m_model_name, m_proc_name, share_memory.m_share_memory_name, input, perf_profile);
 }
 
+bool QNNContext::ApplyBinaryUpdate(const std::vector<LoraAdapter>& lora_adapters) {
+    return g_LibAppBuilder.ModelApplyBinaryUpdate(m_model_name, const_cast<std::vector<LoraAdapter>&>(lora_adapters));
+}
 
 PYBIND11_MODULE(appbuilder, m) {
     m.doc() = R"pbdoc(
@@ -116,7 +119,9 @@ PYBIND11_MODULE(appbuilder, m) {
         .def(py::init<const std::string&, const std::string&, const std::string&, const std::string&, const std::vector<LoraAdapter>&, bool>())
         .def(py::init<const std::string&, const std::string&, const std::string&, const std::string&, const std::string&, bool>())
         .def("Inference", py::overload_cast<const std::vector<py::array_t<float>>&, const std::string&>(&QNNContext::Inference))
-        .def("Inference", py::overload_cast<const ShareMemory&, const std::vector<py::array_t<float>>&, const std::string&>(&QNNContext::Inference));
+        .def("Inference", py::overload_cast<const ShareMemory&, const std::vector<py::array_t<float>>&, const std::string&>(&QNNContext::Inference))
+        .def("ApplyBinaryUpdate", &QNNContext::ApplyBinaryUpdate, "Apply Lora binary update");
+
 
     py::class_<LoraAdapter>(m, "LoraAdapter")
         .def(py::init<const std::string &, const std::vector<std::string> &>());

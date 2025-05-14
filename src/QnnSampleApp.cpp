@@ -189,7 +189,7 @@ sample_app::QnnSampleApp::QnnSampleApp(QnnFunctionPointers qnnFunctionPointers,
                                        bool dumpOutputs,
                                        std::string cachedBinaryPath,
                                        std::string saveBinaryName, 
-                                       const std::vector<LoraAdapter>& lora_adapters)
+                                       std::vector<LoraAdapter>& lora_adapters)
     : m_qnnFunctionPointers(qnnFunctionPointers),
       m_outputPath(outputPath),
       m_saveBinaryName(saveBinaryName),
@@ -701,6 +701,9 @@ bool sample_app::QnnSampleApp::binaryUpdates() {
     return m_lora_adapters.size() > 0;
 }
 
+void sample_app::QnnSampleApp::update_m_lora_adapters(std::vector<LoraAdapter>& lora_adapters) {
+    m_lora_adapters = lora_adapters;
+}
 
 sample_app::StatusCode sample_app::QnnSampleApp::initializeProfileConfigOption(
     const QNN_INTERFACE_VER_TYPE* qnnInterfaceHandle,

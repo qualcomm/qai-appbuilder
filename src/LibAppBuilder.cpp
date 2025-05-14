@@ -52,7 +52,7 @@ std::unique_ptr<sample_app::QnnSampleApp> initQnnSampleApp(std::string cachedBin
                                                            std::string backEndPath,
                                                            std::string systemLibraryPath,
                                                            bool loadFromCachedBinary,
-                                                           const std::vector<LoraAdapter>& lora_adapters) {
+                                                           std::vector<LoraAdapter>& lora_adapters) {
   // Just keep blank for below paths.
   std::string modelPath;
   std::string cachedBinaryPath2;
@@ -288,7 +288,7 @@ bool DeleteShareMemory(std::string share_memory_name) {
 
 bool ModelInitializeEx(const std::string& model_name, const std::string& proc_name, const std::string& model_path,
                        const std::string& backend_lib_path, const std::string& system_lib_path, 
-                       const std::vector<LoraAdapter>& lora_adapters,
+                       std::vector<LoraAdapter>& lora_adapters,
                        bool async) {
   bool result = false;
 
@@ -528,7 +528,7 @@ bool LibAppBuilder::ModelInitialize(const std::string& model_name, const std::st
 
 bool LibAppBuilder::ModelInitialize(const std::string& model_name, const std::string& model_path,
                                     const std::string& backend_lib_path, const std::string& system_lib_path,
-                                    const std::vector<LoraAdapter>& lora_adapters,
+                                    std::vector<LoraAdapter>& lora_adapters,
                                     bool async) {
     return ModelInitializeEx(model_name, "", model_path, backend_lib_path, system_lib_path, lora_adapters, async);
 }
@@ -550,6 +550,32 @@ bool LibAppBuilder::ModelInference(std::string model_name, std::vector<uint8_t*>
                                         std::string& perfProfile){
     std::vector<size_t> inputSize;
     return ModelInferenceEx(model_name, "", "", inputBuffers, inputSize, outputBuffers, outputSize, perfProfile);
+}
+
+bool LibAppBuilder::ModelApplyBinaryUpdate(const std::string model_name, std::vector<LoraAdapter>& lora_adapters) {
+    
+    bool result = true;
+    std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
+    if (nullptr == app) {
+        app->reportError("Apply binary update failure: " + model_name);
+        result = false;
+    }
+    
+    if (result) {
+        app->update_m_lora_adapters(lora_adapters);
+
+        QNN_INFO("Applying Binary update on the graph");
+
+        if (sample_app::StatusCode::SUCCESS != app->contextApplyBinarySection(QNN_CONTEXT_SECTION_UPDATABLE)) {
+            app->reportError("Binary update failure");
+            result = false;
+        }
+    
+    }
+
+    sg_model_map.insert(std::make_pair(model_name, std::move(app)));
+
+    return result;
 }
 
 bool LibAppBuilder::ModelDestroy(std::string model_name, std::string proc_name) {

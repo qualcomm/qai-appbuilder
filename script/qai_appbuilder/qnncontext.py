@@ -131,8 +131,9 @@ class QNNLoraContext:
         """Load a QNN model from `model_path`
 
         Args:
+            model_name: name of the model
             model_path (str): model path
-            bin_files (str) : 
+            bin_files (str) : List of LoraAdapter class objects. 
         """
         self.model_path = model_path
         self.lora_adapters = lora_adapters
@@ -145,7 +146,7 @@ class QNNLoraContext:
             raise ValueError("model_path must be specified!")
 
         if not os.path.exists(self.model_path):
-            raise ValueError(f"Model path does not exist: {self.model_path}")
+            raise ValueError(f"Model path does not exist: {self.model_path}") 
 
         if (backend_lib_path == "None"):
             backend_lib_path = g_backend_lib_path
@@ -159,6 +160,16 @@ class QNNLoraContext:
     #@timer
     def Inference(self, input, perf_profile = PerfProfile.DEFAULT):
         return self.m_context.Inference(input, perf_profile)
+    
+    def apply_binary_update(self, lora_adapters=None):
+        self.lora_adapters = lora_adapters
+        
+        m_lora_adapters = []
+        for adapter in lora_adapters:
+            m_lora_adapters.append(adapter.m_adapter)
+            
+        self.m_context.ApplyBinaryUpdate(m_lora_adapters)
+
 
     #@timer
     def __del__(self):
