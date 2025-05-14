@@ -24,9 +24,9 @@ DEFAULT_SDK_VER     = "2.34"
 DEFAULT_DSP_ARCH    = "73"  # For X-Elite device.
 DEFAULT_LIB_ARCH = "arm64x-windows-msvc" # "aarch64-windows-msvc" # For X-Elite device.
 
-QNN_SDK_URL = "https://softwarecenter.qualcomm.com/api/download/software/qualcomm_neural_processing_sdk/"
+QNN_SDK_URL = "https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/"
 QAI_APPBUILDER_WHEEL = "https://github.com/quic/ai-engine-direct-helper/releases/download/vversion.0/qai_appbuilder-version.0-cp312-cp312-win_amd64.whl"
-QNN_DOWNLOAD_URL = "https://softwarecenter.qualcomm.com/#/catalog/item/a0844287-db23-11ed-a260-063166a9270b?type=Tool"
+QNN_DOWNLOAD_URL = "https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK"
 TEXT_RUN_SCRIPT_AGAIN = "Then run this Python script again."
 
 QNN_SDK_ROOT="C:\\Qualcomm\\AIStack\\QAIRT\\"
@@ -382,7 +382,7 @@ def install_qai_sdk(version):
         full_version = qnn_sdk_version[version]
         zip_name = "v" + full_version + ".zip"
 
-        url = QNN_SDK_URL + zip_name
+        url = QNN_SDK_URL + full_version + "/" + zip_name
         qnn_zip_path = QNN_SDK_ROOT + zip_name
         qnn_root_path = QNN_SDK_ROOT + full_version
 
