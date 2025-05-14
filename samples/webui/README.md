@@ -37,3 +37,4 @@ Run the commands in below table to start WebUI apps.
 ### Screenshots:
 ![image](screenshot/ImageRepairApp.jpg)
 ![image](screenshot/StableDiffusionApp.jpg)
+![image](screenshot/GenieWebUI.png)
