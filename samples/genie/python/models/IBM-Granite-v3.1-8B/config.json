@@ -37,7 +37,7 @@
                     "kv-dim": 128,
                     "allow-async-init": false
                 },
-                "extensions": "qai_libs\\htp_backend_ext_config.json"
+                "extensions": "genie\\python\\config\\htp_backend_ext_config.json"
             },
             "model": {
                 "version": 1,

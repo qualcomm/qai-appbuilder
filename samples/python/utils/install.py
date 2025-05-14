@@ -363,6 +363,7 @@ def setup_qai_env(version, lib_arch = DEFAULT_LIB_ARCH, dsp_arch = DEFAULT_DSP_A
             "QnnHtp.dll",
             "QnnSystem.dll",
             "QnnHtpPrepare.dll",
+            "QnnHtpNetRunExtensions.dll",
             "QnnHtpV{}Stub.dll".format(dsp_arch),
         ]
 
