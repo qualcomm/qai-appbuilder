@@ -107,6 +107,11 @@ def verify_package(url, filepath, filesize, desc=None, fail=None):
         else:
             is_continue = True
 
+    print("If the download speed is too slow, you can download them from one of below URLs and install it manually before you run this 'setup.py'.")
+    print("https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK")
+    print("https://qpm.qualcomm.com/#/main/tools/details/Qualcomm_AI_Runtime_SDK")
+    print()
+
     if is_continue:
         print(f"The file '{filepath}' is not ready. Please wait for downloading to complete.")
 
