@@ -56,7 +56,7 @@ GenieAPIService\GenieAPIService.exe -c "genie\python\models\IBM-Granite-v3.1-8B\
 4. Install the GenieAPIService.apk to mobile and start it.<br>
 
 ## Client Usage:
-  The service can be access through http://<ip address>:8910/, it's compatible with OpenAI API.
+  The service can be access through http://ip:8910/, it's compatible with OpenAI API.
   Here is a Python client sample:
 ```
 import argparse
