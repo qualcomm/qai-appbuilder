@@ -144,7 +144,7 @@ class QnnSampleApp {
 // zw.
   StatusCode executeGraphsBuffers(std::vector<uint8_t*>& inputBuffers,
                                   std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
-                                  std::string perfProfile);
+                                  std::string perfProfile, size_t graphIndex = 0);
 
   StatusCode initializeLog();
   StatusCode setLogLevel(QnnLog_Level_t logLevel);

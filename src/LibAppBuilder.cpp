@@ -413,7 +413,7 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
 bool ModelInferenceEx(std::string model_name, std::string proc_name, std::string share_memory_name,
                       std::vector<uint8_t*>& inputBuffers, std::vector<size_t>& inputSize,
                       std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
-                      std::string& perfProfile) {
+                      std::string& perfProfile, size_t graphIndex) {
     bool result = true;
 
     //QNN_INF("LibAppBuilder::ModelInference: %s \n", model_name.c_str());
@@ -421,7 +421,7 @@ bool ModelInferenceEx(std::string model_name, std::string proc_name, std::string
 #ifdef _WIN32
     if (!proc_name.empty()) {
         // If proc_name, run the model in that process.
-        result = TalkToSvc_Inference(model_name, proc_name, share_memory_name, inputBuffers, inputSize, outputBuffers, outputSize, perfProfile);
+        result = TalkToSvc_Inference(model_name, proc_name, share_memory_name, inputBuffers, inputSize, outputBuffers, outputSize, perfProfile, graphIndex);
         return result;
     }
 #endif
@@ -435,7 +435,7 @@ bool ModelInferenceEx(std::string model_name, std::string proc_name, std::string
         result = false;
     }
 
-    if (result && sample_app::StatusCode::SUCCESS != app->executeGraphsBuffers(inputBuffers, outputBuffers, outputSize, perfProfile)) {
+    if (result && sample_app::StatusCode::SUCCESS != app->executeGraphsBuffers(inputBuffers, outputBuffers, outputSize, perfProfile, graphIndex)) {
         app->reportError("Graph Execution failure");
         result = false;
     }
@@ -534,22 +534,22 @@ bool LibAppBuilder::ModelInitialize(const std::string& model_name, const std::st
 }
 
 bool LibAppBuilder::ModelInference(std::string model_name, std::string proc_name, std::string share_memory_name,
-                                        std::vector<uint8_t*>& inputBuffers, std::vector<size_t>& inputSize,
-                                        std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
-                                        std::string& perfProfile) {
+                                   std::vector<uint8_t*>& inputBuffers, std::vector<size_t>& inputSize,
+                                   std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
+                                   std::string& perfProfile, size_t graphIndex) {
 #ifdef _WIN32
     if (!proc_name.empty()) {   // If proc_name, run the model in that process.
-        return TalkToSvc_Inference(model_name, proc_name, share_memory_name, inputBuffers, inputSize, outputBuffers, outputSize, perfProfile);
+        return TalkToSvc_Inference(model_name, proc_name, share_memory_name, inputBuffers, inputSize, outputBuffers, outputSize, perfProfile, graphIndex);
     }
 #endif
     return false;
 }
 
 bool LibAppBuilder::ModelInference(std::string model_name, std::vector<uint8_t*>& inputBuffers, 
-                                        std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
-                                        std::string& perfProfile){
+                                   std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
+                                   std::string& perfProfile, size_t graphIndex){
     std::vector<size_t> inputSize;
-    return ModelInferenceEx(model_name, "", "", inputBuffers, inputSize, outputBuffers, outputSize, perfProfile);
+    return ModelInferenceEx(model_name, "", "", inputBuffers, inputSize, outputBuffers, outputSize, perfProfile, graphIndex);
 }
 
 bool LibAppBuilder::ModelApplyBinaryUpdate(const std::string model_name, std::vector<LoraAdapter>& lora_adapters) {

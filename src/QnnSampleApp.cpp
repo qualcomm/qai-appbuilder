@@ -1263,8 +1263,8 @@ sample_app::StatusCode sample_app::QnnSampleApp::tearDownInputAndOutputTensors()
 }
 
 sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vector<uint8_t*>& inputBuffers, 
-                                                                               std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
-                                                                               std::string perfProfile) {
+                                                                      std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
+                                                                      std::string perfProfile, size_t graphIndex) {
   auto returnStatus = StatusCode::SUCCESS;
   
   // We push '12345' to 'outputSize' in function 'ModelRun@main.cpp@SvcQNNHelpper.exe'. In this case, share memory will not be freed, we can use the share memory as output buffer directly.
@@ -1281,13 +1281,18 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vecto
       }
   }
 
-  for (size_t graphIdx = 0; graphIdx < m_graphsCount; graphIdx++) {
+  // printf("m_graphsCount = %d\n", m_graphsCount);
+  
+  size_t graphIdx = graphIndex; // Only run one graph at a time.
+  // for (size_t graphIdx = 0; graphIdx < m_graphsCount; graphIdx++) {
+    // printf("Starting execution for graphIdx: %d\n", (int)graphIdx);
+
     QNN_DEBUG("Starting execution for graphIdx: %d", graphIdx);
-    if (graphIdx >= inputBuffers.size()) {
-      QNN_ERROR("No Inputs available for: %d", graphIdx);
-      returnStatus = StatusCode::FAILURE;
-      break;
-    }
+    //if (graphIdx >= inputBuffers.size()) {
+    //  QNN_ERROR("No Inputs available for: %d", graphIdx);
+    //  returnStatus = StatusCode::FAILURE;
+    //  return returnStatus;
+    //}
 
     // improve performance.
 
@@ -1295,6 +1300,9 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vecto
     Qnn_Tensor_t* outputs = (*m_graphsInfo)[graphIdx].m_outputs;
 
     auto graphInfo = (*m_graphsInfo)[graphIdx];
+
+    // printf("graphName: %s, numInputTensors: %d, numOutputTensors: %d\n", graphInfo.graphName, graphInfo.numInputTensors, graphInfo.numOutputTensors);
+
     if (!inputBuffers.empty()) {
       //size_t totalCount = inputFileList[0].size();
       //while (!inputFileList[0].empty()) 
@@ -1406,11 +1414,11 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vecto
         }
         if (StatusCode::SUCCESS != returnStatus) {
           QNN_ERROR("Execution of Graph: %d failed!", graphIdx);
-          break;
+          return returnStatus;
         }
       }
     }
-  }
+  // }  // End of for.
 
   return returnStatus;
 }

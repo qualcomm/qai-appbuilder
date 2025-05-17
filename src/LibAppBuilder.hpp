@@ -64,11 +64,11 @@ public:
 
     bool ModelInference(std::string model_name, std::vector<uint8_t*>& inputBuffers, 
                               std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
-                              std::string& perfProfile);
+                              std::string& perfProfile, size_t graphIndex = 0);
     bool ModelInference(std::string model_name, std::string proc_name, std::string share_memory_name,
                               std::vector<uint8_t*>& inputBuffers, std::vector<size_t>& inputSize,
                               std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
-                              std::string& perfProfile);
+                              std::string& perfProfile, size_t graphIndex = 0);
 
     bool ModelApplyBinaryUpdate(const std::string model_name, std::vector<LoraAdapter>& lora_adapters);
 

@@ -106,7 +106,7 @@ void ModelRun(std::string cmdBuf, HANDLE hSvcPipeOutWrite) {
     size_t share_memory_size      = std::stoull(commands[2]);
     std::string strBufferArray    = commands[3];
     std::string perfProfile       = commands[4];
-
+    size_t graphIndex             = std::stoull(commands[5]);
 
     // Open share memory and read the inference data from share memory.
     LPVOID lpBase = OpenShareMem(share_memory_name, share_memory_size);
@@ -122,7 +122,7 @@ void ModelRun(std::string cmdBuf, HANDLE hSvcPipeOutWrite) {
 
     Print_MemInfo("ModelRun::ModelInference Start.");
     //QNN_INF("ModelRun::ModelInference %s\n", model_name.c_str());
-    bSuccess = g_LibAppBuilder.ModelInference(model_name.c_str(), inputBuffers, outputBuffers, outputSize, perfProfile);
+    bSuccess = g_LibAppBuilder.ModelInference(model_name.c_str(), inputBuffers, outputBuffers, outputSize, perfProfile, graphIndex);
     //QNN_INF("ModelRun::ModelInference End ret = %d\n", bSuccess);
     Print_MemInfo("ModelRun::ModelInference End.");
 

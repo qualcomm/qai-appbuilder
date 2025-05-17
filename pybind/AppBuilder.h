@@ -70,7 +70,8 @@ int destroy_P(std::string model_name, std::string proc_name) {
     return g_LibAppBuilder.ModelDestroy(model_name, proc_name);
 }
 
-std::vector<py::array_t<float>> inference(std::string model_name, const std::vector<py::array_t<float>>& input, std::string perf_profile) {
+std::vector<py::array_t<float>> inference(std::string model_name, const std::vector<py::array_t<float>>& input, 
+                                          std::string perf_profile, size_t graphIndex = 0) {
     std::vector<uint8_t*> inputBuffers;
     std::vector<uint8_t*> outputBuffers;
     std::vector<size_t> outputSize;
@@ -82,7 +83,7 @@ std::vector<py::array_t<float>> inference(std::string model_name, const std::vec
         inputBuffers.push_back(reinterpret_cast<uint8_t*>(buf.ptr));
     }
 
-    g_LibAppBuilder.ModelInference(model_name, inputBuffers, outputBuffers, outputSize, perf_profile);
+    g_LibAppBuilder.ModelInference(model_name, inputBuffers, outputBuffers, outputSize, perf_profile, graphIndex);
 
     //QNN_INF("inference::inference output vector length: %d\n", outputBuffers.size());
 
@@ -104,7 +105,7 @@ std::vector<py::array_t<float>> inference(std::string model_name, const std::vec
 }
 
 std::vector<py::array_t<float>> inference_P(std::string model_name, std::string proc_name, std::string share_memory_name,
-                                            const std::vector<py::array_t<float>>& input, std::string perf_profile) {
+                                            const std::vector<py::array_t<float>>& input, std::string perf_profile, size_t graphIndex = 0) {
     std::vector<uint8_t*> inputBuffers;
     std::vector<size_t> inputSize;
     std::vector<uint8_t*> outputBuffers;
@@ -118,7 +119,7 @@ std::vector<py::array_t<float>> inference_P(std::string model_name, std::string 
         // QNN_INF("inference input data size: %llu\n", size);
     }
 
-    g_LibAppBuilder.ModelInference(model_name, proc_name, share_memory_name, inputBuffers, inputSize, outputBuffers, outputSize, perf_profile);
+    g_LibAppBuilder.ModelInference(model_name, proc_name, share_memory_name, inputBuffers, inputSize, outputBuffers, outputSize, perf_profile, graphIndex);
 
     //QNN_INF("inference_P::inference output vector length: %d\n", outputBuffers.size());
 
@@ -176,8 +177,8 @@ public:
        	       const std::string& model_path, const std::string& backend_lib_path, 
                const std::string& system_lib_path, bool async = false);
 
-    std::vector<py::array_t<float>> Inference(const std::vector<py::array_t<float>>& input, const std::string& perf_profile = "default");
-    std::vector<py::array_t<float>> Inference(const ShareMemory& share_memory, const std::vector<py::array_t<float>>& input, const std::string& perf_profile = "default");
+    std::vector<py::array_t<float>> Inference(const std::vector<py::array_t<float>>& input, const std::string& perf_profile = "default", size_t graphIndex = 0);
+    std::vector<py::array_t<float>> Inference(const ShareMemory& share_memory, const std::vector<py::array_t<float>>& input, const std::string& perf_profile = "default", size_t graphIndex = 0);
     
     bool ApplyBinaryUpdate(const std::vector<LoraAdapter>& lora_adapters);
 

@@ -158,8 +158,8 @@ class QNNLoraContext:
                                                m_lora_adapters, is_async)
 
     #@timer
-    def Inference(self, input, perf_profile = PerfProfile.DEFAULT):
-        return self.m_context.Inference(input, perf_profile)
+    def Inference(self, input, perf_profile = PerfProfile.DEFAULT, graphIndex = 0):
+        return self.m_context.Inference(input, perf_profile, graphIndex)
     
     def apply_binary_update(self, lora_adapters=None):
         self.lora_adapters = lora_adapters
@@ -209,8 +209,8 @@ class QNNContext:
         self.m_context = appbuilder.QNNContext(model_name, model_path, backend_lib_path, system_lib_path, is_async)
 
     #@timer
-    def Inference(self, input, perf_profile = PerfProfile.DEFAULT):
-        return self.m_context.Inference(input, perf_profile)
+    def Inference(self, input, perf_profile = PerfProfile.DEFAULT, graphIndex = 0):
+        return self.m_context.Inference(input, perf_profile, graphIndex)
 
     #@timer
     def __del__(self):
@@ -256,8 +256,8 @@ class QNNContextProc:
         self.m_context = appbuilder.QNNContext(model_name, proc_name, model_path, backend_lib_path, system_lib_path, is_async)
 
     #@timer
-    def Inference(self, shareMemory, input, perf_profile = PerfProfile.DEFAULT):
-        return self.m_context.Inference(shareMemory.m_memory, input, perf_profile)
+    def Inference(self, shareMemory, input, perf_profile = PerfProfile.DEFAULT, graphIndex = 0):
+        return self.m_context.Inference(shareMemory.m_memory, input, perf_profile, graphIndex)
 
     #@timer
     def __del__(self):

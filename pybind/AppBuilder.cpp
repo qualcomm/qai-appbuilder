@@ -54,13 +54,13 @@ QNNContext::~QNNContext() {
 
 
 std::vector<py::array_t<float>> 
-QNNContext::Inference(const std::vector<py::array_t<float>>& input, const std::string& perf_profile) {
-    return inference(m_model_name, input, perf_profile);
+QNNContext::Inference(const std::vector<py::array_t<float>>& input, const std::string& perf_profile, size_t graphIndex) {
+    return inference(m_model_name, input, perf_profile, graphIndex);
 }
 
 std::vector<py::array_t<float>> 
-QNNContext::Inference(const ShareMemory& share_memory, const std::vector<py::array_t<float>>& input, const std::string& perf_profile) {
-    return inference_P(m_model_name, m_proc_name, share_memory.m_share_memory_name, input, perf_profile);
+QNNContext::Inference(const ShareMemory& share_memory, const std::vector<py::array_t<float>>& input, const std::string& perf_profile, size_t graphIndex) {
+    return inference_P(m_model_name, m_proc_name, share_memory.m_share_memory_name, input, perf_profile, graphIndex);
 }
 
 bool QNNContext::ApplyBinaryUpdate(const std::vector<LoraAdapter>& lora_adapters) {
@@ -118,8 +118,8 @@ PYBIND11_MODULE(appbuilder, m) {
         .def(py::init<const std::string&, const std::string&, const std::string&, const std::string&, bool>())
         .def(py::init<const std::string&, const std::string&, const std::string&, const std::string&, const std::vector<LoraAdapter>&, bool>())
         .def(py::init<const std::string&, const std::string&, const std::string&, const std::string&, const std::string&, bool>())
-        .def("Inference", py::overload_cast<const std::vector<py::array_t<float>>&, const std::string&>(&QNNContext::Inference))
-        .def("Inference", py::overload_cast<const ShareMemory&, const std::vector<py::array_t<float>>&, const std::string&>(&QNNContext::Inference))
+        .def("Inference", py::overload_cast<const std::vector<py::array_t<float>>&, const std::string&, size_t>(&QNNContext::Inference))
+        .def("Inference", py::overload_cast<const ShareMemory&, const std::vector<py::array_t<float>>&, const std::string&, size_t>(&QNNContext::Inference))
         .def("ApplyBinaryUpdate", &QNNContext::ApplyBinaryUpdate, "Apply Lora binary update");
 
 

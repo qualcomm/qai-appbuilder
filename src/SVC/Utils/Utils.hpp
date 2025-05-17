@@ -318,7 +318,7 @@ std::pair<std::string, std::string> VectorToShareMem(size_t share_memory_size, u
 BOOL TalkToSvc_Inference(std::string model_name, std::string proc_name, std::string share_memory_name, 
                          std::vector<uint8_t*>& inputBuffers, std::vector<size_t>& inputSize,
                          std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
-                         std::string perfProfile) {
+                         std::string perfProfile, size_t graphIndex) {
     ProcInfo_t* pProcInfo = FindProcInfo(proc_name);
     if (!pProcInfo) {
         QNN_ERR("TalkToSvc_Inference::Cant find this process %s.\n", proc_name.c_str());
@@ -340,7 +340,8 @@ BOOL TalkToSvc_Inference(std::string model_name, std::string proc_name, std::str
     // 'offset' in share memory(according to 'inputBuffers' data size, so that we can restore this data to 'std::vector<uint8_t*>' in Svc).
     std::pair<std::string, std::string> strResultArray = VectorToShareMem(pShareMemInfo->size, (uint8_t*)pShareMemInfo->lpBase, inputBuffers, inputSize);
     command = command + strResultArray.first + "=" + strResultArray.second + ";";
-    command = command + perfProfile;
+    command = command + perfProfile + ";";
+    command = command + std::to_string(graphIndex);
     dwRead = (DWORD)command.length() + 1;
 
     // start_time();
