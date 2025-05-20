@@ -48,4 +48,4 @@ python genie\python\GenieAPIClientImage.py --prompt "<Your prompt>"
 | Phi 3.5 mini * | [model files](https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/phi_3_5_mini_instruct/v1/snapdragon_x_elite/models.zip)<br>[tokenizer.json](https://huggingface.co/microsoft/Phi-3.5-mini-instruct/resolve/main/tokenizer.json?download=true) |
 
 *. For Phi-3.5-Mini-Instruct model, to see appropriate spaces in the output, remove lines 193-196 (Strip rule) in the tokenizer.json file.<br>
-**. Refer to here to [setup Stable Diffusion v2.1 models](../python/README.md) before run 'GenieAPIService.py'.
+**. Refer to here to [setup Stable Diffusion v2.1 models](../../python/README.md) before run 'GenieAPIService.py'.
