@@ -13,7 +13,7 @@ Download and install [git](https://github.com/dennisameling/git/releases/downloa
 ### Step 2: Install basic Python dependencies:
 Run below commands in Windows terminal:
 ```
-pip install requests wget tqdm importlib-metadata
+pip install requests wget tqdm importlib-metadata qai-hub 
 ```
 
 ### Step 3: Download QAI AppBuilder repository:
