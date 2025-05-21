@@ -4,9 +4,9 @@
 This sample helps developers use QAI AppBuilder + Python to build Genie based Open AI compatibility API service on Windows on Snapdragon (WoS) platform.
 
 ## Setting Up Environment For Service:
-### Step 1: Install basic dependencies
-Refer to following link to setup basic dependencies: <br>
-https://github.com/quic/ai-engine-direct-helper/blob/main/samples/python/README.md#setting-up-qai-appbuilder-python-environment <br>
+
+### Step 1: Install Dependencies
+Refer to [python.md](../../../docs/python.md) on how to setup x64 version Python environment.
 
 ### Step 2: Install basic Python dependencies for service
 Run following commands in Windows terminal:
@@ -48,4 +48,4 @@ python genie\python\GenieAPIClientImage.py --prompt "<Your prompt>"
 | Phi 3.5 mini * | [model files](https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/phi_3_5_mini_instruct/v1/snapdragon_x_elite/models.zip)<br>[tokenizer.json](https://huggingface.co/microsoft/Phi-3.5-mini-instruct/resolve/main/tokenizer.json?download=true) |
 
 *. For Phi-3.5-Mini-Instruct model, to see appropriate spaces in the output, remove lines 193-196 (Strip rule) in the tokenizer.json file.<br>
-**. Refer to here to [setup Stable Diffusion v2.1 models](../../python/README.md) before run 'GenieAPIService.py'.
+**. Refer to [setup Stable Diffusion v2.1 models](../../python/README.md) before run 'GenieAPIService.py' (Our Python version 'GenieAPIService.py' support generating image, it depends on Stable Diffusion v2.1 sample code.)
