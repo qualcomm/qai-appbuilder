@@ -24,14 +24,19 @@ from qai_appbuilder import (QNNContext, QNNContextProc, QNNShareMemory, Runtime,
 ####################################################################
 
 MODEL_NAME                  = "stable_diffusion_v2_1"
+MODEL_ID_VAE                = "mn03orx8n"
+MODEL_ID_UNET               = "mmd46dywm"
+MODEL_ID_TEXT               = "mq3p9dd6n"
 TEXT_ENCODER_MODEL_NAME     = MODEL_NAME + "_quantized-textencoderquantizable-qualcomm_snapdragon_x_elite.bin"
 UNET_MODEL_NAME             = MODEL_NAME + "_quantized-unetquantizable-qualcomm_snapdragon_x_elite.bin"
 VAE_DECODER_MODEL_NAME      = MODEL_NAME + "_quantized-vaedecoderquantizable-qualcomm_snapdragon_x_elite.bin"
 
+HUB_ID_H="185c2df6375b8219c30b5d6205387d2fee753f63"
+
 TIMESTEP_EMBEDDING_MODEL_ID = "m0q96xyyq"
 TOKENIZER_MODEL_NAME        = "stabilityai/stable-diffusion-2-1-base"
 TOKENIZER_HELP_URL          = "https://github.com/quic/ai-engine-direct-helper/blob/main/samples/python/" + MODEL_NAME + "/README.md#clip-vit-l14-model"
-
+MODEL_HELP_URL = "https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
 ####################################################################
 
 execution_ws = os.getcwd()
@@ -310,14 +315,17 @@ def modelExecuteCallback(result):
 def model_download():
     ret = True
 
+    desc = f"Downloading {MODEL_NAME} model... "
+    fail = f"\nFailed to download {MODEL_NAME} model. Please prepare the models according to the steps in below link:\n{MODEL_HELP_URL}"
+    
+    ret = install.download_qai_hubmodel(MODEL_ID_VAE, vae_decoder_model_path, desc=desc, fail=fail, hub_id=HUB_ID_H)
+    ret = install.download_qai_hubmodel(MODEL_ID_UNET, unet_model_path, desc=desc, fail=fail, hub_id=HUB_ID_H)
+    ret = install.download_qai_hubmodel(MODEL_ID_TEXT, text_encoder_model_path, desc=desc, fail=fail, hub_id=HUB_ID_H)
+
     desc = "Please download Stable-Diffusion-v2.1 model from https://aihub.qualcomm.com/compute/models/stable_diffusion_v2_1_quantized and save them to path 'samples\\python\\stable_diffusion_v2_1\\models'.\n"
     if not os.path.exists(text_encoder_model_path) or not os.path.exists(unet_model_path) or not os.path.exists(vae_decoder_model_path):
         print(desc)
         exit()
-
-    if not ret:
-        if not os.path.exists(time_embedding_dir):  # There is no timestep_embedding data, exit process.
-            exit()
 
 ####################################################################
 

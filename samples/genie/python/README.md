@@ -19,6 +19,10 @@ Download files for the models listed at the end of this page, save them to follo
 ```
 ai-engine-direct-helper\samples\genie\python\models\<model folder>
 ```
+If you want to modify the relative path of the directory where the model file is located, you need to modify the "config.json" file in the corresponding directory of the model to ensure that the tokenizer.json, htp_backend_ext_config.json and model files set in the configuration file can be found correctly.
+```
+ai-engine-direct-helper\samples\genie\python\models\<model folder>\config.json
+```
 
 ### Step 4: Switch to webui directory
 Run following commands in Windows terminal:
