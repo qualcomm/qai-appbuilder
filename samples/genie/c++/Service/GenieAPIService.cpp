@@ -268,6 +268,13 @@ bool load_model(std::string config_file, std::string model_name) {
   timer.Reset();
   std::cout << GREEN << "INFO: loading model <<< " + s_model_name + " >>>" << RESET << std::endl;
   s_genie_context = std::make_unique<GenieContext>(config_file_path.string());
+
+  if (str_search(s_model_name, "IBM-Granite")) {
+    std::string stop_sequence = "{\n  \"stop-sequence\" : [\"<|end_of_text|>\", \"<|end_of_role|>\", \"<|start_of_role|>\"]\n}";
+    std::cout << "SetStopSequence: " << stop_sequence << std::endl;
+    s_genie_context->SetStopSequence(stop_sequence);
+  }
+
   std::cout << GREEN << "INFO: model <<< " + s_model_name + " >>> is ready!" << RESET << std::endl;
   timer.Print("model load time >>");
 
