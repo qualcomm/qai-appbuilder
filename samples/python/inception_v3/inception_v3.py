@@ -14,6 +14,7 @@ import torch
 import torchvision.transforms as transforms
 from PIL import Image
 from PIL.Image import fromarray as ImageFromArray
+import argparse
 
 from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig)
 
@@ -45,6 +46,12 @@ imagenet_classes_path = model_dir + "\\" + IMAGENET_CLASSES_FILE
 
 inceptionV3 = None
 
+def format_float(num, max_zeros=6):
+    if abs(num) >= 1e-6:
+        return f"{num:.10f}".rstrip('0').rstrip('.')
+    else:
+        return f"{num:.{max_zeros+2}f}".rstrip('0').rstrip('.')
+
 def preprocess_PIL_image(image: Image) -> torch.Tensor:
     preprocess = transforms.Compose([
         transforms.Resize(IMAGE_SIZE),
@@ -62,9 +69,19 @@ def post_process(probabilities, output):
         categories = [s.strip() for s in f.readlines()]
     # Show top categories per image
     top5_prob, top5_catid = torch.topk(probabilities, 5)
-    print("Top 5 predictions for image:\n")
+
+    result = "Top 5 predictions for image:\n"
+    print(result)
+
     for i in range(top5_prob.size(0)):
-        print(categories[top5_catid[i]], top5_prob[i].item())
+        cat_id = categories[top5_catid[i]]
+        item_value = top5_prob[i].item()
+        item_value = format_float(item_value)
+        result += f'{cat_id} {item_value} \n'
+
+        print(categories[top5_catid[i]], item_value)
+
+    return result
 
 # InceptionV3 class which inherited from the class QNNContext.
 class InceptionV3(QNNContext):
@@ -115,8 +132,9 @@ def Inference(input_image_path):
     # show the Top 5 predictions for image
     output = torch.from_numpy(output_data)  
     probabilities = torch.softmax(output, dim=0)
-    post_process(probabilities, output)
-    
+    result=post_process(probabilities, output)
+
+    return result
 
 def Release():
     global inceptionV3
@@ -124,10 +142,23 @@ def Release():
     # Release the resources.
     del(inceptionV3)
 
+def main(input = None):
 
-Init()
+    if input is None:
+        input = execution_ws + "\\input.jpg"
 
-Inference(execution_ws + "\\input.jpg")
+    Init()
 
-Release()
+    result = Inference(input)
 
+    Release()
+
+    return result
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Process a single image path.")
+    parser.add_argument('--image', help='Path to the image', default=None)
+    args = parser.parse_args()
+
+    main(args.image)

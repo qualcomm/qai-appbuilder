@@ -17,6 +17,8 @@ from PIL.Image import fromarray as ImageFromArray
 from torch.nn.functional import interpolate, pad
 from torchvision.ops import nms
 from typing import List, Tuple, Optional, Union, Callable
+import argparse
+
 from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig)
 
 ####################################################################
@@ -292,7 +294,7 @@ def Init():
     # Instance for YoloV8 objects.
     yolov8 = YoloV8("yolov8", madel_path)
 
-def Inference(input_image_path, output_image_path):
+def Inference(input_image_path, output_image_path, show_image = True):
     global image_buffer, nms_iou_threshold, nms_score_threshold
 
     # Read and preprocess the image.
@@ -349,7 +351,9 @@ def Inference(input_image_path, output_image_path):
     #save and display the output_image
     output_image = Image.fromarray(output_image)
     output_image.save(output_image_path)
-    output_image.show()
+
+    if show_image:
+        output_image.show()
 
 def Release():
     global yolov8
@@ -358,9 +362,28 @@ def Release():
     del(yolov8)
 
 
-Init()
+def main(input_image_path=None, output_image_path=None, show_image = True):
+    
+    if input_image_path is None:
+        input_image_path = execution_ws + "\\input.jpg"
 
-Inference(execution_ws + "\\input.jpg", execution_ws + "\\output.jpg")
+    if output_image_path is None:
+        output_image_path = execution_ws + "\\output.png"
 
-Release()
+    Init()
+
+    Inference(input_image_path=input_image_path,output_image_path=output_image_path,show_image=show_image)
+
+    Release()
+
+    return "Yolo V8 Inference Result"
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Process a single image path.")
+    parser.add_argument('--input_image_path', help='Path to the input image', default=None)
+    #input_image_path, output_image_path
+    parser.add_argument('--output_image_path', help='Path to the output image', default=None)
+    args = parser.parse_args()
+
+    main(args.input_image_path, args.output_image_path)
 
