@@ -362,8 +362,8 @@ def Release():
     del(yolov8)
 
 
-def main(input_image_path=None, output_image_path=None, show_image = True):
-    
+def main(input_image_path=None, output_image_path=None, show_image=True):
+
     if input_image_path is None:
         input_image_path = execution_ws + "\\input.jpg"
 
