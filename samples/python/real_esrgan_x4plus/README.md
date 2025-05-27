@@ -71,8 +71,3 @@ The output image will be saved to the following path:
 ```
 C:\ai-hub\real_esrgan_x4plus\out.jpg
 ```
-
-## Reference
-You need to setup the AppBuilder environment before you run the sample code. Below is the guide on how to setup the AppBuilder environment:
-https://github.com/quic/ai-engine-direct-helper/blob/main/README.md
-https://github.com/quic/ai-engine-direct-helper/blob/main/Docs/User_Guide.md

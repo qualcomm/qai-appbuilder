@@ -15,34 +15,36 @@ pip install uvicorn pydantic_settings fastapi langchain langchain_core langchain
 ```
 
 ### Step 3: Download models and tokenizer files
-Download files for the models listed at the end of this page, save them to following path. Need to unzip the 'weight_sharing_model_N_of_N.serialized.bin' files from model package to following path.
+Download files for the [AI-Hub LLM models](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/python#ai-hub-llm-models) list at the end of this page, save them to following path. You need to unzip the 'weight_sharing_model_N_of_N.serialized.bin' files from model package to following path. Copy the corresponding 'tokenizer.json' file to the following directory path too.
 ```
-ai-engine-direct-helper\samples\genie\python\models\<model folder>
+ai-engine-direct-helper\samples\genie\python\models\<model name>
 ```
 If you want to modify the relative path of the directory where the model file is located, you need to modify the "config.json" file in the corresponding directory of the model to ensure that the tokenizer.json, htp_backend_ext_config.json and model files set in the configuration file can be found correctly.
 ```
-ai-engine-direct-helper\samples\genie\python\models\<model folder>\config.json
+ai-engine-direct-helper\samples\genie\python\models\<model name>\config.json
 ```
+* You can also use your own QNN LLM model (if you have one). You can create a subdirectory in the path "ai-engine-direct-helper\samples\genie\python\models\" for your model and customize the "config.json" for your model. Then use your model name in the client application.
 
-### Step 4: Switch to webui directory
+### Step 4: Switch to samples directory
 Run following commands in Windows terminal:
 ```
 cd ai-engine-direct-helper\samples
 ```
 
 ### Step 5: Run service
-Run the following commands to launch Genie API Service:
+Run the following commands to launch Genie API Service (Do *not* close this terminal window while service is running)
 ```
 python genie\python\GenieAPIService.py
 ```
 
 ### Step 6: Now you can access the API service
-The default IP address for this API is: [http://localhost:8910](http://localhost:8910)
-You can try using the following commands to generate text or image:
+The default IP address for this API is: 'localhost:8910', you can access this IP address in the client app.
+You can try using the following commands to generate text or image (You can run these Python in a new terminal window):
 ```
-python genie\python\GenieAPIClient.py --prompt "<Your query>" --stream
-python genie\python\GenieAPIClientImage.py --prompt "<Your prompt>"
+python genie\python\GenieAPIClient.py --prompt "How to fish?" --stream
+python genie\python\GenieAPIClientImage.py --prompt "spectacular view of northern lights from Alaska"
 ```
+When you run the client, you can see the current status of processing client requests from the server. When you run the request of image generation for the first time, the server may have to download the Stable Diffusion model from AI-Hub, and it will take a long time.
 
 ### AI-Hub LLM models:
 

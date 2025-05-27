@@ -3,10 +3,7 @@
 ## Introduction 
 This guide helps developers use QAI AppBuilder with the QNN SDK to execute models on Windows on Snapdragon (WoS) platforms.
 
-## Setting Up QAI AppBuilder Environment and Preparing QNN SDK Libraries
-
-Set up QAI AppBuilder environment and prepare QNN SDK libraries by referring to the links below: 
-
+## Setup AppBuilder environment and prepare QNN SDK libraries by referring to the links below: 
 https://github.com/quic/ai-engine-direct-helper/blob/main/README.md <br>
 https://github.com/quic/ai-engine-direct-helper/blob/main/Docs/User_Guide.md
 
@@ -15,7 +12,7 @@ Set up a new folder named by the model you tend to deploy:
 C:\ai-hub\model_name\
 ```
 
-Set up a new folder called `qnn` and copy the QNN libraries from QNN SDK to below path:
+Copy the QNN libraries from QNN SDK to below path:
 ```
 C:\ai-hub\model_name\qai_libs\libqnnhtpv73.cat
 C:\ai-hub\model_name\qai_libs\libQnnHtpV73Skel.so
@@ -563,10 +560,3 @@ Use the following command to compare the results on Windows on Snapdragon (WoS) 
 ```
 python -m qai_hub_models.models.model_name.demo --on-device --hub-model-id m1m6gor6q --device "Snapdragon X Elite CRD"
 ```
-
-
-## Reference
-You need to setup the AppBuilder environment before you run the sample code. Below is the guide on how to setup the AppBuilder environment:
-https://github.com/quic/ai-engine-direct-helper/blob/main/README.md
-https://github.com/quic/ai-engine-direct-helper/blob/main/Docs/User_Guide.md
-

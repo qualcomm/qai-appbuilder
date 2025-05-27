@@ -14,7 +14,7 @@ Run below commands in Windows terminal:
 pip install gradio
 ```
 
-### Step 3: Switch to webui directory:
+### Step 3: Switch to samples directory:
 Run below commands in Windows terminal:
 ```
 cd ai-engine-direct-helper\samples
