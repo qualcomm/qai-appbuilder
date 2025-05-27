@@ -19,7 +19,7 @@ Download files for the [AI-Hub LLM models](https://github.com/quic/ai-engine-dir
 ```
 ai-engine-direct-helper\samples\genie\python\models\<model name>
 ```
-If you want to modify the relative path of the directory where the model file is located, you need to modify the "config.json" file in the corresponding directory of the model to ensure that the tokenizer.json, htp_backend_ext_config.json and model files set in the configuration file can be found correctly.
+* If you want to modify the relative path of the directory where the model file is located, you need to modify the "config.json" file in the corresponding directory of the model to ensure that the tokenizer.json, htp_backend_ext_config.json and model files set in the configuration file can be found correctly.
 ```
 ai-engine-direct-helper\samples\genie\python\models\<model name>\config.json
 ```
@@ -34,17 +34,33 @@ cd ai-engine-direct-helper\samples
 ### Step 5: Run service
 Run the following commands to launch Genie API Service (Do *not* close this terminal window while service is running)
 ```
-python genie\python\GenieAPIService.py
+python genie\python\GenieAPIService.py --modelname "IBM-Granite-v3.1-8B" --loadmodel
+```
+The service prints the following log, indicating that GenieAPIService started successfully.
+```
+INFO:     loading model <<< IBM-Granite-v3.1-8B >>>
+[INFO]  "Using create From Binary"
+[INFO]  "Allocated total size = 353404160 across 10 buffers"
+INFO:     model <<< IBM-Granite-v3.1-8B >>> is ready!
+INFO:     model init time: 4.71 (s)
+INFO:     Started server process [7608]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8910 (Press CTRL+C to quit)
 ```
 
 ### Step 6: Now you can access the API service
 The default IP address for this API is: 'localhost:8910', you can access this IP address in the client app.
-You can try using the following commands to generate text or image (You can run these Python in a new terminal window):
+You can run the following Python in a new terminal window. <br>
+The following command to generate text from text prompt:
 ```
 python genie\python\GenieAPIClient.py --prompt "How to fish?" --stream
+```
+The following command to generate image from text prompt:
+```
 python genie\python\GenieAPIClientImage.py --prompt "spectacular view of northern lights from Alaska"
 ```
-When you run the client, you can see the current status of processing client requests from the server. When you run the request of image generation for the first time, the server may have to download the Stable Diffusion model from AI-Hub, and it will take a long time.
+* When you run the client, you can see the current status of processing client requests from the server. When you run the request of image generation for the first time, the server may have to download the Stable Diffusion model from AI-Hub, and it will take a long time.
 
 ### AI-Hub LLM models:
 
