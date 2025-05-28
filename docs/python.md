@@ -11,13 +11,13 @@ Download and install [git](https://github.com/dennisameling/git/releases/downloa
 *Make sure to check 'Add python.exe to PATH' while install Python*
 
 ### Step 2: Install basic Python dependencies:
-Run below commands in Windows terminal:
+Run below command in Windows terminal:
 ```
 pip install requests wget tqdm importlib-metadata qai-hub 
 ```
 
 ### Step 3: Download QAI AppBuilder repository:
-Run below commands in Windows terminal:
+Run below command in Windows terminal:
 ```
 git clone https://github.com/quic/ai-engine-direct-helper.git
 ```
