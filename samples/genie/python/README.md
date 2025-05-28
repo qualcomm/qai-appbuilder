@@ -15,7 +15,9 @@ pip install uvicorn pydantic_settings fastapi langchain langchain_core langchain
 ```
 
 ### Step 3: Download models and tokenizer files
-Download the files from the [AI-Hub LLM models](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/python#ai-hub-llm-models) list at the end of this page, save them to following path. You need to unzip the 'weight_sharing_model_N_of_N.serialized.bin' files from model package and copy them to following path. Download and copy the corresponding 'tokenizer.json' file to the following directory path too. 
+Download the files from the [AI-Hub LLM models](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/python#ai-hub-llm-models) list at the end of this page, save them to following path. <br>
+Select 'Snapdragon® X Elite' as the device for WoS platform while downloading the model.<br>
+You need to unzip the 'weight_sharing_model_N_of_N.serialized.bin' files from model package and copy them to following path. Download and copy the corresponding 'tokenizer.json' file to the following directory path too. 
 ```
 ai-engine-direct-helper\samples\genie\python\models\<model name>
 ```
