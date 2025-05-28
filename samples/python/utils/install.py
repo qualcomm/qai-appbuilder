@@ -107,9 +107,6 @@ def verify_package(url, filepath, filesize, desc=None, fail=None):
         else:
             is_continue = True
 
-    print("If the download speed is too slow, you can download them from one of below URLs and install it manually before you run this 'setup.py'.")
-    print("https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK")
-    print("https://qpm.qualcomm.com/#/main/tools/details/Qualcomm_AI_Runtime_SDK")
     print()
 
     if is_continue:
@@ -404,6 +401,11 @@ def install_qai_sdk(version):
                f"If the downloading speed is too slow, please download it manually from {QNN_DOWNLOAD_URL} and install it. " + TEXT_RUN_SCRIPT_AGAIN
         fail = f"Failed to download file from {url}: \n\t1. Please try again a few times.\n\t2. If still doesn't work, please try to download it manually"\
                f" from {QNN_DOWNLOAD_URL} and install it. " + TEXT_RUN_SCRIPT_AGAIN
+
+        print("If the download speed is too slow, you can download them from one of below URLs and install it manually before you run this 'setup.py'.")
+        print("https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK")
+        print("https://qpm.qualcomm.com/#/main/tools/details/Qualcomm_AI_Runtime_SDK")
+
         ret = download_url(url, qnn_zip_path, desc=desc, fail=fail)
         # install_clean(QNN_SDK_ROOT, zip_name)
         if not ret:

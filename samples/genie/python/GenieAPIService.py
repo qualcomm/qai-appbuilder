@@ -20,6 +20,7 @@ from ChainUtils import GenieLLM
 
 sys.path.append("python")
 
+import utils.install as install
 import stable_diffusion_v2_1.stable_diffusion_v2_1 as stable_diffusion
 
 sys.stdin.reconfigure(encoding='utf-8')
@@ -429,6 +430,28 @@ def shutdown():
 
 app.add_api_route('/shutdown', shutdown, methods=['GET'])
 
+def download():
+    PATH_Tokenizer = APP_PATH + "\\models\\IBM-Granite-v3.1-8B\\tokenizer.json"
+    URL_Tokenizer = "https://gitee.com/hf-models/granite-3.1-8b-base/raw/main/tokenizer.json"
+
+    if not os.path.exists(PATH_Tokenizer):
+        install.download_url(URL_Tokenizer, PATH_Tokenizer)
+
+    PATH_Tokenizer = APP_PATH + "\\models\\Phi-3.5-mini\\tokenizer.json"
+    URL_Tokenizer = "https://gitee.com/hf-models/Phi-3.5-mini-instruct/raw/main/tokenizer.json"
+
+    if not os.path.exists(PATH_Tokenizer):
+        install.download_url(URL_Tokenizer, PATH_Tokenizer)
+
+        import re
+        with open(PATH_Tokenizer, 'r', encoding='utf-8') as f:
+            content = f.read()
+        pattern = r',\s*{\s*"type":\s*"Strip",\s*"content":\s*"\s*",\s*"start":\s*\d+,\s*"stop":\s*\d+\s*}'
+        new_content = re.sub(pattern, '', content)
+        with open(PATH_Tokenizer, 'w', encoding='utf-8') as f:
+            f.write(new_content)
+
+
 def model_load(model_name):
     global llm, _current_model, _model_list, _max_query_times
     find_model = False
@@ -436,6 +459,8 @@ def model_load(model_name):
     if model_name.lower() in _current_model.lower():
         return False
 
+    download()
+    
     if _model_list is None:
         model_root = APP_PATH + "models"
         _model_list = [f for f in os.listdir(model_root) if os.path.isdir(os.path.join(model_root, f))]
