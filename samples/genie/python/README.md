@@ -68,11 +68,11 @@ python genie\python\GenieAPIClientImage.py --prompt "spectacular view of norther
 
 ### AI-Hub LLM models:
 
-|  Model  | model file  | tokenizer file **
+|  Model  | model file  | tokenizer file *
 |  ----  | :----   | :----   |
 | [IBM Granite v3.1 8B](https://aihub.qualcomm.com/compute/models/ibm_granite_v3_1_8b_instruct) | [IBM-Granite-v3.1-8B-Instruct](https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/ibm_granite_v3_1_8b_instruct/v1/snapdragon_x_elite/models.zip) | [tokenizer.json](https://huggingface.co/ibm-granite/granite-3.1-8b-base/resolve/main/tokenizer.json?download=true) |
-| [Phi 3.5 mini](https://aihub.qualcomm.com/compute/models/phi_3_5_mini_instruct) * | [Phi-3.5-mini-instruct](https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/phi_3_5_mini_instruct/v1/snapdragon_x_elite/models.zip) | [tokenizer.json](https://huggingface.co/microsoft/Phi-3.5-mini-instruct/resolve/main/tokenizer.json?download=true) |
+| [Phi 3.5 mini](https://aihub.qualcomm.com/compute/models/phi_3_5_mini_instruct) ** | [Phi-3.5-mini-instruct](https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/phi_3_5_mini_instruct/v1/snapdragon_x_elite/models.zip) | [tokenizer.json](https://huggingface.co/microsoft/Phi-3.5-mini-instruct/resolve/main/tokenizer.json?download=true) |
 
-*. For Phi-3.5-Mini-Instruct model, to see appropriate spaces in the output, remove lines 193-196 (Strip rule) in the tokenizer.json file.<br>
-**. Tokenizer files will be downloaded automatically while you running 'GenieAPIService.py'.<br>
+*. Tokenizer files will be downloaded automatically while you running 'GenieAPIService.py'.<br>
+**. 'For Phi-3.5-Mini-Instruct' model, to see appropriate spaces in the output, remove lines 193-196 (Strip rule) in the 'tokenizer.json' file if you download 'tokenizer.json' file manually. If you download it through 'GenieAPIService.py', the script will modify it automatically.<br>
 ***. Refer to [setup Stable Diffusion v2.1 models](../../python/README.md) before run 'GenieAPIService.py' (Our Python version 'GenieAPIService.py' support generating image, it depends on Stable Diffusion v2.1 sample code.)
