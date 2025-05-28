@@ -74,5 +74,16 @@ python genie\python\GenieAPIClientImage.py --prompt "spectacular view of norther
 | [Phi 3.5 mini](https://aihub.qualcomm.com/compute/models/phi_3_5_mini_instruct) ** | [Phi-3.5-mini-instruct](https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/phi_3_5_mini_instruct/v1/snapdragon_x_elite/models.zip) | [tokenizer.json](https://huggingface.co/microsoft/Phi-3.5-mini-instruct/resolve/main/tokenizer.json?download=true) |
 
 *. Tokenizer files will be downloaded automatically while you running 'GenieAPIService.py'.<br>
-**. 'For Phi-3.5-Mini-Instruct' model, to see appropriate spaces in the output, remove lines 193-196 (Strip rule) in the 'tokenizer.json' file if you download 'tokenizer.json' file manually. If you download it through 'GenieAPIService.py', the script will modify it automatically.<br>
+**. For 'Phi-3.5-Mini-Instruct' model, to see appropriate spaces in the output, remove lines 192-197 (Strip rule) in the 'tokenizer.json' file if you download 'tokenizer.json' file manually. Remember to delete the extra commas on line 191. (If you download it through 'GenieAPIService.py', the Python script will modify it automatically.) <br>
+The following is the correct change for the 'tokenizer.json' file of 'Phi-3.5-Mini-Instruct' model:<br>
+```
+-      },
+-      {
+-        "type": "Strip",
+-        "content": " ",
+-        "start": 1,
+-        "stop": 0
+-      }
++      }
+```
 ***. Refer to [setup Stable Diffusion v2.1 models](../../python/README.md) before run 'GenieAPIService.py' (Our Python version 'GenieAPIService.py' support generating image, it depends on Stable Diffusion v2.1 sample code.)
