@@ -21,7 +21,10 @@ Run below commands in Windows terminal:
 ```
 git clone https://github.com/quic/ai-engine-direct-helper.git
 ```
-
+If you have cloned it before, you can update the code by the following command:
+```
+git pull --recurse-submodules
+```
 ### Step 4: Setup QAI AppBuilder Python Environment:
 Run below commands in Windows terminal:
 ```
