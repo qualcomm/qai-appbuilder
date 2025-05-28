@@ -16,11 +16,11 @@ pip install uvicorn pydantic_settings fastapi langchain langchain_core langchain
 
 ### Step 3: Download models and tokenizer files
 Download the files from the [AI-Hub LLM models](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/python#ai-hub-llm-models) list at the end of this page, save them to following path. <br>
-Select 'Snapdragon® X Elite' as the device for WoS platform while downloading the model.<br>
-You need to unzip the 'weight_sharing_model_N_of_N.serialized.bin' files from model package and copy them to following path. Download and copy the corresponding 'tokenizer.json' file to the following directory path too. 
 ```
 ai-engine-direct-helper\samples\genie\python\models\<model name>
 ```
+* Select 'Snapdragon® X Elite' as the device for WoS platform while downloading the model.<br>
+* You need to unzip the 'weight_sharing_model_N_of_N.serialized.bin' files from model package and copy them to following path. Download and copy the corresponding 'tokenizer.json' file to the following directory path too. 
 * Please be careful not to mix 'tokenizer.json' file of different models. Ensure that the' tokenizer.json' file corresponding to the IBM Granite model is placed in the "samples\genie\python\models\IBM-Granite-v3.1-8B" directory, and the' tokenizer.json' file corresponding to the Phi 3.5 model is placed in the "samples\genie\python\models\Phi-3.5-mini" directory.<br>
 
 If you want to modify the relative path of the directory where the model file is located, you need to modify the "config.json" file in the corresponding directory of the model to ensure that the 'tokenizer.json', 'htp_backend_ext_config.json' and model files set in the configuration file can be found correctly.
