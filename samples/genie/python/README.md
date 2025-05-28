@@ -15,15 +15,18 @@ pip install uvicorn pydantic_settings fastapi langchain langchain_core langchain
 ```
 
 ### Step 3: Download models and tokenizer files
-Download files for the [AI-Hub LLM models](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/python#ai-hub-llm-models) list at the end of this page, save them to following path. You need to unzip the 'weight_sharing_model_N_of_N.serialized.bin' files from model package to following path. Copy the corresponding 'tokenizer.json' file to the following directory path too.
+Download the files from the [AI-Hub LLM models](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/python#ai-hub-llm-models) list at the end of this page, save them to following path. You need to unzip the 'weight_sharing_model_N_of_N.serialized.bin' files from model package and copy them to following path. Download and copy the corresponding 'tokenizer.json' file to the following directory path too. 
 ```
 ai-engine-direct-helper\samples\genie\python\models\<model name>
 ```
-* If you want to modify the relative path of the directory where the model file is located, you need to modify the "config.json" file in the corresponding directory of the model to ensure that the tokenizer.json, htp_backend_ext_config.json and model files set in the configuration file can be found correctly.
+* Please be careful not to mix 'tokenizer.json' file of different models. Ensure that the' tokenizer.json' file corresponding to the IBM Granite model is placed in the "samples\genie\python\models\IBM-Granite-v3.1-8B" directory, and the' tokenizer.json' file corresponding to the Phi 3.5 model is placed in the "samples\genie\python\models\Phi-3.5-mini" directory.<br>
+
+If you want to modify the relative path of the directory where the model file is located, you need to modify the "config.json" file in the corresponding directory of the model to ensure that the 'tokenizer.json', 'htp_backend_ext_config.json' and model files set in the configuration file can be found correctly.
 ```
 ai-engine-direct-helper\samples\genie\python\models\<model name>\config.json
 ```
-* You can also use your own QNN LLM model (if you have one). You can create a subdirectory in the path "ai-engine-direct-helper\samples\genie\python\models\" for your model and customize the "config.json" for your model. Then use your model name in the client application.
+
+* You can also use your own QNN LLM model (if you have one). You can create a subdirectory in the path "ai-engine-direct-helper\samples\genie\python\models\" for your model and customize the "config.json" and "prompt.conf" files for your model. Then use your model name in the client application.
 
 ### Step 4: Switch to samples directory
 Run following commands in Windows terminal:
@@ -43,7 +46,7 @@ INFO:     loading model <<< IBM-Granite-v3.1-8B >>>
 [INFO]  "Allocated total size = 353404160 across 10 buffers"
 INFO:     model <<< IBM-Granite-v3.1-8B >>> is ready!
 INFO:     model init time: 4.71 (s)
-INFO:     Started server process [7608]
+INFO:     Started service process [7608]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8910 (Press CTRL+C to quit)
@@ -60,14 +63,15 @@ The following command to generate image from text prompt:
 ```
 python genie\python\GenieAPIClientImage.py --prompt "spectacular view of northern lights from Alaska"
 ```
-* When you run the client, you can see the current status of processing client requests from the server. When you run the request of image generation for the first time, the server may have to download the Stable Diffusion model from AI-Hub, and it will take a long time.
+* When you run the client, you can see the current status of processing client requests from the service terminal window. 
+* When you run the request of image generation for the first time, the service may have to download the Stable Diffusion model from AI-Hub, and it will take a long time.
 
 ### AI-Hub LLM models:
 
-|  Model  | Resource  |
-|  ----  | :----   |
-| IBM Granite v3.1 8B | [model files](https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/ibm_granite_v3_1_8b_instruct/v1/snapdragon_x_elite/models.zip)<br>[tokenizer.json](https://huggingface.co/ibm-granite/granite-3.1-8b-base/resolve/main/tokenizer.json?download=true) |
-| Phi 3.5 mini * | [model files](https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/phi_3_5_mini_instruct/v1/snapdragon_x_elite/models.zip)<br>[tokenizer.json](https://huggingface.co/microsoft/Phi-3.5-mini-instruct/resolve/main/tokenizer.json?download=true) |
+|  Model  | model file  | tokenizer file
+|  ----  | :----   | :----   |
+| [IBM Granite v3.1 8B](https://aihub.qualcomm.com/compute/models/ibm_granite_v3_1_8b_instruct) | [IBM-Granite-v3.1-8B-Instruct](https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/ibm_granite_v3_1_8b_instruct/v1/snapdragon_x_elite/models.zip) | [tokenizer.json](https://huggingface.co/ibm-granite/granite-3.1-8b-base/resolve/main/tokenizer.json?download=true) |
+| [Phi 3.5 mini](https://aihub.qualcomm.com/compute/models/phi_3_5_mini_instruct) * | [Phi-3.5-mini-instruct](https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/phi_3_5_mini_instruct/v1/snapdragon_x_elite/models.zip) | [tokenizer.json](https://huggingface.co/microsoft/Phi-3.5-mini-instruct/resolve/main/tokenizer.json?download=true) |
 
 *. For Phi-3.5-Mini-Instruct model, to see appropriate spaces in the output, remove lines 193-196 (Strip rule) in the tokenizer.json file.<br>
 **. Refer to [setup Stable Diffusion v2.1 models](../../python/README.md) before run 'GenieAPIService.py' (Our Python version 'GenieAPIService.py' support generating image, it depends on Stable Diffusion v2.1 sample code.)
