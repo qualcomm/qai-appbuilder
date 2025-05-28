@@ -10,6 +10,8 @@ Download and install [git](https://github.com/dennisameling/git/releases/downloa
 
 *Make sure to check 'Add python.exe to PATH' while install Python*
 
+Download and install [vc_redist.x64](https://aka.ms/vs/16/release/vc_redist.x64.exe) if you haven't installed.
+
 ### Step 2: Install basic Python dependencies:
 Run below command in Windows terminal:
 ```
