@@ -28,11 +28,12 @@ Run the commands in below table to start WebUI apps.
 |  Model   | Command  |
 |  ----  | :----    |
 | ImageRepairApp | python webui\ImageRepairApp.py |
-| StableDiffusionApp | python webui\StableDiffusionApp.py |
-| GenieWebUI * | python webui\GenieWebUI.py |
+| StableDiffusionApp * | python webui\StableDiffusionApp.py |
+| GenieWebUI ** | python webui\GenieWebUI.py |
 
-*. Refer to step 3 here to [setup LLM models](../genie/python/README.md) before run 'GenieWebUI.py'.<br>
-**. Refer to here to [setup Stable Diffusion v2.1 models](../python/README.md) before run 'GenieWebUI.py'.
+*. Refer to here to [setup Stable Diffusion v2.1 models](../python/README.md) before run 'GenieWebUI.py'. <br>
+*. StableDiffusionApp only support English prompt.<br>
+**. Refer to step 3 here to [setup LLM models](../genie/python/README.md) before run 'GenieWebUI.py'.<br>
 
 ### Screenshots:
 ![image](screenshot/ImageRepairApp.jpg)
