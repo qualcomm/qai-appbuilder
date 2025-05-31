@@ -1,0 +1,59 @@
+{
+  "dialog" : {
+    "version" : 1,
+    "type" : "basic",
+    "context" : {
+      "version" : 1,
+      "size": 4096,
+      "n-vocab":   152064,
+      "bos-token": 151643,
+      "eos-token": 151645,
+      "eot-token": 128009
+    },
+    "sampler" : {
+      "version" : 1,
+      "seed" : 42,
+      "temp" : 1,
+      "top-k" : 1,
+      "top-p" : 1
+    },
+    "tokenizer" : {
+      "version" : 1,
+      "path" : "genie\\python\\models\\Qwen2.0-7B\\tokenizer.json"
+    },
+    "engine" : {
+      "version" : 1,
+      "n-threads" : 3,
+      "backend" : {
+        "version" : 1,
+        "type" : "QnnHtp",
+        "QnnHtp" : {
+          "version" : 1,
+          "use-mmap" : false,
+          "spill-fill-bufsize" : 0,
+          "mmap-budget" : 0,
+          "poll" :false,
+          "pos-id-dim" : 64,
+          "cpu-mask" : "0xe0",
+          "kv-dim" : 128,
+          "rope-theta": 1000000
+        },
+        "extensions" : "qai_libs\\htp_backend_ext_config.json"
+      },
+      "model" : {
+        "version" : 1,
+        "type" : "binary",
+        "binary" : {
+          "version" : 1,
+          "ctx-bins" : [
+            "genie\\python\\models\\Qwen2.0-7B\\model-1.bin",
+            "genie\\python\\models\\Qwen2.0-7B\\model-2.bin",
+            "genie\\python\\models\\Qwen2.0-7B\\model-3.bin",
+            "genie\\python\\models\\Qwen2.0-7B\\model-4.bin",
+            "genie\\python\\models\\Qwen2.0-7B\\model-5.bin"
+          ]
+        }
+      }
+    }
+  }
+}
