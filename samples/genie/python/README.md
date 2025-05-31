@@ -109,7 +109,7 @@ Taking the QWen 2 model as an example, a complete prompt example is as follows: 
 In this example, the user's question is "How to fish?". Therefore, we extract the content before the question as the content of prompt_tags_1 and extract the content after the question as the content of prompt_tags_2. We set the content of 'promtp.conf' as follows: <br>
 prompt_tags_1: <|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n <br>
 prompt_tags_2: <|im_end|>\n<|im_start|>assistant\n <br><br>
-The following link contain the prompt format of some models. <br>
+The following link contains the prompt format of some models. <br>
 https://github.com/quic/ai-hub-apps/tree/main/tutorials/llm_on_genie#prompt-formats
 
 3. For more information about LLM QNN model, you can refer to following link: <br>
