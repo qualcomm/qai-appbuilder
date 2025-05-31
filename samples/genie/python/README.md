@@ -19,7 +19,7 @@ Download the files from the [AI-Hub LLM models](https://github.com/quic/ai-engin
 ```
 ai-engine-direct-helper\samples\genie\python\models\<model name>
 ```
-* Select 'Snapdragon® X Elite' as the device for WoS platform while downloading the model.<br>
+* Select 'SnapdragonÂ® X Elite' as the device for WoS platform while downloading the model.<br>
 * You need to unzip the 'weight_sharing_model_N_of_N.serialized.bin' files from model package and copy them to following path. Download and copy the corresponding 'tokenizer.json' file to the following directory path too. 
 * Please be careful not to mix 'tokenizer.json' file of different models. Ensure that the' tokenizer.json' file corresponding to the IBM Granite model is placed in the "samples\genie\python\models\IBM-Granite-v3.1-8B" directory, and the' tokenizer.json' file corresponding to the Phi 3.5 model is placed in the "samples\genie\python\models\Phi-3.5-mini" directory.<br>
 
@@ -28,7 +28,7 @@ If you want to modify the relative path of the directory where the model file is
 ai-engine-direct-helper\samples\genie\python\models\<model name>\config.json
 ```
 
-* You can also use your own LLM QNN model (if you have one). Refer to [setup custom model](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/python#setup-custom-model) part for detailed steps.
+* You can also use your own LLM Genie model (if you have one). Refer to [setup custom model](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/python#setup-custom-model) part for detailed steps.
 
 ### Step 4: Switch to samples directory
 Run following commands in Windows terminal:
@@ -112,5 +112,5 @@ prompt_tags_2: <|im_end|>\n<|im_start|>assistant\n <br><br>
 The following link contains the prompt format of some models. <br>
 https://github.com/quic/ai-hub-apps/tree/main/tutorials/llm_on_genie#prompt-formats
 
-3. For more information about LLM QNN model, you can refer to following link: <br>
+3. For more information about LLM Genie model, you can refer to following link: <br>
 https://github.com/quic/ai-hub-apps/tree/main/tutorials/llm_on_genie
