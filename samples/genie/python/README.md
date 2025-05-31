@@ -99,7 +99,7 @@ You need to make sure that the following parameters in the configuration file po
 a. tokenizer: The path to the model 'tokenizer.json' file. <br>
 b. extensions: The path to Genie extension configuration file. You can find it from path: 'ai-engine-direct-helper\samples\genie\python\config\htp_backend_ext_config.json'<br>
 c. ctx-bins: The path to model context bin files(ctx-bins). Usually a model has 3~5 context bin files. <br>
-d. forecast-prefix-name:The path to the directory where SSD model' kv-cache.primary.qnn-htp' file is stored. Only SSD model needs this parameter.<br>
+d. forecast-prefix-name:The path to the directory where SSD model 'kv-cache.primary.qnn-htp' file is stored. Only SSD model needs this parameter.<br>
 e. other parameters: Set other parameters according to your model.
 
 2. prompt.conf : model prompt format configuration file. There are two lines in this file, which are used to set prompt_tags_1 and prompt_tags_2 parameters respectively. A complete prompt consists of the following contents: <br>
