@@ -53,12 +53,14 @@ project(GenieAPIClient)
 set(APP "GenieAPIClient")
 set(APP_SOURCES "GenieAPIClient.cpp")
 
+LINK_DIRECTORIES(../External/curl/build/lib/Release/)
+
 add_executable(${APP} ${APP_SOURCES})
 
 SET(EXECUTABLE_OUTPUT_PATH "${PROJECT_SOURCE_DIR}/libs")
 
 target_compile_definitions(${APP} PUBLIC "-DNOMINMAX")
-target_link_libraries(${APP} PRIVATE Shlwapi Shell32)
+target_link_libraries(${APP} Shlwapi Shell32)
 
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MDd")
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MD /O2 /Ob2")
@@ -66,5 +68,8 @@ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MD /O2 /Ob2")
 target_include_directories(${APP} PUBLIC ../External/cpp-httplib
                                          ../External/json/include
                                          ../External/fmt/include
+                                         ../External/curl/include
                                          ../External/DuoTools/DuoEngine  ## for using 'windows_getopt.h' in this project.
                                          ./)
+
+target_link_libraries(${APP} libcurl_imp)
