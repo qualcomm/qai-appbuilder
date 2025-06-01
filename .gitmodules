@@ -13,3 +13,6 @@
 [submodule "samples/genie/c++/External/json"]
 	path = samples/genie/c++/External/json
 	url = https://github.com/nlohmann/json
+[submodule "samples/genie/c++/External/curl"]
+	path = samples/genie/c++/External/curl
+	url = https://github.com/curl/curl
