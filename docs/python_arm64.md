@@ -1,10 +1,12 @@
-### 1. Intruduction: 
+## Python(arm64)
+
+## 1. Intruduction: 
 
 Using the Python extensions with ARM64 Python will get better performance for developers to build GUI app for Windows on Snapdragon(WoS) platforms. Python 3.12.6 ARM64 version has support for following modules: PyQt6, OpenCV, Numpy, PyTorch*, Torchvision*, ONNX*, ONNX Runtime*. <br>
 
 **PyTorch, Torchvision, ONNX, ONNX Runtime: need to compile from source code today.* <br>
 
-### 2. Python and common python extensions: 
+## 2. Python and common python extensions: 
 Get ARM64 version 'python-3.12.6-arm64.exe' from below link and install it. Make sure to add Python to your PATH environment.
 https://www.python.org/ftp/python/3.12.6/python-3.12.6-arm64.exe
 
@@ -20,14 +22,14 @@ pip install pillow-10.3.0-cp312-cp312-win_arm64.whl
 Get PyQt6 from here, refer to the *Notes* below on compiling PyQt6_sip:
 https://github.com/RockLakeGrass/Windows-on-ARM64-Toolchain/tree/main/Python/packages/PyQt/PyQt6
 
-### 3. PyTorch, TorchVision, ONNX, ONNX Runtime:
+## 3. PyTorch, TorchVision, ONNX, ONNX Runtime:
 If need these Python extensioins for ARM64 Python, you need compile them by yourselves. If need support on how to compile them, you can contact with us.
 
-### 4. MSVC library:
+## 4. MSVC library:
 You need ARM64 version 'msvcp140.dll' from 'Microsoft Visual C++ 2022 Redistributable (Arm64)'. You can download it from here and install it:
 https://aka.ms/arm64previewredist/
 
-### 5. Notes: <br>
+## 5. Notes: <br>
 a. For C++(Visual Studio) projects, you need to set 'Runtime Library' to 'Multi-threaded DLL (/MD)'. Please refer to below link for detailed information:
 https://learn.microsoft.com/en-us/cpp/build/reference/md-mt-ld-use-run-time-library?view=msvc-170
 

@@ -1,4 +1,10 @@
-# README
+<br>
+
+<div align="center">
+  <h3>Run the large language model on the local NPU.</h3>
+  <p><i> OpenAI Compatibility API Service (C++) </i></p>
+</div>
+<br>
 
 ## Introduction 
 This sample helps developers use C++ to build Genie based Open AI compatibility API service on Windows on Snapdragon (WoS), Mobile and Linux platforms.
@@ -11,7 +17,7 @@ This service can be used on multiple platforms such as Android, Windows, Linux, 
 
 ### Run the service on WoS: <br>
 1. [Setup LLM models](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/python#step-3-download-models-and-tokenizer-files) first before running this service. <br>
-2. Download [GenieAPIService binary](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.34.0/GenieAPIService_2.34.zip) and copy the subdirectory "GenieAPIService" to path "ai-engine-direct-helper\samples".<br>
+2. Download [GenieAPIService](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.34.0/GenieAPIService_2.34.zip) and copy the subdirectory "GenieAPIService" to path "ai-engine-direct-helper\samples".<br>
 3. Run the following commands to launch the Service (Do *not* close this terminal window while service is running). 
 
 ```
@@ -44,7 +50,17 @@ INFO: Service Is Ready Now!
 
 ## Client Usage:
   The service can be access through the ip address 'localhost:8910', it's compatible with OpenAI API.
-  Here is a Python client sample (You can run this Python client in a new terminal window):
+
+### C++ Client Sample Code:
+  Here is a C++ client sample: [GenieAPIClient.cpp](Service/GenieAPIClient.cpp). You can get the compiled 'GenieAPIClient.exe' from [GenieAPIService](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.34.0/GenieAPIService_2.34.zip). The sample app depends on the dynamical library 'libcurl.dll' which also included in the 'GenieAPIService' package.
+
+  We can run it with the command below in a new terminal window::
+```
+GenieAPIService\GenieAPIClient.exe --prompt "How to fish?" --stream
+```
+
+### Python Client Sample Code:
+  Here is a Python client sample (You can save it to 'GenieAPIClient.py'):
 
 ```
 import argparse
@@ -77,4 +93,9 @@ if args.stream:
 else:
     response = client.chat.completions.create(model=model_name, messages=messages, extra_body=extra_body)
     print(response.choices[0].message.content)
+```
+
+  We can run it with the command below in a new terminal window:
+```
+python GenieAPIClient.py --prompt "How to fish?" --stream
 ```

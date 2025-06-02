@@ -1,4 +1,10 @@
-# README
+<br>
+
+<div align="center">
+  <h3>Run the model locally on NPU, deploy the AI-Hub model quickly.</h3>
+  <p><i> SIMPLE | EASY | FAST </i></p>
+</div>
+<br>
 
 ## Introduction 
 This guide helps developers setup Python environment for using QAI AppBuilder to run sample code on Windows on Snapdragon (WoS) platforms.

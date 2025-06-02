@@ -1,4 +1,10 @@
-# README
+<br>
+
+<div align="center">
+  <h3>Run the large language model on the local NPU.</h3>
+  <p><i> OpenAI Compatibility API Service (Python) </i></p>
+</div>
+<br>
 
 ## Introduction 
 This sample helps developers use QAI AppBuilder + Python to build Genie based Open AI compatibility API service on Windows on Snapdragon (WoS) platform.

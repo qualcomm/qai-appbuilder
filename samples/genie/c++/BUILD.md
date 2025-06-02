@@ -6,9 +6,20 @@
   The code under this folder is Android app which can be used to launch the service in Android device.
 
 ## Build Service from source code:
-
-### Build GenieAPIServer for WoS:<br>
 Install Qualcomm® AI Runtime SDK, CMake, Visual Studio etc, before you compile this service.<br>
+
+### Build 'libcurl.dll' for WoS:<br>
+GenieAPIClient depends on 'libcurl.dll', we need to build this dynamical library first throubh the commands below:
+```
+cd samples/genie/c++/External/curl
+mkdir build & cd build
+cmake -S .. -B . -A ARM64 -DCURL_USE_LIBPSL=OFF 
+cmake --build . --config Release
+```
+
+
+### Build GenieAPIServer & GenieAPIClient for WoS:<br>
+We can compile them through the commands below:
 ```
 Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.34.0.250424\
 cd samples\genie\c++\Service

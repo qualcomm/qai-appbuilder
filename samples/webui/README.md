@@ -1,4 +1,10 @@
-# README
+<br>
+
+<div align="center">
+  <h3>Run the WebUI AI application locally on NPU.</h3>
+  <p><i> SIMPLE | EASY | FAST </i></p>
+</div>
+<br>
 
 ## Introduction 
 These samples helps developers use QAI AppBuilder + Python Gradio extension to build *WebUI* AI apps on Windows on Snapdragon (WoS) platforms.
