@@ -54,7 +54,7 @@ INFO: Service Is Ready Now!
 ### C++ Client Sample Code:
   Here is a C++ client sample: [GenieAPIClient.cpp](Service/GenieAPIClient.cpp). You can get the compiled 'GenieAPIClient.exe' from [GenieAPIService](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.34.0/GenieAPIService_2.34.zip). The sample app depends on the dynamical library 'libcurl.dll' which also included in the 'GenieAPIService' package.
 
-  We can run it with the command below in a new terminal window::
+  We can run it with the command below in a new terminal window:
 ```
 GenieAPIService\GenieAPIClient.exe --prompt "How to fish?" --stream
 ```
