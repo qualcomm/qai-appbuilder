@@ -6,6 +6,10 @@
 </div>
 <br>
 
+## Disclaimer
+This software is provided “as is,” without any express or implied warranties. The authors and contributors shall not be held liable for any damages arising from its use. Due to limited resources, the code may be incomplete or insufficiently tested. Users are solely responsible for evaluating its suitability and assume all associated risks.
+Note: Contributions are welcome. Please ensure thorough testing before deploying in critical systems.
+
 ## Introduction 
 This sample helps developers use QAI AppBuilder + Python to build Genie based Open AI compatibility API service on Windows on Snapdragon (WoS) platform.
 

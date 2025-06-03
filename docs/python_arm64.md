@@ -1,5 +1,9 @@
 ## Python(arm64)
 
+## Disclaimer
+This software is provided “as is,” without any express or implied warranties. The authors and contributors shall not be held liable for any damages arising from its use. Due to limited resources, the code may be incomplete or insufficiently tested. Users are solely responsible for evaluating its suitability and assume all associated risks.
+Note: Contributions are welcome. Please ensure thorough testing before deploying in critical systems.
+
 ## 1. Intruduction: 
 
 Using the Python extensions with ARM64 Python will get better performance for developers to build GUI app for Windows on Snapdragon(WoS) platforms. Python 3.12.6 ARM64 version has support for following modules: PyQt6, OpenCV, Numpy, PyTorch*, Torchvision*, ONNX*, ONNX Runtime*. <br>

@@ -1,5 +1,9 @@
 # User Guide
 
+## Disclaimer
+This software is provided “as is,” without any express or implied warranties. The authors and contributors shall not be held liable for any damages arising from its use. Due to limited resources, the code may be incomplete or insufficiently tested. Users are solely responsible for evaluating its suitability and assume all associated risks.
+Note: Contributions are welcome. Please ensure thorough testing before deploying in critical systems.
+
 ## Environment Setup
 
 ### 1. Libraries from QNN SDK:
