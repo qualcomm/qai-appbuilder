@@ -39,6 +39,7 @@ llm = None
 _current_model = ""
 _model_list = None
 _max_query_times = 0
+_profile = False
 
 class Colors:
     RED = '\033[91m'
@@ -205,6 +206,16 @@ def system_prompt(history):
             return prompt
     return None
 
+def print_profile():
+    if _profile:
+        _, _, _, profile = llm.get_profile_str()
+
+        profile = profile.replace("<small><small>", "")
+        profile = profile.replace("</small></small>", "")
+
+        print()
+        print(f"{Colors.YELLOW}PROF:     ", profile, f"{Colors.END}")
+
 async def stream_chat_event_publisher(history, body):
     global _client_connected
 
@@ -251,6 +262,9 @@ async def stream_chat_event_publisher(history, body):
         # print("*" * 20)
         await asyncio.sleep(0.01)  # yield control back to event loop for cancellation check
         _client_connected = False
+
+        print_profile()
+
         yield chunk.model_dump_json(exclude_unset=True) + "\n\n"
 
     except asyncio.CancelledError as e:
@@ -330,6 +344,8 @@ async def stream_chat(body: ChatCompletionRequest) -> ChatCompletionResponse:
         # print(question)
         answer = llm.invoke(question, sys_prompt=sys_prompt)
         # print(answer)
+
+        print_profile()
 
     print("=" * 40)
     _client_connected = False
@@ -504,10 +520,12 @@ if __name__ == "__main__":
     parser.add_argument("--loadmodel", action="store_true")
     parser.add_argument("--modelname", default="IBM-Granite", type=str)
     parser.add_argument("--max-query-times", default=0, type=int)
+    parser.add_argument("--profile", action="store_true")
 
     args = parser.parse_args()
 
     _max_query_times = args.max_query_times
+    _profile = args.profile
 
     if args.loadmodel:
         model_load(args.modelname)

@@ -49,7 +49,7 @@ cd ai-engine-direct-helper\samples
 ### Step 5: Run service
 Run the following commands to launch Genie API Service (Do *not* close this terminal window while service is running)
 ```
-python genie\python\GenieAPIService.py --modelname "IBM-Granite-v3.1-8B" --loadmodel
+python genie\python\GenieAPIService.py --modelname "IBM-Granite-v3.1-8B" --loadmodel --profile
 ```
 The service prints the following log, indicating that GenieAPIService started successfully.
 ```
