@@ -1,5 +1,10 @@
 # Langflow CV package
 
+## Disclaimer
+This software is provided “as is,” without any express or implied warranties. The authors and contributors shall not be held liable for any damages arising from its use. Due to limited resources, the code may be incomplete or insufficiently tested. Users are solely responsible for evaluating its suitability and assume all associated risks. <br>
+Note: Contributions are welcome. Please ensure thorough testing before deploying in critical systems.
+
+## Introduction 
 **Langflow** is a low-code development tool designed to simplify the creation and deployment of AI models. The **Langflowcv package** serves as a reference example, demonstrating how to run Langflow on PCs powered by Snapdragon® X. This package leverages the NPU (Neural Processing Unit) on Snapdragon® X to accelerate AI model inference.
 
 The **LangflowCV** package includes 3 distinct flows:
