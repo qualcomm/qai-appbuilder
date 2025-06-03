@@ -1,7 +1,7 @@
 # User Guide
 
 ## Disclaimer
-This software is provided ìas is,î without any express or implied warranties. The authors and contributors shall not be held liable for any damages arising from its use. Due to limited resources, the code may be incomplete or insufficiently tested. Users are solely responsible for evaluating its suitability and assume all associated risks.
+This software is provided ‚Äúas is,‚Äù without any express or implied warranties. The authors and contributors shall not be held liable for any damages arising from its use. Due to limited resources, the code may be incomplete or insufficiently tested. Users are solely responsible for evaluating its suitability and assume all associated risks. <br>
 Note: Contributions are welcome. Please ensure thorough testing before deploying in critical systems.
 
 ## Environment Setup
