@@ -8,38 +8,104 @@
 
 $userProfilePath = $env:USERPROFILE
 
-
-function Move-FolderSafely {
+function Download-And-Extract-File {
     param (
-        [string]$sourceFolder,
-        [string]$destinationFolder
+        [Parameter(Mandatory = $true)]
+        [string]$Url,
+        
+        [Parameter(Mandatory = $true)]
+        [string]$CachePath,
+        
+        [Parameter(Mandatory = $true)]
+        [string]$DestinationPath
     )
 
-    try {
-        # 检查源文件夹是否存在
-        if (-not (Test-Path -Path $sourceFolder -PathType Container)) {
-            Write-Error "源文件夹 $sourceFolder 不存在。"
-            return
-        }
-
-        # 检查目标路径是否存在同名文件或文件夹，若存在则删除
-        if (Test-Path -Path $destinationFolder) {
-            Remove-Item -Path $destinationFolder -Recurse -Force
-        }
-
+    # Set retry parameters
+    $max_attempts = 5
+    $attempt = 0
+    $success = $false
+    
+    # Download file (with retry mechanism and file size verification)
+    do {
+        $attempt++
+        Write-Host "Downloading file (Attempt: $attempt/$max_attempts)..."
+        
+        try {
+            # Get remote file size
+            Write-Host "Retrieving remote file size..."
+            $request = [System.Net.WebRequest]::Create($Url)
+            $request.Method = "HEAD"
+            $response = $request.GetResponse()
+            $remote_file_size = $response.ContentLength
+            $response.Close()
+            Write-Host "Remote file size: $($remote_file_size / 1MB) MB"
+            
+            # Check if cached file exists
+            if (Test-Path -Path $CachePath) {
+                $local_file_size = (Get-Item $CachePath).Length
+                Write-Host "Existing cached file found, size: $($local_file_size / 1MB) MB"
                 
-        # 检查目标文件夹的父目录是否存在，如果不存在则创建
-        $destinationParent = Split-Path -Path $destinationFolder -Parent
-        if (-not (Test-Path -Path $destinationParent -PathType Container)) {
-            New-Item -ItemType Directory -Path $destinationParent -Force | Out-Null
+                # Verify cached file size
+                if ($local_file_size -eq $remote_file_size) {
+                    Write-Host "Cached file size matches remote file, skipping download"
+                    $success = $true
+                } else {
+                    Write-Host "Cached file size mismatch, deleting and redownloading..."
+                    Remove-Item -Path $CachePath -Force
+                }
+            }
+            
+            # Download if necessary
+            if (-not $success) {
+                # Record download start time
+                $start_time = Get-Date
+                
+                # Execute download
+                Write-Host "Starting download..."
+                Invoke-WebRequest -Uri $Url -OutFile $CachePath -UseBasicParsing
+                
+                # Calculate download duration
+                $duration = (Get-Date) - $start_time
+                Write-Host "Download completed, duration: $($duration.TotalSeconds) seconds"
+                
+                # Verify downloaded file size
+                $local_file_size = (Get-Item $CachePath).Length
+                
+                if ($local_file_size -eq $remote_file_size) {
+                    Write-Host "File size verification passed: $($local_file_size / 1MB) MB"
+                    $success = $true
+                } else {
+                    Write-Host "File size verification failed!"
+                    Write-Host "  Local file: $($local_file_size / 1MB) MB"
+                    Write-Host "  Remote file: $($remote_file_size / 1MB) MB"
+                    throw "Downloaded file is incomplete"
+                }
+            }
+        } catch {
+            Write-Host "Download failed: $_"
+            
+            if ($attempt -lt $max_attempts) {
+                # Calculate wait time (exponential backoff)
+                $wait_seconds = [Math]::Pow(2, $attempt)
+                Write-Host "Will retry in $wait_seconds seconds..."
+                Start-Sleep -Seconds $wait_seconds
+            }
         }
-
-        # 移动文件夹
-        Move-Item -Path $sourceFolder -Destination $destinationFolder -Force -ErrorAction Stop
-        Write-Host "文件夹 $sourceFolder 已成功移动到 $destinationFolder."
-    }
-    catch {
-        Write-Error "移动文件夹时发生错误: $_"
+    } while (-not $success -and $attempt -lt $max_attempts)
+    
+    # If download was successful, extract the file
+    if ($success) {
+        try {
+            Write-Host "Starting extraction to $DestinationPath..."
+            Expand-Archive -Path $CachePath -DestinationPath $DestinationPath -Force -ErrorAction Stop
+            Write-Host "Extraction completed successfully!"
+            return $true
+        } catch {
+            Write-Host "Extraction failed: $_"
+            return $false
+        }
+    } else {
+        return $false
     }
 }
 
@@ -48,36 +114,18 @@ Function Download_ai_hub_llm_models {
     process {
         $ibm_grantite_url =  "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/ibm_granite_v3_1_8b_instruct_quantized/v1/snapdragon_x_elite/models.zip"
         $ibm_grantite_zip_path = 'ibm_granite_v3_1_8b_instruct_quantized.zip'
-
-        $ibm_grantite_path = 'ibm_granite_v3_1_8b_instruct_quantized'
-
         $ibm_grantite_cache_path = "$userProfilePath\.cache\qualcomm\$ibm_grantite_zip_path"
         $ibm_grantite_destination_path = "$userProfilePath\code\qualcomm\ai-engine-direct-helper\samples\genie\python\models\IBM-Granite-v3.1-8B"
 
-        if (Test-Path -Path $ibm_grantite_cache_path) {
+        $result = Download-And-Extract-File -Url $ibm_grantite_url -CachePath $ibm_grantite_cache_path -DestinationPath $ibm_grantite_destination_path
 
+        # Check if the entire process was successful
+        if ($result) {
+            Write-Host "Model downloaded and extracted successfully!"
+        } else {
+            Write-Host "Failed to download or extract the model."
+            exit 1
         }
-        else{
-
-            Invoke-WebRequest -Uri $ibm_grantite_url -OutFile $ibm_grantite_cache_path
-        }
-
-        # Extract the zip file
-        Expand-Archive -Path $ibm_grantite_cache_path -DestinationPath $ibm_grantite_destination_path -Force -ErrorAction Stop
-        
-        # Move the extracted folder to the destination path
-        #Move-FolderSafely -sourceFolder $ibm_grantite_path -destinationFolder $ibm_grantite_destination_path
-
-        
-
-
-
-        # Download the tokenizer.json file
-        #$ibm_grantite_tokenizer_url = "https://huggingface.co/ibm-granite/granite-3.1-8b-base/resolve/main/tokenizer.json"
-        #Invoke-WebRequest -Uri $ibm_grantite_tokenizer_url -OutFile "$ibm_grantite_destination_path\tokenizer.json" -ErrorAction Stop
-
-
-
 
 
         if($false)
@@ -85,33 +133,18 @@ Function Download_ai_hub_llm_models {
 
             $phi_url = 'https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/phi_3_5_mini_instruct_quantized/v1/snapdragon_x_elite/models.zip'
             $phi_zip_path = 'phi_3_5_mini_instruct_quantized.zip'
-
-            $phi_path = 'phi_3_5_mini_instruct_quantized'
-            $phi_destination_path = "$userProfilePath\code\qualcomm\ai-engine-direct-helper\samples\genie\python\models\Phi-3.5-mini"
             $phi_cache_path = "$userProfilePath\.cache\qualcomm\$phi_zip_path"
+            $phi_destination_path = "$userProfilePath\code\qualcomm\ai-engine-direct-helper\samples\genie\python\models\Phi-3.5-mini"
 
-            if(Test-Path -Path $phi_cache_path)
-            {
+            $result = Download-And-Extract-File -Url $phi_url -CachePath $phi_cache_path -DestinationPath $phi_destination_path
+
+            # Check if the entire process was successful
+            if ($result) {
+                Write-Host "Model downloaded and extracted successfully!"
+            } else {
+                Write-Host "Failed to download or extract the model."
+                exit 1
             }
-            else
-            {
-
-                Invoke-WebRequest -Uri $phi_url -OutFile $phi_cache_path 
-        
-            }
-
-
-            # Extract the zip file
-            Expand-Archive -Path $phi_cache_path -DestinationPath $phi_destination_path  -Force -ErrorAction Stop
-
-            # Move the extracted folder to the destination path
-            #Move-FolderSafely -sourceFolder $phi_path -destinationFolder $phi_destination_path
-
-                        
-            # Download the tokenizer.json file
-            #$phi_tokenizer_url="https://huggingface.co/microsoft/Phi-3.5-mini-instruct/resolve/main/tokenizer.json"
-            #Invoke-WebRequest -Uri $phi_tokenizer_url -OutFile "$phi_destination_path\tokenizer.json" -ErrorAction Stop    
-    
         }
 
     }

@@ -605,7 +605,7 @@
                 "load_from_db": false,
                 "required": false,
                 "placeholder": "",
-                "show": true,
+                "show": false,
                 "name": "api_key",
                 "value": "123",
                 "display_name": "OpenAI API Key",

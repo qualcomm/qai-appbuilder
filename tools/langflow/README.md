@@ -1,13 +1,13 @@
-# Langflow CV package
+# Langflow package
 
 ## Disclaimer
 This software is provided “as is,” without any express or implied warranties. The authors and contributors shall not be held liable for any damages arising from its use. The code may be incomplete or insufficiently tested. Users are solely responsible for evaluating its suitability and assume all associated risks. <br>
 Note: Contributions are welcome. Please ensure thorough testing before deploying in critical systems.
 
 ## Introduction 
-**Langflow** is a low-code development tool designed to simplify the creation and deployment of AI models. The **Langflowcv package** serves as a reference example, demonstrating how to run Langflow on PCs powered by Snapdragon® X. This package leverages the NPU (Neural Processing Unit) on Snapdragon® X to accelerate AI model inference.
+**Langflow** is a low-code development tool designed to simplify the creation and deployment of AI models. The **Langflow package** serves as a reference example, demonstrating how to run Langflow on PCs powered by Snapdragon® X. This package leverages the NPU (Neural Processing Unit) on Snapdragon® X to accelerate AI model inference.
 
-The **LangflowCV** package includes 3 distinct flows:
+The **Langflow** package includes 3 distinct flows:
 
 1. **YoloV8_det Demo** – An object detection flow based on the YOLOv8 model.
 2. **Image Classification Inceptionv3** – An image classification flow using the InceptionV3 model.
@@ -23,6 +23,8 @@ The **LangflowCV** package includes 3 distinct flows:
 ## 🛠️ Installation Steps 
 
 ### 1. Install PowerShell 7  
+**Most of the current systems come with PowerShell 5 by default. However, there are numerous download and installation operations in the setup that rely on the unique strategies of PowerShell 7. Therefore, PowerShell 7 must be installed to support it.**
+
 Download and install the appropriate version of PowerShell 7 for your system:  
 - [PowerShell 7.5.1 for ARM64](https://github.com/PowerShell/PowerShell/releases/download/v7.5.1/PowerShell-7.5.1-win-arm64.msi) 
 
@@ -41,32 +43,39 @@ For more information, refer to the official Microsoft documentation:
 1. Download the ZIP file: [ai-engine-direct-helper-main.zip](https://github.com/quic/ai-engine-direct-helper/archive/refs/heads/main.zip)  
 2. Extract the contents to a local directory.  
 
-### 3. Run Langflow CV package setup script 
+### 3. Run Langflow package setup script
+**Note that the following operations in the Powershell terminal must be performed as Administrator; otherwise, it will lead to the failure of the process.**
+
 Run PowerShell 7 as **Administrator**. Navigate to the following directory inside the downloaded project:
 ```powershell
-cd <path_to_repo>/tools/langflowcv/scripts  
+cd <path_to_repo>/tools/langflow/scripts  
 
 .\setup.ps1
 ```  
 - The installation process may take up to 30 minutes.  
+- As it will take a relatively long time to download the LLM model during the installation process, please avoid all network fluctuations.
 - Avoid using the system during this time. 
 
-**Success Indicator**: 
-If the script completes without errors and displays:  
+**Complete Indicator**: 
+If there are no errors during the script operation and the following words are displayed:
 ```
-Install Ollama and embedding model successfully.....
 Install successfully. Press any key to exit...  
 ```
-Then the installation was successful.  
+Then it indicates that the installation is complete.
 
 ## Starting the Service
 
-In {your_project_path}\tools\langflowcv\scripts directory, run the startup script:
+### Option 1: Command execution 
+
+In {your_project_path}\tools\langflow\scripts directory, run the startup script:
 
 ```powershell
-
 .\start_langflow.ps1
-
+```
+### Option 2: Shortcut
+During the above Setup process, a shortcut pointing to the start langflow script will be created on the desktop:
+```
+Double-click the shortcut named "start_langflow" on the desktop.
 ```
 
 - Wait a few minutes for all services to start.  
@@ -79,7 +88,7 @@ In {your_project_path}\tools\langflowcv\scripts directory, run the startup scrip
 2. In the Templates window, click the **"Blank Flow"** button (bottom-right corner) to create a new blank flow.  
 3. In the top navigation bar, select **"My Projects"** to access your project directory.  
 4. In the left sidebar under **"Folders"**, locate and click the **"Upload a Flow"** icon (usually a folder with an arrow). This will open a file selection dialog.  
-5. All flow files are located in the `tools\langflowcv\flows` directory. Select the desired flow file and click **"Open"** to upload it to your projects.  
+5. All flow files are located in the `tools\langflow\flows` directory. Select the desired flow file and click **"Open"** to upload it to your projects.  
 
 ### First-Time Setup
 1. **Click the “+New Flow” Button**  
@@ -96,7 +105,7 @@ In {your_project_path}\tools\langflowcv\scripts directory, run the startup scrip
 
 5. **Import Flow Files**  
    Navigate to the directory:
-      {your_project_path}/tools/langflowcv/flows
+      {your_project_path}/tools/langflow/flows
 
   Select **all `.json` files** in this folder and click **Open**.
 

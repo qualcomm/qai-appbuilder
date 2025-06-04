@@ -1,3 +1,40 @@
+#==============================================================================
+#
+#  Copyright (c) 2025 Qualcomm Technologies, Inc.
+#  All Rights Reserved.
+#  Confidential and Proprietary - Qualcomm Technologies, Inc.
+#
+#==============================================================================
+
+
+# Get current PowerShell version
+$version = $PSVersionTable.PSVersion
+
+# Check if the major version is less than 7
+if ($version.Major -lt 7) {
+    Write-Host "Current PowerShell version $version does not meet the requirement." -ForegroundColor Red
+    Write-Host "Please install PowerShell 7 according to the README document and try again." -ForegroundColor Red
+    exit 1
+} else {
+    Write-Host "PowerShell version meets the requirement: $version" -ForegroundColor Green
+    Write-Host "Starting Langflow Setup ..." -ForegroundColor Green
+}    
+
+# Check the administrator's permissions
+function Test-Administrator {
+    $user = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal $user
+    return $principal.IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)
+}
+
+# Check and output the result
+if (Test-Administrator) {
+    Write-Host "The current PowerShell terminal window has administrator privileges and starts to execute..." -ForegroundColor Green
+} else {
+    Write-Host "The current PowerShell terminal window does not have administrator privileges. Please reopen the Powershell terminal window as an administrator and try again." -ForegroundColor Red
+    exit 1
+}
+
 #Set it to print debug information
 Set-PSDebug -Trace 0
 
@@ -22,6 +59,9 @@ download_install_python
 
 
 . ".\utils.ps1" 
+
+# Delete the .cache folder
+# Utils_Delete_Folder_With_Retry -folderPath "$userProfilePath\.cache" | Out-Null
 
 #Delete the code\myenvs folder
 $myenvsPath = Join-Path -Path $userProfilePath -ChildPath "code\myenvs"
@@ -203,13 +243,11 @@ $shortcut.WorkingDirectory = Split-Path -Path $targetPath
 $shortcut.Save()
 
 
-
-
-
-
 #Download github llm models
+Write-Host "Start download ai hub llm model"
 . ".\download_ai_hub_llm_models.ps1"
 Download_ai_hub_llm_models
+Write-Host "Downloading model completed."
 #Copy the config and prompt files
 if($false)
 {
@@ -230,30 +268,7 @@ if($false)
 
 
 
-# #Add the patch for the ServiceAPI.py
-# # 定义文件路径
-# $filePath = "GenieAPIService.py"
-
-# # 读取文件内容为数组，每一行是一个元素
-# $lines = Get-Content -Path $filePath
-
-# # 定义要添加的注释
-# $comment = "# Add comments"
-
-# # 检查是否有足够的行数
-# if ($lines.Count -ge 194) {
-#     # 在第 194 行添加注释
-#     $lines[193] = "$($lines[193]) $comment"
-#     # 将修改后的内容写回文件
-#     $lines | Set-Content -Path $filePath
-#     Write-Host "Already add comment on Line 194 "
-# } else {
-#     Write-Host "Can not find line 94"
-# }    
-
-
-# Wait for any key input to end
-Write-Host "Install successfully. Press any key to exit..."
+Write-Host "Install successfully. Press any key to exit..." -ForegroundColor Green
 [void][System.Console]::ReadKey($true)
 
 
