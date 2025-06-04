@@ -7,6 +7,7 @@
 
 ## Build Service from source code:
 Install Qualcomm® AI Runtime SDK, CMake, Visual Studio etc, before you compile this service.<br>
+Please open 'Command Prompt' window (Do *not* use PowerShell window) to compile the libraries.
 
 ### Build 'libcurl.dll' for WoS:<br>
 GenieAPIClient depends on 'libcurl.dll', we need to build this dynamical library first throubh the commands below:
