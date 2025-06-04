@@ -36,12 +36,12 @@ size_t write_callback_stream(char* ptr, size_t size, size_t nmemb, void* userdat
     std::string chunk(ptr, total_size);
     std::istringstream stream(chunk);
     std::string line;
+
     while (std::getline(stream, line)) {
         if (line.rfind("data: ", 0) == 0) {
             std::string jsonStr = line.substr(6);
             if (jsonStr == "[DONE]") {
-                std::cout << "\n[Stream Ended]\n";
-                return 0;
+                return total_size;
             }
 
             if (jsonStr.length() > 10) {
