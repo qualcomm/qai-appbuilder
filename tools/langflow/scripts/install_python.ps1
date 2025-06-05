@@ -17,18 +17,39 @@ Function download_install_python {
 
         try {
             $pythonExes = @("py.exe", "python.exe", "python3.12.exe", "python3.exe")
+            $pythonFound = $false
+            $non312PythonFound = $false
+            
             foreach ($exe in $pythonExes) {
                 if (Get-Command $exe -ErrorAction SilentlyContinue) {
                     $pythonVersion = & $exe --version 2>&1
+                    $pythonFound = $true
+                    
+                    # Check if it is Python 3.12.x
                     if ($pythonVersion -match "Python 3\.12\.\d+") {
                         $python312 = $exe
                         break
                     }
+                    # Check if it is other Python 3.x versions
+                    elseif ($pythonVersion -match "Python 3\.\d+\.\d+") {
+                        $non312PythonFound = $true
+                        Write-Output "A Python version other than 3.12 was detected: $pythonVersion"
+                        Write-Host "You have installed the $pythonVersion, but running langflow requires Python 3.12. Please uninstall it by yourself and try again." -ForegroundColor Red
+                        exit 1
+                    }
                 }
+            }
+            
+            # If Python is not found, continue with the installation
+            if (-not $pythonFound) {
+                Write-Output "Python not detected. Will download and install Python 3.12."
+                # Python installation logic will execute here
             }
         }
         catch {
-            Write-Output "Can not find python. Will download and install it"
+            Write-Output "Error occurred while detecting Python: $_"
+            Write-Output "Will download and install Python 3.12."
+            # Continue with installation logic
         }
 
         if ($python312 -eq $false) {    

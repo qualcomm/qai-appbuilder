@@ -18,6 +18,7 @@ The **Langflow** package includes 3 distinct flows:
 
 1. **PCs Powered by Snapdragon® X**: Ensure you have a PC powered by Snapdragon® X. For more information on compatible devices, visit [this page](https://www.qualcomm.com/snapdragon/laptops)
 2. **PowerShell 7**: Make sure PowerShell 7 is installed on your system.
+3. **Python 3.12**: The installer will automatically install Python 3.12. However, if other versions of Python are already present on the system, please ensure they are manually uninstalled prior to proceeding with the installation.
 
 
 ## 🛠️ Installation Steps 
@@ -28,15 +29,13 @@ The **Langflow** package includes 3 distinct flows:
 Download and install the appropriate version of PowerShell 7 for your system:  
 - [PowerShell 7.5.1 for ARM64](https://github.com/PowerShell/PowerShell/releases/download/v7.5.1/PowerShell-7.5.1-win-arm64.msi) 
 
-For more information, refer to the official Microsoft documentation:  
-[Transition from Windows PowerShell 5.1 to PowerShell 7](https://learn.microsoft.com/en-us/powershell/scripting/install/migrate-from-windows-powershell-51-to-powershell-7?view=powershell-7.5)  
 
 ### 2. Download the Repository  
 #### Option 1: Clone via Git  
 1. Install Git: [Download Git for Windows](https://git-scm.com/downloads/win)  
 2. Open a Git Bash terminal and run:  
    ```powershell  
-   git clone https://github.com/quic/ai-engine-direct-helper.git
+   git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
    ```  
 
 #### Option 2: Download ZIP  
@@ -57,7 +56,7 @@ cd <path_to_repo>/tools/langflow/scripts
 - Avoid using the system during this time. 
 
 **Complete Indicator**: 
-If there are no errors during the script operation and the following words are displayed:
+If there are **no errors during the script operation** and the following words are displayed:
 ```
 Install successfully. Press any key to exit...  
 ```
@@ -167,3 +166,22 @@ The flow will invoke a local large language model to generate a response based o
 
 1. Run the `setup.ps1` installation script again to ensure Langflow is properly installed.
 
+### Error: "File … cannot be loaded. The file … is not digitally signed. You cannot run this script on the current system."
+
+**Cause**: PowerShell execution policy restrictions.
+
+**Solution**:
+
+1. Execute `Get-ExecutionPolicy` to see if the output is Restricted (default, prohibiting the running of scripts) or AllSigned (only allowing the running of signed scripts).
+2. If you want to execute the following command, change the execution policy to RemoteSigned:  `Set-ExecutionPolicy RemoteSigned -Scope LocalMachine` .
+3. Execute `Set-ExecutionPolicy Bypass -Scope Process` can temporarily bypass the policy.
+
+### Known Issue: "The problems existing during the script running process fall within the normal category"
+
+**Explanation**: Defects within the normal range, but they do not affect the functional use
+
+**1**. Run the `setup.ps1` there are phenomena such as output stacking, no need to solve;
+
+**2**. Run the `setup.ps1` there are the command line gets stuck or the download and installation fail due to network issues, the script needs to be re-run；
+
+**3**. The `langflow web` pages can be opened and used normally during run the `start_langflow.ps1` , but there are many error reports in the terminal, no need to solve.
