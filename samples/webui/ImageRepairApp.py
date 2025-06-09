@@ -17,6 +17,9 @@ import gradio as gr
 
 ####################################################################
 
+HOST="0.0.0.0"
+PORT=8977
+
 IMAGE_PATH = "images/"
 IMAGE_OLD = IMAGE_PATH + "old.jpeg"
 IMAGE_NEW = IMAGE_PATH + "new.jpeg"
@@ -406,4 +409,4 @@ if __name__ == '__main__':
 
     real_esrgan.Init()
 
-    demo.queue().launch(share=False, inbrowser=True)
+    demo.queue().launch(server_name=HOST, share=False, inbrowser=True, server_port=PORT)

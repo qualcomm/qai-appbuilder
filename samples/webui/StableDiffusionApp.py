@@ -12,6 +12,9 @@ import gradio as gr
 
 ####################################################################
 
+HOST="0.0.0.0"
+PORT=8978
+
 headjs = """
 <script>
 function dark_mode() {
@@ -117,4 +120,4 @@ if __name__ == '__main__':
 
     stable_diffusion_v2_1.model_initialize()
 
-    demo.queue().launch(share=False, inbrowser=True)
+    demo.queue().launch(server_name=HOST, share=False, inbrowser=True, server_port=PORT)
