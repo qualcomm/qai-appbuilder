@@ -1,3 +1,7 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
 from langchain_core.callbacks import CallbackManager, BaseCallbackHandler
 from langchain_core.prompts import PromptTemplate
 from langchain_core.document_loaders import BaseLoader

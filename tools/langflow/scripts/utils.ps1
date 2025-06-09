@@ -1,10 +1,7 @@
-#==============================================================================
-#
-#  Copyright (c) 2025 Qualcomm Technologies, Inc.
-#  All Rights Reserved.
-#  Confidential and Proprietary - Qualcomm Technologies, Inc.
-#
-#==============================================================================
+# ---------------------------------------------------------------------
+# Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
 
 function Utils_Copy_WithProgress {
     param (

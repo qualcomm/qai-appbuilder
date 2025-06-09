@@ -1,10 +1,7 @@
-#=============================================================================
-#
-#  Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
-#  All Rights Reserved.
-#  Confidential and Proprietary - Qualcomm Technologies, Inc.
-#
-#=============================================================================
+# ---------------------------------------------------------------------
+# Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
 
 # specify compiler
 export CXX := clang++-14

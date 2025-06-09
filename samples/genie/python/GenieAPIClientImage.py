@@ -1,10 +1,7 @@
-#==============================================================================
-#
-#  Copyright (c) 2024 Qualcomm Technologies, Inc.
-#  All Rights Reserved.
-#  Confidential and Proprietary - Qualcomm Technologies, Inc.
-#
-#==============================================================================
+# ---------------------------------------------------------------------
+# Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
 
 # python GenieAPIClientImage.py --prompt "A little cat is playing on the grass near river."
 

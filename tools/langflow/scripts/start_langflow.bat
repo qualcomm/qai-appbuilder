@@ -1,11 +1,8 @@
 
 (
-REM #==============================================================================
-REM #
-REM #  Copyright (c) 2025 Qualcomm Technologies, Inc.
-REM #  All Rights Reserved.
-REM #  Confidential and Proprietary - Qualcomm Technologies, Inc.
-REM #
-REM #==============================================================================
+REM # ---------------------------------------------------------------------
+REM # Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+REM # SPDX-License-Identifier: BSD-3-Clause
+REM # ---------------------------------------------------------------------
 )
 powershell -NoProfile -ExecutionPolicy Bypass .\start_langflow.ps1
