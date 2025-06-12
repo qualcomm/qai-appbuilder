@@ -5,7 +5,7 @@
 
 $vsInstallerPath = "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vs_installer.exe"
 $vsStudioUrl="https://c2rsetup.officeapps.live.com/c2r/downloadVS.aspx?sku=community&channel=Release&version=VS2022&source=VSLandingPage&cid=2030:6d05f9ddbe4740e0abd326b4be16dc88"
-$vsStudioDownloadPath="vs_installer.exe"
+$vsStudioDownloadPath="..\vs_installer.exe"
 
 Function install_VS_Studio {
     param()

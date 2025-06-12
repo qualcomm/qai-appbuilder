@@ -1,7 +1,11 @@
-# ---------------------------------------------------------------------
-# Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
-# SPDX-License-Identifier: BSD-3-Clause
-# ---------------------------------------------------------------------
+#==============================================================================
+#
+#  Copyright (c) 2025 Qualcomm Technologies, Inc.
+#  All Rights Reserved.
+#  Confidential and Proprietary - Qualcomm Technologies, Inc.
+#
+#==============================================================================
+
 
 $userProfilePath = $env:USERPROFILE
 
@@ -13,45 +17,24 @@ Function download_install_python {
 
         try {
             $pythonExes = @("py.exe", "python.exe", "python3.12.exe", "python3.exe")
-            $pythonFound = $false
-            $non312PythonFound = $false
-            
             foreach ($exe in $pythonExes) {
                 if (Get-Command $exe -ErrorAction SilentlyContinue) {
                     $pythonVersion = & $exe --version 2>&1
-                    $pythonFound = $true
-                    
-                    # Check if it is Python 3.12.x
                     if ($pythonVersion -match "Python 3\.12\.\d+") {
                         $python312 = $exe
                         break
                     }
-                    # Check if it is other Python 3.x versions
-                    elseif ($pythonVersion -match "Python 3\.\d+\.\d+") {
-                        $non312PythonFound = $true
-                        Write-Output "A Python version other than 3.12 was detected: $pythonVersion"
-                        Write-Host "You have installed the $pythonVersion, but running langflow requires Python 3.12. Please uninstall it by yourself and try again." -ForegroundColor Red
-                        exit 1
-                    }
                 }
-            }
-            
-            # If Python is not found, continue with the installation
-            if (-not $pythonFound) {
-                Write-Output "Python not detected. Will download and install Python 3.12."
-                # Python installation logic will execute here
             }
         }
         catch {
-            Write-Output "Error occurred while detecting Python: $_"
-            Write-Output "Will download and install Python 3.12."
-            # Continue with installation logic
+            Write-Output "Can not find python. Will download and install it"
         }
 
         if ($python312 -eq $false) {    
             $python312URL = 'https://www.python.org/ftp/python/3.12.0/python-3.12.0-amd64.exe'
             # Need to check whether python-3.12.0-amd64.exe exist or not.
-            $filePath = Join-Path $PSScriptRoot (Split-Path -Leaf $python312URL)
+            $filePath = Join-Path "..\cache\download\" (Split-Path -Leaf $python312URL)
             $downloadSuccess = $false
             $maxRetries = 3
 

@@ -14,7 +14,12 @@ else {
 
 
     $expectedHash = "FFC0EBBD1784C35AA3C73AEE3639396A"
-    $fileHash = Get-FileHash -Algorithm MD5 -Path (Split-Path -Leaf $ollamaURL)
+    $filePath = Join-Path "..\cache\download\" (Split-Path -Leaf $ollamaURL)
+    $fileHash = ""
+    if ($filePath) {
+        $fileHash = Get-FileHash -Algorithm MD5 -Path $filePath
+    }
+    
 
 
     if ($fileHash.Hash -eq $expectedHash) {
@@ -39,7 +44,7 @@ else {
 
             if ($response.StatusCode -eq 200) {
                 Write-Host "The resource is available. Starting download..."
-                Invoke-WebRequest -Uri $ollamaURL -OutFile (Join-Path $PSScriptRoot "OllamaSetup.exe")
+                Invoke-WebRequest -Uri $ollamaURL -OutFile "..\cache\download\OllamaSetup.exe"
             } else {
                 Write-Host "Ollama download failed. Press any key to exit..."
                 [void][System.Console]::ReadKey($true)
@@ -51,7 +56,6 @@ else {
     }
 
     #Start-Process -FilePath (Split-Path -Leaf $ollamaURL) -ArgumentList "/silent" -NoNewWindow -Wait
-    $filePath = Join-Path $PSScriptRoot (Split-Path -Leaf $ollamaURL)
     Write-Host "The ollama.exe path is: $filePath"
     $process = Start-Process -FilePath $filePath -ArgumentList "/silent" -NoNewWindow -PassThru
     $process.WaitForExit()

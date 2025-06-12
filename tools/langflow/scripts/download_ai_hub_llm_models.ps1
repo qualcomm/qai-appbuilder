@@ -111,8 +111,8 @@ Function Download_ai_hub_llm_models {
     process {
         $ibm_grantite_url =  "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/ibm_granite_v3_1_8b_instruct_quantized/v1/snapdragon_x_elite/models.zip"
         $ibm_grantite_zip_path = 'ibm_granite_v3_1_8b_instruct_quantized.zip'
-        $ibm_grantite_cache_path = "$userProfilePath\.cache\qualcomm\$ibm_grantite_zip_path"
-        $ibm_grantite_destination_path = "$userProfilePath\code\qualcomm\ai-engine-direct-helper\samples\genie\python\models\IBM-Granite-v3.1-8B"
+        $ibm_grantite_cache_path = "..\cache\ibm_granite_v3_1_8b_instruct_quantized\$ibm_grantite_zip_path"
+        $ibm_grantite_destination_path = "..\code\qualcomm\ai-engine-direct-helper\samples\genie\python\models\IBM-Granite-v3.1-8B"
 
         $result = Download-And-Extract-File -Url $ibm_grantite_url -CachePath $ibm_grantite_cache_path -DestinationPath $ibm_grantite_destination_path
 
@@ -130,8 +130,8 @@ Function Download_ai_hub_llm_models {
 
             $phi_url = 'https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/phi_3_5_mini_instruct_quantized/v1/snapdragon_x_elite/models.zip'
             $phi_zip_path = 'phi_3_5_mini_instruct_quantized.zip'
-            $phi_cache_path = "$userProfilePath\.cache\qualcomm\$phi_zip_path"
-            $phi_destination_path = "$userProfilePath\code\qualcomm\ai-engine-direct-helper\samples\genie\python\models\Phi-3.5-mini"
+            $phi_cache_path = "..\cache\phi_3_5_mini_instruct_quantized\$phi_zip_path"
+            $phi_destination_path = "..\code\qualcomm\ai-engine-direct-helper\samples\genie\python\models\Phi-3.5-mini"
 
             $result = Download-And-Extract-File -Url $phi_url -CachePath $phi_cache_path -DestinationPath $phi_destination_path
 

@@ -29,10 +29,10 @@ function Create-FolderIfNotExists {
 
 #Create the log folder for log 
 # Example usage of the function
-$path1 = "$userProfilePath\code\qualcomm\GenieWebUI\log"
+$path1 = "..\code\qualcomm\GenieWebUI\log"
 Create-FolderIfNotExists -folderPath $path1
 
-$path2 = "$userProfilePath\code\qualcomm\langflow_cv\log"
+$path2 = "..\code\qualcomm\langflow_cv\log"
 Create-FolderIfNotExists -folderPath $path2
     
 
@@ -61,12 +61,12 @@ if($process){
 write-output $userProfilePath
 
 
-# 提示用户保持窗口打开，并告知将自动打开浏览器访问 127.0.0.1:7860
-Write-Host "Please keep this window open. It will open the browser with  http://127.0.0.1:7860 automatically ...."
+# 提示用户保持窗口打开，并告知将自动打开浏览器访问 127.0.0.1:8979
+Write-Host "Please keep this window open. It will open the browser with  http://127.0.0.1:8979 automatically ...."
 
 
     
-$newFolderPath = Join-Path -Path $userProfilePath -ChildPath "code\myenvs"
+$newFolderPath = "..\code\myenvs"
 & "$newFolderPath\langflow-new-py3.12\Scripts\Activate.ps1"
 
 
@@ -79,17 +79,17 @@ Start-Job -ScriptBlock {
     while ($attempt -lt $maxAttempts) {
         try {
             $socket = New-Object System.Net.Sockets.TcpClient
-            $socket.Connect("127.0.0.1", 7860)
+            $socket.Connect("127.0.0.1", 8979)
             # 服务器连接成功后，额外等待一小段时间确保服务器真正就绪
             Start-Sleep -Seconds 1
 
             # 再次尝试连接确认
             try {
                 $socket = New-Object System.Net.Sockets.TcpClient
-                $socket.Connect("127.0.0.1", 7860)
+                $socket.Connect("127.0.0.1", 8979)
                 if (-not $urlOpened) {
                     Write-Host "Server is ready. Opening the browser..."
-                    Start-Process -FilePath "http://127.0.0.1:7860"
+                    Start-Process -FilePath "http://127.0.0.1:8979"
                     $urlOpened = $true
                     return
                 }
@@ -114,7 +114,7 @@ Start-Job -ScriptBlock {
         
 
 
-uv run langflow run --host 0.0.0.0 --port 7860
+uv run langflow run --host 0.0.0.0 --port 8979
 
 
 

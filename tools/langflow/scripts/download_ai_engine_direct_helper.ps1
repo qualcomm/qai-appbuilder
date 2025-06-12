@@ -14,8 +14,8 @@ Function Download_ai_helper {
 
         $ai_helper_path="ai_helper"
 
-        $ai_helper_dest_path = "$userProfilePath\code\qualcomm\ai-engine-direct-helper\"
-        $ai_helper_cache_path = "$userProfilePath\.cache\qualcomm\$ai_helper_zip"
+        $ai_helper_dest_path = "..\code\qualcomm\ai-engine-direct-helper\"
+        $ai_helper_cache_path = "..\cache\qualcomm\$ai_helper_zip"
 
         if(Test-Path -Path $ai_helper_cache_path)
         {
