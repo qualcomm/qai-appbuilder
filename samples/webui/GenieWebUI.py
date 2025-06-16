@@ -79,9 +79,9 @@ footer{display:none !important}
 
 ###########################################################################
 
-def has_chinese(string):
+def has_chinese(text):
     pattern = re.compile(r'[\u4e00-\u9fff]')
-    match = pattern.search(string)
+    match = pattern.search(text)
     return match is not None
 
 def model_unload():

@@ -19,7 +19,7 @@ from qai_appbuilder import (GenieContext)
 
 ###########################################################################
 
-DEBUG_PROMPT = True
+DEBUG_PROMPT = False
 DEBUG_OUTPUT = True
 DEBUG_GENIE = False
 
@@ -144,13 +144,15 @@ class GenieModel():
             prompt_tags_1 = self.prompt_tags_1
             if self.sys_prompt is not None:
                 prompt_tags_1 = prompt_tags_1.replace("\\nYou are a helpful assistant.", "\\n" + self.sys_prompt)
+            prompt_tags_1 = prompt_tags_1.replace("\\n", "\n")
             prompt_tags_2 = self.prompt_tags_2
+            prompt_tags_2 = prompt_tags_2.replace("\\n", "\n")
             tokens = self.get_num_tokens(q)
 
             split_question = ""
             split_count = 0
             if tokens > DOCS_MAX_SIZE:
-                print(tokens)
+                print("tokens: ", tokens)
                 text_splitter = RecursiveCharacterTextSplitter(
                                 chunk_size=DOCS_MAX_SIZE, chunk_overlap=0,
                                 separators=["\n\n", "\n", "。", "！", "？", ".", "?", "!", " ", ""],
@@ -158,24 +160,34 @@ class GenieModel():
                             )
                 split_question = text_splitter.split_text(q)
                 split_count = len(split_question)
+                print("split_count: ", split_count, self.max_query_times)
                 if split_count > self.max_query_times:
                     split_count = self.max_query_times
             else:
                 split_question = [q]
                 split_count = 1
 
-            # print(split_count)
             for i in range(split_count):
                 q = split_question[i]
 
                 q = prompt_tags_1 + q + prompt_tags_2
                 if DEBUG_PROMPT:
-                    print("=" * 30)
+                    print("\n\n\n")
+                    print("split_count: ", i)
+                    print("-" * 30)
                     print(q)
+                    print("=" * 30)
                 #print(len(q))
 
                 # d.reset()  TODO.
+                if DEBUG_OUTPUT:
+                    print("-" * 60)
+
                 self.d.Query(q, response)
+
+                if DEBUG_OUTPUT:
+                    print()
+                    print("-" * 60)
 
             self.generating = False
 
