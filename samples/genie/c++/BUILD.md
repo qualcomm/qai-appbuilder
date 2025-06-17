@@ -18,9 +18,9 @@ cmake -S .. -B . -A ARM64 -DCURL_USE_LIBPSL=OFF
 cmake --build . --config Release
 ```
 
-
 ### Build GenieAPIServer & GenieAPIClient for WoS:<br>
-We can compile them through the commands below:
+Setup Qualcomm® AI Runtime SDK and replace the Genie libraries and header file by refering to QAI AppBuilder [BUILD.md](../../../BUILD.md) <br>
+We can compile them through the commands below now:
 ```
 Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.34.0.250424\
 cd samples\genie\c++\Service

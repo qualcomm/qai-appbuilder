@@ -6,7 +6,7 @@
 #
 #=============================================================================
 
-# Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.33.0.250327\
+# Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.34.0.250424\
 
 cmake_minimum_required(VERSION 3.4...3.18)
 set(CMAKE_CXX_STANDARD 20)
