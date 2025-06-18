@@ -32,7 +32,7 @@ cd ai-engine-direct-helper\samples
 
 ### Step 4: Run WebUI Apps:
 Run the commands in below table to start WebUI apps. <br>
-You can also start them by double clicking the batch files: start_ImageRepairApp.bat, start_StableDiffusionApp.bat and start_GeneWebUI.bat
+You can also launch them by double-clicking the corresponding batch files: start_ImageRepairApp.bat, start_StableDiffusionApp.bat and start_GeneWebUI.bat
 
 ### WebUI App List:
 
