@@ -42,7 +42,8 @@ git pull --recurse-submodules
 ```
 Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.34.0.250424\
 ```
-- Use the commands below to build and install Python extension(*.whl): 
+- Use the commands below to build and install Python extension(*.whl): <br>
+*Note: Make sure to compile it in the regular Windows Command Prompt — not in the 'ARM64 Native Tools Command Prompt for VS 2022' and not in the 'Power Shell' window.* <br>
 ```
 cd ai-engine-direct-helper
 python setup.py bdist_wheel

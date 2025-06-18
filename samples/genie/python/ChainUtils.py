@@ -96,6 +96,9 @@ class GenieModel():
     def set_params(self, max_length, temp, top_k, top_p):
         self.d.SetParams(max_length, temp, top_k, top_p)
 
+    def set_stop_sequence(self, stop_sequence):
+        self.d.SetStopSequence(stop_sequence)
+
     def get_profile(self):
         try:
             profile_data = json.loads(self.d.GetProfile())
@@ -172,8 +175,10 @@ class GenieModel():
 
                 q = prompt_tags_1 + q + prompt_tags_2
                 if DEBUG_PROMPT:
-                    print("\n\n\n")
-                    print("split_count: ", i)
+                    print("\n")
+                    if DEBUG_SPLIT:
+                        print("split_count: ", i)
+
                     print("-" * 30)
                     print(q)
                     print("=" * 30)
@@ -273,6 +278,9 @@ class GenieLLM(LLM):
 
     def is_ready(self):
         return self.ready
+
+    def set_stop_sequence(self, stop_sequence):
+        self.model.set_stop_sequence(stop_sequence)
 
     def get_profile(self):
         return self.model.get_profile()
