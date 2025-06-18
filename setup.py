@@ -193,7 +193,7 @@ class CMakeBuild(build_ext):
         subprocess.run("cmake " + ext.sourcedir + cmake_args, cwd=build_temp, check=True, shell=True)
         subprocess.run("cmake --build . " + build_args, cwd=build_temp, check=True, shell=True)
 
-with open("README.md", "r", encoding="utf-8", error="ignore") as fh:
+with open("README.md", "r", encoding="utf-8", errors="ignore") as fh:
     long_description = fh.read()
 
 setup(
