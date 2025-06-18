@@ -5,16 +5,7 @@ This is sample code for using AppBuilder to load real_esrgan_x4plus QNN model to
 
 ## Setup AppBuilder environment and prepare QNN SDK libraries by referring to the links below: 
 https://github.com/quic/ai-engine-direct-helper/blob/main/README.md <br>
-https://github.com/quic/ai-engine-direct-helper/blob/main/Docs/User_Guide.md
-
-Copy the QNN libraries from QNN SDK to below path:
-```
-C:\ai-hub\real_esrgan_x4plus\qai_libs\libQnnHtpV73Skel.so
-C:\ai-hub\real_esrgan_x4plus\qai_libs\QnnHtp.dll
-C:\ai-hub\real_esrgan_x4plus\qai_libs\QnnHtpV73Stub.dll
-C:\ai-hub\real_esrgan_x4plus\qai_libs\QnnSystem.dll
-C:\ai-hub\real_esrgan_x4plus\qai_libs\libqnnhtpv73.cat
-```
+https://github.com/quic/ai-engine-direct-helper/blob/main/docs/user_guide.md
 
 ## real_esrgan_x4plus QNN models
 The quantized real_esrgan_x4plus QNN model's input resolution is 128x128 from Qualcomm® AI Hub:
