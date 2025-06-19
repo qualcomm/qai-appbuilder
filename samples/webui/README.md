@@ -36,7 +36,7 @@ You can also launch them by double-clicking the corresponding batch files: start
 
 ### WebUI App List:
 
-|  Model   | Command  |
+|  App   | Command  |
 |  ----  | :----    |
 | ImageRepairApp | python webui\ImageRepairApp.py |
 | StableDiffusionApp * | python webui\StableDiffusionApp.py |

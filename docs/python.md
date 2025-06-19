@@ -8,9 +8,10 @@ Note: Contributions are welcome. Please ensure thorough testing before deploying
 This guide helps developers setup Python environment for using QAI AppBuilder on Windows on Snapdragon (WoS) platforms.
 
 ## Setting Up QAI AppBuilder Python Environment:
+*Note: Windows on Snapdragon (WoS) device support running X86, X64, and ARM64 applications. For ease of use, we recommend using the X64 version of Python to run our sample applications. That’s why we’ve provided a download link for the X64 version of Python below.<br>
 
 ### Step 1: Install Dependencies
-Download and install [git](https://github.com/dennisameling/git/releases/download/v2.47.0.windows.2/Git-2.47.0.2-arm64.exe) and [x64 Python 3.12.8](https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe)
+Download and install [git](https://github.com/dennisameling/git/releases/download/v2.47.0.windows.2/Git-2.47.0.2-arm64.exe) and [X64 Python 3.12.8](https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe)
 
 *Note: Make sure to check 'Add python.exe to PATH' while install Python* <br>
 *Note: If there are multiple Python versions in your environment, make sure that the Python installed this time is in the first place in the PATH environment variable.* <br>
@@ -46,9 +47,5 @@ cd ai-engine-direct-helper\samples
 python python\setup.py
 ```
 
-### Step 5: Now you can refer to the following contents to experience running the AI model on the WoS platform: <br>
-1. Run [sample code](../samples/python/README.md) for the models from Qualcomm [AI-Hub](https://aihub.qualcomm.com/compute/models).
-2. Run OpenAI Compatible API Service(LLM Service):<br>
-2.1 [Python based service](../samples/genie/python/README.md)<br>
-2.2 [C++ based service](../samples/genie/c++/README.md)<br>
-3. Run [WebUI samples](../samples/webui/README.md).
+### Now you can try all the functions. We suggest you try the [WebUI Applications](../samples/webui/README.md) first.
+
