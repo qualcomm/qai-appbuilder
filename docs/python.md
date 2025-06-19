@@ -48,7 +48,7 @@ python python\setup.py
 
 ### Step 5: Now you can refer to the following contents to experience running the AI model on the WoS platform: <br>
 1. Run [sample code](../samples/python/README.md) for the models from Qualcomm [AI-Hub](https://aihub.qualcomm.com/compute/models).
-2. Run OpenAI Compatibility API Service(LLM Service):<br>
+2. Run OpenAI Compatible API Service(LLM Service):<br>
 2.1 [Python based service](../samples/genie/python/README.md)<br>
 2.2 [C++ based service](../samples/genie/c++/README.md)<br>
 3. Run [WebUI samples](../samples/webui/README.md).
