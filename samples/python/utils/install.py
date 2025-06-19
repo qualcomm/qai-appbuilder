@@ -354,7 +354,8 @@ def setup_qai_env(version, lib_arch = DEFAULT_LIB_ARCH, dsp_arch = DEFAULT_DSP_A
         SDK_lib_dir = qnn_root_path + "\\lib\\" + lib_arch
         SDK_hexagon_dir = qnn_root_path + "\\lib\\hexagon-v{}\\unsigned".format(dsp_arch)
 
-        os.makedirs(qnn_libs_dir, exist_ok=True)
+        if not os.path.exists(qnn_libs_dir):
+            os.makedirs(qnn_libs_dir, exist_ok=True)
 
         libs = [
             "QnnHtp.dll",
@@ -379,6 +380,48 @@ def setup_qai_env(version, lib_arch = DEFAULT_LIB_ARCH, dsp_arch = DEFAULT_DSP_A
                 os.remove(os.path.join(qnn_libs_dir, lib))
             shutil.copy(os.path.join(SDK_hexagon_dir, lib), qnn_libs_dir)
 
+
+def install_qai_runtime(version, lib_arch = DEFAULT_LIB_ARCH, dsp_arch = DEFAULT_DSP_ARCH, qnn_libs_dir="qai_libs"):
+    if version in qnn_sdk_version:
+        ret = True
+
+        zip_name = f"QAIRT_Runtime_{version}_v{dsp_arch}.zip"
+        url = f"https://github.com/quic/ai-engine-direct-helper/releases/download/v{version}.0/" + zip_name
+        qnn_zip_path = os.path.join(qnn_libs_dir, zip_name)
+
+        if not os.path.exists(qnn_libs_dir):
+            os.makedirs(qnn_libs_dir, exist_ok=True)
+
+        desc = f"Downloading QAIRT runtime libraries to {qnn_libs_dir}\n"\
+               f"If the downloading speed is too slow, please download it manually from below link and copy it to path {qnn_libs_dir}." + TEXT_RUN_SCRIPT_AGAIN + f"\n{url}"
+        fail = f"Failed to download file from {url}: \n\t1. Please try again a few times.\n\t2. If still doesn't work, please try to download it manually"\
+               f" from {url} and copy it to path {qnn_libs_dir}. " + TEXT_RUN_SCRIPT_AGAIN
+
+        if not os.path.exists(qnn_zip_path):
+            print(desc)
+            ret = download_url(url, qnn_zip_path, desc=desc, fail=fail)
+
+        if not ret:
+            exit()
+
+        print(f"Install QAIRT runtime libraries to '{qnn_libs_dir}'")
+        with zipfile.ZipFile(qnn_zip_path, 'r') as zip_ref:
+            zip_ref.extractall(qnn_libs_dir)
+    
+        src_dir = qnn_libs_dir + "/" + lib_arch
+        for filename in os.listdir(src_dir):
+            src_file = os.path.join(src_dir, filename)
+            if os.path.isfile(src_file):
+                shutil.copy2(src_file, qnn_libs_dir)
+
+        print(f"Install QAIRT runtime libraries to '{qnn_libs_dir}' successfully.")
+
+        return qnn_zip_path
+    else:
+        keys_list = list(qnn_sdk_version.keys())
+        print("Supported versions are:")
+        print(keys_list)
+        return None
 
 def install_qai_sdk(version):
     if version in qnn_sdk_version:
