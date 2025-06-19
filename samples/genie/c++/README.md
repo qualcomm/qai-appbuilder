@@ -2,7 +2,7 @@
 
 <div align="center">
   <h3>Run the large language model on the local NPU.</h3>
-  <p><i> OpenAI Compatibility API Service (C++) </i></p>
+  <p><i> OpenAI Compatible API Service (C++) </i></p>
 </div>
 <br>
 
@@ -13,7 +13,12 @@ Note: Contributions are welcome. Please ensure thorough testing before deploying
 ## Introduction 
 This sample helps developers use C++ to build Genie based Open AI compatibility API service on Windows on Snapdragon (WoS), Mobile and Linux platforms.
 
-# GenieAPIService
+## Features
+• Support both stream and none stream mode <br> 
+• Support switching between models <br>
+• Support to extend the use of your own model <br>
+
+## GenieAPIService
 Genie OpenAI Compatible API Service.
 
 This is an OpenAI compatible API service that can be used to access the Genie AI model.

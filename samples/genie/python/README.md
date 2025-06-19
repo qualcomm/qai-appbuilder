@@ -2,7 +2,7 @@
 
 <div align="center">
   <h3>Run the large language model on the local NPU.</h3>
-  <p><i> OpenAI Compatibility API Service (Python) </i></p>
+  <p><i> OpenAI Compatible API Service (Python) </i></p>
 </div>
 <br>
 
@@ -12,6 +12,11 @@ Note: Contributions are welcome. Please ensure thorough testing before deploying
 
 ## Introduction 
 This sample helps developers use QAI AppBuilder + Python to build Genie based Open AI compatibility API service on Windows on Snapdragon (WoS) platform.
+
+## Features
+• Support both stream and none stream mode <br> 
+• Support switching between models <br>
+• Support to extend the use of your own model <br>
 
 ## Setting Up Environment For Service:
 
