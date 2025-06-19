@@ -47,5 +47,5 @@ cd ai-engine-direct-helper\samples
 python python\setup.py
 ```
 
-### Now you can try all the functions. We suggest you try the [WebUI Applications](../samples/webui/README.md) first.
+### Now you can try all the functions we provided. We suggest you try the [WebUI Applications](../samples/webui/README.md) first.
 
