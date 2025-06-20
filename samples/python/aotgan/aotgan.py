@@ -38,7 +38,7 @@ if not MODEL_NAME in execution_ws:
     execution_ws = execution_ws + "\\" + MODEL_NAME
 
 model_dir = execution_ws + "\\models"
-madel_path = model_dir + "\\" + MODEL_NAME + ".bin"
+model_path = model_dir + "\\" + MODEL_NAME + ".bin"
 
 ####################################################################
 
@@ -74,7 +74,7 @@ def model_download():
 
     desc = f"Downloading {MODEL_NAME} model... "
     fail = f"\nFailed to download {MODEL_NAME} model. Please prepare the model according to the steps in below link:\n{MODEL_HELP_URL}"
-    ret = install.download_qai_hubmodel(MODEL_ID, madel_path, desc=desc, fail=fail)
+    ret = install.download_qai_hubmodel(MODEL_ID, model_path, desc=desc, fail=fail)
 
     if not ret:
         exit()
@@ -88,7 +88,7 @@ def Init():
     QNNConfig.Config(os.getcwd() + "\\qai_libs", Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for AotGan objects.
-    aotgan = AotGan("aotgan", madel_path)
+    aotgan = AotGan("aotgan", model_path)
 
 def Inference(input_image_path, input_mask_path, output_image_path):
     global image_buffer

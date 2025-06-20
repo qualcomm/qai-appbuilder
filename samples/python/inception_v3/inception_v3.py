@@ -39,7 +39,7 @@ if not MODEL_NAME in execution_ws:
     execution_ws = execution_ws + "\\" + MODEL_NAME
 
 model_dir = execution_ws + "\\models"
-madel_path = model_dir + "\\" + MODEL_NAME + ".bin"
+model_path = model_dir + "\\" + MODEL_NAME + ".bin"
 imagenet_classes_path = model_dir + "\\" + IMAGENET_CLASSES_FILE
 
 ####################################################################
@@ -98,7 +98,7 @@ def model_download():
 
     desc = f"Downloading {MODEL_NAME} model... "
     fail = f"\nFailed to download {MODEL_NAME} model. Please prepare the model according to the steps in below link:\n{MODEL_HELP_URL}"
-    ret = install.download_qai_hubmodel(MODEL_ID, madel_path, desc=desc, fail=fail)
+    ret = install.download_qai_hubmodel(MODEL_ID, model_path, desc=desc, fail=fail)
 
     if not ret:
         exit()
@@ -112,7 +112,7 @@ def Init():
     QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for InceptionV3 objects.
-    inceptionV3 = InceptionV3("inceptionV3", madel_path)
+    inceptionV3 = InceptionV3("inceptionV3", model_path)
 
 def Inference(input_image_path):
     # Read and preprocess the image.
