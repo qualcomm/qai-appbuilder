@@ -8,11 +8,12 @@ Note: Contributions are welcome. Please ensure thorough testing before deploying
 This guide helps developers setup Python environment for using QAI AppBuilder on Windows on Snapdragon (WoS) platforms.
 
 ## Setting Up QAI AppBuilder Python Environment:
-*Note: Windows on Snapdragon (WoS) device support running X86, X64, and ARM64 applications. For ease of use, we recommend using the X64 version of Python to run our sample applications. That’s why we’ve provided a download link for the X64 version of Python below.<br>
 
 ### Step 1: Install Dependencies
-Download and install [git](https://github.com/dennisameling/git/releases/download/v2.47.0.windows.2/Git-2.47.0.2-arm64.exe) and [X64 Python 3.12.8](https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe)
+Download and install [git](https://github.com/dennisameling/git/releases/download/v2.47.0.windows.2/Git-2.47.0.2-arm64.exe) and [X64 Python 3.12.8](https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe) <br>
 
+<img src="https://img.shields.io/badge/Note: - Windows on Snapdragon (WoS) device support running X86, X64, and ARM64 applications.-important"> <br>
+*Note: For ease of use, we recommend using the X64 version of Python to run our sample applications. That’s why we’ve provided a download link for the X64 version of Python above.* <br>
 *Note: Make sure to check 'Add python.exe to PATH' while install Python* <br>
 *Note: If there are multiple Python versions in your environment, make sure that the Python installed this time is in the first place in the PATH environment variable.* <br>
 To check the list of Python versions in your PATH environment variable, open a 'Command Prompt' window (not PowerShell), and run the command 'where python' as shown below: <br>
