@@ -16,6 +16,7 @@ from gradio.data_classes import FileData
 sys.path.append("python")
 sys.path.append("genie\\python")
 
+import utils.install as install
 from ChainUtils import GenieLLM
 from DocUtils import DocSummarize
 
@@ -91,8 +92,31 @@ def model_unload():
         del(llm)
         llm = None
 
+def download():
+    PATH_Tokenizer = APP_PATH + "\\models\\IBM-Granite-v3.1-8B\\tokenizer.json"
+    URL_Tokenizer = "https://gitee.com/hf-models/granite-3.1-8b-base/raw/main/tokenizer.json"
+
+    if not os.path.exists(PATH_Tokenizer):
+        install.download_url(URL_Tokenizer, PATH_Tokenizer)
+
+    PATH_Tokenizer = APP_PATH + "\\models\\Phi-3.5-mini\\tokenizer.json"
+    URL_Tokenizer = "https://gitee.com/hf-models/Phi-3.5-mini-instruct/raw/main/tokenizer.json"
+
+    if not os.path.exists(PATH_Tokenizer):
+        install.download_url(URL_Tokenizer, PATH_Tokenizer)
+
+        import re
+        with open(PATH_Tokenizer, 'r', encoding='utf-8') as f:
+            content = f.read()
+        pattern = r',\s*{\s*"type":\s*"Strip",\s*"content":\s*"\s*",\s*"start":\s*\d+,\s*"stop":\s*\d+\s*}'
+        new_content = re.sub(pattern, '', content)
+        with open(PATH_Tokenizer, 'w', encoding='utf-8') as f:
+            f.write(new_content)
+
 def model_change(value):
     global llm
+
+    download()
 
     print()
     print(f"{Colors.GREEN}INFO:     loading model <<<", value, f">>>{Colors.END}")
