@@ -38,13 +38,14 @@ if __name__ == "__main__":
             install.setup_qai_env(qnn_sdk_version, lib_arch, dsp_arch, "qai_libs_2.24")
 
         else:
+            install.install_qai_appbuilder(qnn_sdk_version)
+
             try:
                 install.install_qai_runtime(qnn_sdk_version, lib_arch, dsp_arch, "qai_libs")
             except Exception as e:
                 print(e)
                 print("Failed to install QAIRT runtime libraries. Try to install QAIRT SDK.")
                 install.install_qai_sdk(qnn_sdk_version)
-                install.install_qai_appbuilder(qnn_sdk_version)
                 install.setup_qai_env(qnn_sdk_version, lib_arch, dsp_arch, "qai_libs")
 
         print()
