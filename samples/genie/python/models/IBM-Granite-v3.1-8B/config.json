@@ -2,6 +2,11 @@
     "dialog": {
         "version": 1,
         "type": "basic",
+        "stop-sequence": [
+            "<|end_of_text|>",
+            "end_of_role",
+            "<|start_of_role|>"
+        ],
         "context": {
             "version": 1,
             "size": 4096,
