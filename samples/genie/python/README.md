@@ -83,6 +83,13 @@ python genie\python\GenieAPIClientImage.py --prompt "spectacular view of norther
 * When you run the client, you can see the current status of processing client requests from the service terminal window. 
 * When you run the request of image generation for the first time, the service may have to download the Stable Diffusion model from AI-Hub, and it will take a long time.
 
+### Sample List:
+|  Sample   | Description  |
+|  ----  | :----    |
+| GenieAPIClient.py | A client sample code to call GenieAPIService. |
+| GenieAPIClientImage.py  | A client sample code to call GenieAPIService to generate image. |
+| GenieSample.py  | Use GenieContext to load and run the LLM model in local process.|
+
 ### AI-Hub LLM models:
 
 |  Model  | model file  | tokenizer file *
