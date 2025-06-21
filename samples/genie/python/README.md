@@ -90,7 +90,7 @@ python genie\python\GenieAPIClientImage.py --prompt "spectacular view of norther
 | GenieAPIClientImage.py * | A client sample code to call GenieAPIService to generate image. |
 | GenieSample.py  | Use GenieContext to load and run the LLM model in local process.|
 
-*. Only Python version GenieAPIService support generating image. <br>
+*. Image generation is only supported in the Python version of GenieAPIService. <br>
 
 ### AI-Hub LLM models:
 
