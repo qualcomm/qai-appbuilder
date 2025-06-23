@@ -46,6 +46,7 @@ class LogLevel():
     VERBOSE = 4
     DEBUG = 5
     
+    @staticmethod
     def SetLogLevel(log_level, log_path):
         appbuilder.set_log_level(log_level, log_path)
 
@@ -58,6 +59,7 @@ class ProfilingLevel():
     DETAILED = 2
     INVALID = 3
     
+    @staticmethod
     def SetProfilingLevel(profiling_level):
         appbuilder.set_profiling_level(profiling_level)
 
@@ -75,6 +77,7 @@ class PerfProfile():
     HIGH_PERFORMANCE    = "high_performance"
     BURST               = "burst"
 
+    @staticmethod
     def SetPerfProfileGlobal(perf_profile):
         """
         Set the perf profile globally. We can set HTP to 'burst' and keep it for running inference several times, the use RelPerfProfileGlobal to reset it.
@@ -83,6 +86,7 @@ class PerfProfile():
         """
         appbuilder.set_perf_profile(perf_profile)
 
+    @staticmethod
     def RelPerfProfileGlobal():
         """
         Release the perf profile which set by function SetPerfProfileGlobal().
@@ -92,6 +96,8 @@ class PerfProfile():
 
 class QNNConfig():
     """Config QNN SDK libraries path, runtime(CPU/HTP), log leverl, profiling level."""
+
+    @staticmethod
     def Config(qnn_lib_path: str = "None",
                runtime : str = Runtime.HTP,
                log_level : int = LogLevel.ERROR,
