@@ -6,11 +6,18 @@ Note: Contributions are welcome. Please ensure thorough testing before deploying
 
 ## Environment Setup
 
-### 1. Libraries from QNN SDK:
+### 1. Libraries from Qualcomm® AI Runtime SDK:
 
-<b>We need below libraries from QNN SDK for using AppBuilder on Snapdragon X Elite(Windows on Snapdragon device):</b>
+<b>We need below libraries from Qualcomm® AI Runtime SDK for using AppBuilder on Snapdragon X Elite(Windows on Snapdragon device).</b><br>
 
-If use x64 Python, use the libraries below from QNN SDK:
+<a href="https://github.com/quic/ai-engine-direct-helper/blob/main/docs/user_guide.md"><img src="https://img.shields.io/badge/Note: - Windows on Snapdragon (WoS) device support running X86, X64, ARM64EC and ARM64 applications.-important"></a> <br>
+*Note: For X64 and [ARM64EC](https://learn.microsoft.com/en-us/windows/arm/arm64ec) program, use the libraries under the folder 'arm64x-windows-msvc'; for ARM64 program, use the libraries under the folder 'aarch64-windows-msvc'.* <br>
+
+We have 2 options to get these runtime libraries:
+1. Download [QAIRT Runtime](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.34.0/QAIRT_Runtime_2.34_v73.zip) and extract the dependency libraries to app folder.
+2. Install [Qualcomm® AI Runtime SDK](https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK) and copy the dependency libraries to app folder. <br>
+
+If use x64 Python, use the libraries below from Qualcomm® AI Runtime SDK:
 ```
 C:\Qualcomm\AIStack\QAIRT\{SDK Version}\lib\arm64x-windows-msvc\QnnHtp.dll  (backend for running model on HTP)
 C:\Qualcomm\AIStack\QAIRT\{SDK Version}\lib\arm64x-windows-msvc\QnnCpu.dll  (backend for running model on CPU)
@@ -21,7 +28,7 @@ C:\Qualcomm\AIStack\QAIRT\{SDK Version}\lib\hexagon-v73\unsigned\libQnnHtpV73Ske
 C:\Qualcomm\AIStack\QAIRT\{SDK Version}\lib\hexagon-v73\unsigned\libqnnhtpv73.cat
 ```
 
-If use ARM64 Python, use the libraries below from QNN SDK(ARM64 Python has better performance in Snapdragon X Elite platform):
+If use ARM64 Python, use the libraries below from Qualcomm® AI Runtime SDK(ARM64 Python has better performance in Snapdragon X Elite platform):
 ```
 C:\Qualcomm\AIStack\QAIRT\{SDK Version}\lib\aarch64-windows-msvc\QnnHtp.dll  (backend for running model on HTP)
 C:\Qualcomm\AIStack\QAIRT\{SDK Version}\lib\aarch64-windows-msvc\QnnCpu.dll  (backend for running model on CPU)
@@ -41,7 +48,7 @@ There're several Python classes from this extension:
 - QNNContext - The context of QNN model, used to initialize the QNN model, run the inference and destroy the model resource.
 - QNNContextProc - It's similar with QNNContext but support load the model into a separate processes. [*Depress*]
 - QNNShareMemory - It's used to create processes share memory while using *QNNContextProc*.
-- QNNConfig - It's for configuring  QNN SDK libraries path, runtime(CPU/HTP), log leverl, profiling level.
+- QNNConfig - It's for configuring  Qualcomm® AI Runtime SDK libraries path, runtime(CPU/HTP), log leverl, profiling level.
 - PerfProfile - Set the HTP perf profile.
 ## Sample Code(Python)
 

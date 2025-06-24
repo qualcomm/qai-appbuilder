@@ -139,6 +139,7 @@ def build_release():
     if not os.path.exists(include_path):
         os.mkdir(include_path)
     shutil.copy("src/LibAppBuilder.hpp", include_path)
+    shutil.copy("src/Lora.hpp", include_path)
 
     zip_package(tmp_path, "dist/" + PACKAGE_ZIP)
 
