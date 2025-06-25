@@ -12,7 +12,6 @@ import shutil
 from tqdm import tqdm
 from pathlib import Path
 import qai_hub
-import wget
 import urllib.request as request
 
 qnn_sdk_version =  {
@@ -120,13 +119,17 @@ def verify_package(url, filepath, filesize, desc=None, fail=None):
     return False
 
 
-class tqdmWget(tqdm):
-    last_block = 0
-    def update_progress(self, block_num=1, block_size=1, total_size=None):
-        if total_size is not None:
-            self.total = total_size
-        self.update((block_num - self.last_block) * block_size)
-        self.last_block = block_num
+# import wget
+
+# class tqdmWget(tqdm):
+#    last_block = 0
+#    def update_progress(self, block_num=1, block_size=1, total_size=None):
+#        if total_size is not None:
+#            self.total = total_size
+#        self.update((block_num - self.last_block) * block_size)
+#        self.last_block = block_num
+
+from py3_wget import download_file
 
 def download_url_pywget(url, filepath, filesize=None, desc=None, fail=None):
     ret = True
@@ -143,11 +146,12 @@ def download_url_pywget(url, filepath, filesize=None, desc=None, fail=None):
 
     try:
         # wget.download(url, filepath, wget.bar_adaptive)
-        with tqdmWget(unit='B', unit_scale=True, unit_divisor=1024, desc=os.path.basename(filepath)) as t:
-            def download_callback(blocks, block_size, total_size, bar_function):
-                t.update_progress(blocks, block_size, total_size)
-            wget.callback_progress = download_callback
-            wget.download(url, filepath, wget.bar_adaptive)
+        #with tqdmWget(unit='B', unit_scale=True, unit_divisor=1024, desc=os.path.basename(filepath)) as t:
+        #    def download_callback(blocks, block_size, total_size, bar_function):
+        #        t.update_progress(blocks, block_size, total_size)
+        #    wget.callback_progress = download_callback
+        #    wget.download(url, filepath, wget.bar_adaptive)
+        download_file(url, output_path=filepath, overwrite=True)
 
     except Exception as e:
         # print(str(e))
