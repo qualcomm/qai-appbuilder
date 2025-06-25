@@ -92,26 +92,28 @@ def model_unload():
         del(llm)
         llm = None
 
+def download_tokenizer(model_path, url):
+    if not os.path.exists(model_path):
+        install.download_url(url, model_path)
+
+        if "Phi-3.5-mini" in model_path:
+            import re
+            with open(model_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            pattern = r',\s*{\s*"type":\s*"Strip",\s*"content":\s*"\s*",\s*"start":\s*\d+,\s*"stop":\s*\d+\s*}'
+            new_content = re.sub(pattern, '', content)
+            with open(model_path, 'w', encoding='utf-8') as f:
+                f.write(new_content)
+
 def download():
-    PATH_Tokenizer = APP_PATH + "\\models\\IBM-Granite-v3.1-8B\\tokenizer.json"
-    URL_Tokenizer = "https://gitee.com/hf-models/granite-3.1-8b-base/raw/main/tokenizer.json"
-
-    if not os.path.exists(PATH_Tokenizer):
-        install.download_url(URL_Tokenizer, PATH_Tokenizer)
-
-    PATH_Tokenizer = APP_PATH + "\\models\\Phi-3.5-mini\\tokenizer.json"
-    URL_Tokenizer = "https://gitee.com/hf-models/Phi-3.5-mini-instruct/raw/main/tokenizer.json"
-
-    if not os.path.exists(PATH_Tokenizer):
-        install.download_url(URL_Tokenizer, PATH_Tokenizer)
-
-        import re
-        with open(PATH_Tokenizer, 'r', encoding='utf-8') as f:
-            content = f.read()
-        pattern = r',\s*{\s*"type":\s*"Strip",\s*"content":\s*"\s*",\s*"start":\s*\d+,\s*"stop":\s*\d+\s*}'
-        new_content = re.sub(pattern, '', content)
-        with open(PATH_Tokenizer, 'w', encoding='utf-8') as f:
-            f.write(new_content)
+    download_tokenizer(
+        APP_PATH + "\\models\\IBM-Granite-v3.1-8B\\tokenizer.json",
+        "https://gitee.com/hf-models/granite-3.1-8b-base/raw/main/tokenizer.json"
+    )
+    download_tokenizer(
+        APP_PATH + "\\models\\Phi-3.5-mini\\tokenizer.json",
+        "https://gitee.com/hf-models/Phi-3.5-mini-instruct/raw/main/tokenizer.json"
+    )
 
 def model_change(value):
     global llm
