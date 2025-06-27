@@ -23,7 +23,7 @@ C:\Programs\Python\Python312\python.exe
 C:\Users\zhanweiw\AppData\Local\Microsoft\WindowsApps\python.exe
 ```
 
-Download and install [vc_redist.x64](https://aka.ms/vs/16/release/vc_redist.x64.exe) if you haven't installed.
+Download and install [vc_redist.x64](https://aka.ms/vs/17/release/vc_redist.x64.exe) if you haven't installed.
 
 ### Step 2: Install basic Python dependencies:
 Run below command in Windows terminal:

@@ -67,5 +67,5 @@ Make sure to select the right model when download them:<br>
 Do *not* rename the model names, just download and copy them to the 'models' folder. <br>
 
 Models AI-Hub links:<br>
-[stable_diffusion_v1_5](https://aihub.qualcomm.com/compute/models/stable_diffusion_v1_5_w8a16_quantized)<br>
-[stable_diffusion_v2_1](https://aihub.qualcomm.com/compute/models/stable_diffusion_v2_1_quantized)<br>
+[stable_diffusion_v1_5](https://aihub.qualcomm.com/compute/models/stable_diffusion_v1_5)<br>
+[stable_diffusion_v2_1](https://aihub.qualcomm.com/compute/models/stable_diffusion_v2_1)<br>
