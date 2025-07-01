@@ -1,9 +1,6 @@
 [submodule "pybind/pybind11"]
 	path = pybind/pybind11
 	url = https://github.com/pybind/pybind11
-[submodule "samples/genie/c++/External/DuoTools"]
-	path = samples/genie/c++/External/DuoTools
-	url = https://github.com/msiner/DuoTools
 [submodule "samples/genie/c++/External/cpp-httplib"]
 	path = samples/genie/c++/External/cpp-httplib
 	url = https://github.com/yhirose/cpp-httplib
@@ -16,3 +13,6 @@
 [submodule "samples/genie/c++/External/curl"]
 	path = samples/genie/c++/External/curl
 	url = https://github.com/curl/curl
+[submodule "samples/genie/c++/External/CmdParser"]
+	path = samples/genie/c++/External/CmdParser
+	url = https://github.com/FlorianRappl/CmdParser
