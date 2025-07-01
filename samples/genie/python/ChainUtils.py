@@ -144,9 +144,14 @@ class GenieModel():
 
             q = re.sub(r'\n\s*\n+', '\n\n', self.prompt)  # Remove extra blank line.
 
+            if self.sys_prompt is None:
+                self.sys_prompt = "\\nYou are a helpful assistant."
+            else:
+                self.sys_prompt = "\\n" + self.sys_prompt
+
             prompt_tags_1 = self.prompt_tags_1
             if self.sys_prompt is not None:
-                prompt_tags_1 = prompt_tags_1.replace("\\nYou are a helpful assistant.", "\\n" + self.sys_prompt)
+                prompt_tags_1 = prompt_tags_1.replace("You are a helpful assistant.", "\\n" + self.sys_prompt)
             prompt_tags_1 = prompt_tags_1.replace("\\n", "\n")
             prompt_tags_2 = self.prompt_tags_2
             prompt_tags_2 = prompt_tags_2.replace("\\n", "\n")
