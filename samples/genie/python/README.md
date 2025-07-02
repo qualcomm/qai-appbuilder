@@ -69,11 +69,14 @@ INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8910 (Press CTRL+C to quit)
 ```
-#### More parameter: <br>
+#### More parameters: <br>
 --all-text: Output all text includes tool calls text. Disabled by default.<br>
 --enable-thinking: Enable thinking mode. Disabled by default.<br>
 *. It is recommended to disable thinking mode when using the tools call function.<br>
 *. You can refer to [GenieAPIClientTools.py](../python/GenieAPIClientTools.py) on how to use tools call.<br>
+```
+python genie\python\GenieAPIService.py --modelname "Qwen3.0-8B-v31" --loadmodel --profile --all-text --enable-thinking
+```
 
 ### Step 6: Now you can access the API service
 The default IP address for this API is: 'localhost:8910', you can access this IP address in the client app.

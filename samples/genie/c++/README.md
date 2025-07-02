@@ -51,11 +51,14 @@ INFO: [TIME] | model load time >> 8103.10 ms
 INFO: Service Is Ready Now!
 ```
 
-#### More parameter: <br>
+#### More parameters: <br>
 --all_text: Output all text includes tool calls text. Disabled by default.<br>
 --enable_thinking: Enable thinking model. Disabled by default.<br>
 *. It is recommended to disable thinking mode when using the tools call function.<br>
 *. You can refer to [GenieAPIClientTools.py](../python/GenieAPIClientTools.py) on how to use tools call.<br>
+```
+GenieAPIService\GenieAPIService.exe -c "genie\python\models\Qwen3.0-8B-v31\config.json" -l --all_text --enable_thinking
+```
 
 ### Run the service on Mobile(Snapdragon® 8 Elite Mobile device): <br>
 1. Copy the subdirectory "GenieModels" in the folder "Android" in [GenieAPIService binary](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.34.0/GenieAPIService_2.34.zip) to the root path of mobile sdcard.<br>
