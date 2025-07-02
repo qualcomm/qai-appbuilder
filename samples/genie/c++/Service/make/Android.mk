@@ -14,6 +14,7 @@ SUPPORTED_TARGET_ABI := arm64-v8a
 PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../../External/cpp-httplib
 PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../../External/json/include
 PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../../External/fmt/include
+PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../../External/CmdParser
 PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/..
 PACKAGE_C_INCLUDES += -I ${QNN_SDK_ROOT}include/Genie
 

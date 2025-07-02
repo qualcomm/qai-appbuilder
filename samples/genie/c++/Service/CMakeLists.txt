@@ -40,7 +40,7 @@ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MD /O2 /Ob2")
 target_include_directories(${APP} PUBLIC ../External/cpp-httplib
                                          ../External/json/include
                                          ../External/fmt/include
-                                         ../External/DuoTools/DuoEngine  ## for using 'windows_getopt.h' in this project.
+                                         ../External/CmdParser
                                          ./)
 
 target_link_libraries(${APP} PUBLIC Genie)
@@ -69,7 +69,7 @@ target_include_directories(${APP} PUBLIC ../External/cpp-httplib
                                          ../External/json/include
                                          ../External/fmt/include
                                          ../External/curl/include
-                                         ../External/DuoTools/DuoEngine  ## for using 'windows_getopt.h' in this project.
+                                         ../External/CmdParser
                                          ./)
 
 target_link_libraries(${APP} libcurl_imp)

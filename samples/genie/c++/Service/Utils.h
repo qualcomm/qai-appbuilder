@@ -18,17 +18,16 @@
 #include "httplib.h"
 #include "nlohmann/json.hpp"
 #include "fmt/core.h"
+#include "cmdparser.hpp"
 #include <filesystem>
 #include <chrono>
 #include <random>
 #include <vector>
 #include <unordered_map>
-#ifdef _WIN32
-#include <windows_getopt.h>
-#else
-#include <getopt.h>
-#endif
-
+#include <codecvt>
+#include <locale>
+#include <io.h>
+#include <fcntl.h>
 
 using namespace httplib;
 using namespace std;
@@ -41,6 +40,10 @@ const int CONTEXT_SIZE = 4096;
 const int DOCS_MAX_SIZE = CONTEXT_SIZE - 1024;
 const int DOCS_MAX_QUERY_TIMES = 3;
 const std::vector<std::string>& SEPARATORS = {"\n\n", "\n", "。", "！", "？", "，", ".", "?", "!", " ", ""};
+
+const std::string FN_FLAG = "<";
+const std::string FN_NAME = "<tool_call>";
+const std::string FILL_THINK = "<think>\n\n</think>\n\n";
 
 #define RED "\033[31m"
 #define GREEN "\033[32m"
@@ -72,6 +75,18 @@ const auto root_html = R"(
     </html>
     )";
 
+inline const std::string tool_prompt_template = 
+    "\n\n# Tools\n\n"
+    "You may call one or more functions to assist with the user query.\n\n"
+    "You are provided with function signatures within <tools></tools> XML tags:\n"
+    "<tools>\n"
+    "{tool_descs}"
+    "</tools>\n\n"
+    "For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n"
+    "<tool_call>\n"
+    "{\"name\": <function-name>, \"arguments\": <args-json-object>}\n"
+    "</tool_call>\n";
+
 #ifdef __ANDROID__
 #include <android/log.h>
 #define LOG_TAG "com.example.genieapiservice"
@@ -100,6 +115,53 @@ T get_json_value(const json& jsonData, const std::string& key, const T& defaultV
 
 static std::string json_to_str(const json & data) {
     return data.dump(-1, ' ', false, json::error_handler_t::replace);
+}
+
+void print_wstring(const std::string message) {
+#ifdef _WIN32
+    _setmode(_fileno(stdout), _O_U16TEXT);
+
+    std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+    std::wstring wmsg = converter.from_bytes(message);
+    std::wcout << wmsg << std::flush;
+
+    _setmode(_fileno(stdout), _O_TEXT);
+#else
+    std::cout << message << std::flush;
+#endif
+}
+
+bool starts_with(const std::string& str, const std::string& prefix) {
+    return str.rfind(prefix, 0) == 0;
+}
+
+bool str_contains(const std::string& str, const std::string& sub) {
+    return str.find(sub) != std::string::npos;
+}
+
+std::string trim_empty_lines(const std::string& input) {
+    std::string s = input;
+    s = std::regex_replace(s, std::regex(R"(^(\s*\n)+)"), "");
+    s = std::regex_replace(s, std::regex(R"((\s*\n)+$)"), "");
+    return s;
+}
+
+inline std::string remove_empty_lines(const std::string& input) {
+    return std::regex_replace(input, std::regex(R"((^\s*\n)+)"), "");
+}
+
+bool is_thinking_model(const std::string& model_name) {
+    return str_contains(model_name, "Qwen3") || str_contains(model_name, "DeepSeek");
+}
+
+std::string remove_tool_call_content(const std::string& input) {
+    std::regex tool_call_block(R"(<tool_call>[\s\S]*?<\/tool_call>\s*)");
+    std::regex name_line(R"((\s*\{ *"name": [^\n]*\n?))");
+    std::string result = std::regex_replace(input, tool_call_block, "");
+    result = std::regex_replace(result, name_line, "");
+    result = remove_empty_lines(result);
+
+    return result;
 }
 
 std::string escape_string(const std::string& input) {
@@ -141,7 +203,7 @@ std::string extract_tag(const std::string& line, const std::string& tag) {
     return "";
 }
 
-std::string replace_str(const std::string& str, const std::string& from, const std::string& to) {
+std::string str_replace(const std::string& str, const std::string& from, const std::string& to) {
     std::string result = str;
     size_t pos = 0;
     while ((pos = result.find(from, pos)) != std::string::npos) {

@@ -19,8 +19,9 @@ from qai_appbuilder import (GenieContext)
 
 ###########################################################################
 
-DEBUG_PROMPT = False
+DEBUG_PROMPT = True
 DEBUG_OUTPUT = True
+DEBUG_SPLIT = False
 DEBUG_GENIE = False
 
 DOCS_MAX_SIZE = 4096 - 1024
@@ -49,10 +50,13 @@ class GenieLLMCallbackHandler:
 class GenieModel():
     def __init__(self, 
         model_name: str = "None",
-        max_query_times: int = DOCS_MAX_QUERY_TIMES) -> None:
+        max_query_times: int = DOCS_MAX_QUERY_TIMES,
+        enable_thinking: bool = False) -> None:
 
         self.stream_chunk = ""
         self.prompt = ""
+        self.last_query = ""
+        self.tools_query = ""
 
         self.exiting = False
         self.generating = False
@@ -64,6 +68,7 @@ class GenieModel():
         prompt_path = model_path + "\\prompt.conf"
         self.model_name = model_name
         self.max_query_times = max_query_times
+        self.enable_thinking = enable_thinking
 
         if not os.path.exists(config_path) or not os.path.exists(prompt_path) :
             print("[Error] model config or prompt file not found.")
@@ -74,6 +79,15 @@ class GenieModel():
         prompt_lines = prompt_content.split('\n')
         self.prompt_tags_1 = prompt_lines[0].split(': ')[1].strip()
         self.prompt_tags_2 = prompt_lines[1].split(': ')[1].strip()
+
+        if len(prompt_lines) > 2:
+            self.prompt_tags_3 = prompt_lines[2].split(': ')[1].strip()
+        else:
+            self.prompt_tags_3 = self.prompt_tags_2.replace("assistant", "tool")
+
+        self.prompt_tags_2 = self.prompt_tags_2.replace("\\n", "\n")
+        self.prompt_tags_3 = self.prompt_tags_3.replace("\\n", "\n")
+
         # print(prompt_path)
         # print(prompt_lines)
 
@@ -122,6 +136,9 @@ class GenieModel():
             print(e)
             return 0, 0, 0, 0, 0, 0
 
+    def is_thinking_model(self, model_name):
+        return "Qwen3" in model_name or "DeepSeek" in model_name
+
     def llm_thread(self):
         while(True):
             self.thread_cond.acquire()
@@ -145,16 +162,21 @@ class GenieModel():
             q = re.sub(r'\n\s*\n+', '\n\n', self.prompt)  # Remove extra blank line.
 
             if self.sys_prompt is None:
-                self.sys_prompt = "\\nYou are a helpful assistant."
-            else:
-                self.sys_prompt = "\\n" + self.sys_prompt
+                self.sys_prompt = "You are a helpful assistant."
+            self.sys_prompt = self.sys_prompt.replace("\\n", "\n")
+
+            sys_prompt = self.sys_prompt
+            
+            if self.is_thinking_model(self.model_name):
+                if self.enable_thinking: 
+                    sys_prompt = sys_prompt + "/think"
+                else:
+                    sys_prompt = sys_prompt + "/no_think"
 
             prompt_tags_1 = self.prompt_tags_1
-            if self.sys_prompt is not None:
-                prompt_tags_1 = prompt_tags_1.replace("You are a helpful assistant.", "\\n" + self.sys_prompt)
+            prompt_tags_1 = prompt_tags_1.replace("You are a helpful assistant.", sys_prompt + self.tools_prompt)
             prompt_tags_1 = prompt_tags_1.replace("\\n", "\n")
             prompt_tags_2 = self.prompt_tags_2
-            prompt_tags_2 = prompt_tags_2.replace("\\n", "\n")
             tokens = self.get_num_tokens(q)
 
             split_question = ""
@@ -176,9 +198,17 @@ class GenieModel():
                 split_count = 1
 
             for i in range(split_count):
-                q = split_question[i]
+                if len(self.tools_query) == 0:
+                    q = split_question[i]
+                    q = prompt_tags_1 + q + prompt_tags_2
+                else:
+                    q = self.tools_query
 
-                q = prompt_tags_1 + q + prompt_tags_2
+
+            if self.is_thinking_model(self.model_name):
+                if not self.enable_thinking: 
+                    q += "<think>\n\n</think>\n\n"
+
                 if DEBUG_PROMPT:
                     print("\n")
                     if DEBUG_SPLIT:
@@ -190,6 +220,9 @@ class GenieModel():
                 #print(len(q))
 
                 # d.reset()  TODO.
+                if i == 0 and len(self.tools_query) == 0:  # Remember the first query.
+                    self.last_query = q
+
                 if DEBUG_OUTPUT:
                     print("-" * 60)
 
@@ -205,8 +238,9 @@ class GenieModel():
         self.prompt = prompt
         self.stream_chunk = ""
 
-        sys_prompt = kwargs.get('sys_prompt', None)
-        self.sys_prompt = sys_prompt
+        self.sys_prompt = kwargs.get('sys_prompt', None)
+        self.tools_prompt = kwargs.get('tools_prompt', "")
+        self.tools_query = kwargs.get('tools_query', "")
 
         self.thread_cond.acquire()
         self.thread_cond.notify()
@@ -234,6 +268,15 @@ class GenieModel():
 
     def stop(self):
         self.d.Stop()
+
+    def get_last_query(self):
+        return self.last_query
+
+    def get_prompt_tool(self):
+        return self.prompt_tags_3
+
+    def get_prompt_assistant(self):
+        return self.prompt_tags_2
 
     def get_num_tokens(self, text: str) -> int:
         return self.d.TokenLength(text)
@@ -263,7 +306,8 @@ class GenieLLM(LLM):
     ready: bool = False
     model: GenieModel = None
     callback_handler: GenieLLMCallbackHandler = None
-    max_query_times:int = DOCS_MAX_QUERY_TIMES
+    max_query_times: int = DOCS_MAX_QUERY_TIMES
+    enable_thinking: bool = False
 
     def init(self, model_name, callback_handler: GenieLLMCallbackHandler = None) -> None:
         self.callback_handler = callback_handler
@@ -287,6 +331,15 @@ class GenieLLM(LLM):
     def set_stop_sequence(self, stop_sequence):
         self.model.set_stop_sequence(stop_sequence)
 
+    def get_last_query(self):
+        return self.model.get_last_query()
+
+    def get_prompt_tool(self):
+        return self.model.get_prompt_tool()
+
+    def get_prompt_assistant(self):
+        return self.model.get_prompt_assistant()
+
     def get_profile(self):
         return self.model.get_profile()
 
@@ -307,7 +360,7 @@ class GenieLLM(LLM):
         self.ready = False
         self.model_name = model_name
         #print(self.model_name)
-        self.model = GenieModel(model_name, self.max_query_times)
+        self.model = GenieModel(model_name, self.max_query_times, self.enable_thinking)
         self.ready = True
 
     def _call(
