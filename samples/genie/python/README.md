@@ -15,6 +15,7 @@ This sample helps developers use QAI AppBuilder + Python to build Genie based Op
 
 ## Features
 • Support both stream and none stream mode <br> 
+• Support tools call [*NEW!*] <br> 
 • Support switching between models <br>
 • Support to extend the use of your own model <br>
 
@@ -26,7 +27,7 @@ Refer to [python.md](../../../docs/python.md) on how to setup x64 version Python
 ### Step 2: Install basic Python dependencies for service
 Run following commands in Windows terminal:
 ```
-pip install uvicorn pydantic_settings fastapi langchain langchain_core langchain_community sse_starlette pypdf python-pptx docx2txt openai
+pip install uvicorn pydantic_settings fastapi langchain langchain_core langchain_community sse_starlette pypdf python-pptx docx2txt openai json-repair
 ```
 
 ### Step 3: Download models and tokenizer files
@@ -68,6 +69,11 @@ INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8910 (Press CTRL+C to quit)
 ```
+#### More parameter: <br>
+--all-text: Output all text includes tool calls text. Disabled by default.<br>
+--enable-thinking: Enable thinking mode. Disabled by default.<br>
+*. It is recommended to disable thinking mode when using the tools call function.<br>
+*. You can refer to [GenieAPIClientTools.py](../python/GenieAPIClientTools.py) on how to use tools call.<br>
 
 ### Step 6: Now you can access the API service
 The default IP address for this API is: 'localhost:8910', you can access this IP address in the client app.
@@ -87,6 +93,7 @@ python genie\python\GenieAPIClientImage.py --prompt "spectacular view of norther
 |  Sample   | Description  |
 |  ----  | :----    |
 | GenieAPIClient.py | A client sample code to call GenieAPIService to generate text. |
+| GenieAPIClientTools.py | A client sample code to make tool call to GenieAPIService. |
 | GenieAPIClientImage.py * | A client sample code to call GenieAPIService to generate image. |
 | GenieSample.py  | Use GenieContext to load and run the LLM model in local process.|
 

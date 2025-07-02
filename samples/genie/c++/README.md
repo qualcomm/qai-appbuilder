@@ -15,6 +15,7 @@ This sample helps developers use C++ to build Genie based Open AI compatibility 
 
 ## Features
 • Support both stream and none stream mode <br> 
+• Support tools call [*NEW!*] <br> 
 • Support switching between models <br>
 • Support to extend the use of your own model <br>
 
@@ -49,6 +50,12 @@ INFO: model <<< IBM-Granite-v3.1-8B >>> is ready!
 INFO: [TIME] | model load time >> 8103.10 ms
 INFO: Service Is Ready Now!
 ```
+
+#### More parameter: <br>
+--all_text: Output all text includes tool calls text. Disabled by default.<br>
+--enable_thinking: Enable thinking model. Disabled by default.<br>
+*. It is recommended to disable thinking mode when using the tools call function.<br>
+*. You can refer to [GenieAPIClientTools.py](../python/GenieAPIClientTools.py) on how to use tools call.<br>
 
 ### Run the service on Mobile(Snapdragon® 8 Elite Mobile device): <br>
 1. Copy the subdirectory "GenieModels" in the folder "Android" in [GenieAPIService binary](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.34.0/GenieAPIService_2.34.zip) to the root path of mobile sdcard.<br>
