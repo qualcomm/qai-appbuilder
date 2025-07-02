@@ -16,6 +16,7 @@ This sample helps developers use QAI AppBuilder + Python to build Genie based Op
 ## Features
 • Support both stream and none stream mode <br> 
 • Support tools call [*NEW!*] <br> 
+• Support enable/disable thinking mode [*NEW!*] <br> 
 • Support switching between models <br>
 • Support to extend the use of your own model <br>
 
