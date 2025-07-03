@@ -204,10 +204,9 @@ class GenieModel():
                 else:
                     q = self.tools_query
 
-
-            if self.is_thinking_model(self.model_name):
-                if not self.enable_thinking: 
-                    q += "<think>\n\n</think>\n\n"
+                if self.is_thinking_model(self.model_name):
+                    if not self.enable_thinking: 
+                        q += "<think>\n\n</think>\n\n"
 
                 if DEBUG_PROMPT:
                     print("\n")
