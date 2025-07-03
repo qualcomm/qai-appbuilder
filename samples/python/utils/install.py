@@ -34,6 +34,8 @@ HUB_ID_Q="a916bc04400e033f60fdd73c615e5780e2ba206a"
 QAI_HUB_CONFIG = os.path.join(Path.home(), ".qai_hub", "client.ini")
 QAI_HUB_CONFIG_BACKUP = os.path.join(Path.home(), ".qai_hub", "client.ini.bk")
 
+WGET_URL = "https://eternallybored.org/misc/wget/releases/wget-1.21.4-winarm64.zip"
+ARIA2C_URL = "https://github.com/aria2/aria2/releases/download/release-1.36.0/aria2-1.36.0-win-64bit-build1.zip"
 
 def setup_qai_hub(hub_id):
     if os.path.isfile(QAI_HUB_CONFIG):
@@ -226,10 +228,8 @@ def download_url_wget(url, filepath, filesize=None, desc=None, fail=None):
         if not os.path.exists(wget_exe_path):
             wget_exe_path = "..\\python\\tools\\wget\\wget.exe"
 
-        wget_url = "https://eternallybored.org/misc/wget/releases/wget-1.21.4-winarm64.zip"
-
         if not os.path.exists(wget_exe_path):
-            print(f"wget.exe not found. Please download it manually from '{wget_url}' and unzip it to '{wget_exe_path}'")
+            print(f"wget.exe not found. Please download it manually from '{WGET_URL}' and unzip it to '{wget_exe_path}'")
             return
 
         command = f'"{wget_exe_path}" --no-check-certificate -q --show-progress --continue -P "{path}" -O "{filepath}" {url}'
@@ -319,27 +319,47 @@ def run_uninstall_pip(command, desc=None, live=False):
 
 def install_tools():
     tool_path = "tools"
+
+    os.makedirs(tool_path, exist_ok=True)
+
+    # install wget.exe
     wget_path = tool_path + "\\wget"
     wget_zip_path = tool_path + "\\wget.zip"
     wget_exe_path = wget_path + "\\wget.exe"
+    if not os.path.exists(wget_exe_path):
+        fail = f"Failed to download tool from '{WGET_URL}'. Please download it manually and unzip it to '{tool_path}'. " + TEXT_RUN_SCRIPT_AGAIN
+        desc = f"Downloading '{WGET_URL}' to {wget_path}"
+        ret = download_url_pywget(WGET_URL, wget_zip_path, desc=desc, fail=fail)
+        if not ret:
+            exit()
+        print(f"Install 'wget.exe' to {wget_exe_path}")
+        with zipfile.ZipFile(wget_zip_path, 'r') as zip_ref:
+            zip_ref.extractall(wget_path)
+            print()
 
-    if os.path.exists(wget_exe_path):
-        return
+    # install aria2c.exe
+    aria2c_path = tool_path + "\\aria2c"
+    aria2c_zip_path = tool_path + "\\aria2c.zip"
+    aria2c_exe_path = aria2c_path + "\\aria2c.exe"
+    if not os.path.exists(aria2c_exe_path):
+        fail = f"Failed to download tool from '{ARIA2C_URL}'. Please download it manually and unzip it to '{tool_path}'. " + TEXT_RUN_SCRIPT_AGAIN
+        desc = f"Downloading '{ARIA2C_URL}' to {aria2c_path}"
+        ret = download_url_pywget(ARIA2C_URL, aria2c_zip_path, desc=desc, fail=fail)
+        if not ret:
+            exit()
+        print(f"Install 'aria2c.exe' to {aria2c_exe_path}")
+        with zipfile.ZipFile(aria2c_zip_path, 'r') as zip_ref:
+            zip_ref.extractall(aria2c_path)
+            print()
 
-    url = "https://eternallybored.org/misc/wget/releases/wget-1.21.4-winarm64.zip"
-    fail = f"Failed to download tool from '{url}'. Please download it manually and unzip it to '{tool_path}'. " + TEXT_RUN_SCRIPT_AGAIN
-    desc = f"Downloading '{url}' to {wget_path}"
-
-    os.makedirs(tool_path, exist_ok=True)
-    
-    ret = download_url_pywget(url, wget_zip_path, desc=desc, fail=fail)
-    if not ret:
-        exit()
-    
-    print(f"Install 'wget.exe' to {wget_exe_path}")
-    with zipfile.ZipFile(wget_zip_path, 'r') as zip_ref:
-        zip_ref.extractall(wget_path)
-        print()
+        # Move all files from subdirectories to aria2c_path.
+        for root, dirs, files in os.walk(aria2c_path):
+            if root == aria2c_path:
+                continue
+            for file in files:
+                src = os.path.join(root, file)
+                dst = os.path.join(aria2c_path, file)
+                shutil.move(src, dst)
 
 
 def install_clean(directory, zip_name):
