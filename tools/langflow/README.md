@@ -29,56 +29,8 @@ Download and install the appropriate version of PowerShell 7 for your system:
 - [PowerShell 7.5.1 for ARM64](https://github.com/PowerShell/PowerShell/releases/download/v7.5.1/PowerShell-7.5.1-win-arm64.msi) 
 
 
-### 2. Download the Repository  
-#### Option 1: Clone via Git  
-1. Install Git: [Download Git for Windows](https://git-scm.com/downloads/win)  
-2. Open a Git Bash terminal and run:  
-   ```powershell  
-   git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
-   ```  
-
-#### Option 2: Download ZIP  
-1. Download the ZIP file: [ai-engine-direct-helper-main.zip](https://github.com/quic/ai-engine-direct-helper/archive/refs/heads/main.zip)  
-2. Extract the contents to a local directory.  
-
-### 3. Run Langflow package setup script
-**Note that the following operations in the Powershell terminal must be performed as Administrator; otherwise, it will lead to the failure of the process.**
-
-Run PowerShell 7 as **Administrator**. Navigate to the following directory inside the downloaded project:
-```powershell
-cd <path_to_repo>/tools/langflow/scripts  
-
-.\setup.ps1
-```  
-- The installation process may take up to 30 minutes.  
-- As it will take a relatively long time to download the LLM model during the installation process, please avoid all network fluctuations.
-- Avoid using the system during this time. 
-
-**Complete Indicator**: 
-If there are **no errors during the script operation** and the following words are displayed:
-```
-Install successfully. Press any key to exit...  
-```
-Then it indicates that the installation is complete.
-
-## Starting the Service
-
-### Option 1: Command execution 
-
-In {your_project_path}\tools\langflow\scripts directory, run the startup script:
-
-```powershell
-.\start_langflow.ps1
-```
-### Option 2: Shortcut
-During the above Setup process, a shortcut pointing to the start langflow script will be created on the desktop:
-```
-Double-click the shortcut named "start_langflow" on the desktop.
-```
-
-- Wait a few minutes for all services to start.  
-- A browser window should open automatically.  
-- If it doesn’t, manually open your browser and go to: [http://127.0.0.1:8979/](http://127.0.0.1:8979/)  
+### 2.  Quick Installation
+For a quick installation of the langflow environment, please refer to: [launcher-README.md](https://github.com/quic/ai-engine-direct-helper/blob/main/tools/launcher/README.md)
 
 ## Using the Flows  
 
@@ -144,43 +96,3 @@ Once uploaded, all reference flows will be imported and available for use in you
 -  Enter your message in the text input box and click **`Send`**.
 
 The flow will invoke a local large language model to generate a response based on your input, enabling interactive chat functionality.
-
-
-## Common Issues and Solutions
-
-### Error: "Get-Command : The term 'python' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the spelling of the name, or if a path was included, verify that the path is correct and try again."
-
-**Cause**: This error typically occurs due to a conflict between different versions of Python installed on your system.
-
-**Solution**:
-
-1. Uninstall the old version of Python from your system.
-2. Re-run the `setup.ps1` script to install the correct version of Python.
-
-### Error: "Failed to spawn: `langflow` Caused by: program not found"
-
-**Cause**: This error indicates that Langflow was not installed successfully.
-
-**Solution**:
-
-1. Run the `setup.ps1` installation script again to ensure Langflow is properly installed.
-
-### Error: "File … cannot be loaded. The file … is not digitally signed. You cannot run this script on the current system."
-
-**Cause**: PowerShell execution policy restrictions.
-
-**Solution**:
-
-1. Execute `Get-ExecutionPolicy` to see if the output is Restricted (default, prohibiting the running of scripts) or AllSigned (only allowing the running of signed scripts).
-2. If you want to execute the following command, change the execution policy to RemoteSigned:  `Set-ExecutionPolicy RemoteSigned -Scope LocalMachine` .
-3. Execute `Set-ExecutionPolicy Bypass -Scope Process` can temporarily bypass the policy.
-
-### Known Issue: "The problems existing during the script running process fall within the normal category"
-
-**Explanation**: Defects within the normal range, but they do not affect the functional use
-
-**1**. Run the `setup.ps1` there are phenomena such as output stacking, no need to solve;
-
-**2**. Run the `setup.ps1` there are the command line gets stuck or the download and installation fail due to network issues, the script needs to be re-run；
-
-**3**. The `langflow web` pages can be opened and used normally during run the `start_langflow.ps1` , but there are many error reports in the terminal, no need to solve.
