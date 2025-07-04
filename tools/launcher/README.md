@@ -1,4 +1,4 @@
-# Python(x64)
+# QAI AppBuilder Launcher
 
 ## Disclaimer
 This software is provided “as is,” without any express or implied warranties. The authors and contributors shall not be held liable for any damages arising from its use. The code may be incomplete or insufficiently tested. Users are solely responsible for evaluating its suitability and assume all associated risks. <br>
