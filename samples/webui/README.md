@@ -14,6 +14,7 @@ Note: Contributions are welcome. Please ensure thorough testing before deploying
 These samples helps developers use QAI AppBuilder + Python Gradio extension to build *WebUI* AI apps on Windows on Snapdragon (WoS) platforms.
 
 ## Setting Up Environment For WebUI Apps:
+You can also run the batch file from [QAI AppBuilder Launcher](tools/launcher/) to setup the environment automatically.
 
 ### Step 1: Install basic dependencies
 Refer to [python.md](../../docs/python.md) on how to setup x64 version Python environment.

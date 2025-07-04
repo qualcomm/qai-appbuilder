@@ -207,6 +207,10 @@ def predict(chatbot, max_length, temp, top_k, top_p):
         sumllm = None
 
     elif FUNC_LIST[_func_mode] == "🎨 图像生成":
+        if not stable_diffusion.model_exist():
+            gr.Warning("请先下载图像生成模型！参考：<a href='https://github.com/quic/ai-engine-direct-helper/blob/main/samples/python/README.md#prepare-stable-diffusion-models-manually'>samples/python/README.md</a>", duration=10)
+            return reset_state()
+
         image_data = {"path": ""}
 
         def callback(result):

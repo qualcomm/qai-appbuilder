@@ -38,4 +38,4 @@ start /wait vc_redist.x64.exe /quiet /norestart
 del vc_redist.x64.exe
 
 :InstallQAI
-pwsh -ExecutionPolicy Bypass -File "%currentDir%\utils\Setup_QAI_AppBuilder.ps1" "%currentDir%"
+pwsh -ExecutionPolicy Bypass -File "%currentDir%\utils\Install_QAI_AppBuilder.ps1" "%currentDir%"

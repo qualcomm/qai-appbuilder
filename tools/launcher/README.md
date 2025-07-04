@@ -24,9 +24,9 @@ There are two ways to get our Windows batch scripts:
 
 |  Script   | Command  |
 |  ----  | :----    |
-| 1.Setup_QAI_AppBuilder.bat | Setup QAI AppBuilder basic environment |
+| 1.Install_QAI_AppBuilder.bat | Setup QAI AppBuilder basic environment |
 | 2.Install_LLM_Models.bat | Download and install [IBM-Granite-v3.1-8B-Instruct](https://aihub.qualcomm.com/compute/models/ibm_granite_v3_1_8b_instruct) LLM model automatically. You can replace this model with your LLM model. You can get detailed steps [here](../../samples/genie/python/README.md#setup-custom-model). |
-| 3.Start_WebUI.bat | The launcher for 3 WebUI applications. |
+| 3.Start_WebUI.bat | The launcher for 2 WebUI applications. |
 | 4.Start_GenieAPIService.bat | Start [GenieAPIService](../../samples/genie/c++/). This is OpenAI Compatible API Service (C++ version).|
-| 5.Install_LangFlow.bat | Install LangFlow. You can get more information about LangFlow [here](../langflow/).|
+| 5.Install_LangFlow.bat | Install LangFlow conponents. You can get more information about LangFlow [here](../langflow/).|
 | 6.Start_LangFlow.bat | Start LangFlow service. |

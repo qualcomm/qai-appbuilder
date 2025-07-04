@@ -311,6 +311,10 @@ def modelExecuteCallback(result):
         # print("modelExecuteCallback result: " + result)
 
 ####################################################################
+def model_exist():
+    if os.path.exists(text_encoder_model_path) and os.path.exists(unet_model_path) and os.path.exists(vae_decoder_model_path):
+        return True
+    return False
 
 def model_download():
     ret = True

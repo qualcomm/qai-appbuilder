@@ -23,9 +23,9 @@ Set-Location $scriptPath\env
 
 Write-Host "Please choose which WebUI to launch:"
 Write-Host "1. Start ImageRepairApp"
-Write-Host "2. Start StableDiffusionApp"
-Write-Host "3. Start GenieWebUI"
-$choice = Read-Host "Enter the number (1-3) corresponding to your choice"
+# Write-Host "2. Start StableDiffusionApp"
+Write-Host "2. Start GenieWebUI"
+$choice = Read-Host "Enter the number (1-2) corresponding to your choice"
 
 switch ($choice) {
   "1" {
@@ -33,10 +33,6 @@ switch ($choice) {
     pixi run webui-imagerepair
   }
   "2" {
-    Write-Host "Launching StableDiffusionApp ..."
-    pixi run webui-stable-diffusion
-  }
-  "3" {
     Write-Host "Launching GenieWebUI ..."
     pixi run webui-genie
   }
