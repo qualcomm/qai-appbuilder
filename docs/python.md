@@ -6,7 +6,7 @@ Note: Contributions are welcome. Please ensure thorough testing before deploying
 
 ## Introduction 
 This guide helps developers setup Python environment for using QAI AppBuilder on Windows on Snapdragon (WoS) platforms. <br>
-You can also run the batch file from [QAI AppBuilder Launcher](tools/launcher/) to setup the environment automatically.
+You can also run the batch file from [QAI AppBuilder Launcher](../tools/launcher/) to setup the environment automatically.
 
 ## Setting Up QAI AppBuilder Python Environment:
 

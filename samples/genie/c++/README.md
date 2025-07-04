@@ -27,7 +27,7 @@ This is an OpenAI compatible API service that can be used to access the Genie AI
 This service can be used on multiple platforms such as Android, Windows, Linux, etc.
 
 ### Run the service on WoS: 
-You can also run the batch file from [QAI AppBuilder Launcher](tools/launcher/) to setup the environment automatically. <br>
+You can also run the batch file from [QAI AppBuilder Launcher](../../../tools/launcher/) to setup the environment automatically. <br>
 1. [Setup LLM models](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/python#step-3-download-models-and-tokenizer-files) first before running this service. <br>
 2. Download [GenieAPIService](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.34.0/GenieAPIService_2.34.zip) and copy the subdirectory "GenieAPIService" to path "ai-engine-direct-helper\samples".<br>
 3. Run the following commands to launch the Service (Do *not* close this terminal window while service is running). 
