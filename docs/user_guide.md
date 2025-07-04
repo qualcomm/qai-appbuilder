@@ -6,6 +6,13 @@ Note: Contributions are welcome. Please ensure thorough testing before deploying
 
 ## Environment Setup
 
+### Qualcomm® AI Runtime SDK
+
+Qualcomm® AI Runtime SDK is designed to provide unified, low-level APIs for AI development. It can be downloaded from Qualcomm software center:<br>
+https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK <br>
+Or from QPM [this option expected to be deprecated soon]<br>
+https://qpm.qualcomm.com/#/main/tools/details/Qualcomm_AI_Runtime_SDK
+
 ### 1. Libraries from Qualcomm® AI Runtime SDK:
 
 <b>We need below libraries from Qualcomm® AI Runtime SDK for using AppBuilder on Snapdragon X Elite(Windows on Snapdragon device).</b><br>
@@ -43,7 +50,7 @@ We can copy these libraries to one folder. E.g.: ```C:\<Project Name>\qnn\``` <b
 * [python.md](python.md) can help setup the x64 Python environment automatically.
 * In WoS platform, ARM64 Python has better performance, but some Python extensions such as 'PyTorch' don't work for ARM64 Python today. For detailed help information on how to setup environment for using ARM64 Python, you can refer to [python_arm64.md](python_arm64.md)
 
-## API from AppBuilder Python binding extension for Python projects.<br>
+### 2. API from AppBuilder Python binding extension for Python projects.<br>
 There're several Python classes from this extension:
 - QNNContext - The context of QNN model, used to initialize the QNN model, run the inference and destroy the model resource.
 - QNNContextProc - It's similar with QNNContext but support load the model into a separate processes. [*Depress*]
@@ -93,7 +100,7 @@ PerfProfile.RelPerfProfileGlobal()
 del(text_encoder)
 ```
 
-## API from 'libappbuilder.dll' for C++ projects.
+### 3. API from 'libappbuilder.dll' for C++ projects.
 
 ##### bool LibAppBuilder::ModelInitialize(...) <br>
 *std::string model_name*: Model name such as "unet", "text_encoder", "controlnet_canny". Model name must be unique for different model files. <br>

@@ -1,11 +1,17 @@
-# QAI AppBuilder Launcher
+<br>
+
+<div align="center">
+  <h3>Setup the QAI AppBuilder runtime environment fast and easily.</h3>
+  <p><i> SIMPLE | EASY | FAST </i></p>
+</div>
+<br>
 
 ## Disclaimer
 This software is provided “as is,” without any express or implied warranties. The authors and contributors shall not be held liable for any damages arising from its use. The code may be incomplete or insufficiently tested. Users are solely responsible for evaluating its suitability and assume all associated risks. <br>
 Note: Contributions are welcome. Please ensure thorough testing before deploying in critical systems.
 
-## Introduction 
-This guide introduces how to install the QAI AppBuilder environment fast and easily through our Windows batch scripts.
+## QAI AppBuilder Launcher 
+This guide introduces how to setup the QAI AppBuilder runtime environment fast and easily through our Windows batch scripts.
 
 ## Usage
 ### 1. Download Windows batch scripts
