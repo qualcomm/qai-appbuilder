@@ -17,6 +17,7 @@ This sample helps developers use C++ to build Genie based Open AI compatibility 
 • Support both stream and none stream mode <br> 
 • Support tools call [*NEW!*] <br> 
 • Support enable/disable thinking mode [*NEW!*] <br> 
+• Support text splitter feature [*NEW!*] <br> 
 • Support switching between models <br>
 • Support to extend the use of your own model <br>
 

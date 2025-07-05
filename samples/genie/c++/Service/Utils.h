@@ -39,7 +39,7 @@ const std::string BLANK_STRING = std::string("");
 const int CONTEXT_SIZE = 4096;
 const int DOCS_MAX_SIZE = CONTEXT_SIZE - 1024;
 const int DOCS_MAX_QUERY_TIMES = 3;
-const std::vector<std::string>& SEPARATORS = {"\n\n", "\n", "。", "！", "？", "，", ".", "?", "!", " ", ""};
+const std::vector<std::string>& SEPARATORS = {"\n\n", "\n", "。", "！", "？", "，", ".", "?", "!", ",", " ", ""};
 
 const std::string FN_FLAG = "<";
 const std::string FN_NAME = "<tool_call>";

@@ -12,12 +12,10 @@
 #include <string>
 #include <csignal>
 
-// TODO: support run 'Query' more than 3 times if input question is too long.
 
 #define DEBUG_PROMPT 1
 #define DEBUG_OUTPUT 1
 #define JSON_RESPONSE 1  // TODO: remove this in the future.
-
 
 static std::string s_cmd_model_name = "";
 static std::string s_cmd_config_file = "";
@@ -203,6 +201,42 @@ json get_model_list() {
   return jsonData;
 }
 
+json split_text(const std::string& text, const int max_length, const std::vector<std::string>& separators) {
+  auto length_function = [](const std::string& s) {
+    return s_genie_context->TokenLength(s);
+  };
+
+  std::vector<std::string> text_separators = separators;
+  int text_max_length = max_length;
+
+  if (text_separators.empty()) {
+    text_separators = SEPARATORS;
+  }
+
+  if (text_max_length == 0) {
+    text_max_length = DOCS_MAX_SIZE;
+  }
+
+  std::vector<std::string> text_list;
+  RecursiveCharacterTextSplitter splitter(text_separators, true, text_max_length, length_function);
+  text_list = splitter.split_text(text);
+
+  json jsonData;
+  std::vector<json> content;
+
+  for (const auto& item : text_list) {
+    json item_json;
+    item_json["text"] = item;
+    item_json["length"] = s_genie_context->TokenLength(item);
+    content.push_back(item_json);
+  }
+
+  jsonData["content"] = content;
+  jsonData["object"] = "list";
+
+  return jsonData;
+}
+
 bool process_arguments(int argc, char* argv[]) {
   cli::Parser parser(argc, argv);
 
@@ -330,6 +364,7 @@ bool load_model(std::string config_file, std::string model_name) {
       std::cerr << "ERR:  Can't open file " + prompt_path << std::endl;
       return false;
   }
+
   std::string line1, line2;
   std::getline(prompt_file, line1);
   std::getline(prompt_file, line2);
@@ -750,6 +785,24 @@ int run_service(int argc, char* argv[]) {
     response_ok(res, models);
   };
 
+  const auto handle_text_splitters = [&](const httplib::Request & req, httplib::Response & res) {
+    std::string body = req.body;
+
+    json data = json::parse(body, nullptr, false);
+    if (!data.is_object()) {
+        json error_data {{"message", "Invalid JSON."}};
+        response_error(res, error_data);
+        return;
+    }
+
+    std::string text = data.value("text", "");
+    int max_length = data.value("max_length", 0);
+    std::vector<std::string> separators = data.value("separators", std::vector<std::string>{});
+    json result = split_text(text, max_length, separators);
+
+    response_ok(res, result);
+  };
+
   // Register server middlewares
   svr.set_pre_routing_handler([](const httplib::Request & req, httplib::Response & res) {
     res.set_header("Access-Control-Allow-Origin", req.get_header_value("Origin"));
@@ -777,6 +830,8 @@ int run_service(int argc, char* argv[]) {
   svr.Post("/v1/chat/completions", handle_chat_completions);
   svr.Get ("/models",              handle_models);
   svr.Get ("/v1/models",           handle_models);
+  svr.Post("/textsplitter",        handle_text_splitters);
+  svr.Post("/v1/textsplitter",     handle_text_splitters);
 
   std::cout << YELLOW << "INFO: Service Is Ready Now!" << RESET << std::endl << std::endl;
 
