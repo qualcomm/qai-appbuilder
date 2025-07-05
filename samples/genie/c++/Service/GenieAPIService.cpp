@@ -167,19 +167,30 @@ json get_model_list() {
   if (fs::exists(s_model_root) && fs::is_directory(s_model_root)) {
     for (const auto& entry : fs::directory_iterator(s_model_root)) {
         if (entry.is_directory()) {
-            std::string model_name = entry.path().filename().string();
-            
-            if (false == list_inited) {
-              s_model_list.push_back(model_name);
+            bool has_bin = false, has_tokenizer = false, has_prompt = false;
+            for (const auto& file : fs::directory_iterator(entry.path())) {
+                auto filename = file.path().filename().string();
+                if (file.is_regular_file()) {
+                    if (filename == "tokenizer.json") has_tokenizer = true;
+                    else if (filename == "prompt.conf") has_prompt = true;
+                    else if (file.path().extension() == ".bin") has_bin = true;
+                }
             }
 
-            json model;
-            model["id"] = model_name;
-            model["object"] = "model";
-            model["created"] = timer.GetSystemTime();
-            model["owned_by"] = "";
-            model["permission"] = json::array();
-            models.push_back(model);  
+            if (has_bin && has_tokenizer && has_prompt) {
+                std::string model_name = entry.path().filename().string();
+                if (false == list_inited) {
+                  s_model_list.push_back(model_name);
+                }
+
+                json model;
+                model["id"] = model_name;
+                model["object"] = "model";
+                model["created"] = timer.GetSystemTime();
+                model["owned_by"] = "owner";
+                model["permission"] = json::array();
+                models.push_back(model);  
+            }
         }
     }
   }
@@ -199,7 +210,7 @@ bool process_arguments(int argc, char* argv[]) {
   parser.set_optional<std::string>("m", "model_name", "", "Name of the model to use.");
   parser.set_optional<bool>("l", "load_model", false, "Load the model.");
   parser.set_optional<bool>("a", "all_text", false, "Output all text includes tool calls text.");
-  parser.set_optional<bool>("t", "enable_thinking", false, "Enable thinking.");
+  parser.set_optional<bool>("t", "enable_thinking", false, "Enable thinking mode.");
 
   parser.run_and_exit_if_error();
 

@@ -19,9 +19,9 @@ Write-Host "Please keep this window open. It will open the browser with  http://
 $process = Get-WmiObject -Class Win32_Process | Where-Object { $_.ProcessName -like "*Genie*.exe" }
 
 if ($process) {
-    Write-Host "C++ Genie service ready"
+    Write-Host "GenieAPIService is ready now."
 } else {
-    Write-Host "can not find C++ Genie service. Please run Start_GenieAPIService.bat to start genie serve!"
+    Write-Host "Can not find GenieAPIService. Please run [4.Start_GenieAPIService.bat] to start GenieAPIService before launch LangFlow!"
     Write-Host "Press any key to exit..."
     [void][System.Console]::ReadKey($true)
     exit 1
@@ -42,7 +42,7 @@ Start-Job -ScriptBlock {
                 $socket = New-Object System.Net.Sockets.TcpClient
                 $socket.Connect("127.0.0.1", 8979)
                 if (-not $urlOpened) {
-                    Write-Host "Server is ready. Opening the browser..."
+                    Write-Host "LangFlow is ready now. Opening the browser..."
                     Start-Process -FilePath "http://127.0.0.1:8979"
                     $urlOpened = $true
                     return
@@ -60,7 +60,7 @@ Start-Job -ScriptBlock {
     }
 
     if ($attempt -eq $maxAttempts) {
-        Write-Host "Failed to detect the server readiness after $maxAttempts attempts."
+        Write-Host "Failed to detect the service readiness after $maxAttempts attempts."
     }
 }
 

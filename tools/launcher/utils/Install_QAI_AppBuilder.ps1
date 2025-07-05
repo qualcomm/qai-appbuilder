@@ -70,7 +70,10 @@ if (-not (Test-Path $repoDir)) {
     Write-Host "Cloning ai-engine-direct-helper repository..."
     & $gitCommand.Path clone https://github.com/quic/ai-engine-direct-helper.git --depth=1
 } else {
-    Write-Host "ai-engine-direct-helper repository already exists at $repoDir."
+    Write-Host "ai-engine-direct-helper repository already exists at $repoDir. Pulling latest changes..."
+    Push-Location $repoDir
+    & $gitCommand.Path pull
+    Pop-Location
 }
 
 Write-Host "Setup Python environment..."

@@ -15,6 +15,7 @@ import uuid
 import uvicorn
 import base64
 import numpy as np
+import glob
 from contextlib import asynccontextmanager
 from typing import Dict, List, Literal, Optional, Union, Any, TypedDict
 from typing_extensions import TypeAlias
@@ -901,7 +902,16 @@ def model_load(model_name):
     
     if _model_list is None:
         model_root = APP_PATH + "models"
-        _model_list = [f for f in os.listdir(model_root) if os.path.isdir(os.path.join(model_root, f))]
+
+        _model_list = []
+        for f in os.listdir(model_root):
+            dir_path = os.path.join(model_root, f)
+            if os.path.isdir(dir_path):
+                bin_files = glob.glob(os.path.join(dir_path, "*.bin"))
+                has_tokenizer = os.path.isfile(os.path.join(dir_path, "tokenizer.json"))
+                has_prompt = os.path.isfile(os.path.join(dir_path, "prompt.conf"))
+                if bin_files and has_tokenizer and has_prompt:
+                    _model_list.append(f)
 
     for model in _model_list:
         if model_name.lower() in model.lower():
