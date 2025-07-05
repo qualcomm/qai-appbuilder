@@ -307,8 +307,6 @@ def reset_state():
 
 def main():
     model_root = APP_PATH + "models"
-    model_list = [f for f in os.listdir(model_root) if os.path.isdir(os.path.join(model_root, f))]
-    model_list.insert(0, "")
 
     model_list = []
     for f in os.listdir(model_root):
@@ -319,6 +317,7 @@ def main():
             has_prompt = os.path.isfile(os.path.join(dir_path, "prompt.conf"))
             if bin_files and has_tokenizer and has_prompt:
                 model_list.append(f)
+    model_list.insert(0, "")
 
     with gr.Blocks(css=css, theme='davehornik/Tealy', fill_width=True, fill_height=True) as demo:
         demo.title = "Genie App"
