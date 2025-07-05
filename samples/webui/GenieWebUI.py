@@ -8,6 +8,7 @@ import os
 import threading
 import shutil
 import re
+import glob
 import numpy as np
 import gradio as gr
 from gradio import ChatMessage
@@ -308,6 +309,16 @@ def main():
     model_root = APP_PATH + "models"
     model_list = [f for f in os.listdir(model_root) if os.path.isdir(os.path.join(model_root, f))]
     model_list.insert(0, "")
+
+    model_list = []
+    for f in os.listdir(model_root):
+        dir_path = os.path.join(model_root, f)
+        if os.path.isdir(dir_path):
+            bin_files = glob.glob(os.path.join(dir_path, "*.bin"))
+            has_tokenizer = os.path.isfile(os.path.join(dir_path, "tokenizer.json"))
+            has_prompt = os.path.isfile(os.path.join(dir_path, "prompt.conf"))
+            if bin_files and has_tokenizer and has_prompt:
+                model_list.append(f)
 
     with gr.Blocks(css=css, theme='davehornik/Tealy', fill_width=True, fill_height=True) as demo:
         demo.title = "Genie App"
