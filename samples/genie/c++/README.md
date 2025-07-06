@@ -63,6 +63,10 @@ INFO: Service Is Ready Now!
 GenieAPIService\GenieAPIService.exe -c "genie\python\models\Qwen3.0-8B-v31\config.json" -l --all_text --enable_thinking
 ```
 
+#### Text Splitter
+This function can divide a long text into multiple paragraphs according to the priority order of the specified delimiter and the maximum length of each paragraph. Length is counted by token number instead of text length. You can also use this function to calculate the token number of text. <br>
+You can get the sample code on how to use Text Splitter [here](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/genie/python/GenieAPIClient.py#L26).
+
 ### Run the service on Mobile(Snapdragon® 8 Elite Mobile device): <br>
 1. Copy the subdirectory "GenieModels" in the folder "Android" in [GenieAPIService binary](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.34.0/GenieAPIService_2.34.zip) to the root path of mobile sdcard.<br>
 2. Copy your QWen QNN model & tokenizer.json to "/sdcard/GenieModels/qwen2.0_7b"<br>
