@@ -121,3 +121,6 @@ else:
 ```
 python GenieAPIClient.py --prompt "How to fish?" --stream
 ```
+
+### More Sample Code
+You can find more client sample code [here](../python/README.md#sample-list).
