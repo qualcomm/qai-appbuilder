@@ -4,17 +4,14 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
 
+param (
+    [string]$scriptPath
+)
+
 $process= Get-Process | Where-Object { $_.ProcessName -like "*langflow*"}
 if($process){
-    #Write-Output "Found langflow process and will it."
-
     Stop-Process -Id $process.id -Force
-    #Write-Output "Langflow process was killed."
-} else {
-    #Write-Output "Can not find langflow process"
 }
-
-Write-Host "Please keep this window open. It will open the browser with  http://127.0.0.1:8979 automatically ...."
 
 $process = Get-WmiObject -Class Win32_Process | Where-Object { $_.ProcessName -like "*Genie*.exe" }
 
@@ -64,4 +61,15 @@ Start-Job -ScriptBlock {
     }
 }
 
-langflow run --host 0.0.0.0 --port 8979
+#Install Pixi
+$pixiCommand = Get-Command pixi -ErrorAction SilentlyContinue
+if (-not $pixiCommand) {
+    Write-Host "Installing Pixi..."
+    irm -useb https://pixi.sh/install.ps1 | iex
+} else {
+    Write-Host "Pixi is already installed."
+}
+
+Set-Location $scriptPath\env
+& $pixiCommand.Path run langflow run --host 0.0.0.0 --port 8979
+Set-Location $scriptPath

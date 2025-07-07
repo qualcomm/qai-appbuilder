@@ -6,4 +6,4 @@
 @echo off
 set "currentDir=%CD%"
 
-pwsh -ExecutionPolicy Bypass -File "%currentDir%\utils\Start_WebUI.ps1" "%currentDir%"
+powershell -ExecutionPolicy Bypass -File "%currentDir%\utils\Start_WebUI.ps1" "%currentDir%"

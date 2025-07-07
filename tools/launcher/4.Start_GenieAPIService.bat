@@ -37,4 +37,3 @@ echo Start Genie Service...
     echo Genie API Service Started.
 
 echo Start C++ Genie Service Successfully!
-

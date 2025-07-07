@@ -82,23 +82,6 @@ def download_file_with_progress(url, dest_path, proxy=None):
     print("wget failed, trying requests...")
     return download_with_requests(url, dest_path, proxy)
 
-def update_config_json(config_path, model_dir):
-    try:
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-        if isinstance(config.get('model_files'), list):
-            config['model_files'] = [f for f in os.listdir(model_dir) if f.endswith(".serialized.bin")]
-        if 'tokenizer' in config:
-            config['tokenizer'] = "tokenizer.json"
-        if 'htp_backend_ext_config' in config:
-            config['htp_backend_ext_config'] = "htp_backend_ext_config.json"
-        with open(config_path, 'w', encoding='utf-8') as f:
-            json.dump(config, f, indent=2)
-        print("Updated config.json successfully.")
-    except Exception as e:
-        print(f"Failed to update config.json: {e}")
-        sys.exit(1)
-
 def main():
     ensure_windows_tools()
     base_dir = os.path.join("ai-engine-direct-helper", "samples", "genie", "python", "models")
@@ -116,7 +99,7 @@ def main():
             print("Model zip download failed.")
             sys.exit(1)
 
-        print("Extracting .serialized.bin files...")
+        print("Extracting model bin files...")
         try:
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 for file in zip_ref.namelist():
@@ -131,13 +114,6 @@ def main():
         if not download_file_with_progress(urls["tokenizer_url"], tokenizer_path, proxy):
             print("Tokenizer download failed.")
             sys.exit(1)
-
-        # config_path = os.path.join(model_dir, "config.json")
-        # if os.path.exists(config_path):
-            #print("Updating config.json...")
-            # update_config_json(config_path, model_dir)
-
-    print("\nAll models processed successfully.")
 
 if __name__ == "__main__":
     main()

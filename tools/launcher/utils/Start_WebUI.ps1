@@ -16,25 +16,20 @@ if (-not $pixiCommand) {
   exit 1
 }
 
-#Get the environment 
-$userProfilePath = $env:USERPROFILE
-
 Set-Location $scriptPath\env
-
 Write-Host "Please choose which WebUI to launch:"
 Write-Host "1. Start ImageRepairApp"
-# Write-Host "2. Start StableDiffusionApp"
 Write-Host "2. Start GenieWebUI"
 $choice = Read-Host "Enter the number (1-2) corresponding to your choice"
 
 switch ($choice) {
   "1" {
     Write-Host "Launching ImageRepairApp ..."
-    pixi run webui-imagerepair
+    & $pixiCommand run webui-imagerepair
   }
   "2" {
     Write-Host "Launching GenieWebUI ..."
-    pixi run webui-genie
+    & $pixiCommand run webui-genie
   }
   Default {
     Write-Host "Unaccepted option. Please run the script again and choose a valid option."

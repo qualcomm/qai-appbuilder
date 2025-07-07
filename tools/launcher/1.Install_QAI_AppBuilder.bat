@@ -6,26 +6,15 @@
 @echo off
 set "currentDir=%CD%"
 
-@REM where pwsh >nul 2>&1
-@REM if errorlevel 1 (
-@REM 	echo Error: 'pwsh' (PowerShell Core) is not installed or not in PATH.
-@REM 	exit /b 1
-@REM )
-
-REM Check if PowerShell is installed
-
-pwsh --version >nul 2>&1
-IF %ERRORLEVEL% EQU 0 (
-    echo PowerShell is already installed. Skipping installation.
-) ELSE (
-    echo PowerShell is not installed. Installing PowerShell...
-    winget install --id Microsoft.PowerShell
+if exist "tools" (
+    echo tools directory already exists
+) else (
+    echo Creating tools directory...
+    mkdir tools\Git
 )
 
-set PATH=%PATH%;"C:\Program Files\PowerShell\7\"
-
 :CheckVC
-REM Step 3: Install Visual C++ Redistributable
+REM Install Visual C++ Redistributable
 echo Checking Visual C++ Redistributable...
 reg query "HKLM\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" >nul 2>&1
 if %errorlevel%==0 (
@@ -38,4 +27,4 @@ start /wait vc_redist.x64.exe /quiet /norestart
 del vc_redist.x64.exe
 
 :InstallQAI
-pwsh -ExecutionPolicy Bypass -File "%currentDir%\utils\Install_QAI_AppBuilder.ps1" "%currentDir%"
+powershell -ExecutionPolicy Bypass -File "%currentDir%\utils\Install_QAI_AppBuilder.ps1" "%currentDir%"

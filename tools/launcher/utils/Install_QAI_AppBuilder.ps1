@@ -7,27 +7,6 @@ param (
     [string]$scriptPath
 )
 
-# Get current PowerShell version
-$version = $PSVersionTable.PSVersion
-
-# Check if the major version is less than 7
-if ($version.Major -lt 7) {
-    Write-Host "Current PowerShell version $version does not meet the requirement." -ForegroundColor Red
-    Write-Host "Please install PowerShell 7 according to the README document and try again." -ForegroundColor Red
-    Write-Host "Press any key to exit..."
-    [void][System.Console]::ReadKey($true)
-    exit 1
-} else {
-    Write-Host "PowerShell version meets the requirement: $version" -ForegroundColor Green
-    Write-Host "Starting Setup ..." -ForegroundColor Green
-}
-
-#Set it to print debug information
-Set-PSDebug -Trace 0
-
-#Get the environment 
-$userProfilePath = $env:USERPROFILE
-
 # Check if winget is installed
 $wingetCommand = Get-Command winget -ErrorAction SilentlyContinue
 if (-not $wingetCommand) {
@@ -36,24 +15,6 @@ if (-not $wingetCommand) {
     [void][System.Console]::ReadKey($true)
     exit 1
 }
-
-# Install git
-$gitCommand = Get-Command git -ErrorAction SilentlyContinue
-if (-not $gitCommand) {
-    Write-Host "Installing Git..."
-    winget install --id Git.Git -e --source winget
-}
-# Get git command again
-$gitCommand = Get-Command git -ErrorAction SilentlyContinue
-if (-not $gitCommand) {
-    Write-Host "Git installation failed. Please install Git and try again." -ForegroundColor Red
-    Write-Host "Press any key to exit..."
-    [void][System.Console]::ReadKey($true)
-    exit 1
-}
-
-# Install Visual C++ Redistributable
-# winget install --id=Microsoft.VCRedist.2015+.x64 -e
 
 #Install Pixi
 $pixiCommand = Get-Command pixi -ErrorAction SilentlyContinue
@@ -64,33 +25,62 @@ if (-not $pixiCommand) {
     Write-Host "Pixi is already installed."
 }
 
-# Clone ai-engine-direct-helper repository if not already present
-$repoDir = Join-Path $scriptPath "ai-engine-direct-helper"
-if (-not (Test-Path $repoDir)) {
-    Write-Host "Cloning ai-engine-direct-helper repository..."
-    & $gitCommand.Path clone https://github.com/quic/ai-engine-direct-helper.git --depth=1
-} else {
-    Write-Host "ai-engine-direct-helper repository already exists at $repoDir. Pulling latest changes..."
-    Push-Location $repoDir
-    & $gitCommand.Path pull
-    Pop-Location
-}
-
 Write-Host "Setup Python environment..."
-# Change cwd to env
 Set-Location $scriptPath\env
-# Only for network environment in corporation
 $pixiCommand = Get-Command pixi -ErrorAction SilentlyContinue
 if ($pixiCommand) {
     & $pixiCommand.Path config set tls-no-verify true
     & $pixiCommand.Path install --tls-no-verify --frozen
-    & $pixiCommand.Path run install-qai
 } else {
-    Write-Host "Pixi is not in PATH. Please rerun 1.Setup_QAI_AppBuilder.ps1." -ForegroundColor Red
+    Write-Host "Pixi is not in PATH. Please run [1.Setup_QAI_AppBuilder.bat] again." -ForegroundColor Red
     Write-Host "Press any key to exit..."
     [void][System.Console]::ReadKey($true)
-    Set-Location $scriptPath
     exit 1
+}
+
+# Install git
+Set-Location $scriptPath
+$env:Path += ";tools/Git/bin"
+$gitCommand = Get-Command git -ErrorAction SilentlyContinue
+if (-not $gitCommand) {
+    Write-Host "Installing Git..."
+    $gitUrl = "https://github.com/git-for-windows/git/releases/download/v2.50.0.windows.2/PortableGit-2.50.0.2-arm64.7z.exe"
+    $outputPath = "tools/Git-2.50.0.2-arm64.7z.exe"
+    Invoke-WebRequest -Uri $gitUrl -OutFile $outputPath
+
+    Set-Location $scriptPath\env
+    & $pixiCommand.Path run install-git
+    Set-Location $scriptPath
+}
+
+# Get git command again
+$gitCommand = Get-Command git -ErrorAction SilentlyContinue
+if ($gitCommand) {
+    $gitPath = Resolve-Path $gitCommand.Source | Select-Object -ExpandProperty Path
+} else {
+    Write-Host "Git installation failed. Please install Git and try again." -ForegroundColor Red
+    Write-Host "Press any key to exit..."
+    [void][System.Console]::ReadKey($true)
+    exit 1
+}
+
+# Clone ai-engine-direct-helper repository if not already present
+$repoDir = Join-Path $scriptPath "ai-engine-direct-helper"
+if (-not (Test-Path $repoDir)) {
+    Write-Host "Cloning ai-engine-direct-helper repository..."
+    & $gitPath clone https://github.com/quic/ai-engine-direct-helper.git --depth=1
+} else {
+    Write-Host "ai-engine-direct-helper repository already exists at $repoDir. Pulling latest changes..."
+    Push-Location $repoDir
+    & $gitPath pull
+    Pop-Location
+}
+
+# Install QAI AppBuilder
+if ($pixiCommand) {
+    Set-Location $scriptPath\env
+    & $pixiCommand.Path run install-qai
+    Set-Location $scriptPath
 }
 
 if ($LASTEXITCODE -ne 0) {
