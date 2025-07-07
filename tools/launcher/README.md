@@ -25,8 +25,8 @@ There are two ways to get our Windows batch scripts:
 |  Script   | Description  |
 |  ----  | :----    |
 | 1.Install_QAI_AppBuilder.bat | Setup QAI AppBuilder basic environment. If this script has been executed before, executing it again will upgrade the content of the project. |
-| 2.Install_LLM_Models.bat | Download and install [IBM-Granite-v3.1-8B-Instruct](https://aihub.qualcomm.com/compute/models/ibm_granite_v3_1_8b_instruct) LLM model automatically. You can replace this model with your owner LLM model. You can get detailed steps [here](../../samples/genie/python/README.md#setup-custom-model) for using your custom model. |
+| 2.Install_LLM_Models.bat | Download and install [IBM-Granite-v3.1-8B-Instruct](https://aihub.qualcomm.com/compute/models/ibm_granite_v3_1_8b_instruct) LLM model automatically. <br>You can replace this model with your owner LLM model. Getting detailed steps [here](../../samples/genie/python/README.md#setup-custom-model) for using your custom model. |
 | 3.Start_WebUI.bat | The launcher for starting 2 WebUI applications. |
 | 4.Start_GenieAPIService.bat | Start [GenieAPIService](../../samples/genie/c++/). This is OpenAI Compatible API Service (C++ version).|
 | 5.Install_LangFlow.bat | Install LangFlow components. You can get more information about LangFlow [here](../langflow/).|
-| 6.Start_LangFlow.bat | Start LangFlow service. We also provided several flows for running QNN models on NPU. You can get detailed steps [here](https://github.com/quic/ai-engine-direct-helper/tree/main/tools/langflow#using-the-flows) for using these flows. |
+| 6.Start_LangFlow.bat | Start LangFlow service (The startup speed is slow, so wait patiently. When it is ready, the browser will be started automatically.)<br> We also provided several flows for running QNN models on NPU. You can get detailed steps [here](https://github.com/quic/ai-engine-direct-helper/tree/main/tools/langflow#using-the-flows) for using these flows. |
