@@ -7,15 +7,6 @@ param (
     [string]$scriptPath
 )
 
-# Check if winget is installed
-$wingetCommand = Get-Command winget -ErrorAction SilentlyContinue
-if (-not $wingetCommand) {
-    Write-Host "winget is not installed. Please install winget and try again." -ForegroundColor Red
-    Write-Host "Press any key to exit..."
-    [void][System.Console]::ReadKey($true)
-    exit 1
-}
-
 #Install Pixi
 $pixiCommand = Get-Command pixi -ErrorAction SilentlyContinue
 if (-not $pixiCommand) {
