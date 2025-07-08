@@ -8,5 +8,12 @@ echo Installing large language model...
 cd env
 pixi run install-model
 
-echo Install successfully. Press any key to exit...
+echo(
+
+if %ERRORLEVEL%==0 (
+    echo Install successfully. Press any key to exit...
+) else (
+    echo Install failed, exit code: %ERRORLEVEL%
+)
+
 pause

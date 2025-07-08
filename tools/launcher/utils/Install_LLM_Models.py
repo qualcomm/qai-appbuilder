@@ -114,6 +114,7 @@ def main():
         if not download_file_with_progress(urls["tokenizer_url"], tokenizer_path, proxy):
             print("Tokenizer download failed.")
             sys.exit(1)
+        print("Install successfully. Press any key to exit...")
 
 if __name__ == "__main__":
     main()

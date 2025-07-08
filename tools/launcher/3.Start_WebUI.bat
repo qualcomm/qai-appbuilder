@@ -7,3 +7,11 @@
 set "currentDir=%CD%"
 
 powershell -ExecutionPolicy Bypass -File "%currentDir%\utils\Start_WebUI.ps1" "%currentDir%"
+
+if %ERRORLEVEL%==0 (
+    echo Success.
+) else (
+    echo Failed: %ERRORLEVEL%
+)
+
+pause
