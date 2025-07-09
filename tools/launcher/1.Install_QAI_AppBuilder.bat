@@ -13,10 +13,10 @@ if exist "tools" (
     mkdir tools\Git
 )
 
-set TOOL_PATH=%currentDir%\tools\pixi;%currentDir%\tools\aria2c;%currentDir%\tools\aria2c\aria2-1.36.0-win-64bit-build1;%currentDir%\tools\wget;%currentDir%\tools\Git\bin;
+set TOOL_PATH=%currentDir%\tools\pixi;%currentDir%\tools\aria2c;%currentDir%\tools\wget;%currentDir%\tools\Git\bin;
 set PATH=%TOOL_PATH%%PATH%
 
-set "downloadUrl=https://github.com/aria2/aria2/releases/download/release-1.36.0/aria2-1.36.0-win-64bit-build1.zip"
+set "downloadUrl=https://github.com/minnyres/aria2-windows-arm64/releases/download/v1.37.0/aria2_1.37.0_arm64.zip"
 set "downloadPath=%currentDir%\tools\aria2c.zip"
 set "extractPath=%currentDir%\tools\aria2c"
 
@@ -41,7 +41,7 @@ if exist "tools\pixi\pixi.exe" (
 
     echo Installing pixi
 
-    aria2c -x 16 -s 16 -o "pixi.zip" -d "%currentDir%\tools" "https://github.com/prefix-dev/pixi/releases/download/v0.49.0/pixi-aarch64-pc-windows-msvc.zip"
+    aria2c --console-log-level=error -x 16 -s 16 -o "pixi.zip" -d "%currentDir%\tools" "https://github.com/prefix-dev/pixi/releases/download/v0.49.0/pixi-aarch64-pc-windows-msvc.zip"
     powershell -Command "Expand-Archive -Path '%currentDir%\tools\pixi.zip' -DestinationPath '%currentDir%\tools\pixi' -Force"
 )
 

@@ -4,7 +4,7 @@ echo Starting installation...
 
 set "currentDir=%CD%"
 
-set TOOL_PATH=%currentDir%\tools\pixi;%currentDir%\tools\aria2c;%currentDir%\tools\aria2c\aria2-1.36.0-win-64bit-build1;%currentDir%\tools\wget;%currentDir%\tools\Git\bin;
+set TOOL_PATH=%currentDir%\tools\pixi;%currentDir%\tools\aria2c;%currentDir%\tools\wget;%currentDir%\tools\Git\bin;
 set PATH=%TOOL_PATH%%PATH%
 
 echo Installing large language model...

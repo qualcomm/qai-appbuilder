@@ -85,9 +85,7 @@ def install_tools():
     wget_zip_path = tool_path + "\\wget.zip"
     wget_exe_path = wget_path + "\\wget.exe"
     if not os.path.exists(wget_exe_path):
-        fail = f"Failed to download tool from '{WGET_URL}'. Please download it manually and unzip it to '{tool_path}'. " + TEXT_RUN_SCRIPT_AGAIN
-        desc = f"Downloading '{WGET_URL}' to {wget_path}"
-        ret = download_url_pywget(WGET_URL, wget_zip_path, desc=desc, fail=fail)
+        ret = download_file_with_progress(WGET_URL, wget_zip_path)
         if not ret:
             exit()
         print(f"Install 'wget.exe' to {wget_exe_path}")
@@ -138,7 +136,7 @@ def ensure_windows_tools():
 
 def download_with_aria2c(url, dest_path, proxy=None):
     try:
-        cmd = ["aria2c", "-x", "16", "-s", "16", "-o", os.path.basename(dest_path), "-d", os.path.dirname(dest_path), url]
+        cmd = ["aria2c", "--console-log-level=error", "-x", "16", "-s", "16", "-o", os.path.basename(dest_path), "-d", os.path.dirname(dest_path), url]
         if proxy:
             cmd.extend(["--all-proxy", proxy])
         cmd.append("--continue=true")
