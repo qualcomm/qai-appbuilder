@@ -3,6 +3,7 @@ import sys
 import shutil
 import subprocess
 import requests
+import urllib.request as request
 from tqdm import tqdm
 import zipfile
 from py3_wget import download_file

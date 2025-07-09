@@ -74,6 +74,28 @@ def install_GenieAPIService():
     if os.path.exists(android_root):
         shutil.rmtree(android_root)
 
+def install_QAIRT():
+    extract_root = os.path.join("ai-engine-direct-helper", "samples", "qai_libs")
+    zip_file = os.path.join(extract_root, "QAIRT_Runtime_2.34_v73.zip")
+
+    if os.path.exists(extract_root):
+        print("tools directory already exists")
+    else:
+        print("Creating tools directory...")
+        os.makedirs(extract_root, exist_ok=True)
+    
+    if os.path.exists(zip_file):
+        print("QAIRT_Runtime_2.34_v73.zip already exists")
+    else:
+        print("Downloading QAIRT_Runtime_2.34_v73.zip...")
+        download_url = "https://github.com/quic/ai-engine-direct-helper/releases/download/v2.34.0/QAIRT_Runtime_2.34_v73.zip"
+        
+        if download_file_with_progress(download_url, zip_file):
+            print("download successfully")
+        else:
+            print("download failed")
+            sys.exit(1)
+
 def is_git_installed():
     try:
         subprocess.run(["git", "--version"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -166,6 +188,7 @@ def main():
 
     copy_tools()
     install_GenieAPIService()
+    install_QAIRT()
 
 if __name__ == "__main__":
     main()
