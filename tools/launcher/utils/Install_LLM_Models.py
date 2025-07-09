@@ -1,11 +1,7 @@
 import os
 import sys
-import json
 import zipfile
-import shutil
-import subprocess
-import requests
-from tqdm import tqdm
+from Install_Helper import *
 
 # Model configuration
 models = {
@@ -14,73 +10,6 @@ models = {
         "tokenizer_url": "https://gitee.com/hf-models/granite-3.1-8b-base/raw/main/tokenizer.json"
     }
 }
-
-def is_tool_available(tool_name):
-    return shutil.which(tool_name) is not None
-
-def ensure_windows_tools():
-    required_tools = ["aria2c", "wget"]
-    missing = [tool for tool in required_tools if not is_tool_available(tool)]
-    if missing:
-        print(f"Missing required tools: {', '.join(missing)}\n")
-        print("Please install the missing tools from the following links:")
-        if "aria2c" in missing:
-            print("aria2c: https://github.com/aria2/aria2/releases")
-        if "wget" in missing:
-            print("wget: https://eternallybored.org/misc/wget/")
-        sys.exit(1)
-
-def download_with_aria2c(url, dest_path, proxy=None):
-    try:
-        cmd = ["aria2c", "-x", "16", "-s", "16", "-o", os.path.basename(dest_path), "-d", os.path.dirname(dest_path), url]
-        if proxy:
-            cmd.extend(["--all-proxy", proxy])
-        cmd.append("--continue=true")
-        subprocess.run(cmd, check=True)
-        return True
-    except Exception as e:
-        print(f"[aria2c] Download failed: {e}")
-        return False
-
-def download_with_wget(url, dest_path, proxy=None):
-    try:
-        cmd = ["wget", "-O", dest_path, url]
-        if proxy:
-            cmd.extend(["-e", f"use_proxy=yes", "-e", f"http_proxy={proxy}", "-e", f"https_proxy={proxy}"])
-        subprocess.run(cmd, check=True)
-        return True
-    except Exception as e:
-        print(f"[wget] Download failed: {e}")
-        return False
-
-def download_with_requests(url, dest_path, proxy=None):
-    try:
-        proxies = {"http": proxy, "https": proxy} if proxy else None
-        with requests.get(url, stream=True, timeout=60, proxies=proxies) as response:
-            response.raise_for_status()
-            total = int(response.headers.get('Content-Length', 0))
-            with open(dest_path, 'wb') as out_file, tqdm(
-                total=total, unit='B', unit_scale=True, desc=os.path.basename(dest_path)
-            ) as pbar:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        out_file.write(chunk)
-                        pbar.update(len(chunk))
-        return True
-    except Exception as e:
-        print(f"[requests] Download failed: {e}")
-        return False
-
-def download_file_with_progress(url, dest_path, proxy=None):
-    print(f"Downloading: {url}")
-    print("Using aria2c...")
-    if download_with_aria2c(url, dest_path, proxy):
-        return True
-    print("aria2c failed, trying wget...")
-    if download_with_wget(url, dest_path, proxy):
-        return True
-    print("wget failed, trying requests...")
-    return download_with_requests(url, dest_path, proxy)
 
 def main():
     ensure_windows_tools()
@@ -114,7 +43,6 @@ def main():
         if not download_file_with_progress(urls["tokenizer_url"], tokenizer_path, proxy):
             print("Tokenizer download failed.")
             sys.exit(1)
-        print("Install successfully. Press any key to exit...")
 
 if __name__ == "__main__":
     main()

@@ -2,6 +2,11 @@
 setlocal enabledelayedexpansion
 echo Start install langflow...
 
+set "currentDir=%CD%"
+
+set TOOL_PATH=%currentDir%\tools\pixi;%currentDir%\tools\aria2c;%currentDir%\tools\aria2c\aria2-1.36.0-win-64bit-build1;%currentDir%\tools\wget;%currentDir%\tools\Git\bin;
+set PATH=%TOOL_PATH%%PATH%
+
 if exist "tools" (
     echo tools directory already exists
 ) else (
@@ -10,7 +15,7 @@ if exist "tools" (
 )
 
 :Install Visual Studio
-powershell -ExecutionPolicy Bypass -File utils\Install_Visual_Studio.ps1"
+powershell -ExecutionPolicy Bypass -File "%currentDir%\utils\Install_Visual_Studio.ps1" "%currentDir%"
 
 cd env
 pixi update

@@ -7,24 +7,48 @@
 set "currentDir=%CD%"
 
 if exist "tools" (
-    echo tools directory already exists
+    echo The tools directory already exists
 ) else (
     echo Creating tools directory...
     mkdir tools\Git
 )
 
-:CheckVC
-REM Install Visual C++ Redistributable
-echo Checking Visual C++ Redistributable...
-reg query "HKLM\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" >nul 2>&1
-if %errorlevel%==0 (
-    echo Visual C++ Redistributable is already installed. Skipping installation.
-    goto InstallQAI
-)
-echo Installing Visual C++ Redistributable...
-powershell -Command "Invoke-WebRequest -Uri https://aka.ms/vs/17/release/vc_redist.x64.exe -OutFile vc_redist.x64.exe"
-start /wait vc_redist.x64.exe /quiet /norestart
-del vc_redist.x64.exe
+set TOOL_PATH=%currentDir%\tools\pixi;%currentDir%\tools\aria2c;%currentDir%\tools\aria2c\aria2-1.36.0-win-64bit-build1;%currentDir%\tools\wget;%currentDir%\tools\Git\bin;
+set PATH=%TOOL_PATH%%PATH%
 
-:InstallQAI
+set "downloadUrl=https://github.com/aria2/aria2/releases/download/release-1.36.0/aria2-1.36.0-win-64bit-build1.zip"
+set "downloadPath=%currentDir%\tools\aria2c.zip"
+set "extractPath=%currentDir%\tools\aria2c"
+
+if exist "tools\pixi\pixi.exe" (
+    echo pixi exist
+) else (
+    echo Installing aria2c
+
+    powershell -Command "Invoke-WebRequest -Uri %downloadUrl% -OutFile %downloadPath%"
+
+    if exist "%downloadPath%" (
+        mkdir "%extractPath%"
+        powershell -Command "Expand-Archive -Path '%downloadPath%' -DestinationPath '%extractPath%' -Force"
+        if %errorlevel% equ 0 (
+            echo Extract to %extractPath%
+        ) else (
+            echo Extraction failed.
+        )
+    ) else (
+        echo Download failed.
+    )
+
+    echo Installing pixi
+
+    aria2c -x 16 -s 16 -o "pixi.zip" -d "%currentDir%\tools" "https://github.com/prefix-dev/pixi/releases/download/v0.49.0/pixi-aarch64-pc-windows-msvc.zip"
+    powershell -Command "Expand-Archive -Path '%currentDir%\tools\pixi.zip' -DestinationPath '%currentDir%\tools\pixi' -Force"
+)
+
+echo Installing tools...
+cd env
+pixi run install-tools
+cd ..
+
+:Install_QAI_AppBuilder
 powershell -ExecutionPolicy Bypass -File "%currentDir%\utils\Install_QAI_AppBuilder.ps1" "%currentDir%"
