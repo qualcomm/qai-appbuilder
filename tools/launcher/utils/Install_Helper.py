@@ -85,7 +85,9 @@ def install_tools():
     wget_zip_path = tool_path + "\\wget.zip"
     wget_exe_path = wget_path + "\\wget.exe"
     if not os.path.exists(wget_exe_path):
-        ret = download_file_with_progress(WGET_URL, wget_zip_path)
+        fail = f"Failed to download tool from '{WGET_URL}'. Please download it manually and unzip it to '{tool_path}'. " + TEXT_RUN_SCRIPT_AGAIN
+        desc = f"Downloading '{WGET_URL}' to {wget_path}"
+        ret = download_url_pywget(WGET_URL, wget_zip_path, desc=desc, fail=fail)
         if not ret:
             exit()
         print(f"Install 'wget.exe' to {wget_exe_path}")
