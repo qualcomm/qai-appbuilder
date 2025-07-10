@@ -25,7 +25,7 @@ if exist "tools\pixi\pixi.exe" (
 ) else (
     echo Installing aria2c
 
-    powershell -Command "Invoke-WebRequest -Uri %downloadUrl% -OutFile %downloadPath%"
+    powershell -Command "Invoke-WebRequest -Uri %downloadUrl% -OutFile '%downloadPath%'"
 
     if exist "%downloadPath%" (
         mkdir "%extractPath%"
