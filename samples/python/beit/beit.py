@@ -42,6 +42,8 @@ if not MODEL_NAME in execution_ws:
 
 model_dir = execution_ws + "\\model"
 model_path = model_dir + "\\" + BEIT_MODEL_NAME + ".bin"
+imagenet_classes_path = model_dir + "\\" + IMAGENET_CLASSES_FILE
+
 input_image_path = execution_ws + "\\" + "input.jpg"
 #####################################################################
 
@@ -66,7 +68,7 @@ def preprocess_PIL_image(image: Image) -> torch.Tensor:
 
 def post_process(probabilities, output):
     # Read the categories
-    with open(IMAGENET_CLASSES_FILE, "r") as f:
+    with open(imagenet_classes_path, "r") as f:
         categories = [s.strip() for s in f.readlines()]
     # Show top categories per image
     top5_prob, top5_catid = torch.topk(probabilities, 5)
@@ -93,8 +95,8 @@ class Beit(QNNContext):
 def model_download():
     ret = True
 
-    if not os.path.exists(IMAGENET_CLASSES_FILE):
-        ret = install.download_url(IMAGENET_CLASSES_URL, IMAGENET_CLASSES_FILE)
+    if not os.path.exists(imagenet_classes_path):
+        ret = install.download_url(IMAGENET_CLASSES_URL, imagenet_classes_path)
 
     desc = f"Downloading {MODEL_NAME} model... "
     fail = f"\nFailed to download {MODEL_NAME} model. Please prepare the model according to the steps in below link:\n{MODEL_HELP_URL}"

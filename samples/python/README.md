@@ -22,7 +22,7 @@ Refer to [python.md](../../docs/python.md) on how to setup x64 version Python en
 ### Step 2: Install basic Python dependencies
 Run below commands in Windows terminal:
 ```
-pip install qai_hub_models==0.30.2 huggingface_hub Pillow numpy opencv-python torch torchvision torchaudio transformers diffusers tqdm scikit-image pygame ftfy av resampy soundfile easyocr samplerate whisper audio2numpy openai-whisper ultralytics==8.0.193
+pip install qai_hub_models==0.30.2 huggingface_hub==0.33.1 Pillow==10.4.0 numpy==1.26.4 torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 transformers==4.46.3 diffusers==0.32.2 tqdm==4.67.1 scikit-image==0.25.2 pygame==2.6.1 ftfy==6.3.1 av==15.0.0 resampy==0.4.3 soundfile==0.13.1 easyocr==1.7.2 samplerate==0.2.1 whisper==1.1.10 audio2numpy==0.1.2 openai-whisper==20250625 ultralytics==8.0.193 opencv-python-headless==4.11.0.86 opencv-python==4.10.0.84
 ```
 
 ### Step 3: Run Model
@@ -45,22 +45,23 @@ python python\stable_diffusion_v2_1\stable_diffusion_v2_1.py --prompt "spectacul
 | stable_diffusion_v1_5 | python python\stable_diffusion_v1_5\stable_diffusion_v1_5.py --prompt "the prompt string ..." |
 | real_esrgan_x4plus  | python python\real_esrgan_x4plus\real_esrgan_x4plus.py |
 | real_esrgan_general_x4v3  | python python\real_esrgan_general_x4v3\real_esrgan_general_x4v3.py |
+| quicksrnetmedium  | python python\quicksrnetmedium\quicksrnetmedium.py |
 | inception_v3  | python python\inception_v3\inception_v3.py |
+| beit  | python python\beit\beit.py |
+| googlenet  | python python\googlenet\googlenet.py |
+| resnet_3d  | python python\resnet_3d\resnet_3d.py |
+| yamnet  | python python\yamnet\yamnet.py |
 | yolov8_det  | python python\yolov8_det\yolov8_det.py |
 | unet_segmentation  | python python\unet_segmentation\unet_segmentation.py |
 | openpose  | python python\openpose\openpose.py |
 | lama_dilated  | python python\lama_dilated\lama_dilated.py |
 | aotgan  | python python\aotgan\aotgan.py |
-| beit  | python python\beit\beit.py |
 | depth_anything  | python python\depth_anything\depth_anything.py |
-| googlenet  | python python\googlenet\googlenet.py |
+| mediapipe_hand  | python python\mediapipe_hand\mediapipe_hand.py |
 | nomic_embed_text  | python python\nomic_embed_text\nomic_embed_text.py |
 | openai_clip  | python python\openai_clip\openai_clip.py |
-| quicksrnetmedium  | python python\quicksrnetmedium\quicksrnetmedium.py |
-| resnet_3d  | python python\resnet_3d\resnet_3d.py |
 | whisper_base_en  | python python\whisper_base_en\whisper_base_en.py |
 | whisper_tiny_en  | python python\whisper_tiny_en\whisper_tiny_en.py |
-| yamnet  | python python\yamnet\yamnet.py |
 | | |
 
 ### Prepare Stable Diffusion models manually
