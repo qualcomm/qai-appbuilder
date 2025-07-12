@@ -51,9 +51,17 @@ python python\stable_diffusion_v2_1\stable_diffusion_v2_1.py --prompt "spectacul
 | openpose  | python python\openpose\openpose.py |
 | lama_dilated  | python python\lama_dilated\lama_dilated.py |
 | aotgan  | python python\aotgan\aotgan.py |
+| beit  | python python\beit\beit.py |
+| depth_anything  | python python\depth_anything\depth_anything.py |
+| googlenet  | python python\googlenet\googlenet.py |
+| nomic_embed_text  | python python\nomic_embed_text\nomic_embed_text.py |
+| openai_clip  | python python\openai_clip\openai_clip.py |
+| quicksrnetmedium  | python python\quicksrnetmedium\quicksrnetmedium.py |
+| resnet_3d  | python python\resnet_3d\resnet_3d.py |
+| whisper_base_en  | python python\whisper_base_en\whisper_base_en.py |
+| whisper_tiny_en  | python python\whisper_tiny_en\whisper_tiny_en.py |
+| yamnet  | python python\yamnet\yamnet.py |
 | | |
-
-*More models will be supported soon!*
 
 ### Prepare Stable Diffusion models manually
 Stable Diffusion models are big, you can also download these models manually if automatically downloading functions don't work well.<br>
