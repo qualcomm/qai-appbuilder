@@ -40,7 +40,7 @@ if not "python" in execution_ws:
 if not MODEL_NAME in execution_ws:
     execution_ws = execution_ws + "\\" + MODEL_NAME
 
-model_dir = execution_ws + "\\model"
+model_dir = execution_ws + "\\models"
 model_path = model_dir + "\\" + BEIT_MODEL_NAME + ".bin"
 imagenet_classes_path = model_dir + "\\" + IMAGENET_CLASSES_FILE
 

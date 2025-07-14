@@ -16,35 +16,35 @@ This application supports camera frame online inference (default) and jpg image 
 # 2. Command
 go to <ai-engine-direct-helper> path:
 ```
-cd <ai-engine-direct-helper>\samples\python\
+cd <ai-engine-direct-helper>\samples\
 ```
 
 ## Option 1: launch camera app and recognize hand (end_user mode by default) without controlling audio playback:
 ```
-python mediapipehand\mediapipehand.py
+python python\mediapipe_hand\mediapipe_hand.py
 ```
 
 ## Option 2: launch camera app and recognize hand to control audio playback:
 ```
-python mediapipehand\mediapipehand.py --audiofile <audio path>
+python python\mediapipe_hand\mediapipe_hand.py --audiofile <audio path>
 ```
 
 ## Option 3: launch camera app and recognize hand (demo mode):
 ```
-python mediapipehand\mediapipehand.py --DemoMode True
+python python\mediapipe_hand\mediapipe_hand.py --DemoMode True
 ```
 
 ## Option 4: inference sample jpg image and display result:
 ```
-python mediapipehand\mediapipehand.py --imagefile <image path>
+python python\mediapipe_hand\mediapipe_hand.py --imagefile <image path>
 ```
 
 ## Option 5: inference sample jpg image and display result with demo mode:
 ```
-python mediapipehand\mediapipehand.py --imagefile <image path> --DemoMode True
+python python\mediapipe_hand\mediapipe_hand.py --imagefile <image path> --DemoMode True
 ```
 
 ## Option 6: inference sample jpg image and save result into jpg image file:
 ```
-python mediapipehand\mediapipehand.py --imagefile <image path> --displayPredict False
+python python\mediapipe_hand\mediapipe_hand.py --imagefile <image path> --displayPredict False
 ```

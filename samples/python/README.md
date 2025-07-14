@@ -60,6 +60,7 @@ python python\stable_diffusion_v2_1\stable_diffusion_v2_1.py --prompt "spectacul
 | mediapipe_hand  | python python\mediapipe_hand\mediapipe_hand.py |
 | nomic_embed_text  | python python\nomic_embed_text\nomic_embed_text.py |
 | openai_clip  | python python\openai_clip\openai_clip.py |
+| easy_ocr  | python python python\easy_ocr\easy_ocr.py |
 | whisper_base_en  | python python\whisper_base_en\whisper_base_en.py |
 | whisper_tiny_en  | python python\whisper_tiny_en\whisper_tiny_en.py |
 | | |

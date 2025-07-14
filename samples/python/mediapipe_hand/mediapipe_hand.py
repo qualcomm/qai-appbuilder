@@ -825,6 +825,9 @@ def capture_and_display_processed_frames(
             key = cv2.waitKey(1)
             if key == ESCAPE_KEY_ID:
                 break
+
+            if cv2.getWindowProperty(window_display_name, cv2.WND_PROP_VISIBLE) < 1:
+                break
     else:   # inference 1/30 frames
         while has_frame:
             assert isinstance(frame, np.ndarray)
@@ -849,7 +852,11 @@ def capture_and_display_processed_frames(
             if key == ESCAPE_KEY_ID:
                 break
 
+            if cv2.getWindowProperty(window_display_name, cv2.WND_PROP_VISIBLE) < 1:
+                break
+
     capture.release()
+    cv2.destroyAllWindows()
 
 def main():
     global demo_mode, audio_loaded
