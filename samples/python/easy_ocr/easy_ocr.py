@@ -14,10 +14,10 @@ import torch
 import torch.nn.functional as F
 import time
 import argparse
+
 from PIL import ImageFont, ImageDraw, Image
 from torch.utils.data import DataLoader
-from qai_hub_models.utils.draw import draw_box_from_xyxy
-from qai_hub_models.utils.image_processing import app_to_net_image_inputs
+
 from easyocr.craft_utils import adjustResultCoordinates, getDetBoxes
 from easyocr.imgproc import normalizeMeanVariance, resize_aspect_ratio
 from easyocr.recognition import AlignCollate, ListDataset, custom_mean
@@ -29,7 +29,9 @@ from easyocr.utils import (
     reformat_input,
     set_result_with_confidence,
 )
+
 from easyocr.utils import CTCLabelConverter
+
 from qai_hub_models.utils.asset_loaders import load_image
 from qai_hub_models.utils.display import display_or_save_image
 
@@ -64,26 +66,31 @@ RECOGNIZER_ARGS = {
     "filter_ths": 0.003,
 }
 
+IMAGE_SIZE_W = 800
+IMAGE_SIZE_H = 608
+
+from utils.image_processing import (
+    pil_resize_pad,
+    app_to_net_image_inputs,
+    pil_undo_resize_pad
+)
 ####################################################################
 
-MODEL_NAME                  = "easy_ocr"
-Detector_MODEL_ID = "mn70g6yvq"    #mn77rx2on
-Recognizer_MODEL_ID = "mnw5jyjxn"  #mnw098dpm
-
-CN_Detector_MODEL_ID = "mnov7w2vm"    
-CN_Recognizer_MODEL_ID = "mn4xr1lwq"  
+MODEL_NAME = "easy_ocr"
+Detector_MODEL_ID = "mnov7w2vm"
+Recognizer_MODEL_ID = "mn4xr1lwq"
 CN_Detector_MODEL_ID = "mmd9j7dwn"    
 CN_Recognizer_MODEL_ID = "mnzoyjvdm"
 HUB_ID_SY = "e2f9ca99e756302ac3f604f1169da1243acfec45"
 
-Detector_MODEL_LINK         = MODEL_NAME + "_EasyOCRDetector.bin"
-Recognizer_MODEL_LINK       = MODEL_NAME + "_EasyOCRRecognizer.bin"
+Detector_MODEL_LINK = MODEL_NAME + "_EasyOCRDetector.bin"
+Recognizer_MODEL_LINK = MODEL_NAME + "_EasyOCRRecognizer.bin"
 
 #Detector_MODEL_SIZE     = 42237472
 #Recognizer_MODEL_SIZE   = 12173040
 
-CN_Detector_MODEL_LINK         = MODEL_NAME + "_EasyOCRDetector_Ch_En.bin"
-CN_Recognizer_MODEL_LINK       = MODEL_NAME + "_EasyOCRRecognizer_Ch_En.bin"
+CN_Detector_MODEL_LINK = MODEL_NAME + "_EasyOCRDetector_Ch_En.bin"
+CN_Recognizer_MODEL_LINK = MODEL_NAME + "_EasyOCRRecognizer_Ch_En.bin"
 
 #Detector_MODEL_SIZE     = 42237600
 #Recognizer_MODEL_SIZE   = 15638384
@@ -151,8 +158,7 @@ def model_download():
 
     desc = f"Downloading {MODEL_NAME} model... "
     fail = f"\nFailed to download {MODEL_NAME} model. Please prepare the model according to the steps in below link:\n{MODEL_HELP_URL}"
-    #ret = install.download_qai_hubmodel(Detector_MODEL_ID, detector_model_path, desc=desc, fail=fail)
-    #ret = install.download_qai_hubmodel(Recognizer_MODEL_ID, recognizer_model_path, desc=desc, fail=fail)
+
     ret = install.download_qai_hubmodel(Detector_MODEL_ID, detector_model_path, desc=desc, fail=fail, hub_id=HUB_ID_SY)
     ret = install.download_qai_hubmodel(Recognizer_MODEL_ID, recognizer_model_path, desc=desc, fail=fail, hub_id=HUB_ID_SY)
     ret = install.download_qai_hubmodel(CN_Detector_MODEL_ID, cn_detector_model_path, desc=desc, fail=fail, hub_id=HUB_ID_SY)
@@ -181,7 +187,6 @@ def Init():
     recognizer_model_obj = EasyOCR_Recognizer("EasyOCRRecognizer", cn_recognizer_model_path)
     # ----------------
     
-    
 def main(Image_Path: str = None):
     # Load app and image
     if Image_Path is None:
@@ -190,16 +195,15 @@ def main(Image_Path: str = None):
             ret = install.download_url(INPUT_IMAGE_PATH_URL, input_image_path)
         Image_Path = input_image_path
     
-    image = load_image(Image_Path)
-
-    # Burst the HTP.
-    PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
+    orig_image = load_image(Image_Path)
+    image, scale, padding = pil_resize_pad(orig_image, (IMAGE_SIZE_H, IMAGE_SIZE_W))
 
     # Language list
     #lang_list = ["en"]
     lang_list = ["en","ch_sim"]
 
-    NHWC_int_numpy_frames, _ = app_to_net_image_inputs(image)
+    NHWC_int_numpy_frames, _ = app_to_net_image_inputs(image, True)
+
     batch_size = len(NHWC_int_numpy_frames)
     i = 0
 
@@ -210,7 +214,13 @@ def main(Image_Path: str = None):
     # detector
     input_tensor, infos = Demo_Local_detector_preprocess(img)
 
+    # Burst the HTP.
+    PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
     feature, results = detector_model_obj.Inference(input_tensor)
+
+    # recognizer
+    recognizer_obj = Local_EasyOCR_recognizer(recognizer_model_obj.Inference, lang_list)
+
 
     # reshape the detector output for detector PP    
     results_tensor = torch.from_numpy(results)
@@ -220,10 +230,6 @@ def main(Image_Path: str = None):
     feature_tensor = feature_tensor.reshape(1, 32, 304, 400)
 
     horizontal_list, free_list = Demo_Local_detector_postprocess(results_tensor, infos)
-
-    # recognizer
-    recognizer_obj = Local_EasyOCR_recognizer(recognizer_model_obj.Inference, lang_list)
-    
     horizontal_list, free_list = horizontal_list[0], free_list[0]
     (
         img_cv_grey,
@@ -236,13 +242,14 @@ def main(Image_Path: str = None):
     )
 
     list_result = recognizer_obj.recognize(img_cv_grey, horizontal_list, free_list, batch_size, ignore_char)
+    # Reset the HTP.
+    PerfProfile.RelPerfProfileGlobal() 
+
     results2 = recognizer_obj.recognizer_postprocess(NHWC_int_numpy_frames,NHWC_int_numpy_frame, list_result)
 
-    # Reset the HTP.
-    PerfProfile.RelPerfProfileGlobal()
+    final_image = pil_undo_resize_pad(results2[0],orig_image.size,scale,padding)
+    display_or_save_image(final_image, None)
 
-    #if not is_test:
-    display_or_save_image(results2[0], None)
 
 def SetQNNConfig():
     QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.ERROR, ProfilingLevel.BASIC)
@@ -257,9 +264,8 @@ def Release():
 
 def Demo_Local_detector_preprocess(img: np.ndarray):
     image_arrs = [img]
-    img_resized_list = []
 
-    print("+++++ Demo_Local_detector_preprocess +++++")
+    img_resized_list = []
 
     # resize
     for img in image_arrs:
@@ -272,7 +278,6 @@ def Demo_Local_detector_preprocess(img: np.ndarray):
         img_resized_list.append(img_resized)
 
     ratio_h = ratio_w = 1 / target_ratio
-
     # preprocessing
     x = [
         np.transpose(normalizeMeanVariance(n_img), (2, 0, 1))
@@ -280,7 +285,6 @@ def Demo_Local_detector_preprocess(img: np.ndarray):
     ]
     x = torch.from_numpy(np.array(x))
 
-    print("----- Demo_Local_detector_preprocess -----")
     return x, (ratio_h, ratio_w)
 
 def Demo_Local_detector_postprocess(results: torch.Tensor, infos: torch.Tensor):
@@ -354,7 +358,6 @@ def Demo_Local_detector_postprocess(results: torch.Tensor, infos: torch.Tensor):
         k: DETECTOR_ARGS[k] for k in required_keys if k in DETECTOR_ARGS
     }
     for text_box in result:
-
         horizontal_list, free_list = group_text_box(text_box, **filtered_args)
         if DETECTOR_ARGS["min_size"]:
             horizontal_list = [
@@ -373,6 +376,54 @@ def Demo_Local_detector_postprocess(results: torch.Tensor, infos: torch.Tensor):
 
     return horizontal_list_agg, free_list_agg
 
+def draw_box_from_xyxy(
+    frame: np.ndarray,
+    top_left: np.ndarray | torch.Tensor | tuple[int, int],
+    bottom_right: np.ndarray | torch.Tensor | tuple[int, int],
+    color: tuple[int, int, int] = (0, 0, 0),
+    size: int = 3,
+    text: [str] = None,
+):
+    """
+    Draw a box using the provided top left / bottom right points to compute the box.
+
+    Parameters:
+        frame: np.ndarray
+            np array (H W C x uint8, BGR)
+
+        box: np.ndarray | torch.Tensor
+            array (4), where layout is
+                [xc, yc, h, w]
+
+        color: tuple[int, int, int]
+            Color of drawn points and connection lines (RGB)
+
+        size: int
+            Size of drawn points and connection lines BGR channel layout
+
+        text: None | str
+            Overlay text at the top of the box.
+
+    Returns:
+        None; modifies frame in place.
+    """
+    if not isinstance(top_left, tuple):
+        top_left = (int(top_left[0].item()), int(top_left[1].item()))
+    if not isinstance(bottom_right, tuple):
+        bottom_right = (int(bottom_right[0].item()), int(bottom_right[1].item()))
+
+    cv2.rectangle(frame, top_left, bottom_right, color, size)
+    if text is not None:
+        cv2.putText(
+            frame,
+            text,
+            (top_left[0], top_left[1] - 10),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            color,
+            size,
+        )
+        
 class Local_EasyOCR_recognizer:
     def __init__(
         self,
@@ -401,7 +452,6 @@ class Local_EasyOCR_recognizer:
         with open(lang_char_file, "rb") as file:
             lang_char_bin = file.read()
         self.lang_char = lang_char_bin.decode('gb18030')
-
         self.converter = CTCLabelConverter(self.character, self.separator_list, self.dict_list)
         
     def recognizer_preprocess(
@@ -564,7 +614,7 @@ class Local_EasyOCR_recognizer:
         self, test_loader: DataLoader, ignore_idx: list[int]
     ):
         result = []
-        print(" ----- Local_EasyOCRApp::recognizer_inference  -----")
+
         with torch.no_grad():
             for image_tensors in test_loader:
                 batch_size = image_tensors.size(0)
@@ -576,7 +626,7 @@ class Local_EasyOCR_recognizer:
                 
                 for i in range(image.shape[3], 999):
                     new_image = torch.cat((new_image, new_image[:, :, :, 0:1]), dim=3)
- 
+                
                 preds = self.recognizer(new_image)
 
                 # preds is a list but we need [1, X, 97] for En
@@ -584,8 +634,6 @@ class Local_EasyOCR_recognizer:
                 #reshaped_preds = preds[0].reshape(1, -1, 97)
                 reshaped_preds = preds[0].reshape(1, -1, 6719)
                 reshaped_preds = torch.from_numpy(reshaped_preds)
-
-    
                 # Select max probabilty (greedy decoding) then decode index to character
                 preds_size = torch.IntTensor([reshaped_preds.size(1)] * batch_size)
 
@@ -600,7 +648,6 @@ class Local_EasyOCR_recognizer:
                     # Select max probabilty (greedy decoding) then decode index to character
                     _, preds_index = preds_prob.max(2)
                     preds_index = preds_index.view(-1)
-
                     preds_str = self.converter.decode_greedy(
                         preds_index.data.cpu().detach().numpy(), preds_size.data
                     )
@@ -636,8 +683,8 @@ class Local_EasyOCR_recognizer:
 
     def recognizer_postprocess(
         self,
-        NHWC_int_numpy_frames,
-        NHWC_int_numpy_frame,
+        input_NHWC_int_numpy_frames,
+        input_NHWC_int_numpy_frame,
         list_result
     ):
         i=0
@@ -648,8 +695,10 @@ class Local_EasyOCR_recognizer:
         confs = [item[2] for item in list_result]
         # TODO: Use PIL to draw Chinese
         for coord in coords:
+            coord[0] = [int(x) for x in coord[0]]
+            coord[2] = [int(x) for x in coord[2]]
             draw_box_from_xyxy(
-                NHWC_int_numpy_frame,
+                input_NHWC_int_numpy_frame,
                 tuple(coord[0]),
                 tuple(coord[2]),
                 color=(0, 255, 0),
@@ -657,12 +706,12 @@ class Local_EasyOCR_recognizer:
                 #text=texts[i],
                 )
             print(texts[i])
-            print(confs[i])
+
             i=i+1
 
         i=0
         font_Ch = ImageFont.truetype(font_path, 18)
-        img_pil = Image.fromarray(NHWC_int_numpy_frames[0])
+        img_pil = Image.fromarray(input_NHWC_int_numpy_frames[0])
         for coord in coords:
             ## Use simsum.ttc to write Chinese.            
             draw = ImageDraw.Draw(img_pil)
@@ -670,9 +719,9 @@ class Local_EasyOCR_recognizer:
             coord_y = coord[0][1]
             draw.text((coord_x,coord_y-20),  text = texts[i], font = font_Ch, fill = (b, g, r, a))
             i=i+1
-        NHWC_int_numpy_frames[0] = np.array(img_pil)
+        input_NHWC_int_numpy_frames[0] = np.array(img_pil)
 
-        return (Image.fromarray(NHWC_int_numpy_frames[0]), list_result)
+        return (Image.fromarray(input_NHWC_int_numpy_frames[0]), list_result)
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

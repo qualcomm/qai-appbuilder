@@ -1,7 +1,7 @@
 import numpy as np
 import math
 import torchvision.transforms as transforms
-from PIL import Image
+from PIL.Image import Image
 from PIL.Image import fromarray as ImageFromArray
 from torch.nn.functional import interpolate, pad
 import torch
@@ -142,3 +142,61 @@ def preprocess_inputs(
     )
     
     return {"image": image_masked, "mask": NCHW_fp32_torch_masks}
+
+def app_to_net_image_inputs(
+    pixel_values_or_image: Image,
+    to_float: True,
+#) -> tuple[list[npt.NDArray[np.uint8]], torch.Tensor]:
+):
+    """
+    Convert the provided images to application inputs.
+    ~~This does not change channel order. RGB stays RGB, BGR stays BGR, etc~~
+
+    Parameters:
+        pixel_values_or_image: torch.Tensor
+            PIL image
+            or
+            list of PIL images
+            or
+            numpy array (H W C x uint8) or (N H W C x uint8) -- both BGR or grayscale channel layout
+            or
+            pyTorch tensor (N C H W x fp32, value range is [0, 1]), BGR or grayscale channel layout
+
+        to_float: bool (default=True)
+            Whether to denormalize images to [0,1] (fp32) or keep as uint8.
+
+
+    Returns:
+        NHWC_int_numpy_frames: list[numpy.ndarray]
+            List of numpy arrays (one per input image with uint8 dtype, [H W C] shape, and BGR or grayscale layout.
+            This output is typically used for use of drawing/displaying images with PIL and CV2
+
+        NCHW_fp32_torch_frames: torch.Tensor
+            Tensor of images in fp32 (range 0:1), with shape [Batch, Channels, Height, Width], and BGR or grayscale layout.
+
+    Based on https://github.com/zmurez/MediaPipePyTorch/blob/master/blazebase.py
+    """
+    NHWC_int_numpy_frames: list[np.ndarray] = []
+    NCHW_fp32_torch_frames: torch.Tensor
+    if isinstance(pixel_values_or_image, Image):
+        pixel_values_or_image = [pixel_values_or_image]
+    if isinstance(pixel_values_or_image, list):
+        fp32_frames = []
+        for image in pixel_values_or_image:
+            NHWC_int_numpy_frames.append(np.array(image.convert("RGB")))
+            fp32_frames.append(preprocess_PIL_image(image))
+        NCHW_fp32_torch_frames = torch.cat(fp32_frames)
+    elif isinstance(pixel_values_or_image, torch.Tensor):
+        NCHW_fp32_torch_frames = pixel_values_or_image
+        for b_img in pixel_values_or_image:
+            NHWC_int_numpy_frames.append((b_img.permute(1, 2, 0) * 255).byte().numpy())
+    else:
+        assert isinstance(pixel_values_or_image, np.ndarray)
+        NHWC_int_numpy_frames = (
+            [pixel_values_or_image]
+            if len(pixel_values_or_image.shape) == 3
+            else [x for x in pixel_values_or_image]
+        )
+        NCHW_fp32_torch_frames = numpy_image_to_torch(pixel_values_or_image)
+
+    return NHWC_int_numpy_frames, NCHW_fp32_torch_frames
