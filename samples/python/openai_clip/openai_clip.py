@@ -11,8 +11,8 @@ from PIL import Image
 import torch
 import argparse
 import numpy as np
+import clip
 
-from qai_hub_models.models.openai_clip.model import OpenAIClip as Clip
 from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig)
 
 ####################################################################
@@ -22,6 +22,8 @@ MODEL_NAME = "openai_clip"
 MODEL_HELP_URL = "https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
 IMAGE_SIZE = 224
 SEQ_LEN=77
+
+PRETRAINED_WEIGHTS = "ViT-B/16"
 
 ####################################################################
 
@@ -80,9 +82,9 @@ def Init():
 
     model_download()
 
-    clip_model = Clip.from_pretrained()
-    text_tokenizer=clip_model.text_tokenizer
-    image_preprocessor = clip_model.image_preprocessor
+    device = "cpu"
+    text_tokenizer = clip.tokenize
+    net, image_preprocessor = clip.load(PRETRAINED_WEIGHTS, device=device)
 
     # Config AppBuilder environment.
     QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
