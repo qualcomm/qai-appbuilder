@@ -22,7 +22,7 @@ Refer to [python.md](../../docs/python.md) on how to setup x64 version Python en
 ### Step 2: Install basic Python dependencies
 Run below commands in Windows terminal:
 ```
-pip install qai_hub_models==0.30.2 huggingface_hub==0.33.1 Pillow==10.4.0 numpy==1.26.4 torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 transformers==4.46.3 diffusers==0.32.2 tqdm==4.67.1 scikit-image==0.25.2 pygame==2.6.1 ftfy==6.3.1 av==15.0.0 resampy==0.4.3 soundfile==0.13.1 easyocr==1.7.2 samplerate==0.2.1 whisper==1.1.10 audio2numpy==0.1.2 ultralytics==8.0.193 opencv-python-headless==4.11.0.86 opencv-python==4.10.0.84 openai-whisper==20250625 openai-clip==1.0.1
+pip install qai_hub_models==0.30.2 huggingface_hub==0.33.1 Pillow==10.4.0 numpy==1.26.4 torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 transformers==4.46.3 diffusers==0.32.2 tqdm==4.67.1 scikit-image==0.25.2 pygame==2.6.1 ftfy==6.3.1 av==15.0.0 resampy==0.4.3 soundfile==0.13.1 easyocr==1.7.2 samplerate==0.2.1 whisper==1.1.10 audio2numpy==0.1.2 ultralytics==8.0.193 opencv-python-headless==4.11.0.86 opencv-python==4.10.0.84 openai-whisper==20250625 openai-clip==1.0.1 resampy==0.4.3
 ```
 
 ### Step 3: Run Model
