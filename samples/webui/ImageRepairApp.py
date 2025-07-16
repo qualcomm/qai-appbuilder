@@ -219,6 +219,8 @@ function on_load() {
     dark_mode();
 
     var targetNode = document.getElementById("html_change");
+    targetNode.style.visibility = "hidden";
+    document.querySelector("#html_change").style.visibility = "hidden";
     var config = { attributes: true, childList: true, subtree: true };    
 
     var callback = function(mutationsList) {
@@ -371,7 +373,7 @@ if __name__ == '__main__':
                             imagesave_gr.click(image_save)
 
                     with gr.Row():
-                        html_change_gr = gr.HTML(elem_id="html_change", visible=False)
+                        html_change_gr = gr.HTML(elem_id="html_change", visible=True)
 
                 #with gr.Tab("参数设置"):
                 #    with gr.Column(scale=1, visible=True):
