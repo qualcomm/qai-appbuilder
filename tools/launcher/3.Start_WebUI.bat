@@ -4,6 +4,7 @@
 @REM ---------------------------------------------------------------------
 
 @echo off
+cd /d "%~dp0"
 set "currentDir=%CD%"
 
 set TOOL_PATH=%currentDir%\tools\pixi;%currentDir%\tools\aria2c;%currentDir%\tools\wget;%currentDir%\tools\Git\bin;
