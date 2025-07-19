@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
 import os
+import sys
 import time
 import re
 import threading
@@ -16,6 +17,8 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 from qai_appbuilder import (GenieContext)
 
+sys.stdin.reconfigure(encoding='utf-8')
+sys.stdout.reconfigure(encoding='utf-8')
 
 ###########################################################################
 
@@ -74,7 +77,7 @@ class GenieModel():
             print("[Error] model config or prompt file not found.")
             return
 
-        with open(prompt_path, 'r') as file:
+        with open(prompt_path, 'r', encoding='utf-8') as file:
             prompt_content = file.read()
         prompt_lines = prompt_content.split('\n')
         self.prompt_tags_1 = prompt_lines[0].split(': ')[1].strip()
