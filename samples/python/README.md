@@ -50,6 +50,7 @@ python python\stable_diffusion_v2_1\stable_diffusion_v2_1.py --prompt "spectacul
 | beit  | python python\beit\beit.py |
 | googlenet  | python python\googlenet\googlenet.py |
 | resnet_3d  | python python\resnet_3d\resnet_3d.py |
+| facemap_3dmm  | python python\facemap_3dmm\facemap_3dmm.py |
 | yamnet  | python python\yamnet\yamnet.py |
 | yolov8_det  | python python\yolov8_det\yolov8_det.py |
 | unet_segmentation  | python python\unet_segmentation\unet_segmentation.py |
