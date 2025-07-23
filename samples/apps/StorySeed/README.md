@@ -17,6 +17,10 @@ This application randomly selects four words from a list of 200 elementary-level
 ### Step 1: Install Dependencies
 Refer to [Run the large language model on the local NPU](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/genie/python/README.md) to make sure IBM-Granite-v3.1-8B model can run normally.
 
+Run below commands in Windows termial to install more python dependencies:
+```
+pip install selenium==4.34.2
+```
 **Note: Once the model works normally, stop the model and Genie API Service to avoid affect the execution of this app. This application will start them automatically when running.**
 
 ### Step 2: Install Required Tools
