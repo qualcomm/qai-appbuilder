@@ -14,9 +14,7 @@ Note: Contributions are welcome. Please ensure thorough testing before deploying
 This guide introduces how to setup the QAI AppBuilder runtime environment fast and easily through our Windows batch scripts. <br>
 Note: If the following automatic installation script doesn't work for some reason, please try to manually configure what you are interested in according to the following guidelines. <br>
 [Setup Python Environment](../../docs/python.md) <br>
-[Setup and launch WebUI Apps](../../samples/webui/) <br>
-[GenieAPIService](../../samples/genie/c++/) <br>
-[Samples](../../samples/python/)
+[WebUI Apps](../../samples/webui/) | [GenieAPIService (Python)](../../samples/genie/python/) | [GenieAPIService (C++)](../../samples/genie/c++/) | [Samples](../../samples/python/)
 
 ## Usage
 ### 1. Download Windows batch scripts
