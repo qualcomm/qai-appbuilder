@@ -30,7 +30,7 @@ client = OpenAI(base_url=BASE_URL, api_key="123")
 # print(model_lst)
 
 messages = [{"role": "system", "content": "You are a helpful assistant that can use tools to answer questions and perform tasks."}, {"role": "user", "content": prompt}]
-extra_body = {"size": 4096, "seed": 146, "temp": 1.5, "top_k": 13, "top_p": 0.6, "penalty_last_n": 64, "penalty_repeat": 1.3}
+extra_body = {"size": 4096, "seed": 146, "temp": 1.5, "top_k": 13, "top_p": 0.6}
 
 model_name = args.model
 

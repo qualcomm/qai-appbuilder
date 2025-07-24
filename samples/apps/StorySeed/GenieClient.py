@@ -16,9 +16,7 @@ def generate_response(prompt: str, model: str = "Qwen2.0-7B-SSD", stream: bool =
         "seed": 146,
         "temp": 1.5,
         "top_k": 13,
-        "top_p": 0.6,
-        "penalty_last_n": 64,
-        "penalty_repeat": 1.3
+        "top_p": 0.6
     }
 
     if stream:
