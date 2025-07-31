@@ -1,6 +1,6 @@
-# ragsavedoc guide
+# RagSaveDoc guide
 
-ragsavedoc is a RAG tool which is used to embed .pdf/.txt documents to vector database.
+RagSaveDoc is a RAG tool which is used to embed .pdf/.txt documents to vector database.
 
 ## Environment setup
 
@@ -21,7 +21,7 @@ Step 1. Start cmd command prompt window and active python virtual environment wi
 Step 2. Go to ai-engine-direct-helper samples path and start ragsavedoc application with below command:
 ```
 cd <your path>\ai-engine-direct-helper-2.34\samples
-python fletui\ragsavedoc\RagSaveDoc.py
+python fletui\geniefletui\windows\ragtool\RagSaveDoc.py
 ```
 
 ## How to build ragsavedoc to Windows .exe file.
@@ -33,15 +33,18 @@ Step 1. Start cmd command prompt window and active python virtual environment wi
 ```
 Step 2. Go to ai-engine-direct-helper ragsavedoc path and generate building .spec file with below command:
 ```
-cd <your path>\ai-engine-direct-helper-2.34\samples\fletui\ragsavedoc
+cd <your path>\ai-engine-direct-helper-2.34\samples\fletui\geniefletui\windows\ragtool
 python RagSaveDoc_generate_spec.py
 ```
 Step 3. Build ragsavedoc with below command:
 ```
 pyinstaller RagSaveDoc.spec
 ```
-RagSaveDoc will be saved at <your path>\ai-engine-direct-helper-2.34\samples\fletui\ragsavedoc\dist <br>
+RagSaveDoc will be saved at <your path>\ai-engine-direct-helper-2.34\samples\fletui\geniefletui\windows\ragtool\dist <br>
 
 ## Note
 
-RagSaveDoc supports embedding model auto detection and downloading. So, first launch time may be longer because it will download embedding model. The following launch will be faster.
+ - RagSaveDoc supports embedding model auto detection and downloading. So, first launch time may be longer because it will download embedding model. The following launch will be faster.
+ - Saving a document which includes many pages may take long time. Application will show complete when saving done. Please be patient.
+ 
+ - ![image-RagSaveDoc_PrintScreen](assets/RagSaveDoc_PrintScreen.jpg)
