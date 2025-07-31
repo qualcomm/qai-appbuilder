@@ -32,13 +32,13 @@ beit/
 └── README.md         # Project documentation
 ```
 **NOTE: During runtime, the Release/ directory serves as the working directory. All relative paths within the application are resolved with respect to this directory.**
-#### Step 1:Download QAI Launcher
+#### Step 1: Download QAI Launcher
 Open a terminal and run:
 ```
 mkdir C:\ai-hub\
 cd C:\ai-hub\
 ```
-Click here to download [QAI_Launcher_v1.0.0.zip](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.34.0/QAI_Launcher_v1.0.0.zip).Unzip the downloaded file into the **C:\ai-hub** directory.
+Click here to download [QAI_Launcher_v1.0.0.zip](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.34.0/QAI_Launcher_v1.0.0.zip). Unzip the downloaded file into the **C:\ai-hub** directory.
 Run the following script to install all required dependencies and tools:
 ```
 .\1.Install_QAI_AppBuilder.bat
@@ -148,7 +148,7 @@ Before building and running the application, ensure that:
   * All required model files and DLLs are in their correct locations
 * All DLL paths, model/image paths, and other hardcoded paths in your beit.cpp and CMakeLists.txt are updated to match your environment.The specific steps to update these paths are provided below.
 #### Step 1: Setup CMakeLists.txt and Source Code
-##### 1.Configure CMakeLists.txt
+##### 1. Configure CMakeLists.txt
 Make sure to modify the following path settings in your CMakeLists.txt file to match your local environment:
 ```
 # ❗ Replace these with the actual paths where your OpenCV is installed:
@@ -165,7 +165,7 @@ set(APPBUILDER_DLL "${APPBUILDER_DIR}/libappbuilder.dll")
   ```
   set(OpenCV_DIR "path/to/opencv/build_msvc")
   ```
-###### 2.Update Paths in Source Code
+###### 2. Update Paths in Source Code
 Inside your beit.cpp file, modify the hardcoded paths to match the location of your model and runtime libraries. For example:
 ```
 // ❗ Update these paths to reflect your actual file locations
@@ -180,7 +180,7 @@ std::string json_path = "../models/imagenet_labels.json";
 * These paths are currently relative paths, which means they are resolved relative to the location of the executable (beit.exe) generated in the Release/ directory.
 If your files are not placed in the expected locations relative to Release/, you will need to adjust these paths accordingly or use absolute paths instead.
 
-#####  3.Build the Project with CMake 
+#####  3. Build the Project with CMake 
 In the Windows terminal, run the following command from the project root to configure the build:
 ```bash
 cmake -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release
