@@ -18,7 +18,7 @@ Here are the setup steps on WSL.
 
 - After successful installation, the file system of Ubuntu-20.04 is mapped to File Explorer, and you can directly access and modify files here.
 
-  ![image-Ubuntu](resource\image-Ubuntu.png)
+  ![image-Ubuntu](resource/image-Ubuntu.png)
 
 - For more details about WSL, please refer to [Install WSL | Microsoft Learn](https://learn.microsoft.com/en-us/windows/wsl/install) and[Set up a WSL development environment | Microsoft Learn](https://learn.microsoft.com/en-us/windows/wsl/setup/environment). If WSL installation fails, please refer to [Manual installation steps for older versions of WSL | Microsoft Learn](https://learn.microsoft.com/en-us/windows/wsl/install-manual) to fix the issue.
 
@@ -179,7 +179,7 @@ Here are the setup steps on WSL.
 
     - The error shows as below:
 
-      ![image-NetworkError](resource\image-NetworkError.png)
+      ![image-NetworkError](resource/image-NetworkError.png)
 
     - Solution: Get the dependency from domestic mirror instead of Google. Please modify the files as below.
 

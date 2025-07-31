@@ -21,7 +21,7 @@ Step 1. Start cmd command prompt window and active python virtual environment wi
 Step 2. Go to ai-engine-direct-helper samples path and start ragsavedoc application with below command:
 ```
 cd <your path>\ai-engine-direct-helper-2.34\samples
-python fletui\geniefletui\windows\ragtool\RagSaveDoc.py
+python fletui\GenieFletUI\windows\Ragtool\RagSaveDoc.py
 ```
 
 ## How to build ragsavedoc to Windows .exe file.
@@ -33,14 +33,14 @@ Step 1. Start cmd command prompt window and active python virtual environment wi
 ```
 Step 2. Go to ai-engine-direct-helper ragsavedoc path and generate building .spec file with below command:
 ```
-cd <your path>\ai-engine-direct-helper-2.34\samples\fletui\geniefletui\windows\ragtool
+cd <your path>\ai-engine-direct-helper-2.34\samples\fletui\GenieFletUI\windows\Ragtool
 python RagSaveDoc_generate_spec.py
 ```
 Step 3. Build ragsavedoc with below command:
 ```
 pyinstaller RagSaveDoc.spec
 ```
-RagSaveDoc will be saved at <your path>\ai-engine-direct-helper-2.34\samples\fletui\geniefletui\windows\ragtool\dist <br>
+RagSaveDoc will be saved at <your path>\ai-engine-direct-helper-2.34\samples\fletui\GenieFletUI\windows\Ragtool\dist <br>
 
 ## Note
 
