@@ -25,4 +25,4 @@ python fletui\GenieFletUI\android\GenieFletUI.py
 ```
 
 ## How to build APK.
-Building APK is a bit complicated. Recommend to build a simplest flet app firstly on Linux OS (building APK on Linux is more stable than on Windows). Refer to [BuildAPKGuide](buildapkguide/BuildAPKGuide.md). It will verify the building environment is good. And then replace your .py file to build your application APK.
+Building APK is a bit complicated. Recommend to build a simplest flet app firstly on Linux OS (building APK on Linux is more stable than on Windows). Refer to [BUILD.md](BUILD.md). It will verify the building environment is good. And then replace your .py file to build your application APK.
