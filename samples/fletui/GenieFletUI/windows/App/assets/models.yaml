@@ -1,0 +1,16 @@
+models:
+  - repo_id: gpustack/bge-m3-GGUF
+    local_dir: models/bge-m3-GGUF
+    required_files:
+      - bge-m3-Q4_K_M.gguf
+
+  - repo_id: cross-encoder/ms-marco-MiniLM-L-6-v2
+    local_dir: models/ms-marco-MiniLM-L-6-v2
+    required_files:
+      - config.json
+      - model.safetensors
+      - special_tokens_map.json
+      - tokenizer.json
+      - tokenizer_config.json
+      - vocab.txt
+      - pytorch_model.bin

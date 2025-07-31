@@ -1,0 +1,16 @@
+models:
+  - repo_id: BAAI/bge-m3
+    local_dir: models/bge-m3
+    required_files:
+      - 1_Pooling/config.json
+      - colbert_linear.pt
+      - config.json
+      - config_sentence_transformers.json
+      - modules.json
+      - pytorch_model.bin
+      - sentence_bert_config.json
+      - sentencepiece.bpe.model
+      - sparse_linear.pt
+      - special_tokens_map.json
+      - tokenizer.json
+      - tokenizer_config.json

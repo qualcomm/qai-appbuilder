@@ -14,7 +14,7 @@ RED_URL = "https://creator.xiaohongshu.com"
 PUBLISH_URL = "https://creator.xiaohongshu.com/publish/publish?from=menu"
 
 class RedPublisher:
-    def __init__(self, path=os.getcwd()):
+    def __init__(self, path=os.path.dirname(__file__)):
         if DEBUG:
             print("Class RedPublisher is init ...")
         self.drv = WDRV.Chrome()
@@ -23,7 +23,7 @@ class RedPublisher:
 
     def _load_cks(self):
         if DEBUG:
-            print("Try to load cookies from json")
+            print("Try to load cookies from json:", self.f_cookies)
         if os.path.exists(self.f_cookies):
             try:
                 with open(self.f_cookies, 'r') as f:
@@ -92,7 +92,7 @@ class RedPublisher:
         self.drv.get(LOGIN_URL)
         self._load_cks()
         self.drv.refresh()
-        time.sleep(10)
+        time.sleep(30)
         if self.drv.current_url != LOGIN_URL:
             self._store_cks()
             time.sleep(2)
@@ -108,7 +108,7 @@ class RedPublisher:
         if DEBUG:
             print("Login Manually")
         self.drv.get(LOGIN_URL)
-        time.sleep(5)
+        time.sleep(20)
 
         pi = self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder='手机号']")))
         pi.clear()
