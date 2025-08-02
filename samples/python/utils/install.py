@@ -15,7 +15,6 @@ import qai_hub
 import urllib.request as request
 
 qnn_sdk_version =  {
-    "2.24": "2.24.0.240626",
     "2.34": "2.34.0.250424",
 }
 
@@ -317,7 +316,7 @@ def run_uninstall_pip(command, desc=None, live=False):
     return run(f'"{python}" -m pip {command} ', desc=f"Uninstalling {desc}", errdesc=f"Couldn't install {desc}", live=live)
 
 
-def install_tools():
+def install_download_tools():
     tool_path = "tools"
 
     os.makedirs(tool_path, exist_ok=True)
@@ -500,13 +499,7 @@ def install_qai_sdk(version):
         return None
 
 
-def install_qai_appbuilder(version):
-    lib_arch = "aarch64-windows-msvc"
-    machine = platform.machine()
-    sysinfo = sys.version
-    if machine == "AMD64" or "AMD64" in sysinfo:
-        lib_arch = DEFAULT_LIB_ARCH
-
+def install_qai_appbuilder(version, lib_arch):
     if version in qnn_sdk_version:
         qai_appbuilder_wheel = QAI_APPBUILDER_WHEEL.replace("version", version)
         if lib_arch == "aarch64-windows-msvc":

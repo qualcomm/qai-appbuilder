@@ -22,7 +22,7 @@ Build QAI AppBuilder from source with Visual Studio 2022 on WoS device:<br>
     ```
 
 - Install Visual Studio 2022: 
-  - https://docs.qualcomm.com/bundle/publicresource/topics/80-62010-1/Install-Visual-Studio-2022.html?product=Windows%20on%20Snapdragon
+  - https://docs.qualcomm.com/bundle/publicresource/topics/80-62010-1/setup.html?product=1601111740057789
 - Install x64 version Python-3.12.6: 
   - https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe
 - Use the commands below to install Python dependency: 

@@ -48,7 +48,7 @@ C:\Qualcomm\AIStack\QAIRT\{SDK Version}\lib\hexagon-v73\unsigned\libqnnhtpv73.ca
 
 We can copy these libraries to one folder. E.g.: ```C:\<Project Name>\qnn\``` <br>
 * [python.md](python.md) can help setup the x64 Python environment automatically.
-* In WoS platform, ARM64 Python has better performance, but some Python extensions such as 'PyTorch' don't work for ARM64 Python today. For detailed help information on how to setup environment for using ARM64 Python, you can refer to [python_arm64.md](python_arm64.md)
+* In WoS platform, ARM64 Python has better performance, but some Python extensions don't work for ARM64 Python today. For detailed help information on how to setup environment for using ARM64 Python, you can refer to [python_arm64.md](python_arm64.md)
 
 ### 2. API from AppBuilder Python binding extension for Python projects.<br>
 There're several Python classes from this extension:
@@ -57,6 +57,12 @@ There're several Python classes from this extension:
 - QNNShareMemory - It's used to create processes share memory while using *QNNContextProc*.
 - QNNConfig - It's for configuring  Qualcomm® AI Runtime SDK libraries path, runtime(CPU/HTP), log leverl, profiling level.
 - PerfProfile - Set the HTP perf profile.
+
+## Notes: <br>
+a. Plese use the API *LogLevel.SetLogLevel()* for Python project to initialize the log function before you call any other APIs. 
+c. Refer to Python sample code: <br>
+https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python
+
 ## Sample Code(Python)
 
 ```
@@ -145,6 +151,15 @@ void QNN_DBG(const char* fmt, ...) <br>
     QNN_LOG_LEVEL_VERBOSE = 4 
     QNN_LOG_LEVEL_DEBUG   = 5 
 ```
+
+## Notes: <br>
+a. For C++(Visual Studio) projects, you need to set 'Runtime Library' to 'Multi-threaded DLL (/MD)'. Please refer to below link for detailed information:
+https://learn.microsoft.com/en-us/cpp/build/reference/md-mt-ld-use-run-time-library?view=msvc-170
+
+b. Plese use the API *SetLogLevel()* for C++ project to initialize the log function before you call any other APIs. 
+
+c. Refer to C++ sample code: <br>
+https://github.com/quic/ai-engine-direct-helper/tree/main/samples/c%2B%2B
 
 ## Sample Code(C++: load model to local process.)
 
