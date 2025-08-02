@@ -15,7 +15,7 @@ libQnnHtpV73Skel.so
 ```
 
 ### Convert the Fp16 & Int8 models to QNN:
-We use the [RealESRGAN](https://aihub.qualcomm.com/compute/models/real_esrgan_x4plus) model as sample:
+We use the [RealESRGAN](https://aihub.qualcomm.com/compute/models/real_esrgan_x4plus) model as sample. Make sure to rename the 'real_esrgan_x4plus' in 'extensions.conf' to your model name.
 ```
 Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.36.0.250627\
 Set PATH=%QNN_SDK_ROOT%lib\aarch64-windows-msvc;%QNN_SDK_ROOT%bin\aarch64-windows-msvc;%PATH%
