@@ -60,7 +60,7 @@ INFO: Service Is Ready Now!
 *. It is recommended to disable thinking mode when using the tools call function.<br>
 *. You can refer to [GenieAPIClientTools.py](../python/GenieAPIClientTools.py) on how to use tools call.<br>
 ```
-GenieAPIService\GenieAPIService.exe -c "genie\python\models\Qwen3.0-8B-v31\config.json" -l --all_text --enable_thinking
+GenieAPIService\GenieAPIService.exe -c "genie\python\models\IBM-Granite-v3.1-8B\config.json" -l --all_text --enable_thinking
 ```
 
 #### Text Splitter
@@ -82,7 +82,7 @@ You can get the sample code on how to use Text Splitter [here](https://github.co
 
   We can run it with the command below in a new terminal window:
 ```
-GenieAPIService\GenieAPIClient.exe --prompt "How to fish?" --stream
+GenieAPIService\GenieAPIClient.exe --prompt "How to fish?" --stream --model "IBM-Granite-v3.1-8B"
 ```
 
 ### Python Client Sample Code:
