@@ -11,6 +11,7 @@ import jieba
 import pickle
 from datetime import datetime
 from pathlib import Path
+from RagSaveStatusManager import RagSaveStatusManager
 
 base_path = ""
 MODEL_LIST_CONFIG_FILE = ""
@@ -25,6 +26,7 @@ else:   # this is windows python environment
 
 BM25_DIR = str(base_path / "database" / "bm25")
 CHROMADB_DIR = str(base_path / "database" / "chroma_db")
+DONE_FILE_DIR = str(base_path / "database")
 
 # Candidate: bge-m3, bge-base-zh-v1.5, Qwen3-Embedding-0.6B, Qwen3-Embedding-4B
 EMBEDDING_MODEL_NAME = "bge-m3"
@@ -74,18 +76,20 @@ def load_documents(directory: str):
     global total_page_num
 
     documents = []
+    file_name = []
     total_page_num = 0
     for root, _, files in os.walk(directory):
         for file in files:
             if file.endswith(SUPPORTED_DOCUMENT_TYPE):
                 path = os.path.join(root, file)
+                file_name.append(path)
                 doc = fitz.open(path)
                 total_page_num += len(doc)
                 for i in range(len(doc)):
                     text = doc[i].get_text()
                     if text.strip():
                         documents.append({"page_content": text, "metadata": {"source": path, "page": i + 1}})
-    return documents
+    return documents, file_name
 
 def split_text(docs):
     splitter = RecursiveCharacterTextSplitter(
@@ -157,30 +161,44 @@ def store_vectors(docs, persist_dir=CHROMADB_DIR) -> int:
     print("Save ChromaDB consume: {consume}".format(consume=time_consume))
     return chunk_num
 
-def handle_document(selected_folder: str, page: ft.Page, chat: ft.ListView) -> int:
+def write_to_database(selected_folder: str) -> tuple[int, list]:
     global total_page_num
 
     time_start = datetime.now()
-    docs = load_documents(selected_folder)
+    docs, file_list = load_documents(selected_folder)
     time_consume = datetime.now() - time_start
-    print("Load document consume: {consume}".format(consume=time_consume))
+    print(f"Load document consume: {time_consume}")
 
     time_start = datetime.now()
     split_docs = split_text(docs)
     time_consume = datetime.now() - time_start
-    print("Split docs consume: {consume}".format(consume=time_consume))
+    print(f"Split docs consume: {time_consume}")
     filtered_docs = [doc for doc in split_docs if doc.page_content.strip()]
 
     time_start = datetime.now()
     save_new_bm25_chunk(filtered_docs)
     time_consume = datetime.now() - time_start
-    print("Save bm25 consume: {consume}".format(consume=time_consume))
+    print(f"Save bm25 consume: {time_consume}")
 
     time_start = datetime.now()
     chunk_num = store_vectors(filtered_docs)
     time_consume = datetime.now() - time_start
-    print("Store vectors [Page: {page}, Chunk: {chunk}] consume: {consume}".format(page=total_page_num, chunk=chunk_num, consume=time_consume))
-    return chunk_num
+    print(f"Store vectors [Page: {total_page_num}, Chunk: {chunk_num}] consume: {time_consume}")
+    return chunk_num, file_list
+
+def handle_document(selected_folder: str):
+    rssmanager = RagSaveStatusManager(DONE_FILE_DIR)
+    rssmanager.begin_writing()
+
+    try:
+        chunk_num, file_list = write_to_database(selected_folder)
+        rssmanager.create_done(file_list)
+        return chunk_num
+    except Exception as e:
+        print(f"❌ Exception happens on database: {e}")
+        return None
+    finally:
+        rssmanager.end_writing()
 
 def main(page: ft.Page):
     page.horizontal_alignment = ft.CrossAxisAlignment.STRETCH
@@ -194,14 +212,17 @@ def main(page: ft.Page):
     # file upload button
     async def on_folder_selected(e: ft.FilePickerResultEvent):
         if e.path and os.path.isdir(e.path):
-            pdf_files = [f for f in os.listdir(e.path) if f.endswith(SUPPORTED_DOCUMENT_TYPE)]
-            if pdf_files:
+            files = [f for f in os.listdir(e.path) if f.endswith(SUPPORTED_DOCUMENT_TYPE)]
+            if files:
                 chat.controls.append(ft.Text("Target {folder}: is processing [{time}]...".format(folder=e.path, time=datetime.now())))
                 input_row.disabled = True
                 page.update()
                 await asyncio.sleep(0.1)
-                total_chunk = handle_document(e.path, page, chat)
-                chat.controls.append(ft.Text("Target {folder}: complete [Total pages：{page}， Total chunks：{chunk}] [{time}]".format(folder=e.path, page=total_page_num, chunk=total_chunk, time=datetime.now())))
+                total_chunk = handle_document(e.path)
+                if total_chunk is None:
+                    chat.controls.append(ft.Text(f"Target {e.path}: database is corrupt! [{datetime.now()}]"))
+                else:
+                    chat.controls.append(ft.Text(f"Target {e.path}: complete [Total pages: {total_page_num}, Total chunks: {total_chunk}] [{datetime.now()}]"))
                 input_row.disabled = False
             else:
                 chat.controls.append(ft.Text("There is no pdf/txt file. Please select another folder..."))
