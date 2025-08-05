@@ -46,6 +46,9 @@ if exist "tools\pixi\pixi.exe" (
     powershell -Command "Expand-Archive -Path '%currentDir%\tools\pixi.zip' -DestinationPath '%currentDir%\tools\pixi' -Force"
 )
 
+echo Set Pixi config...
+powershell -ExecutionPolicy Bypass -File "%currentDir%\utils\Set_Pixi_Config.ps1" "%currentDir%"
+
 echo Installing tools...
 cd env
 pixi run install-tools
