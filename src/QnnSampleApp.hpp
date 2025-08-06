@@ -60,7 +60,7 @@ class QnnSampleApp {
                bool dumpOutputs                        = false,
                std::string cachedBinaryPath            = "",
                std::string saveBinaryName              = "",
-               std::vector<LoraAdapter>& lora_adapters = std::vector<LoraAdapter>());
+               const std::vector<LoraAdapter>& lora_adapters = std::vector<LoraAdapter>());
 
   // @brief Print a message to STDERR then return a nonzero
   //  exit status.
@@ -102,8 +102,6 @@ class QnnSampleApp {
   StatusCode contextApplyBinarySection(QnnContext_SectionType_t section);
   bool binaryUpdates();
   void update_m_lora_adapters(std::vector<LoraAdapter>& lora_adapters);
-
-  std::vector<LoraAdapter>& m_lora_adapters;
 
   StatusCode applyBinarySection(
       std::string graphName,
@@ -171,6 +169,13 @@ class QnnSampleApp {
   std::string m_outputPath;
   std::string m_saveBinaryName;
   std::string m_cachedBinaryPath;
+
+#ifdef _WIN32
+  std::vector<LoraAdapter>& m_lora_adapters;
+#else
+  std::vector<LoraAdapter> m_lora_adapters;
+#endif
+
   QnnBackend_Config_t **m_backendConfig = nullptr;
   Qnn_ContextHandle_t m_context         = nullptr;
   QnnContext_Config_t **m_contextConfig = nullptr;
@@ -181,7 +186,6 @@ class QnnSampleApp {
   bool m_dumpOutputs;
   qnn_wrapper_api::GraphInfo_t **m_graphsInfo;
   uint32_t m_graphsCount;
-  void *m_backendLibraryHandle;
   iotensor::IOTensor m_ioTensor;
   bool m_isBackendInitialized;
   bool m_isContextCreated;

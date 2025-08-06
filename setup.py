@@ -112,6 +112,7 @@ def build_cmake():
 
     if os.path.exists(LIB_PATH + "/libGenie.so"):
         shutil.copy(LIB_PATH + "/libGenie.so", binary_path)
+        os.makedirs("lib/Release", exist_ok=True)
         shutil.copy(LIB_PATH + "/libGenie.so", "lib/Release")
 
 build_cmake()

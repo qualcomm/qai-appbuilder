@@ -19,7 +19,7 @@ std::string build_request_body(const std::string& model, const std::string& prom
     body["model"] = model;
     body["stream"] = stream;
     body["messages"] = {
-        {{"role", "system"}, {"content", "You are a math teacher who teaches algebra."}},
+        {{"role", "system"}, {"content", "You are a helpful assistant."}},
         {{"role", "user"}, {"content", prompt}}
     };
     body["size"] = 4096;

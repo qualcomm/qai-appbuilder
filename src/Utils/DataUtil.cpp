@@ -5,8 +5,12 @@
 // SPDX-License-Identifier: BSD-3-Clause
 //
 //==============================================================================
+
+#ifdef _WIN32
 #pragma warning(push)
 #pragma warning(disable:4267)
+#endif
+
 #include <cmath>
 #include <fstream>
 #include <iostream>

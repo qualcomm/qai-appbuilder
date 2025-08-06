@@ -290,11 +290,11 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
                        const std::string& backend_lib_path, const std::string& system_lib_path, 
                        std::vector<LoraAdapter>& lora_adapters,
                        bool async) {
-  bool result = false;
-
   QNN_INF("LibAppBuilder::ModelInitialize: %s \n", model_name.c_str());
 
 #ifdef _WIN32
+  bool result = false;
+
   if(!proc_name.empty()) {
     // If proc_name, create process and save process info & model name to map, load model in new process.
     result = TalkToSvc_Initialize(model_name, proc_name, model_path, backend_lib_path, system_lib_path, async);
@@ -448,11 +448,11 @@ bool ModelInferenceEx(std::string model_name, std::string proc_name, std::string
 }
 
 bool ModelDestroyEx(std::string model_name, std::string proc_name) {
-    bool result = false;
-
     QNN_INF("LibAppBuilder::ModelDestroy: %s \n", model_name.c_str());
 
 #ifdef _WIN32
+    bool result = false;
+
     if (!proc_name.empty()) {
         // If proc_name, desctroy the model in that process.
         result = TalkToSvc_Destroy(model_name, proc_name);

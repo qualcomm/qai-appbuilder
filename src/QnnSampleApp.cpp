@@ -26,8 +26,12 @@
 #include "QnnTypeMacros.hpp"
 #include "IOTensor.hpp"
 #include "LibAppBuilder.hpp"
-#include "set"
+#include <set>
+#include <exception>
+
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 using namespace qnn;
 using namespace qnn::tools;
@@ -35,7 +39,6 @@ using namespace qnn::tools::iotensor;
 
 static const int sg_lowerLatency  = 40;    // Should be used on V66 and above only
 static const int sg_lowLatency    = 100;   // This will limit sleep modes available while running
-static const int sg_mediumLatency = 1000;  // This will limit sleep modes available while running
 static const int sg_highLatency   = 2000;
 static std::set<uint32_t> sg_powerConfigIds = {};
 
@@ -123,7 +126,7 @@ bool boostPerformance(QnnHtpDevice_PerfInfrastructure_t perfInfra, std::string p
         powerConfig.dcvsV3Config.coreVoltageCornerMax    = DCVS_VOLTAGE_VCORNER_TURBO;
     }
     else {
-        QNN_ERROR("Invalid performance profile %s to set power configs", perfProfile);
+        QNN_ERROR("Invalid performance profile %s to set power configs", perfProfile.c_str());
         return false;
     }
     
@@ -189,7 +192,7 @@ sample_app::QnnSampleApp::QnnSampleApp(QnnFunctionPointers qnnFunctionPointers,
                                        bool dumpOutputs,
                                        std::string cachedBinaryPath,
                                        std::string saveBinaryName, 
-                                       std::vector<LoraAdapter>& lora_adapters)
+                                       const std::vector<LoraAdapter>& lora_adapters)
     : m_qnnFunctionPointers(qnnFunctionPointers),
       m_outputPath(outputPath),
       m_saveBinaryName(saveBinaryName),
@@ -200,7 +203,6 @@ sample_app::QnnSampleApp::QnnSampleApp(QnnFunctionPointers qnnFunctionPointers,
       m_inputDataType(inputDataType),
       m_profilingLevel(profilingLevel),
       m_dumpOutputs(dumpOutputs),
-      m_backendLibraryHandle(backendLibraryHandle),
       m_isBackendInitialized(false),
       m_isContextCreated(false) {
   split(m_inputListPaths, inputListPaths, ',');
@@ -579,7 +581,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::applyBinarySection(
 
     void* voidBufferPtr = static_cast<void*>(bufferPtr);
     QnnContext_Buffer_t contextBuffer{ QNN_CONTEXT_BUFFER_VERSION_1,
-                                      {QNN_CONTEXTMEMTYPE_RAW, {voidBufferPtr, bufferSize}} };
+                                      {QNN_CONTEXTMEMTYPE_RAW, {{voidBufferPtr, bufferSize}}} };
 
     // Get Profile Handle
     Qnn_ProfileHandle_t profileBackendHandle{ nullptr };
@@ -789,7 +791,10 @@ sample_app::StatusCode sample_app::QnnSampleApp::createFromBinary() {
     return StatusCode::FAILURE;
   }
 
+#ifdef _WIN32
 #define MMAP_FILE
+#endif
+
 #ifdef MMAP_FILE
   HANDLE hFile = CreateFile(m_cachedBinaryPath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
   if (hFile == INVALID_HANDLE_VALUE) {
@@ -1307,7 +1312,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vecto
       //size_t totalCount = inputFileList[0].size();
       //while (!inputFileList[0].empty()) 
       {
-          size_t startIdx = 0;  // (totalCount - inputFileList[0].size());
+          // size_t startIdx = 0;  // (totalCount - inputFileList[0].size());
           if (iotensor::StatusCode::SUCCESS !=
             m_ioTensor.populateInputTensors((uint32_t)graphIdx, inputBuffers, inputs, graphInfo, m_inputDataType)) {
             returnStatus = StatusCode::FAILURE;
