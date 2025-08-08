@@ -9,7 +9,7 @@ Step 2. Install necessary python module. Recommend to setup python virtual envir
 ```
 python -m venv myfletenv
 myfletenv\Scripts\activate
-pip install flet asyncio langchain langchain_community langchain-huggingface langchain-chroma jieba openai PyPDF2 rank_bm25 huggingface_hub hf_xet python-dateutil llama-cpp-python PyMuPDF pyyaml
+pip install flet asyncio langchain langchain_community langchain-huggingface langchain-chroma jieba openai PyPDF2 rank_bm25 huggingface_hub hf_xet python-dateutil llama-cpp-python PyMuPDF pyyaml sentence_transformers PyInstaller
 ```
 
 ## How to run in python environment
