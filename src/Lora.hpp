@@ -17,8 +17,12 @@
     #else
         #define LIBAPPBUILDER_API __declspec(dllimport)
     #endif
-#else // _WIN32
-    #define LIBAPPBUILDER_API
+#else // Linux and Android
+    #ifdef DLL_EXPORTS
+        #define LIBAPPBUILDER_API __attribute__((visibility("default")))
+    #else
+        #define LIBAPPBUILDER_API
+    #endif
 #endif
 
 

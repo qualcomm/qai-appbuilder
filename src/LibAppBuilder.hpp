@@ -14,16 +14,6 @@
 #include <chrono>
 #include "Lora.hpp"
 
-#ifdef _WIN32
-    #ifdef DLL_EXPORTS
-        #define LIBAPPBUILDER_API __declspec(dllexport)
-    #else
-        #define LIBAPPBUILDER_API __declspec(dllimport)
-    #endif
-#else // _WIN32
-    #define LIBAPPBUILDER_API
-#endif
-
 /////////////////////////////////////////////////////////////////////////////
 /// Sync log time with 'QAIAppSvc.exe' processes. For AppBuilder library internal use.
 /////////////////////////////////////////////////////////////////////////////

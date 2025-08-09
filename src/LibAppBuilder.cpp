@@ -553,7 +553,6 @@ bool LibAppBuilder::ModelInference(std::string model_name, std::vector<uint8_t*>
 }
 
 bool LibAppBuilder::ModelApplyBinaryUpdate(const std::string model_name, std::vector<LoraAdapter>& lora_adapters) {
-    
     bool result = true;
     std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
     if (nullptr == app) {
@@ -605,7 +604,6 @@ bool LibAppBuilder::DeleteShareMemory(std::string share_memory_name) {
 #else
         return true;
 #endif
-
 }
 
 int main(int argc, char** argv) {
