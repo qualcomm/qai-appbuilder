@@ -12,7 +12,7 @@ project(appbuilder LANGUAGES CXX)
 if (WIN32)
     LINK_DIRECTORIES(../lib/Release ../lib/RelWithDebInfo)
 else()
-    LINK_DIRECTORIES(../lib/)
+    LINK_DIRECTORIES(../lib/ ../lib/Release)
 endif()
 
 INCLUDE_DIRECTORIES(../src)
