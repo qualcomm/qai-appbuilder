@@ -136,7 +136,7 @@ link_directories(${OPENCV_ROOT}/lib)
   ```
   find_package(OpenCV REQUIRED COMPONENTS core imgproc highgui imgcodecs videoio)
   ```
-###### 2. Update Paths in Source Code
+##### 2. Update Paths in Source Code
 Inside your `real_esrgan_x4plus.cpp` file, modify the hardcoded paths to match the location of your model and runtime libraries. For example:
 ```
 // ❗ Update these paths to reflect your actual file locations
@@ -150,17 +150,17 @@ fs::path output_path = execution_ws / "output.jpg";
 
 * These paths are currently relative paths, which means they are resolved relative to the location of the executable (`real_esrgan_x4plus.exe`) generated in the Release/ directory.
 If your files are not placed in the expected locations relative to Release/, you will need to adjust these paths accordingly or use absolute paths instead.
-###### Special Note – For source-built OpenCV only
+##### Special Note – For source-built OpenCV only
 If you compiled OpenCV from source (not using vcpkg), you must explicitly tell CMake where your OpenCV installation is located before calling find_package. You should also add a post-build step so that the OpenCV runtime DLLs are automatically copied into the same folder as your executable.
 **Note:** Replace the placeholder paths below (C:/path/to/opencv/...) with the actual install location and bin folder from your own OpenCV build.
-* ###### Step 1 
+* ##### Step 1 
   In CMakeLists.txt (around line 56, before find_package(OpenCV ...)), add:
 ``` 
 set(OpenCV_DIR "C:/path/to/opencv/build_msvc/install") <=New added
 set(OpenCV_BIN_DIR "C:/path/to/opencv/build_msvc/install/ARM64/vc17/bin") <=New added
 find_package(OpenCV REQUIRED COMPONENTS core imgproc highgui imgcodecs videoio)
 ```
-* ###### Step 2 
+* ##### Step 2 
    In the final copy section of CMakeLists.txt (**append** to your existing add_custom_command):
 ```
 # === [New Added] === Post-build step to copy all OpenCV DLLs into the exe's output folder

@@ -143,7 +143,7 @@ set(APPBUILDER_DLL "${APPBUILDER_DIR}/libappbuilder.dll")
   ```
   set(OpenCV_DIR "path/to/opencv/build_msvc")
   ```
-###### 2.Update Paths in Source Code
+##### 2.Update Paths in Source Code
 Inside your beit.cpp file, modify the hardcoded paths to match the location of your model and runtime libraries. For example:
 ```
 // ❗ Update these paths to reflect your actual file locations
