@@ -104,38 +104,14 @@ vcpkg install xtensor
 * If the download is too slow, you can download via the link.Put all the downloaded files in the the vcpkg directory (e.g., C:\vcpkg\dowloads).Then run the command again.
 
 
-### 2.3 How to build opencv4:arm64-windows
-#### Using vcpkg
-##### 1.
-Run following commands in Windows terminal:
-```
-vcpkg install opencv4[core,win32ui,webp,tiff,thread,quirc,png,jpeg,intrinsics,highgui,gapi,fs,dshow,calib3d]:arm64-windows
-```
-##### 2.
-Go to the C:\vcpkg\ports\opencv4\ directory and open the **portfile.cmake** file.
-After line 348, add the following line:
-```
--DCPU_BASELINE=NEON
-```
-So that the section looks like this:
-```
-vcpkg_cmake_configure(
-    SOURCE_PATH "${SOURCE_PATH}"
-    OPTIONS
-        ###### Verify that required components and only those are enabled
-        -DENABLE_CONFIG_VERIFICATION=ON
-        ###### opencv cpu recognition is broken, always using host and not target: here we bypass that
-        -DOPENCV_SKIP_SYSTEM_PROCESSOR_DETECTION=TRUE
-        -DAARCH64=${TARGET_IS_AARCH64}
-        -DX86_64=${TARGET_IS_X86_64}
-        -DX86=${TARGET_IS_X86}
-        -DCPU_BASELINE=NEON        # <-- NEWLY ADDED LINE (IMPORTANT)
-```
-##### 3.
-Then run below command in Windows terminal:
-```
-vcpkg install opencv4[core,calib3d,directml,dshow,fs,gapi,highgui,intrinsics,jpeg,msmf,png,quirc,thread,tiff,webp,win32ui]:arm64-windows --editable  --recurse
-```
+### 2.3 Build OpenCV for ARM64
+
+OpenCV ARM64 support includes two build methods:
+* Using vcpkg for package-based installation and configuration
+* Building from source via GitHub with CMake and Visual Studio
+  
+For complete instructions, including configuration flags, patching steps, and troubleshooting tips, please refer to the following guide:
+📄 [Full OpenCV ARM64 Build Guide](../dependency/opencv)
 
 ### 3.Run Application
 ##### Preparation
@@ -174,24 +150,44 @@ fs::path output_path = execution_ws / "output.jpg";
 
 * These paths are currently relative paths, which means they are resolved relative to the location of the executable (`real_esrgan_x4plus.exe`) generated in the Release/ directory.
 If your files are not placed in the expected locations relative to Release/, you will need to adjust these paths accordingly or use absolute paths instead.
-
+###### Special Note – For source-built OpenCV only
+If you compiled OpenCV from source (not using vcpkg), you must explicitly tell CMake where your OpenCV installation is located before calling find_package. You should also add a post-build step so that the OpenCV runtime DLLs are automatically copied into the same folder as your executable.
+**Note:** Replace the placeholder paths below (C:/path/to/opencv/...) with the actual install location and bin folder from your own OpenCV build.
+* ###### Step 1 
+  In CMakeLists.txt (around line 56, before find_package(OpenCV ...)), add:
+``` 
+set(OpenCV_DIR "C:/path/to/opencv/build_msvc/install") <=New added
+set(OpenCV_BIN_DIR "C:/path/to/opencv/build_msvc/install/ARM64/vc17/bin") <=New added
+find_package(OpenCV REQUIRED COMPONENTS core imgproc highgui imgcodecs videoio)
+```
+* ###### Step 2 
+   In the final copy section of CMakeLists.txt (**append** to your existing add_custom_command):
+```
+# === [New Added] === Post-build step to copy all OpenCV DLLs into the exe's output folder
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          "${OpenCV_BIN_DIR}"
+          $<TARGET_FILE_DIR:${PROJECT_NAME}>
+```
 #####  3. Build the Project with CMake 
-In the Windows terminal, run the following command from the project root to configure the build:
+Open the Windows Command Prompt (CMD) as Administrator, then navigate to the project root directory and run the following command to configure the build:
 ```bash
-cmake -B "%BUILD_DIR%" ^
-      -G %GENERATOR% ^
+cmake -B "build" ^
+      -G "Visual Studio 17 2022" ^
       -A ARM64 ^
       -DCMAKE_BUILD_TYPE=Release ^
       -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=bin
 ```
+
 #### Step 2: Build the Application
 ```bash
-cmake --build "%BUILD_DIR%" --config Release
+cmake --build "build" --config Release
 ```
+
 #### Step 3: Run the Application
 In the Windows terminal, navigate to the Release folder and run:
 ```
-cd Release
+cd build\bin\Release
 ./WoA_Real_Esrgan_x4plus.exe
 ```
 #### Step 4: Verifying Successful Execution
