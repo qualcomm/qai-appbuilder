@@ -75,9 +75,25 @@ bool deepCopyQnnTensorInfo(Qnn_Tensor_t *dst, const Qnn_Tensor_t *src);
 
 QnnLog_Level_t parseLogLevel(std::string logLevelString);
 
+
+#ifdef __ANDROID__
+#include <android/log.h>
+#define LOG_TAG "com.example.genieapiservice"
+#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
+void inline My_Log(const std::string& message) {
+    std::cout << message << std::endl;
+    LOGD("%s", message.c_str());
+}
+#else
+void inline My_Log(const std::string& message) {
+    std::cout << message << std::endl;
+}
+#endif
+
 void inline exitWithMessage(std::string &&msg, int code) {
   // std::cerr << msg << std::endl;
   QNN_ERROR(msg.c_str());
+  My_Log(msg);
   std::exit(code);
 }
 

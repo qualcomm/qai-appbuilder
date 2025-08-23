@@ -60,8 +60,8 @@ python python\stable_diffusion_v2_1\stable_diffusion_v2_1.py --prompt "spectacul
 | depth_anything  | python python\depth_anything\depth_anything.py |
 | mediapipe_hand  | python python\mediapipe_hand\mediapipe_hand.py |
 | nomic_embed_text  | python python\nomic_embed_text\nomic_embed_text.py |
-| easy_ocr  | python python python\easy_ocr\easy_ocr.py |
-| face_attrib_net  | python python python\face_attrib_net\face_attrib_net.py |
+| easy_ocr  | python python\easy_ocr\easy_ocr.py |
+| face_attrib_net  | python python\face_attrib_net\face_attrib_net.py |
 | openai_clip  | python python\openai_clip\openai_clip.py --text "mountain" |
 | whisper_base_en  | python python\whisper_base_en\whisper_base_en.py |
 | whisper_tiny_en  | python python\whisper_tiny_en\whisper_tiny_en.py |

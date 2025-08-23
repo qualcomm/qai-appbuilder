@@ -8,7 +8,6 @@ import os
 sys.path.append(".")
 sys.path.append("python")
 import utils.install as install
-install.install_qai_appbuilder(install.DEFAULT_SDK_VER)
 import cv2
 import numpy as np
 import numpy.typing as npt
