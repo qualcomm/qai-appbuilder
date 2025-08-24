@@ -204,9 +204,11 @@ GenieContext::~GenieContext() {
       std::cerr << "Failed to free the sampler config." << std::endl;
     }
 
-    status = GenieLog_free(m_LogHandle);
-    if (GENIE_STATUS_SUCCESS != status) {
-      std::cerr << "Failed to free the Log handle." << std::endl;
+    if (m_LogHandle != nullptr) {
+        status = GenieLog_free(m_LogHandle);
+        if (GENIE_STATUS_SUCCESS != status) {
+          std::cerr << "Failed to free the Log handle." << std::endl;
+        }
     }
 
     status = GenieProfile_free(m_ProfileHandle);
@@ -297,7 +299,49 @@ bool GenieContext::SetStopSequence(const std::string& stop_sequences) {
     return true;
 }
 
+#if defined(GENIE_API_VERSION_MINOR) && (GENIE_API_VERSION_MINOR >= 11)
+
+void MyAllocCallback(const size_t size, const char **allocatedData)
+{
+    *allocatedData = reinterpret_cast<const char *>(malloc(size));
+}
+
+size_t GenieContext::TokenLength(const std::string &text)
+{
+    GenieTokenizer_Handle_t tokenizerHandle = nullptr;
+    Genie_Status_t status = GenieDialog_getTokenizer(m_DialogHandle, &tokenizerHandle);
+    if (status != GENIE_STATUS_SUCCESS)
+    {
+        std::cerr << "get tokenizer failed, error code: " << status << std::endl;
+        return 0;
+    }
+
+    const int32_t *tokenIds = nullptr;
+    uint32_t numTokenIds = 0;
+
+    status = GenieTokenizer_encode(
+            tokenizerHandle,
+            text.c_str(),
+            MyAllocCallback,
+            &tokenIds,
+            &numTokenIds
+    );
+
+    if (status != GENIE_STATUS_SUCCESS)
+    {
+        std::cerr << "encode failed, erroe code: " << status << " " << "string is: " << text.c_str() << std::endl;
+        return text.size();
+    }
+
+    free((void *) tokenIds);
+    return static_cast<size_t>(numTokenIds);
+}
+
+#else
+
 size_t GenieContext::TokenLength(const std::string& text) {
     std::vector<int32_t> tokens;
     return GenieDialog_encode(m_DialogHandle, text, tokens);
 }
+
+#endif

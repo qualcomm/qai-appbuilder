@@ -11,7 +11,8 @@ This software is provided “as is,” without any express or implied warranties
 Note: Contributions are welcome. Please ensure thorough testing before deploying in critical systems.
 
 ## Introduction 
-This sample helps developers use QAI AppBuilder + Python to build Genie based Open AI compatibility API service on Windows on Snapdragon (WoS) platform.
+This sample helps developers use QAI AppBuilder + Python to build Genie based Open AI compatibility API service on Windows on Snapdragon (WoS) platform. <br>
+We suggest using the C++ version of [GenieAPIService](../c++/) provided by us.
 
 ## Features
 • Support both stream and none stream mode <br> 

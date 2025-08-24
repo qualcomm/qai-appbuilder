@@ -170,11 +170,7 @@ class QnnSampleApp {
   std::string m_saveBinaryName;
   std::string m_cachedBinaryPath;
 
-#ifdef _WIN32
-  std::vector<LoraAdapter>& m_lora_adapters;
-#else
   std::vector<LoraAdapter> m_lora_adapters;
-#endif
 
   QnnBackend_Config_t **m_backendConfig = nullptr;
   Qnn_ContextHandle_t m_context         = nullptr;
