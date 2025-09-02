@@ -12,6 +12,7 @@ The **Langflow** package includes 3 distinct flows:
 1. **YoloV8_det Demo** – An object detection flow based on the YOLOv8 model.
 2. **Image Classification Inceptionv3** – An image classification flow using the InceptionV3 model.
 3. **Basic Chat Genie** – A conversational flow powered by a locally deployed large language model (LLM).
+4. **LLM CV Chat Genie** - The CV models interactive conversational flow supported by a large language model (LLM).
 
 ## ⚠️ Prerequisites
 
@@ -96,3 +97,18 @@ Once uploaded, all reference flows will be imported and available for use in you
 -  Enter your message in the text input box and click **`Send`**.
 
 The flow will invoke a local large language model to generate a response based on your input, enabling interactive chat functionality.
+
+#### 4. Run **LLM CV Chat Genie** Flow
+-  From the main dashboard, click **`My Projects`**.
+
+-  In the project list, choose **`LLM CV Demo`**.
+
+-  Select the corresponding image upload in the **`Qualcomm CV Input`** module of the conversational flow.
+
+-  Click the **`Playground`** button in the top-right corner of the interface.
+
+-  Enter your message in the text input box and click **`Send`**.
+
+> 🕒 **Note1:** For the first use, please note: You need to download and extract the [Qwen2.0-7B-SSD](https://www.aidevhome.com/data/adh2/models/8380/qwen2_7b_ssd.zip) model in advance and store all files inside in the `ai-engine-direct-helper\samples\genie\python\models\Qwen2.0-7B-SSD` directory.
+
+> 🕒 **Note2:** If you want flow to handle images correctly as required, it is necessary to note that the message should include the corresponding `prompt information`. For specific prompt information, please refer to the **`Prompt`** module of the conversational flow.

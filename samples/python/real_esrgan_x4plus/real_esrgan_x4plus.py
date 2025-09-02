@@ -5,6 +5,7 @@
 
 import sys
 import os
+import argparse
 sys.path.append(".")
 sys.path.append("python")
 import utils.install as install
@@ -17,6 +18,7 @@ from utils.image_processing import (
     pil_resize_pad,
     pil_undo_resize_pad
 )
+
 from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig)
 
 
@@ -118,9 +120,25 @@ def Release():
     # Release the resources.
     del(realesrgan)
 
-if __name__ == '__main__':
+def main(input_image_path=None, output_image_path=None, show_image = True):
+
+    if input_image_path is None:
+        input_image_path = execution_ws + "\\input.jpg"
+
+    if output_image_path is None:
+        output_image_path = execution_ws + "\\output.png"
+
     Init()
 
-    Inference(execution_ws + "\\input.jpg", execution_ws + "\\output.jpg")
+    Inference(input_image_path=input_image_path,output_image_path=output_image_path,show_image=show_image)
 
     Release()
+    return "Real ESR Gan Inference Result"
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Process a single image path.")
+    parser.add_argument('--input_image_path', help='Path to the input image', default=None)
+    #input_image_path, output_image_path
+    parser.add_argument('--output_image_path', help='Path to the output image', default=None)
+    args = parser.parse_args()
+    main(args.input_image_path,args.output_image_path)

@@ -5,6 +5,7 @@
 
 import sys
 import os
+import argparse
 sys.path.append(".")
 sys.path.append("python")
 import utils.install as install
@@ -17,6 +18,7 @@ from utils.image_processing import (
     pil_resize_pad,
     pil_undo_resize_pad
 )
+
 from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig)
 
 ####################################################################
@@ -73,7 +75,7 @@ def Init():
     # Instance for UnetSegmentation objects.
     unet_segmentation = UnetSegmentation("unet_segmentation", model_path)
 
-def Inference(input_image_path, output_image_path): 
+def Inference(input_image_path, output_image_path, show_image = True): 
     # Read and preprocess the image.
     image = Image.open(input_image_path)
     width, height = image.size
@@ -106,12 +108,14 @@ def Inference(input_image_path, output_image_path):
     mask_image = Image.blend(image_input.convert("RGBA"), mask.convert("RGBA"), alpha=1.0)
     mask_image = pil_undo_resize_pad(mask_image,image_size,_scale,image_padding)
     mask_image.save(execution_ws + "\\output_mask.png")
-    mask_image.show()
+    if show_image:
+        mask_image.show()
 
     output_image = Image.blend(image_input.convert("RGBA"), mask.convert("RGBA"), alpha=0.5)
     output_image = pil_undo_resize_pad(output_image,image_size,_scale,image_padding)
     output_image.save(output_image_path)
-    output_image.show()
+    if show_image:
+        output_image.show()
 
 
 def Release():
@@ -120,10 +124,30 @@ def Release():
     # Release the resources.
     del(unet_segmentation)
 
+def main(image_path=None,output_path=None,show_image = True):
 
-Init()
+    if image_path is None:
+        # Example image path if no argument is provided
+        image_path = f'{execution_ws}\\input.jpg'
 
-Inference(execution_ws + "\\input.jpg", execution_ws + "\\output.png")
+    if output_path is None:
+        output_path=f'{execution_ws}\\output.png'
 
-Release()
+
+    Init()
+
+    Inference(image_path, output_path, show_image = show_image)
+
+    Release()
+
+    return "Unet Segmentation Inference Result"
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Process a single image path.")
+    parser.add_argument('--image', help='Path to the image', default=None)
+    parser.add_argument('--output_image', help='Path to image', default=None)
+
+    args = parser.parse_args()
+    main(args.image,args.output_image)
 
