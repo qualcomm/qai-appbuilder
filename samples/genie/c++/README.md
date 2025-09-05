@@ -15,11 +15,13 @@ This sample helps developers use C++ to build Genie based Open AI compatibility 
 
 ## Features
 • Support both stream and none stream mode <br> 
+• Support switching between models <br>
+• Support customization model <br>
+• Support text splitter feature [*NEW!*] <br> 
 • Support tools call [*NEW!*] <br> 
 • Support enable/disable thinking mode [*NEW!*] <br> 
-• Support text splitter feature [*NEW!*] <br> 
-• Support switching between models <br>
-• Support to extend the use of your own model <br>
+• Support lora [*NEW!*] <br> 
+• Support history feature [*NEW!*] <br> 
 
 ## GenieAPIService
 Genie OpenAI Compatible API Service.
@@ -54,25 +56,15 @@ INFO: [TIME] | model load time >> 8103.10 ms
 INFO: Service Is Ready Now!
 ```
 
-#### More parameters: <br>
---all_text: Output all text includes tool calls text. Disabled by default.<br>
---enable_thinking: Enable thinking model. Disabled by default.<br>
-*. It is recommended to disable thinking mode when using the tools call function.<br>
-*. You can refer to [GenieAPIClientTools.py](../python/GenieAPIClientTools.py) on how to use tools call.<br>
-```
-GenieAPIService\GenieAPIService.exe -c "genie\python\models\IBM-Granite-v3.1-8B\config.json" -l --all_text --enable_thinking
-```
-
-#### Text Splitter
-This function can divide a long text into multiple paragraphs according to the priority order of the specified delimiter and the maximum length of each paragraph. Length is counted by token number instead of text length. You can also use this function to calculate the token number of text. <br>
-You can get the sample code on how to use Text Splitter [here](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/genie/python/GenieAPIClient.py#L26).
-
 ### Run the service on Mobile(Snapdragon® 8 Elite Mobile device): <br>
 1. Copy the subdirectory "GenieModels" in the folder "Android" in [GenieAPIService binary](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.34.0/GenieAPIService_2.34.zip) to the root path of mobile sdcard.<br>
 2. Copy your QWen QNN model & tokenizer.json to "/sdcard/GenieModels/qwen2.0_7b"<br>
 3. Modify the config file "/sdcard/GenieModels/qwen2.0_7b/config.json" if necessary.<br>
 4. Install the GenieAPIService.apk to mobile and start it.<br>
 * You can also try other models such [IBM-Granite-v3.1-8B-Instruct](https://aihub.qualcomm.com/mobile/models/ibm_granite_v3_1_8b_instruct?domain=Generative+AI&useCase=Text+Generation) which is for "Snapdragon® 8 Elite Mobile" device. You can create a subdirectory in the path "/sdcard/GenieModels/" for your model and customize the "config.json" for your model.
+
+## GenieAPIService API:
+Refere to [AIP](./API.md) for detailed information.
 
 ## Client Usage:
   The service can be access through the ip address 'localhost:8910', it's compatible with OpenAI API.

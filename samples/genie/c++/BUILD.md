@@ -6,6 +6,17 @@
   The code under this folder is Android app which can be used to launch the service in Android device.
 
 ## Build Service from source code:
+
+### Prepare environment:<br>
+
+Use below command to clone the whole repository and the dependency 3rd party libraries.
+```
+git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
+```
+
+Download 'CLI11.hpp' from below link and copy to 'samples\genie\c++\External\CLI11\CLI11.hpp'
+https://github.com/CLIUtils/CLI11/releases/download/v2.5.0/CLI11.hpp
+
 Install Qualcomm® AI Runtime SDK, CMake, Visual Studio etc, before you compile this service.<br>
 Open a 'Command Prompt' window (not PowerShell) to compile the libraries.
 
