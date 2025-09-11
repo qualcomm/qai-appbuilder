@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <!-- 第一行：TextView + Spinner -->
+	<TextView
+		android:id="@+id/models"
+		android:layout_width="wrap_content"
+		android:layout_height="wrap_content"
+		android:text="Select Model："
+		android:layout_marginTop="24dp"
+		android:layout_marginBottom="8dp"
+		android:textSize="18sp"/>
+
+	<Spinner
+		android:id="@+id/spinnerModelsList"
+		android:layout_width="wrap_content"
+		android:layout_height="wrap_content"
+		android:layout_marginBottom="8dp"
+		android:singleLine="true"
+		android:ellipsize="marquee"
+		android:focusableInTouchMode="true"
+		android:scrollHorizontally="false"
+		android:spinnerMode="dropdown"/>
+	
+	<LinearLayout
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:orientation="horizontal"
+		android:layout_marginTop="8dp"
+		android:padding="4dp">
+
+		<Button
+			android:id="@+id/selectImageButton"
+			android:layout_width="wrap_content"
+			android:layout_height="wrap_content"
+			android:layout_marginEnd="8dp"
+			android:text="Select Input Image" />
+
+		<Button
+			android:id="@+id/covertImageButton"
+			android:layout_width="wrap_content"
+			android:layout_height="wrap_content"
+			android:text="Convert" />
+	</LinearLayout>
+
+    <ImageView
+        android:id="@+id/inputImagePreview"
+        android:layout_width="match_parent"
+        android:layout_height="220dp"
+        android:layout_marginTop="8dp"
+        android:scaleType="centerCrop"
+        android:background="#DDDDDD" />
+
+
+    <TextView
+        android:id="@+id/outputLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Output Image："
+        android:textSize="18sp"
+        android:layout_marginTop="24dp"
+        android:layout_marginBottom="8dp" />
+
+    <ImageView
+        android:id="@+id/outputImagePreview"
+        android:layout_width="match_parent"
+        android:layout_height="220dp"
+        android:scaleType="centerCrop"
+        android:background="#EEEEEE" />
+</LinearLayout>

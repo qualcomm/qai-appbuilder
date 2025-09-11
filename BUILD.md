@@ -1,5 +1,5 @@
-## Build
-Build QAI AppBuilder from source with Visual Studio 2022 on WoS device:<br>
+## Build QAI AppBuilder for WoS device
+### Build QAI AppBuilder from source with Visual Studio 2022 on WoS device:<br>
 - Install Qualcomm® AI Runtime SDK:
   - https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK
 - Update the Genie library
@@ -51,3 +51,68 @@ python setup.py bdist_wheel
 # Install the extension:
 pip install dist\qai_appbuilder-2.34.0-cp312-cp312-win_amd64.whl
 ```
+
+## Build QAI AppBuilder for android
+
+### Download QAI AppBuilder source codes:
+Run below command in Windows terminal:
+```
+git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
+```
+### Set PATH and run make.exe to build QAI AppBuilder
+• Download [android ndk](https://dl.google.com/android/repository/android-ndk-r26d-windows.zip).<br>
+• Run following commands in Windows terminal:
+```
+cd ai-engine-direct-helper
+Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\{Qualcomm® AI Runtime SDK version}\
+Set NDK_ROOT={your ndk root directory}
+set PATH=%PATH%;%NDK_ROOT%\toolchains\llvm\prebuilt\windows-x86_64\bin
+Set ANDROID_NDK_ROOT=%NDK_ROOT%
+ 
+"%NDK_ROOT%\prebuilt\windows-x86_64\bin\make.exe" android
+```
+• Then you will see the generated file ai-engine-direct-helper\libs\arm64-v8a\libappbuilder.so.
+
+### Debug issues about AppBuilder
+• Sometimes we will meet error which is related with libAppBuilder.so, for example below abnormal info when execute SuperResolution app on Snapdragon® 8 Elite mobile device. 
+```
+/real_esrgan_x4plus/real_esrgan_x4plus.bin" "/sdcard/AIModels/SuperResolution/real_esrgan_x4plus/input.jpg" "/sdcard/AIModels/SuperResolution/real_esrgan_x4plus/output.jpg"
+          <
+     0.3ms [ ERROR ] Unable to find a valid interface.
+     0.4ms [ ERROR ] Error initializing QNN Function Pointers
+```
+
+• To check above errors info about AppBuilder further, we can 'Compile All Sources' in android studio to generate the bin file of superresolution after modify its CMakeLists.txt file as below,  
+```
+- add_library(${CMAKE_PROJECT_NAME} SHARED native-lib.cpp)
++ # add_library(${CMAKE_PROJECT_NAME} SHARED native-lib.cpp)
+
+- # add_executable(${CMAKE_PROJECT_NAME} native-lib.cpp) # Build command line executable binary for debugging.
++ add_executable(${CMAKE_PROJECT_NAME} native-lib.cpp) # Build command line executable binary for debugging.
+```
+
+• Copy SuperResolution bin file and other below 9 .so files from SuperResolution\app\build\intermediates\cxx\Debug\63644d4r\obj\arm64-v8a and C:\Qualcomm\AIStack\QAIRT\{Qualcomm® AI Runtime SDK version}\lib\ to /data/local/tmp/debug of android device.
+```
+libappbuilder.so
+libc++_shared.so
+libopencv_java4.so
+libQnnHtp.so
+libQnnHtpNetRunExtensions.so
+libQnnHtpPrepare.so
+libQnnHtpV79Skel.so
+libQnnHtpV79Stub.so
+libQnnSystem.so
+```
+
+• Then run below 5 shell commands in android device to debug:
+```
+cd  /data/local/tmp/debug
+export LD_LIBRARY_PATH=/data/local/tmp/debug
+export PATH=$LD_LIBRARY_PATH:$PATH
+chmod +x ./superresolution
+./superresolution "/data/local/tmp/debug" "/sdcard/AIModels/SuperResolution/real_esrgan_x4plus/real_esrgan_x4plus.bin" "/sdcard/AIModels/SuperResolution/real_esrgan_x4plus/input.jpg" "/sdcard/AIModels/SuperResolution/real_esrgan_x4plus/output.jpg"
+```
+
+• Root cause<br>
+Above error info is due to version incompatible between libappbuilder.so and QAIRT sdk version. 
+It is resolved by recompile libappbuilder.so after set correct QNN_SDK_ROOT.
