@@ -76,6 +76,6 @@ Only copy folder 'OpenCV-android-sdk\sdk\native' to 'samples\android\SuperResolu
 
 • Press button "CONVERT" to convert selected input image using selected model, then you can see the preview of output image, for example quicksrnetmedium.int8_output.jpg.
 <div style="display: flex; justify-content: space-between;">
-    <img src="images\real_esrgan_x4plus.png" alt="realesrgan" width="600" >
-    <img src="images\quicksrnetmedium.png" alt="quicksrnet" width="600" >
+    <img src="images\real_esrgan_x4plus.jpg" alt="realesrgan" width="400" >
+    <img src="images\quicksrnetmedium.jpg" alt="quicksrnet" width="400" >
 </div>
