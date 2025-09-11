@@ -1,0 +1,7 @@
+{
+  "prompt_system": "<｜hy_begin▁of▁sentence｜><｜hy_System｜>\n string \n",
+  "prompt_user": "<｜hy_begin▁of▁sentence｜><｜hy_User｜>\n string \n",
+  "prompt_assistant": "<｜hy_begin▁of▁sentence｜><｜hy_Assistant｜>\n string \n",
+  "prompt_tool": "<｜hy_begin▁of▁sentence｜><｜hy_User｜>\n string \n",
+  "prompt_start": " <｜hy_Assistant｜>\n"
+}

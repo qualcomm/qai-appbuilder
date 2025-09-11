@@ -1,0 +1,7 @@
+{
+  "prompt_system": "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n string <|eot_id|>\n",
+  "prompt_user": "<|start_header_id|>user<|end_header_id|>\n\n string <|eot_id|>\n",
+  "prompt_assistant": "<|start_header_id|>assistant<|end_header_id|>\n\n string <|eot_id|>\n",
+  "prompt_tool": "<|start_header_id|>tool<|end_header_id|>\n\n string <|eot_id|>\n",
+  "prompt_start": "<|start_header_id|>assistant<|end_header_id|>\n\n"
+}

@@ -1,0 +1,82 @@
+{
+    "dialog": {
+        "version": 1,
+        "type": "ssd-q1",
+        "ssd-q1": {
+            "version": 1,
+            "ssd-version": 1,
+            "forecast-token-count": 4,
+            "forecast-prefix": 16,
+            "forecast-prefix-name": "genie\\python\\models\\Llama2.0-7B-SSD\\",
+            "branches": [
+                3,
+                2
+            ]
+        },
+        "stop-sequence": [
+            "###",
+            "<|endoftext|>",
+            "<|begin_of_text|>",
+            "<|eot_id|>",
+            "<|end_of_text|>",
+            "<|im_start|>",
+            "<|im_end|>",
+            "<|end|>",
+            "<\\s>",
+            "</s>",
+            "\n\n\n\n\n"
+        ],
+        "context": {
+            "version": 1,
+            "size": 1024,
+            "n-vocab": 64000,
+            "bos-token": 1,
+            "eos-token": 2
+        },
+        "sampler": {
+            "version": 1,
+            "seed": 42,
+            "temp": 0.6,
+            "top-k": 50,
+            "top-p": 0.95,
+            "greedy": false
+        },
+        "tokenizer": {
+            "version": 1,
+            "path": "genie\\python\\models\\Llama2.0-7B-SSD\\tokenizer.json"
+        },
+        "engine": {
+            "version": 1,
+            "n-threads": 0,
+            "backend": {
+                "version": 1,
+                "type": "QnnHtp",
+                "QnnHtp": {
+                    "version": 1,
+                    "spill-fill-bufsize": 0,
+                    "use-mmap": false,
+                    "mmap-budget": 0,
+                    "poll": true,
+                    "pos-id-dim": 64,
+                    "cpu-mask": "0xe0",
+                    "kv-dim": 128,
+                    "allow-async-init": false
+                },
+                "extensions": "genie\\python\\config\\htp_backend_ext_config.json"
+            },
+            "model": {
+                "version": 1,
+                "type": "binary",
+                "binary": {
+                    "version": 1,
+                    "ctx-bins": [
+                        "genie\\python\\models\\Llama2.0-7B-SSD\\model-1.bin",
+                        "genie\\python\\models\\Llama2.0-7B-SSD\\model-2.bin",
+                        "genie\\python\\models\\Llama2.0-7B-SSD\\model-3.bin",
+                        "genie\\python\\models\\Llama2.0-7B-SSD\\model-4.bin"
+                    ]
+                }
+            }
+        }
+    }
+}

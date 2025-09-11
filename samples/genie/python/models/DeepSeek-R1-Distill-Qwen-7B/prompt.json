@@ -1,0 +1,7 @@
+{
+	"prompt_system": "<｜begin▁of▁sentence｜>string",
+	"prompt_user": "<｜User｜>string",
+	"prompt_assistant": "<｜Assistant｜>string",
+	"prompt_tool": "<｜Tool｜>string",
+	"prompt_start": "<｜Assistant｜>"
+}

@@ -128,7 +128,7 @@ The following is the correct change for the 'tokenizer.json' file of 'Phi-3.5-Mi
 
 ### Setup custom model:
 You can create a subdirectory in the path "ai-engine-direct-helper\samples\genie\python\models\" for your own model and customize the "config.json", "prompt.conf" or "prompt.json" files for your model. Both files should be stored in the same directory as your model files. Then use the new directory which you've created as your model name, the name can be used in the client application. <br>
-Note: "prompt.conf" is for old GenieAPIServcie < 2.0.0. Since GenieAPIServcie 2.0.0, we use "prompt.json" to replace it.<br>
+Note: "prompt.conf" is for old version GenieAPIServcie(< 2.0). Since GenieAPIServcie 2.0, we use "prompt.json" to replace it.<br>
 
 1. config.json : Model configuration file. It includes key parameters for the model. You can get several template configuration files for popular models such as Llama 2 & 3, Phi 3.5, Qwen 2 from here:<br>
 https://github.com/quic/ai-hub-apps/tree/main/tutorials/llm_on_genie/configs/genie <br><br>

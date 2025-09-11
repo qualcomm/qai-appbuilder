@@ -12,6 +12,10 @@
       "n-streams" : 1,
       "p-threshold" : 0.0
     },
+    "stop-sequence": [
+        "✿RESULT✿:",
+        "✿RETURN✿:"
+    ],
     "context" : {
       "version" : 1,
       "size": 4096,
@@ -33,7 +37,7 @@
     },
     "engine" : {
       "version" : 1,
-      "n-threads" : 3,
+      "n-threads" : 1,
       "backend" : {
         "version" : 1,
         "type" : "QnnHtp",

@@ -1,0 +1,79 @@
+{
+  "dialog" : {
+    "version" : 1,
+    "type" : "ssd-q1",
+     "ssd-q1" : {
+      "version" : 1,
+      "ssd-version" : 1,
+      "forecast-token-count" : 4,
+      "forecast-prefix" : 16,
+      "forecast-prefix-name" : "genie\\python\\models\\Llama3.1-8B-SSD\\",
+      "branches" : [3, 2],
+      "n-streams" : 1,
+      "p-threshold" : 0.0
+    },
+    "context" : {
+      "version" : 1,
+      "size": 4096,
+      "n-vocab":   128256,
+      "bos-token": 128000,
+      "eos-token": [128001, 128008, 128009],
+      "pad-token": 128001
+    },
+    "sampler" : {
+      "version" : 1,
+      "seed" : 42,
+      "temp" : 0.8,
+      "top-k" : 40,
+      "top-p" : 0.95
+    },
+    "tokenizer" : {
+      "version" : 1,
+      "path" : "genie\\python\\models\\Llama3.1-8B-SSD\\tokenizer.json"
+    },
+    "engine" : {
+      "version" : 1,
+      "n-threads" : 3,
+      "backend" : {
+        "version" : 1,
+        "type" : "QnnHtp",
+        "QnnHtp" : {
+          "version" : 1,
+          "use-mmap" : false,
+          "spill-fill-bufsize" : 0,
+          "mmap-budget" : 0,
+          "poll" : false,
+          "cpu-mask" : "0xe0",
+          "kv-dim" : 128
+        },
+        "extensions" : "genie\\python\\config\\htp_backend_ext_config.json"
+      },
+      "model" : {
+        "version" : 1,
+        "type" : "binary",
+        "positional-encoding": {
+            "type": "rope",
+            "rope-dim": 64,
+            "rope-theta": 500000,
+            "rope-scaling": {
+                "rope-type": "llama3",
+                "factor": 8.0,
+                "low-freq-factor": 1.0,
+                "high-freq-factor": 4.0,
+                "original-max-position-embeddings": 8192
+            }
+        },
+        "binary" : {
+          "version" : 1,
+          "ctx-bins" : [
+            "genie\\python\\models\\Llama3.1-8B-SSD\\model-1.bin",
+            "genie\\python\\models\\Llama3.1-8B-SSD\\model-2.bin",
+            "genie\\python\\models\\Llama3.1-8B-SSD\\model-3.bin",
+            "genie\\python\\models\\Llama3.1-8B-SSD\\model-4.bin",
+            "genie\\python\\models\\Llama3.1-8B-SSD\\model-5.bin"
+          ]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "prompt_system": "<s>[INST] <<SYS>>string<</SYS>>[/INST]</s>",
+  "prompt_user": "<s>[INST]string[/INST]</s>",
+  "prompt_assistant": "<s>[INST]string[/INST]</s>",
+  "prompt_tool": "<s>[INST]string[/INST]</s>",
+  "prompt_start": "<s>[INST]string[/INST] "
+}
