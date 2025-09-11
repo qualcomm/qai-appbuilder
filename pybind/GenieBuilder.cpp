@@ -18,14 +18,13 @@ static int g_MaxLength = CONTENT_LENGTH;
 
 void GenieCallBack(const char* response, const GenieDialog_SentenceCode_t sentence_code, const void* user_data) {
     GenieContext* self = static_cast<GenieContext*>(const_cast<void*>(user_data));
-    if (response) {
+    if (response && strlen(response) > 0) {
         std::lock_guard<std::mutex> guard(self->m_stream_lock);
         self->m_stream_answer += response;
         // std::cout << response << std::flush;
+        g_CurLength += self->TokenLength(response);    // TODO: We should calculate the input length together. input + output < CONTENT_LENGTH.
+        // printf("g_CurLength = %d, g_MaxLength = %d\n", g_CurLength, g_MaxLength);
     }
-
-    g_CurLength += self->TokenLength(response);    // TODO: We should calculate the input length together. input + output < CONTENT_LENGTH.
-    // printf("g_CurLength = %d, g_MaxLength = %d\n", g_CurLength, g_MaxLength);
 
     if(g_CurLength >= g_MaxLength) { // Stop current generation.
         self->Stop();
@@ -260,6 +259,12 @@ bool GenieContext::SetParams(const std::string max_length, const std::string tem
       return false;
     }
 
+    status = GenieSamplerConfig_setParam(m_SamplerConfigHandle, "type", "basic");
+    if (GENIE_STATUS_SUCCESS != status) {
+      std::cerr << "Failed to setParam.\n";
+      return false;
+    }
+
     status = GenieSampler_applyConfig(m_SamplerHandle, m_SamplerConfigHandle);
     if (GENIE_STATUS_SUCCESS != status) {
       std::cerr << "Failed to apply sampler config.\n";
@@ -299,15 +304,41 @@ bool GenieContext::SetStopSequence(const std::string& stop_sequences) {
     return true;
 }
 
-size_t GenieContext::TokenLength(const std::string& text) {
-#ifdef CUSTOM_GENIE
-    std::vector<int32_t> tokens;
-    return GenieDialog_encode(m_DialogHandle, text, tokens);
-#else
-    return text.length();
-#endif
+void MyAllocCallback(const size_t size, const char **allocatedData)
+{
+    *allocatedData = reinterpret_cast<const char *>(malloc(size));
 }
 
+size_t GenieContext::TokenLength(const std::string &text)
+{
+    GenieTokenizer_Handle_t tokenizerHandle = nullptr;
+    Genie_Status_t status = GenieDialog_getTokenizer(m_DialogHandle, &tokenizerHandle);
+    if (status != GENIE_STATUS_SUCCESS)
+    {
+        std::cerr << "get tokenizer failed, error code: " << status << std::endl;
+        return 0;
+    }
+
+    const int32_t *tokenIds = nullptr;
+    uint32_t numTokenIds = 0;
+
+    status = GenieTokenizer_encode(
+            tokenizerHandle,
+            text.c_str(),
+            MyAllocCallback,
+            &tokenIds,
+            &numTokenIds
+    );
+
+    if (status != GENIE_STATUS_SUCCESS)
+    {
+        std::cerr << "encode failed, erroe code: " << status << " " << "string is: " << text.c_str() << std::endl;
+        return text.size();
+    }
+
+    free((void *) tokenIds);
+    return static_cast<size_t>(numTokenIds);
+}
 
 #include "common.h"
 

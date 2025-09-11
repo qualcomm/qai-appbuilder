@@ -22,7 +22,7 @@ Refer to [python.md](../../docs/python.md) on how to setup x64 version Python en
 ### Step 2: Install basic Python dependencies for WebUI
 Run below commands in Windows terminal:
 ```
-pip install gradio qai_hub_models huggingface_hub Pillow numpy opencv-python torch torchvision torchaudio transformers diffusers
+pip install gradio==5.35.0 qai_hub_models huggingface_hub Pillow numpy opencv-python torch torchvision torchaudio transformers diffusers
 ```
 
 ### Step 3: Switch to samples directory:
@@ -37,11 +37,12 @@ You can also launch them by double-clicking the corresponding batch files: start
 
 ### WebUI App List:
 
-|  App   | Command  |
-|  ----  | :----    |
-| ImageRepairApp | python webui\ImageRepairApp.py |
-| StableDiffusionApp * | python webui\StableDiffusionApp.py |
-| GenieWebUI ** | python webui\GenieWebUI.py |
+|  App   | Command  | Describtion |
+|  ----  | :----    | :----    |
+| ImageRepairApp | python webui\ImageRepairApp.py | Image repair app with RealESRGAN model. |
+| StableDiffusionApp * | python webui\StableDiffusionApp.py | Text to image app with Stable Diffusion model. |
+| GenieWebUI ** | python webui\GenieWebUI.py | LLM Chat app, load model in process. |
+| GenieWebUI2 | python webui\GenieWebUI2.py | LLM Chat app, get model functions from Genie API Service through OpenAI API. Please start GenieAPIService before run this app. |
 
 *. StableDiffusionApp only support English prompt.<br>
 **. Refer to step 3 here to [setup LLM models](../genie/python/README.md) before run 'GenieWebUI.py'.<br>

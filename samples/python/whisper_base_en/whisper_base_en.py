@@ -259,10 +259,6 @@ def Init():
         # Instance for Encoder 
     encoder = Encoder("whisper_encoder", encoder_model_path)
 
-
-
-
-
 def Inference(audio_path):
     # Read and preprocess the audio.
     audio, audio_sample_rate = a2n.audio_from_file(audio_path)

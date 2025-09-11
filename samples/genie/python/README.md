@@ -127,9 +127,10 @@ The following is the correct change for the 'tokenizer.json' file of 'Phi-3.5-Mi
 ***. Refer to [setup Stable Diffusion v2.1 models](../../python/README.md) before run 'GenieAPIService.py' (Our Python version 'GenieAPIService.py' support generating image, it depends on Stable Diffusion v2.1 sample code.)
 
 ### Setup custom model:
-You can create a subdirectory in the path "ai-engine-direct-helper\samples\genie\python\models\" for your own model and customize the "config.json" and "prompt.conf" files for your model. Both files should be stored in the same directory as your model files. Then use the new directory which you've created as your model name, the name can be used in the client application. <br>
+You can create a subdirectory in the path "ai-engine-direct-helper\samples\genie\python\models\" for your own model and customize the "config.json", "prompt.conf" or "prompt.json" files for your model. Both files should be stored in the same directory as your model files. Then use the new directory which you've created as your model name, the name can be used in the client application. <br>
+Note: "prompt.conf" is for old GenieAPIServcie < 2.0.0. Since GenieAPIServcie 2.0.0, we use "prompt.json" to replace it.<br>
 
-1. config.json : model configuration file. It includes key parameters for the model. You can get several template configuration files for popular models such as Llama 2 & 3, Phi 3.5, Qwen 2 from here:<br>
+1. config.json : Model configuration file. It includes key parameters for the model. You can get several template configuration files for popular models such as Llama 2 & 3, Phi 3.5, Qwen 2 from here:<br>
 https://github.com/quic/ai-hub-apps/tree/main/tutorials/llm_on_genie/configs/genie <br><br>
 You need to make sure that the following parameters in the configuration file point to the correct file path. <br>
 a. tokenizer: The path to the model 'tokenizer.json' file. <br>
@@ -138,7 +139,29 @@ c. ctx-bins: The path to model context bin files(ctx-bins). Usually a model has 
 d. forecast-prefix-name:The path to the directory where SSD model 'kv-cache.primary.qnn-htp' file is stored. Only SSD model needs this parameter.<br>
 e. other parameters: Set other parameters according to your model. <br>
 
-2. prompt.conf : model prompt format configuration file. There are two lines in this file, which are used to set prompt_tags_1 and prompt_tags_2 parameters respectively. A complete prompt consists of the following contents: <br>
+2. prompt.json : model prompt format configuration file. It defines the input format template for how the model organizes system prompts, user inputs, model responses and other information when receiving user requests.<br>
+Following is a format template for the prompt.json file of the QWEN model:<br>
+```
+{
+  "prompt_system": "<|im_start|>system\n string <|im_end|>\n",
+  "prompt_user": "<|im_start|>user\n string <|im_end|>\n",
+  "prompt_assistant": "<|im_start|>assistant\n string <|im_end|>\n",
+  "prompt_tool": "<|im_start|>tool\n string <|im_end|>\n",
+  "prompt_start": "<|im_start|>assistant\n"
+}
+```
+Field description:<br>
+a. prompt_system: the format template of the system role prompt, string will be replaced with the actual system prompt.<br>
+b. prompt_user: the format template of user input, string will be replaced with the user's actual problem.<br>
+c. prompt_assistant: the format template of the model's reply, string is replaced with the historical reply that the model has generated.<br>
+d. prompt_tool: the format template of return content of tool/function call, string is the placeholder for tool's retrun result.<br>
+e. prompt_start: generate a start tag that indicates "it's the model's turn to reply", and does not contain an end tag at the end, from where the model will start generating text.<br>
+
+The following link contains the prompt format of some other models. <br>
+https://github.com/quic/ai-hub-apps/tree/main/tutorials/llm_on_genie#prompt-formats <br>
+Note: Some models (such as Llama) do not require additional starting tokens, which can be left blank or set to a special token based on the tokenizer.<br>
+
+3. prompt.conf : (deprecated from GenieAPIService v2.0.0).Model prompt format configuration file. There are two lines in this file, which are used to set prompt_tags_1 and prompt_tags_2 parameters respectively. A complete prompt consists of the following contents: <br>
 prompt = prompt_tags_1 + < user questions > + prompt_tags_2 <br><br>
 Taking the QWen 2 model as an example, a complete prompt example is as follows: <br>
 <|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nHow to fish?<|im_end|>\n<|im_start|>assistant\n <br><br>

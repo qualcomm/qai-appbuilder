@@ -40,28 +40,6 @@ else()
 endif()
 
 if(GENIE_LIBRARY)
-    set(SEARCH_CONTENT "GenieDialog_encode")
-    if(WIN32)
-        set(FILE_PATH "$ENV{QNN_SDK_ROOT}include\\Genie\\GenieDialog.h")
-        set(SEARCH_COMMAND "findstr")
-    else()
-        set(FILE_PATH "$ENV{QNN_SDK_ROOT}include/Genie/GenieDialog.h")
-        set(SEARCH_COMMAND "grep")
-    endif()
-    execute_process(
-        COMMAND ${SEARCH_COMMAND} ${SEARCH_CONTENT} ${FILE_PATH}
-        RESULT_VARIABLE RESULT
-        OUTPUT_QUIET
-        ERROR_QUIET
-    )
-    
-    if(RESULT EQUAL 0) # found the function 'GenieDialog_encode'.
-        add_compile_definitions(CUSTOM_GENIE="TRUE")
-        message(STATUS "GenieDialog_encode found in GenieDialog.h")
-    else()
-        message(WARNING "GenieDialog_encode not found in GenieDialog.h")
-    endif()
-
     pybind11_add_module(geniebuilder GenieBuilder.cpp)
 
     if (WIN32)
