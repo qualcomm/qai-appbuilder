@@ -37,7 +37,14 @@ if not qnn_sdk_root:
     print("Error: QNN_SDK_ROOT environment variable is not set.")
     sys.exit(1)
 
-qnn_dir = os.path.join(qnn_sdk_root, "lib/aarch64-oe-linux-gcc11.2")
+if os.path.exists(os.path.join(qnn_sdk_root, 'lib', 'aarch64-oe-linux-gcc11.2', 'libQnnHtp.so')):
+    qnn_dir = os.path.join(qnn_sdk_root, 'lib', 'aarch64-oe-linux-gcc11.2')
+elif os.path.exists(os.path.join(qnn_sdk_root, 'lib', 'aarch64-android', 'libQnnHtp.so')):
+    qnn_dir = os.path.join(qnn_sdk_root, 'lib', 'aarch64-android')
+elif os.path.exists(os.path.join(qnn_sdk_root, 'lib', 'libQnnHtp.so')):
+    qnn_dir = os.path.join(qnn_sdk_root, 'lib')
+else:
+    raise Exception('Failed to find "libQnnHtp.so" in /usr/lib')
 
 # if not "python" in execution_ws:
 #     execution_ws = execution_ws + "\\" + "python"
@@ -95,7 +102,7 @@ def post_process(probabilities, output):
 class InceptionV3(QNNContext):
     def Inference(self, input_data):
         input_datas=[input_data]
-        output_data = super().Inference(input_datas)[0]        
+        output_data = super().Inference(input_datas)[0]
         return output_data
 
 def model_download():
@@ -136,9 +143,9 @@ def Inference(input_image_path):
 
     # Reset the HTP.
     PerfProfile.RelPerfProfileGlobal()
-    
+
     # show the Top 5 predictions for image
-    output = torch.from_numpy(output_data)  
+    output = torch.from_numpy(output_data)
     probabilities = torch.softmax(output, dim=0)
     result=post_process(probabilities, output)
 

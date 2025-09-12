@@ -12,7 +12,7 @@ def response(text):
     return True
 
 # Initialize the model.
-config = "genie\\python\\models\\IBM-Granite-v3.1-8B\\config.json"
+config = os.path.join("genie", "python", "models", "IBM-Granite-v3.1-8B", "config.json")
 dialog = GenieContext(config)
 
 # Ask question.

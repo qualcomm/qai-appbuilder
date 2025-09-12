@@ -30,7 +30,7 @@ DEBUG_GENIE = False
 DOCS_MAX_SIZE = 4096 - 1024
 DOCS_MAX_QUERY_TIMES = 3
 
-APP_PATH="genie\\python\\"
+APP_PATH=os.path.join("genie", "python")
 
 lib_path = "qai_libs"
 if not lib_path in os.getenv('PATH'):
@@ -51,7 +51,7 @@ class GenieLLMCallbackHandler:
         raise NotImplementedError("This method should be overridden by subclasses")
 
 class GenieModel():
-    def __init__(self, 
+    def __init__(self,
         model_name: str = "None",
         max_query_times: int = DOCS_MAX_QUERY_TIMES,
         enable_thinking: bool = False) -> None:
@@ -66,9 +66,9 @@ class GenieModel():
         # self.prompt_docs = ""
         # self.model_ready = False
 
-        model_path = APP_PATH + "models\\" + model_name
-        config_path = model_path + "\\config.json"
-        prompt_path = model_path + "\\prompt.conf"
+        model_path = os.path.join(APP_PATH, "models", model_name)
+        config_path = os.path.join(model_path, "config.json")
+        prompt_path = os.path.join(model_path, "prompt.conf")
         self.model_name = model_name
         self.max_query_times = max_query_times
         self.enable_thinking = enable_thinking
@@ -79,7 +79,7 @@ class GenieModel():
 
         with open(prompt_path, 'r', encoding='utf-8') as file:
             prompt_content = file.read()
-        prompt_lines = prompt_content.split('\n')
+        prompt_lines = prompt_content.strip().split('\n')
         self.prompt_tags_1 = prompt_lines[0].split(': ')[1].strip()
         self.prompt_tags_2 = prompt_lines[1].split(': ')[1].strip()
 
@@ -169,9 +169,9 @@ class GenieModel():
             self.sys_prompt = self.sys_prompt.replace("\\n", "\n")
 
             sys_prompt = self.sys_prompt
-            
+
             if self.is_thinking_model(self.model_name):
-                if self.enable_thinking: 
+                if self.enable_thinking:
                     sys_prompt = sys_prompt + "/think"
                 else:
                     sys_prompt = sys_prompt + "/no_think"
@@ -208,7 +208,7 @@ class GenieModel():
                     q = self.tools_query
 
                 if self.is_thinking_model(self.model_name):
-                    if not self.enable_thinking: 
+                    if not self.enable_thinking:
                         q += "<think>\n\n</think>\n\n"
 
                 if DEBUG_PROMPT:
@@ -361,7 +361,7 @@ class GenieLLM(LLM):
     def _init(self, model_name) -> None:
         self.ready = False
         self.model_name = model_name
-        #print(self.model_name)
+        #print('self.model_name', self.model_name)
         self.model = GenieModel(model_name, self.max_query_times, self.enable_thinking)
         self.ready = True
 
@@ -484,7 +484,7 @@ class GenieLLM(LLM):
 ###########################################################################
 
 
-def main():    
+def main():
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--stream", action="store_true")
@@ -501,7 +501,7 @@ def main():
 
     answer = llm.invoke(prompt)
     print(answer)
- 
+
     for chunk in llm.stream(prompt):
         print(chunk, end="", flush=True)
         pass

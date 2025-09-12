@@ -2,6 +2,7 @@ from pathlib import Path
 import subprocess
 import psutil
 import time
+import os
 
 FLAG_DETACHED_PROCESS = 0x00000008
 FLAG_CREATE_NO_WINDOW = 0x08000000
@@ -16,8 +17,8 @@ class GenieServiceLauncher:
         self.cwd = Path.cwd()
         self.debug_mode = debug_mode
         # Build paths to executable and config file
-        self.exe_path = self.cwd / "GenieAPIService" / "GenieAPIService.exe"
-        self.config_path = f"genie\\python\\models\\{model_name}\\config.json"
+        self.exe_path = os.path.join(self.cwd, "GenieAPIService", "GenieAPIService.exe")
+        self.config_path = os.path.join("genie", "python", "models", model_name, "config.json")
 
         # Preemptively kill any running GenieAPIService instances
         self._terminate_existing_processes()
@@ -81,7 +82,7 @@ class GenieServiceLauncher:
         self.terminate()
         return self.launch(extra_args)
 
-""" 
+"""
 # for script test
 if __name__ == "__main__":
     launcher = GenieServiceLauncher("Qwen2.0-7B-SSD", True)

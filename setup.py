@@ -1,13 +1,17 @@
 #=============================================================================
 #
 # Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
-# 
+#
 # SPDX-License-Identifier: BSD-3-Clause
 #
 #=============================================================================
 
-# Compile Commands: 
+# Compile Commands:
+# [windows]
 # Set QNN_SDK_ROOT=C:/Qualcomm/AIStack/QAIRT/2.38.0.250901/
+# python setup.py bdist_wheel
+# [linux]
+# export QNN_SDK_ROOT=~/QAIRT/2.38.0.250901/
 # python setup.py bdist_wheel
 
 import os
@@ -51,8 +55,11 @@ elif arch == "aarch64":
     PACKAGE_ZIP  = "QAI_AppBuilder-linux_arm64-QNN" + VERSION + "-" + CONFIG + ".zip"
 
 QNN_SDK_ROOT = os.environ.get("QNN_SDK_ROOT")
-print("-- QNN_SDK_ROOT: ", QNN_SDK_ROOT)
+if QNN_SDK_ROOT is None:
+    print('QNN_SDK_ROOT environmental variable not set')
+    exit(1)
 
+print("-- QNN_SDK_ROOT: ", QNN_SDK_ROOT)
 
 def zip_package(dirpath, outFullName):
     zip = zipfile.ZipFile(outFullName, "w", zipfile.ZIP_DEFLATED)
@@ -98,9 +105,14 @@ def build_cmake():
         if arch == "ARM64EC": # TODO: No ARM64EC support in Genie SDK yet.
             LIB_PATH = QNN_SDK_ROOT + "/lib/arm64x-windows-msvc"
     else: # TODO: linux or android.
-        LIB_PATH = QNN_SDK_ROOT + "/lib/aarch64-oe-linux-gcc11.2"
-        if arch == "android": # TODO: for android.
-            LIB_PATH = QNN_SDK_ROOT + "/lib/aarch64-android"
+        if os.path.exists(os.path.join(QNN_SDK_ROOT, 'lib', 'aarch64-oe-linux-gcc11.2', 'libGenie.so')):
+            LIB_PATH = os.path.join(QNN_SDK_ROOT, 'lib', 'aarch64-oe-linux-gcc11.2')
+        elif os.path.exists(os.path.join(QNN_SDK_ROOT, 'lib', 'aarch64-android', 'libGenie.so')):
+            LIB_PATH = os.path.join(QNN_SDK_ROOT, 'lib', 'aarch64-android')
+        elif os.path.exists(os.path.join(QNN_SDK_ROOT, 'lib', 'libGenie.so')):
+            LIB_PATH = os.path.join(QNN_SDK_ROOT, 'lib')
+        else:
+            raise Exception('Failed to find "libGenie.so" in /usr/lib')
 
     if os.path.exists(LIB_PATH + "/Genie.dll"):
         shutil.copy(LIB_PATH + "/Genie.dll", binary_path)

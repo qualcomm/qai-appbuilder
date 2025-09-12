@@ -15,7 +15,7 @@ from gradio import ChatMessage
 from gradio.data_classes import FileData
 
 sys.path.append("python")
-sys.path.append("genie\\python")
+sys.path.append(os.path.join("genie", "python"))
 
 import utils.install as install
 from ChainUtils import GenieLLM
@@ -27,7 +27,7 @@ import stable_diffusion_v2_1.stable_diffusion_v2_1 as stable_diffusion
 
 HOST="0.0.0.0"
 PORT=8976
-APP_PATH="genie\\python\\"
+APP_PATH=os.path.join("genie", "python")
 
 DOCS_MAX_SIZE = 4096 - 1024  # TODO, calculate this value.
 
@@ -56,7 +56,7 @@ _question = None
 
 ###########################################################################
 
-css=""" 
+css="""
 body{
 	display:flex;
 }
@@ -108,11 +108,11 @@ def download_tokenizer(model_path, url):
 
 def download():
     download_tokenizer(
-        APP_PATH + "\\models\\IBM-Granite-v3.1-8B\\tokenizer.json",
+        os.path.join(APP_PATH, "models", "IBM-Granite-v3.1-8B", "tokenizer.json"),
         "https://gitee.com/hf-models/granite-3.1-8b-base/raw/main/tokenizer.json"
     )
     download_tokenizer(
-        APP_PATH + "\\models\\Phi-3.5-mini\\tokenizer.json",
+        os.path.join(APP_PATH, "models", "Phi-3.5-mini", "tokenizer.json"),
         "https://gitee.com/hf-models/Phi-3.5-mini-instruct/raw/main/tokenizer.json"
     )
 
@@ -203,7 +203,7 @@ def predict(chatbot, max_length, temp, top_k, top_p):
 
         for chunk in sumllm.summarize(chatbot, max_length, temp, top_k, top_p):
             yield chunk
-        
+
         del(sumllm)
         sumllm = None
 
@@ -281,7 +281,7 @@ def add_media(chatbot, chatmsg):
 
             file_name = os.path.basename(file_path)
             shutil.copy(file_path, FILE_PATH)
-            file_path = FILE_PATH + "\\" + file_name
+            file_path = os.path.join(FILE_PATH, file_name)
             #print(file_path)
             chatbot.append(ChatMessage(role="user", content="<small><a href='/gradio_api/file=" + file_path + "' target='_blank'>" + file_name + "</a></small>"))
             #chatbot.append(ChatMessage(role="user", content={"path": file_path, "alt_text": file_name}))
@@ -306,7 +306,7 @@ def reset_state():
 ###################
 
 def main():
-    model_root = APP_PATH + "models"
+    model_root = os.path.join(APP_PATH, "models")
 
     model_list = []
     for f in os.listdir(model_root):
@@ -329,7 +329,7 @@ def main():
         with gr.Tab("Settings") as tab:
             with gr.Row():
                 with gr.Column(scale=2):
-                    with gr.Group():                     
+                    with gr.Group():
                         model_select = gr.Dropdown(choices=model_list, value="", label="models", interactive=True)
                         max_length = gr.Slider(1, 4096, value=4096, step=1.0, label="max length", interactive=True)
                         temp = gr.Slider(0.01, 1, value=0.8, step=0.01, label="temperature", interactive=True)
@@ -392,5 +392,5 @@ def main():
     demo.queue().launch(server_name=HOST, share=False, inbrowser=True, server_port=PORT)
 
 if __name__ == '__main__':
-    
+
     main()

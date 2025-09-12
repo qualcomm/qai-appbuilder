@@ -48,7 +48,7 @@ DEBUG_BODY = False
 # For QWen, use it's special tool calls prompt format.
 USE_QWEN_TOOLCALLS_PROMPT = False
 
-APP_PATH="genie\\python\\"
+APP_PATH=os.path.join("genie", "python")
 DEFAULT_MODEL = "IBM-Granite"
 TOOLS_MAX_SIZE = 4096 - 2048
 TOOLS_NO_RESULT = "[ No input result from tools. ]"
@@ -438,7 +438,7 @@ def format_tools_output_qwen(tools_output):
     tools_output = [line for line in lines if line.startswith("✿FUNCTION✿:") or line.startswith("✿ARGS✿:")] # Remove the lines without '✿FUNCTION✿:' and '✿ARGS✿:'
     tools_output = "\n".join(tools_output)
     tools_output = re.sub(r'^.*:\s*$', '', tools_output, flags=re.MULTILINE)  # Remove '✿FUNCTION✿:' and '✿ARGS✿:' which without content.
- 
+
     if is_qwen_model():
         _tools_output = tools_output
 
@@ -451,7 +451,7 @@ def filter_tool_calls(text):
 
 def format_tools_to_openai(text):
     global _tool_call_id, _tools_output
-    
+
     _tools_output = filter_tool_calls(text)
     text_qwen = format_tools_output_qwen(_tools_output) # preprocess the text.
 
@@ -597,7 +597,7 @@ def print_profile():
         print()
         print(f"{Colors.YELLOW}PROF:     ", profile, f"{Colors.END}")
 
-def make_chat_response(content: str = "", tool_calls=None, finish_reason: str = "stop", 
+def make_chat_response(content: str = "", tool_calls=None, finish_reason: str = "stop",
                        model: str = DEFAULT_MODEL, object_type: str = "chat.completion"):
     return ChatCompletionResponse(
         object=object_type,
@@ -611,7 +611,7 @@ def make_chat_response(content: str = "", tool_calls=None, finish_reason: str = 
         usage=ChatUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0),  # TODO: add real data here.
     )
 
-def make_stream_response(content: str = None, tool_calls=None, finish_reason: str = None, 
+def make_stream_response(content: str = None, tool_calls=None, finish_reason: str = None,
                          role: str = "assistant"):
     delta = DeltaMessage(role=role)
     if content is not None:
@@ -883,11 +883,11 @@ def download_tokenizer(model_path, url):
 
 def download():
     download_tokenizer(
-        APP_PATH + "\\models\\IBM-Granite-v3.1-8B\\tokenizer.json",
+        os.path.join(APP_PATH, "models", "IBM-Granite-v3.1-8B", "tokenizer.json"),
         "https://gitee.com/hf-models/granite-3.1-8b-base/raw/main/tokenizer.json"
     )
     download_tokenizer(
-        APP_PATH + "\\models\\Phi-3.5-mini\\tokenizer.json",
+        os.path.join(APP_PATH, "models", "Phi-3.5-mini", "tokenizer.json"),
         "https://gitee.com/hf-models/Phi-3.5-mini-instruct/raw/main/tokenizer.json"
     )
 
@@ -899,9 +899,9 @@ def model_load(model_name):
         return False
 
     download()
-    
+
     if _model_list is None:
-        model_root = APP_PATH + "models"
+        model_root = os.path.join(APP_PATH, "models")
 
         _model_list = []
         for f in os.listdir(model_root):
@@ -941,7 +941,7 @@ def model_load(model_name):
 
     llm.init(model_name=_current_model)
     print(f"{Colors.GREEN}INFO:     model <<<", _current_model, f">>> is ready!{Colors.END}")
- 
+
     time_end = time.time()
     load_time = str(round(time_end - time_start, 2)) + " (s)"
     print(f"{Colors.GREEN}INFO:     model init time:", load_time, f"{Colors.END}")
@@ -994,7 +994,7 @@ def register_post_routes(app: FastAPI):
     # Image generation endpoints
     app.post("/v1/images/generations", response_model=ImageGenerationResponse)(images_generate)
     app.post("/images/generations", response_model=ImageGenerationResponse)(images_generate)
-    
+
     # Chat/completion endpoints
     for path in ["/v1/completions", "/v1/chat/completions", "/completions", "/chat/completions"]:
         app.post(path)(stream_chat)

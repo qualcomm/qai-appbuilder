@@ -395,7 +395,7 @@ def setup_qai_env(version, lib_arch = DEFAULT_LIB_ARCH, dsp_arch = DEFAULT_DSP_A
 
         for lib in libs:
             if os.path.isfile(os.path.join(qnn_libs_dir, lib)):
-                os.remove(os.path.join(qnn_libs_dir, lib)) 
+                os.remove(os.path.join(qnn_libs_dir, lib))
             shutil.copy(os.path.join(SDK_lib_dir, lib), qnn_libs_dir)
 
         for lib in hexagon_libs:
@@ -430,7 +430,7 @@ def install_qai_runtime(version, lib_arch = DEFAULT_LIB_ARCH, dsp_arch = DEFAULT
         print(f"Install QAIRT runtime libraries to '{qnn_libs_dir}'")
         with zipfile.ZipFile(qnn_zip_path, 'r') as zip_ref:
             zip_ref.extractall(qnn_libs_dir)
-    
+
         src_dir = qnn_libs_dir + "/" + lib_arch
         for filename in os.listdir(src_dir):
             src_file = os.path.join(src_dir, filename)
@@ -487,7 +487,7 @@ def install_qai_sdk(version):
         )
         shutil.rmtree(os.path.join(QNN_SDK_ROOT, "qairt"))
         # os.remove(qnn_zip_path)  # remove downloaded package.
-    
+
         # run_command(f"setx QNN_SDK_ROOT {qnn_root_path}")
         print(f"Installed QNN SDK {version} to '{qnn_root_path}' successfully.")
 
