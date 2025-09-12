@@ -9,7 +9,7 @@ Step 2. Install necessary python module. Recommend to setup python virtual envir
 ```
 python -m venv flet_android_env
 flet_android_env\Scripts\activate
-pip install flet openai
+pip install flet==0.28.3 openai==1.63.2
 ```
 
 ## How to run in python environment

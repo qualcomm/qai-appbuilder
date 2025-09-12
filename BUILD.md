@@ -27,7 +27,7 @@
   - https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe
 - Use the commands below to install Python dependency: 
 ```
-pip install wheel setuptools pybind11
+pip install wheel==0.45.1 setuptools==75.8.0 pybind11==2.13.6
 ```
 - Clone this repository to local: 
 ```

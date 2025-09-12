@@ -55,7 +55,7 @@ So, there’s no need to re-download them—you just need to locate and copy the
 Open a terminal in C:\ai-hub\，and run:
 ```
 .\8.Start_PythonEnv.bat
-pip install py3-wget
+pip install py3-wget==1.0.12
 cd ../ai-engine-direct-helper/samples
 python python\beit\beit.py
 ```

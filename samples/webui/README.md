@@ -22,7 +22,7 @@ Refer to [python.md](../../docs/python.md) on how to setup x64 version Python en
 ### Step 2: Install basic Python dependencies for WebUI
 Run below commands in Windows terminal:
 ```
-pip install gradio==5.35.0 qai_hub_models huggingface_hub Pillow numpy opencv-python torch torchvision torchaudio transformers diffusers
+pip install gradio==5.35.0 qai_hub_models==0.30.2 huggingface_hub==0.33.1 Pillow==10.4.0 numpy==1.26.4 opencv-python==4.10.0.84 torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 transformers==4.46.3 diffusers==0.32.2
 ```
 
 ### Step 3: Switch to samples directory:
