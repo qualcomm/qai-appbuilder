@@ -18,7 +18,7 @@ http://app.aihub.qualcomm.com/docs/
 
 a. Install the AI Hub Python packages:
 ```
-pip install qai-hub qai_hub_models
+pip install qai-hub==0.30.0 qai_hub_models==0.30.2
 ```
 
 b. Use below commmand to generate QNN model which suppor 515x512 input resolution:
