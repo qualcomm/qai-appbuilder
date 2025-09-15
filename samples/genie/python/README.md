@@ -29,7 +29,7 @@ Refer to [python.md](../../../docs/python.md) on how to setup x64 version Python
 ### Step 2: Install basic Python dependencies for service
 Run following commands in Windows terminal:
 ```
-pip install uvicorn==0.34.0 pydantic_settings fastapi==0.115.8 langchain==0.3.19 langchain_core==0.3.45 langchain_community==0.3.18 sse_starlette pypdf==5.3.0 python-pptx==1.0.2 docx2txt==0.8 openai==1.63.2 json-repair
+pip install uvicorn==0.34.0 pydantic_settings==2.10.1 fastapi==0.115.8 langchain==0.3.19 langchain_core==0.3.45 langchain_community==0.3.18 sse_starlette==2.2.1 pypdf==5.3.0 python-pptx==1.0.2 docx2txt==0.8 openai==1.63.2 json-repair==0.47.4
 ```
 
 ### Step 3: Download models and tokenizer files
