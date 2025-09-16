@@ -20,8 +20,8 @@ from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfP
 
 ####################################################################
 
-MODEL_ID = "mmd11p1vm"
-MODEL_NAME = "inception_v3"
+MODEL_ID = "mnzdk7koq"
+MODEL_NAME = "regnet"
 MODEL_HELP_URL = "https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
 IMAGENET_CLASSES_URL = "https://raw.githubusercontent.com/pytorch/hub/refs/heads/master/imagenet_classes.txt"
 IMAGENET_CLASSES_FILE = "imagenet_classes.txt"
@@ -29,7 +29,6 @@ IMAGE_SIZE = 224
 
 ####################################################################
 
-#execution_ws = os.getcwd()
 execution_ws=os.path.dirname(os.path.abspath(__file__))
 print(f"Current file directory: {execution_ws}")
 qnn_sdk_root = os.environ.get("QNN_SDK_ROOT")
@@ -39,20 +38,18 @@ if not qnn_sdk_root:
 
 qnn_dir = os.path.join(qnn_sdk_root, "lib/aarch64-oe-linux-gcc11.2")
 
-# if not "python" in execution_ws:
-#     execution_ws = execution_ws + "\\" + "python"
+if not "python" in execution_ws:
+    execution_ws = execution_ws + "/" + "python"
 
 if not MODEL_NAME in execution_ws:
-    execution_ws = os.path.join(execution_ws , MODEL_NAME)
+    execution_ws = execution_ws + "/" + MODEL_NAME
 
-model_dir = os.path.join(execution_ws, "models")
-model_path = os.path.join(model_dir, MODEL_NAME + ".bin")
-print("model_path:",model_path)
-imagenet_classes_path = os.path.join(model_dir, IMAGENET_CLASSES_FILE)
-
+model_dir = execution_ws + "/models"
+model_path = model_dir + "/" + MODEL_NAME + ".bin"
+imagenet_classes_path = model_dir + "/" + IMAGENET_CLASSES_FILE
 ####################################################################
 
-inceptionV3 = None
+regnet = None
 
 def format_float(num, max_zeros=6):
     if abs(num) >= 1e-6:
@@ -91,8 +88,8 @@ def post_process(probabilities, output):
 
     return result
 
-# InceptionV3 class which inherited from the class QNNContext.
-class InceptionV3(QNNContext):
+# regnet class which inherited from the class QNNContext.
+class Regnet(QNNContext):
     def Inference(self, input_data):
         input_datas=[input_data]
         output_data = super().Inference(input_datas)[0]        
@@ -112,7 +109,7 @@ def model_download():
         exit()
 
 def Init():
-    global inceptionV3
+    global regnet
 
     model_download()
 
@@ -120,7 +117,7 @@ def Init():
     QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for InceptionV3 objects.
-    inceptionV3 = InceptionV3("inceptionV3", model_path)
+    regnet = Regnet("regnet", model_path)
 
 def Inference(input_image_path):
     # Read and preprocess the image.
@@ -132,7 +129,7 @@ def Inference(input_image_path):
     PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
 
     # Run the inference.
-    output_data = inceptionV3.Inference([image])
+    output_data = regnet.Inference([image])
 
     # Reset the HTP.
     PerfProfile.RelPerfProfileGlobal()
@@ -145,10 +142,10 @@ def Inference(input_image_path):
     return result
 
 def Release():
-    global inceptionV3
+    global regnet
 
     # Release the resources.
-    del(inceptionV3)
+    del(regnet)
 
 def main(input = None):
 

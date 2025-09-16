@@ -42,23 +42,35 @@ export ADSP_LIBRARY_PATH=$QNN_SDK_ROOT/lib/hexagon-v68/unsigned
 ```
 Replace `<path_to_qnn_sdk>` with the actual path where you extracted the QNN SDK.
 
+
 ### 5. Run Sample Models
 Navigate to the sample directory:
-```bash
-cd {ai-engine-direct-helper}/linux/samples/python
-```
-Run the sample scripts:
-```bash
-python inception_v3/inception_v3.py
-```
-Demonstrates inference with the Inception V3 model.
 
-```bash
-python googlenet/googlenet.py
-```
-Demonstrates inference with the GoogLeNet model.
+The following table lists available sample models, their descriptions, and instructions to run each example:
 
-```bash
-python real_esrgan_x4plus/real_esrgan_x4plus.py
-```
-Demonstrates image super-resolution inference with the RealESRgan model.
+| Example                | Description                                   | How to Run                                      |
+|------------------------|-----------------------------------------------|-------------------------------------------------|
+| convnext_base          | ConvNeXt Base image classification            | `python convnext_base/convnext_base.py`         |
+| convnext_tiny          | ConvNeXt Tiny image classification            | `python convnext_tiny/convnext_tiny.py`         |
+| efficientnet_b0        | EfficientNet B0 image classification          | `python efficientnet_b0/efficientnet_b0.py`     |
+| efficientnet_b4        | EfficientNet B4 image classification          | `python efficientnet_b4/efficientnet_b4.py`     |
+| efficientnet_v2_s      | EfficientNet V2 Small image classification    | `python efficientnet_v2_s/efficientnet_v2_s.py` |
+| fcn_resnet50           | FCN-ResNet50 semantic segmentation            | `python fcn_resnet50/fcn_resnet50.py`           |
+| googlenet              | GoogLeNet image classification                | `python googlenet/googlenet.py`                 |
+| inception_v3           | Inception V3 image classification             | `python inception_v3/inception_v3.py`           |
+| levit                  | LeViT image classification                    | `python levit/levit.py`                         |
+| quicksrnetmedium       | QuickSRNetMedium image super-resolution       | `python quicksrnetmedium/quicksrnetmedium.py`   |
+| real_esrgan_general_x4v3 | RealESRGAN General X4V3 super-resolution   | `python real_esrgan_general_x4v3/real_esrgan_general_x4v3.py` |
+| real_esrgan_x4plus     | RealESRGAN X4Plus image super-resolution      | `python real_esrgan_x4plus/real_esrgan_x4plus.py` |
+| regnet                 | RegNet image classification                   | `python regnet/regnet.py`                       |
+| sesr_m5                | SESR-M5 image super-resolution                | `python sesr_m5/sesr_m5.py`                     |
+| shufflenet_v2          | ShuffleNet V2 image classification            | `python shufflenet_v2/shufflenet_v2.py`         |
+| squeezenet1_1          | SqueezeNet1.1 image classification            | `python squeezenet1_1/squeezenet1_1.py`         |
+| utils                  | Utility scripts for preprocessing/postprocessing | `python utils/utils.py`                      |
+| vit                    | Vision Transformer image classification       | `python vit/vit.py`                             |
+| wideresnet50           | WideResNet50 image classification             | `python wideresnet50/wideresnet50.py`           |
+| xlsr                   | XLSR speech recognition                       | `python xlsr/xlsr.py`                           |
+| yolov8_det             | YOLOv8 object detection                       | `python yolov8_det/yolov8_det.py`               |
+
+> **Note:**  
+> Ensure you are in the `samples/python` directory before running any example.
