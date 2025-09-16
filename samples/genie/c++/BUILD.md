@@ -1,15 +1,18 @@
 # Source code
 ## Service:
-  The code under this folder is C++ implementation of the service. It can be compiled to Windows, Android and Linux target.
+
+The code under this folder is C++ implementation of the service. It can be compiled to Windows, Android and Linux target.
 
 ## Android:
-  The code under this folder is Android app which can be used to launch the service in Android device.
+
+The code under this folder is Android app which can be used to launch the service in Android device.
 
 ## Build Service from source code:
 
 ### Prepare environment:<br>
 
 Use below command to clone the whole repository and the dependency 3rd party libraries.
+
 ```
 git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
 ```
@@ -21,7 +24,9 @@ Install Qualcomm® AI Runtime SDK, CMake, Visual Studio etc, before you compile 
 Open a 'Command Prompt' window (not PowerShell) to compile the libraries.
 
 ### Build 'libcurl.dll' for WoS:<br>
-GenieAPIClient depends on 'libcurl.dll', we need to build this dynamical library first throubh the commands below:
+
+GenieAPIClient depends on 'libcurl.dll', we need to build this dynamical library first through the commands below:
+
 ```
 cd samples/genie/c++/External/curl
 mkdir build & cd build
@@ -29,11 +34,21 @@ cmake -S .. -B . -A ARM64 -DCURL_USE_LIBPSL=OFF
 cmake --build . --config Release
 ```
 
+### Chose Correct SDK Version
+
+After installing `Qualcomm® AI Runtime SDK` Please be mindful of your download version.
+
+Usually it located at `C:\Qualcomm\AIStack\QAIRT\2.38.0.250901`
+
+In the next environment setting, you may use the version you prefer.
+
 ### Build GenieAPIServer & GenieAPIClient for WoS:<br>
+
 Setup Qualcomm® AI Runtime SDK and replace the Genie libraries and header file by refering to QAI AppBuilder [BUILD.md](../../../BUILD.md) <br>
 We can compile them through the commands below now:
+
 ```
-Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.34.0.250424\
+Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.38.0.250901\
 cd samples\genie\c++\Service
 mkdir build && cd build
 cmake -S .. -B . -A ARM64
@@ -41,21 +56,29 @@ cmake --build . --config Release
 ```
 
 ### Build GenieAPIServer for Android: <br>
+
 Install Qualcomm® AI Runtime SDK, Android NDK etc, before you compile this service.<br>
+
 ```
-Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.34.0.250424\
+Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.38.0.250901\
 set PATH=%PATH%;C:\Programs\android-ndk-r26d\toolchains\llvm\prebuilt\windows-x86_64\bin
 Set NDK_ROOT=C:/Programs/android-ndk-r26d/
 Set ANDROID_NDK_ROOT=%NDK_ROOT%
 
-"C:\Programs\android-ndk-r26d\prebuilt\windows-x86_64\bin\make.exe" android
+"C:\Programs\android-ndk-r26d\prebuilt\windows-x86_64\bin\make.exe" android -j4
+
+When you finished building task,please copy the following files.
+copy "%QNN_SDK_ROOT%lib\aarch64-android\*.so"  "libs\arm64-v8a" /Y
+copy "obj\local\arm64-v8a\*.so" "libs\arm64-v8a" /Y
 ```
 
+
 ### Build Android app:<br>
+
 You can install Android Studio for building the Android app.
+
 ```
 1. Open Android Studio then load android app project from ai-engine-direct-helper\samples\genie\c++\Android.
 2. Click the Build menu then click Generate Signed App Bundle or Apk... then select APK and click Next button.
-then select your key and input your password, then click Next button. Finally, click Create buttton.
-
+   then select your key and input your password, then click Next button. Finally, click Create buttton.
 ```
