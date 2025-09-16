@@ -6,19 +6,48 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
 
     <application
-        android:largeHeap="true"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@drawable/ic_launcher_qai"
         android:label="@string/app_name"
-        android:roundIcon="@mipmap/ic_launcher_round"
+        android:largeHeap="true"
+        android:roundIcon="@drawable/ic_launcher_round"
         android:supportsRtl="true"
-        android:usesCleartextTraffic="true"
         android:theme="@style/Theme.GenieAPIService"
+        android:usesCleartextTraffic="true"
+        android:persistent="true"
         tools:targetApi="31">
+        <receiver
+            android:name=".GenieReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="com.example.genieapiservice.UPDATE_WEBVIEW"/>
+                <action android:name="com.example.genieapiservice.RESTART"/>
+            </intent-filter>
+        </receiver>
+
+        <activity
+            android:name=".LogContentActivity"
+            android:exported="false" />
+
+        <service
+            android:name=".ForegroundService"
+            android:enabled="true"
+            android:exported="true"
+            android:foregroundServiceType="mediaPlayback">
+
+        </service>
+
         <activity
             android:name=".MainActivity"
             android:exported="true">

@@ -2,31 +2,83 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical">
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:orientation="vertical"
+    android:background="@color/white">
+
+    <androidx.appcompat.widget.Toolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        android:background="@color/teal_700"
+        android:theme="@style/Theme.GenieAPIService.AppBarOverlay">
+        <TextView
+            android:id="@+id/title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:textColor="@color/white"
+            android:textSize="22sp"/>
+    </androidx.appcompat.widget.Toolbar>
+
+    <TextView
+        android:id="@+id/memory_info"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text=""
+        android:textSize="26sp"
+        android:layout_margin="10dp"
+        android:textColor="@color/black"
+        />
+
+    <TextView
+        android:id="@+id/memory_info_sub"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text=""
+        android:textSize="16sp"
+        android:layout_margin="10dp"
+        android:textColor="@color/black"
+        />
 
     <TextView
         android:id="@+id/temp"
         android:layout_width="match_parent"
-        android:layout_height="60dp"
+        android:layout_height="wrap_content"
         android:text=""
         android:gravity="center"
         android:padding="3dp"
+        android:textColor="@color/black"
         android:layout_margin="6dp"/>
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal"
+        android:orientation="horizontal">
+        <Button
+            android:id="@+id/start_service"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Start Service"/>
+    </LinearLayout>
 
     <WebView
         android:id="@+id/sample_text"
         android:layout_width="match_parent"
-        android:layout_height="300dp"
+        android:layout_height="200dp"
+        android:background="@color/white"
+        android:gravity="center"
+        android:textSize="36sp"
         android:layout_margin="2dp"/>
 
     <TextView
         android:id="@+id/ip_view"
         android:layout_width="match_parent"
-        android:layout_height="200dp"
+        android:layout_height="wrap_content"
         android:text=""
         android:gravity="center"
         android:padding="16dp"
         android:textSize="26sp"
-        android:layout_margin="6dp"/>
-
+        android:textColor="@color/black"
+        android:layout_marginTop="90dp"/>
 </LinearLayout>

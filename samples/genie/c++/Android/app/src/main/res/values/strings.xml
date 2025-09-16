@@ -1,3 +1,11 @@
 <resources>
-    <string name="app_name">GenieAPIService</string>
+    <string name="app_name">GenieAPI</string>
+    <string name="log_files">Log files</string>
+    <string name="button_copy">Copy</string>
+    <string name="button_close">Close</string>
+    <string name="button_refresh">Refresh</string>
+    <string name="tips">The Genie API Service will restart.</string>
+    <string name="button_previous">Previous</string>
+    <string name="button_next">Next</string>
+    <string name="web_view_tips">Genie OpenAI API Service is not running.</string>
 </resources>

@@ -39,10 +39,10 @@ android {
     }
     defaultConfig {
         applicationId = "com.example.genieapiservice"
-        minSdk = 28
-        targetSdk = 28
+        minSdk = 29
+        targetSdk = 31
         versionCode = 1
-        versionName = "1.0"
+        versionName = "2.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         externalNativeBuild {
@@ -68,6 +68,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
@@ -97,6 +98,8 @@ dependencies {
     implementation(libs.appcompat)
     implementation(libs.material)
     implementation(libs.constraintlayout)
+    implementation(libs.activity)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     testImplementation(libs.junit)
     androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)
