@@ -52,4 +52,10 @@ Set ANDROID_NDK_ROOT=%NDK_ROOT%
 ```
 
 ### Build Android app:<br>
-You can install Android Studio for build the Android app.
+You can install Android Studio for building the Android app.
+```
+1. Open Android Studio then load android app project from ai-engine-direct-helper\samples\genie\c++\Android.
+2. Click the Build menu then click Generate Signed App Bundle or Apk... then select APK and click Next button.
+then select your key and input your password, then click Next button. Finally, click Create buttton.
+
+```
