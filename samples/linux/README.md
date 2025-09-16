@@ -73,4 +73,4 @@ The following table lists available sample models, their descriptions, and instr
 | yolov8_det             | YOLOv8 object detection                       | `python yolov8_det/yolov8_det.py`               |
 
 > **Note:**  
-> Ensure you are in the `samples/python` directory before running any example.
+> Ensure you are in the `samples/linux/python` directory before running any example.
