@@ -10,6 +10,13 @@ val sourceFiles = listOf(
     file("..\\..\\Service\\libs\\arm64-v8a\\libQnnHtpV79Skel.so"),
     file("..\\..\\Service\\libs\\arm64-v8a\\libQnnHtpV79Stub.so"),
     file("..\\..\\Service\\libs\\arm64-v8a\\libQnnSystem.so"),
+    file("..\\..\\Service\\libs\\arm64-v8a\\libcurl.so"),
+    file("..\\..\\Service\\libs\\arm64-v8a\\libGenieAPIClient.so"),
+    file("..\\..\\Service\\libs\\arm64-v8a\\libGenieAPIService.so"),
+    file("..\\..\\Service\\libs\\arm64-v8a\\libQnnHtpV79.so"),
+    file("..\\..\\Service\\libs\\arm64-v8a\\libQnnHtpV81.so"),
+    file("..\\..\\Service\\libs\\arm64-v8a\\libQnnHtpV81Skel.so"),
+    file("..\\..\\Service\\libs\\arm64-v8a\\libQnnHtpV81Stub.so"),
 )
 
 val libsDir = file("libs/arm64-v8a")
