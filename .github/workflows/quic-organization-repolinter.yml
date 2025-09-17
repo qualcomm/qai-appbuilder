@@ -20,12 +20,12 @@ jobs:
           files: "repolint.json"
       - name: Run Repolinter with local repolint.json
         if: steps.check_files.outputs.files_exists == 'true'
-        uses: todogroup/repolinter-action@v2
+        uses: todogroup/repolinter-action@v1
         with:
           config_file: "repolint.json"
       - name: Run Repolinter with default ruleset
         if: steps.check_files.outputs.files_exists == 'false'
-        uses: todogroup/repolinter-action@v2
+        uses: todogroup/repolinter-action@v1
         with:
           config_url: "https://raw.githubusercontent.com/quic/.github/main/repolint.json"
 
