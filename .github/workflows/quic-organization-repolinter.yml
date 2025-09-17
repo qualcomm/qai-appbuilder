@@ -15,7 +15,7 @@ jobs:
         uses: actions/checkout@v4
       - name: Verify repolinter config file is present
         id: check_files
-        uses: andstor/file-existence-action@v2
+        uses: andstor/file-existence-action@v3
         with:
           files: "repolint.json"
       - name: Run Repolinter with local repolint.json
