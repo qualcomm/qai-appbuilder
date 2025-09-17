@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 import os
 from typing import List, Generator, Union
 from langchain_core.document_loaders import BaseLoader

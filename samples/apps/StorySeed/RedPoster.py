@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 from selenium import webdriver as WDRV
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait as WREVW

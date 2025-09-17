@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 from llama_cpp import Llama
 from langchain.embeddings.base import Embeddings
 from concurrent.futures import ThreadPoolExecutor, as_completed

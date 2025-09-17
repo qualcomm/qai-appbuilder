@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 import flet as ft
 import asyncio
 from openai import OpenAI
