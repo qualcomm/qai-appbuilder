@@ -20,7 +20,7 @@ from chat import Chat
 from Docutils import ManualDocSummarizer
 
 os.environ["no_proxy"] = "localhost,127.0.0.1,::1"
- 
+
 # ===================================================================
 # 🌐 前端 UI 层（仅保留结构，后端调用将通过 HTTP）
 # 所有实际逻辑用 pass 替代，留出接口接入点
