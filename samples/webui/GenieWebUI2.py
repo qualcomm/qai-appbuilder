@@ -121,6 +121,7 @@ def chat(chatbot, max_length, temp, top_k, top_p):
         answer += chunk
         chatbot[-1].content = answer
         yield chatbot, "", "", ""
+
     profile = service.getchatprofile()
     if profile.status_code == 200:
         # 将响应内容解析为JSON格式
@@ -159,7 +160,8 @@ def translate_text(chatbot, max_length, temp, top_k, top_p):
         chatbot[-1].content = answer
         yield chatbot, "", "", ""
     profile = service.getchatprofile()
-    if profile.status_code == 200:
+
+    if profile and profile.status_code == 200:
         # 将响应内容解析为JSON格式
         data = profile.json()
 

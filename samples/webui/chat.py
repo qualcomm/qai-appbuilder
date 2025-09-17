@@ -10,12 +10,12 @@ import base64
 import time
 from colorama import init, Fore
 from PIL import Image
-
 import io
 
 # 强制 stdout 使用 UTF-8 编码
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
 class Chat():
     def __init__(self) -> None:
         init(autoreset=True)
@@ -32,7 +32,7 @@ class Chat():
             "-l",
             "-p", "8910"
         ]
-        
+
         try:
             # shell=True 是必须的,以便支持 'start' 命令
             subprocess.Popen(command, shell=True, cwd=os.path.dirname(__file__))  # 设置工作目录
@@ -142,31 +142,38 @@ class Chat():
         """与模型聊天"""
         BASE_URL = "http://localhost:8910/v1"   # For Genie
         client = OpenAI(base_url=BASE_URL, api_key="123")
-        messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": content}]
-        extra_body = {"size": 4096, "seed": 146, "temp": 1.5, "top_k": 13, "top_p": 0.6, "penalty_last_n": 64, "penalty_repeat": 1.3}
 
-        # content = content
-        # messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": content}]
-        # extra_body = {"size": max_length, "seed": 146, "temp": temp, "top_k": top_k, "top_p": top_p, "penalty_last_n": 64, "penalty_repeat": 1.3}
-        if stream:
-            response = client.chat.completions.create(model=model_name, stream=True, messages=messages, extra_body=extra_body)
+        try:
+            messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": content}]
+            extra_body = {"size": max_length, "temp": temp, "top_k": top_k, "top_p": top_p}
 
-            for chunk in response:
-                content = chunk.choices[0].delta.content
-                if content is not None:
-                    yield content
-                    # print(Fore.YELLOW + content, end="", flush=True)
-        else:
-            response = client.chat.completions.create(model=model_name, messages=messages, extra_body=extra_body)
-            yield response.choices[0].message.content
-            # print(response)
-            # print(Fore.YELLOW + response.choices[0].message.content)
+            if stream:
+                response = client.chat.completions.create(model=model_name, stream=True, messages=messages, extra_body=extra_body)
+
+                for chunk in response:
+                    content = chunk.choices[0].delta.content
+                    if content is not None:
+                        yield content
+                        # print(Fore.YELLOW + content, end="", flush=True)
+            else:
+                response = client.chat.completions.create(model=model_name, messages=messages, extra_body=extra_body)
+                yield response.choices[0].message.content
+                # print(response)
+                # print(Fore.YELLOW + response.choices[0].message.content)
+
+        except Exception as e:
+            print(Fore.RED + f"Service Error: {e}\n")
 
     def getchatprofile(self):
         BASE_URL = "http://localhost:8910/profile"
-        response = requests.get(BASE_URL)
-        return response
-    
+
+        try: 
+            response = requests.get(BASE_URL)
+            return response
+        except Exception as e:
+            print(Fore.RED + f"Service Error: {e}\n")
+            return None
+
     def getmodellist(self):
         BASE_URL = "http://localhost:8910/models"
         response = requests.get(BASE_URL)
@@ -176,229 +183,7 @@ class Chat():
             modelname.append(data["id"])
         return modelname
 
-    def toolcall(self, content, system_prompt="You are a helpful assistant that can use tools to answer questions and perform tasks.", stream=True, model_name="Qwen2.0-7B-SSD"):
-        """工具调用"""
-        print(f"开始测试工具调用:\n{content}")
-        def search_files(query, maxResults):
-            """Find and locate files or folders by name, such as searching for README.md file location on your computer."""
-            
-            file_info = {
-                "file_path": "c:\\aaa.txt",
-                "file_path2": "c:\\McpServer.py",
-                "file_path3": "c:\\ccc.txt"
-            }
-
-            return json.dumps(file_info)
-
-        def get_current_weather(location, unit="fahrenheit"):
-            """Get the current weather in a given location"""
-            
-            if not unit:
-                unit = "celsius"
-
-            weather_info = {
-                "date": "today",
-                "location": location,
-                "temperature": "32",
-                "unit": unit,
-                "forecast": ["sunny", "windy"],
-            }
-            return json.dumps(weather_info)
-
-        def get_n_day_weather_forecast(location, unit="fahrenheit"):
-            """Get an N-day weather forecast in a given location"""
-
-            if not unit:
-                unit = "celsius"
-
-            weather_info = {
-                "date": "7 days",
-                "location": location,
-                "temperature": "43",
-                "unit": unit,
-                "forecast": ["cloudy", "windy", "rain", "sunny", "cloudy", "windy", "rain"],
-            }
-            return json.dumps(weather_info)
-
-        available_functions = {
-            "get_current_weather": get_current_weather,
-            "get_n_day_weather_forecast": get_n_day_weather_forecast,
-            "search_files": search_files,
-        }
-
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "search_files",
-                    "description": "Find and locate files or folders by name, such as searching for README.md file location on your computer.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "query": {
-                                "type": "string",
-                                "description": "Search query for file names",
-                            },
-                            "maxResults": {
-                                "type": "number",
-                                "minimum": 1,
-                                "maximum": 110,
-                                "description": "Maximum number of results to return (default: 20)",
-                            },
-                            "matchCase": {
-                                "type": "boolean",
-                                "description": "Enable case-sensitive search",
-                            },
-                            "matchWholeWord": {
-                                "type": "boolean",
-                                "description": "Match whole words only",
-                            },
-                            "regex": {
-                                "type": "boolean",
-                                "description": "Enable regular expression search",
-                            },
-                        },
-                        "required": ["query"],
-                        "additionalProperties": False
-                    },
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "get_current_weather",
-                    "description": "Get the current weather in a given location.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "unit": {
-                                "type": "string",
-                                "enum": ["celsius", "fahrenheit"],
-                                "description": "The temperature unit to use. Infer this from the users location.",
-                            },
-                            "location": {
-                                "type": "string",
-                                "description": "The city and state, e.g. San Francisco, CA",
-                            },
-                        },
-                        "required": ["location", "unit"],
-                        "additionalProperties": False
-                    },
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "get_n_day_weather_forecast",
-                    "description": "Get an N-day weather forecast.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "unit": {
-                                "type": "string",
-                                "enum": ["celsius", "fahrenheit"],
-                                "description": "The temperature unit to use. Infer this from the users location.",
-                            },
-                            "location": {
-                                "type": "string",
-                                "description": "The city and state, e.g. San Francisco, CA",
-                            },
-                            "num_days": {
-                                "type": "integer",
-                                "description": "The number of days to forecast",
-                            }
-                        },
-                        "required": ["location", "unit", "num_days"],
-                        "additionalProperties": False
-                    },
-                }
-            },
-        ]
-
-
-        def handle_tool_calls(tool_calls, params, available_functions):
-            for tool_call in tool_calls:
-                try:
-                    tool_call_id = tool_call.id
-                    function_name = tool_call.function.name
-                    function_to_call = available_functions[function_name]
-                    function_args = json.loads(tool_call.function.arguments)
-
-                    if function_name == "search_files":
-                        tool_response = function_to_call(
-                            query=function_args.get("query"),
-                            maxResults=function_args.get("maxResults"),
-                        )
-                    elif function_name == "get_n_day_weather_forecast":
-                        tool_response = function_to_call(
-                            location=function_args.get("location"),
-                            unit=function_args.get("unit"),
-                        )
-                    else:
-                        tool_response = function_to_call(
-                            location=function_args.get("location"),
-                            unit=function_args.get("unit"),
-                        )
-
-                    params["messages"].append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "content": tool_response,
-                        }
-                    )
-                except Exception as e:
-                    print("Exception:", e)
-
-        def print_response_content(content):
-            if content is not None:
-                print(Fore.YELLOW + content, end="", flush=True)
-                print()
-
-        def process_response(response, params, available_functions):
-            content = response.choices[0].message.content
-            print_response_content(content)
-            tool_calls = response.choices[0].message.tool_calls
-            if tool_calls:
-                handle_tool_calls(tool_calls, params, available_functions)
-                response = client.chat.completions.create(**params)
-                content = response.choices[0].message.content or ""
-                print_response_content(content)
-
-        def process_stream_response(response, params, available_functions):
-            for chunk in response:
-                content = chunk.choices[0].delta.content or ""
-                print(Fore.YELLOW + content, end="", flush=True)
-                if chunk.choices[0].finish_reason == "stop":
-                    print()
-                    return
-                tool_calls = chunk.choices[0].delta.tool_calls
-                if tool_calls:
-                    handle_tool_calls(tool_calls, params, available_functions)
-                    response = client.chat.completions.create(**params)
-                    for x in response:
-                        content = x.choices[0].delta.content or ""
-                        print(Fore.YELLOW + content, end="", flush=True)
-                    print()
-
-
-        # init(autoreset=True)
-        BASE_URL = "http://localhost:8910/v1"
-        client = OpenAI(base_url=BASE_URL, api_key="123")
-        messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": content}]
-        extra_body = {"size": 4096, "seed": 146, "temp": 1.5, "top_k": 13, "top_p": 0.6, "penalty_last_n": 64, "penalty_repeat": 1.3}
-        params = dict(model=model_name, stream=stream, messages=[{"role": "user", "content": content}])
-        if stream:
-            response = client.chat.completions.create(model=model_name, stream=True, messages=messages, extra_body=extra_body,
-                                                    tools=tools, tool_choice="auto")
-            process_stream_response(response, params, available_functions)
-        else:
-            response = client.chat.completions.create(model=model_name, messages=messages, extra_body=extra_body,
-                                                    tools=tools, tool_choice="auto")
-            process_response(response, params, available_functions)
-
     def imagegenerate(self, prompt, negative_prompt="", seed=42, step=20, guidance_scale=7.5, size="512x512"):
-
         server_url = "http://127.0.0.1:8910/images/generations"
         payload = {
             "model":"Stable Diffusion 3",
@@ -442,6 +227,7 @@ class Chat():
             return ""
         else:
             print(f"请求失败，状态码: {response.status_code}, 错误信息: {response.text}")
+
 if __name__ == "__main__":
     test = Chat()
     # test.imagegenerate(prompt="a beautiful gril")

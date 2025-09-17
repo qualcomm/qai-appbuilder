@@ -29,19 +29,18 @@ client = OpenAI(base_url=BASE_URL, api_key="123")
 # model_lst = client.models.list()
 # print(model_lst)
 
+model_name = args.model
+
 messages = [{"role": "system", "content": "You are a helpful assistant that can use tools to answer questions and perform tasks."}, {"role": "user", "content": prompt}]
 extra_body = {"size": 4096, "seed": 146, "temp": 1.5, "top_k": 13, "top_p": 0.6}
 
-model_name = args.model
-
-
 def search_files(query, maxResults):
     """Find and locate files or folders by name, such as searching for README.md file location on your computer."""
-    
+
     file_info = {
-        "file_path": "c:\\aaa.txt",
-        "file_path2": "c:\\McpServer.py",
-        "file_path3": "c:\\ccc.txt"
+        "file_path": "c:\\README.md",
+        "file_path2": "c:\\sample.py",
+        "file_path3": "c:\\test.txt"
     }
 
     return json.dumps(file_info)
