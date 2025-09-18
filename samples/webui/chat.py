@@ -103,7 +103,7 @@ class Chat():
             print(Fore.GREEN + "reload message success\n")
         else:
             print(Fore.RED + "fail to reload message\n")    
-    
+
     def stopoutput(self):
         """终止当前模型输出"""
         print("开始测试终止模型输出:")
@@ -143,7 +143,11 @@ class Chat():
             print()
         return result
 
-    def chat(self, content, system_prompt="you are a helpful assistant", model_name="Qwen2.0-7B-SSD", stream=True, max_length=4096, temp=1.5, top_k=13, top_p=0.6):
+    def chat(self, content, system_prompt="You are a helpful assistant", model_name="Qwen2.0-7B-SSD", stream=True, max_length=4096, temp=1.5, top_k=13, top_p=0.6):
+        if system_prompt == "" or system_prompt == None:
+            system_prompt = "You are a helpful assistant"
+        # print(system_prompt)
+
         """与模型聊天"""
         BASE_URL = "http://localhost:8910/v1"   # For Genie
         client = OpenAI(base_url=BASE_URL, api_key="123")

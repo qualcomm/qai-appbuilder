@@ -47,13 +47,6 @@ class Colors:
     WHITE = '\033[97m'
     END = '\033[0m'  # Reset color.
 
-###########################################################################
-
-llm = None
-sumllm = None
-_func_mode = 0
-_question = None
-_sys_prompt = None
 
 ###########################################################################
 
@@ -79,6 +72,14 @@ body{
 
 footer{display:none !important}
 """
+
+###########################################################################
+
+llm = None
+sumllm = None
+_func_mode = 0
+_question = None
+_sys_prompt = None
 
 ###########################################################################
 
@@ -365,7 +366,7 @@ def main():
                         p_speed = gr.Textbox(label="Prompt Speed", visible=True)
                         e_speed = gr.Textbox(label="Eval Speed", visible=True)
                         #FR0001:Add customized prompt
-                        cust_prompt = gr.Textbox(label="Customer Prompt", value="分析单词的词源:", visible=True, interactive=True)
+                        cust_prompt = gr.Textbox(label="Customer Prompt", value="", visible=True, interactive=True)
 
                 with gr.Column(scale=8):
                     chatbot = gr.Chatbot(scale=9, type='messages', show_copy_button=True, group_consecutive_messages=True, height="52vh",)
@@ -415,7 +416,7 @@ def main():
             global _sys_prompt
 
             _sys_prompt = cust_prompt.value
-            print("\nchange:sys prompt:", _sys_prompt)
+            # print("\nchange:sys prompt:", _sys_prompt)
 
             _func_mode = func_mode
             func_name = FUNC_LIST[func_mode]

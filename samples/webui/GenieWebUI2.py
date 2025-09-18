@@ -35,8 +35,8 @@ PORT = 50000
 FILE_PATH = "files"
 TRUSTED_OUTPUT_DIR="images"
 FILE_TYPES = [".pdf", ".docx", ".pptx", ".txt", ".md", ".py", ".c", ".cpp", ".h", ".hpp"]
-FUNC_LIST = ["📐 解题答疑", "📚 文档总结", "🗛 AI 翻 译", "🌐 AI 搜 索", "✒️ 帮我写作", "🎨 图像生成", "🍸 美食指南", "✈️ 旅游规划"]
-FUNC_LIST_EN = ["📐 Q & A", "📚 Doc Summary", "🗛 AI Translation", "🌐 AI Searching", "✒️ Writing Assistant", "🎨 Text To Image", "🍸 Gourmet guide", "✈️ Tourism planning"]
+FUNC_LIST = ["📐 解题答疑", "📚 文档总结", "🗛 AI 翻 译", "🌐 AI 搜 索", "✒️ 帮我写作", "🎨 图像生成", "🍸 定制功能", "✈️ 旅游规划"]
+FUNC_LIST_EN = ["📐 Q & A", "📚 Doc Summary", "🗛 AI Translation", "🌐 AI Searching", "✒️ Writing Assistant", "🎨 Text To Image", "🍸 Customerized Function", "✈️ Tourism planning"]
 
 class Colors:
     RED = '\033[91m'
@@ -51,7 +51,7 @@ class Colors:
 
 ###########################################################################
 
-css=""" 
+css="""
 body{
 	display:flex;
 }
@@ -74,7 +74,6 @@ body{
 footer{display:none !important}
 """
 
-
 ###########################################################################
 
 # ===================================================================
@@ -82,6 +81,7 @@ footer{display:none !important}
 # ===================================================================
 _func_mode = 0
 _question = ""
+_sys_prompt = None
 chat_history = []  # 可用于临时缓存（实际应由后端维护）
 def on_model_selected(model_name):
     """
@@ -110,7 +110,7 @@ def stop_generation():
     service.stopoutput()
     print("✅ The user clicked the pause button and is interrupting the generation...")
 
-def chat(chatbot, max_length, temp, top_k, top_p):
+def chat(chatbot, max_length, temp, top_k, top_p, system_prompt=None):
     """对话"""
     if current_model == "":
         chatbot[-1].content = "Please select a model first."
@@ -118,7 +118,7 @@ def chat(chatbot, max_length, temp, top_k, top_p):
         return
     answer = ""
     print('model select: ', current_model)
-    for chunk in service.chat(_question, max_length=max_length, temp=temp, top_k=top_k, top_p=top_p, model_name=current_model):
+    for chunk in service.chat(_question, system_prompt=system_prompt, max_length=max_length, temp=temp, top_k=top_k, top_p=top_p, model_name=current_model):
         answer += chunk
         chatbot[-1].content = answer
         yield chatbot, "", "", ""
@@ -232,10 +232,27 @@ def vote(data: gr.LikeData):
 def reset_state():
     return [], [], "", "", ""
 
+###################
+ #FR0001:Add customized prompt
+def update_text(value):
+    global _sys_prompt
+    _sys_prompt=value
+    # print("input:", _sys_prompt) 
+    with open("customprompt.txt", "w",encoding="utf-8" ) as file:
+        file.write(value)
+
+    return None
+
+
 # ===================================================================
 # 🖼️ UI 构建（完全保留原始结构）
 # ===================================================================
 def main():
+    #FR0001:Add customized prompt
+    global _sys_prompt
+    file_name="customprompt.txt"
+    #FR0001:Add customized prompt
+
     # 模拟模型列表（实际可从 /api/models 获取）
     model_list = service.getmodellist()
 
@@ -258,47 +275,31 @@ def main():
                         f_latency = gr.Textbox(label="First Latency", value="N/A")
                         p_speed = gr.Textbox(label="Prompt Speed", value="N/A")
                         e_speed = gr.Textbox(label="Eval Speed", value="N/A")
+                        #FR0001:Add customized prompt
+                        cust_prompt = gr.Textbox(label="Customer Prompt", value="", visible=True, interactive=True)
 
                 with gr.Column(scale=8):
-                    chatbot = gr.Chatbot(
-                        scale=9,
-                        type='messages',
-                        show_copy_button=True,
-                        group_consecutive_messages=True,
-                        height="52vh"
-                    )
+                    chatbot = gr.Chatbot(scale=9, type='messages', show_copy_button=True, group_consecutive_messages=True, height="52vh",)
                     chatbot.like(vote, None, None)
 
-                    chatmsg = gr.MultimodalTextbox(
-                        scale=1,
-                        interactive=True,
-                        file_count="multiple",
-                        placeholder="Enter message or upload file...",
-                        show_label=True,
-                        autofocus=True,
-                        max_plain_text_length=3000,
-                        file_types=FILE_TYPES,
-                        label=FUNC_LIST_EN[_func_mode]
-                    )
+                    chatmsg = gr.MultimodalTextbox(scale=1, interactive=True, file_count="multiple", placeholder="Enter message or upload file...", show_label=True, autofocus=True,
+                                                   max_plain_text_length=3000, file_types=FILE_TYPES, label=FUNC_LIST_EN[_func_mode])
 
                     with gr.Row():
                         func_1_btn = gr.Button(FUNC_LIST_EN[0], elem_classes="button_cls")
                         func_2_btn = gr.Button(FUNC_LIST_EN[1], elem_classes="button_cls")
                         func_3_btn = gr.Button(FUNC_LIST_EN[2], elem_classes="button_cls")
                         func_6_btn = gr.Button(FUNC_LIST_EN[5], elem_classes="button_cls")
+                        #FR0001:Add customized prompt
+                        func_7_btn = gr.Button(FUNC_LIST_EN[6], elem_classes="button_cls")
 
-                    gr.Examples([
-                        "Summarize the document content",
-                        "Analyze the source code and give line-by-line comments.",
-                        "Inquire about the weather in Shanghai today",
-                        "Help me check the following English grammar..."
-                    ], chatmsg, label="Quick Input")
+                    gr.Examples(["Summarize the document content",  "Analyze the source code and give line-by-line comments.", "Inquire about the weather in Shanghai today", "Help me check the following English grammar..."], chatmsg, label="Quick Input")
 
         # ===================================================================
         # 🔗 事件绑定（保留结构，逻辑由 predict 分发）
         # ===================================================================
         def predict(chatbot, max_length, temp, top_k, top_p):
-            global _question, _func_mode
+            global _question, _func_mode, _sys_prompt
 
             if not _question.strip() and _func_mode != 1:  # 文档总结除外
                 yield chatbot, "", "", ""
@@ -323,6 +324,11 @@ def main():
                 for chunk in generate_image(chatbot, max_length, temp, top_k, top_p):
                     yield chunk
 
+            elif FUNC_LIST[_func_mode] == "🍸 定制功能":
+                for chunk in chat(chatbot, max_length, temp, top_k, top_p, _sys_prompt):
+                    yield chunk
+                chatbot.append(ChatMessage(role="assistant", content=""))
+
             else:
                 chatbot[-1].content = "该功能正在开发中..."
                 yield chatbot, "", "", ""
@@ -332,10 +338,27 @@ def main():
         chat_run = chat_run.then(predict, [chatbot, max_length, temp, top_k, top_p], [chatbot, f_latency, p_speed, e_speed])
         chat_run.then(lambda: gr.MultimodalTextbox(interactive=True, submit_btn=True, stop_btn=False), None, chatmsg)
         chatmsg.stop(fn=stop_generation)
-        
+
+        #FR0001:Add customized prompt
+        if not os.path.exists(file_name):
+            with open(file_name, "w",encoding="utf-8") as file:
+                file.write("")  # Create an empty file
+
+        with open(file_name, "r",encoding="utf-8") as file:
+            cust_prompt.value = file.read()
+
+        cust_prompt.change(update_text, inputs=cust_prompt, outputs=None)
+        _sys_prompt = cust_prompt.value
+        #FR0001:Add customized prompt
+
         # 功能按钮切换
         def func_change(func_mode):
             global _func_mode
+            global _sys_prompt
+
+            _sys_prompt = cust_prompt.value
+            # print("\nchange:sys prompt:", _sys_prompt)
+
             _func_mode = func_mode
             func_name = FUNC_LIST[func_mode]
             sources = ["upload"] if func_name == "📚 文档总结" else []
@@ -345,6 +368,8 @@ def main():
         func_2_btn.click(lambda: func_change(1), None, chatmsg)
         func_3_btn.click(lambda: func_change(2), None, chatmsg)
         func_6_btn.click(lambda: func_change(5), None, chatmsg)
+        #FR0001:Add customized prompt
+        func_7_btn.click(lambda: func_change(6), None, [chatmsg])
 
         # 模型切换（未来可触发 /api/load-model）
         model_select.change(
@@ -360,4 +385,5 @@ def main():
     demo.queue().launch(server_name=HOST, share=False, inbrowser=True, server_port=PORT)
 
 if __name__ == '__main__':
+
     main()
