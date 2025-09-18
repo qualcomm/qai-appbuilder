@@ -96,6 +96,16 @@ response = requests.post(url, json=history_data)
 
 ```
 
+## Get history of conversation records.
+The sample of get the conversation history records.
+```
+import requests
+BASE_URL = "http://localhost:8910/fetch"
+response = requests.post(BASE_URL)
+print(response.text)
+return response
+```
+
 ## Get modelname list
 get the name of the model that can be loaded.<br>
 ```
