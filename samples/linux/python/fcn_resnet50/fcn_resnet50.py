@@ -158,7 +158,7 @@ def Init():
     model_download()
 
     # Config AppBuilder environment.
-    QNNConfig.Config("/home/ubuntu/code/ai-engine-direct-helper/qnn_libs", Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for fcn_resnet50 objects.
     fcn_resnet50 = Fcn_resnet50("fcn_resnet50", model_path)
