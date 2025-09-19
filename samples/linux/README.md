@@ -69,7 +69,7 @@ The following table lists available sample models, their descriptions, and instr
 | utils                  | Utility scripts for preprocessing/postprocessing | `python utils/utils.py`                      |
 | vit                    | Vision Transformer image classification       | `python vit/vit.py`                             |
 | wideresnet50           | WideResNet50 image classification             | `python wideresnet50/wideresnet50.py`           |
-| xlsr                   | XLSR speech recognition                       | `python xlsr/xlsr.py`                           |
+| xlsr                   | XLSR super-resolution                       | `python xlsr/xlsr.py`                           |
 | yolov8_det             | YOLOv8 object detection                       | `python yolov8_det/yolov8_det.py`               |
 
 > **Note:**  
