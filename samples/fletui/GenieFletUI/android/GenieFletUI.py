@@ -6,43 +6,59 @@
 import flet as ft
 import asyncio
 from openai import OpenAI
+import requests
+import json
+from enum import Enum
+import hashlib
+import base64
+import os
+import platform
+from pathlib import Path
+import logging
 
 PAGE_CONTENT_FACTOR = 0.8
 CIRCLEAVATAR_WIDTH = 50
 
+LOG_FILE = "app.log"
+LOG_ENABLE = False
+
 DEFAULT_THEME = "dark"
 DEFAULT_FONTCOLOR = "cyan700"
 DEFAULT_LLM = "qwen"
+DEFAULT_PERFORMANCE_DATA = True
 
-FUNC_ID_SOLUTION    = 0
-FUNC_ID_TRANSLATE   = 1
-FUNC_ID_SOURCE_CODE = 2
+class FuncID(Enum):
+    FUNC_ID_SOLUTION  = 0
+    FUNC_ID_TRANSLATE = 1
+    FUNC_ID_CUSTOMIZE = 2
 
-'''
-FUNC_NAME_SOLUTION    = "📐 解题答疑"
-FUNC_NAME_TRANSLATE   = "🌐 AI 翻 译"
-FUNC_NAME_SOURCE_CODE = "📜 代码分析"
-'''
-FUNC_NAME_SOLUTION    = "📐 Solution"
-FUNC_NAME_TRANSLATE   = "🌐 Translate"
-FUNC_NAME_SOURCE_CODE = "📜 Code Analyze"
+FUNC_NAME_SOLUTION  = "📐 Solution"
+FUNC_NAME_TRANSLATE = "🌐 Translate"
+FUNC_NAME_CUSTOMIZE = "✏️ Customize"
 
-FUNC_PROMPT_SOLUTION    = "{prompt}"
-FUNC_PROMPT_TRANSLATE   = "将以下内容翻译成{lang}\n{prompt}"
-FUNC_PROMPT_SOURCE_CODE = "请帮忙分析源代码，分析是否有潜在问题。如果没有问题，请给出详细注释。代码如下\n{prompt}"
+FUNC_USER_PROMPT_SOLUTION  = "请回答如下问题：\n{question}"
+FUNC_USER_PROMPT_TRANSLATE = "将以下内容翻译成{lang}：\n{sentence}"
+FUNC_USER_PROMPT_CUSTOMIZE = "{question}"
 
-FUNC_HINT_SOLUTION    = "What can I do for you? ..."
-FUNC_HINT_TRANSLATE   = "Please input your sentence ..."
-FUNC_HINT_SOURCE_CODE = "Please provide your source code ..."
+FUNC_SYSTEM_PROMPT_SOLUTION  = "你是一位智能聊天助手。任务是回答用户的任何问题并给出合理建议。任务设置完毕。"
+FUNC_SYSTEM_PROMPT_TRANSLATE = "你是一位AI翻译专家。任务是自动识别用户输入的单词、句子或段落的语言，然后进行准确的中英文互相翻译。不要将其视为用户的问题来回答，只做翻译工作。任务设置完毕。"
+FUNC_SYSTEM_PROMPT_CUSTOMIZE = "你是一位智能助手。"
 
-ERROR_MESSAGE_GENIESERVER_IN_USING      = "Genie server is in using. Please try again later."
-ERROR_MESSAGE_GENIESERVER_NOT_AVAILABLE = "Genie server is not available. Please check if network or GenieAPIService (Address or Port) is working or not."
-ERROR_MESSAGE_GENIESERVER_GENERAL_ERROR = "Genie server exception happens. Error message: {errmsg}"
-ERROR_MESSAGE_MODEL_LIST_FAILURE        = "Genie server is not working\n\nPlease launch GenieAPIService and restart this application!"
+FUNC_HINT_SOLUTION  = "What can I do for you? ..."
+FUNC_HINT_TRANSLATE = "Please input your sentence ..."
+FUNC_HINT_CUSTOMIZE = "Please customize your system prompt ..."
 
-func_id = FUNC_ID_SOLUTION
+ERROR_MESSAGE_GENIESERVER_IN_USING        = "Genie server is in using. Please try again later."
+ERROR_MESSAGE_GENIESERVER_RESTART_SUCCESS = "Genie server is not available. Restarting successfully. Please retry."
+ERROR_MESSAGE_GENIESERVER_NOT_AVAILABLE   = "Genie server is not available. Restarting failure. Please check if network or GenieAPIService (Address or Port) is working or not."
+ERROR_MESSAGE_GENIESERVER_GENERAL_ERROR   = "Genie server exception happens. Error message: {errmsg}"
+ERROR_MESSAGE_MODEL_LIST_FAILURE          = "Genie server is not working\n\nPlease launch GenieAPIService and restart this application!"
+
+func_id = FuncID.FUNC_ID_SOLUTION
 current_theme = DEFAULT_THEME
 current_fontcolor = DEFAULT_FONTCOLOR
+performance_data = DEFAULT_PERFORMANCE_DATA
+customized_system_prompt = FUNC_SYSTEM_PROMPT_CUSTOMIZE
 
 server_host = "127.0.0.1"
 server_port = "8910"
@@ -53,6 +69,25 @@ top_k = 13
 top_p = 0.6
 running_llm = ""
 client = None
+base_path = ""
+
+def get_sys_prompt_file():
+    global base_path
+    if platform.system() == "Android":
+        base_path = Path.home()
+    else:
+        base_path = Path(__file__).resolve().parent
+
+    return os.path.join(str(base_path), 'data', 'sys_prompt.json')
+
+SYS_PROMPT_FILE = get_sys_prompt_file()
+os.makedirs(os.path.dirname(SYS_PROMPT_FILE), exist_ok=True)
+
+if LOG_ENABLE is True:
+    log_path = str(base_path / LOG_FILE)
+    logging.basicConfig(filename=log_path, level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s', encoding='utf-8')
+else:
+    logging.disable(logging.CRITICAL)
 
 extrabody = {
     "n_predict": n_predict, "seed": 146, "temp": temperature,
@@ -89,12 +124,6 @@ class ChatMessage(ft.Row):
                     width=(page_width-CIRCLEAVATAR_WIDTH)*PAGE_CONTENT_FACTOR,   # 根据窗口宽度动态调整Text宽度，结合no_wrap自动换行
                     text_align=ft.TextAlign.RIGHT   # 文字靠右对齐
                 ),
-                #ft.Container(
-                #    content=ft.Text(message.text, color=ft.Colors.WHITE, selectable=True, no_wrap=False, width=(page_width-CIRCLEAVATAR_WIDTH)*PAGE_CONTENT_FACTOR, text_align=ft.TextAlign.RIGHT),
-                #    bgcolor=ft.Colors.BLUE_500,
-                #    padding=10,
-                #    border_radius=15,
-                #),
                 ft.CircleAvatar(
                     content=ft.Text(message.user, weight="bold"),
                     color=ft.Colors.WHITE,
@@ -102,7 +131,7 @@ class ChatMessage(ft.Row):
                     width=CIRCLEAVATAR_WIDTH
                 )
             ]
-        else:
+        elif message.user == "AI":
             self.alignment = ft.MainAxisAlignment.START
             self.controls = [
                 ft.CircleAvatar(
@@ -121,59 +150,177 @@ class ChatMessage(ft.Row):
                     extension_set=ft.MarkdownExtensionSet.GITHUB_WEB
                 )
             ]
+        else:   # performance data shown
+            self.alignment = ft.MainAxisAlignment.START
+            self.controls = [
+                ft.Container(width=CIRCLEAVATAR_WIDTH, bgcolor="transparent"),
+                ft.Text(message.text, selectable=True, no_wrap=False, width=(page_width-CIRCLEAVATAR_WIDTH)*PAGE_CONTENT_FACTOR, text_align=ft.TextAlign.LEFT, italic=True, size=11, color=ft.Colors.ON_SURFACE_VARIANT)
+            ]
 
     def update_width(self, new_width):
         """动态调整消息框的宽度"""
         if new_width - CIRCLEAVATAR_WIDTH > 200:
-            if isinstance(self.controls[0], ft.Container):  # this is "User" ChatMessage
-                self.controls[0].content.width = (new_width-CIRCLEAVATAR_WIDTH)*PAGE_CONTENT_FACTOR
+            if isinstance(self.controls[0], ft.Text):  # this is "User" ChatMessage
+                self.controls[0].width = (new_width-CIRCLEAVATAR_WIDTH)*PAGE_CONTENT_FACTOR
             else:   # this is "AI" ChatMessage
                 self.controls[1].width = (new_width-CIRCLEAVATAR_WIDTH)*PAGE_CONTENT_FACTOR
             self.update()
 
+def get_hash(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
+
+def encode_prompt(prompt: str) -> str:
+    return base64.b64encode(prompt.encode()).decode()
+
+def decode_prompt(encoded: str) -> str:
+    return base64.b64decode(encoded.encode()).decode()
+
+def save_prompt(prompt: str):
+    encoded = encode_prompt(prompt)
+    hash_value = get_hash(prompt)
+    with open(SYS_PROMPT_FILE, "w") as f:
+        json.dump({"data": encoded, "hash": hash_value}, f)
+
+def load_prompt():
+    try:
+        with open(SYS_PROMPT_FILE, "r") as f:
+            obj = json.load(f)
+            decoded = decode_prompt(obj["data"])
+            if get_hash(decoded) != obj["hash"]:
+                raise ValueError("customized system prompt is tampered!")
+            return decoded
+
+    except (FileNotFoundError, json.JSONDecodeError, ValueError) as e:
+        print(f"load customized system prompt failure. Use default system prompt. Error code: {e}")
+        logging.debug("load customized system prompt failure. Use default system prompt. Error code: {error}".format(error=e))
+        return FUNC_SYSTEM_PROMPT_CUSTOMIZE
+
 def get_llm_list(host:str, port:str, key:str) -> tuple[list[str], str]:
     global client
+
     try:
-        client = OpenAI(base_url=f"http://{host}:{port}/v1", api_key=key)
-        model_lst = client.models.list()
-        modelname_lst = [model.id for model in model_lst.data]
-        default_model = next((m for m in modelname_lst if DEFAULT_LLM.lower() in m.lower()), modelname_lst[0])
-        return modelname_lst, default_model
-    except Exception as e:
-        print(f"Getting LLM list failure: {e}")
+        response = requests.get(f"http://{host}:{port}/v1/models", timeout=1)   # 1 second timeout
+        if response.status_code == 200: 
+            try:
+                client = OpenAI(base_url=f"http://{host}:{port}/v1", api_key=key)
+                model_lst = client.models.list()
+                modelname_lst = [model.id for model in model_lst.data]
+                default_model = next((m for m in modelname_lst if DEFAULT_LLM.lower() in m.lower()), modelname_lst[0])
+                return modelname_lst, default_model
+            except Exception as e:
+                client = None
+                print(f"Getting LLM list failure: {e}")
+                logging.debug("Getting LLM list failure: {error}".format(error=e))
+                return None, None
+    except requests.exceptions.RequestException:
+        client = None
+        print(f"Genie Server is offline")
+        logging.debug("Genie Server is offline")
         return None, None
+"""
+def is_android():
+    print("is_android: {system}, {sdcard}".format(system=platform.system(), sdcard=Path("/sdcard").exists()))
+    logging.debug("is_android: {system}, {sdcard}".format(system=platform.system(), sdcard=Path("/sdcard").exists()))
+    return (
+        platform.system() == "Linux" and
+        Path("/sdcard").exists()
+    )
 
-def edit_prompt(user_input: str) -> str:
+def start_genie_service() -> bool:
+    global client, server_host, server_port, api_key, running_llm
+
+    if is_android() == True:
+        try:
+            subprocess.Popen(["adb", "shell", "am", "start-foreground-service", "-n", "com.example.genieapiservice/.ForegroundService"])
+            print("GenieAPIService start successfully in Android")
+            logging.debug("GenieAPIService start successfully in Android")
+            llm_lst, running_llm = get_llm_list(server_host, server_port, api_key)
+            if llm_lst is None:
+                print("Get llm failure")
+                logging.debug("Get llm failure")
+                return False
+            else:
+                print("Get llm successfully")
+                logging.debug("Get llm successfully")                
+                return True
+        except Exception as e:
+            client = None
+            print(f"GenieAPIService start failure in Android: {e}")
+            logging.debug("GenieAPIService start failure in Android: {error}".format(error=e))
+            return False
+    else:
+        print("Not Android. Don't start genie service")
+        logging.debug("Not Android. Don't start genie service")
+        return False
+"""
+def check_genie_service() -> bool:
+    global server_host, server_port, api_key, running_llm
+
+    llm_lst, running_llm = get_llm_list(server_host, server_port, api_key)
+    if llm_lst is None:
+        #return start_genie_service()
+        return False
+    else:
+        return True
+
+def edit_prompt(user_input: str, context: str="") -> tuple[str, str]:
+    global func_id, customized_system_prompt
     match func_id:
-        case 0:
-            prompt_format = FUNC_PROMPT_SOLUTION.format(prompt=user_input)
-            return prompt_format
-        case 1:
+        case FuncID.FUNC_ID_SOLUTION:
+            sys_prompt  = FUNC_SYSTEM_PROMPT_SOLUTION
+            user_prompt = FUNC_USER_PROMPT_SOLUTION.format(question=user_input)            
+            return sys_prompt, user_prompt
+        case FuncID.FUNC_ID_TRANSLATE:
+            sys_prompt  = FUNC_SYSTEM_PROMPT_TRANSLATE
             target_lang = "英文" if has_chinese(user_input) else "中文"
-            prompt_format = FUNC_PROMPT_TRANSLATE.format(prompt=user_input, lang=target_lang)
-            return prompt_format
-        case 2:
-            prompt_format = FUNC_PROMPT_SOURCE_CODE.format(prompt=user_input)
-            return prompt_format
+            user_prompt = FUNC_USER_PROMPT_TRANSLATE.format(sentence=user_input, lang=target_lang)
+            return sys_prompt, user_prompt
+        case FuncID.FUNC_ID_CUSTOMIZE:
+            sys_prompt  = customized_system_prompt
+            user_prompt = FUNC_USER_PROMPT_CUSTOMIZE.format(question=user_input)
+            return sys_prompt, user_prompt
         case _:
-            return None
+            return None, None
 
-async def disable_all_controls(page, status: bool):
-    for control in page.controls:
-        control.disabled = status
+def get_all_controls(control):
+    all_controls = [control]
+    if hasattr(control, "controls") and control.controls:
+        for child in control.controls:
+            all_controls.extend(get_all_controls(child))
+    return all_controls
+
+async def disable_controls_by_type(page, target_types: tuple, exception_keys: list, status: bool):
+    for top_control in page.controls:
+        for control in get_all_controls(top_control):
+            if isinstance(control, target_types) and getattr(control, "key", None) not in exception_keys:
+                control.disabled = status
     page.update()
 
-def generate_summary(text, stream_output: bool):
-    global running_llm, extrabody
+def clear_server_history():
+    global server_host, server_port
+    response = requests.post(f"http://{server_host}:{server_port}/clear", json={"text": "clear"})
+    print(f"Clear server history: {response.status_code}")
+    logging.debug("Clear server history: {error}".format(error=response.status_code))
 
-    prompt_txt = edit_prompt(text)
+def generate_summary(query: str, stream_output: bool, context: str=""):
+    global running_llm, extrabody, client
+
+    if client == None:
+        if check_genie_service() == False:
+            return None, "Connection error."
+
+    sys_prompt, user_prompt = edit_prompt(user_input=query, context=context)
 
     messages = [
-        {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user", "content": prompt_txt}
+        {"role": "system", "content": sys_prompt},
+        {"role": "user", "content": user_prompt}
     ]
 
     print(f"Start reference: max_length - {extrabody["n_predict"]}. temp - {extrabody["temp"]}. top_k - {extrabody["top_k"]}. top_p - {extrabody["top_p"]}")
+    print(f"System prompt: {sys_prompt}")
+    logging.debug("System prompt: {prompt}".format(prompt=sys_prompt))
+    print(f"User prompt: {user_prompt}")
+    logging.debug("User prompt: {prompt}".format(prompt=user_prompt))
     
     try:
         if stream_output is True:
@@ -183,52 +330,78 @@ def generate_summary(text, stream_output: bool):
             response = client.chat.completions.create(model=running_llm, messages=messages)
             return response.choices[0].message.content, None
     except Exception as e:
-        print(f"inference failure: {e}")        
+        print(f"inference failure: {e}")
+        logging.debug("inference failure: {error}".format(error=e))        
         return None, str(e)
 
-async def send_message_click(e, page: ft.Page, chat: ft.ListView, new_message: ft.TextField):
-    global selected_file, current_fontcolor
-    if new_message.value.strip():
-        new_message.disabled = True
+async def send_message_click(e, page: ft.Page, chat: ft.ListView, new_message: ft.TextField, sendbutton: ft.IconButton):
+    global selected_file, current_fontcolor, performance_data, server_host, server_port, running_llm, client
+    if sendbutton.icon == ft.Icons.SEND_ROUNDED:
+        if new_message.value.strip():
+            m_user = Message("User", new_message.value)
+            cm_user = ChatMessage(m_user, page.width, current_fontcolor)
+            chat.controls.append(cm_user)
 
-        m_user = Message("User", new_message.value)
-        cm_user = ChatMessage(m_user, page.width, current_fontcolor)
-        chat.controls.append(cm_user)
+            new_message.value = ""
+            new_message.focus()
+            sendbutton.icon = ft.Icons.STOP_ROUNDED
+            sendbutton.tooltip = "Stop"
+            page.update()
+            await disable_controls_by_type(page, target_types=(ft.TextField, ft.ElevatedButton, ft.IconButton, ft.PopupMenuButton), exception_keys=[sendbutton.key], status=True)   # ✅ 禁用所有用户可操作控件(除send_button)
+            await asyncio.sleep(0.2)  # 让 UI 先处理
 
-        new_message.value = ""
-        new_message.focus()
-        page.update()
-        await disable_all_controls(page, True)   # ✅ 禁用所有控件
-        await asyncio.sleep(0.2)  # 让 UI 先处理
+            response, err_msg = generate_summary(m_user.text, True)
 
-        response, err_msg = generate_summary(m_user.text, True)
+            cm_ai = ChatMessage(Message("AI", ""), page.width, current_fontcolor)
+            chat.controls.append(cm_ai)
+            ai_text_component = cm_ai.controls[1]
 
-        cm_ai = ChatMessage(Message("AI", ""), page.width, current_fontcolor)
-        chat.controls.append(cm_ai)
-        ai_text_component = cm_ai.controls[1]
+            if response is not None:
+                for chunk in response:
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        ai_text_component.value += chunk.choices[0].delta.content
+                        chat.scroll_to(len(chat.controls) - 1)   # 滚动到最下一行
+                        page.update()
+                        await asyncio.sleep(0)  # ✅ 让事件循环处理，给page机会刷新UI
 
-        if response is not None:
-            for chunk in response:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    ai_text_component.value += chunk.choices[0].delta.content
-                    chat.scroll_to(len(chat.controls) - 1)   # 滚动到最下一行
-                    page.update()
-                    await asyncio.sleep(0)  # ✅ 让事件循环处理，给page机会刷新UI
-        else:
-            if "Connection error.".lower() in err_msg.lower():
-                ai_text_component.value = ERROR_MESSAGE_GENIESERVER_NOT_AVAILABLE
-            elif "There is connection in using.".lower() in err_msg.lower():
-                ai_text_component.value = ERROR_MESSAGE_GENIESERVER_IN_USING
+                if performance_data:
+                    response = requests.get(f"http://{server_host}:{server_port}/profile", timeout=2)
+                    if response.status_code == 200: 
+                        content = json.loads(response.content.decode("utf-8"))
+                        performance_message = f"{content['prompt_processing_rate']} tokens/sec ({content['num_prompt_tokens']} tokens) · {content['token_generation_rate']} tokens/sec ({content['num_generated_tokens']} tokens) · {content['time_to_first_token']} ms to first token · generation time: {content['token_generation_time']} ms · [{running_llm}]"
+                        cm_pd = ChatMessage(Message("Performance data", performance_message), page.width)
+                        chat.controls.append(cm_pd)
+                        chat.scroll_to(len(chat.controls) - 1)
             else:
-                ai_text_component.value = ERROR_MESSAGE_GENIESERVER_GENERAL_ERROR.format(errmsg=err_msg)
-            chat.scroll_to(len(chat.controls) - 1)
+                if "Connection error.".lower() in err_msg.lower() or "Error code: 500".lower() in err_msg.lower():
+                    if check_genie_service() == True:
+                        ai_text_component.value = ERROR_MESSAGE_GENIESERVER_RESTART_SUCCESS
+                    else:
+                        ai_text_component.value = ERROR_MESSAGE_GENIESERVER_NOT_AVAILABLE
+                        client = None
+                elif "There is connection in using.".lower() in err_msg.lower():
+                    ai_text_component.value = ERROR_MESSAGE_GENIESERVER_IN_USING
+                else:
+                    ai_text_component.value = ERROR_MESSAGE_GENIESERVER_GENERAL_ERROR.format(errmsg=err_msg)
+                    client = None
+                chat.scroll_to(len(chat.controls) - 1)
 
-        await disable_all_controls(page, False)   # ✅ 任务完成，恢复所有控件
-        new_message.disabled = False   # **恢复输入框**
-        page.update()    
+            await disable_controls_by_type(page, target_types=(ft.TextField, ft.ElevatedButton, ft.IconButton, ft.PopupMenuButton), exception_keys=[sendbutton.key], status=False)   # ✅ 任务完成，恢复所有控件
+            sendbutton.icon = ft.Icons.SEND_ROUNDED
+            sendbutton.tooltip = "Send message"
+            page.update()
+    else:
+        sendbutton.icon = ft.Icons.SEND_ROUNDED
+        sendbutton.tooltip = "Send message"
+        await disable_controls_by_type(page, target_types=(ft.TextField, ft.ElevatedButton, ft.IconButton, ft.PopupMenuButton), exception_keys=[sendbutton.key], status=False)
+        page.update()
 
-def create_setting_dialog(page: ft.Page):
-    global server_host, server_port, api_key, running_llm, n_predict, temperature, top_k, top_p
+        response = requests.post(f"http://{server_host}:{server_port}/stop", json={"text": "stop"})
+        print(f"Stop inference: {response.status_code}")     
+        logging.debug("Stop inference: {error}".format(error=response.status_code))   
+
+def create_server_setting_dialog(page: ft.Page):
+    global server_host, server_port, api_key, running_llm
     
     def host_onchange(e):
         confirm_button.disabled=True
@@ -252,15 +425,69 @@ def create_setting_dialog(page: ft.Page):
     key_str  = ft.TextField(label="Key", value=api_key, text_size=13, on_change=key_onchange)
     running_llm_dropdown = ft.Dropdown(label="LLM", expand=True, text_size=13, disabled=True, options=[], on_change=on_llm_change)
 
+    def confirm_settings():
+        global server_host, server_port, api_key, running_llm
+
+        server_host = host_str.value
+        server_port = port_str.value
+        api_key     = key_str.value
+        running_llm = running_llm_dropdown.value
+
+        print(f"Server info: http://{server_host}:{server_port}/v1. API Key: {api_key}. LLM: {running_llm}")
+
+        page.close(snack_bar)
+        page.close(server_settings_dialog)
+        page.update()
+
+    confirm_button = ft.TextButton("OK", disabled=True, on_click=lambda e: confirm_settings())
+
+    snack_bar = ft.SnackBar(content=ft.Text(""), duration=2500)
+    page.add(snack_bar)
+
+    def fetch_llm():
+        running_llm_dropdown.disabled = True
+        page.update()
+
+        llm_lst, running_llm = get_llm_list(host_str.value.strip(), port_str.value.strip(), key_str.value.strip())
+        if llm_lst is not None:
+            running_llm_dropdown.options = [ft.dropdown.Option(opt) for opt in llm_lst]
+            running_llm_dropdown.value = running_llm
+            running_llm_dropdown.disabled = False
+            confirm_button.disabled = False
+            snack_bar.content.value = "Get large language model list successfully!"
+        else:
+            snack_bar.content.value = "Fail to get large language model list. Please check Host / Port / Key value!"
+            running_llm_dropdown.options = []
+            running_llm_dropdown.disabled = True
+            confirm_button.disabled = True
+        page.open(snack_bar)
+        page.update()
+
+    server_settings_dialog = ft.AlertDialog(
+        modal=True,
+        title=ft.Text("Genie Server Settings"),
+        content=ft.Container(
+            height=320,
+            content=ft.Column([host_str, port_str, key_str, running_llm_dropdown, ft.ElevatedButton("Verify", icon=ft.Icons.CHECK, on_click=lambda e: fetch_llm())])
+        ),
+        adaptive=False,
+        actions=[confirm_button]
+    )
+
+    return server_settings_dialog
+
+def create_llm_setting_dialog(page: ft.Page):
+    global n_predict, temperature, top_k, top_p, performance_data
+
     n_predict_val = ft.Text(str(4096), size=12)
     temp_val = ft.Text("0.90", size=12)
     top_k_val = ft.Text("13", size=12)
     top_p_val = ft.Text("0.60", size=12)
 
-    n_predict_slider = ft.Slider(label="maxlength (1 - 4096)", min=1, max=4096, divisions=4095, value=n_predict, width=130, disabled=True)
-    temp_slider = ft.Slider(label="temperature (0.01 - 1.0)", min=0.01, max=1.0, divisions=99, value=temperature, width=130, disabled=True)
-    top_k_slider = ft.Slider(label="Top K (1 - 100)", min=1, max=100, divisions=99, value=top_k, width=130, disabled=True)
-    top_p_slider = ft.Slider(label="Top K (0.0 - 1.0)", min=0.0, max=1.0, divisions=100, value=top_p, width=130, disabled=True)
+    n_predict_slider = ft.Slider(label="maxlength (1 - 4096)", min=1, max=4096, divisions=4095, value=n_predict, width=130)
+    temp_slider = ft.Slider(label="temperature (0.01 - 1.0)", min=0.01, max=1.0, divisions=99, value=temperature, width=130)
+    top_k_slider = ft.Slider(label="Top K (1 - 100)", min=1, max=100, divisions=99, value=top_k, width=130)
+    top_p_slider = ft.Slider(label="Top K (0.0 - 1.0)", min=0.0, max=1.0, divisions=100, value=top_p, width=130)
 
     def update_n_predict(e):
         n_predict_val.value = str(int(e.control.value))
@@ -283,6 +510,13 @@ def create_setting_dialog(page: ft.Page):
     top_k_slider.on_change = update_top_k
     top_p_slider.on_change = update_top_p
 
+    def on_performancedata_change(e: ft.ControlEvent):
+        global performance_data
+        performance_data = e.control.value
+        page.update()
+
+    performance_data_switch = ft.Switch(label="Show performance data", value=performance_data, on_change=on_performancedata_change)
+
     def slider_group(title: str, slider: ft.Slider, value_text: ft.Text):
         return ft.Column([
             ft.Text(title, size=12, weight=ft.FontWeight.NORMAL),
@@ -290,12 +524,8 @@ def create_setting_dialog(page: ft.Page):
         ])
 
     def confirm_settings():
-        global server_host, server_port, api_key, running_llm, n_predict, temperature, top_k, top_p, extrabody
+        global extrabody, n_predict, temperature, top_k, top_p
 
-        server_host = host_str.value
-        server_port = port_str.value
-        api_key     = key_str.value
-        running_llm = running_llm_dropdown.value
         n_predict   = int(n_predict_slider.value)
         temperature = round(temp_slider.value, 2)
         top_k       = int(top_k_slider.value)
@@ -306,81 +536,32 @@ def create_setting_dialog(page: ft.Page):
         extrabody["top_k"] = top_k
         extrabody["top_p"] = top_p
 
-        print(f"Server info: http://{server_host}:{server_port}/v1. API Key: {api_key}")
-        print(f"Model info: name - {running_llm}. max_length - {n_predict}. temp - {temperature}. top_k - {top_k}. top_p - {top_p}")
+        print(f"LLM parameters info: max_length - {n_predict}. temp - {temperature}. top_k - {top_k}. top_p - {top_p}")
 
-        page.close(snack_bar)
-        page.close(settings_dialog)
+        page.close(llm_settings_dialog)
         page.update()
 
-    confirm_button = ft.TextButton("OK", disabled=True, on_click=lambda e: confirm_settings())
+    confirm_button = ft.TextButton("OK", on_click=lambda e: confirm_settings())
 
-    snack_bar = ft.SnackBar(content=ft.Text(""), duration=2500)
-    page.add(snack_bar)
-
-    # ===== 模型获取模拟 =====
-    def fetch_llm():
-        running_llm_dropdown.disabled = True
-        right_column_enable(False)
-        page.update()
-
-        llm_lst, running_llm = get_llm_list(host_str.value.strip(), port_str.value.strip(), key_str.value.strip())
-        if llm_lst is not None:
-            running_llm_dropdown.options = [ft.dropdown.Option(opt) for opt in llm_lst]
-            running_llm_dropdown.value = running_llm
-            running_llm_dropdown.disabled = False
-            confirm_button.disabled = False
-            right_column_enable(True)
-            snack_bar.content.value = "Get large language model list successfully!"
-        else:
-            snack_bar.content.value = "Fail to get large language model list. Please check Host / Port / Key value!"
-            running_llm_dropdown.options = []
-            running_llm_dropdown.disabled = True
-            confirm_button.disabled = True
-            right_column_enable(False)
-        page.open(snack_bar)
-        page.update()
-
-    def right_column_enable(enable: bool):
-        for slider in [n_predict_slider, temp_slider, top_k_slider, top_p_slider]:
-            slider.disabled = not enable
-
-    settings_dialog = ft.AlertDialog(
+    llm_settings_dialog = ft.AlertDialog(
         modal=True,
-        title=ft.Text("Genie Server Settings"),
+        title=ft.Text("LLM Settings"),
         content=ft.Container(
-            height=320,
-            content=ft.Row([
-                ft.Column([
+            height=400,
+            content=ft.Column([
                     slider_group("maxlength", n_predict_slider, n_predict_val),
                     slider_group("temp", temp_slider, temp_val),
                     slider_group("Top K", top_k_slider, top_k_val),
-                    slider_group("Top P", top_p_slider, top_p_val)
-                ], width=140),
-                ft.Column([
-                    host_str,
-                    port_str,
-                    key_str,
-                    running_llm_dropdown,
-                    ft.ElevatedButton("Verify", icon=ft.Icons.CHECK, on_click=lambda e: fetch_llm()),
-                ], width=120),
-            ], tight=True),
-        ),
+                    slider_group("Top P", top_p_slider, top_p_val),
+                    performance_data_switch
+                ])),
         adaptive=False,
         actions=[confirm_button]
     )
 
-    return settings_dialog
+    return llm_settings_dialog
 
-def main(page: ft.Page):
-    global func_id, current_theme, current_fontcolor
-
-    page.horizontal_alignment = ft.CrossAxisAlignment.STRETCH
-    page.title = "AI Chat"
-    page.theme_mode = current_theme
-
-    settings_dialog = create_setting_dialog(page)
-
+def create_ui_setting_dialog(page: ft.Page):
     def on_theme_change(e):
         global current_theme
         current_theme = e.control.value
@@ -417,86 +598,193 @@ def main(page: ft.Page):
         on_change=on_fontcolor_change
     )
 
-    def open_settings(e):
-        page.open(settings_dialog)
+    def confirm_settings():
+        page.close(ui_settings_dialog)
         page.update()
 
-    settings_button = ft.IconButton(icon=ft.Icons.SETTINGS, tooltip="Settings", on_click=open_settings)
+    confirm_button = ft.TextButton("OK", on_click=lambda e: confirm_settings())
 
-    dropdown_row = ft.Row(
-        controls=[theme_dropdown, fontcolor_dropdown, settings_button],
-        spacing=20
+    ui_settings_dialog = ft.AlertDialog(
+        modal=True,
+        title=ft.Text("UI Settings"),
+        content=ft.Container(
+            height=180,
+            content=ft.Column([theme_dropdown, fontcolor_dropdown])
+        ),
+        adaptive=False,
+        actions=[confirm_button]
+    )
+
+    return ui_settings_dialog
+
+def create_sysprompt_setting_dialog(page: ft.Page):
+    global customized_system_prompt
+
+    customized_system_prompt = load_prompt()
+
+    sysprompt_text = ft.TextField(
+        value=customized_system_prompt,
+        label="✏️ Customize your system prompt",
+        text_size=12,
+        autofocus=True,
+        shift_enter=True,
+        min_lines=1,
+        max_lines=100,
+        filled=True
+    )
+
+    def reset_settings():
+        sysprompt_text.value=FUNC_SYSTEM_PROMPT_CUSTOMIZE
+        page.update()
+
+    def confirm_settings():
+        global customized_system_prompt
+        customized_system_prompt = sysprompt_text.value
+        save_prompt(customized_system_prompt)
+        page.close(sysprompt_settings_dialog)
+        page.update()
+
+    reset_button = ft.TextButton("Reset", on_click=lambda e: reset_settings())
+    confirm_button = ft.TextButton("OK", on_click=lambda e: confirm_settings())
+
+    sysprompt_settings_dialog = ft.AlertDialog(
+        modal=True,
+        title=ft.Text("System Prompt"),
+        content=ft.Container(
+            height=300,
+            content=sysprompt_text
+        ),
+        adaptive=False,
+        actions=[reset_button, confirm_button]
+    )
+
+    return sysprompt_settings_dialog
+
+def main(page: ft.Page):
+    global func_id, current_theme, current_fontcolor
+
+    page.horizontal_alignment = ft.CrossAxisAlignment.STRETCH
+    page.title = "AI Chat v2.0.0"
+    page.theme_mode = current_theme
+
+    server_settings_dialog = create_server_setting_dialog(page)
+    llm_settings_dialog = create_llm_setting_dialog(page)
+    ui_settings_dialog = create_ui_setting_dialog(page)
+    sysprompt_settings_dialog = create_sysprompt_setting_dialog(page)
+
+    def on_menu_click(e: ft.ControlEvent):
+        selected = e.control.text
+        if selected == "Server Settings":
+            page.open(server_settings_dialog)
+        elif selected == "LLM Settings":
+            page.open(llm_settings_dialog)
+        elif selected == "System Prompt Settings":
+            page.open(sysprompt_settings_dialog)
+        elif selected == "UI Settings":
+            page.open(ui_settings_dialog)
+
+        page.update()
+
+    settings_menu_button = ft.PopupMenuButton(
+        icon=ft.Icons.MORE_VERT,
+        items=[
+            ft.PopupMenuItem(text="Server Settings", on_click=on_menu_click),
+            ft.PopupMenuItem(text="LLM Settings", on_click=on_menu_click),
+            ft.PopupMenuItem(text="System Prompt Settings", on_click=on_menu_click),
+            ft.PopupMenuItem(text="UI Settings", on_click=on_menu_click),            
+        ]
+    )
+
+    def new_session_click(e):
+        clear_server_history()
+        chat.controls.clear()
+        page.update()
+
+    new_session_button = ft.IconButton(
+        icon=ft.Icons.RESTART_ALT_ROUNDED,
+        tooltip="New session",
+        on_click=new_session_click
     )
 
     def click_button_solution(e):
         global func_id
-        func_id = FUNC_ID_SOLUTION
-        update_func_UI()
+        if func_id != FuncID.FUNC_ID_SOLUTION:
+            func_id = FuncID.FUNC_ID_SOLUTION
+            update_func_UI()
+            clear_server_history()
 
     def click_button_translate(e):
         global func_id
-        func_id = FUNC_ID_TRANSLATE
-        update_func_UI()
+        if func_id != FuncID.FUNC_ID_TRANSLATE:
+            func_id = FuncID.FUNC_ID_TRANSLATE
+            update_func_UI()
+            clear_server_history()
 
-    def click_button_source_code(e):
+    def click_button_customize(e):
         global func_id
-        func_id = FUNC_ID_SOURCE_CODE
-        update_func_UI()
+        if func_id != FuncID.FUNC_ID_CUSTOMIZE:
+            func_id = FuncID.FUNC_ID_CUSTOMIZE
+            update_func_UI()
+            clear_server_history()
 
     FUNC_LIST = [
         {
-            "id": FUNC_ID_SOLUTION,
+            "id": FuncID.FUNC_ID_SOLUTION,
             "name": FUNC_NAME_SOLUTION,
-            "prompt": FUNC_PROMPT_SOLUTION,
+            "user_prompt": FUNC_USER_PROMPT_SOLUTION,
+            "sys_prompt": FUNC_SYSTEM_PROMPT_SOLUTION,
             "hint": FUNC_HINT_SOLUTION,
             "handler": click_button_solution
         },
         {
-            "id": FUNC_ID_TRANSLATE,
+            "id": FuncID.FUNC_ID_TRANSLATE,
             "name": FUNC_NAME_TRANSLATE,
-            "prompt": FUNC_PROMPT_TRANSLATE,
+            "user_prompt": FUNC_USER_PROMPT_TRANSLATE,
+            "sys_prompt": FUNC_SYSTEM_PROMPT_TRANSLATE,
             "hint": FUNC_HINT_TRANSLATE,
             "handler": click_button_translate
         },
         {
-            "id": FUNC_ID_SOURCE_CODE,
-            "name": FUNC_NAME_SOURCE_CODE,
-            "prompt": FUNC_PROMPT_SOURCE_CODE,
-            "hint": FUNC_HINT_SOURCE_CODE,
-            "handler": click_button_source_code
+            "id": FuncID.FUNC_ID_CUSTOMIZE,
+            "name": FUNC_NAME_CUSTOMIZE,
+            "user_prompt": FUNC_USER_PROMPT_CUSTOMIZE,
+            "sys_prompt": FUNC_SYSTEM_PROMPT_CUSTOMIZE,
+            "hint": FUNC_HINT_CUSTOMIZE,
+            "handler": click_button_customize
         }
     ]
 
     async def send_message_click_wrapper(e):
-        asyncio.create_task(send_message_click(e, page, chat, new_message))
+        asyncio.create_task(send_message_click(e, page, chat, new_message, send_button))
 
     chat = ft.ListView(expand=True, spacing=10, auto_scroll=True)   # Q&A window
 
     # input title
-    input_title = ft.Text(FUNC_LIST[func_id]["name"])
+    input_title = ft.Text(FUNC_LIST[func_id.value]["name"])
 
     # question input
     new_message = ft.TextField(
-        hint_text=FUNC_LIST[func_id]["hint"],
+        hint_text=FUNC_LIST[func_id.value]["hint"],
         autofocus=True,
         shift_enter=True,
         min_lines=1,
         max_lines=5,
         filled=True,
-        on_submit=send_message_click_wrapper,  # ✅ 按回车键触发发送
+        on_submit=send_message_click_wrapper
     )
 
-    # question send button
+    # question send/stop button
     send_button = ft.IconButton(
         icon=ft.Icons.SEND_ROUNDED,
         tooltip="Send message",
-        on_click=send_message_click_wrapper,
+        key="send_button",
+        on_click=send_message_click_wrapper
     )
 
     input_row = ft.Row(
         controls = [
             ft.Column([input_title, new_message], spacing=5, expand=True),
-            ft.Column([send_button], spacing=5),
+            ft.Column([ft.Container(height=15, bgcolor="transparent"), send_button])   # ft.Container is placeholder so that send_button aligns to new_message.
         ],
         spacing=10,
         tight=True,
@@ -528,14 +816,19 @@ def main(page: ft.Page):
         Func_Row.controls.append(new_button)
 
     page.add(
+        ft.Row(controls=[new_session_button, settings_menu_button], spacing=10, alignment=ft.MainAxisAlignment.END),
         ft.Container(content=chat, border=ft.border.all(1, ft.Colors.OUTLINE), border_radius=5, padding=10, expand=True),
-        dropdown_row,
         input_row,
         Func_Row
     )
 
-    page.add(settings_dialog)
-    page.open(settings_dialog)
+    page.add(server_settings_dialog)
+    page.add(llm_settings_dialog)
+    page.add(ui_settings_dialog)
+    page.add(sysprompt_settings_dialog)
+
+    if check_genie_service() == False:
+        page.open(server_settings_dialog)   # try starting genie service. If failure, pop up server setting dialog.
 
 if __name__ == "__main__":
     ft.app(target=main)
