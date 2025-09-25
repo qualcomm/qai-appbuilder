@@ -31,7 +31,7 @@ TEXT_ENCODER_MODEL_NAME     = MODEL_NAME + "_w8a16_quantized-textencoderquantiza
 UNET_MODEL_NAME             = MODEL_NAME + "_w8a16_quantized-unetquantizable-qualcomm_snapdragon_x_elite.bin"
 VAE_DECODER_MODEL_NAME      = MODEL_NAME + "_w8a16_quantized-vaedecoderquantizable-qualcomm_snapdragon_x_elite.bin"
 
-HUB_ID_H="185c2df6375b8219c30b5d6205387d2fee753f63"
+HUB_ID_H="ox06ibpbkxb4pr0mcyfe7wqgx5pf5r0cm3rf3dzi"
 
 TIMESTEP_EMBEDDING_MODEL_ID = "m7mrzdgxn"
 TOKENIZER_MODEL_NAME        = "openai/clip-vit-large-patch14"

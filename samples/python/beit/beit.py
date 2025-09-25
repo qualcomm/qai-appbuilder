@@ -19,7 +19,7 @@ from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfP
 ####################################################################
 MODEL_NAME = "beit"
 MODEL_ID = "mngvl175n" 
-HUB_ID_H="185c2df6375b8219c30b5d6205387d2fee753f63"
+HUB_ID_H="ox06ibpbkxb4pr0mcyfe7wqgx5pf5r0cm3rf3dzi"
 
 MODEL_HELP_URL = "https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
 
