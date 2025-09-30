@@ -68,16 +68,16 @@ def install_GenieAPIService():
         print("Extracting GenieAPIService...")
         try:
             with zipfile.ZipFile(zip_file, 'r') as zip_ref:
-                zip_ref.extractall(extract_root)
+                zip_ref.extractall(extract_dir)
             print("Extraction completed.")
         except Exception as e:
             print(f"Error extracting file: {e}")
             sys.exit(1)
     
     print("GenieAPIService downloaded and extracted.")
-    android_root = os.path.join(extract_root, "Android")
-    if os.path.exists(android_root):
-        shutil.rmtree(android_root)
+    #android_root = os.path.join(extract_root, "Android")
+    #if os.path.exists(android_root):
+    #    shutil.rmtree(android_root)
 
 def install_QAIRT():
     extract_root = os.path.join("ai-engine-direct-helper", "samples", "qai_libs")
