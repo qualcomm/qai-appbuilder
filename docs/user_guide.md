@@ -21,7 +21,7 @@ https://qpm.qualcomm.com/#/main/tools/details/Qualcomm_AI_Runtime_SDK
 *Note: For X64 and [ARM64EC](https://learn.microsoft.com/en-us/windows/arm/arm64ec) program, use the libraries under the folder 'arm64x-windows-msvc'; for ARM64 program, use the libraries under the folder 'aarch64-windows-msvc'.* <br>
 
 We have 2 options to get these runtime libraries:
-1. Download [QAIRT Runtime](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.38.0/QAIRT_Runtime_2.38_v73.zip) and extract the dependency libraries to app folder.
+1. Download [QAIRT Runtime](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.38.0/QAIRT_Runtime_2.38.0_v73.zip) and extract the dependency libraries to app folder.
 2. Install [Qualcomm® AI Runtime SDK](https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK) and copy the dependency libraries to app folder. <br>
 
 If use x64 Python, use the libraries below from Qualcomm® AI Runtime SDK:

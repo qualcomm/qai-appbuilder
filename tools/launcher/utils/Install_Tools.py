@@ -81,7 +81,7 @@ def install_GenieAPIService():
 
 def install_QAIRT():
     extract_root = os.path.join("ai-engine-direct-helper", "samples", "qai_libs")
-    zip_file = os.path.join(extract_root, "QAIRT_Runtime_2.38_v73.zip")
+    zip_file = os.path.join(extract_root, "QAIRT_Runtime_2.38.0_v73.zip")
 
     if os.path.exists(extract_root):
         print("tools directory already exists")
@@ -90,10 +90,10 @@ def install_QAIRT():
         os.makedirs(extract_root, exist_ok=True)
     
     if os.path.exists(zip_file):
-        print("QAIRT_Runtime_2.38_v73.zip already exists")
+        print("QAIRT_Runtime_2.38.0_v73.zip already exists")
     else:
-        print("Downloading QAIRT_Runtime_2.38_v73.zip...")
-        download_url = "https://github.com/quic/ai-engine-direct-helper/releases/download/v2.38.0/QAIRT_Runtime_2.38_v73.zip"
+        print("Downloading QAIRT_Runtime_2.38.0_v73.zip...")
+        download_url = "https://github.com/quic/ai-engine-direct-helper/releases/download/v2.38.0/QAIRT_Runtime_2.38.0_v73.zip"
         
         if download_file_with_progress(download_url, zip_file):
             print("download successfully")
