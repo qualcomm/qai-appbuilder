@@ -24,7 +24,7 @@ if exist "tools" (
 powershell -ExecutionPolicy Bypass -File "%currentDir%\utils\Install_Visual_Studio.ps1" "%currentDir%"
 
 cd env
-pixi update
+@REM pixi update
 pixi run "langflow -v"
 
 if %ERRORLEVEL% equ 0 (
