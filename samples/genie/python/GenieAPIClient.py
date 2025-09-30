@@ -13,7 +13,7 @@ BASE_URL = "http://localhost:8910/v1"   # For Genie
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--stream", action="store_true")
-parser.add_argument("--prompt", default="你好", type=str)
+parser.add_argument("--prompt", default="Hello", type=str)
 parser.add_argument("--model", default="IBM-Granite-v3.1-8B", type=str)
 args = parser.parse_args()
 
@@ -22,7 +22,8 @@ client = OpenAI(base_url=BASE_URL, api_key="123")
 # model_lst = client.models.list()
 # print(model_lst)
 
-messages = [{"role": "system", "content": "You are a helpful assistant."}, {"role": "user", "content": args.prompt}]
+prompt = args.prompt
+messages = [{"role": "system", "content": "You are a helpful assistant."}, {"role": "user", "content": prompt}]
 extra_body = {"size": 4096, "seed": 146, "temp": 1.5, "top_k": 13, "top_p": 0.6}
 
 model_name = args.model

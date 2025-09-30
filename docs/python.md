@@ -29,7 +29,7 @@ Download and install [vc_redist.x64](https://aka.ms/vs/17/release/vc_redist.x64.
 ### Step 2: Install basic Python dependencies:
 Run below command in Windows terminal:
 ```
-pip install requests==2.32.3 py3-wget==1.0.12 tqdm== 4.67.1 importlib-metadata==8.5.0 qai-hub==0.30.0
+pip install requests==2.32.3 py3-wget==1.0.12 tqdm==4.67.1 importlib-metadata==8.5.0 qai-hub==0.30.0
 ```
 
 ### Step 3: Download QAI AppBuilder repository:
