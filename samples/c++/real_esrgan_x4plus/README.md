@@ -21,7 +21,7 @@ First, create a directory named `real_esrgan_x4plus` at any location (e.g., ai-e
 The final project structure should look like this:
 ```plaintext
 real_esrgan_x4plus/
-├── QAI_AppBuilder-win_arm64-QNN2.34.0-Release/   # QNN SDK
+├── QAI_AppBuilder-win_arm64-QNN2.38.0-Release/   # QNN SDK
 ├── models/                                       # Model files (e.g., .bin)
 ├── qai_libs/                                     # QNN SDK runtime libraries (e.g., HTP backend)
 ├── build/                                        # Directory generated after successful compilation; contains the real_esrgan_x4plus.exe binary.
@@ -37,7 +37,7 @@ Open a terminal and run:
 mkdir C:\ai-hub\
 cd C:\ai-hub\
 ```
-Click here to download [QAI_Launcher_v1.0.0.zip](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.34.0/QAI_Launcher_v1.0.0.zip). Unzip the downloaded file into the **C:\ai-hub** directory.
+Click here to download [QAI_Launcher_v2.0.0.zip](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.38.0/QAI_Launcher_v2.0.0.zip). Unzip the downloaded file into the **C:\ai-hub** directory.
 Run the following script to install all required dependencies and tools:
 ```
 .\1.Install_QAI_AppBuilder.bat
@@ -72,10 +72,10 @@ Place all files in the appropriate directories under your local `real_esrgan_x4p
 
 #### Step 3: Download QAI_AppBuilder
 
-Click here to download [QAI_AppBuilder-win_arm64-QNN2.34.0-Release](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.34.0/QAI_AppBuilder-win_arm64-QNN2.34.0-Release.zip).Unzip the contents of the archive into the `QAI_AppBuilder-win_arm64-QNN2.34.0-Release`/ folder inside your `real_esrgan_x4plus`/ project directory. The structure should look like:
+Click here to download [QAI_AppBuilder-win_arm64-QNN2.38.0-Release](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.38.0/QAI_AppBuilder-win_arm64-QNN2.38.0-Release.zip).Unzip the contents of the archive into the `QAI_AppBuilder-win_arm64-QNN2.38.0-Release`/ folder inside your `real_esrgan_x4plus`/ project directory. The structure should look like:
 ```plaintext
 real_esrgan_x4plus/
-├── QAI_AppBuilder-win_arm64-QNN2.34.0-Release/
+├── QAI_AppBuilder-win_arm64-QNN2.38.0-Release/
 ```
 
 

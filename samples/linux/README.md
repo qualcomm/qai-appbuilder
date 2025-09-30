@@ -20,7 +20,7 @@ Download and install the Qualcomm® AI Runtime SDK from:
 https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK
 
 > **Note:**  
-> This module is intended for Linux OS, version 2.34.0.250424, with the architecture set to x86.  
+> This module is intended for Linux OS, version 2.38.0.250901, with the architecture set to x86.  
 > Although the package is labeled for x86, it also contains dynamic libraries for the aarch64 architecture.  
 > Ensure you select the correct dynamic libraries for your hardware during deployment and runtime to avoid compatibility issues.
 > The downloaded file will have a *.qik extension. For usage instructions, refer to the official documentation:  

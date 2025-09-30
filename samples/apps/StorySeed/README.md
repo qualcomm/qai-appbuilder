@@ -17,7 +17,7 @@ This application randomly selects four words from a list of 200 elementary-level
 ### Step 1: Install Dependencies
 • Please refer to [Run the large language model on the local NPU](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/genie/python/README.md).
 
-• Please download [GenieAPIService](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.34.0/GenieAPIService_2.34.zip) and copy the subdirectory "GenieAPIService" to path "ai-engine-direct-helper\samples".
+• Please download [GenieAPIService](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.38.0/GenieAPIService_v2.1.0_QAIRT_v2.38.0_v73.zip) and copy the files in it into the directory "GenieAPIService" under the path "ai-engine-direct-helper\samples".
 
 • Please download [Qwen2.0-7B-SSD Model](https://www.aidevhome.com/data/adh2/models/8380/qwen2_7b_ssd.zip). Extract it and copy the folder 'Qwen2.0-7B-SSD' into the directory 'ai-engine-direct-helper\samples\genie\python\models'.
 

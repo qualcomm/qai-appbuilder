@@ -38,7 +38,7 @@ Open a terminal and run:
 mkdir C:\ai-hub\
 cd C:\ai-hub\
 ```
-Click here to download [QAI_Launcher_v1.0.0.zip](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.34.0/QAI_Launcher_v1.0.0.zip).Unzip the downloaded file into the **C:\ai-hub** directory.
+Click here to download [QAI_Launcher_v2.0.0.zip](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.38.0/QAI_Launcher_v2.0.0.zip).Unzip the downloaded file into the **C:\ai-hub** directory.
 Run the following script to install all required dependencies and tools:
 ```
 .\1.Install_QAI_AppBuilder.bat
@@ -73,7 +73,7 @@ Place all files in the appropriate directories under your local beit/ project fo
 
 #### Step 3: Download QAI_AppBuilder
 
-Click here to download [QAI_AppBuilder-win_arm64-QNN2.34.0-Release](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.34.0/QAI_AppBuilder-win_arm64-QNN2.34.0-Release.zip).Unzip the contents of the archive into the 3rd/ folder inside your beit/ project directory. The structure should look like:
+Click here to download [QAI_AppBuilder-win_arm64-QNN2.38.0-Release](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.38.0/QAI_AppBuilder-win_arm64-QNN2.38.0-Release.zip).Unzip the contents of the archive into the 3rd/ folder inside your beit/ project directory. The structure should look like:
 ```plaintext
 beit/
 ├── 3rd/
@@ -131,7 +131,7 @@ Make sure to modify the following path settings in your CMakeLists.txt file to m
 ```
 # ❗ Replace these with the actual paths where your OpenCV is installed:
 set(OpenCV_DIR "C:/vcpkg/installed/arm64-windows/share/opencv4")
-set(APPBUILDER_DIR "${CMAKE_SOURCE_DIR}/3rd/QAI_AppBuilder-win_arm64-QNN2.34.0-Release")
+set(APPBUILDER_DIR "${CMAKE_SOURCE_DIR}/3rd/QAI_AppBuilder-win_arm64-QNN2.38.0-Release")
 set(APPBUILDER_DLL "${APPBUILDER_DIR}/libappbuilder.dll")
 ```
 * These paths configure the include directories, DLL binaries, and static library locations for OpenCV. If your setup differs, be sure to update accordingly.

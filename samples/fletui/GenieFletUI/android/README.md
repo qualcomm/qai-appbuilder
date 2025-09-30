@@ -20,7 +20,7 @@ Step 1. Start cmd command prompt window and active python virtual environment wi
 ```
 Step 2. Go to ai-engine-direct-helper samples path and start GenieFletUI application with below command:
 ```
-cd <your path>\ai-engine-direct-helper-2.34\samples
+cd <your path>\ai-engine-direct-helper\samples
 python fletui\GenieFletUI\android\GenieFletUI.py
 ```
 

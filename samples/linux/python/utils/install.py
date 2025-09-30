@@ -15,11 +15,11 @@ import qai_hub
 import urllib.request as request
 
 qnn_sdk_version =  {
-    "2.24": "2.24.0.240626",
     "2.34": "2.34.0.250424",
+    "2.38": "2.38.0.250901",
 }
 
-DEFAULT_SDK_VER     = "2.34"
+DEFAULT_SDK_VER     = "2.38"
 DEFAULT_DSP_ARCH    = "v68"  # For X-Elite device.
 DEFAULT_LIB_ARCH = "aarch64-oe-linux-gcc11.2" # "aarch64-windows-msvc" # For X-Elite device.
 

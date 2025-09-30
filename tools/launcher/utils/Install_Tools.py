@@ -40,7 +40,7 @@ def copy_tools():
 
 def install_GenieAPIService():
     tools_dir = "tools"
-    zip_file = os.path.join(tools_dir, "GenieAPIService_2.34.zip")
+    zip_file = os.path.join(tools_dir, "GenieAPIService_v2.1.0_QAIRT_v2.38.0_v73.zip")
     extract_root = os.path.join("ai-engine-direct-helper", "samples")
     extract_dir = os.path.join("ai-engine-direct-helper", "samples", "GenieAPIService")
 
@@ -51,10 +51,10 @@ def install_GenieAPIService():
         os.makedirs(tools_dir, exist_ok=True)
     
     if os.path.exists(zip_file):
-        print("GenieAPIService_2.34.zip already exists")
+        print("GenieAPIService_v2.1.0_QAIRT_v2.38.0_v73.zip already exists")
     else:
         print("Downloading GenieAPIService...")
-        download_url = "https://github.com/quic/ai-engine-direct-helper/releases/download/v2.34.0/GenieAPIService_2.34.zip"
+        download_url = "https://github.com/quic/ai-engine-direct-helper/releases/download/v2.38.0/GenieAPIService_v2.1.0_QAIRT_v2.38.0_v73.zip"
         
         if download_file_with_progress(download_url, zip_file):
             print("download successfully")
@@ -81,7 +81,7 @@ def install_GenieAPIService():
 
 def install_QAIRT():
     extract_root = os.path.join("ai-engine-direct-helper", "samples", "qai_libs")
-    zip_file = os.path.join(extract_root, "QAIRT_Runtime_2.34_v73.zip")
+    zip_file = os.path.join(extract_root, "QAIRT_Runtime_2.38_v73.zip")
 
     if os.path.exists(extract_root):
         print("tools directory already exists")
@@ -90,10 +90,10 @@ def install_QAIRT():
         os.makedirs(extract_root, exist_ok=True)
     
     if os.path.exists(zip_file):
-        print("QAIRT_Runtime_2.34_v73.zip already exists")
+        print("QAIRT_Runtime_2.38_v73.zip already exists")
     else:
-        print("Downloading QAIRT_Runtime_2.34_v73.zip...")
-        download_url = "https://github.com/quic/ai-engine-direct-helper/releases/download/v2.34.0/QAIRT_Runtime_2.34_v73.zip"
+        print("Downloading QAIRT_Runtime_2.38_v73.zip...")
+        download_url = "https://github.com/quic/ai-engine-direct-helper/releases/download/v2.38.0/QAIRT_Runtime_2.38_v73.zip"
         
         if download_file_with_progress(download_url, zip_file):
             print("download successfully")

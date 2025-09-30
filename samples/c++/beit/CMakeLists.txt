@@ -15,7 +15,7 @@ set(CMAKE_CXX_STANDARD 17)
 #set(OpenCV_DIR "C:/path/to/opencv/build_msvc")
 #set(Xtensor_DIR "C:/vcpkg/installed/arm64-windows/share/xtensor")
 #set(Xtl_DIR "C:/vcpkg/installed/arm64-windows/share/xtl")
-set(APPBUILDER_DIR "${CMAKE_SOURCE_DIR}/3rd/QAI_AppBuilder-win_arm64-QNN2.34.0-Release")
+set(APPBUILDER_DIR "${CMAKE_SOURCE_DIR}/3rd/QAI_AppBuilder-win_arm64-QNN2.38.0-Release")
 set(APPBUILDER_DLL "${APPBUILDER_DIR}/libappbuilder.dll")
 
 set(TARGET_OUTPUT_DIR "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${CMAKE_BUILD_TYPE}")

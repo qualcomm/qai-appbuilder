@@ -20,7 +20,7 @@ Note: If the following automatic installation script doesn't work for some reaso
 ### 1. Download Windows batch scripts
 
 There are two ways to get our Windows batch scripts:
-1. Download the compressed package through [QAI_Launcher_v1.0.0.zip](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.34.0/QAI_Launcher_v1.0.0.zip)  and reduce the compression; <br>
+1. Download the compressed package through [QAI_Launcher_v2.0.0.zip](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.38.0/QAI_Launcher_v2.0.0.zip)  and reduce the compression; <br>
 2. Download this git repository, you can find these scripts from the path 'ai-engine-direct-helper/tools/launcher'; <br>
 
 ### 2. Run these script one by one

@@ -16,9 +16,10 @@ import urllib.request as request
 
 qnn_sdk_version =  {
     "2.34": "2.34.0.250424",
+    "2.38": "2.38.0.250901",
 }
 
-DEFAULT_SDK_VER     = "2.34"
+DEFAULT_SDK_VER     = "2.38"
 DEFAULT_DSP_ARCH    = "73"  # For X-Elite device.
 DEFAULT_LIB_ARCH = "arm64x-windows-msvc" # "aarch64-windows-msvc" # For X-Elite device.
 
@@ -229,7 +230,7 @@ def download_url_wget(url, filepath, filesize=None, desc=None, fail=None):
 
         if not os.path.exists(wget_exe_path):
             print(f"wget.exe not found. Please download it manually from '{WGET_URL}' and unzip it to '{wget_exe_path}'")
-            return
+            return False
 
         command = f'"{wget_exe_path}" --no-check-certificate -q --show-progress --continue -P "{path}" -O "{filepath}" {url}'
         # print(command)
@@ -408,7 +409,7 @@ def install_qai_runtime(version, lib_arch = DEFAULT_LIB_ARCH, dsp_arch = DEFAULT
     if version in qnn_sdk_version:
         ret = True
 
-        zip_name = f"QAIRT_Runtime_{version}_v{dsp_arch}.zip"
+        zip_name = f"QAIRT_Runtime_{version}.0_v{dsp_arch}.zip"
         url = f"https://github.com/quic/ai-engine-direct-helper/releases/download/v{version}.0/" + zip_name
         qnn_zip_path = os.path.join(qnn_libs_dir, zip_name)
 

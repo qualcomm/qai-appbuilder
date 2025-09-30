@@ -36,13 +36,13 @@ add_library(QAI_AppBuilder_Arm SHARED IMPORTED GLOBAL)
 # Configure library properties
 set_target_properties(QAI_AppBuilder_Arm PROPERTIES
     # Import library path (for linking)
-    IMPORTED_IMPLIB "${CMAKE_CURRENT_SOURCE_DIR}/QAI_AppBuilder-win_arm64-QNN2.34.0-Release/libappbuilder.lib"
+    IMPORTED_IMPLIB "${CMAKE_CURRENT_SOURCE_DIR}/QAI_AppBuilder-win_arm64-QNN2.38.0-Release/libappbuilder.lib"
     
     # Shared library path (runtime dependency)
-    IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/QAI_AppBuilder-win_arm64-QNN2.34.0-Release/libappbuilder.dll"
+    IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/QAI_AppBuilder-win_arm64-QNN2.38.0-Release/libappbuilder.dll"
     
     # Header file paths (matching include folder structure)
-    INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/QAI_AppBuilder-win_arm64-QNN2.34.0-Release/include"
+    INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/QAI_AppBuilder-win_arm64-QNN2.38.0-Release/include"
 )
 
 # Set root paths for dependencies
@@ -111,7 +111,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_CURRENT_SOURCE_DIR}/QAI_AppBuilder-win_arm64-QNN2.34.0-Release/libappbuilder.dll"
+        "${CMAKE_CURRENT_SOURCE_DIR}/QAI_AppBuilder-win_arm64-QNN2.38.0-Release/libappbuilder.dll"
         $<TARGET_FILE_DIR:${PROJECT_NAME}>
 	COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${MODELS_ROOT}/real_esrgan_x4plus.bin"

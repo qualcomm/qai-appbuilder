@@ -32,7 +32,7 @@ This service can be used on multiple platforms such as Android, Windows, Linux, 
 ### Run the service on WoS: 
 You can also run the batch file from [QAI AppBuilder Launcher](../../../tools/launcher/) to setup the environment automatically. <br>
 1. [Setup LLM models](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/python#step-3-download-models-and-tokenizer-files) first before running this service. <br>
-2. Download [GenieAPIService](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.34.0/GenieAPIService_2.34.zip) and copy the subdirectory "GenieAPIService" to path "ai-engine-direct-helper\samples".<br>
+2. Download [GenieAPIService](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.38.0/GenieAPIService_v2.1.0_QAIRT_v2.38.0_v73.zip) and copy the subdirectory "GenieAPIService" to path "ai-engine-direct-helper\samples".<br>
 3. Run the following commands to launch the Service (Do *not* close this terminal window while service is running). 
 
 ```
@@ -57,7 +57,7 @@ INFO: Service Is Ready Now!
 ```
 
 ### Run the service on Mobile(Snapdragon® 8 Elite Mobile device): <br>
-1. Copy the subdirectory "GenieModels" in the folder "Android" in [GenieAPIService binary](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.34.0/GenieAPIService_2.34.zip) to the root path of mobile sdcard.<br>
+1. Copy the subdirectory "GenieModels" in [GenieModels.zip](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.38.0/GenieModels.zip) to the root path of mobile sdcard.<br>
 2. Copy your QWen QNN model & tokenizer.json to "/sdcard/GenieModels/qwen2.0_7b"<br>
 3. Modify the config file "/sdcard/GenieModels/qwen2.0_7b/config.json" if necessary.<br>
 4. Install the GenieAPIService.apk to mobile and start it.<br>
@@ -70,7 +70,7 @@ Refere to [AIP](./API.md) for detailed information.
   The service can be access through the ip address 'localhost:8910', it's compatible with OpenAI API.
 
 ### C++ Client Sample Code:
-  Here is a C++ client sample: [GenieAPIClient.cpp](Service/GenieAPIClient.cpp). You can get the compiled 'GenieAPIClient.exe' from [GenieAPIService](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.34.0/GenieAPIService_2.34.zip). The sample app depends on the dynamical library 'libcurl.dll' which also included in the 'GenieAPIService' package.
+  Here is a C++ client sample: [GenieAPIClient.cpp](Service/GenieAPIClient.cpp). You can get the compiled 'GenieAPIClient.exe' from [GenieAPIService](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.38.0/GenieAPIService_v2.1.0_QAIRT_v2.38.0_v73.zip). The sample app depends on the dynamical library 'libcurl.dll' which also included in the 'GenieAPIService' package.
 
   We can run it with the command below in a new terminal window:
 ```
