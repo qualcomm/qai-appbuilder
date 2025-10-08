@@ -123,7 +123,7 @@ public class ForegroundService extends Service {
             while (true) {
                 try {
                     Thread.sleep(1000);  // Sleep 1 second.
-                    URL url = new URL("http://localhost:8910/");
+                    URL url = new URL("http://127.0.0.1:8910/");
                     HttpURLConnection connection = (HttpURLConnection) url.openConnection();
                     connection.setRequestMethod("GET");
                     int responseCode = connection.getResponseCode();

@@ -51,7 +51,7 @@ class Chat():
     def stopservice(self):
         """终止服务"""
         print("开始测试终止服务:")
-        url = "http://localhost:8910/servicestop"
+        url = "http://127.0.0.1:8910/servicestop"
         # 如果需要传递参数,使用 params
         params = {"text": "stop"}  # 这会变成 ?text=stop
         response = requests.post(url, json=params)
@@ -63,7 +63,7 @@ class Chat():
     def clearmessage(self):
         """清除保存的历史信息"""
         print("测试清除历史记录: ")
-        url = "http://localhost:8910/clear"
+        url = "http://127.0.0.1:8910/clear"
         params = {"text": "clear"}  # 这会变成 ?text=stop
         response = requests.post(url, json=params)
         if response.status_code == 200:
@@ -74,7 +74,7 @@ class Chat():
     def reloadmessage(self, message: list[str]):
         """加载从客户端传递的历史信息"""
         print("开始测试加载历史记录: ")
-        url = "http://localhost:8910/reload"
+        url = "http://127.0.0.1:8910/reload"
         user_content = dict()
         user_content['role'] = "user"
         user_content['content'] = ""
@@ -107,7 +107,7 @@ class Chat():
     def stopoutput(self):
         """终止当前模型输出"""
         print("开始测试终止模型输出:")
-        url = "http://localhost:8910/stop"
+        url = "http://127.0.0.1:8910/stop"
         # 如果需要传递参数,使用 params
         params = {"text": "stop"}  # 这会变成 ?text=stop
         response = requests.post(url, json=params)
@@ -119,7 +119,7 @@ class Chat():
     def textsplit(self, text: str, max_length: int = 1024):
         """对文本进行切分"""
         print("测试文本切分")
-        url = "http://localhost:8910/v1/textsplitter"
+        url = "http://127.0.0.1:8910/v1/textsplitter"
 
         separators = ["\n\n", "\n", ".", "！", "？", ",", ".", "?", "!", ",", " ", ""]
         body = {"text": text, "max_length": max_length, "separators": separators}
@@ -149,7 +149,7 @@ class Chat():
         # print(system_prompt)
 
         """与模型聊天"""
-        BASE_URL = "http://localhost:8910/v1"   # For Genie
+        BASE_URL = "http://127.0.0.1:8910/v1"   # For Genie
         client = OpenAI(base_url=BASE_URL, api_key="123")
 
         try:
@@ -174,7 +174,7 @@ class Chat():
             print(Fore.RED + f"Service Error: {e}\n")
 
     def getchatprofile(self):
-        BASE_URL = "http://localhost:8910/profile"
+        BASE_URL = "http://127.0.0.1:8910/profile"
 
         try: 
             response = requests.get(BASE_URL)
@@ -184,7 +184,7 @@ class Chat():
             return None
 
     def getmodellist(self):
-        BASE_URL = "http://localhost:8910/models"
+        BASE_URL = "http://127.0.0.1:8910/models"
         response = requests.get(BASE_URL)
         modelname = []
         datas = response.json()["data"]

@@ -67,7 +67,7 @@ INFO: Service Is Ready Now!
 Refere to [AIP](./API.md) for detailed information.
 
 ## Client Usage:
-  The service can be access through the ip address 'localhost:8910', it's compatible with OpenAI API.
+  The service can be access through the ip address '127.0.0.1:8910', it's compatible with OpenAI API.
 
 ### C++ Client Sample Code:
   Here is a C++ client sample: [GenieAPIClient.cpp](Service/GenieAPIClient.cpp). You can get the compiled 'GenieAPIClient.exe' from [GenieAPIService](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.38.0/GenieAPIService_v2.1.0_QAIRT_v2.38.0_v73.zip). The sample app depends on the dynamical library 'libcurl.dll' which also included in the 'GenieAPIService' package.
@@ -84,7 +84,7 @@ GenieAPIService\GenieAPIClient.exe --prompt "How to fish?" --stream --model "IBM
 import argparse
 from openai import OpenAI
 
-IP_ADDR = "localhost:8910"
+IP_ADDR = "127.0.0.1:8910"
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--stream", action="store_true")

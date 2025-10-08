@@ -94,7 +94,7 @@ def on_model_selected(model_name):
     current_model = model_name
     return   # 可以返回值更新其他组件
 def update_max_contextsize(model_name):
-    url = "http://localhost:8910/contextsize"
+    url = "http://127.0.0.1:8910/contextsize"
     params = {"modelName": model_name}  #Llama2.0-7B-SSD
     response = requests.post(url, json=params)
     if response.status_code == 200:

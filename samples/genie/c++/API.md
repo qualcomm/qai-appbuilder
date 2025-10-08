@@ -1,5 +1,7 @@
 # GenieAPIService API <br>
 
+## Note: <br>
+Using '127.0.0.1:8910' to access a local service is about 2 seconds faster in establishing a connection compared to using 'localhost:8910'. It seems like the domain name resolution is taking extra time.
 
 ## Parameters: <br>
 -c, --config_file: Path to the config file.<br>
@@ -37,7 +39,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--model", default="Qwen2.0-7B-SSD", type=str)  
 args = parser.parse_args()
 
-url = "http://localhost:8910/v1/textsplitter"
+url = "http://127.0.0.1:8910/v1/textsplitter"
 text = ""   # Please enter the text to be split.
 separators = ["\n\n", "\n", "。", "！", "？", "，", ".", "?", "!", ",", " ", ""]
 body = {"text": text, "max_length": 128, "separators": separators}
@@ -59,7 +61,7 @@ This function is used to terminate the model's current output.<br>
 You can get the sample code on how to use this function.
 ```
 import requests
-url = "http://localhost:8910/stop"
+url = "http://127.0.0.1:8910/stop"
 params = {"text": "stop"}  
 response = requests.post(url, json=params)
 ```
@@ -70,7 +72,7 @@ You can get the sample code on how to use this function.
 ```
 import requests
 
-url = "http://localhost:8910/clear"
+url = "http://127.0.0.1:8910/clear"
 params = {"text": "clear"}
 response = requests.post(url, json=params)
 
@@ -81,7 +83,7 @@ When you enable the record history conversation feature using the --num_response
 You can get the sample code on how to reload the history of conversation records.<br>
 ```
 import requests
-url = "http://localhost:8910/reload"
+url = "http://127.0.0.1:8910/reload"
 history_data = {
     "action": "import_history",
     "history": [
@@ -100,7 +102,7 @@ response = requests.post(url, json=history_data)
 The sample of get the conversation history records.
 ```
 import requests
-BASE_URL = "http://localhost:8910/fetch"
+BASE_URL = "http://127.0.0.1:8910/fetch"
 response = requests.post(BASE_URL)
 print(response.text)
 return response
@@ -110,7 +112,7 @@ return response
 get the name of the model that can be loaded.<br>
 ```
 import requests
-BASE_URL = "http://localhost:8910/models"
+BASE_URL = "http://127.0.0.1:8910/models"
 response = requests.get(BASE_URL)
 modelname = []
 datas = response.json()["data"]
@@ -123,7 +125,7 @@ return modelname
 Obtain the performance information of the model.<br>
 ```
 import requests
-BASE_URL = "http://localhost:8910/profile"
+BASE_URL = "http://127.0.0.1:8910/profile"
 response = requests.get(BASE_URL)
 return response
 ```
@@ -133,7 +135,7 @@ Terminate the server process.<br>
 ```
 import requests
 print("开始测试终止服务:")
-url = "http://localhost:8910/servicestop"
+url = "http://127.0.0.1:8910/servicestop"
 # 如果需要传递参数,使用 params
 params = {"text": "stop"}  # 这会变成 ?text=stop
 response = requests.post(url, json=params)
@@ -146,7 +148,7 @@ else:
 ## Get model context size
 Enter the model name to obtain the maximum context length of that model.<br>
 ```
-url = "http://localhost:8910/contextsize"
+url = "http://127.0.0.1:8910/contextsize"
 params = {"modelName": model_name}  #Llama2.0-7B-SSD
 response = requests.post(url, json=params)
 if response.status_code == 200:

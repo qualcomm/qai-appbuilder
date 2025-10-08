@@ -5,7 +5,7 @@
 
 # textsplitter to split text. Only C++ version GenieAPIService support this feature.
 import requests
-url = "http://localhost:8910/v1/textsplitter"
+url = "http://127.0.0.1:8910/v1/textsplitter"
 text = "<your_text_here>"
 separators = ["\n\n", "\n", "。", "！", "？", "，", ".", "?", "!", ",", " ", ""]
 body = {"text": text, "max_length": 1024, "separators": separators}

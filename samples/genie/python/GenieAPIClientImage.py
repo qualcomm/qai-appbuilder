@@ -11,7 +11,7 @@ from PIL import Image
 import os
 import base64
 
-HOST="localhost"
+HOST="127.0.0.1"
 PORT="8910"
 
 parser = argparse.ArgumentParser()

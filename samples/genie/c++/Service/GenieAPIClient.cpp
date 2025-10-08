@@ -12,7 +12,7 @@
 #include <sstream>
 #include <curl/curl.h>
 
-const std::string SVR_URL = "http://localhost:8910/v1/chat/completions";
+const std::string SVR_URL = "http://127.0.0.1:8910/v1/chat/completions";
 
 std::string build_request_body(const std::string& model, const std::string& prompt, bool stream) {
     json body;

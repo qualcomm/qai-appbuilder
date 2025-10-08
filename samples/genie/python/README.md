@@ -81,7 +81,7 @@ python genie\python\GenieAPIService.py --modelname "Qwen3.0-8B-v31" --loadmodel 
 ```
 
 ### Step 6: Now you can access the API service
-The default IP address for this API is: 'localhost:8910', you can access this IP address in the client app.
+The default IP address for this API is: '127.0.0.1:8910', you can access this IP address in the client app.
 You can run the following Python in a new terminal window. <br>
 The following command to generate text from text prompt:
 ```

@@ -5,7 +5,7 @@
 
 from openai import OpenAI
 import time
-HOST = "localhost"
+HOST = "127.0.0.1"
 PORT = "8910"
 TIMEOUT_SECONDS = 240
 client = OpenAI(base_url=f"http://{HOST}:{PORT}/v1", api_key="123", timeout=TIMEOUT_SECONDS)

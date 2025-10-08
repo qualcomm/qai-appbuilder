@@ -9,7 +9,7 @@
 import argparse
 from openai import OpenAI
 
-BASE_URL = "http://localhost:8910/v1"   # For Genie
+BASE_URL = "http://127.0.0.1:8910/v1"   # For Genie 
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--stream", action="store_true")
