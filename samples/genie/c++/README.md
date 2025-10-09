@@ -64,7 +64,7 @@ INFO: Service Is Ready Now!
 * You can also try other models such [IBM-Granite-v3.1-8B-Instruct](https://aihub.qualcomm.com/mobile/models/ibm_granite_v3_1_8b_instruct?domain=Generative+AI&useCase=Text+Generation) which is for "Snapdragon® 8 Elite Mobile" device. You can create a subdirectory in the path "/sdcard/GenieModels/" for your model and customize the "config.json" for your model.
 
 ## GenieAPIService API:
-Refere to [AIP](./API.md) for detailed information.
+Refere to [API](./API.md) for detailed information.
 
 ## Client Usage:
   The service can be access through the ip address '127.0.0.1:8910', it's compatible with OpenAI API.
