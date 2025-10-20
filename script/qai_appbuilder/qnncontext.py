@@ -107,7 +107,8 @@ class QNNConfig():
         global g_backend_lib_path, g_system_lib_path
 
         if not os.path.exists(qnn_lib_path):
-            raise ValueError(f"qnn_lib_path does not exist: {qnn_lib_path}")
+            base_path = os.path.dirname(os.path.abspath(__file__))
+            qnn_lib_path = base_path + "/libs"
 
         if (qnn_lib_path != "None"):
             g_backend_lib_path = qnn_lib_path + PATH_SLASH + QNN_LIB_PRE + "Qnn" + runtime + QNN_LIB_EXT
@@ -115,7 +116,7 @@ class QNNConfig():
 
         if not os.path.exists(g_backend_lib_path):
             raise ValueError(f"backend library does not exist: {g_backend_lib_path}")
-                
+
         if not os.path.exists(g_system_lib_path):
             raise ValueError(f"system library does not exist: {g_system_lib_path}")
 
