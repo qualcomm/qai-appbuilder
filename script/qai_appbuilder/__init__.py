@@ -11,7 +11,7 @@ g_base_path = os.path.dirname(os.path.abspath(__file__))
 if sys.platform.startswith('linux'):
     ADSP_LIBRARY_PATH = os.environ.get('ADSP_LIBRARY_PATH')
     if ADSP_LIBRARY_PATH is None or len(ADSP_LIBRARY_PATH) < 2:
-        os.environ["ADSP_LIBRARY_PATH"] = g_base_path = "/libs"
+        os.environ["ADSP_LIBRARY_PATH"] = g_base_path + "/libs"
 
     import ctypes
     ctypes.CDLL(g_base_path + "/libappbuilder.so", ctypes.RTLD_GLOBAL)
