@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">GenieChat</string>
+    <string name="edit_text_hint">输入消息...</string>
+    <!-- >>> 新增 <<< -->
+    <string name="action_settings">设置</string>
+</resources>
