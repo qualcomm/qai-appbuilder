@@ -131,7 +131,7 @@ def build_cmake():
         shutil.copy(LIB_PATH + "/Genie.dll", "lib/Release")
         shutil.copy(LIB_PATH + "/Genie.lib", "lib/Release")
 
-    DSP_LIB_PATH = QNN_SDK_ROOT + "\\lib\\hexagon-v{}\\unsigned".format(dsp_arch)
+    DSP_LIB_PATH = QNN_SDK_ROOT + f"/lib/hexagon-v{dsp_arch}/unsigned"
 
     if os.path.exists(DSP_LIB_PATH + f"/libqnnhtpv{dsp_arch}.cat"):
         shutil.copy(DSP_LIB_PATH + f"/libqnnhtpv{dsp_arch}.cat", qai_libs_path)
