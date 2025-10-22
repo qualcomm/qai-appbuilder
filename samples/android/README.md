@@ -1,3 +1,8 @@
+## Build and Run GenieChat app
+GenieChat is an Android application that demonstrates how to integrate large language models (LLMs) using the Genie API. It features a clean, modern user interface and supports real-time streaming responses, delivering a seamless interactive user experience.<br>
+• You can download GenieChat source codes and build GenieChat apk in android studio. <br>
+• Then run it on Mobile device, refer to [this document](https://www.aidevhome.com/?id=50).<br>
+
 ## Build and Run SuperResolution sample app on Mobile Phone(Snapdragon® 8 Elite)
 
 The SuperResolution sample app demostrates how to convert an image using [SuperResolution AI models](https://aihub.qualcomm.com/mobile/models?domain=Computer+Vision&useCase=Super+Resolution) on android devices.<br>
