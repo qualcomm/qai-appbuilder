@@ -16,6 +16,8 @@ from PIL.Image import fromarray as ImageFromArray
 import argparse
 
 from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig)
+from pathlib import Path
+
 ####################################################################
 MODEL_NAME = "beit"
 MODEL_ID = "mngvl175n" 
@@ -30,21 +32,20 @@ IMAGENET_CLASSES_FILE = "imagenet_labels.json"
 INPUT_IMAGE_PATH_URL = "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/imagenet_classifier/v1/dog.jpg"
 IMAGE_SIZE = 224
 ####################################################################
-execution_ws = os.getcwd()
+execution_ws = Path(os.getcwd())
+qnn_dir = execution_ws / "qai_libs"
 
-qnn_dir = execution_ws + "\\qai_libs"
+if not "python" in str(execution_ws):
+    execution_ws = execution_ws / "python"
 
-if not "python" in execution_ws:
-    execution_ws = execution_ws + "\\"  + "python"
+if not MODEL_NAME in str(execution_ws):
+    execution_ws = execution_ws / MODEL_NAME
 
-if not MODEL_NAME in execution_ws:
-    execution_ws = execution_ws + "\\" + MODEL_NAME
+model_dir = execution_ws / "models"
+model_path = model_dir /  "{}.bin".format(MODEL_NAME)
+imagenet_classes_path = model_dir / IMAGENET_CLASSES_FILE
 
-model_dir = execution_ws + "\\models"
-model_path = model_dir + "\\" + BEIT_MODEL_NAME + ".bin"
-imagenet_classes_path = model_dir + "\\" + IMAGENET_CLASSES_FILE
-
-input_image_path = execution_ws + "\\" + "input.jpg"
+input_image_path = execution_ws / "input.jpg"
 #####################################################################
 
 beit = None
@@ -111,10 +112,10 @@ def Init():
     model_download()
 
     # Config AppBuilder environment.
-    QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(str(qnn_dir), Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for beit objects.
-    beit = Beit("beit", model_path)
+    beit = Beit("beit", str(model_path))
 
 def Inference(input_image_path):
     # Read and preprocess the image.

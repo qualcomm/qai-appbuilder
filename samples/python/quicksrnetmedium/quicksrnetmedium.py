@@ -23,6 +23,7 @@ from utils.image_processing import (
     pil_undo_resize_pad
 )
 from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig)
+from pathlib import Path
 
 
 ####################################################################
@@ -35,19 +36,19 @@ IMAGE_SIZE = 512
 
 ####################################################################
 
-execution_ws = os.getcwd()
-qnn_dir = execution_ws + "\\qai_libs"
+execution_ws = Path(os.getcwd())
+qnn_dir = execution_ws / "qai_libs"
 
-if not "python" in execution_ws:
-    execution_ws = execution_ws + "\\" + "python"
+if not "python" in str(execution_ws):
+    execution_ws = execution_ws / "python"
 
-if not MODEL_NAME in execution_ws:
-    execution_ws = execution_ws + "\\" + MODEL_NAME
+if not MODEL_NAME in str(execution_ws):
+    execution_ws = execution_ws / MODEL_NAME
 
-model_dir = execution_ws + "\\models"
-model_path = model_dir + "\\" + MODEL_NAME + ".bin"
+model_dir = execution_ws / "models"
+model_path = model_dir /  "{}.bin".format(MODEL_NAME)
 
-input_image_path = execution_ws + "\\input.png"
+input_image_path = execution_ws / "input.png"
 INPUT_IMAGE_PATH_URL = "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/super_resolution/v2/super_resolution_input.jpg"
 ####################################################################
 
@@ -77,10 +78,10 @@ def Init():
     model_download()
     print("Init")
     # Config AppBuilder environment.
-    QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(str(qnn_dir), Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for QuickSRNetMedium objects.
-    quicksrnetmedium = QuickSRNetMedium("quicksrnetmedium", model_path)
+    quicksrnetmedium = QuickSRNetMedium("quicksrnetmedium", str(model_path))
 
 def Inference(input_image_path, output_image_path, show_image = True):
     global image_buffer
@@ -133,7 +134,7 @@ def main(input=None):
         input = input_image_path
 
     Init()
-    Inference(input,execution_ws + "\\output.png")
+    Inference(input,execution_ws / "output.png")
 
     Release()
 

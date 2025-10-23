@@ -17,7 +17,7 @@ from PIL.Image import fromarray as ImageFromArray
 import argparse
 
 from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig)
-
+from pathlib import Path
 ####################################################################
 
 MODEL_ID = "mmxeyyvyn"
@@ -29,18 +29,18 @@ IMAGE_SIZE = 224
 
 ####################################################################
 
-execution_ws = os.getcwd()
-qnn_dir = execution_ws + "\\qai_libs"
+execution_ws = Path(os.getcwd())
+qnn_dir = execution_ws / "qai_libs"
 
-if not "python" in execution_ws:
-    execution_ws = execution_ws + "\\" + "python"
+if not "python" in str(execution_ws):
+    execution_ws = execution_ws / "python"
 
-if not MODEL_NAME in execution_ws:
-    execution_ws = execution_ws + "\\" + MODEL_NAME
+if not MODEL_NAME in str(execution_ws):
+    execution_ws = execution_ws / MODEL_NAME
 
-model_dir = execution_ws + "\\models"
-model_path = model_dir + "\\" + MODEL_NAME + ".bin"
-imagenet_classes_path = model_dir + "\\" + IMAGENET_CLASSES_FILE
+model_dir = execution_ws / "models"
+model_path = model_dir /  "{}.bin".format(MODEL_NAME)
+imagenet_classes_path = model_dir / IMAGENET_CLASSES_FILE
 
 ####################################################################
 
@@ -112,7 +112,7 @@ def Init():
     QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for InceptionV3 objects.
-    inceptionV3 = InceptionV3("inceptionV3", model_path)
+    inceptionV3 = InceptionV3("inceptionV3", str(model_path))
 
 def Inference(input_image_path):
     # Read and preprocess the image.
@@ -145,7 +145,7 @@ def Release():
 def main(input = None):
 
     if input is None:
-        input = execution_ws + "\\input.jpg"
+        input = execution_ws / "input.jpg"
 
     Init()
 

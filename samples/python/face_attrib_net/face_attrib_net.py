@@ -16,6 +16,7 @@ import json
 from PIL import Image
 import argparse
 from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig)
+from pathlib import Path
 
 ####################################################################
 
@@ -35,21 +36,21 @@ OUT_NAMES = [
 
 ####################################################################
 
-execution_ws = os.getcwd()
-qnn_dir = execution_ws + "\\qai_libs"
+execution_ws = Path(os.getcwd())
+qnn_dir = execution_ws / "qai_libs"
 
-if not "python" in execution_ws:
-    execution_ws = execution_ws + "\\" + "python"
+if not "python" in str(execution_ws):
+    execution_ws = execution_ws / "python"
 
-if not MODEL_NAME in execution_ws:
-    execution_ws = execution_ws + "\\" + MODEL_NAME
+if not MODEL_NAME in str(execution_ws):
+    execution_ws = execution_ws / MODEL_NAME
 
-model_dir = execution_ws + "\\models"
-model_path = model_dir + "\\" + MODEL_NAME + ".bin"
+model_dir = execution_ws / "models"
+model_path = model_dir /  "{}.bin".format(MODEL_NAME)
 
-output_path = execution_ws + "\\" + "build"
+output_path = execution_ws / "build"
 
-input_face_image_path = execution_ws + "\\input.bmp"
+input_face_image_path = execution_ws / "input.bmp"
 INPUT_FACE_IMAGE_PATH_URL = "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/face_attrib_net/v1/img_sample.bmp"
 ####################################################################
 
@@ -80,10 +81,10 @@ def Init():
     model_download()
 
     # Config AppBuilder environment.
-    QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(str(qnn_dir), Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for FaceAttriNet objects.
-    face_attrib_net = FaceAttribNet("face_attrib_net", model_path)
+    face_attrib_net = FaceAttribNet("face_attrib_net", str(model_path))
 
 
 def preprocess_image(ori_image):
@@ -105,7 +106,7 @@ def post_process(raw_output):
     if not os.path.exists(output_path):
         os.mkdir(output_path)
 
-    out_file = output_path+"\\output.json"
+    out_file = output_path / "output.json"
     with open(out_file, "w", encoding="utf-8") as wf:
         json.dump(out_dict, wf, ensure_ascii=False, indent=4)
     print(f"Model outputs are saved at: {out_file}")

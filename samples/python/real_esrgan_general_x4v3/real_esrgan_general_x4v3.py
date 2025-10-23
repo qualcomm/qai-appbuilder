@@ -16,6 +16,7 @@ from PIL import Image
 from PIL.Image import fromarray as ImageFromArray
 
 from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig)
+from pathlib import Path
 
 ####################################################################
 
@@ -26,18 +27,17 @@ IMAGE_SIZE = 512
 
 ####################################################################
 
-execution_ws = os.getcwd()
+execution_ws = Path(os.getcwd())
+qnn_dir = execution_ws / "qai_libs"
 
-qnn_dir = execution_ws + "\\qai_libs"
+if not "python" in str(execution_ws):
+    execution_ws = execution_ws / "python"
 
-if not "python" in execution_ws:
-    execution_ws = execution_ws + "\\" + "python"
+if not MODEL_NAME in str(execution_ws):
+    execution_ws = execution_ws / MODEL_NAME
 
-if not MODEL_NAME in execution_ws:
-    execution_ws = execution_ws + "\\" + MODEL_NAME
-
-model_dir = execution_ws + "\\models"
-model_path = model_dir + "\\" + MODEL_NAME + ".bin"
+model_dir = execution_ws / "models"
+model_path = model_dir /  "{}.bin".format(MODEL_NAME)
 
 ####################################################################
 
@@ -84,10 +84,10 @@ def Init():
     model_download()
 
     # Config AppBuilder environment.
-    QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(str(qnn_dir), Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for RealESRGan objects.
-    realesrgan = RealESRGan("realesrgan", model_path)
+    realesrgan = RealESRGan("realesrgan", str(model_path))
 
 def Inference(input_image_path, output_image_path):
     global image_buffer
@@ -124,7 +124,7 @@ def Release():
 
 Init()
 
-Inference(execution_ws + "\\input.jpg", execution_ws + "\\output.jpg")
+Inference(execution_ws / "input.jpg", execution_ws / "output.jpg")
 
 Release()
 

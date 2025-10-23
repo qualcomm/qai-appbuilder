@@ -26,6 +26,7 @@ from qai_hub_models.models.yamnet.model import (
     YAMNET_PROXY_REPOSITORY,
 )
 from qai_hub_models.utils.asset_loaders import  SourceAsRoot
+from pathlib import Path
 
 ####################################################################
 
@@ -40,21 +41,21 @@ YAMNET_CLASSES_FILE = "yamnet_class_map.csv"
 
 ####################################################################
 
-execution_ws = os.getcwd()
-qnn_dir = execution_ws + "\\qai_libs"
+execution_ws = Path(os.getcwd())
+qnn_dir = execution_ws / "qai_libs"
 
-if not "python" in execution_ws:
-    execution_ws = execution_ws + "\\" + "python"
+if not "python" in str(execution_ws):
+    execution_ws = execution_ws / "python"
 
-if not MODEL_NAME in execution_ws:
-    execution_ws = execution_ws + "\\" + MODEL_NAME
+if not MODEL_NAME in str(execution_ws):
+    execution_ws = execution_ws / MODEL_NAME
 
-model_dir = execution_ws + "\\models"
-model_path = model_dir + "\\" + MODEL_NAME + ".bin"
+model_dir = execution_ws / "models"
+model_path = model_dir /  "{}.bin".format(MODEL_NAME)
 
-yamnet_classes_path = model_dir + "\\" + YAMNET_CLASSES_FILE
+yamnet_classes_path = model_dir / YAMNET_CLASSES_FILE
 
-input_wav_path = execution_ws + "\\input.wav"
+input_wav_path = execution_ws / "input.wav"
 INPUT_WAV_PATH_URL = "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/yamnet/v1/speech_whistling2.wav"
 ####################################################################
 
@@ -87,10 +88,10 @@ def Init():
     model_download()
 
     # Config AppBuilder environment.
-    QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(str(qnn_dir), Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for yamnet objects.
-    yamnet = YamNet("yamnet", model_path)
+    yamnet = YamNet("yamnet", str(model_path))
 
 
 

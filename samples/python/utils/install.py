@@ -13,15 +13,34 @@ from tqdm import tqdm
 from pathlib import Path
 import qai_hub
 import urllib.request as request
+import platform
 
 qnn_sdk_version =  {
     "2.34": "2.34.0.250424",
     "2.38": "2.38.0.250901",
 }
 
+def get_system():
+    system = platform.system()
+
+    if system == "Windows":
+        return "Windows"
+    elif system == "Linux":
+        return "Linux"
+    else:
+        return None
+
+system_name = get_system()
+
 DEFAULT_SDK_VER     = "2.38"
 DEFAULT_DSP_ARCH    = "73"  # For X-Elite device.
-DEFAULT_LIB_ARCH = "arm64x-windows-msvc" # "aarch64-windows-msvc" # For X-Elite device.
+
+if system_name == "Linux":
+    DEFAULT_LIB_ARCH = "aarch64-oe-linux-gcc11.2" # "aarch64-oe-linux-gcc11.2" # For QCS9075 device.
+elif system_name == "Windows":
+    DEFAULT_LIB_ARCH = "arm64x-windows-msvc" # "aarch64-windows-msvc" # For X-Elite device.
+
+
 
 QNN_SDK_URL = "https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/"
 QAI_APPBUILDER_WHEEL = "https://github.com/quic/ai-engine-direct-helper/releases/download/vversion.0/qai_appbuilder-version.0-cp312-cp312-win_amd64.whl"
@@ -40,7 +59,10 @@ ARIA2C_URL = "https://github.com/aria2/aria2/releases/download/release-1.36.0/ar
 def setup_qai_hub(hub_id):
     if os.path.isfile(QAI_HUB_CONFIG):
         shutil.copy(QAI_HUB_CONFIG, QAI_HUB_CONFIG_BACKUP)
-    run_command(f"qai-hub.exe configure --api_token {hub_id} > NUL", False)
+    if system_name == "Windows":
+        run_command(f"qai-hub.exe configure --api_token {hub_id} > NUL", False)
+    elif system_name == "Linux":
+        run_command(f"qai-hub configure --api_token {hub_id} > NUL", False)
 
 
 def reset_qai_hub():
@@ -224,16 +246,21 @@ def download_url_wget(url, filepath, filesize=None, desc=None, fail=None):
         os.makedirs(path, exist_ok=True)
 
     try:
-        wget_exe_path = "tools\\wget\\wget.exe"
-        if not os.path.exists(wget_exe_path):
-            wget_exe_path = "..\\python\\tools\\wget\\wget.exe"
+        if system_name == "Windows":
+            wget_exe_path = "tools\\wget\\wget.exe"
+            if not os.path.exists(wget_exe_path):
+                wget_exe_path = "..\\python\\tools\\wget\\wget.exe"
 
-        if not os.path.exists(wget_exe_path):
-            print(f"wget.exe not found. Please download it manually from '{WGET_URL}' and unzip it to '{wget_exe_path}'")
-            return False
+            if not os.path.exists(wget_exe_path):
+                print(f"wget.exe not found. Please download it manually from '{WGET_URL}' and unzip it to '{wget_exe_path}'")
+                return False
 
-        command = f'"{wget_exe_path}" --no-check-certificate -q --show-progress --continue -P "{path}" -O "{filepath}" {url}'
-        # print(command)
+            command = f'"{wget_exe_path}" --no-check-certificate -q --show-progress --continue -P "{path}" -O "{filepath}" {url}'
+        
+        elif system_name == "Linux":
+            command = f'"wget" --no-check-certificate -q --show-progress --continue -P "{path}" -O "{filepath}" {url}'
+
+        print(command)
         result = run(command, desc=desc, errdesc=fail, live=True)
         #print(result)
 
@@ -514,3 +541,5 @@ def install_qai_appbuilder(version, lib_arch):
 
         if (not dist) or (dist.version != version_install) :
             run_pip(f"install {qai_appbuilder_wheel}", "QAI AppBuilder " + version_install)
+
+

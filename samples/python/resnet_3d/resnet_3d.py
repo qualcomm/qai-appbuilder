@@ -16,6 +16,7 @@ from qai_hub_models.models._shared.video_classifier.utils import (
     read_video_per_second,
 )
 from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig)
+from pathlib import Path
 
 ########################################################################
 
@@ -27,21 +28,19 @@ MODEL_HELP_URL = "https://github.com/quic/ai-engine-direct-helper/tree/main/samp
 
 ###############################################################
 
+execution_ws = Path(os.getcwd())
+qnn_dir = execution_ws / "qai_libs"
 
-execution_ws = os.getcwd()
+if not "python" in str(execution_ws):
+    execution_ws = execution_ws / "python"
 
-qnn_dir = execution_ws + "\\qai_libs"
+if not MODEL_NAME in str(execution_ws):
+    execution_ws = execution_ws / MODEL_NAME
 
-if not "python" in execution_ws:
-    execution_ws = execution_ws + "\\" + "python"
+model_dir = execution_ws / "models"
+model_path = model_dir /  "{}.bin".format(MODEL_NAME)
 
-if not MODEL_NAME in execution_ws:
-    execution_ws = execution_ws + "\\" + MODEL_NAME
-
-model_dir = execution_ws + "\\models"
-model_path = model_dir + "\\" + MODEL_NAME + ".bin"
-
-input_video_path = execution_ws + "\\input.mp4"
+input_video_path = execution_ws / "input.mp4"
 INPUT_VIDEO_PATH_URL = "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/resnet_3d/v1/surfing_cutback.mp4"
 
 ########################################################################
@@ -95,10 +94,10 @@ def Init():
     model_download()
 
     # Config AppBuilder environment.
-    QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(str(qnn_dir), Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for resnet_3d objects.
-    resnet_3d= ResNet_3D("resnet_3d", model_path)
+    resnet_3d= ResNet_3D("resnet_3d", str(model_path))
 
 
 def preprocess_video(input_video):

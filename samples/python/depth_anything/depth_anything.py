@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 
 from utils.image_processing import pil_resize_pad, undo_resize_pad
 from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig)
+from pathlib import Path
 
 ####################################################################
 
@@ -31,21 +32,21 @@ IMAGE_SIZE = 518
 
 ####################################################################
 
-execution_ws = os.getcwd()
-qnn_dir = execution_ws + "\\qai_libs"
+execution_ws = Path(os.getcwd())
+qnn_dir = execution_ws / "qai_libs"
 
-if not "python" in execution_ws:
-    execution_ws = execution_ws + "\\" + "python"
+if not "python" in str(execution_ws):
+    execution_ws = execution_ws / "python"
 
-if not MODEL_NAME in execution_ws:
-    execution_ws = execution_ws + "\\" + MODEL_NAME
+if not MODEL_NAME in str(execution_ws):
+    execution_ws = execution_ws / MODEL_NAME
 
-model_dir = execution_ws + "\\models"
-out_image_path = execution_ws + "\\images"
-model_path = model_dir + "\\" + MODEL_NAME + ".bin"
+model_dir = execution_ws / "models"
+model_path = model_dir /  "{}.bin".format(MODEL_NAME)
 
-input_image_path = execution_ws + "\\input.jpg"
+input_image_path = execution_ws / "input.jpg"
 INPUT_IMAGE_PATH_URL = "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/depth_anything/v2/test_input_image.jpg"
+out_image_path = execution_ws
 ####################################################################
 
 
@@ -75,10 +76,10 @@ def Init():
     model_download()
 
     # Config AppBuilder environment.
-    QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(str(qnn_dir), Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for DepthAnything objects.
-    depth_anything = DepthAnything("depth_anything", model_path)
+    depth_anything = DepthAnything("depth_anything", str(model_path))
 
 
 
@@ -105,7 +106,7 @@ def Inference(input_image_path):
 
     if not os.path.exists(out_image_path):
             os.makedirs(out_image_path, exist_ok=True)
-    out_image_path = out_image_path + "\\output.jpg"
+    out_image_path = out_image_path / "output.jpg"
     output_image.save(out_image_path)
     output_image.show()
     

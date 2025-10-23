@@ -20,6 +20,7 @@ from utils.image_processing import (
 )
 
 from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig)
+from pathlib import Path
 
 ####################################################################
 
@@ -31,17 +32,17 @@ IMAGE_SIZE_W = 1280
 
 ####################################################################
 
-execution_ws = os.getcwd()
-qnn_dir = execution_ws + "\\qai_libs"
+execution_ws = Path(os.getcwd())
+qnn_dir = execution_ws / "qai_libs"
 
-if not "python" in execution_ws:
-    execution_ws = execution_ws + "\\" + "python"
+if not "python" in str(execution_ws):
+    execution_ws = execution_ws / "python"
 
-if not MODEL_NAME in execution_ws:
-    execution_ws = execution_ws + "\\" + MODEL_NAME
+if not MODEL_NAME in str(execution_ws):
+    execution_ws = execution_ws / MODEL_NAME
 
-model_dir = execution_ws + "\\models"
-model_path = model_dir + "\\" + MODEL_NAME + ".bin"
+model_dir = execution_ws / "models"
+model_path = model_dir /  "{}.bin".format(MODEL_NAME)
 
 ####################################################################
 
@@ -70,10 +71,10 @@ def Init():
     model_download()
 
     # Config AppBuilder environment.
-    QNNConfig.Config(os.getcwd() + "\\qai_libs", Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(str(qnn_dir), Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for UnetSegmentation objects.
-    unet_segmentation = UnetSegmentation("unet_segmentation", model_path)
+    unet_segmentation = UnetSegmentation("unet_segmentation", str(model_path))
 
 def Inference(input_image_path, output_image_path, show_image = True): 
     # Read and preprocess the image.
@@ -107,7 +108,7 @@ def Inference(input_image_path, output_image_path, show_image = True):
 
     mask_image = Image.blend(image_input.convert("RGBA"), mask.convert("RGBA"), alpha=1.0)
     mask_image = pil_undo_resize_pad(mask_image,image_size,_scale,image_padding)
-    mask_image.save(execution_ws + "\\output_mask.png")
+    mask_image.save(execution_ws / "output_mask.png")
     if show_image:
         mask_image.show()
 
@@ -128,10 +129,10 @@ def main(image_path=None,output_path=None,show_image = True):
 
     if image_path is None:
         # Example image path if no argument is provided
-        image_path = f'{execution_ws}\\input.jpg'
+        image_path = execution_ws / "input.jpg"
 
     if output_path is None:
-        output_path=f'{execution_ws}\\output.png'
+        output_path = execution_ws / "output.png"
 
 
     Init()

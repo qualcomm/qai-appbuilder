@@ -16,6 +16,7 @@ from skimage import io
 import cv2
 import argparse
 from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig)
+from pathlib import Path
 
 ####################################################################
 
@@ -30,22 +31,22 @@ SHAPEBASIS_PATH_URL = "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/q
 BLENDSHAPE_PATH_URL = "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/facemap_3dmm/v1/blendShape.npy"
 ####################################################################
 
-execution_ws = os.getcwd()
-qnn_dir = execution_ws + "\\qai_libs"
+execution_ws = Path(os.getcwd())
+qnn_dir = execution_ws / "qai_libs"
 
-if not "python" in execution_ws:
-    execution_ws = execution_ws + "\\" + "python"
+if not "python" in str(execution_ws):
+    execution_ws = execution_ws / "python"
 
-if not MODEL_NAME in execution_ws:
-    execution_ws = execution_ws + "\\" + MODEL_NAME
+if not MODEL_NAME in str(execution_ws):
+    execution_ws = execution_ws / MODEL_NAME
 
-model_dir = execution_ws + "\\models"
-model_path = model_dir + "\\" + MODEL_NAME + ".bin"
+model_dir = execution_ws / "models"
+model_path = model_dir /  "{}.bin".format(MODEL_NAME)
 
-face_img_fbox_path = execution_ws + "\\" + "face_img_fbox.txt"
-meanFace_path = execution_ws + "\\" + "meanFace.npy"
-shapeBasis_path = execution_ws + "\\" + "shapeBasis.npy"
-blendShape_path = execution_ws + "\\" + "blendShape.npy"
+face_img_fbox_path = execution_ws / "face_img_fbox.txt"
+meanFace_path = execution_ws / "meanFace.npy"
+shapeBasis_path = execution_ws / "shapeBasis.npy"
+blendShape_path = execution_ws / "blendShape.npy"
 
 ####################################################################
 
@@ -86,10 +87,10 @@ def Init():
     model_download()
 
     # Config AppBuilder environment.
-    QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(str(qnn_dir), Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for OpnPose objects.
-    facemap_3dmm = Facemap_3dmm("facemap_3dmm", model_path)
+    facemap_3dmm = Facemap_3dmm("facemap_3dmm", str(model_path))
 
 def save_image(image: Image, base_dir: str, filename: str, desc: str):
     os.makedirs(base_dir, exist_ok=True)
@@ -236,7 +237,7 @@ def Inference(input_image_path):
         )
 
     np.savetxt(
-        execution_ws + "\\" + "demo_output_lmk.txt",
+        execution_ws / "demo_output_lmk.txt",
         landmark.detach().numpy(),
     )
     
@@ -256,7 +257,7 @@ def Release():
 
 def main(input=None):
     if input is None:
-        input = execution_ws + "\\input.jpg"
+        input = execution_ws / "input.jpg"
 
     Init()
     Inference(input)

@@ -21,6 +21,8 @@ import argparse
 from qai_appbuilder import (QNNContext, QNNContextProc, QNNShareMemory, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig, timer)
 
 
+from pathlib import Path
+import time
 ####################################################################
 
 MODEL_NAME                  = "stable_diffusion_v2_1"
@@ -41,23 +43,26 @@ MODEL_HELP_URL = "https://github.com/quic/ai-engine-direct-helper/tree/main/samp
 
 execution_ws = os.getcwd()
 
-qnn_dir = execution_ws + "\\qai_libs"
+execution_ws = Path(os.getcwd())
 
-if not "python" in execution_ws:
-    execution_ws = execution_ws + "\\" + "python"
 
-if not MODEL_NAME in execution_ws:
-    execution_ws = execution_ws + "\\" + MODEL_NAME
+qnn_dir = execution_ws / "qai_libs"
+
+if not "python" in str(execution_ws):
+    execution_ws = execution_ws / "python"
+
+if not MODEL_NAME in str(execution_ws):
+    execution_ws = execution_ws / MODEL_NAME
 
 #Model pathes.
-model_dir = execution_ws + "\\models"
+model_dir = execution_ws / "models"
 sd_dir = model_dir
-tokenizer_dir = model_dir + "\\tokenizer\\"
-time_embedding_dir = model_dir + "\\time-embedding\\"
+tokenizer_dir = model_dir / "tokenizer"
+time_embedding_dir = model_dir / "time-embedding"
 
-text_encoder_model_path = sd_dir + "\\" + TEXT_ENCODER_MODEL_NAME
-unet_model_path = sd_dir + "\\" + UNET_MODEL_NAME
-vae_decoder_model_path = sd_dir + "\\" + VAE_DECODER_MODEL_NAME
+text_encoder_model_path = sd_dir  / TEXT_ENCODER_MODEL_NAME
+unet_model_path = sd_dir / UNET_MODEL_NAME
+vae_decoder_model_path = sd_dir /  VAE_DECODER_MODEL_NAME
 
 tokenizer = None
 scheduler = None
@@ -80,23 +85,23 @@ model_inited = False
 
 ####################################################################
 
-class TextEncoder(QNNContextProc):
-    def Inference(self, share_mem, input_data):
+class TextEncoder(QNNContext):
+    def Inference(self, input_data):
         input_datas=[input_data]
-        output_data = super().Inference(share_mem, input_datas)[0]
+        output_data = super().Inference(input_datas)[0]
 
         # Output of Text encoder should be of shape (1, 77, 1024)
         output_data = output_data.reshape((1, 77, 1024))
         return output_data
 
-class Unet(QNNContextProc):
-    def Inference(self, share_mem, input_data_1, input_data_2, input_data_3):
+class Unet(QNNContext):
+    def Inference(self, input_data_1, input_data_2, input_data_3):
         # We need to reshape the array to 1 dimensionality before send it to the network. 'input_data_2' already is 1 dimensionality, so doesn't need to reshape.
         input_data_1 = input_data_1.reshape(input_data_1.size)
         input_data_3 = input_data_3.reshape(input_data_3.size)
 
         input_datas=[input_data_1, input_data_2, input_data_3]
-        output_data = super().Inference(share_mem, input_datas)[0]
+        output_data = super().Inference(input_datas)[0]
 
         output_data = output_data.reshape(1, 64, 64, 4)
         return output_data
@@ -132,7 +137,7 @@ def model_initialize():
 
     # Initializing the Tokenizer
     try:
-        if os.path.exists(tokenizer_dir) and not os.path.exists(tokenizer_dir + "\\.locks") :
+        if os.path.exists(tokenizer_dir) and not os.path.exists(tokenizer_dir / ".locks") :
             tokenizer = CLIPTokenizer.from_pretrained(tokenizer_dir, local_files_only=True)
         elif os.path.exists(tokenizer_dir):     # Speed up the model loading if the model is ready. Avoiding to check it through network.
             tokenizer = CLIPTokenizer.from_pretrained(TOKENIZER_MODEL_NAME, subfolder="tokenizer", revision="main", cache_dir=tokenizer_dir, local_files_only=True)
@@ -146,13 +151,13 @@ def model_initialize():
 
     # Instance for TextEncoder 
 
-    text_encoder = TextEncoder(model_text_encoder, "model_process", text_encoder_model_path)
+    text_encoder = TextEncoder(model_text_encoder, str(text_encoder_model_path))
 
     # Instance for Unet 
-    unet = Unet(model_unet, "model_process", unet_model_path)
+    unet = Unet(model_unet, str(unet_model_path))
 
     # Instance for VaeDecoder 
-    vae_decoder = VaeDecoder(model_vae_decoder, vae_decoder_model_path)
+    vae_decoder = VaeDecoder(model_vae_decoder, str(vae_decoder_model_path))
 
     share_memory = QNNShareMemory("share_memory", 1024 * 1024 * 50) # 50M
 
@@ -214,7 +219,7 @@ def get_timestep(step):
     return np.int32(scheduler.timesteps.numpy()[step])
 
 # Execute the Stable Diffusion pipeline
-def model_execute(callback, image_path, show_image = True):
+def model_execute(callback, image_path, show_image = True, save_image=True):
     PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
 
     scheduler.set_timesteps(user_step)  # Setting up user provided time steps for Scheduler
@@ -224,17 +229,17 @@ def model_execute(callback, image_path, show_image = True):
     uncond_tokens = run_tokenizer(uncond_prompt)
 
     # Run Text Encoder on Tokens
-    uncond_text_embedding = text_encoder.Inference(share_memory, uncond_tokens)
+    uncond_text_embedding = text_encoder.Inference(uncond_tokens)
     uncond_text_embedding = uncond_text_embedding.copy()
 
-    user_text_embedding = text_encoder.Inference(share_memory, cond_tokens)
+    user_text_embedding = text_encoder.Inference(cond_tokens)
     user_text_embedding = user_text_embedding.copy()
 	
     # Initialize the latent input with random initial latent
     random_init_latent = torch.randn((1, 4, 64, 64), generator=torch.manual_seed(user_seed)).numpy()
     latent_in = random_init_latent.transpose(0, 2, 3, 1)
 
-    time_emb_path = time_embedding_dir + str(user_step) + "\\"
+    time_emb_path = time_embedding_dir / str(user_step)
 
     # Run the loop for user_step times
     for step in range(user_step):
@@ -244,10 +249,10 @@ def model_execute(callback, image_path, show_image = True):
 
         time_step = get_timestep(step)
 
-        unconditional_noise_pred = unet.Inference(share_memory, latent_in, time_step, uncond_text_embedding)
+        unconditional_noise_pred = unet.Inference(latent_in, time_step, uncond_text_embedding)
         unconditional_noise_pred = unconditional_noise_pred.copy()
 
-        conditional_noise_pred = unet.Inference(share_memory, latent_in, time_step, user_text_embedding)
+        conditional_noise_pred = unet.Inference(latent_in, time_step, user_text_embedding)
         conditional_noise_pred = conditional_noise_pred.copy()
 
         latent_in = run_scheduler(unconditional_noise_pred, conditional_noise_pred, latent_in, time_step)
@@ -265,23 +270,27 @@ def model_execute(callback, image_path, show_image = True):
     else:
         image_size = 512
 
-        if not os.path.exists(image_path):
-            os.makedirs(image_path, exist_ok=True)
-        image_path = image_path + "\\%s_%s_%s.jpg"%(formatted_time, str(user_seed), str(image_size))
-
         output_image = np.clip(output_image * 255.0, 0.0, 255.0).astype(np.uint8)
         output_image = output_image.reshape(image_size, image_size, -1)
         output_image = Image.fromarray(output_image, mode="RGB")
-        output_image.save(image_path)
+
+        if save_image:
+            if not os.path.exists(image_path):
+                os.makedirs(image_path, exist_ok=True)
+            image_path = Path(image_path) / "{}_{}_{}.jpg".format(formatted_time, str(user_seed), str(image_size))
+            output_image.save(image_path)
+
+            callback(str(image_path))
         
         if show_image:
             output_image.show()
 
-        callback(image_path)
-
     PerfProfile.RelPerfProfileGlobal()
 
-    return image_path
+    if save_image:
+        return image_path
+    else:
+        return output_image
 
 # Release all the models.
 def model_destroy():
@@ -294,7 +303,7 @@ def model_destroy():
     del(share_memory)
 
 def SetQNNConfig():
-    QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.ERROR, ProfilingLevel.BASIC)
+    QNNConfig.Config(str(qnn_dir), Runtime.HTP, LogLevel.ERROR, ProfilingLevel.BASIC)
 
 ####################################################################
 
@@ -352,7 +361,7 @@ if __name__ == "__main__":
     user_text_guidance = 7.5
 
     setup_parameters(user_prompt, uncond_prompt, user_seed, user_step, user_text_guidance)
-    model_execute(modelExecuteCallback, execution_ws + "\\images")
+    model_execute(modelExecuteCallback, execution_ws / "images", True, True)
 
     time_end = time.time()
     print("time consumes for inference {}(s)".format(str(time_end - time_start)))

@@ -36,6 +36,7 @@ from qai_hub_models.utils.asset_loaders import load_image
 from qai_hub_models.utils.display import display_or_save_image
 
 from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig, timer)
+from pathlib import Path
 
 DETECTOR_ARGS = {
     "canvas_size": 2560,
@@ -99,39 +100,38 @@ INPUT_IMAGE_PATH_URL = "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/
 
 ####################################################################
 
-execution_ws = os.getcwd()
+execution_ws = Path(os.getcwd())
+qnn_dir = execution_ws / "qai_libs"
 
-qnn_dir = execution_ws + "\\qai_libs"
+if not "python" in str(execution_ws):
+    execution_ws = execution_ws / "python"
 
-if not "python" in execution_ws:
-    execution_ws = execution_ws + "\\" + "python"
+if not MODEL_NAME in str(execution_ws):
+    execution_ws = execution_ws / MODEL_NAME
 
-    
-if not MODEL_NAME in execution_ws:
-    execution_ws = execution_ws + "\\" + MODEL_NAME
-
-#Model pathes.
-model_dir = execution_ws + "\\models"
+model_dir = execution_ws / "models"
 sd_dir = model_dir
 
-detector_model_path = sd_dir + "\\" + Detector_MODEL_LINK
-recognizer_model_path = sd_dir + "\\" + Recognizer_MODEL_LINK
+detector_model_path = sd_dir / Detector_MODEL_LINK
+recognizer_model_path = sd_dir / Recognizer_MODEL_LINK
 
-cn_detector_model_path = sd_dir + "\\" + CN_Detector_MODEL_LINK
-cn_recognizer_model_path = sd_dir + "\\" + CN_Recognizer_MODEL_LINK
+cn_detector_model_path = sd_dir / CN_Detector_MODEL_LINK
+cn_recognizer_model_path = sd_dir / CN_Recognizer_MODEL_LINK
 
 # char_file and lang_char_file holds strings for charactor mapping, with different encoding.
 
 #char_file = execution_ws + "\\Char\\" + "en_character.bin"
 #lang_char_file = execution_ws + "\\Char\\" + "en_character.bin"
 
-char_file = execution_ws + "\\Char\\" + "ch_en_character.bin"
-lang_char_file = execution_ws + "\\Char\\" + "ch_en_lang_char.bin"
+char_file = execution_ws / "Char" / "ch_en_character.bin"
+lang_char_file = execution_ws / "Char" / "ch_en_lang_char.bin"
 #input_image_path = execution_ws + "\\english.png"
-input_image_path = execution_ws + "\\ch_en.png"
+input_image_path = execution_ws / "ch_en.png"
 
-font_path = execution_ws + "\\" + "simsun.ttc"
-default_font_path = "C:\\Windows\\Fonts\\simsun.ttc"
+font_path = execution_ws / "simsun.ttc"
+SIMSUN_TTC_URL = "https://git.imagedt.com/shixin/pdtttools/-/raw/master/fonts/simsun.ttc"
+
+# default_font_path = "C:\\Windows\\Fonts\\simsun.ttc"
 ##################################################################
 
 # model objects.
@@ -165,10 +165,7 @@ def model_download():
     ret = install.download_qai_hubmodel(CN_Recognizer_MODEL_ID, cn_recognizer_model_path, desc=desc, fail=fail, hub_id=HUB_ID_SY) 
     
     if not os.path.exists(font_path):
-        try:
-            shutil.copy2(default_font_path, font_path)
-        except Exception as e:
-            print(f"failed to copy {default_font_path} to {font_path}：{e}")
+        ret = install.download_url(SIMSUN_TTC_URL, font_path)
 
     if not ret:
         exit()
@@ -183,8 +180,8 @@ def Init():
     
     #detector_model_obj = EasyOCR_Detector("EasyOCRDetector", detector_model_path)
     #recognizer_model_obj = EasyOCR_Recognizer("EasyOCRRecognizer", recognizer_model_path)
-    detector_model_obj = EasyOCR_Detector("EasyOCRDetector", cn_detector_model_path)
-    recognizer_model_obj = EasyOCR_Recognizer("EasyOCRRecognizer", cn_recognizer_model_path)
+    detector_model_obj = EasyOCR_Detector("EasyOCRDetector", str(cn_detector_model_path))
+    recognizer_model_obj = EasyOCR_Recognizer("EasyOCRRecognizer", str(cn_recognizer_model_path))
     # ----------------
     
 def main(Image_Path: str = None):
@@ -252,7 +249,7 @@ def main(Image_Path: str = None):
 
 
 def SetQNNConfig():
-    QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.ERROR, ProfilingLevel.BASIC)
+    QNNConfig.Config(str(qnn_dir), Runtime.HTP, LogLevel.ERROR, ProfilingLevel.BASIC)
 
 def Release():
     global detector_model_obj

@@ -14,6 +14,7 @@ import numpy as np
 import clip
 
 from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig)
+from pathlib import Path
 
 ####################################################################
 
@@ -27,22 +28,22 @@ PRETRAINED_WEIGHTS = "ViT-B/16"
 
 ####################################################################
 
-execution_ws = os.getcwd()
-qnn_dir = execution_ws + "\\qai_libs"
+execution_ws = Path(os.getcwd())
+qnn_dir = execution_ws / "qai_libs"
 
-if not "python" in execution_ws:
-    execution_ws = execution_ws + "\\" + "python"
+if not "python" in str(execution_ws):
+    execution_ws = execution_ws / "python"
 
-if not MODEL_NAME in execution_ws:
-    execution_ws = execution_ws + "\\" + MODEL_NAME
+if not MODEL_NAME in str(execution_ws):
+    execution_ws = execution_ws / MODEL_NAME
 
-model_dir = execution_ws + "\\models"
-model_path = model_dir + "\\" + MODEL_NAME + ".bin"
+model_dir = execution_ws / "models"
+model_path = model_dir /  "{}.bin".format(MODEL_NAME)
 
-images_dir_path = execution_ws + "\\images"
-images1_path = images_dir_path + "\\" + "image1.jpg"
-images2_path = images_dir_path + "\\" + "image2.jpg"
-images3_path = images_dir_path + "\\" + "image3.jpg"
+images_dir_path = execution_ws / "images"
+images1_path = images_dir_path / "image1.jpg"
+images2_path = images_dir_path / "image2.jpg"
+images3_path = images_dir_path / "image3.jpg"
 INPUT_IMAGE1_PATH_URL = "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/openai_clip/v1/image1.jpg"
 INPUT_IMAGE2_PATH_URL = "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/openai_clip/v1/image2.jpg"
 INPUT_IMAGE3_PATH_URL = "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/openai_clip/v1/image3.jpg"
@@ -87,10 +88,10 @@ def Init():
     net, image_preprocessor = clip.load(PRETRAINED_WEIGHTS, device=device)
 
     # Config AppBuilder environment.
-    QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(str(qnn_dir), Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for InceptionV3 objects.
-    openai_clip = OpenAIClip("openai_clip", model_path)
+    openai_clip = OpenAIClip("openai_clip", str(model_path))
 
 def load_images_from_dir(images_dir):
     images,image_names = [],[]
@@ -153,7 +154,7 @@ def Release():
 def main(images_dir = None,text=None):
     Init()
     if images_dir is None:
-        images_dir = execution_ws + "\\images"
+        images_dir = execution_ws / "images"
 
     if text is None:
         text='camping under the stars'
