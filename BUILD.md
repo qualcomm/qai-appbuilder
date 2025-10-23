@@ -39,10 +39,15 @@ git pull --recurse-submodules
 Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.38.0.250901\
 ```
 - Use the commands below to build and install Python extension(*.whl): <br>
+*Note: Please get the corresponding "Supported Toolchains" and "Hexagon Arch" with your device from [Supported Snapdragon devices](https://docs.qualcomm.com/bundle/publicresource/topics/80-63442-10/QNN_general_overview.html#supported-snapdragon-devices). <br>
 *Note: Make sure to compile it in the regular Windows Command Prompt — not in the 'ARM64 Native Tools Command Prompt for VS 2022' and not in the 'Power Shell' window.* <br>
 ```
 cd ai-engine-direct-helper
+python setup.py --toolchains <Supported Toolchains> --hexagonarch <Hexagon Arch> bdist_wheel
+# For example: python setup.py --toolchains arm64x-windows-msvc --hexagonarch V73 bdist_wheel
+
 python setup.py bdist_wheel
+# You can also use above command, it will compile it with default Toolchains and Hexagon Arch.
 
 # Install the extension:
 pip install dist\qai_appbuilder-2.38.0-cp312-cp312-win_amd64.whl
