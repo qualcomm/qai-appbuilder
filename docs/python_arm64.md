@@ -63,9 +63,10 @@ pip install numpy-1.26.4-cp312-cp312-win_arm64.whl
 pip install opencv_python_headless-4.10.0.82-cp39-abi3-win_arm64.whl
 pip install pillow-10.3.0-cp312-cp312-win_arm64.whl
 ```
-
-Get PyQt6 from here, refer to the *Notes* below on compiling PyQt6_sip:
-https://github.com/RockLakeGrass/Windows-on-ARM64-Toolchain/tree/main/Python/packages/PyQt/PyQt6
+Install PyQt6 for GUI programming:
+```
+pip install PyQt6 PyQt6-WebEngine
+```
 
 ## TorchVision, ONNX, ONNX Runtime:
 If need these Python extensioins for ARM64 Python, you need compile them by yourselves. If need support on how to compile them, you can contact with us.
@@ -83,20 +84,3 @@ b. Plese use the API *LogLevel.SetLogLevel()* for Python and *SetLogLevel()* for
 
 c. If using Python 3.11.5, get OpenCV from here:
 https://github.com/RockLakeGrass/Windows-on-ARM64-Toolchain/tree/main/Python/packages/opencv-python
-
-d. PyQt6 install:
-If using Python 3.12.6, you perhaps need to setup compile environment according to below link for compiling PyQt6_sip: 13.4.0:
-https://github.com/quic/ai-engine-direct-helper/tree/main?tab=readme-ov-file#build
-
-Steps to install PyQt6 for Python 3.12.6:
-1. Download PyQt6-6.3.1-cp37-abi3-win_arm64.whl & PyQt6_Qt6-6.3.1-py3-none-win_arm64.whl from below link:
-https://github.com/RockLakeGrass/Windows-on-ARM64-Toolchain/tree/main/Python/packages/PyQt/PyQt6/PyQt6-6.3.1
-2. Use below commands to install PyQt6:
-
-```
-pip install PyQt6-6.3.1-cp37-abi3-win_arm64.whl
-pip install PyQt6_Qt6-6.3.1-py3-none-win_arm64.whl
-pip install PyQt6_sip==13.4.0
-```
-You can get PyQt6_sip for Python 3.11.5 from here directly:
-https://github.com/RockLakeGrass/Windows-on-ARM64-Toolchain/blob/main/Python/packages/PyQt/PyQt6/PyQt6-sip/PyQt6_sip-13.4.0-cp311-cp311-win_arm64.whl
