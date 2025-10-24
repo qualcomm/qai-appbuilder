@@ -35,35 +35,37 @@ For a quick installation of the langflow environment, please refer to: [launcher
 
 ## Using the Flows  
 
-1. On the newly opened LangFlow web page, click the **"New flow"** button to enter the Templates interface.  
+1. On the newly opened LangFlow web page, click the **"+ Create first flow"** button to enter the Templates interface.  
 2. In the Templates window, click the **"Blank Flow"** button (bottom-right corner) to create a new blank flow.  
-3. In the top navigation bar, select **"My Projects"** to access your project directory.  
-4. In the left sidebar under **"Folders"**, locate and click the **"Upload a Flow"** icon (usually a folder with an arrow). This will open a file selection dialog.  
-5. All flow files are located in the `tools\langflow\flows` directory. Select the desired flow file and click **"Open"** to upload it to your projects.  
+3. In the top navigation bar, select **"Starter Project"** to access your project directory.  
+4. In the left sidebar under **"Projects"**, locate and click the **Upload a Flow icon** (usually the upward arrow icon). This will open a file selection dialog.  
+5. All flow files are located in the `ai-engine-direct-helper\tools\langflow\flows` directory. Select the desired flow file and click **"Open"** to upload it to your projects.  
 
 ### First-Time Setup
-1. **Click the “+New Flow” Button**  
-   On the main dashboard, click the **`+New Flow`** button to create a new flow.
+1. **Click the “+ Create first flow” Button**  
+   On the main dashboard, click the **`+ Create first flow`** button to create a new flow.
 
 2. **Select “+Blank Flow”**  
    In the pop-up **Get Started** window, scroll to the bottom-right corner and click **`+Blank Flow`** to start with an empty canvas.
 
 3. **Enter the Flow Design Page**  
-   You will be taken to the flow design interface. In the center of the screen, click the **`My Projects`** link to open the project manager.
+   You will be taken to the flow design interface. In the center of the screen, click the **`Starter Project`** link to open the project manager.
 
 4. **Upload Flow Templates**  
-   In the project manager, click the **upload icon** next to the **Folders** section.
+   In the project manager, click the **upload icon** next to the **Projects** section.
 
 5. **Import Flow Files**  
    Navigate to the directory:
-      {your_project_path}/tools/langflow/flows
+      ai-engine-direct-helper/tools/langflow/flows
 
   Select **all `.json` files** in this folder and click **Open**.
 
 Once uploaded, all reference flows will be imported and available for use in your workspace.
 
+It should be noted: the new version of langflow has added the **"My Files"** function. Therefore, when selecting an image in any of the following steps, the **"My Files"** window will pop up. If it is the first time to use langflow, you need to Click the **"Click or drag files here"** area in the window to upload the required files (such as image files), and then click the **"Select files"** button after selecting a single file separately.
+
 #### 1. Run **YoloV8_det Demo** Flow 
--  From the main dashboard, click **`My Projects`**.
+-  From the main dashboard, click **`Starter Project`**.
 
 - In the project list, choose **`YoloV8_det Demo`**.
 
@@ -74,7 +76,7 @@ Once uploaded, all reference flows will be imported and available for use in you
 - Click the **`Playground`** button in the top-right corner of the interface, then click **`Run Flow`**.
 
 #### 2. Run **Image Classification Inceptionv3** Flow 
-- From the main dashboard, click **`My Projects`**.
+- From the main dashboard, click **`Starter Project`**.
 
 - In the project list, choose **`Image Classification Inceptionv3`**.
 
@@ -88,7 +90,7 @@ Once uploaded, all reference flows will be imported and available for use in you
 
 
 #### 3. Run **Basic Chat Genie** Flow
--  From the main dashboard, click **`My Projects`**.
+-  From the main dashboard, click **`Starter Project`**.
 
 -  In the project list, choose **`Basic Chat Genie`**.
 
@@ -99,7 +101,7 @@ Once uploaded, all reference flows will be imported and available for use in you
 The flow will invoke a local large language model to generate a response based on your input, enabling interactive chat functionality.
 
 #### 4. Run **LLM CV Chat Genie** Flow
--  From the main dashboard, click **`My Projects`**.
+-  From the main dashboard, click **`Starter Project`**.
 
 -  In the project list, choose **`LLM CV Demo`**.
 
