@@ -41,6 +41,9 @@ class GenieContext:
     def GetProfile(self):
         return self.m_context.GetProfile()
 
+    def SetLora(self, adapter_name, alpha_value):
+        return self.m_context.SetLora(adapter_name, alpha_value)
+
     def TokenLength(self, text):
         return self.m_context.TokenLength(text)
 

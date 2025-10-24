@@ -340,6 +340,32 @@ size_t GenieContext::TokenLength(const std::string &text)
     return static_cast<size_t>(numTokenIds);
 }
 
+bool GenieContext::SetLora(const std::string AdapterName, 
+                           const std::unordered_map<std::string, float> &alphaValue)
+{
+    static std::string engineRole{"primary"};
+    bool AnyInstancePassed{false};
+
+    int32_t status = GenieDialog_applyLora(m_DialogHandle, engineRole.c_str(), AdapterName.c_str());
+    if (GENIE_STATUS_SUCCESS != status)
+    {
+        std::cerr << "Failed to apply the LoRA adapter.\n";
+        return false;
+    }
+
+    for (auto it = alphaValue.begin(); it != alphaValue.end(); it++)
+    {
+        int32_t status = GenieDialog_setLoraStrength(m_DialogHandle, engineRole.c_str(), it->first.c_str(), it->second);
+        if (GENIE_STATUS_SUCCESS != status)
+        {
+            std::cerr << "Failed to set the LoRA alpha strength.\n";
+        }
+        AnyInstancePassed = true;
+    }
+
+    return AnyInstancePassed;
+}
+
 #include "common.h"
 
 PYBIND11_MODULE(geniebuilder, m) {
@@ -366,4 +392,5 @@ PYBIND11_MODULE(geniebuilder, m) {
         .def("TokenLength", &GenieContext::TokenLength)
         .def("SetStopSequence", &GenieContext::SetStopSequence)
         .def("Stop", &GenieContext::Stop);
+		.def("SetLora", &GenieContext::SetLora);
 }
