@@ -144,8 +144,11 @@ public class MainActivity extends AppCompatActivity {
                 // 如果是初始的“...”占位符，则直接替换
                 String newText = "...".equals(currentText) ? chunk : currentText + chunk;
 
+                // 保持同一个 Message 对象参考，方便 Adapter 局部刷新
                 messageList.set(lastIndex, new Message(newText, false));
-                messageAdapter.notifyItemChanged(lastIndex);
+                // 使用带 payload 的刷新，Adapter 会处理增量文本并做动画
+                messageAdapter.notifyItemChanged(lastIndex, "text_append");
+                // 平滑滚动到最后一条，确保新气泡可见
                 recyclerView.scrollToPosition(lastIndex);
             }
         });
