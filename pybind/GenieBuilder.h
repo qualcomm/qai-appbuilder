@@ -22,6 +22,7 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
+#include <unordered_map>
 
 #include "GenieCommon.h"
 #include "GenieDialog.h"
@@ -46,6 +47,8 @@ class GenieContext {
         std::string GetProfile();
         size_t TokenLength(const std::string& text);
         bool SetStopSequence(const std::string& stop_sequences);
+        bool SetLora(const std::string AdapterName, 
+                     const std::unordered_map<std::string, float> &alphaValue);
 
     public:
         std::mutex m_stream_lock;

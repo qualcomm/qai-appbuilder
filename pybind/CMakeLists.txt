@@ -52,5 +52,5 @@ if(GENIE_LIBRARY)
 
     target_include_directories(geniebuilder PUBLIC $ENV{QNN_SDK_ROOT}/include/Genie)
 else()
-    message(STATUS "Could not find Genie library")
+    message(FATAL_ERROR "Could not find Genie library")
 endif()
