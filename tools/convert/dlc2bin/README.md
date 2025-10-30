@@ -37,7 +37,7 @@ Copy config files to DLC model folder. We name the folder as 'DLC2BIN': <br>
 | Device                | Files | Download Link |
 |-----------------------|-------|---------------|
 | Snapdragon® 8 Elite   | v79   | [download](https://github.com/quic/ai-engine-direct-helper/tree/main/tools/convert/dlc2bin/config/v79_mobile) |
-| Snapdragon® X Elite   | v81   | [download](https://github.com/quic/ai-engine-direct-helper/tree/main/tools/convert/dlc2bin/config/v81_mobile) |
+| Snapdragon® 8 Elite Gen 5   | v81   | [download](https://github.com/quic/ai-engine-direct-helper/tree/main/tools/convert/dlc2bin/config/v81_mobile) |
 
 ### Push Files to Android Device
 Enabling Developer Mode in Android device and connect to your PC frist, then run below commands to copy the binary and model files to Android device: <br>
