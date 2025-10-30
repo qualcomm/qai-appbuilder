@@ -4,7 +4,7 @@
 ### ONNX modle files. 
 Take real_esrgan_x4plus as an example, you can download real_esrgan_x4plus-w8a8.onnx and real_esrgan_x4plus-float.onnx from [Real-ESRGAN-x4plus](https://aihub.qualcomm.com/compute/models/real_esrgan_x4plus). Put the onnx file and its model.data file at the same directory.
 
-### for wos
+### For WoS Platform:
 • raw file
 You can run below command to generate random512_512_3.raw file:
 ```
@@ -19,7 +19,7 @@ random512_512_3.raw
 • [htp backend extension json file](https://docs.qualcomm.com/bundle/publicresource/topics/80-63442-10/htp_backend.html#qnn-htp-backend-extensions)
 htp_backend_ext_fp16_v73-real_esrgan_x4plus.json
 
-### for android
+### For Android Platform:
 • raw file
 You can run below command to generate random128_128_3.raw file:
 ```
@@ -86,9 +86,3 @@ python ${QNN_SDK_ROOT}\bin\x86_64-windows-msvc\qnn-model-lib-generator -c real_e
 
 & "$env:QNN_SDK_ROOT\bin\x86_64-windows-msvc\qnn-context-binary-generator.exe" --backend QnnHtp.dll --model output\x64\real_esrgan_x4plus-w8a8.dll --output_dir output --config_file config\htp_backend_ext-w8a8-v81-real_esrgan_x4plus.json --binary_file real_esrgan_x4plus-w8a8-v81
 ```
-
-
-
-
-
-
