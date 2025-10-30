@@ -80,7 +80,7 @@ sumllm = None
 _func_mode = 0
 _question = None
 _sys_prompt = None
-
+llm_name = ""
 ###########################################################################
 
 def has_chinese(text):
@@ -119,23 +119,37 @@ def download():
     )
 
 def model_change(value):
-    global llm
+    global llm_name
 
-    download()
+    if value != llm_name and value != "":
+        llm_name = value
+        global llm
 
-    print()
-    print(f"{Colors.GREEN}INFO:     loading model <<<", value, f">>>{Colors.END}")
-    model_name = value
-    model_unload() # unload old model if it is already loaded.
+        download()
 
-    time_start = time.time()
-    llm = GenieLLM()
-    llm.init(model_name=model_name)
+        print()
+        print(f"{Colors.GREEN}INFO:     loading model <<<", value, f">>>{Colors.END}")
+        model_name = value
+        model_unload() # unload old model if it is already loaded.
 
-    print(f"{Colors.GREEN}INFO:     model <<<", value, f">>> is ready!{Colors.END}")
-    time_end = time.time()
-    load_time = str(round(time_end - time_start, 2)) + " (s)"
-    print(f"{Colors.GREEN}INFO:     model init time:", load_time, f"{Colors.END}")
+        time_start = time.time()
+        llm = GenieLLM()
+        llm.init(model_name=model_name)
+
+        print(f"{Colors.GREEN}INFO:     model <<<", value, f">>> is ready!{Colors.END}")
+        time_end = time.time()
+        load_time = str(round(time_end - time_start, 2)) + " (s)"
+        print(f"{Colors.GREEN}INFO:     model init time:", load_time, f"{Colors.END}")
+
+        
+    elif value != llm_name and value == "":
+        old_model = llm_name 
+        llm_name = value
+        model_unload() # unload old model if it is already loaded.
+        print(f"{Colors.GREEN}INFO: {old_model} Model Offloaded", f"{Colors.END}")
+
+    return value
+
 
 def stop():
     if sumllm:
@@ -173,7 +187,7 @@ def predict(chatbot, max_length, temp, top_k, top_p):
     global _sys_prompt
 
     if not llm or not llm.is_ready():
-        gr.Warning("请先选择模型并等待模型加载完成！", duration=5)
+        gr.Warning("Please select a model first and wait for the model to load!", duration=5)
         return reset_state()
 
     llm.set_params(str(max_length), str(temp), str(top_k), str(top_p))
@@ -202,7 +216,7 @@ def predict(chatbot, max_length, temp, top_k, top_p):
 
     elif FUNC_LIST[_func_mode] == "📚 文档总结":
         if not os.path.exists(FILE_PATH):
-            gr.Warning("请先上传文档！", duration=5)
+            gr.Warning("Please upload the document first!", duration=5)
             return reset_state()
 
         chain_type = "map_reduce"
@@ -210,7 +224,7 @@ def predict(chatbot, max_length, temp, top_k, top_p):
         # print("predict", _question)
         ret = sumllm.init(prompt=_question, chain_type=chain_type, file_path="files")
         if ret == False:
-            gr.Warning("无法从此文档中解析中内容，文档中是否没有包含文本？请先上传包含有效文本的文档！", duration=5)
+            gr.Warning("Unable to parse content from this document. Does the document contain any text? Please upload a document containing valid text first!", duration=5)
             return reset_state()
 
         for chunk in sumllm.summarize(chatbot, max_length, temp, top_k, top_p):
@@ -244,22 +258,23 @@ def predict(chatbot, max_length, temp, top_k, top_p):
 
         if has_chinese(user_prompt):
             user_prompt = f"Translate the following content to English: \n{user_prompt}\n\n"
-            chatbot.append(ChatMessage(role="assistant", content="翻译中..."))
+            chatbot.append(ChatMessage(role="assistant", content="Translating..."))
             yield chatbot, "", "", ""
             user_prompt = llm.invoke(user_prompt)
             chatbot[-1].content = user_prompt
             yield chatbot, "", "", ""
 
-        chatbot.append(ChatMessage(role="assistant", content="图片生成中..."))
+        chatbot.append(ChatMessage(role="assistant", content="Generating images..."))
         yield chatbot, "", "", ""
 
         stable_diffusion.model_initialize()
 
-        user_negative_prompt = ""
+        user_negative_prompt = "lowres, error, cropped, worst quality, low quality, normal quality, jpeg artifacts, watermark"
         user_seed = np.random.randint(low=0, high=9999999999, size=None, dtype=np.int64)
         user_step = 20
         user_guidance_scale = 7.5
 
+        print(user_prompt)
         stable_diffusion.setup_parameters(user_prompt, user_negative_prompt, user_seed, user_step, user_guidance_scale)
         stable_diffusion.model_execute(callback, "images", show_image = False)
 
@@ -391,7 +406,7 @@ def main():
                     # gr.Examples(["总结文档内容", "分析源代码，给出逐行注释", "查询今天上海的天气", "帮我检查一下如下英语语法，如果有误，帮我修正：\n"], chatmsg, label="快捷输入")
                     gr.Examples(["Summarize the document content", "Analyze the source code and give line-by-line comments.", "Inquire about the weather in Shanghai today", "Help me check the following English grammar, and correct it if it is wrong:\n"], chatmsg, label="Quick Input")
 
-        model_select.change(model_change, inputs=model_select)
+        model_select.change(model_change, inputs=model_select, outputs=model_select)
 
         chat_run = chatmsg.submit(add_media, [chatbot, chatmsg], [chatbot, chatmsg])
         chat_run = chat_run.then(predict, [chatbot, max_length, temp, top_k, top_p], [chatbot, f_latency, p_speed, e_speed], show_progress=False)
@@ -419,8 +434,8 @@ def main():
             # print("\nchange:sys prompt:", _sys_prompt)
 
             _func_mode = func_mode
-            func_name = FUNC_LIST[func_mode]
-            if func_name == "📚 文档总结":
+            func_name = FUNC_LIST_EN[func_mode]
+            if func_name == "📚 Doc Summary":
                 return gr.MultimodalTextbox(label=func_name, sources=["upload"])
             else:
                 return gr.MultimodalTextbox(label=func_name, sources=[])
