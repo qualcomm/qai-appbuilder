@@ -87,7 +87,7 @@ def Inference(input_image_path, output_image_path, show_image = True):
     image, scale, padding = pil_resize_pad(orig_image, (IMAGE_SIZE, IMAGE_SIZE))
 
     image = np.array(image)
-    image = np.clip(image, 0, 255) / 255.0  # normalization
+    image = (np.clip(image, 0, 255) / 255.0).astype(np.float32)  # normalization
 
     # Burst the HTP.
     PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
@@ -114,6 +114,22 @@ def Inference(input_image_path, output_image_path, show_image = True):
     if show_image:
         image_buffer.show()
 
+def getInputShapes():
+    input_shapes = realesrgan.getInputShapes()
+    print(input_shapes)
+
+def getInputDataType():
+    input_dataType = realesrgan.getInputDataType()
+    print(input_dataType)
+
+def getOutputShapes():
+    output_shapes = realesrgan.getOutputShapes()
+    print(output_shapes)
+
+def getOutputDataType():
+    output_dataType = realesrgan.getOutputDataType()
+    print(output_dataType)
+
 def Release():
     global realesrgan
 
@@ -129,6 +145,12 @@ def main(input_image_path=None, output_image_path=None, show_image = True):
         output_image_path = execution_ws / "output.png"
 
     Init()
+
+    # Sample code for using these new APIs.
+    getInputShapes()
+    getInputDataType()
+    getOutputShapes()
+    getOutputDataType()
 
     Inference(input_image_path=input_image_path,output_image_path=output_image_path,show_image=show_image)
 

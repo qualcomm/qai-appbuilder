@@ -1225,6 +1225,25 @@ void bufferToFile(std::vector<uint8_t*>& buffers, std::vector<size_t>& size, std
         os.close();
     }
 }
+
+// issue#24
+void printDataTypes(std::vector<std::string>& vec) {
+	std::cout << "[ ";
+    for (size_t i = 0; i < vec.size(); ++i) {
+        std::cout << vec[i] << " ";
+    }
+	std::cout << "]\n";
+}
+
+void printArrayOfVector(std::vector<std::vector<size_t>> arrayOfVectors){
+      for (const auto& vec : arrayOfVectors) {
+        std::cout << "[ ";
+        for (size_t val : vec) {
+            std::cout << val << " ";
+        }
+        std::cout << "]\n";
+    }
+}
 #endif
 
 // improve performance.
@@ -1265,6 +1284,109 @@ sample_app::StatusCode sample_app::QnnSampleApp::tearDownInputAndOutputTensors()
   }
 
   return static_cast<sample_app::StatusCode>(returnStatus);
+}
+
+// issue#24
+std::string dataTypeToString(Qnn_DataType_t dtype) {
+    switch (dtype) {
+      case QNN_DATATYPE_INT_8:   return "INT8";
+      case QNN_DATATYPE_INT_16:   return "INT16";
+      case QNN_DATATYPE_INT_32:   return "INT32";
+      case QNN_DATATYPE_INT_64:   return "INT64";
+      case QNN_DATATYPE_UINT_8:   return "UINT8";
+      case QNN_DATATYPE_UINT_16:   return "UINT16";
+      case QNN_DATATYPE_UINT_32:   return "UINT32";
+      case QNN_DATATYPE_UINT_64:   return "UINT64";
+      case QNN_DATATYPE_FLOAT_16:   return "FLOAT16";
+      case QNN_DATATYPE_FLOAT_32:   return "FLOAT32";
+      case QNN_DATATYPE_FLOAT_64:   return "FLOAT64";
+      case QNN_DATATYPE_SFIXED_POINT_4:   return "SFIXED_POINT_4";
+      case QNN_DATATYPE_SFIXED_POINT_8:   return "SFIXED_POINT_8";                                                                  
+      case QNN_DATATYPE_SFIXED_POINT_16:   return "SFIXED_POINT_16";  
+      case QNN_DATATYPE_SFIXED_POINT_32:   return "SFIXED_POINT_32";  
+      case QNN_DATATYPE_UFIXED_POINT_4:   return "UFIXED_POINT_4";  
+      case QNN_DATATYPE_UFIXED_POINT_8:   return "UFIXED_POINT_8";  
+      case QNN_DATATYPE_UFIXED_POINT_16:   return "UFIXED_POINT_16";  
+      case QNN_DATATYPE_UFIXED_POINT_32:   return "UFIXED_POINT_32";  
+      case QNN_DATATYPE_BOOL_8:   return "BOOL_8";                                      
+      case QNN_DATATYPE_STRING:   return "STRING"; 
+      case QNN_DATATYPE_UNDEFINED:   return "UNDEFINED"; 
+      default:  return "UNKNOWN";
+    }
+}
+
+std::vector<std::vector<size_t>> sample_app::QnnSampleApp::getInputShapes(){
+	if(m_inputShapes.empty()){
+		auto graphInfo = (*m_graphsInfo)[0/*graphIdx*/];
+		Qnn_Tensor_t* inputs  = graphInfo.m_inputs;
+		for (size_t inputIdx = 0; inputIdx < graphInfo.numInputTensors; inputIdx++) {
+			if (QNN_TENSOR_GET_DIMENSIONS(inputs[inputIdx]) == nullptr || QNN_TENSOR_GET_RANK(inputs[inputIdx]) == 0) {
+				//printf("[ERROR] input tensor %zu has nullptr dimensions or rank == 0\n", inputIdx);
+				continue;
+			}
+			std::vector<size_t> dims;
+			m_ioTensor.fillDims(dims, QNN_TENSOR_GET_DIMENSIONS(inputs[inputIdx]), QNN_TENSOR_GET_RANK(inputs[inputIdx]));
+			m_inputShapes.push_back(dims);
+		}
+	}
+#ifdef DEBUG_INFERENCE
+  printf("[DEBUG]m_inputShapes:");
+  printArrayOfVector(m_inputShapes);
+#endif  
+  return m_inputShapes;
+}
+
+std::vector<std::string> sample_app::QnnSampleApp::getInputDataType(){
+	if(m_inputDataType_s.empty()){
+		auto graphInfo = (*m_graphsInfo)[0/*graphIdx*/];
+		Qnn_Tensor_t* inputs  = graphInfo.m_inputs;
+		for (size_t inputIdx = 0; inputIdx < graphInfo.numInputTensors; inputIdx++) {
+			Qnn_DataType_t dims_inputDataType = QNN_TENSOR_GET_DATA_TYPE(inputs[inputIdx]);
+			m_inputDataType_s.push_back(dataTypeToString(dims_inputDataType));
+		}
+	}
+#ifdef DEBUG_INFERENCE
+    printf("[DEBUG]m_inputDataType_s:");
+    printDataTypes(m_inputDataType_s);
+#endif 
+    return m_inputDataType_s;  
+}
+
+std::vector<std::vector<size_t>> sample_app::QnnSampleApp::getOutputShapes(){
+	if(m_outputShapes.empty()){
+		auto graphInfo = (*m_graphsInfo)[0/*graphIdx*/];
+		Qnn_Tensor_t* outputs  = graphInfo.m_outputs;
+		for (size_t outputIdx = 0; outputIdx < graphInfo.numOutputTensors; outputIdx++) {
+			if (QNN_TENSOR_GET_DIMENSIONS(outputs[outputIdx]) == nullptr || QNN_TENSOR_GET_RANK(outputs[outputIdx]) == 0) {
+				//printf("[ERROR] Output tensor %zu has nullptr dimensions or rank == 0\n", outputIdx);
+				continue;
+			}
+			std::vector<size_t> dims;
+			m_ioTensor.fillDims(dims, QNN_TENSOR_GET_DIMENSIONS(outputs[outputIdx]), QNN_TENSOR_GET_RANK(outputs[outputIdx]));
+			m_outputShapes.push_back(dims);
+		}
+	}
+#ifdef DEBUG_INFERENCE
+  printf("[DEBUG]m_outputShapes:");
+  printArrayOfVector(m_outputShapes);
+#endif
+  return m_outputShapes;
+}
+
+std::vector<std::string> sample_app::QnnSampleApp::getOutputDataType(){
+	if(m_outputDataType_s.empty()){
+		auto graphInfo = (*m_graphsInfo)[0/*graphIdx*/];
+		Qnn_Tensor_t* outputs  = graphInfo.m_outputs;
+		for (size_t outputIdx = 0; outputIdx < graphInfo.numOutputTensors; outputIdx++) {
+			Qnn_DataType_t dims_outputDataType = QNN_TENSOR_GET_DATA_TYPE(outputs[outputIdx]);
+			m_outputDataType_s.push_back(dataTypeToString(dims_outputDataType));
+		}
+	}
+#ifdef DEBUG_INFERENCE
+	printf("[DEBUG]m_outputDataType_s:");
+	printDataTypes(m_outputDataType_s);
+#endif
+	return m_outputDataType_s;
 }
 
 sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vector<uint8_t*>& inputBuffers, 

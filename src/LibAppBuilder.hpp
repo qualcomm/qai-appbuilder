@@ -67,6 +67,18 @@ public:
 
     bool CreateShareMemory(std::string share_memory_name, size_t share_memory_size);
     bool DeleteShareMemory(std::string share_memory_name);
+
+    // issue#24
+    std::vector<std::vector<size_t>> getInputShapes(std::string model_name);
+    std::vector<std::string> getInputDataType(std::string model_name);
+    std::vector<std::string> getOutputDataType(std::string model_name);
+    std::vector<std::vector<size_t>> getOutputShapes(std::string model_name);
+
+    // issue#24
+    std::vector<std::vector<size_t>> m_inputShapes;
+    std::vector<std::string> m_inputDataType;
+    std::vector<std::vector<size_t>> m_outputShapes;
+    std::vector<std::string> m_outputDataType;
 };
 
 

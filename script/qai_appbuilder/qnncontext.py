@@ -219,6 +219,19 @@ class QNNContext:
     def Inference(self, input, perf_profile = PerfProfile.DEFAULT, graphIndex = 0):
         return self.m_context.Inference(input, perf_profile, graphIndex)
 
+    # issue#24
+    def getInputShapes(self, ):
+        return self.m_context.getInputShapes()
+
+    def getOutputShapes(self, ):
+        return self.m_context.getOutputShapes()
+
+    def getInputDataType(self, ):
+        return self.m_context.getInputDataType()
+
+    def getOutputDataType(self, ):
+        return self.m_context.getOutputDataType()
+
     #@timer
     def __del__(self):
         if hasattr(self, "m_context") and self.m_context is not None:
@@ -261,6 +274,19 @@ class QNNContextProc:
 
         os.putenv('PATH', g_base_path)
         self.m_context = appbuilder.QNNContext(model_name, proc_name, model_path, backend_lib_path, system_lib_path, is_async)
+
+    # issue#24
+    def getInputShapes(self, ):
+        return self.m_context.getInputShapes()
+
+    def getOutputShapes(self, ):
+        return self.m_context.getOutputShapes()
+
+    def getInputDataType(self, ):
+        return self.m_context.getInputDataType()
+
+    def getOutputDataType(self, ):
+        return self.m_context.getOutputDataType()
 
     #@timer
     def Inference(self, shareMemory, input, perf_profile = PerfProfile.DEFAULT, graphIndex = 0):
