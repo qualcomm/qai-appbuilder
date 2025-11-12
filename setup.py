@@ -302,7 +302,7 @@ setup(
     version=VERSION,
     packages=find_packages(where="script"),
     package_dir={'': 'script'},
-    package_data={"": ["*.dll", "*.pdb", "*.exe", "*.so"]},
+    package_data={"": ["*.dll", "*.pdb", "*.exe", "*.so", "*.cat"]},
     ext_modules=[CMakeExtension("qai_appbuilder.appbuilder", "pybind")],
     cmdclass={"build_ext": CMakeBuild},
     zip_safe=False,
