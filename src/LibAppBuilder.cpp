@@ -606,6 +606,35 @@ bool LibAppBuilder::DeleteShareMemory(std::string share_memory_name) {
 #endif
 }
 
+// issue#24
+std::vector<std::vector<size_t>> LibAppBuilder::getOutputShapes(std::string model_name){
+    std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
+    m_outputShapes = app->getOutputShapes();
+    sg_model_map.insert(std::make_pair(model_name, std::move(app)));
+    return m_outputShapes;
+};
+
+std::vector<std::vector<size_t>> LibAppBuilder::getInputShapes(std::string model_name){
+    std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
+    m_inputShapes = app->getInputShapes();
+    sg_model_map.insert(std::make_pair(model_name, std::move(app)));
+    return m_inputShapes;
+};
+
+std::vector<std::string> LibAppBuilder::getInputDataType(std::string model_name){
+    std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
+    m_inputDataType = app->getInputDataType();
+    sg_model_map.insert(std::make_pair(model_name, std::move(app)));
+    return m_inputDataType;
+};
+
+std::vector<std::string> LibAppBuilder::getOutputDataType(std::string model_name){
+    std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
+    m_outputDataType = app->getOutputDataType();
+    sg_model_map.insert(std::make_pair(model_name, std::move(app)));
+    return m_outputDataType;
+};
+
 int main(int argc, char** argv) {
 
     return EXIT_SUCCESS;

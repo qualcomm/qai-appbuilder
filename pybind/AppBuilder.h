@@ -182,6 +182,12 @@ public:
     
     bool ApplyBinaryUpdate(const std::vector<LoraAdapter>& lora_adapters);
 
+    // issue#24
+    std::vector<std::vector<size_t>> getInputShapes();
+    std::vector<std::string>  getInputDataType();
+    std::vector<std::string>  getOutputDataType();
+    std::vector<std::vector<size_t>> getOutputShapes();
+
     ~QNNContext();
 };
 

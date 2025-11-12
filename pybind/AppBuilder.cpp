@@ -45,6 +45,23 @@ QNNContext::QNNContext(const std::string& model_name,
     g_LibAppBuilder.ModelInitialize(model_name, model_path, backend_lib_path, system_lib_path, m_lora_adapters, async);
 }
 
+// issue#24
+std::vector<std::vector<size_t>> QNNContext::getInputShapes(){
+    return g_LibAppBuilder.getInputShapes(m_model_name);
+};
+
+std::vector<std::string> QNNContext::getInputDataType(){
+    return g_LibAppBuilder.getInputDataType(m_model_name);
+};
+
+std::vector<std::string> QNNContext::getOutputDataType(){
+    return g_LibAppBuilder.getOutputDataType(m_model_name);
+};
+
+std::vector<std::vector<size_t>> QNNContext::getOutputShapes(){
+    return g_LibAppBuilder.getOutputShapes(m_model_name);
+};
+
 QNNContext::~QNNContext() {
     if (m_proc_name.empty())
         g_LibAppBuilder.ModelDestroy(m_model_name);
@@ -130,7 +147,11 @@ PYBIND11_MODULE(appbuilder, m) {
         .def(py::init<const std::string&, const std::string&, const std::string&, const std::string&, const std::string&, bool>())
         .def("Inference", py::overload_cast<const std::vector<py::array_t<float>>&, const std::string&, size_t>(&QNNContext::Inference))
         .def("Inference", py::overload_cast<const ShareMemory&, const std::vector<py::array_t<float>>&, const std::string&, size_t>(&QNNContext::Inference))
-        .def("ApplyBinaryUpdate", &QNNContext::ApplyBinaryUpdate, "Apply Lora binary update");
+        .def("ApplyBinaryUpdate", &QNNContext::ApplyBinaryUpdate, "Apply Lora binary update")
+        .def("getInputShapes", &QNNContext::getInputShapes, "Get Input Shape")
+        .def("getInputDataType", &QNNContext::getInputDataType, "Get Input data type")
+        .def("getOutputDataType", &QNNContext::getOutputDataType, "Get output data type")
+        .def("getOutputShapes", &QNNContext::getOutputShapes, "Get Output Shape");
 
 
     py::class_<LoraAdapter>(m, "LoraAdapter")

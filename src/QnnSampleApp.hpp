@@ -143,6 +143,13 @@ class QnnSampleApp {
   StatusCode executeGraphsBuffers(std::vector<uint8_t*>& inputBuffers,
                                   std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
                                   std::string perfProfile, size_t graphIndex = 0);
+  // issue#24
+  std::vector<std::vector<size_t>> getInputShapes();
+  std::vector<std::string> getInputDataType();
+  std::vector<std::vector<size_t>> getOutputShapes();  
+  std::vector<std::string> getOutputDataType();
+  qnn_wrapper_api::GraphInfo_t **m_graphsInfo;
+  uint32_t m_graphsCount;
 
   StatusCode initializeLog();
   StatusCode setLogLevel(QnnLog_Level_t logLevel);
@@ -180,8 +187,8 @@ class QnnSampleApp {
   iotensor::InputDataType m_inputDataType;
   ProfilingLevel m_profilingLevel;
   bool m_dumpOutputs;
-  qnn_wrapper_api::GraphInfo_t **m_graphsInfo;
-  uint32_t m_graphsCount;
+  //qnn_wrapper_api::GraphInfo_t **m_graphsInfo;
+  //uint32_t m_graphsCount;
   iotensor::IOTensor m_ioTensor;
   bool m_isBackendInitialized;
   bool m_isContextCreated;
@@ -201,6 +208,12 @@ class QnnSampleApp {
   uint32_t m_powerConfigId = 1;
   QnnHtpDevice_PerfInfrastructure_t m_perfInfra = {nullptr};
   bool m_runInCpu = true;
+
+  // issue#24
+  std::vector<std::vector<size_t>> m_inputShapes;
+  std::vector<std::string> m_inputDataType_s;
+  std::vector<std::vector<size_t>> m_outputShapes;
+  std::vector<std::string> m_outputDataType_s;
 };
 }  // namespace sample_app
 }  // namespace tools

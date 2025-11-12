@@ -7,7 +7,7 @@ Download [QAIRT SDK](https://softwarecenter.qualcomm.com/api/download/software/s
 ## Snapdragon® X Elite Devices (Windows on Snapdragon)
 ### Get Config Files
 Copy config files to DLC model folder: <br>
-[DLC2BIN Config (v73)](https://github.com/quic/ai-engine-direct-helper/tree/main/tools/convert/dlc2bin/config/v73)
+[DLC2BIN Config (v73)](https://github.com/quic/ai-engine-direct-helper/tree/main/tools/convert/dlc2bin/config/v73_wos)
 
 ### Copy QNN Files
 Copy the files below from 'C:\Qualcomm\AIStack\QAIRT\2.36.0.250627\lib\hexagon-v73\unsigned' to DLC model folder:
@@ -34,7 +34,10 @@ qnn-context-binary-generator.exe --log_level error --backend QnnHtp.dll --model 
 ## Snapdragon® 8 Elite Mobile Devices (Android Phone and Tablet)
 ### Get Config Files
 Copy config files to DLC model folder. We name the folder as 'DLC2BIN': <br>
-[DLC2BIN Config (v79)](https://github.com/quic/ai-engine-direct-helper/tree/main/tools/convert/dlc2bin/config/v79)
+| Device                | Files | Download Link |
+|-----------------------|-------|---------------|
+| Snapdragon® 8 Elite   | v79   | [download](https://github.com/quic/ai-engine-direct-helper/tree/main/tools/convert/dlc2bin/config/v79_mobile) |
+| Snapdragon® 8 Elite Gen 5   | v81   | [download](https://github.com/quic/ai-engine-direct-helper/tree/main/tools/convert/dlc2bin/config/v81_mobile) |
 
 ### Push Files to Android Device
 Enabling Developer Mode in Android device and connect to your PC frist, then run below commands to copy the binary and model files to Android device: <br>

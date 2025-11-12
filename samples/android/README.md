@@ -3,16 +3,16 @@ GenieChat is an Android application that demonstrates how to integrate large lan
 • You can download GenieChat source codes and build GenieChat apk in android studio. <br>
 • Then run it on Mobile device, refer to [this document](https://www.aidevhome.com/?id=50).<br>
 
-## Build and Run SuperResolution sample app on Mobile Phone(Snapdragon® 8 Elite)
+## Build and Run SuperResolution sample app on Mobile Phone(Snapdragon® 8 Elite and and Snapdragon® 8 Elite Gen 5)
 
-The SuperResolution sample app demostrates how to convert an image using [SuperResolution AI models](https://aihub.qualcomm.com/mobile/models?domain=Computer+Vision&useCase=Super+Resolution) on android devices.<br>
+The SuperResolution sample app demostrates how to convert an image using [SuperResolution AI models](https://aihub.qualcomm.com/mobile/models?domain=Computer+Vision&useCase=Super+Resolution) on android mobile devices.<br>
 
 Following are the detailed steps to build and run:<br>
 
-### Convert DLC model to QNN(*.bin) format(on Snapdragon® 8 Elite)
+### Convert DLC model to QNN(*.bin) format
 Firstly, download SuperResolution AI models dlc files from [SuperResolution AI models](https://aihub.qualcomm.com/mobile/models?domain=Computer+Vision&useCase=Super+Resolution). 
 
-Then, covert the dlc files into QNN(*.bin) files, according to this Link: [Snapdragon® 8 Elite Mobile Devices (Android Phone and Tablet)](https://github.com/quic/ai-engine-direct-helper/blob/main/tools/convert/dlc2bin/README.md).
+Then, covert the dlc files into QNN(*.bin) files, according to this Link: [Snapdragon® 8 Elite Mobile Devices (Android Phone and Tablet)](https://github.com/quic/ai-engine-direct-helper/blob/main/tools/convert/dlc2bin/README.md#snapdragon-8-elite-mobile-devices-android-phone-and-tablet).
 
 ### Push files to Android device
 You can copy files into device under MTP mode or use adb commands. 
@@ -46,19 +46,25 @@ sun:/sdcard/AIModels/SuperResolution/quicksrnetmedium $ ls -l
 ```
 git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
 ```
-SuperResolution app source codes are under this folder: [SuperResolution](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/android/SuperResolution)<br>
-• Copy following 6 .so files from QAIRT SDK to folder SuperResolution\app\libs\arm64-v8a\ :<br>
+One SuperResolution app source codes are under this folder: [samples/android/SuperResolution](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/android/SuperResolution)<br>
+Another SuperResolution app source codes are under this folder: [samples/android/SuperResolution2](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/android/SuperResolution2).<br>
+You can use one of above two SuperResolution apps source codes.<br>
+
+• Copy following 8 .so files from QAIRT SDK to folder SuperResolution\app\libs\arm64-v8a\ :<br>
 ```
 C:\Qualcomm\AIStack\QAIRT\{Qualcomm® AI Runtime SDK version}\lib\aarch64-android\libQnnHtp.so 
 C:\Qualcomm\AIStack\QAIRT\{Qualcomm® AI Runtime SDK version}\lib\aarch64-android\libQnnHtpNetRunExtensions.so 
 C:\Qualcomm\AIStack\QAIRT\{Qualcomm® AI Runtime SDK version}\lib\aarch64-android\libQnnHtpPrepare.so 
 C:\Qualcomm\AIStack\QAIRT\{Qualcomm® AI Runtime SDK version}\lib\aarch64-android\libQnnSystem.so
 C:\Qualcomm\AIStack\QAIRT\{Qualcomm® AI Runtime SDK version}\lib\aarch64-android\libQnnHtpV79Stub.so
+C:\Qualcomm\AIStack\QAIRT\{Qualcomm® AI Runtime SDK version}\lib\aarch64-android\libQnnHtpV81Stub.so
 C:\Qualcomm\AIStack\QAIRT\{Qualcomm® AI Runtime SDK version}\lib\hexagon-v79\unsigned\libQnnHtpV79Skel.so
+C:\Qualcomm\AIStack\QAIRT\{Qualcomm® AI Runtime SDK version}\lib\hexagon-v81\unsigned\libQnnHtpV81Skel.so
+
 ```
-• Under folder SuperResolution\app\src\main\cpp\External\, create new folder QAIAppBuilder, and create new folder include under folder QAIAppBuilder.<br>
+• Under folder SuperResolution\app\src\main\cpp\External\, create new folder QAIAppBuilder and subfolder include.<br>
 Please Copy 2 files ai-engine-direct-helper\src\LibAppBuilder.hpp and ai-engine-direct-helper\src\Lora.hpp to SuperResolution\app\src\main\cpp\External\QAIAppBuilder\include\.<br>
-Please refer to [Build QAI AppBuilder for android](https://github.com/quic/ai-engine-direct-helper/blob/main/BUILD.md) to build appbuilder, and copy generated file libappbuilder.so to folder SuperResolution\app\src\main\cpp\External\QAIAppBuilder\.
+Please refer to [Build QAI AppBuilder for android](https://github.com/quic/ai-engine-direct-helper/blob/main/BUILD.md) to build appbuilder, and copy generated file libappbuilder.so to folder SuperResolution\app\src\main\cpp\External\QAIAppBuilder\.<br>
 
 • Get source codes of xtensor and xtl from github:<br>
 ```
