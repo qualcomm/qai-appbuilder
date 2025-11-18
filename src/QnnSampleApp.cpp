@@ -1289,27 +1289,27 @@ sample_app::StatusCode sample_app::QnnSampleApp::tearDownInputAndOutputTensors()
 // issue#24
 std::string dataTypeToString(Qnn_DataType_t dtype) {
     switch (dtype) {
-      case QNN_DATATYPE_INT_8:   return "INT8";
-      case QNN_DATATYPE_INT_16:   return "INT16";
-      case QNN_DATATYPE_INT_32:   return "INT32";
-      case QNN_DATATYPE_INT_64:   return "INT64";
-      case QNN_DATATYPE_UINT_8:   return "UINT8";
-      case QNN_DATATYPE_UINT_16:   return "UINT16";
-      case QNN_DATATYPE_UINT_32:   return "UINT32";
-      case QNN_DATATYPE_UINT_64:   return "UINT64";
-      case QNN_DATATYPE_FLOAT_16:   return "FLOAT16";
-      case QNN_DATATYPE_FLOAT_32:   return "FLOAT32";
-      case QNN_DATATYPE_FLOAT_64:   return "FLOAT64";
-      case QNN_DATATYPE_SFIXED_POINT_4:   return "SFIXED_POINT_4";
-      case QNN_DATATYPE_SFIXED_POINT_8:   return "SFIXED_POINT_8";                                                                  
-      case QNN_DATATYPE_SFIXED_POINT_16:   return "SFIXED_POINT_16";  
-      case QNN_DATATYPE_SFIXED_POINT_32:   return "SFIXED_POINT_32";  
-      case QNN_DATATYPE_UFIXED_POINT_4:   return "UFIXED_POINT_4";  
-      case QNN_DATATYPE_UFIXED_POINT_8:   return "UFIXED_POINT_8";  
-      case QNN_DATATYPE_UFIXED_POINT_16:   return "UFIXED_POINT_16";  
-      case QNN_DATATYPE_UFIXED_POINT_32:   return "UFIXED_POINT_32";  
-      case QNN_DATATYPE_BOOL_8:   return "BOOL_8";                                      
-      case QNN_DATATYPE_STRING:   return "STRING"; 
+      case QNN_DATATYPE_INT_8:   return "int8";
+      case QNN_DATATYPE_INT_16:   return "int16";
+      case QNN_DATATYPE_INT_32:   return "int32";
+      case QNN_DATATYPE_INT_64:   return "int64";
+      case QNN_DATATYPE_UINT_8:   return "uint8";
+      case QNN_DATATYPE_UINT_16:   return "uint16";
+      case QNN_DATATYPE_UINT_32:   return "uint32";
+      case QNN_DATATYPE_UINT_64:   return "uint64";
+      case QNN_DATATYPE_FLOAT_16:   return "float16";
+      case QNN_DATATYPE_FLOAT_32:   return "float32";
+      case QNN_DATATYPE_FLOAT_64:   return "float64";
+      case QNN_DATATYPE_SFIXED_POINT_4:   return "sfp4";
+      case QNN_DATATYPE_SFIXED_POINT_8:   return "sfp8";                                                                  
+      case QNN_DATATYPE_SFIXED_POINT_16:   return "sfp16";  
+      case QNN_DATATYPE_SFIXED_POINT_32:   return "sfp32";  
+      case QNN_DATATYPE_UFIXED_POINT_4:   return "ufp4";  
+      case QNN_DATATYPE_UFIXED_POINT_8:   return "ufp8";  
+      case QNN_DATATYPE_UFIXED_POINT_16:   return "ufp16";  
+      case QNN_DATATYPE_UFIXED_POINT_32:   return "ufp32";  
+      case QNN_DATATYPE_BOOL_8:   return "bool_";                                      
+      case QNN_DATATYPE_STRING:   return "string_"; 
       case QNN_DATATYPE_UNDEFINED:   return "UNDEFINED"; 
       default:  return "UNKNOWN";
     }

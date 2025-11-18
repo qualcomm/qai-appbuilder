@@ -164,9 +164,25 @@ class QNNLoraContext:
                                                backend_lib_path, system_lib_path,
                                                m_lora_adapters, is_async)
 
+    # issue#24
+    def getInputShapes(self, ):
+        return self.m_context.getInputShapes()
+
+    def getOutputShapes(self, ):
+        return self.m_context.getOutputShapes()
+
+    def getInputDataType(self, ):
+        return self.m_context.getInputDataType()
+
+    def getOutputDataType(self, ):
+        return self.m_context.getOutputDataType()
     #@timer
     def Inference(self, input, perf_profile = PerfProfile.DEFAULT, graphIndex = 0):
-        return self.m_context.Inference(input, perf_profile, graphIndex)
+        output = self.m_context.Inference(input, perf_profile, graphIndex)
+        outputshape_list = self.getOutputShapes()
+        for i in range(len(output)):
+            output[i].reshape(outputshape_list[i])
+        return output
     
     def apply_binary_update(self, lora_adapters=None):
         self.lora_adapters = lora_adapters
@@ -215,10 +231,6 @@ class QNNContext:
 
         self.m_context = appbuilder.QNNContext(model_name, model_path, backend_lib_path, system_lib_path, is_async)
 
-    #@timer
-    def Inference(self, input, perf_profile = PerfProfile.DEFAULT, graphIndex = 0):
-        return self.m_context.Inference(input, perf_profile, graphIndex)
-
     # issue#24
     def getInputShapes(self, ):
         return self.m_context.getInputShapes()
@@ -231,6 +243,14 @@ class QNNContext:
 
     def getOutputDataType(self, ):
         return self.m_context.getOutputDataType()
+
+    #@timer
+    def Inference(self, input, perf_profile = PerfProfile.DEFAULT, graphIndex = 0):
+        output = self.m_context.Inference(input, perf_profile, graphIndex)
+        outputshape_list = self.getOutputShapes()
+        for i in range(len(output)):
+            output[i].reshape(outputshape_list[i])
+        return output
 
     #@timer
     def __del__(self):
@@ -290,8 +310,12 @@ class QNNContextProc:
 
     #@timer
     def Inference(self, shareMemory, input, perf_profile = PerfProfile.DEFAULT, graphIndex = 0):
-        return self.m_context.Inference(shareMemory.m_memory, input, perf_profile, graphIndex)
-
+        output = self.m_context.Inference(shareMemory.m_memory, input, perf_profile, graphIndex)
+        outputshape_list = self.getOutputShapes()
+        for i in range(len(output)):
+            output[i].reshape(outputshape_list[i])
+        return output
+        
     #@timer
     def __del__(self):
         if hasattr(self, "m_context") and self.m_context is not None:
