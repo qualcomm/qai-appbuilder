@@ -44,7 +44,7 @@ Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.38.0.250901\
 ```
 cd ai-engine-direct-helper
 python setup.py --toolchains <Supported Toolchains> --hexagonarch <Hexagon Arch> bdist_wheel
-# For example: python setup.py --toolchains arm64x-windows-msvc --hexagonarch V73 bdist_wheel
+# For example: python setup.py --toolchains arm64x-windows-msvc --hexagonarch 73 bdist_wheel
 
 python setup.py bdist_wheel
 # You can also use above command, it will compile it with default Toolchains and Hexagon Arch.

@@ -86,9 +86,9 @@ sys.argv = cleaned_argv  # Now safe for setuptools
 
 if hexagonarch is None:
     if sys.platform.startswith('win'): 
-        dsp_arch    = "V73"  # For X-Elite device.
+        dsp_arch    = "73"  # For X-Elite device.
     else: # TODO: linux or android.
-        dsp_arch    = "V68"
+        dsp_arch    = "68"
 else:
     dsp_arch = hexagonarch
 
@@ -148,71 +148,59 @@ def build_cmake():
     else:
         LIB_PATH = QNN_SDK_ROOT + f"/lib/{toolchain}"
 
+    os.makedirs("lib/Release", exist_ok=True)
     if os.path.exists(LIB_PATH + "/Genie.dll"):
         shutil.copy(LIB_PATH + "/Genie.dll", binary_path)
         shutil.copy(LIB_PATH + "/Genie.dll", "lib/Release")
+
+    if os.path.exists(LIB_PATH + "/Genie.lib"):
         shutil.copy(LIB_PATH + "/Genie.lib", "lib/Release")
 
-    DSP_LIB_PATH = QNN_SDK_ROOT + f"/lib/hexagon-{dsp_arch}/unsigned"
+    DSP_LIB_PATH = QNN_SDK_ROOT + f"/lib/hexagon-v{dsp_arch}/unsigned"
 
-    if os.path.exists(DSP_LIB_PATH + f"/libqnnhtp{dsp_arch}.cat"):
-        shutil.copy(DSP_LIB_PATH + f"/libqnnhtp{dsp_arch}.cat", qai_libs_path)
-        #shutil.copy(DSP_LIB_PATH + f"/libqnnhtp{dsp_arch}.cat", "lib/Release")
+    if os.path.exists(DSP_LIB_PATH + f"/libqnnhtpV{dsp_arch}.cat"):
+        shutil.copy(DSP_LIB_PATH + f"/libqnnhtpV{dsp_arch}.cat", qai_libs_path)
 
-    if os.path.exists(DSP_LIB_PATH + f"/libQnnHtp{dsp_arch}Skel.so"):
-        shutil.copy(DSP_LIB_PATH + f"/libQnnHtp{dsp_arch}Skel.so", qai_libs_path)
-        #shutil.copy(DSP_LIB_PATH + f"/libQnnHtp{dsp_arch}Skel.so", "lib/Release")
+    if os.path.exists(DSP_LIB_PATH + f"/libQnnHtpV{dsp_arch}Skel.so"):
+        shutil.copy(DSP_LIB_PATH + f"/libQnnHtpV{dsp_arch}Skel.so", qai_libs_path)
     
     if os.path.exists(LIB_PATH + "/QnnHtp.dll"):
         shutil.copy(LIB_PATH + "/QnnHtp.dll", qai_libs_path)
-        #shutil.copy(LIB_PATH + "/QnnHtp.dll", "lib/Release")
-        #shutil.copy(LIB_PATH + "/QnnHtp.lib", "lib/Release")
 
     if os.path.exists(LIB_PATH + "/QnnHtpNetRunExtensions.dll"):
         shutil.copy(LIB_PATH + "/QnnHtpNetRunExtensions.dll", qai_libs_path)
-        #shutil.copy(LIB_PATH + "/QnnHtpNetRunExtensions.dll", "lib/Release")
 
     if os.path.exists(LIB_PATH + "/QnnHtpPrepare.dll"):
         shutil.copy(LIB_PATH + "/QnnHtpPrepare.dll", qai_libs_path)
-        #shutil.copy(LIB_PATH + "/QnnHtpPrepare.dll", "lib/Release")
 
-
-    if os.path.exists(LIB_PATH + f"/QnnHtp{dsp_arch}Stub.dll"):
-        shutil.copy(LIB_PATH + f"/QnnHtp{dsp_arch}Stub.dll", qai_libs_path)
-        #shutil.copy(LIB_PATH + f"/QnnHtp{dsp_arch}Stub.dll", "lib/Release")
+    if os.path.exists(LIB_PATH + f"/QnnHtpV{dsp_arch}Stub.dll"):
+        shutil.copy(LIB_PATH + f"/QnnHtpV{dsp_arch}Stub.dll", qai_libs_path)
 
     if os.path.exists(LIB_PATH + "/QnnSystem.dll"):
         shutil.copy(LIB_PATH + "/QnnSystem.dll", qai_libs_path)
-        #shutil.copy(LIB_PATH + "/QnnSystem.dll", "lib/Release")
 
     #linux or android
     if os.path.exists(LIB_PATH + "/libGenie.so"):
         shutil.copy(LIB_PATH + "/libGenie.so", binary_path)
-        os.makedirs("lib/Release", exist_ok=True)
         shutil.copy(LIB_PATH + "/libGenie.so", "lib/Release")
 
-    if os.path.exists(DSP_LIB_PATH + f"/libQnnHtp{dsp_arch}Skel.so"):
-        shutil.copy(DSP_LIB_PATH + f"/libQnnHtp{dsp_arch}Skel.so", qai_libs_path)
+    if os.path.exists(DSP_LIB_PATH + f"/libQnnHtpV{dsp_arch}Skel.so"):
+        shutil.copy(DSP_LIB_PATH + f"/libQnnHtpV{dsp_arch}Skel.so", qai_libs_path)
 
     if os.path.exists(LIB_PATH + "/libQnnHtp.so"):
         shutil.copy(LIB_PATH + "/libQnnHtp.so", qai_libs_path)
-        #shutil.copy(LIB_PATH + "/libQnnHtp.so", "lib/Release")
 
     if os.path.exists(LIB_PATH + "/libQnnHtpNetRunExtensions.so"):
         shutil.copy(LIB_PATH + "/libQnnHtpNetRunExtensions.so", qai_libs_path)
-        #shutil.copy(LIB_PATH + "/libQnnHtpNetRunExtensions.so", "lib/Release")
 
     if os.path.exists(LIB_PATH + "/libQnnHtpPrepare.so"):
         shutil.copy(LIB_PATH + "/libQnnHtpPrepare.so", qai_libs_path)
-        #shutil.copy(LIB_PATH + "/libQnnHtpPrepare.so", "lib/Release")
 
-    if os.path.exists(LIB_PATH + f"/libQnnHtp{dsp_arch}Stub.so"):
-        shutil.copy(LIB_PATH + f"/libQnnHtp{dsp_arch}Stub.so", qai_libs_path)
-        #shutil.copy(LIB_PATH + f"/libQnnHtp{dsp_arch}Stub.so", "lib/Release")
+    if os.path.exists(LIB_PATH + f"/libQnnHtpV{dsp_arch}Stub.so"):
+        shutil.copy(LIB_PATH + f"/libQnnHtpV{dsp_arch}Stub.so", qai_libs_path)
 
     if os.path.exists(LIB_PATH + "/libQnnSystem.so"):
         shutil.copy(LIB_PATH + "/libQnnSystem.so", qai_libs_path)
-        #shutil.copy(LIB_PATH + "/libQnnSystem.so", "lib/Release")
 
 build_cmake()
 
