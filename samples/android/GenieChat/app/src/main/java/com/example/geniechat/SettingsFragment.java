@@ -4,33 +4,47 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 //
-//==============================================================================
+//=============================================================================
 
 package com.example.geniechat;
 
+import android.Manifest;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
+import android.provider.Settings;
 import android.text.InputType;
 import android.widget.EditText;
+import android.widget.Toast;
 
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
+import androidx.core.content.ContextCompat;
+import androidx.preference.ListPreference;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceCategory;
 import androidx.preference.PreferenceFragmentCompat;
 import androidx.preference.PreferenceManager;
 
+import java.io.File;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
-import android.widget.Toast;
 
 public class SettingsFragment extends PreferenceFragmentCompat {
 
     private static final String KEY_MODELS_SET = "custom_models_set";
     private static final String KEY_SELECTED_MODEL = "model_name";
     private static final String DEFAULT_MODEL = "qwen2.0_7b";
+    private static final int REQ_READ_EXTERNAL = 1001;
 
     private SharedPreferences sharedPreferences;
     private PreferenceCategory modelsCategory;
@@ -45,54 +59,159 @@ public class SettingsFragment extends PreferenceFragmentCompat {
         // 设置“添加新模型”按钮的点击事件
         Preference addModelPref = findPreference("add_model");
         if (addModelPref != null) {
-            addModelPref.setOnPreferenceClickListener(preference -> {
-                showAddModelDialog(requireContext());
-                return true;
-            });
+            // we no longer use manual add — hide this control and keep scanning disk
+            addModelPref.setVisible(false);
         }
 
-        // 加载并显示模型列表
-        loadAndDisplayModels();
+        // 不在此处直接加载模型，改为在 onResume 时检查权限并动态加载
     }
 
+    @Override
+    public void onResume() {
+        super.onResume();
+        ensurePermissionAndLoadModels();
+    }
+
+    private void ensurePermissionAndLoadModels() {
+        // Android 11+ requires MANAGE_EXTERNAL_STORAGE to access arbitrary external paths
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (Environment.isExternalStorageManager()) {
+                List<String> models = scanModelsFromSdcard();
+                loadAndDisplayModelsFromDisk(models);
+            } else {
+                // 引导用户到系统设置页面授予 All files access
+                try {
+                    Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+                    intent.setData(Uri.parse("package:" + requireContext().getPackageName()));
+                    startActivity(intent);
+                } catch (Exception e) {
+                    // 备用通用页面
+                    Intent intent = new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
+                    startActivity(intent);
+                }
+                Toast.makeText(getContext(), "请在系统设置中授予文件访问权限，然后返回本页面以加载模型列表", Toast.LENGTH_LONG).show();
+            }
+        } else {
+            // Android 10 及以下使用 READ_EXTERNAL_STORAGE
+            if (ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.READ_EXTERNAL_STORAGE)
+                    == PackageManager.PERMISSION_GRANTED) {
+                List<String> models = scanModelsFromSdcard();
+                loadAndDisplayModelsFromDisk(models);
+            } else {
+                requestPermissions(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE}, REQ_READ_EXTERNAL);
+            }
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQ_READ_EXTERNAL) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                List<String> models = scanModelsFromSdcard();
+                loadAndDisplayModelsFromDisk(models);
+            } else {
+                Toast.makeText(getContext(), "需要读取存储权限以加载模型列表", Toast.LENGTH_SHORT).show();
+                // fallback: show previously saved models if any
+                loadAndDisplayModels();
+            }
+        }
+    }
+
+    // 原来的基于 SharedPreferences 的列表保留作为后备
     private void loadAndDisplayModels() {
         if (modelsCategory == null) return;
-
-        // 清空旧的模型项 (保留“添加”按钮)
-        while (modelsCategory.getPreferenceCount() > 1) {
-            modelsCategory.removePreference(modelsCategory.getPreference(0));
-        }
-
-        // 读取存储的模型列表，如果为空则添加默认模型
         Set<String> models = new HashSet<>(sharedPreferences.getStringSet(KEY_MODELS_SET, Collections.emptySet()));
         if (models.isEmpty()) {
             models.add(DEFAULT_MODEL);
             saveModels(models);
         }
+        loadAndDisplayModelsFromDisk(new ArrayList<>(models));
+    }
 
-        // 使用 TreeSet 保证列表有序
-        Set<String> sortedModels = new TreeSet<>(models);
-        String selectedModel = sharedPreferences.getString(KEY_SELECTED_MODEL, DEFAULT_MODEL);
+    /**
+     * 根据磁盘上扫描到的模型名刷新设置界面（使用 ListPreference）
+     */
+    private void loadAndDisplayModelsFromDisk(List<String> models) {
+        if (modelsCategory == null) return;
 
-        int order = 0;
-        for (String modelName : sortedModels) {
-            Preference modelPref = new Preference(requireContext());
-            modelPref.setKey(modelName);
-            modelPref.setTitle(modelName);
-            // 如果是当前选中的模型，则高亮显示
-            if (modelName.equals(selectedModel)) {
-                modelPref.setSummary("当前已选择");
-            }
-            modelPref.setOrder(order++); // 控制显示顺序
-            modelPref.setOnPreferenceClickListener(preference -> {
-                showEditModelDialog(requireContext(), preference.getTitle().toString());
-                return true;
-            });
-            modelsCategory.addPreference(modelPref);
+        // 清空 modelsCategory 中的旧项
+        modelsCategory.removeAll();
+
+        // 如果没有找到任何模型，使用默认模型占位
+        if (models == null || models.isEmpty()) {
+            models = new ArrayList<>();
+            models.add(DEFAULT_MODEL);
         }
 
-        // 更新 Category 的摘要，显示当前选择
-        modelsCategory.setSummary("当前选择: " + selectedModel);
+        // 保证有序
+        Collections.sort(models);
+
+        // 转换为 entries/entryValues
+        CharSequence[] entries = new CharSequence[models.size()];
+        CharSequence[] entryValues = new CharSequence[models.size()];
+        for (int i = 0; i < models.size(); i++) {
+            entries[i] = models.get(i);
+            entryValues[i] = models.get(i);
+        }
+
+        // 创建 ListPreference 供用户选择
+        ListPreference lp = new ListPreference(requireContext());
+        lp.setKey(KEY_SELECTED_MODEL);
+        lp.setTitle("选择模型");
+        lp.setEntries(entries);
+        lp.setEntryValues(entryValues);
+        lp.setSummaryProvider(ListPreference.SimpleSummaryProvider.getInstance());
+
+        // 确保 ListPreference 显示当前已选值
+        String currentSelected = sharedPreferences.getString(KEY_SELECTED_MODEL, null);
+        if (currentSelected == null && entryValues.length > 0) {
+            currentSelected = String.valueOf(entryValues[0]);
+            sharedPreferences.edit().putString(KEY_SELECTED_MODEL, currentSelected).apply();
+        }
+        if (currentSelected != null) {
+            lp.setValue(currentSelected);
+        }
+
+        // 当用户更改选择时，立即保存并更新 Category 的摘要以即时反映
+        lp.setOnPreferenceChangeListener((preference, newValue) -> {
+            String sel = String.valueOf(newValue);
+            sharedPreferences.edit().putString(KEY_SELECTED_MODEL, sel).apply();
+            // 更新 category 摘要，通知 UI 立即刷新
+            if (modelsCategory != null) {
+                modelsCategory.setSummary("当前选择: " + sel);
+            }
+            return true;
+        });
+
+        modelsCategory.addPreference(lp);
+        // 显示当前选择在 Category 摘要（初始）
+        if (currentSelected != null) {
+            modelsCategory.setSummary("当前选择: " + currentSelected);
+        }
+    }
+
+    /**
+     * 扫描 /sdcard/GenieModels/ 下的子目录并返回目录名列表
+     */
+    private List<String> scanModelsFromSdcard() {
+        List<String> out = new ArrayList<>();
+        File sd = Environment.getExternalStorageDirectory();
+        File modelsDir = new File(sd, "GenieModels");
+        if (modelsDir.exists() && modelsDir.isDirectory()) {
+            File[] children = modelsDir.listFiles();
+            if (children != null) {
+                for (File f : children) {
+                    if (f.isDirectory()) {
+                        out.add(f.getName());
+                    }
+                }
+            }
+        } else {
+            // 目录不存在，提示并返回空，让后续显示默认
+            Toast.makeText(getContext(), "/sdcard/GenieModels/ 目录不存在", Toast.LENGTH_SHORT).show();
+        }
+        return out;
     }
 
     private void showAddModelDialog(Context context) {

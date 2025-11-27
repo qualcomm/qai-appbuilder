@@ -4,17 +4,27 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 //
-//==============================================================================
+//=============================================================================
 
 package com.example.geniechat.adapter;
+
 import android.animation.ValueAnimator;
-import android.util.Log;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
+import android.content.Intent;
+import android.graphics.Color;
+import android.view.ActionMode;
 import android.view.Gravity;
 import android.view.LayoutInflater;
+import android.view.Menu;
+import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.Toast;
 import android.view.View.MeasureSpec;
 import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
@@ -23,18 +33,29 @@ import com.example.geniechat.R;
 import com.example.geniechat.model.Message;
 
 import java.util.List;
-import java.util.Objects;
 
 import io.noties.markwon.Markwon;
 import io.noties.markwon.ext.strikethrough.StrikethroughPlugin;
 
 public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageViewHolder> {
-    private final List<Message> messageList;
-    private final Markwon markwon;
 
-    public MessageAdapter(List<Message> messageList) {
+    public interface OnRetryClickListener {
+        void onRetryClick(int position);
+    }
+
+    private List<Message> messageList;
+    private final Markwon markwon;
+    private OnRetryClickListener retryClickListener;
+
+    public void setMessageList(List<Message> messageList) {
+        this.messageList = messageList;
+        notifyDataSetChanged();
+    }
+
+    public MessageAdapter(List<Message> messageList, OnRetryClickListener listener) {
         this.messageList = messageList;
         this.markwon = null;
+        this.retryClickListener = listener;
     }
 
     @NonNull
@@ -43,7 +64,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageV
         View view = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_message, parent, false);
         return new MessageViewHolder(view, Markwon.builder(parent.getContext())
                 .usePlugin(StrikethroughPlugin.create())
-                .build());
+                .build(), retryClickListener);
     }
     @Override public void onBindViewHolder(@NonNull MessageViewHolder holder, int position) {
         holder.bind(messageList.get(position));
@@ -64,13 +85,67 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageV
     static class MessageViewHolder extends RecyclerView.ViewHolder {
         LinearLayout messageRoot;
         TextView textViewMessage;
+        ImageView buttonRetry;
         private final Markwon markwon;
 
-        public MessageViewHolder(@NonNull View itemView, Markwon markwon) {
+        public MessageViewHolder(@NonNull View itemView, Markwon markwon, OnRetryClickListener listener) {
             super(itemView);
             this.markwon = markwon;
             messageRoot = itemView.findViewById(R.id.message_root);
             textViewMessage = itemView.findViewById(R.id.textViewMessage);
+            buttonRetry = itemView.findViewById(R.id.button_retry);
+
+            buttonRetry.setOnClickListener(v -> {
+                int position = getAdapterPosition();
+                if (position != RecyclerView.NO_POSITION) {
+                    listener.onRetryClick(position);
+                }
+            });
+            
+            textViewMessage.setCustomSelectionActionModeCallback(new ActionMode.Callback() {
+                private final int MENU_ITEM_SHARE_ID = 1001;
+
+                @Override
+                public boolean onCreateActionMode(ActionMode mode, Menu menu) {
+                    // Let the system create the default menu
+                    return true;
+                }
+
+                @Override
+                public boolean onPrepareActionMode(ActionMode mode, Menu menu) {
+                    // Remove unwanted items
+                    menu.removeItem(android.R.id.cut);
+                    menu.removeItem(android.R.id.paste);
+
+                    // Add custom "Share" item if it doesn't exist
+                    if (menu.findItem(MENU_ITEM_SHARE_ID) == null) {
+                        menu.add(Menu.NONE, MENU_ITEM_SHARE_ID, Menu.NONE, "分享");
+                    }
+                    return true;
+                }
+
+                @Override
+                public boolean onActionItemClicked(ActionMode mode, MenuItem item) {
+                    if (item.getItemId() == MENU_ITEM_SHARE_ID) {
+                        String selectedText = textViewMessage.getText().toString().substring(
+                                textViewMessage.getSelectionStart(),
+                                textViewMessage.getSelectionEnd());
+
+                        Intent shareIntent = new Intent(Intent.ACTION_SEND);
+                        shareIntent.setType("text/plain");
+                        shareIntent.putExtra(Intent.EXTRA_TEXT, selectedText);
+                        itemView.getContext().startActivity(Intent.createChooser(shareIntent, "分享"));
+                        mode.finish();
+                        return true;
+                    }
+                    return false;
+                }
+
+                @Override
+                public void onDestroyActionMode(ActionMode mode) {
+                    // 这里可以添加清理代码
+                }
+            });
         }
 
         void bind(Message message) {
@@ -87,17 +162,23 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageV
             // remove default font padding which can cause uneven vertical spacing
             textViewMessage.setIncludeFontPadding(false);
 
-            // Dynamically adjust layout_width based on message content
-
-
             if (message.isSentByUser()) {
                 textViewMessage.setText(message.getText());
                 messageRoot.setGravity(Gravity.END);
                 textViewMessage.setBackground(ContextCompat.getDrawable(itemView.getContext(), R.drawable.bg_bubble_right));
+
+                if (message.getStatus() == Message.Status.FAILED) {
+                    buttonRetry.setVisibility(View.VISIBLE);
+                    buttonRetry.setColorFilter(Color.RED);
+                } else {
+                    buttonRetry.setVisibility(View.GONE);
+                }
+
             } else {
                 markwon.setMarkdown(textViewMessage, message.getText());
                 messageRoot.setGravity(Gravity.START);
                 textViewMessage.setBackground(ContextCompat.getDrawable(itemView.getContext(), R.drawable.bg_bubble_left));
+                buttonRetry.setVisibility(View.GONE);
             }
             // ensure normal layout params after a full bind
             ViewGroup.LayoutParams lp = textViewMessage.getLayoutParams();
@@ -114,14 +195,6 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageV
         void updateTextAnimated(String newText) {
             final TextView tv = textViewMessage;
             final CharSequence oldText = tv.getText();
-            ViewGroup.LayoutParams params = textViewMessage.getLayoutParams();
-            Log.d("TAG", "bind: message.getText() = " + newText);
-            if (Objects.equals(newText, "")) {
-                params.width = ViewGroup.LayoutParams.WRAP_CONTENT;
-            } else {
-                params.width = ViewGroup.LayoutParams.MATCH_PARENT;
-            }
-            textViewMessage.setLayoutParams(params);
 
             // 记录旧高度
             final int oldHeight = tv.getHeight();

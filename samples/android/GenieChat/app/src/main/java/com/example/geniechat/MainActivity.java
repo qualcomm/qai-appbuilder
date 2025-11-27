@@ -4,13 +4,19 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 //
-//==============================================================================
+//=============================================================================
 
 package com.example.geniechat;
 
+import android.Manifest;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
+import android.provider.Settings;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -18,12 +24,16 @@ import android.widget.EditText;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+import androidx.lifecycle.ViewModelProvider;
 import androidx.preference.PreferenceManager;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.example.geniechat.adapter.MessageAdapter;
 import com.example.geniechat.model.Message;
+import com.example.geniechat.viewmodel.ChatViewModel;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
@@ -34,6 +44,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.Call;
@@ -45,29 +56,36 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends AppCompatActivity implements MessageAdapter.OnRetryClickListener {
 
     private static final String TAG = "MainActivity";
+    private static final int STORAGE_PERMISSION_REQUEST_CODE = 101;
 
     private RecyclerView recyclerView;
     private EditText editTextMessage;
     private FloatingActionButton buttonSend;
 
     private MessageAdapter messageAdapter;
-    private List<Message> messageList = new ArrayList<>();
+    private ChatViewModel chatViewModel;
     private OkHttpClient client;
     private Gson gson;
+    private MenuItem settingsMenuItem;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        // Initialize ViewModel
+        chatViewModel = new ViewModelProvider(this).get(ChatViewModel.class);
+
         initViews();
         initRecyclerView();
         initHttpClient();
 
-        addMessage("你好！有什么可以帮你的吗？", false);
+        observeViewModel();
+
+        chatViewModel.setInitialWelcomeMessage();
     }
 
     private void initViews() {
@@ -79,24 +97,41 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void initRecyclerView() {
-        messageAdapter = new MessageAdapter(messageList);
+        // Pass an empty list initially, data will be supplied by the ViewModel
+        messageAdapter = new MessageAdapter(new ArrayList<>(), this);
         LinearLayoutManager layoutManager = new LinearLayoutManager(this);
         layoutManager.setStackFromEnd(true);
         recyclerView.setLayoutManager(layoutManager);
         recyclerView.setAdapter(messageAdapter);
     }
 
+    private void observeViewModel() {
+        chatViewModel.getMessages().observe(this, messages -> {
+            messageAdapter.setMessageList(messages);
+            if (messages != null && !messages.isEmpty()) {
+                recyclerView.scrollToPosition(messages.size() - 1);
+            }
+        });
+    }
+
+
     private void initHttpClient() {
         client = new OkHttpClient.Builder()
-                // 对于流式响应，可以适当延长读取超时时间
                 .readTimeout(60, TimeUnit.SECONDS)
                 .build();
         gson = new Gson();
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        checkAndRequestStoragePermission();
+    }
+
+    @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         getMenuInflater().inflate(R.menu.main_menu, menu);
+        settingsMenuItem = menu.findItem(R.id.action_settings);
         return true;
     }
 
@@ -116,47 +151,38 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        addMessage(messageText, true);
+        Message userMessage = new Message(messageText, true);
+        chatViewModel.addMessage(userMessage);
         editTextMessage.setText("");
 
-        callChatApi(messageText);
+        setUiEnabled(false); // Disable UI
+        callChatApi(userMessage);
     }
 
-    private void addMessage(String text, boolean isSentByUser) {
+    private void setUiEnabled(boolean enabled) {
         runOnUiThread(() -> {
-            messageList.add(new Message(text, isSentByUser));
-            messageAdapter.notifyItemInserted(messageList.size() - 1);
-            recyclerView.scrollToPosition(messageList.size() - 1);
+            editTextMessage.setEnabled(enabled);
+            buttonSend.setEnabled(enabled);
+            buttonSend.setAlpha(enabled ? 1.0f : 0.5f);
+            if (settingsMenuItem != null) {
+                settingsMenuItem.setEnabled(enabled);
+            }
         });
     }
 
+    // This method is now a wrapper around the ViewModel's method.
+    private void addMessage(Message message) {
+        chatViewModel.addMessage(message);
+    }
+
+    // This method is now a wrapper around the ViewModel's method.
     private void appendToLastMessage(String chunk) {
-        runOnUiThread(() -> {
-            if (messageList.isEmpty()) {
-                return;
-            }
-            int lastIndex = messageList.size() - 1;
-            Message lastMessage = messageList.get(lastIndex);
-
-            // 确保我们只追加到AI的回复上
-            if (!lastMessage.isSentByUser()) {
-                String currentText = lastMessage.getText();
-                // 如果是初始的“...”占位符，则直接替换
-                String newText = "...".equals(currentText) ? chunk : currentText + chunk;
-
-                // 保持同一个 Message 对象参考，方便 Adapter 局部刷新
-                messageList.set(lastIndex, new Message(newText, false));
-                // 使用带 payload 的刷新，Adapter 会处理增量文本并做动画
-                messageAdapter.notifyItemChanged(lastIndex, "text_append");
-                // 平滑滚动到最后一条，确保新气泡可见
-                recyclerView.scrollToPosition(lastIndex);
-            }
-        });
+        chatViewModel.appendToLastMessage(chunk);
     }
 
-    private void callChatApi(String userMessage) {
-        // 先添加一个占位符，表示AI正在思考
-        addMessage("...", false);
+    private void callChatApi(Message userMessage) {
+        // Add a placeholder for the AI's response
+        addMessage(new Message("...", false));
 
         SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
         String ipAddress = sharedPreferences.getString("ip_address", "127.0.0.1:8910");
@@ -170,7 +196,7 @@ public class MainActivity extends AppCompatActivity {
         MediaType JSON = MediaType.get("application/json; charset=utf-8");
         JsonObject jsonBody = new JsonObject();
         jsonBody.addProperty("model", modelName);
-        jsonBody.addProperty("stream", true); // <<<--- 设置为流式
+        jsonBody.addProperty("stream", true);
 
         JsonArray messages = new JsonArray();
         JsonObject systemMessage = new JsonObject();
@@ -180,7 +206,7 @@ public class MainActivity extends AppCompatActivity {
 
         JsonObject userMsg = new JsonObject();
         userMsg.addProperty("role", "user");
-        userMsg.addProperty("content", userMessage);
+        userMsg.addProperty("content", userMessage.getText());
         messages.add(userMsg);
 
         jsonBody.add("messages", messages);
@@ -202,7 +228,9 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onFailure(@NonNull Call call, @NonNull IOException e) {
                 Log.e(TAG, "API Call Failed: ", e);
+                chatViewModel.updateUserMessageStatus(userMessage, Message.Status.FAILED);
                 appendToLastMessage("\n\n网络错误: " + e.getMessage());
+                setUiEnabled(true);
             }
 
             @Override
@@ -215,14 +243,15 @@ public class MainActivity extends AppCompatActivity {
                         // ignore
                     }
                     Log.e(TAG, "API Call Unsuccessful (" + response.code() + "): " + errorBody);
+                    chatViewModel.updateUserMessageStatus(userMessage, Message.Status.FAILED);
                     appendToLastMessage("\n\n请求失败: " + response.code());
+                    setUiEnabled(true);
                     return;
                 }
 
                 try (ResponseBody responseBody = response.body()) {
                     if (responseBody == null) return;
 
-                    // 使用 BufferedReader 逐行读取
                     try (BufferedReader reader = new BufferedReader(new InputStreamReader(responseBody.byteStream()))) {
                         String line;
                         while ((line = reader.readLine()) != null) {
@@ -230,18 +259,17 @@ public class MainActivity extends AppCompatActivity {
                                 String jsonData = line.substring(5).trim();
 
                                 if ("[DONE]".equals(jsonData)) {
-                                    // 数据流结束
+                                    chatViewModel.updateUserMessageStatus(userMessage, Message.Status.SENT);
+                                    setUiEnabled(true);
                                     break;
                                 }
 
-                                // 解析这个小的数据块
                                 JsonObject chunkObject = gson.fromJson(jsonData, JsonObject.class);
                                 JsonArray choices = chunkObject.getAsJsonArray("choices");
                                 if (choices != null && !choices.isEmpty()) {
                                     JsonObject delta = choices.get(0).getAsJsonObject().getAsJsonObject("delta");
                                     if (delta != null && delta.has("content")) {
                                         String contentChunk = delta.get("content").getAsString();
-                                        // 将内容块追加到最后一条消息
                                         appendToLastMessage(contentChunk);
                                     }
                                 }
@@ -252,8 +280,51 @@ public class MainActivity extends AppCompatActivity {
                 } catch (Exception e) {
                     Log.e(TAG, "Response processing error: ", e);
                     appendToLastMessage("\n\n处理回复时出错。");
+                    chatViewModel.updateUserMessageStatus(userMessage, Message.Status.FAILED);
+                    setUiEnabled(true);
                 }
             }
         });
+    }
+
+    @Override
+    public void onRetryClick(int position) {
+        List<Message> messages = chatViewModel.getMessages().getValue();
+        if (messages != null && position >= 0 && position < messages.size()) {
+            Message failedMessage = messages.get(position);
+            if (failedMessage.getStatus() == Message.Status.FAILED) {
+                chatViewModel.retryMessage(failedMessage);
+                setUiEnabled(false);
+                callChatApi(failedMessage);
+            }
+        }
+    }
+
+    private void checkAndRequestStoragePermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+                intent.setData(Uri.parse("package:" + getPackageName()));
+                startActivity(intent);
+            }
+        } else {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this,
+                        new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE, Manifest.permission.READ_EXTERNAL_STORAGE},
+                        STORAGE_PERMISSION_REQUEST_CODE);
+            }
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == STORAGE_PERMISSION_REQUEST_CODE) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                Log.d(TAG, "Storage permission granted.");
+            } else {
+                Log.d(TAG, "Storage permission denied.");
+            }
+        }
     }
 }
