@@ -5,6 +5,9 @@ GenieChat is an Android application that demonstrates how to integrate large lan
 
 ## Build and Run SuperResolution sample app on Mobile Phone(Snapdragon® 8 Elite and and Snapdragon® 8 Elite Gen 5)
 
+Please install [Qualcomm® AI Runtime SDK](https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK) firstly.<br>
+> *Note: For Snapdragon® 8 Elite Gen 5 devices, please install the [Qualcomm® AI Runtime SDK](https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK) version 2.40.1.251119 or newer. * <br>
+
 The SuperResolution sample app demostrates how to convert an image using [SuperResolution AI models](https://aihub.qualcomm.com/mobile/models?domain=Computer+Vision&useCase=Super+Resolution) on android mobile devices.<br>
 
 Following are the detailed steps to build and run:<br>
