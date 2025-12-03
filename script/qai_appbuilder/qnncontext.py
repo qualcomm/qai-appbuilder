@@ -39,6 +39,22 @@ def timer(func):
         return value
     return wrapper_timer
 
+def reshape_input(input):
+    for i in range(len(input)):
+        try:
+            input[i].reshape(-1,)
+        except (ValueError, TypeError, IndexError, AttributeError) as e:
+            print(f"reshape {input[i]} error:{e}")
+    return input
+                
+def reshape_output(output, outputshape_list):
+    for i in range(len(output)):
+        try:
+            output[i].reshape(outputshape_list[i])
+        except (ValueError, TypeError, IndexError) as e:
+            print(f"reshape {outputshape_list[i]} error:{e}")
+    return output
+                
 class LogLevel():
     ERROR = 1
     WARN = 2
@@ -178,10 +194,11 @@ class QNNLoraContext:
         return self.m_context.getOutputDataType()
     #@timer
     def Inference(self, input, perf_profile = PerfProfile.DEFAULT, graphIndex = 0):
+        input= reshape_input(input)         
         output = self.m_context.Inference(input, perf_profile, graphIndex)
         outputshape_list = self.getOutputShapes()
-        for i in range(len(output)):
-            output[i].reshape(outputshape_list[i])
+        output = reshape_output(output, outputshape_list)
+
         return output
     
     def apply_binary_update(self, lora_adapters=None):
@@ -246,10 +263,13 @@ class QNNContext:
 
     #@timer
     def Inference(self, input, perf_profile = PerfProfile.DEFAULT, graphIndex = 0):
+        input = reshape_input(input) 
+
         output = self.m_context.Inference(input, perf_profile, graphIndex)
+
         outputshape_list = self.getOutputShapes()
-        for i in range(len(output)):
-            output[i].reshape(outputshape_list[i])
+        output = reshape_output(output, outputshape_list)
+
         return output
 
     #@timer
@@ -310,10 +330,13 @@ class QNNContextProc:
 
     #@timer
     def Inference(self, shareMemory, input, perf_profile = PerfProfile.DEFAULT, graphIndex = 0):
+        input = reshape_input(input)
+                
         output = self.m_context.Inference(shareMemory.m_memory, input, perf_profile, graphIndex)
+
         outputshape_list = self.getOutputShapes()
-        for i in range(len(output)):
-            output[i].reshape(outputshape_list[i])
+        output = reshape_output(output, outputshape_list)
+
         return output
         
     #@timer
