@@ -128,7 +128,7 @@ def Inference(input_video_path):
     PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
 
     # Run the inference.
-    output_data = resnet_3d.Inference([input_video])
+    output_data = resnet_3d.Inference(input_video)
 
     # Reset the HTP.
     PerfProfile.RelPerfProfileGlobal()

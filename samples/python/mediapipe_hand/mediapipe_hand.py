@@ -234,7 +234,7 @@ def run_box_detector(
     pil_out_image = torch_tensor_to_PIL_image(box_detector_net_inputs[0])
     pil_out_image = np.array(pil_out_image)
     pil_out_image = np.clip(pil_out_image, 0, 255) / 255.0  # normalization
-    box_scores_ndarray, box_coords_ndarray = hand_detector.Inference([pil_out_image])
+    box_scores_ndarray, box_coords_ndarray = hand_detector.Inference(pil_out_image)
     box_scores = torch.from_numpy(box_scores_ndarray)  # convert to tensor
     box_scores = box_scores.unsqueeze(0)  # change shape to [1,2944]
     box_scores = box_scores.clamp(-100, 100)

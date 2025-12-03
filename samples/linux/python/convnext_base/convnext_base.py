@@ -129,7 +129,7 @@ def Inference(input_image_path):
     PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
 
     # Run the inference.
-    output_data = convnext_base.Inference([image])
+    output_data = convnext_base.Inference(image)
 
     # Reset the HTP.
     PerfProfile.RelPerfProfileGlobal()

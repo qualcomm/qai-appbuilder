@@ -109,7 +109,7 @@ def Inference(input_image_path, input_mask_path, output_image_path):
     PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
 
     # Run the inference.
-    output_image = aotgan.Inference([image_masked], [mask_torch])
+    output_image = aotgan.Inference(image_masked, mask_torch)
 
     # Reset the HTP.
     PerfProfile.RelPerfProfileGlobal()

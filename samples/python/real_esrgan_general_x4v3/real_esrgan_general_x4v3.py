@@ -101,7 +101,7 @@ def Inference(input_image_path, output_image_path):
     PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
 
     # Run the inference.
-    output_image = realesrgan.Inference([image])
+    output_image = realesrgan.Inference(image)
 
     # Reset the HTP.
     PerfProfile.RelPerfProfileGlobal()

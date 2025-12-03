@@ -376,7 +376,7 @@ def Inference(input_image_path, output_image_path, show_image = True):
     PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
 
     # Run the inference.
-    output = openpose.Inference([pixel_values])
+    output = openpose.Inference(pixel_values)
 
     # Reset the HTP.
     PerfProfile.RelPerfProfileGlobal()

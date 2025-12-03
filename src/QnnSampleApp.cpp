@@ -1214,7 +1214,7 @@ void bufferToFile(std::vector<uint8_t*>& buffers, std::vector<size_t>& size, std
     for (int i = 0; i < size.size(); i++) {
         QNN_DEBUG("Dump input data, size = %d", size[i]);
 
-        sprintf_s(data_path, BUFSIZE, data_name.c_str(), i);
+        snprintf(data_path, BUFSIZE, data_name.c_str(), i);
         std::ofstream os(data_path, std::ofstream::binary);
         if (!os) {
             QNN_ERR("Failed to open file for writing: %s", data_path);

@@ -90,7 +90,7 @@ def Inference(input_image_path, output_image_path, show_image = True):
     PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
 
     # Run the inference.
-    output = unet_segmentation.Inference([image])
+    output = unet_segmentation.Inference(image)
     
     # Reset the HTP.
     PerfProfile.RelPerfProfileGlobal()

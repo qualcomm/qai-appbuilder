@@ -129,7 +129,7 @@ def Inference(input_image_path):
     PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
 
     # Run the inference.
-    output_data = efficientnet_v2_s.Inference([image])
+    output_data = efficientnet_v2_s.Inference(image)
 
     # Reset the HTP.
     PerfProfile.RelPerfProfileGlobal()

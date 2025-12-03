@@ -98,7 +98,7 @@ def Inference(input_image_path, output_image_path, show_image = True):
     PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
 
     # Run the inference.
-    output_image = sesr_m5.Inference([image])
+    output_image = sesr_m5.Inference(image)
 
     # Reset the HTP.
     PerfProfile.RelPerfProfileGlobal()

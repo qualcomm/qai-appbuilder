@@ -127,7 +127,7 @@ def Inference(input_image_path):
     PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
 
     # Run the inference.
-    output_data = beit.Inference([image])
+    output_data = beit.Inference(image)
 
     # Reset the HTP.
     PerfProfile.RelPerfProfileGlobal()

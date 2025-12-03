@@ -184,7 +184,7 @@ def Inference(frame,invoke_nums):
     PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
 
     # Run the inference.
-    output = fcn_resnet50.Inference([img_input])
+    output = fcn_resnet50.Inference(img_input)
 
     PerfProfile.RelPerfProfileGlobal()
 
