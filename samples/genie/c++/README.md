@@ -14,14 +14,15 @@ Note: Contributions are welcome. Please ensure thorough testing before deploying
 This sample helps developers use C++ to build Genie based Open AI compatibility API service on Windows on Snapdragon (WoS), Mobile and Linux platforms.
 
 ## Features
+• Support LLM on both CPU & NPU [*NEW!*] <br>
 • Support both stream and none stream mode <br> 
 • Support switching between models <br>
 • Support customization model <br>
-• Support text splitter feature [*NEW!*] <br> 
-• Support tools call [*NEW!*] <br> 
-• Support enable/disable thinking mode [*NEW!*] <br> 
-• Support lora [*NEW!*] <br> 
-• Support history feature [*NEW!*] <br> 
+• Support text splitter feature <br> 
+• Support tools call <br> 
+• Support enable/disable thinking mode <br> 
+• Support lora <br> 
+• Support history feature <br> 
 
 ## GenieAPIService
 Genie OpenAI Compatible API Service.
