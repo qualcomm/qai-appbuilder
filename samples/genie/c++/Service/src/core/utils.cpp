@@ -1,4 +1,12 @@
-﻿#include "core/utils.h"
+﻿//==============================================================================
+//
+// Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
+//
+// SPDX-License-Identifier: BSD-3-Clause
+//
+//==============================================================================
+
+#include "core/utils.h"
 #include <chrono>
 
 #include "core/log.h"

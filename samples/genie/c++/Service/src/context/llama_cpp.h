@@ -1,5 +1,13 @@
-#ifndef GENIEAPICLIENT_SLN_LLAMA_CPP_H
-#define GENIEAPICLIENT_SLN_LLAMA_CPP_H
+//==============================================================================
+//
+// Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
+//
+// SPDX-License-Identifier: BSD-3-Clause
+//
+//==============================================================================
+
+#ifndef LLAMA_CPP_H
+#define LLAMA_CPP_H
 
 #include "core/context_base.h"
 
@@ -24,4 +32,4 @@ private:
     Impl *impl_;
 };
 
-#endif //GENIEAPICLIENT_SLN_LLAMA_CPP_H
+#endif //LLAMA_CPP_H

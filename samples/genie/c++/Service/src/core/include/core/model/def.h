@@ -1,5 +1,5 @@
-#ifndef GENIEAPICLIENT_SLN_MODEL_TYPE_H
-#define GENIEAPICLIENT_SLN_MODEL_TYPE_H
+#ifndef MODEL_TYPE_H
+#define MODEL_TYPE_H
 
 // TODO
 struct BaseEnum
@@ -87,4 +87,4 @@ struct ModelType : public BaseEnum
     /* @formatter:on */
 };
 
-#endif //GENIEAPICLIENT_SLN_MODEL_TYPE_H
+#endif //MODEL_TYPE_H

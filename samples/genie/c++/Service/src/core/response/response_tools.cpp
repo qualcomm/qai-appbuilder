@@ -1,4 +1,12 @@
-﻿#include "response_tools.h"
+﻿//==============================================================================
+//
+// Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
+//
+// SPDX-License-Identifier: BSD-3-Clause
+//
+//==============================================================================
+
+#include "response_tools.h"
 #include "core/log.h"
 #include "core/utils.h"
 

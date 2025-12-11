@@ -1,4 +1,12 @@
-﻿#include "core/response_dispatcher.h"
+﻿//==============================================================================
+//
+// Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
+//
+// SPDX-License-Identifier: BSD-3-Clause
+//
+//==============================================================================
+
+#include "core/response_dispatcher.h"
 #include <nlohmann/json.hpp>
 
 #include "response_tools.h"

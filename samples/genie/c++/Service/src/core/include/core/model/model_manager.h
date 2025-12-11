@@ -1,5 +1,5 @@
-#ifndef GENIEAPICLIENT_SLN_MODEL_MANAGER_H
-#define GENIEAPICLIENT_SLN_MODEL_MANAGER_H
+#ifndef MODEL_MANAGER_H
+#define MODEL_MANAGER_H
 
 #include "model_config.h"
 
@@ -28,4 +28,4 @@ private:
     bool loaded_{false};
 };
 
-#endif //GENIEAPICLIENT_SLN_MODEL_MANAGER_H
+#endif //MODEL_MANAGER_H

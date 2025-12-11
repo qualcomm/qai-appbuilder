@@ -1,5 +1,13 @@
-#ifndef GENIEAPICLIENT_SLN_MODEL_PROCESSING_H
-#define GENIEAPICLIENT_SLN_MODEL_PROCESSING_H
+//==============================================================================
+//
+// Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
+//
+// SPDX-License-Identifier: BSD-3-Clause
+//
+//==============================================================================
+
+#ifndef MODEL_PROCESSING_H
+#define MODEL_PROCESSING_H
 
 #include "core/context_base.h"
 
@@ -20,4 +28,4 @@ public:
     std::string start_tag_;
 };
 
-#endif //GENIEAPICLIENT_SLN_MODEL_PROCESSING_H
+#endif //MODEL_PROCESSING_H

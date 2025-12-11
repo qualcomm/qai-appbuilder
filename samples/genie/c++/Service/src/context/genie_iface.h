@@ -1,5 +1,13 @@
-#ifndef GENIEAPICLIENT_SLN_GENIE_IFACE_H
-#define GENIEAPICLIENT_SLN_GENIE_IFACE_H
+//==============================================================================
+//
+// Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
+//
+// SPDX-License-Identifier: BSD-3-Clause
+//
+//==============================================================================
+
+#ifndef GENIE_IFACE_H
+#define GENIE_IFACE_H
 
 #include "../context/genie.h"
 #include "core/log.h"
@@ -162,4 +170,4 @@ GenieContext::Interface *GenieContext::Interface::CreateInterface(GenieContext *
     }
 }
 
-#endif //GENIEAPICLIENT_SLN_GENIE_IFACE_H
+#endif //GENIE_IFACE_H

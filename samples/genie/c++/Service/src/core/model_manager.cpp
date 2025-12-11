@@ -1,3 +1,11 @@
+//==============================================================================
+//
+// Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
+//
+// SPDX-License-Identifier: BSD-3-Clause
+//
+//==============================================================================
+
 #include <core/model/model_config.h>
 #include "core/log.h"
 #include "core/utils.h"

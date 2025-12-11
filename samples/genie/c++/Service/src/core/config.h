@@ -1,5 +1,13 @@
-#ifndef GENIEAPICLIENT_SLN_CONFIG_H
-#define GENIEAPICLIENT_SLN_CONFIG_H
+//==============================================================================
+//
+// Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
+//
+// SPDX-License-Identifier: BSD-3-Clause
+//
+//==============================================================================
+
+#ifndef CONFIG_H
+#define CONFIG_H
 
 #include "core/log.h"
 #include "core/utils.h"
@@ -141,4 +149,4 @@ bool Config::Process()
     return true;
 }
 
-#endif //GENIEAPICLIENT_SLN_CONFIG_H
+#endif //CONFIG_H

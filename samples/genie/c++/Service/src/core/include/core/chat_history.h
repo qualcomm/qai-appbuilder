@@ -1,5 +1,13 @@
-#ifndef GENIEAPICLIENT_SLN_CHAT_HISTORY_H
-#define GENIEAPICLIENT_SLN_CHAT_HISTORY_H
+//==============================================================================
+//
+// Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
+//
+// SPDX-License-Identifier: BSD-3-Clause
+//
+//==============================================================================
+
+#ifndef CHAT_HISTORY_H
+#define CHAT_HISTORY_H
 
 #include <string>
 #include "nlohmann/json.hpp"
@@ -33,4 +41,4 @@ private:
     Impl* impl_{};
 };
 
-#endif //GENIEAPICLIENT_SLN_CHAT_HISTORY_H
+#endif //CHAT_HISTORY_H

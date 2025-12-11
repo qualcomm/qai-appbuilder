@@ -1,5 +1,13 @@
-#ifndef GENIEAPICLIENT_SLN_GENERAL_H
-#define GENIEAPICLIENT_SLN_GENERAL_H
+//==============================================================================
+//
+// Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
+//
+// SPDX-License-Identifier: BSD-3-Clause
+//
+//==============================================================================
+
+#ifndef GENERAL_H
+#define GENERAL_H
 
 #include "core/processor.h"
 
@@ -15,4 +23,4 @@ private:
     struct Utils;
 };
 
-#endif //GENIEAPICLIENT_SLN_GENERAL_H
+#endif //GENERAL_H

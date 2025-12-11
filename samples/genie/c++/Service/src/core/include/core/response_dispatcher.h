@@ -1,5 +1,13 @@
-#ifndef GENIEAPICLIENT_SLN_RESPONSE_DISPATCHER_H
-#define GENIEAPICLIENT_SLN_RESPONSE_DISPATCHER_H
+//==============================================================================
+//
+// Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
+//
+// SPDX-License-Identifier: BSD-3-Clause
+//
+//==============================================================================
+
+#ifndef RESPONSE_DISPATCHER_H
+#define RESPONSE_DISPATCHER_H
 
 #include "httplib.h"
 #include "core/context_base.h"
@@ -65,4 +73,4 @@ private:
     ModelProcessor *proc_{};
 };
 
-#endif //GENIEAPICLIENT_SLN_RESPONSE_DISPATCHER_H
+#endif //RESPONSE_DISPATCHER_H

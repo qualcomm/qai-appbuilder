@@ -1,5 +1,13 @@
-#ifndef GENIEAPICLIENT_SLN_LOG_H
-#define GENIEAPICLIENT_SLN_LOG_H
+//==============================================================================
+//
+// Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
+//
+// SPDX-License-Identifier: BSD-3-Clause
+//
+//==============================================================================
+
+#ifndef LOG_H
+#define LOG_H
 
 #include <GenieLog.h>
 #include <sstream>
@@ -334,4 +342,4 @@ private:
                                                 }};
 };
 
-#endif //GENIEAPICLIENT_SLN_LOG_H
+#endif //LOG_H

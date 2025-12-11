@@ -1,5 +1,5 @@
-﻿#ifndef GENIEAPICLIENT_SLN_MODEL_CONFIG_H
-#define GENIEAPICLIENT_SLN_MODEL_CONFIG_H
+﻿#ifndef MODEL_CONFIG_H
+#define MODEL_CONFIG_H
 
 #include "def.h"
 #include <string>
@@ -87,4 +87,4 @@ protected:
     friend class Config;
 };
 
-#endif //GENIEAPICLIENT_SLN_MODEL_CONFIG_H
+#endif //MODEL_CONFIG_H

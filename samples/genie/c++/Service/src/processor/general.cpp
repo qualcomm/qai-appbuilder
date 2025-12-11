@@ -1,8 +1,14 @@
+//==============================================================================
+//
+// Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
+//
+// SPDX-License-Identifier: BSD-3-Clause
+//
+//==============================================================================
+
 #include "general.h"
 
 #include <nlohmann/json.hpp>
-
-#include "core/log.h"
 #include "core/utils.h"
 
 using json = nlohmann::ordered_json;

@@ -1,5 +1,13 @@
-#ifndef GENIEAPICLIENT_SLN_RESPONSE_TOOLS_H
-#define GENIEAPICLIENT_SLN_RESPONSE_TOOLS_H
+//==============================================================================
+//
+// Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
+//
+// SPDX-License-Identifier: BSD-3-Clause
+//
+//==============================================================================
+
+#ifndef RESPONSE_TOOLS_H
+#define RESPONSE_TOOLS_H
 
 #include <nlohmann/json.hpp>
 #include <httplib.h>
@@ -37,4 +45,4 @@ struct ResponseTools
     static json format_tool_calls(const std::string &tool_calls_str);
 };
 
-#endif //GENIEAPICLIENT_SLN_RESPONSE_TOOLS_H
+#endif //RESPONSE_TOOLS_H
