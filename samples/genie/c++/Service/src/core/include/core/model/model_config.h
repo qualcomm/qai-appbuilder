@@ -1,4 +1,12 @@
-﻿#ifndef MODEL_CONFIG_H
+﻿//==============================================================================
+//
+// Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
+//
+// SPDX-License-Identifier: BSD-3-Clause
+//
+//==============================================================================
+
+#ifndef MODEL_CONFIG_H
 #define MODEL_CONFIG_H
 
 #include "def.h"
