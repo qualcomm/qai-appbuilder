@@ -6,6 +6,7 @@
 //
 //=============================================================================
 
+
 package com.example.geniechat.model;
 
 public class Message {

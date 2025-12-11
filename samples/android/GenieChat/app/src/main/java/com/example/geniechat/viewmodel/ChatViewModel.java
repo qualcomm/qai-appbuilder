@@ -20,9 +20,34 @@ import java.util.Objects;
 
 public class ChatViewModel extends ViewModel {
     private final MutableLiveData<List<Message>> messagesLiveData = new MutableLiveData<>(new ArrayList<>());
+    // Indicates whether the model (assistant) is currently producing a reply.
+    // This LiveData lives in the ViewModel so it survives configuration changes
+    // (e.g., orientation) and allows the UI to permanently disable menus/input
+    // while the assistant is replying.
+    private final MutableLiveData<Boolean> isModelReplying = new MutableLiveData<>(false);
 
     public LiveData<List<Message>> getMessages() {
         return messagesLiveData;
+    }
+
+    public LiveData<Boolean> getIsModelReplying() {
+        return isModelReplying;
+    }
+
+    /**
+     * Call when model reply generation starts (e.g., when you send a user message
+     * and begin streaming assistant response). This will persist across
+     * configuration changes so UI can remain disabled until reply completes.
+     */
+    public void startModelReply() {
+        isModelReplying.postValue(true);
+    }
+
+    /**
+     * Call when model reply generation finishes or is cancelled. Re-enables UI.
+     */
+    public void endModelReply() {
+        isModelReplying.postValue(false);
     }
 
     public void addMessage(Message message) {

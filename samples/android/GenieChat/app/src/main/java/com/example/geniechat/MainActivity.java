@@ -21,6 +21,7 @@ import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.widget.EditText;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
@@ -112,6 +113,12 @@ public class MainActivity extends AppCompatActivity implements MessageAdapter.On
                 recyclerView.scrollToPosition(messages.size() - 1);
             }
         });
+        // Observe model reply state so UI (menus / input) can remain disabled
+        // across configuration changes while the assistant is replying.
+        chatViewModel.getIsModelReplying().observe(this, isReplying -> {
+            boolean enabled = !(isReplying != null && isReplying);
+            setUiEnabled(enabled);
+        });
     }
 
 
@@ -132,12 +139,21 @@ public class MainActivity extends AppCompatActivity implements MessageAdapter.On
     public boolean onCreateOptionsMenu(Menu menu) {
         getMenuInflater().inflate(R.menu.main_menu, menu);
         settingsMenuItem = menu.findItem(R.id.action_settings);
+        // Ensure the menu item's enabled state reflects current model-reply state
+        // (the ViewModel value survives configuration changes).
+        boolean enabled = !Boolean.TRUE.equals(chatViewModel.getIsModelReplying().getValue());
+        settingsMenuItem.setEnabled(enabled);
         return true;
     }
 
     @Override
     public boolean onOptionsItemSelected(@NonNull MenuItem item) {
         if (item.getItemId() == R.id.action_settings) {
+            // Prevent opening Settings while the model is replying.
+            if (Boolean.TRUE.equals(chatViewModel.getIsModelReplying().getValue())) {
+                Toast.makeText(this, "正在生成回复，无法进入设置", Toast.LENGTH_SHORT).show();
+                return true;
+            }
             Intent intent = new Intent(this, SettingsActivity.class);
             startActivity(intent);
             return true;
@@ -155,7 +171,10 @@ public class MainActivity extends AppCompatActivity implements MessageAdapter.On
         chatViewModel.addMessage(userMessage);
         editTextMessage.setText("");
 
-        setUiEnabled(false); // Disable UI
+        // Immediately disable UI and persist model-reply state so it survives
+        // orientation changes.
+        setUiEnabled(false);
+        chatViewModel.startModelReply();
         callChatApi(userMessage);
     }
 
@@ -230,7 +249,8 @@ public class MainActivity extends AppCompatActivity implements MessageAdapter.On
                 Log.e(TAG, "API Call Failed: ", e);
                 chatViewModel.updateUserMessageStatus(userMessage, Message.Status.FAILED);
                 appendToLastMessage("\n\n网络错误: " + e.getMessage());
-                setUiEnabled(true);
+                // End model reply; LiveData observer will re-enable UI.
+                chatViewModel.endModelReply();
             }
 
             @Override
@@ -245,7 +265,7 @@ public class MainActivity extends AppCompatActivity implements MessageAdapter.On
                     Log.e(TAG, "API Call Unsuccessful (" + response.code() + "): " + errorBody);
                     chatViewModel.updateUserMessageStatus(userMessage, Message.Status.FAILED);
                     appendToLastMessage("\n\n请求失败: " + response.code());
-                    setUiEnabled(true);
+                    chatViewModel.endModelReply();
                     return;
                 }
 
@@ -260,7 +280,7 @@ public class MainActivity extends AppCompatActivity implements MessageAdapter.On
 
                                 if ("[DONE]".equals(jsonData)) {
                                     chatViewModel.updateUserMessageStatus(userMessage, Message.Status.SENT);
-                                    setUiEnabled(true);
+                                        chatViewModel.endModelReply();
                                     break;
                                 }
 
@@ -281,7 +301,7 @@ public class MainActivity extends AppCompatActivity implements MessageAdapter.On
                     Log.e(TAG, "Response processing error: ", e);
                     appendToLastMessage("\n\n处理回复时出错。");
                     chatViewModel.updateUserMessageStatus(userMessage, Message.Status.FAILED);
-                    setUiEnabled(true);
+                        chatViewModel.endModelReply();
                 }
             }
         });
@@ -294,7 +314,8 @@ public class MainActivity extends AppCompatActivity implements MessageAdapter.On
             Message failedMessage = messages.get(position);
             if (failedMessage.getStatus() == Message.Status.FAILED) {
                 chatViewModel.retryMessage(failedMessage);
-                setUiEnabled(false);
+                    setUiEnabled(false);
+                    chatViewModel.startModelReply();
                 callChatApi(failedMessage);
             }
         }

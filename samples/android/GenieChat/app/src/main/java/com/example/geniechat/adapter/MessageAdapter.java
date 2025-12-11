@@ -6,8 +6,8 @@
 //
 //=============================================================================
 
-package com.example.geniechat.adapter;
 
+package com.example.geniechat.adapter;
 import android.animation.ValueAnimator;
 import android.content.ClipData;
 import android.content.ClipboardManager;
