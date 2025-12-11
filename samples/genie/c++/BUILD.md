@@ -1,4 +1,5 @@
 # Source code
+
 ## Service:
 
 The code under this folder is C++ implementation of the service. It can be compiled to Windows, Android and Linux target.
@@ -8,6 +9,7 @@ The code under this folder is C++ implementation of the service. It can be compi
 The code under this folder is Android app which can be used to launch the service in Android device.
 
 ## Build Service from source code:
+## Build For Windows:
 
 ### Prepare environment:<br>
 
@@ -17,43 +19,40 @@ Use below command to clone the whole repository and the dependency 3rd party lib
 git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
 ```
 
-Download 'CLI11.hpp' from below link and copy to 'samples\genie\c++\External\CLI11\CLI11.hpp'
-https://github.com/CLIUtils/CLI11/releases/download/v2.5.0/CLI11.hpp
+Install these before you compile this service.<br>
 
-Install Qualcomm® AI Runtime SDK, CMake, Visual Studio etc, before you compile this service.<br>
+- Qualcomm® AI Runtime SDK
+- CMake
+- Visual Studio Build Toos 2022(clang, v143)
+- Ninja
+
 Open a 'Command Prompt' window (not PowerShell) to compile the libraries.
 
-### Build 'libcurl.dll' for WoS:<br>
+### Set QAIRT SDK Version:<br>
 
-GenieAPIClient depends on 'libcurl.dll', we need to build this dynamical library first through the commands below:
+After installing Qualcomm® AI Runtime SDK, It usually located at `C:\Qualcomm\AIStack\QAIRT\2.38.0.250901`. We can make
+it as an environment variable.
 
-```
-cd samples/genie/c++/External/curl
-mkdir build & cd build
-cmake -S .. -B . -A ARM64 -DCURL_USE_LIBPSL=OFF 
-cmake --build . --config Release
-```
+`Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.38.0.250901\`
 
-### Chose Correct SDK Version
+### Build GenieAPIServer & GenieAPIClient:<br>
 
-After installing `Qualcomm® AI Runtime SDK` Please be mindful of your download version.
+GenieServices can access the BIN/MNN/GGUF format AI model as capabilities.
+you can add `-DOption=ON` and end of command to select it.
 
-Usually it located at `C:\Qualcomm\AIStack\QAIRT\2.38.0.250901`
-
-In the next environment setting, you may use the version you prefer.
-
-### Build GenieAPIServer & GenieAPIClient for WoS:<br>
-
-Setup Qualcomm® AI Runtime SDK and replace the Genie libraries and header file by refering to QAI AppBuilder [BUILD.md](../../../BUILD.md) <br>
-We can compile them through the commands below now:
+| Option     | Function                  | Default |
+|------------|:--------------------------|---------|
+| `USE_MNN`  | Support mnn format model  | OFF     |
+| `USE_GGUF` | Support gguf format model | OFF     |
 
 ```
-Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.38.0.250901\
 cd samples\genie\c++\Service
 mkdir build && cd build
-cmake -S .. -B . -A ARM64
-cmake --build . --config Release
+cmake -S .. -B . -A ARM64 ..
+cmake --build . --config Release --parallel 4
 ```
+
+Then the full release will locate at `Service\GenieSerivce_v2.0.0`
 
 ### Build GenieAPIServer for Android: <br>
 
@@ -71,7 +70,6 @@ When you finished building task,please copy the following files.
 copy "%QNN_SDK_ROOT%lib\aarch64-android\*.so"  "libs\arm64-v8a" /Y
 copy "obj\local\arm64-v8a\*.so" "libs\arm64-v8a" /Y
 ```
-
 
 ### Build Android app:<br>
 

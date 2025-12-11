@@ -9,34 +9,50 @@
 LOCAL_PATH := $(call my-dir)
 SUPPORTED_TARGET_ABI := arm64-v8a
 
+define all-c-files-under
+$(call all-named-files-under,*.c,$(1))
+endef
 #============================ Define Common Variables ===============================================================
-# Include paths
-PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../../External/cpp-httplib
-PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../../External/json/include
-PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../../External/fmt/include
-PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../../External/CmdParser
-PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/..
-PACKAGE_C_INCLUDES += -I ${QNN_SDK_ROOT}include/Genie
-
+PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../../External/cpp-httplib/
+PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../../External/json/include/
+PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../../External/fmt/include/
+PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../../External/curl/include/curl/
+PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../../External/curl/include/
+PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../../External/curl/lib/
+PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../../External/CLI11/include
+PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../
+PACKAGE_C_INCLUDES += -I ${QNN_SDK_ROOT}include/Genie/
+PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../src/core/include
 
 #========================== Define libGenie.so variables =============================================
 include $(CLEAR_VARS)
 LOCAL_MODULE := libGenie
 LOCAL_SRC_FILES := ${QNN_SDK_ROOT}lib/aarch64-android/libGenie.so
 include $(PREBUILT_SHARED_LIBRARY)
-
-
-#========================== Define Service app variables =============================================
+# #========================== Define libcurl.so variables =============================================
 include $(CLEAR_VARS)
+LOCAL_MODULE    := libcurl
+LOCAL_SRC_FILES := ../../External/curl/packages/Android/libs/arm64-v8a/libcurl.so
+include $(PREBUILT_SHARED_LIBRARY)
+#========================== Define Service Lib variables =============================================
+include $(CLEAR_VARS)
+CPPFLAGS   += -DQUALLA_MAJOR_VERSION=2 -DQUALLA_MINOR_VERSION=0 -DQUALLA_PATCH_VERSION=0
 LOCAL_C_INCLUDES               := $(PACKAGE_C_INCLUDES)
 
 LOCAL_MODULE                   := GenieAPIService
 LOCAL_SHARED_LIBRARIES 		   := libGenie
 LOCAL_LDLIBS                   := -llog
-LOCAL_SRC_FILES                := ../GenieAPIService.cpp \
-                                  ../GenieBuilder.cpp
-include $(BUILD_EXECUTABLE)
-
+LOCAL_SRC_FILES                :=   ../src/core/context_base.cpp \
+                                    ../src/core/chat_history.cpp \
+                                    ../src/core/utils.cpp \
+                                    ../src/core/model_manager.cpp \
+                                    ../src/context/genie.cpp \
+                                    ../src/GenieAPIService.cpp \
+                                    ../src/processor/harmony.cpp \
+                                    ../src/processor/general.cpp \
+                                    ../src/core/response/response_tools.cpp \
+                                    ../src/core/response/response_dispatcher.cpp
+include $(BUILD_SHARED_LIBRARY)
 #========================== Define Service Lib variables =============================================
 include $(CLEAR_VARS)
 LOCAL_C_INCLUDES               := $(PACKAGE_C_INCLUDES)
@@ -44,16 +60,23 @@ LOCAL_C_INCLUDES               := $(PACKAGE_C_INCLUDES)
 LOCAL_MODULE                   := JNIGenieAPIService
 LOCAL_SHARED_LIBRARIES 		   := libGenie
 LOCAL_LDLIBS                   := -llog
-LOCAL_SRC_FILES                := ../GenieAPIService.cpp \
-                                  ../GenieBuilder.cpp
+LOCAL_SRC_FILES                :=   ../src/core/context_base.cpp \
+                                    ../src/core/chat_history.cpp \
+                                    ../src/core/utils.cpp \
+                                    ../src/core/model_manager.cpp \
+                                    ../src/context/genie.cpp \
+                                    ../src/GenieAPIService.cpp \
+                                    ../src/processor/harmony.cpp \
+                                    ../src/processor/general.cpp \
+                                    ../src/core/response/response_tools.cpp \
+                                    ../src/core/response/response_dispatcher.cpp
 include $(BUILD_SHARED_LIBRARY)
-
 #========================== Define client app variables =============================================
 include $(CLEAR_VARS)
 LOCAL_C_INCLUDES               := $(PACKAGE_C_INCLUDES)
-
 LOCAL_MODULE                   := GenieAPIClient
+#LOCAL_SHARED_LIBRARIES 		   := ../External/curl/packages/Android/libs/arm64-v8a/libcurl.so
+LOCAL_SHARED_LIBRARIES 		   := libcurl
 LOCAL_LDLIBS                   := -llog
-LOCAL_SRC_FILES                := ../GenieAPIClient.cpp
-
+LOCAL_SRC_FILES                := ../src/GenieAPIClient.cpp
 include $(BUILD_EXECUTABLE)
