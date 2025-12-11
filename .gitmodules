@@ -4,15 +4,9 @@
 [submodule "samples/genie/c++/External/cpp-httplib"]
 	path = samples/genie/c++/External/cpp-httplib
 	url = https://github.com/yhirose/cpp-httplib
-[submodule "samples/genie/c++/External/fmt"]
-	path = samples/genie/c++/External/fmt
-	url = https://github.com/fmtlib/fmt
 [submodule "samples/genie/c++/External/json"]
 	path = samples/genie/c++/External/json
 	url = https://github.com/nlohmann/json
 [submodule "samples/genie/c++/External/curl"]
 	path = samples/genie/c++/External/curl
 	url = https://github.com/curl/curl
-[submodule "samples/genie/c++/External/CmdParser"]
-	path = samples/genie/c++/External/CmdParser
-	url = https://github.com/FlorianRappl/CmdParser
