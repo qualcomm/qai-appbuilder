@@ -10,3 +10,12 @@
 [submodule "samples/genie/c++/External/curl"]
 	path = samples/genie/c++/External/curl
 	url = https://github.com/curl/curl
+[submodule "samples/genie/c++/External/llama.cpp"]
+	path = samples/genie/c++/External/llama.cpp
+	url = https://github.com/ggml-org/llama.cpp
+[submodule "samples/genie/c++/External/MNN"]
+	path = samples/genie/c++/External/MNN
+	url = https://github.com/alibaba/MNN
+[submodule "samples/genie/c++/External/cli11"]
+	path = samples/genie/c++/External/cli11
+	url = https://github.com/CLIUtils/CLI11
