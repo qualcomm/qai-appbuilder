@@ -59,7 +59,7 @@
             android:id="@+id/start_service"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Start Service"/>
+            android:text="@string/start_service"/>
     </LinearLayout>
 
     <WebView
@@ -80,5 +80,5 @@
         android:padding="16dp"
         android:textSize="26sp"
         android:textColor="@color/black"
-        android:layout_marginTop="90dp"/>
+        android:layout_marginTop="10dp"/>
 </LinearLayout>

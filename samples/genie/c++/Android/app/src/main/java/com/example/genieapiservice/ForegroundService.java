@@ -1,16 +1,9 @@
-//==============================================================================
-//
-// Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
-// 
-// SPDX-License-Identifier: BSD-3-Clause
-//
-//==============================================================================
-
 package com.example.genieapiservice;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
@@ -107,44 +100,6 @@ public class ForegroundService extends Service {
         }
         SharedPreferences sharedPreferences = getSharedPreferences("LogLevel",Context.MODE_PRIVATE);
         mLogLevelIndex = sharedPreferences.getInt("level",2);
-        // Start Service
-        new Thread(() -> {
-            int newFileIndex = getLogFileIndex();
-            String logFileName = mLogDirectory + File.separator
-                    + "Log:" + String.valueOf(newFileIndex);
-            LogUtils.logDebug(TAG,"logFileName = " + logFileName + " mLogLevelIndex = " + mLogLevelIndex,LogUtils.LOG_DEBUG);
-            nativeLib = new MyNativeLib();
-            String[] commandArgs = {"main", "-c", "/sdcard/GenieModels/qwen2.0_7b-ssd/config.json", "-l", "-d", mLogLevelIndex != -1?String.valueOf(mLogLevelIndex):"2","-f", logFileName};
-            nativeLib.runService(commandArgs);
-            System.out.println("after runService");
-        }).start();
-        // Connect to Service.
-        new Thread(() -> {
-            while (true) {
-                try {
-                    Thread.sleep(1000);  // Sleep 1 second.
-                    URL url = new URL("http://127.0.0.1:8910/");
-                    HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-                    connection.setRequestMethod("GET");
-                    int responseCode = connection.getResponseCode();
-                    System.out.println("in mainactivity, responseCode: " +responseCode);
-                    if (responseCode == HttpURLConnection.HTTP_OK) {
-                        Scanner scanner = new Scanner(connection.getInputStream());
-                        StringBuilder response = new StringBuilder();
-                        while (scanner.hasNextLine()) {
-                            response.append(scanner.nextLine());
-                        }
-                        scanner.close();
-                        System.out.println("Response: " + response.toString());
-                        MainActivity.service_msg = response.toString();
-                        MainActivity.hasGotServiceMsg = true;
-                        break;
-                    }
-                } catch (IOException | InterruptedException e) {
-                    e.printStackTrace();
-                }
-            }
-        }).start();
         //new RecordSystemLogcatTask().start();
         LogUtils.logDebug(TAG,"onCreate called ",LogUtils.LOG_DEBUG);
     }
@@ -175,23 +130,105 @@ public class ForegroundService extends Service {
         }
     }
 
+    private String getFirstModel(String fileDir) {
+        LogUtils.logDebug(TAG,"GetModelFileList :  " + fileDir ,LogUtils.LOG_ERROR);
+        File file = new File(fileDir);
+        File[] subFile = file.listFiles();
+        if (subFile == null) {
+            LogUtils.logDebug(TAG,"model list is null ",LogUtils.LOG_ERROR);
+            return null;
+        }
+        for(int iFileLength = 0; iFileLength < subFile.length; iFileLength++) {
+            if (subFile[iFileLength].isDirectory()) {
+                String filename = subFile[iFileLength].getName();
+                if (isValidModel(filename)) {
+                    return filename;
+                }
+            }
+        }
+        return null;
+    }
+
+    private boolean isValidModel(String dirName) {
+        LogUtils.logDebug(TAG, "isValidModel : " + dirName, LogUtils.LOG_DEBUG);
+        String configFile = "/sdcard/GenieModels/" + dirName + "/config.json";
+        File file = new File(configFile);
+        if (file.exists()) {
+            return true;
+        }
+        return false;
+    }
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        // Start Service
+        LogUtils.logDebug(TAG,"onStartCommand begin = " + intent,LogUtils.LOG_DEBUG);
+        new Thread(() -> {
+            int newFileIndex = getLogFileIndex();
+            String logFileName = mLogDirectory + File.separator
+                    + "Log:" + String.valueOf(newFileIndex);
+            LogUtils.logDebug(TAG,"logFileName = " + logFileName + " mLogLevelIndex = " + mLogLevelIndex,LogUtils.LOG_DEBUG);
+            nativeLib = new MyNativeLib();
+            String currentModel = getFirstModel("/sdcard/GenieModels");
+            String configFile = null;
+            LogUtils.logDebug(TAG,"onStartCommand in child thread = " + intent.getStringExtra("modelName"),LogUtils.LOG_DEBUG);
+            if (currentModel != null) {
+                configFile = "/sdcard/GenieModels/" + currentModel + "/config.json";
+            } else {
+                configFile ="/sdcard/GenieModels/qwen2.0_7b-ssd/config.json";
+            }
+            LogUtils.logDebug(TAG,"cinfig file = " + configFile,LogUtils.LOG_DEBUG);
+            String[] commandArgs = {"main", "-c", configFile, "-l", "-d", mLogLevelIndex != -1 ? String.valueOf(mLogLevelIndex) : "2", "-f", logFileName};
+            nativeLib.runService(commandArgs);
+            System.out.println("after runService");
+        }).start();
+        // Connect to Service.
+        new Thread(() -> {
+            while (true) {
+                try {
+                    Thread.sleep(1000);  // Sleep 1 second.
+                    URL url = new URL("http://localhost:8910/");
+                    HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+                    connection.setRequestMethod("GET");
+                    int responseCode = connection.getResponseCode();
+                    System.out.println("in mainactivity, responseCode: " +responseCode);
+                    if (responseCode == HttpURLConnection.HTTP_OK) {
+                        Scanner scanner = new Scanner(connection.getInputStream());
+                        StringBuilder response = new StringBuilder();
+                        while (scanner.hasNextLine()) {
+                            response.append(scanner.nextLine());
+                        }
+                        scanner.close();
+                        System.out.println("Response: " + response.toString());
+                        //MainActivity.hasGotServiceMsg = true;
+                        MainActivity.service_msg = response.toString();
+                        break;
+                    }
+                } catch (IOException | InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        }).start();
+
         mNotificationManager = (NotificationManager)
                 getSystemService(Context.NOTIFICATION_SERVICE);
         NotificationChannel channel = new NotificationChannel("genie_channel_id", "Genie API Service",
                 NotificationManager.IMPORTANCE_LOW);
         mNotificationManager.createNotificationChannel(channel);
 
+        Intent NotificationIntent = new Intent(this, MainActivity.class);
+        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, NotificationIntent, PendingIntent.FLAG_IMMUTABLE);
         mNotificationBuilder = new NotificationCompat.Builder(this, "genie_channel_id");
         mNotificationBuilder.setDeleteIntent(null)
+                .setContentIntent(pendingIntent)
                 .setContentText(mNotificationTitle + " is running")
                 .setOngoing(true)
                 .setSmallIcon(R.drawable.ic_launcher_qai)
                 .build();
-        startForeground(1, mNotificationBuilder.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MANIFEST);
+        startForeground(1, mNotificationBuilder.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
         ServiceIsRunning = true;
         flags += Service.START_FLAG_REDELIVERY | Service.START_FLAG_RETRY;
+        LogUtils.logDebug(TAG,"onStartCommand end = " + intent,LogUtils.LOG_DEBUG);
         return super.onStartCommand(intent, flags, startId);
     }
 

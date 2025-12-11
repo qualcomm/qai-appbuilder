@@ -46,7 +46,7 @@ android {
     }
     defaultConfig {
         applicationId = "com.example.genieapiservice"
-        minSdk = 29
+        minSdk = 30
         targetSdk = 31
         versionCode = 1
         versionName = "2.0.0"

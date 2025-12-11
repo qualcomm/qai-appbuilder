@@ -1,20 +1,15 @@
-//==============================================================================
-//
-// Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
-// 
-// SPDX-License-Identifier: BSD-3-Clause
-//
-//==============================================================================
-
 package com.example.genieapiservice;
 
+import android.app.PictureInPictureParams;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ActivityInfo;
 import android.net.Uri;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -23,6 +18,9 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.ScrollView;
 import android.widget.TextView;
+
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
@@ -56,10 +54,18 @@ public class LogContentActivity extends AppCompatActivity {
     private int mTotalPageNumber;
     private int mCurrentPageIndex;
     private int mCurrentLineNumber;
+    private ActivityResultLauncher<Intent> register;
+    private boolean mShouldShowFloating;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        boolean isTablet = getResources().getConfiguration().smallestScreenWidthDp >= 600;
+        if (isTablet) {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+        } else {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+        }
         setContentView(R.layout.activity_log_content);
         setSupportActionBar(findViewById(R.id.toolbar));
         getSupportActionBar().setDisplayShowTitleEnabled(false);
@@ -67,6 +73,7 @@ public class LogContentActivity extends AppCompatActivity {
         mLogContent = findViewById(R.id.log_content);
         mBeforeButton = findViewById(R.id.before);
         mPreviousButton = findViewById(R.id.previous);
+        mShouldShowFloating = true;
         mPreviousButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
@@ -161,6 +168,14 @@ public class LogContentActivity extends AppCompatActivity {
         mTile.setText(mLogName);
         mTotalPageNumber = getPageNumber(mLogPath);
         mCurrentPageIndex = mTotalPageNumber;
+
+        register = registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result-> {
+            if(Settings.canDrawOverlays(this)){
+                LogUtils.logDebug(TAG,"got overlay permission.",LogUtils.LOG_DEBUG);
+            }else {
+                LogUtils.logDebug(TAG,"can't get overlay permission.",LogUtils.LOG_DEBUG);
+            }
+        });
     }
 
 
@@ -285,6 +300,33 @@ public class LogContentActivity extends AppCompatActivity {
         super.onResume();
         int begin = (mCurrentPageIndex-1)*mLogLinesMax + 1;
         showLogContentByLines(new File(mLogPath),begin);
+        exitFloatingMode();
+    }
+
+    @Override
+    protected void onUserLeaveHint() {
+        if (mShouldShowFloating) {
+            enterFloatingMode();
+        } else {
+            mShouldShowFloating = true;
+        }
+    }
+
+    private void enterFloatingMode() {
+        getPermission();
+    }
+
+    private void exitFloatingMode() {
+        stopService(new Intent(this, FloatingService.class));
+    }
+
+    private void getPermission() {
+        if(!Settings.canDrawOverlays(this)){
+            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
+            register.launch(intent);
+        }else {
+            startService(new Intent(this, FloatingService.class));
+        }
     }
 
     public void shareLogContent() {
@@ -311,6 +353,7 @@ public class LogContentActivity extends AppCompatActivity {
         } catch (IOException e) {
             e.printStackTrace();
         }
+        mShouldShowFloating = false;
         Intent intent = new Intent(Intent.ACTION_SEND);
         intent.setType("text/plain");
         //intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);

@@ -1,16 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+    xmlns:tools="http://schemas.android.com/tools" >
 
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
-    <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
         android:allowBackup="true"
@@ -19,22 +21,16 @@
         android:icon="@drawable/ic_launcher_qai"
         android:label="@string/app_name"
         android:largeHeap="true"
+        android:persistent="true"
         android:roundIcon="@drawable/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.GenieAPIService"
         android:usesCleartextTraffic="true"
-        android:persistent="true"
-        tools:targetApi="31">
-        <receiver
-            android:name=".GenieReceiver"
-            android:enabled="true"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED"/>
-                <action android:name="com.example.genieapiservice.UPDATE_WEBVIEW"/>
-                <action android:name="com.example.genieapiservice.RESTART"/>
-            </intent-filter>
-        </receiver>
+        tools:targetApi="31" >
+        <service
+            android:name=".FloatingService"
+            android:exported="false" >
+        </service>
 
         <activity
             android:name=".LogContentActivity"
@@ -44,16 +40,14 @@
             android:name=".ForegroundService"
             android:enabled="true"
             android:exported="true"
-            android:foregroundServiceType="mediaPlayback">
-
+            android:foregroundServiceType="mediaPlayback" >
         </service>
 
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true" >
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>

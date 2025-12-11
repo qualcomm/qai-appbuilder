@@ -1,57 +1,33 @@
-//==============================================================================
-//
-// Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
-// 
-// SPDX-License-Identifier: BSD-3-Clause
-//
-//==============================================================================
-
 package com.example.genieapiservice;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
-import android.app.ActivityManager;
-import android.app.AlarmManager;
-import android.app.PendingIntent;
-import android.content.BroadcastReceiver;
 import android.content.ClipData;
 import android.content.ClipboardManager;
-import android.content.ComponentName;
 import android.content.DialogInterface;
 import android.content.Intent;
-import android.content.IntentFilter;
-import android.content.ServiceConnection;
 import android.content.SharedPreferences;
+import android.content.pm.ActivityInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
-import android.os.IBinder;
-import android.os.Process;
 import android.provider.Settings;
-import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.SubMenu;
 import android.view.View;
 import android.webkit.WebView;
-import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
 import android.widget.Button;
-import android.widget.HorizontalScrollView;
-import android.widget.LinearLayout;
-import android.widget.ScrollView;
-import android.widget.Spinner;
 import android.widget.TextView;
-import android.system.Os;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.util.Scanner;
+import java.util.ArrayList;
+import java.util.List;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
@@ -124,10 +100,9 @@ public class MainActivity extends AppCompatActivity {
     private TextView ipView;
     private TextView mTile;
     private Button mStartService;
-    //private Button mStopService;
     private ClipboardManager mClipboard;
     public static String service_msg = "";
-    public static boolean hasGotServiceMsg = false;
+    //public static boolean hasGotServiceMsg = false;
     private static final String stop_msg = "<!DOCTYPE html>    <html>    <head>    <meta charset=\"UTF-8\">    <title>Genie " +
             "OpenAI API Service</title>    <style>    body { word-wrap: break-word; white-space: normal; }    h1 {text-align: " +
             "center;}    </style>    </head>    <body>     <br><br>    <h1 style=\"font-size:1.5em;\">The service is not running. <br>Click the button above to launch it.</h1>    </body>    </html>";
@@ -139,16 +114,17 @@ public class MainActivity extends AppCompatActivity {
     private int mLogLevelIndex = -1;
     private Thread mUpdateMemThread;
     private boolean mExitThread;
+    private ActivityResultLauncher<Intent> register;
+    private boolean mShouldShowFloating;
 
     private Handler updateViewHandler = new Handler(Looper.getMainLooper()) {
         @Override
         public void handleMessage(Message msg) {
             if (msg.what == 1) {
                 displayMemoryInfo();
-                if (hasGotServiceMsg) {
-                    hasGotServiceMsg = false;
+                //if (hasGotServiceMsg) {
                     updateWebView();
-                }
+                //}
             }
         }
     };
@@ -157,12 +133,13 @@ public class MainActivity extends AppCompatActivity {
     private void updateWebView() {
         LogUtils.logDebug(TAG,"updateView: service_msg = " + service_msg,LogUtils.LOG_DEBUG);
         if (!service_msg.isEmpty()) {
+            //hasGotServiceMsg = false;
             webView.loadData(service_msg, "text/html", "UTF-8");
         }
         if (mStartService.getVisibility() != View.VISIBLE) {
             mStartService.setVisibility(View.VISIBLE);
         }
-        if (ForegroundService.ServiceIsRunning && !mStartService.isEnabled()) {
+        if (ForegroundService.ServiceIsRunning && !mStartService.isEnabled() && !service_msg.isEmpty()) {
             mStartService.setEnabled(true);
         }
     }
@@ -189,7 +166,6 @@ public class MainActivity extends AppCompatActivity {
         String memTotal = null;
         String memFree = null;
         String memAvailable = null;
-        String buffers = null;
         String cached = null;
         try (BufferedReader reader = new BufferedReader(new FileReader("/proc/meminfo"))) {
             String line;
@@ -200,13 +176,11 @@ public class MainActivity extends AppCompatActivity {
                     memFree = line;
                 } else if (line.startsWith("MemAvailable:")) {
                     memAvailable = line;
-                } else if (line.startsWith("Buffers:")) {
-                    buffers = line;
                 } else if (line.startsWith("Cached:")) {
                     cached = line;
                 }
 
-                if (memTotal != null && memFree != null && memAvailable != null && buffers != null && cached != null) {
+                if (memTotal != null && memFree != null && memAvailable != null && cached != null) {
                     break;
                 }
             }
@@ -215,63 +189,75 @@ public class MainActivity extends AppCompatActivity {
         }
         String memString = Convert_kb_to_MB(memTotal)  + "\n" + Convert_kb_to_MB(memAvailable);
         memoryInfo.setText(memString);
-        String memSubString = Convert_kb_to_MB (memFree) + "\n"  + Convert_kb_to_MB (buffers) + "\n"  + Convert_kb_to_MB (cached);
+        String memSubString = Convert_kb_to_MB (memFree) + "\n"  + /*Convert_kb_to_MB (buffers) + "\n"  +*/ Convert_kb_to_MB (cached);
         memoryInfoSub.setText(memSubString);
         if (ForegroundService.ServiceIsRunning) {
             String memInfo = "[ DON'T REMOVE THIS NOTIFICATION ]\nMem: " + Convert_kb_to_MB(memTotal.substring(3))
                     + Convert_kb_to_MB(memAvailable.substring(3)) + Convert_kb_to_MB (memFree.substring(3))
-                    + Convert_kb_to_MB ("Buffer:"+buffers.substring(8)) + Convert_kb_to_MB (cached);
+                     + Convert_kb_to_MB (cached);
             ForegroundService.updateNotification(memInfo);
         }
 
     }
 
-    /*private ServiceConnection connection = new ServiceConnection() {
-        @Override
-        public void onServiceConnected(ComponentName name, IBinder service) {
-            ForegroundService.LocalBinder binder = (ForegroundService.LocalBinder) service;
-            ForegroundService GenieService = binder.getService();
-        }
-
-        @Override
-        public void onServiceDisconnected(ComponentName name) {
-
-        }
-    };*/
-
     private void startForegroundService() {
         Intent serviceIntent = new Intent(this, ForegroundService.class);
         startForegroundService(serviceIntent);
-        //bindService(serviceIntent,connection,Context.BIND_AUTO_CREATE);
     }
 
     private void stopForegroundService() {
-        //unbindService(connection);
         Intent serviceIntent = new Intent(this, ForegroundService.class);
         stopService(serviceIntent);
     }
 
-    public void requestPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (!Environment.isExternalStorageManager()) {
-                Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
-                intent.setData(Uri.parse("package:" + getPackageName()));
-                intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                startActivity(intent);
+
+    private List<String> getModelFileList(String fileDir) {
+        LogUtils.logDebug(TAG,"GetModelFileList :  " + fileDir ,LogUtils.LOG_ERROR);
+        List<String> pathList = new ArrayList<>();
+        File file = new File(fileDir);
+        File[] subFile = file.listFiles();
+        if (subFile == null) {
+            LogUtils.logDebug(TAG,"model list is null ",LogUtils.LOG_ERROR);
+            return null;
+        }
+        for(int iFileLength = 0; iFileLength < subFile.length; iFileLength++) {
+            if (subFile[iFileLength].isDirectory()) {
+                String filename = subFile[iFileLength].getName();
+                if (isValidModel(filename)) {
+                    pathList.add(filename);
+                    LogUtils.logDebug(TAG, "model list : " + filename, LogUtils.LOG_DEBUG);
+                }
             }
         }
+        return pathList;
+    }
+
+    private boolean isValidModel(String dirName) {
+        LogUtils.logDebug(TAG, "isValidModel : " + dirName, LogUtils.LOG_DEBUG);
+        String configFile = "/sdcard/GenieModels/" + dirName + "/config.json";
+        File file = new File(configFile);
+        if (file.exists()) {
+            return true;
+        }
+        return false;
     }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        boolean isTablet = getResources().getConfiguration().smallestScreenWidthDp >= 600;
+        if (isTablet) {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+        } else {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+        }
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
         setSupportActionBar(binding.toolbar);
         mClipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         getSupportActionBar().setDisplayShowTitleEnabled(false);
-        requestPermission();
         mExitThread = false;
+        mShouldShowFloating = true;
         mTile = findViewById(R.id.title);
         mTile.setText("GenieAPIService");
         if (LogUtils.LOG_DIRECTORY.isEmpty()) {
@@ -299,6 +285,7 @@ public class MainActivity extends AppCompatActivity {
         } else {
             mStartService.setText("Start Service");
         }
+
         mStartService.setVisibility(View.INVISIBLE);
         mStartService.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -339,7 +326,51 @@ public class MainActivity extends AppCompatActivity {
         displayMemoryInfo();
         updateIpView();
         webView.loadData(stop_msg, "text/html", "UTF-8");
+
+        register = registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result-> {
+            if(Settings.canDrawOverlays(this)){
+                LogUtils.logDebug(TAG,"got overlay permission.",LogUtils.LOG_DEBUG);
+            }else if(Environment.isExternalStorageManager()){
+                LogUtils.logDebug(TAG,"got storage permission.",LogUtils.LOG_DEBUG);
+            } else {
+                LogUtils.logDebug(TAG,"can't get permission.",LogUtils.LOG_DEBUG);
+            }
+        });
+        requestPermission();
         LogUtils.logDebug(TAG,"onCreate end",LogUtils.LOG_DEBUG);
+    }
+
+    private void getPermission() {
+        if(!Settings.canDrawOverlays(this)){
+            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
+            register.launch(intent);
+        }else {
+            startService(new Intent(this, FloatingService.class));
+        }
+    }
+
+    public void requestPermission() {
+        if (!Environment.isExternalStorageManager()) {
+            Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+            intent.setData(Uri.parse("package:" + getPackageName()));
+            //intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            //startActivity(intent);
+            register.launch(intent);
+        }
+    }
+
+    @Override
+    protected void onUserLeaveHint() {
+        if (mShouldShowFloating) {
+            enterFloatingMode();
+        } else {
+            mShouldShowFloating = true;
+        }
+    }
+
+
+    private void enterFloatingMode() {
+        getPermission();
     }
 
 
@@ -355,11 +386,11 @@ public class MainActivity extends AppCompatActivity {
         invalidateOptionsMenu();
         updateWebView();
         updateIpView();
+        exitFloatingMode();
     }
 
-    public static void updateWebView(String str) {
-        LogUtils.logDebug(TAG,"updateWebView start : " + str,LogUtils.LOG_DEBUG);
-        service_msg = str;
+    private void exitFloatingMode() {
+        stopService(new Intent(this, FloatingService.class));
     }
 
     @Override
@@ -373,6 +404,7 @@ public class MainActivity extends AppCompatActivity {
                 logFiles.add(files[i].getName()).setOnMenuItemClickListener(new MenuItem.OnMenuItemClickListener() {
                     @Override
                     public boolean onMenuItemClick(@NonNull MenuItem menuItem) {
+                        mShouldShowFloating = false;
                         Intent intent = new Intent(getApplicationContext(), LogContentActivity.class);
                         intent.putExtra("log_name",menuItem.toString());
                         startActivity(intent);

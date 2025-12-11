@@ -8,4 +8,7 @@
     <string name="button_previous">Previous</string>
     <string name="button_next">Next</string>
     <string name="web_view_tips">Genie OpenAI API Service is not running.</string>
+    <string name="no_config">Can\'t find the config.json file for this model.</string>
+    <string name="select_model">Select Model</string>
+    <string name="start_service">Start Service</string>
 </resources>
