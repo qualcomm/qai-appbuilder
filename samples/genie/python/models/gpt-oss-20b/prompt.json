@@ -1,0 +1,9 @@
+{
+  "prompt_system": "<|start|>system<|message|>string<|end|>",
+  "prompt_user": "<|start|>user<|message|>string<|end|>",
+  "prompt_assistant": "<|start|>assistant<|channel|>final<|message|>string<|return|>\n",
+  "prompt_assistant_c": "<|start|>assistant<|channel|>commentary<|message|>string<|return|>\n",
+  "prompt_tool": "<|start|>developer<|message|>string<|end|>\n",
+  "prompt_start": "<|start|>assistant",
+  "context_size": 4096
+}
