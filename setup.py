@@ -8,6 +8,8 @@
 
 # Compile Commands:
 # [windows]
+# Set QNN_SDK_ROOT=C:/Qualcomm/AIStack/QAIRT/2.40.0.251030/
+# Set QNN_SDK_ROOT=C:/Qualcomm/AIStack/QAIRT/2.39.0.250926/
 # Set QNN_SDK_ROOT=C:/Qualcomm/AIStack/QAIRT/2.38.0.250901/
 # python setup.py bdist_wheel
 # [linux]

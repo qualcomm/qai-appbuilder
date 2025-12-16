@@ -49,6 +49,21 @@ model_path = model_dir + "/" + MODEL_NAME + ".bin"
 imagenet_classes_path = model_dir + "/" + IMAGENET_CLASSES_FILE
 ####################################################################
 
+SOC_ID = None
+cleaned_argv = []
+i = 0
+while i < len(sys.argv):
+    if sys.argv[i] == '--chipset':
+        SOC_ID = sys.argv[i + 1]
+        i += 2
+    else:
+        cleaned_argv.append(sys.argv[i])
+        i += 1
+
+sys.argv = cleaned_argv
+
+print(f"SOC_ID: {SOC_ID}")
+
 wideresnet50 = None
 
 def format_float(num, max_zeros=6):
@@ -103,7 +118,7 @@ def model_download():
 
     desc = f"Downloading {MODEL_NAME} model... "
     fail = f"\nFailed to download {MODEL_NAME} model. Please prepare the model according to the steps in below link:\n{MODEL_HELP_URL}"
-    ret = install.download_qai_hubmodel(MODEL_ID, model_path, desc=desc, fail=fail)
+    ret = install.download_qai_hubmodel(SOC_ID, MODEL_NAME, model_path, desc=desc, fail=fail)
 
     if not ret:
         exit()
@@ -129,7 +144,7 @@ def Inference(input_image_path):
     PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
 
     # Run the inference.
-    output_data = wideresnet50.Inference(image)
+    output_data = wideresnet50.Inference([image])
 
     # Reset the HTP.
     PerfProfile.RelPerfProfileGlobal()

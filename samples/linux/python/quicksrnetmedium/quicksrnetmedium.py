@@ -56,6 +56,21 @@ input_image_path = os.path.join(execution_ws, "super_resolution_input.jpg")
 INPUT_IMAGE_PATH_URL = "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/super_resolution/v2/super_resolution_input.jpg"
 ####################################################################
 
+SOC_ID = None
+cleaned_argv = []
+i = 0
+while i < len(sys.argv):
+    if sys.argv[i] == '--chipset':
+        SOC_ID = sys.argv[i + 1]
+        i += 2
+    else:
+        cleaned_argv.append(sys.argv[i])
+        i += 1
+
+sys.argv = cleaned_argv
+
+print(f"SOC_ID: {SOC_ID}")
+
 image_buffer = None
 quicksrnetmedium = None
 
@@ -71,7 +86,7 @@ def model_download():
 
     desc = f"Downloading {MODEL_NAME} model... "
     fail = f"\nFailed to download {MODEL_NAME} model. Please prepare the model according to the steps in below link:\n{MODEL_HELP_URL}"
-    ret = install.download_qai_hubmodel(MODEL_ID, model_path, desc=desc, fail=fail)
+    ret = install.download_qai_hubmodel(SOC_ID, MODEL_NAME, model_path, desc=desc, fail=fail)
 
     if not ret:
         exit()
@@ -101,7 +116,7 @@ def Inference(input_image_path, output_image_path, show_image = True):
     PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
 
     # Run the inference.
-    output_image = quicksrnetmedium.Inference(image)
+    output_image = quicksrnetmedium.Inference([image])
 
     # Reset the HTP.
     PerfProfile.RelPerfProfileGlobal()

@@ -50,6 +50,21 @@ model_path = model_dir + "/" + MODEL_NAME + ".bin"
 
 ####################################################################
 
+SOC_ID = None
+cleaned_argv = []
+i = 0
+while i < len(sys.argv):
+    if sys.argv[i] == '--chipset':
+        SOC_ID = sys.argv[i + 1]
+        i += 2
+    else:
+        cleaned_argv.append(sys.argv[i])
+        i += 1
+
+sys.argv = cleaned_argv
+
+print(f"SOC_ID: {SOC_ID}")
+
 yolov8 = None
 
 nms_score_threshold: float = 0.45
@@ -296,7 +311,7 @@ def model_download():
 
     desc = f"Downloading {MODEL_NAME} model... "
     fail = f"\nFailed to download {MODEL_NAME} model. Please prepare the model according to the steps in below link:\n{MODEL_HELP_URL}"
-    ret = install.download_qai_hubmodel(MODEL_ID, model_path, desc=desc, fail=fail)
+    ret = install.download_qai_hubmodel(SOC_ID, MODEL_NAME, model_path, desc=desc, fail=fail)
 
     if not ret:
         exit()
@@ -332,11 +347,15 @@ def Inference(input_image_path, output_image_path, show_image = True):
     PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
 
     # Run the inference.
-    model_output = yolov8.Inference(image)
-
-    pred_boxes = torch.tensor(model_output[2].reshape(1, -1, 4))
-    pred_scores = torch.tensor(model_output[0].reshape(1, -1))
-    pred_class_idx = torch.tensor(model_output[1].reshape(1, -1))
+    model_output = yolov8.Inference([image])
+    if SOC_ID == "6490":
+        pred_boxes = torch.tensor(model_output[2].reshape(1, -1, 4))
+        pred_scores = torch.tensor(model_output[0].reshape(1, -1))
+        pred_class_idx = torch.tensor(model_output[1].reshape(1, -1))
+    else:
+        pred_boxes = torch.tensor(model_output[0].reshape(1, -1, 4))
+        pred_scores = torch.tensor(model_output[1].reshape(1, -1))
+        pred_class_idx = torch.tensor(model_output[2].reshape(1, -1))
 
     # Reset the HTP.
     PerfProfile.RelPerfProfileGlobal()

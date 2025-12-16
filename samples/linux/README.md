@@ -50,27 +50,30 @@ The following table lists available sample models, their descriptions, and instr
 
 | Example                | Description                                   | How to Run                                      |
 |------------------------|-----------------------------------------------|-------------------------------------------------|
-| convnext_base          | ConvNeXt Base image classification            | `python convnext_base/convnext_base.py`         |
-| convnext_tiny          | ConvNeXt Tiny image classification            | `python convnext_tiny/convnext_tiny.py`         |
-| efficientnet_b0        | EfficientNet B0 image classification          | `python efficientnet_b0/efficientnet_b0.py`     |
-| efficientnet_b4        | EfficientNet B4 image classification          | `python efficientnet_b4/efficientnet_b4.py`     |
-| efficientnet_v2_s      | EfficientNet V2 Small image classification    | `python efficientnet_v2_s/efficientnet_v2_s.py` |
-| fcn_resnet50           | FCN-ResNet50 semantic segmentation            | `python fcn_resnet50/fcn_resnet50.py`           |
+| aotgan                 | AOTGAN image inpainting                       | `python aotgan/aotgan.py`                       |
+| beit                   | BEiT image classification                     | `python beit/beit.py`                           |
+| depth_anything         | Depth Anything depth estimation               | `python depth_anything/depth_anything.py`       |
+| easy_ocr               | EasyOCR text recognition                      | `python easy_ocr/easy_ocr.py`                   |
+| face_attrib_net        | Face attribute recognition                    | `python face_attrib_net/face_attrib_net.py`     |
+| facemap_3dmm           | 3DMM face mapping                             | `python facemap_3dmm/facemap_3dmm.py`           |
 | googlenet              | GoogLeNet image classification                | `python googlenet/googlenet.py`                 |
 | inception_v3           | Inception V3 image classification             | `python inception_v3/inception_v3.py`           |
-| levit                  | LeViT image classification                    | `python levit/levit.py`                         |
+| lama_dilated           | LaMa Dilated image inpainting                 | `python lama_dilated/lama_dilated.py`           |
+| mediapipe_hand         | MediaPipe Hand landmark detection             | `python mediapipe_hand/mediapipe_hand.py`       |
+| nomic_embed_text       | Nomic text embedding                          | `python nomic_embed_text/nomic_embed_text.py`   |
+| openai_clip            | OpenAI CLIP model                             | `python openai_clip/openai_clip.py`             |
+| openpose               | OpenPose human pose estimation                | `python openpose/openpose.py`                   |
 | quicksrnetmedium       | QuickSRNetMedium image super-resolution       | `python quicksrnetmedium/quicksrnetmedium.py`   |
 | real_esrgan_general_x4v3 | RealESRGAN General X4V3 super-resolution   | `python real_esrgan_general_x4v3/real_esrgan_general_x4v3.py` |
 | real_esrgan_x4plus     | RealESRGAN X4Plus image super-resolution      | `python real_esrgan_x4plus/real_esrgan_x4plus.py` |
-| regnet                 | RegNet image classification                   | `python regnet/regnet.py`                       |
-| sesr_m5                | SESR-M5 image super-resolution                | `python sesr_m5/sesr_m5.py`                     |
-| shufflenet_v2          | ShuffleNet V2 image classification            | `python shufflenet_v2/shufflenet_v2.py`         |
-| squeezenet1_1          | SqueezeNet1.1 image classification            | `python squeezenet1_1/squeezenet1_1.py`         |
-| utils                  | Utility scripts for preprocessing/postprocessing | `python utils/utils.py`                      |
-| vit                    | Vision Transformer image classification       | `python vit/vit.py`                             |
-| wideresnet50           | WideResNet50 image classification             | `python wideresnet50/wideresnet50.py`           |
-| xlsr                   | XLSR super-resolution                       | `python xlsr/xlsr.py`                           |
+| resnet_3d              | 3D ResNet video classification                | `python resnet_3d/resnet_3d.py`                 |
+| stable_diffusion_v1_5  | Stable Diffusion v1.5 text-to-image           | `python stable_diffusion_v1_5/stable_diffusion_v1_5.py` |
+| stable_diffusion_v2_1  | Stable Diffusion v2.1 text-to-image           | `python stable_diffusion_v2_1/stable_diffusion_v2_1.py` |
+| unet_segmentation      | UNet image segmentation                       | `python unet_segmentation/unet_segmentation.py` |
+| whisper_base_en        | Whisper Base (English) speech recognition     | `python whisper_base_en/whisper_base_en.py`     |
+| whisper_tiny_en        | Whisper Tiny (English) speech recognition     | `python whisper_tiny_en/whisper_tiny_en.py`     |
+| yamnet                 | YAMNet audio event classification             | `python yamnet/yamnet.py`                       |
 | yolov8_det             | YOLOv8 object detection                       | `python yolov8_det/yolov8_det.py`               |
 
 > **Note:**  
-> Ensure you are in the `samples/linux/python` directory before running any example.
+> Ensure you are in the `samples/python` directory before running any example.

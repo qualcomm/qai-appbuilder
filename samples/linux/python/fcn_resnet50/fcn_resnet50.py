@@ -44,6 +44,20 @@ model_path = model_dir + "/" + MODEL_NAME + ".bin"
 
 ####################################################################
 
+SOC_ID = None
+cleaned_argv = []
+i = 0
+while i < len(sys.argv):
+    if sys.argv[i] == '--chipset':
+        SOC_ID = sys.argv[i + 1]
+        i += 2
+    else:
+        cleaned_argv.append(sys.argv[i])
+        i += 1
+
+sys.argv = cleaned_argv
+
+print(f"SOC_ID: {SOC_ID}")
 
 
 def resize_pad(
@@ -168,7 +182,7 @@ def model_download():
 
     desc = f"Downloading {MODEL_NAME} model... "
     fail = f"\nFailed to download {MODEL_NAME} model. Please prepare the model according to the steps in below link:\n{MODEL_HELP_URL}"
-    ret = install.download_qai_hubmodel(MODEL_ID, model_path, desc=desc, fail=fail)
+    ret = install.download_qai_hubmodel(SOC_ID, MODEL_NAME, model_path, desc=desc, fail=fail)
 
     if not ret:
         exit()
@@ -184,7 +198,7 @@ def Inference(frame,invoke_nums):
     PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
 
     # Run the inference.
-    output = fcn_resnet50.Inference(img_input)
+    output = fcn_resnet50.Inference([img_input])
 
     PerfProfile.RelPerfProfileGlobal()
 

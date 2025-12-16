@@ -53,7 +53,66 @@ def is_file_exists(filepath):
         return True
     return False
 
-def download_qai_hubmodel(model_id, filepath, desc=None, fail=None, hub_id=HUB_ID_Q):
+def config_model_id(soc_id, model_name):
+    model_map = {
+        "6490": {
+            "inception_v3": "mmd11p1vm",
+            "convnext_base": "mqkrok2zn",
+            "convnext_tiny": "mq93k6w4q",
+            "efficientnet_b0": "mnj2ojddm",
+            "efficientnet_b4": "mqpeoj2vn",
+            "efficientnet_v2_s": "mmd17jxom",
+            "fcn_resnet50": "mqpeoj4on",
+            "googlenet": "mng004z6q",
+            "levit": "mnzdje5zq",
+            "quicksrnetmedium": "mm633o32m",
+            "real_esrgan_general_x4v3": "mqpee00on",
+            "real_esrgan_x4plus": "mqkrre6wn",
+            "regnet": "mnzdk7koq",
+            "sesr_m5": "mn43y5k0q",
+            "shufflenet_v2": "mm6325l2m",
+            "squeezenet1_1": "mn7jr0oon",
+            "vit": "mq938rllq",
+            "wideresnet50": "mq3z0k4lm",
+            "xlsr": "mq938r3rq",
+            "yolov8_det": "mn433rzrq",
+        },
+        "9075": {
+            "inception_v3": "mn15rx6zm",
+            "convnext_base": "mqyjzl4rq",
+            "convnext_tiny": "mmror1x0m",
+            "efficientnet_b0": "mqve1kj0n",
+            "efficientnet_b4": "mmror12wm",
+            "efficientnet_v2_s": "mqkowy07n",
+            "fcn_resnet50": "mqpeoj4on",
+            "googlenet": "mqpo78g0m",
+            "levit": "mnzdje5zq",
+            "quicksrnetmedium": "mn15rxvzm",
+            "real_esrgan_general_x4v3": "mmd72w90m",
+            "real_esrgan_x4plus": "mqe2r48kq",
+            "regnet": "mmd7ekl0m",
+            "sesr_m5": "mmxolrrkm",
+            "shufflenet_v2": "mqvel1oen",
+            "squeezenet1_1": "mmrolrzrm",
+            "vit": "mnw6ldxxm",
+            "wideresnet50": "mng9z8deq",
+            "xlsr": "mnw6ldg3m",
+            "yolov8_det": "mqpoll00m",
+        }
+    }
+ 
+    # 使用 .get() 安全地获取 model_id
+    model_id = model_map.get(soc_id, {}).get(model_name)
+ 
+    if not model_id:
+        print(f"No specific model_id for soc_id='{soc_id}' and model_name='{model_name}'.")
+        print("use deault 9075 models ")
+        model_id = model_map.get("9075", {}).get(model_name)
+   
+    print(f"model_id: {model_id}")
+    return model_id
+
+def download_qai_hubmodel(soc_id, model_name, filepath, desc=None, fail=None, hub_id=HUB_ID_Q):
     ret = True    
 
     if is_file_exists(filepath):
@@ -66,6 +125,8 @@ def download_qai_hubmodel(model_id, filepath, desc=None, fail=None, hub_id=HUB_I
         print(desc)
     else:
         print(f"Downloading {os.path.basename(filepath)}...")
+    
+    model_id = config_model_id(soc_id, model_name)
 
     setup_qai_hub(hub_id)
     try:
