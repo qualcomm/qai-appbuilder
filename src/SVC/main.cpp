@@ -172,6 +172,57 @@ void ModelRelease(std::string cmdBuf, HANDLE hSvcPipeOutWrite) {
     }
 }
 
+std::string vec2str(const std::vector<std::string>& vec) {
+    std::ostringstream oss;
+    for (size_t i = 0; i < vec.size(); i++) {
+        if (i > 0) oss << ",";
+        oss << vec[i];
+    }
+    return oss.str();
+}
+
+std::string vec2str(const std::vector<std::vector<size_t>>& vec) {
+    std::ostringstream oss;
+    for (size_t i = 0; i < vec.size(); i++) {
+        if (i > 0) oss << "|";   // split with | 
+        for (size_t j = 0; j < vec[i].size(); j++) {
+            if (j > 0) oss << ",";
+            oss << vec[i][j];
+        }
+    }
+    return oss.str();
+}
+
+void getModelInfo(std::string cmdBuf, HANDLE hSvcPipeOutWrite) {
+    BOOL bSuccess = true;
+    std::vector<std::string> commands;
+    split_string(commands, cmdBuf, ';');
+    std::string model_name   = commands[0];
+    std::string input        = commands[1];
+
+    ModelInfo_t output = g_LibAppBuilder.getModelInfo(model_name, input);
+    std::string command;
+    std::ostringstream oss;
+    oss << vec2str(output.inputShapes)   << ";"
+        << vec2str(output.inputDataType) << ";"
+        << vec2str(output.outputShapes)  << ";"
+        << vec2str(output.outputDataType)<< ";"
+        << vec2str(output.inputName)<< ";"
+        << vec2str(output.outputName)<< ";"
+        << output.graphName << ";";
+    command = oss.str();
+
+    DWORD dwRead = 0, dwWrite = 0;
+    //printf("getModelInfo in main.cpp,command=%s\n", command.c_str());
+    dwRead = (DWORD)command.length() + 1;
+    if (bSuccess) {
+        bSuccess = WriteFile(hSvcPipeOutWrite, command.c_str(), dwRead, &dwWrite, NULL);
+    }
+    else {
+        bSuccess = WriteFile(hSvcPipeOutWrite, ACTION_FAILED, (DWORD)strlen(ACTION_FAILED) + 1, NULL, NULL);
+    }
+}
+
 int svcprocess_run(HANDLE hSvcPipeInRead, HANDLE hSvcPipeOutWrite) {
     DWORD dwRead = 0, dwWrite = 0;
     BOOL bSuccess = false;
@@ -200,6 +251,10 @@ int svcprocess_run(HANDLE hSvcPipeInRead, HANDLE hSvcPipeOutWrite) {
 
             case 'r':   // release model.
                 ModelRelease(cmdBuf, hSvcPipeOutWrite);
+                break;
+
+            case 'i':   // get model info.
+                getModelInfo(cmdBuf, hSvcPipeOutWrite);
                 break;
         }
     }

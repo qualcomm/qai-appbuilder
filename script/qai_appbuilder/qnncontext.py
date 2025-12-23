@@ -192,13 +192,22 @@ class QNNLoraContext:
 
     def getOutputDataType(self, ):
         return self.m_context.getOutputDataType()
+
+    def getGraphName(self, ):
+        return self.m_context.getGraphName()
+    
+    def getInputName(self, ):
+        return self.m_context.getInputName()
+    
+    def getOutputName(self, ):
+        return self.m_context.getOutputName()
+
     #@timer
     def Inference(self, input, perf_profile = PerfProfile.DEFAULT, graphIndex = 0):
         input= reshape_input(input)         
         output = self.m_context.Inference(input, perf_profile, graphIndex)
         outputshape_list = self.getOutputShapes()
         output = reshape_output(output, outputshape_list)
-
         return output
     
     def apply_binary_update(self, lora_adapters=None):
@@ -261,15 +270,21 @@ class QNNContext:
     def getOutputDataType(self, ):
         return self.m_context.getOutputDataType()
 
+    def getGraphName(self, ):
+        return self.m_context.getGraphName()
+
+    def getInputName(self, ):
+        return self.m_context.getInputName()
+    
+    def getOutputName(self, ):
+        return self.m_context.getOutputName()
+
     #@timer
     def Inference(self, input, perf_profile = PerfProfile.DEFAULT, graphIndex = 0):
         input = reshape_input(input) 
-
         output = self.m_context.Inference(input, perf_profile, graphIndex)
-
         outputshape_list = self.getOutputShapes()
         output = reshape_output(output, outputshape_list)
-
         return output
 
     #@timer
@@ -317,26 +332,33 @@ class QNNContextProc:
 
     # issue#24
     def getInputShapes(self, ):
-        return self.m_context.getInputShapes()
+        return self.m_context.getInputShapes(self.proc_name)
 
     def getOutputShapes(self, ):
-        return self.m_context.getOutputShapes()
+        return self.m_context.getOutputShapes(self.proc_name)
 
     def getInputDataType(self, ):
-        return self.m_context.getInputDataType()
+        return self.m_context.getInputDataType(self.proc_name)
 
     def getOutputDataType(self, ):
-        return self.m_context.getOutputDataType()
+        return self.m_context.getOutputDataType(self.proc_name)
+
+
+    def getGraphName(self, ):
+        return self.m_context.getGraphName(self.proc_name)
+
+    def getInputName(self, ):
+        return self.m_context.getInputName(self.proc_name)
+    
+    def getOutputName(self, ):
+        return self.m_context.getOutputName(self.proc_name)
 
     #@timer
     def Inference(self, shareMemory, input, perf_profile = PerfProfile.DEFAULT, graphIndex = 0):
         input = reshape_input(input)
-                
         output = self.m_context.Inference(shareMemory.m_memory, input, perf_profile, graphIndex)
-
         outputshape_list = self.getOutputShapes()
         output = reshape_output(output, outputshape_list)
-
         return output
         
     #@timer

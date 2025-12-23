@@ -1336,6 +1336,39 @@ std::vector<std::vector<size_t>> sample_app::QnnSampleApp::getInputShapes(){
   return m_inputShapes;
 }
 
+std::string sample_app::QnnSampleApp::getGraphName(){
+	if(m_graphName.empty()){
+		auto graphInfo = (*m_graphsInfo)[0/*graphIdx*/];
+		m_graphName  = graphInfo.graphName;
+	}
+    return m_graphName;
+}
+
+std::vector<std::string> sample_app::QnnSampleApp::getInputName(){
+	if(m_inputName.empty()){
+		auto graphInfo = (*m_graphsInfo)[0/*graphIdx*/];
+		Qnn_Tensor_t* inputs  = graphInfo.m_inputs;
+ 		for (size_t inputIdx = 0; inputIdx < graphInfo.numInputTensors; inputIdx++) {
+			std::string inputName = QNN_TENSOR_GET_NAME(inputs[inputIdx]);
+			m_inputName.push_back(inputName);
+		}
+    }
+	return m_inputName;
+}
+
+
+std::vector<std::string> sample_app::QnnSampleApp::getOutputName(){
+	if(m_outputName.empty()){
+		auto graphInfo = (*m_graphsInfo)[0/*graphIdx*/];
+		Qnn_Tensor_t* outputs  = graphInfo.m_outputs;
+		for (size_t outputIdx = 0; outputIdx < graphInfo.numOutputTensors; outputIdx++) {
+			std::string outputName = QNN_TENSOR_GET_NAME(outputs[outputIdx]);
+			m_outputName.push_back(outputName);
+		}
+	}
+	return m_outputName;
+}
+
 std::vector<std::string> sample_app::QnnSampleApp::getInputDataType(){
 	if(m_inputDataType_s.empty()){
 		auto graphInfo = (*m_graphsInfo)[0/*graphIdx*/];

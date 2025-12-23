@@ -9,7 +9,6 @@
 # Compile Commands:
 # [windows]
 # Set QNN_SDK_ROOT=C:/Qualcomm/AIStack/QAIRT/2.40.0.251030/
-# Set QNN_SDK_ROOT=C:/Qualcomm/AIStack/QAIRT/2.39.0.250926/
 # Set QNN_SDK_ROOT=C:/Qualcomm/AIStack/QAIRT/2.38.0.250901/
 # python setup.py bdist_wheel
 # [linux]
@@ -50,7 +49,7 @@ print("-- Arch: " + arch)
 
 python_path = "script"
 binary_path = python_path + "/" + package_name
-qai_libs_path = os.path.join(binary_path, 'libs')
+qai_libs_path = binary_path + "/libs"
 os.makedirs(qai_libs_path, exist_ok=True)
 init_path = os.path.join(qai_libs_path, "__init__.py")
 with open(init_path, "w") as f:
@@ -115,6 +114,7 @@ def build_clean():
         os.remove(binary_path + "/libappbuilder.so")
     if os.path.exists(binary_path + "/Genie.dll"):
         os.remove(binary_path + "/Genie.dll")
+    shutil.rmtree(qai_libs_path)
 
 def build_cmake():
     if not os.path.exists("build"):

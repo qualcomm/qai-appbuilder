@@ -140,6 +140,15 @@ std::vector<py::array_t<float>> inference_P(std::string model_name, std::string 
     return output;
 }
 
+ModelInfo_t getModelInfo_P(std::string model_name, std::string proc_name, 
+                           std::string input, size_t graphIndex = 0) {
+
+    std::vector<void*> outputBuffers;
+    std::vector<size_t> outputSize;
+    ModelInfo_t output = g_LibAppBuilder.getModelInfo(model_name, proc_name, input);
+    return output;
+}
+
 bool ApplyBinaryUpdate(const std::vector<LoraAdapter>& lora_adapters);
 
 int create_memory(std::string share_memory_name, size_t share_memory_size) {
@@ -187,7 +196,25 @@ public:
     std::vector<std::string>  getInputDataType();
     std::vector<std::string>  getOutputDataType();
     std::vector<std::vector<size_t>> getOutputShapes();
+    std::string getGraphName();
+    std::vector<std::string>  getInputName();
+    std::vector<std::string>  getOutputName();
 
+    std::vector<std::vector<size_t>> getInputShapes(const std::string& proc_name);
+    std::vector<std::string>  getInputDataType(const std::string& proc_name);
+    std::vector<std::string>  getOutputDataType(const std::string& proc_name);
+    std::vector<std::vector<size_t>> getOutputShapes(const std::string& proc_name);
+    std::string getGraphName(const std::string& proc_name);
+    std::vector<std::string>  getInputName(const std::string& proc_name);
+    std::vector<std::string>  getOutputName(const std::string& proc_name);
+
+    typedef struct ModelInfo {
+        std::vector<std::vector<size_t>> inputShapes;
+        std::vector<std::string>  inputDataType;
+        std::vector<std::vector<size_t>> onputShapes;
+        std::vector<std::string> onputDataType;
+        std::string graphName;
+    } ModelInfo_t;
     ~QNNContext();
 };
 

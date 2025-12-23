@@ -62,6 +62,53 @@ std::vector<std::vector<size_t>> QNNContext::getOutputShapes(){
     return g_LibAppBuilder.getOutputShapes(m_model_name);
 };
 
+std::string  QNNContext::getGraphName(){
+    return g_LibAppBuilder.getGraphName(m_model_name);
+};
+
+std::vector<std::string> QNNContext::getInputName(){
+    return g_LibAppBuilder.getInputName(m_model_name);
+};
+
+std::vector<std::string> QNNContext::getOutputName(){
+    return g_LibAppBuilder.getOutputName(m_model_name);
+};
+
+std::vector<std::vector<size_t>> QNNContext::getInputShapes(const std::string& proc_name){
+    ::ModelInfo_t m_moduleInfo = getModelInfo_P(m_model_name, m_proc_name,  "is",  /*perf_profile, graphIndex*/ 0);
+    return m_moduleInfo.inputShapes;
+};
+
+std::vector<std::string> QNNContext::getInputDataType(const std::string& proc_name){
+    ::ModelInfo_t m_moduleInfo  = getModelInfo_P(m_model_name, m_proc_name,  "id");
+    return m_moduleInfo.inputDataType;
+};
+
+std::vector<std::string> QNNContext::getOutputDataType(const std::string& proc_name){
+    ::ModelInfo_t m_moduleInfo  = getModelInfo_P(m_model_name, m_proc_name,  "od");
+    return m_moduleInfo.outputDataType;
+};
+
+std::vector<std::vector<size_t>> QNNContext::getOutputShapes(const std::string& proc_name){
+    ::ModelInfo_t m_moduleInfo  = getModelInfo_P(m_model_name, m_proc_name, "os");
+    return m_moduleInfo.outputShapes;
+};
+
+std::string QNNContext::getGraphName(const std::string& proc_name){
+    ::ModelInfo_t m_moduleInfo  = getModelInfo_P(m_model_name, m_proc_name,  "gn");
+    return m_moduleInfo.graphName;
+};
+
+std::vector<std::string> QNNContext::getInputName(const std::string& proc_name){
+    ::ModelInfo_t m_moduleInfo  = getModelInfo_P(m_model_name, m_proc_name,  "in");
+    return m_moduleInfo.inputName;
+};
+
+std::vector<std::string> QNNContext::getOutputName(const std::string& proc_name){
+    ::ModelInfo_t m_moduleInfo  = getModelInfo_P(m_model_name, m_proc_name,  "on");
+    return m_moduleInfo.outputName;
+};
+
 QNNContext::~QNNContext() {
     if (m_proc_name.empty())
         g_LibAppBuilder.ModelDestroy(m_model_name);
@@ -148,11 +195,20 @@ PYBIND11_MODULE(appbuilder, m) {
         .def("Inference", py::overload_cast<const std::vector<py::array_t<float>>&, const std::string&, size_t>(&QNNContext::Inference))
         .def("Inference", py::overload_cast<const ShareMemory&, const std::vector<py::array_t<float>>&, const std::string&, size_t>(&QNNContext::Inference))
         .def("ApplyBinaryUpdate", &QNNContext::ApplyBinaryUpdate, "Apply Lora binary update")
-        .def("getInputShapes", &QNNContext::getInputShapes, "Get Input Shape")
-        .def("getInputDataType", &QNNContext::getInputDataType, "Get Input data type")
-        .def("getOutputDataType", &QNNContext::getOutputDataType, "Get output data type")
-        .def("getOutputShapes", &QNNContext::getOutputShapes, "Get Output Shape");
-
+        .def("getInputShapes", py::overload_cast<>(&QNNContext::getInputShapes)) 
+        .def("getInputDataType", py::overload_cast<>(&QNNContext::getInputDataType)) 
+        .def("getOutputShapes", py::overload_cast<>(&QNNContext::getOutputShapes)) 
+        .def("getOutputDataType", py::overload_cast<>(&QNNContext::getOutputDataType)) 
+        .def("getInputName", py::overload_cast<>(&QNNContext::getInputName))
+        .def("getOutputName", py::overload_cast<>(&QNNContext::getOutputName))
+        .def("getGraphName", py::overload_cast<>(&QNNContext::getGraphName)) 
+        .def("getInputShapes", py::overload_cast<const std::string&>(&QNNContext::getInputShapes))
+        .def("getInputDataType", py::overload_cast<const std::string&>(&QNNContext::getInputDataType))
+        .def("getOutputDataType", py::overload_cast<const std::string&>(&QNNContext::getOutputDataType))
+        .def("getOutputShapes", py::overload_cast<const std::string&>(&QNNContext::getOutputShapes))
+        .def("getInputName", py::overload_cast<const std::string&>(&QNNContext::getInputName))
+        .def("getOutputName", py::overload_cast<const std::string&>(&QNNContext::getOutputName))
+        .def("getGraphName", py::overload_cast<const std::string&>(&QNNContext::getGraphName));
 
     py::class_<LoraAdapter>(m, "LoraAdapter")
         .def(py::init<const std::string &, const std::vector<std::string> &>());

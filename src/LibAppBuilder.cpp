@@ -635,6 +635,76 @@ std::vector<std::string> LibAppBuilder::getOutputDataType(std::string model_name
     return m_outputDataType;
 };
 
+std::string LibAppBuilder::getGraphName(std::string model_name){
+    std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
+    m_graphName = app->getGraphName();
+    sg_model_map.insert(std::make_pair(model_name, std::move(app)));
+    return m_graphName;
+};
+
+std::vector<std::string> LibAppBuilder::getInputName(std::string model_name){
+    std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
+    m_inputName = app->getInputName();
+    sg_model_map.insert(std::make_pair(model_name, std::move(app)));
+    return m_inputName;
+};
+
+std::vector<std::string> LibAppBuilder::getOutputName(std::string model_name){
+    std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
+    m_outputName = app->getOutputName();
+    sg_model_map.insert(std::make_pair(model_name, std::move(app)));
+    return m_outputName;
+};
+
+ModelInfo_t LibAppBuilder::getModelInfo(std::string model_name, std::string proc_name, std::string input) {
+    ModelInfo_t output;
+#ifdef _WIN32
+    if (!proc_name.empty()) {   // If proc_name, run the model in that process.
+        output = TalkToSvc_getModelInfo(model_name, proc_name, input);
+
+    }
+#endif
+    return output;
+}
+
+ModelInfo_t LibAppBuilder::getModelInfo(std::string model_name, std::string input) {
+    return getModelInfoExt(model_name, input);
+}
+ModelInfo_t LibAppBuilder::getModelInfoExt(std::string model_name, std::string input) {
+    bool result = true;
+    ModelInfo_t info;
+
+    std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
+    if (nullptr == app) {
+        app->reportError("getModelInfoExt failure");
+        result = false;
+    }
+    if(result){
+        if (input == "is") {
+            info.inputShapes = app->getInputShapes();
+        } else if (input == "id") {
+            info.inputDataType = app->getInputDataType();
+        } else if (input == "os") {
+            info.outputShapes = app->getOutputShapes();
+        } else if (input == "od") {
+            info.outputDataType = app->getOutputDataType();
+        } else if (input == "in") {
+            info.inputName = app->getInputName();
+        } else if (input == "on") {
+            info.outputName = app->getOutputName();
+        } else if (input == "gn") {
+            info.graphName = app->getGraphName();
+        } else {
+            printf("wrong input in LibAppBuilder::getModelInfoExt: %s\n", input.c_str());
+            app->reportError("getModelInfoExt failure");
+            return info;
+        }
+    }
+    sg_model_map.insert(std::make_pair(model_name, std::move(app)));
+
+    return info;
+}
+
 int main(int argc, char** argv) {
 
     return EXIT_SUCCESS;

@@ -14,6 +14,8 @@
 
 #include <tchar.h>
 #include <sstream>
+#include <vector>
+#include <string>
 
 #include "Utils/ShareMem.hpp"
 
@@ -374,5 +376,87 @@ BOOL TalkToSvc_Inference(std::string model_name, std::string proc_name, std::str
     return bSuccess;
 }
 
+std::vector<std::string> split(const std::string& s, char delim) {
+    std::vector<std::string> elems;
+    std::stringstream ss(s);
+    std::string item;
+    while (std::getline(ss, item, delim)) {
+        elems.push_back(item);
+    }
+    return elems;
+}
+
+std::vector<std::string> parseStringVector(const std::string& s) {
+    if (s.empty()) return {};
+    return split(s, ',');
+}
+
+std::vector<std::vector<size_t>> parseShapeVector(const std::string& s) {
+    std::vector<std::vector<size_t>> result;
+    if (s.empty()) return result;
+    auto shapes = split(s, '|');  
+    for (auto& shapeStr : shapes) {
+        std::vector<size_t> dims;
+        auto dimsStr = split(shapeStr, ',');
+        for (auto& d : dimsStr) {
+            dims.push_back(std::stoull(d));
+        }
+        result.push_back(dims);
+    }
+    return result;
+}
+
+ModelInfo_t TalkToSvc_getModelInfo(std::string model_name, std::string proc_name, std::string input) {
+    ModelInfo_t output;
+    ProcInfo_t* pProcInfo = FindProcInfo(proc_name);
+    if (!pProcInfo) {
+        return output;
+    }
+
+    HANDLE hSvcPipeInWrite = pProcInfo->hSvcPipeInWrite;
+    HANDLE hSvcPipeOutRead = pProcInfo->hSvcPipeOutRead;
+    DWORD dwRead = 0, dwWrite = 0;
+    BOOL bSuccess;
+
+    std::string command = "i" + model_name + ";" + input + ";";
+    dwRead = (DWORD)command.length() + 1;
+
+    // Write command to Svc.
+    bSuccess = WriteFile(hSvcPipeInWrite, command.c_str(), dwRead, &dwWrite, NULL);
+    //printf("TalkToSvc_getModelInfo::WriteToPipe: %s dwRead = %d dwWrite = %d\n", command.c_str(), dwRead, dwWrite);
+    if (!bSuccess) return output;
+
+    // Read command from Svc.
+    bSuccess = ReadFile(hSvcPipeOutRead, g_buffer, GLOBAL_BUFSIZE, &dwRead, NULL);
+    if(dwRead) {
+        g_buffer[dwRead] = 0;
+        //printf("TalkToSvc_getModelInfo::ReadFromPipe: %s dwRead = %d\n", g_buffer, dwRead);
+    }
+    else {
+        printf("TalkToSvc_getModelInfo::ReadFromPipe: Failed to read from hSvcPipeOutRead, perhaps child process died.\n");
+    }
+    if (!bSuccess || dwRead == 0) return output;
+
+    if (dwRead) {
+        if (g_buffer[0] == 'F') {  // ACTION_FAILED == Failed.
+            return output;
+        }
+    }
+
+    auto parts = split(g_buffer, ';');
+    if (parts.size() < 7) { //total parts of struct ModelInfo_t
+        throw std::runtime_error("Invalid command format: expected 7 parts");
+    }
+
+    output.inputShapes    = parseShapeVector(parts[0]);
+    output.inputDataType  = parseStringVector(parts[1]);
+    output.outputShapes   = parseShapeVector(parts[2]);
+    output.outputDataType = parseStringVector(parts[3]);
+    output.inputName      = parseStringVector(parts[4]);
+    output.outputName     = parseStringVector(parts[5]);
+    output.graphName      = parts[6];
+
+    return output;
+}
 #endif
 

@@ -148,6 +148,9 @@ class QnnSampleApp {
   std::vector<std::string> getInputDataType();
   std::vector<std::vector<size_t>> getOutputShapes();  
   std::vector<std::string> getOutputDataType();
+  std::string getGraphName();
+  std::vector<std::string> getInputName();
+  std::vector<std::string> getOutputName();
   qnn_wrapper_api::GraphInfo_t **m_graphsInfo;
   uint32_t m_graphsCount;
 
@@ -214,6 +217,9 @@ class QnnSampleApp {
   std::vector<std::string> m_inputDataType_s;
   std::vector<std::vector<size_t>> m_outputShapes;
   std::vector<std::string> m_outputDataType_s;
+  std::string m_graphName;
+  std::vector<std::string>  m_inputName;
+  std::vector<std::string>  m_outputName;
 };
 }  // namespace sample_app
 }  // namespace tools

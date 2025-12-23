@@ -114,21 +114,33 @@ def Inference(input_image_path, output_image_path, show_image = True):
     if show_image:
         image_buffer.show()
 
+def getGraphName():
+    graph_name = realesrgan.getGraphName()
+    print("debug_realesrgan,graph_name:",graph_name)
+    
 def getInputShapes():
     input_shapes = realesrgan.getInputShapes()
-    print(input_shapes)
+    print("debug_realesrgan,input_shapes:",input_shapes)
 
 def getInputDataType():
     input_dataType = realesrgan.getInputDataType()
-    print(input_dataType)
+    print("debug_realesrgan,input_dataType:",input_dataType)
 
 def getOutputShapes():
     output_shapes = realesrgan.getOutputShapes()
-    print(output_shapes)
+    print("debug_realesrgan,output_shapes:",output_shapes)
 
 def getOutputDataType():
     output_dataType = realesrgan.getOutputDataType()
-    print(output_dataType)
+    print("debug_realesrgan,output_dataType:",output_dataType)
+    
+def getInputName():
+    input_name = realesrgan.getInputName()
+    print("debug_realesrgan,input_name:",input_name)
+
+def getOutputName():
+    output_name = realesrgan.getOutputName()
+    print("debug_realesrgan,output_name:",output_name)    
 
 def Release():
     global realesrgan
@@ -151,7 +163,10 @@ def main(input_image_path=None, output_image_path=None, show_image = True):
     getInputDataType()
     getOutputShapes()
     getOutputDataType()
-
+    getGraphName()
+    getInputName()
+    getOutputName()
+	
     Inference(input_image_path=input_image_path,output_image_path=output_image_path,show_image=show_image)
 
     Release()

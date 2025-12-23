@@ -33,6 +33,15 @@ extern "C" LIBAPPBUILDER_API bool SetProfilingLevel(int32_t profiling_level);
 extern "C" LIBAPPBUILDER_API bool SetPerfProfileGlobal(const std::string& perf_profile);
 extern "C" LIBAPPBUILDER_API bool RelPerfProfileGlobal();
 
+struct ModelInfo_t {
+    std::vector<std::vector<size_t>> inputShapes;
+    std::vector<std::string>  inputDataType;
+    std::vector<std::vector<size_t>> outputShapes;
+    std::vector<std::string> outputDataType;
+    std::vector<std::string>  inputName;
+    std::vector<std::string>  outputName;
+    std::string graphName;
+};
 
 /////////////////////////////////////////////////////////////////////////////
 /// Class LibAppBuilder declaration.
@@ -73,12 +82,21 @@ public:
     std::vector<std::string> getInputDataType(std::string model_name);
     std::vector<std::string> getOutputDataType(std::string model_name);
     std::vector<std::vector<size_t>> getOutputShapes(std::string model_name);
-
+    std::string getGraphName(std::string model_name);
+    std::vector<std::string> getInputName(std::string model_name);
+    std::vector<std::string> getOutputName(std::string model_name);
+    ModelInfo_t getModelInfo(std::string model_name, std::string proc_name, std::string input);
+    ModelInfo_t getModelInfo(std::string model_name, std::string input);
+    ModelInfo_t getModelInfoExt(std::string model_name, std::string input);                                                             
     // issue#24
     std::vector<std::vector<size_t>> m_inputShapes;
     std::vector<std::string> m_inputDataType;
     std::vector<std::vector<size_t>> m_outputShapes;
     std::vector<std::string> m_outputDataType;
+    std::string m_graphName;
+    std::vector<std::string> m_inputName;
+    std::vector<std::string> m_outputName;
+
 };
 
 
