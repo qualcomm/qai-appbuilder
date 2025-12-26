@@ -136,7 +136,7 @@ def build_cmake():
     if toolchain is None:
         if sys.platform.startswith('win'): # Copy Genie library to 'lib' folder for compiling GenieBuilder pyd.
             LIB_PATH = QNN_SDK_ROOT + "/lib/aarch64-windows-msvc"
-            if arch == "ARM64EC": # TODO: No ARM64EC support in Genie SDK yet.
+            if arch == "ARM64EC": 
                 LIB_PATH = QNN_SDK_ROOT + "/lib/arm64x-windows-msvc"
         else: # TODO: linux or android.
             if os.path.exists(os.path.join(QNN_SDK_ROOT, 'lib', 'aarch64-oe-linux-gcc11.2', 'libGenie.so')):
