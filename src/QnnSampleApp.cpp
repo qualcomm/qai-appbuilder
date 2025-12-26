@@ -782,7 +782,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::createFromBinary() {
   }
   uint64_t bufferSize{0};
 
-  TimerHelper timerHelper;
+  // TimerHelper timerHelper;
 
   tools::datautil::StatusCode status{tools::datautil::StatusCode::SUCCESS};
   std::tie(status, bufferSize) = tools::datautil::getFileSize(m_cachedBinaryPath);
@@ -832,8 +832,8 @@ sample_app::StatusCode sample_app::QnnSampleApp::createFromBinary() {
   }
 #endif
 
-  timerHelper.Print("Read model file to memory.");
-  timerHelper.Reset();
+  // timerHelper.Print("Read model file to memory.");
+  // timerHelper.Reset();
 
   // inspect binary info
   auto returnStatus = StatusCode::SUCCESS;
@@ -918,8 +918,8 @@ sample_app::StatusCode sample_app::QnnSampleApp::createFromBinary() {
     qnn_wrapper_api::freeGraphsInfo(&m_graphsInfo, m_graphsCount);
   }
 
-  timerHelper.Print("contextCreateFromBinary.");
-  timerHelper.Reset();
+  // timerHelper.Print("contextCreateFromBinary.");
+  // timerHelper.Reset();
 
 #ifdef MMAP_FILE
   UnmapViewOfFile(buffer);
@@ -927,7 +927,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::createFromBinary() {
   CloseHandle(hFileMap);
 #endif
 
-  timerHelper.Print("UnmapViewOfFile.");
+  // timerHelper.Print("UnmapViewOfFile.");
 
 QNN_FUNCTION_EXIT_LOG;
   return returnStatus;
