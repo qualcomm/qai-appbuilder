@@ -60,6 +60,7 @@ Run below command in Windows terminal:
 ```
 git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
 ```
+
 ### Set PATH and run make.exe to build QAI AppBuilder
 • Download [android ndk](https://dl.google.com/android/repository/android-ndk-r26d-windows.zip).<br>
 • Run following commands in Windows terminal:
