@@ -87,7 +87,7 @@ sys.argv = cleaned_argv  # Now safe for setuptools
 
 if hexagonarch is None:
     if sys.platform.startswith('win'): 
-        dsp_arch    = "73"  # For X-Elite device.
+        dsp_arch    = "81"  # 73 For X-Elite device of QAIRT prior to 2.38.1.
     else: # TODO: linux or android.
         dsp_arch    = "68"
 else:
