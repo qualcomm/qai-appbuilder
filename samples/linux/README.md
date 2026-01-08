@@ -89,7 +89,7 @@ pip install dist/qai_appbuilder-2.39.0-cp312-cp312-linux_aarch64.whl
 
 > **Note:** The version number may vary based on your QNN SDK version.
 
-#### 4. Run Python AI Sample
+#### 4. Run Python Sample
 
 Navigate to the samples directory:
 
@@ -188,10 +188,6 @@ In addition to the computer vision samples above, QAI AppBuilder provides advanc
 
 Build a chat application powered by large language models (LLMs) using OpenAI-compatible APIs.
 
-> **Platform Support:**  
-> - **IQ9075**: Supported ✓
-> - **QCS6490**: Not supported yet
-
 **Steps to run:**
 
 1. Navigate to the launcher directory:
@@ -209,10 +205,6 @@ bash ./3.Start_WebUI.sh
 ### Advanced Example 2: LangFlow Low-Code Framework
 
 Deploy LangFlow, a visual low-code framework for building AI applications with drag-and-drop components.
-
-> **Platform Support:**  
-> - **IQ9075**: Supported ✓
-> - **QCS6490**: Not supported yet
 
 **Steps to run:**
 
