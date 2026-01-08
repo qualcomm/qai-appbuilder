@@ -1,14 +1,14 @@
-# QAI AppBuilder for Ubuntu 24.04 
+# QAI AppBuilder for Ubuntu 24.04
 
 ## Overview
 
-This guide shows how to develop AI applications on Qualcomm Dragonwing™ **IQ9075** and **QCS6490** using QAI AppBuilder. It highlights official support for both SoCs and covers three key topics:
+This guide demonstrates how to develop AI applications on Qualcomm Dragonwing™ **IQ9075** and **QCS6490** platforms using QAI AppBuilder. Both SoCs are officially supported, and this guide covers three main areas:
 
-1. **Chat Application with OpenAI-Compatible API**: Build a conversational chat WebUI application using OpenAI-compatible APIs for seamless integration.
+1. **Chat Application with OpenAI-Compatible API**: Build conversational chat WebUI applications using OpenAI-compatible APIs for seamless integration.
 
-2. **LangFlow Low-Code Framework Sample**: Deploy and run the LangFlow low-code framework on the IQ9075 development board for rapid AI application development.
+2. **LangFlow Low-Code Framework**: Deploy and run the LangFlow low-code framework on IQ9075 for rapid AI application development.
 
-3. **AI Model Inference with Python API Sample**: Learn how to use the QAI AppBuilder Python interface to perform AI model inference on the IQ9075 SoC.
+3. **AI Model Inference with Python API**: Use the QAI AppBuilder Python interface to perform AI model inference on both **IQ9075** and **QCS6490** platforms.
 
 
 ## Platform Support
@@ -16,12 +16,13 @@ This guide shows how to develop AI applications on Qualcomm Dragonwing™ **IQ90
 | Component                         | IQ9075          | QCS6490        |
 |-----------------------------------|-----------------|----------------|
 | Core SDK & Python API             | Supported       | Supported      |
-| Chat Application (OpenAI API)     | Supported       | Not yet        |
-| LangFlow Low-Code Framework       | Supported       | Not yet        |
+| Chat Application (OpenAI API)     | Supported       | Not Supported  |
+| LangFlow Low-Code Framework       | Supported       | Not Supported  |
 
-Notes:
+**Notes:**
 - Supported SoCs: Qualcomm Dragonwing™ IQ9075 and QCS6490
-- Chat and LangFlow samples currently target IQ9075; Python API inference supports both SoCs.
+- Chat and LangFlow samples currently support IQ9075 only
+- Python API and C++ API support both platforms
 
 
 ## Getting Started
@@ -30,132 +31,102 @@ Notes:
 
 Before you begin, ensure you have the following:
 
-- Qualcomm Dragonwing™ IQ9075 or QCS6490 development board (both supported)
+- Qualcomm Dragonwing™ IQ9075 or QCS6490 development board
 - Ubuntu 24.04 installed and configured
-- QAI AppBuilder SDK installed
 - Python 3.8 or higher
+- Git installed on your system
 
-Clone the required library functions:
+Clone the repository with submodules:
 ```bash
 git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
 ```
 
-### Example 1: Chat Application with OpenAI-Compatible API
+### Download QNN SDK
 
-> **Note:**  
-> This chat application currently supports IQ9075.QCS6490 not supports yet.
-
-```bash
-cd tools/launcher_linux
-```
-Run below commands sequences
-
-```bash
-bash ./1.Install_QAI_Appbuilder.sh
-bash ./2.Install_LLM_Models.sh
-bash ./3.Start_WebUI.sh
-
-```
-
-### Example 2: LangFlow Low-Code Framework Sample
-
-> **Note:**  
-> This LangFlow sample currently supports IQ9075. QCS6490 not supports yet.
-
-#### Step 1: start llm service
-```bash
-cd tools/launcher_linux
-bash ./4.Start_GenieAPIService.sh
-
-```
-#### Step 2: install and start LangFlow application
-```bash
-bash ./5.Install_LangFlow.sh
-bash ./6.Start_LangFlow.sh
-
-```
-
-### Example 3: AI Model Inference with Python API
-
-This example demonstrates how to use Python API to perform inference on CV AI models. The models used in this example are automatically downloaded via network requests within the Python script.
-
-### Model Selection Based on Device
-
-- **QCS6490 Device**: When the example script runs on a QCS6490 device, the automatically downloaded model is a quantized INT8 model optimized for integer inference.
-
-- **IQ9075 Device**: When the example script runs on an IQ9075 device, the automatically downloaded model is a float16 model for half-precision floating-point inference.
-
-
-### 1. Download QNN SDK
-Download and install the Qualcomm® AI Runtime SDK from:
-
+Download the Qualcomm® AI Runtime SDK from:
 
 https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK
 
-> **Note:**  
-> The current Python demo requires QNN version 2.39.x or higher.
-> This module is intended for Linux OS, version 2.38.0.250901, with the architecture set to x86.  
-> Although the package is labeled for x86, it also contains dynamic libraries for the aarch64 architecture.  
-> Ensure you select the correct dynamic libraries for your hardware during deployment and runtime to avoid compatibility issues.
-> The downloaded file will have a *.qik extension. For usage instructions, refer to the official documentation:  
-> https://docs.qualcomm.com/bundle/publicresource/topics/80-77512-1/hexagon-dsp-sdk-install-addons-linux.html?product=1601111740010422
+> **Important Notes:**  
+> - **Required Version**: QNN SDK 2.39.x or higher is required.
+> - **Architecture Support**: Although the package is labeled for x86, it contains dynamic libraries for aarch64 architecture.
+> - **Library Selection**: Ensure you select the correct dynamic libraries matching your hardware platform during deployment to avoid compatibility issues.
+> - **File Format**: The downloaded file has a `*.qik` extension.
+> - **Installation Guide**: For detailed installation instructions, refer to the [official documentation](https://docs.qualcomm.com/bundle/publicresource/topics/80-77512-1/hexagon-dsp-sdk-install-addons-linux.html?product=1601111740010422).
 
-### 2. Install basic Python dependencies:
-Run below command in Windows terminal:
-```
-pip install requests==2.32.3 py3-wget==1.0.12 tqdm==4.67.1 importlib-metadata==8.5.0 qai-hub==0.30.0 opencv-python==4.10.0.82 torch>=1.8.0 torchvision>=0.9.0
-```
+### Set Environment Variables
 
-### 3. Set Environment Variables
+Configure the following environment variables (replace `<path_to_qnn_sdk>` with your actual QNN SDK installation path):
 
-**demo requires QNN version 2.39.x or higher**
-
-Set the following environment variables:
+**Common variables for both platforms:**
 ```bash
 export QNN_SDK_ROOT=<path_to_qnn_sdk>
 export LD_LIBRARY_PATH=$QNN_SDK_ROOT/lib/aarch64-oe-linux-gcc11.2
 ```
 
-- If the development board’s SoC is QCS6490, run the following command.
+**Platform-specific configuration:**
+
+- **For QCS6490 devices:**
 ```bash
 export ADSP_LIBRARY_PATH=$QNN_SDK_ROOT/lib/hexagon-v68/unsigned
 ```
 
-- if it is IQ9075, run the following command to set the environment variable path
-
+- **For IQ9075 devices:**
 ```bash
-export ADSP_LIBRARY_PATH=$QNN_SDK_ROOT/lib/hexagon-v75/unsigned
+export ADSP_LIBRARY_PATH=$QNN_SDK_ROOT/lib/hexagon-v73/unsigned
 ```
 
-Replace `<path_to_qnn_sdk>` with the actual path where you extracted the QNN SDK.
+### QAI AppBuilder Python API Samples
 
-### 4. Build the Project
+These examples demonstrate how to use the Python API for AI model inference on computer vision tasks. Models are automatically downloaded during the first run through network requests within the Python scripts.
 
-Create a build directory and compile the project:
+#### Automatic Model Selection
 
-- If the development board’s SoC is QCS6490, run the following command.
+Models are automatically selected based on your device platform:
+
+- **QCS6490**: Downloads quantized INT8 models optimized for integer inference.
+- **IQ9075**: Downloads FP16 models optimized for half-precision floating-point inference.
+
+#### 1. Install Python Dependencies
+
+Install required Python packages:
+```bash
+pip install requests==2.32.3 py3-wget==1.0.12 tqdm==4.67.1 importlib-metadata==8.5.0 qai-hub==0.30.0 opencv-python==4.10.0.82 torch>=1.8.0 torchvision>=0.9.0
+```
+
+#### 2. Build QAI AppBuilder Libraries
+
+Navigate to the project root directory and build the libraries:
+
+**For QCS6490 (Hexagon v68):**
 ```bash
 python setup.py --toolchains aarch64-oe-linux-gcc11.2 --hexagonarch 68 bdist_wheel
-
 ```
 
-- if it is IQ9075, run the following command to set the environment variable path
+**For IQ9075 (Hexagon v73):**
 ```bash
-python setup.py --toolchains aarch64-oe-linux-gcc11.2 --hexagonarch 75 bdist_wheel
-
+python setup.py --toolchains aarch64-oe-linux-gcc11.2 --hexagonarch 73 bdist_wheel
 ```
 
-### 5. Install Qai Appubuilder Linux wheel
+#### 3. Install QAI AppBuilder Wheel Package
+
+Install the built wheel package:
+
 ```bash
-pip install dist/qai_appbuilder-2.38.0-cp312-cp312-linux_aarch64.whl 
-
+pip install dist/qai_appbuilder-2.39.0-cp312-cp312-linux_aarch64.whl
 ```
 
-### 6. Run Sample Models
+> **Note:** The version number may vary based on your QNN SDK version.
 
-Navigate to the sample directory:
+#### 4. Run Sample Models
 
-The following table lists available sample models, their descriptions, and instructions to run each example:
+Navigate to the samples directory:
+
+```bash
+cd samples/linux/python
+```
+
+The following table lists all available sample models with descriptions and execution commands:
 
 | Example                | Description                                   | How to Run                                      |
 |------------------------|-----------------------------------------------|-------------------------------------------------|
@@ -185,7 +156,119 @@ The following table lists available sample models, their descriptions, and instr
 > Ensure you are in the `samples/linux/python` directory before running any example.
 
 
+### QAI AppBuilder C++ API Sample
+
+This example demonstrates AI model inference using the QAI AppBuilder C++ API. The implementation covers:
+
+- Initializing the QAI AppBuilder runtime environment
+- Loading pre-trained AI models
+- Preparing input data for inference
+- Executing model inference
+- Processing and retrieving output results
+
+**Basic Usage Pattern:**
+
+```C++
+#include "LibAppBuilder.hpp"
+
+// Initialize AppBuilder and set logging level
+LibAppBuilder libAppBuilder;
+SetLogLevel(2);
+
+// Prepare buffers for input and output data
+std::vector<uint8_t*> inputBuffers;
+std::vector<uint8_t*> outputBuffers;
+std::vector<size_t> outputSize;
+
+// Initialize the model with required paths
+libAppBuilder.ModelInitialize(model_name, model_path, backend_lib_path, system_lib_path);
+
+// Prepare input data
+// TODO: Load and preprocess your input data into inputBuffers
+
+// Run inference
+libAppBuilder.ModelInference(model_name, inputBuffers, outputBuffers, outputSize);
+
+// Process inference results
+// TODO: Use the data in outputBuffers for your application
+
+// Clean up allocated memory
+for (int j = 0; j < outputBuffers.size(); j++) {
+    free(outputBuffers[j]);
+}
+outputBuffers.clear();
+outputSize.clear();
+
+libAppBuilder.ModelDestroy(model_name);
+```
 
 
+## Advanced Application Examples
+
+In addition to the computer vision samples above, QAI AppBuilder provides advanced examples for building production-ready AI applications:
+
+
+### Example 1: Chat Application with OpenAI-Compatible API
+
+Build a chat application powered by large language models (LLMs) using OpenAI-compatible APIs.
+
+> **Platform Support:**  
+> - **IQ9075**: Supported ✓
+> - **QCS6490**: Not supported yet
+
+**Steps to run:**
+
+1. Navigate to the launcher directory:
+```bash
+cd tools/launcher_linux
+```
+
+2. Run the setup and launch scripts in sequence:
+```bash
+bash ./1.Install_QAI_Appbuilder.sh
+bash ./2.Install_LLM_Models.sh
+bash ./3.Start_WebUI.sh
+```
+
+### Example 2: LangFlow Low-Code Framework
+
+Deploy LangFlow, a visual low-code framework for building AI applications with drag-and-drop components.
+
+> **Platform Support:**  
+> - **IQ9075**: Supported ✓
+> - **QCS6490**: Not supported yet
+
+**Steps to run:**
+
+1. **Start the LLM Service:**
+```bash
+cd tools/launcher_linux
+bash ./4.Start_GenieAPIService.sh
+```
+
+2. **Install and Launch LangFlow:**
+```bash
+bash ./5.Install_LangFlow.sh
+bash ./6.Start_LangFlow.sh
+```
+
+Once started, access the LangFlow web interface to design and deploy your AI workflows visually.
+
+
+## Additional Resources
+
+For detailed documentation and tutorials:
+
+- **[Python API Documentation](../../docs/python.md)** - Complete Python API reference
+- **[Python ARM64 Guide](../../docs/python_arm64.md)** - ARM64-specific development guide
+- **[Interactive Tutorial](../../docs/tutorial.ipynb)** - Jupyter notebook with step-by-step examples
+- **[User Guide](../../docs/user_guide.md)** - Comprehensive usage guide
+
+## Support
+
+For issues, questions, or contributions:
+- **Issue Tracker**: [GitHub Issues](https://github.com/quic/ai-engine-direct-helper/issues)
+- **Documentation**: [Project README](../../README.md)
+- **Community**: Check existing issues before creating new ones
 
 
