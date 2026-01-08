@@ -2,30 +2,9 @@
 
 ## Overview
 
-This guide demonstrates how to develop AI applications on Qualcomm Dragonwing™ **IQ9075** and **QCS6490** platforms using QAI AppBuilder. Both SoCs are officially supported, and this guide covers three main areas:
+This guide demonstrates how to develop AI applications on Qualcomm Dragonwing™ **IQ9075** and **QCS6490** platforms using QAI AppBuilder. QAI AppBuilder provides both Python and C++ interfaces, allowing you to build AI applications with just a few lines of code.
 
-1. **Chat Application with OpenAI-Compatible API**: Build conversational chat WebUI applications using OpenAI-compatible APIs for seamless integration.
-
-2. **LangFlow Low-Code Framework**: Deploy and run the LangFlow low-code framework on IQ9075 for rapid AI application development.
-
-3. **AI Model Inference with Python API**: Use the QAI AppBuilder Python interface to perform AI model inference on both **IQ9075** and **QCS6490** platforms.
-
-
-## Platform Support
-
-| Component                         | IQ9075          | QCS6490        |
-|-----------------------------------|-----------------|----------------|
-| Core SDK & Python API             | Supported       | Supported      |
-| Chat Application (OpenAI API)     | Supported       | Not Supported  |
-| LangFlow Low-Code Framework       | Supported       | Not Supported  |
-
-**Notes:**
-- Supported SoCs: Qualcomm Dragonwing™ IQ9075 and QCS6490
-- Chat and LangFlow samples currently support IQ9075 only
-- Python API and C++ API support both platforms
-
-
-## Getting Started
+## Quick Start
 
 ### Prerequisites
 
@@ -50,13 +29,11 @@ https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK
 > **Important Notes:**  
 > - **Required Version**: QNN SDK 2.39.x or higher is required.
 > - **Architecture Support**: Although the package is labeled for x86, it contains dynamic libraries for aarch64 architecture.
-> - **Library Selection**: Ensure you select the correct dynamic libraries matching your hardware platform during deployment to avoid compatibility issues.
-> - **File Format**: The downloaded file has a `*.qik` extension.
 > - **Installation Guide**: For detailed installation instructions, refer to the [official documentation](https://docs.qualcomm.com/bundle/publicresource/topics/80-77512-1/hexagon-dsp-sdk-install-addons-linux.html?product=1601111740010422).
 
 ### Set Environment Variables
 
-Configure the following environment variables (replace `<path_to_qnn_sdk>` with your actual QNN SDK installation path):
+On the **IQ9075** and **QCS6490** device side, configure the following environment variables (replace `<path_to_qnn_sdk>` with your actual QNN SDK installation path):
 
 **Common variables for both platforms:**
 ```bash
@@ -76,16 +53,10 @@ export ADSP_LIBRARY_PATH=$QNN_SDK_ROOT/lib/hexagon-v68/unsigned
 export ADSP_LIBRARY_PATH=$QNN_SDK_ROOT/lib/hexagon-v73/unsigned
 ```
 
-### QAI AppBuilder Python API Samples
+### Run Python API Samples
 
-These examples demonstrate how to use the Python API for AI model inference on computer vision tasks. Models are automatically downloaded during the first run through network requests within the Python scripts.
+QAI AppBuilder provides multiple examples of AI applications developed using Python, covering scenarios such as image super-resolution, object detection, and image classification. Follow the steps below to run the Python API examples and quickly get started with these applications.
 
-#### Automatic Model Selection
-
-Models are automatically selected based on your device platform:
-
-- **QCS6490**: Downloads quantized INT8 models optimized for integer inference.
-- **IQ9075**: Downloads FP16 models optimized for half-precision floating-point inference.
 
 #### 1. Install Python Dependencies
 
@@ -118,7 +89,7 @@ pip install dist/qai_appbuilder-2.39.0-cp312-cp312-linux_aarch64.whl
 
 > **Note:** The version number may vary based on your QNN SDK version.
 
-#### 4. Run Sample Models
+#### 4. Run Python AI Sample
 
 Navigate to the samples directory:
 
@@ -205,10 +176,15 @@ libAppBuilder.ModelDestroy(model_name);
 
 ## Advanced Application Examples
 
-In addition to the computer vision samples above, QAI AppBuilder provides advanced examples for building production-ready AI applications:
+In addition to the computer vision samples above, QAI AppBuilder provides advanced examples for building production-ready AI applications.
 
+> **Note:** These advanced examples currently support **Qualcomm Dragonwing™ IQ9075** only.
 
-### Example 1: Chat Application with OpenAI-Compatible API
+1. **Chat Application with OpenAI-Compatible API**: Build conversational chat WebUI applications using OpenAI-compatible APIs for seamless integration.
+
+2. **LangFlow Low-Code Framework**: Deploy and run the LangFlow low-code framework on IQ9075 for rapid AI application development.
+
+### Advanced Example 1: Chat Application with OpenAI-Compatible API
 
 Build a chat application powered by large language models (LLMs) using OpenAI-compatible APIs.
 
@@ -230,7 +206,7 @@ bash ./2.Install_LLM_Models.sh
 bash ./3.Start_WebUI.sh
 ```
 
-### Example 2: LangFlow Low-Code Framework
+### Advanced Example 2: LangFlow Low-Code Framework
 
 Deploy LangFlow, a visual low-code framework for building AI applications with drag-and-drop components.
 
