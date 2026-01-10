@@ -84,6 +84,11 @@ class Runtime():
     CPU = "Cpu"
     HTP = "Htp"
 
+class DataType():
+    """Available runtimes for model execution on Qualcomm harwdware."""
+    FLOAT = "float"
+    NATIVE = "native"
+
 class PerfProfile():
     """
         Set the HTP perf profile.
@@ -139,7 +144,6 @@ class QNNConfig():
         LogLevel.SetLogLevel(log_level, log_path)
         ProfilingLevel.SetProfilingLevel(profiling_level)
 
-
 class QNNLoraContext:
     """High-level Python wrapper for a AppBuilder model."""
     def __init__(self,
@@ -149,7 +153,9 @@ class QNNLoraContext:
                 system_lib_path: str = "None",
                 lora_adapters = None,
                 runtime : str = Runtime.HTP,
-                is_async: bool = False
+                is_async: bool = False,
+                input_data_type: str = DataType.FLOAT,
+                output_data_type: str = DataType.FLOAT
     ) -> None:
         """Load a QNN model from `model_path`
 
@@ -160,7 +166,9 @@ class QNNLoraContext:
         """
         self.model_path = model_path
         self.lora_adapters = lora_adapters
-        
+        self.input_data_type = input_data_type
+        self.output_data_type = output_data_type
+
         m_lora_adapters = []
         for adapter in lora_adapters:
             m_lora_adapters.append(adapter.m_adapter)
@@ -176,9 +184,8 @@ class QNNLoraContext:
         if (system_lib_path == "None"):
             system_lib_path = g_system_lib_path
        
-        self.m_context = appbuilder.QNNContext(model_name, model_path,
-                                               backend_lib_path, system_lib_path,
-                                               m_lora_adapters, is_async)
+        self.m_context = appbuilder.QNNContext(model_name, model_path, backend_lib_path, system_lib_path, m_lora_adapters, 
+                                               is_async, input_data_type, output_data_type)
 
     # issue#24
     def getInputShapes(self, ):
@@ -205,7 +212,7 @@ class QNNLoraContext:
     #@timer
     def Inference(self, input, perf_profile = PerfProfile.DEFAULT, graphIndex = 0):
         input= reshape_input(input)         
-        output = self.m_context.Inference(input, perf_profile, graphIndex)
+        output = self.m_context.Inference(input, perf_profile, graphIndex, self.input_data_type, self.output_data_type)
         outputshape_list = self.getOutputShapes()
         output = reshape_output(output, outputshape_list)
         return output
@@ -235,7 +242,9 @@ class QNNContext:
                 backend_lib_path: str = "None",
                 system_lib_path: str = "None",
                 runtime: str = Runtime.HTP,
-                is_async: bool = False
+                is_async: bool = False,
+                input_data_type: str = DataType.FLOAT,
+                output_data_type: str = DataType.FLOAT
     ) -> None:
         """Load a QNN model from `model_path`
 
@@ -243,7 +252,9 @@ class QNNContext:
             model_path (str): model path
         """
         self.model_path = model_path
-
+        self.input_data_type = input_data_type
+        self.output_data_type = output_data_type
+        
         if self.model_path == "None":
             raise ValueError("model_path must be specified!")
 
@@ -255,7 +266,8 @@ class QNNContext:
         if (system_lib_path == "None"):
             system_lib_path = g_system_lib_path
 
-        self.m_context = appbuilder.QNNContext(model_name, model_path, backend_lib_path, system_lib_path, is_async)
+        self.m_context = appbuilder.QNNContext(model_name, model_path, backend_lib_path, system_lib_path, 
+                                               is_async, input_data_type, output_data_type)
 
     # issue#24
     def getInputShapes(self, ):
@@ -282,7 +294,7 @@ class QNNContext:
     #@timer
     def Inference(self, input, perf_profile = PerfProfile.DEFAULT, graphIndex = 0):
         input = reshape_input(input) 
-        output = self.m_context.Inference(input, perf_profile, graphIndex)
+        output = self.m_context.Inference(input, perf_profile, graphIndex, self.input_data_type, self.output_data_type)
         outputshape_list = self.getOutputShapes()
         output = reshape_output(output, outputshape_list)
         return output
@@ -303,7 +315,9 @@ class QNNContextProc:
                  backend_lib_path: str = "None",
                  system_lib_path: str = "None",
                  runtime : str = Runtime.HTP,
-                 is_async: bool = False
+                 is_async: bool = False,
+                input_data_type: str = DataType.FLOAT,
+                output_data_type: str = DataType.FLOAT
     ) -> None:
         """Load a QNN model from `model_path`
 
@@ -312,6 +326,8 @@ class QNNContextProc:
         """
         self.model_path = model_path
         self.proc_name = proc_name
+        self.input_data_type = input_data_type
+        self.output_data_type = output_data_type
 
         if self.proc_name == "None":
             raise ValueError("proc_name must be specified!")
@@ -328,7 +344,8 @@ class QNNContextProc:
             system_lib_path = g_system_lib_path
 
         os.putenv('PATH', g_base_path)
-        self.m_context = appbuilder.QNNContext(model_name, proc_name, model_path, backend_lib_path, system_lib_path, is_async)
+        self.m_context = appbuilder.QNNContext(model_name, proc_name, model_path, backend_lib_path, system_lib_path, 
+                                               is_async, input_data_type, output_data_type)
 
     # issue#24
     def getInputShapes(self, ):
@@ -356,7 +373,7 @@ class QNNContextProc:
     #@timer
     def Inference(self, shareMemory, input, perf_profile = PerfProfile.DEFAULT, graphIndex = 0):
         input = reshape_input(input)
-        output = self.m_context.Inference(shareMemory.m_memory, input, perf_profile, graphIndex)
+        output = self.m_context.Inference(shareMemory.m_memory, input, perf_profile, graphIndex, self.input_data_type, self.output_data_type)
         outputshape_list = self.getOutputShapes()
         output = reshape_output(output, outputshape_list)
         return output

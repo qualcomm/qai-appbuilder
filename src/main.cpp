@@ -20,6 +20,7 @@
 
 static void* sg_backendHandle{nullptr};
 static void* sg_modelHandle{nullptr};
+static void* sg_systemLibraryHandle{nullptr};
 
 namespace qnn {
 namespace tools {
@@ -344,7 +345,7 @@ std::unique_ptr<sample_app::QnnSampleApp> processCommandLine(int argc,
 
   if (loadFromCachedBinary) {
     statusCode =
-        dynamicloadutil::getQnnSystemFunctionPointers(systemLibraryPath, &qnnFunctionPointers);
+        dynamicloadutil::getQnnSystemFunctionPointers(systemLibraryPath, &qnnFunctionPointers, &sg_systemLibraryHandle);
     if (dynamicloadutil::StatusCode::SUCCESS != statusCode) {
       exitWithMessage("Error initializing QNN System Function Pointers", EXIT_FAILURE);
     }
@@ -447,9 +448,15 @@ int main_disable(int argc, char** argv) {	// zw: change it from 'executable' fil
 
   if (sg_backendHandle) {
     pal::dynamicloading::dlClose(sg_backendHandle);
+    sg_backendHandle = nullptr; // zw.
   }
   if (sg_modelHandle) {
     pal::dynamicloading::dlClose(sg_modelHandle);
+    sg_modelHandle = nullptr; // zw.
+  }
+  if (sg_systemLibraryHandle) { // zw.
+    pal::dynamicloading::dlClose(sg_systemLibraryHandle);
+    sg_systemLibraryHandle = nullptr;
   }
 
   return EXIT_SUCCESS;

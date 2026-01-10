@@ -1027,9 +1027,9 @@ iotensor::StatusCode iotensor::IOTensor::fillDims(std::vector<size_t>& dims,
 iotensor::OutputDataType iotensor::parseOutputDataType(std::string dataTypeString) {
   std::transform(dataTypeString.begin(), dataTypeString.end(), dataTypeString.begin(), ::tolower);
   OutputDataType parsedDataType = OutputDataType::INVALID;
-  if (dataTypeString == "float_only") {
+  if (dataTypeString == "float") {
     parsedDataType = OutputDataType::FLOAT_ONLY;
-  } else if (dataTypeString == "native_only") {
+  } else if (dataTypeString == "native") {
     parsedDataType = OutputDataType::NATIVE_ONLY;
   } else if (dataTypeString == "float_and_native") {
     parsedDataType = OutputDataType::FLOAT_AND_NATIVE;

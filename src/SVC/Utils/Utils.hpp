@@ -162,7 +162,7 @@ BOOL StopSvcProcess(std::string proc_name) {
 
 // Send model data to the Svc through share meoory and receive model generated data from share memory.
 BOOL TalkToSvc_Initialize(const std::string& model_name, const std::string& proc_name, const std::string& model_path,
-                          const std::string& backend_lib_path, const std::string& system_lib_path, bool async) {
+                          const std::string& backend_lib_path, const std::string& system_lib_path, bool async, const std::string& input_data_type, const std::string& output_data_type) {
     ProcInfo_t* pProcInfo = FindProcInfo(proc_name);
     if (!pProcInfo) {
         pProcInfo = CreateSvcProcess(proc_name);
@@ -180,7 +180,7 @@ BOOL TalkToSvc_Initialize(const std::string& model_name, const std::string& proc
         async_str = "async";
     }
 
-    std::string command = "l" + model_name + ";" + model_path + ";" + backend_lib_path + ";" + system_lib_path + ";" + async_str;
+    std::string command = "l" + model_name + ";" + model_path + ";" + backend_lib_path + ";" + system_lib_path + ";" + async_str + ";" + input_data_type + ";" + output_data_type;
     dwRead = (DWORD)command.length() + 1;
 
     TimerHelper timerHelper;

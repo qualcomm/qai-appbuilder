@@ -75,11 +75,13 @@ void ModelLoad(std::string cmdBuf, HANDLE hSvcPipeOutWrite) {
     std::string backend_lib_path            = commands[2];
     std::string system_lib_path             = commands[3];
     std::string async_str                   = commands[4];
+    std::string input_data_type             = commands[5];
+    std::string output_data_type            = commands[6];
 
     Print_MemInfo("ModelLoad::ModelInitialize Start.");
     QNN_INF("ModelLoad::ModelInitialize::Model name %s\n", model_name.c_str());
     std::vector<LoraAdapter> Adapters ;
-    bSuccess = g_LibAppBuilder.ModelInitialize(model_name.c_str(), model_path, backend_lib_path, system_lib_path, Adapters);
+    bSuccess = g_LibAppBuilder.ModelInitialize(model_name.c_str(), model_path, backend_lib_path, system_lib_path, Adapters, false, input_data_type, output_data_type);
     QNN_INF("ModelLoad::ModelInitialize End ret = %d\n", bSuccess);
     Print_MemInfo("ModelLoad::ModelInitialize End.");
 

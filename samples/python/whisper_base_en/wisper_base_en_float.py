@@ -31,7 +31,7 @@ from qai_hub_models.models._shared.whisper.model import (
     WhisperEncoderInf,
 )
 
-from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig, DataType)
+from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig)
 
 ####################################################################
 
@@ -203,7 +203,17 @@ class Encoder(QNNContext):
 
 class Decoder(QNNContext):
     def Inference(self, x, index, k_cache_cross, v_cache_cross, k_cache_self, v_cache_self):
+        if x.dtype != np.float32:
+            x = np.asarray(x, dtype=np.float32, order="C")
+        else:
+            x = np.ascontiguousarray(x)
+        if index.dtype != np.float32:
+            index = np.asarray(index, dtype=np.float32, order="C")
+        else:
+            index = np.ascontiguousarray(index)
+
         input_datas=[x, index, k_cache_cross, v_cache_cross, k_cache_self, v_cache_self]
+
         output_data = super().Inference(input_datas)
         logits = output_data[0]
         logits = logits.reshape(1, 1, 51864)
@@ -255,10 +265,9 @@ def Init():
     QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for Decoder 
-    decoder = Decoder("whisper_decoder", decoder_model_path, input_data_type=DataType.NATIVE, output_data_type=DataType.NATIVE)
-
+    decoder = Decoder("whisper_decoder", decoder_model_path)
     # Instance for Encoder 
-    encoder = Encoder("whisper_encoder", encoder_model_path, input_data_type=DataType.NATIVE, output_data_type=DataType.NATIVE)
+    encoder = Encoder("whisper_encoder", encoder_model_path)
 
     print()
     print("Model decoder:")
@@ -327,13 +336,13 @@ def transcribe_single_chunk(audio: np.ndarray):
     # IMPORTANT:
     # QNNContext.Inference (pybind) expects list[numpy.ndarray], not torch.Tensor.
     # Keep token/index inputs as numpy int32 for decoder.
-    x = np.array([[TOKEN_SOT]], dtype=np.int32)
+    x = np.array([[TOKEN_SOT]], dtype=np.float32)
     decoded_tokens = [TOKEN_SOT]
     sample_len = whisper_base_en.mean_decode_len  # mean # of tokens to sample
 
     logits = np.zeros((1, 1, 51864,)).astype(np.float32)
-    k_cache_self = np.zeros((6, 8, 64, 224,)).astype(np.float16)
-    v_cache_self = np.zeros((6, 8, 224, 64,)).astype(np.float16)
+    k_cache_self = np.zeros((6, 8, 64, 224,)).astype(np.float32)
+    v_cache_self = np.zeros((6, 8, 224, 64,)).astype(np.float32)
         
     sum_logprobs = 0
     print("start decode sample_len ", sample_len)
@@ -342,7 +351,7 @@ def transcribe_single_chunk(audio: np.ndarray):
         # the model performance.
         # index - used to get positional embedding correctly.
         #print("start decode ")
-        index = np.array([[i]], dtype=np.int32)
+        index = np.array([[i]], dtype=np.float32)
 
         #print("start Inference ")
         time_start = time.time()
@@ -350,6 +359,7 @@ def transcribe_single_chunk(audio: np.ndarray):
         logits, k_cache_self, v_cache_self = decoder.Inference(
             x, index, k_cache_cross, v_cache_cross, k_cache_self, v_cache_self
         )
+
         time_end = time.time()
         print("time consumes for decoder {:.2f}(ms)".format((time_end - time_start) * 1000))
         #decoder_out = self.decoder(
@@ -387,7 +397,7 @@ def transcribe_single_chunk(audio: np.ndarray):
             break
 
         sum_logprobs += logprobs[next_token]
-        x = np.array([[next_token]], dtype=np.int32)
+        x = np.array([[next_token]], dtype=np.float32)
         decoded_tokens.append(int(next_token))
 
     tokenizer = whisper.decoding.get_tokenizer(
@@ -479,16 +489,8 @@ def log_mel_spectrogram(
     log_spec = torch.clamp(mel_spec, min=1e-10).log10()
     log_spec = torch.maximum(log_spec, log_spec.max() - 8.0)
     log_spec = (log_spec + 4.0) / 4.0
+    return log_spec.unsqueeze(0).detach().float().numpy()
 
-    # ——关键修改在这里：返回前转换为 float16——
-    return (
-        log_spec
-        .unsqueeze(0)
-        .detach()
-        .to(dtype=torch.float16)   # 转为半精度
-        .cpu()
-        .numpy()                   # numpy 数组，dtype=np.float16
-    )
 
 def chunk_and_resample_audio(
     audio: np.ndarray,

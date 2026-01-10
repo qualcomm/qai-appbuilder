@@ -121,7 +121,8 @@ dynamicloadutil::StatusCode dynamicloadutil::getQnnFunctionPointers(
 }
 
 dynamicloadutil::StatusCode dynamicloadutil::getQnnSystemFunctionPointers(
-    std::string systemLibraryPath, sample_app::QnnFunctionPointers* qnnFunctionPointers) {
+    std::string systemLibraryPath, sample_app::QnnFunctionPointers* qnnFunctionPointers,
+    void** systemLibraryHandleRtn) {  // zw. Save systemHandle for free later.
   QNN_FUNCTION_ENTRY_LOG;
   if (!qnnFunctionPointers) {
     QNN_ERROR("nullptr provided for qnnFunctionPointers");
@@ -134,6 +135,9 @@ dynamicloadutil::StatusCode dynamicloadutil::getQnnSystemFunctionPointers(
               pal::dynamicloading::dlError());
     return StatusCode::FAIL_LOAD_SYSTEM_LIB;
   }
+
+  if (systemLibraryHandleRtn) { *systemLibraryHandleRtn = systemLibraryHandle; }  // zw.
+
   QnnSystemInterfaceGetProvidersFn_t getSystemInterfaceProviders{nullptr};
   getSystemInterfaceProviders = resolveSymbol<QnnSystemInterfaceGetProvidersFn_t>(
       systemLibraryHandle, "QnnSystemInterface_getProviders");

@@ -30,7 +30,8 @@ StatusCode getQnnFunctionPointers(std::string backendPath,
                                   bool loadModelLib,
                                   void** modelHandleRtn);
 StatusCode getQnnSystemFunctionPointers(std::string systemLibraryPath,
-                                        sample_app::QnnFunctionPointers* qnnFunctionPointers);
+                                        sample_app::QnnFunctionPointers* qnnFunctionPointers,
+                                        void** systemLibraryHandleRtn);  // zw. Save systemHandle for free later.
 }  // namespace dynamicloadutil
 }  // namespace tools
 }  // namespace qnn

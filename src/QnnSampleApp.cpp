@@ -1519,28 +1519,55 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vecto
 
                 std::vector<size_t> dims;
                 m_ioTensor.fillDims(dims, QNN_TENSOR_GET_DIMENSIONS(outputs[outputIdx]), QNN_TENSOR_GET_RANK(outputs[outputIdx]));
-                size_t elementCount = datautil::calculateElementCount(dims);
-                size_t size = elementCount * (sizeof(float) / sizeof(uint8_t));
-                uint8_t* buffer = nullptr;
 
-                float* floatBuffer = nullptr;
-                if (shareMemory) {
-                    floatBuffer = (float*)(pShareBuffer + offset);
-                    offset += size;
+                const Qnn_DataType_t outDtype = QNN_TENSOR_GET_DATA_TYPE(outputs[outputIdx]);
+
+                // Native output byte size (same logic used by writeOutputTensor()->writeBatchDataToFile()).
+                // i.e., write as-is, no dequantization. 
+                size_t nativeBytes = 0;
+                {
+                  datautil::StatusCode duStatus;
+                  std::tie(duStatus, nativeBytes) = datautil::calculateLength(dims, outDtype);
+                  if (datautil::StatusCode::SUCCESS != duStatus || nativeBytes == 0) {
+                    QNN_ERROR("Failed to calculate native output size for outputIdx: %d", outputIdx);
+                    return StatusCode::FAILURE;
+                  }
                 }
 
-                if (QNN_TENSOR_GET_DATA_TYPE(outputs[outputIdx]) == QNN_DATATYPE_FLOAT_32) {
+                // Float output byte size when user requests FLOAT_ONLY (always float32 buffer).
+                const size_t floatBytes = datautil::calculateElementCount(dims) * sizeof(float);
+
+                uint8_t* buffer = nullptr;      // what we finally push to outputBuffers
+                float*   floatBuffer = nullptr; // used only for FLOAT_ONLY conversion path
+
+                // NOTE:
+                // - When shareMemory is enabled, caller provides a shared region and we pack outputs
+                //   sequentially into it. We must advance offset by the *actual* bytes we write.
+                // - For FLOAT_ONLY we write floatBytes; for NATIVE_ONLY we write nativeBytes.
+
+                if (outDtype == QNN_DATATYPE_FLOAT_32) {
                     QNN_DEBUG("Writing in output->dataType == QNN_DATATYPE_FLOAT_32");
-                    // Run the model in CPU.
-                    if (!floatBuffer) {
-                        floatBuffer = (float*)malloc(size);
+                    // For float output tensor, outputDataType has no effect (same behavior as IOTensor::writeOutputTensors). 
+                    if (shareMemory) {
+                      buffer = pShareBuffer + offset;
+                      offset += nativeBytes; // nativeBytes == floatBytes in this case, but keep consistent
+                    } else {
+                      buffer = static_cast<uint8_t*>(malloc(nativeBytes));
+                      if (!buffer) {
+                        QNN_ERROR("Failed to allocate output buffer for outputIdx: %d", outputIdx);
+                        return StatusCode::FAILURE;
+                      }
                     }
-                    memcpy(floatBuffer, reinterpret_cast<uint8_t*>(QNN_TENSOR_GET_CLIENT_BUF(&(outputs[outputIdx])).data), size);
-                    buffer = reinterpret_cast<uint8_t*>(floatBuffer);
+                    memcpy(buffer,
+                          reinterpret_cast<uint8_t*>(QNN_TENSOR_GET_CLIENT_BUF(&(outputs[outputIdx])).data),
+                          nativeBytes);
                 }
                 else if (m_outputDataType == OutputDataType::FLOAT_ONLY) {
                     QNN_DEBUG("Writing in output->dataType == OutputDataType::FLOAT_ONLY");
-
+                    if (shareMemory) {
+                      floatBuffer = reinterpret_cast<float*>(pShareBuffer + offset);
+                      offset += floatBytes;
+                    }
                     auto ioReturnStatus = m_ioTensor.convertToFloat(&floatBuffer, &outputs[outputIdx]);
                     if (iotensor::StatusCode::SUCCESS != ioReturnStatus) {
                         QNN_ERROR("failure in convertToFloat");
@@ -1550,18 +1577,35 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vecto
                 }
                 else if (m_outputDataType == OutputDataType::NATIVE_ONLY) {
                     QNN_DEBUG("Writing in output->dataType == OutputDataType::NATIVE_ONLY");
-                    QNN_ERROR("Can't handle NATIVE_ONLY data type");
-                    // TODO: handle native only case.
+
+                    // Native-only: write as-is (no convertToFloat), equivalent to IOTensor::writeOutputTensor(). 
+                    if (shareMemory) {
+                      buffer = pShareBuffer + offset;
+                      offset += nativeBytes;
+                    } else {
+                      buffer = static_cast<uint8_t*>(malloc(nativeBytes));
+                      if (!buffer) {
+                        QNN_ERROR("Failed to allocate native output buffer for outputIdx: %d", outputIdx);
+                        return StatusCode::FAILURE;
+                      }
+                    }
+                    memcpy(buffer,
+                          reinterpret_cast<uint8_t*>(QNN_TENSOR_GET_CLIENT_BUF(&(outputs[outputIdx])).data),
+                          nativeBytes);
                 }
-                else if (m_outputDataType == OutputDataType::FLOAT_AND_NATIVE) {
-                    QNN_DEBUG("Writing in output->dataType == OutputDataType::FLOAT_AND_NATIVE");
-                    QNN_ERROR("Can't handle FLOAT_AND_NATIVE data type");
-                    // TODO: handle float and native case.
+                else {
+                    QNN_ERROR("Can't handle unknown data type: %d", m_outputDataType);
                 }
 
                 if (buffer) {
                     outputBuffers.push_back(buffer);
-                    outputSize.push_back(size);
+                    // Report the exact bytes of this output buffer.
+                    // - FLOAT_ONLY: floatBytes
+                    // - NATIVE_ONLY / float32 tensor: nativeBytes
+                    size_t reportedBytes = (m_outputDataType == OutputDataType::FLOAT_ONLY && outDtype != QNN_DATATYPE_FLOAT_32)
+                                            ? floatBytes
+                                            : nativeBytes;
+                    outputSize.push_back(reportedBytes);
                 }
             }
             // QNN_ERROR("output buffer size: %d\n", outputBuffers.size());
@@ -1646,5 +1690,3 @@ sample_app::StatusCode sample_app::QnnSampleApp::destroyPerformance() {
     sg_powerConfigIds.erase(m_powerConfigId);
     return StatusCode::SUCCESS;
 }
-
-

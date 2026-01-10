@@ -51,15 +51,15 @@ class LIBAPPBUILDER_API LibAppBuilder
 public:
     bool ModelInitialize(const std::string& model_name, const std::string& model_path,
                                const std::string& backend_lib_path, const std::string& system_lib_path,
-                               bool async = false);
+                               bool async = false, const std::string& input_data_type="float", const std::string& output_data_type="float");
     bool ModelInitialize(const std::string& model_name, const std::string& proc_name, const std::string& model_path,
                                const std::string& backend_lib_path, const std::string& system_lib_path,
-                               bool async = false);
+                               bool async = false, const std::string& input_data_type="float", const std::string& output_data_type="float");
 
     bool ModelInitialize(const std::string& model_name, const std::string& model_path,
                          const std::string& backend_lib_path, const std::string& system_lib_path,
                          std::vector<LoraAdapter>& lora_adapters,
-                         bool async = false);
+                         bool async = false, const std::string& input_data_type="float", const std::string& output_data_type="float");
 
     bool ModelInference(std::string model_name, std::vector<uint8_t*>& inputBuffers, 
                         std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
