@@ -4,8 +4,13 @@
 # ---------------------------------------------------------------------
 import os
 import sys
-sys.path.append(".")
-sys.path.append("python")
+if sys.platform.startswith('linux'):
+    sys.path.append(".")
+    sys.path.append("linux/python")
+else:
+    sys.path.append(".")
+    sys.path.append("python")
+
 import numpy as np
 from PIL import Image
 import datetime

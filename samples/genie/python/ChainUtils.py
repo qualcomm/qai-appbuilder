@@ -66,8 +66,12 @@ class GenieModel():
         # self.prompt_docs = ""
         # self.model_ready = False
 
-        model_path = os.path.join(APP_PATH, "models", model_name)
-        config_path = os.path.join(model_path, "config.json")
+        model_path = os.path.join(APP_PATH, "models", model_name)        
+        if sys.platform.startswith('linux'):
+            config_path = os.path.join(model_path, "config_linux.json")
+        else:
+            config_path = os.path.join(model_path, "config.json")
+            
         prompt_path = os.path.join(model_path, "prompt.conf")
         self.model_name = model_name
         self.max_query_times = max_query_times
