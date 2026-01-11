@@ -93,7 +93,7 @@ int dlClose(void *handle);
 ///   recent error that occurred from a call to one of the functions in the
 ///   dl-family APIs.
 //---------------------------------------------------------------------------
-char *dlError(void);
+const char *dlError(void);
 
 }  // namespace dynamicloading
 }  // namespace pal

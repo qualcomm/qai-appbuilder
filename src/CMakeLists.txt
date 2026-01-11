@@ -15,6 +15,8 @@ else()
 set(APP "appbuilder")
 endif()
 
+target_compile_features(${APP} PRIVATE cxx_std_20)
+
 set(APP_SOURCES "QnnSampleApp.cpp"
                 "main.cpp"
                 "Log/Logger.cpp"
@@ -43,6 +45,11 @@ set(APP_SOURCES_ARCH "PAL/src/linux/Directory.cpp"
 endif()
 
 ADD_LIBRARY(${APP} SHARED ${APP_SOURCES} ${APP_SOURCES_ARCH})
+
+if (MSVC)
+  target_compile_options(${APP} PRIVATE /O2 /GL /fp:fast)
+  target_link_options(${APP}    PRIVATE /LTCG)
+endif()
 
 SET(LIBRARY_OUTPUT_PATH "${PROJECT_SOURCE_DIR}/../lib")
 

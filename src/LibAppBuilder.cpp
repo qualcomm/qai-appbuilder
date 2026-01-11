@@ -15,6 +15,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
+#include <algorithm>
+#include <execution>
+#include <vector>
+
 
 #include "BuildId.hpp"
 #include "DynamicLoadUtil.hpp"
@@ -50,6 +54,18 @@ namespace qnn {
 namespace tools {
 namespace libappbuilder {
 
+void warmup_parallel_stl()
+{
+    static std::once_flag once;
+    std::call_once(once, []{
+        constexpr size_t N = 1 << 18;
+        static std::vector<int> dummy(N, 0);
+        std::for_each(std::execution::par, dummy.begin(), dummy.end(),
+                      [](int& x){ x += 1; });
+    });
+    QNN_WAR("warmup_parallel_stl");
+}
+
 std::unique_ptr<sample_app::QnnSampleApp> initQnnSampleApp(std::string cachedBinaryPath, std::string backEndPath, std::string systemLibraryPath,
                                                            bool loadFromCachedBinary, std::vector<LoraAdapter>& lora_adapters,
                                                            const std::string& input_data_type, const std::string& output_data_type) {
@@ -66,7 +82,8 @@ std::unique_ptr<sample_app::QnnSampleApp> initQnnSampleApp(std::string cachedBin
       modelPath = cachedBinaryPath;
   }
 
-  printf("input_data_type: %s, output_data_type: %s\n", input_data_type.c_str(), output_data_type.c_str());
+  QNN_WAR("input_data_type: %s, output_data_type: %s\n", input_data_type.c_str(), output_data_type.c_str());
+
   iotensor::InputDataType parsedInputDataType     = iotensor::parseInputDataType(input_data_type);
   iotensor::OutputDataType parsedOutputDataType   = iotensor::parseOutputDataType(output_data_type);
 
@@ -99,6 +116,9 @@ std::unique_ptr<sample_app::QnnSampleApp> initQnnSampleApp(std::string cachedBin
       sample_app::exitWithMessage("Error initializing QNN System Function Pointers", EXIT_FAILURE);
     }
   }
+
+  if ((input_data_type == "float") || (output_data_type == "float")) // We need 'std::transform' only for ‘float’ mode. It need data conversation.
+      warmup_parallel_stl();
 
   sg_qnnInterface = qnnFunctionPointers.qnnInterface;
   std::unique_ptr<sample_app::QnnSampleApp> app(new sample_app::QnnSampleApp(qnnFunctionPointers, "null", opPackagePaths, sg_backendHandle, "null",

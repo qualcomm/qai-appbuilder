@@ -41,6 +41,9 @@ class pal::StringOp {
   ///   Number of bytes copied
   //---------------------------------------------------------------------------
   static size_t memscpy(void *dst, size_t dstSize, const void *src, size_t copySize);
+  /*
+  static size_t memscpy(void* __restrict dst, size_t dstSize, const void* __restrict src, size_t copySize, unsigned blocks = 8);
+  */
 
   //---------------------------------------------------------------------------
   /// @brief

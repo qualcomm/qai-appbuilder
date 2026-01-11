@@ -480,14 +480,14 @@ def log_mel_spectrogram(
     log_spec = torch.maximum(log_spec, log_spec.max() - 8.0)
     log_spec = (log_spec + 4.0) / 4.0
 
-    # ——关键修改在这里：返回前转换为 float16——
+    # return float16
     return (
         log_spec
         .unsqueeze(0)
         .detach()
-        .to(dtype=torch.float16)   # 转为半精度
+        .to(dtype=torch.float16)   # convert to fp16
         .cpu()
-        .numpy()                   # numpy 数组，dtype=np.float16
+        .numpy()                   # numpy array，dtype=np.float16
     )
 
 def chunk_and_resample_audio(
@@ -517,9 +517,6 @@ def chunk_and_resample_audio(
         ),
         audio[last_sample_in_full_length_audio_chunks:],
     ]
-
-
-
         
 def load_demo_audio() -> tuple[np.ndarray, int]:
 #    TEST_AUDIO_PATH.fetch()

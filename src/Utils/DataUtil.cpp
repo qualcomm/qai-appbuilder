@@ -16,16 +16,27 @@
 #include <iostream>
 #include <numeric>
 #include <queue>
+
+#include <execution>
+#include <algorithm>
+#include <bit>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+
+#if defined(__aarch64__) || defined(_M_ARM64)
+  #include <arm_neon.h>
+#endif
 #ifdef _WIN32
 #include <intrin.h>
 #endif
 #include "DataUtil.hpp"
 #include "Logger.hpp"
-#ifndef __hexagon__
 #include "PAL/Directory.hpp"
 #include "PAL/FileOp.hpp"
 #include "PAL/Path.hpp"
-#endif
+
+#define PARALLEL 1  // wd. Improve performance through std::transform and NEON.
 
 using namespace qnn;
 using namespace qnn::tools;
@@ -412,6 +423,107 @@ static inline uint16_t datautil::fp16_ieee_from_fp32_value(float f) {
      return (sign >> 16) | (shl1_w > UINT32_C(0xFF000000) ? UINT16_C(0x7E00) : nonsign);
  }
 
+static inline uint16_t datautil::fp16_ieee_from_fp32_value_v2(float f) noexcept {
+#if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901L) || defined(__GNUC__) && !defined(__STRICT_ANSI__)
+    constexpr float scale_to_inf  = 0x1.0p+112f;
+    constexpr float scale_to_zero = 0x1.0p-110f;
+#else
+    constexpr float scale_to_inf  = std::bit_cast<float>(UINT32_C(0x77800000));
+    constexpr float scale_to_zero = std::bit_cast<float>(UINT32_C(0x08800000));
+#endif
+    float base = (std::fabs(f) * scale_to_inf) * scale_to_zero;
+
+    const uint32_t w      = std::bit_cast<uint32_t>(f);
+    const uint32_t shl1_w = (w << 1);
+    const uint32_t sign   = (w & UINT32_C(0x80000000));
+    uint32_t bias         = (shl1_w & UINT32_C(0xFF000000));
+    bias = std::max(bias, UINT32_C(0x71000000));
+
+    base = std::bit_cast<float>((bias >> 1) + UINT32_C(0x07800000)) + base;
+
+    const uint32_t bits          = std::bit_cast<uint32_t>(base);
+    const uint32_t exp_bits      = (bits >> 13) & UINT32_C(0x00007C00);
+    const uint32_t mantissa_bits =  bits        & UINT32_C(0x00000FFF);
+    const uint32_t nonsign       = exp_bits + mantissa_bits;
+
+    return static_cast<uint16_t>((sign >> 16) |
+             ((shl1_w > UINT32_C(0xFF000000)) ? UINT16_C(0x7E00) : nonsign));
+}
+
+
+bool datautil::float32_to_float16_neon(uint16_t* __restrict dst,
+                             const float*   __restrict src,
+                             size_t n) noexcept
+{
+#if defined(__aarch64__) || defined(_M_ARM64)
+  #if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC) || defined(__ARM_FEATURE_FP16_SCALAR_ARITHMETIC)
+    size_t i = 0;
+    constexpr size_t step = 8;
+    for (; i + step <= n; i += step) {
+        const float32x4_t f0 = vld1q_f32(src + i + 0);
+        const float32x4_t f1 = vld1q_f32(src + i + 4);
+        const float16x4_t h0 = vcvt_f16_f32(f0);
+        const float16x4_t h1 = vcvt_f16_f32(f1);
+        const float16x8_t h  = vcombine_f16(h0, h1);
+        const uint16x8_t u16 = vreinterpretq_u16_f16(h);
+        vst1q_u16(dst + i, u16);
+    }
+    for (; i < n; ++i) dst[i] = fp16_ieee_from_fp32_value_v2(src[i]);
+    return true;
+  #else
+    (void)dst; (void)src; (void)n; return false;
+  #endif
+#else
+    (void)dst; (void)src; (void)n; return false;
+#endif
+}
+
+
+void datautil::float32_to_float16_dispatch(uint16_t* __restrict dst,
+                                 const float*   __restrict src,
+                                 size_t n) noexcept
+{
+    if (!float32_to_float16_neon(dst, src, n)) {
+        constexpr size_t step = 16;
+        size_t i = 0;
+        for (; i + step <= n; i += step) {
+            dst[i+0]  = fp16_ieee_from_fp32_value_v2(src[i+0]);
+            dst[i+1]  = fp16_ieee_from_fp32_value_v2(src[i+1]);
+            dst[i+2]  = fp16_ieee_from_fp32_value_v2(src[i+2]);
+            dst[i+3]  = fp16_ieee_from_fp32_value_v2(src[i+3]);
+            dst[i+4]  = fp16_ieee_from_fp32_value_v2(src[i+4]);
+            dst[i+5]  = fp16_ieee_from_fp32_value_v2(src[i+5]);
+            dst[i+6]  = fp16_ieee_from_fp32_value_v2(src[i+6]);
+            dst[i+7]  = fp16_ieee_from_fp32_value_v2(src[i+7]);
+
+            dst[i+8]  = fp16_ieee_from_fp32_value_v2(src[i+8]);
+            dst[i+9]  = fp16_ieee_from_fp32_value_v2(src[i+9]);
+            dst[i+10] = fp16_ieee_from_fp32_value_v2(src[i+10]);
+            dst[i+11] = fp16_ieee_from_fp32_value_v2(src[i+11]);
+            dst[i+12] = fp16_ieee_from_fp32_value_v2(src[i+12]);
+            dst[i+13] = fp16_ieee_from_fp32_value_v2(src[i+13]);
+            dst[i+14] = fp16_ieee_from_fp32_value_v2(src[i+14]);
+            dst[i+15] = fp16_ieee_from_fp32_value_v2(src[i+15]);
+        }
+        for (; i < n; ++i) dst[i] = fp16_ieee_from_fp32_value_v2(src[i]);
+    }
+}
+
+
+void datautil::float32_to_float16_parallel(uint16_t* __restrict dst,
+                                 const float*   __restrict src,
+                                 size_t n) noexcept
+{
+    constexpr size_t kParallelThreshold = 8192;
+    if (n < kParallelThreshold) {
+        float32_to_float16_dispatch(dst, src, n);
+        return;
+    }
+    std::transform(std::execution::par_unseq, src, src + n, dst,
+                   [](float x) noexcept -> uint16_t { return fp16_ieee_from_fp32_value_v2(x); });
+
+}
+
 // Enabling fp16 execution
 bool datautil::float32ToFloatN(uint8_t* out,
                        float* in,
@@ -423,13 +535,14 @@ bool datautil::float32ToFloatN(uint8_t* out,
       }
   
       if(bitWidth == 16){
-  #ifndef __hexagon__
+  #ifdef PARALLEL   // wd. Improve performance through std::transform and NEON.
+        auto* dst = reinterpret_cast<uint16_t*>(out);  
+        float32_to_float16_parallel(dst, in, numElements);
+  #else
           uint16_t *temp = (uint16_t *)out;
           for(size_t i = 0; i < numElements; i++){
               temp[i] = fp16_ieee_from_fp32_value(in[i]);
           }
-  #else
-          return false;
   #endif //__hexagon__
       }
       else if(bitWidth == 32) {

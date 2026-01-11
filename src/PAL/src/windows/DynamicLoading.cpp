@@ -24,7 +24,7 @@
 #define TOSTRING(x)  STRINGIFY(x)
 
 static std::set<HMODULE> mod_handles;
-static thread_local char *sg_lastErrMsg = "";
+static thread_local const char* sg_lastErrMsg = "";
 
 void *pal::dynamicloading::dlOpen(const char *filename, int flags) {
   HMODULE mod;
@@ -211,8 +211,8 @@ int pal::dynamicloading::dlClose(void *handle) {
   return 0;
 }
 
-char *pal::dynamicloading::dlError(void) {
-  char *retStr = sg_lastErrMsg;
+const char *pal::dynamicloading::dlError(void) {
+  const char *retStr = sg_lastErrMsg;
 
   sg_lastErrMsg = "";
 

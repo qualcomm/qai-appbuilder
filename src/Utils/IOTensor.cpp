@@ -26,6 +26,9 @@
 using namespace qnn;
 using namespace qnn::tools;
 
+#include "LibAppBuilder.hpp"
+TimerHelper timerHelper;
+
 // Helper method to read data from files to a buffer.
 iotensor::PopulateInputTensorsRetType_t iotensor::IOTensor::readDataAndAllocateBuffer(
     const std::vector<std::string>& filePaths,
@@ -344,6 +347,7 @@ iotensor::PopulateInputTensorsRetType_t iotensor::IOTensor::populateInputTensors
 // It relies on reading data from buffer provided during executeGraph() call.
 iotensor::StatusCode iotensor::IOTensor::populateInputTensor(
     uint8_t* buffer, Qnn_Tensor_t* input, iotensor::InputDataType inputDataType) {
+  timerHelper.Reset();
   if (nullptr == input) {
     QNN_ERROR("input is nullptr");
     return StatusCode::FAILURE;
@@ -357,6 +361,7 @@ iotensor::StatusCode iotensor::IOTensor::populateInputTensor(
       QNN_DEBUG("copyFromFloatToNative failure");
       return StatusCode::FAILURE;
     }
+    timerHelper.Print("populateInputTensor::copyFromFloatToNative");
   } else {
     size_t length;
     datautil::StatusCode returnStatus;
@@ -365,8 +370,8 @@ iotensor::StatusCode iotensor::IOTensor::populateInputTensor(
     if (datautil::StatusCode::SUCCESS != returnStatus) {
       return StatusCode::FAILURE;
     }
-    pal::StringOp::memscpy(
-        reinterpret_cast<uint8_t*>(QNN_TENSOR_GET_CLIENT_BUF(input).data), length, buffer, length);
+    pal::StringOp::memscpy(reinterpret_cast<uint8_t*>(QNN_TENSOR_GET_CLIENT_BUF(input).data), length, buffer, length);
+    timerHelper.Print("populateInputTensor::pal::StringOp::memscpy");
   }
   return StatusCode::SUCCESS;
 }

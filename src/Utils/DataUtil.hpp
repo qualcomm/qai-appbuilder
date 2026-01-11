@@ -90,6 +90,25 @@ StatusCode writeBinaryToFile(std::string fileDir,
 
 // Enabling fp16 execution
 static inline uint16_t fp16_ieee_from_fp32_value(float f);
+
+// Single-element FP32?FP16 (bit type), scalar micro-optimized version, semantic unchanged
+static inline uint16_t fp16_ieee_from_fp32_value_v2(float f) noexcept;
+
+// Batch NEON Fast Path (Returns Whether NEON Has Been Used)
+bool float32_to_float16_neon(uint16_t* __restrict dst,
+                             const float*   __restrict src,
+                             size_t n) noexcept;
+
+// Scheduler: Prioritize NEON, otherwise fall back to scalar batch
+void float32_to_float16_dispatch(uint16_t* __restrict dst,
+                                 const float*   __restrict src,
+                                 size_t n) noexcept;
+
+// Parallel version: small array seq, large array par_unseq
+void float32_to_float16_parallel(uint16_t* __restrict dst,
+                                 const float*   __restrict src,
+                                 size_t n) noexcept;
+
 static inline float fp16_ieee_to_fp32_value(uint16_t h);
 static inline uint32_t fp32_to_bits(float f);
 static inline float fp32_from_bits(uint32_t w);
