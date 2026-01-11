@@ -1,3 +1,11 @@
+//==============================================================================
+//
+// Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
+//
+// SPDX-License-Identifier: BSD-3-Clause
+//
+//==============================================================================
+
 #pragma once
 /*
  * qwen25_image_processor.hpp

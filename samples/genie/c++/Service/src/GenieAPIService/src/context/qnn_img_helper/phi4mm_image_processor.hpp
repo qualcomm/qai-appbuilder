@@ -1,3 +1,11 @@
+//==============================================================================
+//
+// Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
+//
+// SPDX-License-Identifier: BSD-3-Clause
+//
+//==============================================================================
+
 // phi4mm_image_processor.hpp
 // Header-only facade for Phi4MM image preprocessing pipeline.
 // Keep STB implementations in exactly ONE .cpp (see demo.cpp).

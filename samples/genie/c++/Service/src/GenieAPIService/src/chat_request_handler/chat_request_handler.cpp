@@ -1,3 +1,11 @@
+//==============================================================================
+//
+// Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
+//
+// SPDX-License-Identifier: BSD-3-Clause
+//
+//==============================================================================
+
 #include "chat_request_handler.h"
 #include "utils.h"
 #include "log.h"
