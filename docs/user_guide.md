@@ -4,7 +4,16 @@
 This software is provided “as is,” without any express or implied warranties. The authors and contributors shall not be held liable for any damages arising from its use. The code may be incomplete or insufficiently tested. Users are solely responsible for evaluating its suitability and assume all associated risks. <br>
 Note: Contributions are welcome. Please ensure thorough testing before deploying in critical systems.
 
+## Note
+### Native Mode:
+- To achieve optimal performance for model data preprocessing, we should try to use the "native" mode:<br>
+    - When initializing the model, set the input and output data types to "native" (the default is "float");<br>
+    - When passing data to the QAI AppBuilder inference function(Inference), provide the format required by the model itself;<br>
+    - You can obtain the required input and output data format types of the model via the getInputDataType() and getOutputDataType() functions;<br>
+    - For specific usage, please refer to the [Wisper](../samples/python/whisper_base_en/whisper_base_en.py) example code.<br>
+
 ## Environment Setup
+** For Python developers, from v2.0.0, we don't need to prepare the below libraries since we've included these libraries into QAI AppBuilder extension(*.whl). <br>
 
 ### Qualcomm® AI Runtime SDK
 
@@ -60,7 +69,7 @@ There're several Python classes from this extension:
 
 ## Notes: <br>
 a. Plese use the API *LogLevel.SetLogLevel()* for Python project to initialize the log function before you call any other APIs. 
-c. Refer to Python sample code: <br>
+b. Refer to Python sample code: <br>
 https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python
 
 ## Sample Code(Python)
