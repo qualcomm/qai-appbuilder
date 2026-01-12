@@ -72,4 +72,4 @@ int pal::dynamicloading::dlClose(void *handle) {
   return ::dlclose(handle);
 }
 
-char *pal::dynamicloading::dlError(void) { return ::dlerror(); }
+const char *pal::dynamicloading::dlError(void) { return ::dlerror(); }
