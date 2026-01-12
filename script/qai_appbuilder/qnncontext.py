@@ -43,7 +43,7 @@ def timer(func):
 def reshape_input(input):
     for i in range(len(input)):
         try:
-            input[i].reshape(-1,)
+            input[i] = input[i].reshape(-1,)
         except (ValueError, TypeError, IndexError, AttributeError) as e:
             print(f"reshape {input[i]} error:{e}")
     return input
@@ -52,7 +52,7 @@ def reshape_input(input):
 def reshape_output(output, outputshape_list):
     for i in range(len(output)):
         try:
-            output[i].reshape(outputshape_list[i])
+            output[i] = output[i].reshape(outputshape_list[i])
         except (ValueError, TypeError, IndexError) as e:
             print(f"reshape {outputshape_list[i]} error:{e}")
     return output
