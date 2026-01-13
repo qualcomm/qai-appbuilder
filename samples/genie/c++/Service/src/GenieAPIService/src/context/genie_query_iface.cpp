@@ -13,7 +13,6 @@
 #include "genie.h"
 #include "genie_impl.h"
 #include "log.h"
-
 #include "utils.h"
 #include "base64.h"
 #include <LibAppBuilder.hpp>
@@ -55,14 +54,14 @@ void Impl::QInterface::GenieCallBack(const char *response,
                                      const void *user_data)
 {
     auto *self = static_cast<QInterface *>(const_cast<void *>(user_data))->context_;
-    if (sentence_code == GenieDialog_SentenceCode_t::GENIE_DIALOG_SENTENCE_END
+    if (sentence_code == GENIE_DIALOG_SENTENCE_END
         || !response
         || !strlen(response))
     {
         return;
     }
 
-    std::lock_guard<std::mutex> guard(self->m_stream_lock);
+    std::lock_guard guard(self->m_stream_lock);
     self->m_stream_answer += response;
 
     auto &impl = self->impl_;
@@ -70,7 +69,7 @@ void Impl::QInterface::GenieCallBack(const char *response,
     if (impl->CurLength >= impl->MaxLength)
     {
         My_Log{My_Log::Level::kError} << "g_CurLength: " << impl->CurLength << "is over and will stop self"
-                                      << std::endl;
+                << std::endl;
         self->Stop();
     }
 }
@@ -87,15 +86,15 @@ bool Impl::IEmbedding::set_content(const std::string &prompt)
         }
 
         /* @formatter:off */
-        auto embedded_bin =  DecodeImg(j["image"])
-                            .BuildImgPixel()
-                            .BuildPixelEmbeddings()
-                            .BuildTextEmbedding(std::move(prompt_text))
-                            .MergeEmbedding();
+        embedded_bin_ =  DecodeImg(j["image"])
+                        .BuildImgPixel()
+                        .BuildPixelEmbeddings()
+                        .BuildTextEmbedding(std::move(prompt_text))
+                        .MergeEmbedding();
         /* @formatter:on */
 
-        auto p = reinterpret_cast<uint8_t * >(embedded_bin.data());
-        prompt_.assign(p, p + embedded_bin.size() * sizeof(float));
+        prompt_data_ = reinterpret_cast<uint8_t *>(embedded_bin_.data());
+        prompt_len_ = embedded_bin_.size() * sizeof(float);
     }
     catch (std::exception &e)
     {
@@ -127,7 +126,7 @@ void Impl::IEmbedding::TokenToEmbedCallback(const int32_t token,
     auto *self = static_cast<IEmbedding *>(const_cast<void *>(userData));
 
     const size_t lutIndex = token * embeddingSize;
-    if ((lutIndex + embeddingSize) <= self->embedded_raw_buf_.size())
+    if (lutIndex + embeddingSize <= self->embedded_raw_buf_.size())
     {
         const int8_t *embeddingSrc = reinterpret_cast<const int8_t *>(self->embedded_raw_buf_.data()) + lutIndex;
         auto *embeddingDst = static_cast<int8_t *>(embedding);
@@ -163,7 +162,7 @@ Impl::IEmbedding &Impl::IEmbedding::BuildPixelEmbeddings()
     }
 
     std::vector<uint8_t *> inputBuffers(qnn_embedding_info_.bin_stack_.size() + 1);
-    inputBuffers[0] = reinterpret_cast<uint8_t *>(png_pixel_buf_.data());
+    inputBuffers[0] = reinterpret_cast<uint8_t *>(img_pixel_buf_.data());
     for (auto i = 0; i < qnn_embedding_info_.bin_stack_.size(); ++i)
     {
         inputBuffers[i + 1] = const_cast<uint8_t *>(qnn_embedding_info_.bin_stack_[i].data());
@@ -177,7 +176,7 @@ Impl::IEmbedding &Impl::IEmbedding::BuildPixelEmbeddings()
         throw std::runtime_error("call model inference failed");
     }
 
-    png_pixel_buf_.clear();
+    img_pixel_buf_.clear();
     img_embedding_buf_.assign(outputBuffers.at(0), outputBuffers.at(0) + outputSize.at(0));
     for (auto &outputBuffer: outputBuffers)
         free(outputBuffer);
@@ -229,7 +228,7 @@ Impl::IEmbedding &Impl::PHI4Embedding::BuildImgPixel()
     }
 
     const auto *src = out.image_inputs.data.data();
-    png_pixel_buf_.assign(src, src + out.image_inputs.data.size());
+    img_pixel_buf_.assign(src, src + out.image_inputs.data.size());
     return *this;
 }
 
@@ -267,9 +266,9 @@ std::vector<float> Impl::PHI4Embedding::MergeEmbedding()
             if ((size_t) (token_id + 1) * HIDDEN_DIM > embedded_raw_fbuf.size_)
             {
                 throw std::runtime_error(
-                        std::string{"token id is out of bounds, "}
-                        + "embedding_weights_fbuf size: " + std::to_string(embedded_raw_fbuf.size_) + ", "
-                        + "(token_id + 1) * HIDDEN_DIM: " + std::to_string((token_id + 1) * HIDDEN_DIM));
+                    std::string{"token id is out of bounds, "}
+                    + "embedding_weights_fbuf size: " + std::to_string(embedded_raw_fbuf.size_) + ", "
+                    + "(token_id + 1) * HIDDEN_DIM: " + std::to_string((token_id + 1) * HIDDEN_DIM));
             }
 
             const float *src_ptr = &embedded_raw_fbuf.pointer_[token_id * HIDDEN_DIM];
@@ -280,19 +279,44 @@ std::vector<float> Impl::PHI4Embedding::MergeEmbedding()
     return output_bin_buf;
 }
 
+template<typename T>
+std::vector<T> ReadBinaryFile(const std::string &path)
+{
+    std::ifstream ifs(path, std::ios::binary);
+    if (!ifs)
+    {
+        throw std::runtime_error("Failed to open file: " + path);
+    }
+    ifs.seekg(0, std::ios::end);
+    std::streampos end = ifs.tellg();
+    ifs.seekg(0, std::ios::beg);
+    std::streamsize bytes = end - ifs.tellg();
+    if (bytes % sizeof(T) != 0)
+    {
+        throw std::runtime_error("File size not aligned with type size: " + path);
+    }
+    size_t count = static_cast<size_t>(bytes / sizeof(T));
+    std::vector<T> data(count);
+    if (!ifs.read(reinterpret_cast<char *>(data.data()), bytes))
+    {
+        throw std::runtime_error("Failed to read file: " + path);
+    }
+    return data;
+}
+
 Impl::IEmbedding &GenieContext::Impl::Qwen2_5Embedding::BuildImgPixel()
 {
     using namespace qwen2_5;
-    Qwen25ImageProcessor proc;
     int rows = 0, cols = 0;
-    proc.ProcessToBuffer(img_buf_.data(), img_buf_.size(), kHeight, kWidth, png_pixel_buf_, rows, cols);
+    Qwen25ImageProcessor proc;
+    proc.ProcessToBuffer(img_buf_.data(), img_buf_.size(), kHeight, kWidth, img_pixel_buf_, rows, cols);
     img_buf_.clear();
     return *this;
 }
 
 std::vector<float> GenieContext::Impl::Qwen2_5Embedding::MergeEmbedding()
 {
-    static int32_t rows{151655};
+    static const int32_t rows{151655};
     static const size_t cols{2048};
     const unsigned long token_count = question_embedding_buf_.size();
 
@@ -309,7 +333,7 @@ std::vector<float> GenieContext::Impl::Qwen2_5Embedding::MergeEmbedding()
     FloatBufferView embedded_raw_fbuf{out};
     FloatBufferView img_embedding_fbuf{img_embedding_buf_};
 
-    //     2) 从 inputs_embeds 推断 D（嵌入维度）
+    // 2) 从 inputs_embeds 推断 D（嵌入维度）
     if (embedded_raw_fbuf.size_ % token_count != 0)
     {
         throw std::runtime_error(std::string{"embeddings raw buf length is not divisible by sequence length, "}
@@ -317,8 +341,7 @@ std::vector<float> GenieContext::Impl::Qwen2_5Embedding::MergeEmbedding()
                                  + "num_tokens: " + std::to_string(question_embedding_buf_.size()));
     }
 
-
-    //     3) 将 image_embeds_flat 视作 [N_feat, D]
+    //  3) 将 image_embeds_flat 视作 [N_feat, D]
     const size_t D = embedded_raw_fbuf.size_ / token_count;
     if (img_embedding_fbuf.size_ % D != 0)
     {
@@ -339,8 +362,8 @@ std::vector<float> GenieContext::Impl::Qwen2_5Embedding::MergeEmbedding()
     // 5) 图像 token 数量与特征条目数量的匹配 / 扩展（与原脚本相同）
     // 若不匹配：仅支持存在恰好 1 个占位 token，将其展开为 N_feat 个连续的 image_token_id，
     // 并对 inputs_embeds 进行 slice + concat，然后再进行替换。
-    std::vector<float> output_bin_buf;       // 最终的 inputs_embeds_np（展平）
-    std::vector<int32_t> new_input_ids;     // 若发生扩展，更新后的 input_ids
+    std::vector<float> output_bin_buf; // 最终的 inputs_embeds_np（展平）
+    std::vector<int32_t> new_input_ids; // 若发生扩展，更新后的 input_ids
 
     if (n_image_tokens != N_feat)
     {

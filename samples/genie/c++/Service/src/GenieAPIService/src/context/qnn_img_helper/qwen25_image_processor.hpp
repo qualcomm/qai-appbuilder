@@ -30,7 +30,6 @@
 #include <cmath>
 #include <cstdint>
 #include <fstream>
-#include <iostream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -44,10 +43,10 @@ namespace qwen2_5
     {
     public:
         // --- 常量：与原文件一致 ---
-        static constexpr int PATCH_SIZE = 14;                 // 每个patch的尺寸（14x14）
-        static constexpr int TEMPORAL_PATCH_SIZE = 2;         // T=2（两个时间帧，复制同一帧）
-        static constexpr int MERGE_SIZE = 2;                  // 外层merge尺寸=2（用于patch排序）
-        static constexpr int SPATIAL_MERGE_SIZE = 2;          // 常量（qwen_vl_utils）
+        static constexpr int PATCH_SIZE = 14; // 每个patch的尺寸（14x14）
+        static constexpr int TEMPORAL_PATCH_SIZE = 2; // T=2（两个时间帧，复制同一帧）
+        static constexpr int MERGE_SIZE = 2; // 外层merge尺寸=2（用于patch排序）
+        static constexpr int SPATIAL_MERGE_SIZE = 2; // 常量（qwen_vl_utils）
         static constexpr int PATCH_FACTOR = PATCH_SIZE * SPATIAL_MERGE_SIZE; // =28，对齐因子
 
         // CLIP 的 mean/std（与原文件一致）
@@ -57,8 +56,8 @@ namespace qwen2_5
         // 用于承载RGB(A)图像
         struct ImageU8
         {
-            int w = 0, h = 0, c = 0;           // c=3或4
-            std::vector<uint8_t> data;         // 行主序，交错排列
+            int w = 0, h = 0, c = 0; // c=3或4
+            std::vector<uint8_t> data; // 行主序，交错排列
         };
 
     public:
@@ -159,19 +158,21 @@ namespace qwen2_5
                 h_bar = floor_by_factor(static_cast<int>(height / beta), factor);
                 w_bar = floor_by_factor(static_cast<int>(width / beta), factor);
             }
-            else if (area < min_pixels)
-            {
-                double beta = std::sqrt(static_cast<double>(min_pixels) / (static_cast<double>(height) * width));
-                h_bar = ceil_by_factor(static_cast<int>(height * beta), factor);
-                w_bar = ceil_by_factor(static_cast<int>(width * beta), factor);
-            }
+            else
+                if (area < min_pixels)
+                {
+                    double beta =
+                            std::sqrt(static_cast<double>(min_pixels) / (static_cast<double>(height) * width));
+                    h_bar = ceil_by_factor(static_cast<int>(height * beta), factor);
+                    w_bar = ceil_by_factor(static_cast<int>(width * beta), factor);
+                }
             return {h_bar, w_bar};
         }
 
         static inline std::pair<int, int> smart_resize(int height, int width, int factor)
         {
-            const int min_pixels = 4 * factor * factor;       // 与原实现一致：下限像素 = 4 * factor^2
-            const int max_pixels = 16384 * factor * factor;   // 与原实现一致：上限像素 = 16384 * factor^2
+            const int min_pixels = 4 * factor * factor; // 与原实现一致：下限像素 = 4 * factor^2
+            const int max_pixels = 16384 * factor * factor; // 与原实现一致：上限像素 = 16384 * factor^2
             return smart_resize_impl(height, width, factor, min_pixels, max_pixels);
         }
 
@@ -180,10 +181,7 @@ namespace qwen2_5
         {
             int w = 0, h = 0, n = 0; // n: 原始通道数（1/2/3/4）
             stbi_uc *pixels = stbi_load(path.c_str(), &w, &h, &n, 0);
-            if (!pixels)
-            {
-                throw std::runtime_error(std::string("stb_image: failed to load image: ") + path);
-            }
+            if (!pixels) { throw std::runtime_error(std::string("stb_image: failed to load image: ") + path); }
 
             ImageU8 out;
             if (n == 3)
@@ -193,50 +191,53 @@ namespace qwen2_5
                 out.c = 3;
                 out.data.assign(pixels, pixels + static_cast<size_t>(w) * h * 3);
             }
-            else if (n == 4)
-            {
-                out.w = w;
-                out.h = h;
-                out.c = 4;
-                out.data.assign(pixels, pixels + static_cast<size_t>(w) * h * 4);
-            }
-            else if (n == 1)
-            {
-                // 灰度 → RGB
-                out.w = w;
-                out.h = h;
-                out.c = 3;
-                out.data.resize(static_cast<size_t>(w) * h * 3);
-                for (size_t i = 0; i < static_cast<size_t>(w) * h; ++i)
-                {
-                    uint8_t g = pixels[i];
-                    out.data[i * 3 + 0] = g;
-                    out.data[i * 3 + 1] = g;
-                    out.data[i * 3 + 2] = g;
-                }
-            }
-            else if (n == 2)
-            {
-                // 灰度+Alpha → RGBA
-                out.w = w;
-                out.h = h;
-                out.c = 4;
-                out.data.resize(static_cast<size_t>(w) * h * 4);
-                for (size_t i = 0; i < static_cast<size_t>(w) * h; ++i)
-                {
-                    uint8_t g = pixels[i * 2 + 0];
-                    uint8_t a = pixels[i * 2 + 1];
-                    out.data[i * 4 + 0] = g;
-                    out.data[i * 4 + 1] = g;
-                    out.data[i * 4 + 2] = g;
-                    out.data[i * 4 + 3] = a;
-                }
-            }
             else
-            {
-                stbi_image_free(pixels);
-                throw std::runtime_error("Unsupported channel count from stb_image");
-            }
+                if (n == 4)
+                {
+                    out.w = w;
+                    out.h = h;
+                    out.c = 4;
+                    out.data.assign(pixels, pixels + static_cast<size_t>(w) * h * 4);
+                }
+                else
+                    if (n == 1)
+                    {
+                        // 灰度 → RGB
+                        out.w = w;
+                        out.h = h;
+                        out.c = 3;
+                        out.data.resize(static_cast<size_t>(w) * h * 3);
+                        for (size_t i = 0; i < static_cast<size_t>(w) * h; ++i)
+                        {
+                            uint8_t g = pixels[i];
+                            out.data[i * 3 + 0] = g;
+                            out.data[i * 3 + 1] = g;
+                            out.data[i * 3 + 2] = g;
+                        }
+                    }
+                    else
+                        if (n == 2)
+                        {
+                            // 灰度+Alpha → RGBA
+                            out.w = w;
+                            out.h = h;
+                            out.c = 4;
+                            out.data.resize(static_cast<size_t>(w) * h * 4);
+                            for (size_t i = 0; i < static_cast<size_t>(w) * h; ++i)
+                            {
+                                uint8_t g = pixels[i * 2 + 0];
+                                uint8_t a = pixels[i * 2 + 1];
+                                out.data[i * 4 + 0] = g;
+                                out.data[i * 4 + 1] = g;
+                                out.data[i * 4 + 2] = g;
+                                out.data[i * 4 + 3] = a;
+                            }
+                        }
+                        else
+                        {
+                            stbi_image_free(pixels);
+                            throw std::runtime_error("Unsupported channel count from stb_image");
+                        }
             stbi_image_free(pixels);
             return out;
         }
@@ -245,10 +246,7 @@ namespace qwen2_5
         {
             int w = 0, h = 0, n = 0;
             stbi_uc *pixels = stbi_load_from_memory(png_bin_buf, dwLen, &w, &h, &n, 0);
-            if (!pixels)
-            {
-                throw std::runtime_error(std::string("stb_image: failed to load image: "));
-            }
+            if (!pixels) { throw std::runtime_error(std::string("stb_image: failed to load image: ")); }
 
             ImageU8 out;
             if (n == 3)
@@ -258,50 +256,53 @@ namespace qwen2_5
                 out.c = 3;
                 out.data.assign(pixels, pixels + static_cast<size_t>(w) * h * 3);
             }
-            else if (n == 4)
-            {
-                out.w = w;
-                out.h = h;
-                out.c = 4;
-                out.data.assign(pixels, pixels + static_cast<size_t>(w) * h * 4);
-            }
-            else if (n == 1)
-            {
-                // 灰度 → RGB
-                out.w = w;
-                out.h = h;
-                out.c = 3;
-                out.data.resize(static_cast<size_t>(w) * h * 3);
-                for (size_t i = 0; i < static_cast<size_t>(w) * h; ++i)
-                {
-                    uint8_t g = pixels[i];
-                    out.data[i * 3 + 0] = g;
-                    out.data[i * 3 + 1] = g;
-                    out.data[i * 3 + 2] = g;
-                }
-            }
-            else if (n == 2)
-            {
-                // 灰度+Alpha → RGBA
-                out.w = w;
-                out.h = h;
-                out.c = 4;
-                out.data.resize(static_cast<size_t>(w) * h * 4);
-                for (size_t i = 0; i < static_cast<size_t>(w) * h; ++i)
-                {
-                    uint8_t g = pixels[i * 2 + 0];
-                    uint8_t a = pixels[i * 2 + 1];
-                    out.data[i * 4 + 0] = g;
-                    out.data[i * 4 + 1] = g;
-                    out.data[i * 4 + 2] = g;
-                    out.data[i * 4 + 3] = a;
-                }
-            }
             else
-            {
-                stbi_image_free(pixels);
-                throw std::runtime_error("Unsupported channel count from stb_image");
-            }
+                if (n == 4)
+                {
+                    out.w = w;
+                    out.h = h;
+                    out.c = 4;
+                    out.data.assign(pixels, pixels + static_cast<size_t>(w) * h * 4);
+                }
+                else
+                    if (n == 1)
+                    {
+                        // 灰度 → RGB
+                        out.w = w;
+                        out.h = h;
+                        out.c = 3;
+                        out.data.resize(static_cast<size_t>(w) * h * 3);
+                        for (size_t i = 0; i < static_cast<size_t>(w) * h; ++i)
+                        {
+                            uint8_t g = pixels[i];
+                            out.data[i * 3 + 0] = g;
+                            out.data[i * 3 + 1] = g;
+                            out.data[i * 3 + 2] = g;
+                        }
+                    }
+                    else
+                        if (n == 2)
+                        {
+                            // 灰度+Alpha → RGBA
+                            out.w = w;
+                            out.h = h;
+                            out.c = 4;
+                            out.data.resize(static_cast<size_t>(w) * h * 4);
+                            for (size_t i = 0; i < static_cast<size_t>(w) * h; ++i)
+                            {
+                                uint8_t g = pixels[i * 2 + 0];
+                                uint8_t a = pixels[i * 2 + 1];
+                                out.data[i * 4 + 0] = g;
+                                out.data[i * 4 + 1] = g;
+                                out.data[i * 4 + 2] = g;
+                                out.data[i * 4 + 3] = a;
+                            }
+                        }
+                        else
+                        {
+                            stbi_image_free(pixels);
+                            throw std::runtime_error("Unsupported channel count from stb_image");
+                        }
             stbi_image_free(pixels);
             return out;
         }
@@ -382,11 +383,11 @@ namespace qwen2_5
                 throw std::runtime_error("H/W not divisible by patch_size");
             }
 
-            const int grid_h = H / PATCH_SIZE;                     // 例如 46（当H=644）
-            const int grid_w = W / PATCH_SIZE;                     // 例如 46（当W=644）
-            const int grid_h_outer = grid_h / MERGE_SIZE;          // 例如 23（当grid_h=46）
-            const int grid_w_outer = grid_w / MERGE_SIZE;          // 例如 23（当grid_w=46）
-            const int T = TEMPORAL_PATCH_SIZE;                     // 2
+            const int grid_h = H / PATCH_SIZE; // 例如 46（当H=644）
+            const int grid_w = W / PATCH_SIZE; // 例如 46（当W=644）
+            const int grid_h_outer = grid_h / MERGE_SIZE; // 例如 23（当grid_h=46）
+            const int grid_w_outer = grid_w / MERGE_SIZE; // 例如 23（当grid_w=46）
+            const int T = TEMPORAL_PATCH_SIZE; // 2
 
             // 先做CLIP归一化并复制到两个时间帧（t=0与t=1相同）。
             std::vector<float> norm(static_cast<size_t>(T) * 3 * static_cast<size_t>(H) * static_cast<size_t>(W));
@@ -410,8 +411,8 @@ namespace qwen2_5
             }
 
             // 展平顺序：外层 ho, wo, mh, mw；内层 c, t, ph, pw —— 与原实现一致。
-            rows = 1 * grid_h * grid_w;                            // grid_t=1（与原一致）
-            cols = 3 * T * PATCH_SIZE * PATCH_SIZE;                // =1176
+            rows = 1 * grid_h * grid_w; // grid_t=1（与原一致）
+            cols = 3 * T * PATCH_SIZE * PATCH_SIZE; // =1176
             out.assign(static_cast<size_t>(rows) * cols, 0.0f);
 
             int r = 0;
@@ -436,7 +437,8 @@ namespace qwen2_5
                                         for (int pw = 0; pw < PATCH_SIZE; ++pw)
                                         {
                                             out[static_cast<size_t>(r) * cols + k] =
-                                                    norm[idx4(t, c, py0 + ph, px0 + pw)];
+                                                    norm[idx4(t, c, py0 + ph,
+                                                              px0 + pw)];
                                             ++k;
                                         }
                                     }

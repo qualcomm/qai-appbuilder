@@ -169,7 +169,7 @@ std::vector<uint8_t> File::ReadFile(const std::string &file_name, bool binary)
 {
     auto mode = binary ? std::ios::binary : std::ios::in;
     std::ifstream in(file_name, mode);
-    auto file_size = File::get_file_size(file_name, mode);
+    auto file_size = get_file_size(file_name, mode);
     std::vector<uint8_t> buffer(file_size);
     in.read(reinterpret_cast<char *>(buffer.data()), file_size);
     return buffer;

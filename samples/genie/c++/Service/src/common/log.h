@@ -248,8 +248,6 @@ private:
     Level lev_{Level::kWarning};
     char *tag_{const_cast<char *>(LoggerHelper::kConsole_.kDefaultLogTag)};
 
-    static inline void (My_Log::*func_)(const char *msg, uint32_t len);
-
     void Log(const char *msg, uint32_t len)
     {
         if (lev_ > Level_ || len <= 0 || msg == nullptr)
@@ -309,6 +307,8 @@ private:
         ++times;
         mtx.unlock();
     }
+
+    static inline void (My_Log::*func_)(const char *msg, uint32_t len){&My_Log::LogConsole};
 
     std::function<std::string()> get_log_title_{[this]()
                                                 {

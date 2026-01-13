@@ -41,7 +41,7 @@ private:
     void setupHttpServer();
 
     friend ChatRequestHandler;
-    std::vector<std::shared_ptr<Route>> routes_{};
+    std::vector<std::shared_ptr<Route> > routes_{};
 } service;
 
 class GenieService::Route : public std::enable_shared_from_this<Route>
@@ -49,9 +49,8 @@ class GenieService::Route : public std::enable_shared_from_this<Route>
 public:
     Route(bool http_block_check,
           void (ChatRequestHandler::*func)(const httplib::Request &req, httplib::Response &res)) :
-            http_block_check_{http_block_check},
-            func_{func}
-    {}
+        http_block_check_{http_block_check},
+        func_{func} {}
 
     ~Route() = default;
 
@@ -63,17 +62,16 @@ public:
                                 void (ChatRequestHandler::*func)(const httplib::Request &req, httplib::Response &res),
                                 bool http_block_check = true);
 
-
 protected:
     Server &(Server::*action_func_)(const std::string &, Server::Handler){};
-
 
 private:
     void (ChatRequestHandler::*func_)(const httplib::Request &req, httplib::Response &res);
 
     bool http_block_check_{};
 
-    struct ErrorHandle{
+    struct ErrorHandle
+    {
         const char *msg_;
         int status_;
         std::string internal_msg_;
@@ -88,8 +86,8 @@ private:
             (self_->svr.*action_func_)(path, [route, this](const httplib::Request &req, Response &res)
             {
                 My_Log{} << "---------------------------------------------------\n"
-                         << "Time: " << My_Log::GetTimeString() << "\n"
-                         << "Path: " << req.path << std::endl;
+                        << "Time: " << My_Log::GetTimeString() << "\n"
+                        << "Path: " << req.path << std::endl;
 
                 if (!route->http_block_check_)
                     goto ahead;
@@ -104,27 +102,18 @@ private:
                 }
                 http_busy_ = true;
 
-                ahead:
+            ahead:
                 ErrorHandle error_handle;
                 try
                 {
                     ((*self_->requestHandler).*func_)(req, res);
                     return;
                 }
-                catch (const JsonError &e)
-                {
-                    error_handle = {R"({"error": "invalid json"})", 400, e.what()};
-                }
-                catch (const json::exception &e)
-                {
-                    error_handle = {R"({"error": "invalid json"})", 400, e.what()};
-                }
-                catch (const std::exception &e)
-                {
-                    error_handle = {R"({"error": "services error"})", 500, e.what()};
-                }
+                catch (const JsonError &e) { error_handle = {R"({"error": "invalid json"})", 400, e.what()}; }
+                catch (const json::exception &e) { error_handle = {R"({"error": "invalid json"})", 400, e.what()}; }
+                catch (const std::exception &e) { error_handle = {R"({"error": "services error"})", 500, e.what()}; }
                 My_Log{My_Log::Level::kError} << "raise the exception: " << error_handle.internal_msg_ << "\n"
-                                              << "the request body: " << req.body << "\n";
+                        << "the request body: " << req.body << "\n";
                 res.set_content(error_handle.msg_, MIMETYPE_JSON);
                 res.status = error_handle.status_;
             });
@@ -136,29 +125,31 @@ struct GetRoute : GenieService::Route
 {
     GetRoute(bool global_block,
              void (ChatRequestHandler::*func)(const httplib::Request &req, httplib::Response &res)) :
-            Route(global_block, func)
-    { action_func_ = &Server::Get; }
+        Route(global_block, func) { action_func_ = &Server::Get; }
 };
 
 struct PostRoute : GenieService::Route
 {
     PostRoute(bool global_block,
               void (ChatRequestHandler::*func)(const httplib::Request &req, httplib::Response &res)) :
-            Route(global_block, func)
-    { action_func_ = &Server::Post; }
+        Route(global_block, func) { action_func_ = &Server::Post; }
 };
 
 void GenieService::Route::CreateGetRoute(const std::vector<std::string> &path,
                                          void (ChatRequestHandler::*func)(const httplib::Request &req,
                                                                           httplib::Response &res),
                                          bool http_block_check)
-{ std::make_shared<GetRoute>(http_block_check, func)->Registry(path); }
+{
+    std::make_shared<GetRoute>(http_block_check, func)->Registry(path);
+}
 
 void GenieService::Route::CreatePostRoute(const std::vector<std::string> &path,
                                           void (ChatRequestHandler::*func)(const httplib::Request &req,
                                                                            httplib::Response &res),
                                           bool http_block_check)
-{ std::make_shared<PostRoute>(http_block_check, func)->Registry(path); }
+{
+    std::make_shared<PostRoute>(http_block_check, func)->Registry(path);
+}
 
 void GenieService::run(int argc, char *argv[])
 {
@@ -168,10 +159,7 @@ void GenieService::run(int argc, char *argv[])
     // 1. Parsing command line arguments
     try
     {
-        if (!config.Process())
-        {
-            return;
-        }
+        if (!config.Process()) { return; }
         modelManager = std::make_unique<ModelManager>(config.get_mode_manager_config());
     }
     catch (const std::exception &e)
@@ -199,9 +187,9 @@ void GenieService::run(int argc, char *argv[])
     static const std::string HOST = "0.0.0.0";
     My_Log{My_Log::Level::kAlways} << YELLOW << "[OK] Genie API Service IS Running." << RESET << std::endl;
     My_Log{My_Log::Level::kAlways} << YELLOW << "[OK] Genie API Service -> http://"
-                                   << HOST << ":" << port_checked
-                                   << RESET
-                                   << std::endl;
+            << HOST << ":" << port_checked
+            << RESET
+            << std::endl;
     svr.listen(HOST, port_checked);
 }
 
@@ -219,14 +207,14 @@ void GenieService::setupHttpServer()
 {
     My_Log("GenieService::setupHttpServer start\n");
     svr.set_logger([](const auto &req, const Response &res)
-                   {
-                       if (!res.has_header("X-Skip"))
-                       {
-                           My_Log{} << req.path << " handling is done";
-                           My_Log{}.original(true) << "\n\n";
-                           http_busy_ = false;
-                       }
-                   });
+    {
+        if (!res.has_header("X-Skip"))
+        {
+            My_Log{} << req.path << " handling is done";
+            My_Log{}.original(true) << "\n\n";
+            http_busy_ = false;
+        }
+    });
 
     Route::CreateGetRoute({"/"}, &ChatRequestHandler::HandleWelcome, false);
 
@@ -261,14 +249,15 @@ void GenieService::setupHttpServer()
 }
 
 ChatRequestHandler::ChatRequestHandler(GenieService *srv) :
-        model_manager(*srv->modelManager),
-        chatHistory(std::make_unique<ChatHistory>(model_manager)),
-        dispatcherPtr_{std::make_unique<ResponseDispatcher>(model_manager,
-                                                            *chatHistory)},
-        srv_{srv}
-{}
+    model_manager(*srv->modelManager),
+    chatHistory(std::make_unique<ChatHistory>(model_manager)),
+    dispatcherPtr_{
+        std::make_unique<ResponseDispatcher>(model_manager,
+                                             *chatHistory)
+    },
+    srv_{srv} {}
 
-void ChatRequestHandler::ServiceExit(const httplib::Request &req, httplib::Response &res)
+void ChatRequestHandler::ServiceExit(const Request &req, Response &res)
 {
     json data = json::parse(req.body, nullptr, false);
     std::string text = data.value("text", "");
@@ -294,30 +283,31 @@ int main(int argc, char **argv)
 #include <jni.h>
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_example_genieapiservice_MyNativeLib_runService(JNIEnv *env, jobject /* this */, jobjectArray args) {
+Java_com_example_genieapiservice_MyNativeLib_runService(JNIEnv *env, jobject /* this */, jobjectArray args)
+{
     int argc = env->GetArrayLength(args);
-    std::vector<char*> argv;
+    std::vector<char *> argv;
 
     My_Log("MyNativeLib_runService argc: " + std::to_string(argc) + "\n", My_Log::Level::kAlways);
 
-    for (int i = 0; i < argc; ++i) {
-        jstring arg = (jstring)env->GetObjectArrayElement(args, i);
-        const char* c_str = env->GetStringUTFChars(arg, nullptr);
+    for (int i = 0; i < argc; ++i)
+    {
+        jstring arg = (jstring) env->GetObjectArrayElement(args, i);
+        const char *c_str = env->GetStringUTFChars(arg, nullptr);
         My_Log("MyNativeLib_runService argv: " + std::string(c_str) + "\n");
-        argv.push_back(const_cast<char*>(c_str));
+        argv.push_back(const_cast<char *>(c_str));
     }
 
     service.run(argc, argv.data());
     My_Log("MyNativeLib_runService down\n", My_Log::Level::kAlways);
 
-    for (int i = 0; i < argc; ++i) {
-        jstring arg = (jstring)env->GetObjectArrayElement(args, i);
+    for (int i = 0; i < argc; ++i)
+    {
+        jstring arg = (jstring) env->GetObjectArrayElement(args, i);
         env->ReleaseStringUTFChars(arg, argv[i]);
     }
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_example_genieapiservice_MyNativeLib_stopService(JNIEnv *env, jobject /* this */) {
-    service.serviceStop();
-}
+Java_com_example_genieapiservice_MyNativeLib_stopService(JNIEnv *env, jobject /* this */) { service.serviceStop(); }
 #endif

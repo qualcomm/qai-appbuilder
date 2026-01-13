@@ -10,19 +10,19 @@
 This software is provided “as is,” without any express or implied warranties. The authors and contributors shall not be held liable for any damages arising from its use. The code may be incomplete or insufficiently tested. Users are solely responsible for evaluating its suitability and assume all associated risks. <br>
 Note: Contributions are welcome. Please ensure thorough testing before deploying in critical systems.
 
-## Introduction 
+## Introduction
 This sample helps developers use C++ to build Genie based Open AI compatibility API service on Windows on Snapdragon (WoS), Mobile and Linux platforms.
 
 ## Features
 • Support LLM on both CPU & NPU [*NEW!*] <br>
-• Support both stream and none stream mode <br> 
+• Support both stream and none stream mode <br>
 • Support switching between models <br>
 • Support customization model <br>
-• Support text splitter feature <br> 
-• Support tools call <br> 
-• Support enable/disable thinking mode <br> 
-• Support lora <br> 
-• Support history feature <br> 
+• Support text splitter feature <br>
+• Support tools call <br>
+• Support enable/disable thinking mode <br>
+• Support lora <br>
+• Support history feature <br>
 
 ## GenieAPIService
 Genie OpenAI Compatible API Service.
@@ -30,11 +30,11 @@ Genie OpenAI Compatible API Service.
 This is an OpenAI compatible API service that can be used to access the Genie AI model.
 This service can be used on multiple platforms such as Android, Windows, Linux, etc.
 
-### Run the service on WoS: 
+### Run the service on WoS:
 You can also run the batch file from [QAI AppBuilder Launcher](../../../tools/launcher/) to setup the environment automatically. <br>
 1. [Setup LLM models](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/python#step-3-download-models-and-tokenizer-files) first before running this service. <br>
 2. Download [GenieAPIService](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.38.0/GenieAPIService_v2.1.0_QAIRT_v2.38.0_v73.zip) and copy the subdirectory "GenieAPIService" to path "ai-engine-direct-helper\samples".<br>
-3. Run the following commands to launch the Service (Do *not* close this terminal window while service is running). 
+3. Run the following commands to launch the Service (Do *not* close this terminal window while service is running).
 
 ```
 cd ai-engine-direct-helper\samples
@@ -67,19 +67,11 @@ INFO: Service Is Ready Now!
 ## GenieAPIService API:
 Refere to [API](./API.md) for detailed information.
 
-## Client Usage:
-  The service can be access through the ip address '127.0.0.1:8910', it's compatible with OpenAI API.
-
-### C++ Client Sample Code:
-  Here is a C++ client sample: [GenieAPIClient.cpp](Service/GenieAPIClient.cpp). You can get the compiled 'GenieAPIClient.exe' from [GenieAPIService](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.38.0/GenieAPIService_v2.1.0_QAIRT_v2.38.0_v73.zip). The sample app depends on the dynamical library 'libcurl.dll' which also included in the 'GenieAPIService' package.
-
-  We can run it with the command below in a new terminal window:
-```
-GenieAPIService\GenieAPIClient.exe --prompt "How to fish?" --stream --model "IBM-Granite-v3.1-8B"
-```
+## GenieService & C++ Client usage: 
+It is located at [Docs](Service/docs/USAGE.MD)
 
 ### Python Client Sample Code:
-  Here is a Python client sample (You can save it to 'GenieAPIClient.py'):
+Here is a Python client sample (You can save it to 'GenieAPIClient.py'):
 
 ```
 import argparse
@@ -114,7 +106,7 @@ else:
     print(response.choices[0].message.content)
 ```
 
-  We can run it with the command below in a new terminal window:
+We can run it with the command below in a new terminal window:
 ```
 python GenieAPIClient.py --prompt "How to fish?" --stream
 ```

@@ -13,7 +13,6 @@
 #include "utils.h"
 #include "model/model_config.h"
 #include <CLI/CLI.hpp>
-#include <fstream>
 #include <GenieCommon.h>
 
 namespace fs = std::filesystem;
@@ -32,13 +31,19 @@ public:
     bool Process();
 
     IModelConfig get_mode_manager_config()
-    { return model_config_; }
+    {
+        return model_config_;
+    }
 
     bool NeedLoadModel() const
-    { return loadModel; }
+    {
+        return loadModel;
+    }
 
     int get_port() const
-    { return port_; }
+    {
+        return port_;
+    }
 
 private:
     int argc_;
@@ -48,7 +53,7 @@ private:
     IModelConfig model_config_;
 };
 
-bool Config::Process()
+inline bool Config::Process()
 {
     int logLevel{My_Log::Level::kWarning};
     std::string log_path, &config_file{model_config_.config_file_};
@@ -57,7 +62,7 @@ bool Config::Process()
     CLI::App app{"Genie API Service - Powerful Local LLM Service"};
     app.footer("\nSupport: https://github.com/quic/ai-engine-direct-helper");
 
-    app.add_option("-c,--config_file", config_file, "Path to the config file.")->required(true);
+    app.add_option("-c,--config_file", config_file, "Path to the config file.");
     app.add_option("--adapter", model_config_.loraAdapter, "the adapter of lora");
 
     app.add_flag("-l,--load_model", loadModel, "Load the model.");
@@ -81,24 +86,24 @@ bool Config::Process()
     }
     catch (const CLI::CallForHelp &e)
     {
-        My_Log{My_Log::Level::kAlways} << app.help() << std::endl;
+        My_Log{My_Log::Level::kAlways}.original(true) << app.help() << std::endl;
         return false;
     }
     catch (const std::exception &e)
     {
-        My_Log{My_Log::Level::kAlways} << e.what() << std::endl;
+        My_Log{My_Log::Level::kAlways}.original(true) << e.what() << std::endl;
         return false;
     }
 
-    My_Log{}.original(true) << "GenieAPIService: "
-                            << QAI_APP_BUILDER_MAJOR_VERSION << "."
-                            << QAI_APP_BUILDER_MINOR_VERSION << "."
-                            << QAI_APP_BUILDER_PATCH_VERSION << ", "
-                            << "Genie Library: "
-                            << Genie_getApiMajorVersion() << "."
-                            << Genie_getApiMinorVersion() << "."
-                            << Genie_getApiPatchVersion() << std::endl;
-
+    My_Log{My_Log::kAlways}.original(true)
+            << "GenieAPIService: "
+            << QAI_APP_BUILDER_MAJOR_VERSION << "."
+            << QAI_APP_BUILDER_MINOR_VERSION << "."
+            << QAI_APP_BUILDER_PATCH_VERSION << ", "
+            << "Genie Library: "
+            << Genie_getApiMajorVersion() << "."
+            << Genie_getApiMinorVersion() << "."
+            << Genie_getApiPatchVersion() << std::endl;
     if (version)
     {
         return false;
@@ -114,11 +119,11 @@ bool Config::Process()
     CurrentDir = fs::path{buffer}.generic_string();
     My_Log{} << "current work dir: " << CurrentDir << std::endl;
 
-    RootDir = fs::path{argv_[0]}.is_absolute() ?
-              fs::path{argv_[0]}.parent_path().generic_string() :
-              fs::path{CurrentDir + "/" + argv_[0]}
-                      .parent_path()
-                      .generic_string();
+    RootDir = fs::path{argv_[0]}.is_absolute()
+                  ? fs::path{argv_[0]}.parent_path().generic_string()
+                  : fs::path{CurrentDir + "/" + argv_[0]}
+                  .parent_path()
+                  .generic_string();
     My_Log{} << "root dir: " << RootDir << std::endl;
     My_Log::ShowStatus();
 

@@ -36,15 +36,16 @@ public:
         static QInterface *CreateInterface(GenieContext *context);
 
         explicit QInterface(GenieContext *context) :
-                context_{context}
+            context_{context}
         {}
 
         virtual bool set_content(const std::string &prompt) = 0;
 
         Genie_Status_t GenieDialogQuery()
         {
-            auto status = GenieDialogQueryImpl();
-            prompt_.clear();
+            const auto status = GenieDialogQueryImpl();
+            prompt_data_ = nullptr;
+            prompt_len_ = 0;
             return status;
         }
 
@@ -53,7 +54,8 @@ public:
     protected:
         GenieContext *context_;
 
-        std::vector<uint8_t> prompt_;
+        uint8_t *prompt_data_;
+        uint32_t prompt_len_;
 
         static void GenieCallBack(const char *response,
                                   GenieDialog_SentenceCode_t sentence_code,
@@ -68,24 +70,23 @@ public:
 
         bool set_content(const std::string &prompt) final
         {
-            prompt_.assign(prompt.data(), prompt.data() + prompt.size());
+            prompt_data_ = reinterpret_cast<uint8_t *>(const_cast<char *>(prompt.data()));
+            prompt_len_ = prompt.size();
 #ifdef GENIE_BUILDER_DEBUG
             My_Log{} << "\n[Prompt]:\n"
-                     << content.prompt_ << "\n------------\n\n"
-                     << "[Response]:\n";
+                    << content.prompt_ << "\n------------\n\n"
+                    << "[Response]:\n";
 #endif
             return true;
         }
 
         Genie_Status_t GenieDialogQueryImpl() final
         {
-            auto rs = GenieDialog_query(context_->m_DialogHandle,
-                                        reinterpret_cast<const char *>(prompt_.data()),
-                                        GenieDialog_SentenceCode_t::GENIE_DIALOG_SENTENCE_COMPLETE,
-                                        GenieCallBack,
-                                        this);
-            prompt_.clear();
-            return rs;
+            return GenieDialog_query(context_->m_DialogHandle,
+                                     reinterpret_cast<const char *>(prompt_data_),
+                                     GENIE_DIALOG_SENTENCE_COMPLETE,
+                                     GenieCallBack,
+                                     this);
         }
     };
 
@@ -106,36 +107,36 @@ public:
         }
 
         explicit IEmbedding(GenieContext *context) :
-                QInterface(context),
-                embedded_raw_buf_{context_->model_config_.get_embedded_raw_buffer()},
-                qnn_embedding_info_{context->model_config_.get_qnn_embedded_info()}
+            QInterface(context),
+            embedded_raw_buf_{context_->model_config_.get_embedded_raw_buffer()},
+            qnn_embedding_info_{context->model_config_.get_qnn_embedded_info()}
         {}
 
         bool set_content(const std::string &prompt) final;
 
         Genie_Status_t GenieDialogQueryImpl() final
         {
+            img_buf_.clear();
+            img_pixel_buf_.clear();
+            img_embedding_buf_.clear();
+            question_embedding_buf_.clear();
             auto rs = GenieDialog_embeddingQuery(context_->m_DialogHandle,
-                                                 prompt_.data(),
-                                                 prompt_.size(),
-                                                 GenieDialog_SentenceCode_t::GENIE_DIALOG_SENTENCE_COMPLETE,
+                                                 prompt_data_,
+                                                 prompt_len_,
+                                                 GENIE_DIALOG_SENTENCE_COMPLETE,
                                                  TokenToEmbedCallback,
                                                  GenieCallBack,
                                                  this);
-
-            img_buf_.clear();
-            png_pixel_buf_.clear();
-            img_embedding_buf_.clear();
-            question_embedding_buf_.clear();
-            prompt_.clear();
+            embedded_bin_.clear();
             return rs;
         }
 
     protected:
         std::vector<uint8_t> img_buf_;
-        std::vector<float> png_pixel_buf_;
+        std::vector<float> img_pixel_buf_;
         std::vector<uint8_t> img_embedding_buf_;
         std::vector<int32_t> question_embedding_buf_;
+        std::vector<float> embedded_bin_;
         const std::vector<uint8_t> &embedded_raw_buf_;
         const QNNEmbeddingInfo &qnn_embedding_info_;
         int kWidth{};
@@ -157,7 +158,7 @@ public:
         {
             explicit FloatBufferView(const std::vector<uint8_t> &buffer)
             {
-                pointer_ = reinterpret_cast<float *> (const_cast<std::vector<uint8_t> &>(buffer).data());
+                pointer_ = reinterpret_cast<float *>(const_cast<std::vector<uint8_t> &>(buffer).data());
                 size_ = buffer.size() / sizeof(float);
             }
 
@@ -196,11 +197,11 @@ public:
             pre_process_prompt_ = [](std::string &&prompt)
             {
                 static const std::string prompt_template{
-                        " <|im_start|>system\n"
-                        "You are a helpful assistant.<|im_end|>\n"
-                        "<|im_start|>user\n"
-                        "<|vision_start|><|image_pad|><|vision_end|>%s<|im_end|>\n"
-                        "<|im_start|>assistant"
+                    "<|im_start|>system\n"
+                    "You are a helpful assistant.<|im_end|>\n"
+                    "<|im_start|>user\n"
+                    "<|vision_start|><|image_pad|><|vision_end|>%s<|im_end|>\n"
+                    "<|im_start|>assistant\n"
                 };
 
                 std::string buf(prompt_template.size() + prompt.size() + 1, 0);

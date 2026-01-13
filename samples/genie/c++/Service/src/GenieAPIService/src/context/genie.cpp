@@ -342,7 +342,8 @@ bool GenieContext::GenerateTextToken(const std::string &text, const int32_t *&bu
     status = GenieTokenizer_encode(tokenizerHandle, text.c_str(),
                                    [](const size_t size, const char **allocatedData)
                                    { *allocatedData = reinterpret_cast<const char *>(malloc(size)); },
-                                   &buf, &len);
+                                   &buf,
+                                   &len);
 
     if (status != GENIE_STATUS_SUCCESS)
     {

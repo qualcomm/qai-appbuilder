@@ -1,31 +1,5 @@
 # GenieAPIService API <br>
 
-## Note: <br>
-Using '127.0.0.1:8910' to access a local service is about 2 seconds faster in establishing a connection compared to using 'localhost:8910'. It seems like the domain name resolution is taking extra time.
-
-## Parameters: <br>
--c, --config_file: Path to the config file.<br>
--m, --model_name: Name of the model to use.<br>
---adapter: if using lora model, set the adapter of lora.<br>
---lora_aplha: if using lora model, set lora value weight.<br>
--l, --load_model: if load model.<br>
--a, --all_text: Output all text includes tool calls text. Disabled by default.<br>
--t, --enable_thinking: Enable thinking model. Disabled by default.<br>
--v, --version: Print version info and exit.<br>
--n, --num_response: The number of dialogue turns saved in the history record. If you do not need to enable the historical context feature, please set this value to 0.<br>
--o, --min_output_num: The number of tokens reserved for output.<br>
--d, --loglevel: log level setting for record.<br>
--f, --logfile: log file path, it's a option.<br>
--p, --port: Port used for running.<br>
-
-Note: Please note that the input length must not exceed the maximum number of tokens reserved for the input, which means it cannot exceed the model's maximum context length minus the value set for '--min_output_num'. You can invoke the Text Splitter to send the input text to the server for segmentation, and then sequentially pass the split segments to the LLM to complete the question-answering process.<br>
-Note: It is recommended to disable thinking mode when using the tools call function.<br>
-Note: You can refer to [GenieAPIClientTools.py](../python/GenieAPIClientTools.py) on how to use tools call.<br>
-
-```
-GenieAPIService\GenieAPIService.exe -c "genie\python\models\Qwen3.0-8B-v31\config.json" -l --all_text --enable_thinking --num_response 10 --min_output_num 1024 -p 8096
-```
-
 ## Text Splitter
 This function can divide a long text into multiple paragraphs according to the priority order of the specified delimiter and the maximum length of each paragraph. Length is counted by token number instead of text length. You can also use this function to calculate the token number of text. <br>
 You can get the sample code on how to use Text Splitter 

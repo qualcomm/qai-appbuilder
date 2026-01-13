@@ -9,6 +9,7 @@
 // phi4mm_image_processor.hpp
 // Header-only facade for Phi4MM image preprocessing pipeline.
 // Keep STB implementations in exactly ONE .cpp (see demo.cpp).
+
 #pragma once
 #include <algorithm>
 #include <array>
@@ -19,7 +20,6 @@
 #include <iostream>
 #include <limits>
 #include <string>
-#include <tuple>
 #include <vector>
 
 // External dependencies (declarations only if STB_*_IMPLEMENTATION not defined before inclusion)

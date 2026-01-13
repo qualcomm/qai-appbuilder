@@ -11,10 +11,6 @@
 #ifndef _UTILS_H
 #define _UTILS_H
 
-#ifndef FMT_HEADER_ONLY
-#define FMT_HEADER_ONLY
-#endif
-
 #include <regex>
 #include <nlohmann/json.hpp>
 #include "log.h"
@@ -29,7 +25,6 @@ const std::string MIMETYPE_JSON = "application/json; charset=utf-8";
 
 struct JsonError : public std::exception
 {
-public:
     JsonError(std::string &&msg) : msg_{std::move(msg)}
     {}
 
@@ -68,6 +63,16 @@ double MeasureSeconds(F &&fn, Args &&... args)
     auto t1 = clock::now();
     std::chrono::duration<double> elapsed = t1 - t0;
     return elapsed.count();
+}
+
+template<typename T>
+void PrintBuf(T &buf)
+{
+    for (const auto i: buf)
+    {
+        My_Log{}.original(true) << i << " ";
+        My_Log{} << "\n";
+    }
 }
 
 inline class Timer
@@ -195,18 +200,20 @@ inline bool hasInvalidUtf8Chars(const std::string &str)
         {
             numBytes = 1;
         }
-        else if ((byte & 0xF0) == 0xE0)
-        {
-            numBytes = 2;
-        }
-        else if ((byte & 0xF8) == 0xF0)
-        {
-            numBytes = 3;
-        }
         else
-        {
-            return true;
-        }
+            if ((byte & 0xF0) == 0xE0)
+            {
+                numBytes = 2;
+            }
+            else
+                if ((byte & 0xF8) == 0xF0)
+                {
+                    numBytes = 3;
+                }
+                else
+                {
+                    return true;
+                }
 
         if (i + numBytes >= length)
         {
@@ -243,13 +250,13 @@ inline std::string trim_empty_lines(const std::string &input)
 inline std::string escape_string(const std::string &input)
 {
     static const std::unordered_map<char, std::string> escape_map = {
-            {'"',  "\\\""},
-            {'\\', "\\\\"},
-            {'\n', "\\n"},
-            {'\r', "\\r"},
-            {'\t', "\\t"},
-            {'\b', "\\b"},
-            {'\f', "\\f"}
+        {'"', "\\\""},
+        {'\\', "\\\\"},
+        {'\n', "\\n"},
+        {'\r', "\\r"},
+        {'\t', "\\t"},
+        {'\b', "\\b"},
+        {'\f', "\\f"}
     };
 
     std::string result;
@@ -274,12 +281,12 @@ inline std::string escape_string(const std::string &input)
 inline bool str_search(const std::string &source, const std::string &target)
 {
     auto it = std::search(
-            source.begin(), source.end(),
-            target.begin(), target.end(),
-            [](unsigned char ch1, unsigned char ch2)
-            {
-                return std::tolower(ch1) == std::tolower(ch2);
-            }
+        source.begin(), source.end(),
+        target.begin(), target.end(),
+        [](unsigned char ch1, unsigned char ch2)
+        {
+            return std::tolower(ch1) == std::tolower(ch2);
+        }
     );
     return it != source.end();
 }
