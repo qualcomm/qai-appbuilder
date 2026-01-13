@@ -28,7 +28,7 @@ from pathlib import Path
 MODEL_ID = "mnz1l2exq"
 MODEL_NAME = "real_esrgan_x4plus"
 MODEL_HELP_URL = "https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
-IMAGE_SIZE = 512
+
 
 ####################################################################
 
@@ -42,8 +42,13 @@ if not MODEL_NAME in str(execution_ws):
     execution_ws = execution_ws / MODEL_NAME
 
 model_dir = execution_ws / "models"
-model_path = model_dir /  "{}.bin".format(MODEL_NAME)
 
+#load .bin
+model_path = model_dir /  "{}.bin".format(MODEL_NAME)
+IMAGE_SIZE = 512
+#load .dlc
+#model_path = model_dir /  "{}.dlc".format(MODEL_NAME)
+#IMAGE_SIZE = 128
 
 ####################################################################
 

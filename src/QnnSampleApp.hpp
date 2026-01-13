@@ -60,7 +60,8 @@ class QnnSampleApp {
                bool dumpOutputs                        = false,
                std::string cachedBinaryPath            = "",
                std::string saveBinaryName              = "",
-               const std::vector<LoraAdapter>& lora_adapters = std::vector<LoraAdapter>());
+               const std::vector<LoraAdapter>& lora_adapters = std::vector<LoraAdapter>(),
+			    std::string dlcPath                     = "");
 
   // @brief Print a message to STDERR then return a nonzero
   //  exit status.
@@ -169,6 +170,7 @@ class QnnSampleApp {
 
   StatusCode extractProfilingEvent(QnnProfile_EventId_t profileEventId);
   
+  StatusCode composeGraphsFromDlc();
   static const std::string s_defaultOutputPath;
 
   QnnFunctionPointers m_qnnFunctionPointers;
@@ -220,6 +222,10 @@ class QnnSampleApp {
   std::string m_graphName;
   std::vector<std::string>  m_inputName;
   std::vector<std::string>  m_outputName;
+  
+  std::string m_dlcPath;
+  QnnSystemDlc_Handle_t m_dlcHandle = nullptr;
+  Qnn_LogHandle_t m_dlcLogHandle = nullptr;
 };
 }  // namespace sample_app
 }  // namespace tools

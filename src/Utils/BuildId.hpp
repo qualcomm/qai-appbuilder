@@ -11,7 +11,7 @@
 namespace qnn {
 namespace tools {
 
-inline std::string getBuildId() { return std::string("v2.38.0.250901140452_125126"); }
+inline std::string getBuildId() { return std::string("v2.42.0.251225"); }
 
 }  // namespace tools
 }  // namespace qnn

@@ -36,6 +36,8 @@ typedef struct QnnFunctionPointers {
   FreeGraphInfoFnHandleType_t freeGraphInfoFnHandle;
   QNN_INTERFACE_VER_TYPE qnnInterface;
   QNN_SYSTEM_INTERFACE_VER_TYPE qnnSystemInterface;
+  QnnInterface_t qnnInterfaceHandle;
+  QnnSystemInterface_t qnnSystemInterfaceHandle;
 } QnnFunctionPointers;
 
 }  // namespace sample_app

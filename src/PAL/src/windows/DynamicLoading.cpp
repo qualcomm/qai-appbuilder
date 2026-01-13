@@ -46,10 +46,18 @@ void *pal::dynamicloading::dlOpen(const char *filename, int flags) {
     // that would be too costly. SNPE didn't use this feature now
     // , wait until we really need it. keep the flexibility here
     // ask caller MUST pass DL_NOW
-    sg_lastErrMsg = "flags must include DL_NOW";
+    sg_lastErrMsg = "flags must include DL_NOW or only specify DL_NOLOAD";
     return NULL;
   }
 
+  // Only test if the specified library is loaded or not
+  // Return its handle if loaded, otherwise, return NULL
+  if (flags & DL_NOLOAD) {
+    // If the library is loaded, it would be a handle to this library
+    // If the library is not loaded, it would be a NULL
+    mod = GetModuleHandleA(filename);
+    return static_cast<void *>(mod);
+  }
   cur_proc = GetCurrentProcess();
 
   if (EnumProcessModules(cur_proc, NULL, 0, &as_is) == 0) {

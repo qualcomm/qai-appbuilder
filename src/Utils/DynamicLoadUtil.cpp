@@ -77,6 +77,7 @@ dynamicloadutil::StatusCode dynamicloadutil::getQnnFunctionPointers(
         QNN_API_VERSION_MINOR <= interfaceProviders[pIdx]->apiVersion.coreApiVersion.minor) {
       foundValidInterface               = true;
       qnnFunctionPointers->qnnInterface = interfaceProviders[pIdx]->QNN_INTERFACE_VER_NAME;
+      qnnFunctionPointers->qnnInterfaceHandle = *interfaceProviders[pIdx];
       break;
     }
   }
@@ -166,6 +167,7 @@ dynamicloadutil::StatusCode dynamicloadutil::getQnnSystemFunctionPointers(
       foundValidSystemInterface = true;
       qnnFunctionPointers->qnnSystemInterface =
           systemInterfaceProviders[pIdx]->QNN_SYSTEM_INTERFACE_VER_NAME;
+      qnnFunctionPointers->qnnSystemInterfaceHandle = *systemInterfaceProviders[pIdx];
       break;
     }
   }

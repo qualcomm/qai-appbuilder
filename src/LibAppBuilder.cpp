@@ -54,6 +54,16 @@ namespace qnn {
 namespace tools {
 namespace libappbuilder {
 
+std::string getFileNameFromPath(const std::string& path) {
+    if (path.empty()) return {};
+    size_t pos = path.find_last_of("/\\");
+    if (pos == std::string::npos || pos == path.size() - 1) {
+        return {}; 
+    }
+    return path.substr(pos + 1);
+}
+
+
 void warmup_parallel_stl()
 {
     static std::once_flag once;
@@ -66,6 +76,7 @@ void warmup_parallel_stl()
     QNN_WAR("warmup_parallel_stl");
 }
 
+
 std::unique_ptr<sample_app::QnnSampleApp> initQnnSampleApp(std::string cachedBinaryPath, std::string backEndPath, std::string systemLibraryPath,
                                                            bool loadFromCachedBinary, std::vector<LoraAdapter>& lora_adapters,
                                                            const std::string& input_data_type, const std::string& output_data_type) {
@@ -74,6 +85,10 @@ std::unique_ptr<sample_app::QnnSampleApp> initQnnSampleApp(std::string cachedBin
   std::string cachedBinaryPath2;
   std::string opPackagePaths;
   std::string saveBinaryName;
+  if (!cachedBinaryPath.empty()){
+    saveBinaryName = getFileNameFromPath(cachedBinaryPath);
+    QNN_DEBUG("initQnnSampleApp saveBinaryName=%s\n", saveBinaryName.c_str());
+  }
 
   if (loadFromCachedBinary) {  // *.bin
       cachedBinaryPath2 = cachedBinaryPath;
@@ -123,7 +138,7 @@ std::unique_ptr<sample_app::QnnSampleApp> initQnnSampleApp(std::string cachedBin
   sg_qnnInterface = qnnFunctionPointers.qnnInterface;
   std::unique_ptr<sample_app::QnnSampleApp> app(new sample_app::QnnSampleApp(qnnFunctionPointers, "null", opPackagePaths, sg_backendHandle, "null",
                                                                              debug, parsedOutputDataType, parsedInputDataType, sg_parsedProfilingLevel,
-                                                                             dumpOutputs, cachedBinaryPath2, saveBinaryName, lora_adapters));
+                                                                             dumpOutputs, cachedBinaryPath2, saveBinaryName, lora_adapters, cachedBinaryPath));
     return app;
 }
 
@@ -307,6 +322,10 @@ bool DeleteShareMemory(std::string share_memory_name) {
 #endif
 }
 
+bool fileExists(const std::string& path) { 
+    std::ifstream f(path.c_str()); 
+    return f.good(); 
+}
 bool ModelInitializeEx(const std::string& model_name, const std::string& proc_name, const std::string& model_path,
                        const std::string& backend_lib_path, const std::string& system_lib_path, 
                        std::vector<LoraAdapter>& lora_adapters,
@@ -333,8 +352,14 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
   std::string suffix_mode_path = cachedBinaryPath.substr(cachedBinaryPath.find_last_of('.') + 1);
   if (suffix_mode_path == "bin") {  // *.bin
       QNN_INFO("cachedBinaryPath: %s", cachedBinaryPath.c_str());
-  }
-  else {    // *.dll
+  } else if (suffix_mode_path == "dlc"){
+      std::string dlcBinPath = cachedBinaryPath + ".bin";
+      if (fileExists(dlcBinPath)) { 
+          cachedBinaryPath = dlcBinPath; 
+          suffix_mode_path = "bin";
+          QNN_INFO("Found dlc.bin, updated cachedBinaryPath: %s\n", cachedBinaryPath.c_str()); 
+      }
+  } else {    // *.dll
       loadFromCachedBinary = false;
       QNN_INFO("modelPath: %s", cachedBinaryPath.c_str());
   }
@@ -382,7 +407,7 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
       return false;
     }
 
-    if (!loadFromCachedBinary) {
+    if (!loadFromCachedBinary ||  (suffix_mode_path == "dlc")) { //issue#23
       if (sample_app::StatusCode::SUCCESS != app->createContext()) {
         app->reportError("Context Creation failure");
         return false;
