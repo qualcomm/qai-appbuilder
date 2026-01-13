@@ -18,6 +18,7 @@
 #include "PAL/FileOp.hpp"
 #include "PAL/Path.hpp"
 #include "PAL/StringOp.hpp"
+#include "QnnDlcUtils.hpp"
 #include "QnnSampleApp.hpp"
 #include "QnnSampleAppUtils.hpp"
 #include "QnnWrapperUtils.hpp"
@@ -192,7 +193,8 @@ sample_app::QnnSampleApp::QnnSampleApp(QnnFunctionPointers qnnFunctionPointers,
                                        bool dumpOutputs,
                                        std::string cachedBinaryPath,
                                        std::string saveBinaryName, 
-                                       const std::vector<LoraAdapter>& lora_adapters)
+                                       const std::vector<LoraAdapter>& lora_adapters,
+									                     std::string dlcPath)
     : m_qnnFunctionPointers(qnnFunctionPointers),
       m_outputPath(outputPath),
       m_saveBinaryName(saveBinaryName),
@@ -204,9 +206,17 @@ sample_app::QnnSampleApp::QnnSampleApp(QnnFunctionPointers qnnFunctionPointers,
       m_profilingLevel(profilingLevel),
       m_dumpOutputs(dumpOutputs),
       m_isBackendInitialized(false),
-      m_isContextCreated(false) {
+      m_isContextCreated(false),
+	    m_dlcPath(dlcPath)
+{
+
   split(m_inputListPaths, inputListPaths, ',');
   split(m_opPackagePaths, opPackagePaths, ',');
+  if(!dlcPath.empty()){
+    size_t pos = dlcPath.find_last_of("\\/"); 
+    m_outputPath = dlcPath.substr(0, pos);
+    //printf("m_outputPath=%s\n", m_outputPath.c_str());
+  }
   if (m_outputPath.empty()) {
     m_outputPath = s_defaultOutputPath;
   }
@@ -220,6 +230,10 @@ sample_app::QnnSampleApp::QnnSampleApp(QnnFunctionPointers qnnFunctionPointers,
 }
 
 sample_app::QnnSampleApp::~QnnSampleApp() {
+  // Free DLC resources using utility function
+  dlc_utils::freeDlcResources(m_qnnFunctionPointers.qnnSystemInterfaceHandle,
+                              m_dlcHandle,
+                              m_dlcLogHandle);
   // Free Profiling object if it was created
   if (nullptr != m_profileBackendHandle) {
     QNN_DEBUG("Freeing backend profile object.");
@@ -448,20 +462,30 @@ sample_app::StatusCode sample_app::QnnSampleApp::freeContext() {
 // are expected to be read by the app.
 sample_app::StatusCode sample_app::QnnSampleApp::composeGraphs() {
   auto returnStatus = StatusCode::SUCCESS;
-  if (qnn_wrapper_api::ModelError_t::MODEL_NO_ERROR !=
-      m_qnnFunctionPointers.composeGraphsFnHandle(
-          m_backendHandle,
-          m_qnnFunctionPointers.qnnInterface,
-          m_context,
-          (const qnn_wrapper_api::GraphConfigInfo_t**)m_graphConfigsInfo,
-          m_graphConfigsInfoCount,
-          &m_graphsInfo,
-          &m_graphsCount,
-          m_debug,
-          log::getLogCallback(),
-          log::getLogLevel())) {
-    QNN_ERROR("Failed in composeGraphs()");
-    returnStatus = StatusCode::FAILURE;
+  // If DLC path is provided, use DLC-based composition
+  if (!m_dlcPath.empty()) {
+    printf("DLC path provided, using DLC-based graph composition\n");
+    returnStatus = composeGraphsFromDlc();
+    return returnStatus;
+  } else{
+    // Default: compose with QNN's model.so
+    // Default path: use model.so
+    QNN_INFO("Using model.so for graph composition");
+    if (qnn_wrapper_api::ModelError_t::MODEL_NO_ERROR !=
+        m_qnnFunctionPointers.composeGraphsFnHandle(
+                                m_backendHandle,
+                                m_qnnFunctionPointers.qnnInterface,
+                                m_context,
+                                (const qnn_wrapper_api::GraphConfigInfo_t**)m_graphConfigsInfo,
+                                m_graphConfigsInfoCount,
+                                &m_graphsInfo,
+                                &m_graphsCount,
+                                m_debug,
+                                log::getLogCallback(),
+                                log::getLogLevel())) {
+      QNN_ERROR("Failed in composeGraphs()");
+      returnStatus = StatusCode::FAILURE;
+    }
   }
   return returnStatus;
 }
@@ -983,6 +1007,38 @@ sample_app::StatusCode sample_app::QnnSampleApp::saveBinary() {
 
 // C:\Qualcomm\AIStack\QNN\<version>\include\QNN\QnnProfile.h
 // C:\Qualcomm\AIStack\QNN\<version>\include\QNN\HTP\QnnHtpProfile.h
+sample_app::StatusCode sample_app::QnnSampleApp::composeGraphsFromDlc() {
+  QNN_DEBUG("Composing graphs from DLC\n");
+  // Create DLC handle using utility function
+  auto dlcStatus = dlc_utils::createDlcHandle(m_qnnFunctionPointers.qnnSystemInterfaceHandle,
+                                              m_dlcPath,
+                                              log::getLogCallback(),
+                                              log::getLogLevel(),
+                                              m_dlcLogHandle,
+                                              m_dlcHandle);
+
+  if (dlc_utils::StatusCode::SUCCESS != dlcStatus) {
+    QNN_ERROR("Failed to create DLC handle");
+    return StatusCode::FAILURE;
+  }
+
+  // Compose graphs from DLC using utility function
+  dlcStatus = dlc_utils::composeGraphsFromDlc(m_qnnFunctionPointers.qnnSystemInterfaceHandle,
+                                              m_dlcHandle,
+                                              m_backendHandle,
+                                              m_context,
+                                              m_qnnFunctionPointers.qnnInterfaceHandle,
+                                              m_graphsInfo,
+                                              m_graphsCount);
+
+  if (dlc_utils::StatusCode::SUCCESS != dlcStatus) {
+    QNN_ERROR("Failed to compose graphs from DLC");
+    return StatusCode::FAILURE;
+  }
+
+  QNN_INFO("Successfully composed %d graphs from DLC", m_graphsCount);
+  return StatusCode::SUCCESS;
+}
 sample_app::StatusCode sample_app::QnnSampleApp::extractBackendProfilingInfo(
     Qnn_ProfileHandle_t profileHandle) {
   if (nullptr == m_profileBackendHandle) {

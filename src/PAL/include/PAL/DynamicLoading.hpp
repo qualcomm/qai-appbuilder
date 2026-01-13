@@ -26,6 +26,7 @@ enum {
   DL_NOW    = 0x0001,
   DL_LOCAL  = 0x0002,
   DL_GLOBAL = 0x0004,
+  DL_NOLOAD = 0x0008
 };
 
 // specify this address to distingiush from NULL pointer
