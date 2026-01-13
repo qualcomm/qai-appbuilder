@@ -144,7 +144,7 @@ def Inference(input_image_path):
     PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
 
     # Run the inference.
-    output_data = vit.Inference([image])
+    output_data = vit.Inference(image)
 
     # Reset the HTP.
     PerfProfile.RelPerfProfileGlobal()

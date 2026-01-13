@@ -347,7 +347,7 @@ def Inference(input_image_path, output_image_path, show_image = True):
     PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
 
     # Run the inference.
-    model_output = yolov8.Inference([image])
+    model_output = yolov8.Inference(image)
     if SOC_ID == "6490":
         pred_boxes = torch.tensor(model_output[2].reshape(1, -1, 4))
         pred_scores = torch.tensor(model_output[0].reshape(1, -1))

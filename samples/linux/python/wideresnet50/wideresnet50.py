@@ -144,7 +144,7 @@ def Inference(input_image_path):
     PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
 
     # Run the inference.
-    output_data = wideresnet50.Inference([image])
+    output_data = wideresnet50.Inference(image)
 
     # Reset the HTP.
     PerfProfile.RelPerfProfileGlobal()
