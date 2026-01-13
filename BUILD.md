@@ -19,8 +19,8 @@
   
 - Install Visual Studio 2022: 
   - https://docs.qualcomm.com/bundle/publicresource/topics/80-62010-1/setup.html?product=1601111740057789
-- Install x64 version Python-3.12.6: 
-  - https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe
+- Install x64 version [Python-3.12.8](https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe) or install arm64 version [Python-3.12.6](https://github.com/quic/ai-engine-direct-helper/blob/main/docs/python_arm64.md) if your app is running on arm64.
+  - 
 - Use the commands below to install Python dependency: 
 ```
 pip install wheel==0.45.1 setuptools==75.8.0 pybind11==2.13.6
@@ -36,7 +36,7 @@ git pull --recurse-submodules
 ```
 - Set environment 'QNN_SDK_ROOT' to the Qualcomm® AI Runtime SDK path which you're using. E.g.:
 ```
-Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.38.0.250901\
+Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.42.0.251225\
 ```
 - Use the commands below to build and install Python extension(*.whl): <br>
 *Note: Please get the corresponding "Supported Toolchains" and "Hexagon Arch" with your device from [Supported Snapdragon devices](https://docs.qualcomm.com/bundle/publicresource/topics/80-63442-10/QNN_general_overview.html#supported-snapdragon-devices). <br>
@@ -44,7 +44,10 @@ Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.38.0.250901\
 ```
 cd ai-engine-direct-helper
 python setup.py --toolchains <Supported Toolchains> --hexagonarch <Hexagon Arch> bdist_wheel
-# For example: python setup.py --toolchains arm64x-windows-msvc --hexagonarch 73 bdist_wheel
+
+#support multiple hexagonarch, for example: 
+python setup.py --toolchains arm64x-windows-msvc --hexagonarch 73 bdist_wheel
+python setup.py --toolchains arm64x-windows-msvc --hexagonarch 73,81 bdist_wheel
 
 python setup.py bdist_wheel
 # You can also use above command, it will compile it with default Toolchains and Hexagon Arch.
@@ -52,6 +55,10 @@ python setup.py bdist_wheel
 # Install the extension:
 pip install dist\qai_appbuilder-2.38.0-cp312-cp312-win_amd64.whl
 ```
+## DLC Support
+###  load .bin model file after covert .dlc file, refer to [dlc2bin](https://github.com/quic/ai-engine-direct-helper/tree/main/tools/convert/dlc2bin).
+###  load .dlc model file directly from QAIRT version 2.42.0.251225 onwards.
+A new .dlc.bin file will be generated after load and run .dlc model at the first time, then will load that new .dlc.bin file when run your app later to save time. Usage sample codes can refer to [real_esrgan_x4plus.py](https://github.com/quic/ai-engine-direct-helper/commit/dbc36f61c816e3864793f82eb1e688e0ad52216a).
 
 ## Build QAI AppBuilder for android
 
