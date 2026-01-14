@@ -18,7 +18,7 @@
 #include <algorithm>
 #include <execution>
 #include <vector>
-
+#include <fstream>
 
 #include "BuildId.hpp"
 #include "DynamicLoadUtil.hpp"
