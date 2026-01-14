@@ -66,6 +66,7 @@ There're several Python classes from this extension:
 - QNNShareMemory - It's used to create processes share memory while using *QNNContextProc*.
 - QNNConfig - It's for configuring  Qualcomm® AI Runtime SDK libraries path, runtime(CPU/HTP), log leverl, profiling level.
 - PerfProfile - Set the HTP perf profile.
+- More Apis: getInputShapes()/getInputDataType()/getInputName()/getOutputShapes()/getOutputDataType()/getOutputName()/getGraphName(), refer to usage sample codes in [real_esrgan_x4plus.py](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/python/real_esrgan_x4plus/real_esrgan_x4plus.py#L167).
 
 ## Notes: <br>
 a. Plese use the API *LogLevel.SetLogLevel()* for Python project to initialize the log function before you call any other APIs. 
@@ -200,3 +201,8 @@ outputSize.clear();
 
 libAppBuilder.ModelDestroy(model_name);
 ```
+## DLC Support
+###  load .bin model file after covert .dlc file, refer to [dlc2bin](https://github.com/quic/ai-engine-direct-helper/tree/main/tools/convert/dlc2bin).
+###  load .dlc model file directly from QAIRT version 2.41.0.251128 onwards.
+You only need to put the .dlc model file at the same folder of your .bin file, and modify corresponding model path in your app.
+A new .dlc.bin file will be generated after load and run .dlc model at the first time, then will load that new .dlc.bin file when run your app later to save time. Usage sample codes can refer to [real_esrgan_x4plus.py](https://github.com/quic/ai-engine-direct-helper/commit/dbc36f61c816e3864793f82eb1e688e0ad52216a).

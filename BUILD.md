@@ -45,20 +45,15 @@ Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.42.0.251225\
 cd ai-engine-direct-helper
 python setup.py --toolchains <Supported Toolchains> --hexagonarch <Hexagon Arch> bdist_wheel
 
-#support multiple hexagonarch, for example: 
+#for example: 
 python setup.py --toolchains arm64x-windows-msvc --hexagonarch 73 bdist_wheel
-python setup.py --toolchains arm64x-windows-msvc --hexagonarch 73,81 bdist_wheel
 
+# If you use below command, it will compile with default Toolchains and Hexagon Arch.
 python setup.py bdist_wheel
-# You can also use above command, it will compile it with default Toolchains and Hexagon Arch.
 
 # Install the extension:
-pip install dist\qai_appbuilder-2.38.0-cp312-cp312-win_amd64.whl
+pip install dist\qai_appbuilder-2.42.0-cp312-cp312-win_amd64.whl
 ```
-## DLC Support
-###  load .bin model file after covert .dlc file, refer to [dlc2bin](https://github.com/quic/ai-engine-direct-helper/tree/main/tools/convert/dlc2bin).
-###  load .dlc model file directly from QAIRT version 2.42.0.251225 onwards.
-A new .dlc.bin file will be generated after load and run .dlc model at the first time, then will load that new .dlc.bin file when run your app later to save time. Usage sample codes can refer to [real_esrgan_x4plus.py](https://github.com/quic/ai-engine-direct-helper/commit/dbc36f61c816e3864793f82eb1e688e0ad52216a).
 
 ## Build QAI AppBuilder for android
 
