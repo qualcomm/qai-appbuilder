@@ -8,12 +8,13 @@
 
 # Compile Commands:
 # [windows]
-# Set QNN_SDK_ROOT=C:/Qualcomm/AIStack/QAIRT/2.40.0.251030/
+# Set QNN_SDK_ROOT=C:/Qualcomm/AIStack/QAIRT/2.42.0.251225/
 # Set QNN_SDK_ROOT=C:/Qualcomm/AIStack/QAIRT/2.38.0.250901/
 # python setup.py bdist_wheel
 # [linux]
 # export QNN_SDK_ROOT=~/QAIRT/2.38.0.250901/
-# python setup.py bdist_wheel
+# python setup.py bdist_wheel --hexagonarch 81
+# python setup.py bdist_wheel --hexagonarch 81 --toolchains aarch64-windows-msvc
 
 import os
 import platform
@@ -23,6 +24,7 @@ import sys
 from pathlib import Path
 import shutil
 import zipfile
+from shlex import quote
 
 from setuptools import Extension, setup, find_packages
 from setuptools.command.build_ext import build_ext
@@ -35,6 +37,37 @@ machine = platform.machine()
 sysinfo = sys.version
 
 generate = "-G \"Visual Studio 17 2022\""
+
+# -----------------------------------------------------------------------------
+# For "x64 Python + ARM64EC extension" builds:
+# - CMake FindPython (new mode) enforces interpreter architecture == target arch
+#   when both Interpreter and Development are requested, which fails here.
+#   (ARM64EC target + x64 python.exe => "Wrong architecture").
+#   (https://learn.arm.com/learning-paths/laptops-and-desktops/win_arm64ec_porting/how-to-2/)[5](https://getdocs.org/Cmake/docs/3.21/module/findpython)
+# - pybind11 provides a compat/classic mode to avoid the new FindPython path,
+#   selectable via PYBIND11_FINDPYTHON=COMPAT.
+#   (https://stackoverflow.com/questions/64632484/cmake-python-cannot-use-the-interpreter)[4](https://github.com/msys2/MINGW-packages/issues/20569)
+# - We also pass multiple Python executable variables to satisfy different
+#   discovery code paths (Python_EXECUTABLE / Python3_EXECUTABLE / PYTHON_EXECUTABLE). 
+#   (https://learn.arm.com/learning-paths/laptops-and-desktops/win_arm64ec_porting/how-to-2/)
+# -----------------------------------------------------------------------------
+def _cmake_python_hints():
+    py = os.environ.get("PYTHON_X64_EXECUTABLE", sys.executable)
+    # Quote for safety when paths include spaces.
+    pyq = quote(py)
+    # Force pybind11 to use classic/compat mode (avoid FindPython arch check).
+    # See pybind11 CMake docs for PYBIND11_FINDPYTHON=COMPAT. [3](https://stackoverflow.com/questions/64632484/cmake-python-cannot-use-the-interpreter)[4](https://github.com/msys2/MINGW-packages/issues/20569)
+    hints = []
+    hints.append(f" -DPYBIND11_FINDPYTHON=COMPAT")
+    # Make sure pybind11 classic mode finds the right version when multiple Pythons exist.
+    hints.append(f" -DPYBIND11_PYTHON_VERSION={sys.version_info.major}.{sys.version_info.minor}")
+    # Provide Python executable under both "new" and "old" variable names.
+    hints.append(f" -DPython_EXECUTABLE={pyq}")
+    hints.append(f" -DPython3_EXECUTABLE={pyq}")
+    hints.append(f" -DPYTHON_EXECUTABLE={pyq}")
+    return "".join(hints)
+
+
 arch = "ARM64"
 
 if machine == "AMD64" or "AMD64" in sysinfo:
@@ -121,7 +154,10 @@ def build_cmake():
         os.mkdir("build")
     os.chdir("build")
 
-    subprocess.run("cmake .. " + generate, shell=True)
+    # subprocess.run("cmake .. " + generate, shell=True)
+    # Pass Python/pybind11 hints to avoid FindPython arch mismatch for x64 python + ARM64EC target. 
+    subprocess.run("cmake .. " + generate + _cmake_python_hints(), shell=True)
+
     subprocess.run("cmake --build ./ --config " + CONFIG, shell=True)
     os.chdir("../")
 
@@ -253,7 +289,11 @@ class CMakeBuild(build_ext):
 
         cmake_generator = os.environ.get("CMAKE_GENERATOR", "")
 
-        cmake_args = f" -DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}{os.sep}" + f" -DPYTHON_EXECUTABLE={sys.executable}" + f" -DCMAKE_BUILD_TYPE={cfg}"  # not used on MSVC, but no harm
+        # cmake_args = f" -DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}{os.sep}" + f" -DPYTHON_EXECUTABLE={sys.executable}" + f" -DCMAKE_BUILD_TYPE={cfg}"  # not used on MSVC, but no harm
+        # IMPORTANT:
+        # - Do NOT rely on FindPython (new) here: it rejects x64 interpreter for ARM64EC target when Development is requested. 
+        # - Force pybind11 compat mode and pass x64 python executable via multiple variables.
+        cmake_args = f" -DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}{os.sep}" + f" -DCMAKE_BUILD_TYPE={cfg}" + _cmake_python_hints()  # not used on MSVC, but no harm
 
         build_args = ""
 
