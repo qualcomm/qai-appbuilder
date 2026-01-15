@@ -34,6 +34,10 @@
 #include "Utils/Utils.hpp"
 #endif
 
+#if !defined(__ANDROID__)
+  #include <execution>
+#endif
+
 using namespace qnn;
 using namespace qnn::log;
 using namespace qnn::tools;
@@ -63,7 +67,7 @@ std::string getFileNameFromPath(const std::string& path) {
     return path.substr(pos + 1);
 }
 
-
+#if !defined(__ANDROID__)
 void warmup_parallel_stl()
 {
     static std::once_flag once;
@@ -75,7 +79,7 @@ void warmup_parallel_stl()
     });
     QNN_WAR("warmup_parallel_stl");
 }
-
+#endif
 
 std::unique_ptr<sample_app::QnnSampleApp> initQnnSampleApp(std::string cachedBinaryPath, std::string backEndPath, std::string systemLibraryPath,
                                                            bool loadFromCachedBinary, std::vector<LoraAdapter>& lora_adapters,
@@ -132,8 +136,10 @@ std::unique_ptr<sample_app::QnnSampleApp> initQnnSampleApp(std::string cachedBin
     }
   }
 
-  if ((input_data_type == "float") || (output_data_type == "float")) // We need 'std::transform' only for ‘float’ mode. It need data conversation.
+#if !defined(__ANDROID__)
+  if ((input_data_type == "float") || (output_data_type == "float")) // We need 'std::transform' only for ï¿½floatï¿½ mode. It need data conversation.
       warmup_parallel_stl();
+#endif
 
   sg_qnnInterface = qnnFunctionPointers.qnnInterface;
   std::unique_ptr<sample_app::QnnSampleApp> app(new sample_app::QnnSampleApp(qnnFunctionPointers, "null", opPackagePaths, sg_backendHandle, "null",

@@ -24,7 +24,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#if defined(__aarch64__) || defined(_M_ARM64)
+#if defined(__aarch64__) || defined(_M_ARM64) || defined(__ANDROID__)
   #include <arm_neon.h>
 #endif
 #ifdef _WIN32
@@ -396,6 +396,7 @@ static inline uint32_t datautil::fp32_to_bits(float f) {
 #endif
 }
 
+#if !defined(__ANDROID__)
 // Enabling fp16 execution
 static inline uint16_t datautil::fp16_ieee_from_fp32_value(float f) {
  #if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901L) || defined(__GNUC__) && !defined(__STRICT_ANSI__)
@@ -422,7 +423,22 @@ static inline uint16_t datautil::fp16_ieee_from_fp32_value(float f) {
      const uint32_t nonsign = exp_bits + mantissa_bits;
      return (sign >> 16) | (shl1_w > UINT32_C(0xFF000000) ? UINT16_C(0x7E00) : nonsign);
  }
+#endif
 
+#if defined(__ANDROID__)
+static inline uint16_t datautil::fp16_ieee_from_fp32_hw(float f)
+{
+    float32x4_t v32 = vdupq_n_f32(f);
+    //VCVT F16.F32
+    float16x4_t v16 = vcvt_f16_f32(v32);
+    __fp16 h = v16[0];
+    uint16_t out;
+    memcpy(&out, &h, sizeof(out));
+    return out;
+}
+#endif
+
+#if !defined(__ANDROID__)
 static inline uint16_t datautil::fp16_ieee_from_fp32_value_v2(float f) noexcept {
 #if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901L) || defined(__GNUC__) && !defined(__STRICT_ANSI__)
     constexpr float scale_to_inf  = 0x1.0p+112f;
@@ -523,6 +539,7 @@ void datautil::float32_to_float16_parallel(uint16_t* __restrict dst,
                    [](float x) noexcept -> uint16_t { return fp16_ieee_from_fp32_value_v2(x); });
 
 }
+#endif
 
 // Enabling fp16 execution
 bool datautil::float32ToFloatN(uint8_t* out,
@@ -535,13 +552,17 @@ bool datautil::float32ToFloatN(uint8_t* out,
       }
   
       if(bitWidth == 16){
-  #ifdef PARALLEL   // wd. Improve performance through std::transform and NEON.
+  #if defined(PARALLEL) && !defined(__ANDROID__)// wd. Improve performance through std::transform and NEON.
         auto* dst = reinterpret_cast<uint16_t*>(out);  
         float32_to_float16_parallel(dst, in, numElements);
   #else
           uint16_t *temp = (uint16_t *)out;
           for(size_t i = 0; i < numElements; i++){
-              temp[i] = fp16_ieee_from_fp32_value(in[i]);
+              #if defined(__ANDROID__)
+                  temp[i] = fp16_ieee_from_fp32_hw(in[i]);
+              #else
+                  temp[i] = fp16_ieee_from_fp32_value(in[i]);
+              #endif
           }
   #endif //__hexagon__
       }

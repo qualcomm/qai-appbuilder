@@ -88,6 +88,7 @@ StatusCode writeBinaryToFile(std::string fileDir,
                              size_t bufferSize);
 #endif
 
+#if !defined(__ANDROID__)
 // Enabling fp16 execution
 static inline uint16_t fp16_ieee_from_fp32_value(float f);
 
@@ -108,6 +109,10 @@ void float32_to_float16_dispatch(uint16_t* __restrict dst,
 void float32_to_float16_parallel(uint16_t* __restrict dst,
                                  const float*   __restrict src,
                                  size_t n) noexcept;
+#endif
+#if defined(__ANDROID__)
+static inline uint16_t fp16_ieee_from_fp32_hw(float f);
+#endif
 
 static inline float fp16_ieee_to_fp32_value(uint16_t h);
 static inline uint32_t fp32_to_bits(float f);
