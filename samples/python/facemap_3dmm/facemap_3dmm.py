@@ -142,18 +142,15 @@ def Inference(input_image_path):
     PerfProfile.RelPerfProfileGlobal()
 
     # postprocess the result
-    _output = torch.tensor(output)
-    # Parse results from network
-    alpha_id, alpha_exp, pitch, yaw, roll, tX, tY, f = (
-        _output[0, 0:219],
-        _output[0, 219:258],
-        _output[0, 258],
-        _output[0, 259],
-        _output[0, 260],
-        _output[0, 261],
-        _output[0, 262],
-        _output[0, 263],
-    )
+    _output = torch.from_numpy(output[0])  # shape (1, 265)
+    alpha_id  = _output[0, 0:219]
+    alpha_exp = _output[0, 219:258]
+    pitch     = _output[0, 258]
+    yaw       = _output[0, 259]
+    roll      = _output[0, 260]
+    tX        = _output[0, 261]
+    tY        = _output[0, 262]
+    f         = _output[0, 263]
 
     # De-normalized to original range from [-1, 1]
     alpha_id = alpha_id * 3

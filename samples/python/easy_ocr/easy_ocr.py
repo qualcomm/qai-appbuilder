@@ -280,7 +280,7 @@ def Demo_Local_detector_preprocess(img: np.ndarray):
         np.transpose(normalizeMeanVariance(n_img), (2, 0, 1))
         for n_img in img_resized_list
     ]
-    x = torch.from_numpy(np.array(x))
+    x = np.array(x)
 
     return x, (ratio_h, ratio_w)
 

@@ -124,21 +124,25 @@ def Inference(input_audio_path):
     return result
 
 def post_process(accuracy):
-    # Average them along time to get an overall classifier output for the clip.
-    mean_scores = np.mean(accuracy, axis=0)
-    mean_scores = mean_scores[0]
-    top_N = 5
-    # Report the highest-scoring classes.
-    top_class_indices = np.argsort(mean_scores)[::-1][:top_N]
-    # Label each audio one-by-one, for all the chunks,
-    actions = parse_category_meta()
-    top5_classes =  [actions[prediction] for prediction in top_class_indices]
+    print("accuracy shape:", np.array(accuracy).shape)
+    mean_scores = np.mean(accuracy, axis=1)  # Average over the time dimension
+    #print("mean_scores shape after mean:", mean_scores.shape)
 
+    # Squeeze out the batch or redundant dimensions and reduce to a 1D vector [C]
+    mean_scores = np.squeeze(mean_scores)    # e.g. [C]
+    mean_scores = mean_scores.ravel()        
+    #print("mean_scores shape after squeeze/ravel:", mean_scores.shape)
+
+    top_N = 5
+    top_class_indices = np.argsort(mean_scores)[::-1][:top_N]  # 1D index
+    #print("top_class_indices:", top_class_indices, top_class_indices.shape)
+
+    actions = parse_category_meta()  # list[str],length is C
+    top5_classes = [actions[int(idx)] for idx in top_class_indices]
     top5_classes_str= " | ".join(top5_classes)
 
     print(f"Top 5 predictions:\n{top5_classes_str}\n")
     return top5_classes_str
-
 
 def Release():
     global yamnet

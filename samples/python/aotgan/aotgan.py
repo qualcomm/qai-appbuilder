@@ -30,7 +30,7 @@ IMAGE_SIZE = 512
 ####################################################################
 
 execution_ws = Path(os.getcwd())
-qnn_dir = execution_ws / "qai_libs"
+qnn_dir = os.path.join(execution_ws, "qai_libs")
 
 if not "python" in str(execution_ws):
     execution_ws = execution_ws / "python"

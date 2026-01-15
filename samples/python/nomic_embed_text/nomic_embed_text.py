@@ -42,11 +42,13 @@ tokenizer = None
 # NomicEmbedText class which inherited from the class QNNContext.
 class NomicEmbedText(QNNContext):
     def Inference(self, input_ids, attention_mask):
+        if isinstance(input_ids, torch.Tensor):
+            input_ids = input_ids.detach().cpu().numpy()
+        if isinstance(attention_mask, torch.Tensor):
+            attention_mask = attention_mask.detach().cpu().numpy()
         input_datas=[input_ids, attention_mask]
         output_data = super().Inference(input_datas)[0]
         return output_data
-
-
 
 def model_download():
     ret = True
