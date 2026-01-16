@@ -31,7 +31,7 @@ from qai_hub_models.models._shared.whisper.model import (
     WhisperEncoderInf,
 )
 
-from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig)
+from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig, DataType)
 
 ####################################################################
 
@@ -260,9 +260,10 @@ def Init():
     QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for Decoder 
-    decoder = Decoder("whisper_decoder", decoder_model_path)
-        # Instance for Encoder 
-    encoder = Encoder("whisper_encoder", encoder_model_path)
+    decoder = Decoder("whisper_decoder", decoder_model_path, input_data_type=DataType.NATIVE, output_data_type=DataType.NATIVE)
+
+    # Instance for Encoder 
+    encoder = Encoder("whisper_encoder", encoder_model_path, input_data_type=DataType.NATIVE, output_data_type=DataType.NATIVE)
 
 
 
@@ -317,33 +318,13 @@ def transcribe_single_chunk(audio: np.ndarray):
     #print("mel_input", mel_input)
     # Start decoding
     # coreml only takes float tensors
-    x = np.array([[TOKEN_SOT]])
+    x = np.array([[TOKEN_SOT]], dtype=np.int32)
     decoded_tokens = [TOKEN_SOT]
     sample_len = whisper_tiny_en.mean_decode_len  # mean # of tokens to sample
 
-    logits = np.zeros(
-        (
-            1,
-            1,
-            51864,
-        )
-    ).astype(np.float32)
-    k_cache_self = np.zeros(
-        (
-            6,
-            8,
-            64,
-            224,
-        )
-    ).astype(np.float32)
-    v_cache_self = np.zeros(
-        (
-            6,
-            8,
-            224,
-            64,
-        )
-    ).astype(np.float32)
+    logits = np.zeros((1, 1, 51864,)).astype(np.float32)
+    k_cache_self = np.zeros((6, 8, 64, 224,)).astype(np.float16)
+    v_cache_self = np.zeros((6, 8, 224, 64,)).astype(np.float16)
         
     sum_logprobs = 0
     print("start decode sample_len ", sample_len)
@@ -352,8 +333,8 @@ def transcribe_single_chunk(audio: np.ndarray):
         # the model performance.
         # index - used to get positional embedding correctly.
         #print("start decode ")
-        index = torch.zeros([1, 1], dtype=torch.int32)
-        index[0, 0] = i
+        index = np.array([[i]], dtype=np.int32)
+
         #print("start Inference ")
         logits, k_cache_self, v_cache_self = decoder.Inference(
             x, index, k_cache_cross, v_cache_cross, k_cache_self, v_cache_self
@@ -393,7 +374,7 @@ def transcribe_single_chunk(audio: np.ndarray):
             break
 
         sum_logprobs += logprobs[next_token]
-        x = np.array([[next_token]])
+        x = np.array([[next_token]], dtype=np.int32)
         decoded_tokens.append(int(next_token))
 
     tokenizer = whisper.decoding.get_tokenizer(
@@ -485,8 +466,16 @@ def log_mel_spectrogram(
     log_spec = torch.clamp(mel_spec, min=1e-10).log10()
     log_spec = torch.maximum(log_spec, log_spec.max() - 8.0)
     log_spec = (log_spec + 4.0) / 4.0
-    return log_spec.unsqueeze(0).detach().float().numpy()
 
+    # return float16
+    return (
+        log_spec
+        .unsqueeze(0)
+        .detach()
+        .to(dtype=torch.float16)   # convert to fp16
+        .cpu()
+        .numpy()                   # numpy array,dtype=np.float16
+    )
 
 def chunk_and_resample_audio(
     audio: np.ndarray,

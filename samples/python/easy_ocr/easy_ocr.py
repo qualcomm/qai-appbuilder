@@ -624,7 +624,7 @@ class Local_EasyOCR_recognizer:
                 for i in range(image.shape[3], 999):
                     new_image = torch.cat((new_image, new_image[:, :, :, 0:1]), dim=3)
                 
-                preds = self.recognizer(new_image)
+                preds = self.recognizer(new_image.detach().cpu().numpy())
 
                 # preds is a list but we need [1, X, 97] for En
                 #                             [1, X, 6719] for Ch

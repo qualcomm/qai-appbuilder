@@ -129,8 +129,8 @@ def Inference(input_image_path):
             interpolation=cv2.INTER_LINEAR,
         )
     ).float()
-
-    image = CHW_fp32_torch_crop_image.permute(2, 0, 1).view(1, 3, 128, 128)
+    
+    image = CHW_fp32_torch_crop_image.permute(2, 0, 1).view(1, 3, 128, 128).detach().cpu().numpy()
     
     # Burst the HTP.
     PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)

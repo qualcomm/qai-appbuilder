@@ -254,8 +254,7 @@ def run_box_detector(
     decode_preds_from_anchors(box_coords, (256, 256), anchors)
 
     # Convert box coordinates from CWH -> XYXY format for NMS.
-    box_coords[:2] = box_xywh_to_xyxy(box_coords[:2])
-
+    box_coords[..., :2, :] = box_xywh_to_xyxy(box_coords[..., :2, :])
     # flatten coords (remove final [2] dim) for NMS
     flattened_box_coords = box_coords.view(list(box_coords.shape)[:-2] + [-1])
 
