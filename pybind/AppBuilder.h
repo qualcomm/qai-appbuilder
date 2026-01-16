@@ -143,31 +143,10 @@ static inline py::dtype inferOutputNumpyDtype(size_t outputSizeBytes,
 ModelInfo_t getModelInfo_P(std::string model_name, std::string proc_name, 
                            std::string input, size_t graphIndex = 0) {
 
-    std::vector<void*> outputBuffers;
-    std::vector<size_t> outputSize;
     ModelInfo_t output = g_LibAppBuilder.getModelInfo(model_name, proc_name, input);
     return output;
 }
 
-std::vector<std::vector<size_t>> getInputShapes(const std::string& model_name, const std::string& proc_name){
-    ::ModelInfo_t m_moduleInfo = getModelInfo_P(model_name, proc_name,  "is",  /*perf_profile, graphIndex*/ 0);
-    return m_moduleInfo.inputShapes;
-};
-
-std::vector<std::string> getInputDataType(const std::string& model_name, const std::string& proc_name){
-    ::ModelInfo_t m_moduleInfo  = getModelInfo_P(model_name, model_name,  "id");
-    return m_moduleInfo.inputDataType;
-};
-
-std::vector<std::vector<size_t>> getOutputShapes(const std::string& model_name, const std::string& proc_name){
-    ::ModelInfo_t m_moduleInfo  = getModelInfo_P(model_name, model_name, "os");
-    return m_moduleInfo.outputShapes;
-};
-
-std::vector<std::string> getOutputDataType(const std::string& model_name, const std::string& proc_name){
-    ::ModelInfo_t m_moduleInfo  = getModelInfo_P(model_name, model_name,  "od");
-    return m_moduleInfo.outputDataType;
-};
 
 /*
     QNN_LOG_LEVEL_ERROR = 1,
@@ -339,8 +318,8 @@ std::vector<py::array> inference_P(std::string model_name, std::string proc_name
     //QNN_INF("inference_P::inference output vector length: %d\n", outputBuffers.size());
 
     // dtype list like: ['float16', 'float16', ...]
-    std::vector<std::string> outDtypes = getOutputDataType(model_name, proc_name);
-    std::vector<std::vector<size_t>> outShapes = getOutputShapes(model_name, proc_name);
+    std::vector<std::string> outDtypes = g_LibAppBuilder.getOutputDataType(model_name, proc_name);
+    std::vector<std::vector<size_t>> outShapes = g_LibAppBuilder.getOutputShapes(model_name, proc_name);
 
     std::vector<py::array> output;
 

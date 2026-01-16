@@ -707,6 +707,41 @@ std::vector<std::string> LibAppBuilder::getOutputName(std::string model_name){
     sg_model_map.insert(std::make_pair(model_name, std::move(app)));
     return m_outputName;
 };
+//proc
+std::vector<std::vector<size_t>> LibAppBuilder::getOutputShapes(std::string model_name, std::string proc_name){
+    ::ModelInfo_t m_moduleInfo  = getModelInfo(model_name, proc_name,  "os");
+    return m_moduleInfo.outputShapes;
+};
+
+std::vector<std::vector<size_t>> LibAppBuilder::getInputShapes(std::string model_name, std::string proc_name){
+    ::ModelInfo_t m_moduleInfo = getModelInfo(model_name, proc_name,  "is");
+    return m_moduleInfo.inputShapes;
+};
+
+std::vector<std::string> LibAppBuilder::getInputDataType(std::string model_name, std::string proc_name){
+    ::ModelInfo_t m_moduleInfo  = getModelInfo(model_name, proc_name,  "id");
+    return m_moduleInfo.inputDataType;
+};
+
+std::vector<std::string> LibAppBuilder::getOutputDataType(std::string model_name, std::string proc_name){
+    ::ModelInfo_t m_moduleInfo  = getModelInfo(model_name, proc_name,  "od");
+    return m_moduleInfo.outputDataType;
+};
+
+std::string LibAppBuilder::getGraphName(std::string model_name, std::string proc_name){
+    ::ModelInfo_t m_moduleInfo  = getModelInfo(model_name, proc_name,  "gn");
+    return m_moduleInfo.graphName;
+};
+
+std::vector<std::string> LibAppBuilder::getInputName(std::string model_name, std::string proc_name){
+    ::ModelInfo_t m_moduleInfo  = getModelInfo(model_name, proc_name,  "in");
+    return m_moduleInfo.inputName;
+};
+
+std::vector<std::string> LibAppBuilder::getOutputName(std::string model_name, std::string proc_name){
+    ::ModelInfo_t m_moduleInfo  = getModelInfo(model_name, proc_name,  "on");
+    return m_moduleInfo.outputName;
+};
 
 ModelInfo_t LibAppBuilder::getModelInfo(std::string model_name, std::string proc_name, std::string input) {
     ModelInfo_t output;

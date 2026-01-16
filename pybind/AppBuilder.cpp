@@ -78,37 +78,37 @@ std::vector<std::string> QNNContext::getOutputName(){
 };
 
 std::vector<std::vector<size_t>> QNNContext::getInputShapes(const std::string& proc_name){
-    ::ModelInfo_t m_moduleInfo = getModelInfo_P(m_model_name, m_proc_name,  "is",  /*perf_profile, graphIndex*/ 0);
+    ::ModelInfo_t m_moduleInfo = getModelInfo_P(m_model_name, proc_name,  "is");
     return m_moduleInfo.inputShapes;
 };
 
 std::vector<std::string> QNNContext::getInputDataType(const std::string& proc_name){
-    ::ModelInfo_t m_moduleInfo  = getModelInfo_P(m_model_name, m_proc_name,  "id");
+    ::ModelInfo_t m_moduleInfo  = getModelInfo_P(m_model_name, proc_name,  "id");
     return m_moduleInfo.inputDataType;
 };
 
 std::vector<std::vector<size_t>> QNNContext::getOutputShapes(const std::string& proc_name){
-    ::ModelInfo_t m_moduleInfo  = getModelInfo_P(m_model_name, m_proc_name, "os");
+    ::ModelInfo_t m_moduleInfo  = getModelInfo_P(m_model_name, proc_name, "os");
     return m_moduleInfo.outputShapes;
 };
 
 std::vector<std::string> QNNContext::getOutputDataType(const std::string& proc_name){
-    ::ModelInfo_t m_moduleInfo  = getModelInfo_P(m_model_name, m_proc_name,  "od");
+    ::ModelInfo_t m_moduleInfo  = getModelInfo_P(m_model_name, proc_name,  "od");
     return m_moduleInfo.outputDataType;
 };
 
 std::string QNNContext::getGraphName(const std::string& proc_name){
-    ::ModelInfo_t m_moduleInfo  = getModelInfo_P(m_model_name, m_proc_name,  "gn");
+    ::ModelInfo_t m_moduleInfo  = getModelInfo_P(m_model_name, proc_name,  "gn");
     return m_moduleInfo.graphName;
 };
 
 std::vector<std::string> QNNContext::getInputName(const std::string& proc_name){
-    ::ModelInfo_t m_moduleInfo  = getModelInfo_P(m_model_name, m_proc_name,  "in");
+    ::ModelInfo_t m_moduleInfo  = getModelInfo_P(m_model_name, proc_name,  "in");
     return m_moduleInfo.inputName;
 };
 
 std::vector<std::string> QNNContext::getOutputName(const std::string& proc_name){
-    ::ModelInfo_t m_moduleInfo  = getModelInfo_P(m_model_name, m_proc_name,  "on");
+    ::ModelInfo_t m_moduleInfo  = getModelInfo_P(m_model_name, proc_name,  "on");
     return m_moduleInfo.outputName;
 };
 

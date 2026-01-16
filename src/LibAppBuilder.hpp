@@ -87,7 +87,15 @@ public:
     std::vector<std::string> getOutputName(std::string model_name);
     ModelInfo_t getModelInfo(std::string model_name, std::string proc_name, std::string input);
     ModelInfo_t getModelInfo(std::string model_name, std::string input);
-    ModelInfo_t getModelInfoExt(std::string model_name, std::string input);                                                             
+    ModelInfo_t getModelInfoExt(std::string model_name, std::string input);  
+	//proc 
+    std::vector<std::vector<size_t>> getInputShapes(std::string model_name, std::string proc_name);
+    std::vector<std::string> getInputDataType(std::string model_name, std::string proc_name);
+    std::vector<std::string> getInputName(std::string model_name, std::string proc_name);
+    std::string getGraphName(std::string model_name, std::string proc_name);
+    std::vector<std::string> getOutputDataType(std::string model_name, std::string proc_name);
+    std::vector<std::vector<size_t>> getOutputShapes(std::string model_name, std::string proc_name);
+    std::vector<std::string> getOutputName(std::string model_name, std::string proc_name);                                                      
     // issue#24
     std::vector<std::vector<size_t>> m_inputShapes;
     std::vector<std::string> m_inputDataType;
