@@ -94,7 +94,7 @@ std::unique_ptr<sample_app::QnnSampleApp> initQnnSampleApp(std::string cachedBin
     QNN_DEBUG("initQnnSampleApp saveBinaryName=%s\n", saveBinaryName.c_str());
   }
 
-  if (loadFromCachedBinary) {  // *.bin
+  if (loadFromCachedBinary) {  // *.bin and *.dlc
       cachedBinaryPath2 = cachedBinaryPath;
   }
   else {    // *.dll
@@ -144,7 +144,7 @@ std::unique_ptr<sample_app::QnnSampleApp> initQnnSampleApp(std::string cachedBin
   sg_qnnInterface = qnnFunctionPointers.qnnInterface;
   std::unique_ptr<sample_app::QnnSampleApp> app(new sample_app::QnnSampleApp(qnnFunctionPointers, "null", opPackagePaths, sg_backendHandle, "null",
                                                                              debug, parsedOutputDataType, parsedInputDataType, sg_parsedProfilingLevel,
-                                                                             dumpOutputs, cachedBinaryPath2, saveBinaryName, lora_adapters, cachedBinaryPath));
+                                                                             dumpOutputs, cachedBinaryPath2, saveBinaryName, lora_adapters, cachedBinaryPath2));
     return app;
 }
 
