@@ -30,11 +30,16 @@ qnn_wrapper_api::ModelError_t qnn_wrapper_api::freeQnnTensor(Qnn_Tensor_t &tenso
 
 qnn_wrapper_api::ModelError_t qnn_wrapper_api::freeQnnTensors(Qnn_Tensor_t *&tensors,
                                                               uint32_t numTensors) {
+  if (tensors == nullptr || numTensors == 0) {
+    tensors = nullptr;
+    return MODEL_NO_ERROR;
+  }
   // free all pointer allocations in struct
   for (size_t i = 0; i < numTensors; i++) {
     freeQnnTensor(tensors[i]);
   }
   free(tensors);
+  tensors = nullptr;
   return MODEL_NO_ERROR;
 }
 

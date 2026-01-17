@@ -20,7 +20,7 @@
 - Install Visual Studio 2022: 
   - https://docs.qualcomm.com/bundle/publicresource/topics/80-62010-1/setup.html?product=1601111740057789
 - Install x64 version [Python-3.12.8](https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe) or install arm64 version [Python-3.12.6](https://github.com/quic/ai-engine-direct-helper/blob/main/docs/python_arm64.md) if your app is running on arm64.
-  - 
+
 - Use the commands below to install Python dependency: 
 ```
 pip install wheel==0.45.1 setuptools==75.8.0 pybind11==2.13.6
@@ -45,7 +45,7 @@ Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.42.0.251225\
 cd ai-engine-direct-helper
 python setup.py --toolchains <Supported Toolchains> --hexagonarch <Hexagon Arch> bdist_wheel
 
-#for example: 
+# For example: 
 python setup.py --toolchains arm64x-windows-msvc --hexagonarch 73 bdist_wheel
 
 # If you use below command, it will compile with default Toolchains and Hexagon Arch.

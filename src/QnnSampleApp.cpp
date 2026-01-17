@@ -519,7 +519,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::contextApplyBinarySection(QnnCo
 
         for (std::string binaryUpdatesPath : bin_paths){
           m_profilingOption = ProfilingOption::NONE;   
-          auto returnStatus = applyBinarySection(
+          returnStatus = applyBinarySection(
               model_name, binaryUpdatesPath, section, m_useMmap,
               m_profilingLevel, m_profilingOption);
 
@@ -820,24 +820,45 @@ sample_app::StatusCode sample_app::QnnSampleApp::createFromBinary() {
 #endif
 
 #ifdef MMAP_FILE
-  HANDLE hFile = CreateFile(m_cachedBinaryPath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+  HANDLE hFile = CreateFile(m_cachedBinaryPath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
   if (hFile == INVALID_HANDLE_VALUE) {
-    printf("Failed to open file %s. err: %s\n", m_cachedBinaryPath.c_str(), strerror(errno));
+    printf("Failed to open file %s. err: %s", m_cachedBinaryPath.c_str(), strerror(errno));
     return StatusCode::FAILURE;
   }
 
-  HANDLE hFileMap = CreateFileMapping(hFile, NULL, PAGE_READONLY, 0, bufferSize, NULL);
+  // Ensure handles are closed on all paths.
+  HANDLE hFileMap = NULL;
+  uint8_t *buffer  = NULL;
+  auto cleanupWinMmap = [&]() {
+    if (buffer) {
+      UnmapViewOfFile(buffer);
+      buffer = NULL;
+    }
+    if (hFileMap) {
+      CloseHandle(hFileMap);
+      hFileMap = NULL;
+    }
+    if (hFile != INVALID_HANDLE_VALUE) {
+      CloseHandle(hFile);
+      hFile = INVALID_HANDLE_VALUE;
+    }
+  };
+
+  hFileMap = CreateFileMapping(hFile, NULL, PAGE_READONLY, 0, (DWORD)bufferSize, NULL);
+
   if (hFileMap == NULL) {
-    printf("Failed to create file mapping of file %s. err: %s\n", m_cachedBinaryPath.c_str(), strerror(errno));
+    printf("Failed to create file mapping of file %s. err: %s", m_cachedBinaryPath.c_str(), strerror(errno));
+    cleanupWinMmap();
     return StatusCode::FAILURE;
   }
 
-  uint8_t* buffer = (uint8_t*)MapViewOfFile(hFileMap, FILE_MAP_READ, 0, 0, 0);
+  buffer = (uint8_t *)MapViewOfFile(hFileMap, FILE_MAP_READ, 0, 0, 0);
+
   if (buffer == NULL) {
-    printf("MapViewOfFile fail %s. err: %s\n", m_cachedBinaryPath.c_str(), strerror(errno));
+    printf("MapViewOfFile fail %s. err: %s", m_cachedBinaryPath.c_str(), strerror(errno));
+    cleanupWinMmap();
     return StatusCode::FAILURE;
   }
-
 #else
   std::shared_ptr<uint8_t> buffer{nullptr};
   // read serialized binary into a byte buffer
@@ -946,9 +967,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::createFromBinary() {
   // timerHelper.Reset();
 
 #ifdef MMAP_FILE
-  UnmapViewOfFile(buffer);
-  CloseHandle(hFile);
-  CloseHandle(hFileMap);
+  cleanupWinMmap();
 #endif
 
   // timerHelper.Print("UnmapViewOfFile.");
@@ -1041,7 +1060,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::composeGraphsFromDlc() {
 }
 sample_app::StatusCode sample_app::QnnSampleApp::extractBackendProfilingInfo(
     Qnn_ProfileHandle_t profileHandle) {
-  if (nullptr == m_profileBackendHandle) {
+  if (nullptr == profileHandle) {
     QNN_ERROR("Backend Profile handle is nullptr; may not be initialized.");
     return StatusCode::FAILURE;
   }
@@ -1480,9 +1499,22 @@ std::vector<std::string> sample_app::QnnSampleApp::getOutputDataType(){
 
 sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vector<uint8_t*>& inputBuffers, 
                                                                       std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
-                                                                      std::string perfProfile, size_t graphIndex) {
+                                                                      std::string perfProfile, size_t graphIndex, size_t share_memory_size) {
   auto returnStatus = StatusCode::SUCCESS;
   
+  if (nullptr == m_graphsInfo || nullptr == (*m_graphsInfo)) {
+    QNN_ERROR("m_graphsInfo is nullptr");
+    return StatusCode::FAILURE;
+  }
+  if (graphIndex >= m_graphsCount) {
+    QNN_ERROR("Invalid graphIndex: %zu, graphsCount: %zu", graphIndex, m_graphsCount);
+    return StatusCode::FAILURE;
+  }
+  if (inputBuffers.empty()) {
+    QNN_ERROR("inputBuffers is empty");
+    return StatusCode::FAILURE;
+  }
+
   // We push '12345' to 'outputSize' in function 'ModelRun@main.cpp@SvcQNNHelpper.exe'. In this case, share memory will not be freed, we can use the share memory as output buffer directly.
   bool shareMemory = false;
   uint8_t* pShareBuffer = inputBuffers[0];
@@ -1491,7 +1523,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vecto
       outputSize.clear();
 
       // Find the share buffer entry point, the smalest point address in 'inputBuffers'.
-      for (int i = 0; i < inputBuffers.size(); i++) {
+      for (size_t i = 0; i < inputBuffers.size(); i++) {
           if (pShareBuffer > inputBuffers[i])
               pShareBuffer = inputBuffers[i];
       }
@@ -1503,7 +1535,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vecto
   // for (size_t graphIdx = 0; graphIdx < m_graphsCount; graphIdx++) {
     // printf("Starting execution for graphIdx: %d\n", (int)graphIdx);
 
-    QNN_DEBUG("Starting execution for graphIdx: %d", graphIdx);
+  QNN_DEBUG("Starting execution for graphIdx: %d", graphIdx);
     //if (graphIdx >= inputBuffers.size()) {
     //  QNN_ERROR("No Inputs available for: %d", graphIdx);
     //  returnStatus = StatusCode::FAILURE;
@@ -1512,10 +1544,73 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vecto
 
     // improve performance.
 
-    Qnn_Tensor_t* inputs  = (*m_graphsInfo)[graphIdx].m_inputs ;
-    Qnn_Tensor_t* outputs = (*m_graphsInfo)[graphIdx].m_outputs;
+  Qnn_Tensor_t* inputs  = (*m_graphsInfo)[graphIdx].m_inputs ;
+  Qnn_Tensor_t* outputs = (*m_graphsInfo)[graphIdx].m_outputs;
 
-    auto graphInfo = (*m_graphsInfo)[graphIdx];
+  auto graphInfo = (*m_graphsInfo)[graphIdx];
+
+  if (nullptr == inputs || nullptr == outputs) {
+    QNN_ERROR("inputs/outputs is nullptr for graphIdx: %zu", graphIdx);
+    return StatusCode::FAILURE;
+  }
+
+  // When using shared memory, validate share_memory_size is sufficient for the provided input buffers.
+  // NOTE: Only validate when share_memory_size > 0. If share_memory_size == 0, treat it as "unknown/unlimited".
+  if (shareMemory && share_memory_size > 0) {
+    if (inputBuffers.size() != graphInfo.numInputTensors) {
+      QNN_ERROR("Incorrect amount of Input Buffers for graphIdx: %zu. Expected: %d, received: %zu", graphIdx, graphInfo.numInputTensors, inputBuffers.size());
+      return StatusCode::FAILURE;
+    }
+
+    size_t requiredInputBytesTotal = 0;
+    for (size_t inputIdx = 0; inputIdx < graphInfo.numInputTensors; inputIdx++) {
+      std::vector<size_t> dims;
+      if (QNN_TENSOR_GET_DIMENSIONS(inputs[inputIdx]) == nullptr ||
+        QNN_TENSOR_GET_RANK(inputs[inputIdx]) == 0) {
+        QNN_ERROR("Input tensor %zu has nullptr dimensions or rank == 0", inputIdx);
+        return StatusCode::FAILURE;
+      }
+      m_ioTensor.fillDims(dims, QNN_TENSOR_GET_DIMENSIONS(inputs[inputIdx]), QNN_TENSOR_GET_RANK(inputs[inputIdx]));
+
+      size_t bytesNeeded = 0;
+      const Qnn_DataType_t inDtype = QNN_TENSOR_GET_DATA_TYPE(inputs[inputIdx]);
+      if (m_inputDataType == InputDataType::FLOAT && inDtype != QNN_DATATYPE_FLOAT_32) {
+        // Caller provides float32 input when model expects non-float input (conversion path).
+        bytesNeeded = datautil::calculateElementCount(dims) * sizeof(float);
+      } else {
+        datautil::StatusCode duStatus;
+        std::tie(duStatus, bytesNeeded) = datautil::calculateLength(dims, inDtype);
+        if (datautil::StatusCode::SUCCESS != duStatus ||
+        bytesNeeded == 0) {
+          QNN_ERROR("Failed to calculate native input size for inputIdx: %zu", inputIdx);
+          return StatusCode::FAILURE;
+        }
+      }
+
+      // Compute the span end offset (relative to shared memory base) for this input buffer.
+      ptrdiff_t delta = inputBuffers[inputIdx] - pShareBuffer;
+      if (delta < 0) {
+        QNN_ERROR("Invalid shared buffer layout: inputIdx=%zu is below shared base pointer", inputIdx);
+        return StatusCode::FAILURE;
+      }
+      const size_t offsetBytes = static_cast<size_t>(delta);
+      if (offsetBytes > (std::numeric_limits<size_t>::max)() - bytesNeeded) {
+        QNN_ERROR("share memory size overflow while accumulating required input bytes");
+        return StatusCode::FAILURE;
+      }
+      const size_t endBytes = offsetBytes + bytesNeeded;
+      if (requiredInputBytesTotal < endBytes) {
+        requiredInputBytesTotal = endBytes;
+      }
+      if (requiredInputBytesTotal > share_memory_size) {
+        QNN_ERROR("share memory size(%zu) is insufficient for inputs. required=%zu bytes, graphIdx=%zu", share_memory_size, requiredInputBytesTotal, graphIdx);
+        return StatusCode::FAILURE;
+      }
+    }
+
+    QNN_WARN("share memory size(%zu) is enough for inputs. required=%zu bytes, graphIdx=%zu",
+    share_memory_size, requiredInputBytesTotal, graphIdx);
+  }
 
     // printf("graphName: %s, numInputTensors: %d, numOutputTensors: %d\n", graphInfo.graphName, graphInfo.numInputTensors, graphInfo.numOutputTensors);
 
@@ -1568,30 +1663,63 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vecto
           if (StatusCode::SUCCESS == returnStatus) {
             QNN_DEBUG("Successfully executed graphIdx: %d ", graphIdx);
 
+            // Pre-calc each output write size once, then:
+            // 1) use it for the single shared-memory size validation
+            // 2) use it to advance offset during output packing
+            std::vector<size_t> outNativeBytes(graphInfo.numOutputTensors, 0);
+            std::vector<size_t> outFloatBytes(graphInfo.numOutputTensors, 0);
+            std::vector<size_t> outBytesToWrite(graphInfo.numOutputTensors, 0);
+            std::vector<Qnn_DataType_t> outDtypes(graphInfo.numOutputTensors, QNN_DATATYPE_UNDEFINED);
+            for (size_t outputIdx = 0; outputIdx < graphInfo.numOutputTensors; outputIdx++) {
+              std::vector<size_t> dims;
+              m_ioTensor.fillDims(dims, QNN_TENSOR_GET_DIMENSIONS(outputs[outputIdx]), QNN_TENSOR_GET_RANK(outputs[outputIdx]));
+              const Qnn_DataType_t outDtype = QNN_TENSOR_GET_DATA_TYPE(outputs[outputIdx]);
+              outDtypes[outputIdx] = outDtype;
+
+              datautil::StatusCode duStatus;
+              std::tie(duStatus, outNativeBytes[outputIdx]) = datautil::calculateLength(dims, outDtype);
+              if (datautil::StatusCode::SUCCESS != duStatus || outNativeBytes[outputIdx] == 0) {
+                QNN_ERROR("Failed to calculate native output size for outputIdx: %d", outputIdx);
+                return StatusCode::FAILURE;
+              }
+              outFloatBytes[outputIdx] = datautil::calculateElementCount(dims) * sizeof(float);
+
+              if (outDtype != QNN_DATATYPE_FLOAT_32 && m_outputDataType == OutputDataType::FLOAT_ONLY) {
+                outBytesToWrite[outputIdx] = outFloatBytes[outputIdx];
+              } else {
+                outBytesToWrite[outputIdx] = outNativeBytes[outputIdx];
+              }
+            }
+
+            // When using shared memory output, validate share_memory_size before writing any output.
+            // NOTE: Only validate when share_memory_size > 0. If share_memory_size == 0, treat it as "unknown/unlimited".
+            if (shareMemory && share_memory_size > 0) {
+              size_t requiredBytesTotal = 0;
+              for (size_t outputIdx = 0; outputIdx < graphInfo.numOutputTensors; outputIdx++) {
+                if (requiredBytesTotal > (std::numeric_limits<size_t>::max)() - outBytesToWrite[outputIdx]) {
+                  QNN_ERROR("share memory size overflow while accumulating required bytes");
+                  return StatusCode::FAILURE;
+                }
+                requiredBytesTotal += outBytesToWrite[outputIdx];
+                if (requiredBytesTotal > share_memory_size) {
+                  QNN_ERROR("share memory size(%zu) is insufficient. required=%zu bytes, graphIdx=%zu",
+                            share_memory_size, requiredBytesTotal, graphIdx);
+                  return StatusCode::FAILURE;
+                }
+              }
+
+              QNN_WARN("share memory size(%zu) is enough for outputs. required=%zu bytes, graphIdx=%zu", share_memory_size, requiredBytesTotal, graphIdx);
+            }
+
             // populate output buffer directly
             size_t offset = 0;
             for (size_t outputIdx = 0; outputIdx < graphInfo.numOutputTensors; outputIdx++) {
                 QNN_DEBUG("Writing output for outputIdx: %d", outputIdx);
 
-                std::vector<size_t> dims;
-                m_ioTensor.fillDims(dims, QNN_TENSOR_GET_DIMENSIONS(outputs[outputIdx]), QNN_TENSOR_GET_RANK(outputs[outputIdx]));
-
-                const Qnn_DataType_t outDtype = QNN_TENSOR_GET_DATA_TYPE(outputs[outputIdx]);
-
-                // Native output byte size (same logic used by writeOutputTensor()->writeBatchDataToFile()).
-                // i.e., write as-is, no dequantization. 
-                size_t nativeBytes = 0;
-                {
-                  datautil::StatusCode duStatus;
-                  std::tie(duStatus, nativeBytes) = datautil::calculateLength(dims, outDtype);
-                  if (datautil::StatusCode::SUCCESS != duStatus || nativeBytes == 0) {
-                    QNN_ERROR("Failed to calculate native output size for outputIdx: %d", outputIdx);
-                    return StatusCode::FAILURE;
-                  }
-                }
-
-                // Float output byte size when user requests FLOAT_ONLY (always float32 buffer).
-                const size_t floatBytes = datautil::calculateElementCount(dims) * sizeof(float);
+                const Qnn_DataType_t outDtype = outDtypes[outputIdx];
+                const size_t nativeBytes      = outNativeBytes[outputIdx];
+                const size_t floatBytes       = outFloatBytes[outputIdx];
+                const size_t bytesToWrite     = outBytesToWrite[outputIdx];
 
                 uint8_t* buffer = nullptr;      // what we finally push to outputBuffers
                 float*   floatBuffer = nullptr; // used only for FLOAT_ONLY conversion path
@@ -1606,7 +1734,6 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vecto
                     // For float output tensor, outputDataType has no effect (same behavior as IOTensor::writeOutputTensors). 
                     if (shareMemory) {
                       buffer = pShareBuffer + offset;
-                      offset += nativeBytes; // nativeBytes == floatBytes in this case, but keep consistent
                     } else {
                       buffer = static_cast<uint8_t*>(malloc(nativeBytes));
                       if (!buffer) {
@@ -1622,7 +1749,6 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vecto
                     QNN_DEBUG("Writing in output->dataType == OutputDataType::FLOAT_ONLY");
                     if (shareMemory) {
                       floatBuffer = reinterpret_cast<float*>(pShareBuffer + offset);
-                      offset += floatBytes;
                     }
                     auto ioReturnStatus = m_ioTensor.convertToFloat(&floatBuffer, &outputs[outputIdx]);
                     if (iotensor::StatusCode::SUCCESS != ioReturnStatus) {
@@ -1637,7 +1763,6 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vecto
                     // Native-only: write as-is (no convertToFloat), equivalent to IOTensor::writeOutputTensor(). 
                     if (shareMemory) {
                       buffer = pShareBuffer + offset;
-                      offset += nativeBytes;
                     } else {
                       buffer = static_cast<uint8_t*>(malloc(nativeBytes));
                       if (!buffer) {
@@ -1651,6 +1776,10 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vecto
                 }
                 else {
                     QNN_ERROR("Can't handle unknown data type: %d", m_outputDataType);
+                }
+
+                if (shareMemory) {
+                  offset += bytesToWrite;
                 }
 
                 if (buffer) {

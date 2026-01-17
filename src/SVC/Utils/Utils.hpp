@@ -189,7 +189,7 @@ BOOL TalkToSvc_Initialize(const std::string& model_name, const std::string& proc
     // QNN_INF("TalkToSvc_Initialize::WriteToPipe: %s dwRead = %d dwWrite = %d\n", command.c_str(), dwRead, dwWrite);
     if (!bSuccess) return false;
 
-    if (!async) {
+    if (!async) {  // We only wait for Svc response when sync mode. Otherwise, we just return.
         // Read command from Svc.
         bSuccess = ReadFile(hSvcPipeOutRead, g_buffer, GLOBAL_BUFSIZE, &dwRead, NULL);
         if(dwRead) {

@@ -141,6 +141,8 @@ def build_clean():
     if os.path.exists(binary_path + "/QAIAppSvc.exe"):
         os.remove(binary_path + "/libappbuilder.dll")
         os.remove(binary_path + "/QAIAppSvc.exe")
+    if os.path.exists(binary_path + "/QAIAppSvc.pdb"):
+        os.remove(binary_path + "/QAIAppSvc.pdb")
     if os.path.exists(binary_path + "/libappbuilder.pdb"):
         os.remove(binary_path + "/libappbuilder.pdb")
     if os.path.exists(binary_path + "/libappbuilder.so"):
@@ -164,6 +166,8 @@ def build_cmake():
     if os.path.exists("lib/" + CONFIG + "/QAIAppSvc.exe"):
         shutil.copy("lib/" + CONFIG +"/libappbuilder.dll", binary_path)
         shutil.copy("lib/" + CONFIG + "/QAIAppSvc.exe", binary_path)
+    if os.path.exists("lib/" + CONFIG + "/QAIAppSvc.pdb"):
+        shutil.copy("lib/" + CONFIG + "/QAIAppSvc.pdb", binary_path)
     if os.path.exists("lib/" + CONFIG + "/libappbuilder.pdb"):
         shutil.copy("lib/" + CONFIG + "/libappbuilder.pdb", binary_path)
     if os.path.exists("lib/" + "libappbuilder.so"):

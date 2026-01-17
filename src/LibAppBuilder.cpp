@@ -465,7 +465,7 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
 bool ModelInferenceEx(std::string model_name, std::string proc_name, std::string share_memory_name,
                       std::vector<uint8_t*>& inputBuffers, std::vector<size_t>& inputSize,
                       std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
-                      std::string& perfProfile, size_t graphIndex) {
+                      std::string& perfProfile, size_t graphIndex, size_t share_memory_size=0) {
     bool result = true;
 
     //QNN_INF("LibAppBuilder::ModelInference: %s \n", model_name.c_str());
@@ -487,7 +487,7 @@ bool ModelInferenceEx(std::string model_name, std::string proc_name, std::string
         result = false;
     }
 
-    if (result && sample_app::StatusCode::SUCCESS != app->executeGraphsBuffers(inputBuffers, outputBuffers, outputSize, perfProfile, graphIndex)) {
+    if (result && sample_app::StatusCode::SUCCESS != app->executeGraphsBuffers(inputBuffers, outputBuffers, outputSize, perfProfile, graphIndex, share_memory_size)) {
         app->reportError("Graph Execution failure");
         result = false;
     }
@@ -599,9 +599,9 @@ bool LibAppBuilder::ModelInference(std::string model_name, std::string proc_name
 
 bool LibAppBuilder::ModelInference(std::string model_name, std::vector<uint8_t*>& inputBuffers, 
                                    std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
-                                   std::string& perfProfile, size_t graphIndex){
+                                   std::string& perfProfile, size_t graphIndex, size_t share_memory_size){
     std::vector<size_t> inputSize;
-    return ModelInferenceEx(model_name, "", "", inputBuffers, inputSize, outputBuffers, outputSize, perfProfile, graphIndex);
+    return ModelInferenceEx(model_name, "", "", inputBuffers, inputSize, outputBuffers, outputSize, perfProfile, graphIndex, share_memory_size);
 }
 
 bool LibAppBuilder::ModelApplyBinaryUpdate(const std::string model_name, std::vector<LoraAdapter>& lora_adapters) {

@@ -85,7 +85,7 @@ void ModelLoad(std::string cmdBuf, HANDLE hSvcPipeOutWrite) {
     QNN_INF("ModelLoad::ModelInitialize End ret = %d\n", bSuccess);
     Print_MemInfo("ModelLoad::ModelInitialize End.");
 
-    if (!(async_str == "async")) {
+    if (!(async_str == "async")) {  // We only notify client when sync mode. TODO: Async mode will notify client by callback function.
         if(bSuccess) {
             bSuccess = WriteFile(hSvcPipeOutWrite, ACTION_OK, (DWORD)strlen(ACTION_OK) + 1, NULL, NULL);
         }
@@ -117,14 +117,14 @@ void ModelRun(std::string cmdBuf, HANDLE hSvcPipeOutWrite) {
     std::vector<size_t> inputSize;
     std::vector<uint8_t*> outputBuffers;
     std::vector<size_t> outputSize;
-    outputSize.push_back(12345);
+    outputSize.push_back(12345);    // Indicte that this is a share memory output.
 
     // Fill data from 'pShareMemInfo->lpBase' to 'inputBuffers' vector before inference the model.
     ShareMemToVector(strBufferArray, (uint8_t*)lpBase, inputBuffers, inputSize);
 
     Print_MemInfo("ModelRun::ModelInference Start.");
     //QNN_INF("ModelRun::ModelInference %s\n", model_name.c_str());
-    bSuccess = g_LibAppBuilder.ModelInference(model_name.c_str(), inputBuffers, outputBuffers, outputSize, perfProfile, graphIndex);
+    bSuccess = g_LibAppBuilder.ModelInference(model_name.c_str(), inputBuffers, outputBuffers, outputSize, perfProfile, graphIndex, share_memory_size);
     //QNN_INF("ModelRun::ModelInference End ret = %d\n", bSuccess);
     Print_MemInfo("ModelRun::ModelInference End.");
 

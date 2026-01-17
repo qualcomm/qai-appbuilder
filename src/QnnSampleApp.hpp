@@ -143,7 +143,7 @@ class QnnSampleApp {
 // zw.
   StatusCode executeGraphsBuffers(std::vector<uint8_t*>& inputBuffers,
                                   std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
-                                  std::string perfProfile, size_t graphIndex = 0);
+                                  std::string perfProfile, size_t graphIndex = 0, size_t share_memory_size = 0);
   // issue#24
   std::vector<std::vector<size_t>> getInputShapes();
   std::vector<std::string> getInputDataType();

@@ -13,6 +13,7 @@
 
 ShareMemory::ShareMemory(const std::string& share_memory_name, const size_t share_memory_size) {
     m_share_memory_name = share_memory_name;
+    m_share_memory_size = share_memory_size;
     g_LibAppBuilder.CreateShareMemory(share_memory_name, share_memory_size);
 }
 

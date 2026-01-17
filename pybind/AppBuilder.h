@@ -70,6 +70,33 @@ static inline py::dtype dtypeFromString(const std::string& dtypeStr) {
     return py::dtype::of<uint8_t>();
 }
 
+// ---------------------------------------------------------------------------------
+// Helper: case-insensitive "float32 request" for input_data_type/output_data_type
+// Accepts: "float", "float32", "fp32"
+// ---------------------------------------------------------------------------------
+static inline bool isFloat32Request(const std::string& s) {
+    std::string t = s;
+    for (auto& c : t) c = static_cast<char>(::tolower(c));
+    return (t == "float" || t == "float32" || t == "fp32");
+}
+
+// ---------------------------------------------------------------------------------
+// Helper: identify if a py::dtype is float32 (NumPy kind 'f' and itemsize == 4)
+// Note: We avoid relying on dtype object identity; use kind/itemsize instead.
+// ---------------------------------------------------------------------------------
+static inline bool isNumpyFloat32Dtype(const py::dtype& dt) {
+    try {
+        // dt.kind is a 1-char string in NumPy, e.g. 'f' for floating
+        std::string kindStr = py::str(dt.attr("kind"));
+        char kind = kindStr.empty() ? '\0' : kindStr[0];
+        py::ssize_t itemsize = dt.attr("itemsize").cast<py::ssize_t>();
+        return (kind == 'f' && itemsize == 4);
+    } catch (...) {
+        // conservative fallback
+        return false;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Helper: product of dims (for output element count)
 // ---------------------------------------------------------------------------
@@ -206,7 +233,8 @@ std::vector<py::array> inference(std::string model_name, const std::vector<py::a
 
     // Keep temporary converted/contiguous arrays alive during ModelInference
     std::vector<py::array> keepAlive;
-    const bool floatMode = (input_data_type == "float");
+    const bool floatMode = isFloat32Request(input_data_type);
+    const bool floatOutMode = isFloat32Request(output_data_type);
 
     //QNN_INF("inference input vector length: %d\n", input.size());
 
@@ -271,7 +299,16 @@ std::vector<py::array> inference(std::string model_name, const std::vector<py::a
                         { static_cast<py::ssize_t>(dt.itemsize()) },
                         outputBuffers[i],
                         free_data);
-        output.push_back(result);
+
+        // If user requests float output, cast to float32 before returning.
+        // IMPORTANT: do NOT reinterpret the raw buffer as float32 (size may not match).
+        // We first create 'result' using the inferred real dtype, then cast (copy) if needed.
+        if (floatOutMode && !isNumpyFloat32Dtype(dt)) {
+            py::array_t<float, py::array::c_style | py::array::forcecast> farr(result);
+            output.push_back(py::array(farr));
+        } else {
+            output.push_back(result);
+        }
     }
     //print_time("convert Data To ArrayV");
 
@@ -288,7 +325,8 @@ std::vector<py::array> inference_P(std::string model_name, std::string proc_name
 
     // Keep temporary converted/contiguous arrays alive during ModelInference
     std::vector<py::array> keepAlive;
-    const bool floatMode = (input_data_type == "float");
+    const bool floatMode = isFloat32Request(input_data_type);
+    const bool floatOutMode = isFloat32Request(output_data_type);
 
     for (auto i = 0; i < input.size(); i++) {
         if (floatMode) {
@@ -351,7 +389,15 @@ std::vector<py::array> inference_P(std::string model_name, std::string proc_name
                         { static_cast<py::ssize_t>(dt.itemsize()) },
                         outputBuffers[i],
                         free_data);
-        output.push_back(result);
+
+        // If user requests float output, cast to float32 before returning.
+        // For shared memory outputs, this will create a float32 copy (shared memory remains untouched).
+        if (floatOutMode && !isNumpyFloat32Dtype(dt)) {
+            py::array_t<float, py::array::c_style | py::array::forcecast> farr(result);
+            output.push_back(py::array(farr));
+        } else {
+            output.push_back(result);
+        }
     }
     //print_time("convert Data To ArrayV");
 
@@ -371,6 +417,7 @@ int delete_memory(std::string share_memory_name) {
 class ShareMemory {
 public:
     std::string m_share_memory_name;
+    size_t m_share_memory_size = 0;
 
     ShareMemory(const std::string& share_memory_name, const size_t share_memory_size);
     ~ShareMemory();

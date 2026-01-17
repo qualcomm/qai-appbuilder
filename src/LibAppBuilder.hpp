@@ -63,7 +63,7 @@ public:
 
     bool ModelInference(std::string model_name, std::vector<uint8_t*>& inputBuffers, 
                         std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
-                        std::string& perfProfile, size_t graphIndex = 0);
+                        std::string& perfProfile, size_t graphIndex = 0, size_t share_memory_size = 0);
     bool ModelInference(std::string model_name, std::string proc_name, std::string share_memory_name,
                         std::vector<uint8_t*>& inputBuffers, std::vector<size_t>& inputSize,
                         std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
@@ -77,7 +77,6 @@ public:
     bool CreateShareMemory(std::string share_memory_name, size_t share_memory_size);
     bool DeleteShareMemory(std::string share_memory_name);
 
-    // issue#24
     std::vector<std::vector<size_t>> getInputShapes(std::string model_name);
     std::vector<std::string> getInputDataType(std::string model_name);
     std::vector<std::string> getOutputDataType(std::string model_name);
@@ -85,18 +84,19 @@ public:
     std::string getGraphName(std::string model_name);
     std::vector<std::string> getInputName(std::string model_name);
     std::vector<std::string> getOutputName(std::string model_name);
-    ModelInfo_t getModelInfo(std::string model_name, std::string proc_name, std::string input);
-    ModelInfo_t getModelInfo(std::string model_name, std::string input);
-    ModelInfo_t getModelInfoExt(std::string model_name, std::string input);  
-	//proc 
+
     std::vector<std::vector<size_t>> getInputShapes(std::string model_name, std::string proc_name);
     std::vector<std::string> getInputDataType(std::string model_name, std::string proc_name);
-    std::vector<std::string> getInputName(std::string model_name, std::string proc_name);
-    std::string getGraphName(std::string model_name, std::string proc_name);
     std::vector<std::string> getOutputDataType(std::string model_name, std::string proc_name);
     std::vector<std::vector<size_t>> getOutputShapes(std::string model_name, std::string proc_name);
+    std::string getGraphName(std::string model_name, std::string proc_name);
+    std::vector<std::string> getInputName(std::string model_name, std::string proc_name);
     std::vector<std::string> getOutputName(std::string model_name, std::string proc_name);                                                      
-    // issue#24
+
+    ModelInfo_t getModelInfo(std::string model_name, std::string input);
+    ModelInfo_t getModelInfo(std::string model_name, std::string proc_name, std::string input);
+    ModelInfo_t getModelInfoExt(std::string model_name, std::string input);  
+
     std::vector<std::vector<size_t>> m_inputShapes;
     std::vector<std::string> m_inputDataType;
     std::vector<std::vector<size_t>> m_outputShapes;
@@ -104,7 +104,6 @@ public:
     std::string m_graphName;
     std::vector<std::string> m_inputName;
     std::vector<std::string> m_outputName;
-
 };
 
 

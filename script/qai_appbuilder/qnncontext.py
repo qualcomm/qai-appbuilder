@@ -222,7 +222,6 @@ class QNNContext(_QNNContextBase):
                  model_path: str = "None",
                  backend_lib_path: str = "None",
                  system_lib_path: str = "None",
-                 runtime: str = Runtime.HTP,
                  is_async: bool = False,
                  input_data_type: str = DataType.FLOAT,
                  output_data_type: str = DataType.FLOAT
@@ -258,7 +257,6 @@ class QNNContextProc(_QNNContextBase):
                  model_path: str = "None",
                  backend_lib_path: str = "None",
                  system_lib_path: str = "None",
-                 runtime: str = Runtime.HTP,
                  is_async: bool = False,
                  input_data_type: str = DataType.FLOAT,
                  output_data_type: str = DataType.FLOAT
@@ -300,7 +298,6 @@ class QNNLoraContext(_QNNContextBase):
                  backend_lib_path: str = "None",
                  system_lib_path: str = "None",
                  lora_adapters=None,
-                 runtime: str = Runtime.HTP,
                  is_async: bool = False,
                  input_data_type: str = DataType.FLOAT,
                  output_data_type: str = DataType.FLOAT
@@ -355,6 +352,7 @@ class QNNShareMemory:
         """
         self.share_memory_name = share_memory_name
         self.m_memory = appbuilder.ShareMemory(share_memory_name, share_memory_size)
+        self.share_memory_size = share_memory_size
 
     #@timer
     def __del__(self):
