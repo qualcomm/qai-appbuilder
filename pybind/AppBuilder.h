@@ -351,7 +351,11 @@ std::vector<py::array> inference_P(std::string model_name, std::string proc_name
         }
     }
 
-    g_LibAppBuilder.ModelInference(model_name, proc_name, share_memory_name, inputBuffers, inputSize, outputBuffers, outputSize, perf_profile, graphIndex);
+    bool success = g_LibAppBuilder.ModelInference(model_name, proc_name, share_memory_name, inputBuffers, inputSize, outputBuffers, outputSize, perf_profile, graphIndex);
+    if (!success) {
+        QNN_ERR("ModelInference failed for model: %s, proc: %s", model_name.c_str(), proc_name.c_str());
+        return {};
+    }
 
     //QNN_INF("inference_P::inference output vector length: %d\n", outputBuffers.size());
 

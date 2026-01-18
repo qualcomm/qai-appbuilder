@@ -269,6 +269,7 @@ class QNNContextProc(_QNNContextBase):
         self.proc_name = proc_name
         self.input_data_type = input_data_type
         self.output_data_type = output_data_type
+        self.model_name = model_name
 
         if self.proc_name == "None":
             raise ValueError("proc_name must be specified!")
@@ -282,6 +283,11 @@ class QNNContextProc(_QNNContextBase):
 
     #@timer
     def Inference(self, shareMemory, input, perf_profile=PerfProfile.DEFAULT, graphIndex=0):
+        total_input_bytes = sum(arr.nbytes for arr in input)
+        if total_input_bytes > shareMemory.share_memory_size:
+            raise ValueError(f"Input data size {total_input_bytes} exceeds share memory size {shareMemory.share_memory_size}, you need to create a larger share memory for model {self.model_name} @ process {self.proc_name}.")
+            # print(f"Input data size {total_input_bytes} exceeds share memory size {shareMemory.share_memory_size}, you need to create a larger share memory for model {self.model_name} @ process {self.proc_name}.")
+
         return self._inference_and_reshape(
             input,
             lambda _in: self.m_context.Inference(shareMemory.m_memory, _in, perf_profile, graphIndex,

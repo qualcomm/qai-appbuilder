@@ -333,6 +333,67 @@ BOOL TalkToSvc_Inference(std::string model_name, std::string proc_name, std::str
         return false;
     }
 
+
+    // Early validation to avoid VectorToShareMem memcpy crash.
+    if (inputBuffers.size() != inputSize.size()) {
+        QNN_ERR("TalkToSvc_Inference: inputBuffers/inputSize length mismatch. buffers=%zu size=%zu\n", inputBuffers.size(), inputSize.size());
+        return false;
+    }
+    if (!pShareMemInfo->lpBase || pShareMemInfo->size == 0) {
+        QNN_ERR("TalkToSvc_Inference: invalid share memory base or size. name=%s lpBase=%p size=%llu\n", share_memory_name.c_str(), pShareMemInfo->lpBase, (unsigned long long)pShareMemInfo->size);
+        return false;
+    }
+
+    // Compute required size according to VectorToShareMem's offset strategy: reserve sizes of in-share buffers + sizes of out-of-share buffers.
+    {
+        uint8_t* base = (uint8_t*)pShareMemInfo->lpBase;
+        uint8_t* end = base + pShareMemInfo->size;
+        size_t reserved = 0;
+        size_t toCopy = 0;
+
+        for (size_t i = 0; i < inputBuffers.size(); ++i) {
+            uint8_t* buf = inputBuffers[i];
+            size_t sz = inputSize[i];
+
+            if (!buf && sz > 0) {
+                QNN_ERR("TalkToSvc_Inference: null input buffer at index %zu with non-zero size %llu\n", i, (unsigned long long)sz);
+                return false;
+            }
+
+            // In-share: [base, end)
+            if (buf >= base && buf < end) {
+                if (sz > 0 && ((size_t)(end - buf) < sz)) {
+                    QNN_ERR("TalkToSvc_Inference: in-share input buffer out of bounds. idx=%zu buf=%p size=%llu share=[%p,%p)\n", i, buf, (unsigned long long)sz, base, end);
+                    return false;
+                }
+                if (std::numeric_limits<size_t>::max() - reserved < sz) {
+                    QNN_ERR("TalkToSvc_Inference: size_t overflow while accumulating reserved. idx=%zu\n", i);
+                    return false;
+                }
+                reserved += sz;
+            } else {
+                if (std::numeric_limits<size_t>::max() - toCopy < sz) {
+                    QNN_ERR("TalkToSvc_Inference: size_t overflow while accumulating toCopy. idx=%zu\n", i);
+                    return false;
+                }
+                toCopy += sz;
+            }
+        }
+
+        if (std::numeric_limits<size_t>::max() - reserved < toCopy) {
+            QNN_ERR("TalkToSvc_Inference: size_t overflow while computing totalNeeded.\n");
+            return false;
+        }
+        
+        size_t totalNeeded = reserved + toCopy;
+        if (totalNeeded > pShareMemInfo->size) {
+            QNN_ERR("TalkToSvc_Inference: share memory too small. required=%llu (reserved=%llu copy=%llu) share_size=%llu name=%s\n",
+                    (unsigned long long)totalNeeded, (unsigned long long)reserved, (unsigned long long)toCopy, (unsigned long long)pShareMemInfo->size, share_memory_name.c_str());
+            return false;
+        }
+    }
+
+
     HANDLE hSvcPipeInWrite = pProcInfo->hSvcPipeInWrite;
     HANDLE hSvcPipeOutRead = pProcInfo->hSvcPipeOutRead;
     DWORD dwRead = 0, dwWrite = 0;

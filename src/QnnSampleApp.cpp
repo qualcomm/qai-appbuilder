@@ -1588,12 +1588,18 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vecto
       }
 
       // Compute the span end offset (relative to shared memory base) for this input buffer.
-      ptrdiff_t delta = inputBuffers[inputIdx] - pShareBuffer;
-      if (delta < 0) {
+      const uintptr_t baseAddr = reinterpret_cast<uintptr_t>(pShareBuffer);
+      const uintptr_t currAddr = reinterpret_cast<uintptr_t>(inputBuffers[inputIdx]);
+      if (currAddr < baseAddr) {
         QNN_ERROR("Invalid shared buffer layout: inputIdx=%zu is below shared base pointer", inputIdx);
         return StatusCode::FAILURE;
       }
-      const size_t offsetBytes = static_cast<size_t>(delta);
+      const uintptr_t deltaAddr = currAddr - baseAddr;
+      if (deltaAddr > (std::numeric_limits<size_t>::max)()) {
+        QNN_ERROR("share memory size overflow while converting input offset");
+        return StatusCode::FAILURE;
+      }
+      const size_t offsetBytes = static_cast<size_t>(deltaAddr);
       if (offsetBytes > (std::numeric_limits<size_t>::max)() - bytesNeeded) {
         QNN_ERROR("share memory size overflow while accumulating required input bytes");
         return StatusCode::FAILURE;
