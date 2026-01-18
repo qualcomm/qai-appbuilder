@@ -23,7 +23,7 @@
 
 - Use the commands below to install Python dependency: 
 ```
-pip install wheel==0.45.1 setuptools==75.8.0 pybind11==2.13.6
+pip install wheel==0.45.1 setuptools==80.9.0 pybind11==2.13.6 build==1.4.0
 ```
 - Clone this repository to local: 
 ```

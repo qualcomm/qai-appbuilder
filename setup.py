@@ -1,368 +1,649 @@
-#=============================================================================
+# =============================================================================
 #
 # Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
 #
-#=============================================================================
-
-# Compile Commands:
-# [windows]
-# Set QNN_SDK_ROOT=C:/Qualcomm/AIStack/QAIRT/2.42.0.251225/
-# Set QNN_SDK_ROOT=C:/Qualcomm/AIStack/QAIRT/2.38.0.250901/
-# python setup.py bdist_wheel
-# [linux]
-# export QNN_SDK_ROOT=~/QAIRT/2.38.0.250901/
-# python setup.py bdist_wheel --hexagonarch 81
-# python setup.py bdist_wheel --hexagonarch 81 --toolchains aarch64-windows-msvc
+# =============================================================================
+#
+# Modern build notes:
+# - Prefer:  python -m build  (PEP 517)  instead of  python setup.py bdist_wheel
+# - Still supported: python setup.py bdist_wheel
+#
+# Example:
+#   [windows]
+#     set QNN_SDK_ROOT=C:/Qualcomm/AIStack/QAIRT/2.42.0.251225/
+#     set QAI_TOOLCHAINS=aarch64-windows-msvc (For ARM64 Windows Python) [or] set QAI_TOOLCHAINS=arm64x-windows-msvc (For AMD(X64) Windows Python)
+#     set QAI_HEXAGONARCH=81
+#
+#     python -m build -w
+#
+#   [linux]
+#     export QNN_SDK_ROOT=~/QAIRT/2.38.0.250901/
+#     python -m build -w
+#
+# Also works with legacy setup.py invocation:
+#   python setup.py bdist_wheel --toolchains aarch64-windows-msvc --hexagonarch 81
+#
+# =============================================================================
 
 import os
 import platform
 import re
+import shutil
 import subprocess
 import sys
-from pathlib import Path
-import shutil
 import zipfile
-from shlex import quote
+from pathlib import Path
+import warnings
+from typing import Optional
 
 from setuptools import Extension, setup, find_packages
 from setuptools.command.build_ext import build_ext
+from setuptools.command.bdist_wheel import bdist_wheel
 
+
+# ---------------------------
+# Project constants
+# ---------------------------
 VERSION = "2.42.0"
 CONFIG = "Release"  # Release, RelWithDebInfo
-package_name = "qai_appbuilder"
-
-machine = platform.machine()
-sysinfo = sys.version
-
-generate = "-G \"Visual Studio 17 2022\""
+PACKAGE_NAME = "qai_appbuilder"
 
 # -----------------------------------------------------------------------------
-# For "x64 Python + ARM64EC extension" builds:
-# - CMake FindPython (new mode) enforces interpreter architecture == target arch
-#   when both Interpreter and Development are requested, which fails here.
-#   (ARM64EC target + x64 python.exe => "Wrong architecture").
-#   (https://learn.arm.com/learning-paths/laptops-and-desktops/win_arm64ec_porting/how-to-2/)[5](https://getdocs.org/Cmake/docs/3.21/module/findpython)
-# - pybind11 provides a compat/classic mode to avoid the new FindPython path,
-#   selectable via PYBIND11_FINDPYTHON=COMPAT.
-#   (https://stackoverflow.com/questions/64632484/cmake-python-cannot-use-the-interpreter)[4](https://github.com/msys2/MINGW-packages/issues/20569)
-# - We also pass multiple Python executable variables to satisfy different
-#   discovery code paths (Python_EXECUTABLE / Python3_EXECUTABLE / PYTHON_EXECUTABLE). 
-#   (https://learn.arm.com/learning-paths/laptops-and-desktops/win_arm64ec_porting/how-to-2/)
+# Silence setuptools warning banner when invoking legacy "python setup.py ..."
+#
+# When running:
+#   python setup.py bdist_wheel ...
+# setuptools emits a noisy SetuptoolsDeprecationWarning:
+#   "setup.py install is deprecated."
+# with a long banner.
+#
+# We only filter it when this file is executed as a script (__main__),
+# so PEP517 builds (e.g. "python -m build -w") are unaffected.
 # -----------------------------------------------------------------------------
-def _cmake_python_hints():
+if __name__ == "__main__":
+    warnings.filterwarnings(
+        "ignore",
+        message=r".*setup\.py install is deprecated\..*",
+        category=Warning,
+    )
+
+# ---------------------------
+# Helpers
+# ---------------------------
+def _extract_semver3_from_text(text: str) -> Optional[str]:
+    """
+    Extract first 'X.Y.Z' (three numeric dot-separated components) from a string.
+    Example: 'C:/.../2.42.0.251225/' -> '2.42.0'
+    """
+    if not text:
+        return None
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", text)
+    if not m:
+        return None
+    return f"{m.group(1)}.{m.group(2)}.{m.group(3)}"
+
+def _get_base_version_from_qnn_sdk_root(default: str) -> str:
+    """
+    Prefer extracting base version from QNN_SDK_ROOT path; fallback to provided default.
+    """
+    qnn_root = os.environ.get("QNN_SDK_ROOT", "")
+    v = _extract_semver3_from_text(qnn_root)
+    return v if v else default
+
+def _get_hexagonarch_from_argv() -> Optional[str]:
+    """
+    Parse legacy setup.py options early so wheel metadata version can include DSP suffix.
+    Supports: --hexagonarch 81  OR  --hexagonarch=81
+    """
+    argv = sys.argv[1:]
+    for i, a in enumerate(argv):
+        if a == "--hexagonarch" and i + 1 < len(argv):
+            return argv[i + 1]
+        if a.startswith("--hexagonarch="):
+            return a.split("=", 1)[1]
+    return None
+
+def _project_root() -> Path:
+    return Path(__file__).resolve().parent
+
+
+def _is_windows() -> bool:
+    return sys.platform.startswith("win")
+
+def _require_cmake():
+    """Fail fast with a readable error if cmake is not available."""
+    if shutil.which("cmake") is None:
+        raise RuntimeError("cmake executable not found in PATH. Please install CMake and ensure it's available.")
+
+def _detect_arch() -> str:
+    """
+    Keep your original behavior:
+    - On Windows:
+        - If machine == AMD64 OR 'AMD64' in sys.version => target ARM64EC
+        - Else => ARM64
+    - On Linux aarch64 => aarch64
+    """
+    machine = platform.machine()
+    sysinfo = sys.version
+    if machine == "aarch64":
+        return "aarch64"
+    # Windows / others
+    arch = "ARM64"
+    if machine == "AMD64" or ("AMD64" in sysinfo):
+        arch = "ARM64EC"
+    return arch
+
+
+def _default_generator_and_args(arch: str):
+    """
+    Return (generator_args:list[str], is_multi_config:bool)
+    """
+    if arch == "aarch64":
+        return ([], False)
+
+    # Visual Studio generator (multi-config)
+    gen = ["-G", "Visual Studio 17 2022", "-A", arch]
+    return (gen, True)
+
+
+def _cmake_python_hints_args() -> list:
+    """
+    Preserve your ARM64EC + x64 Python workaround:
+    - Force pybind11 to compat mode (avoid FindPython arch check)
+    - Provide Python executable via multiple variable names
+    """
     py = os.environ.get("PYTHON_X64_EXECUTABLE", sys.executable)
-    # Quote for safety when paths include spaces.
-    pyq = quote(py)
-    # Force pybind11 to use classic/compat mode (avoid FindPython arch check).
-    # See pybind11 CMake docs for PYBIND11_FINDPYTHON=COMPAT. [3](https://stackoverflow.com/questions/64632484/cmake-python-cannot-use-the-interpreter)[4](https://github.com/msys2/MINGW-packages/issues/20569)
-    hints = []
-    hints.append(f" -DPYBIND11_FINDPYTHON=COMPAT")
-    # Make sure pybind11 classic mode finds the right version when multiple Pythons exist.
-    hints.append(f" -DPYBIND11_PYTHON_VERSION={sys.version_info.major}.{sys.version_info.minor}")
-    # Provide Python executable under both "new" and "old" variable names.
-    hints.append(f" -DPython_EXECUTABLE={pyq}")
-    hints.append(f" -DPython3_EXECUTABLE={pyq}")
-    hints.append(f" -DPYTHON_EXECUTABLE={pyq}")
-    return "".join(hints)
+    py = str(Path(py))
+    return [
+        "-DPYBIND11_FINDPYTHON=COMPAT",
+        f"-DPYBIND11_PYTHON_VERSION={sys.version_info.major}.{sys.version_info.minor}",
+        f"-DPython_EXECUTABLE={py}",
+        f"-DPython3_EXECUTABLE={py}",
+        f"-DPYTHON_EXECUTABLE={py}",
+    ]
 
 
-arch = "ARM64"
+def _safe_rmtree(p: Path):
+    shutil.rmtree(p, ignore_errors=True)
 
-if machine == "AMD64" or "AMD64" in sysinfo:
-    arch = "ARM64EC"
-    generate += " -A " + arch
 
-if machine == "aarch64":
-    arch = "aarch64"
-    generate = ""
+def _ensure_file(path: Path, content: str):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        path.write_text(content, encoding="utf-8")
 
-print("-- Arch: " + arch)
 
-python_path = "script"
-binary_path = python_path + "/" + package_name
-qai_libs_path = binary_path + "/libs"
-os.makedirs(qai_libs_path, exist_ok=True)
-init_path = os.path.join(qai_libs_path, "__init__.py")
-with open(init_path, "w") as f:
-    f.write("# This file marks this directory as a Python package.\n")
+def _copy_if_exists(src: Path, dst: Path):
+    if src.exists():
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
 
-PACKAGE_ZIP  = "QAI_AppBuilder-win_arm64-QNN" + VERSION + "-" + CONFIG + ".zip"
-if arch == "ARM64EC":
-    PACKAGE_ZIP  = "QAI_AppBuilder-win_arm64ec-QNN" + VERSION + "-" + CONFIG + ".zip"
-elif arch == "aarch64":
-    PACKAGE_ZIP  = "QAI_AppBuilder-linux_arm64-QNN" + VERSION + "-" + CONFIG + ".zip"
 
-QNN_SDK_ROOT = os.environ.get("QNN_SDK_ROOT")
-if QNN_SDK_ROOT is None:
-    print('QNN_SDK_ROOT environmental variable not set')
-    exit(1)
+def _zip_dir(dirpath: Path, out_fullname: Path):
+    out_fullname.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(out_fullname, "w", zipfile.ZIP_DEFLATED) as zf:
+        for p in dirpath.rglob("*"):
+            if p.is_file():
+                zf.write(p, p.relative_to(dirpath))
 
-print("-- QNN_SDK_ROOT: ", QNN_SDK_ROOT)
 
-toolchain = None
-hexagonarch = None
-cleaned_argv = []
-i = 0
-while i < len(sys.argv):
-    if sys.argv[i] == '--toolchains':
-        toolchain = sys.argv[i + 1]
-        i += 2
-    elif sys.argv[i] == '--hexagonarch':
-        hexagonarch = sys.argv[i + 1]
-        i += 2
-    else:
-        cleaned_argv.append(sys.argv[i])
-        i += 1
+def _get_qnn_sdk_root() -> Path:
+    v = os.environ.get("QNN_SDK_ROOT")
+    if not v:
+        raise RuntimeError('QNN_SDK_ROOT environmental variable not set')
+    p = Path(v)
+    if not p.exists() or not p.is_dir():
+        raise RuntimeError(f'QNN_SDK_ROOT="{v}" does not exist or is not a directory')
+    return p
 
-sys.argv = cleaned_argv  # Now safe for setuptools
 
-if hexagonarch is None:
-    if sys.platform.startswith('win'): 
-        dsp_arch    = "81"  # 73 For X-Elite device of QAIRT prior to 2.38.1.
-    else: # TODO: linux or android.
-        dsp_arch    = "68"
-else:
-    dsp_arch = hexagonarch
+def _get_dsp_arch(hexagonarch: Optional[str] = None) -> str:
+    if hexagonarch:
+        return str(hexagonarch)
+    if _is_windows():
+        return "81"  # 73 for older QAIRT prior to 2.38.1 (your original note)
+    return "68"      # TODO: linux or android defaults (kept as-is)
 
-def zip_package(dirpath, outFullName):
-    zip = zipfile.ZipFile(outFullName, "w", zipfile.ZIP_DEFLATED)
-    for path, dirnames, filenames in os.walk(dirpath):
-        fpath = path.replace(dirpath, '')
-        for filename in filenames:
-            zip.write(os.path.join(path, filename), os.path.join(fpath, filename))
-    zip.close()
+def _compute_version_with_dsp_suffix(default_base: str) -> str:
+    """
+    VERSION = <SDK X.Y.Z from QNN_SDK_ROOT> + '.' + <hexagon arch>
+    Priority:
+      1) If env/arg provides QAI_HEXAGONARCH / --hexagonarch, use it.
+      2) Otherwise, use _get_dsp_arch() default.
+    """
+    base = _get_base_version_from_qnn_sdk_root(default_base)
+    explicit_hex = os.environ.get("QAI_HEXAGONARCH") or _get_hexagonarch_from_argv()
+    dsp_arch = str(explicit_hex) if explicit_hex else _get_dsp_arch(None)
+    return f"{base}.{dsp_arch}"
 
-def build_clean():
-    shutil.rmtree(python_path + "/qai_appbuilder.egg-info")
-    shutil.rmtree("build")
-    shutil.rmtree("lib")
-    if os.path.exists(binary_path + "/QAIAppSvc.exe"):
-        os.remove(binary_path + "/libappbuilder.dll")
-        os.remove(binary_path + "/QAIAppSvc.exe")
-    if os.path.exists(binary_path + "/QAIAppSvc.pdb"):
-        os.remove(binary_path + "/QAIAppSvc.pdb")
-    if os.path.exists(binary_path + "/libappbuilder.pdb"):
-        os.remove(binary_path + "/libappbuilder.pdb")
-    if os.path.exists(binary_path + "/libappbuilder.so"):
-        os.remove(binary_path + "/libappbuilder.so")
-    if os.path.exists(binary_path + "/Genie.dll"):
-        os.remove(binary_path + "/Genie.dll")
-    shutil.rmtree(qai_libs_path)
+# Re-compute VERSION for wheel metadata (and zip naming) based on environment/args.
+VERSION = _compute_version_with_dsp_suffix(VERSION)
 
-def build_cmake():
-    if not os.path.exists("build"):
-        os.mkdir("build")
-    os.chdir("build")
+def _package_zip_name(arch: str) -> str:
+    if arch == "ARM64EC":
+        return f"QAI_AppBuilder-win_arm64ec-QNN{VERSION}-{CONFIG}.zip"
+    if arch == "aarch64":
+        return f"QAI_AppBuilder-linux_arm64-QNN{VERSION}-{CONFIG}.zip"
+    return f"QAI_AppBuilder-win_arm64-QNN{VERSION}-{CONFIG}.zip"
 
-    # subprocess.run("cmake .. " + generate, shell=True)
-    # Pass Python/pybind11 hints to avoid FindPython arch mismatch for x64 python + ARM64EC target. 
-    subprocess.run("cmake .. " + generate + _cmake_python_hints(), shell=True)
 
-    subprocess.run("cmake --build ./ --config " + CONFIG, shell=True)
-    os.chdir("../")
+def _ensure_runtime_pkg_dirs(source_pkg_dir: Path, build_pkg_dir: Path):
+    """
+    Ensure libs directory exists and has __init__.py in BOTH:
+    - source tree (for editable/dev convenience)
+    - build_lib tree (for wheel content)
+    """
+    for pkg_dir in (source_pkg_dir, build_pkg_dir):
+        libs = pkg_dir / "libs"
+        libs.mkdir(parents=True, exist_ok=True)
+        _ensure_file(
+            libs / "__init__.py",
+            "# This file marks this directory as a Python package.\n",
+        )
 
-    if os.path.exists("lib/" + CONFIG + "/QAIAppSvc.exe"):
-        shutil.copy("lib/" + CONFIG +"/libappbuilder.dll", binary_path)
-        shutil.copy("lib/" + CONFIG + "/QAIAppSvc.exe", binary_path)
-    if os.path.exists("lib/" + CONFIG + "/QAIAppSvc.pdb"):
-        shutil.copy("lib/" + CONFIG + "/QAIAppSvc.pdb", binary_path)
-    if os.path.exists("lib/" + CONFIG + "/libappbuilder.pdb"):
-        shutil.copy("lib/" + CONFIG + "/libappbuilder.pdb", binary_path)
-    if os.path.exists("lib/" + "libappbuilder.so"):
-        shutil.copy("lib/" + "libappbuilder.so", binary_path)
 
+def _copy_runtime_artifacts(
+    *,
+    arch: str,
+    toolchain: Optional[str] = None,
+    hexagonarch: Optional[str] = None,
+    source_pkg_dir: Path,
+    build_pkg_dir: Path,
+):
+    """
+    Copy Genie/QNN runtime libraries into:
+    - <package>/ (Genie.dll/so, app svc, libappbuilder)
+    - <package>/libs (QNN libs, cat, skel, etc.)
+    Matching your original behavior.
+    """
+    qnn_root = _get_qnn_sdk_root()
+    dsp_arch = _get_dsp_arch(hexagonarch)
+
+    # Decide LIB_PATH (your original priority/order)
     if toolchain is None:
-        if sys.platform.startswith('win'): # Copy Genie library to 'lib' folder for compiling GenieBuilder pyd.
-            LIB_PATH = QNN_SDK_ROOT + "/lib/aarch64-windows-msvc"
-            if arch == "ARM64EC": 
-                LIB_PATH = QNN_SDK_ROOT + "/lib/arm64x-windows-msvc"
-        else: # TODO: linux or android.
-            if os.path.exists(os.path.join(QNN_SDK_ROOT, 'lib', 'aarch64-oe-linux-gcc11.2', 'libGenie.so')):
-                LIB_PATH = os.path.join(QNN_SDK_ROOT, 'lib', 'aarch64-oe-linux-gcc11.2')
-            elif os.path.exists(os.path.join(QNN_SDK_ROOT, 'lib', 'aarch64-android', 'libGenie.so')):
-                LIB_PATH = os.path.join(QNN_SDK_ROOT, 'lib', 'aarch64-android')
-            elif os.path.exists(os.path.join(QNN_SDK_ROOT, 'lib', 'libGenie.so')):
-                LIB_PATH = os.path.join(QNN_SDK_ROOT, 'lib')
+        if _is_windows():
+            lib_path = qnn_root / "lib" / "aarch64-windows-msvc"
+            if arch == "ARM64EC":
+                lib_path = qnn_root / "lib" / "arm64x-windows-msvc"
+        else:
+            # linux/android probing (kept same)
+            cand1 = qnn_root / "lib" / "aarch64-oe-linux-gcc11.2"
+            cand2 = qnn_root / "lib" / "aarch64-android"
+            cand3 = qnn_root / "lib"
+            if (cand1 / "libGenie.so").exists():
+                lib_path = cand1
+            elif (cand2 / "libGenie.so").exists():
+                lib_path = cand2
+            elif (cand3 / "libGenie.so").exists():
+                lib_path = cand3
             else:
-                raise Exception('Failed to find "libGenie.so" in /usr/lib')
+                raise RuntimeError('Failed to find "libGenie.so" in QNN SDK lib paths')
     else:
-        LIB_PATH = QNN_SDK_ROOT + f"/lib/{toolchain}"
+        lib_path = qnn_root / "lib" / toolchain
 
-    os.makedirs("lib/Release", exist_ok=True)
-    if os.path.exists(LIB_PATH + "/Genie.dll"):
-        shutil.copy(LIB_PATH + "/Genie.dll", binary_path)
-        shutil.copy(LIB_PATH + "/Genie.dll", "lib/Release")
+    dsp_lib_path = qnn_root / "lib" / f"hexagon-v{dsp_arch}" / "unsigned"
 
-    if os.path.exists(LIB_PATH + "/Genie.lib"):
-        shutil.copy(LIB_PATH + "/Genie.lib", "lib/Release")
+    # Where to put QNN libs
+    def _do_copy_into(pkg_dir: Path):
+        libs_dir = pkg_dir / "libs"
 
-    DSP_LIB_PATH = QNN_SDK_ROOT + f"/lib/hexagon-v{dsp_arch}/unsigned"
+        # Windows Genie
+        _copy_if_exists(lib_path / "Genie.dll", pkg_dir / "Genie.dll")
+        # Keep "lib/Release" staging like your old script
+        (_project_root() / "lib" / "Release").mkdir(parents=True, exist_ok=True)
+        _copy_if_exists(lib_path / "Genie.dll", _project_root() / "lib" / "Release" / "Genie.dll")
+        _copy_if_exists(lib_path / "Genie.lib", _project_root() / "lib" / "Release" / "Genie.lib")
 
-    if os.path.exists(DSP_LIB_PATH + f"/libqnnhtpV{dsp_arch}.cat"):
-        shutil.copy(DSP_LIB_PATH + f"/libqnnhtpV{dsp_arch}.cat", qai_libs_path)
+        # DSP files
+        _copy_if_exists(dsp_lib_path / f"libqnnhtpV{dsp_arch}.cat", libs_dir / f"libqnnhtpV{dsp_arch}.cat")
+        _copy_if_exists(dsp_lib_path / f"libQnnHtpV{dsp_arch}Skel.so", libs_dir / f"libQnnHtpV{dsp_arch}Skel.so")
 
-    if os.path.exists(DSP_LIB_PATH + f"/libQnnHtpV{dsp_arch}Skel.so"):
-        shutil.copy(DSP_LIB_PATH + f"/libQnnHtpV{dsp_arch}Skel.so", qai_libs_path)
-    
-    if os.path.exists(LIB_PATH + "/QnnHtp.dll"):
-        shutil.copy(LIB_PATH + "/QnnHtp.dll", qai_libs_path)
+        # Windows QNN dlls
+        _copy_if_exists(lib_path / "QnnHtp.dll", libs_dir / "QnnHtp.dll")
+        _copy_if_exists(lib_path / "QnnCpu.dll", libs_dir / "QnnCpu.dll")
+        _copy_if_exists(lib_path / "QnnHtpNetRunExtensions.dll", libs_dir / "QnnHtpNetRunExtensions.dll")
+        _copy_if_exists(lib_path / "QnnHtpPrepare.dll", libs_dir / "QnnHtpPrepare.dll")
+        _copy_if_exists(lib_path / f"QnnHtpV{dsp_arch}Stub.dll", libs_dir / f"QnnHtpV{dsp_arch}Stub.dll")
+        _copy_if_exists(lib_path / "QnnSystem.dll", libs_dir / "QnnSystem.dll")
 
-    if os.path.exists(LIB_PATH + "/QnnCpu.dll"):
-        shutil.copy(LIB_PATH + "/QnnCpu.dll", qai_libs_path)
+        # Linux/Android .so variants
+        _copy_if_exists(lib_path / "libGenie.so", pkg_dir / "libGenie.so")
+        _copy_if_exists(lib_path / "libGenie.so", _project_root() / "lib" / "Release" / "libGenie.so")
+        _copy_if_exists(lib_path / "libQnnHtp.so", libs_dir / "libQnnHtp.so")
+        _copy_if_exists(lib_path / "libQnnCpu.so", libs_dir / "libQnnCpu.so")
+        _copy_if_exists(lib_path / "libQnnHtpNetRunExtensions.so", libs_dir / "libQnnHtpNetRunExtensions.so")
+        _copy_if_exists(lib_path / "libQnnHtpPrepare.so", libs_dir / "libQnnHtpPrepare.so")
+        _copy_if_exists(lib_path / f"libQnnHtpV{dsp_arch}Stub.so", libs_dir / f"libQnnHtpV{dsp_arch}Stub.so")
+        _copy_if_exists(lib_path / "libQnnSystem.so", libs_dir / "libQnnSystem.so")
 
-    if os.path.exists(LIB_PATH + "/QnnHtpNetRunExtensions.dll"):
-        shutil.copy(LIB_PATH + "/QnnHtpNetRunExtensions.dll", qai_libs_path)
+    _do_copy_into(source_pkg_dir)
+    _do_copy_into(build_pkg_dir)
 
-    if os.path.exists(LIB_PATH + "/QnnHtpPrepare.dll"):
-        shutil.copy(LIB_PATH + "/QnnHtpPrepare.dll", qai_libs_path)
 
-    if os.path.exists(LIB_PATH + f"/QnnHtpV{dsp_arch}Stub.dll"):
-        shutil.copy(LIB_PATH + f"/QnnHtpV{dsp_arch}Stub.dll", qai_libs_path)
 
-    if os.path.exists(LIB_PATH + "/QnnSystem.dll"):
-        shutil.copy(LIB_PATH + "/QnnSystem.dll", qai_libs_path)
+def _build_root_cmake_project(arch: str, source_pkg_dir: Path, build_pkg_dir: Path, toolchain: Optional[str] = None, hexagonarch: Optional[str] = None,) -> None:
+    """
+    Equivalent to your original build_cmake(), but:
+    - no chdir side effects leaking outside
+    - uses list-args subprocess
+    - copies artifacts into both source package dir and build_lib package dir
+    """
+    root = _project_root()
+    _require_cmake()
+    build_dir = root / "build"
+    lib_dir = root / "lib"
 
-    #linux or android
-    if os.path.exists(LIB_PATH + "/libGenie.so"):
-        shutil.copy(LIB_PATH + "/libGenie.so", binary_path)
-        shutil.copy(LIB_PATH + "/libGenie.so", "lib/Release")
+    generator_args, is_multi_config = _default_generator_and_args(arch)
 
-    if os.path.exists(DSP_LIB_PATH + f"/libQnnHtpV{dsp_arch}Skel.so"):
-        shutil.copy(DSP_LIB_PATH + f"/libQnnHtpV{dsp_arch}Skel.so", qai_libs_path)
+    build_dir.mkdir(parents=True, exist_ok=True)
 
-    if os.path.exists(LIB_PATH + "/libQnnHtp.so"):
-        shutil.copy(LIB_PATH + "/libQnnHtp.so", qai_libs_path)
+    cmake_configure = ["cmake", "--no-warn-unused-cli", str(root)] + generator_args + _cmake_python_hints_args()
+    subprocess.run(cmake_configure, cwd=str(build_dir), check=True)
 
-    if os.path.exists(LIB_PATH + "/libQnnCpu.so"):
-        shutil.copy(LIB_PATH + "/libQnnCpu.so", qai_libs_path)
+    cmake_build = ["cmake", "--build", str(build_dir)]
+    if is_multi_config:
+        cmake_build += ["--config", CONFIG]
+    subprocess.run(cmake_build, cwd=str(build_dir), check=True)
 
-    if os.path.exists(LIB_PATH + "/libQnnHtpNetRunExtensions.so"):
-        shutil.copy(LIB_PATH + "/libQnnHtpNetRunExtensions.so", qai_libs_path)
+    # Copy produced binaries (your original logic)
+    # Windows outputs: lib/<CONFIG>/QAIAppSvc.exe etc
+    if (lib_dir / CONFIG / "QAIAppSvc.exe").exists():
+        _copy_if_exists(lib_dir / CONFIG / "libappbuilder.dll", source_pkg_dir / "libappbuilder.dll")
+        _copy_if_exists(lib_dir / CONFIG / "QAIAppSvc.exe", source_pkg_dir / "QAIAppSvc.exe")
+        _copy_if_exists(lib_dir / CONFIG / "QAIAppSvc.pdb", source_pkg_dir / "QAIAppSvc.pdb")
+        _copy_if_exists(lib_dir / CONFIG / "libappbuilder.pdb", source_pkg_dir / "libappbuilder.pdb")
 
-    if os.path.exists(LIB_PATH + "/libQnnHtpPrepare.so"):
-        shutil.copy(LIB_PATH + "/libQnnHtpPrepare.so", qai_libs_path)
+        _copy_if_exists(lib_dir / CONFIG / "libappbuilder.dll", build_pkg_dir / "libappbuilder.dll")
+        _copy_if_exists(lib_dir / CONFIG / "QAIAppSvc.exe", build_pkg_dir / "QAIAppSvc.exe")
+        _copy_if_exists(lib_dir / CONFIG / "QAIAppSvc.pdb", build_pkg_dir / "QAIAppSvc.pdb")
+        _copy_if_exists(lib_dir / CONFIG / "libappbuilder.pdb", build_pkg_dir / "libappbuilder.pdb")
 
-    if os.path.exists(LIB_PATH + f"/libQnnHtpV{dsp_arch}Stub.so"):
-        shutil.copy(LIB_PATH + f"/libQnnHtpV{dsp_arch}Stub.so", qai_libs_path)
+    # Linux output
+    _copy_if_exists(lib_dir / "libappbuilder.so", source_pkg_dir / "libappbuilder.so")
+    _copy_if_exists(lib_dir / "libappbuilder.so", build_pkg_dir / "libappbuilder.so")
 
-    if os.path.exists(LIB_PATH + "/libQnnSystem.so"):
-        shutil.copy(LIB_PATH + "/libQnnSystem.so", qai_libs_path)
+    # Ensure libs/__init__.py exists
+    _ensure_runtime_pkg_dirs(source_pkg_dir, build_pkg_dir)
 
-build_cmake()
+    # Copy QNN/Genie runtime libs
+    _copy_runtime_artifacts(
+        arch=arch,
+        toolchain=toolchain,
+        hexagonarch=hexagonarch,
+        source_pkg_dir=source_pkg_dir,
+        build_pkg_dir=build_pkg_dir,
+    )
 
-# build release package for C++ based application.
-def build_release():
-    tmp_path = "lib/package"
-    include_path = "lib/package/include"
-    if not os.path.exists(tmp_path):
-        os.mkdir(tmp_path)
 
-    if os.path.exists("lib/" + CONFIG + "/QAIAppSvc.exe"):
-        shutil.copy("lib/" + CONFIG + "/libappbuilder.dll", tmp_path)
-        shutil.copy("lib/" + CONFIG + "/libappbuilder.lib", tmp_path)
-        shutil.copy("lib/" + CONFIG + "/QAIAppSvc.exe", tmp_path)
+def _build_release_zip(arch: str):
+    """
+    Equivalent to your original build_release().
+    It packages 'lib/package' and writes to dist/<PACKAGE_ZIP>.
+    """
+    root = _project_root()
+    tmp_path = root / "lib" / "package"
+    include_path = tmp_path / "include"
+    dist_dir = root / "dist"
+    pkg_zip = dist_dir / _package_zip_name(arch)
 
-    if os.path.exists("lib/" + CONFIG + "/libappbuilder.pdb"):
-        shutil.copy("lib/" + CONFIG + "/libappbuilder.pdb", tmp_path)
-    if os.path.exists("lib/" + CONFIG + "/QAIAppSvc.pdb"):
-        shutil.copy("lib/" + CONFIG + "/QAIAppSvc.pdb", tmp_path)
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    include_path.mkdir(parents=True, exist_ok=True)
 
-    if os.path.exists("lib/" + "/libappbuilder.so"):
-        shutil.copy("lib/" + "/libappbuilder.so", tmp_path)
+    lib_dir = root / "lib"
 
-    if not os.path.exists(include_path):
-        os.mkdir(include_path)
-    shutil.copy("src/LibAppBuilder.hpp", include_path)
-    shutil.copy("src/Lora.hpp", include_path)
+    # Windows artifacts
+    if (lib_dir / CONFIG / "QAIAppSvc.exe").exists():
+        _copy_if_exists(lib_dir / CONFIG / "libappbuilder.dll", tmp_path / "libappbuilder.dll")
+        _copy_if_exists(lib_dir / CONFIG / "libappbuilder.lib", tmp_path / "libappbuilder.lib")
+        _copy_if_exists(lib_dir / CONFIG / "QAIAppSvc.exe", tmp_path / "QAIAppSvc.exe")
+        _copy_if_exists(lib_dir / CONFIG / "libappbuilder.pdb", tmp_path / "libappbuilder.pdb")
+        _copy_if_exists(lib_dir / CONFIG / "QAIAppSvc.pdb", tmp_path / "QAIAppSvc.pdb")
 
-    zip_package(tmp_path, "dist/" + PACKAGE_ZIP)
+    # Linux artifact
+    _copy_if_exists(lib_dir / "libappbuilder.so", tmp_path / "libappbuilder.so")
 
+    # Headers
+    _copy_if_exists(root / "src" / "LibAppBuilder.hpp", include_path / "LibAppBuilder.hpp")
+    _copy_if_exists(root / "src" / "Lora.hpp", include_path / "Lora.hpp")
+
+    _zip_dir(tmp_path, pkg_zip)
+
+
+def _clean_artifacts():
+    """
+    Equivalent to your original build_clean(), but safe/robust.
+    NOTE: We DO NOT delete dist/ because wheel output is there.
+    """
+    root = _project_root()
+    source_pkg_dir = root / "script" / PACKAGE_NAME
+    libs_dir = source_pkg_dir / "libs"
+
+    # egg-info/build/lib
+    _safe_rmtree(root / "build")
+    _safe_rmtree(root / "lib")
+    _safe_rmtree(root / "script" / f"{PACKAGE_NAME}.egg-info")
+
+    # Remove known binaries under source package dir
+    for fname in [
+        "libappbuilder.dll", "QAIAppSvc.exe", "QAIAppSvc.pdb", "libappbuilder.pdb",
+        "libappbuilder.so", "Genie.dll", "libGenie.so"
+    ]:
+        p = source_pkg_dir / fname
+        if p.exists():
+            p.unlink()
+
+    # Remove runtime QNN libs copied into source libs dir (keep __init__.py)
+    if libs_dir.exists():
+        for p in libs_dir.iterdir():
+            if p.is_file() and p.name != "__init__.py":
+                p.unlink()
+
+
+# ---------------------------
+# CMake extension & commands
+# ---------------------------
 class CMakeExtension(Extension):
     def __init__(self, name: str, sourcedir: str = "") -> None:
         super().__init__(name, sources=[])
-        self.sourcedir = os.fspath(Path(sourcedir).resolve())
+        self.sourcedir = os.fspath((Path(sourcedir).resolve()))
 
-class CMakeBuild(build_ext):
+
+class QaiCMakeBuild(build_ext):
+    """
+    - Runs root CMake build (your old build_cmake) before building the pybind extension
+    - Supports --toolchains / --hexagonarch as setuptools command options
+    - Also reads env vars QAI_TOOLCHAINS / QAI_HEXAGONARCH for PEP517 friendliness
+    """
+
+    user_options = build_ext.user_options + [
+        ("toolchains=", None, "QNN toolchain subdir name under <QNN_SDK_ROOT>/lib/ (e.g. aarch64-windows-msvc)"),
+        ("hexagonarch=", None, "Hexagon DSP arch version (e.g. 81/73/68)"),
+    ]
+
+    def initialize_options(self):
+        super().initialize_options()
+        self.toolchains = None
+        self.hexagonarch = None
+
+    def finalize_options(self):
+        super().finalize_options()
+        # env var fallback (PEP517-friendly)
+        if self.toolchains is None:
+            self.toolchains = os.environ.get("QAI_TOOLCHAINS")
+        if self.hexagonarch is None:
+            self.hexagonarch = os.environ.get("QAI_HEXAGONARCH")
+
+    def run(self):
+        root = _project_root()
+        arch = _detect_arch()
+        print(f"-- Arch: {arch}")
+
+        # Ensure build_lib package dirs
+        build_py_cmd = self.get_finalized_command("build_py")
+        build_lib = Path(build_py_cmd.build_lib)
+
+        source_pkg_dir = root / "script" / PACKAGE_NAME
+        build_pkg_dir = build_lib / PACKAGE_NAME
+
+        _ensure_runtime_pkg_dirs(source_pkg_dir, build_pkg_dir)
+
+        # Root CMake build + copy runtime libs (your old build_cmake)
+        _build_root_cmake_project(
+            arch=arch,
+            toolchain=self.toolchains,
+            hexagonarch=self.hexagonarch,
+            source_pkg_dir=source_pkg_dir,
+            build_pkg_dir=build_pkg_dir,
+        )
+
+        # Now build the actual extension via cmake (pybind/)
+        super().run()
+
     def build_extension(self, ext: CMakeExtension) -> None:
+        """
+        Your original CMakeBuild.build_extension logic, modernized:
+        - uses list args (no shell quoting issues)
+        - preserves ARM64EC generator behavior and Python hints
+        """
+        arch = _detect_arch()
         ext_fullpath = Path.cwd() / self.get_ext_fullpath(ext.name)
         extdir = ext_fullpath.parent.resolve()
 
         cfg = CONFIG
+        cmake_generator_env = os.environ.get("CMAKE_GENERATOR", "")
 
-        cmake_generator = os.environ.get("CMAKE_GENERATOR", "")
+        # Base CMake args
+        cmake_args = [
+            f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}{os.sep}",
+            f"-DCMAKE_BUILD_TYPE={cfg}",
+            *_cmake_python_hints_args(),
+        ]
 
-        # cmake_args = f" -DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}{os.sep}" + f" -DPYTHON_EXECUTABLE={sys.executable}" + f" -DCMAKE_BUILD_TYPE={cfg}"  # not used on MSVC, but no harm
-        # IMPORTANT:
-        # - Do NOT rely on FindPython (new) here: it rejects x64 interpreter for ARM64EC target when Development is requested. 
-        # - Force pybind11 compat mode and pass x64 python executable via multiple variables.
-        cmake_args = f" -DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}{os.sep}" + f" -DCMAKE_BUILD_TYPE={cfg}" + _cmake_python_hints()  # not used on MSVC, but no harm
+        # generator / arch selection
+        generator_args, is_multi_config = _default_generator_and_args(arch)
 
-        build_args = ""
+        # If user explicitly set CMAKE_GENERATOR, don't force ours, but keep arch behavior
+        # (mimic your original logic about "single-config" and "contains_arch")
+        single_config = any(x in cmake_generator_env for x in {"NMake", "Ninja"})
+        contains_arch = any(x in cmake_generator_env for x in {"ARM", "Win64"})
 
-        # We pass in the version to C++. You might not need to.
-        # cmake_args += f" -DVERSION_INFO={self.distribution.get_version()}"
+        if arch != "aarch64" and not single_config and not contains_arch:
+            # We already provide -A in generator_args (VS). Keep consistent.
+            pass
 
-        # Single config generators are handled "normally"
-        single_config = any(x in cmake_generator for x in {"NMake", "Ninja"})
+        if is_multi_config:
+            cmake_args.append(f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_{cfg.upper()}={extdir}")
 
-        # CMake allows an arch-in-generator style for backward compatibility
-        contains_arch = any(x in cmake_generator for x in {"ARM", "Win64"})
-
-        if not single_config and not contains_arch and not arch == "aarch64":
-            cmake_args += " -A " + arch
-
-        # Multi-config generators have a different way to specify configs
-        if not single_config:
-            cmake_args += f" -DCMAKE_LIBRARY_OUTPUT_DIRECTORY_{cfg.upper()}={extdir}"
-            build_args += " --config " + cfg
+        # Build args
+        build_args = []
+        if is_multi_config:
+            build_args += ["--config", cfg]
 
         if "CMAKE_BUILD_PARALLEL_LEVEL" not in os.environ:
             if hasattr(self, "parallel") and self.parallel:
-                # CMake 3.12+ only.
-                build_args += f" -j{self.parallel}"
+                build_args += [f"-j{self.parallel}"]
 
         build_temp = Path(self.build_temp) / ext.name
-        if not build_temp.exists():
-            build_temp.mkdir(parents=True)
+        build_temp.mkdir(parents=True, exist_ok=True)
 
-        print(cmake_args)
-        print(build_args)
-        print(ext.sourcedir)
+        # Configure & build
+        cmake_configure = ["cmake", "--no-warn-unused-cli", ext.sourcedir] + generator_args + cmake_args
+        subprocess.run(cmake_configure, cwd=str(build_temp), check=True)
 
-        subprocess.run("cmake " + ext.sourcedir + cmake_args, cwd=build_temp, check=True, shell=True)
-        subprocess.run("cmake --build . " + build_args, cwd=build_temp, check=True, shell=True)
+        cmake_build = ["cmake", "--build", "."] + build_args
+        subprocess.run(cmake_build, cwd=str(build_temp), check=True)
 
+
+class QaiBdistWheel(bdist_wheel):
+    """
+    Preserve old behavior:
+    - accept legacy CLI options on bdist_wheel: --hexagonarch / --toolchains
+    - propagate them to build_ext via env vars (PEP517-friendly)
+    - build wheel
+    - build release zip
+    - clean artifacts
+    """
+
+    user_options = bdist_wheel.user_options + [
+        ("toolchains=", None, "QNN toolchain subdir name under <QNN_SDK_ROOT>/lib/ (e.g. aarch64-windows-msvc)"),
+        ("hexagonarch=", None, "Hexagon DSP arch version (e.g. 81/73/68)"),
+    ]
+
+    def initialize_options(self):
+        super().initialize_options()
+        self.toolchains = None
+        self.hexagonarch = None
+
+    def finalize_options(self):
+        super().finalize_options()
+        # env var fallback
+        if self.toolchains is None:
+            self.toolchains = os.environ.get("QAI_TOOLCHAINS")
+        if self.hexagonarch is None:
+            self.hexagonarch = os.environ.get("QAI_HEXAGONARCH")
+
+    def run(self):
+        # Propagate to env vars so build_ext can see them
+        if self.toolchains:
+            os.environ["QAI_TOOLCHAINS"] = str(self.toolchains)
+        if self.hexagonarch:
+            os.environ["QAI_HEXAGONARCH"] = str(self.hexagonarch)
+
+        arch = _detect_arch()
+
+        # Build wheel first
+        super().run()
+
+        # Create release zip (same as old script)
+        try:
+            _build_release_zip(arch)
+        except Exception as e:
+            # Do not fail wheel build if release zip fails (optional safety)
+            print(f"[WARN] build_release_zip failed: {e}")
+
+        # Clean (same as old script)
+        try:
+            _clean_artifacts()
+        except Exception as e:
+            print(f"[WARN] clean_artifacts failed: {e}")
+
+
+# ---------------------------
+# setup()
+# ---------------------------
 with open("README.md", "r", encoding="utf-8", errors="ignore") as fh:
     long_description = fh.read()
 
 setup(
-    name=package_name,
+    name=PACKAGE_NAME,
     version=VERSION,
     packages=find_packages(where="script"),
-    package_dir={'': 'script'},
+    package_dir={"": "script"},
     package_data={"": ["*.dll", "*.pdb", "*.exe", "*.so", "*.cat"]},
     ext_modules=[CMakeExtension("qai_appbuilder.appbuilder", "pybind")],
-    cmdclass={"build_ext": CMakeBuild},
+    cmdclass={
+        "build_ext": QaiCMakeBuild,
+        "bdist_wheel": QaiBdistWheel,
+    },
     zip_safe=False,
-    description='AppBuilder is Python & C++ extension that simplifies the process of developing AI prototype & App on WoS. It provides several APIs for running QNN models in WoS CPU & HTP, making it easier to manage AI models.',
+    description=(
+        "AppBuilder is Python & C++ extension that simplifies the process of developing "
+        "AI prototype & App on WoS. It provides several APIs for running QNN models in "
+        "WoS CPU & HTP, making it easier to manage AI models."
+    ),
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url='https://github.com/quic/ai-engine-direct-helper',
-    author='quic-zhanweiw',
-    author_email='quic_zhanweiw@quicinc.com',
-    license='BSD-3-Clause',
-    python_requires='>=3.10',
-    # install_requires=['pybind11>=2.13.6'],
+    url="https://github.com/quic/ai-engine-direct-helper",
+    author="quic-zhanweiw",
+    author_email="quic_zhanweiw@quicinc.com",
+    license="BSD-3-Clause",
+    python_requires=">=3.10",
     classifiers=[
-        'Development Status :: 3 - Alpha',
-        'Intended Audience :: Qualcomm CE',
-        'License :: OSI Approved :: BSD License',
-        'Operating System :: Windows On Snapdragon"',
-        'Programming Language :: Python :: 3.12',
+        "Development Status :: 3 - Alpha",
+        "Intended Audience :: Qualcomm CE",
+        "Operating System :: Windows On Snapdragon",
+        "Programming Language :: Python :: 3.12",
     ],
 )
-
-build_release()
-build_clean()

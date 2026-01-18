@@ -1,0 +1,8 @@
+include README.md
+recursive-include src *
+recursive-include pybind *
+recursive-include script *
+recursive-include cmake *
+include CMakeLists.txt
+global-exclude *.pyc
+global-exclude __pycache__
