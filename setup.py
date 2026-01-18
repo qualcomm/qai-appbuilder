@@ -413,7 +413,6 @@ def _build_release_zip(arch: str):
 
 def _clean_artifacts():
     """
-    Equivalent to your original build_clean(), but safe/robust.
     NOTE: We DO NOT delete dist/ because wheel output is there.
     """
     root = _project_root()
