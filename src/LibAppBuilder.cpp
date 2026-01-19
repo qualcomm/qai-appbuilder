@@ -394,6 +394,15 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
       return false;
     }
 
+    auto devicePropertySupportStatus = app->isDevicePropertySupported();
+    if (sample_app::StatusCode::FAILURE != devicePropertySupportStatus) {
+      auto createDeviceStatus = app->createDevice();
+      if (sample_app::StatusCode::SUCCESS != createDeviceStatus) {
+        app->reportError("Device Creation failure");
+        return false;
+      }
+    }
+	
     if (sample_app::StatusCode::SUCCESS != app->initializeProfiling()) {
       app->reportError("Profiling Initialization failure");
       return false;
@@ -530,15 +539,6 @@ bool ModelDestroyEx(std::string model_name, std::string proc_name) {
     if (sample_app::StatusCode::SUCCESS != app->freeContext()) {
         app->reportError("Context Free failure");
         return false;
-    }
-
-    auto devicePropertySupportStatus = app->isDevicePropertySupported();
-    if (sample_app::StatusCode::FAILURE != devicePropertySupportStatus) {
-        auto freeDeviceStatus = app->freeDevice();
-        if (sample_app::StatusCode::SUCCESS != freeDeviceStatus) {
-            app->reportError("Device Free failure");
-            return false;
-        }
     }
 
     timerHelper.Print("model_destroy " + model_name);
