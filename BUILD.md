@@ -40,19 +40,26 @@ Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.42.0.251225\
 ```
 - Use the commands below to build and install Python extension(*.whl): <br>
 *Note: Please get the corresponding "Supported Toolchains" and "Hexagon Arch" with your device from [Supported Snapdragon devices](https://docs.qualcomm.com/bundle/publicresource/topics/80-63442-10/QNN_general_overview.html#supported-snapdragon-devices). <br>
-*Note: Make sure to compile it in the regular Windows Command Prompt — not in the 'ARM64 Native Tools Command Prompt for VS 2022' and not in the 'Power Shell' window.* <br>
+
 ```
 cd ai-engine-direct-helper
-python setup.py --toolchains <Supported Toolchains> --hexagonarch <Hexagon Arch> bdist_wheel
+#   [build on windows]<br>
+*Note: Make sure to build in the regular Windows Command Prompt — not in the 'ARM64 Native Tools Command Prompt for VS 2022' and not in the 'Power Shell' window.* <br>
+     set QNN_SDK_ROOT=C:/Qualcomm/AIStack/QAIRT/2.42.0.251225/
+     set QAI_TOOLCHAINS=aarch64-windows-msvc (For ARM64 Windows Python) [or] set QAI_TOOLCHAINS=arm64x-windows-msvc (For AMD(X64) Windows Python)
+     set QAI_HEXAGONARCH=81
 
-# For example: 
-python setup.py --toolchains arm64x-windows-msvc --hexagonarch 73 bdist_wheel
+     python -m build -w
 
-# If you use below command, it will compile with default Toolchains and Hexagon Arch.
-python setup.py bdist_wheel
+#   [build on linux]<br>
+     export QNN_SDK_ROOT=~/QAIRT/2.38.0.250901/
+     export QAI_TOOLCHAINS=aarch64-oe-linux-gcc11.2
+     export QAI_HEXAGONARCH=68
+
+     python -m build -w
 
 # Install the extension:
-pip install dist\qai_appbuilder-2.42.0-cp312-cp312-win_amd64.whl
+pip install --force-reinstall dist\qai_appbuilder-2.42.0.81-cp312-cp312-win_amd64.whl
 ```
 
 ## Build QAI AppBuilder for android
