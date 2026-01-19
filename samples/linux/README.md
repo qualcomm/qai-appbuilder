@@ -65,7 +65,7 @@ Install required Python packages:
 pip install requests==2.32.3 py3-wget==1.0.12 tqdm==4.67.1 importlib-metadata==8.5.0 qai-hub==0.30.0 opencv-python==4.10.0.82 torch>=1.8.0 torchvision>=0.9.0
 ```
 
-#### 2. Build QAI AppBuilder Libraries
+#### 2. Build QAI AppBuilder Python and C/C++ Libraries
 
 Navigate to the project root directory and build the libraries:
 

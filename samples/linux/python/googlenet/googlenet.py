@@ -166,6 +166,7 @@ def Inference(input_image_path):
 
 
     output = torch.from_numpy(output_data)  
+    output = output.squeeze(0)
     probabilities = torch.softmax(output, dim=0)
     result=post_process(probabilities, output)
 
