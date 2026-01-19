@@ -6,8 +6,8 @@ version = "0.1.0"
 
 [tasks]
 install-tools = { cmd = ["python", "utils/Install_Tools.py"], cwd = ".."}
-build-qai-appbuilder = { cmd = ["python", "setup.py", "--toolchains", "aarch64-oe-linux-gcc11.2", "--hexagonarch", "73", "bdist_wheel"], cwd = "../ai-engine-direct-helper"}
-install-qai-appbuilder = { cmd = ["pip", "install", "qai_appbuilder-2.38.0-cp312-cp312-linux_aarch64.whl", "--force-reinstall"], cwd = "../ai-engine-direct-helper/dist/"}
+build-qai-appbuilder = { cmd = ["python", "setup.py", "bdist_wheel", "--toolchains", "aarch64-oe-linux-gcc11.2", "--hexagonarch", "73"], cwd = "../ai-engine-direct-helper"}
+install-qai-appbuilder = { cmd = "bash -lc 'pip install ./qai_appbuilder-*.whl --force-reinstall'", cwd = "../ai-engine-direct-helper/dist/"}
 install-model = { cmd = ["python", "utils/Install_LLM_Models.py"], cwd = ".."}
 install-langflow = { cmd = "uv pip install langflow==1.5.0 --trusted-host=pypi.org --trusted-host=files.pythonhosted.org"}
 start-GenieAPIService = { cmd = ["python", "genie/python/GenieAPIService.py", "--modelname", "IBM-Granite-v3.1-8B", "--loadmodel", "--profile"], cwd = "../ai-engine-direct-helper/samples/"}
