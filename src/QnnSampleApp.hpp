@@ -226,6 +226,9 @@ class QnnSampleApp {
   std::string m_dlcPath;
   QnnSystemDlc_Handle_t m_dlcHandle = nullptr;
   Qnn_LogHandle_t m_dlcLogHandle = nullptr;
+
+  std::vector<Qnn_Tensor_t*> m_inputTensors;
+  std::vector<Qnn_Tensor_t*> m_outputTensors;
 };
 }  // namespace sample_app
 }  // namespace tools

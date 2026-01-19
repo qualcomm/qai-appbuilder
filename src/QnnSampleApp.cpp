@@ -464,7 +464,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::composeGraphs() {
   auto returnStatus = StatusCode::SUCCESS;
   // If DLC path is provided, use DLC-based composition
   if (!m_dlcPath.empty()) {
-    printf("DLC path provided, using DLC-based graph composition\n");
+    printf("DLC path (%s) provided, using DLC-based graph composition\n", m_dlcPath.c_str());
     returnStatus = composeGraphsFromDlc();
     return returnStatus;
   } else{
@@ -1328,12 +1328,16 @@ sample_app::StatusCode sample_app::QnnSampleApp::setupInputAndOutputTensors()
 
   for (size_t graphIdx = 0; graphIdx < m_graphsCount; graphIdx++) {
     auto& graphInfo = (*m_graphsInfo)[graphIdx];
-    Qnn_Tensor_t** inputs  = &(graphInfo.m_inputs );
-    Qnn_Tensor_t** outputs = &(graphInfo.m_outputs);
-    returnStatus = m_ioTensor.setupInputAndOutputTensors(inputs, outputs, graphInfo);
+    Qnn_Tensor_t* inputs  = nullptr;
+    Qnn_Tensor_t* outputs = nullptr;
+    returnStatus = m_ioTensor.setupInputAndOutputTensors(&inputs, &outputs, graphInfo);
     if (qnn::tools::iotensor::StatusCode::SUCCESS != returnStatus) {
-      QNN_ERROR("Error in setting up Input and output Tensors for graphIdx: %d", graphIdx);
+      QNN_ERROR("Error in setting up Input and output Tensors for graphIdx: %d\n", graphIdx);
       break;
+    }else{
+      m_inputTensors.push_back(inputs);
+      m_outputTensors.push_back(outputs);
+      QNN_INFO("setup tensors success\n");
     }
   }
 
@@ -1347,11 +1351,11 @@ sample_app::StatusCode sample_app::QnnSampleApp::tearDownInputAndOutputTensors()
 
   for (size_t graphIdx = 0; graphIdx < m_graphsCount; graphIdx++) {
     auto& graphInfo = (*m_graphsInfo)[graphIdx];
-    Qnn_Tensor_t* inputs  = graphInfo.m_inputs ;
-    Qnn_Tensor_t* outputs = graphInfo.m_outputs;
+    Qnn_Tensor_t* inputs  = m_inputTensors[graphIdx];
+    Qnn_Tensor_t* outputs = m_outputTensors[graphIdx];
     returnStatus = m_ioTensor.tearDownInputAndOutputTensors(inputs, outputs, graphInfo.numInputTensors, graphInfo.numOutputTensors);
-    graphInfo.m_inputs  = nullptr;
-    graphInfo.m_outputs = nullptr;
+    m_inputTensors[graphIdx]  = nullptr;
+    m_outputTensors[graphIdx]  = nullptr;
     if (qnn::tools::iotensor::StatusCode::SUCCESS != returnStatus) {
       QNN_ERROR("Error in tear down Input and output Tensors for graphIdx: %d", graphIdx);
       break;
@@ -1392,8 +1396,9 @@ std::string dataTypeToString(Qnn_DataType_t dtype) {
 
 std::vector<std::vector<size_t>> sample_app::QnnSampleApp::getInputShapes(){
 	if(m_inputShapes.empty()){
-		auto graphInfo = (*m_graphsInfo)[0/*graphIdx*/];
-		Qnn_Tensor_t* inputs  = graphInfo.m_inputs;
+ 		size_t graphIdx = 0;
+ 		auto graphInfo = (*m_graphsInfo)[graphIdx];
+ 		Qnn_Tensor_t* inputs  = m_inputTensors[graphIdx];
 		for (size_t inputIdx = 0; inputIdx < graphInfo.numInputTensors; inputIdx++) {
 			if (QNN_TENSOR_GET_DIMENSIONS(inputs[inputIdx]) == nullptr || QNN_TENSOR_GET_RANK(inputs[inputIdx]) == 0) {
 				//printf("[ERROR] input tensor %zu has nullptr dimensions or rank == 0\n", inputIdx);
@@ -1421,8 +1426,9 @@ std::string sample_app::QnnSampleApp::getGraphName(){
 
 std::vector<std::string> sample_app::QnnSampleApp::getInputName(){
 	if(m_inputName.empty()){
-		auto graphInfo = (*m_graphsInfo)[0/*graphIdx*/];
-		Qnn_Tensor_t* inputs  = graphInfo.m_inputs;
+ 		size_t graphIdx = 0;
+ 		auto graphInfo = (*m_graphsInfo)[graphIdx];
+ 		Qnn_Tensor_t* inputs  = m_inputTensors[graphIdx];
  		for (size_t inputIdx = 0; inputIdx < graphInfo.numInputTensors; inputIdx++) {
 			std::string inputName = QNN_TENSOR_GET_NAME(inputs[inputIdx]);
 			m_inputName.push_back(inputName);
@@ -1434,8 +1440,9 @@ std::vector<std::string> sample_app::QnnSampleApp::getInputName(){
 
 std::vector<std::string> sample_app::QnnSampleApp::getOutputName(){
 	if(m_outputName.empty()){
-		auto graphInfo = (*m_graphsInfo)[0/*graphIdx*/];
-		Qnn_Tensor_t* outputs  = graphInfo.m_outputs;
+ 		size_t graphIdx = 0;
+ 		auto graphInfo = (*m_graphsInfo)[graphIdx];
+ 		Qnn_Tensor_t* outputs  = m_outputTensors[graphIdx];
 		for (size_t outputIdx = 0; outputIdx < graphInfo.numOutputTensors; outputIdx++) {
 			std::string outputName = QNN_TENSOR_GET_NAME(outputs[outputIdx]);
 			m_outputName.push_back(outputName);
@@ -1446,8 +1453,9 @@ std::vector<std::string> sample_app::QnnSampleApp::getOutputName(){
 
 std::vector<std::string> sample_app::QnnSampleApp::getInputDataType(){
 	if(m_inputDataType_s.empty()){
-		auto graphInfo = (*m_graphsInfo)[0/*graphIdx*/];
-		Qnn_Tensor_t* inputs  = graphInfo.m_inputs;
+ 		size_t graphIdx = 0;
+ 		auto graphInfo = (*m_graphsInfo)[graphIdx];
+ 		Qnn_Tensor_t* inputs  = m_inputTensors[graphIdx];
 		for (size_t inputIdx = 0; inputIdx < graphInfo.numInputTensors; inputIdx++) {
 			Qnn_DataType_t dims_inputDataType = QNN_TENSOR_GET_DATA_TYPE(inputs[inputIdx]);
 			m_inputDataType_s.push_back(dataTypeToString(dims_inputDataType));
@@ -1462,8 +1470,9 @@ std::vector<std::string> sample_app::QnnSampleApp::getInputDataType(){
 
 std::vector<std::vector<size_t>> sample_app::QnnSampleApp::getOutputShapes(){
 	if(m_outputShapes.empty()){
-		auto graphInfo = (*m_graphsInfo)[0/*graphIdx*/];
-		Qnn_Tensor_t* outputs  = graphInfo.m_outputs;
+ 		size_t graphIdx = 0;
+ 		auto graphInfo = (*m_graphsInfo)[graphIdx];
+ 		Qnn_Tensor_t* outputs  = m_outputTensors[graphIdx];
 		for (size_t outputIdx = 0; outputIdx < graphInfo.numOutputTensors; outputIdx++) {
 			if (QNN_TENSOR_GET_DIMENSIONS(outputs[outputIdx]) == nullptr || QNN_TENSOR_GET_RANK(outputs[outputIdx]) == 0) {
 				//printf("[ERROR] Output tensor %zu has nullptr dimensions or rank == 0\n", outputIdx);
@@ -1483,8 +1492,9 @@ std::vector<std::vector<size_t>> sample_app::QnnSampleApp::getOutputShapes(){
 
 std::vector<std::string> sample_app::QnnSampleApp::getOutputDataType(){
 	if(m_outputDataType_s.empty()){
-		auto graphInfo = (*m_graphsInfo)[0/*graphIdx*/];
-		Qnn_Tensor_t* outputs  = graphInfo.m_outputs;
+ 		size_t graphIdx = 0;
+ 		auto graphInfo = (*m_graphsInfo)[graphIdx];
+ 		Qnn_Tensor_t* outputs  = m_outputTensors[graphIdx];
 		for (size_t outputIdx = 0; outputIdx < graphInfo.numOutputTensors; outputIdx++) {
 			Qnn_DataType_t dims_outputDataType = QNN_TENSOR_GET_DATA_TYPE(outputs[outputIdx]);
 			m_outputDataType_s.push_back(dataTypeToString(dims_outputDataType));
@@ -1544,8 +1554,8 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vecto
 
     // improve performance.
 
-  Qnn_Tensor_t* inputs  = (*m_graphsInfo)[graphIdx].m_inputs ;
-  Qnn_Tensor_t* outputs = (*m_graphsInfo)[graphIdx].m_outputs;
+    Qnn_Tensor_t* inputs = m_inputTensors[graphIdx];
+    Qnn_Tensor_t* outputs = m_outputTensors[graphIdx];
 
   auto graphInfo = (*m_graphsInfo)[graphIdx];
 
