@@ -410,7 +410,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::registerOpPackages() {
 sample_app::StatusCode sample_app::QnnSampleApp::createContext() {
   if (QNN_CONTEXT_NO_ERROR !=
       m_qnnFunctionPointers.qnnInterface.contextCreate(m_backendHandle,
-                                                       m_deviceHandle,
+                                                       s_deviceHandle,
                                                        (const QnnContext_Config_t**)m_contextConfig,
                                                        &m_context)) {
     QNN_ERROR("Could not create context");
@@ -926,7 +926,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::createFromBinary() {
   if (StatusCode::SUCCESS == returnStatus &&
       m_qnnFunctionPointers.qnnInterface.contextCreateFromBinary(
           m_backendHandle,
-          m_deviceHandle,
+          s_deviceHandle,
           (const QnnContext_Config_t**)m_contextConfig,
 #ifdef MMAP_FILE
           static_cast<void*>(buffer),
@@ -1161,9 +1161,9 @@ sample_app::StatusCode sample_app::QnnSampleApp::isFinalizeDeserializedGraphSupp
 }
 
 sample_app::StatusCode sample_app::QnnSampleApp::createDevice() {
-  if (nullptr != m_qnnFunctionPointers.qnnInterface.deviceCreate) {
+  if (nullptr != m_qnnFunctionPointers.qnnInterface.deviceCreate && nullptr == s_deviceHandle) {
     auto qnnStatus =
-        m_qnnFunctionPointers.qnnInterface.deviceCreate(m_logHandle, nullptr, &m_deviceHandle);
+        m_qnnFunctionPointers.qnnInterface.deviceCreate(m_logHandle, nullptr, &s_deviceHandle);
     if (QNN_SUCCESS != qnnStatus && QNN_DEVICE_ERROR_UNSUPPORTED_FEATURE != qnnStatus) {
       QNN_ERROR("Failed to create device");
       return verifyFailReturnStatus(qnnStatus);
@@ -1174,7 +1174,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::createDevice() {
 
 sample_app::StatusCode sample_app::QnnSampleApp::freeDevice() {
   if (nullptr != m_qnnFunctionPointers.qnnInterface.deviceFree) {
-    auto qnnStatus = m_qnnFunctionPointers.qnnInterface.deviceFree(m_deviceHandle);
+    auto qnnStatus = m_qnnFunctionPointers.qnnInterface.deviceFree(s_deviceHandle);
     if (QNN_SUCCESS != qnnStatus && QNN_DEVICE_ERROR_UNSUPPORTED_FEATURE != qnnStatus) {
       QNN_ERROR("Failed to free device");
       return verifyFailReturnStatus(qnnStatus);

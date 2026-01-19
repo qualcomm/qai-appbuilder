@@ -394,15 +394,6 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
       return false;
     }
 
-    auto devicePropertySupportStatus = app->isDevicePropertySupported();
-    if (sample_app::StatusCode::FAILURE != devicePropertySupportStatus) {
-      auto createDeviceStatus = app->createDevice();
-      if (sample_app::StatusCode::SUCCESS != createDeviceStatus) {
-        app->reportError("Device Creation failure");
-        return false;
-      }
-    }
-
     if (sample_app::StatusCode::SUCCESS != app->initializeProfiling()) {
       app->reportError("Profiling Initialization failure");
       return false;

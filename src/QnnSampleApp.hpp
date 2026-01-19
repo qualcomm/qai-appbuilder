@@ -202,7 +202,7 @@ class QnnSampleApp {
   uint32_t m_graphConfigsInfoCount;
   Qnn_LogHandle_t m_logHandle         = nullptr;
   Qnn_BackendHandle_t m_backendHandle = nullptr;
-  Qnn_DeviceHandle_t m_deviceHandle   = nullptr;
+  inline static Qnn_DeviceHandle_t s_deviceHandle = nullptr;
   RunTimeAppKeys m_runTimeAppKeys;
   uint64_t m_numMaxEvents = std::numeric_limits<uint64_t>::max();
   std::vector<qnn_wrapper_api::GraphInfo_t*> m_graphInfoPtrList;
