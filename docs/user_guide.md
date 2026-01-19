@@ -12,6 +12,9 @@ Note: Contributions are welcome. Please ensure thorough testing before deploying
     - You can obtain the required input and output data format types of the model via the getInputDataType() and getOutputDataType() functions;<br>
     - For specific usage, please refer to the [Wisper](../samples/python/whisper_base_en/whisper_base_en.py) example code.<br>
 
+### Supported model's file format:
+- We support run .bin and [.dlc](#dlc-support) model file on HTP and run .so model file model file on CPU.
+
 ## Environment Setup
 ** For Python developers, from v2.0.0, we don't need to prepare the below libraries since we've included these libraries into QAI AppBuilder extension(*.whl). <br>
 
