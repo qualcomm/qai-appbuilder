@@ -71,12 +71,12 @@ Navigate to the project root directory and build the libraries:
 
 **For QCS6490 (Hexagon v68):**
 ```bash
-python setup.py --toolchains aarch64-oe-linux-gcc11.2 --hexagonarch 68 bdist_wheel
+python setup.py bdist_wheel --toolchains aarch64-oe-linux-gcc11.2 --hexagonarch 68 
 ```
 
 **For IQ9075 (Hexagon v73):**
 ```bash
-python setup.py --toolchains aarch64-oe-linux-gcc11.2 --hexagonarch 73 bdist_wheel
+python setup.py bdist_wheel --toolchains aarch64-oe-linux-gcc11.2 --hexagonarch 73 
 ```
 
 #### 3. Install QAI AppBuilder Wheel Package
