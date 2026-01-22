@@ -464,7 +464,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::composeGraphs() {
   auto returnStatus = StatusCode::SUCCESS;
   // If DLC path is provided, use DLC-based composition
   if (!m_dlcPath.empty()) {
-    printf("DLC path (%s) provided, using DLC-based graph composition\n", m_dlcPath.c_str());
+    QNN_INFO("DLC path (%s) provided, using DLC-based graph composition\n", m_dlcPath.c_str());
     returnStatus = composeGraphsFromDlc();
     return returnStatus;
   } else{
@@ -826,6 +826,15 @@ sample_app::StatusCode sample_app::QnnSampleApp::createFromBinary() {
     return StatusCode::FAILURE;
   }
 
+  // Ensure bufferSize matches the real file size seen by WinAPI (important for >4GB).
+  LARGE_INTEGER liSize{};
+  if (!GetFileSizeEx(hFile, &liSize) || liSize.QuadPart <= 0) {
+	printf("GetFileSizeEx failed. err: %s", strerror(errno));
+    CloseHandle(hFile);
+    return StatusCode::FAILURE;
+  }
+  bufferSize = static_cast<uint64_t>(liSize.QuadPart);
+
   // Ensure handles are closed on all paths.
   HANDLE hFileMap = NULL;
   uint8_t *buffer  = NULL;
@@ -844,7 +853,10 @@ sample_app::StatusCode sample_app::QnnSampleApp::createFromBinary() {
     }
   };
 
-  hFileMap = CreateFileMapping(hFile, NULL, PAGE_READONLY, 0, (DWORD)bufferSize, NULL);
+  // CreateFileMapping size is 64-bit via (dwMaximumSizeHigh, dwMaximumSizeLow).
+  DWORD sizeLow  = static_cast<DWORD>(bufferSize & 0xFFFFFFFFull);
+  DWORD sizeHigh = static_cast<DWORD>((bufferSize >> 32) & 0xFFFFFFFFull);
+  hFileMap = CreateFileMapping(hFile, NULL, PAGE_READONLY, sizeHigh, sizeLow, NULL);
 
   if (hFileMap == NULL) {
     printf("Failed to create file mapping of file %s. err: %s", m_cachedBinaryPath.c_str(), strerror(errno));
@@ -852,6 +864,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::createFromBinary() {
     return StatusCode::FAILURE;
   }
 
+  // MapViewOfFile with dwNumberOfBytesToMap=0 maps the entire mapping object.
   buffer = (uint8_t *)MapViewOfFile(hFileMap, FILE_MAP_READ, 0, 0, 0);
 
   if (buffer == NULL) {
