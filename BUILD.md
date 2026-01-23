@@ -18,7 +18,7 @@
     ```
   
 - Install Visual Studio 2022: 
-  - https://docs.qualcomm.com/bundle/publicresource/topics/80-62010-1/setup.html?product=1601111740057789
+  - https://learn.microsoft.com/en-us/visualstudio/releases/2022/release-history#release-dates-and-build-numbers<br>
 - Install x64 version [Python-3.12.8](https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe) or install arm64 version [Python-3.12.6](https://github.com/quic/ai-engine-direct-helper/blob/main/docs/python_arm64.md) if your app is running on arm64.
 
 - Use the commands below to install Python dependency: 
