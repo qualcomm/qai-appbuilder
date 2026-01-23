@@ -44,7 +44,7 @@ Please Install and use python 3.10, not use python 3.12.
 
 Then run below commands in PowerShell:
 ```
-SET QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.37.1.250807
+$env:QNN_SDK_ROOT = "C:\Qualcomm\AIStack\QAIRT\2.37.1.250807"
 cd C:\Qualcomm\AIStack\QAIRT\2.37.1.250807\bin
 
 - After install visual studio, CLang and Cmake, then set path:
