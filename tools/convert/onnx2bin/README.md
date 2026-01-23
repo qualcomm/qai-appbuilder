@@ -30,8 +30,10 @@ Create input_list-128.txt in which includes above raw file:
 ```
 random128_128_3.raw
 ```
+*Note: To improve accuracy, please do not use the above random raw file. Instead, use your actual input data or images to generate the new raw file.<br>
 
-• htp_backend_ext_fp16_v79-real_esrgan_x4plus.json
+• htp_backend_ext_fp16_v79-real_esrgan_x4plus.json<br>
+
 
 ### Install QAIRT SDK:
 Download [QAIRT SDK](https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.37.1.250807/v2.37.1.250807.zip) and unzip it to: C:\Qualcomm\AIStack\QAIRT\2.37.1.250807\
