@@ -65,7 +65,7 @@ We can copy these libraries to one folder. E.g.: ```C:\<Project Name>\qnn\``` <b
 ### 2. API from AppBuilder Python binding extension for Python projects.<br>
 There're several Python classes from this extension:
 - QNNContext - The context of QNN model, used to initialize the QNN model, run the inference and destroy the model resource.
-- QNNContextProc - It's similar with QNNContext but support load the model into a separate processes. [*Depress*]
+- QNNContextProc - It's similar with QNNContext but support load the model into a separate processes.
 - QNNShareMemory - It's used to create processes share memory while using *QNNContextProc*.
 - QNNConfig - It's for configuring  Qualcomm® AI Runtime SDK libraries path, runtime(CPU/HTP), log leverl, profiling level.
 - PerfProfile - Set the HTP perf profile.
