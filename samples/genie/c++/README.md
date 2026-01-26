@@ -113,3 +113,7 @@ python GenieAPIClient.py --prompt "How to fish?" --stream
 
 ### More Sample Code
 You can find more client sample code [here](../python/README.md#sample-list).
+
+### Release
+[GenieAPIService_v2.1.3_QAIRT_v2.42.0_v73.zip
+](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.42.0/GenieAPIService_v2.1.3_QAIRT_v2.42.0_v73.zip).

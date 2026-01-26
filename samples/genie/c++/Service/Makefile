@@ -17,5 +17,5 @@ all: android
 
 android:
 	@echo "-------------------- Building GenieAPIServer for android -------------------- "
-	@$(ANDROID_NDK_ROOT)/ndk-build.cmd APP_ALLOW_MISSING_DEPS=true APP_ABI="arm64-v8a" NDK_PROJECT_PATH=./ NDK_APPLICATION_MK=make/Application.mk APP_BUILD_SCRIPT=make/Android.mk || (echo "-------------------- server android build failed --------------------"; exit 1; )
+	@$(ANDROID_NDK_ROOT)/ndk-build.cmd APP_ALLOW_MISSING_DEPS=true APP_ABI="arm64-v8a" NDK_PROJECT_PATH=./ NDK_APPLICATION_MK=scripts/Application.mk APP_BUILD_SCRIPT=scripts/Android.mk || (echo "-------------------- server android build failed --------------------"; exit 1; )
 	@echo "-------------------- GenieAPIServer for android build succeeded -------------------- "

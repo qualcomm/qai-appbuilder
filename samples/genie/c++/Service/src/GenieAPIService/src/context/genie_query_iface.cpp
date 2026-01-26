@@ -150,13 +150,21 @@ Impl::IEmbedding &GenieContext::Impl::IEmbedding::DecodeImg(std::string &&img_ha
 
 Impl::IEmbedding &Impl::IEmbedding::BuildPixelEmbeddings()
 {
+#ifdef WIN32
+#define BACKEND "QnnHtp.dll"
+#define SYSTEM "QnnSystem.dll"
+#else
+#define BACKEND "libQnnHtp.so"
+#define SYSTEM "libQnnSystem.so"
+#endif
+
     static const char *model_name{"model_name"};
     static std::string perfProfile = "burst";
 
     LibAppBuilder app_builder;
     SetLogLevel(GENIE_LOG_LEVEL_ERROR, "");
     My_Log{} << "start to initiate: " << qnn_embedding_info_.init_bin_file_ << " ....\n";
-    if (!app_builder.ModelInitialize(model_name, qnn_embedding_info_.init_bin_file_, "QnnHtp.dll", "QnnSystem.dll"))
+    if (!app_builder.ModelInitialize(model_name, qnn_embedding_info_.init_bin_file_, BACKEND, SYSTEM))
     {
         throw std::runtime_error("call model initialize failed");
     }

@@ -2,13 +2,13 @@
 
 ## Service:
 
-The code under this folder is C++ implementation of the service. It can be compiled to Windows, Android and Linux target.
+The code under this folder is C++ implementation of the service. It can be compiled to Windows, Android and Linux
+target.
 
 ## Android:
 
 The code under this folder is Android app which can be used to launch the service in Android device.
 
-## Build Service from source code:
 ## Build For Windows:
 
 ### Prepare environment:<br>
@@ -30,10 +30,17 @@ Open a 'Command Prompt' window (not PowerShell) to compile the libraries.
 
 ### Set QAIRT SDK Version:<br>
 
-After installing Qualcomm® AI Runtime SDK, It usually located at `C:\Qualcomm\AIStack\QAIRT\2.38.0.250901`. We can make
+After installing Qualcomm® AI Runtime SDK, It usually located at `C:\Qualcomm\AIStack\QAIRT\2.42.0.251225`. We can make
 it as an environment variable.
 
-`Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.38.0.250901\`
+`Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.42.0.251225\`
+
+### Prepare the dependents
+
+```
+cd samples\genie\c++\External
+git clone https://github.com/nothings/stb.git
+```
 
 ### Build GenieAPIServer & GenieAPIClient:<br>
 
@@ -52,14 +59,14 @@ cmake -S .. -B . -A ARM64 ..
 cmake --build . --config Release --parallel 4
 ```
 
-Then the full release will locate at `Service\GenieSerivce_v2.0.0`
+Then the full release will locate at `Service\GenieSerivce_v2.1.3`
 
 ### Build GenieAPIServer for Android: <br>
 
 Install Qualcomm® AI Runtime SDK, Android NDK etc, before you compile this service.<br>
 
 ```
-Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.38.0.250901\
+Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.42.0.251225\
 set PATH=%PATH%;C:\Programs\android-ndk-r26d\toolchains\llvm\prebuilt\windows-x86_64\bin
 Set NDK_ROOT=C:/Programs/android-ndk-r26d/
 Set ANDROID_NDK_ROOT=%NDK_ROOT%

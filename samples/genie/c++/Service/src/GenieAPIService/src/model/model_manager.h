@@ -36,7 +36,7 @@ private:
 
     void Clean();
 
-    bool ModelComparer(const std::string &source, const std::string &target, bool contain);
+    static bool ModelComparer(const std::string &source, const std::string &target, bool contain);
 
     struct ModeVerifier;
 

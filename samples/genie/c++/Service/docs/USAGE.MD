@@ -4,18 +4,37 @@ GenieService is a pair of HTTP CS(client and server) process.
 
 You should launch the server first, then use client for ask questions.
 
-## Service start:
+## Use For Android
 
-The Genie will start with loading the model config file. if you need to load VLM models, please follow
-the [VLM model layout](VLM_Deployment.MD)
+```
+1. You can find the apk in ai-engine-direct-helper\samples\genie\c++\Android\app\release folder after finishing build.
+2. Run adb install app-release.apk to install this apk.
+3. You can find the GenieAPI in your luancher after installing apk.
+4. Please push the model files into your device. The model files should be pushed to /sdcard/GenieModels.
+5. Click the GenieAPI then click the START SERVICE button. It will load the model files. You will see "Genie API Service IS Running." if loading model successfully.
+If you want to stop this service, please click the STOP SERVICE button. If you want to check the log file, please click the menu at top right-hand corner. Then select Log Files->Log:1.
+If you want to set the log level, please click the menu at top right-hand corner then select Log Level.
+6. Please also install the flet-chat/GenieChat apk. Please check https://github.com/quic/ai-engine-direct-helper/blob/main/samples/fletui/GenieFletUI/android/BUILD.md about how to build the flet-chat apk.
+please check https://github.com/quic/ai-engine-direct-helper/tree/main/samples/android/GenieChat to build the GenieChat apk.
+7. Open the flet-chat and click the menu at top right-hand corner and select Server Settings. Then you can click the item list in LLM to select a model then click the Verify button and ok button.
+8. Now you can query your questions.
+9. If you want to use the GenieChat, please open it and click the menu at top right-hand corner then select settings. you can select the model and go back to main window. Now you can query your questions.
+```
 
-`GenieService.exe -c modles/Qwen2.0-7B-SSD/config.json -l`
+## Use For Windows
 
-or VLM example
+### Service start:
 
-`GenieService.exe -c modles/qwen2.5vl3b/config.json -l`
+The Genie will start with loading the model config file.
+
+`GenieAPIService.exe -c models/Qwen2.0-7B-SSD/config.json -l`
+
+or VLM example, Please follow the [VLM model layout](VLM_DEPLOYMENT.MD)
+
+`GenieAPIService.exe -c models/qwen2.5vl3b/config.json -l`
 
 There is some options, You can also type `GenieService.exe -h` to look up the more usage.
+And set param for it.
 
 ```
 Options:
@@ -34,19 +53,48 @@ Options:
   -p,--port INT               Port used for running
 ```
 
-Note: Please note that the input length must not exceed the maximum number of tokens reserved for the input, which means it cannot exceed the model's maximum context length minus the value set for '--min_output_num'. You can invoke the Text Splitter to send the input text to the server for segmentation, and then sequentially pass the split segments to the LLM to complete the question-answering process.<br>
-Note: It is recommended to disable thinking mode when using the tools call function.<br>
-Note: You can refer to [GenieAPIClientTools.py](../../python/GenieAPIClientTools.py) on how to use tools call.<br>
+- Note 1:
 
-## Client Start
+  Please note that the input length must not exceed the maximum number of tokens reserved for the input, which means
+  it cannot exceed the model's maximum context length minus the value set for `--min_output_num`. You can invoke the
+  Text
+  Splitter to send the input text to the server for segmentation, and then sequentially pass the split segments to the
+  LLM
+  to complete the question-answering process.<br>
 
-### text models
+
+- Note 2:
+
+  It is recommended to disable thinking mode when using the tools call function.<br>
+
+
+- Note 3:
+
+  You can refer to [GenieAPIClientTools.py](../../../python/GenieAPIClientTools.py) on how to use tools call.<br>
+
+### Client Start
+
+Client also have some options:
+
+```
+Options:
+  --prompt                    Your questions for ask. Default is "hello"
+  --system                    Model system prompt. Default is "You are a helpful assistant."   
+  --stream                    Answer in stream mode. It is required
+  --model                     The model will be loaded. It's should located at ./models/xxxx
+  --ip                        The server ip for communication. Default is "127.0.0.1"   
+  --img                       the client image path for VLM models.
+```
+
+#### text models
 
 Asking you a question directly.
 
-`GenieClient.exe --promopt "how to fish?" --stream`
+`GenieAPIClient.exe --prompt "how to fish?" --stream --model Qwen2.0-7B-SSD --ip 127.0.0.1`
 
-### image models
+#### image models
 
-You should provide your question and the image for client
-`GenieClient.exe --promopt "what is the image descript?" --img test.png --stream`
+For VLM models, you should provide your question and the image for client
+
+`GenieAPIClient.exe --prompt "what is the image descript?" --img test.png --stream --model qwen2.5vl3b`
+

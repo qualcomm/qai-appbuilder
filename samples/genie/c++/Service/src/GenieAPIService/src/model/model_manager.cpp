@@ -65,8 +65,10 @@ class ModelManager::EmbeddingVerifier
         {
             type_.v_ = QNNEmbeddingType::PHI4MM;
             init_bin_file_ = self_->model_path_ + "/veg.serialized.bin";
-            bin_files_stack_.assign({self_->model_path_ + "/position_ids.bin",
-                                     self_->model_path_ + "/attention_mask.bin"});
+            bin_files_stack_.assign({
+                self_->model_path_ + "/raw/position_ids.bin",
+                self_->model_path_ + "/raw/attention_mask.bin"
+            });
         }
     };
 
@@ -76,10 +78,12 @@ class ModelManager::EmbeddingVerifier
         {
             type_.v_ = QNNEmbeddingType::QWEN2_5;
             init_bin_file_ = self_->model_path_ + "/veg.serialized.bin";
-            bin_files_stack_.assign({self_->model_path_ + "/position_ids_cos.raw",
-                                     self_->model_path_ + "/position_ids_sin.raw",
-                                     self_->model_path_ + "/window_attention_mask.raw",
-                                     self_->model_path_ + "/full_attention_mask.raw"});
+            bin_files_stack_.assign({
+                self_->model_path_ + "/raw/position_ids_cos.raw",
+                self_->model_path_ + "/raw/position_ids_sin.raw",
+                self_->model_path_ + "/raw/window_attention_mask.raw",
+                self_->model_path_ + "/raw/full_attention_mask.raw"
+            });
         }
     };
 
@@ -99,11 +103,11 @@ public:
         };
         /* @formatter:on */
 
-        QNNEmbeddingInfo embedding_info;
+        QNNEmbeddingInfo embedding_info{};
         for (const auto &check: checkers)
         {
             My_Log{} << "try to check if qnn embedding is: "
-                     << check.embedding_type_.to_string() << "\n";
+                    << check.embedding_type_.to_string() << "\n";
 
             embedding_info = check.func_();
             if (embedding_info.type_.v_ != QNNEmbeddingType::Unknown)
@@ -128,17 +132,20 @@ struct ModelManager::ModeVerifier
             if (self->known_model_path_.empty())
             {
                 std::string err_str{"config file is not found: " + self_->config_file_};
-                config_strict ? throw std::runtime_error(err_str) :
-                My_Log{My_Log::Level::kWarning} << err_str << std::endl;
+                config_strict
+                    ? throw std::runtime_error(err_str)
+                    : My_Log{My_Log::Level::kWarning} << err_str << std::endl;
                 return;
             }
 
             std::string new_config_path{self->known_model_path_ + "/config.json"};
             My_Log{My_Log::Level::kError} << "config file: " << self_->config_file_ << " "
-                                          << "is not exist, will use default ver: " << new_config_path
-                                          << std::endl;
+                    << "is not exist, will use default ver: " << new_config_path
+                    << std::endl;
             self_->config_file_ = new_config_path;
         }
+
+        virtual ~ModeVerifierImpl() = default;
 
     protected:
         ModelManager *self_;
@@ -177,7 +184,7 @@ struct ModelManager::ModeVerifier
                 throw std::runtime_error("qnn model does not match any embedding");
             }
 
-            ahead:
+        ahead:
             return std::make_shared<GenieContext>(*self_);
         }
     };
@@ -240,12 +247,14 @@ struct ModelManager::ModeVerifier
             for (const auto &check: checkers)
             {
                 My_Log{} << "try to check if model is: "
-                         << const_cast<ModelType &>(check.model_type_).to_string()
-                         << " model\n";
+                        << const_cast<ModelType &>(check.model_type_).to_string()
+                        << " model\n";
 
                 auto use_second = MeasureSeconds(
-                        [&context, &check]()
-                        { context = check.func_(); }
+                    [&context, &check]()
+                    {
+                        context = check.func_();
+                    }
                 );
 
                 if (context)
@@ -266,7 +275,7 @@ struct ModelManager::ModeVerifier
 };
 
 ModelManager::ModelManager(IModelConfig &&config) :
-        IModelConfig{std::move(config)}
+    IModelConfig{std::move(config)}
 {}
 
 bool ModelManager::LoadModelByName(const std::string &model_name, bool &first_load)
@@ -316,14 +325,16 @@ bool ModelManager::InitializeConfig(bool load)
     fs::path config_path{config_file_};
     My_Log{} << "ModelManager::LoadModel,configFile=" + config_path.generic_string() << std::endl;
 
-    auto check_path{[](const fs::path &path)
-                    {
-                        auto str = path.generic_string();
-                        if (str.empty())
-                            throw std::runtime_error("the model file layout does not meet the standard, "
-                                                     "it must be /models/{model_name}/{config}");
-                        return str;
-                    }};
+    auto check_path{
+        [](const fs::path &path)
+        {
+            auto str = path.generic_string();
+            if (str.empty())
+                throw std::runtime_error("the model file layout does not meet the standard, "
+                    "it must be /models/{model_name}/{config}");
+            return str;
+        }
+    };
 
     try
     {
@@ -411,15 +422,15 @@ PromptType ModelManager::LoadPromptTemplates(std::string &&prompt_path)
 
         // Unique prompt identifier for a set of models
         static std::array<std::string, 9> models_prefix{
-                "Allam-7B-SSD",
-                "DeepSeek-R1-Distill-Qwen-7B",
-                "Hunyuan2B",
-                "IBM-Granite-v3.1-8B",
-                "Llama2.0-7B-SSD",
-                "Llama3.1-8B-SSD",
-                "phi",
-                "qwen2.0",
-                "gpt-oss-20b",
+            "Allam-7B-SSD",
+            "DeepSeek-R1-Distill-Qwen-7B",
+            "Hunyuan2B",
+            "IBM-Granite-v3.1-8B",
+            "Llama2.0-7B-SSD",
+            "Llama3.1-8B-SSD",
+            "phi",
+            "qwen2.0",
+            "gpt-oss-20b",
         };
 
         prompt_path.clear();
@@ -437,16 +448,16 @@ PromptType ModelManager::LoadPromptTemplates(std::string &&prompt_path)
         if (prompt_path.empty())
         {
             My_Log{My_Log::Level::kError} << "prompt file: " << org_prompt_path << " "
-                                          << "is not exist, and not match any config models while finding"
-                                          << std::endl;
+                    << "is not exist, and not match any config models while finding"
+                    << std::endl;
             return pt;
         }
 
         prompt_path += "/prompt.json";
-        ahead:
+    ahead:
         My_Log{My_Log::Level::kError} << "prompt file: " << org_prompt_path << " "
-                                      << "is not exist, will use default ver: " << prompt_path
-                                      << std::endl;
+                << "is not exist, will use default ver: " << prompt_path
+                << std::endl;
     }
 
     std::ifstream file(prompt_path);
@@ -461,11 +472,11 @@ PromptType ModelManager::LoadPromptTemplates(std::string &&prompt_path)
     {
         file >> j;
         prompt_ = json{
-                {"system",    j["prompt_system"].get<std::string>()},
-                {"user",      j["prompt_user"].get<std::string>()},
-                {"assistant", j["prompt_assistant"].get<std::string>()},
-                {"tool",      j["prompt_tool"].get<std::string>()},
-                {"start",     j["prompt_start"].get<std::string>()}
+            {"system", j["prompt_system"].get<std::string>()},
+            {"user", j["prompt_user"].get<std::string>()},
+            {"assistant", j["prompt_assistant"].get<std::string>()},
+            {"tool", j["prompt_tool"].get<std::string>()},
+            {"start", j["prompt_start"].get<std::string>()}
         };
     }
     catch (const std::exception &e)
@@ -478,7 +489,7 @@ PromptType ModelManager::LoadPromptTemplates(std::string &&prompt_path)
     {
         contextSize = j["context_size"];
     }
-    catch (const std::exception &e)
+    catch (const std::exception &/*e*/)
     {
         contextSize = CONTEXT_SIZE;
     }
@@ -568,18 +579,20 @@ void ModelManager::Clean()
 
 std::string ModelManager::ResolveKnownModelPath(const std::string &model_feature, bool contain)
 {
-    static bool config_list_ready{[this]()
-                                  {
-                                      for (const auto &entry: fs::directory_iterator(RootDir + "/config"))
-                                      {
-                                          if (!entry.is_directory())
-                                          {
-                                              continue;
-                                          }
-                                          config_model_name_list_.push_back(entry.path().filename().generic_string());
-                                      }
-                                      return true;
-                                  }()};
+    static bool config_list_ready{
+        [this]()
+        {
+            for (const auto &entry: fs::directory_iterator(RootDir + "/config"))
+            {
+                if (!entry.is_directory())
+                {
+                    continue;
+                }
+                config_model_name_list_.push_back(entry.path().filename().generic_string());
+            }
+            return true;
+        }()
+    };
 
     for (const auto config_model_name: config_model_name_list_)
     {
@@ -597,15 +610,17 @@ bool ModelManager::ModelComparer(const std::string &source, const std::string &t
 {
     std::string s = source;
     std::string t = target;
-    static auto normalize{[](std::string &s)
-                          {
-                              std::transform(s.begin(), s.end(), s.begin(),
-                                             [](unsigned char c) -> unsigned char
-                                             {
-                                                 if (c == '-' || c == '.' || c == ' ') return '_';
-                                                 return static_cast<unsigned char>(std::tolower(c));
-                                             });
-                          }};
+    static auto normalize{
+        [](std::string &s)
+        {
+            std::transform(s.begin(), s.end(), s.begin(),
+                           [](unsigned char c) -> unsigned char
+                           {
+                               if (c == '-' || c == '.' || c == ' ') return '_';
+                               return static_cast<unsigned char>(std::tolower(c));
+                           });
+        }
+    };
 
     normalize(s);
     normalize(t);
