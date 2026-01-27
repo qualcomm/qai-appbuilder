@@ -1,0 +1,64 @@
+{
+  "dialog" : {
+    "version" : 1,
+    "type" : "basic",
+    "max-num-tokens" : 2048,
+    "embedding" : {
+      "version" : 1,
+      "size" : 2048,
+      "datatype" : "float32"
+    },
+    "context" : {
+      "version" : 1,
+      "size" : 2048,
+      "n-vocab": 151936,
+      "bos-token": 151643,
+      "eos-token": 151645
+    },
+    "sampler" : {
+      "version" : 1,
+      "seed" : 42,
+      "temp" : 0.0,
+      "top-k" : 1,
+      "top-p" : 1.0,
+      "greedy" : true
+    },
+    "tokenizer" : {
+      "version" : 1,
+      "path" : "tokenizer.json"
+    },
+    "engine" : {
+      "version" : 1,
+      "n-threads" : 3,
+      "backend" : {
+        "version" : 1,
+        "type" : "QnnHtp",
+        "QnnHtp" : {
+          "version" : 1,
+          "spill-fill-bufsize" : 0,
+          "use-mmap" : false,
+          "mmap-budget" : 0,
+          "poll" : true,
+          "allow-async-init" : false,
+          "pos-id-dim" : 64,
+          "cpu-mask" : "0xe0",
+          "kv-dim" : 128,
+          "rope-theta": 1000000,
+          "enable-graph-switching": false
+        },
+        "extensions" : "htp_backend_ext_config.json"
+      },
+      "model" : {
+        "version" : 1,
+        "type" : "binary",
+        "binary" : {
+          "version" : 1,
+          "ctx-bins" : [
+            "llm_model-0.bin",
+            "llm_model-1.bin"
+          ]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "prompt_system": "<|im_start|>system\n string <|im_end|>\n",
+  "prompt_user": "<|im_start|>user\n string <|im_end|>\n",
+  "prompt_assistant": "<|im_start|>assistant\n string <|im_end|>\n",
+  "prompt_tool": "<|im_start|>tool\n string <|im_end|>\n",
+  "prompt_start": "<|im_start|>assistant\n"
+}
