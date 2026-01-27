@@ -7,13 +7,19 @@
 <br>
 
 ## Disclaimer
-This software is provided “as is,” without any express or implied warranties. The authors and contributors shall not be held liable for any damages arising from its use. The code may be incomplete or insufficiently tested. Users are solely responsible for evaluating its suitability and assume all associated risks. <br>
+
+This software is provided “as is,” without any express or implied warranties. The authors and contributors shall not be
+held liable for any damages arising from its use. The code may be incomplete or insufficiently tested. Users are solely
+responsible for evaluating its suitability and assume all associated risks. <br>
 Note: Contributions are welcome. Please ensure thorough testing before deploying in critical systems.
 
 ## Introduction
-This sample helps developers use C++ to build Genie based Open AI compatibility API service on Windows on Snapdragon (WoS), Mobile and Linux platforms.
+
+This sample helps developers use C++ to build Genie based Open AI compatibility API service on Windows on Snapdragon (
+WoS), Mobile and Linux platforms.
 
 ## Features
+
 • Support LLM on both CPU & NPU [*NEW!*] <br>
 • Support both stream and none stream mode <br>
 • Support switching between models <br>
@@ -25,95 +31,24 @@ This sample helps developers use C++ to build Genie based Open AI compatibility 
 • Support history feature <br>
 
 ## GenieAPIService
+
 Genie OpenAI Compatible API Service.
 
 This is an OpenAI compatible API service that can be used to access the Genie AI model.
 This service can be used on multiple platforms such as Android, Windows, Linux, etc.
 
-### Run the service on WoS:
-You can also run the batch file from [QAI AppBuilder Launcher](../../../tools/launcher/) to setup the environment automatically. <br>
-1. [Setup LLM models](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/python#step-3-download-models-and-tokenizer-files) first before running this service. <br>
-2. Download [GenieAPIService](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.38.0/GenieAPIService_v2.1.0_QAIRT_v2.38.0_v73.zip) and copy the subdirectory "GenieAPIService" to path "ai-engine-direct-helper\samples".<br>
-3. Run the following commands to launch the Service (Do *not* close this terminal window while service is running).
-
-```
-cd ai-engine-direct-helper\samples
-GenieAPIService\GenieAPIService.exe -c "genie\python\models\IBM-Granite-v3.1-8B\config.json"  -l
-```
-The service prints the following log, indicating that GenieAPIService started successfully.
-```
-process_arguments c: genie\python\models\IBM-Granite-v3.1-8B\config.json
-process_arguments l: load model
-model path: genie\python\models\IBM-Granite-v3.1-8B
-model name: IBM-Granite-v3.1-8B
-INFO: loading model <<< IBM-Granite-v3.1-8B >>>
-[INFO]  "Using create From Binary"
-[INFO]  "Allocated total size = 353404160 across 10 buffers"
-SetStopSequence: {
-  "stop-sequence" : ["<|end_of_text|>", "<|end_of_role|>", "<|start_of_role|>"]
-}
-INFO: model <<< IBM-Granite-v3.1-8B >>> is ready!
-INFO: [TIME] | model load time >> 8103.10 ms
-INFO: Service Is Ready Now!
-```
-
-### Run the service on Mobile(Snapdragon® 8 Elite Mobile device): <br>
-1. Copy the subdirectory "GenieModels" in [GenieModels.zip](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.38.0/GenieModels.zip) to the root path of mobile sdcard.<br>
-2. Copy your QWen QNN model & tokenizer.json to "/sdcard/GenieModels/qwen2.0_7b"<br>
-3. Modify the config file "/sdcard/GenieModels/qwen2.0_7b/config.json" if necessary.<br>
-4. Install the GenieAPIService.apk to mobile and start it.<br>
-* You can also try other models such [IBM-Granite-v3.1-8B-Instruct](https://aihub.qualcomm.com/mobile/models/ibm_granite_v3_1_8b_instruct?domain=Generative+AI&useCase=Text+Generation) which is for "Snapdragon® 8 Elite Mobile" device. You can create a subdirectory in the path "/sdcard/GenieModels/" for your model and customize the "config.json" for your model.
-
 ## GenieAPIService API:
-Refere to [API](./API.md) for detailed information.
 
-## GenieService & C++ Client usage: 
-It is located at [Docs](Service/docs/USAGE.MD)
+Refere to [API](docs/API.md) for detailed information.
 
-### Python Client Sample Code:
-Here is a Python client sample (You can save it to 'GenieAPIClient.py'):
+## GenieService & Client usage:
 
-```
-import argparse
-from openai import OpenAI
-
-IP_ADDR = "127.0.0.1:8910"
-
-parser = argparse.ArgumentParser()
-parser.add_argument("--stream", action="store_true")
-parser.add_argument("--prompt", default="Hello", type=str)
-args = parser.parse_args()
-
-client = OpenAI(base_url="http://" + IP_ADDR + "/v1", api_key="123")
-
-model_lst = client.models.list()
-print(model_lst)
-
-messages = [{"role": "system", "content": "You are a math teacher who teaches algebra."}, {"role": "user", "content": args.prompt}]
-extra_body = {"size": 4096, "temp": 1.5, "top_k": 13, "top_p": 0.6}
-
-model_name = "IBM-Granite-v3.1-8B"
-
-if args.stream:
-    response = client.chat.completions.create(model=model_name, stream=True, messages=messages, extra_body=extra_body)
-
-    for chunk in response:
-        content = chunk.choices[0].delta.content
-        if content is not None:
-            print(content, end="", flush=True)
-else:
-    response = client.chat.completions.create(model=model_name, messages=messages, extra_body=extra_body)
-    print(response.choices[0].message.content)
-```
-
-We can run it with the command below in a new terminal window:
-```
-python GenieAPIClient.py --prompt "How to fish?" --stream
-```
+It is located at [USAGE](docs/USAGE.MD)
 
 ### More Sample Code
+
 You can find more client sample code [here](../python/README.md#sample-list).
 
 ### Release
-[GenieAPIService_v2.1.3_QAIRT_v2.42.0_v73.zip
-](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.42.0/GenieAPIService_v2.1.3_QAIRT_v2.42.0_v73.zip).
+
+[GenieAPIService_v2.1.3_QAIRT_v2.42.0_v73.zip](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.42.0/GenieAPIService_v2.1.3_QAIRT_v2.42.0_v73.zip).

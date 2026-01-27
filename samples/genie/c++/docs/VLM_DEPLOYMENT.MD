@@ -3,6 +3,7 @@
 Please keep VLM models following the layout
 
 - [qwen2.5vl3b](#qwen2.5vl3b)
+- [phi4mm](#phi4mm)
 
 ## qwen2.5vl3b
 
@@ -16,9 +17,27 @@ Please keep VLM models following the layout
 │   prompt.json
 │   tokenizer.json
 │   veg.serialized.bin
+│   
 └───raw
         full_attention_mask.raw
         position_ids_cos.raw
         position_ids_sin.raw
         window_attention_mask.raw
+```
+
+## phi4mm
+
+```
+./models/phi4mm
+│   config.json
+│   embedding_weights_200064x3072.raw
+│   prompt.json
+│   tokenizer.json
+│   veg.serialized.bin
+│   weights_sharing_model_1_of_2.serialized.bin
+│   weights_sharing_model_2_of_2.serialized.bin
+│
+└───raw
+        attention_mask.bin
+        position_ids.bin
 ```
