@@ -1,4 +1,4 @@
-# GenieAPIService 用户使用手册
+# GenieAPIService 使用指南
 
 <div align="center">
   <h2>在本地 NPU 上运行大语言模型</h2>
@@ -75,13 +75,13 @@ GenieAPIService 提供了丰富的功能特性：
 - ✅ **CPU & NPU 支持**：支持在 CPU 和 NPU 上运行 LLM
 - ✅ **流式和非流式模式**：支持流式输出和完整响应两种模式
 - ✅ **模型切换**：支持在运行时切换不同的模型
+- ✅ **多模态支持**：支持视觉语言模型（VLM）
 - ✅ **自定义模型**：支持用户自定义模型配置
 - ✅ **文本分割**：内置文本分割功能，处理长文本输入
 - ✅ **工具调用**：支持 Function Calling 功能
 - ✅ **思考模式**：支持启用/禁用思考模式
 - ✅ **LoRA 支持**：支持 LoRA 适配器
 - ✅ **历史记录**：支持对话历史记录功能
-- ✅ **多模态支持**：支持视觉语言模型（VLM）
 
 ### 支持的模型格式
 
@@ -96,16 +96,12 @@ GenieAPIService 提供了丰富的功能特性：
 ### 步骤 1：下载资源
 
 1. **下载 GenieAPIService**
-   - 访问 [GitHub Releases](https://github.com/quic/ai-engine-direct-helper/releases)
+   - 访问 [GitHub Releases](https://github.com/quic/ai-engine-direct-helper/releases/tag/v2.42.0)
    - 下载 `GenieAPIService_v2.1.3_QAIRT_v2.42.0_v73.zip`
 
 2. **下载模型文件**
    - 根据需要下载对应的模型文件
    - 常见模型：Qwen2.0-7B、IBM-Granite-v3.1-8B、Qwen2.5-VL-3B 等
-
-3. **安装 Qualcomm® AI Runtime SDK**
-   - 下载并安装 QAIRT SDK
-   - 默认安装路径：`C:\Qualcomm\AIStack\QAIRT\2.42.0.251225\`
 
 ### 步骤 2：解压和配置
 
@@ -184,7 +180,7 @@ Server listening on port 8910
 ### 步骤 1：安装 APK
 
 1. **下载 APK**
-   - 访问 [GitHub Releases](https://github.com/quic/ai-engine-direct-helper/releases)
+   - 访问 [GitHub Releases](https://github.com/quic/ai-engine-direct-helper/releases/tag/v2.42.0)
    - 下载 `GenieAPIService.apk`
 
 2. **安装 APK**
@@ -255,17 +251,7 @@ Server listening on port 8910
 
 ### 配置文件结构
 
-每个模型需要一个 `config.json` 配置文件，示例：
-
-```json
-{
-  "model_name": "Qwen2.0-7B-SSD",
-  "model_path": "models/Qwen2.0-7B-SSD",
-  "context_size": 4096,
-  "query_type": "qnn",
-  "prompt_file": "prompt.json"
-}
-```
+每个模型需要一个 `config.json` 配置文件，[参考示例](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/python/models)。
 
 ### 文本模型部署
 
@@ -274,11 +260,10 @@ Server listening on port 8910
 ```
 models/Qwen2.0-7B-SSD/
 ├── config.json           # 模型配置文件
-├── prompt.json          # 提示词模板
-├── tokenizer.json       # 分词器
-├── model-0.bin          # 模型文件
-├── model-1.bin          # 模型文件（如有）
-└── embedding_weights.raw # 嵌入权重（如需要）
+├── prompt.json           # 提示词模板
+├── tokenizer.json        # 分词器
+├── model-0.bin           # 模型文件
+└── model-1.bin           # 模型文件
 ```
 
 ### 视觉语言模型部署
@@ -311,8 +296,8 @@ models/phi4mm/
 ├── prompt.json
 ├── tokenizer.json
 ├── veg.serialized.bin
-├── weights_sharing_model_1_of_2.serialized.bin
-├── weights_sharing_model_2_of_2.serialized.bin
+├── llm_model-0.bin
+├── llm_model-1.bin
 └── raw/
     ├── attention_mask.bin
     └── position_ids.bin
@@ -324,10 +309,11 @@ models/phi4mm/
 
 ```json
 {
-  "system_prompt": "<|im_start|>system\n{system}<|im_end|>\n",
-  "user_prompt": "<|im_start|>user\n{prompt}<|im_end|>\n",
-  "assistant_prompt": "<|im_start|>assistant\n",
-  "stop_tokens": ["<|im_end|>", "<|endoftext|>"]
+  "prompt_system": "<|im_start|>system\n string <|im_end|>\n",
+  "prompt_user": "<|im_start|>user\n string <|im_end|>\n",
+  "prompt_assistant": "<|im_start|>assistant\n string <|im_end|>\n",
+  "prompt_tool": "<|im_start|>tool\n string <|im_end|>\n",
+  "prompt_start": "<|im_start|>assistant\n"
 }
 ```
 
@@ -427,7 +413,7 @@ GenieAPIService.exe -c config.json -l --adapter my_adapter --lora_alpha 0.5
 
 GenieAPIService 提供了 C++ 客户端示例。
 
-#### 文本模型查询
+#### 文本模型调用
 
 ```bash
 GenieAPIClient.exe \
@@ -437,7 +423,7 @@ GenieAPIClient.exe \
   --ip 127.0.0.1
 ```
 
-#### 视觉语言模型查询
+#### 视觉语言模型调用
 
 ```bash
 GenieAPIClient.exe \
@@ -727,8 +713,7 @@ data: [DONE]
 ```json
 {
   "model": "Qwen2.0-7B-SSD",
-  "tokens_per_second": 25.5,
-  "memory_usage": "4.2GB"
+  "tokens_per_second": 25.5
 }
 ```
 
@@ -998,8 +983,7 @@ for chunk in response:
 **问题**：运行 `GenieAPIService.exe` 时提示找不到 DLL 文件。
 
 **解决方案**：
-- 确保已安装 Qualcomm® AI Runtime SDK
-- 检查系统环境变量 `QNN_SDK_ROOT` 是否正确设置
+- 确保当前路径存在 Qualcomm® AI Runtime SDK 运行时库
 - 安装 Visual C++ Redistributable
 
 ### 2. 模型加载失败
@@ -1106,16 +1090,16 @@ for chunk in response:
 
 ### 文档资源
 
-- **API 文档**：[docs/API.md](docs/API.md)
-- **构建文档**：[docs/BUILD.md](docs/BUILD.md)
-- **使用文档**：[docs/USAGE.MD](docs/USAGE.MD)
-- **VLM 部署文档**：[docs/VLM_DEPLOYMENT.MD](docs/VLM_DEPLOYMENT.MD)
+- **API 文档**：[docs/API.md](../samples/genie/c++/docs/API.md)
+- **构建文档**：[docs/BUILD.md](../samples/genie/c++/docs/BUILD.md)
+- **使用文档**：[docs/USAGE.MD](../samples/genie/c++/docs/USAGE.MD)
+- **VLM 部署文档**：[docs/VLM_DEPLOYMENT.MD](../samples/genie/c++/docs/VLM_DEPLOYMENT.MD)
 
 ### 社区支持
 
 - 在 GitHub Issues 中搜索类似问题
-- 查看示例代码：`samples/python/` 目录
-- 参考测试代码：`GenieAPIService/test/genietest.py`
+- 查看示例代码：`samples/genie/python/`， `samples/genie/c%2B%2B/Service/examples/GenieAPIClient` 目录
+- 参考测试代码：`samples/genie/c%2B%2B/Service/test/genietest.py`
 
 ### 联系方式
 
@@ -1149,6 +1133,7 @@ for chunk in response:
 
 - Qwen2.0-7B-SSD
 - Qwen2.5-VL-3B
+- Llama 3
 - IBM-Granite-v3.1-8B
 - Phi-4 多模态
 - Llama 系列（需 GGUF 格式支持）
