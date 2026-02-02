@@ -93,7 +93,7 @@ def Init():
     QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for RealESRGan objects.
-    realesrgan = RealESRGan("realesrgan", model_path)
+    realesrgan = RealESRGan("realesrgan", model_path,  deviceID = 0, coreIdsStr = "0")
 
 def Inference(input_image_path, output_image_path, show_image = True):
     global image_buffer

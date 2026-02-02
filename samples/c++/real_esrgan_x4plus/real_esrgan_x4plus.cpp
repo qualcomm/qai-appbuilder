@@ -69,7 +69,7 @@ int main() {
 	SetProfilingLevel(1);    //ProfilingLevel::BASIC
 
     std::cout << "ModelInitialize" << std::endl;
-	int ret = libAppBuilder.ModelInitialize(MODEL_NAME, model_path.string(), backend_lib_path.string(), system_lib_path.string());
+	int ret = libAppBuilder.ModelInitialize(MODEL_NAME, model_path.string(), backend_lib_path.string(), system_lib_path.string(), /*deviceID*/ 0, /*coreIdsStr*/ "0");
 	std::cout << "ModelInitialize done" << std::endl;
 	if(ret < 0){
         std::cout << "LoadModel failed" << std::endl;
