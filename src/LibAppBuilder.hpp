@@ -43,6 +43,11 @@ struct ModelInfo_t {
     std::string graphName;
 };
 
+struct MultiCoreDeviceConfig_t {
+  uint32_t deviceId{0};
+  std::vector<uint32_t> coreIdVec{};
+  const uint32_t coreType{0}; /* default to QNN_HTP_CORE_TYPE_NSP */
+};
 /////////////////////////////////////////////////////////////////////////////
 /// Class LibAppBuilder declaration.
 /////////////////////////////////////////////////////////////////////////////
@@ -51,15 +56,15 @@ class LIBAPPBUILDER_API LibAppBuilder
 public:
     bool ModelInitialize(const std::string& model_name, const std::string& model_path,
                                const std::string& backend_lib_path, const std::string& system_lib_path,
-                               bool async = false, const std::string& input_data_type="float", const std::string& output_data_type="float");
+                               bool async = false, const std::string& input_data_type="float", const std::string& output_data_type="float", uint32_t deviceID=0, std::string coreIdsStr="");
     bool ModelInitialize(const std::string& model_name, const std::string& proc_name, const std::string& model_path,
                                const std::string& backend_lib_path, const std::string& system_lib_path,
-                               bool async = false, const std::string& input_data_type="float", const std::string& output_data_type="float");
+                               bool async = false, const std::string& input_data_type="float", const std::string& output_data_type="float", uint32_t deviceID=0, std::string coreIdsStr="");
 
     bool ModelInitialize(const std::string& model_name, const std::string& model_path,
                          const std::string& backend_lib_path, const std::string& system_lib_path,
                          std::vector<LoraAdapter>& lora_adapters,
-                         bool async = false, const std::string& input_data_type="float", const std::string& output_data_type="float");
+                         bool async = false, const std::string& input_data_type="float", const std::string& output_data_type="float", uint32_t deviceID=0, std::string coreIdsStr="");
 
     bool ModelInference(std::string model_name, std::vector<uint8_t*>& inputBuffers, 
                         std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,

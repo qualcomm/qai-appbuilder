@@ -50,7 +50,7 @@ static QNN_INTERFACE_VER_TYPE sg_qnnInterface;
 
 QnnHtpDevice_Infrastructure_t *gs_htpInfra(nullptr);
 static bool sg_perf_global = false;
-
+sample_app::MultiCoreDeviceConfig_t multiCoreDevCfg_global ={}; 
 std::unordered_map<std::string, std::unique_ptr<sample_app::QnnSampleApp>> sg_model_map;
 static sample_app::ProfilingLevel sg_parsedProfilingLevel = sample_app::ProfilingLevel::OFF;
 
@@ -83,7 +83,7 @@ void warmup_parallel_stl()
 
 std::unique_ptr<sample_app::QnnSampleApp> initQnnSampleApp(std::string cachedBinaryPath, std::string backEndPath, std::string systemLibraryPath,
                                                            bool loadFromCachedBinary, std::vector<LoraAdapter>& lora_adapters,
-                                                           const std::string& input_data_type, const std::string& output_data_type) {
+                                                           const std::string& input_data_type, const std::string& output_data_type, sample_app::MultiCoreDeviceConfig_t multiCoreDeviceConfig) {
   // Just keep blank for below paths.
   std::string modelPath;
   std::string cachedBinaryPath2;
@@ -144,7 +144,7 @@ std::unique_ptr<sample_app::QnnSampleApp> initQnnSampleApp(std::string cachedBin
   sg_qnnInterface = qnnFunctionPointers.qnnInterface;
   std::unique_ptr<sample_app::QnnSampleApp> app(new sample_app::QnnSampleApp(qnnFunctionPointers, "null", opPackagePaths, sg_backendHandle, "null",
                                                                              debug, parsedOutputDataType, parsedInputDataType, sg_parsedProfilingLevel,
-                                                                             dumpOutputs, cachedBinaryPath2, saveBinaryName, lora_adapters, cachedBinaryPath2));
+                                                                             dumpOutputs, cachedBinaryPath2, saveBinaryName, lora_adapters, cachedBinaryPath2, multiCoreDeviceConfig));
     return app;
 }
 
@@ -332,10 +332,34 @@ bool fileExists(const std::string& path) {
     std::ifstream f(path.c_str()); 
     return f.good(); 
 }
+std::string stripWhitespace(std::string &str) {
+  const std::string whitespace{" \t\n\v\f\r"};
+  if (!str.empty()) {
+    str.erase(str.begin(), (str.begin() + str.find_first_not_of(whitespace)));
+  }
+  if (!str.empty() && std::isspace(str.back())) {
+    str.erase(str.find_last_not_of(whitespace) + 1);
+  }
+  return str;
+}
+
+void split(std::vector<std::string> &splitString,
+                       const std::string &tokenizedString,
+                       const char separator) {
+  splitString.clear();
+  std::istringstream tokenizedStringStream(tokenizedString);
+  while (!tokenizedStringStream.eof()) {
+    std::string value;
+    getline(tokenizedStringStream, value, separator);
+    if (!value.empty()) {
+      splitString.push_back(value);
+    }
+  }
+}
 bool ModelInitializeEx(const std::string& model_name, const std::string& proc_name, const std::string& model_path,
                        const std::string& backend_lib_path, const std::string& system_lib_path, 
                        std::vector<LoraAdapter>& lora_adapters,
-                       bool async, const std::string& input_data_type, const std::string& output_data_type) {
+                       bool async, const std::string& input_data_type, const std::string& output_data_type, uint32_t deviceID=0, std::string coreIdsStr="") {
   QNN_INF("LibAppBuilder::ModelInitialize: %s \n", model_name.c_str());
 
 #ifdef _WIN32
@@ -369,16 +393,40 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
       loadFromCachedBinary = false;
       QNN_INFO("modelPath: %s", cachedBinaryPath.c_str());
   }
-  // TODO: support *.dlc.
 
+    QNN_INFO("debug deviceID=%d\n", deviceID);
+    QNN_INFO("debug coreIdsStr=%s\n", coreIdsStr.c_str());
+    if(deviceID > 3){
+        QNN_ERROR("Invalid argument passed to device_id: %d. Valid range is 0 for NSP; 1,2,3 for HPASS\n", deviceID);
+        return false;
+    }                  
+    multiCoreDevCfg_global.deviceId = deviceID;
 
+    std::vector<std::string> coreIdVec = {};
+    coreIdsStr = stripWhitespace(coreIdsStr);  // strip any whitespace chars
+    split(coreIdVec, coreIdsStr, ','); // use comma delimiter to split codeIds string
+    if (coreIdVec.size() > 4) {       // no more than 4 cores
+        QNN_ERROR("Invalid number of arguments passed to core_ids: %d. Valid: 0,1,2,3\n", coreIdVec.size());
+        return false;
+    }
+
+    uint32_t coreID = 0;
+    for (size_t c_idx = 0; c_idx < coreIdVec.size(); c_idx++) {
+        std::stringstream ss(coreIdVec[c_idx]);
+        ss >> coreID;      // to int value
+        if (coreID > 3) {  // core_id must be 0~3
+            QNN_ERROR("Invalid coreID value passed to core_ids: %d. Valid: 0,1,2,3\n", coreID);
+            return false;
+        }
+        multiCoreDevCfg_global.coreIdVec.push_back(coreID);
+    }
   if (!qnn::log::initializeLogging()) {
     QNN_ERROR("ERROR: Unable to initialize logging!\n");
     return false;
   }
 
   {
-    std::unique_ptr<sample_app::QnnSampleApp> app = libappbuilder::initQnnSampleApp(cachedBinaryPath, backEndPath, systemLibraryPath, loadFromCachedBinary, lora_adapters, input_data_type, output_data_type);
+    std::unique_ptr<sample_app::QnnSampleApp> app = libappbuilder::initQnnSampleApp(cachedBinaryPath, backEndPath, systemLibraryPath, loadFromCachedBinary, lora_adapters, input_data_type, output_data_type, multiCoreDevCfg_global);
 
     if (nullptr == app) {
       return false;
@@ -541,6 +589,14 @@ bool ModelDestroyEx(std::string model_name, std::string proc_name) {
         return false;
     }
 
+    auto devicePropertySupportStatus = app->isDevicePropertySupported();
+    if (sample_app::StatusCode::FAILURE != devicePropertySupportStatus) {
+        auto freeDeviceStatus = app->freeDevice();
+        if (sample_app::StatusCode::SUCCESS != freeDeviceStatus) {
+            app->reportError("Device Free failure");
+            return false;
+        }
+    }
     timerHelper.Print("model_destroy " + model_name);
 
     return true;
@@ -553,7 +609,7 @@ bool ModelDestroyEx(std::string model_name, std::string proc_name) {
 
 bool LibAppBuilder::ModelInitialize(const std::string& model_name, const std::string& proc_name, const std::string& model_path,
                                     const std::string& backend_lib_path, const std::string& system_lib_path,
-                                    bool async, const std::string& input_data_type, const std::string& output_data_type) {
+                                    bool async, const std::string& input_data_type, const std::string& output_data_type, uint32_t deviceID, std::string coreIdsStr) {
 #ifdef _WIN32
     if (!proc_name.empty()) {   // Create process and save process info & model name to map, load model in new process.
         return TalkToSvc_Initialize(model_name, proc_name, model_path, backend_lib_path, system_lib_path, async, input_data_type, output_data_type);
@@ -564,16 +620,16 @@ bool LibAppBuilder::ModelInitialize(const std::string& model_name, const std::st
 
 bool LibAppBuilder::ModelInitialize(const std::string& model_name, const std::string& model_path,
                                     const std::string& backend_lib_path, const std::string& system_lib_path,
-                                    bool async, const std::string& input_data_type, const std::string& output_data_type) {
+                                    bool async, const std::string& input_data_type, const std::string& output_data_type, uint32_t deviceID, std::string coreIdsStr) {
     std::vector<LoraAdapter> Adapters = std::vector<LoraAdapter>();
-    return ModelInitializeEx(model_name, "", model_path, backend_lib_path, system_lib_path, Adapters, async, input_data_type, output_data_type);   
+    return ModelInitializeEx(model_name, "", model_path, backend_lib_path, system_lib_path, Adapters, async, input_data_type, output_data_type, deviceID, coreIdsStr);   
 }
 
 bool LibAppBuilder::ModelInitialize(const std::string& model_name, const std::string& model_path,
                                     const std::string& backend_lib_path, const std::string& system_lib_path,
                                     std::vector<LoraAdapter>& lora_adapters,
-                                    bool async, const std::string& input_data_type, const std::string& output_data_type) {
-    return ModelInitializeEx(model_name, "", model_path, backend_lib_path, system_lib_path, lora_adapters, async, input_data_type, output_data_type);
+                                    bool async, const std::string& input_data_type, const std::string& output_data_type, uint32_t deviceID, std::string coreIdsStr) {
+    return ModelInitializeEx(model_name, "", model_path, backend_lib_path, system_lib_path, lora_adapters, async, input_data_type, output_data_type, deviceID, coreIdsStr);
 }
 
 bool LibAppBuilder::ModelInference(std::string model_name, std::string proc_name, std::string share_memory_name,

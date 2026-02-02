@@ -224,7 +224,9 @@ class QNNContext(_QNNContextBase):
                  system_lib_path: str = "None",
                  is_async: bool = False,
                  input_data_type: str = DataType.FLOAT,
-                 output_data_type: str = DataType.FLOAT
+                 output_data_type: str = DataType.FLOAT,
+                 deviceID: int = 0,
+                 coreIdsStr: str = "None"
                  ) -> None:
         """Load a QNN model from `model_path`
         Args:
@@ -238,7 +240,7 @@ class QNNContext(_QNNContextBase):
         backend_lib_path, system_lib_path = self._resolve_lib_paths(backend_lib_path, system_lib_path)
 
         self.m_context = appbuilder.QNNContext(model_name, model_path, backend_lib_path, system_lib_path,
-                                              is_async, input_data_type, output_data_type)
+                                              is_async, input_data_type, output_data_type, deviceID, coreIdsStr)
 
     #@timer
     def Inference(self, input, perf_profile=PerfProfile.DEFAULT, graphIndex=0):
@@ -259,7 +261,9 @@ class QNNContextProc(_QNNContextBase):
                  system_lib_path: str = "None",
                  is_async: bool = False,
                  input_data_type: str = DataType.FLOAT,
-                 output_data_type: str = DataType.FLOAT
+                 output_data_type: str = DataType.FLOAT,
+                 deviceID: int = 0,
+                 coreIdsStr: str = "None"
                  ) -> None:
         """Load a QNN model from `model_path`
         Args:
@@ -279,7 +283,7 @@ class QNNContextProc(_QNNContextBase):
 
         os.putenv('PATH', g_base_path)
         self.m_context = appbuilder.QNNContext(model_name, proc_name, model_path, backend_lib_path, system_lib_path,
-                                              is_async, input_data_type, output_data_type)
+                                              is_async, input_data_type, output_data_type, deviceID, coreIdsStr)
 
     #@timer
     def Inference(self, shareMemory, input, perf_profile=PerfProfile.DEFAULT, graphIndex=0):
@@ -306,7 +310,9 @@ class QNNLoraContext(_QNNContextBase):
                  lora_adapters=None,
                  is_async: bool = False,
                  input_data_type: str = DataType.FLOAT,
-                 output_data_type: str = DataType.FLOAT
+                 output_data_type: str = DataType.FLOAT,
+                 deviceID: int = 0,
+                 coreIdsStr: str = "None"
                  ) -> None:
         """Load a QNN model from `model_path`
         Args:
@@ -328,7 +334,7 @@ class QNNLoraContext(_QNNContextBase):
         backend_lib_path, system_lib_path = self._resolve_lib_paths(backend_lib_path, system_lib_path)
 
         self.m_context = appbuilder.QNNContext(model_name, model_path, backend_lib_path, system_lib_path, m_lora_adapters,
-                                              is_async, input_data_type, output_data_type)
+                                              is_async, input_data_type, output_data_type, deviceID, coreIdsStr)
 
     #@timer
     def Inference(self, input, perf_profile=PerfProfile.DEFAULT, graphIndex=0):

@@ -23,30 +23,30 @@ ShareMemory::~ShareMemory() {
 
 QNNContext::QNNContext(const std::string& model_name,
                        const std::string& model_path, const std::string& backend_lib_path, const std::string& system_lib_path, 
-                       bool async, const std::string& input_data_type, const std::string& output_data_type) {
+                       bool async, const std::string& input_data_type, const std::string& output_data_type, uint32_t deviceID, std::string coreIdsStr) {
     m_model_name = model_name;
 
-    g_LibAppBuilder.ModelInitialize(model_name, model_path, backend_lib_path, system_lib_path, async, input_data_type, output_data_type);
+    g_LibAppBuilder.ModelInitialize(model_name, model_path, backend_lib_path, system_lib_path, async, input_data_type, output_data_type, deviceID, coreIdsStr);
 }
 
 QNNContext::QNNContext(const std::string& model_name, const std::string& proc_name,
                        const std::string& model_path, const std::string& backend_lib_path, const std::string& system_lib_path, 
-                       bool async, const std::string& input_data_type, const std::string& output_data_type) {
+                       bool async, const std::string& input_data_type, const std::string& output_data_type, uint32_t deviceID, std::string coreIdsStr) {
     m_model_name = model_name;
     m_proc_name = proc_name;
 
-    g_LibAppBuilder.ModelInitialize(model_name, proc_name, model_path, backend_lib_path, system_lib_path, async, input_data_type, output_data_type);
+    g_LibAppBuilder.ModelInitialize(model_name, proc_name, model_path, backend_lib_path, system_lib_path, async, input_data_type, output_data_type, deviceID, coreIdsStr);
 }
 
 QNNContext::QNNContext(const std::string& model_name,
                        const std::string& model_path, const std::string& backend_lib_path, 
                        const std::string& system_lib_path, const std::vector<LoraAdapter>& lora_adapters, 
-                       bool async, const std::string& input_data_type, const std::string& output_data_type) {
+                       bool async, const std::string& input_data_type, const std::string& output_data_type, uint32_t deviceID, std::string coreIdsStr) {
     
     m_model_name = model_name;
     m_lora_adapters = lora_adapters;
 
-    g_LibAppBuilder.ModelInitialize(model_name, model_path, backend_lib_path, system_lib_path, m_lora_adapters, async, input_data_type, output_data_type);
+    g_LibAppBuilder.ModelInitialize(model_name, model_path, backend_lib_path, system_lib_path, m_lora_adapters, async, input_data_type, output_data_type, deviceID, coreIdsStr);
 }
 
 // issue#24
@@ -193,9 +193,9 @@ PYBIND11_MODULE(appbuilder, m) {
         .def(py::init<const std::string&, const size_t>());
 
     py::class_<QNNContext>(m, "QNNContext")
-        .def(py::init<const std::string&, const std::string&, const std::string&, const std::string&, bool, const std::string&, const std::string&>())
-        .def(py::init<const std::string&, const std::string&, const std::string&, const std::string&, const std::vector<LoraAdapter>&, bool, const std::string&, const std::string&>())
-        .def(py::init<const std::string&, const std::string&, const std::string&, const std::string&, const std::string&, bool, const std::string&, const std::string&>())
+        .def(py::init<const std::string&, const std::string&, const std::string&, const std::string&, bool, const std::string&, const std::string&, uint32_t, std::string>())
+        .def(py::init<const std::string&, const std::string&, const std::string&, const std::string&, const std::vector<LoraAdapter>&, bool, const std::string&, const std::string&, uint32_t, std::string>())
+        .def(py::init<const std::string&, const std::string&, const std::string&, const std::string&, const std::string&, bool, const std::string&, const std::string&, uint32_t, std::string>())
         .def("Inference", py::overload_cast<const std::vector<py::array>&, const std::string&, size_t, const std::string&, const std::string&>(&QNNContext::Inference))
         .def("Inference", py::overload_cast<const ShareMemory&, const std::vector<py::array>&, const std::string&, size_t, const std::string&, const std::string&>(&QNNContext::Inference))
         .def("ApplyBinaryUpdate", &QNNContext::ApplyBinaryUpdate, "Apply Lora binary update")

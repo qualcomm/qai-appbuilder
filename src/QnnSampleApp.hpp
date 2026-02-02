@@ -19,6 +19,8 @@
 #include "HTP/QnnHtpDevice.h"
 
 
+#include "QnnDevice.h"
+
 bool disableDcvs(QnnHtpDevice_PerfInfrastructure_t perfInfra);
 bool enableDcvs(QnnHtpDevice_PerfInfrastructure_t perfInfra);
 bool boostPerformance(QnnHtpDevice_PerfInfrastructure_t perfInfra, std::string perfProfile);
@@ -46,6 +48,11 @@ enum class StatusCode {
   QNN_FEATURE_UNSUPPORTED
 };
 
+struct MultiCoreDeviceConfig_t {
+  uint32_t deviceId{0};
+  std::vector<uint32_t> coreIdVec{};
+  const uint32_t coreType{0}; /* default to QNN_HTP_CORE_TYPE_NSP */
+};
 class QnnSampleApp {
  public:
   QnnSampleApp(QnnFunctionPointers qnnFunctionPointers,
@@ -61,7 +68,8 @@ class QnnSampleApp {
                std::string cachedBinaryPath            = "",
                std::string saveBinaryName              = "",
                const std::vector<LoraAdapter>& lora_adapters = std::vector<LoraAdapter>(),
-			    std::string dlcPath                     = "");
+			    std::string dlcPath                     = "",
+				MultiCoreDeviceConfig_t multiCoreDeviceConfig = {});
 
   // @brief Print a message to STDERR then return a nonzero
   //  exit status.
@@ -171,6 +179,8 @@ class QnnSampleApp {
   StatusCode extractProfilingEvent(QnnProfile_EventId_t profileEventId);
   
   StatusCode composeGraphsFromDlc();
+  StatusCode getDevicePlatformInfo(const QnnDevice_PlatformInfo_t *&platformInfoPtr);
+  StatusCode setupDeviceConfig(QnnDevice_Config_t* devConfigPtr, MultiCoreDeviceConfig_t* multicoreConfigPtr);
   static const std::string s_defaultOutputPath;
 
   QnnFunctionPointers m_qnnFunctionPointers;
@@ -202,7 +212,7 @@ class QnnSampleApp {
   uint32_t m_graphConfigsInfoCount;
   Qnn_LogHandle_t m_logHandle         = nullptr;
   Qnn_BackendHandle_t m_backendHandle = nullptr;
-  inline static Qnn_DeviceHandle_t s_deviceHandle = nullptr;
+  Qnn_DeviceHandle_t m_deviceHandle   = nullptr;
   RunTimeAppKeys m_runTimeAppKeys;
   uint64_t m_numMaxEvents = std::numeric_limits<uint64_t>::max();
   std::vector<qnn_wrapper_api::GraphInfo_t*> m_graphInfoPtrList;
@@ -229,6 +239,7 @@ class QnnSampleApp {
 
   std::vector<Qnn_Tensor_t*> m_inputTensors;
   std::vector<Qnn_Tensor_t*> m_outputTensors;
+  MultiCoreDeviceConfig_t m_multiCoreDeviceConfig = {};
 };
 }  // namespace sample_app
 }  // namespace tools
