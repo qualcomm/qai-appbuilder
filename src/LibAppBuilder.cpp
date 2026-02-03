@@ -50,7 +50,7 @@ static QNN_INTERFACE_VER_TYPE sg_qnnInterface;
 
 QnnHtpDevice_Infrastructure_t *gs_htpInfra(nullptr);
 static bool sg_perf_global = false;
-sample_app::MultiCoreDeviceConfig_t multiCoreDevCfg_global ={}; 
+
 std::unordered_map<std::string, std::unique_ptr<sample_app::QnnSampleApp>> sg_model_map;
 static sample_app::ProfilingLevel sg_parsedProfilingLevel = sample_app::ProfilingLevel::OFF;
 
@@ -399,7 +399,8 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
     if(deviceID > 3){
         QNN_ERROR("Invalid argument passed to device_id: %d. Valid range is 0 for NSP; 1,2,3 for HPASS\n", deviceID);
         return false;
-    }                  
+    }   
+    sample_app::MultiCoreDeviceConfig_t multiCoreDevCfg_global ={}; 	
     multiCoreDevCfg_global.deviceId = deviceID;
 
     std::vector<std::string> coreIdVec = {};
