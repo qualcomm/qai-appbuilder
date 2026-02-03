@@ -34,6 +34,10 @@
 #include <windows.h>
 #endif
 
+//hst
+#include <unordered_map>
+#include <mutex>
+
 using namespace qnn;
 using namespace qnn::tools;
 using namespace qnn::tools::iotensor;
@@ -1292,31 +1296,100 @@ sample_app::StatusCode sample_app::QnnSampleApp::setupDeviceConfig(
   return returnStatus;
 }
 
+//hst
+static std::unordered_map<std::string, Qnn_DeviceHandle_t> devicesHandles;
+static std::unordered_map<std::string, uint32_t> devicesRefCounts;
+static std::mutex devicesHandlesMutex;
+
+static std::string makeDeviceKey(uint32_t deviceId, const std::vector<uint32_t>& coreIdVecIn) {
+  std::vector<uint32_t> cores = coreIdVecIn;
+  if (cores.empty()) { cores.push_back(0); } 
+  std::sort(cores.begin(), cores.end());
+  cores.erase(std::unique(cores.begin(), cores.end()), cores.end());
+  std::ostringstream oss;
+  oss << "d" << deviceId << "-c";
+  for (size_t i = 0; i < cores.size(); ++i) {
+    if (i) oss << ",";
+    oss << cores[i];
+  }
+  return oss.str();
+}
+
 sample_app::StatusCode sample_app::QnnSampleApp::createDevice() {
-  auto returnStatus            = StatusCode::SUCCESS;
+  auto returnStatus = StatusCode::SUCCESS;
+  const uint32_t deviceId = m_multiCoreDeviceConfig.deviceId;
+  std::string devKey = makeDeviceKey(deviceId, m_multiCoreDeviceConfig.coreIdVec);
+  {
+    std::lock_guard<std::mutex> lk(devicesHandlesMutex);
+    auto it = devicesHandles.find(devKey);
+    if (it != devicesHandles.end() && it->second != nullptr) {
+      m_deviceHandle = it->second;
+      devicesRefCounts[devKey] += 1;
+      printf("Reusing device handle for key=%s (refCount=%u)\n",
+               devKey.c_str(), devicesRefCounts[devKey]);
+      QNN_FUNCTION_EXIT_LOG;
+      return StatusCode::SUCCESS;
+    }
+  }
+
   QnnDevice_Config_t devConfig = QNN_DEVICE_CONFIG_INIT;
-  // get device config based on user specified multicoreDeviceConfig settings
   returnStatus = setupDeviceConfig(&devConfig, &m_multiCoreDeviceConfig);
-  if (StatusCode::SUCCESS == returnStatus) {
-    const QnnDevice_Config_t* deviceConfigs[] = {&devConfig, nullptr};
-    if (nullptr != m_qnnFunctionPointers.qnnInterface.deviceCreate) {
-      auto qnnStatus = m_qnnFunctionPointers.qnnInterface.deviceCreate(
-          m_logHandle, deviceConfigs, &m_deviceHandle);
-      if (QNN_SUCCESS != qnnStatus && QNN_DEVICE_ERROR_UNSUPPORTED_FEATURE != qnnStatus) {
-        QNN_ERROR("Failed to create device");
-        returnStatus = verifyFailReturnStatus(qnnStatus);
-      }
-      // free up any platformInfo mem
-      if (devConfig.hardwareInfo) {
-        free(devConfig.hardwareInfo);
-      }
+  if (StatusCode::SUCCESS != returnStatus) {
+    return returnStatus;
+  }
+
+  const QnnDevice_Config_t* deviceConfigs[] = {&devConfig, nullptr};
+  if (nullptr != m_qnnFunctionPointers.qnnInterface.deviceCreate) {
+    QNN_INFO("m_qnnFunctionPointers.qnnInterface.deviceCreate begin\n");
+    auto qnnStatus = m_qnnFunctionPointers.qnnInterface.deviceCreate(
+        m_logHandle, deviceConfigs, &m_deviceHandle);
+    if (QNN_SUCCESS != qnnStatus && QNN_DEVICE_ERROR_UNSUPPORTED_FEATURE != qnnStatus) {
+      QNN_ERROR("Failed to create device");
+      returnStatus = verifyFailReturnStatus(qnnStatus);
+    } else {
+
+      std::lock_guard<std::mutex> lk(devicesHandlesMutex);
+      devicesHandles[devKey] = m_deviceHandle;
+      devicesRefCounts[devKey] = 1;
+      printf("Created new device handle and cached for key=%s\n", devKey.c_str());
+    }
+    if (devConfig.hardwareInfo) {
+      free(devConfig.hardwareInfo);
     }
   }
   return returnStatus;
+
 }
 
 sample_app::StatusCode sample_app::QnnSampleApp::freeDevice() {
-  if (nullptr != m_qnnFunctionPointers.qnnInterface.deviceFree) {
+  QNN_INFO("sample_app::QnnSampleApp::freeDevice begin\n");
+  return StatusCode::SUCCESS;
+
+  const uint32_t deviceId = m_multiCoreDeviceConfig.deviceId;
+  std::string devKey = makeDeviceKey(deviceId, m_multiCoreDeviceConfig.coreIdVec);
+
+  bool needRealFree = true; 
+  std::lock_guard<std::mutex> lk(devicesHandlesMutex);
+  auto it = devicesHandles.find(devKey);
+  auto rc = devicesRefCounts.find(devKey);
+  if (it != devicesHandles.end() && rc != devicesRefCounts.end()
+      && it->second == m_deviceHandle && m_deviceHandle != nullptr) {
+    if (rc->second > 1) {
+      rc->second -= 1;
+      QNN_INFO("Decreased refCount for key=%s (refCount=%u)\n",
+                devKey.c_str(), rc->second);
+      needRealFree = false; 
+    } else {
+      rc->second = 0;
+      devicesHandles.erase(it);
+      devicesRefCounts.erase(rc);
+      QNN_INFO("RefCount reached zero for key=%s, will free device\n", devKey.c_str());
+      needRealFree = true;
+    }
+  }
+
+  if (needRealFree && nullptr != m_qnnFunctionPointers.qnnInterface.deviceFree) {
+    printf("m_qnnFunctionPointers.qnnInterface.deviceFree begin\n");
     auto qnnStatus = m_qnnFunctionPointers.qnnInterface.deviceFree(m_deviceHandle);
     if (QNN_SUCCESS != qnnStatus && QNN_DEVICE_ERROR_UNSUPPORTED_FEATURE != qnnStatus) {
       QNN_ERROR("Failed to free device");
