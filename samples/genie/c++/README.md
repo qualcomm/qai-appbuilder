@@ -43,12 +43,9 @@ Refere to [API](docs/API.md) for detailed information.
 
 ## GenieService & Client usage:
 
-It is located at [USAGE](docs/USAGE.MD)
+It is located at [USAGE](docs/USAGE.md)
 
 ### More Sample Code
 
 You can find more client sample code [here](../python/README.md#sample-list).
 
-### Release
-
-[GenieAPIService_v2.1.3_QAIRT_v2.42.0_v73.zip](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.42.0/GenieAPIService_v2.1.3_QAIRT_v2.42.0_v73.zip)
