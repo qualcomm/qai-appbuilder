@@ -11,19 +11,20 @@
 
 #include <httplib.h>
 
-using namespace httplib;
-
 #include <nlohmann/json.hpp>
 
 using json = nlohmann::ordered_json;
 
 #include "../processor/processor.h"
+#include "../model/def.h"
 
 class ChatHistory;
 
+class ModelInput;
+
 class IModelConfig;
 
-class Prompt;
+class ModelProcessor;
 
 class ResponseDispatcher
 {
@@ -35,19 +36,21 @@ public:
 
     void ResetProcessor();
 
-    bool Prepare(json &data,
+    void Prepare(ModelInput &model_input,
+                 bool is_tool,
+                 bool is_stream,
                  const httplib::Request &req);
 
-    bool sendStreamResponse(size_t, httplib::DataSink &sink);
+    bool SendResponse(size_t, httplib::DataSink *sink, httplib::Response *res);
 
-    void sendNormalResponse(httplib::Response &res);
-
-    bool isConnectionAlive() const;
+    static inline std::string MIMETYPE_JSON = "application/json; charset=utf-8";
 
 private:
     void PrintProfile();
 
-    std::string extractFinalAnswer(const std::string &output)
+    bool isConnectionAlive() const;
+
+    static std::string extractFinalAnswer(const std::string &output)
     {
         const std::string tag = "</think>";
         size_t pos = output.find(tag);
@@ -66,18 +69,18 @@ private:
     std::tuple<bool, std::string> preprocessStream(std::string &chunkText,
                                                    bool isToolResponse,
                                                    std::string &toolResponse)
-    { return proc_->preprocessStream(chunkText, isToolResponse, toolResponse); }
+    {
+        return proc_->preprocessStream(chunkText, isToolResponse, toolResponse);
+    }
 
+    bool is_stream_{};
     bool is_tool_{};
-    Prompt* prompt_;
     ChatHistory &chatHistory;
     IModelConfig &model_config_;
     std::string response_buffer; // The response buffer is used to store the response content of the model.
-
-    std::function<std::string(json &data)> input_parser_{};
-    std::string model_input_content_;
     httplib::Request *req_{};
     ModelProcessor *proc_{};
+    ModelInput model_input_;
 };
 
 #endif //RESPONSE_DISPATCHER_H

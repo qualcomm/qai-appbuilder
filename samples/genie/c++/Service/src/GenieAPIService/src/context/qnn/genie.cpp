@@ -7,17 +7,15 @@
 //==============================================================================
 
 #include "genie.h"
-#include "genie_impl.h"
-#include "log.h"
+#include "genie_interface.h"
 #include "utils.h"
-#include <filesystem>
+#include "log.h"
+#include "config_fixer.h"
 
-namespace fs = std::filesystem;
-
-void GenieLog_Callback(const GenieLog_Handle_t handle,
+void GenieLog_Callback(const GenieLog_Handle_t  /*handle*/,
                        const char *fmt,
                        GenieLog_Level_t level,
-                       uint64_t timestamp,
+                       uint64_t /*timestamp*/,
                        va_list args)
 {
     auto length = std::vsnprintf(nullptr, 0, fmt, args);
@@ -55,23 +53,27 @@ void GenieLog_Callback(const GenieLog_Handle_t handle,
     delete[] buf;
 }
 
-
 void GenieContext::inference_thread()
 {
     while (true)
     {
         std::unique_lock<std::mutex> lock(m_request_lock);
-        m_request_cond.wait(lock, [this]
-        { return m_request_ready; });     // m_request_ready == true, wakeup thread; m_request_ready == false, sleep continually.
+        m_request_cond.wait(lock,
+                            [this] { return m_request_ready; });     // m_request_ready == true, wakeup thread; m_request_ready == false, sleep continually.
         if (m_thread_exit)
         {
             return;
         }
 
-        auto status = impl_->interface_->GenieDialogQuery();
+        auto status = inf_impl_->inf_->GenieDialogQuery();
         if (GENIE_STATUS_SUCCESS != status && GENIE_STATUS_WARNING_ABORTED != status)
         {
-            My_Log{} << "Failed to get response from GenieDialog.\n";
+            inference_succeed_ = false;
+            My_Log{My_Log::Level::kError} << "Failed to get response from GenieDialog.\n";
+        }
+        else
+        {
+            inference_succeed_ = true;
         }
 
         m_inference_busy = false;
@@ -79,7 +81,7 @@ void GenieContext::inference_thread()
     }
 }
 
-bool GenieContext::Query(const std::string &prompt, const Callback callback)
+bool GenieContext::Query(const ModelInput &model_input, const Callback &callback)
 {
     if (GENIE_STATUS_SUCCESS != GenieDialog_reset(m_DialogHandle))
     {
@@ -87,8 +89,8 @@ bool GenieContext::Query(const std::string &prompt, const Callback callback)
         return false;
     }
 
-    impl_->CurLength = 0;
-    if (!impl_->interface_->set_content(prompt))
+    inf_impl_->inf_->cur_length_ = 0;
+    if (!inf_impl_->inf_->set_content(const_cast<ModelInput &>(model_input)))
     {
         return false;
     }
@@ -104,7 +106,7 @@ bool GenieContext::Query(const std::string &prompt, const Callback callback)
         {
             std::lock_guard<std::mutex> guard(m_stream_lock);
             response = m_stream_answer;
-            m_stream_answer = "";
+            m_stream_answer.clear();
         }
 
         if (response.empty())
@@ -117,26 +119,30 @@ bool GenieContext::Query(const std::string &prompt, const Callback callback)
             break;
         }
 
-        response = "";
+        response.clear();
         std::this_thread::sleep_for(std::chrono::milliseconds(10)); // sleep 10 ms.
+    }
+
+    if (!inference_succeed_)
+    {
+        return false;
     }
 
     if (!m_stream_answer.empty())
     {
         // send remainder data.
         callback(m_stream_answer);
-        m_stream_answer = "";
+        m_stream_answer.clear();
     }
     return true;
 }
 
 GenieContext::GenieContext(const IModelConfig &model_config) :
-        ContextBase(model_config),
-        impl_{new Impl{}}
+        ContextBase(model_config)
 {
     const std::string sample_config_str = "{\n  \"sampler\" : {\n      \"version\" : 1,\n      \"temp\" : 1.2,\n      \"top-k\" : 25,\n      \"top-p\" : 0.8\n  }\n}";
     int32_t status = 0;
-    auto j = Impl::ConfigFixer{model_config}.Execute();
+    auto j = ConfigFixer{model_config}.Execute();
 
     if (GENIE_STATUS_SUCCESS != GenieDialogConfig_createFromJson(j.dump().c_str(), &m_ConfigHandle))
     {
@@ -184,11 +190,15 @@ GenieContext::GenieContext(const IModelConfig &model_config) :
         throw std::runtime_error("Failed to get sampler");
     }
 
+    if (!inf_impl_)
+    {
+        inf_impl_ = new QInterfaceImpl{this};
+    }
+
     if (!m_stream_thread)
     {
         m_stream_thread = std::make_unique<std::thread>(&GenieContext::inference_thread, this);
     }
-    impl_->interface_ = Impl::QInterface::CreateInterface(this);
 }
 
 GenieContext::~GenieContext()
@@ -252,10 +262,8 @@ GenieContext::~GenieContext()
         m_thread_exit = false;
     }
 
-    delete impl_->interface_;
-    impl_->interface_ = nullptr;
-    delete impl_;
-    impl_ = nullptr;
+    delete inf_impl_;
+    inf_impl_ = nullptr;
     My_Log{} << "GenieContext::~GenieContext() Done:\n";
 }
 
@@ -270,15 +278,13 @@ bool GenieContext::Stop()
     return true;
 }
 
-bool GenieContext::SetParams(const std::string max_length,
-                             const std::string temp,
-                             const std::string top_k,
-                             const std::string top_p)
+bool GenieContext::SetParams(const std::string &max_length,
+                             const std::string &temp,
+                             const std::string &top_k,
+                             const std::string &top_p)
 {
     int32_t status = 0;
-
-    impl_->MaxLength = std::stoi(max_length);
-
+    inf_impl_->inf_->max_length_ = std::stoi(max_length);
     status = GenieSamplerConfig_setParam(m_SamplerConfigHandle, "temp", temp.c_str());
     if (GENIE_STATUS_SUCCESS != status)
     {
@@ -341,14 +347,16 @@ bool GenieContext::GenerateTextToken(const std::string &text, const int32_t *&bu
 
     status = GenieTokenizer_encode(tokenizerHandle, text.c_str(),
                                    [](const size_t size, const char **allocatedData)
-                                   { *allocatedData = reinterpret_cast<const char *>(malloc(size)); },
+                                   {
+                                       *allocatedData = reinterpret_cast<const char *>(malloc(size));
+                                   },
                                    &buf,
                                    &len);
 
     if (status != GENIE_STATUS_SUCCESS)
     {
         My_Log{}.original(true) << "\n";
-        My_Log{My_Log::Level::kError} << "encode failed: : " << status << ", "
+        My_Log{My_Log::Level::kError} << "encode failed: " << status << ", "
                                       << "the string length is: " << text.size() << std::endl;
         return false;
     }
@@ -368,7 +376,7 @@ size_t GenieContext::TokenLength(const std::string &text)
     return len;
 }
 
-void GenieContext::applyLora(const std::string engineRole, const std::string loraAdapterName)
+void GenieContext::applyLora(const std::string &engineRole, const std::string &loraAdapterName)
 {
     int32_t status = GenieDialog_applyLora(m_DialogHandle, engineRole.c_str(), loraAdapterName.c_str());
     if (GENIE_STATUS_SUCCESS != status)
@@ -377,7 +385,7 @@ void GenieContext::applyLora(const std::string engineRole, const std::string lor
     }
 }
 
-void GenieContext::setLoraStrength(const std::string engineRole,
+void GenieContext::setLoraStrength(const std::string &engineRole,
                                    const std::unordered_map<std::string, float> &alphaValue)
 {
     for (auto it = alphaValue.begin(); it != alphaValue.end(); it++)
@@ -477,139 +485,4 @@ GenieLog_Level_t GenieContext::get_genie_log_level()
         default:
             return GENIE_LOG_LEVEL_VERBOSE;
     }
-}
-
-struct GenieContext::Impl::ConfigFixer::FixedInfo
-{
-    const char *item_str_{};
-    json::json_pointer jp_;
-    enum CheckType
-    {
-        kString,
-        kArrayString
-    } check_type_;
-    bool optional_{};
-    bool is_forcast_dir_{false};
-};
-
-json GenieContext::Impl::ConfigFixer::Execute()
-{
-    std::ifstream file(model_config_.get_config_path());
-    json j;
-    file >> j;
-
-    /* @formatter:off */
-    std::vector<FixedInfo> fixed_items{
-            {"tokenizer", json::json_pointer("/dialog/tokenizer/path"), FixedInfo::kString, false},
-            {"extensions", json::json_pointer("/dialog/engine/backend/extensions"), FixedInfo::kString, true},
-            {"ctx-bins", json::json_pointer("/dialog/engine/model/binary/ctx-bins"), FixedInfo::kArrayString, false},
-            {"forecast", json::json_pointer("/dialog/ssd-q1/forecast-prefix-name"), FixedInfo::kArrayString, true, true},
-    };
-
-/* @formatter:on */
-
-    for (auto &fixed_item: fixed_items)
-    {
-        if (!FixedPath(j, fixed_item))
-        {
-            throw std::runtime_error("fixed the config path failed");
-        }
-    }
-
-    if (Genie_getApiMinorVersion() >= 11)
-    {
-        auto jp = json::json_pointer("/dialog/engine/backend/QnnHtp");
-        j.at(jp)["use-mmap"] = true;
-        j.at(jp)["allow-async-init"] = true;
-    }
-    My_Log{} << "fixed the config path successfully\n";
-    My_Log{My_Log::Level::kInfo} << j.dump(4) << std::endl;
-    return j;
-}
-
-bool GenieContext::Impl::ConfigFixer::FixedPath(json &j, ConfigFixer::FixedInfo &info)
-{
-    std::string file_path;
-    auto get_fixed_path{[&](const json &j) -> bool
-                        {
-                            bool rs{false};
-                            std::string file_name;
-
-                            if (!j.is_string())
-                            {
-                                My_Log{} << info.item_str_ << " json object is not string\n";
-                                goto done;
-                            }
-
-                            if (info.is_forcast_dir_)
-                            {
-                                file_path = model_config_.get_model_path();
-                                rs = true;
-                                goto done;
-                            }
-
-                            file_name = fs::path{j.get<std::string>()}.filename().generic_string();
-                            if (file_name.empty())
-                            {
-                                My_Log{} << info.item_str_ << " json object file name is not empty\n";
-                                goto done;
-                            }
-
-                            file_path = model_config_.get_model_path() + "/" + file_name;
-                            if (File::IsFileExist(file_path))
-                            {
-                                rs = true;
-                                goto done;
-                            }
-
-                            My_Log{} << "file path: " << file_path << " is not exist, will use default ver: ";
-                            file_path = RootDir + "/" + file_name;
-                            My_Log{}.original(true) << file_path << "\n";
-
-                            if (!File::IsFileExist(file_path))
-                            {
-                                My_Log{} << "file path: " << file_path << " is not exist\n";
-                                goto done;
-                            }
-
-                            rs = true;
-                            done:
-                            return rs;
-                        }};
-
-    if (!j.contains(info.jp_))
-    {
-        My_Log{} << info.item_str_ << " json object is not found\n";
-        if (!info.optional_)
-        {
-            return false;
-        }
-        return true;
-    }
-
-    switch (info.check_type_)
-    {
-        case FixedInfo::kString:
-            if (get_fixed_path(j.at(info.jp_)))
-            {
-                j.at(info.jp_) = file_path;
-                return true;
-            }
-            if (info.optional_)
-                j.at(info.jp_.parent_pointer()).erase(info.jp_.back());
-            else
-                return false;
-            break;
-        case FixedInfo::kArrayString:
-            for (auto &item: j.at(info.jp_))
-            {
-                if (!get_fixed_path(item) && !info.optional_)
-                {
-                    return false;
-                }
-                item = file_path;
-            }
-            break;
-    }
-    return true;
 }

@@ -10,17 +10,21 @@
 #define CHAT_REQUEST_HANDLER_H
 
 #include <httplib.h>
-#include "../model/model_manager.h"
-#include "../response/response_dispatcher.h"
 
 class GenieService;
+class ModelManager;
+class ChatHistory;
+class ResponseDispatcher;
+class ModelInputBuilder;
 
 class ChatRequestHandler
 {
 public:
     explicit ChatRequestHandler(GenieService *srv);
 
-    void HandleWelcome(const Request &req, Response &res);
+    ~ChatRequestHandler();
+
+    void HandleWelcome(const httplib::Request &req, httplib::Response &res);
 
     void ImageGenerate(const httplib::Request &req, httplib::Response &res);
 
@@ -52,6 +56,7 @@ private:
     ModelManager &model_manager;
     std::unique_ptr<ChatHistory> chatHistory;
     std::unique_ptr<ResponseDispatcher> dispatcherPtr_;
+    ModelInputBuilder* input_builder_;
     GenieService *srv_;
 };
 

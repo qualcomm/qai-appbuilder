@@ -9,110 +9,172 @@
 #include "log.h"
 #include "utils.h"
 #include "model_manager.h"
-#include "../context/genie.h"
+#include "../context/qnn/genie.h"
 #include "../context/mnn.h"
 #include "../context/llama_cpp.h"
-
+#include "def.h"
 #include <filesystem>
 
 namespace fs = std::filesystem;
 
-class ModelManager::EmbeddingVerifier
+#include <LibAppBuilder.hpp>
+
+class ModelManager::QNNImpl
 {
-    struct EmbeddingVerifierImpl
+    struct EmbeddingVerifier
     {
-        explicit EmbeddingVerifierImpl(ModelManager *self) : self_{self}
-        {}
-
-        QNNEmbeddingType type_{};
-        std::string init_bin_file_;
-        std::vector<std::string> bin_files_stack_{};
-        ModelManager *self_{};
-
-        QNNEmbeddingInfo CreateIfVerified()
+        QNNEmbeddingType embedding_type_{};
+        ModelType model_type_{};
+        struct EmbeddingFileSet
         {
-            if (!File::IsFileExist(init_bin_file_) || File::IsFileEmpty(init_bin_file_))
-            {
-                My_Log{My_Log::Level::kError} << "init bin file: " << init_bin_file_ << " is invalid\n";
-                return {};
-            }
+            std::string serialized_file_;
+            std::vector<std::string> bin_files_stack_;
+        };
+        std::unordered_map<ModelType, EmbeddingFileSet> embedding_file_set;
 
-            for (auto &bin_file: bin_files_stack_)
+        QNNEmbedding CreateIfVerified() const
+        {
+            QNNEmbedding embedding;
+            LibAppBuilder *app_builder;
+            embedding.model_types_ = model_type_;
+
+            for (auto &embedding_file: embedding_file_set)
             {
-                if (!File::IsFileExist(bin_file) || File::IsFileEmpty(bin_file))
+                auto &model_type = embedding_file.first;
+                auto &files = embedding_file.second;
+                QNNEmbedding::InferResource *infer_resource;
+                if (!File::IsFileExist(files.serialized_file_) || File::IsFileEmpty(files.serialized_file_))
                 {
-                    My_Log{My_Log::Level::kError} << "bin file: " << bin_file << " is invalid\n";
-                    return {};
+                    My_Log{My_Log::Level::kError} << "veg file: " << files.serialized_file_ << " is invalid\n";
+                    continue;
                 }
+
+                for (auto &bin_file: files.bin_files_stack_)
+                {
+                    if (!File::IsFileExist(bin_file) || File::IsFileEmpty(bin_file))
+                    {
+                        My_Log{My_Log::Level::kError} << "bin file: " << bin_file << " is invalid\n";
+                        goto next_check;
+                    }
+                }
+
+                app_builder = QNNEmbedding::LibAppbuilderCreator(files.serialized_file_, model_type.to_string());
+                if (!app_builder)
+                {
+                    continue;
+                }
+
+                embedding.model_types_ |= model_type;
+                embedding.infer_resources_.emplace(model_type, QNNEmbedding::InferResource{});
+                infer_resource = &embedding.infer_resources_[model_type];
+                infer_resource->bin_stacks_.reserve(files.bin_files_stack_.size());
+                infer_resource->app_builder_ = app_builder;
+                infer_resource->tag_ = model_type.to_string();
+                for (const auto &bin_file: files.bin_files_stack_)
+                {
+                    infer_resource->bin_stacks_.emplace_back(File::ReadFile(bin_file));
+                }
+
+                next_check:;
             }
 
-            QNNEmbeddingInfo embedding_info;
-            embedding_info.type_.v_ = type_.v_;
-            embedding_info.init_bin_file_ = init_bin_file_;
-            embedding_info.bin_stack_.resize(bin_files_stack_.size());
-
-            for (auto i = 0; i < bin_files_stack_.size(); ++i)
+            if (!embedding.infer_resources_.empty())
             {
-                embedding_info.bin_stack_[i] = std::move(File::ReadFile(bin_files_stack_[i]));
+                embedding.embedding_type_ = embedding_type_;
             }
-            return embedding_info;
+
+            return embedding;
         };
     };
 
-    struct PHI4Verifier : public EmbeddingVerifierImpl
+    struct PHI4Verifier : public EmbeddingVerifier
     {
-        explicit PHI4Verifier(ModelManager *self) : EmbeddingVerifierImpl(self)
+        explicit PHI4Verifier(const std::string &model_path)
         {
-            type_.v_ = QNNEmbeddingType::PHI4MM;
-            init_bin_file_ = self_->model_path_ + "/veg.serialized.bin";
-            bin_files_stack_.assign({
-                self_->model_path_ + "/raw/position_ids.bin",
-                self_->model_path_ + "/raw/attention_mask.bin"
+            embedding_type_ = QNNEmbeddingType::PHI4MM;
+            model_type_ = ModelType::Text;
+            embedding_file_set.emplace(ModelType{ModelType::Vision}, EmbeddingFileSet{
+                    model_path + "/veg.serialized.bin",
+                    {
+                            model_path + "/raw/position_ids.bin",
+                            model_path + "/raw/attention_mask.bin"
+                    }
             });
         }
     };
 
-    struct Qwen2_5Verifier : public EmbeddingVerifierImpl
+    struct Qwen2_5Verifier : public EmbeddingVerifier
     {
-        explicit Qwen2_5Verifier(ModelManager *self) : EmbeddingVerifierImpl(self)
+        explicit Qwen2_5Verifier(const std::string &model_path)
         {
-            type_.v_ = QNNEmbeddingType::QWEN2_5;
-            init_bin_file_ = self_->model_path_ + "/veg.serialized.bin";
-            bin_files_stack_.assign({
-                self_->model_path_ + "/raw/position_ids_cos.raw",
-                self_->model_path_ + "/raw/position_ids_sin.raw",
-                self_->model_path_ + "/raw/window_attention_mask.raw",
-                self_->model_path_ + "/raw/full_attention_mask.raw"
+            embedding_type_ = QNNEmbeddingType::QWEN2_5;
+            model_type_ = ModelType::Text;
+            embedding_file_set.emplace(ModelType{ModelType::Vision}, EmbeddingFileSet{
+                    model_path + "/veg.serialized.bin",
+                    {
+                            model_path + "/raw/position_ids_cos.raw",
+                            model_path + "/raw/position_ids_sin.raw",
+                            model_path + "/raw/window_attention_mask.raw",
+                            model_path + "/raw/full_attention_mask.raw"
+                    }
             });
+        }
+    };
+
+    struct Qwen2_5_OMINI_Verifier : public EmbeddingVerifier
+    {
+        explicit Qwen2_5_OMINI_Verifier(const std::string &model_path)
+        {
+            embedding_type_ = QNNEmbeddingType::QWEN2_5_OMINI;
+            model_type_ = ModelType::Text;
+            embedding_file_set.emplace(ModelType{ModelType::Audio},
+                                       EmbeddingFileSet{
+                                               model_path + "/qwen2.5_omini_audio/audio.serialized.bin",
+                                               {
+                                                       model_path + "/qwen2.5_omini_audio/padded_feature.raw",
+                                                       model_path + "/qwen2.5_omini_audio/padded_mask.raw",
+                                                       model_path + "/qwen2.5_omini_audio/attention_mask.raw"
+                                               }
+                                       });
+
+            embedding_file_set.emplace(ModelType{ModelType::Vision},
+                                       EmbeddingFileSet{
+                                               model_path + "/veg.serialized.bin", {
+                                                       model_path + "/qwen2.5_omini_vision/position_ids_cos.raw",
+                                                       model_path + "/qwen2.5_omini_vision/position_ids_sin.raw",
+                                                       model_path + "/qwen2.5_omini_vision/window_attention_mask.raw",
+                                                       model_path + "qwen2.5_omini_vision/full_attention_mask.raw"
+                                               }
+                                       });
         }
     };
 
 public:
-    static QNNEmbeddingInfo TryCreate(ModelManager *self)
+    static QNNEmbedding TryCreate(const std::string &model_path, const std::string &raw_path)
     {
         struct Checker
         {
             QNNEmbeddingType embedding_type_;
-            std::function<QNNEmbeddingInfo()> func_;
+            std::function<QNNEmbedding()> func_;
         };
 
-        /* @formatter:off */
         std::vector<Checker> checkers{
-                {{QNNEmbeddingType::PHI4MM}, [self](){ return PHI4Verifier(self).CreateIfVerified();}},
-                {{QNNEmbeddingType::QWEN2_5}, [self](){ return Qwen2_5Verifier(self).CreateIfVerified();}},
+                {{QNNEmbeddingType::PHI4MM},        [model_path]() { return PHI4Verifier(model_path).CreateIfVerified(); }},
+                {{QNNEmbeddingType::QWEN2_5},       [model_path]() { return Qwen2_5Verifier(model_path).CreateIfVerified(); }},
+                {{QNNEmbeddingType::QWEN2_5_OMINI}, [model_path]() { return Qwen2_5_OMINI_Verifier(model_path).CreateIfVerified(); }},
         };
-        /* @formatter:on */
 
-        QNNEmbeddingInfo embedding_info{};
+        QNNEmbedding embedding{};
         for (const auto &check: checkers)
         {
             My_Log{} << "try to check if qnn embedding is: "
-                    << check.embedding_type_.to_string() << "\n";
+                     << check.embedding_type_.to_string() << "\n";
 
-            embedding_info = check.func_();
-            if (embedding_info.type_.v_ != QNNEmbeddingType::Unknown)
+            embedding = check.func_();
+            if (embedding.embedding_type_ != QNNEmbeddingType::None)
             {
-                return embedding_info;
+                embedding.embedded_raw_buf_ = File::ReadFile(raw_path);
+                return embedding;
             }
         }
         return {};
@@ -132,16 +194,15 @@ struct ModelManager::ModeVerifier
             if (self->known_model_path_.empty())
             {
                 std::string err_str{"config file is not found: " + self_->config_file_};
-                config_strict
-                    ? throw std::runtime_error(err_str)
-                    : My_Log{My_Log::Level::kWarning} << err_str << std::endl;
+                config_strict ? throw std::runtime_error(err_str)
+                              : My_Log{My_Log::Level::kWarning} << err_str << std::endl;
                 return;
             }
 
             std::string new_config_path{self->known_model_path_ + "/config.json"};
             My_Log{My_Log::Level::kError} << "config file: " << self_->config_file_ << " "
-                    << "is not exist, will use default ver: " << new_config_path
-                    << std::endl;
+                                          << "is not exist, will use default ver: " << new_config_path
+                                          << std::endl;
             self_->config_file_ = new_config_path;
         }
 
@@ -156,47 +217,55 @@ struct ModelManager::ModeVerifier
 
     struct QnnVerifier : public ModeVerifierImpl
     {
-        explicit QnnVerifier(ModelManager *self) : ModeVerifierImpl(self)
-        {}
+        explicit QnnVerifier(ModelManager *self) : ModeVerifierImpl(self) {}
 
         std::shared_ptr<ContextBase> CreateIfVerified() override
         {
-            if (!File::MatchFileInDir(self_->model_path_, ".bin", true))
+            if (!File::MatchFileInDir(self_->model_path_, ".bin"))
             {
                 return nullptr;
             }
 
-            std::ifstream file(self_->config_file_);
-            json j;
-            file >> j;
-
-            if (!j.contains("dialog"))
             {
-                return nullptr;
+                std::ifstream file(self_->config_file_);
+                json j;
+                file >> j;
+
+                if (!j.contains("dialog"))
+                {
+                    return nullptr;
+                }
             }
 
-            if (self_->query_type_.v_ != QueryType::EmbeddingQuery)
+            std::vector<std::string> files;
+            // TODO: use Regex embedding_weights_xxx.raw
+            if (!File::MatchFileInDir(self_->model_path_, "embedding_weights", &files))
+            {
                 goto ahead;
-
-            self_->qnn_embedding_info_ = EmbeddingVerifier::TryCreate(self_);
-            if (self_->qnn_embedding_info_.type_.v_ == QNNEmbeddingType::Unknown)
-            {
-                throw std::runtime_error("qnn model does not match any embedding");
             }
 
-        ahead:
+            if (File::IsFileEmpty(files[0]))
+            {
+                throw std::runtime_error("embedded file: " + files[0] + " is invalid");
+            }
+
+            self_->qnn_embedding_ = QNNImpl::TryCreate(self_->model_path_, files[0]);
+            if (self_->qnn_embedding_.embedding_type_ == QNNEmbeddingType::None)
+                throw std::runtime_error("qnn model does not match any embedding rules");
+
+            My_Log{} << "check qnn embedding model type: " << self_->qnn_embedding_.model_types_.to_string() << "\n";
+            ahead:
             return std::make_shared<GenieContext>(*self_);
         }
     };
 
     struct MnnVerifier : public ModeVerifierImpl
     {
-        explicit MnnVerifier(ModelManager *self) : ModeVerifierImpl(self)
-        {}
+        explicit MnnVerifier(ModelManager *self) : ModeVerifierImpl(self) {}
 
         std::shared_ptr<ContextBase> CreateIfVerified() override
         {
-            if (!File::MatchFileInDir(self_->model_path_, ".mnn", true))
+            if (!File::MatchFileInDir(self_->model_path_, ".mnn"))
             {
                 return nullptr;
             }
@@ -206,12 +275,11 @@ struct ModelManager::ModeVerifier
 
     struct GGUFVerify : public ModeVerifierImpl
     {
-        explicit GGUFVerify(ModelManager *self) : ModeVerifierImpl(self, true)
-        {}
+        explicit GGUFVerify(ModelManager *self) : ModeVerifierImpl(self, true) {}
 
         std::shared_ptr<ContextBase> CreateIfVerified() override
         {
-            if (!File::MatchFileInDir(self_->model_path_, ".gguf", true))
+            if (!File::MatchFileInDir(self_->model_path_, ".gguf"))
             {
                 return nullptr;
             }
@@ -224,18 +292,18 @@ struct ModelManager::ModeVerifier
     {
         struct Checker
         {
-            ModelType model_type_;
+            ModelFormat model_format_;
             std::function<std::shared_ptr<ContextBase>()> func_;
         };
 
         /* @formatter:off */
         std::vector<Checker> checkers{
-                {{ModelType::QNN}, [self](){ return QnnVerifier(self).CreateIfVerified();}},
+                {{ModelFormat::QNN}, [self](){ return QnnVerifier(self).CreateIfVerified();}},
 #ifdef USE_MNN
-                {{ModelType::MNN}, [self](){ return MnnVerifier(self).CreateIfVerified();}},
+                {{ModelFormat::MNN}, [self](){ return MnnVerifier(self).CreateIfVerified();}},
 #endif
 #ifdef USE_GGUF
-                {{ModelType::GGUF},[self](){ return GGUFVerify(self).CreateIfVerified();}}
+                {{ModelFormat::GGUF},[self](){ return GGUFVerify(self).CreateIfVerified();}}
 #endif
         };
         /* @formatter:on */
@@ -247,20 +315,20 @@ struct ModelManager::ModeVerifier
             for (const auto &check: checkers)
             {
                 My_Log{} << "try to check if model is: "
-                        << const_cast<ModelType &>(check.model_type_).to_string()
-                        << " model\n";
+                         << const_cast<ModelFormat &>(check.model_format_).to_string()
+                         << " model\n";
 
                 auto use_second = MeasureSeconds(
-                    [&context, &check]()
-                    {
-                        context = check.func_();
-                    }
+                        [&context, &check]()
+                        {
+                            context = check.func_();
+                        }
                 );
 
                 if (context)
                 {
                     My_Log{} << "load successfully! use second: " << use_second << " \n";
-                    self->model_type_ = check.model_type_;
+                    self->model_format_ = check.model_format_;
                     return context;
                 }
             }
@@ -275,33 +343,32 @@ struct ModelManager::ModeVerifier
 };
 
 ModelManager::ModelManager(IModelConfig &&config) :
-    IModelConfig{std::move(config)}
-{}
+        IModelConfig{std::move(config)} {}
 
-bool ModelManager::LoadModelByName(const std::string &model_name, bool &first_load)
+bool ModelManager::LoadModelByName(const std::string &new_model, bool &first_load)
 {
     loaded_ = false;
-    if (model_name.empty())
+    if (new_model.empty())
     {
         My_Log{My_Log::Level::kError} << "model name can not be empty" << std::endl;
         return false;
     }
 
-    if (model_name_ == model_name && genieModelHandle)
+    if (model_name_ == new_model && genieModelHandle)
     {
-        My_Log{} << "model: " + model_name << " has already been loaded" << std::endl;
+        My_Log{} << "model: " + new_model << " has already been loaded" << std::endl;
         first_load = false;
         loaded_ = true;
         return true;
     }
     first_load = true;
 
-    My_Log{} << "model name: " + model_name << " will be loaded" << std::endl;
+    My_Log{} << "model name: " + new_model << " will be loaded" << std::endl;
     UpdateModeList();
     bool found{false};
     for (const auto &name: model_list_)
     {
-        if (ModelComparer(name, model_name, false))
+        if (ModelComparer(name, new_model, false))
         {
             found = true;
             model_name_ = name;
@@ -313,7 +380,7 @@ bool ModelManager::LoadModelByName(const std::string &model_name, bool &first_lo
 
     if (!found)
     {
-        My_Log{My_Log::Level::kError} << "model name: " << model_name_ << " is not exist" << std::endl;
+        My_Log{My_Log::Level::kError} << "model name: " << new_model << " is not exist" << std::endl;
         return false;
     }
 
@@ -325,22 +392,23 @@ bool ModelManager::InitializeConfig(bool load)
     fs::path config_path{config_file_};
     My_Log{} << "ModelManager::LoadModel,configFile=" + config_path.generic_string() << std::endl;
 
-    auto check_path{
-        [](const fs::path &path)
-        {
-            auto str = path.generic_string();
-            if (str.empty())
-                throw std::runtime_error("the model file layout does not meet the standard, "
-                    "it must be /models/{model_name}/{config}");
-            return str;
-        }
+    auto ensure_path{
+            [](const fs::path &path)
+            {
+                auto str = path.generic_string();
+                if (str.empty())
+                    throw std::runtime_error(
+                            "the model file layout does not meet the standard, "
+                            "it must be /models/{model_name}/{config}");
+                return str;
+            }
     };
 
     try
     {
-        model_path_ = check_path(config_path.parent_path().generic_string());
+        model_path_ = ensure_path(config_path.parent_path().generic_string());
         model_name_ = config_path.parent_path().filename().generic_string();
-        model_root_ = check_path(config_path.parent_path().parent_path().generic_string());
+        model_root_ = ensure_path(config_path.parent_path().parent_path().generic_string());
     }
     catch (std::exception &e)
     {
@@ -357,13 +425,8 @@ bool ModelManager::InitializeConfig(bool load)
 bool ModelManager::LoadModel()
 {
     Clean();
-    query_type_ = CheckModelQueryStyle();
-    if (query_type_.v_ == QueryType::Unknown)
-        return false;
-    My_Log{} << "check the query type: " << query_type_.to_string() << std::endl;
-
     prompt_type_ = LoadPromptTemplates(model_path_ + "/prompt.json");
-    if (prompt_type_.v_ == PromptType::Unknown)
+    if (prompt_type_ == PromptType::Unknown)
         return false;
     My_Log{} << "check the prompt type: " << prompt_type_.to_string() << "\n";
 
@@ -373,12 +436,13 @@ bool ModelManager::LoadModel()
                str_contains(model_name_, "DeepSeek") ||
                str_contains(model_name_, "Hunyuan");
     }();
-    My_Log{} << "check is think model: " << thinking_model_ << "\n";
+    My_Log{} << "check if is thinking model: " << thinking_model_ << "\n";
 
     genieModelHandle = ModeVerifier::TryCreate(this);
     if (!genieModelHandle)
     {
         My_Log{} << RED << "Load Model Failed, Model Name: " << model_name_ << RESET << std::endl;
+        model_name_.clear();
         return false;
     }
 
@@ -421,16 +485,16 @@ PromptType ModelManager::LoadPromptTemplates(std::string &&prompt_path)
         }
 
         // Unique prompt identifier for a set of models
-        static std::array<std::string, 9> models_prefix{
-            "Allam-7B-SSD",
-            "DeepSeek-R1-Distill-Qwen-7B",
-            "Hunyuan2B",
-            "IBM-Granite-v3.1-8B",
-            "Llama2.0-7B-SSD",
-            "Llama3.1-8B-SSD",
-            "phi",
-            "qwen2.0",
-            "gpt-oss-20b",
+        static std::array<std::string, 10> models_prefix{
+                "allam-7b-ssd",
+                "deepseek-r1-distill-qwen-7B",
+                "hunyuan2B",
+                "ibm-granite-v3.1-8b",
+                "llama2.0-7b",
+                "llama3.1-8b",
+                "phi",
+                "qwen",
+                "gpt-oss-20b",
         };
 
         prompt_path.clear();
@@ -439,7 +503,7 @@ PromptType ModelManager::LoadPromptTemplates(std::string &&prompt_path)
             // check if model match one of the prefix
             if (ModelComparer(model_name_, model_prefix, true))
             {
-                // one of them, such as qwen2.0 match qwen2.0-7b or qwen2.0-7b-ssd
+                // one of them, such as qwen match qwen2.0-7b or qwen2.0-7b-ssd or qwen3
                 prompt_path = ResolveKnownModelPath(model_prefix, true);
                 break;
             }
@@ -448,23 +512,23 @@ PromptType ModelManager::LoadPromptTemplates(std::string &&prompt_path)
         if (prompt_path.empty())
         {
             My_Log{My_Log::Level::kError} << "prompt file: " << org_prompt_path << " "
-                    << "is not exist, and not match any config models while finding"
-                    << std::endl;
+                                          << "is not exist, and not match any config models while finding"
+                                          << std::endl;
             return pt;
         }
 
         prompt_path += "/prompt.json";
-    ahead:
+        ahead:
         My_Log{My_Log::Level::kError} << "prompt file: " << org_prompt_path << " "
-                << "is not exist, will use default ver: " << prompt_path
-                << std::endl;
+                                      << "is not exist, will use default ver: " << prompt_path
+                                      << std::endl;
     }
 
     std::ifstream file(prompt_path);
     if (!file.good())
     {
         My_Log{My_Log::Level::kError} << "cannot open prompt file: " << prompt_path << std::endl;
-        pt.v_ = PromptType::Unknown;
+        pt = PromptType::Unknown;
         return pt;
     }
 
@@ -472,14 +536,14 @@ PromptType ModelManager::LoadPromptTemplates(std::string &&prompt_path)
     {
         file >> j;
         prompt_ = json{
-            {"system", j["prompt_system"].get<std::string>()},
-            {"user", j["prompt_user"].get<std::string>()},
-            {"assistant", j["prompt_assistant"].get<std::string>()},
-            {"tool", j["prompt_tool"].get<std::string>()},
-            {"start", j["prompt_start"].get<std::string>()}
+                {"system",    j["prompt_system"].get<std::string>()},
+                {"user",      j["prompt_user"].get<std::string>()},
+                {"assistant", j["prompt_assistant"].get<std::string>()},
+                {"tool",      j["prompt_tool"].get<std::string>()},
+                {"start",     j["prompt_start"].get<std::string>()}
         };
     }
-    catch (const std::exception &e)
+    catch (const std::exception &/*e*/)
     {
         My_Log{} << "prompt file: " << prompt_path << " is invalid" << std::endl;
         return pt;
@@ -487,14 +551,14 @@ PromptType ModelManager::LoadPromptTemplates(std::string &&prompt_path)
 
     try
     {
-        contextSize = j["context_size"];
+        context_size_ = j["context_size"];
     }
     catch (const std::exception &/*e*/)
     {
-        contextSize = CONTEXT_SIZE;
+        context_size_ = DEFAULT_CONTEXT_SIZE;
     }
 
-    pt.v_ = str_contains(prompt_["assistant"], "<|channel|>");
+    pt = str_contains(prompt_["assistant"], "<|channel|>");
     return pt;
 }
 
@@ -531,72 +595,33 @@ void IModelConfig::UpdateModeList() const
     }
 }
 
-QueryType ModelManager::CheckModelQueryStyle()
-{
-    QueryType qt{QueryType::Unknown};
-    std::vector<std::string> files = File::SearchExtInDir(model_path_, ".raw");
-    if (files.empty())
-    {
-        qt.v_ = QueryType::TextQuery;
-        return qt;
-    }
-
-    int index{-1};
-    for (auto i = 0; i < files.size(); ++i)
-    {
-        if (str_contains(files[i], "embedding_weights"))
-        {
-            index = i;
-            break;
-        }
-    }
-
-    if (index == -1)
-    {
-        My_Log{My_Log::Level::kError} << "embedded file is not exist\n";
-        return qt;
-    }
-
-    const auto &embedded_file = files[index];
-    if (File::IsFileEmpty(embedded_file))
-    {
-        My_Log{My_Log::Level::kError} << "embedded file: " << embedded_file << "is invalid\n";
-        return qt;
-    }
-
-    embedded_raw_buf_ = File::ReadFile(embedded_file);
-    qt.v_ = QueryType::EmbeddingQuery;
-    return qt;
-}
-
 void ModelManager::Clean()
 {
     known_model_path_.clear();
     genieModelHandle = nullptr;
-    qnn_embedding_info_.Clean();
-    embedded_raw_buf_.clear();
+    qnn_embedding_.Clean();
 }
 
-std::string ModelManager::ResolveKnownModelPath(const std::string &model_feature, bool contain)
+std::string ModelManager::ResolveKnownModelPath(const std::string &model_feature, bool only_prefix)
 {
     static bool config_list_ready{
-        [this]()
-        {
-            for (const auto &entry: fs::directory_iterator(RootDir + "/config"))
+            [this]()
             {
-                if (!entry.is_directory())
+                for (const auto &entry: fs::directory_iterator(RootDir + "/config"))
                 {
-                    continue;
+                    if (!entry.is_directory())
+                    {
+                        continue;
+                    }
+                    config_model_name_list_.push_back(entry.path().filename().generic_string());
                 }
-                config_model_name_list_.push_back(entry.path().filename().generic_string());
-            }
-            return true;
-        }()
+                return true;
+            }()
     };
 
-    for (const auto config_model_name: config_model_name_list_)
+    for (const auto &config_model_name: config_model_name_list_)
     {
-        if (!ModelComparer(config_model_name, model_feature, contain))
+        if (!ModelComparer(config_model_name, model_feature, only_prefix))
         {
             continue;
         }
@@ -606,23 +631,73 @@ std::string ModelManager::ResolveKnownModelPath(const std::string &model_feature
     return "";
 }
 
-bool ModelManager::ModelComparer(const std::string &source, const std::string &target, bool contain)
+bool ModelManager::ModelComparer(const std::string &source, const std::string &target, bool only_prefix)
 {
     std::string s = source;
     std::string t = target;
     static auto normalize{
-        [](std::string &s)
-        {
-            std::transform(s.begin(), s.end(), s.begin(),
-                           [](unsigned char c) -> unsigned char
-                           {
-                               if (c == '-' || c == '.' || c == ' ') return '_';
-                               return static_cast<unsigned char>(std::tolower(c));
-                           });
-        }
+            [](std::string &s)
+            {
+                std::transform(s.begin(), s.end(), s.begin(),
+                               [](unsigned char c) -> unsigned char
+                               {
+                                   if (c == '-' || c == '.' || c == ' ')
+                                       return '_';
+                                   return static_cast<unsigned char>(std::tolower(c));
+                               });
+            }
     };
 
     normalize(s);
     normalize(t);
-    return contain ? s.find(t) != std::string::npos : s == t;
+    return only_prefix ? s.find(t) == 0 : s == t;
+}
+
+void QNNEmbedding::Clean()
+{
+    embedded_raw_buf_.clear();
+    for (auto &infer_resource: infer_resources_)
+    {
+        auto &app_builder = infer_resource.second.app_builder_;
+        if (app_builder != nullptr)
+        {
+            app_builder->ModelDestroy(infer_resource.second.tag_);
+            delete app_builder;
+            app_builder = nullptr;
+        }
+    }
+    infer_resources_.clear();
+    embedding_type_ = QNNEmbeddingType::None;
+    model_types_ = ModelType::Unknown;
+}
+
+LibAppBuilder *QNNEmbedding::LibAppbuilderCreator(const std::string &serialized_file,
+                                                  const std::string &tag)
+{
+#ifdef WIN32
+#define BACKEND "QnnHtp.dll"
+#define SYSTEM "QnnSystem.dll"
+#else
+#define BACKEND "libQnnHtp.so"
+#define SYSTEM "libQnnSystem.so"
+#endif
+    static bool log_setting{
+            []()
+            {
+                SetLogLevel(GENIE_LOG_LEVEL_ERROR, "");
+                return true;
+            }()
+    };
+
+    auto *app_builder = new LibAppBuilder{};
+    My_Log{} << "start to initiate: " << serialized_file << " ....\n";
+    if (!app_builder->ModelInitialize(tag,
+                                      serialized_file,
+                                      BACKEND,
+                                      SYSTEM))
+    {
+        My_Log("call model initialize failed");
+        return nullptr;
+    }
+    return app_builder;
 }

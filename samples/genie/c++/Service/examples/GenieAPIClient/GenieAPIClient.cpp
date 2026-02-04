@@ -23,8 +23,9 @@ std::string SVR_URL = "http://10.92.143.176:8910/v1/chat/completions";
 static class CLI
 {
 public:
-    std::string prompt{"hello"};
+    std::string prompt;
     std::string picture_path_;
+    std::string audio_path_;
     std::string system{"You are a helpful assistant."};
     std::string model{"IBM-Granite-v3.1-8B"};
     bool loop{false};
@@ -37,7 +38,7 @@ public:
 private:
     static std::string ArgToString(const char *s)
     {
-        return std::string(s);             // plain char* → std::string
+        return std::string(s); // plain char* → std::string
     }
 
 #ifdef WIN32
@@ -82,6 +83,8 @@ void CLI::Init(int argc, CharT **argv)
             cli_info.model = ArgToString(argv[++i]);
         else if (ArgToString(arg) == "--img" && i + 1 < argc)
             cli_info.picture_path_ = ArgToString(argv[++i]);
+        else if (ArgToString(arg) == "--audio" && i + 1 < argc)
+            cli_info.audio_path_ = ArgToString(argv[++i]);
         else if (ArgToString(arg) == "--loop")
             cli_info.loop = true;
         else if (ArgToString(arg) == "--ip")
@@ -120,11 +123,12 @@ size_t write_callback_stream(char *ptr, size_t size, size_t nmemb, void *userdat
     message += chunk;
     std::istringstream stream(chunk);
     std::string line;
-
+    bool process{false};
     try
     {
         while (std::getline(stream, line))
         {
+            process = true;
             if (line.rfind("data: ", 0) == 0)
             {
                 std::string jsonStr = line.substr(6);
@@ -140,7 +144,6 @@ size_t write_callback_stream(char *ptr, size_t size, size_t nmemb, void *userdat
                 {
                     My_Log{}.original(true) << j["choices"][0]["delta"]["content"].get<std::string>();
                 }
-
             }
         }
     }
@@ -150,6 +153,11 @@ size_t write_callback_stream(char *ptr, size_t size, size_t nmemb, void *userdat
         My_Log{} << chunk << "\n";
     }
 
+    if (!process)
+    {
+        My_Log{} << "get line failed\n";
+        My_Log{} << message << "\n";
+    }
     return total_size;
 }
 
@@ -192,11 +200,13 @@ void Do(const std::string &body)
 
     if (cli_info.stream)
     {
+        My_Log{} << "reponse mode: stream mode\n";
         headers = curl_slist_append(headers, "Accept: text/event-stream");
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback_stream);
     }
     else
     {
+        My_Log{} << "reponse mode: non-stream mode\n";
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_string);
     }
@@ -205,9 +215,10 @@ void Do(const std::string &body)
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
 
     CURLcode res = curl_easy_perform(curl);
-
     long response_code = 0;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+    std::string full_response;
+
     if (response_code != 200)
     {
         My_Log{} << "get failed response code: " << response_code << std::endl;
@@ -216,8 +227,17 @@ void Do(const std::string &body)
     }
 
     if (!response_string.empty())
-        My_Log{} << nlohmann::json::parse(response_string)["choices"][0]["message"]["content"].get<std::string>()
-                 << std::endl;
+        try
+        {
+            full_response = json::parse(response_string).dump(4);
+            My_Log{} << json::parse(response_string)["choices"][0]["message"]["content"].get<std::string>()
+                     << std::endl;
+
+        } catch (std::exception &e)
+        {
+            My_Log{My_Log::Level::kError} << e.what() << "\n";
+            My_Log{} << (full_response.empty() ? response_string : full_response) << "\n";
+        }
 
     if (res != CURLE_OK)
     {
@@ -241,13 +261,17 @@ void DoLoop()
     }
 }
 
-std::string EncodeImage(std::string &path)
+std::string EncodeBinary(std::string &path)
 {
+    if (path.empty())
+    {
+        return "";
+    }
+
     std::ifstream in(path, std::ios::binary);
     if (!in.good())
     {
-        My_Log{My_Log::Level::kError} << "open file path failed\n";
-        return "";
+        throw std::runtime_error("open file path:" + path + " failed\n");
     }
 
     in.seekg(0, std::ios::end);
@@ -289,27 +313,27 @@ MAIN
 #endif
 
     curl_global_init(CURL_GLOBAL_ALL);
-    std::string req_body;
-    if (cli_info.picture_path_.empty())
+    if (cli_info.prompt.empty())
     {
-        req_body = build_request_body(cli_info.model, cli_info.prompt, cli_info.system, cli_info.stream);
-    }
-    else
-    {
-        auto image = EncodeImage(cli_info.picture_path_);
-        if (image.empty())
+        if (cli_info.picture_path_.empty() && cli_info.audio_path_.empty())
         {
-            return -1;
+            cli_info.prompt = "Hi!";
         }
-        json j;
-        j["question"] = cli_info.prompt;
-        j["image"] = image;
-        req_body = build_request_body(cli_info.model, j, cli_info.system, cli_info.stream);
+        else
+        {
+            cli_info.prompt = "What is it descript?";
+        }
     }
+
+    json j;
+    j["question"] = cli_info.prompt;
+
     try
     {
-        cli_info.loop ?
-        DoLoop() : Do(req_body);
+        j["image"] = EncodeBinary(cli_info.picture_path_);
+        j["audio"] = EncodeBinary(cli_info.audio_path_);
+        std::string req_body = build_request_body(cli_info.model, j, cli_info.system, cli_info.stream);
+        cli_info.loop ? DoLoop() : Do(req_body);
     }
     catch (const std::exception &e)
     {

@@ -111,8 +111,7 @@ public:
         Log(msg.c_str(), msg.size());
     }
 
-    explicit My_Log(Level lev = kWarning) : lev_{lev}
-    {}
+    explicit My_Log(Level lev = kWarning) : lev_{lev} {}
 
     template<typename T>
     My_Log &operator<<(const T &value)
@@ -153,8 +152,7 @@ public:
     {
         if (output)
         {
-            get_log_title_ = []()
-            { return ""; };
+            get_log_title_ = []() { return ""; };
         }
         return *this;
     }
@@ -180,7 +178,7 @@ public:
         return oss.str();
     }
 
-    static inline Level Level_;
+    static inline Level Level_{Level::kAlways};
 private:
     class LoggerHelper
     {
@@ -192,8 +190,7 @@ private:
 
             constexpr Console() noexcept
                     : kConsoleBufferLen(1018),
-                      kDefaultLogTag("genieapiservice_log")
-            {}
+                      kDefaultLogTag("genieapiservice_log") {}
         } kConsole_;
 
         static inline struct File
@@ -206,8 +203,7 @@ private:
 
             File() noexcept
                     : kNewOffset_(4 * 1024 * 1024),
-                      kMaxSize_{6 * 1024 * 1024}
-            {}
+                      kMaxSize_{6 * 1024 * 1024} {}
 
             static void RotateFile(const std::string &from, const std::string &dst, uint32_t offset)
             {
@@ -248,17 +244,15 @@ private:
     Level lev_{Level::kWarning};
     char *tag_{const_cast<char *>(LoggerHelper::kConsole_.kDefaultLogTag)};
 
-    void Log(const char *msg, uint32_t len)
+    inline void Log(const char *msg, uint32_t len)
     {
-        if (lev_ > Level_ || len <= 0 || msg == nullptr)
+        if (lev_ <= Level_  &&  len > 0 && msg != nullptr)
         {
-            return;
+            (this->*func_)(msg, len);
         }
-
-        (this->*func_)(msg, len);
     }
 
-    void LogConsole(const char *msg, uint32_t len)
+    inline void LogConsole(const char *msg, uint32_t len)
     {
 #ifdef __ANDROID__
 #define OUT_PUT(...) \

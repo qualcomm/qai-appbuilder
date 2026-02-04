@@ -37,27 +37,30 @@ std::string ResponseTools::generate_uuid4()
     return "chatcmpl-" + ss.str();
 }
 
-bool ResponseTools::post_stream_data(httplib::DataSink &sink, const char *event, const json &data)
+bool ResponseTools::post_stream_data(httplib::DataSink &sink, const char *event, const std::string &data, bool done)
 {
     std::string str;
     try
     {
-        str = std::string(event) + ": " +
-              json_to_str(data) +
-              "\n\n";
+        str = std::string(event) + ": " + data + "\n\n";
     }
     catch (const std::exception &e)
     {
         My_Log{My_Log::Level::kError} << "data stream pause failed: " << e.what() << std::endl;
     }
 
-    return sink.write(str.c_str(), str.size());
+    sink.write(str.c_str(), str.size());
+    if (done)
+    {
+        sink.done();
+    }
+    return true;
 }
 
-json ResponseTools::responseDataJson(const std::string &content,
-                                     const std::string &finish_reason,
-                                     bool stream,
-                                     const std::string &tool_calls_str)
+std::string ResponseTools::responseDataJson(const std::string &content,
+                                            const std::string &finish_reason,
+                                            bool stream,
+                                            const std::string &tool_calls_str)
 {
     std::string id = generate_uuid4();
     std::string object = stream ? "chat.completion.chunk" : "chat.completion";
@@ -92,7 +95,7 @@ json ResponseTools::responseDataJson(const std::string &content,
             }}
     };
     /* @formatter:on */
-    return data;
+    return json_to_str(data);
 }
 
 std::string ResponseTools::convertToolCallJson(const std::string &input)
@@ -160,7 +163,8 @@ json ResponseTools::format_tool_calls(const std::string &tool_calls_str)
 
     while (std::getline(iss, line))
     {
-        if (line.empty() || line.find("{\"name\":") != 0) continue;
+        if (line.empty() || line.find("{\"name\":") != 0)
+            continue;
         try
         {
             call = json::parse(line);

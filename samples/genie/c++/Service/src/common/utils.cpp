@@ -104,7 +104,7 @@ std::unique_ptr<int8_t[]> File::get_file_as_buffer(const std::string &file_path,
     size = in.tellg();
     if (size == 0)
         return nullptr;
-    auto buf = std::make_unique<int8_t[]>(size);
+    auto buf = std::make_unique < int8_t[] > (size);
     in.read(reinterpret_cast<char *>(buf.get()), size);
     return buf;
 }
@@ -128,41 +128,19 @@ bool File::IsFileExist(const std::string &file_path)
     return std::ifstream(file_path.c_str()).good();
 }
 
-bool File::MatchFileInDir(const std::string &dir_path, const std::string &file, bool is_ext)
+bool File::MatchFileInDir(const std::string &dir_path, const std::string &part, std::vector<std::string> *files)
 {
-    /* @formatter:off */
-    auto checker = is_ext ?
-                   std::function<bool(const fs::directory_entry&)>{[&file](const fs::directory_entry &entry)
-                   {
-                       return entry.path().extension() == file;
-                   }} :
-                   [&file](const fs::directory_entry &entry)
-                   {
-                       return entry.path() == file;
-                   };
-    /* @formatter:on */
-
     for (const auto &entry: fs::directory_iterator(dir_path))
     {
-        if (entry.is_regular_file() && checker(entry))
+        auto file_path = entry.path().generic_string();
+        if (entry.is_regular_file() && str_contains(file_path, part))
         {
+            if (files)
+                files->push_back(file_path);
             return true;
         }
     }
     return false;
-}
-
-std::vector<std::string> File::SearchExtInDir(const std::string &dir_path, const std::string &ext)
-{
-    std::vector<std::string> files;
-    for (const auto &entry: fs::directory_iterator(dir_path))
-    {
-        if (entry.is_regular_file() && entry.path().extension() == ext)
-        {
-            files.push_back(entry.path().generic_string());
-        }
-    }
-    return files;
 }
 
 std::vector<uint8_t> File::ReadFile(const std::string &file_name, bool binary)
@@ -173,4 +151,74 @@ std::vector<uint8_t> File::ReadFile(const std::string &file_name, bool binary)
     std::vector<uint8_t> buffer(file_size);
     in.read(reinterpret_cast<char *>(buffer.data()), file_size);
     return buffer;
+}
+
+template<typename T>
+T get_json_value(const json &jsonData, const std::string &key, const T &defaultValue)
+{
+    try
+    {
+        if (jsonData.contains(key))
+        {
+            return jsonData[key].get<T>();
+        }
+    }
+    catch (const std::exception &e)
+    {
+        try
+        {
+            if constexpr (std::is_same<T, std::string>::value)
+            {
+                std::string texts = "";
+
+                if (jsonData[key].is_array())
+                {
+                    for (const auto &item: jsonData[key])
+                    {
+                        if (item.is_string())
+                        {
+                            texts += item.get<std::string>();
+                        }
+                        else
+                        {
+                            for (auto it = item.begin(); it != item.end(); ++it)
+                            {
+                                if (it.value().is_string())
+                                {
+                                    if (!texts.empty())
+                                    {
+                                        texts += " ";
+                                    }
+                                    texts += it.value().get<std::string>();
+                                }
+                            }
+                        }
+                    }
+                }
+
+                return texts;
+            }
+        }
+        catch (const std::exception &e)
+        {
+            throw std::runtime_error("getting json value for key: " + key + " ," + e.what());
+        }
+    }
+
+    return defaultValue;
+}
+
+template std::string get_json_value(const json &jsonData, const std::string &key, const std::string &defaultValue);
+template int get_json_value(const json &jsonData, const std::string &key, const int &defaultValue);
+template double get_json_value(const json &jsonData, const std::string &key, const double &defaultValue);
+template bool get_json_value(const json &jsonData, const std::string &key, const bool &defaultValue);
+
+template<typename T>
+void PrintBuf(T &buf)
+{
+    for (const auto i: buf)
+    {
+        My_Log{}.original(true) << i << " ";
+        My_Log{} << "\n";
+    }
 }

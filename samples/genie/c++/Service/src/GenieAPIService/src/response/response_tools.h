@@ -18,12 +18,12 @@ struct ResponseTools
 {
     static inline const std::string FN_NAME = "<tool_call>";
 
-    static bool post_stream_data(httplib::DataSink &sink, const char *event, const json &data);
+    static bool post_stream_data(httplib::DataSink &sink, const char *event, const std::string &data, bool done = false);
 
-    static json responseDataJson(const std::string &content,
-                                 const std::string &finish_reason,
-                                 bool stream = true,
-                                 const std::string &tool_calls_str = "");
+    static std::string responseDataJson(const std::string &content,
+                                        const std::string &finish_reason,
+                                        bool stream = true,
+                                        const std::string &tool_calls_str = "");
 
     static std::string convertToolCallJson(const std::string &input);
 

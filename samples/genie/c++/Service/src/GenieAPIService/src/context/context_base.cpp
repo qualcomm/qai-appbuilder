@@ -15,8 +15,10 @@ bool ContextBase::Stop()
     return true;
 }
 
-bool ContextBase::SetParams(const std::string max_length, const std::string temp, const std::string top_k,
-                            const std::string top_p)
+bool ContextBase::SetParams(const std::string &max_length,
+                            const std::string &temp,
+                            const std::string &top_k,
+                            const std::string &top_p)
 {
     My_Log("BuilderBase::SetParams called\n");
     return true;
@@ -33,12 +35,12 @@ size_t ContextBase::TokenLength(const std::string &text)
     return text.size();
 }
 
-void ContextBase::applyLora(const std::string engineRole, const std::string loraAdapterName)
+void ContextBase::applyLora(const std::string &engineRole, const std::string &loraAdapterName)
 {
     My_Log("BuilderBase::applyLora called\n");
 }
 
-void ContextBase::setLoraStrength(const std::string engineRole,
+void ContextBase::setLoraStrength(const std::string &engineRole,
                                   const std::unordered_map<std::string, float> &alphaValue)
 {
     My_Log("BuilderBase::setLoraStrength called\n");

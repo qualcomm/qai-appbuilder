@@ -17,8 +17,11 @@ list(APPEND SERVICE_SOURCES
         src/chat_request_handler/chat_request_handler.cpp
         src/chat_history/chat_history.cpp
         src/model/model_manager.cpp
-        src/context/genie.cpp
-        src/context/genie_query_iface.cpp
+        src/context/qnn/genie.cpp
+        src/context/qnn/genie_interface.cpp
+        src/context/qnn/phi4mm/phi4mm.cpp
+        src/context/qnn/qwen2_5/qwen_2_5.cpp
+        src/context/qnn/qwen2_5_omini/qwen_2_5_omini.cpp
         src/context/context_base.cpp
         src/GenieAPIService.cpp
         src/processor/harmony.cpp
@@ -58,11 +61,7 @@ add_executable(${CMAKE_PROJECT_NAME} ${SERVICE_SOURCES})
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${INCLUDE_PATH})
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE -DNOMINMAX -DBUILDING_LIBCURL -D_HAS_STD_BYTE=0)
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE ${EXTERNAL_LIB_PATH})
-target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE
-        libappbuilder
-        Crypt32
-        ${EXTERNAL_LIBS}
-)
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ${EXTERNAL_LIBS})
 
 set(CONFIG_PATH ${CMAKE_SOURCE_DIR}/../../python/models)
 add_custom_command(

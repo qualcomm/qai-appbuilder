@@ -20,7 +20,7 @@ public:
 
     ~MNNContext() override;
 
-    bool Query(const std::string &prompt, const Callback callback) override;
+    bool Query(const ModelInput &, const Callback& callback) override;
 
     bool Stop() override;
 

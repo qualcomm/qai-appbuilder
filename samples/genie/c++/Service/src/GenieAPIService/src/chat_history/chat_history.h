@@ -15,6 +15,7 @@
 using json = nlohmann::ordered_json;
 
 class IModelConfig;
+
 class ChatHistory
 {
 public:
@@ -23,7 +24,7 @@ public:
     ~ChatHistory();
 
     std::string GetUserMessage(const std::string &prompt_system,
-                                 const std::string &prompt_start);
+                               const std::string &prompt_start);
 
     void AddMessage(const std::string &role, const std::string &content);
 
@@ -39,7 +40,7 @@ public:
 
 private:
     class Impl;
-    Impl* impl_{};
+    Impl *impl_{};
 };
 
 #endif //CHAT_HISTORY_H

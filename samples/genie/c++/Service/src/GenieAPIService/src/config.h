@@ -122,8 +122,8 @@ inline bool Config::Process()
     RootDir = fs::path{argv_[0]}.is_absolute()
                   ? fs::path{argv_[0]}.parent_path().generic_string()
                   : fs::path{CurrentDir + "/" + argv_[0]}
-                  .parent_path()
-                  .generic_string();
+                    .parent_path()
+                    .generic_string();
     My_Log{} << "root dir: " << RootDir << std::endl;
     My_Log::ShowStatus();
 

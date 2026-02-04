@@ -11,9 +11,7 @@
 #ifndef _UTILS_H
 #define _UTILS_H
 
-#include <regex>
 #include <nlohmann/json.hpp>
-#include "log.h"
 
 using json = nlohmann::ordered_json;
 
@@ -21,12 +19,10 @@ inline std::string CurrentDir;
 inline std::string RootDir;
 
 extern std::atomic<bool> http_busy_;
-const std::string MIMETYPE_JSON = "application/json; charset=utf-8";
 
-struct JsonError : public std::exception
+struct ReportError : public std::exception
 {
-    JsonError(std::string &&msg) : msg_{std::move(msg)}
-    {}
+    ReportError(std::string &&msg) : msg_{std::move(msg)} {}
 
     const char *what() const noexcept final
     {
@@ -47,9 +43,9 @@ struct File
 
     static std::unique_ptr<int8_t[]> get_file_as_buffer(const std::string &, uint32_t &size);
 
-    static bool MatchFileInDir(const std::string &dir_path, const std::string &file, bool is_ext);
-
-    static std::vector<std::string> SearchExtInDir(const std::string &dir_path, const std::string &ext);
+    static bool MatchFileInDir(const std::string &dir_path,
+                               const std::string &part,
+                               std::vector<std::string> *files = nullptr);
 
     static std::vector<uint8_t> ReadFile(const std::string &file_name, bool binary = true);
 };
@@ -66,14 +62,7 @@ double MeasureSeconds(F &&fn, Args &&... args)
 }
 
 template<typename T>
-void PrintBuf(T &buf)
-{
-    for (const auto i: buf)
-    {
-        My_Log{}.original(true) << i << " ";
-        My_Log{} << "\n";
-    }
-}
+void PrintBuf(T &buf);
 
 inline class Timer
 {
@@ -120,59 +109,8 @@ inline std::string str_replace(const std::string &str, const std::string &from, 
 }
 
 template<typename T>
-T get_json_value(const json &jsonData, const std::string &key, const T &defaultValue)
-{
-    try
-    {
-        if (jsonData.contains(key))
-        {
-            return jsonData[key].get<T>();
-        }
-    }
-    catch (const std::exception &e)
-    {
-        try
-        {
-            if constexpr (std::is_same<T, std::string>::value)
-            {
-                std::string texts = "";
+T get_json_value(const json &jsonData, const std::string &key, const T &defaultValue);
 
-                if (jsonData[key].is_array())
-                {
-                    for (const auto &item: jsonData[key])
-                    {
-                        if (item.is_string())
-                        {
-                            texts += item.get<std::string>();
-                        }
-                        else
-                        {
-                            for (auto it = item.begin(); it != item.end(); ++it)
-                            {
-                                if (it.value().is_string())
-                                {
-                                    if (!texts.empty())
-                                    {
-                                        texts += " ";
-                                    }
-                                    texts += it.value().get<std::string>();
-                                }
-                            }
-                        }
-                    }
-                }
-
-                return texts;
-            }
-        }
-        catch (const std::exception &e)
-        {
-            throw std::runtime_error("getting json value for key: " + key + " ," + e.what());
-        }
-    }
-
-    return defaultValue;
-}
 
 inline std::string json_to_str(const json &data)
 {
@@ -200,20 +138,18 @@ inline bool hasInvalidUtf8Chars(const std::string &str)
         {
             numBytes = 1;
         }
+        else if ((byte & 0xF0) == 0xE0)
+        {
+            numBytes = 2;
+        }
+        else if ((byte & 0xF8) == 0xF0)
+        {
+            numBytes = 3;
+        }
         else
-            if ((byte & 0xF0) == 0xE0)
-            {
-                numBytes = 2;
-            }
-            else
-                if ((byte & 0xF8) == 0xF0)
-                {
-                    numBytes = 3;
-                }
-                else
-                {
-                    return true;
-                }
+        {
+            return true;
+        }
 
         if (i + numBytes >= length)
         {
@@ -239,24 +175,16 @@ inline bool starts_with(const std::string &str, const std::string &prefix)
     return str.rfind(prefix, 0) == 0;
 }
 
-inline std::string trim_empty_lines(const std::string &input)
-{
-    std::string s = input;
-    s = std::regex_replace(s, std::regex(R"(^(\s*\n)+)"), "");
-    s = std::regex_replace(s, std::regex(R"((\s*\n)+$)"), "");
-    return s;
-}
-
 inline std::string escape_string(const std::string &input)
 {
     static const std::unordered_map<char, std::string> escape_map = {
-        {'"', "\\\""},
-        {'\\', "\\\\"},
-        {'\n', "\\n"},
-        {'\r', "\\r"},
-        {'\t', "\\t"},
-        {'\b', "\\b"},
-        {'\f', "\\f"}
+            {'"',  "\\\""},
+            {'\\', "\\\\"},
+            {'\n', "\\n"},
+            {'\r', "\\r"},
+            {'\t', "\\t"},
+            {'\b', "\\b"},
+            {'\f', "\\f"}
     };
 
     std::string result;
@@ -281,24 +209,14 @@ inline std::string escape_string(const std::string &input)
 inline bool str_search(const std::string &source, const std::string &target)
 {
     auto it = std::search(
-        source.begin(), source.end(),
-        target.begin(), target.end(),
-        [](unsigned char ch1, unsigned char ch2)
-        {
-            return std::tolower(ch1) == std::tolower(ch2);
-        }
+            source.begin(), source.end(),
+            target.begin(), target.end(),
+            [](unsigned char ch1, unsigned char ch2)
+            {
+                return std::tolower(ch1) == std::tolower(ch2);
+            }
     );
     return it != source.end();
-}
-
-inline std::string extract_tag(const std::string &line, const std::string &tag)
-{
-    size_t tagPos = line.find(tag);
-    if (tagPos != std::string::npos)
-    {
-        return line.substr(tagPos + tag.length());
-    }
-    return "";
 }
 
 #endif

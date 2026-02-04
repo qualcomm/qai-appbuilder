@@ -127,8 +127,9 @@ MNNContext::~MNNContext()
 // https://github.com/alibaba/MNN/blob/master/transformers/llm/engine/demo/llm_demo.cpp
 // https://github.com/alibaba/MNN/blob/master/transformers/llm/engine/include/llm/llm.hpp
 // https://github.com/alibaba/MNN/blob/master/transformers/llm/engine/src/llm.cpp
-bool MNNContext::Query(const std::string &prompt, const Callback callback)
+bool MNNContext::Query(const ModelInput &model_input, const Callback& callback)
 {
+    auto &prompt = model_input.text_;
 #ifdef MNN_BUILDER_DEBUG
     My_Log{} << "\n[Prompt]:\n"
              << prompt << "\n------------\n\n"

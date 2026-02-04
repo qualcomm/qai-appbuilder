@@ -16,7 +16,7 @@ class ModelManager : public IModelConfig
 public:
     explicit ModelManager(IModelConfig &&config);
 
-    bool LoadModelByName(const std::string &model_name, bool &first_load);
+    bool LoadModelByName(const std::string &new_model, bool &first_load);
 
     bool InitializeConfig(bool load);
 
@@ -30,17 +30,15 @@ private:
 
     PromptType LoadPromptTemplates(std::string &&prompt_path);
 
-    QueryType CheckModelQueryStyle();
-
-    std::string ResolveKnownModelPath(const std::string& model_feature, bool contain);
+    std::string ResolveKnownModelPath(const std::string& model_feature, bool only_prefix);
 
     void Clean();
 
-    static bool ModelComparer(const std::string &source, const std::string &target, bool contain);
+    static bool ModelComparer(const std::string &source, const std::string &target, bool only_prefix);
 
     struct ModeVerifier;
 
-    class EmbeddingVerifier;
+    class QNNImpl;
     
     std::atomic<bool> loaded_{false};
 };

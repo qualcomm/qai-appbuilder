@@ -1325,7 +1325,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::createDevice() {
     if (it != devicesHandles.end() && it->second != nullptr) {
       m_deviceHandle = it->second;
       devicesRefCounts[devKey] += 1;
-      printf("Reusing device handle for key=%s (refCount=%u)\n",
+      QNN_INFO("Reusing device handle for key=%s (refCount=%u)\n",
                devKey.c_str(), devicesRefCounts[devKey]);
       QNN_FUNCTION_EXIT_LOG;
       return StatusCode::SUCCESS;
@@ -1340,7 +1340,6 @@ sample_app::StatusCode sample_app::QnnSampleApp::createDevice() {
 
   const QnnDevice_Config_t* deviceConfigs[] = {&devConfig, nullptr};
   if (nullptr != m_qnnFunctionPointers.qnnInterface.deviceCreate) {
-    QNN_INFO("m_qnnFunctionPointers.qnnInterface.deviceCreate begin\n");
     auto qnnStatus = m_qnnFunctionPointers.qnnInterface.deviceCreate(
         m_logHandle, deviceConfigs, &m_deviceHandle);
     if (QNN_SUCCESS != qnnStatus && QNN_DEVICE_ERROR_UNSUPPORTED_FEATURE != qnnStatus) {
@@ -1351,7 +1350,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::createDevice() {
       std::lock_guard<std::mutex> lk(devicesHandlesMutex);
       devicesHandles[devKey] = m_deviceHandle;
       devicesRefCounts[devKey] = 1;
-      printf("Created new device handle and cached for key=%s\n", devKey.c_str());
+      QNN_INFO("Created new device handle and cached for key=%s\n", devKey.c_str());
     }
     if (devConfig.hardwareInfo) {
       free(devConfig.hardwareInfo);
@@ -1389,7 +1388,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::freeDevice() {
   }
 
   if (needRealFree && nullptr != m_qnnFunctionPointers.qnnInterface.deviceFree) {
-    printf("m_qnnFunctionPointers.qnnInterface.deviceFree begin\n");
+    QNN_INFO("m_qnnFunctionPointers.qnnInterface.deviceFree begin\n");
     auto qnnStatus = m_qnnFunctionPointers.qnnInterface.deviceFree(m_deviceHandle);
     if (QNN_SUCCESS != qnnStatus && QNN_DEVICE_ERROR_UNSUPPORTED_FEATURE != qnnStatus) {
       QNN_ERROR("Failed to free device");

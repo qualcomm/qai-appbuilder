@@ -9,43 +9,98 @@
 #ifndef PROMPT_H
 #define PROMPT_H
 
-#include "../model/model_config.h"
 #include "../context/context_base.h"
 #include "../chat_history/chat_history.h"
 #include <utils.h>
+#include "log.h"
 #include <nlohmann/json.hpp>
 
 using json = nlohmann::ordered_json;
 
-#ifdef WIN32
-
-#include <windows.h>
-
-#endif
-
-class Prompt
+class ModelInputBuilder
 {
 public:
-    Prompt(ChatHistory &chat_history, IModelConfig &model_config) : chat_history_{chat_history},
-                                                                    model_config_{model_config}
-    {}
+    ModelInputBuilder(ChatHistory &chat_history, IModelConfig &model_config) : chat_history_{chat_history},
+                                                                               model_config_{model_config} {}
 
+    ModelInput &Build(json &data, bool &is_tool)
+    {
+        json msg;
+        for (const auto &e: data["messages"])
+        {
+            if (e["role"] == "user")
+            {
+                msg = e["content"];
+            }
+        }
+
+        if (!msg.is_object())
+        {
+            throw ReportError{"user content is not a object"};
+        }
+
+        static auto get_value{
+                [](json &msg, const char *key) -> std::string
+                {
+                    if (!msg.contains(key))
+                    {
+                        My_Log{} << "msg does not contain " << key << " key";
+                        return "";
+                    }
+
+                    if (!msg[key].is_string())
+                    {
+                        throw ReportError{std::string{key} + " key is invalid"};
+                    }
+
+                    return msg[key].get_ref<std::string &>();
+                }
+        };
+
+        ModelInput model_input{
+                get_value(msg, "question"),
+                get_value(msg, "image"),
+                get_value(msg, "audio"),
+        };
+
+        if (model_input.text_.empty())
+        {
+            throw ReportError{"question key can not be empty"};
+        }
+
+        if (!model_input.image_.empty() || !model_input.audio_.empty())
+        {
+            goto set;
+        }
+
+        model_input.text_ = BuildPrompt(data, is_tool);
+        if (model_input.text_.empty())
+        {
+            throw ReportError{"build prompt failed"};
+        }
+
+        set:
+        model_input_ = std::move(model_input);
+        return model_input_;
+    }
+
+private:
     std::string BuildPrompt(json &data, bool &is_tool)
     {
         is_tool = false;
         // parse data
-        json msg = data["messages"];
-        json tools = data["tools"];
-        std::string userToolsPrompt;   // Tool description sent by client
+        const json &msg = data["messages"];
+        const json &tools = data["tools"];
+        std::string userToolsPrompt; // Tool description sent by client
         std::string systemDefaultPrompt = "You are a helpful assistant.";
         std::string startDefaultPrompt;
-        std::string userContent;               // question sent by client
-        std::string userToolCallBackResult;    // Client tool call result
+        std::string userContent; // question sent by client
+        std::string userToolCallBackResult; // Client tool call result
         auto handle = model_config_.get_genie_model_handle().lock();
         auto &context_size = model_config_.context_size();
 
         // add tool description
-        if (tools != nullptr)
+        if (tools != nullptr && !tools.empty())
         {
             is_tool = true;
             chat_history_.Clear();
@@ -73,11 +128,12 @@ public:
 
         // Extract the content sent by the client, including the user's question, system prompts, and tool invocation results.
         for (const auto &element: msg)
-        { // TODO: Handle history message.
+        {
+            // TODO: Handle history message.
             auto role = get_json_value(element, "role", BLANK_STRING);
             if (role == "user")
             {
-                userContent = get_json_value(element, "content", BLANK_STRING);
+                userContent = element["content"]["question"];
                 chat_history_.AddMessage("user", userContent);
             }
             else if (role == "system")
@@ -86,7 +142,8 @@ public:
                 systemDefaultPrompt = str_replace(systemDefaultPrompt, "\\n", "\n");
             }
             else if (role == "tool")
-            {  // TODO: Check tool id.
+            {
+                // TODO: Check tool id.
                 userToolCallBackResult += trim_empty_lines(get_json_value(element, "content", BLANK_STRING));
                 userToolCallBackResult = "<tool_response>\n" + userToolCallBackResult + "\n</tool_response>\n";
                 chat_history_.AddMessage("tool", userToolCallBackResult);
@@ -113,42 +170,20 @@ public:
         // build model input
         auto &j = model_config_.get_prompt_template();
         /* @formatter:off */
-         std::string modelInputContent = chat_history_.GetUserMessage(
-                                                          str_replace(j["system"], "string", systemDefaultPrompt),
-                                                          j["start"].get<std::string>() + startDefaultPrompt);
+        std::string modelInputContent = chat_history_.GetUserMessage(str_replace(j["system"].get_ref<const std::string&>(), "string", systemDefaultPrompt),
+                                                                     j["start"].get_ref<const std::string&>() + startDefaultPrompt);
         /* @formatter:on */
         return modelInputContent;
     }
 
-    static std::string ExtractPrompt(json &data)
+    std::string trim_empty_lines(const std::string &input)
     {
-        json embedding;
-        for (const auto &e: data["messages"])
-        {
-            if (e["role"] == "user")
-            {
-                embedding = e["content"];
-            }
-        }
-
-        if (!embedding.is_object())
-        {
-            throw JsonError{"user content is not a object"};
-        }
-
-        if (!embedding.contains("question") || !embedding["question"].is_string())
-        {
-            throw JsonError{"question key is invalid"};
-        }
-
-        if (!embedding.contains("image") || !embedding["image"].is_string())
-        {
-            throw JsonError{"image key is invalid"};
-        }
-        return embedding.dump();
+        std::string s = input;
+        s = std::regex_replace(s, std::regex(R"(^(\s*\n)+)"), "");
+        s = std::regex_replace(s, std::regex(R"((\s*\n)+$)"), "");
+        return s;
     }
 
-private:
     static inline const std::string FILL_THINK = "<think>\n\n</think>\n\n";
 
     static inline const std::string BLANK_STRING;
@@ -167,6 +202,7 @@ private:
 
     ChatHistory &chat_history_;
     IModelConfig &model_config_;
+    ModelInput model_input_;
 };
 
 #endif //PROMPT_H

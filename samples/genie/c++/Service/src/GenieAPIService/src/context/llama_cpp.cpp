@@ -303,8 +303,9 @@ LLAMACppBuilder::LLAMACppBuilder(const IModelConfig &info) :
     impl_ = new Impl{std::move(params)};
 }
 
-bool LLAMACppBuilder::Query(const std::string &prompt, const Callback callback)
+bool LLAMACppBuilder::Query(const ModelInput &model_input, const Callback& callback)
 {
+    auto &prompt = model_input.text_;
 #ifdef LLAMA_BUILDER_DEBUG
     My_Log{} << "\n[Prompt]:\n"
              << prompt << "\n------------\n\n"

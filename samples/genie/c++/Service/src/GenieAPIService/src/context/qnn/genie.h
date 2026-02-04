@@ -17,7 +17,7 @@
 
 #include <GenieCommon.h>
 #include <GenieDialog.h>
-#include "context_base.h"
+#include "../context_base.h"
 
 class GenieContext : public ContextBase
 {
@@ -26,14 +26,14 @@ public:
 
     ~GenieContext() override;
 
-    bool Query(const std::string &prompt, const Callback callback) override;
+    bool Query(const ModelInput &, const Callback &) override;
 
     bool Stop() override;
 
-    bool SetParams(const std::string max_length,
-                   const std::string temp,
-                   const std::string top_k,
-                   const std::string top_p) override;
+    bool SetParams(const std::string &max_length,
+                   const std::string &temp,
+                   const std::string &top_k,
+                   const std::string &top_p) override;
 
     json HandleProfile() override;
 
@@ -41,13 +41,16 @@ public:
 
     bool SetStopSequence(const std::string &stop_sequences) override;
 
-    void applyLora(const std::string engineRole,
-                   const std::string loraAdapterName) override;
+    void applyLora(const std::string &engineRole,
+                   const std::string &loraAdapterName) override;
 
-    void setLoraStrength(const std::string engineRole,
+    void setLoraStrength(const std::string &engineRole,
                          const std::unordered_map<std::string, float> &alphaValue) override;
 
-    class Impl;
+    struct QInterfaceImpl;
+
+    class ConfigFixer;
+
 private:
     void inference_thread();
 
@@ -69,9 +72,11 @@ private:
     std::condition_variable m_request_cond;
     bool m_thread_exit{false};
     bool m_inference_busy{false};
+    bool inference_succeed_{true};
+
     std::string m_stream_answer;
     std::mutex m_stream_lock;
-    Impl* impl_;
+    QInterfaceImpl *inf_impl_{};
 };
 
 #endif

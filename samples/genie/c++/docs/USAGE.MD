@@ -21,7 +21,7 @@ You should launch the server first, then use client for ask questions.
 
 
 - Note: Because some android devices will freeze the background process, please check Settings-Battery-Power saving
-  settings-App battery management-GenieAPI and select Allow background activity.)
+  settings-App battery management-GenieAPI and select Allow background activity.
 
 
 4. Please also build and install
@@ -97,7 +97,7 @@ Client also have some options:
 
 ```
 Options:
-  --prompt                    Your questions for ask. Default is "hello"
+  --prompt                    Your questions for ask. Default is "hi!" or "What is it descript"
   --system                    Model system prompt. Default is "You are a helpful assistant."   
   --stream                    Answer in stream mode. It is required
   --model                     The model will be loaded. It's should located at ./models/xxxx
@@ -119,45 +119,10 @@ For VLM models, you should provide your question and the image for client
 
 ## Python example
 
-### Python Client Sample Code:
+You can run Python version with same c++ Client params.
 
-Here is a Python client sample (You can save it to 'GenieAPIClient.py'):
-
-```
-import argparse
-from openai import OpenAI
-
-IP_ADDR = "127.0.0.1:8910"
-
-parser = argparse.ArgumentParser()
-parser.add_argument("--stream", action="store_true")
-parser.add_argument("--prompt", default="Hello", type=str)
-args = parser.parse_args()
-
-client = OpenAI(base_url="http://" + IP_ADDR + "/v1", api_key="123")
-
-model_lst = client.models.list()
-print(model_lst)
-
-messages = [{"role": "system", "content": "You are a math teacher who teaches algebra."}, {"role": "user", "content": args.prompt}]
-extra_body = {"size": 4096, "temp": 1.5, "top_k": 13, "top_p": 0.6}
-
-model_name = "IBM-Granite-v3.1-8B"
-
-if args.stream:
-    response = client.chat.completions.create(model=model_name, stream=True, messages=messages, extra_body=extra_body)
-
-    for chunk in response:
-        content = chunk.choices[0].delta.content
-        if content is not None:
-            print(content, end="", flush=True)
-else:
-    response = client.chat.completions.create(model=model_name, messages=messages, extra_body=extra_body)
-    print(response.choices[0].message.content)
-```
-
-We can run it with the command below in a new terminal window:
+The sample is located at [GenieAPIClient.py](../Service/examples/GenieAPIClient/GenieAPIClient.py)
 
 ```
-python GenieAPIClient.py --prompt "How to fish?" --stream
+python GenieAPIClient.py --prompt "what is the image descript?" --img test.png --stream --model qwen2.5vl3b`
 ```

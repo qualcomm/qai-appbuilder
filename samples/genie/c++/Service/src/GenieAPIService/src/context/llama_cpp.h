@@ -18,7 +18,7 @@ public:
 
     ~LLAMACppBuilder() override;
 
-    bool Query(const std::string &prompt, Callback callback) override;
+    bool Query(const ModelInput &model_input, const Callback &callback) override;
 
     bool Stop() override;
 

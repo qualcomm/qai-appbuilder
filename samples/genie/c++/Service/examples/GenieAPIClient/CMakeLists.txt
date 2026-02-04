@@ -24,6 +24,7 @@ add_executable(${PROJECT_NAME}
         GenieAPIClient.cpp
         ${CMAKE_SOURCE_DIR}/src/common/utils.cpp
 )
+
 target_include_directories(${PROJECT_NAME} PRIVATE ${EXTERNAL_HEADER_PATH})
 target_compile_definitions(${PROJECT_NAME} PRIVATE -DCURL_STATICLIB -DNOMINMAX)
 target_link_libraries(${PROJECT_NAME} PRIVATE libcurl Iphlpapi ws2_32 Wldap32)

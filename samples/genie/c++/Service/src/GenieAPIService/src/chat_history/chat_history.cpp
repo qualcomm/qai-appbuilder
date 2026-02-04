@@ -16,22 +16,24 @@ class ChatHistory::Impl
 public:
     struct GenieChatMessage
     {
-        std::string role;     // role："user", "assistant", "tool"
-        std::string content;  // message content
+        std::string role; // role："user", "assistant", "tool"
+        std::string content; // message content
     };
 
     explicit Impl(IModelConfig &model_config) : model_config_{model_config}
     {}
 
 
-/*
-"Here is a sample:\n";
-"<tool_call>\n"
-"{\"name\": \"example_function\", \"arguments\": {\"arg1\": \"value1\", \"arg2\": \"value2\"}}\n"
-"</tool_call>\n";
-*/
+    /*
+    "Here is a sample:\n";
+    "<tool_call>\n"
+    "{\"name\": \"example_function\", \"arguments\": {\"arg1\": \"value1\", \"arg2\": \"value2\"}}\n"
+    "</tool_call>\n";
+    */
     const std::vector<GenieChatMessage> &get() const
-    { return history; }
+    {
+        return history;
+    }
 
     std::string GetUserMessage(const std::string &prompt_system,
                                const std::string &prompt_start)
@@ -55,9 +57,7 @@ public:
             user_message_vector.push_back(get_message(count - i - 1));
         }
 
-        res = data_process_strategy(user_message_vector, prompt_system, prompt_start, contextSize);
-
-        return res;
+        return data_process_strategy(user_message_vector, prompt_system, prompt_start, contextSize);
     }
 
     std::string data_process_strategy(std::vector<GenieChatMessage> &user_message_vector,
@@ -66,7 +66,9 @@ public:
                                       int contextSize);
 
     void add_message(const std::string &role, const std::string &content)
-    { history.emplace_back(GenieChatMessage{role, content}); }
+    {
+        history.emplace_back(GenieChatMessage{role, content});
+    }
 
     const GenieChatMessage &get_message(size_t index) const
     {
@@ -118,14 +120,16 @@ std::string ChatHistory::Impl::data_process_strategy(std::vector<GenieChatMessag
         {
             format_content = str_replace(j["tool"], "string", content);
         }
-        else if (role == "user")
-        {
-            format_content = str_replace(j["user"], "string", content);
-        }
-        else if (role == "assistant")
-        {
-            format_content = str_replace(j["assistant"], "string", content);
-        }
+        else
+            if (role == "user")
+            {
+                format_content = str_replace(j["user"], "string", content);
+            }
+            else
+                if (role == "assistant")
+                {
+                    format_content = str_replace(j["assistant"], "string", content);
+                }
         string_length += handle->TokenLength(format_content);
         if (string_length <= contextSize)
         {
@@ -150,7 +154,9 @@ std::string ChatHistory::Impl::data_process_strategy(std::vector<GenieChatMessag
 }
 
 ChatHistory::ChatHistory(IModelConfig &model_config)
-{ impl_ = new Impl{model_config}; }
+{
+    impl_ = new Impl{model_config};
+}
 
 ChatHistory::~ChatHistory()
 {
@@ -159,7 +165,9 @@ ChatHistory::~ChatHistory()
 }
 
 void ChatHistory::AddMessage(const std::string &role, const std::string &content)
-{ impl_->add_message(role, content); }
+{
+    impl_->add_message(role, content);
+}
 
 bool ChatHistory::import_from_json(const json &j)
 {
@@ -195,7 +203,6 @@ bool ChatHistory::import_from_json(const json &j)
         // Successfully parsed and replaced the current history.
         impl_->history = std::move(new_history);
         return true;
-
     }
     catch (const std::exception &e)
     {
@@ -211,9 +218,9 @@ json ChatHistory::export_to_json() const
     for (const auto &msg: impl_->history)
     {
         j["history"].push_back({
-                                       {"role",    msg.role},
-                                       {"content", msg.content}
-                               });
+            {"role", msg.role},
+            {"content", msg.content}
+        });
     }
     return j;
 }
@@ -236,7 +243,11 @@ void ChatHistory::Limit(size_t max_size)
 }
 
 void ChatHistory::Clear()
-{ impl_->history.clear(); }
+{
+    impl_->history.clear();
+}
 
 std::string ChatHistory::GetUserMessage(const std::string &prompt_system, const std::string &prompt_start)
-{ return impl_->GetUserMessage(prompt_system, prompt_start); }
+{
+    return impl_->GetUserMessage(prompt_system, prompt_start);
+}
