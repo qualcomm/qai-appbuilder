@@ -2,76 +2,41 @@
 
 GenieService is a pair of HTTP CS(client and server) process.
 
-You should launch the server first, then use client for ask questions.
-
-## Download and Deployment
-
-You should download the models first by following this [Link](https://www.aidevhome.com/?id=51).
-
-For VLM, Please make the model follow the [VLM model layout](VLM_DEPLOYMENT.md)
-
-### Windows
-
-- Please move the models to `ai-engine-direct-helper\samples\genie\python\models` path.
-- Download
-  the [GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip
-](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.42.0/GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip)
-  for Windows and extract to `ai-engine-direct-helper\samples`.
-
-### Android
-
-- Please push the model files into your device. The model files should be pushed to `/sdcard/GenieModels`.
-- Download
-  the [GenieAPIService.apk
-](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.42.0/GenieAPIService.apk)
-  and install on your device.
-- Please also build and install one of both client apk
-    - [flet-chat/GenieChat](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/fletui/GenieFletUI/android/BUILD.md)
-    - [GenieChat](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/android/GenieChat) apk for client.
+You should launch the server first, then use client for ask the questions.
 
 ## Use For Android
 
-1. You can find the GenieAPI in your launcher after installing apk.
-
+1. You can find the GenieAPI in your launcher after installing apk.<br><br>
 
 2. Click the GenieAPI then click the `START SERVICE` button. It will load the model files. You will see "Genie API
    Service IS Running." if loading model successfully. If you want to stop this service, please click the `STOP SERVICE`
-   button.
-   If you want to check the log file, please click the menu at top right-hand corner. Then select Log Files->Log:1.
-   If you want to set the log level, please click the menu at top right-hand corner then select Log Level.
+   button.<br><br>
 
-![img.png](img/3.png)
-![img.png](img/4.png)
+    - Note: Because some android devices will freeze the background process, please check Settings-Battery-Power saving
+      settings-App battery management-GenieAPI and select Allow background activity.<br><br>
 
-- Note: Because some android devices will freeze the background process, please check Settings-Battery-Power saving
-  settings-App battery management-GenieAPI and select Allow background activity.
+      If you want to check the log file, please click the menu at top right-hand corner. Then select Log Files->Log:
+      1.<br><br>
+      If you want to set the log level, please click the menu at top right-hand corner then select Log Level.<br><br>
 
+3. If you want to use the [GenieChat](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/android/GenieChat), please build and install. And open it and click the menu at top right-hand corner then select settings.
+   you can select the model and go back to main window. Now you can query your questions.<br><br>
 
-3. Open the flet-chat and click the menu at top right-hand corner and select Server Settings. Then you can click the
-   item list in LLM to select a model then click the Verify button and ok button.
+   ![img.png](img/6.png)
 
-![img.png](img/6.png)
-
-4. Now you can query your questions.
-
-![img.png](img/5.png)
-
-5. If you want to use the GenieChat, please open it and click the menu at top right-hand corner then select settings.
-   you can select the model and go back to main window. Now you can query your questions.
+   ![img.png](img/5.png)
 
 ## Use For Windows
 
 ### Service start:
 
 The Genie will start with loading the model config file.
-the path `models/[MODEL_NAME]/config.json` is recommended.
 
-`GenieAPIService.exe -c models/Qwen2.0-7B-SSD/config.json -l`
+`GenieAPIService.exe -c "genie\python\models\Qwen2.0-7B-SSD\config.json" -l`
 
 VLM example:
 
-`GenieAPIService.exe -c models/qwen2.5vl3b/config.json -l`
-![img.png](img/1.png)
+`GenieAPIService.exe -c "genie\python\models\qwen2.5vl3b\config.json" -l`
 
 There is some options, You can also type `GenieService.exe -h` to look up the more usage.
 And set param for it.
@@ -141,8 +106,6 @@ For VLM models, you should provide your question and the image for client
 Run c++ version for model qwen2.5vl3b
 
 `GenieAPIClient.exe --prompt "what is the image descript?" --img test.png --stream --model qwen2.5vl3b`
-
-![img.png](img/2.png)
 
 ## Python example
 

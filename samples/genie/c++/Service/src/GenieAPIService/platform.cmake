@@ -32,6 +32,9 @@ set(EXTERNAL_BIN
 
 # Define EXTERNAL_LIB and PATH
 set(EXTERNAL_LIBS Genie${DLL_EXT})
+if (ANDROID)
+    list(APPEND EXTERNAL_LIBS log)
+endif ()
 set(EXTERNAL_LIB_PATH ${QNN_LIB_PATH})
 
 #  Define EXTERNAL_HEADER
@@ -47,18 +50,30 @@ set(EXTERNAL_HEADER_PATH
         ${LIBAPPBUILDER_ROOT}/src
 )
 
-ExternalProject_Add(Libappbuilder
-        SOURCE_DIR ${LIBAPPBUILDER_ROOT}
-        INSTALL_COMMAND ""
-        BUILD_IN_SOURCE ON
-)
+if (MSVC)
+    ExternalProject_Add(Libappbuilder
+            SOURCE_DIR ${LIBAPPBUILDER_ROOT}
+            INSTALL_COMMAND ""
+            BUILD_IN_SOURCE ON
+    )
 
-list(APPEND EXTERNAL_LIB_PATH ${LIBAPPBUILDER_ROOT}/lib/Release)
-list(APPEND EXTERNAL_LIBS libappbuilder)
-list(APPEND EXTERNAL_BIN ${LIBAPPBUILDER_ROOT}/lib/Release/libappbuilder.dll)
-list(APPEND EXTERNAL_LIBS libappbuilder)
+    list(APPEND EXTERNAL_LIB_PATH ${LIBAPPBUILDER_ROOT}/lib/Release)
+    list(APPEND EXTERNAL_BIN ${LIBAPPBUILDER_ROOT}/lib/Release/libappbuilder${DLL_EXT})
+    list(APPEND EXTERNAL_LIBS libappbuilder)
 
-# list(APPEND EXTERNAL_LIBS samplerate)
+elseif (ANDROID)
+    ExternalProject_Add(Libappbuilder
+            SOURCE_DIR ${LIBAPPBUILDER_ROOT}
+            CONFIGURE_COMMAND ""
+            INSTALL_COMMAND ""
+            BUILD_IN_SOURCE ON
+    )
+
+    list(APPEND EXTERNAL_LIB_PATH ${LIBAPPBUILDER_ROOT}/libs/arm64-v8a)
+    list(APPEND EXTERNAL_BIN ${LIBAPPBUILDER_ROOT}/libs/arm64-v8a/libappbuilder${DLL_EXT})
+    list(APPEND EXTERNAL_LIBS appbuilder)
+endif ()
+#list(APPEND EXTERNAL_LIBS samplerate)
 
 set(VS_VC_PATH "C:/Program Files/Microsoft Visual Studio/2022/Community/VC")
 set(VS_VC_BUILD_TOOL_PATH "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC")

@@ -39,13 +39,23 @@ This service can be used on multiple platforms such as Android, Windows, Linux, 
 
 ## GenieAPIService API:
 
-Refere to [API](docs/API.md) for detailed information.
+Refer to [API](docs/API.md) for detailed information.
 
-## GenieService & Client usage:
+## GenieService & Client:
 
-It is located at [USAGE](docs/USAGE.md)
+- **Build:** If you want build form source, start at [BUILD](docs/BUILD.md).
+- **Deployment model:** [DEPLOYMENT](docs/MODEL_DEPLOYMENT.md) /teach how to download and deploy model.
+- **Usage:** [USAGE](docs/USAGE.md) teach how to run with example.
 
 ### More Sample Code
 
 You can find more client sample code [here](../python/README.md#sample-list).
+
+### Release
+
+- Windows:
+  [GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.42.0/GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip)
+
+- Android:
+  [GenieAPIService.apk](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.42.0/GenieAPIService.apk)
 

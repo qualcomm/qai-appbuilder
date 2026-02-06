@@ -56,11 +56,13 @@ void ResponseDispatcher::Prepare(ModelInput &model_input,
 
 bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::Response *res)
 {
+
     auto handle = model_config_.get_genie_model_handle().lock();
     std::string toolResponse; // Save tool call information
     std::string finishReason = "stop";
     response_buffer.clear();
     bool isToolResponse = false;
+
 
     auto genie_callback = [&](std::string &chunk)
     {
@@ -85,59 +87,77 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
         return true;
     };
 
-    // Send empty data, compatible with SSE client.
-    My_Log{} << "~~~~~~~~~~~~~~Query Context Start~~~~~~~~~~~~~~~~~~" << std::endl;
-    if (!handle->Query(model_input_, genie_callback))
+    try
     {
-        constexpr char *err = R"({"error": "Model context unavailable."})";
+        My_Log{} << "~~~~~~~~~~~~~~Query Context Start~~~~~~~~~~~~~~~~~~" << std::endl;
+        if (!handle->Query(model_input_, genie_callback))
+        {
+            constexpr char *err = R"({"error": "Model query unavailable"})";
+            if (is_stream_)
+                ResponseTools::post_stream_data(*sink, "data", err, true);
+            else
+                res->set_content(err, MIMETYPE_JSON);
+            My_Log{} << "~~~~~~~~~~~~~~~Query Context Failed~~~~~~~~~~~~~~~~~~~\n" << std::endl;
+            return false;
+        }
+        My_Log{}.original(true) << "\n";
+        My_Log{} << "~~~~~~~~~~~~~~~Query Context End~~~~~~~~~~~~~~~~~~~\n" << std::endl;
+
+        // If there is a tool call, return the processed characters to the client.
+        if (isToolResponse)
+        {
+            toolResponse = ResponseTools::convertToolCallJson(toolResponse);
+            My_Log{} << "Extracted JSON 2: " << toolResponse << std::endl;
+
+            finishReason = "tool_calls";
+            std::string content;
+
+            if (!model_config_.getisOutputAllText())
+            {
+                content = ResponseTools::remove_tool_call_content(toolResponse);
+            }
+            if (!content.empty())
+            {
+                content += "\n\n";
+            }
+
+            if (is_stream_)
+                ResponseTools::post_stream_data(*sink, "data",
+                                                ResponseTools::responseDataJson(content, "", true, toolResponse));
+        }
+
+        chatHistory.AddMessage("assistant", extractFinalAnswer(response_buffer));
+        PrintProfile();
+
+        // Send end reason
         if (is_stream_)
-            ResponseTools::post_stream_data(*sink, "data", err, true);
+        {
+            ResponseTools::post_stream_data(*sink, "data", ResponseTools::responseDataJson("", finishReason, true));
+            ResponseTools::post_stream_data(*sink, "data", "[DONE]", true);
+        }
         else
-            res->set_content(err, MIMETYPE_JSON);
-        My_Log{} << "~~~~~~~~~~~~~~~Query Context Failed~~~~~~~~~~~~~~~~~~~\n" << std::endl;
+        {
+            auto data = ResponseTools::responseDataJson(response_buffer, finishReason, false, toolResponse);
+            res->set_content(data, MIMETYPE_JSON);
+        }
+        return true;
+    }
+    catch (const std::exception &e)
+    {
+        if (!is_stream_)
+            throw;
+        My_Log{My_Log::Level::kError} << "raise the exception while processing stream response: \n"
+                                      << e.what() << "\n";
+        if (dynamic_cast<const ReportError *>(&e))
+        {
+            ResponseTools::post_stream_data(*sink, "data", e.what(), true);
+        }
+        else
+        {
+            ResponseTools::post_stream_data(*sink, "data", "raise the exception while processing stream response");
+        }
         return false;
     }
-    My_Log{}.original(true) << "\n";
-    My_Log{} << "~~~~~~~~~~~~~~~Query Context End~~~~~~~~~~~~~~~~~~~\n" << std::endl;
-
-    // If there is a tool call, return the processed characters to the client.
-    if (isToolResponse)
-    {
-        toolResponse = ResponseTools::convertToolCallJson(toolResponse);
-        My_Log{} << "Extracted JSON 2: " << toolResponse << std::endl;
-
-        finishReason = "tool_calls";
-        std::string content;
-
-        if (!model_config_.getisOutputAllText())
-        {
-            content = ResponseTools::remove_tool_call_content(toolResponse);
-        }
-        if (!content.empty())
-        {
-            content += "\n\n";
-        }
-
-        if (is_stream_)
-            ResponseTools::post_stream_data(*sink, "data",
-                                            ResponseTools::responseDataJson(content, "", true, toolResponse));
-    }
-
-    chatHistory.AddMessage("assistant", extractFinalAnswer(response_buffer));
-    PrintProfile();
-
-    // Send end reason
-    if (is_stream_)
-    {
-        ResponseTools::post_stream_data(*sink, "data", ResponseTools::responseDataJson("", finishReason, true));
-        ResponseTools::post_stream_data(*sink, "data", "[DONE]", true);
-    }
-    else
-    {
-        auto data = ResponseTools::responseDataJson(response_buffer, finishReason, false, toolResponse);
-        res->set_content(data, MIMETYPE_JSON);
-    }
-    return true;
 }
 
 bool ResponseDispatcher::isConnectionAlive() const

@@ -10,6 +10,9 @@ CMAKE_MINIMUM_REQUIRED(VERSION 3.4...3.18)
 set(CMAKE_CXX_STANDARD 17)
 
 project(GenieAPIService)
+if (NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
+    message(FATAL_ERROR "current os is: " ${CMAKE_SYSTEM_NAME} " only windows support")
+endif ()
 
 option(USE_MNN "Enable the use mnn platform" OFF)
 
@@ -28,12 +31,14 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE ${BUILD_PATH})
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG ${BUILD_PATH})
 file(REMOVE_RECURSE ${BUILD_PATH})
 
-add_compile_options(
-        /MD
-        /O2
-        /Ob2
-        /utf-8
-)
+if (MSVC)
+    add_compile_options(
+            /MD
+            /O2
+            /Ob2
+            /utf-8
+    )
+endif ()
 
 include_directories(${G_EXTERNAL_INCLUDE_PATH}
         ${G_EXTERNAL_DIR}/json/single_include
@@ -41,7 +46,11 @@ include_directories(${G_EXTERNAL_INCLUDE_PATH}
 )
 link_directories(${G_EXTERNAL_LIB_PATH})
 add_subdirectory(src/GenieAPIService)
-add_subdirectory(examples/GenieAPIClient)
+
+if (MSVC)
+    add_subdirectory(examples/GenieAPIClient)
+    add_subdirectory(examples/tools)
+endif ()
 
 add_custom_target(GenieSerivesPacking
         COMMAND ${CMAKE_COMMAND} -E copy ${BUILD_VERSION_FILE} -t ${BUILD_PATH}

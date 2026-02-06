@@ -5,7 +5,7 @@
 The code under this folder is C++ implementation of the service. It can be compiled to Windows, Android and Linux
 target.
 
-When you finished building task , please check [USAGE](USAGE.MD) to learn how to use it.
+When you finished building task , please goto [USAGE](USAGE.MD) to learn how to use it.
 
 ## Android:
 
@@ -61,7 +61,7 @@ cmake -S .. -B . -A ARM64 ..
 cmake --build . --config Release --parallel 4
 ```
 
-Then the full release will locate at `Service\GenieSerivce_v2.1.3`
+Then the full release will locate at `Service\GenieSerivce_v2.1.4`
 
 ### Build GenieAPIServer for Android: <br>
 
@@ -75,12 +75,9 @@ Set NDK_ROOT=C:/Programs/android-ndk-r26d/
 Set ANDROID_NDK_ROOT=%NDK_ROOT%
 ```
 
-You should build these first
+You should build [libappbuilder](https://github.com/quic/ai-engine-direct-helper/blob/main/BUILD.md) first
 
-- [libappbuilder](https://github.com/quic/ai-engine-direct-helper/blob/main/BUILD.md)
-- [libcurl](https://github.com/curl/curl)
-
-Put `libcurl.so` and `libappbuilder.so` to  `ai-engine-direct-helper\samples\genie\c++\Service`
+Put `libappbuilder.so` to  `ai-engine-direct-helper\samples\genie\c++\Service`
 
 Then build GenieApiService for android
 
@@ -99,14 +96,12 @@ copy "obj\local\arm64-v8a\*.so" "libs\arm64-v8a" /Y
 
 You can install Android Studio for building the Android app.
 
-1. Open Android Studio then load android app project from `ai-engine-direct-helper\samples\genie\c++\Android`.
-
+1. Open Android Studio then load android app project from `ai-engine-direct-helper\samples\genie\c++\Android`. <br><br>
 
 2. Click the Build menu then click Generate Signed App Bundle or Apk... then select APK and click Next button.
-   then select your key and input your password, then click Next button. Finally, click Create buttton.
+   then select your key and input your password, then click Next button. Finally, click Create buttton. <br><br>
 
-
-3. You can find the apk in ai-engine-direct-helper\samples\genie\c++\Android\app\release folder after finishing build.
-
+3. You can find the apk in ai-engine-direct-helper\samples\genie\c++\Android\app\release folder after finishing
+   build. <br><br>
 
 4. Run adb install app-release.apk to install this apk.

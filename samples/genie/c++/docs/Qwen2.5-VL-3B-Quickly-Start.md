@@ -203,6 +203,6 @@ except Exception as e:
 Run the script in the command line, specifying the image path and (optional) prompt:
 
 ```
-python vl_client.py --image test.png --prompt "what is image descript？" --stream
+python vl_client.py --image test.png --prompt "what is image descript?" --stream
 python vl_client.py --image "https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_272x92dp.png" --prompt "What implies in this logo?"
 ```

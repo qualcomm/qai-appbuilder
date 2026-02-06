@@ -1,4 +1,4 @@
-//==============================================================================
+﻿//==============================================================================
 //
 // Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
 //
@@ -17,6 +17,7 @@
 
 using json = nlohmann::ordered_json;
 
+// TODO: bad impl!
 class ModelInputBuilder
 {
 public:
@@ -25,66 +26,143 @@ public:
 
     ModelInput &Build(json &data, bool &is_tool)
     {
-        json msg;
+        Reset();
         for (const auto &e: data["messages"])
         {
             if (e["role"] == "user")
             {
-                msg = e["content"];
+                const json &user_content = e["content"];
+                if (user_content.is_string())
+                {
+                    model_input_.text_ = user_content;
+                }
+                else if (user_content.is_array())
+                {
+                    ProcessArray(user_content);
+                }
+                else if (user_content.is_object())
+                {
+                    ProcessObject(user_content);
+                }
+                else
+                {
+                    throw ReportError{"user content is not a object or array"};
+                }
             }
         }
 
-        if (!msg.is_object())
-        {
-            throw ReportError{"user content is not a object"};
-        }
-
-        static auto get_value{
-                [](json &msg, const char *key) -> std::string
-                {
-                    if (!msg.contains(key))
-                    {
-                        My_Log{} << "msg does not contain " << key << " key";
-                        return "";
-                    }
-
-                    if (!msg[key].is_string())
-                    {
-                        throw ReportError{std::string{key} + " key is invalid"};
-                    }
-
-                    return msg[key].get_ref<std::string &>();
-                }
-        };
-
-        ModelInput model_input{
-                get_value(msg, "question"),
-                get_value(msg, "image"),
-                get_value(msg, "audio"),
-        };
-
-        if (model_input.text_.empty())
+        if (model_input_.text_.empty())
         {
             throw ReportError{"question key can not be empty"};
         }
 
-        if (!model_input.image_.empty() || !model_input.audio_.empty())
+        if (!model_input_.image_.empty() || !model_input_.audio_.empty())
         {
-            goto set;
+            goto done;
         }
 
-        model_input.text_ = BuildPrompt(data, is_tool);
-        if (model_input.text_.empty())
+        model_input_.text_ = BuildPrompt(data, is_tool);
+        if (model_input_.text_.empty())
         {
             throw ReportError{"build prompt failed"};
         }
 
-        set:
-        model_input_ = std::move(model_input);
+        done:
         return model_input_;
     }
 
 private:
+    void ProcessArray(const json &user_content)
+    {
+        static auto check_key{
+                [](const json &content, const char *key, bool is_object = false) -> bool
+                {
+                    bool invalid;
+                    if (!content.contains(key))
+                    {
+                        goto error;
+                    }
+
+                    invalid = is_object ? !content[key].is_object() : !content[key].is_string();
+                    if (invalid)
+                    {
+                        goto error;
+                    }
+
+                    return true;
+                    error:
+                    My_Log{} << "user content " << key << " key is invalid\n";
+                    return false;
+                }
+        };
+
+        for (const auto &element: user_content)
+        {
+            if (!check_key(element, "type"))
+            {
+                continue;
+            }
+
+            if (strcmp(element["type"].get_ref<const std::string &>().c_str(), "text") == 0)
+            {
+                if (!check_key(element, "text"))
+                {
+                    continue;
+                }
+                model_input_.text_ = element["text"].get<std::string>();
+            }
+
+            if (strcmp(element["type"].get_ref<const std::string &>().c_str(), "image_url") == 0)
+            {
+                if (!check_key(element, "image_url", true))
+                {
+                    continue;
+                }
+
+                auto &j_image_url = element["image_url"];
+                if (!check_key(j_image_url, "url"))
+                {
+                    continue;
+                }
+
+                auto img = j_image_url["url"].get<std::string>();
+                int pos;
+                if ((pos = img.find(',')) != std::string::npos)
+                {
+                    ++pos;
+                    model_input_.image_ = img.substr(pos, img.size() - pos);
+                }
+            }
+        }
+    }
+
+    void ProcessObject(const json &user_content)
+    {
+        static auto get_value{
+                [](const json &content, const char *key) -> std::string
+                {
+                    if (!content.contains(key))
+                    {
+                        My_Log{} << "msg does not contain " << key << " key\n";
+                        return "";
+                    }
+
+                    if (!content[key].is_string())
+                    {
+                        throw ReportError{std::string{key} + " key is invalid"};
+                    }
+
+                    return content[key].get_ref<const std::string &>();
+                }
+        };
+
+        model_input_ = ModelInput{
+                get_value(user_content, "question"),
+                get_value(user_content, "image"),
+                get_value(user_content, "audio"),
+        };
+    }
+
     std::string BuildPrompt(json &data, bool &is_tool)
     {
         is_tool = false;
@@ -127,18 +205,30 @@ private:
         }
 
         // Extract the content sent by the client, including the user's question, system prompts, and tool invocation results.
+        userContent = model_input_.text_;
+        chat_history_.AddMessage("user", userContent);
         for (const auto &element: msg)
         {
             // TODO: Handle history message.
             auto role = get_json_value(element, "role", BLANK_STRING);
-            if (role == "user")
+            if (role == "system")
             {
-                userContent = element["content"]["question"];
-                chat_history_.AddMessage("user", userContent);
-            }
-            else if (role == "system")
-            {
-                systemDefaultPrompt = get_json_value(element, "content", BLANK_STRING);
+                const json &system_content = element["content"];
+                if (system_content.is_array())
+                {
+                    for (const auto &sys_element: system_content)
+                    {
+                        if (strcmp(sys_element["type"].get_ref<const std::string &>().c_str(), "text") == 0)
+                        {
+                            systemDefaultPrompt = sys_element["text"].get_ref<const std::string &>();
+                            break;
+                        }
+                    }
+                }
+                else if (system_content.is_object())
+                {
+                    systemDefaultPrompt = get_json_value(element, "content", BLANK_STRING);
+                }
                 systemDefaultPrompt = str_replace(systemDefaultPrompt, "\\n", "\n");
             }
             else if (role == "tool")
@@ -182,6 +272,13 @@ private:
         s = std::regex_replace(s, std::regex(R"(^(\s*\n)+)"), "");
         s = std::regex_replace(s, std::regex(R"((\s*\n)+$)"), "");
         return s;
+    }
+
+    void Reset()
+    {
+        model_input_.text_.clear();
+        model_input_.image_.clear();
+        model_input_.audio_.clear();
     }
 
     static inline const std::string FILL_THINK = "<think>\n\n</think>\n\n";

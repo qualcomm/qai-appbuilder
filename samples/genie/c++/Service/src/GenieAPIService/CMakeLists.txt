@@ -57,9 +57,13 @@ configure_file(
         @ONLY
 )
 
-add_executable(${CMAKE_PROJECT_NAME} ${SERVICE_SOURCES})
+if (MSVC)
+    add_executable(${CMAKE_PROJECT_NAME} ${SERVICE_SOURCES})
+elseif (ANDROID)
+    add_library(${CMAKE_PROJECT_NAME} SHARED ${SERVICE_SOURCES})
+endif ()
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${INCLUDE_PATH})
-target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE -DNOMINMAX -DBUILDING_LIBCURL -D_HAS_STD_BYTE=0)
+target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE -DNOMINMAX -D_HAS_STD_BYTE=0)
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE ${EXTERNAL_LIB_PATH})
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ${EXTERNAL_LIBS})
 

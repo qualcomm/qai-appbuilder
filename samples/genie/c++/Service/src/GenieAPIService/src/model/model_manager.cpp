@@ -186,46 +186,56 @@ struct ModelManager::ModeVerifier
     class ModeVerifierImpl
     {
     public:
-        explicit ModeVerifierImpl(ModelManager *self, bool config_strict = true) : self_{self}
-        {
-            if (File::IsFileExist(self_->config_file_) && !File::IsFileEmpty(self_->config_file_))
-                return;
-
-            if (self->known_model_path_.empty())
-            {
-                std::string err_str{"config file is not found: " + self_->config_file_};
-                config_strict ? throw std::runtime_error(err_str)
-                              : My_Log{My_Log::Level::kWarning} << err_str << std::endl;
-                return;
-            }
-
-            std::string new_config_path{self->known_model_path_ + "/config.json"};
-            My_Log{My_Log::Level::kError} << "config file: " << self_->config_file_ << " "
-                                          << "is not exist, will use default ver: " << new_config_path
-                                          << std::endl;
-            self_->config_file_ = new_config_path;
-        }
+        explicit ModeVerifierImpl(ModelManager *self) : self_{self} {}
 
         virtual ~ModeVerifierImpl() = default;
 
-    protected:
-        ModelManager *self_;
-
-    private:
-        virtual std::shared_ptr<ContextBase> CreateIfVerified() = 0;
-    };
-
-    struct QnnVerifier : public ModeVerifierImpl
-    {
-        explicit QnnVerifier(ModelManager *self) : ModeVerifierImpl(self) {}
-
-        std::shared_ptr<ContextBase> CreateIfVerified() override
+        std::shared_ptr<ContextBase> CreateIfVerified()
         {
-            if (!File::MatchFileInDir(self_->model_path_, ".bin"))
+            if (!File::MatchFileInDir(self_->model_path_, ext_))
             {
                 return nullptr;
             }
 
+            if (!config_strict_)
+            {
+                return CreateIfVerifiedImpl();
+            }
+
+            if (File::IsFileExist(self_->config_file_) && !File::IsFileEmpty(self_->config_file_))
+                return CreateIfVerifiedImpl();
+
+            if (self_->known_model_path_.empty())
+            {
+                std::string err_str{"config file is not found: " + self_->config_file_};
+                My_Log{My_Log::Level::kWarning} << err_str << std::endl;
+                return nullptr;
+            }
+
+            std::string new_config_path{self_->known_model_path_ + "/config.json"};
+            My_Log{My_Log::Level::kError} << "config file: " << self_->config_file_ << " "
+                                          << "is not exist, will use default ver: " << new_config_path
+                                          << std::endl;
+            self_->config_file_ = new_config_path;
+
+            return CreateIfVerifiedImpl();
+        }
+
+    protected:
+        ModelManager *self_;
+        bool config_strict_{true};
+        const char *ext_{};
+
+    private:
+        virtual std::shared_ptr<ContextBase> CreateIfVerifiedImpl() = 0;
+    };
+
+    struct QnnVerifier : public ModeVerifierImpl
+    {
+        explicit QnnVerifier(ModelManager *self) : ModeVerifierImpl(self) { ext_ = "bin"; }
+
+        std::shared_ptr<ContextBase> CreateIfVerifiedImpl() override
+        {
             {
                 std::ifstream file(self_->config_file_);
                 json j;
@@ -261,29 +271,24 @@ struct ModelManager::ModeVerifier
 
     struct MnnVerifier : public ModeVerifierImpl
     {
-        explicit MnnVerifier(ModelManager *self) : ModeVerifierImpl(self) {}
+        explicit MnnVerifier(ModelManager *self) : ModeVerifierImpl(self) { ext_ = ".mnn"; }
 
-        std::shared_ptr<ContextBase> CreateIfVerified() override
+        std::shared_ptr<ContextBase> CreateIfVerifiedImpl() override
         {
-            if (!File::MatchFileInDir(self_->model_path_, ".mnn"))
-            {
-                return nullptr;
-            }
             return std::make_shared<MNNContext>(*self_);
         }
     };
 
     struct GGUFVerify : public ModeVerifierImpl
     {
-        explicit GGUFVerify(ModelManager *self) : ModeVerifierImpl(self, true) {}
-
-        std::shared_ptr<ContextBase> CreateIfVerified() override
+        explicit GGUFVerify(ModelManager *self) : ModeVerifierImpl(self)
         {
-            if (!File::MatchFileInDir(self_->model_path_, ".gguf"))
-            {
-                return nullptr;
-            }
+            config_strict_ = false;
+            ext_ = ".gguf";
+        }
 
+        std::shared_ptr<ContextBase> CreateIfVerifiedImpl() override
+        {
             return std::make_shared<LLAMACppBuilder>(*self_);
         }
     };

@@ -123,9 +123,10 @@ size_t write_callback_stream(char *ptr, size_t size, size_t nmemb, void *userdat
     message += chunk;
     std::istringstream stream(chunk);
     std::string line;
-    bool process{false};
+    bool process;
     try
     {
+        process = false;
         while (std::getline(stream, line))
         {
             process = true;
@@ -146,6 +147,10 @@ size_t write_callback_stream(char *ptr, size_t size, size_t nmemb, void *userdat
                 }
             }
         }
+        if (!process)
+        {
+            My_Log{} << chunk << "\n";
+        }
     }
     catch (const std::exception &e)
     {
@@ -153,11 +158,6 @@ size_t write_callback_stream(char *ptr, size_t size, size_t nmemb, void *userdat
         My_Log{} << chunk << "\n";
     }
 
-    if (!process)
-    {
-        My_Log{} << "get line failed\n";
-        My_Log{} << message << "\n";
-    }
     return total_size;
 }
 
@@ -167,8 +167,8 @@ size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp)
     return size * nmemb;
 }
 
-template<typename T>
-std::string build_request_body(const std::string &model, const T &prompt, const std::string &system, bool stream)
+template<typename T1, typename T2>
+std::string build_request_body(const std::string &model, const T1 &prompt, const T2 &system, bool stream)
 {
     json body;
     body["model"] = model;
@@ -183,7 +183,7 @@ std::string build_request_body(const std::string &model, const T &prompt, const 
     body["top_k"] = 13;
     body["top_p"] = 0.6;
 
-    return body.dump();
+    return body.dump(4);
 }
 
 void Do(const std::string &body)
@@ -196,7 +196,6 @@ void Do(const std::string &body)
     curl_easy_setopt(curl, CURLOPT_URL, SVR_URL.c_str());
     struct curl_slist *headers = nullptr;
     headers = curl_slist_append(headers, "Content-Type: application/json");
-    std::string response_string;
 
     if (cli_info.stream)
     {
@@ -208,7 +207,7 @@ void Do(const std::string &body)
     {
         My_Log{} << "reponse mode: non-stream mode\n";
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_string);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &message);
     }
 
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
@@ -226,17 +225,17 @@ void Do(const std::string &body)
         goto clean;
     }
 
-    if (!response_string.empty())
+    if (!cli_info.stream && !message.empty())
         try
         {
-            full_response = json::parse(response_string).dump(4);
-            My_Log{} << json::parse(response_string)["choices"][0]["message"]["content"].get<std::string>()
+            full_response = json::parse(message).dump(4);
+            My_Log{} << json::parse(message)["choices"][0]["message"]["content"].get<std::string>()
                      << std::endl;
-
-        } catch (std::exception &e)
+        }
+        catch (std::exception &e)
         {
             My_Log{My_Log::Level::kError} << e.what() << "\n";
-            My_Log{} << (full_response.empty() ? response_string : full_response) << "\n";
+            My_Log{} << (full_response.empty() ? message : full_response) << "\n";
         }
 
     if (res != CURLE_OK)
@@ -297,6 +296,38 @@ std::string EncodeBinary(std::string &path)
     return out;
 }
 
+json BuildUserContentV1()
+{
+    json j_user;
+    j_user["question"] = cli_info.prompt;
+    j_user["image"] = EncodeBinary(cli_info.picture_path_);
+    j_user["audio"] = EncodeBinary(cli_info.audio_path_);
+    return j_user;
+}
+
+void BuildUserContentV2(json &j_system, json &j_user)
+{
+    j_user = json::array();
+    json text_item;
+    text_item["type"] = "text";
+    text_item["text"] = cli_info.prompt;
+    j_user.push_back(text_item);
+
+    if (!cli_info.picture_path_.empty())
+    {
+        json img_item;
+        img_item["type"] = "image_url";
+        img_item["image_url"] = json::object();
+        img_item["image_url"]["url"] = "data:image/png;base64," + EncodeBinary(cli_info.picture_path_);
+        j_user.push_back(img_item);
+    }
+
+    j_system = json::array();
+    text_item["type"] = "text";
+    text_item["text"] = cli_info.system;
+    j_system.push_back(text_item);
+}
+
 #ifdef WIN32
 #define MAIN int wmain(int argc, wchar_t *argv[])
 #else
@@ -325,14 +356,14 @@ MAIN
         }
     }
 
-    json j;
-    j["question"] = cli_info.prompt;
-
     try
     {
-        j["image"] = EncodeBinary(cli_info.picture_path_);
-        j["audio"] = EncodeBinary(cli_info.audio_path_);
-        std::string req_body = build_request_body(cli_info.model, j, cli_info.system, cli_info.stream);
+        json j_system, j_user;
+//        BuildUserContentV2(j_system, j_user);
+//        std::string req_body = build_request_body(cli_info.model, j_user, j_system, cli_info.stream);
+//        My_Log{} << req_body << "\n";
+        std::string req_body = build_request_body(cli_info.model, BuildUserContentV1(), cli_info.system, cli_info.stream);
+//        std::string req_body = build_request_body(cli_info.model, cli_info.prompt, cli_info.system, cli_info.stream);
         cli_info.loop ? DoLoop() : Do(req_body);
     }
     catch (const std::exception &e)

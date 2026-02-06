@@ -49,8 +49,11 @@ LOCAL_LDLIBS                   := -llog
 LOCAL_SRC_FILES                :=   ../src/GenieAPIService/src/chat_history/chat_history.cpp \
                                     ../src/GenieAPIService/src/chat_request_handler/chat_request_handler.cpp \
 									../src/GenieAPIService/src/context/context_base.cpp \
-                                    ../src/GenieAPIService/src/context/genie.cpp \
-                                    ../src/GenieAPIService/src/context/genie_query_iface.cpp \
+                                    ../src/GenieAPIService/src/context/qnn/genie.cpp \
+                                    ../src/GenieAPIService/src/context/qnn/genie_interface.cpp \
+                                    ../src/GenieAPIService/src/context/qnn/phi4mm/phi4mm.cpp \
+                                    ../src/GenieAPIService/src/context/qnn/qwen2_5/qwen_2_5.cpp \
+                                    ../src/GenieAPIService/src/context/qnn/qwen2_5_omini/qwen_2_5_omini.cpp \
                                     ../src/GenieAPIService/src/model/model_manager.cpp \
                                     ../src/GenieAPIService/src/processor/harmony.cpp \
                                     ../src/GenieAPIService/src/processor/general.cpp \
@@ -69,8 +72,11 @@ LOCAL_LDLIBS                   := -llog
 LOCAL_SRC_FILES                :=   ../src/GenieAPIService/src/chat_history/chat_history.cpp \
                                     ../src/GenieAPIService/src/chat_request_handler/chat_request_handler.cpp \
 									../src/GenieAPIService/src/context/context_base.cpp \
-                                    ../src/GenieAPIService/src/context/genie.cpp \
-                                    ../src/GenieAPIService/src/context/genie_query_iface.cpp \
+                                    ../src/GenieAPIService/src/context/qnn/genie.cpp \
+                                    ../src/GenieAPIService/src/context/qnn/genie_interface.cpp \
+                                    ../src/GenieAPIService/src/context/qnn/phi4mm/phi4mm.cpp \
+                                    ../src/GenieAPIService/src/context/qnn/qwen2_5/qwen_2_5.cpp \
+                                    ../src/GenieAPIService/src/context/qnn/qwen2_5_omini/qwen_2_5_omini.cpp \
                                     ../src/GenieAPIService/src/model/model_manager.cpp \
                                     ../src/GenieAPIService/src/processor/harmony.cpp \
                                     ../src/GenieAPIService/src/processor/general.cpp \

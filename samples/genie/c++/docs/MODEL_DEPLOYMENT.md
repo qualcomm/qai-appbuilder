@@ -1,11 +1,22 @@
-# Deployment
+# Deployment GenieAPIService and Client on your device
+
+You should choose and download models first by following this [Download Link](https://www.aidevhome.com/?id=51).
+
+The path `models/[MODEL_NAME]/config.json` is recommended. For VLM, Please make the model follow
+the [VLM model layout](#Deployment)
+
+- Windows: move the models to `ai-engine-direct-helper\samples\genie\python\models` path.
+
+- Android: Please push the model files into your device. The model files should be pushed to `/sdcard/GenieModels`.
+
+## Deployment
 
 Please keep VLM models following the layout
 
 - [qwen2.5vl3b](#qwen2.5vl3b)
 - [phi4mm](#phi4mm)
 
-## qwen2.5vl3b
+### qwen2.5vl3b
 
 ```
 ./models/qwen2.5vl3b
@@ -25,7 +36,7 @@ Please keep VLM models following the layout
         window_attention_mask.raw
 ```
 
-## phi4mm
+### phi4mm
 
 ```
 ./models/phi4mm
