@@ -22,14 +22,18 @@ git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
 
 ### Download QNN SDK
 
-Download the Qualcomm® AI Runtime SDK from:
+Download the Qualcomm® AI Runtime (QAIRT) SDK on device, which includes the required QNN runtime libraries, from the following link:
 
-https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK
+[QAIRT v2.39.0.250926](https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.39.0.250926/v2.39.0.250926.zip)
 
-> **Important Notes:**  
-> - **Required Version**: QNN SDK 2.39.x or higher is required.
-> - **Architecture Support**: Although the package is labeled for x86, it contains dynamic libraries for aarch64 architecture.
-> - **Installation Guide**: For detailed installation instructions, refer to the [official documentation](https://docs.qualcomm.com/bundle/publicresource/topics/80-77512-1/hexagon-dsp-sdk-install-addons-linux.html?product=1601111740010422).
+```bash
+# Download QAIRT SDK package
+wget https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.39.0.250926/v2.39.0.250926.zip
+
+# Extract the runtime libraries
+unzip v2.39.0.250926.zip
+```
+
 
 ### Set Environment Variables
 
@@ -37,8 +41,8 @@ On the **IQ9075** and **QCS6490** device side, configure the following environme
 
 **Common variables for both platforms:**
 ```bash
-export QNN_SDK_ROOT=<path_to_qnn_sdk>
-export LD_LIBRARY_PATH=$QNN_SDK_ROOT/lib/aarch64-oe-linux-gcc11.2
+export QNN_SDK_ROOT=<path_to_v2.39.0.250926>
+export LD_LIBRARY_PATH=$QNN_SDK_ROOT/lib/aarch64-oe-linux-gcc11.2:$LD_LIBRARY_PATH
 ```
 
 **Platform-specific configuration:**
@@ -60,14 +64,14 @@ QAI AppBuilder provides multiple examples of AI applications developed using Pyt
 
 #### 1. Install Python Dependencies
 
-Install required Python packages:
+Upgrade build tooling and install required Python packages:
 ```bash
 pip install requests==2.32.3 py3-wget==1.0.12 tqdm==4.67.1 importlib-metadata==8.5.0 qai-hub==0.30.0 opencv-python==4.10.0.82 torch>=1.8.0 torchvision>=0.9.0
 ```
 
 #### 2. Build QAI AppBuilder Python and C/C++ Libraries
 
-Navigate to the project root directory and build the libraries:
+From the project root directory, build the libraries:
 
 **For QCS6490 (Hexagon v68):**
 ```bash
@@ -84,7 +88,7 @@ python setup.py bdist_wheel --toolchains aarch64-oe-linux-gcc11.2 --hexagonarch 
 Install the built wheel package:
 
 ```bash
-pip install dist/qai_appbuilder-2.39.0-cp312-cp312-linux_aarch64.whl
+python -m pip install dist/qai_appbuilder-*.whl
 ```
 
 > **Note:** The version number may vary based on your QNN SDK version.
@@ -139,7 +143,7 @@ This example demonstrates AI model inference using the QAI AppBuilder C++ API. T
 
 **Basic Usage Pattern:**
 
-```C++
+```cpp
 #include "LibAppBuilder.hpp"
 
 // Initialize AppBuilder and set logging level
@@ -164,7 +168,7 @@ libAppBuilder.ModelInference(model_name, inputBuffers, outputBuffers, outputSize
 // TODO: Use the data in outputBuffers for your application
 
 // Clean up allocated memory
-for (int j = 0; j < outputBuffers.size(); j++) {
+for (size_t j = 0; j < outputBuffers.size(); j++) {
     free(outputBuffers[j]);
 }
 outputBuffers.clear();
