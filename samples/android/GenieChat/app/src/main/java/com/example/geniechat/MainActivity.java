@@ -9,21 +9,30 @@
 package com.example.geniechat;
 
 import android.Manifest;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.provider.OpenableColumns;
 import android.provider.Settings;
+import android.util.Base64;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.View;
 import android.widget.EditText;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
@@ -41,7 +50,9 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
@@ -61,16 +72,32 @@ public class MainActivity extends AppCompatActivity implements MessageAdapter.On
 
     private static final String TAG = "MainActivity";
     private static final int STORAGE_PERMISSION_REQUEST_CODE = 101;
+    private static final int PICK_IMAGE_REQUEST_CODE = 102;
+    private static final int PICK_DOCUMENT_REQUEST_CODE = 103;
+    private static final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB limit
 
     private RecyclerView recyclerView;
     private EditText editTextMessage;
     private FloatingActionButton buttonSend;
+    private ImageView buttonAddAttachment;
+    
+
+    private LinearLayout attachmentPreviewContainer;
+    private LinearLayout imageAttachmentIndicator;
+    private LinearLayout docAttachmentIndicator;
+    private TextView imageCountText;
+    private TextView docCountText;
+    private ImageView clearImagesButton;
+    private ImageView clearDocsButton;
 
     private MessageAdapter messageAdapter;
     private ChatViewModel chatViewModel;
     private OkHttpClient client;
     private Gson gson;
     private MenuItem settingsMenuItem;
+    
+
+    private List<Message.Attachment> currentAttachments = new ArrayList<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -93,8 +120,24 @@ public class MainActivity extends AppCompatActivity implements MessageAdapter.On
         recyclerView = findViewById(R.id.recyclerView);
         editTextMessage = findViewById(R.id.editTextMessage);
         buttonSend = findViewById(R.id.buttonSend);
+        buttonAddAttachment = findViewById(R.id.buttonAddAttachment);
+        
+
+        attachmentPreviewContainer = findViewById(R.id.attachmentPreviewContainer);
+        imageAttachmentIndicator = findViewById(R.id.imageAttachmentIndicator);
+        docAttachmentIndicator = findViewById(R.id.docAttachmentIndicator);
+        imageCountText = findViewById(R.id.imageCountText);
+        docCountText = findViewById(R.id.docCountText);
+        clearImagesButton = findViewById(R.id.clearImagesButton);
+        clearDocsButton = findViewById(R.id.clearDocsButton);
+        
         setSupportActionBar(findViewById(R.id.toolbar));
         buttonSend.setOnClickListener(v -> sendMessage());
+        buttonAddAttachment.setOnClickListener(v -> showAttachmentDialog());
+        
+
+        clearImagesButton.setOnClickListener(v -> clearImageAttachments());
+        clearDocsButton.setOnClickListener(v -> clearDocAttachments());
     }
 
     private void initRecyclerView() {
@@ -151,7 +194,7 @@ public class MainActivity extends AppCompatActivity implements MessageAdapter.On
         if (item.getItemId() == R.id.action_settings) {
             // Prevent opening Settings while the model is replying.
             if (Boolean.TRUE.equals(chatViewModel.getIsModelReplying().getValue())) {
-                Toast.makeText(this, "正在生成回复，无法进入设置", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Generating, cannot select settings", Toast.LENGTH_SHORT).show();
                 return true;
             }
             Intent intent = new Intent(this, SettingsActivity.class);
@@ -163,13 +206,21 @@ public class MainActivity extends AppCompatActivity implements MessageAdapter.On
 
     private void sendMessage() {
         String messageText = editTextMessage.getText().toString().trim();
-        if (messageText.isEmpty()) {
+        if (messageText.isEmpty() && currentAttachments.isEmpty()) {
             return;
         }
 
-        Message userMessage = new Message(messageText, true);
+
+        Message userMessage;
+        if (!currentAttachments.isEmpty()) {
+            userMessage = new Message(messageText, true, new ArrayList<>(currentAttachments));
+        } else {
+            userMessage = new Message(messageText, true);
+        }
+        
         chatViewModel.addMessage(userMessage);
         editTextMessage.setText("");
+        clearAllAttachments();
 
         // Immediately disable UI and persist model-reply state so it survives
         // orientation changes.
@@ -183,10 +234,221 @@ public class MainActivity extends AppCompatActivity implements MessageAdapter.On
             editTextMessage.setEnabled(enabled);
             buttonSend.setEnabled(enabled);
             buttonSend.setAlpha(enabled ? 1.0f : 0.5f);
+            buttonAddAttachment.setEnabled(enabled);
+            buttonAddAttachment.setAlpha(enabled ? 1.0f : 0.5f);
             if (settingsMenuItem != null) {
                 settingsMenuItem.setEnabled(enabled);
             }
         });
+    }
+
+
+    private void showAttachmentDialog() {
+        String[] options = {
+            getString(R.string.select_image),
+            getString(R.string.select_document)
+        };
+        
+        new AlertDialog.Builder(this)
+            .setTitle(R.string.select_attachment_type)
+            .setItems(options, (dialog, which) -> {
+                if (which == 0) {
+                    pickImage();
+                } else {
+                    pickDocument();
+                }
+            })
+            .setNegativeButton(R.string.cancel, null)
+            .show();
+    }
+
+    private void pickImage() {
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.setType("image/*");
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        startActivityForResult(Intent.createChooser(intent, getString(R.string.select_image)), PICK_IMAGE_REQUEST_CODE);
+    }
+
+    private void pickDocument() {
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.setType("text/plain");
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        startActivityForResult(Intent.createChooser(intent, getString(R.string.select_document)), PICK_DOCUMENT_REQUEST_CODE);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+            return;
+        }
+        
+        Uri uri = data.getData();
+        
+        if (requestCode == PICK_IMAGE_REQUEST_CODE) {
+            handleImageSelection(uri);
+        } else if (requestCode == PICK_DOCUMENT_REQUEST_CODE) {
+            handleDocumentSelection(uri);
+        }
+    }
+
+    private void handleImageSelection(Uri uri) {
+        try {
+
+            long fileSize = getFileSize(uri);
+            if (fileSize > MAX_FILE_SIZE) {
+                Toast.makeText(this, R.string.file_too_large, Toast.LENGTH_SHORT).show();
+                return;
+            }
+            
+
+            InputStream inputStream = getContentResolver().openInputStream(uri);
+            if (inputStream == null) {
+                Toast.makeText(this, R.string.file_read_error, Toast.LENGTH_SHORT).show();
+                return;
+            }
+            
+            ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+            byte[] buffer = new byte[4096];
+            int bytesRead;
+            while ((bytesRead = inputStream.read(buffer)) != -1) {
+                byteArrayOutputStream.write(buffer, 0, bytesRead);
+            }
+            inputStream.close();
+            
+            String base64Image = Base64.encodeToString(byteArrayOutputStream.toByteArray(), Base64.NO_WRAP);
+            String fileName = getFileName(uri);
+            
+            Message.Attachment attachment = new Message.Attachment(
+                Message.AttachmentType.IMAGE, 
+                base64Image, 
+                fileName
+            );
+            currentAttachments.add(attachment);
+            updateAttachmentPreview();
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Error reading image: ", e);
+            Toast.makeText(this, R.string.file_read_error, Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void handleDocumentSelection(Uri uri) {
+        try {
+
+            long fileSize = getFileSize(uri);
+            if (fileSize > MAX_FILE_SIZE) {
+                Toast.makeText(this, R.string.file_too_large, Toast.LENGTH_SHORT).show();
+                return;
+            }
+            
+
+            InputStream inputStream = getContentResolver().openInputStream(uri);
+            if (inputStream == null) {
+                Toast.makeText(this, R.string.file_read_error, Toast.LENGTH_SHORT).show();
+                return;
+            }
+            
+            BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
+            StringBuilder content = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                content.append(line).append("\n");
+            }
+            reader.close();
+            
+            String base64Content = Base64.encodeToString(content.toString().getBytes(), Base64.NO_WRAP);
+            String fileName = getFileName(uri);
+            
+            Message.Attachment attachment = new Message.Attachment(
+                Message.AttachmentType.TEXT_FILE, 
+                base64Content, 
+                fileName
+            );
+            currentAttachments.add(attachment);
+            updateAttachmentPreview();
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Error reading document: ", e);
+            Toast.makeText(this, R.string.file_read_error, Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private long getFileSize(Uri uri) {
+        Cursor cursor = getContentResolver().query(uri, null, null, null, null);
+        if (cursor != null && cursor.moveToFirst()) {
+            int sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE);
+            if (sizeIndex >= 0) {
+                long size = cursor.getLong(sizeIndex);
+                cursor.close();
+                return size;
+            }
+            cursor.close();
+        }
+        return 0;
+    }
+
+    private String getFileName(Uri uri) {
+        String fileName = "unknown";
+        Cursor cursor = getContentResolver().query(uri, null, null, null, null);
+        if (cursor != null && cursor.moveToFirst()) {
+            int nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+            if (nameIndex >= 0) {
+                fileName = cursor.getString(nameIndex);
+            }
+            cursor.close();
+        }
+        return fileName;
+    }
+
+    private void updateAttachmentPreview() {
+        int imageCount = 0;
+        int docCount = 0;
+        
+        for (Message.Attachment attachment : currentAttachments) {
+            if (attachment.getType() == Message.AttachmentType.IMAGE) {
+                imageCount++;
+            } else {
+                docCount++;
+            }
+        }
+        
+
+        if (imageCount > 0 || docCount > 0) {
+            attachmentPreviewContainer.setVisibility(View.VISIBLE);
+        } else {
+            attachmentPreviewContainer.setVisibility(View.GONE);
+        }
+        
+        if (imageCount > 0) {
+            imageAttachmentIndicator.setVisibility(View.VISIBLE);
+            imageCountText.setText(String.valueOf(imageCount));
+        } else {
+            imageAttachmentIndicator.setVisibility(View.GONE);
+        }
+        
+        if (docCount > 0) {
+            docAttachmentIndicator.setVisibility(View.VISIBLE);
+            docCountText.setText(String.valueOf(docCount));
+        } else {
+            docAttachmentIndicator.setVisibility(View.GONE);
+        }
+    }
+
+    private void clearImageAttachments() {
+        currentAttachments.removeIf(a -> a.getType() == Message.AttachmentType.IMAGE);
+        updateAttachmentPreview();
+    }
+
+    private void clearDocAttachments() {
+        currentAttachments.removeIf(a -> a.getType() == Message.AttachmentType.TEXT_FILE);
+        updateAttachmentPreview();
+    }
+
+    private void clearAllAttachments() {
+        currentAttachments.clear();
+        updateAttachmentPreview();
     }
 
     // This method is now a wrapper around the ViewModel's method.
@@ -217,18 +479,102 @@ public class MainActivity extends AppCompatActivity implements MessageAdapter.On
         jsonBody.addProperty("model", modelName);
         jsonBody.addProperty("stream", true);
 
-        JsonArray messages = new JsonArray();
-        JsonObject systemMessage = new JsonObject();
-        systemMessage.addProperty("role", "system");
-        systemMessage.addProperty("content", "You are a helpful assistant.");
-        messages.add(systemMessage);
 
-        JsonObject userMsg = new JsonObject();
-        userMsg.addProperty("role", "user");
-        userMsg.addProperty("content", userMessage.getText());
-        messages.add(userMsg);
+        boolean hasImageAttachment = userMessage.hasAttachments() && userMessage.getImageCount() > 0;
+        
+        if (hasImageAttachment) {
 
-        jsonBody.add("messages", messages);
+            JsonArray placeholderMessages = new JsonArray();
+            JsonObject placeholderMsg = new JsonObject();
+            placeholderMsg.addProperty("role", "user");
+            placeholderMsg.addProperty("content", "placeholder");
+            placeholderMessages.add(placeholderMsg);
+            jsonBody.add("messages", placeholderMessages);
+            
+
+            JsonArray customMessages = new JsonArray();
+            
+            JsonObject systemMessage = new JsonObject();
+            systemMessage.addProperty("role", "system");
+            systemMessage.addProperty("content", "You are a helpful assistant.");
+            customMessages.add(systemMessage);
+            
+
+            JsonObject userMsg = new JsonObject();
+            userMsg.addProperty("role", "user");
+            
+            JsonObject contentObj = new JsonObject();
+            
+
+            StringBuilder questionBuilder = new StringBuilder();
+            if (userMessage.getText() != null && !userMessage.getText().isEmpty()) {
+                questionBuilder.append(userMessage.getText());
+            }
+            
+
+            for (Message.Attachment attachment : userMessage.getAttachments()) {
+                if (attachment.getType() == Message.AttachmentType.TEXT_FILE) {
+                    try {
+                        String decodedContent = new String(Base64.decode(attachment.getBase64Content(), Base64.NO_WRAP));
+                        questionBuilder.append("\n\n--- ").append(attachment.getFileName()).append(" ---\n");
+                        questionBuilder.append(decodedContent);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error decoding text file: ", e);
+                    }
+                }
+            }
+            
+            contentObj.addProperty("question", questionBuilder.toString());
+            
+
+            for (Message.Attachment attachment : userMessage.getAttachments()) {
+                if (attachment.getType() == Message.AttachmentType.IMAGE) {
+                    contentObj.addProperty("image", attachment.getBase64Content());
+                    break; 
+                }
+            }
+            
+            userMsg.add("content", contentObj);
+            customMessages.add(userMsg);
+            
+
+            jsonBody.add("messages", customMessages);
+            
+        } else {
+
+            JsonArray messages = new JsonArray();
+            JsonObject systemMessage = new JsonObject();
+            systemMessage.addProperty("role", "system");
+            systemMessage.addProperty("content", "You are a helpful assistant.");
+            messages.add(systemMessage);
+
+            JsonObject userMsg = new JsonObject();
+            userMsg.addProperty("role", "user");
+            
+
+            StringBuilder contentBuilder = new StringBuilder();
+            if (userMessage.getText() != null && !userMessage.getText().isEmpty()) {
+                contentBuilder.append(userMessage.getText());
+            }
+            
+            for (Message.Attachment attachment : userMessage.getAttachments()) {
+                if (attachment.getType() == Message.AttachmentType.TEXT_FILE) {
+                    try {
+                        String decodedContent = new String(Base64.decode(attachment.getBase64Content(), Base64.NO_WRAP));
+                        contentBuilder.append("\n\n--- ").append(attachment.getFileName()).append(" ---\n");
+                        contentBuilder.append(decodedContent);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error decoding text file: ", e);
+                    }
+                }
+            }
+            
+            userMsg.addProperty("content", contentBuilder.toString());
+            messages.add(userMsg);
+
+            jsonBody.add("messages", messages);
+        }
+        
         jsonBody.addProperty("temperature", temperature);
         jsonBody.addProperty("top_p", topP);
         jsonBody.addProperty("top_k", topK);

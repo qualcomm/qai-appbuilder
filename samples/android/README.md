@@ -1,6 +1,7 @@
 ## Build and Run GenieChat app
-GenieChat is an Android application that demonstrates how to integrate large language models (LLMs) using the Genie API. It features a clean, modern user interface and supports real-time streaming responses, delivering a seamless interactive user experience.<br>
-• You can download GenieChat source codes and build GenieChat apk in android studio. <br>
+GenieChat is an Android application that demonstrates how to integrate large language models (LLMs) and VLM using the Genie API. It features a clean, modern user interface and supports real-time streaming responses, delivering a seamless interactive user experience.<br>
+• Please build or download [GenieAPIService.apk](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.42.0/GenieAPIService.apk), run it refer to [this link](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/genie/c%2B%2B/docs/USAGE.MD#use-for-android) firstly.<br>
+• Please download [GenieChat source codes](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/android/GenieChat) and build GenieChat apk in android studio. <br>
 • Then run it on Mobile device, refer to [this document](https://www.aidevhome.com/?id=50).<br>
 
 ## Build and Run SuperResolution sample app on Mobile Phone(Snapdragon® 8 Elite and and Snapdragon® 8 Elite Gen 5)

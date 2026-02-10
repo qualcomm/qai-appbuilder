@@ -3,4 +3,15 @@
     <string name="edit_text_hint">输入消息...</string>
     <!-- >>> 新增 <<< -->
     <string name="action_settings">设置</string>
+    <string name="add_attachment">添加附件</string>
+    <string name="image_attachment">图片附件</string>
+    <string name="doc_attachment">文档附件</string>
+    <string name="clear_images">清除图片</string>
+    <string name="clear_docs">清除文档</string>
+    <string name="select_attachment_type">选择附件类型</string>
+    <string name="select_image">选择图片</string>
+    <string name="select_document">选择文档 (TXT)</string>
+    <string name="cancel">取消</string>
+    <string name="file_read_error">文件读取失败</string>
+    <string name="file_too_large">文件过大</string>
 </resources>

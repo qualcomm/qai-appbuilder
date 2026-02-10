@@ -24,10 +24,96 @@
         android:layout_height="0dp"
         android:padding="8dp"
         app:layout_constraintTop_toBottomOf="@id/toolbar"
-        app:layout_constraintBottom_toTopOf="@+id/view_input_container"
+        app:layout_constraintBottom_toTopOf="@+id/attachmentPreviewContainer"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         tools:listitem="@layout/item_message" />
+
+    <!-- 附件预览区域 -->
+    <LinearLayout
+        android:id="@+id/attachmentPreviewContainer"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="8dp"
+        android:background="@color/input_background"
+        android:visibility="gone"
+        app:layout_constraintBottom_toTopOf="@+id/view_input_container"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <!-- 图片附件指示器 -->
+        <LinearLayout
+            android:id="@+id/imageAttachmentIndicator"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:visibility="gone"
+            android:layout_marginEnd="16dp">
+
+            <ImageView
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:src="@drawable/ic_image"
+                app:tint="@color/colorPrimary"
+                android:contentDescription="@string/image_attachment" />
+
+            <TextView
+                android:id="@+id/imageCountText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:textColor="@color/colorPrimary"
+                android:textSize="14sp"
+                android:text="0" />
+
+            <ImageView
+                android:id="@+id/clearImagesButton"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_close"
+                app:tint="@color/text_color_primary"
+                android:contentDescription="@string/clear_images" />
+        </LinearLayout>
+
+        <!-- 文档附件指示器 -->
+        <LinearLayout
+            android:id="@+id/docAttachmentIndicator"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:visibility="gone">
+
+            <ImageView
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:src="@drawable/ic_document"
+                app:tint="@color/colorPrimary"
+                android:contentDescription="@string/doc_attachment" />
+
+            <TextView
+                android:id="@+id/docCountText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:textColor="@color/colorPrimary"
+                android:textSize="14sp"
+                android:text="0" />
+
+            <ImageView
+                android:id="@+id/clearDocsButton"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_close"
+                app:tint="@color/text_color_primary"
+                android:contentDescription="@string/clear_docs" />
+        </LinearLayout>
+    </LinearLayout>
 
     <LinearLayout
         android:id="@+id/view_input_container"
@@ -53,11 +139,23 @@
             android:padding="12dp"
             android:textColor="@color/text_color_primary" />
 
+        <!-- 添加附件按钮 -->
+        <ImageView
+            android:id="@+id/buttonAddAttachment"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:padding="8dp"
+            android:src="@drawable/ic_add"
+            app:tint="@color/black"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/add_attachment" />
+
         <com.google.android.material.floatingactionbutton.FloatingActionButton
             android:id="@+id/buttonSend"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
+            android:layout_marginStart="4dp"
             android:src="@drawable/ic_send"
             app:backgroundTint="@color/colorAccent"
             app:tint="@color/white"

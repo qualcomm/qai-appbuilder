@@ -7,13 +7,17 @@
 //=============================================================================
 
 
+
 package com.example.geniechat.adapter;
 import android.animation.ValueAnimator;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.util.Base64;
 import android.view.ActionMode;
 import android.view.Gravity;
 import android.view.LayoutInflater;
@@ -21,6 +25,7 @@ import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -84,16 +89,36 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageV
     @Override public int getItemCount() { return messageList.size(); }
     static class MessageViewHolder extends RecyclerView.ViewHolder {
         LinearLayout messageRoot;
+        LinearLayout messageContentContainer;
+        FrameLayout attachmentWrapper;
+        FrameLayout textWrapper;
         TextView textViewMessage;
         ImageView buttonRetry;
+        LinearLayout attachmentContainer;
+        ImageView imageThumbnail1;
+        ImageView imageThumbnail2;
+        ImageView imageThumbnail3;
+        TextView moreImagesIndicator;
+        LinearLayout fileInfoContainer;
+        TextView fileNameText;
         private final Markwon markwon;
 
         public MessageViewHolder(@NonNull View itemView, Markwon markwon, OnRetryClickListener listener) {
             super(itemView);
             this.markwon = markwon;
             messageRoot = itemView.findViewById(R.id.message_root);
+            messageContentContainer = itemView.findViewById(R.id.messageContentContainer);
+            attachmentWrapper = itemView.findViewById(R.id.attachmentWrapper);
+            textWrapper = itemView.findViewById(R.id.textWrapper);
             textViewMessage = itemView.findViewById(R.id.textViewMessage);
             buttonRetry = itemView.findViewById(R.id.button_retry);
+            attachmentContainer = itemView.findViewById(R.id.attachmentContainer);
+            imageThumbnail1 = itemView.findViewById(R.id.imageThumbnail1);
+            imageThumbnail2 = itemView.findViewById(R.id.imageThumbnail2);
+            imageThumbnail3 = itemView.findViewById(R.id.imageThumbnail3);
+            moreImagesIndicator = itemView.findViewById(R.id.moreImagesIndicator);
+            fileInfoContainer = itemView.findViewById(R.id.fileInfoContainer);
+            fileNameText = itemView.findViewById(R.id.fileNameText);
 
             buttonRetry.setOnClickListener(v -> {
                 int position = getAdapterPosition();
@@ -101,7 +126,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageV
                     listener.onRetryClick(position);
                 }
             });
-            
+
             textViewMessage.setCustomSelectionActionModeCallback(new ActionMode.Callback() {
                 private final int MENU_ITEM_SHARE_ID = 1001;
 
@@ -162,10 +187,82 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageV
             // remove default font padding which can cause uneven vertical spacing
             textViewMessage.setIncludeFontPadding(false);
 
+            // 处理附件显示
+            if (message.hasAttachments() && message.getAttachments() != null && !message.getAttachments().isEmpty()) {
+                attachmentWrapper.setVisibility(View.VISIBLE);
+
+                List<Message.Attachment> attachments = message.getAttachments();
+                int imageCount = message.getImageCount();
+                int fileCount = message.getTextFileCount();
+
+                // 重置所有视图状态
+                imageThumbnail1.setVisibility(View.GONE);
+                imageThumbnail2.setVisibility(View.GONE);
+                imageThumbnail3.setVisibility(View.GONE);
+                moreImagesIndicator.setVisibility(View.GONE);
+                fileInfoContainer.setVisibility(View.GONE);
+
+                if (imageCount > 0) {
+                    // 显示图片缩略图
+                    ImageView[] thumbnails = {imageThumbnail1, imageThumbnail2, imageThumbnail3};
+                    int displayCount = Math.min(imageCount, 3);
+                    int imageIndex = 0;
+
+                    for (int i = 0; i < attachments.size() && imageIndex < displayCount; i++) {
+                        Message.Attachment attachment = attachments.get(i);
+                        if (attachment.getType() == Message.AttachmentType.IMAGE) {
+                            ImageView thumbnail = thumbnails[imageIndex];
+                            thumbnail.setVisibility(View.VISIBLE);
+
+                            try {
+                                byte[] imageBytes = Base64.decode(attachment.getBase64Content(), Base64.DEFAULT);
+                                Bitmap bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.length);
+                                thumbnail.setImageBitmap(bitmap);
+                            } catch (Exception e) {
+                                e.printStackTrace();
+                                thumbnail.setVisibility(View.GONE);
+                            }
+                            imageIndex++;
+                        }
+                    }
+
+                    // 如果图片数量超过3个，显示更多指示器
+                    if (imageCount > 3) {
+                        moreImagesIndicator.setVisibility(View.VISIBLE);
+                        moreImagesIndicator.setText("img+" + imageCount);
+                    }
+                } else if (fileCount > 0) {
+                    // 显示文件信息（只显示第一个文件）
+                    for (Message.Attachment attachment : attachments) {
+                        if (attachment.getType() == Message.AttachmentType.TEXT_FILE) {
+                            fileInfoContainer.setVisibility(View.VISIBLE);
+                            fileNameText.setText(attachment.getFileName());
+                            break;
+                        }
+                    }
+                }
+            } else {
+                attachmentWrapper.setVisibility(View.GONE);
+                imageThumbnail1.setVisibility(View.GONE);
+                imageThumbnail2.setVisibility(View.GONE);
+                imageThumbnail3.setVisibility(View.GONE);
+                moreImagesIndicator.setVisibility(View.GONE);
+                fileInfoContainer.setVisibility(View.GONE);
+            }
+
             if (message.isSentByUser()) {
                 textViewMessage.setText(message.getText());
                 messageRoot.setGravity(Gravity.END);
                 textViewMessage.setBackground(ContextCompat.getDrawable(itemView.getContext(), R.drawable.bg_bubble_right));
+
+                // 用户消息：设置附件和文本右对齐
+                FrameLayout.LayoutParams attachmentParams = (FrameLayout.LayoutParams) attachmentContainer.getLayoutParams();
+                attachmentParams.gravity = Gravity.END;
+                attachmentContainer.setLayoutParams(attachmentParams);
+
+                FrameLayout.LayoutParams textParams = (FrameLayout.LayoutParams) textViewMessage.getLayoutParams();
+                textParams.gravity = Gravity.END;
+                textViewMessage.setLayoutParams(textParams);
 
                 if (message.getStatus() == Message.Status.FAILED) {
                     buttonRetry.setVisibility(View.VISIBLE);
@@ -178,6 +275,16 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageV
                 markwon.setMarkdown(textViewMessage, message.getText());
                 messageRoot.setGravity(Gravity.START);
                 textViewMessage.setBackground(ContextCompat.getDrawable(itemView.getContext(), R.drawable.bg_bubble_left));
+
+                // AI消息：设置附件和文本左对齐
+                FrameLayout.LayoutParams attachmentParams = (FrameLayout.LayoutParams) attachmentContainer.getLayoutParams();
+                attachmentParams.gravity = Gravity.START;
+                attachmentContainer.setLayoutParams(attachmentParams);
+
+                FrameLayout.LayoutParams textParams = (FrameLayout.LayoutParams) textViewMessage.getLayoutParams();
+                textParams.gravity = Gravity.START;
+                textViewMessage.setLayoutParams(textParams);
+
                 buttonRetry.setVisibility(View.GONE);
             }
             // ensure normal layout params after a full bind

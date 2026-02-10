@@ -20,16 +20,127 @@
         android:contentDescription="Retry"
         android:layout_gravity="center_vertical" />
 
-    <com.example.geniechat.view.PaddedTextView
-        android:id="@+id/textViewMessage"
+    <LinearLayout
+        android:id="@+id/messageContentContainer"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:padding="12dp"
-        android:textColor="@color/text_color_primary"
-        android:textSize="16sp"
-        android:includeFontPadding="false"
-        android:breakStrategy="high_quality"
-        android:hyphenationFrequency="normal"
-        android:gravity="start"
-        android:textIsSelectable="true" />
+        android:orientation="vertical">
+
+        <!-- 附件预览容器包装层 -->
+        <FrameLayout
+            android:id="@+id/attachmentWrapper"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:id="@+id/attachmentContainer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingBottom="8dp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:layout_gravity="end"
+                android:gravity="end">
+
+                <!-- 图片缩略图1 -->
+                <ImageView
+                    android:id="@+id/imageThumbnail1"
+                    android:layout_width="50dp"
+                    android:layout_height="50dp"
+                    android:scaleType="centerCrop"
+                    android:visibility="gone"
+                    android:layout_marginStart="6dp"
+                    android:background="#E0E0E0"
+                    android:contentDescription="Image thumbnail 1" />
+
+                <!-- 图片缩略图2 -->
+                <ImageView
+                    android:id="@+id/imageThumbnail2"
+                    android:layout_width="50dp"
+                    android:layout_height="50dp"
+                    android:scaleType="centerCrop"
+                    android:visibility="gone"
+                    android:layout_marginStart="6dp"
+                    android:background="#E0E0E0"
+                    android:contentDescription="Image thumbnail 2" />
+
+                <!-- 图片缩略图3 -->
+                <ImageView
+                    android:id="@+id/imageThumbnail3"
+                    android:layout_width="50dp"
+                    android:layout_height="50dp"
+                    android:scaleType="centerCrop"
+                    android:visibility="gone"
+                    android:layout_marginStart="6dp"
+                    android:background="#E0E0E0"
+                    android:contentDescription="Image thumbnail 3" />
+
+                <!-- 更多图片指示器 -->
+                <TextView
+                    android:id="@+id/moreImagesIndicator"
+                    android:layout_width="50dp"
+                    android:layout_height="50dp"
+                    android:visibility="gone"
+                    android:layout_marginStart="6dp"
+                    android:background="#E0E0E0"
+                    android:gravity="center"
+                    android:textSize="12sp"
+                    android:textColor="#666666"
+                    android:textStyle="bold" />
+
+                <!-- 文件图标和信息 -->
+                <LinearLayout
+                    android:id="@+id/fileInfoContainer"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:visibility="gone"
+                    android:gravity="center_vertical"
+                    android:padding="8dp"
+                    android:layout_marginStart="6dp"
+                    android:background="#F5F5F5">
+
+                    <ImageView
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:src="@drawable/ic_document"
+                        android:layout_marginEnd="6dp"
+                        android:contentDescription="Document icon" />
+
+                    <TextView
+                        android:id="@+id/fileNameText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="12sp"
+                        android:textColor="#666666"
+                        android:maxWidth="120dp"
+                        android:singleLine="true"
+                        android:ellipsize="middle" />
+                </LinearLayout>
+            </LinearLayout>
+        </FrameLayout>
+
+        <!-- 消息文本包装层 -->
+        <FrameLayout
+            android:id="@+id/textWrapper"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <com.example.geniechat.view.PaddedTextView
+                android:id="@+id/textViewMessage"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:padding="12dp"
+                android:textColor="@color/text_color_primary"
+                android:textSize="16sp"
+                android:includeFontPadding="false"
+                android:breakStrategy="high_quality"
+                android:hyphenationFrequency="normal"
+                android:gravity="start"
+                android:layout_gravity="end"
+                android:textIsSelectable="true" />
+        </FrameLayout>
+    </LinearLayout>
 </LinearLayout>
