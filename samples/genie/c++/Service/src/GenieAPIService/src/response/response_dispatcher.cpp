@@ -56,13 +56,11 @@ void ResponseDispatcher::Prepare(ModelInput &model_input,
 
 bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::Response *res)
 {
-
     auto handle = model_config_.get_genie_model_handle().lock();
     std::string toolResponse; // Save tool call information
     std::string finishReason = "stop";
     response_buffer.clear();
     bool isToolResponse = false;
-
 
     auto genie_callback = [&](std::string &chunk)
     {

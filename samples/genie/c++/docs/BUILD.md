@@ -7,19 +7,24 @@ target.
 
 When you finished building task , please goto [USAGE](USAGE.MD) to learn how to use it.
 
-## Android:
-
-The code under this folder is Android app which can be used to launch the service in Android device.
-
-## Build For Windows:
-
-### Prepare environment:<br>
+### Prepare the repositories
 
 Use below command to clone the whole repository and the dependency 3rd party libraries.
 
 ```
 git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
 ```
+
+VLM models depend on some libs, please solve the dependence:
+
+```
+cd samples\genie\c++\External
+git clone https://github.com/nothings/stb.git
+```
+
+## Build For Windows:
+
+### Prepare environment:<br>
 
 Install these before you compile this service.<br>
 
@@ -36,13 +41,6 @@ After installing Qualcomm® AI Runtime SDK, It usually located at `C:\Qualcomm\A
 it as an environment variable.
 
 `Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.42.0.251225\`
-
-### Prepare the dependents
-
-```
-cd samples\genie\c++\External
-git clone https://github.com/nothings/stb.git
-```
 
 ### Build GenieAPIServer & GenieAPIClient:<br>
 

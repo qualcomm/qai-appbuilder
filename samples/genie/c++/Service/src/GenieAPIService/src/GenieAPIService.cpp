@@ -181,14 +181,14 @@ void GenieService::run(int argc, char *argv[])
     svr.listen(HOST, port_checked);
 }
 
-inline void GenieService::ServiceStop()
+void GenieService::ServiceStop()
 {
     My_Log{} << "start to stop service\n";
     modelManager->UnloadModel();
     svr.stop();
 }
 
-inline void GenieService::setupSignalHandlers()
+void GenieService::setupSignalHandlers()
 {
     signal(SIGINT, [](int signum)
     {

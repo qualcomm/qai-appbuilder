@@ -275,7 +275,6 @@ private:
                               default:
                                   my_level = My_Log::Level::kVerbose;
                           }
-
                           My_Log{my_level} << text;
                       }, nullptr);
     }

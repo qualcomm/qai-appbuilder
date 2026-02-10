@@ -44,7 +44,7 @@ Refer to [API](docs/API.md) for detailed information.
 ## GenieService & Client:
 
 - **Build:** If you want build form source, start at [BUILD](docs/BUILD.md).
-- **Deployment model:** [DEPLOYMENT](docs/MODEL_DEPLOYMENT.md) /teach how to download and deploy model.
+- **Deployment model:** [DEPLOYMENT](docs/MODEL_DEPLOYMENT.md) teach how to download and deploy model.
 - **Usage:** [USAGE](docs/USAGE.md) teach how to run with example.
 
 ### More Sample Code

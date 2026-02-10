@@ -15,7 +15,7 @@ class GeneralProcessor : public ModelProcessor
 {
 public:
     std::tuple<bool, std::string>
-    preprocessStream(std::string &chunkText, bool isToolResponse, std::string &toolResponse) override;
+    preprocessStream(std::string chunkText, bool isToolResponse, std::string &toolResponse) override;
 
     void Clean() final
     {};

@@ -18,7 +18,7 @@ public:
 
     ~HarmonyProcessor() override;
 
-    std::tuple<bool, std::string> preprocessStream(std::string &chunkText,
+    std::tuple<bool, std::string> preprocessStream(std::string chunkText,
                                                    bool isToolResponse,
                                                    std::string &toolResponse) override;
 

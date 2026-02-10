@@ -60,7 +60,7 @@ HarmonyProcessor::HarmonyProcessor() :
 {
 }
 
-std::tuple<bool, std::string> HarmonyProcessor::preprocessStream(std::string &chunkText,
+std::tuple<bool, std::string> HarmonyProcessor::preprocessStream(std::string chunkText,
                                                                  bool isToolResponse,
                                                                  std::string &toolResponse)
 {

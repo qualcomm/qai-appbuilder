@@ -66,7 +66,7 @@ private:
         }
     }
 
-    std::tuple<bool, std::string> preprocessStream(std::string &chunkText,
+    std::tuple<bool, std::string> preprocessStream(const std::string &chunkText,
                                                    bool isToolResponse,
                                                    std::string &toolResponse)
     {
