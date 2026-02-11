@@ -17,6 +17,7 @@ val sourceFiles = listOf(
     file("..\\..\\Service\\libs\\arm64-v8a\\libQnnHtpV81.so"),
     file("..\\..\\Service\\libs\\arm64-v8a\\libQnnHtpV81Skel.so"),
     file("..\\..\\Service\\libs\\arm64-v8a\\libQnnHtpV81Stub.so"),
+    file("..\\..\\Service\\libs\\arm64-v8a\\libappbuilder.so"),
 )
 
 val libsDir = file("libs/arm64-v8a")

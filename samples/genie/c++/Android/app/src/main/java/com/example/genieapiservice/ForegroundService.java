@@ -179,7 +179,7 @@ public class ForegroundService extends Service {
             nativeLib = new MyNativeLib();
             String currentModel = getFirstModel("/sdcard/GenieModels");
             String configFile = null;
-            LogUtils.logDebug(TAG,"onStartCommand in child thread = " + intent.getStringExtra("modelName"),LogUtils.LOG_DEBUG);
+            //LogUtils.logDebug(TAG,"onStartCommand in child thread = " + intent.getStringExtra("modelName"),LogUtils.LOG_DEBUG);
             if (currentModel != null) {
                 configFile = "/sdcard/GenieModels/" + currentModel + "/config.json";
             } else {
