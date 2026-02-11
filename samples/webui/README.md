@@ -41,8 +41,7 @@ You can also launch them by double-clicking the corresponding batch files: start
 |  ----  | :----    | :----    |
 | ImageRepairApp | python webui\ImageRepairApp.py | Image repair app with RealESRGAN model. |
 | StableDiffusionApp * | python webui\StableDiffusionApp.py | Text to image app with Stable Diffusion model. |
-| GenieWebUI ** | python webui\GenieWebUI.py | LLM Chat app, load model in process. |
-| GenieWebUI2 | python webui\GenieWebUI2.py | LLM Chat app, get model functions from Genie API Service through OpenAI API. Please start GenieAPIService before run this app. |
+| GenieWebUI ** | python webui\GenieWebUI.py | LLM Chat app, get model functions from GenieAPIService through OpenAI API. Please start GenieAPIService before run this app. |
 
 *. StableDiffusionApp only support English prompt.<br>
 **. Refer to step 3 here to [setup LLM models](../genie/python/README.md) before run 'GenieWebUI.py'.<br>

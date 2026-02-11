@@ -2,6 +2,7 @@
 # Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
+
 import time
 import sys
 import os
@@ -9,33 +10,35 @@ import threading
 import shutil
 import re
 import glob
+import requests
 import numpy as np
+from PIL import Image
 import gradio as gr
 from gradio import ChatMessage
 from gradio.data_classes import FileData
+from chat import Chat
+from Docutils import ManualDocSummarizer
+import base64
 
-sys.path.append("python")
-sys.path.append(os.path.join("genie", "python"))
+os.environ["no_proxy"] = "localhost,127.0.0.1,::1"
 
-import utils.install as install
-from ChainUtils import GenieLLM
-from DocUtils import DocSummarize
+# ===================================================================
+# 🌐 前端 UI 层（仅保留结构，后端调用将通过 HTTP）
+# 所有实际逻辑用 pass 替代，留出接口接入点
+# ===================================================================
+service = Chat()
+docx_summary = ManualDocSummarizer()
 
-import stable_diffusion_v2_1.stable_diffusion_v2_1 as stable_diffusion
-
-###########################################################################
-
-HOST="0.0.0.0"
-PORT=8976
-APP_PATH=os.path.join("genie", "python")
-
-DOCS_MAX_SIZE = 4096 - 1024  # TODO, calculate this value.
-
-FILE_TYPES = [".pdf", ".docx", ".pptx", ".txt", ".md", ".py", ".c", ".cpp", ".h", ".hpp" ]
+current_model = ""
+HOST = "0.0.0.0"
+#HOST = "127.0.0.1"
+PORT = 50000
+FILE_PATH = "files"
+TRUSTED_OUTPUT_DIR="images"
+FILE_TYPES = [".pdf", ".docx", ".pptx", ".txt", ".md", ".py", ".c", ".cpp", ".h", ".hpp"]
+IMG_TYPES = [".png", ".jpg", "jpeg"]
 FUNC_LIST = ["📐 解题答疑", "📚 文档总结", "🗛 AI 翻 译", "🌐 AI 搜 索", "✒️ 帮我写作", "🎨 图像生成", "🍸 定制功能", "✈️ 旅游规划"]
 FUNC_LIST_EN = ["📐 Q & A", "📚 Doc Summary", "🗛 AI Translation", "🌐 AI Searching", "✒️ Writing Assistant", "🎨 Text To Image", "🍸 Customerized Function", "✈️ Tourism planning"]
-
-FILE_PATH = "files"
 
 class Colors:
     RED = '\033[91m'
@@ -45,7 +48,7 @@ class Colors:
     MAGENTA = '\033[95m'
     CYAN = '\033[96m'
     WHITE = '\033[97m'
-    END = '\033[0m'  # Reset color.
+    END = '\033[0m'
 
 
 ###########################################################################
@@ -75,257 +78,179 @@ footer{display:none !important}
 
 ###########################################################################
 
-llm = None
-sumllm = None
+# ===================================================================
+# 🧩 全局变量（仅用于前端状态管理）
+# ===================================================================
 _func_mode = 0
-_question = None
+_question = ""
 _sys_prompt = None
-llm_name = ""
-###########################################################################
+chat_history = []  # 可用于临时缓存（实际应由后端维护）
+def on_model_selected(model_name):
+    """
+    当用户选择模型时触发
+    model_name: 用户选择的模型名称
+    """
+    print(f"Model Selected: {model_name}")
+    # 在这里保存到全局变量，或传递给其他函数
+    global current_model
+    current_model = model_name
+    return   # 可以返回值更新其他组件
+def update_max_contextsize(model_name):
+    url = "http://127.0.0.1:8910/contextsize"
+    params = {"modelName": model_name}  #Llama2.0-7B-SSD
+    response = requests.post(url, json=params)
+    if response.status_code == 200:
+        result = response.json()
+        print("context大小:",result["contextsize"])  
+        return gr.update(maximum=result["contextsize"], value=result["contextsize"])
 
-def has_chinese(text):
-    pattern = re.compile(r'[\u4e00-\u9fff]')
-    match = pattern.search(text)
-    return match is not None
+def get_mock_profile():
+    return "⏱️ 首 Token: 1.2s | 📥 输入速度: 120 tok/s | 📤 输出速度: 45 tok/s"
 
-def model_unload():
-    global llm
+def stop_generation():
+    """中断生成的函数（绑定到 cancel_btn）"""
+    service.stopoutput()
+    print("✅ The user clicked the pause button and is interrupting the generation...")
 
-    if llm:
-        del(llm)
-        llm = None
+def encode_image(image_input):
+    if image_input == "":
+        return ""
+    try:
+        if not os.path.exists(image_input):
+            raise FileNotFoundError(f"Local file not found: {image_input}")
 
-def download_tokenizer(model_path, url):
-    if not os.path.exists(model_path):
-        install.download_url(url, model_path)
-
-        if "Phi-3.5-mini" in model_path:
-            import re
-            with open(model_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            pattern = r',\s*{\s*"type":\s*"Strip",\s*"content":\s*"\s*",\s*"start":\s*\d+,\s*"stop":\s*\d+\s*}'
-            new_content = re.sub(pattern, '', content)
-            with open(model_path, 'w', encoding='utf-8') as f:
-                f.write(new_content)
-
-def download():
-    download_tokenizer(
-        os.path.join(APP_PATH, "models", "IBM-Granite-v3.1-8B", "tokenizer.json"),
-        "https://gitee.com/hf-models/granite-3.1-8b-base/raw/main/tokenizer.json"
-    )
-    download_tokenizer(
-        os.path.join(APP_PATH, "models", "Phi-3.5-mini", "tokenizer.json"),
-        "https://gitee.com/hf-models/Phi-3.5-mini-instruct/raw/main/tokenizer.json"
-    )
-
-def model_change(value):
-    global llm_name
-
-    if value != llm_name and value != "":
-        llm_name = value
-        global llm
-
-        download()
-
-        print()
-        print(f"{Colors.GREEN}INFO:     loading model <<<", value, f">>>{Colors.END}")
-        model_name = value
-        model_unload() # unload old model if it is already loaded.
-
-        time_start = time.time()
-        llm = GenieLLM()
-        llm.init(model_name=model_name)
-
-        print(f"{Colors.GREEN}INFO:     model <<<", value, f">>> is ready!{Colors.END}")
-        time_end = time.time()
-        load_time = str(round(time_end - time_start, 2)) + " (s)"
-        print(f"{Colors.GREEN}INFO:     model init time:", load_time, f"{Colors.END}")
-
+        with open(image_input, "rb") as image_file:
+            return base64.b64encode(image_file.read()).decode('utf-8')
+    except Exception as e:
+            raise Exception(f"Failed to load local image: {e}")
         
-    elif value != llm_name and value == "":
-        old_model = llm_name 
-        llm_name = value
-        model_unload() # unload old model if it is already loaded.
-        print(f"{Colors.GREEN}INFO: {old_model} Model Offloaded", f"{Colors.END}")
-
-    return value
-
-
-def stop():
-    if sumllm:
-        sumllm.stop()
-    else:
-        llm.stop()
-
-def chat(chatbot, max_length, temp, top_k, top_p, sys_prompt=None):
-    if len(_question) <= 0:
-        time.sleep(0.01)
+def chat(chatbot, max_length, temp, top_k, top_p, system_prompt=None):
+    """对话"""
+    if current_model == "":
+        gr.Warning("Please select a model first.", duration =5)
         yield chatbot, "", "", ""
-        return chatbot, "", "", ""
+        return
 
-    chatbot.append(ChatMessage(role="assistant", content=""))
-    #chatbot.append(ChatMessage(role="assistant", content="", metadata={"title": "[Thinking]"}))
-
+    if _question == "":
+        gr.Warning("The questions can not be empty.", duration =5)
+        yield chatbot, "", "", ""
+        return
+    
     answer = ""
-
-    for chunk in llm.stream(_question, sys_prompt=sys_prompt):
+    encoded = encode_image(_chat_img)
+    print('model select: ', current_model)
+    for chunk in service.chat({"question": _question, "image": encoded}, system_prompt=system_prompt, max_length=max_length, temp=temp, top_k=top_k, top_p=top_p, model_name=current_model):
         answer += chunk
-        # print(chunk.text, end="", flush=True)
-        if(len(answer) > 0):
+        chatbot[-1].content = answer
+        yield chatbot, "", "", ""
+
+    profile = service.getchatprofile()
+    if profile.status_code == 200:
+        # 将响应内容解析为JSON格式
+        data = profile.json()
+
+        yield chatbot, round(float(data["time_to_first_token"]), 2), round(float(data["prompt_processing_rate"]),2), round(float(data["token_generation_rate"]), 2)
+
+def summarize_document(chatbot, max_length, temp, top_k, top_p):
+    """文档总结（上传文件后触发）"""
+    yield chatbot, "", "", ""
+    time.sleep(1)
+    chatbot.append(ChatMessage(role="assistant", content="Parsing document ..."))
+    yield chatbot, "", "", ""
+    try:
+        docx_summary.load_and_split_docs(file_path=FILE_PATH)
+        answer = ""
+        for chunk in docx_summary.summarize_map_reduce(custom_prompt="你的工作是用中文写出以下文档的摘要:"):
+            answer += chunk    
             chatbot[-1].content = answer
             yield chatbot, "", "", ""
-
-    chatbot[-1].content = answer
-
-    time_to_first_token, prompt_speed, eval_speed, profile = llm.get_profile_str()
-    chatbot.append(ChatMessage(role="assistant", content=profile))
-
-    yield chatbot, time_to_first_token, prompt_speed, eval_speed
-
-def predict(chatbot, max_length, temp, top_k, top_p):
-    global _question
-    global _sys_prompt
-
-    if not llm or not llm.is_ready():
-        gr.Warning("Please select a model first and wait for the model to load!", duration=5)
-        return reset_state()
-
-    llm.set_params(str(max_length), str(temp), str(top_k), str(top_p))
-
-    if FUNC_LIST[_func_mode] == "📐 解题答疑":
-        for chunk in chat(chatbot, max_length, temp, top_k, top_p):
-            yield chunk
-
-    elif FUNC_LIST[_func_mode] == "🗛 AI 翻 译":
-        if has_chinese(_question):
-            _question = f"Translate the following content to English: \n{_question}\n\n"
-        else:
-            _question = f"将以下内容翻译成中文：\n{_question}\n\n"
-
-        for chunk in chat(chatbot, max_length, temp, top_k, top_p):
-            yield chunk
-
-    elif FUNC_LIST[_func_mode] == "🍸 定制功能":
-        _question = _question
-        # print("\nsys prompt:", _sys_prompt)
-        # print("\nquestion:",_question)
-        user_prompt = _question
-
-        for chunk in chat(chatbot, max_length, temp, top_k, top_p, _sys_prompt):
-            yield chunk
-
-    elif FUNC_LIST[_func_mode] == "📚 文档总结":
-        if not os.path.exists(FILE_PATH):
-            gr.Warning("Please upload the document first!", duration=5)
-            return reset_state()
-
-        chain_type = "map_reduce"
-        sumllm = DocSummarize(llm)
-        # print("predict", _question)
-        ret = sumllm.init(prompt=_question, chain_type=chain_type, file_path="files")
-        if ret == False:
-            gr.Warning("Unable to parse content from this document. Does the document contain any text? Please upload a document containing valid text first!", duration=5)
-            return reset_state()
-
-        for chunk in sumllm.summarize(chatbot, max_length, temp, top_k, top_p):
-            yield chunk
-
-        del(sumllm)
-        sumllm = None
-
-    elif FUNC_LIST[_func_mode] == "🎨 图像生成":
-        if not stable_diffusion.model_exist():
-            gr.Warning("请先下载图像生成模型！参考：<a href='https://github.com/quic/ai-engine-direct-helper/blob/main/samples/python/README.md#prepare-stable-diffusion-models-manually'>samples/python/README.md</a>", duration=10)
-            return reset_state()
-
-        image_data = {"path": ""}
-
-        def callback(result):
-            if ((None == result) or isinstance(result, str)):   # None == Image generates failed. 'str' == image_path: generated new image path.
-                if (None == result):
-                    result = "None"
-                else:
-                    print("Image saved to '" + result + "'")
-                    image_data["path"] = result
-                    print(image_data["path"])
-            else:
-                result = (result + 1) * 100
-                result = int(result / user_step)
-                result = str(result)
-                print("step : " + result)
-
-        user_prompt = _question
-
-        if has_chinese(user_prompt):
-            user_prompt = f"Translate the following content to English: \n{user_prompt}\n\n"
-            chatbot.append(ChatMessage(role="assistant", content="Translating..."))
-            yield chatbot, "", "", ""
-            user_prompt = llm.invoke(user_prompt)
-            chatbot[-1].content = user_prompt
-            yield chatbot, "", "", ""
-
-        chatbot.append(ChatMessage(role="assistant", content="Generating images..."))
+    except Exception as e:
+        print(f"Exception: {e}")
         yield chatbot, "", "", ""
 
-        stable_diffusion.model_initialize()
-
-        user_negative_prompt = "lowres, error, cropped, worst quality, low quality, normal quality, jpeg artifacts, watermark"
-        user_seed = np.random.randint(low=0, high=9999999999, size=None, dtype=np.int64)
-        user_step = 20
-        user_guidance_scale = 7.5
-
-        print(user_prompt)
-        stable_diffusion.setup_parameters(user_prompt, user_negative_prompt, user_seed, user_step, user_guidance_scale)
-        stable_diffusion.model_execute(callback, "images", show_image = False)
-
-        print(image_data["path"])
-        chatbot[-1].content = gr.Image(image_data["path"])
-        # chatbot.append(ChatMessage(role="assistant", content= gr.Image(image_data["path"])))
-        yield chatbot, "", "", ""
-
-
-# TODO. Handle media files.
-def add_media(chatbot, chatmsg):
-    global _question, _func_mode
-
-    print()
-    print(FUNC_LIST[_func_mode])
-
-    if chatmsg["text"] is not None:
-        _question = chatmsg["text"]
-        # print(_question)
-
-        if len(_question) > 0:
-            chatbot.append(ChatMessage(role="user", content=_question))
-
-        # handle files.
-        if os.path.exists(FILE_PATH):
-            shutil.rmtree(FILE_PATH)
-
-        for file_path in chatmsg["files"]:
-            if not os.path.exists(FILE_PATH):
-                os.mkdir(FILE_PATH)
-
-            file_name = os.path.basename(file_path)
-            shutil.copy(file_path, FILE_PATH)
-            file_path = os.path.join(FILE_PATH, file_name)
-            #print(file_path)
-            chatbot.append(ChatMessage(role="user", content="<small><a href='/gradio_api/file=" + file_path + "' target='_blank'>" + file_name + "</a></small>"))
-            #chatbot.append(ChatMessage(role="user", content={"path": file_path, "alt_text": file_name}))
-            #chatbot.append(ChatMessage(role="user", content=FileData(path=file_path, orig_name=file_name)))
-
+def translate_text(chatbot, max_length, temp, top_k, top_p):
+    """翻译功能"""
+    if has_chinese(_question):
+        system_prompt = "You are a translation expert, please translate the following sentence into English."
     else:
-        _question = ""
+        system_prompt = "你是一个翻译专家，请将下面的句子翻译成中文"
+    answer = ""
+    print('chatbot: ', chatbot)
+    for chunk in service.chat(_question, system_prompt=system_prompt, max_length=max_length, temp=temp, top_k=top_k, top_p=top_p):
+        answer += chunk
+        chatbot[-1].content = answer
+        yield chatbot, "", "", ""
+    profile = service.getchatprofile()
+
+    if profile and profile.status_code == 200:
+        # 将响应内容解析为JSON格式
+        data = profile.json()
+
+        yield chatbot, data["time_to_first_token"], data["prompt_processing_rate"], data["token_generation_rate"]
+
+def generate_image(chatbot, max_length, temp, top_k, top_p):
+    """图像生成"""
+    chatbot.append(ChatMessage(role="assistant", content="正在生成图像..."))
+    yield chatbot, "", "", ""
+
+    image_path = service.imagegenerate(_question)
+    if image_path != "":
+        print('image path: ', image_path)
+
+        img = Image.open(image_path)
+        img.verify()  # 验证是否是有效图像
+        img = Image.open(image_path)  # 重新打开用于保存
+        filename = os.path.basename(image_path)
+
+        trusted_path = os.path.join(TRUSTED_OUTPUT_DIR, filename)
+        img.save(trusted_path, quality=95, optimize=True)
+
+        chatbot[-1].content = gr.Image(trusted_path)
+        yield chatbot, "", "", ""
+    else:
+        chatbot[-1].content = "服务暂不支持"
+        yield chatbot, "", "", ""
+
+
+# ===================================================================
+# 🛠️ 工具函数（保留）
+# ===================================================================
+def has_chinese(text):
+    pattern = re.compile(r'[\u4e00-\u9fff]')
+    return pattern.search(text) is not None
+
+def add_media(chatbot, chatmsg):
+    """处理用户输入：文本 + 文件上传"""
+    global _question, _func_mode, _chat_img
+
+    _chat_img = ""
+    _question = chatmsg["text"] or ""
+    if _question:
+        chatbot.append(ChatMessage(role="user", content=_question))
+
+    # 处理文件上传
+    if os.path.exists(FILE_PATH):
+        shutil.rmtree(FILE_PATH)
+    os.makedirs(FILE_PATH, exist_ok=True)
+
+    for file in chatmsg["files"]:
+        file_name = os.path.basename(file)
+        shutil.copy(file, os.path.join(FILE_PATH, file_name))
+        file_path = os.path.join(FILE_PATH, file_name)
+        if not _chat_img:
+            _chat_img = file_path
+        chatbot.append(ChatMessage(
+            role="user",
+            content=f"<small><a href='/gradio_api/file={file_path}' target='_blank'>{file_name}</a></small>"
+        ))
 
     return chatbot, gr.MultimodalTextbox(value=None, interactive=False, submit_btn=False, stop_btn=True)
 
-
 def vote(data: gr.LikeData):
-    # print(data.value, data.index)
     if data.liked:
-        print("You upvoted this response: " + data.value[0] + " : " + str(data.index))
+        print("Upvoted:", data.value)
     else:
-        print("You downvoted this response: " + data.value[0] + " : " + str(data.index))
+        print("Downvoted:", data.value)
 
 def reset_state():
     return [], [], "", "", ""
@@ -341,45 +266,38 @@ def update_text(value):
 
     return None
 
+
+# ===================================================================
+# 🖼️ UI 构建（完全保留原始结构）
+# ===================================================================
 def main():
     #FR0001:Add customized prompt
     global _sys_prompt
     file_name="customprompt.txt"
     #FR0001:Add customized prompt
 
-    model_root = os.path.join(APP_PATH, "models")
-
-    model_list = []
-    for f in os.listdir(model_root):
-        dir_path = os.path.join(model_root, f)
-        if os.path.isdir(dir_path):
-            bin_files = glob.glob(os.path.join(dir_path, "*.bin"))
-            has_tokenizer = os.path.isfile(os.path.join(dir_path, "tokenizer.json"))
-            has_prompt = os.path.isfile(os.path.join(dir_path, "prompt.conf"))
-            if bin_files and has_tokenizer and has_prompt:
-                model_list.append(f)
-    model_list.insert(0, "")
+    # 模拟模型列表（实际可从 /api/models 获取）
+    model_list = service.getmodellist()
 
     with gr.Blocks(css=css, theme='davehornik/Tealy', fill_width=True, fill_height=True) as demo:
         demo.title = "Genie App"
 
         gr.set_static_paths(paths=["resources/", "files/"])
         gr.HTML("""<div align="center"><div style="width:500px"><font size="6" style="color:rgb(255, 255, 234);">Genie App</font></div></div>""")
-        # gr.HTML("""<div align="center"><div style="width:500px"><img style="display: inline" src="/gradio_api/file=resources/icon.png"> <font size="6" style="color:rgb(42, 42, 234);"> Genie App</font>&nbsp;&nbsp;</div></div>""")
 
-        with gr.Tab("Settings") as tab:
+        with gr.Tab("Settings"):
             with gr.Row():
                 with gr.Column(scale=2):
                     with gr.Group():
                         model_select = gr.Dropdown(choices=model_list, value="", label="models", interactive=True)
-                        max_length = gr.Slider(1, 4096, value=4096, step=1.0, label="max length", interactive=True)
+                        max_length = gr.Slider(1, 4096, value=4096, step=1, label="max length", interactive=True)
                         temp = gr.Slider(0.01, 1, value=0.8, step=0.01, label="temperature", interactive=True)
                         top_k = gr.Slider(1, 100, value=40, step=1, label="Top K", interactive=True)
                         top_p = gr.Slider(0, 1, value=0.95, step=0.01, label="Top P", interactive=True)
                     with gr.Group():
-                        f_latency = gr.Textbox(label="First Latency", visible=True)
-                        p_speed = gr.Textbox(label="Prompt Speed", visible=True)
-                        e_speed = gr.Textbox(label="Eval Speed", visible=True)
+                        f_latency = gr.Textbox(label="First Latency", value="N/A")
+                        p_speed = gr.Textbox(label="Prompt Speed", value="N/A")
+                        e_speed = gr.Textbox(label="Eval Speed", value="N/A")
                         #FR0001:Add customized prompt
                         cust_prompt = gr.Textbox(label="Customer Prompt", value="", visible=True, interactive=True)
 
@@ -388,32 +306,62 @@ def main():
                     chatbot.like(vote, None, None)
 
                     chatmsg = gr.MultimodalTextbox(scale=1, interactive=True, file_count="multiple", placeholder="Enter message or upload file...", show_label=True, autofocus=True,
-                                                   max_plain_text_length=3000, sources=[],      # sources=["upload", "microphone"],
-                                                   file_types=FILE_TYPES, label=FUNC_LIST_EN[_func_mode])
+                                                   max_plain_text_length=3000, file_types=IMG_TYPES, label=FUNC_LIST_EN[_func_mode])
 
                     with gr.Row():
-                        # ["📐 解题答疑", "📚 文档总结", "🗛 AI 翻 译", "🌐 AI 搜 索", "✒️ 帮我写作", "🎨 图像生成", "🍸 定制功能", "✈️ 旅游规划"]
                         func_1_btn = gr.Button(FUNC_LIST_EN[0], elem_classes="button_cls")
                         func_2_btn = gr.Button(FUNC_LIST_EN[1], elem_classes="button_cls")
                         func_3_btn = gr.Button(FUNC_LIST_EN[2], elem_classes="button_cls")
-                        #func_4_btn = gr.Button(FUNC_LIST_EN[3], elem_classes="button_cls")
-                        #func_5_btn = gr.Button(FUNC_LIST_EN[4], elem_classes="button_cls")
                         func_6_btn = gr.Button(FUNC_LIST_EN[5], elem_classes="button_cls")
                         #FR0001:Add customized prompt
                         func_7_btn = gr.Button(FUNC_LIST_EN[6], elem_classes="button_cls")
-                        #func_8_btn = gr.Button(FUNC_LIST_EN[7], elem_classes="button_cls")
 
-                    # gr.Examples(["总结文档内容", "分析源代码，给出逐行注释", "查询今天上海的天气", "帮我检查一下如下英语语法，如果有误，帮我修正：\n"], chatmsg, label="快捷输入")
-                    gr.Examples(["Summarize the document content", "Analyze the source code and give line-by-line comments.", "Inquire about the weather in Shanghai today", "Help me check the following English grammar, and correct it if it is wrong:\n"], chatmsg, label="Quick Input")
+                    gr.Examples(["Summarize the document content",  "Analyze the source code and give line-by-line comments.", "Inquire about the weather in Shanghai today", "Help me check the following English grammar..."], chatmsg, label="Quick Input")
 
-        model_select.change(model_change, inputs=model_select, outputs=model_select)
+        # ===================================================================
+        # 🔗 事件绑定（保留结构，逻辑由 predict 分发）
+        # ===================================================================
+        def predict(chatbot, max_length, temp, top_k, top_p):
+            global _question, _func_mode, _sys_prompt
 
+            if not _question.strip() and _func_mode != 1:  # 文档总结除外
+                yield chatbot, "", "", ""
+                return
+
+            chatbot.append(ChatMessage(role="assistant", content=""))
+
+            if FUNC_LIST[_func_mode] == "📐 解题答疑":
+                for chunk in chat(chatbot, max_length, temp, top_k, top_p):
+                    yield chunk
+                chatbot.append(ChatMessage(role="assistant", content=""))
+
+            elif FUNC_LIST[_func_mode] == "📚 文档总结":
+                for chunk in summarize_document(chatbot, max_length, temp, top_k, top_p):
+                    yield chunk
+
+            elif FUNC_LIST[_func_mode] == "🗛 AI 翻 译":
+                for chunk in translate_text(chatbot, max_length, temp, top_k, top_p):
+                    yield chunk
+
+            elif FUNC_LIST[_func_mode] == "🎨 图像生成":
+                for chunk in generate_image(chatbot, max_length, temp, top_k, top_p):
+                    yield chunk
+
+            elif FUNC_LIST[_func_mode] == "🍸 定制功能":
+                for chunk in chat(chatbot, max_length, temp, top_k, top_p, _sys_prompt):
+                    yield chunk
+                chatbot.append(ChatMessage(role="assistant", content=""))
+
+            else:
+                chatbot[-1].content = "该功能正在开发中..."
+                yield chatbot, "", "", ""
+
+        # 事件链：输入 → add_media → predict → 恢复输入框
         chat_run = chatmsg.submit(add_media, [chatbot, chatmsg], [chatbot, chatmsg])
-        chat_run = chat_run.then(predict, [chatbot, max_length, temp, top_k, top_p], [chatbot, f_latency, p_speed, e_speed], show_progress=False)
-        chat_run.then(lambda: gr.MultimodalTextbox(interactive=True, submit_btn=True, stop_btn=False), None, [chatmsg])
+        chat_run = chat_run.then(predict, [chatbot, max_length, temp, top_k, top_p], [chatbot, f_latency, p_speed, e_speed])
+        chat_run.then(lambda: gr.MultimodalTextbox(interactive=True, submit_btn=True, stop_btn=False), None, chatmsg)
+        chatmsg.stop(fn=stop_generation)
 
-        chatmsg.stop(fn=stop)
- 
         #FR0001:Add customized prompt
         if not os.path.exists(file_name):
             with open(file_name, "w",encoding="utf-8") as file:
@@ -426,6 +374,7 @@ def main():
         _sys_prompt = cust_prompt.value
         #FR0001:Add customized prompt
 
+        # 功能按钮切换
         def func_change(func_mode):
             global _func_mode
             global _sys_prompt
@@ -434,21 +383,31 @@ def main():
             # print("\nchange:sys prompt:", _sys_prompt)
 
             _func_mode = func_mode
-            func_name = FUNC_LIST_EN[func_mode]
-            if func_name == "📚 Doc Summary":
-                return gr.MultimodalTextbox(label=func_name, sources=["upload"])
+            func_name = FUNC_LIST[func_mode]
+            if func_name == "📚 文档总结":
+                return gr.MultimodalTextbox(label=func_name, sources=["upload"], file_types=FILE_TYPES)
+            elif func_name == "📐 解题答疑":
+                return gr.MultimodalTextbox(label=func_name, sources=["upload"], file_types=IMG_TYPES)
             else:
                 return gr.MultimodalTextbox(label=func_name, sources=[])
 
-        func_1_btn.click(lambda: func_change(0), None, [chatmsg])
-        func_2_btn.click(lambda: func_change(1), None, [chatmsg])
-        func_3_btn.click(lambda: func_change(2), None, [chatmsg])
-        #func_4_btn.click(lambda: func_change(3), None, [chatmsg])
-        #func_5_btn.click(lambda: func_change(4), None, [chatmsg])
-        func_6_btn.click(lambda: func_change(5), None, [chatmsg])
+        func_1_btn.click(lambda: func_change(0), None, chatmsg)
+        func_2_btn.click(lambda: func_change(1), None, chatmsg)
+        func_3_btn.click(lambda: func_change(2), None, chatmsg)
+        func_6_btn.click(lambda: func_change(5), None, chatmsg)
         #FR0001:Add customized prompt
         func_7_btn.click(lambda: func_change(6), None, [chatmsg])
-        #func_8_btn.click(lambda: func_change(7), None, [chatmsg])
+
+        # 模型切换（未来可触发 /api/load-model）
+        model_select.change(
+            on_model_selected,   # 原来的回调（比如加载模型）
+            model_select, 
+            None
+        ).then(
+            update_max_contextsize,   # 新增：更新 max_length 的范围和值
+            model_select, 
+            max_length
+        )
 
     demo.queue().launch(server_name=HOST, share=False, inbrowser=True, server_port=PORT)
 

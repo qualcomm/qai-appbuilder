@@ -126,6 +126,13 @@ The following is the correct change for the 'tokenizer.json' file of 'Phi-3.5-Mi
 ```
 ***. Refer to [setup Stable Diffusion v2.1 models](../../python/README.md) before run 'GenieAPIService.py' (Our Python version 'GenieAPIService.py' support generating image, it depends on Stable Diffusion v2.1 sample code.)
 
+### AI-Dev LLM models:
+|  Model  | model file 
+|  ----  | :----   | 
+| [Qwen2-7B-SSD](https://www.aidevhome.com/data/adh2/models/suggested/Qwen2.0-7B-SSD-8380-2.34.zip) | [Qwen2.0-7B-SSD-8380-2.34.zip](https://www.aidevhome.com/data/adh2/models/suggested/Qwen2.0-7B-SSD-8380-2.34.zip) | 
+| [Phi 3.5 mini](https://aihub.qualcomm.com/compute/models/phi_3_5_mini_instruct) ** | [Phi-3.5-mini-instruct](https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/phi_3_5_mini_instruct/v1/snapdragon_x_elite/models.zip) |
+
+
 ### Setup custom model:
 You can create a subdirectory in the path "ai-engine-direct-helper\samples\genie\python\models\" for your own model and customize the "config.json", "prompt.conf" or "prompt.json" files for your model. Both files should be stored in the same directory as your model files. Then use the new directory which you've created as your model name, the name can be used in the client application. <br>
 Note: "prompt.conf" is for old version GenieAPIServcie(< 2.0). Since GenieAPIServcie 2.0, we use "prompt.json" to replace it.<br>
