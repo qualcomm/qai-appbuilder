@@ -130,8 +130,9 @@ The following is the correct change for the 'tokenizer.json' file of 'Phi-3.5-Mi
 |  Model  | model file 
 |  ----  | :----   | 
 | [Qwen2-7B-SSD](https://www.aidevhome.com/data/adh2/models/suggested/Qwen2.0-7B-SSD-8380-2.34.zip) | [Qwen2.0-7B-SSD-8380-2.34.zip](https://www.aidevhome.com/data/adh2/models/suggested/Qwen2.0-7B-SSD-8380-2.34.zip) | 
-| [Phi 3.5 mini](https://aihub.qualcomm.com/compute/models/phi_3_5_mini_instruct) ** | [Phi-3.5-mini-instruct](https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/phi_3_5_mini_instruct/v1/snapdragon_x_elite/models.zip) |
-
+| [Qwen2.5-VL-3B](https://www.aidevhome.com/data/adh2/models/suggested/qwen2.5vl3b-8380-2.42.zip) | [qwen2.5vl3b-8380-2.42.zip](https://www.aidevhome.com/data/adh2/models/suggested/qwen2.5vl3b-8380-2.42.zip) |
+| [Llama 3.2 3B](https://www.aidevhome.com/data/adh2/models/suggested/llama3.2-3b-8380-qnn2.37.zip) | [llama3.2-3b-8380-qnn2.37.zip](https://www.aidevhome.com/data/adh2/models/suggested/llama3.2-3b-8380-qnn2.37.zip) |
+| [Llama 3.1 8B](https://www.aidevhome.com/data/adh2/models/suggested/llama3.1-8b-8380-qnn2.38.zip) | [llama3.1-8b-8380-qnn2.38.zip](https://www.aidevhome.com/data/adh2/models/suggested/llama3.1-8b-8380-qnn2.38.zip) |
 
 ### Setup custom model:
 You can create a subdirectory in the path "ai-engine-direct-helper\samples\genie\python\models\" for your own model and customize the "config.json", "prompt.conf" or "prompt.json" files for your model. Both files should be stored in the same directory as your model files. Then use the new directory which you've created as your model name, the name can be used in the client application. <br>

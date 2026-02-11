@@ -44,7 +44,7 @@ You can also launch them by double-clicking the corresponding batch files: start
 | GenieWebUI ** | python webui\GenieWebUI.py | LLM Chat app, get model functions from GenieAPIService through OpenAI API. Please start GenieAPIService before run this app. |
 
 *. StableDiffusionApp only support English prompt.<br>
-**. Refer to step 3 here to [setup LLM models](../genie/python/README.md) before run 'GenieWebUI.py'.<br>
+**. Refer to step 3 here to [setup LLM models](../genie/python/README.md#ai-dev-llm-models) before run 'GenieWebUI.py'.<br>
 
 ### Screenshots:
 ![image](screenshot/ImageRepairApp.jpg)
