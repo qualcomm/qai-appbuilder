@@ -118,6 +118,17 @@ PerfProfile.RelPerfProfileGlobal()
 # Destroy the model and free the memory resource.
 del(text_encoder)
 ```
+## Onnx Sample Code(Python)
+
+If you have onnx sample codes and onnx models, you can convert the models to QNN models or download the corresponding QNN models from aihub then run the onnx sample codes as following steps.
+1. Copy aipc.py and qai_onnxruntime.py from ai-engine-direct-helper\samples\python\utils to your onnx sample codes folder.
+2. Run python aipc.py your_onnx_sample.py
+or add the following codes in your onnx sample at the beginning.
+
+    from qai_appbuilder.aipc import patch_onnxruntime_to_qnn
+    patch_onnxruntime_to_qnn()
+    
+run python your_onnx_sample.py
 
 ### 3. API from 'libappbuilder.dll' for C++ projects.
 
