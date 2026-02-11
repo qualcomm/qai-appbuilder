@@ -34,7 +34,7 @@
 #include "Utils/Utils.hpp"
 #endif
 
-#if !defined(__ANDROID__)
+#if !defined(__ANDROID__) && !defined(__linux__)
   #include <execution>
 #endif
 
@@ -67,7 +67,7 @@ std::string getFileNameFromPath(const std::string& path) {
     return path.substr(pos + 1);
 }
 
-#if !defined(__ANDROID__)
+#if !defined(__ANDROID__) && !defined(__linux__)
 void warmup_parallel_stl()
 {
     static std::once_flag once;
@@ -136,7 +136,7 @@ std::unique_ptr<sample_app::QnnSampleApp> initQnnSampleApp(std::string cachedBin
     }
   }
 
-#if !defined(__ANDROID__)
+#if !defined(__ANDROID__) && !defined(__linux__)
   if ((input_data_type == "float") || (output_data_type == "float")) // We need 'std::transform' only for �float� mode. It need data conversation.
       warmup_parallel_stl();
 #endif

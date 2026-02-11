@@ -16,8 +16,9 @@
 #include <iostream>
 #include <numeric>
 #include <queue>
-
+#if !defined(__ANDROID__) && !defined(__linux__)
 #include <execution>
+#endif
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -438,7 +439,7 @@ static inline uint16_t datautil::fp16_ieee_from_fp32_hw(float f)
 }
 #endif
 
-#if !defined(__ANDROID__)
+#if !defined(__ANDROID__) && !defined(__linux__)
 static inline uint16_t datautil::fp16_ieee_from_fp32_value_v2(float f) noexcept {
 #if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901L) || defined(__GNUC__) && !defined(__STRICT_ANSI__)
     constexpr float scale_to_inf  = 0x1.0p+112f;
@@ -552,7 +553,7 @@ bool datautil::float32ToFloatN(uint8_t* out,
       }
   
       if(bitWidth == 16){
-  #if defined(PARALLEL) && !defined(__ANDROID__)// wd. Improve performance through std::transform and NEON.
+  #if defined(PARALLEL) && !defined(__ANDROID__) && !defined(__linux__)// wd. Improve performance through std::transform and NEON.
         auto* dst = reinterpret_cast<uint16_t*>(out);  
         float32_to_float16_parallel(dst, in, numElements);
   #else
