@@ -14,5 +14,5 @@ def patch_onnxruntime_to_qnn(repo_dir: Optional[str] = None) -> None:
         repo_dir = os.path.dirname(os.path.abspath(__file__))
     if repo_dir not in sys.path:
         sys.path.insert(0, repo_dir)
-    from . import qai_onnxruntime as _ort
+    from . import onnxrtwrapper as _ort
     sys.modules["onnxruntime"] = _ort
