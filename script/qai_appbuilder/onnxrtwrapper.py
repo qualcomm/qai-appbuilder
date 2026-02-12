@@ -7,7 +7,6 @@
 #=============================================================================
 # -*- coding: utf-8 -*-
 """
-qai_onnxruntime.py
 Hot-patch replacement for `onnxruntime` using Qualcomm QAI AppBuilder (QNNContext).
 
 Key capabilities:

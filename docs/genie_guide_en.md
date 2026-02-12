@@ -9,18 +9,42 @@
 
 ## Table of Contents
 
-1. [Introduction](#introduction)
-2. [System Requirements](#system-requirements)
-3. [Features](#features)
-4. [Windows Platform Deployment](#windows-platform-deployment)
-5. [Android Platform Deployment](#android-platform-deployment)
-6. [Model Configuration](#model-configuration)
-7. [Service Usage](#service-usage)
-8. [Client Usage](#client-usage)
-9. [API Reference](#api-reference)
-10. [Python Client Examples](#python-client-examples)
-11. [FAQ](#faq)
-12. [Technical Support](#technical-support)
+1. [📘 Introduction](#introduction)
+2. [⚙️ System Requirements](#system-requirements)
+3. [✨ Features](#features)
+4. [🚀 Platform Deployment](#platform-deployment)
+    - [Windows Platform Deployment](#windows-platform-deployment)
+    - [Android Platform Deployment](#android-platform-deployment)
+5. [🧠 Model Configuration](#model-configuration)
+    - [Text Models](#text-model-deployment)
+    - [Multimodal qwen25-vl-3b Model](#qwen25-vl-3b-model)
+    - [Multimodal phi-4 Model](#phi-4-multimodal-model)
+6. [🛠️ Service Usage](#service-usage)
+7. [📱 Client Usage](#client-usage)
+    - [C++ Client](#c-client)
+    - [Python Client](#python-client)
+    - [Other Language Clients](#other-language-clients)
+8. [🔧 Other Tools](#other-tools)
+    - [encode.exe](#encodeexe)
+    - [decode.exe](#decodeexe)
+    - [wav.exe](#wavexe)
+9. [📡 API Reference](#api-reference)
+    - [Chat Completion Endpoint](#1-chat-completion-endpoint)
+    - [Model List Endpoint](#2-model-list-endpoint)
+    - [Text Splitter Endpoint](#3-text-splitter-endpoint)
+    - [Stop Output Endpoint](#4-stop-output-endpoint)
+    - [Clear History Endpoint](#5-clear-history-endpoint)
+    - [Reload History Endpoint](#6-reload-history-endpoint)
+    - [Fetch History Endpoint](#7-fetch-history-endpoint)
+    - [Get Model Context Size Endpoint](#8-get-model-context-size-endpoint)
+    - [Get Model Performance Info Endpoint](#9-get-model-performance-info-endpoint)
+    - [Stop Service Endpoint](#10-stop-service-endpoint)
+10. [📄 Python Client Examples](#python-client-examples)
+    - [Tool Calling Example](#tool-calling-example)
+    - [Multimodal: Vision Language Model Example](#vision-language-model-example)
+    - [Other Language Examples](#other-language-examples)
+11. [❓ FAQ](#faq)
+12. [📞 Technical Support](#technical-support)
 
 ---
 
@@ -32,8 +56,8 @@ GenieAPIService is an OpenAI-compatible API service developed in C++ that runs o
 
 - **Local Execution**: All inference is completed on local devices, protecting data privacy
 - **OpenAI Compatible**: Uses standard OpenAI API format for easy integration
-- **Multi-Platform Support**: Supports Windows, Android, and Linux platforms
-- **High Performance**: Leverages Qualcomm® AI Runtime SDK for NPU acceleration
+- **Multi-platform Support**: Supports Windows, Android, and Linux platforms
+- **High Performance**: Utilizes Qualcomm® AI Runtime SDK for NPU acceleration
 
 ---
 
@@ -42,12 +66,12 @@ GenieAPIService is an OpenAI-compatible API service developed in C++ that runs o
 ### Windows Platform
 
 - **Operating System**: Windows 11 or higher
-- **Processor**: Devices with Qualcomm Snapdragon support
+- **Processor**: Devices supporting Qualcomm Snapdragon
 - **Memory**: At least 16GB RAM (32GB or more recommended)
 - **Storage**: At least 10GB available space (for model files)
 - **Software Dependencies**:
-  - Qualcomm® AI Runtime SDK (QAIRT) 2.42.0 or higher (included in package, no additional installation required)
-  - Visual C++ Redistributable
+    - Qualcomm® AI Runtime SDK (QAIRT) 2.42.0 or higher (included in package, no additional installation required)
+    - [Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-160)
 
 ### Android Platform
 
@@ -73,7 +97,7 @@ GenieAPIService provides rich features:
 ### Core Features
 
 - ✅ **CPU & NPU Support**: Supports running LLM on both CPU and NPU
-- ✅ **Streaming and Non-Streaming Modes**: Supports both streaming output and complete response modes
+- ✅ **Streaming and Non-streaming Modes**: Supports both streaming output and complete response modes
 - ✅ **Model Switching**: Supports switching between different models at runtime
 - ✅ **Multimodal Support**: Supports Vision Language Models (VLM)
 - ✅ **Custom Models**: Supports user-defined model configurations
@@ -81,33 +105,34 @@ GenieAPIService provides rich features:
 - ✅ **Tool Calling**: Supports Function Calling functionality
 - ✅ **Thinking Mode**: Supports enabling/disabling thinking mode
 - ✅ **LoRA Support**: Supports LoRA adapters
-- ✅ **History**: Supports conversation history functionality
+- ✅ **History Management**: Supports conversation history functionality
 
 ### Supported Model Formats
 
 - **BIN Format**: Qualcomm QNN format models (default)
-- **MNN Format**: Alibaba MNN framework models (requires compile-time enablement)
-- **GGUF Format**: llama.cpp format models (requires compile-time enablement)
+- **MNN Format**: Alibaba MNN framework models (requires compilation-time enablement)
+- **GGUF Format**: llama.cpp format models (requires compilation-time enablement)
 
 ---
+## Platform Deployment
 
 ## Windows Platform Deployment
 
 ### Step 1: Download Resources
 
 1. **Download GenieAPIService**
-   - Visit [GitHub Releases](https://github.com/quic/ai-engine-direct-helper/releases/tag/v2.42.0)
-   - Download `GenieAPIService_v2.1.3_QAIRT_v2.42.0_v73.zip`
+    - Visit [GitHub Releases](https://github.com/quic/ai-engine-direct-helper/releases/tag/v2.42.0)
+    - Download `GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip`
 
 2. **Download Model Files**
-   - Download corresponding model files as needed
-   - Common models: Qwen2.0-7B, IBM-Granite-v3.1-8B, Qwen2.5-VL-3B, etc.
+    - [Download](https://www.aidevhome.com/?id=51) corresponding model files as needed
+    - Common models: Qwen2.0-7B, IBM-Granite-v3.1-8B, Qwen2.5-VL-3B, etc.
 
 ### Step 2: Extract and Configure
 
 1. **Extract GenieAPIService**
    ```
-   Extract GenieAPIService_v2.1.3_QAIRT_v2.42.0_v73.zip to target directory
+   Extract GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip to target directory
    Example: C:\GenieAPIService\
    ```
 
@@ -128,7 +153,7 @@ GenieAPIService provides rich features:
 
 ### Step 3: Start Service
 
-Open Command Prompt (CMD) or PowerShell and navigate to the GenieAPIService directory:
+Open Command Prompt (CMD) or PowerShell, navigate to GenieAPIService directory:
 
 #### Start Text Model Service
 
@@ -149,23 +174,24 @@ GenieAPIService.exe -c models/Qwen2.0-7B-SSD/config.json -l -d 3 -n 10 -o 1024 -
 ```
 
 Parameter descriptions:
+
 - `-c, --config_file`: Configuration file path (required)
 - `-l, --load_model`: Load model at startup
 - `-d, --loglevel`: Log level (1:Error, 2:Warning, 3:Info, 4:Debug, 5:Verbose)
-- `-n, --num_response`: Number of conversation rounds to save in history
+- `-n, --num_response`: Number of historical conversation rounds to save
 - `-o, --min_output_num`: Minimum output token count
 - `-p, --port`: Service port (default 8910)
 - `-t, --enable_thinking`: Enable thinking mode
-- `-a, --all_text`: Output all text (including tool call text)
+- `-a, --all_text`: Output all text (including tool calling text)
 - `--adapter`: LoRA adapter name
 - `--lora_alpha`: LoRA Alpha value
 
 ### Step 4: Verify Service
 
-After successful service startup, you will see information similar to:
+After successful service startup, you'll see information similar to:
 
 ```
-GenieAPIService: 2.1.3, Genie Library: x.x.x
+GenieAPIService: 2.1.4, Genie Library: 1.14.0
 current work dir: C:\GenieAPIService
 root dir: C:\GenieAPIService
 Loading model...
@@ -180,24 +206,24 @@ Server listening on port 8910
 ### Step 1: Install APK
 
 1. **Download APK**
-   - Visit [GitHub Releases](https://github.com/quic/ai-engine-direct-helper/releases/tag/v2.42.0)
-   - Download `GenieAPIService.apk`
+    - Visit [GitHub Releases](https://github.com/quic/ai-engine-direct-helper/releases/tag/v2.42.0)
+    - Download `GenieAPIService.apk`
 
 2. **Install APK**
-   ```bash
+   ```
    adb install GenieAPIService.apk
    ```
-   Or install directly on the device
+   Or install directly on device
 
 ### Step 2: Prepare Model Files
 
 1. **Create Model Directory**
-   ```bash
+   ```
    adb shell mkdir -p /sdcard/GenieModels
    ```
 
 2. **Push Model Files**
-   ```bash
+   ```
    adb push models/Qwen2.0-7B-SSD /sdcard/GenieModels/
    ```
 
@@ -215,17 +241,17 @@ Server listening on port 8910
 ### Step 3: Start Service
 
 1. **Open GenieAPI Application**
-   - Find and open the GenieAPI application on your device
+    - Find and open the GenieAPI application on your device
 
 2. **Start Service**
-   - Click the `START SERVICE` button
-   - Wait for model loading to complete
-   - "Genie API Service IS Running." indicates the service has started
+    - Click the `START SERVICE` button
+    - Wait for model loading to complete
+    - "Genie API Service IS Running." indicates service has started
 
 3. **Configure Background Running** (Important)
-   - Go to device Settings → Battery → Power saving settings → App battery management
-   - Find the GenieAPI application
-   - Select "Allow background activity"
+    - Go to device Settings → Battery → Power saving settings → App battery management
+    - Find GenieAPI application
+    - Select "Allow background activity"
 
 ### Step 4: View Logs
 
@@ -233,17 +259,17 @@ Server listening on port 8910
 - Select "Log Files" → "Log:1"
 - View service running logs
 
-### Step 5: Install Client Application
+### Step 5: Install Client Applications
 
 Recommended client applications:
 
 1. **GenieChat**
-   - Source location: `samples/android/GenieChat`
-   - Compile and install using Android Studio
+    - Source code location: `samples/android/GenieChat`
+    - Compile and install using Android Studio
 
 2. **GenieFletUI**
-   - Source location: `samples/fletui/GenieFletUI/android`
-   - Compile and install using Android Studio
+    - Source code location: `samples/fletui/GenieFletUI/android`
+    - Compile and install using Android Studio
 
 ---
 
@@ -325,7 +351,7 @@ The `prompt.json` file defines the model's prompt format:
 
 #### Basic Startup
 
-```bash
+```
 # Windows
 GenieAPIService.exe -c models/Qwen2.0-7B-SSD/config.json -l
 
@@ -335,7 +361,7 @@ GenieAPIService.exe -c models/Qwen2.0-7B-SSD/config.json -l
 
 #### Advanced Configuration Startup
 
-```bash
+```
 GenieAPIService.exe \
   -c models/Qwen2.0-7B-SSD/config.json \
   -l \
@@ -350,8 +376,9 @@ GenieAPIService.exe \
 
 Default port: `8910`
 
-Can be modified with the `-p` parameter:
-```bash
+Can be modified using the `-p` parameter:
+
+```
 GenieAPIService.exe -c config.json -l -p 9000
 ```
 
@@ -367,41 +394,42 @@ GenieAPIService.exe -c config.json -l -p 9000
 
 #### Log File
 
-```bash
+```
 # Specify log file
 GenieAPIService.exe -c config.json -l -d 3 -f service.log
 ```
 
-### History Functionality
+### History Management
 
 Enabling history functionality allows the model to remember previous conversations:
 
-```bash
-# Save the last 10 conversation rounds
+```
+# Save last 10 conversation rounds
 GenieAPIService.exe -c config.json -l -n 10
 ```
 
 **Notes**:
-- History takes up context length
-- Input length + history length + output length cannot exceed the model's maximum context length
+
+- History occupies context length
+- Input length + history length + output length cannot exceed model's maximum context length
 - History can be cleared or reloaded via API
 
 ### Thinking Mode
 
-Some models support thinking mode (such as DeepSeek-R1):
+Some models support thinking mode (e.g., DeepSeek-R1):
 
-```bash
+```
 # Enable thinking mode
 GenieAPIService.exe -c config.json -l -t
 ```
 
-**Recommendation**: When using tool calling functionality, it is recommended to disable thinking mode.
+**Recommendation**: When using tool calling functionality, it's recommended to disable thinking mode.
 
 ### LoRA Support
 
 Using LoRA adapters:
 
-```bash
+```
 GenieAPIService.exe -c config.json -l --adapter my_adapter --lora_alpha 0.5
 ```
 
@@ -415,7 +443,7 @@ GenieAPIService provides C++ client examples.
 
 #### Text Model Invocation
 
-```bash
+```
 GenieAPIClient.exe \
   --prompt "How to learn programming?" \
   --stream \
@@ -425,7 +453,7 @@ GenieAPIClient.exe \
 
 #### Vision Language Model Invocation
 
-```bash
+```
 GenieAPIClient.exe \
   --prompt "What does this image describe?" \
   --img test.png \
@@ -487,6 +515,31 @@ Simply set the `base_url` to the GenieAPIService address.
 
 ---
 
+## Other Tools
+
+These Windows tools are released together with [Releases](https://github.com/quic/ai-engine-direct-helper/releases/tag/v2.42.0)
+
+### encode.exe
+
+It can help you encode images or any files into base64 format files.<br><br>
+This example encodes cat.png to base64 format data and writes it to cat.txt.<br>
+```encode.exe cat.png cat.txt```
+
+### decode.exe
+
+It can help you decode base64 encoded files to binary files.<br><br>
+This example decodes base64 format cat.txt to binary and writes it to cat.png.<br>
+```decode.exe cat.txt cat.png```
+
+### wav.exe
+
+You may need to input `.wav` format audio files to the `OMINI` model, `wav.exe` can help record your voice!<br>
+We use some additional algorithms and techniques to enhance your voice intensity.<br><br>
+Example:
+After entering the command, press and hold the [Space] key to record... <br>
+```wav.exe test.wav```
+---
+
 ## API Reference
 
 GenieAPIService provides multiple HTTP API endpoints.
@@ -501,8 +554,14 @@ GenieAPIService provides multiple HTTP API endpoints.
 {
   "model": "Qwen2.0-7B-SSD",
   "messages": [
-    {"role": "system", "content": "You are a helpful assistant."},
-    {"role": "user", "content": "How to learn programming?"}
+    {
+      "role": "system",
+      "content": "You are a helpful assistant."
+    },
+    {
+      "role": "user",
+      "content": "How to learn programming?"
+    }
   ],
   "stream": true,
   "size": 4096,
@@ -524,7 +583,7 @@ GenieAPIService provides multiple HTTP API endpoints.
 - `top_p`: Top-P sampling (default: 0.9)
 - `seed`: Random seed (optional)
 
-**Response Example (Non-Streaming)**:
+**Response Example (Non-streaming)**:
 
 ```json
 {
@@ -532,14 +591,16 @@ GenieAPIService provides multiple HTTP API endpoints.
   "object": "chat.completion",
   "created": 1677652288,
   "model": "Qwen2.0-7B-SSD",
-  "choices": [{
-    "index": 0,
-    "message": {
-      "role": "assistant",
-      "content": "Suggestions for learning programming..."
-    },
-    "finish_reason": "stop"
-  }],
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Suggestions for learning programming..."
+      },
+      "finish_reason": "stop"
+    }
+  ],
   "usage": {
     "prompt_tokens": 20,
     "completion_tokens": 100,
@@ -594,7 +655,16 @@ data: [DONE]
 {
   "text": "This is a very long text...",
   "max_length": 128,
-  "separators": ["\n\n", "\n", ".", "!", "?", ",", " ", ""]
+  "separators": [
+    "\n\n",
+    "\n",
+    ".",
+    "!",
+    "?",
+    ",",
+    " ",
+    ""
+  ]
 }
 ```
 
@@ -633,7 +703,7 @@ data: [DONE]
 }
 ```
 
-**Function**: Immediately stop the current model output.
+**Function**: Immediately stop current model output.
 
 ### 5. Clear History Endpoint
 
@@ -647,7 +717,7 @@ data: [DONE]
 }
 ```
 
-**Function**: Clear conversation history saved on the server.
+**Function**: Clear conversation history saved on server.
 
 ### 6. Reload History Endpoint
 
@@ -659,10 +729,22 @@ data: [DONE]
 {
   "action": "import_history",
   "history": [
-    {"role": "user", "content": "Hello"},
-    {"role": "assistant", "content": "Hello! How can I help you?"},
-    {"role": "user", "content": "Tell me about Beijing"},
-    {"role": "assistant", "content": "Beijing is the capital of China..."}
+    {
+      "role": "user",
+      "content": "Hello"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello! How can I help you?"
+    },
+    {
+      "role": "user",
+      "content": "Tell me about Beijing"
+    },
+    {
+      "role": "assistant",
+      "content": "Beijing is the capital of China..."
+    }
   ]
 }
 ```
@@ -678,8 +760,14 @@ data: [DONE]
 ```json
 {
   "history": [
-    {"role": "user", "content": "Hello"},
-    {"role": "assistant", "content": "Hello! How can I help you?"}
+    {
+      "role": "user",
+      "content": "Hello"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello! How can I help you?"
+    }
   ]
 }
 ```
@@ -729,7 +817,7 @@ data: [DONE]
 }
 ```
 
-**Function**: Terminate the GenieAPIService service process.
+**Function**: Terminate GenieAPIService process.
 
 ---
 
@@ -763,7 +851,7 @@ for chunk in response:
         print(content, end="", flush=True)
 ```
 
-### Non-Streaming Output Example
+### Non-streaming Output Example
 
 ```python
 from openai import OpenAI
@@ -795,7 +883,7 @@ tools = [
         "type": "function",
         "function": {
             "name": "get_current_weather",
-            "description": "Get the current weather for a specified city",
+            "description": "Get current weather for a specified city",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -831,14 +919,14 @@ if message.tool_calls:
     for tool_call in message.tool_calls:
         function_name = tool_call.function.name
         function_args = json.loads(tool_call.function.arguments)
-        
+
         # Call actual function
         if function_name == "get_current_weather":
             result = get_current_weather(
                 location=function_args["location"],
                 unit=function_args["unit"]
             )
-            
+
             # Return result to model
             messages.append(message)
             messages.append({
@@ -846,7 +934,7 @@ if message.tool_calls:
                 "tool_call_id": tool_call.id,
                 "content": result
             })
-            
+
             # Get final response
             final_response = client.chat.completions.create(
                 model="Qwen2.0-7B-SSD",
@@ -864,7 +952,7 @@ url = "http://127.0.0.1:8910/v1/textsplitter"
 
 text = """
 This is a very long text content...
-It needs to be split based on token count...
+Needs to be split based on token count...
 """
 
 separators = ["\n\n", "\n", ".", "!", "?", ",", " ", ""]
@@ -892,11 +980,13 @@ import requests
 
 BASE_URL = "http://127.0.0.1:8910"
 
+
 # Clear history
 def clear_history():
     url = f"{BASE_URL}/clear"
     response = requests.post(url, json={"text": "clear"})
     return response.status_code == 200
+
 
 # Reload history
 def reload_history(history_list):
@@ -908,17 +998,19 @@ def reload_history(history_list):
     response = requests.post(url, json=history_data)
     return response.status_code == 200
 
+
 # Fetch history
 def fetch_history():
     url = f"{BASE_URL}/fetch"
     response = requests.post(url)
     return response.json()
 
+
 # Usage example
 if __name__ == "__main__":
     # Clear history
     clear_history()
-    
+
     # Load new history
     history = [
         {"role": "user", "content": "Hello"},
@@ -927,7 +1019,7 @@ if __name__ == "__main__":
         {"role": "assistant", "content": "Beijing is the capital of China..."}
     ]
     reload_history(history)
-    
+
     # Get current history
     current_history = fetch_history()
     print(current_history)
@@ -941,10 +1033,12 @@ import base64
 
 client = OpenAI(base_url="http://127.0.0.1:8910/v1", api_key="123")
 
+
 # Read and encode image
 def encode_image(image_path):
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode('utf-8')
+
 
 # Encode image
 image_base64 = encode_image("test.png")
@@ -974,6 +1068,12 @@ for chunk in response:
         print(content, end="", flush=True)
 ```
 
+### Other Language Examples
+For complete C++ access examples, see [GenieAPIClient.cpp](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/genie/c%2B%2B/Service/examples/GenieAPIClient/GenieAPIClient.cpp).
+
+
+We use Java for Android APK development, the client can be found at [callChatApi](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/android/GenieChat/app/src/main/java/com/example/geniechat/MainActivity.java#L464)
+
 ---
 
 ## FAQ
@@ -983,7 +1083,8 @@ for chunk in response:
 **Problem**: Running `GenieAPIService.exe` prompts that DLL files cannot be found.
 
 **Solution**:
-- Ensure Qualcomm® AI Runtime SDK runtime libraries exist in the current path
+
+- Ensure Qualcomm® AI Runtime SDK runtime libraries exist in current path
 - Install Visual C++ Redistributable
 
 ### 2. Model Loading Failure
@@ -991,29 +1092,32 @@ for chunk in response:
 **Problem**: After service startup, it prompts "Failed to load model".
 
 **Solution**:
-- Check if the configuration file path is correct
+
+- Check if configuration file path is correct
 - Confirm model files are complete and not corrupted
 - Check if model directory structure meets requirements
 - View log files for detailed error information
 
 ### 3. Port Already in Use
 
-**Problem**: When starting service, it prompts "service already exist".
+**Problem**: Starting service prompts "service already exist".
 
 **Solution**:
-- Check if a GenieAPIService instance is already running
-- Use the `-p` parameter to specify a different port
-- Windows: Use `netstat -ano | findstr 8910` to find the process occupying the port
-- Terminate the process occupying the port or restart the system
+
+- Check if GenieAPIService instance is already running
+- Use `-p` parameter to specify another port
+- Windows: Use `netstat -ano | findstr 8910` to find process occupying port
+- Terminate process occupying port or restart system
 
 ### 4. Input Length Exceeded
 
-**Problem**: When sending request, it prompts input length exceeds limit.
+**Problem**: Sending request prompts input length exceeds limit.
 
 **Solution**:
+
 - Use text splitter endpoint to segment long text
 - Increase `--min_output_num` parameter value to reduce output reserved space
-- Use models that support larger context
+- Use models supporting larger context
 - Formula: Input length + history length + minimum output length ≤ model context size
 
 ### 5. Android Service Killed
@@ -1021,6 +1125,7 @@ for chunk in response:
 **Problem**: Service automatically stops after running for a while on Android device.
 
 **Solution**:
+
 - Go to Settings → Battery → Power saving settings → App battery management
 - Find GenieAPI application
 - Select "Allow background activity"
@@ -1031,19 +1136,21 @@ for chunk in response:
 **Problem**: Model inference speed is very slow.
 
 **Solution**:
+
 - Confirm device supports NPU and is correctly configured
 - Check if correct model format is used (BIN format has best performance)
 - Reduce `size` parameter value to limit output length
-- Close unnecessary background applications to free up resources
+- Close unnecessary background apps to free resources
 - Use smaller models (e.g., 3B instead of 7B)
 
 ### 7. Tool Calling Not Working
 
-**Problem**: Model does not call defined tools.
+**Problem**: Model doesn't call defined tools.
 
 **Solution**:
+
 - Confirm the model being used supports tool calling functionality
-- Disable thinking mode (do not use `-t` parameter)
+- Disable thinking mode (don't use `-t` parameter)
 - Check if tool definition format is correct
 - Use `-a` parameter to output all text for debugging
 
@@ -1052,6 +1159,7 @@ for chunk in response:
 **Problem**: After enabling history, model still doesn't remember previous conversations.
 
 **Solution**:
+
 - Confirm `-n` parameter was used at startup
 - Check if history was cleared
 - Use `/fetch` endpoint to view current history
@@ -1062,6 +1170,7 @@ for chunk in response:
 **Problem**: VLM model returns errors or cannot understand image content.
 
 **Solution**:
+
 - Confirm image is correctly Base64 encoded
 - Check if image format is supported (PNG, JPEG recommended)
 - Confirm model files are complete, especially `veg.serialized.bin`
@@ -1072,6 +1181,7 @@ for chunk in response:
 **Problem**: Runtime prompts out of memory or system becomes slow.
 
 **Solution**:
+
 - Use smaller models
 - Reduce `--num_response` parameter value
 - Close other memory-consuming applications
@@ -1101,9 +1211,10 @@ for chunk in response:
 - View example code: `samples/genie/python/`, `samples/genie/c%2B%2B/Service/examples/GenieAPIClient` directories
 - Reference test code: `samples/genie/c%2B%2B/Service/test/genietest.py`
 
-### Contact
+### Contact Information
 
 For technical support, please:
+
 1. Check the FAQ section of this manual
 2. Search GitHub Issues
 3. Create a new Issue on GitHub with detailed error information and logs
@@ -1120,10 +1231,10 @@ This software is provided "as is" without any express or implied warranties. The
 
 ## Version Information
 
-- **GenieAPIService Version**: 2.1.3
+- **GenieAPIService Version**: 2.1.4
 - **QAIRT SDK Version**: 2.42.0
 - **Documentation Version**: 1.0
-- **Last Updated**: 2026-01-28
+- **Last Updated**: 2026-02-12
 
 ---
 
@@ -1137,33 +1248,34 @@ This software is provided "as is" without any express or implied warranties. The
 - IBM-Granite-v3.1-8B
 - Phi-4 Multimodal
 - Llama series (requires GGUF format support)
+- MNN series (requires MNN format support)
 - Other compatible models
 
 ### B. Performance Optimization Recommendations
 
 1. **Use NPU Acceleration**: Ensure using QNN format models
-2. **Set Context Length Reasonably**: Do not exceed the model's maximum supported value
+2. **Set Context Length Reasonably**: Don't exceed model's maximum supported value
 3. **Optimize Batch Processing**: Consider batch processing for multiple requests
 4. **Cache Management**: Use history functionality reasonably
 5. **Resource Monitoring**: Regularly check memory and CPU usage
 
 ### C. Security Recommendations
 
-1. **Network Security**: Do not expose service directly to the public internet
-2. **Access Control**: Add authentication in production environments
-3. **Data Privacy**: Process sensitive data locally, do not upload to cloud
-4. **Regular Updates**: Update to the latest version promptly for security fixes
+1. **Network Security**: Don't expose service directly to public network
+2. **Access Control**: Add authentication in production environment
+3. **Data Privacy**: Process sensitive data locally, don't upload to cloud
+4. **Regular Updates**: Update to latest version promptly for security fixes
 
 ### D. Development Recommendations
 
 1. **Error Handling**: Clients should implement comprehensive error handling mechanisms
 2. **Timeout Settings**: Set reasonable request timeout periods
 3. **Retry Mechanism**: Implement exponential backoff retry strategy
-4. **Logging**: Record key operations and error information
+4. **Logging**: Record critical operations and error information
 5. **Testing**: Conduct thorough functional and performance testing before deployment
 
 ---
 
 **Thank you for using GenieAPIService!**
 
-If you have any questions or suggestions, please visit our GitHub repository.
+For any questions or suggestions, please visit our GitHub repository.
