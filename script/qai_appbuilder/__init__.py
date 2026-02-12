@@ -19,5 +19,4 @@ if sys.platform.startswith('linux'):
 
 from .qnncontext import *
 from .geniecontext import *
-from .aipc import *
-from .onnxrtwrapper import *
+from .onnxwrapper import *

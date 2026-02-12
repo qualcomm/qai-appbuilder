@@ -5,7 +5,7 @@ This is onnx sample code for using AppBuilder to load real_esrgan_x4plus QNN mod
 
 ## Run the sample code
 ```
-python aipc.py onnx_inference.py
+python onnxexec.py onnx_inference.py
 
 ```
 ## Output

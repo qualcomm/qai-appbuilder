@@ -34,7 +34,7 @@ def main() -> int:
     if repo_dir not in sys.path:
         sys.path.insert(0, repo_dir)
 
-    import onnxrtwrapper as _ort
+    import onnxwrapper as _ort
 
     # Hot-patch: make `import onnxruntime as ort` resolve to the QNN wrapper.
     sys.modules["onnxruntime"] = _ort

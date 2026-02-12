@@ -7,7 +7,6 @@
 #=============================================================================
 # -*- coding: utf-8 -*-
 """
-qai_onnxruntime.py
 Hot-patch replacement for `onnxruntime` using Qualcomm QAI AppBuilder (QNNContext).
 
 Key capabilities:
@@ -38,6 +37,7 @@ Auto-generation controls:
 from __future__ import annotations
 
 import os
+import sys
 import time
 import logging
 from dataclasses import dataclass
@@ -57,6 +57,9 @@ from qai_appbuilder import QNNConfig, QNNContext, Runtime, LogLevel, ProfilingLe
 
 logger = logging.getLogger(__name__)
 
+
+# Auto-register this module as 'onnxruntime' 
+sys.modules.setdefault("onnxruntime", sys.modules[__name__])
 
 @dataclass(frozen=True)
 class TensorInfo(Mapping[str, Any]):

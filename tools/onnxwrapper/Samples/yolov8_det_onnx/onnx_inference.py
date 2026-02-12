@@ -4,8 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
 
-from qai_appbuilder.aipc import patch_onnxruntime_to_qnn
-patch_onnxruntime_to_qnn()
+from qai_appbuilder import onnxwrapper
 import onnxruntime as ort
 import numpy as np
 import cv2
