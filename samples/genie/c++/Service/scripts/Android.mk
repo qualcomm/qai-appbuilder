@@ -84,12 +84,12 @@ LOCAL_SRC_FILES                :=   ../src/GenieAPIService/src/chat_history/chat
                                     ../src/GenieAPIService/src/response/response_dispatcher.cpp \
                                     ../src/common/utils.cpp \
                                     ../src/GenieAPIService/src/GenieAPIService.cpp
-include $(BUILD_SHARED_LIBRARY)
-#========================== Define client app variables =============================================
-include $(CLEAR_VARS)
-LOCAL_C_INCLUDES               := $(PACKAGE_C_INCLUDES)
-LOCAL_MODULE                   := GenieAPIClient
-LOCAL_SHARED_LIBRARIES 		   := libcurl
-LOCAL_LDLIBS                   := -llog
-LOCAL_SRC_FILES                := ../examples/GenieAPIClient/GenieAPIClient.cpp
-include $(BUILD_EXECUTABLE)
+#include $(BUILD_SHARED_LIBRARY)
+##========================== Define client app variables =============================================
+#include $(CLEAR_VARS)
+#LOCAL_C_INCLUDES               := $(PACKAGE_C_INCLUDES)
+#LOCAL_MODULE                   := GenieAPIClient
+#LOCAL_SHARED_LIBRARIES 		   := libcurl
+#LOCAL_LDLIBS                   := -llog
+#LOCAL_SRC_FILES                := ../examples/GenieAPIClient/GenieAPIClient.cpp
+#include $(BUILD_EXECUTABLE)

@@ -31,7 +31,7 @@ public:
         {
             if (e["role"] == "user")
             {
-                const json &user_content = e["content"];
+                const json user_content = e["content"];
                 if (user_content.is_string())
                 {
                     model_input_.text_ = user_content;
@@ -163,12 +163,12 @@ private:
         };
     }
 
-    std::string BuildPrompt(json &data, bool &is_tool)
+    std::string BuildPrompt(const json &data, bool &is_tool)
     {
         is_tool = false;
         // parse data
-        const json &msg = data["messages"];
-        const json &tools = data["tools"];
+        const json msg = data["messages"];
+        const json tools = data["tools"];
         std::string userToolsPrompt; // Tool description sent by client
         std::string systemDefaultPrompt = "You are a helpful assistant.";
         std::string startDefaultPrompt;
@@ -213,7 +213,7 @@ private:
             auto role = get_json_value(element, "role", BLANK_STRING);
             if (role == "system")
             {
-                const json &system_content = element["content"];
+                const json system_content = element["content"];
                 if (system_content.is_array())
                 {
                     for (const auto &sys_element: system_content)

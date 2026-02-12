@@ -18,7 +18,7 @@
 
 using json = nlohmann::ordered_json;
 
-std::string SVR_URL = "http://10.92.143.176:8910/v1/chat/completions";
+std::string SVR_URL;
 
 static class CLI
 {
@@ -28,6 +28,7 @@ public:
     std::string audio_path_;
     std::string system{"You are a helpful assistant."};
     std::string model{"IBM-Granite-v3.1-8B"};
+    std::string raw_file_;
     bool loop{false};
     bool stream{false};
     std::string ip{"127.0.0.1"};
@@ -89,9 +90,12 @@ void CLI::Init(int argc, CharT **argv)
             cli_info.loop = true;
         else if (ArgToString(arg) == "--ip")
             cli_info.ip = ArgToString(argv[++i]);
+        else if (ArgToString(arg) == "--raw_file")
+            cli_info.raw_file_ = ArgToString(argv[++i]);
     }
+
     SVR_URL = std::string{"http://"} + cli_info.ip + ":8910/v1/chat/completions";
-    My_Log{} << SVR_URL << "\n";
+    My_Log{} << "url path: " << SVR_URL << "\n";
 }
 
 static class Question
@@ -188,11 +192,15 @@ std::string build_request_body(const std::string &model, const T1 &prompt, const
 
 void Do(const std::string &body)
 {
+    CURLcode res;
+    curl_global_init(CURL_GLOBAL_ALL);
     CURL *curl = curl_easy_init();
     if (!curl)
     {
+        curl_global_cleanup();
         return;
     }
+
     curl_easy_setopt(curl, CURLOPT_URL, SVR_URL.c_str());
     struct curl_slist *headers = nullptr;
     headers = curl_slist_append(headers, "Content-Type: application/json");
@@ -213,11 +221,16 @@ void Do(const std::string &body)
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
 
-    CURLcode res = curl_easy_perform(curl);
     long response_code = 0;
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
     std::string full_response;
+    My_Log{} << "Response: \n";
+    if ((res = curl_easy_perform(curl)) != CURLE_OK)
+    {
+        My_Log{} << "curl_easy_perform() failed: " << curl_easy_strerror(res) << std::endl;
+        goto clean;
+    }
 
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
     if (response_code != 200)
     {
         My_Log{} << "get failed response code: " << response_code << std::endl;
@@ -226,6 +239,7 @@ void Do(const std::string &body)
     }
 
     if (!cli_info.stream && !message.empty())
+    {
         try
         {
             full_response = json::parse(message).dump(4);
@@ -237,16 +251,12 @@ void Do(const std::string &body)
             My_Log{My_Log::Level::kError} << e.what() << "\n";
             My_Log{} << (full_response.empty() ? message : full_response) << "\n";
         }
-
-    if (res != CURLE_OK)
-    {
-        My_Log{} << "curl_easy_perform() failed: " << curl_easy_strerror(res) << std::endl;
-        goto clean;
     }
 
     clean:
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
+    curl_global_cleanup();
 }
 
 // TODO: Stop
@@ -343,33 +353,50 @@ MAIN
     SetConsoleOutputCP(CP_UTF8);
 #endif
 
-    curl_global_init(CURL_GLOBAL_ALL);
-    if (cli_info.prompt.empty())
-    {
-        if (cli_info.picture_path_.empty() && cli_info.audio_path_.empty())
-        {
-            cli_info.prompt = "Hi!";
-        }
-        else
-        {
-            cli_info.prompt = "What is it descript?";
-        }
-    }
-
     try
     {
-        json j_system, j_user;
+        std::string req_body;
+        if (!cli_info.raw_file_.empty())
+        {
+            std::ifstream in(cli_info.raw_file_);
+            if (!in.good())
+            {
+                My_Log{} << "open file path:" << cli_info.raw_file_ << " failed\n";
+                return 1;
+            }
+
+            json j;
+            in >> j;
+            req_body = j.dump(4);
+            cli_info.stream = j["stream"];
+            goto ahead;
+        }
+
+        if (cli_info.prompt.empty())
+        {
+            if (cli_info.picture_path_.empty() && cli_info.audio_path_.empty())
+            {
+                cli_info.prompt = "Hi!";
+            }
+            else
+            {
+                cli_info.prompt = "What is it descript?";
+            }
+        }
+
+
+//        json j_system, j_user;
 //        BuildUserContentV2(j_system, j_user);
 //        std::string req_body = build_request_body(cli_info.model, j_user, j_system, cli_info.stream);
-//        My_Log{} << req_body << "\n";
-        std::string req_body = build_request_body(cli_info.model, BuildUserContentV1(), cli_info.system, cli_info.stream);
+        req_body = build_request_body(cli_info.model, BuildUserContentV1(), cli_info.system, cli_info.stream);
 //        std::string req_body = build_request_body(cli_info.model, cli_info.prompt, cli_info.system, cli_info.stream);
+
+        ahead:
         cli_info.loop ? DoLoop() : Do(req_body);
     }
     catch (const std::exception &e)
     {
         My_Log{My_Log::Level::kError} << e.what();
     }
-    curl_global_cleanup();
     return 0;
 }
