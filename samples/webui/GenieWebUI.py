@@ -239,10 +239,21 @@ def add_media(chatbot, chatmsg):
         file_path = os.path.join(FILE_PATH, file_name)
         if not _chat_img:
             _chat_img = file_path
-        chatbot.append(ChatMessage(
-            role="user",
-            content=f"<small><a href='/gradio_api/file={file_path}' target='_blank'>{file_name}</a></small>"
-        ))
+        
+        # 检查文件扩展名，如果是图片则直接显示
+        file_ext = os.path.splitext(file_name)[1].lower()
+        if file_ext in ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']:
+            # 图片文件：直接显示图片
+            chatbot.append(ChatMessage(
+                role="user",
+                content=gr.Image(file_path)
+            ))
+        else:
+            # 非图片文件：显示文件链接
+            chatbot.append(ChatMessage(
+                role="user",
+                content=f"<small><a href='/gradio_api/file={file_path}' target='_blank'>{file_name}</a></small>"
+            ))
 
     return chatbot, gr.MultimodalTextbox(value=None, interactive=False, submit_btn=False, stop_btn=True)
 
