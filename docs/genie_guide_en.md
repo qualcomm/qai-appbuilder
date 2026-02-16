@@ -951,10 +951,7 @@ GenieAPIService provides a complete set of RESTful API endpoints, compatible wit
   "temperature": 0.7,
   "top_p": 0.9,
   "top_k": 40,
-  "max_tokens": 2048,
-  "stop": ["</s>"],
-  "presence_penalty": 0.0,
-  "frequency_penalty": 0.0
+  "max_tokens": 2048
 }
 ```
 
@@ -969,9 +966,6 @@ GenieAPIService provides a complete set of RESTful API endpoints, compatible wit
 | top_p | float | No | Top-p sampling (0.0-1.0, default: 0.9) |
 | top_k | integer | No | Top-k sampling (default: 40) |
 | max_tokens | integer | No | Maximum output token count (default: 2048) |
-| stop | array | No | Stop sequences |
-| presence_penalty | float | No | Presence penalty (-2.0-2.0, default: 0.0) |
-| frequency_penalty | float | No | Frequency penalty (-2.0-2.0, default: 0.0) |
 
 #### Response Example (Non-streaming)
 

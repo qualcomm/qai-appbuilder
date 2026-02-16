@@ -952,10 +952,7 @@ GenieAPIService 提供了一套完整的 RESTful API 接口，兼容 OpenAI API 
   "temperature": 0.7,
   "top_p": 0.9,
   "top_k": 40,
-  "max_tokens": 2048,
-  "stop": ["</s>"],
-  "presence_penalty": 0.0,
-  "frequency_penalty": 0.0
+  "max_tokens": 2048
 }
 ```
 
@@ -970,9 +967,6 @@ GenieAPIService 提供了一套完整的 RESTful API 接口，兼容 OpenAI API 
 | top_p | float | 否 | Top-p 采样（0.0-1.0，默认：0.9） |
 | top_k | integer | 否 | Top-k 采样（默认：40） |
 | max_tokens | integer | 否 | 最大输出 token 数（默认：2048） |
-| stop | array | 否 | 停止序列 |
-| presence_penalty | float | 否 | 存在惩罚（-2.0-2.0，默认：0.0） |
-| frequency_penalty | float | 否 | 频率惩罚（-2.0-2.0，默认：0.0） |
 
 #### 响应示例（非流式）
 
