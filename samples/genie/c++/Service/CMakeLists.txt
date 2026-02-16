@@ -37,6 +37,9 @@ if (MSVC)
             /O2
             /Ob2
             /utf-8
+            /MP
+            /FS
+            /Zc:referenceBinding
     )
 endif ()
 
