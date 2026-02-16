@@ -127,6 +127,5 @@ params = {"modelName": model_name}  #Llama2.0-7B-SSD
 response = requests.post(url, json=params)
 if response.status_code == 200:
     result = response.json()
-    print("context大小:",result["contextsize"])  
-    return gr.update(maximum=result["contextsize"], value=result["contextsize"])
+    print("context大小:",result["contextsize"])
 ```

@@ -16,35 +16,41 @@
    - [Windows 平台部署](#windows-平台部署)
    - [Android 平台部署](#android-平台部署)
 5. [🧠 模型配置](#模型配置)
-    - [文本模型](#文本模型部署)
-    - [多模态 qwen25-vl-3b 模型](#qwen25-vl-3b-模型)
-    - [多模态 phi-4 模型](#phi-4-多模态模型)
+   - [配置文件结构](#配置文件结构)
+   - [文本模型部署](#文本模型部署)
+   - [多模态 Qwen2.5-VL-3B 模型](#qwen25-vl-3b-模型)
+   - [多模态 Phi-4 模型](#phi-4-多模态模型)
 6. [🛠️ 服务使用](#服务使用)
 7. [📱 客户端使用](#客户端使用)
-    - [c-客户端](#c-客户端)
-    - [python 客户端](#python-客户端)
-    - [其他语言客户端](#其他语言客户端)
-8. [🔧 其他工具](#其他工具)
+   - [C++ 客户端](#c-客户端)
+   - [Python 客户端](#python-客户端)
+   - [其他语言客户端](#其他语言客户端)
+8. [🔨 从源码构建](#从源码构建)
+   - [源码与依赖准备](#源码与依赖准备)
+   - [Windows 构建](#windows-构建)
+   - [Android 构建](#android-构建)
+9. [🔧 其他工具](#其他工具)
    - [encode.exe](#encodeexe)
    - [decode.exe](#decodeexe)
    - [wav.exe](#wavexe)
-9. [📡 API 接口说明](#api-接口说明)
-   - [聊天完成接口](#1-聊天完成接口)
-   - [模型列表接口](#2-模型列表接口)
-   - [文本分割接口](#3-文本分割接口)
-   - [停止输出接口](#4-停止输出接口)
-   - [清除历史记录接口](#5-清除历史记录接口)
-   - [重新加载历史记录接口](#6-重新加载历史记录接口)
-   - [获取历史记录接口](#7-获取历史记录接口)
-   - [获取模型上下文大小接口](#8-获取模型上下文大小接口)
-   - [获取模型性能信息接口](#9-获取模型性能信息接口)
-   - [停止服务接口](#10-停止服务接口)
-10. [📄 Python 客户端示例](#python-客户端示例)
+10. [📡 API 接口说明](#api-接口说明)
+    - [聊天完成接口](#1-聊天完成接口)
+    - [模型列表接口](#2-模型列表接口)
+    - [文本分割接口](#3-文本分割接口)
+    - [停止输出接口](#4-停止输出接口)
+    - [清除历史记录接口](#5-清除历史记录接口)
+    - [重新加载历史记录接口](#6-重新加载历史记录接口)
+    - [获取历史记录接口](#7-获取历史记录接口)
+    - [获取模型上下文大小接口](#8-获取模型上下文大小接口)
+    - [获取模型性能信息接口](#9-获取模型性能信息接口)
+    - [停止服务接口](#10-停止服务接口)
+11. [📄 进阶示例](#进阶示例)
+    - [Python 基本对话示例](#python-基本对话示例)
     - [工具调用示例](#工具调用示例)
-    - [多模态：视觉语言模型示例](#视觉语言模型示例)
+    - [视觉语言模型示例](#视觉语言模型示例)
     - [其他语言示例](#其他语言示例)
-11. [❓ 常见问题](#常见问题)
-12. [📞 技术支持](#技术支持)
+12. [❓ 常见问题](#常见问题)
+13. [📞 技术支持](#技术支持)
 
 ---
 
@@ -115,6 +121,7 @@ GenieAPIService 提供了丰富的功能特性：
 - **GGUF 格式**：llama.cpp 格式模型（需编译时启用）
 
 ---
+
 ## 平台部署
 
 ## Windows 平台部署
@@ -123,11 +130,11 @@ GenieAPIService 提供了丰富的功能特性：
 
 1. **下载 GenieAPIService**
     - 访问 [GitHub Releases](https://github.com/quic/ai-engine-direct-helper/releases/tag/v2.42.0)
-    - 下载 `GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip`
+    - 下载 [GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.42.0/GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip)
 
 2. **下载模型文件**
-    - 根据需要[下载](https://www.aidevhome.com/?id=51)对应的模型文件
-    - 常见模型：Qwen2.0-7B、IBM-Granite-v3.1-8B、Qwen2.5-VL-3B 等
+    - 根据需要 [下载](https://www.aidevhome.com/?id=51) 对应的模型文件
+    - 常见模型：Qwen2.0-7B、Llama-3.1-8B、Qwen2.5-VL-3B 等
 
 ### 步骤 2：解压和配置
 
@@ -174,19 +181,6 @@ GenieAPIService.exe -c models/qwen2.5vl3b/config.json -l
 GenieAPIService.exe -c models/Qwen2.0-7B-SSD/config.json -l -d 3 -n 10 -o 1024 -p 8910
 ```
 
-参数说明：
-
-- `-c, --config_file`：配置文件路径（必需）
-- `-l, --load_model`：启动时加载模型
-- `-d, --loglevel`：日志级别（1:Error, 2:Warning, 3:Info, 4:Debug, 5:Verbose）
-- `-n, --num_response`：保存的历史对话轮数
-- `-o, --min_output_num`：最小输出 token 数量
-- `-p, --port`：服务端口（默认 8910）
-- `-t, --enable_thinking`：启用思考模式
-- `-a, --all_text`：输出所有文本（包括工具调用文本）
-- `--adapter`：LoRA 适配器名称
-- `--lora_alpha`：LoRA Alpha 值
-
 ### 步骤 4：验证服务
 
 服务启动成功后，会显示类似以下信息：
@@ -208,7 +202,7 @@ Server listening on port 8910
 
 1. **下载 APK**
     - 访问 [GitHub Releases](https://github.com/quic/ai-engine-direct-helper/releases/tag/v2.42.0)
-    - 下载 `GenieAPIService.apk`
+    - 下载 [GenieAPIService.apk](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.42.0/GenieAPIService.apk)
 
 2. **安装 APK**
    ```
@@ -241,8 +235,8 @@ Server listening on port 8910
 
 ### 步骤 3：启动服务
 
-1. **打开 GenieAPI 应用**
-    - 在设备上找到并打开 GenieAPI 应用
+1. **打开 GenieAPIService 应用**
+    - 在设备上找到并打开 GenieAPIService 应用
 
 2. **启动服务**
     - 点击 `START SERVICE` 按钮
@@ -251,7 +245,7 @@ Server listening on port 8910
 
 3. **配置后台运行**（重要）
     - 进入设备设置 → 电池 → 省电设置 → 应用电池管理
-    - 找到 GenieAPI 应用
+    - 找到 GenieAPIService 应用
     - 选择 "允许后台活动"
 
 ### 步骤 4：查看日志
@@ -267,10 +261,11 @@ Server listening on port 8910
 1. **GenieChat**
     - 源码位置：`samples/android/GenieChat`
     - 使用 Android Studio 编译安装
+    - 或直接 [下载](https://www.aidevhome.com/zb_users/upload/2026/01/202601281769601771694706.apk) 编译好的 apk
 
 2. **GenieFletUI**
     - 源码位置：`samples/fletui/GenieFletUI/android`
-    - 使用 Android Studio 编译安装
+    - 参考 [Build.md](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/fletui/GenieFletUI/android/BUILD.md) 将 Flet 代码编译成 apk
 
 ---
 
@@ -278,8 +273,73 @@ Server listening on port 8910
 
 ### 配置文件结构
 
-每个模型需要一个 `config.json`
-配置文件，[参考示例](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/python/models)。
+每个模型需要一个 `config.json` 配置文件，[参考示例](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/python/models)。
+
+基本配置文件结构：
+
+其中用到的 [htp_backend_ext_config.json](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/genie/python/config/htp_backend_ext_config.json) 可直接下载使用。
+
+```json
+{
+  "dialog" : {
+    "version" : 1,
+    "type" : "basic",
+    "context" : {
+      "version" : 1,
+      "size": 4096,
+      "n-vocab":   152064,
+      "bos-token": 151643,
+      "eos-token": 151645,
+      "eot-token": 128009
+    },
+    "sampler" : {
+      "version" : 1,
+      "seed" : 42,
+      "temp" : 1,
+      "top-k" : 1,
+      "top-p" : 1
+    },
+    "tokenizer" : {
+      "version" : 1,
+      "path" : "models\\Qwen2.0-7B\\tokenizer.json"
+    },
+    "engine" : {
+      "version" : 1,
+      "n-threads" : 3,
+      "backend" : {
+        "version" : 1,
+        "type" : "QnnHtp",
+        "QnnHtp" : {
+          "version" : 1,
+          "use-mmap" : false,
+          "spill-fill-bufsize" : 0,
+          "mmap-budget" : 0,
+          "poll" :false,
+          "pos-id-dim" : 64,
+          "cpu-mask" : "0xe0",
+          "kv-dim" : 128,
+          "rope-theta": 1000000
+        },
+        "extensions" : "models\\htp_backend_ext_config.json"
+      },
+      "model" : {
+        "version" : 1,
+        "type" : "binary",
+        "binary" : {
+          "version" : 1,
+          "ctx-bins" : [
+            "models\\Qwen2.0-7B\\model-1.bin",
+            "models\\Qwen2.0-7B\\model-2.bin",
+            "models\\Qwen2.0-7B\\model-3.bin",
+            "models\\Qwen2.0-7B\\model-4.bin",
+            "models\\Qwen2.0-7B\\model-5.bin"
+          ]
+        }
+      }
+    }
+  }
+}
+```
 
 ### 文本模型部署
 
@@ -294,9 +354,11 @@ models/Qwen2.0-7B-SSD/
 └── model-1.bin           # 模型文件
 ```
 
-### 视觉语言模型部署
+### Qwen2.5-VL-3B 模型
 
-#### Qwen2.5-VL-3B 模型
+Qwen2.5-VL-3B 是一个多模态视觉语言模型，支持图像理解和文本生成。
+
+#### 模型目录结构
 
 ```
 models/qwen2.5vl3b/
@@ -315,20 +377,91 @@ models/qwen2.5vl3b/
     └── window_attention_mask.raw
 ```
 
-#### Phi-4 多模态模型
+#### Qwen2.5-VL-3B 模型部署
 
+##### Windows 部署
+
+1) 将模型目录 `qwen2.5vl3b` 放入：`models\`目录。
+
+2) 在 `samples` 目录启动服务：
+
+```bat
+GenieAPIService.exe -c "models\qwen2.5vl3b\config.json" -l
 ```
-models/phi4mm/
-├── config.json
-├── embedding_weights_200064x3072.raw
-├── prompt.json
-├── tokenizer.json
-├── veg.serialized.bin
-├── llm_model-0.bin
-├── llm_model-1.bin
-└── raw/
-    ├── attention_mask.bin
-    └── position_ids.bin
+
+3) 在当前目录准备测试用图片 `test.png`，运行客户端：
+
+```bat
+GenieAPIClient.exe --prompt "what is the image descript?" --img test.png --stream --model qwen2.5vl3b
+```
+
+##### Android 部署
+
+- 模型放置到：`/sdcard/GenieModels/qwen2.5vl3b/`
+- 安装并打开 GenieAPIService APK，点击 **START SERVICE** 加载模型
+
+##### Python 客户端示例
+
+> GenieAPIService 提供 OpenAI 兼容接口；对于 VLM（视觉语言模型），`messages` 里需要传 `{question, image}`，其中 `image` 为 Base64 字符串。
+
+下面示例同时支持传入本地图片路径或图片 URL（URL 会先下载再编码）：
+
+```python
+import argparse
+import base64
+import os
+import requests
+from openai import OpenAI
+
+IP_ADDR = "127.0.0.1:8910"
+
+def encode_image(image_input: str) -> str:
+    if image_input.startswith(("http://", "https://")):
+        r = requests.get(image_input, timeout=10)
+        r.raise_for_status()
+        return base64.b64encode(r.content).decode("utf-8")
+    if not os.path.exists(image_input):
+        raise FileNotFoundError(f"Local file not found: {image_input}")
+    with open(image_input, "rb") as f:
+        return base64.b64encode(f.read()).decode("utf-8")
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--stream", action="store_true")
+parser.add_argument("--prompt", default="Describe this image")
+parser.add_argument("--image", required=True, help="Local image path or URL")
+args = parser.parse_args()
+
+base64_image = encode_image(args.image)
+client = OpenAI(base_url="http://" + IP_ADDR + "/v1", api_key="123")
+
+custom_messages = [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": {"question": args.prompt, "image": base64_image}},
+]
+extra_body = {
+    "size": 4096,
+    "temp": 1.5,
+    "top_k": 13,
+    "top_p": 0.6,
+    "messages": custom_messages,
+}
+model_name = "qwen2.5vl3b-8380-2.42"
+placeholder_msgs = [{"role": "user", "content": "placeholder"}]
+
+resp = client.chat.completions.create(
+    model=model_name,
+    messages=placeholder_msgs,
+    stream=args.stream,
+    extra_body=extra_body,
+)
+
+if args.stream:
+    for chunk in resp:
+        if chunk.choices and chunk.choices[0].delta.content is not None:
+            print(chunk.choices[0].delta.content, end="", flush=True)
+    print()
+else:
+    print(resp.choices[0].message.content)
 ```
 
 ### 提示词模板配置
@@ -345,95 +478,91 @@ models/phi4mm/
 }
 ```
 
+不同模型可能使用不同的提示词格式，请根据模型文档配置相应的模板。参考 [模板](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/python/models)。
+
 ---
 
 ## 服务使用
 
 ### 启动服务
 
+基本启动命令：
+
+```cmd
+GenieAPIService.exe -c models/Qwen2.0-7B-SSD/config.json -l
+```
+
+### 完整参数列表
+
+```
+GenieAPIService.exe [OPTIONS]
+
+必需参数：
+  -c, --config_file <path>    模型配置文件路径
+
+可选参数：
+  -l, --load_model            启动时自动加载模型
+  -p, --port <port>           服务端口（默认：8910）
+  -d, --loglevel <level>      日志级别（1-5）
+                              1: Error
+                              2: Warning
+                              3: Info
+                              4: Debug
+                              5: Verbose
+  -n, --num_response <num>    保存的历史对话轮数（默认：10）
+  -o, --min_output_num <num>  最小输出 token 数量（默认：1024）
+  -t, --enable_thinking       启用思考模式
+  -a, --all_text              输出所有文本（包括工具调用）
+  --adapter <name>            LoRA 适配器名称
+  --lora_alpha <value>        LoRA Alpha 值（默认：1.0）
+```
+
+### 使用示例
+
 #### 基本启动
 
-```
-# Windows
+```cmd
 GenieAPIService.exe -c models/Qwen2.0-7B-SSD/config.json -l
-
-# Linux
-./GenieAPIService -c models/Qwen2.0-7B-SSD/config.json -l
 ```
 
-#### 高级配置启动
+#### 自定义端口和日志级别
 
-```
-GenieAPIService.exe \
-  -c models/Qwen2.0-7B-SSD/config.json \
-  -l \
-  -d 3 \
-  -n 10 \
-  -o 1024 \
-  -p 8910 \
-  -f service.log
+```cmd
+GenieAPIService.exe -c models/Qwen2.0-7B-SSD/config.json -l -p 9000 -d 4
 ```
 
-### 服务端口
+#### 启用思考模式
 
-默认端口：`8910`
-
-可以通过 `-p` 参数修改：
-
-```
-GenieAPIService.exe -c config.json -l -p 9000
+```cmd
+GenieAPIService.exe -c models/Qwen2.0-7B-SSD/config.json -l -t
 ```
 
-### 日志配置
+#### 使用 LoRA 适配器
 
-#### 日志级别
-
-- `1`：Error（仅错误）
-- `2`：Warning（警告及以上）
-- `3`：Info（信息及以上）
-- `4`：Debug（调试及以上）
-- `5`：Verbose（详细信息）
-
-#### 日志文件
-
-```
-# 指定日志文件
-GenieAPIService.exe -c config.json -l -d 3 -f service.log
+```cmd
+GenieAPIService.exe -c models/Qwen2.0-7B-SSD/config.json -l --adapter my_lora --lora_alpha 0.8
 ```
 
-### 历史记录功能
+### 服务状态检查
 
-启用历史记录功能可以让模型记住之前的对话：
+服务启动后，可以通过以下方式检查状态：
 
-```
-# 保存最近 10 轮对话
-GenieAPIService.exe -c config.json -l -n 10
-```
+1. **查看控制台输出**
+   ```
+   GenieAPIService: 2.1.4, Genie Library: 1.14.0
+   Server listening on port 8910
+   Model loaded successfully
+   ```
 
-**注意事项**：
+2. **访问健康检查端点**
+   ```bash
+   curl http://localhost:8910/health
+   ```
 
-- 历史记录会占用上下文长度
-- 输入长度 + 历史记录长度 + 输出长度 不能超过模型的最大上下文长度
-- 可以通过 API 清除或重新加载历史记录
-
-### 思考模式
-
-某些模型支持思考模式（如 DeepSeek-R1）：
-
-```
-# 启用思考模式
-GenieAPIService.exe -c config.json -l -t
-```
-
-**建议**：使用工具调用功能时，建议禁用思考模式。
-
-### LoRA 支持
-
-使用 LoRA 适配器：
-
-```
-GenieAPIService.exe -c config.json -l --adapter my_adapter --lora_alpha 0.5
-```
+3. **查看模型列表**
+   ```bash
+   curl http://localhost:8910/v1/models
+   ```
 
 ---
 
@@ -441,41 +570,65 @@ GenieAPIService.exe -c config.json -l --adapter my_adapter --lora_alpha 0.5
 
 ### C++ 客户端
 
-GenieAPIService 提供了 C++ 客户端示例。
+GenieAPIClient 是一个 C++ 命令行客户端，用于与 GenieAPIService 交互。
 
-#### 文本模型调用
+#### 基本用法
 
-```
-GenieAPIClient.exe \
-  --prompt "如何学习编程？" \
-  --stream \
-  --model Qwen2.0-7B-SSD \
-  --ip 127.0.0.1
+```cmd
+GenieAPIClient.exe --prompt "你好，请介绍一下自己" --stream
 ```
 
-#### 视觉语言模型调用
+#### 完整参数列表
 
 ```
-GenieAPIClient.exe \
-  --prompt "这张图片描述了什么？" \
-  --img test.png \
-  --stream \
-  --model qwen2.5vl3b \
-  --ip 127.0.0.1
+GenieAPIClient.exe [OPTIONS]
+
+必需参数：
+  --prompt <text>             输入提示词
+
+可选参数：
+  --stream                    启用流式输出
+  --model <name>              指定模型名称
+  --img <path>                图像文件路径（用于多模态模型）
+  --host <address>            服务器地址（默认：127.0.0.1）
+  --port <port>               服务器端口（默认：8910）
+  --temperature <value>       温度参数（默认：0.7）
+  --top_p <value>             Top-p 参数（默认：0.9）
+  --top_k <value>             Top-k 参数（默认：40）
+  --max_tokens <num>          最大输出 token 数（默认：2048）
 ```
 
-#### 客户端参数说明
+#### C++ 客户端使用
+[参考代码](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/genie/c%2B%2B/Service/examples/GenieAPIClient/GenieAPIClient.cpp)<br>
+##### 文本对话
 
-- `--prompt`：用户问题（必需）
-- `--system`：系统提示词（默认："You are a helpful assistant."）
-- `--stream`：启用流式输出
-- `--model`：模型名称（必需）
-- `--ip`：服务器 IP 地址（默认：127.0.0.1）
-- `--img`：图片路径（仅用于 VLM 模型）
+```cmd
+GenieAPIClient.exe --prompt "解释一下量子计算的原理" --stream
+```
 
-### Python 客户端
+##### 多模态对话
 
-使用 OpenAI Python SDK 连接服务：
+```cmd
+GenieAPIClient.exe --prompt "这张图片里有什么？" --img test.png --stream --model qwen2.5vl3b
+```
+
+##### 自定义参数
+
+```cmd
+GenieAPIClient.exe --prompt "写一首诗" --stream --temperature 0.9 --max_tokens 500
+```
+
+### Python 客户端使用
+[参考代码](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/genie/c%2B%2B/Service/examples/GenieAPIClient/GenieAPIClient.py)<br>
+Python 客户端使用 OpenAI SDK，提供更灵活的集成方式。
+
+#### 安装依赖
+
+```bash
+pip install openai
+```
+
+#### 基本示例
 
 ```python
 from openai import OpenAI
@@ -488,32 +641,254 @@ client = OpenAI(
 
 # 发送请求
 response = client.chat.completions.create(
-    model="Qwen2.0-7B-SSD",
+    model="Qwen2.0-7B",
     messages=[
-        {"role": "system", "content": "你是一个有帮助的助手。"},
-        {"role": "user", "content": "如何学习编程？"}
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "你好，请介绍一下自己"}
     ],
     stream=True
 )
 
 # 处理流式响应
 for chunk in response:
-    content = chunk.choices[0].delta.content
-    if content:
-        print(content, end="", flush=True)
+    if chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="", flush=True)
+```
+
+#### 非流式模式
+
+```python
+response = client.chat.completions.create(
+    model="Qwen2.0-7B",
+    messages=[
+        {"role": "user", "content": "什么是人工智能？"}
+    ],
+    stream=False
+)
+
+print(response.choices[0].message.content)
+```
+
+#### 自定义参数
+
+```python
+response = client.chat.completions.create(
+    model="Qwen2.0-7B",
+    messages=[
+        {"role": "user", "content": "写一首关于春天的诗"}
+    ],
+    temperature=0.9,
+    top_p=0.95,
+    max_tokens=500,
+    stream=True
+)
 ```
 
 ### 其他语言客户端
 
-由于 GenieAPIService 兼容 OpenAI API，您可以使用任何支持 OpenAI API 的客户端库：
+GenieAPIService 兼容 OpenAI API，因此可以使用任何支持 OpenAI API 的客户端库。
 
-- **JavaScript/TypeScript**：`openai` npm 包
-- **Java**：OpenAI Java SDK
-- **Go**：go-openai
-- **Rust**：async-openai
-- **PHP**：openai-php
+#### JavaScript/Node.js
 
-只需将 `base_url` 设置为 GenieAPIService 的地址即可。
+```javascript
+const OpenAI = require('openai');
+
+const client = new OpenAI({
+    baseURL: 'http://127.0.0.1:8910/v1',
+    apiKey: '123'
+});
+
+async function chat() {
+    const response = await client.chat.completions.create({
+        model: 'Qwen2.0-7B',
+        messages: [
+            { role: 'user', content: '你好' }
+        ],
+        stream: true
+    });
+
+    for await (const chunk of response) {
+        if (chunk.choices[0]?.delta?.content) {
+            process.stdout.write(chunk.choices[0].delta.content);
+        }
+    }
+}
+
+chat();
+```
+
+#### Java
+
+```java
+import com.theokanning.openai.OpenAiService;
+import com.theokanning.openai.completion.chat.*;
+
+public class GenieClient {
+    public static void main(String[] args) {
+        OpenAiService service = new OpenAiService("123", Duration.ofSeconds(30));
+        service.setBaseUrl("http://127.0.0.1:8910/v1");
+
+        ChatCompletionRequest request = ChatCompletionRequest.builder()
+            .model("Qwen2.0-7B")
+            .messages(Arrays.asList(
+                new ChatMessage("user", "你好")
+            ))
+            .build();
+
+        service.createChatCompletion(request)
+            .getChoices()
+            .forEach(choice -> System.out.println(choice.getMessage().getContent()));
+    }
+}
+```
+
+#### Go
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    openai "github.com/sashabaranov/go-openai"
+)
+
+func main() {
+    config := openai.DefaultConfig("123")
+    config.BaseURL = "http://127.0.0.1:8910/v1"
+    client := openai.NewClientWithConfig(config)
+
+    resp, err := client.CreateChatCompletion(
+        context.Background(),
+        openai.ChatCompletionRequest{
+            Model: "Qwen2.0-7B",
+            Messages: []openai.ChatCompletionMessage{
+                {
+                    Role:    openai.ChatMessageRoleUser,
+                    Content: "你好",
+                },
+            },
+        },
+    )
+
+    if err != nil {
+        fmt.Printf("Error: %v\n", err)
+        return
+    }
+
+    fmt.Println(resp.Choices[0].Message.Content)
+}
+```
+---
+
+## 从源码构建
+
+> 适用于需要自行编译 C++ Service / Client（Windows / Android / Linux）的开发者。若仅体验或集成 API，建议直接使用 [Release 包](https://github.com/quic/ai-engine-direct-helper/releases)。
+
+### 源码与依赖准备
+
+1. **克隆仓库（含子模块）**
+
+```bash
+git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
+```
+
+2. **VLM 额外依赖（stb）**
+
+视觉语言模型（VLM）依赖 `stb`，请在以下目录拉取：
+
+```bash
+cd samples\genie\c++\External
+git clone https://github.com/nothings/stb.git
+```
+
+### Windows 构建
+
+#### 环境准备
+
+- Qualcomm® AI Runtime SDK（QAIRT）
+- CMake
+- Visual Studio Build Tools 2022（clang、v143）
+- Ninja
+
+> 建议使用 **Command Prompt（CMD）** 而非 PowerShell 执行构建命令。
+
+#### 设置 QAIRT SDK 路径
+
+安装 QAIRT 后通常位于 `C:\Qualcomm\AIStack\QAIRT\2.42.0.251225`，可设置环境变量：
+
+```bat
+Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.42.0.251225
+```
+
+#### 构建命令（ARM64 示例）
+
+```bat
+cd samples\genie\c++\Service
+mkdir build && cd build
+cmake -S .. -B . -A ARM64 ..
+cmake --build . --config Release --parallel 4
+```
+
+构建完成后，发布目录通常位于：`Service\GenieSerivce_v2.1.4`。
+
+#### 可选编译开关（模型格式支持）
+
+GenieService 默认支持 Qualcomm QNN BIN 模型；如需额外支持：
+
+- `USE_MNN=ON`：支持 MNN 格式模型
+- `USE_GGUF=ON`：支持 GGUF（llama.cpp）格式模型
+
+在 CMake 命令末尾追加 `-D<OPTION>=ON` 启用，例如：
+
+```bat
+cmake -S .. -B . -A ARM64 -DUSE_GGUF=ON -DUSE_MNN=ON
+```
+
+### Android 构建
+
+#### 环境准备
+
+- Qualcomm® AI Runtime SDK（QAIRT）
+- Android NDK（示例：r26d）
+- Android Studio（用于构建 APK）
+
+#### 设置环境变量与路径（Windows 主机构建 Android）
+
+```bat
+cd ai-engine-direct-helper\samples\genie\c++\Service
+Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.42.0.251225
+set PATH=%PATH%;C:\Programs\android-ndk-r26d\toolchains\llvm\prebuilt\windows-x86_64\bin
+Set NDK_ROOT=C:/Programs/android-ndk-r26d/
+Set ANDROID_NDK_ROOT=%NDK_ROOT%
+```
+
+#### 先构建 libappbuilder
+
+Android 构建前需要先编译 `libappbuilder`（详见项目根目录的 [BUILD](https://github.com/quic/ai-engine-direct-helper/blob/main/BUILD.md) 说明），并将生成的 `libappbuilder.so` 放到：
+
+`ai-engine-direct-helper\samples\genie\c++\Service`
+
+#### 构建 GenieAPIService（Android）
+
+```bat
+"C:\Programs\android-ndk-r26d\prebuilt\windows-x86_64\bin\make.exe" android -j4
+```
+
+构建完成后，将依赖的 `.so` 拷贝到 `libs/arm64-v8a`：
+
+```bat
+copy "%QNN_SDK_ROOT%lib\aarch64-android\*.so" "libs\arm64-v8a" /Y
+copy "obj\local\arm64-v8a\*.so" "libs\arm64-v8a" /Y
+```
+
+#### 构建 Android App（Android Studio）
+
+1. 使用 Android Studio 打开：`ai-engine-direct-helper\samples\genie\c++\Android`
+2. 菜单 **Build** → **Generate Signed App Bundle / APK** → 选择 **APK**
+3. 选择签名密钥并完成构建
+4. 在 `...\Android\app\release` 目录获取 `app-release.apk`
+5. 安装：`adb install app-release.apk`
 
 ---
 
@@ -523,125 +898,156 @@ for chunk in response:
 
 ### encode.exe
 
-它可以帮助你将图片或任何文件编码为 base64 格式的文件。<br><br>
-此示例将 cat.png 编码为 base64 格式数据并写入 cat.txt。<br>
-```encode.exe cat.png cat.txt```
+它可以帮助你将图片或任何文件编码为 base64 格式的文件。
+
+**示例**：将 cat.png 编码为 base64 格式数据并写入 cat.txt。
+
+```cmd
+encode.exe cat.png cat.txt
+```
 
 ### decode.exe
 
-它可以帮助您将 base64 编码的文件解码为二进制文件。<br><br>
-此示例将 base64 格式的 cat.txt 解码为二进制并写入 cat.png。<br>
-```decode.exe cat.txt cat.png```
+它可以帮助您将 base64 编码的文件解码为二进制文件。
+
+**示例**：将 base64 格式的 cat.txt 解码为二进制并写入 cat.png。
+
+```cmd
+decode.exe cat.txt cat.png
+```
 
 ### wav.exe
 
-您可能需要向 `OMINI` 模型输入 `.wav` 格式的音频文件，`wav.exe` 可以帮助录制您的声音！<br>
-我们采用一些额外的算法和技术来增强您的声音强度。<br><br>
-示例：
-输入命令后，长按 [空格] 键进行录音... <br>
-```wav.exe test.wav```
+您可能需要向 `omini` 模型输入 `.wav` 格式的音频文件，`wav.exe` 可以帮助录制您的声音！
+我们采用一些额外的算法和技术来增强您的声音强度。
+
+**示例**：输入命令后，长按 [空格] 键进行录音...
+
+```cmd
+wav.exe test.wav
+```
+
 ---
 
 ## API 接口说明
 
-GenieAPIService 提供了多个 HTTP API 接口。
+GenieAPIService 提供了一套完整的 RESTful API 接口，兼容 OpenAI API 标准。
 
 ### 1. 聊天完成接口
 
 **端点**：`POST /v1/chat/completions`
 
-**请求示例**：
+**描述**：发送聊天消息并获取模型响应。
+
+#### 请求参数
 
 ```json
 {
-  "model": "Qwen2.0-7B-SSD",
+  "model": "Qwen2.0-7B",
   "messages": [
-    {
-      "role": "system",
-      "content": "你是一个有帮助的助手。"
-    },
-    {
-      "role": "user",
-      "content": "如何学习编程？"
-    }
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "你好"}
   ],
   "stream": true,
-  "size": 4096,
-  "temp": 1.5,
-  "top_k": 13,
-  "top_p": 0.6,
-  "seed": 146
+  "temperature": 0.7,
+  "top_p": 0.9,
+  "top_k": 40,
+  "max_tokens": 2048,
+  "stop": ["</s>"],
+  "presence_penalty": 0.0,
+  "frequency_penalty": 0.0
 }
 ```
 
-**参数说明**：
+#### 参数说明
 
-- `model`：模型名称（必需）
-- `messages`：消息列表（必需）
-- `stream`：是否流式输出（默认：false）
-- `size`：最大输出 token 数（默认：4096）
-- `temp`：温度参数（默认：1.0）
-- `top_k`：Top-K 采样（默认：40）
-- `top_p`：Top-P 采样（默认：0.9）
-- `seed`：随机种子（可选）
+| 参数 | 类型 | 必需 | 说明 |
+|------|------|------|------|
+| model | string | 是 | 模型名称 |
+| messages | array | 是 | 消息列表 |
+| stream | boolean | 否 | 是否流式输出（默认：false） |
+| temperature | float | 否 | 温度参数（0.0-2.0，默认：0.7） |
+| top_p | float | 否 | Top-p 采样（0.0-1.0，默认：0.9） |
+| top_k | integer | 否 | Top-k 采样（默认：40） |
+| max_tokens | integer | 否 | 最大输出 token 数（默认：2048） |
+| stop | array | 否 | 停止序列 |
+| presence_penalty | float | 否 | 存在惩罚（-2.0-2.0，默认：0.0） |
+| frequency_penalty | float | 否 | 频率惩罚（-2.0-2.0，默认：0.0） |
 
-**响应示例（非流式）**：
+#### 响应示例（非流式）
 
 ```json
 {
   "id": "chatcmpl-123",
   "object": "chat.completion",
   "created": 1677652288,
-  "model": "Qwen2.0-7B-SSD",
+  "model": "Qwen2.0-7B",
   "choices": [
     {
       "index": 0,
       "message": {
         "role": "assistant",
-        "content": "学习编程的建议..."
+        "content": "你好！我是一个AI助手，很高兴为您服务。"
       },
       "finish_reason": "stop"
     }
   ],
   "usage": {
-    "prompt_tokens": 20,
-    "completion_tokens": 100,
-    "total_tokens": 120
+    "prompt_tokens": 10,
+    "completion_tokens": 15,
+    "total_tokens": 25
   }
 }
 ```
 
-**响应示例（流式）**：
+#### 响应示例（流式）
 
 ```
-data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"Qwen2.0-7B-SSD","choices":[{"index":0,"delta":{"content":"学"},"finish_reason":null}]}
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"Qwen2.0-7B","choices":[{"index":0,"delta":{"content":"你"},"finish_reason":null}]}
 
-data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"Qwen2.0-7B-SSD","choices":[{"index":0,"delta":{"content":"习"},"finish_reason":null}]}
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"Qwen2.0-7B","choices":[{"index":0,"delta":{"content":"好"},"finish_reason":null}]}
 
 data: [DONE]
+```
+
+#### cURL 示例
+
+```bash
+curl -X POST http://localhost:8910/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen2.0-7B",
+    "messages": [{"role": "user", "content": "你好"}],
+    "stream": false
+  }'
 ```
 
 ### 2. 模型列表接口
 
 **端点**：`GET /v1/models`
 
-**响应示例**：
+**描述**：获取可用模型列表。
+
+#### 请求示例
+
+```bash
+curl http://localhost:8910/v1/models
+```
+
+#### 响应示例
 
 ```json
 {
   "object": "list",
   "data": [
     {
-      "id": "Qwen2.0-7B-SSD",
+      "id": "Qwen2.0-7B",
       "object": "model",
       "created": 1677652288,
-      "owned_by": "system"
-    },
-    {
-      "id": "qwen2.5vl3b",
-      "object": "model",
-      "created": 1677652288,
-      "owned_by": "system"
+      "owned_by": "genie",
+      "permission": [],
+      "root": "Qwen2.0-7B",
+      "parent": null
     }
   ]
 }
@@ -651,247 +1057,210 @@ data: [DONE]
 
 **端点**：`POST /v1/textsplitter`
 
-**请求示例**：
+**描述**：将文本按照指定 `separators` 优先级进行分割。
 
-```json
-{
-  "text": "这是一段很长的文本...",
-  "max_length": 128,
-  "separators": [
-    "\n\n",
-    "\n",
-    "。",
-    "！",
-    "？",
-    "，",
-    " ",
-    ""
-  ]
-}
-```
+#### 调用示例
 
-**参数说明**：
+```python
+import argparse
+from openai import OpenAI
+import requests
 
-- `text`：要分割的文本（必需）
-- `max_length`：每段的最大 token 数（必需）
-- `separators`：分隔符优先级列表（必需）
+parser = argparse.ArgumentParser()
+parser.add_argument("--model", default="Qwen2.0-7B-SSD", type=str)  
+args = parser.parse_args()
 
-**响应示例**：
-
-```json
-{
-  "content": [
-    {
-      "text": "第一段文本...",
-      "length": 120
-    },
-    {
-      "text": "第二段文本...",
-      "length": 115
-    }
-  ]
-}
+url = "http://127.0.0.1:8910/v1/textsplitter"
+text = ""   # Please enter the text to be split.
+separators = ["\n\n", "\n", "。", "！", "？", "，", ".", "?", "!", ",", " ", ""]
+body = {"text": text, "max_length": 128, "separators": separators}
+response = requests.post(url, json=body)
+result = response.json()
+result = result["content"]
+print("result length:", len(result))
+count = 0
+for item in result:
+    count += 1
+    print("No.", count)
+    print("text:", item["text"])
+    print("length: Tokens", item["length"], "string", len(item["text"]))
+    print()
 ```
 
 ### 4. 停止输出接口
 
-**端点**：`POST /stop`
+**端点**：`POST /v1/stop`
 
-**请求示例**：
+**描述**：停止当前正在进行的生成。
 
-```json
-{
-  "text": "stop"
-}
+#### 请求示例
+
+```python
+import requests
+url = "http://127.0.0.1:8910/stop"
+params = {"text": "stop"}  
+response = requests.post(url, json=params)
 ```
-
-**功能**：立即停止当前的模型输出。
 
 ### 5. 清除历史记录接口
 
-**端点**：`POST /clear`
+**端点**：`POST /v1/clear`
 
-**请求示例**：
+**描述**：清除对话历史记录。
 
-```json
-{
-  "text": "clear"
-}
+#### 请求示例
+
+```python
+import requests
+
+url = "http://127.0.0.1:8910/clear"
+params = {"text": "clear"}
+response = requests.post(url, json=params)
 ```
-
-**功能**：清除服务器保存的对话历史记录。
 
 ### 6. 重新加载历史记录接口
 
-**端点**：`POST /reload`
+**端点**：`POST /v1/reload`
 
-**请求示例**：
+**描述**：从文件重新加载历史记录。
 
-```json
-{
-  "action": "import_history",
-  "history": [
-    {
-      "role": "user",
-      "content": "你好"
-    },
-    {
-      "role": "assistant",
-      "content": "你好！有什么可以帮助你的吗？"
-    },
-    {
-      "role": "user",
-      "content": "介绍一下北京"
-    },
-    {
-      "role": "assistant",
-      "content": "北京是中国的首都..."
-    }
-  ]
+#### 调用示例
+
+```python
+import requests
+url = "http://127.0.0.1:8910/reload"
+history_data = {
+    "action": "import_history",
+    "history": [
+        {"role": "user", "content": ""},
+        {"role": "assistant", "content": ""},
+        {"role": "user", "content": ""},
+        {"role": "assistant", "content": ""},
+    ]
 }
-```
 
-**功能**：从客户端上传历史对话记录到服务器。
+response = requests.post(url, json=history_data)
+```
 
 ### 7. 获取历史记录接口
 
-**端点**：`POST /fetch`
+**端点**：`GET /v1/fetch`
 
-**响应示例**：
+**描述**：获取当前对话历史记录。
 
-```json
-{
-  "history": [
-    {
-      "role": "user",
-      "content": "你好"
-    },
-    {
-      "role": "assistant",
-      "content": "你好！有什么可以帮助你的吗？"
-    }
-  ]
-}
+#### 请求示例
+
+```python
+import requests
+BASE_URL = "http://127.0.0.1:8910/fetch"
+response = requests.post(BASE_URL)
+print(response.text)
+return response
 ```
 
 ### 8. 获取模型上下文大小接口
 
-**端点**：`POST /contextsize`
+**端点**：`GET /v1/contextsize`
 
-**请求示例**：
+**描述**：获取当前模型的上下文大小。
 
-```json
-{
-  "modelName": "Qwen2.0-7B-SSD"
-}
-```
+#### 请求示例
 
-**响应示例**：
-
-```json
-{
-  "contextsize": 4096
-}
+```python
+url = "http://127.0.0.1:8910/contextsize"
+params = {"modelName": model_name}  #Llama2.0-7B-SSD
+response = requests.post(url, json=params)
+if response.status_code == 200:
+    result = response.json()
+    print("context大小:",result["contextsize"])
 ```
 
 ### 9. 获取模型性能信息接口
 
-**端点**：`GET /profile`
+**端点**：`GET /v1/performance`
 
-**响应示例**：
+**描述**：获取模型推理性能信息。
 
-```json
-{
-  "model": "Qwen2.0-7B-SSD",
-  "tokens_per_second": 25.5
-}
+#### 请求示例
+
+```python
+import requests
+BASE_URL = "http://127.0.0.1:8910/profile"
+response = requests.get(BASE_URL)
+return response
 ```
 
 ### 10. 停止服务接口
 
-**端点**：`POST /servicestop`
+**端点**：`POST /v1/shutdown`
 
-**请求示例**：
+**描述**：停止 GenieAPIService 服务。
 
-```json
-{
-  "text": "stop"
-}
+#### 请求示例
+```bash
+import requests
+BASE_URL = "http://127.0.0.1:8910/shutdown"
+response = requests.get(BASE_URL)
+return response
 ```
-
-**功能**：终止 GenieAPIService 服务进程。
-
 ---
 
-## Python 客户端示例
+## 进阶示例
 
-### 基本聊天示例
+### Python 基本对话示例
 
 ```python
 from openai import OpenAI
 
-# 配置客户端
-BASE_URL = "http://127.0.0.1:8910/v1"
-client = OpenAI(base_url=BASE_URL, api_key="123")
+client = OpenAI(
+    base_url="http://127.0.0.1:8910/v1",
+    api_key="123"
+)
 
-# 发送消息
-messages = [
-    {"role": "system", "content": "你是一个有帮助的助手。"},
-    {"role": "user", "content": "如何学习编程？"}
-]
-
-# 流式输出
+# 流式对话
 response = client.chat.completions.create(
-    model="Qwen2.0-7B-SSD",
+    model="Qwen2.0-7B",
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "介绍一下量子计算"}
+    ],
     stream=True,
-    messages=messages
+    temperature=0.7,
+    max_tokens=2048
 )
 
 for chunk in response:
-    content = chunk.choices[0].delta.content
-    if content:
-        print(content, end="", flush=True)
-```
-
-### 非流式输出示例
-
-```python
-from openai import OpenAI
-
-client = OpenAI(base_url="http://127.0.0.1:8910/v1", api_key="123")
-
-response = client.chat.completions.create(
-    model="Qwen2.0-7B-SSD",
-    messages=[
-        {"role": "system", "content": "你是一个数学老师。"},
-        {"role": "user", "content": "什么是勾股定理？"}
-    ]
-)
-
-print(response.choices[0].message.content)
+    if chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="", flush=True)
+print()
 ```
 
 ### 工具调用示例
+
+GenieAPIService 支持 Function Calling，允许模型调用外部工具。
 
 ```python
 from openai import OpenAI
 import json
 
-client = OpenAI(base_url="http://127.0.0.1:8910/v1", api_key="123")
+client = OpenAI(
+    base_url="http://127.0.0.1:8910/v1",
+    api_key="123"
+)
 
 # 定义工具
 tools = [
     {
         "type": "function",
         "function": {
-            "name": "get_current_weather",
-            "description": "获取指定城市的当前天气",
+            "name": "get_weather",
+            "description": "获取指定城市的天气信息",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "location": {
+                    "city": {
                         "type": "string",
-                        "description": "城市名称，例如：北京"
+                        "description": "城市名称，例如：北京、上海"
                     },
                     "unit": {
                         "type": "string",
@@ -899,18 +1268,38 @@ tools = [
                         "description": "温度单位"
                     }
                 },
-                "required": ["location", "unit"]
+                "required": ["city"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate",
+            "description": "执行数学计算",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "expression": {
+                        "type": "string",
+                        "description": "数学表达式，例如：2+2、10*5"
+                    }
+                },
+                "required": ["expression"]
             }
         }
     }
 ]
 
 # 发送请求
+messages = [
+    {"role": "system", "content": "You are a helpful assistant with access to tools."},
+    {"role": "user", "content": "北京今天天气怎么样？"}
+]
+
 response = client.chat.completions.create(
-    model="Qwen2.0-7B-SSD",
-    messages=[
-        {"role": "user", "content": "北京今天天气怎么样？"}
-    ],
+    model="Qwen2.0-7B",
+    messages=messages,
     tools=tools,
     tool_choice="auto"
 )
@@ -921,110 +1310,36 @@ if message.tool_calls:
     for tool_call in message.tool_calls:
         function_name = tool_call.function.name
         function_args = json.loads(tool_call.function.arguments)
-
-        # 调用实际的函数
-        if function_name == "get_current_weather":
-            result = get_current_weather(
-                location=function_args["location"],
-                unit=function_args["unit"]
-            )
-
-            # 将结果返回给模型
-            messages.append(message)
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "content": result
-            })
-
-            # 获取最终响应
-            final_response = client.chat.completions.create(
-                model="Qwen2.0-7B-SSD",
-                messages=messages
-            )
-            print(final_response.choices[0].message.content)
-```
-
-### 文本分割示例
-
-```python
-import requests
-
-url = "http://127.0.0.1:8910/v1/textsplitter"
-
-text = """
-这是一段很长的文本内容...
-需要根据 token 数量进行分割...
-"""
-
-separators = ["\n\n", "\n", "。", "！", "？", "，", " ", ""]
-
-body = {
-    "text": text,
-    "max_length": 128,
-    "separators": separators
-}
-
-response = requests.post(url, json=body)
-result = response.json()
-
-for i, item in enumerate(result["content"], 1):
-    print(f"段落 {i}:")
-    print(f"文本: {item['text']}")
-    print(f"Token 数: {item['length']}")
-    print()
-```
-
-### 历史记录管理示例
-
-```python
-import requests
-
-BASE_URL = "http://127.0.0.1:8910"
-
-
-# 清除历史记录
-def clear_history():
-    url = f"{BASE_URL}/clear"
-    response = requests.post(url, json={"text": "clear"})
-    return response.status_code == 200
-
-
-# 重新加载历史记录
-def reload_history(history_list):
-    url = f"{BASE_URL}/reload"
-    history_data = {
-        "action": "import_history",
-        "history": history_list
-    }
-    response = requests.post(url, json=history_data)
-    return response.status_code == 200
-
-
-# 获取历史记录
-def fetch_history():
-    url = f"{BASE_URL}/fetch"
-    response = requests.post(url)
-    return response.json()
-
-
-# 使用示例
-if __name__ == "__main__":
-    # 清除历史
-    clear_history()
-
-    # 加载新的历史
-    history = [
-        {"role": "user", "content": "你好"},
-        {"role": "assistant", "content": "你好！有什么可以帮助你的吗？"},
-        {"role": "user", "content": "介绍一下北京"},
-        {"role": "assistant", "content": "北京是中国的首都..."}
-    ]
-    reload_history(history)
-
-    # 获取当前历史
-    current_history = fetch_history()
-    print(current_history)
+        
+        print(f"调用工具: {function_name}")
+        print(f"参数: {function_args}")
+        
+        # 模拟工具执行
+        if function_name == "get_weather":
+            result = {
+                "city": function_args["city"],
+                "temperature": 22,
+                "condition": "晴朗",
+                "humidity": 45
+            }
+        
+        # 将工具结果添加到消息中
+        messages.append(message)
+        messages.append({
+            "role": "tool",
+            "tool_call_id": tool_call.id,
+            "content": json.dumps(result, ensure_ascii=False)
+        })
+    
+    # 获取最终响应
+    final_response = client.chat.completions.create(
+        model="Qwen2.0-7B",
+        messages=messages
+    )
+    
+    print(f"\n最终回复: {final_response.choices[0].message.content}")
+else:
+    print(message.content)
 ```
 
 ### 视觉语言模型示例
@@ -1032,50 +1347,111 @@ if __name__ == "__main__":
 ```python
 from openai import OpenAI
 import base64
+import os
 
-client = OpenAI(base_url="http://127.0.0.1:8910/v1", api_key="123")
+client = OpenAI(
+    base_url="http://127.0.0.1:8910/v1",
+    api_key="123"
+)
 
-
-# 读取并编码图片
 def encode_image(image_path):
+    """将图像编码为 base64"""
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode('utf-8')
 
+# 准备图像
+image_path = "test.png"
+base64_image = encode_image(image_path)
 
-# 编码图片
-image_base64 = encode_image("test.png")
-
-# 构建消息
-messages = [
+# 发送请求（使用 extra_body 传递自定义消息格式）
+custom_messages = [
+    {"role": "system", "content": "You are a helpful assistant."},
     {
         "role": "user",
         "content": {
-            "question": "这张图片描述了什么？",
-            "image": image_base64
+            "question": "请详细描述这张图片的内容",
+            "image": base64_image
         }
     }
 ]
 
-# 发送请求
 response = client.chat.completions.create(
     model="qwen2.5vl3b",
-    messages=messages,
-    stream=True
+    messages=[{"role": "user", "content": "placeholder"}],  # 占位符
+    stream=True,
+    extra_body={
+        "messages": custom_messages,
+        "size": 4096,
+        "temp": 1.5,
+        "top_k": 13,
+        "top_p": 0.6
+    }
 )
 
-# 处理响应
+# 处理流式响应
+print("模型回复：")
 for chunk in response:
-    content = chunk.choices[0].delta.content
-    if content:
-        print(content, end="", flush=True)
+    if chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="", flush=True)
+print()
 ```
 
 ### 其他语言示例
-有关 C++ 访问的完整例子可以参见 [GenieAPIClient.cpp](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/genie/c%2B%2B/Service/examples/GenieAPIClient/GenieAPIClient.cpp).
 
+#### JavaScript/TypeScript
 
-我们对 Android apk 使用 java
-开发，其中的客户端可以参见 [callChatApi](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/android/GenieChat/app/src/main/java/com/example/geniechat/MainActivity.java#L464)
+```javascript
+import OpenAI from 'openai';
+
+const client = new OpenAI({
+    baseURL: 'http://127.0.0.1:8910/v1',
+    apiKey: '123'
+});
+
+async function chat() {
+    const response = await client.chat.completions.create({
+        model: 'Qwen2.0-7B',
+        messages: [
+            { role: 'system', content: 'You are a helpful assistant.' },
+            { role: 'user', content: '你好' }
+        ],
+        stream: true
+    });
+
+    for await (const chunk of response) {
+        if (chunk.choices[0]?.delta?.content) {
+            process.stdout.write(chunk.choices[0].delta.content);
+        }
+    }
+    console.log();
+}
+
+chat();
+```
+
+#### C#
+
+```csharp
+using OpenAI;
+using OpenAI.Chat;
+
+var client = new OpenAIClient("123", new OpenAIClientOptions
+{
+    Endpoint = new Uri("http://127.0.0.1:8910/v1")
+});
+
+var chatClient = client.GetChatClient("Qwen2.0-7B");
+
+var response = await chatClient.CompleteChatAsync(
+    new ChatMessage[]
+    {
+        new SystemChatMessage("You are a helpful assistant."),
+        new UserChatMessage("你好")
+    }
+);
+
+Console.WriteLine(response.Value.Content[0].Text);
+```
 
 ---
 
@@ -1086,199 +1462,180 @@ for chunk in response:
 **问题**：运行 `GenieAPIService.exe` 时提示找不到 DLL 文件。
 
 **解决方案**：
-
-- 确保当前路径存在 Qualcomm® AI Runtime SDK 运行时库
-- 安装 Visual C++ Redistributable
+- 确保已安装 [Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-160)
+- 检查 QAIRT SDK 是否正确安装
+- 确认所有依赖的 `.dll` 文件都在同一目录下
 
 ### 2. 模型加载失败
 
 **问题**：服务启动后提示 "Failed to load model"。
 
 **解决方案**：
-
-- 检查配置文件路径是否正确
+- 检查 `config.json` 文件路径是否正确
 - 确认模型文件完整且未损坏
-- 检查模型目录结构是否符合要求
+- 检查系统内存是否足够（至少 16GB）
 - 查看日志文件获取详细错误信息
 
-### 3. 端口被占用
+### 3. NPU 不可用
 
-**问题**：启动服务时提示 "service already exist"。
-
-**解决方案**：
-
-- 检查是否已有 GenieAPIService 实例在运行
-- 使用 `-p` 参数指定其他端口
-- Windows: 使用 `netstat -ano | findstr 8910` 查找占用端口的进程
-- 终止占用端口的进程或重启系统
-
-### 4. 输入长度超限
-
-**问题**：发送请求时提示输入长度超过限制。
+**问题**：服务运行在 CPU 上而不是 NPU。
 
 **解决方案**：
+- 确认设备支持 Qualcomm Snapdragon NPU
+- 检查 QAIRT SDK 版本是否正确
+- 在 `config.json` 中设置 `"device": "npu"`
+- 更新设备驱动程序
 
-- 使用文本分割接口将长文本分段
-- 增加 `--min_output_num` 参数值以减少输出预留空间
-- 使用支持更大上下文的模型
-- 公式：输入长度 + 历史记录长度 + 最小输出长度 ≤ 模型上下文大小
+### 4. 推理速度慢
 
-### 5. Android 服务被杀死
-
-**问题**：Android 设备上服务运行一段时间后自动停止。
+**问题**：模型推理速度比预期慢。
 
 **解决方案**：
+- 确认模型运行在 NPU 而不是 CPU
+- 检查系统资源占用情况
+- 尝试减小 `context_size` 或 `max_tokens`
+- 关闭不必要的后台应用程序
 
-- 进入设置 → 电池 → 省电设置 → 应用电池管理
-- 找到 GenieAPI 应用
-- 选择 "允许后台活动"
+### 5. 流式输出不工作
+
+**问题**：设置 `stream=true` 但没有流式输出。
+
+**解决方案**：
+- 确认客户端正确处理 SSE（Server-Sent Events）
+- 检查网络连接和防火墙设置
+- 尝试使用非流式模式测试服务是否正常
+
+### 6. 多模态模型无法识别图像
+
+**问题**：发送图像后模型无响应或报错。
+
+**解决方案**：
+- 确认图像已正确编码为 base64
+- 检查图像格式是否支持（PNG、JPEG）
+- 确认使用的是多模态模型（如 qwen2.5vl3b）
+- 检查消息格式是否正确（需要 `{question, image}` 格式）
+
+### 7. Android 服务自动停止
+
+**问题**：Android 上的服务运行一段时间后自动停止。
+
+**解决方案**：
+- 在设置中允许应用后台运行
 - 关闭电池优化
+- 将应用添加到白名单
+- 确保有足够的存储空间
 
-### 6. 响应速度慢
+### 8. 工具调用不生效
 
-**问题**：模型推理速度很慢。
-
-**解决方案**：
-
-- 确认设备支持 NPU 且已正确配置
-- 检查是否使用了正确的模型格式（BIN 格式性能最佳）
-- 减小 `size` 参数值以限制输出长度
-- 关闭不必要的后台应用释放资源
-- 使用更小的模型（如 3B 而非 7B）
-
-### 7. 工具调用不工作
-
-**问题**：模型不调用定义的工具。
+**问题**：发送 `tools` 参数但模型不调用工具。
 
 **解决方案**：
-
-- 确认使用的模型支持工具调用功能
-- 禁用思考模式（不要使用 `-t` 参数）
+- 确认模型支持 Function Calling
 - 检查工具定义格式是否正确
-- 使用 `-a` 参数输出所有文本以调试
+- 尝试设置 `tool_choice="auto"` 或指定工具名称
+- 查看模型是否需要特定的提示词格式
 
-### 8. 历史记录不生效
+### 9. 历史记录丢失
 
-**问题**：启用历史记录后模型仍然不记得之前的对话。
-
-**解决方案**：
-
-- 确认启动时使用了 `-n` 参数
-- 检查历史记录是否被清除
-- 使用 `/fetch` 接口查看当前历史记录
-- 确保历史记录格式正确
-
-### 9. 视觉语言模型无法识别图片
-
-**问题**：VLM 模型返回错误或无法理解图片内容。
+**问题**：重启服务后对话历史丢失。
 
 **解决方案**：
+- 使用 `-n` 参数设置保存的历史轮数
+- 定期调用 `/v1/history` 接口备份历史
 
-- 确认图片已正确 Base64 编码
-- 检查图片格式是否支持（推荐 PNG、JPEG）
-- 确认模型文件完整，特别是 `veg.serialized.bin`
-- 检查图片大小是否合理（建议不超过 2MB）
+### 10. 端口被占用
 
-### 10. 内存不足
-
-**问题**：运行时提示内存不足或系统变慢。
+**问题**：启动服务时提示端口 8910 已被占用。
 
 **解决方案**：
+- 使用 `-p` 参数指定其他端口
+- 检查是否有其他 GenieAPIService 实例在运行
+- 使用 `netstat -ano | findstr 8910` 查找占用端口的进程
 
-- 使用更小的模型
-- 减少 `--num_response` 参数值
-- 关闭其他占用内存的应用
-- 增加设备物理内存
-- 使用量化程度更高的模型
+### 11. LoRA 适配器加载失败
+
+**问题**：使用 `--adapter` 参数后服务报错。
+
+**解决方案**：
+- 确认 LoRA 文件路径正确
+- 检查 LoRA 文件与基础模型兼容
+- 尝试调整 `--lora_alpha` 参数
+- 查看日志获取详细错误信息
+
+### 12. 输出文本乱码
+
+**问题**：模型输出包含乱码或特殊字符。
+
+**解决方案**：
+- 确认终端支持 UTF-8 编码
+- 检查 tokenizer 文件是否正确
+- 尝试使用不同的客户端测试
+- 更新模型文件到最新版本
 
 ---
 
 ## 技术支持
 
-### 官方资源
+### 获取帮助
 
-- **GitHub 仓库**：https://github.com/quic/ai-engine-direct-helper
-- **问题反馈**：https://github.com/quic/ai-engine-direct-helper/issues
-- **发布页面**：https://github.com/quic/ai-engine-direct-helper/releases
+如果您在使用 GenieAPIService 时遇到问题，可以通过以下方式获取帮助：
 
-### 文档资源
+1. **查看文档**
+   - [GitHub 仓库](https://github.com/quic/ai-engine-direct-helper)
+   - [API 文档](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/genie/c%2B%2B/docs/API.md)
+   - [示例代码](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/c%2B%2B/Service/examples/GenieAPIClient)
 
-- **API 文档**：[docs/API.md](../samples/genie/c++/docs/API.md)
-- **构建文档**：[docs/BUILD.md](../samples/genie/c++/docs/BUILD.md)
-- **使用文档**：[docs/USAGE.MD](../samples/genie/c++/docs/USAGE.MD)
-- **VLM 部署文档**：[docs/VLM_DEPLOYMENT.MD](../samples/genie/c++/docs/VLM_DEPLOYMENT.MD)
+2. **提交问题**
+   - [GitHub Issues](https://github.com/quic/ai-engine-direct-helper/issues)
 
-### 社区支持
+### 报告 Bug
 
-- 在 GitHub Issues 中搜索类似问题
-- 查看示例代码：`samples/genie/python/`， `samples/genie/c%2B%2B/Service/examples/GenieAPIClient` 目录
-- 参考测试代码：`samples/genie/c%2B%2B/Service/test/genietest.py`
+报告 Bug 时，请提供以下信息：
+
+1. **环境信息**
+   ```
+   - 操作系统：Windows 11 / Android 13 / Ubuntu 22.04
+   - 设备型号：Surface Pro X / Samsung Galaxy S23
+   - GenieAPIService 版本：2.1.4
+   - QAIRT 版本：2.42.0
+   ```
+
+2. **问题描述**
+   - 详细描述问题现象
+   - 预期行为和实际行为
+   - 复现步骤
+
+3. **日志信息**
+   - 启动日志
+   - 错误日志
+   - 相关的 API 请求和响应
+
+4. **配置文件**
+   - `config.json` 内容
+   - 启动参数
+
+### 贡献代码
+
+欢迎为 GenieAPIService 贡献代码：
+
+1. Fork 仓库
+2. 创建特性分支
+3. 提交更改
+4. 推送到分支
+5. 创建 Pull Request
+
+### 许可证
+
+GenieAPIService 使用 BSD-3-Clause 许可证。详见 [LICENSE](https://github.com/quic/ai-engine-direct-helper/blob/main/LICENSE) 文件。
 
 ### 联系方式
 
-如需技术支持，请：
-
-1. 查看本手册的常见问题部分
-2. 搜索 GitHub Issues
-3. 在 GitHub 上创建新的 Issue，提供详细的错误信息和日志
+- **项目主页**：https://github.com/quic/ai-engine-direct-helper
+- **问题反馈**：https://github.com/quic/ai-engine-direct-helper/issues
 
 ---
 
-## 免责声明
-
-本软件按"原样"提供，不提供任何明示或暗示的保证。作者和贡献者不对因使用本软件而产生的任何损害承担责任。代码可能不完整或测试不充分。用户需自行评估其适用性并承担所有相关风险。
-
-**注意**：欢迎贡献代码。在关键系统中部署前请确保进行充分测试。
-
----
-
-## 版本信息
-
-- **GenieAPIService 版本**：2.1.4
-- **QAIRT SDK 版本**：2.42.0
-- **文档版本**：1.0
-- **最后更新**：2026-02-12
-
----
-
-## 附录
-
-### A. 支持的模型列表
-
-- Qwen2.0-7B-SSD
-- Qwen2.5-VL-3B
-- Llama 3
-- IBM-Granite-v3.1-8B
-- Phi-4 多模态
-- Llama 系列（需 GGUF 格式支持）
-- MNN 系列（需要 MNN 格式支持）
-- 其他兼容模型
-
-### B. 性能优化建议
-
-1. **使用 NPU 加速**：确保使用 QNN 格式模型
-2. **合理设置上下文长度**：不要超过模型支持的最大值
-3. **优化批处理**：对于多个请求，考虑批量处理
-4. **缓存管理**：合理使用历史记录功能
-5. **资源监控**：定期检查内存和 CPU 使用情况
-
-### C. 安全建议
-
-1. **网络安全**：不要将服务直接暴露到公网
-2. **访问控制**：在生产环境中添加身份验证
-3. **数据隐私**：敏感数据在本地处理，不上传云端
-4. **定期更新**：及时更新到最新版本以获得安全修复
-
-### D. 开发建议
-
-1. **错误处理**：客户端应实现完善的错误处理机制
-2. **超时设置**：设置合理的请求超时时间
-3. **重试机制**：实现指数退避的重试策略
-4. **日志记录**：记录关键操作和错误信息
-5. **测试**：在部署前进行充分的功能和性能测试
-
----
-
-**感谢使用 GenieAPIService！**
-
-如有任何问题或建议，欢迎访问我们的 GitHub 仓库。
+<div align="center">
+  <p>感谢使用 GenieAPIService！</p>
+  <p>如有问题或建议，欢迎在 GitHub 上与我们交流。</p>
+</div>
