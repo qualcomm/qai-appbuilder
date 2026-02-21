@@ -108,7 +108,7 @@ QAI AppBuilder (Quick AI Application Builder) is an extension tool for Qualcomm�
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│         Application Layer                            │
+│         Application Layer                           │
 │    Python App / C++ App / WebUI App                 │
 └─────────────────────────────────────────────────────┘
                         ↓
@@ -2717,7 +2717,6 @@ This software is provided "as is" without any express or implied warranties. The
 If you encounter problems, please visit:
 
 - **GitHub Issues**: https://github.com/quic/ai-engine-direct-helper/issues
-- **GitHub Discussions**: https://github.com/quic/ai-engine-direct-helper/discussions
 
 ### Contribute Code
 

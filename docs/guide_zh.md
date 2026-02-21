@@ -2717,7 +2717,6 @@ QAI AppBuilder 采用 **BSD 3-Clause "New" or "Revised" License**。
 如果遇到问题，请访问：
 
 - **GitHub Issues**：https://github.com/quic/ai-engine-direct-helper/issues
-- **GitHub Discussions**：https://github.com/quic/ai-engine-direct-helper/discussions
 
 ### 贡献代码
 
