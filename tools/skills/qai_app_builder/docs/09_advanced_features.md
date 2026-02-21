@@ -1,0 +1,160 @@
+# 高级功能 (LoRA, 多图, 模型格式)
+
+## 5. 高级功能
+
+### 5.1 LoRA 适配器支持
+
+LoRA (Low-Rank Adaptation) 允许动态加载和切换模型适配器。
+
+#### Python 示例
+
+```python
+from qai_appbuilder import QNNLoraContext, LoraAdapter, QNNConfig, Runtime, LogLevel
+
+# 配置环境
+QNNConfig.Config(
+    qnn_lib_path="./qai_libs",
+    runtime=Runtime.HTP,
+    log_level=LogLevel.INFO
+)
+
+# ============================================
+# 创建 LoRA 适配器
+# ============================================
+adapter1 = LoraAdapter(
+    graph_name="llm_graph",
+    lora_file_paths=[
+        "lora/adapter1_layer1.bin",
+        "lora/adapter1_layer2.bin"
+    ]
+)
+
+adapter2 = LoraAdapter(
+    graph_name="llm_graph",
+    lora_file_paths=[
+        "lora/adapter2_layer1.bin",
+        "lora/adapter2_layer2.bin"
+    ]
+)
+
+# ============================================
+# 初始化带 LoRA 的模型
+# ============================================
+model = QNNLoraContext(
+    model_name="llm_with_lora",
+    model_path="models/base_llm.bin",
+    lora_adapters=[adapter1]  # 初始加载 adapter1
+)
+
+# 执行推理
+output1 = model.Inference([input_data])
+print(f"使用 adapter1 的输出: {output1[0].shape}")
+
+# ============================================
+# 动态切换 LoRA 适配器
+# ============================================
+model.apply_binary_update([adapter2])
+
+output2 = model.Inference([input_data])
+print(f"使用 adapter2 的输出: {output2[0].shape}")
+
+# 清理
+del model
+```
+
+### 5.2 多图模型支持
+
+某些模型包含多个计算图，可以通过 `graphIndex` 参数选择。
+
+```python
+from qai_appbuilder import QNNContext
+
+model = QNNContext(
+    model_name="multi_graph_model",
+    model_path="models/multi_graph_model.bin"
+)
+
+# 使用第一个图
+output1 = model.Inference([input_data], graphIndex=0)
+
+# 使用第二个图
+output2 = model.Inference([input_data], graphIndex=1)
+
+del model
+```
+
+### 5.3 支持的模型格式
+
+QAI AppBuilder 支持多种模型格式，适用于不同的运行时和场景。
+
+#### 5.3.1 支持的模型格式列表
+
+| 格式     | 运行时     | 说明                      |
+| ------ | ------- | ----------------------- |
+| `.bin` | HTP/CPU | 预编译的二进制格式，加载速度最快（推荐）    |
+| `.dlc` | HTP/CPU | 从 QAIRT 2.41.0 开始支持直接加载 |
+| `.so`  | CPU     | 共享库格式，仅在 CPU 上运行        |
+
+#### 5.3.2 DLC 模型直接加载
+
+从 QAIRT 2.41.0 版本开始，支持直接加载 `.dlc` 模型文件。
+
+```python
+from qai_appbuilder import QNNContext, QNNConfig, Runtime, LogLevel
+
+QNNConfig.Config(
+    qnn_lib_path="./qai_libs",
+    runtime=Runtime.HTP,
+    log_level=LogLevel.INFO
+)
+
+# ============================================
+# 直接加载 .dlc 文件
+# ============================================
+model = QNNContext(
+    model_name="my_model",
+    model_path="models/my_model.dlc"  # 使用 .dlc 文件
+)
+
+# 首次运行时，会自动生成 my_model.dlc.bin 文件
+# 后续运行会直接加载 .dlc.bin 以提高速度
+
+output = model.Inference([input_data])
+
+del model
+```
+
+**注意事项**：
+
+- 首次加载 `.dlc` 文件时会自动转换为 `.dlc.bin`
+- 转换后的 `.dlc.bin` 文件会保存在同一目录
+- 后续运行会直接加载 `.dlc.bin` 文件，速度更快
+- 如果需要重新转换，删除 `.dlc.bin` 文件即可
+
+#### 5.3.3 SO 模型格式（CPU 运行时）
+
+对于需要在 CPU 上运行的模型，可以使用 `.so` 格式：
+
+```python
+from qai_appbuilder import QNNContext, QNNConfig, Runtime, LogLevel
+
+# 配置为 CPU 运行时
+QNNConfig.Config(
+    qnn_lib_path="./qai_libs",
+    runtime=Runtime.CPU,  # 使用 CPU 运行时
+    log_level=LogLevel.INFO
+)
+
+# 加载 .so 模型文件
+model = QNNContext(
+    model_name="cpu_model",
+    model_path="models/my_model.so"  # 使用 .so 文件
+)
+
+output = model.Inference([input_data])
+
+del model
+```
+
+---
+
