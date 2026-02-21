@@ -1,6 +1,21 @@
+💡 **提示**：完全根据文档来回答用户问题
+💡 **提示**：当用户问如何在 Qualcomm(高通) 平台上部署模型时，我们可以假设用户已经拥有在 Qualcomm 平台上直接部署的 QNN(*.bin) 格式的模型了。
+💡 **提示**：QAI AppBuilder只能用于在 Qualcomm 平台上加载 QNN 格式的模型并进行推理，无法用于模型格式转换。
+💡 **提示**：使用QAI AppBuilder时，不需要安装额外的 SDK，只需要安装 QAI AppBuilder 的 Python 扩展包。
+
+从 [GitHub Release](https://github.com/quic/ai-engine-direct-helper/releases) 下载对应版本的 `.whl` 文件：
+
+```bash
+# 对于 x64 Python
+pip install qai_appbuilder-{version}-cp312-cp312-win_amd64.whl
+
+# 对于 ARM64 Python
+pip install qai_appbuilder-{version}-cp312-cp312-win_arm64.whl
+```
+
 # Python 核心 API 详解
 
-### 3.3 QNNContext - 标准模型上下文（核心类）
+### QNNContext - 标准模型上下文（核心类）
 
 `QNNContext` 是最常用的类，用于加载模型、执行推理和管理模型生命周期。
 
@@ -12,8 +27,6 @@ class QNNContext:
         self,
         model_name: str = "None",                      # 模型名称（唯一标识）
         model_path: str = "None",                      # 模型文件路径
-        backend_lib_path: str = "None",                # 后端库路径（可选）
-        system_lib_path: str = "None",                 # 系统库路径（可选）
         is_async: bool = False,                        # 是否异步执行
         input_data_type: str = DataType.FLOAT,         # 输入数据类型
         output_data_type: str = DataType.FLOAT         # 输出数据类型
@@ -26,13 +39,9 @@ class QNNContext:
 | ------------------ | ---- | -------------- | -------------------------------------------------------------------- |
 | `model_name`       | str  | "None"         | 模型唯一标识符，用于区分不同模型                                                     |
 | `model_path`       | str  | "None"         | 模型文件路径（支持 `.bin` 和 `.dlc` 格式）                                        |
-| `backend_lib_path` | str  | "None"         | QnnHtp.dll 或 QnnCpu.dll 路径（可选，**从QAI AppBuilder v2.0.0开始，不需要设置此参数**） |
-| `system_lib_path`  | str  | "None"         | QnnSystem.dll 路径（可选，**从QAI AppBuilder v2.0.0开始，不需要设置此参数**）           |
 | `is_async`         | bool | False          | 是否启用异步推理                                                             |
 | `input_data_type`  | str  | DataType.FLOAT | `DataType.FLOAT` 或 `DataType.NATIVE`                                 |
 | `output_data_type` | str  | DataType.FLOAT | `DataType.FLOAT` 或 `DataType.NATIVE`                                 |
-
-💡 **提示**：从QAI AppBuilder **v2.0.0** 开始，不需要设置参数：`backend_lib_path` 和 `system_lib_path` 。
 
 #### 核心方法
 
@@ -42,7 +51,6 @@ class QNNContext:
 def Inference(
     self,
     input: List[np.ndarray],                           # 输入数据列表
-    perf_profile: str = PerfProfile.DEFAULT,           # 性能模式
     graphIndex: int = 0                                # 图索引
 ) -> List[np.ndarray]                                  # 返回输出列表
 ```
@@ -50,17 +58,11 @@ def Inference(
 **参数说明**：
 
 - `input`：输入数据列表，每个元素是一个 NumPy 数组
-- `perf_profile`：性能模式(不推荐使用此参数。)
-  - `PerfProfile.DEFAULT`：默认模式（不改变性能配置）
-  - `PerfProfile.HIGH_PERFORMANCE`：高性能模式
-  - `PerfProfile.BURST`：突发模式（最高性能）
 - `graphIndex`：图索引（用于多图模型，默认为 0）
 
 **返回值**：
 
 - 输出数据列表，每个元素是一个 NumPy 数组
-
-💡 **提示**：不推荐使用perf_profile参数，建议通过配对使用PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST) 、PerfProfile.RelPerfProfileGlobal()来实现设置 NPU 为高性能模式。
 
 ##### 模型信息查询方法
 
@@ -87,7 +89,7 @@ def getInputName(self) -> List[str]
 def getOutputName(self) -> List[str]
 ```
 
-### 3.4 继承 QNNContext 的最佳实践
+### 继承 QNNContext 的最佳实践
 
 示例代码，**继承 `QNNContext` 类**来封装特定模型的逻辑。
 
@@ -172,4 +174,3 @@ encoder = Encoder("whisper_encoder", "models/encoder.bin")
 k_cache, v_cache = encoder.Inference(mel_input)
 del encoder
 ```
-

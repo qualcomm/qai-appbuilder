@@ -1,6 +1,6 @@
 # 性能优化指南
 
-### 3.9 PerfProfile - 性能模式管理
+### PerfProfile - 性能模式管理
 
 `PerfProfile` 用于控制 HTP (NPU) 的性能模式。
 
@@ -45,7 +45,7 @@ output = model.Inference([input_data], perf_profile=PerfProfile.BURST)
 - 使用 `SetPerfProfileGlobal()` 后，`Inference()` 的 `perf_profile` 参数应设置为 `PerfProfile.DEFAULT`
 - 如果在 `Inference()` 中指定其他性能模式，会覆盖全局设置
 
-### 3.10 Native 模式详解（高性能）
+### Native 模式详解（高性能）
 
 Native 模式直接使用模型的原生数据类型，避免数据转换，**显著提升性能**。
 
@@ -111,9 +111,9 @@ print(f"Output dtype: {outputs[0].dtype}")  # 例如：float16
 ---
 
 
-## 6. 性能优化
+## 性能优化
 
-### 6.1 使用 Native 模式（推荐）
+### 使用 Native 模式（推荐）
 
 **性能提升**：Native 模式可以减少 10%-200% 的数据转换开销。
 
@@ -135,7 +135,7 @@ model_native = QNNContext(
 )
 ```
 
-### 6.2 使用 Burst 性能模式
+### 使用 Burst 性能模式
 
 在需要最高性能的场景下使用 Burst 模式。
 
@@ -151,7 +151,7 @@ for i in range(100):
 PerfProfile.RelPerfProfileGlobal()
 ```
 
-### 6.3 批量推理优化
+### 批量推理优化
 
 ```python
 # ❌ 不推荐：每次都初始化模型
@@ -171,7 +171,7 @@ PerfProfile.RelPerfProfileGlobal()
 del model
 ```
 
-### 6.4 使用 ARM64 Python（Windows）
+### 使用 ARM64 Python（Windows）
 
 在 Windows on Snapdragon 平台上，ARM64 Python 比 x64 Python 性能更好。
 
@@ -182,4 +182,3 @@ https://www.python.org/ftp/python/3.12.8/python-3.12.8-arm64.exe
 # 安装 ARM64 版本的 QAI AppBuilder
 pip install qai_appbuilder-{version}-cp312-cp312-win_arm64.whl
 ```
-

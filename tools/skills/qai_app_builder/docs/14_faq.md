@@ -1,8 +1,8 @@
 # 常见问题与参考资源
 
-## 7. 常见问题
+## 常见问题
 
-### 7.1 模型加载失败
+### 1 模型加载失败
 
 **问题**：`ModelInitialize` 返回 `False` 或失败
 
@@ -26,7 +26,7 @@ if not model_path.exists():
     exit()
 ```
 
-### 7.2 推理结果不正确
+### 2 推理结果不正确
 
 **问题**：推理输出与预期不符
 
@@ -55,7 +55,7 @@ print(f"输出数据类型: {output[0].dtype}")
 print(f"输出数据范围: [{output[0].min()}, {output[0].max()}]")
 ```
 
-### 7.3 内存泄漏
+### 3 内存泄漏
 
 **Python 解决方案**：
 
@@ -83,7 +83,7 @@ outputSize.clear();
 appBuilder.ModelDestroy(model_name);
 ```
 
-### 7.4 Native 模式数据类型不匹配
+### 4 Native 模式数据类型不匹配
 
 **问题**：Native 模式下数据类型错误导致推理失败
 
@@ -143,7 +143,7 @@ print(f"输出数据类型: {output[0].dtype}")
 print(f"输出数据形状: {output[0].shape}")
 ```
 
-### 7.5 C++ 链接错误
+### 5 C++ 链接错误
 
 **问题**：LNK2038、LNK2001 或其他链接错误
 
@@ -175,7 +175,7 @@ print(f"输出数据形状: {output[0].shape}")
    - 项目属性 → 高级 → 字符集
    - 设置为：**使用 Unicode 字符集**
 
-### 7.6 性能不佳
+### 6 性能不佳
 
 **问题**：推理速度慢于预期
 
@@ -215,56 +215,3 @@ print(f"平均推理时间: {avg_time * 1000:.2f} ms")
 
 PerfProfile.RelPerfProfileGlobal()
 ```
-
----
-
-## 8. 参考资源
-
-### 8.1 官方文档和资源
-
-- **GitHub 仓库**：https://github.com/quic/ai-engine-direct-helper
-- **Qualcomm AI Hub**：https://aihub.qualcomm.com/
-- **AI Dev Home**：https://www.aidevhome.com/
-- **Qualcomm® AI Runtime SDK**：https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK
-
-### 8.2 教程和博客
-
-- [QAI_AppBuilder: 让本地 AI 部署触手可及！](https://docs.qualcomm.com/bundle/publicresource/80-94755-1_REV_AA_QAI_AppBuilder_-_WoS.pdf)
-- [大语言模型系列(1): 3分钟上手，在骁龙AI PC上部署DeepSeek!](https://blog.csdn.net/csdnsqst0050/article/details/149425691)
-- [大语言模型系列(2): 本地 OpenAI 兼容 API 服务的配置与部署](https://blog.csdn.net/csdnsqst0050/article/details/150208814)
-- [高通平台大语言模型精选](https://www.aidevhome.com/?id=51)
-- [QAI AppBuilder on Linux (QCS6490)](https://docs.radxa.com/en/dragon/q6a/app-dev/npu-dev/qai-appbuilder)
-
-### 8.3 示例代码
-
-- **Python 示例**：https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python
-  
-  - Real-ESRGAN（图像超分辨率）
-  - YOLOv8（目标检测）
-  - Whisper（语音识别）
-  - Stable Diffusion（文生图）
-  - BEiT（图像分类）
-  - OpenPose（姿态估计）
-  - Depth Anything（深度估计）
-  - 等 20+ 个示例
-
-- **C++ 示例**：https://github.com/quic/ai-engine-direct-helper/tree/main/samples/c++
-  
-  - Real-ESRGAN
-  - BEiT（图像分类）
-
-- **WebUI 应用**：https://github.com/quic/ai-engine-direct-helper/tree/main/samples/webui
-  
-  - ImageRepairApp（图像修复）
-  - StableDiffusionApp（文生图）
-  - GenieWebUI（LLM 对话）
-
-### 8.4 模型资源
-
-- **AI Hub 模型库**：https://aihub.qualcomm.com/compute/models
-- **AI Dev Home 模型库**：https://www.aidevhome.com/data/models/
-- **Qwen2 7B SSD**：https://www.aidevhome.com/data/adh2/models/8380/qwen2_7b_ssd_250702.html
-- **DeepSeek-R1-Distill-Qwen-7B**：https://aiot.aidlux.com/zh/models/detail/78
-
----
-

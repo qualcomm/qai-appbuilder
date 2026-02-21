@@ -1,12 +1,14 @@
 ---
 name: qai-appbuilder-docs
-description: QAI AppBuilder technical documentation retrieval. Find guides on installation, Python/C++ APIs, and model deployment examples. QAI AppBuilder is a rapid AI application development framework designed to simplify the deployment of QNN models on NPU (HTP) across Windows on Snapdragon, Android, and Linux platforms.
+description: QAI AppBuilder technical documentation retrieval. Find guides on installation, Python/C++ APIs, and model deployment examples. QAI AppBuilder is a rapid AI application development framework designed to simplify the deployment of QNN models on NPU (HTP) across Qualcomm(高通) Windows on Snapdragon, Android, and Linux platforms. This tool is highly suitable for deploying classic models (all types of models except large language models can be deployed via QAI AppBuilder), such as real_esrgan_x4plus, inception_v3, beit, easy_ocr, and whisper_base_en. This tool is only applicable for loading QNN (*.bin) format models and performing inference, and is not suitable for converting model formats.
+GitHub: https://github.com/quic/ai-engine-direct-helper
 metadata: {"openclaw":{"emoji":"📘","always":true}}
 ---
 
 # QAI AppBuilder 文档知识库
 
-获取 QAI AppBuilder 开发框架的全套技术文档，支持环境搭建、API 查询及代码示例检索。
+获取 QAI AppBuilder 开发框架的全套技术文档，支持环境搭建、API 查询及代码示例检索。大部分非LLM模型部署都可以通过QAI AppBuilder实现。有些模型在本文档中没有直接提及，但可以通过参考给出的 API 文档及相关例子来学习用法。
+当用户问如何在 Qualcomm(高通) 平台上部署模型时，我们可以假设用户提到的模型已经是适合在 Qualcomm 平台上直接部署的 QNN 格式(*.bin后缀)的模型了。
 
 文档根目录路径： C:/Users/zhanweiw/.openclaw/Skills/qai_app_builder
 
@@ -23,7 +25,7 @@ metadata: {"openclaw":{"emoji":"📘","always":true}}
 1. **Analyze**: Identify the user's intent and keywords.
 2. **Select**: Look up the [Document List](#文档列表) below. Choose the **ONE** most relevant file path.
 3. **Execute**: Call the `read` tool with the chosen path.
-4. **Answer**: Summarize the file content to answer the user.
+4. **Answer**: Summarize the file content to answer the user. Answer user questions based on what you actually see, rather than guessing based on your own knowledge. If something is unclear, you may respond that you do not know.
 
 ## 文档列表
 
@@ -44,12 +46,12 @@ metadata: {"openclaw":{"emoji":"📘","always":true}}
 
 ### 🐍 文档4：Python核心API (`docs/04_python_core_api.md`)
 
-**适用问题：** QNNContext使用、模型加载方法、Inference推理接口、自定义模型类、继承QNNContext、获取输入输出形状/类型、Python API详解
+**适用问题：** QNNContext使用、模型加载方法、Inference推理接口、自定义模型类、继承QNNContext、获取输入输出形状/类型、Python API详解。通过 Python 部署 QNN(*.bin)格式模型主要参考此文档。
 **关键词：** Python API、QNNContext、模型加载、推理、Inference、接口
 
 ### 🖼️ 文档5：Python示例：图像超分辨率 (`docs/05_python_example_esrgan.md`)
 
-**适用问题：** Real-ESRGAN模型部署、Python图像处理、超分辨率代码示例、PIL图像预处理、图像增强
+**适用问题：** Real-ESRGAN模型部署、Python图像处理、超分辨率代码示例、PIL图像预处理、图像增强。通过 Python 部署 QNN(*.bin)格式模型可参考此示例。
 **关键词：** Real-ESRGAN、超分辨率、图像处理、Python示例
 
 ### 👁️ 文档6：Python示例：图像分类 (`docs/06_python_example_beit.md`)
@@ -69,8 +71,8 @@ metadata: {"openclaw":{"emoji":"📘","always":true}}
 
 ### 🚀 文档9：高级功能 (`docs/09_advanced_features.md`)
 
-**适用问题：** LoRA适配器使用、QNNLoraContext、动态加载适配器、多图模型（Multi-graph）、graphIndex参数、模型格式说明（.bin/.dlc/.so）
-**关键词：** LoRA、适配器、多图模型、模型格式、高级功能
+**适用问题：** 多图模型（Multi-graph）、graphIndex参数、模型格式说明
+**关键词：** 多图模型、模型格式、高级功能
 
 ### ⚡ 文档10：性能优化 (`docs/10_performance_optimization.md`)
 
@@ -79,12 +81,12 @@ metadata: {"openclaw":{"emoji":"📘","always":true}}
 
 ### 🔧 文档11：C++ API参考 (`docs/11_cpp_api_reference.md`)
 
-**适用问题：** C++接口文档、LibAppBuilder类、ModelInitialize初始化、ModelInference推理、ModelDestroy销毁、C++日志与性能函数
+**适用问题：** C++接口文档、LibAppBuilder类、ModelInitialize初始化、ModelInference推理、ModelDestroy销毁、C++日志与性能函数。通过 C++ 部署 QNN(*.bin)格式模型主要参考此文档。
 **关键词：** C++ API、LibAppBuilder、接口参考、初始化、推理
 
 ### 🖼️ 文档12：C++示例：图像超分辨率 (`docs/12_cpp_example_esrgan.md`)
 
-**适用问题：** C++部署Real-ESRGAN、OpenCV图像处理、C++超分辨率代码、xtensor使用
+**适用问题：** C++部署Real-ESRGAN、OpenCV图像处理、C++超分辨率代码、xtensor使用。通过 C++ 部署 QNN(*.bin)格式模型可参考此示例。
 **关键词：** C++示例、Real-ESRGAN、OpenCV、超分辨率
 
 ### 👁️ 文档13：C++示例：图像分类 (`docs/13_cpp_example_beit.md`)
@@ -92,13 +94,14 @@ metadata: {"openclaw":{"emoji":"📘","always":true}}
 **适用问题：** C++部署BEiT、C++图像分类代码、ImageNet标签加载、C++后处理
 **关键词：** C++示例、BEiT、图像分类、xtensor
 
-### ❓ 文档14：常见问题与参考资源 (`docs/14_faq_resources.md`)
+### ❓ 文档14：常见问题 (`docs/14_faq.md`)
 
-**适用问题：** 模型加载失败、推理结果错误、内存泄漏、链接错误、报错排查、官方文档链接、模型下载地址、GitHub仓库
-**关键词：** 常见问题、FAQ、故障排查、错误、资源、下载
+**适用问题：** 模型加载失败、推理结果错误、内存泄漏、链接错误、报错排查
+**关键词：** 常见问题、FAQ、故障排查、错误
 
-### 🏁 文档15：快速开始与附录 (`docs/15_quick_start_appendix.md`)
+### 🏁 文档15：快速开始与附录 (`docs/15_resource.md`)
 
-**适用问题：** Hello World代码、最简运行示例、快速上手指南、版本历史、许可证License、免责声明
-**关键词：** 快速开始、Hello World、版本历史、License
+**适用问题：** 参考资源、官方文档链接、模型下载地址、GitHub仓库、版本历史、许可证License、免责声明
+**关键词：** 资源、下载、参考资源、版本历史、License
 
+GitHub: https://github.com/quic/ai-engine-direct-helper

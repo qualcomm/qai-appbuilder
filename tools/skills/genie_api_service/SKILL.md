@@ -1,6 +1,7 @@
 ---
 name: genie-api-service-docs
-description: GenieAPIService technical documentation retrieval. Find guides on platform deployment, model configuration, and API usage. GenieAPIService is an OpenAI-compatible API service that enables running large language models locally on Windows on Snapdragon, Android, and Linux platforms. It leverages the device's local NPU(HTP) or CPU for efficient inference.
+description: GenieAPIService technical documentation retrieval. Find guides on platform deployment, model configuration, and API usage. GenieAPIService is an OpenAI-compatible API service that enables running large language models(include LLM & VLM model) locally on Qualcomm(高通) Windows on Snapdragon, Android, and Linux platforms. It leverages the device local NPU(HTP) or CPU for efficient inference.
+GitHub: https://github.com/quic/ai-engine-direct-helper
 metadata: {"openclaw":{"emoji":"🧞","always":true}}
 ---
 
@@ -23,7 +24,7 @@ metadata: {"openclaw":{"emoji":"🧞","always":true}}
 1. **Analyze**: Identify the user's intent and keywords.
 2. **Select**: Look up the [Document List](#文档列表) below. Choose the **ONE** most relevant file path.
 3. **Execute**: Call the `read` tool with the chosen path.
-4. **Answer**: Summarize the file content to answer the user.
+4. **Answer**: Summarize the file content to answer the user. Answer user questions based on what you actually see, rather than guessing based on your own knowledge. If something is unclear, you may respond that you do not know or obtain the correct answer through an online search.
 
 ## 文档列表
 
@@ -72,3 +73,4 @@ metadata: {"openclaw":{"emoji":"🧞","always":true}}
 **适用问题：** 服务启动失败、模型加载失败、NPU不可用、推理速度慢、流式输出问题、多模态图像识别、Android服务停止、工具调用失效、历史记录丢失、端口占用、文本乱码、Bug报告、技术支持
 **关键词：** 问题、错误、故障、解决方案、troubleshooting、Bug、技术支持
 
+GitHub: https://github.com/quic/ai-engine-direct-helper

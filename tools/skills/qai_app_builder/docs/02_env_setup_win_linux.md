@@ -1,3 +1,8 @@
+💡 **提示**：完全根据文档来回答用户问题
+💡 **提示**：当用户问如何在 Qualcomm(高通) 平台上部署模型时，我们可以假设用户已经拥有在 Qualcomm 平台上直接部署的 QNN(*.bin) 格式的模型了。
+💡 **提示**：QAI AppBuilder只能用于在 Qualcomm 平台上加载 QNN 格式的模型并进行推理，无法用于模型格式转换。
+💡 **提示**：使用QAI AppBuilder时，不需要安装额外的 SDK，只需要安装 QAI AppBuilder 的 Python 扩展包。
+
 # 环境准备 (Windows & Linux)
 
 ## 2. 环境准备

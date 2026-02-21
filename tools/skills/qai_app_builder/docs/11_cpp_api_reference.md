@@ -1,8 +1,13 @@
+💡 **提示**：完全根据文档来回答用户问题
+💡 **提示**：当用户问如何在 Qualcomm(高通) 平台上部署模型时，我们可以假设用户已经拥有在 Qualcomm 平台上直接部署的 QNN(*.bin) 格式的模型了。
+💡 **提示**：QAI AppBuilder只能用于在 Qualcomm 平台上加载 QNN 格式的模型并进行推理，无法用于模型格式转换。
+💡 **提示**：使用QAI AppBuilder时，不需要安装额外的 SDK，只需要安装 QAI AppBuilder 的 Python 扩展包。
+
 # C++ API 参考
 
-## 4. C++ API 详解
+## C++ API 详解
 
-### 4.1 LibAppBuilder 类
+### 1 LibAppBuilder 类
 
 `LibAppBuilder` 是 C++ API 的核心类。
 
@@ -113,7 +118,7 @@ std::vector<std::string> getInputName(std::string model_name);
 std::vector<std::string> getOutputName(std::string model_name);
 ```
 
-### 4.2 日志和性能函数
+### 2 日志和性能函数
 
 #### 日志函数
 
@@ -147,28 +152,3 @@ bool SetPerfProfileGlobal(const std::string& perf_profile);
 
 // 释放全局性能模式
 bool RelPerfProfileGlobal();
-
-// 设置性能分析级别
-bool SetProfilingLevel(int32_t profiling_level);
-```
-
-**性能分析级别**：
-
-```cpp
-#define QNN_PROFILING_LEVEL_OFF      0
-#define QNN_PROFILING_LEVEL_BASIC    1
-#define QNN_PROFILING_LEVEL_DETAILED 2
-```
-
-#### TimerHelper - 计时工具类
-
-```cpp
-class TimerHelper {
-public:
-    TimerHelper();                                     // 构造函数（自动开始计时）
-    void Reset();                                      // 重置计时器
-    void Print(std::string message);                   // 打印经过的时间
-    void Print(std::string message, bool reset);       // 打印并可选重置
-};
-```
-
