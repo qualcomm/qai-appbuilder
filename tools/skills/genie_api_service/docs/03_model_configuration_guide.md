@@ -212,3 +212,5 @@ else:
 ```
 
 不同模型可能使用不同的提示词格式，请根据模型文档配置相应的模板。参考 [模板](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/python/models)。
+
+GitHub: https://github.com/quic/ai-engine-direct-helper

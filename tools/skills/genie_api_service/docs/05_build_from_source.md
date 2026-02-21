@@ -110,3 +110,5 @@ copy "obj\local\arm64-v8a\*.so" "libs\arm64-v8a" /Y
 3. 选择签名密钥并完成构建
 4. 在 `...\Android\app\release` 目录获取 `app-release.apk`
 5. 安装：`adb install app-release.apk`
+
+GitHub: https://github.com/quic/ai-engine-direct-helper

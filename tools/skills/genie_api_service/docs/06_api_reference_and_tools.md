@@ -198,3 +198,5 @@ decode.exe cat.txt cat.png
 wav.exe test.wav
 ```
 输入命令后，长按 [空格] 键进行录音。
+
+GitHub: https://github.com/quic/ai-engine-direct-helper

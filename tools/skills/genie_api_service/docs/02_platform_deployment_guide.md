@@ -142,3 +142,5 @@ Server listening on port 8910
 2. **GenieFletUI**
     - 源码位置：`samples/fletui/GenieFletUI/android`
     - 参考 [Build.md](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/fletui/GenieFletUI/android/BUILD.md) 将 Flet 代码编译成 apk
+
+GitHub: https://github.com/quic/ai-engine-direct-helper

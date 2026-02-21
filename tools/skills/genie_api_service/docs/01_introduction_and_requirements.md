@@ -64,3 +64,5 @@ GenieAPIService 提供了丰富的功能特性：
 - **BIN 格式**：Qualcomm QNN 格式模型（默认）
 - **MNN 格式**：阿里巴巴 MNN 框架模型（需编译时启用）
 - **GGUF 格式**：llama.cpp 格式模型（需编译时启用）
+
+GitHub: https://github.com/quic/ai-engine-direct-helper

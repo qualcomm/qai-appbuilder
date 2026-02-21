@@ -202,3 +202,5 @@ response = client.chat.completions.create(
     max_tokens=500,
     stream=True
 )
+
+GitHub: https://github.com/quic/ai-engine-direct-helper

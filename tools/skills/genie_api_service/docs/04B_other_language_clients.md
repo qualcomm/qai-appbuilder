@@ -202,3 +202,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("{}", response["choices"][0]["message"]["content"]);
     Ok(())
 }
+
+GitHub: https://github.com/quic/ai-engine-direct-helper
