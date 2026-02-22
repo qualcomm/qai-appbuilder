@@ -1,6 +1,6 @@
 # Python 示例：图像分类 (BEiT)
 
-### 3.6 完整示例：图像分类（BEiT）
+### 完整示例：图像分类（BEiT）
 
 参考代码：`samples/python/beit/beit.py`
 
@@ -110,4 +110,3 @@ for i in range(5):
 # ============================================
 del beit
 ```
-

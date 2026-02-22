@@ -5,7 +5,7 @@
 
 # 环境准备 (C++) 与 Python 配置
 
-### 2.3 C++ 环境配置
+### C++ 环境配置
 
 #### 步骤 1：下载预编译库
 
@@ -67,9 +67,9 @@ QAI_AppBuilder-linux_aarch64-{version}-Release.tar.gz
 
 ---
 
-## 3. Python API 详解
+## Python API 详解
 
-### 3.1 核心类概览
+### 1 核心类概览
 
 | 类名               | 用途           | 推荐使用                  | 说明                        |
 | ---------------- | ------------ | --------------------- | ------------------------- |
@@ -86,7 +86,7 @@ QAI_AppBuilder-linux_aarch64-{version}-Release.tar.gz
 | `LoraAdapter`    | LoRA 适配器     | 与 QNNLoraContext 配合使用 | 定义 LoRA 适配器文件路径           |
 | `GenieContext`   | 大语言模型专用上下文   | ✅ 推荐（LLM 场景）         | 专为 LLM 优化的上下文类   |
 
-### 3.2 QNNConfig - 全局配置（必需）
+### 2 QNNConfig - 全局配置（必需）
 
 `QNNConfig` 用于配置 QNN 运行环境，**必须在使用其他 API 之前调用**。
 
@@ -125,4 +125,3 @@ QNNConfig.Config(
     profiling_level=ProfilingLevel.BASIC
 )
 ```
-

@@ -1,6 +1,6 @@
 # Python 示例：Stable Diffusion 文生图
 
-### 3.8 完整示例：Stable Diffusion 文生图
+### 完整示例：Stable Diffusion 文生图
 
 参考代码：`samples/python/stable_diffusion_v1_5/stable_diffusion_v1_5.py`
 
@@ -223,4 +223,3 @@ del text_encoder
 del unet
 del vae_decoder
 ```
-

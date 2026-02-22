@@ -1,6 +1,6 @@
 # Python 示例：语音识别 (Whisper)
 
-### 3.7 完整示例：语音识别（Whisper）- Native 模式
+### 完整示例：语音识别（Whisper）- Native 模式
 
 参考代码：`samples/python/whisper_base_en/whisper_base_en.py`
 
@@ -220,4 +220,3 @@ print(f"转录结果: {text.strip()}")
 del encoder
 del decoder
 ```
-

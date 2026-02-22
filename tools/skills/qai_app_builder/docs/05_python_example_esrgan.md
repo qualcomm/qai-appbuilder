@@ -1,6 +1,6 @@
 # Python 示例：图像超分辨率 (Real-ESRGAN)
 
-### 3.5 完整示例：图像超分辨率（Real-ESRGAN）
+### 完整示例：图像超分辨率（Real-ESRGAN）
 
 参考代码：`samples/python/real_esrgan_x4plus/real_esrgan_x4plus.py`
 
@@ -153,4 +153,3 @@ print(f"超分辨率图像已保存到: {output_image_path}")
 # ============================================
 del realesrgan
 ```
-

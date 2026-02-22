@@ -1,8 +1,8 @@
 # C++ 示例：图像超分辨率
 
-### 4.3 完整 C++ 示例
+### 完整 C++ 示例
 
-#### 示例 1：图像超分辨率（Real-ESRGAN）
+#### 示例：图像超分辨率（Real-ESRGAN）
 
 基于真实示例代码：`samples/C++/real_esrgan_x4plus/real_esrgan_x4plus.cpp`
 
@@ -207,4 +207,3 @@ int main() {
     return 0;
 }
 ```
-

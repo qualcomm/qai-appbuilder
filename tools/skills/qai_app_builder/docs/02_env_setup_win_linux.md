@@ -5,9 +5,9 @@
 
 # 环境准备 (Windows & Linux)
 
-## 2. 环境准备
+## 环境准备
 
-### 2.1 Windows 环境配置
+### 1 Windows 环境配置
 
 #### 步骤 1：安装依赖软件
 
@@ -78,7 +78,7 @@ pip install qai_appbuilder-{version}-cp312-cp312-win_arm64.whl
 
 💡 **重要提示**：从 v2.0.0 版本开始，QAI AppBuilder Python 扩展已经包含了所有必需的依赖库（包括 Qualcomm® AI Runtime SDK 运行时库），无需额外安装 Qualcomm® AI Runtime SDK。这大大简化了 Python 开发者的环境配置过程。
 
-### 2.2 Linux 环境配置
+### 2 Linux 环境配置
 
 #### 步骤 1：安装依赖软件
 

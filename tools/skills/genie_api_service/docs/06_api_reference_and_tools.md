@@ -10,69 +10,75 @@ GenieAPIService 提供了一套完整的 RESTful API 接口，兼容 OpenAI API 
 
 ### 请求参数
 
-```json
-{
-  "model": "Qwen2.0-7B",
-  "messages": [
-    {"role": "system", "content": "You are a helpful assistant."},
-    {"role": "user", "content": "你好"}
-  ],
-  "stream": true,
-  "temperature": 0.7,
-  "top_p": 0.9,
-  "top_k": 40,
-  "max_tokens": 2048
-}
-```
-
-### 参数说明
-
 | 参数 | 类型 | 必需 | 说明 |
 |------|------|------|------|
 | model | string | 是 | 模型名称 |
 | messages | array | 是 | 消息列表 |
 | stream | boolean | 否 | 是否流式输出（默认：false） |
-| temperature | float | 否 | 温度参数（0.0-2.0，默认：0.7） |
-| top_p | float | 否 | Top-p 采样（0.0-1.0，默认：0.9） |
-| top_k | integer | 否 | Top-k 采样（默认：40） |
-| max_tokens | integer | 否 | 最大输出 token 数（默认：2048） |
+| temp | float | 否 | 温度参数（默认：0.3） |
+| top_p | float | 否 | Top-p 采样（默认：0.8） |
+| top_k | integer | 否 | Top-k 采样（默认：20） |
+| size | integer | 否 | 上下文大小限制（默认：模型上下文大小） |
 
-### 响应示例（非流式）
+### Python 示例（使用 OpenAI SDK - 非流式）
 
-```json
-{
-  "id": "chatcmpl-123",
-  "object": "chat.completion",
-  "created": 1677652288,
-  "model": "Qwen2.0-7B",
-  "choices": [
-    {
-      "index": 0,
-      "message": {
-        "role": "assistant",
-        "content": "你好！我是一个AI助手，很高兴为您服务。"
-      },
-      "finish_reason": "stop"
+```python
+from openai import OpenAI
+
+# 初始化 OpenAI 客户端，指向 GenieAPIService
+client = OpenAI(
+    base_url="http://127.0.0.1:8910/v1",
+    api_key="123"  # 任意字符串，GenieAPIService 不验证 key
+)
+
+response = client.chat.completions.create(
+    model="Qwen2.0-7B",
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "你好"}
+    ],
+    stream=False,
+    # 使用 extra_body 传递 Genie 特有的参数
+    extra_body={
+        "size": 4096,
+        "temp": 0.7,
+        "top_p": 0.9,
+        "top_k": 40
     }
-  ],
-  "usage": {
-    "prompt_tokens": 10,
-    "completion_tokens": 15,
-    "total_tokens": 25
-  }
-}
+)
+
+print(response.choices[0].message.content)
 ```
 
-### cURL 示例
+### Python 示例（使用 OpenAI SDK - 流式）
 
-```bash
-curl -X POST http://localhost:8910/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "Qwen2.0-7B",
-    "messages": [{"role": "user", "content": "你好"}],
-    "stream": false
-  }'
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://127.0.0.1:8910/v1",
+    api_key="123"
+)
+
+response = client.chat.completions.create(
+    model="Qwen2.0-7B",
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "写一首诗"}
+    ],
+    stream=True,
+    extra_body={
+        "size": 4096,
+        "temp": 0.7,
+        "top_p": 0.9,
+        "top_k": 40
+    }
+)
+
+for chunk in response:
+    content = chunk.choices[0].delta.content
+    if content:
+        print(content, end="", flush=True)
 ```
 
 ---
@@ -83,10 +89,15 @@ curl -X POST http://localhost:8910/v1/chat/completions \
 
 **描述**：获取可用模型列表。
 
-### 请求示例
+### Python 示例
 
-```bash
-curl http://localhost:8910/v1/models
+```python
+import requests
+import json
+
+url = "http://localhost:8910/v1/models"
+response = requests.get(url)
+print(json.dumps(response.json(), indent=2, ensure_ascii=False))
 ```
 
 ---
@@ -97,73 +108,194 @@ curl http://localhost:8910/v1/models
 
 **描述**：将文本按照指定 `separators` 优先级进行分割。
 
-### 调用示例
+### Python 示例
 
 ```python
 import requests
+import json
 
-url = "http://127.0.0.1:8910/v1/textsplitter"
-text = ""   # 要分割的文本
+url = "http://localhost:8910/v1/textsplitter"
+text = "你好！这是一个测试文本。"
 separators = ["\n\n", "\n", "。", "！", "？", "，", ".", "?", "!", ",", " ", ""]
-body = {"text": text, "max_length": 128, "separators": separators}
-response = requests.post(url, json=body)
+payload = {"text": text, "max_length": 10, "separators": separators}
+response = requests.post(url, json=payload)
+print(json.dumps(response.json(), indent=2, ensure_ascii=False))
 ```
 
 ---
 
 ## 4. 停止输出接口
 
-**端点**：`POST /v1/stop`
+**端点**：`POST /stop`
 
 **描述**：停止当前正在进行的生成。
+
+### Python 示例
+
+```python
+import requests
+
+url = "http://localhost:8910/stop"
+payload = {"text": "stop"}
+response = requests.post(url, json=payload)
+print(f"Status Code: {response.status_code}")
+```
 
 ---
 
 ## 5. 清除历史记录接口
 
-**端点**：`POST /v1/clear`
+**端点**：`POST /clear`
 
 **描述**：清除对话历史记录。
+
+### Python 示例
+
+```python
+import requests
+
+url = "http://localhost:8910/clear"
+payload = {"text": "clear"}
+response = requests.post(url, json=payload)
+print(f"Status Code: {response.status_code}")
+```
 
 ---
 
 ## 6. 重新加载历史记录接口
 
-**端点**：`POST /v1/reload`
+**端点**：`POST /reload`
 
-**描述**：从文件重新加载历史记录。
+**描述**：从 JSON 数据重新加载历史记录。
+
+### Python 示例
+
+```python
+import requests
+import json
+
+url = "http://localhost:8910/reload"
+# 假设 history_data 是从 /fetch 接口导出的 JSON 列表
+history_data = [
+    {"role": "user", "content": "你好"},
+    {"role": "assistant", "content": "你好！"}
+]
+response = requests.post(url, json=history_data)
+print(f"Status Code: {response.status_code}")
+```
 
 ---
 
 ## 7. 获取历史记录接口
 
-**端点**：`GET /v1/fetch`
+**端点**：`POST /fetch`
 
 **描述**：获取当前对话历史记录。
+
+### Python 示例
+
+```python
+import requests
+import json
+
+url = "http://localhost:8910/fetch"
+response = requests.post(url)
+print(json.dumps(response.json(), indent=2, ensure_ascii=False))
+```
 
 ---
 
 ## 8. 获取模型上下文大小接口
 
-**端点**：`GET /v1/contextsize`
+**端点**：`POST /contextsize`
 
 **描述**：获取当前模型的上下文大小。
+
+### Python 示例
+
+```python
+import requests
+import json
+
+url = "http://localhost:8910/contextsize"
+response = requests.post(url)
+print(json.dumps(response.json(), indent=2))
+```
 
 ---
 
 ## 9. 获取模型性能信息接口
 
-**端点**：`GET /v1/performance`
+**端点**：`GET /profile`
 
 **描述**：获取模型推理性能信息。
 
+### Python 示例
+
+```python
+import requests
+import json
+
+url = "http://localhost:8910/profile"
+response = requests.get(url)
+print(json.dumps(response.json(), indent=2))
+```
+
 ---
 
-## 10. 停止服务接口
+## 10. 获取模型状态接口
 
-**端点**：`POST /v1/shutdown`
+**端点**：`GET /status`
+
+**描述**：获取模型加载状态。
+
+### Python 示例
+
+```python
+import requests
+import json
+
+url = "http://localhost:8910/status"
+response = requests.get(url)
+print(json.dumps(response.json(), indent=2))
+```
+
+---
+
+## 11. 卸载模型接口
+
+**端点**：`POST /unload`
+
+**描述**：卸载当前加载的模型。
+
+### Python 示例
+
+```python
+import requests
+
+url = "http://localhost:8910/unload"
+response = requests.post(url)
+print(f"Status Code: {response.status_code}")
+```
+
+---
+
+## 12. 停止服务接口
+
+**端点**：`POST /servicestop`
 
 **描述**：停止 GenieAPIService 服务。
+
+### Python 示例
+
+```python
+import requests
+
+url = "http://localhost:8910/servicestop"
+payload = {"text": "stop"}
+response = requests.post(url, json=payload)
+print(f"Status Code: {response.status_code}")
+```
 
 ---
 

@@ -1,6 +1,6 @@
 # C++ 示例：图像分类 (BEiT)
 
-#### 示例 2：图像分类（BEiT）
+#### 示例：图像分类（BEiT）
 
 基于真实示例代码：`samples/C++/beit/beit.cpp`
 

@@ -8,7 +8,7 @@ metadata: {"openclaw":{"emoji":"📘","always":true}}
 # QAI AppBuilder 文档知识库
 
 获取 QAI AppBuilder 开发框架的全套技术文档，支持环境搭建、API 查询及代码示例检索。大部分非LLM模型部署都可以通过QAI AppBuilder实现。有些模型在本文档中没有直接提及，但可以通过参考给出的 API 文档及相关例子来学习用法。
-当用户问如何在 Qualcomm(高通) 平台上部署模型时，我们可以假设用户提到的模型已经是适合在 Qualcomm 平台上直接部署的 QNN 格式(*.bin后缀)的模型了。
+当用户问如何在 Qualcomm(高通) 平台上部署模型时，我们可以假设用户已经拥有在 Qualcomm 平台上直接部署的 QNN(*.bin) 格式的模型了。
 
 文档根目录路径： C:/Users/zhanweiw/.openclaw/Skills/qai_app_builder
 
@@ -41,8 +41,8 @@ metadata: {"openclaw":{"emoji":"📘","always":true}}
 
 ### ⚙️ 文档3：C++环境与Python配置 (`docs/03_env_cpp_py_config.md`)
 
-**适用问题：** C++开发环境搭建、Visual Studio配置、CMake设置、Python全局配置、QNNConfig类、运行时选择（HTP/CPU）、日志级别设置、库路径配置
-**关键词：** C++环境、QNNConfig、全局配置、运行时、日志、Visual Studio
+**适用问题：** C++开发环境搭建、Visual Studio配置、CMake设置、Python全局配置、QNNConfig等核心类介绍、运行时选择（HTP/CPU）、日志级别设置、库路径配置
+**关键词：** C++环境、QNNConfig、全局配置、运行时、日志、Visual Studio、QNNConfig等核心类
 
 ### 🐍 文档4：Python核心API (`docs/04_python_core_api.md`)
 

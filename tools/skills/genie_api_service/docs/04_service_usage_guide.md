@@ -70,12 +70,7 @@ GenieAPIService.exe -c models/Qwen2.0-7B-SSD/config.json -l --adapter my_lora --
    Model loaded successfully
    ```
 
-2. **访问健康检查端点**
-   ```bash
-   curl http://localhost:8910/health
-   ```
-
-3. **查看模型列表**
+2. **查看模型列表**
    ```bash
    curl http://localhost:8910/v1/models
    ```
@@ -89,7 +84,7 @@ GenieAPIClient 是一个 C++ 命令行客户端，用于与 GenieAPIService 交�
 ### 基本用法
 
 ```cmd
-GenieAPIClient.exe --prompt "你好，请介绍一下自己" --stream
+GenieAPIClient.exe --model "qwen2.5vl3b" --prompt "你好，请介绍一下自己" --stream
 ```
 
 ### 完整参数列表

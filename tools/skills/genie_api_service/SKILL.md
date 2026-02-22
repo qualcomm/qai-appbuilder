@@ -40,8 +40,8 @@ metadata: {"openclaw":{"emoji":"🧞","always":true}}
 
 ### 🧠 文档3：模型配置详解 (`docs/03_model_configuration_guide.md`)
 
-**适用问题：** config.json配置、模型配置文件结构、文本模型部署、多模态模型（Qwen2.5-VL-3B）、prompt.json配置、模型目录结构、视觉语言模型、tokenizer/sampler参数
-**关键词：** 模型配置、config.json、prompt.json、多模态、VLM、提示词
+**适用问题：** config.json配置、模型配置文件结构、文本模型部署、多模态模型（Qwen2.5-VL-3B）、prompt.json配置、模型目录结构、视觉语言模型、tokenizer/sampler参数，客户端示例代码（Python）
+**关键词：** 模型配置、config.json、prompt.json、多模态、VLM、提示词、示例代码
 
 ### 🛠️ 文档4：服务使用指南 (`docs/04_service_usage_guide.md`)
 
