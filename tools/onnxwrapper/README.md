@@ -17,15 +17,15 @@ This tool provides a transparent runtime replacement that allows existing **ONNX
 - Rapid validation of QNN models generated from ONNX or downloaded from **AI Hub**.
 
 ## Usage Overview
-There are two usages for this tool:
-**Usage 1**
+There are two usages for this tool:  
+**Usage 1:**
 1. Copy `onnxexec.py` and `onnxwrapper.py` into your ONNX sample code directory.
 2. Run your original ONNX inference script via:
 
 ```bash
 python onnxexec.py your_onnx_sample.py
 ```
-**Usage 2**
+**Usage 2:**  
 Import the wrapper explicitly at the beginning of your script:
 
 ```python
