@@ -1,4 +1,4 @@
-# The Wrapper of ONNX Runtime to QNN Runtime
+# The Wrapper of ONNX Runtime to QNN Runtime (QAI AppBuilder)
 
 ## Introduction
 
@@ -8,7 +8,7 @@ This tool provides a transparent runtime replacement that allows existing **ONNX
 
 - Use a hot-patch mechanism to replace `onnxruntime` with a custom wrapper implemented on top of QNN.
 - Reuse existing ONNX sample scripts and their input/output logic.
-- Automatically locate and load corresponding QNN models converted from ONNX.
+- Automatically locate and load corresponding QNN models.
 
 ## Typical Use Cases
 
@@ -17,15 +17,16 @@ This tool provides a transparent runtime replacement that allows existing **ONNX
 - Rapid validation of QNN models generated from ONNX or downloaded from **AI Hub**.
 
 ## Usage Overview
-
+There are two usages for this tool:
+**Usage 1**
 1. Copy `onnxexec.py` and `onnxwrapper.py` into your ONNX sample code directory.
 2. Run your original ONNX inference script via:
 
 ```bash
 python onnxexec.py your_onnx_sample.py
 ```
-
-Alternatively, import the wrapper explicitly at the beginning of your script:
+**Usage 2**
+Import the wrapper explicitly at the beginning of your script:
 
 ```python
 from qai_appbuilder import onnxwrapper
