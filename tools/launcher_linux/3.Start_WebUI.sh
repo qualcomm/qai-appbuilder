@@ -20,9 +20,7 @@ echo "1. Start ImageRepairApp"
 echo "2. Start GenieWebUI"
 read -p "Enter the number (1-2) corresponding to your choice: " choice
 
-# export QNN_SDK_ROOT=/home/ubuntu/code/2.38.0.250901
-# export LD_LIBRARY_PATH=$QNN_SDK_ROOT/lib/aarch64-oe-linux-gcc11.2
-# export ADSP_LIBRARY_PATH=$QNN_SDK_ROOT/lib/hexagon-v73/unsigned
+
 
 case "$choice" in
     1)

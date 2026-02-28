@@ -16,6 +16,12 @@
 static int g_CurLength = 0;
 static int g_MaxLength = CONTENT_LENGTH;
 
+size_t g_embeddingLutSize{0};
+std::shared_ptr<void> g_embeddingLut{};
+
+// Forward declaration for allocator used in tokenizer decode
+void MyAllocCallback(const size_t size, const char **allocatedData);
+
 void GenieCallBack(const char* response, const GenieDialog_SentenceCode_t sentence_code, const void* user_data) {
     GenieContext* self = static_cast<GenieContext*>(const_cast<void*>(user_data));
     if (response && strlen(response) > 0) {
@@ -39,6 +45,76 @@ void GenieCallBack(const char* response, const GenieDialog_SentenceCode_t senten
 #endif
 }
 
+void tokenToEmbedCallback(int32_t token,
+                          void* embedding,
+                          uint32_t embeddingSize,
+                          const void* /*userData*/) {
+  size_t lutIndex = static_cast<size_t>(token) * embeddingSize;
+  if ((lutIndex + embeddingSize) <= g_embeddingLutSize) {
+    int8_t* embeddingSrc = static_cast<int8_t*>(g_embeddingLut.get()) + lutIndex;
+    int8_t* embeddingDst = static_cast<int8_t*>(embedding);
+    std::copy(embeddingSrc, embeddingSrc + embeddingSize, embeddingDst);
+  } else {
+    std::cerr << "Error: T2E conversion overflow." << std::endl;
+  }
+}
+
+void GenieTokenQueryCallback(
+    const uint32_t* token_ids,
+    const uint32_t numTokens,
+    const GenieDialog_SentenceCode_t sentence_code,
+    const void* user_data
+) {
+    GenieContext* self = static_cast<GenieContext*>(const_cast<void*>(user_data));
+    // Convert token IDs to text using helper
+    if (token_ids && numTokens > 0) {
+        std::string decoded = self->DecodeTokens(token_ids, numTokens);
+        if (!decoded.empty()) {
+            {
+                std::lock_guard<std::mutex> guard(self->m_stream_lock);
+                self->m_stream_answer += decoded;
+            }
+            g_CurLength += self->TokenLength(decoded);
+        }
+    }
+    
+
+    if (g_CurLength >= g_MaxLength) {
+        self->Stop();
+    }
+
+#ifdef GENIE_BUILDER_DEBUG
+    if (sentence_code == GenieDialog_SentenceCode_t::GENIE_DIALOG_SENTENCE_END) {
+        printf("\n-----------------------------------------------------\n");
+    }
+#endif
+}
+
+std::string GenieContext::DecodeTokens(const uint32_t* token_ids, uint32_t numTokens) {
+    GenieTokenizer_Handle_t tokenizerHandle = nullptr;
+    Genie_Status_t tstatus = GenieDialog_getTokenizer(m_DialogHandle, &tokenizerHandle);
+    if (tstatus != GENIE_STATUS_SUCCESS || !tokenizerHandle || !token_ids || numTokens == 0) {
+        return std::string();
+    }
+
+    const char* decoded = nullptr;
+    // GenieTokenizer_decode expects int32_t token IDs
+    tstatus = GenieTokenizer_decode(
+        tokenizerHandle,
+        reinterpret_cast<const int32_t*>(token_ids),
+        numTokens,
+        MyAllocCallback,
+        &decoded
+    );
+    if (tstatus != GENIE_STATUS_SUCCESS || !decoded) {
+        return std::string();
+    }
+
+    std::string out(decoded);
+    free((void*)decoded);
+    return out;
+}
+
 void GenieContext::inference_thread() {
     while(true) {
         std::unique_lock<std::mutex> lock(m_request_lock);
@@ -55,6 +131,66 @@ void GenieContext::inference_thread() {
         m_inference_busy = false;
         m_request_ready = false;
     }
+}
+
+void GenieContext::embedding_inference_thread() {
+    while (true) {
+        std::unique_lock<std::mutex> lock(m_embedding_request_lock);
+        m_embedding_request_cond.wait(lock, [this]{ return m_embedding_request_ready; });
+        if (m_embedding_thread_exit) {
+            return;
+        }
+
+        if(m_embedding.size() == 0) {
+            std::cerr << "Embedding input is empty.\n";
+            m_embedding_inference_busy = false;
+            m_embedding_request_ready = false;
+            continue;
+        }
+
+        GenieDialog_TokenToEmbeddingCallback_t t2eCallback=tokenToEmbedCallback;
+        auto status = GenieDialog_embeddingTokenQuery(
+            m_DialogHandle,
+            m_embedding.data(),
+            static_cast<uint32_t>(m_embedding.size()*sizeof(float)),
+            GenieDialog_SentenceCode_t::GENIE_DIALOG_SENTENCE_COMPLETE,
+            t2eCallback,
+            GenieTokenQueryCallback,
+            this
+        );
+        if (GENIE_STATUS_SUCCESS != status && GENIE_STATUS_WARNING_ABORTED != status) {
+            std::cerr << "Failed to get response from GenieDialog (embedding).\n";
+        }
+
+        m_embedding_inference_busy = false;
+        m_embedding_request_ready = false;
+    }
+}
+
+bool GenieContext::SetEmbeddingTable(const std::string table_path)
+{
+    std::ifstream infile(table_path, std::ios::binary | std::ios::ate);
+    if (!infile) {
+        std::cerr << "Failed to open embedding table file: " << table_path << "\n";
+        return false;
+    }
+
+    std::streamsize size = infile.tellg();
+    infile.seekg(0, std::ios::beg);
+
+    g_embeddingLutSize = static_cast<size_t>(size);
+    g_embeddingLut.reset(malloc(g_embeddingLutSize), free);
+    if (!g_embeddingLut) {
+        std::cerr << "Failed to allocate memory for embedding LUT.\n";
+        return false;
+    }
+
+    if (!infile.read(static_cast<char*>(g_embeddingLut.get()), size)) {
+        std::cerr << "Failed to read embedding LUT data from file.\n";
+        return false;
+    }
+
+    return true;
 }
 
 bool GenieContext::Query(const std::string& prompt, const Callback callback) {
@@ -101,6 +237,59 @@ bool GenieContext::Query(const std::string& prompt, const Callback callback) {
     }
 
     return true;
+}
+
+std::string GenieContext::QueryByEmbedding(const std::vector<float>& embedding, const Callback callback) {
+    if (GENIE_STATUS_SUCCESS != GenieDialog_reset(m_DialogHandle)) {    // TODO: add a Python function for this.
+        std::cerr << "Failed to reset Genie Dialog.\n";
+    }
+
+    g_CurLength = 0;
+    m_embedding = embedding;
+
+
+#ifdef GENIE_BUILDER_DEBUG
+    std::cout << "\n[Embedding Input]:\n";
+    // for (size_t i = 0; i < m_embedding.size(); i++) {
+    //     std::cout << m_embedding[i] << " ";
+    // }
+    std::cout <<"m_embedding size:"<<m_embedding.size()<< "\n\n";
+    std::cout << "\n[Response]:\n";
+#endif
+
+    m_embedding_request_ready = true;
+    m_embedding_inference_busy = true;
+    m_embedding_request_cond.notify_one();
+
+    std::string response = "";
+    std::string chunk="";
+    while (m_embedding_inference_busy) {
+        if (m_stream_answer.size() > 0) {
+            std::lock_guard<std::mutex> guard(m_stream_lock);
+            response = m_stream_answer;
+            m_stream_answer = "";
+        }
+
+        if (response.size() > 0) {
+            if(callback) {
+                callback(response);
+            }
+            chunk += response;
+        }
+
+        response = "";
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    if (m_stream_answer.size() > 0) {
+        if(callback) {
+            callback(m_stream_answer);
+        }
+        chunk += m_stream_answer;
+        m_stream_answer = "";
+    }
+
+    return chunk;
 }
 
 GenieContext::GenieContext(const std::string& config, bool debug) {
@@ -170,6 +359,9 @@ GenieContext::GenieContext(const std::string& config, bool debug) {
     if(!m_stream_thread) {
         m_stream_thread = std::make_unique<std::thread>(&GenieContext::inference_thread, this);
     }
+    if (!m_embedding_stream_thread) {
+        m_embedding_stream_thread = std::make_unique<std::thread>(&GenieContext::embedding_inference_thread, this);
+    }
 }
 
 GenieContext::~GenieContext() {
@@ -184,6 +376,11 @@ GenieContext::~GenieContext() {
         m_thread_exit = true;
         m_request_ready = true;
         m_request_cond.notify_one();
+    }
+    if (m_embedding_stream_thread) {
+        m_embedding_thread_exit = true;
+        m_embedding_request_ready = true;
+        m_embedding_request_cond.notify_one();
     }
 
     if (m_ConfigHandle != nullptr) {
@@ -223,6 +420,13 @@ GenieContext::~GenieContext() {
         // reset the global variable.
         m_request_ready = false;
         m_thread_exit = false;
+    }
+    if (m_embedding_stream_thread) {
+        m_embedding_stream_thread->join();
+        m_embedding_stream_thread = nullptr;
+
+        m_embedding_request_ready = false;
+        m_embedding_thread_exit = false;
     }
 }
 
@@ -387,6 +591,8 @@ PYBIND11_MODULE(geniebuilder, m) {
     py::class_<GenieContext>(m, "GenieContext")
         .def(py::init<const std::string&, bool>())
         .def("Query", &GenieContext::Query)
+        .def("QueryByEmbedding", &GenieContext::QueryByEmbedding)
+        .def("SetEmbeddingTable", &GenieContext::SetEmbeddingTable)
         .def("SetParams", &GenieContext::SetParams)
         .def("GetProfile", &GenieContext::GetProfile)
         .def("TokenLength", &GenieContext::TokenLength)

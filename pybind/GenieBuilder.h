@@ -49,6 +49,11 @@ class GenieContext {
         bool SetStopSequence(const std::string& stop_sequences);
         bool SetLora(const std::string AdapterName, 
                      const std::unordered_map<std::string, float> &alphaValue);
+                     
+
+        std::string QueryByEmbedding(const std::vector<float>& embedding, const Callback callback);
+        bool SetEmbeddingTable(const std::string table_path);
+        std::string DecodeTokens(const uint32_t* token_ids, uint32_t numTokens);
 
     public:
         std::mutex m_stream_lock;
@@ -56,6 +61,7 @@ class GenieContext {
 
     private:
         void inference_thread();
+        void embedding_inference_thread();
 
         GenieDialogConfig_Handle_t m_ConfigHandle = nullptr;
         GenieDialog_Handle_t m_DialogHandle = nullptr;
@@ -71,6 +77,15 @@ class GenieContext {
         std::condition_variable m_request_cond;
         bool m_thread_exit {false};
         bool m_inference_busy {false};
+
+        // Embedding inference thread.
+        std::unique_ptr<std::thread> m_embedding_stream_thread {nullptr};
+        std::mutex m_embedding_request_lock;
+        bool m_embedding_request_ready {false};
+        std::condition_variable m_embedding_request_cond;
+        bool m_embedding_thread_exit {false};
+        bool m_embedding_inference_busy {false};
+        std::vector<float> m_embedding;
 
         std::string m_prompt {""};
         bool m_debug {false};

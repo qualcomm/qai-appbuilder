@@ -29,6 +29,25 @@ class GenieContext:
     def Query(self, prompt, callback):
         return self.m_context.Query(prompt, callback)
 
+    def QueryByEmbedding(self, embedding, callback):
+        """Query using an embedding vector.
+
+        Args:
+            embedding (list[float]): Embedding vector to query with.
+            callback (Callable[[str], bool]): Callback receiving streamed text.
+
+        Returns:
+            string: query response.
+        """
+        return self.m_context.QueryByEmbedding(embedding, callback)
+    def SetEmbeddingTable(self, embedding_table):
+        """Set the embedding table for retrieval.
+
+        Args:
+            embedding_table (list[dict]): List of dicts with 'id' and 'embedding' keys.
+        """
+        return self.m_context.SetEmbeddingTable(embedding_table)
+
     def Stop(self):
         return self.m_context.Stop()
 

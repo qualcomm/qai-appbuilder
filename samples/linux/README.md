@@ -24,14 +24,14 @@ git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
 
 Download the Qualcomm® AI Runtime (QAIRT) SDK on device, which includes the required QNN runtime libraries, from the following link:
 
-[QAIRT v2.39.0.250926](https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.39.0.250926/v2.39.0.250926.zip)
+[QAIRT v2.40.0.251030](https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.40.0.251030/v2.40.0.251030.zip)
 
 ```bash
 # Download QAIRT SDK package
-wget https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.39.0.250926/v2.39.0.250926.zip
+wget https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.40.0.251030/v2.40.0.251030.zip
 
 # Extract the runtime libraries
-unzip v2.39.0.250926.zip
+unzip v2.40.0.251030.zip
 ```
 
 
@@ -66,7 +66,10 @@ QAI AppBuilder provides multiple examples of AI applications developed using Pyt
 
 Upgrade build tooling and install required Python packages:
 ```bash
-pip install requests==2.32.3 py3-wget==1.0.12 tqdm==4.67.1 importlib-metadata==8.5.0 qai-hub==0.30.0 opencv-python==4.10.0.82 torch>=1.8.0 torchvision>=0.9.0
+pip install requests==2.32.3 py3-wget==1.0.12 tqdm==4.67.1 importlib-metadata==8.5.0 qai-hub==0.30.0 opencv-python==4.10.0.82 gradio
+
+pip install transformers==4.45.0 torch==2.9.1 opencv-python
+#pip install torchvision>=0.9.0
 ```
 
 #### 2. Build QAI AppBuilder Python and C/C++ Libraries
@@ -194,7 +197,8 @@ Build a chat application powered by large language models (LLMs) using OpenAI-co
 
 **Steps to run:**
 
-1. Navigate to the launcher directory:
+1. Navigate to the launcher directory :
+
 ```bash
 cd tools/launcher_linux
 ```
