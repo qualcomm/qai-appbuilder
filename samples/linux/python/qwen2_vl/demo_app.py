@@ -175,7 +175,11 @@ def check_model_files(dir:str) -> bool:
 
 
 if __name__ == "__main__":
-    qwen2_vl_model_dir = "/home/ubuntu/ai_model/qwen2vl2b"
+    if len(sys.argv) > 1:
+        qwen2_vl_model_dir = sys.argv[1]
+    else:
+        print("Usage: python demo_app.py <model_path>")
+        sys.exit(1)
 
     if(not check_model_files(qwen2_vl_model_dir)):
         print(f"Model files are missing in {qwen2_vl_model_dir}. Please check the directory and try again.")

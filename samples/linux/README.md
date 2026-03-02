@@ -66,15 +66,21 @@ QAI AppBuilder provides multiple examples of AI applications developed using Pyt
 
 Upgrade build tooling and install required Python packages:
 ```bash
+sudo apt install cmake build-essential python3.12-dev
+
 pip install requests==2.32.3 py3-wget==1.0.12 tqdm==4.67.1 importlib-metadata==8.5.0 qai-hub==0.30.0 opencv-python==4.10.0.82 gradio
 
-pip install transformers==4.45.0 torch==2.9.1 opencv-python
-#pip install torchvision>=0.9.0
+pip install transformers==4.45.0 torch==2.9.1
+pip install torchvision>=0.9.0
+pip install qwen-vl-utils
+
 ```
 
 #### 2. Build QAI AppBuilder Python and C/C++ Libraries
 
 From the project root directory, build the libraries:
+
+
 
 **For QCS6490 (Hexagon v68):**
 ```bash
@@ -246,5 +252,18 @@ For issues, questions, or contributions:
 - **Issue Tracker**: [GitHub Issues](https://github.com/quic/ai-engine-direct-helper/issues)
 - **Documentation**: [Project README](../../README.md)
 - **Community**: Check existing issues before creating new ones
+
+## Troubleshooting
+
+### Common Issues and Solutions
+
+**Issue: undefined symbol: _ZN3tbb6detail2r114execution_slotEPKNS0_2d114execution_dataE**
+-  fix this issue either remove the libtbb-dev or set LD_PRELOAD to libtbb
+```bash
+// option 1: remove libtbb-dev
+sudo apt remove libtbb-dev
+// option 2: set LD_PRELOAD
+export LD_PRELOAD=/usr/lib/aarch64-linux-gnu/libtbb.so.12
+```
 
 
