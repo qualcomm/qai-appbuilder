@@ -53,10 +53,10 @@ except ImportError:  # pragma: no cover
 import qai_appbuilder
 from qai_appbuilder import QNNConfig, QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile
 
-
 logger = logging.getLogger(__name__)
 
 
+# -------------------- ORT API shims --------------------
 @dataclass(frozen=True)
 class TensorInfo(Mapping[str, Any]):
     name: str
@@ -77,9 +77,17 @@ class TensorInfo(Mapping[str, Any]):
         return 3
 
 
-# -------------------- helpers --------------------
+NodeArg = TensorInfo
+
+
+# -------------------- small helpers --------------------
 def _env(name: str, default: str = "") -> str:
     return str(os.environ.get(name, default) or default).strip()
+
+
+def _env_bool(name: str, default: str = "0") -> bool:
+    v = _env(name, default).strip().lower()
+    return v in ("1", "true", "yes", "on")
 
 
 def _default_qai_libs_dir() -> str:
@@ -101,7 +109,6 @@ def _normalize_layout(s: Optional[str]) -> Optional[str]:
     alias = {
         "BHWC": "NHWC",
         "BCHW": "NCHW",
-        # treat D as T for video, alias to our canonical naming
         "NCDHW": "NCTHW",
         "NDHWC": "NTHWC",
         "BCTHW": "NCTHW",
@@ -128,9 +135,7 @@ def _convert_layout(x: np.ndarray, src: Optional[str], dst: Optional[str]) -> np
             return np.transpose(arr, (0, 3, 1, 2)).copy()
         return x
 
-    # 5D video:
-    # NCTHW = (N, C, T, H, W)
-    # NTHWC = (N, T, H, W, C)
+    # 5D: NCTHW <-> NTHWC
     if arr.ndim == 5:
         if src == "NCTHW" and dst == "NTHWC":
             return np.transpose(arr, (0, 2, 3, 4, 1)).copy()
@@ -160,15 +165,26 @@ def _ort_type_from_dtype(dtype: Optional[str]) -> str:
         return "tensor(float)"
     s = str(dtype).strip().lower()
     m = {
-        "float32": "tensor(float)", "fp32": "tensor(float)", "float": "tensor(float)",
-        "float16": "tensor(float16)", "fp16": "tensor(float16)", "half": "tensor(float16)",
-        "uint8": "tensor(uint8)", "u8": "tensor(uint8)",
-        "int8": "tensor(int8)", "i8": "tensor(int8)",
-        "uint16": "tensor(uint16)", "u16": "tensor(uint16)",
-        "int16": "tensor(int16)", "i16": "tensor(int16)",
-        "int32": "tensor(int32)", "i32": "tensor(int32)",
-        "int64": "tensor(int64)", "i64": "tensor(int64)",
-        "bool": "tensor(bool)", "boolean": "tensor(bool)",
+        "float32": "tensor(float)",
+        "fp32": "tensor(float)",
+        "float": "tensor(float)",
+        "float16": "tensor(float16)",
+        "fp16": "tensor(float16)",
+        "half": "tensor(float16)",
+        "uint8": "tensor(uint8)",
+        "u8": "tensor(uint8)",
+        "int8": "tensor(int8)",
+        "i8": "tensor(int8)",
+        "uint16": "tensor(uint16)",
+        "u16": "tensor(uint16)",
+        "int16": "tensor(int16)",
+        "i16": "tensor(int16)",
+        "int32": "tensor(int32)",
+        "i32": "tensor(int32)",
+        "int64": "tensor(int64)",
+        "i64": "tensor(int64)",
+        "bool": "tensor(bool)",
+        "boolean": "tensor(bool)",
     }
     return m.get(s, "tensor(float)")
 
@@ -178,15 +194,26 @@ def _np_dtype_from_str(dtype: Optional[str]) -> np.dtype:
         return np.float32
     s = str(dtype).strip().lower()
     m = {
-        "float32": np.float32, "fp32": np.float32, "float": np.float32,
-        "float16": np.float16, "fp16": np.float16, "half": np.float16,
-        "uint8": np.uint8, "u8": np.uint8,
-        "int8": np.int8, "i8": np.int8,
-        "uint16": np.uint16, "u16": np.uint16,
-        "int16": np.int16, "i16": np.int16,
-        "int32": np.int32, "i32": np.int32,
-        "int64": np.int64, "i64": np.int64,
-        "bool": np.bool_, "boolean": np.bool_,
+        "float32": np.float32,
+        "fp32": np.float32,
+        "float": np.float32,
+        "float16": np.float16,
+        "fp16": np.float16,
+        "half": np.float16,
+        "uint8": np.uint8,
+        "u8": np.uint8,
+        "int8": np.int8,
+        "i8": np.int8,
+        "uint16": np.uint16,
+        "u16": np.uint16,
+        "int16": np.int16,
+        "i16": np.int16,
+        "int32": np.int32,
+        "i32": np.int32,
+        "int64": np.int64,
+        "i64": np.int64,
+        "bool": np.bool_,
+        "boolean": np.bool_,
     }
     return m.get(s, np.float32)
 
@@ -256,7 +283,7 @@ def _infer_layout_from_shape(shape: Any) -> Optional[str]:
     return None
 
 
-# -------------------- QNN wrapper --------------------
+# -------------------- QNN Model Wrapper --------------------
 class QNNModelWrapper(QNNContext):
     """
     QNNContext wrapper.
@@ -265,14 +292,15 @@ class QNNModelWrapper(QNNContext):
     """
 
     def __init__(self, model_name: str, model_path: str, runtime_tag: str = ""):
-        resolved, candidates = self._find_qnn_model_file(model_path, runtime_tag=runtime_tag, return_candidates=True)
+        resolved, candidates = self._find_qnn_model_file(
+            model_path, runtime_tag=runtime_tag, return_candidates=True
+        )
         resolved = os.path.abspath(resolved)
         logger.info(f"[QNN] Selected QNN model file (runtime={runtime_tag}): {resolved}")
         logger.info(f"[QNN] Model candidates (runtime={runtime_tag}): {candidates}")
 
         super().__init__(model_name, resolved)
         self.model_file_path = resolved
-
         self.io_config: Dict[str, Any] = {}
         self._expected_input_shapes: Optional[List[Any]] = None
         self._expected_output_shapes: Optional[List[Any]] = None
@@ -283,14 +311,12 @@ class QNNModelWrapper(QNNContext):
         if env_cfg:
             yaml_paths.append(env_cfg)
 
-        # Try autogen cache and co-located yaml
         yaml_paths += [
             os.path.splitext(resolved)[0] + ".yaml",
             os.path.splitext(resolved)[0] + ".autogen.yaml",
             f"{model_name}.{(runtime_tag or 'htp').lower()}.autogen.yaml",
             model_name + ".yaml",
         ]
-
         for yp in yaml_paths:
             if yp and os.path.exists(yp):
                 try:
@@ -303,7 +329,6 @@ class QNNModelWrapper(QNNContext):
 
         self._log_qnn_model_specs()
 
-        # If no yaml loaded, auto-generate and optionally persist
         if not self.io_config:
             self.io_config = self._autogen_io_config(runtime_tag=runtime_tag)
             autogen_path = self._autogen_yaml_path(resolved, model_name, runtime_tag or "htp")
@@ -330,6 +355,29 @@ class QNNModelWrapper(QNNContext):
             logger.info(f"[QNN] QNN output dtype: {out_dt}")
         except Exception as e:
             logger.warning(f"[QNN] Unable to query QNN model specs via QNNContext APIs: {e}")
+
+    
+    @staticmethod
+    def _looks_like_token_or_step(name: str) -> bool:
+        n = (name or "").strip().lower()
+        keys = ("token", "tokens", "input_ids", "ids", "index", "offset", "step", "pos", "position")
+        return any(k in n for k in keys) or n in ("x", "i", "t", "idx")
+
+    @staticmethod
+    def _is_scalarish_shape(shape: Any) -> bool:
+        if not isinstance(shape, (list, tuple)):
+            return False
+        try:
+            dims = [int(x) for x in shape]
+        except Exception:
+            return False
+        if len(dims) == 0:
+            return True
+        if len(dims) == 1 and dims[0] == 1:
+            return True
+        if len(dims) == 2 and dims[0] == 1 and dims[1] == 1:
+            return True
+        return False
 
     def _autogen_io_config(self, runtime_tag: str = "") -> Dict[str, Any]:
         in_names = self.getInputName()
@@ -366,16 +414,34 @@ class QNNModelWrapper(QNNContext):
         for i, n in enumerate(in_names):
             shape = in_shapes[i] if i < len(in_shapes) else None
             dtype = in_dt[i] if i < len(in_dt) else None
+
             item: Dict[str, Any] = {
                 "name": n,
                 "dtype": _dtype_str_from_any(dtype),
                 "add_batch": True,
             }
+
+            # GENERIC rule:
+            # - if model says int/bool -> respect, and for scalar-ish inputs disable add_batch
+            # - if dtype is unclear but name looks like token/step and shape is scalar-ish -> force int32 and disable add_batch
+            dtype_str = item["dtype"]
+            ln = str(n).strip().lower()
+
+            if dtype_str in ("int32", "int64", "bool"):
+                if self._is_scalarish_shape(shape) or ln in ("x", "index", "offset", "step", "pos", "idx"):
+                    item["add_batch"] = False
+            else:
+                if self._looks_like_token_or_step(ln) and self._is_scalarish_shape(shape):
+                    item["dtype"] = "int32"
+                    item["add_batch"] = False
+
             lay = _infer_layout_from_shape(shape)
             if lay:
                 item["layout"] = lay
+
             if enable_opt_heur and str(n).strip() in common_optional:
                 item["optional"] = True
+
             inputs_cfg.append(item)
 
         outputs_cfg: List[Dict[str, Any]] = []
@@ -400,8 +466,6 @@ class QNNModelWrapper(QNNContext):
         base_dir = os.path.dirname(resolved_model_path)
         filename = f"{model_name}.{runtime_tag.lower()}.autogen.yaml"
         candidate = os.path.join(base_dir, filename)
-
-        # prefer model dir if writable
         try:
             test_path = os.path.join(base_dir, ".qai_write_test")
             with open(test_path, "w", encoding="utf-8") as f:
@@ -410,8 +474,6 @@ class QNNModelWrapper(QNNContext):
             return candidate
         except Exception:
             pass
-
-        # fallback to user cache
         if os.name == "nt":
             root = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
             cache_dir = os.path.join(root, "qai_onnxruntime")
@@ -496,11 +558,10 @@ class QNNModelWrapper(QNNContext):
 
     def Inference(self, input_tensors: List[np.ndarray], input_names: Optional[List[str]] = None) -> List[np.ndarray]:
         cfg = self.io_config or {}
-
         full_in_names = self.getInputName()
         out_names = self.getOutputName()
-
         used_names = input_names if input_names is not None else full_in_names
+
         if len(used_names) != len(input_tensors):
             raise ValueError(f"Input names count {len(used_names)} != tensors count {len(input_tensors)}")
 
@@ -531,7 +592,6 @@ class QNNModelWrapper(QNNContext):
             dst_layout = _normalize_layout(item.get("layout")) or exp_layout.get(n)
             src_layout = _normalize_layout(item.get("src_layout"))
 
-            # heuristic src layout only if dst known and tensor is 4D/5D
             if not src_layout and arr.ndim in (4, 5) and dst_layout:
                 if arr.ndim == 4:
                     if dst_layout == "NCHW" and arr.shape[-1] in (1, 3, 4):
@@ -566,13 +626,14 @@ class QNNModelWrapper(QNNContext):
                 arr = _convert_layout(arr, src_layout, dst_layout)
             final_outs.append(arr)
             logger.info(f"[QNN][Output:{n}] {_tensor_brief(arr)}")
+
         return final_outs
 
 
-# -------------------- ORT-like stubs --------------------
+# -------------------- SessionOptions --------------------
 class SessionOptions:
     def __init__(self):
-        self.log_severity_level = 2
+        self.log_severity_level = 0
         self.log_verbosity_level = 0
         self.enable_profiling = False
         self.optimized_model_filepath = ""
@@ -608,6 +669,7 @@ class SessionOptions:
         self.qnn_profiling_level = ProfilingLevel.BASIC if enable else ProfilingLevel.OFF
 
 
+# -------------------- InferenceSession (ORT-like) --------------------
 class InferenceSession:
     _qnn_initialized = False
     _last_config_key: Optional[tuple] = None
@@ -618,13 +680,30 @@ class InferenceSession:
         self.sess_options = sess_options
         self.model_path = model_path
         self._perf_profile = _env("QAI_QNN_PERF_PROFILE", "BURST").upper()
+        self._auto_fill_missing = _env_bool("QAI_AUTO_FILL_MISSING", "0")
 
-        key = (sess_options.qnn_libs_dir, str(sess_options.qnn_runtime), str(sess_options.qnn_profiling_level), sess_options.log_severity_level)
+        key = (
+            sess_options.qnn_libs_dir,
+            str(sess_options.qnn_runtime),
+            str(sess_options.qnn_profiling_level),
+            sess_options.log_severity_level,
+        )
         if (not InferenceSession._qnn_initialized) or (InferenceSession._last_config_key != key):
-            log_level_map = {0: LogLevel.ERROR, 1: LogLevel.WARN, 2: LogLevel.WARN, 3: LogLevel.INFO, 4: LogLevel.DEBUG}
-            log_level = log_level_map.get(sess_options.log_severity_level, LogLevel.WARN)
+            log_level_map = {
+                0: LogLevel.ERROR,
+                1: LogLevel.WARN,
+                2: LogLevel.WARN,
+                3: LogLevel.INFO,
+                4: LogLevel.DEBUG,
+            }
+            log_level = log_level_map.get(sess_options.log_severity_level, LogLevel.ERROR)
             _ensure_path_contains(sess_options.qnn_libs_dir)
-            QNNConfig.Config(sess_options.qnn_libs_dir, sess_options.qnn_runtime, log_level, sess_options.qnn_profiling_level)
+            QNNConfig.Config(
+                sess_options.qnn_libs_dir,
+                sess_options.qnn_runtime,
+                log_level,
+                sess_options.qnn_profiling_level,
+            )
             InferenceSession._qnn_initialized = True
             InferenceSession._last_config_key = key
             logger.info("QNN environment initialized")
@@ -632,32 +711,178 @@ class InferenceSession:
         runtime_tag = "CPU" if sess_options.qnn_runtime == Runtime.CPU else "HTP"
         model_name = os.path.splitext(os.path.basename(model_path))[0]
         self._model = QNNModelWrapper(model_name, model_path, runtime_tag=runtime_tag)
-
         self._input_names = self._model.getInputName()
         self._output_names = self._model.getOutputName()
+
         logger.info(f"Loaded model (user arg): {model_path}")
         logger.info(f"Loaded model (resolved): {getattr(self._model, 'model_file_path', '')}")
         logger.info(f"Input names: {self._input_names}")
         logger.info(f"Output names: {self._output_names}")
 
+    # ---- expected helpers ----
+    def _get_expected_shape_by_name(self, name: str):
+        try:
+            shapes = self._model.getInputShapes()
+            for n, s in zip(self._input_names, shapes):
+                if n == name:
+                    return s
+        except Exception:
+            pass
+        return None
+
+    def _get_expected_dtype_by_name(self, name: str):
+        try:
+            dtypes = self._model.getInputDataType()
+            for n, dt in zip(self._input_names, dtypes):
+                if n == name:
+                    s = str(dt).lower()
+                    if "int32" in s:
+                        return np.int32
+                    if "int64" in s:
+                        return np.int64
+                    if "float16" in s:
+                        return np.float16
+                    if "float32" in s or "float" in s:
+                        return np.float32
+                    if "bool" in s:
+                        return np.bool_
+        except Exception:
+            pass
+        return None
+
+    def _shape_to_int_list(self, s):
+        if not isinstance(s, (list, tuple)):
+            return None
+        out = []
+        for v in s:
+            try:
+                out.append(int(v))
+            except Exception:
+                out.append(-1)
+        return out
+
+    def _normalize_scalar_1x1(self, arr: Any) -> np.ndarray:
+        a = np.asarray(arr)
+        if a.ndim == 0:
+            a = a.reshape((1, 1))
+        elif a.ndim == 1 and a.shape == (1,):
+            a = a.reshape((1, 1))
+        elif a.ndim == 2 and a.shape == (1, 1):
+            pass
+        else:
+            return np.ascontiguousarray(a)
+        return np.ascontiguousarray(a)
+
+    def _apply_generic_aliases(self, input_feed: Dict[str, np.ndarray]) -> None:
+        alias_map: Dict[str, List[str]] = {
+            # audio
+            "audio": ["mel", "input", "waveform"],
+            "mel": ["audio", "mel_input"],
+            # token/step (common transformer)
+            "x": ["tokens", "token", "input_ids", "ids"],
+            "index": ["offset", "step", "pos", "position", "position_id", "position_ids"],
+            # cache common variants
+            "k_cache_cross": ["n_layer_cross_k", "cross_k", "k_cross", "encoder_k_cache", "k_cache_encoder"],
+            "v_cache_cross": ["n_layer_cross_v", "cross_v", "v_cross", "encoder_v_cache", "v_cache_encoder"],
+            "k_cache_self": ["in_n_layer_self_k_cache", "self_k", "k_self", "k_cache_in", "k_cache_self_in"],
+            "v_cache_self": ["in_n_layer_self_v_cache", "self_v", "v_self", "v_cache_in", "v_cache_self_in"],
+        }
+        for expected, aliases in alias_map.items():
+            if expected in self._input_names and expected not in input_feed:
+                for a in aliases:
+                    if a in input_feed:
+                        input_feed[expected] = input_feed[a]
+                        logger.info(f"[QNN] Input alias applied: '{a}' -> '{expected}'")
+                        break
+
+    def _pack_k_cache_headsplit(self, arr, exp_shape):
+        a = np.asarray(arr)
+        exp = self._shape_to_int_list(exp_shape)
+        if exp and a.ndim == 4 and len(exp) == 4:
+            H, D = exp[1], exp[2]
+            if H > 0 and D > 0 and a.shape[-1] == H * D:
+                if a.shape[1] == 1:
+                    a = a[:, 0, :, :]
+                a = a.reshape(a.shape[0], a.shape[1], H, D)
+                a = np.transpose(a, (0, 2, 3, 1))
+                return np.ascontiguousarray(a.astype(np.float32, copy=False))
+        return np.ascontiguousarray(a.astype(np.float32, copy=False))
+
+    def _pack_v_cache_headsplit(self, arr, exp_shape):
+        a = np.asarray(arr)
+        exp = self._shape_to_int_list(exp_shape)
+        if exp and a.ndim == 4 and len(exp) == 4:
+            H, D = exp[1], exp[3]
+            if H > 0 and D > 0 and a.shape[-1] == H * D:
+                if a.shape[1] == 1:
+                    a = a[:, 0, :, :]
+                a = a.reshape(a.shape[0], a.shape[1], H, D)
+                a = np.transpose(a, (0, 2, 1, 3))
+                return np.ascontiguousarray(a.astype(np.float32, copy=False))
+        return np.ascontiguousarray(a.astype(np.float32, copy=False))
+
     def run(self, output_names: Optional[List[str]], input_feed: Dict[str, np.ndarray], run_options: Optional[Any] = None) -> List[np.ndarray]:
         cfg = getattr(self._model, "io_config", {}) or {}
         per_in = {i.get("name"): i for i in (cfg.get("inputs") or []) if isinstance(i, dict) and i.get("name")}
 
+        expected_names = list(self._input_names)
+        kv_schema_required = {"k_cache_self", "v_cache_self", "k_cache_cross", "v_cache_cross"}
+        is_kv_cache_decoder = kv_schema_required.issubset(set(expected_names))
+
+        if is_kv_cache_decoder:
+            self._apply_generic_aliases(input_feed)
+
+            if "x" in input_feed:
+                input_feed["x"] = self._normalize_scalar_1x1(input_feed["x"])
+            if "index" in input_feed:
+                input_feed["index"] = self._normalize_scalar_1x1(input_feed["index"])
+
+            for name in ("x", "index"):
+                if name in input_feed:
+                    dt = self._get_expected_dtype_by_name(name)
+                    if dt is not None:
+                        arr = np.asarray(input_feed[name])
+                        if arr.dtype != dt:
+                            input_feed[name] = arr.astype(dt, copy=False)
+
+            for k in ("k_cache_cross", "k_cache_self"):
+                if k in input_feed:
+                    input_feed[k] = self._pack_k_cache_headsplit(input_feed[k], self._get_expected_shape_by_name(k))
+            for v in ("v_cache_cross", "v_cache_self"):
+                if v in input_feed:
+                    input_feed[v] = self._pack_v_cache_headsplit(input_feed[v], self._get_expected_shape_by_name(v))
+
+            for name in expected_names:
+                if name not in input_feed:
+                    item = per_in.get(name, {})
+                    if bool(item.get("optional", False)):
+                        logger.info(f"[QNN] Optional input '{name}' not provided; skipping.")
+                        continue
+                    if not self._auto_fill_missing:
+                        raise ValueError(
+                            f"Missing required input: {name}. Provide it from script, "
+                            "or set QAI_AUTO_FILL_MISSING=1 to allow zero-fill (not recommended)."
+                        )
+                    if name in ("x", "index"):
+                        dt = self._get_expected_dtype_by_name(name) or np.int32
+                        input_feed[name] = np.zeros((1, 1), dtype=dt)
+                    elif name in ("k_cache_cross", "v_cache_cross", "k_cache_self", "v_cache_self"):
+                        input_feed[name] = np.zeros((1, 1, 1, 1), dtype=np.float32)
+
+        # apply aliases for non-kv models too (mel->audio, etc.)
+        self._apply_generic_aliases(input_feed)
+
         provided_names: List[str] = []
         inputs: List[np.ndarray] = []
-
         for n in self._input_names:
             if n in input_feed:
                 provided_names.append(n)
                 inputs.append(input_feed[n])
                 continue
-
             item = per_in.get(n, {})
             if bool(item.get("optional", False)):
                 logger.info(f"[QNN] Optional input '{n}' not provided; skipping.")
                 continue
-
             raise ValueError(f"Missing input: {n}. Expected: {self._input_names}")
 
         if self._perf_profile == "BURST":
@@ -683,7 +908,6 @@ class InferenceSession:
             dtypes = self._model.getInputDataType()
         except Exception:
             pass
-
         infos: List[TensorInfo] = []
         for i, n in enumerate(self._input_names):
             s = _as_list_of_ints(shapes[i]) if shapes and i < len(shapes) else None
@@ -699,7 +923,6 @@ class InferenceSession:
             dtypes = self._model.getOutputDataType()
         except Exception:
             pass
-
         infos: List[TensorInfo] = []
         for i, n in enumerate(self._output_names):
             s = _as_list_of_ints(shapes[i]) if shapes and i < len(shapes) else None
@@ -718,6 +941,7 @@ class InferenceSession:
             del self._model
 
 
+# -------------------- module-level helpers --------------------
 def get_available_providers() -> List[str]:
     return ["QNNExecutionProvider", "CPUExecutionProvider"]
 
@@ -726,11 +950,17 @@ def get_device() -> str:
     return "QNN"
 
 
-def run_inference(model_path: str, input_data: Union[np.ndarray, Dict[str, np.ndarray]], qnn_libs_dir: str = "", runtime: str = "HTP") -> List[np.ndarray]:
+def run_inference(
+    model_path: str,
+    input_data: Union[np.ndarray, Dict[str, np.ndarray]],
+    qnn_libs_dir: str = "",
+    runtime: str = "HTP",
+) -> List[np.ndarray]:
     so = SessionOptions()
     so.set_qnn_runtime(runtime)
     if qnn_libs_dir:
         so.set_qnn_libs_dir(qnn_libs_dir)
+
     sess = InferenceSession(model_path, so)
     if isinstance(input_data, np.ndarray):
         names = sess.get_input_names()
