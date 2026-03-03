@@ -29,11 +29,12 @@ public:
         json::json_pointer jp_;
         enum CheckType
         {
+            kBool,
             kString,
             kArrayString
         } check_type_;
         bool optional_{};
-        bool is_forcast_dir_{false};
+        bool extra_{false};  // for string is is_forcast_dir, for bool valye is true or false
     };
 
     explicit ConfigFixer(const IModelConfig &model_config) : model_config_{model_config} {}
@@ -60,6 +61,7 @@ inline json ConfigFixer::Execute()
             {"extensions", json::json_pointer("/dialog/engine/backend/extensions"), FixedInfo::kString, true},
             {"ctx-bins", json::json_pointer("/dialog/engine/model/binary/ctx-bins"), FixedInfo::kArrayString, false},
             {"forecast", json::json_pointer("/dialog/ssd-q1/forecast-prefix-name"), FixedInfo::kArrayString, true, true},
+            {"poll", json::json_pointer("/dialog/engine/backend/QnnHtp/poll"),FixedInfo::kBool, true, false}
     };
 
 /* @formatter:on */
@@ -97,7 +99,7 @@ inline bool ConfigFixer::FixedPath(json &j, ConfigFixer::FixedInfo &info)
                                 goto done;
                             }
 
-                            if (info.is_forcast_dir_)
+                            if (info.extra_)
                             {
                                 file_path = model_config_.get_model_path();
                                 rs = true;
@@ -145,6 +147,9 @@ inline bool ConfigFixer::FixedPath(json &j, ConfigFixer::FixedInfo &info)
 
     switch (info.check_type_)
     {
+        case FixedInfo::kBool:
+            j.at(info.jp_) = info.extra_;
+            break;
         case FixedInfo::kString:
             if (get_fixed_path(j.at(info.jp_)))
             {

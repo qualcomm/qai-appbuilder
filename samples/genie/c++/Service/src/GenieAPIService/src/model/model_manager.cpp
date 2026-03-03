@@ -164,7 +164,7 @@ public:
                 {{QNNEmbeddingType::QWEN2_5_OMINI}, [model_path]() { return Qwen2_5_OMINI_Verifier(model_path).CreateIfVerified(); }},
         };
 
-        QNNEmbedding embedding{};
+        QNNEmbedding embedding;
         for (const auto &check: checkers)
         {
             My_Log{} << "try to check if qnn embedding is: "

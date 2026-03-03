@@ -21,10 +21,7 @@ ChatRequestHandler::ChatRequestHandler(GenieService *srv) :
         input_builder_{new ModelInputBuilder(*chatHistory, model_manager)},
         srv_{srv} {}
 
-ChatRequestHandler::~ChatRequestHandler()
-{
-    delete input_builder_;
-}
+ChatRequestHandler::~ChatRequestHandler() { delete input_builder_; }
 
 void ChatRequestHandler::FetchModelList(const httplib::Request &req, httplib::Response &res)
 {

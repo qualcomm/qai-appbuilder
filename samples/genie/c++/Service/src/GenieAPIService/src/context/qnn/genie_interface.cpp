@@ -17,8 +17,6 @@
 #include "qwen2_5/qwen_2_5.h"
 #include "qwen2_5_omini/qwen_2_5_omini.h"
 
-#define GENIE_BUILDER_DEBUG 1
-
 IEmbedding::IEmbedding(GenieContext *context) :
         QInterface(context),
         qnn_embedding_info_{context->model_config_.get_qnn_embedding()} {}
@@ -161,35 +159,35 @@ IEmbedding &QInterfaceImpl::IEmbedding::Decode(std::string &encode_buf, std::vec
     return *this;
 }
 
-IEmbedding &IEmbedding::BuildInferredBuffer(const QNNEmbedding::InferResource &infer_resource,
+IEmbedding &IEmbedding::BuildInferredBuffer(const QNNEmbedding::InferResource *infer_resource,
                                             std::vector<float> &in_buf,
                                             std::vector<uint8_t> &inferred_buf)
 {
     static std::string perfProfile = "burst";
-    auto &app_builder = infer_resource.app_builder_;
+    auto app_builder = infer_resource->app_builder_;
     auto mode_type = qnn_embedding_info_.model_types_;
     std::vector<uint8_t *> inputBuffers;
     int offset;
     if (mode_type & ModelType::Audio)
     {
-        inputBuffers.resize(infer_resource.bin_stacks_.size());
+        inputBuffers.resize(infer_resource->bin_stacks_.size());
         offset = 0;
     }
     else
     {
         offset = 1;
-        inputBuffers.resize(infer_resource.bin_stacks_.size() + 1);
+        inputBuffers.resize(infer_resource->bin_stacks_.size() + 1);
         inputBuffers[0] = reinterpret_cast<uint8_t *>(in_buf.data());
     }
 
-    for (auto i = 0; i < infer_resource.bin_stacks_.size(); ++i)
+    for (auto i = 0; i < infer_resource->bin_stacks_.size(); ++i)
     {
-        inputBuffers[i + offset] = const_cast<uint8_t *>(infer_resource.bin_stacks_[i].data());
+        inputBuffers[i + offset] = const_cast<uint8_t *>(infer_resource->bin_stacks_[i].data());
     }
 
     std::vector<uint8_t *> outputBuffers;
     std::vector<size_t> outputSize;
-    if (!app_builder->ModelInference(infer_resource.tag_,
+    if (!app_builder->ModelInference(infer_resource->tag_,
                                      inputBuffers,
                                      outputBuffers,
                                      outputSize,
@@ -220,6 +218,7 @@ IEmbedding &QInterfaceImpl::IAudioEmbedding::CustomBuild(ModelInput &model_input
 {
     dynamic_cast<IAudioEmbedding &>(Decode(model_input.audio_, audio_buf_))
             .BuildAudioSamples()
+            .PaddingAudioPrompt()
             .BuildInferredBuffer(infer_resource_,
                                  audio_sample_buf_,
                                  audio_inferred_buf_)

@@ -25,18 +25,17 @@ IVisionEmbedding &QInterface::Qwen2_5::BuildImgPixel()
 IVisionEmbedding & QInterface::Qwen2_5::MergeEmbedding()
 {
     static const int32_t rows{151655};
-    static const size_t cols{2048};
     const unsigned long token_count = prompt_token_size_;
     FloatBufferView tmp_raw_fbuf{qnn_embedding_info_.embedded_raw_buf_};
 
     std::vector<float> embedded_raw_fbuf;
-    embedded_raw_fbuf.resize(token_count * cols);
+    embedded_raw_fbuf.resize(token_count * cols_);
     float *dest_ptr;
     for (uint32_t i = 0; i < prompt_token_size_; ++i)
     {
-        dest_ptr = &embedded_raw_fbuf[i * cols];
-        float *src_ptr = &tmp_raw_fbuf.pointer_[prompt_token_[i] * cols];
-        std::memcpy(dest_ptr, src_ptr, cols * sizeof(float));
+        dest_ptr = &embedded_raw_fbuf[i * cols_];
+        float *src_ptr = &tmp_raw_fbuf.pointer_[prompt_token_[i] * cols_];
+        std::memcpy(dest_ptr, src_ptr, cols_ * sizeof(float));
     }
 
     FloatBufferView img_embedding_fbuf{img_inferred_buf_};

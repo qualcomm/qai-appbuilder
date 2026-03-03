@@ -11,6 +11,8 @@
 
 #include "genie.h"
 
+#define GENIE_BUILDER_DEBUG 1
+
 struct GenieContext::QInterfaceImpl
 {
     QInterfaceImpl(GenieContext *context)
@@ -138,10 +140,17 @@ struct GenieContext::QInterfaceImpl
         std::vector<float> embedded_bin_;
         const QNNEmbedding &qnn_embedding_info_;
         std::string prompt_;
+        int cols_{};
+
+        const QNNEmbedding::InferResource *get_infer_resource(ModelType mode_type)
+        {
+            auto it = qnn_embedding_info_.infer_resources_.find(mode_type);
+            return (it != qnn_embedding_info_.infer_resources_.end()) ? &(it->second) : nullptr;
+        }
 
         IEmbedding &Decode(std::string &encode_buf, std::vector<uint8_t> &decoded_buf);
 
-        IEmbedding &BuildInferredBuffer(const QNNEmbedding::InferResource &infer_resource,
+        IEmbedding &BuildInferredBuffer(const QNNEmbedding::InferResource *infer_resource,
                                         std::vector<float> &in_buf,
                                         std::vector<uint8_t> &inferred_buf);
 
@@ -161,7 +170,7 @@ struct GenieContext::QInterfaceImpl
             return *this;
         };
 
-        virtual IEmbedding & MergeEmbedding() = 0;
+        virtual IEmbedding &MergeEmbedding() = 0;
 
         struct FloatBufferView
         {
@@ -197,7 +206,7 @@ struct GenieContext::QInterfaceImpl
     public:
         explicit IVisionEmbedding(GenieContext *context)
                 : IEmbedding(context),
-                  infer_resource_(qnn_embedding_info_.infer_resources_.at(ModelType{ModelType::Vision})) {};
+                  infer_resource_{get_infer_resource(ModelType{ModelType::Vision})} {}
 
         ~IVisionEmbedding() override = default;
 
@@ -221,15 +230,15 @@ struct GenieContext::QInterfaceImpl
         std::vector<uint8_t> img_buf_{};
         std::vector<float> img_pixel_buf_{};
         std::vector<uint8_t> img_inferred_buf_{};
-        const QNNEmbedding::InferResource &infer_resource_;
+        const QNNEmbedding::InferResource *infer_resource_;
     };
 
     class IAudioEmbedding : virtual public IEmbedding
     {
     public:
-        explicit IAudioEmbedding(GenieContext *context) :
-                IEmbedding(context),
-                infer_resource_(qnn_embedding_info_.infer_resources_.at(ModelType{ModelType::Audio})) {}
+        explicit IAudioEmbedding(GenieContext *context)
+                : IEmbedding(context),
+                  infer_resource_{get_infer_resource(ModelType{ModelType::Audio})} {}
 
         ~IAudioEmbedding() override = default;
 
@@ -240,22 +249,27 @@ struct GenieContext::QInterfaceImpl
             audio_buf_.clear();
             audio_sample_buf_.clear();
             audio_inferred_buf_.clear();
+            audio_length_ = 0;
             return *this;
         }
 
         virtual IAudioEmbedding &BuildAudioSamples() = 0;
 
+        IAudioEmbedding &PaddingAudioPrompt();
+
         std::string kPromptTemplate;
         std::vector<uint8_t> audio_buf_;
         std::vector<float> audio_sample_buf_;
         std::vector<uint8_t> audio_inferred_buf_;
-        const QNNEmbedding::InferResource &infer_resource_;
+        const QNNEmbedding::InferResource *infer_resource_;
+        int audio_length_{};
     };
 
-    class IMultiModal : virtual public IAudioEmbedding, public IVisionEmbedding
+    class IMultiModal : public IAudioEmbedding, public IVisionEmbedding
     {
     public:
-        explicit IMultiModal(GenieContext *context) : IAudioEmbedding(context), IVisionEmbedding(context) {}
+        explicit IMultiModal(GenieContext *context)
+                : IAudioEmbedding(context), IVisionEmbedding(context) {}
 
         IEmbedding &CustomBuild(ModelInput &model_input) final;
 

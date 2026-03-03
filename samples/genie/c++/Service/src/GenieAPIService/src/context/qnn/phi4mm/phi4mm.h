@@ -26,6 +26,7 @@ public:
         {
             endoftext10_list.append("<|endoftext10|>");
         }
+        endoftext10_list.back() = 0;
 
         std::string prompt_template(kPromptTemplate.size() + endoftext10_list.size(), 0);
         sprintf(prompt_template.data(), kPromptTemplate.c_str(), endoftext10_list.c_str(), "%s");
