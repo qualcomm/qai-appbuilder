@@ -7,7 +7,7 @@ import logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    force=True,
+    force=True,   
 )
 
 import os
@@ -152,7 +152,7 @@ if __name__ == "__main__":
     parser.add_argument("--model", default="Real-ESRGAN-x4plus.onnx", help="Path to model (.onnx or .bin)")
     parser.add_argument("--in_img", default="input.jpg", help="Input image path")
     parser.add_argument("--out_img", default="output_x4.png", help="Output image path")
-    parser.add_argument("--tile", type=int, default=512, help="Tile size")
+    parser.add_argument("--tile", type=int, default=128, help="Tile size")
     parser.add_argument("--scale", type=int, default=4, help="Upscale factor")
     args = parser.parse_args()
 

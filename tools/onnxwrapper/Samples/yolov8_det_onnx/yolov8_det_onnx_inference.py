@@ -4,11 +4,11 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
 
-from qai_appbuilder import onnxwrapper
 import onnxruntime as ort
 import numpy as np
 import cv2
 import time
+import argparse
 
 
 # ------------------------- basic utils -------------------------
@@ -260,49 +260,69 @@ def postprocess_output0_yolov8(out0, original_img, input_size=(640, 640),
 
 
 # ------------------------- main -------------------------
-def main():
-    model_path = "yolov8n.onnx"
-    image_path = "input.jpg"
-    output_path = "output_onnx.jpg"
 
+
+def main(model_path: str,
+         image_path: str,
+         output_path: str,
+         input_size: int = 640,
+         conf_threshold: float = 0.25,
+         iou_threshold: float = 0.45,
+         debug: bool = True):
+    """Run YOLOv8 ONNX inference.
+
+    Parameters
+    ----------
+    model_path: path to .onnx model
+    image_path: path to input image
+    output_path: path to save visualization
+    input_size: resize image to (input_size, input_size)
+    conf_threshold: confidence threshold
+    iou_threshold: NMS IoU threshold
+    debug: print output names/shapes and ranges
+    """
     session = ort.InferenceSession(model_path)
 
     # 1) preprocess
-    input_data, original_img, pre_time = preprocess(image_path)
+    input_data, original_img, pre_time = preprocess(image_path, input_size=(input_size, input_size))
 
     # 2) inference (all outputs)
-    out_map, inf_time = inference_all_outputs(session, input_data, debug=True)
+    out_map, inf_time = inference_all_outputs(session, input_data, debug=debug)
 
     # 3) dispatch postprocess depending on outputs
     post_t0 = time.time()
     if all(k in out_map for k in ("boxes", "scores", "class_idx")):
         # QNN wrapper style: 3 output tensors (boxes/scores/class_idx).
         result_img, num_dets, _ = postprocess_qnn_3outputs(
-            out_map, original_img,
-            input_size=(640, 640),
-            conf_threshold=0.25,
-            iou_threshold=0.45,
-            debug=True
+            out_map,
+            original_img,
+            input_size=(input_size, input_size),
+            conf_threshold=conf_threshold,
+            iou_threshold=iou_threshold,
+            debug=debug,
         )
     elif "output0" in out_map and out_map["output0"].shape == (1, 84, 8400):
         # ORT standard: single output0 (1,84,8400).
         result_img, num_dets, _ = postprocess_output0_yolov8(
-            out_map["output0"], original_img,
-            input_size=(640, 640),
-            conf_threshold=0.25,
-            iou_threshold=0.45,
-            debug=True
+            out_map["output0"],
+            original_img,
+            input_size=(input_size, input_size),
+            conf_threshold=conf_threshold,
+            iou_threshold=iou_threshold,
+            debug=debug,
         )
     else:
-        raise ValueError(f"Unknown outputs: {list(out_map.keys())} with shapes {[out_map[k].shape for k in out_map]}")
+        raise ValueError(
+            f"Unknown outputs: {list(out_map.keys())} with shapes {[out_map[k].shape for k in out_map]}"
+        )
 
     post_time = (time.time() - post_t0) * 1000
 
     # Save
     cv2.imwrite(output_path, result_img)
-    print(f"Results saved to {output_path}")
 
-    print(f"\n--- Timing Results ---")
+    print(f"Results saved to {output_path}")
+    print(f"--- Timing Results ---")
     print(f"Preprocess: {pre_time:.2f} ms")
     print(f"Inference: {inf_time:.2f} ms")
     print(f"Postprocess: {post_time:.2f} ms")
@@ -312,4 +332,29 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="YOLOv8 ONNX inference")
+    parser.add_argument("--model", dest="model_path", default="yolov8n.onnx",
+                        help="Path to ONNX model (default: yolov8n.onnx)")
+    parser.add_argument("--input", dest="image_path", default="input.jpg",
+                        help="Path to input image (default: input.jpg)")
+    parser.add_argument("--output", dest="output_path", default="output.jpg",
+                        help="Path to output image (default: output.jpg)")
+    parser.add_argument("--imgsz", dest="input_size", type=int, default=640,
+                        help="Input size for resize, uses square (default: 640)")
+    parser.add_argument("--conf", dest="conf_threshold", type=float, default=0.25,
+                        help="Confidence threshold (default: 0.25)")
+    parser.add_argument("--iou", dest="iou_threshold", type=float, default=0.45,
+                        help="NMS IoU threshold (default: 0.45)")
+    parser.add_argument("--no-debug", dest="debug", action="store_false",
+                        help="Disable debug prints")
+
+    args = parser.parse_args()
+    main(
+        model_path=args.model_path,
+        image_path=args.image_path,
+        output_path=args.output_path,
+        input_size=args.input_size,
+        conf_threshold=args.conf_threshold,
+        iou_threshold=args.iou_threshold,
+        debug=args.debug,
+    )

@@ -5,4 +5,20 @@ This is onnx sample code for using QAI AppBuilder to load facemap_3dmm QNN model
 
 ## Run the sample code
 
-python onnxexec.py facemap_3dmm_onnx_infer.py --model models\facemap_3dmm.bin --image input.jpg
+```
+If you want to run the sample code with onnx models.
+python prepare_facemap_3dmm_onnx_models.py
+python facemap_3dmm_onnx_infer.py --model models-onnx\facemap_3dmm-onnx-float\facemap_3dmm.onnx --image input.jpg
+
+If you want to run the sample code with qnn models.
+python prepare_facemap_3dmm_qnn_models.py
+python onnxexec.py facemap_3dmm_onnx_infer.py --model models-qnn\facemap_3dmm.bin --image input.jpg
+
+You also can add the following code at beginning of facemap_3dmm_onnx_infer.py.
+from qai_appbuilder import onnxwrapper
+Then run the following command.
+python facemap_3dmm_onnx_infer.py --model models-qnn\facemap_3dmm.bin --image input.jpg
+
+```
+## Output
+You can see output.jpg in out folder.

@@ -244,6 +244,90 @@ def _tensor_brief(a: Any) -> str:
     return f"shape={arr.shape}, dtype={arr.dtype}"
 
 
+def _is_normalized_01(arr: np.ndarray) -> bool:
+    """Heuristic: float tensor values look like normalized image in [0,1]."""
+    try:
+        a = np.asarray(arr)
+        if a.dtype.kind != 'f':
+            return False
+        mx = float(np.nanmax(a))
+        mn = float(np.nanmin(a))
+        # allow tiny negatives from preprocessing
+        return mn >= -1e-3 and mx <= 1.5
+    except Exception:
+        return False
+
+
+def _shape_eq(shape, ref) -> bool:
+    try:
+        if shape is None:
+            return False
+        if not isinstance(shape, (list, tuple)):
+            return False
+        if len(shape) != len(ref):
+            return False
+        for a, b in zip(shape, ref):
+            try:
+                if int(a) != int(b):
+                    return False
+            except Exception:
+                return False
+        return True
+    except Exception:
+        return False
+
+
+def _model_looks_like_param_regression_265(out_shapes: Optional[List[Any]]) -> bool:
+    """Heuristic: model has an output with last dim == 265 (e.g., 3DMM parameters)."""
+    try:
+        if not out_shapes:
+            return False
+        for s in out_shapes:
+            if isinstance(s, (list, tuple)) and len(s) >= 1:
+                try:
+                    if int(s[-1]) == 265:
+                        return True
+                except Exception:
+                    continue
+        return False
+    except Exception:
+        return False
+
+
+def _auto_scale_01_to_255_needed(item: dict, exp_in_shape: Any, exp_out_shapes: Optional[List[Any]], arr: np.ndarray) -> bool:
+    """Automatic, conservative scaling for QNN compiled models.
+
+    Goal: when a script feeds normalized [0,1] float image tensor but the compiled
+    QNN model expects pixel-domain [0,255], scale by 255.
+
+    We avoid model-name checks. Instead we only trigger when:
+      - No explicit scale/offset is configured in IO config for this input, AND
+      - The input looks like normalized [0,1], AND
+      - The model's outputs look like a 265-dim parameter regression (rare; minimizes impact).
+
+    This keeps the behavior automatic for the 3DMM-style models while not affecting
+    typical classifiers/detectors.
+    """
+    if item and (('scale' in item) or ('offset' in item)):
+        return False
+    if not _is_normalized_01(arr):
+        return False
+    if not _model_looks_like_param_regression_265(exp_out_shapes):
+        return False
+
+    # If expected input shape is known, require the common image shape (1,3,128,128)
+    # or (1,128,128,3). Otherwise, fall back to current tensor shape.
+    if exp_in_shape is not None:
+        if _shape_eq(exp_in_shape, (1, 3, 128, 128)) or _shape_eq(exp_in_shape, (1, 128, 128, 3)):
+            return True
+        return False
+
+    a = np.asarray(arr)
+    if a.ndim == 4 and (a.shape == (1, 3, 128, 128) or a.shape == (1, 128, 128, 3)):
+        return True
+    return False
+
+
 def _ensure_rank(arr: np.ndarray, expected_rank: Optional[int], add_batch: bool = True) -> np.ndarray:
     if expected_rank is None:
         return arr
@@ -588,6 +672,15 @@ class QNNModelWrapper(QNNContext):
                     arr = arr.astype(np_dt, copy=False)
 
             arr = _ensure_rank(arr, exp_rank.get(n), add_batch=bool(item.get("add_batch", True)))
+            # Auto scale normalized [0,1] -> [0,255] for certain compiled models (no model-name checks)
+            exp_in_shape = None
+            try:
+                exp_in_shape = exp_shape_by_name.get(n)
+            except Exception:
+                exp_in_shape = None
+            if _auto_scale_01_to_255_needed(item, exp_in_shape, getattr(self, '_expected_output_shapes', None), arr):
+                arr = (np.asarray(arr) * np.float32(255.0)).astype(np.asarray(arr).dtype, copy=False)
+                logger.info(f"[QNN][Input:{n}] Auto-scaled input *255 (detected normalized [0,1])")
 
             dst_layout = _normalize_layout(item.get("layout")) or exp_layout.get(n)
             src_layout = _normalize_layout(item.get("src_layout"))

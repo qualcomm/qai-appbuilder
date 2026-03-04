@@ -102,7 +102,7 @@ def preprocess(image_path: str, fbox_path: Path):
     - read RGB with skimage.io.imread
     - load fbox [x0, x1, y0, y1]
     - crop and resize to 128x128
-    - float32, NCHW, shape (1,3,128,128)
+    - float32 in range [0,1], NCHW, shape (1,3,128,128)
     """
     img = io.imread(image_path)  # RGB
     fbox = np.loadtxt(fbox_path).astype(np.int32)
@@ -113,6 +113,8 @@ def preprocess(image_path: str, fbox_path: Path):
 
     crop = img[y0:y1+1, x0:x1+1]
     crop_128 = cv2.resize(crop, (128, 128), interpolation=cv2.INTER_LINEAR).astype(np.float32)
+    # NOTE: AI Hub facemap_3dmm ONNX expects input range float [0,1] (see model card implementation).
+    crop_128 = crop_128 / 255.0
 
     # HWC -> CHW, add batch
     inp = np.transpose(crop_128, (2, 0, 1))[None, ...].astype(np.float32)
