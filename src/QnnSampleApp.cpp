@@ -1132,6 +1132,26 @@ sample_app::StatusCode sample_app::QnnSampleApp::extractProfilingEvent(
   return StatusCode::SUCCESS;
 }
 
+uint64_t sample_app::QnnSampleApp::getProfilingEvent(uint32_t eventType) {
+  QnnProfile_EventData_t eventData;
+  const QnnProfile_EventId_t* profileEvents{nullptr};
+  uint32_t numEvents{0};
+  if (QNN_PROFILE_NO_ERROR != m_qnnFunctionPointers.qnnInterface.profileGetEvents(
+                                  m_profileBackendHandle, &profileEvents, &numEvents)) {
+    QNN_ERROR("Failure in profile get events.");
+    return 0;
+  }
+  for (size_t event = 0; event < numEvents; event++) {
+    if (QNN_PROFILE_NO_ERROR ==
+      m_qnnFunctionPointers.qnnInterface.profileGetEventData(*(profileEvents + event), &eventData)) {
+      if (eventData.type == eventType) {
+        return eventData.value;
+      }
+    }
+  }
+  return 0;
+}
+
 sample_app::StatusCode sample_app::QnnSampleApp::verifyFailReturnStatus(Qnn_ErrorHandle_t errCode) {
   auto returnStatus = sample_app::StatusCode::FAILURE;
   switch (errCode) {

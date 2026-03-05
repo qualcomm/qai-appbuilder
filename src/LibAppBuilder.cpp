@@ -840,6 +840,14 @@ ModelInfo_t LibAppBuilder::getModelInfoExt(std::string model_name, std::string i
     return info;
 }
 
+uint64_t LibAppBuilder::getProfilingEvent(std::string model_name, uint32_t eventType){
+    uint64_t eventValue;
+    std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
+    eventValue = app->getProfilingEvent(eventType);
+    sg_model_map.insert(std::make_pair(model_name, std::move(app)));
+    return eventValue;
+}
+
 int main(int argc, char** argv) {
 
     return EXIT_SUCCESS;

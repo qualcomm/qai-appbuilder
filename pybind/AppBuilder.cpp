@@ -113,6 +113,10 @@ std::vector<std::string> QNNContext::getOutputName(const std::string& proc_name)
     return m_moduleInfo.outputName;
 };
 
+uint64_t QNNContext::getProfilingEvent(uint32_t eventType){
+    return g_LibAppBuilder.getProfilingEvent(m_model_name, eventType);
+}
+
 QNNContext::~QNNContext() {
     if (m_proc_name.empty())
         g_LibAppBuilder.ModelDestroy(m_model_name);
@@ -212,7 +216,8 @@ PYBIND11_MODULE(appbuilder, m) {
         .def("getOutputShapes", py::overload_cast<const std::string&>(&QNNContext::getOutputShapes))
         .def("getInputName", py::overload_cast<const std::string&>(&QNNContext::getInputName))
         .def("getOutputName", py::overload_cast<const std::string&>(&QNNContext::getOutputName))
-        .def("getGraphName", py::overload_cast<const std::string&>(&QNNContext::getGraphName));
+        .def("getGraphName", py::overload_cast<const std::string&>(&QNNContext::getGraphName))
+        .def("getProfilingEvent", py::overload_cast<uint32_t>(&QNNContext::getProfilingEvent));
 
     py::class_<LoraAdapter>(m, "LoraAdapter")
         .def(py::init<const std::string &, const std::vector<std::string> &>());

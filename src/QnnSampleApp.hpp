@@ -160,6 +160,7 @@ class QnnSampleApp {
   std::string getGraphName();
   std::vector<std::string> getInputName();
   std::vector<std::string> getOutputName();
+  uint64_t getProfilingEvent(uint32_t eventType);
   qnn_wrapper_api::GraphInfo_t **m_graphsInfo;
   uint32_t m_graphsCount;
 

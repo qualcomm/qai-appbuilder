@@ -200,6 +200,9 @@ class _QNNContextBase:
 
     def getOutputName(self, ):
         return self._call_ctx_getter("getOutputName")
+    
+    def getProfilingEvent(self, eventType):
+        return self.m_context.getProfilingEvent(eventType)
 
     def _inference_and_reshape(self, input, infer_fn):
         input = reshape_input(input)

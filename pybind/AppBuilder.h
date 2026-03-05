@@ -464,6 +464,7 @@ public:
     std::string getGraphName(const std::string& proc_name);
     std::vector<std::string>  getInputName(const std::string& proc_name);
     std::vector<std::string>  getOutputName(const std::string& proc_name);
+    uint64_t getProfilingEvent(uint32_t eventType);
 
     typedef struct ModelInfo {
         std::vector<std::vector<size_t>> inputShapes;

@@ -101,6 +101,7 @@ public:
     ModelInfo_t getModelInfo(std::string model_name, std::string input);
     ModelInfo_t getModelInfo(std::string model_name, std::string proc_name, std::string input);
     ModelInfo_t getModelInfoExt(std::string model_name, std::string input);  
+    uint64_t getProfilingEvent(std::string model_name, uint32_t eventType);
 
     std::vector<std::vector<size_t>> m_inputShapes;
     std::vector<std::string> m_inputDataType;
