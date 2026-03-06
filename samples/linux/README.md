@@ -10,52 +10,59 @@ This guide demonstrates how to develop AI applications on Qualcomm Dragonwing™
 
 Before you begin, ensure you have the following:
 
-- Qualcomm Dragonwing™ IQ9075 or QCS6490 development board
-- Ubuntu 24.04 installed and configured
-- Python 3.8 or higher
-- Git installed on your system
+- **Hardware:** Qualcomm Dragonwing™ IQ9075 or QCS6490 development board
+- **OS:** Ubuntu 24.04 installed and configured
+- **Python:** Python 3.8 or higher (Python 3.12 recommended)
+- **Tools:** Git and sudo access
+- **Network:** Internet connection for downloading dependencies
 
-Clone the repository with submodules:
+**Clone the repository with submodules:**
+
 ```bash
 git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
+cd ai-engine-direct-helper
 ```
 
 ### Download QNN SDK
 
-Download the Qualcomm® AI Runtime (QAIRT) SDK on device, which includes the required QNN runtime libraries, from the following link:
+Download the Qualcomm® AI Runtime (QAIRT) SDK on your device. This SDK includes the required QNN runtime libraries for AI model execution.
 
-[QAIRT v2.40.0.251030](https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.40.0.251030/v2.40.0.251030.zip)
+**Download Link:** [QAIRT v2.40.0.251030](https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.40.0.251030/v2.40.0.251030.zip)
 
 ```bash
-# Download QAIRT SDK package
+# Download QAIRT SDK package 
 wget https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.40.0.251030/v2.40.0.251030.zip
 
 # Extract the runtime libraries
 unzip v2.40.0.251030.zip
+
+# Verify extraction
+ls v2.40.0.251030/
 ```
 
 
 ### Set Environment Variables
 
-On the **IQ9075** and **QCS6490** device side, configure the following environment variables (replace `<path_to_qnn_sdk>` with your actual QNN SDK installation path):
+Configure the required environment variables on your device. Replace `<path_to_v2.40.0.251030>` with the actual path to your extracted QNN SDK directory.
 
 **Common variables for both platforms:**
+
 ```bash
-export QNN_SDK_ROOT=<path_to_v2.39.0.250926>
+export QNN_SDK_ROOT=<path_to_v2.40.0.251030>
 export LD_LIBRARY_PATH=$QNN_SDK_ROOT/lib/aarch64-oe-linux-gcc11.2:$LD_LIBRARY_PATH
 ```
 
 **Platform-specific configuration:**
 
-- **For QCS6490 devices:**
-```bash
-export ADSP_LIBRARY_PATH=$QNN_SDK_ROOT/lib/hexagon-v68/unsigned
-```
+- **For QCS6490 devices (Hexagon v68):**
+  ```bash
+  export ADSP_LIBRARY_PATH=$QNN_SDK_ROOT/lib/hexagon-v68/unsigned
+  ```
 
-- **For IQ9075 devices:**
-```bash
-export ADSP_LIBRARY_PATH=$QNN_SDK_ROOT/lib/hexagon-v73/unsigned
-```
+- **For IQ9075 devices (Hexagon v73):**
+  ```bash
+  export ADSP_LIBRARY_PATH=$QNN_SDK_ROOT/lib/hexagon-v73/unsigned
+  ```
 
 ### Run Python API Samples
 
@@ -65,32 +72,41 @@ QAI AppBuilder provides multiple examples of AI applications developed using Pyt
 #### 1. Install Python Dependencies
 
 Upgrade build tooling and install required Python packages:
-```bash
-sudo apt install cmake build-essential python3.12-dev
 
-pip install requests==2.32.3 py3-wget==1.0.12 tqdm==4.67.1 importlib-metadata==8.5.0 qai-hub==0.30.0 opencv-python==4.10.0.82 gradio
+```bash
+# Install system dependencies
+sudo apt update
+sudo apt install -y cmake build-essential python3.12-dev
+
+# Install core Python packages
+pip install requests==2.32.3 \
+            py3-wget==1.0.12 \
+            tqdm==4.67.1 \
+            importlib-metadata==8.5.0 \
+            qai-hub==0.30.0 \
+            opencv-python==4.10.0.82 \
+            gradio
 
 pip install transformers==4.45.0 torch==2.9.1
 pip install torchvision>=0.9.0
 pip install qwen-vl-utils
-
 ```
 
 #### 2. Build QAI AppBuilder Python and C/C++ Libraries
 
-From the project root directory, build the libraries:
-
-
+Build the QAI AppBuilder libraries from the project root directory. Choose the command based on your platform:
 
 **For QCS6490 (Hexagon v68):**
 ```bash
-python setup.py bdist_wheel --toolchains aarch64-oe-linux-gcc11.2 --hexagonarch 68 
+python setup.py bdist_wheel --toolchains aarch64-oe-linux-gcc11.2 --hexagonarch 68
 ```
 
 **For IQ9075 (Hexagon v73):**
 ```bash
-python setup.py bdist_wheel --toolchains aarch64-oe-linux-gcc11.2 --hexagonarch 73 
+python setup.py bdist_wheel --toolchains aarch64-oe-linux-gcc11.2 --hexagonarch 73
 ```
+
+> **Note:** The build process may take several minutes. The output wheel file will be created in the `dist/` directory.
 
 #### 3. Install QAI AppBuilder Wheel Package
 
@@ -102,13 +118,21 @@ python -m pip install dist/qai_appbuilder-*.whl
 
 > **Note:** The version number may vary based on your QNN SDK version.
 
-#### 4. Run Python Sample
+**Verify Installation:**
+```bash
+python -c "import qai_appbuilder; print('QAI AppBuilder installed successfully')"
+```
 
-Navigate to the samples directory:
+#### 4. Run Python Samples
+
+Navigate to the samples directory and set the required preload library:
 
 ```bash
+export LD_PRELOAD=/usr/lib/aarch64-linux-gnu/libtbb.so.12
 cd samples/linux/python
 ```
+
+**Available Samples:**
 
 The following table lists all available sample models with descriptions and execution commands:
 
@@ -136,8 +160,7 @@ The following table lists all available sample models with descriptions and exec
 | xlsr                   | XLSR super-resolution                       | `python xlsr/xlsr.py`                           |
 | yolov8_det             | YOLOv8 object detection                       | `python yolov8_det/yolov8_det.py`               |
 
-> **Note:**  
-> Ensure you are in the `samples/linux/python` directory before running any example.
+> **Note:** Ensure you are in the `samples/linux/python` directory before running any example. Each sample will automatically download its required model on first run.
 
 
 ### QAI AppBuilder C++ API Sample
@@ -187,6 +210,31 @@ libAppBuilder.ModelDestroy(model_name);
 ```
 
 
+### Vision Language Model Examples
+
+QAI AppBuilder provides examples for building Vision Language Model (VLM) applications that combine image and video understanding with natural language processing.
+
+#### Running VLM Examples
+
+Navigate to the VLM samples directory and run the demo:
+
+```bash
+cd samples/linux/python/qwen2_vl
+python demo_app.py <model_path>
+```
+
+**Parameters:**
+- `<model_path>`: Path to the directory containing the Qwen2-VL QNN model files
+
+**VLM Capabilities:**
+- Image/Video/Web camera input processing
+- Multimodal inference combining vision and language
+- Natural language output generation
+- Qwen2-VL-2B-Instruct model support
+
+**For detailed setup and usage instructions, see:** [Qwen2-VL Demo (Linux Python)](./python/qwen2_vl/README.md)
+
+
 ## Advanced Application Examples
 
 In addition to the computer vision samples above, QAI AppBuilder provides advanced examples for building production-ready AI applications.
@@ -201,38 +249,40 @@ In addition to the computer vision samples above, QAI AppBuilder provides advanc
 
 Build a chat application powered by large language models (LLMs) using OpenAI-compatible APIs.
 
-**Steps to run:**
+**Steps to Run:**
 
-1. Navigate to the launcher directory :
+1. **Navigate to the launcher directory:**
+   ```bash
+   cd tools/launcher_linux
+   ```
 
-```bash
-cd tools/launcher_linux
-```
+2. **Run the setup and launch scripts in sequence:**
+   ```bash
+   bash ./1.Install_QAI_Appbuilder.sh
+   bash ./2.Install_LLM_Models.sh
+   bash ./3.Start_WebUI.sh
+   ```
 
-2. Run the setup and launch scripts in sequence:
-```bash
-bash ./1.Install_QAI_Appbuilder.sh
-bash ./2.Install_LLM_Models.sh
-bash ./3.Start_WebUI.sh
-```
+3. **Access the WebUI:**
+   Open your browser and navigate to `http://localhost:7860` (default port)
 
 ### Advanced Example 2: LangFlow Low-Code Framework
 
 Deploy LangFlow, a visual low-code framework for building AI applications with drag-and-drop components.
 
-**Steps to run:**
+**Steps to Run:**
 
 1. **Start the LLM Service:**
-```bash
-cd tools/launcher_linux
-bash ./4.Start_GenieAPIService.sh
-```
+   ```bash
+   cd tools/launcher_linux
+   bash ./4.Start_GenieAPIService.sh
+   ```
 
 2. **Install and Launch LangFlow:**
-```bash
-bash ./5.Install_LangFlow.sh
-bash ./6.Start_LangFlow.sh
-```
+   ```bash
+   bash ./5.Install_LangFlow.sh
+   bash ./6.Start_LangFlow.sh
+   ```
 
 Once started, access the LangFlow web interface to design and deploy your AI workflows visually.
 
@@ -257,13 +307,14 @@ For issues, questions, or contributions:
 
 ### Common Issues and Solutions
 
-**Issue: undefined symbol: _ZN3tbb6detail2r114execution_slotEPKNS0_2d114execution_dataE**
--  fix this issue either remove the libtbb-dev or set LD_PRELOAD to libtbb
+**Issue: `undefined symbol: _ZN3tbb6detail2r114execution_slotEPKNS0_2d114execution_dataE`**
+
+This is a TBB (Threading Building Blocks) library conflict. Fix using one of these options:
+
 ```bash
-// option 1: remove libtbb-dev
+# Option 1: Remove conflicting libtbb-dev
 sudo apt remove libtbb-dev
-// option 2: set LD_PRELOAD
+
+# Option 2: Set LD_PRELOAD to use specific TBB version
 export LD_PRELOAD=/usr/lib/aarch64-linux-gnu/libtbb.so.12
 ```
-
-
