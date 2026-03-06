@@ -726,6 +726,26 @@ class QNNModelWrapper(QNNContext):
         return final_outs
 
 
+# -------------------- ORT enum shims --------------------
+class GraphOptimizationLevel:
+    """Compatibility shim for onnxruntime.GraphOptimizationLevel.
+    onnxruntime uses integer levels 0..3; our SessionOptions.graph_optimization_level
+    already stores an int, so exposing these constants makes existing scripts work.
+    """
+    ORT_DISABLE_ALL = 0
+    ORT_ENABLE_BASIC = 1
+    ORT_ENABLE_EXTENDED = 2
+    ORT_ENABLE_ALL = 3
+
+class ExecutionMode:
+    """Compatibility shim for onnxruntime.ExecutionMode."""
+    ORT_SEQUENTIAL = 0
+    ORT_PARALLEL = 1
+
+class SessionOptionsMode:
+    """Placeholder for any future mode enums; kept for forward compatibility."""
+    pass
+
 # -------------------- SessionOptions --------------------
 class SessionOptions:
     def __init__(self):
@@ -734,6 +754,8 @@ class SessionOptions:
         self.enable_profiling = False
         self.optimized_model_filepath = ""
         self.graph_optimization_level = 1
+        self.enable_mem_pattern = True
+        self.execution_mode = ExecutionMode.ORT_SEQUENTIAL
         self.qnn_runtime = Runtime.HTP
         self.qnn_libs_dir = ""
         self.qnn_profiling_level = ProfilingLevel.OFF
