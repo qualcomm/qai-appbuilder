@@ -161,6 +161,7 @@ The following table lists all available sample models with descriptions and exec
 | wideresnet50           | WideResNet50 image classification             | `python wideresnet50/wideresnet50.py`           |
 | xlsr                   | XLSR super-resolution                       | `python xlsr/xlsr.py`                           |
 | yolov8_det             | YOLOv8 object detection                       | `python yolov8_det/yolov8_det.py`               |
+| yolo26n_det            | YOLO26n object detection                      | `python yolov26n_det/yolo26n_det.py`            |
 
 > **Note:** Ensure you are in the `samples/linux/python` directory before running any example. Each sample will automatically download its required model on first run.
 
