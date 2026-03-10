@@ -142,7 +142,12 @@ def Inference(input_image_path):
     PerfProfile.RelPerfProfileGlobal()
 
     # postprocess the result
-    _output = torch.from_numpy(output[0])  # shape (1, 265)
+
+    out0 = np.asarray(output[0])
+    if out0.ndim == 1:
+        out0 = out0[None, :]  # make it (1, N)
+    _output = torch.from_numpy(out0)  # now always 2D
+
     alpha_id  = _output[0, 0:219]
     alpha_exp = _output[0, 219:258]
     pitch     = _output[0, 258]

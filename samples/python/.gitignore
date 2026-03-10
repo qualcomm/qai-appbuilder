@@ -1,0 +1,3 @@
+*.bin
+*.raw
+__pycache__/
