@@ -1,0 +1,13 @@
+*.bin
+!python/easy_ocr/Char/ch_en_character.bin
+!python/easy_ocr/Char/ch_en_lang_char.bin
+!python/easy_ocr/Char/en_character.bin
+!python/easy_ocr/Char/en_lang_char.bin
+
+*.raw
+__pycache__/
+tools/wget/
+tools/aria2c/
+tools/wget.zip
+tools/aria2c.zip
+qai_libs/
