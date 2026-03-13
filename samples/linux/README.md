@@ -210,30 +210,6 @@ libAppBuilder.ModelDestroy(model_name);
 ```
 
 
-### Vision Language Model Examples
-
-QAI AppBuilder provides examples for building Vision Language Model (VLM) applications that combine image and video understanding with natural language processing.
-
-#### Running VLM Examples
-
-Navigate to the VLM samples directory and run the demo:
-
-```bash
-cd samples/linux/python/qwen2_vl
-python demo_app.py <model_path>
-```
-
-**Parameters:**
-- `<model_path>`: Path to the directory containing the Qwen2-VL QNN model files
-
-**VLM Capabilities:**
-- Image/Video/Web camera input processing
-- Multimodal inference combining vision and language
-- Natural language output generation
-- Qwen2-VL-2B-Instruct model support
-
-**For detailed setup and usage instructions, see:** [Qwen2-VL Demo (Linux Python)](./python/qwen2_vl/README.md)
-
 
 ## Advanced Application Examples
 
@@ -243,7 +219,7 @@ In addition to the computer vision samples above, QAI AppBuilder provides advanc
 
 1. **Chat Application with OpenAI-Compatible API**: Build conversational chat WebUI applications using OpenAI-compatible APIs for seamless integration.
 
-2. **LangFlow Low-Code Framework**: Deploy and run the LangFlow low-code framework on IQ9075 for rapid AI application development.
+2. **Vision Language Model Examples**: Example for building Vision Language Model (VLM) applications that combine image and video understanding with natural language processing..
 
 ### Advanced Example 1: Chat Application with OpenAI-Compatible API
 
@@ -266,26 +242,30 @@ Build a chat application powered by large language models (LLMs) using OpenAI-co
 3. **Access the WebUI:**
    Open your browser and navigate to `http://localhost:7860` (default port)
 
-### Advanced Example 2: LangFlow Low-Code Framework
 
-Deploy LangFlow, a visual low-code framework for building AI applications with drag-and-drop components.
+### Advanced Example 2: Vision Language Model Examples
 
-**Steps to Run:**
+QAI AppBuilder provides examples for building Vision Language Model (VLM) applications that combine image and video understanding with natural language processing.
 
-1. **Start the LLM Service:**
-   ```bash
-   cd tools/launcher_linux
-   bash ./4.Start_GenieAPIService.sh
-   ```
+#### Running VLM Examples
 
-2. **Install and Launch LangFlow:**
-   ```bash
-   bash ./5.Install_LangFlow.sh
-   bash ./6.Start_LangFlow.sh
-   ```
+Navigate to the VLM samples directory and run the demo:
 
-Once started, access the LangFlow web interface to design and deploy your AI workflows visually.
+```bash
+cd samples/linux/python/qwen2_vl
+python demo_app.py <model_path>
+```
 
+**Parameters:**
+- `<model_path>`: Path to the directory containing the Qwen2-VL QNN model files
+
+**VLM Capabilities:**
+- Image/Video/Web camera input processing
+- Multimodal inference combining vision and language
+- Natural language output generation
+- Qwen2-VL-2B-Instruct model support
+
+**For detailed setup and usage instructions, see:** [Qwen2-VL Demo (Linux Python)](./python/qwen2_vl/README.md)
 
 ## Additional Resources
 
