@@ -60,7 +60,7 @@ HarmonyProcessor::HarmonyProcessor() :
 {
 }
 
-std::tuple<bool, std::string> HarmonyProcessor::preprocessStream(std::string chunkText,
+std::tuple<bool, std::string> HarmonyProcessor::PreProcessStream(std::string &chunkText,
                                                                  bool isToolResponse,
                                                                  std::string &toolResponse)
 {
@@ -82,12 +82,13 @@ std::tuple<bool, std::string> HarmonyProcessor::preprocessStream(std::string chu
     processChunk(chunkText);
     chunkText = m_analysisText + m_finalText;
 
-    return std::make_tuple(false, "");
+    return std::make_tuple(false, chunkText);
 }
 
 size_t HarmonyProcessor::findTag(const std::string &tag)
 {
-    if (buffer.empty()) return std::string::npos;
+    if (buffer.empty())
+        return std::string::npos;
 
     // return buffer.find(tag);
     auto it = std::search(buffer.begin(), buffer.end(), tag.begin(), tag.end());

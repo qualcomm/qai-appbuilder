@@ -15,6 +15,7 @@ Please keep VLM models following the layout
 
 - [qwen2.5vl3b](#qwen2.5vl3b)
 - [phi4mm](#phi4mm)
+- [qwen2.5_omini_3b](#qwen2.5_omini_3b)
 
 ### qwen2.5vl3b
 
@@ -51,4 +52,27 @@ Please keep VLM models following the layout
 └───raw
         attention_mask.bin
         position_ids.bin
+```
+
+### qwen2.5_omini_3b
+
+```
+./models/qwen2.5_omini_3b
+│   config.json
+│   embedding_weights_151936x2048.raw
+│   model-1.bin
+│   model-2.bin
+│   model-3.bin
+│   prompt.json
+│   tokenizer.json
+│
+├───qwen2.5_omini_audio
+│       audio.serialized.bin
+│
+└───qwen2.5_omini_vision
+        full_attention_mask.raw
+        position_ids_cos.raw
+        position_ids_sin.raw
+        veg.serialized.bin
+        window_attention_mask.raw
 ```

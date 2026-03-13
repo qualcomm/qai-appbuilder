@@ -3,19 +3,34 @@
 	url = https://github.com/pybind/pybind11
 [submodule "samples/genie/c++/External/cpp-httplib"]
 	path = samples/genie/c++/External/cpp-httplib
-	url = https://github.com/yhirose/cpp-httplib
+	url = https://github.com/yhirose/cpp-httplib.git
 [submodule "samples/genie/c++/External/json"]
 	path = samples/genie/c++/External/json
-	url = https://github.com/nlohmann/json
+	url = https://github.com/nlohmann/json.git
 [submodule "samples/genie/c++/External/curl"]
 	path = samples/genie/c++/External/curl
-	url = https://github.com/curl/curl
+	url = https://github.com/curl/curl.git
 [submodule "samples/genie/c++/External/llama.cpp"]
 	path = samples/genie/c++/External/llama.cpp
-	url = https://github.com/ggml-org/llama.cpp
+	url = https://github.com/ggml-org/llama.cpp.git
 [submodule "samples/genie/c++/External/MNN"]
 	path = samples/genie/c++/External/MNN
-	url = https://github.com/alibaba/MNN
+	url = https://github.com/alibaba/MNN.git
 [submodule "samples/genie/c++/External/cli11"]
 	path = samples/genie/c++/External/cli11
 	url = https://github.com/CLIUtils/CLI11
+[submodule "samples/genie/c++/External/libsamplerate"]
+	path = samples/genie/c++/External/libsamplerate
+	url = https://github.com/libsndfile/libsamplerate.git
+[submodule "samples/genie/c++/External/dr_libs"]
+	path = samples/genie/c++/External/dr_libs
+	url = https://github.com/mackron/dr_libs.git
+[submodule "samples/genie/c++/External/LibrosaCpp"]
+	path = samples/genie/c++/External/LibrosaCpp
+	url = https://github.com/ewan-xu/LibrosaCpp.git
+[submodule "samples/genie/c++/External/CLI11"]
+	path = samples/genie/c++/External/CLI11
+	url = https://github.com/CLIUtils/CLI11.git
+[submodule "samples/genie/c++/External/stb"]
+	path = samples/genie/c++/External/stb
+	url = https://github.com/nothings/stb.git

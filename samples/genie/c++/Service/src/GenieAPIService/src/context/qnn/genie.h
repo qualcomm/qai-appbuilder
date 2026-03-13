@@ -30,10 +30,15 @@ public:
 
     bool Stop() override;
 
-    bool SetParams(const std::string &max_length,
-                   const std::string &temp,
-                   const std::string &top_k,
-                   const std::string &top_p) override;
+    int SetParams(const std::string &key, const std::string &value) override
+    {
+        return GenieSamplerConfig_setParam(m_SamplerConfigHandle, key.c_str(), value.c_str());
+    }
+
+    int ApplyParams() override
+    {
+        return GenieSampler_applyConfig(m_SamplerHandle, m_SamplerConfigHandle);
+    }
 
     json HandleProfile() override;
 

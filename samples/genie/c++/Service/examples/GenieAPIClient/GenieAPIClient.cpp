@@ -125,6 +125,7 @@ size_t write_callback_stream(char *ptr, size_t size, size_t nmemb, void *userdat
     size_t total_size = size * nmemb;
     std::string chunk(ptr, total_size);
     message += chunk;
+
     std::istringstream stream(chunk);
     std::string line;
     bool process;
@@ -181,11 +182,11 @@ std::string build_request_body(const std::string &model, const T1 &prompt, const
             {{"role", "system"}, {"content", system}},
             {{"role", "user"},   {"content", prompt}}
     };
-    body["size"] = 4096;
-    body["seed"] = 146;
-    body["temp"] = 1.5;
-    body["top_k"] = 13;
-    body["top_p"] = 0.6;
+//    body["size"] = 4096;
+//    body["seed"] = 146;
+//    body["temp"] = 1.5;
+//    body["top_k"] = 13;
+//    body["top_p"] = 0.6;
 
     return body.dump(4);
 }

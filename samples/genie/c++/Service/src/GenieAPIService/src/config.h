@@ -70,7 +70,7 @@ inline bool Config::Process()
     app.add_flag("-t,--enable_thinking", model_config_.enableThinking, "Enable thinking mode.");
     app.add_flag("-v,--version", version, "Print version info and exit.");
 
-    app.add_option("-n,--num_response", model_config_.numResponse,
+    app.add_option("-n,--num_response", model_config_.num_response_,
                    "The number of rounds saved in the historical record");
     app.add_option("-o,--min_output_num", model_config_.minOutputNum, "The minimum number of tokens output");
     app.add_option("-d,--loglevel", logLevel,

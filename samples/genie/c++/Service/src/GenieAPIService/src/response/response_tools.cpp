@@ -37,12 +37,15 @@ std::string ResponseTools::generate_uuid4()
     return "chatcmpl-" + ss.str();
 }
 
-bool ResponseTools::post_stream_data(httplib::DataSink &sink, const char *event, const std::string &data, bool done)
+bool ResponseTools::post_stream_data(httplib::DataSink &sink, const std::string &data, bool done)
 {
+    static const std::string title{"data: "};
     std::string str;
+    str.reserve(title.size() + data.size() + strlen("\n\n") + 1);
+
     try
     {
-        str = std::string(event) + ": " + data + "\n\n";
+        str = title + data + "\n\n";
     }
     catch (const std::exception &e)
     {
@@ -83,7 +86,7 @@ std::string ResponseTools::responseDataJson(const std::string &content,
                                  {"index", 0},
                                  {"finish_reason", finish_reason},
                                  {content_name, {
-                                                        {"content", content},
+                                                        {"content", content.c_str()},
                                                         {"role", "assistant"},
                                                         {"tool_calls", tool_calls}
                                                 }

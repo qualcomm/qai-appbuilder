@@ -44,7 +44,8 @@ struct GenieContext::QInterfaceImpl
         virtual ~QInterface() = default;
 
         explicit QInterface(GenieContext *context) :
-                context_{context} {}
+                context_{context},
+                kContextSize_{context->model_config_.context_size()} {}
 
         virtual bool set_content(ModelInput &model_input) = 0;
 
@@ -60,9 +61,9 @@ struct GenieContext::QInterfaceImpl
 
         static void OutPutText(ModelInput &model_input);
 
-        int max_length_{DEFAULT_CONTEXT_SIZE};
-
         int cur_length_{0};
+
+        const int kContextSize_{};
 
         class PHI4Embedding;
 
@@ -129,12 +130,13 @@ struct GenieContext::QInterfaceImpl
 
         IEmbedding &BuildPrompt(const std::string &prompt_template, const std::string &input)
         {
-            prompt_.reserve(prompt_template.size() + input.size());
+            prompt_.resize(prompt_template.size() + input.size());
             sprintf(prompt_.data(), prompt_template.c_str(), input.c_str());
             return *this;
         }
 
     protected:
+        std::string kPromptTemplate{};
         int32_t *prompt_token_{};
         uint32_t prompt_token_size_{};
         std::vector<float> embedded_bin_;
@@ -151,7 +153,7 @@ struct GenieContext::QInterfaceImpl
         IEmbedding &Decode(std::string &encode_buf, std::vector<uint8_t> &decoded_buf);
 
         IEmbedding &BuildInferredBuffer(const QNNEmbedding::InferResource *infer_resource,
-                                        std::vector<float> &in_buf,
+                                        std::vector<uint8_t *> &input_buffers,
                                         std::vector<uint8_t> &inferred_buf);
 
         virtual IEmbedding &CustomBuild(ModelInput &model_input) = 0;
@@ -206,7 +208,17 @@ struct GenieContext::QInterfaceImpl
     public:
         explicit IVisionEmbedding(GenieContext *context)
                 : IEmbedding(context),
-                  infer_resource_{get_infer_resource(ModelType{ModelType::Vision})} {}
+                  infer_resource_{get_infer_resource(ModelType{ModelType::Vision})}
+        {
+            if (infer_resource_)
+            {
+                input_buffers_.resize(infer_resource_->bin_stacks_.size() + 1);
+                for (auto i = 0; i < infer_resource_->bin_stacks_.size(); ++i)
+                {
+                    input_buffers_[i + 1] = const_cast<uint8_t *>(infer_resource_->bin_stacks_[i].data());
+                }
+            }
+        }
 
         ~IVisionEmbedding() override = default;
 
@@ -220,15 +232,22 @@ struct GenieContext::QInterfaceImpl
             return *this;
         }
 
+        virtual IVisionEmbedding &BuildVisionInferredInput()
+        {
+            input_buffers_[0] = reinterpret_cast<uint8_t *>(img_pixel_buf_.data());
+            return *this;
+        }
+
         virtual IVisionEmbedding &BuildImgPixel() = 0;
 
     protected:
         int kWidth{};
         int kHeight{};
 
-        std::string kPromptTemplate;
+        int token_index{};
         std::vector<uint8_t> img_buf_{};
         std::vector<float> img_pixel_buf_{};
+        std::vector<uint8_t *> input_buffers_{};
         std::vector<uint8_t> img_inferred_buf_{};
         const QNNEmbedding::InferResource *infer_resource_;
     };
@@ -246,23 +265,30 @@ struct GenieContext::QInterfaceImpl
 
         IEmbedding &CustomClean() override
         {
+            token_index = 0;
+            padded_prompt_template_.clear();
             audio_buf_.clear();
             audio_sample_buf_.clear();
             audio_inferred_buf_.clear();
-            audio_length_ = 0;
+            CleanAudio();
             return *this;
         }
 
+        virtual IAudioEmbedding &CleanAudio() = 0;
+
+        virtual IAudioEmbedding &BuildAudioInferredInput() = 0;
+
         virtual IAudioEmbedding &BuildAudioSamples() = 0;
 
-        IAudioEmbedding &PaddingAudioPrompt();
+        virtual IAudioEmbedding &PaddingAudioPrompt() = 0;
 
-        std::string kPromptTemplate;
+        int token_index{};
+        std::string padded_prompt_template_;
         std::vector<uint8_t> audio_buf_;
         std::vector<float> audio_sample_buf_;
+        std::vector<uint8_t *> input_buffers_{};
         std::vector<uint8_t> audio_inferred_buf_;
         const QNNEmbedding::InferResource *infer_resource_;
-        int audio_length_{};
     };
 
     class IMultiModal : public IAudioEmbedding, public IVisionEmbedding
@@ -275,8 +301,8 @@ struct GenieContext::QInterfaceImpl
 
         IEmbedding &CustomClean() override
         {
-            IAudioEmbedding::CustomClean();
             IVisionEmbedding::CustomClean();
+            IAudioEmbedding::CustomClean();
             return *this;
         }
     };

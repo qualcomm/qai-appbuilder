@@ -47,7 +47,11 @@ struct File
                                const std::string &part,
                                std::vector<std::string> *files = nullptr);
 
-    static std::vector<uint8_t> ReadFile(const std::string &file_name, bool binary = true);
+    template<typename T>
+    static std::vector<T> ReadFile(const std::string &file_name, bool binary = true);
+
+    template<typename T>
+    static void WriteBinaryFile(const std::vector<T> &buf, const std::string &file_name);
 };
 
 template<typename F, typename... Args>

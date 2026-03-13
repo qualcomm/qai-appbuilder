@@ -63,10 +63,14 @@ elseif (ANDROID)
     add_library(${CMAKE_PROJECT_NAME} SHARED ${SERVICE_SOURCES})
 endif ()
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${INCLUDE_PATH})
-target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE -DNOMINMAX -D_HAS_STD_BYTE=0)
+target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
+        -DNOMINMAX
+        -D_HAS_STD_BYTE=0
+        -D_USE_MATH_DEFINES
+)
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE ${EXTERNAL_LIB_PATH})
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ${EXTERNAL_LIBS})
-
+#target_link_options(${CMAKE_PROJECT_NAME} PRIVATE /DEBUG)
 set(CONFIG_PATH ${CMAKE_SOURCE_DIR}/../../python/models)
 add_custom_command(
         TARGET ${CMAKE_PROJECT_NAME} POST_BUILD

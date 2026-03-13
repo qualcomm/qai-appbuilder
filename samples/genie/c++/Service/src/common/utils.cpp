@@ -143,15 +143,29 @@ bool File::MatchFileInDir(const std::string &dir_path, const std::string &part, 
     return false;
 }
 
-std::vector<uint8_t> File::ReadFile(const std::string &file_name, bool binary)
+template<typename T>
+std::vector<T> File::ReadFile(const std::string &file_name, bool binary)
 {
     auto mode = binary ? std::ios::binary : std::ios::in;
     std::ifstream in(file_name, mode);
     auto file_size = get_file_size(file_name, mode);
-    std::vector<uint8_t> buffer(file_size);
+    std::vector<T> buffer(file_size / sizeof(T));
     in.read(reinterpret_cast<char *>(buffer.data()), file_size);
+    in.close();
     return buffer;
 }
+
+template std::vector<uint8_t> File::ReadFile(const std::string &file_name, bool binary);
+
+template<typename T>
+void File::WriteBinaryFile(const std::vector<T> &buffer, const std::string &file_name)
+{
+    std::ofstream out(file_name, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(buffer.data()), buffer.size() * sizeof(T));
+    out.close();
+}
+
+template void File::WriteBinaryFile(const std::vector<float> &buffer, const std::string &file_name);
 
 template<typename T>
 T get_json_value(const json &jsonData, const std::string &key, const T &defaultValue)
@@ -209,8 +223,11 @@ T get_json_value(const json &jsonData, const std::string &key, const T &defaultV
 }
 
 template std::string get_json_value(const json &jsonData, const std::string &key, const std::string &defaultValue);
+
 template int get_json_value(const json &jsonData, const std::string &key, const int &defaultValue);
+
 template double get_json_value(const json &jsonData, const std::string &key, const double &defaultValue);
+
 template bool get_json_value(const json &jsonData, const std::string &key, const bool &defaultValue);
 
 template<typename T>

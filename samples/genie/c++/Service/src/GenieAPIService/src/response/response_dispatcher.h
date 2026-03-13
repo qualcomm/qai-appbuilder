@@ -46,11 +46,11 @@ public:
     static inline std::string MIMETYPE_JSON = "application/json; charset=utf-8";
 
 private:
-    void PrintProfile();
+    void PrintProfile(const std::string &response_buffer);
 
     bool isConnectionAlive() const;
 
-    static std::string extractFinalAnswer(const std::string &output)
+    static std::string ExtractFinalAnswer(const std::string &output)
     {
         const std::string tag = "</think>";
         size_t pos = output.find(tag);
@@ -66,18 +66,17 @@ private:
         }
     }
 
-    std::tuple<bool, std::string> preprocessStream(const std::string &chunkText,
+    std::tuple<bool, std::string> PreProcessStream(std::string &&chunkText,
                                                    bool isToolResponse,
                                                    std::string &toolResponse)
     {
-        return proc_->preprocessStream(chunkText, isToolResponse, toolResponse);
+        return proc_->PreProcessStream(chunkText, isToolResponse, toolResponse);
     }
 
     bool is_stream_{};
     bool is_tool_{};
     ChatHistory &chatHistory;
     IModelConfig &model_config_;
-    std::string response_buffer; // The response buffer is used to store the response content of the model.
     httplib::Request *req_{};
     ModelProcessor *proc_{};
     ModelInput model_input_;

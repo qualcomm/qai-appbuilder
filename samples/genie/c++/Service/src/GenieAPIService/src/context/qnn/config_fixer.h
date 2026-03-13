@@ -34,27 +34,49 @@ public:
             kArrayString
         } check_type_;
         bool optional_{};
-        bool extra_{false};  // for string is is_forcast_dir, for bool valye is true or false
+        bool additional_{false};  // for string is is_forcast_dir, for bool valye is true or false
     };
 
-    explicit ConfigFixer(const IModelConfig &model_config) : model_config_{model_config} {}
+    explicit ConfigFixer(const IModelConfig &model_config) : model_config_{model_config}
+    {
+        std::ifstream file(model_config_.get_config_path());
+        file >> j_;
+    }
 
-    json Execute();
+    json FixConfig();
+
+    json FixSampler() const
+    {
+        json j_config = j_["dialog"]["sampler"];
+        json j_sampler_root{{"sampler", {}}};
+        json &j_out_sampler = j_sampler_root["sampler"];
+
+        for (auto &key: {"version", "seed", "temp", "top-k", "top-p"})
+        {
+            model_config_.sampler()[key] = "";
+            if (j_config.contains(key))
+            {
+                j_out_sampler[key] = j_config[key];
+                model_config_.sampler()[key] = j_config[key];
+            }
+        }
+        j_out_sampler["type"] = "basic";
+        My_Log{My_Log::Level::kInfo} << "sampler text: \n" << j_sampler_root.dump(4) << std::endl;
+        return j_sampler_root;
+    }
 
 private:
     bool FixedPath(json &j, FixedInfo &info);
 
     const IModelConfig &model_config_;
+
+    json j_;
 };
 
 using ConfigFixer = GenieContext::ConfigFixer;
 
-inline json ConfigFixer::Execute()
+inline json ConfigFixer::FixConfig()
 {
-    std::ifstream file(model_config_.get_config_path());
-    json j;
-    file >> j;
-
     /* @formatter:off */
     std::vector<FixedInfo> fixed_items{
             {"tokenizer", json::json_pointer("/dialog/tokenizer/path"), FixedInfo::kString, false},
@@ -68,7 +90,7 @@ inline json ConfigFixer::Execute()
 
     for (auto &fixed_item: fixed_items)
     {
-        if (!FixedPath(j, fixed_item))
+        if (!FixedPath(j_, fixed_item))
         {
             throw std::runtime_error("fixed the config path failed");
         }
@@ -77,12 +99,13 @@ inline json ConfigFixer::Execute()
     if (Genie_getApiMinorVersion() >= 11)
     {
         auto jp = json::json_pointer("/dialog/engine/backend/QnnHtp");
-        j.at(jp)["use-mmap"] = true;
-        j.at(jp)["allow-async-init"] = true;
+        j_.at(jp)["use-mmap"] = true;
+        j_.at(jp)["allow-async-init"] = true;
     }
+
     My_Log{} << "fixed the config path successfully\n";
-    My_Log{My_Log::Level::kInfo} << j.dump(4) << std::endl;
-    return j;
+    My_Log{My_Log::Level::kInfo} << j_.dump(4) << std::endl;
+    return j_;
 }
 
 inline bool ConfigFixer::FixedPath(json &j, ConfigFixer::FixedInfo &info)
@@ -99,7 +122,7 @@ inline bool ConfigFixer::FixedPath(json &j, ConfigFixer::FixedInfo &info)
                                 goto done;
                             }
 
-                            if (info.extra_)
+                            if (info.additional_)
                             {
                                 file_path = model_config_.get_model_path();
                                 rs = true;
@@ -148,7 +171,7 @@ inline bool ConfigFixer::FixedPath(json &j, ConfigFixer::FixedInfo &info)
     switch (info.check_type_)
     {
         case FixedInfo::kBool:
-            j.at(info.jp_) = info.extra_;
+            j.at(info.jp_) = info.additional_;
             break;
         case FixedInfo::kString:
             if (get_fixed_path(j.at(info.jp_)))

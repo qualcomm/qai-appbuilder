@@ -18,7 +18,7 @@ struct ResponseTools
 {
     static inline const std::string FN_NAME = "<tool_call>";
 
-    static bool post_stream_data(httplib::DataSink &sink, const char *event, const std::string &data, bool done = false);
+    static bool post_stream_data(httplib::DataSink &sink, const std::string &data, bool done = false);
 
     static std::string responseDataJson(const std::string &content,
                                         const std::string &finish_reason,

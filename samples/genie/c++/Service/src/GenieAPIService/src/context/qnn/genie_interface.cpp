@@ -46,8 +46,7 @@ void QInterfaceImpl::QInterface::GenieCallBack(const char *response,
     std::lock_guard guard(context->m_stream_lock);
     context->m_stream_answer += response;
     self->cur_length_ += context->TokenLength(response);
-
-    if (self->cur_length_ >= self->max_length_)
+    if (self->cur_length_ >= self->kContextSize_)
     {
         My_Log{My_Log::Level::kError} << "g_CurLength: " << self->cur_length_ << "is over and will stop self"
                                       << std::endl;
@@ -160,35 +159,16 @@ IEmbedding &QInterfaceImpl::IEmbedding::Decode(std::string &encode_buf, std::vec
 }
 
 IEmbedding &IEmbedding::BuildInferredBuffer(const QNNEmbedding::InferResource *infer_resource,
-                                            std::vector<float> &in_buf,
+                                            std::vector<uint8_t *> &input_buffers,
                                             std::vector<uint8_t> &inferred_buf)
 {
     static std::string perfProfile = "burst";
     auto app_builder = infer_resource->app_builder_;
-    auto mode_type = qnn_embedding_info_.model_types_;
-    std::vector<uint8_t *> inputBuffers;
-    int offset;
-    if (mode_type & ModelType::Audio)
-    {
-        inputBuffers.resize(infer_resource->bin_stacks_.size());
-        offset = 0;
-    }
-    else
-    {
-        offset = 1;
-        inputBuffers.resize(infer_resource->bin_stacks_.size() + 1);
-        inputBuffers[0] = reinterpret_cast<uint8_t *>(in_buf.data());
-    }
-
-    for (auto i = 0; i < infer_resource->bin_stacks_.size(); ++i)
-    {
-        inputBuffers[i + offset] = const_cast<uint8_t *>(infer_resource->bin_stacks_[i].data());
-    }
-
     std::vector<uint8_t *> outputBuffers;
     std::vector<size_t> outputSize;
+
     if (!app_builder->ModelInference(infer_resource->tag_,
-                                     inputBuffers,
+                                     input_buffers,
                                      outputBuffers,
                                      outputSize,
                                      perfProfile))
@@ -196,7 +176,6 @@ IEmbedding &IEmbedding::BuildInferredBuffer(const QNNEmbedding::InferResource *i
         throw std::runtime_error("call model inference failed");
     }
 
-    in_buf.clear();
     inferred_buf.assign(outputBuffers.at(0), outputBuffers.at(0) + outputSize.at(0));
     for (auto &outputBuffer: outputBuffers)
         free(outputBuffer);
@@ -207,8 +186,9 @@ IEmbedding &QInterfaceImpl::IVisionEmbedding::CustomBuild(ModelInput &model_inpu
 {
     dynamic_cast<IVisionEmbedding &>(Decode(model_input.image_, img_buf_))
             .BuildImgPixel()
+            .BuildVisionInferredInput()
             .BuildInferredBuffer(infer_resource_,
-                                 img_pixel_buf_,
+                                 input_buffers_,
                                  img_inferred_buf_)
             .BuildPrompt(kPromptTemplate, model_input.text_);
     return *this;
@@ -218,11 +198,12 @@ IEmbedding &QInterfaceImpl::IAudioEmbedding::CustomBuild(ModelInput &model_input
 {
     dynamic_cast<IAudioEmbedding &>(Decode(model_input.audio_, audio_buf_))
             .BuildAudioSamples()
+            .BuildAudioInferredInput()
             .PaddingAudioPrompt()
             .BuildInferredBuffer(infer_resource_,
-                                 audio_sample_buf_,
+                                 input_buffers_,
                                  audio_inferred_buf_)
-            .BuildPrompt(kPromptTemplate, model_input.text_);
+            .BuildPrompt(padded_prompt_template_, model_input.text_);
     return *this;
 }
 

@@ -88,7 +88,7 @@ namespace std
     template<>
     struct std::hash<ModelType>
     {
-        size_t operator()(ModelType const& m) const noexcept { return std::hash<int>{}(int(m)); }
+        size_t operator()(ModelType const &m) const noexcept { return std::hash<int>{}(int(m)); }
     };
 }
 
@@ -165,6 +165,5 @@ struct QNNEmbedding
 
     void Clean();
 };
-
 
 #endif //MODEL_TYPE_H

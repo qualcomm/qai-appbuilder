@@ -140,11 +140,9 @@ bool GenieContext::Query(const ModelInput &model_input, const Callback &callback
 GenieContext::GenieContext(const IModelConfig &model_config) :
         ContextBase(model_config)
 {
-    const std::string sample_config_str = "{\n  \"sampler\" : {\n      \"version\" : 1,\n      \"temp\" : 1.2,\n      \"top-k\" : 25,\n      \"top-p\" : 0.8\n  }\n}";
-    int32_t status = 0;
-    auto j = ConfigFixer{model_config}.Execute();
-
-    if (GENIE_STATUS_SUCCESS != GenieDialogConfig_createFromJson(j.dump().c_str(), &m_ConfigHandle))
+    Genie_Status_t status = 0;
+    auto fixer = ConfigFixer{model_config};
+    if (GENIE_STATUS_SUCCESS != GenieDialogConfig_createFromJson(fixer.FixConfig().dump().c_str(), &m_ConfigHandle))
     {
         throw std::runtime_error("Failed to create the Genie Dialog config.");
     }
@@ -178,7 +176,7 @@ GenieContext::GenieContext(const IModelConfig &model_config) :
         throw std::runtime_error("Failed to create the Genie Dialog");
     }
 
-    status = GenieSamplerConfig_createFromJson(sample_config_str.c_str(), &m_SamplerConfigHandle);
+    status = GenieSamplerConfig_createFromJson(fixer.FixSampler().dump().c_str(), &m_SamplerConfigHandle);
     if (GENIE_STATUS_SUCCESS != status)
     {
         throw std::runtime_error("Failed to create sampler config");
@@ -272,51 +270,6 @@ bool GenieContext::Stop()
     if (GENIE_STATUS_SUCCESS != GenieDialog_signal(m_DialogHandle, GENIE_DIALOG_ACTION_ABORT))
     {
         My_Log{} << "Failed to stop generation.\n";
-        return false;
-    }
-
-    return true;
-}
-
-bool GenieContext::SetParams(const std::string &max_length,
-                             const std::string &temp,
-                             const std::string &top_k,
-                             const std::string &top_p)
-{
-    int32_t status = 0;
-    inf_impl_->inf_->max_length_ = std::stoi(max_length);
-    status = GenieSamplerConfig_setParam(m_SamplerConfigHandle, "temp", temp.c_str());
-    if (GENIE_STATUS_SUCCESS != status)
-    {
-        My_Log{} << "Failed to setParam.\n";
-        return false;
-    }
-
-    status = GenieSamplerConfig_setParam(m_SamplerConfigHandle, "top-k", top_k.c_str());
-    if (GENIE_STATUS_SUCCESS != status)
-    {
-        My_Log{} << "Failed to setParam.\n";
-        return false;
-    }
-
-    status = GenieSamplerConfig_setParam(m_SamplerConfigHandle, "top-p", top_p.c_str());
-    if (GENIE_STATUS_SUCCESS != status)
-    {
-        My_Log{} << "Failed to setParam.\n";
-        return false;
-    }
-
-    status = GenieSamplerConfig_setParam(m_SamplerConfigHandle, "type", "basic");
-    if (GENIE_STATUS_SUCCESS != status)
-    {
-        My_Log{} << "Failed to setParam type.\n";
-        return false;
-    }
-
-    status = GenieSampler_applyConfig(m_SamplerHandle, m_SamplerConfigHandle);
-    if (GENIE_STATUS_SUCCESS != status)
-    {
-        My_Log{My_Log::Level::kError} << "Failed to apply sampler config.\n";
         return false;
     }
 
@@ -479,9 +432,8 @@ GenieLog_Level_t GenieContext::get_genie_log_level()
         case My_Log::Level::kError:
             return GENIE_LOG_LEVEL_ERROR;
         case My_Log::Level::kWarning:
-            return GENIE_LOG_LEVEL_WARN;
         case My_Log::Level::kInfo:
-            return GENIE_LOG_LEVEL_INFO;
+            return GENIE_LOG_LEVEL_WARN;
         default:
             return GENIE_LOG_LEVEL_VERBOSE;
     }

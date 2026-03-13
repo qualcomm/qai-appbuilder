@@ -31,7 +31,7 @@ public:
         return prompt_;
     }
 
-    int &context_size() const
+    const int &context_size() const
     {
         return context_size_;
     }
@@ -61,9 +61,9 @@ public:
         return enableThinking;
     }
 
-    int getnumResponse() const
+    int get_num_response() const
     {
-        return numResponse;
+        return num_response_;
     }
 
     int getminOutputNum() const
@@ -93,12 +93,15 @@ public:
         return thinking_model_;
     }
 
+    json &sampler() const { return sampler_; }
+
     std::weak_ptr<ContextBase> get_genie_model_handle()
     {
         return genieModelHandle;
     }
 
 protected:
+    mutable json sampler_;
     std::shared_ptr<ContextBase> genieModelHandle{};
     std::string model_root_;
     std::string model_path_;
@@ -116,7 +119,7 @@ protected:
     std::string loraAdapter = "default_adapter";
     bool outputAllText = false;
     bool enableThinking = false;
-    int numResponse = 30;
+    int num_response_ = 30;
     int minOutputNum = 1024;
     float loraAlpha = 0.5;
     QNNEmbedding qnn_embedding_;

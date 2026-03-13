@@ -19,7 +19,7 @@ struct GeneralProcessor::Utils
     static inline const char FN_FLAG = '<';
 };
 
-std::tuple<bool, std::string> GeneralProcessor::preprocessStream(std::string chunkText,
+std::tuple<bool, std::string> GeneralProcessor::PreProcessStream(std::string &chunkText,
                                                                  bool isToolResponse,
                                                                  std::string &toolResponse)
 {
@@ -49,6 +49,11 @@ std::tuple<bool, std::string> GeneralProcessor::preprocessStream(std::string chu
         currentIsToolResponse = false;
         keepChunk = toolResponse;  // Since it's not tools call, add the content in toolResponse buffer to keepChunk and print it.
         toolResponse.clear();
+    }
+
+    if (keepChunk.empty())
+    {
+        keepChunk = std::move(chunkText);
     }
 
     return std::make_tuple(currentIsToolResponse, keepChunk);

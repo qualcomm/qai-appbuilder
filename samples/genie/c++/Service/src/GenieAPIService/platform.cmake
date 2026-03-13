@@ -39,6 +39,8 @@ set(EXTERNAL_LIB_PATH ${QNN_LIB_PATH})
 
 #  Define EXTERNAL_HEADER
 set(EXTERNAL_HEADER_PATH
+        ${G_EXTERNAL_DIR}
+        ${G_EXTERNAL_DIR}/LibrosaCpp
         ${G_EXTERNAL_DIR}/libsamplerate/include
         ${G_EXTERNAL_DIR}/dr_libs
         ${G_EXTERNAL_DIR}/stb
@@ -73,7 +75,20 @@ elseif (ANDROID)
     list(APPEND EXTERNAL_BIN ${LIBAPPBUILDER_ROOT}/libs/arm64-v8a/libappbuilder${DLL_EXT})
     list(APPEND EXTERNAL_LIBS appbuilder)
 endif ()
-#list(APPEND EXTERNAL_LIBS samplerate)
+list(APPEND EXTERNAL_LIBS samplerate)
+
+if (MSVC)
+    ExternalProject_Add(Libsamplerate
+            SOURCE_DIR ${G_EXTERNAL_DIR}/libsamplerate
+            CMAKE_ARGS
+            -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}
+            -DLIBSAMPLERATE_EXAMPLES=OFF 
+            -DBUILD_TESTING=OFF
+            BUILD_IN_SOURCE ON
+    )
+    
+    list(APPEND EXTERNAL_LIBS samplerate)
+endif ()
 
 set(VS_VC_PATH "C:/Program Files/Microsoft Visual Studio/2022/Community/VC")
 set(VS_VC_BUILD_TOOL_PATH "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC")
@@ -119,6 +134,7 @@ if (MSVC)
                     -DLLAMA_BUILD_SERVER=OFF
                     -DLLAMA_BUILD_TESTS=OFF
                     -DLLAMA_BUILD_TOOLS=OFF
+                    -DLLAMA_BUILD_EXAMPLES=OFF
                     BUILD_IN_SOURCE ON
             )
         # common part

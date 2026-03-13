@@ -40,6 +40,7 @@ if (MSVC)
             /MP
             /FS
             /Zc:referenceBinding
+            /UNDEBUG
     )
 endif ()
 

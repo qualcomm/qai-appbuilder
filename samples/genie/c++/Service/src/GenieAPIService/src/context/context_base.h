@@ -26,8 +26,7 @@ public:
 
     virtual bool Stop();
 
-    virtual bool SetParams(const std::string &max_length, const std::string &temp,
-                           const std::string &top_k, const std::string &top_p);
+    bool SetParamsByConfig(const json &j);
 
     virtual json HandleProfile() = 0;
 
@@ -41,6 +40,10 @@ public:
                                  const std::unordered_map<std::string, float> &alphaValue);
 
 protected:
+    virtual int SetParams(const std::string &key, const std::string &value);
+
+    virtual int ApplyParams();
+
     const IModelConfig &model_config_;
 };
 

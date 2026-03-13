@@ -35,6 +35,7 @@ HOST = "0.0.0.0"
 PORT = 50000
 FILE_PATH = "files"
 TRUSTED_OUTPUT_DIR="images"
+AUDIO_TYPES = ['.wav']
 FILE_TYPES = [".pdf", ".docx", ".pptx", ".txt", ".md", ".py", ".c", ".cpp", ".h", ".hpp"]
 IMG_TYPES = [".png", ".jpg", "jpeg"]
 FUNC_LIST = ["📐 解题答疑", "📚 文档总结", "🗛 AI 翻 译", "🌐 AI 搜 索", "✒️ 帮我写作", "🎨 图像生成", "🍸 定制功能", "✈️ 旅游规划"]
@@ -101,7 +102,7 @@ def update_max_contextsize(model_name):
     response = requests.post(url, json=params)
     if response.status_code == 200:
         result = response.json()
-        print("context大小:",result["contextsize"])  
+        print("context大小:",result["contextsize"])
         return gr.update(maximum=result["contextsize"], value=result["contextsize"])
 
 def get_mock_profile():
@@ -123,7 +124,7 @@ def encode_image(image_input):
             return base64.b64encode(image_file.read()).decode('utf-8')
     except Exception as e:
             raise Exception(f"Failed to load local image: {e}")
-        
+
 def chat(chatbot, max_length, temp, top_k, top_p, system_prompt=None):
     """对话"""
     if current_model == "":
@@ -135,11 +136,12 @@ def chat(chatbot, max_length, temp, top_k, top_p, system_prompt=None):
         gr.Warning("The questions can not be empty.", duration =5)
         yield chatbot, "", "", ""
         return
-    
+
     answer = ""
-    encoded = encode_image(_chat_img)
+    encoded_img = encode_image(_chat_img)
+    encoded_audio = encode_image(_chat_audio)
     print('model select: ', current_model)
-    for chunk in service.chat({"question": _question, "image": encoded}, system_prompt=system_prompt, max_length=max_length, temp=temp, top_k=top_k, top_p=top_p, model_name=current_model):
+    for chunk in service.chat({"question": _question, "image": encoded_img, "audio": encoded_audio}, system_prompt=system_prompt, max_length=max_length, temp=temp, top_k=top_k, top_p=top_p, model_name=current_model):
         answer += chunk
         chatbot[-1].content = answer
         yield chatbot, "", "", ""
@@ -161,7 +163,7 @@ def summarize_document(chatbot, max_length, temp, top_k, top_p):
         docx_summary.load_and_split_docs(file_path=FILE_PATH)
         answer = ""
         for chunk in docx_summary.summarize_map_reduce(custom_prompt="你的工作是用中文写出以下文档的摘要:"):
-            answer += chunk    
+            answer += chunk
             chatbot[-1].content = answer
             yield chatbot, "", "", ""
     except Exception as e:
@@ -221,9 +223,10 @@ def has_chinese(text):
 
 def add_media(chatbot, chatmsg):
     """处理用户输入：文本 + 文件上传"""
-    global _question, _func_mode, _chat_img
+    global _question, _func_mode, _chat_img, _chat_audio
 
     _chat_img = ""
+    _chat_audio = ""
     _question = chatmsg["text"] or ""
     if _question:
         chatbot.append(ChatMessage(role="user", content=_question))
@@ -237,9 +240,9 @@ def add_media(chatbot, chatmsg):
         file_name = os.path.basename(file)
         shutil.copy(file, os.path.join(FILE_PATH, file_name))
         file_path = os.path.join(FILE_PATH, file_name)
-        if not _chat_img:
-            _chat_img = file_path
-        
+        # if not _chat_img:
+        #     _chat_img = file_path
+
         # 检查文件扩展名，如果是图片则直接显示
         file_ext = os.path.splitext(file_name)[1].lower()
         if file_ext in ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']:
@@ -248,6 +251,14 @@ def add_media(chatbot, chatmsg):
                 role="user",
                 content=gr.Image(file_path)
             ))
+            _chat_img = file_path
+        elif file_ext in AUDIO_TYPES:
+            # 音频文件：显示音频播放器
+            chatbot.append(ChatMessage(
+                role="user",
+                content=gr.Audio(file_path)
+            ))
+            _chat_audio = file_path
         else:
             # 非图片文件：显示文件链接
             chatbot.append(ChatMessage(
@@ -271,7 +282,7 @@ def reset_state():
 def update_text(value):
     global _sys_prompt
     _sys_prompt=value
-    # print("input:", _sys_prompt) 
+    # print("input:", _sys_prompt)
     with open("customprompt.txt", "w",encoding="utf-8" ) as file:
         file.write(value)
 
@@ -317,7 +328,7 @@ def main():
                     chatbot.like(vote, None, None)
 
                     chatmsg = gr.MultimodalTextbox(scale=1, interactive=True, file_count="multiple", placeholder="Enter message or upload file...", show_label=True, autofocus=True,
-                                                   max_plain_text_length=3000, file_types=IMG_TYPES, label=FUNC_LIST_EN[_func_mode])
+                                                   max_plain_text_length=3000, file_types=IMG_TYPES + AUDIO_TYPES, label=FUNC_LIST_EN[_func_mode])
 
                     with gr.Row():
                         func_1_btn = gr.Button(FUNC_LIST_EN[0], elem_classes="button_cls")
@@ -398,7 +409,7 @@ def main():
             if func_name == "📚 文档总结":
                 return gr.MultimodalTextbox(label=func_name, sources=["upload"], file_types=FILE_TYPES)
             elif func_name == "📐 解题答疑":
-                return gr.MultimodalTextbox(label=func_name, sources=["upload"], file_types=IMG_TYPES)
+                return gr.MultimodalTextbox(label=func_name, sources=["upload"], file_types=IMG_TYPES + AUDIO_TYPES)
             else:
                 return gr.MultimodalTextbox(label=func_name, sources=[])
 
@@ -412,11 +423,11 @@ def main():
         # 模型切换（未来可触发 /api/load-model）
         model_select.change(
             on_model_selected,   # 原来的回调（比如加载模型）
-            model_select, 
+            model_select,
             None
         ).then(
             update_max_contextsize,   # 新增：更新 max_length 的范围和值
-            model_select, 
+            model_select,
             max_length
         )
 

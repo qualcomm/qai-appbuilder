@@ -15,13 +15,6 @@ Use below command to clone the whole repository and the dependency 3rd party lib
 git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
 ```
 
-VLM models depend on some libs, please solve the dependence:
-
-```
-cd samples\genie\c++\External
-git clone https://github.com/nothings/stb.git
-```
-
 ## Build For Windows:
 
 ### Prepare environment:<br>

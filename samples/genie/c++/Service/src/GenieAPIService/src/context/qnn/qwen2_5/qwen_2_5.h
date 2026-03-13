@@ -18,10 +18,10 @@ public:
     explicit Qwen2_5(GenieContext *context) : IVisionEmbedding(context), IEmbedding(context)
     {
         kPromptTemplate = "<|im_start|>system\n"
-                          "You are a helpful assistant.<|im_end|>\n"
-                          "<|im_start|>user\n"
-                          "<|vision_start|><|image_pad|><|vision_end|>%s<|im_end|>\n"
-                          "<|im_start|>assistant\n";
+                           "You are a helpful assistant.<|im_end|>\n"
+                           "<|im_start|>user\n"
+                           "<|vision_start|><|image_pad|><|vision_end|>%s<|im_end|>\n"
+                           "<|im_start|>assistant\n";
 
         auto &name = context->model_config_.get_model_name();
         if (str_contains(name, "7b"))

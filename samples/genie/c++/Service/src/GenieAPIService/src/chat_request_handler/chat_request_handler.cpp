@@ -184,15 +184,11 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
         handle->setLoraStrength(engineRole, loraAlphaValue);
     }
 
-    handle->SetParams(std::to_string(get_json_value(data, "size", model_manager.context_size())),
-                      std::to_string(get_json_value(data, "temp", 0.8)),
-                      std::to_string(get_json_value(data, "top_k", 40)),
-                      std::to_string(get_json_value(data, "top_p", 0.95)));
-
     bool is_tool;
     auto &model_input = input_builder_->Build(data, is_tool);
     bool is_stream = get_json_value(data, "stream", false);
     dispatcherPtr_->Prepare(model_input, is_tool, is_stream, req);
+    handle->SetParamsByConfig(data);
 
     is_stream
     ? res.set_chunked_content_provider(

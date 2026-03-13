@@ -72,7 +72,7 @@ class ModelManager::QNNImpl
                 infer_resource->tag_ = model_type.to_string();
                 for (const auto &bin_file: files.bin_files_stack_)
                 {
-                    infer_resource->bin_stacks_.emplace_back(File::ReadFile(bin_file));
+                    infer_resource->bin_stacks_.emplace_back(File::ReadFile<uint8_t>(bin_file));
                 }
 
                 next_check:;
@@ -130,20 +130,16 @@ class ModelManager::QNNImpl
             embedding_file_set.emplace(ModelType{ModelType::Audio},
                                        EmbeddingFileSet{
                                                model_path + "/qwen2.5_omini_audio/audio.serialized.bin",
-                                               {
-                                                       model_path + "/qwen2.5_omini_audio/padded_feature.raw",
-                                                       model_path + "/qwen2.5_omini_audio/padded_mask.raw",
-                                                       model_path + "/qwen2.5_omini_audio/attention_mask.raw"
-                                               }
+                                               {}
                                        });
 
             embedding_file_set.emplace(ModelType{ModelType::Vision},
                                        EmbeddingFileSet{
-                                               model_path + "/veg.serialized.bin", {
+                                               model_path + "/qwen2.5_omini_vision/veg.serialized.bin", {
                                                        model_path + "/qwen2.5_omini_vision/position_ids_cos.raw",
                                                        model_path + "/qwen2.5_omini_vision/position_ids_sin.raw",
                                                        model_path + "/qwen2.5_omini_vision/window_attention_mask.raw",
-                                                       model_path + "qwen2.5_omini_vision/full_attention_mask.raw"
+                                                       model_path + "/qwen2.5_omini_vision/full_attention_mask.raw"
                                                }
                                        });
         }
@@ -173,7 +169,7 @@ public:
             embedding = check.func_();
             if (embedding.embedding_type_ != QNNEmbeddingType::None)
             {
-                embedding.embedded_raw_buf_ = File::ReadFile(raw_path);
+                embedding.embedded_raw_buf_ = File::ReadFile<uint8_t>(raw_path);
                 return embedding;
             }
         }
@@ -244,6 +240,17 @@ struct ModelManager::ModeVerifier
                 if (!j.contains("dialog"))
                 {
                     return nullptr;
+                }
+
+                auto context_size = j["dialog"]["context"]["size"].get<int>();
+                if (!context_size)
+                {
+                    My_Log{My_Log::Level::kError} << "qnn config file is invalid\n";
+                }
+                else
+                {
+                    self_->context_size_ = context_size;
+                    My_Log{} << "fixed qnn context size: " << self_->context_size_ << "\n";
                 }
             }
 

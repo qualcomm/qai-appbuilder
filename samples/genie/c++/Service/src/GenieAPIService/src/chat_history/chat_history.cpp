@@ -38,7 +38,7 @@ public:
     std::string GetUserMessage(const std::string &prompt_system,
                                const std::string &prompt_start)
     {
-        auto num_response = model_config_.getnumResponse();
+        auto num_response = model_config_.get_num_response();
         int contextSize = std::max(model_config_.context_size() - model_config_.getminOutputNum(),
                                    model_config_.context_size() / 2);
         std::string res;
