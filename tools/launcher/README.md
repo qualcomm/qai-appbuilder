@@ -31,10 +31,8 @@ There are two ways to get our Windows batch scripts:
 | 2.Install_LLM_Models.bat | Download and install [IBM-Granite-v3.1-8B-Instruct](https://aihub.qualcomm.com/compute/models/ibm_granite_v3_1_8b_instruct) LLM model automatically. <br>You can replace this model with your owner LLM model. Getting detailed steps [here](../../samples/genie/python/README.md#setup-custom-model) for using your custom model. |
 | 3.Start_WebUI.bat | The launcher for starting 2 WebUI applications. If need the image generation feature, please run script '7.Start_StableDiffusion.bat' first. |
 | 4.Start_GenieAPIService.bat | Start [GenieAPIService](../../samples/genie/c++/). This is OpenAI Compatible API Service (C++ version). Support model name as parameter, e.g.: 4.Start_GenieAPIService.bat "Qwen2.0-7B-SSD" |
-| 5.Install_LangFlow.bat | Install LangFlow components. You can get more information about LangFlow [here](../langflow/). <br>When installing LangFlow, need to install Visual Studio. Visual Studio will be installed automatically during the installation process. If the Visual Studio Installer window pops up, please select 'Yes' to install it.|
-| 6.Start_LangFlow.bat | Start LangFlow service (The startup speed is slow, so wait patiently. When it is ready, the browser will be started automatically.)<br> We also provided several flows for running QNN models on NPU. You can get detailed steps [here](https://github.com/quic/ai-engine-direct-helper/tree/main/tools/langflow#using-the-flows) for using these flows. |
-| 7.Start_StableDiffusion.bat | Start Stable Diffusion WebUI. If model is not exist, it will download it automatically. |
-| 8.Start_PythonEnv.bat | Start Python environment. We use [Pixi](https://pixi.sh/) to manage the Python, this script can setup the Python environment for you if you want to develop and run your owner Python script. |
+| 5.Start_StableDiffusion.bat | Start Stable Diffusion WebUI. If model is not exist, it will download it automatically. |
+| 6.Start_PythonEnv.bat | Start Python environment. We use [Pixi](https://pixi.sh/) to manage the Python, this script can setup the Python environment for you if you want to develop and run your owner Python script. |
 
 ## Possible problems and solutions:
 ### 1. Certificate issue
