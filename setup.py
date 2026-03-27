@@ -641,8 +641,6 @@ setup(
     python_requires=">=3.10",
     classifiers=[
         "Development Status :: 3 - Alpha",
-        "Intended Audience :: Qualcomm CE",
-        "Operating System :: Windows On Snapdragon",
         "Programming Language :: Python :: 3.12",
     ],
 )
