@@ -16,7 +16,6 @@
 #include <stdlib.h>
 #include <fcntl.h>
 #include <algorithm>
-#include <execution>
 #include <vector>
 #include <fstream>
 
