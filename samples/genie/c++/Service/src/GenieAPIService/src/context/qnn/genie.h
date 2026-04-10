@@ -81,6 +81,7 @@ private:
 
     std::string m_stream_answer;
     std::mutex m_stream_lock;
+    std::condition_variable m_stream_cond;  // Condition variable for stream data
     QInterfaceImpl *inf_impl_{};
 };
 

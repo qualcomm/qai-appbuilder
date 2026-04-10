@@ -78,6 +78,7 @@ void GenieContext::inference_thread()
 
         m_inference_busy = false;
         m_request_ready = false;
+        m_stream_cond.notify_one();  // Notify that inference is complete
     }
 }
 
@@ -102,25 +103,23 @@ bool GenieContext::Query(const ModelInput &model_input, const Callback &callback
     std::string response;
     while (m_inference_busy)
     {
+        std::unique_lock<std::mutex> lock(m_stream_lock);
+        
+        // Wait for new data or inference completion (with timeout to check m_inference_busy)
+        m_stream_cond.wait_for(lock, std::chrono::milliseconds(10), 
+            [this] { return !m_stream_answer.empty() || !m_inference_busy; });
+        
         if (!m_stream_answer.empty())
         {
-            std::lock_guard<std::mutex> guard(m_stream_lock);
             response = m_stream_answer;
             m_stream_answer.clear();
+            lock.unlock();
+            
+            if (!callback(response))
+            {
+                break;
+            }
         }
-
-        if (response.empty())
-        {
-            continue;
-        }
-
-        if (!callback(response))
-        {
-            break;
-        }
-
-        response.clear();
-        std::this_thread::sleep_for(std::chrono::milliseconds(10)); // sleep 10 ms.
     }
 
     if (!inference_succeed_)
@@ -305,7 +304,6 @@ bool GenieContext::GenerateTextToken(const std::string &text, const int32_t *&bu
                                    },
                                    &buf,
                                    &len);
-
     if (status != GENIE_STATUS_SUCCESS)
     {
         My_Log{}.original(true) << "\n";
@@ -313,7 +311,12 @@ bool GenieContext::GenerateTextToken(const std::string &text, const int32_t *&bu
                                       << "the string length is: " << text.size() << std::endl;
         return false;
     }
-    return true;
+
+    
+    // NOTE: Do NOT free buf here! The caller (BuildTextEmbedding) needs to use it.
+    // The caller is responsible for freeing the buffer.
+    
+    return len;
 }
 
 size_t GenieContext::TokenLength(const std::string &text)
@@ -322,6 +325,7 @@ size_t GenieContext::TokenLength(const std::string &text)
     uint32_t len;
     if (!GenerateTextToken(text, buf, len))
     {
+        My_Log("generate text token failed");
         return text.size();
     }
 

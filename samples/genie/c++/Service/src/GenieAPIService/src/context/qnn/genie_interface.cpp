@@ -45,6 +45,7 @@ void QInterfaceImpl::QInterface::GenieCallBack(const char *response,
 
     std::lock_guard guard(context->m_stream_lock);
     context->m_stream_answer += response;
+    context->m_stream_cond.notify_one();  // Notify waiting thread that new data is available
     self->cur_length_ += context->TokenLength(response);
     if (self->cur_length_ >= self->kContextSize_)
     {

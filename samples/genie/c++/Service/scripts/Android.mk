@@ -20,6 +20,9 @@ PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../../External/curl/include/
 PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../../External/curl/lib/
 PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../../External/cli11/include
 PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../../External/stb
+PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../../External/LibrosaCpp/
+PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../../External/dr_libs/
+PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../../External/libsamplerate/include
 PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../../External/../../../../src
 PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../
 PACKAGE_C_INCLUDES += -I ${QNN_SDK_ROOT}include/Genie/
@@ -35,6 +38,11 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := libappbuilder
 LOCAL_SRC_FILES := ../libappbuilder.so
 include $(PREBUILT_SHARED_LIBRARY)
+# #========================== Define libsamplerate.so variables =============================================
+include $(CLEAR_VARS)
+LOCAL_MODULE    := libsamplerate
+LOCAL_SRC_FILES := ../libsamplerate.so
+include $(PREBUILT_SHARED_LIBRARY)
 # #========================== Define libcurl.so variables =============================================
 include $(CLEAR_VARS)
 LOCAL_MODULE    := libcurl
@@ -44,7 +52,7 @@ include $(PREBUILT_SHARED_LIBRARY)
 include $(CLEAR_VARS)
 LOCAL_C_INCLUDES               := $(PACKAGE_C_INCLUDES)
 LOCAL_MODULE                   := GenieAPIService
-LOCAL_SHARED_LIBRARIES 		   := libappbuilder libGenie
+LOCAL_SHARED_LIBRARIES 		   := libappbuilder libGenie libsamplerate
 LOCAL_LDLIBS                   := -llog
 LOCAL_SRC_FILES                :=   ../src/GenieAPIService/src/chat_history/chat_history.cpp \
                                     ../src/GenieAPIService/src/chat_request_handler/chat_request_handler.cpp \
@@ -67,7 +75,7 @@ include $(BUILD_SHARED_LIBRARY)
 include $(CLEAR_VARS)
 LOCAL_C_INCLUDES               := $(PACKAGE_C_INCLUDES)
 LOCAL_MODULE                   := JNIGenieAPIService
-LOCAL_SHARED_LIBRARIES 		   := libappbuilder libGenie
+LOCAL_SHARED_LIBRARIES 		   := libappbuilder libGenie libsamplerate
 LOCAL_LDLIBS                   := -llog
 LOCAL_SRC_FILES                :=   ../src/GenieAPIService/src/chat_history/chat_history.cpp \
                                     ../src/GenieAPIService/src/chat_request_handler/chat_request_handler.cpp \
@@ -84,7 +92,7 @@ LOCAL_SRC_FILES                :=   ../src/GenieAPIService/src/chat_history/chat
                                     ../src/GenieAPIService/src/response/response_dispatcher.cpp \
                                     ../src/common/utils.cpp \
                                     ../src/GenieAPIService/src/GenieAPIService.cpp
-#include $(BUILD_SHARED_LIBRARY)
+include $(BUILD_SHARED_LIBRARY)
 ##========================== Define client app variables =============================================
 #include $(CLEAR_VARS)
 #LOCAL_C_INCLUDES               := $(PACKAGE_C_INCLUDES)

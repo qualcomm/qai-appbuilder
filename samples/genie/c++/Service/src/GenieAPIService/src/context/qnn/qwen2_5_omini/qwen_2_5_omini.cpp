@@ -406,7 +406,7 @@ std::vector<int32_t> QInterface::Qwen2_5OMINI::ComputeCuSeqlensFromMask(const st
 
 IAudioEmbedding &QInterface::Qwen2_5OMINI::BuildAudioSamples()
 {
-    uint64_t frames;
+    drwav_uint64 frames;
     uint32_t channels;
     uint32_t sampleRate;
 
