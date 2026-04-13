@@ -25,11 +25,14 @@ void MyAllocCallback(const size_t size, const char **allocatedData);
 void GenieCallBack(const char* response, const GenieDialog_SentenceCode_t sentence_code, const void* user_data) {
     GenieContext* self = static_cast<GenieContext*>(const_cast<void*>(user_data));
     if (response && strlen(response) > 0) {
-        std::lock_guard<std::mutex> guard(self->m_stream_lock);
-        self->m_stream_answer += response;
-        // std::cout << response << std::flush;
-        g_CurLength += self->TokenLength(response);    // TODO: We should calculate the input length together. input + output < CONTENT_LENGTH.
-        // printf("g_CurLength = %d, g_MaxLength = %d\n", g_CurLength, g_MaxLength);
+        {
+            std::lock_guard<std::mutex> guard(self->m_stream_lock);
+            self->m_stream_answer += response;
+            // std::cout << response << std::flush;
+            g_CurLength += self->TokenLength(response);    // TODO: We should calculate the input length together. input + output < CONTENT_LENGTH.
+            // printf("g_CurLength = %d, g_MaxLength = %d\n", g_CurLength, g_MaxLength);
+        }
+        self->m_stream_cond.notify_one();  // Notify waiting thread that new data is available
     }
 
     if(g_CurLength >= g_MaxLength) { // Stop current generation.
@@ -74,6 +77,7 @@ void GenieTokenQueryCallback(
                 std::lock_guard<std::mutex> guard(self->m_stream_lock);
                 self->m_stream_answer += decoded;
             }
+            self->m_stream_cond.notify_one();  // Notify waiting thread that new data is available
             g_CurLength += self->TokenLength(decoded);
         }
     }
@@ -213,23 +217,25 @@ bool GenieContext::Query(const std::string& prompt, const Callback callback) {
 
     std::string response = "";
     while(m_inference_busy) {
-        if (m_stream_answer.size() > 0) {
-            std::lock_guard<std::mutex> guard(m_stream_lock);
+        std::unique_lock<std::mutex> lock(m_stream_lock);
+        // Wait for new data or inference completion (with timeout to check m_inference_busy)
+        m_stream_cond.wait_for(lock, std::chrono::milliseconds(100), [this] {
+            return !m_stream_answer.empty() || !m_inference_busy;
+        });
+        
+        if (!m_stream_answer.empty()) {
             response = m_stream_answer;
             m_stream_answer = "";
-        }
-
-        if (response.size() > 0) {
+            lock.unlock();  // Unlock before callback
+            
             //std::cout << response << std::flush;
             callback(response);
+            response = "";
         }
-
-        response = "";
-        std::this_thread::sleep_for(std::chrono::milliseconds(10)); // sleep 10 ms.
     }
 
-    // Sleep(10);
-    if (m_stream_answer.size() > 0) {   // send remainder data.
+    // Send remainder data after inference completes
+    if (m_stream_answer.size() > 0) {
         // std::cout << remainder << std::flush;
         // std::cout << "[more data]" << std::flush;
         callback(m_stream_answer);
@@ -264,23 +270,26 @@ std::string GenieContext::QueryByEmbedding(const std::vector<float>& embedding, 
     std::string response = "";
     std::string chunk="";
     while (m_embedding_inference_busy) {
-        if (m_stream_answer.size() > 0) {
-            std::lock_guard<std::mutex> guard(m_stream_lock);
+        std::unique_lock<std::mutex> lock(m_stream_lock);
+        // Wait for new data or inference completion (with timeout to check m_embedding_inference_busy)
+        m_stream_cond.wait_for(lock, std::chrono::milliseconds(100), [this] {
+            return !m_stream_answer.empty() || !m_embedding_inference_busy;
+        });
+        
+        if (!m_stream_answer.empty()) {
             response = m_stream_answer;
             m_stream_answer = "";
-        }
-
-        if (response.size() > 0) {
+            lock.unlock();  // Unlock before callback
+            
             if(callback) {
                 callback(response);
             }
             chunk += response;
+            response = "";
         }
-
-        response = "";
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
+    // Send remainder data after inference completes
     if (m_stream_answer.size() > 0) {
         if(callback) {
             callback(m_stream_answer);

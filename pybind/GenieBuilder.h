@@ -57,6 +57,7 @@ class GenieContext {
 
     public:
         std::mutex m_stream_lock;
+        std::condition_variable m_stream_cond;  // Condition variable for stream data notification
         std::string m_stream_answer {""};
 
     private:
