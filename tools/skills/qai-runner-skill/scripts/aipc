@@ -2,8 +2,6 @@
 # Copyright (c) 2026 Qualcomm Innovation Center, Inc. All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
-
-#!/usr/bin/env python3
 from __future__ import annotations
 
 import argparse
@@ -33,7 +31,21 @@ def main() -> int:
     if repo_dir not in sys.path:
         sys.path.insert(0, repo_dir)
 
-    import qai_onnxruntime as _ort  # noqa: PLC0415
+    # --- Platform-aware wrapper check ---
+    # On x86_64 Linux, onnxwrapper.py must be the x86 version (no qai_appbuilder).
+    import platform as _platform
+    _wrapper_path = os.path.join(repo_dir, "onnxwrapper.py")
+    if (_platform.machine() == "x86_64" and sys.platform.startswith("linux")
+            and os.path.exists(_wrapper_path)):
+        with open(_wrapper_path, encoding="utf-8") as _wf:
+            if "qai_appbuilder" in _wf.read():
+                sys.exit(
+                    "[aipc] ERROR: onnxwrapper.py is the ARM/Windows version (requires qai_appbuilder).\n"
+                    "This host is x86_64 Linux. Use the x86 wrapper instead:\n"
+                    "  cp skills/aipc-toolkit/scripts/onnxwrapper_x86.py ./onnxwrapper.py"
+                )
+
+    import onnxwrapper as _ort
 
     # Hot-patch: make `import onnxruntime as ort` resolve to the QNN wrapper.
     sys.modules["onnxruntime"] = _ort

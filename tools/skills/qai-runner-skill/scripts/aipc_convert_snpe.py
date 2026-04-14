@@ -50,7 +50,8 @@ def convert_onnx_to_snpe(
     onnx_path: str,
     output_path: str,
     float_bitwidth: int = 16,
-    preserve_io: bool = True
+    preserve_io: bool = True,
+    source_model_input_shapes=None
 ) -> int:
     """
     Converts ONNX model to SNPE DLC format using qairt-converter.
@@ -62,6 +63,9 @@ def convert_onnx_to_snpe(
         output_path (str): Path for the output DLC file.
         float_bitwidth (int): Floating point bitwidth (16 or 32).
         preserve_io (bool): Whether to preserve input/output layouts.
+        source_model_input_shapes (list[tuple[str, str]] | None): Optional list of
+            (input_name, dims) pairs to pass as --source_model_input_shape for
+            dynamic-input ONNX models.
 
     Returns:
         int: 0 if successful, non-zero otherwise.
@@ -102,6 +106,12 @@ def convert_onnx_to_snpe(
         "--output_path", output_path,
         "--float_bitwidth", str(float_bitwidth)
     ]
+
+    if source_model_input_shapes:
+        for input_name, dims in source_model_input_shapes:
+            converter_command.extend(
+                ["--source_model_input_shape", input_name, dims]
+            )
     
     if preserve_io:
         converter_command.extend(["--preserve_io"])
@@ -154,6 +164,16 @@ def main():
         action="store_true", 
         help="Do not preserve input/output layouts"
     )
+    parser.add_argument(
+        "--source-model-input-shape",
+        nargs=2,
+        action="append",
+        metavar=("INPUT_NAME", "DIMS"),
+        help=(
+            "Optional dynamic input shape override. Can be specified multiple times. "
+            "Example: --source-model-input-shape images 1,3,640,640"
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -193,7 +213,8 @@ def main():
         onnx_path=args.input,
         output_path=args.output,
         float_bitwidth=args.bitwidth,
-        preserve_io=not args.no_preserve_io
+        preserve_io=not args.no_preserve_io,
+        source_model_input_shapes=args.source_model_input_shape,
     )
 
     sys.exit(result)

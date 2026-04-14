@@ -1,258 +1,193 @@
 ---
 name: aipc-toolkit
-description: AIPC, AI Porting Conversion. Tools and workflows for model conversion, inspection, quantization, and inference to Qualcomm platform. Use this skill when working with AI model to ONNX, ONNX models for QNN/SNPE DLC, converting models to FP16/FP32, generating context binaries, or implementing inference for QNN/SNPE DLC.
+description: AIPC, AI Porting Conversion. Tools and workflows for model conversion, inspection, operator patching, quantization, and inference to Qualcomm platform. Use this skill when working with AI model to ONNX, ONNX models for QNN/SNPE DLC, converting models to FP16/FP32, patching unsupported operators, generating context binaries, or implementing inference for QNN/SNPE DLC.
 ---
 
 # AIPC Toolkit
 
-## Overview
+## Trigger Phrases
 
-This skill provides a suite of tools and documentation for developing and deploying AI models on Qualcomm AI PCs and edge devices. It covers the end-to-end workflow from AI model export to ONNX, model inspection and conversion, to inference implementation.
+**Always activate this skill** when the user mentions:
 
-!!! cautions and issues!!! 
-- The script should be run directly without copying to work folder if not sepcified. it is inside apic skill path.
-- there are work around to use qairt toolchain. follow the aipc instruction. don't change toolchain. it will make process fail.
-- python architecture detection is not reliable in windows because of emulation. use windows builtin command to detect arch.
+### Conversion
+- "convert model to qnn" / "qnn conversion" / "convert to qnn"
+- "convert model to dlc" / "snpe conversion" / "convert to dlc"
+- "convert onnx to qnn" / "convert onnx to snpe"
+- "generate context binary" / "context bin" / "qnn context binary"
+- "run qnn inference" / "snpe inference" / "qairt inference"
 
-**Prerequisites:**
-- `QAIRT_SDK_ROOT` environment variable must be set
+### Operator Patching
+- "operator not supported" / "unsupported operator"
+- "patch operator" / "operator patch"
+- "converter failed" / "conversion failed"
+- "dry run failed" / "unsupported ops found"
 
+### Diagnostics
+- "check htp" / "htp ready" / "htp check"
+- "aipc diagnose" / "environment check"
 
-## Core Tasks
-### 0. QARIRT environment setup
-for windows, Refer to `references\win_qairt_setup.md`. for linux, check offical web page - https://docs.qualcomm.com/doc/80-63442-10/topic/linux_setup.html
- 
-### 1. ONNX Model Export and Validation
+## When to Use
 
-Refer to `references/model_export_validation.md` for the complete guide on exporting models to ONNX and performing multi-stage validation. The ONNX model will be used for QNN/SNPE conversion.
+Use this skill for Qualcomm QAIRT/QNN/SNPE model bring-up:
+- Export model to ONNX
+- Inspect ONNX I/O
+- Convert to QNN or SNPE/DLC
+- Quantize model
+- Generate context binaries
+- Run inference and validation
 
-### 2. Float Model Conversion
+## Required Guardrails
 
-Convert ONNX models to either QNN or SNPE format with specified floating-point precision (FP16 or FP32).
+- Run skill scripts from their original skill path unless explicitly noted
+- Do not swap out QAIRT toolchains ad-hoc
+- `QAIRT_SDK_ROOT` must be set
+- On Windows, do not rely on Python arch detection — use OS-native arch commands
+- **Cross-platform shell commands:**
+  - Python scripts via `subprocess.run()` — no shell quoting issues
+  - **Inference execution policy (MANDATORY):**
+    - Run inference via `scripts/aipc` wrapper only.
+    - Do NOT call `snpe-net-run`, `qnn-net-run`, or raw backend CLIs directly for final inference/validation.
+  - Avoid PowerShell variables (`$_`, `$env:`, `!`) in bash-invoked commands — use temp `.ps1` files with `-File` or Python `glob.glob()` instead
+- **Escalation:** If conversion still fails after export/patch/retry, do not silently replace model architecture. Record error + logs + ONNX snapshot → escalate with full bundle. For B3/B4/B7 criteria → open `references/operator_patching.md`.
+- **Dynamic-input ONNX:** If ONNX has dynamic inputs, pass explicit shapes during conversion. See `references/qnn_conversion.md` (QNN: `--input-dim`) or `references/snpe_conversion.md` (SNPE: `--source-model-input-shape`).
 
+### ⚠️ CRITICAL: Context Binary Requirement (DO NOT SKIP)
 
+ARM Windows: `.dll.bin` is **REQUIRED** — `.dll` alone will NOT load.
+ARM Linux: `.so.bin` is **OPTIONAL** — `.so` works directly.
+For full platform table, troubleshooting flow, and usage → open `references/context_binary.md`.
 
-#### SNPE Model Conversion
+### ⚠️ CRITICAL: Operator Patching — Exhaustive Patching Required
 
-There are two ways to convert ONNX models to SNPE DLC format:
+Continue patching ALL unsupported ops until no replacement patterns exist. Never fall back to CPU.
+For patching rules, escalation policy (B3/B4/B7), and code templates → open `references/operator_patching.md`.
 
-**Method 1: Using `qairt-converter` (Recommended)**
+## Quick Start
 
-Use `qairt-converter` to convert ONNX models to SNPE DLC format. This is a unified converter that supports both QNN and SNPE formats.
-
-
-
-**Usage:**
-Choose host toolchain from system.
-For Windows, always use x86_64-windows-msvc.
-For x86 Linux, use x86_64-linux-clang. ARM Linux cross-compilation is not supported.
-
+Bootstrap a project folder:
 ```bash
-python ${QAIRT_SDK_ROOT}/bin/HOST_TOOLCHAIN/qairt-converter \
-    --input_network model.onnx \
-    --output_path model.dlc \
-    --float_bitwidth [16|32]
+python skills/aipc-toolkit/scripts/aipc_project_setup.py path/to/project
 ```
 
-#### QNN Model Conversion
+This attaches:
+- `assets/aipc_AGENTS.md` -> `<project>/AGENTS.md`
+- `assets/aipc_plan.md` -> `<project>/aipc_plan.md`
 
-Use `scripts/aipc_convert_fp.py` to convert ONNX models to QNN format. This script automates calls to `qnn-onnx-converter` and `qnn-model-lib-generator`.
+Then edit:
+- `aipc_plan.md` Config section
+- Placeholders in `AGENTS.md`
 
-For ARM Windows, need extra " HTP Context Binary Generation" step for inference.
+## Core Workflow
 
+1. **Setup QAIRT environment**
+   - Run `aienv.ps1` (Windows) or `source aienv.sh` (Linux)
+   - Verify `QAIRT_SDK_ROOT` is set
 
-**Usage:**
-```bash
-python scripts/aipc_convert_fp.py --precision [16|32]
-```
+2. **Export source model to ONNX**
+   - Use model's export script (e.g., `export_onnx.py`)
+   - Recommended: opset_version=13 or higher
 
-**Precision Options:**
-- `--precision 16`: FP16 conversion (default, recommended for NPU)
-- `--precision 32`: FP32 conversion
+3. **Inspect ONNX I/O and operator compatibility**
+   - Run: `python aipc_inspect_onnxio.py model.onnx`
+   - Run converter dry-run to detect unsupported operators
+   - **If unsupported operators found → Proceed to Step 4**
 
-**Generated Files and Folders:**
-- `{model_name}.bin` - Binary QNN model file
-- `{model_name}.cpp` - C++ representation of the model
-- `{model_name}.yaml` - Input/output configuration file (generated by inspection step)
-- `{model_name}.dll` - Compiled model library (in `test_libs_{model_name}_fp{precision}_{target_arch}/{architecture}/` directory)
-- `test_libs_{model_name}_fp{precision}_{target_arch}/` - Directory containing the compiled model library and supporting files
+4. **Operator Patching (if needed) — Approach Selection**
 
-**Cleanup Option:**
-By default, the script now includes a `--clean_up` flag for the qnn-model-lib-generator which cleans up temporary build files during compilation.
+   **Decision Tree:**
 
-**Example:**
-```bash
-python scripts/aipc_convert_fp.py --precision 16
-```
+   ```
+   1. Can you access PyTorch model BEFORE ONNX export?
+      ├─ YES → Go to 2
+      └─ NO  → Use ONNX Surgery (Approach 3)
 
-#### INT Model Conversion
+   2. Is the operator an explicit PyTorch module?
+      ├─ YES → In-Memory Module Replacement (Approach 1)
+      └─ NO  → Go to 3
 
-Use `scripts/aipc_convert_int.py` to convert ONNX models to QNN format with integer quantization (INT8/INT16). This script handles quantized model conversion with calibration data support.
+   3. Is the operator generated during ONNX export?
+      ├─ YES → Custom Symbolic Handlers (Approach 2)
+      └─ NO  → ONNX Surgery (Approach 3)
+   ```
 
-**Usage:**
-```bash
-python scripts/aipc_convert_int.py --precision [8|16]
-```
+   **Approach 1: In-Memory Model Patch (Preferred)**
+   - Modify model.forward() or replace module instances
+   - Use `references/operator_patching.md` templates
+   - Export patched model → `model_patched.onnx`
 
-**Precision Options:**
-- `--precision 8`: INT8 conversion (quantized, recommended for power efficiency)
-- `--precision 16`: INT16 conversion (quantized)
+   **Approach 2: Custom Symbolic Handlers (Excellent)**
+   - Register handlers before export: `register_custom_op_symbolic()`
+   - Define ONNX graph for unsupported aten ops
+   - Export with handlers active → `model_patched.onnx`
 
-**Generated Files and Folders:**
-- `{model_name}.bin` - Binary QNN quantized model file
-- `{model_name}.cpp` - C++ representation of the quantized model
-- `{model_name}.yaml` - Input/output configuration file (generated by inspection step)
-- `{model_name}.dll` - Compiled quantized model library (in `test_libs_{model_name}_int{precision}_{target_arch}/{architecture}/` directory)
-- `test_libs_{model_name}_int{precision}_{target_arch}/` - Directory containing the compiled quantized model library and supporting files
+   **Approach 3: ONNX Surgery (Fallback)**
+   - Use when source model is not accessible
+   - Directly modify ONNX graph to replace unsupported ops
+   - Validate: `onnx.checker.check_model(model_patched.onnx)`
 
-**Cleanup Option:**
-By default, the script now includes a `--clean_up` flag for the qnn-model-lib-generator which cleans up temporary build files during compilation.
+   **After Each Patch — Validation Gates:**
 
-**Example:**
-```bash
-python scripts/aipc_convert_int.py --precision 8
-```
+   | Gate | Check | Command | Pass Criteria |
+   |------|-------|---------|---------------|
+   | 1 | ONNX Validity | `onnx.checker.check_model()` | No exceptions |
+   | 2 | Converter | `qnn-onnx-converter --dry_run` | No unsupported ops |
+   | 3 | Numerical | Compare with baseline | Cosine ≥ 0.95 |
 
-### 3. Model Patching and Troubleshooting
+   - **Re-inspect:** Run dry-run to verify no unsupported ops remain
+   - **Iterate:** If new unsupported ops found → repeat Step 4
+   - **Track:** Update `aipc_plan.md` with ALL patched operators
+   - **Stop when:** All ops resolved OR exit criteria met (see Escalation Policy)
 
-If model conversion fails, follow this troubleshooting workflow:
+5. **Convert float model**
+   - QNN path: `python aipc_convert_fp.py --onnx model_patched.onnx ...`
+   - SNPE path: `python aipc_convert_snpe.py --onnx model_patched.onnx ...`
 
-1. **Verify Conversion Status:** Check the conversion output to identify specific errors or unsupported operators.
+6. **Optional: Quantization** (INT8/INT16/A16W8)
+   - Use `aipc_convert_int.py` with calibration data
 
-2. **Apply Model Patches:** Refer to `references/model_export_validation.md` for guidance on patching the model. This typically involves:
-   - Replacing unsupported operators in the original model
-   - Adjusting model architecture for QNN/SNPE compatibility
-   - Re-exporting the model to ONNX format
+7. **Context binary generation**
+   - ARM Windows: **REQUIRED** — inference will fail without it
+   - ARM Linux: **OPTIONAL** — `.so` works directly
+   - x86 Linux: Not applicable (CPU-only)
+   - **If generation fails (Windows)**: → Return to Step 4 (operator patching) — continue until no replacement patterns exist
+   - **If generation fails (Linux)**: → Can proceed with `.so` directly
 
-3. **Retry Conversion:** After patching, repeat the Model Conversion step with the updated ONNX model.
+8. **Inference + validation**
+   - Use `aipc` wrapper to run inference script
+   - Validate accuracy against ONNX baseline
 
-4. **Escalation:** If conversion continues to fail after patching attempts, do not substitute with a different model. Instead, escalate the issue for technical support to resolve the underlying conversion compatibility problem.
+> **⚠️ Step 7 MANDATORY for ARM targets**: Context binary requirements are defined under Guardrails. Without it on Windows ARM, model loading will FAIL.
+> - See `references/inference.md` for model file resolution search order.
 
-**Note:** Model patching should address the root cause of conversion failures rather than working around them with alternative models.
+---
 
-### 4. Model Inspection
+## Reference Map
 
-Use `scripts/aipc_inspect_onnxio.py` to inspect ONNX models and generate a YAML configuration file containing input and output tensor names, which will be used for inference scripts.
+Open only what you need:
 
-**Usage:**
-```bash
-python scripts/aipc_inspect_onnxio.py [model.onnx]
+| Topic | File |
+|-------|------|
+| Environment setup (Windows) | `references/win_qairt_setup.md` |
+| Export + ONNX validation | `references/model_export_validation.md` |
+| **Operator patching** | **`references/operator_patching.md`** |
+| QNN conversion | `references/qnn_conversion.md` |
+| SNPE conversion | `references/snpe_conversion.md` |
+| Quantization | `references/model_quantization.md` |
+| Context binary | `references/context_binary.md` |
+| Inference | `references/inference.md` |
+| Troubleshooting | `references/troubleshooting.md` |
 
-```
+## Script Index
 
-### 5. QNN/SNPE Model Inference
-Run converted models through the ONNX→QNN/SNPE wrapper.
+| Script | Purpose |
+|--------|---------|
+| `scripts/aipc` | ONNX wrapper loader |
+| `scripts/aipc_project_setup.py` | Project bootstrap |
+| `scripts/aipc_inspect_onnxio.py` | ONNX I/O inspection |
+| `scripts/aipc_convert_fp.py` | QNN float conversion |
+| `scripts/aipc_convert_int.py` | QNN quantized conversion |
+| `scripts/aipc_convert_snpe.py` | SNPE conversion wrapper |
+| `scripts/aipc_dev_gen_contextbin.py` | Context binary generation |
 
-- Copy `scripts/aipc` and `scripts/qai_onnxruntime.py` into the working folder.
-- Ensure `QAIRT_SDK_ROOT` is set and SDK runtime folders are on `PATH` (Windows) or `LD_LIBRARY_PATH` (Linux).
-- Execute:
-
-```bash
-python aipc path/to/onnx_inference.py
-```
-
-- On Windows, generate the HTP context binary first (section 6) and provide its path.
-- If I/O names fail, regenerate YAML:
-
-```bash
-python scripts/aipc_inspect_onnxio.py model.onnx
-```
-
-Common fixes: add SDK bins to `PATH`, use absolute context-binary paths, or regenerate the YAML I/O file.
-### 6. HTP Context Binary Generation (On Target Device)
-
-#### SNPE/DLC Context Binary Generation
-**Usage:**
-use absolute path for dlc model.
-in windows
-```bash
-qnn-context-binary-generator --backend QnnHtp.dll --model QnnModelDlc.dll --dlc_path [model.dlc] --binary_file [model.dlc]
-```
-in linux
-```bash
- ${QAIRT_SDK_ROOT}/bin/aarch64-oe-linux-gcc11.2/qnn-context-binary-generator --backend libQnnHtp.so --model libQnnModelDlc.so --dlc_path [model.dlc] --binary_file [model.dlc]
-```
-
-it will create `output` folder, and model.dlc.bin will  in `output` folder.
-
-#### QNN Context Binary Generation
-Use `scripts/aipc_dev_gen_contextbin.py` to generate a QNN context binary from a compiled model library (`.so`). This must be executed on the target device.
-
-
-**Usage:**
-```bash
-python scripts/aipc_dev_gen_contextbin.py --model path/to/model.so
-```
-
-### 7. End-to-End Deploy Workflow
-
-For a complete workflow starting from a PyTorch model:
-
-1. **PyTorch to ONNX Export:** Export your PyTorch model to ONNX format. Ensure any custom operators are handled or replaced if necessary.
-
-2. **Model Inspection:** Use `aipc_inspect_onnxio.py` to inspect the ONNX model and generate I/O configuration.
-
-3. **Model Conversion:** Convert the ONNX model to SNPE format with your desired precision (FP16 recommended).
-
-4. **Conversion Troubleshooting:** If conversion fails, apply model patches as described in `model_export_validation.md` and retry.
-
-5. **Context Binary Generation:** On the target device, generate the QNN context binary using `aipc_dev_gen_contextbin.py`.
-
-5. **Inference Implementation:** Integrate the converted model into your app using `qai_onnxruntime` and the `aipc` ONNX Runtime loader (QNN/SNPE).
-
-
-### 8.SNPE/QNNE Quantized Model Conversion (INT8/INT16)
-
-For quantized models requiring calibration data:
-
-Refer to `references/model_quantization.md` for calibration data preparation and detailed conversion steps.
-
-### 9. QAIRT Environment Setup
-
-**Prerequisites:** Before using any AIPC toolkit functionality, the QAIRT SDK environment must be properly configured.
-
-**Windows Setup:**
-Refer to `references/aipcenv_setup_windows.md` for detailed Windows-specific installation and configuration instructions.
-
-**Linux Setup:**
-Follow the official Qualcomm AI Engine Direct SDK documentation for Linux environment setup. Ensure the `QAIRT_SDK_ROOT` environment variable is properly set to point to your SDK installation directory.
-
-**Verification:**
-After setup, verify your environment by checking:
-```bash
-echo $QAIRT_SDK_ROOT
-ls $QAIRT_SDK_ROOT/bin/
-```
-
-The SDK should be accessible and all required binaries should be present in the bin directory.
-
-
-## Examples
-
-### Example: Deploy AI Application to Qualcomm Platform
-
-**User:** "Deploy this AI application to Qualcomm platform"
-
-**Agent:**
-```
-Deployment plan:
-1. Export to ONNX and validate with test inference
-2. Convert to QNN using aipc_convert_fp.py (FP16)
-3. If conversion fails, patch model and retry
-4. Inspect I/O with aipc_inspect_onnxio.py
-5. Generate context binary on target device
-6. Execute inference and validate performance
-7. Retrieve and verify results
-
-update and confirm it. let's run fast, don't walk!
-```
-## Available Resources
-
-### Scripts
-- `scripts/aipc_inspect_onnxio.py`: Inspects ONNX files and generates I/O YAML configurations
-- `scripts/aipc_convert_fp.py`: Converts ONNX models to QNN format with FP16/FP32 precision
-- `scripts/aipc_dev_gen_contextbin.py`: Generates QNN context binaries on target devices
-
-### Reference Documentation
-- `references/model_export_validation.md`: Complete guide for exporting and validating models, including patching strategies
-- `references/model_quantization.md`: Complete guide for model quantization and optimization techniques
+> ⚠️ **Inference must use `scripts/aipc` wrapper** (including remote target runs). Direct `snpe-net-run`/`qnn-net-run` is for diagnostics only, not acceptance validation.
+> ⚠️ **Always prefer the wrapper scripts** (`aipc_convert_fp.py`, `aipc_convert_int.py`) over calling `qnn-onnx-converter` or `qnn-model-lib-generator` directly.

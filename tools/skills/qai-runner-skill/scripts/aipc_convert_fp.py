@@ -2,12 +2,45 @@
 # Copyright (c) 2026 Qualcomm Innovation Center, Inc. All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
+"""
+QNN FP16/FP32 Conversion Script
+
+Converts ONNX models to QNN format (FP16 or FP32 precision).
+
+Usage:
+  # Simple conversion (static input model)
+  python aipc_convert_fp.py --onnx model.onnx --output_dir output --precision 16
+
+  # Dynamic input model (specify fixed dimensions)
+  python aipc_convert_fp.py --onnx model.onnx --output_dir output --precision 16 \\
+    --input-dims input:1,3,64,64
+
+  # Multiple models
+  python aipc_convert_fp.py --onnx *.onnx --output_dir output --precision 16
+
+  # FP32 precision
+  python aipc_convert_fp.py --onnx model.onnx --output_dir output --precision 32
+
+Known Issues & Solutions:
+  - "Missing command line inputs for dynamic inputs": Use --input-dims name:1,3,H,W
+  - "Access is denied": Use absolute output path
+  - "is not a cpp model file": Script auto-fixes this now
+  - Windows ARM64: Context binary generation required after conversion
+
+Args:
+  --onnx: Path(s) to ONNX file(s)
+  --output_dir: Output directory for generated libraries
+  --precision: 16 (FP16) or 32 (FP32)
+  --input-dims: Input dimensions for dynamic models (name:dim1,dim2,...)
+  --target_arch: Target architecture (default: windows-aarch64)
+"""
 
 import argparse
 import glob
 import os
 import platform
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -31,6 +64,24 @@ def _find_first_so(output_dir: str) -> str | None:
     return None
 
 
+def _cleanup_tmp_folders(search_dir: str) -> None:
+    """Remove tmp_<pid>/ folders created by qnn-model-lib-generator.
+
+    The generator creates temporary folders (e.g. tmp_1279/) containing
+    hundreds of .o object files that are never cleaned up automatically.
+    """
+    try:
+        for entry in os.scandir(search_dir):
+            if entry.is_dir() and entry.name.startswith("tmp_"):
+                try:
+                    shutil.rmtree(entry.path)
+                    print(f"Cleaned up temp folder: {entry.path}")
+                except OSError as e:
+                    print(f"Warning: could not remove temp folder {entry.path}: {e}")
+    except Exception:
+        pass
+
+
 def convert_onnx_to_qnn(
     qnn_sdk_root: str,
     host_arch: str,
@@ -39,15 +90,36 @@ def convert_onnx_to_qnn(
     onnx_paths: list[str],
     output_root: str | None,
     cleanup_intermediate: bool = True,
+    input_dims: list[tuple[str, str]] | None = None,
 ) -> int:
     """
-    Converts ONNX models to QNN model libraries (.so) from ONNX.
+    Converts one or more ONNX models to QNN model libraries (.so / .dll).
+
+    Runs two steps per model:
+      1. ``qnn-onnx-converter``      -> ONNX -> C++ + binary weights
+      2. ``qnn-model-lib-generator`` -> C++ + binary -> compiled shared library
 
     Args:
-        qnn_sdk_root (str): Path to the QNN SDK root directory.
-        host_arch (str): Host architecture (e.g., "x86_64-linux-clang").
-        target_arch (str): Target architecture (e.g., "aarch64-oe-linux-gcc11.2").
-        precision (int): 16 or 32 (float bitwidth for conversion).
+        qnn_sdk_root (str): Absolute path to the QAIRT SDK root directory
+            (value of ``QAIRT_SDK_ROOT``).
+        host_arch (str): Host toolchain folder under ``{qnn_sdk_root}/bin/``
+            (e.g. ``"x86_64-linux-clang"``, ``"x86_64-windows-msvc"``).
+        target_arch (str): Target architecture for the compiled library
+            (e.g. ``"aarch64-ubuntu-gcc9.4"``, ``"x86_64-linux-clang"``).
+        precision (int): Float bitwidth -> ``16`` (FP16) or ``32`` (FP32).
+        onnx_paths (list[str]): Paths to ONNX files to convert. If empty,
+            all ``*.onnx`` files under the current directory are used.
+        output_root (str | None): Root directory for ``test_libs_*`` output
+            folders. Defaults to the directory containing each ``.onnx`` file.
+        cleanup_intermediate (bool): Remove intermediate ``.cpp``, ``.bin``,
+            and ``_net.json`` files after a successful build. Default ``True``.
+        input_dims (list[tuple[str, str]] | None): Explicit input dimensions
+            for models with dynamic shapes. Each tuple is
+            ``(input_name, "dim1,dim2,...")``, e.g.
+            ``[("images", "1,3,640,640")]``.
+
+    Returns:
+        int: ``0`` if all models converted successfully, ``1`` if any failed.
     """
     if not qnn_sdk_root:
         raise ValueError("QAIRT_SDK_ROOT environment variable not set. Please source the QAIRT environment script.")
@@ -133,12 +205,38 @@ def convert_onnx_to_qnn(
             "--preserve_io"
         ]
 
+        if input_dims:
+            for input_name, dims in input_dims:
+                converter_command.extend(["-d", input_name, dims])
+
         print(f"Running converter command: {' '.join(converter_command)}")
         try:
-            subprocess.run(converter_command, check=True, env=model_env)
+            subprocess.run(converter_command, check=True, env=model_env, encoding='utf-8', errors='replace')
             print(f"Successfully converted ONNX to C++ and binary for {model_name}")
+            
+            # Fix: Handle case where converter creates file without .cpp extension
+            # This is a known QAIRT SDK bug on Windows where qnn-onnx-converter sometimes
+            # outputs the model graph file without the .cpp extension (e.g., "model" instead
+            # of "model.cpp"). This causes qnn-model-lib-generator to fail with:
+            #   "ValueError: <path> is not a cpp model file"
+            # 
+            # Root cause: The converter writes to --output_path directly and may strip the
+            # extension on certain Windows configurations. The _net.json file gets its
+            # extension correctly, but the main .cpp file does not.
+            #
+            # Workaround: Check if file exists without extension and rename it.
+            if not os.path.exists(abs_cpp_path):
+                cpp_no_ext = abs_cpp_path.replace('.cpp', '')
+                if os.path.exists(cpp_no_ext) and not cpp_no_ext.endswith('.bin'):
+                    os.rename(cpp_no_ext, abs_cpp_path)
+                    print(f"Fixed: Renamed {cpp_no_ext} to {abs_cpp_path}")
         except subprocess.CalledProcessError as e:
-            print(f"Error during ONNX conversion for {model_name}: {e}")
+            print(f"\n[ERROR] QNN conversion failed for {model_name}")
+            print(f"\nTroubleshooting tips:")
+            print(f"  1. If error mentions 'dynamic inputs', add: --input-dims name:1,3,H,W")
+            print(f"  2. If 'access denied', ensure output path is writable")
+            print(f"  3. If 'unsupported operator', check dry-run first")
+            print(f"\nFailed command: {' '.join(converter_command)}")
             failed += 1
             continue
 
@@ -148,13 +246,12 @@ def convert_onnx_to_qnn(
             "-c", abs_cpp_path,
             "-b", abs_bin_path,
             "-o", abs_output_dir_path,
-            "-t", target_arch,
-            "--clean_up"
+            "-t", target_arch
         ]
 
         print(f"Running generator command: {' '.join(generator_command)}")
         try:
-            subprocess.run(generator_command, check=True, env=model_env)
+            subprocess.run(generator_command, check=True, env=model_env, encoding='utf-8', errors='replace')
             print(f"Successfully generated model library for {model_name} at {abs_output_dir_path}")
             converted += 1
         except subprocess.CalledProcessError as e:
@@ -179,6 +276,10 @@ def convert_onnx_to_qnn(
                         print(f"Cleaned up intermediate file: {file_path}")
                     except OSError as e:
                         print(f"Could not remove intermediate file {file_path}: {e}")
+
+            # Clean up temp folders created by qnn-model-lib-generator
+            # These are named tmp_<pid>/ and contain hundreds of .o object files
+            _cleanup_tmp_folders(abs_model_dir)
 
         print(f"Successfully converted {model_path} to {abs_output_dir_path}")
 
@@ -337,7 +438,28 @@ if __name__ == "__main__":
         dest="cleanup_intermediate",
         help="Don't cleanup intermediate files (.bin, .cpp, .json) after successful conversion.",
     )
+    parser.add_argument(
+        "--input-dim",
+        action="append",
+        default=[],
+        dest="input_dims",
+        metavar=("INPUT_NAME,DIMS"),
+        help="Explicit input dimensions for dynamic inputs. Format: input_name,1,3,224,224 (repeatable). Example: --input-dim input,1,3,64,64",
+    )
     args = parser.parse_args()
+
+    parsed_input_dims = None
+    if args.input_dims:
+        parsed_input_dims = []
+        for item in args.input_dims:
+            if ',' in item:
+                parts = item.split(',', 1)
+                input_name = parts[0]
+                dims = parts[1]
+                parsed_input_dims.append((input_name, dims))
+            else:
+                print(f"Warning: Invalid input-dim format: {item}. Expected: input_name,dim1,dim2,...")
+                parsed_input_dims.append((item, "1"))
 
     qnn_sdk_root = os.environ.get("QAIRT_SDK_ROOT")
     if not qnn_sdk_root:
@@ -363,5 +485,6 @@ if __name__ == "__main__":
             args.onnx,
             args.output_root,
             args.cleanup_intermediate,
+            parsed_input_dims,
         )
     )

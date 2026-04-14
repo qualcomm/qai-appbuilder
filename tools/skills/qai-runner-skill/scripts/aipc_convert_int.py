@@ -5,8 +5,39 @@
 
 #!/usr/bin/env python3
 """
-Portable INT Model Conversion Script
-Converts ONNX models to INT quantized QNN format for aarch64 architecture.
+QNN INT8/A16W8 Quantized Conversion Script
+
+Converts ONNX models to quantized QNN format (INT8 or A16W8 precision).
+
+Usage:
+  # Simple conversion (static input model)
+  python aipc_convert_int.py --input_network model.onnx --input_list calibration_list.txt
+
+  # Dynamic input model (specify fixed dimensions)
+  python aipc_convert_int.py --input_network model.onnx --input_list calib.txt \\
+    --input-dim input,1,3,64,64
+
+  # Custom bit widths (A16W8)
+  python aipc_convert_int.py --input_network model.onnx --input_list calib.txt \\
+    --act_bw 16 --weight_bw 8
+
+  # INT8 (A8W8)
+  python aipc_convert_int.py --input_network model.onnx --input_list calib.txt \\
+    --act_bw 8 --weight_bw 8
+
+Known Issues & Solutions:
+  - "Missing command line inputs for dynamic inputs": Use --input-dim name:1,3,H,W
+  - "Access is denied": Use absolute output path
+  - "is not a cpp model file": Script auto-fixes this (same as aipc_convert_fp.py)
+  - "calibration_list.txt not found": Create calibration list with raw input files
+
+Args:
+  --input_network: Path to ONNX file
+  --input_list: Path to calibration list file (required)
+  --act_bw: Activation bitwidth (default: 16)
+  --weight_bw: Weight bitwidth (default: 8)
+  --input-dim: Input dimensions for dynamic models (repeatable)
+  --target-arch: Target architecture (default: auto-detected)
 """
 
 import os
@@ -16,7 +47,22 @@ import glob
 import argparse
 import platform
 import re
+import shutil
 from pathlib import Path
+
+
+def _cleanup_tmp_folders(search_dir: str) -> None:
+    """Remove tmp_<pid>/ folders created by qnn-model-lib-generator."""
+    try:
+        for entry in os.scandir(search_dir):
+            if entry.is_dir() and entry.name.startswith("tmp_"):
+                try:
+                    shutil.rmtree(entry.path)
+                    print(f"Cleaned up temp folder: {entry.path}")
+                except OSError as e:
+                    print(f"Warning: could not remove temp folder {entry.path}: {e}")
+    except Exception:
+        pass
 
 def get_cpu_arch_from_systeminfo():
     try:
@@ -114,23 +160,25 @@ def find_onnx_files(search_dir="."):
     return list(search_path.glob("*.onnx"))
 
 
-def get_model_info(model_path, act_bw=16, weight_bw=8):
+def get_model_info(model_path, act_bw=16, weight_bw=8, output_root=None):
     """Extract model information from the ONNX file path."""
     model_path = Path(model_path)
     model_name = model_path.stem
     model_name_quant = f"{model_name}_a{act_bw}_w{weight_bw}"
     model_dir = model_path.parent
-    
+    abs_model_dir = os.path.abspath(str(model_dir))
+
     # Use os.path.join for cross-platform compatibility
     output_dir_name = f"test_libs_{model_name_quant}_aarch64_a{act_bw}_w{weight_bw}"
-    output_dir_path = os.path.join(str(model_dir), output_dir_name)
-    cpp_path = os.path.join(str(model_dir), f"{model_name_quant}.cpp")
-    bin_path = os.path.join(str(model_dir), f"{model_name_quant}.bin")
+    base_out_dir = os.path.abspath(output_root) if output_root else abs_model_dir
+    output_dir_path = os.path.join(base_out_dir, output_dir_name)
+    cpp_path = os.path.join(abs_model_dir, f"{model_name_quant}.cpp")
+    bin_path = os.path.join(abs_model_dir, f"{model_name_quant}.bin")
     
     return {
         "model_path": str(model_path),
         "model_name": model_name_quant,
-        "model_dir": str(model_dir),
+        "model_dir": abs_model_dir,
         "output_dir_path": output_dir_path,
         "cpp_path": cpp_path,
         "bin_path": bin_path
@@ -139,7 +187,8 @@ def get_model_info(model_path, act_bw=16, weight_bw=8):
 
 def convert_model(model_info, cwd, calibration_list_path, act_bw=16, weight_bw=8,
                   qnn_sdk_root=None, host_toolchain="",
-                  device_toolchain="", cleanup_intermediate=True):
+                  device_toolchain="", cleanup_intermediate=True,
+                  input_dims=None):
     """
     Convert ONNX model to quantized QNN format.
     
@@ -212,6 +261,10 @@ def convert_model(model_info, cwd, calibration_list_path, act_bw=16, weight_bw=8
         "--act_bw", str(act_bw),
         "--weight_bw", str(weight_bw)
     ]
+
+    if input_dims:
+        for input_name, dims in input_dims:
+            converter_cmd.extend(["-d", input_name, dims])
     
     # Build the qnn-model-lib-generator command
     lib_gen_path = os.path.join(qnn_sdk_root, "bin", host_toolchain, "qnn-model-lib-generator")
@@ -220,8 +273,7 @@ def convert_model(model_info, cwd, calibration_list_path, act_bw=16, weight_bw=8
         "-c", abs_cpp_path,
         "-b", abs_bin_path,
         "-o", abs_output_dir,
-        "-t", device_toolchain,
-        "--clean_up"
+        "-t", device_toolchain
     ]
     
     try:
@@ -230,17 +282,39 @@ def convert_model(model_info, cwd, calibration_list_path, act_bw=16, weight_bw=8
         print(f"Command: {' '.join(converter_cmd)}")
         subprocess.run(
             converter_cmd,
-            check=True
+            check=True,
+            encoding='utf-8',
+            errors='replace'
         )
+        print(f"Successfully converted ONNX to C++ and binary for {model_info['model_name']}")
         
+        # Fix: Handle case where converter creates file without .cpp extension
+        # This is a known QAIRT SDK bug on Windows where qnn-onnx-converter sometimes
+        # outputs the model graph file without the .cpp extension (e.g., "model" instead
+        # of "model.cpp"). This causes qnn-model-lib-generator to fail with:
+        #   "ValueError: <path> is not a cpp model file"
+        # 
+        # Root cause: The converter writes to --output_path directly and may strip the
+        # extension on certain Windows configurations. The _net.json file gets its
+        # extension correctly, but the main .cpp file does not.
+        #
+        # Workaround: Check if file exists without extension and rename it.
+        if not os.path.exists(abs_cpp_path):
+            cpp_no_ext = abs_cpp_path.replace('.cpp', '')
+            if os.path.exists(cpp_no_ext) and not cpp_no_ext.endswith('.bin'):
+                os.rename(cpp_no_ext, abs_cpp_path)
+                print(f"Fixed: Renamed {cpp_no_ext} to {abs_cpp_path}")
+
         # Execute the lib generator command
         print(f"\nRunning qnn-model-lib-generator...")
         print(f"Command: {' '.join(lib_gen_cmd)}")
         subprocess.run(
             lib_gen_cmd,
-            check=True
+            check=True,
+            encoding='utf-8',
+            errors='replace'
         )
-        
+
         print(f"Successfully converted {model_path} to {output_dir_path}")
 
         # Cleanup intermediate files if requested
@@ -254,18 +328,22 @@ def convert_model(model_info, cwd, calibration_list_path, act_bw=16, weight_bw=8
                     except OSError as e:
                         print(f"Could not remove intermediate file {file_path}: {e}")
 
+            # Clean up temp folders created by qnn-model-lib-generator
+            _cleanup_tmp_folders(model_info["model_dir"])
+
         return True
         
     except subprocess.CalledProcessError as e:
-        print(f"Error converting {model_path}:", file=sys.stderr)
-        print(f"Return code: {e.returncode}", file=sys.stderr)
-        if e.stdout:
-            print(f"stdout: {e.stdout}", file=sys.stderr)
-        if e.stderr:
-            print(f"stderr: {e.stderr}", file=sys.stderr)
+        print(f"\n[ERROR] INT quantization failed for {model_info['model_name']}")
+        print(f"\nTroubleshooting tips:")
+        print(f"  1. If error mentions 'dynamic inputs', add: --input-dim name:1,3,H,W")
+        print(f"  2. If 'access denied', ensure output path is writable")
+        print(f"  3. If 'calibration_list' not found, check --input_list path")
+        print(f"  4. If 'unsupported operator', check dry-run first")
+        print(f"\nFailed command: {' '.join(converter_cmd)}")
         return False
     except Exception as e:
-        print(f"Unexpected error converting {model_path}: {e}", file=sys.stderr)
+        print(f"\n[ERROR] Unexpected error converting {model_path}: {e}")
         return False
 
 
@@ -273,30 +351,36 @@ def main():
     """Main function to process all ONNX files."""
     # Parse command-line arguments
     parser = argparse.ArgumentParser(
-        description='Convert ONNX models to quantized QNN format for aarch64 architecture',
+        description='Convert ONNX models to quantized QNN format (INT8/A16W8)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Prerequisites:
   Before running this script, ensure you have:
-  1. Set QAIRT_SDK_ROOT environment variable (or use default: /local/mnt/workspace/project/qnn/qairt/2.41.0)
-  2. Set QNN_AARCH64_UBUNTU_GCC_94 environment variable
-  3. Sourced the QNN environment setup script (e.g., source linuxqnn2.sh)
+  1. QAIRT_SDK_ROOT environment variable set
+  2. Calibration data (raw float32 binary files)
+  3. Calibration list file (one path per line)
+  4. Sourced QNN environment setup script
+
+Calibration Data Format:
+  - Raw float32 binary files (.raw)
+  - Shape matching model input (e.g., 1x3x64x64 = 49152 floats)
+  - 50-200 representative samples recommended
 
 Examples:
-  # Convert all ONNX files in current directory with default settings (a16_w8)
-  python3 aipc_convert_int.py
-  
-  # Convert specific ONNX file with custom calibration list
-  python3 aipc_convert_int.py --input_network model.onnx --input_list my_calib.txt
-  
-  # Convert with custom bit widths (e.g., a16_w8)
-  python3 aipc_convert_int.py --act_bw 16 --weight_bw 8
-  
-  # Convert specific file with custom output path
-  python3 aipc_convert_int.py --input_network model.onnx --output_path ./output/model_a16_w8.cpp
-  
-  # Use custom QNN SDK path
-  python3 aipc_convert_int.py --qnn_sdk_root /path/to/qnn/sdk
+  # Convert with default settings (A16W8)
+  python aipc_convert_int.py --input_network model.onnx --input_list calib.txt
+
+  # INT8 quantization (A8W8)
+  python aipc_convert_int.py --input_network model.onnx --input_list calib.txt \\
+    --act_bw 8 --weight_bw 8
+
+  # Dynamic input model
+  python aipc_convert_int.py --input_network model.onnx --input_list calib.txt \\
+    --input-dim input,1,3,64,64
+
+  # Custom output directory
+  python aipc_convert_int.py --input_network model.onnx --input_list calib.txt \\
+    --output-root ./qnn_output
         """
     )
     
@@ -357,23 +441,64 @@ Examples:
     )
 
     parser.add_argument(
+        '--output-root',
+        type=str,
+        default=None,
+        dest='output_root',
+        help='Optional root folder for generated test_libs_* output (default: alongside the .onnx).'
+    )
+
+    parser.add_argument(
         '--no-cleanup',
         action='store_false',
         dest='cleanup_intermediate',
         help="Don't cleanup intermediate files (.bin, .cpp, .json) after successful conversion."
     )
 
+    parser.add_argument(
+        '--input-dim',
+        action='append',
+        default=[],
+        dest='input_dims',
+        metavar=("INPUT_NAME,DIMS"),
+        help="Explicit input dimensions for dynamic inputs. Format: input_name,1,3,224,224 (repeatable). Example: --input-dim input,1,3,64,64"
+    )
+
     args = parser.parse_args()
+
+    parsed_input_dims = None
+    if args.input_dims:
+        parsed_input_dims = []
+        for item in args.input_dims:
+            if ',' in item:
+                parts = item.split(',', 1)
+                input_name = parts[0]
+                dims = parts[1]
+                parsed_input_dims.append((input_name, dims))
+            else:
+                print(f"Warning: Invalid input-dim format: {item}. Expected: input_name,dim1,dim2,...")
+                parsed_input_dims.append((item, "1"))
     
     # Get current working directory using os.getcwd() for portability
     cwd = os.getcwd()
     
     # Check if calibration list exists
     calibration_list_path = args.input_list
-    if not os.path.exists(os.path.join(cwd, calibration_list_path)):
-        print(f"Warning: {calibration_list_path} not found in current directory", file=sys.stderr)
-        print("Calibration list is required for quantization", file=sys.stderr)
-        response = input("Continue anyway? (y/n): ")
+    calib_path_full = os.path.join(cwd, calibration_list_path)
+    if not os.path.exists(calib_path_full):
+        print(f"\n[WARNING] Calibration list not found: {calib_path_full}", file=sys.stderr)
+        print(f"\nCalibration list is REQUIRED for quantization.")
+        print(f"Format: One raw input file path per line.")
+        print(f"Example calibration_list.txt:")
+        print(f"  calib_data/sample_001.raw")
+        print(f"  calib_data/sample_002.raw")
+        print(f"  ...")
+        print(f"\nEach .raw file should be:")
+        print(f"  - Float32 binary data")
+        print(f"  - Shape matching model input (e.g., 1x3x64x64 = 49152 floats)")
+        print(f"  - 50-200 representative samples recommended")
+        print(f"\nCreate calibration data first, then re-run this script.")
+        response = input("\nContinue anyway without calibration? (y/n): ")
         if response.lower() != 'y':
             sys.exit(1)
     
@@ -400,7 +525,7 @@ Examples:
     fail_count = 0
     
     for onnx_file in onnx_files:
-        model_info = get_model_info(onnx_file, args.act_bw, args.weight_bw)
+        model_info = get_model_info(onnx_file, args.act_bw, args.weight_bw, args.output_root)
         
         # Override output path if specified
         if args.output_path and len(onnx_files) == 1:
@@ -409,7 +534,8 @@ Examples:
             model_info['bin_path'] = os.path.splitext(args.output_path)[0] + '.bin'
         
         if convert_model(model_info, cwd, calibration_list_path, args.act_bw, args.weight_bw,
-                        args.qnn_sdk_root, args.host_arch, args.target_arch, args.cleanup_intermediate):
+                        args.qnn_sdk_root, args.host_arch, args.target_arch, args.cleanup_intermediate,
+                        parsed_input_dims):
             success_count += 1
         else:
             fail_count += 1

@@ -9,10 +9,11 @@ Always prefer using a **dedicated Python script** for exporting models. This app
 - **Debugging**: You can easily inspect the model state before export.
 - **In-Memory Patching**: You can fix unsupported operators without modifying the library source code.
 
-### Safe Operator Patching (Template)
+### Operator Patching
 
-If your model uses operators like `Einsum` that are not yet supported by the QNN converter, use the following pattern to patch the model instance in memory.
+For detailed guidance on patching unsupported operators (e.g., `Einsum`, `GridSample`), see **[In-Memory Operator Patching](operator_patching.md)**.
 
+**Quick template:**
 ```python
 import torch
 import types
@@ -20,7 +21,6 @@ import types
 def patch_model_for_qnn(model):
     def patched_forward(self, x):
         # Implementation using MatMul, Reshape, Transpose, etc.
-        # Ensure it matches the mathematical logic of the original op
         return ...
 
     # Replace the forward method of a specific layer instance
@@ -32,8 +32,10 @@ def patch_model_for_qnn(model):
 # Usage
 model = load_original_model()
 patch_model_for_qnn(model)
-torch.onnx.export(model, dummy_input, "model.onnx", opset_version=12)
+torch.onnx.export(model, dummy_input, "model.onnx", opset_version=13)
 ```
+
+> ⚠️ **Validation is mandatory after patching** — see [Section 2](#2-validation-workflow).
 
 ## 2. Validation Workflow
 

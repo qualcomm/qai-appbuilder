@@ -4,11 +4,17 @@
 
 This repository includes the **agent skill** for QAIRT model conversion & inference on Qualcomm devices.
 
-After you activated this skill, AI agents can automatically assist you with:
+After this skill is activated, AI agents can automatically assist you with:
 - Model conversion from ONNX to QNN/SNPE formats
 - Model deployment on Qualcomm AI PCs and edge devices
 - Inference implementation using the qai_appbuilder library
 
+You can also use the [Complete project workflow](#complete-project-workflow) section when you want the agent to execute the project workflow as a whole, rather than assisting step by step.
+
+AIPC (AI Porting Conversion) is the development name. It is released as part of QAI_APPBUILDER, and you may use either term to trigger the skill.
+
+
+Please note: this is an experimental feature and still requires further improvements.
 ---
 
 ## Skill Installations
@@ -22,6 +28,8 @@ A skill is a reusable package of tools, scripts, and documentation that extends 
 ### How to install skill?
 
 Please install agent skills using your preferred AI models, such as [Qwen Code](https://qwenlm.github.io/qwen-code-docs/en/users/features/skills/) or else, you can also install through Visual Studio Code extenstion cline.
+
+You can also use `install skill globally/locally from @skill_source_path`.
 
 ---
 
@@ -87,7 +95,9 @@ Current tests are performed from a YOLOv8 PyTorch environment. To set up:
 "Create YOLOv8 PyTorch example and test"
 ```
 
-#### Test Scenarios
+#### Assistant workflow
+
+Example prompts:
 
 - **ONNX Inference Test**
   - Ensure you have an ONNX model and inference script ready
@@ -103,4 +113,61 @@ Current tests are performed from a YOLOv8 PyTorch environment. To set up:
   - Prompt: `"use QAI-Runner-Skill, create qnn inference script from @onnx_inference.py using @yolov8n_a16_w8_qnn_ctx.bin model . follow the guide strictly." `
   - prompt: `"use QAI-Runner-Skill, create qnn inference script from @onnx_inference.py using @yolov8n_a16_w8_qnn_ctx.bin context binary model "`
   - prompt: `"use QAI-Runner-Skill, create snpe inference script from @onnx_inference.py using @yolov8n.dlc model . "`
+
+- **Quantize Model **
+  - Prompt: `"Create W8A16 QNN quantization. Use COCO128 for calibration."`
+
+- **Operator Patching**
+  - Prompt: `"Follow QAI-Runner-Skill and patch the model."`
+
   
+### Complete project workflow
+This workflow is designed to transform a PyTorch source model and inference flow into QNN or SNPE inference without requiring step-by-step prompts.
+Use the following prompts to run a complete AIPC workflow for the current project.
+
+- `"Create an AIPC project in this folder."`
+  - Stay in the current source path and create the project in place.
+
+- Adjust the project configuration in `aipc_plan.md`.
+  - This is a user action, not a prompt.
+
+- `"Auto-fill any remaining configuration values using derived or default values, then show the project configuration."`
+  - Ensure the project configuration is complete before continuing.
+
+- `"Do all project work."`
+  - Execute the full project workflow based on the configured plan.
+
+
+### Caution
+
+AI agents are not always stable. They may misinterpret instructions, drift away from the requested workflow, or perform unsafe actions if not properly constrained.
+
+If you notice the agent is not following instructions, re-run your request with an explicit constraint prefix, for example:
+
+- `"follow aipc skill" + <your work prompt>`
+
+This forces the agent to adhere to the AIPC skill workflow and reference rules.
+
+### Tested Scenarios
+
+- **WoS (Windows on Snapdragon)**:
+  - Convert and run inference on the same device (**X Elite 2**)
+
+- **Remote ARM Linux**:
+  - **qcs6490**:
+    - Convert **SNPE** model (FP / quantized) on an **x86 host**
+    - Run inference on **ARM Linux target (qcs6490)**
+  - **RB8**:
+    - Convert **QNN / SNPE** model on an **x86 host**
+    - Run inference on **ARM Linux target (RB8)**
+
+### Known Issues
+
+- **qcs6490 + QNN quantization**:
+  - May fail with:
+    - `<E> The SocModel doesn't support FP16`
+  - Root cause:
+    - `--preserve_io` in conversion can trigger FP16 preservation on some SoC configurations
+  - Workaround:
+    - Use **SNPE DLC** quantization flow instead (generate quantized `.dlc` and run with SNPE runtime)
+
