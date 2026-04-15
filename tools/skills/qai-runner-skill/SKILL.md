@@ -57,6 +57,11 @@ ARM Windows: `.dll.bin` is **REQUIRED** — `.dll` alone will NOT load.
 ARM Linux: `.so.bin` is **OPTIONAL** — `.so` works directly.
 For full platform table, troubleshooting flow, and usage → open `references/context_binary.md`.
 
+Linux cross-host note:
+- If host arch differs from Linux target arch (e.g., x86 host + aarch64 target), context-binary generation is **best-effort only**.
+- On generation error in this scenario, log the reason and proceed to inference with `.so`.
+- Do not block unless inference itself fails.
+
 ### ⚠️ CRITICAL: Operator Patching — Exhaustive Patching Required
 
 Continue patching ALL unsupported ops until no replacement patterns exist. Never fall back to CPU.
@@ -146,17 +151,19 @@ Then edit:
    - Use `aipc_convert_int.py` with calibration data
 
 7. **Context binary generation**
-   - ARM Windows: **REQUIRED** — inference will fail without it
-   - ARM Linux: **OPTIONAL** — `.so` works directly
-   - x86 Linux: Not applicable (CPU-only)
-   - **If generation fails (Windows)**: → Return to Step 4 (operator patching) — continue until no replacement patterns exist
-   - **If generation fails (Linux)**: → Can proceed with `.so` directly
+  - ARM Windows: **REQUIRED** — inference will fail without it
+  - ARM Linux: **OPTIONAL** — `.so` works directly
+  - x86 Linux: Not applicable (CPU-only)
+  - **If generation fails (Windows)**: → Return to Step 4 (operator patching) — continue until no replacement patterns exist
+  - **If generation fails (Linux)**: → Can proceed with `.so` directly
+  - **If generation fails (Linux cross-host/cross-arch)**: → Skip this step, log fallback, proceed with `.so`
 
 8. **Inference + validation**
    - Use `aipc` wrapper to run inference script
    - Validate accuracy against ONNX baseline
 
-> **⚠️ Step 7 MANDATORY for ARM targets**: Context binary requirements are defined under Guardrails. Without it on Windows ARM, model loading will FAIL.
+> **⚠️ Step 7 MANDATORY for Windows ARM**: Without `.dll.bin`, model loading will FAIL.
+> On Linux ARM, context binary is optional and `.so` fallback is valid.
 > - See `references/inference.md` for model file resolution search order.
 
 ---

@@ -135,7 +135,7 @@ Orchestrator Agent  ◄─── aipc_plan.md (Config + Progress Summary)
      │         ▼
      ├──► Context Binary Agent ─────────► {MODEL_NAME}_context.bin  [QNN-4 only]
      │         ▼
-     ├──► Inference Agent ───────────────► example.py / results     [QNN-5 / SNPE-5]
+     ├──► Inference Agent ───────────────► infer_{MODEL_NAME}.py / results     [QNN-5 / SNPE-5]
      │         ▼
      └──► Validation Agent ──────────────► REPORT.md / Pass/Fail    [Phase 6]
 ```
@@ -423,6 +423,13 @@ If cosine similarity < 0.95 → **Blocking Condition B6**: stop and report to us
 - Linux: `lib{MODEL_NAME}.so`
 - Windows: `{MODEL_NAME}.dll`
 - Config: `{TARGET_DEVICE}`
+- **Remote device (optional)**: `{RETMOE_DEVICE_INFO}` from `aipc_plan.md`, containing:
+  - **(a) SSH information**: host/user/port and key path if needed
+  - **(b) Working folder**: target directory for upload + execution
+  - **(c) Setup script path**: target QAIRT env script to source before generation
+
+> If `{RETMOE_DEVICE_INFO}` is set, run context-binary generation on the remote target
+> through SSH in that working folder (do not run on local host).
 
 **Outputs**:
 - Linux: `lib{MODEL_NAME}.so.bin` (optional — `.so` works directly)
@@ -440,6 +447,16 @@ python skills/aipc-toolkit/scripts/aipc_dev_gen_contextbin.py \
   --model_lib {MODEL_NAME}.dll \
   --output {MODEL_NAME}.dll.bin
 ```
+
+```bash
+# Remote target execution pattern (Linux/Windows target via SSH)
+ssh <user>@<host> "cd <target_workdir> && \
+  source <target_qairt_setup_script> && \
+  python skills/aipc-toolkit/scripts/aipc_dev_gen_contextbin.py \
+    --model_lib <target_model_lib_path> \
+    --output <target_context_bin_path>"
+```
+> Use values from `{RETMOE_DEVICE_INFO}` when remote mode is enabled.
 
 > Use **absolute paths**. Run on the **target device**, not the host.
 > If target device is unavailable → **Blocking Condition B5**.
@@ -527,7 +544,7 @@ Recommended execution pattern (conceptual):
 2. **If Windows context binary is MISSING → STOP → Blocking Condition B8**
 3. **Linux**: Can proceed with `.so` library directly
 
-**Outputs**: `example.py`, inference results
+**Outputs**: `infer_{MODEL_NAME}.py`, inference results
 
 **Workflow** (`aipc_plan.md` QNN-5 / SNPE-5):
 
@@ -539,7 +556,7 @@ Recommended execution pattern (conceptual):
 
 2. **Ensure `QAIRT_SDK_ROOT` is set** (already done via `{QAIRT_ENV_SETUP}`).
 
-3. **Write `example.py`** with preprocessing, inference call, and postprocessing for `{MODEL_NAME}`.
+3. **Write `infer_{MODEL_NAME}.py`** with preprocessing, inference call, and postprocessing for `{MODEL_NAME}`.
 
 4. **Run inference** via the project wrapper:
    ```bash

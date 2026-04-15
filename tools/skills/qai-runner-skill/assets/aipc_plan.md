@@ -501,7 +501,7 @@ WEIGHT_BITWIDTH   = <!-- 8 (typical); see note above for other modes -->
   - cosine similarity vs. ONNX baseline ≥ 0.99 (FP) / ≥ 0.95 (INT8)
   - collect latency / FPS on target runtime
 
-**Exit Criteria**: `example.py` runs end-to-end and produces correct results.
+**Exit Criteria**: `infer_{MODEL_NAME}.py` runs end-to-end and produces correct results.
 
 ---
 
@@ -679,7 +679,7 @@ DLC_FILE      = <!-- {MODEL_NAME}.dlc  or  {MODEL_NAME}_quantized.dlc -->
 | Context binary (Linux) | `lib{MODEL_NAME}.so.bin` | ⬜ |
 | Context binary (Windows) | `{MODEL_NAME}.dll.bin` | ⬜ |
 | Export script | `export_onnx.py` | ⬜ |
-| Inference script | `example.py` | ⬜ |
+| Inference script | `infer_{MODEL_NAME}.py` | ⬜ |
 | Calibration data | `{CALIB_LIST}` + `calibration_raw/` | ⬜ |
 | Project report | `REPORT.md` | ⬜ |
 
@@ -691,7 +691,7 @@ DLC_FILE      = <!-- {MODEL_NAME}.dlc  or  {MODEL_NAME}_quantized.dlc -->
 | DLC (FP) | `{OUTPUT_DIR}/{MODEL_NAME}.dlc` | ⬜ |
 | DLC (quantized) | `{OUTPUT_DIR}/{MODEL_NAME}_quantized.dlc` | ⬜ |
 | Export script | `export_onnx.py` | ⬜ |
-| Inference script | `example.py` | ⬜ |
+| Inference script | `infer_{MODEL_NAME}.py` | ⬜ |
 | Calibration data | `{CALIB_LIST}` + `calibration_raw/` | ⬜ |
 | Project report | `REPORT.md` | ⬜ |
 

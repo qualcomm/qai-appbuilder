@@ -48,6 +48,11 @@ Step 5: If all patterns exhausted
 - **Linux**: → Can proceed with `.so` library directly
 - **Alternative**: Consider SNPE flow (`.dlc`) if QNN HTP is incompatible
 
+Linux cross-host/cross-arch rule:
+- When host and Linux target architectures differ, context-binary generation is best-effort.
+- If generation fails, skip context-binary step, log failure reason, and continue inference with `.so`.
+- Only escalate if inference/validation fails afterward.
+
 ---
 
 ## QNN Context Binary Generation
@@ -84,6 +89,7 @@ dumpbin /headers C:\path\to\model.dll | find "machine"
 | Windows | `AMD64` | `ARM64` (`.dll`) | ❌ Blocked on host — run on ARM target device |
 
 If architectures do not match, **do not run** `qnn-context-binary-generator` locally. Stop and instruct the user to run on the target device.
+If target-side generation still fails for Linux, context binary remains optional; proceed with `.so`.
 
 ### Usage
 

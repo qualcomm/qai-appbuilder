@@ -21,6 +21,10 @@
 - **Linux**: → Can proceed with `.so` library directly
 - **Alternative**: Try SNPE flow (`.dlc`) if QNN HTP is incompatible
 
+Linux cross-host/cross-arch clarification:
+- If context-binary generation fails while targeting Linux from a different host architecture, skip context-binary and run inference with `.so`.
+- Record the skip reason in the project issue log.
+
 > **⚠️ IMPORTANT**: Pass the `.onnx` file path to `InferenceSession`. The wrapper searches for a matching QAIRT model file **in the same directory**. The QAIRT model **must** exist with the correct naming — if not found, loading will fail. See [Model File Resolution](#model-file-resolution) below.
 
 **Debugging**: the same inference script can be run with `python aipc script.py` (QAIRT via `onnxwrapper`) or with `python script.py` (standard ONNX via `onnxruntime`) to compare outputs between QAIRT and ONNX baseline.
@@ -48,6 +52,58 @@ ssh ubuntu@<target-ip>
 . /home/ubuntu/aienv.sh
 python aipc path/to/inference_script.py
 ```
+
+### Linux ARM HTP Environment (manual export only)
+
+If HTP initialization fails, set runtime environment variables in the current shell first.
+Do not assume a fixed SoC ID or DSP arch; use values provided by the device owner.
+
+```bash
+# Required SDK root (typically set by your environment setup)
+export QAIRT_SDK_ROOT=/path/to/qairt/<version>
+export QNN_SDK_ROOT="${QNN_SDK_ROOT:-$QAIRT_SDK_ROOT}"
+
+# Device-specific values (must match target hardware)
+export PRODUCT_SOC=<soc_id>
+export DSP_ARCH=<dsp_arch>
+
+# DSP and runtime library paths
+export ADSP_LIBRARY_PATH="$QNN_SDK_ROOT/lib/hexagon-v${DSP_ARCH}/unsigned"
+export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$QNN_SDK_ROOT/lib/aarch64-oe-linux-gcc11.2"
+```
+
+Then run inference normally:
+
+```bash
+python aipc path/to/inference_script.py
+```
+
+If logs show:
+- `Stub lib id mismatch: expected ..., detected ...`
+- `Failed to create transport ... error: 1008`
+
+then check:
+1. `QAIRT_SDK_ROOT` points to intended version.
+2. `QNN_SDK_ROOT` is aligned with `QAIRT_SDK_ROOT`.
+3. `PRODUCT_SOC` and `DSP_ARCH` are correct for the target device.
+4. `ADSP_LIBRARY_PATH` points to matching `hexagon-v${DSP_ARCH}`.
+5. `LD_LIBRARY_PATH` includes target ARM64 runtime libs from the same SDK.
+6. No older QNN/HTP libraries appear earlier in search paths.
+
+Quick verification:
+
+```bash
+echo "QAIRT_SDK_ROOT=$QAIRT_SDK_ROOT"
+echo "QNN_SDK_ROOT=$QNN_SDK_ROOT"
+echo "PRODUCT_SOC=$PRODUCT_SOC"
+echo "DSP_ARCH=$DSP_ARCH"
+echo "ADSP_LIBRARY_PATH=$ADSP_LIBRARY_PATH"
+echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
+```
+
+Notes:
+- Do not hardcode `PRODUCT_SOC=9075` or `DSP_ARCH=73` in shared docs; these are platform-specific examples only.
+- Keep placeholders (`<soc_id>`, `<dsp_arch>`) in reusable instructions.
 
 If you invoke commands remotely through SSH in a single line, source the setup script first in the same shell session:
 

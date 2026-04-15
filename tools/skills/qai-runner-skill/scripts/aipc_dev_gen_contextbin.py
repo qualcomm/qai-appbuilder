@@ -37,7 +37,36 @@ import sys
 import platform
 import shutil
 
+def _select_linux_arch_dir(sdk_root: str) -> str:
+    machine = platform.machine().lower()
+    if machine in ("aarch64", "arm64"):
+        candidates = [
+            "aarch64-oe-linux-gcc11.2",
+            "aarch64-ubuntu-gcc9.4",
+            "aarch64-oe-linux-gcc9.3",
+            "aarch64-oe-linux-gcc8.2",
+        ]
+    else:
+        candidates = ["x86_64-linux-clang"]
+
+    for arch_dir in candidates:
+        gen = os.path.join(sdk_root, "bin", arch_dir, "qnn-context-binary-generator")
+        be = os.path.join(sdk_root, "lib", arch_dir, "libQnnHtp.so")
+        if os.path.exists(gen) and os.path.exists(be):
+            return arch_dir
+
+    # Safe fallback to preserve prior behavior if no candidate matched.
+    return "x86_64-linux-clang"
+
 def run_generator(model_path, output_path=None, profiling=False):
+    model_path = os.path.abspath(model_path)
+    if output_path:
+        output_path = os.path.abspath(output_path)
+
+    if not os.path.exists(model_path):
+        print(f"Error: model file not found: {model_path}")
+        sys.exit(2)
+
     sdk_root = os.environ.get("QAIRT_SDK_ROOT")
     if not sdk_root:
         print("Error: QAIRT_SDK_ROOT environment variable is not set.")
@@ -45,7 +74,7 @@ def run_generator(model_path, output_path=None, profiling=False):
 
     system = platform.system().lower()
     if system == "linux":
-        arch_dir = "x86_64-linux-clang"
+        arch_dir = _select_linux_arch_dir(sdk_root)
         generator_exe = "qnn-context-binary-generator"
         backend_name = "libQnnHtp.so"
     elif system == "windows":
@@ -68,8 +97,13 @@ def run_generator(model_path, output_path=None, profiling=False):
         sys.exit(2)
 
     base = os.path.basename(model_path)
-    name_without_ext = os.path.splitext(os.path.splitext(base)[0])[0]
-    binary_name = os.path.basename(output_path) if output_path else name_without_ext
+    name_without_ext = os.path.splitext(base)[0]
+    if output_path:
+        binary_name = os.path.basename(output_path)
+        if binary_name.endswith(".bin"):
+            binary_name = binary_name[:-4]
+    else:
+        binary_name = name_without_ext
     
     command = [generator_path, "--backend", backend_path, "--model", model_path, "--binary_file", binary_name]
     
@@ -86,7 +120,7 @@ def run_generator(model_path, output_path=None, profiling=False):
         print(f"An error occurred: {e}")
         sys.exit(1)
 
-    actual_output = os.path.join("output", binary_name)
+    actual_output = os.path.abspath(os.path.join("output", f"{binary_name}.bin"))
     if os.path.exists(actual_output):
         if output_path:
             os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
@@ -96,7 +130,7 @@ def run_generator(model_path, output_path=None, profiling=False):
             print(f"Output: {os.path.abspath(actual_output)}")
     else:
         files = []
-        for root, dirs, filenames in os.walk("output"):
+        for root, dirs, filenames in os.walk(os.path.abspath("output")):
             for f in filenames:
                 if f.endswith(".bin"):
                     files.append(os.path.join(root, f))
