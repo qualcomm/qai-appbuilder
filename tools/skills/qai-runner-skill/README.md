@@ -14,7 +14,10 @@ You can also use the [Complete project workflow](#complete-project-workflow) sec
 AIPC (AI Porting Conversion) is the development name. It is released as part of QAI_APPBUILDER, and you may use either term to trigger the skill.
 
 
-Please note: this is an experimental feature and still requires further improvements.
+```
+⚠️ Disclaimer: This is an experimental feature and still requires further improvements. Codes generated with this skill is the starting point of code development. All generated codes 
+must complete code review, testing, security validation, and other required software release processes before being released.
+```
 ---
 
 ## Skill Installations
