@@ -11,6 +11,7 @@
 
 #include "qwen_2_5.h"
 #include "qwen25_image_processor.hpp"
+#include "../../torch_helper/base.h"
 
 IVisionEmbedding &QInterface::Qwen2_5::BuildImgPixel()
 {
@@ -22,7 +23,7 @@ IVisionEmbedding &QInterface::Qwen2_5::BuildImgPixel()
     return *this;
 }
 
-IVisionEmbedding & QInterface::Qwen2_5::MergeEmbedding()
+IVisionEmbedding &QInterface::Qwen2_5::MergeEmbedding()
 {
     static const int32_t rows{151655};
     const unsigned long token_count = prompt_token_size_;
@@ -38,7 +39,13 @@ IVisionEmbedding & QInterface::Qwen2_5::MergeEmbedding()
         std::memcpy(dest_ptr, src_ptr, cols_ * sizeof(float));
     }
 
-    FloatBufferView img_embedding_fbuf{img_inferred_buf_};
+    if (img_inferred_buffers_.empty())
+    {
+        embedded_bin_ = std::move(embedded_raw_fbuf);
+        return *this;
+    }
+
+    FloatBufferView img_embedding_fbuf{img_inferred_buffers_[0]};
 
     // 统计当前序列中的图像 token 数量
     size_t n_image_tokens = 0;
@@ -117,15 +124,15 @@ IVisionEmbedding & QInterface::Qwen2_5::MergeEmbedding()
         embedded_bin_.reserve(left_count + mid_count + right_count);
         embedded_bin_.insert(embedded_bin_.end(),
                              embedded_raw_fbuf.data(),
-                              embedded_raw_fbuf.data() + left_count);
+                             embedded_raw_fbuf.data() + left_count);
 
         embedded_bin_.insert(embedded_bin_.end(),
                              img_embedding_fbuf.pointer_,
-                              img_embedding_fbuf.pointer_ + mid_count);
+                             img_embedding_fbuf.pointer_ + mid_count);
 
         embedded_bin_.insert(embedded_bin_.end(),
-                              embedded_raw_fbuf.data() + (pos + 1) * D,
-                              embedded_raw_fbuf.data() + embedded_raw_fbuf.size());  // question_embedding_buf_.end()
+                             embedded_raw_fbuf.data() + (pos + 1) * D,
+                             embedded_raw_fbuf.data() + embedded_raw_fbuf.size());  // question_embedding_buf_.end()
 
         // 再次替换：将 new_input_ids 中所有 image_token_id 对应的行，用 image_embeds 逐条覆盖
         // （与 Python 保持一致的“顺序映射”逻辑）

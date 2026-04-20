@@ -34,13 +34,49 @@ public:
             kArrayString
         } check_type_;
         bool optional_{};
-        bool additional_{false};  // for string is is_forcast_dir, for bool valye is true or false
+        bool additional_{false};  // for string will set to model_root, for bool valye is true or false
     };
 
     explicit ConfigFixer(const IModelConfig &model_config) : model_config_{model_config}
     {
-        std::ifstream file(model_config_.get_config_path());
-        file >> j_;
+        const std::string &config_path = model_config_.get_config_path();
+
+        // Trim leading whitespace to check if it's JSON
+        std::string trimmed_config = config_path;
+        size_t start = trimmed_config.find_first_not_of(" \t\n\r");
+        if (start != std::string::npos)
+        {
+            trimmed_config = trimmed_config.substr(start);
+        }
+
+        // Check if config_path is a JSON string (starts with '{')
+        if (!trimmed_config.empty() && trimmed_config[0] == '{')
+        {
+            // Parse JSON string directly
+            try
+            {
+                j_ = json::parse(config_path);
+                My_Log{My_Log::Level::kInfo} << "Parsed config from JSON string\n";
+            } catch (const std::exception &e)
+            {
+                My_Log{My_Log::Level::kError} << "Failed to parse JSON config in ConfigFixer: " << e.what() << "\n";
+                throw;
+            }
+        }
+        else
+        {
+            // Read from file
+            std::ifstream file(config_path);
+            if (!file.good())
+            {
+                My_Log{My_Log::Level::kError} << "Cannot open config file in ConfigFixer: " << config_path << "\n";
+                throw std::runtime_error("Cannot open config file: " + config_path);
+            }
+            file >> j_;
+            My_Log{My_Log::Level::kInfo} << "Loaded config from file: " << config_path << "\n";
+        }
+
+        My_Log{My_Log::Level::kInfo} << j_.dump(4) << "\n";
     }
 
     json FixConfig();
@@ -82,7 +118,7 @@ inline json ConfigFixer::FixConfig()
             {"tokenizer", json::json_pointer("/dialog/tokenizer/path"), FixedInfo::kString, false},
             {"extensions", json::json_pointer("/dialog/engine/backend/extensions"), FixedInfo::kString, true},
             {"ctx-bins", json::json_pointer("/dialog/engine/model/binary/ctx-bins"), FixedInfo::kArrayString, false},
-            {"forecast", json::json_pointer("/dialog/ssd-q1/forecast-prefix-name"), FixedInfo::kArrayString, true, true},
+            {"forecast", json::json_pointer("/dialog/ssd-q1/forecast-prefix-name"), FixedInfo::kString, true, true},
             {"poll", json::json_pointer("/dialog/engine/backend/QnnHtp/poll"),FixedInfo::kBool, true, false}
     };
 
@@ -115,12 +151,8 @@ inline bool ConfigFixer::FixedPath(json &j, ConfigFixer::FixedInfo &info)
                         {
                             bool rs{false};
                             std::string file_name;
-
-                            if (!j.is_string())
-                            {
-                                My_Log{} << info.item_str_ << " json object is not string\n";
-                                goto done;
-                            }
+                            fs::path current_path;
+                            std::string current_path_str;
 
                             if (info.additional_)
                             {
@@ -129,14 +161,36 @@ inline bool ConfigFixer::FixedPath(json &j, ConfigFixer::FixedInfo &info)
                                 goto done;
                             }
 
-                            file_name = fs::path{j.get<std::string>()}.filename().generic_string();
-                            if (file_name.empty())
+                            if (!j.is_string())
                             {
-                                My_Log{} << info.item_str_ << " json object file name is not empty\n";
+                                My_Log{} << info.item_str_ << " json object is not string\n";
                                 goto done;
                             }
 
+                            if (j.empty())
+                            {
+                                My_Log{} << info.item_str_ << " json object file name is  empty\n";
+                                goto done;
+                            }
+
+                            current_path = fs::path{j.get_ref<const std::string &>()};
+                            file_path = current_path.generic_string();
+                            if (!current_path.is_absolute())
+                            {
+                                file_path = model_config_.get_model_path() + "/" + file_path;
+                            }
+
+                            if (File::IsFileExist(file_path))
+                            {
+                                rs = true;
+                                goto done;
+                            }
+
+                            My_Log{} << "file path: " << current_path_str << " is not exist, will check: ";
+
+                            file_name = current_path.filename().generic_string();
                             file_path = model_config_.get_model_path() + "/" + file_name;
+                            My_Log{}.original(true) << file_path << "\n";
                             if (File::IsFileExist(file_path))
                             {
                                 rs = true;

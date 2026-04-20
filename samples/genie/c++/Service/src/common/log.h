@@ -15,6 +15,7 @@
 #include <iomanip>
 #include <filesystem>
 #include <functional>
+#include <stdarg.h>
 
 #if defined(_WIN32) || defined(__WIN32__) || defined(WIN32)
 
@@ -308,6 +309,32 @@ private:
                                                 {
                                                     return LoggerHelper::get_level_str(lev_);
                                                 }};
+
+
+    std::string Format2Buffer(const char* fmt, ...)
+    {
+        /* @formatter:off */
+        va_list ap;
+        va_start(ap, fmt);
+        int needed = vsnprintf(nullptr, 0, fmt, ap);
+        if (needed < 0)
+        {
+            va_end(ap);
+            throw std::runtime_error("vsnprintf before alloc failed: not a null-terminate buffer");
+        }
+
+        needed++;
+        std::string buf;
+        buf.reserve(needed);
+        buf[needed-1] = '\0';
+
+        if(vsnprintf(buf.data(), needed, fmt, ap)){
+            throw std::runtime_error("vsnprintf after alloc failed: not a null-terminate buffer");
+        }
+        va_end(ap);
+        /* @formatter:on */
+        return buf;
+    }
 };
 
 #endif //LOG_H

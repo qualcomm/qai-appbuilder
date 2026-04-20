@@ -29,6 +29,7 @@ class ModelManager::QNNImpl
         {
             std::string serialized_file_;
             std::vector<std::string> bin_files_stack_;
+            std::vector<std::string> tail_files_stack_;
         };
         std::unordered_map<ModelType, EmbeddingFileSet> embedding_file_set;
 
@@ -53,7 +54,16 @@ class ModelManager::QNNImpl
                 {
                     if (!File::IsFileExist(bin_file) || File::IsFileEmpty(bin_file))
                     {
-                        My_Log{My_Log::Level::kError} << "bin file: " << bin_file << " is invalid\n";
+                        My_Log{} << "bin file: " << bin_file << " is invalid\n";
+                        goto next_check;
+                    }
+                }
+
+                for (auto &tail_file: files.tail_files_stack_)
+                {
+                    if (!File::IsFileExist(tail_file) || File::IsFileEmpty(tail_file))
+                    {
+                        My_Log{} << "tail_file: " << tail_file << " is invalid\n";
                         goto next_check;
                     }
                 }
@@ -73,6 +83,11 @@ class ModelManager::QNNImpl
                 for (const auto &bin_file: files.bin_files_stack_)
                 {
                     infer_resource->bin_stacks_.emplace_back(File::ReadFile<uint8_t>(bin_file));
+                }
+
+                for (const auto &tail_file: files.tail_files_stack_)
+                {
+                    infer_resource->tails_bin_stacks_.emplace_back(File::ReadFile<uint8_t>(tail_file));
                 }
 
                 next_check:;
@@ -95,9 +110,10 @@ class ModelManager::QNNImpl
             model_type_ = ModelType::Text;
             embedding_file_set.emplace(ModelType{ModelType::Vision}, EmbeddingFileSet{
                     model_path + "/veg.serialized.bin",
+                    {},
                     {
-                            model_path + "/raw/position_ids.bin",
-                            model_path + "/raw/attention_mask.bin"
+                            model_path + "/raw/glb_gn.bin",
+                            model_path + "/raw/sub_gn.bin"
                     }
             });
         }
@@ -198,8 +214,27 @@ struct ModelManager::ModeVerifier
                 return CreateIfVerifiedImpl();
             }
 
-            if (File::IsFileExist(self_->config_file_) && !File::IsFileEmpty(self_->config_file_))
+            // Check if config_file_ is a JSON string (starts with '{')
+            std::string trimmed_cfg = self_->config_file_;
+            size_t cfg_start = trimmed_cfg.find_first_not_of(" \t\n\r");
+            if (cfg_start != std::string::npos)
+            {
+                trimmed_cfg = trimmed_cfg.substr(cfg_start);
+            }
+
+            bool is_json_string = (!trimmed_cfg.empty() && trimmed_cfg[0] == '{');
+
+            if (is_json_string)
+            {
+                // config_file_ is a JSON string, not a file path
                 return CreateIfVerifiedImpl();
+            }
+
+            // config_file_ is a file path, check if it exists
+            if (File::IsFileExist(self_->config_file_) && !File::IsFileEmpty(self_->config_file_))
+            {
+                return CreateIfVerifiedImpl();
+            }
 
             if (self_->known_model_path_.empty())
             {
@@ -233,9 +268,37 @@ struct ModelManager::ModeVerifier
         std::shared_ptr<ContextBase> CreateIfVerifiedImpl() override
         {
             {
-                std::ifstream file(self_->config_file_);
                 json j;
-                file >> j;
+
+                // Check if config_file_ is a JSON string (starts with '{')
+                std::string trimmed = self_->config_file_;
+                size_t start = trimmed.find_first_not_of(" \t\n\r");
+                if (start != std::string::npos)
+                {
+                    trimmed = trimmed.substr(start);
+                }
+
+                if (!trimmed.empty() && trimmed[0] == '{')
+                {
+                    // Parse JSON string directly
+                    try
+                    {
+                        j = json::parse(self_->config_file_);
+                    } catch (const std::exception &e)
+                    {
+                        return nullptr;
+                    }
+                }
+                else
+                {
+                    // Read from file
+                    std::ifstream file(self_->config_file_);
+                    if (!file.good())
+                    {
+                        return nullptr;
+                    }
+                    file >> j;
+                }
 
                 if (!j.contains("dialog"))
                 {
@@ -268,11 +331,17 @@ struct ModelManager::ModeVerifier
 
             self_->qnn_embedding_ = QNNImpl::TryCreate(self_->model_path_, files[0]);
             if (self_->qnn_embedding_.embedding_type_ == QNNEmbeddingType::None)
+            {
                 throw std::runtime_error("qnn model does not match any embedding rules");
-
+            }
             My_Log{} << "check qnn embedding model type: " << self_->qnn_embedding_.model_types_.to_string() << "\n";
+
             ahead:
-            return std::make_shared<GenieContext>(*self_);
+
+            auto context = std::make_shared<GenieContext>(*self_);
+
+
+            return context;
         }
     };
 
@@ -401,6 +470,37 @@ bool ModelManager::LoadModelByName(const std::string &new_model, bool &first_loa
 
 bool ModelManager::InitializeConfig(bool load)
 {
+
+    // Check if config_file_ is a JSON string (starts with '{')
+    std::string trimmed_config = config_file_;
+    size_t start = trimmed_config.find_first_not_of(" \t\n\r");
+    if (start != std::string::npos)
+    {
+        trimmed_config = trimmed_config.substr(start);
+    }
+
+
+    if (!trimmed_config.empty() && trimmed_config[0] == '{')
+    {
+        // config_file_ is a JSON string, not a file path
+        My_Log{} << "ModelManager::InitializeConfig: Using JSON string configuration\n";
+
+        // For JSON string config, we need to set some default values
+        // since we don't have a file path to extract them from
+        model_name_ = "json_config_model";
+        model_path_ = ".";  // Current directory
+        model_root_ = ".";
+
+        if (!load)
+        {
+            return true;
+        }
+
+        bool result = LoadModel();
+        return result;
+    }
+
+    // Original file path handling
     fs::path config_path{config_file_};
     My_Log{} << "ModelManager::LoadModel,configFile=" + config_path.generic_string() << std::endl;
 
@@ -439,7 +539,10 @@ bool ModelManager::LoadModel()
     Clean();
     prompt_type_ = LoadPromptTemplates(model_path_ + "/prompt.json");
     if (prompt_type_ == PromptType::Unknown)
+    {
         return false;
+    }
+
     My_Log{} << "check the prompt type: " << prompt_type_.to_string() << "\n";
 
     thinking_model_ = [this]() -> bool
@@ -449,6 +552,7 @@ bool ModelManager::LoadModel()
                str_contains(model_name_, "Hunyuan");
     }();
     My_Log{} << "check if is thinking model: " << thinking_model_ << "\n";
+
 
     genieModelHandle = ModeVerifier::TryCreate(this);
     if (!genieModelHandle)
@@ -619,6 +723,11 @@ std::string ModelManager::ResolveKnownModelPath(const std::string &model_feature
     static bool config_list_ready{
             [this]()
             {
+                fs::path config_path{RootDir + "/config"};
+                if (!fs::is_directory(config_path))
+                {
+                    return true;
+                }
                 for (const auto &entry: fs::directory_iterator(RootDir + "/config"))
                 {
                     if (!entry.is_directory())

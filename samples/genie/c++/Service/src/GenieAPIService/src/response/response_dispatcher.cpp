@@ -45,9 +45,18 @@ void ResponseDispatcher::ResetProcessor()
 void ResponseDispatcher::Prepare(ModelInput &model_input,
                                  bool is_tool,
                                  bool is_stream,
-                                 const httplib::Request &req)
+                                 const httplib::Request &req,
+                                 bool is_dll_mode)
 {
-    this->req_ = &const_cast<httplib::Request &>(req);
+    if (is_dll_mode)
+    {
+        this->req_ = nullptr;
+    }
+    else
+    {
+        this->req_ = &const_cast<httplib::Request &>(req);
+    }
+
     this->model_input_ = model_input;
     is_stream_ = is_stream;
     is_tool_ = is_tool;
@@ -58,10 +67,11 @@ void ResponseDispatcher::Prepare(ModelInput &model_input,
 bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::Response *res)
 {
     auto handle = model_config_.get_genie_model_handle().lock();
-    if (!handle) {
+    if (!handle)
+    {
         return false;
     }
-    
+
     std::string toolResponse; // Save tool call information
     std::string finishReason = "stop";
     std::string response_buffer;
@@ -165,7 +175,9 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
         }
         else
         {
-            ResponseTools::post_stream_data(*sink, "raise the exception while processing stream response");
+            // Include actual exception message for debugging
+            std::string error_msg = std::string("raise the exception while processing stream response: ") + e.what();
+            ResponseTools::post_stream_data(*sink, error_msg);
         }
         return false;
     }
@@ -173,6 +185,12 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
 
 bool ResponseDispatcher::isConnectionAlive() const
 {
+    // If req_ is null or not a real HTTP connection (e.g., DLL mode), assume connection is alive
+    if (!req_)
+    {
+        return true;
+    }
+
     auto closed = req_->is_connection_closed();
     if (closed)
     {

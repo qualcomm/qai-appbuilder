@@ -51,7 +51,13 @@ struct File
     static std::vector<T> ReadFile(const std::string &file_name, bool binary = true);
 
     template<typename T>
-    static void WriteBinaryFile(const std::vector<T> &buf, const std::string &file_name);
+    static void WriteBinaryFile(const std::vector<T> &buffer, const std::string &file_name)
+    {
+        WriteBinaryFile(buffer.data(), buffer.size() , file_name);
+    }
+
+    template<typename T>
+    static void WriteBinaryFile(const T *buf, int size, const std::string &file_name);
 };
 
 template<typename F, typename... Args>

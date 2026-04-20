@@ -25,8 +25,7 @@ namespace fs = std::filesystem;
 class Config
 {
 public:
-    Config(int argc, char *argv[]) : argc_{argc}, argv_{argv}
-    {}
+    Config(int argc, char *argv[]) : argc_{argc}, argv_{argv} {}
 
     bool Process();
 
@@ -116,14 +115,19 @@ inline bool Config::Process()
         return false;
     }
 
-    CurrentDir = fs::path{buffer}.generic_string();
+    auto current_dir_tmp = fs::path{buffer};
+    CurrentDir = current_dir_tmp.generic_string();
     My_Log{} << "current work dir: " << CurrentDir << std::endl;
 
-    RootDir = fs::path{argv_[0]}.is_absolute()
-                  ? fs::path{argv_[0]}.parent_path().generic_string()
-                  : fs::path{CurrentDir + "/" + argv_[0]}
-                    .parent_path()
-                    .generic_string();
+    auto argv0 = fs::path{argv_[0]};
+    RootDir = argv0.is_absolute()
+              ? argv0.parent_path().generic_string()
+              : current_dir_tmp == current_dir_tmp.root_path()
+                ? CurrentDir
+                : fs::path{CurrentDir + "/" + argv_[0]}
+                        .parent_path()
+                        .generic_string();
+
     My_Log{} << "root dir: " << RootDir << std::endl;
     My_Log::ShowStatus();
 

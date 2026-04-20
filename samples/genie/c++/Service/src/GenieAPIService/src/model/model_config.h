@@ -100,7 +100,6 @@ public:
         return genieModelHandle;
     }
 
-protected:
     mutable json sampler_;
     std::shared_ptr<ContextBase> genieModelHandle{};
     std::string model_root_;
@@ -124,6 +123,7 @@ protected:
     float loraAlpha = 0.5;
     QNNEmbedding qnn_embedding_;
 
+protected:
     void UpdateModeList() const;
 
     friend class Config;

@@ -17,12 +17,12 @@
 
 using json = nlohmann::ordered_json;
 
-// TODO: bad impl!
 class ModelInputBuilder
 {
 public:
     ModelInputBuilder(ChatHistory &chat_history, IModelConfig &model_config) : chat_history_{chat_history},
                                                                                model_config_{model_config} {}
+// TODO: bad impl!
 
     ModelInput &Build(json &data, bool &is_tool)
     {
@@ -34,7 +34,7 @@ public:
                 json &user_content = e["content"];
                 if (user_content.is_string())
                 {
-                    model_input_.text_ = user_content;
+                    model_input_.text_ = user_content.get<std::string>();
                 }
                 else if (user_content.is_array())
                 {
@@ -49,11 +49,46 @@ public:
                     throw ReportError{"user content is not a object or array"};
                 }
             }
+            else if (e["role"] == "system")
+            {
+                json &system_content = e["content"];
+                if (system_content.is_string())
+                {
+                    model_input_.system_ = system_content.get<std::string>();
+                }
+                else if (system_content.is_array())
+                {
+                    for (auto sys_element: system_content)
+                    {
+                        if (strcmp(sys_element["type"].get_ref<const std::string &>().c_str(), "text") == 0)
+                        {
+                            model_input_.system_ = sys_element["text"].get_ref<const std::string &>();
+                            break;
+                        }
+                    }
+                }
+                else if (system_content.is_object())
+                {
+                    model_input_.system_ = get_json_value(e, "content", BLANK_STRING);
+                }
+                else
+                {
+                    throw ReportError{"system content is not a object or array"};
+                }
+                model_input_.system_ = str_replace(model_input_.system_, "\\n", "\n");
+            }
+        }
+
+        if (model_input_.system_.empty())
+        {
+            My_Log{} << "system prompt is empty, will use default\n";
+            model_input_.system_ = "You are a helpful assistant.";
         }
 
         if (model_input_.text_.empty())
         {
-            throw ReportError{"question key can not be empty"};
+            My_Log{} << "user prompt is empty, will use default\n";
+            model_input_.text_ = "What is this img or audio describe?";
         }
 
         if (!model_input_.image_.empty() || !model_input_.audio_.empty())
@@ -156,11 +191,9 @@ private:
                 }
         };
 
-        model_input_ = ModelInput{
-                get_value(user_content, "question"),
-                get_value(user_content, "image"),
-                get_value(user_content, "audio"),
-        };
+        model_input_.text_ = get_value(user_content, "question");
+        model_input_.image_ = get_value(user_content, "image");
+        model_input_.audio_ = get_value(user_content, "audio");
     }
 
     std::string BuildPrompt(json &data, bool &is_tool)
@@ -210,33 +243,14 @@ private:
         }
         // Extract the content sent by the client, including the user's question, system prompts, and tool invocation results.
         userContent = model_input_.text_;
+        systemDefaultPrompt = model_input_.system_;
         chat_history_.AddMessage("user", userContent);
 
         for (auto element: msg)
         {
             // TODO: Handle history message.
             auto role = get_json_value(element, "role", BLANK_STRING);
-            if (role == "system")
-            {
-                const json &system_content = element["content"];
-                if (system_content.is_array())
-                {
-                    for (auto sys_element: system_content)
-                    {
-                        if (strcmp(sys_element["type"].get_ref<const std::string &>().c_str(), "text") == 0)
-                        {
-                            systemDefaultPrompt = sys_element["text"].get_ref<const std::string &>();
-                            break;
-                        }
-                    }
-                }
-                else if (system_content.is_object())
-                {
-                    systemDefaultPrompt = get_json_value(element, "content", BLANK_STRING);
-                }
-                systemDefaultPrompt = str_replace(systemDefaultPrompt, "\\n", "\n");
-            }
-            else if (role == "tool")
+            if (role == "tool")
             {
                 // TODO: Check tool id.
                 userToolCallBackResult += trim_empty_lines(get_json_value(element, "content", BLANK_STRING));
@@ -281,6 +295,7 @@ private:
     void Reset()
     {
         model_input_.text_.clear();
+        model_input_.system_.clear();
         model_input_.image_.clear();
         model_input_.audio_.clear();
     }

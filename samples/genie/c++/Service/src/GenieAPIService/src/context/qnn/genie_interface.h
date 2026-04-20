@@ -128,20 +128,19 @@ struct GenieContext::QInterfaceImpl
             return rs;
         }
 
-        IEmbedding &BuildPrompt(const std::string &prompt_template, const std::string &input)
-        {
-            prompt_.resize(prompt_template.size() + input.size());
-            sprintf(prompt_.data(), prompt_template.c_str(), input.c_str());
-            return *this;
-        }
+        std::string BuildPrompt(const std::string &system,
+                                const std::string &user,
+                                const std::string &padded_prompt);
 
     protected:
         std::string kPromptTemplate{};
+        std::string padded_prompt_{};
+
         int32_t *prompt_token_{};
         uint32_t prompt_token_size_{};
+
         std::vector<float> embedded_bin_;
         const QNNEmbedding &qnn_embedding_info_;
-        std::string prompt_;
         int cols_{};
 
         const QNNEmbedding::InferResource *get_infer_resource(ModelType mode_type)
@@ -150,11 +149,17 @@ struct GenieContext::QInterfaceImpl
             return (it != qnn_embedding_info_.infer_resources_.end()) ? &(it->second) : nullptr;
         }
 
+        static std::string GeneratePaddingPrompt(const std::string &bos,
+                                                 const std::string &eos,
+                                                 const std::string &repeated,
+                                                 int times);
+
+
         IEmbedding &Decode(std::string &encode_buf, std::vector<uint8_t> &decoded_buf);
 
         IEmbedding &BuildInferredBuffer(const QNNEmbedding::InferResource *infer_resource,
-                                        std::vector<uint8_t *> &input_buffers,
-                                        std::vector<uint8_t> &inferred_buf);
+                                        std::vector<std::vector<uint8_t *>> &input_buffers,
+                                        std::vector<std::vector<uint8_t>> &inferred_buf);
 
         virtual IEmbedding &CustomBuild(ModelInput &model_input) = 0;
 
@@ -168,23 +173,11 @@ struct GenieContext::QInterfaceImpl
                 free(prompt_token_);
                 prompt_token_ = nullptr;
             }
-            prompt_.clear();
+            padded_prompt_.clear();
             return *this;
         };
 
         virtual IEmbedding &MergeEmbedding() = 0;
-
-        struct FloatBufferView
-        {
-            explicit FloatBufferView(const std::vector<uint8_t> &buffer)
-            {
-                pointer_ = reinterpret_cast<float *>(const_cast<std::vector<uint8_t> &>(buffer).data());
-                size_ = buffer.size() / sizeof(float);
-            }
-
-            float *pointer_{};
-            unsigned long size_{};
-        };
 
     private:
         static void TokenToEmbedCallback(int32_t token,
@@ -192,13 +185,14 @@ struct GenieContext::QInterfaceImpl
                                          uint32_t embeddingSize,
                                          const void *userData);
 
-        IEmbedding &BuildTextEmbedding()
+        IEmbedding &BuildTextEmbedding(const std::string &completed_prompt)
         {
-            if (!context_->GenerateTextToken(prompt_, const_cast<const int32_t *&>(prompt_token_), prompt_token_size_))
+            if (!context_->GenerateTextToken(completed_prompt,
+                                             const_cast<const int32_t *&>(prompt_token_),
+                                             prompt_token_size_))
             {
                 throw std::runtime_error("generate text token failed");
             }
-            prompt_.clear();
             return *this;
         }
     };
@@ -210,12 +204,13 @@ struct GenieContext::QInterfaceImpl
                 : IEmbedding(context),
                   infer_resource_{get_infer_resource(ModelType{ModelType::Vision})}
         {
-            if (infer_resource_)
+            if (infer_resource_ && !infer_resource_->bin_stacks_.empty())
             {
-                input_buffers_.resize(infer_resource_->bin_stacks_.size() + 1);
+                input_buffers_.resize(1);
+                input_buffers_[0].resize(infer_resource_->bin_stacks_.size() + 1);
                 for (auto i = 0; i < infer_resource_->bin_stacks_.size(); ++i)
                 {
-                    input_buffers_[i + 1] = const_cast<uint8_t *>(infer_resource_->bin_stacks_[i].data());
+                    input_buffers_[0][i + 1] = const_cast<uint8_t *>(infer_resource_->bin_stacks_[i].data());
                 }
             }
         }
@@ -228,27 +223,37 @@ struct GenieContext::QInterfaceImpl
         {
             img_buf_.clear();
             img_pixel_buf_.clear();
-            img_inferred_buf_.clear();
+            img_inferred_buffers_.clear();
+            Clean();
+            return *this;
+        }
+
+        virtual IVisionEmbedding &PaddingVisionPrompt()
+        {
+            padded_prompt_ += kPaddedList_;
             return *this;
         }
 
         virtual IVisionEmbedding &BuildVisionInferredInput()
         {
-            input_buffers_[0] = reinterpret_cast<uint8_t *>(img_pixel_buf_.data());
+            input_buffers_[0][0] = reinterpret_cast<uint8_t *>(img_pixel_buf_.data());
             return *this;
         }
 
         virtual IVisionEmbedding &BuildImgPixel() = 0;
 
+        virtual IVisionEmbedding &Clean() { return *this; }
+
     protected:
         int kWidth{};
         int kHeight{};
 
-        int token_index{};
+        int token_index_{};
+        std::string kPaddedList_;
         std::vector<uint8_t> img_buf_{};
         std::vector<float> img_pixel_buf_{};
-        std::vector<uint8_t *> input_buffers_{};
-        std::vector<uint8_t> img_inferred_buf_{};
+        std::vector<std::vector<uint8_t *>> input_buffers_{};
+        std::vector<std::vector<uint8_t>> img_inferred_buffers_{};
         const QNNEmbedding::InferResource *infer_resource_;
     };
 
@@ -265,8 +270,6 @@ struct GenieContext::QInterfaceImpl
 
         IEmbedding &CustomClean() override
         {
-            token_index = 0;
-            padded_prompt_template_.clear();
             audio_buf_.clear();
             audio_sample_buf_.clear();
             audio_inferred_buf_.clear();
@@ -282,12 +285,11 @@ struct GenieContext::QInterfaceImpl
 
         virtual IAudioEmbedding &PaddingAudioPrompt() = 0;
 
-        int token_index{};
-        std::string padded_prompt_template_;
+        int token_index_{};
         std::vector<uint8_t> audio_buf_;
         std::vector<float> audio_sample_buf_;
-        std::vector<uint8_t *> input_buffers_{};
-        std::vector<uint8_t> audio_inferred_buf_;
+        std::vector<std::vector<uint8_t *>> input_buffers_{};
+        std::vector<std::vector<uint8_t>> audio_inferred_buf_;
         const QNNEmbedding::InferResource *infer_resource_;
     };
 

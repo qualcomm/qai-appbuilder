@@ -39,7 +39,8 @@ public:
     void Prepare(ModelInput &model_input,
                  bool is_tool,
                  bool is_stream,
-                 const httplib::Request &req);
+                 const httplib::Request &req,
+                 bool is_dll_mode = false);
 
     bool SendResponse(size_t, httplib::DataSink *sink, httplib::Response *res);
 

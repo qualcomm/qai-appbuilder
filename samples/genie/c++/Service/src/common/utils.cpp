@@ -104,7 +104,7 @@ std::unique_ptr<int8_t[]> File::get_file_as_buffer(const std::string &file_path,
     size = in.tellg();
     if (size == 0)
         return nullptr;
-    auto buf = std::make_unique < int8_t[] > (size);
+    auto buf = std::make_unique<int8_t[]>(size);
     in.read(reinterpret_cast<char *>(buf.get()), size);
     return buf;
 }
@@ -156,16 +156,21 @@ std::vector<T> File::ReadFile(const std::string &file_name, bool binary)
 }
 
 template std::vector<uint8_t> File::ReadFile(const std::string &file_name, bool binary);
+template std::vector<float> File::ReadFile(const std::string &file_name, bool binary);
+template std::vector<int> File::ReadFile(const std::string &file_name, bool binary);
 
 template<typename T>
-void File::WriteBinaryFile(const std::vector<T> &buffer, const std::string &file_name)
+void File::WriteBinaryFile(const T *buf, int size, const std::string &file_name)
 {
     std::ofstream out(file_name, std::ios::binary);
-    out.write(reinterpret_cast<const char *>(buffer.data()), buffer.size() * sizeof(T));
+    out.write(reinterpret_cast<const char *>(buf), size * sizeof(T));
     out.close();
 }
 
-template void File::WriteBinaryFile(const std::vector<float> &buffer, const std::string &file_name);
+template void File::WriteBinaryFile(const long long *buf, int size, const std::string &file_name);
+template void File::WriteBinaryFile(const int *buf, int size, const std::string &file_name);
+template void File::WriteBinaryFile(const unsigned char *buf, int size, const std::string &file_name);
+template void File::WriteBinaryFile(const float *buf, int size, const std::string &file_name);
 
 template<typename T>
 T get_json_value(const json &jsonData, const std::string &key, const T &defaultValue)

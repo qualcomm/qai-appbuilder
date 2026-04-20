@@ -18,6 +18,12 @@ option(USE_MNN "Enable the use mnn platform" OFF)
 
 option(USE_GGUF "Enable the use gguf platform" OFF)
 
+option(BUILD_AS_DLL "Build as DLL library instead of executable" OFF)
+
+if (NOT DEFINED QNN_STUB_VERSION)
+    set(QNN_STUB_VERSION "v73")
+endif ()
+
 set(SCRIPT_PATH ${CMAKE_SOURCE_DIR}/scripts)
 include(${SCRIPT_PATH}/version.cmake)
 
@@ -29,6 +35,7 @@ set(G_EXTERNAL_LIB_PATH ${CMAKE_BINARY_DIR}/lib)
 set(BUILD_PATH ${CMAKE_SOURCE_DIR}/GenieService_v${QAI_APP_BUILDER_VERSION})
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE ${BUILD_PATH})
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG ${BUILD_PATH})
+
 file(REMOVE_RECURSE ${BUILD_PATH})
 
 if (MSVC)
@@ -52,10 +59,17 @@ link_directories(${G_EXTERNAL_LIB_PATH})
 add_subdirectory(src/GenieAPIService)
 
 if (MSVC)
-    add_subdirectory(examples/GenieAPIClient)
-    add_subdirectory(examples/tools)
+    if(BUILD_AS_DLL)
+        set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_RELEASE ${BUILD_PATH}/lib)
+        set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_DEBUG ${BUILD_PATH}/lib)
+        add_subdirectory(examples/SampleApp)
+    else()
+        add_subdirectory(examples/GenieAPIClient)
+        add_subdirectory(examples/tools)
+    endif()
 endif ()
 
-add_custom_target(GenieSerivesPacking
-        COMMAND ${CMAKE_COMMAND} -E copy ${BUILD_VERSION_FILE} -t ${BUILD_PATH}
-)
+# always
+#add_custom_target(GenieSerivesPacking ALL
+#        COMMAND ${CMAKE_COMMAND} -E copy ${BUILD_VERSION_FILE} -t ${BUILD_PATH}
+#)

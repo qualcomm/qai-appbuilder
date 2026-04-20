@@ -77,8 +77,7 @@ bool IEmbedding::set_content(ModelInput &model_input)
         if (model_type & ModelType::Text)
         {
             OutPutText(model_input);
-            prompt_ = std::move(model_input.text_);
-            this->BuildTextEmbedding()
+            this->BuildTextEmbedding(model_input.text_)
                 .MergeEmbedding();
             goto ahead;
         }
@@ -103,11 +102,10 @@ bool IEmbedding::set_content(ModelInput &model_input)
             throw ReportError{"not supprot audio mode\n"};
         }
     }
-
     try
     {
         this->CustomBuild(model_input)
-            .BuildTextEmbedding()
+            .BuildTextEmbedding(BuildPrompt(model_input.system_, padded_prompt_, model_input.text_))
             .MergeEmbedding()
             .Clean();
     }
@@ -147,6 +145,23 @@ void IEmbedding::TokenToEmbedCallback(const int32_t token,
     }
 }
 
+std::string QInterfaceImpl::IEmbedding::GeneratePaddingPrompt(const std::string &bos,
+                                                              const std::string &eos,
+                                                              const std::string &repeated,
+                                                              int times)
+{
+    std::string prompt;
+    int needed = times * repeated.length() + bos.length() + eos.length();
+    prompt.reserve(needed + 1); // for \0
+    prompt.append(bos);
+    for (int i = 0; i < times; ++i)
+    {
+        prompt.append(repeated);
+    }
+    prompt.append(eos);
+    return prompt;
+}
+
 IEmbedding &QInterfaceImpl::IEmbedding::Decode(std::string &encode_buf, std::vector<uint8_t> &decoded_buf)
 {
     decoded_buf.resize(BASE64_DECODE_OUT_SIZE(encode_buf.size()));
@@ -160,38 +175,54 @@ IEmbedding &QInterfaceImpl::IEmbedding::Decode(std::string &encode_buf, std::vec
 }
 
 IEmbedding &IEmbedding::BuildInferredBuffer(const QNNEmbedding::InferResource *infer_resource,
-                                            std::vector<uint8_t *> &input_buffers,
-                                            std::vector<uint8_t> &inferred_buf)
+                                            std::vector<std::vector<uint8_t *>> &input_buffers,
+                                            std::vector<std::vector<uint8_t>> &inferred_buffers)
 {
     static std::string perfProfile = "burst";
     auto app_builder = infer_resource->app_builder_;
     std::vector<uint8_t *> outputBuffers;
     std::vector<size_t> outputSize;
 
-    if (!app_builder->ModelInference(infer_resource->tag_,
-                                     input_buffers,
-                                     outputBuffers,
-                                     outputSize,
-                                     perfProfile))
+    inferred_buffers.resize(input_buffers.size());
+    for (auto i = 0; i < input_buffers.size(); ++i)
     {
-        throw std::runtime_error("call model inference failed");
+        if (!app_builder->ModelInference(infer_resource->tag_,
+                                         input_buffers[i],
+                                         outputBuffers,
+                                         outputSize,
+                                         perfProfile))
+        {
+            throw std::runtime_error("call model inference failed");
+        }
+        inferred_buffers[i].assign(outputBuffers.at(0), outputBuffers.at(0) + outputSize.at(0));
+        free(outputBuffers[0]);
+        outputSize.clear();
+        outputBuffers.clear();
     }
-
-    inferred_buf.assign(outputBuffers.at(0), outputBuffers.at(0) + outputSize.at(0));
-    for (auto &outputBuffer: outputBuffers)
-        free(outputBuffer);
     return *this;
+}
+
+std::string QInterfaceImpl::IEmbedding::BuildPrompt(const std::string &system,
+                                                    const std::string &user,
+                                                    const std::string &padded_prompt)
+{
+    std::string completed_prompt;
+    completed_prompt.reserve(kPromptTemplate.size() + padded_prompt.size() + system.size() + user.size() + 1);
+    completed_prompt[completed_prompt.size()] = '\0';
+    sprintf(completed_prompt.data(), kPromptTemplate.data(), system.c_str(), user.c_str(), padded_prompt.data());
+    My_Log(completed_prompt.c_str(), My_Log::Level::kInfo);
+    return completed_prompt;
 }
 
 IEmbedding &QInterfaceImpl::IVisionEmbedding::CustomBuild(ModelInput &model_input)
 {
     dynamic_cast<IVisionEmbedding &>(Decode(model_input.image_, img_buf_))
             .BuildImgPixel()
+            .PaddingVisionPrompt()
             .BuildVisionInferredInput()
             .BuildInferredBuffer(infer_resource_,
                                  input_buffers_,
-                                 img_inferred_buf_)
-            .BuildPrompt(kPromptTemplate, model_input.text_);
+                                 img_inferred_buffers_);
     return *this;
 }
 
@@ -199,12 +230,11 @@ IEmbedding &QInterfaceImpl::IAudioEmbedding::CustomBuild(ModelInput &model_input
 {
     dynamic_cast<IAudioEmbedding &>(Decode(model_input.audio_, audio_buf_))
             .BuildAudioSamples()
-            .BuildAudioInferredInput()
             .PaddingAudioPrompt()
+            .BuildAudioInferredInput()
             .BuildInferredBuffer(infer_resource_,
                                  input_buffers_,
-                                 audio_inferred_buf_)
-            .BuildPrompt(padded_prompt_template_, model_input.text_);
+                                 audio_inferred_buf_);
     return *this;
 }
 

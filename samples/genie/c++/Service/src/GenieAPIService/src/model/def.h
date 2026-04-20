@@ -18,6 +18,7 @@ const int DEFAULT_CONTEXT_SIZE = 4096;
 
 struct ModelInput
 {
+    std::string system_;
     std::string text_;
     std::string image_;
     std::string audio_;
@@ -157,6 +158,7 @@ struct QNNEmbedding
         LibAppBuilder *app_builder_;
         std::string tag_;
         std::vector<std::vector<uint8_t>> bin_stacks_;
+        std::vector<std::vector<uint8_t>> tails_bin_stacks_;
     };
 
     std::unordered_map<ModelType, InferResource> infer_resources_;

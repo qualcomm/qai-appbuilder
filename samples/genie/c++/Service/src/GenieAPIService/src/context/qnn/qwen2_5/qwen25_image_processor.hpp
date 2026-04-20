@@ -34,6 +34,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+//#include <stb_image_write.h>
 
 // stb headers（注意：需在某个.cpp里先#define STB_*_IMPLEMENTATION）
 
@@ -112,6 +113,7 @@ namespace qwen2_5
             ImageU8 rgb = ToRGBWhiteBackground(img);
             auto [rh, rw] = smart_resize(request_h, request_w, PATCH_FACTOR);
             ImageU8 rgb_resized = ResizeRGB_STB(rgb, rw, rh);
+//            stbi_write_png("1.png", rgb_resized.w, rgb_resized.h, rgb_resized.c, rgb_resized.data.data(), 0);
             GeneratePixelValuesToBuffer(rgb_resized, out, rows, cols);
         }
 

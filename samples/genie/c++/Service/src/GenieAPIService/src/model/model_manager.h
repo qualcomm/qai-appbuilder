@@ -25,8 +25,9 @@ public:
     bool IsLoaded()
     { return loaded_; }
 
-private:
     bool LoadModel();
+
+private:
 
     PromptType LoadPromptTemplates(std::string &&prompt_path);
 

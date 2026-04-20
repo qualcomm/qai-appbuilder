@@ -19,6 +19,7 @@
 #include <stb_image.h>
 #include <stb_image_resize2.h>
 #include "../qwen2_5/qwen25_image_processor.hpp"
+#include "../../torch_helper/base.h"
 
 std::vector<std::vector<float>>
 QInterface::Qwen2_5OMINI::ProcessingMelSpec(std::vector<std::vector<float>> &&mel_spec)
@@ -337,8 +338,13 @@ QInterface::Qwen2_5OMINI::AttentionToPadded(std::vector<float> &&attention_mask,
     {
         int32_t s = cu_seqlens[t - 1];
         int32_t e = cu_seqlens[t];
+
         if (s < 0 || e < s || static_cast<size_t>(e) > H)
-            throw std::runtime_error("cu_seqlens out of range");
+        {
+            My_Log{} << "cu_seqlens out of range: " << s << ", " << e << ", " << H << "\n";
+            continue;
+        }
+
         for (int32_t r = s; r < e; ++r)
         {
             for (int32_t c = s; c < e; ++c)
@@ -481,7 +487,7 @@ IAudioEmbedding &QInterface::Qwen2_5OMINI::BuildAudioSamples()
 
     uint32_t rescaled_length = (out_frames_est - 1) / 160 + 1;
     uint32_t input_length = (rescaled_length - 1) / 2 + 1;
-    IAudioEmbedding::token_index = (input_length - 2) / 2 + 1;
+    IAudioEmbedding::token_index_ = (input_length - 2) / 2 + 1;
     clean();
     return *this;
 }
@@ -547,24 +553,9 @@ IAudioEmbedding &QInterface::Qwen2_5OMINI::BuildAudioInferredInput()
 
     std::vector<int32_t> cu_seqlens = ComputeCuSeqlensFromMask(padded_mask_after_cnn);
     padded_attention_mask_ = AttentionToPadded(std::move(attention_mask), half, cu_seqlens);
-    IAudioEmbedding::input_buffers_[0] = reinterpret_cast<uint8_t *>(padded_feature_.data());
-    IAudioEmbedding::input_buffers_[1] = reinterpret_cast<uint8_t *>(padded_mask_.data());
-    IAudioEmbedding::input_buffers_[2] = reinterpret_cast<uint8_t *>(padded_attention_mask_.data());
-    return *this;
-}
-
-IAudioEmbedding &QInterface::Qwen2_5OMINI::PaddingAudioPrompt()
-{
-    std::string audio_list;
-    auto len = IAudioEmbedding::token_index * strlen("<|AUDIO|>");
-    audio_list.reserve(len + 1); // for \0
-    for (int i = 0; i < IAudioEmbedding::token_index; ++i)
-    {
-        audio_list.append("<|AUDIO|>");
-    }
-
-    padded_prompt_template_.resize(kPromptTemplate.size() + audio_list.size());
-    sprintf(padded_prompt_template_.data(), kPromptTemplate.c_str(), "%s", audio_list.c_str());
+    IAudioEmbedding::input_buffers_[0][0] = reinterpret_cast<uint8_t *>(padded_feature_.data());
+    IAudioEmbedding::input_buffers_[0][1] = reinterpret_cast<uint8_t *>(padded_mask_.data());
+    IAudioEmbedding::input_buffers_[0][2] = reinterpret_cast<uint8_t *>(padded_attention_mask_.data());
     return *this;
 }
 
@@ -580,7 +571,7 @@ IVisionEmbedding &QInterface::Qwen2_5OMINI::BuildImgPixel()
 }
 
 void QInterface::Qwen2_5OMINI::MaskedScatter(const std::vector<uint8_t> &mask,
-                                             const IEmbedding::FloatBufferView &features)
+                                             const FloatBufferView &features)
 {
     if (mask.size() != embedded_bin_.size())
         throw std::runtime_error("mask and embedded_bin must have same flattened length");
@@ -634,7 +625,11 @@ void QInterface::Qwen2_5OMINI::MaskedScatter(const std::vector<uint8_t> &mask,
 
     // element-wise path: require audio_features.size() == number of ones
     if (features.size_ != ones_total)
-        throw std::runtime_error("audio/image features length must equal number of ones in mask");
+    {
+        My_Log{} << "audio/image features length must equal number of ones in mask "
+                 << features.size_ << ", " << ones_total << "\n";
+    }
+
     size_t vi = 0;
     for (size_t i = 0; i < total_elems; ++i)
     {
@@ -676,33 +671,26 @@ IEmbedding &QInterface::Qwen2_5OMINI::MergeEmbedding()
     static const uint32_t kAudioTokenIndex{151646};
     static const int32_t kVisionTokenIndex{151655};
 
-    if (embedded_bin_.size() % cols_ != 0)
-    {
-        throw std::runtime_error("file length not divisible by width");
-    }
-
     FloatBufferView tmp_raw_fbuf{qnn_embedding_info_.embedded_raw_buf_};
-    std::vector<float> embedded_raw_fbuf;
-    embedded_raw_fbuf.resize(prompt_token_size_ * cols_);
+
+    embedded_bin_.resize(prompt_token_size_ * cols_);
     float *dest_ptr;
     for (uint32_t i = 0; i < prompt_token_size_; ++i)
     {
-        dest_ptr = &embedded_raw_fbuf[i * cols_];
+        dest_ptr = &embedded_bin_[i * cols_];
         float *src_ptr = &tmp_raw_fbuf.pointer_[prompt_token_[i] * cols_];
         std::memcpy(dest_ptr, src_ptr, cols_ * sizeof(float));
     }
-    embedded_bin_.assign(embedded_raw_fbuf.data(), embedded_raw_fbuf.data() + embedded_raw_fbuf.size());
 
     if (!audio_inferred_buf_.empty())
     {
-        MergeImpl(IAudioEmbedding::token_index, kAudioTokenIndex, audio_inferred_buf_);
+        MergeImpl(IAudioEmbedding::token_index_, kAudioTokenIndex, audio_inferred_buf_[0]);
     }
 
-    if (!img_inferred_buf_.empty())
+    if (!img_inferred_buffers_.empty())
     {
-        MergeImpl(IVisionEmbedding::token_index, kVisionTokenIndex, img_inferred_buf_);
+        MergeImpl(IVisionEmbedding::token_index_, kVisionTokenIndex, img_inferred_buffers_[0]);
     }
 
     return *this;
 }
-

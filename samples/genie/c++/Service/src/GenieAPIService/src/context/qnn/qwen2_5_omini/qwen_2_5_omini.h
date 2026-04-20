@@ -11,38 +11,43 @@
 
 #include "../genie_interface.h"
 
+struct FloatBufferView;
+
 class QInterface::Qwen2_5OMINI : public IMultiModal
 {
 public:
     explicit Qwen2_5OMINI(GenieContext *context) : IMultiModal(context),
                                                    IEmbedding(context)
     {
-        const char *kRawPromptTemplate{"<|im_start|>system\n"
-                                    "You are Qwen, a virtual human developed by the Qwen Team, Alibaba Group, capable of perceiving auditory and visual inputs, as well as generating text and speech.<|im_end|>\n"
-                                    "<|im_start|>user\n%s"
-                                    "<|vision_bos|>%s<|vision_eos|>"
-                                    "<|audio_bos|>%s<|audio_eos|>"
-                                    "<|im_end|>\n<|im_start|>assistant\n"};
+        kPromptTemplate = "<|im_start|>system\n"
+                          "%s<|im_end|>\n"
+                          "<|im_start|>user\n%s"
+                          "%s" // <|audio_bos|><|IMAGE|><|audio_eos|> and <|vision_bos|><|AUDIO|><|vision_eos|>
+                          "<|im_end|>\n<|im_start|>assistant\n";
+
         cols_ = 2048;
-        IVisionEmbedding::token_index = 196;
+        IVisionEmbedding::token_index_ = 196;
+        kPaddedList_ = GeneratePaddingPrompt("<|vision_bos|>",
+                                             "<|vision_eos|>",
+                                             "<|IMAGE|>",
+                                             IVisionEmbedding::token_index_
+        );
         kHeight = kWidth = 384;
 
-        std::string image_list;
-        int len = IVisionEmbedding::token_index * strlen("<|IMAGE|>");
-        image_list.reserve(len + 1);
-        for (int i = 0; i < IVisionEmbedding::token_index; ++i)
-        {
-            image_list.append("<|IMAGE|>");
-        }
-        kPromptTemplate.resize(strlen(kRawPromptTemplate) + image_list.size());
-        sprintf(kPromptTemplate.data(), kRawPromptTemplate, "%s", image_list.c_str(), "%s");
+        IAudioEmbedding::input_buffers_.resize(1);
+        IAudioEmbedding::input_buffers_[0].resize(3);
+    }
 
-        IAudioEmbedding::input_buffers_.resize(3);
+    IAudioEmbedding &PaddingAudioPrompt() final
+    {
+        padded_prompt_ += GeneratePaddingPrompt("<|audio_bos|>",
+                                                "<|audio_eos|>",
+                                                "<|AUDIO|>",
+                                                IAudioEmbedding::token_index_);
+        return *this;
     }
 
     IAudioEmbedding &BuildAudioSamples() override;
-
-    IAudioEmbedding &PaddingAudioPrompt() override;
 
     IAudioEmbedding &BuildAudioInferredInput() override;
 
@@ -50,6 +55,7 @@ public:
 
     IAudioEmbedding &CleanAudio() override
     {
+        IAudioEmbedding::token_index_ = 0;
         padded_feature_.clear();
         padded_mask_.clear();
         padded_attention_mask_.clear();
