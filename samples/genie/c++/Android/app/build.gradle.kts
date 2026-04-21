@@ -1,33 +1,59 @@
 import org.gradle.api.tasks.Copy
 import java.io.File
 
+// Use absolute path to build_android output directory
+// From app/build.gradle.kts (Android/app/), go up 2 levels to samples/genie/c++, then to build_android
+val buildOutputDir = file("../../build_android/output/libs/arm64-v8a")
+
 val sourceFiles = listOf(
-    file("..\\..\\Service\\libs\\arm64-v8a\\libJNIGenieAPIService.so"),
-    file("..\\..\\Service\\libs\\arm64-v8a\\libGenie.so"),
-    file("..\\..\\Service\\libs\\arm64-v8a\\libQnnHtp.so"),
-    file("..\\..\\Service\\libs\\arm64-v8a\\libQnnHtpNetRunExtensions.so"),
-    file("..\\..\\Service\\libs\\arm64-v8a\\libQnnHtpPrepare.so"),
-    file("..\\..\\Service\\libs\\arm64-v8a\\libQnnHtpV79Skel.so"),
-    file("..\\..\\Service\\libs\\arm64-v8a\\libQnnHtpV79Stub.so"),
-    file("..\\..\\Service\\libs\\arm64-v8a\\libQnnSystem.so"),
-    file("..\\..\\Service\\libs\\arm64-v8a\\libcurl.so"),
-    file("..\\..\\Service\\libs\\arm64-v8a\\libGenieAPIClient.so"),
-    file("..\\..\\Service\\libs\\arm64-v8a\\libGenieAPIService.so"),
-    file("..\\..\\Service\\libs\\arm64-v8a\\libQnnHtpV79.so"),
-    file("..\\..\\Service\\libs\\arm64-v8a\\libQnnHtpV81.so"),
-    file("..\\..\\Service\\libs\\arm64-v8a\\libQnnHtpV81Skel.so"),
-    file("..\\..\\Service\\libs\\arm64-v8a\\libQnnHtpV81Stub.so"),
-    file("..\\..\\Service\\libs\\arm64-v8a\\libappbuilder.so"),
+    "libJNIGenieAPIService.so",
+    "libGenieAPIService.so",
+    "libappbuilder.so",
+    "libsamplerate.so",
+    "libcurl.so",
+    "libGenie.so",
+    "libQnnHtp.so",
+    "libQnnHtpNetRunExtensions.so",
+    "libQnnHtpPrepare.so",
+    "libQnnHtpV79.so",
+    "libQnnHtpV79Skel.so",
+    "libQnnHtpV79Stub.so",
+    "libQnnHtpV81.so",
+    "libQnnHtpV81Skel.so",
+    "libQnnHtpV81Stub.so",
+    "libQnnSystem.so"
 )
 
 val libsDir = file("libs/arm64-v8a")
 
-println("sourceFiles path: ${sourceFiles}")
-println("libsDir path: ${libsDir.absolutePath}")
+println("Build output directory: ${buildOutputDir.absolutePath}")
+println("Libs directory: ${libsDir.absolutePath}")
 
 val copyHttpServiceTask = tasks.register<Copy>("copyHttpService") {
-    from(sourceFiles)
+    from(buildOutputDir) {
+        include(sourceFiles)
+    }
     into(libsDir)
+    
+    doFirst {
+        println("Copying libraries from: ${buildOutputDir.absolutePath}")
+        println("Copying libraries to: ${libsDir.absolutePath}")
+        if (!buildOutputDir.exists()) {
+            throw GradleException("Build output directory does not exist: ${buildOutputDir.absolutePath}")
+        }
+        sourceFiles.forEach { fileName ->
+            val sourceFile = File(buildOutputDir, fileName)
+            if (!sourceFile.exists()) {
+                println("WARNING: Source file not found: ${sourceFile.absolutePath}")
+            } else {
+                println("Found: ${fileName} (${sourceFile.length()} bytes)")
+            }
+        }
+    }
+    
+    doLast {
+        println("Copied ${outputs.files.files.size} library files")
+    }
 }
 
 tasks.preBuild {
@@ -44,7 +70,18 @@ android {
 
     lint {
         baseline = file("lint-baseline.xml")
+        checkReleaseBuilds = false
+        abortOnError = false
     }
+    signingConfigs {
+        create("release") {
+            storeFile = file("C:\\work\\Android\\genieapiservice")
+            storePassword = "123456"
+            keyAlias = "key0"
+            keyPassword = "123456"
+        }
+    }
+    
     defaultConfig {
         applicationId = "com.example.genieapiservice"
         minSdk = 30
@@ -76,7 +113,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 

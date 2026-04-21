@@ -20,6 +20,7 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -271,6 +272,7 @@ public class MainActivity extends AppCompatActivity {
         if (LogUtils.LOG_DIRECTORY.isEmpty()) {
             LogUtils.LOG_DIRECTORY = getApplicationContext().getFilesDir().getAbsolutePath() + File.separator + "Logs";
         }
+        LogUtils.logDebug(TAG,"GenieModels path = " + getFilesDir().toString(),LogUtils.LOG_DEBUG);
         // update the meminfo view
         mUpdateMemThread = new Thread(new Runnable() {
             @Override
@@ -358,12 +360,15 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public void requestPermission() {
-        if (!Environment.isExternalStorageManager()) {
-            Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
-            intent.setData(Uri.parse("package:" + getPackageName()));
-            //intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            //startActivity(intent);
-            register.launch(intent);
+        boolean isCar =
+                getPackageManager().hasSystemFeature(
+                        PackageManager.FEATURE_AUTOMOTIVE);
+        if (!isCar) {
+            if (!Environment.isExternalStorageManager()) {
+                Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+                intent.setData(Uri.parse("package:" + getPackageName()));
+                register.launch(intent);
+            }
         }
     }
 

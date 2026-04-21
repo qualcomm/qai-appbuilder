@@ -22,6 +22,7 @@
 #include "BuildId.hpp"
 #include "DynamicLoadUtil.hpp"
 #include "Logger.hpp"
+#include "LogUtils.hpp"
 #include "PAL/DynamicLoading.hpp"
 #include "PAL/GetOpt.hpp"
 #include "QnnSampleApp.hpp"
@@ -196,6 +197,13 @@ bool SetLogLevel(int32_t log_level, const std::string log_path) {
     return false;
   }
 
+#ifdef __ANDROID__
+  // Set log file path for Android from parameter
+  if(log_path != "" && log_path != "None") {
+    qnn::log::utils::setLogFilePath(log_path);
+  }
+#endif
+
   if (!log::setLogLevel((QnnLog_Level_t) log_level)) {
     QNN_ERROR("Unable to set log level!\n");
     return false;
@@ -246,68 +254,118 @@ bool RelPerfProfileGlobal() {
 }
 
 void QNN_ERR(const char* fmt, ...) {
-    QnnLog_Callback_t logCallback = getLogCallback();
-    if (!logCallback) {return;}
-
     if (QNN_LOG_LEVEL_ERROR > getLogLevel()) {
         return;
     }
+    
     va_list argp;
     va_start(argp, fmt);
-    (*logCallback)(fmt, QNN_LOG_LEVEL_ERROR, getTimediff(), argp);
+    
+    QnnLog_Callback_t logCallback = getLogCallback();
+    if (logCallback) {
+        (*logCallback)(fmt, QNN_LOG_LEVEL_ERROR, getTimediff(), argp);
+    }
+    
+#ifdef __ANDROID__
+    va_list argp_copy;
+    va_copy(argp_copy, argp);
+    qnn::log::utils::logFileCallback(fmt, QNN_LOG_LEVEL_ERROR, getTimediff(), argp_copy);
+    va_end(argp_copy);
+#endif
+    
     va_end(argp);
 }
 
 void QNN_WAR(const char* fmt, ...) {
-    QnnLog_Callback_t logCallback = getLogCallback();
-    if (!logCallback) {return;}
-
     if (QNN_LOG_LEVEL_WARN > getLogLevel()) {
         return;
     }
+    
     va_list argp;
     va_start(argp, fmt);
-    (*logCallback)(fmt, QNN_LOG_LEVEL_WARN, getTimediff(), argp);
+    
+    QnnLog_Callback_t logCallback = getLogCallback();
+    if (logCallback) {
+        (*logCallback)(fmt, QNN_LOG_LEVEL_WARN, getTimediff(), argp);
+    }
+    
+#ifdef __ANDROID__
+    va_list argp_copy;
+    va_copy(argp_copy, argp);
+    qnn::log::utils::logFileCallback(fmt, QNN_LOG_LEVEL_WARN, getTimediff(), argp_copy);
+    va_end(argp_copy);
+#endif
+    
     va_end(argp);
 }
 
 void QNN_INF(const char* fmt, ...) {
-    QnnLog_Callback_t logCallback = getLogCallback();
-    if (!logCallback) {return;}
-
     if (QNN_LOG_LEVEL_INFO > getLogLevel()) {
         return;
     }
 
     va_list argp;
     va_start(argp, fmt);
-    (*logCallback)(fmt, QNN_LOG_LEVEL_INFO, getTimediff(), argp);
+    
+    QnnLog_Callback_t logCallback = getLogCallback();
+    if (logCallback) {
+        (*logCallback)(fmt, QNN_LOG_LEVEL_INFO, getTimediff(), argp);
+    }
+    
+#ifdef __ANDROID__
+    // On Android, also write directly to file log
+    va_list argp_copy;
+    va_copy(argp_copy, argp);
+    qnn::log::utils::logFileCallback(fmt, QNN_LOG_LEVEL_INFO, getTimediff(), argp_copy);
+    va_end(argp_copy);
+#endif
+    
     va_end(argp);
 }
 
 void QNN_VEB(const char* fmt, ...) {
-    QnnLog_Callback_t logCallback = getLogCallback();
-    if (!logCallback) {return;}
-
     if (QNN_LOG_LEVEL_VERBOSE > getLogLevel()) {
         return;
     }
+    
     va_list argp;
     va_start(argp, fmt);
-    (*logCallback)(fmt, QNN_LOG_LEVEL_DEBUG, getTimediff(), argp);
+    
+    QnnLog_Callback_t logCallback = getLogCallback();
+    if (logCallback) {
+        (*logCallback)(fmt, QNN_LOG_LEVEL_DEBUG, getTimediff(), argp);
+    }
+    
+#ifdef __ANDROID__
+    va_list argp_copy;
+    va_copy(argp_copy, argp);
+    qnn::log::utils::logFileCallback(fmt, QNN_LOG_LEVEL_VERBOSE, getTimediff(), argp_copy);
+    va_end(argp_copy);
+#endif
+    
     va_end(argp);
 }
 
 void QNN_DBG(const char* fmt, ...) {
-    QnnLog_Callback_t logCallback = getLogCallback();
-    if (!logCallback) {return;}
-
     if (QNN_LOG_LEVEL_DEBUG > getLogLevel()) {
         return;
     }
+    
     va_list argp;
     va_start(argp, fmt);
-    (*logCallback)(fmt, QNN_LOG_LEVEL_DEBUG, getTimediff(), argp);
+    
+    QnnLog_Callback_t logCallback = getLogCallback();
+    if (logCallback) {
+        (*logCallback)(fmt, QNN_LOG_LEVEL_DEBUG, getTimediff(), argp);
+    }
+    
+#ifdef __ANDROID__
+    va_list argp_copy;
+    va_copy(argp_copy, argp);
+    qnn::log::utils::logFileCallback(fmt, QNN_LOG_LEVEL_DEBUG, getTimediff(), argp_copy);
+    va_end(argp_copy);
+#endif
+    
     va_end(argp);
 }
 

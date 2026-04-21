@@ -56,43 +56,20 @@ Then the full release will locate at `Service\GenieSerivce_v2.1.4`
 
 ### Build GenieAPIServer for Android: <br>
 
-Install Qualcomm® AI Runtime SDK, Android NDK etc, before you compile this service.<br>
+For Android builds, we provide an automated build script that handles all dependencies and generates a ready-to-install APK.
 
-```
-cd ai-engine-direct-helper\samples\genie\c++\Service
-Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.42.0.251225\
-set PATH=%PATH%;C:\Programs\android-ndk-r26d\toolchains\llvm\prebuilt\windows-x86_64\bin
-Set NDK_ROOT=C:/Programs/android-ndk-r26d/
-Set ANDROID_NDK_ROOT=%NDK_ROOT%
-```
+**Please refer to the [Android Build Guide](BUILD_ANDROID_README.md) for detailed instructions.**
 
-You should build [libappbuilder](https://github.com/quic/ai-engine-direct-helper/blob/main/BUILD.md) first
+The automated build script (`build_android.bat`) will:
+- Build libappbuilder.so and all dependencies
+- Build GenieAPIService
+- Copy all required QNN SDK libraries
+- Generate a signed Android APK with all libraries included
 
-Put `libappbuilder.so` to  `ai-engine-direct-helper\samples\genie\c++\Service`
-
-Then build GenieApiService for android
-
-```
-"C:\Programs\android-ndk-r26d\prebuilt\windows-x86_64\bin\make.exe" android -j4
+Simply run:
+```cmd
+cd ai-engine-direct-helper\samples\genie\c++
+build_android.bat
 ```
 
-When you finished building, please copy the following files.
-
-```
-copy "%QNN_SDK_ROOT%lib\aarch64-android\*.so"  "libs\arm64-v8a" /Y
-copy "obj\local\arm64-v8a\*.so" "libs\arm64-v8a" /Y
-```
-
-### Build Android app:<br>
-
-You can install Android Studio for building the Android app.
-
-1. Open Android Studio then load android app project from `ai-engine-direct-helper\samples\genie\c++\Android`. <br><br>
-
-2. Click the Build menu then click Generate Signed App Bundle or Apk... then select APK and click Next button.
-   then select your key and input your password, then click Next button. Finally, click Create buttton. <br><br>
-
-3. You can find the apk in ai-engine-direct-helper\samples\genie\c++\Android\app\release folder after finishing
-   build. <br><br>
-
-4. Run adb install app-release.apk to install this apk.
+For manual configuration and troubleshooting, see [BUILD_ANDROID_README.md](BUILD_ANDROID_README.md).

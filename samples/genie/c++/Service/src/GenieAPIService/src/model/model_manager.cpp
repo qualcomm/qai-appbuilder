@@ -802,13 +802,15 @@ LibAppBuilder *QNNEmbedding::LibAppbuilderCreator(const std::string &serialized_
 #define BACKEND "libQnnHtp.so"
 #define SYSTEM "libQnnSystem.so"
 #endif
-    static bool log_setting{
-            []()
-            {
-                SetLogLevel(GENIE_LOG_LEVEL_ERROR, "");
-                return true;
-            }()
-    };
+    // Commented out: This static initialization sets log level before config.h sets the log file path
+    // This causes the first initialization to not write to file
+    // static bool log_setting{
+    //         []()
+    //         {
+    //             SetLogLevel(GENIE_LOG_LEVEL_ERROR, "");
+    //             return true;
+    //         }()
+    // };
 
     auto *app_builder = new LibAppBuilder{};
     My_Log{} << "start to initiate: " << serialized_file << " ....\n";
@@ -817,7 +819,7 @@ LibAppBuilder *QNNEmbedding::LibAppbuilderCreator(const std::string &serialized_
                                       BACKEND,
                                       SYSTEM))
     {
-        My_Log("call model initialize failed");
+        My_Log("call model initialize failed\n");
         return nullptr;
     }
     return app_builder;

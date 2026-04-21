@@ -14,6 +14,7 @@
 #include "model/model_config.h"
 #include <CLI/CLI.hpp>
 #include <GenieCommon.h>
+#include <LibAppBuilder.hpp>
 
 namespace fs = std::filesystem;
 #ifdef WIN32
@@ -81,6 +82,11 @@ inline bool Config::Process()
     try
     {
         app.parse(argc_, argv_);
+        
+        // Set log level for libappbuilder.so (must be called before My_Log::Init moves log_path)
+        SetLogLevel(logLevel, log_path);
+        
+        // Set log level for libJNIGenieAPIService.so
         My_Log::Init(static_cast<My_Log::Level>(logLevel), std::move(log_path));
     }
     catch (const CLI::CallForHelp &e)

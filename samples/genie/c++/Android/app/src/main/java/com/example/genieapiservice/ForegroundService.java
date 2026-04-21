@@ -16,6 +16,7 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
 import android.graphics.drawable.Icon;
 import android.net.Uri;
@@ -71,6 +72,7 @@ public class ForegroundService extends Service {
     private int mLogLevelIndex = -1;
     private final IBinder binder = new LocalBinder();
     private MyNativeLib nativeLib;
+    private String modelsPathRoot = null;
 
     public class LocalBinder extends Binder {
         ForegroundService getService() {
@@ -109,6 +111,14 @@ public class ForegroundService extends Service {
         SharedPreferences sharedPreferences = getSharedPreferences("LogLevel",Context.MODE_PRIVATE);
         mLogLevelIndex = sharedPreferences.getInt("level",2);
         //new RecordSystemLogcatTask().start();
+        boolean isCar =
+                getPackageManager().hasSystemFeature(
+                        PackageManager.FEATURE_AUTOMOTIVE);
+        if (isCar) {
+            modelsPathRoot = getFilesDir().toString();
+        } else {
+            modelsPathRoot = "/sdcard/GenieModels";
+        }
         LogUtils.logDebug(TAG,"onCreate called ",LogUtils.LOG_DEBUG);
     }
 
@@ -159,9 +169,13 @@ public class ForegroundService extends Service {
 
     private boolean isValidModel(String dirName) {
         LogUtils.logDebug(TAG, "isValidModel : " + dirName, LogUtils.LOG_DEBUG);
-        String configFile = "/sdcard/GenieModels/" + dirName + "/config.json";
+        String configFile = modelsPathRoot + "/" + dirName + "/config.json";
+        LogUtils.logDebug(TAG, "configFile path : " + configFile, LogUtils.LOG_DEBUG);
         File file = new File(configFile);
+        LogUtils.logDebug(TAG, "configFile : " + configFile + " can read : " + file.canRead(), LogUtils.LOG_DEBUG);
+        LogUtils.logDebug(TAG, "configFile : " + configFile + " exists : " + file.exists(), LogUtils.LOG_DEBUG);
         if (file.exists()) {
+            LogUtils.logDebug(TAG, "configFile : " + configFile + " has been found.", LogUtils.LOG_DEBUG);
             return true;
         }
         return false;
@@ -177,13 +191,14 @@ public class ForegroundService extends Service {
                     + "Log:" + String.valueOf(newFileIndex);
             LogUtils.logDebug(TAG,"logFileName = " + logFileName + " mLogLevelIndex = " + mLogLevelIndex,LogUtils.LOG_DEBUG);
             nativeLib = new MyNativeLib();
-            String currentModel = getFirstModel("/sdcard/GenieModels");
+            String currentModel = null;
+            currentModel = getFirstModel(modelsPathRoot);
             String configFile = null;
-            //LogUtils.logDebug(TAG,"onStartCommand in child thread = " + intent.getStringExtra("modelName"),LogUtils.LOG_DEBUG);
             if (currentModel != null) {
-                configFile = "/sdcard/GenieModels/" + currentModel + "/config.json";
+                configFile = modelsPathRoot + "/" + currentModel + "/config.json";
             } else {
-                configFile ="/sdcard/GenieModels/qwen2.0_7b-ssd/config.json";
+                LogUtils.logDebug(TAG,"no config file in " + modelsPathRoot,LogUtils.LOG_DEBUG);
+                return;
             }
             LogUtils.logDebug(TAG,"cinfig file = " + configFile,LogUtils.LOG_DEBUG);
             String[] commandArgs = {"main", "-c", configFile, "-l", "-d", mLogLevelIndex != -1 ? String.valueOf(mLogLevelIndex) : "2", "-f", logFileName};

@@ -69,6 +69,13 @@ uint64_t getTimediff();
 uint64_t getEpoch();
 void setEpoch(uint64_t epoch);
 
+// Forward declaration for utils namespace
+namespace utils {
+#ifdef __ANDROID__
+void setLogFilePath(const std::string& logPath);
+#endif
+}  // namespace utils
+
 class Logger final {
  public:
   Logger(const Logger&) = delete;

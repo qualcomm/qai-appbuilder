@@ -46,18 +46,31 @@ Logger::Logger(QnnLog_Callback_t callback, QnnLog_Level_t maxLevel, QnnLog_Error
 }
 
 void Logger::log(QnnLog_Level_t level, const char* file, long line, const char* fmt, ...) {
-  if (m_callback) {
-    if (level > m_maxLevel.load(std::memory_order_seq_cst)) {
-      return;
-    }
-    va_list argp;
-    va_start(argp, fmt);
-    std::string logString(fmt);
-    std::ignore = file;
-    std::ignore = line;
-    (*m_callback)(logString.c_str(), level, getTimestamp() - m_epoch, argp);
-    va_end(argp);
+  if (level > m_maxLevel.load(std::memory_order_seq_cst)) {
+    return;
   }
+  
+  va_list argp;
+  va_start(argp, fmt);
+  std::string logString(fmt);
+  std::ignore = file;
+  std::ignore = line;
+  uint64_t timestamp = getTimestamp() - m_epoch;
+  
+  // Call the primary callback (stdout) if available
+  if (m_callback) {
+    (*m_callback)(logString.c_str(), level, timestamp, argp);
+  }
+  
+#ifdef __ANDROID__
+  // Also write to file on Android (independent of m_callback)
+  va_list argp_copy;
+  va_copy(argp_copy, argp);
+  utils::logFileCallback(logString.c_str(), level, timestamp, argp_copy);
+  va_end(argp_copy);
+#endif
+  
+  va_end(argp);
 }
 
 uint64_t Logger::getTimestamp() const {
