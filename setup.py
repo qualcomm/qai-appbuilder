@@ -198,13 +198,13 @@ def _get_qnn_sdk_root() -> Path:
         raise RuntimeError(f'QNN_SDK_ROOT="{v}" does not exist or is not a directory')
     return p
 
-
-def _get_dsp_arch(hexagonarch: Optional[str] = None) -> str:
-    if hexagonarch:
-        return str(hexagonarch)
+def _get_dsp_arches(toolchain: Optional[str] = None, hexagonarch: Optional[str] = None) -> list[str]:
+    """Return a list of Hexagon DSP arch versions to package.
+    """
     if _is_windows():
-        return "81"  # 73 for older QAIRT prior to 2.38.1 (your original note)
-    return "68"      # TODO: linux or android defaults (kept as-is)
+        return ["73", "81"]
+    else:
+        return ["68", "73", "75", "79"] 
 
 def _compute_version_with_dsp_suffix(default_base: str) -> str:
     """
@@ -214,9 +214,7 @@ def _compute_version_with_dsp_suffix(default_base: str) -> str:
       2) Otherwise, use _get_dsp_arch() default.
     """
     base = _get_base_version_from_qnn_sdk_root(default_base)
-    explicit_hex = os.environ.get("QAI_HEXAGONARCH") or _get_hexagonarch_from_argv()
-    dsp_arch = str(explicit_hex) if explicit_hex else _get_dsp_arch(None)
-    return f"{base}.{dsp_arch}"
+    return f"{base}"
 
 # Re-compute VERSION for wheel metadata (and zip naming) based on environment/args.
 VERSION = _compute_version_with_dsp_suffix(VERSION)
@@ -259,7 +257,11 @@ def _copy_runtime_artifacts(
     Matching your original behavior.
     """
     qnn_root = _get_qnn_sdk_root()
-    dsp_arch = _get_dsp_arch(hexagonarch)
+    # Determine effective toolchain for DSP arch selection (needed for multi-arch Windows packaging).
+    effective_toolchain = toolchain
+    if effective_toolchain is None and _is_windows():
+        effective_toolchain = "arm64x-windows-msvc" if arch == "ARM64EC" else "aarch64-windows-msvc"
+    dsp_arches = _get_dsp_arches(toolchain=effective_toolchain, hexagonarch=hexagonarch)
 
     # Decide LIB_PATH (your original priority/order)
     if toolchain is None:
@@ -283,8 +285,6 @@ def _copy_runtime_artifacts(
     else:
         lib_path = qnn_root / "lib" / toolchain
 
-    dsp_lib_path = qnn_root / "lib" / f"hexagon-v{dsp_arch}" / "unsigned"
-
     # Where to put QNN libs
     def _do_copy_into(pkg_dir: Path):
         libs_dir = pkg_dir / "libs"
@@ -296,16 +296,41 @@ def _copy_runtime_artifacts(
         _copy_if_exists(lib_path / "Genie.dll", _project_root() / "lib" / "Release" / "Genie.dll")
         _copy_if_exists(lib_path / "Genie.lib", _project_root() / "lib" / "Release" / "Genie.lib")
 
-        # DSP files
-        _copy_if_exists(dsp_lib_path / f"libqnnhtpV{dsp_arch}.cat", libs_dir / f"libqnnhtpV{dsp_arch}.cat")
-        _copy_if_exists(dsp_lib_path / f"libQnnHtpV{dsp_arch}Skel.so", libs_dir / f"libQnnHtpV{dsp_arch}Skel.so")
+        # -------------------------
+        # DSP-arch-specific files
+        # -------------------------
+        # Expect dsp_arches like ["73","81"] (instead of single dsp_arch string)
+        for _dsp in dsp_arches:
+            dsp_lib_path = qnn_root / "lib" / f"hexagon-v{_dsp}" / "unsigned"
 
+            # cat + skel
+            _copy_if_exists(
+                dsp_lib_path / f"libqnnhtpV{_dsp}.cat",
+                libs_dir / f"libqnnhtpV{_dsp}.cat",
+            )
+            _copy_if_exists(
+                dsp_lib_path / f"libQnnHtpV{_dsp}Skel.so",
+                libs_dir / f"libQnnHtpV{_dsp}Skel.so",
+            )
+
+            # Per-arch stubs (Windows/Linux)
+            _copy_if_exists(
+                lib_path / f"QnnHtpV{_dsp}Stub.dll",
+                libs_dir / f"QnnHtpV{_dsp}Stub.dll",
+            )
+            _copy_if_exists(
+                lib_path / f"libQnnHtpV{_dsp}Stub.so",
+                libs_dir / f"libQnnHtpV{_dsp}Stub.so",
+            )
+
+        # -------------------------
+        # Non-DSP-specific QNN libs
+        # -------------------------
         # Windows QNN dlls
         _copy_if_exists(lib_path / "QnnHtp.dll", libs_dir / "QnnHtp.dll")
         _copy_if_exists(lib_path / "QnnCpu.dll", libs_dir / "QnnCpu.dll")
         _copy_if_exists(lib_path / "QnnHtpNetRunExtensions.dll", libs_dir / "QnnHtpNetRunExtensions.dll")
         _copy_if_exists(lib_path / "QnnHtpPrepare.dll", libs_dir / "QnnHtpPrepare.dll")
-        _copy_if_exists(lib_path / f"QnnHtpV{dsp_arch}Stub.dll", libs_dir / f"QnnHtpV{dsp_arch}Stub.dll")
         _copy_if_exists(lib_path / "QnnSystem.dll", libs_dir / "QnnSystem.dll")
 
         # Linux/Android .so variants
@@ -315,7 +340,6 @@ def _copy_runtime_artifacts(
         _copy_if_exists(lib_path / "libQnnCpu.so", libs_dir / "libQnnCpu.so")
         _copy_if_exists(lib_path / "libQnnHtpNetRunExtensions.so", libs_dir / "libQnnHtpNetRunExtensions.so")
         _copy_if_exists(lib_path / "libQnnHtpPrepare.so", libs_dir / "libQnnHtpPrepare.so")
-        _copy_if_exists(lib_path / f"libQnnHtpV{dsp_arch}Stub.so", libs_dir / f"libQnnHtpV{dsp_arch}Stub.so")
         _copy_if_exists(lib_path / "libQnnSystem.so", libs_dir / "libQnnSystem.so")
 
     _do_copy_into(source_pkg_dir)

@@ -137,6 +137,11 @@ class QNNConfig():
             base_path = os.path.dirname(os.path.abspath(__file__))
             qnn_lib_path = base_path + "/libs"
 
+        if not sys.platform.startswith("win"):	
+            ADSP_LIBRARY_PATH = os.environ.get('ADSP_LIBRARY_PATH')
+            if ADSP_LIBRARY_PATH is None or len(ADSP_LIBRARY_PATH) < 2:
+                os.environ["ADSP_LIBRARY_PATH"] = qnn_lib_path
+
         if (qnn_lib_path != "None"):
             g_backend_lib_path = qnn_lib_path + PATH_SLASH + QNN_LIB_PRE + "Qnn" + runtime + QNN_LIB_EXT
             g_system_lib_path = qnn_lib_path + PATH_SLASH + QNN_SYSTEM_LIB
