@@ -59,7 +59,7 @@ cd ai-engine-direct-helper
      python -m build -w
 
 # Install the extension:
-pip install --force-reinstall dist\qai_appbuilder-2.42.0.81-cp312-cp312-win_amd64.whl
+pip install --force-reinstall dist\qai_appbuilder-2.42.0-cp312-cp312-win_amd64.whl
 ```
 
 ## Build QAI AppBuilder for android

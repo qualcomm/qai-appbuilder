@@ -198,8 +198,8 @@ git pull --recurse-submodules
 ```
 
 #### 步骤 3：安装 QAI AppBuilder Python 扩展
-
-从 [GitHub Release](https://github.com/quic/ai-engine-direct-helper/releases) 下载对应版本的 `.whl` 文件：
+直接运行'pip install qai-appbuilder'来安装，
+或者从 [GitHub Release](https://github.com/quic/ai-engine-direct-helper/releases) 下载对应版本的 `.whl` 文件，再运行：
 
 ```bash
 # 对于 x64 Python
