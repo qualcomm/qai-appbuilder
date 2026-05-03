@@ -7,6 +7,13 @@
 #=============================================================================
 import os
 import sys
+from importlib.metadata import version, PackageNotFoundError
+
+try:
+    __version__ = version("qai_appbuilder")
+except PackageNotFoundError:
+    __version__ = "2.45.40"
+
 g_base_path = os.path.dirname(os.path.abspath(__file__))
 if sys.platform.startswith('linux'):
 
