@@ -197,7 +197,7 @@ cd ai-engine-direct-helper
 git pull --recurse-submodules
 ```
 
-#### Step 3: Install QAI AppBuilder Python Extension
+#### Step 3: Install or Build QAI AppBuilder Python Extension
 Install by run 'pip install qai-appbuilder' directly,
 Or download the corresponding version of `.whl` file from [GitHub Release](https://github.com/quic/ai-engine-direct-helper/releases), then:
 
@@ -208,6 +208,8 @@ pip install qai_appbuilder-{version}-cp312-cp312-win_amd64.whl
 # For ARM64 Python
 pip install qai_appbuilder-{version}-cp312-cp312-win_arm64.whl
 ```
+
+or refer to the doc [BUILD.md](../BUILD.md) to build the specific qai-appbuilder wheel (.whl) version you need.
 
 💡 **Important Note**: Starting from v2.0.0, the QAI AppBuilder Python extension already includes all necessary dependency libraries (including Qualcomm® AI Runtime SDK runtime libraries), eliminating the need for additional Qualcomm® AI Runtime SDK installation. This greatly simplifies the environment configuration process for Python developers.
 
@@ -247,12 +249,14 @@ git pull --recurse-submodules
 
 #### Step 3: Install QAI AppBuilder Python Extension
 
-Download the corresponding version of `.whl` file from [GitHub Release](https://github.com/quic/ai-engine-direct-helper/releases):
+Download the corresponding version of `.whl` file from [GitHub Release](https://github.com/quic/ai-engine-direct-helper/releases) or run 'pip install qai-appbuilder' or build differente versions of qai-appbuilder whl file refer to this doc [BUILD.md](../BUILD.md):
 
 ```bash
 # For Linux ARM64
 pip3 install qai_appbuilder-{version}-cp310-cp310-linux_aarch64.whl
 ```
+
+or refer to the doc [BUILD.md](../BUILD.md) to build the specific qai-appbuilder wheel (.whl) version you need.
 
 💡 **Important Note**: Starting from v2.0.0, the QAI AppBuilder Python extension already includes all necessary dependency libraries (including Qualcomm® AI Runtime SDK runtime libraries), eliminating the need for additional Qualcomm® AI Runtime SDK installation.
 

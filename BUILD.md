@@ -43,24 +43,90 @@ Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.42.0.251225\
 
 ```
 cd ai-engine-direct-helper
-#   [build on windows]<br>
 *Note: Make sure to build in the regular Windows Command Prompt — not in the 'ARM64 Native Tools Command Prompt for VS 2022' and not in the 'Power Shell' window.* <br>
      set QNN_SDK_ROOT=C:/Qualcomm/AIStack/QAIRT/2.42.0.251225/
      set QAI_TOOLCHAINS=aarch64-windows-msvc (For ARM64 Windows Python) [or] set QAI_TOOLCHAINS=arm64x-windows-msvc (For AMD(X64) Windows Python)
-     set QAI_HEXAGONARCH=81
-
-     python -m build -w
-
-#   [build on linux]<br>
-     export QNN_SDK_ROOT=~/QAIRT/2.38.0.250901/
-     export QAI_TOOLCHAINS=aarch64-oe-linux-gcc11.2
-     export QAI_HEXAGONARCH=68
 
      python -m build -w
 
 # Install the extension:
 pip install --force-reinstall dist\qai_appbuilder-2.42.0-cp312-cp312-win_amd64.whl
 ```
+
+## Build QAI AppBuilder for Linux
+**Clone the repository with submodules:**
+
+```bash
+git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
+cd ai-engine-direct-helper
+```
+
+### Download QNN SDK
+
+Download the [Qualcomm® AI Runtime (QAIRT) SDK](https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK) on your device. This SDK includes the required QNN runtime libraries for AI model execution.
+
+**Download Link of QAIRT v2.40.0.251030:** https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.40.0.251030/v2.40.0.251030.zip.
+
+```bash
+# Download QAIRT SDK package 
+wget https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.40.0.251030/v2.40.0.251030.zip
+
+# Extract the runtime libraries
+unzip v2.40.0.251030.zip
+
+# Verify extraction
+ls v2.40.0.251030/
+```
+
+### Set Environment Variables
+
+Configure the required environment variables on your device. Replace `<path_to_v2.40.0.251030>` with the actual path to your extracted QNN SDK directory.
+
+**Common variables for both platforms:**
+
+```bash
+export QNN_SDK_ROOT=<path_to_v2.40.0.251030>
+export QAI_TOOLCHAINS=aarch64-oe-linux-gcc11.2
+```
+
+### Install Python Dependencies
+
+Upgrade build tooling and install required Python packages:
+
+```bash
+# Install system dependencies
+sudo apt update
+sudo apt install -y cmake build-essential python3.12-dev
+
+# Install core Python packages
+pip install wheel==0.45.1 setuptools==80.9.0 pybind11==2.13.6 build==1.4.0
+```
+
+### Build QAI AppBuilder Python and C/C++ Libraries
+
+Build the QAI AppBuilder libraries from the project root directory.
+```bash
+python -m build -w
+```
+
+> **Note:** The build process may take several minutes. The output wheel file will be created in the `dist/` directory.
+
+### Install QAI AppBuilder Wheel Package
+
+Install the built wheel package:
+
+```bash
+python -m pip install dist/qai_appbuilder-*.whl
+```
+
+> **Note:** The version number may vary based on your QNN SDK version.
+
+**Verify Installation:**
+```bash
+python -c "import qai_appbuilder; print('QAI AppBuilder installed successfully')"
+```
+
+> **Note:** QAI AppBuilder provides multiple examples of AI applications developed using Python, covering scenarios such as image super-resolution, object detection, and image classification. Refer to (samples/linux/README.md)
 
 ## Build QAI AppBuilder for android
 

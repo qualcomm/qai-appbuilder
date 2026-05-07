@@ -89,7 +89,7 @@
 
 ### 1.1 什么是 QAI AppBuilder？
 
-QAI AppBuilder（Quick AI Application Builder）是 Qualcomm® AI Runtime SDK 的扩展工具，旨在**简化 QNN 模型的部署流程**。它将复杂的模型执行 API 封装成一组简化的接口，使开发者能够轻松地在 CPU或NPU(HTP) 上加载模型并执行推理，大幅降低了在 Windows on Snapdragon (WoS) 和 Linux 平台上部署 AI 模型的复杂度。
+QAI AppBuilder（Quick AI Application Builder）是 [Qualcomm® AI Runtime SDK](https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK) 的扩展工具，旨在**简化 QNN 模型的部署流程**。它将复杂的模型执行 API 封装成一组简化的接口，使开发者能够轻松地在 CPU或NPU(HTP) 上加载模型并执行推理，大幅降低了在 Windows on Snapdragon (WoS) 和 Linux 平台上部署 AI 模型的复杂度。
 
 ### 1.2 主要特性
 
@@ -197,7 +197,7 @@ cd ai-engine-direct-helper
 git pull --recurse-submodules
 ```
 
-#### 步骤 3：安装 QAI AppBuilder Python 扩展
+#### 步骤 3：安装或编译 QAI AppBuilder Python 扩展
 直接运行'pip install qai-appbuilder'来安装，
 或者从 [GitHub Release](https://github.com/quic/ai-engine-direct-helper/releases) 下载对应版本的 `.whl` 文件，再运行：
 
@@ -208,6 +208,8 @@ pip install qai_appbuilder-{version}-cp312-cp312-win_amd64.whl
 # 对于 ARM64 Python
 pip install qai_appbuilder-{version}-cp312-cp312-win_arm64.whl
 ```
+
+或者参考文档[BUILD.md](../BUILD.md)来编译自己需要的qai-appbuilder whl版本。
 
 💡 **重要提示**：从 v2.0.0 版本开始，QAI AppBuilder Python 扩展已经包含了所有必需的依赖库（包括 Qualcomm® AI Runtime SDK 运行时库），无需额外安装 Qualcomm® AI Runtime SDK。这大大简化了 Python 开发者的环境配置过程。
 
@@ -245,14 +247,17 @@ cd ai-engine-direct-helper
 git pull --recurse-submodules
 ```
 
-#### 步骤 3：安装 QAI AppBuilder Python 扩展
+#### 步骤 3：安装或编译 QAI AppBuilder Python 扩展
 
-从 [GitHub Release](https://github.com/quic/ai-engine-direct-helper/releases) 下载对应版本的 `.whl` 文件：
+直接运行'pip install qai-appbuilder'来安装，
+或者从 [GitHub Release](https://github.com/quic/ai-engine-direct-helper/releases) 下载对应版本的 `.whl` 文件，再运行：
 
 ```bash
 # 对于 Linux ARM64
-pip3 install qai_appbuilder-{version}-cp310-cp310-linux_aarch64.whl
+pip3 install qai_appbuilder-{version}-cp312-cp312-linux_aarch64.whl
 ```
+
+或者参考文档[BUILD.md](../BUILD.md)来编译自己需要的qai-appbuilder whl版本。
 
 💡 **重要提示**：从 v2.0.0 版本开始，QAI AppBuilder Python 扩展已经包含了所有必需的依赖库（包括 Qualcomm® AI Runtime SDK 运行时库），无需额外安装 Qualcomm® AI Runtime SDK。
 
