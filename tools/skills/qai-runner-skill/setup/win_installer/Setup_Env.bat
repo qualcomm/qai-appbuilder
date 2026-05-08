@@ -1,4 +1,8 @@
 @echo off
+REM ---------------------------------------------------------------------
+REM Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+REM SPDX-License-Identifier: BSD-3-Clause
+REM ---------------------------------------------------------------------
 REM =====================================================================
 REM Setup_Env.bat (Simplified - x64 Python 3.10 Only)
 REM AIPC Environment Setup
