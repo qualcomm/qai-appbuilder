@@ -10,7 +10,9 @@ Actions
 -------
 1. Attach ``assets/aipc_AGENTS.md`` to the project's ``AGENTS.md``
    (appends if the file already exists; creates it if it does not).
-2. Copy ``assets/aipc_plan.md`` to the project directory as ``aipc_plan.md``
+2. Ensure Claude-compatible prompt entry points are present by linking
+   ``CLAUDE.md`` to ``AGENTS.md`` when appropriate.
+3. Copy ``assets/aipc_plan.md`` to the project directory as ``aipc_plan.md``
    (backs up any existing file before overwriting).
 
 Usage
@@ -33,7 +35,6 @@ Options
 """
 
 import argparse
-import os
 import shutil
 import sys
 from datetime import datetime
@@ -48,6 +49,7 @@ PLAN_TEMPLATE = SKILL_DIR / "assets" / "aipc_plan.md"
 
 # Sentinel written into AGENTS.md so we can detect a previous attachment
 _AIPC_AGENTS_SENTINEL = "<!-- AIPC-TOOLKIT:AGENTS -->"
+_CLAUDE_PROMPT_FILENAMES = ("CLAUDE.md",)
 
 _AGENTS_HEADER = f"""\n
 ---
@@ -84,14 +86,75 @@ def _backup(path: Path) -> Path:
 # Core operations
 # ---------------------------------------------------------------------------
 
+def _setup_claude_prompt_link(
+    agents_target: Path, claude_target: Path, force: bool = False
+) -> None:
+    """Ensure CLAUDE.md points to AGENTS.md when possible."""
+    if claude_target.is_symlink():
+        resolved = claude_target.resolve(strict=False)
+        if resolved == agents_target.resolve():
+            print(f"[SKIP]  {claude_target.name} already links to AGENTS.md")
+            return
+        if not force:
+            print(
+                f"[ERROR] {agents_target.name}, {claude_target.name} are not linked together; "
+                "don't create for project.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        claude_target.unlink()
+
+    elif claude_target.exists():
+        if not force:
+            print(
+                f"[ERROR] {agents_target.name}, {claude_target.name} are not linked together; "
+                "don't create for project.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        backup_path = _backup(claude_target)
+        print(f"[BAK]   Backed up existing {claude_target.name}  ->  {backup_path.name}")
+        claude_target.unlink()
+
+    try:
+        claude_target.symlink_to(agents_target.name)
+        print(f"[OK]    Linked {claude_target.name}  ->  AGENTS.md")
+    except OSError as exc:
+        print(
+            f"[WARN]  Could not create symlink for {claude_target.name}: {exc}\n"
+            f"        Falling back to copying AGENTS.md content."
+        )
+        shutil.copy2(agents_target, claude_target)
+        print(f"[OK]    Copied AGENTS.md  ->  {claude_target}")
+
+
 def setup_agents(project_dir: Path, force: bool = False) -> None:
-    """Attach aipc_AGENTS.md to <project_dir>/AGENTS.md."""
+    """Attach aipc_AGENTS.md to <project_dir>/AGENTS.md and wire Claude prompts."""
     if not AGENTS_TEMPLATE.is_file():
         print(f"[ERROR] Template not found: {AGENTS_TEMPLATE}", file=sys.stderr)
         sys.exit(1)
 
     target = project_dir / "AGENTS.md"
+    claude_target = project_dir / _CLAUDE_PROMPT_FILENAMES[0]
+
+    if target.exists() and claude_target.exists():
+        if not claude_target.is_symlink() or (
+            claude_target.resolve(strict=False) != target.resolve()
+        ):
+            print(
+                "[ERROR] AGENTS.md, CLAUDE.md are not linked together; "
+                "don't create for project.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        print("[INFO]  AGENTS.md and CLAUDE.md are linked; will update agent setting.")
+
+    elif claude_target.exists() and not target.exists():
+        target.symlink_to(claude_target.name)
+        print("[OK]    Linked AGENTS.md  ->  CLAUDE.md")
+
     template_content = _read(AGENTS_TEMPLATE)
+    agents_updated = False
 
     if target.exists():
         existing = _read(target)
@@ -104,19 +167,23 @@ def setup_agents(project_dir: Path, force: bool = False) -> None:
                     f"[SKIP]  {target.name} already contains AIPC agent definitions.\n"
                     f"        Use --force to re-append."
                 )
-                return
-
-        # Append the template after a clear separator
-        with target.open("a", encoding="utf-8") as fh:
-            fh.write(_AGENTS_HEADER)
-            fh.write(template_content)
-            fh.write("\n")
-        print(f"[OK]    Appended aipc_AGENTS.md  ->  {target}")
+        else:
+            # Append the template after a clear separator
+            with target.open("a", encoding="utf-8") as fh:
+                fh.write(_AGENTS_HEADER)
+                fh.write(template_content)
+                fh.write("\n")
+            agents_updated = True
+            print(f"[OK]    Appended aipc_AGENTS.md  ->  {target}")
 
     else:
         # No existing AGENTS.md — create one directly from the template
         shutil.copy2(AGENTS_TEMPLATE, target)
+        agents_updated = True
         print(f"[OK]    Created {target} from aipc_AGENTS.md template")
+
+    if agents_updated or force or target.exists():
+        _setup_claude_prompt_link(target, claude_target, force=force)
 
 
 def setup_plan(project_dir: Path, force: bool = False) -> None:

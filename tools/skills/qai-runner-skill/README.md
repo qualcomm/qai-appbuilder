@@ -5,7 +5,7 @@
 This repository includes the **agent skill** for QAIRT model conversion & inference on Qualcomm devices.
 
 After this skill is activated, AI agents can automatically assist you with:
-- Model conversion from ONNX to QNN/SNPE formats
+- Model conversion from Pytorch/ONNX to QNN/SNPE formats
 - Model deployment on Qualcomm AI PCs and edge devices
 - Inference implementation using the qai_appbuilder library
 
@@ -13,11 +13,13 @@ You can also use the [Complete project workflow](#complete-project-workflow) sec
 
 AIPC (AI Porting Conversion) is the development name. It is released as part of QAI_APPBUILDER, and you may use either term to trigger the skill.
 
+## Publication
 
-```
-⚠️ Disclaimer: This is an experimental feature and still requires further improvements. Codes generated with this skill is the starting point of code development. All generated codes 
-must complete code review, testing, security validation, and other required software release processes before being released.
-```
+**AIPC: Agent-Based Automation for AI Model Deployment with Qualcomm AI Runtime**  
+https://arxiv.org/abs/2604.14661
+
+> **Disclaimer**  
+> This is an experimental feature and still requires further improvement. Code generated with this skill should be treated only as a starting point for development. All generated code must undergo code review, testing, security validation, and any other required software release processes before production use.
 ---
 
 ## Skill Installations
@@ -83,20 +85,46 @@ pip install qai_appbuilder
 
 ---
 
+### for linux, we offer qairt/qai appbuilder helper prompt. this is experimental function.
+check aipc-toolkit/references/tested_install_prompt/readme.md for usage
 
 ## Testing
 
-
-
-### Automated Testing with AI
-
-The QAI-Runner-Skill can be tested through AI-assisted workflows. The following test scenarios are available:
 
 #### Prerequisites
 Current tests are performed from a YOLOv8 PyTorch environment. To set up:
 ```
 "Create YOLOv8 PyTorch example and test"
 ```
+
+### Complete project workflow
+This workflow is designed to transform a PyTorch source model and inference flow into QNN or SNPE inference without requiring step-by-step prompts.
+Use the following prompts to run a complete AIPC workflow for the current project.
+
+- `"Create an AIPC project in this folder."`
+  - Stay in the current source path and create the project in place.
+- `"setup project following aipc skill strictly"` for Claude Code
+- `"setup project following aipc skill using template strictly"` for Claude Code
+  - Claude Code may not create project files from the template automatically. Confirm this manually.
+
+- Adjust the project configuration in `aipc_plan.md`.
+  - This is a user action, not a prompt.
+  - for "QAIRT_ENV_SETUP ", this is important item to make AI work stable. it is better to have a script to 1. activate dedicate py venv with packages 2. initial qairt envsetup. it is not suggested to let ai install exta package when whole start work. it may have side effect like running out of context windows.
+
+- `"Auto-fill any remaining configuration values using derived or default values, then show the project configuration."`
+  - Ensure the project configuration is complete before continuing.
+
+- `"update start time"`
+  - Use this if you want to track the execution time accurately.
+
+- `"Do all project work."`
+  - Execute the full project workflow based on the configured plan.
+
+
+### Automated Testing with AI
+
+The QAI-Runner-Skill can be tested through AI-assisted workflows. The following test scenarios are available:
+
 
 #### Assistant workflow
 
@@ -124,22 +152,6 @@ Example prompts:
   - Prompt: `"Follow QAI-Runner-Skill and patch the model."`
 
   
-### Complete project workflow
-This workflow is designed to transform a PyTorch source model and inference flow into QNN or SNPE inference without requiring step-by-step prompts.
-Use the following prompts to run a complete AIPC workflow for the current project.
-
-- `"Create an AIPC project in this folder."`
-  - Stay in the current source path and create the project in place.
-
-- Adjust the project configuration in `aipc_plan.md`.
-  - This is a user action, not a prompt.
-
-- `"Auto-fill any remaining configuration values using derived or default values, then show the project configuration."`
-  - Ensure the project configuration is complete before continuing.
-
-- `"Do all project work."`
-  - Execute the full project workflow based on the configured plan.
-
 
 ### Caution
 
@@ -164,6 +176,14 @@ This forces the agent to adhere to the AIPC skill workflow and reference rules.
     - Convert **QNN / SNPE** model on an **x86 host**
     - Run inference on **ARM Linux target (RB8)**
 
+- **Code agents**:
+  - Codex CLI
+  - Cline
+  - Qwen Code
+  - OpenCode
+  - Claude Code (may require extra manual checks, as it appears to have its own project setup preferences)
+  - Kilo CLI (project setup flow not yet verified)
+
 ### Known Issues
 
 - **qcs6490 + QNN quantization**:
@@ -172,5 +192,20 @@ This forces the agent to adhere to the AIPC skill workflow and reference rules.
   - Root cause:
     - `--preserve_io` in conversion can trigger FP16 preservation on some SoC configurations
   - Workaround:
-    - Use **SNPE DLC** quantization flow instead (generate quantized `.dlc` and run with SNPE runtime)
+    - Use the **SNPE DLC** flow instead for chipsets that do not support FP16.
+
+
+### tested model
+- esrgan
+- lprnet
+- yolov8
+- yolo26
+- yolo-world
+- rt-detrv3 onnx
+- paddle ocr v4
+
+### testing model.
+- whisper
+- deepseek r1
+- sam3 
 

@@ -4,6 +4,16 @@ This guide covers the best practices for exporting source models to ONNX and val
 
 ## 1. Export to ONNX
 
+### Precision Recommendation
+
+Prefer exporting ONNX in **FP32** for maximum compatibility.
+
+If reduced precision is required, **FP16** is generally better supported than **BF16** across ONNX tooling and downstream QNN conversion flows.
+
+BF16 export may be possible by casting the model and inputs to `torch.bfloat16`, but support is toolchain-dependent and should be treated as experimental unless validated end-to-end.
+
+If you choose BF16, validation in [Section 2](#2-validation-workflow) is mandatory, and you must also confirm the downstream QNN converter/runtime accepts the exported graph.
+
 Always prefer using a **dedicated Python script** for exporting models. This approach is superior to CLI commands because it allows for:
 - **Reproducibility**: The export parameters are locked in code.
 - **Debugging**: You can easily inspect the model state before export.

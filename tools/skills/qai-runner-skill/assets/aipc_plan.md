@@ -21,7 +21,7 @@ FLOW          = <!-- QNN  or  SNPE(default) -->
 SRC_FRAMEWORK = <!-- PyTorch(default) /   ONNX -->
 TARGET_DEVICE = <!-- ARM WIN  (QCOM) / x86 Linux/ ARM Linux (QCOM) -->
 
-PRECISION     = <!-- FP32 / FP16 (default)/ INT8 / A16W8 /INT4/ A8W4 -->
+PRECISION     = <!-- FP32 / FP16 (default)/ BF16(experimental) / INT8 / A16W8 /INT4/ A8W4 -->
 HOST_DEVICE     = <!-- ARM WIN  (default )/  X86 LINUX  /  ARM LINUX -->
 
 RETMOE_DEVICE_INFO = <!-- Optional. Leave empty for local inference.
@@ -123,7 +123,7 @@ TARGET_ARCH   = <!-- derived from TARGET_DEVICE target OS/arch:
 | Inference API | `aipc` wrapper (`python aipc`) | `aipc` wrapper (`python aipc`) |
 | Supported runtimes | HTP, CPU, GPU | DSP, CPU, GPU |
 | Context binary | ✅ Supported | ⚙️ Optional |
-| Quantization | FP16, FP32, INT8, A16W8 | FP16, FP32, INT8, A16W8  |
+| Quantization | FP16, FP32, BF16 (experimental export/input path only), INT8, A16W8 | FP16, FP32, BF16 (experimental source ONNX only), INT8, A16W8  |
 | Primary target | AI PC, ARM Linux | Android, Embedded Linux |
 | Converter tool | `qnn-onnx-converter` | `qairt-converter` |
 | Script | `aipc_convert_fp.py` / `aipc_convert_int.py` | `aipc_convert_snpe.py` |
@@ -273,6 +273,7 @@ OPSET         = <!-- e.g. 13 -->
                     input_names=["{INPUT_NAME}"],
                     output_names=["{OUTPUT_NAMES}"])
   ```
+  > If `{PRECISION}=BF16`, cast the model and dummy input to `torch.bfloat16` before export. Treat BF16 ONNX export as experimental and validate end-to-end.
 
 - [ ] **1.4** Validate: `onnx.checker.check_model("{ONNX_FILE}")`
 
@@ -341,6 +342,8 @@ OPSET         = <!-- e.g. 13 -->
 **Script**: `skills/aipc-toolkit/scripts/aipc_convert_fp.py`
 
 > Skip if going directly to INT8/A16W8 → proceed to Phase 3B.
+>
+> If `{PRECISION}=BF16`, do **not** assume a dedicated BF16 converter mode exists. Use this phase only after confirming the exported ONNX is accepted by the converter/runtime, or fall back to FP32/FP16.
 
 ### Tasks
 
@@ -530,6 +533,8 @@ WEIGHT_BITWIDTH   = <!-- 8 (typical); see note above for other modes -->
     --precision <!-- fp16 or fp32 -->
   ```
   > Invokes `qairt-converter` from `{QAIRT_ROOT}/bin/<host_toolchain>/`
+  >
+  > If `{PRECISION}=BF16`, treat BF16 only as a possible **source ONNX dtype**, not as a guaranteed SNPE converter precision mode. Validate converter acceptance and correctness explicitly.
 
 - [ ] **SNPE-3.2** Verify `{MODEL_NAME}.dlc` exists and is non-zero
 
@@ -640,6 +645,7 @@ DLC_FILE      = <!-- {MODEL_NAME}.dlc  or  {MODEL_NAME}_quantized.dlc -->
 - [ ] **6.1** Accuracy comparison: ONNX vs. {FLOW} output
   - Method: cosine similarity on `{OUTPUT_NAMES}` tensors
   - FP16/FP32 threshold: ≥ 0.99
+  - BF16 threshold: user-confirmed tolerance after end-to-end validation
   - INT8/A16W8 threshold: ≥ 0.95
   - Result: <!-- PASS / FAIL, score: value -->
 

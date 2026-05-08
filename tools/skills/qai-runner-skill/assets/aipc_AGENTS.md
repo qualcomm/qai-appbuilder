@@ -529,7 +529,7 @@ Recommended execution pattern (conceptual):
 3. `source <setup_script>`
 4. run `python aipc ...`
 
-> See `skills/aipc-toolkit/references/inference.md` → “Target Device Inference over SSH” for concrete command examples.
+> See `skills/aipc-toolkit/references/inference.md` → "Target Device Inference over SSH" for concrete command examples.
 
 **Before starting inference:**
 
@@ -637,11 +637,16 @@ If cosine similarity < threshold → **Blocking Condition B6**.
 | FP16/FP32 | ≥ 0.99 | ≤ 1% vs FP32 baseline |
 | INT8/A16W8 | ≥ 0.95 | ≤ 1% vs FP32 baseline |
 
+**⚠️ MANDATORY GATE — verify before any completion response:**
+```bash
+ls REPORT.md   # must exist — if missing, write it NOW before proceeding
+```
+
 **Verification** (Phase 6 exit criteria):
 - [ ] Cosine similarity meets threshold
 - [ ] Task metric within acceptable range
 - [ ] Latency meets performance target
-- [ ] `REPORT.md` written with versions, metrics, limitations
+- [ ] **`REPORT.md` exists on disk** (`ls REPORT.md` confirms)
 - [ ] `END_TIME` and `WORK_TIME` recorded in `REPORT.md` and `aipc_plan.md` Config
 
 ---

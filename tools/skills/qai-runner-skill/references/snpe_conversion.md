@@ -3,6 +3,11 @@
 ## Scope
 Use this reference when `{FLOW}=SNPE` and output target is `.dlc`.
 
+## Precision note
+- `--float_bitwidth 16` should be treated as the converter's 16-bit floating-point mode, not as a guarantee that a BF16 ONNX model is accepted end-to-end.
+- If the source ONNX was exported in BF16, validate that the SNPE/QAIRT converter accepts that graph and produces correct results.
+- For maximum compatibility, prefer exporting ONNX in FP32 and let the converter handle the target float precision.
+
 ## Host toolchain
 - Windows x86: `x86_64-windows-msvc`
 - windows arm : `x86_64-windows-msvc` ,emulation mode

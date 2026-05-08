@@ -205,20 +205,39 @@ class InferenceSession:
         return input_list
 
     def _run_snpe(self, input_list: str, workdir: str):
-        cmd = [
+        cmd_base = [
             self._snpe_net_run_path(),
             "--container",
             self.backend_model,
             "--input_list",
             input_list,
-            "--output_dir",
-            workdir,
         ]
         runtime = self.sess_options.qnn_runtime.upper()
         if runtime == "CPU":
             pass
         elif runtime == "HTP":
-            cmd.append("--use_dsp")
+            cmd_base.append("--use_dsp")
+
+        # SNPE may emit only one output by default for some DLCs.
+        # For multi-output models, run once per output tensor to force all outputs.
+        if len(self.output_names) > 1:
+            for idx, out_name in enumerate(self.output_names):
+                out_dir = os.path.join(workdir, f"snpe_out_{idx}")
+                cmd = cmd_base + [
+                    "--output_dir",
+                    out_dir,
+                    "--set_output_tensors",
+                    out_name,
+                ]
+                try:
+                    subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                except subprocess.CalledProcessError as exc:
+                    raise RuntimeError(
+                        f"snpe-net-run failed for output '{out_name}' (exit={exc.returncode}). stderr:\\n{exc.stderr}"
+                    ) from exc
+            return
+
+        cmd = cmd_base + ["--output_dir", workdir]
         try:
             subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         except subprocess.CalledProcessError as exc:
@@ -248,11 +267,7 @@ class InferenceSession:
             ) from exc
 
     def _load_outputs(self, workdir: str) -> List[np.ndarray]:
-        result_dirs = sorted(Path(workdir).glob("Result_*"))
-        if not result_dirs:
-            raise RuntimeError("No Result_* output directory produced by net-run")
-
-        raw_files = sorted(result_dirs[0].glob("*.raw"))
+        raw_files = sorted(Path(workdir).glob("**/Result_*/*.raw"))
         if not raw_files:
             raise RuntimeError("No .raw output files produced by net-run")
 

@@ -6,8 +6,13 @@
 #!/usr/bin/env python3
 """
 AIPC SNPE Model Converter
-Converts ONNX models to SNPE DLC format using qairt-converter
-Supports multiple platforms: Windows, Linux (x86_64), and macOS
+Converts ONNX models to SNPE DLC format using qairt-converter.
+
+Note:
+    --bitwidth 16 selects the converter's 16-bit floating-point mode.
+    It does not guarantee end-to-end BF16 support for the source ONNX graph.
+    If the ONNX model was exported in BF16, validate converter acceptance and
+    output correctness explicitly.
 """
 
 import argparse
@@ -61,7 +66,8 @@ def convert_onnx_to_snpe(
         host_arch (str): Host architecture (e.g., "x86_64-windows-msvc").
         onnx_path (str): Path to the input ONNX model.
         output_path (str): Path for the output DLC file.
-        float_bitwidth (int): Floating point bitwidth (16 or 32).
+        float_bitwidth (int): Converter floating-point bitwidth (16 or 32).
+            This is not a BF16-specific switch.
         preserve_io (bool): Whether to preserve input/output layouts.
         source_model_input_shapes (list[tuple[str, str]] | None): Optional list of
             (input_name, dims) pairs to pass as --source_model_input_shape for
@@ -152,7 +158,10 @@ def main():
         type=int, 
         choices=[16, 32], 
         default=16, 
-        help="Floating point bitwidth: 16 (default) or 32"
+        help=(
+            "Converter floating point bitwidth: 16 (default) or 32. "
+            "This is not a BF16-specific option."
+        )
     )
     parser.add_argument(
         "--sdk-root", 

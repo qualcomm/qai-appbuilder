@@ -1,6 +1,6 @@
 ---
 name: aipc-toolkit
-description: AIPC, AI Porting Conversion. Tools and workflows for model conversion, inspection, operator patching, quantization, and inference to Qualcomm platform. Use this skill when working with AI model to ONNX, ONNX models for QNN/SNPE DLC, converting models to FP16/FP32, patching unsupported operators, generating context binaries, or implementing inference for QNN/SNPE DLC.
+description: AIPC, AI Porting Conversion. Tools and workflows for QAIRT/AIPC project setup, model conversion, inspection, operator patching, quantization, context-binary generation, and inference on Qualcomm platforms. Use this skill when creating or initializing an AIPC project, exporting AI models to ONNX, converting ONNX models to QNN or SNPE/DLC, converting models to FP16/FP32, patching unsupported operators, generating context binaries, or implementing inference for QNN/SNPE DLC.
 ---
 
 # AIPC Toolkit
@@ -26,6 +26,10 @@ description: AIPC, AI Porting Conversion. Tools and workflows for model conversi
 - "check htp" / "htp ready" / "htp check"
 - "aipc diagnose" / "environment check"
 
+### Project Setup
+- "create aipc project" / "create project" / "init project" / "setup project"
+- "aipc init" / "aipc setup"
+
 ## When to Use
 
 Use this skill for Qualcomm QAIRT/QNN/SNPE model bring-up:
@@ -35,6 +39,7 @@ Use this skill for Qualcomm QAIRT/QNN/SNPE model bring-up:
 - Quantize model
 - Generate context binaries
 - Run inference and validation
+- Create QAIRT/AIPC project
 
 ## Required Guardrails
 
@@ -67,6 +72,21 @@ Linux cross-host note:
 Continue patching ALL unsupported ops until no replacement patterns exist. Never fall back to CPU.
 For patching rules, escalation policy (B3/B4/B7), and code templates → open `references/operator_patching.md`.
 
+### ⚠️ CRITICAL: Project Setup Rules (DO NOT SKIP)
+
+When the user requests "create project", "init project", or any project setup workflow for qairt:
+you must follow the AIPC skill end-to-end for all project setup actions. This is a required, certified workflow with defined acceptance criteria. Do not improvise, skip steps, or replace the workflow with manual setup. If this instruction is not followed exactly, the resulting work is considered invalid and must not be presented as compliant.
+
+0. **NEVER create local files, folders, or scripts yourself.** Do not write any project files manually or spawn agents to do so.
+1. **ALWAYS run `aipc_project_setup.py`** — never write `AGENTS.md`, `CLAUDE.md`, or `aipc_plan.md` manually.
+   ```bash
+   python /path/to/skills/aipc-toolkit/scripts/aipc_project_setup.py <project_dir>
+   ```
+2. **Verify after the script**: `CLAUDE.md` must be a symlink to `AGENTS.md`. If it is not, the setup failed — stop and report the error.
+3. **Before auto-filling `aipc_plan.md`**, inform the user that some Config values require their input (model name, target device, env script path, flow, etc.) and ask them to provide or confirm these before proceeding.
+4. **Then auto-fill** derived and default values from the user's answers.
+5. **Never shortcut**: manual file creation produces an incomplete scaffold (missing `CLAUDE.md`, wrong template, no sentinel). The script is the only correct path.
+
 ## Quick Start
 
 Bootstrap a project folder:
@@ -74,13 +94,20 @@ Bootstrap a project folder:
 python skills/aipc-toolkit/scripts/aipc_project_setup.py path/to/project
 ```
 
-This attaches:
+This sets up:
 - `assets/aipc_AGENTS.md` -> `<project>/AGENTS.md`
+- `<project>/CLAUDE.md` linked to `<project>/AGENTS.md`
 - `assets/aipc_plan.md` -> `<project>/aipc_plan.md`
+
+Notes:
+- If both `AGENTS.md` and `CLAUDE.md` already exist but are not linked together, setup stops with an error.
+- If only `CLAUDE.md` exists, the script creates `AGENTS.md` as a symlink to `CLAUDE.md` before applying the AIPC agent content.
 
 Then edit:
 - `aipc_plan.md` Config section
-- Placeholders in `AGENTS.md`
+- Placeholders in `AGENTS.md` / `CLAUDE.md`
+
+
 
 ## Core Workflow
 
