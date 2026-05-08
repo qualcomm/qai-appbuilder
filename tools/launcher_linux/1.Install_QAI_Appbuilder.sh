@@ -1,5 +1,9 @@
-
 #!/bin/bash
+# ---------------------------------------------------------------------
+# Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 
 # 接收脚本路径参数
 scriptPath=$(pwd)

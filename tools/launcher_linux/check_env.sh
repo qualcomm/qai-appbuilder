@@ -1,4 +1,8 @@
 #!/bin/bash
+# ---------------------------------------------------------------------
+# Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
 #
 # Library of common environment checks and utility functions.
 # Source this script in other scripts to use its functions.
