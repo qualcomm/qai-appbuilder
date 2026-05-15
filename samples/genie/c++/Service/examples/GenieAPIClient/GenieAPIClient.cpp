@@ -9,9 +9,8 @@
 #include <string>
 #include <sstream>
 #include <log.h>
-#include <thread>
-#include <random>
 #include <fstream>
+#include <filesystem>
 #include <base64.h>
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
@@ -29,9 +28,10 @@ public:
     std::string system{"You are a helpful assistant."};
     std::string model{"IBM-Granite-v3.1-8B"};
     std::string raw_file_;
-    bool loop{false};
     bool stream{false};
-    std::string ip{"127.0.0.1"};
+    std::string host{"127.0.0.1:8910"};
+    std::string key_;
+    std::string bench_;
 
     template<typename CharT>
     static void Init(int argc, CharT **argv);
@@ -86,43 +86,30 @@ void CLI::Init(int argc, CharT **argv)
             cli_info.picture_path_ = ArgToString(argv[++i]);
         else if (ArgToString(arg) == "--audio" && i + 1 < argc)
             cli_info.audio_path_ = ArgToString(argv[++i]);
-        else if (ArgToString(arg) == "--loop")
-            cli_info.loop = true;
-        else if (ArgToString(arg) == "--ip")
-            cli_info.ip = ArgToString(argv[++i]);
+        else if (ArgToString(arg) == "--host")
+            cli_info.host = ArgToString(argv[++i]);
+        else if (ArgToString(arg) == "--key")
+            cli_info.key_ = ArgToString(argv[++i]);
         else if (ArgToString(arg) == "--raw_file")
             cli_info.raw_file_ = ArgToString(argv[++i]);
+        else if (ArgToString(arg) == "--bench")
+            cli_info.bench_ = ArgToString(argv[++i]);
     }
-
-    SVR_URL = std::string{"http://"} + cli_info.ip + ":8910/v1/chat/completions";
+    SVR_URL = std::string{"http://"} + cli_info.host + "/v1/chat/completions";
     My_Log{} << "url path: " << SVR_URL << "\n";
 }
 
-static class Question
-{
-public:
-    const char *ChoseOne()
-    {
-        static thread_local std::mt19937 rng{std::random_device{}()};
-        std::uniform_int_distribution<std::size_t> dist{0, question.size() - 1};
-        return question[dist(rng)];
-    }
-
-private:
-    const std::vector<const char *> question{
-            "今天天气如何？",
-            "高通公司是怎么样的企业",
-            "3000 字爱国作文",
-            "你是哪个大模型？",
-            "哥特巴赫猜想是什么"
-    };
-} question;
-
 std::string message;
+std::string response_chunk;
+bool stop_loop{false};
 
 size_t write_callback_stream(char *ptr, size_t size, size_t nmemb, void *userdata)
 {
     size_t total_size = size * nmemb;
+    if (stop_loop)
+    {
+        return total_size;
+    }
     std::string chunk(ptr, total_size);
     message += chunk;
 
@@ -148,7 +135,15 @@ size_t write_callback_stream(char *ptr, size_t size, size_t nmemb, void *userdat
                     j["choices"][0].contains("delta") &&
                     j["choices"][0]["delta"].contains("content"))
                 {
-                    My_Log{}.original(true) << j["choices"][0]["delta"]["content"].get<std::string>();
+                    auto part = j["choices"][0]["delta"]["content"].get<std::string>();
+                    My_Log{}.original(true) << part;
+                    response_chunk += part;
+                    if (!cli_info.bench_.empty() && response_chunk.size() > 500)
+                    {
+                        My_Log{My_Log::Level::kError} << "force stop!\n";
+                        stop_loop = true;
+                        break;
+                    }
                 }
             }
         }
@@ -177,6 +172,7 @@ std::string build_request_body(const std::string &model, const T1 &prompt, const
 {
     json body;
     body["model"] = model;
+    body["api_key"] = cli_info.key_;
     body["stream"] = stream;
     body["messages"] = {
             {{"role", "system"}, {"content", system}},
@@ -191,7 +187,7 @@ std::string build_request_body(const std::string &model, const T1 &prompt, const
     return body.dump(4);
 }
 
-void Do(const std::string &body)
+std::string Do(const std::string &body)
 {
     CURLcode res;
     curl_global_init(CURL_GLOBAL_ALL);
@@ -199,7 +195,7 @@ void Do(const std::string &body)
     if (!curl)
     {
         curl_global_cleanup();
-        return;
+        return "";
     }
 
     curl_easy_setopt(curl, CURLOPT_URL, SVR_URL.c_str());
@@ -224,6 +220,7 @@ void Do(const std::string &body)
 
     long response_code = 0;
     std::string full_response;
+
     My_Log{} << "Response: \n";
     if ((res = curl_easy_perform(curl)) != CURLE_OK)
     {
@@ -244,8 +241,8 @@ void Do(const std::string &body)
         try
         {
             full_response = json::parse(message).dump(4);
-            My_Log{} << json::parse(message)["choices"][0]["message"]["content"].get<std::string>()
-                     << std::endl;
+            response_chunk = json::parse(message)["choices"][0]["message"]["content"].get<std::string>();
+            My_Log{} << response_chunk << "\n";
         }
         catch (std::exception &e)
         {
@@ -258,20 +255,10 @@ void Do(const std::string &body)
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
     curl_global_cleanup();
+    return response_chunk;
 }
 
-// TODO: Stop
-void DoLoop()
-{
-    while (true)
-    {
-        My_Log{} << question.ChoseOne() << std::endl;
-        Do(build_request_body(cli_info.model, question.ChoseOne(), cli_info.system, cli_info.stream));
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-    }
-}
-
-std::string EncodeBinary(std::string &path)
+std::string EncodeBinary(const std::string &path)
 {
     if (path.empty())
     {
@@ -307,12 +294,12 @@ std::string EncodeBinary(std::string &path)
     return out;
 }
 
-json BuildUserContentV1()
+json BuildUserContentV1(const std::string &question, const std::string &img_path, const std::string &audio_path)
 {
     json j_user;
-    j_user["question"] = cli_info.prompt;
-    j_user["image"] = EncodeBinary(cli_info.picture_path_);
-    j_user["audio"] = EncodeBinary(cli_info.audio_path_);
+    j_user["question"] = question;
+    j_user["image"] = EncodeBinary(img_path);
+    j_user["audio"] = EncodeBinary(audio_path);
     return j_user;
 }
 
@@ -339,6 +326,48 @@ void BuildUserContentV2(json &j_system, json &j_user)
     j_system.push_back(text_item);
 }
 
+bool BenchLoop()
+{
+    if (!cli_info.bench_.empty())
+    {
+        std::ifstream in(cli_info.bench_);
+        if (!in.good())
+        {
+            std::string err = std::string{"open file path: "} + cli_info.bench_ + " failed";
+            throw std::runtime_error(err);
+        }
+
+        json j;
+        in >> j;
+        for (const auto &ele: j)
+        {
+            std::string req_body = build_request_body(cli_info.model,
+                                                      BuildUserContentV1(ele["question"].get<std::string>(),
+                                                                         ele["img_path"].get<std::string>(),
+                                                                         ""),
+                                                      cli_info.system, cli_info.stream);
+
+            My_Log{} << "current: " << ele["out_path"].get<std::string>().c_str() << "\n";
+            auto req = Do(req_body);
+            if (req.empty())
+            {
+                My_Log{My_Log::Level::kError} << "Error occur, exit\n";
+                return true;
+            }
+            std::filesystem::path generate{ele["out_path"].get<std::string>().c_str()};
+            std::filesystem::create_directories(generate.parent_path());
+            std::ofstream out(ele["out_path"].get<std::string>(), std::ios::out | std::ios::trunc);
+            out << req;
+            out.close();
+            message.clear();
+            response_chunk.clear();
+            stop_loop = false;
+        }
+        return true;
+    }
+    return false;
+}
+
 #ifdef WIN32
 #define MAIN int wmain(int argc, wchar_t *argv[])
 #else
@@ -354,8 +383,14 @@ MAIN
     SetConsoleOutputCP(CP_UTF8);
 #endif
 
+    json j_system, j_user;
+
     try
     {
+        if (BenchLoop())
+        {
+            return 1;
+        }
         std::string req_body;
         if (!cli_info.raw_file_.empty())
         {
@@ -386,14 +421,16 @@ MAIN
         }
 
 
-//        json j_system, j_user;
-//        BuildUserContentV2(j_system, j_user);
-//        std::string req_body = build_request_body(cli_info.model, j_user, j_system, cli_info.stream);
-        req_body = build_request_body(cli_info.model, BuildUserContentV1(), cli_info.system, cli_info.stream);
+        BuildUserContentV2(j_system, j_user);
+        req_body = build_request_body(cli_info.model, j_user, j_system, cli_info.stream);
+//        req_body = build_request_body(cli_info.model, BuildUserContentV1(cli_info.prompt,
+//                                                                         cli_info.picture_path_,
+//                                                                         cli_info.audio_path_),
+//                                      cli_info.system, cli_info.stream);
 //        std::string req_body = build_request_body(cli_info.model, cli_info.prompt, cli_info.system, cli_info.stream);
 
         ahead:
-        cli_info.loop ? DoLoop() : Do(req_body);
+        Do(req_body);
     }
     catch (const std::exception &e)
     {

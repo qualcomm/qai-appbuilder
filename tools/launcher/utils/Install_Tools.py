@@ -40,7 +40,7 @@ def copy_tools():
 
 def install_GenieAPIService():
     tools_dir = "tools"
-    zip_file = os.path.join(tools_dir, "GenieAPIService_v2.1.0_QAIRT_v2.38.0_v73.zip")
+    zip_file = os.path.join(tools_dir, "GenieAPIService_Stable_QAIRT_v73.zip")
     extract_root = os.path.join("ai-engine-direct-helper", "samples")
     extract_dir = os.path.join("ai-engine-direct-helper", "samples", "GenieAPIService")
 
@@ -51,10 +51,10 @@ def install_GenieAPIService():
         os.makedirs(tools_dir, exist_ok=True)
     
     if os.path.exists(zip_file):
-        print("GenieAPIService_v2.1.0_QAIRT_v2.38.0_v73.zip already exists")
+        print("GenieAPIService_Stable_QAIRT_v73.zip already exists")
     else:
         print("Downloading GenieAPIService...")
-        download_url = "https://github.com/quic/ai-engine-direct-helper/releases/download/v2.38.0/GenieAPIService_v2.1.0_QAIRT_v2.38.0_v73.zip"
+        download_url = "https://github.com/quic/ai-engine-direct-helper/releases/download/v2.44.0/GenieAPIService_Stable_QAIRT_v73.zip"
         
         if download_file_with_progress(download_url, zip_file):
             print("download successfully")

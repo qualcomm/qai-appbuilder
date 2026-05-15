@@ -52,6 +52,8 @@ public:
     void setLoraStrength(const std::string &engineRole,
                          const std::unordered_map<std::string, float> &alphaValue) override;
 
+    void Reset() override;
+
     struct QInterfaceImpl;
 
     class ConfigFixer;
@@ -83,6 +85,7 @@ private:
     std::mutex m_stream_lock;
     std::condition_variable m_stream_cond;  // Condition variable for stream data
     QInterfaceImpl *inf_impl_{};
+    std::string kv_path_;
 };
 
 #endif

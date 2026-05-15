@@ -82,15 +82,23 @@ void GenieContext::inference_thread()
     }
 }
 
-bool GenieContext::Query(const ModelInput &model_input, const Callback &callback)
+void GenieContext::Reset()
 {
     if (GENIE_STATUS_SUCCESS != GenieDialog_reset(m_DialogHandle))
     {
-        My_Log{} << "Failed to reset Genie Dialog.\n";
-        return false;
+        My_Log{} << "reset Genie Dialog failed\n";
+    }
+    inf_impl_->inf_->cur_length_ = 0;
+}
+
+bool GenieContext::Query(const ModelInput &model_input, const Callback &callback)
+{
+    Genie_Status_t status = 0;
+    if (!kv_path_.empty() && GENIE_STATUS_SUCCESS != (status = GenieDialog_restore(m_DialogHandle, kv_path_.c_str())))
+    {
+        throw std::runtime_error("restore kv failed: " + std::to_string(status));
     }
 
-    inf_impl_->inf_->cur_length_ = 0;
     if (!inf_impl_->inf_->set_content(const_cast<ModelInput &>(model_input)))
     {
         return false;
@@ -104,17 +112,17 @@ bool GenieContext::Query(const ModelInput &model_input, const Callback &callback
     while (m_inference_busy)
     {
         std::unique_lock<std::mutex> lock(m_stream_lock);
-        
+
         // Wait for new data or inference completion (with timeout to check m_inference_busy)
-        m_stream_cond.wait_for(lock, std::chrono::milliseconds(10), 
-            [this] { return !m_stream_answer.empty() || !m_inference_busy; });
-        
+        m_stream_cond.wait_for(lock, std::chrono::milliseconds(10),
+                               [this] { return !m_stream_answer.empty() || !m_inference_busy; });
+
         if (!m_stream_answer.empty())
         {
             response = m_stream_answer;
             m_stream_answer.clear();
             lock.unlock();
-            
+
             if (!callback(response))
             {
                 break;
@@ -187,6 +195,28 @@ GenieContext::GenieContext(const IModelConfig &model_config) :
         throw std::runtime_error("Failed to get sampler");
     }
 
+
+    std::vector<std::string> store_paths;
+
+    // if (fixer.has_ssd_prefix_)
+    //     goto ahead;
+
+    store_paths = {
+            model_config.get_model_path() + "/kv-cache.primary.qnn-htp",
+            model_config.get_model_path() + "/Prefix/"
+    };
+
+    for (auto &path: store_paths)
+    {
+        if (File::IsFileExist(path + "kv-cache.primary.qnn-htp"))
+        {
+            kv_path_ = path;
+            My_Log{} << "kv_path: " << kv_path_ << std::endl;
+            break;
+        }
+    }
+
+    ahead:
     if (!inf_impl_)
     {
         inf_impl_ = new QInterfaceImpl{this};
@@ -312,10 +342,6 @@ bool GenieContext::GenerateTextToken(const std::string &text, const int32_t *&bu
         return false;
     }
 
-    
-    // NOTE: Do NOT free buf here! The caller (BuildTextEmbedding) needs to use it.
-    // The caller is responsible for freeing the buffer.
-    
     return len;
 }
 

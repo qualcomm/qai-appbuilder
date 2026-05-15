@@ -18,7 +18,6 @@
 #include <io.h>
 #include <direct.h>
 #include <nlohmann/json.hpp>
-
 using json = nlohmann::json;
 
 using namespace std;
@@ -36,121 +35,101 @@ static double sg_average_token_per_second = 0.0f;
 #define PHI4MMV81
 
 // Extract answer text from streaming chunk
-bool stream_process(const std::string &chunk)
-{
-    if (chunk.empty())
-    {
+bool stream_process(const std::string& chunk) {
+    if (chunk.empty()) {
         return true;
     }
-
+    
     // Handle DONE signal - filter out various DONE formats
-    if (chunk == "[DONE]" || chunk == "DONE" ||
-        chunk.find("[DONE]") == 0 ||
-        chunk.find("data: [DONE]") != std::string::npos)
-    {
+    if (chunk == "[DONE]" || chunk == "DONE" || 
+        chunk.find("[DONE]") == 0 || 
+        chunk.find("data: [DONE]") != std::string::npos) {
         return true;
     }
-
-    try
-    {
+    
+    try {
         std::string json_str = chunk;
-
+        
         // Remove "data: " prefix if present
-        if (json_str.find("data: ") == 0)
-        {
+        if (json_str.find("data: ") == 0) {
             json_str = json_str.substr(6);
         }
-
+        
         // Try to parse as JSON
         json j = json::parse(json_str);
-
+        
         // Try multiple possible JSON structures
         // Structure 1: {"choices": [{"delta": {"content": "..."}}]}
-        if (j.contains("choices") && j["choices"].size() > 0)
-        {
-            auto &choice = j["choices"][0];
-            if (choice.contains("delta") && choice["delta"].contains("content"))
-            {
+        if (j.contains("choices") && j["choices"].size() > 0) {
+            auto& choice = j["choices"][0];
+            if (choice.contains("delta") && choice["delta"].contains("content")) {
                 std::string token = choice["delta"]["content"].get<std::string>();
                 // Filter out special tokens
-                if (!token.empty() && token.find("<|end|>") == std::string::npos)
-                {
+                if (!token.empty() && token.find("<|end|>") == std::string::npos) {
                     printf("%s", token.c_str());
                     fflush(stdout);
                     return true;
                 }
             }
             // Structure 2: {"choices": [{"message": {"content": "..."}}]}
-            if (choice.contains("message") && choice["message"].contains("content"))
-            {
+            if (choice.contains("message") && choice["message"].contains("content")) {
                 std::string token = choice["message"]["content"].get<std::string>();
                 // Filter out special tokens
-                if (!token.empty() && token.find("<|end|>") == std::string::npos)
-                {
+                if (!token.empty() && token.find("<|end|>") == std::string::npos) {
                     printf("%s", token.c_str());
                     fflush(stdout);
                     return true;
                 }
             }
             // Structure 3: {"choices": [{"text": "..."}]}
-            if (choice.contains("text"))
-            {
+            if (choice.contains("text")) {
                 std::string token = choice["text"].get<std::string>();
                 // Filter out special tokens
-                if (!token.empty() && token.find("<|end|>") == std::string::npos)
-                {
+                if (!token.empty() && token.find("<|end|>") == std::string::npos) {
                     printf("%s", token.c_str());
                     fflush(stdout);
                     return true;
                 }
             }
         }
-
+        
         // Structure 4: {"content": "..."}
-        if (j.contains("content"))
-        {
+        if (j.contains("content")) {
             std::string token = j["content"].get<std::string>();
             // Filter out special tokens
-            if (!token.empty() && token.find("<|end|>") == std::string::npos)
-            {
+            if (!token.empty() && token.find("<|end|>") == std::string::npos) {
                 printf("%s", token.c_str());
                 fflush(stdout);
                 return true;
             }
         }
-
+        
         // Structure 5: {"text": "..."}
-        if (j.contains("text"))
-        {
+        if (j.contains("text")) {
             std::string token = j["text"].get<std::string>();
-            if (!token.empty())
-            {
+            if (!token.empty()) {
                 printf("%s", token.c_str());
                 fflush(stdout);
                 return true;
             }
         }
-
+        
         // Structure 6: {"token": "..."}
-        if (j.contains("token"))
-        {
+        if (j.contains("token")) {
             std::string token = j["token"].get<std::string>();
-            if (!token.empty())
-            {
+            if (!token.empty()) {
                 printf("%s", token.c_str());
                 fflush(stdout);
                 return true;
             }
         }
-
+        
         // If no known structure matched, silently ignore
     }
-    catch (const std::exception &e)
-    {
+    catch (const std::exception& e) {
         // If not JSON, check if it's a special token before printing
-        if (chunk.find("data: [DONE]") == std::string::npos &&
-            chunk.find("<|end|>") == std::string::npos)
-        {
+        if (chunk.find("data: [DONE]") == std::string::npos && 
+            chunk.find("<|end|>") == std::string::npos) {
             printf("%s", chunk.c_str());
             fflush(stdout);
         }
@@ -159,39 +138,31 @@ bool stream_process(const std::string &chunk)
 }
 
 // Extract answer text from non-streaming result JSON
-std::string extract_answer(const std::string &result_json)
-{
-    try
-    {
+std::string extract_answer(const std::string& result_json) {
+    try {
         json outer = json::parse(result_json);
         std::string response_str = outer["response"].get<std::string>();
         json inner = json::parse(response_str);
-        if (inner.contains("choices") && inner["choices"].size() > 0)
-        {
-            auto &msg = inner["choices"][0]["message"];
-            if (msg.contains("content"))
-            {
+        if (inner.contains("choices") && inner["choices"].size() > 0) {
+            auto& msg = inner["choices"][0]["message"];
+            if (msg.contains("content")) {
                 std::string content = msg["content"].get<std::string>();
                 // Remove trailing <|end|> token if present
                 auto pos = content.rfind("<|end|>");
-                if (pos != std::string::npos)
-                {
+                if (pos != std::string::npos) {
                     content = content.substr(0, pos);
                 }
                 return content;
             }
         }
     }
-    catch (std::exception &)
-    {
-    }
+    catch (std::exception&) {}
     return result_json;
 }
 
-int main(int argc, char **argv)
-{
-    const char *qualla_dir = nullptr;
-    const char *question = nullptr;
+int main(int argc, char** argv) {
+    const char* qualla_dir = nullptr;
+    const char* question = nullptr;
     if (argc >= 2)
     {
         qualla_dir = argv[1];
@@ -210,8 +181,9 @@ int main(int argc, char **argv)
     std::string llm_hardware_info{"NPU"};
 
 
+
 #ifdef PHI4MMV81
-    std::string config_phi4mm = R"(
+std::string config_phi4mm = R"(
 {
     "dialog" : {
       "version" : 1,
@@ -292,7 +264,7 @@ int main(int argc, char **argv)
 #endif
 
 #ifdef PHI4MMV73
-    std::string config_phi4mm = R"(
+std::string config_phi4mm = R"(
 {
     "dialog" : {
       "version" : 1,
@@ -371,7 +343,7 @@ int main(int argc, char **argv)
 #endif
 
 #ifdef QWEN25_OMINI_3B
-    std::string config_qwen = R"(
+std::string config_qwen = R"(
 {
   "dialog" : {
     "version" : 1,
@@ -441,17 +413,17 @@ int main(int argc, char **argv)
 )";
 #endif
 
-    int load_cnt = 0;
+int load_cnt = 0;
 
 #ifdef PHI4MMV81
     api_interface llm = api_interface(config_phi4mm);
     std::string model_path = "models/phi4mm-v81";
-    std::vector<std::string> model_name = {
-            "models/phi4mm-v81/weight_sharing_model_ar128_ar1_cl8192_1_of_4.serialized.bin",
-            "models/phi4mm-v81/weight_sharing_model_ar128_ar1_cl8192_2_of_4.serialized.bin",
-            "models/phi4mm-v81/weight_sharing_model_ar128_ar1_cl8192_3_of_4.serialized.bin",
-            "models/phi4mm-v81/weight_sharing_model_ar128_ar1_cl8192_4_of_4.serialized.bin"
-    };
+    std::vector<std::string> model_name = { 
+         "models/phi4mm-v81/weight_sharing_model_ar128_ar1_cl8192_1_of_4.serialized.bin",
+         "models/phi4mm-v81/weight_sharing_model_ar128_ar1_cl8192_2_of_4.serialized.bin",
+         "models/phi4mm-v81/weight_sharing_model_ar128_ar1_cl8192_3_of_4.serialized.bin",
+         "models/phi4mm-v81/weight_sharing_model_ar128_ar1_cl8192_4_of_4.serialized.bin"
+        };
 #endif
 
 #ifdef PHI4MMV73
@@ -468,13 +440,12 @@ int main(int argc, char **argv)
     std::string model_path = "models/qwen2.5_omini_3b_8480";
     std::vector<std::string> model_name = { 
         "models/qwen2.5_omini_3b_8480/model-1.bin",
-        "models/qwen2.5_omini_3b_8480/model-2.bin",
-        "models/qwen2.5_omini_3b_8480/model-3.bin"
+		"models/qwen2.5_omini_3b_8480/model-2.bin",
+		"models/qwen2.5_omini_3b_8480/model-3.bin"
         };
 #endif
 
-    while (load_cnt == 0)
-    {
+    while (load_cnt == 0) {
         // Read all the model files to buffers.
         TimerHelper timeModelToMemoryHelper;
 
@@ -500,8 +471,7 @@ int main(int argc, char **argv)
         llm.api_loadmodel(model_path, model_name, llm_hardware_info);
         timeModelToHTPHelper.PrintDiff("Model to HTP");
         printf("status: %d\n", llm.api_status());
-        if (llm.api_status() == error)
-        {
+        if (llm.api_status() == error) {
             printf("exit due to error 1\n");
             exit(1);
         }
@@ -517,17 +487,14 @@ int main(int argc, char **argv)
         int end_index_int = 0;
 
         int cnt = start_index_int;
-        while (cnt <= end_index_int)
-        {
+        while (cnt <= end_index_int) {
             a = "";
 
-            if (question)
-            {
+            if (question) {
                 q = question;
             }
             std::ifstream in(q.c_str());
-            if (!in.good())
-            {
+            if (!in.good()) {
                 printf("Error: cannot open question file: %s\n", q.c_str());
                 exit(3);
             }
@@ -539,34 +506,46 @@ int main(int argc, char **argv)
             // Extract the actual question text from JSON for display
             std::string question_text;
             std::string input_json_str;
-
-            if (j.is_string())
-            {
+            
+            if (j.is_string()) {
                 question_text = j.get<std::string>();
                 input_json_str = question_text;
-            }
-            else if (j.contains("messages") && j["messages"].size() > 0)
-            {
-                auto &message = j["messages"][0];
-                if (message.contains("content") && message["content"].contains("question"))
-                {
-                    question_text = message["content"]["question"].get<std::string>();
-                    // Pass the entire JSON to the model (includes image data)
-                    input_json_str = j.dump();
+            } else if (j.contains("messages") && j["messages"].size() > 0) {
+                // Find the user-role message; fall back to first message
+                const json* user_msg = nullptr;
+                for (auto& msg : j["messages"]) {
+                    if (msg.contains("role") && msg["role"].get<std::string>() == "user") {
+                        user_msg = &msg;
+                        break;
+                    }
                 }
-                else
-                {
+                if (!user_msg) user_msg = &j["messages"][0];
+
+                auto& content = (*user_msg)["content"];
+                if (content.is_string()) {
+                    question_text = content.get<std::string>();
+                } else if (content.is_array()) {
+                    // OpenAI-style: [{"type":"text","text":"..."}]
+                    for (auto& item : content) {
+                        if (item.value("type", "") == "text" && item.contains("text")) {
+                            question_text = item["text"].get<std::string>();
+                            break;
+                        }
+                    }
+                } else if (content.is_object() && content.contains("question")) {
+                    question_text = content["question"].get<std::string>();
+                }
+
+                if (!question_text.empty()) {
+                    input_json_str = j.dump();
+                } else {
                     question_text = "Hello, how are you?";
                     input_json_str = question_text;
                 }
-            }
-            else if (j.contains("question"))
-            {
+            } else if (j.contains("question")) {
                 question_text = j["question"].get<std::string>();
                 input_json_str = question_text;
-            }
-            else
-            {
+            } else {
                 question_text = "Hello, how are you?";
                 input_json_str = question_text;
             }
@@ -577,18 +556,15 @@ int main(int argc, char **argv)
             fflush(stdout);
 
             // Streaming inference - pass full JSON string (includes image) to model
-            try
-            {
+            try {
                 llm.api_Generate(input_json_str, stream_process);
                 printf("\n");
                 fflush(stdout);
-            } catch (const std::exception &e)
-            {
+            } catch (const std::exception& e) {
                 printf("\n[Error in inference: %s]\n", e.what());
             }
 
-            if (llm.api_status() == error)
-            {
+            if (llm.api_status() == error) {
                 printf("exit due to inference error\n");
                 exit(2);
             }
@@ -600,8 +576,7 @@ int main(int argc, char **argv)
         printf("unload model\n");
         llm.api_unloadmodel();
         printf("status: %d\n", llm.api_status());
-        if (llm.api_status() == error)
-        {
+        if (llm.api_status() == error) {
             printf("exit due to error 6\n");
             exit(6);
         }

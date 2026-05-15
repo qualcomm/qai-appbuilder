@@ -125,7 +125,7 @@ bool File::IsFileEmpty(const std::string &file_path)
 
 bool File::IsFileExist(const std::string &file_path)
 {
-    return std::ifstream(file_path.c_str()).good();
+    return std::ifstream(file_path.c_str()).good() || fs::is_directory(file_path);
 }
 
 bool File::MatchFileInDir(const std::string &dir_path, const std::string &part, std::vector<std::string> *files)

@@ -507,7 +507,7 @@ bool ModelManager::InitializeConfig(bool load)
     auto ensure_path{
             [](const fs::path &path)
             {
-                auto str = path.generic_string();
+                auto str = fs::absolute(path).generic_string();
                 if (str.empty())
                     throw std::runtime_error(
                             "the model file layout does not meet the standard, "
@@ -802,15 +802,13 @@ LibAppBuilder *QNNEmbedding::LibAppbuilderCreator(const std::string &serialized_
 #define BACKEND "libQnnHtp.so"
 #define SYSTEM "libQnnSystem.so"
 #endif
-    // Commented out: This static initialization sets log level before config.h sets the log file path
-    // This causes the first initialization to not write to file
-    // static bool log_setting{
-    //         []()
-    //         {
-    //             SetLogLevel(GENIE_LOG_LEVEL_ERROR, "");
-    //             return true;
-    //         }()
-    // };
+    static bool log_setting{
+            []()
+            {
+                SetLogLevel(My_Log::Level_, "");
+                return true;
+            }()
+    };
 
     auto *app_builder = new LibAppBuilder{};
     My_Log{} << "start to initiate: " << serialized_file << " ....\n";
@@ -819,7 +817,7 @@ LibAppBuilder *QNNEmbedding::LibAppbuilderCreator(const std::string &serialized_
                                       BACKEND,
                                       SYSTEM))
     {
-        My_Log("call model initialize failed\n");
+        My_Log("call model initialize failed");
         return nullptr;
     }
     return app_builder;

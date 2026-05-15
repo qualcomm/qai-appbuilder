@@ -143,3 +143,8 @@ int ContextBase::ApplyParams()
     return 0;
 }
 
+void ContextBase::Reset()
+{
+    My_Log("BuilderBase::Reset called\n");
+}
+

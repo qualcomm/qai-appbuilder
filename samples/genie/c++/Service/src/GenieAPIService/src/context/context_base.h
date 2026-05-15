@@ -34,6 +34,8 @@ public:
 
     virtual size_t TokenLength(const std::string &text);
 
+    virtual void Reset();
+
     virtual void applyLora(const std::string &engineRole, const std::string &loraAdapterName);
 
     virtual void setLoraStrength(const std::string &engineRole,

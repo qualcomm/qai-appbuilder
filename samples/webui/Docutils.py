@@ -7,12 +7,11 @@ import os
 from typing import List, Generator, Union
 from langchain_core.document_loaders import BaseLoader
 from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader, PythonLoader, TextLoader, JSONLoader
-from langchain.chains import LLMChain
-from langchain.prompts import PromptTemplate
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+# from langchain.chains import LLMChain
+# from langchain.prompts import PromptTemplate
+# from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import DirectoryLoader
 from chat import Chat
-import sys
 
 class PPTXLoader(BaseLoader):
     def __init__(self, file_path):

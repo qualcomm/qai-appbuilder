@@ -173,6 +173,8 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
         return;
     }
 
+    handle->Reset();
+
     if (modelName.find("lora") != std::string::npos)
     {
         std::unordered_map<std::string, float> loraAlphaValue

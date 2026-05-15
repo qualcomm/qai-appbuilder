@@ -27,6 +27,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
 from ChainUtils import GenieLLM
+import ctypes
 
 sys.path.append("python")
 
@@ -37,6 +38,9 @@ sys.stdin.reconfigure(encoding='utf-8')
 sys.stdout.reconfigure(encoding='utf-8')
 
 ##########################################################################
+if sys.platform == "win32":
+    ctypes.windll.user32.MessageBoxW(0, "Python version is not supported on Windows", "Unsupported Platform", 0)
+    sys.exit(1)
 
 HOST="0.0.0.0"
 PORT=8910

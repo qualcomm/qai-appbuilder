@@ -5,21 +5,11 @@
 
 import requests
 from openai import OpenAI
-from PIL import Image
 import subprocess
-import sys
 import os
-import subprocess
-import json
-import base64
 import time
 from colorama import init, Fore
-from PIL import Image
-import io
 
-# 强制 stdout 使用 UTF-8 编码
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 class Chat():
     def __init__(self) -> None:
@@ -185,11 +175,15 @@ class Chat():
 
     def getmodellist(self):
         BASE_URL = "http://127.0.0.1:8910/models"
+        print(f"[getmodellist] GET {BASE_URL}")
         response = requests.get(BASE_URL)
+        print(f"[getmodellist] HTTP {response.status_code}")
+        print(f"[getmodellist] Raw response: {response.text}")
         modelname = []
         datas = response.json()["data"]
         for data in datas:
             modelname.append(data["id"])
+        print(f"[getmodellist] Parsed models: {modelname}")
         return modelname
 
     def imagegenerate(self, prompt, negative_prompt="", seed=42, step=20, guidance_scale=7.5, size="512x512"):
