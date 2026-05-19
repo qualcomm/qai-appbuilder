@@ -50,22 +50,41 @@ if (MSVC)
             $ENV{QNN_SDK_ROOT}examples\\Genie\\configs\\htp_backend_ext_config.json
     )
 else ()
-    # Linux / Android: use forward-slashes
+    # Linux / Android: use forward-slashes.
+    # On Linux, QAIRT names its DSP-stub / skel libraries with an UPPERCASE
+    # version tag (libQnnHtpV73Stub.so, libQnnHtpV73Skel.so) while the
+    # hexagon directory itself uses the lowercase tag (hexagon-v73). The
+    # filesystem is case-sensitive, so we must use the proper case for each.
+    string(TOUPPER "${QNN_STUB_VERSION}" QNN_STUB_VERSION_UPPER)
+
     set(QNN_BIN_PATH $ENV{QNN_SDK_ROOT}/bin/${QNN_PLATFORM})
     set(QNN_LIB_PATH $ENV{QNN_SDK_ROOT}/lib/${QNN_PLATFORM})
     set(QNN_STUB_PATH $ENV{QNN_SDK_ROOT}/lib/hexagon-${QNN_STUB_VERSION}/unsigned)
-    set(EXTERNAL_BIN
+
+    # Some files in the SDK are optional - they may or may not be shipped in a
+    # given QAIRT release. Build the candidate list and filter out missing
+    # entries instead of failing the post-build copy step.
+    set(_optional_bins
             ${QNN_BIN_PATH}/genie-t2t-run${EXE_EXT}
             ${QNN_LIB_PATH}/${LIB_PREFIX}Genie${DLL_EXT}
             ${QNN_LIB_PATH}/${LIB_PREFIX}QnnHtp${DLL_EXT}
             ${QNN_LIB_PATH}/${LIB_PREFIX}QnnHtpNetRunExtensions${DLL_EXT}
             ${QNN_LIB_PATH}/${LIB_PREFIX}QnnHtpPrepare${DLL_EXT}
             ${QNN_LIB_PATH}/${LIB_PREFIX}QnnSystem${DLL_EXT}
-            ${QNN_LIB_PATH}/${LIB_PREFIX}QnnHtp${QNN_STUB_VERSION}Stub${DLL_EXT}
-            ${QNN_STUB_PATH}/libQnnHtp${QNN_STUB_VERSION}Skel.so
+            ${QNN_LIB_PATH}/${LIB_PREFIX}QnnHtp${QNN_STUB_VERSION_UPPER}Stub${DLL_EXT}
+            ${QNN_STUB_PATH}/libQnnHtp${QNN_STUB_VERSION_UPPER}Skel.so
             ${QNN_STUB_PATH}/libqnnhtp${QNN_STUB_VERSION}.cat
             $ENV{QNN_SDK_ROOT}/examples/Genie/configs/htp_backend_ext_config.json
     )
+
+    set(EXTERNAL_BIN "")
+    foreach(_f IN LISTS _optional_bins)
+        if (EXISTS "${_f}")
+            list(APPEND EXTERNAL_BIN "${_f}")
+        else ()
+            message(STATUS "QNN runtime file not present, will skip: ${_f}")
+        endif ()
+    endforeach()
 endif ()
 
 # Define EXTERNAL_LIB and PATH
