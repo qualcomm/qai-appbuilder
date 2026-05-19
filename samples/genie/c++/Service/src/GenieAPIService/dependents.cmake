@@ -1,39 +1,84 @@
 include(ExternalProject)
 
+# Library naming differs on each platform:
+#   Windows : "Genie.dll" / "Genie.lib"
+#   Linux   : "libGenie.so"
+#   Android : "libGenie.so"
+# We use LIB_PREFIX + name + DLL_EXT to assemble the file names uniformly.
 if (MSVC)
     set(DLL_EXT ".dll")
     set(EXE_EXT ".exe")
+    set(LIB_PREFIX "")
     set(QNN_PLATFORM "aarch64-windows-msvc")
 elseif (ANDROID)
     set(EXE_EXT ".so")
     set(DLL_EXT ".so")
+    set(LIB_PREFIX "lib")
     set(QNN_PLATFORM "aarch64-android")
+elseif (UNIX)
+    # Native Linux (typically aarch64-oe-linux-gcc11.2 from QAIRT)
+    set(EXE_EXT "")
+    set(DLL_EXT ".so")
+    set(LIB_PREFIX "lib")
+    if (NOT DEFINED QNN_PLATFORM)
+        set(QNN_PLATFORM "aarch64-oe-linux-gcc11.2")
+    endif ()
 else ()
-    message(FATAL_ERROR "only support MSVC and ANDROID platform now")
+    message(FATAL_ERROR "only Windows / Linux / Android platforms are supported")
 endif ()
 
 #  Define EXTERNAL_BIN and PATH
 set(LIBAPPBUILDER_ROOT ${G_EXTERNAL_DIR}/../../../..)
-set(QNN_BIN_PATH $ENV{QNN_SDK_ROOT}bin\\${QNN_PLATFORM})
-set(QNN_LIB_PATH $ENV{QNN_SDK_ROOT}lib\\${QNN_PLATFORM})
-set(QNN_STUB_PATH $ENV{QNN_SDK_ROOT}lib\\hexagon-${QNN_STUB_VERSION}\\unsigned)
-set(EXTERNAL_BIN
-        ${QNN_BIN_PATH}\\genie-t2t-run${EXE_EXT}
-        ${QNN_LIB_PATH}\\Genie${DLL_EXT}
-        ${QNN_LIB_PATH}\\QnnHTP${DLL_EXT}
-        ${QNN_LIB_PATH}\\QnnHtpNetRunExtensions${DLL_EXT}
-        ${QNN_LIB_PATH}\\QnnHtpPrepare${DLL_EXT}
-        ${QNN_LIB_PATH}\\QnnSystem${DLL_EXT}
-        ${QNN_LIB_PATH}\\QnnHtp${QNN_STUB_VERSION}Stub${DLL_EXT}
-        ${QNN_STUB_PATH}\\libQnnHtp${QNN_STUB_VERSION}Skel.so
-        ${QNN_STUB_PATH}\\libqnnhtp${QNN_STUB_VERSION}.cat
-        $ENV{QNN_SDK_ROOT}examples\\Genie\\configs\\htp_backend_ext_config.json
-)
+
+if (MSVC)
+    # Keep the original Windows-style paths (back-slash separators are OK on Windows)
+    set(QNN_BIN_PATH $ENV{QNN_SDK_ROOT}bin\\${QNN_PLATFORM})
+    set(QNN_LIB_PATH $ENV{QNN_SDK_ROOT}lib\\${QNN_PLATFORM})
+    set(QNN_STUB_PATH $ENV{QNN_SDK_ROOT}lib\\hexagon-${QNN_STUB_VERSION}\\unsigned)
+    set(EXTERNAL_BIN
+            ${QNN_BIN_PATH}\\genie-t2t-run${EXE_EXT}
+            ${QNN_LIB_PATH}\\Genie${DLL_EXT}
+            ${QNN_LIB_PATH}\\QnnHTP${DLL_EXT}
+            ${QNN_LIB_PATH}\\QnnHtpNetRunExtensions${DLL_EXT}
+            ${QNN_LIB_PATH}\\QnnHtpPrepare${DLL_EXT}
+            ${QNN_LIB_PATH}\\QnnSystem${DLL_EXT}
+            ${QNN_LIB_PATH}\\QnnHtp${QNN_STUB_VERSION}Stub${DLL_EXT}
+            ${QNN_STUB_PATH}\\libQnnHtp${QNN_STUB_VERSION}Skel.so
+            ${QNN_STUB_PATH}\\libqnnhtp${QNN_STUB_VERSION}.cat
+            $ENV{QNN_SDK_ROOT}examples\\Genie\\configs\\htp_backend_ext_config.json
+    )
+else ()
+    # Linux / Android: use forward-slashes
+    set(QNN_BIN_PATH $ENV{QNN_SDK_ROOT}/bin/${QNN_PLATFORM})
+    set(QNN_LIB_PATH $ENV{QNN_SDK_ROOT}/lib/${QNN_PLATFORM})
+    set(QNN_STUB_PATH $ENV{QNN_SDK_ROOT}/lib/hexagon-${QNN_STUB_VERSION}/unsigned)
+    set(EXTERNAL_BIN
+            ${QNN_BIN_PATH}/genie-t2t-run${EXE_EXT}
+            ${QNN_LIB_PATH}/${LIB_PREFIX}Genie${DLL_EXT}
+            ${QNN_LIB_PATH}/${LIB_PREFIX}QnnHtp${DLL_EXT}
+            ${QNN_LIB_PATH}/${LIB_PREFIX}QnnHtpNetRunExtensions${DLL_EXT}
+            ${QNN_LIB_PATH}/${LIB_PREFIX}QnnHtpPrepare${DLL_EXT}
+            ${QNN_LIB_PATH}/${LIB_PREFIX}QnnSystem${DLL_EXT}
+            ${QNN_LIB_PATH}/${LIB_PREFIX}QnnHtp${QNN_STUB_VERSION}Stub${DLL_EXT}
+            ${QNN_STUB_PATH}/libQnnHtp${QNN_STUB_VERSION}Skel.so
+            ${QNN_STUB_PATH}/libqnnhtp${QNN_STUB_VERSION}.cat
+            $ENV{QNN_SDK_ROOT}/examples/Genie/configs/htp_backend_ext_config.json
+    )
+endif ()
 
 # Define EXTERNAL_LIB and PATH
-set(EXTERNAL_LIBS Genie${DLL_EXT})
+if (MSVC)
+    # On Windows the linker takes "Genie.dll" / "Genie.lib" by full file name.
+    set(EXTERNAL_LIBS Genie${DLL_EXT})
+else ()
+    # On Linux / Android the linker prefers the un-decorated lib name (-lGenie).
+    set(EXTERNAL_LIBS Genie)
+endif ()
 if (ANDROID)
     list(APPEND EXTERNAL_LIBS log)
+endif ()
+if (UNIX AND NOT ANDROID)
+    list(APPEND EXTERNAL_LIBS pthread dl)
 endif ()
 set(EXTERNAL_LIB_PATH ${QNN_LIB_PATH})
 
@@ -74,19 +119,35 @@ elseif (ANDROID)
     list(APPEND EXTERNAL_LIB_PATH ${LIBAPPBUILDER_ROOT}/libs/arm64-v8a)
     list(APPEND EXTERNAL_BIN ${LIBAPPBUILDER_ROOT}/libs/arm64-v8a/libappbuilder${DLL_EXT})
     list(APPEND EXTERNAL_LIBS appbuilder)
+
+elseif (UNIX)
+    # Native Linux: build libappbuilder.so via the top-level CMake project
+    ExternalProject_Add(Libappbuilder
+            SOURCE_DIR ${LIBAPPBUILDER_ROOT}
+            CMAKE_ARGS
+                -DCMAKE_BUILD_TYPE=Release
+                -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+            INSTALL_COMMAND ""
+            BUILD_IN_SOURCE ON
+    )
+
+    list(APPEND EXTERNAL_LIB_PATH ${LIBAPPBUILDER_ROOT}/lib)
+    list(APPEND EXTERNAL_BIN ${LIBAPPBUILDER_ROOT}/lib/libappbuilder${DLL_EXT})
+    list(APPEND EXTERNAL_LIBS appbuilder)
 endif ()
 list(APPEND EXTERNAL_LIBS samplerate)
 
-if (MSVC)
+if (MSVC OR (UNIX AND NOT ANDROID))
     ExternalProject_Add(Libsamplerate
             SOURCE_DIR ${G_EXTERNAL_DIR}/libsamplerate
             CMAKE_ARGS
             -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}
-            -DLIBSAMPLERATE_EXAMPLES=OFF 
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+            -DLIBSAMPLERATE_EXAMPLES=OFF
             -DBUILD_TESTING=OFF
             BUILD_IN_SOURCE ON
     )
-    
+
     list(APPEND EXTERNAL_LIBS samplerate)
 endif ()
 

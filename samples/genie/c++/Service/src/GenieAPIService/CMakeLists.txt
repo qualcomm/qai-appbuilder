@@ -67,8 +67,8 @@ configure_file(
 set(LIB_NAME ${CMAKE_PROJECT_NAME})
 
 if (BUILD_AS_DLL)
-    set(LIB_NAME GenieAPILibrary)     
-    # Build as DLL
+    set(LIB_NAME GenieAPILibrary)
+    # Build as DLL/SO
     if (MSVC)
         add_library(${LIB_NAME} SHARED ${DLL_SOURCES})
         target_compile_definitions(${LIB_NAME} PRIVATE
@@ -78,7 +78,7 @@ if (BUILD_AS_DLL)
                 -D_USE_MATH_DEFINES
         )
         # Generate import library and set output name to GenieAPILibrary
-   
+
     elseif (ANDROID)
         add_library(${LIB_NAME} SHARED ${DLL_SOURCES})
         target_compile_definitions(${LIB_NAME} PRIVATE
@@ -87,37 +87,55 @@ if (BUILD_AS_DLL)
                 -D_HAS_STD_BYTE=0
                 -D_USE_MATH_DEFINES
         )
+    elseif (UNIX)
+        add_library(${LIB_NAME} SHARED ${DLL_SOURCES})
+        target_compile_definitions(${LIB_NAME} PRIVATE
+                -DGENIEAPISERVICE_EXPORTS
+        )
     endif ()
-    
+
     target_include_directories(${LIB_NAME} PRIVATE ${INCLUDE_PATH})
     target_link_directories(${LIB_NAME} PRIVATE ${EXTERNAL_LIB_PATH})
     target_link_libraries(${LIB_NAME} PRIVATE ${EXTERNAL_LIBS})
-    
-    # Add platform-specific fixes for ARM64
-    if(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64" OR CMAKE_GENERATOR_PLATFORM MATCHES "ARM64")
+
+    # Add MSVC ARM64 specific platform fixes (only for MSVC ARM64 builds)
+    if(MSVC AND (CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64" OR CMAKE_GENERATOR_PLATFORM MATCHES "ARM64"))
         target_compile_options(${LIB_NAME} PRIVATE /FI"${CMAKE_CURRENT_SOURCE_DIR}/src/platform_fix.h")
     endif()
-    
-    
+
+
 else()
-    # Build as EXE (original behavior)
+    # Build as EXE / SO (original behavior)
     if (MSVC)
         add_executable(${CMAKE_PROJECT_NAME} ${SERVICE_SOURCES})
     elseif (ANDROID)
         add_library(${CMAKE_PROJECT_NAME} SHARED ${SERVICE_SOURCES})
+    elseif (UNIX)
+        # Native Linux: build as a standalone executable
+        add_executable(${CMAKE_PROJECT_NAME} ${SERVICE_SOURCES})
     endif ()
-    
+
     target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${INCLUDE_PATH})
-    target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
-            -DNOMINMAX
-            -D_HAS_STD_BYTE=0
-            -D_USE_MATH_DEFINES
-    )
+    if (MSVC)
+        target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
+                -DNOMINMAX
+                -D_HAS_STD_BYTE=0
+                -D_USE_MATH_DEFINES
+        )
+    endif ()
     target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE ${EXTERNAL_LIB_PATH})
     target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ${EXTERNAL_LIBS})
-    
-    # Add platform-specific fixes for ARM64
-    if(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64" OR CMAKE_GENERATOR_PLATFORM MATCHES "ARM64")
+
+    # Set rpath so the executable can locate its sibling .so files in the same dir
+    if (UNIX AND NOT ANDROID)
+        set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES
+                BUILD_WITH_INSTALL_RPATH TRUE
+                INSTALL_RPATH "$ORIGIN"
+        )
+    endif ()
+
+    # Add MSVC ARM64 specific platform fixes (only for MSVC ARM64 builds)
+    if(MSVC AND (CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64" OR CMAKE_GENERATOR_PLATFORM MATCHES "ARM64"))
         target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE /FI"${CMAKE_CURRENT_SOURCE_DIR}/src/platform_fix.h")
     endif()
 endif()
@@ -140,5 +158,3 @@ if (BUILD_AS_DLL)
                 COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/src/GenieAPILibrary.h -t ${BUILD_PATH}/include
         )
 endif()
-
-

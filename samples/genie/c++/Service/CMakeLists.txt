@@ -10,8 +10,10 @@ CMAKE_MINIMUM_REQUIRED(VERSION 3.4...3.18)
 set(CMAKE_CXX_STANDARD 17)
 
 project(GenieAPIService)
-if (NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
-    message(FATAL_ERROR "current os is: " ${CMAKE_SYSTEM_NAME} " only windows support")
+if (NOT (${CMAKE_SYSTEM_NAME} STREQUAL "Windows"
+        OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux"
+        OR ${CMAKE_SYSTEM_NAME} STREQUAL "Android"))
+    message(FATAL_ERROR "current os is: " ${CMAKE_SYSTEM_NAME} " only Windows / Linux / Android are supported")
 endif ()
 
 option(USE_MNN "Enable the use mnn platform" OFF)
@@ -49,6 +51,18 @@ if (MSVC)
             /Zc:referenceBinding
             /UNDEBUG
     )
+elseif (UNIX)
+    # Linux / Android share these flags
+    add_compile_options(
+            -O2
+            -fPIC
+            -Wno-deprecated-declarations
+            -Wno-attributes
+    )
+    if (NOT ANDROID)
+        # Pure Linux: make sure pthread/dl/atomic are available at link time
+        link_libraries(pthread dl)
+    endif ()
 endif ()
 
 include_directories(${G_EXTERNAL_INCLUDE_PATH}
@@ -67,6 +81,12 @@ if (MSVC)
         add_subdirectory(examples/GenieAPIClient)
         add_subdirectory(examples/tools)
     endif()
+elseif (UNIX AND NOT ANDROID)
+    # Linux: only build the API client example by default. tools/ uses Win32-only
+    # audio APIs and is intentionally skipped here.
+    if (NOT BUILD_AS_DLL)
+        add_subdirectory(examples/GenieAPIClient)
+    endif ()
 endif ()
 
 # always

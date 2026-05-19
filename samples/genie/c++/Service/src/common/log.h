@@ -17,7 +17,7 @@
 #include <functional>
 #include <stdarg.h>
 
-#if defined(_WIN32) || defined(__WIN32__) || defined(WIN32)
+#if defined(_WIN32) || defined(__WIN32__) || defined(WIN32) || (defined(__linux__) && !defined(__ANDROID__))
 
 #define RED "\033[31m"
 #define GREEN "\033[32m"
