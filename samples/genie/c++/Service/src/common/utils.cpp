@@ -50,7 +50,36 @@ bool isPortAvailable(int port)
 }
 
 #else
-bool isPortAvailable(int port){return true;}
+
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <cerrno>
+#include <cstring>
+
+bool isPortAvailable(int port)
+{
+    int listen_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (listen_socket < 0)
+    {
+        My_Log{} << "Error creating socket: " << strerror(errno) << std::endl;
+        return false;
+    }
+
+    int reuse = 1;
+    setsockopt(listen_socket, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+
+    sockaddr_in service{};
+    service.sin_family = AF_INET;
+    service.sin_addr.s_addr = htonl(INADDR_ANY);
+    service.sin_port = htons(port);
+
+    int result = ::bind(listen_socket, reinterpret_cast<sockaddr *>(&service), sizeof(service));
+    ::close(listen_socket);
+
+    return result == 0;
+}
 #endif
 
 std::atomic<bool> http_busy_{false};

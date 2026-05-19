@@ -20,6 +20,10 @@ namespace fs = std::filesystem;
 
 #include <direct.h>
 
+#else
+
+#include <unistd.h>
+
 #endif
 
 class Config
