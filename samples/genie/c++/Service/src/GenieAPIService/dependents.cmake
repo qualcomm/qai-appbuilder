@@ -15,8 +15,10 @@ elseif (ANDROID)
     set(DLL_EXT ".so")
     set(LIB_PREFIX "lib")
     set(QNN_PLATFORM "aarch64-android")
-elseif (UNIX)
-    # Native Linux (typically aarch64-oe-linux-gcc11.2 from QAIRT)
+elseif (UNIX AND NOT ANDROID)
+    # Native Linux (typically aarch64-oe-linux-gcc11.2 from QAIRT). The Android
+    # CMake/NDK path is handled by the elseif(ANDROID) branch above and is
+    # intentionally not affected here.
     set(EXE_EXT "")
     set(DLL_EXT ".so")
     set(LIB_PREFIX "lib")
@@ -78,6 +80,7 @@ if (ANDROID)
     list(APPEND EXTERNAL_LIBS log)
 endif ()
 if (UNIX AND NOT ANDROID)
+    # Linux-only: link against POSIX threading and dlopen.
     list(APPEND EXTERNAL_LIBS pthread dl)
 endif ()
 set(EXTERNAL_LIB_PATH ${QNN_LIB_PATH})
@@ -120,8 +123,10 @@ elseif (ANDROID)
     list(APPEND EXTERNAL_BIN ${LIBAPPBUILDER_ROOT}/libs/arm64-v8a/libappbuilder${DLL_EXT})
     list(APPEND EXTERNAL_LIBS appbuilder)
 
-elseif (UNIX)
-    # Native Linux: build libappbuilder.so via the top-level CMake project
+elseif (UNIX AND NOT ANDROID)
+    # Native Linux: build libappbuilder.so via the top-level CMake project.
+    # Android already has its own elseif(ANDROID) branch above that is left
+    # untouched.
     ExternalProject_Add(Libappbuilder
             SOURCE_DIR ${LIBAPPBUILDER_ROOT}
             CMAKE_ARGS

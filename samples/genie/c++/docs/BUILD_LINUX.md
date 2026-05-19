@@ -128,6 +128,7 @@ via environment variables to `build_linux.sh`:
 | `USE_MNN`          | `OFF`                             | Enable MNN backend. Not validated on Linux yet. |
 | `USE_GGUF`         | `OFF`                             | Enable llama.cpp / GGUF backend. Not validated on Linux yet. |
 | `BUILD_AS_DLL`     | `OFF`                             | Build `libGenieAPILibrary.so` instead of the executable. |
+| `BUILD_LINUX_CLIENT` | `OFF`                           | Build the `GenieAPIClient` sample (requires libcurl + OpenSSL system packages: `sudo apt install libssl-dev`). |
 
 ---
 
@@ -180,18 +181,51 @@ This only happens on the MSVC ARM64 Windows path. The Linux build does not use
 
 ---
 
-## 8. What was changed for Linux support
+## 8. What was changed for Linux support — and how Windows / Android are protected
+
+### 8.1 Compatibility principle
+
+Every change in this port is **strictly fenced off** from the existing Windows
+and Android build paths so that a Linux merge cannot regress those targets.
+Two complementary mechanisms are used:
+
+1. **CMake guards** — every new code path is gated by
+   `if (UNIX AND NOT ANDROID)` (or the more explicit `CMAKE_SYSTEM_NAME
+   STREQUAL "Linux"` where appropriate). Note that the **Android build is
+   driven by `ndk-build` + `Application.mk`**, **not** by these CMakeLists at
+   all (see `Service/Makefile`), so any CMake change is structurally invisible
+   to Android.
+2. **C/C++ preprocessor guards** — every newly added `#include` or
+   compatibility shim is wrapped in
+   `#if defined(__linux__) && !defined(__ANDROID__) … #endif`.
+   This keeps the include set and the macro set on Windows (MSVC) and Android
+   (NDK clang) byte-identical to what they were before.
+
+The single source-level change that does not need a `#if` guard is the fix in
+`model/def.h` — removing the `extra qualification not allowed` form
+`struct std::hash<…>` inside `namespace std`. The new form is plain standard
+C++, accepted by MSVC, gcc and clang alike, so it improves portability without
+behaviour change.
+
+### 8.2 Reference list of edited files
 
 The Linux port is intentionally minimal. Reference list of edited files:
 
 | File | Change |
 |---|---|
-| `samples/genie/c++/Service/CMakeLists.txt` | Allow Linux/Android in addition to Windows; add UNIX compile/link options. |
+| `samples/genie/c++/Service/CMakeLists.txt` | Allow Linux/Android in addition to Windows; add UNIX compile/link options; gate `examples/GenieAPIClient` behind `BUILD_LINUX_CLIENT=ON`. |
 | `samples/genie/c++/Service/src/GenieAPIService/CMakeLists.txt` | Add UNIX (`add_executable`) branch; gate ARM64 MSVC platform fix to MSVC only; set `$ORIGIN` rpath. |
 | `samples/genie/c++/Service/src/GenieAPIService/dependents.cmake` | Add Linux QNN platform / library naming, build `libappbuilder.so` and `libsamplerate` via `ExternalProject`. |
 | `samples/genie/c++/Service/src/common/log.h` | ANSI color macros now also defined on Linux. |
+| `samples/genie/c++/Service/src/common/utils.h` | Add explicit `<atomic>`, `<chrono>`, `<algorithm>`, `<cstdint>`, ... headers (gcc 13 dropped many transitive includes that MSVC still ships). |
 | `samples/genie/c++/Service/src/common/utils.cpp` | `isPortAvailable` implemented with POSIX sockets. |
 | `samples/genie/c++/Service/src/GenieAPIService/src/config.h` | Include `<unistd.h>` on non-Windows for `getcwd`. |
+| `samples/genie/c++/Service/src/GenieAPIService/src/model/def.h` | Add `<cstdint>`; remove redundant `std::` qualifier inside `namespace std` (rejected by gcc). |
+| `samples/genie/c++/Service/src/GenieAPIService/src/model/model_manager.h` | Add `<atomic>`. |
+| `samples/genie/c++/Service/src/GenieAPIService/src/context/qnn/genie.h` | Add `<condition_variable>`. |
+| `samples/genie/c++/Service/src/GenieAPIService/src/context/torch_helper/base.h` | Add `<algorithm>` / `<cmath>` / `<cstdint>` / `<iterator>` / `<limits>` / `<stdexcept>`. |
+| `samples/genie/c++/Service/src/GenieAPIService/src/context/qnn/qwen2_5_omini/qwen_2_5_omini.cpp` | Provide `std::sqrtf` shim before including LibrosaCpp on non-MSVC compilers. |
+| `samples/genie/c++/Service/examples/GenieAPIClient/CMakeLists.txt` | Linux link rules (libcurl + pthread + dl). |
 | `samples/genie/c++/build_linux.sh` (new) | One-click build script. |
 | `samples/genie/c++/docs/BUILD_LINUX.md` (new) | This document. |
 

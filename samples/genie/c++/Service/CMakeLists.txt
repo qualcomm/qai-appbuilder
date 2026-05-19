@@ -51,18 +51,18 @@ if (MSVC)
             /Zc:referenceBinding
             /UNDEBUG
     )
-elseif (UNIX)
-    # Linux / Android share these flags
+elseif (UNIX AND NOT ANDROID)
+    # Native Linux only. Note that the Android build is driven by ndk-build
+    # using scripts/Application.mk, not by this CMakeLists, so its options are
+    # untouched. This branch deliberately uses "UNIX AND NOT ANDROID" rather
+    # than "UNIX" to make that intent explicit.
     add_compile_options(
             -O2
             -fPIC
             -Wno-deprecated-declarations
             -Wno-attributes
     )
-    if (NOT ANDROID)
-        # Pure Linux: make sure pthread/dl/atomic are available at link time
-        link_libraries(pthread dl)
-    endif ()
+    link_libraries(pthread dl)
 endif ()
 
 include_directories(${G_EXTERNAL_INCLUDE_PATH}
@@ -82,9 +82,12 @@ if (MSVC)
         add_subdirectory(examples/tools)
     endif()
 elseif (UNIX AND NOT ANDROID)
-    # Linux: only build the API client example by default. tools/ uses Win32-only
-    # audio APIs and is intentionally skipped here.
-    if (NOT BUILD_AS_DLL)
+    # Linux: examples/GenieAPIClient depends on libcurl which in turn pulls in
+    # OpenSSL, libpsl, etc. Building those is out of scope for the core service
+    # and is gated behind BUILD_LINUX_CLIENT=ON. tools/ uses Win32-only audio
+    # APIs and is intentionally skipped.
+    option(BUILD_LINUX_CLIENT "Build GenieAPIClient sample on Linux" OFF)
+    if (BUILD_LINUX_CLIENT AND NOT BUILD_AS_DLL)
         add_subdirectory(examples/GenieAPIClient)
     endif ()
 endif ()

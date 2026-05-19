@@ -30,10 +30,9 @@ target_include_directories(${PROJECT_NAME} PRIVATE ${EXTERNAL_HEADER_PATH})
 if (MSVC)
     target_compile_definitions(${PROJECT_NAME} PRIVATE -DCURL_STATICLIB -DNOMINMAX)
     target_link_libraries(${PROJECT_NAME} PRIVATE libcurl Iphlpapi ws2_32 Wldap32)
-elseif (UNIX)
+elseif (UNIX AND NOT ANDROID)
+    # Native Linux only. This sample is gated behind BUILD_LINUX_CLIENT in the
+    # top-level Service/CMakeLists.txt and is not built by default on Linux.
     target_compile_definitions(${PROJECT_NAME} PRIVATE -DCURL_STATICLIB)
-    # On Linux libcurl static archive is named libcurl.a; we also need the system
-    # libs that curl historically depends on (ssl/crypto are provided by openssl
-    # in CMAKE_BINARY_DIR/lib if the bundled curl is configured with TLS).
     target_link_libraries(${PROJECT_NAME} PRIVATE curl pthread dl)
 endif ()

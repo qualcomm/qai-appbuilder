@@ -20,8 +20,10 @@ namespace fs = std::filesystem;
 
 #include <direct.h>
 
-#else
+#elif defined(__linux__) && !defined(__ANDROID__)
 
+// On native Linux, getcwd() lives in <unistd.h>. Android pulls <unistd.h> in
+// indirectly via log.h, so we keep that path unchanged.
 #include <unistd.h>
 
 #endif
