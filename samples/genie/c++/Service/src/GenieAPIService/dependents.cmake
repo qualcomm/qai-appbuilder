@@ -85,6 +85,24 @@ if (UNIX AND NOT ANDROID)
 endif ()
 set(EXTERNAL_LIB_PATH ${QNN_LIB_PATH})
 
+# Locate the CLI11 header directory. The repository ships two submodules
+# (External/CLI11 and External/cli11) for historical reasons; pick whichever
+# is actually populated. Required so case-sensitive Linux filesystems and
+# selectively-cloned trees both work.
+set(_CLI11_DIR "")
+foreach(_cand "${G_EXTERNAL_DIR}/CLI11/include" "${G_EXTERNAL_DIR}/cli11/include")
+    if (EXISTS "${_cand}/CLI/CLI.hpp")
+        set(_CLI11_DIR "${_cand}")
+        break()
+    endif ()
+endforeach()
+if (_CLI11_DIR STREQUAL "")
+    message(FATAL_ERROR
+        "CLI11 header (CLI/CLI.hpp) not found under ${G_EXTERNAL_DIR}/CLI11 or "
+        "${G_EXTERNAL_DIR}/cli11. Run:  git submodule update --init --recursive"
+    )
+endif ()
+
 #  Define EXTERNAL_HEADER
 set(EXTERNAL_HEADER_PATH
         ${G_EXTERNAL_DIR}
@@ -94,7 +112,7 @@ set(EXTERNAL_HEADER_PATH
         ${G_EXTERNAL_DIR}/stb
         ${G_EXTERNAL_DIR}/cpp-httplib
         ${G_EXTERNAL_DIR}/json/single_include
-        ${G_EXTERNAL_DIR}/CLI11/include
+        ${_CLI11_DIR}
         ${G_EXTERNAL_INCLUDE_PATH}/Genie
         $ENV{QNN_SDK_ROOT}/include/Genie
         ${LIBAPPBUILDER_ROOT}/src
@@ -142,7 +160,8 @@ elseif (UNIX AND NOT ANDROID)
 endif ()
 list(APPEND EXTERNAL_LIBS samplerate)
 
-if (MSVC OR (UNIX AND NOT ANDROID))
+if (MSVC)
+    # Windows path keeps its original BUILD_IN_SOURCE behaviour.
     ExternalProject_Add(Libsamplerate
             SOURCE_DIR ${G_EXTERNAL_DIR}/libsamplerate
             CMAKE_ARGS
@@ -151,6 +170,22 @@ if (MSVC OR (UNIX AND NOT ANDROID))
             -DLIBSAMPLERATE_EXAMPLES=OFF
             -DBUILD_TESTING=OFF
             BUILD_IN_SOURCE ON
+    )
+
+    list(APPEND EXTERNAL_LIBS samplerate)
+elseif (UNIX AND NOT ANDROID)
+    # On Linux we use an out-of-source build for libsamplerate to avoid the
+    # known issue where the in-source CMake configure resolves "add_subdirectory(src)"
+    # against the wrong working directory under some CMake versions.
+    ExternalProject_Add(Libsamplerate
+            SOURCE_DIR ${G_EXTERNAL_DIR}/libsamplerate
+            BINARY_DIR ${CMAKE_BINARY_DIR}/libsamplerate-build
+            CMAKE_ARGS
+            -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+            -DLIBSAMPLERATE_EXAMPLES=OFF
+            -DBUILD_TESTING=OFF
+            BUILD_IN_SOURCE OFF
     )
 
     list(APPEND EXTERNAL_LIBS samplerate)

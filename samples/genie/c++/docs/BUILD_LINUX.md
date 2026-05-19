@@ -37,11 +37,24 @@ git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
 cd ai-engine-direct-helper
 ```
 
-If you already cloned it without `--recursive`:
+If you already cloned it without `--recursive`, **you must** initialise the
+submodules (the Linux build needs `External/CLI11`, `External/cpp-httplib`,
+`External/json`, `External/libsamplerate`, `External/dr_libs`,
+`External/stb`, `External/LibrosaCpp`):
 
 ```bash
 git submodule update --init --recursive
 ```
+
+Verify that the CLI11 headers are present:
+
+```bash
+ls samples/genie/c++/External/CLI11/include/CLI/CLI.hpp \
+   || ls samples/genie/c++/External/cli11/include/CLI/CLI.hpp
+```
+
+If neither path is populated, the CMake configure step will abort with a
+`CLI/CLI.hpp not found` message.
 
 ---
 
@@ -72,7 +85,11 @@ The simplest path is the helper script:
 ```bash
 cd samples/genie/c++
 chmod +x build_linux.sh
-./build_linux.sh
+./build_linux.sh           # configure & build
+./build_linux.sh --clean   # remove all build artefacts (including the
+                           # in-source residue ExternalProject leaves in
+                           # libsamplerate/, libcurl/, and the repo root)
+./build_linux.sh --rebuild # equivalent to --clean followed by a fresh build
 ```
 
 The script will:
