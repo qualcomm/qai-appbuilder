@@ -250,16 +250,29 @@ cmake --build . --parallel "${JOBS}"
 echo
 echo "=========================================================="
 echo "[OK] Build finished."
-echo "Artifacts:"
-ls -1 "${SERVICE_DIR}"/GenieService_v* 2>/dev/null | head -1 | while read -r d; do
-    echo "  Output dir: ${d}"
-    ls -lh "${d}" || true
-done
+# Find the actual output directory (Service/GenieService_v<VERSION>/).
+OUT_DIR="$(find "${SERVICE_DIR}" -maxdepth 1 -type d -name 'GenieService_v*' \
+            2>/dev/null | head -1)"
+if [[ -n "${OUT_DIR}" && -d "${OUT_DIR}" ]]; then
+    echo "Output dir: ${OUT_DIR}"
+    echo "Contents:"
+    ls -lh "${OUT_DIR}"
+else
+    echo "[WARN] Could not locate Service/GenieService_v* output dir." >&2
+fi
 echo "=========================================================="
 echo
 echo "To run, set up environment first:"
 echo "  export QNN_SDK_ROOT=${QNN_SDK_ROOT}"
-echo "  export LD_LIBRARY_PATH=\${QNN_SDK_ROOT}/lib/${QNN_PLATFORM}:<output_dir>:\${LD_LIBRARY_PATH}"
+if [[ -n "${OUT_DIR}" ]]; then
+    echo "  export LD_LIBRARY_PATH=\${QNN_SDK_ROOT}/lib/${QNN_PLATFORM}:${OUT_DIR}:\${LD_LIBRARY_PATH}"
+else
+    echo "  export LD_LIBRARY_PATH=\${QNN_SDK_ROOT}/lib/${QNN_PLATFORM}:<output_dir>:\${LD_LIBRARY_PATH}"
+fi
 echo "  export ADSP_LIBRARY_PATH=\${QNN_SDK_ROOT}/lib/hexagon-${QNN_STUB_VERSION}/unsigned"
-echo "  cd <output_dir> && ./GenieAPIService -c config/<your_model>/config.json -l -p 8910"
+if [[ -n "${OUT_DIR}" ]]; then
+    echo "  cd ${OUT_DIR} && ./GenieAPIService -c config/<your_model>/config.json -l -p 8910"
+else
+    echo "  cd <output_dir> && ./GenieAPIService -c config/<your_model>/config.json -l -p 8910"
+fi
 echo
