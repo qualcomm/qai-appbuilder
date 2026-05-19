@@ -9,6 +9,16 @@
 #ifndef DEF_H
 #define DEF_H
 
+#if defined(__linux__) && !defined(__ANDROID__)
+    // gcc on Linux requires explicit includes for these standard headers; MSVC
+    // and the Android NDK pull them in transitively.
+    #include <algorithm>
+    #include <cmath>
+    #include <cstdint>
+    #include <iterator>
+    #include <limits>
+    #include <stdexcept>
+#endif
 #include <vector>
 
 struct FloatBufferView

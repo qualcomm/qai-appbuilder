@@ -7,6 +7,18 @@
 //==============================================================================
 
 #include "qwen_2_5_omini.h"
+
+// LibrosaCpp's header uses std::sqrtf, which is a non-standard MSVC extension.
+// On the Android NDK (libc++) it is also available; only on native Linux/glibc
+// does it need a shim. Limit the shim strictly to that case so the existing
+// Windows and Android build paths are unaffected.
+#if defined(__linux__) && !defined(__ANDROID__)
+#include <cmath>
+namespace std {
+    inline float sqrtf(float x) noexcept { return ::sqrtf(x); }
+}
+#endif
+
 #include <librosa/librosa.h>
 
 #define DR_WAV_IMPLEMENTATION

@@ -13,6 +13,11 @@
 
 #include <thread>
 #include <mutex>
+#if defined(__linux__) && !defined(__ANDROID__)
+    // gcc on Linux requires the explicit include for std::condition_variable;
+    // MSVC and the Android NDK pull it in transitively via <thread>/<mutex>.
+    #include <condition_variable>
+#endif
 #include <vector>
 
 #include <GenieCommon.h>

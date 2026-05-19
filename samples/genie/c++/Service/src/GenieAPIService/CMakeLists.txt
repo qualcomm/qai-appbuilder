@@ -87,7 +87,9 @@ if (BUILD_AS_DLL)
                 -D_HAS_STD_BYTE=0
                 -D_USE_MATH_DEFINES
         )
-    elseif (UNIX)
+    elseif (UNIX AND NOT ANDROID)
+        # Native Linux only — Android still goes through the elseif(ANDROID)
+        # branch above.
         add_library(${LIB_NAME} SHARED ${DLL_SOURCES})
         target_compile_definitions(${LIB_NAME} PRIVATE
                 -DGENIEAPISERVICE_EXPORTS
@@ -110,8 +112,8 @@ else()
         add_executable(${CMAKE_PROJECT_NAME} ${SERVICE_SOURCES})
     elseif (ANDROID)
         add_library(${CMAKE_PROJECT_NAME} SHARED ${SERVICE_SOURCES})
-    elseif (UNIX)
-        # Native Linux: build as a standalone executable
+    elseif (UNIX AND NOT ANDROID)
+        # Native Linux: build as a standalone executable.
         add_executable(${CMAKE_PROJECT_NAME} ${SERVICE_SOURCES})
     endif ()
 

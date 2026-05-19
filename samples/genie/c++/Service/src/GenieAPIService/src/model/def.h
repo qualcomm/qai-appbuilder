@@ -10,6 +10,11 @@
 #define MODEL_TYPE_H
 
 #include "base_enum.h"
+#if defined(__linux__) && !defined(__ANDROID__)
+    // gcc on Linux does not transitively include <cstdint> via the headers
+    // below the way MSVC and the Android NDK do.
+    #include <cstdint>
+#endif
 #include <vector>
 #include <string>
 #include <unordered_map>
@@ -87,7 +92,7 @@ struct ModelType : public BaseEnum
 namespace std
 {
     template<>
-    struct std::hash<ModelType>
+    struct hash<ModelType>
     {
         size_t operator()(ModelType const &m) const noexcept { return std::hash<int>{}(int(m)); }
     };
