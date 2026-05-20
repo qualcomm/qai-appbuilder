@@ -136,13 +136,39 @@ check_submodules()
 # --------------------------------------------------------------------------
 clean_build()
 {
-    echo "[*] Cleaning previous build artefacts ..."
+    echo "[*] Cleaning build artefacts for current version (qnn${_QNN_SDK_VER}_${QNN_STUB_VERSION}) ..."
 
-    # 1. The CMake build directory we use for GenieAPIService.
+    # 1. The CMake build directory (contains all .o files, shared across versions).
     rm -rf "${SERVICE_DIR}/build_linux"
 
-    # 2. Final packaging directory (Service/GenieService_v<ver>/).
-    rm -rf "${SERVICE_DIR}"/GenieService_v* 2>/dev/null || true
+    # 2. Only delete the output directory for the CURRENT QNN + HTP version.
+    #    Other versions (e.g. GenieService_v2.1.5_qnn2.45.40_v73 when you are
+    #    cleaning v81) are left intact.
+    #    We read version.cmake to get the app version for the exact dir name.
+    _APP_VER=""
+    _ver_file="${SERVICE_DIR}/scripts/version.cmake"
+    if [[ -f "${_ver_file}" ]]; then
+        _major=$(grep -oP 'QAI_APP_BUILDER_MAJOR_VERSION\s+\K[0-9]+' "${_ver_file}" || echo "")
+        _minor=$(grep -oP 'QAI_APP_BUILDER_MINOR_VERSION\s+\K[0-9]+' "${_ver_file}" || echo "")
+        _patch=$(grep -oP 'QAI_APP_BUILDER_PATCH_VERSION\s+\K[0-9]+' "${_ver_file}" || echo "")
+        if [[ -n "${_major}" && -n "${_minor}" && -n "${_patch}" ]]; then
+            _APP_VER="${_major}.${_minor}.${_patch}"
+        fi
+    fi
+
+    if [[ -n "${_APP_VER}" ]]; then
+        _target_dir="${SERVICE_DIR}/GenieService_v${_APP_VER}_qnn${_QNN_SDK_VER}_${QNN_STUB_VERSION}"
+        if [[ -d "${_target_dir}" ]]; then
+            echo "    removing: ${_target_dir}"
+            rm -rf "${_target_dir}"
+        else
+            echo "    (target dir does not exist, nothing to remove: ${_target_dir})"
+        fi
+    else
+        # Fallback: couldn't parse version.cmake, just warn
+        echo "    [WARN] Could not determine app version from version.cmake." >&2
+        echo "           Skipping output directory removal. Use --clean-all to remove everything." >&2
+    fi
 
     # 3. ExternalProject_Add(libappbuilder) builds in-source at REPO_ROOT.
     #    Wipe its CMake cache so a fresh configure happens next time.
@@ -156,15 +182,10 @@ clean_build()
            "${REPO_ROOT}/src/cmake_install.cmake" \
            "${REPO_ROOT}/src/Makefile"
 
-    # 4. ExternalProject_Add(libsamplerate / curl) also builds in-source on
-    #    Windows. We CANNOT manually rm the source dirs (they belong to the
-    #    submodule). Instead, ask git to wipe ALL untracked files inside each
-    #    submodule and reset any tracked files that may have been modified by
-    #    the configure step. This safely restores the original source tree.
+    # 4. Restore submodule source trees (remove build residue only).
     if command -v git >/dev/null 2>&1; then
         for sub in External/libsamplerate External/curl External/MNN External/llama.cpp; do
             sub_dir="${SCRIPT_DIR}/${sub}"
-            # Only act on directories that are populated git submodules.
             if [[ -d "${sub_dir}/.git" || -f "${sub_dir}/.git" ]]; then
                 echo "    cleaning submodule: ${sub}"
                 ( cd "${sub_dir}" && git clean -fdx >/dev/null 2>&1 || true )
@@ -172,25 +193,15 @@ clean_build()
             fi
         done
     else
-        echo "    [WARN] git not found - skipping submodule cleanup. If the" >&2
-        echo "           libsamplerate / curl / MNN / llama.cpp source trees" >&2
-        echo "           contain stale build files, please run:" >&2
-        echo "             git submodule foreach --recursive 'git clean -fdx && git reset --hard'" >&2
+        echo "    [WARN] git not found - skipping submodule cleanup." >&2
     fi
 
     echo "[OK] Clean done."
 }
 
-if [[ ${DO_CLEAN} -eq 1 ]]; then
-    clean_build
-fi
-
-if [[ ${DO_BUILD} -eq 0 ]]; then
-    exit 0
-fi
-
 # --------------------------------------------------------------------------
-# Defaults & input validation
+# Defaults & input validation (resolved BEFORE clean so we can compute the
+# exact output directory name for the current QNN+HTP version).
 #
 # Resolution order (matches QAI AppBuilder for cross-project consistency):
 #   1. QNN_PLATFORM       lower-level override (rarely needed)
@@ -219,7 +230,6 @@ fi
 # Resolve Hexagon stub version.
 if [[ -z "${QNN_STUB_VERSION:-}" ]]; then
     if [[ -n "${QAI_HEXAGONARCH:-}" ]]; then
-        # Strip any leading 'v' the user might have typed, then add it back.
         _arch_num="${QAI_HEXAGONARCH#v}"
         _arch_num="${_arch_num#V}"
         QNN_STUB_VERSION="v${_arch_num}"
@@ -237,6 +247,26 @@ fi
 if [[ ! -d "${QNN_SDK_ROOT}" ]]; then
     echo "[ERROR] QNN_SDK_ROOT does not exist: ${QNN_SDK_ROOT}" >&2
     exit 1
+fi
+
+# Compute the QNN SDK version string (e.g. "2.45.40") from the SDK path,
+# matching what the CMakeLists does for BUILD_PATH naming.
+_QNN_SDK_VER="unknown"
+if [[ "${QNN_SDK_ROOT}" =~ ([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+    _QNN_SDK_VER="${BASH_REMATCH[1]}"
+fi
+
+# --------------------------------------------------------------------------
+# Now run clean if requested — using the resolved version info to only
+# delete the CURRENT version's output directory, leaving other versions
+# (e.g. different QNN SDK or different HTP arch) intact.
+# --------------------------------------------------------------------------
+if [[ ${DO_CLEAN} -eq 1 ]]; then
+    clean_build
+fi
+
+if [[ ${DO_BUILD} -eq 0 ]]; then
+    exit 0
 fi
 
 # Verify all required git submodules are initialised before we start cmake.
