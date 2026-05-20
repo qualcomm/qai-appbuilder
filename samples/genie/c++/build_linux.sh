@@ -11,9 +11,21 @@
 #   QNN_SDK_ROOT  ->  path to the extracted QAIRT SDK root
 #                     (the directory that contains "include/", "lib/", "bin/")
 #
-# Optional environment variables:
-#   QNN_STUB_VERSION    Default: v73   (one of: v68, v69, v73, v75, v79)
-#   QNN_PLATFORM        Default: aarch64-oe-linux-gcc11.2
+# Optional environment variables (these are aligned with the QAI AppBuilder
+# build, so the same values you use for `python -m build -w` work here):
+#   QAI_TOOLCHAINS      Toolchain subdir name under <QNN_SDK_ROOT>/lib/.
+#                       Default: aarch64-oe-linux-gcc11.2
+#                       Examples: aarch64-oe-linux-gcc11.2,
+#                                 aarch64-ubuntu-gcc9.4
+#   QAI_HEXAGONARCH     Hexagon DSP arch number. Default: 73
+#                       Examples: 68, 69, 73, 75, 79, 81
+#                       (we map this to QNN_STUB_VERSION="v${QAI_HEXAGONARCH}")
+#
+# Lower-level overrides (used internally; you usually don't need to set them):
+#   QNN_PLATFORM        If set, overrides QAI_TOOLCHAINS.
+#   QNN_STUB_VERSION    If set, overrides "v${QAI_HEXAGONARCH}".
+#
+# Other knobs:
 #   BUILD_TYPE          Default: Release
 #   JOBS                Default: $(nproc)
 #   USE_MNN             Default: OFF
@@ -179,14 +191,42 @@ fi
 
 # --------------------------------------------------------------------------
 # Defaults & input validation
+#
+# Resolution order (matches QAI AppBuilder for cross-project consistency):
+#   1. QNN_PLATFORM       lower-level override (rarely needed)
+#   2. QAI_TOOLCHAINS     same env var qai_appbuilder uses
+#   3. fallback default   "aarch64-oe-linux-gcc11.2"
+# Same idea for the Hexagon stub:
+#   1. QNN_STUB_VERSION   lower-level override (e.g. "v73")
+#   2. v${QAI_HEXAGONARCH} (e.g. QAI_HEXAGONARCH=73 -> "v73")
+#   3. fallback default   "v73"
 # --------------------------------------------------------------------------
 : "${BUILD_TYPE:=Release}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
-: "${QNN_STUB_VERSION:=v73}"
-: "${QNN_PLATFORM:=aarch64-oe-linux-gcc11.2}"
 : "${USE_MNN:=OFF}"
 : "${USE_GGUF:=OFF}"
 : "${BUILD_AS_DLL:=OFF}"
+
+# Resolve platform / toolchain.
+if [[ -z "${QNN_PLATFORM:-}" ]]; then
+    if [[ -n "${QAI_TOOLCHAINS:-}" ]]; then
+        QNN_PLATFORM="${QAI_TOOLCHAINS}"
+    else
+        QNN_PLATFORM="aarch64-oe-linux-gcc11.2"
+    fi
+fi
+
+# Resolve Hexagon stub version.
+if [[ -z "${QNN_STUB_VERSION:-}" ]]; then
+    if [[ -n "${QAI_HEXAGONARCH:-}" ]]; then
+        # Strip any leading 'v' the user might have typed, then add it back.
+        _arch_num="${QAI_HEXAGONARCH#v}"
+        _arch_num="${_arch_num#V}"
+        QNN_STUB_VERSION="v${_arch_num}"
+    else
+        QNN_STUB_VERSION="v73"
+    fi
+fi
 
 if [[ -z "${QNN_SDK_ROOT:-}" ]]; then
     echo "[ERROR] QNN_SDK_ROOT is not set." >&2
@@ -215,16 +255,16 @@ fi
 echo "=========================================================="
 echo "GenieAPIService Linux build"
 echo "----------------------------------------------------------"
-echo "  Script dir       : ${SCRIPT_DIR}"
-echo "  Service dir      : ${SERVICE_DIR}"
-echo "  QNN_SDK_ROOT     : ${QNN_SDK_ROOT}"
-echo "  QNN_PLATFORM     : ${QNN_PLATFORM}"
-echo "  QNN_STUB_VERSION : ${QNN_STUB_VERSION}"
-echo "  BUILD_TYPE       : ${BUILD_TYPE}"
-echo "  USE_MNN          : ${USE_MNN}"
-echo "  USE_GGUF         : ${USE_GGUF}"
-echo "  BUILD_AS_DLL     : ${BUILD_AS_DLL}"
-echo "  JOBS             : ${JOBS}"
+echo "  Script dir         : ${SCRIPT_DIR}"
+echo "  Service dir        : ${SERVICE_DIR}"
+echo "  QNN_SDK_ROOT       : ${QNN_SDK_ROOT}"
+echo "  QAI_TOOLCHAINS     : ${QAI_TOOLCHAINS:-<unset>}    -> QNN_PLATFORM=${QNN_PLATFORM}"
+echo "  QAI_HEXAGONARCH    : ${QAI_HEXAGONARCH:-<unset>}    -> QNN_STUB_VERSION=${QNN_STUB_VERSION}"
+echo "  BUILD_TYPE         : ${BUILD_TYPE}"
+echo "  USE_MNN            : ${USE_MNN}"
+echo "  USE_GGUF           : ${USE_GGUF}"
+echo "  BUILD_AS_DLL       : ${BUILD_AS_DLL}"
+echo "  JOBS               : ${JOBS}"
 echo "=========================================================="
 
 export QNN_SDK_ROOT
@@ -254,6 +294,23 @@ echo "[OK] Build finished."
 OUT_DIR="$(find "${SERVICE_DIR}" -maxdepth 1 -type d -name 'GenieService_v*' \
             2>/dev/null | head -1)"
 if [[ -n "${OUT_DIR}" && -d "${OUT_DIR}" ]]; then
+    # ----------------------------------------------------------------------
+    # Run the Linux-only post-build helper. It generates a fresh
+    # config/htp_backend_ext_config.json for the requested DSP arch (the
+    # bundled Windows version is hard-coded for v73 / soc_id=60). Per-model
+    # config.json files are NOT touched - those are end-user data and have
+    # to be edited at deploy time anyway.
+    # ----------------------------------------------------------------------
+    POST_BUILD="${SCRIPT_DIR}/scripts/post_build_linux.sh"
+    if [[ -x "${POST_BUILD}" || -f "${POST_BUILD}" ]]; then
+        # Strip the leading "v" from QNN_STUB_VERSION ("v73" -> "73") to
+        # match what post_build_linux.sh expects.
+        _hex_arg="${QNN_STUB_VERSION#v}"
+        _hex_arg="${_hex_arg#V}"
+        bash "${POST_BUILD}" "${OUT_DIR}" "${_hex_arg}" || \
+            echo "[WARN] post_build_linux.sh failed; continuing." >&2
+    fi
+
     echo "Output dir: ${OUT_DIR}"
     echo "Contents:"
     ls -lh "${OUT_DIR}"
