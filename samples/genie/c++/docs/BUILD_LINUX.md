@@ -120,15 +120,22 @@ cmake --build . --parallel $(nproc)
 ```
 
 The final artefacts will be placed in
-`samples/genie/c++/Service/GenieService_v<VERSION>/`:
+`samples/genie/c++/Service/GenieService_v<APPVER>_qnn<SDKVER>_<DSPVER>/`:
 
+For example, with app version 2.1.5, QAIRT SDK 2.45.40, and QAI_HEXAGONARCH=81:
 ```
-GenieAPIService               # the executable
-libappbuilder.so              # built from the top-level src/
-libGenie.so / libQnnHtp.so /  # copied from QNN_SDK_ROOT
-libQnnSystem.so / ...
-config/                       # default model configs
+Service/GenieService_v2.1.5_qnn2.45.40_v81/
+├── GenieAPIService               # the executable
+├── libappbuilder.so              # built from the top-level src/
+├── libGenie.so / libQnnHtp.so /  # copied from QNN_SDK_ROOT
+│   libQnnSystem.so / ...
+└── config/                       # default model configs + htp_backend_ext_config.json
 ```
+
+> **Note:** On Windows the output directory keeps the shorter name
+> `GenieService_v<APPVER>` for backward compatibility. The extended naming
+> with QNN + DSP version is Linux-only, making it easy to keep multiple
+> builds side-by-side for different SoCs or SDK versions.
 
 ---
 
