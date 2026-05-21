@@ -300,11 +300,11 @@ if (UNIX AND NOT ANDROID)
                 ${G_EXTERNAL_DIR}/llama.cpp/common
                 ${G_EXTERNAL_DIR}/llama.cpp/ggml/include
         )
-        # Library search paths (out-of-source build)
+        # Library search paths (out-of-source build).
+        # llama.cpp places shared libs in bin/, static libs in their source dirs.
         list(APPEND EXTERNAL_LIB_PATH
-                ${CMAKE_BINARY_DIR}/llama-cpp-build/src
+                ${CMAKE_BINARY_DIR}/llama-cpp-build/bin
                 ${CMAKE_BINARY_DIR}/llama-cpp-build/common
-                ${CMAKE_BINARY_DIR}/llama-cpp-build/ggml/src
         )
         list(APPEND EXTERNAL_LIBS common llama ggml ggml-cpu ggml-base)
     endif ()
