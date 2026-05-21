@@ -277,3 +277,35 @@ if (MSVC)
         )
     endif ()
 endif ()
+
+if (UNIX AND NOT ANDROID)
+    if (USE_GGUF)
+        ExternalProject_Add(Libllama.cpp
+                SOURCE_DIR ${G_EXTERNAL_DIR}/llama.cpp
+                BINARY_DIR ${CMAKE_BINARY_DIR}/llama-cpp-build
+                CMAKE_ARGS
+                -DCMAKE_BUILD_TYPE=Release
+                -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+                -DLLAMA_CURL=OFF
+                -DLLAMA_BUILD_SERVER=OFF
+                -DLLAMA_BUILD_TESTS=OFF
+                -DLLAMA_BUILD_TOOLS=OFF
+                -DLLAMA_BUILD_EXAMPLES=OFF
+                BUILD_IN_SOURCE OFF
+                INSTALL_COMMAND ""
+        )
+        # Headers: llama.h in include/, common headers in common/, ggml in ggml/include/
+        list(APPEND EXTERNAL_HEADER_PATH
+                ${G_EXTERNAL_DIR}/llama.cpp/include
+                ${G_EXTERNAL_DIR}/llama.cpp/common
+                ${G_EXTERNAL_DIR}/llama.cpp/ggml/include
+        )
+        # Library search paths (out-of-source build)
+        list(APPEND EXTERNAL_LIB_PATH
+                ${CMAKE_BINARY_DIR}/llama-cpp-build/src
+                ${CMAKE_BINARY_DIR}/llama-cpp-build/common
+                ${CMAKE_BINARY_DIR}/llama-cpp-build/ggml/src
+        )
+        list(APPEND EXTERNAL_LIBS common llama ggml ggml-cpu ggml-base)
+    endif ()
+endif ()
