@@ -154,7 +154,6 @@ if (UNIX AND NOT ANDROID)
             COMMAND ${CMAKE_COMMAND} -E echo "[post-build] copying GenieAPIService + libappbuilder.so ..."
             COMMAND ${CMAKE_COMMAND} -E make_directory ${BUILD_PATH}
             COMMAND ${CMAKE_COMMAND} -E copy ${LIBAPPBUILDER_ROOT}/lib/libappbuilder.so ${BUILD_PATH}/
-            COMMAND ${CMAKE_COMMAND} -E copy ${BUILD_VERSION_FILE} -t ${BUILD_PATH}
             COMMAND ${CMAKE_COMMAND} -E echo "[post-build] done. Output: ${BUILD_PATH}"
     )
 else ()
