@@ -113,7 +113,6 @@ mkdir -p build_linux && cd build_linux
 
 cmake .. \
     -DCMAKE_BUILD_TYPE=Release \
-    -DQNN_STUB_VERSION=v73 \
     -DQNN_PLATFORM=aarch64-oe-linux-gcc11.2
 
 cmake --build . --parallel $(nproc)
@@ -155,14 +154,12 @@ without any change):
 |------------------|-------------------------------|---------|
 | `QNN_SDK_ROOT`   | *(required)*                  | Path to the extracted QAIRT SDK. |
 | `QAI_TOOLCHAINS` | `aarch64-oe-linux-gcc11.2`    | Toolchain subdirectory under `$QNN_SDK_ROOT/lib/`. The same value the `python -m build -w` flow uses. Common Linux value: `aarch64-oe-linux-gcc11.2`. |
-| `QAI_HEXAGONARCH`| `73`                          | Hexagon DSP arch number (just the number, e.g. `68` / `73` / `81`). The script automatically maps this to `v${QAI_HEXAGONARCH}` for the QNN library names. |
 
 Example (matches `setup.py`'s example block):
 
 ```bash
 export QNN_SDK_ROOT=/abs/path/to/v2.40.0.251030
 export QAI_TOOLCHAINS=aarch64-oe-linux-gcc11.2
-export QAI_HEXAGONARCH=73
 ./build_linux.sh
 ```
 
@@ -174,7 +171,6 @@ entirely (e.g. when the SDK uses an unusual subdir name):
 | Variable           | Default                           | Meaning |
 |--------------------|-----------------------------------|---------|
 | `QNN_PLATFORM`     | derived from `QAI_TOOLCHAINS`     | Direct override of the lib subdir (`aarch64-oe-linux-gcc11.2`). |
-| `QNN_STUB_VERSION` | derived from `QAI_HEXAGONARCH`    | Direct override of the Hexagon stub version string (`v73`). |
 
 ### Other CMake / build switches
 
@@ -200,8 +196,8 @@ export QNN_SDK_ROOT=/absolute/path/to/v2.40.0.251030
 OUT_DIR=$(pwd)/samples/genie/c++/Service/GenieService_v2.1.4
 export LD_LIBRARY_PATH=$QNN_SDK_ROOT/lib/aarch64-oe-linux-gcc11.2:$OUT_DIR:$LD_LIBRARY_PATH
 
-# Tell the Hexagon DSP loader where its skel files live.
-export ADSP_LIBRARY_PATH=$QNN_SDK_ROOT/lib/hexagon-v73/unsigned
+# Tell the Hexagon DSP loader where its skel files live (adjust vXX to match your SoC, e.g. v73, v75).
+export ADSP_LIBRARY_PATH=$QNN_SDK_ROOT/lib/hexagon-vXX/unsigned
 
 cd $OUT_DIR
 ./GenieAPIService -c config/<your_model>/config.json -l -p 8910
@@ -215,34 +211,10 @@ See [API.md](API.md) for the endpoint reference and
 
 ## 6.1. Deploying to a target device — what you must edit
 
-The CMake step copies the entire `samples/genie/python/models/` tree into
-`<output>/config/` so you have all the bundled per-model configs ready to
-ship. Two things in that copy are **authored for the Windows reference
-build** and you almost always need to adjust them for your Linux target.
+The Linux build output is intentionally minimal (just the executable and
+`libappbuilder.so`). You need to prepare the model config files separately.
 
-### 6.1.1. `config/htp_backend_ext_config.json` — already auto-fixed
-
-The shipped Windows version contains:
-```json
-{ "devices": [ { "soc_id": 60, "dsp_arch": "v73", ... } ] }
-```
-That `soc_id=60 / v73` combination is specific to Snapdragon X-Elite class
-laptops and is wrong for any other SoC.
-
-**The Linux build script regenerates this file for you** in
-`<output>/config/htp_backend_ext_config.json` based on `QAI_HEXAGONARCH`
-(see `scripts/post_build_linux.sh`). The auto-generated file:
-- writes only `dsp_arch` (e.g. `"v73"`, `"v75"`, `"v79"`, `"v81"`),
-- omits `soc_id` so the QNN runtime auto-detects it.
-
-If your target SoC requires an explicit `soc_id`, edit the file post-deploy
-and add it back:
-```json
-{ "devices": [ { "soc_id": <your_soc_id>, "dsp_arch": "v73", "cores": [...] } ] }
-```
-Refer to the Qualcomm Snapdragon SoC IDs documentation for the right value.
-
-### 6.1.2. `config/<model>/config.json` — you have to edit at deploy time
+### 6.1.1. `config/<model>/config.json` — you have to edit at deploy time
 
 Every per-model config bundled by Qualcomm uses **Windows backslash paths**
 that point to the developer's source tree, e.g.:
@@ -278,16 +250,14 @@ of the layout already matches:
 sed -i 's#\\\\#/#g' /path/to/your/<model>/config.json
 ```
 
-### 6.1.3. Quick deployment checklist
+### 6.1.2. Quick deployment checklist
 
 1. `tar` (or `rsync`) the `<output>/` directory to the device.
 2. Upload your model bin / tokenizer files separately (they are large and
    not part of the source tree).
 3. Edit `config/<model>/config.json` — fix `tokenizer.path`, `ctx-bins`,
    and `backend.extensions` to match the actual on-device locations.
-4. (Optional) Edit `config/htp_backend_ext_config.json` to add `soc_id` if
-   your platform needs it.
-5. Run `./GenieAPIService -c config/<model>/config.json -l -p 8910`.
+4. Run `./GenieAPIService -c config/<model>/config.json -l -p 8910`.
 
 ---
 
@@ -307,8 +277,8 @@ Ensure you used `build_linux.sh` (or pass `-DCMAKE_BUILD_TYPE=Release` with the
 updated CMake files); the new Linux branch links `pthread` and `dl`.
 
 **Hexagon skel file missing (`libQnnHtpV{XX}Skel.so`)**
-Check that `QNN_STUB_VERSION` matches the SoC variant your device uses; then
-verify the file exists under `$QNN_SDK_ROOT/lib/hexagon-v{XX}/unsigned/`.
+Verify the file exists under `$QNN_SDK_ROOT/lib/hexagon-vXX/unsigned/`
+(where `XX` matches your SoC's DSP arch, e.g. `73`, `75`).
 
 **Compilation fails with `_CountOneBits64 was not declared`**
 This only happens on the MSVC ARM64 Windows path. The Linux build does not use
@@ -362,7 +332,6 @@ The Linux port is intentionally minimal. Reference list of edited files:
 | `samples/genie/c++/Service/src/GenieAPIService/src/context/qnn/qwen2_5_omini/qwen_2_5_omini.cpp` | Provide `std::sqrtf` shim before including LibrosaCpp on non-MSVC compilers. |
 | `samples/genie/c++/Service/examples/GenieAPIClient/CMakeLists.txt` | Linux link rules (libcurl + pthread + dl). |
 | `samples/genie/c++/build_linux.sh` (new) | One-click build script. |
-| `samples/genie/c++/scripts/post_build_linux.sh` (new) | Generates a Linux-correct `config/htp_backend_ext_config.json` (right `dsp_arch`, no Windows-specific `soc_id`). Per-model `config.json` files are deliberately left untouched. |
 | `samples/genie/c++/docs/BUILD_LINUX.md` (new) | This document. |
 
 No business logic was changed.
