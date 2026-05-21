@@ -325,46 +325,50 @@ cmake --build . --parallel "${JOBS}"
 echo
 echo "=========================================================="
 echo "[OK] Build finished."
-# Find the actual output directory (Service/GenieService_v<VERSION>/).
-OUT_DIR="$(find "${SERVICE_DIR}" -maxdepth 1 -type d -name 'GenieService_v*' \
-            2>/dev/null | head -1)"
-if [[ -n "${OUT_DIR}" && -d "${OUT_DIR}" ]]; then
-    # ----------------------------------------------------------------------
-    # Run the Linux-only post-build helper. It generates a fresh
-    # config/htp_backend_ext_config.json for the requested DSP arch (the
-    # bundled Windows version is hard-coded for v73 / soc_id=60). Per-model
-    # config.json files are NOT touched - those are end-user data and have
-    # to be edited at deploy time anyway.
-    # ----------------------------------------------------------------------
-    POST_BUILD="${SCRIPT_DIR}/scripts/post_build_linux.sh"
-    if [[ -x "${POST_BUILD}" || -f "${POST_BUILD}" ]]; then
-        # Strip the leading "v" from QNN_STUB_VERSION ("v73" -> "73") to
-        # match what post_build_linux.sh expects.
-        _hex_arg="${QNN_STUB_VERSION#v}"
-        _hex_arg="${_hex_arg#V}"
-        bash "${POST_BUILD}" "${OUT_DIR}" "${_hex_arg}" || \
-            echo "[WARN] post_build_linux.sh failed; continuing." >&2
-    fi
 
+# Compute the exact output directory name (same formula as CMakeLists.txt).
+_gguf_suffix=""
+if [[ "${USE_GGUF}" == "ON" ]]; then
+    _gguf_suffix="_gguf"
+fi
+# We need the app version from version.cmake
+_APP_VER=""
+_ver_file="${SERVICE_DIR}/scripts/version.cmake"
+if [[ -f "${_ver_file}" ]]; then
+    _major=$(grep -oP 'QAI_APP_BUILDER_MAJOR_VERSION\s+\K[0-9]+' "${_ver_file}" 2>/dev/null || echo "")
+    _minor=$(grep -oP 'QAI_APP_BUILDER_MINOR_VERSION\s+\K[0-9]+' "${_ver_file}" 2>/dev/null || echo "")
+    _patch=$(grep -oP 'QAI_APP_BUILDER_PATCH_VERSION\s+\K[0-9]+' "${_ver_file}" 2>/dev/null || echo "")
+    if [[ -n "${_major}" && -n "${_minor}" && -n "${_patch}" ]]; then
+        _APP_VER="${_major}.${_minor}.${_patch}"
+    fi
+fi
+
+if [[ -n "${_APP_VER}" ]]; then
+    OUT_DIR="${SERVICE_DIR}/GenieService_v${_APP_VER}_qnn${_QNN_SDK_VER}${_gguf_suffix}"
+else
+    # Fallback: find any matching dir
+    OUT_DIR="$(find "${SERVICE_DIR}" -maxdepth 1 -type d -name 'GenieService_v*' \
+                2>/dev/null | sort | tail -1)"
+fi
+
+if [[ -n "${OUT_DIR}" && -d "${OUT_DIR}" ]]; then
     echo "Output dir: ${OUT_DIR}"
     echo "Contents:"
     ls -lh "${OUT_DIR}"
 else
-    echo "[WARN] Could not locate Service/GenieService_v* output dir." >&2
+    echo "[WARN] Could not locate output dir: ${OUT_DIR:-<unknown>}" >&2
 fi
 echo "=========================================================="
 echo
-echo "To run, set up environment first:"
-echo "  export QNN_SDK_ROOT=${QNN_SDK_ROOT}"
-if [[ -n "${OUT_DIR}" ]]; then
-    echo "  export LD_LIBRARY_PATH=\${QNN_SDK_ROOT}/lib/${QNN_PLATFORM}:${OUT_DIR}:\${LD_LIBRARY_PATH}"
-else
-    echo "  export LD_LIBRARY_PATH=\${QNN_SDK_ROOT}/lib/${QNN_PLATFORM}:<output_dir>:\${LD_LIBRARY_PATH}"
+echo "To deploy to a target board with QAIRT SDK already installed,"
+echo "copy these 2 files:"
+if [[ -n "${OUT_DIR}" && -d "${OUT_DIR}" ]]; then
+    echo "  ${OUT_DIR}/GenieAPIService"
+    echo "  ${OUT_DIR}/libappbuilder.so"
 fi
+echo
+echo "Then on the target board:"
+echo "  export LD_LIBRARY_PATH=\${QNN_SDK_ROOT}/lib/${QNN_PLATFORM}:<deploy_dir>:\${LD_LIBRARY_PATH}"
 echo "  export ADSP_LIBRARY_PATH=\${QNN_SDK_ROOT}/lib/hexagon-${QNN_STUB_VERSION}/unsigned"
-if [[ -n "${OUT_DIR}" ]]; then
-    echo "  cd ${OUT_DIR} && ./GenieAPIService -c config/<your_model>/config.json -l -p 8910"
-else
-    echo "  cd <output_dir> && ./GenieAPIService -c config/<your_model>/config.json -l -p 8910"
-fi
+echo "  cd <deploy_dir> && ./GenieAPIService -c <model>/config.json -l -p 8910"
 echo
