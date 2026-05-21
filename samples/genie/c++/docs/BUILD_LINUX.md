@@ -120,22 +120,28 @@ cmake --build . --parallel $(nproc)
 ```
 
 The final artefacts will be placed in
-`samples/genie/c++/Service/GenieService_v<APPVER>_qnn<SDKVER>_<DSPVER>/`:
+`samples/genie/c++/Service/GenieService_v<APPVER>_qnn<SDKVER>/`:
 
-For example, with app version 2.1.5, QAIRT SDK 2.45.40, and QAI_HEXAGONARCH=81:
+For example, with app version 2.1.5 and QAIRT SDK 2.45.40:
 ```
-Service/GenieService_v2.1.5_qnn2.45.40_v81/
+Service/GenieService_v2.1.5_qnn2.45.40/
 ├── GenieAPIService               # the executable
 ├── libappbuilder.so              # built from the top-level src/
-├── libGenie.so / libQnnHtp.so /  # copied from QNN_SDK_ROOT
-│   libQnnSystem.so / ...
-└── config/                       # default model configs + htp_backend_ext_config.json
+└── version                       # build info text file
 ```
 
-> **Note:** On Windows the output directory keeps the shorter name
-> `GenieService_v<APPVER>` for backward compatibility. The extended naming
-> with QNN + DSP version is Linux-only, making it easy to keep multiple
-> builds side-by-side for different SoCs or SDK versions.
+If `USE_GGUF=ON`, the directory name gets `_gguf` appended:
+`GenieService_v2.1.5_qnn2.45.40_gguf/`
+
+> **Note:** The Linux output is intentionally minimal — just the 2 binaries
+> you need to deploy to a target board that already has the QAIRT SDK
+> installed. The QNN runtime libs (`libGenie.so`, `libQnnHtp.so`, etc.) are
+> NOT copied because they already exist on the target device as part of the
+> SDK installation.
+>
+> On Windows the output directory keeps the shorter name
+> `GenieService_v<APPVER>` and includes the full SDK runtime for standalone
+> deployment.
 
 ---
 

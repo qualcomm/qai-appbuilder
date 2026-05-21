@@ -143,14 +143,34 @@ else()
 endif()
 
 set(CONFIG_PATH ${CMAKE_SOURCE_DIR}/../../python/models)
-add_custom_command(
-        TARGET ${LIB_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E echo start to copy binray....
-        COMMAND ${CMAKE_COMMAND} -E copy ${EXTERNAL_BIN} ${BUILD_PATH}
-        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CONFIG_PATH} ${BUILD_PATH}/config
-        COMMAND ${CMAKE_COMMAND} -E copy ${BUILD_VERSION_FILE} -t ${BUILD_PATH}
-        COMMAND ${CMAKE_COMMAND} -E echo compile successfully!
-)
+
+if (UNIX AND NOT ANDROID)
+    # -------------------------------------------------------------------------
+    # Linux: minimal output — only the 2 files the user actually needs to
+    # deploy (target board already has QAIRT SDK installed).
+    # -------------------------------------------------------------------------
+    add_custom_command(
+            TARGET ${LIB_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E echo "[post-build] copying GenieAPIService + libappbuilder.so ..."
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${BUILD_PATH}
+            COMMAND ${CMAKE_COMMAND} -E copy ${LIBAPPBUILDER_ROOT}/lib/libappbuilder.so ${BUILD_PATH}/
+            COMMAND ${CMAKE_COMMAND} -E copy ${BUILD_VERSION_FILE} -t ${BUILD_PATH}
+            COMMAND ${CMAKE_COMMAND} -E echo "[post-build] done. Output: ${BUILD_PATH}"
+    )
+else ()
+    # -------------------------------------------------------------------------
+    # Windows / Android: full package (SDK libs + config templates) for
+    # standalone deployment where the target may not have SDK installed.
+    # -------------------------------------------------------------------------
+    add_custom_command(
+            TARGET ${LIB_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E echo start to copy binray....
+            COMMAND ${CMAKE_COMMAND} -E copy ${EXTERNAL_BIN} ${BUILD_PATH}
+            COMMAND ${CMAKE_COMMAND} -E copy_directory ${CONFIG_PATH} ${BUILD_PATH}/config
+            COMMAND ${CMAKE_COMMAND} -E copy ${BUILD_VERSION_FILE} -t ${BUILD_PATH}
+            COMMAND ${CMAKE_COMMAND} -E echo compile successfully!
+    )
+endif ()
 
 message(${CMAKE_CURRENT_SOURCE_DIR}/src/GenieAPIService/src/GenieAPILibrary.h)
 if (BUILD_AS_DLL)

@@ -157,7 +157,12 @@ clean_build()
     fi
 
     if [[ -n "${_APP_VER}" ]]; then
-        _target_dir="${SERVICE_DIR}/GenieService_v${_APP_VER}_qnn${_QNN_SDK_VER}_${QNN_STUB_VERSION}"
+        # Compute same suffix cmake uses: _qnn<ver>[_gguf]
+        _gguf_suffix=""
+        if [[ "${USE_GGUF}" == "ON" ]]; then
+            _gguf_suffix="_gguf"
+        fi
+        _target_dir="${SERVICE_DIR}/GenieService_v${_APP_VER}_qnn${_QNN_SDK_VER}${_gguf_suffix}"
         if [[ -d "${_target_dir}" ]]; then
             echo "    removing: ${_target_dir}"
             rm -rf "${_target_dir}"

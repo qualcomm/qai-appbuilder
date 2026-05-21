@@ -37,18 +37,21 @@ set(G_EXTERNAL_LIB_PATH ${CMAKE_BINARY_DIR}/lib)
 # Output directory naming.
 # Windows / Android keep their historical name "GenieService_v<APPVER>" so any
 # existing deployment scripts continue to work.
-# On Linux we extend it to "GenieService_v<APPVER>_qnn<SDKVER>_<DSPVER>" so that
-# multiple side-by-side builds for different SoCs / SDK versions don't overwrite
-# each other.
+# On Linux the name includes the QNN SDK version and optionally "_gguf" if the
+# GGUF backend is enabled: "GenieService_v<APPVER>_qnn<SDKVER>[_gguf]"
 if (UNIX AND NOT ANDROID)
-    # Try to extract the QAIRT SDK version from the QNN_SDK_ROOT path,
+    # Extract the QAIRT SDK version from QNN_SDK_ROOT path,
     # e.g. ".../qairt/2.45.40.260406" -> "2.45.40".
     set(_qnn_sdk_ver "unknown")
     string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+" _qnn_match "$ENV{QNN_SDK_ROOT}")
     if (NOT "${_qnn_match}" STREQUAL "")
         set(_qnn_sdk_ver "${_qnn_match}")
     endif ()
-    set(BUILD_PATH ${CMAKE_SOURCE_DIR}/GenieService_v${QAI_APP_BUILDER_VERSION}_qnn${_qnn_sdk_ver}_${QNN_STUB_VERSION})
+    set(_suffix "")
+    if (USE_GGUF)
+        set(_suffix "_gguf")
+    endif ()
+    set(BUILD_PATH ${CMAKE_SOURCE_DIR}/GenieService_v${QAI_APP_BUILDER_VERSION}_qnn${_qnn_sdk_ver}${_suffix})
 else ()
     set(BUILD_PATH ${CMAKE_SOURCE_DIR}/GenieService_v${QAI_APP_BUILDER_VERSION})
 endif ()
