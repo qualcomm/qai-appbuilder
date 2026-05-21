@@ -12,6 +12,9 @@
 #include <ggml-backend.h>
 #include <sampling.h>
 #include "log.h"
+#if defined(__linux__) && !defined(__ANDROID__)
+#include <condition_variable>
+#endif
 #include <filesystem>
 
 namespace fs = std::filesystem;
