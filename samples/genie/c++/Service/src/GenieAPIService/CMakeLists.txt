@@ -136,6 +136,11 @@ else()
         )
     endif ()
 
+    # Ensure Libllama.cpp ExternalProject finishes before we link (Linux only)
+    if (USE_GGUF AND UNIX AND NOT ANDROID)
+        add_dependencies(${CMAKE_PROJECT_NAME} Libllama.cpp)
+    endif ()
+
     # Add MSVC ARM64 specific platform fixes (only for MSVC ARM64 builds)
     if(MSVC AND (CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64" OR CMAKE_GENERATOR_PLATFORM MATCHES "ARM64"))
         target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE /FI"${CMAKE_CURRENT_SOURCE_DIR}/src/platform_fix.h")
