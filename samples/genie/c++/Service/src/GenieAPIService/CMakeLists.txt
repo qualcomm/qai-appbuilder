@@ -151,7 +151,7 @@ set(CONFIG_PATH ${CMAKE_SOURCE_DIR}/../../python/models)
 
 if (UNIX AND NOT ANDROID)
     # -------------------------------------------------------------------------
-    # Linux: minimal output — only the 2 files the user actually needs to
+    # Linux: minimal output — only the files the user actually needs to
     # deploy (target board already has QAIRT SDK installed).
     # -------------------------------------------------------------------------
     add_custom_command(
@@ -161,6 +161,17 @@ if (UNIX AND NOT ANDROID)
             COMMAND ${CMAKE_COMMAND} -E copy ${LIBAPPBUILDER_ROOT}/lib/libappbuilder.so ${BUILD_PATH}/
             COMMAND ${CMAKE_COMMAND} -E echo "[post-build] done. Output: ${BUILD_PATH}"
     )
+    if (USE_GGUF)
+        # Copy llama.cpp shared libraries (libllama.so, libggml*.so and their
+        # versioned variants) so they sit next to the executable at runtime.
+        # Use cp -aL to dereference symlinks and copy actual file content,
+        # avoiding broken symlinks when deployed to a different path.
+        add_custom_command(
+                TARGET ${LIB_NAME} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E echo "[post-build] copying llama.cpp shared libraries ..."
+                COMMAND sh -c "cp -aL ${CMAKE_BINARY_DIR}/llama-cpp-build/bin/lib*.so* ${BUILD_PATH}/"
+        )
+    endif ()
 else ()
     # -------------------------------------------------------------------------
     # Windows / Android: full package (SDK libs + config templates) for

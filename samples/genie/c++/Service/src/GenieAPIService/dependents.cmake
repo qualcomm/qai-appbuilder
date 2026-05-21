@@ -287,6 +287,7 @@ if (UNIX AND NOT ANDROID)
                 -DCMAKE_BUILD_TYPE=Release
                 -DCMAKE_POSITION_INDEPENDENT_CODE=ON
                 -DLLAMA_CURL=OFF
+                -DLLAMA_HTTPLIB=OFF
                 -DLLAMA_BUILD_SERVER=OFF
                 -DLLAMA_BUILD_TESTS=OFF
                 -DLLAMA_BUILD_TOOLS=OFF
