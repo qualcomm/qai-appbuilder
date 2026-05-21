@@ -28,7 +28,7 @@ Qwen2-VL Demo is a VLM (Vision Language Model) demonstration program implemented
             opencv-python==4.10.0.82 \
             gradio
 
-   pip install transformers==4.45.0 torch==2.9.1
+   pip install transformers==4.57.0 torch==2.9.1
    pip install torchvision>=0.9.0
    pip install qwen-vl-utils
    ```
@@ -51,7 +51,15 @@ Qwen2-VL Demo is a VLM (Vision Language Model) demonstration program implemented
    Run the demo application with the model path:
 
    ```bash
-   python demo_app.py <model_path>
+   #  Qwen2-VL（Default）
+   # python demo_app.py /path/to/qwen2_vl_model
+   python demo_app.py --model qwen2 --path /path/to/qwen2_vl_model
+
+
+   # Qwen3-VL
+   python demo_app.py --model qwen3 --path /path/to/qwen3_vl_model
+
+
    ```
 
    **Parameters:**
