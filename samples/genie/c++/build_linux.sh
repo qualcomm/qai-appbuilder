@@ -17,20 +17,16 @@
 #                       Default: aarch64-oe-linux-gcc11.2
 #                       Examples: aarch64-oe-linux-gcc11.2,
 #                                 aarch64-ubuntu-gcc9.4
-#   QAI_HEXAGONARCH     Hexagon DSP arch number. Default: 73
-#                       Examples: 68, 69, 73, 75, 79, 81
-#                       (we map this to QNN_STUB_VERSION="v${QAI_HEXAGONARCH}")
 #
 # Lower-level overrides (used internally; you usually don't need to set them):
-#   QNN_PLATFORM        If set, overrides QAI_TOOLCHAINS.
-#   QNN_STUB_VERSION    If set, overrides "v${QAI_HEXAGONARCH}".
+#   QNN_PLATFORM        If set, overrides QAI_TOOLCHAINS.  
 #
 # Other knobs:
 #   BUILD_TYPE          Default: Release
 #   JOBS                Default: $(nproc)
 #   USE_MNN             Default: OFF
 #   USE_GGUF            Default: OFF
-#   BUILD_AS_DLL        Default: OFF
+#   BUILD_AS_DLL        Default: OFF  
 #
 # Usage:
 #   chmod +x build_linux.sh
@@ -136,15 +132,12 @@ check_submodules()
 # --------------------------------------------------------------------------
 clean_build()
 {
-    echo "[*] Cleaning build artefacts for current version (qnn${_QNN_SDK_VER}_${QNN_STUB_VERSION}) ..."
+    echo "[*] Cleaning build artefacts ..."
 
-    # 1. The CMake build directory (contains all .o files, shared across versions).
+    # 1. The CMake build directory (contains all .o files).
     rm -rf "${SERVICE_DIR}/build_linux"
 
-    # 2. Only delete the output directory for the CURRENT QNN + HTP version.
-    #    Other versions (e.g. GenieService_v2.1.5_qnn2.45.40_v73 when you are
-    #    cleaning v81) are left intact.
-    #    We read version.cmake to get the app version for the exact dir name.
+    # 2. Remove output directories matching the naming pattern.
     _APP_VER=""
     _ver_file="${SERVICE_DIR}/scripts/version.cmake"
     if [[ -f "${_ver_file}" ]]; then
@@ -180,6 +173,13 @@ clean_build()
     rm -rf "${REPO_ROOT}/CMakeFiles" \
            "${REPO_ROOT}/CMakeCache.txt" \
            "${REPO_ROOT}/cmake_install.cmake" \
+    fi
+
+    # 3. ExternalProject_Add(libappbuilder) builds in-source at REPO_ROOT.
+    #    Wipe its CMake cache so a fresh configure happens next time.
+    rm -rf "${REPO_ROOT}/CMakeFiles" \
+           "${REPO_ROOT}/CMakeCache.txt" \
+           "${REPO_ROOT}/cmake_install.cmake" \
            "${REPO_ROOT}/Makefile" \
            "${REPO_ROOT}/lib"
     rm -rf "${REPO_ROOT}/src/CMakeFiles" \
@@ -206,16 +206,12 @@ clean_build()
 
 # --------------------------------------------------------------------------
 # Defaults & input validation (resolved BEFORE clean so we can compute the
-# exact output directory name for the current QNN+HTP version).
+# exact output directory name for the current QNN SDK version).
 #
 # Resolution order (matches QAI AppBuilder for cross-project consistency):
 #   1. QNN_PLATFORM       lower-level override (rarely needed)
 #   2. QAI_TOOLCHAINS     same env var qai_appbuilder uses
 #   3. fallback default   "aarch64-oe-linux-gcc11.2"
-# Same idea for the Hexagon stub:
-#   1. QNN_STUB_VERSION   lower-level override (e.g. "v73")
-#   2. v${QAI_HEXAGONARCH} (e.g. QAI_HEXAGONARCH=73 -> "v73")
-#   3. fallback default   "v73"
 # --------------------------------------------------------------------------
 : "${BUILD_TYPE:=Release}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
@@ -229,17 +225,6 @@ if [[ -z "${QNN_PLATFORM:-}" ]]; then
         QNN_PLATFORM="${QAI_TOOLCHAINS}"
     else
         QNN_PLATFORM="aarch64-oe-linux-gcc11.2"
-    fi
-fi
-
-# Resolve Hexagon stub version.
-if [[ -z "${QNN_STUB_VERSION:-}" ]]; then
-    if [[ -n "${QAI_HEXAGONARCH:-}" ]]; then
-        _arch_num="${QAI_HEXAGONARCH#v}"
-        _arch_num="${_arch_num#V}"
-        QNN_STUB_VERSION="v${_arch_num}"
-    else
-        QNN_STUB_VERSION="v73"
     fi
 fi
 
@@ -264,7 +249,7 @@ fi
 # --------------------------------------------------------------------------
 # Now run clean if requested — using the resolved version info to only
 # delete the CURRENT version's output directory, leaving other versions
-# (e.g. different QNN SDK or different HTP arch) intact.
+# (e.g. different QNN SDK) intact.
 # --------------------------------------------------------------------------
 if [[ ${DO_CLEAN} -eq 1 ]]; then
     clean_build
@@ -294,7 +279,6 @@ echo "  Script dir         : ${SCRIPT_DIR}"
 echo "  Service dir        : ${SERVICE_DIR}"
 echo "  QNN_SDK_ROOT       : ${QNN_SDK_ROOT}"
 echo "  QAI_TOOLCHAINS     : ${QAI_TOOLCHAINS:-<unset>}    -> QNN_PLATFORM=${QNN_PLATFORM}"
-echo "  QAI_HEXAGONARCH    : ${QAI_HEXAGONARCH:-<unset>}    -> QNN_STUB_VERSION=${QNN_STUB_VERSION}"
 echo "  BUILD_TYPE         : ${BUILD_TYPE}"
 echo "  USE_MNN            : ${USE_MNN}"
 echo "  USE_GGUF           : ${USE_GGUF}"
@@ -314,7 +298,6 @@ cd "${BUILD_DIR}"
 
 cmake "${SERVICE_DIR}" \
     -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
-    -DQNN_STUB_VERSION="${QNN_STUB_VERSION}" \
     -DQNN_PLATFORM="${QNN_PLATFORM}" \
     -DUSE_MNN="${USE_MNN}" \
     -DUSE_GGUF="${USE_GGUF}" \
@@ -369,6 +352,6 @@ fi
 echo
 echo "Then on the target board:"
 echo "  export LD_LIBRARY_PATH=\${QNN_SDK_ROOT}/lib/${QNN_PLATFORM}:<deploy_dir>:\${LD_LIBRARY_PATH}"
-echo "  export ADSP_LIBRARY_PATH=\${QNN_SDK_ROOT}/lib/hexagon-${QNN_STUB_VERSION}/unsigned"
+echo "  export ADSP_LIBRARY_PATH=\${QNN_SDK_ROOT}/lib/hexagon-vXX/unsigned  # e.g. v73, v75"
 echo "  cd <deploy_dir> && ./GenieAPIService -c <model>/config.json -l -p 8910"
 echo
