@@ -7,7 +7,6 @@ target.
 
 When you finished building task , please goto [USAGE](USAGE.MD) to learn how to use it.
 
-For Linux (ARM64), see the dedicated guide: [BUILD_LINUX.md](BUILD_LINUX.md).
 
 ### Prepare the repositories
 
@@ -56,7 +55,7 @@ cmake --build . --config Release --parallel 4
 
 Then the full release will locate at `Service\GenieSerivce_v2.1.4`
 
-### Build GenieAPIServer for Android: <br>
+## Build for Android: <br>
 
 For Android builds, we provide an automated build script that handles all dependencies and generates a ready-to-install APK.
 
