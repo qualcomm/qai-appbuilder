@@ -6,6 +6,15 @@
 # SPDX-License-Identifier: BSD-3-Clause
 #
 #=============================================================================
+"""
+QNN context wrappers for qai_appbuilder.
+
+Runtime libraries (QnnHtp.dll, QnnSystem.dll, QnnHtpV*Stub.dll,
+libQnnHtpV*Skel.so, ...) are bundled inside this package's ``libs/``
+directory and are resolved automatically at runtime. Callers normally do
+not need to specify a libs path; passing one explicitly is also supported
+for advanced use cases (e.g. pointing at a custom QNN SDK build).
+"""
 import os
 import sys
 import functools
@@ -123,28 +132,53 @@ class PerfProfile():
 
 
 class QNNConfig():
-    """Config QNN SDK libraries path, runtime(CPU/HTP), log leverl, profiling level."""
+    """Configure QNN runtime, log level, and profiling level.
+
+    QNN SDK libraries are bundled with the ``qai_appbuilder`` package and
+    resolved automatically from the package's ``libs/`` directory, so
+    ``qnn_lib_path`` is optional in normal usage.
+    """
 
     @staticmethod
-    def Config(qnn_lib_path: str = "None",
+    def Config(qnn_lib_path: str = None,
                runtime: str = Runtime.HTP,
                log_level: int = LogLevel.ERROR,
                profiling_level: int = ProfilingLevel.OFF,
                log_path: str = "None"
                ):
-        global g_backend_lib_path, g_system_lib_path
-        if not os.path.exists(qnn_lib_path):
-            base_path = os.path.dirname(os.path.abspath(__file__))
-            qnn_lib_path = base_path + "/libs"
+        """Configure the QNN runtime.
 
-        if not sys.platform.startswith("win"):	
+        Parameters
+        ----------
+        qnn_lib_path : str, optional
+            Directory containing the QNN backend libraries. In most cases
+            this can be left unset (or ``None``) and the libraries shipped
+            with ``qai_appbuilder`` will be used automatically. An explicit
+            path is only needed when pointing at a custom QNN SDK build.
+        runtime : str
+            One of the values from :class:`Runtime` (e.g. ``Runtime.HTP``).
+        log_level : int
+            Log verbosity, see :class:`LogLevel`.
+        profiling_level : int
+            Profiling verbosity, see :class:`ProfilingLevel`.
+        log_path : str
+            Optional log file path; ``"None"`` disables file logging.
+        """
+        global g_backend_lib_path, g_system_lib_path
+
+        # Fall back to the libs bundled with this package when no valid
+        # explicit path is supplied.
+        if qnn_lib_path in (None, "None", "") or not os.path.exists(qnn_lib_path):
+            base_path = os.path.dirname(os.path.abspath(__file__))
+            qnn_lib_path = os.path.join(base_path, "libs")
+
+        if not sys.platform.startswith("win"):
             ADSP_LIBRARY_PATH = os.environ.get('ADSP_LIBRARY_PATH')
             if ADSP_LIBRARY_PATH is None or len(ADSP_LIBRARY_PATH) < 2:
                 os.environ["ADSP_LIBRARY_PATH"] = qnn_lib_path
 
-        if (qnn_lib_path != "None"):
-            g_backend_lib_path = qnn_lib_path + PATH_SLASH + QNN_LIB_PRE + "Qnn" + runtime + QNN_LIB_EXT
-            g_system_lib_path = qnn_lib_path + PATH_SLASH + QNN_SYSTEM_LIB
+        g_backend_lib_path = qnn_lib_path + PATH_SLASH + QNN_LIB_PRE + "Qnn" + runtime + QNN_LIB_EXT
+        g_system_lib_path = qnn_lib_path + PATH_SLASH + QNN_SYSTEM_LIB
 
         if not os.path.exists(g_backend_lib_path):
             raise ValueError(f"backend library does not exist: {g_backend_lib_path}")
