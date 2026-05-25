@@ -256,7 +256,7 @@ Navigate to the VLM samples directory and run the demo:
 
 ```bash
 cd samples/linux/python/qwen2_vl
-python demo_app.py <model_path>
+python demo_app.py --model <qwen2,qwen3> --path <model_path>
 ```
 
 **Parameters:**
@@ -266,7 +266,7 @@ python demo_app.py <model_path>
 - Image/Video/Web camera input processing
 - Multimodal inference combining vision and language
 - Natural language output generation
-- Qwen2-VL-2B-Instruct model support
+- Qwen2-VL-2B-Instruct Qwen3-VL-4B-Instruct model support
 
 **For detailed setup and usage instructions, see:** [Qwen2-VL Demo (Linux Python)](./python/qwen2_vl/README.md)
 
