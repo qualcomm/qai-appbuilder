@@ -53,7 +53,6 @@ struct PromptType : public BaseEnum
     }
 };
 
-
 struct ModelType : public BaseEnum
 {
     using BaseEnum::operator=;
@@ -92,7 +91,7 @@ struct ModelType : public BaseEnum
 namespace std
 {
     template<>
-    struct hash<ModelType>
+    struct std::hash<ModelType>
     {
         size_t operator()(ModelType const &m) const noexcept { return std::hash<int>{}(int(m)); }
     };
@@ -102,9 +101,9 @@ struct ModelFormat : public BaseEnum
 {
     enum
     {
-        QNN, // Qualcomm Neural Network SDK
-        MNN, // MNN format.
-        GGUF, // Llama.cpp GGUF format.
+        QNN,
+        MNN,
+        GGUF,
         Unknown,
     };
 
@@ -118,6 +117,30 @@ struct ModelFormat : public BaseEnum
                 return "MNN";
             case GGUF:
                 return "GGUF";
+            default:
+                return "Unknown";
+        }
+    }
+};
+
+struct EmbeddingDataType : BaseEnum
+{
+    using BaseEnum::operator=;
+    enum
+    {
+        None,
+        INT8,
+        FLOAT32,
+    };
+
+    constexpr const char *to_string() noexcept
+    {
+        switch (v_)
+        {
+            case INT8:
+                return "INT8";
+            case FLOAT32:
+                return "FLOAT32";
             default:
                 return "Unknown";
         }
@@ -156,6 +179,7 @@ class LibAppBuilder;
 struct QNNEmbedding
 {
     ModelType model_types_{};
+    EmbeddingDataType data_type{};
     QNNEmbeddingType embedding_type_{};
     std::vector<uint8_t> embedded_raw_buf_;
     struct InferResource

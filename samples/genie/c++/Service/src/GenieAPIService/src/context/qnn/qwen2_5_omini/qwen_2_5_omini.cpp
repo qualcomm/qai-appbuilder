@@ -583,7 +583,7 @@ IVisionEmbedding &QInterface::Qwen2_5OMINI::BuildImgPixel()
 }
 
 void QInterface::Qwen2_5OMINI::MaskedScatter(const std::vector<uint8_t> &mask,
-                                             const FloatBufferView &features)
+                                             const BufferView<float>& features)
 {
     if (mask.size() != embedded_bin_.size())
         throw std::runtime_error("mask and embedded_bin must have same flattened length");
@@ -674,7 +674,7 @@ void QInterface::Qwen2_5OMINI::MergeImpl(int token_index,
         }
     }
 
-    MaskedScatter(mask, FloatBufferView{inferred_buf});
+    MaskedScatter(mask, BufferView<float>{inferred_buf});
 }
 
 IEmbedding &QInterface::Qwen2_5OMINI::MergeEmbedding()
@@ -683,7 +683,7 @@ IEmbedding &QInterface::Qwen2_5OMINI::MergeEmbedding()
     static const uint32_t kAudioTokenIndex{151646};
     static const int32_t kVisionTokenIndex{151655};
 
-    FloatBufferView tmp_raw_fbuf{qnn_embedding_info_.embedded_raw_buf_};
+    BufferView<float> tmp_raw_fbuf{qnn_embedding_info_.embedded_raw_buf_};
 
     embedded_bin_.resize(prompt_token_size_ * cols_);
     float *dest_ptr;
@@ -704,5 +704,7 @@ IEmbedding &QInterface::Qwen2_5OMINI::MergeEmbedding()
         MergeImpl(IVisionEmbedding::token_index_, kVisionTokenIndex, img_inferred_buffers_[0]);
     }
 
+    input_data_ = reinterpret_cast<uint8_t*>(embedded_bin_.data());
+    input_len_ = embedded_bin_.size() * sizeof(float);
     return *this;
 }

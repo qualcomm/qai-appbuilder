@@ -176,6 +176,11 @@ public:
                 {{QNNEmbeddingType::QWEN2_5_OMINI}, [model_path]() { return Qwen2_5_OMINI_Verifier(model_path).CreateIfVerified(); }},
         };
 
+        static std::unordered_map<const char *, EmbeddingDataType> embedding_dtype_map{
+                {"float32", {EmbeddingDataType::FLOAT32}},
+                {"int8",    {EmbeddingDataType::INT8}},
+        };
+
         QNNEmbedding embedding;
         for (const auto &check: checkers)
         {
@@ -267,67 +272,74 @@ struct ModelManager::ModeVerifier
 
         std::shared_ptr<ContextBase> CreateIfVerifiedImpl() override
         {
+            json j;
+
+            // Check if config_file_ is a JSON string (starts with '{')
+            std::string trimmed = self_->config_file_;
+            size_t start = trimmed.find_first_not_of(" \t\n\r");
+            if (start != std::string::npos)
             {
-                json j;
+                trimmed = trimmed.substr(start);
+            }
 
-                // Check if config_file_ is a JSON string (starts with '{')
-                std::string trimmed = self_->config_file_;
-                size_t start = trimmed.find_first_not_of(" \t\n\r");
-                if (start != std::string::npos)
+            if (!trimmed.empty() && trimmed[0] == '{')
+            {
+                // Parse JSON string directly
+                try
                 {
-                    trimmed = trimmed.substr(start);
-                }
-
-                if (!trimmed.empty() && trimmed[0] == '{')
-                {
-                    // Parse JSON string directly
-                    try
-                    {
-                        j = json::parse(self_->config_file_);
-                    } catch (const std::exception &e)
-                    {
-                        return nullptr;
-                    }
-                }
-                else
-                {
-                    // Read from file
-                    std::ifstream file(self_->config_file_);
-                    if (!file.good())
-                    {
-                        return nullptr;
-                    }
-                    file >> j;
-                }
-
-                if (!j.contains("dialog"))
+                    j = json::parse(self_->config_file_);
+                } catch (const std::exception &e)
                 {
                     return nullptr;
                 }
+            }
+            else
+            {
+                // Read from file
+                std::ifstream file(self_->config_file_);
+                if (!file.good())
+                {
+                    return nullptr;
+                }
+                file >> j;
+            }
 
-                auto context_size = j["dialog"]["context"]["size"].get<int>();
-                if (!context_size)
-                {
-                    My_Log{My_Log::Level::kError} << "qnn config file is invalid\n";
-                }
-                else
-                {
-                    self_->context_size_ = context_size;
-                    My_Log{} << "fixed qnn context size: " << self_->context_size_ << "\n";
-                }
+            if (!j.contains("dialog"))
+            {
+                My_Log{My_Log::Level::kWarning} << "dialog is not exist in json object";
+                return nullptr;
+            }
+
+            auto context_size = j["dialog"]["context"]["size"].get<int>();
+            if (!context_size)
+            {
+                My_Log{My_Log::Level::kError} << "qnn config file is invalid\n";
+            }
+            else
+            {
+                self_->context_size_ = context_size;
+                My_Log{} << "fixed qnn context size: " << self_->context_size_ << "\n";
             }
 
             std::vector<std::string> files;
+            std::string dtype_str;
+
             // TODO: use Regex embedding_weights_xxx.raw
             if (!File::MatchFileInDir(self_->model_path_, "embedding_weights", &files))
             {
                 goto ahead;
             }
-
+            
+            My_Log{} << "check qnn embedding file: " << files[0] << "\n";
             if (File::IsFileEmpty(files[0]))
             {
                 throw std::runtime_error("embedded file: " + files[0] + " is invalid");
             }
+
+            static std::unordered_map<const char *, EmbeddingDataType> embedding_dtype_map{
+                    {"float32", {EmbeddingDataType::FLOAT32}},
+                    {"ufixed8",    {EmbeddingDataType::INT8}},
+            };
 
             self_->qnn_embedding_ = QNNImpl::TryCreate(self_->model_path_, files[0]);
             if (self_->qnn_embedding_.embedding_type_ == QNNEmbeddingType::None)
@@ -336,11 +348,25 @@ struct ModelManager::ModeVerifier
             }
             My_Log{} << "check qnn embedding model type: " << self_->qnn_embedding_.model_types_.to_string() << "\n";
 
+            if (!j.contains(json::json_pointer("/dialog/embedding/datatype")))
+                throw std::runtime_error("qnn embedding has bad config in datatype");
+
+            dtype_str = j.at(json::json_pointer("/dialog/embedding/datatype")).get_ref<const std::string &>();
+            for (auto &item: embedding_dtype_map)
+            {
+                if (strcmp(item.first, dtype_str.c_str()) == 0)
+                {
+                    self_->qnn_embedding_.data_type = item.second;
+                    break;
+                }
+            }
+
+            if (self_->qnn_embedding_.data_type == EmbeddingDataType::None)
+                throw std::runtime_error("qnn embedding has bad datatype");
+
+            My_Log{} << "check qnn embedding data type: " << self_->qnn_embedding_.data_type.to_string() << "\n";
             ahead:
-
             auto context = std::make_shared<GenieContext>(*self_);
-
-
             return context;
         }
     };
@@ -790,6 +816,7 @@ void QNNEmbedding::Clean()
     infer_resources_.clear();
     embedding_type_ = QNNEmbeddingType::None;
     model_types_ = ModelType::Unknown;
+    data_type = EmbeddingDataType::None;
 }
 
 LibAppBuilder *QNNEmbedding::LibAppbuilderCreator(const std::string &serialized_file,

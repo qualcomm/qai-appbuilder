@@ -27,7 +27,7 @@ IVisionEmbedding &QInterface::Qwen2_5::MergeEmbedding()
 {
     static const int32_t rows{151655};
     const unsigned long token_count = prompt_token_size_;
-    FloatBufferView tmp_raw_fbuf{qnn_embedding_info_.embedded_raw_buf_};
+    BufferView<float> tmp_raw_fbuf{qnn_embedding_info_.embedded_raw_buf_};
 
     std::vector<float> embedded_raw_fbuf;
     embedded_raw_fbuf.resize(token_count * cols_);
@@ -45,7 +45,7 @@ IVisionEmbedding &QInterface::Qwen2_5::MergeEmbedding()
         return *this;
     }
 
-    FloatBufferView img_embedding_fbuf{img_inferred_buffers_[0]};
+    BufferView<float> img_embedding_fbuf{img_inferred_buffers_[0]};
 
     // 统计当前序列中的图像 token 数量
     size_t n_image_tokens = 0;
@@ -191,5 +191,7 @@ IVisionEmbedding &QInterface::Qwen2_5::MergeEmbedding()
         }
     }
 
+    input_data_ = reinterpret_cast<uint8_t*>(embedded_bin_.data());
+    input_len_ = embedded_bin_.size() * sizeof(float);
     return *this;   // 最终的 inputs_embeds_np（展平）
 }

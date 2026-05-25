@@ -52,8 +52,8 @@ struct GenieContext::QInterfaceImpl
         Genie_Status_t GenieDialogQuery()
         {
             const auto status = GenieDialogQueryImpl();
-            prompt_data_ = nullptr;
-            prompt_len_ = 0;
+            input_data_ = nullptr;
+            input_len_ = 0;
             return status;
         }
 
@@ -73,8 +73,8 @@ struct GenieContext::QInterfaceImpl
 
     protected:
         GenieContext *context_;
-        uint8_t *prompt_data_{};
-        uint32_t prompt_len_{};
+        uint8_t *input_data_{};
+        uint32_t input_len_{};
 
         static void GenieCallBack(const char *response,
                                   GenieDialog_SentenceCode_t sentence_code,
@@ -88,8 +88,8 @@ struct GenieContext::QInterfaceImpl
 
         bool set_content(ModelInput &model_input) final
         {
-            prompt_data_ = reinterpret_cast<uint8_t *>(const_cast<char *>(model_input.text_.data()));
-            prompt_len_ = model_input.text_.size();
+            input_data_ = reinterpret_cast<uint8_t *>(const_cast<char *>(model_input.text_.data()));
+            input_len_ = model_input.text_.size();
             OutPutText(model_input);
             return true;
         }
@@ -97,7 +97,7 @@ struct GenieContext::QInterfaceImpl
         Genie_Status_t GenieDialogQueryImpl() final
         {
             return GenieDialog_query(context_->m_DialogHandle,
-                                     reinterpret_cast<const char *>(prompt_data_),
+                                     reinterpret_cast<const char *>(input_data_),
                                      GENIE_DIALOG_SENTENCE_COMPLETE,
                                      GenieCallBack,
                                      this);
@@ -115,18 +115,7 @@ struct GenieContext::QInterfaceImpl
 
         bool set_content(ModelInput &model_input) final;
 
-        Genie_Status_t GenieDialogQueryImpl() final
-        {
-            auto rs = GenieDialog_embeddingQuery(context_->m_DialogHandle,
-                                                 prompt_data_,
-                                                 prompt_len_,
-                                                 GENIE_DIALOG_SENTENCE_COMPLETE,
-                                                 TokenToEmbedCallback,
-                                                 GenieCallBack,
-                                                 this);
-            embedded_bin_.clear();
-            return rs;
-        }
+        Genie_Status_t GenieDialogQueryImpl() final;
 
         std::string BuildPrompt(const std::string &system,
                                 const std::string &user,
@@ -139,9 +128,21 @@ struct GenieContext::QInterfaceImpl
         int32_t *prompt_token_{};
         uint32_t prompt_token_size_{};
 
-        std::vector<float> embedded_bin_;
         const QNNEmbedding &qnn_embedding_info_;
         int cols_{};
+
+        double requant_scale{1.0};
+        double requant_offset{0};
+        void (*token_to_embed_callback_fn_)(const int32_t token,
+                                            void *embedding,
+                                            const uint32_t embeddingSize,
+                                            const void *userData);
+
+        template<typename T, typename P>
+        static void TokenToEmbedCallback(const int32_t token,
+                                         void *embedding,
+                                         uint32_t embeddingSize,
+                                         const void *userData);
 
         const QNNEmbedding::InferResource *get_infer_resource(ModelType mode_type)
         {
@@ -180,11 +181,6 @@ struct GenieContext::QInterfaceImpl
         virtual IEmbedding &MergeEmbedding() = 0;
 
     private:
-        static void TokenToEmbedCallback(int32_t token,
-                                         void *embedding,
-                                         uint32_t embeddingSize,
-                                         const void *userData);
-
         IEmbedding &BuildTextEmbedding(const std::string &completed_prompt)
         {
             if (!context_->GenerateTextToken(completed_prompt,
@@ -224,7 +220,7 @@ struct GenieContext::QInterfaceImpl
             img_buf_.clear();
             img_pixel_buf_.clear();
             img_inferred_buffers_.clear();
-            Clean();
+            CleanVision();
             return *this;
         }
 
@@ -242,7 +238,7 @@ struct GenieContext::QInterfaceImpl
 
         virtual IVisionEmbedding &BuildImgPixel() = 0;
 
-        virtual IVisionEmbedding &Clean() { return *this; }
+        virtual IVisionEmbedding &CleanVision() = 0;
 
     protected:
         int kWidth{};

@@ -21,15 +21,16 @@
 #endif
 #include <vector>
 
-struct FloatBufferView
+template<typename T>
+struct BufferView
 {
-    explicit FloatBufferView(const std::vector<uint8_t> &buffer)
+    explicit BufferView(const std::vector<uint8_t> &buffer)
     {
-        pointer_ = reinterpret_cast<float *>(const_cast<std::vector<uint8_t> &>(buffer).data());
-        size_ = buffer.size() / sizeof(float);
+        pointer_ = reinterpret_cast<T *>(const_cast<std::vector<uint8_t> &>(buffer).data());
+        size_ = buffer.size() / sizeof(T);
     }
 
-    float *pointer_{};
+    T *pointer_{};
     unsigned long size_{};
 };
 

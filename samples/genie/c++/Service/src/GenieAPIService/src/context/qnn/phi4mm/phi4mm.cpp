@@ -166,7 +166,7 @@ Shape_2D<float> make_attention_mask(
         throw std::runtime_error("attention_mask sum is zero or negative");
     }
 
-//    out.buf = File::ReadFile<float>("attention_mask.raw");
+    //    out.buf = File::ReadFile<float>("attention_mask.raw");
     return out;
 }
 
@@ -186,7 +186,7 @@ Image pad_image_hwc(
 
     int size = dst_w * dst_h * channels;
     float *dst = new float[size];
-//    std::vector<float> dst(static_cast<size_t>(dst_w) * dst_h * channels);
+    //    std::vector<float> dst(static_cast<size_t>(dst_w) * dst_h * channels);
 
     // fill whole dst with fill color
     for (int y = 0; y < dst_h; ++y)
@@ -651,7 +651,7 @@ Shape_4D<float> make_attn_mask_4d(const Shape_2D<uint8_t> &mask2d, float mask_va
     }
     if (!need_expand)
     {
-//        throw std::runtime_error("mask2d need to expand");
+        //        throw std::runtime_error("mask2d need to expand");
         return {};
     }
 
@@ -953,7 +953,7 @@ Shape_3D<float> QInterface::PHI4Embedding::Compose()
         {
             throw std::runtime_error("inferred_buffers is not in the corrent shape: " + std::to_string(buffer.size()));
         }
-        auto buf_view = FloatBufferView{buffer};
+        auto buf_view = BufferView<float>{buffer};
         std::vector<float> buf;
         buf.assign(buf_view.pointer_, buf_view.pointer_ + buf_view.size_);
         per_crop_features.emplace_back(Shape_3D<float>{1, 256, C, std::move(buf)});
@@ -1015,12 +1015,103 @@ Shape_3D<float> QInterface::PHI4Embedding::Compose()
     return concat_3d_list<float>({sub_img3, glb_gn_, glb_img3}, 1);
 }
 
+template<>
+IVisionEmbedding &QInterface::PHI4Embedding::EmbeddingProcess<float>::MergeEmbeddingImpl(std::vector<float> &embedded_bin)
+{
+    const int HIDDEN_DIM = parent->C;
+    BufferView<float> embedded_raw_fbuf{parent->qnn_embedding_info_.embedded_raw_buf_};
+    size_t num_tokens = parent->prompt_token_size_;
+    embedded_bin_ = std::move(embedded_bin);
+
+    for (size_t i = 0; i < num_tokens; ++i)
+    {
+        int32_t token_id = parent->prompt_token_[i];
+        float *dest_ptr = &embedded_bin_[i * HIDDEN_DIM];
+
+        if (token_id != parent->SPECIAL_TOKEN_ID)
+        {
+            if ((size_t) (token_id + 1) * HIDDEN_DIM > embedded_raw_fbuf.size_)
+            {
+                throw std::runtime_error(std::string{"token id is out of bounds, "}
+                                         + "embedding_weights_fbuf size: " + std::to_string(embedded_raw_fbuf.size_) + ", "
+                                         + "(token_id + 1) * HIDDEN_DIM: " + std::to_string((token_id + 1) * HIDDEN_DIM));
+            }
+            const float *src_ptr = &embedded_raw_fbuf.pointer_[token_id * HIDDEN_DIM];
+            std::memcpy(dest_ptr, src_ptr, HIDDEN_DIM * sizeof(float));
+        }
+    }
+
+    parent->input_data_ = reinterpret_cast<uint8_t *>(embedded_bin_.data());
+    parent->input_len_ = embedded_bin_.size() * sizeof(float);
+    return *parent;
+}
+
+template<>
+IVisionEmbedding &QInterface::PHI4Embedding::EmbeddingProcess<uint16_t>::MergeEmbeddingImpl(std::vector<float> &embedded_bin)
+{
+    const int HIDDEN_DIM = parent->C;
+    BufferView<uint8_t> embedded_raw_fbuf{parent->qnn_embedding_info_.embedded_raw_buf_};
+    size_t num_tokens = parent->prompt_token_size_;
+
+    for (size_t i = 0; i < num_tokens; ++i)
+    {
+        int32_t token_id = parent->prompt_token_[i];
+        float *dest_ptr = &embedded_bin[i * HIDDEN_DIM];
+
+        if (token_id != parent->SPECIAL_TOKEN_ID)
+        {
+            if ((size_t) (token_id + 1) * HIDDEN_DIM > embedded_raw_fbuf.size_)
+            {
+                throw std::runtime_error(std::string{"token id is out of bounds, "}
+                                         + "embedding_weights_fbuf size: " + std::to_string(embedded_raw_fbuf.size_) + ", "
+                                         + "(token_id + 1) * HIDDEN_DIM: " + std::to_string((token_id + 1) * HIDDEN_DIM));
+            }
+            size_t src = static_cast<size_t>(token_id) * HIDDEN_DIM;
+            size_t dst = i * HIDDEN_DIM;
+            for (int j = 0; j < HIDDEN_DIM; ++j)
+            {
+                embedded_bin[dst + j] =
+                        (static_cast<float>(embedded_raw_fbuf.pointer_[src + j]) + parent->LUT8_OFFSET) * parent->LUT8_SCALE;
+            }
+
+        }
+    }
+
+    auto round{[](float x)
+               {
+                   float sign = (x < 0.0f) ? -1.0f : 1.0f;
+                   return std::floor(std::fabs(x) + 0.5f) * sign;
+               }};
+
+    constexpr auto min_val = static_cast<int64_t>(std::numeric_limits<uint16_t>::min());
+    constexpr auto max_val = static_cast<int64_t>(std::numeric_limits<uint16_t>::max());
+    embedded_bin_.resize(embedded_bin.size());
+    for (int i = 0; i < embedded_bin.size(); i++)
+    {
+        float val = static_cast<float>(embedded_bin[i] / parent->BASE16_SCALE - parent->BASE16_OFFSET);
+        float sign = (val < 0.0f) ? -1.0f : 1.0f;
+        float rounded = std::floor(std::fabs(val) + 0.5f) * sign;
+        // clip
+        if (rounded < static_cast<float>(std::numeric_limits<uint16_t>::min()))
+        {
+            rounded = static_cast<float>(std::numeric_limits<uint16_t>::min());
+        }
+        if (rounded > static_cast<float>(std::numeric_limits<uint16_t>::max()))
+        {
+            rounded = static_cast<float>(std::numeric_limits<uint16_t>::max());
+        }
+        embedded_bin_[i] = static_cast<uint16_t>(rounded);
+    }
+
+    parent->input_data_ = reinterpret_cast<uint8_t *>(embedded_bin_.data());
+    parent->input_len_ = embedded_bin_.size() * sizeof(uint16_t);
+    return *parent;
+}
+
 IVisionEmbedding &QInterface::PHI4Embedding::MergeEmbedding()
 {
     const int HIDDEN_DIM = C;
-    const int SPECIAL_TOKEN_ID = 200010;
     Shape_3D<float> img_inferred_buffer;
-    std::vector<unsigned char> buf;
 
     if (!img_inferred_buffers_.empty())
     {
@@ -1037,16 +1128,16 @@ IVisionEmbedding &QInterface::PHI4Embedding::MergeEmbedding()
                                      + std::to_string(img_inferred_buffer.d1));
         }
     }
-
-    FloatBufferView embedded_raw_fbuf{qnn_embedding_info_.embedded_raw_buf_};
     size_t num_tokens = prompt_token_size_;
-    embedded_bin_.resize(num_tokens * HIDDEN_DIM);
+
+    std::vector<float> embedded_bin;
+    embedded_bin.resize(num_tokens * HIDDEN_DIM);
     int vision_idx = 0;
 
     for (size_t i = 0; i < num_tokens; ++i)
     {
         int32_t token_id = prompt_token_[i];
-        float *dest_ptr = &embedded_bin_[i * HIDDEN_DIM];
+        float *dest_ptr = &embedded_bin[i * HIDDEN_DIM];
 
         if (token_id == SPECIAL_TOKEN_ID)
         {
@@ -1060,22 +1151,12 @@ IVisionEmbedding &QInterface::PHI4Embedding::MergeEmbedding()
             std::memcpy(dest_ptr, src_ptr, HIDDEN_DIM * sizeof(float));
             vision_idx++;
         }
-        else
-        {
-            if ((size_t) (token_id + 1) * HIDDEN_DIM > embedded_raw_fbuf.size_)
-            {
-                throw std::runtime_error(std::string{"token id is out of bounds, "}
-                                         + "embedding_weights_fbuf size: " + std::to_string(embedded_raw_fbuf.size_) + ", "
-                                         + "(token_id + 1) * HIDDEN_DIM: " + std::to_string((token_id + 1) * HIDDEN_DIM));
-            }
-            const float *src_ptr = &embedded_raw_fbuf.pointer_[token_id * HIDDEN_DIM];
-            std::memcpy(dest_ptr, src_ptr, HIDDEN_DIM * sizeof(float));
-        }
     }
-    return *this;
+    return ep_->MergeEmbeddingImpl(embedded_bin);
 }
 
 QInterface::PHI4Embedding::~PHI4Embedding()
 {
+    delete ep_;
     stbi_ldr_to_hdr_gamma(2.2f);
 }

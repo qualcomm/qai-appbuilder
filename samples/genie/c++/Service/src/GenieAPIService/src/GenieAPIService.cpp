@@ -141,7 +141,6 @@ void GenieService::run(int argc, char *argv[])
     self_ = this;
     Config config{argc, argv};
 
-    // 1. Parsing command line arguments
     try
     {
         if (!config.Process())
@@ -162,7 +161,6 @@ void GenieService::run(int argc, char *argv[])
         return;
     }
 
-    // Initialize request handler
     requestHandler = std::make_unique < ChatRequestHandler > (this);
     int port_checked = config.get_port();
     if (!init_)
@@ -190,12 +188,14 @@ void GenieService::ServiceStop()
 
 void GenieService::setupSignalHandlers()
 {
-    signal(SIGINT, [](int signum)
+    auto fn = [](int signum)
     {
         service.ServiceStop();
         My_Log{} << "Interrupt signal (" << signum << ") received. Exiting..." << std::endl;
         exit(signum);
-    });
+    };
+    signal(SIGINT, fn);
+    signal(SIGBREAK, fn);
 }
 
 void GenieService::setupHttpServer()

@@ -69,7 +69,7 @@ void GenieContext::inference_thread()
         if (GENIE_STATUS_SUCCESS != status && GENIE_STATUS_WARNING_ABORTED != status)
         {
             inference_succeed_ = false;
-            My_Log{My_Log::Level::kError} << "Failed to get response from GenieDialog.\n";
+            My_Log{My_Log::Level::kError} << "get response from GenieDialog failed\n";
         }
         else
         {
@@ -195,14 +195,13 @@ GenieContext::GenieContext(const IModelConfig &model_config) :
         throw std::runtime_error("Failed to get sampler");
     }
 
-
     std::vector<std::string> store_paths;
 
-    // if (fixer.has_ssd_prefix_)
-    //     goto ahead;
+    if (fixer.has_ssd_prefix_)
+        goto ahead;
 
     store_paths = {
-            model_config.get_model_path() + "/kv-cache.primary.qnn-htp",
+            model_config.get_model_path() + "/",
             model_config.get_model_path() + "/Prefix/"
     };
 
