@@ -1760,7 +1760,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vecto
                                                                       std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
                                                                       std::string perfProfile, size_t graphIndex, size_t share_memory_size) {
   auto returnStatus = StatusCode::SUCCESS;
-  printf("QnnSampleApp::executeGraphsBuffers,m_isGpu=%d\n", printf);
+
   if (nullptr == m_graphsInfo || nullptr == (*m_graphsInfo)) {
     QNN_ERROR("m_graphsInfo is nullptr");
     return StatusCode::FAILURE;
