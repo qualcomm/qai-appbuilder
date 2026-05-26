@@ -22,7 +22,7 @@ Generalization upgrades:
 - Auto-generate an IO config when none is provided, and optionally cache it on disk.
 
 Env:
-- QAI_QNN_RUNTIME=HTP|CPU
+- QAI_QNN_RUNTIME=HTP|CPU|GPU
 - QAI_QNN_PERF_PROFILE=BURST|OFF
 - QAI_QNN_LIBS_DIR=<path>
 
@@ -775,7 +775,7 @@ class SessionOptions:
 
     def set_qnn_runtime(self, runtime: Union[Runtime, str]):
         if isinstance(runtime, str):
-            m = {"HTP": Runtime.HTP, "CPU": Runtime.CPU}
+            m = {"HTP": Runtime.HTP, "CPU": Runtime.CPU, "GPU": Runtime.GPU}
             runtime = m.get(runtime.strip().upper(), Runtime.HTP)
         self.qnn_runtime = runtime
 
@@ -826,7 +826,7 @@ class InferenceSession:
             InferenceSession._last_config_key = key
             logger.info("QNN environment initialized")
 
-        runtime_tag = "CPU" if sess_options.qnn_runtime == Runtime.CPU else "HTP"
+        runtime_tag = "CPU" if sess_options.qnn_runtime == Runtime.CPU else ("GPU" if sess_options.qnn_runtime == Runtime.GPU else "HTP")
         model_name = os.path.splitext(os.path.basename(model_path))[0]
         self._model = QNNModelWrapper(model_name, model_path, runtime_tag=runtime_tag)
         self._input_names = self._model.getInputName()

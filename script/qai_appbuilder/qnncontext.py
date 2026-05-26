@@ -33,6 +33,7 @@ if sys.platform.startswith('linux'):
 
 g_backend_lib_path = "None"
 g_system_lib_path = "None"
+g_runtime = None
 g_base_path = os.path.dirname(os.path.abspath(__file__))
 g_base_path = os.getenv('PATH') + ";" + g_base_path + ";"
 
@@ -97,6 +98,7 @@ class Runtime():
     """Available runtimes for model execution on Qualcomm harwdware."""
     CPU = "Cpu"
     HTP = "Htp"
+    GPU = "Gpu"
 
 
 class DataType():
@@ -121,6 +123,9 @@ class PerfProfile():
         You should keep the 'perf_profile' parameter of function 'Inference()' as 'PerfProfile.DEFAULT' for the class QNNContext & QNNContextProc. If not, this
         global setting will be overwrited.
         """
+        global g_runtime
+        if g_runtime == Runtime.GPU:
+            return
         appbuilder.set_perf_profile(perf_profile)
 
     @staticmethod
@@ -128,11 +133,14 @@ class PerfProfile():
         """
         Release the perf profile which set by function SetPerfProfileGlobal().
         """
+        global g_runtime
+        if g_runtime == Runtime.GPU:
+            return
         appbuilder.rel_perf_profile()
 
 
 class QNNConfig():
-    """Configure QNN runtime, log level, and profiling level.
+    """Config QNN SDK libraries path, runtime(CPU/HTP/GPU), log level, and profiling level.
 
     QNN SDK libraries are bundled with the ``qai_appbuilder`` package and
     resolved automatically from the package's ``libs/`` directory, so
@@ -140,7 +148,7 @@ class QNNConfig():
     """
 
     @staticmethod
-    def Config(qnn_lib_path: str = None,
+    def Config(qnn_lib_path: str = "None",
                runtime: str = Runtime.HTP,
                log_level: int = LogLevel.ERROR,
                profiling_level: int = ProfilingLevel.OFF,
@@ -164,8 +172,8 @@ class QNNConfig():
         log_path : str
             Optional log file path; ``"None"`` disables file logging.
         """
-        global g_backend_lib_path, g_system_lib_path
-
+        global g_backend_lib_path, g_system_lib_path, g_runtime
+        g_runtime = runtime
         # Fall back to the libs bundled with this package when no valid
         # explicit path is supplied.
         if qnn_lib_path in (None, "None", "") or not os.path.exists(qnn_lib_path):
@@ -177,8 +185,12 @@ class QNNConfig():
             if ADSP_LIBRARY_PATH is None or len(ADSP_LIBRARY_PATH) < 2:
                 os.environ["ADSP_LIBRARY_PATH"] = qnn_lib_path
 
-        g_backend_lib_path = qnn_lib_path + PATH_SLASH + QNN_LIB_PRE + "Qnn" + runtime + QNN_LIB_EXT
-        g_system_lib_path = qnn_lib_path + PATH_SLASH + QNN_SYSTEM_LIB
+        if (qnn_lib_path != "None"):
+            if runtime == Runtime.GPU:
+                g_backend_lib_path = qnn_lib_path + PATH_SLASH + QNN_LIB_PRE + "QnnGpu" + QNN_LIB_EXT
+            else:
+                g_backend_lib_path = qnn_lib_path + PATH_SLASH + QNN_LIB_PRE + "Qnn" + runtime + QNN_LIB_EXT
+            g_system_lib_path = qnn_lib_path + PATH_SLASH + QNN_SYSTEM_LIB
 
         if not os.path.exists(g_backend_lib_path):
             raise ValueError(f"backend library does not exist: {g_backend_lib_path}")

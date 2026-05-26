@@ -167,6 +167,8 @@ class QnnSampleApp {
   StatusCode initializeLog();
   StatusCode setLogLevel(QnnLog_Level_t logLevel);
 
+  void setIsGpu(bool isGpu) { m_isGpu = isGpu; }
+
   StatusCode initializePerformance();
   StatusCode destroyPerformance();
 
@@ -224,6 +226,7 @@ class QnnSampleApp {
   uint32_t m_powerConfigId = 1;
   QnnHtpDevice_PerfInfrastructure_t m_perfInfra = {nullptr};
   bool m_runInCpu = true;
+  bool m_isGpu = false;
 
   // issue#24
   std::vector<std::vector<size_t>> m_inputShapes;

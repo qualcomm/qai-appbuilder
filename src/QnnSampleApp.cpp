@@ -1760,7 +1760,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vecto
                                                                       std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
                                                                       std::string perfProfile, size_t graphIndex, size_t share_memory_size) {
   auto returnStatus = StatusCode::SUCCESS;
-  
+  printf("QnnSampleApp::executeGraphsBuffers,m_isGpu=%d\n", printf);
   if (nullptr == m_graphsInfo || nullptr == (*m_graphsInfo)) {
     QNN_ERROR("m_graphsInfo is nullptr");
     return StatusCode::FAILURE;
@@ -1900,7 +1900,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vecto
           QNN_DEBUG("Successfully populated input tensors for graphIdx: %d", graphIdx);
           Qnn_ErrorHandle_t executeStatus = QNN_GRAPH_NO_ERROR;
 
-          if (false == m_runInCpu && "default" != perfProfile && false == boostPerformance(m_perfInfra, perfProfile)) {
+          if (!m_isGpu && false == m_runInCpu && "default" != perfProfile && false == boostPerformance(m_perfInfra, perfProfile)) {
             QNN_ERROR("Performance boost failure");
           }
 
@@ -1913,7 +1913,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vecto
                                                               m_profileBackendHandle,
                                                               nullptr);
 
-          if (false == m_runInCpu && "default" != perfProfile && false == resetPerformance(m_perfInfra)) {
+          if (!m_isGpu && false == m_runInCpu && "default" != perfProfile && false == resetPerformance(m_perfInfra)) {
             QNN_ERROR("Performance reset failure");
           }
 
@@ -2111,6 +2111,10 @@ sample_app::StatusCode sample_app::QnnSampleApp::setLogLevel(QnnLog_Level_t logL
 
 // Performance Setting for HTP
 sample_app::StatusCode sample_app::QnnSampleApp::initializePerformance() {
+    if (m_isGpu) {
+        QNN_DEBUG("Skipping HTP performance initialization for GPU backend");
+        return StatusCode::SUCCESS;
+    }
     QnnDevice_Infrastructure_t deviceInfra = nullptr;
     if (QNN_SUCCESS != m_qnnFunctionPointers.qnnInterface.deviceGetInfrastructure(&deviceInfra)) {
         QNN_ERROR("Failure in deviceGetInfrastructure()");
@@ -2131,7 +2135,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::initializePerformance() {
 }
 
 sample_app::StatusCode sample_app::QnnSampleApp::destroyPerformance() {
-    if (true == m_runInCpu)
+    if (true == m_runInCpu || m_isGpu)
         return StatusCode::SUCCESS;
 
     if (QNN_SUCCESS != m_perfInfra.destroyPowerConfigId(m_powerConfigId)) {
