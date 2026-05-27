@@ -102,12 +102,12 @@ public:
     }
 
     bool has_ssd_prefix_;
-    
+
 private:
     bool FixedPath(json &j, FixedInfo &info);
 
     const IModelConfig &model_config_;
-    
+
     json j_;
 };
 
@@ -121,9 +121,9 @@ inline json ConfigFixer::FixConfig()
             {"extensions", json::json_pointer("/dialog/engine/backend/extensions"), FixedInfo::kString, true},
             {"ctx-bins", json::json_pointer("/dialog/engine/model/binary/ctx-bins"), FixedInfo::kArrayString, false},
             {"forecast", json::json_pointer("/dialog/ssd-q1/forecast-prefix-name"), FixedInfo::kString, true, true},
-            {"poll", json::json_pointer("/dialog/engine/backend/QnnHtp/poll"),FixedInfo::kBool, true, false}
+            {"poll", json::json_pointer("/dialog/engine/backend/QnnHtp/poll"),FixedInfo::kBool, true, false},
+            {"lut-path", json::json_pointer("/dialog/embedding/lut-path"),FixedInfo::kString, true, false}
     };
-
     /* @formatter:on */
 
     for (auto &fixed_item: fixed_items)
@@ -133,14 +133,14 @@ inline json ConfigFixer::FixConfig()
             throw std::runtime_error("fixed the config path failed");
         }
     }
-    
+
     if (Genie_getApiMinorVersion() >= 11)
     {
         auto jp = json::json_pointer("/dialog/engine/backend/QnnHtp");
         j_.at(jp)["use-mmap"] = true;
         j_.at(jp)["allow-async-init"] = true;
     }
-    
+
     My_Log{} << "fixed the config path successfully\n";
     My_Log{My_Log::Level::kInfo} << j_.dump(4) << std::endl;
     return j_;
@@ -170,14 +170,14 @@ inline bool ConfigFixer::FixedPath(json &j, ConfigFixer::FixedInfo &info)
                             current_path = fs::path{j.get_ref<const std::string &>()};
                             file_path = current_path.generic_string();
 
-                            if (!current_path.is_absolute())
+                            if (File::IsFileExist(file_path))
                             {
-                                if (info.additional_)
-                                {
-                                    file_path = model_config_.get_model_path() + "/prefix";
-                                }
+                                rs = true;
+                                goto done;
                             }
 
+                            file_name = current_path.filename().generic_string();
+                            file_path = model_config_.get_model_path() + "/" + file_name;
                             if (File::IsFileExist(file_path))
                             {
                                 rs = true;
@@ -185,9 +185,7 @@ inline bool ConfigFixer::FixedPath(json &j, ConfigFixer::FixedInfo &info)
                             }
 
                             My_Log{} << "file path: " << file_path << " is not exist, will check: ";
-
-                            file_name = current_path.filename().generic_string();
-                            file_path = model_config_.get_model_path() + "/" + file_name;
+                            file_path = model_config_.get_model_path() + "/Prefix/" + file_name;
                             My_Log{}.original(true) << file_path << "\n";
                             if (File::IsFileExist(file_path))
                             {
@@ -198,14 +196,12 @@ inline bool ConfigFixer::FixedPath(json &j, ConfigFixer::FixedInfo &info)
                             My_Log{} << "file path: " << file_path << " is not exist, will use default ver: ";
                             file_path = RootDir + "/" + file_name;
                             My_Log{}.original(true) << file_path << "\n";
-
-                            if (!File::IsFileExist(file_path))
+                            if (File::IsFileExist(file_path))
                             {
-                                My_Log{} << "file path: " << file_path << " is not exist\n";
+                                rs = true;
                                 goto done;
                             }
 
-                            rs = true;
                             done:
                             if (rs)
                                 file_path = fs::absolute(file_path).generic_string();

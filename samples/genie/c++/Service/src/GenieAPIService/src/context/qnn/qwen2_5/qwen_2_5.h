@@ -42,11 +42,21 @@ public:
         {
             throw std::runtime_error("Qwen2_5 not match rules of 7b or 3b");
         }
+
+        token_to_embed_callback_fn_ = &TokenToEmbedCallback<float, float>;
     }
 
     IVisionEmbedding &BuildImgPixel() final;
 
     IVisionEmbedding &MergeEmbedding() override;
+
+    IVisionEmbedding &CleanVision() override
+    {
+        embedded_bin_.clear();
+        return *this;
+    }
+
+    std::vector<float> embedded_bin_;
 };
 
 #endif //QWEN_2_5_H

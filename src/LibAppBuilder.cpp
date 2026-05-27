@@ -49,6 +49,7 @@ static void* sg_systemLibraryHandle{nullptr};
 static QNN_INTERFACE_VER_TYPE sg_qnnInterface;
 
 QnnHtpDevice_Infrastructure_t *gs_htpInfra(nullptr);
+static bool gs_isGpu = false;
 static bool sg_perf_global = false;
 
 std::unordered_map<std::string, std::unique_ptr<sample_app::QnnSampleApp>> sg_model_map;
@@ -222,6 +223,11 @@ bool SetPerfProfileGlobal(const std::string& perf_profile) {
         return false;
     }
 
+    if (gs_isGpu) {
+        QNN_DEBUG("Skipping HTP performance profile for GPU backend");
+        return true;
+    }
+
     if (nullptr == gs_htpInfra) {
         QnnDevice_Infrastructure_t deviceInfra = nullptr;
         Qnn_ErrorHandle_t devErr = sg_qnnInterface.deviceGetInfrastructure(&deviceInfra);
@@ -241,6 +247,10 @@ bool SetPerfProfileGlobal(const std::string& perf_profile) {
 }
 
 bool RelPerfProfileGlobal() {
+    if (gs_isGpu) {
+        return true;
+    }
+
     if (false == sg_perf_global) {
       QNN_ERR("You should set perf profile before you release it!\n");
       return false;
@@ -545,7 +555,10 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
       return false;
     }
 
-    if (loadFromCachedBinary) {
+    bool isGpu = backEndPath.find("Gpu") != std::string::npos || backEndPath.find("gpu") != std::string::npos;
+    gs_isGpu = isGpu;
+    app->setIsGpu(isGpu);
+    if (loadFromCachedBinary && !isGpu) {
         if (sample_app::StatusCode::SUCCESS != app->initializePerformance()) {
             app->reportError("Performance initialization failure");
             return false;

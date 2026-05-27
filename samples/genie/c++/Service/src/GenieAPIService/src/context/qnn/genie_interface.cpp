@@ -8,6 +8,13 @@
 
 #include "genie.h"
 #include "genie_interface.h"
+
+template<>
+void IEmbedding::TokenToEmbedCallback<float, float>(const int32_t token,
+                                                    void *embedding,
+                                                    const uint32_t embeddingSize,
+                                                    const void *userData);
+
 #include "log.h"
 #include "utils.h"
 #include "base64.h"
@@ -117,15 +124,14 @@ bool IEmbedding::set_content(ModelInput &model_input)
     }
 
     ahead:
-    prompt_data_ = reinterpret_cast<uint8_t *>(embedded_bin_.data());
-    prompt_len_ = embedded_bin_.size() * sizeof(float);
     return true;
 }
 
-void IEmbedding::TokenToEmbedCallback(const int32_t token,
-                                      void *embedding,
-                                      const uint32_t embeddingSize,
-                                      const void *userData)
+template<>
+void IEmbedding::TokenToEmbedCallback<float, float>(const int32_t token,
+                                                    void *embedding,
+                                                    const uint32_t embeddingSize,
+                                                    const void *userData)
 {
     auto *self = static_cast<IEmbedding *>(const_cast<void *>(userData));
     const size_t lutIndex = token * embeddingSize;
@@ -143,6 +149,47 @@ void IEmbedding::TokenToEmbedCallback(const int32_t token,
     {
         My_Log{My_Log::Level::kError} << "Error: T2E conversion overflow.\n";
     }
+}
+
+template<typename T, typename P>
+void IEmbedding::TokenToEmbedCallback(const int32_t token,
+                                      void *embedding,
+                                      const uint32_t embeddingSize,
+                                      const void *userData)
+{
+    auto *self = static_cast<IEmbedding *>(const_cast<void *>(userData));
+    size_t num_elements = embeddingSize / sizeof(P);
+    size_t lutIndex = static_cast<size_t>(token) * num_elements;
+
+    if ((lutIndex + num_elements) * sizeof(T) <= self->qnn_embedding_info_
+                                                     .embedded_raw_buf_
+                                                     .size())
+    {
+        const T *embeddingSrc = static_cast<const T *>(self->qnn_embedding_info_
+                                                           .embedded_raw_buf_
+                                                           .data()) + (lutIndex);
+        P *embeddingDst = static_cast<P *>(embedding);
+        for (size_t i = 0; i < num_elements; i++)
+        {
+            embeddingDst[i] = static_cast<P>(self->requant_scale * embeddingSrc[i] + self->requant_offset);
+        }
+    }
+    else
+    {
+        My_Log{My_Log::Level::kError} << "Error: T2E conversion overflow.\n";
+    }
+}
+
+Genie_Status_t QInterfaceImpl::IEmbedding::GenieDialogQueryImpl()
+{
+    auto rs = GenieDialog_embeddingQuery(context_->m_DialogHandle,
+                                         input_data_,
+                                         input_len_,
+                                         GENIE_DIALOG_SENTENCE_COMPLETE,
+                                         token_to_embed_callback_fn_,
+                                         GenieCallBack,
+                                         this);
+    return rs;
 }
 
 std::string QInterfaceImpl::IEmbedding::GeneratePaddingPrompt(const std::string &bos,

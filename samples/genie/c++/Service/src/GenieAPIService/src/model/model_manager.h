@@ -9,6 +9,11 @@
 #ifndef MODEL_MANAGER_H
 #define MODEL_MANAGER_H
 
+#if defined(__linux__) && !defined(__ANDROID__)
+    // gcc on Linux requires the explicit include for std::atomic; MSVC and the
+    // Android NDK pull it in transitively.
+    #include <atomic>
+#endif
 #include "model_config.h"
 
 class ModelManager : public IModelConfig

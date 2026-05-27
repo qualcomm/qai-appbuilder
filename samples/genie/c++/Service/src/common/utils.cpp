@@ -49,7 +49,45 @@ bool isPortAvailable(int port)
     return result != SOCKET_ERROR;
 }
 
+#elif defined(__linux__) && !defined(__ANDROID__)
+
+// Native Linux: implement isPortAvailable via POSIX sockets so the service
+// detects port conflicts properly. The Windows branch above and the Android
+// stub below both keep their original behaviour.
+
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <cerrno>
+#include <cstring>
+
+bool isPortAvailable(int port)
+{
+    int listen_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (listen_socket < 0)
+    {
+        My_Log{} << "Error creating socket: " << strerror(errno) << std::endl;
+        return false;
+    }
+
+    int reuse = 1;
+    setsockopt(listen_socket, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+
+    sockaddr_in service{};
+    service.sin_family = AF_INET;
+    service.sin_addr.s_addr = htonl(INADDR_ANY);
+    service.sin_port = htons(port);
+
+    int result = ::bind(listen_socket, reinterpret_cast<sockaddr *>(&service), sizeof(service));
+    ::close(listen_socket);
+
+    return result == 0;
+}
+
 #else
+// Android (and any other POSIX-ish platform that previously took this path):
+// keep the original no-op behaviour to avoid changing existing builds.
 bool isPortAvailable(int port){return true;}
 #endif
 

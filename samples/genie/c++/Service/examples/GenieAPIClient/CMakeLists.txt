@@ -26,5 +26,13 @@ add_executable(${PROJECT_NAME}
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${EXTERNAL_HEADER_PATH})
-target_compile_definitions(${PROJECT_NAME} PRIVATE -DCURL_STATICLIB -DNOMINMAX)
-target_link_libraries(${PROJECT_NAME} PRIVATE libcurl Iphlpapi ws2_32 Wldap32)
+
+if (MSVC)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE -DCURL_STATICLIB -DNOMINMAX)
+    target_link_libraries(${PROJECT_NAME} PRIVATE libcurl Iphlpapi ws2_32 Wldap32)
+elseif (UNIX AND NOT ANDROID)
+    # Native Linux only. This sample is gated behind BUILD_LINUX_CLIENT in the
+    # top-level Service/CMakeLists.txt and is not built by default on Linux.
+    target_compile_definitions(${PROJECT_NAME} PRIVATE -DCURL_STATICLIB)
+    target_link_libraries(${PROJECT_NAME} PRIVATE curl pthread dl)
+endif ()

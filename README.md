@@ -1,7 +1,7 @@
 <br><br><br>
 
 <div align="center">
-  <a href="README.md"><img src="docs/images/qai_appbuilder.png" alt="Quick AI Application Builder" width="360" height="90"></a>
+  <a href="README.md"><img src="https://raw.githubusercontent.com/quic/ai-engine-direct-helper/main/docs/images/qai_appbuilder.png" alt="Quick AI Application Builder" width="360" height="90"></a>
 </div>
 
 <br><br><br>
@@ -79,7 +79,7 @@ Developers can use QAI AppBuilder in both C++ and Python projects <br>
 ## Diagram
 <br>
 <div align="center">
-  <a href="README.md"><img src="docs/images/diagram2.png" alt="Quick AI Application Builder" width="777" height="456"></a>
+  <a href="README.md"><img src="https://raw.githubusercontent.com/quic/ai-engine-direct-helper/main/docs/images/diagram2.png" alt="Quick AI Application Builder" width="777" height="456"></a>
 </div>
 
 ## Environment Setup

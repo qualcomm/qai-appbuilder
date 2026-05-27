@@ -46,7 +46,7 @@ from setuptools.command.bdist_wheel import bdist_wheel
 # ---------------------------
 # Project constants
 # ---------------------------
-VERSION = "2.42.0"
+VERSION = "2.46.0"
 CONFIG = "Release"  # Release, RelWithDebInfo
 PACKAGE_NAME = "qai_appbuilder"
 
@@ -329,6 +329,7 @@ def _copy_runtime_artifacts(
         # Windows QNN dlls
         _copy_if_exists(lib_path / "QnnHtp.dll", libs_dir / "QnnHtp.dll")
         _copy_if_exists(lib_path / "QnnCpu.dll", libs_dir / "QnnCpu.dll")
+        _copy_if_exists(lib_path / "QnnGpu.dll", libs_dir / "QnnGpu.dll")
         _copy_if_exists(lib_path / "QnnHtpNetRunExtensions.dll", libs_dir / "QnnHtpNetRunExtensions.dll")
         _copy_if_exists(lib_path / "QnnHtpPrepare.dll", libs_dir / "QnnHtpPrepare.dll")
         _copy_if_exists(lib_path / "QnnSystem.dll", libs_dir / "QnnSystem.dll")
@@ -338,6 +339,7 @@ def _copy_runtime_artifacts(
         _copy_if_exists(lib_path / "libGenie.so", _project_root() / "lib" / "Release" / "libGenie.so")
         _copy_if_exists(lib_path / "libQnnHtp.so", libs_dir / "libQnnHtp.so")
         _copy_if_exists(lib_path / "libQnnCpu.so", libs_dir / "libQnnCpu.so")
+        _copy_if_exists(lib_path / "libQnnGpu.so", libs_dir / "libQnnGpu.so")
         _copy_if_exists(lib_path / "libQnnHtpNetRunExtensions.so", libs_dir / "libQnnHtpNetRunExtensions.so")
         _copy_if_exists(lib_path / "libQnnHtpPrepare.so", libs_dir / "libQnnHtpPrepare.so")
         _copy_if_exists(lib_path / "libQnnSystem.so", libs_dir / "libQnnSystem.so")

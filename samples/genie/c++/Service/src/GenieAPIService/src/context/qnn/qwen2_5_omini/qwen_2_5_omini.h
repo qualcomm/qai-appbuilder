@@ -11,7 +11,8 @@
 
 #include "../genie_interface.h"
 
-struct FloatBufferView;
+template<typename T>
+struct BufferView;
 
 class QInterface::Qwen2_5OMINI : public IMultiModal
 {
@@ -36,6 +37,7 @@ public:
 
         IAudioEmbedding::input_buffers_.resize(1);
         IAudioEmbedding::input_buffers_[0].resize(3);
+        token_to_embed_callback_fn_ = &TokenToEmbedCallback<float, float>;
     }
 
     IAudioEmbedding &PaddingAudioPrompt() final
@@ -53,12 +55,19 @@ public:
 
     void MergeImpl(int token_index, int standard_index, std::vector<uint8_t> &inferred_buf);
 
+    IVisionEmbedding &CleanVision() override
+    {
+        embedded_bin_.clear();
+        return *this;
+    }
+
     IAudioEmbedding &CleanAudio() override
     {
         IAudioEmbedding::token_index_ = 0;
         padded_feature_.clear();
         padded_mask_.clear();
         padded_attention_mask_.clear();
+        embedded_bin_.clear();
         return *this;
     }
 
@@ -115,12 +124,14 @@ private:
 
     void MaskedScatter(
             const std::vector<uint8_t> &mask,
-            const FloatBufferView &audio_features);
+            const BufferView<float>& features);
 
     size_t idx3(size_t n, size_t i, size_t j, size_t H, size_t W)
     {
         return (n * H + i) * W + j;
     }
+
+    std::vector<float> embedded_bin_;
 };
 
 #endif //QWEN_2_5_OMINI_H

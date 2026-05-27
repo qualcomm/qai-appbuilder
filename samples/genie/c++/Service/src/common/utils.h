@@ -11,6 +11,25 @@
 #ifndef _UTILS_H
 #define _UTILS_H
 
+// On native Linux (glibc + gcc) many transitive includes that MSVC and the
+// Android NDK still ship are absent. Pull them in explicitly only on Linux so
+// the existing Windows / Android build paths see exactly the same include
+// set as before.
+#if defined(__linux__) && !defined(__ANDROID__)
+    #include <atomic>
+    #include <chrono>
+    #include <algorithm>
+    #include <cstdint>
+    #include <exception>
+    #include <fstream>
+    #include <iomanip>
+    #include <memory>
+    #include <stdexcept>
+    #include <string>
+    #include <unordered_map>
+    #include <vector>
+#endif
+
 #include <nlohmann/json.hpp>
 
 using json = nlohmann::ordered_json;
