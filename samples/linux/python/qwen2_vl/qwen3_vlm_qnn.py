@@ -16,7 +16,8 @@ from PIL import Image
 from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig, GenieContext)
 from transformers import AutoConfig
 from qwen_vl_utils import process_vision_info
-
+# Load Qwen3-VL model and configuration
+from transformers.models.qwen3_vl import modeling_qwen3_vl
 
 class Qwen3VLQnnVeg(QNNContext):
     def __init__(self,
@@ -51,37 +52,99 @@ class Qwen3VLQnnLLM(GenieContext):
         genie_config = json.load(json_file)
         self.lookup_table_np = np.fromfile(lookup_table, dtype=np.float32)
         # Reshape lookup table to n-vocab x embedding_vector_len
-        self.lookup_table_np = self.lookup_table_np.reshape(genie_config["dialog"]["context"]["n-vocab"], genie_config["dialog"]["embedding"]["size"])
+        self.lookup_table_np = self.lookup_table_np.reshape(
+            genie_config["dialog"]["context"]["n-vocab"], 
+            genie_config["dialog"]["embedding"]["size"]
+        )
 
         self.stream_chunk = ""
+        
+        # Try to load embedding layer from local model if available
+        try:
+            print("Attempting to load Qwen3-VL embedding layer from local cache...")
+            from transformers.models.qwen3_vl import modeling_qwen3_vl
+            
+            model_id = "Qwen/Qwen3-VL-4B-Instruct"
+            vl_config = AutoConfig.from_pretrained(model_id, local_files_only=True)
+            model = modeling_qwen3_vl.Qwen3VLForConditionalGeneration.from_pretrained(
+                model_id, 
+                cache_dir="./cache", 
+                config=vl_config,
+                local_files_only=True
+            )
+            self.embedding_layer = model.model.language_model.embed_tokens
+            print("✓ Loaded Qwen3-VL embedding layer from local cache")
+        except Exception as e:
+            print(f"Warning: Could not load Qwen3-VL embedding layer: {e}")
+            print("Using lookup table for embeddings instead")
+            self.embedding_layer = None
+        
         super().SetEmbeddingTable(lookup_table)
 
-    def get_embeddings(self, token_ids):
-        token_embeddings =  []
-        # Get embedding for each token:
-        for token_id in token_ids:
-            token_embeddings.append(self.lookup_table_np[token_id, :])
-        # Stack all token embeddings together:
-        token_embeddings_np = np.stack(token_embeddings, axis=0)
-        return token_embeddings_np
-
-    # def embedding_layer(self, token_ids, image_embeddings):
-    #     inputs_embeds = torch.from_numpy(self.get_embeddings(token_ids))
-    #     image_embeddings = torch.from_numpy(image_embeddings)
-    #     
-    #     image_mask = (token_ids == self.video_token_id).unsqueeze(-1).expand_as(inputs_embeds)
-    #     inputs_embeds = inputs_embeds.masked_scatter(image_mask, image_embeddings).detach().numpy()
-    #     return inputs_embeds
+    def get_embeddings(self, token_ids, image_embeddings=None):
+        """Get embeddings for token IDs."""
+        if self.embedding_layer is not None:
+            # Use transformer embedding layer if available
+            inputs_embeds = self.embedding_layer(token_ids)
+            print(f"Token processing:")
+            print(f"  Token IDs shape: {token_ids.shape}")
+            print(f"  Input embeddings shape: {inputs_embeds.shape}")
+            return inputs_embeds
+        else:
+            # Fallback to lookup table
+            print("Using lookup table for embeddings")
+            token_embeddings = []
+            for token_id in token_ids:
+                token_embeddings.append(self.lookup_table_np[token_id, :])
+            token_embeddings_np = np.stack(token_embeddings, axis=0)
+            return torch.from_numpy(token_embeddings_np)
     
-    def Inference(self, video_token_id, token_ids, image_embeddings):        
-        inputs_embeds =torch.from_numpy(self.get_embeddings(token_ids))
-        image_embeddings=torch.from_numpy(image_embeddings)
+    # def Inference(self, video_token_id, token_ids, image_embeddings):        
+    #     inputs_embeds =torch.from_numpy(self.get_embeddings(token_ids))
+    #     image_embeddings=torch.from_numpy(image_embeddings)
         
-        image_mask = (token_ids == video_token_id).unsqueeze(-1).expand_as(inputs_embeds)
-        inputs_embeds = inputs_embeds.masked_scatter(image_mask, image_embeddings).detach().numpy()
-        inputs_embeds.tofile("inputs_embeds.raw")       
-        input_data = inputs_embeds.astype("float32").ravel().tolist()
-        response=super().QueryByEmbedding(input_data, self.on_stream)
+    #     image_mask = (token_ids == video_token_id).unsqueeze(-1).expand_as(inputs_embeds)
+    #     inputs_embeds = inputs_embeds.masked_scatter(image_mask, image_embeddings).detach().numpy()
+    #     inputs_embeds.tofile("inputs_embeds.raw")       
+    #     input_data = inputs_embeds.astype("float32").ravel().tolist()
+    #     response=super().QueryByEmbedding(input_data, self.on_stream)
+    #     return response
+
+    def Inference(self, video_token_id, token_ids, image_embeddings):        
+        # Ensure image_embeddings is a torch tensor
+        if isinstance(image_embeddings, np.ndarray):
+            image_embeddings = torch.from_numpy(image_embeddings)
+
+        # Get token embeddings (returns torch tensor)
+        inputs_embeds = self.get_embeddings(token_ids)
+
+        image_mask = (token_ids == video_token_id)
+        num_image_tokens = image_mask.sum().item()
+
+        print(f"\nImage token analysis:")
+        print(f"  Image token ID: {video_token_id}")
+        print(f"  Number of image tokens found: {num_image_tokens}")
+        print(f"  Vision embeddings shape: {image_embeddings.shape}")
+
+        # Flatten image_embeddings to [num_tokens, embed_dim]
+        image_embeddings_flat = image_embeddings.reshape(-1, image_embeddings.shape[-1])
+        print(f"  Flattened vision embeddings: {image_embeddings_flat.shape}")
+
+        # Validate token count consistency
+        if image_embeddings_flat.shape[0] != num_image_tokens:
+            print(f"  Warning: vision tokens ({image_embeddings_flat.shape[0]}) "
+                  f"!= image placeholder tokens ({num_image_tokens}), proceeding anyway")
+
+        # Replace image placeholder embeddings with vision embeddings
+        image_mask_expanded = image_mask.unsqueeze(-1).expand_as(inputs_embeds)
+        multimodal_embeddings = inputs_embeds.masked_scatter(
+            image_mask_expanded, 
+            image_embeddings_flat
+        ).detach().numpy()
+
+        multimodal_embeddings.tofile("inputs_embeds.raw")
+        input_data = multimodal_embeddings.astype("float32").ravel().tolist()
+        response = super().QueryByEmbedding(input_data, self.on_stream)
         return response
     
     def on_stream(self,text: str,stop: bool = False) -> bool:        
@@ -122,14 +185,42 @@ class Qwen3VLQnn():
         return messages
 
        
-    def Init(self,onGenieCallback=None):
+    def Init(self, onGenieCallback=None):
         QNNConfig.Config(self.runtime_path, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
         
         self.veg = Qwen3VLQnnVeg(self.veg_model_path, self.runtime_path)       
-        self.llm = Qwen3VLQnnLLM(self.llm_model_path, lookup_table=self.look_up_table_path,onGenieCallback=onGenieCallback)
-        self.processor = AutoProcessor.from_pretrained("Qwen/Qwen3-VL-4B-Instruct", trust_remote_code=True)
-        self.llm_config = AutoConfig.from_pretrained("Qwen/Qwen3-VL-4B-Instruct", trust_remote_code=True)
-        self.video_token_id= self.llm_config.video_token_id
+        self.llm = Qwen3VLQnnLLM(self.llm_model_path, lookup_table=self.look_up_table_path, onGenieCallback=onGenieCallback)
+        
+        # Try to load processor from local path first, fallback to Qwen2-VL if not available
+        try:
+            # Try Qwen3-VL processor
+            self.processor = AutoProcessor.from_pretrained(
+                "Qwen/Qwen3-VL-4B-Instruct", 
+                trust_remote_code=True,
+                local_files_only=True
+            )
+            self.llm_config = AutoConfig.from_pretrained(
+                "Qwen/Qwen3-VL-4B-Instruct", 
+                trust_remote_code=True,
+                local_files_only=True
+            )
+            print("Loaded Qwen3-VL processor from local cache")
+        except Exception as e:
+            print(f"Warning: Could not load Qwen3-VL processor locally: {e}")
+            print("Falling back to Qwen2-VL processor...")
+            # Fallback to Qwen2-VL which is more commonly available
+            self.processor = AutoProcessor.from_pretrained(
+                "Qwen/Qwen2-VL-2B-Instruct", 
+                trust_remote_code=True
+            )
+            self.llm_config = AutoConfig.from_pretrained(
+                "Qwen/Qwen2-VL-2B-Instruct", 
+                trust_remote_code=True
+            )
+            print("Loaded Qwen2-VL processor as fallback")
+        
+        # Use image_token_id instead of video_token_id
+        self.video_token_id = self.llm_config.image_token_id
     
 
     def Inference(self, image_path: str, prompt: str) -> str:

@@ -66,14 +66,21 @@ class Qwen2VLQnnLLM(GenieContext):
         return token_embeddings_np
     
     def Inference(self, video_token_id, token_ids, image_embeddings):        
-        inputs_embeds =torch.from_numpy(self.get_embeddings(token_ids))
-        image_embeddings=torch.from_numpy(image_embeddings)
-        
+        # Ensure image_embeddings is a torch tensor
+        if isinstance(image_embeddings, np.ndarray):
+            image_embeddings = torch.from_numpy(image_embeddings)
+
+        # Ensure token_ids is 1D (remove batch dimension if present)
+        if token_ids.dim() == 2:
+            token_ids = token_ids.squeeze(0)
+
+        inputs_embeds = torch.from_numpy(self.get_embeddings(token_ids))
+
         image_mask = (token_ids == video_token_id).unsqueeze(-1).expand_as(inputs_embeds)
         inputs_embeds = inputs_embeds.masked_scatter(image_mask, image_embeddings).detach().numpy()
         inputs_embeds.tofile("inputs_embeds.raw")       
         input_data = inputs_embeds.astype("float32").ravel().tolist()
-        response=super().QueryByEmbedding(input_data, self.on_stream)
+        response = super().QueryByEmbedding(input_data, self.on_stream)
         return response
     
     def on_stream(self,text: str,stop: bool = False) -> bool:        
