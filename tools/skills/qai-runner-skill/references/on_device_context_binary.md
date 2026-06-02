@@ -9,7 +9,7 @@ If context binary generation fails, follow this structured flow:
 
 ```
 Step 1: Is this Windows ARM or Linux ARM?
-  ├─ Windows ARM → Context binary is MANDATORY → Continue to Step 2
+  ├─ Windows ARM → Context binary is PREFERRED → Can also use `.dll` direct path with ARM64X/CHPE runtime
   └─ Linux ARM   → Optional (.so works directly) → Can skip
 
 Step 2: What does the error say?
@@ -39,12 +39,12 @@ Step 5: If all patterns exhausted
 
 | Target Platform | Context Binary | Can use library directly? |
 |-----------------|----------------|--------------------------|
-| **ARM Windows** | **REQUIRED** — `{model}.dll.bin` | ❌ NO — `.dll` alone will NOT load |
+| **ARM Windows** | **PREFERRED** — `{model}.dll.bin` | ✅ YES — `.dll` direct path works with ARM64X/CHPE hybrid runtime DLLs |
 | **ARM Linux**   | **OPTIONAL** — `{model}.so.bin` | ✅ YES — `.so` works directly |
 | x86 Linux       | N/A (CPU-only) | ✅ YES — use x86 wrapper |
 
 **If context binary generation fails:**
-- **Windows**: → **Blocking Condition B8** — Cannot proceed to inference
+- **Windows**: → Can continue with `.dll` direct path via ARM64X/CHPE hybrid runtime DLLs
 - **Linux**: → Can proceed with `.so` library directly
 - **Alternative**: Consider SNPE flow (`.dlc`) if QNN HTP is incompatible
 
@@ -52,6 +52,22 @@ Linux cross-host/cross-arch rule:
 - When host and Linux target architectures differ, context-binary generation is best-effort.
 - If generation fails, skip context-binary step, log failure reason, and continue inference with `.so`.
 - Only escalate if inference/validation fails afterward.
+
+### VTCM troubleshooting note
+
+- Default setting: start with `vtcm_mb=0`.
+- On some targets, `vtcm_mb=0` (or other values) can still fail at runtime due to device feature limits.
+- Typical failure messages include:
+  - `Request feature vtcm size with value <N> unsupported`
+  - `Failed to register context to device and backend`
+  - `Failed to create context from binary with err 0x138d`
+
+If you hit these errors, do not assume one fixed value works for all devices/models.
+Run a small range sweep on target and keep the first stable value:
+- Suggested range: `vtcm_mb=0,1,2,3,4,8`
+- Keep `O=3` unchanged while sweeping.
+- Validate each candidate by real target inference (not host-only).
+
 
 ---
 

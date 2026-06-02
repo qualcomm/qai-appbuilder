@@ -91,6 +91,7 @@ def convert_onnx_to_qnn(
     output_root: str | None,
     cleanup_intermediate: bool = True,
     input_dims: list[tuple[str, str]] | None = None,
+    preserve_io_mode: str = "datatype",
 ) -> int:
     """
     Converts one or more ONNX models to QNN model libraries (.so / .dll).
@@ -204,6 +205,8 @@ def convert_onnx_to_qnn(
             "--float_bitwidth", str(precision),
             "--preserve_io"
         ]
+        if preserve_io_mode == "layout":
+            converter_command.append("layout")
 
         if input_dims:
             for input_name, dims in input_dims:
@@ -287,6 +290,7 @@ def convert_onnx_to_qnn(
     return 0 if failed == 0 else 1
 
 def get_cpu_arch_from_systeminfo():
+    """
     try:
         result = subprocess.run(['systeminfo'], capture_output=True, text=True, check=True, encoding='utf-8')
         output = result.stdout
@@ -322,12 +326,15 @@ def get_cpu_arch_from_systeminfo():
                     return val
 
         return None
-
+    
     except subprocess.CalledProcessError:
         return None
     except FileNotFoundError:
         return None
-
+    """
+    import os
+    """ if we generate context binary on host device with with soc id and dsp_arch, we can always use x64 tool chaain"""
+    return os.environ.get("PROCESSOR_ARCHITECTURE", "amd64").lower()
 
 def detect_host_arch():
     """
@@ -446,6 +453,13 @@ if __name__ == "__main__":
         metavar=("INPUT_NAME,DIMS"),
         help="Explicit input dimensions for dynamic inputs. Format: input_name,1,3,224,224 (repeatable). Example: --input-dim input,1,3,64,64",
     )
+    parser.add_argument(
+        "--preserve-io-mode",
+        choices=("datatype", "layout"),
+        default="datatype",
+        help="Preserve IO mode for qnn-onnx-converter. 'datatype' passes '--preserve_io' (keep layout+dtype). "
+             "'layout' passes '--preserve_io layout' (layout only).",
+    )
     args = parser.parse_args()
 
     parsed_input_dims = None
@@ -486,5 +500,6 @@ if __name__ == "__main__":
             args.output_root,
             args.cleanup_intermediate,
             parsed_input_dims,
+            args.preserve_io_mode,
         )
     )

@@ -62,6 +62,10 @@ class InferenceSession:
         sess_options: Optional[SessionOptions] = None,
         providers: Optional[List[str]] = None,
     ):
+        print(
+            "[WARNING] !This is x86 emulation for development! "
+            "IT IS WRONG to run on real ARM Qualcomm device!"
+        )
         self.model_path = os.path.abspath(model_path)
         self.model_stem = os.path.splitext(self.model_path)[0]
         self.sess_options = sess_options or SessionOptions()

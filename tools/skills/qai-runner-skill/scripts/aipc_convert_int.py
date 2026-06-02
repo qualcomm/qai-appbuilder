@@ -65,6 +65,7 @@ def _cleanup_tmp_folders(search_dir: str) -> None:
         pass
 
 def get_cpu_arch_from_systeminfo():
+    """
     try:
         result = subprocess.run(['systeminfo'], capture_output=True, text=True, check=True, encoding='utf-8')
         output = result.stdout
@@ -100,11 +101,16 @@ def get_cpu_arch_from_systeminfo():
                     return val
 
         return None
-
+    
     except subprocess.CalledProcessError:
         return None
     except FileNotFoundError:
         return None
+    """
+    import os
+    """ if we generate context binary on host device with with soc id and dsp_arch, we can always use x64 tool chaain"""
+    return os.environ.get("PROCESSOR_ARCHITECTURE", "amd64").lower()
+
 def detect_host_arch():
     """
     Detects the host architecture and selects the appropriate toolchain from the available options.
@@ -188,7 +194,7 @@ def get_model_info(model_path, act_bw=16, weight_bw=8, output_root=None):
 def convert_model(model_info, cwd, calibration_list_path, act_bw=16, weight_bw=8,
                   qnn_sdk_root=None, host_toolchain="",
                   device_toolchain="", cleanup_intermediate=True,
-                  input_dims=None):
+                  input_dims=None, preserve_io_mode="datatype"):
     """
     Convert ONNX model to quantized QNN format.
     
@@ -234,11 +240,16 @@ def convert_model(model_info, cwd, calibration_list_path, act_bw=16, weight_bw=8
         print("Please set QAIRT_SDK_ROOT environment variable or ensure the default path exists", file=sys.stderr)
         return False
     
-    # Ensure QNN_AARCH64_UBUNTU_GCC_94 is set (required by QNN tools)
-    if 'QNN_AARCH64_UBUNTU_GCC_94' not in os.environ:
+    # Ensure QNN_AARCH64_UBUNTU_GCC_94 is set for ubuntu aarch64 cross-builds.
+    if device_toolchain == "aarch64-ubuntu-gcc9.4" and 'QNN_AARCH64_UBUNTU_GCC_94' not in os.environ:
         print("Warning: QNN_AARCH64_UBUNTU_GCC_94 environment variable is not set", file=sys.stderr)
         print("Setting it to '/' as default", file=sys.stderr)
         os.environ['QNN_AARCH64_UBUNTU_GCC_94'] = '/'
+
+    # Use an explicit subprocess environment to avoid shell/session variance.
+    run_env = os.environ.copy()
+    if device_toolchain == "aarch64-ubuntu-gcc9.4":
+        run_env["QNN_AARCH64_UBUNTU_GCC_94"] = run_env.get("QNN_AARCH64_UBUNTU_GCC_94", "/")
     
     python_exe = sys.executable
     if not os.path.exists(python_exe):
@@ -256,11 +267,19 @@ def convert_model(model_info, cwd, calibration_list_path, act_bw=16, weight_bw=8
         python_exe, converter_path,
         "--input_network", abs_model_path,
         "--output_path", abs_cpp_path,
-        "--preserve_io",
         "--input_list", abs_calibration_list,
         "--act_bw", str(act_bw),
-        "--weight_bw", str(weight_bw)
+        "--weight_bw", str(weight_bw),
+        "--bias_bw", "32",
+        "--use_per_channel_quantization",
+        "--algorithms", "cle",
+        "--param_quantizer", "enhanced",
+        "--act_quantizer", "enhanced"
     ]
+    preserve_io_args = ["--preserve_io"]
+    if preserve_io_mode == "layout":
+        preserve_io_args = ["--preserve_io", "layout"]
+    converter_cmd[6:6] = preserve_io_args
 
     if input_dims:
         for input_name, dims in input_dims:
@@ -283,6 +302,7 @@ def convert_model(model_info, cwd, calibration_list_path, act_bw=16, weight_bw=8
         subprocess.run(
             converter_cmd,
             check=True,
+            env=run_env,
             encoding='utf-8',
             errors='replace'
         )
@@ -311,6 +331,7 @@ def convert_model(model_info, cwd, calibration_list_path, act_bw=16, weight_bw=8
         subprocess.run(
             lib_gen_cmd,
             check=True,
+            env=run_env,
             encoding='utf-8',
             errors='replace'
         )
@@ -463,6 +484,13 @@ Examples:
         metavar=("INPUT_NAME,DIMS"),
         help="Explicit input dimensions for dynamic inputs. Format: input_name,1,3,224,224 (repeatable). Example: --input-dim input,1,3,64,64"
     )
+    parser.add_argument(
+        '--preserve-io-mode',
+        choices=('datatype', 'layout'),
+        default='datatype',
+        help="Preserve IO mode for qnn-onnx-converter. 'datatype' passes '--preserve_io' "
+             "(keep layout+dtype). 'layout' passes '--preserve_io layout' (layout only)."
+    )
 
     args = parser.parse_args()
 
@@ -535,7 +563,7 @@ Examples:
         
         if convert_model(model_info, cwd, calibration_list_path, args.act_bw, args.weight_bw,
                         args.qnn_sdk_root, args.host_arch, args.target_arch, args.cleanup_intermediate,
-                        parsed_input_dims):
+                        parsed_input_dims, args.preserve_io_mode):
             success_count += 1
         else:
             fail_count += 1

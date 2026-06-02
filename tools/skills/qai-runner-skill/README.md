@@ -1,4 +1,4 @@
-# QAI Runner Skill
+# QAI Runner Skill(internal project name AIPC)
 
 ## Overview
 
@@ -18,6 +18,7 @@ AIPC (AI Porting Conversion) is the development name. It is released as part of 
 **AIPC: Agent-Based Automation for AI Model Deployment with Qualcomm AI Runtime**  
 https://arxiv.org/abs/2604.14661
 
+### Disclaimer
 > **Disclaimer**  
 > This is an experimental feature and still requires further improvement. Code generated with this skill should be treated only as a starting point for development. All generated code must undergo code review, testing, security validation, and any other required software release processes before production use.
 ---
@@ -59,10 +60,13 @@ Once installed, the skill is **automatically activated** when:
 3. The assistant recognizes keywords like "convert model", "QNN", "Qualcomm AI PC"
 
 ---
+### Known Behavior Change After Skill Activation
 
-### Prerequisites After Installation
+Activating this skill may alter the default behavior of your AI agent. If unintended behavior is observed after activation, disable the skill according to the configuration options of your specific code agent.
 
-After installing the skill, ensure you have the required software:
+### Prerequisites
+
+Ensure the following software is installed before using this skill.
 
 
 #### 1. [QAIRT SDK](https://quic.github.io/cloud-ai-sdk-pages/latest/qnn-aic/general/QAIRT-SDK-Installation/index.html) (both Target Device, Development Machine)
@@ -85,11 +89,19 @@ pip install qai_appbuilder
 
 ---
 
-### for linux, we offer qairt/qai appbuilder helper prompt. this is experimental function.
-check aipc-toolkit/references/tested_install_prompt/readme.md for usage
+
+### Platform-Specific Helper Prompts (Experimental)
+
+#### Linux
+An experimental helper prompt for QAIRT/QAI Appbuilder is available for Linux environments. Please refer to `setup/ubuntu/readme.md` for detailed usage instructions.
+
+#### Windows
+For Windows environments, please use `setup/win_installer/Setup_Env.bat` to setup and `setup/win_installer/PythonShell.bat` to activate qairt python venv.
+
 
 ## Testing
 
+It is recommended to utilize a script that (1) activates the QAIRT Python virtual environment and (2) initializes the QAIRT environment settings. This script serves as the standard procedure for configuring the workspace during validation and testing.
 
 #### Prerequisites
 Current tests are performed from a YOLOv8 PyTorch environment. To set up:
@@ -109,7 +121,7 @@ Use the following prompts to run a complete AIPC workflow for the current projec
 
 - Adjust the project configuration in `aipc_plan.md`.
   - This is a user action, not a prompt.
-  - for "QAIRT_ENV_SETUP ", this is important item to make AI work stable. it is better to have a script to 1. activate dedicate py venv with packages 2. initial qairt envsetup. it is not suggested to let ai install exta package when whole start work. it may have side effect like running out of context windows.
+  - Regarding "QAIRT_ENV_SETUP": This is a critical configuration item for ensuring agent stability. It is recommended to use a script that automates the activation of a dedicated Python virtual environment containing all necessary packages, followed by the initialization of the QAIRT environment. Automated package installation via the AI agent at runtime is discouraged, as it may result in unintended side effects, such as exceeding context window limits.
 
 - `"Auto-fill any remaining configuration values using derived or default values, then show the project configuration."`
   - Ensure the project configuration is complete before continuing.
@@ -120,6 +132,7 @@ Use the following prompts to run a complete AIPC workflow for the current projec
 - `"Do all project work."`
   - Execute the full project workflow based on the configured plan.
 
+Advanced Usage: The AI agent may be instructed to modify the project plan dynamically, such as appending a GUI video inference stage to the conclusion of the workflow.
 
 ### Automated Testing with AI
 
@@ -153,59 +166,65 @@ Example prompts:
 
   
 
-### Caution
+### Operational Constraints and Reliability
 
-AI agents are not always stable. They may misinterpret instructions, drift away from the requested workflow, or perform unsafe actions if not properly constrained.
+AI agents may exhibit variability in performance. They may occasionally misinterpret instructions, deviate from the intended workflow, or execute unintended actions if not sufficiently constrained.
 
-If you notice the agent is not following instructions, re-run your request with an explicit constraint prefix, for example:
+If the agent deviates from the prescribed instructions, it is recommended to re-issue the request with an explicit constraint prefix. For example:
 
-- `"follow aipc skill" + <your work prompt>`
+- `"follow aipc skill" + [your prompt]`
 
-This forces the agent to adhere to the AIPC skill workflow and reference rules.
+This ensures strict adherence to the AIPC skill workflow and reference protocols.
 
-### Tested Scenarios
+### Verified Deployment Scenarios
 
 - **WoS (Windows on Snapdragon)**:
-  - Convert and run inference on the same device (**X Elite 2**)
+  - Full conversion and inference executed on-device (**Snapdragon X Elite Gen 2**).
 
 - **Remote ARM Linux**:
-  - **qcs6490**:
-    - Convert **SNPE** model (FP / quantized) on an **x86 host**
-    - Run inference on **ARM Linux target (qcs6490)**
-  - **RB8**:
-    - Convert **QNN / SNPE** model on an **x86 host**
-    - Run inference on **ARM Linux target (RB8)**
+  - **Qualcomm QCS6490**:
+    - SNPE model conversion (Floating Point and Quantized) executed on an **x86 host**.
+    - Inference executed on the **ARM Linux target (QCS6490)**.
+    - *Note: Occasional support issues with FP16 preservation have been observed.*
+  - **Qualcomm RB8**:
+    - QNN and SNPE model conversion executed on an **x86 host**.
+    - Inference executed on the **ARM Linux target (RB8)**.
 
-- **Code agents**:
+- **Verified Code Agents**:
   - Codex CLI
   - Cline
   - Qwen Code
   - OpenCode
-  - Claude Code (may require extra manual checks, as it appears to have its own project setup preferences)
-  - Kilo CLI (project setup flow not yet verified)
+  - Gemini CLI
+  - Claude Code (*Note: Requires additional manual verification as it may default to internal project setup preferences.*)
+  - Kilo CLI (*Note: Project setup workflow verification is currently in progress.*)
 
 ### Known Issues
 
-- **qcs6490 + QNN quantization**:
-  - May fail with:
-    - `<E> The SocModel doesn't support FP16`
-  - Root cause:
-    - `--preserve_io` in conversion can trigger FP16 preservation on some SoC configurations
-  - Workaround:
-    - Use the **SNPE DLC** flow instead for chipsets that do not support FP16.
+- **QCS6490 + QNN Quantization**:
+  - Deployment may encounter the following error: `<E> The SocModel doesn't support FP16`.
+  - **Root Cause**: The `--preserve_io` flag during conversion may attempt to preserve FP16 precision on SoC configurations where it is not supported.
+  - **Workaround**: Utilize the **SNPE DLC** workflow for chipsets lacking FP16 support. Note that similar constraints may apply.
+  - **updated solution** : AI will change to  `--preserve_io layout` option.
 
+### Verified Models
+- ESRGAN
+- LPRNet
+- YOLOv8
+- YOLOv26
+- YOLO-World
+- RT-DETRv3 (Requires initial export to ONNX format)
+- PaddleOCR v4 (Requires initial export to ONNX format)
+- Whisper (Requires structural modifications for NPU optimization prior to initiating the AIPC project workflow)
 
-### tested model
-- esrgan
-- lprnet
-- yolov8
-- yolo26
-- yolo-world
-- rt-detrv3 onnx
-- paddle ocr v4
-
-### testing model.
-- whisper
-- deepseek r1
-- sam3 
+### Verified LLM Performance (ESRGAN SNPE or QNN Base Case)
+- Claude 4.5/4.6 Sonnet
+- GPT-5.2-5.5 / Codex
+- Gemini 3.1/3.5 Flash,2.5/3.1 PRO
+- DeepSeek-V4 Lite/pro
+- Qwen-3.5-Coder-Plus/3.6 plus
+- Mimo Pro v2 pro
+- Doubao-Seed-2.0-Code
+- NVIDIA Nemotron-3
+- MiniMax 2.5
 

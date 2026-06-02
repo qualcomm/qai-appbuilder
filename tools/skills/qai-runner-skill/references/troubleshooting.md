@@ -112,3 +112,83 @@ Escalation bundle:
    ```bash
    powershell -Command 'Get-ChildItem | ForEach-Object { $_.FullName }'
    ```
+
+## Subprocess Encoding Errors on Windows (qnn-onnx-converter / qnn-model-lib-generator)
+
+**Symptom**:
+```
+UnicodeDecodeError: 'utf-8' codec can't decode byte 0xa5 in position 8: invalid start byte
+Exception in thread Thread-3 (_readerthread)
+```
+or conversion script fails with encoding-related crash.
+
+**Cause**:
+QAIRT CLI tools (`qnn-onnx-converter`, `qnn-model-lib-generator`) mix binary data (progress bar control characters, HTP compilation artifacts) into stdout/stderr text streams on Windows. When Python's `subprocess.run()` decodes the output as UTF-8, it encounters invalid byte sequences and throws `UnicodeDecodeError`.
+
+**Solution**:
+Always pass `encoding='utf-8', errors='replace'` to `subprocess.run()` when invoking QAIRT tools:
+
+```python
+subprocess.run(cmd, check=True, encoding='utf-8', errors='replace')
+```
+
+`errors='replace'` substitutes undecodable bytes with `\ufffd`  instead of crashing. The lost binary output is irrelevant — it's only progress animation and internal timing data.
+
+For scripts that use `subprocess.Popen` with reader threads (like `qnn-model-lib-generator` invoked via `qnn-model-lib-generator` Python wrapper), the same issue can occur in the reader thread. The workaround is to set `PYTHONIOENCODING=utf-8` and `PYTHONUTF8=1` in the environment, or ensure the subprocess stdout is opened in binary mode:
+
+```python
+proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+for line in proc.stdout:
+    print(line.decode('utf-8', errors='replace').rstrip())
+```
+
+**References**:
+- `skills/aipc-toolkit/scripts/aipc_convert_fp.py` line 217 — existing workaround
+- `skills/aipc-toolkit/scripts/aipc_convert_int.py` line 300 — same workaround
+
+---
+
+## Console Print UnicodeEncodeError on Windows ('cp950' / 'cp437')
+
+**Symptom**:
+```
+UnicodeEncodeError: 'cp950' codec can't encode character '\u2705' in position 88: illegal multibyte sequence
+```
+or similar `UnicodeEncodeError` when running model export (`export_onnx.py`) or diagnostic scripts in command-line environments.
+
+**Cause**:
+Python's standard output `sys.stdout` uses the terminal's active code page (such as CP950 or CP437) by default on Windows. When third-party libraries (e.g. PyTorch's ONNX exporter) print non-ASCII or UTF-8 characters (like status checkmarks `✅`), Python tries to encode them into the terminal's regional encoding, resulting in a crash.
+
+**Solution**:
+Reconfigure `sys.stdout` and `sys.stderr` to enforce UTF-8 encoding at the entry point of your script (or within `main()`):
+
+```python
+import sys
+if sys.stdout.encoding != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except AttributeError:
+        pass
+```
+
+---
+
+## Snapdragon NPU System Driver Version Mismatch (Windows)
+
+**Symptoms**:
+- Context loading fails: `Can't read future blob. Newest blob version supported: X.X.X. Current blob version: Y.Y.Y. Skel failed to process context binary.`
+- JIT compilation fails: `validateNativeOps master op validator ... failed 3110 ... User driver upgrade required to support new ops.`
+
+**Cause**:
+The model is compiled with a newer version of the QAIRT SDK (which uses a newer HTP compiler and operator schema version) than the Qualcomm NPU system driver (`qcdsp2.dll` / `skel` driver) currently installed on the target Windows system.
+
+**Solutions / Workarounds**:
+1. **Update system NPU driver**:
+   - Install the latest Qualcomm chipset/NPU driver and system BIOS from the OEM support portal (e.g. Lenovo, Dell, HP).
+   - Alternatively, obtain developers NPU driver packages directly from the Qualcomm Software Center.
+2. **Execute via QNN CPU software fallback**:
+   - Compile the model with **FP32** precision (`--precision 32`) and `--preserve-io-mode layout` (to avoid inserting unsupported float16 transpose layers on CPU).
+   - Copy the compiled C++ library `esrgan.dll` directly to the workspace as `esrgan.dll.bin` (since the wrapper on Windows expects `.dll.bin`).
+   - Run the direct QNN CPU software net-run:
+     `qnn-net-run.exe --backend QnnCpu.dll --model esrgan.dll.bin --input_list input_list.txt`

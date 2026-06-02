@@ -19,6 +19,28 @@ Always prefer using a **dedicated Python script** for exporting models. This app
 - **Debugging**: You can easily inspect the model state before export.
 - **In-Memory Patching**: You can fix unsupported operators without modifying the library source code.
 
+### Opset Version Guidance
+
+Choose the ONNX opset version carefully to avoid QNN conversion issues:
+
+| Opset | Status | Notes |
+|-------|--------|-------|
+| 13 | Safe | Widely supported, but lacks some newer ops |
+| 17 | **Avoid** | `Resize` op version conversion fails; use 18+ |
+| 18 | **Recommended** | Best QNN compatibility; default for PyTorch 2.x exporter |
+| 19?20 | May work | Watch for op version warnings during conversion |
+
+```python
+torch.onnx.export(
+    model,
+    dummy_input,
+    "model.onnx",
+    opset_version=18,  # Recommended for QNN
+)
+```
+
+> **Known benign warnings**: Some ops (e.g., `LeakyRelu` at opset 16+) produce `WARNING_OP_VERSION_NOT_SUPPORTED` during QNN conversion. These are warnings, not errors ? the converter handles them internally. Do not waste time downgrading opset to suppress them.
+
 ### Operator Patching
 
 For detailed guidance on patching unsupported operators (e.g., `Einsum`, `GridSample`), see **[In-Memory Operator Patching](operator_patching.md)**.

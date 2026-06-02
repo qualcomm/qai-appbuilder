@@ -23,8 +23,12 @@ TARGET_DEVICE = <!-- ARM WIN  (QCOM) / x86 Linux/ ARM Linux (QCOM) -->
 
 PRECISION     = <!-- FP32 / FP16 (default)/ BF16(experimental) / INT8 / A16W8 /INT4/ A8W4 -->
 HOST_DEVICE     = <!-- ARM WIN  (default )/  X86 LINUX  /  ARM LINUX -->
+CONTEXT_BINARY_GEN = <!-- YES (default) / NO
+                         YES: generate a hardware-specific HTP context binary on the HOST (x86) for the target SoC, then deploy to target (required on ARM WIN; recommended for fixed-SoC deployment)
+                         NO:  skip context binary generation (use raw .so / .dll directly; only valid when on-device JIT compilation is acceptable) -->
 
-RETMOE_DEVICE_INFO = <!-- Optional. Leave empty for local inference.
+RETMOE_DEVICE_INFO = <!-- Optional to configure. Leave empty for local inference.
+                         If set, remote target inference is MANDATORY for final acceptance (host-only validation is not sufficient).
                          For remote (target-device) inference, you must provide a file (text/YAML) that records:
                            a) SSH information (host/user/port and key path if needed)
                            b) Target working directory (where inference is executed)
@@ -67,16 +71,21 @@ SHELL         = <!-- derived from HOST_DEVICE:
                      ARM WIN    → powershell
                      X86 LINUX  → bash
                      ARM LINUX  → bash -->
-TARGET_ARCH   = <!-- derived from TARGET_DEVICE target OS/arch:
-                     ARM Linux  → aarch64-ubuntu-gcc9.4
-                     x86 Linux  → x86_64-linux-clang
-                     ARM WIN  → windows-aarch64 -->
+TARGET_ARCH   = <!-- derived from CONTEXT_BINARY_GEN and TARGET_DEVICE:
+                     If CONTEXT_BINARY_GEN = YES (default):
+                       TARGET_ARCH = HOST_ARCH  (context binary is compiled on the host for the host toolchain;
+                                                  the binary is then deployed to the target at runtime)
+                       e.g. ARM WIN → x86_64-windows-msvc  |  X86 LINUX → x86_64-linux-clang  |  ARM LINUX → aarch64-linux-gcc
+                     If CONTEXT_BINARY_GEN = NO:
+                       TARGET_ARCH is derived from TARGET_DEVICE target OS/arch:
+                       ARM Linux  → aarch64-ubuntu-gcc9.4
+                       x86 Linux  → x86_64-linux-clang
+                       ARM WIN    → x86_64-windows-msvc  (emulation — qairt ARM WIN toolchain uses x86_64 emulation)-->
 
 
 ```
 
 ---
-
 
 ## Project Overview
 
@@ -139,7 +148,7 @@ TARGET_ARCH   = <!-- derived from TARGET_DEVICE target OS/arch:
 - [ ] (Required on ARM WIN / Optional on Linux — QNN only) Generate context binary for `{TARGET_DEVICE}`
 - [ ] Implement end-to-end inference pipeline using aipc launcher
 - [ ] Validate accuracy and performance against baseline
-- [ ] If `RETMOE_DEVICE_INFO` is set, complete remote deployment + target inference + runtime log collection
+- [ ] If `RETMOE_DEVICE_INFO` is set, complete remote deployment + target inference + runtime log collection (**required for final acceptance**)
 
 ---
 
@@ -219,6 +228,41 @@ OPSET         = <!-- e.g. 13 -->
   # Flow B — SNPE  (ARM Windows host — uses x86_64-windows-msvc emulation)
   python {QAIRT_ROOT}/bin/x86_64-windows-msvc/qairt-converter --version
   ```
+- [ ] Linux cross-build preflight (when `TARGET_ARCH = aarch64-ubuntu-gcc9.4`):
+  ```bash
+  which aarch64-linux-gnu-g++
+  export QNN_AARCH64_UBUNTU_GCC_94=/
+  printf '<%s>\n' "$QNN_AARCH64_UBUNTU_GCC_94"
+  ```
+  > If compiler is missing: `sudo apt install g++-aarch64-linux-gnu`
+- [ ] **Windows preflight — cmake and MSVC toolchain** (QNN only, required by `qnn-model-lib-generator`):
+  ```powershell
+  # Check cmake
+  where.exe cmake 2>$null
+  if ($?) { cmake --version | Select-Object -First 1 }
+
+  # Discover Visual Studio Launch-VsDevShell (any version/edition)
+  $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+  if (Test-Path $vsWhere) {
+    $vsPath = & $vsWhere -latest -property installationPath 2>$null
+    if ($vsPath) {
+      & "$vsPath\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 2>&1 | Out-Null
+      Write-Output "VS dev shell: $vsPath"
+    }
+  }
+  if (-not $vsPath) {
+    Write-Warning "Visual Studio not found. qnn-model-lib-generator will fail."
+    Write-Warning "Install Visual Studio with 'Desktop development with C++' workload"
+  }
+
+  # Verify MSVC and Windows SDK are available after dev shell
+  cl.exe 2>$null
+  if ($?) { Write-Output "MSVC compiler: OK" } else { Write-Warning "MSVC compiler not found" }
+  ```
+  > Without cmake and Visual Studio C++ tools, `qnn-model-lib-generator` fails with:
+  > `'cmake' is not recognized` or `The CXX compiler identification is unknown`.
+  > Install any Visual Studio version (2019, 2022, or later) with the "Desktop development with C++" workload,
+  > and ensure cmake is available (bundled with VS or installed separately via `winget install cmake`).
 - [ ] Source model weights available
 - [ ] Test input data available for validation
 
@@ -243,7 +287,7 @@ OPSET         = <!-- e.g. 13 -->
 
 > ⚠️ **ARM Windows**: Do **not** use `$env:PROCESSOR_ARCHITECTURE` or Python's `platform.machine()` — both can be affected by emulation. Use `(Get-WmiObject Win32_Processor).Architecture` (0 = x86, 5 = ARM, 9 = x64/AMD64, 12 = ARM64) or `dumpbin /headers model.dll | find "machine"` to reliably detect host arch.  
 > ⚠️ **ARM Windows**: QAIRT converter scripts (`qnn-onnx-converter`, `qairt-converter`) live under `{QAIRT_ROOT}/bin/x86_64-windows-msvc/` and are Python scripts — invoke with `python <path>`, not directly.  
-> ⚠️ **ARM Windows**: Context binary generation uses `aarch64-windows-msvc` backend (`QnnHtp.dll`). See `aipc_dev_gen_contextbin.py`.  
+> ⚠️ **ARM Windows**: Context binary generation runs on the **host** x86 using `x86_64-windows-msvc` toolchain (`QnnHtp.dll`). See `host_context_binary_gen.md`.  
 > ⚠️ **x86 Linux**: Toolchain binaries live under `{QAIRT_ROOT}/bin/x86_64-linux-clang/`.  
 > ⚠️ **ARM Linux**: Toolchain binaries live under `{QAIRT_ROOT}/bin/aarch64-linux-gcc/`.
 
@@ -283,6 +327,7 @@ OPSET         = <!-- e.g. 13 -->
   ```
 
 - [ ] **1.6** ONNX inference sanity check — compare output with {SRC_FRAMEWORK} baseline
+  > If `RETMOE_DEVICE_INFO` is set, skip local quick-smoke sanity inference at this step and perform target-device inference first in Phase 5.
 
 - [ ] **1.7** Iterative patching (if needed)
   - If dry-run shows new unsupported ops after patch → repeat Tasks 1.2–1.6
@@ -353,8 +398,10 @@ OPSET         = <!-- e.g. 13 -->
     --onnx {ONNX_FILE} \
     --output-root {OUTPUT_DIR} \
     --precision <!-- 16 or 32 --> \
+    --preserve-io-mode datatype \
     --target-arch {TARGET_ARCH}
   ```
+  > If target runtime shows FP16/dtype compatibility issues, rerun with `--preserve-io-mode layout`.
 
 - [ ] **QNN-3A.2** Verify conversion outputs in `{OUTPUT_DIR}`:
   - `{MODEL_NAME}.bin` ✓
@@ -419,8 +466,10 @@ WEIGHT_BITWIDTH   = <!-- 8 (typical); see note above for other modes -->
     --output-root {OUTPUT_DIR} \
     --act_bw {ACT_BITWIDTH} \
     --weight_bw {WEIGHT_BITWIDTH} \
+    --preserve-io-mode datatype \
     --target-arch {TARGET_ARCH}
   ```
+  > If target runtime shows FP16/dtype compatibility issues, rerun with `--preserve-io-mode layout`.
 
 - [ ] **QNN-3B.4** Verify quantized outputs in `{OUTPUT_DIR}`:
   - `{MODEL_NAME}_a16_w8.bin` ✓
@@ -434,34 +483,137 @@ WEIGHT_BITWIDTH   = <!-- 8 (typical); see note above for other modes -->
 
 ---
 
-## [QNN] Phase 4: Context Binary Generation
+## [QNN] Phase 4: Context Binary Generation (Host-Side)
 
 **Agent**: Context Binary Agent  
-**Script**: `skills/aipc-toolkit/scripts/aipc_dev_gen_contextbin.py`
+**Reference**: `skills/aipc-toolkit/references/host_context_binary_gen.md`
 
-> **ARM Windows (ARM WIN)**: ⚠️ **Required** — `.dll` cannot be used directly for inference; context binary must be generated first.  
-> **Linux (X86 LINUX / ARM LINUX)**: ⚙️ Optional — use when deploying to a specific SoC without on-device compilation.
+> Context binary generation runs on the **host** (x86 Linux or x86 Windows), not on the target device.
+> The host uses `qnn-context-binary-generator` with `soc_id`/`dsp_arch` config to compile a binary for the target SoC.
+> The resulting `.bin` is then deployed to the target for inference.
+>
+> **ARM Windows (ARM WIN)**: ⚙️ Optional — `.dll.bin` recommended for fixed-SoC deployment; `.dll` direct path is allowed.  
+> **Linux (X86 LINUX / ARM LINUX)**: ⚙️ Optional — use when deploying to a specific SoC without on-device JIT compilation.
+> **Linux fallback policy**: Do **not** switch to non-context `.so` unless all applicable methods in `host_context_binary_gen.md` are attempted and logged (soc/dsp validation, `vtcm_mb` sweep, mapping alternatives, `htp_arch`/no-`soc_id` path).
+>
+> ⚠️ **`SOC_ID` and `DSP_ARCH` are mandatory.** Confirm them from the target device before generation.
+> See `host_context_binary_gen.md` → Step 1 for how to read these values.
 
 ### Tasks
 
-- [ ] **QNN-4.1** Generate context binary for `{TARGET_DEVICE}`
-  ```bash
-  # Linux — input: lib{MODEL_NAME}.so → output: lib{MODEL_NAME}.so.bin
-  python skills/aipc-toolkit/scripts/aipc_dev_gen_contextbin.py \
-    --model_lib lib{MODEL_NAME}.so \
-    --output lib{MODEL_NAME}.so.bin
+- [ ] **QNN-4.1** Confirm `{SOC_ID}` and `{DSP_ARCH}` from target device (see `host_context_binary_gen.md` Step 1; on Windows on Snapdragon, run the `aipc_qairt_devinfo.ps1` script from the skill scripts directory to automatically detect them)
 
-  # Windows — input: {MODEL_NAME}.dll → output: {MODEL_NAME}.dll.bin
-  python skills/aipc-toolkit/scripts/aipc_dev_gen_contextbin.py \
-    --model_lib {MODEL_NAME}.dll \
-    --output {MODEL_NAME}.dll.bin
+- [ ] **QNN-4.2** Create SoC config file (`.conf`) on the host:
+
+  ```bash
+  # Linux host
+  cat > /tmp/soc{SOC_ID}_{DSP_ARCH}.conf << 'CONF'
+  {"graphs":[{"graph_names":["{MODEL_NAME}"],"vtcm_mb":0,"O":3}],"devices":[{"soc_id":{SOC_ID},"dsp_arch":"{DSP_ARCH}","cores":[{"perf_profile":"burst","rpc_control_latency":50}]}]}
+  CONF
   ```
 
-- [ ] **QNN-4.2** Verify context binary loads on target device:
-  - Linux: `lib{MODEL_NAME}.so.bin` ✓
-  - Windows: `{MODEL_NAME}.dll.bin` ✓
+  ```powershell
+  # Windows host
+  '{"graphs":[{"graph_names":["{MODEL_NAME}"],"vtcm_mb":0,"O":3}],"devices":[{"soc_id":{SOC_ID},"dsp_arch":"{DSP_ARCH}","cores":[{"perf_profile":"burst","rpc_control_latency":50}]}]}' `
+    | Set-Content C:\tmp\soc{SOC_ID}_{DSP_ARCH}.conf
+  ```
 
-**Exit Criteria**: Context binary generated (output = input filename + `.bin` postfix) and verified on `{TARGET_DEVICE}`.
+- [ ] **QNN-4.3** Create backend extension wrapper JSON on the host:
+
+  ```bash
+  # Linux host
+  cat > /tmp/soc{SOC_ID}_{DSP_ARCH}.json << JSONEOF
+  {"backend_extensions":{"shared_library_path":"$QAIRT_SDK_ROOT/lib/x86_64-linux-clang/libQnnHtpNetRunExtensions.so","config_file_path":"/tmp/soc{SOC_ID}_{DSP_ARCH}.conf"}}
+  JSONEOF
+  ```
+
+  ```powershell
+  # Windows host
+  ('{"backend_extensions":{"shared_library_path":"' + $env:QAIRT_SDK_ROOT + '\\lib\\x86_64-windows-msvc\\QnnHtpNetRunExtensions.dll","config_file_path":"C:\\tmp\\soc{SOC_ID}_{DSP_ARCH}.conf"}}') `
+    | Set-Content C:\tmp\soc{SOC_ID}_{DSP_ARCH}.json
+  ```
+
+- [ ] **QNN-4.4** Run `qnn-context-binary-generator` on the host:
+
+  ```bash
+  # Linux x86 host → generates binary for target SoC {SOC_ID}/{DSP_ARCH}
+  mkdir -p {OUTPUT_DIR}
+  $QAIRT_SDK_ROOT/bin/x86_64-linux-clang/qnn-context-binary-generator \
+    --backend     $QAIRT_SDK_ROOT/lib/x86_64-linux-clang/libQnnHtp.so \
+    --model       {OUTPUT_DIR}/lib{MODEL_NAME}.so \
+    --binary_file lib{MODEL_NAME}.so \
+    --output_dir  {OUTPUT_DIR} \
+    --config_file /tmp/soc{SOC_ID}_{DSP_ARCH}.json
+  # output: {OUTPUT_DIR}/lib{MODEL_NAME}.so.bin
+  ```
+
+  ```powershell
+  # Windows x86 host → generates binary for target SoC {SOC_ID}/{DSP_ARCH}
+  & "$env:QAIRT_SDK_ROOT\bin\x86_64-windows-msvc\qnn-context-binary-generator.exe" `
+    --backend     "$env:QAIRT_SDK_ROOT\lib\x86_64-windows-msvc\QnnHtp.dll" `
+    --model       "{OUTPUT_DIR}\{MODEL_NAME}.dll" `
+    --binary_file {MODEL_NAME}.dll `
+    --output_dir  "{OUTPUT_DIR}" `
+    --config_file "C:\tmp\soc{SOC_ID}_{DSP_ARCH}.json"
+  # output: {OUTPUT_DIR}\{MODEL_NAME}.dll.bin
+  ```
+
+  > ⚠️ `--binary_file` takes a **stem without `.bin`** — the tool appends `.bin` automatically.  
+  > Do **not** pass an absolute path to `--binary_file` — it double-appends `.bin`.
+
+- [ ] **QNN-4.5** Preflight — verify x86 model `.so` before VTCM sweep:
+
+  The context binary generator must load the model `.so` on the **host**.
+  If the `.so` was compiled for aarch64 it cannot be loaded on x86 — generation
+  will silently fail or produce a corrupt binary. Verify arch before proceeding.
+
+  ```bash
+  file {OUTPUT_DIR}/<x86_toolchain>/lib{MODEL_NAME}.so
+  # Expected:  ELF 64-bit LSB shared object, x86-64
+  # Wrong:     ELF 64-bit LSB shared object, ARM aarch64  ← rebuild required
+  ```
+
+  If arch is wrong, rebuild the x86 `.so` from the existing `.cpp`/`.bin`
+  (no re-quantization needed):
+  ```bash
+  python {QAIRT_ROOT}/bin/x86_64-linux-clang/qnn-model-lib-generator \
+    -c {MODEL_NAME}_a{ACT_BITWIDTH}_w{WEIGHT_BITWIDTH}.cpp \
+    -b {MODEL_NAME}_a{ACT_BITWIDTH}_w{WEIGHT_BITWIDTH}.bin \
+    -o {OUTPUT_DIR} -t x86_64-linux-clang
+  ```
+
+- [ ] **QNN-4.6** VTCM sweep — generate, deploy, and validate all values on target device:
+
+  > Host generation always succeeds for all `vtcm_mb` values.
+  > Failures only surface at runtime on the target. Always sweep the full range
+  > and select the **maximum passing** value (higher = better HTP performance).
+
+  Record results in VTCM sweep log below.
+
+### VTCM Sweep Log
+
+| vtcm_mb | Host gen | Device load | Latency | Error |
+|---------|----------|-------------|---------|-------|
+| <!-- --> | <!-- OK/FAIL --> | <!-- PASS/FAIL --> | <!-- ms --> | <!-- error msg --> |
+
+```
+VTCM_PREFERRED  = <!-- value that failed, with error -->
+VTCM_SELECTED   = <!-- maximum passing value -->
+```
+
+- [ ] **QNN-4.7** Deploy final context binary (maximum passing `vtcm_mb`) to target:
+  ```bash
+  scp {OUTPUT_DIR}/lib{MODEL_NAME}.so.bin <user>@<target-host>:<workdir>/
+  ```
+
+- [ ] **QNN-4.8 (Linux fallback gate)** If context still fails on Linux, complete and log all applicable troubleshooting attempts before `.so` fallback:
+  - confirm `SOC_ID`/`DSP_ARCH` from target identity
+  - sweep `vtcm_mb=0,1,2,3,4,8` (see above)
+  - test `soc_id`/`dsp_arch` alternatives from QAIRT mapping
+  - test `htp_arch` / no-`soc_id` path when applicable
+  - attach command + error log evidence in Issue Log
+
+**Exit Criteria**: Context binary generated on host, VTCM sweep completed on target, maximum passing `vtcm_mb` selected and deployed.
 
 ---
 
@@ -469,7 +621,7 @@ WEIGHT_BITWIDTH   = <!-- 8 (typical); see note above for other modes -->
 
 **Agent**: Inference Agent  
 **Reference**: `skills/aipc-toolkit/references/inference.md`
-> **ARM Windows (ARM WIN)**: ⚠️ **Required** — `.dll` cannot be used directly for inference; context binary must be generated first.  
+> **ARM Windows (ARM WIN)**: ⚙️ Optional — `.dll.bin` recommended for fixed-SoC deployment; `.dll` direct path is allowed.  
 ### Tasks
 
 - [ ] **QNN-5.1** Write pre-processing pipeline
@@ -492,6 +644,7 @@ WEIGHT_BITWIDTH   = <!-- 8 (typical); see note above for other modes -->
   > The `aipc` wrapper passes the `.onnx` path but searches for a matching QNN binary in the same directory.  
   > See `references/inference.md` → Model File Resolution for full search order.  
   > If I/O names fail, regenerate the model YAML.
+  > Linux `.so` (non-context) is allowed only if QNN-4.7 fallback gate is satisfied and logged.
 
 - [ ] **QNN-5.3** Write post-processing pipeline
   - Outputs: `{OUTPUT_NAMES}`
@@ -639,6 +792,13 @@ DLC_FILE      = <!-- {MODEL_NAME}.dlc  or  {MODEL_NAME}_quantized.dlc -->
 # ═══════════════════════════════════════════════
 
 **Agent**: Validation & Testing Agent
+
+### Accuracy Validation Criteria
+
+- [ ] Accuracy validation
+  - [ ] Cosine similarity > 0.995
+  - [ ] SNR > 30 dB
+  - [ ] Task metric loss < 1% *(check only if task-specific evaluation data is available)*
 
 ## Tasks
 
@@ -802,5 +962,6 @@ New ops discovered: {list or "none"}
 | QNN Conversion | `../references/qnn_conversion.md` |
 | SNPE Conversion | `../references/snpe_conversion.md` |
 | Context Binary | `../references/context_binary.md` |
+| Host Context Binary Gen | `../references/host_context_binary_gen.md` |
 | Troubleshooting | `../references/troubleshooting.md` |
 | Windows Setup | `../references/win_qairt_setup.md` |

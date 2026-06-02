@@ -57,7 +57,7 @@ Generalization upgrades:
 - Auto-generate an IO config when none is provided, and optionally cache it on disk.
  
 Env:
-- QAI_QNN_RUNTIME=HTP|CPU
+- QAI_QNN_RUNTIME=HTP|CPU|GPU
 - QAI_QNN_PERF_PROFILE=BURST|OFF
 - QAI_QNN_LIBS_DIR=<path>
  
@@ -94,6 +94,38 @@ except ImportError:  # pragma: no cover
  
 import qai_appbuilder
 from qai_appbuilder import QNNConfig, QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile
+
+# -------------------- Windows ARM HTP Auto-detection --------------------
+if platform.system().lower() == "windows":
+    # Only configure if hexagon isn't already specified in ADSP_LIBRARY_PATH
+    if "hexagon" not in os.environ.get("ADSP_LIBRARY_PATH", ""):
+        _sdk_root = os.environ.get("QAIRT_SDK_ROOT", "C:\\Qualcomm\\AIStack\\QAIRT\\2.45.40.260406")
+        _resolved_arch = None
+        _validator = os.path.join(_sdk_root, "bin", "aarch64-windows-msvc", "qnn-platform-validator.exe")
+        if os.path.exists(_validator):
+            try:
+                _cmd = [_validator, "--coreVersion", "--backend", "dsp"]
+                _res = subprocess.run(_cmd, capture_output=True, text=True, timeout=3)
+                _match = re.search(r"Hexagon Architecture V(\d+)", _res.stdout)
+                if _match:
+                    _resolved_arch = f"hexagon-v{_match.group(1)}"
+            except Exception:
+                pass
+        
+        # Fall back to v73 if validator fails or is missing
+        _hexagon_folder = _resolved_arch or "hexagon-v73"
+        if not _resolved_arch:
+            import warnings
+            warnings.warn(
+                "[onnxwrapper] HTP DSP arch could not be detected; falling back to hexagon-v73. "
+                "This may cause skel/stub mismatch errors on devices with a different DSP architecture. "
+                "Set ADSP_LIBRARY_PATH manually or ensure qnn-platform-validator.exe is available.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        _skel_path = os.path.join(_sdk_root, "lib", _hexagon_folder, "unsigned")
+        _stub_path = os.path.join(_sdk_root, "lib", "aarch64-windows-msvc")
+        os.environ["ADSP_LIBRARY_PATH"] = f"{_skel_path};{_stub_path}"
 
 # Setup logging with console handler
 logger = logging.getLogger(__name__)
@@ -188,6 +220,24 @@ NodeArg = TensorInfo
 # -------------------- small helpers --------------------
 def _env(name: str, default: str = "") -> str:
     return str(os.environ.get(name, default) or default).strip()
+
+
+def _snpe_profiling_level() -> str:
+    """Return SNPE profiling level for snpe-net-run.
+
+    Default is `detailed`. Set `QAI_SNPE_PROFILING_LEVEL=linting` to enable
+    chrometrace export via `snpe-diagview --chrometrace`.
+    """
+    level = _env("QAI_SNPE_PROFILING_LEVEL", "detailed").strip().lower()
+    allowed = {"off", "basic", "moderate", "detailed", "linting", "qhas"}
+    if level not in allowed:
+        logger.warning(
+            "Invalid QAI_SNPE_PROFILING_LEVEL=%r; falling back to detailed. Allowed: %s",
+            level,
+            ", ".join(sorted(allowed)),
+        )
+        return "detailed"
+    return level
 
 
 def _env_bool(name: str, default: str = "0") -> bool:
@@ -659,7 +709,8 @@ class QnnRunner(BaseRunner):
     For SNPE DLC models, use `SnpeRunner`.
     
     **Platform Notes:**
-    - **Windows ARM**: Requires context binary (.dll.bin) for HTP inference
+    - **Windows ARM**: Prefers context binary (.dll.bin) for HTP inference;
+      `.dll` direct path also works when ARM64X/CHPE hybrid runtime DLLs are used
     - **Linux ARM**: HTP/CPU/GPU support
     - **x86 Linux**: CPU-only inference
     
@@ -904,7 +955,7 @@ class SnpeRunner(BaseRunner):
             input_list_path,
             "--output_dir",
             abs_output_dir,
-            "--profiling_level detaile"
+            f"--profiling_level={_snpe_profiling_level()}"
         ]
         
         # Build model_info from qai_model if available
@@ -1283,10 +1334,10 @@ class QNNModelWrapper(QNNContext):
         #print(f"Searching QNN model file candidates: {candidates}")
         if system == "WINDOWS":
             candidates += [
-                base + ".dll.bin", # base + ".dll",
-                base_wo_ext + ".dll.bin", # base_wo_ext + ".dll",
-                base + ".onnx.dll.bin", #base + ".onnx.dll",
-                base_wo_ext + ".onnx.dll.bin", # base_wo_ext + ".onnx.dll",
+                base + ".dll.bin", base + ".dll",
+                base_wo_ext + ".dll.bin", base_wo_ext + ".dll",
+                base + ".onnx.dll.bin", base + ".onnx.dll",
+                base_wo_ext + ".onnx.dll.bin", base_wo_ext + ".onnx.dll",
             ]
         else:
             candidates += [
@@ -1307,7 +1358,7 @@ class QNNModelWrapper(QNNContext):
             
             candidates += [lib_base + ".dlc"]
             if system == "WINDOWS":
-                candidates += [lib_base + ".dll.bin"] #, lib_base + ".dll"
+                candidates += [lib_base + ".dll.bin", lib_base + ".dll"]
             else:
                 candidates += [lib_base + ".so.bin", lib_base + ".so"]
 
@@ -1452,14 +1503,43 @@ class SessionOptions:
         if libs:
             self.qnn_libs_dir = libs
         if not self.qnn_libs_dir:
-            self.qnn_libs_dir = _default_qai_libs_dir()
+            # Prefer QAIRT_SDK_ROOT libs over the qai_appbuilder bundled libs.
+            # The bundled libs may be a different version than the SDK used to
+            # compile the model/context binary, causing ABI mismatches and
+            # segfaults in C extension getter calls (e.g. getGraphName).
+            qairt_root = os.environ.get("QAIRT_SDK_ROOT", "")
+            if qairt_root:
+                _machine = platform.machine().lower()
+                _is_win  = platform.system() == "Windows"
+                if _is_win:
+                    # ARM64X/CHPE hybrid libs work on both x86_64 and ARM64 Windows.
+                    # Prefer arm64x-windows-msvc if it exists; fall back to x86_64.
+                    _arm64x = os.path.join(qairt_root, "lib", "arm64x-windows-msvc")
+                    if os.path.isdir(_arm64x):
+                        _toolchain = "arm64x-windows-msvc"
+                    else:
+                    _toolchain = "x86_64-windows-msvc"
+                elif _machine == "aarch64":
+                    _toolchain = "aarch64-ubuntu-gcc9.4"
+                else:
+                    _toolchain = "x86_64-linux-clang"
+                _sdk_libs = os.path.join(qairt_root, "lib", _toolchain)
+                if os.path.isdir(_sdk_libs):
+                    self.qnn_libs_dir = _sdk_libs
+                    logger.info(f"[QNN] Using QAIRT_SDK_ROOT libs: {_sdk_libs}")
+            if not self.qnn_libs_dir:
+                self.qnn_libs_dir = _default_qai_libs_dir()
 
         _ensure_path_contains(self.qnn_libs_dir)
         logger.info(f"[QNN] Using QNN libs dir: {os.path.abspath(self.qnn_libs_dir)}")
 
     def set_qnn_runtime(self, runtime: Union[Runtime, str]):
         if isinstance(runtime, str):
-            m = {"HTP": Runtime.HTP, "CPU": Runtime.CPU}
+            m = {
+                "HTP": Runtime.HTP,
+                "CPU": Runtime.CPU,
+                "GPU": getattr(Runtime, "GPU", Runtime.HTP),
+            }
             runtime = m.get(runtime.strip().upper(), Runtime.HTP)
         self.qnn_runtime = runtime
 
@@ -1511,7 +1591,12 @@ class InferenceSession:
             InferenceSession._last_config_key = key
             logger.info("QNN environment initialized")
 
-        runtime_tag = "CPU" if sess_options.qnn_runtime == Runtime.CPU else "HTP"
+        if sess_options.qnn_runtime == Runtime.CPU:
+            runtime_tag = "CPU"
+        elif getattr(Runtime, "GPU", "Gpu") == sess_options.qnn_runtime:
+            runtime_tag = "GPU"
+        else:
+            runtime_tag = "HTP"
         model_name = os.path.splitext(os.path.basename(model_path))[0]
         self._model = QNNModelWrapper(model_name, model_path, runtime_tag=runtime_tag)
         self._input_names = self._model.getInputName()
@@ -1703,8 +1788,13 @@ class InferenceSession:
             # Determine backend based on model type
             lower = self._model.model_file_path.lower()
             if any(lower.endswith(ext) for ext in (".dlc")):
-                # For SNPE models, use DSP backend (default) or CPU if specified
-                backend = "cpu" if self.sess_options.qnn_runtime == Runtime.CPU else "dsp"
+                # For SNPE models, route runtime exactly
+                if self.sess_options.qnn_runtime == Runtime.CPU:
+                    backend = "cpu"
+                elif getattr(Runtime, "GPU", "Gpu") == self.sess_options.qnn_runtime:
+                    backend = "gpu"
+                else:
+                    backend = "dsp"
             else:
                 # For QNN models, use HTP backend
                 backend = "cpu" if self.sess_options.qnn_runtime == Runtime.CPU else "htp"
@@ -1724,7 +1814,10 @@ class InferenceSession:
                 print(f"Profile output saved to: {output_dir}")
                 raise e
 
-        if self._perf_profile == "BURST":
+        use_perf_profile = (
+            self._perf_profile == "BURST" and self.sess_options.qnn_runtime == Runtime.HTP
+        )
+        if use_perf_profile:
             PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
 
         try:
@@ -1740,10 +1833,11 @@ class InferenceSession:
                 outs = [out_map[n] for n in yaml_output_names]
             return outs
         finally:
-            try:
-                PerfProfile.RelPerfProfileGlobal()
-            except Exception:
-                pass
+            if use_perf_profile:
+                try:
+                    PerfProfile.RelPerfProfileGlobal()
+                except Exception:
+                    pass
 
     def get_inputs(self) -> List[TensorInfo]:
         shapes = None

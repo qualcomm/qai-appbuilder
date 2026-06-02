@@ -6,8 +6,32 @@ Use this reference when `{FLOW}=QNN`.
 > **Wrapper scripts vs. direct toolchain calls**  
 > `aipc_convert_fp.py` and `aipc_convert_int.py` are the **recommended entry points** for QNN conversion.  
 > They internally invoke `qnn-onnx-converter` and `qnn-model-lib-generator`, and include **tested auto-detection logic** that resolves known QAIRT toolchain path issues across all supported host architectures (ARM WIN / X86 LINUX / ARM LINUX).  
-> `--preserve_io` is passed automatically to keep input/output tensor order consistent with the ONNX model.  
+> Preserve-IO policy in wrapper scripts:  
+> - Default: `--preserve_io` (keep layout + datatype)  
+> - Fallback: `--preserve_io layout` when target runtime shows FP16/dtype compatibility issues  
 > Prefer these scripts over calling the toolchain binaries directly.
+
+## Dependencies
+
+**CMake is required** for `qnn-model-lib-generator` to compile model libraries (.dll/.so).
+
+### Windows
+- Install **Visual Studio** (2019, 2022, or later) with the **"C++ CMake tools for Windows"** component
+  - Or install [CMake standalone](https://cmake.org/download/) and add it to PATH
+- CMake is typically located at:
+  `C:\Program Files\Microsoft Visual Studio\<version>\<edition>\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\`
+  where `<version>` = 2019, 2022, etc. and `<edition>` = Community, Professional, Enterprise
+- If `cmake` is not in PATH, add it before running conversion:
+  ```powershell
+  $env:PATH = "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin;" + $env:PATH
+  ```
+
+### Linux
+```bash
+sudo apt install cmake
+```
+
+> **Note**: The `aipc_convert_fp.py` script checks for CMake before conversion and will fail fast with guidance if it is missing.
 
 ## Target architecture selection
 
@@ -23,11 +47,60 @@ Override explicitly when you need a specific target:
 
 > **Note:** `aarch64-ubuntu-gcc9.4` produces a library for ARM deployment; the resulting `.so` cannot be run on an x86 host.
 
+## Linux cross-compile toolchain note (`aarch64-ubuntu-gcc9.4`)
+
+When building ARM Linux model libraries on a Linux host, `qnn-model-lib-generator` validates the Ubuntu aarch64 toolchain using:
+
+- `QNN_AARCH64_UBUNTU_GCC_94` (sysroot root)
+- `${QNN_AARCH64_UBUNTU_GCC_94}/usr/bin/aarch64-linux-gnu-g++` (compiler path)
+
+### Required setup
+
+Install the cross compiler package:
+
+```bash
+sudo apt install g++-aarch64-linux-gnu
+```
+
+Set the environment variable before conversion/libgen:
+
+```bash
+# Typical Ubuntu host setup when compiler is at /usr/bin/aarch64-linux-gnu-g++
+export QNN_AARCH64_UBUNTU_GCC_94=/
+```
+
+### Quick verification
+
+```bash
+which aarch64-linux-gnu-g++
+printf '<%s>\n' "$QNN_AARCH64_UBUNTU_GCC_94"
+```
+
+Expected:
+- `which` prints `/usr/bin/aarch64-linux-gnu-g++`
+- variable is set to `/` (recommended)
+
+### Common failure signatures
+
+- `Could not find compiler: ${QNN_AARCH64_UBUNTU_GCC_94}/usr/bin/aarch64-linux-gnu-g++`
+  - Meaning: toolchain variable/path was not resolved as expected by libgen.
+- `fatal error: ... No space left on device`
+  - Meaning: compilation ran but failed due to host disk/tmp capacity (check `/tmp` and free space).
+
 ## Float conversion (FP16/FP32)
 ```bash
 python skills/aipc-toolkit/scripts/aipc_convert_fp.py \
   --onnx model.onnx \
-  --precision 16
+  --precision 16 \
+  --preserve-io-mode datatype
+```
+
+If target runtime shows FP16/dtype compatibility issues, retry with layout-only preservation:
+```bash
+python skills/aipc-toolkit/scripts/aipc_convert_fp.py \
+  --onnx model.onnx \
+  --precision 16 \
+  --preserve-io-mode layout
 ```
 
 ### Explicit input dimensions for dynamic inputs
@@ -65,7 +138,19 @@ python skills/aipc-toolkit/scripts/aipc_convert_int.py \
   --input_list calibration_list.txt \
   --output-root qnn_output \
   --act_bw 8 \
-  --weight_bw 8
+  --weight_bw 8 \
+  --preserve-io-mode datatype
+```
+
+If target runtime shows FP16/dtype compatibility issues, retry with:
+```bash
+python skills/aipc-toolkit/scripts/aipc_convert_int.py \
+  --input_network model.onnx \
+  --input_list calibration_list.txt \
+  --output-root qnn_output \
+  --act_bw 8 \
+  --weight_bw 8 \
+  --preserve-io-mode layout
 ```
 
 > **Troubleshooting**: If conversion fails with "Unsupported operator" errors, see [In-Memory Operator Patching](operator_patching.md) for patching guidance.
@@ -143,6 +228,7 @@ dumpbin /headers C:\path\to\model.dll | find "machine"
 |----|-----------|-----------|--------|
 | Linux | `x86_64` | `aarch64` (`.so`) | Blocked on host — run on ARM target device |
 | Linux | `aarch64` | `aarch64` (`.so`) | Allowed |
+| Linux | `x86_64` | `x86_64` (`.so`) | Allowed |
 | Windows | `ARM64` | `ARM64` (`.dll`) | Allowed |
 | Windows | `AMD64` | `ARM64` (`.dll`) | Blocked on host — run on ARM target device |
 

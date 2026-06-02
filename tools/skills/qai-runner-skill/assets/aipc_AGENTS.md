@@ -36,6 +36,8 @@ Agents execute the full pipeline **autonomously** without asking for confirmatio
 - Proceed through all phases without pausing for user confirmation
 - Continue beyond local artifact generation when deployment/inference/validation phases remain
 - If `RETMOE_DEVICE_INFO` is present, execute remote deploy + remote inference + log collection before final response
+- Treat host-only inference as interim validation only when `RETMOE_DEVICE_INFO` is present; final acceptance requires target execution
+- When `RETMOE_DEVICE_INFO` is present, skip local quick-smoke inference before remote target inference
 - Apply safe defaults for any unspecified optional parameters
 - Log every decision and assumption in `aipc_plan.md` Issue Log
 - Mark each phase ✅ Done in Progress Summary upon completion
@@ -47,6 +49,7 @@ Agents execute the full pipeline **autonomously** without asking for confirmatio
 - Ask "should I run onnxsim?" (always run it)
 - Ask "should I simplify the model?" (always simplify)
 - Pause for routine confirmations that can be resolved from Config values
+- Run local quick-smoke inference before required remote target inference when `RETMOE_DEVICE_INFO` is set
 
 ### `interactive` mode
 Agents ask the user for confirmation at each phase transition and before key decisions.
@@ -72,7 +75,7 @@ Agents ask the user for confirmation at each phase transition and before key dec
 | B5 | Target device is unavailable for context binary generation or on-device testing | Stop. Ask user how to proceed. |
 | B6 | Accuracy drops below threshold after quantization (cosine < 0.95) | Stop. Report metrics. Ask user whether to accept or retry. |
 | B7 | No known replacement pattern exists for unsupported operator | Stop. Document operator, escalate to user. |
-| **B8** | **Context binary generation fails on Windows ARM** | **Stop. Return to operator patching. Escalate only if B3/B4/B7 met.** |
+| **B8** | **Context binary generation fails on Windows ARM** | **Record issue and continue with non-context `.dll` path if needed. Escalate only if B3/B4/B7 met.** |
 
 ### ⚠️ CRITICAL: Operator Patching — Exhaustive Requirement
 
@@ -90,19 +93,19 @@ Agents ask the user for confirmation at each phase transition and before key dec
 **Agents MUST know:**
 | Platform | Context Binary | Can proceed without it? |
 |----------|----------------|------------------------|
-| **ARM Windows** | **REQUIRED** — `.dll.bin` | ❌ NO — inference will FAIL |
-| **ARM Linux**   | **OPTIONAL** — `.so.bin` | ✅ YES — `.so` works directly |
+| **ARM Windows** | **OPTIONAL** — `.dll.bin` | ✅ YES — `.dll` works directly |
+| **ARM Linux**   | **OPTIONAL** — `.so.bin` | ✅ YES — `.so` works directly **only after host-context troubleshooting is exhausted** |
 
 **Agents MUST NOT:**
-- ❌ Say "the DLL can be used directly on Windows without context binary"
+- ❌ Say "Windows always requires context binary"
 - ❌ Say "context binary is required on Linux"
-- ❌ Proceed to Phase 7 (Inference) on Windows if context binary generation failed
+- ❌ Block Phase 7 (Inference) on Windows solely because context binary generation failed
 - ❌ Stop patching after arbitrary iteration count
 
 **Correct behavior:**
-- ✅ **Windows ARM**: Context binary (`.dll.bin`) is **MANDATORY**
-- ✅ **Linux ARM**: Context binary (`.so.bin`) is **OPTIONAL** — can use `.so` directly
-- ✅ **If Windows context binary fails**: → Return to operator patching
+- ✅ **Windows ARM**: Context binary (`.dll.bin`) is **OPTIONAL** — `.dll` direct path is allowed
+- ✅ **Linux ARM**: Context binary (`.so.bin`) is **OPTIONAL**, but `.so` fallback is allowed only after all required host-context troubleshooting is completed and logged
+- ✅ **If Windows context binary fails**: record logs and continue with `.dll` fallback path
 - ✅ **Continue patching** until no replacement patterns exist
 - ✅ **Escalate** only when B3/B4/B7 conditions are met
 
@@ -334,8 +337,10 @@ python skills/aipc-toolkit/scripts/aipc_convert_fp.py \
   --onnx {ONNX_FILE} \
   --output-root {OUTPUT_DIR} \
   --precision {PRECISION} \
+  --preserve-io-mode datatype \
   --target-arch {TARGET_ARCH}
 ```
+> If target runtime shows FP16/dtype compatibility issues, retry with `--preserve-io-mode layout`.
 
 **Flow B — SNPE** (`aipc_plan.md` SNPE-3):
 ```bash
@@ -390,8 +395,10 @@ python skills/aipc-toolkit/scripts/aipc_convert_int.py \
   --output-root {OUTPUT_DIR} \
   --act_bw {ACT_BITWIDTH} \
   --weight_bw <!-- 8 for INT8/A16W8 typical; see docs/QUANTIZATION_GUIDE.md for other modes --> \
+  --preserve-io-mode datatype \
   --target-arch {TARGET_ARCH}
 ```
+> If target runtime shows FP16/dtype compatibility issues, retry with `--preserve-io-mode layout`.
 
 **Flow B — SNPE** (`aipc_plan.md` SNPE-4):
 ```bash
@@ -417,63 +424,39 @@ If cosine similarity < 0.95 → **Blocking Condition B6**: stop and report to us
 
 ### 6. Context Binary Agent
 
-**Role**: Generates hardware-specific context binaries for on-device deployment. **Flow A (QNN) only.**
+**Role**: Generates hardware-specific HTP context binaries on the **host** (x86 Linux or ARM Windows) for the target SoC, then deploys to the target device. **Flow A (QNN) only.**
+
+**Key concept**: The host generates a context binary compiled for the **target SoC** using `qnn-context-binary-generator`. The `.bin` can then run on the target device even if host and target architectures differ.
 
 **Inputs**:
-- Linux: `lib{MODEL_NAME}.so`
-- Windows: `{MODEL_NAME}.dll`
-- Config: `{TARGET_DEVICE}`
-- **Remote device (optional)**: `{RETMOE_DEVICE_INFO}` from `aipc_plan.md`, containing:
-  - **(a) SSH information**: host/user/port and key path if needed
-  - **(b) Working folder**: target directory for upload + execution
-  - **(c) Setup script path**: target QAIRT env script to source before generation
+- Linux host: `lib{MODEL_NAME}.so` (x86-arch — host cannot load aarch64)
+- Windows host: `{MODEL_NAME}.dll` (x86-arch or emulation)
+- Config: `{SOC_ID}`, `{DSP_ARCH}` — **mandatory**, identify from target device before generation
+- Reference: `skills/aipc-toolkit/references/host_context_binary_gen.md`
 
-> If `{RETMOE_DEVICE_INFO}` is set, run context-binary generation on the remote target
-> through SSH in that working folder (do not run on local host).
+> ⚠️ `{SOC_ID}` and `{DSP_ARCH}` are mandatory. Generating without them produces a generic binary that may crash or produce wrong results on the target.
+> See `host_context_binary_gen.md` → Step 1 for how to read these values from the target device.
 
 **Outputs**:
-- Linux: `lib{MODEL_NAME}.so.bin` (optional — `.so` works directly)
-- Windows: `{MODEL_NAME}.dll.bin` (REQUIRED — `.dll` alone will NOT load)
+- Linux: `lib{MODEL_NAME}.so.bin` (optional — `.so` works directly on Linux)
+- Windows: `{MODEL_NAME}.dll.bin` (optional — `.dll` works directly on Windows)
 
 **Workflow** (`aipc_plan.md` QNN-4):
-```bash
-# Linux (optional)
-python skills/aipc-toolkit/scripts/aipc_dev_gen_contextbin.py \
-  --model_lib lib{MODEL_NAME}.so \
-  --output lib{MODEL_NAME}.so.bin
 
-# Windows (REQUIRED)
-python skills/aipc-toolkit/scripts/aipc_dev_gen_contextbin.py \
-  --model_lib {MODEL_NAME}.dll \
-  --output {MODEL_NAME}.dll.bin
-```
-
-```bash
-# Remote target execution pattern (Linux/Windows target via SSH)
-ssh <user>@<host> "cd <target_workdir> && \
-  source <target_qairt_setup_script> && \
-  python skills/aipc-toolkit/scripts/aipc_dev_gen_contextbin.py \
-    --model_lib <target_model_lib_path> \
-    --output <target_context_bin_path>"
-```
-> Use values from `{RETMOE_DEVICE_INFO}` when remote mode is enabled.
-
-> Use **absolute paths**. Run on the **target device**, not the host.
-> If target device is unavailable → **Blocking Condition B5**.
 
 ### ⚠️ CRITICAL: Platform-Specific Requirements
 
 | Platform | Context Binary | If generation fails |
 |----------|----------------|---------------------|
-| **Windows ARM** | **REQUIRED** | → **Return to operator patching** (Step 3.5) |
-| **Linux ARM**   | **OPTIONAL** | → Can proceed with `.so` library directly |
+| **Windows ARM** | **OPTIONAL** | → If generation fails, continue with `.dll` fallback |
+| **Linux ARM**   | **OPTIONAL** | → First exhaust `host_context_binary_gen.md` methods, then fallback to `.so` |
 
-**If context binary generation fails:**
+**If context binary generation fails on host:**
 
 1. **Identify ALL unsupported operators** from error logs
 2. **For EACH operator:**
    - Search `references/operator_patching.md` for replacement pattern
-   - If pattern exists → Apply patch → Re-generate context binary → Repeat
+   - If pattern exists → Apply patch → Re-export model → Re-convert → Re-generate context binary → Repeat
    - If NO pattern exists → Document → Escalate (B7)
 3. **DO NOT stop** patching because:
    - ❌ "7 iterations reached" (soft guideline only)
@@ -483,19 +466,23 @@ ssh <user>@<host> "cd <target_workdir> && \
    - **B4**: Only patch changes model semantics
    - **B7**: No replacement pattern exists
 5. **Windows only**: If all patches exhausted → Suggest SNPE flow alternative
-6. **Linux only**: Can proceed to inference with `.so` library directly
+6. **Linux only**: Can proceed to inference with `.so` library directly only after all applicable host-context methods have been attempted and logged:
+   - correct `soc_id`/`dsp_arch` confirmation
+   - `vtcm_mb` sweep (`0,1,2,3,4,8`)
+   - `soc_id`/`dsp_arch` alternatives from mapping
+   - `htp_arch` / no-`soc_id` path when applicable
 
 **Batch mode**: 
-- **Windows**: Run autonomously, on failure → return to patching
-- **Linux**: Run autonomously, can proceed on failure
+- **Windows**: Run autonomously on host; if context generation fails, continue with `.dll` fallback
+- **Linux**: Run autonomously on host; `.so` fallback allowed only after required host-context troubleshooting is exhausted
 
 **Verification** (QNN-4 exit criteria):
-- [ ] **Windows**: `{MODEL_NAME}.dll.bin` exists and is non-zero → Proceed to Phase 7
-- [ ] **Linux**: `{MODEL_NAME}.so.bin` exists OR can proceed with `.so` directly
+- [ ] **Windows**: `{MODEL_NAME}.dll.bin` generated and deployed OR `.dll` fallback path verified
+- [ ] **Linux**: `{MODEL_NAME}.so.bin` generated on host and deployed to target OR all host-context methods attempted+logged before `.so` fallback
 - [ ] **If Windows verification fails**: Return to Step 3.5 (operator patching)
 - [ ] **Escalate** only when B3/B4/B7 conditions met
 
-**Reference**: `skills/aipc-toolkit/references/context_binary.md`
+**Reference**: `skills/aipc-toolkit/references/host_context_binary_gen.md`
 
 ---
 
@@ -505,17 +492,17 @@ ssh <user>@<host> "cd <target_workdir> && \
 
 **Inputs**:
 - **Flow A (Linux)**: `lib{MODEL_NAME}.so` OR `lib{MODEL_NAME}.so.bin`; `{MODEL_NAME}.yaml`
-- **Flow A (Windows)**: `{MODEL_NAME}.dll.bin` (**REQUIRED**); `{MODEL_NAME}.yaml`
+- **Flow A (Windows)**: `{MODEL_NAME}.dll.bin` (optional) or `{MODEL_NAME}.dll`; `{MODEL_NAME}.yaml`
 - **Flow B**: `{OUTPUT_DIR}/{DLC_FILE}`; `{MODEL_NAME}.yaml`
 - `scripts/aipc` and `scripts/onnxwrapper.py` (from skill source)
-- **Remote inference (optional)**: `{RETMOE_DEVICE_INFO}` file (from `aipc_plan.md`) that records:
+- **Remote inference (required when provided)**: `{RETMOE_DEVICE_INFO}` file (from `aipc_plan.md`) that records:
   - SSH connection info (host/user/port and key path if needed)
   - Target working directory (where inference is executed)
   - QAIRT setup script path on the target (user-provided; sets env vars / activates venv / initializes QAIRT)
 
-### Remote Inference over SSH (Optional)
+### Remote Inference over SSH (Required When `RETMOE_DEVICE_INFO` Is Set)
 
-If `{RETMOE_DEVICE_INFO}` is provided, inference may be executed on the target device via SSH.
+If `{RETMOE_DEVICE_INFO}` is provided, inference must be executed on the target device via SSH before task completion.
 
 `{RETMOE_DEVICE_INFO}` must point to a file containing:
 - **(a) SSH information**: host/user/port and key path if needed
@@ -535,14 +522,14 @@ Recommended execution pattern (conceptual):
 
 | Platform | Required File | If missing |
 |----------|---------------|------------|
-| **Windows ARM** | `{MODEL_NAME}.dll.bin` | → **FAIL** — Cannot proceed |
-| **Linux ARM**   | `{MODEL_NAME}.so` or `.so.bin` | → OK — `.so` works directly |
+| **Windows ARM** | `{MODEL_NAME}.dll` or `.dll.bin` | → OK — either path can proceed |
+| **Linux ARM**   | `{MODEL_NAME}.so` or `.so.bin` | → `.so` is OK only after host-context troubleshooting exhaustion is documented |
 
 1. Verify required files exist:
-   - **Windows**: `{MODEL_NAME}.dll.bin` or `{MODEL_NAME}.onnx.dll.bin` (**REQUIRED**)
+   - **Windows**: `{MODEL_NAME}.dll` or `{MODEL_NAME}.dll.bin` (either works)
    - **Linux**: `{MODEL_NAME}.so` or `{MODEL_NAME}.so.bin` (either works)
-2. **If Windows context binary is MISSING → STOP → Blocking Condition B8**
-3. **Linux**: Can proceed with `.so` library directly
+2. **If Windows context binary is MISSING**: continue with `.dll` direct inference path
+3. **Linux**: Can proceed with `.so` library directly only after all required host-context troubleshooting methods are completed and logged
 
 **Outputs**: `infer_{MODEL_NAME}.py`, inference results
 
