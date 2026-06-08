@@ -31,31 +31,18 @@ IMAGE_SIZE = 640
 
 execution_ws=os.path.dirname(os.path.abspath(__file__))
 print(f"Current file directory: {execution_ws}")
-qnn_sdk_root = os.environ.get("QNN_SDK_ROOT")
-if not qnn_sdk_root:
-    print("Error: QNN_SDK_ROOT environment variable is not set.")
-    sys.exit(1)
-
-qnn_dir = os.path.join(qnn_sdk_root, "lib/aarch64-oe-linux-gcc11.2")
+# qnn_sdk_root = os.environ.get("QNN_SDK_ROOT")
+# if not qnn_sdk_root:
+#     print("Error: QNN_SDK_ROOT environment variable is not set.")
+#     sys.exit(1)
+#
+# qnn_dir = os.path.join(qnn_sdk_root, "lib/aarch64-oe-linux-gcc11.2")
 
 model_path = "<path to your yolo26 series qnn model>"
 
 ####################################################################
 
-SOC_ID = None
-cleaned_argv = []
-i = 0
-while i < len(sys.argv):
-    if sys.argv[i] == '--chipset':
-        SOC_ID = sys.argv[i + 1]
-        i += 2
-    else:
-        cleaned_argv.append(sys.argv[i])
-        i += 1
-
-sys.argv = cleaned_argv
-
-print(f"SOC_ID: {SOC_ID}")
+SOC_ID = "9075"
 
 yolo26n = None
 
@@ -221,7 +208,7 @@ def Init():
     global yolo26
 
     # Config AppBuilder environment.
-    QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config("None", Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for Yolo26 objects.
     yolo26 = Yolo26("yolo26", model_path)
@@ -294,7 +281,11 @@ def Release():
     del(yolo26)
 
 
-def main(input_image_path=None, output_image_path=None, show_image=False, confidence: float = 0.80):
+def main(input_image_path=None, output_image_path=None, show_image=False, confidence: float = 0.80, chipset="9075"):
+    global SOC_ID
+
+    SOC_ID = chipset
+    print(f"SOC_ID: {SOC_ID}")
 
     if input_image_path is None:
         input_image_path = os.path.join(execution_ws, "input.jpg")
@@ -321,6 +312,8 @@ if __name__ == '__main__':
     #input_image_path, output_image_path
     parser.add_argument('--output_image_path', help='Path to the output image', default=None)
     parser.add_argument('--confidence', help='Score threshold for keeping boxes', type=float, default=0.60)
+    parser.add_argument('--chipset', choices=["6490", "9075"], default="9075", help='Target chipset')
+    parser.add_argument('--show_image', action=argparse.BooleanOptionalAction, default=False, help='Show the output image')
     args = parser.parse_args()
 
-    main(args.input_image_path, args.output_image_path, confidence=args.confidence)
+    main(args.input_image_path, args.output_image_path, args.show_image, args.confidence, args.chipset)

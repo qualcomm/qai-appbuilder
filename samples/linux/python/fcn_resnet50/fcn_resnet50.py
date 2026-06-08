@@ -26,12 +26,12 @@ IMAGE_SIZE = 520
 
 execution_ws=os.path.dirname(os.path.abspath(__file__))
 print(f"Current file directory: {execution_ws}")
-qnn_sdk_root = os.environ.get("QNN_SDK_ROOT")
-if not qnn_sdk_root:
-    print("Error: QNN_SDK_ROOT environment variable is not set.")
-    sys.exit(1)
-
-qnn_dir = os.path.join(qnn_sdk_root, "lib/aarch64-oe-linux-gcc11.2")
+# qnn_sdk_root = os.environ.get("QNN_SDK_ROOT")
+# if not qnn_sdk_root:
+#     print("Error: QNN_SDK_ROOT environment variable is not set.")
+#     sys.exit(1)
+#
+# qnn_dir = os.path.join(qnn_sdk_root, "lib/aarch64-oe-linux-gcc11.2")
 
 # if not "python" in execution_ws:
 #     execution_ws = execution_ws + "/" + "python"
@@ -44,20 +44,7 @@ model_path = model_dir + "/" + MODEL_NAME + ".bin"
 
 ####################################################################
 
-SOC_ID = None
-cleaned_argv = []
-i = 0
-while i < len(sys.argv):
-    if sys.argv[i] == '--chipset':
-        SOC_ID = sys.argv[i + 1]
-        i += 2
-    else:
-        cleaned_argv.append(sys.argv[i])
-        i += 1
-
-sys.argv = cleaned_argv
-
-print(f"SOC_ID: {SOC_ID}")
+SOC_ID = "9075"
 
 
 def resize_pad(
@@ -172,7 +159,7 @@ def Init():
     model_download()
 
     # Config AppBuilder environment.
-    QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config("None", Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for fcn_resnet50 objects.
     fcn_resnet50 = Fcn_resnet50("fcn_resnet50", model_path)
@@ -234,7 +221,11 @@ def Release():
     # Release the resources.
     del(fcn_resnet50)
 
-def main(input = None):
+def main(input = None, chipset="9075"):
+    global SOC_ID
+
+    SOC_ID = chipset
+    print(f"SOC_ID: {SOC_ID}")
 
     if input is None:
         input = os.path.join(execution_ws, "input.jpg")
@@ -254,6 +245,7 @@ def main(input = None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process a single image path.")
     parser.add_argument('--image', help='Path to the image', default=None)
+    parser.add_argument('--chipset', choices=["6490", "9075"], default="9075", help='Target chipset')
     args = parser.parse_args()
 
-    main(args.image)
+    main(args.image, args.chipset)
