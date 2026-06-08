@@ -36,14 +36,15 @@ IMAGE_SIZE = 128
 
 execution_ws=os.path.dirname(os.path.abspath(__file__))
 print(f"Current file directory: {execution_ws}")
-qnn_sdk_root = os.environ.get("QNN_SDK_ROOT")
-if not qnn_sdk_root:
-    print("Error: QNN_SDK_ROOT environment variable is not set.")
-    sys.exit(1)
-qnn_dir = os.path.join(qnn_sdk_root, "lib/aarch64-oe-linux-gcc11.2")
+# qnn_sdk_root = os.environ.get("QNN_SDK_ROOT")
+# if not qnn_sdk_root:
+#     print("Error: QNN_SDK_ROOT environment variable is not set.")
+#     sys.exit(1)
+#
+# qnn_dir = os.path.join(qnn_sdk_root, "lib/aarch64-oe-linux-gcc11.2")
 
 # if not "python" in execution_ws:
-#     execution_ws = execution_ws + "\\" + "python"
+#     execution_ws = execution_ws + "/" + "python"
 
 # if not MODEL_NAME in execution_ws:
 #     execution_ws = execution_ws + "\\" + MODEL_NAME
@@ -56,20 +57,7 @@ input_image_path = os.path.join(execution_ws, "super_resolution_input.jpg")
 INPUT_IMAGE_PATH_URL = "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/super_resolution/v2/super_resolution_input.jpg"
 ####################################################################
 
-SOC_ID = None
-cleaned_argv = []
-i = 0
-while i < len(sys.argv):
-    if sys.argv[i] == '--chipset':
-        SOC_ID = sys.argv[i + 1]
-        i += 2
-    else:
-        cleaned_argv.append(sys.argv[i])
-        i += 1
-
-sys.argv = cleaned_argv
-
-print(f"SOC_ID: {SOC_ID}")
+SOC_ID = "9075"
 
 image_buffer = None
 quicksrnetmedium = None
@@ -97,7 +85,7 @@ def Init():
     model_download()
     print("Init")
     # Config AppBuilder environment.
-    QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config("None", Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for QuickSRNetMedium objects.
     quicksrnetmedium = QuickSRNetMedium("quicksrnetmedium", model_path)
@@ -143,8 +131,11 @@ def Release():
     # Release the resources.
     del(quicksrnetmedium)
 
-def main(input=None):
+def main(input=None, show_image=True, chipset="9075"):
+    global SOC_ID
 
+    SOC_ID = chipset
+    print(f"SOC_ID: {SOC_ID}")
 
     if input is None:
         if not os.path.exists(input_image_path):
@@ -153,13 +144,15 @@ def main(input=None):
         input = input_image_path
 
     Init()
-    Inference(input,os.path.join(execution_ws,"output.png"))
+    Inference(input, os.path.join(execution_ws,"output.png"), show_image=show_image)
 
     Release()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Process a single image path.")
     parser.add_argument('--image', help='Path to the image', default=None)
+    parser.add_argument('--chipset', choices=["6490", "9075"], default="9075", help='Target chipset')
+    parser.add_argument('--show_image', action=argparse.BooleanOptionalAction, default=True, help='Show the output image')
     args = parser.parse_args()
-    main(args.image)
+    main(args.image, args.show_image, args.chipset)
     

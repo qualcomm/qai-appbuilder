@@ -11,6 +11,7 @@ import utils.install as install
 import cv2
 import numpy as np
 import torchvision.transforms as transforms
+import argparse
 from PIL import Image
 from PIL.Image import fromarray as ImageFromArray
 from utils.image_processing import (
@@ -31,12 +32,12 @@ IMAGE_SIZE = 128
 
 execution_ws=os.path.dirname(os.path.abspath(__file__))
 print(f"Current file directory: {execution_ws}")
-qnn_sdk_root = os.environ.get("QNN_SDK_ROOT")
-if not qnn_sdk_root:
-    print("Error: QNN_SDK_ROOT environment variable is not set.")
-    sys.exit(1)
-
-qnn_dir = os.path.join(qnn_sdk_root, "lib/aarch64-oe-linux-gcc11.2")
+# qnn_sdk_root = os.environ.get("QNN_SDK_ROOT")
+# if not qnn_sdk_root:
+#     print("Error: QNN_SDK_ROOT environment variable is not set.")
+#     sys.exit(1)
+#
+# qnn_dir = os.path.join(qnn_sdk_root, "lib/aarch64-oe-linux-gcc11.2")
 
 # if not "python" in execution_ws:
 #     execution_ws = execution_ws + "/" + "python"
@@ -50,20 +51,7 @@ model_path = model_dir + "/" + MODEL_NAME + ".bin"
 
 ####################################################################
 
-SOC_ID = None
-cleaned_argv = []
-i = 0
-while i < len(sys.argv):
-    if sys.argv[i] == '--chipset':
-        SOC_ID = sys.argv[i + 1]
-        i += 2
-    else:
-        cleaned_argv.append(sys.argv[i])
-        i += 1
-
-sys.argv = cleaned_argv
-
-print(f"SOC_ID: {SOC_ID}")
+SOC_ID = "9075"
 
 image_buffer = None
 sesr_m5 = None
@@ -92,7 +80,7 @@ def Init():
     model_download()
 
     # Config AppBuilder environment.
-    QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config("None", Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for sesr_m5 objects.
     sesr_m5 = Sesr_m5("sesr_m5", model_path)
@@ -140,9 +128,30 @@ def Release():
     # Release the resources.
     del(sesr_m5)
 
-if __name__ == '__main__':
+def main(input_image_path=None, output_image_path=None, show_image=True, chipset="9075"):
+    global SOC_ID
+
+    SOC_ID = chipset
+    print(f"SOC_ID: {SOC_ID}")
+
+    if input_image_path is None:
+        input_image_path = os.path.join(execution_ws, "input.jpg")
+
+    if output_image_path is None:
+        output_image_path = os.path.join(execution_ws, "output.jpg")
+
     Init()
 
-    Inference(os.path.join(execution_ws,"input.jpg"), os.path.join(execution_ws,"output.jpg"))
+    Inference(input_image_path, output_image_path, show_image=show_image)
 
     Release()
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Process a single image path.")
+    parser.add_argument('--input_image_path', help='Path to the input image', default=None)
+    parser.add_argument('--output_image_path', help='Path to the output image', default=None)
+    parser.add_argument('--chipset', choices=["6490", "9075"], default="9075", help='Target chipset')
+    parser.add_argument('--show_image', action=argparse.BooleanOptionalAction, default=True, help='Show the output image')
+    args = parser.parse_args()
+
+    main(args.input_image_path, args.output_image_path, args.show_image, args.chipset)
