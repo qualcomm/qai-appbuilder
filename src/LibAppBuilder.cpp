@@ -11,6 +11,7 @@
 #include <string>
 #include <chrono>
 #include <unordered_map>
+#include <mutex>
 #include <iostream>
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,6 +54,13 @@ static bool gs_isGpu = false;
 static bool sg_perf_global = false;
 
 std::unordered_map<std::string, std::unique_ptr<sample_app::QnnSampleApp>> sg_model_map;
+// Guards sg_model_map only. The map is mutated (erase on take, insert on
+// return) by every ModelInference/ModelInitialize call. When two pipeline
+// threads run different models concurrently (e.g. model a on HTP0 + model 1 on HTP1),
+// their erase/insert on this shared map race and corrupt its bucket list.
+// This mutex serializes ONLY the map find/erase/insert; executeGraphsBuffers
+// (the actual HTP inference) runs OUTSIDE the lock, so parallelism is kept.
+static std::mutex sg_model_map_mutex;
 static sample_app::ProfilingLevel sg_parsedProfilingLevel = sample_app::ProfilingLevel::OFF;
 
 namespace qnn {
@@ -155,6 +163,7 @@ std::unique_ptr<sample_app::QnnSampleApp> initQnnSampleApp(std::string cachedBin
 
 
 std::unique_ptr<sample_app::QnnSampleApp> getQnnSampleApp(std::string model_name) {
+  std::lock_guard<std::mutex> lk(sg_model_map_mutex);
   auto it = sg_model_map.find(model_name);
   if (it != sg_model_map.end()) {
     if (it->second) {
@@ -164,6 +173,15 @@ std::unique_ptr<sample_app::QnnSampleApp> getQnnSampleApp(std::string model_name
     }
   }
   return nullptr;
+}
+
+// Symmetric counterpart to getQnnSampleApp: re-insert the app under the same
+// lock. Replaces the bare `sg_model_map.insert(...)` calls scattered across
+// ModelInference/ModelInitialize so every map mutation is serialized.
+void putQnnSampleApp(std::string model_name,
+                     std::unique_ptr<sample_app::QnnSampleApp> app) {
+  std::lock_guard<std::mutex> lk(sg_model_map_mutex);
+  sg_model_map.insert(std::make_pair(std::move(model_name), std::move(app)));
 }
 
 void SetProcInfo(std::string proc_name, uint64_t epoch) {
@@ -573,7 +591,7 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
 
     timerHelper.Print("model_initialize " + model_name);
 
-    sg_model_map.insert(std::make_pair(model_name, std::move(app)));
+    putQnnSampleApp(model_name, std::move(app));
 
     return true;
   }
@@ -611,7 +629,7 @@ bool ModelInferenceEx(std::string model_name, std::string proc_name, std::string
         result = false;
     }
 
-    sg_model_map.insert(std::make_pair(model_name, std::move(app)));
+    putQnnSampleApp(model_name, std::move(app));
 
     timerHelper.Print("model_inference " + model_name);
 
@@ -742,7 +760,7 @@ bool LibAppBuilder::ModelApplyBinaryUpdate(const std::string model_name, std::ve
     
     }
 
-    sg_model_map.insert(std::make_pair(model_name, std::move(app)));
+    putQnnSampleApp(model_name, std::move(app));
 
     return result;
 }
@@ -780,49 +798,49 @@ bool LibAppBuilder::DeleteShareMemory(std::string share_memory_name) {
 std::vector<std::vector<size_t>> LibAppBuilder::getOutputShapes(std::string model_name){
     std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
     m_outputShapes = app->getOutputShapes();
-    sg_model_map.insert(std::make_pair(model_name, std::move(app)));
+    putQnnSampleApp(model_name, std::move(app));
     return m_outputShapes;
 };
 
 std::vector<std::vector<size_t>> LibAppBuilder::getInputShapes(std::string model_name){
     std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
     m_inputShapes = app->getInputShapes();
-    sg_model_map.insert(std::make_pair(model_name, std::move(app)));
+    putQnnSampleApp(model_name, std::move(app));
     return m_inputShapes;
 };
 
 std::vector<std::string> LibAppBuilder::getInputDataType(std::string model_name){
     std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
     m_inputDataType = app->getInputDataType();
-    sg_model_map.insert(std::make_pair(model_name, std::move(app)));
+    putQnnSampleApp(model_name, std::move(app));
     return m_inputDataType;
 };
 
 std::vector<std::string> LibAppBuilder::getOutputDataType(std::string model_name){
     std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
     m_outputDataType = app->getOutputDataType();
-    sg_model_map.insert(std::make_pair(model_name, std::move(app)));
+    putQnnSampleApp(model_name, std::move(app));
     return m_outputDataType;
 };
 
 std::string LibAppBuilder::getGraphName(std::string model_name){
     std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
     m_graphName = app->getGraphName();
-    sg_model_map.insert(std::make_pair(model_name, std::move(app)));
+    putQnnSampleApp(model_name, std::move(app));
     return m_graphName;
 };
 
 std::vector<std::string> LibAppBuilder::getInputName(std::string model_name){
     std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
     m_inputName = app->getInputName();
-    sg_model_map.insert(std::make_pair(model_name, std::move(app)));
+    putQnnSampleApp(model_name, std::move(app));
     return m_inputName;
 };
 
 std::vector<std::string> LibAppBuilder::getOutputName(std::string model_name){
     std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
     m_outputName = app->getOutputName();
-    sg_model_map.insert(std::make_pair(model_name, std::move(app)));
+    putQnnSampleApp(model_name, std::move(app));
     return m_outputName;
 };
 //proc
@@ -905,7 +923,7 @@ ModelInfo_t LibAppBuilder::getModelInfoExt(std::string model_name, std::string i
             return info;
         }
     }
-    sg_model_map.insert(std::make_pair(model_name, std::move(app)));
+    putQnnSampleApp(model_name, std::move(app));
 
     return info;
 }
@@ -914,7 +932,7 @@ uint64_t LibAppBuilder::getProfilingEvent(std::string model_name, uint32_t event
     uint64_t eventValue;
     std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
     eventValue = app->getProfilingEvent(eventType);
-    sg_model_map.insert(std::make_pair(model_name, std::move(app)));
+    putQnnSampleApp(model_name, std::move(app));
     return eventValue;
 }
 
