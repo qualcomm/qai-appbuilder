@@ -69,6 +69,105 @@
 - `stub lib id mismatch` and transport `1008` errors disappear.
 - HTP inference proceeds; non-fatal power-config warnings may remain.
 
+## One-command triage bundle (Linux ARM, wrapper mode)
+
+Use this bundle when you see:
+- `Failed to load skel`
+- `Transport layer setup failed: 14001`
+- `Unsupported SoC model`
+- `Invalid dsp arch`
+- unexpected wrapper artifact selection
+
+### Command template
+
+```bash
+# Run on target (or remote target via SSH)
+OUT=triage_$(date +%Y%m%d_%H%M%S)
+mkdir -p "$OUT"
+
+# 1) wrapper selection + env snapshot
+{
+  echo "QAI_QNN_RUNTIME=$QAI_QNN_RUNTIME"
+  echo "QAI_QNN_LIBS_DIR=$QAI_QNN_LIBS_DIR"
+  echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
+  echo "ADSP_LIBRARY_PATH=$ADSP_LIBRARY_PATH"
+  echo "PRODUCT_SOC=$PRODUCT_SOC"
+  echo "DSP_ARCH=$DSP_ARCH"
+} > "$OUT/env_snapshot.txt"
+
+# 2) validator baseline
+qnn-platform-validator --backend dsp --coreVersion > "$OUT/validator_core.txt" 2>&1 || true
+qnn-platform-validator --backend dsp --testBackend > "$OUT/validator_test.txt" 2>&1 || true
+
+# 3) runtime libs actually loaded (critical)
+export LD_DEBUG=libs
+timeout 15 python -u aipc onnx_inference.py > "$OUT/lddebug.log" 2>&1 || true
+grep -E 'libQnnHtp\\.so|libQnnSystem\\.so' "$OUT/lddebug.log" > "$OUT/loaded_qnn_libs.txt" || true
+
+# 4) rpc daemons
+journalctl -u adsprpcd -u cdsprpcd -n 300 --no-pager > "$OUT/rpcd_journal.txt" 2>&1 || true
+
+# 5) dmesg (if sudo available)
+sudo dmesg -T | egrep -i 'fastrpc|adsprpc|cdsp|rpc|qnn|htp|glink|remoteproc' \
+  > "$OUT/dmesg_filtered.txt" 2>&1 || true
+
+echo "Triage bundle saved to: $OUT"
+```
+
+### Quick interpretation
+- If wrapper-selected artifact is `.onnx` → artifact naming/resolution issue.
+- If `libQnnHtp.so` and `libQnnSystem.so` are from different parent directories → mixed runtime stack.
+- If validator passes but inference fails → check wrapper artifact + loaded libs before changing model/quantization.
+
+## onnxwrapper auto-selection + QNN libs dir mismatch (Linux ARM, context-binary mode)
+
+**Symptoms**:
+- `onnxwrapper` selects the wrong artifact (e.g. stale `*.so.bin` or even `.onnx` interpreted as model lib)
+- `Failed to load skel, error: 4000`
+- `Transport layer setup failed: 14001`
+- `Failed to parse platform config: 14001`
+- `Unsupported SoC model ...` / `Invalid dsp arch. Cannot determine stub`
+- CPU/HTP both fail when wrapper auto-picks wrong file
+
+**Likely causes**:
+1. Stale context binary/model file in working directory is matched first by wrapper naming rules.
+2. Wrapper loads an unintended QNN runtime folder (for example `aarch64-ubuntu-gcc9.4`) while deployment expects `aarch64-oe-linux-gcc11.2`.
+3. DSP daemon expects `libQnnHtpV73Skel.so.2` but only `libQnnHtpV73Skel.so` exists.
+
+**Action (verified fix sequence)**:
+1. Remove/backup stale matched context files near ONNX:
+   ```bash
+   cd <workdir>
+   mkdir -p _ctx_backup
+   mv -f <model>.so.bin _ctx_backup/ 2>/dev/null || true
+   mv -f <model>.onnx.so.bin _ctx_backup/ 2>/dev/null || true
+   mv -f <model>.htp.bin _ctx_backup/ 2>/dev/null || true
+   ```
+2. Deploy context binary using ONNX-matching name (recommended for wrapper):
+   ```bash
+   cp <generated_context>.bin <model>.onnx.so.bin
+   ```
+3. Force wrapper runtime libs dir explicitly:
+   ```bash
+   export QAI_QNN_LIBS_DIR="$QAIRT_SDK_ROOT/lib/aarch64-oe-linux-gcc11.2"
+   export LD_LIBRARY_PATH="$QAI_QNN_LIBS_DIR:$LD_LIBRARY_PATH"
+   export ADSP_LIBRARY_PATH="$QAIRT_SDK_ROOT/lib/hexagon-v73/unsigned"
+   ```
+4. Ensure skel SONAME-compatible link exists:
+   ```bash
+   cd "$QAIRT_SDK_ROOT/lib/hexagon-v73/unsigned"
+   sudo ln -sf libQnnHtpV73Skel.so libQnnHtpV73Skel.so.2
+   ```
+5. Run inference only through wrapper:
+   ```bash
+   export QAI_QNN_RUNTIME=HTP
+   python aipc onnx_inference.py
+   ```
+
+**Validation**:
+- Log should show selected model file as `<model>.onnx.so.bin`
+- Inference should complete (`inference_ok`) instead of transport/skel errors
+
 ## Escalate when
 - same failure persists after patch + retry
 - converter fails on required op with no feasible rewrite
@@ -192,3 +291,47 @@ The model is compiled with a newer version of the QAIRT SDK (which uses a newer 
    - Copy the compiled C++ library `esrgan.dll` directly to the workspace as `esrgan.dll.bin` (since the wrapper on Windows expects `.dll.bin`).
    - Run the direct QNN CPU software net-run:
      `qnn-net-run.exe --backend QnnCpu.dll --model esrgan.dll.bin --input_list input_list.txt`
+
+---
+
+## snpe-net-run --use_dsp segfault on ARM64 Windows (exit code 3221225477 / 0xC0000005)
+
+**Symptom**:
+- snpe-net-run.exe --use_dsp --container model.dlc crashes with exit code **3221225477** (0xC0000005 = STATUS_ACCESS_VIOLATION).
+- No error message other than Logging level is : SNPE_LOG_LEVEL_ERROR.
+- Running without --use_dsp produces: No backend could validate Op=... Type=Transpose.
+
+**Root cause: Architecture mismatch on ARM64 Windows with x86_64 emulated Python**:
+- Python runs under x86_64 emulation: platform.machine() returns AMD64, platform.processor() returns ARMv8 (... Qualcomm).
+- snpe-net-run.exe is a **pure AMD64** binary at in/x86_64-windows-msvc/snpe-net-run.exe.
+- When --use_dsp is passed, it tries to load QnnHtp.dll / SNPE.dll to access HTP hardware.
+- The AMD64 QnnHtp.dll at lib/x86_64-windows-msvc/QnnHtp.dll **cannot access HTP hardware** — x86_64 emulation doesn't forward NPU driver ioctls.
+- The ARM64X (CHPE hybrid) QnnHtp.dll at lib/arm64x-windows-msvc/QnnHtp.dll can access HTP but **cannot be loaded by a pure AMD64 binary** — the CHPE loader is only available in the native ARM64 Windows loader, not the x86_64 emulation layer.
+- Result: access violation crash.
+
+**Detection**:
+`python
+import platform
+print(platform.machine())    # AMD64 on emulated Python
+print(platform.processor())  # ARMv8 (64-bit) ... Qualcomm
+
+# Check PE architecture of snpe-net-run.exe
+import struct
+with open('snpe-net-run.exe', 'rb') as f:
+    f.seek(struct.unpack('<I', f.read(64)[0x3C:0x40])[0])
+    f.read(4)
+    m = struct.unpack('<H', f.read(2))[0]
+# 0x8664 = AMD64, 0xAA64 = ARM64, 0x01C4 = ARM64X(CHPE)
+`
+
+**Resolution**: Use the ipc wrapper (via qai_appbuilder / onnxwrapper.py) instead of snpe-net-run.exe:
+`powershell
+# The wrapper auto-discovers .dlc alongside .onnx and handles ARM64X bridging
+python aipc infer_onnx.py -- --model model.onnx --input input.jpg --output output.png
+`
+
+The wrapper uses qai_appbuilder Python package which properly loads the ARM64X (CHPE) hybrid runtime DLLs from lib/arm64x-windows-msvc/, bridging x86_64 emulated Python to native HTP hardware.
+
+**Notes**:
+- The [QNN] Selected QNN model file (runtime=HTP): ... log confirms the wrapper found the .dlc and routed correctly.
+- The benign Error 0x200: failed to close queue at exit can be ignored.

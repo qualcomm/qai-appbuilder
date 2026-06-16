@@ -1129,6 +1129,34 @@ class QNNModelWrapper(QNNContext):
         if not self._log_qnn_model_specs():
             raise RuntimeError("Failed to query QNN model specs. The model may be invalid or incompatible with this wrapper.")
 
+        # Optional net.json permute metadata (for no-preserve-io converted models).
+        # YAML `layout_qairt_none_convert` takes precedence; net.json is fallback.
+        self._effective_in_qnn_to_onnx_perms: Dict[str, List[int]] = {}
+        self._effective_out_qnn_to_onnx_perms: Dict[str, List[int]] = {}
+        graph_name = ""
+        try:
+            graph_name = str(self.getGraphName() or "")
+        except Exception:
+            graph_name = ""
+
+        net_in_perms: Dict[str, List[int]] = {}
+        net_out_perms: Dict[str, List[int]] = {}
+        try:
+            net_in_perms, net_out_perms = self._load_net_json_permutes(
+                resolved, model_path, graph_name=graph_name
+            )
+        except Exception as exc:
+            logger.debug(f"[QNN] net.json permute load failed: {exc}")
+        yaml_in_perms, yaml_out_perms = self._load_yaml_layout_permutes(self.io_config or {})
+        self._effective_in_qnn_to_onnx_perms = dict(net_in_perms)
+        self._effective_out_qnn_to_onnx_perms = dict(net_out_perms)
+        self._merge_yaml_permutes_with_warning(
+            self._effective_in_qnn_to_onnx_perms, yaml_in_perms, kind="input"
+        )
+        self._merge_yaml_permutes_with_warning(
+            self._effective_out_qnn_to_onnx_perms, yaml_out_perms, kind="output"
+        )
+
         if not self.io_config:
             self.io_config = self._autogen_io_config(runtime_tag=runtime_tag)
             autogen_path = self._autogen_yaml_path(resolved, model_name, runtime_tag or "htp")
@@ -1306,6 +1334,321 @@ class QNNModelWrapper(QNNContext):
         except Exception as e:
             logger.warning(f"[QNN] Failed to save auto-generated IO config to {path}: {e}")
 
+    @staticmethod
+    def _invert_permute(perm: List[int]) -> Optional[List[int]]:
+        try:
+            p = [int(x) for x in perm]
+        except Exception:
+            return None
+        n = len(p)
+        if sorted(p) != list(range(n)):
+            return None
+        inv = [0] * n
+        for i, v in enumerate(p):
+            inv[v] = i
+        return inv
+
+    @classmethod
+    def _normalize_perm_spec(cls, spec: Any, tensor_name: str, io_kind: str) -> Optional[List[int]]:
+        def _as_int_list(v: Any) -> Optional[List[int]]:
+            if not isinstance(v, (list, tuple)):
+                return None
+            try:
+                vals = [int(x) for x in v]
+            except Exception:
+                return None
+            n = len(vals)
+            if sorted(vals) != list(range(n)):
+                return None
+            return vals
+
+        if isinstance(spec, (list, tuple)):
+            parsed = _as_int_list(spec)
+            if parsed is None:
+                logger.warning(f"[QNN][{io_kind}:{tensor_name}] invalid permute list in YAML")
+            return parsed
+
+        if not isinstance(spec, dict):
+            return None
+
+        if "qnn_to_onnx" in spec:
+            parsed = _as_int_list(spec.get("qnn_to_onnx"))
+            if parsed is None:
+                logger.warning(f"[QNN][{io_kind}:{tensor_name}] invalid qnn_to_onnx in YAML")
+            return parsed
+
+        if "onnx_to_qnn" in spec:
+            parsed = _as_int_list(spec.get("onnx_to_qnn"))
+            if parsed is None:
+                logger.warning(f"[QNN][{io_kind}:{tensor_name}] invalid onnx_to_qnn in YAML")
+                return None
+            inv = cls._invert_permute(parsed)
+            if inv is None:
+                logger.warning(f"[QNN][{io_kind}:{tensor_name}] onnx_to_qnn is not invertible")
+                return None
+            return inv
+
+        if "permute_order_to_src" in spec:
+            parsed = _as_int_list(spec.get("permute_order_to_src"))
+            if parsed is None:
+                logger.warning(f"[QNN][{io_kind}:{tensor_name}] invalid permute_order_to_src in YAML")
+            return parsed
+
+        if "permute" in spec:
+            parsed = _as_int_list(spec.get("permute"))
+            if parsed is None:
+                logger.warning(f"[QNN][{io_kind}:{tensor_name}] invalid permute in YAML")
+            return parsed
+
+        return None
+
+    @classmethod
+    def _parse_layout_perm_section(cls, section: Any, io_kind: str) -> Dict[str, List[int]]:
+        out: Dict[str, List[int]] = {}
+        if isinstance(section, dict):
+            items = section.items()
+        elif isinstance(section, list):
+            items = []
+            for it in section:
+                if not isinstance(it, dict):
+                    continue
+                name = it.get("name")
+                if name:
+                    items.append((name, it))
+        else:
+            return out
+
+        for name, spec in items:
+            if not name:
+                continue
+            parsed = cls._normalize_perm_spec(spec, str(name), io_kind)
+            if parsed is not None:
+                out[str(name)] = parsed
+        return out
+
+    @classmethod
+    def _load_yaml_layout_permutes(cls, io_config: Dict[str, Any]) -> "Tuple[Dict[str, List[int]], Dict[str, List[int]]]":
+        section = io_config.get("layout_qairt_none_convert") if isinstance(io_config, dict) else None
+        if not isinstance(section, dict):
+            return {}, {}
+
+        inputs = cls._parse_layout_perm_section(section.get("inputs"), "Input")
+        outputs = cls._parse_layout_perm_section(section.get("outputs"), "Output")
+        if inputs or outputs:
+            logger.info(
+                f"[QNN] Loaded YAML layout_qairt_none_convert permutes: "
+                f"inputs={list(inputs.keys())}, outputs={list(outputs.keys())}"
+            )
+        return inputs, outputs
+
+    @staticmethod
+    def _merge_yaml_permutes_with_warning(
+        base: Dict[str, List[int]],
+        yaml_map: Dict[str, List[int]],
+        kind: str = "input",
+    ) -> None:
+        for name, yperm in (yaml_map or {}).items():
+            existing = base.get(name)
+            if existing is not None and existing != yperm:
+                logger.warning(
+                    f"[QNN][{kind}:{name}] YAML permute overrides net.json: "
+                    f"net.json={existing}, yaml={yperm}"
+                )
+            base[name] = yperm
+
+    @staticmethod
+    def _shape_to_int_list(shape: Any) -> Optional[List[int]]:
+        if not isinstance(shape, (list, tuple)):
+            return None
+        out: List[int] = []
+        for v in shape:
+            try:
+                out.append(int(v))
+            except Exception:
+                return None
+        return out
+
+    @staticmethod
+    def _infer_qnn_to_onnx_perm_from_shapes(
+        qnn_shape: Optional[List[int]],
+        onnx_shape: Optional[List[int]],
+    ) -> Optional[List[int]]:
+        """Infer QNN->ONNX transpose order from shape correspondence.
+
+        Returns permutation `p` such that:
+          onnx_tensor = np.transpose(qnn_tensor, p)
+        where onnx_shape[i] == qnn_shape[p[i]].
+        """
+        if not qnn_shape or not onnx_shape:
+            return None
+        if len(qnn_shape) != len(onnx_shape):
+            return None
+        rank = len(qnn_shape)
+        if qnn_shape == onnx_shape:
+            return list(range(rank))
+        # Ambiguous case: repeated dim values can produce multiple valid permutations.
+        # In this case do not guess from shapes; require explicit permute (YAML/net.json).
+        if len(set(qnn_shape)) != rank or len(set(onnx_shape)) != rank:
+            return None
+
+        used = [False] * rank
+        perm: List[int] = []
+        for dim in onnx_shape:
+            match = None
+            for idx, qd in enumerate(qnn_shape):
+                if not used[idx] and qd == dim:
+                    match = idx
+                    break
+            if match is None:
+                return None
+            used[match] = True
+            perm.append(match)
+        return perm
+
+    def _read_yaml_onnx_shape(self, tensor_name: str, io_kind: str, item: Dict[str, Any], cfg: Dict[str, Any]) -> Optional[List[int]]:
+        direct = self._shape_to_int_list(item.get("onnx_shape"))
+        if direct:
+            return direct
+
+        onnx_dims = cfg.get("onnx_dims") if isinstance(cfg, dict) else None
+        if isinstance(onnx_dims, dict):
+            sec = onnx_dims.get("inputs" if io_kind == "input" else "outputs")
+            if isinstance(sec, dict):
+                got = self._shape_to_int_list(sec.get(tensor_name))
+                if got:
+                    return got
+
+        layout_sec = cfg.get("layout_qairt_none_convert") if isinstance(cfg, dict) else None
+        if isinstance(layout_sec, dict):
+            sec = layout_sec.get("inputs" if io_kind == "input" else "outputs")
+            if isinstance(sec, dict):
+                spec = sec.get(tensor_name)
+                if isinstance(spec, dict):
+                    got = self._shape_to_int_list(spec.get("onnx_shape"))
+                    if got:
+                        return got
+        return None
+
+    def _shape_based_qnn_to_onnx_perm(
+        self,
+        tensor_name: str,
+        io_kind: str,
+        item: Dict[str, Any],
+        cfg: Dict[str, Any],
+        qnn_shape: Optional[Any],
+    ) -> Optional[List[int]]:
+        qshape = self._shape_to_int_list(qnn_shape)
+        onnx_shape = self._read_yaml_onnx_shape(tensor_name, io_kind, item, cfg)
+        perm = self._infer_qnn_to_onnx_perm_from_shapes(qshape, onnx_shape)
+        if perm is None and qshape and onnx_shape and len(qshape) == len(onnx_shape):
+            if qshape != onnx_shape and (len(set(qshape)) != len(qshape) or len(set(onnx_shape)) != len(onnx_shape)):
+                logger.warning(
+                    f"[QNN][{io_kind}:{tensor_name}] shape-based permute is ambiguous with repeated dims: "
+                    f"qnn_shape={qshape}, onnx_shape={onnx_shape}. "
+                    "Use layout_qairt_none_convert or net.json permute metadata."
+                )
+        if perm and perm != list(range(len(perm))):
+            logger.info(
+                f"[QNN][{io_kind}:{tensor_name}] shape-based permute inferred from YAML dims: "
+                f"qnn_shape={qshape}, onnx_shape={onnx_shape}, qnn_to_onnx={perm}"
+            )
+        return perm
+
+    @staticmethod
+    def _load_net_json_permutes(
+        model_path: str,
+        onnx_path: str = "",
+        graph_name: str = "",
+    ) -> "Tuple[Dict[str, List[int]], Dict[str, List[int]]]":
+        """Load permute_order_to_src for I/O tensors from QNN *_net.json.
+
+        Search order:
+          1. Resolved model dir/model stem (+ "_net.json")
+          2. ONNX dir/model stem (+ "_net.json")
+          3. Current working directory with model stems
+        """
+        tensor_type_input = 0
+        tensor_type_output = 1
+
+        def _try_load(path: str):
+            try:
+                import json as _json
+
+                data = _json.loads(Path(path).read_text(encoding="utf-8"))
+                tensors = data.get("graph", {}).get("tensors", {})
+                in_perms: Dict[str, List[int]] = {}
+                out_perms: Dict[str, List[int]] = {}
+                for name, tensor in tensors.items():
+                    ttype = tensor.get("type")
+                    perm = tensor.get("permute_order_to_src", [])
+                    if ttype == tensor_type_input:
+                        in_perms[name] = perm
+                    elif ttype == tensor_type_output:
+                        out_perms[name] = perm
+                logger.info(
+                    f"[QNN] Loaded net.json permutes from {path}: "
+                    f"inputs={list(in_perms.keys())}, outputs={list(out_perms.keys())}"
+                )
+                return in_perms, out_perms
+            except Exception as exc:
+                logger.debug(f"[QNN] Could not load net.json from {path}: {exc}")
+                return None
+
+        stems: List[str] = []
+        explicit_net_json = _env("QAI_NET_JSON", "")
+        if explicit_net_json and os.path.exists(explicit_net_json):
+            loaded = _try_load(os.path.abspath(explicit_net_json))
+            if loaded is not None:
+                return loaded
+
+        for p in [model_path, onnx_path]:
+            if not p:
+                continue
+            base = os.path.splitext(os.path.abspath(p))[0]
+            for suffix in (".so.bin", ".dll.bin", ".so", ".dll", ".bin"):
+                if base.endswith(suffix):
+                    base = base[: -len(suffix)]
+                    break
+            dirname, basename = os.path.split(base)
+            if basename.startswith("lib"):
+                stems.append(os.path.join(dirname, basename[3:]))
+            stems.append(base)
+
+        for p in [model_path, onnx_path]:
+            if not p:
+                continue
+            base = os.path.splitext(os.path.basename(p))[0]
+            for suffix in (".so.bin", ".dll.bin", ".so", ".dll", ".bin"):
+                if base.endswith(suffix):
+                    base = base[: -len(suffix)]
+                    break
+            if base.startswith("lib"):
+                stems.append(os.path.join(os.getcwd(), base[3:]))
+            stems.append(os.path.join(os.getcwd(), base))
+
+        if graph_name:
+            graph_name = graph_name.strip()
+            if graph_name:
+                for p in [model_path, onnx_path]:
+                    if not p:
+                        continue
+                    stems.append(os.path.join(os.path.dirname(os.path.abspath(p)), graph_name))
+                stems.append(os.path.join(os.getcwd(), graph_name))
+
+        seen = set()
+        for stem in stems:
+            candidate = stem + "_net.json"
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            if os.path.exists(candidate):
+                loaded = _try_load(candidate)
+                if loaded is not None:
+                    return loaded
+
+        logger.info("[QNN] No *_net.json found for permute metadata; using layout heuristics/YAML only.")
+        return {}, {}
+
     def _find_qnn_model_file(
         self,
         model_path: str,
@@ -1373,6 +1716,14 @@ class QNNModelWrapper(QNNContext):
                 logger.info(f"Found QNN model file: {os.path.basename(c)} (searched from {model_path})")
                 return (c, candidates) if return_candidates else c
 
+        # If resolved path is still .onnx, no companion artifact was found.
+        if model_path.lower().endswith(".onnx"):
+            raise FileNotFoundError(
+                f"No QNN/SNPE model file found for '{model_path}'. "
+                f"Place a .dlc, .dll, .so, or .bin file with the same base name "
+                f"alongside the .onnx file, then retry."
+            )
+
         logger.warning(f"No QNN model file found for '{model_path}', using original path.")
         return (model_path, candidates) if return_candidates else model_path
 
@@ -1423,20 +1774,69 @@ class QNNModelWrapper(QNNContext):
             dst_layout = _normalize_layout(item.get("layout")) or exp_layout.get(n)
             src_layout = _normalize_layout(item.get("src_layout"))
 
-            if not src_layout and arr.ndim in (4, 5) and dst_layout:
-                if arr.ndim == 4:
-                    if dst_layout == "NCHW" and arr.shape[-1] in (1, 3, 4):
-                        src_layout = "NHWC"
-                    elif dst_layout == "NHWC" and arr.shape[1] in (1, 3, 4):
-                        src_layout = "NCHW"
+            # net.json permute takes priority:
+            # permute_order_to_src is QNN->ONNX, so its inverse is ONNX->QNN for inputs.
+            net_in_perm = (
+                self._effective_in_qnn_to_onnx_perms.get(n, [])
+                if hasattr(self, "_effective_in_qnn_to_onnx_perms")
+                else []
+            )
+            is_identity = (not net_in_perm) or (net_in_perm == list(range(len(net_in_perm))))
+            if not is_identity:
+                src_to_qnn = [0] * len(net_in_perm)
+                for index, value in enumerate(net_in_perm):
+                    src_to_qnn[value] = index
+                if arr.ndim == len(src_to_qnn):
+                    arr = np.transpose(arr, src_to_qnn)
+                    arr = np.ascontiguousarray(arr)
+                    logger.info(f"[QNN][Input:{n}] net.json permute applied (ONNX->QNN): {src_to_qnn}")
                 else:
-                    if dst_layout == "NCTHW" and arr.shape[-1] in (1, 3, 4):
-                        src_layout = "NTHWC"
-                    elif dst_layout == "NTHWC" and arr.shape[1] in (1, 3, 4):
-                        src_layout = "NCTHW"
+                    logger.warning(
+                        f"[QNN][Input:{n}] net.json permute rank mismatch: "
+                        f"arr.ndim={arr.ndim}, perm_len={len(src_to_qnn)}; falling back to layout heuristics"
+                    )
+                    is_identity = True
 
-            if src_layout and dst_layout and src_layout != dst_layout:
-                arr = _convert_layout(arr, src_layout, dst_layout)
+            if is_identity:
+                qnn_shape = None
+                try:
+                    qnn_shape = self._get_expected_shape_by_name(n)
+                except Exception:
+                    qnn_shape = None
+                dim_qnn_to_onnx = self._shape_based_qnn_to_onnx_perm(
+                    n, "input", item, cfg, qnn_shape
+                )
+                dim_is_identity = (not dim_qnn_to_onnx) or (dim_qnn_to_onnx == list(range(len(dim_qnn_to_onnx))))
+                if not dim_is_identity:
+                    src_to_qnn = [0] * len(dim_qnn_to_onnx)
+                    for index, value in enumerate(dim_qnn_to_onnx):
+                        src_to_qnn[value] = index
+                    if arr.ndim == len(src_to_qnn):
+                        arr = np.transpose(arr, src_to_qnn)
+                        arr = np.ascontiguousarray(arr)
+                        logger.info(f"[QNN][Input:{n}] shape-based permute applied (ONNX->QNN): {src_to_qnn}")
+                        is_identity = False
+                    else:
+                        logger.warning(
+                            f"[QNN][Input:{n}] shape-based permute rank mismatch: "
+                            f"arr.ndim={arr.ndim}, perm_len={len(src_to_qnn)}; falling back to layout heuristics"
+                        )
+
+            if is_identity:
+                if not src_layout and arr.ndim in (4, 5) and dst_layout:
+                    if arr.ndim == 4:
+                        if dst_layout == "NCHW" and arr.shape[-1] in (1, 3, 4):
+                            src_layout = "NHWC"
+                        elif dst_layout == "NHWC" and arr.shape[1] in (1, 3, 4):
+                            src_layout = "NCHW"
+                    else:
+                        if dst_layout == "NCTHW" and arr.shape[-1] in (1, 3, 4):
+                            src_layout = "NTHWC"
+                        elif dst_layout == "NTHWC" and arr.shape[1] in (1, 3, 4):
+                            src_layout = "NCTHW"
+
+                if src_layout and dst_layout and src_layout != dst_layout:
+                    arr = _convert_layout(arr, src_layout, dst_layout)
 
             arr = np.ascontiguousarray(arr)
             logger.info(f"[QNN][Input:{n}] {_tensor_brief(arr)} layout={src_layout}->{dst_layout}")
@@ -1453,7 +1853,50 @@ class QNNModelWrapper(QNNContext):
             arr = np.asarray(o)
             src_layout = _normalize_layout(item.get("src_layout"))
             dst_layout = _normalize_layout(item.get("layout"))
-            if src_layout and dst_layout and src_layout != dst_layout and arr.ndim in (4, 5):
+
+            # net.json permute takes priority for outputs (QNN->ONNX directly).
+            net_out_perm = (
+                self._effective_out_qnn_to_onnx_perms.get(n, [])
+                if hasattr(self, "_effective_out_qnn_to_onnx_perms")
+                else []
+            )
+            is_identity = (not net_out_perm) or (net_out_perm == list(range(len(net_out_perm))))
+            if not is_identity:
+                if arr.ndim == len(net_out_perm):
+                    arr = np.transpose(arr, net_out_perm)
+                    arr = np.ascontiguousarray(arr)
+                    logger.info(f"[QNN][Output:{n}] net.json permute applied (QNN->ONNX): {net_out_perm}")
+                else:
+                    logger.warning(
+                        f"[QNN][Output:{n}] net.json permute rank mismatch: "
+                        f"arr.ndim={arr.ndim}, perm_len={len(net_out_perm)}; falling back to layout heuristics"
+                    )
+                    is_identity = True
+
+            if is_identity:
+                qnn_shape = None
+                if isinstance(self._expected_output_shapes, (list, tuple)):
+                    for out_name, out_shape in zip(out_names, self._expected_output_shapes):
+                        if out_name == n:
+                            qnn_shape = out_shape
+                            break
+                dim_qnn_to_onnx = self._shape_based_qnn_to_onnx_perm(
+                    n, "output", item, cfg, qnn_shape
+                )
+                dim_is_identity = (not dim_qnn_to_onnx) or (dim_qnn_to_onnx == list(range(len(dim_qnn_to_onnx))))
+                if not dim_is_identity:
+                    if arr.ndim == len(dim_qnn_to_onnx):
+                        arr = np.transpose(arr, dim_qnn_to_onnx)
+                        arr = np.ascontiguousarray(arr)
+                        logger.info(f"[QNN][Output:{n}] shape-based permute applied (QNN->ONNX): {dim_qnn_to_onnx}")
+                        is_identity = False
+                    else:
+                        logger.warning(
+                            f"[QNN][Output:{n}] shape-based permute rank mismatch: "
+                            f"arr.ndim={arr.ndim}, perm_len={len(dim_qnn_to_onnx)}; falling back to layout heuristics"
+                        )
+
+            if is_identity and src_layout and dst_layout and src_layout != dst_layout and arr.ndim in (4, 5):
                 arr = _convert_layout(arr, src_layout, dst_layout)
             final_outs.append(arr)
             logger.info(f"[QNN][Output:{n}] {_tensor_brief(arr)}")
@@ -1518,7 +1961,7 @@ class SessionOptions:
                     if os.path.isdir(_arm64x):
                         _toolchain = "arm64x-windows-msvc"
                     else:
-                    _toolchain = "x86_64-windows-msvc"
+                        _toolchain = "x86_64-windows-msvc"
                 elif _machine == "aarch64":
                     _toolchain = "aarch64-ubuntu-gcc9.4"
                 else:

@@ -48,8 +48,10 @@ def run_generator(
     model_path: str | None = None,
     dlc_path: str | None = None,
     output_path: str | None = None,
+    output_dir: str | None = None,
     backend: str = "htp",
     profiling: bool = False,
+    config_file: str | None = None,
 ) -> None:
     sdk_root = os.environ.get("QAIRT_SDK_ROOT")
     if not sdk_root:
@@ -99,6 +101,16 @@ def run_generator(
 
     binary_name = _normalize_binary_basename(output_path, input_for_naming)
     command.extend(["--binary_file", binary_name])
+    if output_dir:
+        output_dir = os.path.abspath(output_dir)
+        os.makedirs(output_dir, exist_ok=True)
+        command.extend(["--output_dir", output_dir])
+    if config_file:
+        config_file = os.path.abspath(config_file)
+        if not os.path.exists(config_file):
+            print(f"Error: config file not found: {config_file}")
+            sys.exit(2)
+        command.extend(["--config_file", config_file])
 
     if profiling:
         command.extend(["--profiling_level", "detailed", "--profiling_option", "optrace"])
@@ -114,11 +126,12 @@ def run_generator(
         print(f"Error executing command: {error}")
         sys.exit(1)
 
-    generated = os.path.join("output", f"{binary_name}.bin")
+    generated_base = output_dir or "output"
+    generated = os.path.join(generated_base, f"{binary_name}.bin")
     if not os.path.exists(generated):
-        found = sorted(str(path) for path in Path("output").rglob("*.bin")) if os.path.isdir("output") else []
+        found = sorted(str(path) for path in Path(generated_base).rglob("*.bin")) if os.path.isdir(generated_base) else []
         if not found:
-            print("Error: output context binary not found in ./output")
+            print(f"Error: output context binary not found in {generated_base}")
             sys.exit(1)
         generated = found[0]
 
@@ -137,8 +150,13 @@ if __name__ == "__main__":
     input_group.add_argument("--model", help="Path to the model .dll/.so file")
     input_group.add_argument("--dlc", help="Path to the input .dlc file")
     parser.add_argument("--output", help="Output path for context binary")
+    parser.add_argument("--output_dir", help="Output directory for context binary (passed to generator)")
     parser.add_argument("--backend", choices=["htp", "cpu"], default="htp", help="QNN backend library to use")
     parser.add_argument("--profiling", action="store_true", help="Enable HTP optrace profiling")
+    parser.add_argument(
+        "--config_file",
+        help="Optional backend extension JSON (recommended for ARM target context generation with explicit soc_id/dsp_arch)",
+    )
 
     args = parser.parse_args()
-    run_generator(args.model, args.dlc, args.output, args.backend, args.profiling)
+    run_generator(args.model, args.dlc, args.output, args.output_dir, args.backend, args.profiling, args.config_file)

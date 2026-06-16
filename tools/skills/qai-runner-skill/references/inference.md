@@ -34,6 +34,101 @@ Linux cross-host/cross-arch clarification:
 - If context-binary generation fails while targeting Linux from a different host architecture, you may skip context-binary and run inference with `.so` only after the required host-context troubleshooting above is completed.
 - Record the skip reason in the project issue log.
 
+### Linux ARM context-binary wrapper resolution (important)
+
+When using `python aipc ...` with `onnxwrapper.py`, the wrapper auto-selects a QNN artifact by filename priority near the `.onnx` file.
+Stale or mismatched files can cause wrong artifact selection and misleading transport errors.
+
+Recommended practice for context-binary mode:
+
+1. Clean stale matched files first:
+```bash
+cd <workdir>
+mkdir -p _ctx_backup
+mv -f <model>.so.bin _ctx_backup/ 2>/dev/null || true
+mv -f <model>.onnx.so.bin _ctx_backup/ 2>/dev/null || true
+mv -f <model>.htp.bin _ctx_backup/ 2>/dev/null || true
+```
+
+2. Deploy context binary with ONNX-matching name:
+```bash
+cp <generated_context>.bin <model>.onnx.so.bin
+```
+
+3. Pin runtime libraries explicitly (avoid unintended auto-selected toolchain dir):
+```bash
+export QAI_QNN_LIBS_DIR="$QAIRT_SDK_ROOT/lib/aarch64-oe-linux-gcc11.2"
+export LD_LIBRARY_PATH="$QAI_QNN_LIBS_DIR:$LD_LIBRARY_PATH"
+export ADSP_LIBRARY_PATH="$QAIRT_SDK_ROOT/lib/hexagon-v73/unsigned"
+```
+
+4. Ensure skel SONAME-compatible alias exists if daemon expects `.so.2`:
+```bash
+cd "$QAIRT_SDK_ROOT/lib/hexagon-v73/unsigned"
+sudo ln -sf libQnnHtpV73Skel.so libQnnHtpV73Skel.so.2
+```
+
+5. Run HTP inference through wrapper:
+```bash
+export QAI_QNN_RUNTIME=HTP
+python aipc path/to/inference_script.py
+```
+
+If logs show:
+- `Failed to load skel, error: 4000`
+- `Transport layer setup failed: 14001`
+- `Failed to parse platform config: 14001`
+
+first verify wrapper-selected model filename and `QAI_QNN_LIBS_DIR` path before changing model or quantization flow.
+
+### Acceptance environment snapshot (recommended)
+
+Before final remote acceptance run, record the effective runtime environment.
+For Linux targets, use:
+```bash
+SNAPSHOT=acceptance_env_snapshot.txt
+{
+  echo "QAI_QNN_RUNTIME=$QAI_QNN_RUNTIME"
+  echo "QAI_QNN_LIBS_DIR=$QAI_QNN_LIBS_DIR"
+  echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
+  echo "ADSP_LIBRARY_PATH=$ADSP_LIBRARY_PATH"
+  echo "PRODUCT_SOC=$PRODUCT_SOC"
+  echo "DSP_ARCH=$DSP_ARCH"
+} | tee "$SNAPSHOT"
+```
+
+Do not declare final acceptance pass if required fields are missing.
+On non-Linux targets, capture equivalent runtime/environment fields with platform-appropriate commands.
+
+### Runtime libs consistency check (platform-aware)
+
+Before final acceptance, verify runtime core libraries are resolved from the same intended runtime stack.
+
+- Linux targets:
+  - `libQnnHtp.so`
+  - `libQnnSystem.so`
+- Windows targets:
+  - corresponding QNN runtime core libraries from the same runtime family
+    (for example, avoid mixing different runtime family/toolchain directories).
+
+Linux example:
+```bash
+export LD_DEBUG=libs
+timeout 15 python -u aipc onnx_inference.py > lddebug.log 2>&1 || true
+grep -E 'libQnnHtp\\.so|libQnnSystem\\.so' lddebug.log
+```
+
+If resolved parent directories/toolchain families differ, treat it as mixed runtime stack.
+Do not declare acceptance pass until runtime path alignment is fixed.
+
+### Preflight checklist (final acceptance)
+
+- Confirm wrapper-selected artifact is intended QNN artifact (not `.onnx`).
+- Confirm runtime core libraries resolve from a single intended runtime stack.
+- Confirm acceptance environment snapshot is complete and saved.
+
+If any item fails, fix preflight first, then rerun acceptance.
+
 > **⚠️ IMPORTANT**: Pass the `.onnx` file path to `InferenceSession`. The wrapper searches for a matching QAIRT model file **in the same directory**. The QAIRT model **must** exist with the correct naming — if not found, loading will fail. See [Model File Resolution](#model-file-resolution) below.
 
 **Debugging**: the same inference script can be run with `python aipc script.py` (QAIRT via `onnxwrapper`) or with `python script.py` (standard ONNX via `onnxruntime`) to compare outputs between QAIRT and ONNX baseline.
@@ -249,6 +344,8 @@ outputs:
    - `x86_64` Linux → `x86_64-linux-clang`
    - Windows → `arm64x-windows-msvc` (preferred, works on both x86_64 and ARM64) or `x86_64-windows-msvc` (fallback)
 3. `qai_appbuilder/libs/` — bundled libs (fallback)
+
+> ⚠️ For Linux ARM targets where deployment uses `aarch64-oe-linux-gcc11.2` runtime libs, set `QAI_QNN_LIBS_DIR` explicitly to that directory to avoid unintended auto-resolution.
 
 > ⚠️ **ARM64 Windows toolchain detection (onnxwrapper.py:1482):**
 > On Windows, the wrapper now checks for `arm64x-windows-msvc` first. If it exists

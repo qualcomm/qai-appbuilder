@@ -43,14 +43,44 @@ qairt_profile_output/qnn-profiling-data_0.log
 
 **Step 4: Convert logs to Chrome Trace format**
 
+create optrace_config.json
+```
+{
+  "features":
+  {
+      "enable_input_output_flow_events": true,
+      "enable_sequencer_flow_events": true,
+      "htp_json": true,
+      "runtrace": true,
+      "memory_info": true,
+      "traceback": true,
+      "qhas_schema": true,
+      "qhas_json": true
+  }
+}
+```
+
 ```bash
 ${QAIRT_SDK_ROOT}/bin/x86_64-linux-clang/qnn-profile-viewer \
     --reader ${QAIRT_SDK_ROOT}/lib/x86_64-linux-clang/libQnnChrometraceProfilingReader.so \
     --input_log qairt_profile_output/qnn-profiling-data_0.log \
-    --output chromeTrace.json
+    --output chromeTrace.json \
+    --schematic qnn-onnx-convert_gernerated_bin.bin \
+    --config optrace_config.json
 ```
 
-> ⚠️ **CAUTION**: Under detailed HTP `optrace` profiling, the Chrometrace reader library (`libQnnChrometraceProfilingReader.so`) may fail with `Error printing stats.` due to incompatibilities with microsecond cycle metrics. If this occurs, use the following robust fallback strategies:
+**Windows equivalent:**
+```powershell
+${env:QAIRT_SDK_ROOT}\bin\x86_64-windows-msvc\qnn-profile-viewer.exe `
+    --reader ${env:QAIRT_SDK_ROOT}\lib\x86_64-windows-msvc\QnnChrometraceProfilingReader.dll `
+    --input_log qairt_profile_output\qnn-profiling-data_0.log `
+    --output chromeTrace.json `
+    --schematic qnn-onnx-convert_gernerated_bin.bin `
+    --config optrace_config.json
+    
+```
+
+> ⚠️ **CAUTION**: Under detailed HTP `optrace` profiling, the Chrometrace reader library (`libQnnChrometraceProfilingReader.so` on Linux, `QnnChrometraceProfilingReader.dll` on Windows) may fail with `Error printing stats.` due to incompatibilities with microsecond cycle metrics. If this occurs, use the following robust fallback strategies:
 >
 > **Fallback A: HTP Reader (Recommended for HTP hardware stats)**
 > ```bash
@@ -61,6 +91,14 @@ ${QAIRT_SDK_ROOT}/bin/x86_64-linux-clang/qnn-profile-viewer \
 > ```
 > *(This will also print extremely rich, human-readable per-layer Execution Cycles to stdout, which you can redirect to a `.txt` file).*
 >
+> **Windows equivalent:**
+> ```powershell
+> ${env:QAIRT_SDK_ROOT}\bin\x86_64-windows-msvc\qnn-profile-viewer.exe `
+>     --reader ${env:QAIRT_SDK_ROOT}\lib\x86_64-windows-msvc\QnnHtpProfilingReader.dll `
+>     --input_log qairt_profile_output\qnn-profiling-data_0.log `
+>     --output htp_stats.json
+> ```
+>
 > **Fallback B: JSON Reader & Chrome Trace Converter**
 > First, parse the profile log into standard QNN JSON:
 > ```bash
@@ -68,6 +106,13 @@ ${QAIRT_SDK_ROOT}/bin/x86_64-linux-clang/qnn-profile-viewer \
 >     --reader ${QAIRT_SDK_ROOT}/lib/x86_64-linux-clang/libQnnJsonProfilingReader.so \
 >     --input_log qairt_profile_output/qnn-profiling-data_0.log \
 >     --output qairt_profile_output/profile_json.json
+> ```
+> **Windows equivalent:**
+> ```powershell
+> ${env:QAIRT_SDK_ROOT}\bin\x86_64-windows-msvc\qnn-profile-viewer.exe `
+>     --reader ${env:QAIRT_SDK_ROOT}\lib\x86_64-windows-msvc\QnnJsonProfilingReader.dll `
+>     --input_log qairt_profile_output\qnn-profiling-data_0.log `
+>     --output qairt_profile_output\profile_json.json
 > ```
 > Then, run the skill utility `convert_qnn_to_trace.py` to translate this QNN JSON format into a standard, visualize-friendly Google Chrome Trace JSON (`chromeTrace.json`):
 > ```bash
@@ -92,15 +137,19 @@ Open `chrome://tracing` in Google Chrome and load `chromeTrace.json` to inspect 
 
 The context binary must be regenerated with optrace instrumentation before profiling data can be collected.
 
-**Step 1: Regenerate context binary with profiling enabled**
+**Step 1: Regenerate context binary with optrace instrumentation**
 
-```bash
-python scripts/aipc_dev_gen_contextbin.py --model /path/to/libmodel.so --profiling
+Follow the full procedure in [`references/host_context_binary_gen.md`](host_context_binary_gen.md) to regenerate the context binary.
+When running `qnn-context-binary-generator`, add the profiling flags:
+
+```
+--profiling_level detailed --profiling_option optrace
 ```
 
-This passes `--profiling_level detailed --profiling_option optrace` to `qnn-context-binary-generator`, embedding optrace instrumentation in the output `.bin`.
+These flags embed optrace instrumentation in the output context `.bin`. Note that for visualization, you will also need the schematic binary (which is the `.bin` file output directly by `qnn-onnx-converter`, distinct from the compiled context binary).
+See the [Additional CLI Options](host_context_binary_gen.md#additional-cli-options) section of that reference for details.
 
-**Steps 2–5**: Same as the model library path above, using the generated `.bin` as the model path.
+**Steps 2–5**: Same as the model library path above, using the newly generated `.bin` as the model path.
 
 ## SNPE Profiling
 
@@ -200,31 +249,20 @@ Notes:
 
 To generate complete QHAS (Qualcomm Hardware Analysis System) interactive HTML reports and advanced Chrome Traces (with HTP topology, dataflows, memory graphs, and sequencer tracing):
 
-1. **Generate the Schematic Binary during Context Binary creation**:
-   Ensure you pass `--profiling_level detailed --profiling_option optrace` to `qnn-context-binary-generator`:
-   ```bash
-   qnn-context-binary-generator \
-       --profiling_level detailed \
-       --profiling_option optrace \
-       --backend ${QAIRT_SDK_ROOT}/lib/${TARGET_ARCH}/libQnnHtp.so \
-       --model libmodel.so \
-       --binary_file model.bin
-   ```
-   This will output:
-   - `model.bin` (Context Binary)
-   - `model_schematic.bin` (Schematic file required for QHAS visualization)
+1. **Locate the Schematic Binary from your ONNX conversion**:
+   Note that you need the schematic binary (the `.bin` file output directly by `qnn-onnx-converter`, e.g., `model.bin`) for visualization. This is distinct from the compiled context binary.
 
 2. **Run inference with Optrace detailed profiling**:
    Run your `qnn-net-run` or ONNX wrapper with detailed optrace profiling to generate the raw log file:
    - `qairt_profile_output/qnn-profiling-data_0.log`
 
 3. **Generate QHAS HTML Dashboard and Advanced Traces**:
-   Run `qnn-profile-viewer` specifying both the raw log and the **schematic binary** using the `libQnnHtpOptraceProfilingReader.so` reader library:
+   Run `qnn-profile-viewer` specifying both the raw log and the **schematic binary** (the model `.bin` from the converter step) using the `libQnnHtpOptraceProfilingReader.so` reader library:
    ```bash
    qnn-profile-viewer \
        --reader ${QAIRT_SDK_ROOT}/lib/${TARGET_ARCH}/libQnnHtpOptraceProfilingReader.so \
        --input_log qairt_profile_output/qnn-profiling-data_0.log \
-       --schematic model_schematic.bin \
+       --schematic model.bin \
        --output qairt_profile_output/chromeTrace_optrace.json
    ```
 
@@ -233,3 +271,18 @@ This will automatically output the following elite diagnostic reports in the out
 - `chromeTrace_optrace_htp.json`: Highly detailed HTP sequencer and memory hardware trace.
 - `chromeTrace_optrace_qnn_htp_analysis_summary.html`: Interactive QHAS HTML diagnostic dashboard (includes graph visualization, op-by-op info, sorting, filtering, and latency charts).
 - `chromeTrace_optrace_qnn_htp_analysis_summary.json`: Comprehensive QHAS JSON raw metrics file containing hardware-level topology analysis.
+
+
+## Identifying Potential Performance Issues
+
+When analyzing profiling data, watch for these common bottlenecks:
+
+- **CPU Fallback**: Operations that unexpectedly execute on the CPU instead of the hardware accelerator (HTP/GPU), causing significant latency spikes
+- **Memory Transitions**: Inefficient data movement between different memory hierarchies (e.g., DDR ↔ HTP cache), which can be a major bottleneck
+- **Operator Fusion Opportunities**: Adjacent operators that could be fused into a single operation to reduce memory bandwidth and improve cache locality
+- **Synchronization Overhead**: Unnecessary sync points between CPU and accelerator causing pipeline stalls; look for idle periods between kernel launches
+- **Bandwidth Saturation**: Operations hitting memory bandwidth limits (DDR or HTP cache), resulting in sustained bottlenecks visible across multiple layers
+- **Data Format Conversions**: Expensive layout or precision conversions (e.g., float32 ↔ int8) between operators that add significant overhead
+- **Suboptimal Kernel Selection**: Operations using slower implementations when faster alternatives are available; compare per-op execution times against expected performance
+- **Load Imbalance**: Uneven computation distribution across accelerator resources (e.g., under-utilized HTP cores), leaving processing capability idle
+- **Input/Output Bottlenecks**: Model input preprocessing and output postprocessing times dominating overall latency; optimize I/O transfer and format conversions 

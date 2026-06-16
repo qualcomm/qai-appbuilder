@@ -193,6 +193,8 @@ Context binary generation requires two config files that specify the target SoC.
 | `perf_profile` | optional | `burst` for latency-focused inference |
 | `rpc_control_latency` | optional | RPC dispatch latency hint in microseconds |
 
+> **Note**: `graph_names` must match the compiled QNN graph name. For AIMET outputs, this is often the library stem (e.g., `{MODEL_NAME}_ptq_q`), not the original ONNX model name.
+
 ### 2b. Backend extension wrapper JSON
 
 ```json
