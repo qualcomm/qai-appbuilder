@@ -21,28 +21,18 @@ import android.content.pm.ServiceInfo;
 import android.graphics.drawable.Icon;
 import android.net.Uri;
 import android.os.Binder;
-import android.os.Build;
-import android.os.Environment;
-import android.os.FileUtils;
 import android.os.IBinder;
-import android.os.Message;
-import android.provider.Settings;
 import android.system.Os;
 import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
 
-import org.json.JSONObject;
-
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -60,7 +50,15 @@ class MyNativeLib {
 
 public class ForegroundService extends Service {
     private final static String TAG = "ForegroundService";
+    private String modelRoot;
+    private static final String DEFAULT_MODEL_NAME = "llm_llama3.1";
     static {
+        try {
+            // Ensure ADSP_LIBRARY_PATH is set before loading native libs.
+            Os.setenv("ADSP_LIBRARY_PATH", "/data/local/tmp/qnn;/vendor/lib/rfsa/adsp", true);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
         System.loadLibrary("JNIGenieAPIService");
         System.loadLibrary("GenieAPIService");
     }
@@ -72,7 +70,6 @@ public class ForegroundService extends Service {
     private int mLogLevelIndex = -1;
     private final IBinder binder = new LocalBinder();
     private MyNativeLib nativeLib;
-    private String modelsPathRoot = null;
 
     public class LocalBinder extends Binder {
         ForegroundService getService() {
@@ -93,13 +90,26 @@ public class ForegroundService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        modelRoot = getApplicationContext().getFilesDir().getAbsolutePath() + "/GenieModels";
         if (LogUtils.LOG_DIRECTORY.isEmpty()) {
             LogUtils.LOG_DIRECTORY = getApplicationContext().getFilesDir().getAbsolutePath() + File.separator + "Logs";
         }
         try {
-            String nativeLibPath = getApplicationContext().getApplicationInfo().nativeLibraryDir;
-            Os.setenv("ADSP_LIBRARY_PATH", nativeLibPath, true);
-            Os.setenv("LD_LIBRARY_PATH", nativeLibPath, true);
+            boolean isAutomotive =
+                    getPackageManager().hasSystemFeature(
+                            PackageManager.FEATURE_AUTOMOTIVE);
+            if (isAutomotive) {
+                String appNativeDir = getApplicationContext().getApplicationInfo().nativeLibraryDir;
+                QnnLibCopier.copyIfNeeded(getApplicationContext());
+                Os.setenv("ADSP_LIBRARY_PATH", "/data/local/tmp/qnn;/vendor/lib/rfsa/adsp", true);
+                Os.setenv("LD_LIBRARY_PATH", appNativeDir, true);
+                LogUtils.logDebug(TAG, "ADSP_LIBRARY_PATH=" + System.getenv("ADSP_LIBRARY_PATH"), LogUtils.LOG_DEBUG);
+                LogUtils.logDebug(TAG, "LD_LIBRARY_PATH=" + System.getenv("LD_LIBRARY_PATH"), LogUtils.LOG_DEBUG);
+            } else {
+                String nativeLibPath = getApplicationContext().getApplicationInfo().nativeLibraryDir;
+                Os.setenv("ADSP_LIBRARY_PATH", nativeLibPath, true);
+                Os.setenv("LD_LIBRARY_PATH", nativeLibPath, true);
+            }
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -111,15 +121,32 @@ public class ForegroundService extends Service {
         SharedPreferences sharedPreferences = getSharedPreferences("LogLevel",Context.MODE_PRIVATE);
         mLogLevelIndex = sharedPreferences.getInt("level",2);
         //new RecordSystemLogcatTask().start();
-        boolean isCar =
-                getPackageManager().hasSystemFeature(
-                        PackageManager.FEATURE_AUTOMOTIVE);
-        if (isCar) {
-            modelsPathRoot = getFilesDir().toString();
-        } else {
-            modelsPathRoot = "/sdcard/GenieModels";
-        }
         LogUtils.logDebug(TAG,"onCreate called ",LogUtils.LOG_DEBUG);
+    }
+
+    private String resolveModelRoot() {
+        String internal = getApplicationContext().getFilesDir().getAbsolutePath() + "/GenieModels";
+        String[] candidates = {
+                internal,
+                "/storage/emulated/10/GenieModels",
+                "/sdcard/GenieModels",
+                "/data/media/10/GenieModels",
+                "/data/local/tmp"
+        };
+        for (String candidate : candidates) {
+            String first = getFirstModel(candidate);
+            if (first != null) {
+                LogUtils.logDebug(TAG, "Using model root: " + candidate, LogUtils.LOG_DEBUG);
+                return candidate;
+            }
+            File cfg = new File(candidate + "/" + DEFAULT_MODEL_NAME + "/config.json");
+            if (cfg.exists()) {
+                LogUtils.logDebug(TAG, "Using model root (default model present): " + candidate, LogUtils.LOG_DEBUG);
+                return candidate;
+            }
+        }
+        LogUtils.logDebug(TAG, "No valid model root found. Checked: " + String.join(", ", candidates), LogUtils.LOG_ERROR);
+        return internal;
     }
 
     private void stopServiceSession() {
@@ -159,7 +186,7 @@ public class ForegroundService extends Service {
         for(int iFileLength = 0; iFileLength < subFile.length; iFileLength++) {
             if (subFile[iFileLength].isDirectory()) {
                 String filename = subFile[iFileLength].getName();
-                if (isValidModel(filename)) {
+                if (isValidModel(filename, fileDir)) {
                     return filename;
                 }
             }
@@ -167,15 +194,11 @@ public class ForegroundService extends Service {
         return null;
     }
 
-    private boolean isValidModel(String dirName) {
+    private boolean isValidModel(String dirName, String modelRoot) {
         LogUtils.logDebug(TAG, "isValidModel : " + dirName, LogUtils.LOG_DEBUG);
-        String configFile = modelsPathRoot + "/" + dirName + "/config.json";
-        LogUtils.logDebug(TAG, "configFile path : " + configFile, LogUtils.LOG_DEBUG);
+        String configFile = modelRoot + "/" + dirName + "/config.json";
         File file = new File(configFile);
-        LogUtils.logDebug(TAG, "configFile : " + configFile + " can read : " + file.canRead(), LogUtils.LOG_DEBUG);
-        LogUtils.logDebug(TAG, "configFile : " + configFile + " exists : " + file.exists(), LogUtils.LOG_DEBUG);
         if (file.exists()) {
-            LogUtils.logDebug(TAG, "configFile : " + configFile + " has been found.", LogUtils.LOG_DEBUG);
             return true;
         }
         return false;
@@ -191,16 +214,26 @@ public class ForegroundService extends Service {
                     + "Log:" + String.valueOf(newFileIndex);
             LogUtils.logDebug(TAG,"logFileName = " + logFileName + " mLogLevelIndex = " + mLogLevelIndex,LogUtils.LOG_DEBUG);
             nativeLib = new MyNativeLib();
-            String currentModel = null;
-            currentModel = getFirstModel(modelsPathRoot);
+            modelRoot = resolveModelRoot();
+            String currentModel = getFirstModel(modelRoot);
             String configFile = null;
             if (currentModel != null) {
-                configFile = modelsPathRoot + "/" + currentModel + "/config.json";
+                configFile = modelRoot + "/" + currentModel + "/config.json";
             } else {
-                LogUtils.logDebug(TAG,"no config file in " + modelsPathRoot,LogUtils.LOG_DEBUG);
+                configFile = modelRoot + "/" + DEFAULT_MODEL_NAME + "/config.json";
+            }
+            LogUtils.logDebug(TAG,"config file = " + configFile,LogUtils.LOG_DEBUG);
+            File cfg = new File(configFile);
+            LogUtils.logDebug(TAG,"config exists=" + cfg.exists() + " size=" + (cfg.exists() ? cfg.length() : -1),LogUtils.LOG_DEBUG);
+            File prompt = new File(modelRoot + "/" + (currentModel != null ? currentModel : DEFAULT_MODEL_NAME) + "/prompt.json");
+            LogUtils.logDebug(TAG,"prompt exists=" + prompt.exists() + " path=" + prompt.getAbsolutePath(),LogUtils.LOG_DEBUG);
+            File modelDir = new File(modelRoot + "/" + (currentModel != null ? currentModel : DEFAULT_MODEL_NAME) + "/models");
+            LogUtils.logDebug(TAG,"model dir exists=" + modelDir.exists() + " path=" + modelDir.getAbsolutePath(),LogUtils.LOG_DEBUG);
+            LogUtils.logDebug(TAG,"cinfig file = " + configFile,LogUtils.LOG_DEBUG);
+            if (!cfg.exists()) {
+                LogUtils.logDebug(TAG, "No valid config.json found; aborting service start.", LogUtils.LOG_ERROR);
                 return;
             }
-            LogUtils.logDebug(TAG,"cinfig file = " + configFile,LogUtils.LOG_DEBUG);
             String[] commandArgs = {"main", "-c", configFile, "-l", "-d", mLogLevelIndex != -1 ? String.valueOf(mLogLevelIndex) : "2", "-f", logFileName};
             nativeLib.runService(commandArgs);
             System.out.println("after runService");
@@ -268,7 +301,11 @@ public class ForegroundService extends Service {
         int index = 0;
         LogUtils.logDebug(TAG,"the file number : " + files.length,LogUtils.LOG_DEBUG);
         for (int i = files.length-1; i >=0; i--) {
-            index = Integer.valueOf(files[i].getName().substring(4)).intValue();
+            String name = files[i].getName();
+            if (name.length() <= 4 || !name.startsWith("Log:")) {
+                continue;
+            }
+            index = Integer.valueOf(name.substring(4)).intValue();
             if (index >= 9) {
                 files[i].delete();
                 continue;

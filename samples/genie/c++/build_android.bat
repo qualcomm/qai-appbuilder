@@ -15,7 +15,7 @@ REM Configuration Section - Modify these paths according to your environment
 REM =============================================================================
 
 REM Set QNN SDK Root (Qualcomm AI Runtime SDK)
-set "QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.42.0.251225\"
+set "QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.46.0.260424\"
 
 REM Set Android NDK Root
 set "NDK_ROOT=C:\work\android-ndk-r26d-windows\android-ndk-r26d\" 
@@ -54,10 +54,25 @@ if not exist "%NDK_MAKE%" (
     exit /b 1
 )
 
+REM Locate the native Windows ninja.exe from PATH. We search for "ninja.exe"
+REM (not "ninja") so the depot_tools ninja shell-script wrapper, which has no
+REM .exe extension, is skipped -- CMake would otherwise pick it and fail with
+REM "%1 is not a valid Win32 application". Take the first match in PATH order.
+set "NINJA_EXE="
+for /f "delims=" %%I in ('where ninja.exe 2^>nul') do (
+    if not defined NINJA_EXE set "NINJA_EXE=%%I"
+)
+if not defined NINJA_EXE (
+    echo ERROR: ninja.exe not found in PATH.
+    echo Please add a directory containing ninja.exe to your PATH.
+    exit /b 1
+)
+
 echo Environment validated successfully.
 echo   QNN_SDK_ROOT: %QNN_SDK_ROOT%
 echo   NDK_ROOT: %NDK_ROOT%
 echo   NDK_MAKE: %NDK_MAKE%
+echo   NINJA_EXE: %NINJA_EXE%
 echo.
 
 REM =============================================================================
@@ -103,6 +118,7 @@ cd /d "%LIBSAMPLERATE_BUILD%"
 
 echo Configuring libsamplerate with CMake...
 cmake -G "Ninja" ^
+      -DCMAKE_MAKE_PROGRAM="%NINJA_EXE%" ^
       -DCMAKE_TOOLCHAIN_FILE="%NDK_ROOT%build\cmake\android.toolchain.cmake" ^
       -DANDROID_ABI=arm64-v8a ^
       -DANDROID_PLATFORM=android-21 ^

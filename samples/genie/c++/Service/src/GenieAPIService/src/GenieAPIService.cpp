@@ -195,7 +195,11 @@ void GenieService::setupSignalHandlers()
         exit(signum);
     };
     signal(SIGINT, fn);
+#if defined(_WIN32) || defined(__WIN32__) || defined(WIN32)
     signal(SIGBREAK, fn);
+#else
+    signal(SIGTERM, fn);
+#endif
 }
 
 void GenieService::setupHttpServer()

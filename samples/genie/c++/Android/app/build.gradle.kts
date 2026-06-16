@@ -135,6 +135,11 @@ android {
 
     packaging {
         jniLibs.useLegacyPackaging = true
+        // Skel libraries contain a DSP-firmware-specific CRC embedded by the Qualcomm
+        // toolchain. Stripping changes the binary and breaks CRC validation at runtime.
+        jniLibs.keepDebugSymbols += setOf(
+            "*/arm64-v8a/*Skel.so"
+        )
     }
 }
 

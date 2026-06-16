@@ -100,6 +100,8 @@ class IPAddressUtils {
 }
 
 public class MainActivity extends AppCompatActivity {
+    private String modelRoot;
+    //private static final String DEFAULT_MODEL_NAME = "llm_llama3.2";
 
     private static final String TAG = "MainActivity";
     private ActivityMainBinding binding;
@@ -125,6 +127,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean mExitThread;
     private ActivityResultLauncher<Intent> register;
     private boolean mShouldShowFloating;
+    private String mLastServiceMsg = "";
 
     private Handler updateViewHandler = new Handler(Looper.getMainLooper()) {
         @Override
@@ -141,9 +144,12 @@ public class MainActivity extends AppCompatActivity {
 
     private void updateWebView() {
         LogUtils.logDebug(TAG,"updateView: service_msg = " + service_msg,LogUtils.LOG_DEBUG);
-        if (!service_msg.isEmpty()) {
-            //hasGotServiceMsg = false;
+        if (!service_msg.isEmpty() && !service_msg.equals(mLastServiceMsg)) {
+            // Avoid repeated loadData calls that can leak WebView globals.
             webView.loadData(service_msg, "text/html", "UTF-8");
+            mLastServiceMsg = service_msg;
+        } else if (service_msg.isEmpty()) {
+            mLastServiceMsg = "";
         }
         if (mStartService.getVisibility() != View.VISIBLE) {
             mStartService.setVisibility(View.VISIBLE);
@@ -243,7 +249,7 @@ public class MainActivity extends AppCompatActivity {
 
     private boolean isValidModel(String dirName) {
         LogUtils.logDebug(TAG, "isValidModel : " + dirName, LogUtils.LOG_DEBUG);
-        String configFile = "/sdcard/GenieModels/" + dirName + "/config.json";
+        String configFile = modelRoot + "/" + dirName + "/config.json";
         File file = new File(configFile);
         if (file.exists()) {
             return true;
@@ -254,6 +260,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        modelRoot = getFilesDir().getAbsolutePath() + "/GenieModels";
         boolean isTablet = getResources().getConfiguration().smallestScreenWidthDp >= 600;
         if (isTablet) {
             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
@@ -272,7 +279,6 @@ public class MainActivity extends AppCompatActivity {
         if (LogUtils.LOG_DIRECTORY.isEmpty()) {
             LogUtils.LOG_DIRECTORY = getApplicationContext().getFilesDir().getAbsolutePath() + File.separator + "Logs";
         }
-        LogUtils.logDebug(TAG,"GenieModels path = " + getFilesDir().toString(),LogUtils.LOG_DEBUG);
         // update the meminfo view
         mUpdateMemThread = new Thread(new Runnable() {
             @Override
@@ -351,19 +357,26 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void getPermission() {
-        if(!Settings.canDrawOverlays(this)){
-            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
-            register.launch(intent);
-        }else {
-            startService(new Intent(this, FloatingService.class));
+        if (!Settings.canDrawOverlays(this)) {
+            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:" + getPackageName()));
+            if (intent.resolveActivity(getPackageManager()) != null) {
+                register.launch(intent);
+            } else {
+                LogUtils.logDebug(TAG,
+                        "Overlay permission UI not available on this device. Skipping floating mode.",
+                        LogUtils.LOG_ERROR);
+            }
+            return;
         }
+        startService(new Intent(this, FloatingService.class));
     }
 
     public void requestPermission() {
-        boolean isCar =
+        boolean isAutomotive =
                 getPackageManager().hasSystemFeature(
                         PackageManager.FEATURE_AUTOMOTIVE);
-        if (!isCar) {
+        if (!isAutomotive) {
             if (!Environment.isExternalStorageManager()) {
                 Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
                 intent.setData(Uri.parse("package:" + getPackageName()));

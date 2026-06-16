@@ -15,6 +15,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.Settings;
@@ -329,10 +330,24 @@ public class LogContentActivity extends AppCompatActivity {
     }
 
     private void getPermission() {
-        if(!Settings.canDrawOverlays(this)){
-            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
-            register.launch(intent);
-        }else {
+        if (!Settings.canDrawOverlays(this)) {
+            // Automotive systems don't support MANAGE_OVERLAY_PERMISSION settings UI
+            if (getPackageManager().hasSystemFeature(PackageManager.FEATURE_AUTOMOTIVE)) {
+                Log.i(TAG, "Automotive system detected, skipping MANAGE_OVERLAY_PERMISSION request");
+                return;
+            }
+            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:" + getPackageName()));
+            if (intent.resolveActivity(getPackageManager()) == null) {
+                Log.w(TAG, "No activity to handle MANAGE_OVERLAY_PERMISSION request");
+                return;
+            }
+            try {
+                register.launch(intent);
+            } catch (android.content.ActivityNotFoundException e) {
+                Log.w(TAG, "ActivityNotFoundException for MANAGE_OVERLAY_PERMISSION", e);
+            }
+        } else {
             startService(new Intent(this, FloatingService.class));
         }
     }
