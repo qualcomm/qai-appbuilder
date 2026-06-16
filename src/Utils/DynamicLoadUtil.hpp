@@ -8,7 +8,41 @@
 
 #pragma once
 
-#include "SampleApp.hpp"
+#include "QnnInterface.h"
+#include "QnnWrapperUtils.hpp"
+#include "System/QnnSystemInterface.h"
+
+namespace qnn {
+namespace tools {
+namespace qnn_app {
+
+// Graph Related Function Handle Types
+typedef qnn_wrapper_api::ModelError_t (*ComposeGraphsFnHandleType_t)(
+    Qnn_BackendHandle_t,
+    QNN_INTERFACE_VER_TYPE,
+    Qnn_ContextHandle_t,
+    const qnn_wrapper_api::GraphConfigInfo_t **,
+    const uint32_t,
+    qnn_wrapper_api::GraphInfo_t ***,
+    uint32_t *,
+    bool,
+    QnnLog_Callback_t,
+    QnnLog_Level_t);
+typedef qnn_wrapper_api::ModelError_t (*FreeGraphInfoFnHandleType_t)(
+    qnn_wrapper_api::GraphInfo_t ***, uint32_t);
+
+typedef struct QnnFunctionPointers {
+  ComposeGraphsFnHandleType_t composeGraphsFnHandle;
+  FreeGraphInfoFnHandleType_t freeGraphInfoFnHandle;
+  QNN_INTERFACE_VER_TYPE qnnInterface;
+  QNN_SYSTEM_INTERFACE_VER_TYPE qnnSystemInterface;
+  QnnInterface_t qnnInterfaceHandle;
+  QnnSystemInterface_t qnnSystemInterfaceHandle;
+} QnnFunctionPointers;
+
+}  // namespace qnn_app
+}  // namespace tools
+}  // namespace qnn
 
 namespace qnn {
 namespace tools {
@@ -25,12 +59,12 @@ enum class StatusCode {
 
 StatusCode getQnnFunctionPointers(std::string backendPath,
                                   std::string modelPath,
-                                  sample_app::QnnFunctionPointers* qnnFunctionPointers,
+                                  qnn_app::QnnFunctionPointers* qnnFunctionPointers,
                                   void** backendHandle,
                                   bool loadModelLib,
                                   void** modelHandleRtn);
 StatusCode getQnnSystemFunctionPointers(std::string systemLibraryPath,
-                                        sample_app::QnnFunctionPointers* qnnFunctionPointers,
+                                        qnn_app::QnnFunctionPointers* qnnFunctionPointers,
                                         void** systemLibraryHandleRtn);  // zw. Save systemHandle for free later.
 }  // namespace dynamicloadutil
 }  // namespace tools

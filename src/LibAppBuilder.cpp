@@ -26,14 +26,14 @@
 #include "LogUtils.hpp"
 #include "PAL/DynamicLoading.hpp"
 #include "PAL/GetOpt.hpp"
-#include "QnnSampleApp.hpp"
+#include "QnnInferenceEngine.hpp"
 #include "Lora.hpp"
-#include "QnnSampleAppUtils.hpp"
+#include "QnnAppUtils.hpp"
 #include "LibAppBuilder.hpp"
 #ifdef _WIN32
 #include <io.h>
-#include "Utils/Utils.hpp"
 #endif
+#include "Utils/Utils.hpp"
 
 #if !defined(__ANDROID__) && !defined(__linux__)
   #include <execution>
@@ -51,9 +51,10 @@ static QNN_INTERFACE_VER_TYPE sg_qnnInterface;
 
 QnnHtpDevice_Infrastructure_t *gs_htpInfra(nullptr);
 static bool gs_isGpu = false;
+static bool gs_isCpu = false;
 static bool sg_perf_global = false;
 
-std::unordered_map<std::string, std::unique_ptr<sample_app::QnnSampleApp>> sg_model_map;
+std::unordered_map<std::string, std::unique_ptr<qnn_app::QnnInferenceEngine>> sg_model_map;
 // Guards sg_model_map only. The map is mutated (erase on take, insert on
 // return) by every ModelInference/ModelInitialize call. When two pipeline
 // threads run different models concurrently (e.g. model a on HTP0 + model 1 on HTP1),
@@ -61,7 +62,7 @@ std::unordered_map<std::string, std::unique_ptr<sample_app::QnnSampleApp>> sg_mo
 // This mutex serializes ONLY the map find/erase/insert; executeGraphsBuffers
 // (the actual HTP inference) runs OUTSIDE the lock, so parallelism is kept.
 static std::mutex sg_model_map_mutex;
-static sample_app::ProfilingLevel sg_parsedProfilingLevel = sample_app::ProfilingLevel::OFF;
+static qnn_app::ProfilingLevel sg_parsedProfilingLevel = qnn_app::ProfilingLevel::OFF;
 
 namespace qnn {
 namespace tools {
@@ -90,9 +91,9 @@ void warmup_parallel_stl()
 }
 #endif
 
-std::unique_ptr<sample_app::QnnSampleApp> initQnnSampleApp(std::string cachedBinaryPath, std::string backEndPath, std::string systemLibraryPath,
+std::unique_ptr<qnn_app::QnnInferenceEngine> initQnnInferenceEngine(std::string cachedBinaryPath, std::string backEndPath, std::string systemLibraryPath,
                                                            bool loadFromCachedBinary, std::vector<LoraAdapter>& lora_adapters,
-                                                           const std::string& input_data_type, const std::string& output_data_type, sample_app::MultiCoreDeviceConfig_t multiCoreDeviceConfig) {
+                                                           const std::string& input_data_type, const std::string& output_data_type, qnn_app::MultiCoreDeviceConfig_t multiCoreDeviceConfig) {
   // Just keep blank for below paths.
   std::string modelPath;
   std::string cachedBinaryPath2;
@@ -100,7 +101,7 @@ std::unique_ptr<sample_app::QnnSampleApp> initQnnSampleApp(std::string cachedBin
   std::string saveBinaryName;
   if (!cachedBinaryPath.empty()){
     saveBinaryName = getFileNameFromPath(cachedBinaryPath);
-    QNN_DEBUG("initQnnSampleApp saveBinaryName=%s\n", saveBinaryName.c_str());
+    QNN_DEBUG("initQnnInferenceEngine saveBinaryName=%s\n", saveBinaryName.c_str());
   }
 
   if (loadFromCachedBinary) {  // *.bin and *.dlc
@@ -118,7 +119,7 @@ std::unique_ptr<sample_app::QnnSampleApp> initQnnSampleApp(std::string cachedBin
   bool dumpOutputs                                = true;
   bool debug                                      = false;
   
-  sample_app::QnnFunctionPointers qnnFunctionPointers;
+  qnn_app::QnnFunctionPointers qnnFunctionPointers;
   // Load backend and model .so and validate all the required function symbols are resolved
   auto statusCode = dynamicloadutil::getQnnFunctionPointers(backEndPath,
                                                             modelPath,
@@ -128,20 +129,20 @@ std::unique_ptr<sample_app::QnnSampleApp> initQnnSampleApp(std::string cachedBin
                                                             &sg_modelHandle);
   if (dynamicloadutil::StatusCode::SUCCESS != statusCode) {
     if (dynamicloadutil::StatusCode::FAIL_LOAD_BACKEND == statusCode) {
-      sample_app::exitWithMessage(
+      qnn_app::exitWithMessage(
           "Error initializing QNN Function Pointers: could not load backend: " + backEndPath, EXIT_FAILURE);
     } else if (dynamicloadutil::StatusCode::FAIL_LOAD_MODEL == statusCode) {
-      sample_app::exitWithMessage(
+      qnn_app::exitWithMessage(
           "Error initializing QNN Function Pointers: could not load model: " + modelPath, EXIT_FAILURE);
     } else {
-      sample_app::exitWithMessage("Error initializing QNN Function Pointers", EXIT_FAILURE);
+      qnn_app::exitWithMessage("Error initializing QNN Function Pointers", EXIT_FAILURE);
     }
   }
 
   if (loadFromCachedBinary) {
     statusCode = dynamicloadutil::getQnnSystemFunctionPointers(systemLibraryPath, &qnnFunctionPointers, &sg_systemLibraryHandle);
     if (dynamicloadutil::StatusCode::SUCCESS != statusCode) {
-      sample_app::exitWithMessage("Error initializing QNN System Function Pointers", EXIT_FAILURE);
+      qnn_app::exitWithMessage("Error initializing QNN System Function Pointers", EXIT_FAILURE);
     }
   }
 
@@ -151,7 +152,7 @@ std::unique_ptr<sample_app::QnnSampleApp> initQnnSampleApp(std::string cachedBin
 #endif
 
   sg_qnnInterface = qnnFunctionPointers.qnnInterface;
-  std::unique_ptr<sample_app::QnnSampleApp> app(new sample_app::QnnSampleApp(qnnFunctionPointers, "null", opPackagePaths, sg_backendHandle, "null",
+  std::unique_ptr<qnn_app::QnnInferenceEngine> app(new qnn_app::QnnInferenceEngine(qnnFunctionPointers, "null", opPackagePaths, sg_backendHandle, "null",
                                                                              debug, parsedOutputDataType, parsedInputDataType, sg_parsedProfilingLevel,
                                                                              dumpOutputs, cachedBinaryPath2, saveBinaryName, lora_adapters, cachedBinaryPath2, multiCoreDeviceConfig));
     return app;
@@ -162,7 +163,7 @@ std::unique_ptr<sample_app::QnnSampleApp> initQnnSampleApp(std::string cachedBin
 }  // namespace qnn
 
 
-std::unique_ptr<sample_app::QnnSampleApp> getQnnSampleApp(std::string model_name) {
+std::unique_ptr<qnn_app::QnnInferenceEngine> getQnnInferenceEngine(std::string model_name) {
   std::lock_guard<std::mutex> lk(sg_model_map_mutex);
   auto it = sg_model_map.find(model_name);
   if (it != sg_model_map.end()) {
@@ -175,27 +176,22 @@ std::unique_ptr<sample_app::QnnSampleApp> getQnnSampleApp(std::string model_name
   return nullptr;
 }
 
-// Symmetric counterpart to getQnnSampleApp: re-insert the app under the same
+// Symmetric counterpart to getQnnInferenceEngine: re-insert the app under the same
 // lock. Replaces the bare `sg_model_map.insert(...)` calls scattered across
 // ModelInference/ModelInitialize so every map mutation is serialized.
-void putQnnSampleApp(std::string model_name,
-                     std::unique_ptr<sample_app::QnnSampleApp> app) {
+void putQnnApp(std::string model_name,
+                     std::unique_ptr<qnn_app::QnnInferenceEngine> app) {
   std::lock_guard<std::mutex> lk(sg_model_map_mutex);
   sg_model_map.insert(std::make_pair(std::move(model_name), std::move(app)));
 }
-
 void SetProcInfo(std::string proc_name, uint64_t epoch) {
     setEpoch(epoch);
-#ifdef _WIN32
     g_ProcName = proc_name;
-#endif
 }
 
 bool SetProfilingLevel(int32_t profiling_level) {
-    sg_parsedProfilingLevel = (sample_app::ProfilingLevel)profiling_level;
-#ifdef _WIN32
+    sg_parsedProfilingLevel = (qnn_app::ProfilingLevel)profiling_level;
     g_profilingLevel = profiling_level;
-#endif
     return true;
 }
 
@@ -228,20 +224,26 @@ bool SetLogLevel(int32_t log_level, const std::string log_path) {
     return false;
   }
 
-#ifdef _WIN32
   g_logEpoch = getEpoch();
   g_logLevel = log_level;
-#endif
   return true;
 }
 
 bool SetPerfProfileGlobal(const std::string& perf_profile) {
+    // In cross-process mode the model lives in the Svc child process, so the
+    // perf profile must be applied there. Forward to all Svc processes; if any
+    // exist, that is authoritative and we return its result. With no Svc process
+    // (pure in-process mode) fall through to apply it locally.
+    if (!sg_proc_info_map.empty()) {
+        return TalkToSvc_SetPerfProfileGlobal(perf_profile);
+    }
+
     if (nullptr == sg_backendHandle) {
         QNN_ERR("SetPerfProfileGlobal::initialize one model before set perf profile!\n");
         return false;
     }
 
-    if (gs_isGpu) {
+    if (gs_isGpu || gs_isCpu) {
         QNN_DEBUG("Skipping HTP performance profile for GPU backend");
         return true;
     }
@@ -265,6 +267,11 @@ bool SetPerfProfileGlobal(const std::string& perf_profile) {
 }
 
 bool RelPerfProfileGlobal() {
+    // Mirror SetPerfProfileGlobal: forward to Svc processes in cross-process mode.
+    if (!sg_proc_info_map.empty()) {
+        return TalkToSvc_RelPerfProfileGlobal();
+    }
+
     if (gs_isGpu) {
         return true;
     }
@@ -398,19 +405,11 @@ void QNN_DBG(const char* fmt, ...) {
 }
 
 bool CreateShareMemory(std::string share_memory_name, size_t share_memory_size) {
-#ifdef _WIN32
     return CreateShareMem(share_memory_name, share_memory_size);
-#else
-    return true;
-#endif
 }
 
 bool DeleteShareMemory(std::string share_memory_name) {
-#ifdef _WIN32
     return DeleteShareMem(share_memory_name);
-#else
-    return true;
-#endif
 }
 
 bool fileExists(const std::string& path) { 
@@ -447,7 +446,6 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
                        bool async, const std::string& input_data_type, const std::string& output_data_type, uint32_t deviceID=0, std::string coreIdsStr="") {
   QNN_INF("LibAppBuilder::ModelInitialize: %s \n", model_name.c_str());
 
-#ifdef _WIN32
   bool result = false;
 
   if(!proc_name.empty()) {
@@ -455,7 +453,6 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
     result = TalkToSvc_Initialize(model_name, proc_name, model_path, backend_lib_path, system_lib_path, async, input_data_type, output_data_type);
     return result;
   }
-#endif
 
   TimerHelper timerHelper;
 
@@ -464,15 +461,26 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
   std::string backEndPath = backend_lib_path;
   std::string systemLibraryPath = system_lib_path;
 
+  // Determine the target backend up front. The cached *.dlc.bin context binary
+  // is an HTP-specific serialized context and can only be de-serialized by the
+  // HTP backend. Using it with the CPU/GPU backend triggers
+  // "Context de-serialization failed" and a subsequent crash, so the cache must
+  // only be consumed when running on HTP.
+  bool isGpu = backEndPath.find("Gpu") != std::string::npos || backEndPath.find("gpu") != std::string::npos;
+  bool isCpu = backEndPath.find("Cpu") != std::string::npos || backEndPath.find("cpu") != std::string::npos;
+
   std::string suffix_mode_path = cachedBinaryPath.substr(cachedBinaryPath.find_last_of('.') + 1);
   if (suffix_mode_path == "bin") {  // *.bin
       QNN_INFO("cachedBinaryPath: %s", cachedBinaryPath.c_str());
   } else if (suffix_mode_path == "dlc"){
       std::string dlcBinPath = cachedBinaryPath + ".bin";
-      if (fileExists(dlcBinPath)) { 
+      if (!isCpu && !isGpu && fileExists(dlcBinPath)) {
+          // Only HTP can load the cached context binary.
           cachedBinaryPath = dlcBinPath; 
           suffix_mode_path = "bin";
           QNN_INFO("Found dlc.bin, updated cachedBinaryPath: %s\n", cachedBinaryPath.c_str()); 
+      } else if ((isCpu || isGpu) && fileExists(dlcBinPath)) {
+          QNN_INFO("Ignoring HTP cache %s for CPU/GPU backend; loading .dlc directly.\n", dlcBinPath.c_str());
       }
   } else {    // *.dll
       loadFromCachedBinary = false;
@@ -485,7 +493,7 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
         QNN_ERROR("Invalid argument passed to device_id: %d. Valid range is 0 for NSP; 1,2,3 for HPASS\n", deviceID);
         return false;
     }   
-    sample_app::MultiCoreDeviceConfig_t multiCoreDevCfg_global ={}; 	
+    qnn_app::MultiCoreDeviceConfig_t multiCoreDevCfg_global ={}; 	
     multiCoreDevCfg_global.deviceId = deviceID;
 
     std::vector<std::string> coreIdVec = {};
@@ -506,13 +514,14 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
         }
         multiCoreDevCfg_global.coreIdVec.push_back(coreID);
     }
+  QNN_INFO("[DEBUG]in LibAppBuilder, ModelInitializeEx: isGpu=%d, isCpu=%d, backEndPath=%s\n", (int)isGpu, (int)isCpu, backEndPath.c_str());
   if (!qnn::log::initializeLogging()) {
     QNN_ERROR("ERROR: Unable to initialize logging!\n");
     return false;
   }
 
   {
-    std::unique_ptr<sample_app::QnnSampleApp> app = libappbuilder::initQnnSampleApp(cachedBinaryPath, backEndPath, systemLibraryPath, loadFromCachedBinary, lora_adapters, input_data_type, output_data_type, multiCoreDevCfg_global);
+    std::unique_ptr<qnn_app::QnnInferenceEngine> app = libappbuilder::initQnnInferenceEngine(cachedBinaryPath, backEndPath, systemLibraryPath, loadFromCachedBinary, lora_adapters, input_data_type, output_data_type, multiCoreDevCfg_global);
 
     if (nullptr == app) {
       return false;
@@ -522,62 +531,66 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
     QNN_INFO("Backend        build version: %s", app->getBackendBuildId().c_str());
 
     app->initializeLog();
+    app->setIsGpu(isGpu);
+    app->setIsCpu(isCpu);
 
-    if (sample_app::StatusCode::SUCCESS != app->initializeBackend()) {
+    if (qnn_app::StatusCode::SUCCESS != app->initializeBackend()) {
       app->reportError("Backend Initialization failure");
       return false;
     }
 
     auto devicePropertySupportStatus = app->isDevicePropertySupported();
-    if (sample_app::StatusCode::FAILURE != devicePropertySupportStatus) {
+    if (qnn_app::StatusCode::FAILURE != devicePropertySupportStatus) {
       auto createDeviceStatus = app->createDevice();
-      if (sample_app::StatusCode::SUCCESS != createDeviceStatus) {
+      if (qnn_app::StatusCode::SUCCESS != createDeviceStatus) {
         app->reportError("Device Creation failure");
         return false;
       }
     }
 	
-    if (sample_app::StatusCode::SUCCESS != app->initializeProfiling()) {
+    if (qnn_app::StatusCode::SUCCESS != app->initializeProfiling()) {
       app->reportError("Profiling Initialization failure");
       return false;
     }
 
-    if (sample_app::StatusCode::SUCCESS != app->registerOpPackages()) {
+    if (qnn_app::StatusCode::SUCCESS != app->registerOpPackages()) {
       app->reportError("Register Op Packages failure");
       return false;
     }
 
     if (!loadFromCachedBinary ||  (suffix_mode_path == "dlc")) { //issue#23
-      if (sample_app::StatusCode::SUCCESS != app->createContext()) {
+      if (qnn_app::StatusCode::SUCCESS != app->createContext()) {
         app->reportError("Context Creation failure");
         return false;
       }
-      if (sample_app::StatusCode::SUCCESS != app->composeGraphs()) {
+      if (qnn_app::StatusCode::SUCCESS != app->composeGraphs()) {
         app->reportError("Graph Prepare failure");
         return false;
       }
-      if (sample_app::StatusCode::SUCCESS != app->finalizeGraphs()) {
+      if (qnn_app::StatusCode::SUCCESS != app->finalizeGraphs()) {
         app->reportError("Graph Finalize failure");
         return false;
       }
     } else {
-      if (sample_app::StatusCode::SUCCESS != app->createFromBinary()) {
+      if (qnn_app::StatusCode::SUCCESS != app->createFromBinary()) {
         app->reportError("Create From Binary failure");
         return false;
       }
     }
 
     // improve performance.
-    if (sample_app::StatusCode::SUCCESS != app->setupInputAndOutputTensors()) {
+    if (qnn_app::StatusCode::SUCCESS != app->setupInputAndOutputTensors()) {
       app->reportError("Setup Input and Output Tensors failure");
       return false;
     }
 
-    bool isGpu = backEndPath.find("Gpu") != std::string::npos || backEndPath.find("gpu") != std::string::npos;
     gs_isGpu = isGpu;
+    gs_isCpu = isCpu;	
     app->setIsGpu(isGpu);
+    app->setIsCpu(isCpu);
+	
     if (loadFromCachedBinary && !isGpu) {
-        if (sample_app::StatusCode::SUCCESS != app->initializePerformance()) {
+        if (qnn_app::StatusCode::SUCCESS != app->initializePerformance()) {
             app->reportError("Performance initialization failure");
             return false;
         }
@@ -585,13 +598,13 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
 
     // apply lora Adapter on graph
     if (app->binaryUpdates() &&
-        sample_app::StatusCode::SUCCESS != app->contextApplyBinarySection(QNN_CONTEXT_SECTION_UPDATABLE)) {
+        qnn_app::StatusCode::SUCCESS != app->contextApplyBinarySection(QNN_CONTEXT_SECTION_UPDATABLE)) {
         return app->reportError("Binary update/execution failure");
     }
 
     timerHelper.Print("model_initialize " + model_name);
 
-    putQnnSampleApp(model_name, std::move(app));
+    putQnnApp(model_name, std::move(app));
 
     return true;
   }
@@ -607,29 +620,27 @@ bool ModelInferenceEx(std::string model_name, std::string proc_name, std::string
 
     //QNN_INF("LibAppBuilder::ModelInference: %s \n", model_name.c_str());
 
-#ifdef _WIN32
     if (!proc_name.empty()) {
         // If proc_name, run the model in that process.
         result = TalkToSvc_Inference(model_name, proc_name, share_memory_name, inputBuffers, inputSize, outputBuffers, outputSize, perfProfile, graphIndex);
         return result;
     }
-#endif
 
     TimerHelper timerHelper;
 
-    std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
+    std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
 
     if (result && nullptr == app) {
         app->reportError("Inference failure");
         result = false;
     }
 
-    if (result && sample_app::StatusCode::SUCCESS != app->executeGraphsBuffers(inputBuffers, outputBuffers, outputSize, perfProfile, graphIndex, share_memory_size)) {
+    if (result && qnn_app::StatusCode::SUCCESS != app->executeGraphsBuffers(inputBuffers, outputBuffers, outputSize, perfProfile, graphIndex, share_memory_size)) {
         app->reportError("Graph Execution failure");
         result = false;
     }
 
-    putQnnSampleApp(model_name, std::move(app));
+    putQnnApp(model_name, std::move(app));
 
     timerHelper.Print("model_inference " + model_name);
 
@@ -639,7 +650,6 @@ bool ModelInferenceEx(std::string model_name, std::string proc_name, std::string
 bool ModelDestroyEx(std::string model_name, std::string proc_name) {
     QNN_INF("LibAppBuilder::ModelDestroy: %s \n", model_name.c_str());
 
-#ifdef _WIN32
     bool result = false;
 
     if (!proc_name.empty()) {
@@ -647,41 +657,40 @@ bool ModelDestroyEx(std::string model_name, std::string proc_name) {
         result = TalkToSvc_Destroy(model_name, proc_name);
         return result;
     }
-#endif
 
     TimerHelper timerHelper;
 
-    std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
+    std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     if (nullptr == app) {
         app->reportError("Can't find the model with model_name: " + model_name);
         return false;
     }
 
     // improve performance.
-    if (sample_app::StatusCode::SUCCESS != app->tearDownInputAndOutputTensors()) {
+    if (qnn_app::StatusCode::SUCCESS != app->tearDownInputAndOutputTensors()) {
         app->reportError("Input and Output Tensors destroy failure");
         return false;
     }
 
-    if (sample_app::StatusCode::SUCCESS != app->destroyPerformance()) {
+    if (qnn_app::StatusCode::SUCCESS != app->destroyPerformance()) {
         app->reportError("Performance destroy failure");
         return false;
     }
 
-    if (sample_app::StatusCode::SUCCESS != app->freeGraphs()) {
+    if (qnn_app::StatusCode::SUCCESS != app->freeGraphs()) {
         app->reportError("Free graphs failure");
         return false;
     }
 
-    if (sample_app::StatusCode::SUCCESS != app->freeContext()) {
+    if (qnn_app::StatusCode::SUCCESS != app->freeContext()) {
         app->reportError("Context Free failure");
         return false;
     }
 
     auto devicePropertySupportStatus = app->isDevicePropertySupported();
-    if (sample_app::StatusCode::FAILURE != devicePropertySupportStatus) {
+    if (qnn_app::StatusCode::FAILURE != devicePropertySupportStatus) {
         auto freeDeviceStatus = app->freeDevice();
-        if (sample_app::StatusCode::SUCCESS != freeDeviceStatus) {
+        if (qnn_app::StatusCode::SUCCESS != freeDeviceStatus) {
             app->reportError("Device Free failure");
             return false;
         }
@@ -699,11 +708,9 @@ bool ModelDestroyEx(std::string model_name, std::string proc_name) {
 bool LibAppBuilder::ModelInitialize(const std::string& model_name, const std::string& proc_name, const std::string& model_path,
                                     const std::string& backend_lib_path, const std::string& system_lib_path,
                                     bool async, const std::string& input_data_type, const std::string& output_data_type, uint32_t deviceID, std::string coreIdsStr) {
-#ifdef _WIN32
     if (!proc_name.empty()) {   // Create process and save process info & model name to map, load model in new process.
         return TalkToSvc_Initialize(model_name, proc_name, model_path, backend_lib_path, system_lib_path, async, input_data_type, output_data_type);
     }
-#endif
     return false;
 }
 
@@ -725,11 +732,9 @@ bool LibAppBuilder::ModelInference(std::string model_name, std::string proc_name
                                    std::vector<uint8_t*>& inputBuffers, std::vector<size_t>& inputSize,
                                    std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
                                    std::string& perfProfile, size_t graphIndex) {
-#ifdef _WIN32
     if (!proc_name.empty()) {   // If proc_name, run the model in that process.
         return TalkToSvc_Inference(model_name, proc_name, share_memory_name, inputBuffers, inputSize, outputBuffers, outputSize, perfProfile, graphIndex);
     }
-#endif
     return false;
 }
 
@@ -742,7 +747,7 @@ bool LibAppBuilder::ModelInference(std::string model_name, std::vector<uint8_t*>
 
 bool LibAppBuilder::ModelApplyBinaryUpdate(const std::string model_name, std::vector<LoraAdapter>& lora_adapters) {
     bool result = true;
-    std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
+    std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     if (nullptr == app) {
         app->reportError("Apply binary update failure: " + model_name);
         result = false;
@@ -753,24 +758,22 @@ bool LibAppBuilder::ModelApplyBinaryUpdate(const std::string model_name, std::ve
 
         QNN_INFO("Applying Binary update on the graph");
 
-        if (sample_app::StatusCode::SUCCESS != app->contextApplyBinarySection(QNN_CONTEXT_SECTION_UPDATABLE)) {
+        if (qnn_app::StatusCode::SUCCESS != app->contextApplyBinarySection(QNN_CONTEXT_SECTION_UPDATABLE)) {
             app->reportError("Binary update failure");
             result = false;
         }
     
     }
 
-    putQnnSampleApp(model_name, std::move(app));
+    putQnnApp(model_name, std::move(app));
 
     return result;
 }
 
 bool LibAppBuilder::ModelDestroy(std::string model_name, std::string proc_name) {
-#ifdef _WIN32
     if (!proc_name.empty()) {   // If proc_name, desctroy the model in that process.
         return TalkToSvc_Destroy(model_name, proc_name);
     }
-#endif
     return false;
 }
 
@@ -779,68 +782,60 @@ bool LibAppBuilder::ModelDestroy(std::string model_name) {
 }
 
 bool LibAppBuilder::CreateShareMemory(std::string share_memory_name, size_t share_memory_size) {
-#ifdef _WIN32
     return CreateShareMem(share_memory_name, share_memory_size);
-#else
-    return true;
-#endif 
 }
 
 bool LibAppBuilder::DeleteShareMemory(std::string share_memory_name) {
-#ifdef _WIN32
     return DeleteShareMem(share_memory_name);
-#else
-        return true;
-#endif
 }
 
 // issue#24
 std::vector<std::vector<size_t>> LibAppBuilder::getOutputShapes(std::string model_name){
-    std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
+    std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     m_outputShapes = app->getOutputShapes();
-    putQnnSampleApp(model_name, std::move(app));
+    putQnnApp(model_name, std::move(app));
     return m_outputShapes;
 };
 
 std::vector<std::vector<size_t>> LibAppBuilder::getInputShapes(std::string model_name){
-    std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
+    std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     m_inputShapes = app->getInputShapes();
-    putQnnSampleApp(model_name, std::move(app));
+    putQnnApp(model_name, std::move(app));
     return m_inputShapes;
 };
 
 std::vector<std::string> LibAppBuilder::getInputDataType(std::string model_name){
-    std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
+    std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     m_inputDataType = app->getInputDataType();
-    putQnnSampleApp(model_name, std::move(app));
+    putQnnApp(model_name, std::move(app));
     return m_inputDataType;
 };
 
 std::vector<std::string> LibAppBuilder::getOutputDataType(std::string model_name){
-    std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
+    std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     m_outputDataType = app->getOutputDataType();
-    putQnnSampleApp(model_name, std::move(app));
+    putQnnApp(model_name, std::move(app));
     return m_outputDataType;
 };
 
 std::string LibAppBuilder::getGraphName(std::string model_name){
-    std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
+    std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     m_graphName = app->getGraphName();
-    putQnnSampleApp(model_name, std::move(app));
+    putQnnApp(model_name, std::move(app));
     return m_graphName;
 };
 
 std::vector<std::string> LibAppBuilder::getInputName(std::string model_name){
-    std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
+    std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     m_inputName = app->getInputName();
-    putQnnSampleApp(model_name, std::move(app));
+    putQnnApp(model_name, std::move(app));
     return m_inputName;
 };
 
 std::vector<std::string> LibAppBuilder::getOutputName(std::string model_name){
-    std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
+    std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     m_outputName = app->getOutputName();
-    putQnnSampleApp(model_name, std::move(app));
+    putQnnApp(model_name, std::move(app));
     return m_outputName;
 };
 //proc
@@ -881,12 +876,9 @@ std::vector<std::string> LibAppBuilder::getOutputName(std::string model_name, st
 
 ModelInfo_t LibAppBuilder::getModelInfo(std::string model_name, std::string proc_name, std::string input) {
     ModelInfo_t output;
-#ifdef _WIN32
     if (!proc_name.empty()) {   // If proc_name, run the model in that process.
         output = TalkToSvc_getModelInfo(model_name, proc_name, input);
-
     }
-#endif
     return output;
 }
 
@@ -897,7 +889,7 @@ ModelInfo_t LibAppBuilder::getModelInfoExt(std::string model_name, std::string i
     bool result = true;
     ModelInfo_t info;
 
-    std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
+    std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     if (nullptr == app) {
         app->reportError("getModelInfoExt failure");
         result = false;
@@ -923,16 +915,16 @@ ModelInfo_t LibAppBuilder::getModelInfoExt(std::string model_name, std::string i
             return info;
         }
     }
-    putQnnSampleApp(model_name, std::move(app));
+    putQnnApp(model_name, std::move(app));
 
     return info;
 }
 
 uint64_t LibAppBuilder::getProfilingEvent(std::string model_name, uint32_t eventType){
     uint64_t eventValue;
-    std::unique_ptr<sample_app::QnnSampleApp> app = getQnnSampleApp(model_name);
+    std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     eventValue = app->getProfilingEvent(eventType);
-    putQnnSampleApp(model_name, std::move(app));
+    putQnnApp(model_name, std::move(app));
     return eventValue;
 }
 

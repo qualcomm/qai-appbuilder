@@ -35,7 +35,9 @@ g_backend_lib_path = "None"
 g_system_lib_path = "None"
 g_runtime = None
 g_base_path = os.path.dirname(os.path.abspath(__file__))
-g_base_path = os.getenv('PATH') + ";" + g_base_path + ";"
+# Prepend/append the package dir to PATH using the platform separator (';' on
+# Windows, ':' on Linux) so the spawned QAIAppSvc service binary is found.
+g_base_path = os.getenv('PATH') + os.pathsep + g_base_path + os.pathsep
 
 
 def timer(func):
@@ -335,6 +337,9 @@ class QNNContextProc(_QNNContextBase):
 
         backend_lib_path, system_lib_path = self._resolve_lib_paths(backend_lib_path, system_lib_path)
 
+        # Ensure the package dir is on PATH so the native side can spawn the
+        # QAIAppSvc service binary (posix_spawnp / CreateProcess search PATH).
+        os.environ['PATH'] = g_base_path
         os.putenv('PATH', g_base_path)
         self.m_context = appbuilder.QNNContext(model_name, proc_name, model_path, backend_lib_path, system_lib_path,
                                               is_async, input_data_type, output_data_type, deviceID, coreIdsStr)

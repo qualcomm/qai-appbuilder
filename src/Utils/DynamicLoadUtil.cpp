@@ -35,7 +35,7 @@ static inline T resolveSymbol(void* libHandle, const char* sym) {
 dynamicloadutil::StatusCode dynamicloadutil::getQnnFunctionPointers(
     std::string backendPath,
     std::string modelPath,
-    sample_app::QnnFunctionPointers* qnnFunctionPointers,
+    qnn_app::QnnFunctionPointers* qnnFunctionPointers,
     void** backendHandleRtn,
     bool loadModelLib,
     void** modelHandleRtn) {
@@ -102,7 +102,7 @@ dynamicloadutil::StatusCode dynamicloadutil::getQnnFunctionPointers(
 
     std::string modelPrepareFunc = "QnnModel_composeGraphs";
     qnnFunctionPointers->composeGraphsFnHandle =
-        resolveSymbol<sample_app::ComposeGraphsFnHandleType_t>(libModelHandle,
+        resolveSymbol<qnn_app::ComposeGraphsFnHandleType_t>(libModelHandle,
                                                                modelPrepareFunc.c_str());
     if (nullptr == qnnFunctionPointers->composeGraphsFnHandle) {
       return StatusCode::FAIL_SYM_FUNCTION;
@@ -110,7 +110,7 @@ dynamicloadutil::StatusCode dynamicloadutil::getQnnFunctionPointers(
 
     std::string modelFreeFunc = "QnnModel_freeGraphsInfo";
     qnnFunctionPointers->freeGraphInfoFnHandle =
-        resolveSymbol<sample_app::FreeGraphInfoFnHandleType_t>(libModelHandle,
+        resolveSymbol<qnn_app::FreeGraphInfoFnHandleType_t>(libModelHandle,
                                                                modelFreeFunc.c_str());
     if (nullptr == qnnFunctionPointers->freeGraphInfoFnHandle) {
       return StatusCode::FAIL_SYM_FUNCTION;
@@ -122,7 +122,7 @@ dynamicloadutil::StatusCode dynamicloadutil::getQnnFunctionPointers(
 }
 
 dynamicloadutil::StatusCode dynamicloadutil::getQnnSystemFunctionPointers(
-    std::string systemLibraryPath, sample_app::QnnFunctionPointers* qnnFunctionPointers,
+    std::string systemLibraryPath, qnn_app::QnnFunctionPointers* qnnFunctionPointers,
     void** systemLibraryHandleRtn) {  // zw. Save systemHandle for free later.
   QNN_FUNCTION_ENTRY_LOG;
   if (!qnnFunctionPointers) {

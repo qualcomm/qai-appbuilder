@@ -19,8 +19,8 @@
 #include "PAL/Path.hpp"
 #include "PAL/StringOp.hpp"
 #include "QnnDlcUtils.hpp"
-#include "QnnSampleApp.hpp"
-#include "QnnSampleAppUtils.hpp"
+#include "QnnInferenceEngine.hpp"
+#include "QnnAppUtils.hpp"
 #include "QnnWrapperUtils.hpp"
 
 // zw.
@@ -183,9 +183,9 @@ bool resetPerformance(QnnHtpDevice_PerfInfrastructure_t perfInfra) {
 
 // Default path where the outputs will be stored if outputPath is
 // not supplied.
-const std::string sample_app::QnnSampleApp::s_defaultOutputPath = "./output/";
+const std::string qnn_app::QnnInferenceEngine::s_defaultOutputPath = "./output/";
 
-sample_app::QnnSampleApp::QnnSampleApp(QnnFunctionPointers qnnFunctionPointers,
+qnn_app::QnnInferenceEngine::QnnInferenceEngine(QnnFunctionPointers qnnFunctionPointers,
                                        std::string inputListPaths,
                                        std::string opPackagePaths,
                                        void* backendLibraryHandle,
@@ -193,7 +193,7 @@ sample_app::QnnSampleApp::QnnSampleApp(QnnFunctionPointers qnnFunctionPointers,
                                        bool debug,
                                        iotensor::OutputDataType outputDataType,
                                        iotensor::InputDataType inputDataType,
-                                       sample_app::ProfilingLevel profilingLevel,
+                                       qnn_app::ProfilingLevel profilingLevel,
                                        bool dumpOutputs,
                                        std::string cachedBinaryPath,
                                        std::string saveBinaryName, 
@@ -235,7 +235,7 @@ sample_app::QnnSampleApp::QnnSampleApp(QnnFunctionPointers qnnFunctionPointers,
   return;
 }
 
-sample_app::QnnSampleApp::~QnnSampleApp() {
+qnn_app::QnnInferenceEngine::~QnnInferenceEngine() {
   // Free DLC resources using utility function
   dlc_utils::freeDlcResources(m_qnnFunctionPointers.qnnSystemInterfaceHandle,
                               m_dlcHandle,
@@ -274,7 +274,7 @@ sample_app::QnnSampleApp::~QnnSampleApp() {
   return;
 }
 
-std::string sample_app::QnnSampleApp::getBackendBuildId() {
+std::string qnn_app::QnnInferenceEngine::getBackendBuildId() {
   char* backendBuildId{nullptr};
   if (QNN_SUCCESS !=
       m_qnnFunctionPointers.qnnInterface.backendGetBuildId((const char**)&backendBuildId)) {
@@ -283,11 +283,11 @@ std::string sample_app::QnnSampleApp::getBackendBuildId() {
   return (backendBuildId == nullptr ? std::string("") : std::string(backendBuildId));
 }
 
-// Initialize QnnSampleApp. Things it does:
+// Initialize QnnInferenceEngine. Things it does:
 //  1. Create output directory
 //  2. Read all input list paths provided
 //      during creation.
-sample_app::StatusCode sample_app::QnnSampleApp::initialize() {
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::initialize() {
   // Create Output Directory
 #ifndef __hexagon__
   if (m_dumpOutputs && !::pal::FileOp::checkFileExists(m_outputPath) &&
@@ -318,7 +318,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::initialize() {
   return StatusCode::SUCCESS;
 }
 
-sample_app::StatusCode sample_app::QnnSampleApp::initializeProfiling() {
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::initializeProfiling() {
   if (ProfilingLevel::OFF != m_profilingLevel) {
     QNN_INFO("Profiling turned on; level = %d", m_profilingLevel);
     if (ProfilingLevel::BASIC == m_profilingLevel) {
@@ -343,13 +343,13 @@ sample_app::StatusCode sample_app::QnnSampleApp::initializeProfiling() {
 }
 
 // Simple method to report error from app to lib.
-int32_t sample_app::QnnSampleApp::reportError(const std::string& err) {
+int32_t qnn_app::QnnInferenceEngine::reportError(const std::string& err) {
   QNN_ERROR("%s", err.c_str());
   return EXIT_FAILURE;
 }
 
 // Initialize a QnnBackend.
-sample_app::StatusCode sample_app::QnnSampleApp::initializeBackend() {
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::initializeBackend() {
   auto qnnStatus = m_qnnFunctionPointers.qnnInterface.backendCreate(
       m_logHandle, (const QnnBackend_Config_t**)m_backendConfig, &m_backendHandle);
   if (QNN_BACKEND_NO_ERROR != qnnStatus) {
@@ -362,7 +362,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::initializeBackend() {
 }
 
 // Terminate the backend after done.
-sample_app::StatusCode sample_app::QnnSampleApp::terminateBackend() {
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::terminateBackend() {
   if ((m_isBackendInitialized && nullptr != m_qnnFunctionPointers.qnnInterface.backendFree) &&
       QNN_BACKEND_NO_ERROR != m_qnnFunctionPointers.qnnInterface.backendFree(m_backendHandle)) {
     QNN_ERROR("Could not terminate backend");
@@ -375,7 +375,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::terminateBackend() {
 // Register op packages and interface providers supplied during
 // object creation. If there are multiple op packages, register
 // them sequentially in the order provided.
-sample_app::StatusCode sample_app::QnnSampleApp::registerOpPackages() {
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::registerOpPackages() {
   const size_t pathIdx              = 0;
   const size_t interfaceProviderIdx = 1;
   for (auto const& opPackagePath : m_opPackagePaths) {
@@ -413,7 +413,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::registerOpPackages() {
 }
 
 // Create a Context in a backend.
-sample_app::StatusCode sample_app::QnnSampleApp::createContext() {
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::createContext() {
   if (QNN_CONTEXT_NO_ERROR !=
       m_qnnFunctionPointers.qnnInterface.contextCreate(m_backendHandle,
                                                        m_deviceHandle,
@@ -427,7 +427,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::createContext() {
 }
 
 // Free context after done.
-sample_app::StatusCode sample_app::QnnSampleApp::freeContext() {
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::freeContext() {
   // clear graph info first
   if (m_graphsInfo) {
     for (uint32_t gIdx = 0; gIdx < m_graphsCount; gIdx++) {
@@ -466,7 +466,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::freeContext() {
 // m_debug is the option supplied to composeGraphs to
 // say that all intermediate tensors including output tensors
 // are expected to be read by the app.
-sample_app::StatusCode sample_app::QnnSampleApp::composeGraphs() {
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::composeGraphs() {
   auto returnStatus = StatusCode::SUCCESS;
   // If DLC path is provided, use DLC-based composition
   if (!m_dlcPath.empty()) {
@@ -496,7 +496,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::composeGraphs() {
   return returnStatus;
 }
 
-sample_app::StatusCode sample_app::QnnSampleApp::finalizeGraphs() {
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::finalizeGraphs() {
   for (size_t graphIdx = 0; graphIdx < m_graphsCount; graphIdx++) {
     if (QNN_GRAPH_NO_ERROR !=
         m_qnnFunctionPointers.qnnInterface.graphFinalize(
@@ -517,8 +517,8 @@ sample_app::StatusCode sample_app::QnnSampleApp::finalizeGraphs() {
   return returnStatus;
 }
 
-sample_app::StatusCode sample_app::QnnSampleApp::contextApplyBinarySection(QnnContext_SectionType_t section) {
-    sample_app::StatusCode returnStatus = sample_app::StatusCode::SUCCESS;
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::contextApplyBinarySection(QnnContext_SectionType_t section) {
+    qnn_app::StatusCode returnStatus = qnn_app::StatusCode::SUCCESS;
       for(auto loraadapter = m_lora_adapters.begin(); loraadapter != m_lora_adapters.end(); ++loraadapter){
         std::string model_name = loraadapter->m_graph_name;  
         std::vector<std::string> bin_paths = loraadapter->m_bin_paths;  
@@ -529,7 +529,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::contextApplyBinarySection(QnnCo
               model_name, binaryUpdatesPath, section, m_useMmap,
               m_profilingLevel, m_profilingOption);
 
-          if (returnStatus != sample_app::StatusCode::SUCCESS) {
+          if (returnStatus != qnn_app::StatusCode::SUCCESS) {
               QNN_ERROR("Error during call to applyBinarySection.");
               return returnStatus;
           }
@@ -539,7 +539,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::contextApplyBinarySection(QnnCo
     return returnStatus;
 }
 
-sample_app::StatusCode sample_app::QnnSampleApp::applyBinarySection(
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::applyBinarySection(
     std::string graphName,
     std::string binaryPath,
     QnnContext_SectionType_t sectionType,
@@ -552,7 +552,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::applyBinarySection(
     if (m_qnnFunctionPointers.qnnInterface.propertyHasCapability(QNN_PROPERTY_CONTEXT_SUPPORT_BINARY_UPDATES) !=
         QNN_PROPERTY_SUPPORTED) {
         QNN_ERROR("Backend does not support updates to context binary.");
-        return sample_app::StatusCode::FAILURE;
+        return qnn_app::StatusCode::FAILURE;
     }
     Qnn_GraphHandle_t graphHandle{ nullptr };
     for (size_t graphIdx = 0; graphIdx < m_graphInfoPtrList.size(); graphIdx++) {
@@ -564,7 +564,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::applyBinarySection(
     }
     if (graphHandle == nullptr) {
         QNN_ERROR("Unable to find the graph with name = %s", graphName.c_str());
-        return sample_app::StatusCode::FAILURE;
+        return qnn_app::StatusCode::FAILURE;
     }
 
     uint64_t bufferSize{ 0 };
@@ -617,17 +617,17 @@ sample_app::StatusCode sample_app::QnnSampleApp::applyBinarySection(
     Qnn_ProfileHandle_t profileBackendHandle{ nullptr };
     bool isProfileHandleCreated = false;
     if (profilingLevel != ProfilingLevel::OFF && profilingLevel != ProfilingLevel::CLIENT &&
-        sample_app::StatusCode::SUCCESS == initializeProfileHandle(&m_qnnFunctionPointers.qnnInterface,
+        qnn_app::StatusCode::SUCCESS == initializeProfileHandle(&m_qnnFunctionPointers.qnnInterface,
             profilingLevel,
             &profileBackendHandle,
             m_numMaxEvents)) {
         isProfileHandleCreated = true;
     }
     if (profilingOption != ProfilingOption::NONE && isProfileHandleCreated) {
-        if (sample_app::StatusCode::SUCCESS != initializeProfileConfigOption(
+        if (qnn_app::StatusCode::SUCCESS != initializeProfileConfigOption(
             &m_qnnFunctionPointers.qnnInterface, profilingOption, profileBackendHandle)) {
             QNN_ERROR("Unable to set Profiling Option: %d", profilingOption);
-            return sample_app::StatusCode::FAILURE;
+            return qnn_app::StatusCode::FAILURE;
         }
     }
 
@@ -650,7 +650,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::applyBinarySection(
         else if (QNN_GET_ERROR_CODE(executeStatus) == QNN_CONTEXT_ERROR_MEM_ALLOC) {
             QNN_ERROR("Memory allocation error while creating context update.");
         }
-        return sample_app::StatusCode::FAILURE;
+        return qnn_app::StatusCode::FAILURE;
     }
     else {
         QNN_VERBOSE("Binary section retrieved from %s and applied to graph %s.\n",
@@ -662,10 +662,10 @@ sample_app::StatusCode sample_app::QnnSampleApp::applyBinarySection(
         terminateProfileHandle(&m_qnnFunctionPointers.qnnInterface, profileBackendHandle);
     }
     QNN_FUNCTION_EXIT_LOG;
-    return sample_app::StatusCode::SUCCESS;
+    return qnn_app::StatusCode::SUCCESS;
 }
 
-sample_app::StatusCode sample_app::QnnSampleApp::initializeProfileHandle(
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::initializeProfileHandle(
     const QNN_INTERFACE_VER_TYPE* qnnInterfaceHandle,
     ProfilingLevel profilingLevel,
     Qnn_ProfileHandle_t* profileHandle,
@@ -729,22 +729,22 @@ sample_app::StatusCode sample_app::QnnSampleApp::initializeProfileHandle(
     return StatusCode::SUCCESS;
 }
 
-bool sample_app::QnnSampleApp::binaryUpdates() {
+bool qnn_app::QnnInferenceEngine::binaryUpdates() {
     return m_lora_adapters.size() > 0;
 }
 
-void sample_app::QnnSampleApp::update_m_lora_adapters(std::vector<LoraAdapter>& lora_adapters) {
+void qnn_app::QnnInferenceEngine::update_m_lora_adapters(std::vector<LoraAdapter>& lora_adapters) {
     m_lora_adapters = lora_adapters;
 }
 
-sample_app::StatusCode sample_app::QnnSampleApp::initializeProfileConfigOption(
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::initializeProfileConfigOption(
     const QNN_INTERFACE_VER_TYPE* qnnInterfaceHandle,
     ProfilingOption profilingOption,
     Qnn_ProfileHandle_t profileHandle) {
     QNN_FUNCTION_ENTRY_LOG;
-    sample_app::StatusCode returnStatus;
+    qnn_app::StatusCode returnStatus;
     QnnProfile_Config_t optraceConfig = QNN_PROFILE_CONFIG_INIT;
-    if (profilingOption == sample_app::ProfilingOption::OPTRACE) {
+    if (profilingOption == qnn_app::ProfilingOption::OPTRACE) {
         optraceConfig.option = QNN_PROFILE_CONFIG_OPTION_ENABLE_OPTRACE;
         optraceConfig.enableOptrace = true;
         const QnnProfile_Config_t* profileConfigs[] = { &optraceConfig, nullptr };
@@ -759,17 +759,17 @@ sample_app::StatusCode sample_app::QnnSampleApp::initializeProfileConfigOption(
     }
     else {
         QNN_ERROR("Unknown config option: %d", profilingOption);
-        returnStatus = sample_app::StatusCode::FAILURE;
+        returnStatus = qnn_app::StatusCode::FAILURE;
     }
 
     QNN_FUNCTION_EXIT_LOG;
     return returnStatus;
 }
 
-sample_app::StatusCode sample_app::QnnSampleApp::terminateProfileHandle(
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::terminateProfileHandle(
     const QNN_INTERFACE_VER_TYPE* qnnInterfaceHandle, Qnn_ProfileHandle_t profileHandle) {
     QNN_FUNCTION_ENTRY_LOG;
-    auto returnStatus = sample_app::StatusCode::SUCCESS;
+    auto returnStatus = qnn_app::StatusCode::SUCCESS;
     if (nullptr != profileHandle && nullptr != qnnInterfaceHandle->profileFree) {
         QNN_DEBUG("Freeing backend profile object.");
         auto result = qnnInterfaceHandle->profileFree(profileHandle);
@@ -780,7 +780,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::terminateProfileHandle(
     return returnStatus;
 }
 
-sample_app::StatusCode sample_app::QnnSampleApp::addGraphToContext(
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::addGraphToContext(
     qnn_wrapper_api::GraphInfo_t* graphInfo) {
     QNN_FUNCTION_ENTRY_LOG;
     m_graphInfoPtrList.push_back(graphInfo);
@@ -788,7 +788,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::addGraphToContext(
     return StatusCode::SUCCESS;
 }
 
-sample_app::StatusCode sample_app::QnnSampleApp::addGraphsToContext(
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::addGraphsToContext(
     qnn_wrapper_api::GraphInfo_t** graphInfos, uint32_t numGraphs) {
     QNN_FUNCTION_ENTRY_LOG;
     for (uint32_t i = 0; i < numGraphs; i++) {
@@ -798,7 +798,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::addGraphsToContext(
     return StatusCode::SUCCESS;
 }
 
-sample_app::StatusCode sample_app::QnnSampleApp::createFromBinary() {
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::createFromBinary() {
   QNN_FUNCTION_ENTRY_LOG;
   if (m_cachedBinaryPath.empty()) {
     QNN_ERROR("No name provided to read binary file from.");
@@ -995,7 +995,7 @@ QNN_FUNCTION_EXIT_LOG;
   return returnStatus;
 }
 
-sample_app::StatusCode sample_app::QnnSampleApp::saveBinary() {
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::saveBinary() {
   if (m_saveBinaryName.empty()) {
     QNN_ERROR("No name provided to save binary file.");
     return StatusCode::FAILURE;
@@ -1033,11 +1033,14 @@ sample_app::StatusCode sample_app::QnnSampleApp::saveBinary() {
     return StatusCode::FAILURE;
   }
 #ifndef __hexagon__
-  auto dataUtilStatus = tools::datautil::writeBinaryToFile(
-      m_outputPath, m_saveBinaryName + ".bin", (uint8_t*)saveBuffer.get(), writtenBufferSize);
-  if (tools::datautil::StatusCode::SUCCESS != dataUtilStatus) {
-    QNN_ERROR("Error while writing binary to file.");
-    return StatusCode::FAILURE;
+  //printf("save to .dlc.bin? m_isGpu=%d,m_runInCpu=%d\n", m_isGpu, m_runInCpu);
+  if(!m_isGpu && !m_runInCpu){
+    auto dataUtilStatus = tools::datautil::writeBinaryToFile(
+        m_outputPath, m_saveBinaryName + ".bin", (uint8_t*)saveBuffer.get(), writtenBufferSize);
+    if (tools::datautil::StatusCode::SUCCESS != dataUtilStatus) {
+      QNN_ERROR("Error while writing binary to file.");
+      return StatusCode::FAILURE;
+    }
   }
 #endif
   return StatusCode::SUCCESS;
@@ -1045,7 +1048,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::saveBinary() {
 
 // C:\Qualcomm\AIStack\QNN\<version>\include\QNN\QnnProfile.h
 // C:\Qualcomm\AIStack\QNN\<version>\include\QNN\HTP\QnnHtpProfile.h
-sample_app::StatusCode sample_app::QnnSampleApp::composeGraphsFromDlc() {
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::composeGraphsFromDlc() {
   QNN_DEBUG("Composing graphs from DLC\n");
   // Create DLC handle using utility function
   auto dlcStatus = dlc_utils::createDlcHandle(m_qnnFunctionPointers.qnnSystemInterfaceHandle,
@@ -1077,7 +1080,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::composeGraphsFromDlc() {
   QNN_INFO("Successfully composed %d graphs from DLC", m_graphsCount);
   return StatusCode::SUCCESS;
 }
-sample_app::StatusCode sample_app::QnnSampleApp::extractBackendProfilingInfo(
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::extractBackendProfilingInfo(
     Qnn_ProfileHandle_t profileHandle) {
   if (nullptr == profileHandle) {
     QNN_ERROR("Backend Profile handle is nullptr; may not be initialized.");
@@ -1098,7 +1101,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::extractBackendProfilingInfo(
   return StatusCode::SUCCESS;
 }
 
-sample_app::StatusCode sample_app::QnnSampleApp::extractProfilingSubEvents(
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::extractProfilingSubEvents(
     QnnProfile_EventId_t profileEventId) {
   const QnnProfile_EventId_t* profileSubEvents{nullptr};
   uint32_t numSubEvents{0};
@@ -1115,7 +1118,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::extractProfilingSubEvents(
   return StatusCode::SUCCESS;
 }
 
-sample_app::StatusCode sample_app::QnnSampleApp::extractProfilingEvent(
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::extractProfilingEvent(
     QnnProfile_EventId_t profileEventId) {
   QnnProfile_EventData_t eventData;
   if (QNN_PROFILE_NO_ERROR !=
@@ -1132,7 +1135,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::extractProfilingEvent(
   return StatusCode::SUCCESS;
 }
 
-uint64_t sample_app::QnnSampleApp::getProfilingEvent(uint32_t eventType) {
+uint64_t qnn_app::QnnInferenceEngine::getProfilingEvent(uint32_t eventType) {
   QnnProfile_EventData_t eventData;
   const QnnProfile_EventId_t* profileEvents{nullptr};
   uint32_t numEvents{0};
@@ -1152,17 +1155,17 @@ uint64_t sample_app::QnnSampleApp::getProfilingEvent(uint32_t eventType) {
   return 0;
 }
 
-sample_app::StatusCode sample_app::QnnSampleApp::verifyFailReturnStatus(Qnn_ErrorHandle_t errCode) {
-  auto returnStatus = sample_app::StatusCode::FAILURE;
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::verifyFailReturnStatus(Qnn_ErrorHandle_t errCode) {
+  auto returnStatus = qnn_app::StatusCode::FAILURE;
   switch (errCode) {
     case QNN_COMMON_ERROR_SYSTEM_COMMUNICATION:
-      returnStatus = sample_app::StatusCode::FAILURE_SYSTEM_COMMUNICATION_ERROR;
+      returnStatus = qnn_app::StatusCode::FAILURE_SYSTEM_COMMUNICATION_ERROR;
       break;
     case QNN_COMMON_ERROR_SYSTEM:
-      returnStatus = sample_app::StatusCode::FAILURE_SYSTEM_ERROR;
+      returnStatus = qnn_app::StatusCode::FAILURE_SYSTEM_ERROR;
       break;
     case QNN_COMMON_ERROR_NOT_SUPPORTED:
-      returnStatus = sample_app::StatusCode::QNN_FEATURE_UNSUPPORTED;
+      returnStatus = qnn_app::StatusCode::QNN_FEATURE_UNSUPPORTED;
       break;
     default:
       break;
@@ -1170,7 +1173,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::verifyFailReturnStatus(Qnn_Erro
   return returnStatus;
 }
 
-sample_app::StatusCode sample_app::QnnSampleApp::isDevicePropertySupported() {
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::isDevicePropertySupported() {
   if (nullptr != m_qnnFunctionPointers.qnnInterface.propertyHasCapability) {
     auto qnnStatus =
         m_qnnFunctionPointers.qnnInterface.propertyHasCapability(QNN_PROPERTY_GROUP_DEVICE);
@@ -1185,7 +1188,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::isDevicePropertySupported() {
   return StatusCode::SUCCESS;
 }
 
-sample_app::StatusCode sample_app::QnnSampleApp::isFinalizeDeserializedGraphSupported() {
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::isFinalizeDeserializedGraphSupported() {
   auto returnStatus = StatusCode::FAILURE;
   if (nullptr != m_qnnFunctionPointers.qnnInterface.propertyHasCapability) {
     auto qnnStatus = m_qnnFunctionPointers.qnnInterface.propertyHasCapability(
@@ -1199,7 +1202,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::isFinalizeDeserializedGraphSupp
   return returnStatus;
 }
 
-sample_app::StatusCode sample_app::QnnSampleApp::getDevicePlatformInfo(
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::getDevicePlatformInfo(
     const QnnDevice_PlatformInfo_t*& platformInfoPtr) {
   if (nullptr != m_qnnFunctionPointers.qnnInterface.deviceGetPlatformInfo) {
     auto qnnStatus =
@@ -1212,7 +1215,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::getDevicePlatformInfo(
   return StatusCode::SUCCESS;
 }
 
-sample_app::StatusCode sample_app::QnnSampleApp::setupDeviceConfig(
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::setupDeviceConfig(
     QnnDevice_Config_t* devConfigPtr, MultiCoreDeviceConfig_t* multicoreConfigPtr) {
   const QnnDevice_PlatformInfo_t* devPlatformInfoPtr{nullptr};
   // get Device Platform info
@@ -1222,7 +1225,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::setupDeviceConfig(
     const uint32_t hwNumDevices                        = devPlatformInfoPtr->v1.numHwDevices;
     QnnDevice_HardwareDeviceInfo_t* const hwDeviceInfo = devPlatformInfoPtr->v1.hwDevices;
     const uint32_t socNumCores                         = hwDeviceInfo->v1.numCores;
-    QNN_INFO("sample_app::QnnSampleApp::setupDeviceConfig, hwNumDevices: %d, socNumCores: %d\n", hwNumDevices, socNumCores);
+    QNN_INFO("qnn_app::QnnInferenceEngine::setupDeviceConfig, hwNumDevices: %d, socNumCores: %d\n", hwNumDevices, socNumCores);
   
     if (multicoreConfigPtr->coreIdVec.size() == 0) {
       // fill default coreIdVec with default [0]
@@ -1335,17 +1338,19 @@ static std::string makeDeviceKey(uint32_t deviceId, const std::vector<uint32_t>&
   return oss.str();
 }
 
-sample_app::StatusCode sample_app::QnnSampleApp::createDevice() {
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::createDevice() {
   auto returnStatus = StatusCode::SUCCESS;
-//add begin, no need to call setupDeviceConfig and getDevicePlatformInfo for cpu 
+//add begin, no need to call setupDeviceConfig and getDevicePlatformInfo for cpu
+  QNN_INFO("QnnSampleApp::createDevice, m_runInCpu=%d\n", m_runInCpu);
   if (true == m_runInCpu){
     if (nullptr != m_qnnFunctionPointers.qnnInterface.deviceCreate && nullptr == m_deviceHandle) {
         auto qnnStatus =
           m_qnnFunctionPointers.qnnInterface.deviceCreate(m_logHandle, nullptr, &m_deviceHandle);
-      if (QNN_SUCCESS != qnnStatus && QNN_DEVICE_ERROR_UNSUPPORTED_FEATURE != qnnStatus) {
-        QNN_ERROR("Failed to create device");
-        return verifyFailReturnStatus(qnnStatus);
-      }
+          if (QNN_SUCCESS != qnnStatus && QNN_DEVICE_ERROR_UNSUPPORTED_FEATURE != qnnStatus) {
+              // CPU backend may not support deviceCreate at all — treat as non-fatal and continue.
+              QNN_WARN("CPU backend: deviceCreate returned error (0x%x), continuing without device handle", (unsigned int)qnnStatus);
+              m_deviceHandle = nullptr;
+          }
 	  }
 	  return returnStatus;
   }
@@ -1394,8 +1399,8 @@ sample_app::StatusCode sample_app::QnnSampleApp::createDevice() {
 
 }
 
-sample_app::StatusCode sample_app::QnnSampleApp::freeDevice() {
-  QNN_INFO("sample_app::QnnSampleApp::freeDevice begin\n");
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::freeDevice() {
+  QNN_INFO("qnn_app::QnnInferenceEngine::freeDevice begin\n");
   return StatusCode::SUCCESS;
 
   const uint32_t deviceId = m_multiCoreDeviceConfig.deviceId;
@@ -1435,7 +1440,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::freeDevice() {
 // executeGraphs() that is currently used by qnn-sample-app's main.cpp.
 // This function runs all the graphs present in model.so by reading
 // inputs from input_list based files and writes output to .raw files.
-sample_app::StatusCode sample_app::QnnSampleApp::executeGraphs() {
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::executeGraphs() {
   auto returnStatus = StatusCode::SUCCESS;
   for (size_t graphIdx = 0; graphIdx < m_graphsCount; graphIdx++) {
     QNN_DEBUG("Starting execution for graphIdx: %d", graphIdx);
@@ -1571,7 +1576,7 @@ void printArrayOfVector(std::vector<std::vector<size_t>> arrayOfVectors){
 #endif
 
 // improve performance.
-sample_app::StatusCode sample_app::QnnSampleApp::setupInputAndOutputTensors()
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::setupInputAndOutputTensors()
 {
   auto returnStatus = qnn::tools::iotensor::StatusCode::SUCCESS;
 
@@ -1590,11 +1595,11 @@ sample_app::StatusCode sample_app::QnnSampleApp::setupInputAndOutputTensors()
     }
   }
 
-  return static_cast<sample_app::StatusCode>(returnStatus);
+  return static_cast<qnn_app::StatusCode>(returnStatus);
 }
 
 // improve performance.
-sample_app::StatusCode sample_app::QnnSampleApp::tearDownInputAndOutputTensors()
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::tearDownInputAndOutputTensors()
 {
   auto returnStatus = qnn::tools::iotensor::StatusCode::SUCCESS;
 
@@ -1611,7 +1616,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::tearDownInputAndOutputTensors()
     }
   }
 
-  return static_cast<sample_app::StatusCode>(returnStatus);
+  return static_cast<qnn_app::StatusCode>(returnStatus);
 }
 
 // issue#24
@@ -1643,7 +1648,7 @@ std::string dataTypeToString(Qnn_DataType_t dtype) {
     }
 }
 
-std::vector<std::vector<size_t>> sample_app::QnnSampleApp::getInputShapes(){
+std::vector<std::vector<size_t>> qnn_app::QnnInferenceEngine::getInputShapes(){
 	if(m_inputShapes.empty()){
  		size_t graphIdx = 0;
  		auto graphInfo = (*m_graphsInfo)[graphIdx];
@@ -1665,7 +1670,7 @@ std::vector<std::vector<size_t>> sample_app::QnnSampleApp::getInputShapes(){
   return m_inputShapes;
 }
 
-std::string sample_app::QnnSampleApp::getGraphName(){
+std::string qnn_app::QnnInferenceEngine::getGraphName(){
 	if(m_graphName.empty()){
 		auto graphInfo = (*m_graphsInfo)[0/*graphIdx*/];
 		m_graphName  = graphInfo.graphName;
@@ -1673,7 +1678,7 @@ std::string sample_app::QnnSampleApp::getGraphName(){
     return m_graphName;
 }
 
-std::vector<std::string> sample_app::QnnSampleApp::getInputName(){
+std::vector<std::string> qnn_app::QnnInferenceEngine::getInputName(){
 	if(m_inputName.empty()){
  		size_t graphIdx = 0;
  		auto graphInfo = (*m_graphsInfo)[graphIdx];
@@ -1687,7 +1692,7 @@ std::vector<std::string> sample_app::QnnSampleApp::getInputName(){
 }
 
 
-std::vector<std::string> sample_app::QnnSampleApp::getOutputName(){
+std::vector<std::string> qnn_app::QnnInferenceEngine::getOutputName(){
 	if(m_outputName.empty()){
  		size_t graphIdx = 0;
  		auto graphInfo = (*m_graphsInfo)[graphIdx];
@@ -1700,7 +1705,7 @@ std::vector<std::string> sample_app::QnnSampleApp::getOutputName(){
 	return m_outputName;
 }
 
-std::vector<std::string> sample_app::QnnSampleApp::getInputDataType(){
+std::vector<std::string> qnn_app::QnnInferenceEngine::getInputDataType(){
 	if(m_inputDataType_s.empty()){
  		size_t graphIdx = 0;
  		auto graphInfo = (*m_graphsInfo)[graphIdx];
@@ -1717,7 +1722,7 @@ std::vector<std::string> sample_app::QnnSampleApp::getInputDataType(){
     return m_inputDataType_s;  
 }
 
-std::vector<std::vector<size_t>> sample_app::QnnSampleApp::getOutputShapes(){
+std::vector<std::vector<size_t>> qnn_app::QnnInferenceEngine::getOutputShapes(){
 	if(m_outputShapes.empty()){
  		size_t graphIdx = 0;
  		auto graphInfo = (*m_graphsInfo)[graphIdx];
@@ -1739,7 +1744,7 @@ std::vector<std::vector<size_t>> sample_app::QnnSampleApp::getOutputShapes(){
   return m_outputShapes;
 }
 
-std::vector<std::string> sample_app::QnnSampleApp::getOutputDataType(){
+std::vector<std::string> qnn_app::QnnInferenceEngine::getOutputDataType(){
 	if(m_outputDataType_s.empty()){
  		size_t graphIdx = 0;
  		auto graphInfo = (*m_graphsInfo)[graphIdx];
@@ -1756,7 +1761,7 @@ std::vector<std::string> sample_app::QnnSampleApp::getOutputDataType(){
 	return m_outputDataType_s;
 }
 
-sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vector<uint8_t*>& inputBuffers, 
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::executeGraphsBuffers(std::vector<uint8_t*>& inputBuffers, 
                                                                       std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
                                                                       std::string perfProfile, size_t graphIndex, size_t share_memory_size) {
   auto returnStatus = StatusCode::SUCCESS;
@@ -2078,14 +2083,14 @@ sample_app::StatusCode sample_app::QnnSampleApp::executeGraphsBuffers(std::vecto
 }
 
 // zw.
-sample_app::StatusCode sample_app::QnnSampleApp::freeGraphs() {
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::freeGraphs() {
   qnn_wrapper_api::freeGraphsInfo(&m_graphsInfo, m_graphsCount);
   m_graphsInfo = nullptr;
 
   return StatusCode::SUCCESS;
 }
 
-sample_app::StatusCode sample_app::QnnSampleApp::initializeLog() {
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::initializeLog() {
   // initialize logging in the backend
   if (log::isLogInitialized()) {
     auto logCallback = log::getLogCallback();
@@ -2101,7 +2106,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::initializeLog() {
   return StatusCode::SUCCESS;
 }
 
-sample_app::StatusCode sample_app::QnnSampleApp::setLogLevel(QnnLog_Level_t logLevel) {
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::setLogLevel(QnnLog_Level_t logLevel) {
     if (QNN_SUCCESS != m_qnnFunctionPointers.qnnInterface.logSetLogLevel(m_logHandle, logLevel)) {
         QNN_WARN("Unable to set logging level in the backend.");
     }
@@ -2110,9 +2115,9 @@ sample_app::StatusCode sample_app::QnnSampleApp::setLogLevel(QnnLog_Level_t logL
 }
 
 // Performance Setting for HTP
-sample_app::StatusCode sample_app::QnnSampleApp::initializePerformance() {
-    if (m_isGpu) {
-        QNN_DEBUG("Skipping HTP performance initialization for GPU backend");
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::initializePerformance() {
+    if (m_isGpu || m_runInCpu) {
+        QNN_DEBUG("Skipping HTP performance initialization for GPU/CPU backend");
         return StatusCode::SUCCESS;
     }
     QnnDevice_Infrastructure_t deviceInfra = nullptr;
@@ -2125,7 +2130,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::initializePerformance() {
     m_perfInfra = htpInfra->perfInfra;
     uint32_t deviceId = m_multiCoreDeviceConfig.deviceId; //0;
     uint32_t coreId = m_multiCoreDeviceConfig.coreIdVec.empty()? 0 : *std::min_element(m_multiCoreDeviceConfig.coreIdVec.begin(), m_multiCoreDeviceConfig.coreIdVec.end()); //0;
-    QNN_INFO("sample_app::QnnSampleApp::initializePerformance,deviceId=%u, coreId=%u\n",deviceId,coreId);
+    QNN_INFO("qnn_app::QnnInferenceEngine::initializePerformance,deviceId=%u, coreId=%u\n",deviceId,coreId);
     if (QNN_SUCCESS != m_perfInfra.createPowerConfigId(deviceId, coreId, &m_powerConfigId)) {
         QNN_ERROR("Failure in createPowerConfigId()");
         return StatusCode::FAILURE;
@@ -2134,7 +2139,7 @@ sample_app::StatusCode sample_app::QnnSampleApp::initializePerformance() {
     return StatusCode::SUCCESS;
 }
 
-sample_app::StatusCode sample_app::QnnSampleApp::destroyPerformance() {
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::destroyPerformance() {
     if (true == m_runInCpu || m_isGpu)
         return StatusCode::SUCCESS;
 

@@ -495,7 +495,7 @@ iotensor::StatusCode iotensor::IOTensor::setupTensors(Qnn_Tensor_t** tensors,
       QNN_DEBUG("allocateBuffer successful");
       (*tensors)[tensorIdx] = QNN_TENSOR_INIT;
       returnStatus =
-          (sample_app::deepCopyQnnTensorInfo(((*tensors) + tensorIdx), &wrapperTensor) == true
+          (qnn_app::deepCopyQnnTensorInfo(((*tensors) + tensorIdx), &wrapperTensor) == true
                ? StatusCode::SUCCESS
                : StatusCode::FAILURE);
     }

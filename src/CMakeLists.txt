@@ -17,7 +17,7 @@ endif()
 
 set(CMAKE_CXX_STANDARD 20)
 
-set(APP_SOURCES "QnnSampleApp.cpp"
+set(APP_SOURCES "QnnInferenceEngine.cpp"
                 "main.cpp"
                 "Log/Logger.cpp"
                 "Log/LogUtils.cpp"
@@ -27,7 +27,7 @@ set(APP_SOURCES "QnnSampleApp.cpp"
                 "Utils/DynamicLoadUtil.cpp"
                 "Utils/IOTensor.cpp"
 		"Utils/QnnDlcUtils.cpp"
-                "Utils/QnnSampleAppUtils.cpp"
+                "Utils/QnnAppUtils.cpp"
                 "WrapperUtils/QnnWrapperUtils.cpp"
                 "LibAppBuilder.cpp"
                 "Lora.cpp")
@@ -72,9 +72,9 @@ target_include_directories(${APP} PUBLIC CachingUtil
                                          $ENV{QNN_SDK_ROOT}/include/QNN
                                          SVC
                                          ./)
-if (WIN32)
+
+# The remote-inference service (QAIAppSvc) is now cross-platform.
 add_subdirectory(SVC)
-endif()
 
 include_directories($ENV{QNN_SDK_ROOT}/include/QNN)
 

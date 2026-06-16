@@ -11,20 +11,22 @@
 # - Still supported: python setup.py bdist_wheel
 #
 # Example:
-#   [windows]
+#   [windows - WOS ARM64 device]
 #     set QNN_SDK_ROOT=C:/Qualcomm/AIStack/QAIRT/2.42.0.251225/
 #     set QAI_TOOLCHAINS=aarch64-windows-msvc (For ARM64 Windows Python) [or] set QAI_TOOLCHAINS=arm64x-windows-msvc (For AMD(X64) Windows Python)
 #     set QAI_HEXAGONARCH=81
 #
 #     python -m build -w
 #
+#   [windows - x86 PC (non-WOS)]
+#     set QNN_SDK_ROOT=C:/Qualcomm/AIStack/QAIRT/2.42.0.251225/
+#     set QAI_TOOLCHAINS=x86_64-windows-msvc 
+#     python -m build -w
+#
 #   [linux]
 #     export QNN_SDK_ROOT=~/QAIRT/2.38.0.250901/
 #     python -m build -w
-#
-# Also works with legacy setup.py invocation:
-#   python setup.py bdist_wheel --toolchains aarch64-windows-msvc --hexagonarch 81
-#
+
 # =============================================================================
 
 import os
@@ -46,7 +48,7 @@ from setuptools.command.bdist_wheel import bdist_wheel
 # ---------------------------
 # Project constants
 # ---------------------------
-VERSION = "2.46.0"
+VERSION = "2.47.0"
 CONFIG = "Release"  # Release, RelWithDebInfo
 PACKAGE_NAME = "qai_appbuilder"
 
@@ -84,6 +86,16 @@ def _extract_semver3_from_text(text: str) -> Optional[str]:
         return None
     return f"{m.group(1)}.{m.group(2)}.{m.group(3)}"
 
+def _extract_semver4_from_text(text: str) -> Optional[str]:
+    """
+    Extract 'X.Y.Z.DATE' (4 numeric dot-separated components) from a string.
+    Example: 'C:/.../2.42.0.251225/' -> '2.42.0.251225'
+    """
+    if not text:
+        return None
+    m = re.search(r"(\d+\.\d+\.\d+\.\d+)", text)
+    return m.group(1) if m else None
+
 def _get_base_version_from_qnn_sdk_root(default: str) -> str:
     """
     Prefer extracting base version from QNN_SDK_ROOT path; fallback to provided default.
@@ -117,33 +129,78 @@ def _require_cmake():
     if shutil.which("cmake") is None:
         raise RuntimeError("cmake executable not found in PATH. Please install CMake and ensure it's available.")
 
+def _is_wos_device() -> bool:
+    """
+    Detect whether we are running on a Windows on Snapdragon (WOS) device.
+    On WOS, the underlying CPU is ARM64 (Qualcomm Snapdragon), but x64 Python
+    reports platform.machine() == 'AMD64' due to emulation.
+    We distinguish WOS from a real x86_64 PC by checking the processor string
+    and PROCESSOR_IDENTIFIER / PROCESSOR_ARCHITECTURE environment variables.
+    Returns True if running on a WOS (ARM64) device, False on a real x86_64 PC.
+    """
+    # Check PROCESSOR_ARCHITECTURE env var (set by Windows)
+    proc_arch = os.environ.get("PROCESSOR_ARCHITECTURE", "").upper()
+    proc_id = os.environ.get("PROCESSOR_IDENTIFIER", "").upper()
+    processor = platform.processor().upper()
+    print(f"proc_arch:{proc_arch}")
+    print(f"proc_id:{proc_id}")
+    print(f"processor:{processor}")
+    # ARM indicators in processor info
+    arm_keywords = ("ARM", "QUALCOMM", "SNAPDRAGON", "ORYON")
+    for kw in arm_keywords:
+        if kw in proc_id or kw in processor:
+            return True
+
+    # On WOS, PROCESSOR_ARCHITECTURE is typically "ARM64" even for x64 processes
+    if proc_arch == "ARM64":
+        return True
+
+    return False
+
+
 def _detect_arch() -> str:
     """
-    Keep your original behavior:
-    - On Windows:
-        - If machine == AMD64 OR 'AMD64' in sys.version => target ARM64EC
-        - Else => ARM64
-    - On Linux aarch64 => aarch64
+    Detect the target build architecture:
+    - On Linux: aarch64 or x86_64
+    - On Windows WOS (ARM64 Snapdragon) device:
+        - If running x64 Python (AMD64) => "ARM64EC"
+        - Else => "ARM64"
+    - On Windows x86_64 PC (non-WOS) => "x86_64"
     """
     machine = platform.machine()
     sysinfo = sys.version
-    if machine == "aarch64":
-        return "aarch64"
-    # Windows / others
-    arch = "ARM64"
-    if machine == "AMD64" or ("AMD64" in sysinfo):
-        arch = "ARM64EC"
-    return arch
+    print(f"machine={machine}")
+    print(f"sysinfo={sysinfo}")
+
+    if not _is_windows():
+        if machine in {"aarch64", "arm64"}:
+            return "aarch64"
+        if machine in {"x86_64", "AMD64"}:
+            return "x86_64-linux"
+    # Windows: distinguish WOS (ARM64 CPU) from real x86_64 PC
+    if _is_wos_device():
+        # WOS device: ARM64 CPU
+        if machine == "AMD64" or ("AMD64" in sysinfo):
+            return "ARM64EC"
+        return "ARM64"
+    else:
+        # Real x86_64 Windows PC (non-WOS)
+        return "x86_64"
 
 
 def _default_generator_and_args(arch: str):
     """
     Return (generator_args:list[str], is_multi_config:bool)
     """
-    if arch == "aarch64":
+    if not _is_windows():
         return ([], False)
 
-    # Visual Studio generator (multi-config)
+    if arch == "x86_64":
+        # x86_64 Windows PC: use Visual Studio with x64 platform
+        gen = ["-G", "Visual Studio 17 2022", "-A", "x64"]
+        return (gen, True)
+
+    # WOS ARM64 / ARM64EC: Visual Studio generator (multi-config)
     gen = ["-G", "Visual Studio 17 2022", "-A", arch]
     return (gen, True)
 
@@ -216,6 +273,60 @@ def _compute_version_with_dsp_suffix(default_base: str) -> str:
     base = _get_base_version_from_qnn_sdk_root(default_base)
     return f"{base}"
 
+def _patch_setup_py_version(version3: str) -> None:
+    """
+    Rewrite the literal `VERSION = "X.Y.Z"` constant in this setup.py on disk
+    so it stays in sync with the SDK version extracted from QNN_SDK_ROOT.
+
+    Only the first top-level assignment (the one in the 'Project constants'
+    block) is changed; the later `VERSION = _compute_version_with_dsp_suffix(...)`
+    re-assignment is left untouched because it does not match the literal pattern.
+    version3: 3-part semver (e.g. '2.46.0')
+    """
+    setup_py = Path(__file__).resolve()
+    text = setup_py.read_text(encoding="utf-8")
+    new_text, n = re.subn(
+        r'^VERSION\s*=\s*"[^"]*"',
+        f'VERSION = "{version3}"',
+        text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    if n and new_text != text:
+        setup_py.write_text(new_text, encoding="utf-8")
+        print(f'-- Patched setup.py VERSION = "{version3}"')
+
+def _patch_cpp_version_files(version3: str, version4: str) -> None:
+    """
+    Rewrite BuildId.hpp and common.h with the current SDK version.
+    version3: 3-part semver (e.g. '2.46.0')
+    version4: 4-part semver (e.g. '2.46.0.260424')
+    """
+    root = _project_root()
+
+    # Patch BuildId.hpp
+    build_id = root / "src" / "Utils" / "BuildId.hpp"
+    text = build_id.read_text(encoding="utf-8")
+    text = re.sub(
+        r'return std::string\("v[^"]*"\)',
+        f'return std::string("v{version4}")',
+        text
+    )
+    build_id.write_text(text, encoding="utf-8")
+
+    # Patch common.h
+    common_h = root / "pybind" / "common.h"
+    text = common_h.read_text(encoding="utf-8")
+    text = re.sub(
+        r'#define APPBUILDER_VERSION "[^"]*"',
+        f'#define APPBUILDER_VERSION "{version3}"',
+        text
+    )
+    common_h.write_text(text, encoding="utf-8")
+
+    # Patch setup.py's own VERSION constant
+    _patch_setup_py_version(version3)
+
 # Re-compute VERSION for wheel metadata (and zip naming) based on environment/args.
 VERSION = _compute_version_with_dsp_suffix(VERSION)
 
@@ -224,8 +335,11 @@ def _package_zip_name(arch: str) -> str:
         return f"QAI_AppBuilder-win_arm64ec-QNN{VERSION}-{CONFIG}.zip"
     if arch == "aarch64":
         return f"QAI_AppBuilder-linux_arm64-QNN{VERSION}-{CONFIG}.zip"
+    if arch == "x86_64":
+        return f"QAI_AppBuilder-win_x86_64-QNN{VERSION}-{CONFIG}.zip"
+    if arch == "x86_64-linux":
+        return f"QAI_AppBuilder-linux_x86_64-QNN{VERSION}-{CONFIG}.zip"
     return f"QAI_AppBuilder-win_arm64-QNN{VERSION}-{CONFIG}.zip"
-
 
 def _ensure_runtime_pkg_dirs(source_pkg_dir: Path, build_pkg_dir: Path):
     """
@@ -260,28 +374,51 @@ def _copy_runtime_artifacts(
     # Determine effective toolchain for DSP arch selection (needed for multi-arch Windows packaging).
     effective_toolchain = toolchain
     if effective_toolchain is None and _is_windows():
-        effective_toolchain = "arm64x-windows-msvc" if arch == "ARM64EC" else "aarch64-windows-msvc"
+        if arch == "ARM64EC":
+            effective_toolchain = "arm64x-windows-msvc"
+        elif arch == "x86_64":
+            effective_toolchain = "x86_64-windows-msvc"
+        else:
+            effective_toolchain = "aarch64-windows-msvc"
     dsp_arches = _get_dsp_arches(toolchain=effective_toolchain, hexagonarch=hexagonarch)
 
     # Decide LIB_PATH (your original priority/order)
     if toolchain is None:
         if _is_windows():
-            lib_path = qnn_root / "lib" / "aarch64-windows-msvc"
             if arch == "ARM64EC":
                 lib_path = qnn_root / "lib" / "arm64x-windows-msvc"
-        else:
-            # linux/android probing (kept same)
-            cand1 = qnn_root / "lib" / "aarch64-oe-linux-gcc11.2"
-            cand2 = qnn_root / "lib" / "aarch64-android"
-            cand3 = qnn_root / "lib"
-            if (cand1 / "libGenie.so").exists():
-                lib_path = cand1
-            elif (cand2 / "libGenie.so").exists():
-                lib_path = cand2
-            elif (cand3 / "libGenie.so").exists():
-                lib_path = cand3
+            elif arch == "x86_64":
+                lib_path = qnn_root / "lib" / "x86_64-windows-msvc"
             else:
-                raise RuntimeError('Failed to find "libGenie.so" in QNN SDK lib paths')
+                lib_path = qnn_root / "lib" / "aarch64-windows-msvc"
+        else:
+            # linux/android probing; prefer QAIRT envsetup defaults
+            candidates: list[Path] = []
+
+            if arch == "aarch64":
+                candidates = [
+                    qnn_root / "lib" / "aarch64-oe-linux-gcc11.2",
+                    qnn_root / "lib" / "aarch64-android",
+                ]
+            elif arch == "x86_64-linux":
+                # QAIRT envsetup.sh uses x86_64-linux-clang for PATH/LD_LIBRARY_PATH
+                candidates = [
+                    qnn_root / "lib" / "x86_64-linux-clang",
+                ]
+
+            # Fallbacks
+            candidates.append(qnn_root / "lib")
+
+            lib_path = None
+            for cand in candidates:
+                if (cand / "libGenie.so").exists():
+                    lib_path = cand
+                    break
+            if lib_path is None:
+                raise RuntimeError(
+                    'Failed to find "libGenie.so" in QNN SDK lib paths. '
+                    'Set QAI_TOOLCHAINS to the correct <QNN_SDK_ROOT>/lib/<toolchain> subdir.'
+                )
     else:
         lib_path = qnn_root / "lib" / toolchain
 
@@ -390,6 +527,16 @@ def _build_root_cmake_project(arch: str, source_pkg_dir: Path, build_pkg_dir: Pa
     _copy_if_exists(lib_dir / "libappbuilder.so", source_pkg_dir / "libappbuilder.so")
     _copy_if_exists(lib_dir / "libappbuilder.so", build_pkg_dir / "libappbuilder.so")
 
+    # Linux QAIAppSvc service executable (cross-process inference). It is built
+    # alongside libappbuilder.so in lib/. Copy it into the package and make sure
+    # it keeps the executable bit so posix_spawnp can launch it.
+    if (lib_dir / "QAIAppSvc").exists():
+        for pkg_dir in (source_pkg_dir, build_pkg_dir):
+            dst = pkg_dir / "QAIAppSvc"
+            _copy_if_exists(lib_dir / "QAIAppSvc", dst)
+            if dst.exists():
+                os.chmod(dst, 0o755)
+
     # Ensure libs/__init__.py exists
     _ensure_runtime_pkg_dirs(source_pkg_dir, build_pkg_dir)
 
@@ -429,6 +576,10 @@ def _build_release_zip(arch: str):
 
     # Linux artifact
     _copy_if_exists(lib_dir / "libappbuilder.so", tmp_path / "libappbuilder.so")
+    if (lib_dir / "QAIAppSvc").exists():
+        _copy_if_exists(lib_dir / "QAIAppSvc", tmp_path / "QAIAppSvc")
+        if (tmp_path / "QAIAppSvc").exists():
+            os.chmod(tmp_path / "QAIAppSvc", 0o755)
 
     # Headers
     _copy_if_exists(root / "src" / "LibAppBuilder.hpp", include_path / "LibAppBuilder.hpp")
@@ -453,7 +604,7 @@ def _clean_artifacts():
     # Remove known binaries under source package dir
     for fname in [
         "libappbuilder.dll", "QAIAppSvc.exe", "QAIAppSvc.pdb", "libappbuilder.pdb",
-        "libappbuilder.so", "Genie.dll", "libGenie.so"
+        "libappbuilder.so", "QAIAppSvc", "Genie.dll", "libGenie.so"
     ]:
         p = source_pkg_dir / fname
         if p.exists():
@@ -505,6 +656,18 @@ class QaiCMakeBuild(build_ext):
         arch = _detect_arch()
         print(f"-- Arch: {arch}")
 
+        # Auto-patch C++ version headers from QNN_SDK_ROOT
+        qnn_root_str = os.environ.get("QNN_SDK_ROOT", "")
+        v3 = _extract_semver3_from_text(qnn_root_str)
+        v4 = _extract_semver4_from_text(qnn_root_str)
+        if not v3 or not v4:
+            raise RuntimeError(
+                f'Cannot extract version from QNN_SDK_ROOT="{qnn_root_str}". '
+                'Expected a path containing a version like "2.46.0.260424".'
+            )
+        _patch_cpp_version_files(v3, v4)
+        print(f"-- Version: {v4}")
+
         # Ensure build_lib package dirs
         build_py_cmd = self.get_finalized_command("build_py")
         build_lib = Path(build_py_cmd.build_lib)
@@ -533,6 +696,7 @@ class QaiCMakeBuild(build_ext):
         - preserves ARM64EC generator behavior and Python hints
         """
         arch = _detect_arch()
+        print(f"build_extension-- Arch: {arch}")
         ext_fullpath = Path.cwd() / self.get_ext_fullpath(ext.name)
         extdir = ext_fullpath.parent.resolve()
 
@@ -617,6 +781,27 @@ class QaiBdistWheel(bdist_wheel):
             os.environ["QAI_HEXAGONARCH"] = str(self.hexagonarch)
 
         arch = _detect_arch()
+        print(f"run-- Arch: {arch}")
+        # On x86_64 Windows PC (non-WOS), auto-set QAI_TOOLCHAINS to x86_64-windows-msvc
+        # if not already specified by the user.
+        if not os.environ.get("QAI_TOOLCHAINS"):
+            if arch == "x86_64":
+                os.environ["QAI_TOOLCHAINS"] = "x86_64-windows-msvc"
+                self.toolchains = "x86_64-windows-msvc"
+            elif arch == "ARM64EC":
+                os.environ["QAI_TOOLCHAINS"] = "arm64x-windows-msvc"
+                self.toolchains = "arm64x-windows-msvc"			
+            elif arch == "aarch64":
+                os.environ["QAI_TOOLCHAINS"] = "aarch64-oe-linux-gcc11.2"
+                self.toolchains = "aarch64-oe-linux-gcc11.2"	
+            elif arch == "ARM64":
+                os.environ["QAI_TOOLCHAINS"] = "aarch64-windows-msvc"
+                self.toolchains = "aarch64-windows-msvc"
+            elif arch == "x86_64-linux":
+                os.environ["QAI_TOOLCHAINS"] = "x86_64-linux-clang"
+                self.toolchains = "x86_64-linux-clang"			
+            else:
+                print(f"please set environment QAI_TOOLCHAINS for this arch:{arch}!!!")
 
         # Build wheel first
         super().run()
@@ -646,7 +831,7 @@ setup(
     version=VERSION,
     packages=find_packages(where="script"),
     package_dir={"": "script"},
-    package_data={"": ["*.dll", "*.pdb", "*.exe", "*.so", "*.cat"]},
+    package_data={"": ["*.dll", "*.pdb", "*.exe", "*.so", "*.cat", "QAIAppSvc"]},
     ext_modules=[CMakeExtension("qai_appbuilder.appbuilder", "pybind")],
     cmdclass={
         "build_ext": QaiCMakeBuild,

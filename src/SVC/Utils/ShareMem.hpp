@@ -1,49 +1,47 @@
 //==============================================================================
 //
 // Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
-// 
+//
 // SPDX-License-Identifier: BSD-3-Clause
 //
 //==============================================================================
 
 #pragma once
 
-#include <windows.h>
-#include <psapi.h>
 #include <iostream>
 #include <fstream>
+#include <unordered_map>
+#include <memory>
+
+#ifdef _WIN32
+#include <windows.h>
+#include <psapi.h>
 #include <direct.h>
 #include <process.h>
 #include <winbase.h>
-#include <unordered_map>
+#endif
 
 #include "LibAppBuilder.hpp"
+#include "ipc/SharedRegion.hpp"
 
 
 #define PRINT_MEMINFO (0)
 
+// Cross-platform shared-memory descriptor. 'lpBase' and 'size' keep their
+// original names so the data-marshalling code in Utils.hpp / main.cpp is
+// unchanged; 'region' owns the underlying OS mapping (file mapping on Windows,
+// mmap'd fd on POSIX).
 typedef struct ShareMemInfo {
     size_t size;
-    HANDLE hCreateMapFile;
-    LPVOID lpBase;
+    void*  lpBase;
+    std::unique_ptr<ipc::SharedRegion> region;
 } ShareMemInfo_t;
 
-std::unordered_map<std::string, ShareMemInfo_t*> sg_share_mem_map;
+std::unordered_map<std::string, std::unique_ptr<ShareMemInfo_t>> sg_share_mem_map;
 
 BOOL Print_MemInfo(std::string TAG) {
 #if PRINT_MEMINFO
-    /*
-    MEMORYSTATUSEX memInfo;
-    memInfo.dwLength = sizeof(MEMORYSTATUSEX);
-    if (!GlobalMemoryStatusEx(&memInfo)) {
-        QNN_ERR("GlobalMemoryStatusEx failed.");
-        return false;
-    }
-
-    // std::cout << "Shared memory used by this process: " << memInfo.ullAvailPageFile << " bytes" << std::endl;
-    QNN_INF("MemInfo:: %d M", memInfo.ullAvailPageFile / 1024 / 1024);
-    */
-
+#ifdef _WIN32
     uint64_t phyUsed = 0, memUsed = 0, pagefileUsed = 0;
     PROCESS_MEMORY_COUNTERS_EX pmc;
     DWORD processID = GetCurrentProcessId();
@@ -55,7 +53,7 @@ BOOL Print_MemInfo(std::string TAG) {
     }
     CloseHandle(processHandle);
     QNN_WAR("[MemInfo][%s]:: phy used: %llu M, mem used: %llu M, pagefile used %llu M", TAG.c_str(), phyUsed, memUsed, pagefileUsed);
-
+#endif
 #endif
     return true;
 }
@@ -64,8 +62,7 @@ ShareMemInfo_t* FindShareMem(std::string share_memory_name) {
     auto it = sg_share_mem_map.find(share_memory_name);
     if (it != sg_share_mem_map.end()) {
         if (it->second) {
-            auto pShareMemInfo = it->second;
-            return pShareMemInfo;
+            return it->second.get();
         }
     }
 
@@ -73,50 +70,49 @@ ShareMemInfo_t* FindShareMem(std::string share_memory_name) {
     return nullptr;
 }
 
+// Register an already-mapped region under a name. Takes ownership of 'region'.
+// Returns the stored descriptor, or nullptr on failure.
+ShareMemInfo_t* RegisterShareMem(const std::string& share_memory_name,
+                                 std::unique_ptr<ipc::SharedRegion> region) {
+    if (!region || !region->Base()) {
+        return nullptr;
+    }
+
+    auto info = std::make_unique<ShareMemInfo_t>();
+    info->size   = region->Size();
+    info->lpBase = region->Base();
+    info->region = std::move(region);
+
+    ShareMemInfo_t* raw = info.get();
+    sg_share_mem_map[share_memory_name] = std::move(info);
+    return raw;
+}
+
+// Client side: create a named shared-memory region.
 BOOL CreateShareMem(std::string share_memory_name, size_t share_memory_size) {
-    DWORD size = (DWORD)share_memory_size;
-    HANDLE hCreateMapFile = nullptr;
-    LPVOID lpBase = nullptr;
-    ShareMemInfo_t* pShareMemInfo = nullptr;
-
-    hCreateMapFile = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, 
-                                        size, share_memory_name.c_str());
-
-    if(hCreateMapFile) {
-        lpBase = MapViewOfFile(hCreateMapFile, FILE_MAP_ALL_ACCESS, 0, 0, size);
+    auto region = ipc::SharedRegion::Create(share_memory_name, share_memory_size);
+    if (!region) {
+        QNN_ERR("CreateShareMem::create failed.\n");
+        return false;
     }
 
-    if (lpBase) {
-        pShareMemInfo = (ShareMemInfo_t*)malloc(sizeof(ShareMemInfo_t));
-        if (pShareMemInfo) {
-            pShareMemInfo->size = share_memory_size;
-            pShareMemInfo->hCreateMapFile = hCreateMapFile;
-            pShareMemInfo->lpBase = lpBase;
-
-            sg_share_mem_map.insert(std::make_pair(share_memory_name, pShareMemInfo));
-            QNN_INF("CreateShareMem::Count = %d\n", (int)sg_share_mem_map.size());
-            return true;
-        }
+    if (!RegisterShareMem(share_memory_name, std::move(region))) {
+        QNN_ERR("CreateShareMem::register failed.\n");
+        return false;
     }
 
-    QNN_ERR("CreateShareMem::create failed.\n");
-    return false;
+    QNN_INF("CreateShareMem::Count = %d\n", (int)sg_share_mem_map.size());
+    return true;
 }
 
 BOOL DeleteShareMem(std::string share_memory_name) {
-    ShareMemInfo_t* pShareMemInfo = FindShareMem(share_memory_name);
-    if (!pShareMemInfo) {
+    auto it = sg_share_mem_map.find(share_memory_name);
+    if (it == sg_share_mem_map.end()) {
         QNN_ERR("DeleteShareMem::Cant find this share memory %s.\n", share_memory_name.c_str());
         return false;
     }
-    else {
-        UnmapViewOfFile(pShareMemInfo->lpBase);
-        CloseHandle(pShareMemInfo->hCreateMapFile);
-        sg_share_mem_map.erase(share_memory_name);
-        free(pShareMemInfo);
-        QNN_INF("DeleteShareMem::Count = %d\n", (int)sg_share_mem_map.size());
-        return true;
-    }
 
-    return false;
+    sg_share_mem_map.erase(it);   // unique_ptr dtor unmaps / closes the region
+    QNN_INF("DeleteShareMem::Count = %d\n", (int)sg_share_mem_map.size());
+    return true;
 }

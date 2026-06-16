@@ -6,9 +6,6 @@
 //
 //==============================================================================
 
-#pragma once
-
-
 #include "Utils/Utils.hpp"
 #include "Lora.hpp"
 #include <string>
@@ -23,47 +20,39 @@
 
 LibAppBuilder g_LibAppBuilder;
 
-LPVOID OpenShareMem(std::string share_memory_name, size_t share_memory_size) {
-    HANDLE hOpenMapFile = nullptr;
-    LPVOID lpBase = nullptr;
-    ShareMemInfo_t* pShareMemInfo = nullptr;
-
-    hOpenMapFile = OpenFileMappingA(FILE_MAP_ALL_ACCESS, NULL, share_memory_name.c_str());
-
-    if (hOpenMapFile) {
-        lpBase = MapViewOfFile(hOpenMapFile, FILE_MAP_ALL_ACCESS, 0, 0, 0);
-    }
-    if (lpBase) {
-        pShareMemInfo = (ShareMemInfo_t*)malloc(sizeof(ShareMemInfo_t));
-
-        if (pShareMemInfo) {
-            pShareMemInfo->hCreateMapFile = hOpenMapFile;
-            pShareMemInfo->lpBase = lpBase;
-            pShareMemInfo->size = share_memory_size;
-            // QNN_INF("OpenShareMem::pShareMemInfo %p\n", pShareMemInfo);
-            sg_share_mem_map.insert(std::make_pair(share_memory_name, pShareMemInfo));
-        }
+// Server side: map the shared-memory region for this inference.
+//   Windows : open the named mapping created by the client.
+//   POSIX   : adopt the fd just received over the command channel (SCM_RIGHTS).
+void* OpenShareMem(std::string share_memory_name, size_t share_memory_size, ipc::ShmHandle posixFd = ipc::kInvalidShm()) {
+    std::unique_ptr<ipc::SharedRegion> region;
+#ifdef _WIN32
+    (void)posixFd;
+    region = ipc::SharedRegion::OpenByName(share_memory_name, share_memory_size);
+#else
+    region = ipc::SharedRegion::OpenFromHandle(posixFd, share_memory_size);
+#endif
+    if (!region) {
+        return nullptr;
     }
 
+    void* lpBase = region->Base();
+    if (!RegisterShareMem(share_memory_name, std::move(region))) {
+        return nullptr;
+    }
     return lpBase;
 }
 
 void CloseShareMem(std::string share_memory_name) {
-    ShareMemInfo_t* pShareMemInfo = sg_share_mem_map[share_memory_name];
-
-    if (pShareMemInfo) {
-        // QNN_INF("CloseShareMem::pShareMemInfo %p\n", pShareMemInfo);
-        UnmapViewOfFile(pShareMemInfo->lpBase);
-        CloseHandle(pShareMemInfo->hCreateMapFile);
-        sg_share_mem_map.erase(share_memory_name);
-        free(pShareMemInfo);
+    auto it = sg_share_mem_map.find(share_memory_name);
+    if (it != sg_share_mem_map.end()) {
+        sg_share_mem_map.erase(it);   // unique_ptr dtor unmaps / closes the region
     }
     else {
         QNN_ERR("CloseShareMem::Can't find share memory%s.\n", share_memory_name.c_str());
     }
 }
 
-void ModelLoad(std::string cmdBuf, HANDLE hSvcPipeOutWrite) {
+void ModelLoad(std::string cmdBuf, ipc::IpcChannel* channel) {
     BOOL bSuccess;
     Print_MemInfo("ModelLoad Start.");
 
@@ -87,15 +76,15 @@ void ModelLoad(std::string cmdBuf, HANDLE hSvcPipeOutWrite) {
 
     if (!(async_str == "async")) {  // We only notify client when sync mode. TODO: Async mode will notify client by callback function.
         if(bSuccess) {
-            bSuccess = WriteFile(hSvcPipeOutWrite, ACTION_OK, (DWORD)strlen(ACTION_OK) + 1, NULL, NULL);
+            channel->Write(ACTION_OK, strlen(ACTION_OK) + 1);
         }
         else {
-            bSuccess = WriteFile(hSvcPipeOutWrite, ACTION_FAILED, (DWORD)strlen(ACTION_FAILED) + 1, NULL, NULL);
+            channel->Write(ACTION_FAILED, strlen(ACTION_FAILED) + 1);
         }
     }
 }
 
-void ModelRun(std::string cmdBuf, HANDLE hSvcPipeOutWrite) {
+void ModelRun(std::string cmdBuf, ipc::IpcChannel* channel, ipc::ShmHandle posixFd) {
     BOOL bSuccess;
     Print_MemInfo("ModelRun Start.");
     // TimerHelper timerHelper;
@@ -111,7 +100,8 @@ void ModelRun(std::string cmdBuf, HANDLE hSvcPipeOutWrite) {
     size_t graphIndex             = std::stoull(commands[5]);
 
     // Open share memory and read the inference data from share memory.
-    LPVOID lpBase = OpenShareMem(share_memory_name, share_memory_size);
+    // On POSIX 'posixFd' is the fd received with this command via SCM_RIGHTS.
+    void* lpBase = OpenShareMem(share_memory_name, share_memory_size, posixFd);
 
     std::vector<uint8_t*> inputBuffers;
     std::vector<size_t> inputSize;
@@ -140,18 +130,16 @@ void ModelRun(std::string cmdBuf, HANDLE hSvcPipeOutWrite) {
 
     // timerHelper.Print("ModelRun");
 
-    DWORD dwRead = 0, dwWrite = 0;
     std::string command = strResultArray.first + "=" + strResultArray.second;
-    dwRead = (DWORD)command.length() + 1;
     if (bSuccess) {
-        bSuccess = WriteFile(hSvcPipeOutWrite, command.c_str(), dwRead, &dwWrite, NULL);
+        channel->Write(command.c_str(), command.length() + 1);
     }
     else {
-        bSuccess = WriteFile(hSvcPipeOutWrite, ACTION_FAILED, (DWORD)strlen(ACTION_FAILED) + 1, NULL, NULL);
+        channel->Write(ACTION_FAILED, strlen(ACTION_FAILED) + 1);
     }
 }
 
-void ModelRelease(std::string cmdBuf, HANDLE hSvcPipeOutWrite) {
+void ModelRelease(std::string cmdBuf, ipc::IpcChannel* channel) {
     BOOL bSuccess;
     Print_MemInfo("ModelRelease Start.");
 
@@ -167,10 +155,34 @@ void ModelRelease(std::string cmdBuf, HANDLE hSvcPipeOutWrite) {
     Print_MemInfo("ModelRelease::ModelDestroy End.");
 
     if (bSuccess) {
-        bSuccess = WriteFile(hSvcPipeOutWrite, ACTION_OK, (DWORD)strlen(ACTION_OK) + 1, NULL, NULL);
+        channel->Write(ACTION_OK, strlen(ACTION_OK) + 1);
     }
     else {
-        bSuccess = WriteFile(hSvcPipeOutWrite, ACTION_FAILED, (DWORD)strlen(ACTION_FAILED) + 1, NULL, NULL);
+        channel->Write(ACTION_FAILED, strlen(ACTION_FAILED) + 1);
+    }
+}
+
+// Apply / release the HTP perf profile inside this Svc process, where the model
+// (and thus the QNN backend handle) actually lives. Called for the 'p' / 'e'
+// commands forwarded by the client's PerfProfile.SetPerfProfileGlobal / Rel.
+void SetPerf(std::string cmdBuf, ipc::IpcChannel* channel) {
+    std::string perf_profile = cmdBuf;   // remainder after the 'p' command byte
+    BOOL bSuccess = SetPerfProfileGlobal(perf_profile);
+    if (bSuccess) {
+        channel->Write(ACTION_OK, strlen(ACTION_OK) + 1);
+    }
+    else {
+        channel->Write(ACTION_FAILED, strlen(ACTION_FAILED) + 1);
+    }
+}
+
+void RelPerf(ipc::IpcChannel* channel) {
+    BOOL bSuccess = RelPerfProfileGlobal();
+    if (bSuccess) {
+        channel->Write(ACTION_OK, strlen(ACTION_OK) + 1);
+    }
+    else {
+        channel->Write(ACTION_FAILED, strlen(ACTION_FAILED) + 1);
     }
 }
 
@@ -195,7 +207,7 @@ std::string vec2str(const std::vector<std::vector<size_t>>& vec) {
     return oss.str();
 }
 
-void getModelInfo(std::string cmdBuf, HANDLE hSvcPipeOutWrite) {
+void getModelInfo(std::string cmdBuf, ipc::IpcChannel* channel) {
     BOOL bSuccess = true;
     std::vector<std::string> commands;
     split_string(commands, cmdBuf, ';');
@@ -214,49 +226,61 @@ void getModelInfo(std::string cmdBuf, HANDLE hSvcPipeOutWrite) {
         << output.graphName << ";";
     command = oss.str();
 
-    DWORD dwRead = 0, dwWrite = 0;
     //printf("getModelInfo in main.cpp,command=%s\n", command.c_str());
-    dwRead = (DWORD)command.length() + 1;
     if (bSuccess) {
-        bSuccess = WriteFile(hSvcPipeOutWrite, command.c_str(), dwRead, &dwWrite, NULL);
+        channel->Write(command.c_str(), command.length() + 1);
     }
     else {
-        bSuccess = WriteFile(hSvcPipeOutWrite, ACTION_FAILED, (DWORD)strlen(ACTION_FAILED) + 1, NULL, NULL);
+        channel->Write(ACTION_FAILED, strlen(ACTION_FAILED) + 1);
     }
 }
 
-int svcprocess_run(HANDLE hSvcPipeInRead, HANDLE hSvcPipeOutWrite) {
-    DWORD dwRead = 0, dwWrite = 0;
+int svcprocess_run(ipc::IpcChannel* channel) {
+    size_t dwRead = 0;
     BOOL bSuccess = false;
 
-    if ((hSvcPipeOutWrite == INVALID_HANDLE_VALUE) || (hSvcPipeInRead == INVALID_HANDLE_VALUE)) {
-        ErrorExit("Svc::Failed to get write or read handle.");
+    if (!channel) {
+        ErrorExit("Svc::Failed to get command channel.");
     }
 
     for (;;) {
-        bSuccess = ReadFile(hSvcPipeInRead, g_buffer, GLOBAL_BUFSIZE, &dwRead, NULL);
+        bSuccess = channel->Read(g_buffer, GLOBAL_BUFSIZE, dwRead);
 
         if (!bSuccess || dwRead == 0) {
-            QNN_WAR("Svc::Failed to read from hSvcPipeInRead, perhaps parent process closed pipe or died.\n");
+            // The parent closed the command channel (e.g. after destroying the
+            // last model in this process). This is the normal shutdown path, not
+            // an error: the service loop simply exits and the process ends.
+            QNN_INF("Svc::Command channel closed by parent. Service exiting normally.\n");
             break;
         }
+
+        // Any fd that arrived with this message (POSIX SCM_RIGHTS); kInvalidShm() on Windows.
+        ipc::ShmHandle posixFd = channel->TakePendingFd();
 
         char* cmdBuf = g_buffer + 1;
         switch (g_buffer[0]) {
             case 'l':   // load model.
-                ModelLoad(cmdBuf, hSvcPipeOutWrite);
+                ModelLoad(cmdBuf, channel);
                 break;
 
             case 'g':   // run Graphs.
-                ModelRun(cmdBuf, hSvcPipeOutWrite);
+                ModelRun(cmdBuf, channel, posixFd);
                 break;
 
             case 'r':   // release model.
-                ModelRelease(cmdBuf, hSvcPipeOutWrite);
+                ModelRelease(cmdBuf, channel);
                 break;
 
             case 'i':   // get model info.
-                getModelInfo(cmdBuf, hSvcPipeOutWrite);
+                getModelInfo(cmdBuf, channel);
+                break;
+
+            case 'p':   // set perf profile (in this process, where the model lives).
+                SetPerf(cmdBuf, channel);
+                break;
+
+            case 'e':   // release perf profile.
+                RelPerf(channel);
                 break;
         }
     }
@@ -466,14 +490,17 @@ std::map<std::string, std::vector<std::string>> parse_binary_updates(
 
 int main(int argc, char** argv) {
     if (argc > 1 && argv[1] && argv[1][0] == 's') {  // Start server.
-        HANDLE hSvcPipeInRead = (HANDLE)std::stoull(argv[2]);
-        HANDLE hSvcPipeOutWrite = (HANDLE)std::stoull(argv[3]);
+        uint64_t inRead   = std::stoull(argv[2]);
+        uint64_t outWrite = std::stoull(argv[3]);
         SetLogLevel(std::stoi(argv[5]));
         SetProfilingLevel(std::stoi(argv[6]));
         SetProcInfo(argv[7], std::stoull(argv[4]));
         QNN_INF("Svc App Start proc %s.\n", argv[7]);
         Print_MemInfo("Svc App Start.");
-        svcprocess_run(hSvcPipeInRead, hSvcPipeOutWrite);
+
+        auto channel = ipc::IpcChannel::AttachChild(inRead, outWrite);
+        svcprocess_run(channel.get());
+
         Print_MemInfo("Svc App End.");
     }
     else {  // Start test mode to load & run model.

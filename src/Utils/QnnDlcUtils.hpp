@@ -15,7 +15,7 @@
 
 namespace qnn {
 namespace tools {
-namespace sample_app {
+namespace qnn_app {
 namespace dlc_utils {
 
 enum class StatusCode {
@@ -95,6 +95,6 @@ StatusCode retrieveGraphHandles(const QnnInterface_t& qnnInterface,
                                uint32_t graphsCount);
 
 }  // namespace dlc_utils
-}  // namespace sample_app
+}  // namespace qnn_app
 }  // namespace tools
 }  // namespace qnn

@@ -21,13 +21,13 @@
 #include "PAL/Path.hpp"
 #endif
 #include "PAL/StringOp.hpp"
-#include "QnnSampleAppUtils.hpp"
+#include "QnnAppUtils.hpp"
 #include "QnnTypeMacros.hpp"
 
 using namespace qnn;
 using namespace qnn::tools;
 
-void sample_app::split(std::vector<std::string> &splitString,
+void qnn_app::split(std::vector<std::string> &splitString,
                        const std::string &tokenizedString,
                        const char separator) {
   splitString.clear();
@@ -41,7 +41,7 @@ void sample_app::split(std::vector<std::string> &splitString,
   }
 }
 
-void sample_app::parseInputFilePaths(std::vector<std::string> &inputFilePaths,
+void qnn_app::parseInputFilePaths(std::vector<std::string> &inputFilePaths,
                                      std::vector<std::string> &paths,
                                      std::string separator) {
   for (auto &inputInfo : inputFilePaths) {
@@ -55,7 +55,7 @@ void sample_app::parseInputFilePaths(std::vector<std::string> &inputFilePaths,
   }
 }
 
-sample_app::ReadInputListsRetType_t sample_app::readInputLists(
+qnn_app::ReadInputListsRetType_t qnn_app::readInputLists(
     std::vector<std::string> inputFileListPaths) {
   std::vector<std::vector<std::vector<std::string>>> filePathsLists;
   std::vector<std::unordered_map<std::string, uint32_t>> inputNameToIndexMaps;
@@ -74,7 +74,7 @@ sample_app::ReadInputListsRetType_t sample_app::readInputLists(
   return std::make_tuple(filePathsLists, inputNameToIndexMaps, true);
 }
 
-sample_app::ReadInputListRetType_t sample_app::readInputList(const std::string inputFileListPath) {
+qnn_app::ReadInputListRetType_t qnn_app::readInputList(const std::string inputFileListPath) {
   std::queue<std::string> lines;
   std::ifstream fileListStream(inputFileListPath);
   if (!fileListStream) {
@@ -121,7 +121,7 @@ sample_app::ReadInputListRetType_t sample_app::readInputList(const std::string i
   return std::make_tuple(filePathsList, inputNameToIndex, true);
 }
 
-std::unordered_map<std::string, uint32_t> sample_app::extractInputNameIndices(
+std::unordered_map<std::string, uint32_t> qnn_app::extractInputNameIndices(
     const std::string &inputLine, const std::string &separator) {
   std::vector<std::string> inputFilePaths;
   std::unordered_map<std::string, uint32_t> inputNameToIndex;
@@ -143,7 +143,7 @@ std::unordered_map<std::string, uint32_t> sample_app::extractInputNameIndices(
                                              : std::unordered_map<std::string, uint32_t>{};
 }
 
-std::string sample_app::sanitizeTensorName(std::string name) {
+std::string qnn_app::sanitizeTensorName(std::string name) {
   std::string sanitizedName = std::regex_replace(name, std::regex("\\W+"), "_");
   if (!std::isalpha(sanitizedName[0]) && sanitizedName[0] != '_') {
     sanitizedName = "_" + sanitizedName;
@@ -151,7 +151,7 @@ std::string sample_app::sanitizeTensorName(std::string name) {
   return sanitizedName;
 }
 
-sample_app::ProfilingLevel sample_app::parseProfilingLevel(std::string profilingLevelString) {
+qnn_app::ProfilingLevel qnn_app::parseProfilingLevel(std::string profilingLevelString) {
   std::transform(profilingLevelString.begin(),
                  profilingLevelString.end(),
                  profilingLevelString.begin(),
@@ -167,7 +167,7 @@ sample_app::ProfilingLevel sample_app::parseProfilingLevel(std::string profiling
   return parsedProfilingLevel;
 }
 
-bool sample_app::deepCopyQnnTensorInfo(Qnn_Tensor_t *dst, const Qnn_Tensor_t *src) {
+bool qnn_app::deepCopyQnnTensorInfo(Qnn_Tensor_t *dst, const Qnn_Tensor_t *src) {
   if (nullptr == dst || nullptr == src) {
     QNN_ERROR("Received nullptr");
     return false;
@@ -239,7 +239,7 @@ bool sample_app::deepCopyQnnTensorInfo(Qnn_Tensor_t *dst, const Qnn_Tensor_t *sr
   return true;
 }
 
-bool sample_app::copyTensorsInfo(const Qnn_Tensor_t *tensorsInfoSrc,
+bool qnn_app::copyTensorsInfo(const Qnn_Tensor_t *tensorsInfoSrc,
                                  Qnn_Tensor_t *&tensorWrappers,
                                  uint32_t tensorsCount) {
   QNN_FUNCTION_ENTRY_LOG;
@@ -260,7 +260,7 @@ bool sample_app::copyTensorsInfo(const Qnn_Tensor_t *tensorsInfoSrc,
   return returnStatus;
 }
 
-bool sample_app::copyGraphsInfoV1(const QnnSystemContext_GraphInfoV1_t *graphInfoSrc,
+bool qnn_app::copyGraphsInfoV1(const QnnSystemContext_GraphInfoV1_t *graphInfoSrc,
                                   qnn_wrapper_api::GraphInfo_t *graphInfoDst) {
   graphInfoDst->graphName = nullptr;
   if (graphInfoSrc->graphName) {
@@ -289,7 +289,7 @@ bool sample_app::copyGraphsInfoV1(const QnnSystemContext_GraphInfoV1_t *graphInf
   return true;
 }
 
-bool sample_app::copyGraphsInfoV3(const QnnSystemContext_GraphInfoV3_t *graphInfoSrc,
+bool qnn_app::copyGraphsInfoV3(const QnnSystemContext_GraphInfoV3_t *graphInfoSrc,
                                   qnn_wrapper_api::GraphInfo_t *graphInfoDst) {
   graphInfoDst->graphName = nullptr;
   if (graphInfoSrc->graphName) {
@@ -318,7 +318,7 @@ bool sample_app::copyGraphsInfoV3(const QnnSystemContext_GraphInfoV3_t *graphInf
   return true;
 }
 
-bool sample_app::copyGraphsInfo(const QnnSystemContext_GraphInfo_t *graphsInput,
+bool qnn_app::copyGraphsInfo(const QnnSystemContext_GraphInfo_t *graphsInput,
                                 const uint32_t numGraphs,
                                 qnn_wrapper_api::GraphInfo_t **&graphsInfo) {
   QNN_FUNCTION_ENTRY_LOG;
@@ -370,7 +370,7 @@ bool sample_app::copyGraphsInfo(const QnnSystemContext_GraphInfo_t *graphsInput,
   return true;
 }
 
-bool sample_app::copyMetadataToGraphsInfo(const QnnSystemContext_BinaryInfo_t *binaryInfo,
+bool qnn_app::copyMetadataToGraphsInfo(const QnnSystemContext_BinaryInfo_t *binaryInfo,
                                           qnn_wrapper_api::GraphInfo_t **&graphsInfo,
                                           uint32_t &graphsCount) {
   if (nullptr == binaryInfo) {
@@ -416,7 +416,7 @@ bool sample_app::copyMetadataToGraphsInfo(const QnnSystemContext_BinaryInfo_t *b
   return false;
 }
 
-QnnLog_Level_t sample_app::parseLogLevel(std::string logLevelString) {
+QnnLog_Level_t qnn_app::parseLogLevel(std::string logLevelString) {
   QNN_FUNCTION_ENTRY_LOG;
   std::transform(logLevelString.begin(), logLevelString.end(), logLevelString.begin(), ::tolower);
   QnnLog_Level_t parsedLogLevel = QNN_LOG_LEVEL_MAX;

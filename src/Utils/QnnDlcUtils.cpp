@@ -11,12 +11,12 @@
 #include <cstring>
 
 #include "Logger.hpp"
-#include "QnnSampleAppUtils.hpp"
+#include "QnnAppUtils.hpp"
 
 using namespace qnn;
 using namespace qnn::tools;
 
-sample_app::dlc_utils::StatusCode sample_app::dlc_utils::createDlcHandle(
+qnn_app::dlc_utils::StatusCode qnn_app::dlc_utils::createDlcHandle(
     const QnnSystemInterface_t& systemInterface,
     const std::string& dlcPath,
     QnnLog_Callback_t logCallback,
@@ -46,7 +46,7 @@ sample_app::dlc_utils::StatusCode sample_app::dlc_utils::createDlcHandle(
   return StatusCode::SUCCESS;
 }
 
-void sample_app::dlc_utils::freeDlcResources(const QnnSystemInterface_t& systemInterface,
+void qnn_app::dlc_utils::freeDlcResources(const QnnSystemInterface_t& systemInterface,
                                              QnnSystemDlc_Handle_t& dlcHandle,
                                              Qnn_LogHandle_t& logHandle) {
   if (dlcHandle) {
@@ -61,7 +61,7 @@ void sample_app::dlc_utils::freeDlcResources(const QnnSystemInterface_t& systemI
   }
 }
 
-sample_app::dlc_utils::StatusCode sample_app::dlc_utils::composeGraphsFromDlc(
+qnn_app::dlc_utils::StatusCode qnn_app::dlc_utils::composeGraphsFromDlc(
     const QnnSystemInterface_t& systemInterface,
     QnnSystemDlc_Handle_t dlcHandle,
     Qnn_BackendHandle_t backendHandle,
@@ -98,7 +98,7 @@ sample_app::dlc_utils::StatusCode sample_app::dlc_utils::composeGraphsFromDlc(
   QNN_DEBUG("Successfully composed %d graphs from DLC", numGraphs);
 
   // Use existing utility function to copy graph info
-  if (!sample_app::copyGraphsInfo(systemGraphInfos, numGraphs, graphsInfo)) {
+  if (!qnn_app::copyGraphsInfo(systemGraphInfos, numGraphs, graphsInfo)) {
     QNN_ERROR("Failed to copy graphs info from system graph info");
     // Clean up system graph infos
     if (systemGraphInfos) {
@@ -115,7 +115,7 @@ sample_app::dlc_utils::StatusCode sample_app::dlc_utils::composeGraphsFromDlc(
   }
 
   graphsCount = numGraphs;
-  QNN_DEBUG("in sample_app::dlc_utils::composeGraphsFromDlc");
+  QNN_DEBUG("in qnn_app::dlc_utils::composeGraphsFromDlc");
   // Retrieve graph handles
   auto retrieveStatus = retrieveGraphHandles(qnnInterface, context, graphsInfo, graphsCount);
   if (StatusCode::SUCCESS != retrieveStatus) {
@@ -151,11 +151,11 @@ sample_app::dlc_utils::StatusCode sample_app::dlc_utils::composeGraphsFromDlc(
     }
     free(systemGraphInfos);
   }
-  QNN_DEBUG("sample_app::dlc_utils::composeGraphsFromDlc end");
+  QNN_DEBUG("qnn_app::dlc_utils::composeGraphsFromDlc end");
   return retrieveStatus;
 }
 
-sample_app::dlc_utils::StatusCode sample_app::dlc_utils::retrieveGraphHandles(
+qnn_app::dlc_utils::StatusCode qnn_app::dlc_utils::retrieveGraphHandles(
     const QnnInterface_t& qnnInterface,
     Qnn_ContextHandle_t context,
     qnn_wrapper_api::GraphInfo_t** graphsInfo,

@@ -1,7 +1,7 @@
 //==============================================================================
 //
 // Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
-// 
+//
 // SPDX-License-Identifier: BSD-3-Clause
 //
 //==============================================================================
@@ -12,19 +12,32 @@
 #define _LIBAPPBUILDER_UTILS_H
 
 
-#include <tchar.h>
 #include <sstream>
 #include <vector>
 #include <string>
+#include <limits>
+#include <memory>
+#include <cstring>
+#include <cerrno>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include "Utils/ShareMem.hpp"
+#include "ipc/IpcChannel.hpp"
+#include "ipc/SvcProcess.hpp"
 
 #define GLOBAL_BUFSIZE      4096
 
-#ifdef UNICODE  
-#define SVC_APPBUILDER_CMD   TEXT("QAIAppSvc.exe svc %llu %llu %llu %d %d \"%S\"")
-#else  
-#define SVC_APPBUILDER_CMD   TEXT("QAIAppSvc.exe svc %llu %llu %llu %d %d \"%s\"")
+// Executable name used to spawn the service process. On both platforms this is
+// resolved via PATH search (CreateProcess / posix_spawnp); the Python wrapper
+// puts the qai_appbuilder package directory on PATH so the service binary that
+// ships next to libappbuilder is found.
+#ifdef _WIN32
+#define SVC_APPBUILDER_EXE  "QAIAppSvc.exe"
+#else
+#define SVC_APPBUILDER_EXE  "QAIAppSvc"
 #endif
 
 uint64_t g_logEpoch = 0;
@@ -34,15 +47,20 @@ std::string g_ProcName = "^main";
 
 char g_buffer[GLOBAL_BUFSIZE];
 
+// Per-service-process state: the command channel and the child process handle.
+// Declaration order matters: 'channel' is declared after 'process' so that on
+// destruction the channel (socket/pipe) is closed FIRST. Closing it gives the
+// child an EOF on its next read, which makes its loop exit; only then is
+// 'process' destroyed (and the child reaped).
 typedef struct ProcInfo {
-    HANDLE hSvcPipeInWrite;
-    HANDLE hSvcPipeOutRead;
-    PROCESS_INFORMATION piSvcProcInfo;
+    std::unique_ptr<ipc::SvcProcess> process;
+    std::unique_ptr<ipc::IpcChannel> channel;
 } ProcInfo_t;
 
-std::unordered_map<std::string, ProcInfo_t*> sg_proc_info_map;      // proc_name map to ProcInfo_t.
-std::unordered_map<std::string, ProcInfo_t*> sg_model_info_map;     // model_name map to ProcInfo_t.
+std::unordered_map<std::string, std::unique_ptr<ProcInfo_t>> sg_proc_info_map;   // proc_name -> ProcInfo_t
+std::unordered_map<std::string, ProcInfo_t*> sg_model_info_map;                  // model_name -> ProcInfo_t
 
+#ifdef _WIN32
 std::string GetLastErrorAsString(std::string message) {
     DWORD errorMessageID = ::GetLastError();
     if (errorMessageID == 0)
@@ -56,10 +74,17 @@ std::string GetLastErrorAsString(std::string message) {
 
     return message + " Error: [" + std::to_string(errorMessageID) + "] " + result;
 }
+#else
+std::string GetLastErrorAsString(std::string message) {
+    int e = errno;
+    if (e == 0) return std::string();
+    return message + " Error: [" + std::to_string(e) + "] " + std::string(std::strerror(e));
+}
+#endif
 
 void ErrorExit(std::string message) {
     QNN_ERR(GetLastErrorAsString(message).c_str());
-    ExitProcess(1);
+    exit(1);
 }
 
 void split_string(std::vector<std::string> & output, const std::string &input, const char separator) {
@@ -77,8 +102,7 @@ ProcInfo_t* FindProcInfo(std::string proc_name) {
     auto it = sg_proc_info_map.find(proc_name);
     if (it != sg_proc_info_map.end()) {
         if (it->second) {
-            auto pProcInfo = it->second;
-            return pProcInfo;
+            return it->second.get();
         }
     }
 
@@ -86,81 +110,48 @@ ProcInfo_t* FindProcInfo(std::string proc_name) {
 }
 
 ProcInfo_t* CreateSvcProcess(std::string proc_name) {
-    STARTUPINFO siStartInfo;
-    PROCESS_INFORMATION piSvcProcInfo;
-    ProcInfo_t* pProcInfo = nullptr;
-    BOOL bSuccess = FALSE;
-
-    HANDLE hSvcPipeInRead = NULL;
-    HANDLE hSvcPipeInWrite = NULL;
-    HANDLE hSvcPipeOutRead = NULL;
-    HANDLE hSvcPipeOutWrite = NULL;
-
-    SECURITY_ATTRIBUTES saAttr;
-    saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
-    saAttr.bInheritHandle = TRUE;
-    saAttr.lpSecurityDescriptor = NULL;
-
-    if (!CreatePipe(&hSvcPipeOutRead, &hSvcPipeOutWrite, &saAttr, 0))
-        ErrorExit("Create out pipe failed.");
-
-    if (!SetHandleInformation(hSvcPipeOutRead, HANDLE_FLAG_INHERIT, 0))
-        ErrorExit("SetHandleInformation for out pipe failed.");
-
-    if (!CreatePipe(&hSvcPipeInRead, &hSvcPipeInWrite, &saAttr, 0))
-        ErrorExit("Create in pipe failed");
-
-    if (!SetHandleInformation(hSvcPipeInWrite, HANDLE_FLAG_INHERIT, 0))
-        ErrorExit("SetHandleInformation for in pipe failed.");
-
-    ZeroMemory(&piSvcProcInfo, sizeof(PROCESS_INFORMATION));
-    ZeroMemory(&siStartInfo, sizeof(STARTUPINFO));
-
-    siStartInfo.cb = sizeof(STARTUPINFO);
-
-    _stprintf_s((TCHAR*)g_buffer, GLOBAL_BUFSIZE, SVC_APPBUILDER_CMD, (uint64_t)hSvcPipeInRead, (uint64_t)hSvcPipeOutWrite, 
-                g_logEpoch, g_logLevel, g_profilingLevel, proc_name.c_str());
-
-    bSuccess = CreateProcess(NULL, (TCHAR*)g_buffer, NULL, NULL, TRUE, 0, NULL, NULL, &siStartInfo, &piSvcProcInfo);
-
-    if (!bSuccess) {
-        ErrorExit("CreateProcess failed.");
-    }
-    else {
-        CloseHandle(hSvcPipeOutWrite);
-        CloseHandle(hSvcPipeInRead);
-
-        ProcInfo_t* pProcInfo = (ProcInfo_t*)malloc(sizeof(ProcInfo_t));
-        pProcInfo->hSvcPipeOutRead = hSvcPipeOutRead;
-        pProcInfo->hSvcPipeInWrite = hSvcPipeInWrite;
-        pProcInfo->piSvcProcInfo = piSvcProcInfo;
-
-        sg_proc_info_map.insert(std::make_pair(proc_name, pProcInfo));
-
-        QNN_INF("CreateSvcProcess Success!");
-        return pProcInfo;
+    ipc::ChildEndpoints ends;
+    auto channel = ipc::IpcChannel::CreateParent(ends);
+    if (!channel) {
+        ErrorExit("Create command channel failed.");
+        return nullptr;
     }
 
-    return nullptr;
+    auto process = ipc::SvcProcess::Spawn(SVC_APPBUILDER_EXE, proc_name, ends,
+                                          g_logEpoch, g_logLevel, g_profilingLevel);
+    if (!process) {
+        ErrorExit("Spawn service process failed.");
+        return nullptr;
+    }
+
+    // The child has inherited its endpoints; the parent no longer needs them.
+    channel->CloseInheritedEnds();
+
+    auto pProcInfo = std::make_unique<ProcInfo_t>();
+    pProcInfo->channel = std::move(channel);
+    pProcInfo->process = std::move(process);
+
+    ProcInfo_t* raw = pProcInfo.get();
+    sg_proc_info_map[proc_name] = std::move(pProcInfo);
+
+    QNN_INF("CreateSvcProcess Success!");
+    return raw;
 }
 
 BOOL StopSvcProcess(std::string proc_name) {
-    ProcInfo_t* pProcInfo = FindProcInfo(proc_name);
-    if (!pProcInfo) {
-        QNN_ERR("TalkToSvc_Inference::Cant find this process %s.\n", proc_name.c_str());
+    auto it = sg_proc_info_map.find(proc_name);
+    if (it == sg_proc_info_map.end()) {
+        QNN_ERR("StopSvcProcess::Cant find this process %s.\n", proc_name.c_str());
         return false;
     }
 
-    CloseHandle(pProcInfo->piSvcProcInfo.hProcess);
-    CloseHandle(pProcInfo->piSvcProcInfo.hThread);
-    CloseHandle(pProcInfo->hSvcPipeInWrite);        // This will close pipe write for Svc process, it will exit.
-    CloseHandle(pProcInfo->hSvcPipeOutRead);
-    sg_proc_info_map.erase(proc_name);
-    free(pProcInfo);
+    // Destroying ProcInfo_t closes the channel (signals the child to exit) and
+    // reaps the process.
+    sg_proc_info_map.erase(it);
     return true;
 }
 
-// Send model data to the Svc through share meoory and receive model generated data from share memory.
+// Send model data to the Svc through the command channel and receive the response.
 BOOL TalkToSvc_Initialize(const std::string& model_name, const std::string& proc_name, const std::string& model_path,
                           const std::string& backend_lib_path, const std::string& system_lib_path, bool async, const std::string& input_data_type, const std::string& output_data_type) {
     ProcInfo_t* pProcInfo = FindProcInfo(proc_name);
@@ -170,10 +161,9 @@ BOOL TalkToSvc_Initialize(const std::string& model_name, const std::string& proc
         if (!pProcInfo) return false;
     }
 
-    HANDLE hSvcPipeInWrite = pProcInfo->hSvcPipeInWrite;
-    HANDLE hSvcPipeOutRead = pProcInfo->hSvcPipeOutRead;
-    DWORD dwRead = 0, dwWrite = 0;
-    BOOL bSuccess;
+    ipc::IpcChannel* channel = pProcInfo->channel.get();
+    size_t dwRead = 0;
+    bool bSuccess;
     std::string async_str = "sync";
 
     if (async) {
@@ -181,23 +171,21 @@ BOOL TalkToSvc_Initialize(const std::string& model_name, const std::string& proc
     }
 
     std::string command = "l" + model_name + ";" + model_path + ";" + backend_lib_path + ";" + system_lib_path + ";" + async_str + ";" + input_data_type + ";" + output_data_type;
-    dwRead = (DWORD)command.length() + 1;
 
     TimerHelper timerHelper;
     // Write command to Svc.
-    bSuccess = WriteFile(hSvcPipeInWrite, command.c_str(), dwRead, &dwWrite, NULL);
-    // QNN_INF("TalkToSvc_Initialize::WriteToPipe: %s dwRead = %d dwWrite = %d\n", command.c_str(), dwRead, dwWrite);
+    bSuccess = channel->Write(command.c_str(), command.length() + 1);
     if (!bSuccess) return false;
 
     if (!async) {  // We only wait for Svc response when sync mode. Otherwise, we just return.
         // Read command from Svc.
-        bSuccess = ReadFile(hSvcPipeOutRead, g_buffer, GLOBAL_BUFSIZE, &dwRead, NULL);
+        bSuccess = channel->Read(g_buffer, GLOBAL_BUFSIZE, dwRead);
         if(dwRead) {
             g_buffer[dwRead] = 0;
-            QNN_INF("TalkToSvc_Initialize::ReadFromPipe: %s dwRead = %d\n", g_buffer, dwRead);
+            QNN_INF("TalkToSvc_Initialize::ReadFromPipe: %s dwRead = %d\n", g_buffer, (int)dwRead);
         }
         else {
-            QNN_ERR("TalkToSvc_Initialize::ReadFromPipe: Failed to read from hSvcPipeOutRead, perhaps child process died.\n");
+            QNN_ERR("TalkToSvc_Initialize::ReadFromPipe: Failed to read from channel, perhaps child process died.\n");
         }
         if (!bSuccess || dwRead == 0) return false;
     }
@@ -210,6 +198,54 @@ BOOL TalkToSvc_Initialize(const std::string& model_name, const std::string& proc
     return bSuccess;
 }
 
+// Forward a perf-profile command to a single Svc process and wait for its ack.
+// 'action' is 'p' (set perf profile, payload = perf_profile string) or
+// 'e' (release perf profile, no payload).
+static BOOL TalkToSvc_PerfOne(ProcInfo_t* pProcInfo, char action, const std::string& perf_profile) {
+    ipc::IpcChannel* channel = pProcInfo->channel.get();
+    size_t dwRead = 0;
+    bool bSuccess;
+
+    std::string command = std::string(1, action) + perf_profile;
+    bSuccess = channel->Write(command.c_str(), command.length() + 1);
+    if (!bSuccess) return false;
+
+    bSuccess = channel->Read(g_buffer, GLOBAL_BUFSIZE, dwRead);
+    if (!bSuccess || dwRead == 0) {
+        QNN_ERR("TalkToSvc_Perf::Failed to read from channel, perhaps child process died.\n");
+        return false;
+    }
+    g_buffer[dwRead] = 0;
+    return (g_buffer[0] != 'F');   // 'F' == ACTION_FAILED
+}
+
+// The Python PerfProfile.SetPerfProfileGlobal / RelPerfProfileGlobal are process
+// global and carry no proc_name. In cross-process mode the models live in the
+// Svc child processes, so broadcast the perf command to every Svc process. With
+// no Svc process running (pure in-process mode) this returns false so the caller
+// falls back to applying the perf profile locally.
+BOOL TalkToSvc_SetPerfProfileGlobal(const std::string& perf_profile) {
+    if (sg_proc_info_map.empty()) return false;
+    BOOL ok = true;
+    for (auto& kv : sg_proc_info_map) {
+        if (kv.second) {
+            ok = TalkToSvc_PerfOne(kv.second.get(), 'p', perf_profile) && ok;
+        }
+    }
+    return ok;
+}
+
+BOOL TalkToSvc_RelPerfProfileGlobal() {
+    if (sg_proc_info_map.empty()) return false;
+    BOOL ok = true;
+    for (auto& kv : sg_proc_info_map) {
+        if (kv.second) {
+            ok = TalkToSvc_PerfOne(kv.second.get(), 'e', "") && ok;
+        }
+    }
+    return ok;
+}
+
 BOOL TalkToSvc_Destroy(std::string model_name, std::string proc_name) {
     ProcInfo_t* pProcInfo = FindProcInfo(proc_name);
     if (!pProcInfo) {
@@ -217,28 +253,26 @@ BOOL TalkToSvc_Destroy(std::string model_name, std::string proc_name) {
         return false;
     }
 
-    HANDLE hSvcPipeInWrite = pProcInfo->hSvcPipeInWrite;
-    HANDLE hSvcPipeOutRead = pProcInfo->hSvcPipeOutRead;
-    DWORD dwRead = 0, dwWrite = 0;
-    BOOL bSuccess;
+    ipc::IpcChannel* channel = pProcInfo->channel.get();
+    size_t dwRead = 0;
+    bool bSuccess;
 
     std::string command = "r" + model_name;
-    dwRead = (DWORD)command.length() + 1;
 
     TimerHelper timerHelper;
     // Write command to Svc.
-    bSuccess = WriteFile(hSvcPipeInWrite, command.c_str(), dwRead, &dwWrite, NULL);
-    QNN_INF("TalkToSvc_Destroy::WriteToPipe: %s dwRead = %d dwWrite = %d\n", command.c_str(), dwRead, dwWrite);
+    bSuccess = channel->Write(command.c_str(), command.length() + 1);
+    QNN_INF("TalkToSvc_Destroy::WriteToPipe: %s\n", command.c_str());
     if (!bSuccess) return false;
 
     // Read command from Svc.
-    bSuccess = ReadFile(hSvcPipeOutRead, g_buffer, GLOBAL_BUFSIZE, &dwRead, NULL);
+    bSuccess = channel->Read(g_buffer, GLOBAL_BUFSIZE, dwRead);
     if (dwRead) {
         g_buffer[dwRead] = 0;
-        QNN_INF("TalkToSvc_Destroy::ReadFromPipe: %s dwRead = %d\n", g_buffer, dwRead);
+        QNN_INF("TalkToSvc_Destroy::ReadFromPipe: %s dwRead = %d\n", g_buffer, (int)dwRead);
     }
     else {
-        QNN_ERR("TalkToSvc_Destroy::ReadFromPipe: Failed to read from hSvcPipeOutRead, perhaps child process died.\n");
+        QNN_ERR("TalkToSvc_Destroy::ReadFromPipe: Failed to read from channel, perhaps child process died.\n");
     }
     if (!bSuccess || dwRead == 0) return false;
     timerHelper.Print("TalkToSvc_Destroy::Pipe talk");
@@ -317,7 +351,7 @@ std::pair<std::string, std::string> VectorToShareMem(size_t share_memory_size, u
 }
 
 // Send model data to the Svc through share memory and receive model generated data from share memory.
-BOOL TalkToSvc_Inference(std::string model_name, std::string proc_name, std::string share_memory_name, 
+BOOL TalkToSvc_Inference(std::string model_name, std::string proc_name, std::string share_memory_name,
                          std::vector<uint8_t*>& inputBuffers, std::vector<size_t>& inputSize,
                          std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
                          std::string perfProfile, size_t graphIndex) {
@@ -384,7 +418,7 @@ BOOL TalkToSvc_Inference(std::string model_name, std::string proc_name, std::str
             QNN_ERR("TalkToSvc_Inference: size_t overflow while computing totalNeeded.\n");
             return false;
         }
-        
+
         size_t totalNeeded = reserved + toCopy;
         if (totalNeeded > pShareMemInfo->size) {
             QNN_ERR("TalkToSvc_Inference: share memory too small. required=%llu (reserved=%llu copy=%llu) share_size=%llu name=%s\n",
@@ -394,10 +428,9 @@ BOOL TalkToSvc_Inference(std::string model_name, std::string proc_name, std::str
     }
 
 
-    HANDLE hSvcPipeInWrite = pProcInfo->hSvcPipeInWrite;
-    HANDLE hSvcPipeOutRead = pProcInfo->hSvcPipeOutRead;
-    DWORD dwRead = 0, dwWrite = 0;
-    BOOL bSuccess;
+    ipc::IpcChannel* channel = pProcInfo->channel.get();
+    size_t dwRead = 0;
+    bool bSuccess;
 
     std::string command = "g" + model_name + ";" + share_memory_name + ";" + std::to_string(pShareMemInfo->size) + ";";
     // 'offset' in share memory(according to 'inputBuffers' data size, so that we can restore this data to 'std::vector<uint8_t*>' in Svc).
@@ -405,22 +438,23 @@ BOOL TalkToSvc_Inference(std::string model_name, std::string proc_name, std::str
     command = command + strResultArray.first + "=" + strResultArray.second + ";";
     command = command + perfProfile + ";";
     command = command + std::to_string(graphIndex);
-    dwRead = (DWORD)command.length() + 1;
 
     // start_time();
-    // Write command to Svc.
-    bSuccess = WriteFile(hSvcPipeInWrite, command.c_str(), dwRead, &dwWrite, NULL);
-    // QNN_INF("TalkToSvc_Inference::WriteToPipe: %s dwRead = %d dwWrite = %d\n", command.c_str(), dwRead, dwWrite);
+    // Write command to Svc. On POSIX, the shared-memory fd travels with the
+    // command so the server can map it (it cannot be opened by name). On
+    // Windows the fd is ignored and the server opens the mapping by name.
+    ipc::ShmHandle shmHandle = pShareMemInfo->region ? pShareMemInfo->region->Handle() : ipc::kInvalidShm();
+    bSuccess = channel->WriteWithFd(command.c_str(), command.length() + 1, shmHandle);
     if (!bSuccess) return false;
 
     // Read command from Svc.
-    bSuccess = ReadFile(hSvcPipeOutRead, g_buffer, GLOBAL_BUFSIZE, &dwRead, NULL);
+    bSuccess = channel->Read(g_buffer, GLOBAL_BUFSIZE, dwRead);
     if(dwRead) {
         g_buffer[dwRead] = 0;
-        QNN_INF("TalkToSvc_Inference::ReadFromPipe: %s dwRead = %d\n", g_buffer, dwRead);
+        QNN_INF("TalkToSvc_Inference::ReadFromPipe: %s dwRead = %d\n", g_buffer, (int)dwRead);
     }
     else {
-        QNN_ERR("TalkToSvc_Inference::ReadFromPipe: Failed to read from hSvcPipeOutRead, perhaps child process died.\n");
+        QNN_ERR("TalkToSvc_Inference::ReadFromPipe: Failed to read from channel, perhaps child process died.\n");
     }
     if (!bSuccess || dwRead == 0) return false;
     //print_time("TalkToSvc_Inference::Pipe talk");
@@ -455,7 +489,7 @@ std::vector<std::string> parseStringVector(const std::string& s) {
 std::vector<std::vector<size_t>> parseShapeVector(const std::string& s) {
     std::vector<std::vector<size_t>> result;
     if (s.empty()) return result;
-    auto shapes = split(s, '|');  
+    auto shapes = split(s, '|');
     for (auto& shapeStr : shapes) {
         std::vector<size_t> dims;
         auto dimsStr = split(shapeStr, ',');
@@ -474,27 +508,23 @@ ModelInfo_t TalkToSvc_getModelInfo(std::string model_name, std::string proc_name
         return output;
     }
 
-    HANDLE hSvcPipeInWrite = pProcInfo->hSvcPipeInWrite;
-    HANDLE hSvcPipeOutRead = pProcInfo->hSvcPipeOutRead;
-    DWORD dwRead = 0, dwWrite = 0;
-    BOOL bSuccess;
+    ipc::IpcChannel* channel = pProcInfo->channel.get();
+    size_t dwRead = 0;
+    bool bSuccess;
 
     std::string command = "i" + model_name + ";" + input + ";";
-    dwRead = (DWORD)command.length() + 1;
 
     // Write command to Svc.
-    bSuccess = WriteFile(hSvcPipeInWrite, command.c_str(), dwRead, &dwWrite, NULL);
-    //printf("TalkToSvc_getModelInfo::WriteToPipe: %s dwRead = %d dwWrite = %d\n", command.c_str(), dwRead, dwWrite);
+    bSuccess = channel->Write(command.c_str(), command.length() + 1);
     if (!bSuccess) return output;
 
     // Read command from Svc.
-    bSuccess = ReadFile(hSvcPipeOutRead, g_buffer, GLOBAL_BUFSIZE, &dwRead, NULL);
+    bSuccess = channel->Read(g_buffer, GLOBAL_BUFSIZE, dwRead);
     if(dwRead) {
         g_buffer[dwRead] = 0;
-        //printf("TalkToSvc_getModelInfo::ReadFromPipe: %s dwRead = %d\n", g_buffer, dwRead);
     }
     else {
-        printf("TalkToSvc_getModelInfo::ReadFromPipe: Failed to read from hSvcPipeOutRead, perhaps child process died.\n");
+        printf("TalkToSvc_getModelInfo::ReadFromPipe: Failed to read from channel, perhaps child process died.\n");
     }
     if (!bSuccess || dwRead == 0) return output;
 
@@ -520,4 +550,3 @@ ModelInfo_t TalkToSvc_getModelInfo(std::string model_name, std::string proc_name
     return output;
 }
 #endif
-

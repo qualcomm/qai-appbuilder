@@ -15,8 +15,8 @@
 #include "Logger.hpp"
 #include "PAL/DynamicLoading.hpp"
 #include "PAL/GetOpt.hpp"
-#include "QnnSampleApp.hpp"
-#include "QnnSampleAppUtils.hpp"
+#include "QnnInferenceEngine.hpp"
+#include "QnnAppUtils.hpp"
 
 static void* sg_backendHandle{nullptr};
 static void* sg_modelHandle{nullptr};
@@ -24,7 +24,7 @@ static void* sg_systemLibraryHandle{nullptr};
 
 namespace qnn {
 namespace tools {
-namespace sample_app {
+namespace qnn_app {
 
 void showHelp() {
   std::cout
@@ -135,7 +135,7 @@ void showHelpAndExit(std::string&& error) {
   std::exit(EXIT_FAILURE);
 }
 
-std::unique_ptr<sample_app::QnnSampleApp> processCommandLine(int argc,
+std::unique_ptr<qnn_app::QnnInferenceEngine> processCommandLine(int argc,
                                                              char** argv,
                                                              bool& loadFromCachedBinary) {
   enum OPTIONS {
@@ -186,7 +186,7 @@ std::unique_ptr<sample_app::QnnSampleApp> processCommandLine(int argc,
   std::string opPackagePaths;
   iotensor::OutputDataType parsedOutputDataType   = iotensor::OutputDataType::FLOAT_ONLY;
   iotensor::InputDataType parsedInputDataType     = iotensor::InputDataType::FLOAT;
-  sample_app::ProfilingLevel parsedProfilingLevel = ProfilingLevel::OFF;
+  qnn_app::ProfilingLevel parsedProfilingLevel = ProfilingLevel::OFF;
   bool dumpOutputs                                = true;
   std::string cachedBinaryPath;
   std::string saveBinaryName;
@@ -243,14 +243,14 @@ std::unique_ptr<sample_app::QnnSampleApp> processCommandLine(int argc,
         break;
 
       case OPT_PROFILING_LEVEL:
-        parsedProfilingLevel = sample_app::parseProfilingLevel(pal::g_optArg);
-        if (parsedProfilingLevel == sample_app::ProfilingLevel::INVALID) {
+        parsedProfilingLevel = qnn_app::parseProfilingLevel(pal::g_optArg);
+        if (parsedProfilingLevel == qnn_app::ProfilingLevel::INVALID) {
           showHelpAndExit("Invalid profiling level.");
         }
         break;
 
       case OPT_LOG_LEVEL:
-        logLevel = sample_app::parseLogLevel(pal::g_optArg);
+        logLevel = qnn_app::parseLogLevel(pal::g_optArg);
         if (logLevel != QNN_LOG_LEVEL_MAX) {
           if (!log::setLogLevel(logLevel)) {
             showHelpAndExit("Unable to set log level.");
@@ -351,7 +351,7 @@ std::unique_ptr<sample_app::QnnSampleApp> processCommandLine(int argc,
     }
   }
 
-  std::unique_ptr<sample_app::QnnSampleApp> app(new sample_app::QnnSampleApp(qnnFunctionPointers,
+  std::unique_ptr<qnn_app::QnnInferenceEngine> app(new qnn_app::QnnInferenceEngine(qnnFunctionPointers,
                                                                              inputListPaths,
                                                                              opPackagePaths,
                                                                              sg_backendHandle,
@@ -366,7 +366,7 @@ std::unique_ptr<sample_app::QnnSampleApp> processCommandLine(int argc,
   return app;
 }
 
-}  // namespace sample_app
+}  // namespace qnn_app
 }  // namespace tools
 }  // namespace qnn
 
@@ -380,8 +380,8 @@ int main_disable(int argc, char** argv) {	// zw: change it from 'executable' fil
 
   {
     bool loadFromCachedBinary{false};
-    std::unique_ptr<sample_app::QnnSampleApp> app =
-        sample_app::processCommandLine(argc, argv, loadFromCachedBinary);
+    std::unique_ptr<qnn_app::QnnInferenceEngine> app =
+        qnn_app::processCommandLine(argc, argv, loadFromCachedBinary);
 
     if (nullptr == app) {
       return EXIT_FAILURE;
@@ -390,57 +390,57 @@ int main_disable(int argc, char** argv) {	// zw: change it from 'executable' fil
     QNN_INFO("qnn-sample-app build version: %s", qnn::tools::getBuildId().c_str());
     QNN_INFO("Backend        build version: %s", app->getBackendBuildId().c_str());
 
-    if (sample_app::StatusCode::SUCCESS != app->initialize()) {
+    if (qnn_app::StatusCode::SUCCESS != app->initialize()) {
       return app->reportError("Initialization failure");
     }
 
-    if (sample_app::StatusCode::SUCCESS != app->initializeBackend()) {
+    if (qnn_app::StatusCode::SUCCESS != app->initializeBackend()) {
       return app->reportError("Backend Initialization failure");
     }
 
     auto devicePropertySupportStatus = app->isDevicePropertySupported();
-    if (sample_app::StatusCode::FAILURE != devicePropertySupportStatus) {
+    if (qnn_app::StatusCode::FAILURE != devicePropertySupportStatus) {
       auto createDeviceStatus = app->createDevice();
-      if (sample_app::StatusCode::SUCCESS != createDeviceStatus) {
+      if (qnn_app::StatusCode::SUCCESS != createDeviceStatus) {
         return app->reportError("Device Creation failure");
       }
     }
 
-    if (sample_app::StatusCode::SUCCESS != app->initializeProfiling()) {
+    if (qnn_app::StatusCode::SUCCESS != app->initializeProfiling()) {
       return app->reportError("Profiling Initialization failure");
     }
 
-    if (sample_app::StatusCode::SUCCESS != app->registerOpPackages()) {
+    if (qnn_app::StatusCode::SUCCESS != app->registerOpPackages()) {
       return app->reportError("Register Op Packages failure");
     }
 
     if (!loadFromCachedBinary) {
-      if (sample_app::StatusCode::SUCCESS != app->createContext()) {
+      if (qnn_app::StatusCode::SUCCESS != app->createContext()) {
         return app->reportError("Context Creation failure");
       }
-      if (sample_app::StatusCode::SUCCESS != app->composeGraphs()) {
+      if (qnn_app::StatusCode::SUCCESS != app->composeGraphs()) {
         return app->reportError("Graph Prepare failure");
       }
-      if (sample_app::StatusCode::SUCCESS != app->finalizeGraphs()) {
+      if (qnn_app::StatusCode::SUCCESS != app->finalizeGraphs()) {
         return app->reportError("Graph Finalize failure");
       }
     } else {
-      if (sample_app::StatusCode::SUCCESS != app->createFromBinary()) {
+      if (qnn_app::StatusCode::SUCCESS != app->createFromBinary()) {
         return app->reportError("Create From Binary failure");
       }
     }
 
-    if (sample_app::StatusCode::SUCCESS != app->executeGraphs()) {
+    if (qnn_app::StatusCode::SUCCESS != app->executeGraphs()) {
       return app->reportError("Graph Execution failure");
     }
 
-    if (sample_app::StatusCode::SUCCESS != app->freeContext()) {
+    if (qnn_app::StatusCode::SUCCESS != app->freeContext()) {
       return app->reportError("Context Free failure");
     }
 
-    if (sample_app::StatusCode::FAILURE != devicePropertySupportStatus) {
+    if (qnn_app::StatusCode::FAILURE != devicePropertySupportStatus) {
       auto freeDeviceStatus = app->freeDevice();
-      if (sample_app::StatusCode::SUCCESS != freeDeviceStatus) {
+      if (qnn_app::StatusCode::SUCCESS != freeDeviceStatus) {
         return app->reportError("Device Free failure");
       }
     }

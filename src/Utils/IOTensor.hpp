@@ -16,7 +16,7 @@
 #include "QnnContext.h"
 #include "QnnGraph.h"
 #include "QnnProperty.h"
-#include "QnnSampleAppUtils.hpp"
+#include "QnnAppUtils.hpp"
 #include "QnnTensor.h"
 #include "QnnTypes.h"
 #include "QnnWrapperUtils.hpp"
