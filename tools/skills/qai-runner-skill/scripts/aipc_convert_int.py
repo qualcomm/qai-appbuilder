@@ -205,8 +205,8 @@ def convert_model(model_info, cwd, calibration_list_path, act_bw=16, weight_bw=8
         act_bw: Activation bit width (default: 16)
         weight_bw: Weight bit width (default: 8)
         qnn_sdk_root: QAIRT SDK root path (default: from env or /local/mnt/workspace/project/qnn/qairt/2.41.0)
-        host_toolchain: Host toolchain (default: auto-detected using detect_host_arch())
-        device_toolchain: Device toolchain (default: auto-detected using detect_target_arch())
+        host_toolchain: Host SDK bin/lib folder for toolchain  (default: auto-detected using detect_host_arch())
+        device_toolchain: Device toolchain for compilation (default: auto-detected using detect_target_arch())
     
     Prerequisites:
         - QAIRT_SDK_ROOT environment variable must be set (or provided via parameter)
@@ -276,8 +276,10 @@ def convert_model(model_info, cwd, calibration_list_path, act_bw=16, weight_bw=8
         "--param_quantizer", "enhanced",
         "--act_quantizer", "enhanced"
     ]
-    preserve_io_args = ["--preserve_io"]
-    if preserve_io_mode == "layout":
+    preserve_io_args = []
+    if preserve_io_mode == "datatype":
+        preserve_io_args = ["--preserve_io"]
+    elif preserve_io_mode == "layout":
         preserve_io_args = ["--preserve_io", "layout"]
     converter_cmd[6:6] = preserve_io_args
 
@@ -486,10 +488,11 @@ Examples:
     )
     parser.add_argument(
         '--preserve-io-mode',
-        choices=('datatype', 'layout'),
+        choices=('datatype', 'layout', 'none'),
         default='datatype',
         help="Preserve IO mode for qnn-onnx-converter. 'datatype' passes '--preserve_io' "
-             "(keep layout+dtype). 'layout' passes '--preserve_io layout' (layout only)."
+             "(keep layout+dtype). 'layout' passes '--preserve_io layout' (layout only). "
+             "'none' passes no preserve options."
     )
 
     args = parser.parse_args()

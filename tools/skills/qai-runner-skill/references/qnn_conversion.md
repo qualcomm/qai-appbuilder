@@ -69,6 +69,18 @@ Set the environment variable before conversion/libgen:
 export QNN_AARCH64_UBUNTU_GCC_94=/
 ```
 
+> **Important (not a typo):** `QNN_AARCH64_UBUNTU_GCC_94=/` is the correct value on standard Ubuntu hosts.
+> `qnn-model-lib-generator` concatenates `${QNN_AARCH64_UBUNTU_GCC_94}/usr/bin/aarch64-linux-gnu-g++`,
+> so setting `/` resolves to `//usr/bin/aarch64-linux-gnu-g++` (equivalent to `/usr/bin/aarch64-linux-gnu-g++`).
+
+### Recommended persistent setup
+
+Add this to your host QAIRT environment setup script so every conversion run is consistent:
+
+```bash
+export QNN_AARCH64_UBUNTU_GCC_94=${QNN_AARCH64_UBUNTU_GCC_94:-/}
+```
+
 ### Quick verification
 
 ```bash
@@ -84,6 +96,7 @@ Expected:
 
 - `Could not find compiler: ${QNN_AARCH64_UBUNTU_GCC_94}/usr/bin/aarch64-linux-gnu-g++`
   - Meaning: toolchain variable/path was not resolved as expected by libgen.
+  - Fix: ensure `g++-aarch64-linux-gnu` is installed and set `QNN_AARCH64_UBUNTU_GCC_94=/`.
 - `fatal error: ... No space left on device`
   - Meaning: compilation ran but failed due to host disk/tmp capacity (check `/tmp` and free space).
 

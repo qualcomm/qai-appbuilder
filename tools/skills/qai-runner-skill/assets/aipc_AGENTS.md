@@ -174,6 +174,10 @@ Orchestrator Agent  ◄─── aipc_plan.md (Config + Progress Summary)
    - Use existing `.raw` samples directly when source is raw data.
    - Record dataset source/path and sample count in `aipc_plan.md`.
 
+7. **Windows Console Encoding Guardrail**: Local Windows shells can use non-UTF-8 encodings (such as `cp950` or `cp437`), which frequently trigger `UnicodeEncodeError` or `UnicodeDecodeError` when processing console outputs with special characters. Always enforce UTF-8 encoding/decoding where possible, and use `errors='replace'` or `errors='ignore'` in Python subprocess handling.
+
+8. **PowerShell Inline Pipeline Command Guardrail**: Avoid using `$_.` (e.g., `Where-Object { $_.LastWriteTime ... }`) in inline powershell commands passed via `-Command` to other shells. The `$_` variable is prone to expansion errors by the caller shell, resulting in empty values and broken syntax. Always wrap PowerShell pipelines in a standalone `.ps1` file and invoke it using `-File`.
+
 ---
 
 ## Agent Roster
@@ -341,6 +345,7 @@ python skills/aipc-toolkit/scripts/aipc_convert_fp.py \
   --target-arch {TARGET_ARCH}
 ```
 > If target runtime shows FP16/dtype compatibility issues, retry with `--preserve-io-mode layout`.
+> Do not use `--preserve-io-mode none` in QNN-3A. Layout optimization is only allowed in QNN-8 after baseline validation passes.
 
 **Flow B — SNPE** (`aipc_plan.md` SNPE-3):
 ```bash
@@ -361,7 +366,7 @@ python skills/aipc-toolkit/scripts/aipc_convert_snpe.py \
 
 **Verification** (QNN-3A / SNPE-3 exit criteria):
 - [ ] Conversion logs show no errors
-- [ ] **Flow A (Linux)**: `lib{MODEL_NAME}.so` exists; `file lib{MODEL_NAME}.so` confirms `{TARGET_ARCH}`
+- [ ] **Flow A (Linux)**: `lib{MODEL_NAME}.so` exists; `file lib{MODEL_NAME}.so` 
 - [ ] **Flow A (Windows)**: `{MODEL_NAME}.dll` exists; `dumpbin /headers {MODEL_NAME}.dll | find "machine"` confirms `{TARGET_ARCH}`
 - [ ] **Flow B**: `{OUTPUT_DIR}/{MODEL_NAME}.dlc` exists and is non-zero
 
@@ -399,6 +404,7 @@ python skills/aipc-toolkit/scripts/aipc_convert_int.py \
   --target-arch {TARGET_ARCH}
 ```
 > If target runtime shows FP16/dtype compatibility issues, retry with `--preserve-io-mode layout`.
+> Do not use `--preserve-io-mode none` in QNN-3B. Layout optimization is only allowed in QNN-8 after baseline validation passes.
 
 **Flow B — SNPE** (`aipc_plan.md` SNPE-4):
 ```bash

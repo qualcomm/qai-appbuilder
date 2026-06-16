@@ -90,13 +90,21 @@ pip install qai_appbuilder
 ---
 
 
-### Platform-Specific Helper Prompts (Experimental)
+### Platform-Specific Helper/Prompts (Experimental)
 
 #### Linux
 An experimental helper prompt for QAIRT/QAI Appbuilder is available for Linux environments. Please refer to `setup/ubuntu/readme.md` for detailed usage instructions.
 
 #### Windows
-For Windows environments, please use `setup/win_installer/Setup_Env.bat` to setup and `setup/win_installer/PythonShell.bat` to activate qairt python venv.
+For Windows environments, use the following steps:
+
+1. Run `setup/win_installer/Setup_Env.bat` to configure the environment.
+2. Run `setup/win_installer/PythonShell.bat` to activate the QAIRT Python virtual environment.
+3. In PowerShell, initialize the QAIRT SDK environment by dot-sourcing the setup script:
+
+   ```powershell
+   . "$env:QAIRT_SDK_ROOT\bin\envsetup.ps1"
+   ```
 
 
 ## Testing
@@ -195,7 +203,7 @@ This ensures strict adherence to the AIPC skill workflow and reference protocols
   - Cline
   - Qwen Code
   - OpenCode
-  - Gemini CLI
+  - Antigravity CLI/Gemini CLI
   - Claude Code (*Note: Requires additional manual verification as it may default to internal project setup preferences.*)
   - Kilo CLI (*Note: Project setup workflow verification is currently in progress.*)
 
@@ -217,14 +225,18 @@ This ensures strict adherence to the AIPC skill workflow and reference protocols
 - PaddleOCR v4 (Requires initial export to ONNX format)
 - Whisper (Requires structural modifications for NPU optimization prior to initiating the AIPC project workflow)
 
-### Verified LLM Performance (ESRGAN SNPE or QNN Base Case)
-- Claude 4.5/4.6 Sonnet
+### Verified LLM
+
 - GPT-5.2-5.5 / Codex
+- Claude 4.5/4.6 Sonnet
 - Gemini 3.1/3.5 Flash,2.5/3.1 PRO
 - DeepSeek-V4 Lite/pro
 - Qwen-3.5-Coder-Plus/3.6 plus
 - Mimo Pro v2 pro
 - Doubao-Seed-2.0-Code
-- NVIDIA Nemotron-3
+- glm 5.1
+- kimi 2.6
+- NVIDIA Nemotron-3 pro
 - MiniMax 2.5
+
 

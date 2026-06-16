@@ -28,7 +28,7 @@ description: AIPC, AI Porting Conversion. Tools and workflows for QAIRT/AIPC pro
 - "detect target soc" / "qairt devinfo" / "detect device info"
 
 ### Project Setup
-- "create aipc project" / "create project" / "init project" / "setup project"
+- "create aipc project" / "init aipc project" / "setup aipc project"
 - "aipc init" / "aipc setup"
 
 ## When to Use
@@ -58,12 +58,32 @@ Use this skill for Qualcomm QAIRT/QNN/SNPE model bring-up:
   - Python scripts via `subprocess.run()` — no shell quoting issues
   - **Inference execution policy (MANDATORY):**
     - Run inference via `scripts/aipc` wrapper only.
+    - Before any final inference run, perform **wrapper artifact preflight**:
+      - print which QNN artifact will be selected for `{ONNX_FILE}`
+      - remove or quarantine stale matched artifacts (platform-dependent: `<model>.onnx.dll.bin` on Windows, `<model>.onnx.so.bin` on Linux) before deploying a new one
+      - in context-binary mode, prefer ONNX-matching deployment filename: `<model>.onnx.dll.bin` on Windows, `<model>.onnx.so.bin` on Linux
+      - the wrapper discovers context binaries by appending platform-specific suffixes to the ONNX path; see `onnxwrapper.py:_find_qnn_model_file()` for the full candidate list
     - If remote target execution is configured (for example `RETMOE_DEVICE_INFO` is set in project config),
       you MUST skip local host inference runs.
     - In this mode, acceptance and validation MUST be executed on the remote target only.
     - Local host inference is not allowed as an acceptance substitute.
     - Do NOT call `snpe-net-run`, `qnn-net-run`, or raw backend CLIs directly for final inference/validation.
-  - Avoid PowerShell variables (`$_`, `$env:`, `!`) in bash-invoked commands — use temp `.ps1` files with `-File` or Python `glob.glob()` instead
+    - **Linux ARM runtime-libs pinning (MANDATORY for remote acceptance):**
+      - Do not rely on implicit wrapper auto-resolution when multiple target toolchain lib folders exist.
+      - Explicitly set `QAI_QNN_LIBS_DIR` to the intended runtime directory for deployment and prepend it to `LD_LIBRARY_PATH`.
+      - Example:
+        ```bash
+        export QAI_QNN_LIBS_DIR="$QAIRT_SDK_ROOT/lib/aarch64-oe-linux-gcc11.2"
+        export LD_LIBRARY_PATH="$QAI_QNN_LIBS_DIR:$LD_LIBRARY_PATH"
+        export ADSP_LIBRARY_PATH="$QAIRT_SDK_ROOT/lib/hexagon-v${DSP_ARCH}/unsigned"
+        ```
+      - If not pinned, mixed runtime loading may produce:
+        - `Failed to load skel, error: 4000`
+        - `Transport layer setup failed: 14001`
+        - `Failed to parse platform config: 14001`
+        - `Unsupported SoC model ...` / `Invalid dsp arch ...`
+  - Avoid PowerShell inline pipelines and variables (`$_`, `$env:`, `!`) in command arguments passed via `-Command` (e.g., `Where-Object { $_.LastWriteTime }` gets expanded to `{ .LastWriteTime }` by the outer shell, breaking syntax). Always write PowerShell pipelines to a temporary `.ps1` file and execute it using the `-File` parameter, or use Python globbing/filesystem functions instead.
+  - **Console Encoding Guardrail**: Local Windows shells can use non-UTF-8 encodings (such as `cp950` or `cp437`), which frequently trigger `UnicodeEncodeError` or `UnicodeDecodeError` when processing console outputs with special characters. Always enforce UTF-8 encoding/decoding where possible, and use `errors='replace'` or `errors='ignore'` in Python subprocess handling.
 - **Escalation:** If conversion still fails after export/patch/retry, do not silently replace model architecture. Record error + logs + ONNX snapshot → escalate with full bundle. For B3/B4/B7 criteria → open `references/operator_patching.md`.
 - **Dynamic-input ONNX:** If ONNX has dynamic inputs, pass explicit shapes during conversion. See `references/qnn_conversion.md` (QNN: `--input-dim`) or `references/snpe_conversion.md` (SNPE: `--source-model-input-shape`).
 
@@ -76,7 +96,7 @@ Use this skill for Qualcomm QAIRT/QNN/SNPE model bring-up:
 
 **Model library** (`.dll` / `.so`):
 - Must match the **host process architecture**, not the target CPU.
-- On ARM64 Windows, the QAIRT Python venv runs under x86_64 emulation → compile with `-t windows-x86_64`.
+- On ARM64 Windows, the QAIRT Python venv runs under x86_64 emulation → qnn-model-lib-generator tool compile with `-t windows-x86_64`.
 - Compiling for `windows-aarch64` produces a DLL that the x86_64 emulated Python cannot load.
 
 **Context binary generation** runs on the HOST (x86), not on the target device.
@@ -208,9 +228,12 @@ Then edit:
    - SNPE path: `python aipc_convert_snpe.py --onnx model_patched.onnx ...`
 
 6. **Optional: Quantization** (INT8/INT16/A16W8)
-   - Use `aipc_convert_int.py` with calibration data
+   - Use `aipc_convert_int.py` (QAIRT default) or `aipc_convert_aimet.py` (AIMET path) with calibration data
 
 7. **Context binary generation (host-side)**
+  - For ARM target context generation, do not run `aipc_dev_gen_contextbin_x86.py` without explicit target config.
+    - Preferred: use direct `qnn-context-binary-generator` flow from `references/host_context_binary_gen.md`.
+    - If using `aipc_dev_gen_contextbin_x86.py`, pass `--config_file <backend_extension.json>` (with `soc_id` / `dsp_arch` config).
   - **If generation fails (Windows)**: → Return to Step 4 (operator patching) — continue until no replacement patterns exist
   - **If generation fails (Linux)**: → Continue troubleshooting using `references/host_context_binary_gen.md` first.
     - You MUST attempt and record all applicable host-context methods before fallback:
@@ -224,6 +247,12 @@ Then edit:
 8. **Inference + validation**
    - Use `aipc` wrapper to run inference script
    - Validate accuracy against ONNX baseline.
+   - Perform wrapper preflight before final run:
+     - verify selected artifact path
+     - clean stale matched `.bin` files in workdir (including `.onnx.dll.bin` on Windows, `.onnx.so.bin` on Linux)
+     - ensure deployed context binary name matches ONNX discovery rule: `<model>.onnx.dll.bin` on Windows, `<model>.onnx.so.bin` on Linux
+     - on Windows, the wrapper also matches `<model>.onnx.dll.bin`, `<model>.dll.bin`, `<model>.dll` in that order
+   - On Linux ARM targets, set `QAI_QNN_LIBS_DIR` explicitly to intended runtime libs dir before running `aipc`.
    - If remote target execution is configured, you MUST run inference/validation on the remote target only.
    - In this case, skip local host inference entirely.
    - Final pass/fail must come from remote target results.
@@ -246,6 +275,7 @@ Open only what you need:
 | Host context binary gen | `references/host_context_binary_gen.md` |
 | Inference | `references/inference.md` |
 | Troubleshooting | `references/troubleshooting.md` |
+| Optimization | `references/optimization.md` |
 
 ## Script Index
 
@@ -255,7 +285,8 @@ Open only what you need:
 | `scripts/aipc_project_setup.py` | Project bootstrap |
 | `scripts/aipc_inspect_onnxio.py` | ONNX I/O inspection |
 | `scripts/aipc_convert_fp.py` | QNN float conversion |
-| `scripts/aipc_convert_int.py` | QNN quantized conversion |
+| `scripts/aipc_convert_int.py` | QNN quantized conversion (QAIRT path) |
+| `scripts/aipc_convert_aimet.py` | QNN/SNPE quantized conversion using AIMET (Linux only) |
 | `scripts/aipc_convert_snpe.py` | SNPE conversion wrapper |
 | `scripts/aipc_dev_gen_contextbin.py` | Context binary generation (on-device / legacy) |
 | `scripts/aipc_dev_gen_contextbin_x86.py` | Host-side context binary generation (x86 host → target SoC) |
@@ -263,4 +294,4 @@ Open only what you need:
 
 
 > ⚠️ **Inference must use `scripts/aipc` wrapper** (including remote target runs). Direct `snpe-net-run`/`qnn-net-run` is for diagnostics only, not acceptance validation.
-> ⚠️ **Always prefer the wrapper scripts** (`aipc_convert_fp.py`, `aipc_convert_int.py`) over calling `qnn-onnx-converter` or `qnn-model-lib-generator` directly.
+> ⚠️ **Always prefer the wrapper scripts** (`aipc_convert_fp.py`, `aipc_convert_int.py`, `aipc_convert_aimet.py`) over calling `qnn-onnx-converter` or `qnn-model-lib-generator` directly.

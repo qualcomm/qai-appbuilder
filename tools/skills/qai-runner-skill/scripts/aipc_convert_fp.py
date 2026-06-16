@@ -106,7 +106,7 @@ def convert_onnx_to_qnn(
         host_arch (str): Host toolchain folder under ``{qnn_sdk_root}/bin/``
             (e.g. ``"x86_64-linux-clang"``, ``"x86_64-windows-msvc"``).
         target_arch (str): Target architecture for the compiled library
-            (e.g. ``"aarch64-ubuntu-gcc9.4"``, ``"x86_64-linux-clang"``).
+            (e.g. ``"aarch64-ubuntu-gcc9.4"``, ``"x86_64-linux-clang", "windows-x86_64", "windows-aarch64" ``).
         precision (int): Float bitwidth -> ``16`` (FP16) or ``32`` (FP32).
         onnx_paths (list[str]): Paths to ONNX files to convert. If empty,
             all ``*.onnx`` files under the current directory are used.
@@ -125,8 +125,8 @@ def convert_onnx_to_qnn(
     if not qnn_sdk_root:
         raise ValueError("QAIRT_SDK_ROOT environment variable not set. Please source the QAIRT environment script.")
     #print host arch and target arch
-    print(f"Host architecture: {host_arch}")
-    print(f"Target architecture: {target_arch}")
+    print(f"Host architecture for sdk lib/bin toolchain folder: {host_arch}")
+    print(f"Target architecture for compilation: {target_arch}")
     qnn_onnx_converter = os.path.join(qnn_sdk_root, "bin", host_arch, "qnn-onnx-converter")
     qnn_model_lib_generator = os.path.join(qnn_sdk_root, "bin", host_arch, "qnn-model-lib-generator")
 
@@ -202,11 +202,12 @@ def convert_onnx_to_qnn(
             python_exe, qnn_onnx_converter,
             "--input_network", abs_model_path,
             "--output_path", abs_cpp_path,
-            "--float_bitwidth", str(precision),
-            "--preserve_io"
+            "--float_bitwidth", str(precision)
         ]
-        if preserve_io_mode == "layout":
-            converter_command.append("layout")
+        if preserve_io_mode == "datatype":
+            converter_command.append("--preserve_io")
+        elif preserve_io_mode == "layout":
+            converter_command.extend(["--preserve_io", "layout"])
 
         if input_dims:
             for input_name, dims in input_dims:
@@ -432,7 +433,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--target-arch",
         default="",
-        help="QNN target arch (also used for generated library).",
+        help="QNN target arch for qnn-model-lib-generator   (also used for generated library).",
     )
     parser.add_argument(
         "--output-root",
@@ -455,10 +456,10 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--preserve-io-mode",
-        choices=("datatype", "layout"),
+        choices=("datatype", "layout", "none"),
         default="datatype",
         help="Preserve IO mode for qnn-onnx-converter. 'datatype' passes '--preserve_io' (keep layout+dtype). "
-             "'layout' passes '--preserve_io layout' (layout only).",
+             "'layout' passes '--preserve_io layout' (layout only). 'none' passes no preserve options.",
     )
     args = parser.parse_args()
 
@@ -488,7 +489,7 @@ if __name__ == "__main__":
     # Auto-detect target architecture if not provided
     if not args.target_arch:
         args.target_arch = detect_target_arch()
-        print(f"Auto-detected target architecture: {args.target_arch}")
+        print(f"Auto-detected target architecture(for non context binary generation code): {args.target_arch}")
 
     sys.exit(
         convert_onnx_to_qnn(
