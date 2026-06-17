@@ -95,8 +95,10 @@ add_subdirectory(src/GenieAPIService)
 
 if (MSVC)
     if(BUILD_AS_DLL)
-        set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_RELEASE ${BUILD_PATH}/lib)
-        set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_DEBUG ${BUILD_PATH}/lib)
+        # GenieAPILibrary.lib is routed to ${BUILD_PATH}/lib via a per-target
+        # ARCHIVE_OUTPUT_DIRECTORY property in src/GenieAPIService/CMakeLists.txt
+        # (a global CMAKE_ARCHIVE_OUTPUT_DIRECTORY set here would be too late,
+        # since src/GenieAPIService was already added above).
         add_subdirectory(examples/SampleApp)
     else()
         add_subdirectory(examples/GenieAPIClient)

@@ -77,7 +77,15 @@ if (BUILD_AS_DLL)
                 -D_HAS_STD_BYTE=0
                 -D_USE_MATH_DEFINES
         )
-        # Generate import library and set output name to GenieAPILibrary
+        # Emit the import library (GenieAPILibrary.lib) into ${BUILD_PATH}/lib so
+        # SampleApp can link it. This is set as a per-target property because the
+        # top-level CMakeLists sets CMAKE_ARCHIVE_OUTPUT_DIRECTORY only AFTER this
+        # subdirectory is added, which is too late to affect this target.
+        set_target_properties(${LIB_NAME} PROPERTIES
+                ARCHIVE_OUTPUT_DIRECTORY ${BUILD_PATH}/lib
+                ARCHIVE_OUTPUT_DIRECTORY_RELEASE ${BUILD_PATH}/lib
+                ARCHIVE_OUTPUT_DIRECTORY_DEBUG ${BUILD_PATH}/lib
+        )
 
     elseif (ANDROID)
         add_library(${LIB_NAME} SHARED ${DLL_SOURCES})
@@ -182,7 +190,7 @@ else ()
             COMMAND ${CMAKE_COMMAND} -E echo start to copy binray....
             COMMAND ${CMAKE_COMMAND} -E copy ${EXTERNAL_BIN} ${BUILD_PATH}
             COMMAND ${CMAKE_COMMAND} -E copy_directory ${CONFIG_PATH} ${BUILD_PATH}/config
-            COMMAND ${CMAKE_COMMAND} -E copy ${BUILD_VERSION_FILE} -t ${BUILD_PATH}
+            COMMAND ${CMAKE_COMMAND} -E copy ${BUILD_VERSION_FILE} ${BUILD_PATH}/
             COMMAND ${CMAKE_COMMAND} -E echo compile successfully!
     )
 endif ()
@@ -192,6 +200,6 @@ if (BUILD_AS_DLL)
         add_custom_command(
                 TARGET ${LIB_NAME} POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E make_directory ${BUILD_PATH}/include
-                COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/src/GenieAPILibrary.h -t ${BUILD_PATH}/include
+                COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/src/GenieAPILibrary.h ${BUILD_PATH}/include/
         )
 endif()

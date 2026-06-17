@@ -10,6 +10,7 @@ project(GenieAPIClient)
 
 ExternalProject_Add(Libcurl
         SOURCE_DIR ${G_EXTERNAL_DIR}/curl
+        BINARY_DIR ${CMAKE_BINARY_DIR}/curl-build
         CMAKE_ARGS
         -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}
         -DBUILD_SHARED_LIBS=OFF
@@ -17,7 +18,7 @@ ExternalProject_Add(Libcurl
         -DBUILD_TESTING=OFF
         -DCURL_USE_LIBPSL=OFF
         -DENABLE_UNICODE=ON
-        BUILD_IN_SOURCE ON
+        BUILD_IN_SOURCE OFF
 )
 
 add_executable(${PROJECT_NAME}

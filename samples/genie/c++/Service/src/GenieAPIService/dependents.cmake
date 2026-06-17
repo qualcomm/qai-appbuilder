@@ -138,10 +138,16 @@ set(EXTERNAL_HEADER_PATH
 )
 
 if (MSVC)
+    # Build out-of-source so the generated .sln/.vcxproj/CMakeCache.txt/CMakeFiles
+    # land under the Service build dir instead of polluting the repo root
+    # (SOURCE_DIR is the repo root). The library itself is still emitted to
+    # <repo>/lib/Release because LIBRARY_OUTPUT_PATH in src/CMakeLists.txt is
+    # source-relative, so EXTERNAL_LIB_PATH/EXTERNAL_BIN below remain valid.
     ExternalProject_Add(Libappbuilder
             SOURCE_DIR ${LIBAPPBUILDER_ROOT}
+            BINARY_DIR ${CMAKE_BINARY_DIR}/libappbuilder-build
             INSTALL_COMMAND ""
-            BUILD_IN_SOURCE ON
+            BUILD_IN_SOURCE OFF
     )
 
     list(APPEND EXTERNAL_LIB_PATH ${LIBAPPBUILDER_ROOT}/lib/Release)
@@ -180,14 +186,18 @@ endif ()
 list(APPEND EXTERNAL_LIBS samplerate)
 
 if (MSVC)
-    # Windows path keeps its original BUILD_IN_SOURCE behaviour.
+    # Build out-of-source so the generated project files land under the Service
+    # build dir instead of the libsamplerate source tree. The library is consumed
+    # via its install (CMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}), so moving the
+    # build dir does not affect linking.
     ExternalProject_Add(Libsamplerate
             SOURCE_DIR ${G_EXTERNAL_DIR}/libsamplerate
+            BINARY_DIR ${CMAKE_BINARY_DIR}/libsamplerate-build
             CMAKE_ARGS
             -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}
-            -DLIBSAMPLERATE_EXAMPLES=OFF 
+            -DLIBSAMPLERATE_EXAMPLES=OFF
             -DBUILD_TESTING=OFF
-            BUILD_IN_SOURCE ON
+            BUILD_IN_SOURCE OFF
     )
 
     list(APPEND EXTERNAL_LIBS samplerate)
