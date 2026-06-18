@@ -54,8 +54,8 @@ You can find more client sample code [here](../python/README.md#sample-list).
 ### Release
 
 - Windows:
-  [GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.42.0/GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip)
+  [GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip](https://github.com/qualcomm/qai-appbuilder/releases/download/v2.42.0/GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip)
 
 - Android:
-  [GenieAPIService.apk](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.42.0/GenieAPIService.apk)
+  [GenieAPIService.apk](https://github.com/qualcomm/qai-appbuilder/releases/download/v2.42.0/GenieAPIService.apk)
 

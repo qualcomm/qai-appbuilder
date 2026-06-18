@@ -25,7 +25,7 @@ import qai_hub
 MODEL_ID = "mqp35e9lm"
 MODEL_NAME = "yolov8_det"
 MODEL_HELP_URL = (
-    "https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python/"
+    "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/"
     + MODEL_NAME
     + "#"
     + MODEL_NAME

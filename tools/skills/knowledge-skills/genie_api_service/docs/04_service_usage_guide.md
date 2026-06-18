@@ -109,7 +109,7 @@ GenieAPIClient.exe [OPTIONS]
 
 ### 使用示例
 
-[参考代码](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/genie/c%2B%2B/Service/examples/GenieAPIClient/GenieAPIClient.cpp)
+[参考代码](https://github.com/qualcomm/qai-appbuilder/blob/main/samples/genie/c%2B%2B/Service/examples/GenieAPIClient/GenieAPIClient.cpp)
 
 #### 文本对话
 
@@ -133,7 +133,7 @@ GenieAPIClient.exe --prompt "写一首诗" --stream --temperature 0.9 --max_toke
 
 ## Python 客户端使用
 
-[参考代码](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/genie/c%2B%2B/Service/examples/GenieAPIClient/GenieAPIClient.py)
+[参考代码](https://github.com/qualcomm/qai-appbuilder/blob/main/samples/genie/c%2B%2B/Service/examples/GenieAPIClient/GenieAPIClient.py)
 
 Python 客户端使用 OpenAI SDK，提供更灵活的集成方式。
 
@@ -198,4 +198,4 @@ response = client.chat.completions.create(
     stream=True
 )
 
-GitHub: https://github.com/quic/ai-engine-direct-helper
+GitHub: https://github.com/qualcomm/qai-appbuilder

@@ -817,7 +817,6 @@ class InferenceSession:
             log_level = log_level_map.get(sess_options.log_severity_level, LogLevel.ERROR)
             _ensure_path_contains(sess_options.qnn_libs_dir)
             QNNConfig.Config(
-                sess_options.qnn_libs_dir,
                 sess_options.qnn_runtime,
                 log_level,
                 sess_options.qnn_profiling_level,

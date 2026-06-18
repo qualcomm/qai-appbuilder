@@ -29,11 +29,11 @@ https://qpm.qualcomm.com/#/main/tools/details/Qualcomm_AI_Runtime_SDK
 
 <b>We need below libraries from Qualcomm® AI Runtime SDK for using AppBuilder on Snapdragon X Elite(Windows on Snapdragon device).</b><br>
 
-<a href="https://github.com/quic/ai-engine-direct-helper/blob/main/docs/user_guide.md"><img src="https://img.shields.io/badge/Note: - Windows on Snapdragon (WoS) device support running X86, X64, ARM64EC and ARM64 applications.-important"></a> <br>
+<a href="https://github.com/qualcomm/qai-appbuilder/blob/main/docs/user_guide.md"><img src="https://img.shields.io/badge/Note: - Windows on Snapdragon (WoS) device support running X86, X64, ARM64EC and ARM64 applications.-important"></a> <br>
 *Note: For X64 and [ARM64EC](https://learn.microsoft.com/en-us/windows/arm/arm64ec) program, use the libraries under the folder 'arm64x-windows-msvc'; for ARM64 program, use the libraries under the folder 'aarch64-windows-msvc'.* <br>
 
 We have 2 options to get these runtime libraries:
-1. Download [QAIRT Runtime](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.38.0/QAIRT_Runtime_2.38.0_v73.zip) and extract the dependency libraries to app folder.
+1. Download [QAIRT Runtime](https://github.com/qualcomm/qai-appbuilder/releases/download/v2.38.0/QAIRT_Runtime_2.38.0_v73.zip) and extract the dependency libraries to app folder.
 2. Install [Qualcomm® AI Runtime SDK](https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK) and copy the dependency libraries to app folder. <br>
 
 If use x64 Python, use the libraries below from Qualcomm® AI Runtime SDK:
@@ -69,12 +69,12 @@ There're several Python classes from this extension:
 - QNNShareMemory - It's used to create processes share memory while using *QNNContextProc*.
 - QNNConfig - It's for configuring  Qualcomm® AI Runtime SDK libraries path, runtime(CPU/HTP), log leverl, profiling level.
 - PerfProfile - Set the HTP perf profile.
-- More Apis: getInputShapes()/getInputDataType()/getInputName()/getOutputShapes()/getOutputDataType()/getOutputName()/getGraphName(), refer to usage sample codes in [real_esrgan_x4plus.py](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/python/real_esrgan_x4plus/real_esrgan_x4plus.py#L167).
+- More Apis: getInputShapes()/getInputDataType()/getInputName()/getOutputShapes()/getOutputDataType()/getOutputName()/getGraphName(), refer to usage sample codes in [real_esrgan_x4plus.py](https://github.com/qualcomm/qai-appbuilder/blob/main/samples/python/real_esrgan_x4plus/real_esrgan_x4plus.py#L167).
 
 ## Notes: <br>
 a. Plese use the API *LogLevel.SetLogLevel()* for Python project to initialize the log function before you call any other APIs. 
 b. Refer to Python sample code: <br>
-https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python
+https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python
 
 ## Sample Code(Python)
 
@@ -86,7 +86,7 @@ execution_ws = os.getcwd()
 des_dir = execution_ws + "\\qnn"
 
 def SetQNNConfig():
-    QNNConfig.Config(des_dir, Runtime.HTP, LogLevel.DEBUG, ProfilingLevel.BASIC)
+    QNNConfig.Config(Runtime.HTP, LogLevel.DEBUG, ProfilingLevel.BASIC)
 
 class TextEncoder(QNNContext):
     #@timer
@@ -172,7 +172,7 @@ https://learn.microsoft.com/en-us/cpp/build/reference/md-mt-ld-use-run-time-libr
 b. Plese use the API *SetLogLevel()* for C++ project to initialize the log function before you call any other APIs. 
 
 c. Refer to C++ sample code: <br>
-https://github.com/quic/ai-engine-direct-helper/tree/main/samples/c%2B%2B
+https://github.com/qualcomm/qai-appbuilder/tree/main/samples/c%2B%2B
 
 ## Sample Code(C++: load model to local process.)
 
@@ -205,7 +205,7 @@ outputSize.clear();
 libAppBuilder.ModelDestroy(model_name);
 ```
 ## DLC Support
-###  load .bin model file after covert .dlc file, refer to [dlc2bin](https://github.com/quic/ai-engine-direct-helper/tree/main/tools/convert/dlc2bin).
+###  load .bin model file after covert .dlc file, refer to [dlc2bin](https://github.com/qualcomm/qai-appbuilder/tree/main/tools/convert/dlc2bin).
 ###  load .dlc model file directly from QAIRT version 2.41.0.251128 onwards.
 You only need to put the .dlc model file at the same folder of your .bin file, and modify corresponding model path in your app.
-A new .dlc.bin file will be generated after load and run .dlc model at the first time, then will load that new .dlc.bin file when run your app later to save time. Usage sample codes can refer to [real_esrgan_x4plus.py](https://github.com/quic/ai-engine-direct-helper/commit/dbc36f61c816e3864793f82eb1e688e0ad52216a).
+A new .dlc.bin file will be generated after load and run .dlc model at the first time, then will load that new .dlc.bin file when run your app later to save time. Usage sample codes can refer to [real_esrgan_x4plus.py](https://github.com/qualcomm/qai-appbuilder/commit/dbc36f61c816e3864793f82eb1e688e0ad52216a).

@@ -19,7 +19,7 @@ from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfP
 
 MODEL_ID = "mqpeoj4on"
 MODEL_NAME = "fcn_resnet50"
-MODEL_HELP_URL = "https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
 IMAGE_SIZE = 520
 
 ####################################################################
@@ -172,7 +172,7 @@ def Init():
     model_download()
 
     # Config AppBuilder environment.
-    QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for fcn_resnet50 objects.
     fcn_resnet50 = Fcn_resnet50("fcn_resnet50", model_path)

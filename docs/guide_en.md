@@ -190,7 +190,7 @@ https://aka.ms/vs/17/release/vc_redist.arm64.exe
 
 ```bash
 # Clone repository
-git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
+git clone https://github.com/qualcomm/qai-appbuilder.git --recursive
 
 # If already cloned, update code
 cd ai-engine-direct-helper
@@ -199,7 +199,7 @@ git pull --recurse-submodules
 
 #### Step 3: Install or Build QAI AppBuilder Python Extension
 Install by run 'pip install qai-appbuilder' directly,
-Or download the corresponding version of `.whl` file from [GitHub Release](https://github.com/quic/ai-engine-direct-helper/releases), then:
+Or download the corresponding version of `.whl` file from [GitHub Release](https://github.com/qualcomm/qai-appbuilder/releases), then:
 
 ```bash
 # For x64 Python
@@ -240,7 +240,7 @@ pip3 install numpy pillow opencv-python
 
 ```bash
 # Clone repository
-git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
+git clone https://github.com/qualcomm/qai-appbuilder.git --recursive
 
 # If already cloned, update code
 cd ai-engine-direct-helper
@@ -249,7 +249,7 @@ git pull --recurse-submodules
 
 #### Step 3: Install QAI AppBuilder Python Extension
 
-Download the corresponding version of `.whl` file from [GitHub Release](https://github.com/quic/ai-engine-direct-helper/releases) or run 'pip install qai-appbuilder' or build differente versions of qai-appbuilder whl file refer to this doc [BUILD.md](../BUILD.md):
+Download the corresponding version of `.whl` file from [GitHub Release](https://github.com/qualcomm/qai-appbuilder/releases) or run 'pip install qai-appbuilder' or build differente versions of qai-appbuilder whl file refer to this doc [BUILD.md](../BUILD.md):
 
 ```bash
 # For Linux ARM64
@@ -288,7 +288,7 @@ source ~/.bashrc
 
 #### Step 1: Download Precompiled Libraries
 
-Download the precompiled library for the corresponding platform from [GitHub Release](https://github.com/quic/ai-engine-direct-helper/releases):
+Download the precompiled library for the corresponding platform from [GitHub Release](https://github.com/qualcomm/qai-appbuilder/releases):
 
 **Windows ARM64**:
 ```
@@ -609,7 +609,6 @@ if MODEL_NAME not in str(execution_ws):
 model_dir = execution_ws / "models"
 
 QNNConfig.Config(
-    qnn_lib_path=str(qnn_dir),  # This parameter can be left empty starting from v2.0.0
     runtime=Runtime.HTP,
     log_level=LogLevel.WARN,
     profiling_level=ProfilingLevel.BASIC
@@ -764,7 +763,6 @@ if MODEL_NAME not in str(execution_ws):
 model_dir = execution_ws / "models"
 
 QNNConfig.Config(
-    qnn_lib_path=str(qnn_dir),  # This parameter can be left empty starting from v2.0.0
     runtime=Runtime.HTP,
     log_level=LogLevel.WARN,
     profiling_level=ProfilingLevel.BASIC
@@ -876,7 +874,6 @@ if MODEL_NAME not in str(execution_ws):
 model_dir = execution_ws / "models"
 
 QNNConfig.Config(
-    qnn_lib_path=str(qnn_dir),  # This parameter can be left empty starting from v2.0.0
     runtime=Runtime.HTP,
     log_level=LogLevel.WARN,
     profiling_level=ProfilingLevel.BASIC
@@ -1097,7 +1094,6 @@ if MODEL_NAME not in str(execution_ws):
 model_dir = execution_ws / "models"
 
 QNNConfig.Config(
-    qnn_lib_path=str(qnn_dir),  # This parameter can be left empty starting from v2.0.0
     runtime=Runtime.HTP,
     log_level=LogLevel.ERROR,
     profiling_level=ProfilingLevel.BASIC
@@ -2063,7 +2059,6 @@ from qai_appbuilder import QNNLoraContext, LoraAdapter, QNNConfig, Runtime, LogL
 
 # Configure environment
 QNNConfig.Config(
-    qnn_lib_path="./qai_libs",
     runtime=Runtime.HTP,
     log_level=LogLevel.INFO
 )
@@ -2153,7 +2148,6 @@ Starting from QAIRT 2.41.0, direct loading of `.dlc` model files is supported.
 from qai_appbuilder import QNNContext, QNNConfig, Runtime, LogLevel
 
 QNNConfig.Config(
-    qnn_lib_path="./qai_libs",
     runtime=Runtime.HTP,
     log_level=LogLevel.INFO
 )
@@ -2190,7 +2184,6 @@ from qai_appbuilder import QNNContext, QNNConfig, Runtime, LogLevel
 
 # Configure for CPU runtime
 QNNConfig.Config(
-    qnn_lib_path="./qai_libs",
     runtime=Runtime.CPU,  # Use CPU runtime
     log_level=LogLevel.INFO
 )
@@ -2467,7 +2460,6 @@ import time
 
 # 1. Ensure using HTP (NPU) not CPU
 QNNConfig.Config(
-    qnn_lib_path="./qai_libs",
     runtime=Runtime.HTP,  # Ensure it's HTP
     log_level=LogLevel.INFO,
     profiling_level=ProfilingLevel.BASIC  # Enable performance profiling
@@ -2502,7 +2494,7 @@ PerfProfile.RelPerfProfileGlobal()
 
 ### 8.1 Official Documentation and Resources
 
-- **GitHub Repository**: https://github.com/quic/ai-engine-direct-helper
+- **GitHub Repository**: https://github.com/qualcomm/qai-appbuilder
 - **Qualcomm AI Hub**: https://aihub.qualcomm.com/
 - **AI Dev Home**: https://www.aidevhome.com/
 - **Qualcomm® AI Runtime SDK**: https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK
@@ -2517,7 +2509,7 @@ PerfProfile.RelPerfProfileGlobal()
 
 ### 8.3 Sample Code
 
-- **Python Examples**: https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python
+- **Python Examples**: https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python
   
   - Real-ESRGAN (Image Super-Resolution)
   - YOLOv8 (Object Detection)
@@ -2528,12 +2520,12 @@ PerfProfile.RelPerfProfileGlobal()
   - Depth Anything (Depth Estimation)
   - 20+ examples
 
-- **C++ Examples**: https://github.com/quic/ai-engine-direct-helper/tree/main/samples/c++
+- **C++ Examples**: https://github.com/qualcomm/qai-appbuilder/tree/main/samples/c++
   
   - Real-ESRGAN
   - BEiT (Image Classification)
 
-- **WebUI Applications**: https://github.com/quic/ai-engine-direct-helper/tree/main/samples/webui
+- **WebUI Applications**: https://github.com/qualcomm/qai-appbuilder/tree/main/samples/webui
   
   - ImageRepairApp (Image Repair)
   - StableDiffusionApp (Text-to-Image)
@@ -2558,7 +2550,6 @@ import numpy as np
 
 # 1. Configure environment (required)
 QNNConfig.Config(
-    qnn_lib_path="./qai_libs",
     runtime=Runtime.HTP,
     log_level=LogLevel.INFO
 )
@@ -2702,7 +2693,7 @@ int main() {
 
 QAI AppBuilder is licensed under **BSD 3-Clause "New" or "Revised" License**.
 
-See: https://github.com/quic/ai-engine-direct-helper/blob/main/LICENSE
+See: https://github.com/qualcomm/qai-appbuilder/blob/main/LICENSE
 
 ---
 
@@ -2720,20 +2711,20 @@ This software is provided "as is" without any express or implied warranties. The
 
 If you encounter problems, please visit:
 
-- **GitHub Issues**: https://github.com/quic/ai-engine-direct-helper/issues
+- **GitHub Issues**: https://github.com/qualcomm/qai-appbuilder/issues
 
 ### Contribute Code
 
 Pull Requests are welcome! Please refer to:
 
-- **Contributing Guide**: https://github.com/quic/ai-engine-direct-helper/blob/main/CONTRIBUTING.md
-- **Code of Conduct**: https://github.com/quic/ai-engine-direct-helper/blob/main/CODE-OF-CONDUCT.md
+- **Contributing Guide**: https://github.com/qualcomm/qai-appbuilder/blob/main/CONTRIBUTING.md
+- **Code of Conduct**: https://github.com/qualcomm/qai-appbuilder/blob/main/CODE-OF-CONDUCT.md
 
 ---
 
 <div align="center">
   <p>⭐ If this project helps you, please give us a Star!</p>
-  <p>📧 Questions or suggestions? Visit <a href="https://github.com/quic/ai-engine-direct-helper">GitHub Repository</a></p>
+  <p>📧 Questions or suggestions? Visit <a href="https://github.com/qualcomm/qai-appbuilder">GitHub Repository</a></p>
 </div>
 
 ---

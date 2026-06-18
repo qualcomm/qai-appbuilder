@@ -26,7 +26,7 @@ For QAI APPBuilder execution:
 ```bash
 # Prepare a Linux environment
 cd $your_work_dir
-git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
+git clone https://github.com/qualcomm/qai-appbuilder.git --recursive
 cd ai-engine-direct-helper
 ```
 

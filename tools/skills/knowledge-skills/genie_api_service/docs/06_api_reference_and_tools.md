@@ -301,7 +301,7 @@ print(f"Status Code: {response.status_code}")
 
 # 其他工具
 
-这些 Windows 工具随着 [Releases](https://github.com/quic/ai-engine-direct-helper/releases/tag/v2.42.0) 一起发布
+这些 Windows 工具随着 [Releases](https://github.com/qualcomm/qai-appbuilder/releases/tag/v2.42.0) 一起发布
 
 ## encode.exe
 

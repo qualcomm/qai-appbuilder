@@ -2,11 +2,11 @@
 
 ## 配置文件结构
 
-每个模型需要一个 `config.json` 配置文件，[参考示例](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/python/models)。
+每个模型需要一个 `config.json` 配置文件，[参考示例](https://github.com/qualcomm/qai-appbuilder/tree/main/samples/genie/python/models)。
 
 基本配置文件结构：
 
-其中用到的 [htp_backend_ext_config.json](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/genie/python/config/htp_backend_ext_config.json) 可直接下载使用。
+其中用到的 [htp_backend_ext_config.json](https://github.com/qualcomm/qai-appbuilder/blob/main/samples/genie/python/config/htp_backend_ext_config.json) 可直接下载使用。
 
 ```json
 {
@@ -211,6 +211,6 @@ else:
 }
 ```
 
-不同模型可能使用不同的提示词格式，请根据模型文档配置相应的模板。参考 [模板](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/python/models)。
+不同模型可能使用不同的提示词格式，请根据模型文档配置相应的模板。参考 [模板](https://github.com/qualcomm/qai-appbuilder/tree/main/samples/genie/python/models)。
 
-GitHub: https://github.com/quic/ai-engine-direct-helper
+GitHub: https://github.com/qualcomm/qai-appbuilder

@@ -29,7 +29,7 @@ from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfP
 
 MODEL_ID = "mm633o32m"  
 MODEL_NAME = "quicksrnetmedium"
-MODEL_HELP_URL = "https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
 IMAGE_SIZE = 128
 
 ####################################################################
@@ -97,7 +97,7 @@ def Init():
     model_download()
     print("Init")
     # Config AppBuilder environment.
-    QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for QuickSRNetMedium objects.
     quicksrnetmedium = QuickSRNetMedium("quicksrnetmedium", model_path)

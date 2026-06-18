@@ -13,7 +13,7 @@ This section explains how to configure and run the Qwen2.5-VL-3B model in a Wind
 
 - **Download the Genie Service Program**:<br>
   Go to the GitHub Releases page to
-  download [GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.42.0/GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip):
+  download [GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip](https://github.com/qualcomm/qai-appbuilder/releases/download/v2.42.0/GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip):
   Releases download page.
 
 - **Extract the file**:<br>
@@ -55,7 +55,7 @@ Note: Please ensure test.png is existed in the current directory.
 
 - **Download and Install APK**: <br>
   Visit the GitHub Releases page to
-  download [GenieAPIService.apk](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.42.0/GenieAPIService.apk)
+  download [GenieAPIService.apk](https://github.com/qualcomm/qai-appbuilder/releases/download/v2.42.0/GenieAPIService.apk)
   and install it on your Android device: Releases
   Download Page.
 

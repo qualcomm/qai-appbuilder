@@ -18,7 +18,7 @@ from pathlib import Path
 
 MODEL_ID = "mn03prw8n"
 MODEL_NAME = "nomic_embed_text"
-MODEL_HELP_URL = "https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
 SEQ_LEN = 128
 ####################################################################
 
@@ -71,7 +71,7 @@ def Init():
     )
 
     # Config AppBuilder environment.
-    QNNConfig.Config(str(qnn_dir), Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for nomic_embed_text objects.
     nomic_embed_text = NomicEmbedText("nomic_embed_text", str(model_path))

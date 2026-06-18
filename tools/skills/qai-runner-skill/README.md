@@ -80,7 +80,7 @@ set QAIRT_SDK_ROOT=/path/to/qairt-sdk
 ```
 
 
-#### 2. [qai_appbuilder](https://github.com/quic/ai-engine-direct-helper/releases)  Library (For Inference)
+#### 2. [qai_appbuilder](https://github.com/qualcomm/qai-appbuilder/releases)  Library (For Inference)
 ```bash
 # Install on target device or development machine
 pip install qai_appbuilder

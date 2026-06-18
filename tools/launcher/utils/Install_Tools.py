@@ -54,7 +54,7 @@ def install_GenieAPIService():
         print("GenieAPIService_Stable_QAIRT_v73.zip already exists")
     else:
         print("Downloading GenieAPIService...")
-        download_url = "https://github.com/quic/ai-engine-direct-helper/releases/download/v2.44.0/GenieAPIService_Stable_QAIRT_v73.zip"
+        download_url = "https://github.com/qualcomm/qai-appbuilder/releases/download/v2.44.0/GenieAPIService_Stable_QAIRT_v73.zip"
         
         if download_file_with_progress(download_url, zip_file):
             print("download successfully")
@@ -93,7 +93,7 @@ def install_QAIRT():
         print("QAIRT_Runtime_2.38.0_v73.zip already exists")
     else:
         print("Downloading QAIRT_Runtime_2.38.0_v73.zip...")
-        download_url = "https://github.com/quic/ai-engine-direct-helper/releases/download/v2.38.0/QAIRT_Runtime_2.38.0_v73.zip"
+        download_url = "https://github.com/qualcomm/qai-appbuilder/releases/download/v2.38.0/QAIRT_Runtime_2.38.0_v73.zip"
         
         if download_file_with_progress(download_url, zip_file):
             print("download successfully")
@@ -133,7 +133,7 @@ def clone_or_update_repo():
         if not os.path.exists(repo_dir):
             print("Cloning ai-engine-direct-helper repository...")
             
-            subprocess.run(["git", "clone", "https://github.com/quic/ai-engine-direct-helper.git", "--depth=1"], check=True)
+            subprocess.run(["git", "clone", "https://github.com/qualcomm/qai-appbuilder.git", "--depth=1"], check=True)
             print(f"Repository cloned to {repo_dir}")
         else:
             print(f"ai-engine-direct-helper repository already exists at {repo_dir}. Pulling latest changes...")
@@ -193,7 +193,7 @@ def main():
 
     copy_tools()
     install_GenieAPIService()
-    install_QAIRT()
+    #install_QAIRT()
 
 if __name__ == "__main__":
     main()

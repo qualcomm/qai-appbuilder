@@ -15,16 +15,18 @@ import qai_hub
 import urllib.request as request
 
 qnn_sdk_version =  {
-    "2.34": "2.34.0.250424",
     "2.38": "2.38.0.250901",
+    "2.46": "2.46.0.260424",
+    "2.47": "2.47.0.260601",
 }
 
-DEFAULT_SDK_VER     = "2.38"
+DEFAULT_SDK_VER     = "2.46"
 DEFAULT_DSP_ARCH    = "v68"  # For X-Elite device.
 DEFAULT_LIB_ARCH = "aarch64-oe-linux-gcc11.2" # "aarch64-windows-msvc" # For X-Elite device.
 
 QNN_SDK_URL = "https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/"
-QAI_APPBUILDER_WHEEL = "https://github.com/quic/ai-engine-direct-helper/releases/download/vversion.0/qai_appbuilder-version.0-cp312-cp312-win_amd64.whl"
+QAI_APPBUILDER_WHEEL = "https://github.com/qualcomm/qai-appbuilder/releases/download/vversion.0/qai_appbuilder-version.0-cp312-cp312-win_amd64.whl"
+
 QNN_DOWNLOAD_URL = "https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK"
 TEXT_RUN_SCRIPT_AGAIN = "Then run this Python script again."
 
@@ -471,7 +473,7 @@ def install_qai_runtime(version, lib_arch = DEFAULT_LIB_ARCH, dsp_arch = DEFAULT
         ret = True
 
         zip_name = f"QAIRT_Runtime_{version}_v{dsp_arch}.zip"
-        url = f"https://github.com/quic/ai-engine-direct-helper/releases/download/v{version}.0/" + zip_name
+        url = f"https://github.com/qualcomm/qai-appbuilder/releases/download/v{version}.0/" + zip_name
         qnn_zip_path = os.path.join(qnn_libs_dir, zip_name)
 
         if not os.path.exists(qnn_libs_dir):

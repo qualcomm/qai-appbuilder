@@ -845,7 +845,7 @@ setup(
     ),
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/quic/ai-engine-direct-helper",
+    url="https://github.com/qualcomm/qai-appbuilder",
     author="quic-zhanweiw",
     author_email="quic_zhanweiw@quicinc.com",
     license="BSD-3-Clause",

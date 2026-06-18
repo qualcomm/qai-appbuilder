@@ -186,7 +186,7 @@ ENCODER_MODEL_NAME = "whisper_base_en-whisperencoder-snapdragon_x_elite"
 DECODER_MODEL_NAME = "whisper_base_en-whisperdecoder-snapdragon_x_elite"
 
 MODEL_HELP_URL = (
-    "https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python/"
+    "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/"
     + MODEL_NAME
     + "#"
     + MODEL_NAME

@@ -187,7 +187,6 @@ import time
 
 # 1. 确保使用 HTP（NPU）而非 CPU
 QNNConfig.Config(
-    qnn_lib_path="./qai_libs",
     runtime=Runtime.HTP,  # 确保是 HTP
     log_level=LogLevel.INFO,
     profiling_level=ProfilingLevel.BASIC  # 启用性能分析

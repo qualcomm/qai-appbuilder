@@ -4,13 +4,13 @@
 
 ### 官方文档和资源
 
-- **GitHub 仓库**：https://github.com/quic/ai-engine-direct-helper
+- **GitHub 仓库**：https://github.com/qualcomm/qai-appbuilder
 - **Qualcomm® AI Runtime SDK**：https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK
 
 ### 教程和博客
 
-- [QAI AppBuilder Guide](https://github.com/quic/ai-engine-direct-helper/blob/main/docs/guide_zh.md)
-- [GenieAPIService (OpenAI Compatible API Service)](https://github.com/quic/ai-engine-direct-helper/blob/main/docs/genie_guide_zh.md)
+- [QAI AppBuilder Guide](https://github.com/qualcomm/qai-appbuilder/blob/main/docs/guide_zh.md)
+- [GenieAPIService (OpenAI Compatible API Service)](https://github.com/qualcomm/qai-appbuilder/blob/main/docs/genie_guide_zh.md)
 - [大语言模型系列(1): 3分钟上手，在骁龙AI PC上部署DeepSeek!](https://blog.csdn.net/csdnsqst0050/article/details/149425691)
 - [大语言模型系列(2): 本地 OpenAI 兼容 API 服务的配置与部署](https://blog.csdn.net/csdnsqst0050/article/details/150208814)
 - [大语言模型系列(3): Qwen2.5-VL-3B 多模态模型端侧部署](https://blog.csdn.net/csdnsqst0050/article/details/157474571)
@@ -19,7 +19,7 @@
 
 ### 示例代码
 
-- **Python 示例**：https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python
+- **Python 示例**：https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python
   
   - Real-ESRGAN（图像超分辨率）
   - YOLOv8（目标检测）
@@ -30,12 +30,12 @@
   - Depth Anything（深度估计）
   - 等 20+ 个示例
 
-- **C++ 示例**：https://github.com/quic/ai-engine-direct-helper/tree/main/samples/c++
+- **C++ 示例**：https://github.com/qualcomm/qai-appbuilder/tree/main/samples/c++
   
   - Real-ESRGAN
   - BEiT（图像分类）
 
-- **WebUI 应用**：https://github.com/quic/ai-engine-direct-helper/tree/main/samples/webui
+- **WebUI 应用**：https://github.com/qualcomm/qai-appbuilder/tree/main/samples/webui
   
   - ImageRepairApp（图像修复）
   - StableDiffusionApp（文生图）
@@ -92,7 +92,7 @@
 
 QAI AppBuilder 采用 **BSD 3-Clause "New" or "Revised" License**。
 
-详见：https://github.com/quic/ai-engine-direct-helper/blob/main/LICENSE
+详见：https://github.com/qualcomm/qai-appbuilder/blob/main/LICENSE
 
 ---
 
@@ -110,20 +110,20 @@ QAI AppBuilder 采用 **BSD 3-Clause "New" or "Revised" License**。
 
 如果遇到问题，请访问：
 
-- **GitHub Issues**：https://github.com/quic/ai-engine-direct-helper/issues
+- **GitHub Issues**：https://github.com/qualcomm/qai-appbuilder/issues
 
 ### 贡献代码
 
 欢迎提交 Pull Request！请参阅：
 
-- **贡献指南**：https://github.com/quic/ai-engine-direct-helper/blob/main/CONTRIBUTING.md
-- **行为准则**：https://github.com/quic/ai-engine-direct-helper/blob/main/CODE-OF-CONDUCT.md
+- **贡献指南**：https://github.com/qualcomm/qai-appbuilder/blob/main/CONTRIBUTING.md
+- **行为准则**：https://github.com/qualcomm/qai-appbuilder/blob/main/CODE-OF-CONDUCT.md
 
 ---
 
 <div align="center">
   <p>⭐ 如果这个项目对你有帮助，请给我们一个 Star！</p>
-  <p>📧 有问题或建议？访问 <a href="https://github.com/quic/ai-engine-direct-helper">GitHub 仓库</a></p>
+  <p>📧 有问题或建议？访问 <a href="https://github.com/qualcomm/qai-appbuilder">GitHub 仓库</a></p>
 </div>
 
 ---

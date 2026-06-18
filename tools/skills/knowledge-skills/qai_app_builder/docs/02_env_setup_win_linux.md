@@ -57,7 +57,7 @@ https://aka.ms/vs/17/release/vc_redist.arm64.exe
 
 ```bash
 # 克隆仓库
-git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
+git clone https://github.com/qualcomm/qai-appbuilder.git --recursive
 
 # 如果已克隆，更新代码
 cd ai-engine-direct-helper
@@ -66,7 +66,7 @@ git pull --recurse-submodules
 
 #### 步骤 3：安装 QAI AppBuilder Python 扩展
 
-从 [GitHub Release](https://github.com/quic/ai-engine-direct-helper/releases) 下载对应版本的 `.whl` 文件：
+从 [GitHub Release](https://github.com/qualcomm/qai-appbuilder/releases) 下载对应版本的 `.whl` 文件：
 
 ```bash
 # 对于 x64 Python
@@ -105,7 +105,7 @@ pip3 install numpy pillow opencv-python
 
 ```bash
 # 克隆仓库
-git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
+git clone https://github.com/qualcomm/qai-appbuilder.git --recursive
 
 # 如果已克隆，更新代码
 cd ai-engine-direct-helper
@@ -114,7 +114,7 @@ git pull --recurse-submodules
 
 #### 步骤 3：安装 QAI AppBuilder Python 扩展
 
-从 [GitHub Release](https://github.com/quic/ai-engine-direct-helper/releases) 下载对应版本的 `.whl` 文件：
+从 [GitHub Release](https://github.com/qualcomm/qai-appbuilder/releases) 下载对应版本的 `.whl` 文件：
 
 ```bash
 # 对于 Linux ARM64

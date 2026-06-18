@@ -5,8 +5,8 @@
 ### 步骤 1：下载资源
 
 1. **下载 GenieAPIService**
-    - 访问 [GitHub Releases](https://github.com/quic/ai-engine-direct-helper/releases/tag/v2.42.0)
-    - 下载 [GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.42.0/GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip)
+    - 访问 [GitHub Releases](https://github.com/qualcomm/qai-appbuilder/releases/tag/v2.42.0)
+    - 下载 [GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip](https://github.com/qualcomm/qai-appbuilder/releases/download/v2.42.0/GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip)
 
 2. **下载模型文件**
     - 根据需要 [下载](https://www.aidevhome.com/?id=51) 对应的模型文件
@@ -77,8 +77,8 @@ Server listening on port 8910
 ### 步骤 1：安装 APK
 
 1. **下载 APK**
-    - 访问 [GitHub Releases](https://github.com/quic/ai-engine-direct-helper/releases/tag/v2.42.0)
-    - 下载 [GenieAPIService.apk](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.42.0/GenieAPIService.apk)
+    - 访问 [GitHub Releases](https://github.com/qualcomm/qai-appbuilder/releases/tag/v2.42.0)
+    - 下载 [GenieAPIService.apk](https://github.com/qualcomm/qai-appbuilder/releases/download/v2.42.0/GenieAPIService.apk)
 
 2. **安装 APK**
    ```
@@ -141,6 +141,6 @@ Server listening on port 8910
 
 2. **GenieFletUI**
     - 源码位置：`samples/fletui/GenieFletUI/android`
-    - 参考 [Build.md](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/fletui/GenieFletUI/android/BUILD.md) 将 Flet 代码编译成 apk
+    - 参考 [Build.md](https://github.com/qualcomm/qai-appbuilder/blob/main/samples/fletui/GenieFletUI/android/BUILD.md) 将 Flet 代码编译成 apk
 
-GitHub: https://github.com/quic/ai-engine-direct-helper
+GitHub: https://github.com/qualcomm/qai-appbuilder

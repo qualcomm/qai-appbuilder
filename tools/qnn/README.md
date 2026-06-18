@@ -15,11 +15,8 @@ This repository contains a small **QAI AppBuilder + QNN** verification script: [
 The script configures AppBuilder globally using:
 
 ```python
-QNNConfig.Config(str(qnn_dir), Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+QNNConfig.Config(Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 ```
-
-By default `qnn_dir` is an empty string in the script (`qnn_dir = ""`). Ensure your environment is set up so QAI AppBuilder can locate the required QNN libraries/runtime (or adjust the script to point `qnn_dir` to your QNN install path if your setup requires it).
-
 ---
 
 ## 2) How to run

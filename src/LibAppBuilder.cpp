@@ -111,7 +111,7 @@ std::unique_ptr<qnn_app::QnnInferenceEngine> initQnnInferenceEngine(std::string 
       modelPath = cachedBinaryPath;
   }
 
-  QNN_WAR("input_data_type: %s, output_data_type: %s\n", input_data_type.c_str(), output_data_type.c_str());
+  QNN_WARN("input_data_type: %s, output_data_type: %s\n", input_data_type.c_str(), output_data_type.c_str());
 
   iotensor::InputDataType parsedInputDataType     = iotensor::parseInputDataType(input_data_type);
   iotensor::OutputDataType parsedOutputDataType   = iotensor::parseOutputDataType(output_data_type);
@@ -201,8 +201,12 @@ bool SetLogLevel(int32_t log_level, const std::string log_path) {
     if (_access(log_path.c_str(), 0) == 0) {
         std::string STD_OUT = log_path + "\\log_out.txt";
         std::string STD_ERR = log_path + "\\log_err.txt";
-        freopen(STD_OUT.c_str(), "w+", stdout);
-        freopen(STD_ERR.c_str(), "w+", stderr);
+        if (freopen(STD_OUT.c_str(), "w+", stdout) == nullptr) {
+            QNN_WARN("Failed to redirect stdout to %s", STD_OUT.c_str());
+        }
+        if (freopen(STD_ERR.c_str(), "w+", stderr) == nullptr) {
+            QNN_WARN("Failed to redirect stderr to %s", STD_ERR.c_str());
+        }
     }
   }
 #endif
@@ -444,7 +448,7 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
                        const std::string& backend_lib_path, const std::string& system_lib_path, 
                        std::vector<LoraAdapter>& lora_adapters,
                        bool async, const std::string& input_data_type, const std::string& output_data_type, uint32_t deviceID=0, std::string coreIdsStr="") {
-  QNN_INF("LibAppBuilder::ModelInitialize: %s \n", model_name.c_str());
+  QNN_INFO("LibAppBuilder::ModelInitialize: %s \n", model_name.c_str());
 
   bool result = false;
 
@@ -618,7 +622,7 @@ bool ModelInferenceEx(std::string model_name, std::string proc_name, std::string
                       std::string& perfProfile, size_t graphIndex, size_t share_memory_size=0) {
     bool result = true;
 
-    //QNN_INF("LibAppBuilder::ModelInference: %s \n", model_name.c_str());
+    QNN_INFO("LibAppBuilder::ModelInference: %s \n", model_name.c_str());
 
     if (!proc_name.empty()) {
         // If proc_name, run the model in that process.
@@ -630,13 +634,11 @@ bool ModelInferenceEx(std::string model_name, std::string proc_name, std::string
 
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
 
-    if (result && nullptr == app) {
-        app->reportError("Inference failure");
+    if (nullptr == app) {
+	    QNN_WARN("getQnnInferenceEngine returns null in ModelInferenceEx.");
         result = false;
-    }
-
-    if (result && qnn_app::StatusCode::SUCCESS != app->executeGraphsBuffers(inputBuffers, outputBuffers, outputSize, perfProfile, graphIndex, share_memory_size)) {
-        app->reportError("Graph Execution failure");
+    } else if (result && qnn_app::StatusCode::SUCCESS != app->executeGraphsBuffers(inputBuffers, outputBuffers, outputSize, perfProfile, graphIndex, share_memory_size)) {
+        app->reportError("Inference failure");
         result = false;
     }
 
@@ -648,7 +650,7 @@ bool ModelInferenceEx(std::string model_name, std::string proc_name, std::string
 }
 
 bool ModelDestroyEx(std::string model_name, std::string proc_name) {
-    QNN_INF("LibAppBuilder::ModelDestroy: %s \n", model_name.c_str());
+    QNN_INFO("LibAppBuilder::ModelDestroy: %s \n", model_name.c_str());
 
     bool result = false;
 
@@ -749,7 +751,7 @@ bool LibAppBuilder::ModelApplyBinaryUpdate(const std::string model_name, std::ve
     bool result = true;
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     if (nullptr == app) {
-        app->reportError("Apply binary update failure: " + model_name);
+        QNN_WARN("Apply binary update failure: %s\n", model_name.c_str());
         result = false;
     }
     
@@ -891,7 +893,7 @@ ModelInfo_t LibAppBuilder::getModelInfoExt(std::string model_name, std::string i
 
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     if (nullptr == app) {
-        app->reportError("getModelInfoExt failure");
+	    QNN_WARN("getModelInfoExt failure: %s\n", model_name.c_str());
         result = false;
     }
     if(result){

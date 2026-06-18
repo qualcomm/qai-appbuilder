@@ -36,8 +36,8 @@ HUB_ID_H="ox06ibpbkxb4pr0mcyfe7wqgx5pf5r0cm3rf3dzi"
 
 TIMESTEP_EMBEDDING_MODEL_ID = "m7mrzdgxn"
 TOKENIZER_MODEL_NAME        = "openai/clip-vit-large-patch14"
-TOKENIZER_HELP_URL          = "https://github.com/quic/ai-engine-direct-helper/blob/main/samples/python/" + MODEL_NAME + "/README.md#clip-vit-l14-model"
-MODEL_HELP_URL = "https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+TOKENIZER_HELP_URL          = "https://github.com/qualcomm/qai-appbuilder/blob/main/samples/python/" + MODEL_NAME + "/README.md#clip-vit-l14-model"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
 
 ####################################################################
 
@@ -283,7 +283,7 @@ def model_destroy():
     del(vae_decoder)
 
 def SetQNNConfig():
-    QNNConfig.Config(str(qnn_dir), Runtime.HTP, LogLevel.ERROR, ProfilingLevel.BASIC)
+    QNNConfig.Config(Runtime.HTP, LogLevel.ERROR, ProfilingLevel.BASIC)
 
 ####################################################################
 

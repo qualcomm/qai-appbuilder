@@ -19,7 +19,7 @@ You should launch the server first, then use client for ask the questions.
       1.<br><br>
       If you want to set the log level, please click the menu at top right-hand corner then select Log Level.<br><br>
 
-3. If you want to use the [GenieChat](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/android/GenieChat), please build and install. And open it and click the menu at top right-hand corner then select settings.
+3. If you want to use the [GenieChat](https://github.com/qualcomm/qai-appbuilder/tree/main/samples/android/GenieChat), please build and install. And open it and click the menu at top right-hand corner then select settings.
    you can select the model and go back to main window. Now you can query your questions.<br><br>
 
    ![img.png](img/6.png)

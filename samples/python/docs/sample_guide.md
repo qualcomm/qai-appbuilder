@@ -4,8 +4,8 @@
 This guide helps developers use QAI AppBuilder with the QNN SDK to execute models on Windows on Snapdragon (WoS) platforms.
 
 ## Setup AppBuilder environment and prepare QNN SDK libraries by referring to the links below: 
-https://github.com/quic/ai-engine-direct-helper/blob/main/README.md <br>
-https://github.com/quic/ai-engine-direct-helper/blob/main/Docs/User_Guide.md
+https://github.com/qualcomm/qai-appbuilder/blob/main/README.md <br>
+https://github.com/qualcomm/qai-appbuilder/blob/main/Docs/User_Guide.md
 
 Set up a new folder named by the model you tend to deploy:
 ```
@@ -96,7 +96,7 @@ compile_job = cast(hub.client.CompileJob, submitted_compile_job)
 ## Sample Code for Deploying the Model and Executing Inference
 
 The sample code refers to the following path:
-https://github.com/quic/ai-engine-direct-helper/blob/main/docs/user_guide.md
+https://github.com/qualcomm/qai-appbuilder/blob/main/docs/user_guide.md
 
 Here we take `lama_dilated` as example:
 
@@ -169,7 +169,7 @@ def Init():
     global lamadilated
 
     # Config AppBuilder environment.
-    QNNConfig.Config(os.getcwd() + "\\qai_libs", Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for LamaDilated objects.
     lamadilated_model = "models\\lama_dilated.bin"

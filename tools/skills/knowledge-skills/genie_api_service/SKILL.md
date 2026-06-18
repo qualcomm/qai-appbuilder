@@ -1,7 +1,7 @@
 ---
 name: genie-api-service-docs
 description: GenieAPIService technical documentation retrieval. Find guides on platform deployment, model configuration, and API usage. GenieAPIService is an OpenAI-compatible API service that enables running large language models(include LLM & VLM model) locally on Qualcomm(高通) Windows on Snapdragon, Android, and Linux platforms. It leverages the device local NPU(HTP) or CPU for efficient inference.
-GitHub: https://github.com/quic/ai-engine-direct-helper
+GitHub: https://github.com/qualcomm/qai-appbuilder
 metadata: {"openclaw":{"emoji":"🧞","always":true}}
 ---
 

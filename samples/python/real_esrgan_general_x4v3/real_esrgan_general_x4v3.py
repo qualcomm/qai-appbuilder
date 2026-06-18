@@ -22,7 +22,7 @@ from pathlib import Path
 
 MODEL_ID = "mn0j68p8m"
 MODEL_NAME = "real_esrgan_general_x4v3"
-MODEL_HELP_URL = "https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
 IMAGE_SIZE = 512
 
 ####################################################################
@@ -84,7 +84,7 @@ def Init():
     model_download()
 
     # Config AppBuilder environment.
-    QNNConfig.Config(str(qnn_dir), Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for RealESRGan objects.
     realesrgan = RealESRGan("realesrgan", str(model_path))

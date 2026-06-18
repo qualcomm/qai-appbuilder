@@ -77,7 +77,7 @@ HAND_DETECTOR_MODEL_ID = "mno1jz9vm"
 HAND_DETECTOR_MODEL_NAME = "handdetector"
 LANDMARK_DETECTOR_MODEL_NAME = "landmarkdetector"
 ESCAPE_KEY_ID = 27
-MODEL_HELP_URL = "https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
 
 ####################################################################
 
@@ -158,7 +158,7 @@ def Init():
     time_save = time.time()
 
     # Config AppBuilder environment.
-    QNNConfig.Config(str(qnn_dir), Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for HandDetector objects.
     hand_detector = HandDetector("hand_detector", str(hand_detector_model_path))

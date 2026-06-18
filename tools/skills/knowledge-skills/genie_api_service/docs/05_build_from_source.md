@@ -1,13 +1,13 @@
 # GenieAPIService 从源码构建
 
-> 适用于需要自行编译 C++ Service / Client（Windows / Android / Linux）的开发者。若仅体验或集成 API，建议直接使用 [Release 包](https://github.com/quic/ai-engine-direct-helper/releases)。
+> 适用于需要自行编译 C++ Service / Client（Windows / Android / Linux）的开发者。若仅体验或集成 API，建议直接使用 [Release 包](https://github.com/qualcomm/qai-appbuilder/releases)。
 
 ## 源码与依赖准备
 
 ### 1. 克隆仓库（含子模块）
 
 ```bash
-git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
+git clone https://github.com/qualcomm/qai-appbuilder.git --recursive
 ```
 
 ### 2. VLM 额外依赖（stb）
@@ -86,7 +86,7 @@ Set ANDROID_NDK_ROOT=%NDK_ROOT%
 
 ### 先构建 libappbuilder
 
-Android 构建前需要先编译 `libappbuilder`（详见项目根目录的 [BUILD](https://github.com/quic/ai-engine-direct-helper/blob/main/BUILD.md) 说明），并将生成的 `libappbuilder.so` 放到：
+Android 构建前需要先编译 `libappbuilder`（详见项目根目录的 [BUILD](https://github.com/qualcomm/qai-appbuilder/blob/main/BUILD.md) 说明），并将生成的 `libappbuilder.so` 放到：
 
 `ai-engine-direct-helper\samples\genie\c++\Service`
 
@@ -111,4 +111,4 @@ copy "obj\local\arm64-v8a\*.so" "libs\arm64-v8a" /Y
 4. 在 `...\Android\app\release` 目录获取 `app-release.apk`
 5. 安装：`adb install app-release.apk`
 
-GitHub: https://github.com/quic/ai-engine-direct-helper
+GitHub: https://github.com/qualcomm/qai-appbuilder

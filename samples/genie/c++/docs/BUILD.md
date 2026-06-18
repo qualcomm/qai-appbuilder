@@ -13,7 +13,7 @@ When you finished building task , please goto [USAGE](USAGE.MD) to learn how to 
 Use below command to clone the whole repository and the dependency 3rd party libraries.
 
 ```
-git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
+git clone https://github.com/qualcomm/qai-appbuilder.git --recursive
 ```
 
 ## Build For Windows:

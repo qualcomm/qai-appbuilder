@@ -36,7 +36,7 @@ pip install requests==2.32.3 py3-wget==1.0.12 tqdm==4.67.1 importlib-metadata==8
 ### Step 3: Download QAI AppBuilder repository:
 Run below command in Windows terminal:
 ```
-git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
+git clone https://github.com/qualcomm/qai-appbuilder.git --recursive
 ```
 If you have cloned it before, you can update the code by the following command:
 ```

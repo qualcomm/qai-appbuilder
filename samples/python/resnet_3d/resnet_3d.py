@@ -23,7 +23,7 @@ from pathlib import Path
 
 MODEL_ID = "mn1v138rn"
 MODEL_NAME = "resnet_3d"
-MODEL_HELP_URL = "https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
 
 
 ###############################################################
@@ -94,7 +94,7 @@ def Init():
     model_download()
 
     # Config AppBuilder environment.
-    QNNConfig.Config(str(qnn_dir), Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for resnet_3d objects.
     resnet_3d= ResNet_3D("resnet_3d", str(model_path))

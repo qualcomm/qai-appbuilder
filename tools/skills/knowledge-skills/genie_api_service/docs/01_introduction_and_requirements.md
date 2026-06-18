@@ -63,4 +63,4 @@ GenieAPIService 提供了丰富的功能特性：
 - **MNN 格式**：阿里巴巴 MNN 框架模型（需编译时启用）
 - **GGUF 格式**：llama.cpp 格式模型（需编译时启用）
 
-GitHub: https://github.com/quic/ai-engine-direct-helper
+GitHub: https://github.com/qualcomm/qai-appbuilder

@@ -750,10 +750,12 @@ qnn_app::StatusCode qnn_app::QnnInferenceEngine::initializeProfileConfigOption(
         const QnnProfile_Config_t* profileConfigs[] = { &optraceConfig, nullptr };
         Qnn_ErrorHandle_t qnnStatus =
             qnnInterfaceHandle->profileSetConfig(profileHandle, profileConfigs);
-        QNN_ERROR(
-            "Failed to set profile config option: %d, with error: %d",
-            profilingOption,
-            qnnStatus);
+        if (QNN_PROFILE_NO_ERROR != qnnStatus) {
+            QNN_ERROR(
+                "Failed to set profile config option: %d, with error: %d",
+                profilingOption,
+                qnnStatus);
+        }
         returnStatus = verifyFailReturnStatus(qnnStatus);
 
     }
@@ -1401,7 +1403,7 @@ qnn_app::StatusCode qnn_app::QnnInferenceEngine::createDevice() {
 
 qnn_app::StatusCode qnn_app::QnnInferenceEngine::freeDevice() {
   QNN_INFO("qnn_app::QnnInferenceEngine::freeDevice begin\n");
-  return StatusCode::SUCCESS;
+  return StatusCode::SUCCESS; //AISW-149462
 
   const uint32_t deviceId = m_multiCoreDeviceConfig.deviceId;
   std::string devKey = makeDeviceKey(deviceId, m_multiCoreDeviceConfig.coreIdVec);

@@ -35,7 +35,7 @@ CHUNK_LENGTH = 0.98
 
 MODEL_ID = "mm65xwe5n"
 MODEL_NAME = "yamnet"
-MODEL_HELP_URL = "https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
 YAMNET_CLASSES_URL = "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/yamnet/v1/yamnet_class_map.csv"
 YAMNET_CLASSES_FILE = "yamnet_class_map.csv"
 
@@ -88,7 +88,7 @@ def Init():
     model_download()
 
     # Config AppBuilder environment.
-    QNNConfig.Config(str(qnn_dir), Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for yamnet objects.
     yamnet = YamNet("yamnet", str(model_path))

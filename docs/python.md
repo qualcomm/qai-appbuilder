@@ -13,7 +13,7 @@ You can also run the batch file from [QAI AppBuilder Launcher](../tools/launcher
 ### Step 1: Install Dependencies
 Download and install [git](https://github.com/dennisameling/git/releases/download/v2.47.0.windows.2/Git-2.47.0.2-arm64.exe) and [X64 Python 3.12.8](https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe) <br>
 
-<a href="https://github.com/quic/ai-engine-direct-helper/blob/main/docs/python.md#step-1-install-dependencies"><img src="https://img.shields.io/badge/Note: - Windows on Snapdragon (WoS) device support running X86, X64, ARM64EC and ARM64 applications.-important"></a> <br>
+<a href="https://github.com/qualcomm/qai-appbuilder/blob/main/docs/python.md#step-1-install-dependencies"><img src="https://img.shields.io/badge/Note: - Windows on Snapdragon (WoS) device support running X86, X64, ARM64EC and ARM64 applications.-important"></a> <br>
 *Note: For ease of use, we recommend using the X64 version of Python to run our sample applications. That’s why we’ve provided a download link for the X64 version of Python above.* <br>
 *Note: Make sure to check 'Add python.exe to PATH' while install Python* <br>
 *Note: If there are multiple Python versions in your environment, make sure that the Python installed this time is in the first place in the PATH environment variable.* <br>
@@ -35,7 +35,7 @@ pip install requests==2.32.3 py3-wget==1.0.12 tqdm==4.67.1 importlib-metadata==8
 ### Step 3: Download QAI AppBuilder repository:
 Run below command in Windows terminal:
 ```
-git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
+git clone https://github.com/qualcomm/qai-appbuilder.git --recursive
 ```
 If you have cloned it before, you can update the code by the following command:
 ```

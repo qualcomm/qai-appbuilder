@@ -22,7 +22,7 @@ from pathlib import Path
 
 MODEL_ID = "mmxeyyvyn"
 MODEL_NAME = "inception_v3"
-MODEL_HELP_URL = "https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
 IMAGENET_CLASSES_URL = "https://raw.githubusercontent.com/pytorch/hub/refs/heads/master/imagenet_classes.txt"
 IMAGENET_CLASSES_FILE = "imagenet_classes.txt"
 IMAGE_SIZE = 224
@@ -109,7 +109,7 @@ def Init():
     model_download()
 
     # Config AppBuilder environment.
-    QNNConfig.Config(str(qnn_dir), Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for InceptionV3 objects.
     inceptionV3 = InceptionV3("inceptionV3", str(model_path))

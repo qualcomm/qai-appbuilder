@@ -24,7 +24,7 @@ import qai_hub
 MODEL_ID = "mnz1l2exq"
 MODEL_NAME = "real_esrgan_x4plus"
 MODEL_HELP_URL = (
-    "https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python/"
+    "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/"
     + MODEL_NAME
     + "#"
     + MODEL_NAME

@@ -251,4 +251,4 @@ var response = await chatClient.CompleteChatAsync(
 
 Console.WriteLine(response.Value.Content[0].Text);
 
-GitHub: https://github.com/quic/ai-engine-direct-helper
+GitHub: https://github.com/qualcomm/qai-appbuilder

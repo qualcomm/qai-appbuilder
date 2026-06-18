@@ -33,7 +33,7 @@ sudo apt install -y git cmake build-essential
 ## 2. Clone the repository
 
 ```bash
-git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
+git clone https://github.com/qualcomm/qai-appbuilder.git --recursive
 cd ai-engine-direct-helper
 ```
 

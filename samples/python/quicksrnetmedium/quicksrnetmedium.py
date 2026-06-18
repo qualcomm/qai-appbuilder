@@ -31,7 +31,7 @@ from pathlib import Path
 MODEL_ID = "mn70g68vq"  #"mqe84e95q" #"mnw34l13m"
 HUB_ID_H="ox06ibpbkxb4pr0mcyfe7wqgx5pf5r0cm3rf3dzi"
 MODEL_NAME = "quicksrnetmedium"
-MODEL_HELP_URL = "https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
 IMAGE_SIZE = 512
 
 ####################################################################
@@ -78,7 +78,7 @@ def Init():
     model_download()
     print("Init")
     # Config AppBuilder environment.
-    QNNConfig.Config(str(qnn_dir), Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for QuickSRNetMedium objects.
     quicksrnetmedium = QuickSRNetMedium("quicksrnetmedium", str(model_path))

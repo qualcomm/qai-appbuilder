@@ -126,12 +126,12 @@
 如果您在使用 GenieAPIService 时遇到问题，可以通过以下方式获取帮助：
 
 1. **查看文档**
-   - [GitHub 仓库](https://github.com/quic/ai-engine-direct-helper)
-   - [API 文档](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/genie/c%2B%2B/docs/API.md)
-   - [示例代码](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/c%2B%2B/Service/examples/GenieAPIClient)
+   - [GitHub 仓库](https://github.com/qualcomm/qai-appbuilder)
+   - [API 文档](https://github.com/qualcomm/qai-appbuilder/blob/main/samples/genie/c%2B%2B/docs/API.md)
+   - [示例代码](https://github.com/qualcomm/qai-appbuilder/tree/main/samples/genie/c%2B%2B/Service/examples/GenieAPIClient)
 
 2. **提交问题**
-   - [GitHub Issues](https://github.com/quic/ai-engine-direct-helper/issues)
+   - [GitHub Issues](https://github.com/qualcomm/qai-appbuilder/issues)
 
 ### 报告 Bug
 
@@ -171,9 +171,9 @@
 
 ### 许可证
 
-GenieAPIService 使用 BSD-3-Clause 许可证。详见 [LICENSE](https://github.com/quic/ai-engine-direct-helper/blob/main/LICENSE) 文件。
+GenieAPIService 使用 BSD-3-Clause 许可证。详见 [LICENSE](https://github.com/qualcomm/qai-appbuilder/blob/main/LICENSE) 文件。
 
 ### 联系方式
 
-- **项目主页**：https://github.com/quic/ai-engine-direct-helper
-- **问题反馈**：https://github.com/quic/ai-engine-direct-helper/issues
+- **项目主页**：https://github.com/qualcomm/qai-appbuilder
+- **问题反馈**：https://github.com/qualcomm/qai-appbuilder/issues

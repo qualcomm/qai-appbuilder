@@ -129,8 +129,8 @@ GenieAPIService 提供了丰富的功能特性：
 ### 步骤 1：下载资源
 
 1. **下载 GenieAPIService**
-    - 访问 [GitHub Releases](https://github.com/quic/ai-engine-direct-helper/releases/tag/v2.42.0)
-    - 下载 [GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.42.0/GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip)
+    - 访问 [GitHub Releases](https://github.com/qualcomm/qai-appbuilder/releases/tag/v2.42.0)
+    - 下载 [GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip](https://github.com/qualcomm/qai-appbuilder/releases/download/v2.42.0/GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip)
 
 2. **下载模型文件**
     - 根据需要 [下载](https://www.aidevhome.com/?id=51) 对应的模型文件
@@ -201,8 +201,8 @@ Server listening on port 8910
 ### 步骤 1：安装 APK
 
 1. **下载 APK**
-    - 访问 [GitHub Releases](https://github.com/quic/ai-engine-direct-helper/releases/tag/v2.42.0)
-    - 下载 [GenieAPIService.apk](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.42.0/GenieAPIService.apk)
+    - 访问 [GitHub Releases](https://github.com/qualcomm/qai-appbuilder/releases/tag/v2.42.0)
+    - 下载 [GenieAPIService.apk](https://github.com/qualcomm/qai-appbuilder/releases/download/v2.42.0/GenieAPIService.apk)
 
 2. **安装 APK**
    ```
@@ -265,7 +265,7 @@ Server listening on port 8910
 
 2. **GenieFletUI**
     - 源码位置：`samples/fletui/GenieFletUI/android`
-    - 参考 [Build.md](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/fletui/GenieFletUI/android/BUILD.md) 将 Flet 代码编译成 apk
+    - 参考 [Build.md](https://github.com/qualcomm/qai-appbuilder/blob/main/samples/fletui/GenieFletUI/android/BUILD.md) 将 Flet 代码编译成 apk
 
 ---
 
@@ -273,11 +273,11 @@ Server listening on port 8910
 
 ### 配置文件结构
 
-每个模型需要一个 `config.json` 配置文件，[参考示例](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/python/models)。
+每个模型需要一个 `config.json` 配置文件，[参考示例](https://github.com/qualcomm/qai-appbuilder/tree/main/samples/genie/python/models)。
 
 基本配置文件结构：
 
-其中用到的 [htp_backend_ext_config.json](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/genie/python/config/htp_backend_ext_config.json) 可直接下载使用。
+其中用到的 [htp_backend_ext_config.json](https://github.com/qualcomm/qai-appbuilder/blob/main/samples/genie/python/config/htp_backend_ext_config.json) 可直接下载使用。
 
 ```json
 {
@@ -478,7 +478,7 @@ else:
 }
 ```
 
-不同模型可能使用不同的提示词格式，请根据模型文档配置相应的模板。参考 [模板](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/python/models)。
+不同模型可能使用不同的提示词格式，请根据模型文档配置相应的模板。参考 [模板](https://github.com/qualcomm/qai-appbuilder/tree/main/samples/genie/python/models)。
 
 ---
 
@@ -599,7 +599,7 @@ GenieAPIClient.exe [OPTIONS]
 ```
 
 #### C++ 客户端使用
-[参考代码](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/genie/c%2B%2B/Service/examples/GenieAPIClient/GenieAPIClient.cpp)<br>
+[参考代码](https://github.com/qualcomm/qai-appbuilder/blob/main/samples/genie/c%2B%2B/Service/examples/GenieAPIClient/GenieAPIClient.cpp)<br>
 ##### 文本对话
 
 ```cmd
@@ -619,7 +619,7 @@ GenieAPIClient.exe --prompt "写一首诗" --stream --temperature 0.9 --max_toke
 ```
 
 ### Python 客户端使用
-[参考代码](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/genie/c%2B%2B/Service/examples/GenieAPIClient/GenieAPIClient.py)<br>
+[参考代码](https://github.com/qualcomm/qai-appbuilder/blob/main/samples/genie/c%2B%2B/Service/examples/GenieAPIClient/GenieAPIClient.py)<br>
 Python 客户端使用 OpenAI SDK，提供更灵活的集成方式。
 
 #### 安装依赖
@@ -783,14 +783,14 @@ func main() {
 
 ## 从源码构建
 
-> 适用于需要自行编译 C++ Service / Client（Windows / Android / Linux）的开发者。若仅体验或集成 API，建议直接使用 [Release 包](https://github.com/quic/ai-engine-direct-helper/releases)。
+> 适用于需要自行编译 C++ Service / Client（Windows / Android / Linux）的开发者。若仅体验或集成 API，建议直接使用 [Release 包](https://github.com/qualcomm/qai-appbuilder/releases)。
 
 ### 源码与依赖准备
 
 1. **克隆仓库（含子模块）**
 
 ```bash
-git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
+git clone https://github.com/qualcomm/qai-appbuilder.git --recursive
 ```
 
 2. **VLM 额外依赖（stb）**
@@ -865,7 +865,7 @@ Set ANDROID_NDK_ROOT=%NDK_ROOT%
 
 #### 先构建 libappbuilder
 
-Android 构建前需要先编译 `libappbuilder`（详见项目根目录的 [BUILD](https://github.com/quic/ai-engine-direct-helper/blob/main/BUILD.md) 说明），并将生成的 `libappbuilder.so` 放到：
+Android 构建前需要先编译 `libappbuilder`（详见项目根目录的 [BUILD](https://github.com/qualcomm/qai-appbuilder/blob/main/BUILD.md) 说明），并将生成的 `libappbuilder.so` 放到：
 
 `ai-engine-direct-helper\samples\genie\c++\Service`
 
@@ -894,7 +894,7 @@ copy "obj\local\arm64-v8a\*.so" "libs\arm64-v8a" /Y
 
 ## 其他工具
 
-这些 Windows 工具随着 [Releases](https://github.com/quic/ai-engine-direct-helper/releases/tag/v2.42.0) 一起发布
+这些 Windows 工具随着 [Releases](https://github.com/qualcomm/qai-appbuilder/releases/tag/v2.42.0) 一起发布
 
 ### encode.exe
 
@@ -1575,12 +1575,12 @@ Console.WriteLine(response.Value.Content[0].Text);
 如果您在使用 GenieAPIService 时遇到问题，可以通过以下方式获取帮助：
 
 1. **查看文档**
-   - [GitHub 仓库](https://github.com/quic/ai-engine-direct-helper)
-   - [API 文档](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/genie/c%2B%2B/docs/API.md)
-   - [示例代码](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/c%2B%2B/Service/examples/GenieAPIClient)
+   - [GitHub 仓库](https://github.com/qualcomm/qai-appbuilder)
+   - [API 文档](https://github.com/qualcomm/qai-appbuilder/blob/main/samples/genie/c%2B%2B/docs/API.md)
+   - [示例代码](https://github.com/qualcomm/qai-appbuilder/tree/main/samples/genie/c%2B%2B/Service/examples/GenieAPIClient)
 
 2. **提交问题**
-   - [GitHub Issues](https://github.com/quic/ai-engine-direct-helper/issues)
+   - [GitHub Issues](https://github.com/qualcomm/qai-appbuilder/issues)
 
 ### 报告 Bug
 
@@ -1620,12 +1620,12 @@ Console.WriteLine(response.Value.Content[0].Text);
 
 ### 许可证
 
-GenieAPIService 使用 BSD-3-Clause 许可证。详见 [LICENSE](https://github.com/quic/ai-engine-direct-helper/blob/main/LICENSE) 文件。
+GenieAPIService 使用 BSD-3-Clause 许可证。详见 [LICENSE](https://github.com/qualcomm/qai-appbuilder/blob/main/LICENSE) 文件。
 
 ### 联系方式
 
-- **项目主页**：https://github.com/quic/ai-engine-direct-helper
-- **问题反馈**：https://github.com/quic/ai-engine-direct-helper/issues
+- **项目主页**：https://github.com/qualcomm/qai-appbuilder
+- **问题反馈**：https://github.com/qualcomm/qai-appbuilder/issues
 
 ---
 

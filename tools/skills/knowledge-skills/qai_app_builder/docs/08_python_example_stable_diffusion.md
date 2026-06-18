@@ -33,7 +33,6 @@ if MODEL_NAME not in str(execution_ws):
 model_dir = execution_ws / "models"
 
 QNNConfig.Config(
-    qnn_lib_path=str(qnn_dir),  # 此参数从 v2.0.0 开始可以不进行设置，留空即可。
     runtime=Runtime.HTP,
     log_level=LogLevel.ERROR,
     profiling_level=ProfilingLevel.BASIC

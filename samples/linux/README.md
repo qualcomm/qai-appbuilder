@@ -21,7 +21,7 @@ Before you begin, ensure you have the following:
 **Clone the repository with submodules:**
 
 ```bash
-git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
+git clone https://github.com/qualcomm/qai-appbuilder.git --recursive
 cd ai-engine-direct-helper
 ```
 
@@ -282,7 +282,7 @@ For detailed documentation and tutorials:
 ## Support
 
 For issues, questions, or contributions:
-- **Issue Tracker**: [GitHub Issues](https://github.com/quic/ai-engine-direct-helper/issues)
+- **Issue Tracker**: [GitHub Issues](https://github.com/qualcomm/qai-appbuilder/issues)
 - **Documentation**: [Project README](../../README.md)
 - **Community**: Check existing issues before creating new ones
 

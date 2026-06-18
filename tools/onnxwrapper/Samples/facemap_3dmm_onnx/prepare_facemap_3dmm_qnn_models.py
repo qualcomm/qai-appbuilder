@@ -29,7 +29,7 @@ MODEL_ID = "mqyy9zd9q"
 HUB_ID_H = "ox06ibpbkxb4pr0mcyfe7wqgx5pf5r0cm3rf3dzi"
 MODEL_NAME = "facemap_3dmm"
 MODEL_HELP_URL = (
-    "https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python/"
+    "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/"
     + MODEL_NAME
     + "#"
     + MODEL_NAME

@@ -221,7 +221,7 @@ def Init():
     global yolo26
 
     # Config AppBuilder environment.
-    QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for Yolo26 objects.
     yolo26 = Yolo26("yolo26", model_path)

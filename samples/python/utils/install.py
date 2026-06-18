@@ -43,7 +43,7 @@ elif system_name == "Windows":
 
 
 QNN_SDK_URL = "https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/"
-QAI_APPBUILDER_WHEEL = "https://github.com/quic/ai-engine-direct-helper/releases/download/vversion.0/qai_appbuilder-version.0-cp312-cp312-win_amd64.whl"
+QAI_APPBUILDER_WHEEL = "https://github.com/qualcomm/qai-appbuilder/releases/download/vversion.0/qai_appbuilder-version.0-cp312-cp312-win_amd64.whl"
 QNN_DOWNLOAD_URL = "https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK"
 TEXT_RUN_SCRIPT_AGAIN = "Then run this Python script again."
 
@@ -437,7 +437,7 @@ def install_qai_runtime(version, lib_arch = DEFAULT_LIB_ARCH, dsp_arch = DEFAULT
         ret = True
 
         zip_name = f"QAIRT_Runtime_{version}.0_v{dsp_arch}.zip"
-        url = f"https://github.com/quic/ai-engine-direct-helper/releases/download/v{version}.0/" + zip_name
+        url = f"https://github.com/qualcomm/qai-appbuilder/releases/download/v{version}.0/" + zip_name
         qnn_zip_path = os.path.join(qnn_libs_dir, zip_name)
 
         if not os.path.exists(qnn_libs_dir):

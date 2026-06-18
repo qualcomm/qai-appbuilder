@@ -137,7 +137,7 @@ Follow the prompts to set passwords and certificate information.
 ### 1. Clone the Repository (if not already done)
 
 ```cmd
-git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
+git clone https://github.com/qualcomm/qai-appbuilder.git --recursive
 cd ai-engine-direct-helper
 ```
 

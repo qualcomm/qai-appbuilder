@@ -3,7 +3,7 @@
 💡 **提示**：QAI AppBuilder只能用于在 Qualcomm 平台上加载 QNN 格式的模型并进行推理，无法用于模型格式转换。
 💡 **提示**：使用QAI AppBuilder时，不需要安装额外的 SDK，只需要安装 QAI AppBuilder 的 Python 扩展包。
 
-从 [GitHub Release](https://github.com/quic/ai-engine-direct-helper/releases) 下载对应版本的 `.whl` 文件：
+从 [GitHub Release](https://github.com/qualcomm/qai-appbuilder/releases) 下载对应版本的 `.whl` 文件：
 
 ```bash
 # 对于 x64 Python

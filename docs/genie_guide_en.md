@@ -128,8 +128,8 @@ GenieAPIService provides rich features:
 ### Step 1: Download Resources
 
 1. **Download GenieAPIService**
-    - Visit [GitHub Releases](https://github.com/quic/ai-engine-direct-helper/releases/tag/v2.42.0)
-    - Download [GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.42.0/GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip)
+    - Visit [GitHub Releases](https://github.com/qualcomm/qai-appbuilder/releases/tag/v2.42.0)
+    - Download [GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip](https://github.com/qualcomm/qai-appbuilder/releases/download/v2.42.0/GenieAPIService_v2.1.4_QAIRT_v2.42.0_v73.zip)
 
 2. **Download Model Files**
     - [Download](https://www.aidevhome.com/?id=51) corresponding model files as needed
@@ -200,8 +200,8 @@ Server listening on port 8910
 ### Step 1: Install APK
 
 1. **Download APK**
-    - Visit [GitHub Releases](https://github.com/quic/ai-engine-direct-helper/releases/tag/v2.42.0)
-    - Download [GenieAPIService.apk](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.42.0/GenieAPIService.apk)
+    - Visit [GitHub Releases](https://github.com/qualcomm/qai-appbuilder/releases/tag/v2.42.0)
+    - Download [GenieAPIService.apk](https://github.com/qualcomm/qai-appbuilder/releases/download/v2.42.0/GenieAPIService.apk)
 
 2. **Install APK**
    ```
@@ -264,7 +264,7 @@ Recommended client applications:
 
 2. **GenieFletUI**
     - Source code location: `samples/fletui/GenieFletUI/android`
-    - Refer to [Build.md](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/fletui/GenieFletUI/android/BUILD.md) to compile Flet code into apk
+    - Refer to [Build.md](https://github.com/qualcomm/qai-appbuilder/blob/main/samples/fletui/GenieFletUI/android/BUILD.md) to compile Flet code into apk
 
 ---
 
@@ -272,11 +272,11 @@ Recommended client applications:
 
 ### Configuration File Structure
 
-Each model requires a `config.json` configuration file, [reference examples](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/python/models).
+Each model requires a `config.json` configuration file, [reference examples](https://github.com/qualcomm/qai-appbuilder/tree/main/samples/genie/python/models).
 
 Basic configuration file structure:
 
-The [htp_backend_ext_config.json](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/genie/python/config/htp_backend_ext_config.json) used can be downloaded directly.
+The [htp_backend_ext_config.json](https://github.com/qualcomm/qai-appbuilder/blob/main/samples/genie/python/config/htp_backend_ext_config.json) used can be downloaded directly.
 
 ```json
 {
@@ -477,7 +477,7 @@ The `prompt.json` file defines the model's prompt format:
 }
 ```
 
-Different models may use different prompt formats. Please configure the appropriate template according to the model documentation. Reference [templates](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/python/models).
+Different models may use different prompt formats. Please configure the appropriate template according to the model documentation. Reference [templates](https://github.com/qualcomm/qai-appbuilder/tree/main/samples/genie/python/models).
 
 ---
 
@@ -598,7 +598,7 @@ Optional Parameters:
 ```
 
 #### C++ Client Usage
-[Reference code](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/genie/c%2B%2B/Service/examples/GenieAPIClient/GenieAPIClient.cpp)<br>
+[Reference code](https://github.com/qualcomm/qai-appbuilder/blob/main/samples/genie/c%2B%2B/Service/examples/GenieAPIClient/GenieAPIClient.cpp)<br>
 ##### Text Chat
 
 ```cmd
@@ -618,7 +618,7 @@ GenieAPIClient.exe --prompt "Write a poem" --stream --temperature 0.9 --max_toke
 ```
 
 ### Python Client Usage
-[Reference code](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/genie/c%2B%2B/Service/examples/GenieAPIClient/GenieAPIClient.py)<br>
+[Reference code](https://github.com/qualcomm/qai-appbuilder/blob/main/samples/genie/c%2B%2B/Service/examples/GenieAPIClient/GenieAPIClient.py)<br>
 Python client uses OpenAI SDK, providing more flexible integration.
 
 #### Install Dependencies
@@ -782,14 +782,14 @@ func main() {
 
 ## Building from Source
 
-> This section is for developers who need to compile the C++ Service/Client (Windows/Android/Linux) themselves. If you only want to experience or integrate the API, it's recommended to use the [Release package](https://github.com/quic/ai-engine-direct-helper/releases) directly.
+> This section is for developers who need to compile the C++ Service/Client (Windows/Android/Linux) themselves. If you only want to experience or integrate the API, it's recommended to use the [Release package](https://github.com/qualcomm/qai-appbuilder/releases) directly.
 
 ### Source Code and Dependencies Preparation
 
 1. **Clone Repository (with submodules)**
 
 ```bash
-git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
+git clone https://github.com/qualcomm/qai-appbuilder.git --recursive
 ```
 
 2. **VLM Extra Dependency (stb)**
@@ -864,7 +864,7 @@ Set ANDROID_NDK_ROOT=%NDK_ROOT%
 
 #### Build libappbuilder First
 
-Before building for Android, you need to compile `libappbuilder` first (see the project root [BUILD](https://github.com/quic/ai-engine-direct-helper/blob/main/BUILD.md) documentation), and place the generated `libappbuilder.so` at:
+Before building for Android, you need to compile `libappbuilder` first (see the project root [BUILD](https://github.com/qualcomm/qai-appbuilder/blob/main/BUILD.md) documentation), and place the generated `libappbuilder.so` at:
 
 `ai-engine-direct-helper\samples\genie\c++\Service`
 
@@ -893,7 +893,7 @@ copy "obj\local\arm64-v8a\*.so" "libs\arm64-v8a" /Y
 
 ## Other Tools
 
-These Windows tools are released together with [Releases](https://github.com/quic/ai-engine-direct-helper/releases/tag/v2.42.0)
+These Windows tools are released together with [Releases](https://github.com/qualcomm/qai-appbuilder/releases/tag/v2.42.0)
 
 ### encode.exe
 
@@ -1574,12 +1574,12 @@ Console.WriteLine(response.Value.Content[0].Text);
 If you encounter problems using GenieAPIService, you can get help through the following ways:
 
 1. **View Documentation**
-   - [GitHub Repository](https://github.com/quic/ai-engine-direct-helper)
-   - [API Documentation](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/genie/c%2B%2B/docs/API.md)
-   - [Example Code](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/c%2B%2B/Service/examples/GenieAPIClient)
+   - [GitHub Repository](https://github.com/qualcomm/qai-appbuilder)
+   - [API Documentation](https://github.com/qualcomm/qai-appbuilder/blob/main/samples/genie/c%2B%2B/docs/API.md)
+   - [Example Code](https://github.com/qualcomm/qai-appbuilder/tree/main/samples/genie/c%2B%2B/Service/examples/GenieAPIClient)
 
 2. **Submit Issues**
-   - [GitHub Issues](https://github.com/quic/ai-engine-direct-helper/issues)
+   - [GitHub Issues](https://github.com/qualcomm/qai-appbuilder/issues)
 
 ### Reporting Bugs
 
@@ -1619,12 +1619,12 @@ Contributions to GenieAPIService are welcome:
 
 ### License
 
-GenieAPIService uses the BSD-3-Clause license. See [LICENSE](https://github.com/quic/ai-engine-direct-helper/blob/main/LICENSE) file for details.
+GenieAPIService uses the BSD-3-Clause license. See [LICENSE](https://github.com/qualcomm/qai-appbuilder/blob/main/LICENSE) file for details.
 
 ### Contact Information
 
-- **Project Homepage**: https://github.com/quic/ai-engine-direct-helper
-- **Issue Feedback**: https://github.com/quic/ai-engine-direct-helper/issues
+- **Project Homepage**: https://github.com/qualcomm/qai-appbuilder
+- **Issue Feedback**: https://github.com/qualcomm/qai-appbuilder/issues
 
 ---
 

@@ -18,7 +18,6 @@ endif()
 set(CMAKE_CXX_STANDARD 20)
 
 set(APP_SOURCES "QnnInferenceEngine.cpp"
-                "main.cpp"
                 "Log/Logger.cpp"
                 "Log/LogUtils.cpp"
                 "PAL/src/common/GetOpt.cpp"

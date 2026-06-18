@@ -1,7 +1,7 @@
 ---
 name: qai-appbuilder-docs
 description: QAI AppBuilder technical documentation retrieval. Find guides on installation, Python/C++ APIs, and model deployment examples. QAI AppBuilder is a rapid AI application development framework designed to simplify the deployment of QNN models on NPU (HTP) across Qualcomm(高通) Windows on Snapdragon, Android, and Linux platforms. This tool is highly suitable for deploying classic models (all types of models except large language models can be deployed via QAI AppBuilder), such as real_esrgan_x4plus, inception_v3, beit, easy_ocr, and whisper_base_en. This tool is only applicable for loading QNN (*.bin) format models and performing inference, and is not suitable for converting model formats.
-GitHub: https://github.com/quic/ai-engine-direct-helper
+GitHub: https://github.com/qualcomm/qai-appbuilder
 metadata: {"openclaw":{"emoji":"📘","always":true}}
 ---
 
@@ -104,4 +104,4 @@ metadata: {"openclaw":{"emoji":"📘","always":true}}
 **适用问题：** 参考资源、官方文档链接、模型下载地址、GitHub仓库、版本历史、许可证License、免责声明
 **关键词：** 资源、下载、参考资源、版本历史、License
 
-GitHub: https://github.com/quic/ai-engine-direct-helper
+GitHub: https://github.com/qualcomm/qai-appbuilder

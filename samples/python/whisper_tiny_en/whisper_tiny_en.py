@@ -41,7 +41,7 @@ ENCODER_MODEL_ID = "mqv56230n"
 DECODER_MODEL_ID = "mn0vjew3m"
 ENCODER_MODEL_NAME = "whisper_tiny_en-whisperencoder-snapdragon_x_elite"
 DECODER_MODEL_NAME = "whisper_tiny_en-whisperdecoder-snapdragon_x_elite"
-MODEL_HELP_URL = "https://github.com/quic/ai-engine-direct-helper/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
 WHISPER_VERSION = "tiny.en"
 MEL_FILTER_PATH_URL = "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/whisper_asr_shared/v1/openai_assets/mel_filters.npz"
 JFK_WAV_PATH_URL = "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/whisper_asr_shared/v1/audio/jfk.wav"
@@ -257,7 +257,7 @@ def Init():
     whisper_tiny_en =WhisperTinyEn.from_pretrained() 
 
     # Config AppBuilder environment.
-    QNNConfig.Config(qnn_dir, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    QNNConfig.Config(Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
     # Instance for Decoder 
     decoder = Decoder("whisper_decoder", decoder_model_path, input_data_type=DataType.NATIVE, output_data_type=DataType.NATIVE)

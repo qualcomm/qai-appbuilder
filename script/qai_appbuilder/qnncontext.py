@@ -37,7 +37,8 @@ g_runtime = None
 g_base_path = os.path.dirname(os.path.abspath(__file__))
 # Prepend/append the package dir to PATH using the platform separator (';' on
 # Windows, ':' on Linux) so the spawned QAIAppSvc service binary is found.
-g_base_path = os.getenv('PATH') + os.pathsep + g_base_path + os.pathsep
+_path_env = os.getenv('PATH')
+g_base_path = (_path_env if _path_env else "") + os.pathsep + g_base_path + os.pathsep
 
 
 def timer(func):
@@ -150,8 +151,7 @@ class QNNConfig():
     """
 
     @staticmethod
-    def Config(qnn_lib_path: str = "None",
-               runtime: str = Runtime.HTP,
+    def Config(runtime: str = Runtime.HTP,
                log_level: int = LogLevel.ERROR,
                profiling_level: int = ProfilingLevel.OFF,
                log_path: str = "None"
@@ -160,11 +160,6 @@ class QNNConfig():
 
         Parameters
         ----------
-        qnn_lib_path : str, optional
-            Directory containing the QNN backend libraries. In most cases
-            this can be left unset (or ``None``) and the libraries shipped
-            with ``qai_appbuilder`` will be used automatically. An explicit
-            path is only needed when pointing at a custom QNN SDK build.
         runtime : str
             One of the values from :class:`Runtime` (e.g. ``Runtime.HTP``).
         log_level : int
@@ -178,6 +173,7 @@ class QNNConfig():
         g_runtime = runtime
         # Fall back to the libs bundled with this package when no valid
         # explicit path is supplied.
+        qnn_lib_path = "None"
         if qnn_lib_path in (None, "None", "") or not os.path.exists(qnn_lib_path):
             base_path = os.path.dirname(os.path.abspath(__file__))
             qnn_lib_path = os.path.join(base_path, "libs")

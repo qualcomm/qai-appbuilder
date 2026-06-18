@@ -9,7 +9,7 @@
 
 #### 步骤 1：下载预编译库
 
-从 [GitHub Release](https://github.com/quic/ai-engine-direct-helper/releases) 下载对应平台的预编译库：
+从 [GitHub Release](https://github.com/qualcomm/qai-appbuilder/releases) 下载对应平台的预编译库：
 
 **Windows ARM64**：
 ```

@@ -24,7 +24,7 @@ class QNNModel(QNNContext):
 
 
 qnn_dir = ""
-QNNConfig.Config(str(qnn_dir), Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+QNNConfig.Config(Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
 
 def _numpy_dtype_from_str(s: str):
