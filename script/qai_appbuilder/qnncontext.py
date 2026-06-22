@@ -71,7 +71,7 @@ def reshape_output(output, outputshape_list):
     return output
 
 
-class LogLevel():
+class LogLevel:
     ERROR = 1
     WARN = 2
     INFO = 3
@@ -83,7 +83,7 @@ class LogLevel():
         appbuilder.set_log_level(log_level, log_path)
 
 
-class ProfilingLevel():
+class ProfilingLevel:
     """
     file:///C:/Qualcomm/AIStack/QNN/2.19.0.240124/docs/QNN/general/htp/htp_backend.html?highlight=rpc_control_latency#qnn-htp-profiling
     """
@@ -97,20 +97,20 @@ class ProfilingLevel():
         appbuilder.set_profiling_level(profiling_level)
 
 
-class Runtime():
-    """Available runtimes for model execution on Qualcomm harwdware."""
+class Runtime:
+    """Available runtimes for model execution on Qualcomm hardware."""
     CPU = "Cpu"
     HTP = "Htp"
     GPU = "Gpu"
 
 
-class DataType():
-    """Available runtimes for model execution on Qualcomm harwdware."""
+class DataType:
+    """Available runtimes for model execution on Qualcomm hardware."""
     FLOAT = "float"
     NATIVE = "native"
 
 
-class PerfProfile():
+class PerfProfile:
     """
     Set the HTP perf profile.
     file:///C:/Qualcomm/AIStack/QNN/2.19.0.240124/docs/QNN/general/htp/htp_backend.html?highlight=rpc_control_latency#qnn-htp-performance-infrastructure-api
@@ -124,7 +124,7 @@ class PerfProfile():
         """
         Set the perf profile globally. We can set HTP to 'burst' and keep it for running inference several times, the use RelPerfProfileGlobal to reset it.
         You should keep the 'perf_profile' parameter of function 'Inference()' as 'PerfProfile.DEFAULT' for the class QNNContext & QNNContextProc. If not, this
-        global setting will be overwrited.
+        global setting will be overwritten.
         """
         global g_runtime
         if g_runtime == Runtime.GPU:
@@ -142,7 +142,7 @@ class PerfProfile():
         appbuilder.rel_perf_profile()
 
 
-class QNNConfig():
+class QNNConfig:
     """Config QNN SDK libraries path, runtime(CPU/HTP/GPU), log level, and profiling level.
 
     QNN SDK libraries are bundled with the ``qai_appbuilder`` package and
@@ -183,7 +183,7 @@ class QNNConfig():
             if ADSP_LIBRARY_PATH is None or len(ADSP_LIBRARY_PATH) < 2:
                 os.environ["ADSP_LIBRARY_PATH"] = qnn_lib_path
 
-        if (qnn_lib_path != "None"):
+        if qnn_lib_path != "None":
             if runtime == Runtime.GPU:
                 g_backend_lib_path = qnn_lib_path + PATH_SLASH + QNN_LIB_PRE + "QnnGpu" + QNN_LIB_EXT
             else:
@@ -216,9 +216,9 @@ class _QNNContextBase:
             raise ValueError(f"Model path does not exist: {self.model_path}")
 
     def _resolve_lib_paths(self, backend_lib_path: str, system_lib_path: str):
-        if (backend_lib_path == "None"):
+        if backend_lib_path == "None":
             backend_lib_path = g_backend_lib_path
-        if (system_lib_path == "None"):
+        if system_lib_path == "None":
             system_lib_path = g_system_lib_path
         return backend_lib_path, system_lib_path
 
@@ -229,25 +229,25 @@ class _QNNContextBase:
         return method()
 
     # issue#24
-    def getInputShapes(self, ):
+    def getInputShapes(self):
         return self._call_ctx_getter("getInputShapes")
 
-    def getOutputShapes(self, ):
+    def getOutputShapes(self):
         return self._call_ctx_getter("getOutputShapes")
 
-    def getInputDataType(self, ):
+    def getInputDataType(self):
         return self._call_ctx_getter("getInputDataType")
 
-    def getOutputDataType(self, ):
+    def getOutputDataType(self):
         return self._call_ctx_getter("getOutputDataType")
 
-    def getGraphName(self, ):
+    def getGraphName(self):
         return self._call_ctx_getter("getGraphName")
 
-    def getInputName(self, ):
+    def getInputName(self):
         return self._call_ctx_getter("getInputName")
 
-    def getOutputName(self, ):
+    def getOutputName(self):
         return self._call_ctx_getter("getOutputName")
     
     def getProfilingEvent(self, eventType):
@@ -262,8 +262,7 @@ class _QNNContextBase:
 
     def __del__(self):
         if hasattr(self, "m_context") and self.m_context is not None:
-            del (self.m_context)
-        m_context = None
+            del self.m_context
 
 
 class QNNContext(_QNNContextBase):
@@ -424,8 +423,7 @@ class QNNShareMemory:
     #@timer
     def __del__(self):
         if hasattr(self, "m_memory") and self.m_memory is not None:
-            del (self.m_memory)
-        m_memory = None
+            del self.m_memory
 
 
 class LoraAdapter:  # this will just hold data
