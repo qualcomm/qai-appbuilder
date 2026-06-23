@@ -1,3 +1,18 @@
+## Contents
+
+- [Build QAI AppBuilder for WoS device](#build-qai-appbuilder-for-wos-device)
+  - [Build QAI AppBuilder from source with Visual Studio 2022 on WoS device](#build-qai-appbuilder-from-source-with-visual-studio-2022-on-wos-device)
+- [Build QAI AppBuilder for Linux](#build-qai-appbuilder-for-linux)
+  - [Download QNN SDK](#download-qnn-sdk)
+  - [Set Environment Variables](#set-environment-variables)
+  - [Install Python Dependencies](#install-python-dependencies)
+  - [Build QAI AppBuilder Python and C/C++ Libraries](#build-qai-appbuilder-python-and-cc-libraries)
+  - [Install QAI AppBuilder Wheel Package](#install-qai-appbuilder-wheel-package)
+- [Build QAI AppBuilder for android](#build-qai-appbuilder-for-android)
+  - [Download QAI AppBuilder source codes](#download-qai-appbuilder-source-codes)
+  - [Set PATH and run make.exe to build QAI AppBuilder](#set-path-and-run-makeexe-to-build-qai-appbuilder)
+  - [Debug issues about AppBuilder](#debug-issues-about-appbuilder)
+
 ## Build QAI AppBuilder for WoS device
 ### Build QAI AppBuilder from source with Visual Studio 2022 on WoS device:<br>
 - Install Qualcomm® AI Runtime SDK:
