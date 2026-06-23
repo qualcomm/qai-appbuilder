@@ -34,6 +34,21 @@ if sys.platform.startswith('linux'):
     except OSError:
         pass
 
+    # Cross-process inference (QNNContextProc) spawns a separate "QAIAppSvc"
+    # executable. That child process must locate libappbuilder.so (and its QNN
+    # dependencies) via the dynamic linker. The package only adds its dir to
+    # PATH, not LD_LIBRARY_PATH, so the child fails with
+    # "libappbuilder.so: cannot open shared object file". Prepend the package
+    # dir (+ an optional QNN lib dir from QAI_QNN_LIB_DIR) to LD_LIBRARY_PATH
+    # here; the spawned process inherits this environment.
+    _extra_lib_dirs = [g_base_path]
+    _qnn_dir = os.environ.get("QAI_QNN_LIB_DIR")
+    if _qnn_dir:
+        _extra_lib_dirs.append(_qnn_dir)
+    os.environ["LD_LIBRARY_PATH"] = os.pathsep.join(
+        _extra_lib_dirs + ([os.environ["LD_LIBRARY_PATH"]] if os.environ.get("LD_LIBRARY_PATH") else [])
+    )
+
 from .qnncontext import *
 from .geniecontext import *
 from .onnxwrapper import *
