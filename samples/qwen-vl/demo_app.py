@@ -230,6 +230,7 @@ def load_qwwen3_vlm(qwen3_vl_model_dir:str):
     with open(llm_model_config_path, "r", encoding="utf-8") as f:
         config_data = json.load(f)
     #print("Loaded config.json:", config_data)
+    config_data["dialog"]["embedding"]["lut-path"] = look_up_table_path
     config_data["dialog"]["tokenizer"]["path"] = os.path.join(qwen3_vl_model_dir, "tokenizer.json")
     config_data["dialog"]["engine"]["backend"]["extensions"] = os.path.join(qwen3_vl_model_dir, "htp_backend_ext_config.json")
     #print(f"Set tokenizer path to {config_data["dialog"]["engine"]["model"]["binary"]["ctx-bins"]}")

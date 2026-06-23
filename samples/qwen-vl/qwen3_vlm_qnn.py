@@ -197,12 +197,12 @@ class Qwen3VLQnn():
             self.processor = AutoProcessor.from_pretrained(
                 "Qwen/Qwen3-VL-4B-Instruct", 
                 trust_remote_code=True,
-                local_files_only=True
+                local_files_only=False
             )
             self.llm_config = AutoConfig.from_pretrained(
                 "Qwen/Qwen3-VL-4B-Instruct", 
                 trust_remote_code=True,
-                local_files_only=True
+                local_files_only=False
             )
             print("Loaded Qwen3-VL processor from local cache")
         except Exception as e:
