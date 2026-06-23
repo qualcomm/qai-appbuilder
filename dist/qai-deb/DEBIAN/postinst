@@ -1,0 +1,30 @@
+#!/bin/bash
+set -e
+
+echo "[INFO] Installing QAI AppBuilder..."
+
+WHEEL="/opt/qai/qai_appbuilder-2.46.0-cp312-cp312-linux_aarch64.whl"
+
+# 安装 Python 依赖
+echo "[INFO] Installing Python dependencies..."
+python3 -m pip install \
+  --no-cache-dir \
+  --break-system-packages \
+  numpy
+
+# 安装主包
+echo "[INFO] Installing wheel..."
+python3 -m pip install \
+  --no-cache-dir \
+  --break-system-packages \
+  "$WHEEL"
+
+# 验证
+echo "[INFO] Verifying installation..."
+python3 - <<EOF
+import qai_appbuilder
+import numpy
+print("✅ QAI AppBuilder install OK")
+EOF
+
+echo "[SUCCESS] Installation completed."

@@ -1,0 +1,9 @@
+Package: qai-appbuilder
+Version: 2.46.0
+Section: devel
+Priority: optional
+Architecture: arm64
+Maintainer: Qualcomm
+Depends: python3, python3-pip, qcom-fastrpc-dev
+Description: QAI AppBuilder Installer
+ Installs QAI AppBuilder Python package and dependencies.
