@@ -10,6 +10,7 @@ import time
 import zipfile
 import shutil
 import threading
+import subprocess
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -34,10 +35,61 @@ except ImportError:
 
 MODEL_NAME = "stable_diffusion_v3_5"
 
-# Download URL (zip package), automatically extracted to the same directory as the script
-MODEL_DOWNLOAD_URL = "https://www.aidevhome.com/data/adh2/models/suggested/sd3.5_qnn_for_windows-8380.zip"
-MODEL_ZIP_NAME     = "sd3.5_qnn_for_windows-8380.zip"
-MODEL_ROOT_NAME    = "sd3.5_qnn_for_windows-8380"
+####################################################################
+# Device detection
+####################################################################
+
+def get_cpu_name() -> str:
+    """Get CPU name from the system."""
+    try:
+        result = subprocess.run(
+            ["wmic", "cpu", "get", "Name", "/value"],
+            capture_output=True, text=True, timeout=10
+        )
+        for line in result.stdout.splitlines():
+            if line.startswith("Name="):
+                return line.split("=", 1)[1].strip()
+    except Exception:
+        pass
+    # Fallback: try platform module
+    try:
+        import platform
+        return platform.processor()
+    except Exception:
+        pass
+    return ""
+
+
+def detect_device_model() -> str:
+    """Detect WoS device model based on CPU name."""
+    cpu_name = get_cpu_name().lower()
+    print(f"[INFO] Detected CPU: {cpu_name}")
+
+    # Check for family 8 model 2 (Snapdragon X2 Elite)
+    if "family 8 model 2" in cpu_name or "x2" in cpu_name or "x2e" in cpu_name:
+        return "snapdragon_x2_elite"
+    # Check for family 8 model 1 (Snapdragon X Elite)
+    elif "family 8 model 1" in cpu_name or ("x elite" in cpu_name and "x2" not in cpu_name):
+        return "snapdragon_x_elite"
+    else:
+        print("[WARN] Unknown CPU model, defaulting to snapdragon_x_elite")
+        return "snapdragon_x_elite"
+
+
+# Detect device and set download URL accordingly
+_DEVICE_MODEL = detect_device_model()
+
+if _DEVICE_MODEL == "snapdragon_x2_elite":
+    MODEL_DOWNLOAD_URL = "https://www.aidevhome.com/data/adh2/models/suggested/sd3.5_qnn_for_windows-8480.zip"
+    MODEL_ZIP_NAME     = "sd3.5_qnn_for_windows-8480.zip"
+    MODEL_ROOT_NAME    = "sd3.5_qnn_for_windows-8480"
+else:
+    # snapdragon_x_elite (default)
+    MODEL_DOWNLOAD_URL = "https://www.aidevhome.com/data/adh2/models/suggested/sd3.5_qnn_for_windows-8380.zip"
+    MODEL_ZIP_NAME     = "sd3.5_qnn_for_windows-8380.zip"
+    MODEL_ROOT_NAME    = "sd3.5_qnn_for_windows-8380"
+
+print(f"[INFO] Device model: {_DEVICE_MODEL}, using model: {MODEL_ZIP_NAME}")
 
 ####################################################################
 # Path configuration
@@ -479,15 +531,26 @@ def model_download():
             print("Corrupted archive removed. Please re-run to download again.")
         sys.exit(1)
 
-    # Rename the extracted directory to 'models'
+    # Copy extracted contents into the 'models' subdirectory, then remove the extracted dir
     extracted_dir = os.path.join(_SCRIPT_DIR, MODEL_ROOT_NAME)
     if os.path.exists(extracted_dir) and extracted_dir != MODEL_ROOT:
-        if os.path.exists(MODEL_ROOT):
-            shutil.rmtree(MODEL_ROOT)
-        os.rename(extracted_dir, MODEL_ROOT)
-        print(f"Renamed '{MODEL_ROOT_NAME}' to 'models'")
+        print(f"Copying '{MODEL_ROOT_NAME}' to 'models'...")
+        os.makedirs(MODEL_ROOT, exist_ok=True)
+        for item in os.listdir(extracted_dir):
+            src = os.path.join(extracted_dir, item)
+            dst = os.path.join(MODEL_ROOT, item)
+            if os.path.isdir(src):
+                if os.path.exists(dst):
+                    shutil.rmtree(dst)
+                shutil.copytree(src, dst)
+            else:
+                shutil.copy2(src, dst)
+        shutil.rmtree(extracted_dir)
+        print(f"Copied model files to: {MODEL_ROOT}")
+    elif extracted_dir == MODEL_ROOT:
+        print(f"Extracted directly to: {MODEL_ROOT}")
 
-        # Remove zip archive
+    # Remove zip archive
     if os.path.exists(zip_path):
         os.remove(zip_path)
         print(f"Removed archive: {MODEL_ZIP_NAME}")
