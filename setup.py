@@ -48,7 +48,7 @@ from setuptools.command.bdist_wheel import bdist_wheel
 # ---------------------------
 # Project constants
 # ---------------------------
-VERSION = "2.47.0"
+VERSION = "2.47.1"
 CONFIG = "Release"  # Release, RelWithDebInfo
 PACKAGE_NAME = "qai_appbuilder"
 
@@ -195,13 +195,19 @@ def _default_generator_and_args(arch: str):
     if not _is_windows():
         return ([], False)
 
+    # Allow overriding the VS generator (e.g. "Visual Studio 18 2026").
+    # If unset, omit -G entirely so CMake auto-detects the newest installed
+    # Visual Studio (works for VS 2022, 2026, ... without hardcoding a version).
+    vs_gen = os.environ.get("QAI_VS_GENERATOR")
+    gen_flag = ["-G", vs_gen] if vs_gen else []
+
     if arch == "x86_64":
-        # x86_64 Windows PC: use Visual Studio with x64 platform
-        gen = ["-G", "Visual Studio 17 2022", "-A", "x64"]
+        # x86_64 Windows PC: x64 platform
+        gen = gen_flag + ["-A", "x64"]
         return (gen, True)
 
-    # WOS ARM64 / ARM64EC: Visual Studio generator (multi-config)
-    gen = ["-G", "Visual Studio 17 2022", "-A", arch]
+    # WOS ARM64 / ARM64EC: multi-config VS generator
+    gen = gen_flag + ["-A", arch]
     return (gen, True)
 
 
