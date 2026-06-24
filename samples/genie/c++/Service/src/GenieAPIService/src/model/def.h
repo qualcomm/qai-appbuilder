@@ -91,7 +91,7 @@ struct ModelType : public BaseEnum
 namespace std
 {
     template<>
-    struct std::hash<ModelType>
+    struct hash<ModelType>
     {
         size_t operator()(ModelType const &m) const noexcept { return std::hash<int>{}(int(m)); }
     };

@@ -856,6 +856,13 @@ setup(
     author_email="quic_zhanweiw@quicinc.com",
     license="BSD-3-Clause",
     python_requires=">=3.10",
+    install_requires=[
+        # qai_appbuilder/__init__.py unconditionally imports onnxwrapper,
+        # whose top-level imports require numpy + pyyaml. Without these,
+        # `pip install qai-appbuilder` in a clean venv fails to import.
+        "numpy",
+        "pyyaml",
+    ],
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Programming Language :: Python :: 3.12",

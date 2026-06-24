@@ -1,0 +1,924 @@
+name: CI
+
+# Stage A scope (current):
+#   - lint (Ubuntu, GitHub-hosted, informational only)
+#   - build the windows-x64 wheel (ARM64EC binaries, for x64 Python on X Elite)
+#       on windows-latest. Cannot smoke-test it here because windows-latest is
+#       x86-64 hardware and ARM64EC binaries crash on import (access violation).
+#       Smoke test for this wheel happens on real X Elite hardware in Stage B.
+#   - build the windows-arm64 wheel (native aarch64) on windows-11-arm and
+#       smoke-test it natively (the runner IS ARM64, so import works).
+#   - build the linux-aarch64 wheel on ubuntu-22.04-arm and smoke-test it.
+#   - build android arm64-v8a libappbuilder.so via NDK r26d (no testing
+#     because exercising the .so needs an Android device).
+#   - build samples/genie/c++/Service (GenieAPIService) on windows-2022
+#     cross-compiled to ARM64, per samples/genie/c++/docs/BUILD.md. Pulls
+#     ~11 genie/c++/External/* submodules (llama.cpp, MNN, curl, ...).
+#     USE_MNN/USE_GGUF currently OFF on hosted runners — re-enable once
+#     the toolchain story is sorted out (see ci-stage-a history).
+#   - build samples/genie/c++/Service for Linux ARM64 (ubuntu-22.04-arm)
+#     via the project-provided build_linux.sh.
+#   - build samples/genie/c++/Service for Android arm64-v8a (windows-2022
+#     + NDK r26d) via the project-provided build_android.bat. APK signing
+#     step is best-effort (no signing secrets configured).
+#
+# Release: pushing a `v*` tag (e.g. `git tag v2.47.0 && git push --tags`)
+# additionally triggers the `release` job, which gathers every build
+# artifact and publishes a GitHub Release at that tag.
+#
+# Matrix:
+#   - Windows x64 + Windows ARM64: 3 Python (3.11/3.12/3.13) x 2 QNN SDK
+#       (2.46/2.47) per OS = 12 jobs total across both Windows OSes
+#   - Linux aarch64: 1 job (py3.12 x QNN 2.47), expanded once stable
+#
+# fail-fast disabled so a single broken combination does not mask the rest.
+#
+# Smoke tests (windows-arm64 + linux-aarch64):
+#   tests/test_package_smoke.py       — pure-Python imports + constants
+#   tests/test_cpu_runtime_smoke.py   — pybind C++ extension + QNN CPU
+#                                       backend DLL/so discovery (no NPU)
+#
+# Known limitation: the Community SDK ships an upstream Genie. The Genie
+# library bundled into the wheel will be the upstream one rather than the
+# customized build referenced in BUILD.md. Smoke tests do not exercise Genie.
+# NPU end-to-end + Genie LLM tests live in Stage B (self-hosted X Elite
+# runner) and are not part of this workflow.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# Opt every step into the Node 24 runtime for JavaScript actions.
+# Node 20 is being phased out on GitHub-hosted runners (forced 2026-06-16,
+# removed 2026-09-16) and the warning shows up across actions/checkout,
+# actions/cache, actions/upload-artifact, etc. Setting this once at the
+# workflow level avoids version-bump churn on each action reference.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    # Informational only while pre-existing lint debt is paid down in a
+    # separate cleanup. Findings still appear in the job log; they do not
+    # gate the build/test path. Flip continue-on-error to false once the
+    # baseline is clean.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install ruff
+        run: pip install ruff==0.6.9
+
+      - name: Run ruff
+        run: ruff check script/ tests/ samples/python/utils/
+
+  build-windows-x64:
+    name: x64 wheel · py${{ matrix.python }} · qnn${{ matrix.qnn.version }}
+    # Pin to windows-2022 explicitly. windows-latest is migrating to
+    # windows-2025; during the rollover, CMake's VS-instance discovery
+    # ("could not find any instance of Visual Studio") gets flaky.
+    runs-on: windows-2022
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.12', '3.13']
+        qnn:
+          # Single SDK row for now. To add another version, copy this block.
+          # genie-url points at the customized Genie zip published by the
+          # qualcomm/qai-appbuilder release; setup-qnn-sdk extracts it and
+          # overlays Genie.dll / Genie.lib (+ headers + libGenie.so for Linux)
+          # onto the Community SDK. Leave empty to skip the overlay.
+          - version: '2.47.0.260601'
+            url: ''
+            genie-url: 'https://github.com/qualcomm/qai-appbuilder/releases/download/v2.47.0/QAIRT_v2.47.0.260601.zip'
+          # 2.46 enabled with SDK-bundled Genie only — no matching
+          # customized Genie zip is published on qualcomm/qai-appbuilder
+          # yet. Add the genie-url when that ships.
+          - version: '2.46.0.260424'
+            url: 'https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.46.0.260424/v2.46.0.260424.zip'
+            genie-url: ''
+    steps:
+      - name: Checkout (with pybind11 submodule only)
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Init pybind11 submodule
+        shell: pwsh
+        run: |
+          git submodule update --init --depth 1 pybind/pybind11
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          architecture: 'x64'
+
+      # Explicitly stage MSVC for the amd64 host -> arm64 target cross
+      # toolchain. CMake's VS-instance discovery has been flaky on the
+      # windows-latest -> windows-2025 transition; running vcvarsall up
+      # front and exporting its env via GITHUB_ENV makes the build
+      # robust to that. ARM64EC binaries link against the ARM64 toolset
+      # so amd64_arm64 is the correct vcvars arch.
+      - name: Setup MSVC (amd64_arm64)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64_arm64
+
+      - name: Setup QNN SDK
+        uses: ./.github/actions/setup-qnn-sdk
+        with:
+          version: ${{ matrix.qnn.version }}
+          url: ${{ matrix.qnn.url }}
+          genie-runtime-url: ${{ matrix.qnn.genie-url }}
+          genie-runtime-version: ${{ matrix.qnn.version }}_v73
+
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install wheel==0.45.1 setuptools==80.9.0 pybind11==2.13.6 build==1.4.0 "cmake>=3.21"
+
+      - name: Build wheel
+        shell: pwsh
+        env:
+          QAI_TOOLCHAINS: arm64x-windows-msvc
+          QAI_HEXAGONARCH: '81'
+        run: |
+          python -m build -w --no-isolation
+
+      - name: List wheel contents
+        id: list-x64
+        shell: pwsh
+        run: |
+          $whl = Get-ChildItem dist/qai_appbuilder-*.whl | Select-Object -First 1
+          if (-not $whl) { Write-Error "No wheel produced in dist/"; exit 1 }
+          Write-Host "Built: $($whl.Name)"
+          python -c "import sys, zipfile; [print(n) for n in zipfile.ZipFile(sys.argv[1]).namelist()]" $whl.FullName
+          # Expose the wheel basename (no .whl suffix) so upload-artifact can
+          # mirror the canonical wheel filename: e.g.
+          #   qai_appbuilder-2.47.0-cp312-cp312-win_amd64
+          $stem = [System.IO.Path]::GetFileNameWithoutExtension($whl.Name)
+          "wheel-stem=$stem" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.list-x64.outputs.wheel-stem }}-qnn${{ matrix.qnn.version }}
+          path: |
+            dist/*.whl
+            dist/*.zip
+          if-no-files-found: error
+
+      - name: Upload CMake logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmake-logs-win_amd64-py${{ matrix.python }}-qnn${{ matrix.qnn.version }}
+          path: |
+            build/**/CMakeFiles/CMakeOutput.log
+            build/**/CMakeFiles/CMakeError.log
+            build/**/CMakeCache.txt
+          if-no-files-found: ignore
+
+  build-windows-arm64:
+    name: arm64 wheel + test · py${{ matrix.python }} · qnn${{ matrix.qnn.version }}
+    runs-on: windows-11-arm
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.12', '3.13']
+        qnn:
+          # See windows-x64 matrix above for the genie-url convention.
+          - version: '2.47.0.260601'
+            url: ''
+            genie-url: 'https://github.com/qualcomm/qai-appbuilder/releases/download/v2.47.0/QAIRT_v2.47.0.260601.zip'
+          - version: '2.46.0.260424'
+            url: 'https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.46.0.260424/v2.46.0.260424.zip'
+            genie-url: ''
+    steps:
+      - name: Checkout (with pybind11 submodule only)
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Init pybind11 submodule
+        shell: pwsh
+        run: |
+          git submodule update --init --depth 1 pybind/pybind11
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          architecture: 'arm64'
+
+      - name: Setup QNN SDK
+        uses: ./.github/actions/setup-qnn-sdk
+        with:
+          version: ${{ matrix.qnn.version }}
+          url: ${{ matrix.qnn.url }}
+          genie-runtime-url: ${{ matrix.qnn.genie-url }}
+          genie-runtime-version: ${{ matrix.qnn.version }}_v73
+
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install wheel==0.45.1 setuptools==80.9.0 pybind11==2.13.6 build==1.4.0 "cmake>=3.21" pytest
+
+      - name: Build wheel
+        shell: pwsh
+        env:
+          QAI_TOOLCHAINS: aarch64-windows-msvc
+          QAI_HEXAGONARCH: '81'
+        run: |
+          python -m build -w --no-isolation
+
+      - name: List wheel contents
+        id: list-arm64
+        shell: pwsh
+        run: |
+          $whl = Get-ChildItem dist/qai_appbuilder-*.whl | Select-Object -First 1
+          if (-not $whl) { Write-Error "No wheel produced in dist/"; exit 1 }
+          Write-Host "Built: $($whl.Name)"
+          python -c "import sys, zipfile; [print(n) for n in zipfile.ZipFile(sys.argv[1]).namelist()]" $whl.FullName
+          $stem = [System.IO.Path]::GetFileNameWithoutExtension($whl.Name)
+          "wheel-stem=$stem" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.list-arm64.outputs.wheel-stem }}-qnn${{ matrix.qnn.version }}
+          path: |
+            dist/*.whl
+            dist/*.zip
+          if-no-files-found: error
+
+      - name: Install built wheel
+        shell: pwsh
+        run: |
+          $whl = (Get-ChildItem dist/qai_appbuilder-*.whl | Select-Object -First 1).FullName
+          pip install --force-reinstall $whl
+
+      - name: Install runtime deps for smoke test
+        shell: pwsh
+        # qai_appbuilder/__init__.py imports onnxwrapper, whose top-level
+        # imports include numpy and yaml. These are real runtime deps but
+        # are not declared in setup.py's install_requires (yet) — install
+        # them explicitly here so the wheel can be imported.
+        run: |
+          pip install numpy pyyaml
+
+      - name: Smoke test
+        shell: pwsh
+        # Two test files run here:
+        #  - test_package_smoke.py  : pure-Python imports + constants
+        #  - test_cpu_runtime_smoke.py : exercises the pybind C++ extension
+        #    and QNN CPU backend DLL discovery (no NPU, no .bin model).
+        # Together they catch ABI mismatches, missing bundled QNN DLLs,
+        # and pybind layer regressions before Stage B real-NPU testing.
+        run: |
+          pytest tests/test_package_smoke.py tests/test_cpu_runtime_smoke.py -v
+
+      - name: Upload CMake logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmake-logs-win_arm64-py${{ matrix.python }}-qnn${{ matrix.qnn.version }}
+          path: |
+            build/**/CMakeFiles/CMakeOutput.log
+            build/**/CMakeFiles/CMakeError.log
+            build/**/CMakeCache.txt
+          if-no-files-found: ignore
+
+  # -----------------------------------------------------------------
+  # Linux aarch64 — single combination (py3.12 x QNN 2.47).
+  # Uses ubuntu-22.04-arm hosted runner (native ARM64).
+  # Toolchain `aarch64-oe-linux-gcc11.2` and Hexagon arch 68 follow
+  # BUILD.md's Linux example. If the Community SDK zip turns out to
+  # not include the OE Linux libs, this job will surface that as a
+  # missing-file error in the build step.
+  # -----------------------------------------------------------------
+  build-linux-arm64:
+    name: linux arm64 wheel + test · py3.12 · qnn2.47.0.260601
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 45
+    steps:
+      - name: Checkout (with pybind11 submodule only)
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Init pybind11 submodule
+        run: git submodule update --init --depth 1 pybind/pybind11
+
+      - name: Install build toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build unzip
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Setup QNN SDK
+        uses: ./.github/actions/setup-qnn-sdk
+        with:
+          version: '2.47.0.260601'
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install wheel==0.45.1 setuptools==80.9.0 pybind11==2.13.6 build==1.4.0 "cmake>=3.21" pytest
+
+      - name: Build wheel
+        env:
+          QAI_TOOLCHAINS: aarch64-oe-linux-gcc11.2
+          QAI_HEXAGONARCH: '68'
+        run: |
+          python -m build -w --no-isolation
+
+      - name: List wheel contents
+        id: list-linux
+        run: |
+          whl=$(ls dist/qai_appbuilder-*.whl | head -n1)
+          if [ -z "$whl" ]; then echo "No wheel produced in dist/"; exit 1; fi
+          echo "Built: $(basename "$whl")"
+          python -c "import sys, zipfile; print('\n'.join(zipfile.ZipFile(sys.argv[1]).namelist()))" "$whl"
+          stem=$(basename "$whl" .whl)
+          echo "wheel-stem=${stem}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.list-linux.outputs.wheel-stem }}-qnn2.47.0.260601
+          path: |
+            dist/*.whl
+            dist/*.zip
+          if-no-files-found: error
+
+      - name: Install built wheel
+        run: |
+          whl=$(ls dist/qai_appbuilder-*.whl | head -n1)
+          pip install --force-reinstall "$whl"
+
+      - name: Install runtime deps for smoke test
+        # See windows-arm64 job for rationale.
+        run: pip install numpy pyyaml
+
+      - name: Smoke test
+        run: pytest tests/test_package_smoke.py tests/test_cpu_runtime_smoke.py -v
+
+      - name: Upload CMake logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmake-logs-linux_aarch64-py3.12-qnn2.47.0.260601
+          path: |
+            build/**/CMakeFiles/CMakeOutput.log
+            build/**/CMakeFiles/CMakeError.log
+            build/**/CMakeCache.txt
+          if-no-files-found: ignore
+
+  # -----------------------------------------------------------------
+  # Android — produces libappbuilder.so for arm64-v8a via NDK r26d.
+  # Output is a native shared library (NOT a wheel) used by Android
+  # apps that link against AppBuilder.
+  #
+  # Build is driven by make/Android.mk + make/Application.mk through
+  # ndk-build, mirroring BUILD.md's Android section. Tests are not
+  # run — exercising the .so requires an Android device.
+  # -----------------------------------------------------------------
+  build-android-arm64v8a:
+    name: android arm64-v8a libappbuilder.so · qnn2.47.0.260601
+    # Temporarily disabled. Upstream make/Android.mk now contains a
+    # QAIAppSvc executable target that pulls in src/SVC/main.cpp, but
+    # that file is Windows-only (uses #pragma once at top of a .cpp,
+    # plus <tchar.h> and other Windows headers). NDK build fails:
+    #
+    #   main.cpp:9:9: error: #pragma once in main file
+    #   Utils.hpp:15:10: fatal error: 'tchar.h' file not found
+    #
+    # The pre-existing libappbuilder shared-library target itself still
+    # compiles fine; only the new QAIAppSvc target is broken. Waiting
+    # for upstream to either gate the QAIAppSvc target on Windows or
+    # make src/SVC/main.cpp cross-platform. To re-enable, change the
+    # `if:` below back to a normal trigger guard.
+    if: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends unzip curl
+
+      - name: Setup Android NDK r26d
+        id: ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26d
+          add-to-path: false
+
+      - name: Setup QNN SDK
+        uses: ./.github/actions/setup-qnn-sdk
+        with:
+          version: '2.47.0.260601'
+
+      - name: Build libappbuilder.so via ndk-build
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.ndk.outputs.ndk-path }}
+        run: |
+          # Mirrors the command in the project Makefile's `android` target,
+          # but invokes the Linux ndk-build binary directly so we don't have
+          # to depend on Windows-only ndk-build.cmd.
+          #
+          # make/Android.mk concatenates QNN_SDK_ROOT with "include/QNN"
+          # WITHOUT a path separator (line 14), so the BUILD.md convention
+          # requires QNN_SDK_ROOT to end with a trailing slash. The
+          # setup-qnn-sdk action exports it without one (Path() based code
+          # in setup.py doesn't care), so add it back here for Android.
+          export QNN_SDK_ROOT="${QNN_SDK_ROOT%/}/"
+          echo "QNN_SDK_ROOT=$QNN_SDK_ROOT"
+          test -f "${QNN_SDK_ROOT}include/QNN/QnnInterface.h" \
+            || { echo "QnnInterface.h not found under ${QNN_SDK_ROOT}include/QNN"; ls "${QNN_SDK_ROOT}include" || true; exit 1; }
+
+          "$ANDROID_NDK_ROOT/ndk-build" \
+            APP_ALLOW_MISSING_DEPS=true \
+            APP_ABI=arm64-v8a \
+            NDK_PROJECT_PATH=./ \
+            NDK_APPLICATION_MK=make/Application.mk \
+            APP_BUILD_SCRIPT=make/Android.mk
+
+      - name: Verify output
+        run: |
+          out="libs/arm64-v8a/libappbuilder.so"
+          if [ ! -f "$out" ]; then
+            echo "Expected $out was not produced. Tree under libs/:"
+            find libs -maxdepth 3 -type f 2>/dev/null || true
+            exit 1
+          fi
+          ls -lh "$out"
+          file "$out"
+
+      - name: Upload libappbuilder.so artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libappbuilder-android-arm64v8a-qnn2.47.0.260601
+          path: libs/arm64-v8a/libappbuilder.so
+          if-no-files-found: error
+
+  # -----------------------------------------------------------------
+  # samples/genie/c++/Service — GenieAPIService Windows ARM64 build.
+  #
+  # Follows samples/genie/c++/docs/BUILD.md. This is a separate cmake
+  # project from the wheel above: cross-compiled from windows-2022 to
+  # ARM64, with all 11 genie/c++ submodules (llama.cpp, MNN, curl,
+  # cli11, libsamplerate, dr_libs, LibrosaCpp, cpp-httplib, json, stb,
+  # CLI11) initialized. Output: Service/GenieService_v<version>/ with
+  # GenieAPIService.exe and friends.
+  #
+  # Build-only — there's no smoke test that can run on a hosted ARM
+  # runner (Service needs an LLM model + NPU on a real X Elite to
+  # actually do anything). Real validation lives in Stage B.
+  # -----------------------------------------------------------------
+  build-genie-service-windows-arm64:
+    name: genie c++ Service · windows arm64 · qnn${{ matrix.qnn.version }}
+    runs-on: windows-2022
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # Build the Windows GenieAPIService against every Community SDK
+        # release we currently support. All `url` values point at the
+        # apigwx-aws.qualcomm.com mirror — keeping them explicit (instead
+        # of relying on the default softwarecenter URL) makes it trivial
+        # to add / drop versions: one line each.
+        #
+        # `genie-url` is the optional customized-Genie overlay zip
+        # published in qualcomm/qai-appbuilder releases. Today only v2.47
+        # has a published overlay; the other rows ship with the SDK-
+        # bundled (upstream) Genie. Fill in the URL for any row once an
+        # overlay zip is published for that version.
+        qnn:
+          - version: '2.40.1.251119'
+            url: 'https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.40.1.251119/v2.40.1.251119.zip'
+            genie-url: ''
+          - version: '2.41.0.251128'
+            url: 'https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.41.0.251128/v2.41.0.251128.zip'
+            genie-url: ''
+          - version: '2.42.0.251225'
+            url: 'https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.42.0.251225/v2.42.0.251225.zip'
+            genie-url: ''
+          - version: '2.43.0.260128'
+            url: 'https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.43.0.260128/v2.43.0.260128.zip'
+            genie-url: ''
+          - version: '2.44.0.260225'
+            url: 'https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.44.0.260225/v2.44.0.260225.zip'
+            genie-url: ''
+          - version: '2.45.0.260326'
+            url: 'https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.45.0.260326/v2.45.0.260326.zip'
+            genie-url: ''
+          - version: '2.46.0.260424'
+            url: 'https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.46.0.260424/v2.46.0.260424.zip'
+            genie-url: ''
+          - version: '2.47.0.260601'
+            url: 'https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.47.0.260601/v2.47.0.260601.zip'
+            genie-url: 'https://github.com/qualcomm/qai-appbuilder/releases/download/v2.47.0/QAIRT_v2.47.0.260601.zip'
+    steps:
+      - name: Checkout (with genie submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Init genie c++ + pybind11 submodules
+        shell: pwsh
+        # Only the genie/c++/External/* submodules + pybind11 are needed.
+        # pybind11 is here defensively in case any included CMake bit
+        # references it.
+        run: |
+          git submodule update --init --depth 1 pybind/pybind11
+          git submodule update --init --depth 1 --recursive samples/genie/c++/External
+
+      - name: Setup MSVC (amd64_arm64)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64_arm64
+
+      - name: Setup QNN SDK
+        uses: ./.github/actions/setup-qnn-sdk
+        with:
+          version: ${{ matrix.qnn.version }}
+          url: ${{ matrix.qnn.url }}
+          genie-runtime-url: ${{ matrix.qnn.genie-url }}
+          genie-runtime-version: ${{ matrix.qnn.version }}_v73
+
+      - name: Append trailing slash to QNN_SDK_ROOT
+        shell: pwsh
+        # Service/src/GenieAPIService/dependents.cmake builds QNN paths by
+        # string-concatenating $ENV{QNN_SDK_ROOT} + "lib\\<abi>" with no
+        # separator (lines 17-18), so it requires QNN_SDK_ROOT to end with
+        # a path separator. setup-qnn-sdk action exports it without one
+        # (the wheel build's pathlib-based code does not care). Add it
+        # back for this job — same pattern as the Android job, just in
+        # PowerShell.
+        run: |
+          $root = $env:QNN_SDK_ROOT.TrimEnd('\','/') + '\'
+          "QNN_SDK_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "QNN_SDK_ROOT=$root"
+          if (-not (Test-Path "${root}lib\aarch64-windows-msvc\Genie.lib")) {
+            Write-Error "Expected Genie.lib not found at ${root}lib\aarch64-windows-msvc\Genie.lib"
+            Get-ChildItem "${root}lib\aarch64-windows-msvc" 2>$null | Select-Object Name
+            exit 1
+          }
+
+      - name: Install build helpers
+        shell: pwsh
+        # Ninja: not strictly required for the VS generator path BUILD.md
+        # uses (it relies on MSBuild via `cmake --build . --config Release`),
+        # but the doc lists it as a prereq so keep it installable for any
+        # subproject that switches generators.
+        run: |
+          choco install -y ninja --no-progress
+
+      - name: Configure GenieAPIService
+        shell: cmd
+        working-directory: samples/genie/c++/Service
+        # Per BUILD.md:
+        #   cmake -S .. -B . -A ARM64 ..
+        # That command has both -S/-B and a positional source-dir which
+        # newer cmake versions reject. Use the modern equivalent.
+        #
+        # USE_MNN and USE_GGUF are NOT enabled here. Both bring in large
+        # third-party builds (MNN, llama.cpp) that hit toolchain / host
+        # arch issues on hosted windows-2022 runners. Service is built
+        # with the BIN backend only. To re-enable later, add:
+        #   -DUSE_MNN=ON -DUSE_GGUF=ON
+        # and revisit the LLVM/clang-cl setup that previously worked
+        # locally but stalled in CI.
+        run: |
+          if not exist build mkdir build
+          cmake -S . -B build -A ARM64
+
+      - name: Build GenieAPIService
+        shell: cmd
+        working-directory: samples/genie/c++/Service
+        run: |
+          cmake --build build --config Release --parallel 4
+
+      - name: Verify output
+        shell: pwsh
+        working-directory: samples/genie/c++/Service
+        run: |
+          $out = Get-ChildItem -Directory -Filter "GenieService_v*" | Select-Object -First 1
+          if (-not $out) {
+            Write-Error "Expected GenieService_v*/ directory was not produced. Tree under Service/:"
+            Get-ChildItem -Recurse -Depth 2 | Select-Object FullName
+            exit 1
+          }
+          Write-Host "Output dir: $($out.FullName)"
+          Get-ChildItem $out.FullName -Recurse -File | Select-Object FullName, Length
+
+      - name: Upload GenieService artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GenieService-windows-arm64-qnn${{ matrix.qnn.version }}
+          path: samples/genie/c++/Service/GenieService_v*/**
+          if-no-files-found: error
+
+      - name: Upload CMake logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmake-logs-genie-service-windows-arm64-qnn${{ matrix.qnn.version }}
+          path: |
+            samples/genie/c++/Service/build/**/CMakeFiles/CMakeOutput.log
+            samples/genie/c++/Service/build/**/CMakeFiles/CMakeError.log
+            samples/genie/c++/Service/build/**/CMakeCache.txt
+          if-no-files-found: ignore
+
+  # -----------------------------------------------------------------
+  # Release — only runs when a `v*` tag is pushed. Collects every
+  # artifact from the build jobs above and attaches them to a new
+  # GitHub Release at that tag.
+  #
+  # Trigger: push of a tag matching v*  (e.g. `git tag v2.47.0 && git push --tags`)
+  # Skip:    every regular branch push and pull_request — the `if:` below
+  #          gates the whole job.
+  # -----------------------------------------------------------------
+  # -----------------------------------------------------------------
+  # samples/genie/c++/Service — GenieAPIService Linux ARM64 build via
+  # the project-provided build_linux.sh.
+  #
+  # Runs on ubuntu-22.04-arm (native aarch64). The script does the
+  # configure + build of Service/, also builds libsamplerate from the
+  # bundled External/ submodule, and copies QAIRT runtime libs +
+  # default model config files into Service/GenieService_v<APPVER>_qnn<SDKVER>/.
+  #
+  # Build-only — running GenieAPIService needs an LLM model and an
+  # NPU/HTP backend, which is Stage B real-hardware territory.
+  # -----------------------------------------------------------------
+  build-genie-service-linux-arm64:
+    name: genie c++ Service · linux arm64 · qnn2.47.0.260601
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 60
+    steps:
+      - name: Checkout (with genie submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Init genie c++ + pybind11 submodules
+        # The Service build runs ExternalProject for libappbuilder out of
+        # the repo root, which references pybind11. The genie/c++/External
+        # submodules cover libsamplerate, CLI11, json, cpp-httplib, dr_libs,
+        # stb, LibrosaCpp — all required by build_linux.sh's submodule check.
+        run: |
+          git submodule update --init --depth 1 pybind/pybind11
+          git submodule update --init --depth 1 --recursive samples/genie/c++/External
+
+      - name: Install build toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build unzip
+
+      - name: Setup QNN SDK
+        uses: ./.github/actions/setup-qnn-sdk
+        with:
+          version: '2.47.0.260601'
+
+      - name: Append trailing slash to QNN_SDK_ROOT
+        # build_linux.sh's downstream cmake (in dependents.cmake) does
+        # string concat with QNN_SDK_ROOT — same trailing-slash convention
+        # as the Windows Service / Android jobs.
+        run: |
+          root="${QNN_SDK_ROOT%/}/"
+          echo "QNN_SDK_ROOT=$root" >> "$GITHUB_ENV"
+          echo "QNN_SDK_ROOT=$root"
+          test -d "${root}lib/aarch64-oe-linux-gcc11.2" \
+            || { echo "Expected aarch64-oe-linux-gcc11.2 lib dir missing under $root"; ls "${root}lib" || true; exit 1; }
+
+      - name: Build GenieAPIService via build_linux.sh
+        # Run the project-provided helper script verbatim — the same path
+        # local devs follow per BUILD_LINUX.md. USE_MNN/USE_GGUF stay OFF
+        # for the same toolchain reasons we hit on Windows.
+        run: |
+          chmod +x samples/genie/c++/build_linux.sh
+          (cd samples/genie/c++ && ./build_linux.sh)
+
+      - name: Locate output and verify
+        id: locate
+        run: |
+          out_dir=$(find samples/genie/c++/Service -maxdepth 1 -type d -name 'GenieService_v*_qnn*' | head -n1)
+          if [ -z "$out_dir" ]; then
+            echo "Expected GenieService_v*_qnn*/ output directory not found:"
+            ls -la samples/genie/c++/Service/ || true
+            exit 1
+          fi
+          echo "Output dir: $out_dir"
+          ls -lh "$out_dir"
+          echo "out-name=$(basename "$out_dir")" >> "$GITHUB_OUTPUT"
+          echo "out-dir=$out_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Upload GenieService artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.locate.outputs.out-name }}-linux_aarch64
+          path: ${{ steps.locate.outputs.out-dir }}/**
+          if-no-files-found: error
+
+      - name: Upload CMake logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmake-logs-genie-service-linux-arm64
+          path: |
+            samples/genie/c++/Service/build/**/CMakeFiles/CMakeOutput.log
+            samples/genie/c++/Service/build/**/CMakeFiles/CMakeError.log
+            samples/genie/c++/Service/build/**/CMakeCache.txt
+          if-no-files-found: ignore
+
+  # -----------------------------------------------------------------
+  # samples/genie/c++/Service — Android arm64-v8a build via the
+  # project-provided build_android.bat.
+  #
+  # Runs on windows-2022 (the .bat is Windows-only). The script builds
+  # libappbuilder.so, libGenieAPIService.so, libJNIGenieAPIService.so,
+  # then attempts to assemble a release APK via Gradle. The APK step
+  # requires a release-signing keystore (configured in
+  # Android/app/build.gradle.kts) which doesn't exist on the runner —
+  # the script's :skip_apk fallback gracefully exits with the .so files
+  # already produced. continue-on-error keeps the run "green-with-
+  # unsigned-libs" until proper signing secrets are wired up.
+  # -----------------------------------------------------------------
+  build-android-genie-service:
+    name: genie c++ Service · android arm64-v8a · qnn2.47.0.260601
+    runs-on: windows-2022
+    timeout-minutes: 60
+    # APK-signing step is expected to fail on hosted runners until a
+    # release keystore is wired up via secrets. .so artifacts produced
+    # before that step are still uploaded.
+    continue-on-error: true
+    steps:
+      - name: Checkout (with genie submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Init genie c++ + pybind11 submodules
+        shell: pwsh
+        run: |
+          git submodule update --init --depth 1 pybind/pybind11
+          git submodule update --init --depth 1 --recursive samples/genie/c++/External
+
+      - name: Setup Android NDK r26d
+        id: ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26d
+          add-to-path: false
+
+      - name: Setup QNN SDK
+        uses: ./.github/actions/setup-qnn-sdk
+        with:
+          version: '2.47.0.260601'
+
+      - name: Install ninja
+        shell: pwsh
+        run: choco install -y ninja --no-progress
+
+      - name: Patch build_android.bat for CI paths
+        shell: pwsh
+        # The script hard-codes:
+        #   set "QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.46.0.260424\"
+        #   set "NDK_ROOT=C:\work\android-ndk-r26d-windows\android-ndk-r26d\"
+        # Rewrite both lines in-place so the script picks up the runner-
+        # provisioned QNN SDK + NDK. Trailing slash kept (the script's
+        # downstream make/cmake assumes it).
+        #
+        # NDK path uses FORWARD slashes — the project Makefile (line 24)
+        # passes ANDROID_NDK_ROOT directly to a shell command that's
+        # parsed by GNU make's bash, which eats backslashes as escape
+        # characters. Forward slashes work everywhere on Windows for
+        # this NDK shipped with cmd.exe + bash.
+        run: |
+          $bat = 'samples/genie/c++/build_android.bat'
+          $qnn = ($env:QNN_SDK_ROOT.TrimEnd('\','/') + '\').Replace('/', '\')
+          $ndk = ('${{ steps.ndk.outputs.ndk-path }}'.TrimEnd('\','/') + '/').Replace('\', '/')
+          (Get-Content $bat) `
+            -replace 'set "QNN_SDK_ROOT=.*?"', ('set "QNN_SDK_ROOT=' + $qnn + '"') `
+            -replace 'set "NDK_ROOT=.*?"',     ('set "NDK_ROOT='     + $ndk + '"') `
+            | Set-Content $bat
+          Write-Host "Patched paths:"
+          Select-String -Path $bat -Pattern 'set "QNN_SDK_ROOT=|set "NDK_ROOT=' | Select-Object -ExpandProperty Line
+
+      - name: Build via build_android.bat
+        shell: cmd
+        working-directory: samples/genie/c++
+        run: |
+          call build_android.bat
+
+      - name: Verify .so output
+        shell: pwsh
+        # The .so files land here regardless of whether the later APK
+        # signing step succeeds, so verify them independently.
+        run: |
+          $out = 'samples/genie/c++/build_android/output/libs/arm64-v8a'
+          if (-not (Test-Path $out)) {
+            Write-Error "Expected output dir $out not found."
+            Get-ChildItem 'samples/genie/c++/build_android' -Recurse -Depth 3 -ErrorAction SilentlyContinue | Select-Object FullName
+            exit 1
+          }
+          Get-ChildItem $out | Select-Object Name, Length
+          $required = @('libappbuilder.so', 'libGenieAPIService.so')
+          foreach ($f in $required) {
+            if (-not (Test-Path (Join-Path $out $f))) {
+              Write-Error "Required artifact missing: $f"
+              exit 1
+            }
+          }
+
+      - name: Upload Android .so artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: GenieService-android-arm64v8a-libs-qnn2.47.0.260601
+          path: samples/genie/c++/build_android/output/libs/arm64-v8a/*.so
+          if-no-files-found: error
+
+      - name: Upload Android APK if produced
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: GenieService-android-arm64v8a-apk-qnn2.47.0.260601
+          path: samples/genie/c++/build_android/output/apk/*.apk
+          if-no-files-found: ignore
+
+  release:
+    name: Publish GitHub Release
+    # Temporarily disabled — re-enable once all build jobs (especially
+    # Genie Service with USE_GGUF) are stable. To re-enable, change the
+    # condition back to:
+    #   if: startsWith(github.ref, 'refs/tags/v')
+    if: false
+    needs:
+      - build-windows-x64
+      - build-windows-arm64
+      - build-linux-arm64
+      # - build-android-arm64v8a   # disabled until upstream fixes SVC main.cpp on Android
+      - build-genie-service-windows-arm64
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # required for action-gh-release to create the Release
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts for release
+        shell: bash
+        # actions/download-artifact@v4 lands each artifact in its own
+        # subdir. action-gh-release wants a flat file list; copy the
+        # *.whl / *.zip / *.so / GenieService dirs into a single dir.
+        run: |
+          mkdir -p release
+          # wheels and release zips from wheel jobs
+          find artifacts -type f \( -name '*.whl' -o -name 'QAI_AppBuilder-*.zip' \) -exec cp -v {} release/ \;
+          # android .so — rename to include the artifact label so it doesn't collide
+          if [ -f artifacts/libappbuilder-android-arm64v8a-qnn2.47.0.260601/libappbuilder.so ]; then
+            cp -v artifacts/libappbuilder-android-arm64v8a-qnn2.47.0.260601/libappbuilder.so \
+                  release/libappbuilder-android-arm64v8a-qnn2.47.0.260601.so
+          fi
+          # Genie c++ Service: zip the whole tree
+          genie_dir=$(find artifacts -type d -name 'GenieService-windows-arm64-*' | head -n1)
+          if [ -n "$genie_dir" ]; then
+            (cd "$genie_dir" && zip -qr "${GITHUB_WORKSPACE}/release/GenieService-windows-arm64-qnn2.47.0.260601.zip" .)
+          fi
+          echo "Release payload:"
+          ls -lh release/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

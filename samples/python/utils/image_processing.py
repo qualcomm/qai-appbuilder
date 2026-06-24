@@ -8,6 +8,7 @@ import math
 import torchvision.transforms as transforms
 from PIL.Image import Image
 from PIL.Image import fromarray as ImageFromArray
+from qai_hub_models.utils.image_processing import numpy_image_to_torch
 from torch.nn.functional import interpolate, pad
 import torch
 from typing import Tuple, Dict
