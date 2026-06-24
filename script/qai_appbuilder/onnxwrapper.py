@@ -658,10 +658,12 @@ class QNNModelWrapper(QNNContext):
         exp_shapes = self._expected_input_shapes
         exp_rank: Dict[str, Optional[int]] = {n: None for n in full_in_names}
         exp_layout: Dict[str, Optional[str]] = {n: None for n in full_in_names}
+        exp_shape_by_name: Dict[str, Optional[Any]] = {n: None for n in full_in_names}
         if exp_shapes:
             for n, s in zip(full_in_names, exp_shapes):
                 exp_rank[n] = len(s) if isinstance(s, (list, tuple)) else None
                 exp_layout[n] = _infer_layout_from_shape(s)
+                exp_shape_by_name[n] = s
 
         processed: List[np.ndarray] = []
         for n, t in zip(used_names, input_tensors):
@@ -817,6 +819,7 @@ class InferenceSession:
             log_level = log_level_map.get(sess_options.log_severity_level, LogLevel.ERROR)
             _ensure_path_contains(sess_options.qnn_libs_dir)
             QNNConfig.Config(
+                sess_options.qnn_libs_dir,
                 sess_options.qnn_runtime,
                 log_level,
                 sess_options.qnn_profiling_level,
