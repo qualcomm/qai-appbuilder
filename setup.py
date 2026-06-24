@@ -138,6 +138,15 @@ def _is_wos_device() -> bool:
     and PROCESSOR_IDENTIFIER / PROCESSOR_ARCHITECTURE environment variables.
     Returns True if running on a WOS (ARM64) device, False on a real x86_64 PC.
     """
+    # Explicit user request via QAI_TOOLCHAINS overrides host detection.
+    # This is the path CI uses: cross-build ARM64EC / ARM64 wheels from an
+    # x86_64 hosted runner. Without this hook, _detect_arch() would pick
+    # "x86_64" on the x64 build machine and request a non-existent
+    # x86_64-windows-msvc SDK toolchain.
+    qai_toolchains = os.environ.get("QAI_TOOLCHAINS", "").lower()
+    if qai_toolchains in ("arm64x-windows-msvc", "aarch64-windows-msvc"):
+        return True
+
     # Check PROCESSOR_ARCHITECTURE env var (set by Windows)
     proc_arch = os.environ.get("PROCESSOR_ARCHITECTURE", "").upper()
     proc_id = os.environ.get("PROCESSOR_IDENTIFIER", "").upper()
