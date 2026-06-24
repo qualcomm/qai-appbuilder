@@ -129,6 +129,48 @@ def _require_cmake():
     if shutil.which("cmake") is None:
         raise RuntimeError("cmake executable not found in PATH. Please install CMake and ensure it's available.")
 
+
+# Source dependencies that are normally populated by "git clone --recursive".
+# GitHub "Download ZIP" does not include submodule contents, so fail early with a
+# clear message instead of surfacing a later CMake/pybind11 error.
+_REQUIRED_SOURCE_DEPENDENCIES = [
+    (
+        "pybind11",
+        Path("pybind") / "pybind11" / "CMakeLists.txt",
+        "Required to build the qai_appbuilder Python extension.",
+    ),
+]
+
+
+def _check_source_dependencies() -> None:
+    """Validate that source-only build dependencies are available."""
+    root = _project_root()
+    missing = []
+
+    for name, rel_path, reason in _REQUIRED_SOURCE_DEPENDENCIES:
+        abs_path = root / rel_path
+        if not abs_path.exists():
+            missing.append((name, rel_path, reason))
+
+    if not missing:
+        return
+
+    missing_lines = "\n".join(
+        f"  - {name}: missing {rel_path} ({reason})"
+        for name, rel_path, reason in missing
+    )
+
+    raise RuntimeError(
+        "Missing source dependencies required to build QAI AppBuilder from source.\n"
+        f"{missing_lines}\n\n"
+        "How to fix:\n"
+        "  1. If you cloned this repository without --recursive, run:\n"
+        "       git submodule update --init --recursive\n\n"
+        "  2. If you downloaded source code by GitHub 'Download ZIP', run:\n"
+        "       python prepare_source.py\n\n"
+        "Then retry:\n"
+        "       python -m build -w\n"
+    )
 def _is_wos_device() -> bool:
     """
     Detect whether we are running on a Windows on Snapdragon (WOS) device.
