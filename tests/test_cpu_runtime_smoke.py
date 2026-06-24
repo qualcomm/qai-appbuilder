@@ -49,10 +49,11 @@ def test_set_log_level_calls_through_pybind() -> None:
 def test_qnn_cpu_backend_dll_is_bundled_and_loadable() -> None:
     """Configuring with Runtime.CPU must succeed on any platform.
 
-    QNNConfig.Config() with no qnn_lib_path falls back to the wheel-bundled
-    qai_appbuilder/libs/ directory (qnncontext.py:137-138). It then asserts
-    QnnCpu.dll and QnnSystem.dll exist (lines 149-152), and finally invokes
-    the pybind set_log_level + set_profiling_level functions (lines 154-155).
+    QNNConfig.Config() resolves the wheel-bundled qai_appbuilder/libs/ dir
+    (the qnn_lib_path argument was removed upstream — the wheel-bundled
+    libs/ is the only supported location). It then asserts QnnCpu.dll
+    and QnnSystem.dll exist, and finally invokes the pybind
+    set_log_level + set_profiling_level functions.
 
     A pass therefore proves four things at once:
     1. the wheel packaged QnnCpu.dll
@@ -63,7 +64,6 @@ def test_qnn_cpu_backend_dll_is_bundled_and_loadable() -> None:
     from qai_appbuilder import LogLevel, ProfilingLevel, QNNConfig, Runtime
 
     QNNConfig.Config(
-        qnn_lib_path="None",
         runtime=Runtime.CPU,
         log_level=LogLevel.ERROR,
         profiling_level=ProfilingLevel.OFF,
