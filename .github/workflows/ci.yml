@@ -518,9 +518,9 @@ jobs:
         # bundled (upstream) Genie. Fill in the URL for any row once an
         # overlay zip is published for that version.
         qnn:
-          - version: '2.40.1.251119'
-            url: 'https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.40.1.251119/v2.40.1.251119.zip'
-            genie-url: ''
+          # 2.40.1.251119 dropped — its Community SDK zip is no longer
+          # hosted at apigwx-aws.qualcomm.com (HTTP 404 / S3 NoSuchKey).
+          # Restore the entry if the URL becomes available again.
           - version: '2.41.0.251128'
             url: 'https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.41.0.251128/v2.41.0.251128.zip'
             genie-url: ''
