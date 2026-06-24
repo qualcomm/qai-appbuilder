@@ -1,0 +1,318 @@
+name: 'Setup QNN SDK'
+description: >
+  Download and cache the Qualcomm AI Runtime Community SDK,
+  then expose QNN_SDK_ROOT for downstream steps. Supports Windows
+  and Linux hosted runners.
+
+inputs:
+  version:
+    description: 'QNN Community SDK version (matches the URL path).'
+    required: false
+    default: '2.47.0.260601'
+  url:
+    description: 'Override the SDK download URL. Defaults to the Community SDK matching `version`.'
+    required: false
+    default: ''
+  genie-runtime-url:
+    description: >
+      URL of the QAIRT zip that contains the customized Genie.dll/lib to
+      overlay onto the Community SDK on Windows. The zip is expected to
+      contain `arm64x-windows-msvc/Genie.{dll,lib}` (x64 + ARM64EC host
+      processes) and `aarch64-windows-msvc/Genie.{dll,lib}` (native
+      ARM64 processes). Linux and Android jobs do not consume this — the
+      customized Genie is Windows-only, so non-Windows builds always use
+      the Genie shipped in the QNN SDK as-is (do not pass this input
+      from Linux/Android callers).
+
+      Empty value disables the overlay (the build uses the SDK-bundled
+      Genie unchanged).
+    required: false
+    default: ''
+  genie-runtime-version:
+    description: 'Version label used in the Genie zip cache key. Bump together with genie-runtime-url.'
+    required: false
+    default: ''
+
+outputs:
+  qnn-sdk-root:
+    description: 'Absolute path to the extracted QNN SDK (also exported as QNN_SDK_ROOT).'
+    value: ${{ steps.expose-windows.outputs.qnn-sdk-root || steps.expose-linux.outputs.qnn-sdk-root }}
+
+runs:
+  using: 'composite'
+  steps:
+    # -----------------------------------------------------------------
+    # Resolve URL and install dir (OS-agnostic; written in pwsh because
+    # GitHub-hosted ubuntu runners ship pwsh preinstalled).
+    # -----------------------------------------------------------------
+    - name: Resolve SDK URL and install dir (Windows)
+      id: vars-windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $version = "${{ inputs.version }}"
+        $url = "${{ inputs.url }}"
+        if ([string]::IsNullOrEmpty($url)) {
+          $url = "https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/$version/v$version.zip"
+        }
+        $installDir = Join-Path $env:RUNNER_TEMP "qnn-sdk-$version"
+        "url=$url"               | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+        "install-dir=$installDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+    - name: Resolve SDK URL and install dir (Linux)
+      id: vars-linux
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        version="${{ inputs.version }}"
+        url="${{ inputs.url }}"
+        if [ -z "$url" ]; then
+          url="https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/${version}/v${version}.zip"
+        fi
+        install_dir="${RUNNER_TEMP}/qnn-sdk-${version}"
+        echo "url=${url}" >> "$GITHUB_OUTPUT"
+        echo "install-dir=${install_dir}" >> "$GITHUB_OUTPUT"
+
+    # -----------------------------------------------------------------
+    # Cache (single step; path/key resolved per-OS via the two steps above).
+    # -----------------------------------------------------------------
+    - name: Restore QNN SDK from cache
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.vars-windows.outputs.install-dir || steps.vars-linux.outputs.install-dir }}
+        key: qnn-sdk-${{ inputs.version }}-${{ runner.os }}-v1
+
+    # -----------------------------------------------------------------
+    # Download + extract — OS-specific so .so permissions survive on Linux.
+    # -----------------------------------------------------------------
+    - name: Download and extract QNN SDK (Windows)
+      if: runner.os == 'Windows' && steps.cache.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+        $url        = "${{ steps.vars-windows.outputs.url }}"
+        $installDir = "${{ steps.vars-windows.outputs.install-dir }}"
+        $zipPath    = Join-Path $env:RUNNER_TEMP "qnn-sdk.zip"
+
+        Write-Host "Downloading QNN SDK from $url"
+        Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing
+        Write-Host "Extracting to $installDir"
+        New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+        Expand-Archive -Path $zipPath -DestinationPath $installDir -Force
+        Remove-Item $zipPath -Force
+
+    - name: Download and extract QNN SDK (Linux)
+      if: runner.os == 'Linux' && steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        url="${{ steps.vars-linux.outputs.url }}"
+        install_dir="${{ steps.vars-linux.outputs.install-dir }}"
+        zip_path="${RUNNER_TEMP}/qnn-sdk.zip"
+
+        echo "Downloading QNN SDK from $url"
+        curl -fsSL "$url" -o "$zip_path"
+        echo "Extracting to $install_dir"
+        mkdir -p "$install_dir"
+        unzip -q "$zip_path" -d "$install_dir"
+        rm -f "$zip_path"
+
+    # -----------------------------------------------------------------
+    # Locate QNN_SDK_ROOT — also OS-specific because of path / probe syntax.
+    # -----------------------------------------------------------------
+    - name: Locate QNN SDK root and export (Windows)
+      id: expose-windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $installDir = "${{ steps.vars-windows.outputs.install-dir }}"
+
+        $candidates = @(
+          $installDir,
+          (Join-Path $installDir "qairt"),
+          (Join-Path $installDir "qairt/${{ inputs.version }}")
+        )
+        $sdkRoot = $null
+        foreach ($c in $candidates) {
+          if ((Test-Path (Join-Path $c "lib")) -and (Test-Path (Join-Path $c "include"))) {
+            $sdkRoot = (Resolve-Path $c).Path
+            break
+          }
+        }
+        if (-not $sdkRoot) {
+          Get-ChildItem $installDir -Directory | ForEach-Object {
+            if (-not $sdkRoot -and (Test-Path (Join-Path $_.FullName "lib"))) {
+              $sdkRoot = $_.FullName
+            }
+            if (-not $sdkRoot) {
+              Get-ChildItem $_.FullName -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+                if (-not $sdkRoot -and (Test-Path (Join-Path $_.FullName "lib"))) {
+                  $sdkRoot = $_.FullName
+                }
+              }
+            }
+          }
+        }
+        if (-not $sdkRoot) {
+          Write-Host "Failed to locate QNN SDK root under $installDir. Tree:"
+          Get-ChildItem $installDir -Recurse -Depth 2 | Select-Object FullName
+          exit 1
+        }
+
+        Write-Host "QNN_SDK_ROOT = $sdkRoot"
+        Write-Host "Contents of lib/:"
+        Get-ChildItem (Join-Path $sdkRoot "lib") | Select-Object Name
+
+        "qnn-sdk-root=$sdkRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+        "QNN_SDK_ROOT=$sdkRoot" | Out-File -FilePath $env:GITHUB_ENV    -Append -Encoding utf8
+
+    - name: Locate QNN SDK root and export (Linux)
+      id: expose-linux
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        install_dir="${{ steps.vars-linux.outputs.install-dir }}"
+        version="${{ inputs.version }}"
+
+        sdk_root=""
+        for c in "$install_dir" "$install_dir/qairt" "$install_dir/qairt/$version"; do
+          if [ -d "$c/lib" ] && [ -d "$c/include" ]; then
+            sdk_root="$(cd "$c" && pwd)"
+            break
+          fi
+        done
+
+        if [ -z "$sdk_root" ]; then
+          # Fallback: scan one or two levels deep for a dir containing lib/.
+          while IFS= read -r d; do
+            if [ -d "$d/lib" ]; then sdk_root="$d"; break; fi
+          done < <(find "$install_dir" -mindepth 1 -maxdepth 2 -type d 2>/dev/null)
+        fi
+
+        if [ -z "$sdk_root" ]; then
+          echo "Failed to locate QNN SDK root under $install_dir. Tree:"
+          find "$install_dir" -maxdepth 3 -type d
+          exit 1
+        fi
+
+        echo "QNN_SDK_ROOT = $sdk_root"
+        echo "Contents of lib/:"
+        ls -1 "$sdk_root/lib"
+
+        echo "qnn-sdk-root=$sdk_root" >> "$GITHUB_OUTPUT"
+        echo "QNN_SDK_ROOT=$sdk_root" >> "$GITHUB_ENV"
+
+    # -----------------------------------------------------------------
+    # Genie overlay — replace the upstream Genie shipped in the Community
+    # SDK with the quic-customized Genie from QAIRT_Runtime_*_v73.zip.
+    # BUILD.md mandates this; samples/genie/ depends on the customized
+    # symbols. Until matching 2.46/2.47 builds of the customized zip
+    # exist, this is stubbed at the v2.38.0 zip — close enough to make
+    # the build/import path produce something, but Genie behavior may
+    # diverge until upstream zips for 2.46/2.47 land.
+    # -----------------------------------------------------------------
+    - name: Resolve Genie overlay paths and cache key (Windows)
+      id: genie-vars-windows
+      if: runner.os == 'Windows' && inputs.genie-runtime-url != ''
+      shell: pwsh
+      run: |
+        $stage = Join-Path $env:RUNNER_TEMP "qairt-runtime-${{ inputs.genie-runtime-version }}"
+        "stage-dir=$stage" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+    - name: Restore Genie overlay from cache
+      id: genie-cache
+      if: runner.os == 'Windows' && inputs.genie-runtime-url != ''
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.genie-vars-windows.outputs.stage-dir }}
+        key: genie-runtime-${{ inputs.genie-runtime-version }}-${{ runner.os }}-v1
+
+    - name: Download Genie overlay (Windows)
+      if: runner.os == 'Windows' && inputs.genie-runtime-url != '' && steps.genie-cache.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+        $url   = "${{ inputs.genie-runtime-url }}"
+        $stage = "${{ steps.genie-vars-windows.outputs.stage-dir }}"
+        $zip   = Join-Path $env:RUNNER_TEMP "qairt-runtime.zip"
+
+        Write-Host "Downloading Genie overlay from $url"
+        Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+        New-Item -ItemType Directory -Force -Path $stage | Out-Null
+        Expand-Archive -Path $zip -DestinationPath $stage -Force
+        Remove-Item $zip -Force
+
+    - name: Apply Genie overlay (Windows)
+      if: runner.os == 'Windows' && inputs.genie-runtime-url != ''
+      shell: pwsh
+      # Per BUILD.md: copy Genie.dll/Genie.lib from the overlay zip's
+      # arm64x-windows-msvc/ and aarch64-windows-msvc/ subdirs into the
+      # SDK's same-named lib subdirs. Also copy the GenieDialog.h header
+      # if present. We tolerate missing source files (the v2.38.0 stub
+      # may not match every layout) so this is best-effort with a clear
+      # log of what got copied.
+      run: |
+        $stage = "${{ steps.genie-vars-windows.outputs.stage-dir }}"
+        $sdk   = $env:QNN_SDK_ROOT
+
+        # The overlay zip extracts as either:  <stage>/QAIRT_Runtime_*/...  or
+        # directly  <stage>/arm64x-windows-msvc/...  Probe for it.
+        $overlayRoot = $null
+        if ((Test-Path (Join-Path $stage "arm64x-windows-msvc")) -or
+            (Test-Path (Join-Path $stage "aarch64-windows-msvc"))) {
+          $overlayRoot = $stage
+        } else {
+          Get-ChildItem $stage -Directory | ForEach-Object {
+            if (-not $overlayRoot -and (
+                (Test-Path (Join-Path $_.FullName "arm64x-windows-msvc")) -or
+                (Test-Path (Join-Path $_.FullName "aarch64-windows-msvc"))
+              )) {
+              $overlayRoot = $_.FullName
+            }
+          }
+        }
+        if (-not $overlayRoot) {
+          Write-Host "::warning::Genie overlay zip layout not recognized under $stage. Skipping overlay (build will use upstream Genie). Tree:"
+          Get-ChildItem $stage -Recurse -Depth 2 | Select-Object FullName
+          exit 0
+        }
+
+        Write-Host "Genie overlay root: $overlayRoot"
+        Write-Host "QNN_SDK_ROOT      : $sdk"
+
+        $copied = @()
+        foreach ($abi in @("arm64x-windows-msvc", "aarch64-windows-msvc")) {
+          $src = Join-Path $overlayRoot $abi
+          $dst = Join-Path $sdk         "lib/$abi"
+          if (-not (Test-Path $src)) { continue }
+          if (-not (Test-Path $dst)) {
+            Write-Host "::warning::SDK lib subdir $dst not present; skipping $abi overlay"
+            continue
+          }
+          foreach ($name in @("Genie.dll", "Genie.lib")) {
+            $s = Join-Path $src $name
+            if (Test-Path $s) {
+              Copy-Item $s (Join-Path $dst $name) -Force
+              $copied += "$abi/$name"
+            }
+          }
+        }
+
+        # Optional header
+        $hdr = Get-ChildItem $overlayRoot -Recurse -Filter "GenieDialog.h" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($hdr) {
+          $dstHdrDir = Join-Path $sdk "include/Genie"
+          if (-not (Test-Path $dstHdrDir)) {
+            $dstHdrDir = Join-Path $sdk "include/QNN"
+          }
+          if (Test-Path $dstHdrDir) {
+            Copy-Item $hdr.FullName (Join-Path $dstHdrDir "GenieDialog.h") -Force
+            $copied += "include/$(Split-Path $dstHdrDir -Leaf)/GenieDialog.h"
+          }
+        }
+
+        if ($copied.Count -eq 0) {
+          Write-Host "::warning::No Genie files were copied. Build will use the SDK's bundled Genie."
+        } else {
+          Write-Host "Genie overlay applied ($($copied.Count) files):"
+          $copied | ForEach-Object { Write-Host "  $_" }
+        }
+
