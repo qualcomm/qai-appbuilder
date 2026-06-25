@@ -131,10 +131,42 @@ jobs:
       # front and exporting its env via GITHUB_ENV makes the build
       # robust to that. ARM64EC binaries link against the ARM64 toolset
       # so amd64_arm64 is the correct vcvars arch.
+      #
+      # Inlined instead of using ilammy/msvc-dev-cmd@v1 because the
+      # qualcomm/qai-appbuilder enterprise GitHub Actions allowlist
+      # rejects third-party actions not in its policy. vcvarsall.bat
+      # comes with VS itself on the windows-2022 hosted runner.
       - name: Setup MSVC (amd64_arm64)
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: amd64_arm64
+        shell: pwsh
+        run: |
+          $vsRoot = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise"
+          if (-not (Test-Path $vsRoot)) {
+            $vsRoot = "C:\Program Files\Microsoft Visual Studio\2022\Community"
+          }
+          if (-not (Test-Path $vsRoot)) {
+            $vsRoot = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools"
+          }
+          $vcvars = Join-Path $vsRoot "VC\Auxiliary\Build\vcvarsall.bat"
+          if (-not (Test-Path $vcvars)) {
+            Write-Error "vcvarsall.bat not found under $vsRoot"
+            exit 1
+          }
+          # Diff env before/after vcvarsall so we know which keys to export.
+          $before = cmd /c "set"
+          $after  = cmd /c "`"$vcvars`" amd64_arm64 && set"
+          $beforeMap = @{}
+          foreach ($line in $before) {
+            if ($line -match '^([^=]+)=(.*)$') { $beforeMap[$matches[1]] = $matches[2] }
+          }
+          foreach ($line in $after) {
+            if ($line -match '^([^=]+)=(.*)$') {
+              $k = $matches[1]; $v = $matches[2]
+              if (-not $beforeMap.ContainsKey($k) -or $beforeMap[$k] -ne $v) {
+                "$k=$v" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+              }
+            }
+          }
+          Write-Host "MSVC env staged from $vcvars (amd64_arm64)"
 
       - name: Setup QNN SDK
         uses: ./.github/actions/setup-qnn-sdk
@@ -432,10 +464,25 @@ jobs:
 
       - name: Setup Android NDK r26d
         id: ndk
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: r26d
-          add-to-path: false
+        # Inlined instead of using nttld/setup-ndk@v1 because the
+        # qualcomm/qai-appbuilder enterprise GitHub Actions allowlist
+        # rejects third-party actions not in its policy. The Linux NDK
+        # zip is a public download from Google.
+        shell: bash
+        run: |
+          ver="r26d"
+          install_dir="${RUNNER_TEMP}/android-ndk-${ver}"
+          zip_path="${RUNNER_TEMP}/android-ndk-${ver}.zip"
+          if [ ! -d "${install_dir}/android-ndk-${ver}" ]; then
+            curl -fsSL -o "${zip_path}" "https://dl.google.com/android/repository/android-ndk-${ver}-linux.zip"
+            mkdir -p "${install_dir}"
+            unzip -q "${zip_path}" -d "${install_dir}"
+            rm -f "${zip_path}"
+          fi
+          ndk_path="${install_dir}/android-ndk-${ver}"
+          test -x "${ndk_path}/ndk-build" || { echo "ndk-build missing at ${ndk_path}"; exit 1; }
+          echo "ndk-path=${ndk_path}" >> "$GITHUB_OUTPUT"
+          echo "Android NDK ${ver} ready at ${ndk_path}"
 
       - name: Setup QNN SDK
         uses: ./.github/actions/setup-qnn-sdk
@@ -558,9 +605,36 @@ jobs:
           git submodule update --init --depth 1 --recursive samples/genie/c++/External
 
       - name: Setup MSVC (amd64_arm64)
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: amd64_arm64
+        shell: pwsh
+        # See build-windows-x64 for rationale of inlining.
+        run: |
+          $vsRoot = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise"
+          if (-not (Test-Path $vsRoot)) {
+            $vsRoot = "C:\Program Files\Microsoft Visual Studio\2022\Community"
+          }
+          if (-not (Test-Path $vsRoot)) {
+            $vsRoot = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools"
+          }
+          $vcvars = Join-Path $vsRoot "VC\Auxiliary\Build\vcvarsall.bat"
+          if (-not (Test-Path $vcvars)) {
+            Write-Error "vcvarsall.bat not found under $vsRoot"
+            exit 1
+          }
+          $before = cmd /c "set"
+          $after  = cmd /c "`"$vcvars`" amd64_arm64 && set"
+          $beforeMap = @{}
+          foreach ($line in $before) {
+            if ($line -match '^([^=]+)=(.*)$') { $beforeMap[$matches[1]] = $matches[2] }
+          }
+          foreach ($line in $after) {
+            if ($line -match '^([^=]+)=(.*)$') {
+              $k = $matches[1]; $v = $matches[2]
+              if (-not $beforeMap.ContainsKey($k) -or $beforeMap[$k] -ne $v) {
+                "$k=$v" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+              }
+            }
+          }
+          Write-Host "MSVC env staged from $vcvars (amd64_arm64)"
 
       - name: Setup QNN SDK
         uses: ./.github/actions/setup-qnn-sdk
@@ -791,10 +865,28 @@ jobs:
 
       - name: Setup Android NDK r26d
         id: ndk
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: r26d
-          add-to-path: false
+        # Inlined instead of using nttld/setup-ndk@v1 because the
+        # qualcomm/qai-appbuilder enterprise GitHub Actions allowlist
+        # rejects third-party actions not in its policy. The Windows
+        # NDK zip is a public download from Google.
+        shell: pwsh
+        run: |
+          $ver = "r26d"
+          $installDir = Join-Path $env:RUNNER_TEMP "android-ndk-$ver"
+          $zipPath    = Join-Path $env:RUNNER_TEMP "android-ndk-$ver.zip"
+          $ndkPath    = Join-Path $installDir "android-ndk-$ver"
+          if (-not (Test-Path $ndkPath)) {
+            Invoke-WebRequest -Uri "https://dl.google.com/android/repository/android-ndk-$ver-windows.zip" -OutFile $zipPath -UseBasicParsing
+            New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+            Expand-Archive -Path $zipPath -DestinationPath $installDir -Force
+            Remove-Item $zipPath -Force
+          }
+          if (-not (Test-Path (Join-Path $ndkPath "ndk-build.cmd"))) {
+            Write-Error "ndk-build.cmd missing at $ndkPath"
+            exit 1
+          }
+          "ndk-path=$ndkPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Android NDK $ver ready at $ndkPath"
 
       - name: Setup QNN SDK
         uses: ./.github/actions/setup-qnn-sdk
@@ -872,53 +964,3 @@ jobs:
           path: samples/genie/c++/build_android/output/apk/*.apk
           if-no-files-found: ignore
 
-  release:
-    name: Publish GitHub Release
-    # Temporarily disabled — re-enable once all build jobs (especially
-    # Genie Service with USE_GGUF) are stable. To re-enable, change the
-    # condition back to:
-    #   if: startsWith(github.ref, 'refs/tags/v')
-    if: false
-    needs:
-      - build-windows-x64
-      - build-windows-arm64
-      - build-linux-arm64
-      # - build-android-arm64v8a   # disabled until upstream fixes SVC main.cpp on Android
-      - build-genie-service-windows-arm64
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write   # required for action-gh-release to create the Release
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Flatten artifacts for release
-        shell: bash
-        # actions/download-artifact@v4 lands each artifact in its own
-        # subdir. action-gh-release wants a flat file list; copy the
-        # *.whl / *.zip / *.so / GenieService dirs into a single dir.
-        run: |
-          mkdir -p release
-          # wheels and release zips from wheel jobs
-          find artifacts -type f \( -name '*.whl' -o -name 'QAI_AppBuilder-*.zip' \) -exec cp -v {} release/ \;
-          # android .so — rename to include the artifact label so it doesn't collide
-          if [ -f artifacts/libappbuilder-android-arm64v8a-qnn2.47.0.260601/libappbuilder.so ]; then
-            cp -v artifacts/libappbuilder-android-arm64v8a-qnn2.47.0.260601/libappbuilder.so \
-                  release/libappbuilder-android-arm64v8a-qnn2.47.0.260601.so
-          fi
-          # Genie c++ Service: zip the whole tree
-          genie_dir=$(find artifacts -type d -name 'GenieService-windows-arm64-*' | head -n1)
-          if [ -n "$genie_dir" ]; then
-            (cd "$genie_dir" && zip -qr "${GITHUB_WORKSPACE}/release/GenieService-windows-arm64-qnn2.47.0.260601.zip" .)
-          fi
-          echo "Release payload:"
-          ls -lh release/
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: release/*
-          generate_release_notes: true
-          fail_on_unmatched_files: true
