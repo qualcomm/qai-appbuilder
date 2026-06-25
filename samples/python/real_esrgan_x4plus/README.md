@@ -4,8 +4,8 @@
 This is sample code for using AppBuilder to load real_esrgan_x4plus QNN model to HTP and execute inference to generate image. 
 
 ## Setup AppBuilder environment and prepare QNN SDK libraries by referring to the links below: 
-https://github.com/quic/ai-engine-direct-helper/blob/main/README.md <br>
-https://github.com/quic/ai-engine-direct-helper/blob/main/docs/user_guide.md
+https://github.com/qualcomm/qai-appbuilder/blob/main/README.md <br>
+https://github.com/qualcomm/qai-appbuilder/blob/main/docs/user_guide.md
 
 ## real_esrgan_x4plus QNN models
 The quantized real_esrgan_x4plus QNN model's input resolution is 128x128 from Qualcomm® AI Hub:
@@ -40,7 +40,7 @@ C:\ai-hub\real_esrgan_x4plus\models\real_esrgan_x4plus.bin
 
 ## Run the sample code
 Download the sample code from the following link:
-https://github.com/quic/ai-engine-direct-helper/blob/main/Samples/real_esrgan_x4plus/real_esrgan_x4plus.py
+https://github.com/qualcomm/qai-appbuilder/blob/main/Samples/real_esrgan_x4plus/real_esrgan_x4plus.py
 
 After downloaded the sample code, please copy it to the following path:
 ```

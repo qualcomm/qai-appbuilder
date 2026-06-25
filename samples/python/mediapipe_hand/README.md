@@ -14,9 +14,9 @@ This application supports camera frame online inference (default) and jpg image 
 <br><br>
 
 # 2. Command
-go to <ai-engine-direct-helper> path:
+go to <qai-appbuilder> path:
 ```
-cd <ai-engine-direct-helper>\samples\
+cd <qai-appbuilder>\samples\
 ```
 
 ## Option 1: launch camera app and recognize hand (end_user mode by default) without controlling audio playback:

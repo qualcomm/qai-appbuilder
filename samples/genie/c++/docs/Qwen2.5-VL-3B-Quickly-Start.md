@@ -9,7 +9,7 @@ This section explains how to configure and run the Qwen2.5-VL-3B model in a Wind
 - **Download model files**:<br>
   Visit the website to download the model files for the corresponding
   platform: [Qwen2.5-VL-3B](https://www.aidevhome.com/?id=51) Model Download, and place
-  the downloaded model in the `ai-engine-direct-helper\samples\genie\python\models` directory.
+  the downloaded model in the `qai-appbuilder\samples\genie\python\models` directory.
 
 - **Download the Genie Service Program**:<br>
   Go to the GitHub Releases page to
@@ -17,7 +17,7 @@ This section explains how to configure and run the Qwen2.5-VL-3B model in a Wind
   Releases download page.
 
 - **Extract the file**:<br>
-  Unzip the downloaded compressed package into the project code directory `ai-engine-direct-helper\samples`.
+  Unzip the downloaded compressed package into the project code directory `qai-appbuilder\samples`.
 
 ### 1.2 Starting Services and Running Examples
 
@@ -26,7 +26,7 @@ separately.
 
 ```
 # 1. Entry the directory
-cd ai-engine-direct-helper\samples
+cd qai-appbuilder\samples
 
 # 2. Start the GenieAPI Service (loading the config file)
 GenieAPIService\GenieAPIService.exe -c "genie\python\models\qwen2.5vl3b\config.json" -l

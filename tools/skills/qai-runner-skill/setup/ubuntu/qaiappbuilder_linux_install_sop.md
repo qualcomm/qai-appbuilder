@@ -1,7 +1,7 @@
 # QAI AppBuilder Install SOP (Reusable)
 
 ## Purpose
-Install `qai_appbuilder` from source (`ai-engine-direct-helper`) on a target device/environment with QAIRT, then verify DSP backend readiness.
+Install `qai_appbuilder` from source (`qai-appbuilder`) on a target device/environment with QAIRT, then verify DSP backend readiness.
 
 ## Required Inputs (ask before install)
 1. `target_device`: `local` or remote host/IP
@@ -16,7 +16,7 @@ Example from this run:
 - `install_path=/home/ubuntu/Test/qaiappbuilder`
 
 ## Source Repo
-- `https://github.com/quic/ai-engine-direct-helper.git`
+- `https://github.com/qualcomm/qai-appbuilder.git`
 
 ## 1) Precheck and Environment
 ```bash
@@ -66,13 +66,13 @@ export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:$QNN_SDK_ROOT/lib/aarch64-oe-linux-
 set -euo pipefail
 
 INSTALL_BASE="<ABS_INSTALL_PATH>"
-REPO_DIR="$INSTALL_BASE/ai-engine-direct-helper"
+REPO_DIR="$INSTALL_BASE/qai-appbuilder"
 VENV_PATH="<ABS_VENV_PATH>"
 
 mkdir -p "$INSTALL_BASE"
 
 if [ ! -d "$REPO_DIR/.git" ]; then
-  git clone --recurse-submodules https://github.com/quic/ai-engine-direct-helper.git "$REPO_DIR"
+  git clone --recurse-submodules https://github.com/qualcomm/qai-appbuilder.git "$REPO_DIR"
 fi
 
 git -C "$REPO_DIR" pull --recurse-submodules
@@ -118,7 +118,7 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$QNN_SDK_ROOT/lib/aarch64-oe-linux-gcc11
 - DSP architecture: `V73` (`DSP_ARCH=73`)
 - Installed version: `qai_appbuilder 2.45.0`
 - Install location: `/home/ubuntu/Test/qairt/pyqairt/lib/python3.10/site-packages`
-- Repo path: `/home/ubuntu/Test/qaiappbuilder/ai-engine-direct-helper`
+- Repo path: `/home/ubuntu/Test/qaiappbuilder/qai-appbuilder`
 
 ## Troubleshooting
 - `aienv.sh missing`: run QAIRT bootstrap SOP first (`QAIRT_SETUP_SOP.md`).

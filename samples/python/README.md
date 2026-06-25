@@ -28,12 +28,12 @@ pip install qai_hub_models==0.30.2 huggingface_hub==0.33.1 Pillow==10.4.0 numpy=
 ### Step 3: Run Model
 Run below commands in Windows terminal:
 ```
-cd ai-engine-direct-helper\samples
+cd qai-appbuilder\samples
 python <Python script for running model> <Parameter of Python script>
 ```
 Where `<Python script for running model>` is the Python script you want to run. For example, if you want to run `stable_diffusion_v2_1`, you can run below command:
 ```
-cd ai-engine-direct-helper\samples
+cd qai-appbuilder\samples
 python python\stable_diffusion_v2_1\stable_diffusion_v2_1.py --prompt "spectacular view of northern lights from Alaska"
 ```
 

@@ -18,9 +18,9 @@ Step 1. Start cmd command prompt window and active python virtual environment wi
 ```
 <flet_android_env path>\Scripts\activate
 ```
-Step 2. Go to ai-engine-direct-helper samples path and start GenieFletUI application with below command:
+Step 2. Go to qai-appbuilder samples path and start GenieFletUI application with below command:
 ```
-cd <your path>\ai-engine-direct-helper\samples
+cd <your path>\qai-appbuilder\samples
 python fletui\GenieFletUI\android\GenieFletUI.py
 ```
 

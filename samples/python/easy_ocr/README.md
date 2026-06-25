@@ -4,7 +4,7 @@
 This is sample code for using AppBuilder to load easyocr QNN model to HTP and execute optical character recognition (OCR) inference to detect and extract text from input images.
 
 ###
-cd ai-engine-direct-helper\samples
+cd qai-appbuilder\samples
 python python\easyocr\easy_ocr.py
 
 ####Resources:

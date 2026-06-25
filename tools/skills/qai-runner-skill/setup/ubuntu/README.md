@@ -60,7 +60,7 @@ Then execute end-to-end:
 - precheck and source env
 - detect SoC/model and DSP_ARCH using qnn-platform-validator
 - set PRODUCT_SOC/DSP_ARCH and export ADSP_LIBRARY_PATH + LD_LIBRARY_PATH
-- clone/pull ai-engine-direct-helper with recursive submodules
+- clone/pull qai-appbuilder with recursive submodules
 - build wheel (python3 setup.py bdist_wheel)
 - pip install generated wheel
 - run verification commands from SOP

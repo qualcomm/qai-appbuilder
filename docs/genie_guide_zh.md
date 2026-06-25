@@ -856,7 +856,7 @@ cmake -S .. -B . -A ARM64 -DUSE_GGUF=ON -DUSE_MNN=ON
 #### 设置环境变量与路径（Windows 主机构建 Android）
 
 ```bat
-cd ai-engine-direct-helper\samples\genie\c++\Service
+cd qai-appbuilder\samples\genie\c++\Service
 Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.42.0.251225
 set PATH=%PATH%;C:\Programs\android-ndk-r26d\toolchains\llvm\prebuilt\windows-x86_64\bin
 Set NDK_ROOT=C:/Programs/android-ndk-r26d/
@@ -867,7 +867,7 @@ Set ANDROID_NDK_ROOT=%NDK_ROOT%
 
 Android 构建前需要先编译 `libappbuilder`（详见项目根目录的 [BUILD](https://github.com/qualcomm/qai-appbuilder/blob/main/BUILD.md) 说明），并将生成的 `libappbuilder.so` 放到：
 
-`ai-engine-direct-helper\samples\genie\c++\Service`
+`qai-appbuilder\samples\genie\c++\Service`
 
 #### 构建 GenieAPIService（Android）
 
@@ -884,7 +884,7 @@ copy "obj\local\arm64-v8a\*.so" "libs\arm64-v8a" /Y
 
 #### 构建 Android App（Android Studio）
 
-1. 使用 Android Studio 打开：`ai-engine-direct-helper\samples\genie\c++\Android`
+1. 使用 Android Studio 打开：`qai-appbuilder\samples\genie\c++\Android`
 2. 菜单 **Build** → **Generate Signed App Bundle / APK** → 选择 **APK**
 3. 选择签名密钥并完成构建
 4. 在 `...\Android\app\release` 目录获取 `app-release.apk`

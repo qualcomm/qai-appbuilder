@@ -20,7 +20,7 @@ def download_with_wget(url, dest_path, proxy=None):
         return False
 
 def install_QAIRT():
-    extract_root = os.path.join("ai-engine-direct-helper", "samples", "qai_libs")
+    extract_root = os.path.join("qai-appbuilder", "samples", "qai_libs")
     zip_file = os.path.join(extract_root, "QAIRT_Runtime_2.38.0_v73.zip")
 
     if os.path.exists(extract_root):
@@ -62,15 +62,15 @@ def install_git():
 
 def clone_or_update_repo():
     try:
-        repo_dir = "ai-engine-direct-helper"
+        repo_dir = "qai-appbuilder"
 
         if not os.path.exists(repo_dir):
-            print("Cloning ai-engine-direct-helper repository...")
+            print("Cloning qai-appbuilder repository...")
             
             subprocess.run(["git", "clone", "https://github.com/qualcomm/qai-appbuilder.git", "--recursive"], check=True)
             print(f"Repository cloned to {repo_dir}")
         else:
-            print(f"ai-engine-direct-helper repository already exists at {repo_dir}. Pulling latest changes...")
+            print(f"qai-appbuilder repository already exists at {repo_dir}. Pulling latest changes...")
             
             subprocess.run(["git", "pull"], check=True, cwd=repo_dir)
             print("Latest changes pulled.")
@@ -85,7 +85,7 @@ def clone_or_update_repo():
         return False
 
 def install_qai_appbuilder():
-    extract_root = os.path.join("ai-engine-direct-helper", "samples", "qai_libs")
+    extract_root = os.path.join("qai-appbuilder", "samples", "qai_libs")
     zip_file = os.path.join(extract_root, "qai_appbuilder-2.38.0-cp312-cp312-linux_aarch64.whl")
 
     if os.path.exists(extract_root):

@@ -73,4 +73,4 @@ metadata: {"openclaw":{"emoji":"🧞","always":true}}
 **适用问题：** 服务启动失败、模型加载失败、NPU不可用、推理速度慢、流式输出问题、多模态图像识别、Android服务停止、工具调用失效、历史记录丢失、端口占用、文本乱码、Bug报告、技术支持
 **关键词：** 问题、错误、故障、解决方案、troubleshooting、Bug、技术支持
 
-GitHub: https://github.com/quic/ai-engine-direct-helper
+GitHub: https://github.com/qualcomm/qai-appbuilder

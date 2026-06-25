@@ -29,7 +29,7 @@ def download_with_wget(url, dest_path, proxy=None):
 
 def main():
     # ensure_windows_tools()
-    base_dir = os.path.join("ai-engine-direct-helper", "samples", "genie", "python", "models")
+    base_dir = os.path.join("qai-appbuilder", "samples", "genie", "python", "models")
     os.makedirs(base_dir, exist_ok=True)
     proxy = None
 

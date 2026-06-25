@@ -17,7 +17,7 @@ During the  Visual Studio installation process, you will be asked to choose the 
 * **Desktop development with C++**.
 
 ##  1.File Download & Setup Instructions
-First, create a directory named `real_esrgan_x4plus` at any location (e.g., ai-engine-direct-helper\samples\c++\real_esrgan_x4plus). 
+First, create a directory named `real_esrgan_x4plus` at any location (e.g., qai-appbuilder\samples\c++\real_esrgan_x4plus). 
 The final project structure should look like this:
 ```plaintext
 real_esrgan_x4plus/
@@ -44,7 +44,7 @@ Run the following script to install all required dependencies and tools:
 ```
 Then navigate to:
 ```
-ai-engine-direct-helper/samples/
+qai-appbuilder/samples/
 ```
 Copy the entire **`qai_libs`/** folder into your local `real_esrgan_x4plus`/ project directory.
 
@@ -55,13 +55,13 @@ Open a terminal in C:\ai-hub\，and run:
 ```
 .\8.Start_PythonEnv.bat
 pip install py3-wget==1.0.12
-cd ../ai-engine-direct-helper/samples
+cd ../qai-appbuilder/samples
 python python\real_esrgan_x4plus\real_esrgan_x4plus.py
 ```
 **Note: All operations in this step are performed inside the virtual environment py312, which is automatically created and activated by 8.Start_PythonEnv.bat.**
 Then navigate to:
 ```
-ai-engine-direct-helper/samples/python/real_esrgan_x4plus/
+qai-appbuilder/samples/python/real_esrgan_x4plus/
 ```
 Copy the following files into your local `real_esrgan_x4plus`/ directory:
 * **`models`/** folder (contains the real_esrgan_x4plus model (`real_esrgan_x4plus.bin`) files)

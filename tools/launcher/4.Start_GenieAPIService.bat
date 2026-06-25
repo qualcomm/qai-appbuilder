@@ -20,7 +20,7 @@ echo Start Genie Service...
     )
 
     echo Starting C++ Genie Service...
-    cd ai-engine-direct-helper\samples\
+    cd qai-appbuilder\samples\
     echo Please keep this window open. Genie Service is running
     powershell -Command "GenieAPIService\GenieAPIService.exe -c genie\python\models\%MODEL_CONFIG%\config.json"
     echo Genie API Service Started.

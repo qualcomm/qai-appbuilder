@@ -12,7 +12,7 @@ def copy_tools():
     try:
         script_dir = os.path.dirname(".")
         source_base = os.path.join(script_dir, "tools")
-        target_base = os.path.join(script_dir, "ai-engine-direct-helper", "samples", "tools")
+        target_base = os.path.join(script_dir, "qai-appbuilder", "samples", "tools")
         
         dirs_to_check = ["aria2c", "wget"]        
         os.makedirs(target_base, exist_ok=True)
@@ -41,8 +41,8 @@ def copy_tools():
 def install_GenieAPIService():
     tools_dir = "tools"
     zip_file = os.path.join(tools_dir, "GenieAPIService_Stable_QAIRT_v73.zip")
-    extract_root = os.path.join("ai-engine-direct-helper", "samples")
-    extract_dir = os.path.join("ai-engine-direct-helper", "samples", "GenieAPIService")
+    extract_root = os.path.join("qai-appbuilder", "samples")
+    extract_dir = os.path.join("qai-appbuilder", "samples", "GenieAPIService")
 
     if os.path.exists(tools_dir):
         print("tools directory already exists")
@@ -80,7 +80,7 @@ def install_GenieAPIService():
     #    shutil.rmtree(android_root)
 
 def install_QAIRT():
-    extract_root = os.path.join("ai-engine-direct-helper", "samples", "qai_libs")
+    extract_root = os.path.join("qai-appbuilder", "samples", "qai_libs")
     zip_file = os.path.join(extract_root, "QAIRT_Runtime_2.38.0_v73.zip")
 
     if os.path.exists(extract_root):
@@ -128,15 +128,15 @@ def install_git():
 
 def clone_or_update_repo():
     try:
-        repo_dir = "ai-engine-direct-helper"
+        repo_dir = "qai-appbuilder"
 
         if not os.path.exists(repo_dir):
-            print("Cloning ai-engine-direct-helper repository...")
+            print("Cloning qai-appbuilder repository...")
             
             subprocess.run(["git", "clone", "https://github.com/qualcomm/qai-appbuilder.git", "--depth=1"], check=True)
             print(f"Repository cloned to {repo_dir}")
         else:
-            print(f"ai-engine-direct-helper repository already exists at {repo_dir}. Pulling latest changes...")
+            print(f"qai-appbuilder repository already exists at {repo_dir}. Pulling latest changes...")
             
             subprocess.run(["git", "pull"], check=True, cwd=repo_dir)
             print("Latest changes pulled.")

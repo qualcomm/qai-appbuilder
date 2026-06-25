@@ -69,7 +69,7 @@ The automated build script (`build_android.bat`) will:
 
 Simply run:
 ```cmd
-cd ai-engine-direct-helper\samples\genie\c++
+cd qai-appbuilder\samples\genie\c++
 build_android.bat
 ```
 

@@ -65,7 +65,7 @@ inline bool Config::Process()
     bool version{false};
 
     CLI::App app{"Genie API Service - Powerful Local LLM Service"};
-    app.footer("\nSupport: https://github.com/quic/ai-engine-direct-helper");
+    app.footer("\nSupport: https://github.com/qualcomm/qai-appbuilder");
 
     app.add_option("-c,--config_file", config_file, "Path to the config file.");
     app.add_option("--adapter", model_config_.loraAdapter, "the adapter of lora");

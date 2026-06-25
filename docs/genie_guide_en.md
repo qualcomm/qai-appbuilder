@@ -855,7 +855,7 @@ cmake -S .. -B . -A ARM64 -DUSE_GGUF=ON -DUSE_MNN=ON
 #### Set Environment Variables and Paths (Building Android from Windows Host)
 
 ```bat
-cd ai-engine-direct-helper\samples\genie\c++\Service
+cd qai-appbuilder\samples\genie\c++\Service
 Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.42.0.251225
 set PATH=%PATH%;C:\Programs\android-ndk-r26d\toolchains\llvm\prebuilt\windows-x86_64\bin
 Set NDK_ROOT=C:/Programs/android-ndk-r26d/
@@ -866,7 +866,7 @@ Set ANDROID_NDK_ROOT=%NDK_ROOT%
 
 Before building for Android, you need to compile `libappbuilder` first (see the project root [BUILD](https://github.com/qualcomm/qai-appbuilder/blob/main/BUILD.md) documentation), and place the generated `libappbuilder.so` at:
 
-`ai-engine-direct-helper\samples\genie\c++\Service`
+`qai-appbuilder\samples\genie\c++\Service`
 
 #### Build GenieAPIService (Android)
 
@@ -883,7 +883,7 @@ copy "obj\local\arm64-v8a\*.so" "libs\arm64-v8a" /Y
 
 #### Build Android App (Android Studio)
 
-1. Open with Android Studio: `ai-engine-direct-helper\samples\genie\c++\Android`
+1. Open with Android Studio: `qai-appbuilder\samples\genie\c++\Android`
 2. Menu **Build** → **Generate Signed App Bundle / APK** → Select **APK**
 3. Select signing key and complete the build
 4. Get `app-release.apk` in the `...\Android\app\release` directory

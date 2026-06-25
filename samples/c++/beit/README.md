@@ -45,7 +45,7 @@ Run the following script to install all required dependencies and tools:
 ```
 Then navigate to:
 ```
-ai-engine-direct-helper/samples/
+qai-appbuilder/samples/
 ```
 Copy the entire **qai_libs/** folder into your local beit/ project directory.
 
@@ -56,13 +56,13 @@ Open a terminal in C:\ai-hub\，and run:
 ```
 .\8.Start_PythonEnv.bat
 pip install py3-wget==1.0.12
-cd ../ai-engine-direct-helper/samples
+cd ../qai-appbuilder/samples
 python python\beit\beit.py
 ```
 **Note: All operations in this step are performed inside the virtual environment py312, which is automatically created and activated by 8.Start_PythonEnv.bat.**
 Then navigate to:
 ```
-ai-engine-direct-helper/samples/python/beit/
+qai-appbuilder/samples/python/beit/
 ```
 Copy the following files into your local beit/ directory:
 * **models/** folder (contains the BEIT model and imagenet_labels.txt files)

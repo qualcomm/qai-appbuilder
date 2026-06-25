@@ -19,9 +19,9 @@ Step 2. Start a new cmd command prompt window and active python virtual environm
 ```
 <myfletenv path>\Scripts\activate
 ```
-Step 3. Go to ai-engine-direct-helper samples path and start GenieFletUI application with below command:
+Step 3. Go to qai-appbuilder samples path and start GenieFletUI application with below command:
 ```
-cd <your path>\ai-engine-direct-helper\samples
+cd <your path>\qai-appbuilder\samples
 python fletui\GenieFletUI\windows\App\GenieFletUI.py
 ```
 
@@ -32,16 +32,16 @@ Step 1. Start cmd command prompt window and active python virtual environment wi
 ```
 <myfletenv path>\Scripts\activate
 ```
-Step 2. Go to ai-engine-direct-helper GenieFletUI path and generate building .spec file with below command:
+Step 2. Go to qai-appbuilder GenieFletUI path and generate building .spec file with below command:
 ```
-cd <your path>\ai-engine-direct-helper\samples\fletui\GenieFletUI\windows\App
+cd <your path>\qai-appbuilder\samples\fletui\GenieFletUI\windows\App
 python GenieFletUI_generate_spec.py
 ```
 Step 3. Build geniefletui with below command:
 ```
 pyinstaller GenieFletUI.spec
 ```
-GenieFletUI.exe will be saved at <your path>\ai-engine-direct-helper\samples\fletui\GenieFletUI\windows\App\dist <br>
+GenieFletUI.exe will be saved at <your path>\qai-appbuilder\samples\fletui\GenieFletUI\windows\App\dist <br>
 
 ## Note
 

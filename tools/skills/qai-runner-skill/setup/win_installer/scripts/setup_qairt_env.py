@@ -273,7 +273,7 @@ def install_python_deps(root):
         {
             "label": "qai_appbuilder (x64 wheel)",
             "packages": [
-                ("https://github.com/quic/ai-engine-direct-helper/releases/download/v2.45.0/qai_appbuilder-2.45.0-cp310-cp310-win_amd64.whl", "qai_appbuilder"),
+                ("https://github.com/qualcomm/qai-appbuilder/releases/download/v2.45.0/qai_appbuilder-2.45.0-cp310-cp310-win_amd64.whl", "qai_appbuilder"),
             ],
         },
         # ── Batch 2: Core numerical + ONNX (pin numpy first) ──────────────

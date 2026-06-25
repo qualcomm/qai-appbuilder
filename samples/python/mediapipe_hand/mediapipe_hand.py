@@ -802,7 +802,7 @@ def capture_and_display_processed_frames(
     if not capture.isOpened():
         raise ValueError("Unable to open video capture.")
 
-    # image_256x256 = Image.open("C:\\Users\\WM\\Desktop\\QAI\\ai-engine-direct-helper\\samples\\python\\mediapipehand\\input.jpg")
+    # image_256x256 = Image.open("C:\\Users\\WM\\Desktop\\QAI\\qai-appbuilder\\samples\\python\\mediapipehand\\input.jpg")
     # test_Frame256x256 = np.array(image_256x256.convert("RGB"))
 
     frame_count = 0
@@ -867,14 +867,14 @@ def main():
         "--imagefile",
         type=str,
         default=None,
-        # default="C:\\Users\\WM\\Desktop\\QAI\\ai-engine-direct-helper\\samples\\python\\mediapipehand\\input.jpg",
+        # default="C:\\Users\\WM\\Desktop\\QAI\\qai-appbuilder\\samples\\python\\mediapipehand\\input.jpg",
         help="image file path",
     )
     parser.add_argument(
         "--audiofile",
         type=str,
         default=None,
-        # default="C:\\Users\\WM\\Desktop\\QAI\\ai-engine-direct-helper\\samples\\python\\mediapipehand\\sky.wav",
+        # default="C:\\Users\\WM\\Desktop\\QAI\\qai-appbuilder\\samples\\python\\mediapipehand\\sky.wav",
         help="audio file path",
     )
     parser.add_argument(
