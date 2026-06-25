@@ -18,9 +18,9 @@ Step 1. Start cmd command prompt window and active python virtual environment wi
 ```
 <myfletenv path>\Scripts\activate
 ```
-Step 2. Go to ai-engine-direct-helper samples path and start ragsavedoc application with below command:
+Step 2. Go to qai-appbuilder samples path and start ragsavedoc application with below command:
 ```
-cd <your path>\ai-engine-direct-helper\samples
+cd <your path>\qai-appbuilder\samples
 python fletui\GenieFletUI\windows\Ragtool\RagSaveDoc.py
 ```
 
@@ -31,16 +31,16 @@ Step 1. Start cmd command prompt window and active python virtual environment wi
 ```
 <myfletenv path>\Scripts\activate
 ```
-Step 2. Go to ai-engine-direct-helper ragsavedoc path and generate building .spec file with below command:
+Step 2. Go to qai-appbuilder ragsavedoc path and generate building .spec file with below command:
 ```
-cd <your path>\ai-engine-direct-helper\samples\fletui\GenieFletUI\windows\Ragtool
+cd <your path>\qai-appbuilder\samples\fletui\GenieFletUI\windows\Ragtool
 python RagSaveDoc_generate_spec.py
 ```
 Step 3. Build ragsavedoc with below command:
 ```
 pyinstaller RagSaveDoc.spec
 ```
-RagSaveDoc will be saved at <your path>\ai-engine-direct-helper\samples\fletui\GenieFletUI\windows\Ragtool\dist <br>
+RagSaveDoc will be saved at <your path>\qai-appbuilder\samples\fletui\GenieFletUI\windows\Ragtool\dist <br>
 
 ## Note
 

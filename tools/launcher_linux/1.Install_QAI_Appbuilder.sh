@@ -42,7 +42,7 @@ cd ..
 if command -v pixi &> /dev/null; then
     cd "$scriptPath/env" || exit
     
-    if compgen -G "$scriptPath/ai-engine-direct-helper/dist/qai_appbuilder-*.whl" > /dev/null; then
+    if compgen -G "$scriptPath/qai-appbuilder/dist/qai_appbuilder-*.whl" > /dev/null; then
         echo "Wheel file already exists, skipping build..."
     else
         echo "Building QAI AppBuilder..."

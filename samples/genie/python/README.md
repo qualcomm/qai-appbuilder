@@ -33,9 +33,9 @@ pip install uvicorn==0.34.0 pydantic_settings==2.10.1 fastapi==0.115.8 langchain
 ```
 
 ### Step 3: Download models and tokenizer files
-Download the files from the [AI-Hub LLM models](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/python#ai-hub-llm-models) list at the end of this page, save them to following path. <br>
+Download the files from the [AI-Hub LLM models](https://github.com/qualcomm/qai-appbuilder/tree/main/samples/genie/python#ai-hub-llm-models) list at the end of this page, save them to following path. <br>
 ```
-ai-engine-direct-helper\samples\genie\python\models\<model name>
+qai-appbuilder\samples\genie\python\models\<model name>
 ```
 * Select 'Snapdragon® X Elite' as the device for WoS platform while downloading the model.<br>
 * You need to unzip the 'weight_sharing_model_N_of_N.serialized.bin' files from model package and copy them to following path. Download and copy the corresponding 'tokenizer.json' file to the following directory path too. 
@@ -43,15 +43,15 @@ ai-engine-direct-helper\samples\genie\python\models\<model name>
 
 If you want to modify the relative path of the directory where the model file is located, you need to modify the "config.json" file in the corresponding directory of the model to ensure that the 'tokenizer.json', 'htp_backend_ext_config.json' and model files set in the configuration file can be found correctly.
 ```
-ai-engine-direct-helper\samples\genie\python\models\<model name>\config.json
+qai-appbuilder\samples\genie\python\models\<model name>\config.json
 ```
 
-* You can also use your own LLM Genie model (if you have one). Refer to [setup custom model](https://github.com/quic/ai-engine-direct-helper/tree/main/samples/genie/python#setup-custom-model) part for detailed steps.
+* You can also use your own LLM Genie model (if you have one). Refer to [setup custom model](https://github.com/qualcomm/qai-appbuilder/tree/main/samples/genie/python#setup-custom-model) part for detailed steps.
 
 ### Step 4: Switch to samples directory
 Run following commands in Windows terminal:
 ```
-cd ai-engine-direct-helper\samples
+cd qai-appbuilder\samples
 ```
 
 ### Step 5: Run service
@@ -135,14 +135,14 @@ The following is the correct change for the 'tokenizer.json' file of 'Phi-3.5-Mi
 | [Llama 3.1 8B](https://www.aidevhome.com/data/adh2/models/suggested/llama3.1-8b-8380-qnn2.38.zip) | [llama3.1-8b-8380-qnn2.38.zip](https://www.aidevhome.com/data/adh2/models/suggested/llama3.1-8b-8380-qnn2.38.zip) |
 
 ### Setup custom model:
-You can create a subdirectory in the path "ai-engine-direct-helper\samples\genie\python\models\" for your own model and customize the "config.json", "prompt.conf" or "prompt.json" files for your model. Both files should be stored in the same directory as your model files. Then use the new directory which you've created as your model name, the name can be used in the client application. <br>
+You can create a subdirectory in the path "qai-appbuilder\samples\genie\python\models\" for your own model and customize the "config.json", "prompt.conf" or "prompt.json" files for your model. Both files should be stored in the same directory as your model files. Then use the new directory which you've created as your model name, the name can be used in the client application. <br>
 Note: "prompt.conf" is for old version GenieAPIServcie(< 2.0). Since GenieAPIServcie 2.0, we use "prompt.json" to replace it.<br>
 
 1. config.json : Model configuration file. It includes key parameters for the model. You can get several template configuration files for popular models such as Llama 2 & 3, Phi 3.5, Qwen 2 from here:<br>
 https://github.com/quic/ai-hub-apps/tree/main/tutorials/llm_on_genie/configs/genie <br><br>
 You need to make sure that the following parameters in the configuration file point to the correct file path. <br>
 a. tokenizer: The path to the model 'tokenizer.json' file. <br>
-b. extensions: The path to Genie extension configuration file. You can find it from path: 'ai-engine-direct-helper\samples\genie\python\config\htp_backend_ext_config.json'<br>
+b. extensions: The path to Genie extension configuration file. You can find it from path: 'qai-appbuilder\samples\genie\python\config\htp_backend_ext_config.json'<br>
 c. ctx-bins: The path to model context bin files(ctx-bins). Usually a model has 3~5 context bin files. <br>
 d. forecast-prefix-name:The path to the directory where SSD model 'kv-cache.primary.qnn-htp' file is stored. Only SSD model needs this parameter.<br>
 e. other parameters: Set other parameters according to your model. <br>

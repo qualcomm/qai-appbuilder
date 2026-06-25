@@ -60,7 +60,7 @@ https://aka.ms/vs/17/release/vc_redist.arm64.exe
 git clone https://github.com/qualcomm/qai-appbuilder.git --recursive
 
 # 如果已克隆，更新代码
-cd ai-engine-direct-helper
+cd qai-appbuilder
 git pull --recurse-submodules
 ```
 
@@ -108,7 +108,7 @@ pip3 install numpy pillow opencv-python
 git clone https://github.com/qualcomm/qai-appbuilder.git --recursive
 
 # 如果已克隆，更新代码
-cd ai-engine-direct-helper
+cd qai-appbuilder
 git pull --recurse-submodules
 ```
 

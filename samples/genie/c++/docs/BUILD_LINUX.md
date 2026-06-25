@@ -34,7 +34,7 @@ sudo apt install -y git cmake build-essential
 
 ```bash
 git clone https://github.com/qualcomm/qai-appbuilder.git --recursive
-cd ai-engine-direct-helper
+cd qai-appbuilder
 ```
 
 If you already cloned it without `--recursive`, **you must** initialise the

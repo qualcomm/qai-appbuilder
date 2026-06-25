@@ -4,7 +4,7 @@
 
 `build_android.bat` is an automated build script for compiling the Android version of libappbuilder.so and GenieAPIService libraries. The script automatically handles dependencies and organizes all build artifacts into the `build_android` folder, keeping the source code directory clean.
 
-**Script Location**: `ai-engine-direct-helper/samples/genie/c++/build_android.bat`
+**Script Location**: `qai-appbuilder/samples/genie/c++/build_android.bat`
 
 ## Features
 
@@ -138,7 +138,7 @@ Follow the prompts to set passwords and certificate information.
 
 ```cmd
 git clone https://github.com/qualcomm/qai-appbuilder.git --recursive
-cd ai-engine-direct-helper
+cd qai-appbuilder
 ```
 
 ### 2. Configure the Build Script
@@ -260,7 +260,7 @@ This error occurs when Android Studio's embedded JDK is incompatible with the Gr
 
 The automated build script handles JDK compatibility automatically:
 ```cmd
-cd ai-engine-direct-helper\samples\genie\c++
+cd qai-appbuilder\samples\genie\c++
 build_android.bat
 ```
 
@@ -269,7 +269,7 @@ build_android.bat
 If you have JDK 17 installed separately:
 ```cmd
 set JAVA_HOME=C:\Program Files\Java\jdk-17
-cd ai-engine-direct-helper\samples\genie\c++\Android
+cd qai-appbuilder\samples\genie\c++\Android
 gradlew.bat clean assembleRelease
 ```
 
@@ -345,7 +345,7 @@ Automatically builds an Android APK package ready for installation.
 
 ## License
 
-This script follows the same license as the ai-engine-direct-helper project (BSD-3-Clause).
+This script follows the same license as the qai-appbuilder project (BSD-3-Clause).
 
 ## Feedback and Support
 

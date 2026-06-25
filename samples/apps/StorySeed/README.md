@@ -15,15 +15,15 @@ This application randomly selects four words from a list of 200 elementary-level
 
 ## Setting Up Environment
 ### Step 1: Install Dependencies
-• Please refer to [Run the large language model on the local NPU](https://github.com/quic/ai-engine-direct-helper/blob/main/samples/genie/python/README.md).
+• Please refer to [Run the large language model on the local NPU](https://github.com/qualcomm/qai-appbuilder/blob/main/samples/genie/python/README.md).
 
-• Please download [GenieAPIService](https://github.com/quic/ai-engine-direct-helper/releases/download/v2.38.0/GenieAPIService_v2.1.0_QAIRT_v2.38.0_v73.zip) and copy the files in it into the directory "GenieAPIService" under the path "ai-engine-direct-helper\samples".
+• Please download [GenieAPIService](https://github.com/qualcomm/qai-appbuilder/releases/download/v2.38.0/GenieAPIService_v2.1.0_QAIRT_v2.38.0_v73.zip) and copy the files in it into the directory "GenieAPIService" under the path "qai-appbuilder\samples".
 
-• Please download [Qwen2.0-7B-SSD Model](https://www.aidevhome.com/data/adh2/models/8380/qwen2_7b_ssd.zip). Extract it and copy the folder 'Qwen2.0-7B-SSD' into the directory 'ai-engine-direct-helper\samples\genie\python\models'.
+• Please download [Qwen2.0-7B-SSD Model](https://www.aidevhome.com/data/adh2/models/8380/qwen2_7b_ssd.zip). Extract it and copy the folder 'Qwen2.0-7B-SSD' into the directory 'qai-appbuilder\samples\genie\python\models'.
 
 • Run the following 2 commands to launch the Service：
 ```
-cd ai-engine-direct-helper\samples
+cd qai-appbuilder\samples
 GenieAPIService\GenieAPIService.exe -c "genie\python\models\Qwen2.0-7B-SSD\config.json"  -l
 ```
 If the service prints the following logs, indicating that GenieAPIService started successfully.
@@ -69,7 +69,7 @@ Note: please make sure fill in the actual chrome version to install chromedriver
 • Enter the directory and execute the python script:
 
 ```
-cd ai-engine-direct-helper\samples\
+cd qai-appbuilder\samples\
 python apps\StorySeed\StorySeed.py
 ```
 
@@ -87,7 +87,7 @@ Genie Service Started
 and DO NOT input phone number or verification code on the Chrome browser.**
 ```
 ⚠️Please input the verification code in Command line, NOT in Browser⚠️
-Try to load cookies from json: C:\codes\ai-engine-direct-helper\samples\apps\StorySeed\red_cookies.json
+Try to load cookies from json: C:\codes\qai-appbuilder\samples\apps\StorySeed\red_cookies.json
 WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
 I0000 00:00:1753436926.115219   12300 voice_transcription.cc:58] Registering VoiceTranscriptionCapability
 Clean all the inactive cookies
@@ -103,7 +103,7 @@ After the story is posted, you can see the update in [Xiaohongshu](https://creat
 ### Note
 • If you want to use another mobile phone number to login, please delete existing file red_cookies.json firstly.
 • Don't start any other GenieAPIService when executing this app.
-• If you want to use another AI model but not 'Qwen2.0-7B-SSD', for example IBM-Granite-v3.1-8B model, please modify the variable MODEL_NAME in StorySeed.py to be "IBM-Granite-v3.1-8B" , and please copy the model files into the directory 'ai-engine-direct-helper\samples\genie\python\models', try below commands to ensure GenieAPIService can be started successfully(remember press Ctrl+C to stop it manually).
+• If you want to use another AI model but not 'Qwen2.0-7B-SSD', for example IBM-Granite-v3.1-8B model, please modify the variable MODEL_NAME in StorySeed.py to be "IBM-Granite-v3.1-8B" , and please copy the model files into the directory 'qai-appbuilder\samples\genie\python\models', try below commands to ensure GenieAPIService can be started successfully(remember press Ctrl+C to stop it manually).
 ```
 GenieAPIService\GenieAPIService.exe -c "genie\python\models\IBM-Granite-v3.1-8B\config.json"  -l
 ```

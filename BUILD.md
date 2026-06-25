@@ -30,11 +30,11 @@ pip install wheel==0.45.1 setuptools==80.9.0 pybind11==2.13.6 build==1.4.0
 ```
 - Clone this repository to local: 
 ```
-git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
+git clone https://github.com/qualcomm/qai-appbuilder.git --recursive
 ```
 - If you have cloned it before, you can update the code by the following command:
 ```
-cd ai-engine-direct-helper
+cd qai-appbuilder
 git pull --recurse-submodules
 ```
 - Set environment 'QNN_SDK_ROOT' to the Qualcomm® AI Runtime SDK path which you're using. E.g.:
@@ -45,7 +45,7 @@ Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.47.0.260601\
 *Note: Please get the corresponding "Supported Toolchains" and "Hexagon Arch" with your device from [Supported Snapdragon devices](https://docs.qualcomm.com/bundle/publicresource/topics/80-63442-10/QNN_general_overview.html#supported-snapdragon-devices). <br>
 
 ```
-cd ai-engine-direct-helper
+cd qai-appbuilder
 *Note: Make sure to build in the regular Windows Command Prompt — not in the 'ARM64 Native Tools Command Prompt for VS 2022' and not in the 'Power Shell' window.* <br>
      set QNN_SDK_ROOT=C:/Qualcomm/AIStack/QAIRT/2.42.0.251225/
      python -m build -w
@@ -58,8 +58,8 @@ pip install --force-reinstall dist\qai_appbuilder-2.42.0-cp312-cp312-win_amd64.w
 **Clone the repository with submodules:**
 
 ```bash
-git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
-cd ai-engine-direct-helper
+git clone https://github.com/qualcomm/qai-appbuilder.git --recursive
+cd qai-appbuilder
 ```
 
 ### Download QNN SDK
@@ -134,14 +134,14 @@ python -c "import qai_appbuilder; print('QAI AppBuilder installed successfully')
 ### Download QAI AppBuilder source codes:
 Run below command in Windows terminal:
 ```
-git clone https://github.com/quic/ai-engine-direct-helper.git --recursive
+git clone https://github.com/qualcomm/qai-appbuilder.git --recursive
 ```
 
 ### Set PATH and run make.exe to build QAI AppBuilder
 • Download [android ndk](https://dl.google.com/android/repository/android-ndk-r26d-windows.zip).<br>
 • Run following commands in Windows terminal:
 ```
-cd ai-engine-direct-helper
+cd qai-appbuilder
 Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\{Qualcomm® AI Runtime SDK version}\
 Set NDK_ROOT={your ndk root directory}
 set PATH=%PATH%;%NDK_ROOT%\toolchains\llvm\prebuilt\windows-x86_64\bin
@@ -149,7 +149,7 @@ Set ANDROID_NDK_ROOT=%NDK_ROOT%
  
 "%NDK_ROOT%\prebuilt\windows-x86_64\bin\make.exe" android
 ```
-• Then you will see the generated file ai-engine-direct-helper\libs\arm64-v8a\libappbuilder.so.
+• Then you will see the generated file qai-appbuilder\libs\arm64-v8a\libappbuilder.so.
 
 ### Debug issues about AppBuilder
 • Sometimes we will meet error which is related with libAppBuilder.so, for example below abnormal info when execute SuperResolution app on Snapdragon® 8 Elite mobile device. 

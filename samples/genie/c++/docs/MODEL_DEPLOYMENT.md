@@ -5,7 +5,7 @@ You should choose and download models first by following this [Download Link](ht
 The path `models/[MODEL_NAME]/config.json` is recommended. For VLM, Please make the model follow
 the [VLM model layout](#Deployment)
 
-- Windows: move the models to `ai-engine-direct-helper\samples\genie\python\models` path.
+- Windows: move the models to `qai-appbuilder\samples\genie\python\models` path.
 
 - Android: Please push the model files into your device. The model files should be pushed to `/sdcard/GenieModels`.
 

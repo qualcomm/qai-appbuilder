@@ -22,7 +22,7 @@ import PIL.Image
 import builtins
 import re
 
-#current location: ai-engine-direct-helper\samples
+#current location: qai-appbuilder\samples
 CURRENT_DIR = os.getcwd()
 RED_APP_DIR = os.path.join(CURRENT_DIR, "apps", "StorySeed")
 IMAGE_SCRIPT_PATH = os.path.join(CURRENT_DIR, "python", "stable_diffusion_v2_1", "stable_diffusion_v2_1.py")

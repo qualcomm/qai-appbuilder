@@ -40,13 +40,13 @@ git clone https://github.com/qualcomm/qai-appbuilder.git --recursive
 ```
 If you have cloned it before, you can update the code by the following command:
 ```
-cd ai-engine-direct-helper
+cd qai-appbuilder
 git pull --recurse-submodules
 ```
 ### Step 4: Setup QAI AppBuilder Python Environment:
 Run below commands in Windows terminal:
 ```
-cd ai-engine-direct-helper\samples
+cd qai-appbuilder\samples
 python python\setup.py
 ```
 

@@ -28,7 +28,7 @@ pip install gradio==5.35.0 qai_hub_models==0.30.2 huggingface_hub==0.33.1 Pillow
 ### Step 3: Switch to samples directory:
 Run below commands in Windows terminal:
 ```
-cd ai-engine-direct-helper\samples
+cd qai-appbuilder\samples
 ```
 
 ### Step 4: Run WebUI Apps:

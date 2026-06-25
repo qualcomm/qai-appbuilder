@@ -15,7 +15,7 @@ echo "Installing large language model..."
 cd env || exit
 
 # 执行 pixi 命令
-if [ -f "$currentDir/ai-engine-direct-helper/samples/genie/python/models/IBM-Granite-v3.1-8B/weight_sharing_model_4_of_5.serialized.bin" ]; then
+if [ -f "$currentDir/qai-appbuilder/samples/genie/python/models/IBM-Granite-v3.1-8B/weight_sharing_model_4_of_5.serialized.bin" ]; then
     echo "LLM Models already exists, skipping download..."
 else
     echo "Download LLM Models..."
