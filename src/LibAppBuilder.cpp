@@ -285,6 +285,14 @@ bool RelPerfProfileGlobal() {
       return false;
     }
 
+    // issue#109/#4: never dereference a null HTP infrastructure handle. This
+    // can happen if the backend/context was released between Set and Rel.
+    if (nullptr == gs_htpInfra) {
+      QNN_ERR("RelPerfProfileGlobal::HTP infrastructure is not available (context released?)\n");
+      sg_perf_global = false;
+      return false;
+    }
+
     sg_perf_global = false;
     QnnHtpDevice_PerfInfrastructure_t perfInfra = gs_htpInfra->perfInfra;
     QNN_INF("PERF::RelPerfProfileGlobal");
@@ -635,9 +643,13 @@ bool ModelInferenceEx(std::string model_name, std::string proc_name, std::string
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
 
     if (nullptr == app) {
-	    QNN_WARN("getQnnInferenceEngine returns null in ModelInferenceEx.");
-        result = false;
-    } else if (result && qnn_app::StatusCode::SUCCESS != app->executeGraphsBuffers(inputBuffers, outputBuffers, outputSize, perfProfile, graphIndex, share_memory_size)) {
+        // issue#109/#4: model missing/released. Bail out without dereferencing
+        // the null app and without re-inserting a null entry into the map.
+        QNN_WARN("getQnnInferenceEngine returns null in ModelInferenceEx (model not found or released): %s\n", model_name.c_str());
+        return false;
+    }
+
+    if (qnn_app::StatusCode::SUCCESS != app->executeGraphsBuffers(inputBuffers, outputBuffers, outputSize, perfProfile, graphIndex, share_memory_size)) {
         app->reportError("Inference failure");
         result = false;
     }
@@ -664,7 +676,10 @@ bool ModelDestroyEx(std::string model_name, std::string proc_name) {
 
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     if (nullptr == app) {
-        app->reportError("Can't find the model with model_name: " + model_name);
+        // issue#109/#4: the model was never registered or has already been
+        // destroyed/taken. Do NOT dereference the null app (the original code
+        // called app->reportError here, which crashed on a repeated destroy).
+        QNN_WARN("ModelDestroy: can't find the model with model_name: %s (already destroyed?)\n", model_name.c_str());
         return false;
     }
 
@@ -751,20 +766,19 @@ bool LibAppBuilder::ModelApplyBinaryUpdate(const std::string model_name, std::ve
     bool result = true;
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     if (nullptr == app) {
-        QNN_WARN("Apply binary update failure: %s\n", model_name.c_str());
-        result = false;
+        // issue#109/#4: model missing/released. Bail out without dereferencing
+        // the null app and without re-inserting a null entry into the map.
+        QNN_WARN("Apply binary update failure: %s (model not found or released)\n", model_name.c_str());
+        return false;
     }
-    
-    if (result) {
-        app->update_m_lora_adapters(lora_adapters);
 
-        QNN_INFO("Applying Binary update on the graph");
+    app->update_m_lora_adapters(lora_adapters);
 
-        if (qnn_app::StatusCode::SUCCESS != app->contextApplyBinarySection(QNN_CONTEXT_SECTION_UPDATABLE)) {
-            app->reportError("Binary update failure");
-            result = false;
-        }
-    
+    QNN_INFO("Applying Binary update on the graph");
+
+    if (qnn_app::StatusCode::SUCCESS != app->contextApplyBinarySection(QNN_CONTEXT_SECTION_UPDATABLE)) {
+        app->reportError("Binary update failure");
+        result = false;
     }
 
     putQnnApp(model_name, std::move(app));
@@ -794,6 +808,10 @@ bool LibAppBuilder::DeleteShareMemory(std::string share_memory_name) {
 // issue#24
 std::vector<std::vector<size_t>> LibAppBuilder::getOutputShapes(std::string model_name){
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
+    if (nullptr == app) {  // issue#109/#4: guard against released/missing context.
+        QNN_WARN("getOutputShapes: model not found or released: %s\n", model_name.c_str());
+        return {};
+    }
     m_outputShapes = app->getOutputShapes();
     putQnnApp(model_name, std::move(app));
     return m_outputShapes;
@@ -801,6 +819,10 @@ std::vector<std::vector<size_t>> LibAppBuilder::getOutputShapes(std::string mode
 
 std::vector<std::vector<size_t>> LibAppBuilder::getInputShapes(std::string model_name){
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
+    if (nullptr == app) {  // issue#109/#4
+        QNN_WARN("getInputShapes: model not found or released: %s\n", model_name.c_str());
+        return {};
+    }
     m_inputShapes = app->getInputShapes();
     putQnnApp(model_name, std::move(app));
     return m_inputShapes;
@@ -808,6 +830,10 @@ std::vector<std::vector<size_t>> LibAppBuilder::getInputShapes(std::string model
 
 std::vector<std::string> LibAppBuilder::getInputDataType(std::string model_name){
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
+    if (nullptr == app) {  // issue#109/#4
+        QNN_WARN("getInputDataType: model not found or released: %s\n", model_name.c_str());
+        return {};
+    }
     m_inputDataType = app->getInputDataType();
     putQnnApp(model_name, std::move(app));
     return m_inputDataType;
@@ -815,6 +841,10 @@ std::vector<std::string> LibAppBuilder::getInputDataType(std::string model_name)
 
 std::vector<std::string> LibAppBuilder::getOutputDataType(std::string model_name){
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
+    if (nullptr == app) {  // issue#109/#4
+        QNN_WARN("getOutputDataType: model not found or released: %s\n", model_name.c_str());
+        return {};
+    }
     m_outputDataType = app->getOutputDataType();
     putQnnApp(model_name, std::move(app));
     return m_outputDataType;
@@ -822,6 +852,10 @@ std::vector<std::string> LibAppBuilder::getOutputDataType(std::string model_name
 
 std::string LibAppBuilder::getGraphName(std::string model_name){
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
+    if (nullptr == app) {  // issue#109/#4
+        QNN_WARN("getGraphName: model not found or released: %s\n", model_name.c_str());
+        return {};
+    }
     m_graphName = app->getGraphName();
     putQnnApp(model_name, std::move(app));
     return m_graphName;
@@ -829,6 +863,10 @@ std::string LibAppBuilder::getGraphName(std::string model_name){
 
 std::vector<std::string> LibAppBuilder::getInputName(std::string model_name){
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
+    if (nullptr == app) {  // issue#109/#4
+        QNN_WARN("getInputName: model not found or released: %s\n", model_name.c_str());
+        return {};
+    }
     m_inputName = app->getInputName();
     putQnnApp(model_name, std::move(app));
     return m_inputName;
@@ -836,6 +874,10 @@ std::vector<std::string> LibAppBuilder::getInputName(std::string model_name){
 
 std::vector<std::string> LibAppBuilder::getOutputName(std::string model_name){
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
+    if (nullptr == app) {  // issue#109/#4
+        QNN_WARN("getOutputName: model not found or released: %s\n", model_name.c_str());
+        return {};
+    }
     m_outputName = app->getOutputName();
     putQnnApp(model_name, std::move(app));
     return m_outputName;
@@ -888,34 +930,36 @@ ModelInfo_t LibAppBuilder::getModelInfo(std::string model_name, std::string inpu
     return getModelInfoExt(model_name, input);
 }
 ModelInfo_t LibAppBuilder::getModelInfoExt(std::string model_name, std::string input) {
-    bool result = true;
     ModelInfo_t info;
 
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     if (nullptr == app) {
-	    QNN_WARN("getModelInfoExt failure: %s\n", model_name.c_str());
-        result = false;
+        // issue#109/#4: model missing/released. Return empty info without
+        // dereferencing the null app or re-inserting a null map entry.
+        QNN_WARN("getModelInfoExt failure: %s (model not found or released)\n", model_name.c_str());
+        return info;
     }
-    if(result){
-        if (input == "is") {
-            info.inputShapes = app->getInputShapes();
-        } else if (input == "id") {
-            info.inputDataType = app->getInputDataType();
-        } else if (input == "os") {
-            info.outputShapes = app->getOutputShapes();
-        } else if (input == "od") {
-            info.outputDataType = app->getOutputDataType();
-        } else if (input == "in") {
-            info.inputName = app->getInputName();
-        } else if (input == "on") {
-            info.outputName = app->getOutputName();
-        } else if (input == "gn") {
-            info.graphName = app->getGraphName();
-        } else {
-            printf("wrong input in LibAppBuilder::getModelInfoExt: %s\n", input.c_str());
-            app->reportError("getModelInfoExt failure");
-            return info;
-        }
+
+    if (input == "is") {
+        info.inputShapes = app->getInputShapes();
+    } else if (input == "id") {
+        info.inputDataType = app->getInputDataType();
+    } else if (input == "os") {
+        info.outputShapes = app->getOutputShapes();
+    } else if (input == "od") {
+        info.outputDataType = app->getOutputDataType();
+    } else if (input == "in") {
+        info.inputName = app->getInputName();
+    } else if (input == "on") {
+        info.outputName = app->getOutputName();
+    } else if (input == "gn") {
+        info.graphName = app->getGraphName();
+    } else {
+        printf("wrong input in LibAppBuilder::getModelInfoExt: %s\n", input.c_str());
+        app->reportError("getModelInfoExt failure");
+        // Put the app back before returning so the model is not lost.
+        putQnnApp(model_name, std::move(app));
+        return info;
     }
     putQnnApp(model_name, std::move(app));
 
@@ -923,8 +967,12 @@ ModelInfo_t LibAppBuilder::getModelInfoExt(std::string model_name, std::string i
 }
 
 uint64_t LibAppBuilder::getProfilingEvent(std::string model_name, uint32_t eventType){
-    uint64_t eventValue;
+    uint64_t eventValue = 0;
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
+    if (nullptr == app) {  // issue#109/#4
+        QNN_WARN("getProfilingEvent: model not found or released: %s\n", model_name.c_str());
+        return 0;
+    }
     eventValue = app->getProfilingEvent(eventType);
     putQnnApp(model_name, std::move(app));
     return eventValue;

@@ -10,6 +10,8 @@ import os
 import sys
 import importlib.util
 
+from qai_appbuilder.qnncontext import _register_context, _unregister_context
+
 spec = importlib.util.find_spec("qai_appbuilder.geniebuilder")
 if spec is not None:
     from qai_appbuilder import geniebuilder
@@ -18,6 +20,9 @@ if spec is not None:
 
 class GenieContext:
     """High-level Python wrapper for a GenieBuilder model."""
+
+    _released = False
+
     def __init__(self,
                 config: str = "None",
                 debug: bool = False
@@ -25,6 +30,7 @@ class GenieContext:
         self.config = config
         self.debug = debug
         self.m_context = geniebuilder.GenieContext(config, debug)
+        _register_context(self)
 
     def Query(self, prompt, callback):
         return self.m_context.Query(prompt, callback)
@@ -66,7 +72,32 @@ class GenieContext:
     def TokenLength(self, text):
         return self.m_context.TokenLength(text)
 
+    def release(self):
+        """Deterministically release the underlying Genie context (idempotent)."""
+        if getattr(self, "_released", False):
+            return
+        self._released = True
+        m_context = getattr(self, "m_context", None)
+        if m_context is not None:
+            self.m_context = None
+            try:
+                del m_context
+            except Exception as e:
+                print(f"[WARN] Failed to release Genie context: {e}")
+        try:
+            _unregister_context(self)
+        except Exception:
+            pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.release()
+        return False
+
     def __del__(self):
-        if hasattr(self, "m_context") and self.m_context is not None:
-            del(self.m_context)
-            m_context = None
+        try:
+            self.release()
+        except Exception:
+            pass
