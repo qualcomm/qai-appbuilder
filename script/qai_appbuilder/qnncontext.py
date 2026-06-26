@@ -39,6 +39,66 @@ g_base_path = os.path.dirname(os.path.abspath(__file__))
 # Windows, ':' on Linux) so the spawned QAIAppSvc service binary is found.
 _path_env = os.getenv('PATH')
 g_base_path = (_path_env if _path_env else "") + os.pathsep + g_base_path + os.pathsep
+# ---------------------------------------------------------------------------
+# Active-context registry & fork safety (see GitHub issue #109)
+# ---------------------------------------------------------------------------
+# Python's ``del`` and ``gc.collect()`` provide no deterministic, idempotent
+# resource release for the underlying C++ QNN contexts. In addition, on Linux
+# ``multiprocessing`` defaults to ``fork()``, which clones all unreleased C++
+# context state (HTP device handles, backend library handles, the internal
+# model map, the QAIAppSvc IPC channel, ...) into the child process where those
+# handles are invalid.
+#
+# To make lifecycle management safe we:
+#   1. Track every live context object in a weak registry.
+#   2. Expose a module-level ``release_all()`` that deterministically releases
+#      every registered context.
+#   3. Register ``release_all()`` as an ``os.register_at_fork(before=...)``
+#      handler so the parent's C++ state is drained *before* any fork, leaving
+#      the child with a clean slate.
+import threading
+import weakref
+
+_active_contexts = weakref.WeakSet()
+_active_contexts_lock = threading.RLock()
+
+
+def _register_context(ctx):
+    """Register a live context so it can be released deterministically."""
+    with _active_contexts_lock:
+        _active_contexts.add(ctx)
+
+
+def _unregister_context(ctx):
+    """Remove a context from the active registry (best-effort)."""
+    with _active_contexts_lock:
+        _active_contexts.discard(ctx)
+
+
+def release_all():
+    """Deterministically release every live QNN/Genie context.
+
+    This drains the active-context registry and calls ``release()`` on each
+    registered object. It is safe to call multiple times (each ``release()``
+    is idempotent) and is registered as a pre-fork handler so child processes
+    never inherit live C++ context state.
+    """
+    with _active_contexts_lock:
+        contexts = list(_active_contexts)
+    for ctx in contexts:
+        try:
+            ctx.release()
+        except Exception as e:  # never let cleanup raise
+            print(f"[WARN] release_all: failed to release a context: {e}")
+
+
+# Register the pre-fork handler exactly once. ``register_at_fork`` only exists
+# on platforms that support fork (POSIX); guard accordingly.
+if hasattr(os, "register_at_fork"):
+    try:
+        os.register_at_fork(before=release_all)
+    except (RuntimeError, ValueError):
+        pass
 
 
 def timer(func):
@@ -69,6 +129,25 @@ def reshape_output(output, outputshape_list):
         except (ValueError, TypeError, IndexError) as e:
             print(f"reshape {outputshape_list[i]} error:{e}")
     return output
+    def release(self):
+        """Release the underlying ORT InferenceSession (idempotent)."""
+        sess = getattr(self, "session", None)
+        if sess is not None:
+            self.session = None
+            del sess
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.release()
+        return False
+
+    def __del__(self):
+        try:
+            self.release()
+        except Exception:
+            pass
 
 
 class LogLevel:
@@ -206,8 +285,12 @@ class _QNNContextBase:
     - backend/system lib path resolving
     - common getters (issue#24)
     - inference reshape workflow
-    - resource cleanup
+    - resource cleanup (deterministic, idempotent release - issue#109)
     """
+
+    # Set True once the underlying C++ context has been released. Guards against
+    # repeated release (e.g. via gc.collect()) and operating on a stale context.
+    _released = False
 
     def _validate_model_path(self):
         if self.model_path == "None":
@@ -222,7 +305,16 @@ class _QNNContextBase:
             system_lib_path = g_system_lib_path
         return backend_lib_path, system_lib_path
 
+    def _ensure_live(self, op: str):
+        """Raise if the context has already been released (issue#109, issue#4)."""
+        if getattr(self, "_released", False) or getattr(self, "m_context", None) is None:
+            raise RuntimeError(
+                f"Cannot perform '{op}': context "
+                f"'{getattr(self, 'model_name', '<unknown>')}' has been released."
+            )
+
     def _call_ctx_getter(self, method_name: str):
+        self._ensure_live(method_name)
         method = getattr(self.m_context, method_name)
         if hasattr(self, "proc_name"):
             return method(self.proc_name)
@@ -251,18 +343,57 @@ class _QNNContextBase:
         return self._call_ctx_getter("getOutputName")
     
     def getProfilingEvent(self, eventType):
+        self._ensure_live("getProfilingEvent")
         return self.m_context.getProfilingEvent(eventType)
 
     def _inference_and_reshape(self, input, infer_fn):
+        self._ensure_live("Inference")
         input = reshape_input(input)
         output = infer_fn(input)
         outputshape_list = self.getOutputShapes()
         output = reshape_output(output, outputshape_list)
         return output
 
+    @property
+    def is_released(self) -> bool:
+        """True once the underlying C++ context has been released."""
+        return getattr(self, "_released", False) or getattr(self, "m_context", None) is None
+
+    def release(self):
+        """Deterministically release the underlying C++ context.
+
+        Idempotent: guarded by ``_released`` so repeated calls (including via
+        ``gc.collect()`` or ``__del__``) are safe no-ops. After release the
+        context must not be used for inference, metadata queries, etc."""
+        if getattr(self, "_released", False):
+            return
+        self._released = True
+        m_context = getattr(self, "m_context", None)
+        if m_context is not None:
+            self.m_context = None
+            try:
+                del m_context
+            except Exception as e:
+                print(f"[WARN] Failed to release context "
+                      f"'{getattr(self, 'model_name', '<unknown>')}': {e}")
+        # Drop our registry entry so release_all() won't revisit us.
+        try:
+            _unregister_context(self)
+        except Exception:
+            pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.release()
+        return False
+
     def __del__(self):
-        if hasattr(self, "m_context") and self.m_context is not None:
-            del self.m_context
+        try:
+            self.release()
+        except Exception:
+            pass
 
 
 class QNNContext(_QNNContextBase):
@@ -284,6 +415,7 @@ class QNNContext(_QNNContextBase):
             model_path (str): model path
         """
         self.model_path = model_path
+        self.model_name = model_name
         self.input_data_type = input_data_type
         self.output_data_type = output_data_type
 
@@ -292,6 +424,7 @@ class QNNContext(_QNNContextBase):
 
         self.m_context = appbuilder.QNNContext(model_name, model_path, backend_lib_path, system_lib_path,
                                               is_async, input_data_type, output_data_type, deviceID, coreIdsStr)
+        _register_context(self)
 
     #@timer
     def Inference(self, input, perf_profile=PerfProfile.DEFAULT, graphIndex=0):
@@ -338,9 +471,11 @@ class QNNContextProc(_QNNContextBase):
         os.putenv('PATH', g_base_path)
         self.m_context = appbuilder.QNNContext(model_name, proc_name, model_path, backend_lib_path, system_lib_path,
                                               is_async, input_data_type, output_data_type, deviceID, coreIdsStr)
+        _register_context(self)
 
     #@timer
     def Inference(self, shareMemory, input, perf_profile=PerfProfile.DEFAULT, graphIndex=0):
+        self._ensure_live("Inference")
         total_input_bytes = sum(arr.nbytes for arr in input)
         if total_input_bytes > shareMemory.share_memory_size:
             raise ValueError(f"Input data size {total_input_bytes} exceeds share memory size {shareMemory.share_memory_size}, you need to create a larger share memory for model {self.model_name} @ process {self.proc_name}.")
@@ -389,6 +524,7 @@ class QNNLoraContext(_QNNContextBase):
 
         self.m_context = appbuilder.QNNContext(model_name, model_path, backend_lib_path, system_lib_path, m_lora_adapters,
                                               is_async, input_data_type, output_data_type, deviceID, coreIdsStr)
+        _register_context(self)
 
     #@timer
     def Inference(self, input, perf_profile=PerfProfile.DEFAULT, graphIndex=0):
@@ -398,6 +534,7 @@ class QNNLoraContext(_QNNContextBase):
         )
 
     def apply_binary_update(self, lora_adapters=None):
+        self._ensure_live("apply_binary_update")
         self.lora_adapters = lora_adapters
         m_lora_adapters = []
         for adapter in lora_adapters:
@@ -407,6 +544,8 @@ class QNNLoraContext(_QNNContextBase):
 
 class QNNShareMemory:
     """High-level Python wrapper for a AppBuilder model."""
+
+    _released = False
 
     def __init__(self,
                  share_memory_name: str = "None",
@@ -420,10 +559,33 @@ class QNNShareMemory:
         self.m_memory = appbuilder.ShareMemory(share_memory_name, share_memory_size)
         self.share_memory_size = share_memory_size
 
+    def release(self):
+        """Deterministically release the shared memory (idempotent)."""
+        if getattr(self, "_released", False):
+            return
+        self._released = True
+        m_memory = getattr(self, "m_memory", None)
+        if m_memory is not None:
+            self.m_memory = None
+            try:
+                del m_memory
+            except Exception as e:
+                print(f"[WARN] Failed to release share memory "
+                      f"'{getattr(self, 'share_memory_name', '<unknown>')}': {e}")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.release()
+        return False
+
     #@timer
     def __del__(self):
-        if hasattr(self, "m_memory") and self.m_memory is not None:
-            del self.m_memory
+        try:
+            self.release()
+        except Exception:
+            pass
 
 
 class LoraAdapter:  # this will just hold data
