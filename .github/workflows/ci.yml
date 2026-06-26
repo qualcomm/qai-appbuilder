@@ -196,17 +196,35 @@ jobs:
         run: |
           $whl = Get-ChildItem dist/qai_appbuilder-*.whl | Select-Object -First 1
           if (-not $whl) { Write-Error "No wheel produced in dist/"; exit 1 }
+
+          # Rename wheel so its name reflects the actual ABI (ARM64EC),
+          # not setuptools' generic win_arm64 tag. Without this the file
+          # name is byte-for-byte identical to the native windows-arm64
+          # wheel produced by the other matrix, which is confusing for
+          # end users and collides on upload.
+          # Naming follows PEP 425 conventions but uses a non-standard
+          # platform tag — pip will still install it on x64 Python that
+          # was launched from a WOS device.
+          $renamed = $whl.Name -replace 'win_arm64', 'win_arm64ec'
+          if ($renamed -ne $whl.Name) {
+            Rename-Item $whl.FullName $renamed
+            $whl = Get-ChildItem dist/qai_appbuilder-*-win_arm64ec.whl | Select-Object -First 1
+          }
+
           Write-Host "Built: $($whl.Name)"
           python -c "import sys, zipfile; [print(n) for n in zipfile.ZipFile(sys.argv[1]).namelist()]" $whl.FullName
           # Expose the wheel basename (no .whl suffix) so upload-artifact can
           # mirror the canonical wheel filename: e.g.
-          #   qai_appbuilder-2.47.0-cp312-cp312-win_amd64
+          #   qai_appbuilder-2.47.0-cp312-cp312-win_arm64ec
           $stem = [System.IO.Path]::GetFileNameWithoutExtension($whl.Name)
           "wheel-stem=$stem" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with:
+          # Wheel was renamed above to carry `win_arm64ec` instead of
+          # `win_arm64`, so the artifact name is naturally disjoint from
+          # the native windows-arm64 job's artifact.
           name: ${{ steps.list-x64.outputs.wheel-stem }}-qnn${{ matrix.qnn.version }}
           path: |
             dist/*.whl
