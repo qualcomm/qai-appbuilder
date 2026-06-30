@@ -1,3 +1,7 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
 """Smoke tests for the installed qai_appbuilder wheel.
 
 These tests intentionally avoid loading a real model so they can run in CI after
