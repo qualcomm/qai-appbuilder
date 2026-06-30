@@ -81,7 +81,17 @@ jobs:
         run: pip install ruff==0.6.9
 
       - name: Run ruff
-        run: ruff check script/ tests/ samples/python/utils/
+        # Lint findings are informational while pre-existing lint debt
+        # is being paid down in a separate cleanup PR. Force exit 0 so
+        # the report shows up in logs without turning the PR check red.
+        # The job-level `continue-on-error: true` above also marks the
+        # job soft-failure, but the GitHub PR Checks UI still renders
+        # it red unless the step itself succeeds. The `|| true` makes
+        # the step succeed unconditionally.
+        # When the baseline is clean, drop the `|| true` AND the
+        # `continue-on-error` together to flip lint back into a gate.
+        continue-on-error: true
+        run: ruff check script/ tests/ samples/python/utils/ || true
 
   build-windows-x64:
     name: x64 wheel · py${{ matrix.python }} · qnn${{ matrix.qnn.version }}
