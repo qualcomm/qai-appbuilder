@@ -1,3 +1,7 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
 """Deeper CPU-only smoke tests for the qai_appbuilder wheel.
 
 Goes beyond `test_package_smoke.py` (which only checks Python-level imports
