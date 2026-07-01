@@ -13,7 +13,7 @@ Note: Contributions are welcome. Please ensure thorough testing before deploying
     - For specific usage, please refer to the [Wisper](../samples/python/whisper_base_en/whisper_base_en.py) example code.<br>
 
 ### Supported model's file format:
-- We support run .bin and [.dlc](#dlc-support) model file on HTP and run .so model file model file on CPU.
+- .bin & .dlc & .so & .onnx.
 
 ## Environment Setup
 ** For Python developers, from v2.0.0, we don't need to prepare the below libraries since we've included these libraries into QAI AppBuilder extension(*.whl). <br>
@@ -69,6 +69,7 @@ There're several Python classes from this extension:
 - QNNShareMemory - It's used to create processes share memory while using *QNNContextProc*.
 - QNNConfig - It's for configuring  Qualcomm® AI Runtime SDK libraries path, runtime(CPU/HTP), log leverl, profiling level.
 - PerfProfile - Set the HTP perf profile.
+- OnnxRuntimeContext - A backend for running `.onnx` model files via `onnxruntime_qnn` (QNN HTP Execution Provider). 
 - More Apis: getInputShapes()/getInputDataType()/getInputName()/getOutputShapes()/getOutputDataType()/getOutputName()/getGraphName(), refer to usage sample codes in [real_esrgan_x4plus.py](https://github.com/qualcomm/qai-appbuilder/blob/main/samples/python/real_esrgan_x4plus/real_esrgan_x4plus.py#L167).
 
 ## Notes: <br>
@@ -209,3 +210,48 @@ libAppBuilder.ModelDestroy(model_name);
 ###  load .dlc model file directly from QAIRT version 2.41.0.251128 onwards.
 You only need to put the .dlc model file at the same folder of your .bin file, and modify corresponding model path in your app.
 A new .dlc.bin file will be generated after load and run .dlc model at the first time, then will load that new .dlc.bin file when run your app later to save time. Usage sample codes can refer to [real_esrgan_x4plus.py](https://github.com/qualcomm/qai-appbuilder/commit/dbc36f61c816e3864793f82eb1e688e0ad52216a).
+
+## ONNX Support
+
+From PR [#126](https://github.com/qualcomm/qai-appbuilder/pull/126), QAI AppBuilder supports running `.onnx` model files directly via the new `OnnxRuntimeContext` class, which uses `onnxruntime_qnn` (the QNN HTP Execution Provider for ONNX Runtime) to accelerate inference on the Snapdragon NPU (HTP).
+
+### Overview
+
+| Feature | Details |
+|---|---|
+| Model format | Standard `.onnx` (FP32 or FP16) |
+| Backend | `onnxruntime_qnn` — QNN HTP Execution Provider |
+| Fallback | Automatically falls back to `CPUExecutionProvider` if QNN EP is unavailable |
+| Platform | Windows on Snapdragon (WoS, ARM64); also works on x86 with CPU fallback |
+| API class | `OnnxRuntimeContext` (from `qai_appbuilder`) |
+
+### Prerequisites
+
+Install `onnxruntime_qnn` (the QNN-enabled ONNX Runtime package for Snapdragon):
+
+```bash
+pip install onnxruntime_qnn
+```
+
+> **Note:** `onnxruntime_qnn` is a separate package from the standard `onnxruntime`. It bundles the QNN Execution Provider and the required QNN HTP backend libraries. It is available for ARM64 (WoS) and x64 Windows.
+
+### API: OnnxRuntimeContext
+
+`OnnxRuntimeContext` provides the same interface as `QNNContext` for metadata queries and inference, so existing code patterns work with minimal changes.
+
+#### Constructor
+
+```python
+OnnxRuntimeContext(model_name: str, model_path: str, use_cpu: bool = False)
+```
+
+| Parameter | Description |
+|---|---|
+| `model_name` | A unique name string for this model instance |
+| `model_path` | Path to the `.onnx` model file |
+| `use_cpu` | If `True`, forces `CPUExecutionProvider` (skips QNN HTP EP); default `False` |
+
+### Sample scripts using OnnxRuntimeContext
+
+- [yolov8_det-onnx.py](https://github.com/qualcomm/qai-appbuilder/blob/main/samples/python/yolov8_det/yolov8_det-onnx.py) — YOLOv8 object detection via ONNX Runtime QNN EP
+- [real_esrgan_x4plus.py](https://github.com/qualcomm/qai-appbuilder/blob/main/samples/python/real_esrgan_x4plus/real_esrgan_x4plus.py) — Real-ESRGAN super-resolution with `--onnx` flag (auto-generates FP16 ONNX from PyTorch weights)

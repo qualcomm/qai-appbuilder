@@ -2139,6 +2139,7 @@ QAI AppBuilder supports multiple model formats for different runtimes and scenar
 | `.bin` | HTP/CPU | Precompiled binary format, fastest loading (recommended) |
 | `.dlc` | HTP/CPU | Direct loading supported from QAIRT 2.41.0 |
 | `.so` | CPU | Shared library format, runs only on CPU |
+| `.onnx` | HTP/CPU | Direct loading supported from v2.0.0, automatically uses ONNX Runtime (recommended) |
 
 #### 5.3.2 Direct DLC Model Loading
 
@@ -2198,6 +2199,26 @@ output = model.Inference([input_data])
 
 del model
 ```
+#### 5.3.4 Direct ONNX Model Loading (Recommended)
+
+**ONNX Runtime Features**:
+
+- ✅ **Auto Detection**: QNNContext automatically detects `.onnx` files and uses ONNX Runtime
+- ✅ **HTP Acceleration**: Automatically selects HTP backend for best performance
+- ✅ **FP16 Precision**: FP16 precision enabled by default for improved performance
+- ✅ **CPU Fallback**: Automatically falls back to CPU when QNN provider is unavailable
+- ✅ **Backward Compatible**: Existing `.bin` users experience no API changes
+
+**ONNX Model Usage Example**:
+
+[yolov8_det](https://github.com/qualcomm/qai-appbuilder/pull/124/changes) & [real_esrgan_x4plus](https://github.com/qualcomm/qai-appbuilder/commit/6b0470b9760f42be5b364e6ace38f154030d303a)
+
+**Notes**:
+
+- ONNX models automatically execute on HTP without manual conversion
+- First loading may take some time for initialization
+- Supports all standard ONNX model operators
+- Unsupported operators automatically fall back to CPU execution
 
 ---
 
