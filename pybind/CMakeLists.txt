@@ -29,6 +29,10 @@ if (WIN32)
     target_link_libraries(${PROJECT_NAME} PUBLIC libappbuilder)
 else()
     target_link_libraries(${PROJECT_NAME} PUBLIC appbuilder.so)
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        INSTALL_RPATH "$ORIGIN"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
 endif()
 
 
@@ -48,6 +52,10 @@ if(GENIE_LIBRARY)
         target_link_libraries(geniebuilder PUBLIC Genie)
     else()
         target_link_libraries(geniebuilder PUBLIC libGenie.so)
+        set_target_properties(geniebuilder PROPERTIES
+            INSTALL_RPATH "$ORIGIN"
+            BUILD_WITH_INSTALL_RPATH TRUE
+        )
     endif()
 
     target_include_directories(geniebuilder PUBLIC $ENV{QNN_SDK_ROOT}/include/Genie)
