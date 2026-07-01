@@ -2123,7 +2123,17 @@ qnn_app::StatusCode qnn_app::QnnInferenceEngine::initializePerformance() {
         return StatusCode::SUCCESS;
     }
     QnnDevice_Infrastructure_t deviceInfra = nullptr;
-    if (QNN_SUCCESS != m_qnnFunctionPointers.qnnInterface.deviceGetInfrastructure(&deviceInfra)) {
+    Qnn_ErrorHandle_t infraStatus = m_qnnFunctionPointers.qnnInterface.deviceGetInfrastructure(&deviceInfra);
+    if (QNN_SUCCESS != infraStatus) {
+        if (QNN_DEVICE_ERROR_UNSUPPORTED_FEATURE == infraStatus) {
+            // Non-HTP backends (CPU) do not expose device power infrastructure.
+            // Set m_runInCpu=true so that destroyPerformance(), boostPerformance()
+            // and resetPerformance() short-circuit via their existing
+            // `if (true == m_runInCpu) return StatusCode::SUCCESS` guard —
+            // preventing a crash from uninitialized m_perfInfra/m_powerConfigId.
+            m_runInCpu = true;
+            return StatusCode::SUCCESS;
+        }
         QNN_ERROR("Failure in deviceGetInfrastructure()");
         return StatusCode::FAILURE;
     }
