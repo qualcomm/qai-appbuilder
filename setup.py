@@ -31,6 +31,7 @@
 #     export QNN_SDK_ROOT=~/QAIRT/2.38.0.250901/
 #     export QAI_TOOLCHAINS=aarch64-oe-linux-gcc11.2
 #     export QAI_CMAKE_TOOLCHAIN_FILE=~/toolchain-aarch64.cmake
+#     export QAI_DSP_ARCHES=73,75,79 (optional - defaults to a per-OS list)
 #     python -m build -w
 
 # =============================================================================
@@ -340,11 +341,17 @@ def _pybind11_cross_ext_args(toolchain_file: str) -> list:
 
 def _get_dsp_arches(toolchain: Optional[str] = None, hexagonarch: Optional[str] = None) -> list[str]:
     """Return a list of Hexagon DSP arch versions to package.
+
+    QAI_DSP_ARCHES overrides the default list (comma/whitespace-separated,
+    e.g. "68,73,75,79"), for packaging a custom set of DSP arches.
     """
+    env_arches = os.environ.get("QAI_DSP_ARCHES")
+    if env_arches:
+        return [a for a in re.split(r"[,\s]+", env_arches.strip()) if a]
     if _is_windows():
         return ["73", "81"]
     else:
-        return ["68", "73", "75", "79"] 
+        return ["68", "73", "75", "79"]
 
 def _compute_version_with_dsp_suffix(default_base: str) -> str:
     """
