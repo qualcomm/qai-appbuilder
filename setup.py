@@ -26,6 +26,12 @@
 #   [linux]
 #     export QNN_SDK_ROOT=~/QAIRT/2.38.0.250901/
 #     python -m build -w
+#
+#   [linux - cross-compile for aarch64]
+#     export QNN_SDK_ROOT=~/QAIRT/2.38.0.250901/
+#     export QAI_TOOLCHAINS=aarch64-oe-linux-gcc11.2
+#     export QAI_CMAKE_TOOLCHAIN_FILE=~/toolchain-aarch64.cmake
+#     python -m build -w
 
 # =============================================================================
 
@@ -269,6 +275,68 @@ def _get_qnn_sdk_root() -> Path:
     if not p.exists() or not p.is_dir():
         raise RuntimeError(f'QNN_SDK_ROOT="{v}" does not exist or is not a directory')
     return p
+
+
+def _parse_toolchain_system_processor(toolchain_file: str) -> Optional[tuple]:
+    """
+    Parse CMAKE_SYSTEM_NAME and CMAKE_SYSTEM_PROCESSOR from a CMake toolchain
+    file. Returns (system, processor) or None if either is absent.
+    Only looks at set() calls with literal string arguments - does not evaluate CMake.
+    """
+    try:
+        text = Path(toolchain_file).read_text(encoding="utf-8")
+    except OSError:
+        return None
+    def _cmake_var(name: str) -> Optional[str]:
+        m = re.search(rf'set\s*\(\s*{name}\s+"?([^"\s\)]+)"?', text)
+        return m.group(1) if m else None
+    system = _cmake_var("CMAKE_SYSTEM_NAME")
+    processor = _cmake_var("CMAKE_SYSTEM_PROCESSOR")
+    if not system or not processor:
+        return None
+    return system, processor
+
+
+def _host_platform_from_toolchain(toolchain_file: str) -> Optional[str]:
+    """
+    Return a distutils platform string (e.g. 'linux-aarch64') derived from
+    the toolchain file's CMAKE_SYSTEM_NAME/CMAKE_SYSTEM_PROCESSOR, or None
+    if either is absent or the combination is unrecognised.
+    """
+    parsed = _parse_toolchain_system_processor(toolchain_file)
+    if not parsed:
+        return None
+    system, processor = parsed
+    if system.lower() == "linux":
+        return f"linux-{processor}"
+    if system.lower() == "android":
+        return f"linux-{processor}"
+    if system.lower() == "windows":
+        return f"win-{processor}"
+    return None
+
+
+def _pybind11_cross_ext_args(toolchain_file: str) -> list:
+    """
+    pybind11's FindPythonLibsNew.cmake (PYBIND11_FINDPYTHON=COMPAT) determines
+    PYTHON_MODULE_EXTENSION by executing PYTHON_EXECUTABLE and reading its
+    EXT_SUFFIX - but PYTHON_EXECUTABLE is the build-host interpreter, so that
+    suffix is for the host arch, not the cross-compilation target. Compute the
+    target suffix from the running interpreter's version plus the toolchain's
+    target triplet, and force it via cmake args (mirrors the PYBIND11_PYTHONLIBS_OVERWRITE
+    escape hatch documented in FindPythonLibsNew.cmake).
+    """
+    parsed = _parse_toolchain_system_processor(toolchain_file)
+    if not parsed:
+        return []
+    system, processor = parsed
+    if system.lower() != "linux":
+        return []
+    ext_suffix = f".cpython-{sys.version_info.major}{sys.version_info.minor}-{processor}-linux-gnu.so"
+    return [
+        "-DPYBIND11_PYTHONLIBS_OVERWRITE=OFF",
+        f"-DPYTHON_MODULE_EXTENSION={ext_suffix}",
+    ]
 
 def _get_dsp_arches(toolchain: Optional[str] = None, hexagonarch: Optional[str] = None) -> list[str]:
     """Return a list of Hexagon DSP arch versions to package.
@@ -518,6 +586,10 @@ def _build_root_cmake_project(arch: str, source_pkg_dir: Path, build_pkg_dir: Pa
     build_dir.mkdir(parents=True, exist_ok=True)
 
     cmake_configure = ["cmake", "--no-warn-unused-cli", str(root)] + generator_args + _cmake_python_hints_args()
+    _cmake_toolchain = os.environ.get("QAI_CMAKE_TOOLCHAIN_FILE")
+    if _cmake_toolchain:
+        cmake_configure.append(f"-DCMAKE_TOOLCHAIN_FILE={_cmake_toolchain}")
+        cmake_configure += _pybind11_cross_ext_args(_cmake_toolchain)
     subprocess.run(cmake_configure, cwd=str(build_dir), check=True)
 
     cmake_build = ["cmake", "--build", str(build_dir)]
@@ -754,6 +826,10 @@ class QaiCMakeBuild(build_ext):
 
         # Configure & build
         cmake_configure = ["cmake", "--no-warn-unused-cli", ext.sourcedir] + generator_args + cmake_args
+        _cmake_toolchain = os.environ.get("QAI_CMAKE_TOOLCHAIN_FILE")
+        if _cmake_toolchain:
+            cmake_configure.append(f"-DCMAKE_TOOLCHAIN_FILE={_cmake_toolchain}")
+            cmake_configure += _pybind11_cross_ext_args(_cmake_toolchain)
         subprocess.run(cmake_configure, cwd=str(build_temp), check=True)
 
         cmake_build = ["cmake", "--build", "."] + build_args
@@ -781,6 +857,15 @@ class QaiBdistWheel(bdist_wheel):
         self.hexagonarch = None
 
     def finalize_options(self):
+        # Derive _PYTHON_HOST_PLATFORM from QAI_CMAKE_TOOLCHAIN_FILE before
+        # super().finalize_options() calls get_platform() to set plat_name.
+        if not os.environ.get("_PYTHON_HOST_PLATFORM"):
+            toolchain_file = os.environ.get("QAI_CMAKE_TOOLCHAIN_FILE", "")
+            if toolchain_file:
+                host_plat = _host_platform_from_toolchain(toolchain_file)
+                if host_plat:
+                    os.environ["_PYTHON_HOST_PLATFORM"] = host_plat
+                    print(f"-- _PYTHON_HOST_PLATFORM={host_plat} (derived from toolchain)")
         super().finalize_options()
         # env var fallback
         if self.toolchains is None:
