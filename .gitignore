@@ -5,3 +5,4 @@ lib/
 *.whl
 __pycache__/
 *.pyc
+script/qai_appbuilder/libs/
