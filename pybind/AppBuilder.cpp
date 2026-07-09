@@ -130,9 +130,95 @@ QNNContext::Inference(const std::vector<py::array>& input, const std::string& pe
     return inference(m_model_name, input, perf_profile, graphIndex, input_data_type, output_data_type);
 }
 
-std::vector<py::array> 
+std::vector<py::array>
 QNNContext::Inference(const ShareMemory& share_memory, const std::vector<py::array>& input, const std::string& perf_profile, size_t graphIndex, const std::string& input_data_type, const std::string& output_data_type) {
     return inference_P(m_model_name, m_proc_name, share_memory.m_share_memory_name, input, perf_profile, graphIndex, input_data_type, output_data_type);
+}
+
+std::string
+QNNContext::InferenceAsync(const ShareMemory& share_memory, const std::vector<py::array>& input,
+                           const std::string& perf_profile, size_t graphIndex,
+                           const std::string& input_data_type, const std::string& output_data_type) {
+    std::vector<uint8_t*> inputBuffers;
+    std::vector<size_t>   inputSize;
+    std::vector<py::array> keepAlive;
+    const bool floatMode = isFloat32Request(input_data_type);
+
+    for (auto i = 0; i < (int)input.size(); i++) {
+        if (floatMode) {
+            py::array_t<float, py::array::c_style | py::array::forcecast> farr(input[i]);
+            py::buffer_info buf = farr.request();
+            keepAlive.push_back(py::array(farr));
+            inputBuffers.push_back(reinterpret_cast<uint8_t*>(buf.ptr));
+            inputSize.push_back(static_cast<size_t>(buf.size) * static_cast<size_t>(buf.itemsize));
+        } else {
+            py::array carr = py::array::ensure(input[i], py::array::c_style);
+            if (!carr) throw std::runtime_error("Failed to ensure contiguous input array");
+            py::buffer_info buf = carr.request();
+            keepAlive.push_back(carr);
+            inputBuffers.push_back(reinterpret_cast<uint8_t*>(buf.ptr));
+            inputSize.push_back(static_cast<size_t>(buf.size) * static_cast<size_t>(buf.itemsize));
+        }
+    }
+
+    std::string perf = perf_profile;
+    return g_LibAppBuilder.ModelInferenceAsync(
+        m_model_name, m_proc_name, share_memory.m_share_memory_name,
+        inputBuffers, inputSize, perf, graphIndex);
+}
+
+std::vector<py::array>
+QNNContext::InferenceWait(const std::string& request_id, const ShareMemory& share_memory,
+                          const std::string& output_data_type) {
+    std::vector<uint8_t*> outputBuffers;
+    std::vector<size_t>   outputSize;
+
+    bool success = g_LibAppBuilder.ModelWaitInference(
+        request_id, m_proc_name, share_memory.m_share_memory_name,
+        outputBuffers, outputSize);
+
+    if (!success) {
+        QNN_ERR("InferenceWait failed for request_id: %s\n", request_id.c_str());
+        return {};
+    }
+
+    const bool floatOutMode = isFloat32Request(output_data_type);
+    std::vector<std::string> outDtypes  = g_LibAppBuilder.getOutputDataType(m_model_name, m_proc_name);
+    std::vector<std::vector<size_t>> outShapes = g_LibAppBuilder.getOutputShapes(m_model_name, m_proc_name);
+
+    std::vector<py::array> output;
+    for (size_t i = 0; i < outputBuffers.size(); i++) {
+        std::string dtypeStr = (i < outDtypes.size()) ? outDtypes[i] : std::string("uint8");
+        const std::vector<size_t> shape = (i < outShapes.size()) ? outShapes[i] : std::vector<size_t>{};
+        py::dtype dt = inferOutputNumpyDtype((i < outputSize.size()) ? outputSize[i] : 0, shape, dtypeStr);
+
+        size_t elemCount = 0;
+        if (!shape.empty()) {
+            elemCount = productDims(shape);
+        } else {
+            const size_t itemBytes = static_cast<size_t>(dt.itemsize());
+            if (itemBytes > 0 && i < outputSize.size() && (outputSize[i] % itemBytes) == 0)
+                elemCount = outputSize[i] / itemBytes;
+            else if (i < outputSize.size()) {
+                dt = py::dtype::of<uint8_t>();
+                elemCount = outputSize[i];
+            }
+        }
+
+        py::capsule free_data(outputBuffers[i], [](void* f) {});  // shared memory — don't free
+        py::array result(dt,
+                        { static_cast<py::ssize_t>(elemCount) },
+                        { static_cast<py::ssize_t>(dt.itemsize()) },
+                        outputBuffers[i], free_data);
+
+        if (floatOutMode && !isNumpyFloat32Dtype(dt)) {
+            py::array_t<float, py::array::c_style | py::array::forcecast> farr(result);
+            output.push_back(py::array(farr));
+        } else {
+            output.push_back(result);
+        }
+    }
+    return output;
 }
 
 bool QNNContext::ApplyBinaryUpdate(const std::vector<LoraAdapter>& lora_adapters) {
@@ -164,26 +250,13 @@ PYBIND11_MODULE(appbuilder, m) {
     m.attr("__license__") = "BSD-3-Clause";
 
     m.def("model_initialize", &initialize, "Initialize models.");
-
-#ifdef _WIN32
     m.def("model_initialize", &initialize_P, "Initialize models.");
-#endif
 
     m.def("model_inference", &inference, "Inference models.");
-
-#ifdef _WIN32
     m.def("model_inference", &inference_P, "Inference models.");
-#endif
 
-#ifdef _WIN32
-    m.def("model_destroy", &destroy, "Destroy models.");
-#else
     m.def("model_destroy", static_cast<int(*)(std::string)>(&destroy), "Destroy models.");
-#endif
-
-#ifdef _WIN32
     m.def("model_destroy", &destroy_P, "Destroy models.");
-#endif
 
     m.def("memory_create", &create_memory, "Create share memory.");
     m.def("memory_delete", &delete_memory, "Delete share memory.");
@@ -202,6 +275,13 @@ PYBIND11_MODULE(appbuilder, m) {
         .def(py::init<const std::string&, const std::string&, const std::string&, const std::string&, const std::string&, bool, const std::string&, const std::string&, uint32_t, std::string>())
         .def("Inference", py::overload_cast<const std::vector<py::array>&, const std::string&, size_t, const std::string&, const std::string&>(&QNNContext::Inference))
         .def("Inference", py::overload_cast<const ShareMemory&, const std::vector<py::array>&, const std::string&, size_t, const std::string&, const std::string&>(&QNNContext::Inference))
+        .def("InferenceAsync", &QNNContext::InferenceAsync,
+             py::arg("share_memory"), py::arg("input"),
+             py::arg("perf_profile") = "default", py::arg("graphIndex") = 0,
+             py::arg("input_data_type") = "float", py::arg("output_data_type") = "float")
+        .def("InferenceWait", &QNNContext::InferenceWait,
+             py::arg("request_id"), py::arg("share_memory"),
+             py::arg("output_data_type") = "float")
         .def("ApplyBinaryUpdate", &QNNContext::ApplyBinaryUpdate, "Apply Lora binary update")
         .def("getInputShapes", py::overload_cast<>(&QNNContext::getInputShapes)) 
         .def("getInputDataType", py::overload_cast<>(&QNNContext::getInputDataType)) 

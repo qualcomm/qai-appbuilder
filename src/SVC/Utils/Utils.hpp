@@ -319,11 +319,13 @@ std::pair<std::string, std::string> VectorToShareMem(size_t share_memory_size, u
     uint8_t* buffer = nullptr;
 
     // How to handle the case - part of the data in buffers are in the share memory?
-    // Calculate the offset, avoid overflow the input data which already in the share memory.
-    for (int i = 0; i < buffers.size(); i++) {
+    // Calculate the offset for out-of-shm copies: must start AFTER the last byte
+    // of any buffer that already lives in shm, so we don't overwrite it.
+    for (int i = 0; i < (int)buffers.size(); i++) {
         buffer = buffers[i];
-        if (buffer >= lpBase && buffer <= lpBase + share_memory_size) {     // This buffer is in the share memory area.
-            offset += size[i];
+        if (buffer >= lpBase && buffer < lpBase + share_memory_size) {     // This buffer is in the share memory area.
+            size_t end = (size_t)(buffer - lpBase) + size[i];
+            if (end > offset) offset = end;
         }
     }
 
@@ -331,7 +333,7 @@ std::pair<std::string, std::string> VectorToShareMem(size_t share_memory_size, u
     for (int i = 0; i < buffers.size(); i++) {
         buffer = buffers[i];
         dataSize = size[i];
-        if (buffer >= lpBase && buffer <= lpBase + share_memory_size) {     // This buffer is in the share memory area.
+        if (buffer >= lpBase && buffer < lpBase + share_memory_size) {     // This buffer is in the share memory area.
             strOffsetArray += std::to_string(buffer - lpBase) + ",";
             //QNN_INF("VectorToShareMem in buffers, ignore copy.\n");
         }
@@ -469,6 +471,97 @@ BOOL TalkToSvc_Inference(std::string model_name, std::string proc_name, std::str
     }
 
     return bSuccess;
+}
+
+// Launch inference asynchronously on the Svc side.
+// Returns a request_id string; the caller must later call TalkToSvc_WaitInference
+// with that id to retrieve the result.
+std::string TalkToSvc_InferenceAsync(std::string model_name, std::string proc_name,
+                                     std::string share_memory_name,
+                                     std::vector<uint8_t*>& inputBuffers,
+                                     std::vector<size_t>& inputSize,
+                                     std::string perfProfile, size_t graphIndex) {
+    ProcInfo_t* pProcInfo = FindProcInfo(proc_name);
+    if (!pProcInfo) {
+        QNN_ERR("TalkToSvc_InferenceAsync::Cant find this process %s.\n", proc_name.c_str());
+        return "";
+    }
+
+    ShareMemInfo_t* pShareMemInfo = FindShareMem(share_memory_name);
+    if (!pShareMemInfo) {
+        QNN_ERR("TalkToSvc_InferenceAsync::Cant find this share memory %s.\n", share_memory_name.c_str());
+        return "";
+    }
+
+    ipc::IpcChannel* channel = pProcInfo->channel.get();
+    size_t dwRead = 0;
+    bool bSuccess;
+
+    std::string command = "g" + model_name + ";" + share_memory_name + ";" +
+                          std::to_string(pShareMemInfo->size) + ";";
+    std::pair<std::string, std::string> strResultArray =
+        VectorToShareMem(pShareMemInfo->size, (uint8_t*)pShareMemInfo->lpBase, inputBuffers, inputSize);
+    command = command + strResultArray.first + "=" + strResultArray.second + ";";
+    command = command + perfProfile + ";";
+    command = command + std::to_string(graphIndex) + ";async";   // mark as async
+
+    ipc::ShmHandle shmHandle = pShareMemInfo->region ? pShareMemInfo->region->Handle() : ipc::kInvalidShm();
+    bSuccess = channel->WriteWithFd(command.c_str(), command.length() + 1, shmHandle);
+    if (!bSuccess) return "";
+
+    // Server replies with request_id immediately (not the full result).
+    bSuccess = channel->Read(g_buffer, GLOBAL_BUFSIZE, dwRead);
+    if (!bSuccess || dwRead == 0) {
+        QNN_ERR("TalkToSvc_InferenceAsync::Failed to read request_id.\n");
+        return "";
+    }
+    g_buffer[dwRead] = 0;
+    if (g_buffer[0] == 'F') return "";
+
+    return std::string(g_buffer);
+}
+
+// Block until a previously launched async inference (request_id) is complete
+// and collect the output buffers from shared memory.
+BOOL TalkToSvc_WaitInference(const std::string& request_id,
+                              const std::string& proc_name,
+                              const std::string& share_memory_name,
+                              std::vector<uint8_t*>& outputBuffers,
+                              std::vector<size_t>& outputSize) {
+    if (request_id.empty()) return false;
+
+    ProcInfo_t* pProcInfo = FindProcInfo(proc_name);
+    if (!pProcInfo) {
+        QNN_ERR("TalkToSvc_WaitInference::Cant find this process %s.\n", proc_name.c_str());
+        return false;
+    }
+
+    ShareMemInfo_t* pShareMemInfo = FindShareMem(share_memory_name);
+    if (!pShareMemInfo) {
+        QNN_ERR("TalkToSvc_WaitInference::Cant find this share memory %s.\n", share_memory_name.c_str());
+        return false;
+    }
+
+    ipc::IpcChannel* channel = pProcInfo->channel.get();
+    size_t dwRead = 0;
+    bool bSuccess;
+
+    std::string command = "q" + request_id;
+    bSuccess = channel->Write(command.c_str(), command.length() + 1);
+    if (!bSuccess) return false;
+
+    bSuccess = channel->Read(g_buffer, GLOBAL_BUFSIZE, dwRead);
+    if (dwRead) {
+        g_buffer[dwRead] = 0;
+        QNN_INF("TalkToSvc_WaitInference::ReadFromPipe: %s dwRead = %d\n", g_buffer, (int)dwRead);
+    } else {
+        QNN_ERR("TalkToSvc_WaitInference::ReadFromPipe: Failed, perhaps child process died.\n");
+    }
+    if (!bSuccess || dwRead == 0) return false;
+    if (g_buffer[0] == 'F') return false;
+
+    ShareMemToVector(g_buffer, (uint8_t*)pShareMemInfo->lpBase, outputBuffers, outputSize);
+    return true;
 }
 
 std::vector<std::string> split(const std::string& s, char delim) {

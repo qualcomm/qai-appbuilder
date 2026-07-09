@@ -74,6 +74,20 @@ public:
                         std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
                         std::string& perfProfile, size_t graphIndex = 0);
 
+    // Async cross-process inference: send inputs and return immediately with a
+    // request_id.  Call ModelWaitInference() later to collect the outputs.
+    std::string ModelInferenceAsync(std::string model_name, std::string proc_name,
+                                    std::string share_memory_name,
+                                    std::vector<uint8_t*>& inputBuffers,
+                                    std::vector<size_t>& inputSize,
+                                    std::string& perfProfile, size_t graphIndex = 0);
+
+    bool ModelWaitInference(const std::string& request_id,
+                            const std::string& proc_name,
+                            const std::string& share_memory_name,
+                            std::vector<uint8_t*>& outputBuffers,
+                            std::vector<size_t>& outputSize);
+
     bool ModelApplyBinaryUpdate(const std::string model_name, std::vector<LoraAdapter>& lora_adapters);
 
     bool ModelDestroy(std::string model_name);

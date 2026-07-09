@@ -755,11 +755,37 @@ bool LibAppBuilder::ModelInference(std::string model_name, std::string proc_name
     return false;
 }
 
-bool LibAppBuilder::ModelInference(std::string model_name, std::vector<uint8_t*>& inputBuffers, 
+bool LibAppBuilder::ModelInference(std::string model_name, std::vector<uint8_t*>& inputBuffers,
                                    std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
                                    std::string& perfProfile, size_t graphIndex, size_t share_memory_size){
     std::vector<size_t> inputSize;
     return ModelInferenceEx(model_name, "", "", inputBuffers, inputSize, outputBuffers, outputSize, perfProfile, graphIndex, share_memory_size);
+}
+
+std::string LibAppBuilder::ModelInferenceAsync(std::string model_name, std::string proc_name,
+                                               std::string share_memory_name,
+                                               std::vector<uint8_t*>& inputBuffers,
+                                               std::vector<size_t>& inputSize,
+                                               std::string& perfProfile, size_t graphIndex) {
+    if (proc_name.empty()) {
+        QNN_ERR("ModelInferenceAsync: proc_name is required.\n");
+        return "";
+    }
+    return TalkToSvc_InferenceAsync(model_name, proc_name, share_memory_name,
+                                    inputBuffers, inputSize, perfProfile, graphIndex);
+}
+
+bool LibAppBuilder::ModelWaitInference(const std::string& request_id,
+                                       const std::string& proc_name,
+                                       const std::string& share_memory_name,
+                                       std::vector<uint8_t*>& outputBuffers,
+                                       std::vector<size_t>& outputSize) {
+    if (proc_name.empty()) {
+        QNN_ERR("ModelWaitInference: proc_name is required.\n");
+        return false;
+    }
+    return TalkToSvc_WaitInference(request_id, proc_name, share_memory_name,
+                                   outputBuffers, outputSize);
 }
 
 bool LibAppBuilder::ModelApplyBinaryUpdate(const std::string model_name, std::vector<LoraAdapter>& lora_adapters) {

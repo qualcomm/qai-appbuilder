@@ -11,6 +11,10 @@
 #include <string>
 #include <sstream>
 #include <map>
+#include <future>
+#include <mutex>
+#include <unordered_map>
+#include <atomic>
 
 
 // ============================== Service / QAIAppSvc ============================== //
@@ -20,13 +24,35 @@
 
 LibAppBuilder g_LibAppBuilder;
 
+// Tracks pending async model loads: model_name -> future<bool>
+static std::mutex g_async_futures_mutex;
+static std::unordered_map<std::string, std::future<bool>> g_async_futures;
+
+// Async inference result storage
+struct InferResult {
+    bool        success = false;
+    std::string offsets;   // strOffsetArray
+    std::string sizes;     // strSizeArray
+};
+
+static std::atomic<uint64_t> g_request_counter{0};
+static std::mutex g_infer_results_mutex;
+static std::unordered_map<std::string, std::future<InferResult>> g_infer_futures;
+
 // Server side: map the shared-memory region for this inference.
 //   Windows : open the named mapping created by the client.
 //   POSIX   : adopt the fd just received over the command channel (SCM_RIGHTS).
-void* OpenShareMem(std::string share_memory_name, size_t share_memory_size, ipc::ShmHandle posixFd = ipc::kInvalidShm()) {
+// registry_key: the key used in sg_share_mem_map (defaults to share_memory_name).
+//   For async inferences, pass a unique key to avoid aliasing when the same
+//   share_memory_name is used concurrently by multiple background threads.
+void* OpenShareMem(std::string share_memory_name, size_t share_memory_size,
+                   ipc::ShmHandle posixFd = ipc::kInvalidShm(),
+                   const std::string& registry_key = "") {
+    const std::string& reg_key = registry_key.empty() ? share_memory_name : registry_key;
     std::unique_ptr<ipc::SharedRegion> region;
 #ifdef _WIN32
     (void)posixFd;
+    // Windows: OS-level name stays share_memory_name; only the map key differs.
     region = ipc::SharedRegion::OpenByName(share_memory_name, share_memory_size);
 #else
     region = ipc::SharedRegion::OpenFromHandle(posixFd, share_memory_size);
@@ -36,7 +62,7 @@ void* OpenShareMem(std::string share_memory_name, size_t share_memory_size, ipc:
     }
 
     void* lpBase = region->Base();
-    if (!RegisterShareMem(share_memory_name, std::move(region))) {
+    if (!RegisterShareMem(reg_key, std::move(region))) {
         return nullptr;
     }
     return lpBase;
@@ -53,7 +79,6 @@ void CloseShareMem(std::string share_memory_name) {
 }
 
 void ModelLoad(std::string cmdBuf, ipc::IpcChannel* channel) {
-    BOOL bSuccess;
     Print_MemInfo("ModelLoad Start.");
 
     std::vector<std::string> commands;
@@ -67,27 +92,77 @@ void ModelLoad(std::string cmdBuf, ipc::IpcChannel* channel) {
     std::string input_data_type             = commands[5];
     std::string output_data_type            = commands[6];
 
-    Print_MemInfo("ModelLoad::ModelInitialize Start.");
-    QNN_INF("ModelLoad::ModelInitialize::Model name %s\n", model_name.c_str());
-    std::vector<LoraAdapter> Adapters ;
-    bSuccess = g_LibAppBuilder.ModelInitialize(model_name.c_str(), model_path, backend_lib_path, system_lib_path, Adapters, false, input_data_type, output_data_type);
-    QNN_INF("ModelLoad::ModelInitialize End ret = %d\n", bSuccess);
-    Print_MemInfo("ModelLoad::ModelInitialize End.");
+    bool async = (async_str == "async");
 
-    if (!(async_str == "async")) {  // We only notify client when sync mode. TODO: Async mode will notify client by callback function.
-        if(bSuccess) {
-            channel->Write(ACTION_OK, strlen(ACTION_OK) + 1);
+    if (async) {
+        // Launch model initialization on a background thread.
+        // ModelRun will wait for it to finish before running inference.
+        std::vector<LoraAdapter> Adapters;
+        std::future<bool> fut = std::async(std::launch::async, [=]() mutable -> bool {
+            Print_MemInfo("ModelLoad(async)::ModelInitialize Start.");
+            QNN_INF("ModelLoad(async)::ModelInitialize::Model name %s\n", model_name.c_str());
+            bool bSuccess = g_LibAppBuilder.ModelInitialize(model_name.c_str(), model_path, backend_lib_path, system_lib_path, Adapters, false, input_data_type, output_data_type);
+            QNN_INF("ModelLoad(async)::ModelInitialize End ret = %d\n", bSuccess);
+            Print_MemInfo("ModelLoad(async)::ModelInitialize End.");
+            return bSuccess;
+        });
+
+        {
+            std::lock_guard<std::mutex> lk(g_async_futures_mutex);
+            g_async_futures[model_name] = std::move(fut);
         }
-        else {
+        // Do not send a response — client does not wait in async mode.
+    } else {
+        Print_MemInfo("ModelLoad::ModelInitialize Start.");
+        QNN_INF("ModelLoad::ModelInitialize::Model name %s\n", model_name.c_str());
+        std::vector<LoraAdapter> Adapters;
+        BOOL bSuccess = g_LibAppBuilder.ModelInitialize(model_name.c_str(), model_path, backend_lib_path, system_lib_path, Adapters, false, input_data_type, output_data_type);
+        QNN_INF("ModelLoad::ModelInitialize End ret = %d\n", bSuccess);
+        Print_MemInfo("ModelLoad::ModelInitialize End.");
+
+        if (bSuccess) {
+            channel->Write(ACTION_OK, strlen(ACTION_OK) + 1);
+        } else {
             channel->Write(ACTION_FAILED, strlen(ACTION_FAILED) + 1);
         }
     }
 }
 
+// If there is a pending async load for this model, wait for it to finish.
+// Returns false if the load failed; true if load succeeded or was already done.
+static bool WaitForAsyncLoad(const std::string& model_name) {
+    std::future<bool> fut;
+    {
+        std::lock_guard<std::mutex> lk(g_async_futures_mutex);
+        auto it = g_async_futures.find(model_name);
+        if (it != g_async_futures.end()) {
+            fut = std::move(it->second);
+            g_async_futures.erase(it);
+        }
+    }
+    if (fut.valid()) {
+        return fut.get();
+    }
+    return true;  // no pending async load — nothing to wait for
+}
+
+// Wait for all pending async model loads to finish (used by perf commands that
+// require the backend handle to be initialized).
+static void WaitForAllAsyncLoads() {
+    std::unordered_map<std::string, std::future<bool>> pending;
+    {
+        std::lock_guard<std::mutex> lk(g_async_futures_mutex);
+        pending = std::move(g_async_futures);
+    }
+    for (auto& kv : pending) {
+        if (kv.second.valid()) {
+            kv.second.get();
+        }
+    }
+}
+
 void ModelRun(std::string cmdBuf, ipc::IpcChannel* channel, ipc::ShmHandle posixFd) {
-    BOOL bSuccess;
     Print_MemInfo("ModelRun Start.");
-    // TimerHelper timerHelper;
 
     std::vector<std::string> commands;
     split_string(commands, cmdBuf, ';');
@@ -98,43 +173,129 @@ void ModelRun(std::string cmdBuf, ipc::IpcChannel* channel, ipc::ShmHandle posix
     std::string strBufferArray    = commands[3];
     std::string perfProfile       = commands[4];
     size_t graphIndex             = std::stoull(commands[5]);
+    // commands[6]: "async" or "sync" (optional, default sync)
+    bool async_infer = (commands.size() > 6 && commands[6] == "async");
 
-    // Open share memory and read the inference data from share memory.
-    // On POSIX 'posixFd' is the fd received with this command via SCM_RIGHTS.
-    void* lpBase = OpenShareMem(share_memory_name, share_memory_size, posixFd);
-
-    std::vector<uint8_t*> inputBuffers;
-    std::vector<size_t> inputSize;
-    std::vector<uint8_t*> outputBuffers;
-    std::vector<size_t> outputSize;
-    outputSize.push_back(12345);    // Indicte that this is a share memory output.
-
-    // Fill data from 'pShareMemInfo->lpBase' to 'inputBuffers' vector before inference the model.
-    ShareMemToVector(strBufferArray, (uint8_t*)lpBase, inputBuffers, inputSize);
-
-    Print_MemInfo("ModelRun::ModelInference Start.");
-    //QNN_INF("ModelRun::ModelInference %s\n", model_name.c_str());
-    bSuccess = g_LibAppBuilder.ModelInference(model_name.c_str(), inputBuffers, outputBuffers, outputSize, perfProfile, graphIndex, share_memory_size);
-    //QNN_INF("ModelRun::ModelInference End ret = %d\n", bSuccess);
-    Print_MemInfo("ModelRun::ModelInference End.");
-
-    // Fill data from outputBuffers to 'pShareMemInfo->lpBase' and send back to client.
-    std::pair<std::string, std::string> strResultArray = VectorToShareMem(share_memory_size, (uint8_t*)lpBase, outputBuffers, outputSize);
-
-    outputBuffers.clear();
-    outputSize.clear();
-
-    Print_MemInfo("ModelRun::CloseShareMem Start.");
-    CloseShareMem(share_memory_name);
-    Print_MemInfo("ModelRun::CloseShareMem End.");
-
-    // timerHelper.Print("ModelRun");
-
-    std::string command = strResultArray.first + "=" + strResultArray.second;
-    if (bSuccess) {
-        channel->Write(command.c_str(), command.length() + 1);
+    // If the model was loaded asynchronously, wait for it to finish before inference.
+    if (!WaitForAsyncLoad(model_name)) {
+        QNN_ERR("ModelRun: async model load failed for '%s'\n", model_name.c_str());
+        channel->Write(ACTION_FAILED, strlen(ACTION_FAILED) + 1);
+        return;
     }
-    else {
+
+    if (async_infer) {
+        // Generate a unique request_id and reply immediately.
+        uint64_t req_id = ++g_request_counter;
+        std::string request_id = model_name + "_req_" + std::to_string(req_id);
+
+        // Use a unique SHM registration key per request to avoid aliasing when
+        // two async inferences for the same model run concurrently.
+        std::string shm_key = share_memory_name + "_" + request_id;
+
+        // On POSIX the fd must survive until the lambda finishes; dup it so the
+        // server's main loop closing posixFd doesn't affect the lambda.
+#ifndef _WIN32
+        ipc::ShmHandle lambdaFd = (posixFd >= 0) ? ::dup(posixFd) : posixFd;
+#else
+        ipc::ShmHandle lambdaFd = posixFd;
+#endif
+
+        std::future<InferResult> fut = std::async(std::launch::async,
+            [=]() mutable -> InferResult {
+                InferResult result;
+
+                void* lpBase = OpenShareMem(share_memory_name, share_memory_size, lambdaFd, shm_key);
+                if (!lpBase) {
+#ifndef _WIN32
+                    if (lambdaFd >= 0) ::close(lambdaFd);
+#endif
+                    return result;
+                }
+
+                std::vector<uint8_t*> inputBuffers, outputBuffers;
+                std::vector<size_t>   inputSize, outputSize;
+                // outputSize must start empty — ModelInference populates it.
+                ShareMemToVector(strBufferArray, (uint8_t*)lpBase, inputBuffers, inputSize);
+
+                result.success = g_LibAppBuilder.ModelInference(
+                    model_name.c_str(), inputBuffers, outputBuffers, outputSize,
+                    perfProfile, graphIndex, share_memory_size);
+
+                if (result.success) {
+                    auto strResultArray = VectorToShareMem(
+                        share_memory_size, (uint8_t*)lpBase, outputBuffers, outputSize);
+                    result.offsets = strResultArray.first;
+                    result.sizes   = strResultArray.second;
+                }
+                outputBuffers.clear();
+                outputSize.clear();
+                CloseShareMem(shm_key);
+                return result;
+            });
+
+        {
+            std::lock_guard<std::mutex> lk(g_infer_results_mutex);
+            g_infer_futures[request_id] = std::move(fut);
+        }
+        // Send request_id back immediately so client can do other work.
+        channel->Write(request_id.c_str(), request_id.length() + 1);
+    } else {
+        // Synchronous path (original behaviour).
+        void* lpBase = OpenShareMem(share_memory_name, share_memory_size, posixFd);
+
+        std::vector<uint8_t*> inputBuffers, outputBuffers;
+        std::vector<size_t>   inputSize, outputSize;
+        // outputSize must start empty — ModelInference populates it.
+        ShareMemToVector(strBufferArray, (uint8_t*)lpBase, inputBuffers, inputSize);
+
+        Print_MemInfo("ModelRun::ModelInference Start.");
+        BOOL bSuccess = g_LibAppBuilder.ModelInference(
+            model_name.c_str(), inputBuffers, outputBuffers, outputSize,
+            perfProfile, graphIndex, share_memory_size);
+        Print_MemInfo("ModelRun::ModelInference End.");
+
+        std::pair<std::string, std::string> strResultArray =
+            VectorToShareMem(share_memory_size, (uint8_t*)lpBase, outputBuffers, outputSize);
+
+        outputBuffers.clear();
+        outputSize.clear();
+        CloseShareMem(share_memory_name);
+
+        std::string command = strResultArray.first + "=" + strResultArray.second;
+        if (bSuccess) {
+            channel->Write(command.c_str(), command.length() + 1);
+        } else {
+            channel->Write(ACTION_FAILED, strlen(ACTION_FAILED) + 1);
+        }
+    }
+}
+
+// Client sends 'q' + request_id to collect the result of an async inference.
+void ModelQueryResult(std::string cmdBuf, ipc::IpcChannel* channel) {
+    std::string request_id = cmdBuf;   // everything after 'q'
+
+    std::future<InferResult> fut;
+    {
+        std::lock_guard<std::mutex> lk(g_infer_results_mutex);
+        auto it = g_infer_futures.find(request_id);
+        if (it != g_infer_futures.end()) {
+            fut = std::move(it->second);
+            g_infer_futures.erase(it);
+        }
+    }
+
+    if (!fut.valid()) {
+        QNN_ERR("ModelQueryResult: unknown request_id '%s'\n", request_id.c_str());
+        channel->Write(ACTION_FAILED, strlen(ACTION_FAILED) + 1);
+        return;
+    }
+
+    InferResult result = fut.get();   // blocks until background inference finishes
+
+    if (result.success) {
+        std::string command = result.offsets + "=" + result.sizes;
+        channel->Write(command.c_str(), command.length() + 1);
+    } else {
         channel->Write(ACTION_FAILED, strlen(ACTION_FAILED) + 1);
     }
 }
@@ -147,6 +308,12 @@ void ModelRelease(std::string cmdBuf, ipc::IpcChannel* channel) {
     split_string(commands, cmdBuf, ';');
 
     std::string model_name = commands[0];
+
+    // Ensure any pending async load finishes before destroying the model.
+    if (!WaitForAsyncLoad(model_name)) {
+        QNN_ERR("ModelRelease: async model load failed for '%s', proceeding with destroy\n", model_name.c_str());
+        // Continue with destroy even if load failed, to clean up resources.
+    }
 
     Print_MemInfo("ModelRelease::ModelDestroy Start.");
     QNN_INF("ModelRelease::ModelDestroy %s\n", model_name.c_str());
@@ -166,6 +333,7 @@ void ModelRelease(std::string cmdBuf, ipc::IpcChannel* channel) {
 // (and thus the QNN backend handle) actually lives. Called for the 'p' / 'e'
 // commands forwarded by the client's PerfProfile.SetPerfProfileGlobal / Rel.
 void SetPerf(std::string cmdBuf, ipc::IpcChannel* channel) {
+    WaitForAllAsyncLoads();   // backend handle must exist before applying perf profile
     std::string perf_profile = cmdBuf;   // remainder after the 'p' command byte
     BOOL bSuccess = SetPerfProfileGlobal(perf_profile);
     if (bSuccess) {
@@ -177,6 +345,7 @@ void SetPerf(std::string cmdBuf, ipc::IpcChannel* channel) {
 }
 
 void RelPerf(ipc::IpcChannel* channel) {
+    WaitForAllAsyncLoads();   // backend handle must exist before releasing perf profile
     BOOL bSuccess = RelPerfProfileGlobal();
     if (bSuccess) {
         channel->Write(ACTION_OK, strlen(ACTION_OK) + 1);
@@ -213,6 +382,13 @@ void getModelInfo(std::string cmdBuf, ipc::IpcChannel* channel) {
     split_string(commands, cmdBuf, ';');
     std::string model_name   = commands[0];
     std::string input        = commands[1];
+
+    // Ensure any pending async load finishes before querying model info.
+    if (!WaitForAsyncLoad(model_name)) {
+        QNN_ERR("getModelInfo: async model load failed for '%s'\n", model_name.c_str());
+        channel->Write(ACTION_FAILED, strlen(ACTION_FAILED) + 1);
+        return;
+    }
 
     ModelInfo_t output = g_LibAppBuilder.getModelInfo(model_name, input);
     std::string command;
@@ -263,8 +439,12 @@ int svcprocess_run(ipc::IpcChannel* channel) {
                 ModelLoad(cmdBuf, channel);
                 break;
 
-            case 'g':   // run Graphs.
+            case 'g':   // run Graphs (sync or async).
                 ModelRun(cmdBuf, channel, posixFd);
+                break;
+
+            case 'q':   // query async inference result.
+                ModelQueryResult(cmdBuf, channel);
                 break;
 
             case 'r':   // release model.
