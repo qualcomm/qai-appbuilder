@@ -446,6 +446,12 @@ public:
     std::vector<py::array> Inference(const std::vector<py::array>& input, const std::string& perf_profile = "default", size_t graphIndex = 0, const std::string& input_data_type="float", const std::string& output_data_type="float");
     std::vector<py::array> Inference(const ShareMemory& share_memory, const std::vector<py::array>& input, const std::string& perf_profile = "default", size_t graphIndex = 0, const std::string& input_data_type="float", const std::string& output_data_type="float");
 
+    // Async cross-process inference: returns a request_id string immediately.
+    std::string InferenceAsync(const ShareMemory& share_memory, const std::vector<py::array>& input, const std::string& perf_profile = "default", size_t graphIndex = 0, const std::string& input_data_type="float", const std::string& output_data_type="float");
+
+    // Wait for an async inference started by InferenceAsync() and return outputs.
+    std::vector<py::array> InferenceWait(const std::string& request_id, const ShareMemory& share_memory, const std::string& output_data_type="float");
+
     bool ApplyBinaryUpdate(const std::vector<LoraAdapter>& lora_adapters);
 
     // issue#24

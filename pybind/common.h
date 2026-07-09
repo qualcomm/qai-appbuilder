@@ -11,7 +11,7 @@
 #ifndef _COMMON_H
 #define _COMMON_H
 
-#define APPBUILDER_VERSION "2.47.0"
+#define APPBUILDER_VERSION "2.47.1"
 
 #endif
 
