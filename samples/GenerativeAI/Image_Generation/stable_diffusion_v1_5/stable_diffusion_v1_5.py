@@ -1,0 +1,381 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+import sys
+import os
+sys.path.append(".")
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "common"))
+os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = "1"  # Disable 'cache-system uses symlinks' warning.
+os.environ['HF_ENDPOINT'] = "https://hf-api.gitee.com"
+import install
+import time
+from PIL import Image
+import numpy as np
+import torch
+from transformers import CLIPTokenizer
+from diffusers import DPMSolverMultistepScheduler
+from diffusers.models.embeddings import get_timestep_embedding, TimestepEmbedding
+import argparse
+
+from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig, timer)
+
+from pathlib import Path
+import time
+import platform
+####################################################################
+
+MODEL_NAME                  = "stable_diffusion_v1_5"
+MODEL_NAME_VAE              = "stable_diffusion_v1_5_VAL"
+MODEL_NAME_UNET             = "stable_diffusion_v1_5_UNET"
+MODEL_NAME_TEXT             = "stable_diffusion_v1_5_TEXT"
+MODEL_ID_VAE                = "mmx0424em"
+MODEL_ID_UNET               = "mqvvdydeq"
+MODEL_ID_TEXT               = "mn4ke9yzm"
+TEXT_ENCODER_MODEL_NAME     = MODEL_NAME + "_w8a16_quantized-textencoderquantizable-qualcomm_snapdragon_x_elite.bin"
+UNET_MODEL_NAME             = MODEL_NAME + "_w8a16_quantized-unetquantizable-qualcomm_snapdragon_x_elite.bin"
+VAE_DECODER_MODEL_NAME      = MODEL_NAME + "_w8a16_quantized-vaedecoderquantizable-qualcomm_snapdragon_x_elite.bin"
+
+HUB_ID_H="ox06ibpbkxb4pr0mcyfe7wqgx5pf5r0cm3rf3dzi"
+
+TIMESTEP_EMBEDDING_MODEL_ID = "m7mrzdgxn"
+TOKENIZER_MODEL_NAME        = "openai/clip-vit-large-patch14"
+TOKENIZER_HELP_URL          = "https://github.com/qualcomm/qai-appbuilder/blob/main/samples/python/" + MODEL_NAME + "/README.md#clip-vit-l14-model"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+
+####################################################################
+
+SOC_ID = None
+cleaned_argv = []
+i = 0
+while i < len(sys.argv):
+    if sys.argv[i] == '--chipset':
+        SOC_ID = sys.argv[i + 1]
+        i += 2
+    else:
+        cleaned_argv.append(sys.argv[i])
+        i += 1
+
+sys.argv = cleaned_argv
+
+print(f"SOC_ID: {SOC_ID}")
+
+execution_ws = Path(os.path.dirname(os.path.abspath(__file__)))
+
+#Model pathes.
+model_dir = execution_ws / "models"
+sd_dir = model_dir
+tokenizer_dir = model_dir / "tokenizer"
+time_embedding_dir = model_dir / "time-embedding"
+
+text_encoder_model_path = sd_dir  / TEXT_ENCODER_MODEL_NAME
+unet_model_path = sd_dir / UNET_MODEL_NAME
+vae_decoder_model_path = sd_dir /  VAE_DECODER_MODEL_NAME
+
+tokenizer = None
+scheduler = None
+tokenizer_max_length = 77   # Define Tokenizer output max length (must be 77)
+
+# model objects.
+text_encoder = None
+unet = None
+vae_decoder = None
+
+# Any user defined prompt
+user_prompt = ""
+uncond_prompt = ""
+user_seed = np.int64(0)
+user_step = 20              # User defined step value, any integer value in {20, 30, 50}
+user_text_guidance = 7.5    # User define text guidance, any float value in [5.0, 15.0]
+
+def _detect_platform():
+    """Return one of: 'wos', 'x86_win', 'arm64_linux', 'x86_linux', 'unknown'."""
+    system  = platform.system().lower()
+    machine = platform.machine().lower()
+
+    if system == "windows":
+        if machine in ("aarch64", "arm64"):
+            return "wos"          # Windows on Snapdragon
+        else:
+            return "x86_win"      # Regular x86_64 Windows
+    if system == "linux":
+        if machine in ("aarch64", "arm64"):
+            return "arm64_linux"
+        if machine in ("x86_64", "amd64"):
+            return "x86_linux"
+    return "unknown"
+
+PLATFORM = _detect_platform()
+print(f"[INFO] Detected platform: {PLATFORM}")
+
+####################################################################
+
+class TextEncoder(QNNContext):
+    def Inference(self, input_data):
+        input_datas=[input_data]
+        output_data = super().Inference(input_datas)[0]
+
+        # Output of Text encoder should be of shape (1, 77, 768)
+        output_data = output_data.reshape((1, 77, 768))
+        return output_data
+
+class Unet(QNNContext):
+    def Inference(self, input_data_1, input_data_2, input_data_3):
+        # We need to reshape the array to 1 dimensionality before send it to the network. 'input_data_2' already is 1 dimensionality, so doesn't need to reshape.
+        input_data_1 = input_data_1.reshape(input_data_1.size)
+        input_data_3 = input_data_3.reshape(input_data_3.size)
+
+        input_datas=[input_data_1, input_data_2, input_data_3]
+        output_data = super().Inference(input_datas)[0]
+
+        output_data = output_data.reshape(1, 64, 64, 4)
+        return output_data
+
+class VaeDecoder(QNNContext):
+    def Inference(self, input_data):
+        input_data = input_data.reshape(input_data.size)
+        input_datas=[input_data]
+
+        output_data = super().Inference(input_datas)[0]
+        
+        return output_data
+
+####################################################################
+
+def model_initialize():
+    global scheduler, tokenizer, text_encoder, unet, vae_decoder
+
+    result = True
+
+    SetQNNConfig()
+
+    model_download()
+
+    # model names
+    model_text_encoder  = "text_encoder"
+    model_unet          = "model_unet"
+    model_vae_decoder   = "vae_decoder"
+
+    # Initializing the Tokenizer
+    try:
+        if os.path.exists(tokenizer_dir) and not os.path.exists(tokenizer_dir / ".locks") :
+            tokenizer = CLIPTokenizer.from_pretrained(tokenizer_dir, local_files_only=True)
+        elif os.path.exists(tokenizer_dir):     # Speed up the model loading if the model is ready. Avoiding to check it through network.
+            tokenizer = CLIPTokenizer.from_pretrained(TOKENIZER_MODEL_NAME, cache_dir=str(tokenizer_dir), local_files_only=True)
+        else:
+            tokenizer = CLIPTokenizer.from_pretrained(TOKENIZER_MODEL_NAME, cache_dir=str(tokenizer_dir))
+    except Exception as e:
+        # print(e)
+        fail = "\nFailed to download tokenizer model. Please prepare the tokenizer data according to the guide below:\n" + TOKENIZER_HELP_URL + "\n"
+        print(fail)
+        exit()
+
+    # Instance for TextEncoder 
+    text_encoder = TextEncoder(model_text_encoder, str(text_encoder_model_path))
+
+    # Instance for Unet 
+    unet = Unet(model_unet, str(unet_model_path))
+
+    # Instance for VaeDecoder 
+    vae_decoder = VaeDecoder(model_vae_decoder, str(vae_decoder_model_path))
+
+    # Scheduler - initializing the Scheduler.
+    scheduler = DPMSolverMultistepScheduler(num_train_timesteps=1000, beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear")
+
+    return result
+
+def run_tokenizer(prompt):
+    text_input = tokenizer(prompt, padding="max_length", max_length=tokenizer_max_length, truncation=True)
+    text_input = np.array(text_input.input_ids, dtype=np.float32)
+    return text_input
+
+# These parameters can be configured through GUI 'settings'.
+def setup_parameters(prompt, un_prompt, seed, step, text_guidance):
+
+    global user_prompt, uncond_prompt, user_seed, user_step, user_text_guidance
+
+    user_prompt = prompt
+    uncond_prompt = un_prompt
+    user_seed = np.int64(seed)
+    user_step = step
+    user_text_guidance = text_guidance
+    
+    if user_seed == -1:
+        user_seed = np.random.randint(low=0, high=9999999999, size=None, dtype=np.int64)
+
+    assert isinstance(user_seed, np.int64) == True, "user_seed should be of type int64"
+    assert isinstance(user_step, int) == True, "user_step should be of type int"
+    assert isinstance(user_text_guidance, float) == True, "user_text_guidance should be of type float"
+    assert user_text_guidance >= 5.0 and user_text_guidance <= 15.0, "user_text_guidance should be a float from [5.0, 15.0]"
+
+def run_scheduler(noise_pred_uncond, noise_pred_text, latent_in, timestep):
+    # Convert all inputs from NHWC to NCHW
+    noise_pred_uncond = np.transpose(noise_pred_uncond, (0, 3, 1, 2)).copy()
+    noise_pred_text = np.transpose(noise_pred_text, (0, 3, 1, 2)).copy()
+    latent_in = np.transpose(latent_in, (0, 3, 1, 2)).copy()
+
+    # Convert all inputs to torch tensors
+    noise_pred_uncond = torch.from_numpy(noise_pred_uncond)
+    noise_pred_text = torch.from_numpy(noise_pred_text)
+    latent_in = torch.from_numpy(latent_in)
+
+    # Merge noise_pred_uncond and noise_pred_text based on user_text_guidance
+    noise_pred = noise_pred_uncond + user_text_guidance * (noise_pred_text - noise_pred_uncond)
+
+    # Run Scheduler step
+    latent_out = scheduler.step(noise_pred, timestep, latent_in).prev_sample.numpy()
+
+    # Convert latent_out from NCHW to NHWC
+    latent_out = np.transpose(latent_out, (0, 2, 3, 1)).copy()
+
+    return latent_out
+
+# Function to get timesteps
+def get_timestep(step):
+    return np.int32(scheduler.timesteps.numpy()[step])
+
+# Execute the Stable Diffusion pipeline
+def model_execute(callback, image_path, show_image = True, save_image = False):
+    PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
+
+    scheduler.set_timesteps(user_step)  # Setting up user provided time steps for Scheduler
+
+    # Run Tokenizer
+    cond_tokens = run_tokenizer(user_prompt)
+    uncond_tokens = run_tokenizer(uncond_prompt)
+
+    # Run Text Encoder on Tokens
+    uncond_text_embedding = text_encoder.Inference(uncond_tokens)
+    user_text_embedding = text_encoder.Inference(cond_tokens)
+
+    # Initialize the latent input with random initial latent
+    random_init_latent = torch.randn((1, 4, 64, 64), generator=torch.manual_seed(user_seed)).numpy()
+    latent_in = random_init_latent.transpose(0, 2, 3, 1)
+
+    time_emb_path = time_embedding_dir / str(user_step)
+
+    # Run the loop for user_step times
+    for step in range(user_step):
+        time_embedding = None
+
+        print(f'Step {step} Running...')
+
+        time_step = get_timestep(step)
+
+        unconditional_noise_pred = unet.Inference(latent_in, time_step, uncond_text_embedding)
+        conditional_noise_pred = unet.Inference(latent_in, time_step, user_text_embedding)
+
+        latent_in = run_scheduler(unconditional_noise_pred, conditional_noise_pred, latent_in, time_step)
+
+        callback(step)
+
+    # Run VAE
+    import datetime
+    now = datetime.datetime.now()
+    output_image = vae_decoder.Inference(latent_in)
+    formatted_time = now.strftime("%Y_%m_%d_%H_%M_%S")
+
+    if len(output_image) == 0:
+        callback(None)
+    else:
+        image_size = 512
+
+        output_image = np.clip(output_image * 255.0, 0.0, 255.0).astype(np.uint8)
+        output_image = output_image.reshape(image_size, image_size, -1)
+        output_image = Image.fromarray(output_image, mode="RGB")
+
+        if save_image:
+            if not os.path.exists(image_path):
+                os.makedirs(image_path, exist_ok=True)
+            image_path = Path(image_path) / "{}_{}_{}.jpg".format(formatted_time, str(user_seed), str(image_size))
+            output_image.save(image_path)
+
+            callback(str(image_path))
+        
+        if show_image:
+            output_image.show()
+
+    PerfProfile.RelPerfProfileGlobal()
+
+    if save_image:
+        return image_path
+    else:
+        return output_image
+
+# Release all the models.
+def model_destroy():
+    global text_encoder
+    global unet
+    global vae_decoder
+
+    del(text_encoder)
+    del(unet)
+    del(vae_decoder)
+
+def SetQNNConfig():
+    QNNConfig.Config(Runtime.HTP, LogLevel.ERROR, ProfilingLevel.BASIC)
+
+####################################################################
+
+def modelExecuteCallback(result):
+    if ((None == result) or isinstance(result, str)):   # None == Image generates failed. 'str' == image_path: generated new image path.
+        if (None == result):
+            result = "None"
+        else:
+            print("Image saved to '" + result + "'")
+    else:
+        result = (result + 1) * 100
+        result = int(result / user_step)
+        result = str(result)
+        # print("modelExecuteCallback result: " + result)
+
+####################################################################
+
+def model_download():
+    ret = True
+
+    desc = f"Downloading {MODEL_NAME} model... "
+    fail = f"\nFailed to download {MODEL_NAME} model. Please prepare the models according to the steps in below link:\n{MODEL_HELP_URL}"
+
+    # WoS / x86_win use (model_id, path); Linux uses (soc_id, name, path)
+    if PLATFORM in ("wos", "x86_win"):
+        ret = install.download_qai_hubmodel(SOC_ID, MODEL_NAME_VAE, vae_decoder_model_path, desc=desc, fail=fail, hub_id=HUB_ID_H)
+        ret = install.download_qai_hubmodel(SOC_ID, MODEL_NAME_UNET, unet_model_path, desc=desc, fail=fail, hub_id=HUB_ID_H)
+        ret = install.download_qai_hubmodel(SOC_ID, MODEL_NAME_TEXT, text_encoder_model_path, desc=desc, fail=fail, hub_id=HUB_ID_H)
+    else:
+        ret = install.download_qai_hubmodel(SOC_ID, MODEL_NAME_VAE, vae_decoder_model_path, desc=desc, fail=fail)
+        ret = install.download_qai_hubmodel(SOC_ID, MODEL_NAME_UNET, unet_model_path, desc=desc, fail=fail)
+        ret = install.download_qai_hubmodel(SOC_ID, MODEL_NAME_TEXT, text_encoder_model_path, desc=desc, fail=fail)
+
+    desc = "Please download Stable-Diffusion-v1.5 model from https://aihub.qualcomm.com/compute/models/stable_diffusion_v1_5 and save them to path 'samples\\python\\stable_diffusion_v1_5\\models'.\n"
+    if not os.path.exists(text_encoder_model_path) or not os.path.exists(unet_model_path) or not os.path.exists(vae_decoder_model_path):
+        print(desc)
+        exit()
+
+####################################################################
+
+
+if __name__ == "__main__":
+    DEFAULT_PROMPT = "spectacular view of northern lights from Alaska"
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--prompt", default=DEFAULT_PROMPT, type=str)
+    args = parser.parse_args()
+
+    model_initialize()
+
+    time_start = time.time()
+
+    user_prompt = args.prompt
+    uncond_prompt = "lowres, text, error, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark"
+    user_seed = np.random.randint(low=0, high=9999999999, size=None, dtype=np.int64)
+    user_step = 20
+    user_text_guidance = 7.5
+
+    setup_parameters(user_prompt, uncond_prompt, user_seed, user_step, user_text_guidance)
+    model_execute(modelExecuteCallback, execution_ws / "images", True, True)
+
+    time_end = time.time()
+    print("time consumes for inference {}(s)".format(str(time_end - time_start)))
+
+    model_destroy()
