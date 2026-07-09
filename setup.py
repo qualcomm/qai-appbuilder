@@ -961,7 +961,7 @@ setup(
         # qai_appbuilder/__init__.py unconditionally imports onnxwrapper,
         # whose top-level imports require numpy + pyyaml. Without these,
         # `pip install qai-appbuilder` in a clean venv fails to import.
-        "numpy",
+        "numpy>=1.22,<=2.4.4",
         "pyyaml",
     ],
     classifiers=[

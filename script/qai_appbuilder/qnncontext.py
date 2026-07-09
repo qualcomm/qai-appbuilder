@@ -857,13 +857,32 @@ class QNNContextProc(_QNNContextBase):
         total_input_bytes = sum(arr.nbytes for arr in input)
         if total_input_bytes > shareMemory.share_memory_size:
             raise ValueError(f"Input data size {total_input_bytes} exceeds share memory size {shareMemory.share_memory_size}, you need to create a larger share memory for model {self.model_name} @ process {self.proc_name}.")
-            # print(f"Input data size {total_input_bytes} exceeds share memory size {shareMemory.share_memory_size}, you need to create a larger share memory for model {self.model_name} @ process {self.proc_name}.")
 
         return self._inference_and_reshape(
             input,
             lambda _in: self.m_context.Inference(shareMemory.m_memory, _in, perf_profile, graphIndex,
                                                  self.input_data_type, self.output_data_type)
         )
+
+    def InferenceAsync(self, shareMemory, input, perf_profile=PerfProfile.DEFAULT, graphIndex=0):
+        """Launch inference asynchronously on the Svc side.
+        Returns a request_id string; the Svc main loop remains unblocked.
+        Call InferenceWait(request_id, shareMemory) to collect the outputs."""
+        self._ensure_live("InferenceAsync")
+        total_input_bytes = sum(arr.nbytes for arr in input)
+        if total_input_bytes > shareMemory.share_memory_size:
+            raise ValueError(f"Input data size {total_input_bytes} exceeds share memory size.")
+        reshaped = reshape_input(list(input))
+        return self.m_context.InferenceAsync(shareMemory.m_memory, reshaped, perf_profile, graphIndex,
+                                             self.input_data_type, self.output_data_type)
+
+    def InferenceWait(self, request_id, shareMemory):
+        """Wait for the async inference identified by request_id and return
+        the reshaped output arrays."""
+        self._ensure_live("InferenceWait")
+        output = self.m_context.InferenceWait(request_id, shareMemory.m_memory, self.output_data_type)
+        outputshape_list = self.getOutputShapes()
+        return reshape_output(output, outputshape_list)
 
 
 class QNNLoraContext(_QNNContextBase):
