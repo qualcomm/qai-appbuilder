@@ -55,7 +55,7 @@ from setuptools.command.bdist_wheel import bdist_wheel
 # ---------------------------
 # Project constants
 # ---------------------------
-VERSION = "2.47.1"
+VERSION = "2.47.0"
 CONFIG = "Release"  # Release, RelWithDebInfo
 PACKAGE_NAME = "qai_appbuilder"
 

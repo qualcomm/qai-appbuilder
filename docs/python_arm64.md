@@ -84,3 +84,6 @@ b. Plese use the API *LogLevel.SetLogLevel()* for Python and *SetLogLevel()* for
 
 c. If using Python 3.11.5, get OpenCV from here:
 https://github.com/RockLakeGrass/Windows-on-ARM64-Toolchain/tree/main/Python/packages/opencv-python
+
+d. If using Python 3.13, you can find many Wheels for Python for Windows on ARM64 in https://github.com/cgohlke/win_arm64-wheels <br>
+
