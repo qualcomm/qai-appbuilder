@@ -16,8 +16,9 @@ import urllib.request as request
 import platform
 
 qnn_sdk_version =  {
-    "2.38": "2.38.0.250901",
-    "2.48": "2.48.0.260626",    
+    "2.46": "2.46.0.260424",
+	"2.47": "2.47.0.260601",
+    "2.48": "2.48.40.260702",    
 }
 
 def get_system():
@@ -43,7 +44,8 @@ elif system_name == "Windows":
 
 
 QNN_SDK_URL = "https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/"
-QAI_APPBUILDER_WHEEL = "https://github.com/qualcomm/qai-appbuilder/releases/download/vversion.0/qai_appbuilder-version.0-cp312-cp312-win_amd64.whl"
+QAI_APPBUILDER_WHEEL = "https://github.com/qualcomm/qai-appbuilder/releases/download/vversion.40/qai_appbuilder-version.40-cp312-cp312-win_amd64.whl"
+#QAI_APPBUILDER_WHEEL = "https://github.com/qualcomm/qai-appbuilder/releases/download/vversion.0/qai_appbuilder-version.0-cp312-cp312-win_amd64.whl"
 QNN_DOWNLOAD_URL = "https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK"
 TEXT_RUN_SCRIPT_AGAIN = "Then run this Python script again."
 
@@ -77,6 +79,111 @@ def is_file_exists(filepath):
         # print(f"{os.path.basename(filepath)} already exist.")
         return True
     return False
+
+# -----------------------------------------------------------------------------
+# Chipset validation helpers
+# -----------------------------------------------------------------------------
+
+# Valid chipset values accepted on non-Windows platforms
+VALID_CHIPSETS = ("6490", "9075")
+
+# Model support map: chipset -> set of supported model names (strict, no wos fallback)
+_CHIPSET_MODEL_SUPPORT = {
+    "6490": {
+        "inception_v3", "convnext_base", "convnext_tiny", "efficientnet_b0",
+        "efficientnet_b4", "efficientnet_v2_s", "fcn_resnet50", "googlenet",
+        "levit", "quicksrnetmedium", "real_esrgan_general_x4v3", "real_esrgan_x4plus",
+        "regnet", "sesr_m5", "shufflenet_v2", "squeezenet1_1", "vit",
+        "wideresnet50", "xlsr", "yolov8_det",
+    },
+    "9075": {
+        "aotgan", "beit", "depth_anything",
+        "easy_ocr_Detector", "easy_ocr_Recognizer",
+        "easy_ocr_CN_Detector", "easy_ocr_CN_Recognizer",
+        "face_attrib_net", "facemap_3dmm", "googlenet", "inception_v3",
+        "lama_dilated", "landmarkdetector", "handdetector",
+        "nomic_embed_text", "openai_clip", "openpose",
+        "quicksrnetmedium", "real_esrgan_general_x4v3", "real_esrgan_x4plus",
+        "resnet_3d",
+        "stable_diffusion_v1_5_VAL", "stable_diffusion_v1_5_UNET", "stable_diffusion_v1_5_TEXT",
+        "stable_diffusion_v2_1_VAE", "stable_diffusion_v2_1_UNET", "stable_diffusion_v2_1_TEXT",
+        "unet_segmentation",
+        "whisper_base_en-whisperencoder-snapdragon_x_elite",
+        "whisper_base_en-whisperdecoder-snapdragon_x_elite",
+        "whisper_tiny_en-whisperencoder-snapdragon_x_elite",
+        "whisper_tiny_en-whisperdecoder-snapdragon_x_elite",
+        "yamnet", "yolov8_det",
+    },
+}
+
+
+def is_model_supported_on_chipset(soc_id, model_name):
+    """Check if model_name is supported on the given chipset (strict, no wos fallback).
+
+    Args:
+        soc_id: Chipset ID string (e.g. '6490', '9075')
+        model_name: Model name to check
+
+    Returns:
+        True if supported, False if not supported or chipset unknown
+    """
+    return model_name in _CHIPSET_MODEL_SUPPORT.get(soc_id, set())
+
+
+def get_supported_chipsets_for_model(model_name):
+    """Return a list of chipset IDs that support the given model.
+
+    Args:
+        model_name: Model name to look up
+
+    Returns:
+        List of chipset ID strings that support this model
+    """
+    return [cs for cs, models in _CHIPSET_MODEL_SUPPORT.items()
+            if model_name in models]
+
+
+def validate_chipset(soc_id, model_name):
+    """Validate chipset argument and check model support. Exits on error.
+
+    On non-Windows platforms, soc_id is required and must be one of VALID_CHIPSETS.
+    On all platforms, if soc_id is one of VALID_CHIPSETS, the model must be
+    supported on that chipset.
+
+    Args:
+        soc_id: Chipset ID from --chipset argument (may be None)
+        model_name: Model name to validate support for
+
+    Returns:
+        soc_id (unchanged) if validation passes
+    """
+    import platform
+    system = platform.system()
+
+    if system != "Windows":
+        if soc_id is None:
+            print(f"[ERROR] --chipset is required on non-Windows platforms.")
+            print(f"        Supported values: {', '.join(VALID_CHIPSETS)}")
+            sys.exit(1)
+        if soc_id not in VALID_CHIPSETS:
+            print(f"[ERROR] Invalid --chipset value: '{soc_id}'")
+            print(f"        Supported values: {', '.join(VALID_CHIPSETS)}")
+            sys.exit(1)
+
+    # If a valid chipset is specified, check model support
+    if soc_id is not None and soc_id in VALID_CHIPSETS:
+        if not is_model_supported_on_chipset(soc_id, model_name):
+            supported = get_supported_chipsets_for_model(model_name)
+            hint = f", e.g.: {supported[0]}" if supported else ""
+            print(f"[ERROR] --chipset '{soc_id}' does not support model '{model_name}'.")
+            print(f"        The current chipset does not support this model.")
+            if supported:
+                print(f"        Please use a chipset that supports '{model_name}'{hint}")
+                print(f"        Supported chipsets for this model: {', '.join(supported)}")
+            sys.exit(1)
+
+    return soc_id
+
 
 def config_model_id(soc_id, model_name):
     model_map = {

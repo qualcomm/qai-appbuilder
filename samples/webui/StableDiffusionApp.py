@@ -5,7 +5,8 @@
 import os
 import sys
 sys.path.append(".")
-sys.path.append("python")
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "generativeai", "image_generation"))
 import stable_diffusion_v2_1.stable_diffusion_v2_1 as stable_diffusion_v2_1 # We need add this line before import 'gradio'.
 import gradio as gr
 
@@ -49,10 +50,7 @@ footer{display:none !important}
 
 ####################################################################
 
-execution_ws = os.getcwd()
-
-if not "webui" in execution_ws:
-    execution_ws = execution_ws + "\\webui"
+execution_ws = os.path.dirname(os.path.abspath(__file__))
 
 user_prompt = ""
 uncond_prompt = ""
@@ -95,7 +93,7 @@ def infer(text, text2, step, guidance, seed, number):
 
 if __name__ == '__main__':
 
-    with gr.Blocks(head=headjs, css=css, theme=gr.themes.Glass(), fill_width=True, fill_height=True) as demo:
+    with gr.Blocks(fill_width=True, fill_height=True, css=css, theme=gr.themes.Glass()) as demo:
         demo.title = "文生图应用"
         gr.Markdown("<h1><center>文生图应用</center></h1>")
 
