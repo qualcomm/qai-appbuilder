@@ -47,11 +47,11 @@ Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.47.0.260601\
 ```
 cd qai-appbuilder
 *Note: Make sure to build in the regular Windows Command Prompt — not in the 'ARM64 Native Tools Command Prompt for VS 2022' and not in the 'Power Shell' window.* <br>
-     set QNN_SDK_ROOT=C:/Qualcomm/AIStack/QAIRT/2.42.0.251225/
+     set QNN_SDK_ROOT=C:/Qualcomm/AIStack/QAIRT/2.48.40.260702/
      python -m build -w
 
 # Install the extension:
-pip install --force-reinstall dist\qai_appbuilder-2.42.0-cp312-cp312-win_amd64.whl
+pip install --force-reinstall dist\qai_appbuilder-2.48.40-cp312-cp312-win_amd64.whl
 ```
 
 ## Build QAI AppBuilder for Linux

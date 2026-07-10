@@ -4,12 +4,9 @@
 # ---------------------------------------------------------------------
 import os
 import sys
-if sys.platform.startswith('linux'):
-    sys.path.append(".")
-    sys.path.append("linux/python")
-else:
-    sys.path.append(".")
-    sys.path.append("python")
+sys.path.append(".")
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "computervision", "super_resolution"))
 
 import numpy as np
 from PIL import Image
