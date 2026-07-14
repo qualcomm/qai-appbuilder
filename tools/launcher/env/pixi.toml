@@ -7,7 +7,7 @@ version = "0.1.0"
 [tasks]
 install-tools = { cmd = ["python", "utils/Install_Tools.py"], cwd = ".."}
 install-vs = { cmd = ["python", "utils/Install_Visual_Studio.py"], cwd = ".."}
-install-qai-appbuilder = { cmd = ["python", "python/setup.py"], cwd = "../qai-appbuilder/samples/"}
+install-qai-appbuilder = { cmd = ["python", "common/setup.py"], cwd = "../qai-appbuilder/samples/"}
 install-model = { cmd = ["python", "utils/Install_LLM_Models.py"], cwd = ".."}
 install-langflow = { cmd = "uv pip install langflow==1.7.1 --trusted-host=pypi.org --trusted-host=files.pythonhosted.org"}
 webui-imagerepair = { cmd = "python ./webui/ImageRepairApp.py", cwd = "../qai-appbuilder/samples"}

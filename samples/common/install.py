@@ -238,10 +238,10 @@ def config_model_id(soc_id, model_name):
             "stable_diffusion_v2_1_UNET": "mqpyg98gq", #
             "stable_diffusion_v2_1_TEXT": "mm5w6859m", #
             "unet_segmentation": "mn4dwj17n", #
-            "whisper_base_en-whisperencoder-snapdragon_x_elite": "mqvvjzzeq", #
-            "whisper_base_en-whisperdecoder-snapdragon_x_elite": "mq8ylzzpm", #
-            "whisper_tiny_en-whisperencoder-snapdragon_x_elite": "mqv56230n", #
-            "whisper_tiny_en-whisperdecoder-snapdragon_x_elite": "mn0vjew3m", #
+            "whisper_base_en-whisperencoder-snapdragon_x_elite": "mnjkzwg1m", #
+            "whisper_base_en-whisperdecoder-snapdragon_x_elite": "mq2zr71wq", #
+            "whisper_tiny_en-whisperencoder-snapdragon_x_elite": "mno0d5dpn", #
+            "whisper_tiny_en-whisperdecoder-snapdragon_x_elite": "mq9g4ddln", #
             "yamnet": "mm64zg26q", #
             "yolov8_det": "mqpoll00m", #
         },
@@ -750,5 +750,5 @@ def detect_device_model() -> str:
     elif "family 8 model 1" in cpu_name or ("x elite" in cpu_name and "x2" not in cpu_name):
         return "snapdragon_x_elite"
     else:
-        print("[WARN] Unknown CPU model, defaulting to snapdragon_x_elite")
-        return "snapdragon_x_elite"
+        print("f[WARN] The current chipset {cpu_name} does not support this model.")
+        sys.exit(1)
