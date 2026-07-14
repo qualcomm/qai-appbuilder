@@ -18,7 +18,7 @@
 - Install Qualcomm® AI Runtime SDK:
   - https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK
 - Update the Genie library for using AMD64 Python on WoS device
-  - Download [QAIRT_v2.47.0.260601.zip](https://github.com/qualcomm/qai-appbuilder/releases/download/v2.47.0/QAIRT_v2.47.0.260601.zip), unzip it and replace the original files Genie.lib, Genie.dll in your Qualcomm® AI Runtime SDK install path (for example C:\Qualcomm\AIStack\QAIRT\2.47.0.260601\lib\arm64x-windows-msvc\).
+  - Download [QAIRT_v2.48.40.260702.zip](https://github.com/qualcomm/qai-appbuilder/releases/download/v2.48.40/QAIRT_v2.48.40.260702.zip), unzip it and replace the original files Genie.lib, Genie.dll in your Qualcomm® AI Runtime SDK install path (for example C:\Qualcomm\AIStack\QAIRT\2.48.40.260702\lib\arm64x-windows-msvc\).
   
 - Install Visual Studio 2022: 
   - https://learn.microsoft.com/en-us/visualstudio/releases/2022/release-history#release-dates-and-build-numbers<br>
@@ -39,7 +39,7 @@ git pull --recurse-submodules
 ```
 - Set environment 'QNN_SDK_ROOT' to the Qualcomm® AI Runtime SDK path which you're using. E.g.:
 ```
-Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.47.0.260601\
+Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.48.40.260702\
 ```
 - Use the commands below to build and install Python extension(*.whl): <br>
 *Note: Please get the corresponding "Supported Toolchains" and "Hexagon Arch" with your device from [Supported Snapdragon devices](https://docs.qualcomm.com/bundle/publicresource/topics/80-63442-10/QNN_general_overview.html#supported-snapdragon-devices). <br>

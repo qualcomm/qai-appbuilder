@@ -26,48 +26,108 @@ import argparse
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+def _detect_platform():
+    """Return one of: 'wos', 'x86_win', 'arm64_linux', 'x86_linux', 'unknown'."""
+    system  = platform.system().lower()
+    machine = platform.machine().lower()
+
+    if system == "windows":
+        if machine in ("aarch64", "arm64"):
+            return "wos"          # Windows on Snapdragon
+        else:
+            return "x86_win"      # Regular x86_64 Windows
+    if system == "linux":
+        if machine in ("aarch64", "arm64"):
+            return "arm64_linux"
+        if machine in ("x86_64", "amd64"):
+            return "x86_linux"
+    return "unknown"
+
+PLATFORM = _detect_platform()
+print(f"[INFO] Detected platform: {PLATFORM}")
+
 # ── All available models ───────────────────────────────────────────────────
 # Format: (category, model_name, relative_script_path, platforms)
 # platforms: list of supported OS names as returned by platform.system()
 #            e.g. ["Windows", "Linux"] or None (= all platforms)
-_ALL_MODELS = [
-    # ── audio ──────────────────────────────────────────────────────────────
-    ("audio",           "pipertts_en",                  r"audio\audio_generation\pipertts_en\pipertts_en.py",                        None),
-    ("audio",           "whisper_base_en",               r"audio\speech_recognition\whisper_base_en\whisper_base_en.py",              None),
-    ("audio",           "whisper_tiny_en",               r"audio\speech_recognition\whisper_tiny_en\whisper_tiny_en.py",              None),
-    ("audio",           "yamnet",                        r"audio\audio_classification\yamnet\yamnet.py",                              None),
+if PLATFORM in ("wos", "x86_win"):
+    _ALL_MODELS = [
+        # ── audio ──────────────────────────────────────────────────────────────
+        ("audio",           "pipertts_en",                  r"audio\audio_generation\pipertts_en\pipertts_en.py",                        None),
+        ("audio",           "whisper_base_en",               r"audio\speech_recognition\whisper_base_en\whisper_base_en.py",              None),
+        ("audio",           "whisper_tiny_en",               r"audio\speech_recognition\whisper_tiny_en\whisper_tiny_en.py",              None),
+        ("audio",           "yamnet",                        r"audio\audio_classification\yamnet\yamnet.py",                              None),
 
-    # ── computervision ─────────────────────────────────────────────────────
-    ("computervision",  "aotgan",                        r"computervision\image_editing\aotgan\aotgan.py",                            None),
-    ("computervision",  "beit",                          r"computervision\image_classification\beit\beit.py",                         None),
-    ("computervision",  "depth_anything",                r"computervision\depth_estimation\depth_anything\depth_anything.py",         None),
-    ("computervision",  "face_attrib_net",               r"computervision\face_recognition\face_attrib_net\face_attrib_net.py",       None),
-    ("computervision",  "facemap_3dmm",                  r"computervision\face_recognition\facemap_3dmm\facemap_3dmm.py",             None),
-    ("computervision",  "googlenet",                     r"computervision\image_classification\googlenet\googlenet.py",               None),
-    ("computervision",  "inception_v3",                  r"computervision\image_classification\inception_v3\inception_v3.py",         None),
-    ("computervision",  "lama_dilated",                  r"computervision\image_editing\lama_dilated\lama_dilated.py",                None),
-    ("computervision",  "mediapipe_hand",                r"computervision\pose_estimation\mediapipe_hand\mediapipe_hand.py",          None),
-    ("computervision",  "openpose",                      r"computervision\pose_estimation\openpose\openpose.py",                      None),
-    ("computervision",  "quicksrnetmedium",              r"computervision\super_resolution\quicksrnetmedium\quicksrnetmedium.py",     None),
-    ("computervision",  "real_esrgan_general_x4v3",      r"computervision\super_resolution\real_esrgan_general_x4v3\real_esrgan_general_x4v3.py", None),
-    ("computervision",  "real_esrgan_x4plus",            r"computervision\super_resolution\real_esrgan_x4plus\real_esrgan_x4plus.py", None),
-    ("computervision",  "resnet_3d",                     r"computervision\video_classification\resnet_3d\resnet_3d.py",               None),
-    ("computervision",  "unet_segmentation",             r"computervision\semantic_segmentation\unet_segmentation\unet_segmentation.py", None),
-    ("computervision",  "yolov8_det",                    r"computervision\object_detection\yolov8_det\yolov8_det.py",                 None),
+        # ── computervision ─────────────────────────────────────────────────────
+        ("computervision",  "aotgan",                        r"computervision\image_editing\aotgan\aotgan.py",                            None),
+        ("computervision",  "beit",                          r"computervision\image_classification\beit\beit.py",                         None),
+        ("computervision",  "depth_anything",                r"computervision\depth_estimation\depth_anything\depth_anything.py",         None),
+        ("computervision",  "face_attrib_net",               r"computervision\face_recognition\face_attrib_net\face_attrib_net.py",       None),
+        ("computervision",  "facemap_3dmm",                  r"computervision\face_recognition\facemap_3dmm\facemap_3dmm.py",             None),
+        ("computervision",  "googlenet",                     r"computervision\image_classification\googlenet\googlenet.py",               None),
+        ("computervision",  "inception_v3",                  r"computervision\image_classification\inception_v3\inception_v3.py",         None),
+        ("computervision",  "lama_dilated",                  r"computervision\image_editing\lama_dilated\lama_dilated.py",                None),
+        ("computervision",  "mediapipe_hand",                r"computervision\pose_estimation\mediapipe_hand\mediapipe_hand.py",          None),
+        ("computervision",  "openpose",                      r"computervision\pose_estimation\openpose\openpose.py",                      None),
+        ("computervision",  "quicksrnetmedium",              r"computervision\super_resolution\quicksrnetmedium\quicksrnetmedium.py",     None),
+        ("computervision",  "real_esrgan_general_x4v3",      r"computervision\super_resolution\real_esrgan_general_x4v3\real_esrgan_general_x4v3.py", None),
+        ("computervision",  "real_esrgan_x4plus",            r"computervision\super_resolution\real_esrgan_x4plus\real_esrgan_x4plus.py", None),
+        ("computervision",  "resnet_3d",                     r"computervision\video_classification\resnet_3d\resnet_3d.py",               None),
+        ("computervision",  "unet_segmentation",             r"computervision\semantic_segmentation\unet_segmentation\unet_segmentation.py", None),
+        ("computervision",  "yolov8_det",                    r"computervision\object_detection\yolov8_det\yolov8_det.py",                 None),
 
-    # ── generativeai ───────────────────────────────────────────────────────
-    ("generativeai",    "stable_diffusion_v1_5",         r"generativeai\image_generation\stable_diffusion_v1_5\stable_diffusion_v1_5.py", None),
-    ("generativeai",    "stable_diffusion_v2_1",         r"generativeai\image_generation\stable_diffusion_v2_1\stable_diffusion_v2_1.py", None),
-    ("generativeai",    "stable_diffusion_v3_5",         r"generativeai\image_generation\stable_diffusion_v3_5\stable_diffusion_v3_5.py", None),
+        # ── generativeai ───────────────────────────────────────────────────────
+        ("generativeai",    "stable_diffusion_v1_5",         r"generativeai\image_generation\stable_diffusion_v1_5\stable_diffusion_v1_5.py", None),
+        ("generativeai",    "stable_diffusion_v2_1",         r"generativeai\image_generation\stable_diffusion_v2_1\stable_diffusion_v2_1.py", None),
+        ("generativeai",    "stable_diffusion_v3_5",         r"generativeai\image_generation\stable_diffusion_v3_5\stable_diffusion_v3_5.py", None),
 
-    # ── multimodal ─────────────────────────────────────────────────────────
-    ("multimodal",      "easy_ocr",                      r"multimodal\image_to_text\easy_ocr\easy_ocr.py",                            None),
-    ("multimodal",      "nomic_embed_text",              r"multimodal\text_generation\nomic_embed_text\nomic_embed_text.py",           None),
-    ("multimodal",      "openai_clip",                   r"multimodal\image_classification\openai_clip\openai_clip.py",               None),
-    ("multimodal",      "opus_mt_zh_en",                 r"multimodal\text_generation\opus_mt_zh_en\opus_mt_zh_en.py",                None),
-    # qwen_vl requires Linux (aarch64-oe-linux) runtime; not supported on WoS
-    ("multimodal",      "qwen_vl",                       r"multimodal\qwen_vl\qwen_vl.py",                                           ["Linux"]),
-]
+        # ── multimodal ─────────────────────────────────────────────────────────
+        ("multimodal",      "easy_ocr",                      r"multimodal\image_to_text\easy_ocr\easy_ocr.py",                            None),
+        ("multimodal",      "nomic_embed_text",              r"multimodal\text_generation\nomic_embed_text\nomic_embed_text.py",           None),
+        ("multimodal",      "openai_clip",                   r"multimodal\image_classification\openai_clip\openai_clip.py",               None),
+        ("multimodal",      "opus_mt_zh_en",                 r"multimodal\text_generation\opus_mt_zh_en\opus_mt_zh_en.py",                None),
+        # qwen_vl requires Linux (aarch64-oe-linux) runtime; not supported on WoS
+        ("multimodal",      "qwen_vl",                       r"multimodal\qwen_vl\qwen_vl.py",                                           ["Linux"]),
+    ]
+else:
+    _ALL_MODELS = [
+        # ── audio ──────────────────────────────────────────────────────────────
+        ("audio",           "pipertts_en",                  r"audio/Audio_Generation/pipertts_en/pipertts_en.py",                        None),
+        ("audio",           "whisper_base_en",               r"audio/Speech_Recognition/whisper_base_en/whisper_base_en.py",              None),
+        ("audio",           "whisper_tiny_en",               r"audio/Speech_Recognition/whisper_tiny_en/whisper_tiny_en.py",              None),
+        ("audio",           "yamnet",                        r"audio/Audio_Classification/yamnet/yamnet.py",                              None),
+
+        # ── computervision ─────────────────────────────────────────────────────
+        ("computervision",  "aotgan",                        r"ComputerVision/Image_Editing/aotgan/aotgan.py",                            None),
+        ("computervision",  "beit",                          r"ComputerVision/Image_Classification/beit/beit.py",                         None),
+        ("computervision",  "depth_anything",                r"ComputerVision/Depth_Estimation/depth_anything/depth_anything.py",         None),
+        ("computervision",  "face_attrib_net",               r"ComputerVision/Face_Recognition/face_attrib_net/face_attrib_net.py",       None),
+        ("computervision",  "facemap_3dmm",                  r"ComputerVision/Face_Recognition/facemap_3dmm/facemap_3dmm.py",             None),
+        ("computervision",  "googlenet",                     r"ComputerVision/Image_Classification/googlenet/googlenet.py",               None),
+        ("computervision",  "inception_v3",                  r"ComputerVision/Image_Classification/inception_v3/inception_v3.py",         None),
+        ("computervision",  "lama_dilated",                  r"ComputerVision/Image_Editing/lama_dilated/lama_dilated.py",                None),
+        ("computervision",  "mediapipe_hand",                r"ComputerVision/Pose_Estimation/mediapipe_hand/mediapipe_hand.py",          None),
+        ("computervision",  "openpose",                      r"ComputerVision/Pose_Estimation/openpose/openpose.py",                      None),
+        ("computervision",  "quicksrnetmedium",              r"ComputerVision/Super_Resolution/quicksrnetmedium/quicksrnetmedium.py",     None),
+        ("computervision",  "real_esrgan_general_x4v3",      r"ComputerVision/Super_Resolution/real_esrgan_general_x4v3/real_esrgan_general_x4v3.py", None),
+        ("computervision",  "real_esrgan_x4plus",            r"ComputerVision/Super_Resolution/real_esrgan_x4plus/real_esrgan_x4plus.py", None),
+        ("computervision",  "resnet_3d",                     r"ComputerVision/Video_Classification/resnet_3d/resnet_3d.py",               None),
+        ("computervision",  "unet_segmentation",             r"ComputerVision/Semantic_Segmentation/unet_segmentation/unet_segmentation.py", None),
+        ("computervision",  "yolov8_det",                    r"ComputerVision/Object_Detection/yolov8_det/yolov8_det.py",                 None),
+
+        # ── generativeai ───────────────────────────────────────────────────────
+        ("generativeai",    "stable_diffusion_v1_5",         r"GenerativeAI/Image_Generation/stable_diffusion_v1_5/stable_diffusion_v1_5.py", None),
+        ("generativeai",    "stable_diffusion_v2_1",         r"GenerativeAI/Image_Generation/stable_diffusion_v2_1/stable_diffusion_v2_1.py", None),
+        ("generativeai",    "stable_diffusion_v3_5",         r"GenerativeAI/Image_Generation/stable_diffusion_v3_5/stable_diffusion_v3_5.py", None),
+
+        # ── multimodal ─────────────────────────────────────────────────────────
+        ("multimodal",      "easy_ocr",                      r"Multimodal/Image_To_Text/easy_ocr/easy_ocr.py",                            None),
+        ("multimodal",      "nomic_embed_text",              r"Multimodal/Text_Generation/nomic_embed_text/nomic_embed_text.py",           None),
+        ("multimodal",      "openai_clip",                   r"Multimodal/Image_Classification/openai_clip/openai_clip.py",               None),
+        ("multimodal",      "opus_mt_zh_en",                 r"Multimodal/text_generation/opus_mt_zh_en/opus_mt_zh_en.py",                None),
+        # qwen_vl requires Linux (aarch64-oe-linux) runtime; not supported on WoS
+        ("multimodal",      "qwen_vl",                       r"Multimodal/qwen_vl/qwen_vl.py",                                           ["Linux"]),
+    ]
 
 # Filter models by current platform
 _current_os = platform.system()
