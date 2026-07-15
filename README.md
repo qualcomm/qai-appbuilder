@@ -26,8 +26,8 @@ The **Quick AI Application Builder** (this repository) is also referred to as "Q
 
 With QAI AppBuilder, a single natural language prompt drives the full AI application build pipeline — no coding required:
 
-- **Path A — Pre-built models from AI Hub**: The [AI Hub Model Run Skill](tools/skills/qai-runner-skill/) automatically downloads pre-exported QNN models directly from [Qualcomm AI Hub](https://aihub.qualcomm.com/compute/models) and runs inference on the Snapdragon NPU without any conversion step.
-- **Path B — Custom model conversion**: The [Model Builder Skill](tools/skills/knowledge-skills/qai_app_builder/) takes your own PyTorch or ONNX model and automatically handles the full pipeline — export, quantization (FP16 / W8A16 / W8A8 / W4A8), and context binary generation via QAIRT SDK — producing an optimized `.bin`/`.dlc` ready for on-device inference.
+- **Path A — Pre-built models from AI Hub**: The [AI Hub Model Run Skill](tools/qaimodelbuilder/skills/aihub-model-run) automatically downloads pre-exported QNN models directly from [Qualcomm AI Hub](https://aihub.qualcomm.com/compute/models) and runs inference on the Snapdragon NPU without any conversion step.
+- **Path B — Custom model conversion**: The [Model Builder Skill](tools/qaimodelbuilder/factory/chat_features/model-builder) takes your own PyTorch or ONNX model and automatically handles the full pipeline — export, quantization (FP16 / W8A16 / W8A8 / W4A8), and context binary generation via QAIRT SDK — producing an optimized `.bin`/`.dlc` ready for on-device inference.
 
 Both paths converge on the same **NPU inference engine** (`QNNContext` via `qai-appbuilder`), running fully on-device on Snapdragon series — no internet connection required at inference time.
 
