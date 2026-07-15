@@ -1,3 +1,4 @@
 # Force shell scripts to always use LF line endings (required for Linux execution).
 # Modern Windows editors (VS Code, Notepad++, etc.) handle LF files without issues.
 *.sh text eol=lf
+samples/**/*.bin binary

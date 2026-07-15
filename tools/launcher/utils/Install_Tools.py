@@ -80,8 +80,8 @@ def install_GenieAPIService():
     #    shutil.rmtree(android_root)
 
 def install_QAIRT():
-    extract_root = os.path.join("qai-appbuilder", "samples", "qai_libs")
-    zip_file = os.path.join(extract_root, "QAIRT_Runtime_2.38.0_v73.zip")
+    extract_root = os.path.join("qai-appbuilder", "tools")
+    zip_file = os.path.join(extract_root, "QAIRT_v2.48.40.260702.zip")
 
     if os.path.exists(extract_root):
         print("tools directory already exists")
@@ -90,10 +90,10 @@ def install_QAIRT():
         os.makedirs(extract_root, exist_ok=True)
     
     if os.path.exists(zip_file):
-        print("QAIRT_Runtime_2.38.0_v73.zip already exists")
+        print("QAIRT_v2.48.40.260702.zip already exists")
     else:
-        print("Downloading QAIRT_Runtime_2.38.0_v73.zip...")
-        download_url = "https://github.com/qualcomm/qai-appbuilder/releases/download/v2.38.0/QAIRT_Runtime_2.38.0_v73.zip"
+        print("Downloading QAIRT_v2.48.40.260702.zip...")
+        download_url = "https://github.com/qualcomm/qai-appbuilder/releases/download/v2.48.40/QAIRT_v2.48.40.260702.zip"
         
         if download_file_with_progress(download_url, zip_file):
             print("download successfully")

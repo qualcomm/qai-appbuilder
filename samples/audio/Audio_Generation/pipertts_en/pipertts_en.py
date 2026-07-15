@@ -70,6 +70,21 @@ _MODEL_URLS = {
 }
 _REQUIRED_MODELS = ["encoder.bin", "sdp.bin", "flow.bin", "decoder.bin"]
 
+SOC_ID = None
+cleaned_argv = []
+i = 0
+while i < len(sys.argv):
+    if sys.argv[i] == '--chipset':
+        SOC_ID = sys.argv[i + 1]
+        i += 2
+    else:
+        cleaned_argv.append(sys.argv[i])
+        i += 1
+
+sys.argv = cleaned_argv
+
+print(f"SOC_ID: {SOC_ID}")
+
 # -- Piper phoneme vocabulary (from official piper-voices voice config) --------
 # IPA char -> piper encoder input id
 # '_'=0(PAD), '^'=1(BOS), '$'=2(EOS), ' '=3(space)
