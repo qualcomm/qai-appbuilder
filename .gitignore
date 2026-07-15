@@ -1,6 +1,6 @@
 dist/
 build/
-lib/
+/lib/
 *.egg-info/
 *.whl
 __pycache__/
