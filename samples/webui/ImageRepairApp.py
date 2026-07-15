@@ -4,19 +4,16 @@
 # ---------------------------------------------------------------------
 import os
 import sys
-if sys.platform.startswith('linux'):
-    sys.path.append(".")
-    sys.path.append("linux/python")
-else:
-    sys.path.append(".")
-    sys.path.append("python")
+sys.path.append(".")
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "computervision", "super_resolution"))
 
 import numpy as np
 from PIL import Image
 import datetime
 from tkinter import filedialog, Tk
 import shutil
-import real_esrgan_x4plus.real_esrgan_x4plus as real_esrgan # We need add this line before import 'gradio'.
+import real_esrgan_general_x4v3.real_esrgan_general_x4v3 as real_esrgan # We need add this line before import 'gradio'.
 import gradio as gr
 
 
@@ -337,7 +334,7 @@ def image_save():
 
 def image_repair():
     if os.path.exists(IMAGE_OLD):
-        real_esrgan.Inference(IMAGE_OLD, IMAGE_NEW, False)
+        real_esrgan.Inference(IMAGE_OLD, IMAGE_NEW)
         pil_new = Image.open(IMAGE_NEW)
         size = pil_new.size
         pil_new = np.array(pil_new)

@@ -1,8 +1,8 @@
 *.bin
-!python/easy_ocr/Char/ch_en_character.bin
-!python/easy_ocr/Char/ch_en_lang_char.bin
-!python/easy_ocr/Char/en_character.bin
-!python/easy_ocr/Char/en_lang_char.bin
+!multimodal/Image_To_Text/easy_ocr/Char/ch_en_character.bin
+!multimodal/Image_To_Text/easy_ocr/Char/ch_en_lang_char.bin
+!multimodal/Image_To_Text/easy_ocr/Char/en_character.bin
+!multimodal/Image_To_Text/easy_ocr/Char/en_lang_char.bin
 
 *.raw
 __pycache__/
