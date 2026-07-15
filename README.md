@@ -1,7 +1,7 @@
 <br>
 
 <div align="center">
-  <img src="docs/images/qai_banner.svg" alt="QAI AppBuilder & QAI ModelBuilder" width="900" height="150">
+  <img src="https://raw.githubusercontent.com/qualcomm/qai-appbuilder/main/docs/images/qai_banner.svg" alt="QAI AppBuilder & QAI ModelBuilder" width="900" height="150">
 </div>
 
 <br>
@@ -32,7 +32,7 @@ With QAI AppBuilder, a single natural language prompt drives the full AI applica
 Both paths converge on the same **NPU inference engine** (`QNNContext` via `qai-appbuilder`), running fully on-device on Snapdragon series — no internet connection required at inference time.
 
 <div align="center">
-  <img src="docs/images/qai_appbuilder_agent.svg" alt="QAI AppBuilder Agent Capabilities" width="1330" height="488">
+  <img src="https://raw.githubusercontent.com/qualcomm/qai-appbuilder/main/docs/images/qai_appbuilder_agent.svg" alt="QAI AppBuilder Agent Capabilities" width="1330" height="488">
 </div>
 
 ### What can QAI AppBuilder do?
@@ -140,7 +140,7 @@ You can also run the batch file from [QAI AppBuilder Launcher](tools/launcher/) 
 ## Diagram
 
 <div align="center">
-  <img src="docs/images/diagram2.png" alt="QAI AppBuilder Diagram" width="1100" height="482">
+  <img src="https://raw.githubusercontent.com/qualcomm/qai-appbuilder/main/docs/images/diagram2.png" alt="QAI AppBuilder Diagram" width="1100" height="482">
 </div>
 
 ---
