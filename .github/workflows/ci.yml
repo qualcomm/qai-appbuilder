@@ -27,8 +27,8 @@ name: CI
 # artifact and publishes a GitHub Release at that tag.
 #
 # Matrix:
-#   - Windows x64 + Windows ARM64: 3 Python (3.11/3.12/3.13) x 2 QNN SDK
-#       (2.46/2.47) per OS = 12 jobs total across both Windows OSes
+#   - Windows x64 + Windows ARM64: 3 Python (3.11/3.12/3.13) x 3 QNN SDK
+#       (2.46/2.47/2.48.40) per OS = 18 jobs total across both Windows OSes
 #   - Linux aarch64: 1 job (py3.12 x QNN 2.47), expanded once stable
 #
 # fail-fast disabled so a single broken combination does not mask the rest.
@@ -110,16 +110,15 @@ jobs:
           # qualcomm/qai-appbuilder release; setup-qnn-sdk extracts it and
           # overlays Genie.dll / Genie.lib (+ headers + libGenie.so for Linux)
           # onto the Community SDK. Leave empty to skip the overlay.
-          - version: '2.48.0.260626'
-            url: 'https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.48.0.260626/v2.48.0.260626.zip'
-            genie-url: ''
+          - version: '2.48.40.260702'
+            url: 'https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.48.40.260702/v2.48.40.260702.zip'
+            genie-url: 'https://github.com/qualcomm/qai-appbuilder/releases/download/v2.48.40/QAIRT_v2.48.40.260702.zip'
           - version: '2.47.0.260601'
             url: ''
             genie-url: 'https://github.com/qualcomm/qai-appbuilder/releases/download/v2.47.0/QAIRT_v2.47.0.260601.zip'
           # Rows below use the SDK-bundled (upstream) Genie because no
           # matching customized-Genie overlay is published on
-          # qualcomm/qai-appbuilder for that version yet. Fill in the
-          # genie-url when the overlay ships (2.48 is likely the next).
+          # qualcomm/qai-appbuilder for that version yet.
           - version: '2.46.0.260424'
             url: 'https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.46.0.260424/v2.46.0.260424.zip'
             genie-url: ''
@@ -266,9 +265,9 @@ jobs:
         python: ['3.11', '3.12', '3.13']
         qnn:
           # See windows-x64 matrix above for the genie-url convention.
-          - version: '2.48.0.260626'
-            url: 'https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.48.0.260626/v2.48.0.260626.zip'
-            genie-url: ''
+          - version: '2.48.40.260702'
+            url: 'https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.48.40.260702/v2.48.40.260702.zip'
+            genie-url: 'https://github.com/qualcomm/qai-appbuilder/releases/download/v2.48.40/QAIRT_v2.48.40.260702.zip'
           - version: '2.47.0.260601'
             url: ''
             genie-url: 'https://github.com/qualcomm/qai-appbuilder/releases/download/v2.47.0/QAIRT_v2.47.0.260601.zip'
@@ -379,7 +378,7 @@ jobs:
   # missing-file error in the build step.
   # -----------------------------------------------------------------
   build-linux-arm64:
-    name: linux arm64 wheel + test · py3.12 · qnn2.47.0.260601
+    name: linux arm64 wheel + test · py3.12 · qnn2.48.40.260702
     runs-on: ubuntu-22.04-arm
     timeout-minutes: 45
     steps:
@@ -404,7 +403,7 @@ jobs:
       - name: Setup QNN SDK
         uses: ./.github/actions/setup-qnn-sdk
         with:
-          version: '2.47.0.260601'
+          version: '2.48.40.260702'
 
       - name: Install build dependencies
         run: |
@@ -431,7 +430,7 @@ jobs:
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.list-linux.outputs.wheel-stem }}-qnn2.47.0.260601
+          name: ${{ steps.list-linux.outputs.wheel-stem }}-qnn2.48.40.260702
           path: |
             dist/*.whl
             dist/*.zip
@@ -453,7 +452,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: cmake-logs-linux_aarch64-py3.12-qnn2.47.0.260601
+          name: cmake-logs-linux_aarch64-py3.12-qnn2.48.40.260702
           path: |
             build/**/CMakeFiles/CMakeOutput.log
             build/**/CMakeFiles/CMakeError.log
@@ -470,7 +469,7 @@ jobs:
   # run — exercising the .so requires an Android device.
   # -----------------------------------------------------------------
   build-android-arm64v8a:
-    name: android arm64-v8a libappbuilder.so · qnn2.47.0.260601
+    name: android arm64-v8a libappbuilder.so · qnn2.48.40.260702
     # Temporarily disabled. Upstream make/Android.mk now contains a
     # QAIAppSvc executable target that pulls in src/SVC/main.cpp, but
     # that file is Windows-only (uses #pragma once at top of a .cpp,
@@ -522,7 +521,7 @@ jobs:
       - name: Setup QNN SDK
         uses: ./.github/actions/setup-qnn-sdk
         with:
-          version: '2.47.0.260601'
+          version: '2.48.40.260702'
 
       - name: Build libappbuilder.so via ndk-build
         env:
@@ -563,7 +562,7 @@ jobs:
       - name: Upload libappbuilder.so artifact
         uses: actions/upload-artifact@v4
         with:
-          name: libappbuilder-android-arm64v8a-qnn2.47.0.260601
+          name: libappbuilder-android-arm64v8a-qnn2.48.40.260702
           path: libs/arm64-v8a/libappbuilder.so
           if-no-files-found: error
 
@@ -624,9 +623,9 @@ jobs:
           - version: '2.47.0.260601'
             url: 'https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.47.0.260601/v2.47.0.260601.zip'
             genie-url: 'https://github.com/qualcomm/qai-appbuilder/releases/download/v2.47.0/QAIRT_v2.47.0.260601.zip'
-          - version: '2.48.0.260626'
-            url: 'https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.48.0.260626/v2.48.0.260626.zip'
-            genie-url: ''
+          - version: '2.48.40.260702'
+            url: 'https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.48.40.260702/v2.48.40.260702.zip'
+            genie-url: 'https://github.com/qualcomm/qai-appbuilder/releases/download/v2.48.40/QAIRT_v2.48.40.260702.zip'
     steps:
       - name: Checkout (with genie submodules)
         uses: actions/checkout@v4
@@ -788,7 +787,7 @@ jobs:
   # NPU/HTP backend, which is Stage B real-hardware territory.
   # -----------------------------------------------------------------
   build-genie-service-linux-arm64:
-    name: genie c++ Service · linux arm64 · qnn2.47.0.260601
+    name: genie c++ Service · linux arm64 · qnn2.48.40.260702
     runs-on: ubuntu-22.04-arm
     timeout-minutes: 60
     steps:
@@ -815,7 +814,7 @@ jobs:
       - name: Setup QNN SDK
         uses: ./.github/actions/setup-qnn-sdk
         with:
-          version: '2.47.0.260601'
+          version: '2.48.40.260702'
 
       - name: Append trailing slash to QNN_SDK_ROOT
         # build_linux.sh's downstream cmake (in dependents.cmake) does
@@ -882,7 +881,7 @@ jobs:
   # unsigned-libs" until proper signing secrets are wired up.
   # -----------------------------------------------------------------
   build-android-genie-service:
-    name: genie c++ Service · android arm64-v8a · qnn2.47.0.260601
+    name: genie c++ Service · android arm64-v8a · qnn2.48.40.260702
     runs-on: windows-2022
     timeout-minutes: 60
     # APK-signing step is expected to fail on hosted runners until a
@@ -929,7 +928,7 @@ jobs:
       - name: Setup QNN SDK
         uses: ./.github/actions/setup-qnn-sdk
         with:
-          version: '2.47.0.260601'
+          version: '2.48.40.260702'
 
       - name: Install ninja
         shell: pwsh
@@ -990,7 +989,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: GenieService-android-arm64v8a-libs-qnn2.47.0.260601
+          name: GenieService-android-arm64v8a-libs-qnn2.48.40.260702
           path: samples/genie/c++/build_android/output/libs/arm64-v8a/*.so
           if-no-files-found: error
 
@@ -998,7 +997,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: GenieService-android-arm64v8a-apk-qnn2.47.0.260601
+          name: GenieService-android-arm64v8a-apk-qnn2.48.40.260702
           path: samples/genie/c++/build_android/output/apk/*.apk
           if-no-files-found: ignore
 
