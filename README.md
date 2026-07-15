@@ -1,176 +1,325 @@
-<br><br><br>
+<br>
 
 <div align="center">
-  <a href="README.md"><img src="https://raw.githubusercontent.com/qualcomm/qai-appbuilder/main/docs/images/qai_appbuilder.png" alt="Quick AI Application Builder" width="360" height="90"></a>
+  <img src="docs/images/qai_banner.svg" alt="QAI AppBuilder & QAI ModelBuilder" width="900" height="150">
 </div>
 
-<br><br><br>
+<br>
 
 <div align="center">
-  <h3>A simple way to build AI application based on Qualcomm® AI Runtime SDK.</h3>
-  <p><i> SIMPLE | EASY | FAST </i></p>
   <a href="https://github.com/qualcomm/qai-appbuilder"><img src="https://img.shields.io/github/stars/qualcomm/qai-appbuilder" alt="stars"></a>
-  <a href="https://github.com/qualcomm/qai-appbuilder/releases/tag/v2.38.0"><img src="https://img.shields.io/badge/Release-v2.0.0-green" alt="Release"></a>
+  <a href="https://github.com/qualcomm/qai-appbuilder/releases"><img src="https://img.shields.io/badge/Release-v2.38.0-green" alt="Release"></a>
   <a href="https://opensource.org/license/BSD-3-clause"><img src="https://img.shields.io/badge/License-BSD--3--Clause-blue" alt="License: BSD 3-Clause"></a>
   <a href="https://www.python.org/downloads/windows/"><img src="https://img.shields.io/badge/Python-00599C?logo=Python" alt="Python"></a>
   <a href="https://en.cppreference.com/w/cpp/compiler_support"><img src="https://img.shields.io/badge/C++-999999?logo=c%2B%2B" alt="C++"></a>
-  <a href="https://www.qualcomm.com/products/technology/processors/ai-engine"><img src="https://img.shields.io/badge/NPU-ccffff" alt="AI"></a>
-  <a href="https://github.com/quic/ai-hub-apps/tree/main/tutorials/llm_on_genie"><img src="https://img.shields.io/badge/Genie AI-ffff9C" alt="AI"></a>
+  <a href="https://www.qualcomm.com/products/technology/processors/ai-engine"><img src="https://img.shields.io/badge/NPU-ccffff" alt="NPU"></a>
+  <a href="https://github.com/quic/ai-hub-apps/tree/main/tutorials/llm_on_genie"><img src="https://img.shields.io/badge/Genie AI-ffff9C" alt="Genie AI"></a>
 </div>
+
 <br>
 
 ---
 
-## Disclaimer
-This software is provided “as is,” without any express or implied warranties. The authors and contributors shall not be held liable for any damages arising from its use. The code may be incomplete or insufficiently tested. Users are solely responsible for evaluating its suitability and assume all associated risks. <br>
-Note: Contributions are welcome. Please ensure thorough testing before deploying in critical systems.
-
 ## QAI AppBuilder
-The Quick AI Application Builder (this repository) is also referred to as "QAI AppBuilder" in the source code and documentation.<br>
-QAI AppBuilder is an extension of the Qualcomm® AI Runtime SDK, which is used to simplify the deployment of QNN models. Some libraries from the [Qualcomm® AI Runtime SDK](https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK) are required to use QAI AppBuilder.<br>
-QAI AppBuilder is designed to help developers easily use the Qualcomm® AI Runtime SDK to execute models on Windows on Snapdragon (WoS) and Linux platforms. It encapsulates the model execution APIs into a set of simplified interfaces for loading models onto the NPU/HTP and performing inference. It substantially lowers the complexity of model deployment for developers.
 
-## QAI AppBuilder Launcher
-We provide a wealth of samples to help you quickly explore the features of QAI AppBuilder. For some key examples, we also offer scripts to assist in setting up the relevant environment efficiently. You can learn how to use these scripts through [QAI AppBuilder Launcher](tools/launcher/), enabling you to experience the core functionalities within an hour.
+The **Quick AI Application Builder** (this repository) is also referred to as "QAI AppBuilder" in the source code and documentation. It is an extension of the [Qualcomm® AI Runtime SDK](https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK) that substantially lowers the complexity of on-device AI model deployment for developers.
 
-## Blog & Documentation
-[QAI AppBuilder Guide](docs/guide_en.md) [English](docs/guide_en.md) | [中文](docs/guide_zh.md) <br>
-[GenieAPIService (OpenAI Compatible API Service)](docs/genie_guide_en.md) [English](docs/genie_guide_en.md) | [中文](docs/genie_guide_zh.md) <br>
-[Qwen2.5-VL-3B On-Device Deployment](samples/genie/c%2B%2B/docs/Qwen2.5-VL-3B-Quickly-Start.md) [English](samples/genie/c%2B%2B/docs/Qwen2.5-VL-3B-Quickly-Start.md) | [中文](https://blog.csdn.net/csdnsqst0050/article/details/157474571) <br>
-[QAI AppBuilder: 让本地 AI 部署触手可及！](https://docs.qualcomm.com/bundle/publicresource/80-94755-1_REV_AA_QAI_AppBuilder_-_WoS.pdf) <br>
-[大语言模型系列(1): 3分钟上手，在骁龙AI PC上部署DeepSeek!](https://blog.csdn.net/csdnsqst0050/article/details/149425691) <br>
-[大语言模型系列(2): 本地 OpenAI 兼容 API 服务的配置与部署](https://blog.csdn.net/csdnsqst0050/article/details/150208814) <br>
-[大语言模型系列(3): Qwen2.5-VL-3B 多模态模型端侧部署](https://blog.csdn.net/csdnsqst0050/article/details/157474571) <br>
-[大语言模型系列(4): BGE-Base-Zh-V1.5 端侧使用教程](https://blog.csdn.net/csdnsqst0050/article/details/157651536) <br>
-[大语言模型系列(5): Qwen3-Reranker-0.6B 使用指南](https://blog.csdn.net/csdnsqst0050/article/details/158846858) <br>
-[大语言模型系列(6): Qwen3-embedding-0.6B 使用指南](https://blog.csdn.net/csdnsqst0050/article/details/159389533) <br>
-[大语言模型系列(7): Qwen3-8B-8K模型端侧部署指南](https://blog.csdn.net/csdnsqst0050/article/details/160557753) <br>
-[高通平台大语言模型精选](https://www.aidevhome.com/?id=51) <br>
-[QAI AppBuilder on Linux (QCS6490)](https://docs.radxa.com/en/dragon/q6a/app-dev/npu-dev/qai-appbuilder) <br>
-[Qwen2 7B SSD 使用教程](https://www.aidevhome.com/?id=29) <br>
-[Qwen2.5 3B 使用教程](https://www.aidevhome.com/?id=36) <br>
-[Genie API Service 配置与使用](https://www.aidevhome.com/?id=52) <br>
-[GenieChat：使用 Genie API Service 构建本地大语言模型驱动的安卓应用](https://www.aidevhome.com/?id=50) <br>
-[SuperResolutionApp：图片超分 Android 开发示例](https://www.aidevhome.com/?id=53) <br>
+With QAI AppBuilder, a single natural language prompt drives the full AI application build pipeline — no coding required:
 
+- **Path A — Pre-built models from AI Hub**: The [AI Hub Model Run Skill](tools/skills/qai-runner-skill/) automatically downloads pre-exported QNN models directly from [Qualcomm AI Hub](https://aihub.qualcomm.com/compute/models) and runs inference on the Snapdragon NPU without any conversion step.
+- **Path B — Custom model conversion**: The [Model Builder Skill](tools/skills/knowledge-skills/qai_app_builder/) takes your own PyTorch or ONNX model and automatically handles the full pipeline — export, quantization (FP16 / W8A16 / W8A8 / W4A8), and context binary generation via QAIRT SDK — producing an optimized `.bin`/`.dlc` ready for on-device inference.
 
-## Advantage
+Both paths converge on the same **NPU inference engine** (`QNNContext` via `qai-appbuilder`), running fully on-device on Snapdragon series — no internet connection required at inference time.
 
-Developers can use QAI AppBuilder in both C++ and Python projects <br>
-
-• Support both C++ & Python <br>
-• Support both Windows & Linux <br>
-• Support Genie(Large Language Model) <br>
-• Support LLM on both CPU & NPU [*NEW!*] <br>
-• Support Multimodal LLM [*NEW!*] <br>
-• Support Float & Native Input & Output Data [*NEW!*] <br>
-• Support Multi Graph <br>
-• Support LoRA <br> 
-• Support multiple models <br>
-• Support multiple inputs & outputs <br>
-• Easier for developing apps <br>
-• Faster for testing models <br>
-• Plenty of sample code <br>
-
-** Support ARM64 Windows, Linux and Ubuntu (e.g.: X Elite Windows, QCS8550 Linux and QCM6490 Ubuntu). <br>
-** Support OpenAI Compatible API Service([GenieAPIService](samples/genie/c++/README.md)) on WoS, Android and Linux. <br>
-** Use "native" mode input & output data can improve data conversation performance obviously. Refer to [User Guide](https://github.com/qualcomm/qai-appbuilder/blob/main/docs/user_guide.md#native-mode) & [Wisper](samples/python/whisper_base_en/whisper_base_en.py) sample code. <br>
-** Support running .dlc/.bin/.so/.onnx models on NPU(HTP)/CPU/GPU <br>
-
-## Diagram
-<br>
 <div align="center">
-  <a href="README.md"><img src="https://raw.githubusercontent.com/qualcomm/qai-appbuilder/main/docs/images/diagram2.png" alt="Quick AI Application Builder" width="777" height="456"></a>
+  <img src="docs/images/qai_appbuilder_agent.svg" alt="QAI AppBuilder Agent Capabilities" width="1330" height="488">
 </div>
 
-## Environment Setup
-Refere to [python.md](docs/python.md) for instructions on setting up the Python(x64 version) environment to use QAI AppBuilder on Windows on Snapdragon (WoS) platforms. <br>
-You can also run the batch file from [QAI AppBuilder Launcher](tools/launcher/) to setup the environment automatically.
+### What can QAI AppBuilder do?
+
+| Capability | Description |
+|------------|-------------|
+| **Run AI Models on NPU / GPU / CPU** | Load QNN context binaries (`.bin`), model libraries (`.dll`), or SNPE DLC (`.dlc`) onto the Snapdragon NPU, GPU, or CPU and perform high-performance inference |
+| **C++ & Python APIs** | Full-featured bindings for both C++ and Python, so you can integrate on-device AI into any project regardless of language |
+| **Cross-Platform Support** | Runs on **Windows on Snapdragon (WoS)** ARM64 and **Linux** (e.g. QCS8550, QCM6490), with a unified API surface across both platforms |
+| **AI-Driven Model Conversion** | Convert PyTorch / ONNX models to QNN format at multiple precisions (FP16 / W8A16 / W8A8 / W4A8) through **natural language chat** — the AI handles export, quantization, context binary generation, and accuracy validation end-to-end |
+| **Pre-built Models from AI Hub** | Automatically download and run pre-exported QNN models from [Qualcomm AI Hub](https://aihub.qualcomm.com/compute/models) with no conversion step required |
+| **On-Device Model Workbench** | Run ready-to-use **Model Packs** (SR / OCR / ASR / TTS / CV…) on the local Snapdragon NPU with one click; supports multi-variant precision switching, benchmarking, and side-by-side comparison |
+| **LLM Agent Pipeline** | Orchestrate multiple local NPU models in a single task via natural language — e.g. classify images then upscale matches, all driven by one prompt |
+| **Large Language Models (Genie)** | Run Llama 3 / Qwen 3 / Gemma 2 and other quantized LLMs **fully offline** on the NPU via **GenieAPIService** (OpenAI-compatible API); switch between local and cloud models in the same chat UI |
+| **Multimodal & Speech & Vision** | Supports multimodal LLMs (e.g. Qwen2.5-VL), ASR (Whisper, Zipformer), TTS (MeloTTS), OCR (PP-OCR), super-resolution, object detection, and more |
+| **WebUI Applications** | Bundled WebUI apps (StableDiffusionApp, ImageRepairApp, GenieWebUI) and a streaming chat WebUI — all running on-device, no internet required |
+| **Skill Plugin System** | Extend the AI with hot-reloadable Skill plugins; write your own in a single `SKILL.md` file |
+| **Native & Float I/O / Multi-Graph / LoRA** | Native (quantized) and float I/O for maximum throughput; multiple model graphs in one session; LoRA adapter support |
+
+> Supports ARM64 Windows, Linux and Ubuntu (e.g. X Elite Windows, QCS8550 Linux, QCM6490 Ubuntu). Use "native" mode I/O to improve data throughput — see [User Guide](https://github.com/qualcomm/qai-appbuilder/blob/main/docs/user_guide.md#native-mode) and [Whisper sample](samples/audio/Speech_Recognition/whisper_base_en/whisper_base_en.py) for reference.
+
+---
+
+## QAI Skills
+
+QAI AppBuilder ships two built-in AI Agent Skills that together cover the full on-device model lifecycle — from sourcing a model all the way to running inference on the Snapdragon NPU.
+
+### Skill 1 — AI Hub Model Run
+
+> **Use this skill when the model you need already exists on [Qualcomm AI Hub](https://aihub.qualcomm.com/compute/models).**
+
+The **AI Hub Model Run** skill downloads pre-exported QNN models directly from AI Hub and runs them on the Snapdragon NPU via `qai_appbuilder` (`QNNContext`) — no conversion, no Visual Studio, no QAIRT SDK required.
+
+| What it does | Details |
+|-------------|---------|
+| **Supported formats** | `QNN_CONTEXT_BINARY` (`.bin`), `QNN_DLC` (`.dlc`), `ONNX` (CPU baseline only), `VOICE_AI`, `TFLITE` |
+| **Inference engine** | Always `qai_appbuilder.QNNContext` loading `.bin` / `.dlc` on the NPU/HTP; `onnxruntime` is used only for optional CPU accuracy comparison |
+| **Target devices** | Snapdragon X Elite, Snapdragon X2 Elite, Snapdragon X Plus 8-Core |
+| **Typical workflow** | Detect chipset → fetch download link from AI Hub → `curl` download → extract ZIP → run inference script |
+| **No conversion needed** | Pre-compiled `.bin` / `.dlc` packages load directly — first-run graph compilation takes 5–60 s, subsequent runs are fast |
+| **CPU baseline** | Optionally compare NPU output against `onnxruntime` CPU baseline (cosine similarity > 0.999 for float models) |
+
+**Example trigger prompts:**
+```
+"Download Inception V3 from AI Hub and run inference on my photo"
+"Run YOLOv8 object detection on this image using the NPU"
+"Use the pre-built Whisper model to transcribe my audio file"
+```
+
+---
+
+### Skill 2 — Model Builder
+
+> **Use this skill when you have a custom PyTorch or ONNX model that is NOT available on AI Hub.**
+
+The **Model Builder** skill automates the full QNN conversion pipeline for custom models — from ONNX export all the way to a validated `.bin` context binary running on the Snapdragon NPU.
+
+| What it does | Details |
+|-------------|---------|
+| **Input formats** | PyTorch (`.pt` / `.pth`) → ONNX export, or existing ONNX (`.onnx`) |
+| **Output formats** | QNN context binary (`.bin`), QNN model library (`.dll`), SNPE DLC (`.dlc`) |
+| **Supported precisions** | FP16, FP32, W8A16, W8A8, W8A8B8, W4A16, W4A8 |
+| **Auto pipeline** | Export → ONNX inspection → operator patching → QNN conversion → context binary generation → inference → accuracy validation vs. ONNX CPU baseline |
+| **Operator patching** | Automatically detects and patches unsupported operators (Einsum, GridSample, ScatterND, Mod, Floor…) with QNN-compatible equivalents |
+| **Accuracy validation** | Computes cosine similarity between QNN output and ONNX CPU baseline; threshold ≥ 0.99 (FP16/FP32) or ≥ 0.95 (INT8/quantized) |
+| **Auto-generated inference code** | Saves a standalone `infer_<model>.py` and `inference_manifest.json` after successful validation — ready for App Builder Pack export |
+| **Requires** | QAIRT SDK 2.45+, Visual Studio 2022 Community, Python x64 3.10 (all auto-installed by `Setup.bat`) |
+| **Scope** | Best suited for small-to-medium models (recommended < 2 GB); LLM conversion is not yet supported |
+
+**Example trigger prompts:**
+```
+"Convert my ResNet ONNX model to QNN FP16 and validate the accuracy"
+"Convert my custom YOLOv8 model to W8A8 with calibration data and compare against the original"
+"Export my PyTorch model to QNN, run inference, and generate an App Builder pack"
+```
+
+---
+
+## Quick Start
+
+### Python
+
+```bash
+pip install qai-appbuilder
+```
+
+### C++
+
+Download the prebuilt binary package from [Releases](https://github.com/qualcomm/qai-appbuilder/releases):
+
+```
+QAI_AppBuilder-win_arm64-{Qualcomm® AI Runtime SDK version}-Release.zip
+```
+
+Refer to [User Guide](docs/user_guide.md) for full API usage, or follow [tutorial.ipynb](docs/tutorial.ipynb) to set up and run a CV model step by step.
+
+### Environment Setup
+
+Refer to [python.md](docs/python.md) for instructions on setting up the Python (x64) environment to use QAI AppBuilder on Windows on Snapdragon (WoS) platforms.
+
+You can also run the batch file from [QAI AppBuilder Launcher](tools/launcher/) to set up the environment automatically — enabling you to experience the core functionalities within an hour.
+
+---
+
+## Diagram
+
+<div align="center">
+  <img src="docs/images/diagram2.png" alt="QAI AppBuilder Diagram" width="1100" height="482">
+</div>
+
+---
 
 ## WebUI AI Application
-We have developed several [WebUI AI applications](samples/webui/README.md) based on QAI AppBuilder, allowing you to experience them quickly. <br>
-All these applications run on a local PC, requiring *no internet connection* and are *completely free*. <br>
-You can run WebUI AI applications througn the batch file [3.Start_WebUI.bat](tools/launcher/).
-<br><br>
-<a href="samples/webui/README.md"><img src="https://img.shields.io/badge/Note: - Before trying other functions, we suggest that you try these WebUI AI Application first.-important"></a>
 
-|  App   | Description  |
-|  ----  | :----    |
+We have developed several [WebUI AI applications](samples/webui/) based on QAI AppBuilder, allowing you to experience them quickly.
+All these applications run on a local PC, requiring *no internet connection* and are *completely free*.
+You can run WebUI AI applications through the batch file [3.Start_WebUI.bat](tools/launcher/3.Start_WebUI.bat).
+
+> **Note:** Before trying other functions, we suggest that you try these WebUI AI applications first.
+
+| App | Description |
+|-----|-------------|
 | ImageRepairApp | An image restoration tool designed to repair old or damaged photographs. |
-| StableDiffusionApp  | A text-to-image generation tool that creates images based on user input. |
-| GenieWebUI  | A large language model (LLM) interface that enables interactive conversations.|
+| StableDiffusionApp | A text-to-image generation tool that creates images based on user input. |
+| GenieWebUI | A large language model (LLM) interface that enables interactive conversations. |
 
-## OpenAI Compatible API Service (GenieAPIService):<br>
-Considering that the current mainstream method for invoking LLMs is based on OpenAI-compatible APIs, we have implemented such interfaces in both C++ and Python. This allows application developers to interact with the local large language model running on NPU in a familiar way. <br>
-Many third-party applications that support the OpenAI API can seamlessly switch to the local NPU-based model by simply changing the API IP endpoint. <br>
-We have also implemented the client sample code of Genie API Service through both C++ and Python for the reference of developers.
+---
 
-1. [Python based service](samples/genie/python/README.md): Guide to run OpenAI compatible API services developed with python.<br>
-2. [C++ based service](samples/genie/c++/README.md): Guide to run OpenAI compatible API services developed with C++.<br>
+## OpenAI Compatible API Service (GenieAPIService)
+
+Considering that the current mainstream method for invoking LLMs is based on OpenAI-compatible APIs, we have implemented such interfaces in both C++ and Python. This allows application developers to interact with the local large language model running on NPU in a familiar way.
+
+Many third-party applications that support the OpenAI API can seamlessly switch to the local NPU-based model by simply changing the API endpoint.
+
+We have also implemented client sample code for GenieAPIService in both C++ and Python for developer reference.
+
+1. [Python based service](samples/genie/python/README.md): Guide to run OpenAI compatible API services developed with Python.
+2. [C++ based service](samples/genie/c++/README.md): Guide to run OpenAI compatible API services developed with C++.
+
+---
 
 ## Samples
-We have many [Python](samples/python/README.md), [Python_Linux](samples/linux/README.md) and [C++](samples/c++/) samples which can be run directly. The models used in these samples are from [AI-Hub](https://aihub.qualcomm.com/compute/models).<br>
-*We suggest that you try to run these sample code before you actually start writing your own code.*<br>
+
+We have a rich set of samples covering multiple categories. All models are sourced from [AI Hub](https://aihub.qualcomm.com/compute/models) and automatically downloaded on first run.
+
+Use the interactive launcher to run any sample without writing code:
+
+```bash
+cd qai-appbuilder\samples
+python run_inference.py              # interactive menu
+python run_inference.py --list       # list all available models
+python run_inference.py --model whisper_base_en --args "--audio_file input.wav"
+```
+
+| Category | Description | Link |
+|----------|-------------|------|
+| **Audio** | TTS (PiperTTS), ASR (Whisper Base/Tiny), Audio Classification (YAMNet) | [audio/](samples/audio/) |
+| **Computer Vision** | Image classification, object detection, segmentation, depth estimation, pose estimation, face analysis, super-resolution, inpainting | [ComputerVision/](samples/ComputerVision/) |
+| **Generative AI** | Stable Diffusion v1.5 / v2.1 / v3.5 (text → image) | [GenerativeAI/](samples/GenerativeAI/) |
+| **Multimodal** | OCR (EasyOCR), text embedding (NomicEmbed), CLIP, Chinese→English translation (OpusMT), VLM (Qwen-VL) | [Multimodal/](samples/Multimodal/) |
+| **WebUI Apps** | Gradio-based apps: ImageRepairApp, StableDiffusionApp, GenieWebUI | [webui/](samples/webui/) |
+| **Genie LLM Service** | OpenAI-compatible LLM API service (Python + C++) for Llama, Qwen, Phi, Granite | [genie/](samples/genie/) |
+| **Android** | GenieChat (LLM/VLM) and SuperResolution Android apps | [android/](samples/android/) |
+| **C++** | C++ inference samples for Real-ESRGAN, BEiT | [c++/](samples/c++/) |
+
+See [samples/README.md](samples/README.md) for the full guide including environment setup, model download instructions, and run examples.
+
+---
 
 ## Tools
 
 ### 1. QAI AppBuilder Launcher
-We provide [QAI AppBuilder Launcher](tools/launcher/), enabling you to experience the core functionalities of QAI AppBuilder within an hour.
+[QAI AppBuilder Launcher](tools/launcher/) — enables you to experience the core functionalities of QAI AppBuilder within an hour.
 
 ### 2. DLC2BIN
-[DLC2BIN](./tools/convert/dlc2bin/) is a guide to help you convert the general DLC model format into the BIN format optimized for a specific platform.
+[DLC2BIN](./tools/convert/dlc2bin/) — converts the general DLC model format into the BIN format optimized for a specific platform.
 
 ### 3. ONNX2BIN
-[ONNX2BIN](./tools/convert/onnx2bin/) is a guide to help you convert the ONNX model format into the BIN format optimized for a specific platform.
+[ONNX2BIN](./tools/convert/onnx2bin/) — converts the ONNX model format into the BIN format optimized for a specific platform.
 
 ### 4. ONNXWRAPPER
-[ONNXWRAPPER](./tools/onnxwrapper/) is a wrapper to run onnx inference code with qnn model, which will switch to qnn runtime automatically.
+[ONNXWRAPPER](./tools/onnxwrapper/) — a wrapper to run ONNX inference code with a QNN model, which switches to the QNN runtime automatically.
 
 ### 5. SKILLS
-[SKILLS](./tools/skills/) include 3 skills, they are [genie_api_service](./tools/skills/knowledge-skills/genie_api_service) which is used for GenieAPIService technical documentation retrieval, [qai_app_builder](./tools/skills/knowledge-skills/qai_app_builder) which is used for QAI AppBuilder technical documentation retrieval, and [qai-runner-skill](./tools/skills/qai-runner-skill) which is used for QAIRT model conversion & inference on Qualcomm devices.
+[SKILLS](./tools/skills/) includes 3 skills:
+- [genie_api_service](./tools/skills/knowledge-skills/genie_api_service) — GenieAPIService technical documentation retrieval
+- [qai_app_builder](./tools/skills/knowledge-skills/qai_app_builder) — QAI AppBuilder technical documentation retrieval
+- [qai-runner-skill](./tools/skills/qai-runner-skill) — QAIRT model conversion & inference on Qualcomm devices
+
+---
 
 ## Models
+
 ### Model Hub
-[AI Hub](https://aihub.qualcomm.com/compute/models) <br>
-[AI Dev Home](https://www.aidevhome.com/data/models/) <br>
+
+| Hub | Link |
+|-----|------|
+| AI Hub | [aihub.qualcomm.com](https://aihub.qualcomm.com/compute/models) |
+| AI Dev Home | [aidevhome.com](https://www.aidevhome.com/data/models/) |
 
 ### LLM Models
-[Qwen2 7B SSD](https://www.aidevhome.com/data/adh2/models/8380/qwen2_7b_ssd_250702.html) <br>
-[DeepSeek-R1-Distill-Qwen-7B](https://aiot.aidlux.com/zh/models/detail/78) <br>
 
-## Thrid Party App List
-[stable-diffusion-webui Extension](https://github.com/quic/wos-ai-plugins/tree/main/plugins/stable-diffusion-webui/qairt_accelerate) <br>
-[Blender ControlNet Plugin](https://github.com/quic/wos-ai-plugins/tree/main/plugins/blender/SnapdragonImageGeneration) <br>
-[无痕修图软件](https://www.aidevhome.com/?id=30) <br>
-[图片超分器](https://www.aidevhome.com/?id=5) <br>
-[图片超分应用](https://www.aidevhome.com/?id=37) <br>
-[视频超分应用](https://www.aidevhome.com/?id=44) <br>
-[图片消除器](https://www.aidevhome.com/?id=4) <br>
-[图片搜索应用](https://www.aidevhome.com/?id=31) <br>
+| Model | Link |
+|-------|------|
+| Qwen2 7B SSD | [Download](https://www.aidevhome.com/data/adh2/models/8380/qwen2_7b_ssd_250702.html) |
+| DeepSeek-R1-Distill-Qwen-7B | [Download](https://aiot.aidlux.com/zh/models/detail/78) |
+
+---
+
+## Blog & Documentation
+
+### Official Docs
+
+| Guide | Links |
+|-------|-------|
+| QAI AppBuilder Guide | [English](docs/guide_en.md) \| [中文](docs/guide_zh.md) |
+| GenieAPIService (OpenAI Compatible API) | [English](docs/genie_guide_en.md) \| [中文](docs/genie_guide_zh.md) |
+| Qwen2.5-VL-3B On-Device Deployment | [English](samples/genie/c%2B%2B/docs/Qwen2.5-VL-3B-Quickly-Start.md) \| [中文](https://blog.csdn.net/csdnsqst0050/article/details/157474571) |
+| QAI AppBuilder WoS PDF | [PDF](https://docs.qualcomm.com/bundle/publicresource/80-94755-1_REV_AA_QAI_AppBuilder_-_WoS.pdf) |
+| QAI AppBuilder on Linux (QCS6490) | [English](https://docs.radxa.com/en/dragon/q6a/app-dev/npu-dev/qai-appbuilder) |
+
+### Blog Posts
+
+> The following blog posts are in Chinese (中文).
+
+| Title | Link |
+|-------|------|
+| 3分钟上手，在骁龙AI PC上部署DeepSeek | [中文](https://blog.csdn.net/csdnsqst0050/article/details/149425691) |
+| 本地 OpenAI 兼容 API 服务的配置与部署 | [中文](https://blog.csdn.net/csdnsqst0050/article/details/150208814) |
+| Qwen2.5-VL-3B 多模态模型端侧部署 | [中文](https://blog.csdn.net/csdnsqst0050/article/details/157474571) |
+| BGE-Base-Zh-V1.5 端侧使用教程 | [中文](https://blog.csdn.net/csdnsqst0050/article/details/157651536) |
+| Qwen3-Reranker-0.6B 使用指南 | [中文](https://blog.csdn.net/csdnsqst0050/article/details/158846858) |
+| Qwen3-embedding-0.6B 使用指南 | [中文](https://blog.csdn.net/csdnsqst0050/article/details/159389533) |
+| Qwen3-8B-8K 模型端侧部署指南 | [中文](https://blog.csdn.net/csdnsqst0050/article/details/160557753) |
+| 高通平台大语言模型精选 | [中文](https://www.aidevhome.com/?id=51) |
+| Qwen2 7B SSD 使用教程 | [中文](https://www.aidevhome.com/?id=29) |
+| Qwen2.5 3B 使用教程 | [中文](https://www.aidevhome.com/?id=36) |
+| Genie API Service 配置与使用 | [中文](https://www.aidevhome.com/?id=52) |
+| GenieChat：Genie API Service 安卓应用开发 | [中文](https://www.aidevhome.com/?id=50) |
+| SuperResolutionApp：图片超分 Android 开发示例 | [中文](https://www.aidevhome.com/?id=53) |
+
+---
+
+## Third-Party App List
+
+| App | Description |
+|-----|-------------|
+| [stable-diffusion-webui Extension](https://github.com/quic/wos-ai-plugins/tree/main/plugins/stable-diffusion-webui/qairt_accelerate) | Stable Diffusion WebUI plugin accelerated by QAIRT |
+| [Blender ControlNet Plugin](https://github.com/quic/wos-ai-plugins/tree/main/plugins/blender/SnapdragonImageGeneration) | Blender image generation plugin for Snapdragon |
+| [无痕修图软件](https://www.aidevhome.com/?id=30) (Inpainting App) | AI-powered photo inpainting tool |
+| [图片超分器](https://www.aidevhome.com/?id=5) (Super-Resolution Tool) | Image super-resolution upscaler |
+| [图片超分应用](https://www.aidevhome.com/?id=37) (Super-Resolution App) | Super-resolution application |
+| [视频超分应用](https://www.aidevhome.com/?id=44) (Video Super-Resolution App) | Video super-resolution upscaler |
+| [图片消除器](https://www.aidevhome.com/?id=4) (Object Removal Tool) | AI-powered object removal from images |
+| [图片搜索应用](https://www.aidevhome.com/?id=31) (Image Search App) | AI-powered image search application |
+
+---
 
 ## QAI AppBuilder Components
-There're two ways to use QAI AppBuilder:
-### 1. Using the QAI AppBuilder C++ libraries to develop C++ based AI application.
-Download prebuild binary package *QAI_AppBuilder-win_arm64-{Qualcomm® AI Runtime SDK version}-Release.zip* to get these files: https://github.com/qualcomm/qai-appbuilder/releases
 
-### 2. Using the QAI AppBuilder Python binding extension to develop Python based AI application.
-Install by run 'pip install qai-appbuilder' directly,
-or download Python extension *qai_appbuilder-{version}-cp312-cp312-win_amd64.whl* and install it with the command below:
-https://github.com/qualcomm/qai-appbuilder/releases
+There are two ways to use QAI AppBuilder:
+
+### 1. C++ Library
+
+Download the prebuilt binary package from [Releases](https://github.com/qualcomm/qai-appbuilder/releases) and link the headers and `.lib`/`.so` files into your C++ project:
 
 ```
-pip install qai_appbuilder-{version}-cp312-cp312-win_amd64.whl
+QAI_AppBuilder-win_arm64-{Qualcomm® AI Runtime SDK version}-Release.zip
 ```
 
-## User Guide
-Refere to [User Guide](docs/user_guide.md) on how to use QAI AppBuilder to program AI application. <br>
-Refer to [tutorial.ipynb](docs/tutorial.ipynb) to setup and run a cv model step by step.
+### 2. Python Binding
+
+Install via pip (see [Quick Start](#quick-start)) or download a specific wheel for your Python version from [Releases](https://github.com/qualcomm/qai-appbuilder/releases).
+
+---
 
 ## Build
-You can use the pre-compiled version directly and download the version you need from [Release](https://github.com/qualcomm/qai-appbuilder/releases). And if you want other qai-appbuilder whl file, please to compile it by yourself refer to this doc [BUILD.md](BUILD.md).
+
+You can use the pre-compiled version directly — download the version you need from [Releases](https://github.com/qualcomm/qai-appbuilder/releases). To build other wheel variants, refer to [BUILD.md](BUILD.md).
+
+---
 
 ## License
+
 QAI AppBuilder is licensed under the BSD 3-clause "New" or "Revised" License. Check out the [LICENSE](LICENSE) for more details.
+
+---
 
 ## Star History
 
@@ -181,3 +330,11 @@ QAI AppBuilder is licensed under the BSD 3-clause "New" or "Revised" License. Ch
    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=qualcomm/qai-appbuilder&type=Date" />
  </picture>
 </a>
+
+---
+
+## Disclaimer
+
+This software is provided "as is," without any express or implied warranties. The authors and contributors shall not be held liable for any damages arising from its use. The code may be incomplete or insufficiently tested. Users are solely responsible for evaluating its suitability and assume all associated risks.
+
+Note: Contributions are welcome. Please ensure thorough testing before deploying in critical systems.
