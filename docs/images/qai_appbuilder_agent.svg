@@ -1,0 +1,199 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 360" width="980" height="360">
+  <defs>
+    <linearGradient id="blueGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#0055bb"/><stop offset="100%" style="stop-color:#0099dd"/>
+    </linearGradient>
+    <linearGradient id="greenGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#007733"/><stop offset="100%" style="stop-color:#00aa55"/>
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#b06000"/><stop offset="100%" style="stop-color:#dd8800"/>
+    </linearGradient>
+    <linearGradient id="indigoGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#4455cc"/><stop offset="100%" style="stop-color:#6677ee"/>
+    </linearGradient>
+    <linearGradient id="foundationGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#e8f5ee"/><stop offset="100%" style="stop-color:#d8eee4"/>
+    </linearGradient>
+    <marker id="arrowBlue" markerWidth="6" markerHeight="5" refX="5" refY="2.5" orient="auto">
+      <polygon points="0 0, 6 2.5, 0 5" fill="#0055bb"/>
+    </marker>
+    <marker id="arrowGray" markerWidth="6" markerHeight="5" refX="5" refY="2.5" orient="auto">
+      <polygon points="0 0, 6 2.5, 0 5" fill="#888899"/>
+    </marker>
+    <marker id="arrowPurple" markerWidth="6" markerHeight="5" refX="5" refY="2.5" orient="auto">
+      <polygon points="0 0, 6 2.5, 0 5" fill="#8855dd"/>
+    </marker>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="1" stdDeviation="2.5" flood-color="#aaaacc" flood-opacity="0.3"/>
+    </filter>
+    <filter id="agentShadow">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#0055bb" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="980" height="360" rx="12" fill="#f8f9fc"/>
+
+  <!-- TITLE -->
+  <text x="450" y="28" text-anchor="middle"
+        font-family="'Segoe UI',Arial,sans-serif" font-size="15" font-weight="700" fill="#1a2a50" letter-spacing="0.3">
+    QAI AppBuilder — AI Agent Capabilities
+  </text>
+
+  <!-- ═══ [1] USER PROMPT ═══ -->
+  <rect x="14" y="52" width="118" height="230" rx="8"
+        fill="#ffffff" stroke="#99aacc" stroke-width="1.2" filter="url(#shadow)"/>
+  <text x="73" y="72" text-anchor="middle"
+        font-family="'Segoe UI',Arial,sans-serif" font-size="9" font-weight="700" fill="#334466">User Prompt</text>
+  <!-- chat bubble -->
+  <rect x="24" y="80" width="98" height="92" rx="6" fill="#eef2ff" stroke="#aabbdd" stroke-width="0.8"/>
+  <text x="73" y="95"  text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="7.5" fill="#2244aa">"Build a WebUI app</text>
+  <text x="73" y="107" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="7.5" fill="#2244aa">for [MeloTTS</text>
+  <text x="73" y="119" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="7.5" fill="#2244aa">(Chinese)] model,</text>
+  <text x="73" y="131" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="7.5" fill="#2244aa">run inference and</text>
+  <text x="73" y="143" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="7.5" fill="#2244aa">show the result"</text>
+  <!-- labels below bubble -->
+  <line x1="24" y1="176" x2="122" y2="176" stroke="#eef0f8" stroke-width="0.8"/>
+  <text x="73" y="190" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="7.5" fill="#8899bb">Natural language</text>
+  <text x="73" y="202" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="7.5" fill="#8899bb">No coding needed</text>
+  <text x="73" y="228" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="22" fill="#ccddee">→</text>
+
+  <!-- Arrow 1 -->
+  <line x1="133" y1="167" x2="152" y2="167"
+        stroke="#0055bb" stroke-width="2" marker-end="url(#arrowBlue)"/>
+
+  <!-- ═══ [2] AI AGENT — with Skills inside ═══ -->
+  <rect x="156" y="44" width="340" height="258" rx="10"
+        fill="#ffffff" stroke="#0055bb" stroke-width="2.2" filter="url(#agentShadow)"/>
+
+  <!-- Agent title badge -->
+  <rect x="256" y="56" width="140" height="26" rx="13" fill="url(#blueGrad)"/>
+  <text x="326" y="73" text-anchor="middle"
+        font-family="'Segoe UI',Arial,sans-serif" font-size="11" font-weight="700" fill="#ffffff">🤖 AI Agent</text>
+  <text x="326" y="92" text-anchor="middle"
+        font-family="'Segoe UI',Arial,sans-serif" font-size="9" font-weight="700" fill="#003388">QAI AppBuilder Core</text>
+  <text x="326" y="105" text-anchor="middle"
+        font-family="'Segoe UI',Arial,sans-serif" font-size="7.5" fill="#4466aa">Plans &amp; orchestrates Skills automatically</text>
+
+  <!-- Skill 3: App Builder — full width, at top -->
+  <rect x="166" y="114" width="320" height="72" rx="6"
+        fill="#f0f2ff" stroke="#4455cc" stroke-width="1"/>
+  <text x="326" y="131" text-anchor="middle"
+        font-family="'Segoe UI',Arial,sans-serif" font-size="8.5" font-weight="700" fill="#2233aa">🖥️ App Builder</text>
+
+  <!-- Flow: Agent → Cloud LLM → Returns result → AI App -->
+  <!-- Step 1: Agent parses prompt -->
+  <rect x="206" y="138" width="66" height="14" rx="7" fill="#e8e0ff" stroke="#8855dd" stroke-width="0.8"/>
+  <text x="239" y="148" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="7" fill="#6633cc">Receives prompt</text>
+  <!-- arrow -->
+  <line x1="272" y1="145" x2="286" y2="145" stroke="#8855dd" stroke-width="1.2" marker-end="url(#arrowPurple)"/>
+  <!-- Step 2: Sends to Cloud LLM -->
+  <rect x="287" y="138" width="72" height="14" rx="7" fill="#e8e0ff" stroke="#8855dd" stroke-width="0.8"/>
+  <text x="323" y="148" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="7" fill="#6633cc">☁️ Cloud LLM</text>
+  <!-- arrow -->
+  <line x1="359" y1="145" x2="373" y2="145" stroke="#8855dd" stroke-width="1.2" marker-end="url(#arrowPurple)"/>
+  <!-- Step 3: Processes result -->
+  <rect x="374" y="138" width="74" height="14" rx="7" fill="#e8e0ff" stroke="#8855dd" stroke-width="0.8"/>
+  <text x="411" y="148" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="7" fill="#6633cc">Builds AI App</text>
+  <!-- Step 4: Generates AI App -->
+
+  <!-- sub labels -->
+  <text x="239" y="162" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="6.5" fill="#9988cc">from user</text>
+  <text x="323" y="162" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="6.5" fill="#9988cc">GPT / Claude / Gemini</text>
+  <text x="411" y="162" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="6.5" fill="#9988cc">generates code</text>
+
+  <!-- SKILLS label — between App Builder and Skill 1/2 -->
+  <line x1="168" y1="200" x2="484" y2="200" stroke="#ccd8ee" stroke-width="0.8"/>
+  <text x="326" y="207" text-anchor="middle"
+        font-family="'Segoe UI',Arial,sans-serif" font-size="7" font-weight="700" fill="#8899bb" letter-spacing="1.5">SKILLS</text>
+
+  <!-- Skill 1: AI Hub Model Run -->
+  <rect x="166" y="212" width="152" height="68" rx="6"
+        fill="#f0faf4" stroke="#007733" stroke-width="1"/>
+  <text x="242" y="230" text-anchor="middle"
+        font-family="'Segoe UI',Arial,sans-serif" font-size="8.5" font-weight="700" fill="#005522">🌐 AI Hub Model Run</text>
+  <text x="242" y="243" text-anchor="middle"
+        font-family="'Segoe UI',Arial,sans-serif" font-size="7.5" fill="#337755">Download prebuilt QNN model</text>
+  <rect x="206" y="250" width="32" height="13" rx="6" fill="#d0f0e0" stroke="#007733" stroke-width="0.6"/>
+  <text x="222" y="260" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="7" fill="#005522">.bin</text>
+  <rect x="246" y="250" width="32" height="13" rx="6" fill="#d0f0e0" stroke="#007733" stroke-width="0.6"/>
+  <text x="262" y="260" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="7" fill="#005522">.dlc</text>
+  <text x="242" y="275" text-anchor="middle"
+        font-family="'Segoe UI',Arial,sans-serif" font-size="7" fill="#99aabb">No conversion needed</text>
+
+  <!-- Skill 2: Model Builder -->
+  <rect x="326" y="212" width="160" height="68" rx="6"
+        fill="#fffbf0" stroke="#b06000" stroke-width="1"/>
+  <text x="406" y="230" text-anchor="middle"
+        font-family="'Segoe UI',Arial,sans-serif" font-size="8.5" font-weight="700" fill="#7a4000">🔧 Model Builder</text>
+  <text x="406" y="243" text-anchor="middle"
+        font-family="'Segoe UI',Arial,sans-serif" font-size="7.5" fill="#996600">PyTorch/ONNX → QNN model</text>
+  <rect x="334" y="250" width="28" height="13" rx="6" fill="#fff0cc" stroke="#b06000" stroke-width="0.6"/>
+  <text x="348" y="260" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="7" fill="#7a4000">FP16</text>
+  <rect x="368" y="250" width="36" height="13" rx="6" fill="#fff0cc" stroke="#b06000" stroke-width="0.6"/>
+  <text x="386" y="260" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="7" fill="#7a4000">W8A16</text>
+  <rect x="410" y="250" width="28" height="13" rx="6" fill="#fff0cc" stroke="#b06000" stroke-width="0.6"/>
+  <text x="424" y="260" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="7" fill="#7a4000">W8A8</text>
+  <rect x="444" y="250" width="34" height="13" rx="6" fill="#fff0cc" stroke="#b06000" stroke-width="0.6"/>
+  <text x="461" y="260" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="7" fill="#7a4000">W4A8</text>
+
+  <!-- Arrow 2 -->
+  <line x1="496" y1="164" x2="576" y2="164"
+        stroke="#0055bb" stroke-width="2.2" marker-end="url(#arrowBlue)"/>
+  <text x="537" y="160" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="7" font-weight="700" fill="#0055bb">Auto Build</text>
+
+  <!-- ═══ [3] AUTO-GENERATED AI APPLICATION ═══ -->
+  <rect x="582" y="52" width="364" height="152" rx="10"
+        fill="#ffffff" stroke="#0055bb" stroke-width="1.4" filter="url(#shadow)"/>
+  <text x="764" y="94" text-anchor="middle"
+        font-family="'Segoe UI',Arial,sans-serif" font-size="11" font-weight="700" fill="#003388">Auto-Generated AI Application</text>
+
+  <!-- App type tags -->
+  <rect x="608" y="102" width="50" height="15" rx="7" fill="#dde8ff" stroke="#8899cc" stroke-width="0.8"/>
+  <text x="633" y="112" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="7.5" fill="#003388">OCR</text>
+  <rect x="668" y="102" width="48" height="15" rx="7" fill="#dde8ff" stroke="#8899cc" stroke-width="0.8"/>
+  <text x="692" y="112" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="7.5" fill="#003388">ASR</text>
+  <rect x="726" y="102" width="46" height="15" rx="7" fill="#dde8ff" stroke="#8899cc" stroke-width="0.8"/>
+  <text x="749" y="112" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="7.5" fill="#003388">TTS</text>
+  <rect x="782" y="102" width="46" height="15" rx="7" fill="#dde8ff" stroke="#8899cc" stroke-width="0.8"/>
+  <text x="805" y="112" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="7.5" fill="#003388">LLM</text>
+  <rect x="838" y="102" width="82" height="15" rx="7" fill="#dde8ff" stroke="#8899cc" stroke-width="0.8"/>
+  <text x="879" y="112" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="7.5" fill="#003388">Custom Model…</text>
+
+  <!-- Divider + On-device model section -->
+  <line x1="592" y1="124" x2="936" y2="124" stroke="#dde8f0" stroke-width="0.8"/>
+  <text x="764" y="136" text-anchor="middle"
+        font-family="'Segoe UI',Arial,sans-serif" font-size="7.5" font-weight="700" fill="#334466">Advantages of On-Device AI  ·  Runs on Qualcomm Snapdragon® Series NPU</text>
+  <!-- advantage pills row 1 -->
+  <rect x="593" y="142" width="100" height="15" rx="7" fill="#e8f5ee" stroke="#008844" stroke-width="0.8"/>
+  <text x="643" y="152" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="7" fill="#006630">🔒 Privacy · No upload</text>
+  <rect x="700" y="142" width="112" height="15" rx="7" fill="#e8f5ee" stroke="#008844" stroke-width="0.8"/>
+  <text x="756" y="152" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="7" fill="#006630">⚡ Low latency · No cloud</text>
+  <rect x="819" y="142" width="116" height="15" rx="7" fill="#e8f5ee" stroke="#008844" stroke-width="0.8"/>
+  <text x="877" y="152" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="7" fill="#006630">🌐 Works fully offline</text>
+  <!-- advantage pills row 2 -->
+  <rect x="631" y="162" width="120" height="15" rx="7" fill="#e8f5ee" stroke="#008844" stroke-width="0.8"/>
+  <text x="691" y="172" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="7" fill="#006630">💰 Zero API cost</text>
+  <rect x="758" y="162" width="140" height="15" rx="7" fill="#e8f5ee" stroke="#008844" stroke-width="0.8"/>
+  <text x="828" y="172" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif" font-size="7" fill="#006630">🔋 Efficient NPU power</text>
+
+  <!-- Arrow: App → SDK (down) -->
+  <line x1="764" y1="204" x2="764" y2="225"
+        stroke="#0055bb" stroke-width="1.8" marker-end="url(#arrowBlue)"/>
+  <text x="800" y="218" font-family="'Segoe UI',Arial,sans-serif" font-size="7.5" fill="#4466aa">depends on</text>
+
+  <!-- SDK box (outside) -->
+  <rect x="582" y="229" width="364" height="42" rx="8"
+        fill="#eef5ff" stroke="#0055bb" stroke-width="1.4" filter="url(#shadow)"/>
+  <text x="764" y="251" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif"
+        font-size="9" font-weight="700" fill="#003388">Qualcomm® AI Runtime SDK</text>
+  <text x="764" y="262" text-anchor="middle" font-family="'Segoe UI',Arial,sans-serif"
+        font-size="7.5" fill="#4466aa"></text>
+
+  <rect x="14" y="330" width="952" height="20" rx="5" fill="#eef0f8" stroke="#ccd0e8" stroke-width="0.8"/>
+  <text x="490" y="344" text-anchor="middle"
+        font-family="'Segoe UI',Arial,sans-serif" font-size="8.5" fill="#3a4a88" letter-spacing="0.2">
+    One natural language prompt  →  Agent + Skills auto-build  →  AI app running on Qualcomm Snapdragon NPU  —  no coding required
+  </text>
+</svg>
