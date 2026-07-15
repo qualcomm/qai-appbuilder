@@ -26,7 +26,7 @@ from pathlib import Path
 
 MODEL_ID = "mqp35e9lm"
 MODEL_NAME = "yolov8_det"
-MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/blob/main/samples/computerVision/Object_Detection/yolov8_det/README.md"
 IMAGE_SIZE = 640
 
 SOC_ID = None

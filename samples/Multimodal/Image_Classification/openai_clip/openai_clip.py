@@ -20,7 +20,7 @@ from pathlib import Path
 
 MODEL_ID = "mmx0537em"
 MODEL_NAME = "openai_clip"
-MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/blob/main/samples/multimodal/Image_Classification/openai_clip/README.md"
 IMAGE_SIZE = 224
 SEQ_LEN=77
 

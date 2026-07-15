@@ -22,7 +22,7 @@ from pathlib import Path
 
 MODEL_ID = "mmxeyyvyn"
 MODEL_NAME = "inception_v3"
-MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/blob/main/samples/computerVision/Image_Classification/inception_v3/README.md"
 IMAGENET_CLASSES_URL = "https://raw.githubusercontent.com/pytorch/hub/refs/heads/master/imagenet_classes.txt"
 IMAGENET_CLASSES_FILE = "imagenet_classes.txt"
 IMAGE_SIZE = 224

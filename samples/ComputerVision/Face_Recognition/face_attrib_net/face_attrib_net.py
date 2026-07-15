@@ -35,7 +35,7 @@ from _face_recognition import (
 
 MODEL_ID = "mnj1jvgdn"
 MODEL_NAME = "face_attrib_net"
-MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/blob/main/samples/computerVision/Face_Recognition/face_attrib_net/README.md"
 IMAGE_SIZE = 128
 
 OUTPUT_NAMES = [

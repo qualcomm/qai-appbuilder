@@ -224,12 +224,12 @@ def load_qwen2_vlm(qwen2_vl_model_dir:str):
     with open(llm_model_config_path, "w", encoding="utf-8") as f:
         json.dump(config_data, f, ensure_ascii=False, indent=2)
 
-    qnn_runtime_path = os.environ.get("QNN_SDK_ROOT", "")
-    if not qnn_runtime_path:
-        print("Please set QNN_SDK_ROOT environment variable to QNN SDK path.")
-        sys.exit(1)
-    qnn_runtime_path=f"{qnn_runtime_path}/lib/{lib_runtime}"
-
+    # qnn_runtime_path = os.environ.get("QNN_SDK_ROOT", "")
+    # if not qnn_runtime_path:
+    #     print("Please set QNN_SDK_ROOT environment variable to QNN SDK path.")
+    #     sys.exit(1)
+    # qnn_runtime_path=f"{qnn_runtime_path}/lib/{lib_runtime}"
+    qnn_runtime_path = "Htp"
     global qnn_vlm
     qnn_vlm=Qwen2VLQnn(veg_model_path, 
                             llm_model_config_path, 
@@ -263,11 +263,12 @@ def load_qwwen3_vlm(qwen3_vl_model_dir:str):
     with open(llm_model_config_path, "w", encoding="utf-8") as f:
         json.dump(config_data, f, ensure_ascii=False, indent=2)
 
-    qnn_runtime_path = os.environ.get("QNN_SDK_ROOT", "")
-    if not qnn_runtime_path:
-        print("Please set QNN_SDK_ROOT environment variable to QNN SDK path.")
-        sys.exit(1)
-    qnn_runtime_path=f"{qnn_runtime_path}/lib/{lib_runtime}"
+    # qnn_runtime_path = os.environ.get("QNN_SDK_ROOT", "")
+    # if not qnn_runtime_path:
+    #     print("Please set QNN_SDK_ROOT environment variable to QNN SDK path.")
+    #     sys.exit(1)
+    # qnn_runtime_path=f"{qnn_runtime_path}/lib/{lib_runtime}"
+    qnn_runtime_path = "Htp"
 
     global qnn_vlm
     qnn_vlm=Qwen3VLQnn(veg_model_path, 

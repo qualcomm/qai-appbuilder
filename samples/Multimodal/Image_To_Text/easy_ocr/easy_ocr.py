@@ -188,7 +188,7 @@ CN_Recognizer_MODEL_LINK = MODEL_NAME + "_EasyOCRRecognizer_Ch_En.bin"
 
 #Detector_MODEL_SIZE     = 42237600
 #Recognizer_MODEL_SIZE   = 15638384
-MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/blob/main/samples/multimodal/Image_To_Text/easy_ocr/README.md"
 INPUT_IMAGE_PATH_URL = "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/easyocr/v1/english.png"
 
 ####################################################################

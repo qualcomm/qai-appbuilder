@@ -27,7 +27,7 @@ from pathlib import Path
 
 MODEL_ID = "mnw5x9kpn"
 MODEL_NAME = "depth_anything"
-MODEL_HELP_URL = ""
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/blob/main/samples/computerVision/Depth_Estimation/depth_anything/README.md"
 IMAGE_SIZE = 518
 
 ####################################################################

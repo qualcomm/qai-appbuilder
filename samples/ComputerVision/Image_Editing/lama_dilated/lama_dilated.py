@@ -26,7 +26,7 @@ from pathlib import Path
 
 MODEL_ID       = "mq36kyo6q"
 MODEL_NAME     = "lama_dilated"
-MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/blob/main/samples/computerVision/Image_Editing/lama_dilated/README.md"
 
 ####################################################################
 

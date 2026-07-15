@@ -26,7 +26,7 @@ from pathlib import Path
 
 MODEL_ID = "mq218vg7m"
 MODEL_NAME = "unet_segmentation"
-MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/blob/main/samples/computerVision/Semantic_Segmentation/unet_segmentation/README.md"
 IMAGE_SIZE_H = 640
 IMAGE_SIZE_W = 1280
 

@@ -35,7 +35,7 @@ from _text_generation import (
 
 MODEL_ID = "mn03prw8n"
 MODEL_NAME = "nomic_embed_text"
-MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/blob/main/samples/multimodal/Text_Generation/nomic_embed_text/README.md"
 SEQ_LEN = 128
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -26,7 +26,7 @@ from pathlib import Path
 
 MODEL_ID       = "mn1w65o8m"
 MODEL_NAME     = "aotgan"
-MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/blob/main/samples/computerVision/Image_Editing/aotgan/README.md"
 
 ####################################################################
 

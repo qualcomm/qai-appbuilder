@@ -37,7 +37,7 @@ from pathlib import Path
 # ─────────────────────────────────────────────────────────────────────────────
 
 MODEL_NAME = "opus_mt_zh_en"
-MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/blob/main/samples/multimodal/Text_Generation/opus_mt_zh_en/README.md"
 
 MODEL_URLS = {
     "snapdragon_x2_elite": "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/opus_mt_zh_en/releases/v0.57.1/opus_mt_zh_en-voice_ai-float-qualcomm_snapdragon_x2_elite.zip",

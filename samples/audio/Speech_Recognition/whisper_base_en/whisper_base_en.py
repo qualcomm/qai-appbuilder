@@ -46,7 +46,7 @@ from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfP
 MODEL_NAME = "whisper_base_en"
 ENCODER_MODEL_NAME = "whisper_base_en-whisperencoder-snapdragon_x_elite"
 DECODER_MODEL_NAME = "whisper_base_en-whisperdecoder-snapdragon_x_elite"
-MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/blob/main/samples/audio/Speech_Recognition/whisper_base_en/README.md"
 WHISPER_VERSION = "base.en"
 
 ####################################################################

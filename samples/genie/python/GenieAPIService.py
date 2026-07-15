@@ -29,9 +29,18 @@ from sse_starlette.sse import EventSourceResponse
 from ChainUtils import GenieLLM
 import ctypes
 
-sys.path.append("python")
+# get the current script directory
+script_dir = os.path.dirname(os.path.abspath(__file__))
 
-import utils.install as install
+# add common directory（../../../common）
+common_dir = os.path.normpath(os.path.join(script_dir, "..", "..", "common"))
+sys.path.insert(0, common_dir)
+
+# add GenerativeAI directory（../../../GenerativeAI）
+generative_ai_dir = os.path.normpath(os.path.join(script_dir, "..", "..", "GenerativeAI", "Image_Generation"))
+sys.path.insert(0, generative_ai_dir)
+
+import install
 import stable_diffusion_v2_1.stable_diffusion_v2_1 as stable_diffusion
 
 sys.stdin.reconfigure(encoding='utf-8')

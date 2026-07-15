@@ -48,9 +48,9 @@ export ADSP_LIBRARY_PATH=$QNN_SDK_ROOT/lib/hexagon-v75/unsigned
 |  ----  | :----    |
 | 1.Install_QAI_AppBuilder.bat | Setup QAI AppBuilder basic environment. If this script has been executed before, executing it again will upgrade the content of the project. |
 | 2.Install_LLM_Models.bat | Download and install [IBM-Granite-v3.1-8B-Instruct](https://aihub.qualcomm.com/compute/models/ibm_granite_v3_1_8b_instruct) LLM model automatically. <br>You can replace this model with your owner LLM model. Getting detailed steps [here](../../samples/genie/python/README.md#setup-custom-model) for using your custom model. |
-| 3.Start_WebUI.bat | The launcher for starting 2 WebUI applications. If need the image generation feature, please run script '7.Start_StableDiffusion.bat' first. |
-| 4.Start_GenieAPIService.bat | Start [GenieAPIService](../../samples/genie/c++/). This is OpenAI Compatible API Service (C++ version). Support model name as parameter, e.g.: 4.Start_GenieAPIService.bat "Qwen2.0-7B-SSD" |
-| 5.Start_StableDiffusion.bat | Start Stable Diffusion WebUI. If model is not exist, it will download it automatically. |
+| 3.Start_GenieAPIService.bat | Start [GenieAPIService](../../samples/genie/c++/). This is OpenAI Compatible API Service (C++ version). Support model name as parameter, e.g.: 3.Start_GenieAPIService.bat "Qwen2.0-7B-SSD" |
+| 4.Start_WebUI.bat | The launcher for starting 2 WebUI applications. If need the image generation feature, please run script '7.Start_StableDiffusion.bat' first. |
+ 5.Start_StableDiffusion.bat | Start Stable Diffusion WebUI. If model is not exist, it will download it automatically. |
 | 6.Start_PythonEnv.bat | Start Python environment. We use [Pixi](https://pixi.sh/) to manage the Python, this script can setup the Python environment for you if you want to develop and run your owner Python script. |
 
 ## Possible problems and solutions:

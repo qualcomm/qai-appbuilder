@@ -31,7 +31,7 @@ import platform
 MODEL_ID = "mn70g68vq"  #"mqe84e95q" #"mnw34l13m"
 HUB_ID_H="ox06ibpbkxb4pr0mcyfe7wqgx5pf5r0cm3rf3dzi"
 MODEL_NAME = "quicksrnetmedium"
-MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/blob/main/samples/computerVision/Super_Resolution/quicksrnetmedium/README.md"
 IMAGE_SIZE_WOS = 512
 IMAGE_SIZE_LINUX = 128
 

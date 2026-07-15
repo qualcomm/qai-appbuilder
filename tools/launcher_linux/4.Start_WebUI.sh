@@ -28,8 +28,12 @@ read -p "Enter the number (1-2) corresponding to your choice: " choice
 
 case "$choice" in
     1)
-        echo "Launching ImageRepairApp ..."
-        pixi run webui-imagerepair
+        # echo "Launching ImageRepairApp ..."
+        # pixi run webui-imagerepair
+        echo "ImageRepairApp is not supported yet."
+        read -p "Press Enter to exit..."
+        cd "$scriptPath" || exit
+        exit 1
         ;;
     2)
         echo "Launching GenieWebUI ..."
