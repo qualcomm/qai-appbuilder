@@ -88,7 +88,7 @@ def preprocess_video_kinetics_400(input_video: torch.Tensor) -> torch.Tensor:
 
 MODEL_ID = "mn1v138rn"
 MODEL_NAME = "resnet_3d"
-MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/blob/main/samples/computerVision/Video_Classification/resnet_3d/README.md"
 
 
 ###############################################################

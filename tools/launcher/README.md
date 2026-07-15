@@ -29,8 +29,8 @@ There are two ways to get our Windows batch scripts:
 |  ----  | :----    |
 | `1.Install_QAI_AppBuilder.bat` | **[Run first]** Sets up the complete QAI AppBuilder environment. Installs [aria2c](https://github.com/minnyres/aria2-windows-arm64/releases) (ARM64 multi-threaded downloader) and [Pixi](https://pixi.sh/) (v0.49.0, ARM64) if not present, configures Pixi TLS settings, then runs `Install_Tools.py` to install wget, Git (ARM64 portable), Visual C++ Redistributable, clone/update the `qai-appbuilder` repository, and download [GenieAPIService](https://github.com/qualcomm/qai-appbuilder/releases/download/v2.44.0/GenieAPIService_Stable_QAIRT_v73.zip). Finally installs the QAI AppBuilder Python package. Re-running this script will pull the latest changes from the repository. |
 | `2.Install_LLM_Models.bat` | Downloads and installs the [IBM-Granite-v3.1-8B-Instruct](https://aihub.qualcomm.com/compute/models/ibm_granite_v3_1_8b_instruct) LLM model (serialized `.bin` files) and its tokenizer automatically into `qai-appbuilder/samples/genie/python/models/IBM-Granite-v3.1-8B/`. <br>You can replace this model with your own LLM model. See [here](../../samples/genie/python/README.md#setup-custom-model) for steps on using a custom model. |
-| `3.Start_WebUI.bat` | Launches one of the following WebUI applications (interactive selection): <br>**1. ImageRepairApp** — AI-powered image inpainting/repair WebUI. <br>**2. GenieWebUI** — LLM chat WebUI powered by Genie. |
-| `4.Start_GenieAPIService.bat` | Starts the [GenieAPIService](../../samples/genie/c++/) — an OpenAI-compatible C++ API service. Defaults to `IBM-Granite-v3.1-8B` model config. Supports passing a custom model config name as a parameter, e.g.: `4.Start_GenieAPIService.bat "Qwen2.0-7B-SSD"`. Keep this window open while the service is running. |
+| `3.Start_GenieAPIService.bat` | Starts the [GenieAPIService](../../samples/genie/c++/) — an OpenAI-compatible C++ API service. Defaults to `IBM-Granite-v3.1-8B` model config. Supports passing a custom model config name as a parameter, e.g.: `3.Start_GenieAPIService.bat "Qwen2.0-7B-SSD"`. Keep this window open while the service is running. |
+| `4.Start_WebUI.bat` | Launches one of the following WebUI applications (interactive selection): <br>**1. ImageRepairApp** — AI-powered image inpainting/repair WebUI. <br>**2. GenieWebUI** — LLM chat WebUI powered by Genie. |
 | `5.Start_StableDiffusion.bat` | Starts the Stable Diffusion v3.5 image generation WebUI (`StableDiffusionApp.py`). If the model files are not present, they will be downloaded automatically. Automatically sets `HF_ENDPOINT` (HuggingFace mirror) and `HF_HOME` (local cache path) to avoid common download and path-length issues. |
 | `6.Start_PythonEnv.bat` | Activates the Pixi-managed Python 3.12 environment shell. Use this to run your own Python scripts or develop within the pre-configured environment (includes torch, transformers, diffusers, gradio, etc.). |
 
@@ -40,8 +40,8 @@ There are two ways to get our Windows batch scripts:
 tools/launcher/
 ├── 1.Install_QAI_AppBuilder.bat   # Main setup script
 ├── 2.Install_LLM_Models.bat       # LLM model downloader
-├── 3.Start_WebUI.bat              # WebUI launcher (ImageRepair / GenieWebUI)
-├── 4.Start_GenieAPIService.bat    # C++ Genie API service launcher
+├── 3.Start_GenieAPIService.bat    # C++ Genie API service launcher
+├── 4.Start_WebUI.bat              # WebUI launcher (ImageRepair / GenieWebUI)
 ├── 5.Start_StableDiffusion.bat    # Stable Diffusion v3.5 WebUI launcher
 ├── 6.Start_PythonEnv.bat          # Python environment shell
 ├── env/

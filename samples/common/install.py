@@ -470,7 +470,7 @@ def download_url_wget(url, filepath, filesize=None, desc=None, fail=None):
                 wget_exe_path = "..\\python\\tools\\wget\\wget.exe"
 
             if not os.path.exists(wget_exe_path):
-                print(f"wget.exe not found. Please download it manually from '{WGET_URL}' and unzip it to '{wget_exe_path}'")
+                print(f"wget.exe not found. Please download it manually from '{WGET_URL}' and unzip it to '{wget_exe_path}' or run 'python ./common/steup.py'")
                 return False
 
             command = f'"{wget_exe_path}" --no-check-certificate -q --show-progress --continue -P "{path}" -O "{filepath}" {url}'

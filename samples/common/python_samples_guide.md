@@ -89,7 +89,7 @@ python setup.py
 python setup.py --qnn-sdk-version 2.31.0 --dsp-arch 73
 ```
 
-Internally calls `install.install_qai_appbuilder()` and `install.install_qai_runtime()` (or `install.install_qai_sdk()` as fallback).
+Internally calls `install.install_qai_appbuilder()` or `install.install_qai_sdk()` as fallback.
 
 ### 2.2 `install.py` — Model Download & Device Detection
 

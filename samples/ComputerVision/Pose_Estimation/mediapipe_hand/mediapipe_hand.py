@@ -76,7 +76,7 @@ HAND_DETECTOR_MODEL_ID = "mno1jz9vm"
 HAND_DETECTOR_MODEL_NAME = "handdetector"
 LANDMARK_DETECTOR_MODEL_NAME = "landmarkdetector"
 ESCAPE_KEY_ID = 27
-MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/blob/main/samples/computerVision/Pose_Estimation/mediapipe_hand/README.md"
 
 ####################################################################
 

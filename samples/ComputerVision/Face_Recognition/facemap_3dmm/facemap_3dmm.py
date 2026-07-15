@@ -42,7 +42,7 @@ except ImportError:
 MODEL_ID   = "mqyy9zd9q"
 HUB_ID_H   = "ox06ibpbkxb4pr0mcyfe7wqgx5pf5r0cm3rf3dzi"
 MODEL_NAME = "facemap_3dmm"
-MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/blob/main/samples/computerVision/Face_Recognition/facemap_3dmm/README.md"
 
 FACE_IMG_FBOX_PATH_URL = "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/facemap_3dmm/v1/face_img_fbox.txt"
 MEANFACE_PATH_URL      = "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/facemap_3dmm/v1/meanFace.npy"

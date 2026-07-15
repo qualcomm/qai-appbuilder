@@ -70,10 +70,7 @@ from pathlib import Path
 MODEL_ID_WOS   = "mnz1l2exq"   # WoS / x86-win hub model ID
 MODEL_ID_LINUX = "mqkrre6wn"   # Linux hub model ID
 MODEL_NAME     = "real_esrgan_x4plus"
-MODEL_HELP_URL = (
-    "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/"
-    + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
-)
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/blob/main/samples/computerVision/Super_Resolution/real_esrgan_x4plus/README.md"
 
 # Public DLC download URLs  (v0.55.0)
 MODEL_DLC_FLOAT_URL = (

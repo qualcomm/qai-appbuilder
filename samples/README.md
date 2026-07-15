@@ -22,10 +22,11 @@ samples/
 ├── run_inference.py          # Interactive launcher for all Python inference samples
 ├── common/                   # Shared utilities for all Python samples
 ├── audio/                    # Audio inference samples (TTS, ASR, classification)
-├── ComputerVision/           # Computer vision inference samples
-├── GenerativeAI/             # Generative AI inference samples (Stable Diffusion)
-├── Multimodal/               # Multimodal inference samples (OCR, translation, CLIP, VLM)
-├── apps/                     # Complete AI applications (WebUI, StorySeed, FletUI)
+├── computerVision/           # Computer vision inference samples
+├── generativeAI/             # Generative AI inference samples (Stable Diffusion)
+├── multimodal/               # Multimodal inference samples (OCR, translation, CLIP, VLM)
+├── webui/                    # Gradio WebUI applications (ImageRepairApp, StableDiffusionApp, GenieWebUI)
+├── apps/                     # Complete AI applications (StorySeed, FletUI)
 ├── genie/                    # Genie LLM API service (Python + C++)
 ├── android/                  # Android sample apps (GenieChat, SuperResolution)
 ├── c++/                      # C++ inference samples
@@ -225,9 +226,9 @@ For detailed API documentation, see [common/python_samples_guide.md](common/pyth
 
 ---
 
-## 3. Web UI Applications (`apps/`)
+## 3. Web UI Applications (`webui/` and `apps/`)
 
-### 3.1 WebUI Apps (`apps/webui/`)
+### 3.1 WebUI Apps (`webui/`)
 
 Gradio-based web applications running on the Snapdragon NPU.
 
@@ -240,13 +241,13 @@ pip install gradio==5.35.0
 
 | App | Command | Port | Description |
 |-----|---------|------|-------------|
-| [ImageRepairApp](apps/webui/ImageRepairApp.py) | `python apps\webui\ImageRepairApp.py` | 8977 | Image super-resolution app using Real-ESRGAN x4plus. Upload image → 4× enhanced output with before/after slider comparison. |
-| [StableDiffusionApp](apps/webui/StableDiffusionApp.py) | `python apps\webui\StableDiffusionApp.py` | 8978 | Text-to-image app using Stable Diffusion v2.1. Supports prompt, negative prompt, steps, guidance, seed, batch count. |
-| [GenieWebUI](apps/webui/GenieWebUI.py) | `python apps\webui\GenieWebUI.py` | — | LLM chat app. Connects to GenieAPIService via OpenAI-compatible API. Start GenieAPIService first. |
+| [ImageRepairApp](webui/ImageRepairApp.py) | `python webui\ImageRepairApp.py` | 8977 | Image super-resolution app using Real-ESRGAN General x4v3. Upload image → 4× enhanced output with before/after slider comparison. |
+| [StableDiffusionApp](webui/StableDiffusionApp.py) | `python webui\StableDiffusionApp.py` | 8978 | Text-to-image app using Stable Diffusion v2.1. Supports prompt, negative prompt, steps, guidance, seed, batch count. |
+| [GenieWebUI](webui/GenieWebUI.py) | `python webui\GenieWebUI.py` | 50000 | LLM chat app. Connects to GenieAPIService via OpenAI-compatible API. Start GenieAPIService first. |
 
 You can also launch them via batch files: `start_ImageRepairApp.bat`, `start_StableDiffusionApp.bat`, `start_GeneWebUI.bat`.
 
-See [apps/webui/README.md](apps/webui/README.md) for details.
+See [webui/README.md](webui/README.md) for details.
 
 ### 3.2 StorySeed App (`apps/StorySeed/`)
 

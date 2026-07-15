@@ -8,7 +8,7 @@
 
 <div align="center">
   <a href="https://github.com/qualcomm/qai-appbuilder"><img src="https://img.shields.io/github/stars/qualcomm/qai-appbuilder" alt="stars"></a>
-  <a href="https://github.com/qualcomm/qai-appbuilder/releases"><img src="https://img.shields.io/badge/Release-v2.38.0-green" alt="Release"></a>
+  <a href="https://github.com/qualcomm/qai-appbuilder/releases/tag/v2.48.40"><img src="https://img.shields.io/badge/Release-v3.0.0-green" alt="Release"></a>
   <a href="https://opensource.org/license/BSD-3-clause"><img src="https://img.shields.io/badge/License-BSD--3--Clause-blue" alt="License: BSD 3-Clause"></a>
   <a href="https://www.python.org/downloads/windows/"><img src="https://img.shields.io/badge/Python-00599C?logo=Python" alt="Python"></a>
   <a href="https://en.cppreference.com/w/cpp/compiler_support"><img src="https://img.shields.io/badge/C++-999999?logo=c%2B%2B" alt="C++"></a>
@@ -149,7 +149,7 @@ You can also run the batch file from [QAI AppBuilder Launcher](tools/launcher/) 
 
 We have developed several [WebUI AI applications](samples/webui/) based on QAI AppBuilder, allowing you to experience them quickly.
 All these applications run on a local PC, requiring *no internet connection* and are *completely free*.
-You can run WebUI AI applications through the batch file [3.Start_WebUI.bat](tools/launcher/3.Start_WebUI.bat).
+You can run WebUI AI applications through the batch file [4.Start_WebUI.bat](tools/launcher/4.Start_WebUI.bat).
 
 > **Note:** Before trying other functions, we suggest that you try these WebUI AI applications first.
 
@@ -190,10 +190,11 @@ python run_inference.py --model whisper_base_en --args "--audio_file input.wav"
 | Category | Description | Link |
 |----------|-------------|------|
 | **Audio** | TTS (PiperTTS), ASR (Whisper Base/Tiny), Audio Classification (YAMNet) | [audio/](samples/audio/) |
-| **Computer Vision** | Image classification, object detection, segmentation, depth estimation, pose estimation, face analysis, super-resolution, inpainting | [ComputerVision/](samples/ComputerVision/) |
-| **Generative AI** | Stable Diffusion v1.5 / v2.1 / v3.5 (text → image) | [GenerativeAI/](samples/GenerativeAI/) |
-| **Multimodal** | OCR (EasyOCR), text embedding (NomicEmbed), CLIP, Chinese→English translation (OpusMT), VLM (Qwen-VL) | [Multimodal/](samples/Multimodal/) |
+| **Computer Vision** | Image classification, object detection, segmentation, depth estimation, pose estimation, face analysis, super-resolution, inpainting | [computerVision/](samples/computerVision/) |
+| **Generative AI** | Stable Diffusion v1.5 / v2.1 / v3.5 (text → image) | [generativeAI/](samples/generativeAI/) |
+| **Multimodal** | OCR (EasyOCR), text embedding (NomicEmbed), CLIP, Chinese→English translation (OpusMT), VLM (Qwen-VL) | [multimodal/](samples/multimodal/) |
 | **WebUI Apps** | Gradio-based apps: ImageRepairApp, StableDiffusionApp, GenieWebUI | [webui/](samples/webui/) |
+| **Apps** | StorySeed (AI story + image → Xiaohongshu), FletUI desktop app | [apps/](samples/apps/) |
 | **Genie LLM Service** | OpenAI-compatible LLM API service (Python + C++) for Llama, Qwen, Phi, Granite | [genie/](samples/genie/) |
 | **Android** | GenieChat (LLM/VLM) and SuperResolution Android apps | [android/](samples/android/) |
 | **C++** | C++ inference samples for Real-ESRGAN, BEiT | [c++/](samples/c++/) |

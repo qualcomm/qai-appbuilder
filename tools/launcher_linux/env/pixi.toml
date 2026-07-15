@@ -6,7 +6,7 @@ version = "0.1.0"
 
 [tasks]
 install-tools = { cmd = ["python", "utils/Install_Tools.py"], cwd = ".."}
-build-qai-appbuilder = { cmd = ["python", "setup.py", "bdist_wheel", "--toolchains", "aarch64-oe-linux-gcc11.2", "--hexagonarch", "73"], cwd = "../qai-appbuilder"}
+build-qai-appbuilder = { cmd = ["python", "-m", "build", "-w"], cwd = "../qai-appbuilder"}
 install-qai-appbuilder = { cmd = "bash -lc 'pip install ./qai_appbuilder-*.whl --force-reinstall'", cwd = "../qai-appbuilder/dist/"}
 install-model = { cmd = ["python", "utils/Install_LLM_Models.py"], cwd = ".."}
 install-langflow = { cmd = "uv pip install langflow==1.5.0 --trusted-host=pypi.org --trusted-host=files.pythonhosted.org"}
@@ -50,3 +50,8 @@ python-pptx = ">=1.0.2, <2"
 docx2txt = ">=0.9, <0.10"
 openai = ">=1.93.0, <2"
 json-repair = ">=0.47.4,<0.55"
+build = ">=1.4.0,<1.5.0"
+wheel = ">=0.45.1,<0.46.0"
+setuptools = ">=80.9.0,<80.10.0"
+pybind11 = ">=2.13.6,<2.14.0"
+colorama = ">=0.4.6,<0.4.8"

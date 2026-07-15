@@ -22,7 +22,7 @@ import platform
 
 MODEL_ID = "mn0j68p8m"
 MODEL_NAME = "real_esrgan_general_x4v3"
-MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/blob/main/samples/computerVision/Super_Resolution/real_esrgan_general_x4v3/README.md"
 IMAGE_SIZE_WOS = 512
 IMAGE_SIZE_LINUX = 128
 IMAGE_SIZE = 512

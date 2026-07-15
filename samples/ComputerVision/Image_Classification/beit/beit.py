@@ -32,7 +32,7 @@ from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfP
 MODEL_NAME = "beit"
 MODEL_ID   = "mngvl175n"
 HUB_ID_H   = "ox06ibpbkxb4pr0mcyfe7wqgx5pf5r0cm3rf3dzi"
-MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/blob/main/samples/computerVision/Image_Classification/beit/README.md"
 
 IMAGENET_CLASSES_URL  = "https://raw.githubusercontent.com/anishathalye/imagenet-simple-labels/master/imagenet-simple-labels.json"
 IMAGENET_CLASSES_FILE = "imagenet_labels.json"

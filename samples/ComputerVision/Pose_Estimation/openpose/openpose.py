@@ -33,7 +33,7 @@ from pathlib import Path
 
 MODEL_ID = "mqv65e1xm"
 MODEL_NAME = "openpose"
-MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/blob/main/samples/computerVision/Pose_Estimation/openpose/README.md"
 IMAGE_SIZE = 224
 
 ####################################################################

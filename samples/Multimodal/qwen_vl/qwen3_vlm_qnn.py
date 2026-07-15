@@ -186,7 +186,7 @@ class Qwen3VLQnn():
 
        
     def Init(self, onGenieCallback=None):
-        QNNConfig.Config(self.runtime_path, Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+        QNNConfig.Config(Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
         
         self.veg = Qwen3VLQnnVeg(self.veg_model_path, self.runtime_path)       
         self.llm = Qwen3VLQnnLLM(self.llm_model_path, lookup_table=self.look_up_table_path, onGenieCallback=onGenieCallback)

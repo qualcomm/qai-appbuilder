@@ -413,4 +413,13 @@ if __name__ == '__main__':
 
     real_esrgan.Init()
 
+    # Bypass system proxy for localhost so Gradio 5.x internal startup health check succeeds.
+    # Gradio calls httpx.get("http://localhost:<port>/gradio_api/startup-events") after starting
+    # the server; if a system proxy intercepts localhost traffic it returns 403 and Gradio aborts.
+    for _env_key in ("NO_PROXY", "no_proxy"):
+        _existing = os.environ.get(_env_key, "")
+        _bypass = "localhost,127.0.0.1"
+        if _bypass not in _existing:
+            os.environ[_env_key] = (_existing + "," + _bypass).lstrip(",")
+
     demo.queue().launch(server_name=HOST, share=False, inbrowser=True, server_port=PORT)

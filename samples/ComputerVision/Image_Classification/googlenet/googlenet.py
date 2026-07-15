@@ -22,7 +22,7 @@ from pathlib import Path
 ####################################################################
 MODEL_ID = "mnw5x8wrn"
 MODEL_NAME = "googlenet"
-MODEL_HELP_URL = ""
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/blob/main/samples/computerVision/Image_Classification/googlenet/README.md"
 IMAGENET_CLASSES_URL = "https://raw.githubusercontent.com/anishathalye/imagenet-simple-labels/master/imagenet-simple-labels.json"
 IMAGENET_CLASSES_FILE = "imagenet_labels.json"
 IMAGE_SIZE=224

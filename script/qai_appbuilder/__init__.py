@@ -20,6 +20,9 @@ if sys.platform.startswith('linux'):
     import ctypes
     ctypes.CDLL(g_base_path + "/libappbuilder.so", ctypes.RTLD_GLOBAL)
     ctypes.CDLL(g_base_path + "/libGenie.so", ctypes.RTLD_GLOBAL)
+    ctypes.CDLL(g_base_path + "/libs" + "/libQnnSystem.so", ctypes.RTLD_GLOBAL)
+    ctypes.CDLL(g_base_path + "/libs" + "/libQnnHtp.so", ctypes.RTLD_GLOBAL)
+    ctypes.CDLL(g_base_path + "/libs" + "/libQnnHtpNetRunExtensions.so", ctypes.RTLD_GLOBAL)
 
     # The QAIAppSvc service binary (used by QNNContextProc for cross-process
     # inference) must be executable so posix_spawnp can launch it. Some pip /

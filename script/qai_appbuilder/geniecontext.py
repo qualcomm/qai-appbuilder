@@ -27,6 +27,15 @@ class GenieContext:
                 config: str = "None",
                 debug: bool = False
     ) -> None:
+        qnn_lib_path = "None"
+        if qnn_lib_path in (None, "None", "") or not os.path.exists(qnn_lib_path):
+            base_path = os.path.dirname(os.path.abspath(__file__))
+            qnn_lib_path = os.path.join(base_path, "libs")
+
+        if not sys.platform.startswith("win"):
+            ADSP_LIBRARY_PATH = os.environ.get('ADSP_LIBRARY_PATH')
+            if ADSP_LIBRARY_PATH is None or len(ADSP_LIBRARY_PATH) < 2:
+                os.environ["ADSP_LIBRARY_PATH"] = qnn_lib_path
         self.config = config
         self.debug = debug
         self.m_context = geniebuilder.GenieContext(config, debug)

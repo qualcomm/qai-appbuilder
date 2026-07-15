@@ -101,7 +101,7 @@ CHUNK_LENGTH = 0.98
 
 MODEL_ID = "mm65xwe5n"
 MODEL_NAME = "yamnet"
-MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/python/" + MODEL_NAME + "#" + MODEL_NAME + "-qnn-models"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/blob/main/samples/audio/Audio_Classification/yamnet/README.md"
 YAMNET_CLASSES_URL = "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/yamnet/v1/yamnet_class_map.csv"
 YAMNET_CLASSES_FILE = "yamnet_class_map.csv"
 
