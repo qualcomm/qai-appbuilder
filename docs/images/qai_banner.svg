@@ -1,0 +1,143 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 150" width="900" height="150">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a2a40"/>
+      <stop offset="100%" style="stop-color:#1e3450"/>
+    </linearGradient>
+    <linearGradient id="blueAccent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#0077ff"/>
+      <stop offset="100%" style="stop-color:#00c8ff"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="nodeGlow">
+      <feGaussianBlur stdDeviation="2.5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="900" height="150" rx="10" fill="url(#bg)"/>
+
+  <!-- ═══ AI BACKGROUND ELEMENTS ═══ -->
+
+  <!-- ═══ LEFT: NPU Chip (AppBuilder — hardware inference) ═══ -->
+  <g transform="translate(20, 30)" opacity="0.55">
+    <!-- Chip body -->
+    <rect x="28" y="18" width="54" height="54" rx="5"
+          fill="none" stroke="#00c8ff" stroke-width="1.2"/>
+    <!-- Inner core grid -->
+    <rect x="36" y="26" width="38" height="38" rx="2"
+          fill="#0a2a40" stroke="#0077ff" stroke-width="0.8" opacity="0.6"/>
+    <line x1="46" y1="26" x2="46" y2="64" stroke="#0077ff" stroke-width="0.5" opacity="0.4"/>
+    <line x1="55" y1="26" x2="55" y2="64" stroke="#0077ff" stroke-width="0.5" opacity="0.4"/>
+    <line x1="64" y1="26" x2="64" y2="64" stroke="#0077ff" stroke-width="0.5" opacity="0.4"/>
+    <line x1="36" y1="36" x2="74" y2="36" stroke="#0077ff" stroke-width="0.5" opacity="0.4"/>
+    <line x1="36" y1="45" x2="74" y2="45" stroke="#0077ff" stroke-width="0.5" opacity="0.4"/>
+    <line x1="36" y1="54" x2="74" y2="54" stroke="#0077ff" stroke-width="0.5" opacity="0.4"/>
+    <!-- Center NPU label -->
+    <text x="55" y="49" text-anchor="middle"
+          font-family="'Segoe UI', Arial, sans-serif" font-size="8" font-weight="700"
+          fill="#00c8ff" opacity="0.9">NPU</text>
+    <!-- Pins — top -->
+    <line x1="38" y1="18" x2="38" y2="10" stroke="#00c8ff" stroke-width="1.2"/>
+    <line x1="46" y1="18" x2="46" y2="10" stroke="#00c8ff" stroke-width="1.2"/>
+    <line x1="54" y1="18" x2="54" y2="10" stroke="#00c8ff" stroke-width="1.2"/>
+    <line x1="62" y1="18" x2="62" y2="10" stroke="#00c8ff" stroke-width="1.2"/>
+    <line x1="70" y1="18" x2="70" y2="10" stroke="#00c8ff" stroke-width="1.2"/>
+    <!-- Pins — bottom -->
+    <line x1="38" y1="72" x2="38" y2="80" stroke="#00c8ff" stroke-width="1.2"/>
+    <line x1="46" y1="72" x2="46" y2="80" stroke="#00c8ff" stroke-width="1.2"/>
+    <line x1="54" y1="72" x2="54" y2="80" stroke="#00c8ff" stroke-width="1.2"/>
+    <line x1="62" y1="72" x2="62" y2="80" stroke="#00c8ff" stroke-width="1.2"/>
+    <line x1="70" y1="72" x2="70" y2="80" stroke="#00c8ff" stroke-width="1.2"/>
+    <!-- Pins — left -->
+    <line x1="28" y1="28" x2="20" y2="28" stroke="#00c8ff" stroke-width="1.2"/>
+    <line x1="28" y1="37" x2="20" y2="37" stroke="#00c8ff" stroke-width="1.2"/>
+    <line x1="28" y1="46" x2="20" y2="46" stroke="#00c8ff" stroke-width="1.2"/>
+    <line x1="28" y1="55" x2="20" y2="55" stroke="#00c8ff" stroke-width="1.2"/>
+    <line x1="28" y1="64" x2="20" y2="64" stroke="#00c8ff" stroke-width="1.2"/>
+    <!-- Pins — right -->
+    <line x1="82" y1="28" x2="90" y2="28" stroke="#00c8ff" stroke-width="1.2"/>
+    <line x1="82" y1="37" x2="90" y2="37" stroke="#00c8ff" stroke-width="1.2"/>
+    <line x1="82" y1="46" x2="90" y2="46" stroke="#00c8ff" stroke-width="1.2"/>
+    <line x1="82" y1="55" x2="90" y2="55" stroke="#00c8ff" stroke-width="1.2"/>
+    <line x1="82" y1="64" x2="90" y2="64" stroke="#00c8ff" stroke-width="1.2"/>
+  </g>
+
+  <!-- ═══ RIGHT: Model Conversion Pipeline (ModelBuilder) ═══ -->
+  <g transform="translate(742, 22)" opacity="0.55">
+    <!-- Box 1: ONNX/PyTorch source -->
+    <rect x="0" y="18" width="36" height="26" rx="4"
+          fill="#1a1000" stroke="#f59e0b" stroke-width="1.2"/>
+    <text x="18" y="29" text-anchor="middle"
+          font-family="'Segoe UI', Arial, sans-serif" font-size="6.5" font-weight="700"
+          fill="#f59e0b">PyTorch</text>
+    <text x="18" y="39" text-anchor="middle"
+          font-family="'Segoe UI', Arial, sans-serif" font-size="6" fill="#c8a060">ONNX</text>
+    <!-- Arrow 1 -->
+    <line x1="36" y1="31" x2="50" y2="31" stroke="#f59e0b" stroke-width="1.2"/>
+    <polygon points="50,27 58,31 50,35" fill="#f59e0b"/>
+    <!-- Box 2: Conversion gear -->
+    <rect x="58" y="14" width="34" height="34" rx="4"
+          fill="#0d2040" stroke="#00c8ff" stroke-width="1.2"/>
+    <!-- Gear icon -->
+    <circle cx="75" cy="31" r="7" fill="none" stroke="#00c8ff" stroke-width="1.5"/>
+    <circle cx="75" cy="31" r="3" fill="#00c8ff" opacity="0.6"/>
+    <line x1="75" y1="21" x2="75" y2="24" stroke="#00c8ff" stroke-width="2"/>
+    <line x1="75" y1="38" x2="75" y2="41" stroke="#00c8ff" stroke-width="2"/>
+    <line x1="65" y1="31" x2="68" y2="31" stroke="#00c8ff" stroke-width="2"/>
+    <line x1="82" y1="31" x2="85" y2="31" stroke="#00c8ff" stroke-width="2"/>
+    <line x1="68" y1="24" x2="70" y2="26" stroke="#00c8ff" stroke-width="1.5"/>
+    <line x1="80" y1="36" x2="82" y2="38" stroke="#00c8ff" stroke-width="1.5"/>
+    <line x1="68" y1="38" x2="70" y2="36" stroke="#00c8ff" stroke-width="1.5"/>
+    <line x1="80" y1="26" x2="82" y2="24" stroke="#00c8ff" stroke-width="1.5"/>
+    <!-- Arrow 2 -->
+    <line x1="92" y1="31" x2="106" y2="31" stroke="#f59e0b" stroke-width="1.2"/>
+    <polygon points="106,27 114,31 106,35" fill="#f59e0b"/>
+    <!-- Box 3: QNN output -->
+    <rect x="114" y="18" width="36" height="26" rx="4"
+          fill="#001a0d" stroke="#00e87a" stroke-width="1.2"/>
+    <text x="132" y="29" text-anchor="middle"
+          font-family="'Segoe UI', Arial, sans-serif" font-size="6.5" font-weight="700"
+          fill="#00e87a">QNN</text>
+    <text x="132" y="39" text-anchor="middle"
+          font-family="'Segoe UI', Arial, sans-serif" font-size="6" fill="#60c890">.bin/.dlc</text>
+
+    <!-- Label below -->
+    <text x="75" y="60" text-anchor="middle"
+          font-family="'Segoe UI', Arial, sans-serif" font-size="7" letter-spacing="0.5"
+          fill="#7a6030">Model Conversion</text>
+
+    <!-- Vertical stacked inference boxes suggesting App Builder -->
+    <rect x="10" y="72" width="130" height="14" rx="3"
+          fill="none" stroke="#3a6a9a" stroke-width="0.8" opacity="0.6"/>
+    <text x="75" y="82" text-anchor="middle"
+          font-family="'Segoe UI', Arial, sans-serif" font-size="6.5" letter-spacing="0.5"
+          fill="#5a8ab0">OCR · ASR · TTS · CV on NPU</text>
+  </g>
+
+  <!-- ═══ MAIN CONTENT ═══ -->
+
+  <!-- Main title: QAI AppBuilder -->
+  <text x="450" y="62" text-anchor="middle"
+        font-family="'Segoe UI', Arial, sans-serif"
+        font-size="42" font-weight="900" letter-spacing="2"
+        fill="#ffffff" filter="url(#glow)">QAI AppBuilder</text>
+
+  <!-- Blue underline -->
+  <rect x="230" y="72" width="440" height="2" rx="1" fill="url(#blueAccent)" opacity="0.6"/>
+
+  <!-- ModelBuilder mention: bordered badge -->
+  <rect x="90" y="88" width="720" height="32" rx="16"
+        fill="none" stroke="#3a6a9a" stroke-width="1" opacity="0.7"/>
+  <text x="450" y="109" text-anchor="middle"
+        font-family="'Segoe UI', Arial, sans-serif"
+        font-size="13.5" font-weight="400" letter-spacing="0.5"
+        fill="#a0c8e8">Powering
+    <tspan font-weight="700" fill="#f59e0b"> QAI ModelBuilder</tspan>
+    <tspan fill="#a0c8e8"> — Local-first AI Workspace · QNN Model Conversion · On-Device App Builder</tspan>
+  </text>
+</svg>
