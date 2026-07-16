@@ -22,14 +22,94 @@
 
 ## QAI AppBuilder
 
-The **Quick AI Application Builder** (this repository) is also referred to as "QAI AppBuilder" in the source code and documentation. It is an extension of the [Qualcomm® AI Runtime SDK](https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK) that substantially lowers the complexity of on-device AI model deployment for developers.
+**QAI AppBuilder** (the "Quick AI Application Builder", this repository) is an open-source,
+**on-device AI application platform** built on top of the
+[Qualcomm® AI Runtime SDK](https://softwarecenter.qualcomm.com/#/catalog/item/Qualcomm_AI_Runtime_SDK).
+Just describe the app you want in plain language — the AI Agent turns it into a complete,
+runnable application on the Snapdragon NPU, with **no coding required**.
 
-With QAI AppBuilder, a single natural language prompt drives the full AI application build pipeline — no coding required:
+### From an idea to a running app — in one conversation
 
-- **Path A — Pre-built models from AI Hub**: The [AI Hub Model Run Skill](tools/qaimodelbuilder/skills/aihub-model-run) automatically downloads pre-exported QNN models directly from [Qualcomm AI Hub](https://aihub.qualcomm.com/compute/models) and runs inference on the Snapdragon NPU without any conversion step.
-- **Path B — Custom model conversion**: The [Model Builder Skill](tools/qaimodelbuilder/factory/chat_features/model-builder) takes your own PyTorch or ONNX model and automatically handles the full pipeline — export, quantization (FP16 / W8A16 / W8A8 / W4A8), and context binary generation via QAIRT SDK — producing an optimized `.bin`/`.dlc` ready for on-device inference.
+At the center of QAI AppBuilder is the **App Builder**: tell the Agent what you want to build
+("*a screenshot OCR tool*", "*a voice-memo transcriber*", "*a real-time speech translator*")
+and it assembles a complete, self-contained local application for you — picking the right
+models, wiring up the pipeline, and generating the UI. The default output is a lightweight
+local web app; with a custom prompt the Agent can produce a CLI tool, a desktop utility, or a
+batch script just as easily.
 
-Both paths converge on the same **NPU inference engine** (`QNNContext` via `qai-appbuilder`), running fully on-device on Snapdragon series — no internet connection required at inference time.
+To do this, the Agent draws on **on-device Model Packs** (Whisper, Zipformer-ZH, MeloTTS,
+PP-OCR and more) and, whenever it needs a model that isn't packaged yet, resolves it
+automatically — downloading a pre-built model straight from
+[Qualcomm AI Hub](https://aihub.qualcomm.com/compute/models) when one exists, or converting
+your own PyTorch / ONNX model (export → quantization → context-binary generation → accuracy
+validation via QAIRT SDK) when it doesn't. Either way, you never leave the conversation, and
+every model ends up running on the same on-device NPU engine (`QNNContext` via
+`qai-appbuilder`).
+
+### Why it matters
+
+- **Minutes, not days** — get a working local AI app without hand-writing a UI or wiring up
+  model I/O yourself.
+- **Truly on-device** — every model runs on the Snapdragon NPU; your data never leaves the
+  machine. No internet connection is needed at inference time.
+- **Private by design** — a natural fit for privacy-sensitive scenarios (corporate documents,
+  medical images, personal recordings), backed by a built-in security module that gates every
+  file, command, and tool the Agent touches.
+- **Extensible** — the Agent is driven by hot-reloadable **Skills** and **Model Packs**; add a
+  new self-contained module and the Agent picks it up automatically.
+
+---
+
+### Get Started with QAI ModelBuilder
+
+> **QAI ModelBuilder** is the natural-language Agent front-end of QAI AppBuilder — the App Builder,
+> Model Builder, and AI Hub Model Run capabilities described above all live here. Grab the
+> pre-built package below and you'll have a running, on-device AI app builder in **two commands**.
+
+<div align="center">
+  <a href="https://github.com/qualcomm/qai-appbuilder/releases/download/v2.48.40/qaimodelbuilder.zip">
+    <img src="https://img.shields.io/badge/Download-QAI%20ModelBuilder%20v3.0.0-2ea44f?style=for-the-badge" alt="Download QAI ModelBuilder">
+  </a>
+  &nbsp;&nbsp;
+  <a href="https://github.com/qualcomm/qai-appbuilder/tree/main/tools/qaimodelbuilder">
+    <img src="https://img.shields.io/badge/Browse%20Source-tools/qaimodelbuilder-24292e?style=for-the-badge&logo=github" alt="Browse QAI ModelBuilder source code">
+  </a>
+</div>
+
+<br>
+
+**Just want to use it? Two steps:**
+
+> **Platform:** Windows on Snapdragon (ARM64). No admin rights needed — `Setup.bat` automatically
+> downloads Python, Node.js, QAIRT SDK, and model weights for you.
+
+1. **Download & unzip**
+   [`qaimodelbuilder.zip`](https://github.com/qualcomm/qai-appbuilder/releases/download/v2.48.40/qaimodelbuilder.zip),
+   then open `cmd.exe` in the extracted folder.
+
+2. **Run two commands** — the first installs the environment (one-time), the second launches the
+   WebUI and opens your browser:
+
+```cmd
+Setup.bat
+Start.bat
+```
+
+Your browser opens the QAI ModelBuilder WebUI — start chatting to build an app, convert a model,
+or run one straight from AI Hub.
+
+**Want to read or modify the code?** The complete QAI ModelBuilder project lives at
+[`tools/qaimodelbuilder`](https://github.com/qualcomm/qai-appbuilder/tree/main/tools/qaimodelbuilder).
+Clone the repo, then run `Setup.bat` → `Build.bat` → `Start.bat` to launch from source.
+
+> 📖 **Docs inside the QAI ModelBuilder project:**
+>
+> | Document | Description |
+> |----------|-------------|
+> | [README](tools/qaimodelbuilder/README.md) \| [中文](tools/qaimodelbuilder/README.zh-CN.md) | Full project overview — architecture, features, configuration, skill system, FAQ |
+> | [Quick Start](tools/qaimodelbuilder/QUICK-START.md) \| [中文](tools/qaimodelbuilder/QUICK-START.zh-CN.md) | 1-page cheat-sheet — dev mode / desktop app (Tauri) / release build, and which `.bat` to run when |
+
+---
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/qualcomm/qai-appbuilder/main/docs/images/qai_appbuilder_agent.svg" alt="QAI AppBuilder Agent Capabilities" width="1330" height="488">

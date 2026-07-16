@@ -13,11 +13,15 @@ __pycache__/
 *.egg
 
 # -------- Virtualenvs --------
+# Names like env/ ENV/ envs/ are common SOURCE directory names too, so anchor
+# them to the repo root — a virtualenv only ever appears at the tree root (the
+# app's real venv lives outside the tree under %LOCALAPPDATA%). This avoids
+# mis-ignoring a source dir such as frontend/src/env/ deeper in the tree.
 .venv/
 venv/
-env/
-ENV/
-envs/
+/env/
+/ENV/
+/envs/
 .python-version
 
 # -------- Node / Frontend --------
@@ -44,22 +48,37 @@ npm-debug.log*
 # App Builder Packs at data/app_builder/user_models/**, weight .bin files at
 # data/app_builder/user_model_weights/**, secrets, caches). Never source, never
 # shipped in the release zip, never committed back after a user rebuild.
-data/
-!data/README.md
-!data/.gitkeep
-models/
+# Anchored to the repo root (/data/) so a same-named source dir deeper in the
+# tree is never mis-ignored.
+/data/
+!/data/README.md
+!/data/.gitkeep
+# Top-level model-weight cache from the Download Center (NPU quantized model
+# .bin files). Anchored to the repo root so it does NOT catch source dirs that
+# happen to be named "models/" deeper in the tree (e.g. the shipped skill code
+# at skills/*/models/ or the App Builder Pack code at factory/app_builder/
+# models/). Those are source and MUST stay committable.
+/models/
 !factory/app_builder/models/
 !factory/app_builder/models/**
-!skills/aihub-model-run/models/
-!skills/aihub-model-run/models/**
 factory/app_builder/models/**/__pycache__/
 factory/app_builder/models/**/*.pyc
-bin/
-!bin/README.md
-!bin/.gitkeep
-vendor/
-!vendor/whl/
-!vendor/whl/README.md
+# Skill code shipped under skills/*/models/ (e.g. aihub-model-run) is source,
+# not a runtime weight cache — keep it committable. (Belt-and-braces: the
+# anchored /models/ above already spares it, but be explicit.)
+!skills/**/models/
+!skills/**/models/**
+skills/**/models/**/__pycache__/
+skills/**/models/**/*.pyc
+# Root-level dev toolchain + vendored deps (reproducible; never source).
+# Anchored to the repo root so a same-named source dir deeper in the tree
+# (e.g. a hypothetical src/**/bin/ or frontend/**/vendor/) is not mis-ignored.
+/bin/
+!/bin/README.md
+!/bin/.gitkeep
+/vendor/
+!/vendor/whl/
+!/vendor/whl/README.md
 
 # -------- Databases --------
 *.db

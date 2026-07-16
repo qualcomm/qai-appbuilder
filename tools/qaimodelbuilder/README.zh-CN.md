@@ -71,7 +71,6 @@ QAI ModelBuilder 已**全面重写为 Clean Architecture / DDD 应用**。代码
 │   service_release · platform（共享内核）                       │
 ├──────────────────────────────────────────────────────────────┤
 │  frontend/    Vue 3 + Vite SPA  →  运行时由 frontend/dist/ 提供 │
-│  desktop/     Tauri 2.x 桌面壳（可选）                          │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -89,15 +88,11 @@ QAI ModelBuilder 已**全面重写为 Clean Architecture / DDD 应用**。代码
 | `service_release` | GenieAPIService 下载中心 |
 | `platform` | 共享内核：config、logging、persistence、crypto、edition、skills、uploads… |
 
-> **权威文档** 位于 [`docs/`](docs/)，导航索引见 [`docs/README.md`](docs/README.md)（架构、AI 编程、UI/UX、安全、运维、重构记录等）。
-
 ---
 
 ## 🧩 App Builder —— 一键运行端侧 AI 模型
 
 > **在骁龙 NPU 上使用 AI 模型最快的方式。** App Builder 在聊天界面中嵌入了一个工作台，每个模型都是位于 `factory/app_builder/models/<id>/` 的自包含 **Model Pack**。上传图片 / 录音 / 输入文字，点击 **Run** 即可拿到结果，并由对应查看器渲染。所有推理通过 QAI AppBuilder + QNN HTP 在本机完成——**输入数据不上传**。
->
-> 配套设计文档位于 [`docs/30-ui-ux/`](docs/30-ui-ux/)。
 
 ### 快速上手
 
@@ -169,7 +164,7 @@ QAI ModelBuilder 已**全面重写为 Clean Architecture / DDD 应用**。代码
 
 ### 多精度变体（FP16 / INT8 / W8A16…）
 
-同一个 Pack 可打包同一模型的多个精度变体（契约见 [`docs/30-ui-ux/multi-variant-pack-contract.md`](docs/30-ui-ux/multi-variant-pack-contract.md)）。每个变体自带 `runtime`（量化、模型体积、context bins、支持设备）、`assets`、`metrics`：
+同一个 Pack 可打包同一模型的多个精度变体。每个变体自带 `runtime`（量化、模型体积、context bins、支持设备）、`assets`、`metrics`：
 
 ```jsonc
 "variants": [
@@ -405,14 +400,11 @@ QAIModelBuilder/
 │   ├── db_staging/       #   编译入库种子（*.jsonl）
 │   └── config/           #   编译配置种子
 ├── skills/               # 用户可安装技能（每个含 SKILL.md）
-├── desktop/              # Tauri 2.x 桌面壳（可选）
 ├── scripts/              # build / ci / dev / init / release / setup 脚本
 ├── tools/                # 可导入工具包（factory_compiler、install pipeline、openapi）
 ├── models/               # 预置端侧模型权重
 ├── data/                 # 运行时数据（install 生成；gitignore）
 ├── vendor/               # 离线 wheel（ARM64）+ 内置二进制 + g2p/nltk 数据
-├── tests/                # pytest 套件（unit / integration / contract / e2e）
-├── docs/                 # 权威文档（见 docs/README.md）
 ├── Setup.bat  Start.bat  Build.bat  Release.bat  Console.bat  Uninstall.bat  qai.bat
 └── pyproject.toml        # Python 依赖与控制台脚本（唯一权威）
 ```

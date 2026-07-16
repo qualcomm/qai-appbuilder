@@ -76,7 +76,6 @@ description: QAI ModelBuilder. Tools and workflows for model conversion, inspect
 | 0-byte generator / `WinError 193` / 需修改 SDK 文件 | sdk-integrity-recovery | `${APP_ROOT}/factory/chat_features/model-builder/troubleshooting/sdk-integrity-recovery/SKILL.md` | base |
 | basicsr / functional_tensor / aux 分支 ReshapeOp | export-troubleshooting | `${APP_ROOT}/factory/chat_features/model-builder/troubleshooting/export-troubleshooting/SKILL.md` | base |
 | 待转模型是 YOLO/检测/分割/Transformer 等量化敏感架构 / 量化前想预判风险与推荐精度 | quantization-sensitivity（转换前风险预判速查表） | `${APP_ROOT}/factory/chat_features/model-builder/references/quantization-sensitivity.md` | base |
-| 结果不对 / cosine < 0.95 / 量化后掉点 / 某通道输出全 0 / 推理慢 / 想提性能 | model-opt（模型优化索引：精度与性能） | `${APP_ROOT}/factory/chat_features/model-opt/SKILL.md` | base（含 graph 子项为 advanced，external 剔除）|
 
 > **说明**：上表的排障/精度/性能知识已抽取为独立子 SKILL。本 SKILL 正文中仍保留的相关段落（Blocking Conditions、Operator Patching、Step 8 精度、Tool Path 错误等）为**主流程内联摘要**，遇到具体问题时**以对应子 SKILL 为准**（子 SKILL 内容更完整）。
 
@@ -692,9 +691,6 @@ Use `--no-templates` to skip plan copy.
 
         > 🧭 **Full B6 diagnosis flow, the 5 fix options with one-line principles each,
         > Large-Dynamic-Range channel-collapse trap, and calibration-data acquisition rules
-        > → load the `quantization-accuracy` sub-SKILL:**
-        > `${APP_ROOT}/factory/chat_features/model-opt/quantization/accuracy/SKILL.md`
-        > (canonical source — the above bullet is only an entry hook).
    - **Task-specific accuracy, latency benchmark, and regression test** (per-task metric
      thresholds — Top-1 / mAP / PSNR·SSIM / WER / BLEU / mIoU; cold·p50·p95·throughput·peak-mem;
      >= 3 known-good regression inputs) → [`references/expected_output_artifacts.md`](references/expected_output_artifacts.md) § Validation Report.
@@ -806,7 +802,6 @@ Open only what you need:
 | Troubleshooting | `references/troubleshooting.md` |
 | Quantization sensitivity (pre-conversion risk pre-flight) | `references/quantization-sensitivity.md` |
 | Verification discipline (cheap-falsify-first / artifact-is-truth / host≠device) | `references/verification-discipline.md` |
-| HTP profiling / per-layer 耗时 / 找瓶颈 | 见 model-opt → `${APP_ROOT}/factory/chat_features/model-opt/profiling/SKILL.md`（性能剖析属 model-opt 类别） |
 | Pack Export & inference_manifest.json | `references/pack_export.md` |
 
 > ### 🧭 子 SKILL（按需加载，见顶部「Problem Routing Index」）
@@ -821,7 +816,6 @@ Open only what you need:
 > | env-troubleshooting | `${APP_ROOT}/factory/chat_features/model-builder/troubleshooting/env-troubleshooting/SKILL.md` | base | 环境/依赖/VS/import 故障 |
 > | sdk-integrity-recovery | `${APP_ROOT}/factory/chat_features/model-builder/troubleshooting/sdk-integrity-recovery/SKILL.md` | base | SDK 写保护纪律 + 损坏恢复 |
 > | export-troubleshooting | `${APP_ROOT}/factory/chat_features/model-builder/troubleshooting/export-troubleshooting/SKILL.md` | base | ONNX 导出期兼容问题 |
-> | model-opt（模型优化索引） | `${APP_ROOT}/factory/chat_features/model-opt/SKILL.md` | base | 转换成功后的精度/性能优化：精度诊断(base) + 图优化(advanced)，按 tier 过滤呈现子 SKILL |
 
 ## Script Index
 
