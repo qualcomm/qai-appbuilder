@@ -3,6 +3,7 @@ ai-engine-direct-helper/
 GenieService_v*
 .idea
 .junie/
-cmake-build/
+cmake-build*/
+build-*
 __pycache__
 QAIModelBuilder

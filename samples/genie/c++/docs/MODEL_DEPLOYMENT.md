@@ -1,31 +1,29 @@
 # Deployment GenieAPIService and Client on your device
 
-You should choose and download models first by following this [Download Link](https://www.aidevhome.com/?id=51)
-(external link — please verify it is still valid).
+Download models first from this [Download Link](https://www.aidevhome.com/?id=51)
+(external link — verify it is still valid).
 
-The path `models/[MODEL_NAME]/config.json` is recommended. For VLM, Please make the model follow
-the [VLM model layout](#Deployment)
+Use the path `models/[MODEL_NAME]/config.json`. For VLM models, follow
+the [VLM model layout](#Deployment).
 
-- Windows: `qai-appbuilder\samples\genie\python\models` is the directory name you get when you `git clone` the
-  source repository — move the models there in that case. If instead you obtained a pre-built release package,
-  there is no `qai-appbuilder` folder; the equivalent path is simply `samples\genie\python\models` relative to
-  wherever you extracted the package.
+- Windows: `qai-appbuilder\samples\genie\python\models` is the directory created by `git clone` — move models
+  there. For a pre-built release package, no `qai-appbuilder` folder exists; the equivalent path is
+  `samples\genie\python\models` relative to wherever you extracted the package.
 
-- Android: Please push the model files into your device. The model files should be pushed to `/sdcard/GenieModels`.
+- Android: push the model files to `/sdcard/GenieModels` on the device.
 
 ## Deployment
 
-Please keep VLM models following the layout
+VLM models must follow this layout:
 
 - [qwen2.5vl3b](#qwen2.5vl3b)
 - [phi4mm](#phi4mm)
 - [qwen2.5_omini_3b](#qwen2.5_omini_3b)
 
-> **Note:** The file layouts below are illustrative examples of what a downloaded model package looks like. The
-> specific file names (e.g. `veg.serialized.bin`, `embedding_weights.raw`) are private conventions of the
-> underlying QNN Genie SDK model export process — the C++ service code never parses or depends on these exact
-> file names. Treat this as a reference only; the exact contents may vary between model versions, so always defer
-> to what is actually inside the package you downloaded.
+> **Note:** The file layouts below illustrate what a downloaded model package looks like. Specific file names
+> (e.g. `veg.serialized.bin`, `embedding_weights.raw`) are private conventions of the underlying QNN Genie SDK
+> model export process — the C++ service code never parses or depends on them. Treat this as a reference only;
+> contents may vary between model versions, so defer to what is actually inside the package you downloaded.
 
 ### qwen2.5vl3b
 
@@ -89,17 +87,16 @@ Please keep VLM models following the layout
 
 ## Multi-model deployment (optional)
 
-In addition to the single-model `config.json` described above, the server also supports loading and serving
-**multiple models concurrently** — potentially one on each backend/device (QNN/NPU, MNN/CPU, GGUF/GPU) — from a
-single running `GenieAPIService` process.
+In addition to the single-model `config.json` described above, the server supports loading and serving
+**multiple models concurrently** — one on each backend/device (QNN/NPU, MNN/CPU, GGUF/GPU) — from a single
+running `GenieAPIService` process.
 
 ### How it is discovered
 
-Place a `service_config.json` file in the **same directory as the `GenieAPIService` executable** (this is
-auto-discovered — there is no command-line flag to point at a different location). This additional loading only
-happens when the server is started **with `-l`/`--load_model`** (see [USAGE.MD](USAGE.MD)); without `-l`, the
-server only loads the single model pointed to by `-c`/`--config_file` and ignores any `models` list in
-`service_config.json`.
+Place a `service_config.json` file in the **same directory as the `GenieAPIService` executable** (auto-discovered;
+no command-line flag can point at a different location). This additional loading only happens when the server
+starts **with `-l`/`--load_model`** (see [USAGE.MD](USAGE.MD)); without `-l`, the server only loads the single
+model pointed to by `-c`/`--config_file` and ignores any `models` list in `service_config.json`.
 
 ### `models[]` array — key fields
 
@@ -145,8 +142,8 @@ server only loads the single model pointed to by `-c`/`--config_file` and ignore
   entry targeting an already-occupied device is skipped, not queued.
 - **`context_size`**: `0` uses the model's own default context length.
 - **`enabled`**: set to `false` to temporarily disable a model (e.g. a memory-hungry MNN model) without removing
-  its entry, without affecting the loading of any other model in the list.
-- **`default_model`** (top-level field, sibling of `models`): which model name serves requests that omit the
+  its entry or affecting the loading of any other model in the list.
+- **`default_model`** (top-level field, sibling of `models`): the model name that serves requests omitting the
   `"model"` field entirely.
 
 ### Client-side routing
