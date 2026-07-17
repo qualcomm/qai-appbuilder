@@ -1,4 +1,4 @@
-//==============================================================================
+﻿//==============================================================================
 //
 // Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
 //
@@ -10,11 +10,6 @@
 #define MODEL_TYPE_H
 
 #include "base_enum.h"
-#if defined(__linux__) && !defined(__ANDROID__)
-    // gcc on Linux does not transitively include <cstdint> via the headers
-    // below the way MSVC and the Android NDK do.
-    #include <cstdint>
-#endif
 #include <vector>
 #include <string>
 #include <unordered_map>
@@ -27,6 +22,10 @@ struct ModelInput
     std::string text_;
     std::string image_;
     std::string audio_;
+    // Agent 类型标记：由 ModelInputBuilder 在构建时设置
+    // "main" = 主 Agent（system prompt 含 "agent=main"）
+    // "sub"  = 子 Agent（默认值）
+    std::string agent_type_ = "sub";
 };
 
 struct PromptType : public BaseEnum
@@ -52,6 +51,7 @@ struct PromptType : public BaseEnum
         }
     }
 };
+
 
 struct ModelType : public BaseEnum
 {
@@ -93,12 +93,13 @@ namespace std
     template<>
     struct hash<ModelType>
     {
-        size_t operator()(ModelType const &m) const noexcept { return std::hash<int>{}(int(m)); }
+        size_t operator()(ModelType const& m) const noexcept { return std::hash<int>{}(int(m)); }
     };
 }
 
 struct ModelFormat : public BaseEnum
 {
+    using BaseEnum::operator=;
     enum
     {
         QNN,

@@ -1,4 +1,4 @@
-//==============================================================================
+﻿//==============================================================================
 //
 // Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
 //
@@ -109,8 +109,6 @@ struct Shape_6D
     int d4;
     int d5;
     std::vector<T> buf;
-
-    void Shape();
 };
 
 template<typename T>
@@ -123,8 +121,6 @@ int Sum(const T &x, bool round_result = true)
     {
         sum += static_cast<double>(data[i]);
     }
-//    if (round_result)
-//        return static_cast<int>(std::lround(sum));
     return static_cast<int>(sum); // truncates toward zero
 }
 

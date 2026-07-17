@@ -1,4 +1,4 @@
-//==============================================================================
+﻿//==============================================================================
 //
 // Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
 //
@@ -10,15 +10,6 @@
 #define SHAPE_6D_H
 
 #include "base.h"
-#include <log.h>
-
-template<typename T>
-void Shape_6D<T>::Shape()
-{
-    My_Log{} << "[" << d0 << ", " << d1 << ", "
-             << d2 << ", " << d3 << ", "
-             << d4 << ", " << d5 << "]";
-}
 
 // Reshape in: (d0, d1, d2, d3, d4, d5) -> out: (out_d0, out_d1, out_d2)
 // Use out_d1 = -1 to compute it as product(d1..d4).

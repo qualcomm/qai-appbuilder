@@ -1,4 +1,4 @@
-//==============================================================================
+﻿//==============================================================================
 //
 // Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
 // 
@@ -11,33 +11,16 @@
 #ifndef _UTILS_H
 #define _UTILS_H
 
-// On native Linux (glibc + gcc) many transitive includes that MSVC and the
-// Android NDK still ship are absent. Pull them in explicitly only on Linux so
-// the existing Windows / Android build paths see exactly the same include
-// set as before.
-#if defined(__linux__) && !defined(__ANDROID__)
-    #include <atomic>
-    #include <chrono>
-    #include <algorithm>
-    #include <cstdint>
-    #include <exception>
-    #include <fstream>
-    #include <iomanip>
-    #include <memory>
-    #include <stdexcept>
-    #include <string>
-    #include <unordered_map>
-    #include <vector>
-#endif
-
 #include <nlohmann/json.hpp>
+#include <functional>
+#include <chrono>
+#include <algorithm>
+#include <cctype>
 
 using json = nlohmann::ordered_json;
 
 inline std::string CurrentDir;
 inline std::string RootDir;
-
-extern std::atomic<bool> http_busy_;
 
 struct ReportError : public std::exception
 {
@@ -90,9 +73,6 @@ double MeasureSeconds(F &&fn, Args &&... args)
     return elapsed.count();
 }
 
-template<typename T>
-void PrintBuf(T &buf);
-
 inline class Timer
 {
 public:
@@ -111,8 +91,6 @@ private:
 
     Impl *impl_;
 } timer;
-
-bool isPortAvailable(int port);
 
 inline bool str_contains(const std::string &str, const std::string &sub)
 {
@@ -144,59 +122,6 @@ T get_json_value(const json &jsonData, const std::string &key, const T &defaultV
 inline std::string json_to_str(const json &data)
 {
     return data.dump(-1, ' ', false, json::error_handler_t::replace);
-}
-
-inline bool hasInvalidUtf8Chars(const std::string &str)
-{
-    const uint8_t *data = reinterpret_cast<const uint8_t *>(str.data());
-    size_t length = str.size();
-    size_t i = 0;
-
-    while (i < length)
-    {
-        uint8_t byte = data[i];
-
-        if ((byte & 0x80) == 0)
-        {
-            i++;
-            continue;
-        }
-
-        int numBytes;
-        if ((byte & 0xE0) == 0xC0)
-        {
-            numBytes = 1;
-        }
-        else if ((byte & 0xF0) == 0xE0)
-        {
-            numBytes = 2;
-        }
-        else if ((byte & 0xF8) == 0xF0)
-        {
-            numBytes = 3;
-        }
-        else
-        {
-            return true;
-        }
-
-        if (i + numBytes >= length)
-        {
-            return true;
-        }
-
-        for (int j = 1; j <= numBytes; j++)
-        {
-            if ((data[i + j] & 0xC0) != 0x80)
-            {
-                return true;
-            }
-        }
-
-        i += numBytes + 1;
-    }
-
-    return false;
 }
 
 inline bool starts_with(const std::string &str, const std::string &prefix)
@@ -235,17 +160,232 @@ inline std::string escape_string(const std::string &input)
     return result;
 }
 
-inline bool str_search(const std::string &source, const std::string &target)
+/**
+ * Sanitize invalid UTF-8 byte sequences in-place.
+ * Replaces any invalid UTF-8 byte with '?' to prevent Rust tokenizer
+ * (GenieTokenizer_encode / GenieDialog_query) from panicking with Utf8Error.
+ *
+ * Returns true if any invalid bytes were found and replaced.
+ */
+inline bool sanitize_utf8_inplace(std::string& input)
 {
-    auto it = std::search(
-            source.begin(), source.end(),
-            target.begin(), target.end(),
-            [](unsigned char ch1, unsigned char ch2)
-            {
-                return std::tolower(ch1) == std::tolower(ch2);
+    bool has_invalid = false;
+    for (size_t i = 0; i < input.size(); )
+    {
+        unsigned char byte = static_cast<unsigned char>(input[i]);
+        if ((byte & 0x80) == 0) {
+            // ASCII single-byte character, valid
+            ++i;
+        } else if ((byte & 0xE0) == 0xC0) {
+            // 2-byte sequence
+            if (i + 1 < input.size() &&
+                (static_cast<unsigned char>(input[i+1]) & 0xC0) == 0x80) {
+                i += 2;
+            } else {
+                input[i] = '?';
+                has_invalid = true;
+                ++i;
             }
-    );
-    return it != source.end();
+        } else if ((byte & 0xF0) == 0xE0) {
+            // 3-byte sequence
+            if (i + 2 < input.size() &&
+                (static_cast<unsigned char>(input[i+1]) & 0xC0) == 0x80 &&
+                (static_cast<unsigned char>(input[i+2]) & 0xC0) == 0x80) {
+                i += 3;
+            } else {
+                input[i] = '?';
+                has_invalid = true;
+                ++i;
+            }
+        } else if ((byte & 0xF8) == 0xF0) {
+            // 4-byte sequence
+            if (i + 3 < input.size() &&
+                (static_cast<unsigned char>(input[i+1]) & 0xC0) == 0x80 &&
+                (static_cast<unsigned char>(input[i+2]) & 0xC0) == 0x80 &&
+                (static_cast<unsigned char>(input[i+3]) & 0xC0) == 0x80) {
+                i += 4;
+            } else {
+                input[i] = '?';
+                has_invalid = true;
+                ++i;
+            }
+        } else {
+            // Invalid leading byte (continuation byte or out-of-range byte)
+            input[i] = '?';
+            has_invalid = true;
+            ++i;
+        }
+    }
+    return has_invalid;
+}
+
+inline void clean_control_characters_inplace(std::string& input)
+{
+    // Pass 1: Replace ASCII control characters (< 0x20) except whitespace
+    for (char& c : input)
+    {
+        unsigned char uc = static_cast<unsigned char>(c);
+        // Keep printable ASCII (>= 0x20), UTF-8 bytes (>= 0x80), and specific whitespace
+        // Replace invalid control characters (like \0) with a safe placeholder
+        if (uc < 0x20 && uc != '\n' && uc != '\r' && uc != '\t')
+        {
+            c = '?';
+        }
+    }
+
+    // Pass 2: Fix invalid UTF-8 multi-byte sequences
+    // This prevents Rust tokenizer (GenieTokenizer_encode / GenieDialog_query) from panicking
+    // with "Utf8Error" when it receives invalid UTF-8 byte sequences.
+    sanitize_utf8_inplace(input);
+}
+
+// Buffers raw text fed in incrementally (e.g. one LLM token at a time) and only forwards
+// complete UTF-8 characters to the callback, holding back any trailing partial multi-byte
+// sequence until the continuation bytes arrive. This is the correct fix for streaming output
+// (as opposed to sanitize_utf8_inplace, which replaces bytes and would corrupt every
+// multi-byte character that happens to be split across a token boundary).
+// https://github.com/alibaba/MNN/blob/master/apps/Android/MnnLlmChat/app/src/main/cpp/utf8_stream_processor.hpp
+class Utf8StreamProcessor
+{
+public:
+    explicit Utf8StreamProcessor(std::function<void(std::string &)> callback)
+            : callback(std::move(callback))
+    {}
+
+    void processStream(const char *str, size_t len)
+    {
+        utf8Buffer.append(str, len);
+
+        size_t i = 0;
+        std::string completeChars;
+        while (i < utf8Buffer.size())
+        {
+            int length = utf8CharLength(static_cast<unsigned char>(utf8Buffer[i]));
+            if (length == 0 || i + length > utf8Buffer.size())
+            {
+                break;
+            }
+            completeChars.append(utf8Buffer, i, length);
+            i += length;
+        }
+        utf8Buffer = utf8Buffer.substr(i);
+        if (!completeChars.empty())
+        {
+            callback(completeChars);
+        }
+    }
+
+    static int utf8CharLength(unsigned char byte)
+    {
+        if ((byte & 0x80) == 0) return 1;
+        if ((byte & 0xE0) == 0xC0) return 2;
+        if ((byte & 0xF0) == 0xE0) return 3;
+        if ((byte & 0xF8) == 0xF0) return 4;
+        return 0;
+    }
+
+private:
+    std::string utf8Buffer;
+    std::function<void(std::string &)> callback;
+};
+
+/**
+ * Advance a byte offset within a UTF-8 string forward until it points to the start of a valid
+ * UTF-8 character (or the end of the string).  Use this to fix up an offset that was computed
+ * by raw byte arithmetic and may therefore land in the middle of a multi-byte sequence.
+ *
+ * @param str    The UTF-8 string
+ * @param offset Byte offset that may be inside a multi-byte character
+ * @return       The smallest offset >= the input that is either the end of the string or the
+ *               first byte of a valid UTF-8 character (i.e. not a continuation byte 10xxxxxx)
+ */
+inline size_t utf8_align_start(const std::string &str, size_t offset)
+{
+    const uint8_t *data = reinterpret_cast<const uint8_t *>(str.data());
+    size_t len = str.size();
+    // Continuation bytes have the pattern 10xxxxxx (0x80..0xBF).
+    // Skip forward past any continuation bytes so we land on a leading byte.
+    while (offset < len && (data[offset] & 0xC0) == 0x80)
+    {
+        ++offset;
+    }
+    return offset;
+}
+
+/**
+ * Safely truncate a UTF-8 string to a maximum byte length without breaking multi-byte characters.
+ * If the string is longer than max_bytes, it will be truncated and suffix will be appended.
+ *
+ * @param str The input UTF-8 string
+ * @param max_bytes Maximum number of bytes (not characters) to keep
+ * @param suffix Suffix to append when truncated (default: "...")
+ * @return Truncated string with valid UTF-8 encoding
+ */
+inline std::string safe_utf8_truncate(const std::string &str, size_t max_bytes, const std::string &suffix = "...")
+{
+    if (str.length() <= max_bytes)
+    {
+        return str;
+    }
+
+    // Reserve space for suffix
+    size_t target_length = max_bytes > suffix.length() ? max_bytes - suffix.length() : 0;
+    if (target_length == 0)
+    {
+        return suffix.substr(0, max_bytes);
+    }
+
+    const uint8_t *data = reinterpret_cast<const uint8_t *>(str.data());
+    size_t safe_length = 0;
+    size_t i = 0;
+
+    while (i < target_length && i < str.length())
+    {
+        uint8_t byte = data[i];
+
+        // Determine the number of bytes in this UTF-8 character
+        int char_bytes = 1;
+        if ((byte & 0x80) == 0)
+        {
+            // Single-byte character (0xxxxxxx)
+            char_bytes = 1;
+        }
+        else if ((byte & 0xE0) == 0xC0)
+        {
+            // Two-byte character (110xxxxx)
+            char_bytes = 2;
+        }
+        else if ((byte & 0xF0) == 0xE0)
+        {
+            // Three-byte character (1110xxxx)
+            char_bytes = 3;
+        }
+        else if ((byte & 0xF8) == 0xF0)
+        {
+            // Four-byte character (11110xxx)
+            char_bytes = 4;
+        }
+        else
+        {
+            // Invalid UTF-8 start byte, skip it
+            i++;
+            continue;
+        }
+
+        // Check if the complete character fits within the target length
+        if (i + char_bytes <= target_length)
+        {
+            safe_length = i + char_bytes;
+            i += char_bytes;
+        }
+        else
+        {
+            // The character would be cut off, stop here
+            break;
+        }
+    }
+
+    return str.substr(0, safe_length) + suffix;
 }
 
 #endif

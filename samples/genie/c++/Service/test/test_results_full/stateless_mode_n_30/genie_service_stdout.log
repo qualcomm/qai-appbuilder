@@ -1,0 +1,1223 @@
+GenieAPIService: 2.3.7, Genie Library: 1.19.0
+ [W] current work dir: C:/Users/HCKTest/Desktop/GenieEnv/GenieAPIService_2.3.1/GenieAPIService_2.3.1/samples/genie/c++/Service/cmake-build-release-visual-studio-arm/GenieService-win-arm64
+ [W] root dir: C:/Users/HCKTest/Desktop/GenieEnv/GenieAPIService_2.3.1/GenieAPIService_2.3.1/samples/genie/c++/Service/cmake-build-release-visual-studio-arm/GenieService-win-arm64
+ [I] log level setting: 4
+ [A] setting log level by library: -1
+ [W] ModelManager::LoadModel,configFile=C:/Users/HCKTest/Desktop/GenieEnv/models/phi4-v81/config.json
+ [W] Debug config loaded: status_update_content_visible=0, log_rule_matches=0, log_inference_stream=0
+ [W] [Config] extended_rules loaded: local_path=1, internal_url=1, device_id=1, image_data=1
+ [W] [Config] detection_rules loaded: phone=1(level=S1), email=1(level=S1), id_card=1(level=S2), bank_card=1(level=S2), api_key=1(level=S2), private_key=1(level=S2), token=1(level=S2), password=1(level=S1)
+ [W] Incremental check config loaded: enabled=1, session_ttl_seconds=3600, max_sessions=1000
+ [W] S2 turn cleaning config loaded: enabled=1, log_details=1, allow_cloud_reroute=1
+ [W] Routing config loaded: enabled=1, policy_id=default_v1
+ [W] [cloud_shared] Loaded: timeout=120, stream_timeout=1800, retry.max=2, rate_limit.max_inferences=20
+ [W] Cloud model config loaded: enabled=1, base_url=https://your-api-endpoint.example.com/v1, model=azure::gpt-5.4, timeout=120, rate_limit.max_inferences_per_task=20, rate_limit.max_tokens_per_task=0, upload_policy.enable_sensitivity_check=1, upload_policy.enable_desensitization=1, context_size=1000000
+ [W] Enterprise cloud model config loaded: enabled=0, base_url=https://your-api-endpoint.example.com/v1, model=codewise_instruct, timeout=120, rate_limit.max_inferences_per_task=20, context_size=32000
+ [W] Local model config loaded: enabled=1
+ [W] [Config] emergency_truncation loaded: enabled=1, max_truncation_ratio=0.4, safety_margin_tokens=30
+ [W] [Config] system_context loaded: sections=6
+ [W] [Config] prompt_sections loaded: enabled=0, rules=48, default_action=exclude, max_section_tokens=0
+ [W] [Config] subagent_prompt_sections loaded: enabled=0, rules=11, default_action=exclude, max_section_tokens=0
+ [W] [Config] system_prompts.sections_enabled loaded: identity_intro=1, skill_rule=1, tools_intro=1, catalog_structured_intro=1
+ [W] [Config] system_prompts.few_shot_examples_enabled loaded: enabled=1, skill_correct_call=1, no_skill_needed=1, max_skill_examples=1
+ [I] [SpawnGuard] Config loaded: enabled=1
+ [I] [LongTextSummarization] Config loaded: enabled=1, trigger_ratio=0.5, chunk_ratio=0.45, max_chunks=12, summarize_user=1, summarize_tool=1, cache.enabled=1, cache.max_entries=500, cache.ttl_minutes=60
+ [I] [LongTextSummarization] SummaryCache configured: max_entries=500, max_memory_mb=50, ttl_minutes=60
+ [W] Prompt optimization config loaded: output_reserve_ratio=0.2, recent_window=6, old_compress_len=100, recent_compress_len=300, format=structured, whitelist=1, auto_correction=1
+ [I] [ParsePromptFile] Checking prompt file for model 'phi4-v81', path='C:/Users/HCKTest/Desktop/GenieEnv/models/phi4-v81/prompt.json'
+ [I] [ParsePromptFile] File exists: 1, File empty: 0
+ [I] [ParsePromptFile] Parsed prompt.json, type=object, is_object=1 for model 'phi4-v81'
+ [I] [ParsePromptFile] prompt fields loaded for model 'phi4-v81': system_len=26, user_len=24, assistant_len=29, tool_len=24, start_len=13
+ [I] [ParsePromptFile] system_preview='<|system|> string <|end|>
+...', assistant_preview='<|assistant|> string <|end|>
+...'
+ [I] [ParsePromptFile] SUCCESS: prompt_type=General, context_size=0, out_prompt.type='object', out_prompt.is_object=1 for model 'phi4-v81'
+ [I] [LoadPromptTemplates] Read context_size from config.json dialog.context.size=8192 for model 'phi4-v81'
+ [I] contextSize (from config.json): 8192
+ [W] check the prompt type: General
+ [W] check if is thinking model: 0
+ [W] try to check if model is: QNN model
+ [W] fixed qnn context size: 8192
+ [W] check qnn embedding file: C:/Users/HCKTest/Desktop/GenieEnv/models/phi4-v81/embedding_weights_200064x3072.raw
+ [W] try to check if qnn embedding is: phi4
+ [W] start to initiate: C:/Users/HCKTest/Desktop/GenieEnv/models/phi4-v81/veg.serialized.bin ....
+     0.1ms [^main][3884][  INFO ] LibAppBuilder::ModelInitialize: [Vision ] 
+     0.1ms [^main][3884][  INFO ] cachedBinaryPath: C:/Users/HCKTest/Desktop/GenieEnv/models/phi4-v81/veg.serialized.bin
+     0.1ms [^main][3884][  INFO ] debug deviceID=0
+     0.1ms [^main][3884][  INFO ] debug coreIdsStr=
+     0.1ms [^main][3884][  INFO ] [DEBUG]in LibAppBuilder, ModelInitializeEx: isGpu=0, isCpu=0, backEndPath=QnnHtp.dll
+     0.1ms [^main][3884][WARNING] input_data_type: float, output_data_type: float
+     1.4ms [^main][3884][  INFO ] Model wasn't loaded from a shared library.
+     1.4ms [^main][3884][VERBOSE] Entering getQnnSystemFunctionPointers
+     2.6ms [^main][3884][VERBOSE] Returning from getQnnSystemFunctionPointers
+     2.8ms [^main][3884][WARNING] warmup_parallel_stl
+     2.8ms [^main][3884][  INFO ] LibAppBuilder   build version: v2.47.0.260601
+     2.8ms [^main][3884][  INFO ] Backend        build version: v2.48.0.260626120635
+     2.8ms [^main][3884][  INFO ] Initializing logging in the backend. Callback: [00007FFB4BCB33F0], Log Level: [4]
+     0.0ms [^main][3884][  INFO ]  <I> QnnLog_create started.
+     0.0ms [^main][3884][VERBOSE]  <V> Registered a new graph environment 0 with priority: 100, num hvx threads: 1001, num hmx threads: 1001
+     0.0ms [^main][3884][WARNING]  <W> Initializing HtpProvider
+     0.0ms [^main][3884][VERBOSE]  <V> Creating default router
+     0.0ms [^main][3884][VERBOSE]  <V> RouterWindows creater
+     0.0ms [^main][3884][VERBOSE]  <V> HTP: Initializing the router
+     0.0ms [^main][3884][VERBOSE]  <V> Detected Snapdragon SOC Dynamic SDM with 2 SOCs
+     0.0ms [^main][3884][VERBOSE]  <V> Allocating PlatformInfo struct size 120
+     0.0ms [^main][3884][VERBOSE]  <V> Multicore support is unavailable
+     0.0ms [^main][3884][VERBOSE]  <V> Force to use single core in default platformInfo when MultiCore is not supported, numHwDevices= 1
+     0.0ms [^main][3884][VERBOSE]  <V> HTP: Initializing the graph registry
+     0.0ms [^main][3884][VERBOSE]  <V> HTP: Initializing the context registry
+     0.0ms [^main][3884][VERBOSE]  <V> HTP: Initializing the device registry
+     0.0ms [^main][3884][VERBOSE]  <V> HTP: Initializing the tensor counter
+     0.0ms [^main][3884][VERBOSE]  <V> HTP: setting isExitCalled to false
+     0.0ms [^main][3884][VERBOSE]  <V> HTP: setting ssrInProgress to false
+     0.0ms [^main][3884][VERBOSE]  <V> HTP: FinalCleanupFn fnPtr is nullptr
+     0.0ms [^main][3884][VERBOSE]  <V> HTP: initializing mem registry
+     0.0ms [^main][3884][VERBOSE]  <V> HTP: initializing mmap registry
+     0.0ms [^main][3884][VERBOSE]  <V> HTP: Initializing the logger lifecycle manager
+     0.0ms [^main][3884][VERBOSE]  <V> HTP: constructing bundle
+     0.0ms [^main][3884][VERBOSE]  <V> Graph environment handle not opened as preparelib or driverlib is not yet loaded
+     0.0ms [^main][3884][VERBOSE]  <V> Set default graph environment 0 remoteHandle 0
+     0.0ms [^main][3884][VERBOSE]  <V> Opened default graph env, envRemoteHandle 0
+     0.0ms [^main][3884][  INFO ]  <I> exit with 0
+     0.0ms [^main][3884][  INFO ]  <I> exit with 0
+     0.0ms [^main][3884][VERBOSE]  <V> HTP: initialization completed successfully
+     0.0ms [^main][3884][  INFO ]  <I> QnnLog_create exit.
+     0.0ms [^main][3884][  INFO ]  <I> QnnBackend_create started. backend = 0x117bb98
+     0.0ms [^main][3884][VERBOSE]  <V> Oem key validation infra not found, limiting oemMaxPriority to HIGHEST
+     0.0ms [^main][3884][VERBOSE]  <V> Backend handle created: 1
+     0.0ms [^main][3884][VERBOSE]  <V> Graph environment handle not opened as preparelib or driverlib is not yet loaded
+     0.0ms [^main][3884][VERBOSE]  <V> Set default graph environment 0 remoteHandle 0
+     0.0ms [^main][3884][VERBOSE]  <V> Opened default graph env, envRemoteHandle 0
+     0.0ms [^main][3884][  INFO ]  <I> QnnBackend_create done successfully. backend = 0x117bb98
+     0.0ms [^main][3884][VERBOSE]  <V> Deactivated logger with handle 0000000000000001
+     6.5ms [^main][3884][  INFO ] Initialize Backend Returned Status = 0
+     6.5ms [^main][3884][  INFO ] QnnSampleApp::createDevice, m_runInCpu=0
+     0.0ms [^main][3884][  INFO ]  <I> QnnDevice_getPlatformInfo started.
+     0.0ms [^main][3884][  INFO ]  <I> QnnDevice_getPlatformInfo done. status 0x0
+     0.0ms [^main][3884][VERBOSE]  <V> Deactivated logger with handle 0000000000000001
+     6.5ms [^main][3884][  INFO ] qnn_app::QnnInferenceEngine::setupDeviceConfig, hwNumDevices: 1, socNumCores: 1
+     6.6ms [^main][3884][  INFO ] setupDeviceConfig,deviceID=0,deviceType=0
+     6.6ms [^main][3884][  INFO ] Init Device Config for deviceID: 0, numCores: 1
+     0.0ms [^main][3884][  INFO ]  <I> QnnDevice_create started
+     0.0ms [^main][3884][VERBOSE]  <V> Create device with id 0x1
+     0.0ms [^main][3884][VERBOSE]  <V> Setting default value for unsigned PD usage
+     0.0ms [^main][3884][VERBOSE]  <V> DSP Driver Path: C:\windows\System32\DriverStore\FileRepository\qcnspmcdm8480.inf_arm64_bcadd006b7f58855
+     0.0ms [^main][3884][  INFO ]  <I> First connection to QNN stub established!
+     0.0ms [^main][3884][VERBOSE]  <V> Off-chip memory allocator not available - this is expected for on-chip only builds
+     0.0ms [^main][3884][VERBOSE]  <V> Loading remote funcs
+     0.0ms [^main][3884][VERBOSE]  <V> Getting effective domain ID of domain name cdsp
+     0.0ms [^main][3884][VERBOSE]  <V> Effective cdsp_id is: 3, Session_id is: 0 for original Device Id: 0, DeviceId: 0, CoreId: 0, pdId: 0
+     0.0ms [^main][3884][VERBOSE]  <V> No ADAS pltform detected, BCS disabled
+     0.0ms [^main][3884][VERBOSE]  <V> Transport config  BCS_enable:0  [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> Dspqueue is supported in this meta.
+     0.0ms [^main][3884][VERBOSE]  <V> Successfully created dspqueue for priority 100
+     0.0ms [^main][3884][VERBOSE]  <V> isPollingAvailable 1
+     0.0ms [^main][3884][VERBOSE]  <V> Returning queueid 0 for priority 100
+     0.0ms [^main][3884][VERBOSE]  <V> transport execute faster ipc start polling [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> exits with 2, successfully initialized rpc memory
+     0.0ms [^main][3884][VERBOSE]  <V> Successful rpcMemInit
+     0.0ms [^main][3884][VERBOSE]  <V> 8 isInit true
+     0.0ms [^main][3884][VERBOSE]  <V> 136 isInit true
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> transport run [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> 8 isInit true
+     0.0ms [^main][3884][VERBOSE]  <V> 8 isInit true
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> transport run [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> Created transport wrapper for device {0 0 0} and devType 0
+     0.0ms [^main][3884][VERBOSE]  <V> exits device initialization with  0
+     0.0ms [^main][3884][VERBOSE]  <V> Function not called, PrepareLib isn't loaded!
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> transport run [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> setSkelLogLevel return 0
+     0.0ms [^main][3884][  INFO ]  <I> QnnDevice_create done. device = 0x1. status 0x0
+     0.0ms [^main][3884][VERBOSE]  <V> Deactivated logger with handle 0000000000000001
+   230.4ms [^main][3884][  INFO ] Created new device handle and cached for key=d0-c0
+   230.4ms [^main][3884][VERBOSE] Entering createFromBinary
+   230.8ms [^main][3884][VERBOSE] Entering copyGraphsInfo
+   230.8ms [^main][3884][VERBOSE] Entering copyTensorsInfo
+   230.8ms [^main][3884][VERBOSE] Returning from copyTensorsInfo
+   230.8ms [^main][3884][VERBOSE] Entering copyTensorsInfo
+   230.8ms [^main][3884][VERBOSE] Returning from copyTensorsInfo
+   230.8ms [^main][3884][VERBOSE] Returning from copyGraphsInfo
+   230.9ms [^main][3884][VERBOSE] Entering addGraphsToContext
+   230.9ms [^main][3884][VERBOSE] Returning from addGraphsToContext
+     0.0ms [^main][3884][  INFO ]  <I> QnnContext_createFromBinary started. backend = 0x1, device = 0x1
+     0.0ms [^main][3884][VERBOSE]  <V> Creating deserializer for version 3.3.3
+     0.0ms [^main][3884][VERBOSE]  <V> EncryptionFlag is 0
+     0.0ms [^main][3884][VERBOSE]  <V> Multicore support is unavailable
+     0.0ms [^main][3884][VERBOSE]  <V> 8 isInit true
+     0.0ms [^main][3884][VERBOSE]  <V> 16 isInit true
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> transport run [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> Context create from binary with context 0x1
+     0.0ms [^main][3884][VERBOSE]  <V> Context Binary contains 1 graphs
+     0.0ms [^main][3884][VERBOSE]  <V> Graph memory usage summary, context id 1, shared graph weights size 0
+     0.0ms [^main][3884][VERBOSE]  <V> Number of HVX threads to be used not explicitly specified. Max available (8) will be used.
+     0.0ms [^main][3884][VERBOSE]  <V> Added 1 to registered graph env 0
+     0.0ms [^main][3884][VERBOSE]  <V> Graph environment handle not opened as preparelib or driverlib is not yet loaded
+     0.0ms [^main][3884][VERBOSE]  <V> Successfully opened graph env handle, envId 0
+     0.0ms [^main][3884][VERBOSE]  <V> Registered to graph env, envId 0 
+     0.0ms [^main][3884][VERBOSE]  <V> Multicore support is unavailable
+     0.0ms [^main][3884][VERBOSE]  <V> Force to use single core for HTP_FEATURE_NUM_CORES when MultiCore is not supported
+     0.0ms [^main][3884][VERBOSE]  <V> Multicore support is unavailable
+     0.0ms [^main][3884][VERBOSE]  <V> Force to use single core for HTP_FEATURE_NUM_CORES when MultiCore is not supported
+     0.0ms [^main][3884][VERBOSE]  <V> DLBC is set to 0 for graph 0
+     0.0ms [^main][3884][VERBOSE]  <V> DLBC_WEIGHTS is set to 0 for graph 0
+     0.0ms [^main][3884][VERBOSE]  <V> SPARSE_WEIGHTS_COMPRESSION is set to 0 for graph 0
+     0.0ms [^main][3884][VERBOSE]  <V> NUM_CORES is set to 1 for graph 0
+     0.0ms [^main][3884][VERBOSE]  <V> SLC_ALLOCATOR is set to 0 for graph 0
+     0.0ms [^main][3884][VERBOSE]  <V> DSP ARCH graph is set to 81 for graph 0
+     0.0ms [^main][3884][VERBOSE]  <V> BF16 is set to 0 for graph 0
+     0.0ms [^main][3884][VERBOSE]  <V> Context Binary Graph 0 'veg' added for the processing
+     0.0ms [^main][3884][VERBOSE]  <V> Get graph estimates from single core barrel
+     0.0ms [^main][3884][VERBOSE]  <V> Context 1 graph veg estimated PD size ~460.45MB, including nonSharedWeight 425721856 B I/O 4882432 B runlist 31498496 B spillfill 12320768 B 
+     0.0ms [^main][3884][VERBOSE]  <V> Graph memory usage summary, context id 1, graph name:veg, hexagon graph id 256 in graph info: nonShared Wts/constSize 425721856, graphIOTensorSize 4882432 vtcm 8388608 spillFillBufferSizes 12320768, OpDataSize 20425728
+     0.0ms [^main][3884][VERBOSE]  <V> Setting context 1 adapter buffer size estimate to 0
+     0.0ms [^main][3884][VERBOSE]  <V> Setting context 1 shared weight near size estimate to 0
+     0.0ms [^main][3884][VERBOSE]  <V> Setting context 1 reserved space to 482812160
+     0.0ms [^main][3884][WARNING]  <W> m_CFBCallbackInfoObj is not initialized, return emptyList
+     0.0ms [^main][3884][VERBOSE]  <V> Allocation is not required because no updatable component in serialize bin
+     0.0ms [^main][3884][VERBOSE]  <V> Context 1 succeed to create from binary on Stub
+     0.0ms [^main][3884][VERBOSE]  <V> Query preemption type is not supported
+     0.0ms [^main][3884][VERBOSE]  <V> Context 1 estimated PD size requirement is ~460.45MB, including largest Graph estimate 482812160 B
+     0.0ms [^main][3884][VERBOSE]  <V> Get HTP device state deviceId 0x0 coreId 0x0 pdId 0x0 state 1
+     0.0ms [^main][3884][VERBOSE]  <V> Device is already initialized deviceId 0 coreId 0 pdId 0 state 1
+     0.0ms [^main][3884][VERBOSE]  <V> Transport session already exists for deviceId 0, coreId 0, pdId 0
+     0.0ms [^main][3884][VERBOSE]  <V> PD 0 chosen for context 1, estimated future space on pd ~460.45 MB device priority is -1, graph priority is 100
+     0.0ms [^main][3884][VERBOSE]  <V> Trying to deserialize contextId 1 on pdId 0 with deviceId 0 coreId 0
+     0.0ms [^main][3884][VERBOSE]  <V> Get HTP device state deviceId 0x0 coreId 0x0 pdId 0x0 state 1
+     0.0ms [^main][3884][VERBOSE]  <V> Device is already initialized deviceId 0 coreId 0 pdId 0 state 1
+     0.0ms [^main][3884][VERBOSE]  <V> Transport session already exists for deviceId 0, coreId 0, pdId 0
+     0.0ms [^main][3884][VERBOSE]  <V> Mapping is not required because no updatable component in serialize bin
+     0.0ms [^main][3884][VERBOSE]  <V> Function not called, PrepareLib isn't loaded!
+     0.0ms [^main][3884][VERBOSE]  <V> Shared memory polling not supported in initializeGraphStats
+     0.0ms [^main][3884][VERBOSE]  <V> Graph rpc memory manager::alloc deviceId 0, coreId 0, pdId 0
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Graph rpc memory manager::alloc numCores 1
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Device type is queried as 0
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Device type is queried as 0
+     0.0ms [^main][3884][VERBOSE]  <V> 3305984 isInit true
+     0.0ms [^main][3884][VERBOSE]  <V> RpcMemory Allocated for Persistent buffer with Host adddress 00000227E5500000, fd 14, size 3305984
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Device type is queried as 0
+     0.0ms [^main][3884][VERBOSE]  <V> 1572992 isInit true
+     0.0ms [^main][3884][VERBOSE]  <V> RpcMemory Allocated for Persistent buffer with Host adddress 00000227E5900000, fd 15, size 1572992
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Device type is queried as 0
+     0.0ms [^main][3884][VERBOSE]  <V> 21368 isInit true
+     0.0ms [^main][3884][VERBOSE]  <V> RpcMemory Allocated for Persistent buffer with Host adddress 00000227E5B00000, fd 16, size 21368
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> First entry for fd 14 on domain 3, adding to refCount
+     0.0ms [^main][3884][VERBOSE]  <V> fastrpc memory map for fd: 14 with length: 3305984 succeeded
+     0.0ms [^main][3884][VERBOSE]  <V> Successfully mapped buffer on host side with Device 0, Core 0, Pd 0
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> transport shared buffer [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> sharedBufferMapping op 2 fd 14 with offset 0 size 3305984, va 0x000000fdc00000, devConfig {0, 0, 0}, err 0
+     0.0ms [^main][3884][VERBOSE]  <V> With fd: 14 Device Id 0, Core Id 0, and Pd Id 0, RefCount of NSP side map call is: 1, NSP VA is: 0x000000fdc00000
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> First entry for fd 15 on domain 3, adding to refCount
+     0.0ms [^main][3884][VERBOSE]  <V> fastrpc memory map for fd: 15 with length: 1572992 succeeded
+     0.0ms [^main][3884][VERBOSE]  <V> Successfully mapped buffer on host side with Device 0, Core 0, Pd 0
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> transport shared buffer [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> sharedBufferMapping op 2 fd 15 with offset 0 size 1572992, va 0x000000fda00000, devConfig {0, 0, 0}, err 0
+     0.0ms [^main][3884][VERBOSE]  <V> With fd: 15 Device Id 0, Core Id 0, and Pd Id 0, RefCount of NSP side map call is: 1, NSP VA is: 0x000000fda00000
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> First entry for fd 16 on domain 3, adding to refCount
+     0.0ms [^main][3884][VERBOSE]  <V> fastrpc memory map for fd: 16 with length: 21368 succeeded
+     0.0ms [^main][3884][VERBOSE]  <V> Successfully mapped buffer on host side with Device 0, Core 0, Pd 0
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> transport shared buffer [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> sharedBufferMapping op 2 fd 16 with offset 0 size 21368, va 0x000000fdbf8000, devConfig {0, 0, 0}, err 0
+     0.0ms [^main][3884][VERBOSE]  <V> With fd: 16 Device Id 0, Core Id 0, and Pd Id 0, RefCount of NSP side map call is: 1, NSP VA is: 0x000000fdbf8000
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Device type is queried as 0
+     0.0ms [^main][3884][VERBOSE]  <V> 72 isInit true
+     0.0ms [^main][3884][VERBOSE]  <V> RpcMemory Allocated for Persistent buffer with Host adddress 00000227E5B10000, fd 17, size 72
+     0.0ms [^main][3884][VERBOSE]  <V> RPC Memory allocated for graph veg with In 00000227E5500000 [327200 B], Far In 0000000000000000 [0 B], Inouts 00000227E5B00000 [5378 B], Outs 00000227E5900000 [180080 B], Far Outs 0000000000000000 [0 B]
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Extended UDMA not enabled or not supported by platform for graph 256, skipping far mapping allocation
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Graph rpc memory allocate or mapping for copyless weights buffer deviceId 0, coreId 0, pd 0
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Device type is queried as 0
+     0.0ms [^main][3884][VERBOSE]  <V> 425721856 isInit true
+     0.0ms [^main][3884][VERBOSE]  <V> RpcMemory Allocated for Persistent buffer with Host adddress 00000227E5B20000, fd 18, size 425721856
+     0.0ms [^main][3884][VERBOSE]  <V> IHtpMemory allocated for Weights 00000227E5B20000 [425721856 B] @ OS 9dc000
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> First entry for fd 18 on domain 3, adding to refCount
+     0.0ms [^main][3884][VERBOSE]  <V> fastrpc memory map for fd: 18 with length: 425721856 succeeded
+     0.0ms [^main][3884][VERBOSE]  <V> Successfully mapped buffer on host side with Device 0, Core 0, Pd 0
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> transport shared buffer [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> sharedBufferMapping op 7 fd 18 with offset 0 size 425721856, va 0x000000e0000000, devConfig {0, 0, 0}, err 0
+     0.0ms [^main][3884][VERBOSE]  <V> With fd: 18 Device Id 0, Core Id 0, and Pd Id 0, RefCount of NSP side map call is: 1, NSP VA is: 0x000000e0000000
+     0.0ms [^main][3884][VERBOSE]  <V> RPC Memory mapped for Weights 00000227E5B20000 [425721856 B] @ VA e0000000
+     0.0ms [^main][3884][ ERROR ]  <E> [ERROR][SetBufName][NSW] status=-1
+     0.0ms [^main][3884][VERBOSE]  <V> [SetBufName][NSW] fd=18 size=425721856 graphName=veg graphShortName=veg graphId=256 groupId=-1 contextId=1
+     0.0ms [^main][3884][VERBOSE]  <V> Successfully copied 423702528 bytes of weights! Actual bytes to transfer: 423702528
+     0.0ms [^main][3884][VERBOSE]  <V> HtpTransport::graphPrepareDsp done. graph.m_hexNNGraphHandle = 0
+     0.0ms [^main][3884][VERBOSE]  <V> 80 isInit true
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> transport run [status = 0]
+     0.0ms [^main][3884][WARNING]  <W> setInferenceBufferForHtpExtensionSkel: not supported for DeviceId 0 coreId 0 pdId 0
+     0.0ms [^main][3884][WARNING]  <W> setInferenceBufferForHtpExtensionSkel not supported on this platform
+     0.0ms [^main][3884][VERBOSE]  <V> Context binary being sent to skel for processing. Number of graphs = 1
+     0.0ms [^main][3884][VERBOSE]  <V> Creating deserializer for version 3.3.3
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> No groupId found for this context:0x1
+     0.0ms [^main][3884][VERBOSE]  <V> Graph does not have mc metadata
+     0.0ms [^main][3884][VERBOSE]  <V> 10404280 isInit true
+     0.0ms [^main][3884][VERBOSE]  <V> 40 isInit true
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> No groupId found for this context:0x1
+     0.0ms [^main][3884][VERBOSE]  <V> Graph does not have mc metadata
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> transport run [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> Context 1 deserialized on pd 0
+     0.0ms [^main][3884][VERBOSE]  <V> Succeed to deserialize contextId 1 on pdId 0 with deviceId 0 coreId 0
+     0.0ms [^main][3884][VERBOSE]  <V> Wake up free backend (id: 1)'s thread(s)
+     0.0ms [^main][3884][  INFO ]  <I> Number of existing contexts: 1, graphs: 1
+     0.0ms [^main][3884][  INFO ]  <I> QnnContext_createFromBinary done successfully. context = 0x1
+     0.0ms [^main][3884][VERBOSE]  <V> Deactivated logger with handle 0000000000000001
+     0.0ms [^main][3884][  INFO ]  <I> QnnGraph_retrieve started. context = 0x1
+     0.0ms [^main][3884][VERBOSE]  <V> Wake up free backend (id: 1)'s thread(s)
+     0.0ms [^main][3884][  INFO ]  <I> Number of existing contexts: 1, graphs: 1
+     0.0ms [^main][3884][  INFO ]  <I> QnnGraph_retrieve done. status 0x0
+     0.0ms [^main][3884][VERBOSE]  <V> Deactivated logger with handle 0000000000000001
+  1490.8ms [^main][3884][VERBOSE] Returning from createFromBinary
+  1491.0ms [^main][3884][  INFO ] setup tensors success
+  1491.0ms [^main][3884][  INFO ] qnn_app::QnnInferenceEngine::initializePerformance,deviceId=0, coreId=0
+     0.0ms [^main][3884][  INFO ]  <I> htpPerfInfrastructureCreatePowerConfigId started for deviceId: 0, coreId: 0
+
+     0.0ms [^main][3884][VERBOSE]  <V> Device with device id 0 core id 0 found with core type 0
+     0.0ms [^main][3884][VERBOSE]  <V> Created power config id 3873276160 for device id 0 core id 0 processDomain id 0
+     0.0ms [^main][3884][  INFO ]  <I> htpPerfInfrastructureCreatePowerConfigId done. status 0x0
+     0.0ms [^main][3884][VERBOSE]  <V> Deactivated logger with handle 0000000000000001
+  1491.1ms [^main][3884][WARNING] Time: model_initialize [Vision ] 1491.00
+ [W] check qnn embedding model type: [Text Vision ]
+ [W] check qnn embedding data type: FLOAT32
+ [I] Loaded config from file: C:/Users/HCKTest/Desktop/GenieEnv/models/phi4-v81/config.json
+ [I] {
+    "dialog": {
+        "version": 1,
+        "type": "basic",
+        "max-num-tokens": 2048,
+        "embedding": {
+            "version": 1,
+            "size": 3072,
+            "datatype": "float32"
+        },
+        "context": {
+            "version": 1,
+            "size": 8192,
+            "n-vocab": 200064,
+            "bos-token": 200021,
+            "eos-token": 199999
+        },
+        "sampler": {
+            "version": 1,
+            "seed": 42,
+            "temp": 5.0,
+            "top-k": 5,
+            "top-p": 0.8,
+            "greedy": true
+        },
+        "tokenizer": {
+            "version": 1,
+            "path": "tokenizer.json"
+        },
+        "engine": {
+            "version": 1,
+            "n-threads": 3,
+            "backend": {
+                "version": 1,
+                "type": "QnnHtp",
+                "QnnHtp": {
+                    "version": 1,
+                    "spill-fill-bufsize": 0,
+                    "use-mmap": true,
+                    "mmap-budget": 0,
+                    "poll": false,
+                    "allow-async-init": false,
+                    "cpu-mask": "0xe0",
+                    "kv-dim": 128,
+                    "enable-graph-switching": false
+                },
+                "extensions": "htp_backend_ext_config.json"
+            },
+            "model": {
+                "version": 1,
+                "type": "binary",
+                "binary": {
+                    "version": 1,
+                    "ctx-bins": [
+                        "llm_8k\\weight_sharing_model_ar128_ar1_cl8192_1_of_4.serialized.bin",
+                        "llm_8k\\weight_sharing_model_ar128_ar1_cl8192_2_of_4.serialized.bin",
+                        "llm_8k\\weight_sharing_model_ar128_ar1_cl8192_3_of_4.serialized.bin",
+                        "llm_8k\\weight_sharing_model_ar128_ar1_cl8192_4_of_4.serialized.bin"
+                    ]
+                },
+                "positional-encoding": {
+                    "type": "rope",
+                    "rope-dim": 48,
+                    "rope-theta": 10000,
+                    "rope-scaling": {
+                        "rope-type": "longrope",
+                        "factor": 32,
+                        "original-max-position-embeddings": 4096,
+                        "long-factor": [
+                            1,
+                            1.118320672,
+                            1.250641126,
+                            1.398617824,
+                            1.564103225,
+                            1.74916897,
+                            1.956131817,
+                            2.187582649,
+                            2.446418898,
+                            2.735880826,
+                            3.059592084,
+                            3.421605075,
+                            3.826451687,
+                            4.279200023,
+                            4.785517845,
+                            5.351743533,
+                            5.984965424,
+                            6.693110555,
+                            7.485043894,
+                            8.370679318,
+                            9.36110372,
+                            10.4687158,
+                            11.70738129,
+                            13.09260651,
+                            14.64173252,
+                            16.37415215,
+                            18.31155283,
+                            20.47818807,
+                            22.90118105,
+                            25.61086418,
+                            28.64115884,
+                            32.03,
+                            32.1,
+                            32.13,
+                            32.23,
+                            32.6,
+                            32.61,
+                            32.64,
+                            32.66,
+                            32.7,
+                            32.71,
+                            32.93,
+                            32.97,
+                            33.28,
+                            33.49,
+                            33.5,
+                            44.16,
+                            47.77
+                        ],
+                        "short-factor": [
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0
+                        ]
+                    }
+                }
+            }
+        }
+    }
+}
+ [W] forecast json object is not found
+ [W] lut-path json object is not found
+ [W] fixed the config path successfully
+ [I] {
+    "dialog": {
+        "version": 1,
+        "type": "basic",
+        "max-num-tokens": 2048,
+        "embedding": {
+            "version": 1,
+            "size": 3072,
+            "datatype": "float32"
+        },
+        "context": {
+            "version": 1,
+            "size": 8192,
+            "n-vocab": 200064,
+            "bos-token": 200021,
+            "eos-token": 199999
+        },
+        "sampler": {
+            "version": 1,
+            "seed": 42,
+            "temp": 5.0,
+            "top-k": 5,
+            "top-p": 0.8,
+            "greedy": true
+        },
+        "tokenizer": {
+            "version": 1,
+            "path": "C:/Users/HCKTest/Desktop/GenieEnv/models/phi4-v81/tokenizer.json"
+        },
+        "engine": {
+            "version": 1,
+            "n-threads": 3,
+            "backend": {
+                "version": 1,
+                "type": "QnnHtp",
+                "QnnHtp": {
+                    "version": 1,
+                    "spill-fill-bufsize": 0,
+                    "use-mmap": true,
+                    "mmap-budget": 0,
+                    "poll": false,
+                    "allow-async-init": true,
+                    "cpu-mask": "0xe0",
+                    "kv-dim": 128,
+                    "enable-graph-switching": false
+                },
+                "extensions": "C:/Users/HCKTest/Desktop/GenieEnv/GenieAPIService_2.3.1/GenieAPIService_2.3.1/samples/genie/c++/Service/cmake-build-release-visual-studio-arm/GenieService-win-arm64/htp_backend_ext_config.json"
+            },
+            "model": {
+                "version": 1,
+                "type": "binary",
+                "binary": {
+                    "version": 1,
+                    "ctx-bins": [
+                        "C:/Users/HCKTest/Desktop/GenieEnv/models/phi4-v81/weight_sharing_model_ar128_ar1_cl8192_1_of_4.serialized.bin",
+                        "C:/Users/HCKTest/Desktop/GenieEnv/models/phi4-v81/weight_sharing_model_ar128_ar1_cl8192_2_of_4.serialized.bin",
+                        "C:/Users/HCKTest/Desktop/GenieEnv/models/phi4-v81/weight_sharing_model_ar128_ar1_cl8192_3_of_4.serialized.bin",
+                        "C:/Users/HCKTest/Desktop/GenieEnv/models/phi4-v81/weight_sharing_model_ar128_ar1_cl8192_4_of_4.serialized.bin"
+                    ]
+                },
+                "positional-encoding": {
+                    "type": "rope",
+                    "rope-dim": 48,
+                    "rope-theta": 10000,
+                    "rope-scaling": {
+                        "rope-type": "longrope",
+                        "factor": 32,
+                        "original-max-position-embeddings": 4096,
+                        "long-factor": [
+                            1,
+                            1.118320672,
+                            1.250641126,
+                            1.398617824,
+                            1.564103225,
+                            1.74916897,
+                            1.956131817,
+                            2.187582649,
+                            2.446418898,
+                            2.735880826,
+                            3.059592084,
+                            3.421605075,
+                            3.826451687,
+                            4.279200023,
+                            4.785517845,
+                            5.351743533,
+                            5.984965424,
+                            6.693110555,
+                            7.485043894,
+                            8.370679318,
+                            9.36110372,
+                            10.4687158,
+                            11.70738129,
+                            13.09260651,
+                            14.64173252,
+                            16.37415215,
+                            18.31155283,
+                            20.47818807,
+                            22.90118105,
+                            25.61086418,
+                            28.64115884,
+                            32.03,
+                            32.1,
+                            32.13,
+                            32.23,
+                            32.6,
+                            32.61,
+                            32.64,
+                            32.66,
+                            32.7,
+                            32.71,
+                            32.93,
+                            32.97,
+                            33.28,
+                            33.49,
+                            33.5,
+                            44.16,
+                            47.77
+                        ],
+                        "short-factor": [
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0
+                        ]
+                    }
+                }
+            }
+        }
+    }
+}
+     0.0ms [^main][3884][  INFO ]  <I> htpPerfInfrastructureCreatePowerConfigId started for deviceId: 0, coreId: 0
+
+     0.0ms [^main][3884][VERBOSE]  <V> Device with device id 0 core id 0 found with core type 0
+     0.0ms [^main][3884][VERBOSE]  <V> Created power config id 3873276161 for device id 0 core id 0 processDomain id 0
+     0.0ms [^main][3884][  INFO ]  <I> htpPerfInfrastructureCreatePowerConfigId done. status 0x0
+     0.0ms [^main][3884][VERBOSE]  <V> Deactivated logger with handle 0000000000000001
+     0.0ms [^main][3884][  INFO ]  <I> htpPerfInfrastructureSetMemoryConfig started for deviceId: 0, coreId: 0
+     0.0ms [^main][3884][VERBOSE]  <V> set memory settings memory grow size 33554432
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> transport run [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> Set perf settings success
+     0.0ms [^main][3884][  INFO ]  <I> htpPerfInfrastructureSetMemoryConfig done. status 0x0
+     0.0ms [^main][3884][VERBOSE]  <V> Deactivated logger with handle 0000000000000001
+     0.0ms [^main][3884][  INFO ]  <I> htpPerfInfrastructureSetPowerConfig started for powerConfigId: -421691135
+
+     0.0ms [^main][3884][VERBOSE]  <V> Get HTP power device instance for device id 0 core id 0 processDomain id 0 coreType 0
+     0.0ms [^main][3884][VERBOSE]  <V> Get HTP power device instance for device id 0 core id 0 processDomain id 0 coreType 0
+     0.0ms [^main][3884][VERBOSE]  <V> set power settings rpc polling time 9999
+     0.0ms [^main][3884][VERBOSE]  <V> Setting poll QoS to 9999
+     0.0ms [^main][3884][VERBOSE]  <V> Shared memory polling not supported in setPollQos
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> m_isPollingEnabledAtRunTime is: 1
+     0.0ms [^main][3884][VERBOSE]  <V> set power settings rpc polling time 9999
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> set remote rpc control return 0
+     0.0ms [^main][3884][  INFO ]  <I> htpPerfInfrastructureSetPowerConfig done. status 0x0
+     0.0ms [^main][3884][VERBOSE]  <V> Deactivated logger with handle 0000000000000001
+     0.0ms [^main][3884][  INFO ]  <I> htpPerfInfrastructureSetPowerConfig started for powerConfigId: -421691135
+
+     0.0ms [^main][3884][VERBOSE]  <V> Get HTP power device instance for device id 0 core id 0 processDomain id 0 coreType 0
+     0.0ms [^main][3884][VERBOSE]  <V> Get HTP power device instance for device id 0 core id 0 processDomain id 0 coreType 0
+     0.0ms [^main][3884][VERBOSE]  <V> set power settings DCVS V3 for context id -421691135:
+     0.0ms [^main][3884][VERBOSE]  <V> setDcvsEnable 1
+     0.0ms [^main][3884][VERBOSE]  <V> dcvsEnable 0
+     0.0ms [^main][3884][VERBOSE]  <V> powerMode 16
+     0.0ms [^main][3884][VERBOSE]  <V> setSleepLatency 1
+     0.0ms [^main][3884][VERBOSE]  <V> sleepLatency 40
+     0.0ms [^main][3884][VERBOSE]  <V> setSleepDisable 0
+     0.0ms [^main][3884][VERBOSE]  <V> sleepDisable 0
+     0.0ms [^main][3884][VERBOSE]  <V> setBusParams 1
+     0.0ms [^main][3884][VERBOSE]  <V> busVoltageCornerMin 160
+     0.0ms [^main][3884][VERBOSE]  <V> busVoltageCornerTarget 160
+     0.0ms [^main][3884][VERBOSE]  <V> busVoltageCornerMax 160
+     0.0ms [^main][3884][VERBOSE]  <V> setCoreParams 1
+     0.0ms [^main][3884][VERBOSE]  <V> coreVoltageCornerMin 160
+     0.0ms [^main][3884][VERBOSE]  <V> coreVoltageCornerTarget 160
+     0.0ms [^main][3884][VERBOSE]  <V> coreVoltageCornerMax 160
+     0.0ms [^main][3884][VERBOSE]  <V> Resetting polling rpc graph stats
+     0.0ms [^main][3884][VERBOSE]  <V> Shared memory polling not supported in resetDeviceGraphStats
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> transport run [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> Set perf settings success
+     0.0ms [^main][3884][  INFO ]  <I> htpPerfInfrastructureSetPowerConfig done. status 0x0
+     0.0ms [^main][3884][VERBOSE]  <V> Deactivated logger with handle 0000000000000001
+     0.0ms [^main][3884][  INFO ]  <I> htpPerfInfrastructureSetPowerConfig started for powerConfigId: -421691135
+
+     0.0ms [^main][3884][VERBOSE]  <V> Get HTP power device instance for device id 0 core id 0 processDomain id 0 coreType 0
+     0.0ms [^main][3884][VERBOSE]  <V> Get HTP power device instance for device id 0 core id 0 processDomain id 0 coreType 0
+     0.0ms [^main][3884][VERBOSE]  <V> set power settings DCVS V3 for context id -421691135:
+     0.0ms [^main][3884][VERBOSE]  <V> setDcvsEnable 1
+     0.0ms [^main][3884][VERBOSE]  <V> dcvsEnable 1
+     0.0ms [^main][3884][VERBOSE]  <V> powerMode 1
+     0.0ms [^main][3884][VERBOSE]  <V> setSleepLatency 1
+     0.0ms [^main][3884][VERBOSE]  <V> sleepLatency 2000
+     0.0ms [^main][3884][VERBOSE]  <V> setSleepDisable 0
+     0.0ms [^main][3884][VERBOSE]  <V> sleepDisable 0
+     0.0ms [^main][3884][VERBOSE]  <V> setBusParams 1
+     0.0ms [^main][3884][VERBOSE]  <V> busVoltageCornerMin 48
+     0.0ms [^main][3884][VERBOSE]  <V> busVoltageCornerTarget 64
+     0.0ms [^main][3884][VERBOSE]  <V> busVoltageCornerMax 64
+     0.0ms [^main][3884][VERBOSE]  <V> setCoreParams 1
+     0.0ms [^main][3884][VERBOSE]  <V> coreVoltageCornerMin 48
+     0.0ms [^main][3884][VERBOSE]  <V> coreVoltageCornerTarget 64
+     0.0ms [^main][3884][VERBOSE]  <V> coreVoltageCornerMax 64
+     0.0ms [^main][3884][VERBOSE]  <V> Resetting polling rpc graph stats
+     0.0ms [^main][3884][VERBOSE]  <V> Shared memory polling not supported in resetDeviceGraphStats
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> transport run [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> Set perf settings success
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 000000812BF3E650 for deviceId 0x0 coreId 0x0 pdId 0x2!
+     0.0ms [^main][3884][VERBOSE]  <V> transport run [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> Set perf settings success
+     0.0ms [^main][3884][  INFO ]  <I> htpPerfInfrastructureSetPowerConfig done. status 0x0
+     0.0ms [^main][3884][VERBOSE]  <V> Deactivated logger with handle 0000000000000001
+ [I] sampler text: 
+{
+    "sampler": {
+        "version": 1,
+        "seed": 42,
+        "temp": 5.0,
+        "top-k": 5,
+        "top-p": 0.8,
+        "type": "basic"
+    }
+}
+ [W] load successfully! use second: 9.12764 
+ [W] LoadSingleModel: model_format=QNN, backend=qnn, device=npu
+ [W] [32mModel load successfully: phi4-v81[0m
+ [W] [ContentSecurityInspector] Extended rules loaded: local_path (R_PATH_UNIX, R_PATH_WIN)
+ [W] [ContentSecurityInspector] Extended rules loaded: internal_url (R_INTERNAL_IP, R_INTERNAL_DOMAIN)
+ [W] [ContentSecurityInspector] Extended rules loaded: device_id (R_MAC_ADDR, R_IMEI)
+ [W] [ContentSecurityInspector] Extended rules loaded: image_data (R_BASE64_IMAGE)
+ [W] [ContentSecurityInspector] Keywords dict loaded from C:/Users/HCKTest/Desktop/GenieEnv/GenieAPIService_2.3.1/GenieAPIService_2.3.1/samples/genie/c++/Service/cmake-build-release-visual-studio-arm/GenieService-win-arm64/./sensitive_keywords.json, rules_count=120
+ [W] [GenieRoutingGateway] Initialized, routing.enabled=1, local_model.enabled=1, cloud_model.enabled=1, use_local_model_fallback(sensitivity)=0
+ [W] [ChatRequestHandler] GenieRoutingGateway initialized, routing.enabled=1, cloud.enabled=1, enterprise_cloud.enabled=0
+ [W] GenieService::setupHttpServer start
+ [W] GenieService::setupHttpServer end
+ [A] [33m[OK] Genie API Service IS Running.[0m
+ [A] [33m[OK] Genie API Service -> http://0.0.0.0:8910[0m
+ [I] [LoadAllModelsFromConfig] Derived models base dir from -c param: C:/Users/HCKTest/Desktop/GenieEnv/models
+ [I] [LoadAllModelsFromConfig] model_root_ set to: C:/Users/HCKTest/Desktop/GenieEnv/models
+ [I] [LoadAllModelsFromConfig] Processing model: qwen3-8b-8380, original path: qwen3-8b-8380
+ [I] [LoadAllModelsFromConfig] Resolved relative path using models_base_dir: C:/Users/HCKTest/Desktop/GenieEnv/models/qwen3-8b-8380
+ [I] [LoadAllModelsFromConfig] Canonicalized path: C:/Users/HCKTest/Desktop/GenieEnv/models/qwen3-8b-8380
+ [I] [LoadAllModelsFromConfig] Final model path: C:/Users/HCKTest/Desktop/GenieEnv/models/qwen3-8b-8380
+ [W] [LoadAllModelsFromConfig] Skipping model 'qwen3-8b-8380': device 'npu' is already occupied by 'phi4-v81'. Only one model per device can be resident at a time.
+ [W] [LoadAllModelsFromConfig] Specified default_model 'qwen3-8b-8380' not found in loaded models, keeping current default: phi4-v81
+ [W] [LoadAllModelsFromConfig] Total models loaded: 0, default_model=phi4-v81
+ [W] ---------------------------------------------------
+Time: 2026-07-16 20:46:56.486
+Path: /v1/chat/completions
+ [W] [GenieRoutingGateway] New global session detected (single user message): global_session_id=sess_1784260016486_49224, user_session_id=sess_1784260016486_16352, first_msg_key=fmk_a2b945195b77b5d3
+ [W] [GenieRoutingGateway] HandleChatCompletion start, request_id=req_1784260016486_3128
+ [D] [ClientSource] Source UNKNOWN (no header, no OpenClaw features detected)
+ [W] [GenieRoutingGateway] Client source: Unknown
+ [D] [DetectAgentType] Detected: sub (agent=main not found in system prompt)
+ [W] [GenieRoutingGateway] Full check: total_messages=1
+ [W] [PERF] Step0_PreInspect: phase_ms=0, total_ms=0
+ [W] [ContentSecurityInspector] LocalModel skipped: use_local_model_fallback=false
+ [W] [ContentSecurityInspector] No sensitive content detected by rule engine
+ [W] [PERF] Step1_Inspect: phase_ms=0, total_ms=0
+ [W] [TaskComplexityEvaluator] LocalModel skipped: use_local_model_fallback=false
+ [W] [TaskComplexityEvaluator] complexity=C0, reason=simple task: tool_calls_after_user=0
+ [W] [ModelRouter] Route decision: agent_type=sub, target=LOCAL, sensitivity=S0, complexity=C0, need_desensitize=0, enterprise_cloud_available=0, public_cloud_available=1, reason=sub_agent: prefer local (S0/S1 or C0/C1)
+ [W] [PERF] Step2_3_RouteDecision: phase_ms=0, total_ms=0
+ [W] [PERF] Step5_PreExecute: phase_ms=0, total_ms=0
+ [W] [GenieRoutingGateway] Route=LOCAL, continuing with local processing
+ [I] [AUDIT] {"type":"audit","request_id":"req_1784260016486_3128","timestamp":"2026-07-17T03:46:56Z","session_id":"sess_1784260016486_16352","route_decision":"LOCAL","sensitivity_level":"S0","complexity_level":"C0","desensitized":false,"desensitize_strategies":[],"desensitize_success":false,"desensitize_failure_reason":"","cloud_endpoint":"","latency_ms":0,"http_status":-1,"retry_count":0,"hit_rule_ids":[],"hit_categories":[],"route_reason":"sub_agent: prefer local (S0/S1 or C0/C1)","rule_engine_failed":false,"tool_output_escalation":false,"latency_warning":false,"oversized_field_warning":false,"oversized_fields_count":0,"keywords_dict_reloaded":false,"keywords_dict_rules_count":0,"local_output_overflow":false,"tool_call_retries_exceeded":false,"local_input_overflow":false,"sticky_route_hit":false,"cloud_tier":"local","incremental_check_used":false,"incremental_new_messages":0,"total_messages_count":1}
+ [W] system prompt is empty, will use default
+
+ [I] [Context] Total: 8192 tokens, Reserved: 1638 tokens, Available: 6554 tokens
+ [D] [Context] Window size: 8192 tokens
+ [W] History size: 1, returning all messages (no compression)
+ [I] [Normal] Final prompt - Tokens: 26, Available: 6528, Length: 130 chars
+ [I] Prompt tokens: 26, Context size: 8192, Max output tokens: 8166
+ [W] set param successfully: name: temp, value: 0.30000001192092896
+
+ [W] --- Query Context Start ---
+ [W] [QNN] query_mutex_ acquired immediately (wait=0ms)
+ [W] [QNN Restore] Query begin: type=SUBAGENT_INFERENCE, model_name=phi4-v81, model_dir=
+ [W] 1 1
+ [W] 
+[Prompt] [SUBAGENT_INFERENCE][phi4-v81]:
+<|system|> You are a helpful assistant. <|end|>
+<|user|> 请记住这句话，并用一句话简短确认。 <|end|>
+<|assistant|>
+------------
+
+[Response] [SUBAGENT_INFERENCE][phi4-v81]:
+     0.0ms [^main][3884][  INFO ]  <I> htpPerfInfrastructureSetPowerConfig started for powerConfigId: -421691135
+
+     0.0ms [^main][3884][VERBOSE]  <V> Get HTP power device instance for device id 0 core id 0 processDomain id 0 coreType 0
+     0.0ms [^main][3884][VERBOSE]  <V> Get HTP power device instance for device id 0 core id 0 processDomain id 0 coreType 0
+     0.0ms [^main][3884][VERBOSE]  <V> set power settings DCVS V3 for context id -421691135:
+     0.0ms [^main][3884][VERBOSE]  <V> setDcvsEnable 1
+     0.0ms [^main][3884][VERBOSE]  <V> dcvsEnable 0
+     0.0ms [^main][3884][VERBOSE]  <V> powerMode 16
+     0.0ms [^main][3884][VERBOSE]  <V> setSleepLatency 1
+     0.0ms [^main][3884][VERBOSE]  <V> sleepLatency 40
+     0.0ms [^main][3884][VERBOSE]  <V> setSleepDisable 0
+     0.0ms [^main][3884][VERBOSE]  <V> sleepDisable 0
+     0.0ms [^main][3884][VERBOSE]  <V> setBusParams 1
+     0.0ms [^main][3884][VERBOSE]  <V> busVoltageCornerMin 160
+     0.0ms [^main][3884][VERBOSE]  <V> busVoltageCornerTarget 160
+     0.0ms [^main][3884][VERBOSE]  <V> busVoltageCornerMax 160
+     0.0ms [^main][3884][VERBOSE]  <V> setCoreParams 1
+     0.0ms [^main][3884][VERBOSE]  <V> coreVoltageCornerMin 160
+     0.0ms [^main][3884][VERBOSE]  <V> coreVoltageCornerTarget 160
+     0.0ms [^main][3884][VERBOSE]  <V> coreVoltageCornerMax 160
+     0.0ms [^main][3884][VERBOSE]  <V> Resetting polling rpc graph stats
+     0.0ms [^main][3884][VERBOSE]  <V> Shared memory polling not supported in resetDeviceGraphStats
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> transport run [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> Set perf settings success
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 000000812BF3E650 for deviceId 0x0 coreId 0x0 pdId 0x2!
+     0.0ms [^main][3884][VERBOSE]  <V> transport run [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> Set perf settings success
+     0.0ms [^main][3884][  INFO ]  <I> htpPerfInfrastructureSetPowerConfig done. status 0x0
+     0.0ms [^main][3884][VERBOSE]  <V> Deactivated logger with handle 0000000000000001
+当然，我会记住这句话。<|end|>
+ [W] --- Query Context End ---
+
+ [D] [History] ✓ Added assistant message (standard format)
+ [W] --- Token Summary Start ---
+ [W] Time to First Token: 0.12 s
+ [W] Token Generation Time: 0.61 s
+ [W] Num Prompt Tokens: 26, Text Length: 130
+ [W] Prompt Processing Rate: 216.40 toks/sec
+ [W] Num Generated Tokens: 10, Text Length: 40
+ [W] Token Generation Rate: 14.75 toks/sec
+ [W] --- Token Summary End ---
+ [W] /v1/chat/completions handling is done
+
+ [W] ---------------------------------------------------
+Time: 2026-07-16 20:46:57.238
+Path: /v1/chat/completions
+ [W] [GenieRoutingGateway] New global session detected (single user message): global_session_id=sess_1784260017238_95703, user_session_id=sess_1784260017238_16877, first_msg_key=fmk_63a57635eb4b4777
+ [W] [GenieRoutingGateway] HandleChatCompletion start, request_id=req_1784260017238_1323
+ [D] [ClientSource] Source UNKNOWN (no header, no OpenClaw features detected)
+ [W] [GenieRoutingGateway] Client source: Unknown
+ [D] [DetectAgentType] Detected: sub (agent=main not found in system prompt)
+ [W] [GenieRoutingGateway] Full check: total_messages=1
+ [W] [PERF] Step0_PreInspect: phase_ms=0, total_ms=0
+ [W] [ContentSecurityInspector] LocalModel skipped: use_local_model_fallback=false
+ [W] [ContentSecurityInspector] No sensitive content detected by rule engine
+ [W] [PERF] Step1_Inspect: phase_ms=0, total_ms=0
+ [W] [TaskComplexityEvaluator] LocalModel skipped: use_local_model_fallback=false
+ [W] [TaskComplexityEvaluator] complexity=C0, reason=simple task: tool_calls_after_user=0
+ [W] [ModelRouter] Route decision: agent_type=sub, target=LOCAL, sensitivity=S0, complexity=C0, need_desensitize=0, enterprise_cloud_available=0, public_cloud_available=1, reason=sub_agent: prefer local (S0/S1 or C0/C1)
+ [W] [PERF] Step2_3_RouteDecision: phase_ms=0, total_ms=0
+ [W] [PERF] Step5_PreExecute: phase_ms=0, total_ms=0
+ [W] [GenieRoutingGateway] Route=LOCAL, continuing with local processing
+ [I] [AUDIT] {"type":"audit","request_id":"req_1784260017238_1323","timestamp":"2026-07-17T03:46:57Z","session_id":"sess_1784260017238_16877","route_decision":"LOCAL","sensitivity_level":"S0","complexity_level":"C0","desensitized":false,"desensitize_strategies":[],"desensitize_success":false,"desensitize_failure_reason":"","cloud_endpoint":"","latency_ms":0,"http_status":-1,"retry_count":0,"hit_rule_ids":[],"hit_categories":[],"route_reason":"sub_agent: prefer local (S0/S1 or C0/C1)","rule_engine_failed":false,"tool_output_escalation":false,"latency_warning":false,"oversized_field_warning":false,"oversized_fields_count":0,"keywords_dict_reloaded":false,"keywords_dict_rules_count":0,"local_output_overflow":false,"tool_call_retries_exceeded":false,"local_input_overflow":false,"sticky_route_hit":false,"cloud_tier":"local","incremental_check_used":false,"incremental_new_messages":0,"total_messages_count":1}
+ [W] system prompt is empty, will use default
+
+ [I] [Context] Total: 8192 tokens, Reserved: 1638 tokens, Available: 6554 tokens
+ [D] [Context] Window size: 8192 tokens
+ [W] History size: 1, returning all messages (no compression)
+ [I] [Normal] Final prompt - Tokens: 162, Available: 6392, Length: 734 chars
+ [I] [Tool Call] Adjusting temperature to 0.1 for tool calling scenario
+ [I] Prompt tokens: 162, Context size: 8192, Max output tokens: 8030
+ [W] set param successfully: name: temp, value: 0.10000000149011612
+
+ [W] --- Query Context Start ---
+ [W] [QNN] query_mutex_ acquired immediately (wait=0ms)
+ [W] [QNN Restore] Query begin: type=SUBAGENT_INFERENCE, model_name=phi4-v81, model_dir=
+ [W] 1 1
+ [W] 
+[Prompt] [SUBAGENT_INFERENCE][phi4-v81]:
+<|system|> You are a helpful assistant.
+# Tools
+
+You may call one or more functions to assist with the user query.
+
+You are provided with function signatures within <tools></tools> XML tags:
+<tools>
+[{"type":"function","function":{"name":"read","description":"Read the content of a file at the given path.","parameters":{"type":"object","properties":{"path":{"type":"string","description":"File path to read"}},"required":["path"]}}}]
+</tools>
+
+For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:
+<tool_call>
+{"name": <function-name>, "arguments": <args-json-object>}
+</tool_call>
+
+
+ <|end|>
+<|user|> Please call the read tool to read README.md. <|end|>
+<|assistant|>
+------------
+
+[Response] [SUBAGENT_INFERENCE][phi4-v81]:
+<tool_call>
+{
+  "name": "read",
+  "arguments": {
+    "type": "object",
+    "properties": {
+      "path": "README.md"
+    }
+  }
+}<|end|>
+ [W] --- Query Context End ---
+
+ [D] [History] ✓ Added assistant message (standard format)
+ [W] --- Token Summary Start ---
+ [W] Time to First Token: 0.31 s
+ [W] Token Generation Time: 3.08 s
+ [W] Num Prompt Tokens: 162, Text Length: 734
+ [W] Prompt Processing Rate: 516.80 toks/sec
+ [W] Num Generated Tokens: 44, Text Length: 135
+ [W] Token Generation Rate: 13.96 toks/sec
+ [W] --- Token Summary End ---
+ [W] [DEBUG-TOOL-CALL] Outer JSON parse failed ([json.exception.parse_error.101] parse error at line 10, column 2: syntax error while parsing value - invalid literal; last read: '"README.md"<U+000A>    }<U+000A>  }<U+000A>}<'; expected end of input), trying repairJson...
+ [W] [DEBUG-TOOL-CALL] repairJson failed ([json.exception.parse_error.101] parse error at line 10, column 2: syntax error while parsing value - invalid literal; last read: '"README.md"<U+000A>    }<U+000A>  }<U+000A>}<'; expected end of input), trying to escape literal control chars in string values...
+ [E] parse tool calls's message as json failed:[json.exception.parse_error.101] parse error at line 10, column 2: syntax error while parsing value - invalid literal; last read: '"README.md"<U+000A>    }<U+000A>  }<U+000A>}<'; expected end of input
+ [W] ResponseDispatcher::sendStreamResponse: 
+<tool_call>
+{"name":"unknow","arguments":"\n{\n  \"name\": \"read\",\n  \"arguments\": {\n    \"type\": \"object\",\n    \"properties\": {\n      \"path\": \"README.md\"\n    }\n  }\n}<|end|>"}
+</tool_call>
+ [W] [UnknowToolLoop] Detected unknow tool call #1 (max=3)
+ [W] /v1/chat/completions handling is done
+
+ [W] ---------------------------------------------------
+Time: 2026-07-16 20:47:00.668
+Path: /contextsize
+ [W] /contextsize handling is done
+
+ [W] ---------------------------------------------------
+Time: 2026-07-16 20:47:00.671
+Path: /v1/chat/completions
+ [W] [GenieRoutingGateway] New global session detected (single user message): global_session_id=sess_1784260020672_63178, user_session_id=sess_1784260020672_88309, first_msg_key=fmk_4a0e8241f859704b
+ [W] [GenieRoutingGateway] HandleChatCompletion start, request_id=req_1784260020672_5791
+ [D] [ClientSource] Source UNKNOWN (no header, no OpenClaw features detected)
+ [W] [GenieRoutingGateway] Client source: Unknown
+ [D] [DetectAgentType] Detected: sub (agent=main not found in system prompt)
+ [W] [GenieRoutingGateway] Full check: total_messages=1
+ [W] [PERF] Step0_PreInspect: phase_ms=0, total_ms=0
+     0.0ms [^main][3884][  INFO ]  <I> htpPerfInfrastructureSetPowerConfig started for powerConfigId: -421691135
+
+     0.0ms [^main][3884][VERBOSE]  <V> Get HTP power device instance for device id 0 core id 0 processDomain id 0 coreType 0
+     0.0ms [^main][3884][VERBOSE]  <V> Get HTP power device instance for device id 0 core id 0 processDomain id 0 coreType 0
+     0.0ms [^main][3884][VERBOSE]  <V> set power settings DCVS V3 for context id -421691135:
+     0.0ms [^main][3884][VERBOSE]  <V> setDcvsEnable 1
+     0.0ms [^main][3884][VERBOSE]  <V> dcvsEnable 1
+     0.0ms [^main][3884][VERBOSE]  <V> powerMode 1
+     0.0ms [^main][3884][VERBOSE]  <V> setSleepLatency 1
+     0.0ms [^main][3884][VERBOSE]  <V> sleepLatency 2000
+     0.0ms [^main][3884][VERBOSE]  <V> setSleepDisable 0
+     0.0ms [^main][3884][VERBOSE]  <V> sleepDisable 0
+     0.0ms [^main][3884][VERBOSE]  <V> setBusParams 1
+     0.0ms [^main][3884][VERBOSE]  <V> busVoltageCornerMin 48
+     0.0ms [^main][3884][VERBOSE]  <V> busVoltageCornerTarget 64
+     0.0ms [^main][3884][VERBOSE]  <V> busVoltageCornerMax 64
+     0.0ms [^main][3884][VERBOSE]  <V> setCoreParams 1
+     0.0ms [^main][3884][VERBOSE]  <V> coreVoltageCornerMin 48
+     0.0ms [^main][3884][VERBOSE]  <V> coreVoltageCornerTarget 64
+     0.0ms [^main][3884][VERBOSE]  <V> coreVoltageCornerMax 64
+     0.0ms [^main][3884][VERBOSE]  <V> Resetting polling rpc graph stats
+     0.0ms [^main][3884][VERBOSE]  <V> Shared memory polling not supported in resetDeviceGraphStats
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> transport run [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> Set perf settings success
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 000000812BF3E650 for deviceId 0x0 coreId 0x0 pdId 0x2!
+     0.0ms [^main][3884][VERBOSE]  <V> transport run [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> Set perf settings success
+     0.0ms [^main][3884][  INFO ]  <I> htpPerfInfrastructureSetPowerConfig done. status 0x0
+     0.0ms [^main][3884][VERBOSE]  <V> Deactivated logger with handle 0000000000000001
+ [W] [ContentSecurityInspector] LocalModel skipped: use_local_model_fallback=false
+ [W] [ContentSecurityInspector] No sensitive content detected by rule engine
+ [W] [PERF] Step1_Inspect: phase_ms=375, total_ms=375
+ [W] [TaskComplexityEvaluator] LocalModel skipped: use_local_model_fallback=false
+ [W] [TaskComplexityEvaluator] complexity=C0, reason=simple task: tool_calls_after_user=0
+ [W] [ModelRouter] Route decision: agent_type=sub, target=LOCAL, sensitivity=S0, complexity=C0, need_desensitize=0, enterprise_cloud_available=0, public_cloud_available=1, reason=sub_agent: prefer local (S0/S1 or C0/C1)
+ [W] [PERF] Step2_3_RouteDecision: phase_ms=0, total_ms=376
+ [W] [PERF] Step5_PreExecute: phase_ms=0, total_ms=376
+ [W] [GenieRoutingGateway] Route=LOCAL, continuing with local processing
+ [W] [GenieRoutingGateway] Latency warning: latency_ms=376 exceeds P95 target=300ms
+ [I] [AUDIT] {"type":"audit","request_id":"req_1784260020672_5791","timestamp":"2026-07-17T03:47:01Z","session_id":"sess_1784260020672_88309","route_decision":"LOCAL","sensitivity_level":"S0","complexity_level":"C0","desensitized":false,"desensitize_strategies":[],"desensitize_success":false,"desensitize_failure_reason":"","cloud_endpoint":"","latency_ms":376,"http_status":-1,"retry_count":0,"hit_rule_ids":[],"hit_categories":[],"route_reason":"sub_agent: prefer local (S0/S1 or C0/C1)","rule_engine_failed":false,"tool_output_escalation":false,"latency_warning":true,"oversized_field_warning":false,"oversized_fields_count":0,"keywords_dict_reloaded":false,"keywords_dict_rules_count":0,"local_output_overflow":false,"tool_call_retries_exceeded":false,"local_input_overflow":false,"sticky_route_hit":false,"cloud_tier":"local","incremental_check_used":false,"incremental_new_messages":0,"total_messages_count":1}
+ [W] system prompt is empty, will use default
+
+ [I] [Context] Total: 8192 tokens, Reserved: 1638 tokens, Available: 6554 tokens
+ [D] [Context] Window size: 8192 tokens
+ [W] History size: 1, returning all messages (no compression)
+ [I] [Normal] Final prompt - Tokens: 1982, Available: 4572, Length: 10728 chars
+ [I] Prompt tokens: 1982, Context size: 8192, Max output tokens: 6210
+ [W] set param successfully: name: temp, value: 0.30000001192092896
+
+ [W] --- Query Context Start ---
+ [W] [QNN] query_mutex_ acquired immediately (wait=0ms)
+ [W] [QNN Restore] Query begin: type=SUBAGENT_INFERENCE, model_name=phi4-v81, model_dir=
+ [W] 1 1
+ [W] 
+[Prompt] [SUBAGENT_INFERENCE][phi4-v81]:
+<|system|> You are a helpful assistant. <|end|>
+<|user|> The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text summarization triggers. The quick brown fox jumps over the lazy dog while testing long text s <|end|>
+<|assistant|>
+------------
+
+[Response] [SUBAGENT_INFERENCE][phi4-v81]:
+     0.0ms [^main][3884][  INFO ]  <I> htpPerfInfrastructureSetPowerConfig started for powerConfigId: -421691135
+
+     0.0ms [^main][3884][VERBOSE]  <V> Get HTP power device instance for device id 0 core id 0 processDomain id 0 coreType 0
+     0.0ms [^main][3884][VERBOSE]  <V> Get HTP power device instance for device id 0 core id 0 processDomain id 0 coreType 0
+     0.0ms [^main][3884][VERBOSE]  <V> set power settings DCVS V3 for context id -421691135:
+     0.0ms [^main][3884][VERBOSE]  <V> setDcvsEnable 1
+     0.0ms [^main][3884][VERBOSE]  <V> dcvsEnable 0
+     0.0ms [^main][3884][VERBOSE]  <V> powerMode 16
+     0.0ms [^main][3884][VERBOSE]  <V> setSleepLatency 1
+     0.0ms [^main][3884][VERBOSE]  <V> sleepLatency 40
+     0.0ms [^main][3884][VERBOSE]  <V> setSleepDisable 0
+     0.0ms [^main][3884][VERBOSE]  <V> sleepDisable 0
+     0.0ms [^main][3884][VERBOSE]  <V> setBusParams 1
+     0.0ms [^main][3884][VERBOSE]  <V> busVoltageCornerMin 160
+     0.0ms [^main][3884][VERBOSE]  <V> busVoltageCornerTarget 160
+     0.0ms [^main][3884][VERBOSE]  <V> busVoltageCornerMax 160
+     0.0ms [^main][3884][VERBOSE]  <V> setCoreParams 1
+     0.0ms [^main][3884][VERBOSE]  <V> coreVoltageCornerMin 160
+     0.0ms [^main][3884][VERBOSE]  <V> coreVoltageCornerTarget 160
+     0.0ms [^main][3884][VERBOSE]  <V> coreVoltageCornerMax 160
+     0.0ms [^main][3884][VERBOSE]  <V> Resetting polling rpc graph stats
+     0.0ms [^main][3884][VERBOSE]  <V> Shared memory polling not supported in resetDeviceGraphStats
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> transport run [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> Set perf settings success
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 000000812BF3E650 for deviceId 0x0 coreId 0x0 pdId 0x2!
+     0.0ms [^main][3884][VERBOSE]  <V> transport run [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> Set perf settings success
+     0.0ms [^main][3884][  INFO ]  <I> htpPerfInfrastructureSetPowerConfig done. status 0x0
+     0.0ms [^main][3884][VERBOSE]  <V> Deactivated logger with handle 0000000000000001
+I'm sorry, but I can't assist with that.<|end|>
+ [W] --- Query Context End ---
+
+ [D] [History] ✓ Added assistant message (standard format)
+ [W] --- Token Summary Start ---
+ [W] Time to First Token: 1.71 s
+ [W] Token Generation Time: 0.67 s
+ [W] Num Prompt Tokens: 1982, Text Length: 10728
+ [W] Prompt Processing Rate: 1161.44 toks/sec
+ [W] Num Generated Tokens: 12, Text Length: 47
+ [W] Token Generation Rate: 16.40 toks/sec
+ [W] --- Token Summary End ---
+ [W] /v1/chat/completions handling is done
+
+ [W] ---------------------------------------------------
+Time: 2026-07-16 20:47:03.487
+Path: /clear
+ [W] /clear handling is done
+
+ [W] ---------------------------------------------------
+Time: 2026-07-16 20:47:03.500
+Path: /fetch
+ [W] /fetch handling is done
+
+ [W] ---------------------------------------------------
+Time: 2026-07-16 20:47:03.512
+Path: /contextsize
+ [W] /contextsize handling is done
+
+ [W] ---------------------------------------------------
+Time: 2026-07-16 20:47:03.525
+Path: /servicestop
+ [W] /servicestop handling is done
+
+     0.0ms [^main][3884][  INFO ]  <I> htpPerfInfrastructureSetPowerConfig started for powerConfigId: -421691135
+
+     0.0ms [^main][3884][VERBOSE]  <V> Get HTP power device instance for device id 0 core id 0 processDomain id 0 coreType 0
+     0.0ms [^main][3884][VERBOSE]  <V> Get HTP power device instance for device id 0 core id 0 processDomain id 0 coreType 0
+     0.0ms [^main][3884][VERBOSE]  <V> set power settings DCVS V3 for context id -421691135:
+     0.0ms [^main][3884][VERBOSE]  <V> setDcvsEnable 1
+     0.0ms [^main][3884][VERBOSE]  <V> dcvsEnable 1
+     0.0ms [^main][3884][VERBOSE]  <V> powerMode 1
+     0.0ms [^main][3884][VERBOSE]  <V> setSleepLatency 1
+     0.0ms [^main][3884][VERBOSE]  <V> sleepLatency 2000
+     0.0ms [^main][3884][VERBOSE]  <V> setSleepDisable 0
+     0.0ms [^main][3884][VERBOSE]  <V> sleepDisable 0
+     0.0ms [^main][3884][VERBOSE]  <V> setBusParams 1
+     0.0ms [^main][3884][VERBOSE]  <V> busVoltageCornerMin 48
+     0.0ms [^main][3884][VERBOSE]  <V> busVoltageCornerTarget 64
+     0.0ms [^main][3884][VERBOSE]  <V> busVoltageCornerMax 64
+     0.0ms [^main][3884][VERBOSE]  <V> setCoreParams 1
+     0.0ms [^main][3884][VERBOSE]  <V> coreVoltageCornerMin 48
+     0.0ms [^main][3884][VERBOSE]  <V> coreVoltageCornerTarget 64
+     0.0ms [^main][3884][VERBOSE]  <V> coreVoltageCornerMax 64
+     0.0ms [^main][3884][VERBOSE]  <V> Resetting polling rpc graph stats
+     0.0ms [^main][3884][VERBOSE]  <V> Shared memory polling not supported in resetDeviceGraphStats
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> transport run [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> Set perf settings success
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 000000812BF3E650 for deviceId 0x0 coreId 0x0 pdId 0x2!
+     0.0ms [^main][3884][VERBOSE]  <V> transport run [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> Set perf settings success
+     0.0ms [^main][3884][  INFO ]  <I> htpPerfInfrastructureSetPowerConfig done. status 0x0
+     0.0ms [^main][3884][VERBOSE]  <V> Deactivated logger with handle 0000000000000001
+ [W] start to stop service
+ [W] Unloading model...
+ 18530.0ms [^main][3884][  INFO ] LibAppBuilder::ModelDestroy: [Vision ] 
+ 18530.1ms [^main][3884][  INFO ] cleaning up resources for input tensors
+ 18530.1ms [^main][3884][  INFO ] cleaning up resources for output tensors
+     0.0ms [^main][3884][  INFO ]  <I> htpPerfInfrastructureDestroyPowerConfigId started for powerConfigId: -421691136
+
+     0.0ms [^main][3884][VERBOSE]  <V> Get HTP power device instance for device id 0 core id 0 processDomain id 0 coreType 0
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> transport run [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> Destroy perf context success
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 000000812BF3E650 for deviceId 0x0 coreId 0x0 pdId 0x2!
+     0.0ms [^main][3884][VERBOSE]  <V> transport run [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> Destroy perf context success
+     0.0ms [^main][3884][VERBOSE]  <V> Destroyed power config id 3873276160 for device id 0 core id 0 processDomain id 0
+     0.0ms [^main][3884][  INFO ]  <I> htpPerfInfrastructureDestroyPowerConfigId done. status 0x0
+     0.0ms [^main][3884][VERBOSE]  <V> Deactivated logger with handle 0000000000000001
+     0.0ms [^main][3884][  INFO ]  <I> QnnContext_free started. context = 0x1
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Shared memory polling not supported in pauseDevicePolling
+     0.0ms [^main][3884][VERBOSE]  <V> 48 isInit true
+     0.0ms [^main][3884][VERBOSE]  <V> 40 isInit true
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+ [W] [GenieRoutingGateway] Destructor: alive flag set to false, detached threads will exit safely
+     0.0ms [^main][3884][VERBOSE]  <V> transport run [status = 0]
+     0.0ms [^main][3884][WARNING]  <W> m_CFBCallbackInfoObj is not initialized, return emptyList
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> transport clean dmahandles [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> sharedBufferRelease op 3 fd 14 with offset 0 size 3305984, va 0x000000fdc00000, devConfig {0, 0, 0}, err 0
+     0.0ms [^main][3884][VERBOSE]  <V> Last entry for fd 14 on domain 3, calling unmap
+     0.0ms [^main][3884][VERBOSE]  <V> fastrpc memory unmap for fd: 14 with length: 3305984 succeeded
+     0.0ms [^main][3884][VERBOSE]  <V> Freed memory allocated by Memory Object
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> transport clean dmahandles [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> sharedBufferRelease op 3 fd 15 with offset 0 size 1572992, va 0x000000fda00000, devConfig {0, 0, 0}, err 0
+     0.0ms [^main][3884][VERBOSE]  <V> Last entry for fd 15 on domain 3, calling unmap
+     0.0ms [^main][3884][VERBOSE]  <V> fastrpc memory unmap for fd: 15 with length: 1572992 succeeded
+     0.0ms [^main][3884][VERBOSE]  <V> Freed memory allocated by Memory Object
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> transport clean dmahandles [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> sharedBufferRelease op 3 fd 16 with offset 0 size 21368, va 0x000000fdbf8000, devConfig {0, 0, 0}, err 0
+     0.0ms [^main][3884][VERBOSE]  <V> Last entry for fd 16 on domain 3, calling unmap
+     0.0ms [^main][3884][VERBOSE]  <V> fastrpc memory unmap for fd: 16 with length: 21368 succeeded
+     0.0ms [^main][3884][VERBOSE]  <V> Freed memory allocated by Memory Object
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> SharedMemoryMod 3 destroy/deregister fd 18 with len 425721856, va 0x000000e0000000
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> transport clean dmahandles [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> sharedBufferRelease op 3 fd 18 with offset 0 size 425721856, va 0x000000e0000000, devConfig {0, 0, 0}, err 0
+     0.0ms [^main][3884][VERBOSE]  <V> Last entry for fd 18 on domain 3, calling unmap
+     0.0ms [^main][3884][VERBOSE]  <V> fastrpc memory unmap for fd: 18 with length: 425721856 succeeded
+     0.0ms [^main][3884][VERBOSE]  <V> sharedMemoryMod Latency 843
+     0.0ms [^main][3884][VERBOSE]  <V> Found transport session 00000080011F1AB0 for deviceId 0x0 coreId 0x0 pdId 0x0!
+     0.0ms [^main][3884][VERBOSE]  <V> transport clean dmahandles [status = 0]
+     0.0ms [^main][3884][VERBOSE]  <V> sharedBufferRelease op 3 fd 18 with offset 0 size 425721856, va 0x000000e0000000, devConfig {0, 0, 0}, err 0
+     0.0ms [^main][3884][WARNING]  <W> All shared memories related to fd 18 on domain 3 are destroyed
+ [W] GenieContext::~GenieContext():
+     0.0ms [^main][3884][VERBOSE]  <V> Freed memory allocated by Memory Object
+     0.0ms [^main][3884][VERBOSE]  <V> Freed memory allocated by Memory Object
+     0.0ms [^main][3884][  INFO ]  <I> Graph Rpc memory was not initialized for graph 1
+     0.0ms [^main][3884][VERBOSE]  <V> Freeing shared spill-fill buffer
+     0.0ms [^main][3884][VERBOSE]  <V> No groupId found for this context:0x1
+     0.0ms [^main][3884][VERBOSE]  <V> ContextFree remove DSP size reserve from PdManager for context 1 on pd 0
+     0.0ms [^main][3884][VERBOSE]  <V> Query preemption type is not supported
+     0.0ms [^main][3884][VERBOSE]  <V> Unmapping is not required because no updatable component in serialize bin
+     0.0ms [^main][3884][VERBOSE]  <V> Decrementing ref counter for default graph env. 9 remaining in group. 1 in registry
+     0.0ms [^main][3884][VERBOSE]  <V> Wake up free backend (id: 1)'s thread(s)
+     0.0ms [^main][3884][  INFO ]  <I> Number of existing contexts: 4, graphs: 8
+     0.0ms [^main][3884][  INFO ]  <I> QnnContext_free done successfully.
+     0.0ms [^main][3884][VERBOSE]  <V> Deactivated logger with handle 0000000000000001
+ 18976.1ms [^main][3884][  INFO ] qnn_app::QnnInferenceEngine::freeDevice begin
+ 18976.1ms [^main][3884][WARNING] Time: model_destroy [Vision ] 446.01
+     0.0ms [^main][3884][  INFO ]  <I> QnnBackend_free started. backend = 0x1
+     0.0ms [^main][3884][VERBOSE]  <V> Terminated backend 0000000000000001 successfully in backendLifecycleManager
+     0.0ms [^main][3884][VERBOSE]  <V> Deactivated logger with handle 0000000000000001
+ [W] GenieContext::~GenieContext() Done:
+ [W] the context is being destroyed
+ [W] Service stopped successfully.
+ <E> Error 0x200: failed to close queue 00000080016F5BD0 for priority 100
+

@@ -1,4 +1,4 @@
-//==============================================================================
+﻿//==============================================================================
 //
 // Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
 //
@@ -42,6 +42,8 @@ IVisionEmbedding &QInterface::Qwen2_5::MergeEmbedding()
     if (img_inferred_buffers_.empty())
     {
         embedded_bin_ = std::move(embedded_raw_fbuf);
+        input_data_ = reinterpret_cast<uint8_t*>(embedded_bin_.data());
+        input_len_ = embedded_bin_.size() * sizeof(float);
         return *this;
     }
 
@@ -157,12 +159,6 @@ IVisionEmbedding &QInterface::Qwen2_5::MergeEmbedding()
             float *dst = &embedded_bin_[row * D];
             std::copy(src, src + D, dst);
         }
-
-        // We do not need it now.
-        //        free(prompt_token_);
-        //        prompt_token_ = static_cast<int32_t *>(malloc(new_input_ids.size()));
-        //        memcpy(prompt_token_, new_input_ids.data(), new_input_ids.size());
-        //        prompt_token_.swap(new_input_ids);
     }
     else
     {

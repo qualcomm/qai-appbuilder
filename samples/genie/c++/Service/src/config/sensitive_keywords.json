@@ -1,0 +1,115 @@
+{
+    "_comment": "敏感关键词词典 - 供 ContentSecurityInspector 加载，支持热更新（修改文件后 keywords_reload_interval_seconds 内自动生效）",
+    "_comment_format": "每条规则包含：id（唯一标识）、category（分类）、level（S1/S2）、keywords（关键词列表）",
+    "_comment_level": "S1=敏感但可脱敏后上云；S2=高度敏感禁止上云",
+    "_comment_hot_reload": "修改本文件后无需重启服务，检测器会在 keywords_reload_interval_seconds 内自动重载",
+
+    "rules": [
+        {
+            "_comment": "=== MEDICAL 类：医疗健康敏感信息 ===",
+            "id": "KW_MEDICAL_DIAGNOSIS",
+            "category": "MEDICAL",
+            "level": "S1",
+            "keywords": [
+                "诊断结果", "病历", "病历号", "住院号", "门诊号",
+                "检查报告", "化验单", "影像报告", "CT报告", "MRI报告",
+                "手术记录", "出院小结", "病程记录",
+                "确诊", "疑似诊断", "临床诊断",
+                "medical record", "diagnosis report", "discharge summary",
+                "patient ID", "medical history"
+            ]
+        },
+        {
+            "id": "KW_MEDICAL_PRESCRIPTION",
+            "category": "MEDICAL",
+            "level": "S1",
+            "keywords": [
+                "处方", "处方笺", "药方", "用药记录", "医嘱",
+                "剂量", "服药方法", "处方药", "处方编号",
+                "prescription", "dosage", "medication order"
+            ]
+        },
+        {
+            "id": "KW_MEDICAL_SENSITIVE",
+            "category": "MEDICAL",
+            "level": "S2",
+            "keywords": [
+                "艾滋病", "HIV", "性病", "梅毒", "淋病",
+                "精神病", "精神障碍", "抑郁症诊断", "精神科病历",
+                "传染病报告", "甲类传染病", "乙类传染病",
+                "肿瘤病理", "癌症诊断", "恶性肿瘤"
+            ]
+        },
+
+        {
+            "_comment": "=== ENTERPRISE 类：企业内部敏感信息 ===",
+            "id": "KW_ENTERPRISE_FINANCIAL",
+            "category": "ENTERPRISE",
+            "level": "S2",
+            "keywords": [
+                "未公开财务数据", "内部财报", "季度预测", "年度预算草案",
+                "营收预测", "利润预测", "内部审计报告",
+                "未披露业绩", "盈利预警", "内幕信息",
+                "confidential financial", "internal forecast", "undisclosed revenue",
+                "earnings guidance", "insider information"
+            ]
+        },
+        {
+            "id": "KW_ENTERPRISE_CONTRACT",
+            "category": "ENTERPRISE",
+            "level": "S2",
+            "keywords": [
+                "保密协议", "NDA", "合同草案", "合同条款",
+                "采购合同", "供应商合同", "框架协议",
+                "合同编号", "甲方乙方", "违约金",
+                "non-disclosure agreement", "contract draft", "confidential agreement",
+                "purchase order", "vendor contract"
+            ]
+        },
+        {
+            "id": "KW_ENTERPRISE_CODE",
+            "category": "ENTERPRISE",
+            "level": "S1",
+            "keywords": [
+                "内部代码", "源代码仓库", "私有仓库", "内网地址",
+                "内部接口文档", "API文档（内部）", "内部系统",
+                "proprietary code", "internal repository", "private repo",
+                "internal API", "intranet"
+            ]
+        },
+        {
+            "id": "KW_ENTERPRISE_STRATEGY",
+            "category": "ENTERPRISE",
+            "level": "S2",
+            "keywords": [
+                "未公开战略", "商业计划书（保密）", "产品路线图（内部）",
+                "并购计划", "重组方案", "裁员计划",
+                "竞争对手分析（内部）", "市场进入策略（保密）",
+                "unreleased roadmap", "M&A plan", "acquisition target",
+                "confidential strategy", "internal roadmap"
+            ]
+        },
+
+        {
+            "_comment": "=== POLITICAL 类：政治/法律敏感内容 ===",
+            "id": "KW_POLITICAL_LEGAL",
+            "category": "POLITICAL",
+            "level": "S2",
+            "keywords": [
+                "涉密文件", "国家秘密", "机密级", "绝密级", "秘密级",
+                "保密规定", "涉密人员",
+                "classified document", "state secret", "top secret",
+                "confidential document", "restricted information"
+            ]
+        },
+        {
+            "id": "KW_POLITICAL_SENSITIVE",
+            "category": "POLITICAL",
+            "level": "S2",
+            "keywords": [
+                "政治敏感", "敏感话题", "审查内容",
+                "politically sensitive", "censored content"
+            ]
+        }
+    ]
+}

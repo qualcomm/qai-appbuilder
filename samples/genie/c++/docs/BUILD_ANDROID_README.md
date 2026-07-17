@@ -2,90 +2,85 @@
 
 ## Overview
 
-`build_android.bat` is an automated build script for compiling the Android version of libappbuilder.so and GenieAPIService libraries. The script automatically handles dependencies and organizes all build artifacts into the `build_android` folder, keeping the source code directory clean.
+`build_android.bat` is an automated build script for compiling the Android version of libappbuilder.so and GenieAPIService libraries. The script automatically handles dependencies and organizes all build artifacts into the `build-android` folder (note the hyphen, not an underscore), keeping the source code directory clean.
 
-**Script Location**: `qai-appbuilder/samples/genie/c++/build_android.bat`
+**Script Location**: `qai-appbuilder/samples/genie/c++/Service/build_android.bat`
 
 ## Features
 
-✅ Automatically builds libappbuilder.so and its dependencies  
-✅ Automatically builds GenieAPIService library  
-✅ Automatically copies all required QNN SDK library files  
-✅ Organizes all build artifacts into a separate build directory  
-✅ Provides detailed build logs and error messages  
-✅ Environment validation and error checking  
-✅ Builds Android APK package with all libraries included  
-✅ **Android file logging support** - All QNN log functions write to files  
-✅ Automatic Java 17 download if Java 25 is detected
+✅ Automatically builds libappbuilder.so and its dependencies
+✅ Automatically builds GenieAPIService native library
+✅ Automatically copies all required QNN SDK library files
+✅ Organizes all build artifacts into a separate `build-android` directory
+✅ Provides build logs and stops immediately on the first failed step
+✅ Environment validation and error checking (required env vars, tools on `PATH`, expected SDK/NDK files)
+✅ Builds Android APK package with all libraries included
 
 ## Prerequisites
 
-Before running the script, ensure the following tools are installed:
+Before running the script, ensure the following tools are installed and, unlike previous versions of this script, exported as **environment variables** before invoking it (the script no longer has any hardcoded default paths — it fails fast with an explicit error message if a required variable is missing):
 
 1. **Qualcomm® AI Runtime SDK (QAIRT)**
-   - Default path: `C:\Qualcomm\AIStack\QAIRT\2.42.0.251225\`
+   - `QNN_SDK_ROOT`, e.g. `C:\Qualcomm\AIStack\QAIRT\2.44.0.260225\` (use whatever version you actually installed — this is only an example; the script requires `%QNN_SDK_ROOT%\lib\aarch64-android\libGenie.so` to exist)
 
 2. **Android NDK**
-   - Recommended version: r26d
-   - Default path: `C:\work\android-ndk-r26d-windows\android-ndk-r26d\`
+   - `NDK_ROOT` (or `ANDROID_NDK_ROOT`), recommended version r26d, e.g. `C:\work\android-ndk-r26d\`
+   - Requires `%NDK_ROOT%\build\cmake\android.toolchain.cmake` and an `ndk-build.cmd`/`.bat` to exist under `NDK_ROOT`
 
-3. **Git** (for cloning the repository)
+3. **CMake** and **Ninja** — both must be resolvable via `PATH` (used to build `libsamplerate`/`libappbuilder`)
 
-4. **Java Development Kit (JDK)** (for building APK)
+4. **Git** (for cloning the repository)
 
-## Manual Configuration Required
+5. **Java Development Kit (JDK)** — `JAVA_HOME` must be set, or `java` must be resolvable via `PATH` (used by the Gradle build). JDK 17 is the version validated for this project.
 
-### IMPORTANT: Before Running build_android.bat
+## Configuration
 
-You **MUST** manually modify the following paths in the script according to your environment:
+### Set environment variables before running `build_android.bat`
 
-#### 1. Edit `build_android.bat`
+Unlike earlier versions of this script, you no longer need to edit `build_android.bat` itself to point it at your SDK/NDK — the script reads everything from environment variables and fails fast with an explicit `[ERROR] ... is not set` message if a required one is missing.
 
-Open `build_android.bat` and modify these configuration variables:
+Set these before invoking the script (Command Prompt syntax shown; if you run it from PowerShell use `$env:NAME = "value"` instead):
 
 ```batch
-REM ============================================================================
-REM Configuration - MODIFY THESE PATHS ACCORDING TO YOUR ENVIRONMENT
-REM ============================================================================
-
-REM Set QNN SDK Root (Qualcomm AI Runtime SDK)
-set "QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.42.0.251225\"
-
-REM Set Android NDK Root
-set "NDK_ROOT=C:\work\android-ndk-r26d-windows\android-ndk-r26d\"
-
-REM Number of parallel jobs for GenieAPIService build
+set "QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.44.0.260225\"
+set "NDK_ROOT=C:\work\android-ndk-r26d\"
 set "JOBS=4"
 ```
 
 **Configuration Parameters:**
 
-- **QNN_SDK_ROOT**: Path to your Qualcomm AI Runtime SDK installation
-- **NDK_ROOT**: Path to your Android NDK installation
-- **JOBS**: Number of parallel compilation jobs (adjust based on your CPU cores)
+- **QNN_SDK_ROOT**: Path to your Qualcomm AI Runtime SDK installation. *(required; use whatever version you actually installed, `2.44.0.260225` above is only an example)*
+- **NDK_ROOT** (or **ANDROID_NDK_ROOT**): Path to your Android NDK installation. *(required)*
+- **JOBS**: Number of parallel compilation jobs. *(optional, defaults to `4` if unset)*
 
-#### 2. Edit Gradle Configuration Files
+### Gradle project files (reference only — verify against your actual project)
 
-##### 2.1 Update `samples/genie/c++/Android/gradle/wrapper/gradle-wrapper.properties`
+> **Note:** This C++ service source tree does not ship the `Android/` Gradle project directory by
+> itself, so the exact values below cannot be verified against this repository snapshot. Treat
+> them as a **reference example** of a typical Gradle setup and always check your own
+> `Android/app/build.gradle.kts`, `Android/gradle/wrapper/gradle-wrapper.properties`, and
+> `Android/gradle/libs.versions.toml` for the values that actually apply to your project.
 
-Modify the Gradle distribution URL to match your environment:
+##### `samples/genie/c++/Android/gradle/wrapper/gradle-wrapper.properties`
+
+Points Gradle at a local distribution zip, e.g.:
 
 ```properties
 distributionUrl=file\:///C:/Programs/gradle-8.7-bin.zip
 ```
 
-Change `C:/Programs/gradle-8.7-bin.zip` to your actual Gradle distribution path.
+Change it to match wherever your Gradle distribution actually lives.
 
-##### 2.2 Update `samples/genie/c++/Android/gradle/libs.versions.toml`
+##### `samples/genie/c++/Android/gradle/libs.versions.toml`
 
-Modify the Android Gradle Plugin version if needed:
+Android Gradle Plugin version, e.g.:
 
 ```toml
 [versions]
 agp = "8.7.3"  # Adjust to match your installed version
 ```
 
-##### 2.3 Update `samples/genie/c++/Android/app/build.gradle.kts`
+##### `samples/genie/c++/Android/app/build.gradle.kts`
 
 **IMPORTANT**: Configure APK signing for release builds:
 
@@ -138,12 +133,12 @@ Follow the prompts to set passwords and certificate information.
 
 ```cmd
 git clone https://github.com/qualcomm/qai-appbuilder.git --recursive
-cd qai-appbuilder
+cd qai-appbuilder\samples\genie\c++\Service
 ```
 
-### 2. Configure the Build Script
+### 2. Set the Required Environment Variables
 
-**IMPORTANT**: Follow the "Manual Configuration Required" section above to modify all necessary paths.
+**IMPORTANT**: Follow the "Configuration" section above to export `QNN_SDK_ROOT`/`NDK_ROOT` (and, if needed, review the Gradle project files) — there is no need to edit `build_android.bat` itself.
 
 ### 3. Run the Build Script
 
@@ -153,75 +148,76 @@ Execute in Command Prompt (CMD):
 build_android.bat
 ```
 
-**Note**: Use Command Prompt (CMD), not PowerShell.
+**Note**: Run it from Command Prompt (CMD). If you use PowerShell, set the environment variables with
+`$env:NAME = "value"` first — the script itself is a plain `.bat` and PowerShell can invoke it directly.
 
 ### 4. Wait for Build Completion
 
-The script will automatically execute the following steps:
+The script executes the following steps in order (there is no numbered `[n/9]`-style progress output;
+this is simply the real sequence found in `build_android.bat`):
 
-1. **[1/9]** Validate environment configuration
-2. **[2/9]** Create build directory structure
-3. **[3/9]** Build libsamplerate.so
-4. **[4/9]** Skip libcurl.so (not required)
-5. **[5/9]** Build libappbuilder.so
-6. **[6/9]** Copy dependencies to Service directory
-7. **[7/9]** Build GenieAPIService
-8. **[8/9]** Build Android APK
-9. **[9/9]** Copy all library files to output directory
-10. **[10/10]** Display build summary
+1. Validate the environment: required env vars (`QNN_SDK_ROOT`, `NDK_ROOT`/`ANDROID_NDK_ROOT`), `ninja`/`cmake` on `PATH`, the QNN Android runtime lib, the NDK's `android.toolchain.cmake`, `gradlew.bat`, and a usable JDK.
+2. Create the `build-android` directory and `build-android\output\libs\arm64-v8a`.
+3. Build `libsamplerate.so` via **CMake + Ninja** against the Android NDK toolchain, with `-DBUILD_SHARED_LIBS=ON` (the vendored `External/libsamplerate` defaults to a static build, so this flag has to be passed explicitly).
+4. Build `libappbuilder.so` via **CMake + Ninja** as well, from the repository's top-level `src/` directory (the same source that `qai_appbuilder` Python wheels link against) — **not** via `ndk-build`.
+5. Build the native `GenieAPIService`/JNI wrapper via `ndk-build`, using `scripts/Android.mk` + `scripts/Application.mk` (this is the only step in the pipeline that actually uses `ndk-build`).
+6. Copy the QNN SDK runtime libraries (`libGenie.so`, `libQnnHtp*.so`, `libQnnSystem.so`, the Hexagon stub/skel/`.cat` files for `QNN_STUB_VERSION`) plus the freshly built `.so` files into `build-android\output\libs\arm64-v8a`.
+7. Run `gradlew.bat assembleRelease -PqnnStubVersion=<QNN_STUB_VERSION>` to produce the signed APK.
+8. Copy the generated APK to `build-android\output\GenieAPIService.apk`.
+9. Print a short build summary (native lib output dir + APK path).
 
 ## Build Output
 
-After successful build, all files will be organized in the `build_android` directory:
+After a successful build, all files are organized in the `build-android` directory (hyphen, not underscore):
 
 ```
-build_android/
-├── appbuilder/              # libappbuilder.so build artifacts
-│   ├── libappbuilder.so
-│   ├── libs/
-│   └── obj/
-├── service/                 # GenieAPIService build artifacts
-│   ├── libs/
-│   └── obj/
+build-android/
+├── libsamplerate/            # libsamplerate CMake+Ninja build tree
+├── libappbuilder/            # libappbuilder.so CMake+Ninja build tree
+├── libsamplerate.so          # copied out of libsamplerate/ for convenience
+├── libappbuilder.so          # copied out of the top-level src/lib/ for convenience
+├── obj/                      # ndk-build intermediates for the native service
+├── libs/
+│   └── arm64-v8a/            # ndk-build output for the native service + JNI wrapper
 └── output/
     ├── libs/
-    │   └── arm64-v8a/       # All deployable .so files
+    │   └── arm64-v8a/         # All deployable .so files, consolidated here
     │       ├── libappbuilder.so
+    │       ├── libsamplerate.so
     │       ├── libGenieAPIService.so
     │       ├── libJNIGenieAPIService.so
     │       ├── libGenie.so
-    │       ├── libQnnHtp.so
-    │       └── ... (other QNN SDK libraries)
-    └── apk/
-        └── GenieAPIService.apk  # Android APK package
+    │       ├── libQnnHtp*.so
+    │       └── ... (other QNN SDK runtime libraries)
+    └── GenieAPIService.apk    # Android APK package (directly under output/, no apk/ subfolder)
 ```
 
 ### Key Output Directories
 
-- **`build_android/output/libs/arm64-v8a/`**: Contains all .so files needed for Android deployment
-- **`build_android/output/apk/`**: Contains the built Android APK package
+- **`build-android/output/libs/arm64-v8a/`**: Contains all .so files needed for Android deployment
+- **`build-android/output/GenieAPIService.apk`**: The built Android APK package
 
 ## Install APK
 
 After building, install the APK directly:
 
 ```cmd
-adb install build_android/output/apk/GenieAPIService.apk
+adb install build-android/output/GenieAPIService.apk
 ```
 
 ## Troubleshooting
 
-### Q1: Script error "QNN_SDK_ROOT not found"
+### Q1: Script error "[ERROR] QNN_SDK_ROOT is not set."
 
 **Solution**: 
 - Verify QAIRT SDK is correctly installed
-- Modify `QNN_SDK_ROOT` path in the script to match your actual installation path
+- Export `QNN_SDK_ROOT` as an environment variable before running the script (e.g. `set "QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.44.0.260225\"`) — you no longer edit the script itself
 
-### Q2: Script error "NDK_ROOT not found"
+### Q2: Script error "[ERROR] NDK_ROOT or ANDROID_NDK_ROOT is not set."
 
 **Solution**:
 - Verify Android NDK is correctly installed
-- Modify `NDK_ROOT` path in the script to match your actual installation path
+- Export `NDK_ROOT` (or `ANDROID_NDK_ROOT`) as an environment variable before running the script
 
 ### Q3: Build fails with "cannot find header files"
 
@@ -232,8 +228,7 @@ adb install build_android/output/apk/GenieAPIService.apk
 ### Q4: Gradle build fails
 
 **Solution**:
-- Verify Gradle distribution path in `gradle-wrapper.properties`
-- Check Android Gradle Plugin version in `libs.versions.toml`
+- Verify the Gradle distribution path in `gradle-wrapper.properties` and the Android Gradle Plugin version in `libs.versions.toml` against your actual `Android/` project (these values could not be verified from this repository snapshot — see the note in the "Configuration" section)
 - Ensure JDK is properly installed and configured
 
 ### Q4.1: Android Studio build fails with "Could not resolve all files for configuration ':app:androidJdkImage'"
@@ -258,9 +253,11 @@ This error occurs when Android Studio's embedded JDK is incompatible with the Gr
 
 **Option 2: Use the build_android.bat script**
 
-The automated build script handles JDK compatibility automatically:
+The automated build script only checks that `JAVA_HOME`/`java` is available; it does **not**
+automatically resolve JDK/Gradle version incompatibilities. If Option 1 or 3 doesn't apply to your
+setup, make sure whatever JDK the script picks up is Gradle-compatible before running it:
 ```cmd
-cd qai-appbuilder\samples\genie\c++
+cd qai-appbuilder\samples\genie\c++\Service
 build_android.bat
 ```
 
@@ -276,31 +273,31 @@ gradlew.bat clean assembleRelease
 ### Q5: How to clean build artifacts?
 
 **Solution**:
-- Delete the `build_android` directory: `rmdir /s /q build_android`
+- Delete the `build-android` directory: `rmdir /s /q build-android`
 - The source code directory remains clean with no build artifacts
 
 ### Q6: Can I change the number of parallel jobs?
 
 **Solution**:
-- Yes, modify `set "JOBS=4"` in the script to your desired value
+- Yes, set the `JOBS` environment variable to your desired value before running the script, e.g. `set "JOBS=8"` (defaults to `4` if unset)
 - Recommended: Set to your CPU core count or slightly less
 
 ## Script Features
 
 ### 1. Environment Validation
-The script validates all required tools and paths before building.
+The script validates all required environment variables, tools on `PATH`, and expected SDK/NDK files before building, and prints an explicit `[ERROR] ...` message identifying exactly what's missing.
 
 ### 2. Error Handling
-Each build step includes error checking; the script stops immediately if any step fails.
+Each build step checks its own exit code (`if errorlevel 1 exit /b 1`); the script stops immediately if any step fails.
 
 ### 3. Build Artifact Isolation
-All build artifacts are stored in the `build_android` directory, keeping the source code directory clean.
+All build artifacts are stored in the `build-android` directory, keeping the source code directory clean.
 
 ### 4. Automatic Dependency Handling
-The script automatically handles dependencies between libappbuilder.so and GenieAPIService.
+The script builds `libsamplerate` and `libappbuilder.so` before the native `GenieAPIService`/JNI wrapper that depends on them, in the correct order.
 
-### 5. Detailed Logging
-Provides detailed build progress and status information for easy debugging.
+### 5. Build Progress Output
+Prints the resolved configuration (SDK/NDK paths, stub version, job count, output dir) and per-step progress to the console.
 
 ### 6. APK Generation
 Automatically builds an Android APK package ready for installation.
@@ -310,28 +307,29 @@ Automatically builds an Android APK package ready for installation.
 ### Build Process
 
 1. **libsamplerate.so Build**
-   - Uses CMake and Ninja
+   - Uses **CMake + Ninja** against the Android NDK toolchain file
    - Target architecture: arm64-v8a
+   - Built with `-DBUILD_SHARED_LIBS=ON` (the vendored source defaults to static)
 
 2. **libappbuilder.so Build**
-   - Uses Android NDK's ndk-build tool
+   - Also uses **CMake + Ninja** (not `ndk-build`) against the Android NDK toolchain file
    - Target architecture: arm64-v8a
-   - Build configuration: `make/Android.mk` and `make/Application.mk`
+   - Source: the repository's top-level `src/` directory (same source `qai_appbuilder` Python wheels link against)
 
 3. **GenieAPIService Build**
    - Depends on libappbuilder.so
-   - Uses Android NDK's ndk-build tool
+   - This is the only step that actually uses Android NDK's `ndk-build` tool
    - Build configuration: `scripts/Android.mk` and `scripts/Application.mk`
 
 4. **Android APK Build**
-   - Uses Gradle build system
+   - Uses Gradle build system (`gradlew.bat assembleRelease -PqnnStubVersion=<QNN_STUB_VERSION>`)
    - Packages all native libraries
-   - Configuration: `Android/app/build.gradle.kts`
+   - Configuration: `Android/app/build.gradle.kts` *(reference only — see the note in "Configuration")*
 
 5. **Library Collection**
    - Copies runtime libraries from QNN SDK
    - Copies generated libraries from build output
-   - Consolidates all files to `build_android/output/libs/arm64-v8a/`
+   - Consolidates all files to `build-android/output/libs/arm64-v8a/`
 
 
 ## Version Information
@@ -339,9 +337,8 @@ Automatically builds an Android APK package ready for installation.
 - **Script Version**: 2.0
 - **Supported NDK Version**: r26d
 - **Supported Target Architecture**: arm64-v8a
-- **Supported QAIRT Version**: 2.42.0.251225
-- **Gradle Version**: 8.7+
-- **Android Gradle Plugin**: 8.7.3+
+- **Supported QAIRT Version**: 2.44.0.260225 (use whatever version you actually installed — this is only the version validated for this project)
+- **Gradle Version / Android Gradle Plugin**: see the disclaimer in "Configuration" — cannot be verified from this repository snapshot; check your own `Android/gradle/` project files
 
 ## License
 

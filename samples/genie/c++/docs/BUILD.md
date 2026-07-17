@@ -31,29 +31,37 @@ Open a 'Command Prompt' window (not PowerShell) to compile the libraries.
 
 ### Set QAIRT SDK Version:<br>
 
-After installing Qualcomm® AI Runtime SDK, It usually located at `C:\Qualcomm\AIStack\QAIRT\2.42.0.251225`. We can make
+After installing Qualcomm® AI Runtime SDK, it usually locates at `C:\Qualcomm\AIStack\QAIRT\2.44.0.260225\`
+(use whatever version you actually installed — this is only an example). We can make
 it as an environment variable.
 
-`Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.42.0.251225\`
+`Set QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.44.0.260225\`
+
+**`QNN_SDK_ROOT` must be set before configuring CMake**, since the build reads it at configure time.
 
 ### Build GenieAPIServer & GenieAPIClient:<br>
 
 GenieServices can access the BIN/MNN/GGUF format AI model as capabilities.
-you can add `-DOption=ON` and end of command to select it.
+**Windows/MSVC is the only platform that supports multiple backends at the same time** — you can add
+`-DOption=ON` at the end of the CMake configure command to select it. Linux and Android builds are
+fixed to QNN/Genie-only and do not accept these options (see [BUILD_LINUX.md](BUILD_LINUX.md) and
+[BUILD_ANDROID_README.md](BUILD_ANDROID_README.md)).
 
-| Option     | Function                  | Default |
-|------------|:--------------------------|---------|
-| `USE_MNN`  | Support mnn format model  | OFF     |
-| `USE_GGUF` | Support gguf format model | OFF     |
+| Option         | Function                                                            | Default |
+|----------------|:---------------------------------------------------------------------|---------|
+| `USE_MNN`      | Support mnn format model (CPU backend)                             | OFF     |
+| `USE_GGUF`     | Support gguf format model (GPU backend via llama.cpp, falls back to CPU) | OFF     |
+| `BUILD_AS_DLL` | Build only the `GenieAPILibrary.dll` target. Default OFF builds the full set (exe + dll + all examples: `GenieAPIClient`, `SampleApp`, `examples/tools`). | OFF |
 
 ```
 cd samples\genie\c++\Service
 mkdir build && cd build
-cmake -S .. -B . -A ARM64 ..
+cmake -S .. -B . -A ARM64 -DUSE_MNN=ON -DUSE_GGUF=ON
 cmake --build . --config Release --parallel 4
 ```
 
-Then the full release will locate at `Service\GenieSerivce_v2.1.4`
+Then the full release will locate at `Service\GenieService_v<VERSION>` (currently `Service\GenieService_v2.3.7`,
+see `scripts/version.cmake` for the authoritative version number).
 
 ## Build for Android: <br>
 
@@ -69,7 +77,7 @@ The automated build script (`build_android.bat`) will:
 
 Simply run:
 ```cmd
-cd qai-appbuilder\samples\genie\c++
+cd qai-appbuilder\samples\genie\c++\Service
 build_android.bat
 ```
 
@@ -91,7 +99,9 @@ chmod +x build_linux.sh
 ./build_linux.sh
 ```
 
-The output goes to `samples/genie/c++/Service/GenieService_v<VERSION>/`.
+The output goes to `samples/genie/c++/Service/build-linux/GenieService_v<VERSION>_qnn<SDK_DIR_NAME>/`
+(the Linux build is fixed to QNN/Genie-only; `USE_MNN`/`USE_GGUF` are not available here — see
+[BUILD_LINUX.md](BUILD_LINUX.md) for details).
 
 For all options, runtime setup, and troubleshooting see
 [BUILD_LINUX.md](BUILD_LINUX.md).

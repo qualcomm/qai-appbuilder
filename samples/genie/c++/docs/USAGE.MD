@@ -46,11 +46,15 @@ Options:
   -h,--help                   Print this help message and exit
   -c,--config_file TEXT       Path to the config file.
   --adapter TEXT              the adapter of lora
-  -l,--load_model             Load the model.
-  -a,--all_text               Output all text includes tool calls text.
+  -l,--load_model             Load the model and also load additional models listed in service_config.json.
+  -a,--all_text                Output all text includes tool calls text.
   -t,--enable_thinking        Enable thinking mode.
+  -g,--prompt_debug           Enable prompt compression optimization debug logs. (Repeat for level 2: -g -g)
   -v,--version                Print version info and exit.
-  -n,--num_response INT       The number of rounds saved in the historical record
+  -n,--num_response INT       The number of rounds saved in the historical record. Passing -1 has special
+                              semantics beyond history size: it switches the server to a stateless
+                              client-managed-history mode, enables prompt compression/optimization, and
+                              enables long-text Map-Reduce summarization — it is not simply "save -1 rounds".
   -o,--min_output_num INT     The minimum number of tokens output
   -d,--loglevel INT           log level setting for record. 1: Error, 2: Warning, 3: Info, 4: Debug, 5: Verbose
   -f,--logfile TEXT           log file path, it's a option
@@ -85,10 +89,18 @@ Client also have some options:
 Options:
   --prompt                    Your questions for ask. Default is "hi!" or "What is it descript"
   --system                    Model system prompt. Default is "You are a helpful assistant."   
-  --stream                    Answer in stream mode. It is required
+  --stream                    Answer in stream mode. This is an optional boolean flag (omit it for a
+                              non-streaming response); it is not required.
   --model                     The model will be loaded. It's should located at ./models/xxxx
-  --ip                        The server ip for communication. Default is "127.0.0.1"   
+  --host                      The server address for communication (host, or host:port). Default is
+                              "127.0.0.1:8910" — note that the default already includes the port, not just an IP.
   --img                       the client image path for VLM models.
+  --audio                     the client audio path for multimodal (audio input) models.
+  --key                       API key to send as "api_key" in the request body.
+  --raw_file                  Path to a file containing a complete, ready-to-send request body (JSON); when
+                              set, it is sent as-is instead of building the body from --prompt/--system/etc.
+  --bench                     Enable a lightweight benchmark/stress mode (forcibly truncates the response
+                              after a short prefix instead of waiting for the full output).
 ```
 
 #### text models
@@ -97,7 +109,7 @@ Asking you a question directly.
 
 Run c++ version for model Qwen2.0-7B-SSD
 
-`GenieAPIClient.exe --prompt "how to fish?" --stream --model Qwen2.0-7B-SSD --ip 127.0.0.1`
+`GenieAPIClient.exe --prompt "how to fish?" --stream --model Qwen2.0-7B-SSD --host 127.0.0.1:8910`
 
 #### image models
 
@@ -109,21 +121,11 @@ Run c++ version for model qwen2.5vl3b
 
 ## Python example
 
-You can run Python version with same c++ Client params.
-
-The sample is located at [GenieAPIClient.py](../Service/examples/GenieAPIClient/GenieAPIClient.py)
-
-Install the dependence: openai
-
-```
-pip install openai
-```
-
-Run python version for qwen2.5vl3b
-
-```
-python GenieAPIClient.py --prompt "what is the image descript?" --img test.png --stream --model qwen2.5vl3b
-```
+`GenieAPIClient` is a C++ CLI sample; there is no equivalent standalone Python CLI for it in this repository. If you
+want to call the service from Python instead, see [GenieAPIClientTools.py](../../python/GenieAPIClientTools.py)
+(also referenced in Note 3 above), or call the REST endpoints directly — see [API.md](API.md) for the
+`/v1/chat/completions` request/response format (it works with any OpenAI-compatible client library, including the
+`openai` Python package).
 
 ## Tools
 

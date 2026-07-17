@@ -1,0 +1,30 @@
+{
+  "OptionParams": {
+    "temperature": 0,
+    "top_p": 0.95,
+    "top_k": 40,
+    "n_predict": 512,
+    "n_ctx": 8192
+  },
+  "stream": false,
+  "messages": [
+    {
+      "role": "system",
+      "content": [
+        {
+          "type": "text",
+          "text": "You are a helpful AI assistant."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Please introduce yourself briefly."
+        }
+      ]
+    }
+  ]
+}

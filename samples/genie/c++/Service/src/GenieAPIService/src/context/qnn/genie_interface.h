@@ -1,4 +1,4 @@
-//==============================================================================
+﻿//==============================================================================
 //
 // Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //
@@ -10,14 +10,14 @@
 #define GENIE_IMPL_H
 
 #include "genie.h"
-
-#define GENIE_BUILDER_DEBUG 1
+#include "log.h"
+#include "../../model/model_config.h"
 
 struct GenieContext::QInterfaceImpl
 {
     QInterfaceImpl(GenieContext *context)
     {
-        if (context->model_config_.get_qnn_embedding().embedding_type_ == QNNEmbeddingType::None)
+        if (context->model_config_.i_model_config_.get_qnn_embedding().embedding_type_ == QNNEmbeddingType::None)
         {
             inf_ = new IGeneral{context};
             return;
@@ -45,7 +45,7 @@ struct GenieContext::QInterfaceImpl
 
         explicit QInterface(GenieContext *context) :
                 context_{context},
-                kContextSize_{context->model_config_.context_size()} {}
+                kContextSize_{context->model_config_.get_context_size()} {}
 
         virtual bool set_content(ModelInput &model_input) = 0;
 
@@ -59,7 +59,7 @@ struct GenieContext::QInterfaceImpl
 
         virtual Genie_Status_t GenieDialogQueryImpl() = 0;
 
-        static void OutPutText(ModelInput &model_input);
+        void OutPutText(ModelInput &model_input, const char *query_type_label);
 
         int cur_length_{0};
 
@@ -90,7 +90,7 @@ struct GenieContext::QInterfaceImpl
         {
             input_data_ = reinterpret_cast<uint8_t *>(const_cast<char *>(model_input.text_.data()));
             input_len_ = model_input.text_.size();
-            OutPutText(model_input);
+            OutPutText(model_input, context_->get_query_type_label(model_input));
             return true;
         }
 
@@ -133,10 +133,11 @@ struct GenieContext::QInterfaceImpl
 
         double requant_scale{1.0};
         double requant_offset{0};
+
         void (*token_to_embed_callback_fn_)(const int32_t token,
                                             void *embedding,
                                             const uint32_t embeddingSize,
-                                            const void *userData);
+                                            const void *userData){};
 
         template<typename T, typename P>
         static void TokenToEmbedCallback(const int32_t token,

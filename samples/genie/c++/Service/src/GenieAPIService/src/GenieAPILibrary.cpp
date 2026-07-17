@@ -1,4 +1,4 @@
-//==============================================================================
+﻿//==============================================================================
 //
 // Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
 //
@@ -12,22 +12,15 @@
 #include "chat_request_handler/model_input_builder.h"
 #include "chat_history/chat_history.h"
 #include "response/response_dispatcher.h"
-#include "log.h"
 #include "utils.h"
-#include <thread>
-#include <mutex>
-#include <sstream>
-#include <ctime>
-#include <filesystem>
 #include <GenieCommon.h>
+#include <filesystem>
 
 #ifdef WIN32
 #include <direct.h>
 #else
 #include <unistd.h>
 #endif
-
-namespace fs = std::filesystem;
 
 // Internal implementation class
 class QInterfaceImpl {
@@ -41,10 +34,7 @@ public:
     std::condition_variable load_cv;
     bool load_done = false;
     bool load_result = false;
-    bool initialized = false;
-    bool service_running = false;
     bool model_loaded = false;
-    bool is_generating = false;
     bool stop_requested = false;
     
     std::string current_prompt;
@@ -71,19 +61,27 @@ public:
     int current_status = init;
     int generate_status = completed;
     
-    bool InitializeModelManager(const std::string& config_json) {
+    bool InitializeModelManager(const std::string& config_json, Level level) {
         try {
-            // Parse config JSON string and save to temporary file
-            json config_data = json::parse(config_json);
-            
-            // Extract dialog config
-            if (!config_data.contains("dialog")) {
-                last_error = "Config JSON must contain 'dialog' section";
+            // config_json 可以是两种形式：
+            // 1) 内联 JSON 文本(SampleApp 宏编译内置的 QNN dialog 字符串)——保留严格的 dialog 必填校验
+            // 2) 磁盘上真实的 config.json 路径(QNN/MNN/GGUF 均可)——跳过该校验,交给底层引擎自己识别
+            std::string trimmed = config_json;
+            size_t start = trimmed.find_first_not_of(" \t\n\r");
+            trimmed = (start != std::string::npos) ? trimmed.substr(start) : std::string();
+            bool is_inline_json = (!trimmed.empty() && trimmed[0] == '{');
+
+            if (is_inline_json) {
+                json config_data = json::parse(config_json);
+                if (!config_data.contains("dialog")) {
+                    last_error = "Config JSON must contain 'dialog' section";
+                    return false;
+                }
+            } else if (!File::IsFileExist(config_json)) {
+                last_error = "config is neither an inline JSON object nor an existing config file path: " + config_json;
                 return false;
             }
-            
-            // Create a temporary config file in memory or use the JSON directly
-            // For now, we'll store the JSON and pass it to model manager
+
             config_file = config_json;
             
             // Create model config
@@ -95,6 +93,7 @@ public:
             model_config.minOutputNum = min_output_num;
             model_config.outputAllText = output_all_text;
             model_config.enableThinking = enable_thinking;
+            model_config.log_level_ = level;
             
             // Create model manager
             model_manager = std::make_unique<ModelManager>(std::move(model_config));
@@ -109,9 +108,6 @@ public:
             // Create response dispatcher
             response_dispatcher = std::make_unique<ResponseDispatcher>(*model_manager, *chat_history);
             
-            // Create input builder
-            input_builder = std::make_unique<ModelInputBuilder>(*chat_history, *model_manager);
-            
             return true;
             
         } catch (const std::exception& e) {
@@ -119,11 +115,54 @@ public:
             return false;
         }
     }
+
+    // primary 模型（--config 指定）加载成功后调用：若 RootDir/service_config.json 存在，
+    // 附加加载其中的 qnn/NPU 模型条目；附加加载不影响 primary 已加载成功这一结果，
+    // 且会把 default_model_name_ 复位回 primary，避免被最后加载的额外模型覆盖。
+    void TryAutoLoadAdditionalQnnModels() {
+        if (!model_manager) {
+            return;
+        }
+        std::string service_config_path = (std::filesystem::path(RootDir) / "service_config.json").generic_string();
+        if (!File::IsFileExist(service_config_path)) {
+            return;
+        }
+        bool multi_ok = model_manager->LoadAllModelsFromConfig("qnn");
+        My_Log{My_Log::Level::kInfo} << "[api_loadmodel] LoadAllModelsFromConfig(qnn): "
+                                      << (multi_ok ? "loaded additional qnn model(s)" : "no additional qnn model loaded")
+                                      << std::endl;
+        model_manager->SetDefaultModel(model_manager->model_name_);
+        response_dispatcher = std::make_unique<ResponseDispatcher>(*model_manager, *chat_history,
+                                                                     model_manager->GetDefaultInstanceConfig());
+    }
 };
+
+// Builds the OpenAI-style request JSON from a raw prompt, reused by both api_Generate overloads:
+// if the prompt is itself valid JSON it is used as-is, otherwise it is wrapped into a single
+// user message before the stream flag is set.
+static json BuildRequestDataFromPrompt(const std::string& prompt, bool stream) {
+    json request_data;
+    try {
+        request_data = json::parse(prompt);
+    } catch (...) {
+        request_data["messages"] = json::array();
+        json message;
+        message["role"] = "user";
+        json content;
+        content["question"] = prompt;
+        content["image"] = "";
+        content["audio"] = "";
+        message["content"] = content;
+        request_data["messages"].push_back(message);
+    }
+    request_data["stream"] = stream;
+    return request_data;
+}
 
 // api_interface implementation
 
-api_interface::api_interface(std::string& config) : config_(config), impl_(nullptr), status(init) {
+api_interface::api_interface(std::string& config, Level level) : config_(config), level_{level}
+{
     // Initialize RootDir and CurrentDir for DLL usage
     if (RootDir.empty()) {
         char buffer[1024];
@@ -151,9 +190,8 @@ bool api_interface::api_loadmodel(const std::string& model_path, std::vector<std
     if (!impl_) {
         impl_ = new QInterfaceImpl();
         
-        if (!impl_->InitializeModelManager(config_)) {
-            printf("[ERROR] api_loadmodel: InitializeModelManager failed, error: %s\n", impl_->last_error.c_str());
-            fflush(stdout);
+        if (!impl_->InitializeModelManager(config_, level_)) {
+            My_Log{My_Log::Level::kError} << "[api_loadmodel] InitializeModelManager failed: " << impl_->last_error << std::endl;
             status = error;
             impl_->current_status = error;
             return false;
@@ -165,33 +203,32 @@ bool api_interface::api_loadmodel(const std::string& model_path, std::vector<std
         status = loading;
         impl_->current_status = loading;
         
-        // Check if we're using JSON string config (config_file_ starts with '{')
+        // config_file_ 要么是内联 JSON 文本(以 '{' 开头),要么是磁盘上真实存在的 config.json 路径,
+        // 两种情况都走 LoadSingleModel() 直连加载(等价于 GenieAPIService.exe -c 的单模型加载路径),
+        // 都能覆盖 QNN/MNN/GGUF 三种后端;其余情况才走多模型按名查找的 LoadModelByName。
         std::string trimmed = impl_->model_manager->config_file_;
         size_t start = trimmed.find_first_not_of(" \t\n\r");
         if (start != std::string::npos) {
             trimmed = trimmed.substr(start);
         }
         
-        bool is_json_config = (!trimmed.empty() && trimmed[0] == '{');
+        bool is_direct_config = (!trimmed.empty() && trimmed[0] == '{') || File::IsFileExist(trimmed);
         
-        if (is_json_config) {
-            // Using JSON string config - set model path and call LoadModel directly
-            // Set the actual model path from the parameter
+        if (is_direct_config) {
+            // 直连加载:model_path 是模型目录,model_name_/model_root_ 按目录名/父目录推导,
+            // 与 ModelManager::InitializeConfig() 里 -c 单模型模式的推导方式保持一致。
             impl_->model_manager->model_path_ = model_path;
-            impl_->model_manager->model_name_ = "json_config_model";
-            impl_->model_manager->model_root_ = ".";
-            // Keep config_file_ as JSON string - don't change it!
-            // impl_->model_manager->config_file_ is already the JSON string from constructor
+            impl_->model_manager->model_name_ = std::filesystem::path(model_path).filename().generic_string();
+            impl_->model_manager->model_root_ = std::filesystem::path(model_path).parent_path().generic_string();
+            // Keep config_file_ as-is (inline JSON text or disk path) - don't change it!
             
-            if (!impl_->model_manager->LoadModel()) {
+            if (!impl_->model_manager->LoadSingleModel()) {
                 impl_->last_error = "Failed to load model";
-                printf("[ERROR] api_loadmodel: LoadModel failed\n");
-                fflush(stdout);
+                My_Log{My_Log::Level::kError} << "[api_loadmodel] LoadSingleModel failed" << std::endl;
                 status = error;
                 impl_->current_status = error;
                 return false;
             }
-            
             if (impl_->response_dispatcher) {
                 impl_->response_dispatcher->ResetProcessor();
             }
@@ -200,8 +237,7 @@ bool api_interface::api_loadmodel(const std::string& model_path, std::vector<std
             bool first_load = false;
             if (!impl_->model_manager->LoadModelByName(model_path, first_load)) {
                 impl_->last_error = "Failed to load model: " + model_path;
-                printf("[ERROR] api_loadmodel: LoadModelByName failed\n");
-                fflush(stdout);
+                My_Log{My_Log::Level::kError} << "[api_loadmodel] LoadModelByName failed: " << model_path << std::endl;
                 status = error;
                 impl_->current_status = error;
                 return false;
@@ -212,6 +248,8 @@ bool api_interface::api_loadmodel(const std::string& model_path, std::vector<std
             }
         }
         
+        impl_->TryAutoLoadAdditionalQnnModels();
+        
         impl_->model_loaded = true;
         status = loaded;
         impl_->current_status = loaded;
@@ -219,8 +257,7 @@ bool api_interface::api_loadmodel(const std::string& model_path, std::vector<std
         
     } catch (const std::exception& e) {
         impl_->last_error = e.what();
-        printf("[ERROR] api_loadmodel: Exception caught: %s\n", e.what());
-        fflush(stdout);
+        My_Log{My_Log::Level::kError} << "[api_loadmodel] Exception caught: " << e.what() << std::endl;
         status = error;
         impl_->current_status = error;
         return false;
@@ -230,8 +267,8 @@ bool api_interface::api_loadmodel(const std::string& model_path, std::vector<std
 bool api_interface::api_loadmodel_async(const std::string& model_path, std::vector<std::string>& model_name, const std::string& hwinfo) {
     if (!impl_) {
         impl_ = new QInterfaceImpl();
-        if (!impl_->InitializeModelManager(config_)) {
-            printf("[ERROR] api_loadmodel_async: InitializeModelManager failed\n");
+        if (!impl_->InitializeModelManager(config_, level_)) {
+            My_Log{My_Log::Level::kError} << "[api_loadmodel_async] InitializeModelManager failed: " << impl_->last_error << std::endl;
             status = error;
             impl_->current_status = error;
             return false;
@@ -262,6 +299,7 @@ bool api_interface::api_loadmodel_async(const std::string& model_path, std::vect
                 if (first_load && impl_->response_dispatcher) {
                     impl_->response_dispatcher->ResetProcessor();
                 }
+                impl_->TryAutoLoadAdditionalQnnModels();
                 impl_->model_loaded = true;
                 this->status = ::loaded;
                 impl_->current_status = ::loaded;
@@ -269,18 +307,15 @@ bool api_interface::api_loadmodel_async(const std::string& model_path, std::vect
                 impl_->last_error = "Failed to load model: " + mp;
                 this->status = ::error;
                 impl_->current_status = ::error;
-                printf("[ERROR] api_loadmodel_async: LoadModelByName failed\n");
+                My_Log{My_Log::Level::kError} << "[api_loadmodel_async] LoadModelByName failed: " << mp << std::endl;
             }
         } catch (const std::exception& e) {
-            printf("[ERROR] api_loadmodel_async: Exception caught: %s\n", e.what());
-            printf("[ERROR] api_loadmodel_async: Exception details: %s\n", e.what());
-            fflush(stdout);
+            My_Log{My_Log::Level::kError} << "[api_loadmodel_async] Exception caught: " << e.what() << std::endl;
             impl_->last_error = std::string("Exception in model load: ") + e.what();
             this->status = ::error;
             impl_->current_status = ::error;
         } catch (...) {
-            printf("[ERROR] api_loadmodel_async: Unknown exception caught!\n");
-            fflush(stdout);
+            My_Log{My_Log::Level::kError} << "[api_loadmodel_async] Unknown exception caught" << std::endl;
             impl_->last_error = "Unknown exception in model load";
             this->status = ::error;
             impl_->current_status = ::error;
@@ -312,8 +347,7 @@ bool api_interface::api_wait_loaded(int timeout_ms) {
         while (!impl_->load_done) {
             impl_->load_cv.wait_for(lk, std::chrono::seconds(5), pred);
             if (!impl_->load_done) {
-                printf("[INFO] api_wait_loaded: Still loading model, please wait...\n");
-                fflush(stdout);
+                My_Log{My_Log::Level::kInfo} << "[api_wait_loaded] Still loading model, please wait..." << std::endl;
             }
         }
     } else {
@@ -321,7 +355,7 @@ bool api_interface::api_wait_loaded(int timeout_ms) {
     }
 
     if (!impl_->load_done) {
-        printf("[WARN] api_wait_loaded: Timed out waiting for model load\n");
+        My_Log{My_Log::Level::kWarning} << "[api_wait_loaded] Timed out waiting for model load" << std::endl;
         return false;
     }
 
@@ -377,47 +411,21 @@ std::string api_interface::api_Generate(const std::string& prompt) {
         impl_->current_status = inference;
         impl_->generate_status = generating;
         
-        auto model_handle = impl_->model_manager->get_genie_model_handle().lock();
+        auto model_handle = impl_->model_manager->GetDefaultModelHandle().lock();
         if (!model_handle) {
             impl_->last_error = "Model context unavailable";
             impl_->generate_status = failed;
             return build_response_json("", prompt, false, false);
         }
         
-        // Build JSON request
-        json request_data;
-        
-        // Try to parse prompt as JSON first
-        bool parsed_json = false;
-        try {
-            request_data = json::parse(prompt);
-            parsed_json = true;
-        } catch (...) {
-            // Prompt is not JSON, will build request from plain text
-        }
-        
-        // If not JSON, build request from plain text
-        if (!parsed_json) {
-            request_data["messages"] = json::array();
-            json message;
-            message["role"] = "user";
-            
-            json content;
-            content["question"] = prompt;
-            content["image"] = "";
-            content["audio"] = "";
-            
-            message["content"] = content;
-            request_data["messages"].push_back(message);
-        }
-        
-        request_data["stream"] = false;
+        json request_data = BuildRequestDataFromPrompt(prompt, false);
         
         // Set parameters
         model_handle->SetParamsByConfig(request_data);
         
         // Build model input
         bool is_tool = false;
+        impl_->input_builder = std::make_unique<ModelInputBuilder>(*impl_->chat_history,  impl_->model_manager->GetDefaultInstanceConfig(), nullptr);
         auto& model_input = impl_->input_builder->Build(request_data, is_tool);
         
         // Prepare response dispatcher
@@ -463,43 +471,19 @@ std::string api_interface::api_Generate(const std::string& prompt, std::function
         impl_->generate_status = generating;
         impl_->stream_callback = callback;
         
-        auto model_handle = impl_->model_manager->get_genie_model_handle().lock();
+        auto model_handle = impl_->model_manager->GetDefaultModelHandle().lock();
         if (!model_handle) {
             impl_->last_error = "Model context unavailable";
             impl_->generate_status = failed;
             return build_response_json("", prompt, false, true);
         }
         
-        // Build JSON request
-        json request_data;
-        
-        // Try to parse prompt as JSON first
-        bool parsed_json = false;
-        try {
-            request_data = json::parse(prompt);
-            parsed_json = true;
-        } catch (...) {
-            // Prompt is not JSON, will build request from plain text
-        }
-        
-        // If not JSON, build request from plain text
-        if (!parsed_json) {
-            request_data["messages"] = json::array();
-            json message;
-            message["role"] = "user";
-            json content;
-            content["question"] = prompt;
-            content["image"] = "";
-            content["audio"] = "";
-            message["content"] = content;
-            request_data["messages"].push_back(message);
-        }
-        
-        request_data["stream"] = true;
+        json request_data = BuildRequestDataFromPrompt(prompt, true);
         
         model_handle->SetParamsByConfig(request_data);
         
         bool is_tool = false;
+        impl_->input_builder = std::make_unique<ModelInputBuilder>(*impl_->chat_history,  impl_->model_manager->GetDefaultInstanceConfig(), nullptr);
         auto& model_input = impl_->input_builder->Build(request_data, is_tool);
         
         httplib::Request dummy_req;
@@ -546,47 +530,47 @@ void api_interface::api_Reset() {
 }
 
 int api_interface::api_token_num(const std::string& promptJson) {
-    // TODO: Implement token counting
+    // 暂未实现：token 计数，保留导出签名以保证 ABI 兼容
     return 0;
 }
 
 bool api_interface::api_loadmodel(std::vector<uint8_t*>& buffers, std::vector<size_t>& buffersSize, const std::string& hwinfo) {
-    // TODO: Implement loading from memory buffers
+    // 暂未实现：从内存缓冲区加载模型
     return false;
 }
 
 bool api_interface::api_loadtoken(const std::string& token_fullpath) {
-    // TODO: Implement tokenizer loading
+    // 暂未实现：单独加载 tokenizer
     return false;
 }
 
 bool api_interface::api_warmUp() {
-    // TODO: Implement warm-up
+    // 暂未实现：模型预热
     return false;
 }
 
 std::string api_interface::api_param_return() {
-    // TODO: Implement parameter return
+    // 暂未实现：返回当前推理参数
     return "{}";
 }
 
 bool api_interface::api_unloadtocpu() {
-    // TODO: Implement unload to CPU
+    // 暂未实现：卸载到 CPU
     return false;
 }
 
 void api_interface::api_StartLoop() {
-    // TODO: Implement start loop
+    // 暂未实现：启动常驻循环
 }
 
 void api_interface::api_StopLoop() {
-    // TODO: Implement stop loop
+    // 暂未实现：停止常驻循环
 }
 
 // Private methods
 
 std::string api_interface::api_performance_statistic() {
-    // TODO: Implement performance statistics
+    // 暂未实现：性能统计
     return "{}";
 }
 

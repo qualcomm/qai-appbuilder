@@ -1,4 +1,4 @@
-//==============================================================================
+﻿//==============================================================================
 //
 // Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
 //
@@ -10,16 +10,25 @@
 #define CHAT_HISTORY_H
 
 #include <string>
+#include <memory>
 #include "nlohmann/json.hpp"
 
 using json = nlohmann::ordered_json;
+struct GenieChatMessage
+{
+    std::string role;        // role："user", "assistant", "tool"
+    std::string content;     // message content
+};
 
+class ModelInstanceConfig;
 class IModelConfig;
 
 class ChatHistory
 {
 public:
-    explicit ChatHistory(IModelConfig &model_config_);
+    explicit ChatHistory(ModelInstanceConfig &model_config);
+    
+    explicit ChatHistory(IModelConfig &model_config);
 
     ~ChatHistory();
 
@@ -40,7 +49,7 @@ public:
 
 private:
     class Impl;
-    Impl *impl_{};
+    std::unique_ptr<Impl> impl_;
 };
 
 #endif //CHAT_HISTORY_H

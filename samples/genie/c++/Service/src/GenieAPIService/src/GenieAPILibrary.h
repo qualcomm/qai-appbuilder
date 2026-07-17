@@ -1,4 +1,4 @@
-//==============================================================================
+﻿//==============================================================================
 //
 // Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
 //
@@ -9,12 +9,10 @@
 #ifndef LIB_MODEl_INTERFACE_HPP
 #define LIB_MODEl_INTERFACE_HPP
 
-#include <iostream>
-#include <memory>
 #include <vector>
-#include <map>
 #include <functional>
 #include <string>
+
 
 #ifdef _WIN32
 #ifdef GENIEAPI_EXPORTS
@@ -25,9 +23,6 @@
 #else
 #define LIB_MODEl_INTERFACE_API
 #endif
-
-typedef int32_t int32;
-typedef float float32;
 
 enum generater_status {
     completed = 0,    // finished generate 
@@ -59,14 +54,24 @@ enum hardware_type
 
 struct hardware_info
 {
-    int32 layer;
-    int32 type;
+    int layer;
+    int type;
+};
+
+enum Level
+{
+    kAlways,
+    kError,
+    kWarning,
+    kInfo,
+    kDebug,
+    kVerbose,
 };
 
 class QInterfaceImpl;
 class LIB_MODEl_INTERFACE_API api_interface {
 public:
-    api_interface(std::string& original);
+    api_interface(std::string& original, Level level = (Level)-1);
 
     ~api_interface();
 
@@ -89,52 +94,49 @@ public:
 
     // Async streaming APIs
     bool api_Generate_stream(const std::string& prompt);
+
     std::string api_Get_Generate_token();
+
     int api_generate_status();
+
     bool api_stop();
 
     void api_Reset();
 
     int api_token_num(const std::string& promptJson);
 
-    // TODO
+    // 暂未实现：从内存缓冲区加载模型
     bool api_loadmodel(std::vector<uint8_t*>& buffers, std::vector<size_t>& buffersSize, const std::string& hwinfo);
 
-    // TODO
+    // 暂未实现：单独加载 tokenizer
     bool api_loadtoken(const std::string& token_fullpath);
 
-    // TODO
+    // 暂未实现：模型预热
     bool api_warmUp();
 
-    // TODO
+    // 暂未实现：返回当前推理参数
     std::string api_param_return();
 
-    // TODO
+    // 暂未实现：卸载到 CPU
     bool api_unloadtocpu();
 
-    // TODO
+    // 暂未实现：启动常驻循环
     void api_StartLoop();
 
-    // TODO
+    // 暂未实现：停止常驻循环
     void api_StopLoop();
 
 private:
-    //bool update_params(const params& params);
-    
-    //get prompt token number
     std::string api_performance_statistic();
 
     void stream_ask(const std::string& prompt);
     void inference_thread();
     std::string build_response_json(const std::string& response, const std::string& prompt, bool is_stream=false, bool is_stream_end=false);
 
+    Level level_{};
     int status{ init };
-    int token_exceed = 0;
-    bool canceled = false;
     QInterfaceImpl* impl_{};
     std::string config_;
-    std::time_t generate_start_time_;
-    //params _params;
 };
 
 #endif // LIB_MODEl_INTERFACE_HPP

@@ -1,4 +1,4 @@
-//==============================================================================
+﻿//==============================================================================
 //
 // Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
 // 
@@ -13,6 +13,18 @@ bool ContextBase::Stop()
 {
     My_Log("BuilderBase::Stop called\n");
     return true;
+}
+
+int ContextBase::SetParams(const std::string &key, const std::string &value)
+{
+    My_Log("BuilderBase::SetParams called\n");
+    return 0;
+}
+
+int ContextBase::ApplyParams()
+{
+    My_Log("BuilderBase::ApplyParams called\n");
+    return 0;
 }
 
 bool ContextBase::SetParamsByConfig(const json &j)
@@ -58,15 +70,15 @@ bool ContextBase::SetParamsByConfig(const json &j)
             continue;
         }
 
-//        if (key == "size")
-//        {
-//            int max_length = std::stoi(value);
-//            if (max_length)
-//            {
-//                max_length_ = max_length;
-//            }
-//            goto ahead;
-//        }
+        if (key == "size")
+        {
+            int max_length = std::stoi(value);
+            if (max_length)
+            {
+                max_length_ = max_length;
+            }
+            goto ahead;
+        }
 
         if ((status = SetParams(key, value)))
         {
@@ -82,7 +94,7 @@ bool ContextBase::SetParamsByConfig(const json &j)
         }
 
         ahead:
-        My_Log{} << "set param sueccessfully: "
+        My_Log{} << "set param successfully: "
                  << "name: " << key << ", "
                  << "value: " << value << "\n";
     }
@@ -128,23 +140,10 @@ void ContextBase::setLoraStrength(const std::string &engineRole,
 
 ContextBase::~ContextBase()
 {
-    My_Log("the context is be destroyed\n");
-}
-
-int ContextBase::SetParams(const std::string &key, const std::string &value)
-{
-    My_Log("BuilderBase::SetParams called\n");
-    return 0;
-}
-
-int ContextBase::ApplyParams()
-{
-    My_Log("BuilderBase::ApplyParams called\n");
-    return 0;
+    My_Log("the context is being destroyed\n");
 }
 
 void ContextBase::Reset()
 {
     My_Log("BuilderBase::Reset called\n");
 }
-

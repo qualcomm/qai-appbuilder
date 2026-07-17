@@ -9,25 +9,25 @@
 
 project(SampleApp)
 
-
-add_executable(SampleApp SampleApp.cpp)
-
-# SampleApp needs GenieAPILibrary.h. Pull it straight from the GenieAPIService
-# source tree (where it actually lives) rather than relying on the DLL target's
-# POST_BUILD copy into ${BUILD_PATH}/include, which only happens after the DLL
-# is built and races with this target's compile.
-target_include_directories(SampleApp PRIVATE
-    ${CMAKE_SOURCE_DIR}/src/GenieAPIService/src
-    ${BUILD_PATH}/include
+add_executable(SampleApp
+        SampleApp.cpp
+        ${CMAKE_SOURCE_DIR}/src/common/utils.cpp
 )
 
-# Ensure the GenieAPILibrary DLL (and its import lib) is built before SampleApp,
-# so ${BUILD_PATH}/lib/GenieAPILibrary.lib exists at link time.
-add_dependencies(SampleApp GenieAPILibrary)
+target_include_directories(SampleApp PRIVATE
+        ${BUILD_PATH}/include
+        ${CMAKE_SOURCE_DIR}/src/common
+        ${CMAKE_SOURCE_DIR}/src/GenieAPIService
+)
 
-if(WIN32)
-    target_link_libraries(SampleApp PRIVATE
-        ${BUILD_PATH}/lib/GenieAPILibrary.lib
+target_link_libraries(SampleApp PRIVATE
+    GenieAPILibrary
+)
+
+if (UNIX)
+    set_target_properties(SampleApp PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "$ORIGIN"
     )
-endif()
+endif ()
 
