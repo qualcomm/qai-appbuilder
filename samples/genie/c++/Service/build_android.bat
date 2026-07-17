@@ -77,6 +77,44 @@ if not exist "%GRADLEW%" (
     exit /b 1
 )
 
+rem Gradle distribution resolution, in priority order:
+rem   1. GRADLE_HOME - an already-extracted Gradle install; call its own
+rem      bin\gradle.bat directly, bypassing the wrapper (and GRADLE_DISTRIBUTION_ZIP)
+rem      entirely.
+rem   2. GRADLE_DISTRIBUTION_ZIP - internal override: rewrites distributionUrl to
+rem      a local zip instead of downloading from services.gradle.org.
+rem   3. neither set - the wrapper downloads as usual, but GRADLE_USER_HOME is
+rem      redirected under build-android so the download stays self-contained
+rem      instead of landing in the user's global ~/.gradle.
+set "GRADLE_WRAPPER_PROPS=%ANDROID_PROJECT_DIR%\gradle\wrapper\gradle-wrapper.properties"
+set "GRADLE_EXE=%GRADLEW%"
+set "GRADLE_MODE=wrapper, auto-download"
+if not "%GRADLE_HOME%"=="" (
+    if not exist "%GRADLE_HOME%\bin\gradle.bat" (
+        echo [ERROR] GRADLE_HOME does not contain bin\gradle.bat: %GRADLE_HOME%
+        exit /b 1
+    )
+    set "GRADLE_EXE=%GRADLE_HOME%\bin\gradle.bat"
+    set "GRADLE_MODE=GRADLE_HOME: %GRADLE_HOME%"
+) else if not "%GRADLE_DISTRIBUTION_ZIP%"=="" (
+    if not exist "%GRADLE_DISTRIBUTION_ZIP%" (
+        echo [ERROR] GRADLE_DISTRIBUTION_ZIP does not exist: %GRADLE_DISTRIBUTION_ZIP%
+        exit /b 1
+    )
+    if not exist "%GRADLE_WRAPPER_PROPS%" (
+        echo [ERROR] gradle-wrapper.properties was not found under: %ANDROID_PROJECT_DIR%\gradle\wrapper
+        exit /b 1
+    )
+    set "GRADLE_LOCAL_URL=%GRADLE_DISTRIBUTION_ZIP:\=/%"
+    findstr /v /b /c:"distributionUrl=" "%GRADLE_WRAPPER_PROPS%" > "%GRADLE_WRAPPER_PROPS%.tmp"
+    echo distributionUrl=file\:///!GRADLE_LOCAL_URL!>> "%GRADLE_WRAPPER_PROPS%.tmp"
+    move /Y "%GRADLE_WRAPPER_PROPS%.tmp" "%GRADLE_WRAPPER_PROPS%" >nul
+    set "GRADLE_MODE=local zip: %GRADLE_DISTRIBUTION_ZIP%"
+) else (
+    set "GRADLE_USER_HOME=%BUILD_DIR%\gradle-home"
+    set "GRADLE_MODE=wrapper, auto-download into !GRADLE_USER_HOME!"
+)
+
 if "%JAVA_HOME%"=="" (
     where java.exe >nul 2>nul
     if errorlevel 1 (
@@ -93,6 +131,7 @@ echo   QNN_SDK_ROOT     : %QNN_SDK_ROOT%
 echo   NDK_ROOT         : %NDK_ROOT%
 echo   QNN_STUB_VERSION : %QNN_STUB_VERSION%
 echo   JOBS             : %JOBS%
+echo   GRADLE           : %GRADLE_MODE%
 echo   OUTPUT_DIR       : %OUTPUT_DIR%
 echo ============================================================
 
@@ -129,26 +168,19 @@ if "%SAMPLERATE_SO%"=="" (
 copy /Y "%SAMPLERATE_SO%" "%BUILD_DIR%\libsamplerate.so" >nul
 
 set "APPBUILDER_ROOT=%SCRIPT_DIR%..\..\..\.."
-set "APPBUILDER_BUILD=%BUILD_DIR%\libappbuilder"
-cmake -S "%APPBUILDER_ROOT%" ^
-      -B "%APPBUILDER_BUILD%" ^
-      -G Ninja ^
-      -DCMAKE_TOOLCHAIN_FILE="%ANDROID_TOOLCHAIN_FILE%" ^
-      -DANDROID_ABI=%ANDROID_ABI% ^
-      -DANDROID_PLATFORM=%ANDROID_PLATFORM% ^
-      -DCMAKE_BUILD_TYPE=Release ^
-      -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-if errorlevel 1 exit /b 1
+set "APPBUILDER_NDK_OUT=%BUILD_DIR%\libappbuilder-obj"
+set "APPBUILDER_LIBS_OUT=%BUILD_DIR%\libappbuilder-libs"
+rem Mirrors the repository's own top-level Makefile "android" target (plain
+rem ndk-build against make\Android.mk/Application.mk), which is the documented
+rem way to build libappbuilder.so for Android; not a CMake+Ninja build of src\.
+pushd "%APPBUILDER_ROOT%"
+call "%NDK_BUILD%" NDK_PROJECT_PATH=. NDK_APPLICATION_MK=make\Application.mk APP_BUILD_SCRIPT=make\Android.mk "NDK_OUT=%APPBUILDER_NDK_OUT%" "NDK_LIBS_OUT=%APPBUILDER_LIBS_OUT%" -j%JOBS%
+set "BUILD_RESULT=%ERRORLEVEL%"
+popd
+if not "%BUILD_RESULT%"=="0" exit /b %BUILD_RESULT%
 
-cmake --build "%APPBUILDER_BUILD%" --config Release --parallel %JOBS%
-if errorlevel 1 exit /b 1
-
-rem libappbuilder's own CMakeLists.txt overrides LIBRARY_OUTPUT_PATH to
-rem <APPBUILDER_ROOT>/lib, not anywhere under the out-of-tree build dir, so the
-rem search base must be the source-tree lib dir (see same wildcard note above).
-set "APPBUILDER_SO="
-for /r "%APPBUILDER_ROOT%\lib" %%F in (*libappbuilder.so) do set "APPBUILDER_SO=%%F"
-if "%APPBUILDER_SO%"=="" (
+set "APPBUILDER_SO=%APPBUILDER_LIBS_OUT%\arm64-v8a\libappbuilder.so"
+if not exist "%APPBUILDER_SO%" (
     echo [ERROR] libappbuilder.so was not produced.
     exit /b 1
 )
@@ -189,7 +221,7 @@ rem QAI_APP_BUILDER_VERSION must stay in sync with scripts\version.cmake.
 ) > "%BUILD_DIR%\output\version"
 
 pushd "%ANDROID_PROJECT_DIR%"
-call "%GRADLEW%" assembleRelease "-PqnnStubVersion=%QNN_STUB_VERSION%"
+call "%GRADLE_EXE%" assembleRelease "-PqnnStubVersion=%QNN_STUB_VERSION%"
 set "BUILD_RESULT=%ERRORLEVEL%"
 popd
 if not "%BUILD_RESULT%"=="0" exit /b %BUILD_RESULT%

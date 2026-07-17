@@ -178,15 +178,12 @@ add_custom_command(
         COMMAND ${CMAKE_COMMAND} -E make_directory ${BUILD_PATH}/include
         COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/src/GenieAPILibrary.h ${BUILD_PATH}/include
 )
-if (MSVC)
+if (BUILD_AS_DLL)
     # 保证只构建 ${LIB_NAME}（不连带构建 ${CMAKE_PROJECT_NAME}）时，EXTERNAL_BIN 里的后端
     # dll（包括升级第三方依赖时新增的条目，如 llama-common.dll）也能同步拷贝到 BUILD_PATH，
-    # 不再依赖额外构建一次 exe target 才能补齐。
-    add_custom_command(
-            TARGET ${LIB_NAME} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${EXTERNAL_BIN} ${BUILD_PATH}
-    )
-elseif (UNIX)
+    # 不再依赖额外构建一次 exe target 才能补齐。BUILD_AS_DLL=OFF 时 exe 与 dll 同时构建，
+    # 这份拷贝已由 ${CMAKE_PROJECT_NAME} 的 POST_BUILD 覆盖，此处按需省略以避免两个 target
+    # 并行拷贝同一份文件产生写入竞争。
     add_custom_command(
             TARGET ${LIB_NAME} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different ${EXTERNAL_BIN} ${BUILD_PATH}
@@ -204,20 +201,7 @@ if (MSVC)
                 ${CMAKE_CURRENT_SOURCE_DIR}/../config/sensitive_keywords.json
                 ${BUILD_PATH}
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${CMAKE_CURRENT_SOURCE_DIR}/../test/test_service.py
-                ${BUILD_PATH}
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${BUILD_VERSION_FILE} ${BUILD_PATH}
-    )
-    # BUILD_AS_DLL=ON 时 exe 不构建，同样的打包也得挂到 ${LIB_NAME} 上，才能得到完整产物目录。
-    add_custom_command(
-            TARGET ${LIB_NAME} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory ${CONFIG_PATH} ${BUILD_PATH}/config
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${CMAKE_CURRENT_SOURCE_DIR}/../config/service_config.json
-                ${CMAKE_CURRENT_SOURCE_DIR}/../config/sensitive_keywords.json
-                ${BUILD_PATH}
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${CMAKE_CURRENT_SOURCE_DIR}/../test/test_service.py
+                ${CMAKE_CURRENT_SOURCE_DIR}/../../test/test_service.py
                 ${BUILD_PATH}
             COMMAND ${CMAKE_COMMAND} -E copy_if_different ${BUILD_VERSION_FILE} ${BUILD_PATH}
     )
@@ -231,11 +215,15 @@ elseif (UNIX)
                 ${CMAKE_CURRENT_SOURCE_DIR}/../config/sensitive_keywords.json
                 ${BUILD_PATH}
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${CMAKE_CURRENT_SOURCE_DIR}/../test/test_service.py
+                ${CMAKE_CURRENT_SOURCE_DIR}/../../test/test_service.py
                 ${BUILD_PATH}
             COMMAND ${CMAKE_COMMAND} -E copy_if_different ${BUILD_VERSION_FILE} ${BUILD_PATH}
     )
-    # BUILD_AS_DLL=ON 时 exe 不构建，同样的打包也得挂到 ${LIB_NAME} 上。
+endif ()
+if (BUILD_AS_DLL)
+    # BUILD_AS_DLL=ON 时 exe 不构建，同样的打包也得挂到 ${LIB_NAME} 上，才能得到完整产物目录。
+    # BUILD_AS_DLL=OFF 时省略此块，避免与上面 ${CMAKE_PROJECT_NAME} 的 POST_BUILD 并行拷贝
+    # 同一份文件产生写入竞争。
     add_custom_command(
             TARGET ${LIB_NAME} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_directory ${CONFIG_PATH} ${BUILD_PATH}/config
@@ -244,7 +232,7 @@ elseif (UNIX)
                 ${CMAKE_CURRENT_SOURCE_DIR}/../config/sensitive_keywords.json
                 ${BUILD_PATH}
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${CMAKE_CURRENT_SOURCE_DIR}/../test/test_service.py
+                ${CMAKE_CURRENT_SOURCE_DIR}/../../test/test_service.py
                 ${BUILD_PATH}
             COMMAND ${CMAKE_COMMAND} -E copy_if_different ${BUILD_VERSION_FILE} ${BUILD_PATH}
     )

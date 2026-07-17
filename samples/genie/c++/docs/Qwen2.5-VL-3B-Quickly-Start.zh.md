@@ -7,8 +7,8 @@
 ### 1.1 资源下载与准备
 
 - **下载模型文件**：<br>
-  访问网站下载对应平台的模型文件：[Qwen2.5-VL-3B](https://www.aidevhome.com/?id=51) 模型下载，并将
-  下载的模型放置在 `qai-appbuilder\samples\genie\python\models` 目录中。
+  从 [Qwen2.5-VL-3B](https://www.aidevhome.com/?id=51) 下载对应平台的模型文件，并放置到
+  `qai-appbuilder\samples\genie\python\models` 目录中。
 
 - **下载 Genie 服务程序**：<br>
   前往 GitHub Releases 页面，下载与您的 NPU 架构相匹配的 `GenieAPIService_<version>_QAIRT_<qairt_version>_<stub>.zip` 软件包
@@ -20,7 +20,7 @@
 
 ### 1.2 启动服务并运行示例
 
-操作步骤：打开终端，进入 samples 目录，分别运行服务和客户端命令。
+打开终端，进入 samples 目录，分别运行服务和客户端命令。
 
 ```
 # 1. Entry the directory
@@ -39,32 +39,30 @@ GenieAPIService\GenieAPIService.exe -c "genie\python\models\qwen2.5vl3b\config.j
 GenieAPIClient.exe --prompt "what is the image descript?" --img test.png --stream --model qwen2.5vl3b
 ```
 
-注意：请确保 test.png 存在于当前目录中。
-
 ## 第二部分：在 Android 平台上使用
 
 ### 2.1 资源下载与准备
 
 - **下载模型文件**：<br>
-  与 Windows 平台一致，请先下载对应平台的模型：[Qwen2.5-VL-3B](https://www.aidevhome.com/?id=51)
-  模型下载，并将下载的模型放置在 `/sdcard/GenieModels/` 目录中。
+  与 Windows 平台相同，从 [Qwen2.5-VL-3B](https://www.aidevhome.com/?id=51) 下载对应平台的模型，
+  并放置到设备的 `/sdcard/GenieModels/` 目录中。
 
 
 - **下载并安装 APK**：<br>
-  访问 [GitHub Releases](https://github.com/qualcomm/qai-appbuilder/releases) 页面下载最新的
-  `GenieAPIService.apk` 并将其安装到您的 Android 设备上。
+  从 [GitHub Releases](https://github.com/qualcomm/qai-appbuilder/releases) 下载最新的 `GenieAPIService.apk`
+  并安装到 Android 设备上。
 
 ### 2.2 示例应用的编译与运行
 
-Android 平台的示例应用源代码位于项目目录中，您需要自行编译它。
+Android 示例应用源码位于项目目录中，需自行编译。
 
 - **源代码路径**：
   `samples\android\GenieChat`
 
 
 - **操作说明**：<br>
-  请使用 Android Studio 打开此目录，编译它并安装到您的设备上，然后将其与已安装的
-  `GenieAPIService` 配合使用。
+  用 Android Studio 打开此目录，编译并安装到设备上，然后配合已安装的
+  `GenieAPIService` 使用。
 
 ### 2.3 示例应用截图
 
@@ -76,20 +74,18 @@ Android 平台的示例应用源代码位于项目目录中，您需要自行编
 
 ## 第三部分：Python 调用指南
 
-无论是在 Windows 上运行 GenieAPIService.exe，还是在 Android 上启动 GenieAPIService.apk，一旦服务成功启动，
-它都会显示一个 IP 地址和端口（例如 127.0.0.1:8910 或手机的 IP）。随后我们就可以通过与 OpenAI 兼容的接口
-使用 Python 调用该服务。
+无论 GenieAPIService.exe 运行在 Windows 上，还是 GenieAPIService.apk 运行在 Android 上，服务启动成功后都会显示
+一个 IP 地址和端口（例如 127.0.0.1:8910，或手机的 IP）。通过 OpenAI 兼容接口，用 Python 调用该服务。
 
 ### 3.1 资源下载与准备
 
-请确保已安装 openai 库。
+安装 `openai` 库：
 
 ```pip install openai```
 
 ### 3.2 Python 调用代码（vl_client.py）
 
-创建一个 Python 脚本（例如 vl_client.py），并将以下代码复制到其中。请根据实际情况
-修改 IP 地址。
+创建 Python 脚本（例如 vl_client.py），复制以下代码，并根据实际环境修改 IP 地址。
 
 ```
 import argparse
@@ -205,9 +201,8 @@ python vl_client.py --image "https://www.google.com/images/branding/googlelogo/2
 
 ### 3.4 两种支持的消息格式
 
-上面的脚本使用了一个扁平化的、非标准的 `content` 对象 — `{"question": ..., "image": base64_image}` — 服务器
-仍然支持这种格式（通过 `ModelInputBuilder::ProcessObject` 解析）。这是一种 GenieAPIClient 风格的
-简写形式，主要是为了向后兼容而保留。
+上面的脚本使用了扁平化的非标准 `content` 对象 — `{"question": ..., "image": base64_image}`。服务器仍支持
+此格式（通过 `ModelInputBuilder::ProcessObject` 解析），这是为向后兼容保留的 GenieAPIClient 风格简写。
 
 服务器还支持（并且对于新的集成方式，推荐使用）**标准的 OpenAI `content` 数组格式**
 （通过 `ModelInputBuilder::ProcessArray` 解析），该格式与现成的 OpenAI 客户端

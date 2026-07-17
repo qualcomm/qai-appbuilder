@@ -7,9 +7,8 @@ This section explains how to configure and run the Qwen2.5-VL-3B model in a Wind
 ### 1.1 Resource Download and Preparation
 
 - **Download model files**:<br>
-  Visit the website to download the model files for the corresponding
-  platform: [Qwen2.5-VL-3B](https://www.aidevhome.com/?id=51) Model Download, and place
-  the downloaded model in the `qai-appbuilder\samples\genie\python\models` directory.
+  Download the model matching your platform from [Qwen2.5-VL-3B](https://www.aidevhome.com/?id=51)
+  and place it in the `qai-appbuilder\samples\genie\python\models` directory.
 
 - **Download the Genie Service Program**:<br>
   Go to the GitHub Releases page and download the `GenieAPIService_<version>_QAIRT_<qairt_version>_<stub>.zip` package that
@@ -22,7 +21,7 @@ This section explains how to configure and run the Qwen2.5-VL-3B model in a Wind
 
 ### 1.2 Starting Services and Running Examples
 
-Operation Steps: Open the terminal, navigate to the samples directory, and run the service and client commands
+Open the terminal, navigate to the samples directory, and run the service and client commands
 separately.
 
 ```
@@ -42,34 +41,30 @@ GenieAPIService\GenieAPIService.exe -c "genie\python\models\qwen2.5vl3b\config.j
 GenieAPIClient.exe --prompt "what is the image descript?" --img test.png --stream --model qwen2.5vl3b
 ```
 
-Note: Please ensure test.png is existed in the current directory.
-
 ## Part 2: Using on Android Platform
 
 ### 2.1 Resource Download and Preparation
 
 - **Download model files**:<br>
-  Consistent with the Windows platform, please first download the model for the corresponding
-  platform: [Qwen2.5-VL-3B](https://www.aidevhome.com/?id=51)
-  model download, and place the downloaded model in the `/sdcard/GenieModels/` directory.
+  As with Windows, download the model matching your platform from
+  [Qwen2.5-VL-3B](https://www.aidevhome.com/?id=51) and place it in the `/sdcard/GenieModels/` directory.
 
 
 - **Download and Install APK**: <br>
-  Visit the [GitHub Releases](https://github.com/qualcomm/qai-appbuilder/releases) page to download the latest
-  `GenieAPIService.apk` and install it on your Android device.
+  Download the latest `GenieAPIService.apk` from [GitHub Releases](https://github.com/qualcomm/qai-appbuilder/releases)
+  and install it on the device.
 
 ### 2.2 Example Application Compilation and Execution
 
-The sample application source code for the Android platform is located in the project directory, and you need to compile
-it yourself.
+The Android sample app source is located in the project directory; build it yourself.
 
 - **Source path**:
   `samples\android\GenieChat`
 
 
 - **Instructions**:<br>
-  Please open this directory using Android Studio, compile it, and install it on your device, then use it in
-  conjunction with the already installed `GenieAPIService`.
+  Open this directory in Android Studio, build it, install it on the device, and run it alongside the
+  installed `GenieAPIService`.
 
 ### 2.3 Example Application Screenshots
 
@@ -81,20 +76,20 @@ Example in **Geniechat**
 
 ## Part 3: Python Calling Guide
 
-Whether running GenieAPIService.exe on Windows or launching GenieAPIService.apk on Android, once the service starts
-successfully, it will display an IP address and port (e.g., 127.0.0.1:8910 or the mobile phone's IP). We can then use
-Python to call this service via the OpenAI-compatible interface.
+Whether GenieAPIService.exe runs on Windows or GenieAPIService.apk runs on Android, the service displays an IP
+address and port once it starts (e.g., 127.0.0.1:8910, or the phone's IP). Call this service from Python via the
+OpenAI-compatible interface.
 
 ### 3.1 Resource Download and Preparation
 
-Please ensure the openai library is installed.
+Install the `openai` library:
 
 ```pip install openai```
 
 ### 3.2 Python Calling Code (vl_client.py)
 
-Create a Python script (e.g., vl_client.py) and copy the following code into it. Please modify the IP address according
-to the actual situation.
+Create a Python script (e.g., vl_client.py), copy the following code into it, and update the IP address for your
+environment.
 
 ```
 import argparse

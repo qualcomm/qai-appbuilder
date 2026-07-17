@@ -1,26 +1,25 @@
 # GenieService Usage
 
-GenieService is a pair of HTTP CS(client and server) process.
+GenieService is a pair of HTTP client/server processes.
 
-You should launch the server first, then use client for ask the questions.
+Launch the server first, then use the client to ask questions.
 
 ## Use For Android
 
-1. You can find the GenieAPI in your launcher after installing apk.<br><br>
+1. Find the GenieAPI in your launcher after installing the APK.<br><br>
 
-2. Click the GenieAPI then click the `START SERVICE` button. It will load the model files. You will see "Genie API
-   Service IS Running." if loading model successfully. If you want to stop this service, please click the `STOP SERVICE`
-   button.<br><br>
+2. Click GenieAPI, then click `START SERVICE`. It loads the model files and shows "Genie API
+   Service IS Running." once loading succeeds. Click `STOP SERVICE` to stop the service.<br><br>
 
-    - Note: Because some android devices will freeze the background process, please check Settings-Battery-Power saving
+    - Note: Some Android devices freeze background processes. Check Settings-Battery-Power saving
       settings-App battery management-GenieAPI and select Allow background activity.<br><br>
 
-      If you want to check the log file, please click the menu at top right-hand corner. Then select Log Files->Log:
+      To view the log file, click the menu at the top right, then select Log Files->Log
       1.<br><br>
-      If you want to set the log level, please click the menu at top right-hand corner then select Log Level.<br><br>
+      To set the log level, click the menu at the top right, then select Log Level.<br><br>
 
-3. If you want to use the [GenieChat](https://github.com/qualcomm/qai-appbuilder/tree/main/samples/android/GenieChat), please build and install. And open it and click the menu at top right-hand corner then select settings.
-   you can select the model and go back to main window. Now you can query your questions.<br><br>
+3. To use [GenieChat](https://github.com/qualcomm/qai-appbuilder/tree/main/samples/android/GenieChat), build and install it. Open it, click the menu at the top right, and select settings.
+   Select the model and go back to the main window. Now you can ask questions.<br><br>
 
    ![img.png](img/6.png)
 
@@ -30,7 +29,7 @@ You should launch the server first, then use client for ask the questions.
 
 ### Service start:
 
-The Genie will start with loading the model config file.
+The service loads the model config file on startup.
 
 `GenieAPIService.exe -c "genie\python\models\Qwen2.0-7B-SSD\config.json" -l`
 
@@ -38,8 +37,7 @@ VLM example:
 
 `GenieAPIService.exe -c "genie\python\models\qwen2.5vl3b\config.json" -l`
 
-There is some options, You can also type `GenieService.exe -h` to look up the more usage.
-And set param for it.
+Run `GenieAPIService.exe -h` for the full list of options and parameters.
 
 ```
 Options:
@@ -64,26 +62,23 @@ Options:
 
 - Note 1:
 
-  Please note that the input length must not exceed the maximum number of tokens reserved for the input, which means
-  it cannot exceed the model's maximum context length minus the value set for `--min_output_num`. You can invoke the
-  Text
-  Splitter to send the input text to the server for segmentation, and then sequentially pass the split segments to the
-  LLM
-  to complete the question-answering process.<br>
+  Input length must not exceed the tokens reserved for input — the model's maximum context length minus the
+  value set for `--min_output_num`. Use the Text Splitter to segment long input text, then pass each segment
+  to the LLM sequentially to complete the question-answering process.<br>
 
 
 - Note 2:
 
-  It is recommended to disable thinking mode when using the tools call function.<br>
+  Disable thinking mode when using the tools call function (recommended).<br>
 
 
 - Note 3:
 
-  You can refer to [GenieAPIClientTools.py](../../python/GenieAPIClientTools.py) on how to use tools call.<br>
+  See [GenieAPIClientTools.py](../../python/GenieAPIClientTools.py) for how to use tools call.<br>
 
 ### Client Start
 
-Client also have some options:
+Client options:
 
 ```
 Options:
@@ -105,7 +100,7 @@ Options:
 
 #### text models
 
-Asking you a question directly.
+Ask a question directly.
 
 Run c++ version for model Qwen2.0-7B-SSD
 
@@ -113,7 +108,7 @@ Run c++ version for model Qwen2.0-7B-SSD
 
 #### image models
 
-For VLM models, you should provide your question and the image for client
+For VLM models, provide both the question and the image.
 
 Run c++ version for model qwen2.5vl3b
 
@@ -121,12 +116,12 @@ Run c++ version for model qwen2.5vl3b
 
 ## Python example
 
-`GenieAPIClient` is a C++ CLI sample; there is no equivalent standalone Python CLI for it in this repository. If you
-want to call the service from Python instead, see [GenieAPIClientTools.py](../../python/GenieAPIClientTools.py)
+`GenieAPIClient` is a C++ CLI sample only; this repository has no equivalent standalone Python CLI. To call the
+service from Python instead, see [GenieAPIClientTools.py](../../python/GenieAPIClientTools.py)
 (also referenced in Note 3 above), or call the REST endpoints directly — see [API.md](API.md) for the
-`/v1/chat/completions` request/response format (it works with any OpenAI-compatible client library, including the
+`/v1/chat/completions` request/response format (compatible with any OpenAI-compatible client library, including the
 `openai` Python package).
 
 ## Tools
 
-There is many useful tools can help you develop and use Service, please move steps to [Tools](TOOLS.md)
+Several tools help with developing and using the service. See [Tools](TOOLS.md).

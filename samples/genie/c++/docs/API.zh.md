@@ -1,7 +1,7 @@
 # GenieAPIService API <br>
 
 ## 聊天补全（Chat Completions）
-这是**核心推理接口**，与 OpenAI 兼容。它注册了四个等效的别名，因此以下任意路径都可以正常工作：
+**核心推理接口**，与 OpenAI 兼容，注册了四个等效别名。以下任意路径均可正常调用：
 ```
 POST /completions
 POST /v1/completions
@@ -13,13 +13,13 @@ POST /v1/chat/completions
 请求体中的 `model` 字段用于选择由哪个已加载的模型来处理该请求：
 - 如果 `model` 与某个已加载模型的名称匹配（参见[获取模型名称列表](#获取模型名称列表get-modelname-list)），则直接使用该模型。
 - 如果省略 `model`，则使用服务器当前的默认模型。
-- 如果设置了 `model` 但它与当前任何已加载的模型都不匹配，服务器会尝试进行**动态切换**：它会卸载当前占用同一设备（NPU/GPU/CPU）的模型，并按需加载所请求的模型，然后处理该请求。这只有在该模型确实能在配置的模型根目录下的磁盘中找到时才有效；否则请求会失败。
+- 如果设置了 `model` 但未匹配任何已加载模型，服务器会尝试**动态切换**：卸载当前占用同一设备（NPU/GPU/CPU）的模型，按需加载所请求的模型，再处理该请求。仅当该模型确实存在于配置的模型根目录下时才会生效，否则请求失败。
 - 一些代理前端会在 `model` 前添加 `local::` 前缀，路由时会自动去除该前缀。
 
 只有当服务器上有多个可用模型时，这种路由才有意义——关于如何通过 `service_config.json` 配置多个模型，请参见 [MODEL_DEPLOYMENT.zh.md](MODEL_DEPLOYMENT.zh.md)。
 
 ### `messages` —— 支持两种格式
-每条消息的 `content` 字段可以接受**以下两种形式之一**——不同请求之间可以混用不同的风格，但单条消息的 `content` 必须使用其中一种：
+每条消息的 `content` 字段支持**以下两种格式之一**——不同请求可以混用风格，但同一条消息的 `content` 只能使用其中一种：
 
 1. **标准 OpenAI 数组格式**（推荐，兼容性最好）：
    ```json
@@ -34,10 +34,10 @@ POST /v1/chat/completions
    {"role": "user", "content": {"question": "What is in this image?", "image": "<base64 or data URL>", "audio": "<base64>"}}
    ```
 
-`image_url`/`image` 和 `input_audio`/`audio` 都是可选的——纯文本聊天时可以省略它们。多模态输入只对支持该功能的模型有意义（`qwen2.5vl*`、`qwen2.5_omini*` 以及 `phi4*` 系列模型）；MNN 和 GGUF 模型不支持多模态输入。
+`image_url`/`image` 与 `input_audio`/`audio` 均为可选字段，纯文本聊天可省略。多模态输入只对支持该功能的模型有意义（`qwen2.5vl*`、`qwen2.5_omini*` 以及 `phi4*` 系列模型）；MNN 和 GGUF 模型不支持多模态输入。
 
 ### `stream` —— 可选，默认为 `false`
-将 `"stream"` 设为 `true` 可以以 `text/event-stream` 服务器推送事件（Server-Sent Events）的形式接收响应，其增量 `delta` 分块格式与 OpenAI 流式 API 所使用的格式相同。省略该字段（或设为 `false`）则会得到一个完整的单条 JSON 响应。
+将 `"stream"` 设为 `true`，以 `text/event-stream` 服务器推送事件（Server-Sent Events）形式接收响应，增量 `delta` 分块格式与 OpenAI 流式 API 一致。省略该字段（或设为 `false`）则返回完整的单条 JSON 响应。
 
 ### 最简示例
 ```python
@@ -58,9 +58,8 @@ print(response.json())
 ---
 
 ## 文本分割器（Text Splitter）
-该功能可以按照指定分隔符的优先顺序以及每个段落的最大长度，将一段长文本切分为多个段落。长度按 token 数量而非文本长度计算。你也可以使用该功能来计算文本的 token 数量。 <br>
-该接口注册了两个等效别名：`POST /textsplitter` 和 `POST /v1/textsplitter`。<br>
-你可以获取如何使用文本分割器的示例代码
+按照指定分隔符的优先顺序和每个段落的最大长度，将长文本切分为多个段落。长度按 token 数量计算，而非文本字符数。该接口同样可用作独立的 token 计数工具。<br>
+注册了两个等效别名：`POST /textsplitter` 和 `POST /v1/textsplitter`。
 
 ```
 import argparse
@@ -89,9 +88,7 @@ for item in result:
 ```
 
 ## 终止输出（Terminate output）
-该功能用于终止模型当前的输出。<br>
-你可以选择传入 `model` 字段以指定某个已加载的模型；如果省略，则针对当前默认模型执行操作。<br>
-你可以获取如何使用该功能的示例代码。
+终止模型当前的输出。可选传入 `model` 字段以指定某个已加载的模型；省略时默认作用于当前默认模型。
 ```
 import requests
 url = "http://127.0.0.1:8910/stop"
@@ -103,7 +100,7 @@ response = requests.post(url, json=params)
 > **关于当前行为的说明：** 聊天历史现在是由每个 `/v1/chat/completions` 请求中的 `messages` 数组即时重新构建的（服务器不会在多次请求之间保留任何服务器端会话状态）。因此，这三个历史遗留接口不再具有其名称所暗示的功能——具体的当前行为请参见下面各自的说明。如果你需要多轮上下文，请在每次请求中把完整的对话内容作为 `messages` 数组发送，而不要依赖这些接口。
 
 ### `POST /clear`
-目前是一个**空操作（no-op）**：它总是返回 `200 OK` 和空的响应体，且不会在服务器端清除任何内容（因为服务器端本来就没有需要清除的历史记录）。
+目前是**空操作（no-op）**：始终返回 `200 OK` 和空响应体，不清除服务器端任何内容——服务器本身不保留任何历史记录。
 ```
 import requests
 
@@ -201,7 +198,7 @@ else:
 ```
 
 ## 获取模型上下文大小（Get model context size）
-输入模型名称以获取该模型的最大上下文长度。如果省略 `model` 或其与任何已加载模型都不匹配，则会返回当前默认模型的上下文大小（不会报错）。<br>
+通过 `model` 字段传入模型名称，获取该模型的最大上下文长度。若省略 `model` 或未匹配到已加载模型，则返回当前默认模型的上下文大小，不会报错。<br>
 ```
 url = "http://127.0.0.1:8910/contextsize"
 params = {"model": model_name}  #Llama2.0-7B-SSD

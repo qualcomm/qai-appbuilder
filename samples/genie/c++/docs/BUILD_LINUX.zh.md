@@ -97,19 +97,17 @@ chmod +x build_linux.sh
 2. 构建 `GenieAPIService`（并传递性地构建 `libappbuilder.so`、`libsamplerate`，
    以及——仅在 Linux 上——为 `cpp-httplib` 使用的 HTTPS 传输层在构建期从
    `github.com/Mbed-TLS/mbedtls` 拉取的一份 mbedTLS 副本）。
-3. 将 QNN 运行时库和默认模型配置文件复制到下面所述的输出目录中。
+3. 将默认模型配置文件与元数据文件（`service_config.json`、`sensitive_keywords.json`、
+   `test_service.py`、构建版本文件 `version`）复制到下面所述的输出目录中。
 
 ### 输出
 
-最终的构建产物会放置于
-`samples/genie/c++/Service/build-linux/GenieService_v<APPVER>_qnn<SDK_DIR_NAME>/`，
-其中 `<SDK_DIR_NAME>` 就是 `$QNN_SDK_ROOT` 路径的最后一段目录名
-（即你实际的 QAIRT SDK 目录被命名为什么——**不是**固定的数字格式）。
+最终的构建产物会放置于一个固定、不带版本号、按平台区分的目录（由
+`Service/CMakeLists.txt` 中的 `BUILD_PATH` 设定）：
+`samples/genie/c++/Service/build-linux/GenieService-linux-arm64/`。
 
-例如，当应用版本为 2.3.7 且
-`QNN_SDK_ROOT=/opt/qairt/2.44.0.260225` 时：
 ```
-Service/build-linux/GenieService_v2.3.7_qnn2.44.0.260225/
+Service/build-linux/GenieService-linux-arm64/
 ├── GenieAPIService               # the executable
 └── libappbuilder.so              # built from the top-level src/
 ```
@@ -119,15 +117,14 @@ Service/build-linux/GenieService_v2.3.7_qnn2.44.0.260225/
 > （`libGenie.so`、`libQnnHtp.so` 等）不会被复制，因为它们作为 SDK 安装的一部分，
 > 已经存在于目标设备上。
 >
-> 在 Windows 上，输出目录使用较短的名称
-> `GenieService_v<APPVER>`（没有 `_qnn<...>` 后缀，也没有 `build-linux/` 这一层）
-> 并包含完整的 SDK 运行时，以便独立部署。
+> 在 Windows 上，输出目录是 `GenieService-win-arm64`（没有
+> `build-linux/` 这一层）并包含完整的 SDK 运行时，以便独立部署。切换 QAIRT SDK
+> 版本后重新构建会直接覆盖之前的产物——目录名从不包含 SDK 版本号。
 
 > **Linux 端仅支持 QNN/Genie 后端。** 与 Windows/MSVC 不同，Linux 构建
 > **不**支持 `USE_MNN`/`USE_GGUF` 后端。`Service/CMakeLists.txt`
 > 在非 MSVC 平台上会主动拒绝这两个选项——传入 `-DUSE_MNN=ON` 或
-> `-DUSE_GGUF=ON`（无论是直接传入，还是通过将来某个版本的脚本可能读取的环境变量间接传入）
-> 都会使 CMake **配置步骤立即失败**，并报出
+> `-DUSE_GGUF=ON` 都会使 CMake **配置步骤立即失败**，并报出
 > `FATAL_ERROR "USE_MNN/USE_GGUF is supported only on
 > Windows/MSVC; Linux builds are QNN-only."`。目前没有任何方法能得到一份
 > 同时支持加载 MNN 或 GGUF 模型的 Linux 构建。
@@ -135,8 +132,8 @@ Service/build-linux/GenieService_v2.3.7_qnn2.44.0.260225/
 ### 构建选项
 
 `build_linux.sh` 只读取脚本开头明确列出的环境变量——它**不会**转发任意的
-`-D...` 参数，也**不会**读取 `USE_MNN`/`USE_GGUF`/`BUILD_LINUX_CLIENT`
-（这三个即使在运行脚本之前导出了，也不会产生任何效果）：
+`-D...` 参数，也**不会**读取 `USE_MNN`/`USE_GGUF`
+（这两个即使在运行脚本之前导出了，也不会产生任何效果）：
 
 | Variable           | Default                        | Meaning |
 |--------------------|---------------------------------|---------|
@@ -147,13 +144,10 @@ Service/build-linux/GenieService_v2.3.7_qnn2.44.0.260225/
 | `JOBS`             | `$(nproc)`                     | Parallel jobs passed to `cmake --build ... -j`. |
 | `BUILD_AS_DLL`     | `OFF`                          | `OFF` builds the `GenieAPIService` executable; `ON` builds only `libGenieAPILibrary.so` instead. |
 
-如果你需要在 Linux 上构建 `GenieAPIClient` CLI 示例程序，它由一个独立的
-CMake 选项 `BUILD_LINUX_CLIENT` 控制（默认 `OFF`，定义于
-`Service/CMakeLists.txt`）——这**不是** `build_linux.sh` 会读取的环境变量。
-你必须自己调用 CMake 并显式传入该参数，
-例如 `cmake -S Service -B Service/build-linux -DBUILD_LINUX_CLIENT=ON ...`。
-它会链接从 `External/curl/` 通过 `ExternalProject` 构建出的 `libcurl`；
-如果需要 HTTPS 支持，请先安装 `sudo apt install libssl-dev`。
+`GenieAPIClient` CLI 示例程序始终随 `GenieAPIService` 一起构建，没有开关能关闭它。
+它链接的是一份仅支持 HTTP（不含 TLS/LDAP/SSH2）的静态 `libcurl`，由它自己的
+`examples/GenieAPIClient/CMakeLists.txt` 通过 `ExternalProject` 从 `External/curl/`
+源码自动构建，无需单独安装 curl。
 
 ---
 
@@ -164,10 +158,8 @@ CMake 选项 `BUILD_LINUX_CLIENT` 控制（默认 `OFF`，定义于
 ```bash
 export QNN_SDK_ROOT=/absolute/path/to/2.44.0.260225
 
-# OUT_DIR follows the pattern build-linux/GenieService_v<APPVER>_qnn<SDK_DIR_NAME>
-# (see section 4 "Output" above for how <SDK_DIR_NAME> is derived).
-# Example for app 2.3.7 + QAIRT 2.44.0.260225:
-OUT_DIR=$(pwd)/samples/genie/c++/Service/build-linux/GenieService_v2.3.7_qnn2.44.0.260225
+# 固定的输出目录名（见上方第 4 节“输出”）。
+OUT_DIR=$(pwd)/samples/genie/c++/Service/build-linux/GenieService-linux-arm64
 
 # Both the QAIRT runtime and our build dir need to be on LD_LIBRARY_PATH.
 export LD_LIBRARY_PATH=$QNN_SDK_ROOT/lib/aarch64-oe-linux-gcc11.2:$OUT_DIR:$LD_LIBRARY_PATH
@@ -189,7 +181,7 @@ cd $OUT_DIR
 
 ### 5.1. 部署到目标设备
 
-将构建输出目录（`build-linux/GenieService_v<APPVER>_qnn<SDK_DIR_NAME>/`）中的
+将构建输出目录（`build-linux/GenieService-linux-arm64/`）中的
 **全部文件**复制到目标设备。该构建只生成运行时必需的二进制文件，
 该目录下的每一个文件都是必需的。
 
@@ -282,10 +274,3 @@ git submodule update --init --recursive
 ```
 `build_linux.sh` 本身**不会**预先检查这一点；该错误是从 CMake 配置步骤中
 冒出来的，因此如果你克隆时没有加 `--recursive`，请主动提前运行上述命令。
-
-**`Could NOT find OpenSSL`（仅在 `BUILD_LINUX_CLIENT=ON` 时出现）**
-`External/curl/` 的 `ExternalProject` 需要 OpenSSL 头文件来构建
-HTTPS 支持。请通过以下命令安装它们：
-```bash
-sudo apt install libssl-dev
-```

@@ -1,7 +1,7 @@
 # GenieAPIService API <br>
 
 ## Chat Completions
-This is the **core inference endpoint** and is OpenAI-compatible. It is registered under four equivalent aliases, so any of the following paths works the same way:
+The **core inference endpoint**, OpenAI-compatible, registered under four equivalent aliases. Any of the following paths works the same way:
 ```
 POST /completions
 POST /v1/completions
@@ -19,7 +19,7 @@ The request body's `model` field selects which loaded model handles the request:
 This routing only matters when the server has more than one model available — see [MODEL_DEPLOYMENT.md](MODEL_DEPLOYMENT.md) for how to configure multiple models via `service_config.json`.
 
 ### `messages` — two supported formats
-Each message's `content` field accepts **either** of the following shapes — you can mix styles across different requests, but a single message's `content` must use one or the other:
+Each message's `content` field accepts **either** of the following shapes. Different requests may mix styles, but a single message's `content` must use one or the other:
 
 1. **Standard OpenAI array format** (recommended, best compatibility):
    ```json
@@ -58,9 +58,8 @@ print(response.json())
 ---
 
 ## Text Splitter
-This function can divide a long text into multiple paragraphs according to the priority order of the specified delimiter and the maximum length of each paragraph. Length is counted by token number instead of text length. You can also use this function to calculate the token number of text. <br>
-This endpoint is registered under two equivalent aliases: `POST /textsplitter` and `POST /v1/textsplitter`.<br>
-You can get the sample code on how to use Text Splitter
+Splits a long text into multiple paragraphs, following the priority order of the given delimiters and a maximum length per paragraph. Length is measured in token count, not character count. The same endpoint also works as a standalone token counter.<br>
+Registered under two equivalent aliases: `POST /textsplitter` and `POST /v1/textsplitter`.
 
 ```
 import argparse
@@ -89,9 +88,7 @@ for item in result:
 ```
 
 ## Terminate output
-This function is used to terminate the model's current output.<br>
-You can optionally pass a `model` field to target a specific loaded model; if omitted, the current default model is targeted.<br>
-You can get the sample code on how to use this function.
+Terminates the model's current output. An optional `model` field targets a specific loaded model; if omitted, the current default model is targeted.
 ```
 import requests
 url = "http://127.0.0.1:8910/stop"
@@ -103,7 +100,7 @@ response = requests.post(url, json=params)
 > **Note on current behavior:** chat history is now built fresh from the `messages` array of each individual `/v1/chat/completions` request (the server keeps no server-side conversation state between requests). As a result, these three legacy endpoints no longer do what their names suggest — see each one below for its exact current behavior. If you need multi-turn context, send the full conversation as the `messages` array on every request instead.
 
 ### `POST /clear`
-Currently a **no-op**: it always returns `200 OK` with an empty body and does not clear anything server-side (there is no server-side history left to clear).
+Currently a **no-op**: always returns `200 OK` with an empty body and clears nothing server-side, since the server retains no history to clear.
 ```
 import requests
 
@@ -201,7 +198,7 @@ else:
 ```
 
 ## Get model context size
-Enter the model name to obtain the maximum context length of that model. If `model` is omitted or does not match a loaded model, the current default model's context size is returned instead (with no error).<br>
+Pass a model name in `model` to obtain that model's maximum context length. If `model` is omitted or does not match a loaded model, the current default model's context size is returned instead, with no error.<br>
 ```
 url = "http://127.0.0.1:8910/contextsize"
 params = {"model": model_name}  #Llama2.0-7B-SSD
