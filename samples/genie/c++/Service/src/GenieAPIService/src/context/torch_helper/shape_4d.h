@@ -1,4 +1,4 @@
-//==============================================================================
+﻿//==============================================================================
 //
 // Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
 //
@@ -334,8 +334,6 @@ Shape_4D<float> concat_shape4d(const Shape_4D<float> &A, const Shape_4D<float> &
     out.d3 = (dim == 3) ? (A.d3 + B.d3) : A.d3;
 
     long long total = static_cast<long long>(out.d0) * out.d1 * out.d2 * out.d3;
-//    if (total > static_cast<long long>(std::numeric_limits<size_t>::max()))
-//        throw std::overflow_error("output size too large");
     out.buf.resize(static_cast<size_t>(total));
 
     // Helpers: linear index in row-major
@@ -580,8 +578,6 @@ Shape_4D<float> slice_shape4d_range(
 
     // Check for overflow when allocating
     long long total = static_cast<long long>(out0) * out1 * out2 * out3;
-//    if (total > static_cast<long long>(std::numeric_limits<size_t>::max()))
-//        throw std::overflow_error("output size too large");
 
     // Prepare output
     Shape_4D<float> out;
@@ -630,17 +626,12 @@ Shape_4D<float> repeat_shape4d(const Shape_4D_View<float> &in, int r0, int r1, i
     if (r0 <= 0 || r1 <= 0 || r2 <= 0 || r3 <= 0)
         throw std::invalid_argument("repeat factors must be > 0");
 
-//    printf("%d %d %d %d", in.d0,  in.d1, in.d2 ,in.d3);
     // Compute output dims and total size (use long long to avoid overflow)
     long long out_d0 = static_cast<long long>(in.d0) * r0;
     long long out_d1 = static_cast<long long>(in.d1) * r1;
     long long out_d2 = static_cast<long long>(in.d2) * r2;
     long long out_d3 = static_cast<long long>(in.d3) * r3;
     long long out_total = out_d0 * out_d1 * out_d2 * out_d3;
-//    printf("    %lld", static_cast<long long>(std::numeric_limits<size_t>::max()));
-    // 18432 >   -1
-//    if (out_total > static_cast<long long>(std::numeric_limits<size_t>::max()))
-//        throw std::overflow_error("output size too large");
 
     // Prepare output
     Shape_4D<float> out;

@@ -1,4 +1,4 @@
-//==============================================================================
+﻿//==============================================================================
 //
 // Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
 //
@@ -8,11 +8,12 @@
 
 #include "genie.h"
 #include "genie_interface.h"
+#include <cstdio>
 
 template<>
-void IEmbedding::TokenToEmbedCallback<float, float>(const int32_t token,
+void IEmbedding::TokenToEmbedCallback<float, float>(int32_t token,
                                                     void *embedding,
-                                                    const uint32_t embeddingSize,
+                                                    uint32_t embeddingSize,
                                                     const void *userData);
 
 #include "log.h"
@@ -26,15 +27,13 @@ void IEmbedding::TokenToEmbedCallback<float, float>(const int32_t token,
 
 IEmbedding::IEmbedding(GenieContext *context) :
         QInterface(context),
-        qnn_embedding_info_{context->model_config_.get_qnn_embedding()} {}
+        qnn_embedding_info_{context->model_config_.i_model_config_.get_qnn_embedding()} {}
 
-void QInterface::OutPutText(ModelInput &model_input)
+void QInterface::OutPutText(ModelInput &model_input, const char *query_type_label)
 {
-#ifdef GENIE_BUILDER_DEBUG
-    My_Log{} << "\n[Prompt]:\n"
+    My_Log{} << "\n[Prompt] [" << query_type_label << "][" << context_->get_model_name() << "]:\n"
              << model_input.text_ << "\n------------\n\n"
-             << "[Response]:\n";
-#endif
+             << "[Response] [" << query_type_label << "][" << context_->get_model_name() << "]:\n";
 }
 
 void QInterfaceImpl::QInterface::GenieCallBack(const char *response,
@@ -54,17 +53,24 @@ void QInterfaceImpl::QInterface::GenieCallBack(const char *response,
     context->m_stream_answer += response;
     context->m_stream_cond.notify_one();  // Notify waiting thread that new data is available
     self->cur_length_ += context->TokenLength(response);
+
     if (self->cur_length_ >= self->kContextSize_)
     {
-        My_Log{My_Log::Level::kError} << "g_CurLength: " << self->cur_length_ << "is over and will stop self"
-                                      << std::endl;
+        // 我们自己按分词估算主动喊停(区别于 genie.cpp 里 SDK 自己报告
+        // GENIE_STATUS_WARNING_CONTEXT_EXCEEDED 的那一条 [MODEL_DEFECT] 日志:
+        // 那条是 SDK 内部真实上下文耗尽,这一条是我们自己的估算提前达到上限)。
+        // 同样以 error 级别打一条带 [MODEL_DEFECT] 标记、reason 字段不同的日志,
+        // 供 test_service.py 侧区分识别、归类为模型缺陷诊断信息。
+        My_Log{My_Log::Level::kError} << "[MODEL_DEFECT] reason=self_estimated_limit_exceeded token_size="
+                                      << self->cur_length_ << " is over and will stop self" << std::endl;
+        context->stopped_by_output_limit_ = true;
         context->Stop();
     }
 }
 
 IEmbedding *IEmbedding::CreateInterface(GenieContext *context)
 {
-    switch (int(context->model_config_.get_qnn_embedding().embedding_type_))
+    switch (int(context->model_config_.i_model_config_.get_qnn_embedding().embedding_type_))
     {
         case QNNEmbeddingType::PHI4MM:
             return new PHI4Embedding(context);
@@ -78,27 +84,27 @@ IEmbedding *IEmbedding::CreateInterface(GenieContext *context)
 
 bool IEmbedding::set_content(ModelInput &model_input)
 {
+    My_Log{} << model_input.image_.empty() << " " << model_input.audio_.empty() << "\n";
     auto model_type = qnn_embedding_info_.model_types_;
     if (model_input.image_.empty() && model_input.audio_.empty())
     {
         if (model_type & ModelType::Text)
         {
-            OutPutText(model_input);
+            OutPutText(model_input, context_->get_query_type_label(model_input));
             this->BuildTextEmbedding(model_input.text_)
                 .MergeEmbedding();
             goto ahead;
         }
         else
         {
-            throw ReportError{"not supprot text mode\n"};
+            throw ReportError{"not support text mode\n"};
         }
     }
-
     if (!model_input.image_.empty())
     {
         if (!(model_type & ModelType::Vision))
         {
-            throw ReportError{"not supprot vision mode\n"};
+            throw ReportError{"not support vision mode\n"};
         }
     }
 
@@ -106,7 +112,7 @@ bool IEmbedding::set_content(ModelInput &model_input)
     {
         if (!(model_type & ModelType::Audio))
         {
-            throw ReportError{"not supprot audio mode\n"};
+            throw ReportError{"not support audio mode\n"};
         }
     }
     try
@@ -253,10 +259,11 @@ std::string QInterfaceImpl::IEmbedding::BuildPrompt(const std::string &system,
                                                     const std::string &user,
                                                     const std::string &padded_prompt)
 {
+    auto needed = std::snprintf(nullptr, 0, kPromptTemplate.c_str(), system.c_str(), user.c_str(), padded_prompt.c_str());
     std::string completed_prompt;
-    completed_prompt.reserve(kPromptTemplate.size() + padded_prompt.size() + system.size() + user.size() + 1);
-    completed_prompt[completed_prompt.size()] = '\0';
-    sprintf(completed_prompt.data(), kPromptTemplate.data(), system.c_str(), user.c_str(), padded_prompt.data());
+    completed_prompt.resize(needed + 1);
+    std::snprintf(completed_prompt.data(), completed_prompt.size(), kPromptTemplate.c_str(), system.c_str(), user.c_str(), padded_prompt.c_str());
+    completed_prompt.resize(needed);
     My_Log(completed_prompt.c_str(), My_Log::Level::kInfo);
     return completed_prompt;
 }

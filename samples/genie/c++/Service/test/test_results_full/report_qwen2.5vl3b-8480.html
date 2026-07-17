@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>qwen2.5vl3b-8480 - 测试报告</title>
+<style>
+:root {
+    --primary: #1565C0;
+    --primary-light: #1976D2;
+    --primary-dark: #0D47A1;
+    --accent: #1565C0;
+    --success: #2E7D32;
+    --success-light: #43A047;
+    --danger: #C62828;
+    --danger-light: #E53935;
+    --warning: #E65100;
+    --warning-light: #FB8C00;
+    --muted: #78909C;
+    --bg: #F5F7FA;
+    --bg-alt: #F8FAFE;
+    --card-bg: #FFFFFF;
+    --border: #E0E0E0;
+    --border-strong: #BDBDBD;
+    --text: #263238;
+    --text-secondary: #546E7A;
+    --rule: #E0E0E0;
+    --radius: 8px;
+    --radius-sm: 4px;
+    --shadow: 0 2px 8px rgba(0,0,0,0.08);
+    --shadow-hover: 0 4px 14px rgba(21,101,192,0.12);
+    --font-serif: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    --font-mono: 'SF Mono', 'Cascadia Code', 'JetBrains Mono', Consolas, Menlo, monospace;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { font-feature-settings: 'kern', 'liga', 'calt', 'tnum'; }
+body { font-family: var(--font-sans); background: var(--bg); color: var(--text); line-height: 1.6; font-size: 14px; -webkit-font-smoothing: antialiased; }
+.header { background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%); color: #FFFFFF; padding: 40px 0; margin-bottom: 30px; position: relative; box-shadow: 0 2px 12px rgba(13,71,161,0.18); }
+.header-inner { max-width: 1400px; margin: 0 auto; padding: 0 30px; }
+.header .eyebrow { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(255,255,255,0.75); margin-bottom: 10px; font-weight: 600; }
+.header h1 { font-size: 30px; font-weight: 600; margin-bottom: 8px; letter-spacing: -0.5px; line-height: 1.2; color: #FFFFFF; }
+.header .subtitle { color: rgba(255,255,255,0.85); font-size: 14px; max-width: 720px; }
+.header .meta { display: flex; gap: 28px; margin-top: 18px; flex-wrap: wrap; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.18); }
+.header .meta-item { font-size: 13px; color: rgba(255,255,255,0.92); font-variant-numeric: tabular-nums; }
+.header .meta-item strong { color: #FFFFFF; font-weight: 600; }
+.cmdline-details { display: inline-block; vertical-align: middle; }
+.cmdline-details summary { cursor: pointer; color: rgba(255,255,255,0.92); font-weight: 600; list-style: none; }
+.cmdline-details summary::-webkit-details-marker { display: none; }
+.cmdline-details summary strong { color: #FFFFFF; }
+.cmdline-pre { white-space: pre-wrap; word-break: break-all; font-family: var(--font-mono); font-size: 11px; line-height: 1.5;
+    color: rgba(255,255,255,0.92); margin: 8px 0 0; max-width: 900px; max-height: 160px; overflow-y: auto;
+    background: rgba(255,255,255,0.12); padding: 8px 10px; border-radius: var(--radius-sm); }
+.container { max-width: 1400px; margin: 0 auto; padding: 0 30px 60px; }
+.summary-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 28px; }
+.summary-card { background: var(--card-bg); border-radius: var(--radius); padding: 22px 20px; text-align: center; box-shadow: var(--shadow); border-top: 4px solid var(--muted); transition: transform 0.18s ease, box-shadow 0.18s ease; }
+.summary-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-hover); }
+.summary-card.card-pass { border-top-color: var(--success); }
+.summary-card.card-fail { border-top-color: var(--danger); }
+.summary-card.card-crash { border-top-color: var(--warning); }
+.summary-card .num { font-size: 36px; font-weight: 700; line-height: 1.2; font-variant-numeric: tabular-nums; letter-spacing: -0.5px; color: var(--text); }
+.summary-card .label { font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 6px; font-weight: 600; }
+.summary-card.card-pass .num { color: var(--success); }
+.summary-card.card-fail .num { color: var(--danger); }
+.summary-card.card-crash .num { color: var(--warning); }
+.progress-bar { background: #E8EAF6; border-radius: 20px; height: 28px; margin: 18px 0 8px; overflow: hidden; position: relative; box-shadow: inset 0 1px 2px rgba(0,0,0,0.04); }
+.progress-fill { height: 100%; border-radius: 20px; transition: width 0.6s ease; display:flex; align-items:center; justify-content:center; }
+.progress-fill.good { background: linear-gradient(90deg, var(--success-light), #66BB6A); }
+.progress-fill.warn { background: linear-gradient(90deg, var(--warning-light), #FFA726); }
+.progress-fill.bad { background: linear-gradient(90deg, var(--danger-light), #EF5350); }
+.progress-text { font-size: 13px; font-weight: 600; color: white; text-shadow: 0 1px 2px rgba(0,0,0,0.3); letter-spacing: 0.3px; }
+.progress-meta { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-secondary); margin-bottom: 28px; padding: 0 4px; font-variant-numeric: tabular-nums; }
+.progress-meta .pct { color: var(--primary); font-weight: 600; font-size: 13px; }
+.section { margin-bottom: 32px; }
+.section h2 { font-size: 18px; font-weight: 600; color: var(--text); margin-bottom: 16px; padding-bottom: 10px; border-bottom: 2px solid var(--border); letter-spacing: -0.2px; position: relative; display: flex; align-items: center; }
+.section h2::after { content: ''; position: absolute; left: 0; bottom: -2px; width: 56px; height: 2px; background: var(--primary); }
+.section h2 .icon { color: var(--primary); margin-right: 8px; }
+.icon { margin-right: 8px; }
+.model-section { background: var(--card-bg); border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 24px; overflow: hidden; transition: box-shadow 0.18s ease; }
+.model-section:hover { box-shadow: var(--shadow-hover); }
+.model-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; background: linear-gradient(180deg, #FAFAFA 0%, #F5F5F5 100%); border-bottom: 1px solid var(--border); }
+.model-header h3 { font-size: 16px; color: var(--primary); font-weight: 600; letter-spacing: -0.2px; }
+.model-stats { display: flex; gap: 12px; align-items: center; }
+.stat-pass { font-size: 13px; color: var(--success); font-weight: 500; font-variant-numeric: tabular-nums; }
+.stat-rate { font-size: 12px; background: var(--primary); color: white; padding: 3px 12px; border-radius: 12px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: 0.2px; }
+.group-section { padding: 18px 20px; border-bottom: 1px solid #F0F0F0; }
+.group-section:last-child { border-bottom: none; }
+.group-title { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 12px; letter-spacing: 0.2px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+thead th { background: #F5F5F5; padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-secondary);
+            text-transform: uppercase; font-size: 11px; letter-spacing: 0.4px; border-bottom: 2px solid var(--border); }
+tbody td { padding: 10px 12px; border-bottom: 1px solid #F0F0F0; vertical-align: middle; font-variant-numeric: tabular-nums; }
+tbody tr:hover { background: var(--bg-alt); }
+tbody tr:last-child td { border-bottom: none; }
+td.center, th.center { text-align: center; }
+td.num, th.num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+code { background: #F5F5F5; padding: 2px 6px; border-radius: 3px; font-family: var(--font-mono); font-size: 12px; color: var(--text); }
+.status-pass, .status-fail, .status-crash, .status-skip { display: inline-block; font-weight: 700; font-size: 11px; letter-spacing: 0.5px; padding: 3px 9px; min-width: 52px; text-align: center; border-radius: 10px; }
+.status-pass { color: var(--success); background: rgba(46,125,50,0.10); }
+.status-fail { color: var(--danger); background: rgba(198,40,40,0.10); }
+.status-crash { color: var(--warning); background: rgba(230,81,0,0.10); }
+.status-skip { color: var(--muted); background: rgba(120,144,156,0.12); }
+.badge-ignorable { display: inline-block; margin-left: 6px; font-size: 10px; font-weight: 700; letter-spacing: 0.4px; padding: 2px 7px; border-radius: 8px; background: rgba(255,152,0,0.14); color: #E65100; border: 1px solid rgba(230,81,0,0.30); cursor: help; vertical-align: middle; }
+.badge-capability { display: inline-block; margin-left: 6px; font-size: 10px; font-weight: 700; letter-spacing: 0.4px; padding: 2px 7px; border-radius: 8px; background: rgba(30,136,229,0.14); color: #1565C0; border: 1px solid rgba(21,101,192,0.30); cursor: help; vertical-align: middle; }
+.badge-mnn-oom { display: inline-block; margin-left: 6px; font-size: 10px; font-weight: 700; letter-spacing: 0.4px; padding: 2px 7px; border-radius: 8px; background: rgba(198,40,40,0.14); color: var(--danger); border: 1px solid rgba(198,40,40,0.30); cursor: help; vertical-align: middle; }
+.badge-mnn-cascade { display: inline-block; margin-left: 6px; font-size: 10px; font-weight: 700; letter-spacing: 0.4px; padding: 2px 7px; border-radius: 8px; background: rgba(120,144,156,0.16); color: #37474F; border: 1px solid rgba(84,110,122,0.30); cursor: help; vertical-align: middle; }
+.card-ignored { border-top: 3px solid #FB8C00; }
+.card-ignored .num { color: #E65100; }
+.card-capability { border-top: 3px solid var(--warning); }
+.card-capability .num { color: var(--warning); }
+.latency-warn { color: #F57C00; font-weight: 600; }
+.latency-slow { color: var(--danger); font-weight: 700; }
+.cv-stable { color: var(--success); font-size: 11px; font-weight: 600; }
+.cv-moderate { color: #F57C00; font-size: 11px; font-weight: 600; }
+.cv-unstable { color: var(--danger); font-size: 11px; font-weight: 700; }
+.pivot-table { margin: 0; }
+.resp-cell { max-width: 360px; min-width: 240px; font-size: 12px; vertical-align: middle; padding: 10px 12px !important; }
+.resp-ok { display: inline-block; color: var(--success); font-weight: 600; font-size: 12px; letter-spacing: 0.2px; }
+.resp-error { color: var(--danger); font-size: 11px; word-break: break-all; font-family: var(--font-mono); line-height: 1.45; }
+.resp-detail { color: var(--text-secondary); font-size: 11px; line-height: 1.45; }
+.resp-value { font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums; }
+.resp-value strong { color: var(--primary); font-weight: 700; }
+.resp-models { font-weight: 600; color: var(--primary); display: block; margin-bottom: 4px; }
+.resp-status { color: var(--text); }
+.resp-empty { color: var(--muted); font-style: italic; }
+.resp-json { font-size: 11px; line-height: 1.6; color: var(--text-secondary); font-family: var(--font-mono); }
+.resp-json strong { color: var(--text); font-weight: 600; }
+.resp-list { font-size: 11px; margin-top: 4px; color: var(--text-secondary); line-height: 1.5; }
+.resp-link { display: inline-block; margin-left: 6px; font-size: 11px; color: var(--primary); text-decoration: none; font-weight: 600; padding: 2px 9px; border-radius: 10px; background: rgba(21,101,192,0.08); transition: background 0.15s, color 0.15s; }
+.resp-link:hover { background: var(--primary); color: #FFFFFF; }
+.resp-round { margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px dashed var(--border); font-size: 12px; }
+.resp-round:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+.resp-kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-family: var(--font-mono); font-size: 11px; line-height: 1.5; align-items: baseline; }
+.resp-kv .kv-key { color: var(--text-secondary); font-weight: 600; white-space: nowrap; }
+.resp-kv .kv-val { color: var(--text); font-variant-numeric: tabular-nums; word-break: break-all; }
+.resp-kv .kv-more { grid-column: 1 / -1; color: var(--muted); font-size: 10px; margin-top: 4px; font-style: italic; }
+.compare-table { background: var(--card-bg); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.perf-round-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; margin-top: 4px; }
+.perf-round-card { background: var(--card-bg); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px 18px; border-top: 3px solid var(--primary-light); transition: transform 0.18s ease, box-shadow 0.18s ease; }
+.perf-round-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-hover); }
+.perf-round-card .perf-round-title { font-size: 13px; font-weight: 700; color: var(--primary); margin-bottom: 10px; letter-spacing: 0.2px; }
+.perf-round-card .perf-metric { display: flex; justify-content: space-between; align-items: baseline; padding: 5px 0; font-size: 12px; border-bottom: 1px dashed #EEEEEE; }
+.perf-round-card .perf-metric:last-child { border-bottom: none; }
+.perf-round-card .perf-metric-label { color: var(--text-secondary); }
+.perf-round-card .perf-metric-value { font-family: var(--font-mono); font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; margin-left: 10px; }
+.mode-tag { padding: 2px 9px; border-radius: 10px; font-size: 11px; font-weight: 600; letter-spacing: 0.2px; }
+.mode-stream { background: #E3F2FD; color: var(--primary); }
+.mode-nonstream { background: #FFF3E0; color: var(--warning); }
+.mode-format-string { background: #ECEFF1; color: var(--text-secondary); }
+.mode-format-array { background: #E1F5FE; color: #0277BD; }
+.mode-format-object { background: #F3E5F5; color: #6A1B9A; }
+.delta-up { color: var(--danger); font-weight: 600; font-family: var(--font-mono); }
+.delta-down { color: var(--success); font-weight: 600; font-family: var(--font-mono); }
+.crash-table { background: var(--card-bg); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; border-left: 4px solid var(--danger); }
+.crash-table tbody td { color: var(--danger); }
+.perf-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 16px; margin-bottom: 22px; }
+.perf-stat { background: var(--card-bg); border-radius: var(--radius); padding: 18px; text-align: center; box-shadow: var(--shadow); border-top: 3px solid var(--primary-light); }
+.perf-value { display: block; font-size: 28px; font-weight: 700; color: var(--primary); font-variant-numeric: tabular-nums; letter-spacing: -0.5px; line-height: 1.1; }
+.perf-label { font-size: 12px; color: var(--text-secondary); margin-top: 6px; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600; }
+.chart-container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.chart-container canvas { background: var(--card-bg); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); height: 280px !important; }
+.empty-state { background: var(--card-bg); border-radius: var(--radius); padding: 30px; text-align: center; color: var(--text-secondary); font-style: italic; font-size: 14px; box-shadow: var(--shadow); }
+.footer { text-align: center; padding: 30px; color: var(--text-secondary); font-size: 12px; border-top: 1px solid var(--border); margin-top: 40px; letter-spacing: 0.2px; }
+.model-link-card { background: var(--card-bg); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px 22px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; transition: transform 0.18s ease, box-shadow 0.18s ease; border-left: 3px solid var(--primary); }
+.model-link-card:hover { transform: translateX(2px); box-shadow: var(--shadow-hover); }
+.model-link-card a { text-decoration: none; color: var(--primary); font-weight: 600; font-size: 16px; letter-spacing: -0.2px; }
+.model-link-card a:hover { color: var(--primary-dark); }
+.model-link-card .model-link-stats { display: flex; gap: 18px; font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; letter-spacing: 0.2px; align-items: center; }
+.startup-banner { background: linear-gradient(135deg, #FFEBEE 0%, #FFCDD2 100%); border: 1px solid var(--danger); border-left: 6px solid var(--danger); border-radius: var(--radius); padding: 22px 26px; margin-bottom: 24px; box-shadow: 0 3px 14px rgba(198,40,40,0.18); }
+.startup-banner-title { font-size: 18px; font-weight: 700; color: var(--danger); margin-bottom: 8px; letter-spacing: -0.2px; }
+.startup-banner-desc { font-size: 13px; color: #5D2020; line-height: 1.65; margin-bottom: 14px; }
+.startup-banner-desc code { background: rgba(198,40,40,0.10); color: var(--danger); padding: 2px 6px; border-radius: 3px; font-size: 12px; }
+.startup-table { width: 100%; border-collapse: collapse; background: rgba(255,255,255,0.7); border-radius: var(--radius-sm); overflow: hidden; }
+.startup-table thead th { background: rgba(198,40,40,0.10); color: var(--danger); padding: 9px 12px; text-align: left; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; border-bottom: 1px solid rgba(198,40,40,0.20); }
+.startup-table tbody td { padding: 10px 12px; border-bottom: 1px solid rgba(198,40,40,0.10); vertical-align: top; font-size: 12px; color: #3E1212; }
+.startup-table tbody tr:last-child td { border-bottom: none; }
+.startup-detail { white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono); font-size: 11px; line-height: 1.5; color: #4A1818; margin: 0; max-height: 240px; overflow-y: auto; background: rgba(255,255,255,0.6); padding: 8px 10px; border-radius: 3px; }
+@media (max-width: 768px) {
+    .chart-container { grid-template-columns: 1fr; }
+    .header .meta { flex-direction: column; gap: 8px; }
+    .pivot-table { font-size: 11px; }
+}
+@media print {
+    .header { background: #333 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .summary-card, .model-section, table { box-shadow: none; border: 1px solid #ddd; }
+}
+</style>
+</head>
+<body>
+<div class="header">
+    <div class="header-inner">
+        <div class="eyebrow">Model Test Report</div>
+        <h1>qwen2.5vl3b-8480</h1>
+        <p class="subtitle">模型测试详细报告</p>
+        <div class="meta">
+            <span class="meta-item"><strong>生成时间:</strong> 2026-07-16 20:53:14</span>
+            <span class="meta-item"><strong>测试轮数:</strong> 1</span>
+            <span class="meta-item"><strong>总耗时:</strong> 79.9s</span>
+            <span class="meta-item"><a href="report.html" style="color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--accent); font-weight: 600;">← 返回总汇报</a></span>
+            <span class="meta-item"><details class="cmdline-details" open><summary><strong>命令行</strong></summary><pre class="cmdline-pre">'src\test\test_service.py' --exe_dir 'cmake-build-release-visual-studio-arm\GenieService-win-arm64' --models 'C:\Users\HCKTest\Desktop\GenieEnv\models' --data_dir 'C:\Users\HCKTest\Desktop\GenieEnv\data' --suite full --out_dir test_results_full_20260716</pre></details></span>
+        </div>
+    </div>
+</div>
+
+<div class="container">
+
+
+
+<div class="summary-bar">
+    <div class="summary-card"><div class="num">31</div><div class="label">总测试数</div></div>
+    <div class="summary-card card-pass"><div class="num">28</div><div class="label">通过</div></div>
+    <div class="summary-card card-fail"><div class="num">2</div><div class="label">失败</div></div>
+    <div class="summary-card card-ignored" title="服务端已知占位/未实现缺陷的 FAIL 子集"><div class="num">2</div><div class="label">可忽略</div></div>
+    <div class="summary-card card-crash"><div class="num">0</div><div class="label">崩溃</div></div>
+    <div class="summary-card"><div class="num">2</div><div class="label">跳过</div></div>
+    <div class="summary-card card-capability" title="根因判定为模型自身能力/输出质量局限而非服务端缺陷的诊断性标注;诊断性维度,不改变 passed/failed/退出码判定"><div class="num">1</div><div class="label">模型能力问题</div></div>
+</div>
+
+<div class="progress-bar">
+    <div class="progress-fill good" style="width:90%">
+        <span class="progress-text">通过率 90.3%</span>
+    </div>
+</div>
+<div class="progress-meta"><span>模型通过率</span><span class="pct">90.3%</span></div>
+
+<div class="section">
+<h2><span class="icon">&#9889;</span> 模型推理性能</h2>
+<div class="model-section">
+    <div class="group-section">
+        <table class="pivot-table">
+        <thead><tr><th>端点</th><th class="center">R1</th><th class="num">延迟</th><th>响应数据</th></tr></thead>
+        <tbody><tr><td><code>POST /v1/chat/completions (non-stream)</code></td><td class="center"><span class="status-pass">PASS</span></td><td class="num ">194 ms</td><td class="resp-cell"><div class="resp-round">R1: <span class="resp-value">响应长度: 31 字符</span> <span class="mode-tag mode-format-string" title="本次请求 content 字段使用的格式">OpenAI字符串风格</span> <a href="conversations.html#qwen2.5vl3b-8480_R1_nonstream" class="resp-link">查看详情 →</a></div></td></tr><tr><td><code>POST /v1/chat/completions (stream)</code></td><td class="center"><span class="status-pass">PASS</span></td><td class="num ">208 ms</td><td class="resp-cell"><div class="resp-round">R1: <span class="resp-value">TTFT=60ms, 7 chunks</span> <span class="mode-tag mode-format-string" title="本次请求 content 字段使用的格式">OpenAI字符串风格</span> <a href="conversations.html#qwen2.5vl3b-8480_R1_stream" class="resp-link">查看详情 →</a></div></td></tr><tr><td><code>POST /chat/completions (non-stream)</code></td><td class="center"><span class="status-pass">PASS</span></td><td class="num ">193 ms</td><td class="resp-cell"><div class="resp-round">R1: <span class="resp-value">响应长度: 31 字符</span> <span class="mode-tag mode-format-array" title="本次请求 content 字段使用的格式">OpenAI数组风格</span> <a href="conversations.html#qwen2.5vl3b-8480_R1_nonstream" class="resp-link">查看详情 →</a></div></td></tr><tr><td><code>POST /chat/completions (stream)</code></td><td class="center"><span class="status-pass">PASS</span></td><td class="num ">206 ms</td><td class="resp-cell"><div class="resp-round">R1: <span class="resp-value">TTFT=56ms, 7 chunks</span> <span class="mode-tag mode-format-array" title="本次请求 content 字段使用的格式">OpenAI数组风格</span> <a href="conversations.html#qwen2.5vl3b-8480_R1_stream" class="resp-link">查看详情 →</a></div></td></tr><tr><td><code>POST /v1/completions (non-stream)</code></td><td class="center"><span class="status-pass">PASS</span></td><td class="num ">203 ms</td><td class="resp-cell"><div class="resp-round">R1: <span class="resp-ok">OK</span></div></td></tr><tr><td><code>POST /v1/completions (stream)</code></td><td class="center"><span class="status-pass">PASS</span></td><td class="num ">195 ms</td><td class="resp-cell"><div class="resp-round">R1: <span class="resp-ok">OK</span></div></td></tr><tr><td><code>POST /completions (non-stream)</code></td><td class="center"><span class="status-pass">PASS</span></td><td class="num ">202 ms</td><td class="resp-cell"><div class="resp-round">R1: <span class="resp-ok">OK</span></div></td></tr><tr><td><code>POST /completions (stream)</code></td><td class="center"><span class="status-pass">PASS</span></td><td class="num ">194 ms</td><td class="resp-cell"><div class="resp-round">R1: <span class="resp-ok">OK</span></div></td></tr><tr><td><code>GET /profile</code></td><td class="center"><span class="status-pass">PASS</span></td><td class="num ">2 ms</td><td class="resp-cell"><span class="resp-ok">OK</span></td></tr></tbody></table>
+    </div>
+</div>
+</div>
+
+<div class="section">
+<h2><span class="icon">&#128737;</span> 服务功能接口</h2>
+<div class="model-section">
+    <div class="group-section">
+        <table class="pivot-table">
+        <thead><tr><th>端点</th><th class="center">R1</th><th class="num">延迟</th><th>响应数据</th></tr></thead>
+        <tbody><tr><td><code>GET /status (before chat)</code></td><td class="center"><span class="status-pass">PASS</span></td><td class="num ">13 ms</td><td class="resp-cell"><div class="resp-json">loading: 0</div></td></tr><tr><td><code>GET /status (after chat)</code></td><td class="center"><span class="status-pass">PASS</span></td><td class="num ">3 ms</td><td class="resp-cell"><div class="resp-json">loading: 0</div></td></tr><tr><td><code>POST /contextsize</code></td><td class="center"><span class="status-pass">PASS</span></td><td class="num ">1 ms</td><td class="resp-cell"><span class="resp-value">contextsize = <strong>2048</strong></span></td></tr><tr><td><code>POST /fetch</code></td><td class="center"><span class="status-pass">PASS</span></td><td class="num ">1 ms</td><td class="resp-cell"><div class="resp-round">R1: <span class="resp-value">history: 空</span></div></td></tr><tr><td><code>POST /textsplitter</code></td><td class="center"><span class="status-pass">PASS</span></td><td class="num ">15 ms</td><td class="resp-cell"><div class="resp-round">R1: <span class="resp-value">1 segments</span> <a href="conversations.html#qwen2.5vl3b-8480_R1_textsplitter" class="resp-link">查看详情 →</a></div></td></tr><tr><td><code>POST /v1/textsplitter</code></td><td class="center"><span class="status-pass">PASS</span></td><td class="num ">2 ms</td><td class="resp-cell"><div class="resp-round">R1: <span class="resp-value">1 segments</span> <a href="conversations.html#qwen2.5vl3b-8480_R1_textsplitter" class="resp-link">查看详情 →</a></div></td></tr><tr><td><code>POST /images/generations</code></td><td class="center"><span class="status-fail">FAIL</span><span class="badge-ignorable" title="服务端 /images/generations 未实现 (HTTP 501 Not Implemented)">可忽略</span></td><td class="num ">12 ms</td><td class="resp-cell"><div class="resp-json">raw_body: </div></td></tr><tr><td><code>POST /v1/images/generations</code></td><td class="center"><span class="status-fail">FAIL</span><span class="badge-ignorable" title="服务端 /images/generations 未实现 (HTTP 501 Not Implemented)">可忽略</span></td><td class="num ">12 ms</td><td class="resp-cell"><div class="resp-json">raw_body: </div></td></tr><tr><td><code>POST /reload</code></td><td class="center"><span class="status-pass">PASS</span></td><td class="num ">4 ms</td><td class="resp-cell"><span class="resp-ok">OK</span></td></tr><tr><td><code>POST /stop</code></td><td class="center"><span class="status-pass">PASS</span></td><td class="num ">5 ms</td><td class="resp-cell"><span class="resp-ok">OK</span></td></tr><tr><td><code>POST /clear</code></td><td class="center"><span class="status-pass">PASS</span></td><td class="num ">4 ms</td><td class="resp-cell"><span class="resp-ok">OK</span></td></tr><tr><td><code>POST /unload</code></td><td class="center"><span class="status-pass">PASS</span></td><td class="num ">2947 ms</td><td class="resp-cell"><span class="resp-ok">OK</span></td></tr></tbody></table>
+    </div>
+</div>
+</div>
+
+<div class="section">
+<h2><span class="icon">&#128295;</span> 其它/专项测试</h2>
+<div class="model-section">
+    <div class="group-section">
+        <table class="pivot-table">
+        <thead><tr><th>端点</th><th class="center">R1</th><th class="num">延迟</th><th>响应数据</th></tr></thead>
+        <tbody><tr><td><code>POST /v1/chat/completions (dynamic switch + multimodal stability)</code></td><td class="center"><span class="status-pass">PASS</span></td><td class="num latency-slow">21207 ms</td><td class="resp-cell"><span class="resp-value">响应长度: 58 字符</span> <a href="conversations.html#qwen2.5vl3b-8480_R1_nonstream" class="resp-link">查看详情 →</a></td></tr><tr><td><code>POST /v1/chat/completions (multimodal audio openai-style)</code></td><td class="center"><span class="status-skip">SKIP</span></td><td class="num ">0 ms</td><td class="resp-cell"><span class="resp-value">响应长度: 0 字符</span> <a href="conversations.html#qwen2.5vl3b-8480_R1_nonstream" class="resp-link">查看详情 →</a></td></tr><tr><td><code>POST /v1/chat/completions (multimodal client-style)</code></td><td class="center"><span class="status-pass">PASS</span></td><td class="num latency-warn">5284 ms</td><td class="resp-cell"><span class="resp-value">响应长度: 97 字符</span> <a href="conversations.html#qwen2.5vl3b-8480_R1_nonstream" class="resp-link">查看详情 →</a></td></tr><tr><td><code>POST /v1/chat/completions (multimodal openai-style)</code></td><td class="center"><span class="status-pass">PASS</span></td><td class="num latency-warn">4673 ms</td><td class="resp-cell"><span class="resp-value">响应长度: 143 字符</span> <a href="conversations.html#qwen2.5vl3b-8480_R1_nonstream" class="resp-link">查看详情 →</a></td></tr></tbody></table>
+    </div>
+</div>
+</div>
+
+<div class="section"><h2><span class="icon">&#128241;</span> SampleApp 测试结果</h2>
+                <table class="pivot-table">
+        <thead><tr><th>用例</th><th class="center">状态</th><th class="num">耗时</th><th>详情</th><th>模型能力问题</th></tr></thead>
+        <tbody><tr><td><code>SAMPLEAPP: basic_chat</code></td>
+            <td class="center"><span class="status-pass">PASS</span></td>
+            <td class="num">19585 ms</td>
+            <td>backend=qnn, returncode=0, stdout_len=3958</td>
+            <td class="center"></td></tr><tr><td><code>SAMPLEAPP: multimodal_image (vs GenieAPIService 对照)</code></td>
+            <td class="center"><span class="status-pass">PASS</span></td>
+            <td class="num">23559 ms</td>
+            <td>backend=qnn, image=gronding_box_safety_draw.png, returncode=0, stdout_len=4398</td>
+            <td class="center"></td></tr></tbody></table>
+                </div>
+<div class="section"><h2><span class="icon">&#128268;</span> tool_calls 协议测试</h2>
+                <div class="summary-bar">
+                    <div class="summary-card"><div class="num">4</div><div class="label">用例数</div></div>
+                    <div class="summary-card card-pass"><div class="num">3</div><div class="label">通过</div></div>
+                    <div class="summary-card card-fail"><div class="num">0</div><div class="label">失败</div></div>
+                    <div class="summary-card card-crash"><div class="num">0</div><div class="label">崩溃</div></div>
+                    <div class="summary-card"><div class="num">1</div><div class="label">跳过(模型能力局限)</div></div>
+                </div>
+                <div class="resp-detail"><a href="report_tool_calls.html#toolcall-20">R1: POST /v1/chat/completions (tool_call retry limit enforcement) →</a><br><a href="report_tool_calls.html#toolcall-21">R1: POST /v1/chat/completions (tool_call round-trip with result) →</a><br><a href="report_tool_calls.html#toolcall-22">R1: POST /v1/chat/completions (tool_call model invocation probe) →</a><br><a href="report_tool_calls.html#toolcall-23">R1: POST /v1/chat/completions (tool_call streaming argument integrity probe) →</a></div>
+                </div>
+
+<div class="section">
+                <h2><span class="icon">&#128202;</span> 性能报告</h2>
+                <p style="color: var(--text-secondary); margin-bottom: 18px; font-size: 13px;">每轮推理后 <code>/profile</code> 返回的详细性能指标及资源占用</p>
+                <div class="perf-round-grid">
+                <div class="perf-round-card">
+                    <div class="perf-round-title">Round 1</div>
+                    <div class="perf-metric"><span class="perf-metric-label">Time to First Token (ms)</span><span class="perf-metric-value">0.04</span></div>
+                    <div class="perf-metric"><span class="perf-metric-label">Token Generation Time (ms)</span><span class="perf-metric-value">0.15</span></div>
+                    <div class="perf-metric"><span class="perf-metric-label">Prompt Processing Rate (tokens/s)</span><span class="perf-metric-value">850.34</span></div>
+                    <div class="perf-metric"><span class="perf-metric-label">Token Generation Rate (tokens/s)</span><span class="perf-metric-value">46.87</span></div>
+                    <div class="perf-metric"><span class="perf-metric-label">Num Prompt Tokens</span><span class="perf-metric-value">34</span></div>
+                    <div class="perf-metric"><span class="perf-metric-label">Num Generated Tokens</span><span class="perf-metric-value">8</span></div>
+                    <div class="perf-metric"><span class="perf-metric-label">推理 CPU 占用</span><span class="perf-metric-value">1.3%</span></div>
+                    <div class="perf-metric"><span class="perf-metric-label">推理内存占用</span><span class="perf-metric-value">5558 MB</span></div>
+                </div></div></div>
+
+
+<div class="footer">
+    qwen2.5vl3b-8480 Test Report &middot; <a href="report.html">返回总汇报</a> &middot; 2026-07-16 20:53:14
+</div>
+
+</div>
+</body>
+</html>

@@ -1,4 +1,4 @@
-//==============================================================================
+﻿//==============================================================================
 //
 // Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
 //
@@ -10,7 +10,6 @@
 #define CONFIG_H
 
 #include "log.h"
-#include "utils.h"
 #include "model/model_config.h"
 #include <CLI/CLI.hpp>
 #include <GenieCommon.h>
@@ -20,18 +19,19 @@ namespace fs = std::filesystem;
 
 #include <direct.h>
 
-#elif defined(__linux__) && !defined(__ANDROID__)
+#else
 
-// On native Linux, getcwd() lives in <unistd.h>. Android pulls <unistd.h> in
-// indirectly via log.h, so we keep that path unchanged.
 #include <unistd.h>
 
 #endif
 
+extern bool isPortAvailable(int port);
+
 class Config
 {
 public:
-    Config(int argc, char *argv[]) : argc_{argc}, argv_{argv} {}
+    Config(int argc, char *argv[]) : argc_{argc}, argv_{argv}
+    {}
 
     bool Process();
 
@@ -65,14 +65,15 @@ inline bool Config::Process()
     bool version{false};
 
     CLI::App app{"Genie API Service - Powerful Local LLM Service"};
-    app.footer("\nSupport: https://github.com/qualcomm/qai-appbuilder");
+    app.footer("\nSupport: https://github.com/quic/ai-engine-direct-helper");
 
     app.add_option("-c,--config_file", config_file, "Path to the config file.");
     app.add_option("--adapter", model_config_.loraAdapter, "the adapter of lora");
 
-    app.add_flag("-l,--load_model", loadModel, "Load the model.");
+    app.add_flag("-l,--load_model", loadModel, "Load the model and also load additional models listed in service_config.json.");
     app.add_flag("-a,--all_text", model_config_.outputAllText, "Output all text includes tool calls text.");
     app.add_flag("-t,--enable_thinking", model_config_.enableThinking, "Enable thinking mode.");
+    app.add_flag("-g,--prompt_debug", model_config_.enablePromptDebug, "Enable prompt compression optimization debug logs. (Repeat for level 2: -g -g)");
     app.add_flag("-v,--version", version, "Print version info and exit.");
 
     app.add_option("-n,--num_response", model_config_.num_response_,
@@ -121,19 +122,14 @@ inline bool Config::Process()
         return false;
     }
 
-    auto current_dir_tmp = fs::path{buffer};
-    CurrentDir = current_dir_tmp.generic_string();
+    CurrentDir = fs::path{buffer}.generic_string();
     My_Log{} << "current work dir: " << CurrentDir << std::endl;
 
-    auto argv0 = fs::path{argv_[0]};
-    RootDir = argv0.is_absolute()
-              ? argv0.parent_path().generic_string()
-              : current_dir_tmp == current_dir_tmp.root_path()
-                ? CurrentDir
-                : fs::path{CurrentDir + "/" + argv_[0]}
-                        .parent_path()
-                        .generic_string();
-
+    RootDir = fs::path{argv_[0]}.is_absolute()
+                  ? fs::path{argv_[0]}.parent_path().generic_string()
+                  : fs::path{CurrentDir + "/" + argv_[0]}
+                    .parent_path()
+                    .generic_string();
     My_Log{} << "root dir: " << RootDir << std::endl;
     My_Log::ShowStatus();
 

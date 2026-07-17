@@ -1,12 +1,12 @@
 #=============================================================================
 #
 # Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
-# 
+#
 # SPDX-License-Identifier: BSD-3-Clause
 #
 #=============================================================================
 
-include(dependents.cmake)
+include(platform.cmake)
 
 list(APPEND INCLUDE_PATH
         ${EXTERNAL_HEADER_PATH}
@@ -15,6 +15,11 @@ list(APPEND INCLUDE_PATH
 
 list(APPEND SERVICE_SOURCES
         src/chat_request_handler/chat_request_handler.cpp
+        src/chat_request_handler/prompt_optimizer.cpp
+        src/chat_request_handler/message_pre_filter.cpp
+        src/chat_request_handler/prompt_preparation_service.cpp
+        src/chat_request_handler/summary_cache.cpp
+        src/chat_request_handler/long_text_summarizer.cpp
         src/chat_history/chat_history.cpp
         src/model/model_manager.cpp
         src/context/qnn/genie.cpp
@@ -24,13 +29,27 @@ list(APPEND SERVICE_SOURCES
         src/context/qnn/qwen2_5_omini/qwen_2_5_omini.cpp
         src/context/context_base.cpp
         src/GenieAPIService.cpp
+        src/port_available.cpp
         src/processor/harmony.cpp
         src/processor/general.cpp
         src/response/response_tools.cpp
         src/response/response_dispatcher.cpp
         ${CMAKE_SOURCE_DIR}/src/common/utils.cpp
+        src/gateway/gateway/gateway.cpp
+        src/gateway/gateway/gateway_routing.cpp
+        src/gateway/gateway/gateway_session.cpp
+        src/gateway/gateway/gateway_history.cpp
+        src/gateway/gateway/gateway_cloud.cpp
+        src/gateway/gateway/gateway_steps.cpp
+        src/gateway/gateway/gateway_incremental.cpp
+        src/gateway/gateway/gateway_overflow.cpp
+        src/gateway/security/content_security_inspector.cpp
+        src/gateway/security/desensitizer.cpp
+        src/gateway/security/task_complexity_evaluator.cpp
+        src/gateway/routing/model_router.cpp
+        src/gateway/cloud/cloud_model_client.cpp
+        src/gateway/audit/audit_logger.cpp
 )
-
 
 add_compile_options(
         -DQAI_APP_BUILDER_MAJOR_VERSION=${QAI_APP_BUILDER_MAJOR_VERSION}
@@ -38,168 +57,195 @@ add_compile_options(
         -DQAI_APP_BUILDER_PATCH_VERSION=${QAI_APP_BUILDER_PATCH_VERSION}
 )
 
-if (USE_MNN)
+if (MSVC AND USE_MNN)
     add_definitions(-DUSE_MNN)
     list(APPEND SERVICE_SOURCES
             src/context/mnn.cpp
     )
 endif ()
 
-if (USE_GGUF)
+if (MSVC AND USE_GGUF)
     add_definitions(-DUSE_GGUF)
     list(APPEND SERVICE_SOURCES
             src/context/llama_cpp.cpp
     )
 endif ()
 
-# DLL wrapper sources
+if (MSVC)
+    configure_file(
+            ${SCRIPT_PATH}/version.rc.in
+            ${CMAKE_BINARY_DIR}/version.rc
+            @ONLY
+    )
+endif ()
+
+if (MSVC)
+    add_executable(${CMAKE_PROJECT_NAME} ${SERVICE_SOURCES})
+elseif (UNIX)
+    add_executable(${CMAKE_PROJECT_NAME} ${SERVICE_SOURCES})
+endif ()
+
+target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${INCLUDE_PATH})
+if (MSVC)
+    target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
+            NOMINMAX
+            _HAS_STD_BYTE=0
+            _USE_MATH_DEFINES
+    )
+endif ()
+target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE ${EXTERNAL_LIB_PATH})
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ${EXTERNAL_LIBS})
+add_dependencies(${CMAKE_PROJECT_NAME} Libsamplerate)
+add_dependencies(${CMAKE_PROJECT_NAME} Libappbuilder)
+if (UNIX)
+    # cpp-httplib in TLS mode pulls in <mbedtls/*.h>, so the mbedTLS headers must
+    # exist (i.e. the ExternalProject download step must have run) before any TU
+    # is compiled.
+    add_dependencies(${CMAKE_PROJECT_NAME} Libmbedtls)
+endif ()
+if (MSVC AND USE_MNN)
+    add_dependencies(${CMAKE_PROJECT_NAME} Libmnn)
+endif ()
+if (MSVC AND USE_GGUF)
+    add_dependencies(${CMAKE_PROJECT_NAME} Libllama.cpp)
+    add_dependencies(${CMAKE_PROJECT_NAME} AdrenoOpenCLKernels)
+endif ()
+
+if (UNIX)
+    set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "$ORIGIN"
+    )
+endif ()
+
+if (MSVC)
+    target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE /Zi)
+    target_link_options(${CMAKE_PROJECT_NAME} PRIVATE /DEBUG)
+endif ()
+
+if (BUILD_AS_DLL)
+    # BUILD_AS_DLL=ON 把 exe 排除出默认 ALL 目标，只单独构建 dll。
+    set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES EXCLUDE_FROM_ALL TRUE)
+endif ()
+
+set(LIB_NAME GenieAPILibrary)
 list(APPEND DLL_SOURCES
         ${SERVICE_SOURCES}
         src/GenieAPILibrary.cpp
 )
 
-configure_file(
-        ${SCRIPT_PATH}/version.rc.in
-        ${CMAKE_BINARY_DIR}/version.rc
-        @ONLY
-)
-
-set(LIB_NAME ${CMAKE_PROJECT_NAME})
-
-if (BUILD_AS_DLL)
-    set(LIB_NAME GenieAPILibrary)
-    # Build as DLL/SO
-    if (MSVC)
-        add_library(${LIB_NAME} SHARED ${DLL_SOURCES})
-        target_compile_definitions(${LIB_NAME} PRIVATE
-                -DGENIEAPISERVICE_EXPORTS
-                -DNOMINMAX
-                -D_HAS_STD_BYTE=0
-                -D_USE_MATH_DEFINES
-        )
-        # Emit the import library (GenieAPILibrary.lib) into ${BUILD_PATH}/lib so
-        # SampleApp can link it. This is set as a per-target property because the
-        # top-level CMakeLists sets CMAKE_ARCHIVE_OUTPUT_DIRECTORY only AFTER this
-        # subdirectory is added, which is too late to affect this target.
-        set_target_properties(${LIB_NAME} PROPERTIES
-                ARCHIVE_OUTPUT_DIRECTORY ${BUILD_PATH}/lib
-                ARCHIVE_OUTPUT_DIRECTORY_RELEASE ${BUILD_PATH}/lib
-                ARCHIVE_OUTPUT_DIRECTORY_DEBUG ${BUILD_PATH}/lib
-        )
-
-    elseif (ANDROID)
-        add_library(${LIB_NAME} SHARED ${DLL_SOURCES})
-        target_compile_definitions(${LIB_NAME} PRIVATE
-                -DGENIEAPISERVICE_EXPORTS
-                -DNOMINMAX
-                -D_HAS_STD_BYTE=0
-                -D_USE_MATH_DEFINES
-        )
-    elseif (UNIX AND NOT ANDROID)
-        # Native Linux only — Android still goes through the elseif(ANDROID)
-        # branch above.
-        add_library(${LIB_NAME} SHARED ${DLL_SOURCES})
-        target_compile_definitions(${LIB_NAME} PRIVATE
-                -DGENIEAPISERVICE_EXPORTS
-        )
-    endif ()
-
-    target_include_directories(${LIB_NAME} PRIVATE ${INCLUDE_PATH})
-    target_link_directories(${LIB_NAME} PRIVATE ${EXTERNAL_LIB_PATH})
-    target_link_libraries(${LIB_NAME} PRIVATE ${EXTERNAL_LIBS})
-
-    # Add MSVC ARM64 specific platform fixes (only for MSVC ARM64 builds)
-    if(MSVC AND (CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64" OR CMAKE_GENERATOR_PLATFORM MATCHES "ARM64"))
-        target_compile_options(${LIB_NAME} PRIVATE /FI"${CMAKE_CURRENT_SOURCE_DIR}/src/platform_fix.h")
-    endif()
-
-
-else()
-    # Build as EXE / SO (original behavior)
-    if (MSVC)
-        add_executable(${CMAKE_PROJECT_NAME} ${SERVICE_SOURCES})
-    elseif (ANDROID)
-        add_library(${CMAKE_PROJECT_NAME} SHARED ${SERVICE_SOURCES})
-    elseif (UNIX AND NOT ANDROID)
-        # Native Linux: build as a standalone executable.
-        add_executable(${CMAKE_PROJECT_NAME} ${SERVICE_SOURCES})
-    endif ()
-
-    target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${INCLUDE_PATH})
-    if (MSVC)
-        target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
-                -DNOMINMAX
-                -D_HAS_STD_BYTE=0
-                -D_USE_MATH_DEFINES
-        )
-    endif ()
-    target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE ${EXTERNAL_LIB_PATH})
-    target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ${EXTERNAL_LIBS})
-
-    # Set rpath so the executable can locate its sibling .so files in the same dir
-    if (UNIX AND NOT ANDROID)
-        set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES
-                BUILD_WITH_INSTALL_RPATH TRUE
-                INSTALL_RPATH "$ORIGIN"
-        )
-    endif ()
-
-    # Ensure Libllama.cpp ExternalProject finishes before we link (Linux only)
-    if (USE_GGUF AND UNIX AND NOT ANDROID)
-        add_dependencies(${CMAKE_PROJECT_NAME} Libllama.cpp)
-    endif ()
-
-    # Add MSVC ARM64 specific platform fixes (only for MSVC ARM64 builds)
-    if(MSVC AND (CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64" OR CMAKE_GENERATOR_PLATFORM MATCHES "ARM64"))
-        target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE /FI"${CMAKE_CURRENT_SOURCE_DIR}/src/platform_fix.h")
-    endif()
-endif()
-
-set(CONFIG_PATH ${CMAKE_SOURCE_DIR}/../../python/models)
-
-if (UNIX AND NOT ANDROID)
-    # -------------------------------------------------------------------------
-    # Linux: minimal output — only the files the user actually needs to
-    # deploy (target board already has QAIRT SDK installed).
-    # -------------------------------------------------------------------------
-    add_custom_command(
-            TARGET ${LIB_NAME} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E echo "[post-build] copying GenieAPIService + libappbuilder.so ..."
-            COMMAND ${CMAKE_COMMAND} -E make_directory ${BUILD_PATH}
-            COMMAND ${CMAKE_COMMAND} -E copy ${LIBAPPBUILDER_ROOT}/lib/libappbuilder.so ${BUILD_PATH}/
-            COMMAND ${CMAKE_COMMAND} -E echo "[post-build] done. Output: ${BUILD_PATH}"
-    )
-    if (USE_GGUF)
-        # Copy only the SONAME versioned libraries (lib*.so.0) that are needed
-        # at runtime.  The unversioned lib*.so symlinks are only required at
-        # link-time and are intentionally omitted to keep the output clean.
-        # cp -L dereferences symlinks so we always get real files in the output.
-        add_custom_command(
-                TARGET ${LIB_NAME} POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E echo "[post-build] copying llama.cpp shared libraries ..."
-                COMMAND sh -c "cp -L ${CMAKE_BINARY_DIR}/llama-cpp-build/bin/lib*.so.0 ${BUILD_PATH}/"
-        )
-    endif ()
-else ()
-    # -------------------------------------------------------------------------
-    # Windows / Android: full package (SDK libs + config templates) for
-    # standalone deployment where the target may not have SDK installed.
-    # -------------------------------------------------------------------------
-    add_custom_command(
-            TARGET ${LIB_NAME} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E echo start to copy binray....
-            COMMAND ${CMAKE_COMMAND} -E copy ${EXTERNAL_BIN} ${BUILD_PATH}
-            COMMAND ${CMAKE_COMMAND} -E copy_directory ${CONFIG_PATH} ${BUILD_PATH}/config
-            COMMAND ${CMAKE_COMMAND} -E copy ${BUILD_VERSION_FILE} ${BUILD_PATH}/
-            COMMAND ${CMAKE_COMMAND} -E echo compile successfully!
+add_library(${LIB_NAME} SHARED ${DLL_SOURCES})
+target_compile_definitions(${LIB_NAME} PRIVATE GENIEAPISERVICE_EXPORTS)
+if (MSVC)
+    target_compile_definitions(${LIB_NAME} PRIVATE
+            NOMINMAX
+            GENIEAPI_EXPORTS
+            _HAS_STD_BYTE=0
+            _USE_MATH_DEFINES
     )
 endif ()
 
-message(${CMAKE_CURRENT_SOURCE_DIR}/src/GenieAPIService/src/GenieAPILibrary.h)
-if (BUILD_AS_DLL)
-        add_custom_command(
-                TARGET ${LIB_NAME} POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E make_directory ${BUILD_PATH}/include
-                COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/src/GenieAPILibrary.h ${BUILD_PATH}/include/
-        )
-endif()
+target_include_directories(${LIB_NAME} PRIVATE ${INCLUDE_PATH})
+target_link_directories(${LIB_NAME} PRIVATE ${EXTERNAL_LIB_PATH})
+target_link_libraries(${LIB_NAME} PRIVATE ${EXTERNAL_LIBS})
+add_dependencies(${LIB_NAME} Libsamplerate)
+add_dependencies(${LIB_NAME} Libappbuilder)
+if (UNIX)
+    add_dependencies(${LIB_NAME} Libmbedtls)
+endif ()
+if (MSVC AND USE_MNN)
+    add_dependencies(${LIB_NAME} Libmnn)
+endif ()
+if (MSVC AND USE_GGUF)
+    add_dependencies(${LIB_NAME} Libllama.cpp)
+    add_dependencies(${LIB_NAME} AdrenoOpenCLKernels)
+endif ()
+
+if (UNIX)
+    set_target_properties(${LIB_NAME} PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "$ORIGIN"
+    )
+endif ()
+
+if (MSVC)
+    target_compile_options(${LIB_NAME} PRIVATE /Zi)
+    target_link_options(${LIB_NAME} PRIVATE /DEBUG)
+endif ()
+
+add_custom_command(
+        TARGET ${LIB_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${BUILD_PATH}/include
+        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/src/GenieAPILibrary.h ${BUILD_PATH}/include
+)
+if (MSVC)
+    # 保证只构建 ${LIB_NAME}（不连带构建 ${CMAKE_PROJECT_NAME}）时，EXTERNAL_BIN 里的后端
+    # dll（包括升级第三方依赖时新增的条目，如 llama-common.dll）也能同步拷贝到 BUILD_PATH，
+    # 不再依赖额外构建一次 exe target 才能补齐。
+    add_custom_command(
+            TARGET ${LIB_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${EXTERNAL_BIN} ${BUILD_PATH}
+    )
+elseif (UNIX)
+    add_custom_command(
+            TARGET ${LIB_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${EXTERNAL_BIN} ${BUILD_PATH}
+    )
+endif ()
+
+set(CONFIG_PATH ${CMAKE_SOURCE_DIR}/../../python/models)
+if (MSVC)
+    add_custom_command(
+            TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${EXTERNAL_BIN} ${BUILD_PATH}
+            COMMAND ${CMAKE_COMMAND} -E copy_directory ${CONFIG_PATH} ${BUILD_PATH}/config
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${CMAKE_CURRENT_SOURCE_DIR}/../config/service_config.json
+                ${CMAKE_CURRENT_SOURCE_DIR}/../config/sensitive_keywords.json
+                ${BUILD_PATH}
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${CMAKE_CURRENT_SOURCE_DIR}/../test/test_service.py
+                ${BUILD_PATH}
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${BUILD_VERSION_FILE} ${BUILD_PATH}
+    )
+    # BUILD_AS_DLL=ON 时 exe 不构建，同样的打包也得挂到 ${LIB_NAME} 上，才能得到完整产物目录。
+    add_custom_command(
+            TARGET ${LIB_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory ${CONFIG_PATH} ${BUILD_PATH}/config
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${CMAKE_CURRENT_SOURCE_DIR}/../config/service_config.json
+                ${CMAKE_CURRENT_SOURCE_DIR}/../config/sensitive_keywords.json
+                ${BUILD_PATH}
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${CMAKE_CURRENT_SOURCE_DIR}/../test/test_service.py
+                ${BUILD_PATH}
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${BUILD_VERSION_FILE} ${BUILD_PATH}
+    )
+elseif (UNIX)
+    add_custom_command(
+            TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${EXTERNAL_BIN} ${BUILD_PATH}
+            COMMAND ${CMAKE_COMMAND} -E copy_directory ${CONFIG_PATH} ${BUILD_PATH}/config
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${CMAKE_CURRENT_SOURCE_DIR}/../config/service_config.json
+                ${CMAKE_CURRENT_SOURCE_DIR}/../config/sensitive_keywords.json
+                ${BUILD_PATH}
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${CMAKE_CURRENT_SOURCE_DIR}/../test/test_service.py
+                ${BUILD_PATH}
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${BUILD_VERSION_FILE} ${BUILD_PATH}
+    )
+    # BUILD_AS_DLL=ON 时 exe 不构建，同样的打包也得挂到 ${LIB_NAME} 上。
+    add_custom_command(
+            TARGET ${LIB_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory ${CONFIG_PATH} ${BUILD_PATH}/config
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${CMAKE_CURRENT_SOURCE_DIR}/../config/service_config.json
+                ${CMAKE_CURRENT_SOURCE_DIR}/../config/sensitive_keywords.json
+                ${BUILD_PATH}
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${CMAKE_CURRENT_SOURCE_DIR}/../test/test_service.py
+                ${BUILD_PATH}
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${BUILD_VERSION_FILE} ${BUILD_PATH}
+    )
+endif ()

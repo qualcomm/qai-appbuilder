@@ -1,4 +1,8 @@
-qai-appbuilder/
-build/
+ai-engine-direct-helper/
+*build/
 GenieService_v*
 .idea
+.junie/
+cmake-build/
+__pycache__
+QAIModelBuilder

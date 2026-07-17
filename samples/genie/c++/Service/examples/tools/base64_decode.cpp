@@ -1,4 +1,4 @@
-//==============================================================================
+﻿//==============================================================================
 //
 // Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
 //
@@ -53,8 +53,6 @@ int main(int argc, char **argv)
         std::cout << "decode to binrary failed before alloc: " << GetLastError() << "\n";
         return -1;
     }
-
-    ERROR_SUCCESS;
 
     auto buf = new uint8_t[dwDecodeLen]{};
     if (!CryptStringToBinaryA(encoded_buf.data(),

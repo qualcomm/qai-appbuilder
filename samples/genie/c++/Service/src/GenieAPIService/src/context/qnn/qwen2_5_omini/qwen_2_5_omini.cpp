@@ -1,4 +1,4 @@
-//==============================================================================
+﻿//==============================================================================
 //
 // Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
 //
@@ -578,7 +578,6 @@ IVisionEmbedding &QInterface::Qwen2_5OMINI::BuildImgPixel()
     Qwen25ImageProcessor proc;
     proc.ProcessToBuffer(img_buf_.data(), img_buf_.size(), kHeight, kWidth, img_pixel_buf_, rows, cols);
     img_buf_.clear();
-    File::WriteBinaryFile<float>(img_pixel_buf_, "img_pixel.raw");
     return *this;
 }
 
