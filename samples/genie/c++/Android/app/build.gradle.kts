@@ -1,28 +1,38 @@
 import org.gradle.api.tasks.Copy
 import java.io.File
 
-// Use absolute path to build_android output directory
-// From app/build.gradle.kts (Android/app/), go up 2 levels to samples/genie/c++, then to build_android
-val buildOutputDir = file("../../build_android/output/libs/arm64-v8a")
+// Must stay in sync with the QNN_STUB_VERSION build_android.bat actually built (default
+// "v79;v81", ';'-separated for multiple Hexagon architectures); pass
+// -PqnnStubVersion=<vNN>[;<vNN>...] to gradlew to override.
+val qnnStubVersion = (project.findProperty("qnnStubVersion") as String?) ?: "v79;v81"
+val qnnStubVersions = qnnStubVersion.split(";").map { it.trim() }.filter { it.isNotEmpty() }
+
+// From app/build.gradle.kts (Android/app/), go up 2 levels to samples/genie/c++, then into
+// Service/build-android (build_android.bat lives in Service and resolves all its paths from
+// there, mirroring how build_linux.sh keeps its own build-linux output inside Service too).
+val buildOutputDir = file("../../Service/build-android/output/libs/arm64-v8a")
 
 val sourceFiles = listOf(
     "libJNIGenieAPIService.so",
     "libGenieAPIService.so",
+    // libappbuilder/libsamplerate are LOCAL_SHARED_LIBRARIES of the two modules above
+    // (see Service/scripts/Android.mk) and must ship alongside them or the dynamic
+    // linker refuses to load either .so at process start.
     "libappbuilder.so",
     "libsamplerate.so",
-    "libcurl.so",
     "libGenie.so",
     "libQnnHtp.so",
+    "libQnnSystem.so",
     "libQnnHtpNetRunExtensions.so",
-    "libQnnHtpPrepare.so",
-    "libQnnHtpV79.so",
-    "libQnnHtpV79Skel.so",
-    "libQnnHtpV79Stub.so",
-    "libQnnHtpV81.so",
-    "libQnnHtpV81Skel.so",
-    "libQnnHtpV81Stub.so",
-    "libQnnSystem.so"
-)
+    "libQnnHtpPrepare.so"
+) + qnnStubVersions.flatMap { ver ->
+    val tag = "V" + ver.removePrefix("v")
+    listOf(
+        "libQnnHtp${tag}Stub.so",
+        "libQnnHtp${tag}Skel.so",
+        "libqnnhtp${ver}.cat"
+    )
+}
 
 val libsDir = file("libs/arm64-v8a")
 

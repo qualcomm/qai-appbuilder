@@ -1,33 +1,33 @@
-# Tools introduce
+# Tools Introduction
 
 # encode.exe
 
-It can help you encode a png or any files to base64 file.
+Encodes a PNG or any file to base64.
 
 example:
 
-This example encoding cat.png to base64 format data and wrtie to cat.txt.
+Encode cat.png to base64 and write the result to cat.txt.
 
 ```encode.exe cat.png cat.txt```
 
 # decode.exe
 
-It can help you decode from base64 file to binary file.
+Decodes a base64 file back to binary.
 
 example:
 
-This example decoding base64 format cat.txt to binary and wrtie to cat.png.
+Decode cat.txt from base64 back to binary and write the result to cat.png.
 
 ```decode.exe cat.txt cat.png```
 
 # wav.exe
 
-You maybe need input .wav format audio file to OMINI model, It's can help you recording you voice!
+Records audio to a .wav file, for example to use as input for the OMINI model.
 
-We use some algorithms and techniques to amplify your sound.
+Applies amplification to the recorded audio.
 
 example:
 
-After type the command, long press the [SPACE] key for recoding...
+After running the command, hold [SPACE] to record.
 
 ```wav.exe test.wav```
