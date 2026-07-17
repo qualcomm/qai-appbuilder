@@ -1,0 +1,965 @@
+{
+    "_comment": "GenieAPIService 服务配置文件 - 程序启动时自动加载，修改后重启服务生效",
+    "_version": "1.0",
+
+    "local_model": {
+        "_comment": "本地模型配置",
+        "_comment_enabled": "true=启用本地模型（默认），false=禁用本地模型（仅使用云端模型）",
+        "enabled": true
+    },
+
+    "cloud_shared": {
+        "_comment": "云端模型共享配置（cloud_model 与 enterprise_cloud_model 共用，避免重复配置）",
+        "timeout_seconds": 120,
+        "_comment_stream_timeout": "SSE 流式请求的读超时（秒），同时控制本地模型流式读超时（含长文本摘要推理阶段）；长文本摘要推理建议 1800s+，多轮工具调用建议 600s+",
+        "stream_timeout_seconds": 1800,
+        "_comment_log_debug": "云端客户端调试日志开关：true=输出连接细节、端点选择、请求参数等 [DBG] 日志（仅用于开发调试），false=关闭（生产环境推荐）；默认 false",
+        "log_debug": false,
+
+        "retry": {
+            "_comment": "重试策略：max=最大重试次数，backoff_ms=重试间隔(毫秒)",
+            "max": 2,
+            "backoff_ms": 200,
+            "_comment_max_total_attempts": "所有端点的总尝试次数上限，0=自动(endpoints数量×max)",
+            "max_total_attempts": 0,
+            "_comment_retry_on_429": "HTTP 429 限流时是否切换到下一个端点（false=在当前端点退避重试）",
+            "retry_on_429_switch_endpoint": false
+        },
+
+        "circuit_breaker": {
+            "_comment": "熔断器：连续失败 failure_threshold 次后进入冷却期 cooldown_seconds 秒",
+            "failure_threshold": 3,
+            "cooldown_seconds": 60
+        },
+
+        "rate_limit": {
+            "_comment": "推理限流配置（每轮任务维度，防止模型进入死循环无限消耗 tokens）",
+            "_comment_max_inferences": "每轮任务最大推理（工具调用）次数，0=不限制，默认 20",
+            "max_inferences_per_task": 20,
+            "_comment_max_tokens": "每轮任务最大累计 Token 数（prompt+completion），0=不限制，默认 0",
+            "max_tokens_per_task": 0
+        }
+    },
+
+    "cloud_model": {
+        "_comment": "云端模型配置（对应 OpenAI Chat Completions 兼容接口）",
+        "enabled": true,
+        "base_url": "https://your-api-endpoint.example.com/v1",
+        "api_key": "",
+        "model": "azure::gpt-5.4",
+        "_comment_context_size": "云端模型上下文窗口大小（tokens），用于统一提示词优化流水线的 token 预算计算。0=使用默认值 32768。建议根据实际部署的云端模型显式配置，例如 Llama-3.3-70B 通常为 131072，Qwen2.5-72B 通常为 32768。",
+        "context_size": 1000000,
+
+        "upload_policy": {
+            "_comment": "数据上云策略（仅当 local_model.enabled=false 且 cloud_model.enabled=true 时生效）",
+            "_comment_sensitivity_check": "true=对上云数据进行敏感性检查（默认），false=跳过检查，所有数据直接上云",
+            "enable_sensitivity_check": true,
+            "_comment_desensitization": "true=对 S1/S2 数据脱敏后再上云（默认），false=不脱敏直接上云",
+            "enable_desensitization": true
+        },
+
+        "_comment_endpoints": "多端点配置（按顺序尝试，主端点失败自动切换备用端点）",
+        "endpoints": []
+    },
+
+    "enterprise_cloud_model": {
+        "_comment": "企业内网模型服务配置（用于 C1 级别任务路由，中等复杂度任务由企业内部服务器处理）",
+        "enabled": false,
+        "base_url": "https://your-api-endpoint.example.com/v1",
+        "api_key": "",
+        "model": "codewise_instruct",
+        "_comment_context_size": "企业云模型上下文窗口大小（tokens），用于统一提示词优化流水线的 token 预算计算。0=使用默认值 16384。建议根据实际部署的企业云模型显式配置。",
+        "context_size": 32000,
+
+        "_comment_endpoints": "多端点配置（按顺序尝试，主端点失败自动切换备用端点）",
+        "endpoints": []
+    },
+
+    "routing": {
+        "_comment": "智能路由与内容安全配置",
+        "enabled": true,
+        "_comment_policy_id": "策略 ID，用于缓存 Key 隔离，修改后旧缓存自动失效",
+        "policy_id": "default_v1",
+        "_comment_prefer_local": "true=S0+C0/C1 优先走本地；false=S0+C1 在云端可用时允许上云",
+        "prefer_local_for_simple": true,
+        "_comment_enterprise_cloud_require_desensitize": "企业内网云是否要求对 S1 数据脱敏后再上传：false（默认）=企业云视为可信边界，S1 数据无需脱敏直接发送（适合物理隔离的内网部署）；true=保守模式，S1 数据发往企业云前仍需脱敏（适合对数据合规有要求的企业）",
+        "enterprise_cloud_require_desensitize": false,
+
+        "sensitivity_detection": {
+            "_comment": "敏感内容检测配置",
+            "_comment_enabled": "总开关：true=开启敏感检测（默认），false=关闭所有敏感检测，所有数据直接上云（不做任何安全检查）",
+            "enabled": true,
+            "_comment_method": "检测方法：rule_first=规则引擎优先（推荐）",
+            "method": "rule_first",
+            "_comment_system_prompt": "本地模型辅助安全检测时使用的系统提示词",
+            "system_prompt": "You are a security classifier. Respond immediately with ONLY a JSON object. Do NOT think, reason, or explain. No analysis, no preamble, no extra text.\nOutput format: {\"sensitivity\":\"S0|S1|S2\",\"reason\":\"brief reason\"}\nRules: S0=no sensitive info, S1=moderate (phone/email/password keyword), S2=high (ID card/bank card/API key/private key/bearer token)",
+            "_comment_local_model": "是否启用本地模型辅助判断（开启后延迟 P95 目标从 300ms 升至 5 分钟）",
+            "use_local_model_fallback": false,
+            "_comment_strict_s2": "true=任意规则命中 S2 即整体升级为 S2（推荐保持 true）",
+            "strict_s2_union": true,
+            "_comment_timeout": "本地模型辅助判断超时（毫秒），超时后保守升级一级；默认 300000ms（5 分钟）",
+            "timeout_ms": 300000,
+            "_comment_max_chars": "辅助判断输入截断长度（字符数），防止超长文本导致推理超时",
+            "model_input_max_chars": 2000,
+            "_comment_max_gen_tokens": "安全检查最大生成 token 数；思考类模型（Harmony 格式）在输出 JSON 前会先生成 analysis channel 内容，需要更大预算；默认 2048",
+            "max_gen_tokens": 2048,
+            "_comment_overrides": "规则等级覆盖，例如将银行卡格式规则从 S2 降为 S1：{\"R_BANK_CARD_FMT\": \"S1\"}",
+            "rule_level_overrides": {},
+            "_comment_debug_log_matches": "调试日志开关：true=规则命中时打印匹配规则、原始文本及前后30字符上下文（包含原始敏感信息，仅用于问题排查），false=关闭（生产环境推荐）；默认 false",
+            "debug_log_matches": false,
+            "_comment_keywords": "关键词词典路径（相对于可执行文件目录），支持热更新；留空则不加载",
+            "keywords_dict_path": "./sensitive_keywords.json",
+            "keywords_reload_interval_seconds": 60,
+            "extended_rules": {
+                "_comment": "扩展检测规则开关（各类型可独立开启/关闭，不影响基础 PII/SECRET/FINANCIAL 规则）",
+                "_comment_local_path": "本地文件路径检测：Unix/Linux/macOS 用户目录路径（R_PATH_UNIX）和 Windows 用户目录路径（R_PATH_WIN），敏感等级 S1",
+                "enable_local_path": true,
+                "_comment_internal_url": "内网地址检测：RFC 1918 私有 IP 地址段（R_INTERNAL_IP）和内网域名后缀 .internal/.local/.corp/.intranet/.lan（R_INTERNAL_DOMAIN），敏感等级 S1",
+                "enable_internal_url": true,
+                "_comment_device_id": "设备标识检测：MAC 地址（R_MAC_ADDR）和带上下文关键词的 IMEI（R_IMEI），敏感等级 S1",
+                "enable_device_id": true,
+                "_comment_image_data": "图片数据基础保护：检测 data URI 格式的内嵌图片（R_BASE64_IMAGE）；因无法分析图片内容，保守标记为 S1；建议保持开启以防止图片中的隐私信息（证件照、截图等）被发送至云端",
+                "enable_image_data": true
+            },
+            "detection_rules": {
+                "_comment": "基础检测规则开关（各类型可独立开启/关闭；默认全部开启）",
+                "_comment_phone": "手机号检测（R_PHONE_CN）：中国大陆11位手机号",
+                "enable_phone": true,
+                "_comment_level_phone": "手机号命中时的敏感等级：S0/S1/S2，默认 S1",
+                "level_phone": "S1",
+                "_comment_email": "电子邮件检测（R_EMAIL）：标准邮箱格式",
+                "enable_email": true,
+                "_comment_level_email": "邮箱命中时的敏感等级：S0/S1/S2，默认 S1",
+                "level_email": "S1",
+                "_comment_id_card": "身份证检测（R_ID_CARD）：中国居民18位身份证",
+                "enable_id_card": true,
+                "_comment_level_id_card": "身份证命中时的敏感等级：S0/S1/S2，默认 S2",
+                "level_id_card": "S2",
+                "_comment_bank_card": "银行卡检测（R_BANK_CARD_KW / R_BANK_CARD_FMT）：含上下文关键词或标准格式",
+                "enable_bank_card": true,
+                "_comment_level_bank_card": "银行卡命中时的敏感等级：S0/S1/S2，默认 S2",
+                "level_bank_card": "S2",
+                "_comment_api_key": "API Key 检测（R_API_KEY）：sk- 开头的 OpenAI 风格密钥",
+                "enable_api_key": true,
+                "_comment_level_api_key": "API Key 命中时的敏感等级：S0/S1/S2，默认 S2",
+                "level_api_key": "S2",
+                "_comment_private_key": "私钥检测（R_PRIVATE_KEY）：PEM 格式私钥块",
+                "enable_private_key": true,
+                "_comment_level_private_key": "私钥命中时的敏感等级：S0/S1/S2，默认 S2",
+                "level_private_key": "S2",
+                "_comment_token": "Bearer Token 检测（R_TOKEN）：HTTP Authorization Bearer 令牌",
+                "enable_token": true,
+                "_comment_level_token": "Bearer Token 命中时的敏感等级：S0/S1/S2，默认 S2",
+                "level_token": "S2",
+                "_comment_password": "密码关键词检测（R_PASSWORD_KW）：password=/passwd=/secret= 赋值模式",
+                "enable_password": true,
+                "_comment_level_password": "密码关键词命中时的敏感等级：S0/S1/S2，默认 S1",
+                "level_password": "S1"
+            }
+        },
+
+        "desensitization": {
+            "_comment": "脱敏配置（S1 内容上云前自动脱敏）",
+            "enabled": true,
+            "_comment_system_prompt": "本地模型摘要化脱敏时使用的系统提示词",
+            "system_prompt": "You are a redaction assistant. Rewrite the text to remove or generalize all PII/secrets/credentials.\nDo NOT include any identifiers, numbers that look like IDs, keys, tokens, emails, phone numbers, addresses.\nPreserve only the minimum task context needed.\nOutput ONLY the rewritten text.",
+            "_comment_strategies": "脱敏策略列表：mask=部分遮盖，placeholder=占位符替换，delete=删除，summarize=摘要化脱敏（调用端侧模型）",
+            "strategies": ["structured_placeholder"],
+            "_comment_style": "占位符样式模板，{type}=实体类型，{index}=序号，例如 <PHONE_1>",
+            "placeholder_style": "<{type}_{index}>",
+            "_comment_iterative": "true=迭代脱敏（首轮未清除时继续脱敏，最多 max_rounds 轮）",
+            "iterative": true,
+            "max_rounds": 3,
+            "_comment_summarize": "摘要化脱敏超时（毫秒），仅当 strategies 包含 summarize 时生效；默认 300000ms（5 分钟）",
+            "summarize_timeout_ms": 300000,
+            "_comment_format_preserving": "格式保留脱敏开关（工具调用场景）：true=生成符合语义格式的 Mock Data（如 mock_user_1@example.com），false=使用占位符（如 <EMAIL_1>）；默认 false",
+            "format_preserving_enabled": true,
+            "_comment_restore_response": "响应还原开关（格式保留脱敏场景）：true=将云端响应中的 Mock Data 还原为原始敏感数据后再发送给客户端，false=直接将 Mock Data 发送给客户端；默认 true；仅当 format_preserving_enabled=true 时生效",
+            "restore_response_enabled": true,
+            "_comment_restore_stream": "流式响应还原开关：true=对云端 SSE 流式响应执行字段级 JSON 还原（默认），false=跳过流式还原（用于 A/B 测试验证还原逻辑是否导致问题）；仅当 restore_response_enabled=true 时生效",
+            "restore_stream_enabled": true,
+            "_comment_log_details": "脱敏过程详细日志开关：true=输出脱敏前后内容对比和映射关系（包含原始敏感信息，仅用于开发调试），false=仅输出摘要信息（生产环境推荐）；默认 false",
+            "log_desensitization_details": false,
+            "entity_switches": {
+                "_comment": "各实体类型脱敏开关（独立控制每种实体是否执行脱敏；默认全部开启）",
+                "_comment_phone": "手机号脱敏：138****1234 格式遮盖",
+                "enable_phone": true,
+                "_comment_email": "邮箱脱敏：a***@domain.com 格式遮盖",
+                "enable_email": true,
+                "_comment_id_card": "身份证脱敏：保留前3位和后4位",
+                "enable_id_card": true,
+                "_comment_bank_card": "银行卡脱敏：保留前4位和后4位",
+                "enable_bank_card": true,
+                "_comment_api_key": "API Key 脱敏：替换为 <API_KEY>",
+                "enable_api_key": true,
+                "_comment_private_key": "私钥脱敏：删除整个 PEM 私钥块，替换为 <PRIVATE_KEY_REMOVED>",
+                "enable_private_key": true,
+                "_comment_token": "Bearer Token 脱敏：替换为 Bearer <TOKEN>",
+                "enable_token": true,
+                "_comment_password": "密码脱敏：替换值为 <PASSWORD>，保留关键词",
+                "enable_password": true,
+                "_comment_internal_url": "内网 IP/域名脱敏：RFC 1918 私有 IP → <INTERNAL_IP>，内网域名（.internal/.local/.corp/.intranet/.lan）→ <INTERNAL_DOMAIN>",
+                "enable_internal_url": true,
+                "_comment_local_path": "本地路径脱敏：Windows 用户目录路径（C:\\Users\\...）和 Unix 用户目录路径（/home/.../或/Users/...）→ <LOCAL_PATH>",
+                "enable_local_path": true,
+                "_comment_device_id": "设备标识脱敏：MAC 地址（XX:XX:XX:XX:XX:XX）→ <MAC_ADDR>，IMEI（15位）→ <IMEI>",
+                "enable_device_id": true,
+                "_comment_image_data": "图片数据脱敏：data URI 格式的内嵌图片（data:image/...;base64,...）→ <IMAGE_DATA_REMOVED>",
+                "enable_image_data": true
+            }
+        },
+
+        "complexity": {
+            "_comment": "任务复杂度评估配置",
+            "_comment_method": "评估方法：heuristic_first=启发式规则优先（推荐）",
+            "method": "heuristic_first",
+            "_comment_system_prompt": "本地模型辅助复杂度评估时使用的系统提示词",
+            "system_prompt": "You are a task complexity classifier. Respond immediately with ONLY a JSON object. Do NOT think, reason, or explain. No analysis, no preamble, no extra text.\nOutput format: {\"complexity\":\"C0|C1|C2\",\"reason\":\"brief reason\"}\nRules: C0=simple (greeting/factual Q&A/simple lookup), C1=moderate (analysis/summarize/compare/evaluate/plan/design), C2=complex (generate report/code refactor/multi-step plan/system design/comprehensive analysis)",
+            "_comment_local_model": "是否启用本地模型辅助复杂度判断",
+            "use_local_model_fallback": false,
+            "_comment_timeout": "本地模型辅助判断超时（毫秒），超时后保守升级一级（C0→C1）；默认 300000ms（5 分钟）",
+            "timeout_ms": 300000,
+            "_comment_max_chars": "辅助判断输入截断长度（字符数），与 sensitivity_detection.model_input_max_chars 对齐",
+            "model_input_max_chars": 2000,
+            "thresholds": {
+                "_comment_tool_calls": "最新用户提问后的工具调用次数超过此值判定为 C1",
+                "tool_calls": 5
+            },
+            "_comment_keywords_c1": "C1 复杂度关键词列表（命中后升级为 C1）；留空数组则使用内置默认值；关键词匹配不区分大小写",
+            "keywords_c1": [
+                "分析", "推理", "归纳", "对比", "评估", "规划", "设计",
+                "analyze", "reasoning", "compare", "evaluate", "plan", "design",
+                "summarize", "infer", "deduce", "assess"
+            ],
+            "_comment_keywords_c2": "C2 复杂度关键词列表（命中后直接升级为 C2，优先级高于 C1）；留空数组则使用内置默认值",
+            "keywords_c2": [
+                "生成报告", "代码重构", "对比多方案", "多步骤规划", "系统设计", "架构设计",
+                "全面分析", "深度分析", "综合评估", "完整实现",
+                "generate report", "code refactor", "compare multiple", "multi-step plan",
+                "system design", "architecture design", "comprehensive analysis",
+                "deep analysis", "full implementation", "complete implementation"
+            ]
+        },
+
+        "fallback": {
+            "_comment": "降级策略配置",
+            "_comment_cloud_to_local": "云端不可用时是否 fallback 到本地（false=直接报错 503）",
+            "cloud_unavailable_to_local": true,
+            "local_unavailable": {
+                "_comment": "本地不可用时的处理策略：cloud_if_allowed=尝试上云，fail=报错",
+                "s0": "cloud_if_allowed",
+                "s1": "cloud_if_allowed",
+                "s2": "fail"
+            },
+            "_comment_clean_history": "事后路由回退时清理本地模型产生的中间 tool_calls/tool 消息（Phase 4 Step 18）",
+            "clean_local_history_on_fallback": true,
+            "_comment_max_retries": "本地输入溢出时云端可恢复错误（503）的最大重试次数；超出后升级为 422（永久失败），阻止客户端无限重试；0=不限制（不推荐）；默认 3",
+            "max_input_overflow_retries": 0,
+            "_comment_enterprise_cloud_unavailable": "企业云不可用时的 fallback 策略：public_cloud_if_allowed=降级到公有云（默认），local_if_allowed=降级到本地，fail=直接返回503",
+            "enterprise_cloud_unavailable": "public_cloud_if_allowed",
+            "_comment_public_cloud_unavailable": "公有云不可用时的 fallback 策略：enterprise_cloud_if_allowed=降级到企业云（默认），local_if_allowed=降级到本地，fail=直接返回503",
+            "public_cloud_unavailable": "enterprise_cloud_if_allowed"
+        },
+
+        "cache": {
+            "_comment": "安全检测结果 LRU 缓存（相同内容命中缓存可跳过重复检测）",
+            "ttl_seconds": 60,
+            "max_entries": 256
+        },
+
+        "agent_routing": {
+            "_comment": "Agent 路由偏好配置",
+            "_comment_sub_prefer": "true=子 Agent 默认优先走本地",
+            "sub_agent_prefer_local": true,
+            "_comment_sub_cloud": "true=子 Agent 在 S0/S1+C2 且云端可用时允许上云",
+            "sub_agent_allow_cloud_on_c2": true,
+            "_comment_retries": "单次请求最大工具调用重试次数，超出后触发事后路由回退",
+            "max_tool_call_retries": 10
+        },
+
+        "sticky_routing": {
+            "_comment": "会话级路由锁定（Phase 4 Step 17）：一旦某 session 路由到 CLOUD，后续请求均走 CLOUD 直到任务完成",
+            "_comment_enabled": "false=关闭（默认），true=开启 sticky routing",
+            "enabled": true,
+            "_comment_ttl": "session 锁定超时（秒），超时后重新评估路由，默认 30 分钟",
+            "ttl_seconds": 1800,
+            "_comment_max": "最大锁定 session 数（防内存泄漏），达到上限时清理最旧的条目",
+            "max_sessions": 1000
+        },
+
+        "incremental_check": {
+            "_comment": "安全检查增量模式（多轮对话中只检查新增消息，降低 CPU 和推理延迟）",
+            "_comment_enabled": "false=关闭（默认），true=开启增量检查",
+            "enabled": true,
+            "_comment_ttl": "会话安全状态 TTL（秒），超时后重新全量检查，默认 1 小时",
+            "session_ttl_seconds": 3600,
+            "_comment_max": "最大缓存会话数（防内存泄漏），达到上限时清理最旧的条目",
+            "max_sessions": 1000,
+            "_comment_s2": "S2 历史默认全量检查（安全红线）；例外：当 s2_turn_cleaning.enabled=true 且有 S2 轮次记录时，允许对当前轮做增量检查（只检查新消息），以判断当前轮是否含 S2",
+            "s2_always_full_check": true,
+            "_comment_ref": "是否检测新消息中对历史敏感信息的引用（如'刚才的手机号'）",
+            "detect_sensitive_reference": true,
+            "_comment_tamper": "是否检测历史消息被篡改（消息数量减少）",
+            "detect_history_tampering": true
+        },
+
+        "s2_turn_cleaning": {
+            "_comment": "S2 轮次清理配置（清理历史中包含 S2 的完整轮次后再上云）",
+            "_comment_enabled": "true=开启 S2 轮次清理（默认）。开启后：\n  1. 增量检查允许在 S2 历史下继续工作（只检查当前轮，不扫描历史 S2 内容）\n  2. 当前轮无 S2 时，清洗历史中的 S2 轮次后再上云\n  3. 清洗后 max_sensitivity 可从 S2 降级为 S1/S0，恢复增量检查\nfalse=关闭（保持原有行为：历史含 S2 则始终全量检查，导致后续轮次也报 S2）",
+            "enabled": true,
+            "_comment_log_details": "true=输出清理详情日志（包含被清理的轮次信息），false=仅输出摘要",
+            "log_details": true,
+            "_comment_allow_cloud_reroute_after_clean": "true=清洗历史 S2 后，若当前轮路由决策为 LOCAL 但云端更适合，允许重新路由到 CLOUD；false=清洗后保持原路由决策（保守模式）",
+            "allow_cloud_reroute_after_clean": true
+        },
+
+        "metrics": {
+            "_comment": "指标汇总输出配置（0=禁用）",
+            "summary_every_n_requests": 100,
+            "summary_every_seconds": 0,
+            "latency_sample_size": 1000,
+            "fail_reason_topn": 5
+        }
+    },
+
+    "prompt_optimization": {
+        "_comment": "Prompt 优化与分级压缩配置，控制历史消息的保留与压缩策略",
+
+        "skill_catalog_format": "structured",
+        "enable_tool_whitelist": true,
+        "allowed_tools": ["read", "edit", "write", "exec", "web_search", "web_fetch"],
+        "enable_skill_auto_correction": true,
+        "tool_call_temperature": 0.1,
+
+        "_comment_spawn_guard": "SpawnGuard：sessions_spawn 重复调用防护。当 sessions_spawn 的 tool_response 包含 childSessionKey 时，在 tool_response 末尾注入强制等待指令，阻止小模型重复 spawn 导致创建多个重复 subagent。",
+        "spawn_guard": {
+            "_comment_enabled": "总开关：true=开启注入（默认），false=关闭（禁用注入）",
+            "enabled": true,
+            "_comment_header": "注入内容的标题行，{child_key} 占位符在运行时替换为实际 childSessionKey 值",
+            "header": "[SPAWN_GUARD] Child session accepted: {child_key}",
+            "_comment_body": "注入内容的正文，各行以 \\n 分隔",
+            "body": "STOP. Do NOT call sessions_spawn again.\nThe child is running asynchronously. Its result will arrive as a new user message.\nYour ONLY valid next action is to output plain text (no tool calls) to acknowledge the spawn.\nWait silently. Do not repeat the spawn."
+        },
+
+        "system_prompts": {
+            "_comment_sections_enabled": "各静态段落的启用开关（true=输出该段落，false=跳过）",
+            "sections_enabled": {
+                "_comment": "identity_intro=身份声明（始终输出）；skill_rule=Skill与Tool区分规则（仅有SKILL时输出）；tools_intro=工具列表说明（仅有SKILL时输出）；catalog_structured_intro=Skill Catalog头部说明",
+                "identity_intro": true,
+                "skill_rule": true,
+                "tools_intro": true,
+                "catalog_structured_intro": true
+            },
+
+            "_comment_few_shot_examples_enabled": "Few-shot 示例各类型的启用开关",
+            "few_shot_examples_enabled": {
+                "_comment_enabled": "总开关：false=完全禁用 few-shot 示例生成（优先级最高）",
+                "enabled": true,
+                "_comment_skill_correct_call": "正确的 Skill 调用示例（使用 read 工具加载 SKILL.md）",
+                "skill_correct_call": true,
+                "_comment_no_skill_needed": "无需 Skill 的普通问答示例（用于演示元查询场景：列出 Skills 时直接从 Catalog 回答）",
+                "no_skill_needed": true,
+                "_comment_max_skill_examples": "最多生成几个 Skill 示例（取 runtime_skills 中前 N 个）：0=不生成任何 Skill 示例；1=只生成第1个；2=生成前2个（默认）；以此类推",
+                "max_skill_examples": 1
+            },
+
+            "_comment_identity_intro": "身份声明段落，始终输出（无论是否有 SKILL）",
+            "identity_intro": "You are QAI ModelBuilder, a personal AI assistant running on Windows 11.\n\n",
+            "_comment_skill_rule": "Skill 与 Tool 区分规则，仅在有 SKILL 时输出；无 SKILL 时省略，避免引入不存在的概念",
+            "skill_rule": "**RULE**: Skills are NOT tools. To use a skill, call `read` with its SKILL.md path. Never call a skill name as a tool.\n\n",
+            "tools_intro": "You can only call these tools:\n- read(path, offset?, limit?)\n- edit(path, edits:[{oldText, newText}])\n- write(path, content)\n- exec(command, timeout?)  // timeout in seconds; 0=no timeout\n- web_search(query, count?, country?, freshness?)\n- web_fetch(url, extractMode?, maxChars?)\n- glob(pattern, cwd?)\n- grep(pattern, path?, include?, ignoreCase?, contextLines?)\n- agent(prompt)\n\nNever call any other tool name.\n\n",
+            "catalog_structured_intro": "## Available Skills (complete list, NOT tools)\n\nTo use a skill: read(SKILL.md path) first, then follow its instructions.\nTo list skills: answer directly from this catalog, no tool call needed.\n\n",
+            "_comment_few_shot_header": "few_shot_header：动态生成示例的段落标题（含末尾换行），默认 '## Examples\\n\\n'",
+            "few_shot_header": "## Examples\n\n",
+
+            "_comment_few_shot_templates": "以下为 BuildFewShotExamples 动态生成示例时使用的模板字符串，{idx} 占位符在运行时替换为示例序号",
+            "_comment_few_shot_skill_title_template": "技能匹配示例的标题行模板，{idx} 替换为序号",
+            "few_shot_skill_title_template": "**Example {idx} - Skill Match**\n",
+            "_comment_few_shot_default_user_query_prefix": "use_for 为空时的默认用户查询前缀（前缀 + skill_name + 后缀）",
+            "few_shot_default_user_query_prefix": "Please use the ",
+            "_comment_few_shot_default_user_query_suffix": "use_for 为空时的默认用户查询后缀",
+            "few_shot_default_user_query_suffix": " skill",
+            "_comment_few_shot_user_label": "示例中用户发言的标签前缀",
+            "few_shot_user_label": "User: ",
+            "_comment_few_shot_response_label": "示例中模型响应的标签前缀",
+            "few_shot_response_label": "Response: ",
+            "_comment_few_shot_correct_call_label": "正确调用 Skills 的示例标签前缀",
+            "few_shot_correct_call_label": "Tool(correct skill call): ",
+            "_comment_few_shot_no_skill_title_template": "无需技能示例的标题行模板，{idx} 替换为序号；此示例用于演示元查询场景（列出 Skills 时直接从 Catalog 回答，无需调用工具）",
+            "few_shot_no_skill_title_template": "**Example {idx} - List Skills (answer from catalog)**\n",
+            "_comment_few_shot_no_skill_user_input": "无需技能示例中的用户输入文本（元查询：列出所有 Skills）",
+            "few_shot_no_skill_user_input": "What skills do you have? / 有哪些skills?",
+            "_comment_few_shot_no_skill_response": "无需技能示例中的模型响应文本（直接从 Catalog 回答，不调用任何工具）",
+            "few_shot_no_skill_response": "I have the following skills: [list from catalog above]. No tool call needed."
+        },
+
+        "_comment_output_reserve_ratio": "为模型输出预留的上下文窗口比率（默认 0.20 即 20%）；实际可用于 Prompt 的 token 数 = context_size × (1 - output_reserve_ratio)",
+        "output_reserve_ratio": 0.20,
+
+        "_comment_max_messages_limit": "消息数量上限（超出时智能丢弃最旧的消息，保留工具调用序列完整性）",
+        "max_messages_limit": 16,
+
+        "_comment_recent_window": "最近 N 条消息视为'新消息'，在分级压缩中受到更高保护（优先保留完整内容）",
+        "recent_window": 6,
+
+        "_comment_compress_len": "各类消息的内容压缩阈值（字符数）；超出阈值时截断并追加 '...'",
+        "_comment_old_compress_len": "Phase 2：旧消息（recent_window 之外）的压缩阈值",
+        "old_compress_len": 100,
+        "_comment_recent_compress_len": "Phase 3：新消息（recent_window 之内，非保护消息）的压缩阈值",
+        "recent_compress_len": 300,
+        "_comment_tool_compress_len": "Phase 4：工具响应消息的压缩阈值",
+        "tool_compress_len": 300,
+
+        "_comment_min_compress_threshold": "最小压缩收益阈值（字符数）；节省字符数低于此值时跳过压缩，避免无效操作",
+        "min_compress_threshold": 60,
+
+        "_comment_tool_min_length": "工具消息压缩后的最小有效长度（字符数）；压缩后低于此值时跳过压缩，防止工具响应被过度截断；应小于 tool_compress_len",
+        "tool_min_length": 100,
+
+        "emergency_truncation": {
+            "_comment": "Phase 4: 紧急截断配置（最后一条 tool 消息超大导致 context overflow 时的兜底机制）",
+            "_comment_enabled": "是否启用 Phase 4 紧急截断（默认 true）",
+            "enabled": true,
+            "_comment_max_truncation_ratio": "最大截断比例（0.0-1.0）；若需要截断的 token 数超过最后一条 tool 消息的此比例，则放弃截断，直接走 local_input_overflow 流程；默认 0.40（40%）",
+            "max_truncation_ratio": 0.40,
+            "_comment_safety_margin_tokens": "安全余量（token 数）；截断时额外预留的 token 数，防止边界情况；默认 30",
+            "safety_margin_tokens": 30
+        },
+
+        "_comment_long_text_summarization": "长文本摘要化配置（Phase -1）：在 prompt 构建前对超长 user 消息和 tool 响应执行 Map-Reduce 摘要，减少本地上下文溢出概率",
+        "long_text_summarization": {
+            "_comment_enabled": "总开关：false=禁用（默认），true=启用长文本摘要化前置优化",
+            "enabled": true,
+            "_comment_trigger_ratio": "触发阈值比率：单条消息 token 数超过 context_size × trigger_ratio 时触发摘要；默认 0.5",
+            "trigger_ratio": 0.5,
+            "_comment_chunk_ratio": "分块大小比率：每个 chunk 的 token 上限 = context_size × chunk_ratio；默认 0.45",
+            "chunk_ratio": 0.45,
+            "_comment_max_chunks": "最大分块数：超出时截断尾部块并输出 warning；默认 12",
+            "max_chunks": 12,
+            "_comment_summarize_user_messages": "true=对最后一条超长 user 文本消息执行摘要（默认 true）",
+            "summarize_user_messages": true,
+            "_comment_summarize_tool_responses": "true=对末尾连续 tool 消息链中的超长消息执行摘要（默认 true）",
+            "summarize_tool_responses": true,
+            "_comment_verbose_logging": "true=输出摘要化过程详细日志（含原文长度、摘要长度、缓存命中等），仅用于调试；默认 false",
+            "verbose_logging": false,
+            "_comment_map_instruction": "Map 阶段摘要指令文本（对每个分块的摘要任务说明）",
+            "map_instruction": "Extract and compress the key information from the following content into a compact summary of at most 30% of the original length. Output plain text only — do NOT add section headers, bullet formatting, or markdown. Preserve: facts, file paths, code snippets, error messages, numbers, URLs, and critical technical details. Omit: introductions, repeated explanations, decorative text, and table-of-contents entries.",
+            "_comment_reduce_instruction": "Reduce 阶段合并指令文本（对各分块摘要的合并任务说明）",
+            "reduce_instruction": "Merge the following partial summaries into one compact summary. Remove all duplication. Output plain text only — do NOT add section headers or bullet formatting. Preserve all unique facts, file paths, code snippets, numbers, URLs, and technical details.",
+            "cache": {
+                "_comment": "摘要结果进程内 LRU 缓存配置（服务重启后失效，不持久化）",
+                "_comment_enabled": "true=启用缓存（默认），false=禁用缓存（每次请求均重新摘要）",
+                "enabled": true,
+                "_comment_max_entries": "最大缓存条目数；达到上限时淘汰最旧条目；默认 500",
+                "max_entries": 500,
+                "_comment_max_memory_mb": "缓存最大内存占用（MB）；超出时淘汰最旧条目；默认 50",
+                "max_memory_mb": 50,
+                "_comment_ttl_minutes": "缓存条目 TTL（分钟）；超时后自动失效；默认 60",
+                "ttl_minutes": 60
+            }
+        },
+
+        "_comment_system_context": "系统上下文配置，所有系统提示词内容均从此处读取。",
+        "system_context": {
+            "_comment_sections": "子段落列表，按顺序拼接。title=段落标题（含 # 前缀），lines=内容行数组，enabled=是否启用该段落",
+            "sections": [
+                {
+                    "_comment": "身份声明段落（已移至 identity_intro，此处禁用避免重复）",
+                    "title": "# QAI ModelBuilder Personal Assistant (Windows 11)",
+                    "enabled": false,
+                    "lines": []
+                },
+                {
+                    "title": "## Core Behavior",
+                    "enabled": false,
+                    "lines": [
+                        "- Analyze user requests and match the most appropriate skill",
+                        "- Respond directly to the user when no matching skill is found",
+                        "- Answer questions based on facts; do not fabricate information",
+                        "- When a matching SKILL is found, first call the read tool to load the corresponding SKILL.md file; do NOT call the SKILL name directly as a tool. See the examples below the skill list",
+                        "- Always provide a clear, user-friendly summary after calling a tool",
+                        "- Validate file paths and provide actionable suggestions when reporting errors",
+                        "\n\n** IMPORTANT: The Skills listed under \"Available Skills\" below are NOT directly callable Tools. Skills are not tools — you must use the \"read\" tool to load the corresponding SKILL.md file in order to learn how to use each Skill."
+                    ]
+                },
+                {
+                    "_comment": "Analysis 通道约束：防止模型在 analysis 中过度推理，导致输出 token 耗尽",
+                    "title": "## Analysis Channel Guidelines",
+                    "enabled": false,
+                    "lines": [
+                        "- Keep analysis brief: 1-3 sentences max",
+                        "- State WHAT action to take, not HOW to implement it",
+                        "- Do NOT write code, scripts, or detailed implementations in analysis"
+                    ]
+                },
+                {
+                    "_comment": "Custom instructions: language preference and honesty requirements",
+                    "title": "## Custom Instructions",
+                    "enabled": false,
+                    "lines": [
+                        "- Always respond in English unless the user explicitly requests another language.",
+                        "- When uncertain, be honest with the user and do not fabricate information."
+                    ]
+                },
+                {
+                    "_comment": "Session Startup instruction handling rules",
+                    "title": "## Session Startup",
+                    "enabled": false,
+                    "lines": [
+                        "When a Session Startup instruction is received:",
+                        "- No need to read any files",
+                        "- Greet the user directly in 1-3 sentences",
+                        "- Ask the user what they need help with"
+                    ]
+                },
+                {
+                    "_comment": "工具使用准则（仅在 Harmony 格式且有工具时生效）",
+                    "title": "## Tool Usage Guidelines",
+                    "enabled": false,
+                    "lines": [
+                        "When using tools, follow these principles:",
+                        "- Always validate file paths before operations",
+                        "- For read operations on large files, use offset/limit parameters",
+                        "- Use edit for precise changes, write for complete file replacement",
+                        "- Report errors clearly with actionable suggestions",
+                        "- Never execute potentially harmful commands"
+                    ]
+                }
+            ]
+        },
+
+        "prompt_sections": {
+            "_comment": "原始系统提示词段落保留配置。通过标题关键词匹配决定哪些 Markdown 段落被追加到优化后的提示词中。",
+            "_comment_enabled": "false=禁用段落过滤（默认，不追加原始段落）；true=启用，按 rules 过滤后追加",
+            "enabled": false,
+
+            "_comment_rules": "段落匹配规则列表，按顺序匹配，第一个命中的规则生效。",
+            "_comment_rule_fields": "title_contains=标题子串（大小写不敏感）；heading_level=0任意/1=#/2=##/3=###；include=true保留/false丢弃",
+            "rules": [
+                {
+                    "_comment": "## Tooling：工具可用性列表（read/write/edit/exec/browser/subagents）",
+                    "title_contains": "Tooling",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## Tool Call Style：工具调用风格（何时旁白、何时静默）",
+                    "title_contains": "Tool Call Style",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## Safety：安全行为准则（不追求自我保全、优先人类监督等）",
+                    "title_contains": "Safety",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## OpenClaw CLI Quick Reference：OpenClaw 命令行快速参考",
+                    "title_contains": "OpenClaw CLI",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## Skills (mandatory)：技能匹配规则（扫描 available_skills 并读取 SKILL.md）",
+                    "title_contains": "Skills (mandatory)",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## Workspace：工作目录配置（C:\\Users\\...\\workspace）",
+                    "title_contains": "Workspace",
+                    "heading_level": 2,
+                    "include": true
+                },
+                {
+                    "_comment": "## Documentation：OpenClaw 文档链接（本地 docs 和在线镜像）",
+                    "title_contains": "Documentation",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## Current Date & Time：当前时区信息",
+                    "title_contains": "Current Date",
+                    "heading_level": 2,
+                    "include": true
+                },
+                {
+                    "_comment": "## Workspace Files (injected)：工作区文件注入说明",
+                    "title_contains": "Workspace Files",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## Reply Tags：回复标签格式（[[reply_to_current]] 等）",
+                    "title_contains": "Reply Tags",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## Messaging：消息路由规则（跨 session 发消息、子 agent 编排等）",
+                    "title_contains": "Messaging",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## Group Chat Context：群聊上下文（通常为空，由运行时注入）",
+                    "title_contains": "Group Chat Context",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## Inbound Context (trusted metadata)：入站消息元数据（chat_id/channel/provider 等）",
+                    "title_contains": "Inbound Context",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## Runtime System Events (gateway-generated)：运行时系统事件（消息触发记录）",
+                    "title_contains": "Runtime System Events",
+                    "heading_level": 2,
+                    "include": true
+                },
+                {
+                    "_comment": "## Silent Replies：静默回复规则（NO_REPLY 格式要求）",
+                    "title_contains": "Silent Replies",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## Heartbeats：心跳轮询规则（HEARTBEAT_OK 格式要求）",
+                    "title_contains": "Heartbeats",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## Runtime：运行时信息（agent=main/host/model/shell/channel 等）",
+                    "title_contains": "Runtime",
+                    "heading_level": 2,
+                    "include": true
+                },
+                {
+                    "_comment": "# Project Context：用户工作区文件内容（AGENTS.md/SOUL.md 等），通常很长",
+                    "title_contains": "Project Context",
+                    "heading_level": 1,
+                    "include": true
+                },
+                {
+                    "_comment": "# AGENTS.md - Your Workspace：工作区行为规范（每次会话读取文件、记忆管理等）",
+                    "title_contains": "AGENTS.md",
+                    "heading_level": 1,
+                    "include": true
+                },
+                {
+                    "_comment": "## First Run：首次运行指引（读取 BOOTSTRAP.md）",
+                    "title_contains": "First Run",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## Every Session：每次会话启动时的必读文件列表（SOUL.md/USER.md/memory 等）",
+                    "title_contains": "Every Session",
+                    "heading_level": 2,
+                    "include": true
+                },
+                {
+                    "_comment": "## Memory：记忆文件说明（daily notes 和 MEMORY.md 的用途）",
+                    "title_contains": "Memory",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "### MEMORY.md - Your Long-Term Memory：长期记忆文件的加载规则（仅主会话）",
+                    "title_contains": "MEMORY.md",
+                    "heading_level": 3,
+                    "include": false
+                },
+                {
+                    "_comment": "### Write It Down - No Mental Notes!：记忆写入规则（不要依赖脑记）",
+                    "title_contains": "Write It Down",
+                    "heading_level": 3,
+                    "include": false
+                },
+                {
+                    "_comment": "## External vs Internal：外部操作 vs 内部操作的安全边界",
+                    "title_contains": "External vs Internal",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## Group Chats：群聊行为规范（何时发言、何时沉默）",
+                    "title_contains": "Group Chats",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "### Know When to Speak!：群聊发言时机规则",
+                    "title_contains": "Know When to Speak",
+                    "heading_level": 3,
+                    "include": false
+                },
+                {
+                    "_comment": "### React Like a Human!：表情反应使用规则（Discord/Slack）",
+                    "title_contains": "React Like a Human",
+                    "heading_level": 3,
+                    "include": true
+                },
+                {
+                    "_comment": "## Tools：工具使用说明（Skills 提供工具，TOOLS.md 记录本地配置）",
+                    "title_contains": "Tools",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## Heartbeats - Be Proactive!：心跳轮询行为规范（主动检查邮件/日历等）",
+                    "title_contains": "Heartbeats - Be Proactive",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "### Heartbeat vs Cron: When to Use Each：心跳 vs Cron 的使用场景对比",
+                    "title_contains": "Heartbeat vs Cron",
+                    "heading_level": 3,
+                    "include": false
+                },
+                {
+                    "_comment": "### Memory Maintenance (During Heartbeats)：心跳期间的记忆维护流程",
+                    "title_contains": "Memory Maintenance",
+                    "heading_level": 3,
+                    "include": false
+                },
+                {
+                    "_comment": "## Make It Yours：自定义工作区规范的提示",
+                    "title_contains": "Make It Yours",
+                    "heading_level": 2,
+                    "include": true
+                },
+                {
+                    "_comment": "# SOUL.md - Who You Are：AI 人格定义文件",
+                    "title_contains": "SOUL.md",
+                    "heading_level": 1,
+                    "include": true
+                },
+                {
+                    "_comment": "## Core Truths：核心行为准则（真正有帮助、有观点、先尝试再问）",
+                    "title_contains": "Core Truths",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## Boundaries：行为边界（私人信息保密、外部操作先询问）",
+                    "title_contains": "Boundaries",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## Vibe：风格定义（简洁、有深度、不做企业机器人）",
+                    "title_contains": "Vibe",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## Continuity：会话连续性说明（每次会话读取记忆文件）",
+                    "title_contains": "Continuity",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "# TOOLS.md - Local Notes：本地工具配置笔记（摄像头/SSH/TTS 等）",
+                    "title_contains": "TOOLS.md",
+                    "heading_level": 1,
+                    "include": false
+                },
+                {
+                    "_comment": "# IDENTITY.md - Who Am I?：AI 身份定义文件（名字/性格/emoji 等）",
+                    "title_contains": "IDENTITY.md",
+                    "heading_level": 1,
+                    "include": true
+                },
+                {
+                    "_comment": "# USER.md - About Your Human：用户信息文件（姓名/时区/偏好等）",
+                    "title_contains": "USER.md",
+                    "heading_level": 1,
+                    "include": true
+                },
+                {
+                    "_comment": "# HEARTBEAT.md：心跳任务清单文件",
+                    "title_contains": "HEARTBEAT.md",
+                    "heading_level": 1,
+                    "include": false
+                },
+                {
+                    "_comment": "# BOOTSTRAP.md - Hello, World：首次启动引导文件",
+                    "title_contains": "BOOTSTRAP.md",
+                    "heading_level": 1,
+                    "include": false
+                },
+                {
+                    "_comment": "## The Conversation：首次对话引导（询问名字/性格/风格）",
+                    "title_contains": "The Conversation",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## After You Know Who You Are：身份确认后的文件更新步骤",
+                    "title_contains": "After You Know Who You Are",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## Connect (Optional)：可选的消息平台连接（WhatsApp/Telegram）",
+                    "title_contains": "Connect (Optional)",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## When You're Done：引导完成后删除 BOOTSTRAP.md",
+                    "title_contains": "When You're Done",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "── SubAgent 特有段落 ──────────────────────────────────────────────────────",
+                    "_comment2": "## Subagent Context：子 Agent 上下文（运行深度、结果自动上报等），SubAgent 特有，默认保留",
+                    "title_contains": "Subagent Context",
+                    "heading_level": 2,
+                    "include": false
+                }
+            ],
+
+            "_comment_default_action": "未被任何规则命中的段落的默认处理：include=保留，exclude=丢弃（推荐 exclude，安全默认值）",
+            "default_action": "exclude",
+
+            "_comment_max_section_tokens": "单个段落的最大 token 数，超出时截断并追加 '...[truncated]'（0=不限制）",
+            "max_section_tokens": 0
+        },
+
+        "subagent_prompt_sections": {
+            "_comment": "SubAgent 专用段落过滤配置。BuildSystemContext() 重建核心骨架（identity_intro/skill_rule/tools_intro/skill_catalog/few_shot）后，",
+            "_comment2": "再从原始提示词中按此配置过滤并附加 SubAgent 特有段落（Workspace/Subagent Context/Runtime 等）。",
+            "_comment3": "与 prompt_sections 结构完全相同，但仅在 SubAgent 路径（OptimizeSubagentSystemPrompt）中使用。",
+            "_comment_enabled": "true=启用（推荐）；false=禁用，SubAgent 退化为只做 XML 替换，不做模板重建",
+            "enabled": false,
+
+            "_comment_rules": "段落匹配规则列表，按顺序匹配，第一个命中的规则生效。",
+            "_comment_rule_fields": "title_contains=标题子串（大小写不敏感）；heading_level=0任意/1=#/2=##/3=###；include=true保留/false丢弃",
+            "rules": [
+                {
+                    "_comment": "## Workspace：工作目录（SubAgent 执行任务的根目录，必须保留）",
+                    "title_contains": "Workspace",
+                    "heading_level": 2,
+                    "include": true
+                },
+                {
+                    "_comment": "## Subagent Context：子 Agent 上下文（运行深度/结果自动上报等，SubAgent 特有，必须保留）",
+                    "title_contains": "Subagent Context",
+                    "heading_level": 2,
+                    "include": true
+                },
+                {
+                    "_comment": "## Current Date & Time：当前时区（SubAgent 执行时间相关任务时需要）",
+                    "title_contains": "Current Date",
+                    "heading_level": 2,
+                    "include": true
+                },
+                {
+                    "_comment": "## Inbound Context (trusted metadata)：入站消息元数据（channel/provider/chat_type 等）",
+                    "title_contains": "Inbound Context",
+                    "heading_level": 2,
+                    "include": true
+                },
+                {
+                    "_comment": "## Runtime：运行时信息（agent=support/model/shell/channel 等，SubAgent 需要知道自己的运行环境）",
+                    "title_contains": "Runtime",
+                    "heading_level": 2,
+                    "include": true
+                },
+                {
+                    "_comment": "## Workspace Files (injected)：工作区文件注入说明（通常为空，保留以防有内容注入）",
+                    "title_contains": "Workspace Files",
+                    "heading_level": 2,
+                    "include": true
+                },
+                {
+                    "_comment": "## Tooling：工具可用性列表（已由 BuildSystemContext 的 tools_intro 替代，丢弃原始版本）",
+                    "title_contains": "Tooling",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## Tool Call Style：工具调用风格（已由 BuildSystemContext 替代，丢弃）",
+                    "title_contains": "Tool Call Style",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## Safety：安全行为准则（已由 BuildSystemContext 替代，丢弃）",
+                    "title_contains": "Safety",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## OpenClaw CLI Quick Reference：CLI 参考（SubAgent 很少需要管理 gateway，丢弃）",
+                    "title_contains": "OpenClaw CLI",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## Skills (mandatory)：原始 Skills 规则段落（已由 BuildSystemContext 的 skill_catalog 替代，丢弃）",
+                    "title_contains": "Skills",
+                    "heading_level": 2,
+                    "include": false
+                }
+            ],
+
+            "_comment_default_action": "未被任何规则命中的段落的默认处理：exclude=丢弃（安全默认值，防止意外保留冗余段落）",
+            "default_action": "exclude",
+
+            "_comment_max_section_tokens": "单个段落的最大 token 数，超出时截断（0=不限制）",
+            "max_section_tokens": 0
+        }
+    },
+
+    "_comment_models": "多模型并发配置：同时加载多个模型实例，支持 CPU/GPU/NPU 并发推理。客户端通过请求中的 model 字段指定使用哪个模型。固定顺序：第1个=NPU模型，第2个=GPU模型，第3个=CPU模型。",
+    "models": [
+        {
+            "_comment": "NPU 模型（固定槽位1）：使用 QNN 后端在 NPU 上运行",
+            "name": "qwen3-8b-8380",
+            "path": "qwen3-8b-8380",
+            "backend": "qnn",
+            "device": "npu",
+            "context_size": 8192,
+            "enabled": true
+        },
+        {
+            "_comment": "GPU 模型（固定槽位2）：使用 Llama.cpp (GGUF) 后端在 GPU 上运行",
+            "name": "gpt-oss-20b-GGUF",
+            "path": "gpt-oss-20b-GGUF",
+            "backend": "GGUF",
+            "device": "gpu",
+            "context_size": 16384,
+            "enabled": false
+        },
+        {
+            "_comment": "CPU 模型（固定槽位3）：使用 MNN 后端在 CPU 上运行",
+            "name": "Qwen2-7B-Instruct-MNN",
+            "path": "Qwen2-7B-Instruct-MNN",
+            "backend": "mnn",
+            "device": "cpu",
+            "context_size": 4096,
+            "enabled": false
+        }
+    ],
+    "_comment_default_model": "默认模型名称：客户端不指定 model 字段时使用此模型。必须与 models 数组中某个 name 字段完全匹配。",
+    "default_model": "qwen3-8b-8380",
+
+    "debug": {
+        "_comment": "调试与诊断配置",
+        "_comment_status_update_content_visible": "true=状态更新消息（preparing/inference/tool_call 等）同时将描述文字写入 delta.content，客户端可在对话界面看到状态提示；false=delta.content 为空，客户端不显示状态文字（仅用于保活连接）",
+        "status_update_content_visible": false,
+        "_comment_log_rule_matches": "true=规则引擎命中时打印匹配规则ID和原始文本（含前后各30字符上下文），默认false，仅用于问题排查，生产环境请保持关闭",
+        "log_rule_matches": false,
+        "_comment_log_inference_stream": "true=启用推理输出流程调试日志（kInfo 级别），包括：FinalizeFinalChannel 的调用状态、flush 内容字节数与预览、末尾标签前缀裁剪情况等；用于排查模型输出末尾内容丢失问题；默认 false，生产环境建议关闭以减少日志量",
+        "log_inference_stream": false
+    }
+}

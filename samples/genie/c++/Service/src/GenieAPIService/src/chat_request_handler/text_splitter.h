@@ -1,4 +1,4 @@
-//==============================================================================
+﻿//==============================================================================
 //
 // Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
 //
@@ -10,6 +10,9 @@
 #define TEXT_SPLITTER_H
 
 #include <string>
+#include <vector>
+#include <functional>
+#include <regex>
 
 // When writing the C++ implementation of RecursiveCharacterTextSplitter, I referenced the Python code in LangChain.
 // https://github.com/langchain-ai/langchain/blob/master/libs/text-splitters/langchain_text_splitters/character.py#L58
@@ -99,7 +102,6 @@ public:
     }
 
     static inline const int DOCS_MAX_SIZE = DEFAULT_CONTEXT_SIZE - 1024;
-    const int DOCS_MAX_QUERY_TIMES = 3;
 };
 
 #endif //TEXT_SPLITTER_H

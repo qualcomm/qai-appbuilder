@@ -1,4 +1,4 @@
-//==============================================================================
+﻿//==============================================================================
 //
 // Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
 //
@@ -644,8 +644,6 @@ Shape_3D<float> slice_shape3d_range(
     int out2 = compute_len(start2, end2, step2);
 
     long long total = static_cast<long long>(out0) * out1 * out2;
-    if (total > static_cast<long long>(std::numeric_limits<size_t>::max()));
-//        throw std::overflow_error("output size too large");
 
     Shape_3D<float> out;
     out.d0 = out0;
