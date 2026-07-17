@@ -4,6 +4,22 @@
 > 1. Fill in the **Variables** section below — each variable is defined **once**.
 > 2. Throughout this document, `{VARIABLE}` references are already resolved by your definitions above.
 > 3. Choose **Flow A (QNN)** or **Flow B (SNPE)** and follow only that flow's phases.
+> 4. Before declaring the project complete, run the **Project Closeout Gate** below. If `EVOLVE = YES`, Phase E is required and must be completed or explicitly skipped with a recorded reason.
+
+---
+
+## Project Closeout Gate
+
+Before reporting the whole project as complete:
+
+- [ ] Main configured flow is complete and accepted on the required target (`RETMOE_DEVICE_INFO` remote target if set).
+- [ ] `REPORT.md` exists and links the final validation evidence.
+- [ ] Config completion fields are filled: `END_TIME`, `WORK_TIME`, and final pass/fail status.
+- [ ] If `ACCURACY_REPORT = YES`, Phase R is complete and linked from `REPORT.md`.
+- [ ] If `EVOLVE = YES`, Phase E is complete: candidates reviewed by Verification Subagent, interactive confirmations handled if applicable, skill repo committed for applied changes, and the Skill Evolution Summary table filled.
+- [ ] If `EVOLVE = YES` but no skill changes are applied, record the explicit skip/reject reason in the Skill Evolution Summary before closing.
+
+**Closeout rule**: Do not claim the full plan is complete while any enabled post-project phase (`ACCURACY_REPORT`, `EVOLVE`) is still unrun, awaiting confirmation, blocked, or undocumented.
 
 ---
 
@@ -18,6 +34,10 @@ QAIRT_ENV_SETUP = <!-- path to the project-level env-setup script; sources {QAIR
 
 FLOW          = <!-- QNN  or  SNPE(default) -->
 OPTIMIZE_LAYOUT = <!-- YES / NO (default NO); QNN only. If YES, run final optimization pass by removing --preserve_io -->
+ACCURACY_REPORT = <!-- YES / NO (default NO); optional final accuracy report phase after profiling and before skill evolution. If YES, consolidate validation/profiling artifacts into an accuracy report. -->
+EVOLVE        = <!-- YES / NO (default NO); post-project skill self-improvement phase. If YES, run evolve phase after all main phases complete. See references/evolve.md -->
+EVOLVE_MODE   = <!-- inherit / batch / interactive (default inherit); controls whether evolve applies verified skill changes automatically or asks user before applying. inherit uses MODE. -->
+AIPC_SKILL_DIR = <!-- path to the aipc skill checkout to update; global or project-local; must be a git repository before evolve applies changes -->
 
 SRC_FRAMEWORK = <!-- PyTorch(default) /   ONNX -->
 TARGET_DEVICE = <!-- ARM WIN  (QCOM) / x86 Linux/ ARM Linux (QCOM) -->
@@ -60,7 +80,7 @@ CALIB_LIST       = <!-- one absolute sample path per line.  calibration_list.txt
 OUTPUT_DIR    = <!-- e.g. qairt_output(default)-->
 OWNER         = <!-- name / team / aipc(default)-->
 START_TIME    = <!-- YYYY-MM-DD HH:MM get current system time -->
-END_TIME      = <!-- YYYY-MM-DD HH:MM  — filled in by Validation Agent at Phase 6.5 -->
+END_TIME      = <!-- YYYY-MM-DD HH:MM  — filled in by Validation Agent at Phase 7.5 -->
 WORK_TIME     = <!-- e.g. 2h 30m       — END_TIME minus START_TIME -->
 python venv   = <!-- qairt (default) | project (only if qairt venv is insufficient) -->
 python lib install = <!-- ask (default) | yes | no  — always ask before pip install -->
@@ -69,6 +89,12 @@ python lib install = <!-- ask (default) | yes | no  — always ask before pip in
 QAIRT_ROOT    = <!--if QAIRT_ENV_SETUP is provided, derive this value from $QAIRT_SDK_ROOT after sourcing that script. /absolute path to the versioned QAIRT SDK root>
 
 ONNX_FILE     = {MODEL_NAME}.onnx
+# For multi-component pipelines (e.g. diffusion, Whisper, CLIP), replace the single
+# ONNX_FILE with a component list and shared output directory:
+# COMPONENTS   = <!-- comma-separated component names, e.g. text_encoder, unet, vae_decoder -->
+# ONNX_DIR     = <!-- directory for all component ONNX files, e.g. onnx_models -->
+# When COMPONENTS is set, all Phase 1–5 tasks iterate over each component.
+# See references/multi_component_pipeline.md for the full workflow.
 HOST_ARCH      = <!-- can derived from HOST_DEVICE:
                      ARM WIN    → x86_64-windows-msvc  (emulation — qairt ARM WIN toolchain uses x86_64 emulation)
                      X86 LINUX  → x86_64-linux-clang
@@ -183,6 +209,7 @@ Is PRECISION INT8 / A16W8 / INT4 / A8W4?
 
 ## Objectives
 
+- [ ] Adapt the source PyTorch model for NPU-friendly export when model-side changes are required
 - [ ] Export `{MODEL_NAME}` to ONNX format with QNN-compatible operators
 - [ ] Inspect ONNX model I/O and operator compatibility
 - [ ] Convert `{ONNX_FILE}` using **{FLOW}** flow
@@ -195,9 +222,12 @@ Is PRECISION INT8 / A16W8 / INT4 / A8W4?
 
 ---
 
-## Prerequisites (Common)
+## Phase 0: Environment & Prerequisites (Common)
 
-### Operator Patching Status (Fill during Phase 1)
+**Agent**: Environment Agent  
+**Concern**: Infrastructure only — QAIRT toolchain, Python venv, env vars, preflight checks. Model-side NPU changes belong in Phase 1, not here.
+
+### Operator Patching Status (Fill during Phase 2)
 
 > **Update these fields as you discover and patch unsupported operators:**
 
@@ -211,14 +241,20 @@ PATCH_LAST_UPDATE  = <!-- YYYY-MM-DD HH:MM --
 
 ### Model-Specific Notes
 
-> Fill these in during Phase 1 discovery:
+> Fill these in during Phase 1 / Phase 2 discovery:
 
 ```
+MODEL_STRUCTURE = <!-- generic / transformer_decoder / custom -->
+PYTORCH_ADAPTATION_NEEDED = <!-- Yes / No -->
+PYTORCH_ADAPTATION_NOTES  = <!-- wrappers, cache handling, fixed-shape assumptions, or "none" -->
+
 INPUT_NAME    = <!-- e.g. images -->
 INPUT_SHAPE   = <!-- e.g. [1, 3, 640, 640] -->
 OUTPUT_NAMES  = <!-- e.g. output0, output1 -->
 OPSET         = <!-- e.g. 13 -->
 ```
+
+> If `MODEL_STRUCTURE = transformer_decoder`, follow `skills/aipc-toolkit/references/pytorch_modification.md` for PyTorch-side adaptation and `skills/aipc-toolkit/references/transformer_models_qairt.md` for ONNX prefill/decode export and validation contracts.
 
 ### Environment Setup
 
@@ -311,7 +347,7 @@ OPSET         = <!-- e.g. 13 -->
 
 ### Wrapper Artifact & Runtime-Libs Preflight (QNN inference, platform-aware)
 
-- [ ] Run wrapper artifact preflight before Phase 5 inference:
+- [ ] Run wrapper artifact preflight before Phase 6 inference:
   ```bash
   # In model working directory
   ls -1 {MODEL_NAME}*.bin 2>/dev/null || true
@@ -383,7 +419,43 @@ OPSET         = <!-- e.g. 13 -->
 
 ---
 
-## Phase 1: Model Export to ONNX (Common)
+## Phase 1: NPU Model Adaptation (Common, when needed)
+
+**Agent**: Model Adaptation Agent  
+**Reference**: `skills/aipc-toolkit/references/pytorch_modification.md`
+
+> **Scope**: All model-side changes required to make the model NPU-compatible — wrappers, fixed-shape assumptions, operator replacements, KV-cache flattening, `use_cache=False` export paths, etc. This is separate from environment setup (Phase 0) and ONNX export mechanics (Phase 2).
+> For transformer decoder models, this phase prepares explicit prefill/decode wrappers and KV-cache inputs/outputs before the Model Export Agent creates ONNX artifacts.
+> ⚠️ Do not mix NPU model adaptation work into Phase 0 (env checks) or Phase 2 (export mechanics). If adaptation is needed, complete and validate it here before proceeding to Phase 2.
+
+### Tasks
+
+- [ ] **1.1** Identify whether PyTorch adaptation is required
+  - Set `MODEL_STRUCTURE` to `generic`, `transformer_decoder`, or `custom`
+  - Set `PYTORCH_ADAPTATION_NEEDED`
+  - Record key shape and wrapper assumptions in `PYTORCH_ADAPTATION_NOTES`
+
+- [ ] **1.2** Inspect model-side NPU constraints
+  - For generic models: identify forward-path changes or wrapper needs that preserve semantics
+  - For transformer decoder models: identify prefill/decode split, KV-cache shapes, cache type, and fixed-shape decode bring-up target
+
+- [ ] **1.3** Implement PyTorch wrapper or adaptation code
+  - Do not modify installed package source files
+  - Keep model semantics unchanged
+  - If a required change alters semantics, stop under Blocking Condition B4
+
+- [ ] **1.4** Validate adapted PyTorch outputs before ONNX export
+  - Check output shapes, dtypes, finite values, and nonzero counts
+  - For transformer decoder models, validate prefill and decode wrappers separately
+  - Record validation notes in `PYTORCH_ADAPTATION_NOTES`
+
+- [ ] **1.5** Hand off export-ready model entry point or wrappers to Phase 2
+
+**Exit Criteria**: NPU model adaptation is either marked not needed (`PYTORCH_ADAPTATION_NEEDED = No`) or all model-side changes are validated and the export-ready entry point is handed off to Phase 2. Phase 2 must not start until this exit criteria is met.
+
+---
+
+## Phase 2: Model Export to ONNX (Common)
 
 **Agent**: Model Export Agent  
 **Reference**: `skills/aipc-toolkit/references/model_export_validation.md`
@@ -391,7 +463,9 @@ OPSET         = <!-- e.g. 13 -->
 ### Tasks
 
 - [ ] **1.1** Review `{MODEL_NAME}` architecture for QNN-incompatible operators
+  - ⚠️ **Gate**: Confirm Phase 1 exit criteria is met before starting. If `PYTORCH_ADAPTATION_NEEDED = Yes`, the adapted model entry point from Phase 1 must be used — do not export from the original unmodified model.
   - Known problematic ops: `Einsum`, custom attention, `GridSample`, `ScatterND`
+  - For transformer decoder models, use `transformer_models_qairt.md` for the prefill/decode ONNX contract instead of exporting only a generic full-forward graph
   - Update `PATCH_NEEDED` and `PATCH_OPS` in Variables above
 
 - [ ] **1.2** Write `export_onnx.py` with in-memory operator patches (if `PATCH_NEEDED = Yes`)
@@ -417,7 +491,7 @@ OPSET         = <!-- e.g. 13 -->
   ```
 
 - [ ] **1.6** ONNX inference sanity check — compare output with {SRC_FRAMEWORK} baseline
-  > If `RETMOE_DEVICE_INFO` is set, skip local quick-smoke sanity inference at this step and perform target-device inference first in Phase 5.
+  > If `RETMOE_DEVICE_INFO` is set, skip local quick-smoke sanity inference at this step and perform target-device inference first in Phase 6.
 
 - [ ] **1.7** Iterative patching (if needed)
   - If dry-run shows new unsupported ops after patch → repeat Tasks 1.2–1.6
@@ -429,7 +503,7 @@ OPSET         = <!-- e.g. 13 -->
 
 ---
 
-## Phase 2: Model Inspection (Common)
+## Phase 3: Model Inspection (Common)
 
 **Agent**: Model Inspector Agent  
 **Reference**: `skills/aipc-toolkit/references/model_export_validation.md` §2
@@ -471,22 +545,22 @@ OPSET         = <!-- e.g. 13 -->
 
 ---
 
-## [QNN] Phase 3A: FP16 / FP32 / BF16 Conversion
+## [QNN] Phase 4A: FP16 / FP32 / BF16 Conversion
 
 **Agent**: Conversion Agent  
 **Script**: `skills/aipc-toolkit/scripts/aipc_convert_fp.py`
 
-> Skip if going directly to low-bit quantization → proceed to Phase 3B.
+> Skip if going directly to low-bit quantization → proceed to Phase 4B.
 >
 > If `{PRECISION}=BF16`, do **not** assume a dedicated BF16 converter mode exists. Use this phase only after confirming the exported ONNX is accepted by the converter/runtime, or fall back to FP32/FP16.
 >
-> 🚫 **Phase 3 guardrail**: `--preserve-io-mode none` is forbidden in conversion/quantization phases (3A/3B/3C).
+> 🚫 **Phase 4 guardrail**: `--preserve-io-mode none` is forbidden in conversion/quantization phases (4A/4B/4C).
 > Use `datatype` by default, or `layout` only when required for compatibility.
-> Baseline-first policy: complete Phase 6 validation on preserve-io artifacts before entering QNN Phase 8.
+> Baseline-first policy: complete Phase 7 validation on preserve-io artifacts before entering QNN Phase 9.
 
 ### Tasks
 
-- [ ] **QNN-3A.1** Run FP conversion
+- [ ] **QNN-4A.1** Run FP conversion
   ```bash
   python skills/aipc-toolkit/scripts/aipc_convert_fp.py \
     --onnx {ONNX_FILE} \
@@ -496,23 +570,23 @@ OPSET         = <!-- e.g. 13 -->
     --target-arch {TARGET_ARCH}
   ```
   > If target runtime shows FP16/dtype compatibility issues, rerun with `--preserve-io-mode layout`.
-  > Do **not** use `--preserve-io-mode none` in Phase 3A.
+  > Do **not** use `--preserve-io-mode none` in Phase 4A.
 
-- [ ] **QNN-3A.2** Verify conversion outputs in `{OUTPUT_DIR}`:
+- [ ] **QNN-4A.2** Verify conversion outputs in `{OUTPUT_DIR}`:
   - `{MODEL_NAME}.bin` ✓
   - `{MODEL_NAME}.cpp` ✓
   - `{MODEL_NAME}_net.json` ✓
 
-- [ ] **QNN-3A.3** Compile shared library via libgen
+- [ ] **QNN-4A.3** Compile shared library via libgen
   - Output: `lib{MODEL_NAME}.so` (Linux) / `lib{MODEL_NAME}.dll` (Windows)
 
-- [ ] **QNN-3A.4** Verify library file is non-zero size
+- [ ] **QNN-4A.4** Verify library file is non-zero size
 
 **Exit Criteria**: `lib{MODEL_NAME}.so` compiled successfully.
 
 ---
 
-## [QNN] Phase 3B: Model Quantization (INT4/INT8/A16W8) — QAIRT path (default)
+## [QNN] Phase 4B: Model Quantization (INT4/INT8/A16W8) — QAIRT path (default)
 
 **Agent**: Quantization Agent  
 **Script**: `skills/aipc-toolkit/scripts/aipc_convert_int.py`  
@@ -520,7 +594,7 @@ OPSET         = <!-- e.g. 13 -->
 
 > Use when `{QUANT_TOOL} = QAIRT`. Quantizes to `{PRECISION}` using the QAIRT toolchain directly.  
 > Quantizes to the precision set in `{PRECISION}` using the QAIRT toolchain directly.  
-> If `{QUANT_TOOL} = AIMET`, skip this phase and follow **Phase 3C** instead.
+> If `{QUANT_TOOL} = AIMET`, skip this phase and follow **Phase 4C** instead.
 > 🚫 `--preserve-io-mode none` is forbidden in this phase.
 
 ### Additional Variables
@@ -544,10 +618,10 @@ WEIGHT_BITWIDTH   = <!-- 8 (typical); see note above for other modes -->
 
 ### Tasks
 
-- [ ] **QNN-3B.1** Prepare calibration dataset (50–200 representative samples)
+- [ ] **QNN-4B.1** Prepare calibration dataset (50–200 representative samples)
   - Format: raw float32 binary `.raw` files, shape matching `{INPUT_SHAPE}`
 
-- [ ] **QNN-3B.2** Generate `{CALIB_LIST}`
+- [ ] **QNN-4B.2** Generate `{CALIB_LIST}`
   ```
   # One absolute file path per line
   calibration_raw/sample_001.raw
@@ -555,7 +629,7 @@ WEIGHT_BITWIDTH   = <!-- 8 (typical); see note above for other modes -->
   ...
   ```
 
-- [ ] **QNN-3B.3** Run INT quantization
+- [ ] **QNN-4B.3** Run INT quantization
   ```bash
   python skills/aipc-toolkit/scripts/aipc_convert_int.py \
     --input_network {ONNX_FILE} \
@@ -567,20 +641,20 @@ WEIGHT_BITWIDTH   = <!-- 8 (typical); see note above for other modes -->
     --target-arch {TARGET_ARCH}
   ```
   > If target runtime shows dtype compatibility issues, rerun with `--preserve-io-mode layout`.
-  > Do **not** use `--preserve-io-mode none` in Phase 3B.
+  > Do **not** use `--preserve-io-mode none` in Phase 4B.
 
-- [ ] **QNN-3B.4** Verify quantized outputs in `{OUTPUT_DIR}`:
+- [ ] **QNN-4B.4** Verify quantized outputs in `{OUTPUT_DIR}`:
   - `{MODEL_NAME}_a{ACT_BITWIDTH}_w{WEIGHT_BITWIDTH}.bin` ✓
   - `{MODEL_NAME}_a{ACT_BITWIDTH}_w{WEIGHT_BITWIDTH}.cpp` ✓
   - `lib{MODEL_NAME}_a{ACT_BITWIDTH}_w{WEIGHT_BITWIDTH}.so` ✓
 
-- [ ] **QNN-3B.5** Quick accuracy check vs. FP baseline (cosine similarity ≥ 0.95)
+- [ ] **QNN-4B.5** Quick accuracy check vs. FP baseline (cosine similarity ≥ 0.95)
 
 **Exit Criteria**: Quantized library compiled. Accuracy within acceptable threshold.
 
 ---
 
-## [QNN] Phase 3C: Model Quantization (INT4/INT8/A16W8) — AIMET path (Linux only)
+## [QNN] Phase 4C: Model Quantization (INT4/INT8/A16W8) — AIMET path (Linux only)
 
 **Agent**: Quantization Agent  
 **Reference**: `skills/aipc-toolkit/references/model_quantization_aimet.md`
@@ -613,7 +687,7 @@ WEIGHT_BITWIDTH   = <!-- 8 (typical); see note above for other modes -->
 
 ### Tasks
 
-- [ ] **QNN-3C.1** Set up AIMET environment
+- [ ] **QNN-4C.1** Set up AIMET environment
   ```bash
   source ~/qairt_2404.sh
   mkdir -p {AIMET_WORK_DIR}/{artifacts,logs,data}
@@ -629,13 +703,13 @@ PY
   ```
   - If both `aimet_onnx` and `aimet_torch` are installed, avoid `aimet_common` imports in ONNX flow.
 
-- [ ] **QNN-3C.2** Select AIMET PTQ technique (see `references/model_quantization_aimet.md` — Escalation Flow):
+- [ ] **QNN-4C.2** Select AIMET PTQ technique (see `references/model_quantization_aimet.md` — Escalation Flow):
   - **Baseline**: CLE (data-free) + standard PTQ at `{PRECISION}`
   - **For higher accuracy**: add AdaRound or SeqMSE at the same `{PRECISION}`
   - All techniques operate at the precision configured in `{PRECISION}` — do not change bitwidth here
   - Record chosen technique in `AIMET_RUN_ID`
 
-- [ ] **QNN-3C.3** Run AIMET PTQ (example: CLE + W8A8 baseline)
+- [ ] **QNN-4C.3** Run AIMET PTQ (example: CLE + W8A8 baseline)
   ```python
   # See references/model_quantization_aimet.md for full templates
   # PyTorch path:
@@ -658,11 +732,11 @@ PY
     - `activation_type='int16'`
   - First-pass calibration sample target: **50–200** representative samples.
 
-- [ ] **QNN-3C.4** Verify AIMET artifacts:
+- [ ] **QNN-4C.4** Verify AIMET artifacts:
   - `{AIMET_ARTIFACTS}/{MODEL_NAME}_ptq.onnx` ✓
   - `{AIMET_ARTIFACTS}/{MODEL_NAME}_ptq.encodings` ✓
 
-- [ ] **QNN-3C.5** Evaluate accuracy (cosine similarity vs. FP32 baseline ≥ 0.99 target)
+- [ ] **QNN-4C.5** Evaluate accuracy (cosine similarity vs. FP32 baseline ≥ 0.99 target)
   ```python
   import numpy as np
   f = np.fromfile("{AIMET_ARTIFACTS}/ref_float.raw", dtype=np.float32)
@@ -672,7 +746,7 @@ PY
   ```
   - If cosine < 0.99: apply AdaRound or SeqMSE at the same `{PRECISION}` per `references/model_quantization_aimet.md`
 
-- [ ] **QNN-3C.6** Convert AIMET artifacts to QNN IR (pass encodings via `--quantization_overrides`)
+- [ ] **QNN-4C.6** Convert AIMET artifacts to QNN IR (pass encodings via `--quantization_overrides`)
   ```bash
   qnn-onnx-converter \
     --input_network {AIMET_ARTIFACTS}/{MODEL_NAME}_ptq.onnx \
@@ -682,9 +756,9 @@ PY
     -o {OUTPUT_DIR}/{MODEL_NAME}_aimet_qnn.cpp
   ```
   > ⚠️ Do **not** pass `--input_list` to `qnn-onnx-converter` — it is not a valid argument here.
-  > Use preserve-io `datatype` (or `layout` only if required). Do **not** use `none` in Phase 3C.
+  > Use preserve-io `datatype` (or `layout` only if required). Do **not** use `none` in Phase 4C.
 
-- [ ] **QNN-3C.7** Compile shared library
+- [ ] **QNN-4C.7** Compile shared library
   ```bash
   python {QAIRT_ROOT}/bin/x86_64-linux-clang/qnn-model-lib-generator \
     -c {OUTPUT_DIR}/{MODEL_NAME}_aimet_qnn.cpp \
@@ -692,7 +766,7 @@ PY
     -o {OUTPUT_DIR} -t {TARGET_ARCH}
   ```
 
-- [ ] **QNN-3C.8** Verify outputs:
+- [ ] **QNN-4C.8** Verify outputs:
   - `{OUTPUT_DIR}/{MODEL_NAME}_aimet_qnn.bin` ✓
   - `{OUTPUT_DIR}/{MODEL_NAME}_aimet_qnn.cpp` ✓
   - `lib{MODEL_NAME}_aimet_qnn.so` ✓
@@ -701,7 +775,7 @@ PY
 
 ---
 
-## [QNN] Phase 4: Context Binary Generation (Host-Side)
+## [QNN] Phase 5: Context Binary Generation (Host-Side)
 
 **Agent**: Context Binary Agent  
 **Reference**: `skills/aipc-toolkit/references/host_context_binary_gen.md`
@@ -719,9 +793,9 @@ PY
 
 ### Tasks
 
-- [ ] **QNN-4.1** Confirm `{SOC_ID}` and `{DSP_ARCH}` from target device (see `host_context_binary_gen.md` Step 1; on Windows on Snapdragon, run the `aipc_qairt_devinfo.ps1` script from the skill scripts directory to automatically detect them)
+- [ ] **QNN-5.1** Confirm `{SOC_ID}` and `{DSP_ARCH}` from target device (see `host_context_binary_gen.md` Step 1; on Windows on Snapdragon, run the `aipc_qairt_devinfo.ps1` script from the skill scripts directory to automatically detect them)
 
-- [ ] **QNN-4.2** Create SoC config file (`.conf`) on the host:
+- [ ] **QNN-5.2** Create SoC config file (`.conf`) on the host:
 
   ```bash
   # Linux host
@@ -736,7 +810,7 @@ PY
     | Set-Content C:\tmp\soc{SOC_ID}_{DSP_ARCH}.conf
   ```
 
-- [ ] **QNN-4.3** Create backend extension wrapper JSON on the host:
+- [ ] **QNN-5.3** Create backend extension wrapper JSON on the host:
 
   ```bash
   # Linux host
@@ -751,7 +825,7 @@ PY
     | Set-Content C:\tmp\soc{SOC_ID}_{DSP_ARCH}.json
   ```
 
-- [ ] **QNN-4.4** Run `qnn-context-binary-generator` on the host:
+- [ ] **QNN-5.4** Run `qnn-context-binary-generator` on the host:
 
   ```bash
   # Linux x86 host → generates binary for target SoC {SOC_ID}/{DSP_ARCH}
@@ -779,7 +853,7 @@ PY
   > ⚠️ `--binary_file` takes a **stem without `.bin`** — the tool appends `.bin` automatically.  
   > Do **not** pass an absolute path to `--binary_file` — it double-appends `.bin`.
 
-- [ ] **QNN-4.5** Preflight — verify host model library architecture before VTCM sweep:
+- [ ] **QNN-5.5** Preflight — verify host model library architecture before VTCM sweep:
 
   The context binary generator must load the model `.so` or `.dll` on the **host**.
   If the `.so` was compiled for aarch64 it cannot be loaded on x86 — generation
@@ -815,7 +889,7 @@ PY
     -o {OUTPUT_DIR} -t windows-x86_64
   ```
 
-- [ ] **QNN-4.6** VTCM sweep — generate, deploy, and validate all values on target device:
+- [ ] **QNN-5.6** VTCM sweep — generate, deploy, and validate all values on target device:
 
   > Host generation always succeeds for all `vtcm_mb` values.
   > Failures only surface at runtime on the target. Always sweep the full range
@@ -834,12 +908,12 @@ VTCM_PREFERRED  = <!-- value that failed, with error -->
 VTCM_SELECTED   = <!-- maximum passing value -->
 ```
 
-- [ ] **QNN-4.7** Deploy final context binary (maximum passing `vtcm_mb`) to target:
+- [ ] **QNN-5.7** Deploy final context binary (maximum passing `vtcm_mb`) to target:
   ```bash
   scp {OUTPUT_DIR}/lib{MODEL_NAME}.so.bin <user>@<target-host>:<workdir>/
   ```
 
-- [ ] **QNN-4.8 (Linux fallback gate)** If context still fails on Linux, complete and log all applicable troubleshooting attempts before `.so` fallback:
+- [ ] **QNN-5.8 (Linux fallback gate)** If context still fails on Linux, complete and log all applicable troubleshooting attempts before `.so` fallback:
   - confirm `SOC_ID`/`DSP_ARCH` from target identity
   - sweep `vtcm_mb=0,1,2,3,4,8` (see above)
   - test `soc_id`/`dsp_arch` alternatives from QAIRT mapping
@@ -850,20 +924,57 @@ VTCM_SELECTED   = <!-- maximum passing value -->
 
 ---
 
-## [QNN] Phase 5: Inference Implementation
+### Mandatory Real Inference Acceptance Gate
+
+Smoke validation is never sufficient for final acceptance, regardless of whether it passes or fails.
+A smoke check may only prove that a QNN/SNPE artifact loads and executes with synthetic tensors.
+It must not be used to mark `QNN-6`, `SNPE-6`, or `Phase 7` as complete.
+
+Before `QNN-6` / `SNPE-6` and `Phase 7` can be marked ✅ Done, real inference must be completed end-to-end for the model's actual task:
+
+- Use real task inputs from the project preprocessor/tokenizer/data loader, not synthetic zero tensors only.
+- Run the complete model-specific inference path required to produce user-meaningful outputs.
+- For CV models, this means image/video preprocessing, model execution, and task postprocessing such as class labels, boxes, masks, keypoints, embeddings, or scores.
+- For audio/speech models, this means waveform/feature preprocessing, model execution, and task postprocessing such as transcript, tokens, embeddings, or scores.
+- For text/LLM decoder models, this means prompt tokenization, required prefill/KV-cache handling when applicable, decode for one or more generated tokens, and detokenization to text.
+- For multimodal/custom models, this means all required modality preprocessors, model execution, and task-specific decoded outputs.
+- If `RETMOE_DEVICE_INFO` is set, run real inference on the remote target; host-only inference is not final acceptance.
+- Record the selected runtime artifact, input source, model outputs, decoded/task output, and runtime environment.
+- Compare QNN/SNPE outputs against PyTorch or ONNX CPU baseline for the same input — this is mandatory, not optional. Cosine similarity on raw tensors alone is not sufficient; decoded task output must also match (label, box, transcript, generated text, score, etc.).
+
+Acceptance artifact requirement:
+
+```text
+real_inference_output.txt or equivalent log must include:
+- input source and preprocessing path
+- selected QNN/SNPE artifact path
+- runtime/backend/device
+- raw model outputs or generated token IDs where applicable
+- decoded/task-specific result, such as labels/boxes/masks/transcript/text/scores
+- baseline comparison when available
+- pass/fail conclusion
+```
+
+## [QNN] Phase 6: Inference Implementation
 
 **Agent**: Inference Agent  
 **Reference**: `skills/aipc-toolkit/references/inference.md`
 > **ARM Windows (ARM WIN)**: ⚙️ Optional — `.dll.bin` recommended for fixed-SoC deployment; `.dll` direct path is allowed.  
 ### Tasks
 
-- [ ] **QNN-5.0** Wrapper preflight (MUST before final acceptance run)
+> ⚠️ **Inference Guardrail**: All inference MUST use `python aipc infer_{MODEL_NAME}.py`.
+> Never call `qai_appbuilder.QNNContext` directly.
+> **Reason**: QAIRT reorders output tensors at context-binary compile time. The `onnxwrapper`
+> restores ONNX output order via the `.yaml` file. Direct `QNNContext` returns HTP-internal order —
+> outputs will be silently mismatched. Ensure `.yaml` is deployed alongside `.onnx` on the target.
+
+- [ ] **QNN-6.0** Wrapper preflight (MUST before final acceptance run)
   - confirm current candidate artifacts near `{ONNX_FILE}`
   - clean stale matched context files from prior runs
   - confirm deployed context filename follows ONNX match rule (`{MODEL_NAME}.onnx.so.bin`)
   - record selected artifact path in Issue Log
 
-- [ ] **QNN-5.0b** Linux ARM runtime-libs pin (MUST for target acceptance)
+- [ ] **QNN-6.0b** Linux ARM runtime-libs pin (MUST for target acceptance)
   ```bash
   export QAI_QNN_LIBS_DIR={QAIRT_ROOT}/lib/aarch64-oe-linux-gcc11.2
   export LD_LIBRARY_PATH=$QAI_QNN_LIBS_DIR:$LD_LIBRARY_PATH
@@ -872,21 +983,21 @@ VTCM_SELECTED   = <!-- maximum passing value -->
   - Record `QAI_QNN_LIBS_DIR` and effective `LD_LIBRARY_PATH` in Issue Log
   - If omitted, errors may include: `Failed to load skel`, `Transport layer setup failed: 14001`
 
-- [ ] **QNN-5.0d** Persist acceptance environment snapshot and attach to artifacts
+- [ ] **QNN-6.0d** Persist acceptance environment snapshot and attach to artifacts
   - use platform-appropriate commands (Linux command shown in preflight section)
   - output file: `{OUTPUT_DIR}/acceptance_env_snapshot.txt`
   - reference this file in `REPORT.md` and `Issue Log`
 
-- [ ] **QNN-5.0e** Runtime libs consistency gate
+- [ ] **QNN-6.0e** Runtime libs consistency gate
   - confirm runtime core libs resolve to the same intended toolchain/runtime family
   - if mismatch: stop acceptance and fix runtime path selection first (e.g., `QAI_QNN_LIBS_DIR` / loader path alignment)
 
-- [ ] **QNN-5.1** Write pre-processing pipeline
+- [ ] **QNN-6.1** Write pre-processing pipeline
   - Input: `{INPUT_NAME}`, shape `{INPUT_SHAPE}`
   - Operations: <!-- resize, normalize, channel reorder, etc. -->
   - Output: `numpy.ndarray float32`
 
-- [ ] **QNN-5.2** Run inference via `aipc` wrapper
+- [ ] **QNN-6.2** Run inference via `aipc` wrapper
   ```bash
   # Ensure QAIRT_SDK_ROOT is set (source {QAIRT_ENV_SETUP} first)
   
@@ -902,20 +1013,34 @@ VTCM_SELECTED   = <!-- maximum passing value -->
   > The `aipc` wrapper passes the `.onnx` path but searches for a matching QNN binary in the same directory.  
   > See `references/inference.md` → Model File Resolution for full search order.  
   > If I/O names fail, regenerate the model YAML.
-  > Linux `.so` (non-context) is allowed only if QNN-4.7 fallback gate is satisfied and logged.
+  > Linux `.so` (non-context) is allowed only if QNN-5.7 fallback gate is satisfied and logged.
+  > **Deploy `.yaml` alongside `.onnx` on target** — wrapper output reorder depends on it. Missing `.yaml` causes silent output mismatch.
 
-- [ ] **QNN-5.3** Write post-processing pipeline
+- [ ] **QNN-6.3** Write post-processing pipeline
   - Outputs: `{OUTPUT_NAMES}`
   - Operations: <!-- softmax / NMS / decode boxes / etc. -->
 
-- [ ] **QNN-5.4** Validate against ONNX baseline
+- [ ] **QNN-6.4** Validate against PyTorch / ONNX CPU baseline
   - input tensor name/shape match model
   - preprocessing matches training/export assumptions
   - output tensor mapping is correct
-  - cosine similarity vs. ONNX baseline ≥ 0.99 (FP) / ≥ 0.95 (INT8)
+  - **Raw tensor check**: cosine similarity vs. ONNX CPU baseline ≥ 0.99 (FP) / ≥ 0.95 (INT8)
+  - **Decoded output check** (mandatory for all model types — choose the applicable row):
+
+    | Model type | Baseline to run | Decoded output to compare |
+    |---|---|---|
+    | Classification | ONNX CPU `session.run()` | Top-1 / Top-5 class label matches |
+    | Detection | ONNX CPU `session.run()` | Box coords + class labels within IoU ≥ 0.9 of baseline |
+    | Segmentation | ONNX CPU `session.run()` | Mask pixel agreement ≥ 95% vs baseline |
+    | Audio / ASR | ONNX CPU `session.run()` | Transcript / token sequence matches baseline |
+    | Embedding | ONNX CPU `session.run()` | Cosine similarity of embedding vector ≥ 0.999 |
+    | LLM / decoder | ONNX CPU greedy decode | Generated token IDs match baseline for ≥ first 10 new tokens; decoded text is semantically coherent |
+    | Custom | ONNX CPU `session.run()` | Task-specific metric matches baseline within acceptable tolerance |
+
+  - Record: input source, baseline output, QNN output, decoded comparison result, pass/fail
   - collect latency / FPS on target runtime
 
-**Exit Criteria**: `infer_{MODEL_NAME}.py` runs end-to-end and produces correct results.
+**Exit Criteria**: `infer_{MODEL_NAME}.py` runs end-to-end, decoded output matches PyTorch/ONNX CPU baseline per the table above, and results are recorded in `real_inference_output.txt`.
 
 ---
 
@@ -929,14 +1054,14 @@ VTCM_SELECTED   = <!-- maximum passing value -->
 
 ---
 
-## [SNPE] Phase 3: DLC Conversion (FP16 / FP32 / BF16)
+## [SNPE] Phase 4: DLC Conversion (FP16 / FP32 / BF16)
 
 **Agent**: Conversion Agent  
 **Script**: `skills/aipc-toolkit/scripts/aipc_convert_snpe.py`
 
 ### Tasks
 
-- [ ] **SNPE-3.1** Run SNPE DLC conversion
+- [ ] **SNPE-4.1** Run SNPE DLC conversion
   ```bash
   python skills/aipc-toolkit/scripts/aipc_convert_snpe.py \
     --onnx {ONNX_FILE} \
@@ -947,9 +1072,9 @@ VTCM_SELECTED   = <!-- maximum passing value -->
   >
   > If `{PRECISION}=BF16`, treat BF16 only as a possible **source ONNX dtype**, not as a guaranteed SNPE converter precision mode. Validate converter acceptance and correctness explicitly.
 
-- [ ] **SNPE-3.2** Verify `{MODEL_NAME}.dlc` exists and is non-zero
+- [ ] **SNPE-4.2** Verify `{MODEL_NAME}.dlc` exists and is non-zero
 
-- [ ] **SNPE-3.3** Inspect DLC (optional)
+- [ ] **SNPE-4.3** Inspect DLC (optional)
   ```bash
   {QAIRT_ROOT}/bin/x86_64-linux-clang/snpe-dlc-info -i {OUTPUT_DIR}/{MODEL_NAME}.dlc
   ```
@@ -958,7 +1083,7 @@ VTCM_SELECTED   = <!-- maximum passing value -->
 
 ---
 
-## [SNPE] Phase 4: DLC Quantization (INT4/INT8/A16W8, Optional)
+## [SNPE] Phase 5: DLC Quantization (INT4/INT8/A16W8, Optional)
 
 **Agent**: Quantization Agent  
 **Reference**: `skills/aipc-toolkit/references/model_quantization.md`, `skills/aipc-toolkit/references/model_quantization_aimet.md`
@@ -990,10 +1115,10 @@ WEIGHT_BITWIDTH   = <!-- 8 (typical); see note above for other modes -->
 
 > Use when `{QUANT_TOOL} = QAIRT`. Quantizes to `{PRECISION}` using the QAIRT toolchain directly.
 
-- [ ] **SNPE-4A.1** Prepare calibration dataset (50–200 representative samples)
+- [ ] **SNPE-5A.1** Prepare calibration dataset (50–200 representative samples)
   - Format: raw float32 binary `.raw` files, shape matching `{INPUT_SHAPE}`
 
-- [ ] **SNPE-4A.2** Generate `{CALIB_LIST}`
+- [ ] **SNPE-5A.2** Generate `{CALIB_LIST}`
   ```
   # One absolute file path per line
   calibration_raw/sample_001.raw
@@ -1001,7 +1126,7 @@ WEIGHT_BITWIDTH   = <!-- 8 (typical); see note above for other modes -->
   ...
   ```
 
-- [ ] **SNPE-4A.3** Run DLC quantization
+- [ ] **SNPE-5A.3** Run DLC quantization
   ```bash
   {QAIRT_ROOT}/bin/x86_64-linux-clang/snpe-dlc-quant \
     --input_dlc {OUTPUT_DIR}/{MODEL_NAME}.dlc \
@@ -1010,9 +1135,9 @@ WEIGHT_BITWIDTH   = <!-- 8 (typical); see note above for other modes -->
     --enable_htp
   ```
 
-- [ ] **SNPE-4A.4** Verify `{MODEL_NAME}_quantized.dlc` ✓
+- [ ] **SNPE-5A.4** Verify `{MODEL_NAME}_quantized.dlc` ✓
 
-- [ ] **SNPE-4A.5** Quick accuracy check vs. FP baseline (cosine similarity ≥ 0.95)
+- [ ] **SNPE-5A.5** Quick accuracy check vs. FP baseline (cosine similarity ≥ 0.95)
 
 **Exit Criteria**: Quantized DLC generated. Accuracy within acceptable threshold.
 
@@ -1026,13 +1151,13 @@ WEIGHT_BITWIDTH   = <!-- 8 (typical); see note above for other modes -->
 > ⚠️ Linux host required. Not available on ARM Windows.  
 > Produces `.onnx` + `.encodings` → converted to DLC via `snpe-onnx-to-dlc --quantization_overrides`.
 
-- [ ] **SNPE-4B.1** Run AIMET PTQ at `{PRECISION}` (see `references/model_quantization_aimet.md` for full templates)
+- [ ] **SNPE-5B.1** Run AIMET PTQ at `{PRECISION}` (see `references/model_quantization_aimet.md` for full templates)
   - Apply CLE + standard PTQ as baseline; optionally add AdaRound or SeqMSE for higher accuracy
   - All techniques stay at the precision configured in `{PRECISION}`
   - Produces: `{AIMET_ARTIFACTS}/{MODEL_NAME}_ptq.onnx` + `{MODEL_NAME}_ptq.encodings`
-  - See QNN Phase 3C tasks 3C.1–3C.5 for AIMET environment setup and execution steps
+  - See QNN Phase 4C tasks 4C.1–4C.5 for AIMET environment setup and execution steps
 
-- [ ] **SNPE-4B.2** Convert AIMET ONNX → DLC (pass encodings via `--quantization_overrides`)
+- [ ] **SNPE-5B.2** Convert AIMET ONNX → DLC (pass encodings via `--quantization_overrides`)
   ```bash
   snpe-onnx-to-dlc \
     --input_network {AIMET_ARTIFACTS}/{MODEL_NAME}_ptq.onnx \
@@ -1043,15 +1168,15 @@ WEIGHT_BITWIDTH   = <!-- 8 (typical); see note above for other modes -->
   ```
   > Skip `snpe-dlc-quantize` — AIMET encodings are already embedded via `--quantization_overrides`.
 
-- [ ] **SNPE-4B.3** Verify `{MODEL_NAME}_aimet.dlc` ✓
+- [ ] **SNPE-5B.3** Verify `{MODEL_NAME}_aimet.dlc` ✓
 
-- [ ] **SNPE-4B.4** Quick accuracy check vs. FP baseline (cosine similarity ≥ 0.95)
+- [ ] **SNPE-5B.4** Quick accuracy check vs. FP baseline (cosine similarity ≥ 0.95)
 
 **Exit Criteria**: AIMET-quantized DLC generated. Accuracy within acceptable threshold.
 
 ---
 
-## [SNPE] Phase 5: Inference Implementation
+## [SNPE] Phase 6: Inference Implementation
 
 **Agent**: Inference Agent  
 **Reference**: `skills/aipc-toolkit/references/inference.md`
@@ -1064,37 +1189,50 @@ DLC_FILE      = <!-- {MODEL_NAME}.dlc  /  {MODEL_NAME}_quantized.dlc (QAIRT)  / 
 
 ### Tasks
 
-- [ ] **SNPE-5.1** Write pre-processing pipeline
+- [ ] **SNPE-6.1** Write pre-processing pipeline
   - Input: `{INPUT_NAME}`, shape `{INPUT_SHAPE}`
   - Operations: <!-- resize, normalize, channel reorder, etc. -->
   - Output: `numpy.ndarray float32`
 
-- [ ] **SNPE-5.2** Run inference via `aipc` wrapper
+- [ ] **SNPE-6.2** Run inference via `aipc` wrapper
   ```bash
   # Ensure QAIRT_SDK_ROOT is set (source {QAIRT_ENV_SETUP} first)
   python aipc path/to/onnx_inference.py
   ```
   > If I/O names fail, regenerate the model YAML.
 
-- [ ] **SNPE-5.3** Write post-processing pipeline
+- [ ] **SNPE-6.3** Write post-processing pipeline
   - Outputs: `{OUTPUT_NAMES}`
   - Operations: <!-- softmax / NMS / decode boxes / etc. -->
 
-- [ ] **SNPE-5.4** Validate against ONNX baseline
+- [ ] **SNPE-6.4** Validate against PyTorch / ONNX CPU baseline
   - input tensor name/shape match model
   - preprocessing matches training/export assumptions
   - output tensor mapping is correct
-  - cosine similarity vs. ONNX baseline ≥ 0.99 (FP) / ≥ 0.95 (INT8)
+  - **Raw tensor check**: cosine similarity vs. ONNX CPU baseline ≥ 0.99 (FP) / ≥ 0.95 (INT8)
+  - **Decoded output check** (mandatory for all model types — choose the applicable row):
+
+    | Model type | Baseline to run | Decoded output to compare |
+    |---|---|---|
+    | Classification | ONNX CPU `session.run()` | Top-1 / Top-5 class label matches |
+    | Detection | ONNX CPU `session.run()` | Box coords + class labels within IoU ≥ 0.9 of baseline |
+    | Segmentation | ONNX CPU `session.run()` | Mask pixel agreement ≥ 95% vs baseline |
+    | Audio / ASR | ONNX CPU `session.run()` | Transcript / token sequence matches baseline |
+    | Embedding | ONNX CPU `session.run()` | Cosine similarity of embedding vector ≥ 0.999 |
+    | LLM / decoder | ONNX CPU greedy decode | Generated token IDs match baseline for ≥ first 10 new tokens; decoded text is semantically coherent |
+    | Custom | ONNX CPU `session.run()` | Task-specific metric matches baseline within acceptable tolerance |
+
+  - Record: input source, baseline output, QNN output, decoded comparison result, pass/fail
   - collect latency / FPS on target runtime
 
-**Exit Criteria**: Inference script runs end-to-end and produces correct results.
+**Exit Criteria**: Inference script runs end-to-end, decoded output matches PyTorch/ONNX CPU baseline per the table above, and results are recorded in `real_inference_output.txt`.
 
 ---
 
 ---
 
 # ═══════════════════════════════════════════════
-# PHASE 6 — VALIDATION & TESTING (Common)
+# PHASE 7 — VALIDATION & TESTING (Common)
 # ═══════════════════════════════════════════════
 
 **Agent**: Validation & Testing Agent
@@ -1139,13 +1277,13 @@ DLC_FILE      = <!-- {MODEL_NAME}.dlc  /  {MODEL_NAME}_quantized.dlc (QAIRT)  / 
 ---
 
 # ═══════════════════════════════════════════════
-# PHASE 7 — PROFILING (Common)
+# PHASE 8 — PROFILING (Common)
 # ═══════════════════════════════════════════════
 
 **Agent**: Profiling Agent  
 **Reference**: `skills/aipc-toolkit/references/profiling.md`
 
-> Run after Phase 6 validation passes. Profiling requires a working inference pipeline.  
+> Run after Phase 7 validation passes. Profiling requires a working inference pipeline.  
 > Goal: collect per-layer execution data, identify bottlenecks, and produce an actionable report.
 > 
 > ⚠️ **Directory Isolation Rule**: For all profiling work, you must copy/save all related artifacts—including the compiled context binary, the converted QNN/SNPE model bin, network structure JSONs, dynamic libraries, and the generated profile output trace files—into a separate directory dedicated to the specific layout preservation mode under evaluation. The directory name must use the prefix `qairt_profile_{layout}` (for example: `qairt_profile_datatype`, `qairt_profile_layout`, or `qairt_profile_none`).
@@ -1256,26 +1394,26 @@ DLC_FILE      = <!-- {MODEL_NAME}.dlc  /  {MODEL_NAME}_quantized.dlc (QAIRT)  / 
 
 ---
 
-## [QNN] Phase 8: Layout Optimization (Optional, End-of-Plan)
+## [QNN] Phase 9: Layout Optimization (Optional, End-of-Plan)
 
 **Agent**: Optimization Agent  
 **Reference**: `skills/aipc-toolkit/references/optimization.md`
 
 > Use only when `{FLOW} = QNN` and `{OPTIMIZE_LAYOUT} = YES`.  
 > SNPE flow does not support this optimization phase.  
-> Run this phase after Phase 6 validation (and ideally Phase 7 profiling).  
+> Run this phase after Phase 7 validation (and ideally Phase 8 profiling).  
 > The only optimization choice here is removing `--preserve_io` so conversion/runtime can use hardware-preferred layout/type.
-> Strict sequencing: never run this phase before QNN-3A/3B/3C baseline conversion and Phase 6 validation are both complete.
+> Strict sequencing: never run this phase before QNN-4A/4B/4C baseline conversion and Phase 7 validation are both complete.
 > 
 > ⚠️ **Directory Isolation Rule**: All optimized artifacts generated during this phase (libraries, model binaries, net JSONs, and context binaries) must be saved in a separate, dedicated folder prefixed with `qairt_profile_` indicating the layout mode (typically `qairt_profile_none/`). Do not overwrite the baseline artifacts.
 
 ### Tasks
 
-- [ ] **8.1** Confirm optimization scope and acceptance target
-  - Keep baseline metrics from Phase 6/7 as comparison anchor.
+- [ ] **9.1** Confirm optimization scope and acceptance target
+  - Keep baseline metrics from Phase 8/9 as comparison anchor.
   - Record target backend (`HTP` / `GPU` / `CPU`) and scenario (local or remote target).
 
-- [ ] **8.2** Build optimization candidate by removing `--preserve_io`
+- [ ] **9.2** Build optimization candidate by removing `--preserve_io`
   - Do not use preserve-io flags (`--preserve_io` or `--preserve_io layout`) in this run.
   - If script supports it, use:
   ```bash
@@ -1286,17 +1424,17 @@ DLC_FILE      = <!-- {MODEL_NAME}.dlc  /  {MODEL_NAME}_quantized.dlc (QAIRT)  / 
   ```
   - Apply the same no-preserve-io setting for INT path (`aipc_convert_int.py`) or AIMET path (`aipc_convert_aimet.py`) when applicable, targeting `qairt_profile_none/` (or the equivalent layout-prefixed directory).
 
-- [ ] **8.3** Re-implement I/O handling as needed
+- [ ] **9.3** Re-implement I/O handling as needed
   - Re-check generated model I/O metadata (`_net.json` / yaml / inspector output).
   - Update preprocessing and postprocessing for layout or datatype changes.
 
-- [ ] **8.4** Re-run validation and profiling with optimized artifact
+- [ ] **9.4** Re-run validation and profiling with optimized artifact
   - Accuracy check against baseline.
   - Latency/FPS comparison on the same backend and input set (⚠️ **Note**: latency/FPS must be measured **without** enabling profiling settings, as profiling degrades performance. This means:
     1. The `onnxwrapper` session option must have profiling disabled: `sess_options.enable_profiling = False`.
     2. The deployed context binary must be compiled **without** the `--profiling` configuration flag).
 
-- [ ] **8.5** Decision gate
+- [ ] **9.5** Decision gate
   - Keep optimized artifact only if end-to-end performance gain is real and accuracy remains acceptable.
   - Otherwise, keep baseline preserve-io path and document reason.
 
@@ -1310,6 +1448,101 @@ DLC_FILE      = <!-- {MODEL_NAME}.dlc  /  {MODEL_NAME}_quantized.dlc (QAIRT)  / 
 | Notes | <!-- preserve-io mode and integration changes --> | <!-- --> | <!-- --> |
 
 **Exit Criteria**: QNN no-preserve-io decision recorded with metrics, and final optimized artifacts saved in the dedicated `qairt_profile_none/` folder.
+
+---
+
+## Phase R: Accuracy Report — Optional, Disabled by Default
+
+**Agent**: Validation & Reporting Agent  
+**Reference**: `skills/aipc-toolkit/references/accuracy_checking.md`
+
+> Skip this phase entirely unless `{ACCURACY_REPORT} = YES`.  
+> Run after validation and profiling are complete, and before Skill Evolution.  
+> Purpose: consolidate accuracy, decoded-output, runtime, and profiling evidence into a project-facing report. This phase documents the current project; it does not modify the skill itself.
+
+### Tasks
+
+- [ ] **R.1** Collect validation artifacts
+  - `accuracy_check/metrics.json`
+  - `accuracy_check/baseline_outputs/`
+  - `accuracy_check/target_outputs/`
+  - `real_inference_output.txt`
+  - task-specific evaluation results, if available
+  - accepted deployed artifact path and wrapper artifact-preflight log
+
+- [ ] **R.2** Collect profiling artifacts
+  - QNN: `htp_stats.txt`, `qnn-profile-viewer` outputs, QHAS/chrometrace files if generated
+  - SNPE: `SNPEDiag_*.log`, `snpe-diagview_stdout.txt`
+  - latency/FPS measurements from non-profiling acceptance runs
+
+- [ ] **R.3** Write `ACCURACY_REPORT.md`
+  - model / flow / precision / target device summary
+  - selected deployed artifact (`.so`, `.dll`, `.dlc`, `.so.bin`, or `.dll.bin`)
+  - raw tensor metrics (`cosine`, `SNR`, `MAE`, max diff)
+  - decoded/task-specific comparison
+  - profiling bottlenecks and accuracy-performance tradeoffs
+  - pass/fail conclusion and known limitations
+
+- [ ] **R.4** Run / document QAIRT Accuracy Debugger backup as needed
+  - default acceptance remains AIPC wrapper output from Phase 6/7
+  - if debugger is used, record ladder status: `framework_runner` -> `inference_engine` -> `verification` -> `tensor_visualizer` -> `snooping`
+  - collect debugger CSV/HTML/plot paths, worst tensor/op, and rows below threshold
+  - record target debugger limitations separately from final acceptance, especially when debugger reconverts/re-prepares a model that already passed wrapper acceptance
+
+- [ ] **R.5** Link report from `REPORT.md`
+  - Add a short `## Accuracy Report` section with the path to `ACCURACY_REPORT.md`.
+  - Record whether any debugger-only backup path was used (`verification`, `snooping`, or `inference_engine`).
+
+### Accuracy Report Summary
+
+| Item | Value |
+|---|---|
+| Report path | `ACCURACY_REPORT.md` |
+| Validation status | <!-- PASS / FAIL --> |
+| Main raw tensor metric | <!-- e.g. cosine=0.9992, SNR=34.1 dB --> |
+| Task metric | <!-- e.g. Top-1 match / mAP drop / WER --> |
+| Profiling summary | <!-- top bottleneck + latency --> |
+| Debugger backup used | <!-- none / framework_runner / inference_engine / verification / tensor_visualizer / snooping --> |
+| Debugger artifacts | <!-- e.g. ACCURACY_DEBUGGER_WORKFLOW.md, verification.csv, tensor_visualizer plots, snooping CSV --> |
+| Direct model-library fallback | <!-- N/A or .so/.dll diagnostic result, including arch and exit status --> |
+
+**Exit Criteria**: `ACCURACY_REPORT.md` exists, is linked from `REPORT.md`, and summarizes validation/profiling evidence without triggering reconversion unless explicitly justified by missing artifacts.
+
+---
+
+## Phase E: Skill Evolution (evolve) — Optional, Disabled by Default
+
+**Agent**: Evolve Orchestrator + Verification Subagent  
+**Reference**: `skills/aipc-toolkit/references/evolve.md`
+
+> Skip this phase entirely unless `{EVOLVE} = YES`.
+> Run after all main phases (6 / 7 / 8 as applicable) are complete.
+> Purpose: improve the aipc skill itself for future projects — not to document this project's history.
+> `{EVOLVE_MODE}` controls confirmation: `inherit` uses `{MODE}`, `batch` applies verified changes automatically, and `interactive` asks the user before applying.
+
+### Tasks
+
+- [ ] **E.1** Read work history: `aipc_plan.md` Issue Log, `REPORT.md`, `logs/`, and all referenced documents
+- [ ] **E.2** Resolve `{AIPC_SKILL_DIR}` and ensure it is a git repository; if missing git metadata, initialize it and commit the initial skill state before making changes
+- [ ] **E.3** Identify candidate improvements across: environment setup, operator patching, conversion, quantization, inference/validation, profiling, agent flow
+- [ ] **E.4** For each candidate: prepare the proposed change text, target file/section, and rationale
+- [ ] **E.5** If effective evolve mode is `interactive`, ask the user to confirm the candidate list before verification
+- [ ] **E.6** Spawn a **Verification Subagent** (fresh context, no project history) to review each proposed change
+  - Subagent receives: proposed change text, target file/section, rationale, current target section content
+  - Subagent returns: `APPROVE` / `REJECT` / `REVISE` verdict with reason and optional revised text
+- [ ] **E.7** If effective evolve mode is `interactive`, show the final approved/revised diff and proposed skill commit message before applying
+- [ ] **E.8** If effective evolve mode is `interactive`, wait for explicit user confirmation before applying the diff or committing; this is mandatory for any `REVISE` verdict
+- [ ] **E.9** Apply all confirmed `APPROVE` verdicts; apply confirmed `REVISE` verdicts with the subagent's revised text; discard `REJECT`
+- [ ] **E.10** Commit the skill repository with the confirmed concise evolve summary message
+- [ ] **E.11** Fill in and append the Skill Evolution Summary table below
+
+### Skill Evolution Summary
+
+| # | Target file | Section | Change type | Verdict | Applied |
+|---|---|---|---|---|---|
+| 1 | | | add / modify / remove | | ⬜ |
+
+**Exit Criteria**: If `{EVOLVE} = YES`, all candidate changes reviewed by Verification Subagent, interactive confirmations completed when required, verdicts applied or explicitly skipped/rejected, skill repository committed for applied changes, and summary table filled. The project must not be reported fully complete until this exit criteria is met or a skip/block reason is recorded.
 
 ---
 
@@ -1354,6 +1587,23 @@ DLC_FILE      = <!-- {MODEL_NAME}.dlc  /  {MODEL_NAME}_quantized.dlc (QAIRT)  / 
 
 ## Issue Log
 
+### Issue Log Guardrail (Do Not Skip)
+
+**Mandatory update timing (batch + interactive):**
+- Before closing any phase as ✅ Done
+- After every converter/runner failure
+- After each operator patch iteration
+- After any fallback decision (e.g., context-bin skip, runtime switch)
+
+**Minimum fields required per update:**
+- Timestamp
+- Phase
+- Command / artifact path
+- Status (`Open` / `Resolved`)
+- Resolution / next action
+
+If any of the above is missing, phase handoff is invalid and must be blocked until backfilled.
+
 ### Remote Acceptance Environment Snapshot (platform-aware)
 | Key | Value |
 |-----|-------|
@@ -1372,6 +1622,12 @@ DLC_FILE      = <!-- {MODEL_NAME}.dlc  /  {MODEL_NAME}_quantized.dlc (QAIRT)  / 
 | libQnnSystem.so | |
 
 ### Operator Patching Log
+
+> **Guardrail**: Every unsupported-op cycle must update all of:
+> 1) Config patch fields (`PATCH_NEEDED`, `PATCH_OPS`, `PATCH_APPROACH`, `PATCH_ITERATIONS`, `PATCH_LAST_UPDATE`)
+> 2) One Iteration History block below
+> 3) One row in General Issues with command + error summary
+> Missing any item = incomplete patch tracking.
 
 **Summary:**
 | Metric | Value |
@@ -1433,27 +1689,38 @@ New ops discovered: {list or "none"}
 |---|---|---|---|---|---|
 | 1 | | {FLOW} | | Open | |
 
+### Phase Handoff Checklist (Issue Log Automation)
+
+- [ ] Latest phase has at least one updated row in **General Issues**
+- [ ] All failing commands in this phase are captured with short error signature
+- [ ] All produced artifacts for this phase are recorded (path + result)
+- [ ] If patching occurred: `PATCH_*` fields and Operator Iteration History are updated
+- [ ] Status reflects reality (`Open` only if unresolved; otherwise `Resolved`)
+
 ---
 
 ## Progress Summary
 
 | Phase | Description | Flow | Status |
 |---|---|---|---|
-| 0 | Prerequisites & Environment Setup | Common | ⬜ Not Started |
-| 1 | Model Export to ONNX | Common | ⬜ Not Started |
-| 2 | Model Inspection | Common | ⬜ Not Started |
-| QNN-3A | FP16/FP32/BF16 Conversion | QNN | ⬜ Not Started |
-| QNN-3B | Model Quantization (INT4/INT8/A16W8) — QAIRT | QNN | ⬜ Not Started |
-| QNN-3C | Model Quantization (INT4/INT8/A16W8) — AIMET, same precision + advanced PTQ (Linux only) | QNN | ⬜ Not Started |
-| QNN-4 | Context Binary Generation | QNN | ⬜ Not Started |
-| QNN-5 | Inference (aipc wrapper) | QNN | ⬜ Not Started |
-| SNPE-3 | DLC Conversion (FP16/FP32/BF16) | SNPE | ⬜ Not Started |
-| SNPE-4A | DLC Quantization (INT4/INT8/A16W8) — QAIRT | SNPE | ⬜ Not Started |
-| SNPE-4B | DLC Quantization (INT4/INT8/A16W8) — AIMET, same precision + advanced PTQ (Linux only) | SNPE | ⬜ Not Started |
-| SNPE-5 | Inference (aipc wrapper) | SNPE | ⬜ Not Started |
-| 6 | Validation & Testing | Common | ⬜ Not Started |
-| 7 | Profiling & Bottleneck Report | Common | ⬜ Not Started |
-| QNN-8 | Layout Optimization (remove `--preserve_io`, optional end-of-plan) | QNN | ⬜ Not Started |
+| 0 | Environment & Prerequisites (toolchain, venv, env vars) | Common | ⬜ Not Started |
+| 1 | NPU Model Adaptation (wrappers, fixed-shape, operator changes) | Common | ⬜ Not Started |
+| 2 | Model Export to ONNX | Common | ⬜ Not Started |
+| 3 | Model Inspection | Common | ⬜ Not Started |
+| QNN-4A | FP16/FP32/BF16 Conversion | QNN | ⬜ Not Started |
+| QNN-4B | Model Quantization (INT4/INT8/A16W8) — QAIRT | QNN | ⬜ Not Started |
+| QNN-4C | Model Quantization (INT4/INT8/A16W8) — AIMET, same precision + advanced PTQ (Linux only) | QNN | ⬜ Not Started |
+| QNN-5 | Context Binary Generation | QNN | ⬜ Not Started |
+| QNN-6 | Inference (aipc wrapper) | QNN | ⬜ Not Started |
+| SNPE-4 | DLC Conversion (FP16/FP32/BF16) | SNPE | ⬜ Not Started |
+| SNPE-5A | DLC Quantization (INT4/INT8/A16W8) — QAIRT | SNPE | ⬜ Not Started |
+| SNPE-5B | DLC Quantization (INT4/INT8/A16W8) — AIMET, same precision + advanced PTQ (Linux only) | SNPE | ⬜ Not Started |
+| SNPE-6 | Inference (aipc wrapper) | SNPE | ⬜ Not Started |
+| 7 | Validation & Testing | Common | ⬜ Not Started |
+| 8 | Profiling & Bottleneck Report | Common | ⬜ Not Started |
+| QNN-9 | Layout Optimization (remove `--preserve_io`, optional end-of-plan) | QNN | ⬜ Not Started |
+| R | Accuracy Report (optional, disabled by default) | Common | ⬜ Not Started |
+| E | Skill Evolution (evolve, post-project, opt-in) | Common | ⬜ Not Started |
 
 > Status legend: ⬜ Not Started · 🔄 In Progress · ✅ Done · ❌ Blocked
 
@@ -1465,11 +1732,14 @@ New ops discovered: {list or "none"}
 |---|---|
 | AIPC Skill (main) | `../SKILL.md` |
 | Agent Definitions | `../assets/aipc_AGENTS.md` |
+| PyTorch Modification / Adaptation | `../references/pytorch_modification.md` |
 | Model Export Guide | `../references/model_export_validation.md` |
+| Transformer Decoder ONNX Guide | `../references/transformer_models_qairt.md` |
 | **Operator Patching** | **`../references/operator_patching.md`** |
 | Quantization Guide (QAIRT) | `../references/model_quantization.md` |
 | Quantization Guide (AIMET) | `../references/model_quantization_aimet.md` |
 | Inference Reference | `../references/inference.md` |
+| Accuracy Checking | `../references/accuracy_checking.md` |
 | QNN Conversion | `../references/qnn_conversion.md` |
 | SNPE Conversion | `../references/snpe_conversion.md` |
 | Context Binary | `../references/context_binary.md` |
@@ -1478,3 +1748,4 @@ New ops discovered: {list or "none"}
 | Optimization | `../references/optimization.md` |
 | Troubleshooting | `../references/troubleshooting.md` |
 | Windows Setup | `../references/win_qairt_setup.md` |
+| Skill Evolution (evolve) | `../references/evolve.md` |

@@ -159,8 +159,33 @@ sub_node = helper.make_node("Sub", [input_a, "mul_out"], [output_name], name="mo
 |-------|---------|--------|----------|
 | `Only numerical type cast is supported` | Any Cast node | **This is a WARNING, not an error.** Conversion may still succeed. Verify with actual conversion, not just dry-run. | Warning |
 | `Tensor mismatch 0x32 != 0x216` | Cast followed by Mul/Add | Add `Add(0.0)` after the final Cast to break type inference chain: `Cast → Add(0.0) → Mul` | Medium |
+| `QnnBackend_validateOpConfig failed 3110` | `Cast(BOOL_8 → FLOAT_16)` in HuggingFace decoder causal mask | **HTP hard-rejects BOOL→float casts.** Converter accepts it silently; failure surfaces only at context binary generation. Fix at export time — see note below. | ★★★★★ |
 
 ---
+
+> **`Cast(BOOL→FLOAT16)` — HTP hard rejection (HuggingFace decoder models)**
+>
+> Appears in transformer decoder models when `attention_mask` flows through `masking_utils.py`.
+> The QNN converter accepts the graph, but `qnn-context-binary-generator` rejects it at compose time:
+> ```
+> QnnBackend_validateOpConfig failed 3110
+> in[0]:QNN_DATATYPE_BOOL_8  out[0]:QNN_DATATYPE_FLOAT_16
+> MODEL_GRAPH_OP_VALIDATION_ERROR
+> ```
+> This subgraph (`Cast→BOOL → And → Cast→FLOAT`) repeats once per decoder layer, making
+> post-export ONNX surgery impractical.
+>
+> **Fix — pass `attention_mask=None` in the export wrapper:**
+> ```python
+> outputs = model(
+>     input_ids=input_ids,
+>     attention_mask=None,   # model builds pure float causal mask; no BOOL cast
+>     position_ids=position_ids,
+>     use_cache=False,
+> )
+> ```
+> With no mask supplied the model constructs an additive float causal mask internally,
+> bypassing the `int64→BOOL→float` path entirely.
 
 ### Einsum Operator
 

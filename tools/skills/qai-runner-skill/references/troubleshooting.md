@@ -20,10 +20,66 @@
   - wrapper: `--source-model-input-shape <name> <dims>`
   - direct: `--source_model_input_shape <name> <dims>`
 
+## Bash `nounset` breaks QAIRT env setup
+
+**Symptoms**:
+- Bash wrapper exits while sourcing QAIRT setup scripts
+- Error mentions an unbound variable such as `PYTHONPATH`
+- Conversion, context-binary generation, or inference stops before QAIRT is initialized
+
+**Likely cause**:
+- The shell is running with `set -u` / `set -o nounset`
+- Some QAIRT setup scripts reference optional variables before defining them
+
+**Action**:
+Temporarily disable `nounset` while sourcing the QAIRT environment script, then restore the previous shell state:
+
+```bash
+case $- in *u*) had_nounset=1 ;; *) had_nounset=0 ;; esac
+set +u
+source "$QAIRT_ENV_SETUP"
+[ "$had_nounset" = 1 ] && set -u
+```
+
+Use this pattern in Bash wrappers that prepare QAIRT before running converter, context-generation, or inference commands.
+
 ## Inference runtime validation failures
 - Check runtime/backend compatibility for generated DLC/lib.
 - Re-check I/O layout, data type, and pre/post-processing consistency.
 - Test with minimal input list and known-good sample.
+
+## AppBuilder teardown segfault (Linux ARM, HTP) — Safe Exit Workaround
+
+**Symptoms**:
+- Inference appears to complete, but process exits with:
+  - `Segmentation fault (core dumped)`
+  - return code `139` (`SIGSEGV`)
+- GDB backtrace points to AppBuilder teardown path (for example `ModelDestroy` / `destroyPerformance` in `libappbuilder.so`).
+
+**Likely cause**:
+- Runtime crash during QNN/AppBuilder model cleanup/destructor path, not during forward inference itself.
+
+**Workaround (validation-only)**:
+1. Add a runtime-safe-exit flag to the inference script, and bypass normal destructor teardown after outputs are persisted:
+   ```python
+   import os, sys
+   SAFE_EXIT = os.getenv("AIPC_SAFE_EXIT", "0") == "1"
+   # ... run inference, save results first ...
+   if SAFE_EXIT:
+       sys.stdout.flush()
+       os._exit(0)  # bypass ModelDestroy teardown path
+   ```
+2. Run with:
+   ```bash
+   export AIPC_SAFE_EXIT=1
+   python aipc infer_xxx.py
+   ```
+
+**Important**:
+- This is a **workaround**, not a root-cause fix.
+- Use for bring-up/acceptance unblock when teardown crash is known.
+- Always save outputs/logs before `os._exit(0)` (it skips normal cleanup/finalizers).
+- Keep a normal path (`AIPC_SAFE_EXIT=0`) for future SDK/runtime validation once teardown bug is fixed.
 
 ## HTP transport/version mismatch (Linux ARM)
 
@@ -167,6 +223,44 @@ echo "Triage bundle saved to: $OUT"
 **Validation**:
 - Log should show selected model file as `<model>.onnx.so.bin`
 - Inference should complete (`inference_ok`) instead of transport/skel errors
+
+## Context Binary Too Large — DSP SMMU Map Failure
+
+**Symptoms**:
+```
+fastrpc memory map for fd: N with length: XXXXXXXXX failed with error: 0x1
+Mapping buffer fd N to FastRpc failed on domain 3
+SharedMemoryMod failed to Map Buffer to SMMU for domain 0
+Failed to map buffer of size XXXXXXXXX
+Failed to map weights buffer to device!
+Failed to initialize graph memory
+Failed to initialize graph with id N ... with err 1002
+Context create from binary failed ... err 1002
+```
+
+**Cause**:
+The context binary file size exceeds the DSP SMMU contiguous mapping window on the target
+device (typically 512 MB–1 GB on embedded QCS/SA platforms). This is a hardware memory
+management constraint, not a VTCM or driver version issue.
+
+**Key distinction**:
+- VTCM errors (`Request feature vtcm size … unsupported`) → fix with `vtcm_mb` sweep
+- SMMU map errors (`error: 0x1`, `err 1002`) → VTCM sweep will **not** help; binary size is the constraint
+
+**⚠️ Test before concluding the binary is unusable**: SMMU map errors at load time are
+**not always fatal**. On some devices and firmware versions the DSP recovers and inference
+completes correctly despite the error messages. Always run a full inference pass and check
+the output before deciding the context binary cannot be used.
+
+**Immediate workaround**: The `onnxwrapper` auto-falls back to JIT `.so` compilation on HTP
+when the context binary fails to load. Inference still runs on HTP; a `<model>.htp.autogen.yaml`
+is created in the working directory. This is acceptable for bring-up but not for production.
+
+**Production fix**: Split the model into two smaller sub-graphs, each producing a context
+binary below the SMMU limit (~800 MB is a safe target).
+
+**Full guide**: See `references/model_split.md` for the decision tree, split patterns,
+export/conversion/deployment steps, and validation.
 
 ## Escalate when
 - same failure persists after patch + retry
