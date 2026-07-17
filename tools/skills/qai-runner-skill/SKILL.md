@@ -26,6 +26,8 @@ description: AIPC, AI Porting Conversion. Tools and workflows for QAIRT/AIPC pro
 - "check htp" / "htp ready" / "htp check"
 - "aipc diagnose" / "environment check"
 - "detect target soc" / "qairt devinfo" / "detect device info"
+- "fastrpc memory map" / "err 1002" / "smmu" / "context binary too large"
+- "split model" / "model split" / "split unet" / "context binary size"
 
 ### Project Setup
 - "create aipc project" / "init aipc project" / "setup aipc project"
@@ -47,6 +49,24 @@ Use this skill for Qualcomm QAIRT/QNN/SNPE model bring-up:
 - Run skill scripts from their original skill path unless explicitly noted
 - Do not swap out QAIRT toolchains ad-hoc
 - `QAIRT_SDK_ROOT` must be set
+- **`QAIRT_TMP_DIR` — set when `/tmp` is full**: `qnn-onnx-converter` copies external-data ONNX
+   weights to a temp directory before processing. On servers where `/tmp` is a small `tmpfs`, this
+   fails with `Failed to copy external data to the disk at: /tmp/... permission or space issue`.
+   Set `QAIRT_TMP_DIR` to a path with at least 2× the model's weight file size free:
+   ```bash
+   export QAIRT_TMP_DIR=/path/with/enough/space   # e.g. /workspace/qairt_tmp
+   ```
+   Check before any converter call: `df -h /tmp` — if `Use%` is 100%, set `QAIRT_TMP_DIR`.
+- **LONG-RUNNING JOBS — CRASH RESILIENCE (MANDATORY):** Any operation expected to take >2 minutes
+  (conversion, context binary generation, inference) MUST be launched as a detached systemd service
+  so it survives agent session crashes:
+  ```bash
+  systemd-run --user --unit=aipc-<task> --description="<desc>" bash /path/to/script.sh
+  ```
+  - Write all output to a persistent log file (not stdout): `exec >> /path/to/job.log 2>&1`
+  - Use idempotent skip-if-done guards: `if [ ! -f output.so ]; then ...; fi`
+  - Poll progress: `systemctl --user status aipc-<task>.service --no-pager` + `tail -20 log`
+  - **NEVER use `nohup ... &` or `tmux`** — both are killed when the agent session ends.
 - On Windows, do not rely on Python arch detection — use OS-native arch commands
 - On ARM64 Windows, `platform.machine()` returns `AMD64` under x86_64 emulation.
   Prefer the minimal QAIRT device probe script for SoC detection. Avoid CIM/WMI when possible.
@@ -58,6 +78,8 @@ Use this skill for Qualcomm QAIRT/QNN/SNPE model bring-up:
   - Python scripts via `subprocess.run()` — no shell quoting issues
   - **Inference execution policy (MANDATORY):**
     - Run inference via `scripts/aipc` wrapper only.
+    - **MANDATORY**: You MUST use the `onnxwrapper.py` provided within the `aipc-toolkit` skill (`scripts/onnxwrapper.py`).
+    - **PROHIBITED**: NEVER use or fallback to the `onnxwrapper.py` bundled with the QAIRT SDK or `qai_appbuilder` package (e.g., from `site-packages/qai_appbuilder/onnxwrapper.py`). The skill version contains critical patches for AIPC workflows.
     - Before any final inference run, perform **wrapper artifact preflight**:
       - print which QNN artifact will be selected for `{ONNX_FILE}`
       - remove or quarantine stale matched artifacts (platform-dependent: `<model>.onnx.dll.bin` on Windows, `<model>.onnx.so.bin` on Linux) before deploying a new one
@@ -267,12 +289,14 @@ Open only what you need:
 |-------|------|
 | Environment setup (Windows) | `references/win_qairt_setup.md` |
 | Export + ONNX validation | `references/model_export_validation.md` |
+| **Multi-component pipelines** | **`references/multi_component_pipeline.md`** |
 | **Operator patching** | **`references/operator_patching.md`** |
 | QNN conversion | `references/qnn_conversion.md` |
 | SNPE conversion | `references/snpe_conversion.md` |
 | Quantization | `references/model_quantization.md` |
 | Context binary | `references/context_binary.md` |
 | Host context binary gen | `references/host_context_binary_gen.md` |
+| Large context binary / model split | `references/model_split.md` |
 | Inference | `references/inference.md` |
 | Troubleshooting | `references/troubleshooting.md` |
 | Optimization | `references/optimization.md` |

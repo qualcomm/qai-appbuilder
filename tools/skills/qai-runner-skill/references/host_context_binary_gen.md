@@ -115,6 +115,7 @@ Look up in QAIRT docs:
 
 - Do not force `soc_id` from Linux sysfs values alone (for example `/sys/devices/soc0/soc_id`) without QAIRT mapping validation.
 - Linux kernel/platform IDs are not guaranteed to map 1:1 to QAIRT context config identifiers.
+- ⚠️ **`PRODUCT_SOC` env var is NOT the QAIRT `soc_id`.** Scripts like `aienv.sh` often export `PRODUCT_SOC` (e.g. `9075`) as a Linux platform identifier. Passing this value directly as `soc_id` in the context binary config will fail with `Unknown config socModel 0`. Always map through the QAIRT SoC table (e.g. `qcs9075`/`sa8775p` → `soc_id=77`). Never read `soc_id` from `$PRODUCT_SOC` without table validation.
 - Do not run speculative `dsp_arch` sweeps across unrelated versions (for example `v69`) unless QAIRT mapping for the current target token explicitly lists them.
 - For a given target token, keep `dsp_arch` fixed to the mapped value and troubleshoot with VTCM / `soc_id` / `htp_arch` knobs first.
 - If explicit `soc_id` config repeatedly fails (parse/compose/runtime), switch to architecture-based device config (for example `htp_arch`) and validate on target.
@@ -123,6 +124,7 @@ Look up in QAIRT docs:
 General VTCM guidance:
 - Use `vtcm_mb=0` as the default starting setting.
 - `vtcm_mb=0` may still fail on some targets; treat it as a starting point, not a guaranteed-working value.
+- 💡 **Hint — large models (weights > 500 MB)**: VTCM pressure is higher for large models. Even if `vtcm_mb=0` generates and loads successfully, higher values may improve HTP performance by reducing DDR spills. Running the full sweep (`vtcm_mb=0,1,2,3,4,8`) and picking the maximum passing value is especially worthwhile for large models.
 - **Host generation always succeeds for all `vtcm_mb` values** — the host cannot
   detect whether a given VTCM size is supported by the target SoC at generation
   time. The failure only surfaces at **runtime on the target device**.
