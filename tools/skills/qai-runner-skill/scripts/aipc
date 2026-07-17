@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import os
 import runpy
 import sys
@@ -31,7 +32,19 @@ def main() -> int:
     if repo_dir not in sys.path:
         sys.path.insert(0, repo_dir)
 
-    # --- Platform-aware wrapper check ---
+    # Save stdout/stderr before QNN runtime may redirect them.
+    # qai_appbuilder / QNN DLLs may redirect stdout/stderr at the C level
+    # during initialization. Save the original file descriptors so we can
+    # restore them before the user script runs.
+    _saved_stdout_fd = -1
+    _saved_stderr_fd = -1
+    try:
+        _saved_stdout_fd = os.dup(sys.stdout.fileno())
+        _saved_stderr_fd = os.dup(sys.stderr.fileno())
+    except (OSError, io.UnsupportedOperation):
+        pass
+
+    # Platform-aware wrapper check.
     # On x86_64 Linux, onnxwrapper.py must be the x86 version (no qai_appbuilder).
     import platform as _platform
     _wrapper_path = os.path.join(repo_dir, "onnxwrapper.py")
@@ -40,7 +53,8 @@ def main() -> int:
         with open(_wrapper_path, encoding="utf-8") as _wf:
             if "qai_appbuilder" in _wf.read():
                 sys.exit(
-                    "[aipc] ERROR: onnxwrapper.py is the ARM/Windows version (requires qai_appbuilder).\n"
+                    "[aipc] ERROR: onnxwrapper.py is the ARM/Windows version "
+                    "(requires qai_appbuilder).\n"
                     "This host is x86_64 Linux. Use the x86 wrapper instead:\n"
                     "  cp skills/aipc-toolkit/scripts/onnxwrapper_x86.py ./onnxwrapper.py"
                 )
@@ -49,6 +63,20 @@ def main() -> int:
 
     # Hot-patch: make `import onnxruntime as ort` resolve to the QNN wrapper.
     sys.modules["onnxruntime"] = _ort
+
+    # Restore stdout/stderr so user script output is visible.
+    if _saved_stdout_fd >= 0:
+        try:
+            os.dup2(_saved_stdout_fd, sys.stdout.fileno())
+            os.close(_saved_stdout_fd)
+        except (OSError, io.UnsupportedOperation):
+            pass
+    if _saved_stderr_fd >= 0:
+        try:
+            os.dup2(_saved_stderr_fd, sys.stderr.fileno())
+            os.close(_saved_stderr_fd)
+        except (OSError, io.UnsupportedOperation):
+            pass
 
     sys.argv = [args.script, *args.script_args]
     runpy.run_path(args.script, run_name="__main__")

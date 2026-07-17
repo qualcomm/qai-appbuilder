@@ -76,6 +76,7 @@ Agents ask the user for confirmation at each phase transition and before key dec
 | B6 | Accuracy drops below threshold after quantization (cosine < 0.95) | Stop. Report metrics. Ask user whether to accept or retry. |
 | B7 | No known replacement pattern exists for unsupported operator | Stop. Document operator, escalate to user. |
 | **B8** | **Context binary generation fails on Windows ARM** | **Record issue and continue with non-context `.dll` path if needed. Escalate only if B3/B4/B7 met.** |
+| **B9** | **Issue Log / patch records are missing or stale for the current phase** | **Stop phase handoff. Backfill `aipc_plan.md` Issue Log and patch tracking fields before continuing.** |
 
 ### ⚠️ CRITICAL: Operator Patching — Exhaustive Requirement
 
@@ -99,7 +100,7 @@ Agents ask the user for confirmation at each phase transition and before key dec
 **Agents MUST NOT:**
 - ❌ Say "Windows always requires context binary"
 - ❌ Say "context binary is required on Linux"
-- ❌ Block Phase 7 (Inference) on Windows solely because context binary generation failed
+- ❌ Block Phase 6 (Inference) on Windows solely because context binary generation failed
 - ❌ Stop patching after arbitrary iteration count
 
 **Correct behavior:**
@@ -120,27 +121,30 @@ User Request
 Orchestrator Agent  ◄─── aipc_plan.md (Config + Progress Summary)
      │  [reads {MODE}: batch → autonomous | interactive → confirm each phase]
      │
-     ├──► Model Export Agent ──────────► {ONNX_FILE}          [Plan Phase 1]
+     ├──► NPU Adaptation Agent ─────────► adapted model / wrappers  [Plan Phase 1]
+     │         │ (if PYTORCH_ADAPTATION_NEEDED = No → skip, proceed directly to Phase 2)
+     │         ▼
+     ├──► Model Export Agent ──────────► {ONNX_FILE}          [Plan Phase 2]
      │         │ (if patches needed → loop back)
      │         ▼
-     ├──► Model Inspector Agent ────────► {MODEL_NAME}.yaml    [Plan Phase 2]
+     ├──► Model Inspector Agent ────────► {MODEL_NAME}.yaml    [Plan Phase 3]
      │         │ (if issues found → back to Export Agent)
      │         ▼
      │    ┌────────────────────────────────────────────────────┐
      │    │  FLOW = QNN                  FLOW = SNPE           │
-     │    ├──► Conversion Agent ──────► lib{MODEL_NAME}.so     │ [QNN-3A]
+     │    ├──► Conversion Agent ──────► lib{MODEL_NAME}.so     │ [QNN-4A]
      │    │         OR                                         │
-     │    ├──► Conversion Agent ──────► {MODEL_NAME}.dlc       │ [SNPE-3]
+     │    ├──► Conversion Agent ──────► {MODEL_NAME}.dlc       │ [SNPE-4]
      │    │         OR (if INT)                                │
-     │    ├──► Quantization Agent ────► lib{MODEL_NAME}_a16_w8 │ [QNN-3B / SNPE-4]
+     │    ├──► Quantization Agent ────► lib{MODEL_NAME}_a16_w8 │ [QNN-4B / SNPE-5]
      │    └────────────────────────────────────────────────────┘
      │         │ (if conversion fails → back to Export Agent)
      │         ▼
-     ├──► Context Binary Agent ─────────► {MODEL_NAME}_context.bin  [QNN-4 only]
+     ├──► Context Binary Agent ─────────► {MODEL_NAME}_context.bin  [QNN-5 only]
      │         ▼
-     ├──► Inference Agent ───────────────► infer_{MODEL_NAME}.py / results     [QNN-5 / SNPE-5]
+     ├──► Inference Agent ───────────────► infer_{MODEL_NAME}.py / results     [QNN-6 / SNPE-6]
      │         ▼
-     └──► Validation Agent ──────────────► REPORT.md / Pass/Fail    [Phase 6]
+     └──► Validation Agent ──────────────► REPORT.md / Pass/Fail    [Phase 7]
 ```
 
 ---
@@ -167,16 +171,24 @@ Orchestrator Agent  ◄─── aipc_plan.md (Config + Progress Summary)
 5. **Log all decisions in batch mode.**  
    When `{MODE} = batch`, every autonomous decision (e.g., default parameter chosen, optional step skipped/included) must be recorded in `aipc_plan.md` Issue Log before proceeding.
 
-6. **Before quantization phase, orchestrator MUST.**
+6. **Issue Log completion gate (MANDATORY before phase handoff).**
+   - Before marking any phase as complete, agents must append/update an Issue Log row with:
+     - timestamp, phase, command/artifact, status, and resolution/next action.
+   - If operator patching happened in the phase, agents must also update:
+     - `PATCH_NEEDED`, `PATCH_OPS`, `PATCH_APPROACH`, `PATCH_ITERATIONS`, `PATCH_LAST_UPDATE`
+     - and one iteration block in `Operator Patching Log`.
+   - **No phase may transition to ✅ Done if these entries are missing** (Blocking Condition B9).
+
+7. **Before quantization phase, orchestrator MUST.**
    - Verify `CALIBRATION_DATA` exists and is usable (folder/file/list).
    - If `CALIBRATION_DATA` is missing or invalid, search web for a suitable public calibration dataset and download.
    - Generate `CALIB_LIST` via image-to-raw preprocessing when source is images.
    - Use existing `.raw` samples directly when source is raw data.
    - Record dataset source/path and sample count in `aipc_plan.md`.
 
-7. **Windows Console Encoding Guardrail**: Local Windows shells can use non-UTF-8 encodings (such as `cp950` or `cp437`), which frequently trigger `UnicodeEncodeError` or `UnicodeDecodeError` when processing console outputs with special characters. Always enforce UTF-8 encoding/decoding where possible, and use `errors='replace'` or `errors='ignore'` in Python subprocess handling.
+8. **Windows Console Encoding Guardrail**: Local Windows shells can use non-UTF-8 encodings (such as `cp950` or `cp437`), which frequently trigger `UnicodeEncodeError` or `UnicodeDecodeError` when processing console outputs with special characters. Always enforce UTF-8 encoding/decoding where possible, and use `errors='replace'` or `errors='ignore'` in Python subprocess handling.
 
-8. **PowerShell Inline Pipeline Command Guardrail**: Avoid using `$_.` (e.g., `Where-Object { $_.LastWriteTime ... }`) in inline powershell commands passed via `-Command` to other shells. The `$_` variable is prone to expansion errors by the caller shell, resulting in empty values and broken syntax. Always wrap PowerShell pipelines in a standalone `.ps1` file and invoke it using `-File`.
+9. **PowerShell Inline Pipeline Command Guardrail**: Avoid using `$_.` (e.g., `Where-Object { $_.LastWriteTime ... }`) in inline powershell commands passed via `-Command` to other shells. The `$_` variable is prone to expansion errors by the caller shell, resulting in empty values and broken syntax. Always wrap PowerShell pipelines in a standalone `.ps1` file and invoke it using `-File`.
 
 ---
 
@@ -192,6 +204,7 @@ Orchestrator Agent  ◄─── aipc_plan.md (Config + Progress Summary)
 - Delegate to specialist agents in phase order; verify exit criteria before proceeding
 - Update `aipc_plan.md` Progress Summary after each phase completes
 - Log all decisions and blockers in `aipc_plan.md` Issue Log
+- Enforce Issue Log completion gate (B9) before every phase handoff
 
 **Key Decisions**:
 - Confirm `{FLOW}` = QNN or SNPE
@@ -204,27 +217,68 @@ Orchestrator Agent  ◄─── aipc_plan.md (Config + Progress Summary)
 2. Read `{MODE}`: set autonomous execution if `batch`, confirmation-per-phase if `interactive`
 3. Run environment setup: `source {QAIRT_ENV_SETUP}` (bash) or `. "{QAIRT_ENV_SETUP}"` (PowerShell)
 4. Verify toolchain (see Environment Setup Checklist)
-5. Delegate Phase 1 → Model Export Agent
-6. Delegate Phase 2 → Model Inspector Agent
-7. Based on `{FLOW}` and `{PRECISION}`:
-   - **QNN + FP**: delegate QNN-3A → Conversion Agent
-   - **QNN + INT**: delegate QNN-3B → Quantization Agent
-   - **SNPE + FP**: delegate SNPE-3 → Conversion Agent
-   - **SNPE + INT**: delegate SNPE-4 → Quantization Agent
-8. If `{FLOW}` = QNN and context binary needed: delegate QNN-4 → Context Binary Agent
-9. Delegate QNN-5 or SNPE-5 → Inference Agent
-10. Delegate Phase 6 → Validation Agent
-11. After each phase: verify exit criteria, update Progress Summary, log decisions
+5. Delegate Phase 1 → NPU Adaptation Agent
+   - If `PYTORCH_ADAPTATION_NEEDED = No`: mark Phase 1 ✅ Done and skip to step 6
+   - If `PYTORCH_ADAPTATION_NEEDED = Yes`: wait for exit criteria before proceeding
+6. Delegate Phase 2 → Model Export Agent (using adapted model entry point from Phase 1 if applicable)
+7. Delegate Phase 3 → Model Inspector Agent
+8. Based on `{FLOW}` and `{PRECISION}`:
+   - **QNN + FP**: delegate QNN-4A → Conversion Agent
+   - **QNN + INT**: delegate QNN-4B → Quantization Agent
+   - **SNPE + FP**: delegate SNPE-4 → Conversion Agent
+   - **SNPE + INT**: delegate SNPE-5 → Quantization Agent
+9. If `{FLOW}` = QNN and context binary needed: delegate QNN-5 → Context Binary Agent
+10. Delegate QNN-6 or SNPE-6 → Inference Agent
+11. Delegate Phase 7 → Validation Agent
+12. If `{FLOW}` = QNN and Phase 8 profiling needed: delegate Phase 8 → Profiling Agent
+13. If `{FLOW}` = QNN and `{OPTIMIZE_LAYOUT}` = YES: delegate Phase 9 → Optimization Agent
+14. If `{EVOLVE}` = YES: delegate Phase E → Evolve Orchestrator (see below)
+15. After each phase: verify exit criteria, update Progress Summary, log decisions
+16. Run Issue Log completion gate checklist:
+   - latest phase has at least one General Issues row updated
+   - commands/artifacts are recorded
+   - operator patch fields + iteration log updated when applicable
 
-**Batch mode note**: Steps 5–11 execute without pausing for user confirmation unless a Blocking Condition is hit.
+**Batch mode note**: Steps 5–14 execute without pausing for user confirmation unless a Blocking Condition is hit.
 
 **Tools / Skills**:
 - `aipc-toolkit` skill (primary — activate via `use_skill`)
 - `aipc_plan.md` Config + Progress Summary + Issue Log
 
 ---
+### 2. NPU Adaptation Agent
 
-### 2. Model Export Agent
+**Role**: Makes all model-side changes required for NPU-compatible export — wrappers, fixed-shape assumptions, operator replacements, KV-cache flattening, `use_cache=False` paths, and PyTorch-side validation. This is a standalone phase (Phase 1) that must complete before ONNX export (Phase 2) begins.
+
+**Scope**:
+- Use this agent whenever the model needs any model-side change before ONNX export, regardless of source framework.
+- For transformer decoder models: prepare explicit prefill/decode wrappers, KV-cache inputs/outputs, fixed-shape decode bring-up, and PyTorch-side validation.
+- For non-transformer models: prepare wrappers, operator substitutions, or forward-path adjustments that preserve semantics and make ONNX/QNN conversion feasible.
+- If `PYTORCH_ADAPTATION_NEEDED = No`: mark Phase 1 ✅ Done immediately and hand off to Phase 2 without doing any work.
+
+**Responsibilities**:
+- Inspect the PyTorch model structure and identify model-side changes needed for NPU export.
+- Implement wrapper modules or forward-path adjustments without modifying installed package source files.
+- For transformer decoder models, expose `past_key_values` and `present_key_values` explicitly through prefill/decode wrappers.
+- Preserve model semantics; if a required change alters semantics, stop under Blocking Condition B4.
+- Validate adapted PyTorch outputs before ONNX export, including output shapes, dtypes, finite values, and nonzero counts.
+- Hand off validated PyTorch wrappers or adaptation code to the Model Export Agent.
+
+**Inputs**:
+- Source model weights and source framework code.
+- `{MODEL_NAME}`, `{SRC_FRAMEWORK}`, `{INPUT_NAME}`, `{INPUT_SHAPE}`, `{OUTPUT_NAMES}` from `aipc_plan.md`.
+- Transformer decoder requirements, if applicable, from `skills/aipc-toolkit/references/pytorch_modification.md`.
+
+**Outputs**:
+- PyTorch adaptation code, wrapper modules, or an export-ready model entry point.
+- PyTorch validation notes and shape assumptions recorded in `aipc_plan.md`.
+- For transformer decoder models: validated prefill/decode wrapper definitions ready for ONNX export.
+
+**Reference**:
+- `skills/aipc-toolkit/references/pytorch_modification.md`
+- For ONNX export and validation after adaptation: `skills/aipc-toolkit/references/model_export_validation.md`
+
+### 3. Model Export Agent
 
 **Role**: Exports the source model ({SRC_FRAMEWORK}) to ONNX format, applying in-memory patches for unsupported operators.
 
@@ -240,7 +294,7 @@ Orchestrator Agent  ◄─── aipc_plan.md (Config + Progress Summary)
 **Outputs**:
 - `{ONNX_FILE}` — validated ONNX file
 
-**Workflow** (`aipc_plan.md` Phase 1):
+**Workflow** (`aipc_plan.md` Phase 2):
 1. Check `PATCH_NEEDED` — if Yes, identify ops from `PATCH_OPS`; if patch changes semantics → **B4**
 2. Write and run `export_onnx.py`:
    ```python
@@ -263,7 +317,7 @@ Orchestrator Agent  ◄─── aipc_plan.md (Config + Progress Summary)
    onnx.save(model_simplified, "{ONNX_FILE}")
    ```
 3. Verify numerical parity vs {SRC_FRAMEWORK} baseline
-4. Update `aipc_plan.md` Phase 1 checkboxes → hand off to Model Inspector Agent
+4. Update `aipc_plan.md` Phase 2 checkboxes → hand off to Model Inspector Agent
 
 **Batch mode**: steps 1–4 execute autonomously. Log patch decisions in Issue Log.
 
@@ -279,7 +333,7 @@ Patches may expose previously-hidden unsupported ops. After each patch:
   - Patch changes semantics (B4)
   - 7+ iterations with NO progress (B3)
 
-**Verification** (Phase 1 exit criteria):
+**Verification** (Phase 2 exit criteria):
 - [ ] `onnx.checker.check_model()` passes
 - [ ] Inference output matches {SRC_FRAMEWORK} baseline
 - [ ] No unsupported operators (confirmed by inspector)
@@ -288,14 +342,14 @@ Patches may expose previously-hidden unsupported ops. After each patch:
 
 ---
 
-### 3. Model Inspector Agent
+### 4. Model Inspector Agent
 
 **Role**: Inspects `{ONNX_FILE}` I/O shapes, data types, and operator compatibility before conversion.
 
 **Inputs**: `{ONNX_FILE}`  
 **Outputs**: `{MODEL_NAME}.yaml`, inspection report
 
-**Workflow** (`aipc_plan.md` Phase 2):
+**Workflow** (`aipc_plan.md` Phase 3):
 1. Run inspection:
    ```bash
    python skills/aipc-toolkit/scripts/aipc_inspect_onnxio.py {ONNX_FILE}
@@ -309,13 +363,13 @@ Patches may expose previously-hidden unsupported ops. After each patch:
    # Flow B — SNPE
    {QAIRT_ROOT}/bin/{HOST_ARCH}/qairt-converter --input_network {ONNX_FILE} --dry_run
    ```
-4. Document issues in `aipc_plan.md` Phase 2 task 2.3
+4. Document issues in `aipc_plan.md` Phase 3 task 2.3
 5. If issues found → escalate to Model Export Agent; re-inspect after patching
-6. If clean → update Phase 2 checkboxes; hand off to Conversion Agent
+6. If clean → update Phase 3 checkboxes; hand off to Conversion Agent
 
 **Batch mode**: steps 1–6 execute autonomously. Log all findings in Issue Log.
 
-**Verification** (Phase 2 exit criteria):
+**Verification** (Phase 3 exit criteria):
 - [ ] `{MODEL_NAME}.yaml` generated with correct I/O names and shapes
 - [ ] No unsupported operators flagged
 - [ ] `INPUT_NAME`, `INPUT_SHAPE`, `OUTPUT_NAMES` recorded in `aipc_plan.md`
@@ -324,7 +378,7 @@ Patches may expose previously-hidden unsupported ops. After each patch:
 
 ---
 
-### 4. Conversion Agent (FP16 / FP32)
+### 5. Conversion Agent (FP16 / FP32)
 
 **Role**: Converts `{ONNX_FILE}` to QNN or SNPE format at FP16/FP32 precision.
 
@@ -335,7 +389,7 @@ Patches may expose previously-hidden unsupported ops. After each patch:
 
 **Workflow**:
 
-**Flow A — QNN** (`aipc_plan.md` QNN-3A):
+**Flow A — QNN** (`aipc_plan.md` QNN-4A):
 ```bash
 python skills/aipc-toolkit/scripts/aipc_convert_fp.py \
   --onnx {ONNX_FILE} \
@@ -345,9 +399,9 @@ python skills/aipc-toolkit/scripts/aipc_convert_fp.py \
   --target-arch {TARGET_ARCH}
 ```
 > If target runtime shows FP16/dtype compatibility issues, retry with `--preserve-io-mode layout`.
-> Do not use `--preserve-io-mode none` in QNN-3A. Layout optimization is only allowed in QNN-8 after baseline validation passes.
+> Do not use `--preserve-io-mode none` in QNN-4A. Layout optimization is only allowed in QNN-9 after baseline validation passes.
 
-**Flow B — SNPE** (`aipc_plan.md` SNPE-3):
+**Flow B — SNPE** (`aipc_plan.md` SNPE-4):
 ```bash
 python skills/aipc-toolkit/scripts/aipc_convert_snpe.py \
   --onnx {ONNX_FILE} \
@@ -364,7 +418,7 @@ python skills/aipc-toolkit/scripts/aipc_convert_snpe.py \
 
 **Batch mode**: run conversion autonomously; log each attempt in Issue Log. Stop only on B3.
 
-**Verification** (QNN-3A / SNPE-3 exit criteria):
+**Verification** (QNN-4A / SNPE-4 exit criteria):
 - [ ] Conversion logs show no errors
 - [ ] **Flow A (Linux)**: `lib{MODEL_NAME}.so` exists; `file lib{MODEL_NAME}.so` 
 - [ ] **Flow A (Windows)**: `{MODEL_NAME}.dll` exists; `dumpbin /headers {MODEL_NAME}.dll | find "machine"` confirms `{TARGET_ARCH}`
@@ -374,7 +428,7 @@ python skills/aipc-toolkit/scripts/aipc_convert_snpe.py \
 
 ---
 
-### 5. Quantization Agent (INT8 / A16W8)
+### 6. Quantization Agent (INT8 / A16W8)
 
 **Role**: Quantizes `{ONNX_FILE}` to INT8 or A16W8 using calibration data.
 
@@ -392,7 +446,7 @@ python skills/aipc-toolkit/scripts/aipc_convert_snpe.py \
 
 **Workflow**:
 
-**Flow A — QNN** (`aipc_plan.md` QNN-3B):
+**Flow A — QNN** (`aipc_plan.md` QNN-4B):
 ```bash
 python skills/aipc-toolkit/scripts/aipc_convert_int.py \
   --input_network {ONNX_FILE} \
@@ -404,9 +458,9 @@ python skills/aipc-toolkit/scripts/aipc_convert_int.py \
   --target-arch {TARGET_ARCH}
 ```
 > If target runtime shows FP16/dtype compatibility issues, retry with `--preserve-io-mode layout`.
-> Do not use `--preserve-io-mode none` in QNN-3B. Layout optimization is only allowed in QNN-8 after baseline validation passes.
+> Do not use `--preserve-io-mode none` in QNN-4B. Layout optimization is only allowed in QNN-9 after baseline validation passes.
 
-**Flow B — SNPE** (`aipc_plan.md` SNPE-4):
+**Flow B — SNPE** (`aipc_plan.md` SNPE-5):
 ```bash
 {QAIRT_ROOT}/bin/{HOST_ARCH}/snpe-dlc-quant \
   --input_dlc {OUTPUT_DIR}/{MODEL_NAME}.dlc \
@@ -420,7 +474,7 @@ If cosine similarity < 0.95 → **Blocking Condition B6**: stop and report to us
 
 **Batch mode**: run quantization autonomously; log accuracy result in Issue Log. Stop only on B6.
 
-**Verification** (QNN-3B / SNPE-4 exit criteria):
+**Verification** (QNN-4B / SNPE-5 exit criteria):
 - [ ] Quantized artifact exists and is non-zero
 - [ ] Cosine similarity vs FP baseline ≥ 0.95
 
@@ -428,7 +482,7 @@ If cosine similarity < 0.95 → **Blocking Condition B6**: stop and report to us
 
 ---
 
-### 6. Context Binary Agent
+### 7. Context Binary Agent
 
 **Role**: Generates hardware-specific HTP context binaries on the **host** (x86 Linux or ARM Windows) for the target SoC, then deploys to the target device. **Flow A (QNN) only.**
 
@@ -447,7 +501,7 @@ If cosine similarity < 0.95 → **Blocking Condition B6**: stop and report to us
 - Linux: `lib{MODEL_NAME}.so.bin` (optional — `.so` works directly on Linux)
 - Windows: `{MODEL_NAME}.dll.bin` (optional — `.dll` works directly on Windows)
 
-**Workflow** (`aipc_plan.md` QNN-4):
+**Workflow** (`aipc_plan.md` QNN-5):
 
 
 ### ⚠️ CRITICAL: Platform-Specific Requirements
@@ -482,7 +536,7 @@ If cosine similarity < 0.95 → **Blocking Condition B6**: stop and report to us
 - **Windows**: Run autonomously on host; if context generation fails, continue with `.dll` fallback
 - **Linux**: Run autonomously on host; `.so` fallback allowed only after required host-context troubleshooting is exhausted
 
-**Verification** (QNN-4 exit criteria):
+**Verification** (QNN-5 exit criteria):
 - [ ] **Windows**: `{MODEL_NAME}.dll.bin` generated and deployed OR `.dll` fallback path verified
 - [ ] **Linux**: `{MODEL_NAME}.so.bin` generated on host and deployed to target OR all host-context methods attempted+logged before `.so` fallback
 - [ ] **If Windows verification fails**: Return to Step 3.5 (operator patching)
@@ -492,7 +546,7 @@ If cosine similarity < 0.95 → **Blocking Condition B6**: stop and report to us
 
 ---
 
-### 7. Inference Agent
+### 8. Inference Agent
 
 **Role**: Implements the end-to-end inference pipeline for `{MODEL_NAME}` using the ONNX→QNN/SNPE wrapper.
 
@@ -524,6 +578,16 @@ Recommended execution pattern (conceptual):
 
 > See `skills/aipc-toolkit/references/inference.md` → "Target Device Inference over SSH" for concrete command examples.
 
+**⚠️ Inference Guardrail — Always Use `aipc` Launcher**
+
+Never call `qai_appbuilder.QNNContext` directly for inference. Always use:
+```bash
+python aipc infer_{MODEL_NAME}.py
+```
+**Reason**: QAIRT may reorder output tensors at context-binary compile time. The `onnxwrapper` restores ONNX output order using the `.yaml` file. Direct `QNNContext.Inference` returns HTP-internal order — outputs will be silently mismatched without the wrapper's remapping.
+Also ensure the `.yaml` file (generated by `aipc_inspect_onnxio.py`) is deployed alongside the `.onnx` on the target — the reorder depends on it.
+See `references/inference.md` → "Always Use `aipc` Launcher" for full details.
+
 **Before starting inference:**
 
 | Platform | Required File | If missing |
@@ -539,7 +603,7 @@ Recommended execution pattern (conceptual):
 
 **Outputs**: `infer_{MODEL_NAME}.py`, inference results
 
-**Workflow** (`aipc_plan.md` QNN-5 / SNPE-5):
+**Workflow** (`aipc_plan.md` QNN-6 / SNPE-6):
 
 1. **Copy wrapper scripts** into the working folder:
    ```bash
@@ -562,7 +626,7 @@ Recommended execution pattern (conceptual):
    > The `aipc` wrapper passes the `.onnx` path but searches for a matching QNN binary in the same directory.  
    > See `references/inference.md` → Model File Resolution for full search order.
 
-5. **Windows only**: generate the HTP context binary first (Phase 4) and copy to match ONNX naming.
+5. **Windows only**: generate the HTP context binary first (Phase 5) and copy to match ONNX naming.
 
 6. **If I/O names fail**: regenerate `{MODEL_NAME}.yaml` via the inspector:
    ```bash
@@ -577,7 +641,7 @@ Recommended execution pattern (conceptual):
 - Use absolute paths for `{MODEL_NAME}_context.bin` and `{DLC_FILE}`
 - Regenerate `{MODEL_NAME}.yaml` via inspector if I/O names mismatch
 
-**Verification** (QNN-5 / SNPE-5 exit criteria):
+**Verification** (QNN-6 / SNPE-6 exit criteria):
 - [ ] Inference runs without errors
 - [ ] Input tensor name/shape matches model (from `{MODEL_NAME}.yaml`)
 - [ ] Preprocessing matches training/export assumptions
@@ -591,7 +655,7 @@ Recommended execution pattern (conceptual):
 
 ---
 
-### 8. Validation & Testing Agent
+### 9. Validation & Testing Agent
 
 **Role**: Validates `{MODEL_NAME}` accuracy, performance, and correctness after conversion.
 
@@ -605,13 +669,13 @@ Recommended execution pattern (conceptual):
 
 **Outputs**: `REPORT.md`
 
-**Workflow** (`aipc_plan.md` Phase 6):
-1. ONNX CPU inference → baseline outputs (Phase 6.1)
-2. `{FLOW}` inference on same inputs → compare cosine similarity on `{OUTPUT_NAMES}` (Phase 6.1)
-3. Task-specific metric: mAP / Top-1 / WER vs {SRC_FRAMEWORK} baseline (Phase 6.2)
-4. Latency benchmark on `{TARGET_DEVICE}`: cold start, p50/p95, throughput, peak memory (Phase 6.3)
-5. Regression tests with known-good inputs (Phase 6.4)
-6. Write `REPORT.md` (Phase 6.5):
+**Workflow** (`aipc_plan.md` Phase 7):
+1. ONNX CPU inference → baseline outputs (Phase 7.1)
+2. `{FLOW}` inference on same inputs → compare cosine similarity on `{OUTPUT_NAMES}` (Phase 7.1)
+3. Task-specific metric: mAP / Top-1 / WER vs {SRC_FRAMEWORK} baseline (Phase 7.2)
+4. Latency benchmark on `{TARGET_DEVICE}`: cold start, p50/p95, throughput, peak memory (Phase 7.3)
+5. Regression tests with known-good inputs (Phase 7.4)
+6. Write `REPORT.md` (Phase 7.5):
    - Record **task completion time** (`END_TIME = <YYYY-MM-DD HH:MM>`)
    - Compute and record **total work duration** (`WORK_TIME = END_TIME − START_TIME` from `aipc_plan.md` Config)
    - Include both values in `REPORT.md` header and in `aipc_plan.md` Config block
@@ -635,7 +699,7 @@ If cosine similarity < threshold → **Blocking Condition B6**.
 ls REPORT.md   # must exist — if missing, write it NOW before proceeding
 ```
 
-**Verification** (Phase 6 exit criteria):
+**Verification** (Phase 7 exit criteria):
 - [ ] Cosine similarity meets threshold
 - [ ] Task metric within acceptable range
 - [ ] Latency meets performance target
@@ -657,6 +721,7 @@ ls REPORT.md   # must exist — if missing, write it NOW before proceeding
 | Python env | QAIRT venv via `{QAIRT_ENV_SETUP}` | Record in `aipc_plan.md` Config (`python venv`) |
 | Calibration data | `{CALIBRATION_DATA}` + `{CALIB_LIST}` | Required for INT quantization only |
 | Execution mode | `{MODE}` | `batch` = autonomous; `interactive` = confirm each phase |
+| Evolve mode | `{EVOLVE_MODE}` | `inherit` = use `{MODE}`; `batch` = apply verified skill updates automatically; `interactive` = ask user before applying |
 
 **Windows architecture detection**: Do **not** use `$env:PROCESSOR_ARCHITECTURE` or Python's `platform.machine()` — both can be affected by emulation. Use:
 ```powershell
@@ -674,3 +739,46 @@ ls REPORT.md   # must exist — if missing, write it NOW before proceeding
 - **Absolute paths**: always use absolute paths for `{MODEL_NAME}_context.bin` and `{DLC_FILE}`.
 - **Batch mode decisions**: every autonomous decision must be logged in `aipc_plan.md` Issue Log.
 - **Blocking conditions**: see the Blocking Conditions table above. These always require stopping, regardless of `{MODE}`.
+
+---
+
+## Evolve Orchestrator (Phase E — Disabled by Default)
+
+> **Activation**: only when `{EVOLVE} = YES`. Skip entirely otherwise.  
+> **Reference**: `../references/evolve.md`
+> **Confirmation mode**: `{EVOLVE_MODE}` defaults to `inherit`; effective `batch` applies verified changes automatically, effective `interactive` asks the user before applying changes.
+
+**Role**: Reads the completed project's work history, synthesizes candidate skill improvements, invokes a Verification Subagent to vet each change, and applies approved changes to the aipc skill documents.
+
+**Inputs**:
+- `aipc_plan.md` Issue Log and per-phase notes
+- `REPORT.md`
+- `logs/` (stderr/stdout from each phase)
+- Current `aipc_plan.md`, `aipc_AGENTS.md`, `SKILL.md`, and all `references/*.md` files used in this project
+
+**Workflow**:
+1. Read all inputs listed above
+2. Resolve `{AIPC_SKILL_DIR}` and ensure it is a git repository; if missing git metadata, initialize it and commit the initial state before making changes
+3. Identify candidate improvements across: environment/setup, operator patching, conversion, quantization, inference/validation, profiling, agent flow
+4. For each candidate, prepare: proposed change text, target file and section, rationale
+5. If effective evolve mode is `interactive`, ask the user to confirm the candidate list before verification
+6. **Spawn Verification Subagent** (fresh context, no project history) with only: proposed change text, target file/section, rationale, current target section content
+7. Collect verdicts (`APPROVE` / `REVISE` / `REJECT`) from the subagent
+8. If effective evolve mode is `interactive`, ask the user to confirm the final approved/revised diff before applying
+9. Apply `APPROVE` changes directly; apply `REVISE` with the subagent's revised text; discard `REJECT` and log reason
+10. Commit the skill repository with a concise evolve summary message
+11. Fill in the Skill Evolution Summary table in `aipc_plan.md`
+12. Mark Phase E ✅ Done
+
+**Guardrails**:
+- Changes must be general (apply to any project/model), not specific to this project
+- Every change must account for both Windows and Linux where applicable; platform-specific rules must be labeled
+- References document general knowledge/guardrails — not step-by-step task procedures for a specific project
+- Do not duplicate content already present in the target file — add or refine, do not repeat
+- Verification Subagent is mandatory; no change may be applied without a subagent verdict
+
+**Verification Subagent contract**:
+
+> Input: `{ proposed_change, target_file, target_section, current_section_content, rationale }`  
+> Output: `{ verdict: APPROVE|REJECT|REVISE, reason: string, revised_text?: string }`  
+> The subagent must check: (1) is this general enough? (2) does it handle both platforms? (3) does it conflict with or duplicate existing content? (4) is it placed in the right document type (reference vs. plan vs. agents)?

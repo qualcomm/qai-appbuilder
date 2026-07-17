@@ -23,7 +23,7 @@ Use this ready prompt to repeat the same QAIRT setup inputs:
 Set up QAIRT by following /home/ubuntu/Test/QAIRT_SETUP_SOP.md exactly.
 
 Use these values:
-1) QAIRT version: 2.45.0.260326
+1) QAIRT version: 2.47.0.260601
 2) target: local
 3) install path: /home/ubuntu/Test/qairt
 
