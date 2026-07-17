@@ -105,21 +105,18 @@ The script will:
    `libsamplerate`, and — only on Linux — an mbedTLS copy fetched from
    `github.com/Mbed-TLS/mbedtls` at build time for the HTTPS transport used
    by `cpp-httplib`).
-3. Copy the QNN runtime libraries plus the default model config files into
-   the output directory below.
+3. Copy the default model configs and metadata files (`service_config.json`,
+   `sensitive_keywords.json`, `test_service.py`, the build `version` file)
+   into the output directory below.
 
 ### Output
 
-The final artefacts are placed in
-`samples/genie/c++/Service/build-linux/GenieService_v<APPVER>_qnn<SDK_DIR_NAME>/`,
-where `<SDK_DIR_NAME>` is simply the last path component of `$QNN_SDK_ROOT`
-(whatever your QAIRT SDK directory is actually named — **not** a fixed
-numeric format).
+The final artefacts are placed in a fixed, version-free, platform-specific
+directory (set by `BUILD_PATH` in `Service/CMakeLists.txt`):
+`samples/genie/c++/Service/build-linux/GenieService-linux-arm64/`.
 
-For example, with app version 2.3.7 and
-`QNN_SDK_ROOT=/opt/qairt/2.44.0.260225`:
 ```
-Service/build-linux/GenieService_v2.3.7_qnn2.44.0.260225/
+Service/build-linux/GenieService-linux-arm64/
 ├── GenieAPIService               # the executable
 └── libappbuilder.so              # built from the top-level src/
 ```
@@ -130,25 +127,26 @@ Service/build-linux/GenieService_v2.3.7_qnn2.44.0.260225/
 > NOT copied because they already exist on the target device as part of the
 > SDK installation.
 >
-> On Windows the output directory keeps the shorter name
-> `GenieService_v<APPVER>` (no `_qnn<...>` suffix, no `build-linux/` layer)
-> and includes the full SDK runtime for standalone deployment.
+> On Windows the output directory is `GenieService-win-arm64` (no
+> `build-linux/` layer) and includes the full SDK runtime for standalone
+> deployment. Switching QAIRT SDK versions and rebuilding overwrites the
+> previous artefacts in place — the directory name never encodes the SDK
+> version.
 
 > **Linux is QNN/Genie-only.** Unlike Windows/MSVC, the Linux build does
 > **not** support the `USE_MNN`/`USE_GGUF` backends. `Service/CMakeLists.txt`
 > actively rejects them on non-MSVC platforms — passing `-DUSE_MNN=ON` or
-> `-DUSE_GGUF=ON` (directly, or indirectly through an environment variable a
-> future version of the script might read) makes the CMake **configure step
-> fail immediately** with `FATAL_ERROR "USE_MNN/USE_GGUF is supported only on
-> Windows/MSVC; Linux builds are QNN-only."`. There is currently no way to get
-> a Linux build that also loads MNN or GGUF models.
+> `-DUSE_GGUF=ON` makes the CMake **configure step fail immediately** with
+> `FATAL_ERROR "USE_MNN/USE_GGUF is supported only on Windows/MSVC; Linux
+> builds are QNN-only."` There is no way to get a Linux build that also
+> loads MNN or GGUF models.
 
 ### Build options
 
 `build_linux.sh` only reads the environment variables it explicitly
 documents at the top of the script — it does **not** forward arbitrary
-`-D...` flags, and it does **not** read `USE_MNN`/`USE_GGUF`/`BUILD_LINUX_CLIENT`
-(those three have no effect if exported before running the script):
+`-D...` flags, and it does **not** read `USE_MNN`/`USE_GGUF` (both have no
+effect if exported before running the script):
 
 | Variable           | Default                        | Meaning |
 |--------------------|---------------------------------|---------|
@@ -159,13 +157,11 @@ documents at the top of the script — it does **not** forward arbitrary
 | `JOBS`             | `$(nproc)`                     | Parallel jobs passed to `cmake --build ... -j`. |
 | `BUILD_AS_DLL`     | `OFF`                          | `OFF` builds the `GenieAPIService` executable; `ON` builds only `libGenieAPILibrary.so` instead. |
 
-If you need to build the `GenieAPIClient` CLI sample on Linux, it is gated by
-a separate CMake option, `BUILD_LINUX_CLIENT` (default `OFF`, defined in
-`Service/CMakeLists.txt`) — this is **not** an environment variable read by
-`build_linux.sh`. You have to invoke CMake yourself and pass it explicitly,
-e.g. `cmake -S Service -B Service/build-linux -DBUILD_LINUX_CLIENT=ON ...`.
-It links against `libcurl` built from `External/curl/` via `ExternalProject`;
-if you need HTTPS support, install `sudo apt install libssl-dev` first.
+`GenieAPIClient`, the CLI sample, always builds alongside `GenieAPIService`
+— there is no option to disable it. It links against a minimal static
+`libcurl` (HTTP only, no TLS/LDAP/SSH2) that its own
+`examples/GenieAPIClient/CMakeLists.txt` builds from `External/curl/` via
+`ExternalProject`, so no separate curl installation is needed.
 
 ---
 
@@ -176,10 +172,8 @@ Set the runtime library paths and start the service:
 ```bash
 export QNN_SDK_ROOT=/absolute/path/to/2.44.0.260225
 
-# OUT_DIR follows the pattern build-linux/GenieService_v<APPVER>_qnn<SDK_DIR_NAME>
-# (see section 4 "Output" above for how <SDK_DIR_NAME> is derived).
-# Example for app 2.3.7 + QAIRT 2.44.0.260225:
-OUT_DIR=$(pwd)/samples/genie/c++/Service/build-linux/GenieService_v2.3.7_qnn2.44.0.260225
+# Fixed output directory name (see section 4 "Output" above).
+OUT_DIR=$(pwd)/samples/genie/c++/Service/build-linux/GenieService-linux-arm64
 
 # Both the QAIRT runtime and our build dir need to be on LD_LIBRARY_PATH.
 export LD_LIBRARY_PATH=$QNN_SDK_ROOT/lib/aarch64-oe-linux-gcc11.2:$OUT_DIR:$LD_LIBRARY_PATH
@@ -202,7 +196,7 @@ See [API.md](API.md) for the endpoint reference and
 ### 5.1. Deploying to a target device
 
 Copy **all files** in the build output directory
-(`build-linux/GenieService_v<APPVER>_qnn<SDK_DIR_NAME>/`) to the target device.
+(`build-linux/GenieService-linux-arm64/`) to the target device.
 The build only produces runtime-essential binaries; every file in that
 directory is needed.
 
@@ -239,7 +233,8 @@ package to `/data/genie/` and the model files to
 #### `htp_backend_ext_config.json` — also needs path edits
 
 The HTP backend extension config (`htp_backend_ext_config.json`) referenced
-by the model config is used for indicate HTP version. Please set `dsp_arch` to correct value. For example:
+by the model config indicates the HTP version to target. Set `dsp_arch` to
+the correct value, for example:
 
 ```json
 {
@@ -298,10 +293,3 @@ git submodule update --init --recursive
 `build_linux.sh` itself does **not** pre-check this; the error surfaces from
 the CMake configure step, so run the command above proactively if you cloned
 without `--recursive`.
-
-**`Could NOT find OpenSSL` (only when `BUILD_LINUX_CLIENT=ON`)**
-The `External/curl/` `ExternalProject` needs OpenSSL headers to build
-HTTPS support. Install them with:
-```bash
-sudo apt install libssl-dev
-```
