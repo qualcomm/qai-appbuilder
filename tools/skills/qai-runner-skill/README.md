@@ -107,7 +107,7 @@ For Windows environments, use the following steps:
    ```
 
 
-## Testing
+## Usage
 
 It is recommended to utilize a script that (1) activates the QAIRT Python virtual environment and (2) initializes the QAIRT environment settings. This script serves as the standard procedure for configuring the workspace during validation and testing.
 
@@ -139,12 +139,11 @@ Use the following prompts to run a complete AIPC workflow for the current projec
 
 - `"Do all project work."`
   - Execute the full project workflow based on the configured plan.
+  - you may use "/goal" to help the work.
 
 Advanced Usage: The AI agent may be instructed to modify the project plan dynamically, such as appending a GUI video inference stage to the conclusion of the workflow.
 
-### Automated Testing with AI
 
-The QAI-Runner-Skill can be tested through AI-assisted workflows. The following test scenarios are available:
 
 
 #### Assistant workflow
