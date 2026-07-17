@@ -1,0 +1,111 @@
+GenieAPIService: 2.3.7, Genie Library: 1.19.0
+ [W] current work dir: C:/Users/HCKTest/Desktop/GenieEnv/GenieAPIService_2.3.1/GenieAPIService_2.3.1/samples/genie/c++/Service/cmake-build-release-visual-studio-arm/GenieService-win-arm64
+ [W] root dir: C:/Users/HCKTest/Desktop/GenieEnv/GenieAPIService_2.3.1/GenieAPIService_2.3.1/samples/genie/c++/Service/cmake-build-release-visual-studio-arm/GenieService-win-arm64
+ [A] setting log level by library: -1
+ [W] ModelManager::LoadModel,configFile=C:/Users/HCKTest/Desktop/GenieEnv/models/gpt-oss-20b-MNN/config.json
+ [W] Debug config loaded: status_update_content_visible=0, log_rule_matches=0, log_inference_stream=0
+ [W] [Config] extended_rules loaded: local_path=1, internal_url=1, device_id=1, image_data=1
+ [W] [Config] detection_rules loaded: phone=1(level=S1), email=1(level=S1), id_card=1(level=S2), bank_card=1(level=S2), api_key=1(level=S2), private_key=1(level=S2), token=1(level=S2), password=1(level=S1)
+ [W] Incremental check config loaded: enabled=1, session_ttl_seconds=3600, max_sessions=1000
+ [W] S2 turn cleaning config loaded: enabled=1, log_details=1, allow_cloud_reroute=1
+ [W] Routing config loaded: enabled=1, policy_id=default_v1
+ [W] [cloud_shared] Loaded: timeout=120, stream_timeout=1800, retry.max=2, rate_limit.max_inferences=20
+ [W] Cloud model config loaded: enabled=1, base_url=https://your-api-endpoint.example.com/v1, model=azure::gpt-5.4, timeout=120, rate_limit.max_inferences_per_task=20, rate_limit.max_tokens_per_task=0, upload_policy.enable_sensitivity_check=1, upload_policy.enable_desensitization=1, context_size=1000000
+ [W] Enterprise cloud model config loaded: enabled=0, base_url=https://your-api-endpoint.example.com/v1, model=codewise_instruct, timeout=120, rate_limit.max_inferences_per_task=20, context_size=32000
+ [W] Local model config loaded: enabled=1
+ [W] [Config] emergency_truncation loaded: enabled=1, max_truncation_ratio=0.4, safety_margin_tokens=30
+ [W] [Config] system_context loaded: sections=6
+ [W] [Config] prompt_sections loaded: enabled=0, rules=48, default_action=exclude, max_section_tokens=0
+ [W] [Config] subagent_prompt_sections loaded: enabled=0, rules=11, default_action=exclude, max_section_tokens=0
+ [W] [Config] system_prompts.sections_enabled loaded: identity_intro=1, skill_rule=1, tools_intro=1, catalog_structured_intro=1
+ [W] [Config] system_prompts.few_shot_examples_enabled loaded: enabled=1, skill_correct_call=1, no_skill_needed=1, max_skill_examples=1
+ [W] Prompt optimization config loaded: output_reserve_ratio=0.2, recent_window=6, old_compress_len=100, recent_compress_len=300, format=structured, whitelist=1, auto_correction=1
+ [W] check the prompt type: Harmony
+ [W] check if is thinking model: 0
+ [W] try to check if model is: QNN model
+ [W] dialog is not exist in json object
+ [W] try to check if model is: MNN model
+The device supports: i8sdot:1, fp16:1, i8mm: 0, sve2: 0, sme2: 0
+ [W] load successfully! use second: 9.4495 
+ [W] LoadSingleModel: model_format=MNN, backend=mnn, device=cpu
+ [W] [32mModel load successfully: gpt-oss-20b-MNN[0m
+ [W] [ContentSecurityInspector] Extended rules loaded: local_path (R_PATH_UNIX, R_PATH_WIN)
+ [W] [ContentSecurityInspector] Extended rules loaded: internal_url (R_INTERNAL_IP, R_INTERNAL_DOMAIN)
+ [W] [ContentSecurityInspector] Extended rules loaded: device_id (R_MAC_ADDR, R_IMEI)
+ [W] [ContentSecurityInspector] Extended rules loaded: image_data (R_BASE64_IMAGE)
+ [W] [ContentSecurityInspector] Keywords dict loaded from C:/Users/HCKTest/Desktop/GenieEnv/GenieAPIService_2.3.1/GenieAPIService_2.3.1/samples/genie/c++/Service/cmake-build-release-visual-studio-arm/GenieService-win-arm64/./sensitive_keywords.json, rules_count=120
+ [W] [GenieRoutingGateway] Initialized, routing.enabled=1, local_model.enabled=1, cloud_model.enabled=1, use_local_model_fallback(sensitivity)=0
+ [W] [ChatRequestHandler] GenieRoutingGateway initialized, routing.enabled=1, cloud.enabled=1, enterprise_cloud.enabled=0
+ [W] GenieService::setupHttpServer start
+ [W] GenieService::setupHttpServer end
+ [A] [33m[OK] Genie API Service IS Running.[0m
+ [A] [33m[OK] Genie API Service -> http://0.0.0.0:8910[0m
+ [E] [LoadAllModelsFromConfig] Model directory does not exist, skipping model 'qwen3-8b-8380'.
+  Expected path : C:/Users/HCKTest/Desktop/GenieEnv/models/qwen3-8b-8380
+  models_base_dir: C:/Users/HCKTest/Desktop/GenieEnv/models
+  Hint: Ensure the -c argument points to the correct model config file (e.g. models\<model_name>\config.json), so that the models directory can be correctly derived.
+ [W] [LoadAllModelsFromConfig] Specified default_model 'qwen3-8b-8380' not found in loaded models, keeping current default: gpt-oss-20b-MNN
+ [W] [LoadAllModelsFromConfig] Total models loaded: 0, default_model=gpt-oss-20b-MNN
+ [W] ---------------------------------------------------
+Time: 2026-07-16 20:53:10.694
+Path: /v1/chat/completions
+ [W] BuilderBase::Reset called
+ [W] [GenieRoutingGateway] New global session detected (single user message): global_session_id=sess_1784260390695_98785, user_session_id=sess_1784260390695_82083, first_msg_key=fmk_192cfa38d7ad5f65
+ [W] [GenieRoutingGateway] HandleChatCompletion start, request_id=req_1784260390695_4412
+ [W] [GenieRoutingGateway] Client source: Unknown
+ [W] [GenieRoutingGateway] Full check: total_messages=1
+ [W] [PERF] Step0_PreInspect: phase_ms=0, total_ms=0
+ [W] [ContentSecurityInspector] LocalModel skipped: use_local_model_fallback=false
+ [W] [ContentSecurityInspector] No sensitive content detected by rule engine
+ [W] [PERF] Step1_Inspect: phase_ms=0, total_ms=0
+ [W] [TaskComplexityEvaluator] LocalModel skipped: use_local_model_fallback=false
+ [W] [TaskComplexityEvaluator] complexity=C0, reason=simple task: tool_calls_after_user=0
+ [W] [ModelRouter] Route decision: agent_type=sub, target=LOCAL, sensitivity=S0, complexity=C0, need_desensitize=0, enterprise_cloud_available=0, public_cloud_available=1, reason=sub_agent: prefer local (S0/S1 or C0/C1)
+ [W] [PERF] Step2_3_RouteDecision: phase_ms=0, total_ms=1
+ [W] [PERF] Step5_PreExecute: phase_ms=0, total_ms=1
+ [W] [GenieRoutingGateway] Route=LOCAL, continuing with local processing
+ [W] system prompt is empty, will use default
+
+
+ [W] [Status] inference: Inferencing...
+ [W] --- Query Context Start ---
+ [W] 
+[Prompt] [SUBAGENT_INFERENCE][gpt-oss-20b-MNN]:
+<|start|>system<|message|>You are ChatGPT, a large language model trained by OpenAI.
+Knowledge cutoff: 2024-06
+Current date: 2026-07-16
+
+Reasoning: medium
+
+# Valid channels: analysis, commentary, final. Channel must be included for every message.<|end|><|start|>developer<|message|># Instructions
+
+You are a helpful assistant.<|end|><|start|>user<|message|>Write a very long, detailed step-by-step essay about the history of computing, at least 3000 words.<|end|><|start|>assistant
+------------
+
+[Response] [SUBAGENT_INFERENCE][gpt-oss-20b-MNN]:
+ [W] start to stop service
+ [W] Unloading model...
+
+ [W] --- Query Context End ---
+
+ [W] --- Token Summary Start ---
+ [W] Time to First Token: 2.03 s
+ [W] Token Generation Time: 0.00 s
+ [W] Num Prompt Tokens: 103, Text Length: 481
+ [W] Prompt Processing Rate: 50.71 toks/sec
+ [W] Num Generated Tokens: 0, Text Length: 0
+ [W] Token Generation Rate: 0.00 toks/sec
+ [W] --- Token Summary End ---
+ [W] /v1/chat/completions handling is done
+
+ [W] 
+[Shutdown] Interrupt signal received. Initiating graceful shutdown...
+ [W] start to stop service
+ [W] Unloading model...
+ [W] UnloadModel: genieModelHandle is null (may be multi-model mode)
+ [W] UnloadModel: clearing 1 loaded model(s) from multi-model registry
+ [W] MNNContext::~MNNContext() Done。
+ [W] the context is being destroyed
+ [W] Service stopped successfully.
+ [W] [Shutdown] Graceful shutdown completed.
+ [W] [GenieRoutingGateway] Destructor: alive flag set to false, detached threads will exit safely

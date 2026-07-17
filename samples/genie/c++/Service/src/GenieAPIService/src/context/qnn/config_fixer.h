@@ -1,4 +1,4 @@
-//==============================================================================
+﻿//==============================================================================
 //
 // Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //
@@ -11,7 +11,10 @@
 
 #include "genie.h"
 #include "../../model/model_config.h"
+#include "../../model/model_instance_config.h"
+
 #include <nlohmann/json.hpp>
+
 
 using json = nlohmann::ordered_json;
 
@@ -36,9 +39,9 @@ public:
         bool additional_{false};  // for string will set to model_root, for bool valye is true or false
     };
 
-    explicit ConfigFixer(const IModelConfig &model_config) : model_config_{model_config}
+    explicit ConfigFixer(const ModelInstanceConfig &model_config) : model_config_{model_config}
     {
-        const std::string &config_path = model_config_.get_config_path();
+        const std::string &config_path = model_config_.i_model_config_.get_config_path();
 
         // Trim leading whitespace to check if it's JSON
         std::string trimmed_config = config_path;
@@ -106,7 +109,7 @@ public:
 private:
     bool FixedPath(json &j, FixedInfo &info);
 
-    const IModelConfig &model_config_;
+    const ModelInstanceConfig &model_config_;
 
     json j_;
 };

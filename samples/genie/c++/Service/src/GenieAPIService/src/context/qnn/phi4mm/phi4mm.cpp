@@ -21,7 +21,6 @@
 #include "../../torch_helper/shape_4d.h"
 #include "../../torch_helper/shape_3d.h"
 #include "../../torch_helper/shape_2d.h"
-#include "../../torch_helper/img.h"
 #include <set>
 #include <log.h>
 #include <utils.h>
@@ -215,19 +214,22 @@ Image pad_image_hwc(
     return {dst_w, dst_h, 3, dst, size};
 }
 
+// 注意: 这里必须使用 STBIR_FILTER_CATMULLROM, 不能用 STBIR_FILTER_MITCHELL —— 经实测定位,
+// stb_image_resize2 的 STBIR_FILTER_MITCHELL 在特定放大比例(如 640x640 -> 896x896, 1.4x)下,
+// 其内部采样系数表构建(stbir_build_samplers)存在越界访问缺陷,必现触发 0xC0000005。
+// CATMULLROM 与 MITCHELL 同属 support=2 的三次滤波器家族,视觉质量相近,且未复现该缺陷。
 Image resize_srgb_float_pipeline(float *pixels, int org_w, int org_h, int comp, int tar_w, int tar_h)
 {
     Image out{tar_w, tar_h, comp};
     out.size = tar_w * tar_h * comp;
     out.point = new float[out.size];
-    float *out_f = out.point;
 
     if (!stbir_quick_resize_helper(pixels, org_w, org_h, 0,
                                    out.point, tar_w, tar_h, 0,
                                    STBIR_RGB,
                                    STBIR_TYPE_FLOAT,
                                    STBIR_EDGE_REFLECT,
-                                   STBIR_FILTER_MITCHELL))
+                                   STBIR_FILTER_CATMULLROM))
     {
         throw std::runtime_error("resize img failed");
     }
@@ -237,9 +239,13 @@ Image resize_srgb_float_pipeline(float *pixels, int org_w, int org_h, int comp, 
 // <img_buf, attention_mask>
 std::pair<Image, Shape_2D<float>> QInterface::PHI4Embedding::DynamicPreprocess()
 {
-    const stbir_pixel_layout excepted_layout{STBIR_RGB};
+    constexpr int kRequestedChannels = 3;
     int ori_w = 0, ori_h = 0, comp = 0;
-    auto *f_pixels = stbi_loadf_from_memory(img_buf_.data(), img_buf_.size(), &ori_w, &ori_h, &comp, excepted_layout);
+    auto *f_pixels = stbi_loadf_from_memory(img_buf_.data(), img_buf_.size(), &ori_w, &ori_h, &comp, kRequestedChannels);
+    if (!f_pixels)
+    {
+        throw std::runtime_error("decode img failed");
+    }
 
     My_Log{} << "comp: " << comp << "\n";
     auto aspect_ratio = (float) ori_w / ori_h;
@@ -282,13 +288,12 @@ std::pair<Image, Shape_2D<float>> QInterface::PHI4Embedding::DynamicPreprocess()
 
     auto attention_mask = make_attention_mask(best_ratio, padding_width, padding_height, kMaskSize);
 
-    auto resized_img = resize_srgb_float_pipeline(f_pixels, ori_w, ori_h, comp, new_size.first, new_size.second);
+    auto resized_img = resize_srgb_float_pipeline(f_pixels, ori_w, ori_h, kRequestedChannels, new_size.first, new_size.second);
     stbi_image_free(f_pixels);
 
     auto padded_img = pad_image_hwc(resized_img, padding_width, padding_height);
-    stbi_image_free(resized_img.point);
-    return {padded_img,
-            make_attention_mask(best_ratio, padding_width, padding_height, kMaskSize)};
+    delete[] resized_img.point;
+    return {padded_img, attention_mask};
 }
 
 Shape_3D<float> ImageToTensorNormalized(const Image &img)
@@ -380,7 +385,9 @@ Shape_4D<float> QInterface::PHI4Embedding::GenerateGlobalImg(const Image &img)
 {
     Image standard_img = resize_srgb_float_pipeline(img.point, img.w, img.h, img.c, kWidth, kHeight);
     save_float_image(standard_img.point, standard_img.w, standard_img.h, 3, "resized_srgb3.png");
-    return unsqueeze_batch(ImageToTensorNormalized(standard_img));
+    auto result = unsqueeze_batch(ImageToTensorNormalized(standard_img));
+    delete[] standard_img.point;
+    return result;
 }
 
 Shape_3D<float> ones_mask_3d(int mask_res)
@@ -856,7 +863,7 @@ IVisionEmbedding &QInterface::PHI4Embedding::BuildImgPixel()
     crop_w_ = image_size.second / kWidth;
 
     Shape_4D<float> global_image = GenerateGlobalImg(img);
-    stbi_image_free(img.point);
+    delete[] img.point;
     auto global_attention_mask = ones_mask_3d(kMaskSize);
 
     Shape_6D<float> hd_images_reshape_6d = reshape_3d_to_6d(hd_images, 1, 3, crop_h_, kHeight, crop_w_, kWidth);
@@ -880,7 +887,6 @@ IVisionEmbedding &QInterface::PHI4Embedding::BuildImgPixel()
                                                                   downsample_attention_masks_5d.d3 * downsample_attention_masks_5d.d4);
 
     token_index_ = compute_num_img_tokens(downsample_attention_masks);
-
 
     hd_images_reshape_4d = concat_shape4d(global_image, hd_images_reshape_4d, 0);
 

@@ -1,4 +1,4 @@
-//==============================================================================
+﻿//==============================================================================
 //
 // Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
 //
@@ -15,7 +15,6 @@
 #include <iomanip>
 #include <filesystem>
 #include <functional>
-#include <stdarg.h>
 
 #if defined(_WIN32) || defined(__WIN32__) || defined(WIN32) || (defined(__linux__) && !defined(__ANDROID__))
 
@@ -64,7 +63,7 @@ public:
 
     static void Init(Level lev, std::string &&log_path)
     {
-        Level_ = (lev > Level::kVerbose || lev <= Level::kAlways) ? Level::kWarning : lev;
+        Level_ = (lev > Level::kVerbose || lev <= Level::kAlways) ? Level::kError : lev;
         if (log_path.empty())
         {
             func_ = &My_Log::LogConsole;
@@ -89,14 +88,14 @@ public:
 
     static void ShowStatus()
     {
-        My_Log{My_Log::Level::kWarning} << "log level setting: " << Level_ << std::endl;
+        My_Log{My_Log::Level::kInfo} << "log level setting: " << Level_ << std::endl;
         if (!LoggerHelper::kFile_.log_path_.empty())
         {
-            My_Log{My_Log::Level::kWarning} << "log path: " << LoggerHelper::kFile_.log_path_ << std::endl;
+            My_Log{My_Log::Level::kInfo} << "log path: " << LoggerHelper::kFile_.log_path_ << std::endl;
         }
         if (!LoggerHelper::kFile_.tmp_path_.empty())
         {
-            My_Log{My_Log::Level::kWarning} << "tmp path: " << LoggerHelper::kFile_.tmp_path_ << std::endl;
+            My_Log{My_Log::Level::kInfo} << "tmp path: " << LoggerHelper::kFile_.tmp_path_ << std::endl;
         }
     }
 
@@ -124,7 +123,6 @@ public:
     My_Log &operator<<(std::ostream &(*func)(std::ostream &))
     {
         func(os_);
-        // std::endl(os_);
 
         if (func == static_cast<std::ostream &(*)(std::ostream &)>(std::endl) ||
             func == static_cast<std::ostream &(*)(std::ostream &)>(std::flush))
@@ -160,14 +158,6 @@ public:
 
     static std::string GetTimeString()
     {
-        /*
-        std::time_t t = std::time(nullptr);
-        std::tm tm = *std::localtime(&t);
-        std::ostringstream oss;
-        oss << std::put_time(&tm, "%Y-%m-%d %H:%M:%S");
-        return oss.str();
-        */
-
         auto now = std::chrono::system_clock::now();
         std::time_t t = std::chrono::system_clock::to_time_t(now);
         auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
@@ -255,6 +245,12 @@ private:
 
     inline void LogConsole(const char *msg, uint32_t len)
     {
+        // Fix: 使用 mutex 保护控制台输出，防止多线程下日志乱序。
+        // LogFile 已有 mutex 保护，LogConsole 此前无锁，在多线程场景（如安全检查
+        // 与主推理并发）下可能导致 [E]/[W]/[I] 级别日志交错输出，难以诊断。
+        static std::mutex console_mtx;
+        std::lock_guard<std::mutex> lk(console_mtx);
+
 #ifdef __ANDROID__
 #define OUT_PUT(...) \
         __android_log_print(ANDROID_LOG_DEBUG, tag_, "%.*s", ##__VA_ARGS__);
@@ -275,6 +271,9 @@ private:
             cur += chunk;
             remaining -= chunk;
         }
+#ifndef __ANDROID__
+        fflush(stdout);
+#endif
     }
 
     void LogFile(const char *msg, uint32_t len)
@@ -309,32 +308,6 @@ private:
                                                 {
                                                     return LoggerHelper::get_level_str(lev_);
                                                 }};
-
-
-    std::string Format2Buffer(const char* fmt, ...)
-    {
-        /* @formatter:off */
-        va_list ap;
-        va_start(ap, fmt);
-        int needed = vsnprintf(nullptr, 0, fmt, ap);
-        if (needed < 0)
-        {
-            va_end(ap);
-            throw std::runtime_error("vsnprintf before alloc failed: not a null-terminate buffer");
-        }
-
-        needed++;
-        std::string buf;
-        buf.reserve(needed);
-        buf[needed-1] = '\0';
-
-        if(vsnprintf(buf.data(), needed, fmt, ap)){
-            throw std::runtime_error("vsnprintf after alloc failed: not a null-terminate buffer");
-        }
-        va_end(ap);
-        /* @formatter:on */
-        return buf;
-    }
 };
 
 #endif //LOG_H

@@ -61,13 +61,14 @@ If neither path is populated, the CMake configure step will abort with a
 ## 3. Get the QAIRT SDK
 
 Download a QAIRT SDK that ships the Linux ARM64 runtime (look for the
-`aarch64-oe-linux-gcc11.2` subdirectory under `lib/`):
+`aarch64-oe-linux-gcc11.2` subdirectory under `lib/`). The example below uses
+`2.44.0.260225`, the version currently validated for this project — substitute
+whatever QAIRT SDK version you actually have:
 
 ```bash
-wget https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.45.40.260406/v2.45.40.260406.zip
-unzip v2.45.40.260406.zip
-export QNN_SDK_ROOT=$(pwd)/qairt/2.45.40.260406
-export QAI_TOOLCHAINS=aarch64-oe-linux-gcc11.2
+wget https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.44.0.260225/v2.44.0.260225.zip
+unzip v2.44.0.260225.zip
+export QNN_SDK_ROOT=$(pwd)/qairt/2.44.0.260225
 ```
 
 Verify the layout:
@@ -87,53 +88,40 @@ The simplest path is the helper script:
 cd samples/genie/c++
 chmod +x build_linux.sh
 ./build_linux.sh           # configure & build
-./build_linux.sh --clean   # remove all build artefacts (including the
-                           # in-source residue ExternalProject leaves in
-                           # libsamplerate/, libcurl/, and the repo root)
-./build_linux.sh --rebuild # equivalent to --clean followed by a fresh build
 ```
+
+`build_linux.sh` only knows one mode — configure then build. It does **not**
+support `--clean`/`--rebuild` flags; to do a clean build, remove the
+`Service/build-linux/` directory yourself before re-running the script.
 
 The script will:
 
-1. Run CMake against `samples/genie/c++/Service/` with Linux-friendly flags.
-2. Trigger an `ExternalProject` build of `libappbuilder.so` from the repo root
-   (this is the same library that `qai_appbuilder` Python wheels link against).
-3. Build `libsamplerate` from the bundled source.
-4. Compile `GenieAPIService` and copy the QNN runtime libraries plus the
-   default model config files into `Service/GenieService_v<VERSION>/`.
+1. Run `cmake -S Service -B Service/build-linux` with the Linux-friendly flags
+   described below (this is a plain CMake configure/build invocation — the
+   heavy lifting for `libappbuilder.so`/`libsamplerate` is done by
+   `ExternalProject` targets declared inside `src/GenieAPIService/platform.cmake`,
+   not by the shell script itself).
+2. Build `GenieAPIService` (and, transitively, `libappbuilder.so`,
+   `libsamplerate`, and — only on Linux — an mbedTLS copy fetched from
+   `github.com/Mbed-TLS/mbedtls` at build time for the HTTPS transport used
+   by `cpp-httplib`).
+3. Copy the QNN runtime libraries plus the default model config files into
+   the output directory below.
 
 ### Output
 
-The final artefacts will be placed in
-`samples/genie/c++/Service/GenieService_v<APPVER>_qnn<SDKVER>/`.
+The final artefacts are placed in
+`samples/genie/c++/Service/build-linux/GenieService_v<APPVER>_qnn<SDK_DIR_NAME>/`,
+where `<SDK_DIR_NAME>` is simply the last path component of `$QNN_SDK_ROOT`
+(whatever your QAIRT SDK directory is actually named — **not** a fixed
+numeric format).
 
-For example, with app version 2.1.5 and QAIRT SDK 2.45.40:
+For example, with app version 2.3.7 and
+`QNN_SDK_ROOT=/opt/qairt/2.44.0.260225`:
 ```
-Service/GenieService_v2.1.5_qnn2.45.40/
+Service/build-linux/GenieService_v2.3.7_qnn2.44.0.260225/
 ├── GenieAPIService               # the executable
 └── libappbuilder.so              # built from the top-level src/
-```
-
-### Build with GGUF enabled
-
-To enable GGUF support:
-```bash
-cd samples/genie/c++
-chmod +x build_linux.sh
-USE_GGUF=ON ./build_linux.sh
-```
-
-If `USE_GGUF=ON`, the directory name gets `_gguf` appended and additionally
-contains the llama.cpp shared libraries:
-
-```
-Service/GenieService_v2.1.5_qnn2.45.40_gguf/
-├── GenieAPIService               # the executable
-├── libappbuilder.so              # built from the top-level src/
-├── libllama.so.0                 # llama.cpp main library
-├── libggml.so.0                  # ggml backend entry
-├── libggml-cpu.so.0              # ggml CPU backend
-└── libggml-base.so.0             # ggml base runtime
 ```
 
 > **Note:** The Linux output is intentionally minimal — just the binaries
@@ -143,25 +131,41 @@ Service/GenieService_v2.1.5_qnn2.45.40_gguf/
 > SDK installation.
 >
 > On Windows the output directory keeps the shorter name
-> `GenieService_v<APPVER>` and includes the full SDK runtime for standalone
-> deployment.
+> `GenieService_v<APPVER>` (no `_qnn<...>` suffix, no `build-linux/` layer)
+> and includes the full SDK runtime for standalone deployment.
+
+> **Linux is QNN/Genie-only.** Unlike Windows/MSVC, the Linux build does
+> **not** support the `USE_MNN`/`USE_GGUF` backends. `Service/CMakeLists.txt`
+> actively rejects them on non-MSVC platforms — passing `-DUSE_MNN=ON` or
+> `-DUSE_GGUF=ON` (directly, or indirectly through an environment variable a
+> future version of the script might read) makes the CMake **configure step
+> fail immediately** with `FATAL_ERROR "USE_MNN/USE_GGUF is supported only on
+> Windows/MSVC; Linux builds are QNN-only."`. There is currently no way to get
+> a Linux build that also loads MNN or GGUF models.
 
 ### Build options
 
-`build_linux.sh` reads the **same environment variables that QAI AppBuilder
-uses** (so the values you already export for `python -m build -w` work here
-without any change):
+`build_linux.sh` only reads the environment variables it explicitly
+documents at the top of the script — it does **not** forward arbitrary
+`-D...` flags, and it does **not** read `USE_MNN`/`USE_GGUF`/`BUILD_LINUX_CLIENT`
+(those three have no effect if exported before running the script):
 
-| Variable           | Default                           | Meaning |
-|--------------------|-----------------------------------|---------|
-| `QNN_SDK_ROOT`     | *(required)*                      | Path to the extracted QAIRT SDK. |
-| `QAI_TOOLCHAINS`   | `aarch64-oe-linux-gcc11.2`        | Toolchain subdirectory under `$QNN_SDK_ROOT/lib/`. |
-| `BUILD_TYPE`       | `Release`                         | Standard CMake build type. |
-| `JOBS`             | `$(nproc)`                        | Parallel jobs for the build. |
-| `USE_MNN`          | `OFF`                             | Enable MNN backend. Not validated on Linux yet. |
-| `USE_GGUF`         | `OFF`                             | Enable llama.cpp / GGUF backend (see "Build with GGUF enabled" above). |
-| `BUILD_AS_DLL`     | `OFF`                             | Build `libGenieAPILibrary.so` instead of the executable. |
-| `BUILD_LINUX_CLIENT` | `OFF`                           | Build the `GenieAPIClient` sample. libcurl is built from `External/curl/` via `ExternalProject`. If HTTPS support is needed: `sudo apt install libssl-dev`. |
+| Variable           | Default                        | Meaning |
+|--------------------|---------------------------------|---------|
+| `QNN_SDK_ROOT`     | *(required)*                    | Path to the extracted QAIRT SDK. The script aborts immediately if this is unset. |
+| `QNN_STUB_VERSION` | `v73`                           | Hexagon DSP stub version used at runtime setup. |
+| `QNN_PLATFORM`     | `aarch64-oe-linux-gcc11.2`      | QNN toolchain/platform string, forwarded to CMake as `-DQNN_PLATFORM=...`. |
+| `BUILD_TYPE`       | `Release`                      | Standard CMake build type. |
+| `JOBS`             | `$(nproc)`                     | Parallel jobs passed to `cmake --build ... -j`. |
+| `BUILD_AS_DLL`     | `OFF`                          | `OFF` builds the `GenieAPIService` executable; `ON` builds only `libGenieAPILibrary.so` instead. |
+
+If you need to build the `GenieAPIClient` CLI sample on Linux, it is gated by
+a separate CMake option, `BUILD_LINUX_CLIENT` (default `OFF`, defined in
+`Service/CMakeLists.txt`) — this is **not** an environment variable read by
+`build_linux.sh`. You have to invoke CMake yourself and pass it explicitly,
+e.g. `cmake -S Service -B Service/build-linux -DBUILD_LINUX_CLIENT=ON ...`.
+It links against `libcurl` built from `External/curl/` via `ExternalProject`;
+if you need HTTPS support, install `sudo apt install libssl-dev` first.
 
 ---
 
@@ -170,12 +174,12 @@ without any change):
 Set the runtime library paths and start the service:
 
 ```bash
-export QNN_SDK_ROOT=/absolute/path/to/2.45.40.260406
+export QNN_SDK_ROOT=/absolute/path/to/2.44.0.260225
 
-# OUT_DIR is the directory printed by build_linux.sh as "Output dir: ...".
-# Its name follows the pattern GenieService_v<APPVER>_qnn<SDKVER>[_gguf].
-# Example for app 2.1.5 + QAIRT 2.45.40 (no GGUF):
-OUT_DIR=$(pwd)/samples/genie/c++/Service/GenieService_v2.1.5_qnn2.45.40
+# OUT_DIR follows the pattern build-linux/GenieService_v<APPVER>_qnn<SDK_DIR_NAME>
+# (see section 4 "Output" above for how <SDK_DIR_NAME> is derived).
+# Example for app 2.3.7 + QAIRT 2.44.0.260225:
+OUT_DIR=$(pwd)/samples/genie/c++/Service/build-linux/GenieService_v2.3.7_qnn2.44.0.260225
 
 # Both the QAIRT runtime and our build dir need to be on LD_LIBRARY_PATH.
 export LD_LIBRARY_PATH=$QNN_SDK_ROOT/lib/aarch64-oe-linux-gcc11.2:$OUT_DIR:$LD_LIBRARY_PATH
@@ -198,9 +202,9 @@ See [API.md](API.md) for the endpoint reference and
 ### 5.1. Deploying to a target device
 
 Copy **all files** in the build output directory
-(`GenieService_v<APPVER>_qnn<SDKVER>[_gguf]/`) to the target device. The
-build only produces runtime-essential binaries; every file in that directory
-is needed.
+(`build-linux/GenieService_v<APPVER>_qnn<SDK_DIR_NAME>/`) to the target device.
+The build only produces runtime-essential binaries; every file in that
+directory is needed.
 
 You also need to prepare model config files and the HTP backend extension
 config. Both require path edits before the service can start.
@@ -267,25 +271,6 @@ by the model config is used for indicate HTP version. Please set `dsp_arch` to c
 
 ---
 
-### 5.2. Running with the GGUF backend
-
-When built with `USE_GGUF=ON`, the output directory contains additional
-`lib*.so.0` shared libraries from llama.cpp (see section 4 "Build with GGUF
-enabled" for the full file list).
-
-The `GenieAPIService` executable was built with `INSTALL_RPATH=$ORIGIN`,
-so it automatically locates these `lib*.so.0` files **as long as they sit
-in the same directory as the binary**. You do **not** need to add the
-output directory to `LD_LIBRARY_PATH` for the GGUF libraries; only the
-QAIRT SDK lib dir still has to be on `LD_LIBRARY_PATH`, exactly as in
-the non-GGUF case above.
-
-If you copy `GenieAPIService` somewhere else, copy all the `lib*.so.0`
-files alongside it (or add the original output directory to
-`LD_LIBRARY_PATH`).
-
----
-
 ## 6. Troubleshooting
 
 **`error while loading shared libraries: libGenie.so`**
@@ -310,8 +295,9 @@ The git submodule for CLI11 was not initialised. Run:
 ```bash
 git submodule update --init --recursive
 ```
-`build_linux.sh` also performs an early submodule presence check and
-will print the same advice before invoking CMake.
+`build_linux.sh` itself does **not** pre-check this; the error surfaces from
+the CMake configure step, so run the command above proactively if you cloned
+without `--recursive`.
 
 **`Could NOT find OpenSSL` (only when `BUILD_LINUX_CLIENT=ON`)**
 The `External/curl/` `ExternalProject` needs OpenSSL headers to build
