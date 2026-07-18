@@ -404,12 +404,8 @@ QAI AppBuilder is licensed under the BSD 3-clause "New" or "Revised" License. Ch
 
 ## Star History
 
-<a href="https://www.star-history.com/#qualcomm/qai-appbuilder&Date">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=qualcomm/qai-appbuilder&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=qualcomm/qai-appbuilder&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=qualcomm/qai-appbuilder&type=Date" />
- </picture>
+<a href="https://star-history.com/#qualcomm/qai-appbuilder&Date">
+  <img alt="Star History Chart" src="https://raw.githubusercontent.com/qualcomm/qai-appbuilder/main/docs/images/star-history.svg" width="800" />
 </a>
 
 ---
