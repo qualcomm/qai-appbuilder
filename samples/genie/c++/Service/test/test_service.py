@@ -133,6 +133,16 @@ def _build_chat_content(prompt, content_format):
     return prompt  # openai_string（默认，向后兼容旧行为）
 
 
+SYSTEM_PROMPT = "You are a helpful assistant."
+
+
+def _build_chat_system_content(content_format):
+    """system 消息的 content 同样按 content_format 轮换格式,与 _build_chat_content 用途一致,
+    确保 GenieRoutingGateway 等读取 system 消息 content 的代码路径也能被三种格式覆盖到
+    (GenieAPIClient.exe 默认请求格式对 system/user 消息是同时恒定使用数组形式的)。"""
+    return _build_chat_content(SYSTEM_PROMPT, content_format)
+
+
 def _content_format_label(content_format):
     """content_format → 报告展示用的中文短标签 + CSS 修饰类名后缀。"""
     return {
@@ -1791,7 +1801,7 @@ class APITester:
         body = {
             "model": self.model_name,
             "messages": [
-                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "system", "content": _build_chat_system_content(content_format)},
                 {"role": "user", "content": _build_chat_content(prompt, content_format)}
             ],
             "stream": False
@@ -1871,7 +1881,7 @@ class APITester:
         body = {
             "model": self.model_name,
             "messages": [
-                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "system", "content": _build_chat_system_content(content_format)},
                 {"role": "user", "content": _build_chat_content(prompt, content_format)}
             ],
             "stream": True
