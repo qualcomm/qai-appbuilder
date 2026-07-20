@@ -133,6 +133,16 @@ def _build_chat_content(prompt, content_format):
     return prompt  # openai_string（默认，向后兼容旧行为）
 
 
+SYSTEM_PROMPT = "You are a helpful assistant."
+
+
+def _build_chat_system_content(content_format):
+    """system 消息的 content 同样按 content_format 轮换格式,与 _build_chat_content 用途一致,
+    确保 GenieRoutingGateway 等读取 system 消息 content 的代码路径也能被三种格式覆盖到
+    (GenieAPIClient.exe 默认请求格式对 system/user 消息是同时恒定使用数组形式的)。"""
+    return _build_chat_content(SYSTEM_PROMPT, content_format)
+
+
 def _content_format_label(content_format):
     """content_format → 报告展示用的中文短标签 + CSS 修饰类名后缀。"""
     return {
@@ -1791,7 +1801,7 @@ class APITester:
         body = {
             "model": self.model_name,
             "messages": [
-                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "system", "content": _build_chat_system_content(content_format)},
                 {"role": "user", "content": _build_chat_content(prompt, content_format)}
             ],
             "stream": False
@@ -1871,7 +1881,7 @@ class APITester:
         body = {
             "model": self.model_name,
             "messages": [
-                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "system", "content": _build_chat_system_content(content_format)},
                 {"role": "user", "content": _build_chat_content(prompt, content_format)}
             ],
             "stream": True
@@ -8024,11 +8034,19 @@ def _finalize_and_exit(all_results, all_perf_samples, all_crash_events, out_dir,
                                             remote_mode=remote_mode, cmdline=cmdline)
     ReportGenerator.generate_conversations(all_results, str(out_dir))
 
+    # 与 generate_summary_html() 的 summary_all 用同一套互斥分类优先级（SKIP > CRASHED > PASSED > FAILED），
+    # 避免同一条 TestResult 被多个桶重复计数导致 passed+failed+crashed+skipped != total。
     total = len(all_results)
-    passed = sum(1 for r in all_results if r.passed)
-    failed = sum(1 for r in all_results if not r.passed and not r.crashed and not r.skipped)
-    crashed = sum(1 for r in all_results if r.crashed)
-    skipped = sum(1 for r in all_results if r.skipped)
+    passed = failed = crashed = skipped = 0
+    for r in all_results:
+        if r.skipped:
+            skipped += 1
+        elif r.crashed:
+            crashed += 1
+        elif r.passed:
+            passed += 1
+        else:
+            failed += 1
     print(f"\n{'='*60}")
     print(f"测试完成: {passed}/{total} 通过, {failed} 失败, {crashed} 崩溃, {skipped} 跳过")
     print(f"{'='*60}")

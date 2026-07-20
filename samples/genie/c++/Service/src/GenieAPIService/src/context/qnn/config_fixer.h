@@ -119,17 +119,23 @@ using ConfigFixer = GenieContext::ConfigFixer;
 inline json ConfigFixer::FixConfig()
 {
     /* @formatter:off */
-    std::vector<FixedInfo> fixed_items{
+    std::vector<FixedInfo> global_items{
             {"tokenizer", json::json_pointer("/dialog/tokenizer/path"), FixedInfo::kString, false},
-            {"extensions", json::json_pointer("/dialog/engine/backend/extensions"), FixedInfo::kString, true},
-            {"ctx-bins", json::json_pointer("/dialog/engine/model/binary/ctx-bins"), FixedInfo::kArrayString, false},
             {"forecast", json::json_pointer("/dialog/ssd-q1/forecast-prefix-name"), FixedInfo::kString, true, true},
-            {"poll", json::json_pointer("/dialog/engine/backend/QnnHtp/poll"),FixedInfo::kBool, true, false},
-            {"lut-path", json::json_pointer("/dialog/embedding/lut-path"),FixedInfo::kString, true, false}
+            {"lut-path", json::json_pointer("/dialog/embedding/lut-path"), FixedInfo::kString, true, false}
+    };
+    // pointers below are relative to a single engine object; applied per-engine
+    // to support both the legacy single-engine `dialog/engine` object and the
+    // eaglet (speculative-decoding) `dialog/engine` array of {target, draft} roles.
+    std::vector<FixedInfo> engine_items{
+            {"extensions", json::json_pointer("/backend/extensions"), FixedInfo::kString, true},
+            {"ctx-bins", json::json_pointer("/model/binary/ctx-bins"), FixedInfo::kArrayString, false},
+            {"poll", json::json_pointer("/backend/QnnHtp/poll"), FixedInfo::kBool, true, false},
+            {"draft-token-map", json::json_pointer("/model/draft-token-map"), FixedInfo::kString, true, false}
     };
     /* @formatter:on */
 
-    for (auto &fixed_item: fixed_items)
+    for (auto &fixed_item: global_items)
     {
         if (!FixedPath(j_, fixed_item))
         {
@@ -137,11 +143,39 @@ inline json ConfigFixer::FixConfig()
         }
     }
 
-    if (Genie_getApiMinorVersion() >= 11)
+    auto engine_jp = json::json_pointer("/dialog/engine");
+    if (!j_.contains(engine_jp))
     {
-        auto jp = json::json_pointer("/dialog/engine/backend/QnnHtp");
-        j_.at(jp)["use-mmap"] = true;
-        j_.at(jp)["allow-async-init"] = true;
+        throw std::runtime_error("fixed the config path failed");
+    }
+
+    bool multi_engine = j_.at(engine_jp).is_array();
+    size_t engine_count = multi_engine ? j_.at(engine_jp).size() : 1;
+
+    for (size_t i = 0; i < engine_count; ++i)
+    {
+        json::json_pointer engine_prefix = multi_engine
+                ? json::json_pointer(engine_jp.to_string() + "/" + std::to_string(i))
+                : engine_jp;
+
+        for (auto engine_item: engine_items)
+        {
+            engine_item.jp_ = json::json_pointer(engine_prefix.to_string() + engine_item.jp_.to_string());
+            if (!FixedPath(j_, engine_item))
+            {
+                throw std::runtime_error("fixed the config path failed");
+            }
+        }
+
+        if (Genie_getApiMinorVersion() >= 11)
+        {
+            auto jp = json::json_pointer(engine_prefix.to_string() + "/backend/QnnHtp");
+            if (j_.contains(jp))
+            {
+                j_.at(jp)["use-mmap"] = true;
+                j_.at(jp)["allow-async-init"] = true;
+            }
+        }
     }
 
     My_Log{} << "fixed the config path successfully\n";
