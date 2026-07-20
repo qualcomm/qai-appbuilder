@@ -28,12 +28,34 @@ read -p "Enter the number (1-2) corresponding to your choice: " choice
 
 case "$choice" in
     1)
-        # echo "Launching ImageRepairApp ..."
-        # pixi run webui-imagerepair
-        echo "ImageRepairApp is not supported yet."
-        read -p "Press Enter to exit..."
-        cd "$scriptPath" || exit
-        exit 1
+        echo "Launching ImageRepairApp ..."
+         # Add SOC ID Select Menu
+        echo ""
+        echo "Please choose the SOC ID:"
+        echo "1. wos (default)"
+        echo "2. 9075"
+        echo "3. 6490"
+        read -p "Enter the number (1-3) corresponding to your choice: " soc_choice
+        
+        # set SOC ID
+        case "$soc_choice" in
+            1)
+                soc_id="wos"
+                ;;
+            2)
+                soc_id="9075"
+                ;;
+            3)
+                soc_id="8550"
+                ;;
+            *)
+                echo "Invalid SOC ID choice. Using default (wos)."
+                soc_id="wos"
+                ;;
+        esac
+        
+        echo "Starting ImageRepairApp with SOC ID: $soc_id"
+        pixi run webui-imagerepair --soc_id "$soc_id"
         ;;
     2)
         echo "Launching GenieWebUI ..."

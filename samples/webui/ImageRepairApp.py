@@ -15,7 +15,7 @@ from tkinter import filedialog, Tk
 import shutil
 import real_esrgan_general_x4v3.real_esrgan_general_x4v3 as real_esrgan # We need add this line before import 'gradio'.
 import gradio as gr
-
+import argparse
 
 ####################################################################
 
@@ -350,6 +350,15 @@ def image_repair():
 
 if __name__ == '__main__':
 
+    parser = argparse.ArgumentParser(description='Image Repair App')
+    parser.add_argument('--soc_id', type=str, default="wos", help='Chipset ID for the device')
+    args = parser.parse_args()
+
+    print(f"ImageRepairApp: args.soc_id = {args.soc_id}")
+    real_esrgan.Soc_ID_config(soc_id=args.soc_id)
+    
+    real_esrgan.Init()
+
     with gr.Blocks(head=headjs, css=css, theme=gr.themes.Glass(), fill_width=True, fill_height=True) as demo:
         demo.title = "Image Repair App"
         #gr.HTML("""<h1 align="center">Image Repair App</h1>""")
@@ -364,7 +373,7 @@ if __name__ == '__main__':
                     with gr.Row():
                         with gr.Column(scale=1, visible=True):
                             image_gr = gr.Image(type="filepath", sources=['upload', 'clipboard', 'webcam'], width=256, height=256, elem_classes="radio-group", format="jpeg",
-                                                label="Select Image", scale=1, interactive=True, show_label=True, show_download_button=True)
+                                                label="Select Image", scale=1, interactive=True, show_label=True)
 
                             #outpath_gr = gr.Button("Output Folder", elem_classes="button")
                             #outpath_gr.click(directory_select)
@@ -410,8 +419,6 @@ if __name__ == '__main__':
             image_gr.upload(image_uploaded, inputs=image_gr, outputs=[html_change_gr])
             reapir_gr.click(image_repair, outputs=[html_change_gr, image_gr])
 
-
-    real_esrgan.Init()
 
     # Bypass system proxy for localhost so Gradio 5.x internal startup health check succeeds.
     # Gradio calls httpx.get("http://localhost:<port>/gradio_api/startup-events") after starting
