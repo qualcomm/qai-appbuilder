@@ -116,6 +116,10 @@ def model_download():
     if not ret:
         exit()
 
+def Soc_ID_config(soc_id):
+    global SOC_ID
+    SOC_ID = soc_id
+
 def Init():
     global realesrgan
 
@@ -159,10 +163,8 @@ def Release():
     # Release the resources.
     del(realesrgan)
 
-
-Init()
-
-Inference(execution_ws / "input.jpg", execution_ws / "output.jpg")
-
-Release()
+if __name__ == "__main__":
+    Init()
+    Inference(execution_ws / "input.jpg", execution_ws / "output.jpg")
+    Release()
 
