@@ -23,6 +23,7 @@
 #include "log.h"
 #include "../../response/response_dispatcher.h"
 #include "../../chat_request_handler/model_input_builder.h"
+#include "../security/security_utils.h"
 #include <chrono>
 #include <sstream>
 #include <iomanip>
@@ -613,7 +614,7 @@ std::string GenieRoutingGateway::DetectAgentTypeFromRequest(const json& request)
     if (request.contains("messages") && request["messages"].is_array()) {
         for (const auto& msg : request["messages"]) {
             if (msg.value("role", "") == "system") {
-                system_prompt = msg.value("content", "");
+                system_prompt = SecurityUtils::ExtractMessageContentText(msg);
                 break;
             }
         }

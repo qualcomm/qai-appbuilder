@@ -26,6 +26,7 @@
 #include "log.h"
 #include "../../response/response_dispatcher.h"
 #include "../../chat_request_handler/model_input_builder.h"
+#include "../security/security_utils.h"
 #include <chrono>
 #include <mutex>
 
@@ -94,9 +95,7 @@ ClientSource GenieRoutingGateway::DetectClientSource(const httplib::Request &htt
         {
             if (!msg.is_object()) continue;
             std::string role = msg.value("role", "");
-            std::string content;
-            if (msg.contains("content") && msg["content"].is_string())
-                content = msg["content"].get<std::string>();
+            std::string content = SecurityUtils::ExtractMessageContentText(msg);
 
             if (content.empty()) continue;
 

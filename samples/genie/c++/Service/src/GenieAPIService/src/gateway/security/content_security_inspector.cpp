@@ -1205,10 +1205,10 @@ InspectionResult ContentSecurityInspector::Inspect(
                 for (const auto& msg : request["messages"]) {
                     if (msg.contains("role") && msg["role"].is_string() &&
                         msg["role"].get<std::string>() == "tool") {
-                        if (msg.contains("content") && msg["content"].is_string()) {
+                        std::string tool_content = SecurityUtils::ExtractMessageContentText(msg);
+                        if (!tool_content.empty()) {
                             std::vector<std::string> tool_cats, tool_ids;
-                            SensitivityLevel tool_level = ScanText(
-                                msg["content"].get<std::string>(), tool_cats, tool_ids);
+                            SensitivityLevel tool_level = ScanText(tool_content, tool_cats, tool_ids);
                             if (tool_level == SensitivityLevel::S2) {
                                 result.tool_output_escalation = true;
                                 My_Log{} << "[ContentSecurityInspector] Tool output escalation detected (S2 in tool message)" << std::endl;

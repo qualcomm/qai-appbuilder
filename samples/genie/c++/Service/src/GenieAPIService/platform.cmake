@@ -20,9 +20,26 @@ include(ExternalProject)
 # (VS 自带的 ARM64 Clang)，因为它们不走 MSBuild/FileTracker，可以绕开该限制。
 set(VS_VC_PATH "C:/Program Files/Microsoft Visual Studio/2022/Community/VC")
 set(VS_VC_BUILD_TOOL_PATH "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC")
+# 依次尝试 Community 与 Build Tools 两种安装形态的 VC 根目录（Community 优先，找不到再退到
+# Build Tools），覆盖“机器上只装了 Visual Studio Build Tools 而非完整 Community”这种常见环境
+# 差异——此前 VS_VC_BUILD_TOOL_PATH 定义后从未被实际使用，导致只装了 Build Tools 的机器上
+# clang/lld 与 libomp140.aarch64.dll 的探测都固定失败在 VS_VC_PATH 这一条路径上。
+set(VS_VC_SEARCH_PATHS ${VS_VC_PATH} ${VS_VC_BUILD_TOOL_PATH})
 if (MSVC)
-    set(MSVC_CLANG_COMPILER ${VS_VC_PATH}/Tools/Llvm/ARM64/bin/clang.exe)
-    set(MSVC_CLANG_LINKER ${VS_VC_PATH}/Tools/Llvm/ARM64/bin/lld.exe)
+    set(MSVC_CLANG_COMPILER "")
+    set(MSVC_CLANG_LINKER "")
+    foreach (_vs_vc_candidate ${VS_VC_SEARCH_PATHS})
+        if (NOT MSVC_CLANG_COMPILER AND EXISTS "${_vs_vc_candidate}/Tools/Llvm/ARM64/bin/clang.exe")
+            set(MSVC_CLANG_COMPILER ${_vs_vc_candidate}/Tools/Llvm/ARM64/bin/clang.exe)
+            set(MSVC_CLANG_LINKER ${_vs_vc_candidate}/Tools/Llvm/ARM64/bin/lld.exe)
+        endif ()
+    endforeach ()
+    if (NOT MSVC_CLANG_COMPILER)
+        # 两条候选路径下都没找到时，退回 VS_VC_PATH 下的路径（保留原有行为），让后续
+        # 构建阶段针对该路径给出的报错更直观、可定位。
+        set(MSVC_CLANG_COMPILER ${VS_VC_PATH}/Tools/Llvm/ARM64/bin/clang.exe)
+        set(MSVC_CLANG_LINKER ${VS_VC_PATH}/Tools/Llvm/ARM64/bin/lld.exe)
+    endif ()
 endif ()
 
 # Library naming differs on each platform:
@@ -400,10 +417,17 @@ if (MSVC)
         )
         # ggml-cpu.dll 依赖 LLVM OpenMP 运行时(libomp140.aarch64.dll)，随 VS ARM64 LLVM 工具链
         # 分发但不在 PATH 中；多 MSVC 工具集版本共存时的选取踩坑详见 playbook 3.3.5。
-        file(GLOB LIBOMP_DLL_CANDIDATES "${VS_VC_PATH}/Redist/MSVC/*/debug_nonredist/arm64/Microsoft.VC*.OpenMP.LLVM/libomp140.aarch64.dll")
+        # 依次在 VS_VC_SEARCH_PATHS(Community 优先、Build Tools 兜底)下逐一 GLOB 搜索，
+        # 避免只装了 Build Tools(而非完整 Community)时固定使用 VS_VC_PATH 而搜索落空。
+        set(LIBOMP_DLL_CANDIDATES "")
+        foreach (_vs_vc_candidate ${VS_VC_SEARCH_PATHS})
+            file(GLOB _libomp_dll_found "${_vs_vc_candidate}/Redist/MSVC/*/debug_nonredist/arm64/Microsoft.VC*.OpenMP.LLVM/libomp140.aarch64.dll")
+            list(APPEND LIBOMP_DLL_CANDIDATES ${_libomp_dll_found})
+        endforeach ()
         if (NOT LIBOMP_DLL_CANDIDATES)
-            message(FATAL_ERROR "libomp140.aarch64.dll not found under ${VS_VC_PATH}/Redist/MSVC/*/debug_nonredist/arm64/Microsoft.VC*.OpenMP.LLVM/. "
-                    "Install the ARM64 LLVM OpenMP redistributable via Visual Studio Installer, or update VS_VC_PATH in platform.cmake.")
+            message(FATAL_ERROR "libomp140.aarch64.dll not found under any of: ${VS_VC_SEARCH_PATHS} "
+                    "(pattern: <VC_ROOT>/Redist/MSVC/*/debug_nonredist/arm64/Microsoft.VC*.OpenMP.LLVM/). "
+                    "Install the ARM64 LLVM OpenMP redistributable via Visual Studio Installer, or update VS_VC_PATH/VS_VC_BUILD_TOOL_PATH in platform.cmake.")
         endif ()
         list(SORT LIBOMP_DLL_CANDIDATES COMPARE NATURAL)
         list(POP_BACK LIBOMP_DLL_CANDIDATES LIBOMP_DLL)

@@ -23,6 +23,7 @@
 #include "log.h"
 #include "../../response/response_dispatcher.h"
 #include "../../response/response_tools.h"
+#include "../security/security_utils.h"
 #include <chrono>
 #include <sstream>
 #include <thread>
@@ -492,7 +493,7 @@ bool GenieRoutingGateway::ExecuteCloudRequest(const json &cloud_request,
         if (cloud_request.contains("messages") && cloud_request["messages"].is_array()) {
             for (const auto& msg : cloud_request["messages"]) {
                 if (msg.is_object() && msg.value("role", "") == "system") {
-                    cloud_system_prompt = msg.value("content", "");
+                    cloud_system_prompt = SecurityUtils::ExtractMessageContentText(msg);
                     break;
                 }
             }
