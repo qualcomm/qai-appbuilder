@@ -95,6 +95,13 @@ except ImportError:  # pragma: no cover
 import qai_appbuilder
 from qai_appbuilder import QNNConfig, QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile
 
+# Detect QNNConfig.Config API shape once at import time.
+# Older qai_appbuilder builds ) accept (libs_dir, runtime, log_level, profiling_level).
+# Newer builds removed libs_dir: (runtime, log_level, profiling_level, log_path).
+# We use keyword arguments throughout so the call is self-documenting and order-independent.
+import inspect as _inspect
+_QNN_CONFIG_HAS_LIBS_DIR = "libs_dir" in _inspect.signature(QNNConfig.Config).parameters
+
 # -------------------- Windows ARM HTP Auto-detection --------------------
 if platform.system().lower() == "windows":
     # Only configure if hexagon isn't already specified in ADSP_LIBRARY_PATH
@@ -2024,11 +2031,19 @@ class InferenceSession:
             }
             log_level = log_level_map.get(sess_options.log_severity_level, LogLevel.ERROR)
             _ensure_path_contains(sess_options.qnn_libs_dir)
-            QNNConfig.Config(
-                sess_options.qnn_runtime,
-                log_level,
-                sess_options.qnn_profiling_level,
-            )
+            if _QNN_CONFIG_HAS_LIBS_DIR:
+                QNNConfig.Config(
+                    libs_dir=sess_options.qnn_libs_dir,
+                    runtime=sess_options.qnn_runtime,
+                    log_level=log_level,
+                    profiling_level=sess_options.qnn_profiling_level,
+                )
+            else:
+                QNNConfig.Config(
+                    runtime=sess_options.qnn_runtime,
+                    log_level=log_level,
+                    profiling_level=sess_options.qnn_profiling_level,
+                )
             InferenceSession._qnn_initialized = True
             InferenceSession._last_config_key = key
             logger.info("QNN environment initialized")
@@ -2043,6 +2058,44 @@ class InferenceSession:
         self._model = QNNModelWrapper(model_name, model_path, runtime_tag=runtime_tag)
         self._input_names = self._model.getInputName()
         self._output_names = self._model.getOutputName()
+
+        # Build ONNX dot-format names from YAML config (QNN uses underscores internally).
+        # Expose dot-format names via get_input_names()/get_inputs() for ONNX compatibility.
+        # Priority: 1) ONNX-inspected YAML (dot format), 2) autogen YAML, 3) QNN names.
+        self._input_names_onnx = list(self._input_names)
+        self._output_names_onnx = list(self._output_names)
+        self._onnx_to_qnn_input: Dict[str, str] = {}
+
+        # Check ONNX-inspected YAML first (has dot-format names like past_key_values.0.key)
+        onnx_yaml_path = os.path.splitext(model_path)[0] + ".yaml"
+        if os.path.exists(onnx_yaml_path):
+            try:
+                with open(onnx_yaml_path, "r", encoding="utf-8") as f:
+                    onnx_yaml = yaml.safe_load(f) or {}
+                onnx_in = onnx_yaml.get("input") or []
+                onnx_out = onnx_yaml.get("output") or []
+                if onnx_in and len(onnx_in) == len(self._input_names):
+                    self._input_names_onnx = onnx_in
+                    self._onnx_to_qnn_input = dict(zip(onnx_in, self._input_names))
+                if onnx_out and len(onnx_out) == len(self._output_names):
+                    self._output_names_onnx = onnx_out
+            except Exception:
+                pass
+
+        # Fallback: use autogen/loaded YAML config
+        if not self._onnx_to_qnn_input:
+            io_cfg = getattr(self._model, "io_config", {}) or {}
+            yaml_inputs = io_cfg.get("input") or io_cfg.get("inputs") or []
+            if yaml_inputs:
+                yaml_in_names = [i["name"] if isinstance(i, dict) else i for i in yaml_inputs]
+                if len(yaml_in_names) == len(self._input_names):
+                    self._input_names_onnx = yaml_in_names
+                    self._onnx_to_qnn_input = dict(zip(yaml_in_names, self._input_names))
+            yaml_outputs = io_cfg.get("output") or io_cfg.get("outputs") or []
+            if yaml_outputs:
+                yaml_out_names = [o["name"] if isinstance(o, dict) else o for o in yaml_outputs]
+                if len(yaml_out_names) == len(self._output_names):
+                    self._output_names_onnx = yaml_out_names
 
         logger.info(f"Loaded model (user arg): {model_path}")
         logger.info(f"Loaded model (resolved): {getattr(self._model, 'model_file_path', '')}")
@@ -2160,8 +2213,34 @@ class InferenceSession:
         return np.ascontiguousarray(a.astype(np.float32, copy=False))
 
     def run(self, output_names: Optional[List[str]], input_feed: Dict[str, np.ndarray], run_options: Optional[Any] = None) -> List[np.ndarray]:
-        # Get ONNX output order from YAML (io_config)
-        yaml_output_names = getattr(self._model, "io_config", {}).get("output", []) or self._output_names
+        # Normalize input names: accept both ONNX dot-format (past_key_values.0.key)
+        # and QNN underscore format (past_key_values_0_key).
+        onnx_to_qnn = getattr(self, "_onnx_to_qnn_input", {}) or {}
+        if onnx_to_qnn:
+            normalized_feed: Dict[str, np.ndarray] = {}
+            for k, v in input_feed.items():
+                normalized_feed[onnx_to_qnn.get(k, k)] = v
+            input_feed = normalized_feed
+
+        # Get ONNX output order: prefer ONNX-inspected YAML (dot-format, correct order),
+        # fall back to autogen YAML, then QNN internal order.
+        yaml_output_names = (
+            getattr(self, "_output_names_onnx", None)
+            or getattr(self._model, "io_config", {}).get("output", [])
+            or self._output_names
+        )
+        # Map ONNX dot-format output names to QNN underscore format for out_map lookup.
+        # Match by converting both to underscore format (dots -> underscores).
+        _onnx_to_qnn_output: Dict[str, str] = {}
+        onnx_out = getattr(self, "_output_names_onnx", None)
+        if onnx_out and len(onnx_out) == len(self._output_names):
+            # Build lookup: underscore(ONNX name) -> QNN name
+            _qnn_lookup = {n: n for n in self._output_names}
+            for onnx_name in onnx_out:
+                us_name = onnx_name.replace(".", "_")
+                if us_name in _qnn_lookup:
+                    _onnx_to_qnn_output[onnx_name] = us_name
+        _yaml_output_names_qnn = [_onnx_to_qnn_output.get(n, n) for n in yaml_output_names]
         
         cfg = getattr(self._model, "io_config", {}) or {}
         per_in = {i.get("name"): i for i in (cfg.get("inputs") or []) if isinstance(i, dict) and i.get("name")}
@@ -2251,7 +2330,7 @@ class InferenceSession:
                 if output_names is not None:
                     return [out_map[n] for n in output_names]
                 else:
-                    return [out_map[n] for n in yaml_output_names]
+                    return [out_map[n] for n in _yaml_output_names_qnn]
             except Exception as e:
                 print(f"Profile output saved to: {output_dir}")
                 raise e
@@ -2272,7 +2351,7 @@ class InferenceSession:
                 outs = [out_map[n] for n in output_names]
             else:
                 # When no specific order requested, use ONNX order from YAML
-                outs = [out_map[n] for n in yaml_output_names]
+                outs = [out_map[n] for n in _yaml_output_names_qnn]
             return outs
         finally:
             if use_perf_profile:
@@ -2282,6 +2361,7 @@ class InferenceSession:
                     pass
 
     def get_inputs(self) -> List[TensorInfo]:
+        """Return input info with ONNX dot-format names."""
         shapes = None
         dtypes = None
         try:
@@ -2290,13 +2370,15 @@ class InferenceSession:
         except Exception:
             pass
         infos: List[TensorInfo] = []
-        for i, n in enumerate(self._input_names):
+        onnx_names = getattr(self, "_input_names_onnx", None) or self._input_names
+        for i, n in enumerate(onnx_names):
             s = _as_list_of_ints(shapes[i]) if shapes and i < len(shapes) else None
             dt = _ort_type_from_dtype(str(dtypes[i])) if dtypes and i < len(dtypes) else "tensor(float)"
             infos.append(TensorInfo(name=n, shape=s, type=dt))
         return infos
 
     def get_outputs(self) -> List[TensorInfo]:
+        """Return output info with ONNX dot-format names."""
         shapes = None
         dtypes = None
         try:
@@ -2305,17 +2387,20 @@ class InferenceSession:
         except Exception:
             pass
         infos: List[TensorInfo] = []
-        for i, n in enumerate(self._output_names):
+        onnx_names = getattr(self, "_output_names_onnx", None) or self._output_names
+        for i, n in enumerate(onnx_names):
             s = _as_list_of_ints(shapes[i]) if shapes and i < len(shapes) else None
             dt = _ort_type_from_dtype(str(dtypes[i])) if dtypes and i < len(dtypes) else "tensor(float)"
             infos.append(TensorInfo(name=n, shape=s, type=dt))
         return infos
 
     def get_input_names(self) -> List[str]:
-        return self._input_names
+        """Return input names in ONNX dot-format (e.g. past_key_values.0.key)."""
+        return getattr(self, "_input_names_onnx", None) or self._input_names
 
     def get_output_names(self) -> List[str]:
-        return self._output_names
+        """Return output names in ONNX dot-format (e.g. present_key_values.0.key)."""
+        return getattr(self, "_output_names_onnx", None) or self._output_names
 
     def __del__(self):
         if hasattr(self, "_model"):
