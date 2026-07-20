@@ -6,7 +6,7 @@ import os
 import sys
 sys.path.append(".")
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "computervision", "super_resolution"))
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ComputerVision", "Super_Resolution"))
 
 import numpy as np
 from PIL import Image
@@ -373,7 +373,7 @@ if __name__ == '__main__':
                     with gr.Row():
                         with gr.Column(scale=1, visible=True):
                             image_gr = gr.Image(type="filepath", sources=['upload', 'clipboard', 'webcam'], width=256, height=256, elem_classes="radio-group", format="jpeg",
-                                                label="Select Image", scale=1, interactive=True, show_label=True)
+                                                label="Select Image", scale=1, interactive=True, show_label=True, show_download_button=True)
 
                             #outpath_gr = gr.Button("Output Folder", elem_classes="button")
                             #outpath_gr.click(directory_select)
