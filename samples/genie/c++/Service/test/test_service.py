@@ -8024,11 +8024,19 @@ def _finalize_and_exit(all_results, all_perf_samples, all_crash_events, out_dir,
                                             remote_mode=remote_mode, cmdline=cmdline)
     ReportGenerator.generate_conversations(all_results, str(out_dir))
 
+    # 与 generate_summary_html() 的 summary_all 用同一套互斥分类优先级（SKIP > CRASHED > PASSED > FAILED），
+    # 避免同一条 TestResult 被多个桶重复计数导致 passed+failed+crashed+skipped != total。
     total = len(all_results)
-    passed = sum(1 for r in all_results if r.passed)
-    failed = sum(1 for r in all_results if not r.passed and not r.crashed and not r.skipped)
-    crashed = sum(1 for r in all_results if r.crashed)
-    skipped = sum(1 for r in all_results if r.skipped)
+    passed = failed = crashed = skipped = 0
+    for r in all_results:
+        if r.skipped:
+            skipped += 1
+        elif r.crashed:
+            crashed += 1
+        elif r.passed:
+            passed += 1
+        else:
+            failed += 1
     print(f"\n{'='*60}")
     print(f"测试完成: {passed}/{total} 通过, {failed} 失败, {crashed} 崩溃, {skipped} 跳过")
     print(f"{'='*60}")

@@ -18,6 +18,7 @@
 // 使用方：
 //   - content_security_inspector.cpp
 //   - task_complexity_evaluator.cpp
+//   - gateway_steps.cpp / gateway_cloud.cpp / gateway_routing.cpp（ExtractMessageContentText）
 //
 //==============================================================================
 
@@ -36,6 +37,30 @@
 #include <algorithm>
 
 namespace SecurityUtils {
+
+// ============================================================
+// 提取消息 content 字段的纯文本，兼容两种格式：
+//   - content 为字符串：直接返回
+//   - content 为 OpenAI 多段内容数组（[{"type":"text","text":...}, ...]）：
+//     拼接所有 type=="text" 分段的文本
+// 其它类型（如缺失 content、非法结构）返回空字符串。
+// ============================================================
+inline std::string ExtractMessageContentText(const json& msg)
+{
+    if (!msg.contains("content")) return "";
+    const auto& content = msg["content"];
+    if (content.is_string()) return content.get<std::string>();
+    if (!content.is_array()) return "";
+
+    std::string text;
+    for (const auto& part : content) {
+        if (part.is_object() && part.value("type", "") == "text" &&
+            part.contains("text") && part["text"].is_string()) {
+            text += part["text"].get<std::string>();
+        }
+    }
+    return text;
+}
 
 // ============================================================
 // FNV-1a 哈希（64位）

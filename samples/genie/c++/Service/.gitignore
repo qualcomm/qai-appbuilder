@@ -4,6 +4,9 @@ GenieService_v*
 .idea
 .junie/
 cmake-build*/
+workspace/
+docs/
+todo/
 build-*
 __pycache__
 QAIModelBuilder
