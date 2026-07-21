@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * useMetricsHistory — derives a latency history projection from the App Builder
  * run list (V1 `MetricsView.js` parity for the headline + history sparkline +

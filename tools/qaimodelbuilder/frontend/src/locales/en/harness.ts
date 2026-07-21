@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 // =============================================================================
 // i18n locale sub-file — 手工维护，UTF-8（无 BOM）。
 //
@@ -12,27 +17,7 @@
 // =============================================================================
 
 const harness = {
-  agent: {
-    compressing: "Compressing context...",
-    interrupted: "Operation interrupted by user",
-    maxIterations: "Maximum iterations reached",
-  },
   config: {
-    agent: {
-      autoCompress: {
-        desc: "Automatically compress context when approaching token limit",
-      },
-      autoTitle: {
-        desc: "Automatically generate conversation titles",
-      },
-      experienceExtraction: {
-        desc: "Auto-extract reusable experiences after successful tasks",
-      },
-      maxIterations: {
-        desc: "Maximum tool call rounds in agentic loop",
-      },
-      title: "Agent Loop",
-    },
     security: {
       smartApproval: {
         label: "Smart Approval",
@@ -40,28 +25,9 @@ const harness = {
       },
     },
   },
-  experiences: {
-    category: "Category",
-    deleteConfirm: "Delete this experience?",
-    deleted: "Experience deleted",
-    empty: "No experiences saved yet",
-    insights: "Insights",
-    summary: "Summary",
-    title: "Experiences",
-  },
-  guardrail: {
-    blocked: "Tool call blocked by guardrail",
-    warn: "Guardrail warning",
-  },
   search: {
     noResults: "No matching conversations found",
-    placeholder: "Search conversations...",
-    searching: "Searching...",
   },
-  stopGeneration: {
-    tooltip: "Stop the current AI response",
-  },
-  stopped: "Generation stopped by user",
 };
 
 export default harness;

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """HTTP transport seam + SSE event parser for ai_coding providers (PR-102).
 
 The :class:`HttpTransportPort` lets us inject a fake httpx-style

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Implementation-mode resource budgets — constants + frozen config (DISC-1 §22.5).
 
 DISC-1 step2 "safe ground floor": the per-run / per-item resource caps an

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """qai.platform.logging — Structured logging with request_id propagation.
 
 Wraps `structlog` to emit JSON logs by default (line-delimited, ASCII-safe)

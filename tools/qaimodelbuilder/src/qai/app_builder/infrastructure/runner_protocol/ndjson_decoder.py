@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Stateful NDJSON line decoder for runner_protocol byte streams.
 
 The :class:`ProcessRunnerPort` produces :class:`ProcessStdoutFrame`

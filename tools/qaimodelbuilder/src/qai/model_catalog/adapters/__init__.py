@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Real adapters for the ``model_catalog`` bounded context (PR-044).
 
 Each adapter retires one of the eight ``_Fake<Port>`` classes that

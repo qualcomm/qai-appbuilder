@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Exec profile loader for ``qai.command_policy`` (U-008b).
 
 Loads static :class:`CommandProfile` assets from a directory of ``*.toml``

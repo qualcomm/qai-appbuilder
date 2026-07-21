@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 // =============================================================================
 // en message catalogue —— 主入口（纯组装），手工维护，UTF-8（无 BOM）。
 //
@@ -25,7 +30,6 @@ import codePersona from "./en/codePersona";
 import commandPalette from "./en/commandPalette";
 import common from "./en/common";
 import config from "./en/config";
-import confirm from "./en/confirm";
 import depBroker from "./en/depBroker";
 import downloads from "./en/downloads";
 import error from "./en/error";
@@ -42,14 +46,13 @@ import language from "./en/language";
 import layout from "./en/layout";
 import mbPro from "./en/mbPro";
 import mcpServers from "./en/mcpServers";
-import modelBuild from "./en/modelBuild";
+import modeIntro from "./en/modeIntro";
 import modelBuilder from "./en/modelBuilder";
-import modelSelector from "./en/modelSelector";
+import modelHubFrame from "./en/modelHubFrame";
 import models from "./en/models";
 import nav from "./en/nav";
 import openCode from "./en/openCode";
 import policyTemplates from "./en/policyTemplates";
-import processProxy from "./en/processProxy";
 import projectAccess from "./en/projectAccess";
 import promptEnhance from "./en/promptEnhance";
 import promptHistory from "./en/promptHistory";
@@ -71,9 +74,7 @@ import toast from "./en/toast";
 import tool from "./en/tool";
 import toolbar from "./en/toolbar";
 import toolSafety from "./en/toolSafety";
-import upload from "./en/upload";
 import util from "./en/util";
-import venv from "./en/venv";
 import views from "./en/views";
 import voiceInput from "./en/voiceInput";
 import wechat from "./en/wechat";
@@ -95,7 +96,6 @@ const en = {
   commandPalette,
   common,
   config,
-  confirm,
   depBroker,
   downloads,
   error,
@@ -112,14 +112,13 @@ const en = {
   layout,
   mbPro,
   mcpServers,
-  modelBuild,
+  modeIntro,
   modelBuilder,
-  modelSelector,
+  modelHubFrame,
   models,
   nav,
   openCode,
   policyTemplates,
-  processProxy,
   projectAccess,
   promptEnhance,
   promptHistory,
@@ -141,9 +140,7 @@ const en = {
   tool,
   toolbar,
   toolSafety,
-  upload,
   util,
-  venv,
   views,
   voiceInput,
   wechat,

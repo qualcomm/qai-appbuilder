@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``LoadForgeConfigUseCase`` — forge-config read with default injection (R5).
 
 The legacy ``GET /api/forge-config`` handler did ~120 lines of work in
@@ -58,6 +63,7 @@ _OC_CONFIG_KEY = "ai_coding.oc.config"
 #: Fixed back to False so the three sources of truth agree again.
 _TOOLBAR_DEFAULT_ENABLED = {
     "model_builder": True,
+    "model_hub": True,
     "app_builder": True,
     "code": True,
     "translate": False,
@@ -230,22 +236,42 @@ class LoadForgeConfigUseCase:
         # (front-end DEFAULT_TOOLBAR_MODULES fills order/mode/i18n/icon), the
         # frontend has NO ``pro`` entry, so the backend ships the full module
         # descriptor here for the toolbar to render it.
+        #
+        # Order 40 slots pro directly after app_builder (10) / model_hub (20)
+        # / model_builder (30) so advanced model-workflow modes stay grouped,
+        # then general-purpose modes (code=60 / translate=70 / ppt=80) follow.
+        # The 10-unit gap leaves room for future modules to slot in.
         if self.is_internal:
             pro = _ensure_dict(toolbar_modules, "pro")
             pro.setdefault("enabled", True)
-            pro.setdefault("order", 60)
+            # Legacy-order migration (2026-07-20 rearrange): pro's previous
+            # default was 30; the toolbar was reordered (app_builder→10,
+            # model_hub→20, model_builder→30) so pro moves to 40. Installs
+            # whose forge_config carries the previous default get a one-time
+            # bump; a deliberately-customised value won't be exactly 30 in
+            # normal usage. Mirrors the frontend LEGACY_ORDER_MIGRATION.
+            if pro.get("order") == 30:
+                pro["order"] = 40
+            pro.setdefault("order", 40)
             pro.setdefault("mode", "pro")
             pro.setdefault("i18n", "index.proMode")
             pro.setdefault("icon", "pro")
-            # internal-only「GoMaster 在线」mode button — same edition-gated
+            # internal-only「GoMaster」mode button — same edition-gated
             # injection pattern as the ``pro`` module. The frontend has no
             # ``gomaster`` fallback default, so the button does not render on
             # external builds (which lack this backend injection). The full
             # module descriptor is shipped here (order/mode/i18n/icon) since
             # the frontend's DEFAULT_TOOLBAR_MODULES has no entry for it.
+            # Order 50 places GoMaster right after Pro (40), still ahead of
+            # the general-purpose modes (code=60, translate=70, ppt=80).
             gomaster = _ensure_dict(toolbar_modules, "gomaster")
             gomaster.setdefault("enabled", True)
-            gomaster.setdefault("order", 70)
+            # Legacy-order migration (2026-07-20 rearrange): mirrors the
+            # pro=30→40 migration above. gomaster's previous default was 40;
+            # now 50 so it stays paired with pro.
+            if gomaster.get("order") == 40:
+                gomaster["order"] = 50
+            gomaster.setdefault("order", 50)
             gomaster.setdefault("mode", "gomaster")
             gomaster.setdefault("i18n", "index.gomasterMode")
             gomaster.setdefault("icon", "gomaster")

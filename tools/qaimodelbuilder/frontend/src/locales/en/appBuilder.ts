@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 // =============================================================================
 // i18n locale sub-file — 手工维护，UTF-8（无 BOM）。
 //
@@ -61,6 +66,10 @@ const appBuilder = {
     step3: "Generate & preview — the app opens in a new browser tab",
     noModelHint: "No model selected yet — pick one from the Models menu below.",
     modelSelectedHint: "Using: {names}",
+    // Sub-step (feedback 7C): a supporting hint under step 1 that guides
+    // users to Model Builder if their model hasn't been converted yet.
+    step1NeedConversion: "If your model hasn't been converted yet, start in",
+    step1GoToModelBuilder: "Model Builder",
     chipPrompt:
       "Build a WebUI app for the [{model}] model. Provide input controls, run inference over the HTTP API, and show the result.",
     chipHintText: 'Example input: "{text}".',

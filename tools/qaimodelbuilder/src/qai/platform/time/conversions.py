@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Datetime / ISO-8601 conversion utilities.
 
 All utilities here enforce timezone-aware UTC. Naive datetimes are treated as

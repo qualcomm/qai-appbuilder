@@ -1,4 +1,9 @@
 <!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
+<!--
   ModelCardActions — the 6-state action row of a `ModelCard`.
 
   Extracted from `ModelCard.vue` (single-responsibility / cohesion: keeps the

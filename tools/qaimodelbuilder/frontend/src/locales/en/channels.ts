@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 // =============================================================================
 // i18n locale sub-file — 手工维护，UTF-8（无 BOM）。
 //
@@ -24,6 +29,8 @@ const channels = {
   settingsSaved: "Channel settings saved",
   settingsSaveFailed: "Failed to save channel settings",
   settingsLoadFailed: "Failed to load channel settings",
+  legacy_notice:
+    "This view uses the legacy component path. Please update to FeishuConfigPanel.",
   modelLabel: "AI Model",
   modelFollowGlobal: "Default (follow global settings)",
   modelSearch: "Search models...",
@@ -67,7 +74,13 @@ const channels = {
     errorMsg: "Channel error",
     idleHint: "Configure Feishu app credentials to connect via WebSocket, no public IP required",
     introLine1: "Receives messages via Feishu Open Platform WebSocket long-connection - no public IP required.<br>",
-    introLine2: "Visit <a href=\"https://open.feishu.cn/app\" target=\"_blank\" style=\"color:var(--accent)\">Feishu Open Platform</a> to create a custom app, enable the bot capability, request <code>im:message</code> and <code>im:message:send_as_bot</code> permissions, then in \"Event Subscription\" choose WebSocket long-connection mode and subscribe to the <code>im.message.receive_v1</code> event.",
+    // introLine2 split: pull the "Feishu Open Platform" link out of the
+    // inline sentence into a stand-alone button-style external link. The
+    // paragraph now holds only prose (no <a>); the button is built in
+    // FeishuConfigPanel's template.
+    introLine2Prefix: "Create a custom app on the Feishu Open Platform, enable the bot capability, request <code>im:message</code> and <code>im:message:send_as_bot</code> permissions, then in \"Event Subscription\" choose WebSocket long-connection mode and subscribe to the <code>im.message.receive_v1</code> event.",
+    openPlatformLabel: "Open Feishu Open Platform",
+    openPlatformTooltip: "Go to Feishu Open Platform",
     refreshStatus: "Refresh Status",
     runningHint: "Feishu channel is running. The bot is connected to Feishu and ready to receive messages.",
     info: {

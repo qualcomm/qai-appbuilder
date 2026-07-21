@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------
-# Copyright (c) 2024-2026 Qualcomm Innovation Center, Inc. All rights reserved.
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
 """Shell-execution tool handler (``exec``).
@@ -16,12 +16,12 @@ When no runner is injected the handler falls back to the legacy raw
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextlib
 import os
 import platform
 import re
 import sys
+import tempfile
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -252,26 +252,92 @@ def _resolve_shell(command: str, shell: str) -> str:
     return "sh"
 
 
-def _encode_powershell_command(wrapped: str) -> str:
-    """Base64-encode a PowerShell command for ``-EncodedCommand``.
+# ---------------------------------------------------------------------------
+# PowerShell -File materialisation (2026-07-20) — root-cause CLIXML fix.
+#
+# ``powershell.exe -EncodedCommand ... 2>pipe`` unconditionally activates the
+# "minishell" host on stderr, which serialises EVERY non-stdout stream
+# (Write-Host / Write-Error / Progress / Information records) into CLIXML —
+# ``#< CLIXML\n<Objs ...>...</Objs>`` blobs whose Tags-section leaks ``<S>PSHOST</S>``
+# and other internal element values into any regex-based cleanup. This is
+# built into powershell.exe's ``-EncodedCommand`` code path; ``-OutputFormat
+# Text`` does not disable it, ``$ProgressPreference='SilentlyContinue'`` only
+# suppresses the progress records (not error/info/host records), and the
+# ``_strip_powershell_clixml`` regex fights an ever-growing set of XML
+# element shapes.
+#
+# ``powershell.exe -File script.ps1 2>pipe`` uses the host-native text
+# formatter on stderr — plain readable text, no CLIXML wrapper. Verified
+# empirically (see the ``test_powershell_file_mode_stderr_no_clixml``
+# regression). This removes the noise at source and makes
+# ``_strip_powershell_clixml`` a defence-in-depth pass rather than a
+# load-bearing hack.
+# ---------------------------------------------------------------------------
 
-    Root cause fixed (2026-07-11): the chat streaming path joins the
-    powershell argv back into a single string via
-    ``subprocess.list2cmdline`` and re-runs it through ``cmd.exe /c "..."``.
-    ``list2cmdline`` escapes inner double quotes as ``\"``, but cmd.exe does
-    NOT honour backslash escaping — it only pairs bare double quotes. So a
-    ``-Command`` payload containing quotes (e.g. ``... | Select-Object -Property "Name"``)
-    has its outer ``-Command`` quote closed early, exposing the payload's
-    ``|`` to cmd.exe as a real pipe and mis-routing the tail (``Select-Object``)
-    as a standalone command → ``'Select-Object' is not recognized`` (exit 255).
 
-    PowerShell's ``-EncodedCommand`` takes a Base64 string of the UTF-16LE
-    bytes of the command. That payload is pure ASCII base64 — no spaces, no
-    quotes, no pipes — so it survives ``list2cmdline`` + a nested ``cmd.exe /c``
-    unchanged. Verified: the same quoted/piped command exits 255 with
-    ``-Command`` but exits 0 with ``-EncodedCommand``.
+def _write_powershell_script_temp(wrapped_command: str) -> Path:
+    r"""Materialise a wrapped PowerShell command into a temporary ``.ps1``.
+
+    Returns the absolute path to the temp file. The caller MUST append the
+    returned path to a ``tmp_paths`` list so ``cleanup_temp_scripts``
+    unlinks it after the child exits (best-effort, in a ``finally``).
+
+    Encoding — UTF-8 with BOM
+    -------------------------
+    PowerShell 5.1 defaults to ANSI/GBK when reading a ``.ps1`` file that
+    lacks an encoding marker, so a wrapped command containing non-ASCII
+    (Chinese, emoji, accented chars) would silently corrupt at parse time.
+    Prepending the UTF-8 BOM (``\xef\xbb\xbf``) tells PS to decode as
+    UTF-8 unconditionally — the same pattern used by
+    ``_multiline_rewrite._write_multiline_bat`` for its ``.bat`` payloads
+    (which additionally sets ``chcp 65001`` for its child's stdout).
+
+    Location
+    --------
+    Written under ``%TEMP%\QAIModelBuilder\default\qai_ps_<rand>.ps1``
+    (isolated from user data, cleanable as a group) when that directory is
+    reachable; otherwise the system default ``%TEMP%`` root — same policy
+    as :func:`_multiline_rewrite._materialisation_temp_dir`.
+
+    Errors
+    ------
+    Any write failure is re-raised after best-effort deletion of the
+    partially-written file, so the caller sees the real disk/permission
+    error rather than a downstream "script not found".
     """
-    return base64.b64encode(wrapped.encode("utf-16-le")).decode("ascii")
+    # Match the .bat materialisation policy — QAIModelBuilder\default under
+    # %TEMP%. Falling back to None lets tempfile use the system default.
+    tmp_dir_root = (
+        Path(os.environ.get("TEMP", tempfile.gettempdir()))
+        / "QAIModelBuilder"
+        / "default"
+    )
+    try:
+        tmp_dir_root.mkdir(parents=True, exist_ok=True)
+        tmp_dir: str | None = str(tmp_dir_root)
+    except OSError:
+        tmp_dir = None
+
+    # UTF-8 BOM prefix (0xEF 0xBB 0xBF) — mandatory so PS 5.1 doesn't fall
+    # back to ANSI/GBK on non-ASCII payloads.
+    payload = "\ufeff" + wrapped_command
+    if not payload.endswith("\n"):
+        payload += "\n"
+
+    fd, path_str = tempfile.mkstemp(
+        suffix=".ps1", prefix="qai_ps_", dir=tmp_dir, text=False
+    )
+    tmp_path = Path(path_str)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(payload.encode("utf-8"))
+    except Exception:
+        # Best-effort cleanup on write failure — re-raise so the caller
+        # sees the real error (disk full, permission denied, etc.).
+        with contextlib.suppress(OSError):
+            tmp_path.unlink()
+        raise
+    return tmp_path
 
 
 def _pe_machine(path: Path) -> int | None:
@@ -386,7 +452,11 @@ def _resolve_portable_git_shell(shell_name: str) -> str | None:
     return chosen
 
 
-def _select_shell(command: str, shell: str) -> tuple[list[str], bool]:
+def _select_shell(
+    command: str,
+    shell: str,
+    tmp_paths_out: list[Path] | None = None,
+) -> tuple[list[str], bool]:
     """Return (argv, use_shell_wrap) for the chosen interpreter.
 
     On Windows we pick between cmd.exe and powershell.exe via the 6-rule
@@ -395,10 +465,19 @@ def _select_shell(command: str, shell: str) -> tuple[list[str], bool]:
     with ``-ExecutionPolicy Bypass`` (7-L4) so restricted-policy machines do
     not refuse to run them.
 
-    PowerShell payloads are passed via ``-EncodedCommand`` (Base64 UTF-16LE)
-    rather than ``-Command`` so a command containing quotes / pipes survives
-    the chat streaming path's ``list2cmdline`` + nested ``cmd.exe /c`` join
-    intact (see :func:`_encode_powershell_command`).
+    PowerShell payloads are materialised to a temporary UTF-8-BOM ``.ps1``
+    file and invoked via ``-File <path>`` (2026-07-20 root-cause CLIXML
+    fix — see :func:`_write_powershell_script_temp`). ``-File`` uses the
+    host-native stderr text formatter, whereas ``-EncodedCommand`` +
+    piped stderr triggers CLIXML minishell serialisation whose Tags-section
+    ``<S>PSHOST</S>`` element (and other internal values) leak into
+    regex-based cleanup and corrupt the visible output. The temp ``.ps1``
+    path is embedded in the returned argv right after the ``-File`` token,
+    AND — when *tmp_paths_out* is provided — appended to that list so the
+    caller can unlink it via
+    :func:`_multiline_rewrite.cleanup_temp_scripts` after the child exits.
+    Callers that cannot pass *tmp_paths_out* can recover the path from the
+    argv (``argv[argv.index("-File") + 1]``) instead.
 
     ``sh`` / ``bash`` on Windows are resolved to a USABLE PortableGit shell
     (arch-matching front-end AND backend, see :func:`_resolve_portable_git_shell`);
@@ -414,15 +493,17 @@ def _select_shell(command: str, shell: str) -> tuple[list[str], bool]:
         return ["cmd", "/c", command], False
     if shell == "powershell":
         wrapped = _wrap_powershell_command(command)
-        encoded = _encode_powershell_command(wrapped)
+        script_path = _write_powershell_script_temp(wrapped)
+        if tmp_paths_out is not None:
+            tmp_paths_out.append(script_path)
         return [
             "powershell",
             "-NoProfile",
             "-NonInteractive",
             "-ExecutionPolicy",
             "Bypass",
-            "-EncodedCommand",
-            encoded,
+            "-File",
+            str(script_path),
         ], False
     if shell in ("sh", "bash"):
         # POSIX: rely on PATH resolution (``/bin/sh`` / ``/bin/bash``).
@@ -670,10 +751,15 @@ async def tool_exec(
         # ``_select_shell`` is inside the try so a ToolError it raises (e.g.
         # sh/bash unavailable) still runs the finally that unlinks any temp
         # scripts already materialised by the multi-line rewrite above.
+        # Passing ``tmp_paths_out=tmp_paths`` lets the PowerShell ``-File``
+        # branch (2026-07-20 CLIXML fix) register its temp ``.ps1`` for the
+        # same finally-cleanup path used by the multi-line ``.bat``.
         if rewritten_argv is not None:
             argv = rewritten_argv
         else:
-            argv, _ = _select_shell(command, resolved_shell)
+            argv, _ = _select_shell(
+                command, resolved_shell, tmp_paths_out=tmp_paths
+            )
         return await _dispatch_exec(
             argv=argv,
             command=command,
@@ -1045,38 +1131,70 @@ def _decode(buf: bytes, *, suppress_advice: bool = False) -> tuple[str, bool]:
 # unescape) rather than a full CLIXML deserialiser: we only need the human
 # error/warning text, not the object graph.
 _CLIXML_HEADER = "#< CLIXML"
-# Match the inner text of each <S S="...">...</S> stream node. ``S`` may carry
-# a stream-kind attribute (Error / Warning / Verbose / Debug) or none.
+# Match the inner text of each <S S="...">...</S> stream-content node.
+#
+# The ``S="..."`` attribute is REQUIRED (not optional) — it names the source
+# stream kind (Error / Warning / Verbose / Debug / Information / progress).
+# Making the attribute optional would also match plain ``<S>...</S>`` elements
+# used elsewhere in the CLIXML object graph — notably the ``Tags`` list of an
+# ``InformationRecord`` for a ``Write-Host`` line, which serialises as
+# ``<LST><S>PSHOST</S></LST>`` (``PSHOST`` here is a Tag value, not stream
+# content). See regression test ``test_strip_clixml_does_not_extract_tags_S_element``.
 _CLIXML_S_NODE_RE = re.compile(
-    r"<S(?:\s+S=\"[^\"]*\")?>(.*?)</S>", re.DOTALL
+    r'<S\s+S="[^"]*">(.*?)</S>', re.DOTALL
 )
 # PowerShell encodes control chars as ``_xHHHH_`` (e.g. _x000D_ = CR,
 # _x000A_ = LF). Decode those back to real characters.
 _CLIXML_XCHAR_RE = re.compile(r"_x([0-9A-Fa-f]{4})_")
+# Precise CLIXML blob boundary is ``<Objs ...>...</Objs>``. We locate the
+# opening ``<Objs`` after the ``#< CLIXML`` header and its matching closing
+# ``</Objs>`` so that only that XML span is stripped — anything before the
+# header and anything after ``</Objs>`` (which under the streaming exec path
+# is REAL user stdout that PowerShell interleaved with the CLIXML stderr
+# line-by-line) is preserved verbatim.
+_CLIXML_OBJS_OPEN_RE = re.compile(r"<Objs\b")
+_CLIXML_OBJS_CLOSE = "</Objs>"
 
 
 def _strip_powershell_clixml(text: str) -> str:
-    """Unwrap a PowerShell CLIXML stderr blob into readable plain text.
+    """Unwrap PowerShell CLIXML stream noise into readable plain text.
 
     Returns *text* unchanged when it is not CLIXML (no ``#< CLIXML`` header),
-    so it is safe to call on any stderr. When it IS CLIXML, extracts the
-    concatenated text of every ``<S ...>`` stream node, decodes XML entities
-    and ``_xHHHH_`` control-char escapes, and returns the joined result.
+    so it is safe to call on any stderr / mixed output.
 
-    Only meaningful for ``shell="powershell"`` stderr; callers gate on that.
+    The input may be either:
+
+    * A pure CLIXML blob (classic case — stderr only), or
+    * A **mixed** buffer where stdout and stderr have been merged line-by-line
+      into a single string. This happens in the streaming exec path
+      (``stream_exec()`` merges both streams into ``full_output`` by arrival
+      order). PowerShell 5.1 ``Write-Host`` emits its information records as
+      CLIXML on stderr while a concurrent ``Get-ChildItem`` (or any other
+      cmdlet) writes plain text to stdout — the two streams end up
+      interleaved:
+
+          hello from stdout
+          #< CLIXML
+          <Objs ...>...</Objs>
+          world from stdout after clixml
+
+    The OLD implementation naively grabbed ``text[start:]`` from the CLIXML
+    header to end-of-string and treated it all as XML, silently swallowing
+    every plain-stdout line that happened to appear AFTER ``</Objs>``. This
+    routinely turned 500-byte directory listings into 6 bytes.
+
+    The FIX bounds the CLIXML span precisely to ``<Objs ...> ... </Objs>``
+    and iterates in case (rare but possible) the buffer contains multiple
+    CLIXML segments interleaved with plain text. For each segment: the plain
+    text before it is preserved as-is, the ``<S S="...">...</S>`` stream
+    nodes inside are extracted / decoded, and iteration continues from just
+    after ``</Objs>`` so any following plain stdout is kept.
+
+    Called for ``shell="powershell"`` stderr AND for the merged streaming
+    buffer; both paths route through here so the handler stays idempotent.
     """
     if _CLIXML_HEADER not in text:
         return text
-    # Isolate the portion from the CLIXML header onward (there should be
-    # nothing before it, but be defensive).
-    start = text.find(_CLIXML_HEADER)
-    prefix = text[:start]
-    clixml = text[start:]
-    nodes = _CLIXML_S_NODE_RE.findall(clixml)
-    if not nodes:
-        # Header present but no <S> nodes we recognise — drop the CLIXML noise
-        # rather than surface raw XML (keep any plain prefix that preceded it).
-        return prefix.rstrip()
     import html as _html
 
     def _decode_node(raw: str) -> str:
@@ -1087,8 +1205,47 @@ def _strip_powershell_clixml(text: str) -> str:
         )
         return s
 
-    body = "".join(_decode_node(n) for n in nodes)
-    return (prefix + body).strip()
+    out_parts: list[str] = []
+    pos = 0
+    n = len(text)
+    while pos < n:
+        header_idx = text.find(_CLIXML_HEADER, pos)
+        if header_idx < 0:
+            # No more CLIXML segments — remainder is all plain text.
+            out_parts.append(text[pos:])
+            break
+        # Preserve plain text before the header verbatim.
+        out_parts.append(text[pos:header_idx])
+        # Locate the ``<Objs>`` opening after the header. If absent (residual
+        # / truncated header without a body), preserve legacy behaviour: drop
+        # from the header onward within this segment (nothing meaningful to
+        # extract) and stop scanning — there is no ``</Objs>`` to bound on.
+        objs_open_match = _CLIXML_OBJS_OPEN_RE.search(text, header_idx)
+        if objs_open_match is None:
+            # Legacy behaviour: header w/o <Objs> ⇒ everything from the header
+            # to EOF is CLIXML noise we cannot parse; drop it.
+            break
+        objs_start = objs_open_match.start()
+        # Anything between the header line and ``<Objs>`` (whitespace/newline)
+        # is CLIXML framing — discard it.
+        # Find the matching ``</Objs>`` after ``<Objs``. If missing (malformed
+        # / truncated), fall back to dropping the remainder like the legacy
+        # implementation did.
+        objs_close_idx = text.find(_CLIXML_OBJS_CLOSE, objs_start)
+        if objs_close_idx < 0:
+            break
+        objs_end = objs_close_idx + len(_CLIXML_OBJS_CLOSE)
+        # Extract stream-content nodes strictly inside the ``<Objs>...</Objs>``
+        # span (never past ``</Objs>`` — that's user stdout territory).
+        clixml_body = text[objs_start:objs_end]
+        nodes = _CLIXML_S_NODE_RE.findall(clixml_body)
+        if nodes:
+            out_parts.append("".join(_decode_node(nd) for nd in nodes))
+        # Continue after ``</Objs>``. A trailing newline that PowerShell
+        # emitted after the CLIXML line is preserved as part of the next
+        # ``text[pos:...]`` slice.
+        pos = objs_end
+    return "".join(out_parts).strip()
 
 
 def _extract_child_protected_denies(err_text: str) -> str:

@@ -56,20 +56,26 @@ npm-debug.log*
 # Top-level model-weight cache from the Download Center (NPU quantized model
 # .bin files). Anchored to the repo root so it does NOT catch source dirs that
 # happen to be named "models/" deeper in the tree (e.g. the shipped skill code
-# at skills/*/models/ or the App Builder Pack code at factory/app_builder/
-# models/). Those are source and MUST stay committable.
+# at skills/*/models/, the promoted model-hub skill at
+# factory/chat_features/model-hub/models/, or the App Builder Pack code at
+# factory/app_builder/models/). Those are source and MUST stay committable.
 /models/
 !factory/app_builder/models/
 !factory/app_builder/models/**
 factory/app_builder/models/**/__pycache__/
 factory/app_builder/models/**/*.pyc
-# Skill code shipped under skills/*/models/ (e.g. aihub-model-run) is source,
+# Skill code shipped under skills/*/models/ and factory/chat_features/*/models/
+# (e.g. the model-hub skill's per-model NOTES.md + infer scripts) is source,
 # not a runtime weight cache — keep it committable. (Belt-and-braces: the
-# anchored /models/ above already spares it, but be explicit.)
+# anchored /models/ above already spares deep dirs, but be explicit.)
 !skills/**/models/
 !skills/**/models/**
 skills/**/models/**/__pycache__/
 skills/**/models/**/*.pyc
+!factory/chat_features/**/models/
+!factory/chat_features/**/models/**
+factory/chat_features/**/models/**/__pycache__/
+factory/chat_features/**/models/**/*.pyc
 # Root-level dev toolchain + vendored deps (reproducible; never source).
 # Anchored to the repo root so a same-named source dir deeper in the tree
 # (e.g. a hypothetical src/**/bin/ or frontend/**/vendor/) is not mis-ignored.

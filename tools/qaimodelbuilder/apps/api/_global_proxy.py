@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Global proxy (mechanism B) provider — apps/api wiring root.
 
 Single source of truth for the *machine-readable* global-proxy URL that the

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Okta OIDC login / callback / logout / me routes.
 
 Mounted under no prefix (the paths are absolute — ``/auth/login``,
@@ -76,6 +81,142 @@ logger = get_logger("qai.auth")
 #    created_at}. Entries expire per ``auth.state_ttl_seconds``. Single
 #    process uvicorn — no multi-worker sharing to worry about.
 _PENDING_STATES: dict[str, dict[str, Any]] = {}
+
+# ── MB Pro LDAP access check ──────────────────────────────────────────────────
+
+_LDAP_GROUP = "ModelBuilderProUsers"
+_LDAP_TIMEOUT = 3.0
+
+
+def _resolve_ldap_validate_url() -> str:
+    """Return the MB Pro LDAP validate endpoint URL, or ``""`` if unavailable.
+
+    MB Pro is an internal-only capability; its LDAP validate endpoint lives on
+    the corporate network (ceflow) and its URL must never ship in an external
+    artifact. The value therefore lives in the internal-only
+    ``qai.platform.edition`` package (``internal_config.toml [mb_pro]
+    ldap_validate_url``), which is physically excluded from external builds.
+
+    On external editions the ``edition`` package is absent, so the import fails
+    and this returns ``""``; ``_check_mb_pro_access`` then short-circuits to
+    ``(False, False)`` — the external login flow is unaffected and no MB Pro
+    access is granted. On internal editions the URL is read from the TOML.
+    """
+    try:
+        from qai.platform.edition import get_mb_pro_ldap_url
+    except ImportError:
+        return ""
+    return get_mb_pro_ldap_url()
+
+
+async def _check_mb_pro_access(
+    username: str, *, ssl_verify: bool = True
+) -> tuple[bool, bool]:
+    """Check if ``username`` is a member of the ModelBuilderProUsers group.
+
+    Calls the ceflow LDAP validate endpoint, which returns the full member
+    list. We check whether ``username`` (email-domain-stripped, e.g.
+    ``"jinweif"``) appears in ``members``.
+
+    The endpoint URL is resolved via :func:`_resolve_ldap_validate_url`. On the
+    external edition it resolves to ``""`` (MB Pro is internal-only) and this
+    function short-circuits to ``(authorized=False, ldap_error=False)`` — a
+    graceful "not authorized, not an error" so external login succeeds and MB
+    Pro simply stays unavailable.
+
+    **Username normalization** (2026-07-19): ceflow's LDAP endpoint returns
+    members as SHORT usernames (``"jinweif"``, ``"zhanweiw"``, …), never full
+    email addresses. Callers may pass either form:
+      • Okta OIDC ``preferred_username`` = ``"zhanweiw@qti.qualcomm.com"`` →
+        login callback path
+      • Session-cookie ``username`` already stripped by caller →
+        ``mb_pro_session.py`` refresh path
+    We normalize inside this function so both call sites agree without each
+    having to remember to ``.split("@")[0]``. The prior bug: the login
+    callback compared ``"zhanweiw@qti.qualcomm.com" in ["zhanweiw", ...]``
+    which is always False, so every user was denied at login even when
+    ceflow returned a valid membership. See release notes 2026-07-19.
+
+    Returns ``(authorized, ldap_error)``. On any failure (timeout, non-200,
+    malformed response, ``valid=false``), returns ``(False, True)`` so the
+    caller surfaces a "service unavailable" message rather than silently
+    denying access.
+
+    ``ssl_verify`` is the effective unified outbound-TLS switch
+    (``Settings.ssl_verify``, edition-derived default: False for internal
+    dev / self-signed corporate gateways, True for packaged external
+    release). Callers pass the resolved global value (login callback:
+    ``_resolve_ssl_verify()``; refresh route: ``settings.ssl_verify``) so
+    corporate self-signed ceflow certs Just Work on internal editions
+    without additional env-var setup.
+
+    Logs an ``auth.mb_pro.ldap_ok`` debug event on success and a warning
+    event on each failure branch (non-200, invalid response, exception).
+    The warning branches are intentionally verbose to aid diagnosis of
+    LDAP/network issues without requiring debug-level logging in production.
+    """
+    # MB Pro is internal-only. On external editions the LDAP endpoint URL is
+    # absent (the qai.platform.edition package ships only in internal builds),
+    # so resolve to "" and short-circuit to "not authorized, not an error":
+    # external login proceeds normally and MB Pro stays unavailable.
+    ldap_validate_url = _resolve_ldap_validate_url()
+    if not ldap_validate_url:
+        return False, False
+
+    # Normalize to the short LDAP handle. .split("@")[0] on a string with no
+    # "@" is a no-op, so this is idempotent for callers who already strip.
+    ldap_username = (username or "").split("@")[0]
+
+    _verify: bool = bool(ssl_verify)
+    try:
+        async with httpx.AsyncClient(
+            timeout=_LDAP_TIMEOUT, trust_env=False, verify=_verify
+        ) as client:
+            r = await client.post(
+                ldap_validate_url,
+                json={"identifier": _LDAP_GROUP},
+            )
+        if r.status_code != 200:
+            logger.warning(
+                "auth.mb_pro.ldap_non_200",
+                username=ldap_username,
+                username_raw=username,
+                status_code=r.status_code,
+                url=ldap_validate_url,
+                body_preview=r.text[:200] if r.text else "",
+            )
+            return False, True
+        data = r.json()
+        if not data.get("valid"):
+            logger.warning(
+                "auth.mb_pro.ldap_invalid_response",
+                username=ldap_username,
+                username_raw=username,
+                valid_field=data.get("valid"),
+                keys=list(data.keys()) if isinstance(data, dict) else None,
+                body_preview=str(data)[:200],
+            )
+            return False, True
+        members: list[str] = data.get("members") or []
+        authorized = ldap_username in members
+        logger.debug(
+            "auth.mb_pro.ldap_ok",
+            username=ldap_username,
+            username_raw=username,
+            authorized=authorized,
+            member_count=len(members),
+        )
+        return authorized, False
+    except Exception as exc:  # noqa: BLE001 — any transport failure → ldap_error
+        logger.warning(
+            "auth.mb_pro.ldap_exception",
+            username=ldap_username,
+            username_raw=username,
+            exc_type=type(exc).__name__,
+            exc_msg=str(exc)[:300],
+            url=ldap_validate_url,
+        )
+        return False, True
 
 
 def build_router(
@@ -296,6 +437,17 @@ def build_router(
         # anchoring the id_token). Discard them — the HMAC-signed cookie
         # below is the entire session state.
 
+        # Check MB Pro group membership once at login; result rides in the
+        # session cookie so we never need to re-query LDAP on every request.
+        # ssl_verify follows the unified outbound-TLS switch (edition-derived
+        # default: False for internal / self-signed ceflow, True for external),
+        # resolved LIVE so a runtime toggle hot-applies to the next login.
+        _authorized, _ldap_error = await _check_mb_pro_access(
+            user.get("username", ""), ssl_verify=_resolve_ssl_verify()
+        )
+        user["is_mb_pro_authorized"] = _authorized
+        user["mb_pro_access_check_failed"] = _ldap_error
+
         cookie = dump_session(user, settings.session_ttl_seconds, secret)
         response = RedirectResponse(
             _safe_next(record.get("next", "/")), status_code=303
@@ -313,6 +465,8 @@ def build_router(
             "auth.callback.login_ok",
             username=user.get("username"),
             email=user.get("email"),
+            is_mb_pro_authorized=user.get("is_mb_pro_authorized"),
+            mb_pro_access_check_failed=user.get("mb_pro_access_check_failed"),
         )
         return response
 

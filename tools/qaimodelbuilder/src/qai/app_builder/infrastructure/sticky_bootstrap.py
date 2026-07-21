@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """BootstrapSpec builder for the persistent sticky worker (PR-302 wiring).
 
 V1 ``backend/app_builder/runners/sticky_worker.py:131-185``

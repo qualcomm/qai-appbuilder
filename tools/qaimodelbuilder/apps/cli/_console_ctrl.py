@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Windows-friendly console Ctrl+C handling for the ``apps.cli.serve`` supervisor.
 
 V1 parity: the legacy ``start_server.py`` (V1) gave the launcher a polished

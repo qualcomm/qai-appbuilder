@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Neutral workspace project-context (AGENTS.md / CLAUDE.md) helpers.
 
 Both the **main agent** path (``streaming.py:_resolve_workspace_context_files``,

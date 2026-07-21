@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Three-mode init vocabulary (parallel of ``tools.build.factory_compiler._common.modes``).
 
 Kept as a separate module to avoid cross-package imports between

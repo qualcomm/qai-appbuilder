@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Access-denied error/hint message builders for AI tools (V1 parity).
 
 Ported 1:1 from V1's ``backend/security/access_error_helper.py`` (107

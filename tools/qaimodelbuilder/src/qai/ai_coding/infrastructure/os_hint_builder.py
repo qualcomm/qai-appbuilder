@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """OS hint builder for ai_coding system prompts (PR-095 / S9 H-11).
 
 The legacy ``backend/ai_coding/session_manager.py`` (lines 48-92)

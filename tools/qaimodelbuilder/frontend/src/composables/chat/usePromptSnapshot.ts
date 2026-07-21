@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * `usePromptSnapshot` — prompt-snapshot modal state + lifecycle for the
  * chat message list (V1 `useForgeConfig.js:20-127`).

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """DI wiring for the ``ai_coding`` bounded context (PR-035 / S3 → PR-046 / S4
 → PR-103 / S7.5 L1).
 
@@ -107,9 +112,6 @@ from qai.ai_coding.application.use_cases.change_workspace import (
 from qai.ai_coding.application.use_cases.decide_permission import (
     DecidePermissionUseCase,
 )
-from qai.ai_coding.application.use_cases.execute_tool_directly import (
-    ExecuteToolDirectlyUseCase,
-)
 from qai.ai_coding.application.use_cases.expire_stale_permissions import (
     DEFAULT_PERMISSION_TTL_SECONDS,
     ExpireStalePermissionsUseCase,
@@ -190,9 +192,6 @@ from qai.ai_coding.application.use_cases.spawn_coding_session import (
 from qai.ai_coding.application.use_cases.stream_coding_session import (
     StreamCodingSessionUseCase,
 )
-from qai.ai_coding.application.use_cases.stream_tool_exec import (
-    StreamToolExecUseCase,
-)
 from qai.ai_coding.application.use_cases.terminate_coding_session import (
     TerminateCodingSessionUseCase,
 )
@@ -216,9 +215,6 @@ from qai.ai_coding.infrastructure.providers import (
 )
 from qai.ai_coding.infrastructure.tools import (
     build_default_tool_handlers,
-)
-from qai.ai_coding.infrastructure.tools.exec_streaming_adapter import (
-    AiCodingExecStreamingAdapter,
 )
 from qai.ai_coding.infrastructure.tools.tool_result_store import (
     FileSystemToolResultStore,
@@ -349,19 +345,10 @@ class AiCodingServices:
     # PR-105: hard abort + revert (CC + OC twin routes).
     abort_session_use_case: AbortSessionUseCase
     revert_message_use_case: RevertMessageUseCase
-    # PR-108c: universal tool execute (no session bound).  Backs the
-    # legacy ``POST /api/tool_execute`` and ``POST /api/tool_execute_stream``
-    # routes (P1-B18 KEEP).  Appended per v2.7 §3.1 field-name lock.
-    execute_tool_directly_use_case: ExecuteToolDirectlyUseCase
     # 2-H14: pending-permission TTL sweep (auto-reject stale approval
     # gates; V1 ``permission_approval_timeout_seconds`` parity).
     # Appended per v2.7 §3.1 field-name lock.
     expire_stale_permissions_use_case: ExpireStalePermissionsUseCase
-    # 落点5: universal exec streaming (real-time stdout/stderr) for the
-    # ``POST /api/tool_execute_stream`` route — surfaces ``output`` /
-    # ``cap_reached`` frames via an application port so the route never
-    # imports infrastructure.  Appended per v2.7 §3.1 field-name lock.
-    stream_tool_exec_use_case: StreamToolExecUseCase
     # V1 parity: oversized tool-output persistence + read-back (restores
     # ``backend/tool_result_storage.py``).  Appended with a default per
     # v2.7 §3.1 field-name lock; exposed so the chat tool bridge can reuse
@@ -1120,28 +1107,12 @@ def build_ai_coding_services(container: Container) -> AiCodingServices:
             event_bus=container.events,
             provider_port=provider,
         ),
-        # PR-108c: universal tool execute (no session bound).
-        execute_tool_directly_use_case=ExecuteToolDirectlyUseCase(
-            tool_bridge=tool_bridge,
-        ),
         # 2-H14: pending-permission TTL sweep.
         expire_stale_permissions_use_case=ExpireStalePermissionsUseCase(
             repository=repo,
             event_bus=container.events,
             clock=container.clock,
             ttl_seconds=DEFAULT_PERMISSION_TTL_SECONDS,
-        ),
-        # 落点5: universal exec streaming use case (real ``output`` /
-        # ``cap_reached`` frames via the ai_coding ExecStreamingPort).
-        # The concrete streaming engine is ai_coding's own
-        # ``stream_tool_exec`` infrastructure helper (NOT qai.tools), so
-        # no cross-context import is required.
-        stream_tool_exec_use_case=StreamToolExecUseCase(
-            exec_streaming_port=AiCodingExecStreamingAdapter(
-                guard_token_provider=_guard_token_provider,
-                ask_pending_probe=_ask_pending_probe,
-                allow_x86=container.settings.security.allow_x86_processes,
-            ),
         ),
         tool_result_store=tool_result_store,
     )

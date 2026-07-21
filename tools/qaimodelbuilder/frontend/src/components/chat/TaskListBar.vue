@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <script setup lang="ts">
 /**
  * TaskListBar — compact top-right pill + dropdown for the LATEST task list
@@ -91,11 +96,13 @@ function _publishStackBottom(): void {
     // No bar rendered → nothing stacks below the bar; reset to 0 so floats
     // pin to the top of `.chat-view`.
     host.style.setProperty("--qai-task-stack-bottom", "0px");
+    host.style.setProperty("--qai-task-pill-bottom", "0px");
     return;
   }
   const hostTop = host.getBoundingClientRect().top;
-  // Visible children: the pill (always) + the dropdown (when expanded). The
-  // dropdown is absolute, so include it explicitly to track its full height.
+  // ── Full stack bottom (pill + dropdown when expanded) ────────────────────
+  // Consumed by MessageQueuePanel so its floating queue sits fully below the
+  // task-list dropdown. See MessageQueuePanel:16-19 for the contract.
   let maxBottom = root.getBoundingClientRect().bottom;
   const dropdown = root.querySelector<HTMLElement>(".task-bar-dropdown");
   if (dropdown !== null) {
@@ -103,6 +110,15 @@ function _publishStackBottom(): void {
   }
   const offset = Math.ceil(maxBottom - hostTop);
   host.style.setProperty("--qai-task-stack-bottom", `${offset}px`);
+  // ── Pill-only bottom (excludes the dropdown) ─────────────────────────────
+  // Consumed by the mode-intro-overlay anchor so its ⓘ button sits directly
+  // BELOW the pill (avoiding overlap — user feedback: "the two buttons
+  // overlap") without jumping down when the dropdown expands. The dropdown
+  // occluding the intro button briefly is acceptable (user is looking at
+  // tasks, not onboarding at that moment). See
+  // styles/chat/chat.css `.chat-view__intro-anchor`.
+  const pillBottom = Math.ceil(root.getBoundingClientRect().bottom - hostTop);
+  host.style.setProperty("--qai-task-pill-bottom", `${pillBottom}px`);
 }
 onMounted(() => {
   if (typeof ResizeObserver !== "undefined") {
@@ -123,7 +139,10 @@ onBeforeUnmount(() => {
   }
   // Reset so a stale offset doesn't strand floats after this bar unmounts.
   const host = _findChatView(rootEl.value);
-  if (host !== null) host.style.removeProperty("--qai-task-stack-bottom");
+  if (host !== null) {
+    host.style.removeProperty("--qai-task-stack-bottom");
+    host.style.removeProperty("--qai-task-pill-bottom");
+  }
 });
 </script>
 

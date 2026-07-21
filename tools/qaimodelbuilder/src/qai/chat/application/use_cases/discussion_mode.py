@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Pure helpers for collaboration-mode resolution in the discussion orchestrator.
 
 A **collaboration mode** (design §26 / §27) defines HOW a roster collaborates

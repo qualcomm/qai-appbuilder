@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Conversation workspace → auto session-grant bridge (apps/api wiring root).
 
 SEC true-scoping (PART E). When a user sets a conversation's working

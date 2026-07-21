@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Filesystem-backed image upload store (PR-403 / S7.5 lane L4).
 
 Migrates :class:`backend.image_store.ImageStore` (155 LOC) into the

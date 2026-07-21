@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Pluggable speaker-selection strategies for multi-agent discussions.
 
 A multi-agent discussion (docs/70-multi-agent/multi-agent-conversation-design.md §4.1) runs

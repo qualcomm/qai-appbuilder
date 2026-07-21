@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``ListDownloadJobsUseCase`` — list active download jobs.
 
 Issue (f) decision A (HANDOFF-after-PR-040 §5): the missing use case

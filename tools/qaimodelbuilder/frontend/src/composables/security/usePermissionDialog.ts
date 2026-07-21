@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * usePermissionDialog — global file-access / command-execution authorization
  * dialog state (V1 parity: `js/security/use_security_dialog.js`).

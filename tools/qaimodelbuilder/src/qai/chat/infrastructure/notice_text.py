@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """User-facing notice text builders for stream-end edge cases (PR-090, S9 F-1/F-2).
 
 Implements audit items :ref:`F-1` (truncation notice on

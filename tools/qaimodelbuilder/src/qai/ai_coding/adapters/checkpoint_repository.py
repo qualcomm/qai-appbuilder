@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """kv_user_prefs-backed :class:`CheckpointRepositoryPort` adapter (PR-105).
 
 Stores per-session checkpoint snapshots in the shared

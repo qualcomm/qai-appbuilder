@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``ConversationTab`` aggregate for multi-tab parallel chat.
 
 A *tab* is the user's view on a conversation in the front-end.  One

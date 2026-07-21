@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Pure classification + reply formatting for bare slash commands.
 
 Architecture cleanup (A-1 step1): the apps-layer dispatch bridge

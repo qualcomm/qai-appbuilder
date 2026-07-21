@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """App Builder — voice preference + feedback + benchmark routes.
 
 Covers the voice-preference GET/PUT pair, the sticky-worker preload

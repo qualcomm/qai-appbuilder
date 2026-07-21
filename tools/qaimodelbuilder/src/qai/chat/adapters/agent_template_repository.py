@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """aiosqlite-backed :class:`AgentTemplateRepositoryPort`.
 
 Schema reference: ``qai-db-schema.md`` §2.9 (chat_agent_template, migration
@@ -33,7 +38,9 @@ __all__ = ["SqliteAgentTemplateRepository"]
 
 _COLUMNS = (
     "id, name, description, display_name, model_id, persona, config_json, "
-    "is_builtin, cloned_from_id, created_at, updated_at"
+    "is_builtin, cloned_from_id, created_at, updated_at, "
+    "name_i18n_json, description_i18n_json, display_name_i18n_json, "
+    "persona_i18n_json"
 )
 
 
@@ -41,6 +48,34 @@ def _config_to_json(config: dict[str, Any] | None) -> str | None:
     if config is None:
         return None
     return json.dumps(config, ensure_ascii=False)
+
+
+def _i18n_to_json(i18n: dict[str, str] | None) -> str | None:
+    """Serialise an i18n map to JSON, or ``None`` when absent (write path)."""
+    if not i18n:
+        return None
+    return json.dumps(i18n, ensure_ascii=False)
+
+
+def _i18n_from_json(raw: object) -> dict[str, str] | None:
+    """Parse a ``*_i18n_json`` column into a per-locale map.
+
+    A NULL / malformed / non-object value degrades to ``None`` (fall back to the
+    canonical single-language column) rather than raising, so a single bad row
+    cannot break a list/find (AGENTS.md §8 forward-compatibility).
+    """
+    if raw is None:
+        return None
+    try:
+        parsed = json.loads(str(raw))
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    # Keep only str->str entries so downstream resolve never trips on a
+    # non-string value.
+    result = {k: v for k, v in parsed.items() if isinstance(k, str) and isinstance(v, str)}
+    return result or None
 
 
 def _config_from_json(raw: object) -> dict[str, Any] | None:
@@ -85,6 +120,10 @@ class SqliteAgentTemplateRepository:
             template.cloned_from_id,
             template.created_at.isoformat(),
             template.updated_at.isoformat(),
+            _i18n_to_json(template.name_i18n),
+            _i18n_to_json(template.description_i18n),
+            _i18n_to_json(template.display_name_i18n),
+            _i18n_to_json(template.persona_i18n),
         )
         try:
             async with self._db.connection() as conn:
@@ -94,8 +133,10 @@ class SqliteAgentTemplateRepository:
                         "INSERT INTO chat_agent_template ("
                         "id, name, description, display_name, model_id, "
                         "persona, config_json, is_builtin, cloned_from_id, "
-                        "created_at, updated_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                        "created_at, updated_at, name_i18n_json, "
+                        "description_i18n_json, display_name_i18n_json, "
+                        "persona_i18n_json) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                         "ON CONFLICT(id) DO UPDATE SET "
                         " name=excluded.name, "
                         " description=excluded.description, "
@@ -104,7 +145,11 @@ class SqliteAgentTemplateRepository:
                         " persona=excluded.persona, "
                         " config_json=excluded.config_json, "
                         " is_builtin=excluded.is_builtin, "
-                        " updated_at=excluded.updated_at",
+                        " updated_at=excluded.updated_at, "
+                        " name_i18n_json=excluded.name_i18n_json, "
+                        " description_i18n_json=excluded.description_i18n_json, "
+                        " display_name_i18n_json=excluded.display_name_i18n_json, "
+                        " persona_i18n_json=excluded.persona_i18n_json",
                         params,
                     )
                     await conn.commit()
@@ -198,6 +243,9 @@ class SqliteAgentTemplateRepository:
     # ------------------------------------------------------------------
     @staticmethod
     def _row_to_template(row: tuple[object, ...]) -> AgentTemplate:
+        # i18n columns are tail-appended (index 11-14); a short projection
+        # (legacy row read before migration 056) leaves them unset -> None ->
+        # canonical single-language fallback (AGENTS.md §8).
         return AgentTemplate(
             id=AgentTemplateId.of(str(row[0])),
             name=str(row[1]) if row[1] is not None else "",
@@ -210,4 +258,8 @@ class SqliteAgentTemplateRepository:
             cloned_from_id=str(row[8]) if row[8] is not None else None,
             created_at=datetime.fromisoformat(str(row[9])),
             updated_at=datetime.fromisoformat(str(row[10])),
+            name_i18n=_i18n_from_json(row[11]) if len(row) > 11 else None,
+            description_i18n=_i18n_from_json(row[12]) if len(row) > 12 else None,
+            display_name_i18n=_i18n_from_json(row[13]) if len(row) > 13 else None,
+            persona_i18n=_i18n_from_json(row[14]) if len(row) > 14 else None,
         )

@@ -1,4 +1,9 @@
 <!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
+<!--
   TemplateLibraryDialog — the unified three-tier template panel (§27 decision 2).
 
   One overlay with three tabs — 角色 (single role) / 团队 (team) / 模式 (mode) —
@@ -22,6 +27,7 @@ import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useConfirm } from "@/composables/useConfirm";
 import { useToast } from "@/composables/useToast";
+import { useTemplateI18n } from "@/composables/chat/useTemplateI18n";
 import AgentEditorSection from "@/components/chat/AgentEditorSection.vue";
 import RosterEditorSection from "@/components/chat/RosterEditorSection.vue";
 import ModeEditorSection from "@/components/chat/ModeEditorSection.vue";
@@ -65,6 +71,25 @@ type TemplateTab = "agent" | "roster" | "mode";
 const { t } = useI18n();
 const { confirm } = useConfirm();
 const toast = useToast();
+const { resolve: resolveI18n } = useTemplateI18n();
+
+// Localised display text for built-in presets (custom rows fall back to their
+// own single-language fields). Display layer only — see useTemplateI18n.
+function agentName(a: AgentTemplateView): string {
+  return resolveI18n(a.nameI18n, a.name);
+}
+function agentDisplayName(a: AgentTemplateView): string {
+  return resolveI18n(a.displayNameI18n, a.displayName);
+}
+function rosterName(r: RosterTemplateView): string {
+  return resolveI18n(r.nameI18n, r.name);
+}
+function modeName(m: ModeTemplateView): string {
+  return resolveI18n(m.nameI18n, m.name);
+}
+function modeDescription(m: ModeTemplateView): string {
+  return resolveI18n(m.descriptionI18n, m.description ?? "");
+}
 
 const agents = useAgentTemplateStore();
 const rosters = useRosterTemplateStore();
@@ -215,7 +240,7 @@ onMounted(async () => {
 });
 
 async function deleteAgent(a: AgentTemplateView): Promise<void> {
-  if (!(await _confirmDelete(a.name))) return;
+  if (!(await _confirmDelete(agentName(a)))) return;
   try {
     await agents.remove(a.id);
   } catch (e) {
@@ -223,7 +248,7 @@ async function deleteAgent(a: AgentTemplateView): Promise<void> {
   }
 }
 async function deleteRoster(r: RosterTemplateView): Promise<void> {
-  if (!(await _confirmDelete(r.name))) return;
+  if (!(await _confirmDelete(rosterName(r)))) return;
   try {
     await rosters.remove(r.id);
     if (rosterPreviewId.value === r.id) rosterPreviewId.value = null;
@@ -245,16 +270,16 @@ async function deleteMode(m: ModeTemplateView): Promise<void> {
     count > 0
       ? await confirm({
           icon: "🗑️",
-          title: t("chat.discussion.modes.deleteTitle", { name: m.name }),
+          title: t("chat.discussion.modes.deleteTitle", { name: modeName(m) }),
           message: t("chat.discussion.modes.deleteInUseMessage", {
             n: count,
-            name: m.name,
+            name: modeName(m),
           }),
           confirmText: t("common.delete"),
           cancelText: t("common.cancel"),
           confirmStyle: "danger",
         })
-      : await _confirmDelete(m.name);
+      : await _confirmDelete(modeName(m));
   if (!ok) return;
   try {
     await modes.remove(m.id);
@@ -323,7 +348,7 @@ async function _confirmReset(name: string): Promise<boolean> {
 }
 
 async function resetAgent(a: AgentTemplateView): Promise<void> {
-  if (!(await _confirmReset(a.name))) return;
+  if (!(await _confirmReset(agentName(a)))) return;
   try {
     await agents.reset(a.id);
     toast.success(t("chat.discussion.library.resetDone"));
@@ -333,7 +358,7 @@ async function resetAgent(a: AgentTemplateView): Promise<void> {
 }
 
 async function resetRoster(r: RosterTemplateView): Promise<void> {
-  if (!(await _confirmReset(r.name))) return;
+  if (!(await _confirmReset(rosterName(r)))) return;
   try {
     await rosters.reset(r.id);
     toast.success(t("chat.discussion.library.resetDone"));
@@ -343,7 +368,7 @@ async function resetRoster(r: RosterTemplateView): Promise<void> {
 }
 
 async function resetMode(m: ModeTemplateView): Promise<void> {
-  if (!(await _confirmReset(m.name))) return;
+  if (!(await _confirmReset(modeName(m)))) return;
   try {
     await modes.reset(m.id);
     toast.success(t("chat.discussion.library.resetDone"));
@@ -419,8 +444,8 @@ async function resetMode(m: ModeTemplateView): Promise<void> {
             item-testid="library-agent-item"
           >
             <template #item-main="{ entry: a }">
-              <span class="tl-item-name">{{ a.name }}</span>
-              <span class="tl-item-meta">{{ a.displayName }}</span>
+              <span class="tl-item-name">{{ agentName(a) }}</span>
+              <span class="tl-item-meta">{{ agentDisplayName(a) }}</span>
             </template>
             <template #actions="{ entry: a, isBuiltin }">
               <button
@@ -518,7 +543,7 @@ async function resetMode(m: ModeTemplateView): Promise<void> {
             item-testid="library-roster-item"
           >
             <template #item-main="{ entry: r }">
-              <span class="tl-item-name">{{ r.name }}</span>
+              <span class="tl-item-name">{{ rosterName(r) }}</span>
               <span class="tl-item-meta">{{
                 t("chat.discussion.library.members", { n: r.members.length })
               }}</span>
@@ -630,14 +655,14 @@ async function resetMode(m: ModeTemplateView): Promise<void> {
           >
             <template #item-main="{ entry: m }">
               <span class="tl-item-name">
-                {{ m.name }}
+                {{ modeName(m) }}
                 <span
                   v-if="m.id === props.selectedModeId"
                   class="tl-active-badge"
                   >{{ t("chat.discussion.library.active") }}</span
                 >
               </span>
-              <span class="tl-item-meta">{{ m.description }}</span>
+              <span class="tl-item-meta">{{ modeDescription(m) }}</span>
             </template>
             <template #actions="{ entry: m, isBuiltin }">
               <button

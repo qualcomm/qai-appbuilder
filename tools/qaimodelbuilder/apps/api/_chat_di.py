@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """DI wiring for the ``chat`` bounded context (PR-033 / S3 + PR-042 + PR-043 / S4 + PR-401b + PR-402 / S7.5).
 
 PR-033 (S3) injected seven ``_Fake<Port>`` in-memory adapters here;
@@ -1538,6 +1543,20 @@ def build_chat_services(container: "Container") -> ChatServices:
         # the user's explicit "load / refresh" action in the marketplace panel.
     )
 
+    # Promote-ready turn-end detection (migration 057): adapt App Builder's
+    # ImportScanBinsUseCase onto the chat PromoteReadyScanPort so the streaming
+    # use case can persist Conversation.detected_model at turn end WITHOUT chat
+    # importing qai.app_builder (context-isolation). The adapter holds the
+    # container and resolves ``container.app_builder.import_scan_bins_use_case``
+    # LAZILY at scan time — chat is built before app_builder in Container._wire,
+    # but a real turn ends long after the whole container is wired. Local import
+    # avoids an apps.api.di ↔ _chat_di circular import at module load.
+    from apps.api._promote_ready_scan_bridge import (
+        AppBuilderPromoteReadyScanAdapter,
+    )
+
+    _promote_ready_scan = AppBuilderPromoteReadyScanAdapter(container)
+
     return ChatServices(
         create_conversation_use_case=CreateConversationUseCase(
             conversations=conversations,
@@ -1658,6 +1677,12 @@ def build_chat_services(container: "Container") -> ChatServices:
             # CCD-5: durable compaction-checkpoint store so the in-memory
             # write-through cache survives a process restart.
             compaction_checkpoint_store=compaction_checkpoint_store,
+            # Promote-ready turn-end detection (migration 057): scan the model
+            # workspace path from the final summary for promote-eligible
+            # variants and persist Conversation.detected_model. Apps-layer
+            # adapter maps this port onto ImportScanBinsUseCase (chat never
+            # imports qai.app_builder). Best-effort; None disables detection.
+            promote_ready_scan=_promote_ready_scan,
         ),
         stop_chat_use_case=StopChatUseCase(
             abort_registry=abort_registry,
@@ -1791,6 +1816,13 @@ def build_chat_services(container: "Container") -> ChatServices:
             abort_registry=abort_registry,
             abort_handle_factory=AsyncioStreamAbortHandle,
             mode_templates=mode_templates,
+            # Built-in template i18n (migration 056, method A): the agent +
+            # roster template repos let the orchestrator re-resolve a built-in
+            # participant's persona translation at runtime by (template_id +
+            # locale). Reuse the SAME repos the template-management use cases
+            # use (single source of truth).
+            agent_templates=agent_templates,
+            roster_templates=roster_templates,
             # DISC-2 P2-step1 (§22A.5): grey-zone LLM intent classifier reusing
             # the shared streaming ``llm`` port. Only consulted when the
             # per-conversation ``intent_classifier_enabled`` flag is on AND the

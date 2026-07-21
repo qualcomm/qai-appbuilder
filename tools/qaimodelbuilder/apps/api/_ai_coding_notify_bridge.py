@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Apps-layer reverse bridge: ai_coding → channels (6 interop items).
 
 Architecture cleanup (A-1 step2): :class:`AiCodingToChannelNotifier`

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """aiosqlite-backed :class:`RosterTemplateRepositoryPort`.
 
 Schema reference: ``qai-db-schema.md`` §2.8 (chat_roster_template, migration
@@ -33,8 +38,59 @@ __all__ = ["SqliteRosterTemplateRepository"]
 
 _COLUMNS = (
     "id, name, description, members_json, is_builtin, "
-    "default_mode_id, cloned_from_id, created_at, updated_at"
+    "default_mode_id, cloned_from_id, created_at, updated_at, "
+    "name_i18n_json, description_i18n_json, members_i18n_json"
 )
+
+
+def _i18n_to_json(i18n: dict[str, Any] | None) -> str | None:
+    """Serialise an i18n map (str->str or str->list) to JSON, ``None`` if absent."""
+    if not i18n:
+        return None
+    return json.dumps(i18n, ensure_ascii=False)
+
+
+def _str_i18n_from_json(raw: object) -> dict[str, str] | None:
+    """Parse a str->str ``*_i18n_json`` column; NULL / malformed -> ``None``.
+
+    Forward-compatible (AGENTS.md §8): a bad blob degrades to ``None`` so the
+    caller falls back to the canonical single-language column.
+    """
+    if raw is None:
+        return None
+    try:
+        parsed = json.loads(str(raw))
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    result = {k: v for k, v in parsed.items() if isinstance(k, str) and isinstance(v, str)}
+    return result or None
+
+
+def _members_i18n_from_json(raw: object) -> dict[str, list[dict[str, Any]]] | None:
+    """Parse ``members_i18n_json`` into ``{locale: [member-dict, ...]}``.
+
+    Shape is ``{"en": [{"display_name","persona","config"}, ...], "zh-CN": [...],
+    "zh-TW": [...]}``. Malformed / NULL degrades to ``None`` (fall back to the
+    canonical ``members_json``); a per-locale value that is not a list is
+    dropped, and non-dict entries inside a list are skipped — never raises.
+    """
+    if raw is None:
+        return None
+    try:
+        parsed = json.loads(str(raw))
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    result: dict[str, list[dict[str, Any]]] = {}
+    for locale, members in parsed.items():
+        if not isinstance(locale, str) or not isinstance(members, list):
+            continue
+        cleaned = [m for m in members if isinstance(m, dict)]
+        result[locale] = cleaned
+    return result or None
 
 
 def _members_to_json(members: tuple[RosterTemplateMember, ...]) -> str:
@@ -118,6 +174,9 @@ class SqliteRosterTemplateRepository:
             template.cloned_from_id,
             template.created_at.isoformat(),
             template.updated_at.isoformat(),
+            _i18n_to_json(template.name_i18n),
+            _i18n_to_json(template.description_i18n),
+            _i18n_to_json(template.members_i18n),
         )
         try:
             async with self._db.connection() as conn:
@@ -127,15 +186,19 @@ class SqliteRosterTemplateRepository:
                         "INSERT INTO chat_roster_template ("
                         "id, name, description, members_json, is_builtin, "
                         "default_mode_id, cloned_from_id, created_at, "
-                        "updated_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                        "updated_at, name_i18n_json, description_i18n_json, "
+                        "members_i18n_json) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                         "ON CONFLICT(id) DO UPDATE SET "
                         " name=excluded.name, "
                         " description=excluded.description, "
                         " members_json=excluded.members_json, "
                         " is_builtin=excluded.is_builtin, "
                         " default_mode_id=excluded.default_mode_id, "
-                        " updated_at=excluded.updated_at",
+                        " updated_at=excluded.updated_at, "
+                        " name_i18n_json=excluded.name_i18n_json, "
+                        " description_i18n_json=excluded.description_i18n_json, "
+                        " members_i18n_json=excluded.members_i18n_json",
                         params,
                     )
                     await conn.commit()
@@ -229,6 +292,9 @@ class SqliteRosterTemplateRepository:
     # ------------------------------------------------------------------
     @staticmethod
     def _row_to_template(row: tuple[object, ...]) -> RosterTemplate:
+        # i18n columns tail-appended (index 9-11); a short projection (legacy
+        # row read before migration 056) leaves them unset -> None -> canonical
+        # single-language fallback (AGENTS.md §8).
         return RosterTemplate(
             id=RosterTemplateId.of(str(row[0])),
             name=str(row[1]) if row[1] is not None else "",
@@ -239,4 +305,7 @@ class SqliteRosterTemplateRepository:
             cloned_from_id=(str(row[6]) if row[6] is not None else None),
             created_at=datetime.fromisoformat(str(row[7])),
             updated_at=datetime.fromisoformat(str(row[8])),
+            name_i18n=_str_i18n_from_json(row[9]) if len(row) > 9 else None,
+            description_i18n=_str_i18n_from_json(row[10]) if len(row) > 10 else None,
+            members_i18n=_members_i18n_from_json(row[11]) if len(row) > 11 else None,
         )

@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 // =============================================================================
 // i18n locale sub-file — 手工维护，UTF-8（无 BOM）。
 //
@@ -25,7 +30,7 @@ const voiceInput = {
     zipformer: "Zipformer（中文）",
   },
   engineLabel: "引擎",
-  engineMenuHint: "首次冷啟動約 10-15 秒 · 之後常駐 · 閒置 10 分鐘自動釋放",
+  engineMenuHint: "ⓘ 提示：首次使用需載入模型（約 10-15 秒），之後一直可用；閒置 10 分鐘會自動釋放",
   engineMenuTitle: "語音輸入引擎",
   errorTitle: "語音輸入失敗",
   inferError: "語音模型「{model}」推理失敗：{detail}。可在引擎選單切到 {other}，或在 AppBuilder 重新下載該模型。",

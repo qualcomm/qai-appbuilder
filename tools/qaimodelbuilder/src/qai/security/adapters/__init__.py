@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """aiosqlite / settings-driven adapters for the security bounded context.
 
 PR-040 swaps each in-memory ``_Fake<Port>`` from ``apps/api/_security_di.py``

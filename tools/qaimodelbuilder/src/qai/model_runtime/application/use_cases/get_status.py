@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``GetStatusUseCase`` — detailed status of the inference daemon.
 
 Returns the adapter's status dict augmented with the V1 ``path_warning``

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Use cases for roster-template management (CRUD + apply-to-conversation).
 
 A **roster template** (``docs/70-multi-agent/multi-agent-conversation-design.md``
@@ -452,7 +457,7 @@ class ApplyRosterTemplateUseCase:
             self._conversations, request.conversation_id
         )
         created: list[Participant] = []
-        for member in template.members:
+        for member_index, member in enumerate(template.members):
             participant = Participant.create(
                 participant_id=ParticipantId.generate(self._ids),
                 conversation_id=request.conversation_id,
@@ -462,6 +467,16 @@ class ApplyRosterTemplateUseCase:
                 model_id=member.model_id,
                 persona=member.persona,
                 config=dict(member.config) if member.config else None,
+                # Provenance for runtime i18n persona override (migration 056).
+                # A team member has no id of its own, so we store a COMPOSITE
+                # key ``"<roster_id>#<member_index>"`` (e.g. ``builtin-arch-
+                # dev-test#0``). At runtime the orchestrator splits on ``#`` to
+                # recover (roster_id, index) and looks up
+                # ``members_i18n[locale][index].persona`` for the translation.
+                # The index is the member's ORDER position in
+                # ``template.members`` — which is exactly the order the built-in
+                # seed's ``members_i18n[locale]`` array uses, so they align 1:1.
+                template_id=f"{template.id.value}#{member_index}",
             )
             await self._participants.save(participant)
             created.append(participant)

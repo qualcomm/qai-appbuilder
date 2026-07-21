@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * `useQuestionImages` — per-question pending-image queues for the in-conversation
  * ChatQuestionCard (V2 enhancement).

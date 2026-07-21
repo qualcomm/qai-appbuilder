@@ -38,18 +38,53 @@ has its OWN FastAPI backend that does inference in-process; it does NOT call the
 host run API. Method:
 
 1. **Understand model I/O.** Use `read` to view the selected model's `runner.py`
-   **READ-ONLY** at `${APP_ROOT}/factory/app_builder/models/<id>/runner.py`
-   (always use that absolute path — your tool working directory is the user
-   WORKSPACE, not the app install dir), and call
+   **READ-ONLY** — pack lives in **one of two locations** depending on origin:
+
+   - **Built-in packs**: `${APP_ROOT}/factory/app_builder/models/<id>/runner.py`
+   - **User-imported packs (P4)**: `${APP_ROOT}/data/app_builder/user_models/<id>/runner.py`
+
+   Always use these absolute paths — your tool working directory is the user
+   WORKSPACE, not the app install dir. If the built-in path does not exist,
+   try the user path (a given pack lives in exactly one). Also call
    `GET /api/app-builder/models/{id}/schema` and
    `GET /api/app-builder/models/{id}/manifest` for input/output shape, params,
    and examples.
+
+   The runner's `_resolve_weights()` / `_resolve_model_dir()` function contains
+   the canonical logic for locating `.bin` weight files (handles both dev-time
+   env-var anchors and packaged-zip ancestor-walk). Your generated
+   `backend/inference.py` **must not reinvent this logic** — copy the
+   `_resolve_dir()` template from `${APP_ROOT}/factory/app_builder/fullstack-authoring.SKILL.md`
+   §4 verbatim; it is 4-tier and correctly handles built-in packs, user-imported
+   packs (both dev-time), and packaged zips (any machine).
 2. **Determine `app_id`.** Lowercase letters/digits/dash/underscore only, must
    start with an alphanumeric, length 2–64, derived from the user request + the
    primary model (e.g. `melotts-tts-demo`, `ppocrv4-ocr-reader`). If a directory
    `${APP_ROOT}/data/app_builder/<app_id>/` already exists, **MODIFY the existing
    app in place** — do not create `-copy` / `-new` duplicates unless the user
    explicitly asks for a new app.
+
+   **P4 migration for existing apps referencing user-imported packs**: if an
+   existing `app.yaml` has `builtin: true` + `pack_dir: "${APP_ROOT}/factory/…"`
+   / `model_dir: "${APP_ROOT}/models/…"` but the referenced pack was actually
+   imported via ModelBuilder (check whether
+   `${APP_ROOT}/factory/app_builder/models/<id>/manifest.json` exists — if not,
+   the pack is user-imported), you MUST update:
+
+   - `app.yaml` to the user-pack layout (`builtin: false` + user paths, see
+     `fullstack-authoring.SKILL.md` §3),
+   - `backend/inference.py` + `backend/main.py` regenerated from the current
+     `_webui/backend/*_base.py` templates (so the 4-tier `_resolve_dir` picks
+     up the P4 user-anchor env vars at dev-time), AND
+   - `run.bat` (and `run.ps1` / `run.sh` if present) regenerated from
+     `fullstack-authoring.SKILL.md` §7. **This is easy to miss** — a stale
+     6-line `run.bat` (no `REPO_ROOT` derivation, no `if exist` guards) means
+     manual `run.bat` double-click sees empty env vars and the pack dir /
+     manifest cannot be resolved (weights still find via tier-2 fallback but
+     I/O contract degrades to static defaults).
+
+   Existing apps generated before P4 have 3-tier resolvers that only find
+   built-in packs.
 3. **Generate the FULL project** under the ABSOLUTE path
    `${APP_ROOT}/data/app_builder/<app_id>/` (always use this absolute path — a
    bare relative `data/app_builder/` resolves under your tool working directory,
@@ -166,16 +201,24 @@ Example chains (short):
 
 ## What you do **not** do
 
-- **Do not MODIFY** any file under `factory/app_builder/models/<id>/` (manifest,
-  runner, weights, SKILL) or any weights under `${APP_ROOT}/models/<id>/`. These
-  are developer-maintained and must not change during user conversations.
-- You **MAY `read` `runner.py` READ-ONLY** to understand a model's input/output.
-  The generated fullstack app's **OWN** backend **SHOULD** perform inference
+- **Do not MODIFY** any pack file — read-only applies to **both** locations:
+  - Built-in: `${APP_ROOT}/factory/app_builder/models/<id>/` (manifest / runner
+    / weights / SKILL) and weights under `${APP_ROOT}/models/<id>/`.
+  - User-imported (P4): `${APP_ROOT}/data/app_builder/user_models/<id>/`
+    (manifest / runner / SKILL) and weights under
+    `${APP_ROOT}/data/app_builder/user_model_weights/models/<id>/`.
+
+  These are release-contracted (built-in) or user-import-contracted (user) and
+  must not change during user conversations.
+- You **MAY `read` `runner.py` READ-ONLY** — at whichever of the two locations
+  above holds the pack — to understand a model's input/output and to copy
+  its `_resolve_weights()` / `_resolve_model_dir()` logic. The generated
+  fullstack app's **OWN** backend **SHOULD** perform inference
   in-process using `qai_appbuilder` and the project shared helpers (it may copy
   and adapt the runner's load/preprocess/infer/postprocess logic into its own
   `backend/`). You must **NOT** modify the pack's original
-  `runner.py` / `manifest.json` / weights under
-  `factory/app_builder/models/<id>/` — copy/adapt into the app dir instead.
+  `runner.py` / `manifest.json` / weights in either location — copy/adapt into
+  the app dir instead.
 - **Do not read** Run RESULT files that the user has not explicitly sent via
   `Send to Chat` — privacy first. This does **not** forbid reading the
   developer-shipped `runner.py` (a model source file, not user data).

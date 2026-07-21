@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Agent-template HTTP routes (``/api/chat/agent-templates``).
 
 An **agent template** is a named, reusable definition of a SINGLE multi-agent
@@ -78,6 +83,14 @@ class AgentTemplateItem(BaseModel):
     #: When this template was cloned from another (e.g. a built-in preset), the
     #: SOURCE template's id; ``None`` for originals. Tail-appended (§3.1).
     cloned_from_id: str | None = None
+    #: Multi-language (i18n) maps for built-in presets (migration 056), each a
+    #: ``{"en":..,"zh-CN":..,"zh-TW":..}`` object. ``None`` for custom rows →
+    #: the frontend falls back to the single-language fields above. Tail-appended
+    #: (§3.1); single source of truth = the seed → DB (no locale-file dup).
+    name_i18n: dict[str, str] | None = None
+    description_i18n: dict[str, str] | None = None
+    display_name_i18n: dict[str, str] | None = None
+    persona_i18n: dict[str, str] | None = None
 
 
 class AgentTemplateListResponse(BaseModel):
@@ -151,6 +164,10 @@ def _template_to_item(template: AgentTemplate) -> AgentTemplateItem:
         created_at=template.created_at.isoformat(),
         updated_at=template.updated_at.isoformat(),
         cloned_from_id=template.cloned_from_id,
+        name_i18n=template.name_i18n,
+        description_i18n=template.description_i18n,
+        display_name_i18n=template.display_name_i18n,
+        persona_i18n=template.persona_i18n,
     )
 
 

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Use case: report ai_coding provider health, models and providers list.
 
 Backs the legacy ``GET /api/cc/health`` and ``GET /api/oc/health``

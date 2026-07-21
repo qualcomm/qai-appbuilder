@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Use case: decide a pending permission request.
 
 PR-095 (S9 audit §2.2 H-13) extends :class:`DecidePermissionCommand`

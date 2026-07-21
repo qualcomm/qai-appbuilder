@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """First-round auto title generation bridge (V1 parity: main.py:6817-6851).
 
 When a WebUI chat stream completes successfully **on the first round** of a

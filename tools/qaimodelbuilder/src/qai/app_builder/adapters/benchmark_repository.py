@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """aiosqlite-backed :class:`BenchmarkRepositoryPort` (S9 close).
 
 Schema reference: ``qai-db-schema.md`` §3.9 (``app_builder_benchmark``;
@@ -54,17 +59,6 @@ _GET_SQL = (
     "created_at, finished_at "
     "FROM app_builder_benchmark "
     "WHERE id = ?"
-)
-
-
-_LIST_SQL = (
-    "SELECT id, model_id, iterations, warmup, inputs_json, status, "
-    "stats_json, raw_latencies_json, error_message, "
-    "created_at, finished_at "
-    "FROM app_builder_benchmark "
-    "WHERE model_id = ? "
-    "ORDER BY created_at DESC "
-    "LIMIT ?"
 )
 
 
@@ -128,25 +122,6 @@ class SqliteBenchmarkRepository:
                 benchmark_id,
             )
         return self._row_to_domain(row)
-
-    async def list_for_model(
-        self, model_id: AppModelId, *, limit: int = 50
-    ) -> tuple[BenchmarkRecord, ...]:
-        try:
-            async with self._db.connection() as conn:
-                cur = await conn.execute(
-                    _LIST_SQL, (model_id.value, int(limit))
-                )
-                rows = await cur.fetchall()
-                await cur.close()
-        except Exception as exc:  # noqa: BLE001
-            raise PersistenceError(
-                "app_builder.benchmark.list_failed",
-                f"failed to list benchmarks for {model_id!r}: {exc}",
-                operation="benchmark.list_for_model",
-                cause=exc,
-            ) from exc
-        return tuple(self._row_to_domain(row) for row in rows)
 
     @staticmethod
     def _row_to_domain(row: tuple[object, ...]) -> BenchmarkRecord:

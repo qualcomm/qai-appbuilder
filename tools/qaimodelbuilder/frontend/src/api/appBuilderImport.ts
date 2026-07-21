@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * App Builder import API client (Model Builder → App Builder promotion).
  *
@@ -30,8 +35,20 @@ export interface BinScanResultDTO {
   readonly mtime?: string | null;
 }
 
+/** Set when the scan found no `output/` variants but detected a
+ *  downloaded-but-not-normalized AI Hub model in the workdir (weight +
+ *  metadata.json, often in a nested subfolder). Lets the UI guide the user to
+ *  run Step 6.5 normalization instead of showing a blank Import panel. */
+export interface NeedsNormalizeDTO {
+  readonly model_workdir: string;
+  readonly detected_weight: string;
+}
+
 export interface BinScanResponseDTO {
   readonly results: BinScanResultDTO[];
+  /** Optional (tail-appended): present only when `results` is empty AND an
+   *  un-normalized AI Hub package was detected. */
+  readonly needs_normalize?: NeedsNormalizeDTO | null;
 }
 
 /**

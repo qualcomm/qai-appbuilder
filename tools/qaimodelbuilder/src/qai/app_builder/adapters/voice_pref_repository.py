@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """aiosqlite-backed :class:`VoiceInputPreferenceRepositoryPort` (PR-045 + PR-307).
 
 Schema reference: ``qai-db-schema.md`` §3.5 (``app_builder_voice_pref``).

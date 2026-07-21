@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Inbound WeChat image decoder (S9 PR-093 §2.2 H-15).
 
 Restores multi-modal image handling for inbound WeChat messages —

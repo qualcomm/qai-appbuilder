@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``seed_defaults`` — load PR-060 staging JSONL into qai.db (PR-062).
 
 After PR-061 created an empty ``qai.db`` with the v2 schema, PR-062

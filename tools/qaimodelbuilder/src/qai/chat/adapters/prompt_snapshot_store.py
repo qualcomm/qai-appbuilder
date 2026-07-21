@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """In-memory prompt-snapshot ring buffer (PR-403 / S7.5 lane L4).
 
 Migrates ``backend/main.py:_prompt_snapshots`` (module-level dict +

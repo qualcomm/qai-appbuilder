@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Launcher helper — wait for runtime endpoint, open browser, clean stale state.
 
 This is a tiny CLI used by ``Start.bat`` (and conceptually by any
@@ -476,9 +481,11 @@ def _sweep_fallback_ports(ports: "tuple[int, ...]") -> int:
         # tree down and released its listening socket. Wait (bounded)
         # until the swept ports are no longer LISTENING, so the
         # supervisor's subsequent ``_resolve_bindable_port`` probe sees
-        # the freed default port (8989) instead of racing the teardown
-        # and picking yet another fallback — which would re-create the
-        # very "two servers running" symptom we are fixing.
+        # the freed default port (4099 when ``Start.bat`` pins it via
+        # ``--port``; otherwise the first bindable entry of
+        # ``FALLBACK_PORTS``) instead of racing the teardown and picking
+        # yet another fallback — which would re-create the very "two
+        # servers running" symptom we are fixing.
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:
             if not _pids_listening_on_ports(ports):
@@ -709,7 +716,7 @@ def _wait_for_url(data_root: Path, timeout: float) -> str | None:
 def _health_probe_url(base_url: str) -> str:
     """Build the health-endpoint URL from the API base URL.
 
-    The endpoint file records the SPA base (e.g. ``http://127.0.0.1:8989/``);
+    The endpoint file records the SPA base (e.g. ``http://127.0.0.1:4099/``);
     the readiness probe targets ``/api/system/health`` (liveness + DB pragma
     snapshot) on the same origin. Tolerant of a trailing slash on the base.
     """

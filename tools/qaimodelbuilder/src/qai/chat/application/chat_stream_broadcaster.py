@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """In-process ordinary chat stream broadcast + replay state machine.
 
 The primary chat WS/SSE routes stream frames directly to the initiating

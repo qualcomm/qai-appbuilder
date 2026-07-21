@@ -737,7 +737,7 @@ def main():
         print("[ERROR]      <.venv_x64_310>\\Scripts\\python.exe "
               "scripts\\setup\\setup_qairt_env.py --gen-config")
         print("[ERROR] 注意：模型推理本身无需 VS 2022 / QAIRT SDK；若只是想跑推理，")
-        print("[ERROR] 请改用 aihub-model-run skill 下载预编译模型直接推理。")
+        print("[ERROR] 请改用 model-hub skill 下载预编译模型直接推理。")
         sys.exit(1)
 
     # 2. Initialize VS ARM64 environment (Windows only)

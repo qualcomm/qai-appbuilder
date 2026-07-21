@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Dynamic pack dependency checker / installer (PR-094 §17.5 #11).
 
 Restores the legacy ``backend/app_builder/dep_checker.py`` (494 LOC) as an

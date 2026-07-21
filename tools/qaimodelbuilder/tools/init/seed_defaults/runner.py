@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Implementation of the seed-defaults loader (PR-062)."""
 
 from __future__ import annotations
@@ -49,6 +54,10 @@ _STAGING: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         (
             "id", "name", "description", "members_json", "is_builtin",
             "created_at", "updated_at",
+            # Multi-language (i18n) sidecar columns (migration 056): per-locale
+            # {"en":..,"zh-CN":..,"zh-TW":..} maps; NULL for custom rows → fall
+            # back to the canonical single-language columns above.
+            "name_i18n_json", "description_i18n_json", "members_i18n_json",
         ),
     ),
     (
@@ -62,6 +71,9 @@ _STAGING: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         (
             "id", "name", "description", "display_name", "model_id", "persona",
             "config_json", "is_builtin", "created_at", "updated_at",
+            # Multi-language (i18n) sidecar columns (migration 056).
+            "name_i18n_json", "description_i18n_json",
+            "display_name_i18n_json", "persona_i18n_json",
         ),
     ),
     (
@@ -74,6 +86,8 @@ _STAGING: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         (
             "id", "name", "description", "framing", "tool_policy_json",
             "flow_policy_json", "is_builtin", "created_at", "updated_at",
+            # Multi-language (i18n) sidecar columns (migration 056).
+            "name_i18n_json", "description_i18n_json", "framing_i18n_json",
         ),
     ),
 )
@@ -270,6 +284,21 @@ def _insert_rows(
     )
     exists_sql = f"SELECT 1 FROM {table} WHERE {pk} = ? LIMIT 1"
 
+    # Idempotent forward-compatible BACKFILL (AGENTS.md §8 rule 6): when a
+    # built-in preset row was seeded by an OLDER install (before a later
+    # migration tail-appended new ``*_i18n_json`` columns), the plain "PK
+    # exists → skip" idempotency below would leave those new columns NULL
+    # forever, so a re-run of the installer never delivers the multi-language
+    # text to already-provisioned users. To fix that WITHOUT ever clobbering
+    # user edits, we backfill ONLY columns whose name ends in ``_i18n_json``
+    # (pure additive translation sidecars), ONLY when the DB value is currently
+    # NULL and the staging row provides a value. The per-column
+    # ``WHERE <col> IS NULL`` guard makes it strictly monotonic (NULL→value,
+    # never value→other), and these columns only exist on built-in template
+    # tables, so user-authored rows (which carry their own text in the base
+    # columns and NULL i18n) are untouched.
+    i18n_columns = tuple(c for c in columns if c.endswith("_i18n_json"))
+
     with sqlite3.connect(str(db_path)) as conn:
         # Ensure busy timeout so concurrent installs (rare but possible)
         # don't immediately fail.
@@ -278,6 +307,7 @@ def _insert_rows(
         cur = conn.cursor()
         inserted = 0
         skipped = 0
+        backfilled = 0
         for row in rows:
             try:
                 values = _row_to_tuple(row, columns)
@@ -302,6 +332,32 @@ def _insert_rows(
                 )
                 continue
             if existing is not None:
+                # Row already present: skip the INSERT, but idempotently
+                # backfill any additive ``*_i18n_json`` sidecar column that is
+                # still NULL in the DB yet supplied by staging (AGENTS.md §8
+                # rule 6). Monotonic (only NULL→value) and confined to i18n
+                # columns, so user data is never overwritten.
+                for col in i18n_columns:
+                    new_value = row.get(col)
+                    if new_value is None:
+                        continue
+                    try:
+                        upd = cur.execute(
+                            f"UPDATE {table} SET {col} = ? "
+                            f"WHERE {pk} = ? AND {col} IS NULL",
+                            (new_value, pk_value),
+                        )
+                    except (
+                        sqlite3.IntegrityError,
+                        sqlite3.OperationalError,
+                    ) as exc:
+                        report.add_error(
+                            f"{table}: error backfilling "
+                            f"{col!r} for {pk_value!r}: {exc}"
+                        )
+                        continue
+                    if upd.rowcount == 1:
+                        backfilled += 1
                 skipped += 1
                 continue
             try:
@@ -332,7 +388,19 @@ def _insert_rows(
         table=table,
         inserted=inserted,
         skipped=skipped,
+        backfilled=backfilled,
     )
+    if backfilled:
+        report.add(InitReportEntry(
+            initialiser=f"seed_defaults.{table}",
+            location="qai_db_table_backfill",
+            target=table,
+            rows=backfilled,
+            note=(
+                f"backfilled {backfilled} NULL *_i18n_json value(s) on "
+                f"pre-existing built-in rows (idempotent forward-compat)"
+            ),
+        ))
     return inserted, skipped
 
 

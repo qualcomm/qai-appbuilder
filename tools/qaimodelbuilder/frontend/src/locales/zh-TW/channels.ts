@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 // =============================================================================
 // i18n locale sub-file — 手工维护，UTF-8（无 BOM）。
 //
@@ -24,6 +29,7 @@ const channels = {
   settingsSaved: "通道設定已儲存",
   settingsSaveFailed: "儲存通道設定失敗",
   settingsLoadFailed: "載入通道設定失敗",
+  legacy_notice: "此檢視使用的是舊版元件路徑，請更新到 FeishuConfigPanel。",
   modelLabel: "AI 模型",
   modelFollowGlobal: "預設（跟隨全域設定）",
   modelSearch: "搜尋模型…",
@@ -67,7 +73,11 @@ const channels = {
     errorMsg: "通道出錯",
     idleHint: "填寫飛書應用憑證以透過 WebSocket 長連線接入，無需公網 IP",
     introLine1: "透過飛書開放平台 WebSocket 長連線接收訊息，無需公網 IP。<br>",
-    introLine2: "請在 <a href=\"https://open.feishu.cn/app\" target=\"_blank\" style=\"color:var(--accent)\">飛書開放平台</a> 建立自建應用，開啟機器人能力，申請 <code>im:message</code>、<code>im:message:send_as_bot</code> 權限，並在「事件訂閱」中選擇 WebSocket 長連線模式，訂閱 <code>im.message.receive_v1</code> 事件。",
+    // introLine2 拆分：把「飛書開放平台」外連從段落中抽出，改為獨立成行的按鈕式外連。
+    // 段落僅保留敘述文字（無 <a>），按鈕由 FeishuConfigPanel 模板自行組合。
+    introLine2Prefix: "請在飛書開放平台建立自建應用，開啟機器人能力，申請 <code>im:message</code>、<code>im:message:send_as_bot</code> 權限，並在「事件訂閱」中選擇 WebSocket 長連線模式，訂閱 <code>im.message.receive_v1</code> 事件。",
+    openPlatformLabel: "開啟飛書開放平台",
+    openPlatformTooltip: "跳轉到飛書開放平台",
     refreshStatus: "重新整理狀態",
     runningHint: "飛書通道運行中，機器人已連接飛書伺服器，可接收訊息。",
     info: {

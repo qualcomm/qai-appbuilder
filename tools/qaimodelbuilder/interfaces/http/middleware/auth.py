@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """FastAPI middleware: Okta OIDC session-cookie gate for the Web UI.
 
 Sits alongside :mod:`interfaces.http.middleware.csrf` in the middleware
@@ -50,7 +55,7 @@ from urllib.parse import urlencode
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, RedirectResponse
+from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
 
 from qai.platform.logging import get_logger
@@ -116,6 +121,8 @@ def public_user(claims: dict[str, Any]) -> dict[str, Any]:
         "display_name": display_name,
         "sub": str(claims.get("sub") or ""),
         "auth_source": str(claims.get("auth_source") or "okta_oidc"),
+        "is_mb_pro_authorized": bool(claims.get("is_mb_pro_authorized", False)),
+        "mb_pro_access_check_failed": bool(claims.get("mb_pro_access_check_failed", False)),
     }
 
 
@@ -313,15 +320,62 @@ class AuthMiddleware(BaseHTTPMiddleware):
             request.state.user = user
             return await call_next(request)
 
-        # Missing / invalid session → differentiated response.
+        # ── Missing / invalid session — differentiated by client type ─────
+        #
+        # UX contract (2026-07-17): **the application must always render
+        # its own shell first**. A user who opens the app URL — or any
+        # SPA-router deep link like ``/chat`` / ``/settings`` / any other
+        # front-end path — must see the QAI ModelBuilder interface, not
+        # be silently teleported to Okta / account.qualcomm.com before
+        # the SPA ever loads. The latter feels to end users like the
+        # shortcut is broken or the URL was hijacked ("I clicked
+        # ModelBuilder, why am I on Qualcomm's login page?"). The
+        # correct login flow is: the SPA shell renders → the SPA hydrates
+        # ``/api/auth/me`` (which IS public — see ``_PUBLIC_EXACT``) →
+        # sees ``authenticated=false`` → shows the in-app ``LoginPrompt``
+        # modal so the user can *choose* to sign in.
+        #
+        # Regression trigger (both commits in HEAD, session-cookie-masked):
+        #
+        #   * ``5ee75b45`` (2026-07-12) introduced this middleware, which
+        #     was written to 303-redirect any non-public HTML request to
+        #     ``/auth/login``. That path serves the auth router which
+        #     303s again to Okta — a full page teleport before the SPA
+        #     runs a single line of JavaScript.
+        #   * ``fa4ac9c`` (2026-07-15) changed the app launcher
+        #     (``apps/cli/_endpoint_helper.py:605``) to open ``/chat``
+        #     on startup. ``/`` is in ``_PUBLIC_EXACT`` but ``/chat`` is
+        #     not, so the redirect fired on every cold start whenever
+        #     the session cookie was absent / expired.
+        #   * The bug went unnoticed because the 8-hour session TTL is
+        #     silently slid forward on every request, so long-running
+        #     users never hit an expired cookie in practice.
+        #
+        # Fix (2026-07-17): route missing-session BY CLIENT TYPE instead
+        # of BY REDIRECT.
+        #
+        #   * Browser HTML navigations → pass through. The SPA shell
+        #     loads normally, then the SPA's own ``LoginPrompt`` modal
+        #     handles the unauthenticated state. The user always sees
+        #     the QAI interface first. **No server-side 303 to Okta.**
+        #   * SPA JSON fetches / CLI / bots (i.e. non-HTML tooling that
+        #     already handles envelope errors) → 401 envelope so
+        #     ``http.ts:parseAndInterceptApiError`` on the SPA side can
+        #     surface the LoginPrompt modal from a mid-session 401 too.
+        #
+        # Note that ``request.state.user`` stays unset on the pass-through
+        # branch. That is fine: downstream code that needs a user reads
+        # it via ``get_current_user`` / the ``/api/auth/me`` route, both
+        # of which already tolerate ``None``. The SPA HTML response is
+        # a static bundle — it has no dependency on the request user.
         login_url = _login_url(request)
         if _wants_browser_redirect(request):
             logger.debug(
-                "auth.middleware.redirect_browser",
+                "auth.middleware.pass_through_html",
                 path=path,
-                login_url=login_url,
+                reason="spa_shell_renders_first_then_login_prompt_modal",
             )
-            return RedirectResponse(login_url, status_code=303)
+            return await call_next(request)
 
         logger.debug(
             "auth.middleware.reject_api",

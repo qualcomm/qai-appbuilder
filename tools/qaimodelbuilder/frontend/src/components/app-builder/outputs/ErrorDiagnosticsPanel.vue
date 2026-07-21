@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <script setup lang="ts">
 /**
  * ErrorDiagnosticsPanel — App Builder 错误诊断面板（V1 行为对齐，V2 优良结构）。

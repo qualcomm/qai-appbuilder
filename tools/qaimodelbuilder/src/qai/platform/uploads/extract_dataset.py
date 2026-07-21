@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Dataset archive extraction (zip / tar) with zip-slip protection.
 
 V1 parity (``backend/main.py`` L6160-6196): a dataset upload that is a

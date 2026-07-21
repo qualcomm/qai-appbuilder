@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 // =============================================================================
 // i18n locale sub-file — 手工维护，UTF-8（无 BOM）。
 //
@@ -32,6 +37,20 @@ const common = {
   enabled: "已啟用",
   expand: "展開",
   gotIt: "知道了",
+  // Shared help-manual overlay (see components/common/HelpButton.vue).
+  // Kept nested under `common` (not the top-level `help.*` namespace, which
+  // holds CLI-command help copy) so it is stable across features.
+  // Note: the modal close button reuses top-level `common.close` (the
+  // ChannelInfoDialog chrome consumes that key), so no `close` entry is
+  // duplicated here.
+  help: {
+    button: {
+      ariaLabel: "說明",
+    },
+    loadFailed: "說明內容載入失敗，請稍後再試或查看官方文件。",
+    title: "說明",
+    viewOfficial: "查看官方文件",
+  },
   less: "收起",
   loading: "載入中…",
   minimize: "最小化",

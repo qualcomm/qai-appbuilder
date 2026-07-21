@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * useChatCommands — main-chat slash command system (V1 parity).
  *
@@ -39,6 +44,7 @@ import { loadServiceModel } from "@/api/serviceControl";
 import { saveChatModelPreference } from "@/composables/chat/useChatModelPreference";
 import { useForgeConfig } from "@/composables/useForgeConfig";
 import { useReboot } from "@/composables/useReboot";
+import { IS_INTERNAL } from "@/edition";
 import { useChatTabsStore, type TabId, type ChatTab } from "@/stores/chatTabs";
 import {
   useConversationsStore,
@@ -604,7 +610,16 @@ export function useChatCommands() {
 
   function cmdHelp(tab: ChatTab): void {
     // V1 `/help` (useChat.js:1630-1636) — uses the help namespace text.
-    reply(tab.id, t("help.mainText"));
+    // Internal builds also append the Qualcomm support address so users
+    // who prefer the /help command (rather than the sidebar user menu)
+    // can still find it. IS_INTERNAL is a build-time constant, so the
+    // append branch is DCE'd on external/Release builds — the internal
+    // support address never ships in the open-source bundle.
+    let text = t("help.mainText");
+    if (IS_INTERNAL) {
+      text += "\n\n📮 Support: qai-appbuilder.support@qti.qualcomm.com";
+    }
+    reply(tab.id, text);
   }
 
   async function cmdReboot(tab: ChatTab, text: string): Promise<void> {

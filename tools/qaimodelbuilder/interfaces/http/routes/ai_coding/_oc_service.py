@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """OC service subprocess control routes (``_register_oc_service_routes``).
 
 The 4 OC-only routes (start / stop / status / logs).  Extracted verbatim

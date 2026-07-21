@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Use cases: QR-image rendering and read-only challenge lookup (PR-204).
 
 Adds two thin use cases that complete the QR-login surface introduced in

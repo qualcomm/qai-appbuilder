@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * Pure helper: extract the model workspace dir from chat messages.
  *
@@ -72,33 +77,44 @@ function buildWorkspacePattern(root: string): RegExp {
 }
 
 /**
- * Return the model workspace dir (`<workspaceRoot>\<model>`) referenced LAST
- * in the given messages, or `""` when none is present.
+ * Return ALL distinct model workspace dirs (`<workspaceRoot>\<model>`)
+ * referenced anywhere in the messages, ordered by RECENCY (most-recently
+ * mentioned first), de-duplicated.
  *
- * Scans each message newest-first and, within a message, both its text
- * `content` and its stringified `toolCalls` (the conversion tool's output —
- * where the workspace path usually lands — rides the tool call, not the
- * assistant prose). Mirrors V1's "scan everything, take the last match".
+ * Why this exists (2026-07 fix): the single-value {@link extractModelWorkdirFromMessages}
+ * returns just ONE path, which meant a conversation that mentions several
+ * `<root>\<model>` paths (e.g. a stray `C:\WoS_AI\fix_skill_docs3` early on and
+ * the REAL `C:\WoS_AI\resnet50` many times) could resolve to the wrong one —
+ * and worse, "resolved a path" was treated as "found a model" even when that
+ * directory has NO precision artifacts on disk. Callers that can verify disk
+ * state (scanBins) should pull ALL candidates and pick the first one that
+ * actually contains `.bin`/`.dlc` variants — a State-Truth-First selection
+ * (the truth is "which dir really has variants", not "which path appeared
+ * first in the text").
  *
- * `workspaceRoot` defaults to `C:\WoS_AI` (V1 parity) so existing callers
- * keep working unchanged; pass the configured `workspace.model_root` to scan
- * for a custom root instead.
+ * Ordering: newest mention first. Within a single message the LAST textual
+ * match is considered its representative (mirrors the historical
+ * "take the last match" bias), and messages are walked newest→oldest, so the
+ * returned list is "most recently referenced" → "least". De-duplicated while
+ * preserving that order.
  */
-export function extractModelWorkdirFromMessages(
+export function extractAllModelWorkdirsFromMessages(
   messages: readonly WorkdirScanMessage[] | undefined,
   workspaceRoot: string = DEFAULT_WORKSPACE_ROOT,
-): string {
-  if (!Array.isArray(messages)) return "";
+): string[] {
+  if (!Array.isArray(messages)) return [];
   const root =
     typeof workspaceRoot === "string" && workspaceRoot.trim() !== ""
       ? workspaceRoot
       : DEFAULT_WORKSPACE_ROOT;
   const pattern = buildWorkspacePattern(root);
-  // Normalise the root for the returned dir: drop trailing separators and
-  // re-join the literal segments with a single backslash (V1 returns a
-  // backslash path regardless of how the match was spelled in the text).
   const rootSegments = root.split(/[\\/]+/).filter((seg) => seg.length > 0);
   const normalisedRoot = rootSegments.join("\\");
+
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  // Walk newest → oldest. Within each message collect ALL matches; append the
+  // message's matches in reverse (its last match is "most recent" within it).
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (!msg) continue;
@@ -113,14 +129,41 @@ export function extractModelWorkdirFromMessages(
     }
     if (parts.length === 0) continue;
     const text = parts.join("\n");
-    // `pattern` carries the `g` flag; reset lastIndex before each scan so a
-    // prior message's match position doesn't skip the start of this one.
     pattern.lastIndex = 0;
     const matches = [...text.matchAll(pattern)];
-    if (matches.length > 0) {
-      const model = matches[matches.length - 1]?.[1];
-      if (model) return `${normalisedRoot}\\${model}`;
+    // Reverse so the last match in the message (its representative / most
+    // recent) is considered before earlier ones in the same message.
+    for (let m = matches.length - 1; m >= 0; m--) {
+      const model = matches[m]?.[1];
+      if (!model) continue;
+      const dir = `${normalisedRoot}\\${model}`;
+      if (seen.has(dir)) continue;
+      seen.add(dir);
+      ordered.push(dir);
     }
   }
-  return "";
+  return ordered;
+}
+
+/**
+ * Return the model workspace dir (`<workspaceRoot>\<model>`) referenced LAST
+ * in the given messages, or `""` when none is present.
+ *
+ * Thin wrapper over {@link extractAllModelWorkdirsFromMessages} that returns
+ * the most-recently-mentioned candidate (preserving the historical single-
+ * value "take the last match" behaviour) for callers that cannot verify disk
+ * state. Callers that CAN scan disk should use
+ * {@link extractAllModelWorkdirsFromMessages} + scanBins to pick the candidate
+ * that truly has variants.
+ *
+ * `workspaceRoot` defaults to `C:\WoS_AI` (V1 parity) so existing callers
+ * keep working unchanged; pass the configured `workspace.model_root` to scan
+ * for a custom root instead.
+ */
+export function extractModelWorkdirFromMessages(
+  messages: readonly WorkdirScanMessage[] | undefined,
+  workspaceRoot: string = DEFAULT_WORKSPACE_ROOT,
+): string {
+  const all = extractAllModelWorkdirsFromMessages(messages, workspaceRoot);
+  return all[0] ?? "";
 }

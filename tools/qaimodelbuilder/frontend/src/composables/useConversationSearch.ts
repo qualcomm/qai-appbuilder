@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * useConversationSearch — V1-parity full-text conversation search for
  * the sidebar (extracted from `AppSidebar.vue` cohesion split).

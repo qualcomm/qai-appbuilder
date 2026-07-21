@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <script setup lang="ts">
 /**
  * ComposerModeIcon — the single source of truth for toolbar-module icons.
@@ -24,6 +29,7 @@ withDefaults(
 
 const KNOWN: ReadonlySet<string> = new Set([
   "model_builder",
+  "model_hub",
   "app_builder",
   "code",
   "translate",
@@ -191,6 +197,24 @@ function resolve(key: string): string {
     cy="18"
     r="2.5"
   /><path d="M7.7 7.7l2.6 8.1M16.3 7.7l-2.6 8.1M8 6h8" /></svg>
+  <!-- model_hub (模型市场) — download cloud ("pull pre-compiled models") -->
+  <svg
+    v-else-if="resolve(iconKey) === 'model_hub'"
+    :width="size"
+    :height="size"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+  ><path d="M20 16.2A4.5 4.5 0 0 0 17.5 8h-1.8A7 7 0 1 0 4 14.9" /><polyline points="8 17 12 21 16 17" /><line
+    x1="12"
+    y1="12"
+    x2="12"
+    y2="21"
+  /></svg>
   <!-- fallback — generic rounded square -->
   <svg
     v-else

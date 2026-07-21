@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``ProbeProviderUseCase`` -- verify a cloud provider's connectivity.
 
 The config wizard (``qai config provider test`` / ``add``) needs to know

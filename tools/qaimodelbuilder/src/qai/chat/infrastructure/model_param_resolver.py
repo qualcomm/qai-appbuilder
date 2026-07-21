@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Per-model parameter clamping / filtering (PR-090, S9 C-5).
 
 Implements audit item :ref:`C-5` (model param resolution) from

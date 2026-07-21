@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <script setup lang="ts">
 /**
  * Shared role-editing form (display name / model / persona / tools / colour).
@@ -29,6 +34,7 @@ import {
   DISCUSSION_PALETTE_SIZE,
 } from "@/stores/_chatTabsTypes";
 import { isAdvertised, type ModeToolPolicy } from "@/lib/modePolicy";
+import ToolGroupToggle from "./ToolGroupToggle.vue";
 
 /** The unified editable shape this form binds to (v-model:value). */
 export interface RoleFormData {
@@ -142,14 +148,6 @@ function patch(partial: Partial<RoleFormData>): void {
 const paletteIndices = computed(() =>
   Array.from({ length: DISCUSSION_PALETTE_SIZE }, (_, i) => i),
 );
-
-function toggleTool(tool: string): void {
-  const next = [...props.value.allowedTools];
-  const i = next.indexOf(tool);
-  if (i >= 0) next.splice(i, 1);
-  else next.push(tool);
-  patch({ allowedTools: next });
-}
 
 const allToolsSelected = computed(() =>
   SELECTABLE_TOOLS.value.every((tool) => props.value.allowedTools.includes(tool)),
@@ -271,26 +269,14 @@ watch(
           }}
         </button>
       </span>
-      <div class="role-tools-grid">
-        <label
-          v-for="tool in SELECTABLE_TOOLS"
-          :key="tool"
-          class="role-tool-chip"
-          :class="{
-            'is-on': value.allowedTools.includes(tool),
-            'is-dimmed': isToolDimmed(tool),
-          }"
-          :title="dimTooltip(tool)"
-        >
-          <input
-            type="checkbox"
-            :checked="value.allowedTools.includes(tool)"
-            :data-testid="`role-form-tool-${tool}`"
-            @change="toggleTool(tool)"
-          />
-          {{ tool }}
-        </label>
-      </div>
+      <ToolGroupToggle
+        :model-value="value.allowedTools"
+        :tools="SELECTABLE_TOOLS"
+        mode="allowed"
+        :is-dimmed="isToolDimmed"
+        :dim-tooltip="dimTooltip"
+        @update:model-value="patch({ allowedTools: $event })"
+      />
     </div>
 
     <!-- Per-role SKILL whitelist (independent multi-select; pool = globally

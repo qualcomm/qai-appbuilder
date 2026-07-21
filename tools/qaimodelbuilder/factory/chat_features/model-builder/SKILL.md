@@ -1,6 +1,6 @@
 ---
-name: model-builder
-description: QAI ModelBuilder. Tools and workflows for model conversion, inspection, operator patching, quantization, and inference validation of self-converted models on Qualcomm platform. Use this skill when working with custom ONNX/PyTorch models: export to ONNX, convert to QNN/SNPE DLC, FP16/FP32/INT8 quantization, operator patching, context binary generation, and inference validation of self-built models. NOT for AI Hub prebuilt packages — use aihub-model-run skill instead. Supports QAIRT SDK 2.45+ on Windows on Snapdragon (WoS) ARM64 devices.
+name: Model Builder
+description: QAI ModelBuilder. Tools and workflows for model conversion, inspection, operator patching, quantization, and inference validation of self-converted models on Qualcomm platform. Use this skill when working with custom ONNX/PyTorch models: export to ONNX, convert to QNN/SNPE DLC, FP16/FP32/INT8 quantization, operator patching, context binary generation, and inference validation of self-built models. NOT for AI Hub prebuilt packages — use model-hub skill instead. Supports QAIRT SDK 2.45+ on Windows on Snapdragon (WoS) ARM64 devices.
 ---
 
 # QAI ModelBuilder
@@ -27,37 +27,37 @@ description: QAI ModelBuilder. Tools and workflows for model conversion, inspect
 >
 > | # | Question | YES → | NO → |
 > |---|------|-------|------|
-> | Q1 | Does the model the user mentioned **already have a prebuilt package on AI Hub** (e.g. Zipformer, MobileNet, YOLO)? | ❌ **Stop**, switch to the `aihub-model-run` skill | Continue to Q2 |
-> | Q2 | Is the file the user wants to download/use an AI Hub prebuilt artifact (QNN context binary `.bin` / `.dlc`)? | ❌ **Stop**, switch to the `aihub-model-run` skill | Continue to Q3 |
+> | Q1 | Does the model the user mentioned **already have a prebuilt package on AI Hub** (e.g. Zipformer, MobileNet, YOLO)? | ❌ **Stop**, switch to the `model-hub` skill | Continue to Q2 |
+> | Q2 | Is the file the user wants to download/use an AI Hub prebuilt artifact (QNN context binary `.bin` / `.dlc`)? | ❌ **Stop**, switch to the `model-hub` skill | Continue to Q3 |
 > | Q3 | Does the user have a **custom ONNX/PyTorch model** that needs converting, or needs re-quantizing/recompiling into a custom `.bin`? | ✅ Activate this skill | ❌ User intent unclear — confirm first |
 >
-> **Common trigger words for Q1/Q2 (matching any one → switch to `aihub-model-run` immediately, do NOT handle inside this skill):**
+> **Common trigger words for Q1/Q2 (matching any one → switch to `model-hub` immediately, do NOT handle inside this skill):**
 > - "download from AI Hub" / "model on AI Hub" / "on-device pre-exported package" / "prebuilt package"
 > - A model name + "download" where that model already exists on AI Hub (e.g. Zipformer, Whisper, Inception, ResNet)
 > - "QNN_CONTEXT_BINARY" / "QNN_DLC" / "AI Hub prebuilt context binary"
 
-> ### 🤖 Dispatching a sub-agent to another skill (especially `aihub-model-run`) — MANDATORY
+> ### 🤖 Dispatching a sub-agent to another skill (especially `model-hub`) — MANDATORY
 >
-> **Background lesson (2026-06)**: After judging that a task belonged to `aihub-model-run`, we once **did not read its SKILL.md in full first**, and instead — under the context pollution of this skill's (model-builder) 70KB full text plus various `factory\chat_features\model-builder\scripts\...` paths — wrote a sub-agent instruction "out of a knowledge vacuum" telling it to "go search `C:\Shared` / `C:\WoS_AI` for `.bin`/`metadata.json`". A sub-agent is a **completely fresh, blank context that inherits NOTHING from this skill**, so it can only follow the prompt → it triggered a full recursive scan and hung for 30+ minutes.
+> **Background lesson (2026-06)**: After judging that a task belonged to `model-hub`, we once **did not read its SKILL.md in full first**, and instead — under the context pollution of this skill's (model-builder) 70KB full text plus various `factory\chat_features\model-builder\scripts\...` paths — wrote a sub-agent instruction "out of a knowledge vacuum" telling it to "go search `C:\Shared` / `C:\WoS_AI` for `.bin`/`metadata.json`". A sub-agent is a **completely fresh, blank context that inherits NOTHING from this skill**, so it can only follow the prompt → it triggered a full recursive scan and hung for 30+ minutes.
 >
 > Therefore, when the GATE above concludes "the task belongs to another skill and a sub-agent must be dispatched", you **MUST**:
 >
-> 1. **First `read` the target SKILL.md in full** (e.g. `${APP_ROOT}\skills\aihub-model-run\SKILL.md`), then write the sub-agent prompt based on its content. **Dispatching a sub-agent without first reading the target SKILL in full is forbidden.**
+> 1. **First `read` the target SKILL.md in full** (e.g. `${APP_ROOT}\factory\chat_features\model-hub\SKILL.md`), then write the sub-agent prompt based on its content. **Dispatching a sub-agent without first reading the target SKILL in full is forbidden.**
 > 2. **The first instruction in the sub-agent prompt MUST be "read the target SKILL.md in full before acting"** — the sub-agent does not inherit the main agent's context.
 > 3. **The sub-agent prompt MUST NOT carry any path / script / toolchain reference from this skill (model-builder)** (`run_pipeline.py`, `qnn-onnx-converter`, `qai_convert_*.py`, `qairt_sdk_root` conversion tools, etc.) — they apply only to "custom ONNX/PyTorch conversion", are useless for AI Hub prebuilt packages, and would lure the sub-agent into a wrong full-disk file search.
-> 4. If the target SKILL provides a "Sub-Agent Dispatch Template" (`aihub-model-run` has one), **reuse its template directly**.
+> 4. If the target SKILL provides a "Sub-Agent Dispatch Template" (`model-hub` has one), **reuse its template directly**.
 
 **Quick decision reference:**
 
 | User need | Correct skill | Inference tool |
 |---------|-----------|--------|
-| Download a prebuilt package from AI Hub (e.g. Inception v3, MobileNet) and run inference | **`aihub-model-run`** | `qai_appbuilder` / `QNNContext` (all NPU inference goes through this path) |
+| Download a prebuilt package from AI Hub (e.g. Inception v3, MobileNet) and run inference | **`model-hub`** | `qai_appbuilder` / `QNNContext` (all NPU inference goes through this path) |
 | Custom ONNX/PyTorch → convert → inference | **this skill** (`model-builder`) | `qai_appbuilder` / `QNNContext` |
 | Quantize/recompile an existing model into a custom `.bin` | **this skill** (`model-builder`) | `qai_appbuilder` / `QNNContext` |
 
-> ⚠️ **AI Hub prebuilt packages — belong to the `aihub-model-run` skill; this skill does not handle them:**
+> ⚠️ **AI Hub prebuilt packages — belong to the `model-hub` skill; this skill does not handle them:**
 >
-> A prebuilt package downloaded from AI Hub contains a QNN context binary (`.bin`) or `.dlc`; these are all loaded directly by the `aihub-model-run` skill via `qai_appbuilder` / `QNNContext` and run on the NPU. This skill only converts/compiles **custom ONNX/PyTorch** models into NPU models; it does not handle AI Hub prebuilt artifacts.
+> A prebuilt package downloaded from AI Hub contains a QNN context binary (`.bin`) or `.dlc`; these are all loaded directly by the `model-hub` skill via `qai_appbuilder` / `QNNContext` and run on the NPU. This skill only converts/compiles **custom ONNX/PyTorch** models into NPU models; it does not handle AI Hub prebuilt artifacts.
 
 ---
 
@@ -85,14 +85,14 @@ description: QAI ModelBuilder. Tools and workflows for model conversion, inspect
 
 **Only after passing the "SKILL Boundary Decision" above** should you activate this skill:
 
-> ⚠️ "AI Hub download" / "AI Hub prebuilt package" / "on-device pre-exported package" → **do NOT activate this skill by themselves**; switch to `aihub-model-run`. Only when the user explicitly says "needs re-compilation/quantization" does it belong to this skill.
+> ⚠️ "AI Hub download" / "AI Hub prebuilt package" / "on-device pre-exported package" → **do NOT activate this skill by themselves**; switch to `model-hub`. Only when the user explicitly says "needs re-compilation/quantization" does it belong to this skill.
 
 ### Conversion (when custom ONNX/PyTorch conversion is needed)
 - "convert model to qnn" / "qnn conversion" / "convert to qnn"
 - "convert model to dlc" / "snpe conversion" / "convert to dlc"
 - "convert onnx to qnn" / "convert onnx to snpe"
 - "generate context binary" / "context bin" / "qnn context binary"
-- "run qnn inference" / "snpe inference" / "qairt inference" — ⚠️ **Only activate this skill when the inference target is a self-built/self-converted model; if the inference target is an AI Hub prebuilt package → use `aihub-model-run` instead**
+- "run qnn inference" / "snpe inference" / "qairt inference" — ⚠️ **Only activate this skill when the inference target is a self-built/self-converted model; if the inference target is an AI Hub prebuilt package → use `model-hub` instead**
 
 ### Operator Patching
 - "operator not supported" / "unsupported operator"
@@ -147,7 +147,7 @@ This skill is the **model conversion/compilation pipeline** (converting custom O
 - You need to quantize/recompile into a custom `.bin` yourself
 - You need post-conversion inference validation of a self-built model
 
-**❌ Non-applicable scenarios (use the `aihub-model-run` skill instead):**
+**❌ Non-applicable scenarios (use the `model-hub` skill instead):**
 - You want to run inference on a model that already has a prebuilt package on AI Hub (e.g. Inception v3, MobileNet, YOLO)
 - You only need to download the prebuilt artifact and run inference directly — no VS 2022 needed, no QAIRT SDK conversion needed
 
@@ -216,6 +216,7 @@ Use this skill for Qualcomm QAIRT/QNN/SNPE model bring-up:
   - Python scripts via `subprocess.run()` — no shell quoting issues
   - **Inference execution policy (MANDATORY):** run inference via `qai_runner.py` wrapper / `qai_appbuilder` / `QNNContext` only — NPU inference goes through these exclusively; `onnxruntime` is allowed ONLY with `CPUExecutionProvider` for an ONNX baseline. Details + wrapper rules → Step 7/8. 
     - **Benign HTP errors (non-fatal, ignore — inference still correct):** `setPowerConfig error 0x32c9` (couldn't switch to BURST under restricted perms; run as admin or `performance_profile: "default"` to avoid); `Error 0x200: failed to close queue` (HTP queue teardown timing at model destroy — result already written); `m_CFBCallbackInfoObj is not initialized` (HTP v81 callback init order). None affect results; never degrade to CPU on account of these.
+    - **⚠️ NEVER call `os._exit()` before destroying all `QNNContext` objects** — it causes process crash (`0xC0000409`). If early exit is needed, `del` all contexts first, then call `os._exit()`. `DSP_INFO UNSUPPORTED_KEY: 49/50` / `Error 0x200` on stderr are non-fatal; let the script exit normally (or `del` then `os._exit()`). To suppress stderr noise in PowerShell use `2>$null`.
   - Avoid PowerShell variables (`$_`, `$env:`, `!`) in bash-invoked commands — use temp `.ps1` files with `-File` or Python `glob.glob()` instead
 - **Windows terminal encoding (MANDATORY):** Inference templates (`scripts/inference/infer_*.py`) and `qai_runner.py` already pre-set `sys.stdout/stderr.reconfigure(encoding="utf-8", errors="replace")` — copy-and-run works with Unicode (`→`, `✓`, non-ASCII text, emoji). For a **new** inference script from scratch, add the same reconfigure block right after `import sys`. Do NOT use `set PYTHONUTF8=1 && ...` (cmd appends a trailing space → `invalid PYTHONUTF8 value` crash); the in-script reconfigure makes any env var unnecessary.
 - **Escalation:** If conversion still fails after export/patch/retry, do not silently replace model architecture. Record error + logs + ONNX snapshot → escalate with full bundle. For B3/B4/B7 criteria → open `references/operator_patching.md`.
@@ -260,7 +261,7 @@ Use this skill for Qualcomm QAIRT/QNN/SNPE model bring-up:
 
 Strings like `QAIRT 2.45 WoS` / `Verified on QAIRT 2.47.1.260610` in scripts/docs are **historical verification annotations**, not hard requirements — QAIRT 2.x is backward compatible, later versions usually work unchanged. The installed version is the single source of truth in `${APP_ROOT}\data\config\qairt_env.json` (`_version` field). Don't "fix" old version strings to a newer one, and don't alarm the user when annotations and installed version differ. In `.bat` snippets use `%QAIRT_SDK_ROOT%`, not a hardcoded versioned path.
 
-> ⚠️ **Incompatibility between the QAIRT version and AI Hub prebuilt packages**: the backward-compatibility rule **applies only to artifacts this skill generates itself**. The `.bin` of an AI Hub prebuilt package is strictly bound to the QAIRT version it was compiled with (version mismatch → `Error code: 5000`). When you encounter an AI Hub prebuilt package → you MUST go through the `aihub-model-run` skill.
+> ⚠️ **Incompatibility between the QAIRT version and AI Hub prebuilt packages**: the backward-compatibility rule **applies only to artifacts this skill generates itself**. The `.bin` of an AI Hub prebuilt package is strictly bound to the QAIRT version it was compiled with (version mismatch → `Error code: 5000`). When you encounter an AI Hub prebuilt package → you MUST go through the `model-hub` skill.
 
 ---
 
@@ -445,6 +446,29 @@ Use `--no-templates` to skip plan copy.
 
 ## Core Workflow
 
+> ### Host OS Detection (MANDATORY — run once before Step 1, write result to plan.md)
+>
+> Detect the host platform and record `HOST_OS` in `plan.md` before starting any pipeline step:
+>
+> ```bash
+> python3 -c "
+> import platform, sys
+> m = platform.machine()
+> print('windows-arm64' if sys.platform == 'win32' else
+>       'linux-aarch64' if m in ('aarch64', 'arm64') else
+>       'linux-x64'     if m in ('x86_64', 'amd64') else 'unknown')
+> "
+> ```
+>
+> | `HOST_OS` | Platform | Step 7 inference path |
+> |-----------|----------|-----------------------|
+> | `windows-arm64` | Windows on Snapdragon ARM64 | **Path A** — local `qai_runner.py` / `qai_appbuilder` |
+> | `linux-aarch64` | Ubuntu/Linux aarch64 (HTP hardware on-device) | **Path A** — local `qai_runner.py` + `QnnRunner` |
+> | `linux-x64` | Ubuntu/Linux x86_64 (cross-compile host, no HTP locally) | **Path B** — `adb_runner.py` → push to aarch64 board |
+>
+> If the result is `unknown` → **stop and ask the user** which platform they are on.
+> Write as `HOST_OS = <value>` in the `plan.md` Project Config block.
+
 1. **Export source model to ONNX**
    - Use model's export script (e.g., `export_onnx.py`)
    - Use `python_x64_venv` Python (x86_64 3.10)
@@ -563,6 +587,14 @@ Use `--no-templates` to skip plan copy.
    internal mapping + more command examples → [`references/qnn_conversion.md`](references/qnn_conversion.md)
    (the Full Argument Reference under § End-to-End Pipeline); the Script Index is at the end of this file.
 
+   > **Ubuntu platform note (`HOST_OS = linux-x64` or `linux-aarch64`):** `run_pipeline.py` is Windows-only.
+   > On Linux hosts use `qai_dev_gen_contextbin_x86.py`, which selects Linux toolchain paths automatically.
+   > Conversion tool directories:
+   > - `linux-x64`: `$QAIRT_SDK_ROOT/bin/x86_64-linux-clang/` (cross-compiles; produces aarch64 output for board deployment)
+   > - `linux-aarch64`: `$QAIRT_SDK_ROOT/bin/aarch64-oe-linux-gcc11.2/`
+   >
+   > Python env on Ubuntu: `python3_venv` (3.12) for all conversion and ADB steps.
+
 5. **Optional: Quantization** (INT8/A16W8/A8W8B8)
 
    **Pre-quantization checklist (MANDATORY before running quantization):**
@@ -616,8 +648,26 @@ Use `--no-templates` to skip plan copy.
    - **Quick validation without bin:** `QNNContext` can load `.dlc` directly (no bin needed; results numerically identical to `.bin`, ~21-27% slower p50).
    - For manual steps, HTP runtime files, backend config, graph_names rules -> [`references/context_binary.md`](references/context_binary.md)
 
+   > **Ubuntu x64 宿主机（linux-x64）可选：跳过 Step 6 直接板端验证**
+   >
+   > 若当前目标是**精度验证**而非性能测试或最终部署，可在 Step 5（量化）完成后，直接将 `.dlc`
+   > 通过 `adb_runner.py` 推送到板端（见 Step 7 Path B），无需等待 `qnn-context-binary-generator`（通常 100–300 s）。
+   > `adb_runner.py` 会自动推送 `libQnnModelDlc.so` 适配库，板端 JIT 编译后执行。
+   > 首次板端加载慢（JIT），**不适合性能 benchmark**；需性能数据时仍需完成 Step 6 生成 `.bin`。
+   > `.bin` 路径继续作为默认推荐路径，本步骤不受影响。
+
 7. **Inference + validation**
 
+   > ### Step 7 Inference Path Router — check `HOST_OS` first
+   >
+   > | `HOST_OS` | Inference Path | Tool |
+   > |-----------|----------------|------|
+   > | `windows-arm64` | **Path A** — local execution | `qai_runner.py` / `qai_appbuilder` |
+   > | `linux-aarch64` | **Path A** — local execution | `qai_runner.py` + `QnnRunner` |
+   > | `linux-x64` | **Path B** — ADB deploy to aarch64 board | `adb_runner.py` |
+
+   > #### Path A — Local Execution (`windows-arm64` / `linux-aarch64`)
+   >
    > 🚨 **MANDATORY — USE WRAPPER ONLY:**
    > - ✅ **Always use `qai_runner.py`** (preferred) **or `qai_appbuilder` directly** (WoS ARM64).
    > - ❌ **NEVER call `qnn-net-run` directly.** `qai_runner.py` handles input/output tensors, NCHW/NHWC format, and result post-processing automatically. Using `qnn-net-run` bypasses all of this and produces unusable raw output.
@@ -672,11 +722,75 @@ Use `--no-templates` to skip plan copy.
    num_classes / postprocessing / detection-only top-level `postprocessing` thresholds / `assets[]` rules)
    → [`references/pack_export.md`](references/pack_export.md) § 1.
 
+   > #### Path B — ADB Deploy + On-Device Inference (`linux-x64` only)
+   >
+   > The Ubuntu x64 host cannot run aarch64 `qnn-net-run` locally. Use `adb_runner.py` to push the
+   > model and QNN runtime to a connected aarch64 board and execute inference there.
+   >
+   > **Blocking Conditions — check ALL before any push:**
+   >
+   > | ID | Condition | Action |
+   > |----|-----------|--------|
+   > | **B-ADB-01** | `which adb` fails — adb not installed on host | Stop. Instruct: `sudo apt-get install -y android-tools-adb` |
+   > | **B-ADB-02** | `adb devices` returns no online device | Stop. Check USB cable / USB debugging / TCP connection |
+   > | **B-ADB-03** | Multiple devices connected, `ADB_DEVICE_ID` not set in `plan.md` | Stop. Ask user to add `ADB_DEVICE_ID` to `plan.md` |
+   > | **B-ADB-04** | No model file (`.bin` or `.dlc`) found in `OUTPUT_DIR` | Stop. To use `.bin`: complete Step 6 (context binary generation). To use `.dlc` for quick accuracy validation: complete Step 4 (float conversion) or Step 5 (quantization). Step 6 is not required if `.dlc` is sufficient. |
+   > | **B-ADB-05** | Input `.raw` files missing from calibration/input directory | Stop. Prepare input data before proceeding |
+   >
+   > **Execution (run from Ubuntu x64 host):**
+   >
+   > ```bash
+   > python3 ${APP_ROOT}/factory/chat_features/model-builder/scripts/adb_runner.py \
+   >   --model      ${OUTPUT_DIR}/${MODEL_NAME}_${PRECISION}.bin \
+   >   --inputs     ${WORKSPACE}/${MODEL_NAME}/calib/<input_0>.raw \
+   >   --output_dir ${WORKSPACE}/${MODEL_NAME}/output/adb_out \
+   >   --sdk_root   $QAIRT_SDK_ROOT \
+   >   --backend    htp \
+   >   --device_os  ${ADB_DEVICE_OS:-android} \
+   >   --dsp_version ${ADB_DSP_VERSION:-v73} \
+   >   [--device_id ${ADB_DEVICE_ID}]
+   > ```
+   >
+   > ```bash
+   > # Option 2: use .dlc (skip Step 6 — quick accuracy validation only, not for perf benchmark)
+   > python3 ${APP_ROOT}/factory/chat_features/model-builder/scripts/adb_runner.py \
+   >   --model      ${OUTPUT_DIR}/${MODEL_NAME}_${PRECISION}.dlc \
+   >   --inputs     ${WORKSPACE}/${MODEL_NAME}/calib/<input_0>.raw \
+   >   --output_dir ${WORKSPACE}/${MODEL_NAME}/output/adb_out \
+   >   --sdk_root   $QAIRT_SDK_ROOT \
+   >   --backend    htp \
+   >   --device_os  ${ADB_DEVICE_OS:-android} \
+   >   --dsp_version ${ADB_DSP_VERSION:-v73} \
+   >   [--device_id ${ADB_DEVICE_ID}]
+   > ```
+   >
+   > `adb_runner.py` handles automatically:
+   > - Pushes `qnn-net-run` from `$QAIRT_SDK_ROOT/bin/<target_arch>/` — **device needs no pre-installed tools**
+   > - Pushes `libQnnHtp.so`, `libQnnSystem.so`, stub libs, `hexagon-<dsp>/unsigned/` skel dir
+   > - Pushes model file + input `.raw` files, generates `input_list.txt` on device
+   > - Executes `qnn-net-run` via `adb shell` with `LD_LIBRARY_PATH` and `ADSP_LIBRARY_PATH` set
+   > - Pulls `output/Result_*/*.raw` back to `--output_dir` on host
+   > - When model is `.dlc`: also pushes `libQnnModelDlc.so` and uses `--model libQnnModelDlc.so --dlc_path <file>.dlc` (`.bin` path's `--retrieve_context` behavior is unchanged)
+   >
+   > Output `.raw` files land at: `${WORKSPACE}/${MODEL_NAME}/output/adb_out/Result_*/*.raw`
+   > These are used as QNN inference results in Step 8 cosine comparison.
+   >
+   > **Do NOT:**
+   > - Run `qnn-net-run` on the Ubuntu x64 host (architecture mismatch — will fail)
+   > - Assume the device already has `qnn-net-run` pre-installed (always push from SDK)
+   > - Proceed past any Blocking Condition without resolving it first
+   > - Pass a `.dlc` file as `--model` to `qnn-net-run` directly — it is not a shared library. `adb_runner.py` handles the correct `--model libQnnModelDlc.so --dlc_path` form automatically.
+   >
+   > For ADB setup guide, SoC lib table, troubleshooting → [`references/adb_execution.md`](references/adb_execution.md)
+
 8. **Validation report (Phase 6 — MANDATORY after successful inference)**
    - **Must execute in batch mode** — do NOT stop after inference succeeds
    - **ONNX baseline comparison (MANDATORY):**
      1. Run ONNX inference using the same input image/data used in step 7 — use `onnxruntime` with **`CPUExecutionProvider` only** (CPU-only baseline; never route this baseline onto the NPU)
-     2. Run QNN inference on the SAME input (already done in step 7 — reuse output)
+     2. Run QNN inference on the SAME input (already done in step 7 — reuse output).
+        **Path A** (local, windows-arm64 / linux-aarch64): output is in memory or local `output/` directory.
+        **Path B** (linux-x64 / ADB): load output from `${WORKSPACE}/${MODEL_NAME}/output/adb_out/Result_*/*.raw`
+        (pulled to host by `adb_runner.py`) using `np.fromfile(path, dtype=np.float32)`.
      3. Compute cosine similarity between ONNX output tensor and QNN output tensor
      4. Example comparison code pattern:
         ```python
@@ -728,6 +842,17 @@ Use `--no-templates` to skip plan copy.
 
      - Pass/fail verdict
      - Top predictions (classification) or sample outputs (other tasks)
+   - **Model workspace path (MANDATORY — include in EVERY turn's final summary):**
+     in the final summary of **every reply turn** (not only the very last turn
+     of the task, and even when the turn is only an intermediate step), print the
+     model's top-level workspace path `${WORKSPACE}\<model_name>` (i.e.
+     `C:\WoS_AI\<model_name>`) as a plain, user-visible text line. App Builder's
+     promote-ready detection runs at the end of **each** turn and extracts this
+     path from your final summary, then scans its `output/` for precision
+     variants. Conversations are often multi-turn (follow-up questions, or the
+     conversion succeeds only after several rounds of fixing), so the path must
+     appear in whichever turn the model became ready — hence every turn includes
+     it. Missing it = the Promote-to-App-Builder CTA / ready-dot never appears.
    - **Update `plan.md` (MANDATORY — it is the agent's session work log):** each time a phase completes, immediately update that phase's Progress Summary (⬜ → ✅) and record Issue/Operator patch status; at the end of Phase 6 fill `END_TIME` (current timestamp) + `WORK_TIME` (END_TIME minus START_TIME) and mark all completed phases Done. Keep it updated so context can be restored across sessions.
 
 ### Expected Output Artifacts
@@ -768,11 +893,16 @@ For multi-precision/multi-size batch runs, use the `${APP_ROOT}/factory/chat_fea
 | `CALIBRATION_DATA` | Quantization calibration source | image folder / raw folder / list file | Required for INT/A16W8 only |
 | `RETMOE_DEVICE_INFO` | Remote device SSH info file | (optional) | For remote inference/validation |
 | `MODE` | Execution mode | `batch` (default) or `interactive` | Controls autonomous vs interactive behavior |
+| `HOST_OS` | Host platform (auto-detected at workflow start) | `linux-x64` / `linux-aarch64` / `windows-arm64` | Auto via `platform.machine()`; drives Step 7 inference path |
+| `ADB_DEVICE_ID` | ADB device serial | `8347dcb1` | Required only if multiple devices connected (linux-x64 only) |
+| `ADB_DEVICE_OS` | Target board OS | `android` (default) / `linux` | Drives `target_arch` selection in `adb_runner.py` (linux-x64 only) |
+| `ADB_DSP_VERSION` | HTP/DSP version on target board | `v73` (default) / `v75` / `v79` / `v81` | See `references/adb_execution.md` §4 for SoC mapping (linux-x64 only) |
+| `ADB_TARGET_ARCH` | SDK arch dir override | `aarch64-android` | Overrides `ADB_DEVICE_OS` default; use only for non-standard SDK layouts |
 
 **Architecture derivation rules:**
-- `ARM WIN` → HOST_ARCH: `x86_64-windows-msvc`, TARGET_ARCH: `windows-aarch64`, SHELL: `powershell`
-- `X86 LINUX` → HOST_ARCH: `x86_64-linux-clang`, TARGET_ARCH: `x86_64-linux-clang`, SHELL: `bash`
-- `ARM LINUX` → HOST_ARCH: `aarch64-linux-gcc`, TARGET_ARCH: `aarch64-ubuntu-gcc9.4`, SHELL: `bash`
+- `ARM WIN` / `HOST_OS=windows-arm64` → HOST_ARCH: `x86_64-windows-msvc`, TARGET_ARCH: `windows-aarch64`, SHELL: `powershell`
+- `X86 LINUX` / `HOST_OS=linux-x64` → HOST_ARCH: `x86_64-linux-clang`, TARGET_ARCH: `aarch64-oe-linux-gcc11.2` (cross-compile; model runs on aarch64 board via ADB), SHELL: `bash`
+- `ARM LINUX` / `HOST_OS=linux-aarch64` → HOST_ARCH: `aarch64-oe-linux-gcc11.2`, TARGET_ARCH: `aarch64-oe-linux-gcc11.2`, SHELL: `bash`
 
 ---
 
@@ -784,6 +914,53 @@ remote target device over SSH instead of locally. **Core rules**: ① `MODE=batc
 → Blocking Condition **B5**, stop and ask the user; ③ use absolute paths on the remote device.
 
 For the full `RETMOE_DEVICE_INFO` file format + SSH execution template → [`references/remote_execution.md`](references/remote_execution.md)
+
+## ADB Device Deployment (Optional)
+
+Use `adb_runner.py` when the target device is connected via ADB (Android or Linux embedded) and does **not** have `qnn-net-run` pre-installed. The script pushes the binary from the QAIRT SDK, along with runtime libs and model files, then pulls back outputs.
+
+### Trigger Conditions
+
+Activate this flow when **any** of the following are true:
+- User mentions: "推到板端" / "adb push" / "在设备上跑" / "on device" / "adb deploy" / "板端推理" / "device inference" / "qnn-net-run on device"
+- `plan.md` contains `ADB_DEVICE_ID`, `ADB_TARGET_ARCH`, or `ADB_DSP_VERSION`
+
+### Blocking Conditions (stop before executing any push)
+
+| ID | Condition | Action |
+|----|-----------|--------|
+| **B-ADB-01** | `which adb` fails — adb not installed on host | Stop. Instruct: `sudo apt-get install -y android-tools-adb` |
+| **B-ADB-02** | `adb devices` returns no online device | Stop. Ask user to check USB cable / USB debugging / TCP connection |
+| **B-ADB-03** | Multiple devices connected, no `ADB_DEVICE_ID` specified | Stop. Ask user to specify `--device_id <serial>` |
+| **B-ADB-04** | No model file (`.bin` or `.dlc`) found on host | Stop. To use `.bin`: complete Step 6 (context binary generation). To use `.dlc` for quick accuracy validation: complete Step 4 (float conversion) or Step 5 (quantization). Step 6 is not required if `.dlc` is sufficient. |
+| **B-ADB-05** | Input `.raw` files missing | Stop. Ask user to prepare input data |
+
+### Execution Steps
+
+1. Run `adb_runner.py` — pushes `qnn-net-run` (from SDK), runtime libs, model file, and input `.raw` files to device
+2. Executes `qnn-net-run` on device via `adb shell` with `LD_LIBRARY_PATH` and `ADSP_LIBRARY_PATH` set
+3. `adb pull` retrieves `output/` directory to host `--output_dir`
+4. Display `.raw` output shape and value summary
+
+### Output Format
+
+```
+[ADB] Using device: 8347dcb1
+[ADB] Pushing qnn-net-run from SDK (aarch64-android)
+[ADB] Pushing libQnnHtp.so
+[ADB Deploy] Pushed: model_fp16_contextbin.bin, aarch64-android/libQnnHtp.so, inputs/input_0.raw
+[ADB Execute] qnn-net-run exit=0
+[ADB Pull] /data/local/tmp/qai_run/model_fp16/output → /workspace/outputs/
+[Result] shape=(1, 1000), dtype=float32, top-5: [("cat", 0.72), ...]
+```
+
+### What NOT to Do
+
+- Do **not** run `qnn-net-run` on the host (architecture mismatch will fail)
+- Do **not** assume the device already has `qnn-net-run` — always push from SDK
+- Do **not** proceed past any Blocking Condition above without resolving it first
+
+For full setup guide, troubleshooting, and SoC library table → [`references/adb_execution.md`](references/adb_execution.md)
 
 ## Reference Map
 
@@ -803,6 +980,7 @@ Open only what you need:
 | Quantization sensitivity (pre-conversion risk pre-flight) | `references/quantization-sensitivity.md` |
 | Verification discipline (cheap-falsify-first / artifact-is-truth / host≠device) | `references/verification-discipline.md` |
 | Pack Export & inference_manifest.json | `references/pack_export.md` |
+| ADB device deployment | `references/adb_execution.md` |
 
 > ### 🧭 子 SKILL（按需加载，见顶部「Problem Routing Index」）
 >
@@ -836,6 +1014,7 @@ Open only what you need:
 | `${APP_ROOT}/factory/chat_features/model-builder/scripts/run_pipeline.py` | **Default end-to-end pipeline (Flow A)**: ONNX → DLC → .bin. Reads `${APP_ROOT}\data\config\qairt_env.json`, invokes `qairt-converter` → optional `qairt-quantizer` → `qai_dev_gen_contextbin.py --model <file>.dlc`. No VS ARM64 env required. Supports CLE / per-channel / bf16 / w16a16. **DLC is cross-platform by default**; pass `--soc_optimized` to build a SoC-specific graph. Pure Python — no `.bat` wrapper needed. | x64 | SKILL.md — Core Workflow Step 4 & `references/qnn_conversion.md` — End-to-End Pipeline |
 | `${APP_ROOT}/factory/chat_features/model-builder/scripts/run_pipeline_legacy.py` | **Legacy pipeline (Flow C)**: ONNX → C++/BIN → DLL → .bin. Retained for the rare case where the user explicitly requests the DLL path or needs the `.dll` artifact. Runs `qnn-onnx-converter` + `qnn-model-lib-generator` (requires VS ARM64 env, initializes internally via `cmd /c vcvarsall.bat arm64 && set`) + `qai_dev_gen_contextbin.py --model <file>.dll`. | x64 | SKILL.md — Core Workflow Step 4 (legacy note) |
 | `${APP_ROOT}/factory/chat_features/model-builder/scripts/model_config.json` | Multi-precision/multi-size model config template | — | SKILL.md — WoS ARM64 End-to-End Pipeline |
+| `${APP_ROOT}/factory/chat_features/model-builder/scripts/adb_runner.py` | ADB deploy + on-device qnn-net-run inference for Android / Linux embedded aarch64 targets | x64 | SKILL.md — ADB Device Deployment; `references/adb_execution.md` |
 
 ### Inference Templates (`${APP_ROOT}/factory/chat_features/model-builder/scripts/inference/`)
 
@@ -877,7 +1056,7 @@ Import to App Builder / Pack Export Script Index) → [`references/pack_export.m
 
 ---
 
-## ⚠️ CRITICAL: Python Environment Management (WoS ARM64)
+## ⚠️ CRITICAL: Python Environment Management
 
 Two separate Python environments — **not interchangeable**. Both paths come from `${APP_ROOT}\data\config\qairt_env.json` (auto-generated by `Setup.bat`). **Never hardcode paths.**
 
@@ -885,6 +1064,13 @@ Two separate Python environments — **not interchangeable**. Both paths come fr
 |-------------|-------------------------------|--------|------|
 | Conversion env | `python_x64_venv` | x86_64 3.10 | ONNX export, `qnn-onnx-converter`, `qnn-model-lib-generator` |
 | Inference env | `python_arm64_venv` | ARM64 3.13 | `qai_appbuilder`, `QNNContext` inference |
+| Ubuntu env | `python3_venv` | x86_64 3.12 | All Ubuntu operations: ONNX export, `qairt-converter`, `qai_dev_gen_contextbin_x86.py`, `adb_runner.py` |
+
+> **Ubuntu platform note (`HOST_OS = linux-x64` or `linux-aarch64`):** There is no `python_arm64_venv` on Ubuntu.
+> Use `python3_venv` (x86_64 3.12) for **all operations**, including `adb_runner.py`.
+> On `linux-x64`, `qai_appbuilder` / `QNNContext` local inference is **not available** (no local aarch64 execution) —
+> Step 7 uses **Path B** (`adb_runner.py`) to run inference on a connected aarch64 board instead.
+> On `linux-aarch64`, `qai_runner.py` + `QnnRunner` handles local inference (Path A).
 
 > ### ⚠️ Default rule for tools NOT described in SKILL.md
 >

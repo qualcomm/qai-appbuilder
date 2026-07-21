@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Persist the MB Pro Agent's connect-time greeting burst as a chat message.
 
 When the Pro toolbar's「连接」succeeds, the remote MB Pro Agent proactively
@@ -88,8 +93,16 @@ class GreetingMapperPort(Protocol):
     use case also uses to stamp the terminal END frame.
     """
 
-    def new_context(self) -> GreetingSequencerPort:
-        """Return a fresh per-stream sequencer/context for one greeting drain."""
+    def new_context(
+        self, *, my_session_id: str | None = None
+    ) -> GreetingSequencerPort:
+        """Return a fresh per-stream sequencer/context for one greeting drain.
+
+        ``my_session_id`` (when provided) tells the mapper which remote-agent
+        session this drain is bound to, so global broadcasts (``queue_state``
+        etc.) that name a DIFFERENT owner can be filtered — those events
+        belong to another tab's task and must not be rendered as ours.
+        """
         ...
 
     def map_event(
@@ -185,7 +198,10 @@ class PersistMbProGreetingUseCase:
         # Event→frame mapping is an injected collaborator (GreetingMapperPort)
         # so this application module never imports infrastructure. The concrete
         # MbProMapper + QueryMappingContext are supplied by the apps bridge.
-        ctx = self._greeting_mapper.new_context()
+        # Pass this tab's remote session_id so the mapper can filter global
+        # broadcasts (``queue_state`` etc.) that name a different owner.
+        my_sid = manager.get_state().session_id
+        ctx = self._greeting_mapper.new_context(my_session_id=my_sid)
 
         chunk_parts: list[str] = []
         reasoning_parts: list[str] = []

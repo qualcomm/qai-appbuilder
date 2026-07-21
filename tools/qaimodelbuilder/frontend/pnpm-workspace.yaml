@@ -23,3 +23,15 @@ overrides:
 allowBuilds:
   esbuild: true
   vue-demi: true
+
+patchedDependencies:
+  entities@4.5.0: patches/entities@4.5.0.patch
+  estree-walker@3.0.3: patches/estree-walker@3.0.3.patch
+
+# virtualStoreDir: route the pnpm virtual store (the bulk of the 1.2 GB
+# dependency content) out of the source tree into the per-user runtime data
+# directory. frontend/node_modules/ keeps only the thin symlink layer and
+# .bin/ — a few MB — so the source tree stays clean and easy to back up.
+# data/ is git-ignored (root .gitignore) and is the designated home for all
+# runtime-generated content. pnpm install / build / exec all work normally.
+virtualStoreDir: ../data/pnpm-virtual-store

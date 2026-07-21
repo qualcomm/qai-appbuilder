@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """GoMaster External Auto-Optimize proxy routes — /api/gomaster/optimize/*.
 
 BFF proxy for the ``external`` GoMaster link (one-click, cloud-LLM-driven,

@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <script setup lang="ts">
 /**
  * SessionToolsPopover — per-session ("this conversation only") temporary
@@ -36,6 +41,7 @@ import { useI18n } from "vue-i18n";
 import { useChatTabsStore } from "@/stores/chatTabs";
 import { useSkillsStore } from "@/stores/skills";
 import { fetchChatTools, type ChatToolDescriptor } from "@/api/chatTools";
+import ToolGroupToggle from "./ToolGroupToggle.vue";
 
 interface Props {
   open: boolean;
@@ -96,6 +102,14 @@ const hasOverride = computed(
 function isToolOn(name: string): boolean {
   return !disabledTools.value.has(name);
 }
+
+// Bridge for ToolGroupToggle component.
+const toolNames = computed(() => tools.value.map((t) => t.name));
+const disabledToolsList = computed(() => [...disabledTools.value]);
+function onToolsUpdate(newList: string[]): void {
+  commit(new Set(newList), new Set(disabledSkills.value));
+}
+
 function isSkillOn(id: string): boolean {
   return !disabledSkills.value.has(id);
 }
@@ -247,26 +261,13 @@ onBeforeUnmount(() => {
       >
         {{ t("chat.sessionTools.noTools", "没有可用工具") }}
       </div>
-      <div
+      <ToolGroupToggle
         v-else
-        class="session-tools-grid"
-      >
-        <label
-          v-for="tool in tools"
-          :key="tool.name"
-          class="session-tool-chip"
-          :class="{ 'is-on': isToolOn(tool.name) }"
-          :title="tool.description"
-        >
-          <input
-            type="checkbox"
-            :checked="isToolOn(tool.name)"
-            :data-testid="`session-tool-${tool.name}`"
-            @change="toggleTool(tool.name)"
-          />
-          {{ tool.name }}
-        </label>
-      </div>
+        :model-value="disabledToolsList"
+        :tools="toolNames"
+        mode="disabled"
+        @update:model-value="onToolsUpdate"
+      />
 
       <!-- Skills -->
       <div class="session-tools-section-label session-tools-section-label--skills">
@@ -327,8 +328,8 @@ onBeforeUnmount(() => {
   bottom: calc(100% + 8px);
   right: 0;
   z-index: 50;
-  min-width: 300px;
-  max-width: 360px;
+  min-width: 360px;
+  max-width: 460px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-md);

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``SubAgentSession`` aggregate for the chat bounded context.
 
 A :class:`SubAgentSession` is the "session / memory" of a sub-agent that

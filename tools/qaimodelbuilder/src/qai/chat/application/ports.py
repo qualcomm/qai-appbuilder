@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Application-layer ports for the chat bounded context.
 
 Ports are abstract :class:`typing.Protocol` types that describe the
@@ -2209,16 +2214,20 @@ class RuntimeLimitStorePort(Protocol):
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True, slots=True)
 class ResolvedCodePersona:
-    """A resolved code persona (prompt + display name).
+    """A resolved code persona (prompt + display name + tool groups).
 
     Apps-layer-shaped DTO returned by :class:`CodePersonaResolverPort`.
     ``prompt`` is the (override-applied) working-role system prompt;
     ``name`` is the human-readable display name (may be ``None`` when
-    the persona record carried no name).
+    the persona record carried no name);
+    ``groups`` is the (override-applied) list of tool-group identifiers
+    that this persona is permitted to use (e.g. ``["read", "edit",
+    "command"]``).  ``None`` means "all groups" (no restriction).
     """
 
     prompt: str
     name: str | None = None
+    groups: tuple[Any, ...] | None = None
 
 
 @runtime_checkable
@@ -2241,7 +2250,9 @@ class CodePersonaResolverPort(Protocol):
     the prefs document behind an aiosqlite connection.
     """
 
-    async def resolve(self, persona_id: str) -> ResolvedCodePersona | None:
+    async def resolve(
+        self, persona_id: str, locale: str | None = None
+    ) -> ResolvedCodePersona | None:
         """Return the resolved persona for ``persona_id`` (or ``None``)."""
         ...
 
@@ -2615,6 +2626,59 @@ class BudgetTrackerPort(Protocol):
         ...
 
 
+@dataclass(frozen=True, slots=True)
+class PromoteReadyVariant:
+    """One promote-eligible precision variant found under a model workspace.
+
+    Mirrors the App Builder ``BinScanResult`` shape the promote card consumes,
+    but is a chat-context DTO so ``qai.chat`` never imports ``qai.app_builder``
+    (the apps-layer adapter maps ``BinScanResult`` → this).
+    """
+
+    precision: str
+    label: str
+
+
+class PromoteReadyScanPort(Protocol):
+    """Scan a model workspace directory for promote-eligible NPU weight
+    variants (``output/<model>_<label>.{bin,dlc}``).
+
+    Turn-end promote-ready detection
+    (``StreamChatUseCase._finalize_assistant_message``) extracts the model
+    workspace path from the turn's final summary text and asks this port
+    whether that directory holds promotable precision variants. The result is
+    persisted onto ``Conversation.detected_model`` so the frontend CTA needs
+    ZERO on-open disk scans.
+
+    Cross-context isolation (AGENTS.md / import-linter ``context-isolation``)
+    ------------------------------------------------------------------------
+    The real capability lives in ``qai.app_builder`` (``ImportScanBinsUseCase``),
+    which ``qai.chat`` MUST NOT import. The apps/api composition root supplies
+    an adapter (``_promote_ready_scan_bridge``) that maps this port onto that
+    use case — exactly like ``_workspace_grant_bridge`` bridges chat → security.
+    The chat context only ever names THIS port.
+
+    State-Truth-First (AGENTS.md 铁律 1/3)
+    -------------------------------------
+    The returned variants reflect the REAL on-disk scan (``scanBins``), the
+    same truth source the actual promote flow uses — no drift. An empty tuple
+    means "scanned, nothing promotable"; the caller distinguishes that from
+    "not scanned" (never called / error).
+    """
+
+    async def scan(self, model_workdir: str) -> tuple[PromoteReadyVariant, ...]:
+        """Return the promote-eligible precision variants under ``model_workdir``.
+
+        ``model_workdir`` is a top-level model workspace (e.g.
+        ``C:\\WoS_AI\\resnet50``); the adapter scans ``<model_workdir>/output/``.
+        Returns an empty tuple when the directory has no promotable variants.
+        Best-effort: implementations SHOULD NOT raise on a missing directory /
+        transient scan error (return an empty tuple instead) so a detection
+        pass never breaks the turn.
+        """
+        ...
+
+
 __all__ = [
     # repositories
     "ConversationRepositoryPort",
@@ -2691,4 +2755,7 @@ __all__ = [
     # per-conversation token-budget tracker (max_budget_tokens feature)
     "BudgetTrackerPort",
     "BudgetCheckResult",
+    # promote-ready detection scan (cross-BC via apps bridge → app_builder)
+    "PromoteReadyScanPort",
+    "PromoteReadyVariant",
 ]

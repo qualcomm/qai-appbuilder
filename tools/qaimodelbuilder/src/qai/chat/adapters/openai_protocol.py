@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """OpenAI-compatible protocol parsing helpers (PR-401a / S7.5 lane L4).
 
 This module migrates four families of pure functions from the legacy

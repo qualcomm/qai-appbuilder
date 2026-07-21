@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Cross-agent tool concurrency budget (parallel tool execution).
 
 A small, dependency-free ``asyncio.Semaphore`` budget that bounds how many

@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <script setup lang="ts">
 /**
  * Chat view — multi-tab workspace (PR-054).
@@ -43,9 +48,14 @@ import { useConversationsStore, type ConversationSummary } from "@/stores/conver
 import { useDiscussionStore } from "@/stores/discussion";
 import { useForgeConfig } from "@/composables/useForgeConfig";
 import { useConversationWorkspace } from "@/composables/useConversationWorkspace";
+import { useModeFrameTriggers } from "@/composables/useModeFrameTriggers";
+import { usePromoteReadyDetection } from "@/composables/usePromoteReadyDetection";
 import ConversationWorkspaceDialog from "@/components/chat/ConversationWorkspaceDialog.vue";
 import ChatMessageList from "@/components/chat/ChatMessageList.vue";
 import ChatComposer from "@/components/chat/ChatComposer.vue";
+import ModeIntroCard from "@/components/chat/ModeIntroCard.vue";
+import type { IntroMode } from "@/composables/useModeIntroCardVisibility";
+import PromoteReadyNotice from "@/components/chat/PromoteReadyNotice.vue";
 import MessageQueuePanel from "@/components/chat/MessageQueuePanel.vue";
 import TaskListBar from "@/components/chat/TaskListBar.vue";
 // SubAgentRail — second-level navigator rendered directly below the parent
@@ -77,7 +87,6 @@ const AppBuilderWorkbenchOverlay = defineAsyncComponent(
 import ImplementationPanel from "@/components/chat/ImplementationPanel.vue";
 import {
   ICON_FOLDER,
-  ICON_WRENCH,
   ICON_CHEVRON_DOWN,
   ICON_CHEVRON_UP,
   ICON_DOWNLOAD,
@@ -118,6 +127,23 @@ const {
 const activeConversationId = computed<string | null>(
   () => store.activeTab?.conversationId ?? null,
 );
+
+// ── Promote-ready CTA (Sprint 2, feedback 7B) ────────────────────────────────
+// Detect when the ACTIVE tab is in Model Builder / App Builder mode AND the
+// conversation references a model workspace whose `output/` contains scanned-
+// eligible precision variants. When so, surface an inline notice above the
+// composer whose CTA reuses the shared `requestOpenPromote` trigger (same wire
+// the ModeIntroCard chip uses). See `usePromoteReadyDetection` for the full
+// state machine — including sessionStorage-scoped dismissal per workdir so the
+// user is not nagged repeatedly for the same model.
+const promoteReady = usePromoteReadyDetection();
+function onPromoteReadyPromoted(): void {
+  // Same effect as an explicit dismiss — the user just acted on the CTA, so
+  // hide it. The mode-frame's Promote popover was popped open by
+  // `requestOpenPromote` (fired inside the notice component itself).
+  promoteReady.dismiss();
+}
+
 
 // Lazily create a conversation for the active tab when it has none yet, so the
 // 📁 button stays usable BEFORE the first message is sent (the workspace is
@@ -197,6 +223,42 @@ const { peekTransport } = useChatTransports();
 
 const activeTab = computed(() => store.activeTab);
 const activeTabId = computed(() => store.activeTabId);
+
+// Mode-intro card visibility. Rendered as an on-demand overlay attached
+// to a top-right ⓘ button (see the template + ModeIntroCard for the full
+// rationale). The card only makes sense when the tab ALREADY has messages
+// — an empty tab is covered by the mode's dedicated empty-state
+// (App Builder / GoMaster / Pro / Code / Model Builder), which provides
+// the same 3-step guide as a full-screen welcome; showing a second overlay
+// on top of that would be redundant and cluttered.
+//
+// Note: this is a POSITION-only change. The 3-tier visibility gate
+// (`useModeIntroCardVisibility` — permanent / session / clear) still runs
+// inside ModeIntroCard itself, so the "× closes it, checkbox makes it
+// permanent, settings can restore" UX is untouched.
+const introMode = computed<IntroMode | null>(() => {
+  const tab = activeTab.value;
+  if (tab === null) return null;
+  // Empty conversation → the mode's dedicated empty-state already provides
+  // full onboarding, so suppress the overlay. Fires the moment the user
+  // sends their first turn (activeMessages.length > 0), at which point the
+  // empty-state disappears and the ⓘ overlay button takes over.
+  if (tab.messages.length === 0 && tab.streamingContent === "") {
+    return null;
+  }
+  const mode = tab.activeMode;
+  if (
+    mode === "app-builder" ||
+    mode === "gomaster" ||
+    mode === "model-build" ||
+    mode === "model-hub" ||
+    mode === "pro" ||
+    mode === "code"
+  ) {
+    return mode;
+  }
+  return null;
+});
 
 // ── SubAgentRail data source ────────────────────────────────────────────────
 //
@@ -648,6 +710,59 @@ function onFillPrompt(prompt: string): void {
 }
 
 /**
+ * ModeIntroCard action chip → route the stable `id` to the corresponding
+ * mode-frame trigger (Plan §7 decision 5 — C+D combo). The action ids are
+ * the same across modes so the ModeIntroCard stays presentational and the
+ * concrete "open my apps menu / open promote panel / open optimize drawer"
+ * side-effects live where they always did (the three mode-frame toolbars).
+ *
+ * We route via a shared bump-token composable (`useModeFrameTriggers`) so
+ * the mode-frame components' local `ref` panel state stays intact — they
+ * just `watch` the token and flip their own `menuOpen` ref on bump.
+ *
+ * Unknown ids are silently ignored (defensive — no runtime error if a
+ * future chip is added and not yet wired here).
+ */
+const {
+  requestOpenMyApps,
+  requestOpenPromote,
+  requestOpenOptimize,
+  requestOpenProSettings,
+  requestOpenProConnect,
+  requestOpenCodePersona,
+  requestOpenCodeContext,
+} = useModeFrameTriggers();
+function onModeIntroAction(id: string): void {
+  switch (id) {
+    case "open-my-apps":
+      requestOpenMyApps();
+      break;
+    case "open-promote":
+      requestOpenPromote();
+      break;
+    case "open-optimize":
+      requestOpenOptimize();
+      break;
+    case "open-pro-settings":
+      requestOpenProSettings();
+      break;
+    case "open-pro-connect":
+      requestOpenProConnect();
+      break;
+    case "open-code-persona":
+      requestOpenCodePersona();
+      break;
+    case "open-code-context":
+      requestOpenCodeContext();
+      break;
+    default:
+      // Unknown action id → no-op. Keeps forward compatibility with future
+      // ModeIntroCard chips.
+      break;
+  }
+}
+
+/**
  * Retry a send-failed user message (V1 `retryLastMessage`,
  * useChat.js:2800-2807). Removes the failed user message (which resets
  * the tab to idle) and re-sends its original content as a fresh turn,
@@ -784,9 +899,15 @@ watch(
 // headerActions Pinia store.
 //
 // Behaviour parity with the previous AppHeader implementation:
-//   - Tool Calls toggle  → ui.setShowToolMessages(!ui.showToolMessages)
-//   - Collapse All       → ui.setMessagesCollapsed(!ui.messagesCollapsed),
-//                          label flips between Collapse/Expand
+//   - Collapse/Expand Tool Cards → bulk-collapses every ToolExecPanel via
+//                          ui.setToolCardsCollapsed. Method B semantics
+//                          (2026-07-20): every card is forced to the
+//                          chosen state AND its per-card `userToggled` is
+//                          set so the running→done auto-collapse watcher
+//                          stops firing — "I want to see every detail,
+//                          don't fold anything". Disabled when tool cards
+//                          are hidden altogether (Settings → Chat
+//                          Display → Show tool-call cards = off).
 //   - Export             → buildMarkdown + Blob/object-URL download;
 //                          disabled when active tab has 0 messages,
 //                          tooltip becomes `chat.exportEmptyHint`
@@ -796,6 +917,11 @@ watch(
 //                          no backend delete
 //   - New Conversation   → chatTabs.openTab(); rendered as the page CTA
 //                          (variant: "primary")
+//
+// The "Tool Calls" pill was retired 2026-07-20: users almost never change
+// this preference so the toolbar slot was expensive; moved to Settings →
+// App Config → Chat Display (localStorage-persisted). `ui.showToolMessages`
+// itself is unchanged — same state, same consumers.
 //
 // Topbar action icons now come from the shared `topbarIcons` module so the
 // whole header shares one consistent monochrome line-icon family (see import
@@ -864,12 +990,11 @@ function buildMarkdown(
   return lines.join("\n");
 }
 
-function handleToggleToolMessages(): void {
-  ui.setShowToolMessages(!ui.showToolMessages);
-}
-
-function handleToggleCollapseAll(): void {
-  ui.setMessagesCollapsed(!ui.messagesCollapsed);
+function handleToggleCollapseToolCards(): void {
+  // ?? false ensures the initial null (never-clicked) state treats the
+  // first click as "start collapsing" — matches user intuition "the button
+  // shows Collapse when nothing is collapsed yet".
+  ui.setToolCardsCollapsed(!(ui.toolCardsCollapsed ?? false));
 }
 
 function handleExport(): void {
@@ -927,26 +1052,21 @@ useHeaderActions((): HeaderAction[] => [
     testId: "chat-workspace-btn",
   },
   {
-    id: "chat.toolCalls",
-    label: t("chat.toolCalls"),
-    title: t("layout.toggle_tool_messages"),
-    iconSvg: ICON_WRENCH,
+    id: "chat.collapseToolCards",
+    label: ui.toolCardsCollapsed === true
+      ? t("chat.expandToolCards")
+      : t("chat.collapseToolCards"),
+    title: !ui.showToolMessages
+      ? t("chat.toolCardsHiddenHint")
+      : ui.toolCardsCollapsed === true
+        ? t("layout.expand_tool_cards")
+        : t("layout.collapse_tool_cards"),
+    iconSvg: ui.toolCardsCollapsed === true ? ICON_CHEVRON_DOWN : ICON_CHEVRON_UP,
     extraClass: "chat-toolbar-toggle",
-    pressed: ui.showToolMessages,
-    onClick: handleToggleToolMessages,
-    testId: "chat-tool-calls-btn",
-  },
-  {
-    id: "chat.collapseAll",
-    label: ui.messagesCollapsed ? t("chat.expandAll") : t("chat.collapseAll"),
-    title: ui.messagesCollapsed
-      ? t("layout.expand_all")
-      : t("layout.collapse_all"),
-    iconSvg: ui.messagesCollapsed ? ICON_CHEVRON_DOWN : ICON_CHEVRON_UP,
-    extraClass: "chat-toolbar-toggle",
-    pressed: ui.messagesCollapsed,
-    onClick: handleToggleCollapseAll,
-    testId: "chat-collapse-all-btn",
+    pressed: ui.toolCardsCollapsed === true,
+    disabled: !ui.showToolMessages,
+    onClick: handleToggleCollapseToolCards,
+    testId: "chat-collapse-tool-cards-btn",
   },
   {
     id: "chat.export",
@@ -1047,6 +1167,35 @@ useHeaderActions((): HeaderAction[] => [
            Self-hides when there is no active implementation plan
            (phase === "none"), so ordinary chat / discussion is unchanged. -->
       <ImplementationPanel />
+
+      <!-- Mode-intro overlay: a top-right ⓘ button that pops out a
+           3-step reference card on click. Anchored via
+           `.chat-view__intro-anchor` (positioned in <style>). Only
+           renders when `introMode` is non-null (see the computed for
+           the full gate — currently: mode has an intro AND the tab
+           already has messages, so empty tabs get their dedicated
+           empty-state onboarding without a second overlay on top). -->
+      <div v-if="introMode !== null" class="chat-view__intro-anchor">
+        <ModeIntroCard
+          :mode="introMode"
+          @fill-prompt="onFillPrompt"
+          @action="onModeIntroAction"
+        />
+      </div>
+
+      <!-- Promote-ready CTA (Sprint 2, feedback 7B). Inline strip that
+           appears above the composer when the active tab is in Model Builder,
+           Model Hub or App Builder mode AND `usePromoteReadyDetection` sees
+           promote-eligible precision variants (.bin/.dlc) under the
+           conversation's model workspace. Self-hides otherwise; not persistent
+           (session-scoped dismissal per workdir — see composable). -->
+      <PromoteReadyNotice
+        :visible="promoteReady.shouldShow.value"
+        :variants="promoteReady.detectedVariants.value"
+        :workdir="promoteReady.detectedWorkdir.value"
+        @dismiss="promoteReady.dismiss"
+        @promote="onPromoteReadyPromoted"
+      />
 
       <ChatComposer
         ref="composerRef"

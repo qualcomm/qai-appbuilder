@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * Mode-template store — collaboration modes ("怎么协作": 讨论/评审/辩论/实施/custom).
  *
@@ -74,6 +79,11 @@ interface ModeTemplateWire {
   cloned_from_id?: string | null;
   created_at: string;
   updated_at: string;
+  /** Per-locale i18n maps for built-in presets (migration 056); null/absent
+   *  for custom rows → fall back to the single-language fields above. */
+  name_i18n?: Record<string, string> | null;
+  description_i18n?: Record<string, string> | null;
+  framing_i18n?: Record<string, string> | null;
 }
 
 interface ModeTemplateListWire {
@@ -120,6 +130,11 @@ export interface ModeTemplateView {
   /** Source template id when this is a clone (esp. a clone of a factory preset);
    *  "" / undefined = not a clone. Reset is only meaningful when set. */
   clonedFromId?: string;
+  /** Per-locale i18n maps for built-in presets; undefined for custom rows.
+   *  Consumed by useTemplateI18n at the display layer. */
+  nameI18n?: Record<string, string>;
+  descriptionI18n?: Record<string, string>;
+  framingI18n?: Record<string, string>;
 }
 
 /** Body for create / update (id is route/response only). */
@@ -157,6 +172,11 @@ function wireToView(w: ModeTemplateWire): ModeTemplateView {
     ...(w.cloned_from_id != null && w.cloned_from_id !== ""
       ? { clonedFromId: w.cloned_from_id }
       : {}),
+    ...(w.name_i18n != null ? { nameI18n: w.name_i18n } : {}),
+    ...(w.description_i18n != null
+      ? { descriptionI18n: w.description_i18n }
+      : {}),
+    ...(w.framing_i18n != null ? { framingI18n: w.framing_i18n } : {}),
   };
 }
 

@@ -7,7 +7,11 @@ settings:
 overrides:
   entities: 4.5.0
 
-pnpmfileChecksum: sha256-VrsrToi1Z5RU6E0jos1dun+x1csejft/ASKz3cSNUQo=
+pnpmfileChecksum: sha256-Kuj6upqNwbuD6fp6ERhfIo+QJpK/9tO7LmY7Xackv1c=
+
+patchedDependencies:
+  entities@4.5.0: 23a443abbbcf4542b89c3e54ee3060e1027d4b36e1ae8ee3e1ed1c9fb007db42
+  estree-walker@3.0.3: 1cad6222b1237f49c7acc22e9478e29176030ad7e121f060e39c1d75d55c18fd
 
 importers:
 
@@ -3058,7 +3062,7 @@ snapshots:
   '@vitest/mocker@2.1.9(vite@5.4.21(@types/node@22.19.19))':
     dependencies:
       '@vitest/spy': 2.1.9
-      estree-walker: 3.0.3
+      estree-walker: 3.0.3(patch_hash=1cad6222b1237f49c7acc22e9478e29176030ad7e121f060e39c1d75d55c18fd)
       magic-string: 0.30.21
     optionalDependencies:
       vite: 5.4.21(@types/node@22.19.19)
@@ -3104,7 +3108,7 @@ snapshots:
     dependencies:
       '@babel/parser': 7.29.7
       '@vue/shared': 3.5.35
-      entities: 4.5.0
+      entities: 4.5.0(patch_hash=23a443abbbcf4542b89c3e54ee3060e1027d4b36e1ae8ee3e1ed1c9fb007db42)
       estree-walker: 2.0.2
       source-map-js: 1.2.1
 
@@ -3582,7 +3586,7 @@ snapshots:
     dependencies:
       domelementtype: 2.3.0
       domhandler: 5.0.3
-      entities: 4.5.0
+      entities: 4.5.0(patch_hash=23a443abbbcf4542b89c3e54ee3060e1027d4b36e1ae8ee3e1ed1c9fb007db42)
 
   domelementtype@2.3.0: {}
 
@@ -3613,7 +3617,7 @@ snapshots:
 
   emoji-regex@9.2.2: {}
 
-  entities@4.5.0: {}
+  entities@4.5.0(patch_hash=23a443abbbcf4542b89c3e54ee3060e1027d4b36e1ae8ee3e1ed1c9fb007db42): {}
 
   env-paths@2.2.1: {}
 
@@ -3759,7 +3763,7 @@ snapshots:
 
   estree-walker@2.0.2: {}
 
-  estree-walker@3.0.3:
+  estree-walker@3.0.3(patch_hash=1cad6222b1237f49c7acc22e9478e29176030ad7e121f060e39c1d75d55c18fd):
     dependencies:
       '@types/estree': 1.0.9
 
@@ -3884,7 +3888,7 @@ snapshots:
 
   happy-dom@15.11.7:
     dependencies:
-      entities: 4.5.0
+      entities: 4.5.0(patch_hash=23a443abbbcf4542b89c3e54ee3060e1027d4b36e1ae8ee3e1ed1c9fb007db42)
       webidl-conversions: 7.0.0
       whatwg-mimetype: 3.0.0
 
@@ -3911,7 +3915,7 @@ snapshots:
       domelementtype: 2.3.0
       domhandler: 5.0.3
       domutils: 3.2.2
-      entities: 4.5.0
+      entities: 4.5.0(patch_hash=23a443abbbcf4542b89c3e54ee3060e1027d4b36e1ae8ee3e1ed1c9fb007db42)
 
   https-proxy-agent@7.0.6(supports-color@10.2.2):
     dependencies:

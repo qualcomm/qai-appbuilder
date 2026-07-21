@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 // =============================================================================
 // i18n locale sub-file — 手工维护，UTF-8（无 BOM）。
 //
@@ -35,6 +40,7 @@ const chatErrors = {
     openProviderSettings: "打开云模型设置",
     setApiKey: "设置 API Key",
     selectModel: "选择模型",
+    switchModel: "换个模型重试",
     compressContext: "压缩上下文",
     copyDiagnostics: "复制诊断信息",
   },

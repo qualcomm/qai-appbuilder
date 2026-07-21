@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Unified FastAPI exception handlers for the qai HTTP surface.
 
 Maps :mod:`qai.platform.errors` exception hierarchy to HTTP status codes

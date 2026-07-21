@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Pack-runner command registry.
 
 A registry maps :class:`AppModelDefinition` (resolved by ``model.id``
@@ -325,6 +330,7 @@ def build_command_resolver(
                 inputs=inputs_payload,
                 params=params_payload,
                 variant=variant,
+                run_id=str(run.id),
             )
         return ProcessExecutionRequest(
             argv=argv,

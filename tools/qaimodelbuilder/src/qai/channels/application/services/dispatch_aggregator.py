@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Aggregate a streamed dispatch frame iterator into one final reply (R16).
 
 Background — the HTTP ``POST /api/{kind}/dispatch`` route previously

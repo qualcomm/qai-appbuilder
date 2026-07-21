@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Cryptographic hash value objects for the qai platform layer.
 
 Centralises the :class:`Hash256` primitive (64-char lower-case hex

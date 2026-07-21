@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Discussion Policy Planner (§21.4) — intent × state → execution policy.
 
 Layer 2 of the four-layer discussion orchestration (§21.2).  A **pure function**

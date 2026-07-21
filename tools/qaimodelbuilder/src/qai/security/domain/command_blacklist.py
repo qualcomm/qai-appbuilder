@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """qai.security.domain — default dangerous-command blacklist prefixes.
 
 Pure domain constant (no I/O, no framework, no cross-context import). This

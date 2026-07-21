@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """aiosqlite-backed :class:`SkillRegistryPort` (PR-044).
 
 Schema reference: ``qai-db-schema.md`` §6.6 (model_catalog_skill).

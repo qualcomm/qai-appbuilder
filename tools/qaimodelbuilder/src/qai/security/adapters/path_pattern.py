@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Normalised :class:`PathPattern` matcher (PR-092 §2.1 C-1 / §17.5 #11).
 
 The domain-layer :class:`qai.security.domain.value_objects.PathPattern`

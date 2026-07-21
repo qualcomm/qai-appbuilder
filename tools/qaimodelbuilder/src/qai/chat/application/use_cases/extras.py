@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Image upload, prompt enhance, prompt snapshot use cases (PR-403 / S7.5 lane L4).
 
 Three thin orchestrating use cases that wrap the corresponding ports.

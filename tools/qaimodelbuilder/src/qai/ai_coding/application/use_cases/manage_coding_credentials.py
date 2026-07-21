@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Use cases: list / save / delete ai_coding credentials.
 
 Backs the legacy ``GET / POST / DELETE /api/cc/credentials`` routes.

@@ -1,4 +1,9 @@
 <!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
+<!--
   ModelCatalogTab — V1 "models" tab container (milestone-2: full parity).
 
   Renders the hardware-grouped model catalog as three collapsible-free

@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * Conversations store — shared "Recent Chats" list source.
  *
@@ -47,6 +52,18 @@ export interface ConversationSummary {
   // can pin conversations on top and the favorites dialog can filter them.
   pinned?: boolean;
   favorite?: boolean;
+  // Promote-ready detection result (backend migration 057). The backend
+  // detects at turn end and persists it onto Conversation.detected_model; the
+  // single-GET (`GET /api/chat/conversations/{id}`) carries it so the
+  // "Promote to App Builder" CTA can be surfaced with ZERO on-open disk scans.
+  // `workdir` empty + `variants` empty ⇒ "checked, nothing to promote";
+  // absent / null ⇒ never detected (legacy / forward-compatible). The list
+  // projection does not populate it (sidebar does not need it).
+  detected_model?: {
+    workdir: string;
+    variants: { precision: string; label: string }[];
+    checked_at?: string;
+  } | null;
 }
 
 interface ConversationListResponse {

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """CC/OC config + credentials routes (``_register_cc_config_routes``).
 
 Extracted verbatim from the former single-file ``ai_coding.py``

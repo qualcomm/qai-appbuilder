@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <script setup lang="ts">
 // AppBuilderEmptyState — the dark "welcome" screen shown in the App Builder
 // chat when there are no messages yet. Guides the user through the 3-step
@@ -21,6 +26,7 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 
 import { useAppBuilderStore } from "@/stores/appBuilder";
+import { useChatTabsStore } from "@/stores/chatTabs";
 import { useToast } from "@/composables/useToast";
 import type { AppEntry } from "@/stores/appBuilder";
 
@@ -40,8 +46,23 @@ interface Chip {
 const emit = defineEmits<{ "fill-prompt": [prompt: string] }>();
 
 const store = useAppBuilderStore();
+const chatTabsStore = useChatTabsStore();
 const { t } = useI18n();
 const toast = useToast();
+
+// ── "Go to Model Builder" sub-step (Sprint 2, feedback 7C) ──────────────────
+// Users landing on the App Builder empty state may not yet have converted
+// their model. Rather than force them to hunt for the mode switcher, expose
+// a next-to-step-1 sub-step that flips the active tab into Model Builder
+// mode in place — reuses the store's canonical `setActiveMode` action so the
+// mode change flows through the same code path the toolbar mode switcher
+// uses (State-Truth-First — one truth source, no drift).
+function switchToModelBuilder(): void {
+  const tabId = chatTabsStore.activeTabId;
+  if (tabId === null) return;
+  chatTabsStore.setActiveMode(tabId, "model-build");
+}
+
 
 // ── generated app projects ("My generated apps", Phase 4) ───────────────────
 
@@ -253,6 +274,25 @@ onMounted(async () => {
           <span v-else class="ab-empty-hint">{{
             t("appBuilder.authoring.modelSelectedHint", { names: selectedNames })
           }}</span>
+          <!-- Sub-step (Sprint 2, feedback 7C): if the user has NOT yet
+               converted a model, guide them straight into Model Builder so
+               the whole "convert → promote → build app" flow is discoverable
+               from a cold empty state. The link switches the active tab's
+               mode via the SAME `setActiveMode` action the toolbar mode
+               switcher uses — no bespoke route, one truth source. -->
+          <p class="ab-empty-step-substep" data-testid="ab-empty-goto-model-builder">
+            <span class="ab-empty-step-substep-text">{{
+              t("appBuilder.authoring.step1NeedConversion")
+            }}</span>
+            <button
+              type="button"
+              class="ab-empty-step-substep-link"
+              data-testid="ab-empty-goto-model-builder-btn"
+              @click="switchToModelBuilder"
+            >
+              → {{ t("appBuilder.authoring.step1GoToModelBuilder") }}
+            </button>
+          </p>
         </div>
       </li>
       <li class="ab-empty-step">
@@ -434,6 +474,39 @@ onMounted(async () => {
 
 .ab-empty-hint--warn {
   color: #e0a94a;
+}
+
+/* Sub-step under step 1 (feedback 7C): guides the user to Model Builder when
+   they haven't converted a model yet. Deliberately subdued — a two-line
+   supporting hint under the step text, NOT a competing CTA (the primary
+   flow is still "select model → describe app → generate", but this side
+   ramp is there for the "I don't have a converted model yet" case). */
+.ab-empty-step-substep {
+  margin: 4px 0 0;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 0.82rem;
+  color: #8a8a92;
+  line-height: 1.4;
+}
+
+.ab-empty-step-substep-link {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: #7fa7ff;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: none;
+  transition: color 0.12s ease;
+}
+.ab-empty-step-substep-link:hover,
+.ab-empty-step-substep-link:focus-visible {
+  color: #a4c1ff;
+  text-decoration: underline;
 }
 
 .ab-empty-chips {

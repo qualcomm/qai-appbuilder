@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """UUID v7 generation and generic UUID validation.
 
 UUID v7 (RFC 9562) is a time-ordered 128-bit identifier whose leading

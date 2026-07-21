@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Skill-capability registration / unregistration use cases (PR-504).
 
 The :class:`RegisterSkillCapabilityUseCase` is the security-side

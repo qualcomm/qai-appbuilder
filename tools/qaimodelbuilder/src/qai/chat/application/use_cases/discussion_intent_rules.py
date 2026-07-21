@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Locale-aware heuristic rule pack for the discussion Intent Router (§21.3.1).
 
 This module is the SINGLE, CENTRAL home for the short-phrase dictionaries the

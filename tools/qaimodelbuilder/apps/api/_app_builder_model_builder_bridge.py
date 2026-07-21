@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Cross-context bridge: App Builder route -> Model Builder export use case.
 
 The HTTP route ``POST /api/app-builder/import/auto-export`` lives in

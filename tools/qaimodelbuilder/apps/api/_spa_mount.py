@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """SPA + chat-image static mounts for the FastAPI app (extracted from main.py).
 
 Background (AGENTS.md §6 / dealign-fix-plan C1, 2026-06-06):

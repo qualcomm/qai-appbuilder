@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Supported audio container/codec extensions (PR-306 domain extraction).
 
 Promoted from ``features/app-builder/shared/audio_formats.py`` to a

@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * `useCodePersonas` — manage AI coding persona presets.
  *
@@ -27,6 +32,12 @@ export interface Persona {
   default_prompt?: string;
   /** True when the user has overridden this persona's prompt. */
   is_customized?: boolean;
+  /** Tool permission groups (e.g. ["read", "edit", "command"]). */
+  groups?: Array<string | [string, Record<string, string>]>;
+  /** Built-in default groups (tail-appended by backend). */
+  default_groups?: Array<string | [string, Record<string, string>]>;
+  /** True when the user has overridden this persona's groups. */
+  is_groups_customized?: boolean;
   system_prompt?: string;
   model_id?: string;
   enabled?: boolean;
@@ -57,6 +68,9 @@ interface PersonaListResponse {
 export interface CodePersonaI18n {
   t?: (key: string, named?: Record<string, unknown>) => string;
   localizedName?: (persona: Persona) => string;
+  /** Reactive locale getter — called on each fetch to pick the current
+   *  UI language (e.g. "en", "zh-CN", "zh-TW"). */
+  getLocale?: () => string;
 }
 
 export function useCodePersonas(i18n: CodePersonaI18n = {}) {
@@ -87,7 +101,9 @@ export function useCodePersonas(i18n: CodePersonaI18n = {}) {
   async function fetchPersonas(): Promise<void> {
     loading.value = true;
     try {
-      const res = await apiJson<PersonaListResponse>("GET", "/api/code-personas");
+      const currentLocale = typeof i18n.getLocale === "function" ? i18n.getLocale() : "";
+      const localeParam = currentLocale ? `?locale=${encodeURIComponent(currentLocale)}` : "";
+      const res = await apiJson<PersonaListResponse>("GET", `/api/code-personas${localeParam}`);
       personas.value = res.personas;
       // Set active persona from backend "selected" field
       if (res.selected) {
@@ -229,6 +245,53 @@ export function useCodePersonas(i18n: CodePersonaI18n = {}) {
     }
   }
 
+  /**
+   * Save custom tool permission groups for a built-in persona via
+   * `POST /api/code-personas/:id` with `{ groups }`.
+   * The local persona's `groups` is updated on success.
+   */
+  async function savePersonaGroups(
+    id: string,
+    groups: Array<string | [string, Record<string, string>]>,
+  ): Promise<boolean> {
+    saving.value = true;
+    try {
+      await apiJson<{ status: string }>("POST", `/api/code-personas/${id}`, {
+        groups,
+      });
+      const idx = personas.value.findIndex((p) => p.id === id);
+      if (idx >= 0) {
+        const current = personas.value[idx] as Persona;
+        const updated: Persona = { ...current, groups, is_groups_customized: true };
+        personas.value = [
+          ...personas.value.slice(0, idx),
+          updated,
+          ...personas.value.slice(idx + 1),
+        ];
+        if (activePersona.value?.id === id) activePersona.value = updated;
+      }
+      toast.push({
+        id: crypto.randomUUID(),
+        kind: "success",
+        message: tr("codePersona.saveSuccess", `"${nameOf(personas.value.find((p) => p.id === id))}" saved`, {
+          name: nameOf(personas.value.find((p) => p.id === id)),
+        }),
+        timeoutMs: 3000,
+      });
+      return true;
+    } catch (e) {
+      toast.push({
+        id: crypto.randomUUID(),
+        kind: "error",
+        message: `${tr("codePersona.saveFailed", "Save failed")}: ${(e as Error).message}`,
+        timeoutMs: 5000,
+      });
+      return false;
+    } finally {
+      saving.value = false;
+    }
+  }
+
   async function deletePersona(id: string): Promise<void> {
     try {
       await apiJson("DELETE", `/api/code-personas/${id}`);
@@ -275,6 +338,7 @@ export function useCodePersonas(i18n: CodePersonaI18n = {}) {
     selectPersonaPersisted,
     createPersona,
     savePersonaPrompt,
+    savePersonaGroups,
     resetPersonaPrompt,
     deletePersona,
   };

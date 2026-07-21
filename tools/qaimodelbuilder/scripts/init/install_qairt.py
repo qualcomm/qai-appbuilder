@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 r"""``scripts.init.install_qairt`` — QAIRT SDK install orchestrator (PR-902).
 
 Replaces the legacy ``Setup_Builder_Env.bat`` workflow with a Python

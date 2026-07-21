@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Public API for ``qai.platform.time``.
 
 Exports a Clock abstraction (Protocol + SystemClock + FrozenClock) and a small

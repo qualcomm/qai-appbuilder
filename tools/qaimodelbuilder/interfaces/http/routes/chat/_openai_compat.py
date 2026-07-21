@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """OpenAI-compatible HTTP routes — PR-033 stage D.
 
 External contract per ``08-business-capabilities.md`` §8.2: these

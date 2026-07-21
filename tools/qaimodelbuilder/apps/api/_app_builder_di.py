@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """DI wiring for the ``app_builder`` bounded context (PR-034 + PR-045 + PR-301).
 
 PR-034 (S3) injected eight ``_Fake<Port>`` adapters; PR-045 (S4)
@@ -11,9 +16,9 @@ PR-301 (S7.5) introduces the sticky-worker subsystem:
 
 Lifespan integration (apps/api/lifespan.py is owned by the I1
 integration lane; this PR's manifest §10 lists the warm-up hook).
-Until I1 wires it, ``container.sticky_worker_host`` is optional and
-:func:`build_app_builder_services` falls back to
-:class:`StaticWorkerStatusAdapter` when the host is absent.
+``container.sticky_worker_host`` is optional; the
+:class:`StickyWorkerStatusAdapter` reads through a lazy host provider so
+the ``WorkerStatusPort`` reports ``alive=False`` until the host is wired.
 
 Existing :class:`AppBuilderServices` field names (PR-034 §11 lock) are
 preserved verbatim. PR-301 only **adds** the optional
@@ -82,7 +87,6 @@ from qai.app_builder.application.use_cases.deferred_routes import (
     GetTaxonomyUseCase,
     GetTaxonomyTreeUseCase,
     ImportScanBinsUseCase,
-    ListLocalFilesUseCase,
     ListRunsUseCase,
     PreloadVoiceInputUseCase,
     RunBatchUseCase,
@@ -101,10 +105,7 @@ from qai.app_builder.application.use_cases.run_benchmark import (
     RunBenchmarkUseCase,
 )
 from qai.app_builder.application.use_cases.skill_and_schema import (
-    BuildSystemPromptUseCase,
-    FilesystemSkillFileLoader,
     GeneratePackCatalogUseCase,
-    GetAppBuilderToolDescriptorUseCase,
     GetModelSchemaUseCase,
     ResolveModelInferenceCodeUseCase,
     ResolveSkillFilesUseCase,
@@ -374,16 +375,11 @@ class AppBuilderServices:
     clear_cache_use_case: ClearCacheUseCase | None = None
     list_runs_use_case: ListRunsUseCase | None = None
     delete_run_history_use_case: DeleteRunHistoryUseCase | None = None
-    list_local_files_use_case: ListLocalFilesUseCase | None = None
     get_pack_manifest_use_case: GetPackManifestUseCase | None = None
     import_scan_bins_use_case: ImportScanBinsUseCase | None = None
     run_batch_use_case: RunBatchUseCase | None = None
     # NEW (PR-305) — SKILL.md aggregation + Schema-driven UI + appbuilder_run.
-    build_system_prompt_use_case: BuildSystemPromptUseCase | None = None
     get_model_schema_use_case: GetModelSchemaUseCase | None = None
-    get_appbuilder_tool_descriptor_use_case: (
-        GetAppBuilderToolDescriptorUseCase | None
-    ) = None
     # NEW (PR-094 §17.5 #14) — Markdown run-report export.
     export_run_markdown_use_case: ExportRunMarkdownUseCase | None = None
     # NEW (PR-094 §17.5 #11 / #12) — wired collaborators consumed by
@@ -522,11 +518,11 @@ def build_app_builder_services(container: "Container") -> AppBuilderServices:
 
     Uses ``container.{database, clock, ids, settings, events, data_paths}``.
 
-    PR-301: when ``container.sticky_worker_host`` is present (set up by
-    the I1 integration lane's lifespan hook), the worker-status port
-    becomes :class:`StickyWorkerStatusAdapter` and surfaces the live
-    sticky-worker registry. Otherwise it falls back to
-    :class:`StaticWorkerStatusAdapter` for parity with PR-045 wiring.
+    PR-301: the worker-status port is a :class:`StickyWorkerStatusAdapter`
+    wrapping a lazy sticky-worker host provider. When
+    ``container.sticky_worker_host`` is not yet set up (I1 integration
+    lane's lifespan hook), the adapter surfaces ``alive=False`` /
+    empty ``loaded_models`` until the live host registry is wired.
     """
     db = container.database
     clock = container.clock
@@ -801,9 +797,6 @@ def build_app_builder_services(container: "Container") -> AppBuilderServices:
     # already available — DataPaths for filesystem-rooted UCs, the
     # registry for deps status, the sticky host for preload.
     blob_dir = data_paths.blobs_dir / "app_builder"
-    # PR-304 ListLocalFilesUseCase: sandboxed file picker rooted at the
-    # uploads area; ``data_paths.blob_dir("uploads")`` returns a Path.
-    files_picker_root = data_paths.blob_dir("uploads")
     runner_registry_count_provider = (
         (lambda: len(runner_registry))
         if hasattr(runner_registry, "__len__")
@@ -1031,19 +1024,6 @@ def build_app_builder_services(container: "Container") -> AppBuilderServices:
         blobs_dir=data_paths.blobs_dir,
     )
 
-    # PR-305: SKILL.md loader rooted at the pack root (when present).
-    # When the pack root isn't available we fall back to a null loader
-    # that always returns None — BuildSystemPromptUseCase still works and
-    # reports "SKILL file not found" for every model.
-    if pack_root_for_scan is not None:
-        skill_loader = FilesystemSkillFileLoader(pack_root=pack_root_for_scan)
-    else:
-        class _NullSkillLoader:
-            def load(self, model_id, file_name):  # noqa: ANN001
-                return None
-
-        skill_loader = _NullSkillLoader()  # type: ignore[assignment]
-
     # PR-094 §17.5 #15 — single instance shared between the catalog
     # tool descriptor (which surfaces ``quality_score`` per model row)
     # and the AppBuilderServices field (consumers that only need the
@@ -1112,12 +1092,21 @@ def build_app_builder_services(container: "Container") -> AppBuilderServices:
         ResolveModelInferenceCodeUseCase | None
     ) = None
     if pack_root_for_scan is not None:
+        # P4 双根修复：locator 需同时覆盖 built-in + user 两根，否则用户
+        # 导入的 pack 的 SKILL.md / runner.py 会解析不到（见 modules
+        # ``skill_paths.py`` / ``skill_and_schema.py`` 的双 anchor 文档）。
         resolve_skill_files_uc = ResolveSkillFilesUseCase(
-            locator=FilesystemSkillPathLocator(pack_root=pack_root_for_scan),
+            locator=FilesystemSkillPathLocator(
+                pack_root=pack_root_for_scan,
+                user_pack_root=user_pack_root_for_scan,
+            ),
             manifest_provider=manifest_provider,
         )
         resolve_model_inference_code_uc = ResolveModelInferenceCodeUseCase(
-            locator=FilesystemSkillPathLocator(pack_root=pack_root_for_scan),
+            locator=FilesystemSkillPathLocator(
+                pack_root=pack_root_for_scan,
+                user_pack_root=user_pack_root_for_scan,
+            ),
             manifest_provider=manifest_provider,
             app_models=app_models,
         )
@@ -1126,6 +1115,11 @@ def build_app_builder_services(container: "Container") -> AppBuilderServices:
         manifest_provider=manifest_provider,
         status_provider=app_model_status_resolver,
         inject_quality_score_use_case=inject_quality_score_uc,
+        # P4 通用路径元信息：让 catalog 里每个模型条目带 built-in / user layout
+        # 标签 + ${APP_ROOT} 相对路径 + env-var 名字。这是**对所有 pack 100%
+        # 覆盖**的信息通道（不依赖 skill.enabled 或 SKILL.md 是否存在），
+        # Agent 写 app.yaml / 回答用户"模型在哪" / 调试加载失败时都能用到。
+        origin_by_id=pack_manifest_origin,
     )
 
     # ── Weight-download use case ────────────────────────────────────────
@@ -1255,6 +1249,12 @@ def build_app_builder_services(container: "Container") -> AppBuilderServices:
             repo_root=_repo_root_for_apps,
             workspace_root=Path(resolve_workspace_root(container)),
             apps_root=data_paths.root / "app_builder",
+            # P4 双根：packager 需感知用户导入的 pack / weights 根，否则
+            # ``_collect_model_weights`` / ``_collect_model_pack`` 会把
+            # 用户 pack 的路径判为"outside root"并跳过，产出的 zip 缺 .bin。
+            # 见 ``app_project_packager.py`` 顶部 dual-anchor docstring。
+            user_pack_root=user_pack_root_for_scan,
+            user_weights_root=user_weights_root_for_install,
         )
         package_app_project_uc = PackageAppProjectUseCase(
             repository=app_project_repository,
@@ -1344,9 +1344,6 @@ def build_app_builder_services(container: "Container") -> AppBuilderServices:
             app_models=app_models, runs=runs
         ),
         delete_run_history_use_case=DeleteRunHistoryUseCase(runs=runs),
-        list_local_files_use_case=ListLocalFilesUseCase(
-            base_dir=files_picker_root
-        ),
         get_pack_manifest_use_case=GetPackManifestUseCase(
             app_models=app_models,
             manifest_provider=manifest_provider,
@@ -1360,21 +1357,9 @@ def build_app_builder_services(container: "Container") -> AppBuilderServices:
             run_app_use_case=run_app_uc,
         ),
         # PR-305 SKILL.md aggregation + Schema + appbuilder_run descriptor
-        build_system_prompt_use_case=BuildSystemPromptUseCase(
-            app_models=app_models,
-            manifest_provider=manifest_provider,
-            skill_loader=skill_loader,
-        ),
         get_model_schema_use_case=GetModelSchemaUseCase(
             app_models=app_models,
             manifest_provider=manifest_provider,
-        ),
-        get_appbuilder_tool_descriptor_use_case=(
-            GetAppBuilderToolDescriptorUseCase(
-                app_models=app_models,
-                manifest_provider=manifest_provider,
-                inject_quality_score_use_case=inject_quality_score_uc,
-            )
         ),
         # PR-094 §17.5 #14 — Markdown run-report export. The renderer
         # adapter is injected so the use case satisfies the

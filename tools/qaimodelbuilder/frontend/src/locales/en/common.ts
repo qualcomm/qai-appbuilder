@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 // =============================================================================
 // i18n locale sub-file — 手工维护，UTF-8（无 BOM）。
 //
@@ -32,6 +37,20 @@ const common = {
   enabled: "Enabled",
   expand: "Expand",
   gotIt: "Got it",
+  // Shared help-manual overlay (see components/common/HelpButton.vue).
+  // Kept nested under `common` (not the top-level `help.*` namespace, which
+  // holds CLI-command help copy) so it is stable across features.
+  // Note: the modal close button reuses top-level `common.close` (the
+  // ChannelInfoDialog chrome consumes that key), so no `close` entry is
+  // duplicated here.
+  help: {
+    button: {
+      ariaLabel: "Help",
+    },
+    loadFailed: "Failed to load help content. Please retry or check the official docs.",
+    title: "Help",
+    viewOfficial: "View official docs",
+  },
   less: "Less",
   loading: "Loading…",
   minimize: "Minimize",

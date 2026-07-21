@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``FileSystemPackFileCleanup`` — delete an imported pack's on-disk files.
 
 Symmetric counterpart to :class:`FileSystemAppImportAdapter._install_pack`:

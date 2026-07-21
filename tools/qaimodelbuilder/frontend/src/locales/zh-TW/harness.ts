@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 // =============================================================================
 // i18n locale sub-file — 手工维护，UTF-8（无 BOM）。
 //
@@ -12,27 +17,7 @@
 // =============================================================================
 
 const harness = {
-  agent: {
-    compressing: "正在壓縮上下文...",
-    interrupted: "操作已被使用者中斷",
-    maxIterations: "已達最大迭代次數",
-  },
   config: {
-    agent: {
-      autoCompress: {
-        desc: "接近 token 上限時自動壓縮上下文",
-      },
-      autoTitle: {
-        desc: "自動生成對話標題",
-      },
-      experienceExtraction: {
-        desc: "任務成功後自動提取可複用經驗",
-      },
-      maxIterations: {
-        desc: "Agentic loop 最大工具調用輪次",
-      },
-      title: "Agent 循環",
-    },
     security: {
       smartApproval: {
         label: "智慧審批",
@@ -40,28 +25,9 @@ const harness = {
       },
     },
   },
-  experiences: {
-    category: "分類",
-    deleteConfirm: "確定刪除此經驗？",
-    deleted: "經驗已刪除",
-    empty: "暫無儲存的經驗",
-    insights: "經驗洞察",
-    summary: "摘要",
-    title: "經驗庫",
-  },
-  guardrail: {
-    blocked: "工具調用被防護欄攔截",
-    warn: "防護欄警告",
-  },
   search: {
     noResults: "未找到匹配的對話",
-    placeholder: "搜尋對話記錄...",
-    searching: "搜尋中...",
   },
-  stopGeneration: {
-    tooltip: "停止當前 AI 回應",
-  },
-  stopped: "已由使用者停止生成",
 };
 
 export default harness;

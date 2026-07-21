@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Shared single-agent turn kernel (main + sub-agent + discussion loops).
 
 Both the **main agent** loop (``streaming.py:_run_followup_loop`` +

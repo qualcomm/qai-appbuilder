@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Shared image-reference decoding for chat turns (single source of truth).
 
 Both the SSE/WS route layer (a user prompt that embeds uploaded images as

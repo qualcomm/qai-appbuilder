@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Pack-runner command resolution (PR-302).
 
 Replaces PR-045's ``_default_resolver = lambda r, m: None`` placeholder

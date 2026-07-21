@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Discussion Intent Router (§21.3) — heuristic, dependency-free classifier.
 
 Layer 1 of the four-layer discussion orchestration (§21.2): given the user's

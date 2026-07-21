@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * Markdown rendering pipeline.
  *
@@ -40,8 +45,7 @@
  *   (not via a `data-*` wildcard), keeping the marker policy auditable in one
  *   place.
  *
- * The chat / ai_coding render path uses `renderMarkdown(md)` directly;
- * see `useMarkdown.ts` for the reactive composable wrapper.
+ * The chat / ai_coding render path uses `renderMarkdown(md)` directly.
  */
 import DOMPurify, { type Config as DOMPurifyConfig } from "dompurify";
 import hljs from "highlight.js/lib/common";

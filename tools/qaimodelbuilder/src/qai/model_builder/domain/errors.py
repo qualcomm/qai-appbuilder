@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Domain errors raised by ``qai.model_builder.application`` use cases.
 
 All exceptions inherit a single base so callers (HTTP route + bridge)

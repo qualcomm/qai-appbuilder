@@ -5,7 +5,7 @@
  * ========================================================================== */
 
 /* ---------------------------------------------------------------------
- * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause
  * --------------------------------------------------------------------- */
 /* ── Layout ─────────────────────────────────────────────────────────────── */
@@ -20,14 +20,13 @@
 
 /* ── Sidebar ────────────────────────────────────────────────────────────── */
 .sidebar {
-  /* 用 em 单位让侧栏宽度跟随根字号缩放：
-       - 100% 字号（16px）→ 17em ≈ 272px（≈ 保持原 260px 视觉）
-       - 160% 字号（~25.6px）→ 17em ≈ 435px（被 clamp 上限 360px 截住）
-     clamp 下限 260px 保证小字号下与 V1 视觉一致；上限 360px 防止字号被拉到
-     200%+ 时侧栏吃掉过多主区域。V1 硬编码 260px 的问题是它不跟字号缩放，
-     字号放大后 "QAI ModelBuilder Platform" 品牌标题被 ellipsis 截断。 */
-  width: clamp(260px, 17em, 360px);
-  min-width: clamp(260px, 17em, 360px);
+  /* 固定像素宽度，NOT em：侧栏宽度不随全局字号缩放。
+     此前用 clamp(260px, 17em, 360px)，em 相对 body 的 font-size(=--text-base)，
+     全局字号滑块放大 --text-base 时会把整个侧栏拉宽，非常难看（用户反馈）。
+     字号放大只应放大文字本身，不应放大布局面板宽度。品牌标题若放不下由
+     文字省略/换行处理，而不是把面板撑大。 */
+  width: 260px;
+  min-width: 260px;
   background: var(--bg-secondary);
   border-right: 1px solid var(--border);
   display: flex;
@@ -567,9 +566,9 @@ html.light .sidebar-logo-line {
 
 @media (min-width: 1440px) {
   .sidebar {
-    /* 大屏对齐：与上面 .sidebar 同理，em 缩放 + clamp 兜底。 */
-    width: clamp(300px, 19em, 400px);
-    min-width: clamp(300px, 19em, 400px);
+    /* 大屏适度加宽，仍用固定 px（NOT em），不随全局字号缩放。 */
+    width: 300px;
+    min-width: 300px;
   }
   .panel-view { padding: var(--space-8); }
   .message-row { max-width: min(900px, 80%); }

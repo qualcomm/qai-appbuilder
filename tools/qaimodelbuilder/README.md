@@ -4,7 +4,6 @@
 
 [![Platform](https://img.shields.io/badge/Platform-Windows_on_ARM-blue?logo=windows)](https://www.microsoft.com/windows)
 [![Snapdragon](https://img.shields.io/badge/NPU-Snapdragon_X_Elite%2FPlus-red?logo=qualcomm)](https://www.qualcomm.com/snapdragon)
-[![Python](https://img.shields.io/badge/Python-3.12%2B-blue?logo=python)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi)](https://fastapi.tiangolo.com/)
 [![Vue3](https://img.shields.io/badge/Frontend-Vue3_%2B_Vite-4FC08D?logo=vue.js)](https://vuejs.org/)
 [![中文文档](https://img.shields.io/badge/文档-中文版-red?logo=googletranslate&logoColor=white)](README.zh-CN.md)
@@ -12,8 +11,9 @@
 ---
 
 > ⚡ **In a hurry?** See **[`QUICK-START.md`](QUICK-START.md)** for a 1-page
-> cheat-sheet covering the three usage modes — **dev (run from source) / desktop
-> app (Tauri) / release artifact** — and which `.bat` to run when.
+> cheat-sheet covering the two shipping modes — **dev (run from source) / release
+> artifact** — and which `.bat` to run when. (An optional developer-only Tauri desktop
+> shell also exists; see below.)
 
 ---
 
@@ -51,6 +51,7 @@
 | ⚡ **Skill Management** | Plugin-based Skill system with hot-reload and automatic system-prompt injection; built-in chat skills plus user-installable skills. |
 | 🪝 **Chat Action Hooks** | Bind shell commands to chat lifecycle events from the Settings → Hooks tab. |
 | 🔒 **Secure Storage & Permission Gating** | API keys stored via OS keyring (with encrypted fallback) — never written in plaintext. Tool execution is gated by a `PolicyCenter` + Protected Paths + FileBroker software guardrail stack with a permission-approval workflow. |
+| 🔑 **User Login (Okta SSO)** | The WebUI is gated behind Okta OIDC single sign-on (enabled by default). On shared machines and lab environments, only authorized users reach the tool. Disable it for local `pnpm dev` only. |
 | 📥 **Download Center** | Browse and download Snapdragon NPU-optimized quantized models from a remote release manifest, powered by aria2c multi-threaded downloading with resume + checksum verification. |
 | 🎨 **Dark / Light Theme & i18n** | Switchable dark/light theme, responsive layout, and English / Chinese UI. |
 
@@ -66,8 +67,8 @@ QAI ModelBuilder has been **fully rewritten as a Clean Architecture / DDD applic
 │  interfaces/  Protocol adapters: HTTP / WS / SSE / Webhook     │
 ├──────────────────────────────────────────────────────────────┤
 │  src/qai/     Bounded contexts (domain ⇐ application ⇐ adapters)│
-│   chat · app_builder · model_builder ·                       │
-│   model_catalog · model_runtime · security ·                  │
+│   chat · ai_coding · app_builder · model_builder ·           │
+│   model_catalog · model_runtime · security · channels ·      │
 │   tools · user_prefs · dependency_approval ·                  │
 │   command_policy · service_release · platform (shared kernel) │
 ├──────────────────────────────────────────────────────────────┤
@@ -78,11 +79,13 @@ QAI ModelBuilder has been **fully rewritten as a Clean Architecture / DDD applic
 | Context | Purpose |
 |---------|---------|
 | `chat` | Multi-tab conversations / messages, multi-agent discussion, OpenAI-compatible entry |
+| `ai_coding` | Agentic coding sessions (Claude Code / OpenCode) with a permission-gated tool harness |
 | `app_builder` | On-device Model Pack execution, runs, artifacts, share, benchmarking |
 | `model_builder` | Model conversion + Promote-to-App-Builder export |
 | `model_catalog` | Downloadable model/skill catalog (remote release manifest + aria2c) |
 | `model_runtime` | GenieAPIService daemon control (start/stop/status/load/logs) |
 | `security` | Permission-approval workflow, FileGuard / FileBroker, sandbox grants, audit |
+| `channels` | IM channel integration (WeChat / Feishu) — chat with the assistant from an IM app |
 | `tools` | Tool execution (FileBroker etc.) |
 | `user_prefs` | Durable user preferences (`kv_user_prefs` table) |
 | `dependency_approval` / `command_policy` | Dependency-install / command-execution approval queues |
@@ -115,7 +118,7 @@ QAI ModelBuilder has been **fully rewritten as a Clean Architecture / DDD applic
 | **Zipformer ZH** (`zipformer-zh`) | ASR | audio → JSON (text + timestamps) | Chinese, INT8, faster than Whisper Base |
 | **MeloTTS ZH** (`melotts-zh`) | TTS | text → wav 24 kHz | Chinese; voice + speed control, full-NPU W8A16 |
 
-> The built-in Packs currently cover **ASR / TTS**. The Pack taxonomy also supports SR / CV and more — convert your own models with [Model Builder](#-highlight-model-builder-skill) and one-click **Promote to App Builder** to add new Packs (e.g. image classification or super-resolution). Demo models such as `inception-v3` / `real-esrgan` ship as part of the `aihub-model-run` user skill, not as built-in App Builder Packs.
+> The built-in Packs currently cover **ASR / TTS**. The Pack taxonomy also supports SR / CV and more — convert your own models with [Model Builder](#-highlight-model-builder-skill) and one-click **Promote to App Builder** to add new Packs (e.g. image classification or super-resolution). Demo models such as `inception-v3` / `real-esrgan` ship as part of the `model-hub` built-in mode, not as built-in App Builder Packs.
 >
 > **Adding a new Pack is a directory copy:** clone the `_template`, edit `manifest.json` + `runner.py`, drop weights in. The backend auto-scans `factory/app_builder/models/*/manifest.json` at startup.
 
@@ -281,11 +284,11 @@ If a quantized model (W8A8 / W8A16 / W4A8 / W4A16) gives poor accuracy, just des
 | 1 | **Use real calibration data** | Provide actual images from your target domain instead of synthetic data — better represents the model's input distribution. |
 | 2 | **Increase calibration sample count** | Use 20–200 representative images instead of the default small set (more samples improve accuracy, but conversion time scales up). |
 | 3 | **Switch to higher precision** | Try W8A16 instead of W8A8, or fall back to FP16 for sensitive layers. |
-| 4 | **Ask the AI to diagnose & fix** | Describe the accuracy problem in chat — the AI analyzes the output, identifies problematic layers, applies per-layer overrides, or patches operators. |
+| 4 | **Ask the AI to diagnose** | Describe the accuracy problem in chat — the AI analyzes the output, identifies likely problematic layers, and proposes fixes (per-layer overrides, higher precision, better calibration) for you to choose from. |
 | 5 | **Per-layer mixed precision** | Keep specific sensitive layers (e.g. first/last conv) in FP16 while quantizing the rest. |
 | 6 | **Compare FP16 vs quantized** | Run both on the same image and ask the AI to compute cosine similarity / PSNR to judge whether the gap is acceptable. |
 
-> **No AI expertise required.** Just describe what you observe and the AI proposes and executes the appropriate fix.
+> **No AI expertise required.** Just describe what you observe; the AI diagnoses the cause and proposes the appropriate fix, then applies the one you choose.
 
 ### Prerequisites
 
@@ -350,13 +353,14 @@ Copy any of these into the chat box to see the tools in action:
 
 > **Platform:** Windows on Snapdragon (ARM64). `Setup.bat` automatically downloads `uv`, Python 3.13 ARM64, PortableGit, and Node.js into `%LOCALAPPDATA%\QAIModelBuilder\` — **no administrator rights and no manual Python install required**.
 
-There are three usage modes (full cheat-sheet in [`QUICK-START.md`](QUICK-START.md)):
+There are two shipping usage modes (full cheat-sheet in [`QUICK-START.md`](QUICK-START.md)):
 
 | Mode | For | Script chain |
 |------|-----|--------------|
 | **Dev — run from source** | Contributors, debugging | `Setup.bat` → `Build.bat` → `Start.bat` |
-| **Desktop app (Tauri)** | A standalone `.exe` / `.msi` | `Setup.bat --desktop` → `Build.bat --desktop` |
-| **Release artifact** | Packaging for end users | `Release.bat [version]` → ship `dist\release\` → end user runs `Setup.bat` → `Start.bat` |
+| **Release artifact** | Packaging for end users | `Release.bat [version]` → ship `.build\release\` → end user runs `Setup.bat` → `Start.bat` |
+
+> There is also an **optional, developer-only desktop shell** (Tauri 2.x, `Setup.bat --desktop` → `Build.bat --desktop`) — a runnable skeleton for Windows ARM64/x64. It is **not part of the release artifact** and is not a supported end-user distribution path yet.
 
 ### Launcher scripts (repo root)
 
@@ -400,7 +404,7 @@ QAIModelBuilder/
 ├── factory/              # Out-of-the-box assets
 │   ├── _source/          #   factory source material (compiler input — never read at runtime)
 │   ├── app_builder/      #   built-in Model Packs (models/<id>/manifest.json + runner.py)
-│   ├── chat_features/    #   built-in chat skills (code-assist / model-builder / ppt-gen)
+│   ├── chat_features/    #   built-in chat skills (code-assist / model-builder / model-hub / ppt-gen)
 │   ├── db_staging/       #   compiled DB seed (*.jsonl)
 │   └── config/           #   compiled config seed
 ├── skills/               # User-installable skills (each with a SKILL.md)
@@ -463,21 +467,16 @@ The Settings page has four tabs: **App Config** (service / network / security), 
 
 Skills are the plugin-extension mechanism. There are two kinds, kept separate by design:
 
-- **Built-in chat skills** (`factory/chat_features/`): `code-assist`, `model-builder`, `ppt-gen`.
+- **Built-in chat skills** (`factory/chat_features/`): `code-assist`, `model-builder`, `model-hub`, `ppt-gen`.
 - **User-installable skills** (`skills/`): each is a directory with a `SKILL.md`. Current bundled set:
 
 | Skill | Description |
 |-------|-------------|
-| `aihub-model-run` | Run pre-compiled Qualcomm AI Hub model packages |
 | `data-analyst` | Data analysis & visualization |
 | `file-manager` | File system operations |
 | `weather` | China weather queries |
 | `read-arxiv-paper` | Read & summarize arXiv papers |
-| `summarize` | Summarize articles / news |
-| `stooq-market` | Stock market data |
 | `email-163-com` | 163 Mail send/receive |
-| `outlook` | Outlook mail |
-| `invoice-summary` | Invoice summarization |
 
 ### How to Use
 

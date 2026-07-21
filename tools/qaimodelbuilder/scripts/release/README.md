@@ -9,7 +9,7 @@
 ## What this package does
 
 The release pipeline produces a single, self-contained artifact tree
-(`dist/release/` by default) that contains:
+(`.build/release/` by default) that contains:
 
 ```
 apps/                                     # FastAPI app + DI + lifespan
@@ -49,7 +49,8 @@ black list.
 # 1) Dry-run (default). Prints the plan; no destructive side effects.
 python -m scripts.release
 
-# 2) Real build under dist/release/, archived as zip.
+# 2) Real build under .build/release/, archived as zip next to it
+#    (.build/qaimodelbuilder-release.zip + .sha256 sidecar).
 python -m scripts.release --apply
 
 # 3) Custom output dir + JSON stage stream (CI consumption).
@@ -86,9 +87,9 @@ artifact — see the note in "What this package does"):
 
 ```powershell
 python -m scripts.release.check_release `
-    --artifact-root  dist/release `
+    --artifact-root  .build/release `
     --emit-sha256    `
-    --sha256-output  dist/release.sha256
+    --sha256-output  .build/release.sha256
 ```
 
 `check_release.py` is intentionally dependency-free (only stdlib). It is

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Identifier value objects for the ``model_catalog`` bounded context.
 
 Each identifier is a tiny :class:`~dataclasses.dataclass` wrapping a single

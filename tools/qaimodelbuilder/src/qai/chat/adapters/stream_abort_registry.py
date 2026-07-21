@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """In-memory :class:`StreamAbortRegistryPort` adapter (PR-042).
 
 Promoted out of ``apps/api/_chat_di.py`` so the regex

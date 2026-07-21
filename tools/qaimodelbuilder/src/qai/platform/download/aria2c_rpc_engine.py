@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``aria2c`` RPC-backed :class:`DownloadEnginePort` (F-13, GAP-PR-E1).
 
 Home rationale (platform shared kernel)
@@ -130,7 +135,7 @@ _POLL_INTERVAL_S = 0.5
 # as dead. Second line of defence behind aria2c's own ``lowest-speed-limit``
 # (set in :meth:`Aria2cRpcDownloadEngine.start`'s options dict). Same value
 # as the service_release sibling for consistency.
-_STALL_TIMEOUT_S = 90.0
+_STALL_TIMEOUT_S = 180.0
 
 
 # ===========================================================================
@@ -546,11 +551,11 @@ class Aria2cRpcDownloadEngine:
             # center: without these the daemon silently spins on a dead TCP
             # stream and the SSE client sees a frozen progress bar. Each
             # value is documented at length over in aria2c_daemon.py.
-            "max-tries": "5",
-            "retry-wait": "3",
-            "connect-timeout": "15",
-            "timeout": "30",
-            "lowest-speed-limit": "50K",
+            "max-tries": "10",
+            "retry-wait": "5",
+            "connect-timeout": "20",
+            "timeout": "60",
+            "lowest-speed-limit": "10K",
         }
         try:
             resp = await self._rpc_client.call(

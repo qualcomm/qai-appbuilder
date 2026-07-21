@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Infrastructure adapters for the ``model_catalog`` bounded context (PR-044).
 
 Holds non-SQLite real adapters: filesystem blob storage, ``aria2c``

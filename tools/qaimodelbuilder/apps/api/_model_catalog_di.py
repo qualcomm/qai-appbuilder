@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """DI wiring for the ``model_catalog`` bounded context.
 
 PR-032 (S3) injected eight ``_Fake<Port>`` in-memory adapters here;
@@ -80,10 +85,13 @@ from qai.model_catalog.application.ports import (
 from qai.model_catalog.application.use_cases import (
     CancelDownloadUseCase,
     GetModelEntryUseCase,
+    InMemoryPermissionSnapshotStore,
     ListCloudModelsUseCase,
     ListDownloadJobsUseCase,
     ListModelEntriesUseCase,
     ListProviderConfigsUseCase,
+    PermissionSnapshotStore,
+    ProbeCloudModelPermissionsUseCase,
     ProbeProviderUseCase,
     RefreshReleaseManifestUseCase,
     RegisterModelEntryUseCase,
@@ -168,6 +176,13 @@ class ModelCatalogServices:
     # provider connectivity probe (additive tail field — config wizard /
     # ``qai config provider test``; HTTP+CLI shareable)
     probe_provider_use_case: ProbeProviderUseCase
+    # Cloud-model permission snapshot (additive tail fields — scanned once
+    # from lifespan; the chat dropdown reads the snapshot to hide models
+    # the user's API key has no access to. Store is an in-memory dict;
+    # ``PermissionStatus.UNKNOWN`` is the safe default so a scan that has
+    # not yet run / has failed keeps every model visible.
+    permission_snapshot_store: PermissionSnapshotStore
+    probe_cloud_model_permissions_use_case: ProbeCloudModelPermissionsUseCase
 
 
 def build_model_catalog_services(
@@ -303,6 +318,23 @@ def build_model_catalog_services(
         secret_store=getattr(container, "secret_store", None),
     )
 
+    # ── Cloud-model permission snapshot ──────────────────────────────
+    # Shared in-memory store (process-lifetime). Reused across the scan use
+    # case (writer, driven by lifespan) and the HTTP route (reader). Reset
+    # on process restart by design — permission state is never persisted.
+    permission_store = InMemoryPermissionSnapshotStore()
+    probe_permissions = ProbeCloudModelPermissionsUseCase(
+        registry=provider_registry,
+        # Reuse the same HttpProviderProbe (one ``GET /v1/models`` per provider)
+        # so the permission scan piggybacks on the connectivity probe's
+        # SSL-verify wiring + timeout.
+        probe=HttpProviderProbe(
+            ssl_verify_provider=build_ssl_verify_provider(container)
+        ),
+        store=permission_store,
+        secret_store=getattr(container, "secret_store", None),
+    )
+
     return ModelCatalogServices(
         # raw ports
         model_entry_repository=entry_repo,
@@ -329,6 +361,8 @@ def build_model_catalog_services(
         update_provider_config_use_case=update_provider,
         list_cloud_models_use_case=list_cloud_models,
         probe_provider_use_case=probe_provider,
+        permission_snapshot_store=permission_store,
+        probe_cloud_model_permissions_use_case=probe_permissions,
     )
 
 

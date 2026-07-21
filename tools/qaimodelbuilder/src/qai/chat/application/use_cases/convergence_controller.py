@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``ConvergenceController`` — single-point discussion early-stop decision (DISC-2 P1-step2).
 
 The multi-agent discussion loop (``orchestrate_discussion._run_full_path``)

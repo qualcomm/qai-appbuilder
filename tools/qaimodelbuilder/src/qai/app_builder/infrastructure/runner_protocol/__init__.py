@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Runner protocol v3.1 — typed event envelopes (PR-302).
 
 Implements the wire-level decoder for the **runner_protocol v3.1**

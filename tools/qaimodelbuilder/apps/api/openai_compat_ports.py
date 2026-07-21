@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Apps-layer ports for the OpenAI-compatible HTTP surface (PR-042).
 
 Issue (b) resolution from ``HANDOFF-after-PR-040.md`` §5: ``/v1/models``

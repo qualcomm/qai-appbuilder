@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Runtime detection of a gateway's Anthropic prompt-cache support (方案B).
 
 Cache support is a GATEWAY-level property. We learn it at runtime from the

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Memory context use case (PR-402 / S7.5 lane L4).
 
 Migrates :meth:`backend.memory.ExperienceMemory.build_context_block`

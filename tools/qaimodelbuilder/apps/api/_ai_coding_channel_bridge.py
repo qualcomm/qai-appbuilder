@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Apps-layer cross-context bridge: channels → ai_coding (S9 PR-093 §2.1 C-7 + PR-097 R-10).
 
 Routes channel messages and slash-commands into the

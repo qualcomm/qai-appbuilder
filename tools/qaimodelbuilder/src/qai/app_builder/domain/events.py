@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Domain events emitted by the App Builder context.
 
 Subscribers in other contexts (audit log, channels, telemetry) react
@@ -15,7 +20,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import ClassVar
 
-from qai.app_builder.domain.artifact import Artifact
 from qai.app_builder.domain.import_plan import CommitId
 from qai.app_builder.domain.run import RunFrame, RunStatus
 from qai.app_builder.domain.value_objects import AppModelId, RunId
@@ -27,7 +31,6 @@ __all__ = [
     "RunCompletedEvent",
     "RunFailedEvent",
     "RunCancelledEvent",
-    "ArtifactProducedEvent",
     "ImportCommittedEvent",
     "ImportRolledBackEvent",
     "StickyWorkerDiedEvent",
@@ -94,16 +97,6 @@ class RunCancelledEvent(DomainEvent):
     @property
     def status(self) -> RunStatus:
         return RunStatus.CANCELLED
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class ArtifactProducedEvent(DomainEvent):
-    """An :class:`Artifact` was attached to a :class:`Run`."""
-
-    event_type: ClassVar[str] = "app_builder.artifact_produced"
-
-    run_id: RunId
-    artifact: Artifact
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

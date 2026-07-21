@@ -1,23 +1,22 @@
-"""SKILL.md aggregation + Schema-driven UI + appbuilder_run tool descriptor (PR-305).
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
 
-Three layered concerns surfaced together because they share Pack
+"""SKILL.md resolution + Schema-driven UI use cases.
+
+Layered concerns surfaced together because they share Pack
 manifest data:
 
-* **SKILL.md aggregation** —
-  :class:`BuildSystemPromptUseCase` walks the manifest provider
-  + the SKILL.md file system and builds a deterministic prompt
-  fragment. Mirrors the legacy ``FeatureManager.get_feature_prompt``
-  behaviour without coupling to ``backend.feature_manager``.
+* **SKILL.md file resolution** —
+  :class:`ResolveSkillFilesUseCase` resolves the ordered SKILL.md
+  file paths (top-level guide + selected Pack guide) to inline for
+  an App Builder chat turn, gated by each Pack manifest's
+  ``skill.enabled`` flag and file existence.
 * **Schema-driven UI** —
   :class:`GetModelSchemaUseCase` returns just the input/output schema
   for a model (a lighter alternative to PR-304's full manifest route
   for clients that only need to render the form).
-* **Agent pipeline ``appbuilder_run``** —
-  :class:`GetAppBuilderToolDescriptorUseCase` produces a JSON-Schema-
-  shaped tool descriptor so the L1 ai_coding lane can register
-  ``appbuilder_run`` in its LLM tool registry. The descriptor enumerates
-  available models + their input shapes; the actual tool execution
-  goes through the existing ``RunAppUseCase`` (no new execution path).
 
 PR-305 does NOT:
 * Introduce a real G2P asset downloader (handled by install / PR-306)
@@ -27,7 +26,8 @@ PR-305 does NOT:
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import logging
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -35,6 +35,13 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from qai.app_builder.application.ports import AppModelRepositoryPort
 from qai.app_builder.domain.app_model import AppModelDefinition
 from qai.app_builder.domain.errors import AppModelNotFoundError
+from qai.app_builder.domain.pack_layout_constants import (
+    BUILTIN_PACK_REL,
+    BUILTIN_WEIGHTS_REL,
+    USER_PACK_REL,
+    USER_WEIGHTS_MODELS_SUBDIR,
+    USER_WEIGHTS_REL,
+)
 from qai.app_builder.domain.value_objects import AppModelId
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -46,14 +53,10 @@ if TYPE_CHECKING:  # pragma: no cover
     )
 
 __all__ = [
-    "BuildSystemPromptUseCase",
     "GeneratePackCatalogUseCase",
     "GetModelSchemaUseCase",
-    "GetAppBuilderToolDescriptorUseCase",
     "ModelSchema",
     "ModelInferenceCode",
-    "SystemPromptFragment",
-    "AppBuilderToolDescriptor",
     "ManifestProvider",
     "SkillFileLoader",
     "FilesystemSkillFileLoader",
@@ -62,6 +65,9 @@ __all__ = [
     "ResolveModelInferenceCodeUseCase",
     "ModelStatusProvider",
 ]
+
+
+_logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -125,20 +131,46 @@ class FilesystemSkillFileLoader:
     Bounded to ``pack_root`` (constructor arg) — relative paths cannot
     escape via ``..``. Encoding is UTF-8 with ``errors="replace"`` so
     a malformed SKILL.md never crashes the prompt builder.
+
+    Dual-anchor support (built-in + user Pack roots)
+    -----------------------------------------------
+    Since P4 the runtime tracks two Pack anchors (与
+    ``FileSystemWeightsPresence`` 双 anchor 探测语义一致，
+    State-Truth-First 铁律 1):
+
+    * **built-in** — ``pack_root`` (``<repo_root>/factory/app_builder/models``);
+    * **user-imported** — ``user_pack_root``
+      (``<data_dir>/app_builder/user_models``).
+
+    A given Pack physically lives in **exactly one** of the two anchors
+    (磁盘即真值). ``load()`` probes built-in first, then user; the first
+    anchor that holds a readable file wins. ``user_pack_root`` defaults to
+    ``None`` so existing test fixtures / lean containers（只有内置根）
+    keep working。
     """
 
-    __slots__ = ("_pack_root",)
+    __slots__ = ("_pack_root", "_user_pack_root")
 
-    def __init__(self, *, pack_root: Path) -> None:
+    def __init__(
+        self,
+        *,
+        pack_root: Path,
+        user_pack_root: Path | None = None,
+    ) -> None:
         if not isinstance(pack_root, Path):
             raise TypeError("pack_root must be a Path")
+        if user_pack_root is not None and not isinstance(user_pack_root, Path):
+            raise TypeError("user_pack_root must be a Path or None")
         self._pack_root = pack_root.resolve()
+        self._user_pack_root = (
+            user_pack_root.resolve() if user_pack_root is not None else None
+        )
 
-    def load(self, model_id: AppModelId, file_name: str) -> str | None:
-        # Sandboxed file read.
-        target = (self._pack_root / str(model_id) / file_name).resolve()
+    def _read_under(self, root: Path, model_id: str, file_name: str) -> str | None:
+        """Sandboxed read under a single anchor. ``None`` on miss / escape / IO."""
+        target = (root / model_id / file_name).resolve()
         try:
-            target.relative_to(self._pack_root)
+            target.relative_to(root)
         except ValueError:
             return None
         if not target.is_file():
@@ -148,70 +180,21 @@ class FilesystemSkillFileLoader:
         except OSError:
             return None
 
+    def load(self, model_id: AppModelId, file_name: str) -> str | None:
+        mid = str(model_id)
+        # Built-in anchor first (V1 layout — release-contracted packs).
+        text = self._read_under(self._pack_root, mid, file_name)
+        if text is not None:
+            return text
+        # User anchor (P4 — user-imported packs under data_dir).
+        if self._user_pack_root is not None:
+            return self._read_under(self._user_pack_root, mid, file_name)
+        return None
+
 
 # ---------------------------------------------------------------------------
 # DTOs
 # ---------------------------------------------------------------------------
-@dataclass(frozen=True, slots=True, kw_only=True)
-class SystemPromptFragment:
-    """Aggregated SKILL.md text + per-model attribution.
-
-    The legacy ``FeatureManager.get_feature_prompt`` returns a single
-    plain string concatenation; we keep that final string in
-    :attr:`text` and also expose the individual :attr:`per_model`
-    sections so the UI / tests can verify which packs contributed.
-    """
-
-    text: str
-    per_model: tuple["PerModelSkill", ...] = field(default_factory=tuple)
-    model_count: int = 0
-    skipped_count: int = 0
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.text, str):
-            raise ValueError("text must be str")
-        if not isinstance(self.per_model, tuple):
-            raise ValueError("per_model must be a tuple")
-        for i, m in enumerate(self.per_model):
-            if not isinstance(m, PerModelSkill):
-                raise ValueError(f"per_model[{i}] must be PerModelSkill")
-        if not isinstance(self.model_count, int) or isinstance(
-            self.model_count, bool
-        ):
-            raise ValueError("model_count must be int")
-        if self.model_count < 0:
-            raise ValueError("model_count must be >= 0")
-        if not isinstance(self.skipped_count, int) or isinstance(
-            self.skipped_count, bool
-        ):
-            raise ValueError("skipped_count must be int")
-        if self.skipped_count < 0:
-            raise ValueError("skipped_count must be >= 0")
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class PerModelSkill:
-    """One model's SKILL.md content fragment."""
-
-    model_id: str
-    title: str
-    text: str
-    skipped: bool = False
-    skip_reason: str = ""
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.model_id, str) or not self.model_id:
-            raise ValueError("model_id must be non-empty str")
-        if not isinstance(self.title, str):
-            raise ValueError("title must be str")
-        if not isinstance(self.text, str):
-            raise ValueError("text must be str")
-        if not isinstance(self.skipped, bool):
-            raise ValueError("skipped must be bool")
-        if not isinstance(self.skip_reason, str):
-            raise ValueError("skip_reason must be str")
-
-
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ModelInferenceCode:
     """One selected model's inference code *reference* (``runner.py`` path).
@@ -274,152 +257,9 @@ class ModelSchema:
             raise ValueError("variants must be tuple")
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class AppBuilderToolDescriptor:
-    """LLM tool descriptor for ``appbuilder_run``.
-
-    Shape mirrors the OpenAI / Anthropic tool schema (name + description
-    + JSON Schema for parameters). The L1 ai_coding lane registers this
-    descriptor in its tool registry so LLMs can invoke a Pack via the
-    standard tool-call flow.
-
-    The descriptor enumerates available models + each model's input
-    schema, so the LLM has enough type information to call the right
-    Pack with the right arguments without the user having to spell them
-    out.
-    """
-
-    name: str = "appbuilder_run"
-    description: str = (
-        "Run an App Builder model (Pack) and return its result. "
-        "Each Pack is a small AI feature (ASR / TTS / OCR / SR / image "
-        "classification / image SR) backed by a local NPU runtime."
-    )
-    parameters: dict[str, Any] = field(default_factory=dict)
-    available_models: tuple[dict[str, Any], ...] = field(
-        default_factory=tuple
-    )
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.name, str) or not self.name:
-            raise ValueError("name must be non-empty str")
-        if not isinstance(self.description, str):
-            raise ValueError("description must be str")
-        if not isinstance(self.parameters, dict):
-            raise ValueError("parameters must be dict")
-        if not isinstance(self.available_models, tuple):
-            raise ValueError("available_models must be tuple of dict")
-
-
 # ---------------------------------------------------------------------------
 # Use cases
 # ---------------------------------------------------------------------------
-class BuildSystemPromptUseCase:
-    """Aggregate SKILL.md content from all enabled Packs.
-
-    Walks the registered AppModels, looks up each Pack's manifest +
-    SKILL.md, and builds a single prompt fragment. Models without a
-    manifest, with ``manifest.skill.enabled=False``, or with a missing
-    SKILL.md file are reported in :attr:`SystemPromptFragment.per_model`
-    with ``skipped=True`` and a reason.
-
-    Output format
-    -------------
-
-    The aggregated :attr:`text` follows the legacy
-    ``FeatureManager.get_feature_prompt`` shape::
-
-        ## <Pack Title> (<model_id>)
-        <SKILL.md content>
-
-        ---
-
-        ## <Next Pack Title> (<next_model_id>)
-        ...
-
-    The trailing ``---`` separator is inserted between sections, not
-    after the last one.
-    """
-
-    _SECTION_SEPARATOR = "\n\n---\n\n"
-
-    def __init__(
-        self,
-        *,
-        app_models: AppModelRepositoryPort,
-        manifest_provider: ManifestProvider,
-        skill_loader: SkillFileLoader,
-    ) -> None:
-        self._app_models = app_models
-        self._manifest_provider = manifest_provider
-        self._skill_loader = skill_loader
-
-    async def execute(self) -> SystemPromptFragment:
-        models = await self._app_models.list_all()
-        sections: list[str] = []
-        per_model: list[PerModelSkill] = []
-        included_count = 0
-        skipped_count = 0
-        for model in models:
-            entry = self._build_one(model)
-            per_model.append(entry)
-            if entry.skipped:
-                skipped_count += 1
-            else:
-                sections.append(
-                    f"## {entry.title} ({entry.model_id})\n{entry.text}"
-                )
-                included_count += 1
-        return SystemPromptFragment(
-            text=self._SECTION_SEPARATOR.join(sections),
-            per_model=tuple(per_model),
-            model_count=included_count,
-            skipped_count=skipped_count,
-        )
-
-    def _build_one(self, model: AppModelDefinition) -> PerModelSkill:
-        if not model.is_runnable:
-            return PerModelSkill(
-                model_id=str(model.id),
-                title=model.title,
-                text="",
-                skipped=True,
-                skip_reason="model disabled",
-            )
-        manifest = self._manifest_provider(model.id)
-        if manifest is None:
-            return PerModelSkill(
-                model_id=str(model.id),
-                title=model.title,
-                text="",
-                skipped=True,
-                skip_reason="manifest not available",
-            )
-        if not manifest.skill.enabled:
-            return PerModelSkill(
-                model_id=str(model.id),
-                title=model.title,
-                text="",
-                skipped=True,
-                skip_reason="skill disabled in manifest",
-            )
-        text = self._skill_loader.load(model.id, manifest.skill.file)
-        if text is None:
-            return PerModelSkill(
-                model_id=str(model.id),
-                title=model.title,
-                text="",
-                skipped=True,
-                skip_reason=f"SKILL file {manifest.skill.file!r} not found",
-            )
-        return PerModelSkill(
-            model_id=str(model.id),
-            title=model.title,
-            text=text.strip(),
-            skipped=False,
-        )
-
-
 class ResolveSkillFilesUseCase:
     """Resolve SKILL.md file paths to inline for an App Builder chat turn.
 
@@ -676,11 +516,31 @@ class GeneratePackCatalogUseCase:
         manifest_provider: ManifestProvider,
         status_provider: "ModelStatusProvider | None" = None,
         inject_quality_score_use_case: "InjectQualityScoreUseCase | None" = None,
+        origin_by_id: "Mapping[str, str] | None" = None,
     ) -> None:
+        """Args:
+            origin_by_id: Optional mapping ``{model_id: "built-in" | "user"}``
+                identifying which anchor pair a pack lives under. Sourced from
+                :func:`_read_pack_manifests_union` at DI wire-up time. When
+                present, ``_render_model`` emits a **"位置" (Location)** block
+                per pack telling the LLM the correct ``pack_dir`` /
+                ``model_dir`` layout to use when writing ``app.yaml`` and the
+                right env-var names for runtime resolution. When ``None``,
+                the location block is omitted (backward-compat / lean
+                containers).
+
+                This is the **primary通用 channel** for path-awareness — it
+                covers 100% of packs (built-in and user-imported) regardless
+                of whether ``skill.enabled`` is True or a SKILL.md file
+                exists. Absolute paths are never emitted; only
+                ``${APP_ROOT}``-anchored relative paths + env-var names,
+                keeping generated App code portable across machines.
+        """
         self._app_models = app_models
         self._manifest_provider = manifest_provider
         self._status_provider = status_provider
         self._inject_quality_score = inject_quality_score_use_case
+        self._origin_by_id = origin_by_id or {}
 
     async def execute(self) -> str:
         models = await self._app_models.list_all()
@@ -731,10 +591,21 @@ class GeneratePackCatalogUseCase:
         lines.extend(self._usage_rules())
 
         if truncated:
+            # P4 双根：built-in packs 在 ``factory/app_builder/models/``，
+            # user-imported packs 在 ``data/app_builder/user_models/``。
+            # 主推 API：让 LLM 通过 App Builder catalog 接口拿完整列表
+            # （API 契约稳定，路径可能演进）。若必须直接扫盘，须同时覆盖
+            # 两根，否则会漏用户导入的 pack——因此路径信息仅作 fallback
+            # 括号补充，不作主句。
+            #
+            # 常量来源：``pack_layout_constants``（single source of truth；
+            # 见该模块 docstring 里的"镜像点"说明）。
             lines.append(
                 f"> 注：共有 {total} 个模型可用，此处仅展示前 "
-                f"{self._MAX_PACKS} 个。使用 `glob` 工具查看 "
-                "`factory/app_builder/models/*/manifest.json` 获取完整列表。"
+                f"{self._MAX_PACKS} 个。完整清单请通过 App Builder catalog "
+                "接口获取（若必须扫盘，pack 分布在两根："
+                f"`{BUILTIN_PACK_REL}/`（内置）+ "
+                f"`{USER_PACK_REL}/`（用户导入），两根都需覆盖）。"
             )
             lines.append("")
 
@@ -782,6 +653,10 @@ class GeneratePackCatalogUseCase:
         variants_line = self._render_variants(manifest)
         if variants_line:
             out.append(variants_line)
+
+        location_lines = self._render_location(mid)
+        if location_lines:
+            out.extend(location_lines)
 
         out.append("")
         return out
@@ -847,6 +722,62 @@ class GeneratePackCatalogUseCase:
             for v in manifest.variants[:4]
         ]
         return f"  - 可用精度: {', '.join(v_strs)}"
+
+    def _render_location(self, mid: str) -> list[str]:
+        """Emit path metadata for one pack so the Agent knows its layout.
+
+        Renders (only when ``self._origin_by_id`` has an entry for ``mid``)::
+
+            - 位置: 内置 pack (V1 built-in layout)
+              - Pack 目录: `${APP_ROOT}/factory/app_builder/models/<id>/`
+              - 权重目录: `${APP_ROOT}/models/<id>/`
+              - app.yaml: `builtin: true`
+
+        or for user-imported (P4) packs::
+
+            - 位置: 用户导入 pack (P4 user layout)
+              - Pack 目录: `${APP_ROOT}/data/app_builder/user_models/<id>/`
+              - 权重目录: `${APP_ROOT}/data/app_builder/user_model_weights/models/<id>/`
+              - app.yaml: `builtin: false`
+
+        Only ``${APP_ROOT}``-anchored relative paths are emitted — absolute
+        paths never leak into the LLM prompt, so generated App code stays
+        portable across machines (host UI, manual ``run.bat``, and
+        packaged-zip-on-foreign-machine all resolve via the same
+        ``_resolve_dir`` 4-tier logic).
+
+        Silently returns ``[]`` when the pack's origin is unknown (lean
+        container, pack seeded before the manifest union was wired, etc.) —
+        Agent falls back to inspecting ``manifest.json`` location manually.
+        """
+        origin = self._origin_by_id.get(mid)
+        if origin == "built-in":
+            return [
+                "  - 位置: 内置 pack (V1 built-in layout)",
+                f"    - Pack 目录: `${{APP_ROOT}}/{BUILTIN_PACK_REL}/{mid}/`",
+                f"    - 权重目录: `${{APP_ROOT}}/{BUILTIN_WEIGHTS_REL}/{mid}/`",
+                "    - app.yaml: `builtin: true` + 上述两条 `${APP_ROOT}/...` 路径",
+            ]
+        if origin == "user":
+            return [
+                "  - 位置: 用户导入 pack (P4 user layout)",
+                f"    - Pack 目录: `${{APP_ROOT}}/{USER_PACK_REL}/{mid}/`",
+                f"    - 权重目录: `${{APP_ROOT}}/{USER_WEIGHTS_REL}/{USER_WEIGHTS_MODELS_SUBDIR}/{mid}/`",
+                "    - app.yaml: `builtin: false` + 上述两条 `${APP_ROOT}/...` 路径",
+                f"    - 运行时: `${{APP_BUILDER_USER_MODEL_ROOT}}/{USER_WEIGHTS_MODELS_SUBDIR}/<id>/`"
+                f"（注意多一层 `{USER_WEIGHTS_MODELS_SUBDIR}/`）+ `${{APP_BUILDER_USER_PACK_ROOT}}/<id>/`",
+            ]
+        # origin unknown — omit the block, let the Agent inspect manifest.json itself.
+        # Only log when origin was explicitly set to a non-standard value (future
+        # extension leak, or a bad DI wire); ``None`` is the normal lean-container
+        # / not-wired case and stays silent to avoid log noise.
+        if origin is not None:
+            _logger.debug(
+                "app_builder.catalog.origin_unknown: model_id=%s origin=%r",
+                mid,
+                origin,
+            )
+        return []
 
     @staticmethod
     def _usage_rules() -> list[str]:
@@ -962,121 +893,6 @@ class GetModelSchemaUseCase:
             input_schema=input_schema_dict,
             output_schema=output_schema_dict,
             variants=variants,
-        )
-
-
-class GetAppBuilderToolDescriptorUseCase:
-    """Build the LLM tool descriptor for ``appbuilder_run``.
-
-    Returns a :class:`AppBuilderToolDescriptor` enumerating all enabled
-    models. The L1 ai_coding lane consumes this via a bridge in
-    ``apps/api/_app_builder_skill_bridge.py`` (I1 owned) and registers
-    it in its tool registry.
-
-    JSON-Schema shape of the parameters
-    -----------------------------------
-
-    ``parameters`` follows the JSON-Schema convention common to both
-    OpenAI and Anthropic tool schemas::
-
-        {
-          "type": "object",
-          "properties": {
-            "model_id": { "type": "string", "enum": [<model ids>] },
-            "inputs":   { "type": "object",
-                          "description": "Per-model inputs; see
-                          per-model schema returned by
-                          GET /models/{id}/schema" }
-          },
-          "required": ["model_id", "inputs"]
-        }
-    """
-
-    def __init__(
-        self,
-        *,
-        app_models: AppModelRepositoryPort,
-        manifest_provider: ManifestProvider,
-        inject_quality_score_use_case: "InjectQualityScoreUseCase | None" = None,
-    ) -> None:
-        self._app_models = app_models
-        self._manifest_provider = manifest_provider
-        # PR-094 §17.5 #15 — when wired, the descriptor's
-        # ``available_models`` rows gain a ``quality_score ∈ [0, 1]``
-        # field derived from past run ratings, so the planner LLM can
-        # bias toward packs with positive user feedback. ``None`` keeps
-        # the descriptor shape byte-for-byte compatible with pre-PR-094
-        # consumers.
-        self._inject_quality_score = inject_quality_score_use_case
-
-    async def execute(self) -> AppBuilderToolDescriptor:
-        models = await self._app_models.list_all()
-        enabled = [m for m in models if m.is_runnable]
-        model_ids = sorted(str(m.id) for m in enabled)
-        # PR-094 §17.5 #15 — fold ratings into per-model quality_score.
-        scores: dict[Any, float] = {}
-        if self._inject_quality_score is not None and enabled:
-            try:
-                scores = await self._inject_quality_score.execute(
-                    [m.id for m in enabled]
-                )
-            except Exception:  # noqa: BLE001 — score injection must not break catalog
-                scores = {}
-        available: list[dict[str, Any]] = []
-        for model in enabled:
-            manifest = self._manifest_provider(model.id)
-            row: dict[str, Any] = {
-                "model_id": str(model.id),
-                "title": model.title,
-                "taxonomy": list(model.taxonomy.segments),
-            }
-            if manifest is not None:
-                row["description"] = manifest.description
-                if manifest.input_schema is not None:
-                    row["input_kind"] = manifest.input_schema.kind
-                if manifest.output_schema is not None:
-                    row["output_kind"] = manifest.output_schema.kind
-                if manifest.variants:
-                    row["variants"] = [v.id for v in manifest.variants]
-            score = scores.get(model.id)
-            if score is not None:
-                row["quality_score"] = score
-            available.append(row)
-        parameters: dict[str, Any] = {
-            "type": "object",
-            "properties": {
-                "model_id": {
-                    "type": "string",
-                    "description": "Identifier of the App Builder model to run.",
-                    "enum": model_ids,
-                },
-                "inputs": {
-                    "type": "object",
-                    "description": (
-                        "Inputs for the chosen model. Shape depends on the "
-                        "model's input_schema; clients should call "
-                        "GET /api/app-builder/models/{model_id}/schema to "
-                        "discover it."
-                    ),
-                },
-                "variant_id": {
-                    "type": "string",
-                    "description": (
-                        "Optional variant id (e.g. 'fp16', 'int8'). "
-                        "When omitted, the manifest's default variant is used."
-                    ),
-                },
-                "params": {
-                    "type": "object",
-                    "description": "Optional pack-specific knobs (manifest.params).",
-                },
-            },
-            "required": ["model_id", "inputs"],
-            "additionalProperties": False,
-        }
-        return AppBuilderToolDescriptor(
-            parameters=parameters,
-            available_models=tuple(available),
         )
 
 

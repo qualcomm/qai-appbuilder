@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """DI wiring for the platform uploads sub-module (PR-605).
 
 This is NOT a bounded-context namespace — it's a platform shared kernel

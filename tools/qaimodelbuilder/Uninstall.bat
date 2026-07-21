@@ -1,4 +1,10 @@
 @echo off
+
+REM ---------------------------------------------------------------------
+REM Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+REM SPDX-License-Identifier: BSD-3-Clause
+REM ---------------------------------------------------------------------
+
 REM ===========================================================================
 REM   QAI ModelBuilder v2 -- Uninstaller (Clean Cutover)
 REM

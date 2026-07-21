@@ -1,17 +1,28 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Runtime endpoint file — single source of truth for "where is the API".
 
 Background
 ----------
-``ServerSettings.port`` defaults to ``8989`` (see ``settings.py``), but on
-Windows the OS dynamically reserves random TCP port ranges at boot
-(Hyper-V / WSL2 / Docker / WinNAT — visible via
+``ServerSettings.port`` defaults to ``4099`` (see
+``qai.platform.config.settings.ServerSettings.port`` — the value is
+pinned by the Okta redirect_uri ``http://localhost:4099/callback``
+registered on the authorization server, so any deviation breaks SSO).
+``Start.bat`` also passes ``--port 4099`` explicitly to the supervisor
+so the actual bind matches the SSO contract. However, on Windows the OS
+dynamically reserves random TCP port ranges at boot (Hyper-V / WSL2 /
+Docker / WinNAT — visible via
 ``netsh int ipv4 show excludedportrange protocol=tcp``). Any port inside
 such a range fails ``bind()`` with ``WinError 10013`` even though no
 process is listening on it. ``apps.cli.serve`` therefore probes a list of
 fallback ports at supervisor startup (see ``apps/cli/serve.py``
-``FALLBACK_PORTS``) and may pick a port other than the documented
-default — different machines, and even different reboots of the same
-machine, can land on different ports.
+``FALLBACK_PORTS``) and — when ``--port`` is not pinned explicitly — may
+pick a port other than the documented default. Different machines, and
+even different reboots of the same machine, can land on different
+ports.
 
 That makes the *static* default in ``settings.py`` an unreliable
 contract for downstream consumers (``Start.bat`` browser auto-open,
@@ -25,7 +36,8 @@ The lifespan writes a small JSON file to
 ``<data_root>/runtime/server.endpoint.json`` after uvicorn's
 ``Application startup complete`` and removes it on shutdown. Consumers
 read the file and dial whatever it says, falling back gracefully (e.g.
-to ``8989``) when the file is absent (server not running) or stale.
+to the documented default ``4099``) when the file is absent (server not
+running) or stale.
 
 This is the AGENTS.md §3.10 "State-Truth-First" rule 4 in action: one
 authoritative truth source for "where is the API now", not a static
@@ -161,7 +173,7 @@ def read_endpoint(data_root: Path) -> dict[str, Any] | None:
     Used by Python-side consumers (``scripts/init/uninstall.py``).
     Always returns ``None`` rather than raising — callers that want to
     dial the URL should fall back to a sensible default (e.g. the
-    documented ``8989``) when this returns ``None`` so a stale-or-absent
+    documented default ``4099``) when this returns ``None`` so a stale-or-absent
     endpoint never prevents a graceful shutdown / uninstall.
     """
 

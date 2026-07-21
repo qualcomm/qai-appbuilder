@@ -1,7 +1,7 @@
 ---
-name: weather
+name: Weather
 description: Query weather forecasts for any city. Uses wttr.in service, no API key required.
-tags: weather, forecast, wttr.
+tags: weather, forecast, wttr
 use_for: Getting current weather, checking weather forecasts, querying weather by city name
 homepage: "https://wttr.in/:help"
 ---

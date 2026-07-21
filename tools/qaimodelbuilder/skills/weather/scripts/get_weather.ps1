@@ -1,5 +1,9 @@
 #!/usr/bin/env pwsh
 # -*- coding: utf-8 -*-
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
 <#
 .SYNOPSIS
     查询城市天气信息（简化版）

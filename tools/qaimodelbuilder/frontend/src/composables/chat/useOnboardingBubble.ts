@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * `useOnboardingBubble` — first-time onboarding bubble for the AI-coding
  * assistant pills (V1 `app.js:706-904` 1:1 port).

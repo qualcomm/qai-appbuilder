@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``AppModelStatusInfo`` — install/deps status surfaced on ``GET /models``.
 
 The lean :class:`~qai.app_builder.domain.app_model.AppModelDefinition`

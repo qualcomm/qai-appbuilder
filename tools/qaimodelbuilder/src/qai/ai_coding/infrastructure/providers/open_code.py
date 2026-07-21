@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """OpenCode provider adapter (PR-046, PR-102, PR-OC-real-stream).
 
 Talks to a local OpenCode HTTP server (``http://127.0.0.1:8765`` by

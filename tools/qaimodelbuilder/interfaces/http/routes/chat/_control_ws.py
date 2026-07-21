@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Chat control-plane WebSocket — ``WS /api/chat/control``.
 
 Architecture rationale (AGENTS.md 判据 1 / §🔴 State-Truth-First)

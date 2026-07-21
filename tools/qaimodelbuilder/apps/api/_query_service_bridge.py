@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Apps-layer bridge: build the chat query-service transport factory.
 
 A *query service* (internal-only) is routed via a ``query::<id>`` model hint

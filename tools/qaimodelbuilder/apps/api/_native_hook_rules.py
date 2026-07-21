@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Native FileGuard rule hot-sync (apps/api wiring root) — PR-4.
 
 Seeds and live-syncs the native ``guard64.dll`` deny / allow prefix rules

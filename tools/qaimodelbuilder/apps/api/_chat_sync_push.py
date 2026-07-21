@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """WebUI→Channel sync push bridge (V1 parity: main.py:6754-6815).
 
 When a WebUI chat stream completes successfully and the request carried

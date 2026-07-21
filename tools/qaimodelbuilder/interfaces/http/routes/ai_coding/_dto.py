@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Shared wire-format DTOs + conversion helpers for ai_coding routes.
 
 Extracted verbatim from the former single-file ``ai_coding.py`` during
@@ -229,52 +234,6 @@ class ToolInvocationResponse(BaseModel):
     status: str
     duration_ms: int | None = None
     result: dict[str, Any] | None = None
-    error_code: str | None = None
-
-
-# ---------------------------------------------------------------------------
-# PR-108c: universal /api/tool_execute(_stream) DTOs
-# ---------------------------------------------------------------------------
-
-
-class ToolExecuteRequest(BaseModel):
-    """Body of ``POST /api/tool_execute`` and ``POST /api/tool_execute_stream``.
-
-    Mirrors the legacy ``backend/main.py:1947 ToolExecuteRequest`` shape:
-    ``name`` + ``arguments`` carry the tool dispatch, ``model_id`` and
-    ``current_used_tokens`` are advisory hints used by the legacy
-    head+tail truncation heuristic (PR-108c keeps the fields for
-    parity; tuning is best-effort and may evolve).
-    """
-
-    name: str = Field(..., min_length=1, max_length=128)
-    arguments: dict[str, Any] = Field(default_factory=dict)
-    model_id: str | None = Field(default=None, max_length=128)
-    current_used_tokens: int | None = Field(default=None, ge=0)
-
-
-class ToolExecuteResponse(BaseModel):
-    """Body of ``POST /api/tool_execute``.
-
-    Mirrors the legacy wire envelope:
-
-    * ``result`` — full output (UI-display copy, not truncated);
-    * ``model_result`` — head+tail summary fed back to the model;
-    * ``tool_name`` — echoed back for client-side correlation;
-    * ``success`` — ``True`` iff the bridge call returned ``ok=True``;
-    * ``truncated`` — ``True`` when ``model_result`` is shorter than
-      ``result`` due to head+tail truncation;
-    * ``stored_path`` — populated when the body was persisted to a
-      :class:`ToolResultStore`.  Models can ``read(path=...)`` it to
-      retrieve the omitted middle.
-    """
-
-    result: str
-    model_result: str
-    tool_name: str
-    success: bool
-    truncated: bool = False
-    stored_path: str | None = None
     error_code: str | None = None
 
 

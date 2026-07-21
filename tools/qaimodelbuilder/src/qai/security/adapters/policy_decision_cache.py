@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """LRU cache for :class:`qai.security.domain.entities.Policy.evaluate` results.
 
 PR-092 §2.1 C-8 / §17.5 #9 — restores the legacy policy decision

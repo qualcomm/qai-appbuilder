@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """PEP 578 ``sys.addaudithook`` interpreter-level IO interceptor (PR-502).
 
 This module is the new-architecture replacement for the legacy

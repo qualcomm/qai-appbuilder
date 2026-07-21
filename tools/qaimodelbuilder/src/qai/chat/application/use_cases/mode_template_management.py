@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Use cases for collaboration-mode template management (CRUD + apply).
 
 A **mode template** (``docs/70-multi-agent/multi-agent-conversation-design.md``

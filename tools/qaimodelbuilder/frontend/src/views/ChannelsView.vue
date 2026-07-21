@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <script setup lang="ts">
 /**
  * Channels view — card grid layout (V1 style).
@@ -26,6 +31,14 @@ import WechatConfigPanel from "@/components/channels/WechatConfigPanel.vue";
 import WechatInfoDialog from "@/components/channels/WechatInfoDialog.vue";
 import FeishuInfoDialog from "@/components/channels/FeishuInfoDialog.vue";
 import ChannelsGuideDialog from "@/components/channels/ChannelsGuideDialog.vue";
+// Shared help-manual affordance (per-channel task-oriented guide). Rendered
+// in the channel-card HEADER right before the existing ℹ️ info button so
+// the two discoverable-help affordances sit side-by-side (Help + Info).
+// The header placement was chosen over the earlier "top-of-panel help-row"
+// design because the row visually competed with the model selector and
+// looked stray — users' eyes land on the header first, and pairing with
+// the info button lets them treat both as one "help cluster".
+import HelpButton from "@/components/common/HelpButton.vue";
 
 const { t } = useI18n();
 const toast = useToastStore();
@@ -286,6 +299,14 @@ useHeaderActions(() => [
               {{ t("channels.wechat.cardDesc") }}
             </div>
           </div>
+          <!-- Task-oriented help (how to set up + common issues). Sits
+               directly next to the ℹ️ info button so both discoverable-
+               help entry points cluster in the header. -->
+          <HelpButton
+            doc-key="wechat-ilink"
+            external-url="https://ilink.dev/"
+            size="sm"
+          />
           <button
             class="btn btn-ghost btn-sm channel-info-btn"
             type="button"
@@ -323,6 +344,15 @@ useHeaderActions(() => [
               {{ t("channels.feishu.cardDesc") }}
             </div>
           </div>
+          <!-- Task-oriented help (how to set up + common issues). Sits
+               directly next to the ℹ️ info button so both discoverable-
+               help entry points cluster in the header. Symmetric with
+               the WeChat card above. -->
+          <HelpButton
+            doc-key="feishu-setup"
+            external-url="https://open.feishu.cn/app"
+            size="sm"
+          />
           <button
             class="btn btn-ghost btn-sm channel-info-btn"
             type="button"

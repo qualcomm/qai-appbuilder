@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Neutral agentic-kernel parts shared by the main + sub-agent loops.
 
 Both the **main agent** loop (``streaming.py:_run_followup_loop`` + its

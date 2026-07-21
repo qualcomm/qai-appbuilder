@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """AdHoc implementation task — a frozen value object (DISC-1 §22.10#1).
 
 DISC-1 step3 turns a ``directed_implement`` intent into a single

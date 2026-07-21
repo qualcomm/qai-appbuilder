@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """GoMaster session-control routes — /api/gomaster-session/*.
 
 These routes back the chat composer's「GoMaster 在线」mode toolbar buttons:

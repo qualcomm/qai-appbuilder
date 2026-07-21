@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <script setup lang="ts">
 // Edition stub component. Used by vite.config.ts `resolve.alias` in EXTERNAL
 // builds as the resolution target for internal-only components that have been

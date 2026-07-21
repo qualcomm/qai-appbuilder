@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Public API for ``qai.chat.adapters`` (PR-042 + PR-043 + PR-401a + PR-401b).
 
 PR-042 retired 6 of 7 in-memory ``_Fake<Port>`` adapters from

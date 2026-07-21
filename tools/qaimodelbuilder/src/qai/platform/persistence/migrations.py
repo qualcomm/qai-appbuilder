@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Schema migrations: sequential ``NNN_description.sql`` files.
 
 We deliberately keep this hand-rolled and tiny (~150 lines) instead of

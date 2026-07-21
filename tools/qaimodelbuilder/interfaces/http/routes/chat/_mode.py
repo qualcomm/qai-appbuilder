@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Collaboration-mode HTTP routes (``/api/chat/mode-templates``).
 
 A **mode template** is a named collaboration mode ("怎么协作": 讨论 / 评审 / 辩论 /
@@ -87,6 +92,16 @@ class ModeTemplateItem(BaseModel):
     #: When this mode was cloned from another (e.g. a built-in preset), the
     #: SOURCE template's id; ``None`` for originals. Tail-appended (§3.1).
     cloned_from_id: str | None = None
+    #: Multi-language (i18n) maps for built-in presets (migration 056), each a
+    #: ``{"en":..,"zh-CN":..,"zh-TW":..}`` object. ``None`` for custom rows →
+    #: the frontend falls back to the single-language ``name`` / ``description``
+    #: / ``framing`` fields above. Tail-appended (§3.1) so the wire shape stays
+    #: backward-compatible; lets the UI localise built-in template text without
+    #: duplicating the translations into the frontend locale files (single
+    #: source of truth = the seed → DB).
+    name_i18n: dict[str, str] | None = None
+    description_i18n: dict[str, str] | None = None
+    framing_i18n: dict[str, str] | None = None
 
 
 class ModeTemplateListResponse(BaseModel):
@@ -173,6 +188,9 @@ def _template_to_item(template: ModeTemplate) -> ModeTemplateItem:
             for issue in lint_mode(template)
         ],
         cloned_from_id=template.cloned_from_id,
+        name_i18n=template.name_i18n,
+        description_i18n=template.description_i18n,
+        framing_i18n=template.framing_i18n,
     )
 
 

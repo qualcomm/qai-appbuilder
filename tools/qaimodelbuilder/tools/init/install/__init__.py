@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``install`` — end-to-end QAI install pipeline orchestrator (PR-064).
 
 Chains the four S6 stages into a single ``dry-run / apply / verify``

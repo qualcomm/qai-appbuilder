@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``GetRunUseCase`` — read a single :class:`Run` by id.
 
 Thin wrapper over :class:`RunRepositoryPort.get` so the route layer

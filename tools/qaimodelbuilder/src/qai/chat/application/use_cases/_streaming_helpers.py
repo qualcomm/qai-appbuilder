@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Pure / weakly-coupled helpers extracted from ``streaming.py``.
 
 ARCH-1 / A-3 cohesion split (zero behaviour change): these functions

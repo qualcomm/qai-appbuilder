@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Agent tool handler — spawns sub-agent tasks (A6 feature).
 
 The "agent" tool allows the LLM to delegate sub-tasks to a focused

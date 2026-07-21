@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """aria2c daemon lifecycle + auto-install + JSON-RPC client (infrastructure).
 
 Ports the process / RPC / auto-install machinery of V1
@@ -697,11 +702,11 @@ class Aria2cDaemon:
             "file-allocation": "none",
             "auto-file-renaming": "false",
             # Robustness params (2026-06-19) — see docstring above.
-            "max-tries": "5",
-            "retry-wait": "3",
-            "connect-timeout": "15",
-            "timeout": "30",
-            "lowest-speed-limit": "50K",
+            "max-tries": "10",
+            "retry-wait": "5",
+            "connect-timeout": "20",
+            "timeout": "60",
+            "lowest-speed-limit": "10K",
         }
 
 

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """DI wiring for the ``channels`` bounded context (PR-047 + PR-201).
 
 PR-047 replaced 11 in-memory ``_Fake<Port>`` adapters with real

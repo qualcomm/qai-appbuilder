@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``DownloadModelWeightsUseCase`` — download a built-in Pack's weights.
 
 Drives the shared multi-threaded aria2c download engine

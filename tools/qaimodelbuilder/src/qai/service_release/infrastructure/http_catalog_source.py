@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """HTTP catalog source: fetch + parse release manifest and model catalog.
 
 Ports the V1 parsing/容错 logic from ``backend/version_manager.py``

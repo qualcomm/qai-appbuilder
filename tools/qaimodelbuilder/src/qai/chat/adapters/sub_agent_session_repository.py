@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """aiosqlite-backed :class:`SubAgentSessionRepositoryPort`.
 
 Schema reference: ``qai-db-schema.md`` §2.6 (chat_subagent_session,

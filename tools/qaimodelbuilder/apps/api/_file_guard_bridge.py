@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Cross-context FileGuard bridge (S-1 / D11 — apps/api wiring root).
 
 Wires the ai_coding :class:`FileGuardPort` to the *real* PolicyCenter

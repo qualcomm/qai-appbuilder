@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Production tool implementations for the ``ai_coding`` bounded context.
 
 PR-101 ports the 9 production tools from the legacy ``backend/tools/``

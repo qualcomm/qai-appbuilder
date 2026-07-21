@@ -1,4 +1,10 @@
 @echo off
+
+REM ---------------------------------------------------------------------
+REM Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+REM SPDX-License-Identifier: BSD-3-Clause
+REM ---------------------------------------------------------------------
+
 REM Start.bat - Windows launcher for QAIModelBuilder (v2.7 / S9).
 REM
 REM Features:
@@ -35,6 +41,11 @@ echo.
 set "ROOT_DIR=%~dp0"
 set "VENV=%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_arm64_313"
 set "PYTHON=%VENV%\Scripts\python.exe"
+
+REM Route Python bytecode caches out of the source tree into data\caches\pycache
+REM (keeps the source tree clean; data\ is the per-user runtime root and is
+REM git-ignored). %~dp0 has a trailing backslash so no extra separator is needed.
+set "PYTHONPYCACHEPREFIX=%~dp0data\caches\pycache"
 
 REM -- 1. PortableGit PATH injection ------------------------------------------
 set "PORTABLE_GIT_DIR=%LOCALAPPDATA%\QAIModelBuilder\git"

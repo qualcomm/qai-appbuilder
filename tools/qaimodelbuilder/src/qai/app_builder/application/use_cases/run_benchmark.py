@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``RunBenchmarkUseCase`` — schedule + execute a model latency benchmark.
 
 Wired by S9 close to back the ``POST /api/app-builder/benchmark`` route

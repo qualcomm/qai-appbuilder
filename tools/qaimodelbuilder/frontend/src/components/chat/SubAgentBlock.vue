@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <script setup lang="ts">
 /**
  * SubAgentBlock — render one sub-agent block inside an assistant turn.
@@ -93,7 +98,19 @@ const turnViews = computed<
     key: turn.roundIndex,
     content: turn.content,
     tools: turn.tools.map((tool, index) => ({
-      key: `${turn.roundIndex}-${index}`,
+      // v-for key stability (2026-07-20): prefer the backend-provided
+      // `tool_call_id` so a same-physical tool call retains the same DOM node
+      // across array reshuffles (mapper reordering / mid-stream inserts /
+      // cancellations reflow the tools array). A plain `${roundIndex}-${index}`
+      // key would drift on any reshuffle, remounting ToolExecPanel and
+      // resetting its local `userToggled` state — which would silently undo
+      // a user's manual "expand this card" action once the tool completes.
+      // Fallback (`tool.name+index`) covers historical sub-agent frames where
+      // the backend didn't emit `tool_call_id`; still more stable than raw
+      // index because same-position calls with different names diverge.
+      key: tool.tool_call_id
+        ? `${turn.roundIndex}-${tool.tool_call_id}`
+        : `${turn.roundIndex}-${tool.name}-${index}`,
       // Forward the sub-agent tool call's `tool_call_id` as `callId` so the
       // per-tool stop button (ToolExecPanel `canCancel`) is shown on sub-agent
       // tool cards. The backend now tracks sub-agent-internal tool call ids:

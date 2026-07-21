@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Output buffer with UTF-8-continuation-safe truncation.
 
 The ring buffer in :class:`SubprocessBackgroundProcessManager` is a

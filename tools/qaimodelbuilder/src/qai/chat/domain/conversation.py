@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``Conversation`` aggregate root for the chat bounded context.
 
 A :class:`Conversation` owns:
@@ -124,6 +129,21 @@ class Conversation:
     #: Tail-appended with default ``None`` so existing constructions stay
     #: valid (AGENTS.md §3.1).
     full_history_tokens: int | None = None
+
+    #: Persisted promote-ready detection result (migration 057). Written at
+    #: turn end (``StreamChatUseCase._finalize_assistant_message`` via the
+    #: apps-layer ``PromoteReadyScanPort``): the model workspace path extracted
+    #: from the turn's final summary + the precision variants scanned on disk.
+    #: Shape:
+    #:   {"workdir": str, "variants": [{"precision": str, "label": str}, ...],
+    #:    "checked_at": "<iso8601>"}
+    #: An empty ``workdir`` / empty ``variants`` records "checked, nothing to
+    #: promote"; ``None`` = never detected (legacy / forward-compatible
+    #: default). Read by the frontend promote-ready CTA (0 on-open disk scans).
+    #: Tail-appended with default ``None`` so existing constructions stay valid
+    #: (AGENTS.md §3.1). Persisted via ``save_messages`` (preserve_header) too —
+    #: both ON CONFLICT branches write it, like ``full_history_tokens``.
+    detected_model: dict | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.id, ConversationId):

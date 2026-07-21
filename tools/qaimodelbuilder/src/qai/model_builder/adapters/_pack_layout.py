@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Filesystem helpers for the ``app_pack/`` directory layout.
 
 Direct port of the legacy
@@ -144,8 +149,15 @@ def find_context_binary(
     * label form ``<model>_<label>.bin`` — e.g. ``inception_v3_int8.bin``;
     * plan form  ``<model>_<plan>.bin``  — e.g. ``inception_v3_w8a8.bin``.
 
-    We probe both (label first, plan second) with case-insensitive
-    fallback. Returns the path when the file exists and meets
+    The app_pack contract is format-neutral: the NPU weight may be a QNN
+    context binary (``.bin``) OR a QNN DLC (``.dlc``) — ``QNNContext`` loads
+    either directly (a ``.dlc`` is numerically equivalent, only ~20-27%
+    slower). Model Hub downloads AI Hub ``.dlc`` packages that should promote
+    to the SAME app_pack as a Model-Builder-converted ``.bin`` WITHOUT lying
+    about the extension. So we probe ``.bin`` FIRST (Model Builder's own
+    output; keeps existing behaviour) then ``.dlc`` (AI Hub downloads), for
+    each of the label / plan suffix forms, with case-insensitive fallback.
+    Returns the path when the file exists and meets
     :data:`qai.model_builder.domain.value_objects.MIN_CONTEXT_BIN_SIZE`,
     else ``None``.
     """
@@ -154,12 +166,15 @@ def find_context_binary(
 
     candidate_names: list[str] = []
     seen: set[str] = set()
-    for suffix in (label, plan):
-        bin_name = f"{model_name}_{suffix}.bin"
-        if bin_name.lower() in seen:
-            continue
-        seen.add(bin_name.lower())
-        candidate_names.append(bin_name)
+    # ``.bin`` first (Model Builder native output), then ``.dlc`` (AI Hub /
+    # Model Hub downloads). Both are valid app_pack weight formats.
+    for ext in (".bin", ".dlc"):
+        for suffix in (label, plan):
+            bin_name = f"{model_name}_{suffix}{ext}"
+            if bin_name.lower() in seen:
+                continue
+            seen.add(bin_name.lower())
+            candidate_names.append(bin_name)
 
     bin_path: Path | None = None
     for bin_name in candidate_names:

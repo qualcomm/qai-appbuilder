@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Manifest schema v1 value objects for App Builder Pack metadata (PR-303).
 
 These VOs faithfully model the on-disk ``manifest.json`` schema used by

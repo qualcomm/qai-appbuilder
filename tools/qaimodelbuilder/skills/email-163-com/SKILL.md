@@ -1,7 +1,7 @@
 ---
-name: email-163-com
+name: Email 163
 description: 163 email tool for sending, reading, searching, and replying to emails via 163.com (NetEase Mail).
-tags: email, 163, netease, mail.
+tags: email, 163, netease, mail
 use_for: Sending emails, reading emails, searching emails, replying to emails via 163.com
 ---
 

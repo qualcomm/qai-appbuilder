@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Use case: read the message history of a :class:`CodingSession`.
 
 Backs the legacy ``GET /api/cc/sessions/{id}/history`` route.  The

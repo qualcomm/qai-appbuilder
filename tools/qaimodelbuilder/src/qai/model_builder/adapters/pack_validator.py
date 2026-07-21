@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Concrete :class:`PackValidatorPort` adapter.
 
 Equivalent to ``features/model-builder/scripts/qai_pack_validate.py``

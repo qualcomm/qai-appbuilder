@@ -18,6 +18,12 @@ MODE          = <!-- batch (default) / interactive -->
 CALIBRATION_DATA   = <!-- calibration source (required for INT/A16W8 only): image folder / raw folder / list file -->
 RETMOE_DEVICE_INFO = <!-- Optional. Path to file with SSH info for remote target execution. Leave empty for local only. -->
 
+HOST_OS            = <!-- auto-detected: windows-arm64 / linux-x64 / linux-aarch64 -->
+ADB_DEVICE_ID      = <!-- Optional: ADB device serial, required if multiple devices connected -->
+ADB_DEVICE_OS      = <!-- Optional: android (default) / linux — drives target_arch in adb_runner.py -->
+ADB_DSP_VERSION    = <!-- Optional: v73 (default) / v75 / v79 / v81 — HTP skel version on target board -->
+ADB_TARGET_ARCH    = <!-- Optional: override SDK arch dir, e.g. aarch64-android (non-standard SDK layout only) -->
+
 START_TIME    = <!-- YYYY-MM-DD HH:MM (filled when work begins) -->
 END_TIME      = <!-- YYYY-MM-DD HH:MM (filled at Phase 6 completion) -->
 ```

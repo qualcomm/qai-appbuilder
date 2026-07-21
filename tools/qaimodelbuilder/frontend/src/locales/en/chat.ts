@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 // =============================================================================
 // i18n locale sub-file — 手工维护，UTF-8（无 BOM）。
 //
@@ -219,12 +224,12 @@ const chat = {
     copied: "Copied",
     zoomHint: "Click to zoom",
   },
-  toolCalls: "Tool Calls",
   skillsActive: "{n} skills active",
   collapse: "Collapse",
-  collapseAll: "Collapse All",
+  collapseToolCards: "Collapse Tool Cards",
   expand: "Expand",
-  expandAll: "Expand All",
+  expandToolCards: "Expand Tool Cards",
+  toolCardsHiddenHint: "Enable tool call cards in Settings first",
   toolDone: "Done",
   toolError: "Failed",
   toolParams: "Arguments",
@@ -241,6 +246,29 @@ const chat = {
   toolRunning: "Running",
   toolGeneratingArgs: "Generating arguments",
   toolGeneratingArgsCount: "Generating arguments… ({n} chars)",
+  // Tool-card subtitle categories (header layout: [icon] [category]
+  // · [contextual description]). Keys mirror `useToolSubtitle.toolMeta`'s
+  // switch table 1:1; `unknown` is the fallback label for tools not in the
+  // table. See `frontend/src/composables/chat/useToolSubtitle.ts`.
+  toolCategory: {
+    read: "Read",
+    list: "List",
+    write: "Write",
+    edit: "Edit",
+    glob: "Glob",
+    grep: "Grep",
+    exec: "Shell",
+    webfetch: "Fetch",
+    web_search: "Web Search",
+    apply_patch: "Patch",
+    appbuilder_run: "Run Model",
+    agent: "SubAgent",
+    background_process: "Background",
+    list_subagents: "Agents",
+    skill: "Skill",
+    appbuilder_batch_run: "Batch Run",
+    unknown: "Tool",
+  },
   totalTokens: "total tokens",
   turnLimitWarn: "Warning: Current session has reached {n} turns. Consider clearing history or starting a new session.",
   untitled: "(Untitled)",
@@ -256,7 +284,7 @@ const chat = {
   welcomeChip4Label: "Zipformer · Download from AI Hub & run",
   welcomeChip4Prompt: "Download the Zipformer speech-recognition model from Qualcomm AI Hub (the on-device pre-exported package), write inference code, and run speech recognition on the local NPU. First detect the current chipset to pick the correct package, then read metadata.json to confirm input/output shapes and quantization params, then download, extract, and run inference. Run the full pipeline end-to-end without stopping for confirmation.",
   welcomeChip5Label: "Image classification · sub-agent download & run",
-  welcomeChip5Prompt: "Use a sub-agent to download an image-classification model from Qualcomm AI Hub (e.g. the on-device pre-exported Inception v3 or MobileNet package). Have the sub-agent write inference code and classify a test image on the local NPU, printing the Top-5 results. The sub-agent should: (1) first detect the chipset; (2) check for an existing NOTES.md by first listing the skills/aihub-model-run/models/ directory to find the exact folder name (it may differ from the model name, e.g. 'inception_v3' not 'inceptionv3'), then reading that NOTES.md — it contains the download URL, I/O shapes, and a ready-made inference script; (3) then read metadata.json and labels.txt before running. Run the full pipeline end-to-end without stopping for confirmation.",
+  welcomeChip5Prompt: "Use a sub-agent to download an image-classification model from Qualcomm AI Hub (e.g. the on-device pre-exported Inception v3 or MobileNet package). Have the sub-agent write inference code and classify a test image on the local NPU, printing the Top-5 results. The sub-agent should: (1) first detect the chipset; (2) check for an existing NOTES.md by first listing the factory/chat_features/model-hub/models/ directory to find the exact folder name (it may differ from the model name, e.g. 'inception_v3' not 'inceptionv3'), then reading that NOTES.md — it contains the download URL, I/O shapes, and a ready-made inference script; (3) then read metadata.json and labels.txt before running. Run the full pipeline end-to-end without stopping for confirmation.",
   welcomeChip6Label: "MeloTTS (zh) · Download from AI Hub & run",
   welcomeChip6Prompt: "Download the melotts_zh Chinese text-to-speech model from Qualcomm AI Hub (the VOICE_AI on-device pre-exported package), write an inference pipeline that synthesizes a line of Chinese text to speech on the local NPU and saves it as a wav file. First detect the current chipset to pick the correct package, read each sub-model's metadata.json and config.json, and note that on ARM64 dependencies like torchaudio/numba/MeCab need mock workarounds. Run the full pipeline end-to-end without stopping for confirmation.",
   welcomeChip7Label: "Mermaid diagram · visualize the architecture",

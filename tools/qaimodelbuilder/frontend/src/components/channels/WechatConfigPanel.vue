@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <script setup lang="ts">
 /**
  * WechatConfigPanel — single-instance WeChat channel (V1-aligned).
@@ -19,6 +24,12 @@ import { useI18n } from "vue-i18n";
 import { useWechatShared } from "@/composables/useWechat";
 import ChannelModelSelector from "./ChannelModelSelector.vue";
 import ChannelProxyPanel from "./ChannelProxyPanel.vue";
+// NOTE: the HelpButton for this channel lives in the channel-card HEADER
+// (see `ChannelsView.vue` — directly to the left of the existing ℹ️
+// info button), not inside this panel. That placement keeps the two
+// discoverable-help affordances side-by-side (Help + Info) at the top
+// of the card, matching the pattern users already know from the info
+// button. See `ChannelsView.vue::channel-card-header` for the wiring.
 
 const { t } = useI18n();
 
@@ -63,6 +74,10 @@ onBeforeUnmount(dispose);
     class="qai-wechat-config"
     data-testid="wechat-config-panel"
   >
+    <!-- HelpButton for this channel lives in the channel-card header (see
+         `ChannelsView.vue`), directly to the left of the ℹ️ info button —
+         two paired discoverable-help affordances at the top of the card. -->
+
     <!-- Model selector — V1 parity: the "AI Model → Default (follow global
          settings)" row is ALWAYS visible above the status-specific body,
          regardless of connection/registration, so the user can pick a model

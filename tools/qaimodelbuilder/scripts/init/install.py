@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """CLI entry point for the install pipeline orchestrator (PR-064).
 
 Single command that chains all four S6 stages (PR-060..063) into the

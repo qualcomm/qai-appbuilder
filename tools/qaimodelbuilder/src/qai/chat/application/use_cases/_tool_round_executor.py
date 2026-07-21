@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Shared parallel tool-round execution skeleton (main + sub-agent).
 
 Both the **main agent** loop (``streaming.py``) and the **sub-agent** loop

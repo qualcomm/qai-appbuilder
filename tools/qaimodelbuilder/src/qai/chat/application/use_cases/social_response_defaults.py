@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Social / lightweight-path response policy — central constants + resolver.
 
 DISC-2 P4-step1 (§22A.7): the lightweight path (Path A — a single brief

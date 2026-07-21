@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``qai app <pack> [flags]`` — App Builder inference from the CLI.
 
 Desktop App Plan §2.1.1 group L2 (D2 one-shot + D3 REPL). This is the CLI

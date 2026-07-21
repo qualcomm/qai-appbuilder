@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """SecretStore-backed :class:`CredentialsResolverPort` (PR-047).
 
 Adapter wrapping :class:`qai.platform.persistence.secrets.SecretStore` so

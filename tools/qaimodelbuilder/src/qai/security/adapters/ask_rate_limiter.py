@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """In-memory :class:`AskRateLimiterPort` adapter (PR-501).
 
 Single-process, single-worker default — matching the same single-worker

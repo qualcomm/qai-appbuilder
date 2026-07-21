@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Apps-layer WebUI broadcaster for channel inbound / outbound traffic.
 
 PR-097 (S9 §6 R-19): restores the WebUI live-update side-channel that

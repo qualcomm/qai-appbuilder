@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <script setup lang="ts">
 /**
  * ModeFrameAppBuilder — chat-input sub-toolbar for `app-builder` mode.
@@ -17,7 +22,7 @@
  *   - Compare      → toggles the compare tray (disabled when empty).
  *   - Workbench    → show/hide the workbench overlay.
  */
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useAppBuilderStore } from "@/stores/appBuilder";
 import type { AppModelResponse, AppEntry, AppRunState, PackageState } from "@/stores/appBuilder";
@@ -30,6 +35,9 @@ import { formatSpeed, formatEta, formatBytes } from "@/composables/downloads/for
 import {
   togglePromptDialog,
 } from "@/composables/app-builder/useAppBuilderModeUi";
+import { useModeFrameTriggers } from "@/composables/useModeFrameTriggers";
+import { extractModelWorkdirFromMessages } from "@/utils/modelWorkdir";
+import PromoteToAppBuilderCard from "@/components/app-builder/model-builder/PromoteToAppBuilderCard.vue";
 
 const { t } = useI18n();
 const store = useAppBuilderStore();
@@ -42,7 +50,9 @@ const { confirm } = useConfirm();
 // run/prompt/compare controls only make sense when the workbench overlay is
 // enabled in Settings; when it is off (default) they are permanently inert,
 // so we hide them entirely (see #6).
-const { appBuilderShowWorkbench } = useForgeConfig();
+// Also read the raw forge config so the Promote popover can derive its
+// workspace root (mirrors ModeFrameModelBuilder — parity).
+const { appBuilderShowWorkbench, config: forgeConfig } = useForgeConfig();
 
 // Load the imported-model registry when this toolbar mounts (entering
 // app-builder mode). Previously the heavy workbench overlay owned this
@@ -641,6 +651,78 @@ async function onDeleteModel(m: ModelRow): Promise<void> {
     _deletingModelIds.value = next;
   }
 }
+
+// ── Promote to App Builder (parity with Model Builder mode) ─────────────────
+// Symmetric to ModeFrameModelBuilder's promote entry: exposes the same
+// PromoteToAppBuilderCard as a popover in this mode's toolbar too, so users
+// don't have to switch back to Model Builder to promote a converted model.
+// The workdir is derived from the active chat's messages via
+// `extractModelWorkdirFromMessages` — the SAME scan Model Builder mode uses
+// as its fallback source, so promote works after a chat-driven conversion
+// without any manual model-path upload.
+const promotePanelOpen = ref(false);
+const workspaceModelRoot = computed<string>(() => {
+  const cfg = forgeConfig.value as Record<string, unknown> | null;
+  if (cfg === null || typeof cfg !== "object") return "";
+  const ws = cfg["workspace"];
+  if (ws !== null && typeof ws === "object") {
+    const root = (ws as Record<string, unknown>)["model_root"];
+    if (typeof root === "string" && root.trim() !== "") return root;
+  }
+  return "";
+});
+const promoteWorkdir = computed<string>(() =>
+  extractModelWorkdirFromMessages(
+    tabs.activeTab?.messages,
+    workspaceModelRoot.value || undefined,
+  ),
+);
+
+// "Ready" badge on the Promote button — symmetric with
+// ModeFrameModelBuilder's `promoteReady`. When the active conversation
+// references a promote-able model workdir (either an uploaded model path
+// or a `<root>\<model>` path scanned from messages), we draw a subtle
+// 6-px accent dot on the button so users notice the affordance is now
+// actionable. Purely cosmetic; the actual variant scan runs inside
+// PromoteToAppBuilderCard on click, so a false-positive dot is harmless.
+// Same rationale as `promoteReady` in ModeFrameModelBuilder — user
+// feedback: "ModelBuilder shows a dot on Promote when a workdir is
+// detected, AppBuilder does not; they should be consistent."
+const promoteReady = computed<boolean>(() => promoteWorkdir.value !== "");
+function togglePromotePanel(): void {
+  promotePanelOpen.value = !promotePanelOpen.value;
+}
+function onPromoteImported(): void {
+  promotePanelOpen.value = false;
+  toast.success(t("modelBuilder.promote.importSuccess"));
+  // Refresh the App Builder model list so the freshly imported model shows
+  // in this frame's model menu.
+  void store.fetchModels();
+}
+
+// ── Cross-component triggers from ModeIntroCard chips ───────────────────────
+// The ModeIntroCard's `open-my-apps` / `open-promote` chips route through
+// `useModeFrameTriggers` — bump tokens that we watch here to open the
+// corresponding local popover. This keeps the mode-frame's local `ref`
+// state as the SINGLE source of truth for panel open/close (only reactive
+// to its OWN watchers), while letting the intro card surface these panels
+// without cross-component coupling.
+//
+// The `activeMode` gate mirrors `ModeFrameModelBuilder.vue` — even though
+// mode-frames are currently mounted via `v-else-if` (mutually exclusive),
+// the gate keeps the token contract symmetric so a future refactor that
+// makes frames persistent (e.g. for KeepAlive optimisation) cannot cause
+// two frames to both react to the same bump.
+const { openMyAppsToken, openPromoteToken } = useModeFrameTriggers();
+watch(openMyAppsToken, () => {
+  if (tabs.activeTab?.activeMode !== "app-builder") return;
+  appsMenuOpen.value = true;
+  void store.fetchApps();
+});
+watch(openPromoteToken, () => {
+  if (tabs.activeTab?.activeMode !== "app-builder") return;
+  promotePanelOpen.value = true;
+});
 </script>
 
 <template>
@@ -1267,6 +1349,65 @@ async function onDeleteModel(m: ModelRow): Promise<void> {
         v-if="appsMenuOpen"
         class="dropdown-overlay"
         @click="appsMenuOpen = false"
+      ></div>
+    </div>
+
+    <!-- Promote to App Builder (parity with ModeFrameModelBuilder). Symmetric
+         entry so users don't have to bounce back to Model Builder mode to
+         promote a converted model. Same PromoteToAppBuilderCard; workdir is
+         scanned from the active chat's messages (extractModelWorkdirFromMessages).
+         Hidden until the user clicks (popover) — does NOT compete for space
+         with the always-visible Model + Apps menus. -->
+    <span class="rit-sep"></span>
+    <div class="rit-submenu-wrap">
+      <button
+        type="button"
+        class="rit-btn"
+        :class="{
+          'rit-model-upload--active': promotePanelOpen,
+          'ab-promote-btn--ready': promoteReady,
+        }"
+        :title="t('modelBuilder.promote.title')"
+        data-testid="ab-toggle-promote"
+        @click="togglePromotePanel"
+      >
+        <svg
+          width="13"
+          height="13"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        ><path d="M4 14h6v6H4z" /><path d="M14 4h6v6h-6z" /><path d="M7 14V7h7" /><polyline points="14 10 7 10" /></svg>
+        <span>{{ t("modelBuilder.promote.title") }}</span>
+        <!-- Ready dot (§14 UX) — symmetric with ModeFrameModelBuilder's
+             `mb-promote-ready-dot`. A subtle 6px accent dot when a
+             promote-able model workdir has been detected. Draws the eye
+             without shouting; purely cosmetic. -->
+        <span
+          v-if="promoteReady"
+          class="ab-promote-ready-dot"
+          role="status"
+          :aria-label="t('modelBuilder.promote.readyBadgeAria')"
+        ></span>
+      </button>
+      <div
+        v-if="promotePanelOpen"
+        class="rit-submenu rit-submenu--wide"
+        style="min-width: 400px; max-height: 500px; overflow-y: auto"
+        data-testid="ab-promote-panel"
+      >
+        <PromoteToAppBuilderCard
+          :session-model-workdir="promoteWorkdir"
+          @imported="onPromoteImported"
+        />
+      </div>
+      <div
+        v-if="promotePanelOpen"
+        class="dropdown-overlay"
+        @click="promotePanelOpen = false"
       ></div>
     </div>
 
@@ -2062,5 +2203,21 @@ async function onDeleteModel(m: ModelRow): Promise<void> {
   font-size: 11px;
   font-style: italic;
   color: var(--text-muted, rgba(255, 255, 255, 0.4));
+}
+
+/* "Ready" dot on the Promote button — symmetric with
+ * `.mb-promote-ready-dot` in ModeFrameModelBuilder. Accent-colored 6px
+ * pill that sits inline after the label so it inherits button padding.
+ * Purely CSS + theme tokens; no i18n text (aria-label on the dot itself
+ * conveys meaning to assistive tech). Kept as its own class name
+ * (`ab-` prefix) so future divergence between the two frames is easy. */
+.ab-promote-ready-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent, #6d5efc);
+  box-shadow: 0 0 0 2px var(--bg-secondary, #1c1c22);
+  margin-left: 2px;
+  flex: 0 0 auto;
 }
 </style>

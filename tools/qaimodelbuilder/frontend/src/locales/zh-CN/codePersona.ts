@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 // =============================================================================
 // i18n locale sub-file — 手工维护，UTF-8（无 BOM）。
 //
@@ -38,6 +43,18 @@ const codePersona = {
   },
   discardConfirm: "当前有未保存的修改，确定放弃吗？",
   editPrompts: "编辑提示词…",
+  groups: {
+    command: "命令执行",
+    commandDesc: "运行 Shell 命令和后台进程",
+    edit: "文件编辑",
+    editDesc: "创建、修改和补丁文件",
+    label: "工具权限",
+    read: "文件读取",
+    readDesc: "读取文件、搜索内容、浏览网页",
+    resetGroups: "重置权限",
+    restrictedHint: "限制范围：{pattern}",
+    other: "其它",
+  },
   loadFailed: "加载编程模式失败",
   loading: "正在加载…",
   menuTitle: "编程模式",

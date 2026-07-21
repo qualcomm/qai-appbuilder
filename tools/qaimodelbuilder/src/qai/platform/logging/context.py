@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Per-task contextual data (request_id, correlation_id) via ContextVar.
 
 These vars flow across ``await`` boundaries within the same Task by virtue

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Cross-context FileBroker bridge (apps/api wiring root).
 
 Builds the production :class:`PatternFileScreen` — the *pure-software*

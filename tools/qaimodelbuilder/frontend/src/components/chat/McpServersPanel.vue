@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <script setup lang="ts">
 /**
  * McpServersPanel — manage MCP (Model Context Protocol) servers.
@@ -35,6 +40,11 @@ import type {
 } from "@/api/mcpServers";
 import { useToast } from "@/composables/useToast";
 import { useConfirm } from "@/composables/useConfirm";
+// Shared help-manual affordance — see components/common/HelpButton.vue.
+// Docs live under `frontend/src/help-content/mcp-add-server.<locale>.md`
+// with the wireframe + troubleshooting SVGs under
+// `frontend/public/help-images/mcp-add-server/`.
+import HelpButton from "@/components/common/HelpButton.vue";
 
 const { t } = useI18n();
 const toast = useToast();
@@ -660,7 +670,18 @@ onUnmounted(() => {
   >
     <header class="mcp-panel__head">
       <div>
-        <h3 class="mcp-panel__title">{{ t("mcpServers.title") }}</h3>
+        <div class="mcp-panel__title-row">
+          <h3 class="mcp-panel__title">{{ t("mcpServers.title") }}</h3>
+          <!-- Inline help affordance next to the panel title so users
+               discovering MCP for the first time can open the manual
+               without leaving the settings screen. External link points
+               at the MCP protocol homepage. -->
+          <HelpButton
+            doc-key="mcp-add-server"
+            external-url="https://modelcontextprotocol.io/"
+            size="sm"
+          />
+        </div>
         <p class="mcp-panel__subtitle">{{ t("mcpServers.subtitle") }}</p>
       </div>
       <div class="mcp-panel__head-actions">
@@ -1305,6 +1326,15 @@ onUnmounted(() => {
   font-weight: 700;
   margin: 0;
   color: var(--text-primary);
+}
+/* Title + inline HelpButton row. Keeps the title-baseline alignment so the
+ * ℹ️ affordance reads as a first-class part of the title, not a floating
+ * action. Uses gap tokens so light/dark themes and rem-scale layouts are
+ * unaffected. */
+.mcp-panel__title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 .mcp-panel__subtitle {
   font-size: var(--text-sm);

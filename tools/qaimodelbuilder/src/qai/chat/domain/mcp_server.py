@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """MCP (Model Context Protocol) value objects for the chat bounded context.
 
 An *MCP server* is an external process (``stdio`` subprocess) or network

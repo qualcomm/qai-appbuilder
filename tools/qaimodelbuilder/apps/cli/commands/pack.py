@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``qai pack`` subcommands — App Builder Pack management from the CLI.
 
 Desktop App Plan §2.1.1 group D. Thin wrappers over

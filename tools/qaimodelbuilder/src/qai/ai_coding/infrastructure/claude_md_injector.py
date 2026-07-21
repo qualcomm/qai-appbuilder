@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """CLAUDE.md template injector for ai_coding workspaces (PR-095 / S9 H-12).
 
 The legacy ``backend/ai_coding/session_manager.py`` (lines 1243-1311)

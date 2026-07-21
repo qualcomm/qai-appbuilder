@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Curated MCP marketplace catalog (phase-1 built-in 'curated' source).
 
 The MCP marketplace lets the user browse a *source* (an MCP registry / catalog)

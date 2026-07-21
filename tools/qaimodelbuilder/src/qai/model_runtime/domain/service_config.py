@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Domain helpers for the GenieAPIService ``service_config.json`` document.
 
 Pure (no I/O) data + functions for the service-config document so they can

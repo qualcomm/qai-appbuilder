@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Apps-layer bridge: MB Pro session-lifecycle controller.
 
 The chat composer's「Pro / 增强」mode exposes user-controlled
@@ -42,6 +47,27 @@ __all__ = [
 ]
 
 _log = get_logger(__name__)
+
+
+def _resolve_effective_session_id(
+    session_id: str | None, username: str | None
+) -> str | None:
+    """Resolve the remote session id to use, scoped to the authenticated user.
+
+    SECURITY: never let an arbitrary client-supplied ``session_id`` win over the
+    authenticated ``username``. Remote session ids are namespaced
+    ``<username>_<tab_id>`` (see :func:`_find_idle_agent_url`), so a client could
+    otherwise POST ``session_id="<other_user>..."`` and attach to another user's
+    ``sessions/<other_user>/`` history. A client-supplied session_id is honoured
+    ONLY when it is scoped to THIS user (equals the username, or is prefixed
+    ``<username>_``); anything else is ignored and we fall back to the trusted
+    username. With no username at all, no session id is derivable.
+    """
+    if not username:
+        return None
+    if session_id and (session_id == username or session_id.startswith(f"{username}_")):
+        return session_id
+    return username
 
 
 class MbProProbeError(RuntimeError):
@@ -149,21 +175,27 @@ class MbProSessionController:
         session_id: str | None,
         insecure: bool | None,
         conversation_id: str | None = None,
+        username: str | None = None,
     ) -> dict[str, Any]:
         descriptor = self._descriptor_factory()
         if descriptor is None:
             raise RuntimeError("MB Pro not configured")
 
         # Auto-probe: when the frontend calls connect WITHOUT specifying
-        # ``agent_url`` AND WITHOUT a ``session_id`` hint (fresh session on a
-        # new tab), transparently pick an idle port from the pool. If the tab
-        # has a remembered session_id (reconnect for history restore), respect
-        # it — the user's history lives on that specific port, so we do NOT
-        # auto-probe on reconnects. If no pool is configured
-        # (``_probe_config_factory`` returns None), the descriptor's single
-        # ``endpoint`` is used as-is (backward compatible).
+        # ``agent_url``, transparently pick the right port from the pool.
+        # Phase 1 finds the port currently running THIS user's session (so a
+        # disconnect + reconnect from the same tab lands back on the same
+        # machine); Phase 2 falls back to any idle port. We probe regardless
+        # of whether the frontend supplied ``session_id`` — a remembered
+        # session_id from a previous connect no longer pins the port, since
+        # ``_find_idle_agent_url`` uses ``username`` (server-side session dir)
+        # to locate the owning machine reliably.
         resolved_agent_url = agent_url
-        if resolved_agent_url is None and not session_id:
+        # See ``_resolve_effective_session_id`` — client-supplied session_id is
+        # only honoured when scoped to the authenticated username (prevents
+        # cross-user session attach).
+        effective_session_id = _resolve_effective_session_id(session_id, username)
+        if resolved_agent_url is None:
             probe_cfg = (
                 self._probe_config_factory()
                 if self._probe_config_factory is not None
@@ -177,6 +209,7 @@ class MbProSessionController:
                     host=host,
                     ports=ports,
                     timeout=timeout,
+                    expected_session_id=effective_session_id,
                 )
 
         # Lazily create THIS tab's manager (connecting is the user's explicit
@@ -186,7 +219,7 @@ class MbProSessionController:
         state = await mgr.connect(
             descriptor=descriptor,
             agent_url=resolved_agent_url,
-            session_id_hint=session_id,
+            session_id_hint=effective_session_id,
             insecure=insecure,
         )
         # Greeting persistence + broadcast (fire-and-forget). On a fresh session
@@ -283,159 +316,200 @@ async def _find_idle_agent_url(
     timeout: float,
     busy_retries: int = 2,
     busy_backoff_s: float = 2.0,
+    expected_session_id: str | None = None,
 ) -> str:
-    """Probe the MB Pro pool and return the first idle port's URL.
+    """Probe the MB Pro pool and return the best available port's URL.
 
-    Each port hosts its own uvicorn process whose ``_global_builder`` singleton
-    runs at most one job at a time. The ONLY reliable "is-this-port-idle"
-    signal is the ``queue_state`` event that the remote emits as the first
-    event of its connect-time greeting burst (verified live 2026-06-29). To
-    read it we must actually create a session and consume that first event.
+    Two-phase selection:
 
-    Design (throwaway probes + fresh-connect on the winner):
-      * For each port, spawn a throwaway ``SessionManager`` and race them
-        concurrently. Each probe: create session → drain the first event → if
-        it is a ``queue_state`` with ``busy=false`` it is a candidate. Whatever
-        the outcome, the throwaway is disconnected before we return so the
-        remote does not accumulate orphaned sessions.
-      * As soon as ANY probe reports idle we cancel the still-running probes
-        (they can only lose to the lowest-numbered idle port anyway) so we
-        neither wait for the slowest port nor keep opening throwaway sessions
-        we don't need — lower latency + less remote load.
-      * The winner's URL is returned; the caller then does a NORMAL fresh
-        ``connect`` against that URL (which triggers the standard greeting
-        pipeline via :class:`PersistMbProGreetingUseCase`).
+    Phase 1 -- caller's own session (tab-scoped):
+      When ``expected_session_id`` is provided, check ``owner_session`` in each
+      port's ``/api/busy`` response. If any port is currently running THIS
+      tab's session (``owner_session == expected_session_id``), connect there
+      immediately -- the tab's task is live on that machine and we must not
+      redirect it to a different port. Matching is exact on the tab-scoped id
+      (``<username>_<tab_id>``) so other tabs owned by the same user do NOT
+      hijack this tab's connection.
 
-    Busy retry (temporary-exhaustion smoothing): GPU jobs are short-lived, so
-    "all busy" is usually transient. Rather than fail immediately and make the
-    user re-click, we re-probe up to ``busy_retries`` extra rounds, waiting
-    ``busy_backoff_s`` between rounds. "All offline" is NOT retried (a down
-    pool won't come back in seconds; fail fast so the user sees the real
-    problem). Offline-vs-busy is re-evaluated each round: a port coming online
-    mid-wait is picked up on the next round.
+    Phase 2 -- idle port fallback:
+      If no port owns the caller's session, fall back to the existing
+      idle-probe logic (first port that reports ``busy=false``). The tab-scoped
+      session_id is still passed as ``session_id_hint`` by the caller so the
+      remote server creates ``sessions/<sid>/`` on whichever idle port is
+      selected.
 
-    Errors (raised as :class:`MbProProbeError` with a machine code so the
-    frontend renders a localized message — see that class):
-      * All ports offline → ``mb_pro.pool_all_offline`` (route → 502).
-      * All ports reachable but busy after all retries →
-        ``mb_pro.pool_all_busy`` with ``details["busy_count"]`` (route → 503).
-
-    Host + port pool + timeout come from
-    ``internal_config.toml [query_services.mb_pro]`` (``probe_host`` /
-    ``probe_ports`` / ``probe_timeout_s``); the deployment topology is
-    edition-config, not source (PROJECT-RULES §3.8.1).
+    Error codes (raised as :class:`MbProProbeError`):
+      * ``mb_pro.pool_all_offline`` -- every port unreachable (-> 502).
+      * ``mb_pro.pool_all_busy``    -- every port reachable but busy (-> 503).
     """
-    # Local imports keep the module loadable on external editions (the
-    # `query_service` subpackage is physically excluded there).
-    from qai.chat.infrastructure.query_service import SessionManager
+    import httpx  # local import — external editions may not carry httpx? (it's a hard dep, safe)
 
-    async def _probe_one(port: int) -> tuple[int, str, bool] | None:
-        """Return (port, url, is_idle) on success, ``None`` on unreachable.
+    # HTTP GET is fast; cap probe timeout at 3s regardless of the configured
+    # session-connect timeout (which was calibrated for session creation +
+    # greeting drain). If a port doesn't answer /api/busy in 3s we treat it
+    # as unreachable rather than blocking the whole autoprobe.
+    _probe_timeout = min(3.0, max(1.0, float(timeout)))
 
-        ``is_idle`` distinguishes "reachable but busy" from "reachable and
-        idle" so the caller can tell the two error cases apart.
+    async def _probe_one(
+        client: httpx.AsyncClient, port: int
+    ) -> tuple[int, str, bool, dict[str, Any]] | tuple[int, str, None, str] | None:
+        """Probe one port.
+
+        Returns one of:
+        * ``(port, url, is_idle, meta)``  — port responded with valid JSON.
+        * ``(port, url, None, reason)``   — port answered but not usable;
+          ``reason`` is ``"offline"`` (connection refused / non-200) or
+          ``"network"`` (host unreachable / DNS / timeout).
+        * ``None`` — asyncio.CancelledError was propagated (peer found idle).
+
+        Distinguishing offline from network-error lets the caller tell the user
+        whether the *server* is down or their *network* is the problem.
         """
         url = f"http://{host}:{port}"
-        mgr = SessionManager()
         try:
-            try:
-                state = await mgr.connect(
-                    descriptor=descriptor,
-                    agent_url=url,
-                    session_id_hint=None,
-                    insecure=insecure,
-                )
-            except asyncio.CancelledError:
-                raise  # a peer already found idle; propagate so finally cleans up
-            except Exception:  # noqa: BLE001 — unreachable / handshake failure
-                return None
-            if not state.connected:
-                return None
-            # Read only the FIRST event: the greeting burst opens with
-            # ``queue_state`` (per the remote's contract). If we somehow see a
-            # different event first, treat it as "unknown → assume busy" to
-            # be safe (won't wrongly claim an idle machine).
-            is_idle = False
-            async for event in mgr.drain_greeting(timeout=timeout):
-                if event.get("type") == "queue_state":
-                    is_idle = not bool(event.get("busy"))
-                break  # only care about the FIRST event
-            return (port, url, is_idle)
-        finally:
-            try:
-                await mgr.disconnect()
-            except Exception:  # noqa: BLE001 — best-effort cleanup
-                _log.debug("mb_pro.probe_disconnect_failed", port=port, exc_info=True)
+            r = await client.get(f"{url}/api/busy", timeout=_probe_timeout)
+        except asyncio.CancelledError:
+            raise  # a peer already found idle; propagate for cleanup
+        except httpx.ConnectError:
+            # Connection actively refused (RST) — host reachable, port not
+            # listening → the service is offline on this port.
+            return (port, url, None, "offline")
+        except (httpx.ConnectTimeout, httpx.ReadTimeout,
+                httpx.TimeoutException):
+            # Could not establish a connection within the timeout — could be
+            # a slow network, firewall silently dropping packets, or the host
+            # being down. Treat conservatively as a network / routing issue
+            # rather than a clean service-offline signal.
+            return (port, url, None, "network")
+        except Exception:  # noqa: BLE001 — other transport errors → network
+            return (port, url, None, "network")
+        if r.status_code != 200:
+            # HTTP error from a reachable host (e.g. 404 on old server) →
+            # service is present but doesn't expose /api/busy; treat as offline.
+            return (port, url, None, "offline")
+        try:
+            payload = r.json()
+        except Exception:  # noqa: BLE001 — malformed JSON → treat as offline
+            return (port, url, None, "offline")
+        if not isinstance(payload, dict) or "busy" not in payload:
+            return (port, url, None, "offline")
+        is_idle = not bool(payload.get("busy"))
+        return (port, url, is_idle, payload)
 
-    async def _probe_round() -> tuple[str | None, list[tuple[int, str, bool]]]:
+    async def _probe_round(
+        client: httpx.AsyncClient,
+    ) -> tuple[str | None, list[tuple[int, str, bool, dict[str, Any]]], list[str]]:
         """One concurrent probe pass over all ports.
 
-        Returns ``(idle_url_or_None, reachable_results)``. Cancels the
-        remaining probes as soon as an idle one is seen (early exit). The
-        returned ``idle_url`` is always the LOWEST-numbered idle port among the
-        results collected so far, for deterministic routing.
+        Returns ``(idle_url_or_None, reachable_results, failure_reasons)``.
+        Collects ALL results before returning so the caller can inspect every
+        port's ``owner_session`` for Phase 1 (user's own session) before
+        falling back to the first idle port in Phase 2.
+        ``failure_reasons`` is a list of ``"offline"`` / ``"network"`` strings
+        from failed probes, used by the caller to distinguish network-level
+        failures from service-level failures.
         """
         tasks = {
-            asyncio.ensure_future(_probe_one(p)): p for p in ports
+            asyncio.ensure_future(_probe_one(client, p)): p for p in ports
         }
-        reachable: list[tuple[int, str, bool]] = []
-        found_idle = False
+        reachable: list[tuple[int, str, bool, dict[str, Any]]] = []
+        failure_reasons: list[str] = []
         try:
             for fut in asyncio.as_completed(list(tasks)):
                 res = await fut
                 if res is None:
                     continue
-                reachable.append(res)
-                if res[2]:  # is_idle → we can stop early
-                    found_idle = True
-                    break
+                if res[2] is None:
+                    # Failed probe: (port, url, None, reason)
+                    failure_reasons.append(res[3])  # type: ignore[index]
+                    continue
+                reachable.append(res)  # type: ignore[arg-type]
         finally:
             for t in tasks:
                 if not t.done():
                     t.cancel()
-            # Let the cancellations settle so every throwaway session is
-            # disconnected before we return (no orphaned remote sessions).
             await asyncio.gather(*tasks, return_exceptions=True)
-        if found_idle:
-            idle_ports = [r for r in reachable if r[2]]
-            idle_ports.sort(key=lambda t: t[0])
-            _port, url, _ = idle_ports[0]
+
+        # Phase 1: prefer the port that is currently running THIS tab's session.
+        if expected_session_id:
+            for _port, url, _is_idle, meta in sorted(reachable, key=lambda r: r[0]):
+                if meta.get("owner_session") == expected_session_id:
+                    _log.info(
+                        "mb_pro.autoprobe_owner_match",
+                        port=_port,
+                        url=url,
+                        expected_session_id=expected_session_id,
+                    )
+                    return url, reachable, failure_reasons
+
+        # Phase 2: first idle port (lowest port number wins for determinism).
+        idle_ports = [r for r in reachable if r[2]]
+        if idle_ports:
+            idle_ports.sort(key=lambda r: r[0])
+            _port, url, _, _ = idle_ports[0]
             _log.info("mb_pro.autoprobe_picked", port=_port, url=url)
-            return url, reachable
-        return None, reachable
+            return url, reachable, failure_reasons
+
+        return None, reachable, failure_reasons
 
     attempts = max(1, busy_retries + 1)
-    last_busy_count = 0
-    for attempt in range(attempts):
-        idle_url, reachable = await _probe_round()
-        if idle_url is not None:
-            return idle_url
-        if not reachable:
-            # Nothing answered at all → pool is down. Fail fast (do NOT retry;
-            # a down pool won't recover within a few seconds).
-            raise MbProProbeError(
-                "mb_pro.pool_all_offline",
-                "远端 Agent 全部离线",
-                details={"port_count": len(ports)},
-            )
-        # Reachable but all busy. ``last_busy_count`` is the count of machines
-        # that actually ANSWERED (reachable) on this round — NOT ``len(ports)``,
-        # since some ports may be offline. Reporting the real busy count keeps
-        # the user-facing number honest (e.g. "5 machines busy" when 3 of 8 are
-        # simply down). Retry after a short backoff unless this was the last
-        # attempt (temporary-exhaustion smoothing).
-        last_busy_count = len(reachable)
-        if attempt < attempts - 1:
-            _log.info(
-                "mb_pro.autoprobe_all_busy_retry",
-                attempt=attempt + 1,
-                busy_count=last_busy_count,
-            )
-            await asyncio.sleep(busy_backoff_s)
+    last_reachable: list[tuple[int, str, bool, dict[str, Any]]] = []
+    last_failure_reasons: list[str] = []
+    async with httpx.AsyncClient(trust_env=False) as client:
+        for attempt in range(attempts):
+            idle_url, reachable, failure_reasons = await _probe_round(client)
+            if idle_url is not None:
+                return idle_url
+            if not reachable:
+                # Nothing answered successfully. Classify: if ALL failures are
+                # network-type (timeout / route error), the user's network
+                # can't reach the pool — surface a distinct error so the user
+                # knows to check their own connectivity rather than assuming
+                # the servers are down. If at least one port gave a clean
+                # "connection refused" we know the host is reachable and the
+                # service just isn't running there.
+                all_network = bool(failure_reasons) and all(
+                    r == "network" for r in failure_reasons
+                )
+                if all_network:
+                    raise MbProProbeError(
+                        "mb_pro.pool_network_error",
+                        "无法连接远端 Agent，网络不可达",
+                        details={"port_count": len(ports)},
+                    )
+                raise MbProProbeError(
+                    "mb_pro.pool_all_offline",
+                    "远端 Agent 全部离线",
+                    details={"port_count": len(ports)},
+                )
+            last_reachable = reachable
+            if attempt < attempts - 1:
+                _log.info(
+                    "mb_pro.autoprobe_all_busy_retry",
+                    attempt=attempt + 1,
+                    busy_count=len(reachable),
+                )
+                await asyncio.sleep(busy_backoff_s)
+
+    # All retries exhausted; every reachable port was busy. Aggregate a compact
+    # summary for the UI: total busy machines, total queue depth across the
+    # pool, distinct phases (so operator sees what kind of work is running).
+    busy_metas = [meta for (_, _, _, meta) in last_reachable]
+    queue_total = 0
+    for meta in busy_metas:
+        try:
+            queue_total += int(meta.get("queue_len") or 0)
+        except (TypeError, ValueError):
+            pass
+    phases = sorted({str(meta.get("phase") or "") for meta in busy_metas if meta.get("phase")})
     raise MbProProbeError(
         "mb_pro.pool_all_busy",
-        f"当前 {last_busy_count} 台机器全部繁忙，请稍后再试",
-        details={"busy_count": last_busy_count},
+        f"当前 {len(last_reachable)} 台机器全部繁忙，请稍后再试",
+        details={
+            "busy_count": len(last_reachable),
+            "queue_total": queue_total,
+            "phases": phases,
+        },
     )
 
 
@@ -592,8 +666,8 @@ def _build_greeting_use_case(*, container: Any, peek_manager: Any) -> Any | None
             self._ids = id_gen
             self._mapper = MbProMapper()
 
-        def new_context(self) -> Any:
-            return QueryMappingContext(ids=self._ids)
+        def new_context(self, *, my_session_id: Any = None) -> Any:
+            return QueryMappingContext(ids=self._ids, my_session_id=my_session_id)
 
         def map_event(self, event: Any, ctx: Any) -> Any:
             return self._mapper.map_event(event, ctx)

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Subprocess-backed hook engine for the chat agentic loop.
 
 Migrated into the chat bounded context from the (removed) ``ai_coding``

@@ -38,6 +38,7 @@ ${APP_ROOT}/data/app_builder/<app_id>/
   app.yaml                    # app metadata (host entry point; see §2)
   README.md                   # how to run, models, I/O, limitations
   run.bat                     # Windows manual run entry (ASCII/English only)
+  start.bat                   # Windows debug restart entry; kills old listener on port, then starts app
   run.ps1                     # optional; English-only content
   requirements.txt            # minimal deps; prefer the current venv (often empty)
   backend/
@@ -99,11 +100,23 @@ description: Enter Chinese text and play the synthesized speech.
 created_at: "2026-07-08T20:00:00+08:00"
 updated_at: "2026-07-08T20:00:00+08:00"
 models:
+  # Case 1 — BUILT-IN pack (factory/app_builder/models/<id>/):
   - id: melotts-zh
     title: MeloTTS (Chinese)
     builtin: true
     pack_dir: "${APP_ROOT}/factory/app_builder/models/melotts-zh"
     model_dir: "${APP_ROOT}/models/melotts-zh"
+  # Case 2 — USER-IMPORTED pack (P4; imported via QAI ModelBuilder):
+  # Use the user roots for BOTH pack_dir and model_dir. Note the extra
+  # `models/` layer in model_dir (matches manifest `installPath` convention).
+  # If unsure whether a pack is built-in or user, check whether
+  # `${APP_ROOT}/factory/app_builder/models/<id>/manifest.json` exists on disk;
+  # if not, use the user paths below.
+  - id: inception-v3
+    title: Inception v3
+    builtin: false
+    pack_dir: "${APP_ROOT}/data/app_builder/user_models/inception-v3"
+    model_dir: "${APP_ROOT}/data/app_builder/user_model_weights/models/inception-v3"
 entry:
   app_module: backend.main:app
   health_path: /health
@@ -121,7 +134,15 @@ Rules:
 
 - `id` MUST equal the directory name; all host APIs key off this id.
 - `models[].pack_dir` and `models[].model_dir` use the ABSOLUTE `${APP_ROOT}/...`
-  form.
+  form. **Pick the right layout for the pack's origin** (see two cases above):
+  - `builtin: true` → `factory/app_builder/models/<id>/` (pack) +
+    `models/<id>/` (weights)
+  - `builtin: false` (user-imported) → `data/app_builder/user_models/<id>/`
+    (pack) + `data/app_builder/user_model_weights/models/<id>/` (weights)
+    — note the extra `models/` layer in model_dir.
+  The packager has a defensive fallback that will attempt the user layout
+  if a built-in path is missing, but writing the correct layout up-front
+  produces cleaner package_manifest.json and avoids warnings.
 - `entry.app_module` is the import path uvicorn launches (`backend.main:app`);
   `health_path` must match the `/health` route; `frontend_path` is where the UI
   is served (`/`).
@@ -152,9 +173,13 @@ Env vars the host injects at launch:
 
 - `APP_ROOT` — the install directory.
 - `APP_PROJECT_ROOT` — `${APP_ROOT}/data/app_builder/<app_id>`.
-- `APP_BUILDER_MODEL_ROOT` — `${APP_ROOT}/models`.
-- `APP_BUILDER_PACK_ROOT` — `${APP_ROOT}/factory/app_builder/models`.
+- `APP_BUILDER_MODEL_ROOT` — `${APP_ROOT}/models` (built-in pack weights).
+- `APP_BUILDER_PACK_ROOT` — `${APP_ROOT}/factory/app_builder/models` (built-in pack manifests / assets).
+- `APP_BUILDER_USER_MODEL_ROOT` — `${APP_ROOT}/data/app_builder/user_model_weights` (P4; user-imported pack weights). **Note the extra `models/` layer**: real files live at `${APP_BUILDER_USER_MODEL_ROOT}/models/<id>/<bin>`.
+- `APP_BUILDER_USER_PACK_ROOT` — `${APP_ROOT}/data/app_builder/user_models` (P4; user-imported pack manifests / assets). No extra layer: `${APP_BUILDER_USER_PACK_ROOT}/<id>/manifest.json`.
 - `PYTHONPATH` includes the app dir and `${APP_ROOT}/src`.
+
+A given pack lives in **exactly one** anchor pair (built-in OR user), never both. Your `_resolve_dir()` helper (§4) probes both so the app works regardless of pack origin.
 
 ---
 
@@ -201,42 +226,110 @@ class LoadedModel:
     model_dir: Path
 
 
-# ── CRITICAL: self-contained model resolution ─────────────────────────────────
-# The packaged zip bundles models under  <pkg>/models/<model_id>/  and the pack
-# under  <pkg>/pack/<model_id>/.  When the app runs standalone (no host env),
-# APP_BUILDER_MODEL_ROOT / APP_BUILDER_PACK_ROOT are NOT set, so you MUST NOT
-# use a bare  Path(model_root) / "<id>"  — that resolves to "" / "<id>" which
-# is a relative path from the process CWD, not the package dir.
+# ── CRITICAL: self-contained model resolution (P4 双根 + 打包分发) ────────────
+# Packs may originate from EITHER anchor pair (a given pack lives in exactly one):
 #
-# Use the 3-tier _resolve_dir() helper below (copy it verbatim):
-#   1. Host env root (set by the host when managing the app)
-#   2. Walk up from __file__ looking for <fallback_sub>/<model_id>
-#      → finds the bundled copy inside the package zip automatically
-#   3. Last-resort relative path (same as env_root or ".")
+#   built-in :  APP_BUILDER_MODEL_ROOT/<id>/<bin>          (weights)
+#               APP_BUILDER_PACK_ROOT/<id>/manifest.json   (pack meta)
+#   user     :  APP_BUILDER_USER_MODEL_ROOT/models/<id>/<bin>  ← extra "models/" layer!
+#               APP_BUILDER_USER_PACK_ROOT/<id>/manifest.json
 #
-# This makes the zip self-contained: it works on any machine with a QAI venv,
-# even without the original QAIModelBuilder install.
-def _resolve_dir(env_root: str, model_id: str, fallback_sub: str) -> Path:
-    """Resolve a model or pack directory — host env first, then bundled copy."""
-    if env_root:
-        p = Path(env_root) / model_id
+# After packaging, both flavours bundle under the SAME arcnames inside the zip:
+#   <pkg>/models/<id>/<bin>   +   <pkg>/pack/<id>/manifest.json
+# so the ancestor-walk fallback (§tier 3 below) is uniform.
+#
+# When the app runs standalone (no host env), APP_BUILDER_*_ROOT vars are NOT set,
+# so you MUST NOT use a bare Path(env_root) / "<id>" — that resolves to "" / "<id>"
+# which is a relative path from the process CWD, not the package dir.
+#
+# Use the 4-tier _resolve_dir() helper below (copy it verbatim). The helper takes
+# BOTH env-var names for a category (built-in + user), plus the "user extra" layer
+# name (either "models" for weights, or "" for pack), plus the arcname sub-dir the
+# packager uses ("models" or "pack"):
+#
+#   1a. Built-in env root       : $BUILTIN_ENV/<id>                        (dev host, built-in pack)
+#   1b. User env root           : $USER_ENV/<user_extra>/<id>              (dev host, user-imported pack)
+#   2.  Walk up from __file__ looking for <arcname_sub>/<id>               (packaged zip on any machine)
+#   3.  Last-resort relative path so callers get a clear FileNotFoundError
+#
+# This makes the zip self-contained AND makes the dev-host binding work for both
+# built-in and user-imported packs — one helper, no per-pack conditionals.
+def _resolve_dir(
+    builtin_env: str,
+    user_env: str,
+    model_id: str,
+    user_extra: str,   # "models" for weights, "" for pack
+    arcname_sub: str,  # "models" or "pack" (matches packager arcnames)
+) -> Path:
+    """Resolve a model or pack directory — probes built-in env, user env,
+    then the bundled zip layout via ancestor walk."""
+    # Tier 1a: built-in host env (e.g. APP_BUILDER_MODEL_ROOT/<id>).
+    if builtin_env:
+        p = Path(builtin_env) / model_id
         if p.is_dir():
             return p
-    # Walk up from backend/inference.py → backend/ → <pkg>/ → …
-    # Finds <pkg>/models/<model_id> or <pkg>/pack/<model_id> in the zip.
+    # Tier 1b: user host env (P4). Weights need the extra "models/" layer to
+    # match manifest installPath convention; pack does not.
+    if user_env:
+        p = Path(user_env)
+        if user_extra:
+            p = p / user_extra
+        p = p / model_id
+        if p.is_dir():
+            return p
+    # Tier 2: walk up from backend/inference.py → backend/ → <pkg>/ → …
+    # Finds <pkg>/models/<model_id> or <pkg>/pack/<model_id> inside a packaged
+    # zip that was unpacked anywhere. Uniform for both built-in and user packs
+    # because the packager writes them under the same arcnames.
     here = Path(__file__).resolve()
     for parent in here.parents:
-        candidate = parent / fallback_sub / model_id
+        candidate = parent / arcname_sub / model_id
         if candidate.is_dir():
             return candidate
-    return Path(env_root or ".") / model_id
+    # Tier 3: last-resort — return the anchor candidate that best matches
+    # what we know about the pack, so the caller's subsequent .is_dir()
+    # check / open() call produces a clear error against a MEANINGFUL path
+    # (not a bogus "./id" relative to CWD).
+    if builtin_env:
+        return Path(builtin_env) / model_id
+    if user_env:
+        p = Path(user_env)
+        if user_extra:
+            p = p / user_extra
+        return p / model_id
+    return Path(".") / model_id
+def load_model(
+    *,
+    model_root: str = "",
+    pack_root: str = "",
+    user_model_root: str = "",
+    user_pack_root: str = "",
+) -> LoadedModel:
+    """Load QNN context binaries ONCE. Called at startup; cached process-wide.
 
-
-def load_model(*, model_root: str = "", pack_root: str = "") -> LoadedModel:
-    """Load QNN context binaries ONCE. Called at startup; cached process-wide."""
-    # <<CHANGE: replace "melotts-zh" with your model_id, "models"/"pack" are fixed>>
-    model_dir = _resolve_dir(model_root, "melotts-zh", "models")
-    pack_dir  = _resolve_dir(pack_root,  "melotts-zh", "pack")
+    ``model_root`` / ``pack_root`` come from ``APP_BUILDER_MODEL_ROOT`` /
+    ``APP_BUILDER_PACK_ROOT`` (built-in anchors). ``user_model_root`` /
+    ``user_pack_root`` come from ``APP_BUILDER_USER_MODEL_ROOT`` /
+    ``APP_BUILDER_USER_PACK_ROOT`` (P4 user anchors). Pass every var
+    ``os.environ.get()`` returns; the resolver decides which anchor holds
+    this pack.
+    """
+    # <<CHANGE: replace "melotts-zh" with your model_id; the "models"/"pack"
+    #  and user_extra literals below are FIXED and match the packager output.>>
+    model_dir = _resolve_dir(
+        builtin_env=model_root,
+        user_env=user_model_root,
+        model_id="melotts-zh",
+        user_extra="models",   # weights: user layout adds "models/" layer
+        arcname_sub="models",  # packaged zip uses <pkg>/models/<id>/
+    )
+    pack_dir = _resolve_dir(
+        builtin_env=pack_root,
+        user_env=user_pack_root,
+        model_id="melotts-zh",
+        user_extra="",         # pack: user layout has no extra layer
+        arcname_sub="pack",    # packaged zip uses <pkg>/pack/<id>/
+    )
     # QNNConfig.Config is process-global; call once (see qnn_helper for the
     # guarded pattern). Load each .bin as a QNNContext.
     ctx = qnn_helper.QnnContext.load(model_dir / "encoder.bin", runtime="Htp")
@@ -439,19 +532,103 @@ $('runBtn').addEventListener('click', run);
 
 ---
 
-## 7. `run.bat` and `README.md`
+## 7. `run.bat`, `start.bat`, and `README.md`
 
 ### `run.bat` (Windows manual run — ASCII/English ONLY)
 
 `run.bat` is generated content (data). Keep it **ASCII / English-only** — Chinese
 comments in a `.bat` are risky under PowerShell/OEM encoding and can corrupt or
-break the script. Launch uvicorn with the current venv Python, CWD = app dir:
+break the script.
+
+**CRITICAL — env var wiring for user-imported (P4) packs.** When the host UI
+launches the app (Apps menu), it injects
+`APP_BUILDER_MODEL_ROOT` / `APP_BUILDER_PACK_ROOT` /
+`APP_BUILDER_USER_MODEL_ROOT` / `APP_BUILDER_USER_PACK_ROOT`. But when the user
+double-clicks `run.bat` directly (no host UI), env vars are empty and
+`_resolve_dir`'s tier-1a/1b skip. For a **built-in** pack, tier-2 walk-up finds
+`<repo>/models/<id>/` from the app's own path — works. For a **user-imported**
+pack, real weights live at `<repo>/data/app_builder/user_model_weights/models/<id>/`
+(extra `models/` layer, NOT reachable via `<ancestor>/models/<id>` walk-up).
+
+Fix: `run.bat` itself derives the repo root from `%~dp0` (app dir is
+`<repo>/data/app_builder/<app_id>/` → three levels up = `<repo>`) and exports
+all four anchors. Each `if exist` guard means: after unzip on a foreign machine
+the anchor dirs don't exist so env stays empty and `_resolve_dir` tier-2
+walk-up finds the bundled `models/<id>/` next to `backend/` — no branch needed.
 
 ```bat
 @echo off
 REM Manual run for this App Builder app. Prefer the host UI (Apps menu).
+setlocal
 cd /d "%~dp0"
+
+REM Derive repo root: <repo>/data/app_builder/<app_id>/run.bat -> up 3 levels.
+REM Guarded exports: on a foreign machine (unpacked zip) these dirs do not
+REM exist, env stays empty, and inference.py tier-2 walk-up finds bundled
+REM models/<id>/ + pack/<id>/ next to backend/. On the dev host they DO
+REM exist and tier-1a/1b hit directly, matching host-UI-launch behaviour.
+REM ``if exist "...\"`` (trailing backslash) restricts the check to a real
+REM directory — prevents a same-named FILE from being mistaken for a dir.
+set "REPO_ROOT=%~dp0..\..\.."
+if exist "%REPO_ROOT%\models\" set "APP_BUILDER_MODEL_ROOT=%REPO_ROOT%\models"
+if exist "%REPO_ROOT%\factory\app_builder\models\" set "APP_BUILDER_PACK_ROOT=%REPO_ROOT%\factory\app_builder\models"
+if exist "%REPO_ROOT%\data\app_builder\user_model_weights\" set "APP_BUILDER_USER_MODEL_ROOT=%REPO_ROOT%\data\app_builder\user_model_weights"
+if exist "%REPO_ROOT%\data\app_builder\user_models\" set "APP_BUILDER_USER_PACK_ROOT=%REPO_ROOT%\data\app_builder\user_models"
+
 "%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_arm64_313\Scripts\python.exe" -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+```
+
+### `start.bat` (Windows debug restart — ASCII/English ONLY)
+
+Every generated WebUI app MUST also include `start.bat`. It is a manual debug
+launcher that accepts an optional port argument, kills any existing LISTENING
+process on that port, prints each step, pauses before commands when debugging is
+needed, and starts uvicorn. Keep it ASCII / English-only. Resolve `APP_ROOT`
+from `%~dp0..\..\..` instead of hard-coding a local user path.
+
+### `run.ps1` (optional PowerShell equivalent)
+
+Same anchor-derivation logic as run.bat. **Deliberately unrolled** — no
+`Resolve-Path` (throws on non-existent / cross-volume paths, would crash the
+script when unpacked in a shallow location) and no
+`$ErrorActionPreference = 'Stop'` for the probe (a missing anchor dir is a
+normal fallback path, not a fatal error). We only `-PathType Container`-guard
+the exports so a same-named file is not mistaken for a directory:
+
+```powershell
+Set-Location -LiteralPath $PSScriptRoot
+# Join without canonicalising — Resolve-Path would throw on foreign-machine
+# unpacked layouts where the ancestor path does not exist / crosses volumes.
+$RepoRoot = Join-Path $PSScriptRoot '..\..\..'
+$anchors = @{
+    APP_BUILDER_MODEL_ROOT       = Join-Path $RepoRoot 'models'
+    APP_BUILDER_PACK_ROOT        = Join-Path $RepoRoot 'factory\app_builder\models'
+    APP_BUILDER_USER_MODEL_ROOT  = Join-Path $RepoRoot 'data\app_builder\user_model_weights'
+    APP_BUILDER_USER_PACK_ROOT   = Join-Path $RepoRoot 'data\app_builder\user_models'
+}
+foreach ($k in $anchors.Keys) {
+    if (Test-Path -LiteralPath $anchors[$k] -PathType Container) {
+        Set-Item -Path "env:$k" -Value $anchors[$k]
+    }
+}
+& "$env:LOCALAPPDATA\QAIModelBuilder\envs\.venv_arm64_313\Scripts\python.exe" -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+```
+
+### `run.sh` (optional POSIX equivalent — for Linux/macOS reference distributions)
+
+```sh
+#!/usr/bin/env bash
+set -e
+cd "$(dirname "$0")"
+# Do NOT `set -e` around the anchor probes — a missing anchor dir is a
+# normal fallback, not a fatal error. `cd ../../..` never fails on POSIX
+# (`/..` resolves to `/`), so this stays inside `set -e` safely.
+REPO_ROOT="$(cd ../../.. && pwd)"
+[ -d "$REPO_ROOT/models" ] && export APP_BUILDER_MODEL_ROOT="$REPO_ROOT/models"
+[ -d "$REPO_ROOT/factory/app_builder/models" ] && export APP_BUILDER_PACK_ROOT="$REPO_ROOT/factory/app_builder/models"
+[ -d "$REPO_ROOT/data/app_builder/user_model_weights" ] && export APP_BUILDER_USER_MODEL_ROOT="$REPO_ROOT/data/app_builder/user_model_weights"
+[ -d "$REPO_ROOT/data/app_builder/user_models" ] && export APP_BUILDER_USER_PACK_ROOT="$REPO_ROOT/data/app_builder/user_models"
+python3 -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 ```
 
 ### `README.md`

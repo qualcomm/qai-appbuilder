@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Bootstrap RPC protocol — JSON-line stdin/stdout codec.
 
 The sticky-worker bootstrap subprocess speaks a tiny line-oriented JSON

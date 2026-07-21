@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Use cases: read / mutate per-instance :class:`ChannelBindings` (PR-202).
 
 Bindings map ``conversation_id -> channel_user_id`` so the WebUI's

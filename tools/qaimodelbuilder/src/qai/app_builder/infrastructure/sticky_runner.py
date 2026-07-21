@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Sticky-worker-backed :class:`RunnerPort` (PR-302 wiring).
 
 This adapter is the long-missing PR-302 integration: it makes every App

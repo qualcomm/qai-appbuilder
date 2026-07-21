@@ -1,4 +1,10 @@
 @echo off
+
+REM ---------------------------------------------------------------------
+REM Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+REM SPDX-License-Identifier: BSD-3-Clause
+REM ---------------------------------------------------------------------
+
 REM ===========================================================================
 REM Build.bat - Compile the V2 WebUI frontend into the production SPA bundle
 REM             (frontend/dist) that Start.bat / apps.api serves at runtime.
@@ -96,15 +102,34 @@ pushd "%ROOT_DIR%frontend" || (echo [ERROR] frontend not found & exit /b 1)
 REM 1. Install dependencies (skipped when node_modules already present).
 REM    A non-frozen install is used so a drifted lockfile does not block.
 REM
-REM Detection of corrupted node_modules: even when node_modules\.bin exists,
-REM transitive deps may be missing (e.g. esbuild absent under
-REM node_modules/vite/node_modules/, leading to "ERR_MODULE_NOT_FOUND" when
-REM vite starts). We probe for a few known-critical packages — if any are
-REM missing, force a fresh install.
-if not exist "node_modules\.bin" set "DO_INSTALL=1"
-if not exist "node_modules\vite" set "DO_INSTALL=1"
-if not exist "node_modules\esbuild" set "DO_INSTALL=1"
-if not exist "node_modules\vue" set "DO_INSTALL=1"
+REM Detection of corrupted / missing node_modules:
+REM   - Probe for known-critical REAL FILES (not just directory entries).
+REM     `if exist` on a directory returns True even for a broken Junction
+REM     (Windows reparse point whose target has been deleted), so we must
+REM     probe a concrete file inside the package to confirm the virtual
+REM     store is intact.  This matters because pnpm's virtualStoreDir is
+REM     outside the source tree (pnpm-workspace.yaml virtualStoreDir); if
+REM     that directory is wiped (e.g. a fresh clone, or data/ cleanup) the
+REM     Junctions in node_modules/ still exist but their targets are gone,
+REM     causing "Cannot find module .../vite/bin/vite.js" at build time.
+REM   - If any probe fails, force a fresh `pnpm install` which rebuilds
+REM     both the virtual store and the node_modules symlink layer.
+REM   - IMPORTANT: also delete node_modules\.modules.yaml (pnpm's install
+REM     state file) when the virtual store is missing. Without this, pnpm
+REM     sees the state file and reports "Already up to date", skipping the
+REM     rebuild even though the actual package files are gone.
+if not exist "node_modules\.bin\vite.cmd"    set "DO_INSTALL=1"
+if not exist "node_modules\vite\bin\vite.js" set "DO_INSTALL=1"
+if not exist "node_modules\esbuild\package.json" set "DO_INSTALL=1"
+if not exist "node_modules\vue\package.json" set "DO_INSTALL=1"
+if "%DO_INSTALL%"=="1" (
+    if exist "node_modules\.modules.yaml" (
+        del /f /q "node_modules\.modules.yaml" 2>nul
+    )
+    if exist "node_modules\.pnpm-workspace-state-v1.json" (
+        del /f /q "node_modules\.pnpm-workspace-state-v1.json" 2>nul
+    )
+)
 
 REM --clean: nuke node_modules entirely before installing. Use this when a
 REM regular `pnpm install` cannot heal the tree (e.g. node_modules copied

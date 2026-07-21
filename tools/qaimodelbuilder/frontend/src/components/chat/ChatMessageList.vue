@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <script setup lang="ts">
 /**
  * ChatMessageList — V1-style message renderer with welcome screen.
@@ -63,6 +68,13 @@ import CloudModelOnboarding from "@/components/chat/CloudModelOnboarding.vue";
 import CloudModelApiKeyOnboarding from "@/components/chat/CloudModelApiKeyOnboarding.vue";
 import SetApiKeyDialog from "@/components/chat/SetApiKeyDialog.vue";
 import AppBuilderEmptyState from "@/components/chat/AppBuilderEmptyState.vue";
+import ProEmptyState from "@/components/chat/ProEmptyState.vue";
+import CodeEmptyState from "@/components/chat/CodeEmptyState.vue";
+import ModelBuilderEmptyState from "@/components/chat/ModelBuilderEmptyState.vue";
+import ModelHubEmptyState from "@/components/chat/ModelHubEmptyState.vue";
+// ModeIntroCard has been relocated to `ChatView.vue` (sticky above the
+// composer) so it stays visible in conversations with pre-existing history.
+// See `ChatView.vue::introMode` for the new mount.
 import { IS_INTERNAL } from "@/edition";
 // Internal-only GoMaster empty-state. Lazily referenced ONLY on the internal
 // edition so the external open-source build tree-shakes it away (module
@@ -103,6 +115,11 @@ const emit = defineEmits<{
   // bubble; `inject-edit` → withdraw + remove + refill the composer draft.
   "inject-cancel": [payload: { id: string; text: string }];
   "inject-edit": [payload: { id: string; text: string }];
+  // NOTE: `mode-intro-action` used to be emitted here (when ModeIntroCard
+  // was mounted inside the message list). ModeIntroCard has moved to
+  // ChatView.vue (sticky above the composer), which listens directly, so
+  // this emit is no longer needed and has been removed. Removing it also
+  // avoids a stale contract entry that would drift as ChatView evolves.
 }>();
 
 const { t } = useI18n();
@@ -545,6 +562,31 @@ const isAppBuilderMode = computed(
 const isGomasterMode = computed(
   () => activeTab.value?.activeMode === "gomaster",
 );
+
+// Pro (增强 / Model Builder Pro) mode: show the Pro-specific 3-step intro +
+// "Open settings / Connect GPU Agent" chips instead of the generic chat
+// chips. Parity with the App Builder / GoMaster empty-state pattern.
+const isProMode = computed(() => activeTab.value?.activeMode === "pro");
+
+// Code (Claude Code) mode: show the Code-specific 3-step intro + "Pick
+// persona / Upload code" chips instead of the generic chat chips. Parity
+// with the App Builder / GoMaster / Pro empty-state pattern.
+const isCodeMode = computed(() => activeTab.value?.activeMode === "code");
+const isModelBuildMode = computed(
+  () => activeTab.value?.activeMode === "model-build",
+);
+const isModelHubMode = computed(
+  () => activeTab.value?.activeMode === "model-hub",
+);
+
+// Mode-intro card (Plan §7 decision 5 — C+D combo): when the current tab has
+// messages AND is in a mode-with-onboarding, render a collapsible intro
+// NOTE: `introMode` computed used to live here and drive an in-list
+// ModeIntroCard render at the top of the message list. The card has been
+// relocated to `ChatView.vue` as a sticky helper strip above the composer,
+// because the top-of-list placement was invisible in conversations with
+// pre-existing history (default scroll landed on the newest message and
+// no user scrolls up to hunt for onboarding). See `ChatView.vue::introMode`.
 
 /** Map a message's `toolCalls` (`ChatToolCall[]`) onto the shared
  *  `ToolCallView[]` consumed by ToolCallList — the SAME render path the
@@ -1343,20 +1385,6 @@ function renderCommittedMarkdown(msg: ChatMessage): string {
   return html;
 }
 
-// ─── Message collapse (V1 index.html:327-337 全部折叠 + 547-553 per-msg) ──────
-// Collapse state lives in the ui store so the AppHeader "Collapse All"
-// pill (a sibling component in App.vue, not a parent of this list) can
-// drive it without prop/event plumbing. A per-message override wins
-// over the global flag.
-
-function isCollapsed(id: string): boolean {
-  return ui.collapsedMessageIds[id] ?? ui.messagesCollapsed;
-}
-
-function toggleCollapsed(id: string): void {
-  ui.toggleMessageCollapsed(id);
-}
-
 // ─── Image messages: parse `![alt](url)` markdown + lightbox (V1:690-726) ────
 // The composer embeds uploaded-image references as markdown image links
 // inside the outgoing prompt text (ChatComposer.uploadPendingImages →
@@ -2023,21 +2051,40 @@ onBeforeUnmount(() => {
           </g>
         </svg>
       </div>
-      <div class="welcome-title">
-        {{ t("chat.welcomeTitle") }}
-      </div>
-      <div class="welcome-subtitle">
-        {{ t("chat.welcomeSubtitle") }}
-      </div>
-      <!-- App Builder authoring empty-state (Phase 2/3): 3-step guide and
-           model-aware example chips. Replaces the generic chat chips + cloud
-           onboarding when the tab is in `app-builder` mode. Chips FILL the
-           composer (emit `fill-prompt`). -->
+      <!-- Mode-specific welcome screens: each replaces the generic
+           welcome-title + subtitle + chips + cloud onboarding with a
+           mode-tailored 3-step guide and CTA chips. Falls through to the
+           generic welcome only when the active mode has no dedicated
+           empty state (basic chat / ppt / translate / …).
+
+           The five mode-specific screens (App Builder / GoMaster / Pro /
+           Code / Model Builder) share the same visual family (see each
+           component's <style>) so switching modes on an empty tab feels
+           consistent, not like a genre change. -->
       <AppBuilderEmptyState
         v-if="isAppBuilderMode"
         @fill-prompt="emit('fill-prompt', $event)"
       />
+      <ProEmptyState v-else-if="isProMode" />
+      <CodeEmptyState v-else-if="isCodeMode" />
+      <ModelBuilderEmptyState
+        v-else-if="isModelBuildMode"
+        @fill-prompt="emit('fill-prompt', $event)"
+      />
+      <ModelHubEmptyState
+        v-else-if="isModelHubMode"
+        @fill-prompt="emit('fill-prompt', $event)"
+      />
       <template v-else>
+        <!-- Generic welcome copy (basic chat + not-yet-mode-tailored
+             modes): the app logo above is followed by a generic title +
+             subtitle + starter chips. -->
+        <div class="welcome-title">
+          {{ t("chat.welcomeTitle") }}
+        </div>
+        <div class="welcome-subtitle">
+          {{ t("chat.welcomeSubtitle") }}
+        </div>
         <div class="welcome-chips">
           <div
             v-for="(chip, idx) in welcomeChips"
@@ -2093,6 +2140,16 @@ onBeforeUnmount(() => {
 
     <!-- Messages -->
     <template v-if="activeTab && !showWelcome && !activeTab.loadingHistory">
+      <!-- NOTE: ModeIntroCard used to render HERE (top of the message
+           list, before the load-more sentinel). That placement failed the
+           product intent — with `activeMessages.length > 0` the default
+           scroll landed on the newest message and the card sat above ALL
+           historical messages, invisible until the user scrolled to the
+           very top (which nobody does to hunt for onboarding). The card
+           has been moved to `ChatView.vue` as a sticky helper strip
+           above the composer, so it lives in the user's natural viewport
+           regardless of conversation length. See `ChatView.vue` for the
+           new mount. -->
       <!-- D3 load-more sentinel (V1 useChat.js:904-916 _startLoadMoreObserver):
            an IntersectionObserver watches this element; when it scrolls
            into view AND the tab still has older messages, the store loads
@@ -2116,7 +2173,6 @@ onBeforeUnmount(() => {
         class="message-row"
         :class="[
           msg.role === 'user' ? 'user' : 'ai',
-          { 'msg-collapsed': isCollapsed(msg.id) },
           {
             'msg-pending-injection':
               (msg.meta as Record<string, unknown> | undefined)?.['injected'] === true &&
@@ -2215,27 +2271,14 @@ onBeforeUnmount(() => {
               >
                 {{ copiedId === msg.id ? "✓" : "⧉" }}
               </button>
-              <!-- Per-message collapse toggle (V1 index.html:547-553) -->
-              <button
-                type="button"
-                class="msg-collapse-btn"
-                data-testid="message-collapse-btn"
-                :title="isCollapsed(msg.id) ? t('chat.expand') : t('chat.collapse')"
-                :aria-label="isCollapsed(msg.id) ? t('chat.expand') : t('chat.collapse')"
-                :aria-expanded="!isCollapsed(msg.id)"
-                @click="toggleCollapsed(msg.id)"
-              >
-                <span
-                  class="msg-collapse-arrow"
-                  :class="{ collapsed: isCollapsed(msg.id) }"
-                  aria-hidden="true"
-                >▼</span>
-              </button>
             </div>
           </div>
-          <!-- Collapsed: hide all body content; meta row stays visible. -->
-          <template v-if="!isCollapsed(msg.id)">
-            <!-- Sub-agent blocks (V1 index.html:629-669) — rendered BEFORE the
+          <!-- Message body — tool cards inside use ui.toolCardsCollapsed
+               (bulk-collapse from the topbar) for their own collapse
+               state; the per-message ▼ toggle that used to hide the
+               entire body was retired 2026-07-20 (see stores/ui.ts
+               header comment). -->
+          <!-- Sub-agent blocks (V1 index.html:629-669) — rendered BEFORE the
                  parent agent's text bubble + the mainAgentSummaryHeader
                  separator, so the user sees each sub-agent's progress + tools
                  first and the parent summary below. Persisted on the message
@@ -2560,7 +2603,6 @@ onBeforeUnmount(() => {
             <!-- A4: copy lives in the meta row as a pure ⧉ icon (V1
                  index.html:544). The previous bottom "⧉ Copy" text button
                  was removed to match V1 (icon-only, in the meta row). -->
-          </template>
         </div>
       </div>
 

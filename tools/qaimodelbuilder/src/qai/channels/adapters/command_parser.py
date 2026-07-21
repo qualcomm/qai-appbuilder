@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Real :class:`CommandParserPort` adapter — RegexCommandParser (PR-203).
 
 Parses leading-slash commands (``/<verb> <arg1> <arg2> ...``) out of a

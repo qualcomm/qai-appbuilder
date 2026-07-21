@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * Pure module-level helpers extracted from `appBuilder.ts` to keep that
  * store within the cohesion budget. No reactive state, no Pinia/Vue

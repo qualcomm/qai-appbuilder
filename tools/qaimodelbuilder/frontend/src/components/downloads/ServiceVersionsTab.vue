@@ -1,4 +1,9 @@
 <!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
+<!--
   ServiceVersionsTab — V1 "service" tab container.
 
   Lists `ServiceVersion[]` (sorted descending by version) as a vertical

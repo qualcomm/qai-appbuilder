@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * `useImplementation` — implementation-run control composable (DISC-1 二期
  * §22.9). Mirrors `useDiscussion`: binds the conversation-scoped implementation

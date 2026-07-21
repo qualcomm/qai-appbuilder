@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Shared base for ai_coding HTTP-based provider adapters (PR-046, PR-102).
 
 Both :class:`ClaudeCodeProvider` and :class:`OpenCodeProvider` extend

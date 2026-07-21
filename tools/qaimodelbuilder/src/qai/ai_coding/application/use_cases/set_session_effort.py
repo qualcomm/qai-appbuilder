@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Use case: set the per-session thinking-depth override.
 
 Backs the legacy ``POST /api/cc/sessions/{id}/effort`` route.

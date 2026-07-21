@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * UI-global state store.
  *
@@ -11,16 +16,37 @@
  *              - `activeToolMode`  — chat-input tool selector mode
  *              - `showToolMessages` — collapse/expand tool messages
  *              - `globalLoading`   — full-screen busy flag
- * M-align (V1→V2): adds (additive only) chat message-collapse state
- *            consumed by ChatMessageList (V1 index.html:327-337 全部折叠
- *            + 547-553 per-message collapse):
- *              - `messagesCollapsed`   — global "collapse all" flag set
- *                                        by the AppHeader toggle pill
- *              - `collapsedMessageIds` — per-message override map; an
- *                                        entry wins over the global flag
- *                                        so a single message can be
- *                                        expanded while everything else
- *                                        is collapsed (and vice-versa)
+ * 2026-07-20 tool-card bulk toggle: adds (additive) global collapse
+ *            override for all `ToolExecPanel` cards, driven by the topbar
+ *            "Collapse/Expand Tool Cards" button. Replaces the previous
+ *            per-message collapse feature (`messagesCollapsed` +
+ *            `collapsedMessageIds` — those were UX misfits: they hid the
+ *            entire assistant message body including markdown text, not
+ *            just tool cards, which is not what users actually wanted).
+ *              - `toolCardsCollapsed`     — 3-state: `null` = user has
+ *                                            never used the bulk button,
+ *                                            each card follows its own
+ *                                            `DEFAULT_COLLAPSED_TOOLS` +
+ *                                            running→done auto-collapse
+ *                                            defaults; `true`/`false` =
+ *                                            user has taken over; every
+ *                                            card is forced to that value
+ *                                            and its `userToggled` is set
+ *                                            so the auto-collapse-on-done
+ *                                            watcher stops firing.
+ *              - `toolCardsBroadcastTick` — monotonic tick incremented by
+ *                                            every `setToolCardsCollapsed`
+ *                                            call. `ToolExecPanel` watches
+ *                                            this tick so re-clicking the
+ *                                            bulk button (same value) also
+ *                                            re-applies to any card the
+ *                                            user has since manually
+ *                                            toggled — see the header-click
+ *                                            handler in `ToolExecPanel.vue`.
+ *            Persisted to `localStorage` under `TOOL_CARDS_COLLAPSED_KEY`;
+ *            once the user clicks the bulk button, that preference is
+ *            permanent (no API to reset to `null`), matching the "I want
+ *            to see every detail, don't fold anything" mental model.
  */
 import { defineStore } from "pinia";
 
@@ -32,6 +58,7 @@ export type ToolMode =
   | null
   | "app-builder"
   | "model-build"
+  | "model-hub"
   | "ppt"
   | "code"
   | "translate"
@@ -59,11 +86,18 @@ interface UiState {
   activeToolMode: ToolMode;
   /** Whether tool-call messages are visible in the chat list. */
   showToolMessages: boolean;
-  /** Global "collapse all" flag — toggled by the AppHeader pill. */
-  messagesCollapsed: boolean;
-  /** Per-message collapse override; presence of a key overrides the
-   *  global `messagesCollapsed` flag for that message id. */
-  collapsedMessageIds: Record<string, boolean>;
+  /** Global bulk-collapse for `ToolExecPanel` cards. `null` = user has
+   *  never touched the topbar bulk button, each card decides on its own.
+   *  `true` / `false` = user has taken over; new cards mount into this
+   *  value with `userToggled = true` (see `ToolExecPanel.vue`). Persisted
+   *  to localStorage, no API resets it back to `null`. */
+  toolCardsCollapsed: boolean | null;
+  /** Monotonic broadcast tick — incremented by every
+   *  `setToolCardsCollapsed` call so `ToolExecPanel` watchers can force
+   *  re-application even when the boolean value did not change (needed
+   *  when the user has since manually toggled a single card and then
+   *  clicks the bulk button again in the same direction). */
+  toolCardsBroadcastTick: number;
   /** Global busy flag (e.g., during reboot / re-login). */
   globalLoading: boolean;
 }
@@ -85,6 +119,16 @@ const THEME_STORAGE_KEY = "qai_theme";
 /** localStorage key for the sidebar collapsed state. Persisted so a
  *  reload / re-open restores the user's preferred sidebar width. */
 const SIDEBAR_COLLAPSED_KEY = "qai_sidebar_collapsed";
+/** localStorage key for the "show tool-call cards" preference (2026-07-20:
+ *  previously session-only, now persisted so the Settings → App Config
+ *  toggle sticks across reloads/restarts — same pattern as theme/sidebar).
+ *  Default `true` when the key is missing (parity with the previous
+ *  session-only default). */
+const SHOW_TOOL_MESSAGES_KEY = "qai_show_tool_messages";
+/** localStorage key for the tool-card bulk-collapse preference. Missing
+ *  or invalid = user has never used the topbar bulk button, each card
+ *  keeps its own defaults; `"true"` / `"false"` = user has taken over. */
+const TOOL_CARDS_COLLAPSED_KEY = "qai_tool_cards_collapsed";
 
 function detectInitialSidebarCollapsed(): boolean {
   try {
@@ -95,6 +139,33 @@ function detectInitialSidebarCollapsed(): boolean {
     // localStorage unavailable — fall through to default.
   }
   return false;
+}
+
+function detectInitialShowToolMessages(): boolean {
+  // Default `true` (visible) when nothing is stored — preserves the prior
+  // session-only behaviour on a fresh install. An explicit `"false"` sticks
+  // across reloads / restarts once the user flips the Settings toggle.
+  try {
+    const stored = localStorage.getItem(SHOW_TOOL_MESSAGES_KEY);
+    if (stored === "true") return true;
+    if (stored === "false") return false;
+  } catch {
+    // localStorage unavailable — fall through to default.
+  }
+  return true;
+}
+
+function detectInitialToolCardsCollapsed(): boolean | null {
+  // Default `null` (per-card defaults) when nothing is stored. Once the
+  // user clicks the topbar bulk button the choice sticks across reloads.
+  try {
+    const stored = localStorage.getItem(TOOL_CARDS_COLLAPSED_KEY);
+    if (stored === "true") return true;
+    if (stored === "false") return false;
+  } catch {
+    // localStorage unavailable — fall through to null default.
+  }
+  return null;
 }
 
 function detectInitialTheme(): AppTheme {
@@ -147,9 +218,9 @@ export const useUiStore = defineStore("ui", {
     documentTitleSuffix: "QAIModelBuilder",
     fontSize: "md",
     activeToolMode: null,
-    showToolMessages: true,
-    messagesCollapsed: false,
-    collapsedMessageIds: {},
+    showToolMessages: detectInitialShowToolMessages(),
+    toolCardsCollapsed: detectInitialToolCardsCollapsed(),
+    toolCardsBroadcastTick: 0,
     globalLoading: false,
   }),
   actions: {
@@ -212,30 +283,32 @@ export const useUiStore = defineStore("ui", {
     },
     setShowToolMessages(visible: boolean): void {
       this.showToolMessages = visible;
+      try {
+        localStorage.setItem(SHOW_TOOL_MESSAGES_KEY, String(visible));
+      } catch {
+        // localStorage unavailable — keep in-memory value only (session).
+      }
     },
     /**
-     * Set the global "collapse all / expand all" flag. Clears any
-     * per-message overrides so the new global state takes effect for
-     * every message uniformly (V1 "全部折叠" resets per-message state).
+     * Set the global bulk-collapse flag for all `ToolExecPanel` cards.
+     * Called by the topbar "Collapse/Expand Tool Cards" button. Method
+     * B semantics (chosen 2026-07-20): every card is force-set to this
+     * value, its per-card `userToggled` is set to `true` so the
+     * running→done auto-collapse watcher stops firing, and the choice
+     * persists across reloads via `TOOL_CARDS_COLLAPSED_KEY`. The tick
+     * is unconditionally incremented so `ToolExecPanel` watchers re-fire
+     * even when the boolean value did not change (matters when the user
+     * has since manually toggled a single card and is clicking the bulk
+     * button again in the same direction to "reset" that outlier).
      */
-    setMessagesCollapsed(collapsed: boolean): void {
-      this.messagesCollapsed = collapsed;
-      this.collapsedMessageIds = {};
-    },
-    /** Toggle the per-message collapse override for one message id. The
-     *  override always wins over the global flag (so a user can expand
-     *  one message while "collapse all" is active, and vice-versa). */
-    toggleMessageCollapsed(messageId: string): void {
-      const current =
-        this.collapsedMessageIds[messageId] ?? this.messagesCollapsed;
-      this.collapsedMessageIds = {
-        ...this.collapsedMessageIds,
-        [messageId]: !current,
-      };
-    },
-    /** Resolve the effective collapsed state for a message id. */
-    isMessageCollapsed(messageId: string): boolean {
-      return this.collapsedMessageIds[messageId] ?? this.messagesCollapsed;
+    setToolCardsCollapsed(collapsed: boolean): void {
+      this.toolCardsCollapsed = collapsed;
+      this.toolCardsBroadcastTick += 1;
+      try {
+        localStorage.setItem(TOOL_CARDS_COLLAPSED_KEY, String(collapsed));
+      } catch {
+        // localStorage unavailable — keep in-memory value only (session).
+      }
     },
     setGlobalLoading(loading: boolean): void {
       this.globalLoading = loading;

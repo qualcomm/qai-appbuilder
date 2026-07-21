@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * Vitest configuration.
  *
@@ -10,6 +15,16 @@ import vue from "@vitejs/plugin-vue";
 import { fileURLToPath, URL } from "node:url";
 
 export default defineConfig({
+  // Mirror the build-time literal defines from vite.config.ts (§ define,
+  // ~L96-99) so components that read the injected `__APP_VERSION__` /
+  // `__EDITION__` globals (e.g. AppSidebar.vue) don't throw
+  // `ReferenceError: __XXX__ is not defined` under vitest, which has no
+  // Vite `define` substitution of its own. Values are test-fixed: the
+  // real version/edition are irrelevant to unit tests.
+  define: {
+    __APP_VERSION__: JSON.stringify("0.0.0-test"),
+    __EDITION__: JSON.stringify("internal"),
+  },
   plugins: [vue()],
   resolve: {
     alias: {
@@ -24,6 +39,11 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "html", "lcov"],
+      // Route coverage output out of the source tree — data/ is the
+      // per-user runtime root (git-ignored). Path is relative to this
+      // config file (frontend/), so it resolves to
+      // <repo-root>/data/caches/vitest/ at runtime.
+      reportsDirectory: "../data/caches/vitest",
       exclude: [
         "node_modules/**",
         "dist/**",

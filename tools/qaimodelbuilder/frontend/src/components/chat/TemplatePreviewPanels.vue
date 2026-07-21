@@ -1,4 +1,9 @@
 <!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
+<!--
   TemplatePreviewPanels — read-only preview panels for the template library.
 
   Presentational only (no emits, no CRUD): given the agent / team / mode currently
@@ -15,10 +20,14 @@ import { onMounted } from "vue";
 import { useI18n } from "vue-i18n";
 
 import { useCloudModelOptions } from "@/composables/chat/useCloudModelOptions";
+import { useTemplateI18n } from "@/composables/chat/useTemplateI18n";
 import { useModeTemplateStore } from "@/stores/modeTemplate";
 import { detectPresetTier, type ModeToolPolicy } from "@/lib/modePolicy";
 import type { AgentTemplateView } from "@/stores/agentTemplate";
-import type { RosterTemplateView } from "@/stores/rosterTemplate";
+import type {
+  RosterTemplateView,
+  RosterTemplateMemberView,
+} from "@/stores/rosterTemplate";
 import type { ModeTemplateView } from "@/stores/modeTemplate";
 
 defineProps<{
@@ -28,6 +37,7 @@ defineProps<{
 }>();
 
 const { t } = useI18n();
+const { resolve: resolveI18n } = useTemplateI18n();
 const modes = useModeTemplateStore();
 const { cloudModels, cloudModelLabel, loadCloudModels } = useCloudModelOptions();
 
@@ -84,8 +94,46 @@ function policyValueLabel(v: string): string {
 function rosterDefaultModeLabel(r: RosterTemplateView): string {
   if (!r.defaultModeId) return "—";
   const hit = modes.templates.find((m) => m.id === r.defaultModeId);
-  return hit ? hit.name : r.defaultModeId;
+  return hit ? modeName(hit) : r.defaultModeId;
 }
+
+// --- Localised built-in template text (display layer only) -----------------
+// Built-in presets carry per-locale i18n maps; custom rows have none and fall
+// back to their own single-language text. See useTemplateI18n.
+function agentName(a: AgentTemplateView): string {
+  return resolveI18n(a.nameI18n, a.name);
+}
+function agentDisplayName(a: AgentTemplateView): string {
+  return resolveI18n(a.displayNameI18n, a.displayName);
+}
+function agentDescription(a: AgentTemplateView): string {
+  return resolveI18n(a.descriptionI18n, a.description ?? "");
+}
+function agentPersona(a: AgentTemplateView): string {
+  return resolveI18n(a.personaI18n, a.persona ?? "");
+}
+function rosterName(r: RosterTemplateView): string {
+  return resolveI18n(r.nameI18n, r.name);
+}
+function rosterDescription(r: RosterTemplateView): string {
+  return resolveI18n(r.descriptionI18n, r.description ?? "");
+}
+function memberName(m: RosterTemplateMemberView): string {
+  return resolveI18n(m.displayNameI18n, m.displayName);
+}
+function memberPersona(m: RosterTemplateMemberView): string {
+  return resolveI18n(m.personaI18n, m.persona ?? "");
+}
+function modeName(m: ModeTemplateView): string {
+  return resolveI18n(m.nameI18n, m.name);
+}
+function modeDescription(m: ModeTemplateView): string {
+  return resolveI18n(m.descriptionI18n, m.description ?? "");
+}
+function modeFraming(m: ModeTemplateView): string {
+  return resolveI18n(m.framingI18n, m.framing ?? "");
+}
+
 </script>
 
 <template>
@@ -95,10 +143,10 @@ function rosterDefaultModeLabel(r: RosterTemplateView): string {
     class="tl-preview"
     data-testid="library-agent-preview"
   >
-    <h4 class="tl-preview-title">{{ agent.name }}</h4>
-    <p class="tl-preview-role">{{ agent.displayName }}</p>
-    <p v-if="agent.description" class="tl-preview-desc">
-      {{ agent.description }}
+    <h4 class="tl-preview-title">{{ agentName(agent) }}</h4>
+    <p class="tl-preview-role">{{ agentDisplayName(agent) }}</p>
+    <p v-if="agentDescription(agent)" class="tl-preview-desc">
+      {{ agentDescription(agent) }}
     </p>
     <dl class="tl-preview-grid">
       <dt>{{ t("chat.discussion.modelId") }}</dt>
@@ -125,8 +173,8 @@ function rosterDefaultModeLabel(r: RosterTemplateView): string {
         <span v-else>—</span>
       </dd>
     </dl>
-    <p v-if="agent.persona" class="tl-preview-framing">
-      {{ agent.persona }}
+    <p v-if="agentPersona(agent)" class="tl-preview-framing">
+      {{ agentPersona(agent) }}
     </p>
   </section>
 
@@ -136,9 +184,9 @@ function rosterDefaultModeLabel(r: RosterTemplateView): string {
     class="tl-preview"
     data-testid="library-roster-preview"
   >
-    <h4 class="tl-preview-title">{{ roster.name }}</h4>
-    <p v-if="roster.description" class="tl-preview-desc">
-      {{ roster.description }}
+    <h4 class="tl-preview-title">{{ rosterName(roster) }}</h4>
+    <p v-if="rosterDescription(roster)" class="tl-preview-desc">
+      {{ rosterDescription(roster) }}
     </p>
     <dl class="tl-preview-grid">
       <dt>{{ t("chat.discussion.templates.defaultModeLabel") }}</dt>
@@ -152,7 +200,7 @@ function rosterDefaultModeLabel(r: RosterTemplateView): string {
       <li v-for="(m, i) in roster.members" :key="i" class="tl-preview-member">
         <details>
           <summary class="tl-preview-member-sum">
-            <span class="tl-preview-member-name">{{ m.displayName }}</span>
+            <span class="tl-preview-member-name">{{ memberName(m) }}</span>
             <span class="tl-preview-member-model">{{
               modelLabelById(m.modelId)
             }}</span>
@@ -160,9 +208,9 @@ function rosterDefaultModeLabel(r: RosterTemplateView): string {
           <dl class="tl-preview-grid tl-preview-grid--nested">
             <dt>{{ t("chat.discussion.modelId") }}</dt>
             <dd>{{ modelLabelById(m.modelId) }}</dd>
-            <template v-if="m.persona">
+            <template v-if="memberPersona(m)">
               <dt>{{ t("chat.discussion.persona") }}</dt>
-              <dd class="tl-preview-framing">{{ m.persona }}</dd>
+              <dd class="tl-preview-framing">{{ memberPersona(m) }}</dd>
             </template>
             <dt>{{ t("chat.discussion.allowedTools") }}</dt>
             <dd>
@@ -200,13 +248,13 @@ function rosterDefaultModeLabel(r: RosterTemplateView): string {
     class="tl-preview"
     data-testid="library-mode-preview"
   >
-    <h4 class="tl-preview-title">{{ mode.name }}</h4>
-    <p v-if="mode.description" class="tl-preview-desc">
-      {{ mode.description }}
+    <h4 class="tl-preview-title">{{ modeName(mode) }}</h4>
+    <p v-if="modeDescription(mode)" class="tl-preview-desc">
+      {{ modeDescription(mode) }}
     </p>
     <dl class="tl-preview-grid">
       <dt>{{ t("chat.discussion.modes.framing") }}</dt>
-      <dd class="tl-preview-framing">{{ mode.framing || "—" }}</dd>
+      <dd class="tl-preview-framing">{{ modeFraming(mode) || "—" }}</dd>
       <dt>{{ t("chat.discussion.modes.systemModel") }}</dt>
       <dd>{{ systemModelLabel(mode.systemModel) }}</dd>
       <dt>{{ t("chat.discussion.modes.toolPolicy") }}</dt>

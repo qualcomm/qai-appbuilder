@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``Feedback`` value object — user-submitted rating + comment for a Run.
 
 Models the legacy ``data/app_builder_audit.jsonl`` ``feedback`` event +

@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * `useChatModelPreference` — persist + restore the globally selected chat
  * model (V1 `useModels.js:13` `selectedModelId` is a single global ref that

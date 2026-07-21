@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """System-prompt builders for the chat bounded context.
 
 Contains two :class:`~qai.chat.application.ports.SystemPromptBuilderPort`
@@ -56,6 +61,9 @@ from qai.chat.application.ports import (
 from qai.chat.application.use_cases._workspace_context import (
     WORKSPACE_CONTEXT_EXTRA_KEY,
     render_workspace_context_block as _build_workspace_context_file_block,
+)
+from qai.chat.domain.template_i18n import (
+    normalize_ui_language as _domain_normalize_ui_language,
 )
 from qai.platform.logging import get_logger
 
@@ -626,6 +634,8 @@ _FEATURE_DISPLAY_NAMES: dict[str, str] = {
     "model_builder": "模型构建",
     "model-build": "模型构建",
     "model_build": "模型构建",
+    "model-hub": "模型市场",
+    "model_hub": "模型市场",
     "app-builder": "应用构建",
     "code": "编程辅助",
     "code_assist": "编程辅助",
@@ -639,6 +649,8 @@ _FEATURE_DISPLAY_NAMES_EN: dict[str, str] = {
     "model_builder": "Model Builder",
     "model-build": "Model Builder",
     "model_build": "Model Builder",
+    "model-hub": "Model Hub",
+    "model_hub": "Model Hub",
     "app-builder": "App Builder",
     "code": "Coding Assistant",
     "code_assist": "Coding Assistant",
@@ -652,6 +664,8 @@ _FEATURE_DISPLAY_NAMES_ZH_TW: dict[str, str] = {
     "model_builder": "模型建構",
     "model-build": "模型建構",
     "model_build": "模型建構",
+    "model-hub": "模型市場",
+    "model_hub": "模型市場",
     "app-builder": "應用建構",
     "code": "程式輔助",
     "code_assist": "程式輔助",
@@ -678,13 +692,14 @@ def _normalize_ui_language(locale: str | None) -> str:
     UI locales). Anything unknown / empty / ``None`` falls back to ``"zh-CN"``
     (the product's default locale), matching ``_translate_prompt_for``'s
     default-to-Simplified behaviour so the two language paths stay consistent.
+
+    Thin delegate to the canonical domain helper
+    (:func:`qai.chat.domain.template_i18n.normalize_ui_language`) so the UI-locale
+    normalisation rule lives in ONE place (复用 > 重造); this module-level name is
+    kept for import compatibility (referenced by ``_feature_display_names_for`` /
+    ``_build_feature_prompt``).
     """
-    lang = (locale or "").strip()
-    if lang == "en":
-        return "en"
-    if lang == "zh-TW":
-        return "zh-TW"
-    return "zh-CN"
+    return _domain_normalize_ui_language(locale)
 
 
 # Feature-mode framing sentences, localized per UI language. Keyed by the three
@@ -808,10 +823,10 @@ _MODEL_BUILD_PATTERNS: tuple[re.Pattern[str], ...] = (
     # noun within 60 chars.  V1:114-118.
     #
     # NOTE (2026-06): ``download`` was intentionally REMOVED from this verb
-    # set. In V1 there was no separate ``aihub-model-run`` skill, so
+    # set. In V1 there was no separate AI-Hub skill, so
     # "download a model" was routed to model-builder. In V2, downloading a
     # pre-built package from Qualcomm AI Hub is the job of the
-    # ``aihub-model-run`` skill, NOT model-builder (which is for converting /
+    # ``model-hub`` skill, NOT model-builder (which is for converting /
     # re-quantizing CUSTOM ONNX/PyTorch models). Keeping ``download`` here
     # mis-promoted AI-Hub-download prompts ("Download the Zipformer / Inception
     # / melotts_zh model from Qualcomm AI Hub ...") into model-builder mode and
@@ -831,17 +846,18 @@ _MODEL_BUILD_PATTERNS: tuple[re.Pattern[str], ...] = (
 
 
 # ---------------------------------------------------------------------------
-# AI-Hub VETO patterns (2026-06)
+# AI-Hub routing patterns (2026-06; repurposed 2026-07)
 # ---------------------------------------------------------------------------
 #
-# Strong negative signal: if the user message mentions Qualcomm **AI Hub** (or
-# its pre-built-package terminology), the intent is "download a pre-exported
-# package from AI Hub and run it" — that is the ``aihub-model-run`` skill's
-# job, NOT model-builder (which converts / re-quantizes CUSTOM ONNX/PyTorch
-# models). So these act as a VETO: when ANY of them matches, ``_auto_detect``
-# returns ``None`` (no model-build promotion) even if a build pattern also
-# matched — leaving the lightweight default prompt + skill catalog so the model
-# picks ``aihub-model-run`` itself.
+# Strong signal: if the user message mentions Qualcomm **AI Hub** (or its
+# pre-built-package terminology), the intent is "download a pre-exported
+# package from AI Hub and run it" — that is the ``model-hub`` skill's job (the
+# promoted former ``aihub-model-run``), NOT model-builder (which converts /
+# re-quantizes CUSTOM ONNX/PyTorch models). When ANY of these matches,
+# ``_auto_detect_tool_mode`` routes to ``"model-hub"`` (2026-07) so the toolbar
+# flips to the dedicated mode. Historically (before ``model-hub`` was a
+# first-class mode) this was a pure VETO that returned ``None``; it still vetoes
+# model-builder promotion — an AI-Hub request never resolves to ``model_build``.
 #
 # Matching tolerates hyphen / space / no-separator variants and is
 # case-insensitive (e.g. "AI Hub" / "AI-Hub" / "AIHub"; "pre-exported" /
@@ -877,8 +893,9 @@ _AIHUB_VETO_PATTERNS: tuple[re.Pattern[str], ...] = (
 def _is_aihub_request(user_message: str) -> bool:
     """True when the message clearly targets Qualcomm AI Hub pre-built packages.
 
-    Used as a VETO over model-build auto-detection: such requests belong to the
-    ``aihub-model-run`` skill, not model-builder.
+    Used to route model-build auto-detection: such requests belong to the
+    ``model-hub`` skill (promoted former ``aihub-model-run``), not
+    model-builder.
     """
     return any(p.search(user_message) for p in _AIHUB_VETO_PATTERNS)
 
@@ -893,26 +910,29 @@ def _auto_detect_tool_mode(user_message: str) -> str | None:
     the caller (``streaming.py``) already lifts the latest user message
     out of the multi-modal payload before invoking the builder.
 
-    The caller uses this to force-promote ``effective_tool_mode`` to
-    ``"model_build"`` so the SKILL.md injection path fires and the
+    The caller uses this to force-promote ``effective_tool_mode`` so the
     frontend receives a ``tool_mode_changed`` SSE frame to flip the
-    toolbar — even when the user forgot to switch to Model Builder
-    mode in the UI.
+    toolbar — even when the user forgot to switch mode in the UI.
 
-    AI-Hub VETO (2026-06): when the message clearly targets Qualcomm AI Hub
-    pre-built packages (see ``_AIHUB_VETO_PATTERNS``), this returns ``None``
-    even if a build pattern also matches — that request belongs to the
-    ``aihub-model-run`` skill, not model-builder.
+    AI-Hub routing (2026-07): when the message clearly targets Qualcomm AI
+    Hub pre-built packages (see ``_AIHUB_VETO_PATTERNS``), this returns
+    ``"model-hub"`` — downloading a pre-exported package from AI Hub is the
+    job of the ``model-hub`` skill (the promoted ``aihub-model-run``), NOT
+    model-builder (which converts / re-quantizes CUSTOM ONNX/PyTorch
+    models). Previously this branch returned ``None`` (a pure veto) because
+    there was no dedicated AI-Hub tool mode; now that ``model-hub`` is a
+    first-class feature mode, we route to it so the toolbar flips to the
+    right mode. The build-pattern veto still holds: an AI-Hub request never
+    promotes to model-builder even if a build verb also matches.
 
-    Returns ``None`` when *user_message* is falsy, vetoed as an AI-Hub
-    request, or no build pattern matches.
+    Returns ``None`` when *user_message* is falsy or no pattern matches.
     """
     if not user_message:
         return None
-    # VETO first: AI-Hub download/pre-built requests must NOT be promoted to
-    # model-builder (they belong to the aihub-model-run skill).
+    # AI-Hub download/pre-built requests route to the dedicated ``model-hub``
+    # mode (never model-builder — they belong to the promoted aihub skill).
     if _is_aihub_request(user_message):
-        return None
+        return "model-hub"
     for pattern in _MODEL_BUILD_PATTERNS:
         if pattern.search(user_message):
             return "model_build"
@@ -1297,7 +1317,7 @@ class RichSystemPromptBuilder(SystemPromptBuilderPort):
         # Auto-detection must NOT inject the full SKILL — that pollutes the
         # default-mode prompt with 70KB of model-builder tool-chain paths even
         # when the user never asked for it (and well-known model names like
-        # Inception/ResNet are frequently aihub-model-run targets, not
+        # Inception/ResNet are frequently model-hub targets, not
         # model-builder). Instead, auto-detect only flips the frontend toolbar
         # (via the returned effective_tool_mode → tool_mode_changed SSE) and
         # leaves the lightweight default prompt in place; the

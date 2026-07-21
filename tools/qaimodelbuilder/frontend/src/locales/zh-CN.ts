@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 // =============================================================================
 // zh-CN message catalogue —— 主入口（纯组装），手工维护，UTF-8（无 BOM）。
 //
@@ -26,7 +31,6 @@ import codePersona from "./zh-CN/codePersona";
 import commandPalette from "./zh-CN/commandPalette";
 import common from "./zh-CN/common";
 import config from "./zh-CN/config";
-import confirm from "./zh-CN/confirm";
 import depBroker from "./zh-CN/depBroker";
 import downloads from "./zh-CN/downloads";
 import error from "./zh-CN/error";
@@ -43,14 +47,13 @@ import language from "./zh-CN/language";
 import layout from "./zh-CN/layout";
 import mbPro from "./zh-CN/mbPro";
 import mcpServers from "./zh-CN/mcpServers";
-import modelBuild from "./zh-CN/modelBuild";
+import modeIntro from "./zh-CN/modeIntro";
 import modelBuilder from "./zh-CN/modelBuilder";
-import modelSelector from "./zh-CN/modelSelector";
+import modelHubFrame from "./zh-CN/modelHubFrame";
 import models from "./zh-CN/models";
 import nav from "./zh-CN/nav";
 import openCode from "./zh-CN/openCode";
 import policyTemplates from "./zh-CN/policyTemplates";
-import processProxy from "./zh-CN/processProxy";
 import projectAccess from "./zh-CN/projectAccess";
 import promptEnhance from "./zh-CN/promptEnhance";
 import promptHistory from "./zh-CN/promptHistory";
@@ -72,9 +75,7 @@ import toast from "./zh-CN/toast";
 import tool from "./zh-CN/tool";
 import toolbar from "./zh-CN/toolbar";
 import toolSafety from "./zh-CN/toolSafety";
-import upload from "./zh-CN/upload";
 import util from "./zh-CN/util";
-import venv from "./zh-CN/venv";
 import views from "./zh-CN/views";
 import voiceInput from "./zh-CN/voiceInput";
 import wechat from "./zh-CN/wechat";
@@ -96,7 +97,6 @@ const zh_CN: MessageSchema = {
   commandPalette,
   common,
   config,
-  confirm,
   depBroker,
   downloads,
   error,
@@ -113,14 +113,13 @@ const zh_CN: MessageSchema = {
   layout,
   mbPro,
   mcpServers,
-  modelBuild,
+  modeIntro,
   modelBuilder,
-  modelSelector,
+  modelHubFrame,
   models,
   nav,
   openCode,
   policyTemplates,
-  processProxy,
   projectAccess,
   promptEnhance,
   promptHistory,
@@ -142,9 +141,7 @@ const zh_CN: MessageSchema = {
   tool,
   toolbar,
   toolSafety,
-  upload,
   util,
-  venv,
   views,
   voiceInput,
   wechat,

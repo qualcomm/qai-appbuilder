@@ -5,7 +5,7 @@
  * ========================================================================== */
 
 /* ---------------------------------------------------------------------
- * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause
  * --------------------------------------------------------------------- */
 /* ── Components ─────────────────────────────────────────────────────────── */
@@ -458,10 +458,12 @@
 .toast-container {
   position: fixed;
   top: var(--space-4);
-  right: var(--space-4);
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 9999;
   display: flex;
   flex-direction: column;
+  align-items: center; /* 顶部正中：多条 toast 沿容器中轴居中堆叠 */
   gap: var(--space-2);
 }
 .toast {
@@ -493,8 +495,8 @@ html.light .toast.error   { background: #fdecec; color: #b42318; border-color: r
 html.light .toast.info    { background: #e8f1fe; color: #1e40af; border-color: rgba(96, 165, 250, 0.45); }
 html.light .toast.warning { background: #fdf4e3; color: #92400e; border-color: rgba(251, 191, 36, 0.45); }
 @keyframes toast-in {
-  from { opacity: 0; transform: translateX(20px) scale(0.96); }
-  to   { opacity: 1; transform: translateX(0) scale(1); }
+  from { opacity: 0; transform: translateY(-20px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 /* 手动关闭按钮 */
 .toast-close {

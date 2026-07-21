@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Roster-template HTTP routes (``/api/chat/roster-templates``).
 
 A **roster template** is a named, reusable bundle of multi-agent discussion role
@@ -93,6 +98,15 @@ class RosterTemplateItem(BaseModel):
     #: When this template was cloned from another (e.g. a built-in preset), the
     #: SOURCE template's id; ``None`` for originals. Tail-appended (§3.1).
     cloned_from_id: str | None = None
+    #: Multi-language (i18n) maps for built-in presets (migration 056).
+    #: ``name_i18n`` / ``description_i18n`` are ``{"en":..,"zh-CN":..,"zh-TW":..}``
+    #: objects; ``members_i18n`` is ``{locale: [{display_name, persona, config},
+    #: ...]}`` (per-member localised text, index-aligned with ``members``).
+    #: ``None`` for custom rows → the frontend falls back to the single-language
+    #: fields above. Tail-appended (§3.1); single source of truth = seed → DB.
+    name_i18n: dict[str, str] | None = None
+    description_i18n: dict[str, str] | None = None
+    members_i18n: dict[str, list[dict[str, Any]]] | None = None
 
 
 class RosterTemplateListResponse(BaseModel):
@@ -175,6 +189,9 @@ def _template_to_item(template: RosterTemplate) -> RosterTemplateItem:
         created_at=template.created_at.isoformat(),
         updated_at=template.updated_at.isoformat(),
         cloned_from_id=template.cloned_from_id,
+        name_i18n=template.name_i18n,
+        description_i18n=template.description_i18n,
+        members_i18n=template.members_i18n,
     )
 
 

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Three-level context compression adapter (A3 + PR-090 S9 C-3).
 
 Migrates the three-level progressive compression pipeline from the legacy
