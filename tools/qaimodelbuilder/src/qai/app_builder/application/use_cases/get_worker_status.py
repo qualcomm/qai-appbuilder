@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``GetWorkerStatusUseCase`` — surface :class:`WorkerPoolStatus` to the API.
 
 Thin wrapper over :class:`WorkerStatusPort.status`. Lets the route

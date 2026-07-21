@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``Participant`` aggregate for the chat bounded context.
 
 A :class:`Participant` is the generic abstraction for a *speaker* in a
@@ -88,6 +93,19 @@ class Participant:
     # token/index for the bubble -- never a hard-coded colour).  ``None`` for
     # plain user / main-agent / sub-agent participants.
     config: dict[str, Any] | None = None
+    #: Optional provenance link (migration 056 ``chat_participant.template_id``):
+    #: the built-in template this participant was imported from, letting the
+    #: discussion orchestrator re-resolve a built-in role's persona by
+    #: (template_id + current locale) at runtime (method A). Encoding:
+    #:   * single-role import  -> the agent template id (e.g. ``builtin-agent-architect``)
+    #:   * team member import   -> ``"<roster_id>#<member_index>"`` (e.g.
+    #:     ``builtin-arch-dev-test#0``) so the runtime can locate the exact member
+    #:     inside ``members_i18n[locale]``.
+    #: ``None`` = not sourced from a built-in template (user-authored / main /
+    #: sub-agent) -> no override, existing behaviour byte-for-byte unchanged.
+    #: Tail-appended optional field (§3.1 additive) so old constructors / old
+    #: rows (which read back NULL -> None) are unaffected.
+    template_id: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -164,6 +182,8 @@ class Participant:
             if enabled_skills is not None:
                 copied["enabled_skills"] = list(enabled_skills)
             self.config = copied
+        if self.template_id is not None and not isinstance(self.template_id, str):
+            raise TypeError("Participant.template_id must be a str or None")
         ensure_aware_utc(self.created_at)
         ensure_aware_utc(self.updated_at)
 
@@ -183,6 +203,7 @@ class Participant:
         persona: str | None = None,
         subagent_session_id: SubAgentSessionId | None = None,
         config: dict[str, Any] | None = None,
+        template_id: str | None = None,
     ) -> Participant:
         """Construct a brand-new participant."""
         ts = ensure_aware_utc(now)
@@ -195,6 +216,7 @@ class Participant:
             persona=persona,
             subagent_session_id=subagent_session_id,
             config=config,
+            template_id=template_id,
             created_at=ts,
             updated_at=ts,
         )

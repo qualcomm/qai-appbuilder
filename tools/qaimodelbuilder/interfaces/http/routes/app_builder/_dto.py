@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """App Builder route DTOs + shared mappers / helpers.
 
 Pure architectural split of the former single-file
@@ -470,24 +475,6 @@ class CacheClearResponse(BaseModel):
     deleted_files: int
 
 
-class LocalFileEntryResponse(BaseModel):
-    """One row of ``GET /files/local`` listing."""
-
-    name: str
-    relative_path: str
-    size_bytes: int
-    is_dir: bool
-    modified_at: float
-
-
-class LocalFilesResponse(BaseModel):
-    """``GET /files/local`` body."""
-
-    base_dir: str
-    sub_path: str
-    entries: list[LocalFileEntryResponse]
-
-
 class BinScanResultResponse(BaseModel):
     """One row of ``POST /import/scan-bins`` body.
 
@@ -505,8 +492,27 @@ class BinScanResultResponse(BaseModel):
     mtime: str | None = None
 
 
+class NeedsNormalizePayload(BaseModel):
+    """Set when the readiness scan found NO variants under ``output/`` but the
+    workdir holds a downloaded-but-not-normalized AI Hub model (a weight +
+    metadata.json, typically in a nested ``<model>-qnn_dlc-*`` subfolder).
+
+    Lets the UI show an actionable "detected an un-normalized model — run Step
+    6.5 to make it importable" guidance instead of a blank Import panel. The
+    backend does NOT auto-normalize (inferred fields need human confirmation);
+    it only surfaces the signal. Tail-appended / optional — omitted (``None``)
+    in the normal case, so the ``results`` contract is unchanged.
+    """
+
+    model_workdir: str
+    detected_weight: str
+
+
 class BinScanResponse(BaseModel):
     results: list[BinScanResultResponse]
+    # Optional (tail-appended): present only when results is empty AND an
+    # un-normalized AI Hub package was detected in the workdir.
+    needs_normalize: NeedsNormalizePayload | None = None
 
 
 class ScanBinsRequestBody(BaseModel):
@@ -735,32 +741,7 @@ class RunsListResponse(BaseModel):
     offset: int
 
 
-class CandidatesRequestBody(BaseModel):
-    """``POST /import/candidates`` request body."""
-
-    candidates: list[str] = Field(default_factory=list)
-
-
 # ---- PR-305: SKILL.md + Schema + appbuilder_run DTOs --------------------
-
-
-class PerModelSkillResponse(BaseModel):
-    """One row of ``GET /system-prompt`` per-model section."""
-
-    model_id: str
-    title: str
-    text: str
-    skipped: bool
-    skip_reason: str = ""
-
-
-class SystemPromptResponse(BaseModel):
-    """``GET /system-prompt`` body — aggregated SKILL.md fragment."""
-
-    text: str
-    per_model: list[PerModelSkillResponse]
-    model_count: int
-    skipped_count: int
 
 
 class ModelSchemaResponse(BaseModel):
@@ -771,15 +752,6 @@ class ModelSchemaResponse(BaseModel):
     input_schema: dict[str, object] | None = None
     output_schema: dict[str, object] | None = None
     variants: list[dict[str, object]] = Field(default_factory=list)
-
-
-class AppBuilderToolDescriptorResponse(BaseModel):
-    """``GET /tool-descriptor`` body — LLM tool descriptor for ``appbuilder_run``."""
-
-    name: str
-    description: str
-    parameters: dict[str, object]
-    available_models: list[dict[str, object]]
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,9 @@
 <!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
+<!--
   RosterEditorSection — inline "team" (roster) editor section (M-roster-1).
 
   Extracted from the former second-tier RosterTemplateDialog so the TemplateLibrary
@@ -19,6 +24,7 @@
 import { computed, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useToast } from "@/composables/useToast";
+import { useTemplateI18n } from "@/composables/chat/useTemplateI18n";
 import AgentRoleForm, {
   type RoleFormData,
 } from "@/components/chat/AgentRoleForm.vue";
@@ -28,7 +34,7 @@ import {
   type RosterTemplateView,
   type RosterTemplateMemberView,
 } from "@/stores/rosterTemplate";
-import { useModeTemplateStore } from "@/stores/modeTemplate";
+import { useModeTemplateStore, type ModeTemplateView } from "@/stores/modeTemplate";
 
 const props = defineProps<{
   /** "save as team" source = the current discussion roster (may be empty). */
@@ -45,9 +51,16 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+const { resolve: resolveI18n } = useTemplateI18n();
 const toast = useToast();
 const store = useRosterTemplateStore();
 const modeStore = useModeTemplateStore();
+
+/** Localised built-in mode name for the default-mode dropdown (custom modes
+ *  fall back to own name). Display layer only — see useTemplateI18n. */
+function modeName(m: ModeTemplateView): string {
+  return resolveI18n(m.nameI18n, m.name);
+}
 
 // `editingId` null ⇒ create (POST); a string ⇒ edit that template (PATCH).
 const editingId = ref<string | null>(null);
@@ -226,7 +239,7 @@ async function save(): Promise<void> {
           {{ t("chat.discussion.templates.defaultModeNone") }}
         </option>
         <option v-for="m in modeOptions" :key="m.id" :value="m.id">
-          {{ m.name }}
+          {{ modeName(m) }}
         </option>
       </select>
     </label>

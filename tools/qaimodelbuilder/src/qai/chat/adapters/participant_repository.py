@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """aiosqlite-backed :class:`ParticipantRepositoryPort`.
 
 Schema reference: ``qai-db-schema.md`` §2.7 (chat_participant, migration
@@ -39,7 +44,7 @@ __all__ = ["SqliteParticipantRepository"]
 
 _COLUMNS = (
     "id, conversation_id, kind, display_name, model_id, persona, "
-    "subagent_session_id, created_at, updated_at, config_json"
+    "subagent_session_id, created_at, updated_at, config_json, template_id"
 )
 
 
@@ -74,6 +79,10 @@ class SqliteParticipantRepository:
             json.dumps(participant.config, ensure_ascii=False)
             if participant.config
             else None,
+            # Built-in template provenance (migration 056 ``template_id``):
+            # the source template id / composite ``<roster_id>#<index>`` key,
+            # or NULL for user-authored / main / sub-agent participants.
+            participant.template_id,
         )
         try:
             async with self._db.connection() as conn:
@@ -83,8 +92,8 @@ class SqliteParticipantRepository:
                         "INSERT INTO chat_participant ("
                         "id, conversation_id, kind, display_name, model_id, "
                         "persona, subagent_session_id, created_at, updated_at, "
-                        "config_json) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                        "config_json, template_id) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                         "ON CONFLICT(id) DO UPDATE SET "
                         " conversation_id=excluded.conversation_id, "
                         " kind=excluded.kind, "
@@ -93,7 +102,8 @@ class SqliteParticipantRepository:
                         " persona=excluded.persona, "
                         " subagent_session_id=excluded.subagent_session_id, "
                         " updated_at=excluded.updated_at, "
-                        " config_json=excluded.config_json",
+                        " config_json=excluded.config_json, "
+                        " template_id=excluded.template_id",
                         params,
                     )
                     await conn.commit()
@@ -209,6 +219,13 @@ class SqliteParticipantRepository:
                 parsed = None
             if isinstance(parsed, dict):
                 config = parsed
+        # Built-in template provenance (migration 056 ``template_id``, column
+        # index 10). Tail-appended so a short projection (legacy row read before
+        # the column existed) leaves ``template_id`` as None -> no runtime
+        # persona override (existing behaviour unchanged).
+        template_id: str | None = None
+        if len(row) > 10 and row[10] is not None:
+            template_id = str(row[10])
         return Participant(
             id=ParticipantId.of(str(row[0])),
             conversation_id=ConversationId.of(str(row[1])),
@@ -222,6 +239,7 @@ class SqliteParticipantRepository:
                 else None
             ),
             config=config,
+            template_id=template_id,
             created_at=datetime.fromisoformat(str(row[7])),
             updated_at=datetime.fromisoformat(str(row[8])),
         )

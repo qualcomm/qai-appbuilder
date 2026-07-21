@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * Multi-tab Chat store (PR-054).
  *
@@ -2769,6 +2774,72 @@ export const useChatTabsStore = defineStore("chatTabs", {
         streamingSenderColor: null,
         streamingSenderModelId: null,
       });
+      // Promote-ready detection refresh (migration 057): the backend re-detects
+      // + persists ``Conversation.detected_model`` at THIS turn's end
+      // (``_finalize_assistant_message``). Re-read the conversation summary so
+      // the tab's ``detectedModel`` reflects it and the promote CTA updates
+      // this turn (the model may have only just produced a promotable variant,
+      // or switched to a different model dir). Fire-and-forget + best-effort:
+      // never blocks or throws out of the terminal transition.
+      void this._refreshDetectedModel(tabId);
+    },
+
+    /**
+     * Re-read a tab's conversation ``detected_model`` from the backend summary
+     * and patch ``tab.detectedModel`` (promote-ready detection, migration 057).
+     *
+     * Called after a turn ends (``confirmDone``) since the backend re-detects
+     * + persists at turn end. Best-effort: a missing conversation id, a
+     * transient fetch failure, or the tab going away are all swallowed so it
+     * never disturbs the turn-completion path. Never overwrites a tab that
+     * switched conversations mid-flight (re-checks the id after the await).
+     */
+    async _refreshDetectedModel(tabId: TabId): Promise<void> {
+      const tab = this.tabs.find((t) => t.id === tabId);
+      if (tab === undefined) return;
+      const convId = tab.conversationId;
+      if (convId === null || convId === "") return;
+      try {
+        const { apiJson } = await import("@/api");
+        const summary = await apiJson<{
+          detected_model?: {
+            workdir?: unknown;
+            variants?: unknown;
+            checked_at?: unknown;
+          } | null;
+        }>("GET", `/api/chat/conversations/${encodeURIComponent(convId)}`);
+        const raw = summary.detected_model;
+        let detectedModel: ChatTab["detectedModel"] = null;
+        if (raw !== null && raw !== undefined && typeof raw === "object") {
+          const workdir = typeof raw.workdir === "string" ? raw.workdir : "";
+          const variants: { precision: string; label: string }[] = [];
+          if (Array.isArray(raw.variants)) {
+            for (const v of raw.variants) {
+              if (v === null || typeof v !== "object") continue;
+              const precision = (v as Record<string, unknown>).precision;
+              const label = (v as Record<string, unknown>).label;
+              if (typeof precision === "string" && typeof label === "string") {
+                variants.push({ precision, label });
+              }
+            }
+          }
+          const checkedAt =
+            typeof raw.checked_at === "string" ? raw.checked_at : undefined;
+          detectedModel = {
+            workdir,
+            variants,
+            ...(checkedAt !== undefined ? { checkedAt } : {}),
+          };
+        }
+        // Only patch if the tab still exists AND still points at the same
+        // conversation (guard against a mid-flight tab/conversation switch).
+        const still = this.tabs.find((t) => t.id === tabId);
+        if (still !== undefined && still.conversationId === convId) {
+          this._patchTab(tabId, { detectedModel });
+        }
+      } catch {
+        // Best-effort — a refresh hiccup must never disturb turn completion.
+      }
     },
 
     /**
@@ -5181,7 +5252,7 @@ export const useChatTabsStore = defineStore("chatTabs", {
       // for SSR / test isolation.
       const { apiJson } = await import("@/api");
       try {
-        const { messages, startPos } = await fetchNewestPage(
+        const { messages, startPos, detectedModel } = await fetchNewestPage(
           apiJson,
           convId,
           HISTORY_PAGE_SIZE,
@@ -5198,6 +5269,10 @@ export const useChatTabsStore = defineStore("chatTabs", {
             hasMoreMessages: startPos > 0,
             loadingMore: false,
             loadingHistory: false,
+            // Promote-ready detection seeded from the conversation summary
+            // (migration 057): opening a conversation surfaces the CTA with
+            // ZERO on-open disk scans. null when never detected (legacy).
+            detectedModel,
             // Rehydrate the top TaskListBar from the newest todowrite call in
             // history — the bar reads `tab.todoList`, which is otherwise only
             // filled live (so a reload would hide the pill even though the

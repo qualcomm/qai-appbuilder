@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Apps-layer channel inbound dispatch (S9 PR-093 §2.1 C-6 + PR-097).
 
 Restores the central inbound-message dispatch pipeline that the

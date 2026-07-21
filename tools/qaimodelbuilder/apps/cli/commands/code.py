@@ -1,11 +1,16 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``qai code`` subcommands - ai_coding session / config / oc / skill / checkpoint CRUD.
 
 Desktop App Plan §2.1.1 group F2. Thin wrappers around the ai_coding bounded
 context's **non-streaming** use cases (``qai.ai_coding.application.use_cases.*``).
 
 Streaming / interactive use cases (``StreamCodingSessionUseCase`` /
-``SendUserMessageUseCase`` / ``StreamToolExecUseCase``) are intentionally
-excluded - they require a long-lived API server pipe.
+``SendUserMessageUseCase``) are intentionally excluded - they require a
+long-lived API server pipe.
 
 Layout
 ------

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Apply built-in security policy template use case (R7 cohesion fix).
 
 Previously the built-in ``demo`` / ``development`` / ``strict`` rule sets

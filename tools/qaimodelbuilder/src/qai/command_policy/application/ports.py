@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Application-layer ports for ``qai.command_policy`` (PR-603).
 
 The BC exposes :class:`ExecBrokerPort` for querying loaded exec profiles

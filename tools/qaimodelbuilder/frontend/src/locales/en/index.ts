@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 // =============================================================================
 // i18n locale sub-file — 手工维护，UTF-8（无 BOM）。
 //
@@ -275,6 +280,19 @@ const index = {
   manageDatasetFiles: "Manage uploaded dataset files",
   manageUploadedModels: "Manage uploaded model files",
   modelBuilder: "Model Builder",
+  modelHub: "Model Hub",
+  modelHubFrame: {
+    pickModel: "Pick AI Hub model",
+    pickModelHint: "Choose a pre-compiled model from Qualcomm AI Hub",
+    pickModelHeader: "Qualcomm AI Hub model",
+    pickModelPlaceholder: "e.g. Llama-v3-8B, YOLOv8-Detection…",
+    pickModelConfirm: "Set",
+    pickModelDesc: "Type an AI Hub model name or id, then describe what you need in chat — the Agent downloads the pre-compiled package for you.",
+    export: "Export to App Builder",
+    exportTitle: "Export a downloaded model to App Builder",
+    exportHeader: "Export to App Builder",
+    exportDesc: "Once a model has been downloaded, use this to register it for use in App Builder mode.",
+  },
   modelDownloadingBody: "Models are downloading; installation is required after completion. The list will update automatically.",
   modelDownloadingHint: "📥 Models are downloading; install required after completion to use…",
   modelDownloadingTitle: "Downloading model...",
@@ -331,7 +349,16 @@ const index = {
   proMode: "Pro",
   proOptional: "optional",
   proPoolAllBusy: "All {count} machines are busy right now. Please try again shortly.",
-  proPoolAllOffline: "All remote Agent machines are offline.",
+  proPoolAllBusyWithQueue: "All {count} machines are busy right now (queue: {queueTotal}). Please try again shortly.",
+  proPoolAllOffline: "The remote Agent service is offline. Please contact your administrator.",
+  proPoolNetworkError: "Cannot reach the remote Agent. Please check your network connection and try again.",
+  proPinnedMachineOffline: "This tab is bound to {url}, which is temporarily unreachable. Please try again later, or open a new tab to use a different machine.",
+  proAccessDeniedTitle: "You don't have access to Model Builder Pro",
+  proAccessDeniedBody: "Join the ModelBuilderProUsers distribution list to get access.",
+  proAccessApply: "Apply to join",
+  proAccessRefresh: "Refresh access",
+  proAccessRefreshing: "Checking…",
+  proAccessLdapError: "Permission service unavailable. Please try again later.",
   proProbing: "Finding an idle machine…",
   proSave: "Save",
   proSettings: "Settings",

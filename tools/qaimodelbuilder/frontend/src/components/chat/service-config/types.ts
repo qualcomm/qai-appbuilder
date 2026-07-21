@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * Shared TypeScript interfaces for the ServiceConfigPanel split-out Tab
  * components. These mirror the ``service_config.json`` document shape consumed

@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <script setup lang="ts">
 /**
  * FeishuConfigPanel — single-instance Feishu channel (V1-aligned).
@@ -25,6 +30,10 @@ import { useI18n } from "vue-i18n";
 import { useFeishuShared } from "@/composables/useFeishu";
 import ChannelModelSelector from "./ChannelModelSelector.vue";
 import ChannelProxyPanel from "./ChannelProxyPanel.vue";
+// NOTE: the HelpButton for this channel lives in the channel-card HEADER
+// (see `ChannelsView.vue` — directly to the left of the existing ℹ️
+// info button), not inside this panel. Symmetric with WechatConfigPanel;
+// see that file's script-header comment for the rationale.
 
 const { t } = useI18n();
 
@@ -65,6 +74,10 @@ onBeforeUnmount(dispose);
     class="qai-feishu-config"
     data-testid="feishu-config-panel"
   >
+    <!-- HelpButton for this channel lives in the channel-card header (see
+         `ChannelsView.vue`), directly to the left of the ℹ️ info button —
+         two paired discoverable-help affordances at the top of the card. -->
+
     <!-- Model selector — V1 parity: the "AI Model → Default (follow global
          settings)" row is ALWAYS visible above the status-specific body,
          regardless of connection/registration, so the user can pick a model
@@ -183,8 +196,37 @@ onBeforeUnmount(dispose);
       <div class="channel-idle-body">
         <div class="channel-idle-hint">
           <span v-html="t('channels.feishu.introLine1')" />
-          <span v-html="t('channels.feishu.introLine2')" />
+          <span v-html="t('channels.feishu.introLine2Prefix')" />
         </div>
+        <!-- Decision 6 (Plan §1.4): promote the "Feishu Open Platform" link
+             out of the inline sentence into an independent, button-styled
+             external link so it is impossible to miss and its click target
+             is a full button hit area rather than 4-character inline text. -->
+        <a
+          class="btn btn-ghost btn-sm feishu-open-platform-btn"
+          href="https://open.feishu.cn/app"
+          target="_blank"
+          rel="noopener noreferrer"
+          :title="t('channels.feishu.openPlatformTooltip')"
+          data-testid="feishu-open-platform-link"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+            <polyline points="15 3 21 3 21 9" />
+            <line x1="10" y1="14" x2="21" y2="3" />
+          </svg>
+          {{ t("channels.feishu.openPlatformLabel") }}
+        </a>
 
         <!-- App ID -->
         <div
@@ -327,8 +369,37 @@ onBeforeUnmount(dispose);
              v-html to render the link and code tags. -->
         <div class="channel-idle-hint">
           <span v-html="t('channels.feishu.introLine1')" />
-          <span v-html="t('channels.feishu.introLine2')" />
+          <span v-html="t('channels.feishu.introLine2Prefix')" />
         </div>
+        <!-- Decision 6 (Plan §1.4): promote the "Feishu Open Platform" link
+             out of the inline sentence into an independent, button-styled
+             external link so it is impossible to miss and its click target
+             is a full button hit area rather than 4-character inline text. -->
+        <a
+          class="btn btn-ghost btn-sm feishu-open-platform-btn"
+          href="https://open.feishu.cn/app"
+          target="_blank"
+          rel="noopener noreferrer"
+          :title="t('channels.feishu.openPlatformTooltip')"
+          data-testid="feishu-open-platform-link-idle"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+            <polyline points="15 3 21 3 21 9" />
+            <line x1="10" y1="14" x2="21" y2="3" />
+          </svg>
+          {{ t("channels.feishu.openPlatformLabel") }}
+        </a>
 
         <!-- App ID (required) -->
         <div
@@ -518,6 +589,25 @@ onBeforeUnmount(dispose);
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
+}
+
+/*
+ * "Open Feishu Open Platform" external link — promoted from an inline <a>
+ * inside introLine2 to a standalone button-style affordance (decision 6).
+ * `align-self: flex-start` keeps it left-aligned as its own row inside the
+ * `.channel-idle-body` flex column without stretching to full width.
+ * All colours flow from existing `.btn.btn-ghost.btn-sm` tokens.
+ */
+.feishu-open-platform-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  margin: 4px 0 var(--space-2);
+  text-decoration: none;
+}
+.feishu-open-platform-btn:hover {
+  text-decoration: none;
 }
 
 /* Explicit "已保存" badge so the saved state is unambiguous (not relying on

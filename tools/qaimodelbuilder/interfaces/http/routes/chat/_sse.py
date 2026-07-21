@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Chat SSE streaming route — PR-033 stage B.
 
 Single endpoint:
@@ -429,6 +434,7 @@ async def _stream_discussion_sse(
     prompt_text: str,
     pinned_speaker: str | None = None,
     model_id: str | None = None,
+    locale: str | None = None,
 ) -> AsyncIterator[bytes]:
     """Drive ``OrchestrateDiscussionUseCase`` and yield SSE-encoded bytes.
 
@@ -465,6 +471,12 @@ async def _stream_discussion_sse(
             # supplied tab model_id. Forcing this None severs the old
             # query::mb_pro leak into discussions.
             default_model_id=None,
+            # UI language (en / zh-CN / zh-TW) for built-in template i18n
+            # (migration 056): drives the runtime persona / mode-framing override
+            # so a built-in role/mode's text follows the user's chosen language.
+            # None / unknown → the orchestrator normalises to zh-CN (the product
+            # default) → Simplified text, byte-for-byte the pre-056 behaviour.
+            locale=locale or None,
         )
         agen = container.chat.orchestrate_discussion.execute(request)
     except QaiError as exc:
@@ -843,6 +855,7 @@ def build_router(*, container: "Container") -> APIRouter:
                 prompt_text=prompt,
                 pinned_speaker=pinned_speaker or None,
                 model_id=model_id,
+                locale=locale,
             )
             return StreamingResponse(
                 disc_body,

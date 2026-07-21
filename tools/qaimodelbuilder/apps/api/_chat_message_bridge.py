@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Apps-layer cross-context bridge: channels → chat (PR-047 + PR-201 + S9 PR-093 + PR-097).
 
 The :class:`MessageBridgePort` lives in

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Asset (labels / vocab / tokenizer) collector for the emitted Pack.
 
 Direct port of the legacy ``Step 9b`` logic from

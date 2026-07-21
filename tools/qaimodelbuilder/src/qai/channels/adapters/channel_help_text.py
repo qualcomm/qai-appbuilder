@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Help-text formatters for channel commands (S9 PR-093 §2.4 L-5).
 
 Restores the three Chinese help strings (``format_main_help`` /

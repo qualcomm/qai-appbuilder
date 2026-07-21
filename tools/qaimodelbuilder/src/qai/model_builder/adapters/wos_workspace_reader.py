@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Filesystem adapter for :class:`qai.model_builder.application.ports.WorkspaceReaderPort`.
 
 Maps a ``C:/WoS_AI/<name>/`` directory into a

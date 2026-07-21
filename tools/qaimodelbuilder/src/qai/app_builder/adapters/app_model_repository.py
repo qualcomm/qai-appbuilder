@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """aiosqlite-backed :class:`AppModelRepositoryPort` (PR-045).
 
 Schema reference: ``qai-db-schema.md`` §3.1 (``app_builder_model_definition``).
@@ -68,7 +73,17 @@ class SqliteAppModelRepository:
                     "input_presets_json, required_catalog_ids_json, "
                     "user_imported, version "
                     "FROM app_builder_model_definition "
-                    "ORDER BY pinned DESC, title ASC"
+                    # Built-in models first (user_imported=0), then
+                    # user-imported (user_imported=1). Built-ins keep the
+                    # legacy ``pinned DESC, title ASC`` order; user-imported
+                    # models sort by ``created_at ASC`` (add-time) so the
+                    # gallery lists them in the order the user imported them
+                    # (title used only as a deterministic tie-break). The
+                    # CASE keeps each tier on its own sort key so surfacing
+                    # add-time for user models never perturbs built-in order.
+                    "ORDER BY user_imported ASC, pinned DESC, "
+                    "CASE WHEN user_imported = 1 THEN created_at ELSE title END ASC, "
+                    "title ASC"
                 )
                 rows = await cur.fetchall()
                 await cur.close()

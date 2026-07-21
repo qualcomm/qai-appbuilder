@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <script setup lang="ts">
 /**
  * CloudModelsPanel — V1-parity cloud model catalog management with full
@@ -32,6 +37,9 @@ import { apiJson } from "@/api";
 import { useToast } from "@/composables/useToast";
 import { useConfirm } from "@/composables/useConfirm";
 import ToggleSwitch from "@/components/chat/service-config/ToggleSwitch.vue";
+// Shared help-manual affordance — see components/common/HelpButton.vue.
+// Docs live under `frontend/src/help-content/cloud-models.<locale>.md`.
+import HelpButton from "@/components/common/HelpButton.vue";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -633,6 +641,14 @@ function onGlobalKeydown(event: KeyboardEvent): void {
         v-model="search"
         class="cloud-models-search"
         :placeholder="'🔍 ' + t('cloudModels.search')"
+      />
+      <!-- Help affordance for provider / base_url / API key onboarding.
+           Placed at the end of the toolbar so it sits alongside Add/Search
+           without disrupting the current visual weight. -->
+      <HelpButton
+        doc-key="cloud-models"
+        external-url="https://platform.openai.com/docs/api-reference"
+        size="sm"
       />
     </div>
 

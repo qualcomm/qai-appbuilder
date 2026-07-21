@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Service-catalog HTTP routes — hardware-grouped model download center.
 
 V1 ``backend/model_catalog_manager.py`` parity, exposed under a **new**

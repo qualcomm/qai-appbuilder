@@ -1,8 +1,8 @@
 ---
-name: ppt-gen
+name: PPT Gen
 description: Generate fully editable, high-quality PPTX with python-pptx based on the user's topic, materials, or business goals; defaults to a general-purpose "dark gilded elegant" visual system, with adaptive layout capabilities for cover, table of contents, section/transition, viewpoint statement, image-text mixed layout, multi-card, columns, data, workflow, timeline, comparison, case study, quote, summary, and ending pages.
-tags: ppt, presentation, slides, 演示文稿, 幻灯片, 可编辑PPT, 通用PPT, 高质量PPT
-use_for: 制作PPT、生成演示文稿、做幻灯片、ppt生成、通用风格PPT、深色鎏金风格PPT、可编辑PPT
+tags: ppt, presentation, slides, editable, general-purpose, high-quality
+use_for: Producing PPTs, generating presentations, making slides, PPT generation, general-purpose style PPTs, dark gilded style PPTs, editable PPTs
 ---
 
 # PPT Generation Assistant

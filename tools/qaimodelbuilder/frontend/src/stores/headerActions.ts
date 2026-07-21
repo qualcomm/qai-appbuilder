@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * Header actions store — V1 parity for the topbar right-side button group.
  *
@@ -44,7 +49,7 @@ import { defineStore } from "pinia";
  * by reference.
  */
 export interface HeaderAction {
-  /** Stable key (e.g. `"service.refresh"`, `"chat.toolCalls"`). */
+  /** Stable key (e.g. `"service.refresh"`, `"chat.workspace"`). */
   id: string;
   /** Already-translated label (call `t()` in the registering view). */
   label: string;

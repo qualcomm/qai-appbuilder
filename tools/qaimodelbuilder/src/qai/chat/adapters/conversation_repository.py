@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """aiosqlite-backed :class:`ConversationRepositoryPort` (PR-042).
 
 Schema reference: ``qai-db-schema.md`` §2.1 (chat_conversation) + §2.2
@@ -55,7 +60,8 @@ __all__ = ["SqliteConversationRepository"]
 
 
 _HEADER_COLUMNS = (
-    "id, title, status, created_at, updated_at, meta_json, full_history_tokens"
+    "id, title, status, created_at, updated_at, meta_json, "
+    "full_history_tokens, detected_model_json"
 )
 _MESSAGE_COLUMNS = (
     "id, conversation_id, parent_id, role, content_text, "
@@ -557,6 +563,9 @@ class SqliteConversationRepository:
             if conversation.meta
             else None,
             conversation.full_history_tokens,
+            json.dumps(conversation.detected_model, ensure_ascii=False)
+            if conversation.detected_model
+            else None,
         )
         message_rows: list[tuple[object, ...]] = []
         for position, msg in enumerate(conversation.messages):
@@ -584,15 +593,19 @@ class SqliteConversationRepository:
         # leave title/meta_json untouched (so a concurrent rename survives);
         # header-owning saves write title/meta_json from the aggregate.
         # BOTH branches write full_history_tokens=excluded.full_history_tokens
-        # — the streaming ``save_messages`` path uses preserve_header=True, so
-        # omitting it from that branch would freeze the running token counter
-        # forever (it would never update on the normal turn-completion save).
+        # AND detected_model_json=excluded.detected_model_json — the streaming
+        # ``save_messages`` path uses preserve_header=True, so omitting either
+        # from that branch would freeze that column forever (it would never
+        # update on the normal turn-completion save). detected_model is written
+        # by the turn-end detector via that same preserve_header path, so it
+        # MUST be in the preserve_header branch (migration 057).
         if preserve_header:
             on_conflict = (
                 "ON CONFLICT(id) DO UPDATE SET "
                 " status=excluded.status, "
                 " updated_at=excluded.updated_at, "
-                " full_history_tokens=excluded.full_history_tokens"
+                " full_history_tokens=excluded.full_history_tokens, "
+                " detected_model_json=excluded.detected_model_json"
             )
         else:
             on_conflict = (
@@ -601,7 +614,8 @@ class SqliteConversationRepository:
                 " status=excluded.status, "
                 " updated_at=excluded.updated_at, "
                 " meta_json=excluded.meta_json, "
-                " full_history_tokens=excluded.full_history_tokens"
+                " full_history_tokens=excluded.full_history_tokens, "
+                " detected_model_json=excluded.detected_model_json"
             )
 
         try:
@@ -611,8 +625,8 @@ class SqliteConversationRepository:
                     await conn.execute(
                         "INSERT INTO chat_conversation "
                         "(id, title, status, created_at, updated_at, meta_json, "
-                        "full_history_tokens) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                        "full_history_tokens, detected_model_json) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
                         + on_conflict,
                         header_params,
                     )
@@ -726,6 +740,14 @@ class SqliteConversationRepository:
         # full_history_tokens (column index 6) appended by migration 036; NULL
         # / absent (short rows from 6-col list/search projections) -> None.
         full_history_tokens = header[6] if len(header) > 6 else None
+        # detected_model_json (column index 7) appended by migration 057; NULL
+        # / absent (short list/search projections, or an old DB before 057)
+        # -> None. Forward-compatible: a conversation from a DB without the
+        # column simply loads with ``detected_model=None``.
+        detected_model_raw = header[7] if len(header) > 7 else None
+        detected_model = (
+            json.loads(str(detected_model_raw)) if detected_model_raw else None
+        )
         messages: list[Message] = []
         for row in message_rows:
             messages.append(SqliteConversationRepository._row_to_message(row))
@@ -741,6 +763,9 @@ class SqliteConversationRepository:
                 int(full_history_tokens)
                 if full_history_tokens is not None
                 else None
+            ),
+            detected_model=(
+                detected_model if isinstance(detected_model, dict) else None
             ),
         )
 

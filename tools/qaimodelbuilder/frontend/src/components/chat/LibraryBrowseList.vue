@@ -1,4 +1,9 @@
 <!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
+<!--
   LibraryBrowseList — the shared "built-in presets + mine" browse list used by
   all three template-library tabs (Agents / Teams / Modes).
 

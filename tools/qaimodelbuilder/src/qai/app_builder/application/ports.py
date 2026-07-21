@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Abstract ports for the App Builder application layer.
 
 All external dependencies of the use cases live behind ``Protocol``
@@ -655,15 +660,6 @@ class FeedbackRepositoryPort(Protocol):
         """
         ...
 
-    async def latest_for_run(self, run_id: RunId) -> Feedback | None:
-        """Return the most recent feedback row for ``run_id`` or ``None``.
-
-        Convenience accessor consumed by the quality-score injection
-        path (``InjectQualityScoreUseCase``) — keeps the LLM Pack
-        catalog in sync with the most recent rating.
-        """
-        ...
-
     async def latest_ratings_for_runs(
         self, run_ids: Iterable[RunId]
     ) -> dict[str, int]:
@@ -787,12 +783,6 @@ class BenchmarkRepositoryPort(Protocol):
 
         Raises :class:`qai.platform.errors.NotFoundError` when unknown.
         """
-        ...
-
-    async def list_for_model(
-        self, model_id: AppModelId, *, limit: int = 50
-    ) -> tuple[BenchmarkRecord, ...]:
-        """Return up to ``limit`` rows for ``model_id`` (newest first)."""
         ...
 
 

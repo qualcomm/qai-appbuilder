@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``qai.dependency_approval`` bounded context — dependency installation approval.
 
 This BC manages pending dependency-install requests in the security sandbox.

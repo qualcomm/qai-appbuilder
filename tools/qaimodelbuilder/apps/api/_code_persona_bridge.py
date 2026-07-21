@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Apps-layer cross-context bridge: chat → user_prefs code-persona (R12).
 
 The chat bounded context resolves a selected *code persona* (id →
@@ -73,7 +78,9 @@ class CodePersonaResolverBridge:
     def __init__(self, *, container: "Container") -> None:
         self._container = container
 
-    async def resolve(self, persona_id: str) -> ResolvedCodePersona | None:
+    async def resolve(
+        self, persona_id: str, locale: str | None = None
+    ) -> ResolvedCodePersona | None:
         persona_id = (persona_id or "").strip()
         if not persona_id:
             return None
@@ -87,22 +94,53 @@ class CodePersonaResolverBridge:
             # Lazy cross-context import — legitimate at the apps
             # composition root (context-isolation targets ``qai.<ctx>``
             # source files, not ``apps.api``).
-            from qai.user_prefs.domain.code_personas import CodePersonaManager
+            from qai.user_prefs.domain.code_personas import (
+                CodePersonaManager,
+                DEFAULT_PERSONAS,
+            )
 
             doc = await load_doc_uc.execute(_CODE_PERSONAS_KEY)
             _selected, personas = CodePersonaManager.get_all_personas(doc)
-        except Exception as exc:  # noqa: BLE001 — best-effort, never break stream
+        except Exception as exc:  # noqa: BLE001
             logger.warning("chat.persona_resolution_failed", error=str(exc))
             return None
         for persona in personas:
             if persona.get("id") != persona_id:
                 continue
-            prompt = persona.get("prompt")
+            # Determine the effective prompt:
+            # 1. If user has customized (is_customized=True), use their override directly.
+            # 2. Otherwise, pick from the multilingual prompts dict by locale.
+            prompt: str | None = None
+            is_customized = persona.get("is_customized", False)
+            if is_customized:
+                prompt = persona.get("prompt")
+            else:
+                # `prompts` is stripped from get_all_personas output (API
+                # payload optimization); read directly from DEFAULT_PERSONAS.
+                builtin = DEFAULT_PERSONAS.get(persona_id, {})
+                prompts = builtin.get("prompts")
+                if isinstance(prompts, dict) and locale:
+                    norm = _normalize_locale(locale)
+                    prompt = prompts.get(norm) or prompts.get("zh-CN")
+                if not prompt:
+                    prompt = persona.get("prompt")
             if not isinstance(prompt, str) or not prompt.strip():
                 return None
             name = persona.get("name")
+            groups = persona.get("groups")
             return ResolvedCodePersona(
                 prompt=prompt,
                 name=name if isinstance(name, str) and name.strip() else None,
+                groups=tuple(groups) if isinstance(groups, list) else None,
             )
         return None
+
+
+def _normalize_locale(locale: str) -> str:
+    """Normalize a locale string to one of 'en', 'zh-CN', 'zh-TW'."""
+    locale = (locale or "").strip().lower()
+    if locale.startswith("en"):
+        return "en"
+    if locale in ("zh-tw", "zh_tw", "zh-hant"):
+        return "zh-TW"
+    return "zh-CN"

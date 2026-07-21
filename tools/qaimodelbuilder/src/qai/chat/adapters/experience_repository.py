@@ -1,12 +1,12 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """aiosqlite-backed :class:`ExperienceRepositoryPort` (PR-042).
 
 Schema reference: ``qai-db-schema.md`` §2.4 (chat_experience).
 Single-row aggregate -- INSERT OR REPLACE on save, DELETE on delete.
-
-PR-095 (S9 audit §2.3 A-3 experience category counts) appends the
-:meth:`list_categories_with_counts` reader.  The existing
-:meth:`list_categories` keeps its ``tuple[str, ...]`` return contract
-unchanged so historical callers continue to compile.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from qai.chat.domain.errors import ExperienceNotFoundError
-from qai.chat.domain.experience import CategoryStat, Experience
+from qai.chat.domain.experience import Experience
 from qai.chat.domain.ids import ExperienceId
 from qai.platform.errors import PersistenceError
 
@@ -163,96 +163,6 @@ class SqliteExperienceRepository:
                 cause=exc,
             ) from exc
         return tuple(str(r[0]) for r in rows)
-
-    async def list_categories_with_counts(self) -> tuple[CategoryStat, ...]:
-        """Return distinct categories with their experience counts.
-
-        PR-095 / S9 A-3.  Restores the legacy "Experience Library"
-        sidebar that displayed each category alongside the number
-        of saved snippets.  Implemented as a single ``GROUP BY``
-        query so the wall-clock cost is comparable to the existing
-        :meth:`list_categories` reader.
-        """
-        try:
-            async with self._db.connection() as conn:
-                cur = await conn.execute(
-                    "SELECT category, COUNT(*) AS n FROM chat_experience "
-                    "GROUP BY category "
-                    "ORDER BY category ASC"
-                )
-                rows = await cur.fetchall()
-                await cur.close()
-        except Exception as exc:  # noqa: BLE001
-            raise PersistenceError(
-                "chat.experience.list_categories_with_counts_failed",
-                f"failed to list categories with counts: {exc}",
-                operation="experience.list_categories_with_counts",
-                cause=exc,
-            ) from exc
-        return tuple(
-            CategoryStat(name=str(r[0]), count=int(r[1]))
-            for r in rows
-        )
-
-    async def search_fulltext(
-        self,
-        query: str,
-        limit: int = 20,
-    ) -> list[Experience]:
-        """Return experiences matching ``query`` via FTS5 ``MATCH``.
-
-        Backed by the ``experience_fts`` virtual table created in
-        migration ``009_chat_experience_fts5.sql`` (PR-094 §17.5 #13 /
-        §3.3 A-14). Results are ordered by ``rank`` (FTS5's BM25 default)
-        so the most relevant rows surface first.
-
-        Args:
-            query: An FTS5 MATCH expression. Callers should sanitize the
-                value before invoking — special characters (``"``, ``-``,
-                ``*`` etc.) carry FTS5 syntactic meaning. The repository
-                does NOT escape the value because doing so opaquely
-                would prevent advanced operators (``AND`` / ``OR`` /
-                ``NEAR``) that legitimate callers rely on.
-            limit: Maximum number of rows to return; non-positive values
-                produce an empty list.
-
-        Returns:
-            A list (not tuple, by spec) of :class:`Experience` objects
-            ordered by relevance, possibly empty when nothing matches or
-            when the FTS index has not yet been populated (e.g. the
-            migration was just applied and the triggers haven't seen any
-            INSERTs yet).
-        """
-        if not isinstance(query, str):
-            raise TypeError(
-                f"query must be str, got {type(query).__name__}"
-            )
-        if limit <= 0:
-            return []
-        if not query or not query.strip():
-            return []
-
-        sql = (
-            "SELECT e.id, e.category, e.content, e.metadata_json, e.created_at "
-            "FROM experience_fts AS f "
-            "JOIN chat_experience AS e ON e.id = f.experience_id "
-            "WHERE experience_fts MATCH ? "
-            "ORDER BY rank "
-            "LIMIT ?"
-        )
-        try:
-            async with self._db.connection() as conn:
-                cur = await conn.execute(sql, (query, int(limit)))
-                rows = await cur.fetchall()
-                await cur.close()
-        except Exception as exc:  # noqa: BLE001
-            raise PersistenceError(
-                "chat.experience.search_fulltext_failed",
-                f"failed to FTS-search experiences: {exc}",
-                operation="experience.search_fulltext",
-                cause=exc,
-            ) from exc
-        return [self._row_to_experience(r) for r in rows]
 
     @staticmethod
     def _row_to_experience(row: tuple[object, ...]) -> Experience:

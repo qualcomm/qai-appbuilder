@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``GetServiceConfigUseCase`` — read service_config.json (api_key masked).
 
 Encapsulates the read side of the GenieAPIService config surface that

@@ -1,4 +1,9 @@
 <!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
+<!--
   AgentEditorSection — inline single-role "agent" editor section (M-agent-1).
 
   The 角色 tab's create/edit form, factored out of TemplateLibraryDialog so all

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Chat HTTP routes aggregate (PR-033 / S3).
 
 The chat surface is large enough (REST + SSE + data WS + control WS +

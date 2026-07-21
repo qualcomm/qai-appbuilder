@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Use cases for the lane-2 App Builder routes (PR-304).
 
 PR-034 / PR-045 shipped 18 routes; the legacy backend has 37. PR-304
@@ -32,19 +37,20 @@ Use cases implemented
 | ``ClearCacheUseCase`` | DELETE /cache | Clears per-context artifact blobs |
 | ``ListRunsUseCase`` | GET /runs | Paginated list across all models |
 | ``DeleteRunHistoryUseCase`` | DELETE /history/runs/{run_id} | Tombstone a run's record |
-| ``ListLocalFilesUseCase`` | GET /files/local | Lists files in a sandboxed dir under DataPaths |
 | ``GetPackManifestUseCase`` | GET /models/{model_id}/manifest | Reads PackManifest via reader |
-| ``ImportCandidatesUseCase`` | POST /import/candidates | Wraps existing ImportDryRun |
 | ``ImportScanBinsUseCase`` | POST /import/scan-bins | Scans for unrecognised bin files |
 | ``RunBatchUseCase`` | POST /batch | Runs multiple models sequentially |
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator, Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+_log = logging.getLogger(__name__)
 
 from qai.app_builder.application.ports import (
     AppModelRepositoryPort,
@@ -104,12 +110,10 @@ __all__ = [
     "ClearCacheUseCase",
     "ListRunsUseCase",
     "DeleteRunHistoryUseCase",
-    "ListLocalFilesUseCase",
-    "LocalFileEntry",
     "GetPackManifestUseCase",
-    "ImportCandidatesUseCase",
     "ImportScanBinsUseCase",
     "BinScanResult",
+    "UnnormalizedAihubHint",
     "RunBatchUseCase",
     "BatchRunRequest",
     "BatchRunResult",
@@ -743,84 +747,6 @@ class DeleteRunHistoryUseCase:
 
 
 # ---------------------------------------------------------------------------
-# List local files
-# ---------------------------------------------------------------------------
-@dataclass(frozen=True, slots=True, kw_only=True)
-class LocalFileEntry:
-    """One row of the local-file picker listing."""
-
-    name: str
-    relative_path: str
-    size_bytes: int
-    is_dir: bool
-    modified_at: float
-
-    def __post_init__(self) -> None:
-        for name, value in (
-            ("name", self.name),
-            ("relative_path", self.relative_path),
-        ):
-            if not isinstance(value, str):
-                raise ValueError(f"{name} must be str")
-        if not isinstance(self.size_bytes, int) or isinstance(self.size_bytes, bool):
-            raise ValueError("size_bytes must be int")
-        if self.size_bytes < 0:
-            raise ValueError("size_bytes must be >= 0")
-        if not isinstance(self.is_dir, bool):
-            raise ValueError("is_dir must be bool")
-        if not isinstance(self.modified_at, (int, float)) or isinstance(
-            self.modified_at, bool
-        ):
-            raise ValueError("modified_at must be number")
-
-
-class ListLocalFilesUseCase:
-    """List files in a sandboxed directory under :class:`DataPaths`.
-
-    Used by the input picker UI. The ``base_dir`` constructor arg is
-    enforced via path-prefix check (no escaping via ``..``). Empty
-    output if the directory is missing.
-    """
-
-    def __init__(self, *, base_dir: Path) -> None:
-        if not isinstance(base_dir, Path):
-            raise TypeError("base_dir must be a Path")
-        self._base_dir = base_dir.resolve()
-
-    async def execute(
-        self, *, sub_path: str = ""
-    ) -> tuple[LocalFileEntry, ...]:
-        target = (self._base_dir / sub_path).resolve()
-        # Path-prefix check (sandboxing).
-        try:
-            target.relative_to(self._base_dir)
-        except ValueError as exc:
-            raise ValueError(
-                f"sub_path {sub_path!r} escapes base_dir"
-            ) from exc
-        if not target.is_dir():
-            return ()
-        out: list[LocalFileEntry] = []
-        for entry in sorted(target.iterdir(), key=lambda p: p.name):
-            try:
-                stat = entry.stat()
-            except OSError:
-                continue
-            out.append(
-                LocalFileEntry(
-                    name=entry.name,
-                    relative_path=str(
-                        entry.relative_to(self._base_dir).as_posix()
-                    ),
-                    size_bytes=stat.st_size if entry.is_file() else 0,
-                    is_dir=entry.is_dir(),
-                    modified_at=stat.st_mtime,
-                )
-            )
-        return tuple(out)
-
-
-# ---------------------------------------------------------------------------
 # Pack manifest
 # ---------------------------------------------------------------------------
 class GetPackManifestUseCase:
@@ -862,23 +788,6 @@ class ManifestNotAvailableError(LookupError):
 # ---------------------------------------------------------------------------
 # Import — extension routes
 # ---------------------------------------------------------------------------
-class ImportCandidatesUseCase:
-    """Inspect candidate sources via :class:`ImportPort.dry_run`.
-
-    Thin wrapper that lets the route layer call dry_run without
-    bypassing the application layer. (The existing ``ImportDryRunUseCase``
-    in import_workflow.py is functionally equivalent; this is a
-    semantic alias used by the ``/import/candidates`` route.)
-    """
-
-    def __init__(self, *, dry_run_use_case: Any) -> None:
-        # Pure passthrough so we don't double-import ImportDryRunUseCase.
-        self._inner = dry_run_use_case
-
-    async def execute(self, candidates: Iterable[str]) -> Any:
-        return await self._inner.execute(candidates)
-
-
 # Filename-suffix → plan-form precision token. Mirrors the legacy
 # ``LABEL_TO_PRECISION`` map (backend/app_builder/api_routes.py) so the
 # multi-variant PromoteCard checklist matches the V1 behaviour exactly.
@@ -886,9 +795,12 @@ _LABEL_TO_PRECISION: dict[str, str] = {
     # ── Label form (UI-friendly) ──
     "fp16": "fp16",
     "fp32": "fp32",
+    "float": "fp32",  # alias: LLM agent may write PRECISION=float in plan.md
+    "bf16": "bf16",
     "int8": "w8a8",  # canonical for INT8 outputs (ahead of w8a8b8)
     "w8a16": "w8a16",
     "w4a16": "w4a16",
+    "w16a16": "w16a16",
     "int4": "w4a8",
     # ── Plan form (as written by some converters) ──
     "w8a8": "w8a8",
@@ -900,10 +812,12 @@ _LABEL_TO_PRECISION: dict[str, str] = {
 _PLAN_TO_DISPLAY_LABEL: dict[str, str] = {
     "fp16": "FP16",
     "fp32": "FP32",
+    "bf16": "BF16",
     "w8a8": "INT8",
     "w8a8b8": "INT8",
     "w8a16": "W8A16",
     "w4a16": "W4A16",
+    "w16a16": "W16A16",
     "w4a8": "INT4",
 }
 
@@ -939,21 +853,59 @@ class BinScanResult:
             raise ValueError("size_bytes must be int")
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class UnnormalizedAihubHint:
+    """Signal that a workdir holds a downloaded-but-not-yet-normalized AI Hub
+    model — i.e. the readiness scan found NO ``output/<model>_<label>.{bin,dlc}``
+    variants, but the workspace clearly contains an AI Hub package (a
+    ``metadata.json`` next to a ``.dlc``/``.bin`` weight, typically inside a
+    nested ``<model>-qnn_dlc-*`` subfolder) that Model Hub's Step 6.5
+    normalization (``aihub_to_manifest.py``) has not been run on yet.
+
+    Both Model Builder and Model Hub rely on the agent to *initiate*
+    normalization (there is no auto-trigger — that would treat inferred
+    fields like ``output.type`` as authoritative, violating State-Truth-First).
+    This hint lets the UI turn a confusing empty state ("model on disk but the
+    Import panel is blank") into an actionable "detected an un-normalized model —
+    run Step 6.5 to make it importable" guidance, WITHOUT silently normalizing
+    on the user's behalf.
+
+    * ``model_workdir`` — the top-level workspace (== the value to pass as
+      ``--workdir`` / whose folder name is ``--model-name``).
+    * ``detected_weight`` — POSIX path of the un-normalized weight we found
+      (for display / to confirm the detection is real, not a guess).
+    """
+
+    model_workdir: str
+    detected_weight: str
+
+
 class ImportScanBinsUseCase:
-    """Scan for ``.bin`` files (NPU context binaries) to import.
+    """Scan for NPU context binaries (``.bin`` / ``.dlc``) to import.
+
+    The app_pack contract is format-neutral: a promotable NPU weight may be
+    a QNN context binary (``.bin``, Model Builder's own output) OR a QNN DLC
+    (``.dlc``, downloaded from Qualcomm AI Hub via Model Hub) — ``QNNContext``
+    loads either directly. So both Model Builder and Model Hub reach the SAME
+    promote/export flow, and this readiness scan must recognise BOTH suffixes
+    (otherwise a ``.dlc``-only workspace looks "empty" and the Promote CTA
+    never appears).
 
     Two scan modes:
 
     * **workspace mode** (``model_workdir`` given) — enumerate
-      ``<model_workdir>/output/<model>_<label>.bin`` precision artifacts
-      and decode each into ``{precision, label, size, mtime}``. This is
-      the source for the multi-variant PromoteCard checklist (V1
+      ``<model_workdir>/output/<model>_<label>.{bin,dlc}`` precision
+      artifacts and decode each into ``{precision, label, size, mtime}``.
+      This is the source for the multi-variant PromoteCard checklist (V1
       ``GET /import/scan-bins?modelWorkdir=…`` parity). Files smaller
       than 1 MiB or with an unrecognised label suffix are skipped.
     * **legacy mode** (no ``model_workdir``) — a content-free recursive
       directory listing of the configured ``scan_root``. Bin
       fingerprinting is intentionally outside the importer's contract.
     """
+
+    #: Valid NPU weight suffixes for the app_pack contract (format-neutral).
+    _WEIGHT_SUFFIXES: tuple[str, ...] = (".bin", ".dlc")
 
     def __init__(self, *, scan_root: Path) -> None:
         if not isinstance(scan_root, Path):
@@ -971,7 +923,15 @@ class ImportScanBinsUseCase:
         if not self._scan_root.is_dir():
             return ()
         out: list[BinScanResult] = []
-        for entry in sorted(self._scan_root.rglob("*.bin"), key=lambda p: str(p)):
+        candidates = sorted(
+            (
+                p
+                for p in self._scan_root.rglob("*")
+                if p.suffix.lower() in self._WEIGHT_SUFFIXES
+            ),
+            key=lambda p: str(p),
+        )
+        for entry in candidates:
             if entry.is_file():
                 try:
                     stat = entry.stat()
@@ -1015,7 +975,7 @@ class ImportScanBinsUseCase:
 
         for f in entries:
             try:
-                if not f.is_file() or f.suffix.lower() != ".bin":
+                if not f.is_file() or f.suffix.lower() not in self._WEIGHT_SUFFIXES:
                     continue
                 stat = f.stat()
                 if stat.st_size < _SCAN_BIN_MIN_BYTES:
@@ -1031,6 +991,13 @@ class ImportScanBinsUseCase:
                 continue
             precision = _LABEL_TO_PRECISION.get(label_raw)
             if not precision:
+                _log.debug(
+                    "scan-bins: skipping %r — label suffix %r not in "
+                    "_LABEL_TO_PRECISION (known: %s)",
+                    f.name,
+                    label_raw,
+                    ", ".join(sorted(_LABEL_TO_PRECISION)),
+                )
                 continue
 
             mtime_iso = datetime.fromtimestamp(
@@ -1050,14 +1017,117 @@ class ImportScanBinsUseCase:
                 )
             )
 
+        # Deduplicate by precision: App Builder needs exactly ONE weight per
+        # precision. Multiple files can decode to the same precision — e.g. a
+        # ``<model>_int8.bin`` and a ``<model>_w8a8.bin`` (both map to the
+        # ``w8a8`` precision → both display "INT8"), or the same precision
+        # present as BOTH ``.bin`` and ``.dlc``. Emitting two rows for one
+        # precision produced a confusing duplicate checkbox that toggled in
+        # lockstep (the picker keys selection by precision string). Keep one
+        # per precision: prefer ``.bin`` (native QNN context binary) over
+        # ``.dlc``, then the most recently modified.
+        best_by_precision: dict[str, BinScanResult] = {}
+        for r in out:
+            key = r.precision or ""
+            cur = best_by_precision.get(key)
+            if cur is None:
+                best_by_precision[key] = r
+                continue
+            r_bin = str(r.path).lower().endswith(".bin")
+            cur_bin = str(cur.path).lower().endswith(".bin")
+            # Prefer .bin over .dlc; if same extension class, prefer newer mtime.
+            if r_bin and not cur_bin:
+                best_by_precision[key] = r
+            elif r_bin == cur_bin and (r.mtime or "") > (cur.mtime or ""):
+                best_by_precision[key] = r
+        deduped = list(best_by_precision.values())
+
         # Stable order: by display label (deterministic UI rendering).
-        out.sort(key=lambda r: r.label or "")
-        return tuple(out)
+        deduped.sort(key=lambda r: r.label or "")
+        return tuple(deduped)
+
+    def detect_unnormalized_aihub(
+        self, model_workdir: str
+    ) -> UnnormalizedAihubHint | None:
+        """Detect a downloaded-but-not-normalized AI Hub model in *model_workdir*.
+
+        Called only when the normal workspace scan found NO variants under
+        ``output/`` — turns a blank Import panel into actionable guidance.
+
+        Heuristic (conservative; only fires on a clear AI Hub signature):
+          * ``output/`` is missing or holds no recognized variant, AND
+          * somewhere under the workdir (typically a nested
+            ``<model>-qnn_dlc-*`` subfolder) there is a ``.dlc``/``.bin`` weight
+            ≥ the min-size threshold that sits next to a ``metadata.json``.
+
+        Returns the top-level workdir + the detected weight path, or ``None``
+        when no such un-normalized AI Hub package is present (so a genuinely
+        empty / unrelated workdir stays empty — no false guidance).
+
+        Deliberately does NOT normalize anything: normalization infers fields
+        (output.type, num_classes, preprocessing) that need human confirmation
+        (see aihub_to_manifest.py GuessLog), so auto-running it would treat
+        guesses as authoritative. We only surface "here is an un-normalized
+        model — run Step 6.5" guidance.
+        """
+        try:
+            workdir = Path(model_workdir).resolve()
+        except (OSError, ValueError):
+            return None
+        if not workdir.is_dir():
+            return None
+
+        output_dir = workdir / "output"
+
+        best: Path | None = None
+        best_size = -1
+        # Depth-limited scan: AI Hub packages land either directly in the
+        # workdir or one nested folder down (e.g. ``<model>-qnn_dlc-<prec>/``).
+        # We look at the workdir top level + its immediate subdirectories only
+        # (depth ≤ 2) — this is enough for the AI Hub layout and avoids walking
+        # an arbitrarily deep tree (a large workspace with .venv / node_modules
+        # / nested caches would make an unbounded rglob slow). ``output/`` is
+        # skipped (already covered by the normal variant scan).
+        search_dirs: list[Path] = [workdir]
+        try:
+            search_dirs.extend(
+                d for d in workdir.iterdir() if d.is_dir() and d != output_dir
+            )
+        except OSError:
+            return None
+        for d in search_dirs:
+            try:
+                entries = list(d.iterdir())
+            except OSError:
+                continue
+            for cand in entries:
+                try:
+                    if not cand.is_file():
+                        continue
+                    if cand.suffix.lower() not in self._WEIGHT_SUFFIXES:
+                        continue
+                    size = cand.stat().st_size
+                    if size < _SCAN_BIN_MIN_BYTES:
+                        continue
+                    # Require an AI Hub signature nearby: a metadata.json in the
+                    # same folder (how AI Hub packages ship). This keeps the
+                    # heuristic from firing on unrelated stray .bin files.
+                    if not (cand.parent / "metadata.json").is_file():
+                        continue
+                    if size > best_size:
+                        best_size = size
+                        best = cand
+                except OSError:
+                    continue
+
+        if best is None:
+            return None
+        return UnnormalizedAihubHint(
+            model_workdir=str(workdir),
+            detected_weight=str(best.as_posix()),
+        )
 
 
-# ---------------------------------------------------------------------------
-# Batch run
-# ---------------------------------------------------------------------------
 @dataclass(frozen=True, slots=True, kw_only=True)
 class BatchRunRequest:
     """One row of a ``POST /batch`` request."""

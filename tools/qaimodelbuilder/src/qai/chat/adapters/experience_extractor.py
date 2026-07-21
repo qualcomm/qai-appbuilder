@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """LLM-powered experience extractor (PR-091, audit H-6).
 
 Migrates :func:`backend.experience_extractor._try_extract_experience`

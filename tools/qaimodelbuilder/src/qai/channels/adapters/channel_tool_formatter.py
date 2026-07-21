@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Rich tool-progress formatter for channel push notifications (S9 PR-093).
 
 Restores the per-tool icon + path-extraction formatting that the legacy

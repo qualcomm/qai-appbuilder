@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Inbound Feishu image decoder (PR-097 §2 R-7).
 
 Restores multi-modal image handling for inbound Feishu messages —

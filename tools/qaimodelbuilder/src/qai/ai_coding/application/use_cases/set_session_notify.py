@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Use case: bind / clear a session's dual-channel notify target.
 
 Backs the legacy ``POST /api/cc/sessions/{id}/wechat_notify`` +

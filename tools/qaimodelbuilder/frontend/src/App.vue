@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <script setup lang="ts">
 /**
  * Top-level layout shell.
@@ -21,7 +26,9 @@ import { useChatTabsStore } from "@/stores/chatTabs";
 import { useConversationsStore } from "@/stores/conversations";
 import { useAuthStore } from "@/stores/auth";
 import { useServiceStore } from "@/stores/service";
+import { useCloudModelPermissionsStore } from "@/stores/cloudModelPermissions";
 import { useTheme } from "@/composables/useTheme";
+import { useFontSize } from "@/composables/useFontSize";
 import { useCommandPalette } from "@/composables/useCommandPalette";
 import { useToast } from "@/composables/useToast";
 import { useKeymap, type KeymapBinding } from "@/composables/keymap";
@@ -56,6 +63,11 @@ const auth = useAuthStore();
 // Edition flag (internal vs external) — fetched once at mount and consumed
 // by the guided "missing cloud API key" flow (useCloudModelStatus.openApiKeyFlow).
 const service = useServiceStore();
+// Cloud-model permission snapshot — populated once at mount from the
+// backend's lifespan-scanned per-model permissions. Fail-open: if the fetch
+// fails the store stays empty and every model shows in the dropdown (matches
+// the never-preset-unavailable UX principle).
+const cloudModelPermissions = useCloudModelPermissionsStore();
 // Toast host is mounted globally (AppToastHost); use it for the
 // welcome-back message after a successful sign-in.
 const toast = useToast();
@@ -108,6 +120,7 @@ registerCloudModelSettingsNavigator(() => {
 });
 
 useTheme();
+useFontSize();
 
 // Mount the command palette's Escape-to-close listener + command registry;
 // the palette overlay is already mounted. Opening is bound to Ctrl/Cmd+.
@@ -328,6 +341,16 @@ function startAppMount(): void {
   // internal-vs-external branch (useCloudModelStatus.openApiKeyFlow); on
   // failure `isInternal` stays null and the flow routes to Settings.
   void service.fetchEdition();
+
+  // Pull the cloud-model permission snapshot once at app mount. The backend
+  // lifespan spawns the actual probe scan asynchronously (one GET /v1/models
+  // per configured cloud provider, comparing configured vs returned model
+  // ids to derive per-model allowed/denied). Best-effort and fail-open: a
+  // network error / not-yet-populated snapshot leaves the store empty →
+  // every model shows in the dropdown (never-preset-unavailable). Fired
+  // AFTER `service.fetchEdition()` so it does not compete with the
+  // edition-detection round-trip on a cold start (both are non-blocking).
+  void cloudModelPermissions.refresh();
 
   // Connect the global SSE stream (`/api/events`). V1 connected this on app
   // mount (useChat.js:connectEventStream). V2 consumes the `reboot` event here

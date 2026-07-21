@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """SQLite / non-streaming adapters for the App Builder context (PR-045).
 
 Each adapter implements one or more of the Ports defined in
@@ -26,7 +31,7 @@ from .feedback_repository import SqliteFeedbackRepository
 from .run_repository import SqliteRunRepository
 from .share_repository import SqliteShareRepository
 from .voice_pref_repository import SqliteVoicePrefRepository
-from .worker_status import StaticWorkerStatusAdapter, StickyWorkerStatusAdapter
+from .worker_status import StickyWorkerStatusAdapter
 
 __all__ = [
     "SqliteAppModelRepository",
@@ -35,6 +40,5 @@ __all__ = [
     "SqliteRunRepository",
     "SqliteShareRepository",
     "SqliteVoicePrefRepository",
-    "StaticWorkerStatusAdapter",
     "StickyWorkerStatusAdapter",
 ]

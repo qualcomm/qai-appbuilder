@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 // =============================================================================
 // i18n locale sub-file — 手工维护，UTF-8（无 BOM）。
 //
@@ -38,6 +43,18 @@ const codePersona = {
   },
   discardConfirm: "You have unsaved changes. Discard them?",
   editPrompts: "Edit prompts...",
+  groups: {
+    command: "Command execution",
+    commandDesc: "Run shell commands and background processes",
+    edit: "File editing",
+    editDesc: "Create, modify, and patch files",
+    label: "Tool permissions",
+    read: "File reading",
+    readDesc: "Read files, search content, browse web",
+    resetGroups: "Reset permissions",
+    restrictedHint: "Restricted to: {pattern}",
+    other: "Other",
+  },
   loadFailed: "Failed to load coding personas",
   loading: "Loading personas...",
   menuTitle: "Coding Mode",

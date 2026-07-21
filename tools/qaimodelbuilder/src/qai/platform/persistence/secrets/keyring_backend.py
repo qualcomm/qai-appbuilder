@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """KeyringSecretStore — OS keyring (Credential Manager / Keychain / Secret Service).
 
 The :mod:`keyring` library exposes a uniform ``set_password`` /

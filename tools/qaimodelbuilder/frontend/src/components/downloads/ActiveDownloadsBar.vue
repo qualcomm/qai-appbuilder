@@ -1,4 +1,9 @@
 <!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
+<!--
   ActiveDownloadsBar — V1 floating summary strip above the tabs.
 
   Shown only while at least one task is `preparing` / `downloading`. Lists

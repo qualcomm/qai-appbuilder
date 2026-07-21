@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Chat REST routes (JSON, no streaming) — PR-033 stage A + PR-042 + PR-043.
 
 Mounted under ``/api/chat``. The aggregate router lives in
@@ -136,6 +141,15 @@ class ConversationSummary(BaseModel):
     # default False (AGENTS.md §3.1).
     pinned: bool = False
     favorite: bool = False
+    # Promote-ready turn-end detection result (migration 057). The backend
+    # detects at turn end (StreamChatUseCase._finalize_assistant_message) and
+    # persists it onto Conversation.detected_model; the frontend "Promote to
+    # App Builder" CTA reads it here with ZERO on-open disk scans. Shape:
+    #   {"workdir": str, "variants": [{"precision": str, "label": str}...],
+    #    "checked_at": "<iso8601>"}
+    # None = never detected (legacy / forward-compatible). Appended with
+    # default None (AGENTS.md §3.1); older frontends ignore the new field.
+    detected_model: dict | None = None
 
 
 class ConversationListResponse(BaseModel):
@@ -1152,6 +1166,10 @@ def _conversation_to_summary(item) -> ConversationSummary:  # type: ignore[no-un
         meta=c.meta,
         pinned=c.pinned,
         favorite=c.favorite,
+        # Present on the single-GET (full aggregate); the list projection loads
+        # a 6-col header without detected_model_json, so this is None there
+        # (the sidebar does not need it — only the promote CTA reads it).
+        detected_model=getattr(c, "detected_model", None),
     )
 
 
@@ -1287,6 +1305,10 @@ def build_router(*, container: "Container") -> APIRouter:
             meta=conv.meta,
             pinned=conv.pinned,
             favorite=conv.favorite,
+            # Promote-ready detection (migration 057): the frontend CTA reads
+            # this from the single-GET so opening a conversation needs 0 disk
+            # scans. None until the first turn-end detection persists it.
+            detected_model=getattr(conv, "detected_model", None),
         )
 
     @router.get(

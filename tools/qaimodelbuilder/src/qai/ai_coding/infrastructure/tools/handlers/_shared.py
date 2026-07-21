@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------
-# Copyright (c) 2024-2026 Qualcomm Innovation Center, Inc. All rights reserved.
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
 """Shared constants, schemas, and helpers for the tool handler family.
@@ -502,7 +502,11 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                 f"{AVAILABLE_TOOLS_SECTION}\n\n"
                 f"{PREFER_DEDICATED_TOOLS_SECTION}\n\n"
                 f"{WORKDIR_GUIDANCE_SECTION}\n\n"
-                f"{SHELL_NOTES_SECTION}"
+                f"{SHELL_NOTES_SECTION}\n\n"
+                "When invoking this tool, also fill the 'description' arg "
+                "with a brief phrase (a few words) naming the intent — the "
+                "chat UI renders it as the tool-card subtitle so the user "
+                "can follow along without having to expand every command."
             ),
             "parameters": {
                 "type": "object",
@@ -511,6 +515,20 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                     "command": {
                         "type": "string",
                         "description": "Command string to execute",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": (
+                            "A brief phrase naming what this call is for — "
+                            "shown as the tool-card subtitle in the chat so "
+                            "the user can follow the assistant's work at a "
+                            "glance without expanding each command. Aim for "
+                            "an action-first phrase (a few words is plenty), "
+                            "e.g. 'Install project dependencies', 'Run unit "
+                            "tests', 'List Python processes'. Optional but "
+                            "strongly encouraged for anything beyond a "
+                            "trivial one-liner."
+                        ),
                     },
                     "shell": {
                         "type": "string",
@@ -859,7 +877,11 @@ CLOUD_TOOL_DESCRIPTION_OVERRIDES: dict[str, dict[str, Any]] = {
             f"{SHELL_NOTES_SECTION}\n\n"
             "TRUNCATION: over-limit output is truncated and the full text "
             "written to a file (the notice explains how to retrieve it) — "
-            "do NOT shorten output yourself with head / tail / more."
+            "do NOT shorten output yourself with head / tail / more.\n\n"
+            "When invoking this tool, also fill the 'description' arg with "
+            "a brief phrase (a few words) naming the intent — the chat UI "
+            "renders it as the tool-card subtitle so the user can follow "
+            "along without having to expand every command."
         ),
         "param_descriptions": {
             "cwd": (
@@ -867,6 +889,15 @@ CLOUD_TOOL_DESCRIPTION_OVERRIDES: dict[str, dict[str, Any]] = {
                 "in-command cd / Set-Location."
             ),
             "shell": SHELL_ALIAS_DESCRIPTION,
+            "description": (
+                "A brief phrase naming what this call is for — shown as "
+                "the tool-card subtitle in the chat so the user can follow "
+                "the assistant's work at a glance without expanding each "
+                "command. Aim for an action-first phrase (a few words is "
+                "plenty), e.g. 'Install project dependencies', 'Run unit "
+                "tests', 'List Python processes'. Optional but strongly "
+                "encouraged for anything beyond a trivial one-liner."
+            ),
         },
     },
     "webfetch": {
@@ -1436,54 +1467,26 @@ def get_workspace_base() -> str | None:
 # from ``container.repo_root``). ``None`` means "no APP_ROOT context" (e.g. a
 # bare unit test), in which case the placeholder is left verbatim (fail-safe —
 # never crash, never fabricate a path).
-_app_root_var: ContextVar[str | None] = ContextVar(
-    "qai_tool_app_root", default=None
+# ---------------------------------------------------------------------------
+# APP_ROOT / SKILL_DIR placeholder expansion (BC-shared).
+#
+# The ContextVar and the four helpers below are the *single* live definition
+# in the process — they live in ``qai.platform.skills.placeholders`` (shared
+# kernel) so both the ``ai_coding`` tool handlers and the ``chat`` skill
+# loader read the same binding without crossing a Bounded-Context boundary
+# (``.importlinter`` contract 3). We re-export them from here to keep this
+# module's long-standing public surface stable — ``apps.api.di``, the
+# ``handlers`` package ``__init__``, ``read_write.py``, and unit tests all
+# still import ``set_app_root`` / ``get_app_root`` / ``reset_app_root`` /
+# ``expand_skill_placeholders`` from this module.
+# ---------------------------------------------------------------------------
+from qai.platform.skills.placeholders import (
+    _app_root_var,
+    expand_skill_placeholders,
+    get_app_root,
+    reset_app_root,
+    set_app_root,
 )
-
-
-def set_app_root(app_root: str | None) -> object:
-    """Bind the per-request install/repo root (``${APP_ROOT}``); returns token.
-
-    Pass the token to :func:`reset_app_root` once the request completes. A
-    blank / ``None`` value clears the binding.
-    """
-    cleaned = (app_root or "").strip() or None
-    return _app_root_var.set(cleaned)
-
-
-def reset_app_root(token: object) -> None:
-    """Restore the APP_ROOT binding to its previous value."""
-    try:
-        _app_root_var.reset(token)  # type: ignore[arg-type]
-    except (ValueError, LookupError):  # pragma: no cover — defensive
-        pass
-
-
-def get_app_root() -> str | None:
-    """Return the current per-request APP_ROOT, or ``None``."""
-    return _app_root_var.get()
-
-
-def expand_skill_placeholders(body: str, *, skill_dir: str | None = None) -> str:
-    """Expand SKILL.md path placeholders in ``body`` to real absolute paths.
-
-    Handles the two placeholders a SKILL.md may carry so that a SKILL loaded on
-    demand (``read`` / ``skill`` tool) resolves the same way it would if it had
-    been injected into the system prompt by ``FeatureSkillProvider``:
-
-    * ``${APP_ROOT}``  → the per-request install/repo root (:func:`get_app_root`).
-    * ``${SKILL_DIR}`` → the SKILL.md file's own parent directory (``skill_dir``).
-
-    A placeholder whose value is unavailable (no bound APP_ROOT / no
-    ``skill_dir``) is left verbatim — never crash, never fabricate a path.
-    """
-    if "${APP_ROOT}" in body:
-        app_root = get_app_root()
-        if app_root:
-            body = body.replace("${APP_ROOT}", app_root)
-    if skill_dir and "${SKILL_DIR}" in body:
-        body = body.replace("${SKILL_DIR}", skill_dir)
-    return body
 
 
 # ---------------------------------------------------------------------------

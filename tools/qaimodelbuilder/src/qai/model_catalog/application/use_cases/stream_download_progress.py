@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``StreamDownloadProgressUseCase`` -- relay engine progress to callers.
 
 The use case bridges the engine's :meth:`stream_progress` AsyncIterator

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Filesystem-mtime watcher driving :class:`UpdatePolicyUseCase`.
 
 PR-092 §2.1 C-9 / §17.5 #10 — restores the legacy policy hot-reload

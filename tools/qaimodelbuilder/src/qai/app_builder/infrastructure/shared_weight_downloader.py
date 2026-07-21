@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Adapter loading the shared ``weight_downloader`` helper by file path.
 
 ``factory/app_builder/shared/weight_downloader.py`` holds the single

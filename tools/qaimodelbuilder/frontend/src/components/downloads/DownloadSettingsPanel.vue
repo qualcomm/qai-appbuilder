@@ -1,4 +1,9 @@
 <!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
+<!--
   DownloadSettingsPanel — V1 collapsible "Download Settings" region.
 
   Edits the forge_config download section:
@@ -19,6 +24,9 @@ import { useI18n } from "vue-i18n";
 import type { DownloadSettings } from "@/types/downloads";
 import { hasUnsafePath } from "@/composables/downloads/format";
 import ToggleSwitch from "@/components/chat/service-config/ToggleSwitch.vue";
+// Shared help-manual affordance — see components/common/HelpButton.vue.
+// Docs live under `frontend/src/help-content/download-settings.<locale>.md`.
+import HelpButton from "@/components/common/HelpButton.vue";
 
 interface Props {
   settings: DownloadSettings;
@@ -92,18 +100,29 @@ function clamp(n: number, min: number, max: number): number {
     <!-- V1 .dc-settings-panel: bordered card; header is a full-width
          clickable bar; body (border-top) appears when expanded. -->
     <div class="dc-settings__panel">
-      <button
-        type="button"
-        class="dc-settings__toggle"
-        :aria-expanded="expanded"
-        @click="toggle"
-      >
-        <span
-          class="dc-settings__chevron"
-          :class="{ 'is-open': expanded }"
-        >▶</span>
-        {{ t("downloads.settings") }}
-      </button>
+      <div class="dc-settings__header-row">
+        <button
+          type="button"
+          class="dc-settings__toggle"
+          :aria-expanded="expanded"
+          @click="toggle"
+        >
+          <span
+            class="dc-settings__chevron"
+            :class="{ 'is-open': expanded }"
+          >▶</span>
+          {{ t("downloads.settings") }}
+        </button>
+        <!-- Help affordance for aria2c / proxy / SSL / save_dir safety.
+             Sits outside the toggle button so clicking ℹ️ never
+             accidentally collapses/expands the settings section. External
+             link points at the aria2 project homepage. -->
+        <HelpButton
+          doc-key="download-settings"
+          external-url="https://aria2.github.io/"
+          size="sm"
+        />
+      </div>
 
       <div
         v-if="expanded"
@@ -357,10 +376,26 @@ function clamp(n: number, min: number, max: number): number {
   overflow: hidden;
 }
 
+/* Header row: the collapsible toggle takes all remaining width, HelpButton
+ * sits at the right edge. Sharing the header bar background so the ℹ️
+ * affordance reads as part of the header rather than as an orphaned icon
+ * floating above the panel. */
+.dc-settings__header-row {
+  display: flex;
+  align-items: stretch;
+  background: var(--bg-secondary);
+}
+
+.dc-settings__header-row :deep(.help-btn) {
+  align-self: center;
+  margin-right: var(--space-2);
+}
+
 /* V1 .dc-settings-header: full-width clickable bar, bg-secondary, hover bg-tertiary */
 .dc-settings__toggle {
   display: flex;
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   align-items: center;
   gap: var(--space-2);
   background: var(--bg-secondary);

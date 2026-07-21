@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``qai build`` — Model Builder agentic chat session (interactive REPL, D4/L1).
 
 Desktop App Plan §2.1.1 group L1 + cli-interactive-design §3.2 / §3.4. This is

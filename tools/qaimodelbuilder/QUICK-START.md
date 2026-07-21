@@ -11,7 +11,23 @@
 
 ---
 
-## Two modes at a glance
+## Just want to use it? (No coding)
+
+```cmd
+Setup.bat
+Start.bat
+```
+
+That's it. `Setup.bat` installs everything automatically (first time only); `Start.bat`
+launches the WebUI and opens your browser. Start chatting to build an app, convert a model,
+or run one from AI Hub.
+
+> **First screen is a login.** The WebUI is gated behind Okta single sign-on (on by default),
+> so you sign in before you reach the tool. Disable it only for local `pnpm dev`.
+
+---
+
+## For developers — two modes at a glance
 
 | Mode | Scripts | Who it's for | First-time prep | Daily run |
 |---|---|---|---|---|

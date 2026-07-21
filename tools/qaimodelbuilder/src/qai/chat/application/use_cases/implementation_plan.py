@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Implementation plan data model — FeatureItem + ImplementationPlan (DISC-1 二期-step1).
 
 DISC-1 二期 turns a converged discussion into a concrete, persistable plan:

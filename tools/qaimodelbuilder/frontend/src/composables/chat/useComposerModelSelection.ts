@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * `useComposerModelSelection` — chat-composer model selector logic
  * (ARCH-1 cohesion split, extracted verbatim from `ChatComposer.vue`).

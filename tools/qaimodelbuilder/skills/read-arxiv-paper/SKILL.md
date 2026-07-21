@@ -1,7 +1,7 @@
 ---
-name: read-arxiv-paper
+name: Read arXiv Paper
 description: Fetch and summarize academic papers from arxiv.org. Use for arxiv.org paper URLs (e.g. arxiv.org/abs/...). Triggers: 'read/summarize this arxiv paper', 'read paper', 'summarize paper'. NOTE: arxiv URLs must use this skill, NOT summarizenews.
-tags: arxiv, paper, research, summarize.
+tags: arxiv, paper, research, summarize
 use_for: Reading arxiv papers, summarizing research papers, extracting paper key points
 ---
 

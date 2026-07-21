@@ -1,21 +1,17 @@
-"""Worker-status adapters (PR-045 + PR-301).
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
 
-Two adapters live here:
-
-* :class:`StaticWorkerStatusAdapter` — PR-045 inline-runner stub that
-  returns a fixed snapshot. Kept verbatim because tests and DI
-  fallbacks still rely on it (and the v2.7 §3.1 field-name lock means
-  we don't rename the class).
+"""Worker-status adapter (PR-301).
 
 * :class:`StickyWorkerStatusAdapter` — PR-301 real adapter that reads
   state from a live :class:`StickyWorkerHost` instance and projects it
   onto the SSOT :class:`WorkerPoolStatus` shape (loaded_models[],
   alive, multimodel, active_model_id, state).
 
-Both adapters satisfy the same
-:class:`qai.app_builder.application.ports.WorkerStatusPort` Protocol so
-DI can swap between them based on whether sticky-worker is enabled at
-spawn time.
+It satisfies the
+:class:`qai.app_builder.application.ports.WorkerStatusPort` Protocol.
 """
 
 from __future__ import annotations
@@ -32,44 +28,8 @@ if TYPE_CHECKING:  # pragma: no cover
     from qai.app_builder.infrastructure.sticky_worker import StickyWorkerHost
 
 __all__ = [
-    "StaticWorkerStatusAdapter",
     "StickyWorkerStatusAdapter",
 ]
-
-
-class StaticWorkerStatusAdapter:
-    """Return a fixed :class:`WorkerPoolStatus`.
-
-    Constructor knobs:
-
-    * ``total_workers`` (default ``1``);
-    * ``busy_workers`` (default ``0``);
-    * ``queued_runs`` (default ``0``).
-
-    The defaults model the inline-runner case used by the rest of
-    PR-045's wiring; tests can pass concrete numbers to drive the
-    underlying use case through both happy and saturated branches.
-    """
-
-    __slots__ = ("_total", "_busy", "_queued")
-
-    def __init__(
-        self,
-        *,
-        total_workers: int = 1,
-        busy_workers: int = 0,
-        queued_runs: int = 0,
-    ) -> None:
-        self._total = int(total_workers)
-        self._busy = int(busy_workers)
-        self._queued = int(queued_runs)
-
-    async def status(self) -> WorkerPoolStatus:
-        return WorkerPoolStatus(
-            total_workers=self._total,
-            busy_workers=self._busy,
-            queued_runs=self._queued,
-        )
 
 
 class StickyWorkerStatusAdapter:

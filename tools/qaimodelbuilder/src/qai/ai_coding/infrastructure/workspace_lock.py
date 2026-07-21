@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """File-system-backed :class:`WorkspaceLockPort` (PR-046).
 
 Replaces the in-memory ``_FakeWorkspaceLock`` from S3 with a

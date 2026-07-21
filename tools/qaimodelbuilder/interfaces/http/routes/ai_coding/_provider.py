@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Per-provider handler registration (``_register_provider_routes``).
 
 The 11 shared CC/OC endpoints. Extracted verbatim from the former

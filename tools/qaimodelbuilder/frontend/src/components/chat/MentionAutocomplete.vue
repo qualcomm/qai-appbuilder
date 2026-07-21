@@ -1,4 +1,9 @@
 <!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
+<!--
   MentionAutocomplete.vue — `@<name>` popover for the chat composer.
 
   Pure presentation: ALL logic lives in :composable:`useMentionAutocomplete`.

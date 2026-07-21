@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Convergence-control feature flags — central constants + resolver (DISC-2 P1).
 
 The "discussion convergence control" feature (DISC-2 二期) introduces four

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """HTTP routes for the ``qai.user_prefs`` bounded context (PR-601a/b/606).
 
 Routes (PR-601a backbone):
@@ -476,9 +481,9 @@ def build_router(*, container: Container) -> APIRouter:
     # ===========================================================================
 
     @router.get("/api/code-personas")
-    async def get_code_personas() -> dict[str, Any]:
+    async def get_code_personas(locale: str | None = None) -> dict[str, Any]:
         doc = await services.load_document_use_case.execute(CODE_PERSONAS_KEY)
-        selected, personas = CodePersonaManager.get_all_personas(doc)
+        selected, personas = CodePersonaManager.get_all_personas(doc, locale=locale)
         return {"selected": selected, "personas": personas}
 
     @router.post("/api/code-personas/select")
@@ -516,22 +521,44 @@ def build_router(*, container: Container) -> APIRouter:
     async def override_code_persona(
         persona_id: str, body: dict[str, Any]
     ) -> dict[str, Any]:
-        prompt = str(body.get("prompt", ""))
-        if len(prompt) > MAX_PROMPT_LENGTH:
-            raise DomainError(
-                "user_prefs.code_personas.prompt_too_long",
-                f"Prompt too long: {len(prompt)} chars "
-                f"(max {MAX_PROMPT_LENGTH})",
-            )
+        prompt = body.get("prompt")
+        groups = body.get("groups")
         doc = await services.load_document_use_case.execute(CODE_PERSONAS_KEY)
-        try:
-            updated = CodePersonaManager.override_prompt(doc, persona_id, prompt)
-        except ValueError as exc:
+        # Apply prompt override if provided.
+        if prompt is not None:
+            prompt = str(prompt)
+            if len(prompt) > MAX_PROMPT_LENGTH:
+                raise DomainError(
+                    "user_prefs.code_personas.prompt_too_long",
+                    f"Prompt too long: {len(prompt)} chars "
+                    f"(max {MAX_PROMPT_LENGTH})",
+                )
+            try:
+                doc = CodePersonaManager.override_prompt(doc, persona_id, prompt)
+            except ValueError as exc:
+                raise ValidationError(
+                    "user_prefs.code_personas.invalid_persona", str(exc)
+                ) from exc
+        # Apply groups override if provided.
+        if groups is not None:
+            if not isinstance(groups, list):
+                raise ValidationError(
+                    "user_prefs.code_personas.invalid_groups",
+                    "groups must be an array",
+                )
+            try:
+                doc = CodePersonaManager.override_groups(doc, persona_id, groups)
+            except ValueError as exc:
+                raise ValidationError(
+                    "user_prefs.code_personas.invalid_groups", str(exc)
+                ) from exc
+        if prompt is None and groups is None:
             raise ValidationError(
-                "user_prefs.code_personas.invalid_persona", str(exc)
-            ) from exc
+                "user_prefs.code_personas.empty_body",
+                "Request body must contain at least one of: prompt, groups",
+            )
         await services.save_document_use_case.execute(
-            CODE_PERSONAS_KEY, updates=updated
+            CODE_PERSONAS_KEY, updates=doc
         )
         return {"status": "saved"}
 
@@ -584,23 +611,43 @@ def build_router(*, container: Container) -> APIRouter:
     async def update_code_persona(
         persona_id: str, body: dict[str, Any]
     ) -> dict[str, Any]:
-        """Update a persona's prompt via PUT (alias for POST override)."""
-        prompt = str(body.get("prompt", ""))
-        if len(prompt) > MAX_PROMPT_LENGTH:
-            raise DomainError(
-                "user_prefs.code_personas.prompt_too_long",
-                f"Prompt too long: {len(prompt)} chars "
-                f"(max {MAX_PROMPT_LENGTH})",
-            )
+        """Update a persona's prompt and/or groups via PUT."""
+        prompt = body.get("prompt")
+        groups = body.get("groups")
         doc = await services.load_document_use_case.execute(CODE_PERSONAS_KEY)
-        try:
-            updated = CodePersonaManager.override_prompt(doc, persona_id, prompt)
-        except ValueError as exc:
+        if prompt is not None:
+            prompt = str(prompt)
+            if len(prompt) > MAX_PROMPT_LENGTH:
+                raise DomainError(
+                    "user_prefs.code_personas.prompt_too_long",
+                    f"Prompt too long: {len(prompt)} chars "
+                    f"(max {MAX_PROMPT_LENGTH})",
+                )
+            try:
+                doc = CodePersonaManager.override_prompt(doc, persona_id, prompt)
+            except ValueError as exc:
+                raise ValidationError(
+                    "user_prefs.code_personas.invalid_persona", str(exc)
+                ) from exc
+        if groups is not None:
+            if not isinstance(groups, list):
+                raise ValidationError(
+                    "user_prefs.code_personas.invalid_groups",
+                    "groups must be an array",
+                )
+            try:
+                doc = CodePersonaManager.override_groups(doc, persona_id, groups)
+            except ValueError as exc:
+                raise ValidationError(
+                    "user_prefs.code_personas.invalid_groups", str(exc)
+                ) from exc
+        if prompt is None and groups is None:
             raise ValidationError(
-                "user_prefs.code_personas.invalid_persona", str(exc)
-            ) from exc
+                "user_prefs.code_personas.empty_body",
+                "Request body must contain at least one of: prompt, groups",
+            )
         await services.save_document_use_case.execute(
-            CODE_PERSONAS_KEY, updates=updated
+            CODE_PERSONAS_KEY, updates=doc
         )
         return {"status": "saved", "persona_id": persona_id}
 

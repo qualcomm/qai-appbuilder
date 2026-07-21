@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 // =============================================================================
 // i18n locale sub-file — 手工维护，UTF-8（无 BOM）。
 //
@@ -61,6 +66,10 @@ const appBuilder = {
     step3: "生成并预览——应用会在新的浏览器标签页中打开",
     noModelHint: "尚未选择模型——请在下方的“模型”菜单中选择。",
     modelSelectedHint: "正在使用：{names}",
+    // 步骤 1 下的次级说明（feedback 7C）：模型还没转换时，指引用户前往
+    // Model Builder。
+    step1NeedConversion: "如果模型还没转换，先去",
+    step1GoToModelBuilder: "Model Builder",
     chipPrompt:
       "为 [{model}] 模型构建一个 WebUI 应用：提供输入控件，通过 HTTP API 运行推理，并展示结果。",
     chipHintText: "例如输入：“{text}”。",

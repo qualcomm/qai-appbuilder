@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``qai install-*`` / ``qai uninstall`` / ``qai compile-factory`` — thin wrappers.
 
 Desktop App Plan §2.1.1 group C. Each subcommand is a one-line bridge to

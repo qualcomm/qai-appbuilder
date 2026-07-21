@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Manifest / candidate / accuracy / import-meta JSON builders.
 
 Direct port of:
@@ -191,7 +196,14 @@ def build_manifest_dict(
             "timeoutMs": 120000,
         },
         "skill": {
-            "enabled": False,
+            # P4：SKILL.md 由 ``qai_pack_exporter._write_skill`` (Step 8.5) 自动
+            # 生成，包含 pack-specific 的 I/O + weight-resolver 指引。默认
+            # enabled=True，让 App Builder chat 的 ``ResolveSkillFilesUseCase``
+            # 把这份 SKILL 注入到系统提示，Agent 就能直接看到用户 pack 的
+            # 用法说明；否则 Step 8.5 生成的文件就成了死代码
+            # （``skill_and_schema.py`` 的 ``_resolve_pack_skill`` 会因
+            # ``not skill.enabled`` 直接跳过）。用户想控制 prompt budget 可以在导入后手工改回 False。
+            "enabled": True,
             "file": "SKILL.md",
         },
         "capabilities": {

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """GoMaster online REST/stream capability-proxy routes — /api/gomaster/*.
 
 These BFF proxy routes back the frontend「GoMaster 在线」panels (graph optimize

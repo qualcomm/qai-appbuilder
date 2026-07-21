@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * usePromoteToAppBuilder — Model Builder → App Builder import logic.
  *
@@ -24,9 +29,45 @@ import {
   importCommit,
   importRollback,
   type BinScanResultDTO,
+  type NeedsNormalizeDTO,
   type ImportPlanItemDTO,
 } from "@/api/appBuilderImport";
 import { ApiError } from "@/api";
+
+// ── module-level "user generated a Pack for this workdir" registry ──────────
+// Records the workdirs the user has ACTIVELY generated an App Builder Pack for
+// during this browser session. Lives at module scope (NOT inside the
+// composable) so it survives:
+//   * closing + reopening the promote panel (the Card is v-if/v-show toggled),
+//   * the composable being re-instantiated when the Card component rebuilds
+//     (mode switch / tab switch).
+// Keyed by workdir so different models stay isolated. This is what lets
+// `showCommitCard` show "generated / ready to import" again after reopening —
+// instead of falling back to "re-generate" — WITHOUT reviving the old
+// "any on-disk app_pack auto-jumps to Ready" behaviour (a workdir only enters
+// this set via a real generatePack() success in THIS session; a stale on-disk
+// app_pack from another session is NOT in the set, preserving the guard).
+const _generatedWorkdirs = new Set<string>();
+// Reactivity trigger: a plain Set is not tracked by `computed`, so bump this
+// ref on every add/delete to force dependent computeds to re-evaluate (same
+// pattern as usePromoteReadyDetection's dismissBump).
+const _generatedBump = ref(0);
+
+function _markGenerated(workdir: string): void {
+  if (workdir === "") return;
+  _generatedWorkdirs.add(workdir);
+  _generatedBump.value++;
+}
+
+function _unmarkGenerated(workdir: string): void {
+  if (_generatedWorkdirs.delete(workdir)) _generatedBump.value++;
+}
+
+function _hasGenerated(workdir: string): boolean {
+  // Touch the bump ref so this read is reactive inside a computed.
+  void _generatedBump.value;
+  return workdir !== "" && _generatedWorkdirs.has(workdir);
+}
 
 /** One detected precision variant (workspace branch checklist row). */
 export interface VariantRow {
@@ -87,6 +128,11 @@ export interface UsePromoteToAppBuilder {
   refresh: () => Promise<void>;
   // ── workspace (multi-variant) branch ──
   readonly variants: Ref<VariantRow[]>;
+  /** Set when the scan found NO `output/` variants but detected a downloaded-
+   *  but-not-normalized AI Hub model in the workdir. Drives the card's
+   *  "run Step 6.5 to normalize" guidance (instead of a blank empty state).
+   *  `null` in every normal case (variants found, or genuinely empty). */
+  readonly needsNormalize: Ref<NeedsNormalizeDTO | null>;
   readonly checkedPrecisions: Ref<string[]>;
   readonly defaultPrecision: Ref<string>;
   readonly scanLoading: Ref<boolean>;
@@ -142,23 +188,23 @@ export function usePromoteToAppBuilder(
   // State-Truth-First reading: the "real state" here is not just
   // "does app_pack exist on disk" but "did the current user consciously
   // create it via the current workflow" — a distinction the disk cannot
-  // record. We record it in-session and expose an "existing pack →
-  // Import" escape hatch only through explicit user action (future
-  // "skip precision" link if needed; today the ↻ refresh reveals the
-  // candidate for advanced users).
-  const userGeneratedThisSession = ref(false);
+  // record. We record it in a MODULE-LEVEL registry keyed by workdir (see
+  // `_generatedWorkdirs` at module top) so the "generated" fact survives the
+  // Card being closed/reopened or the composable being re-instantiated
+  // (mode/tab switch) — the previous instance-level `ref` was lost on close,
+  // which forced the user back to "re-generate" every reopen.
   // The commit-stage card renders only when:
   //   (1) a candidate exists on disk (backend dry-run resolved one), AND
   //   (2) the user has NOT asked to re-pick precision (existing V2 flag), AND
-  //   (3) the user has clicked Generate in THIS session (new gate above).
+  //   (3) the user has generated a Pack for THIS workdir in THIS session.
   // Condition (3) enforces the "Generate-first" ordering the user
-  // requested — a disk-residue app_pack no longer auto-jumps past the
-  // pick-precision stage.
+  // requested — a disk-residue app_pack (from another session, not generated
+  // here) no longer auto-jumps past the pick-precision stage.
   const showCommitCard = computed(
     () =>
       hasCandidates.value &&
       !forceVariantPicker.value &&
-      userGeneratedThisSession.value,
+      _hasGenerated(sessionModelWorkdir.value),
   );
   // V1 parity: tracks whether a successful dry-run (Validate) just produced
   // these planItems AND they are genuinely importable (no blocking errors), so
@@ -178,6 +224,7 @@ export function usePromoteToAppBuilder(
 
   // ── workspace branch ──
   const variants = ref<VariantRow[]>([]);
+  const needsNormalize = ref<NeedsNormalizeDTO | null>(null);
   const checkedPrecisions = ref<string[]>([]);
   const defaultPrecision = ref("");
   const scanLoading = ref(false);
@@ -269,9 +316,9 @@ export function usePromoteToAppBuilder(
     // Strict Generate-first ordering (needs-3): re-picking precision means
     // the currently-generated Pack is being abandoned; drop the session flag
     // so ``showCommitCard`` won't auto-jump back to Figure 1 the moment the
-    // user finishes ticking checkboxes. The flag will be re-set only when
+    // user finishes ticking checkboxes. The workdir is re-marked only when
     // the new Generate succeeds.
-    userGeneratedThisSession.value = false;
+    _unmarkGenerated(sessionModelWorkdir.value);
     void fetchVariants();
   }
 
@@ -316,6 +363,7 @@ export function usePromoteToAppBuilder(
   // ── workspace branch actions ─────────────────────────────────────────────
   function resetVariants(): void {
     variants.value = [];
+    needsNormalize.value = null;
     checkedPrecisions.value = [];
     defaultPrecision.value = "";
   }
@@ -341,7 +389,7 @@ export function usePromoteToAppBuilder(
       // Only rows the backend decoded into a precision variant are
       // checklist candidates (workspace mode). Legacy listing rows
       // (no precision) are ignored here.
-      const rows: VariantRow[] = res.results
+      const decoded: VariantRow[] = res.results
         .filter((r: BinScanResultDTO) => r.precision != null && r.label != null)
         .map((r: BinScanResultDTO) => ({
           precision: String(r.precision),
@@ -349,7 +397,24 @@ export function usePromoteToAppBuilder(
           sizeBytes: r.size_bytes,
           mtime: r.mtime ?? null,
         }));
+      // Deduplicate by precision (defensive — the backend already dedupes,
+      // but the picker keys selection/default by the precision STRING, so a
+      // duplicate precision row would share one checkbox state and toggle in
+      // lockstep). Keep the first occurrence per precision (backend order is
+      // already .bin-preferred / newest-first within a precision).
+      const seenPrec = new Set<string>();
+      const rows: VariantRow[] = [];
+      for (const r of decoded) {
+        if (seenPrec.has(r.precision)) continue;
+        seenPrec.add(r.precision);
+        rows.push(r);
+      }
       variants.value = rows;
+      // Surface the "un-normalized AI Hub model detected" hint ONLY when no
+      // variants were found (backend sets it only in that case). When variants
+      // exist it is null. Lets the card guide "run Step 6.5" instead of a
+      // blank empty state.
+      needsNormalize.value = rows.length === 0 ? (res.needs_normalize ?? null) : null;
       // Default selection: all checked, first as default (V1 parity).
       checkedPrecisions.value = rows.map((r) => r.precision);
       defaultPrecision.value = rows[0]?.precision ?? "";
@@ -434,8 +499,9 @@ export function usePromoteToAppBuilder(
         // across workdir switches (see the ``watch`` below) or full reloads,
         // so a stale ``app_pack/`` on disk can never trick the card into
         // Figure-1 (Ready) without the user consciously clicking Generate in
-        // the current session.
-        userGeneratedThisSession.value = true;
+        // the current session. Recorded in the module-level registry so it
+        // survives closing/reopening the panel and composable rebuilds.
+        _markGenerated(sessionModelWorkdir.value);
         await scanCandidates();
       } else {
         error.value =
@@ -479,10 +545,10 @@ export function usePromoteToAppBuilder(
       // Strict Generate-first ordering (needs-3): switching workspaces drops
       // the session-generated flag so the new workspace shows its
       // pick-precision stage first even if it has a stale ``app_pack/`` on
-      // disk. This is why the flag lives in-session (Vue ref) rather than
-      // on disk — the "conscious act of Generate" is per-session, not
-      // per-directory.
-      userGeneratedThisSession.value = false;
+      // disk. The "generated" fact now lives in a module-level registry keyed
+      // by workdir (`_generatedWorkdirs`), so switching workdir needs NO reset
+      // here — a different workdir simply isn't in the set (unless it too was
+      // generated this session, which is exactly the state we want to keep).
       void scanCandidates();
       void fetchVariants();
     },
@@ -520,6 +586,7 @@ export function usePromoteToAppBuilder(
     showVariantPickerStage,
     refresh,
     variants,
+    needsNormalize,
     checkedPrecisions,
     defaultPrecision,
     scanLoading,

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """SDK-backed Claude Code provider adapter (CC file checkpoint/rewind).
 
 This adapter mirrors V1's ``backend/ai_coding/session_manager.py`` model

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Inbound WeChat long-poll transport (S9 PR-093 §2.1 C-8).
 
 Restores the personal-WeChat inbound message reception that the legacy

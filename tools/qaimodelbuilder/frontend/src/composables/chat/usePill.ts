@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * `usePill` — CC / OC assistant-pill label, tooltip and interaction logic
  * (V1 `index.html:1191-1227` + `app.js:728-747`).

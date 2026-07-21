@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``Share`` value object — a public token referencing a single :class:`Run`.
 
 Models the legacy ``data/app_builder_share.db`` content and the schema

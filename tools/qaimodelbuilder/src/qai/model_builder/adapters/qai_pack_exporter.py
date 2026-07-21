@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Concrete :class:`PackExporterPort` adapter.
 
 Reproduces the 11-step pipeline from
@@ -57,7 +62,7 @@ from qai.model_builder.domain.value_objects import (
 )
 
 from ._assets_collector import collect_assets
-from ._io_contract_probe import extract_and_smoke_test_contract
+from ._io_contract_probe import extract_and_smoke_test_contract_subprocess
 from ._manifest_builder import (
     build_accuracy_summary,
     build_accuracy_summary_dict,
@@ -147,6 +152,21 @@ class QaiPackExporter:
     :attr:`skip_smoke_test`. Both knobs together let DI choose the
     right behaviour per deployment."""
 
+    smoke_test_interpreter_argv: tuple[str, ...] | None = None
+    """Launch prefix for the one-shot smoke-test child process.
+
+    Typically ``(str(python_exe),)`` where ``python_exe`` is the ARM64 venv
+    interpreter resolved via ``select_runner_interpreter`` so the child can
+    load ``qai_appbuilder`` + the QNN runtime. When ``None`` the probe defaults
+    to ``(sys.executable,)`` (dev / tests). DI wires the production value."""
+
+    smoke_test_env: dict[str, str] | None = None
+    """Full environment for the smoke-test child process.
+
+    DI merges the QAIRT SDK env (``QAIRT_ROOT`` etc.) + ``PATH`` extras onto
+    ``os.environ`` here (mirroring the sticky-worker spawn) so the child finds
+    the QNN DLLs. When ``None`` the probe copies the current ``os.environ``."""
+
     async def export(
         self,
         *,
@@ -194,7 +214,7 @@ class QaiPackExporter:
             log=log,
         )
         # Step 5: I/O contract extraction (smoke test).
-        io_contract = self._extract_io_contract(
+        io_contract = await self._extract_io_contract(
             default_bin=default_bin,
             log=log,
             errors=errors,
@@ -224,6 +244,20 @@ class QaiPackExporter:
             meta=meta,
             default_precision=default_precision,
             default_bin=default_bin,
+            pack_dir=layout.pack_dir,
+            log=log,
+            errors=errors,
+        )
+        # Step 8.5: SKILL.md skeleton — gives the App Builder chat Agent a
+        # pack-specific summary + a pointer to runner.py's ``_resolve_weights``
+        # for weight-path logic (P4 dual-root awareness).
+        # Without this, the runtime ``FilesystemSkillFileLoader`` finds
+        # nothing under either anchor and the LLM only sees the generic
+        # top-level SKILL, missing all pack-specific I/O guidance.
+        self._write_skill(
+            meta=meta,
+            default_precision=default_precision,
+            variants=variants,
             pack_dir=layout.pack_dir,
             log=log,
             errors=errors,
@@ -467,7 +501,7 @@ class QaiPackExporter:
             assets_dir=assets_dir,
         )
 
-    def _extract_io_contract(
+    async def _extract_io_contract(
         self,
         *,
         default_bin: Path,
@@ -483,6 +517,14 @@ class QaiPackExporter:
         enforcement (the documented legacy-Pack path) instead of rejecting an
         empty-lists placeholder with ``CONTRACT_MISMATCH``. We never fabricate
         a contract we did not actually validate (State-Truth-First).
+
+        The QNN native load + zero-tensor inference runs in a one-shot child
+        process (:func:`extract_and_smoke_test_contract_subprocess`) so native
+        ``printf`` output and any native crash stay isolated from this
+        long-lived service process. The success value and the raised domain
+        exceptions are identical to the in-process path, so the failure
+        semantics below (strict raise / non-strict degrade to ``None``) are
+        unchanged.
         """
         if self.skip_smoke_test:
             log.append(
@@ -492,14 +534,16 @@ class QaiPackExporter:
             )
             return None
         try:
-            io_contract = extract_and_smoke_test_contract(
+            io_contract = await extract_and_smoke_test_contract_subprocess(
                 default_bin,
                 shared_dir=self.qai_appbuilder_shared_dir,
+                interpreter_argv=self.smoke_test_interpreter_argv,
+                env=self.smoke_test_env,
             )
             log.append(
                 f"[INFO] Extracted I/O contract from "
-                f"{default_bin.name} via qai_appbuilder; smoke test "
-                "passed (zero-tensor inference returned without error)"
+                f"{default_bin.name} via qai_appbuilder (out-of-process); "
+                "smoke test passed (zero-tensor inference returned without error)"
             )
             return io_contract
         except Exception as exc:  # noqa: BLE001 — domain errors below
@@ -594,6 +638,152 @@ class QaiPackExporter:
             errors.append(f"runner_compile_failed: {exc}")
             runner_compiles = False
         return runner_path, runner_compiles
+
+    def _write_skill(
+        self,
+        *,
+        meta: _ExportMetadata,
+        default_precision: str,
+        variants: tuple[Variant, ...],
+        pack_dir: Path,
+        log: list[str],
+        errors: list[str],
+    ) -> Path | None:
+        """Step 8.5: write a pack-specific ``SKILL.md`` skeleton.
+
+        The App Builder chat Agent reads this to understand what a pack does
+        without having to parse the full ``runner.py``. Contents:
+
+        * one-line summary from ``manifest.display_name`` + I/O kinds;
+        * a "P4 imported pack" tag (this exporter only produces user-imported
+          packs — a hint the LLM needs when writing ``app.yaml`` and picking
+          the correct ``pack_dir`` / ``model_dir`` layout);
+        * pointer to ``runner.py._resolve_weights`` as the authoritative
+          weight-path resolver (P4 double-anchor safe: runner logic handles
+          both built-in ``APP_BUILDER_MODEL_ROOT`` and user
+          ``APP_BUILDER_USER_MODEL_ROOT`` layouts, plus packaged-zip
+          ancestor-walk);
+        * per-variant table (precision / .bin name / size) — matches the
+          hand-written SKILL.md that used to be authored manually
+          (equivalence let us drop those hand-writes without regressing
+          Agent context);
+        * reminder that ``appbuilder_run`` is the tool-invocation channel
+          (so LLM does not try to load ``.bin`` directly for tool calls).
+
+        The manifest's ``skill.enabled`` defaults to ``True``
+        (see ``_manifest_builder.py``) so this SKILL is auto-injected into
+        chat sessions selecting this pack — Step 8.5 is a live feature, not
+        reference material. Users can flip it to ``False`` per pack if they
+        want prompt-budget control.
+
+        IO error handling: ``write_text`` failures are recorded in ``errors``
+        and ``log`` (matching ``_write_runner`` convention) instead of raising,
+        so a filesystem hiccup on this optional file does not abort the whole
+        export. Returns the written path or ``None`` on failure.
+        """
+        log.append("[INFO] Generating SKILL.md skeleton ...")
+        skill_path = pack_dir / "SKILL.md"
+
+        # Build the variants table from Step 6's variants[]. Precision label
+        # is Precision.label (e.g. "fp16" / "int8" / "w8a16"); use .long_label
+        # for the human-facing column (e.g. "FP16 · Highest accuracy").
+        if variants:
+            variant_rows = ["| Precision | Weight file | Size |",
+                            "|---|---|---|"]
+            for v in variants:
+                size_mb = round(v.size_bytes / (1024 * 1024), 1)
+                default_tag = " *(default)*" if v.is_default else ""
+                variant_rows.append(
+                    f"| `{v.precision.label}`{default_tag} "
+                    f"({v.precision.long_label}) "
+                    f"| `{v.context_bin_name}` "
+                    f"| ~{size_mb} MB |"
+                )
+            variants_section = "\n".join(variant_rows) + "\n"
+        else:
+            variants_section = "_No variants declared._\n"
+
+        content = (
+            f"# {meta.display_name}\n"
+            "\n"
+            f"Model ID: `{meta.pack_id}`  \n"
+            f"I/O: `{meta.input_kind}` → `{meta.output_kind}`  \n"
+            f"Default precision: `{default_precision}`  \n"
+            "Origin: **user-imported via QAI ModelBuilder (P4 pack)**. "
+            "Weights live under "
+            "`${APP_BUILDER_USER_MODEL_ROOT}/models/"
+            f"{meta.pack_id}/` at dev-time; pack metadata under "
+            "`${APP_BUILDER_USER_PACK_ROOT}/"
+            f"{meta.pack_id}/`.\n"
+            "\n"
+            "## Available variants\n"
+            "\n"
+            f"{variants_section}"
+            "\n"
+            "## How to invoke\n"
+            "\n"
+            f"Use the `appbuilder_run` tool with `modelId = \"{meta.pack_id}\"`. "
+            "Input/output schemas and available parameters come from "
+            "`manifest.json` (`inputSchema` / `outputSchema` / `params`) — "
+            "the host resolves everything, you do not need to touch `.bin` "
+            "files or environment variables to make a tool call.\n"
+            "\n"
+            "## How to build a fullstack app around this model\n"
+            "\n"
+            f"When generating a WebUI (`data/app_builder/<app_id>/`) that "
+            f"loads `{meta.pack_id}` in-process (rather than via "
+            "`appbuilder_run`), your `backend/inference.py` MUST use the "
+            "canonical weight-path resolver instead of hard-coding paths. "
+            "Source of truth: this pack's `runner.py` — read its "
+            "`_resolve_weights()` / `_resolve_model_dir()` function. It "
+            "already handles all four cases correctly:\n"
+            "\n"
+            "1. **Dev host, built-in pack** — `$APP_BUILDER_MODEL_ROOT/<id>/<bin>`\n"
+            "2. **Dev host, user-imported pack (P4)** — "
+            "`$APP_BUILDER_USER_MODEL_ROOT/models/<id>/<bin>` "
+            "(note the extra `models/` layer)\n"
+            "3. **Packaged zip, any machine** — ancestor-walk from "
+            "`__file__` for `<pkg>/models/<id>/`\n"
+            "4. **Fallback** — clear `FileNotFoundError` against the "
+            "canonical path\n"
+            "\n"
+            # NOTE (架构一致性): the two path strings below duplicate the
+            # ``USER_PACK_REL`` / ``USER_WEIGHTS_REL`` + ``USER_WEIGHTS_MODELS_SUBDIR``
+            # constants in ``qai.app_builder.domain.pack_layout_constants``.
+            # We do NOT import that module here because ``qai.model_builder``
+            # is architecturally upstream of ``qai.app_builder``, and a
+            # reverse import would introduce cross-context coupling.
+            # The strings appear **verbatim** (no f-string interpolation
+            # inside the path prefix) so a contract-consistency test in
+            # ``tests/unit/qai/app_builder/test_pack_layout_constants.py``
+            # can grep them literally. Change either side → the test fails
+            # → change the other side too.
+            f'Because this pack is user-imported (P4), your `app.yaml` MUST '
+            f'use the user-pack layout: `builtin: false` + '
+            f'`pack_dir: "${{APP_ROOT}}/data/app_builder/user_models/{meta.pack_id}"` + '
+            f'`model_dir: "${{APP_ROOT}}/data/app_builder/user_model_weights/models/{meta.pack_id}"`. '
+            "Copy the runner's `_resolve_*` "
+            "helper verbatim into `backend/inference.py`; do NOT reinvent "
+            "path logic (it will miss one of the four cases and break "
+            "either dev-time or packaged-distribution use).\n"
+            "\n"
+            "## Weight files\n"
+            "\n"
+            "Actual `.bin` locations are runtime concerns — you should "
+            "never hard-code them. See the file `manifest.json`'s "
+            "`assets.installPath` (and `variants[].assets.installPath`) "
+            "for the canonical relative paths; the host anchors them to "
+            "either the built-in or user weight root at runtime.\n"
+        )
+        try:
+            skill_path.write_text(content, encoding="utf-8")
+        except OSError as exc:
+            msg = f"skill_write_failed: {exc}"
+            log.append(f"[ERROR]   SKILL.md: {msg}")
+            errors.append(msg)
+            return None
+        log.append("[INFO]   SKILL.md: OK")
+        return skill_path
 
     def _write_requirements(
         self,

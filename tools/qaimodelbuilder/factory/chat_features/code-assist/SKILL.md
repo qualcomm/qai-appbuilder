@@ -1,8 +1,8 @@
 ---
-name: code-assist
+name: Code Assist
 description: A professional programming assistant supporting code writing, debugging, review, refactoring, and performance optimization, as well as open-source repository analysis.
-tags: code, programming, debug, refactor, review, 编程, 调试, 重构
-use_for: 编写代码、调试错误、代码审查、重构优化、性能优化、解释代码、运行测试、分析仓库
+tags: code, programming, debug, refactor, review
+use_for: Writing code, debugging errors, code review, refactoring and optimization, performance tuning, code explanation, running tests, repository analysis
 ---
 
 # Programming Assistant

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``apps.cli.serve`` — reboot supervisor (S7.5 PR-901, lane L9).
 
 Parent-process reboot loop replacing the legacy ``start_server.py:597-636``
@@ -39,7 +44,7 @@ Console script registration (PR-901 §10 hand-off to I1):
 Usage::
 
     python -m apps.cli.serve                # default host/port from settings
-    python -m apps.cli.serve --host 0.0.0.0 --port 8989
+    python -m apps.cli.serve --host 0.0.0.0 --port 4099
     qai-serve --reload                      # after I1 wires the script
 
 The supervisor passes all unknown arguments through to ``apps.api``.
@@ -134,9 +139,18 @@ DEFAULT_PROBE_HOST = "127.0.0.1"
 #
 # Selection criteria for the list:
 #
-# * 8989 first — preserves the documented default (settings, CORS allow
-#   list, README, ``Start.bat`` history) when it is bindable, so the vast
-#   majority of machines see no change.
+# * 8989 first — legacy packaged default, retained here for backward
+#   compatibility with existing dev workflows / CORS allow-list entries
+#   (see ``qai.platform.config.settings.SecuritySettings.allowed_origins``
+#   which still lists ``http://localhost:8989`` alongside 4099). NOTE:
+#   this is NO LONGER the documented default port — the documented
+#   default is ``ServerSettings.port = 4099`` (pinned by the Okta
+#   redirect_uri ``http://localhost:4099/callback``). ``Start.bat`` passes
+#   ``--port 4099`` explicitly so the SSO-critical bind path never
+#   consults this fallback list. FALLBACK_PORTS only runs when ``--port``
+#   is omitted (bare ``python -m apps.cli.serve``); the first entry is
+#   deliberately left at 8989 to avoid silently changing that dev
+#   scenario's behaviour.
 # * Stay above 1024 (well-known) and below 49152 (ephemeral / dynamic
 #   range that Windows itself draws from for outbound connections, and
 #   that overlaps heavily with Hyper-V reservations).
@@ -145,8 +159,9 @@ DEFAULT_PROBE_HOST = "127.0.0.1"
 # * Avoid widely-used dev ports (3000 / 5000 / 5173 / 8000 / 8080 / 8888)
 #   so we do not collide with another local project the user is running.
 #
-# 8989 is paired with same-tail offsets (12989 / 18989 / 28989) so the
-# fallback URL stays recognisable for users who are used to the default.
+# The first entry 8989 is paired with same-tail offsets (12989 / 18989 /
+# 28989) so the fallback URL stays recognisable for users familiar with
+# the legacy packaged default.
 FALLBACK_PORTS: tuple[int, ...] = (8989, 8088, 7799, 12989, 18989, 28989)
 
 
@@ -370,7 +385,7 @@ class _Supervisor:
             # ``_create_app_for_uvicorn()`` → ``create_app()`` calls
             # ``load_settings()`` fresh, without the CLI overrides that
             # ``main()`` applied). Without this, ``container.settings.
-            # server.port`` would still be the *default* (8989) while
+            # server.port`` would still be the *default* (4099) while
             # uvicorn actually bound the supervisor-selected fallback port
             # (e.g. 8088). The lifespan reads this env var to write the
             # correct URL in the runtime endpoint file.
@@ -917,7 +932,12 @@ def _resolve_bindable_port(
     ``except RuntimeError`` handlers (serve.py call sites) keep working
     unchanged. Priority is preserved: an explicit ``requested`` port is
     tried alone (raises on failure); otherwise ``fallbacks`` are probed
-    in order, first entry (8989) being the documented default.
+    in order. The current documented default is ``4099`` (pinned by the
+    Okta redirect_uri — see
+    ``qai.platform.config.settings.ServerSettings.port``); the fallback
+    list's first entry (``8989``) is the legacy packaged default retained
+    for backward compatibility and only consulted when ``--port`` is
+    omitted.
 
     Tests inject ``can_bind`` to simulate excluded / occupied ports.
     """

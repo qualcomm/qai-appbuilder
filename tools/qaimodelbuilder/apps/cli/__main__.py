@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``apps.cli.__main__`` — top-level ``qai`` argparse dispatcher (D1 skeleton).
 
 Desktop App Plan §1.2 / §2.1 / §2.5 / §2.6. The existing

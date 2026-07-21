@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """In-memory registry pairing a tab's pending ``question`` with its answer.
 
 The ``question`` chat tool (a V2 enhancement; V1 has no equivalent) lets the

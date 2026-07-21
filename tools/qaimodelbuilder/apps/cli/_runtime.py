@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``apps.cli._runtime`` — shared runtime context for one-shot CLI commands.
 
 Desktop App Plan §1.2 / §2.5 / §2.6 — single composition root for short-lived

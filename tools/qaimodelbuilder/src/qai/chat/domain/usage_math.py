@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Pure token-usage aggregation math (C档 阶段2 — usage收口).
 
 Single source of truth for the "cumulative-prompt provider" usage-finalize

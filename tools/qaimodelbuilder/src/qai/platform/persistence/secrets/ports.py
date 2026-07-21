@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """SecretStore port — the abstract interface for credential storage.
 
 Adapters implementing :class:`SecretStore` must persist ``(service, key) -> str``

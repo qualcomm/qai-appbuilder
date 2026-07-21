@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Dependency container for the API entry point.
 
 Wiring is explicit — no global registry, no service locator. Each
@@ -127,6 +132,8 @@ class SystemServices:
 
 
 if TYPE_CHECKING:  # pragma: no cover
+    from collections.abc import Callable
+
     from qai.app_builder.infrastructure import StickyWorkerHost
 
 
@@ -850,6 +857,7 @@ class _StreamingToolInvocationBridge:
             branch = self._exec_stream_via_runner(
                 argv=argv, command=command, cwd=cwd, timeout=timeout,
                 spawn_started_at=spawn_started_at,
+                resolved_shell=resolved_shell,
             )
         else:
             branch = self._exec_stream_bare(
@@ -858,6 +866,7 @@ class _StreamingToolInvocationBridge:
                 cwd=cwd,
                 timeout=timeout,
                 spawn_started_at=spawn_started_at,
+                resolved_shell=resolved_shell,
             )
         try:
             async for chunk in branch:
@@ -873,6 +882,7 @@ class _StreamingToolInvocationBridge:
         cwd: str | None,
         timeout: float,
         spawn_started_at: datetime,
+        resolved_shell: str,
     ):
         """Legacy streaming exec via ``stream_exec`` (no injected runner).
 
@@ -884,6 +894,14 @@ class _StreamingToolInvocationBridge:
 
         Yields live ``ToolStreamChunk`` STDOUT/STDERR frames, then a final
         ``DONE`` chunk carrying the consolidated result.
+
+        Architectural contract (2026-07-20 fix): the ``consolidated`` text
+        fed back to the model must be assembled from ``result.stdout`` and
+        ``result.stderr`` **separately** — ``_strip_powershell_clixml`` is
+        applied to ``stderr_str`` only, so real user stdout (Write-Host /
+        PSHOST output on the stdout channel) is never touched by CLIXML
+        stripping.  Mirrors the non-streaming ``handlers.exec.tool_exec``
+        path (``exec.py:880-889``).
         """
         from qai.ai_coding.infrastructure.tools.handlers.exec_diagnostics import (
             format_exit_diagnostics,
@@ -899,6 +917,7 @@ class _StreamingToolInvocationBridge:
         )
         from qai.ai_coding.infrastructure.tools.handlers.exec import (
             _maybe_append_native_denial_note,
+            _strip_powershell_clixml,
         )
 
         ok = True
@@ -929,43 +948,36 @@ class _StreamingToolInvocationBridge:
                     child_pid = frame.meta.get("pid") or None
                 # CAP_REACHED / TERMINATED carry no user text.
             ok = (result.exit_code == 0) and not result.timed_out
-            # V1 parity (backend/tools/_exec.py:834-850): the streamed exec's
-            # consolidated result fed back to the LLM must carry the
-            # ``[exit code: N]`` marker + targeted diagnostic hint on failure.
-            consolidated = result.full_output
-            # 2026-07-14: strip PowerShell CLIXML noise from the streamed path.
-            # exec.py already strips it on the direct-subprocess path (L885,
-            # L1263); the stream_exec path was missing the same treatment,
-            # causing ``#< CLIXML <Objs ...>`` blobs to reach the model.
-            # _strip_powershell_clixml is a no-op for non-CLIXML text, so it
-            # is safe to call unconditionally (no shell guard needed).
-            from qai.ai_coding.infrastructure.tools.handlers.exec import (
-                _strip_powershell_clixml,
-            )
-            consolidated = _strip_powershell_clixml(consolidated)
+            # 2026-07-20 architectural fix: strip CLIXML from stderr ONLY.
+            # Previously we passed the merged ``full_output`` to
+            # ``_strip_powershell_clixml`` — but that helper (see
+            # ``exec.py:1073``) only guarantees stderr semantics, and its
+            # merged-buffer branch could and did trim stdout content that
+            # happened to appear after a CLIXML span (the "PSHOST 吞输出"
+            # regression: a PowerShell ``Write-Host`` writes both a
+            # ``#< CLIXML`` blob on stderr and readable text on stdout;
+            # merging them and running strip on the union corrupted the
+            # stdout half).  The non-streaming handler already runs strip
+            # on ``err_text`` alone (``exec.py:885``); this path now
+            # honours the same contract.
+            stdout_str = result.stdout
+            stderr_str = result.stderr
+            if resolved_shell == "powershell":
+                stderr_str = _strip_powershell_clixml(stderr_str)
             exit_code = result.exit_code if result.exit_code is not None else -1
-            if result.timed_out:
-                consolidated = (
-                    f"{consolidated.rstrip()}\n[exit code: {exit_code}]"
-                    if consolidated.strip()
-                    else f"[exit code: {exit_code}]"
-                )
-            elif exit_code != 0:
-                tail = f"[exit code: {exit_code}]"
-                diag = format_exit_diagnostics(
-                    exit_code,
-                    consolidated,
-                    "",
-                    sandboxed=False,
-                    command=command,
-                )
-                if diag:
-                    tail = f"{tail}\n{diag.lstrip(chr(10))}"
-                consolidated = (
-                    f"{consolidated.rstrip()}\n{tail}"
-                    if consolidated.strip()
-                    else tail
-                )
+            # V1 parity (backend/tools/_exec.py:941-1007): assemble the
+            # consolidated LLM-visible text as ``<stdout>\n[stderr]\n<stderr>``
+            # + ``[exit code: N]`` on failure + diagnostics on non-zero.  Uses
+            # the same helper as ``_render_exec`` (apps/api/_chat_tool_result_render).
+            consolidated = _compose_streaming_exec_output(
+                stdout=stdout_str,
+                stderr=stderr_str,
+                exit_code=exit_code,
+                timed_out=result.timed_out,
+                command=command,
+                sandboxed=False,
+                format_exit_diagnostics=format_exit_diagnostics,
+            )
             # D2-E: append precise native FileGuard denial note (covers both
             # timeout and non-zero exit). The helper is a no-op when exit_code
             # == 0, pid is None, probe is None, or audit found nothing.
@@ -994,6 +1006,7 @@ class _StreamingToolInvocationBridge:
         cwd: str | None,
         timeout: float,
         spawn_started_at: datetime,
+        resolved_shell: str,
     ):
         """Streaming exec routed through an injected ``ProcessRunnerPort``.
 
@@ -1012,6 +1025,16 @@ class _StreamingToolInvocationBridge:
 
         Yields live ``ToolStreamChunk`` STDOUT/STDERR frames, then a final
         ``DONE`` chunk carrying the consolidated result.
+
+        Architectural contract (2026-07-20 fix): the consolidated text
+        assembles ``stdout`` and ``stderr`` **separately** (matching the
+        non-streaming ``handlers.exec.tool_exec`` path,
+        ``exec.py:880-889``); PowerShell CLIXML stripping is applied to
+        the stderr half ONLY.  Previously this branch never called
+        ``_strip_powershell_clixml`` at all — CLIXML blobs would reach
+        the model verbatim.  Fixed here for architectural consistency
+        with the bare branch even though this codepath currently only
+        runs with ``resolved_shell != "powershell"`` in production.
         """
         from qai.ai_coding.infrastructure.tools.handlers.exec_diagnostics import (
             format_exit_diagnostics,
@@ -1030,6 +1053,7 @@ class _StreamingToolInvocationBridge:
         from qai.tools.infrastructure.exec_env import build_exec_env
         from qai.ai_coding.infrastructure.tools.handlers.exec import (
             _maybe_append_native_denial_note,
+            _strip_powershell_clixml,
         )
 
         request = ProcessExecutionRequest(
@@ -1042,7 +1066,14 @@ class _StreamingToolInvocationBridge:
             timeout_s=timeout if timeout and timeout > 0 else None,
         )
 
-        collected: list[str] = []
+        # 2026-07-20 architectural fix: keep stdout and stderr in separate
+        # accumulators rather than a merged list.  This lets us apply
+        # ``_strip_powershell_clixml`` to the stderr half only (mirroring
+        # exec.py:885 non-streaming behaviour) — a merged list would let
+        # a CLIXML strip on the union corrupt real user stdout appearing
+        # after the CLIXML span (the "PSHOST 吞输出" regression).
+        stdout_collected: list[str] = []
+        stderr_collected: list[str] = []
         exit_code: int | None = -1
         timed_out = False
         ok = True
@@ -1052,14 +1083,14 @@ class _StreamingToolInvocationBridge:
                 if isinstance(frame, ProcessStdoutFrame):
                     text = frame.data.decode("utf-8", errors="replace")
                     if text:
-                        collected.append(text)
+                        stdout_collected.append(text)
                         yield ToolStreamChunk(
                             kind=ToolStreamChunkKind.STDOUT, text=text
                         )
                 elif isinstance(frame, ProcessStderrFrame):
                     text = frame.data.decode("utf-8", errors="replace")
                     if text:
-                        collected.append(text)
+                        stderr_collected.append(text)
                         yield ToolStreamChunk(
                             kind=ToolStreamChunkKind.STDERR, text=text
                         )
@@ -1080,36 +1111,32 @@ class _StreamingToolInvocationBridge:
             )
             return
 
-        consolidated = "".join(collected)
         _code = exit_code if exit_code is not None else -1
         ok = (_code == 0) and not timed_out
-        if timed_out:
-            consolidated = (
-                f"{consolidated.rstrip()}\n[exit code: {_code}]"
-                if consolidated.strip()
-                else f"[exit code: {_code}]"
-            )
-        elif _code != 0:
-            tail = f"[exit code: {_code}]"
-            # This path ran through the injected runner; the ``sandboxed``
-            # flag is the diagnostic-attribution hint preserved from the
-            # pre Phase 3 cleanup days (it used to mean "ran inside the
-            # AppContainer launcher" — now both branches execute directly,
-            # but the flag keeps diagnostics output stable for consumers).
-            diag = format_exit_diagnostics(
-                _code,
-                consolidated,
-                "",
-                sandboxed=True,
-                command=command,
-            )
-            if diag:
-                tail = f"{tail}\n{diag.lstrip(chr(10))}"
-            consolidated = (
-                f"{consolidated.rstrip()}\n{tail}"
-                if consolidated.strip()
-                else tail
-            )
+        stdout_str = "".join(stdout_collected)
+        stderr_str = "".join(stderr_collected)
+        # Strip PowerShell CLIXML from stderr ONLY (see the docstring +
+        # exec.py:885 for the architectural contract).  Even though the
+        # routed-runner branch typically runs argv-form ``["cmd","/c",...]``
+        # today, the strip is architecturally required for
+        # ``resolved_shell == "powershell"`` future callers and is a no-op
+        # for cmd / sh (``_strip_powershell_clixml`` returns the input
+        # verbatim when no ``#< CLIXML`` header is present).
+        if resolved_shell == "powershell":
+            stderr_str = _strip_powershell_clixml(stderr_str)
+        # ``sandboxed=True`` here matches the pre-fix diagnostic
+        # attribution: this branch is the "ran through the injected
+        # runner" one (see the prior comment below in _render_exec's
+        # caller in the old code).
+        consolidated = _compose_streaming_exec_output(
+            stdout=stdout_str,
+            stderr=stderr_str,
+            exit_code=_code,
+            timed_out=timed_out,
+            command=command,
+            sandboxed=True,
+            format_exit_diagnostics=format_exit_diagnostics,
+        )
 
         # D2-E: append precise native FileGuard denial note (covers both
         # timeout and non-zero exit). The helper is a no-op when _code == 0,
@@ -1128,6 +1155,61 @@ class _StreamingToolInvocationBridge:
             ok=ok,
         )
 
+
+
+def _compose_streaming_exec_output(
+    *,
+    stdout: str,
+    stderr: str,
+    exit_code: int,
+    timed_out: bool,
+    command: str,
+    sandboxed: bool,
+    format_exit_diagnostics: "Callable[..., str]",
+) -> str:
+    """Assemble the LLM-visible consolidated text for a streaming exec run.
+
+    Mirrors :func:`apps.api._chat_tool_result_render._render_exec` (V1
+    ``backend/tools/_exec.py:941-1007``): the non-streaming exec handler
+    stores ``stdout`` / ``stderr`` as separate fields and lets the render
+    step join them; the streaming path historically merged them and fed
+    the merged form to the LLM directly, losing the invariant that
+    per-stream post-processing (``_strip_powershell_clixml`` on stderr
+    only) never touches the other stream.  This helper rebuilds that
+    invariant on the streaming side.
+
+    Format:
+
+      * ``<stdout.rstrip()>`` when stdout non-empty
+      * ``\\n[stderr]\\n<stderr.rstrip()>`` when stderr non-empty
+      * ``\\n[exit code: N]`` when timed out OR ``exit_code != 0``
+      * ``\\n<exit_diagnostics>`` when non-zero and diagnostics non-empty
+
+    Empty stdout + empty stderr + exit 0 → ``""`` (an empty consolidated
+    result surfaces to the caller as "no output", matching V1 behaviour).
+    """
+    parts: list[str] = []
+    if stdout:
+        parts.append(stdout.rstrip())
+    if stderr:
+        parts.append(f"[stderr]\n{stderr.rstrip()}")
+    if timed_out or exit_code != 0:
+        parts.append(f"[exit code: {exit_code}]")
+    if exit_code != 0 and not timed_out:
+        # V1 parity (_exec.py:948-958): targeted diagnostic hint AFTER the
+        # ``[exit code: N]`` marker so the model can act on an otherwise
+        # opaque non-zero exit.  ``sandboxed`` flag selects attribution
+        # (routed-runner vs bare) — historical semantics unchanged.
+        diag = format_exit_diagnostics(
+            exit_code,
+            stdout,
+            stderr,
+            sandboxed=sandboxed,
+            command=command,
+        )
+        if diag:
+            parts.append(diag.lstrip("\n"))
+    return "\n".join(parts)
 
 
 def subprocess_join(argv: list[str]) -> str:

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """DI wiring for the ``model_builder`` bounded context (S9 close).
 
 Materialises :class:`qai.model_builder.application` use cases against
@@ -18,6 +23,7 @@ so the cross-context boundary stays single-direction
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -69,6 +75,61 @@ _DEFAULT_WOS_AI_ROOT = Path("C:/WoS_AI")
 # ``manifest.io_contract`` — exactly what V1's exporter did by inserting
 # ``features/app-builder/shared`` onto ``sys.path``.
 _DEFAULT_SHARED_REL = ("factory", "app_builder", "shared")
+
+
+def _resolve_smoke_test_child_launch(
+    container: "Container",
+) -> tuple[tuple[str, ...] | None, dict[str, str] | None]:
+    """Resolve ``(interpreter_argv, env)`` for the one-shot smoke-test child.
+
+    Mirrors ``apps.api.lifespan._spawn_sticky_worker`` (lifespan.py:1740-1764):
+    the Pack import smoke test now runs the QNN native load + zero-tensor
+    inference in a throwaway child process, and that child must use the SAME
+    ARM64 venv interpreter + QAIRT SDK env / ``PATH`` extras the sticky worker
+    and one-shot Pack runner use, so ``qai_appbuilder`` and the QNN runtime DLLs
+    load identically.
+
+    Returns ``(None, None)`` (probe then falls back to ``sys.executable`` +
+    ``os.environ``) on any resolution failure, so a diagnostics glitch never
+    blocks export wiring — dev / non-NPU hosts then simply fail the child's
+    ``qai_appbuilder`` import, surfacing the same ``MissingQaiAppBuilderError``
+    as before.
+    """
+    try:
+        from qai.app_builder.infrastructure.app_manifest import (
+            select_runner_interpreter,
+        )
+    except Exception:  # noqa: BLE001 — non-app_builder builds: use defaults
+        return None, None
+
+    repo_root = getattr(container, "repo_root", None)
+    if not isinstance(repo_root, Path):
+        return None, None
+
+    try:
+        interpreter = select_runner_interpreter(
+            qairt_env_file=getattr(container, "qairt_env_file", None),
+            repo_root=repo_root,
+        )
+        python_exe = interpreter.resolve()
+
+        base_env = dict(os.environ)
+        extra_env_fn = getattr(interpreter, "extra_env", None)
+        if callable(extra_env_fn):
+            for _k, _v in extra_env_fn().items():
+                base_env[str(_k)] = str(_v)
+        path_segments_fn = getattr(interpreter, "path_segments", None)
+        if callable(path_segments_fn):
+            segments = path_segments_fn()
+            if segments:
+                prefix = os.pathsep.join(str(s) for s in segments)
+                existing = base_env.get("PATH", "")
+                base_env["PATH"] = (
+                    prefix + (os.pathsep + existing if existing else "")
+                )
+        return (str(python_exe),), base_env
+    except Exception:  # noqa: BLE001 — never break DI on resolver failure
+        return None, None
 
 
 def _resolve_app_builder_shared_dir(container: "Container") -> Path | None:
@@ -178,6 +239,15 @@ def build_model_builder_services(
     workspace_reader = WosAiWorkspaceReader(wos_ai_root=root)
     taxonomy_classifier = RuleAndShapeTaxonomyClassifier()
 
+    # Resolve the ARM64 venv interpreter + QAIRT SDK env/PATH extras for the
+    # one-shot smoke-test child process (same resolution the sticky worker uses,
+    # lifespan.py:1740-1764). The QNN native load + zero-tensor inference now
+    # runs in that throwaway child so its native fd output / crashes stay out of
+    # this service process. ``(None, None)`` falls back to sys.executable +
+    # os.environ (dev/non-NPU), preserving the prior MissingQaiAppBuilderError
+    # behaviour on hosts without the runtime.
+    smoke_interpreter_argv, smoke_env = _resolve_smoke_test_child_launch(container)
+
     pack_exporter = QaiPackExporter(
         classifier=taxonomy_classifier,
         qai_appbuilder_shared_dir=shared_dir,
@@ -188,6 +258,8 @@ def build_model_builder_services(
         # placeholder I/O contract. Strict mode (legacy hard-abort)
         # is opt-in per deployment via a future Settings field.
         require_qai_appbuilder=False,
+        smoke_test_interpreter_argv=smoke_interpreter_argv,
+        smoke_test_env=smoke_env,
     )
     pack_validator = QaiPackValidator()
 

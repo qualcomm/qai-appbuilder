@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * Auth store — SSO session snapshot mirrored from `GET /api/auth/me`.
  *
@@ -25,6 +30,7 @@
  */
 import { defineStore } from "pinia";
 import { fetchAuthMe, renewSession, type AuthUser } from "@/api/auth";
+import { apiJson } from "@/api";
 
 interface AuthState {
   /** Master switch — `settings.auth.enabled` on the server. */
@@ -94,6 +100,14 @@ export const useAuthStore = defineStore("auth", {
       if (state.expiresAt === null) return null;
       return state.expiresAt - Math.floor(Date.now() / 1000);
     },
+
+    /** True when the user is authorized to use Model Builder Pro. */
+    isMbProAuthorized: (state): boolean =>
+      state.user?.is_mb_pro_authorized === true,
+
+    /** True when the LDAP check failed at login (show "service unavailable"). */
+    mbProAccessCheckFailed: (state): boolean =>
+      state.user?.mb_pro_access_check_failed === true,
   },
 
   actions: {
@@ -157,6 +171,23 @@ export const useAuthStore = defineStore("auth", {
       } catch {
         // Network hiccup — leave state as-is; the timer will retry, and
         // any real 401 on a business call re-prompts anyway.
+      }
+    },
+
+    /**
+     * Re-check ModelBuilderProUsers membership without logging out.
+     * Updates the session cookie server-side and refreshes local auth state.
+     * Called from the Pro toolbar's「刷新权限」button.
+     */
+    async refreshMbProAccess(): Promise<void> {
+      try {
+        await apiJson("POST", "/api/mb-pro-session/refresh-access");
+        // Force a fresh /api/auth/me fetch by clearing any in-flight dedup
+        // so the new cookie (written by refresh-access) is read immediately.
+        this.inflight = null;
+        await this.refresh();
+      } catch {
+        // Network failure — leave state as-is; UI shows "service unavailable"
       }
     },
 

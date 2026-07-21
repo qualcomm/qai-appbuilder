@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Security routes — auto_approve config (legacy) + full V1-aligned config endpoints. (split from security.py).
 
 Pure-move extraction (zero behaviour change): the route handlers are

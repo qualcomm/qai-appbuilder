@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <script setup lang="ts">
 /**
  * PromoteToAppBuilderCard — Model Builder → App Builder import UI.
@@ -61,6 +66,7 @@ const {
   showVariantPickerStage,
   refresh,
   variants,
+  needsNormalize,
   checkedPrecisions,
   defaultPrecision,
   scanLoading,
@@ -82,6 +88,32 @@ function warnText(code: string): string {
 
 /** The sole detected variant in the single-variant branch (if any). */
 const singleVariant = computed(() => variants.value[0]);
+
+/**
+ * "Why is Generate greyed out?" — a human-readable next-step hint.
+ *
+ * Returns `null` when the button is enabled (so the tooltip / hint line stays
+ * out of the user's way). The priority mirrors `canGenerate` in the composable
+ * (`usePromoteToAppBuilder.ts:196-201`) from most-specific to generic so the
+ * message always tells the user the SINGLE next action to unblock — never a
+ * vague "something is missing".
+ *
+ * Note: `hasWorkdir` is enforced by the outer `v-else` template guard (the
+ * whole workspace branch, including this button, only renders when a workdir
+ * is present), so it is structurally unreachable here and intentionally NOT
+ * included as its own branch.
+ */
+const disabledReason = computed<string | null>(() => {
+  if (canGenerate.value) return null;
+  if (exporting.value) return t("modelBuilder.promote.disabledReason.exporting");
+  if (variants.value.length === 0)
+    return t("modelBuilder.promote.disabledReason.noBins");
+  if (checkedPrecisions.value.length === 0)
+    return t("modelBuilder.promote.disabledReason.noVariantSelected");
+  if (defaultPrecision.value === "")
+    return t("modelBuilder.promote.disabledReason.noDefaultVariant");
+  return t("modelBuilder.promote.disabledReason.generic");
+});
 </script>
 
 <template>
@@ -336,6 +368,38 @@ const singleVariant = computed(() => variants.value[0]);
           </div>
         </div>
 
+        <!-- Scanning in progress: the workdir is known but the output/ scan
+             has not returned yet (e.g. the agent is still generating the model
+             / variants). Without this, the variant list + needsNormalize +
+             noBins branches are all suppressed (they gate on !scanLoading),
+             leaving the popover visually EMPTY below the workdir line. Show a
+             friendly "scanning…" line instead of a blank panel. -->
+        <div
+          v-else-if="scanLoading"
+          class="promote-card__no-bins promote-card__scanning"
+          data-testid="promote-scanning"
+        >
+          {{ t("modelBuilder.promote.scanning") }}
+        </div>
+
+        <!-- Un-normalized AI Hub model detected: guide to Step 6.5 instead of
+             a bare "no bins" message. Fires when the scan found no output/
+             variants BUT the workdir holds a downloaded-but-not-normalized AI
+             Hub package (weight + metadata.json). -->
+        <div
+          v-else-if="!scanLoading && needsNormalize"
+          class="promote-card__no-bins promote-card__needs-normalize"
+          data-testid="promote-needs-normalize"
+        >
+          <div class="promote-card__needs-normalize-title">
+            {{ t("modelBuilder.promote.needsNormalize.title") }}
+          </div>
+          <div class="promote-card__needs-normalize-body">
+            {{ t("modelBuilder.promote.needsNormalize.body") }}
+          </div>
+          <code class="promote-card__needs-normalize-path">{{ needsNormalize.detected_weight }}</code>
+        </div>
+
         <!-- No bins detected -->
         <div
           v-else-if="!scanLoading"
@@ -349,10 +413,29 @@ const singleVariant = computed(() => variants.value[0]);
             type="button"
             class="promote-card__btn promote-card__btn--primary"
             :disabled="!canGenerate"
+            :title="disabledReason ?? undefined"
+            :aria-describedby="disabledReason ? 'promote-disabled-hint' : undefined"
             @click="generatePack"
           >
             {{ exporting ? t("modelBuilder.promote.generating") : t("modelBuilder.promote.generate") }}
           </button>
+          <!--
+            "Why is Generate greyed out?" hint (plan §6.4 A).
+
+            Rendered as a persistent block (never v-if) with `min-height` so
+            toggling between disabled/enabled does NOT push the surrounding
+            content up/down — a layout jitter every time the user checks a
+            precision. Empty content collapses to invisible via the ternary
+            but the row height is reserved. Colour + size come from CSS vars
+            so both light and dark themes stay readable (§14 UX rules).
+          -->
+          <p
+            id="promote-disabled-hint"
+            class="promote-card__disabled-hint"
+            :aria-hidden="disabledReason ? undefined : 'true'"
+          >
+            {{ disabledReason ?? "" }}
+          </p>
         </div>
       </template>
     </div>
@@ -689,7 +772,55 @@ const singleVariant = computed(() => variants.value[0]);
   color: var(--text-muted);
 }
 
+/* Un-normalized AI Hub model guidance — a slightly more prominent, actionable
+   variant of the plain no-bins hint (accent left border + a code line showing
+   the detected weight so the user can confirm the detection is real). */
+.promote-card__needs-normalize {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border-left: 3px solid var(--accent, #6d5efc);
+  background: var(--bg-secondary, rgba(109, 94, 252, 0.06));
+  border-radius: 4px;
+}
+.promote-card__needs-normalize-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary, inherit);
+}
+.promote-card__needs-normalize-body {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.promote-card__needs-normalize-path {
+  font-size: var(--text-xs);
+  word-break: break-all;
+  color: var(--text-muted);
+  opacity: 0.85;
+}
+
 .promote-card__generate {
   margin-top: var(--space-1);
+}
+
+/*
+ * "Why is Generate greyed out?" hint line (plan §6.4 A).
+ *
+ * Design constraints (§14 UX rules):
+ *  - Colour + font-size come from CSS vars → light/dark themes both readable,
+ *    same wavelength as the sibling `.promote-card__no-bins` hint.
+ *  - `min-height` reserves the row even when the message is empty so toggling
+ *    disabled ↔ enabled does NOT push the layout — no jitter on every click.
+ *  - `margin-top: var(--space-1)` matches the vertical rhythm of the sibling
+ *    hint blocks in this card (workdir / no-bins).
+ */
+.promote-card__disabled-hint {
+  margin: var(--space-1) 0 0 0;
+  min-height: 1.5em;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: 1.5;
 }
 </style>

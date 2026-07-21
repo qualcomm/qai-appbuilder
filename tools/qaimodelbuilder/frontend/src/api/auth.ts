@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * Auth API — thin client for the Okta OIDC SSO surface exposed by the
  * backend at `interfaces/http/routes/auth.py`.
@@ -24,6 +29,10 @@ export interface AuthUser {
   readonly display_name: string;
   readonly sub: string;
   readonly auth_source: string;
+  /** True when the user is a member of ModelBuilderProUsers. */
+  readonly is_mb_pro_authorized: boolean;
+  /** True when the LDAP membership check failed at login (service unavailable). */
+  readonly mb_pro_access_check_failed: boolean;
 }
 
 /** Response shape of `GET /api/auth/me`. */

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Streaming tool-exec subprocess adapter — real-time stdout/stderr tee.
 
 Port of v1 ``backend/tools/_exec.py::_tool_exec_stream`` into the new
@@ -79,10 +84,14 @@ _READER_QUEUE_MAXSIZE = 10000
 # Bypass``) and rejoins the resulting argv via ``subprocess_join`` BEFORE
 # handing the command string here.  ``create_subprocess_shell`` then runs it
 # through the OS shell (cmd.exe on Windows).  Adding detection here too would
-# double-select the shell.  The ai_coding sibling engine
-# (``qai.ai_coding...tool_exec_stream``) — used by the direct
-# ``/api/tool_execute_stream`` route without that upstream selection — reuses
-# ``_select_shell`` itself (see that module's ``_select_shell_argv``).
+# double-select the shell.
+#
+# Historical note (2026-07-21): a sibling ``ai_coding`` streaming engine at
+# ``src/qai/ai_coding/infrastructure/tools/tool_exec_stream.py`` used to serve
+# a legacy ``POST /api/tool_execute_stream`` route with its own inline
+# ``_select_shell`` call.  Both the route and that sibling engine were
+# retired in the 2026-07-21 cleanup (zero V2 SPA consumers), so this file
+# is now the sole streaming exec engine.
 
 
 # ---------------------------------------------------------------------------
@@ -118,14 +127,32 @@ class ExecStreamFrame:
 class ExecStreamResult:
     """Accumulator filled during iteration of :func:`stream_exec`.
 
-    After the async iterator is exhausted, ``full_output`` contains the
-    complete stdout+stderr text and ``exit_code`` the child's return code.
+    After the async iterator is exhausted, ``stdout`` and ``stderr`` hold
+    the child's two output streams **separately** (each carrying only its
+    own bytes, never merged), ``full_output`` holds the time-ordered
+    concatenation of both (kept as a legacy compatibility surface — the
+    ordering matches the byte stream as observed by the FIFO reader), and
+    ``exit_code`` holds the child's return code.
+
+    The stdout/stderr separation is architecturally required by callers
+    that must post-process one stream without touching the other — the
+    non-streaming exec handler already relies on this (only the stderr
+    text is fed to ``_strip_powershell_clixml``); the streaming path must
+    honour the same contract so a PowerShell ``#< CLIXML`` blob on stderr
+    never touches the real user stdout printed alongside it (PSHOST /
+    Write-Host output on the stdout channel).
     """
 
     full_output: str = ""
     exit_code: int | None = None
     timed_out: bool = False
     truncated: bool = False
+    #: Bytes decoded from the child's stdout pipe only.  Never contains
+    #: stderr text.  Populated from the reader-task tag == "stdout".
+    stdout: str = ""
+    #: Bytes decoded from the child's stderr pipe only.  Never contains
+    #: stdout text.  Populated from the reader-task tag == "stderr".
+    stderr: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -315,6 +342,16 @@ async def _stream_impl(
 
         # --- Main drain loop ---
         collected: list[str] = []
+        # Per-stream aggregators — filled alongside ``collected`` so the final
+        # result carries stdout and stderr SEPARATELY.  Architectural contract:
+        # a caller that must post-process one stream (e.g. strip
+        # ``#< CLIXML`` from PowerShell stderr) must never touch the other
+        # (PSHOST / Write-Host output on stdout).  The non-streaming
+        # ``handlers.exec.tool_exec`` path already honours this (only
+        # ``err_text`` is stripped).  ``full_output`` remains the byte-ordered
+        # concatenation for legacy callers that read the merged form.
+        stdout_collected: list[str] = []
+        stderr_collected: list[str] = []
         total_bytes = 0
         cap_noticed = False
         timed_out = False
@@ -378,6 +415,19 @@ async def _stream_impl(
                             f"{effective_timeout}s]\n"
                         )
                         collected.append(timeout_msg)
+                        # Mirror onto stdout_collected: the synthetic marker is
+                        # yielded as a STDOUT frame, so the per-stream view must
+                        # match (keeps full_output == stdout + stderr invariant
+                        # so a caller composing "stdout\n[stderr]\n<stderr>"
+                        # still surfaces the timeout marker).
+                        #
+                        # Routing choice: stdout keeps the marker on a plain
+                        # trailing line (as historically), rather than inside
+                        # the ``[stderr]`` block ``di.py::_compose_streaming_
+                        # exec_output`` renders — matches what users saw before
+                        # the split-stream refactor (judgement 2: no visible
+                        # regression).
+                        stdout_collected.append(timeout_msg)
                         yield ExecStreamFrame(
                             kind=ExecStreamFrameKind.STDOUT,
                             data=timeout_msg,
@@ -417,6 +467,13 @@ async def _stream_impl(
             assert text is not None
             line_bytes_len = len(text.encode("utf-8"))
             collected.append(text)
+            # Fill the per-stream aggregator so the caller sees stdout and
+            # stderr separately after the iterator drains (see the dataclass
+            # docstring for the architectural rationale).
+            if tag == "stdout":
+                stdout_collected.append(text)
+            else:  # tag == "stderr"
+                stderr_collected.append(text)
             total_bytes += line_bytes_len
 
             if total_bytes > cap_bytes and not cap_noticed:
@@ -489,6 +546,8 @@ async def _stream_impl(
                 f"\n[process killed: timeout after {effective_timeout}s]\n"
             )
             collected.append(timeout_msg)
+            # Mirror onto stdout_collected (see the in-loop branch above).
+            stdout_collected.append(timeout_msg)
             yield ExecStreamFrame(
                 kind=ExecStreamFrameKind.STDOUT,
                 data=timeout_msg,
@@ -546,6 +605,8 @@ async def _stream_impl(
 
     # Populate result accumulator
     result.full_output = "".join(collected)
+    result.stdout = "".join(stdout_collected)
+    result.stderr = "".join(stderr_collected)
     result.exit_code = exit_code
     result.timed_out = timed_out
     result.truncated = cap_noticed

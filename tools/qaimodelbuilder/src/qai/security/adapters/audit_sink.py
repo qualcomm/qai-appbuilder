@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """aiosqlite-backed :class:`AuditSinkPort` (PR-040, append-only).
 
 Schema reference: ``qai-db-schema.md`` §1.6 (security_audit_entry).

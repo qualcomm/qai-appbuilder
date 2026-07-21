@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """asyncio.subprocess-backed :class:`OcServicePort` adapter (PR-105).
 
 Manages the local OpenCode HTTP server subprocess via

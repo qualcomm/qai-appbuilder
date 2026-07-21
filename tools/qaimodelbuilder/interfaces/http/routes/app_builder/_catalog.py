@@ -1,9 +1,13 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """App Builder — catalogue / registry / status routes.
 
 The read-mostly registry surface: worker status, taxonomy (flat + full
-static tree), dependency status, blob cache status/clear, local-file
-listing, pack manifest, aggregated SKILL.md system prompt, per-model
-schema and the ``appbuilder_run`` LLM tool descriptor.
+static tree), dependency status, blob cache status/clear, pack manifest
+and per-model schema.
 
 Handler bodies are byte-for-byte identical to the pre-split module.
 """
@@ -12,22 +16,17 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 
 from ._dto import (
-    AppBuilderToolDescriptorResponse,
     CacheClearResponse,
     CacheStatusResponse,
     DepsProgressResponse,
     DepsStatusResponse,
     LoadedModelDTO,
-    LocalFileEntryResponse,
-    LocalFilesResponse,
     ModelSchemaResponse,
     PackDepProgressResponse,
     PackManifestResponse,
-    PerModelSkillResponse,
-    SystemPromptResponse,
     TaxonomyNodeResponse,
     TaxonomyTreeGroupResponse,
     TaxonomyTreeResponse,
@@ -228,36 +227,6 @@ def register(router: APIRouter, *, container: "Container") -> None:
         deleted = await uc.execute()
         return CacheClearResponse(deleted_files=deleted)
 
-    # ---- 15. files/local ----------------------------------------------
-    @router.get("/files/local", response_model=LocalFilesResponse)
-    async def list_local_files(
-        sub_path: str = Query(default=""),
-    ) -> LocalFilesResponse:
-        uc = _services().list_local_files_use_case
-        if uc is None:
-            raise HTTPException(status_code=503, detail="files-local use case not wired")
-        try:
-            entries = await uc.execute(sub_path=sub_path)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        # Read base_dir from the use case (private attr is OK for the
-        # adapter layer here — same module owns both).
-        base_dir = str(uc._base_dir)  # noqa: SLF001
-        return LocalFilesResponse(
-            base_dir=base_dir,
-            sub_path=sub_path,
-            entries=[
-                LocalFileEntryResponse(
-                    name=e.name,
-                    relative_path=e.relative_path,
-                    size_bytes=e.size_bytes,
-                    is_dir=e.is_dir,
-                    modified_at=e.modified_at,
-                )
-                for e in entries
-            ],
-        )
-
     # ---- 16. models/{model_id}/manifest --------------------------------
     @router.get(
         "/models/{model_id}/manifest",
@@ -401,29 +370,6 @@ def register(router: APIRouter, *, container: "Container") -> None:
     # PR-305 — SKILL.md + Schema-driven UI + appbuilder_run
     # ============================================================
 
-    # ---- 17. system-prompt --------------------------------------------
-    @router.get("/system-prompt", response_model=SystemPromptResponse)
-    async def get_system_prompt() -> SystemPromptResponse:
-        uc = _services().build_system_prompt_use_case
-        if uc is None:
-            raise HTTPException(status_code=503, detail="system-prompt use case not wired")
-        result = await uc.execute()
-        return SystemPromptResponse(
-            text=result.text,
-            per_model=[
-                PerModelSkillResponse(
-                    model_id=p.model_id,
-                    title=p.title,
-                    text=p.text,
-                    skipped=p.skipped,
-                    skip_reason=p.skip_reason,
-                )
-                for p in result.per_model
-            ],
-            model_count=result.model_count,
-            skipped_count=result.skipped_count,
-        )
-
     # ---- 18. models/{id}/schema ---------------------------------------
     @router.get(
         "/models/{model_id}/schema",
@@ -449,21 +395,4 @@ def register(router: APIRouter, *, container: "Container") -> None:
             input_schema=schema.input_schema,
             output_schema=schema.output_schema,
             variants=list(schema.variants),
-        )
-
-    # ---- 19. tool-descriptor ------------------------------------------
-    @router.get(
-        "/tool-descriptor",
-        response_model=AppBuilderToolDescriptorResponse,
-    )
-    async def get_appbuilder_tool_descriptor() -> AppBuilderToolDescriptorResponse:
-        uc = _services().get_appbuilder_tool_descriptor_use_case
-        if uc is None:
-            raise HTTPException(status_code=503, detail="tool-descriptor use case not wired")
-        d = await uc.execute()
-        return AppBuilderToolDescriptorResponse(
-            name=d.name,
-            description=d.description,
-            parameters=d.parameters,
-            available_models=list(d.available_models),
         )

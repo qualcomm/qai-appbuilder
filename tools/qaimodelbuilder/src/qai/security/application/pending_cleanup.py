@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Phase 2 (2026-07-06) — subprocess-gone cleanup service.
 
 Scans the in-memory :class:`PermissionWaitRegistry` (and the durable

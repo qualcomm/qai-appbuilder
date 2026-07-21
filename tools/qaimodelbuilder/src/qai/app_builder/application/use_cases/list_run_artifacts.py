@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``ListRunArtifactsUseCase`` — list the artifacts attached to a Run.
 
 Thin wrapper over :class:`RunRepositoryPort.get` that returns the

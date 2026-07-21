@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Per-path file locks (serialise concurrent writes to the SAME file).
 
 When one round's tool calls run in PARALLEL (parallel-tool-execution-design.md),

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Application-layer ports for the ai_coding bounded context.
 
 Every external dependency of the use cases — provider subprocess,
@@ -54,8 +59,6 @@ __all__ = [
     "CodingConfigRepositoryPort",
     "CodingProviderPort",
     "CodingSessionRepositoryPort",
-    "ExecStreamChunk",
-    "ExecStreamingPort",
     "FileBrokerPort",
     "FileGuardPort",
     "OcServicePort",
@@ -940,75 +943,3 @@ class ClaudeMdInjectorPort(Protocol):
     def copy_to(self, working_dir: Path) -> Path | None:
         """Copy the bundled template into ``working_dir``."""
         ...
-
-
-# ---------------------------------------------------------------------------
-# Exec streaming (落点5 — real-time stdout/stderr tee for the universal
-# ``POST /api/tool_execute_stream`` route)
-# ---------------------------------------------------------------------------
-class ExecStreamChunk:
-    """One chunk of streaming shell-exec output (落点5).
-
-    A framework-light, infrastructure-free DTO (regular class, mirroring
-    :class:`ToolBridgeResult`) so the application port stays decoupled
-    from the concrete engine's frame type
-    (``qai.ai_coding.infrastructure.tools.tool_exec_stream.ExecStreamFrame``).
-
-    Attributes
-    ----------
-    kind:
-        ``"started"`` | ``"output"`` | ``"cap_reached"`` | ``"terminated"``.
-        ``"output"`` collapses stdout + stderr (the route does not need
-        to distinguish them on the wire; V1 surfaced both as
-        ``{type:"output"}``).
-    data:
-        Text payload for ``"output"`` chunks (empty otherwise).
-    exit_code / timed_out / truncated:
-        Populated on the terminal ``"terminated"`` chunk.
-    """
-
-    __slots__ = ("data", "exit_code", "kind", "timed_out", "truncated")
-
-    def __init__(
-        self,
-        *,
-        kind: str,
-        data: str = "",
-        exit_code: int | None = None,
-        timed_out: bool = False,
-        truncated: bool = False,
-    ) -> None:
-        self.kind: str = kind
-        self.data: str = data
-        self.exit_code: int | None = exit_code
-        self.timed_out: bool = timed_out
-        self.truncated: bool = truncated
-
-
-@runtime_checkable
-class ExecStreamingPort(Protocol):
-    """Stream a shell command's stdout/stderr in real time (落点5).
-
-    Backs the universal ``POST /api/tool_execute_stream`` route's
-    real-time path for the ``exec`` tool.  The route consumes the async
-    iterator and re-emits each chunk as an SSE frame
-    (``output`` / ``cap_reached``) between the ``start`` and ``done``
-    envelopes — without ``interfaces.http`` ever importing the
-    infrastructure exec engine (the ``interfaces-stays-thin`` /
-    ``context-isolation`` contracts forbid it).
-
-    Returns ``(chunk_iterator, accumulator)`` where the accumulator is a
-    duck-typed object exposing ``full_output`` / ``exit_code`` /
-    ``timed_out`` / ``truncated`` after the iterator drains, so the route
-    can build the final ``done`` envelope.  Implementations MUST NOT
-    raise on a spawn failure — surface it as a terminal chunk instead.
-    """
-
-    def stream(
-        self,
-        *,
-        command: str,
-        cwd: str | None = None,
-        shell: str = "auto",
-        timeout: float | None = None,
-    ) -> "tuple[AsyncIterator[ExecStreamChunk], Any]": ...

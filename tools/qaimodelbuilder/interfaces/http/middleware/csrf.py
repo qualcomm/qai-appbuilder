@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Double-submit-cookie CSRF middleware (PR-040, issue e decision A).
 
 Mounted in ``apps/api/main.py`` AFTER :func:`register_error_handlers`

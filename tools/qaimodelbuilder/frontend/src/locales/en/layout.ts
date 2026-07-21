@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 // =============================================================================
 // i18n locale sub-file — 手工维护，UTF-8（无 BOM）。
 //
@@ -13,14 +18,14 @@
 
 const layout = {
   clear: "Clear conversation",
-  collapse_all: "Collapse all messages",
   collapse_sidebar: "Collapse sidebar",
+  collapse_tool_cards: "Collapse all tool call cards",
   command_palette_empty: "No matching commands.",
   command_palette_placeholder: "Type a command or page…",
   command_palette_shortcut: "Command palette (Ctrl+K)",
   command_palette_title: "Command palette",
-  expand_all: "Expand all messages",
   expand_sidebar: "Expand sidebar",
+  expand_tool_cards: "Expand all tool call cards",
   export: "Export conversation",
   header_aria: "Application header",
   main_aria: "Main content",
@@ -29,11 +34,10 @@ const layout = {
   overflowMenu: "More actions",
   pending_permissions: "Pending permission requests",
   sidebar_aria: "Sidebar navigation",
-  sidebar_toggle: "Toggle sidebar",
+  toggle_sidebar: "Toggle sidebar",
   skip_to_content: "Skip to main content",
   switch_to_dark: "Switch to dark theme",
   switch_to_light: "Switch to light theme",
-  toggle_tool_messages: "Toggle tool call messages",
 };
 
 export default layout;

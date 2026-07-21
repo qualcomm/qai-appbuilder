@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``ModeTemplate`` aggregate for the chat bounded context.
 
 A :class:`ModeTemplate` is a *named collaboration mode* — "怎么协作": ``讨论`` /
@@ -325,6 +330,18 @@ class ModeTemplate:
     #: editing it; ``reset`` restores the copy's business fields from
     #: ``cloned_from_id`` in place (the copy keeps its own id / created_at).
     cloned_from_id: str | None = None
+    #: Optional per-locale i18n maps for built-in presets (migration 056). Each
+    #: is ``{"en": "...", "zh-CN": "...", "zh-TW": "..."}`` loaded from the
+    #: matching ``*_i18n_json`` column; ``None`` for custom (``is_builtin=0``)
+    #: templates and pre-056 rows — which then always render their canonical
+    #: single-language field (name / description / framing) as the fallback
+    #: (AGENTS.md §8 forward-compatibility). NOTE: the built-in 讨论 mode's
+    #: framing is intentionally an empty string in all three languages — an empty
+    #: translation is treated as "no override" and falls back to the (also empty)
+    #: framing, which is correct. Tail-appended optional fields (§3.1 additive).
+    name_i18n: dict[str, str] | None = None
+    description_i18n: dict[str, str] | None = None
+    framing_i18n: dict[str, str] | None = None
     created_at: datetime
     updated_at: datetime
 

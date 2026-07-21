@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Use cases: read/save the ai_coding UI config document.
 
 Backs the legacy ``GET /api/cc/config`` + ``POST /api/cc/config``

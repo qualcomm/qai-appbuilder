@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Markdown run-report renderer (PR-094 §17.5 #14).
 
 Restores the legacy ``backend/app_builder/run_exporter.py`` (188 LOC) as an

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """aiosqlite-backed :class:`ModeTemplateRepositoryPort`.
 
 Schema reference: ``qai-db-schema.md`` §2.10 (chat_mode_template, migration
@@ -38,7 +43,8 @@ __all__ = ["SqliteModeTemplateRepository"]
 
 _COLUMNS = (
     "id, name, description, framing, tool_policy_json, flow_policy_json, "
-    "hard_constraints_json, is_builtin, cloned_from_id, created_at, updated_at"
+    "hard_constraints_json, is_builtin, cloned_from_id, created_at, updated_at, "
+    "name_i18n_json, description_i18n_json, framing_i18n_json"
 )
 
 
@@ -51,6 +57,31 @@ def _loads(raw: object) -> dict:
     except (ValueError, TypeError):
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _i18n_to_json(i18n: dict[str, str] | None) -> str | None:
+    """Serialise a str->str i18n map to JSON, or ``None`` when absent."""
+    if not i18n:
+        return None
+    return json.dumps(i18n, ensure_ascii=False)
+
+
+def _i18n_from_json(raw: object) -> dict[str, str] | None:
+    """Parse a ``*_i18n_json`` column; NULL / malformed -> ``None`` (fallback).
+
+    Forward-compatible (AGENTS.md §8): a bad blob degrades to ``None`` so the
+    read falls back to the canonical single-language column.
+    """
+    if raw is None:
+        return None
+    try:
+        parsed = json.loads(str(raw))
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    result = {k: v for k, v in parsed.items() if isinstance(k, str) and isinstance(v, str)}
+    return result or None
 
 
 class SqliteModeTemplateRepository:
@@ -80,6 +111,9 @@ class SqliteModeTemplateRepository:
             template.cloned_from_id,
             template.created_at.isoformat(),
             template.updated_at.isoformat(),
+            _i18n_to_json(template.name_i18n),
+            _i18n_to_json(template.description_i18n),
+            _i18n_to_json(template.framing_i18n),
         )
         try:
             async with self._db.connection() as conn:
@@ -89,8 +123,10 @@ class SqliteModeTemplateRepository:
                         "INSERT INTO chat_mode_template ("
                         "id, name, description, framing, tool_policy_json, "
                         "flow_policy_json, hard_constraints_json, is_builtin, "
-                        "cloned_from_id, created_at, updated_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                        "cloned_from_id, created_at, updated_at, "
+                        "name_i18n_json, description_i18n_json, "
+                        "framing_i18n_json) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                         "ON CONFLICT(id) DO UPDATE SET "
                         " name=excluded.name, "
                         " description=excluded.description, "
@@ -99,7 +135,10 @@ class SqliteModeTemplateRepository:
                         " flow_policy_json=excluded.flow_policy_json, "
                         " hard_constraints_json=excluded.hard_constraints_json, "
                         " is_builtin=excluded.is_builtin, "
-                        " updated_at=excluded.updated_at",
+                        " updated_at=excluded.updated_at, "
+                        " name_i18n_json=excluded.name_i18n_json, "
+                        " description_i18n_json=excluded.description_i18n_json, "
+                        " framing_i18n_json=excluded.framing_i18n_json",
                         params,
                     )
                     await conn.commit()
@@ -193,6 +232,9 @@ class SqliteModeTemplateRepository:
     # ------------------------------------------------------------------
     @staticmethod
     def _row_to_template(row: tuple[object, ...]) -> ModeTemplate:
+        # i18n columns tail-appended (index 11-13); a short projection (legacy
+        # row read before migration 056) leaves them unset -> None -> canonical
+        # single-language fallback (AGENTS.md §8).
         return ModeTemplate(
             id=ModeTemplateId.of(str(row[0])),
             name=str(row[1]) if row[1] is not None else "",
@@ -205,4 +247,7 @@ class SqliteModeTemplateRepository:
             cloned_from_id=str(row[8]) if row[8] is not None else None,
             created_at=datetime.fromisoformat(str(row[9])),
             updated_at=datetime.fromisoformat(str(row[10])),
+            name_i18n=_i18n_from_json(row[11]) if len(row) > 11 else None,
+            description_i18n=_i18n_from_json(row[12]) if len(row) > 12 else None,
+            framing_i18n=_i18n_from_json(row[13]) if len(row) > 13 else None,
         )

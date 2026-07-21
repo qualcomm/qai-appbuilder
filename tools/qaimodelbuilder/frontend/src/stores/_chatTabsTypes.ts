@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * Types and constants for the multi-tab chat store. Extracted from
  * `chatTabs.ts` to keep that store within the cohesion budget. The
@@ -30,6 +35,7 @@ export type ChatMessageRole =
  */
 export type ToolModeKey =
   | "model-build"
+  | "model-hub"
   | "app-builder"
   | "code"
   | "translate"
@@ -1022,6 +1028,18 @@ export const DEFAULT_IMPLEMENTATION_STATE: TabImplementationState = {
 export interface ChatTab {
   readonly id: TabId;
   conversationId: ConversationId | null;
+  /** Promote-ready detection result for this tab's conversation (backend
+   *  migration 057). Loaded from the single-GET conversation summary on open
+   *  (`loadHistoryMessages` → historyLoader) and refreshed at turn end when
+   *  the backend re-detects + the frontend re-reads. Drives the "Promote to
+   *  App Builder" CTA with ZERO on-open disk scans (replaces the old
+   *  every-message global scan). `null` / undefined ⇒ never detected;
+   *  `workdir` empty + `variants` empty ⇒ "checked, nothing to promote". */
+  detectedModel?: {
+    workdir: string;
+    variants: { precision: string; label: string }[];
+    checkedAt?: string;
+  } | null;
   title: string;
   modelId: string;
   /**

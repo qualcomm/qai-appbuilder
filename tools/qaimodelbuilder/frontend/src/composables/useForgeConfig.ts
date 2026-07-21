@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * `useForgeConfig` — composable for reading/saving forge config + the
  * data-driven chat-input toolbar module list.
@@ -65,18 +70,43 @@ export interface VisibleToolbarModule extends ToolbarModuleEntry {
   key: string;
 }
 
-/** Default toolbar modules — align V1: translate/ppt hidden by default. */
+/** Default toolbar modules — align V1: translate/ppt hidden by default.
+ *
+ * Order values leave 10-unit gaps so future modules can slot in without
+ * renumbering. The order reflects the intended user journey rather than
+ * chronological addition: Model Builder → App Builder → Pro → GoMaster
+ * (advanced / cloud-assisted model workflows) → Code → Translate → PPT
+ * (general-purpose modes). See `forge_config.py` for the two internal-
+ * only modules (pro / gomaster) that the backend injects with orders
+ * 30 / 40 respectively — the two files intentionally share the same
+ * order scheme so the toolbar looks the same on internal builds
+ * regardless of whether a module comes from the frontend fallback or
+ * the backend edition-gated injection. */
 export const DEFAULT_TOOLBAR_MODULES: ToolbarModulesMap = {
   model_builder: {
     enabled: true,
-    order: 10,
+    order: 30,
     mode: "model-build",
     i18n: "index.modelBuilder",
     icon: "cube",
   },
-  app_builder: {
+  // Model Hub — first-class mode (upgraded from the `aihub-model-run` skill):
+  // download pre-compiled models from Qualcomm AI Hub and export them to App
+  // Builder. Peer of model_builder / app_builder. `tool_mode` is the hyphenated
+  // "model-hub" (backend system_prompt_builder already ships the display name /
+  // feature prompt). Order 20 — the intended user journey is App Builder (10) →
+  // Model Hub (20) → Model Builder (30): get a ready-made model first, build a
+  // model only if you must convert your own.
+  model_hub: {
     enabled: true,
     order: 20,
+    mode: "model-hub",
+    i18n: "index.modelHub",
+    icon: "model_hub",
+  },
+  app_builder: {
+    enabled: true,
+    order: 10,
     mode: "app-builder",
     i18n: "index.appBuilder",
     icon: "apps",
@@ -84,9 +114,14 @@ export const DEFAULT_TOOLBAR_MODULES: ToolbarModulesMap = {
     // currently has a matching `*Hint` locale key; peers omit `hint`.
     hint: "index.appBuilderHint",
   },
+  // NOTE: order 40 / 50 are reserved for the internal-only `pro` and
+  // `gomaster` modules that the backend injects (see forge_config.py
+  // `pro.setdefault("order", 40)` / `gomaster.setdefault("order", 50)`).
+  // The frontend has no fallback entries for those two — they only
+  // render on internal editions where the backend ships them.
   code: {
     enabled: true,
-    order: 30,
+    order: 60,
     mode: "code",
     i18n: "index.coding",
     icon: "code",
@@ -95,7 +130,7 @@ export const DEFAULT_TOOLBAR_MODULES: ToolbarModulesMap = {
     // V1 parity (config-defaults.js:274): translate mode is DISABLED by
     // default; the user opts in via Settings → App Config → Toolbar Modules.
     enabled: false,
-    order: 40,
+    order: 70,
     mode: "translate",
     i18n: "index.translateMode",
     icon: "lang",
@@ -104,7 +139,7 @@ export const DEFAULT_TOOLBAR_MODULES: ToolbarModulesMap = {
     // V1 parity (config-defaults.js:275): PPT generation mode is DISABLED by
     // default; the user opts in via Settings → App Config → Toolbar Modules.
     enabled: false,
-    order: 50,
+    order: 80,
     mode: "ppt",
     i18n: "index.pptGen",
     icon: "slide",
@@ -143,6 +178,53 @@ export const gomasterMode = computed<string | null>(
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+/**
+ * Legacy-order migration table (2026-07-20 rearrange).
+ *
+ * The toolbar-module order was rearranged to reflect the intended user
+ * journey — get a ready-made model first, build your own only if needed:
+ *
+ *     app_builder    20 → 10
+ *     model_hub      15 → 20
+ *     model_builder  10 → 30
+ *     pro            30 → 40   (backend-injected on internal editions)
+ *     gomaster       40 → 50   (backend-injected on internal editions)
+ *     code           50 → 60
+ *     translate      60 → 70
+ *     ppt            70 → 80
+ *
+ * `patchModule` persists the FULL toolbar-modules map (including `order`)
+ * on any toggle change, so upgrading users whose `forge_config.json` was
+ * populated by the PREVIOUS defaults still carry the old orders. We treat
+ * "the exact previous-default value" as an implicit default (a user almost
+ * never deliberately types 15 for model_hub or 50 for code — those numeric
+ * constants only ever existed as defaults) and rewrite to the new order at
+ * read time. Genuinely customised values (e.g. 33, 99) are preserved. This
+ * makes a fresh install (Setup.bat → Start.bat) and any upgraded install
+ * show the SAME order, per product requirement.
+ *
+ * The `from` values are the PREVIOUS defaults (the 2026-07-18 scheme).
+ * Mirrored by the backend `forge_config.py` for pro / gomaster.
+ */
+const LEGACY_ORDER_MIGRATION: Record<string, { from: number; to: number }> = {
+  app_builder: { from: 20, to: 10 },
+  model_hub: { from: 15, to: 20 },
+  model_builder: { from: 10, to: 30 },
+  pro: { from: 30, to: 40 },
+  gomaster: { from: 40, to: 50 },
+  code: { from: 50, to: 60 },
+  translate: { from: 60, to: 70 },
+  ppt: { from: 70, to: 80 },
+};
+
+function migrateLegacyOrder(key: string, order: number): number {
+  const rule = LEGACY_ORDER_MIGRATION[key];
+  if (rule !== undefined && order === rule.from) {
+    return rule.to;
+  }
+  return order;
+}
+
 function readToolbarModules(cfg: ForgeConfig | null | undefined): ToolbarModulesMap {
   if (cfg === null || cfg === undefined || typeof cfg !== "object") {
     return { ...DEFAULT_TOOLBAR_MODULES };
@@ -167,7 +249,7 @@ function readToolbarModules(cfg: ForgeConfig | null | undefined): ToolbarModules
         ? (r["enabled"] as boolean)
         : (fallback?.enabled ?? true),
       order: typeof r["order"] === "number"
-        ? (r["order"] as number)
+        ? migrateLegacyOrder(key, r["order"] as number)
         : (fallback?.order ?? 999),
       mode: typeof r["mode"] === "string"
         ? (r["mode"] as string)

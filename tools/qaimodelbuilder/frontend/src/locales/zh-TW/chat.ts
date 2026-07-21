@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 // =============================================================================
 // i18n locale sub-file — 手工维护，UTF-8（无 BOM）。
 //
@@ -219,12 +224,12 @@ const chat = {
     copied: "已複製",
     zoomHint: "點擊放大",
   },
-  toolCalls: "工具呼叫",
   skillsActive: "{n} 個技能已啟用",
   collapse: "摺疊",
-  collapseAll: "摺疊全部",
+  collapseToolCards: "摺疊所有工具卡",
   expand: "展開",
-  expandAll: "展開全部",
+  expandToolCards: "展開所有工具卡",
+  toolCardsHiddenHint: "請先在設定裡啟用工具卡顯示",
   toolDone: "完成",
   toolError: "失敗",
   toolParams: "參數",
@@ -240,6 +245,28 @@ const chat = {
   toolRunning: "執行中",
   toolGeneratingArgs: "生成參數中",
   toolGeneratingArgsCount: "正在生成參數… ({n} 字元)",
+  // 工具卡副標題類別（header 佈局：[圖示] [類別] · [語境化描述]）。
+  // key 與 `useToolSubtitle.toolMeta` 的 switch 表 1:1 對齊；`unknown` 是不在
+  // 表內工具的兜底文案。參見 `frontend/src/composables/chat/useToolSubtitle.ts`。
+  toolCategory: {
+    read: "讀取",
+    list: "列目錄",
+    write: "寫入",
+    edit: "編輯",
+    glob: "尋找檔案",
+    grep: "搜尋",
+    exec: "Shell",
+    webfetch: "抓取",
+    web_search: "聯網搜尋",
+    apply_patch: "套用修補",
+    appbuilder_run: "執行模型",
+    agent: "子 Agent",
+    background_process: "背景行程",
+    list_subagents: "Agent 列表",
+    skill: "技能",
+    appbuilder_batch_run: "批次執行",
+    unknown: "工具",
+  },
   totalTokens: "總 tokens",
   turnLimitWarn: "⚠️ 當前會話已達到 {n} 輪對話，建議儘快清理歷史或建立新會話。",
   untitled: "（未命名）",
@@ -255,7 +282,7 @@ const chat = {
   welcomeChip4Label: "Zipformer · 從 AI Hub 下載並推理",
   welcomeChip4Prompt: "從 Qualcomm AI Hub 下載 Zipformer 語音辨識模型（端側預導出包），編寫推理程式碼並在本機 NPU 上跑一段語音辨識。請先偵測當前晶片型號以選擇正確的模型包，再閱讀 metadata.json 確認輸入/輸出形狀與量化參數，然後完成下載、解壓與推理。請一次自動跑完整個流程，無需中途確認。",
   welcomeChip5Label: "圖片分類 · 子 Agent 下載並推理",
-  welcomeChip5Prompt: "請安排一個子 Agent 從 Qualcomm AI Hub 下載一個圖片分類模型（如 Inception v3 或 MobileNet 的端側預導出包），由該子 Agent 編寫推理程式碼並在本機 NPU 上對一張測試圖片完成分類推理，輸出 Top-5 結果。子 Agent 需：(1) 先偵測晶片型號；(2) 透過先列出 skills/aihub-model-run/models/ 目錄確認精確資料夾名稱（目錄名可能與模型名不同，例如是 'inception_v3' 而非 'inceptionv3'），再讀取對應的 NOTES.md（其中包含下載連結、I/O 形狀和現成的推理腳本）；(3) 然後再讀取 metadata.json 與 labels.txt。請一次自動跑完整個流程，無需中途確認。",
+  welcomeChip5Prompt: "請安排一個子 Agent 從 Qualcomm AI Hub 下載一個圖片分類模型（如 Inception v3 或 MobileNet 的端側預導出包），由該子 Agent 編寫推理程式碼並在本機 NPU 上對一張測試圖片完成分類推理，輸出 Top-5 結果。子 Agent 需：(1) 先偵測晶片型號；(2) 透過先列出 factory/chat_features/model-hub/models/ 目錄確認精確資料夾名稱（目錄名可能與模型名不同，例如是 'inception_v3' 而非 'inceptionv3'），再讀取對應的 NOTES.md（其中包含下載連結、I/O 形狀和現成的推理腳本）；(3) 然後再讀取 metadata.json 與 labels.txt。請一次自動跑完整個流程，無需中途確認。",
   welcomeChip6Label: "MeloTTS 中文 · 從 AI Hub 下載並推理",
   welcomeChip6Prompt: "從 Qualcomm AI Hub 下載 melotts_zh 中文語音合成模型（VOICE_AI 端側預導出包），編寫推理流水線在本機 NPU 上把一段中文文字合成為語音並儲存為 wav。請先偵測當前晶片型號以選擇正確的模型包，閱讀各子模型的 metadata.json 與 config.json，注意 ARM64 上 torchaudio/numba/MeCab 等相依套件需用 mock 處理。請一次自動跑完整個流程，無需中途確認。",
   welcomeChip7Label: "Mermaid 架構圖 · 視覺化專案結構",

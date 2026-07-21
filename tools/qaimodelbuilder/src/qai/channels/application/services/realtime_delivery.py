@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Real-time delivery service with 3-layer fallback (S9 PR-093 §2.2 H-14).
 
 Restores the production-grade real-time channel delivery semantics

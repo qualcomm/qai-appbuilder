@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <script setup lang="ts">
 /**
  * ModelDropdown — 380px popover for selecting the active chat model.
@@ -23,6 +28,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { apiJson } from "@/api";
+import { useCloudModelPermissionsStore } from "@/stores/cloudModelPermissions";
 import { useModelSelector, type ModelInfo } from "@/composables/useModelSelector";
 
 interface Props {
@@ -64,6 +70,13 @@ function isSelected(modelId: string, provider: string | undefined): boolean {
 
 const { t } = useI18n();
 const router = useRouter();
+
+// Per-``(provider, model_id)`` permission snapshot populated at app mount by
+// App.vue. The dropdown reads it to HIDE (not grey out — product decision) any
+// model the current cloud API key has been probed as `"denied"`. Fail-open:
+// `"unknown"` and `"allowed"` both show, so a not-yet-populated / failed
+// snapshot leaves the previous "show all" behaviour intact.
+const permissionsStore = useCloudModelPermissionsStore();
 
 const {
   models: localModels,
@@ -247,8 +260,36 @@ const filteredLocal = computed<ModelInfo[]>(() =>
   localModels.value.filter((m) => matchesText(getModelLabel(m))),
 );
 
+/**
+ * Permission gate for a cloud entry.
+ *
+ * Hides ``"denied"`` models entirely (product decision — no grey/lock UI).
+ * Exception: the CURRENTLY SELECTED model is always kept in the list, even
+ * when denied, so the user does not lose visual anchoring on what they had
+ * selected (e.g. after a probe scan just flipped it to denied). Without this,
+ * the dropdown would silently drop the selected row and the user would see
+ * their model "vanish" with no explanation. When denied AND selected we
+ * keep the row in place; the surrounding chat error card (see
+ * chatErrorActions.ts `permission_denied` spec) is where the user learns
+ * why turns to this model fail and picks a replacement.
+ */
+function isCloudEntryVisible(entry: CloudEntry): boolean {
+  const status = permissionsStore.getStatus(
+    entry.provider,
+    entry.model_id,
+  );
+  if (status !== "denied") return true;
+  // Denied — keep only if this is the model the user currently has picked.
+  return (
+    props.selectedModelId === entry.model_id &&
+    (props.selectedModelProvider ?? "") === (entry.provider ?? "")
+  );
+}
+
 const filteredCloud = computed<CloudEntry[]>(() =>
-  cloudEntries.value.filter(matchesCloud),
+  cloudEntries.value.filter(
+    (entry) => isCloudEntryVisible(entry) && matchesCloud(entry),
+  ),
 );
 
 function matchesQueryService(entry: QueryServiceEntry): boolean {

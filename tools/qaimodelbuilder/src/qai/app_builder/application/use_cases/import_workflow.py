@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Three import-workflow use cases: dry-run / commit / rollback.
 
 The use cases are thin orchestrators over :class:`ImportPort`. They

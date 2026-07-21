@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Python interpreter resolvers — pluggable selectors for ``argv[0]``.
 
 Mirrors the legacy ``backend/app_builder/runners/python_script.py::

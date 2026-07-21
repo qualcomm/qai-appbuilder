@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * Base URL helpers — kept in their own module so the higher-level
  * client modules (`http.ts`, `sse.ts`, `stream.ts`) can import them

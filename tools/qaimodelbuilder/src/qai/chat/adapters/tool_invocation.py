@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Registry-backed :class:`ToolInvocationPort` adapter (PR-042).
 
 Dispatches a named tool to one of a registry of async callables. The

@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <script setup lang="ts">
 /**
  * ChatComposer — V1-style rich input area with toolbar (PR-054 rewrite).
@@ -75,6 +80,7 @@ import ScheduledContinuationPopover from "./ScheduledContinuationPopover.vue";
 import AwayQuestionAutoAnswerDialog from "./AwayQuestionAutoAnswerDialog.vue";
 import UserMessageJumpPopover from "./UserMessageJumpPopover.vue";
 import ModeFrameModelBuilder from "./toolbar-modes/ModeFrameModelBuilder.vue";
+import ModeFrameModelHub from "./toolbar-modes/ModeFrameModelHub.vue";
 import ModeFrameAppBuilder from "./toolbar-modes/ModeFrameAppBuilder.vue";
 import ModeFrameCoding from "./toolbar-modes/ModeFrameCoding.vue";
 import ModeFrameTranslate from "./toolbar-modes/ModeFrameTranslate.vue";
@@ -1082,6 +1088,7 @@ function setToolModeFromKey(modeStr: string): void {
   if (tab === null) return;
   const known: ReadonlySet<string> = new Set([
     "model-build",
+    "model-hub",
     "app-builder",
     "code",
     "translate",
@@ -1726,6 +1733,11 @@ const {
           <ModeFrameAppBuilder
             v-else-if="effectiveMode === 'app-builder'"
             @exit="exitMode"
+          />
+          <ModeFrameModelHub
+            v-else-if="effectiveMode === 'model-hub'"
+            @exit="exitMode"
+            @fill-prompt="appendToDraft"
           />
           <ModeFrameCoding
             v-else-if="effectiveMode === 'code'"

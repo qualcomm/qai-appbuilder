@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Async SQLite engine with safe defaults.
 
 Single ``Database`` instance per application; created in lifespan and
@@ -12,8 +17,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import shutil
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -94,7 +101,13 @@ class Database:
         return self._open_connections
 
     async def start(self) -> None:
-        """Open & close one connection to validate the file and apply PRAGMAs."""
+        """Open & close one connection to validate the file and apply PRAGMAs.
+
+        If the database file exists but fails an ``integrity_check``, it is
+        renamed to ``<name>.corrupted.<timestamp>`` and a fresh empty database
+        is created in its place so the application can always start cleanly.
+        History data is lost, but the service remains operational.
+        """
         async with self._lock:
             if self._started:
                 return
@@ -104,6 +117,14 @@ class Database:
                     "Cannot start a Database that has been closed",
                 )
             self._path.parent.mkdir(parents=True, exist_ok=True)
+
+            # --- corruption guard -------------------------------------------
+            # Only run the check when the file already exists; a brand-new
+            # (absent) path is fine — SQLite will create it on first connect.
+            if self._path.exists():
+                await self._recover_if_corrupt()
+            # ----------------------------------------------------------------
+
             try:
                 async with self._raw_connect() as conn:
                     await self._apply_pragmas(conn)
@@ -198,6 +219,85 @@ class Database:
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
+
+    async def _recover_if_corrupt(self) -> None:
+        """Run ``PRAGMA integrity_check``; if it fails, back up and delete the
+        corrupted file so a fresh database is created on the next connect.
+
+        Handles two failure modes:
+        1. SQLite can open the file but reports integrity errors.
+        2. SQLite cannot open the file at all (e.g. truncated / not a DB).
+        """
+        corrupt = False
+        try:
+            async with self._raw_connect() as conn:
+                cur = await conn.execute("PRAGMA integrity_check")
+                rows = await cur.fetchall()
+                await cur.close()
+            results = [row[0] for row in rows]
+            if results == ["ok"]:
+                return  # healthy — nothing to do
+            # integrity_check returned one or more error rows
+            corrupt = True
+            try:
+                _log.error(
+                    "database.corrupt_detected",
+                    path=str(self._path),
+                    errors=results,
+                )
+            except Exception:  # noqa: BLE001 — log failure must not abort recovery
+                pass
+        except Exception as exc:  # noqa: BLE001 — file unreadable / not a DB
+            corrupt = True
+            try:
+                _log.error(
+                    "database.open_failed_on_start",
+                    path=str(self._path),
+                    error=type(exc).__name__,
+                )
+            except Exception:  # noqa: BLE001 — log failure must not abort recovery
+                pass
+
+        if not corrupt:
+            return
+
+        # Reach here only on corruption or open failure → rename & recreate.
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        backup = self._path.with_name(
+            f"{self._path.stem}.corrupted.{ts}{self._path.suffix}"
+        )
+        try:
+            shutil.move(str(self._path), str(backup))
+            try:
+                _log.warning(
+                    "database.corrupt_backed_up",
+                    original=str(self._path),
+                    backup=str(backup),
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        except Exception:  # noqa: BLE001 — rename failed; try plain delete
+            try:
+                _log.warning(
+                    "database.corrupt_backup_failed",
+                    path=str(self._path),
+                )
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                self._path.unlink(missing_ok=True)
+                try:
+                    _log.warning("database.corrupt_deleted", path=str(self._path))
+                except Exception:  # noqa: BLE001
+                    pass
+            except Exception:  # noqa: BLE001 — give up; start() will raise
+                try:
+                    _log.error(
+                        "database.corrupt_unrecoverable",
+                        path=str(self._path),
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
 
     @contextlib.asynccontextmanager
     async def _raw_connect(self) -> AsyncIterator[Any]:

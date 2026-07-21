@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Runtime endpoint file — backwards-compatible re-export shim.
 
 The implementation moved to ``qai.platform.process.runtime_endpoint`` so

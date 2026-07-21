@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """HTTP-backed :class:`LLMStreamPort` (PR-042 + PR-090 S9 hardening).
 
 Speaks to any OpenAI-compatible HTTP endpoint
@@ -1243,6 +1248,17 @@ class HttpOpenAICompatibleLLMStream:
                             message=_http_message,
                             retryable=_retryable,
                             retry_after_seconds=_retry_after_s,
+                            # Preserve the upstream response body verbatim
+                            # (truncated) so the chat error card's [Copy
+                            # diagnostics] path can surface exactly what the
+                            # provider said. Especially useful for 403 /
+                            # permission_denied: providers commonly return a
+                            # JSON body naming the offending model / plan
+                            # restriction that the generic localized
+                            # ``permissionDenied`` message cannot convey.
+                            # Additive payload key (§3.1); frontend degrades
+                            # gracefully when absent.
+                            provider_message=body_text[:2048] if body_text else None,
                         ):
                             yield frame
                         return
@@ -2204,6 +2220,7 @@ class HttpOpenAICompatibleLLMStream:
         param: str | None = None,
         model_id: str | None = None,
         retry_after_seconds: float | None = None,
+        provider_message: str | None = None,
     ) -> AsyncIterator[StreamFrame]:
         """Emit one ERROR frame followed by a failed END frame.
 
@@ -2228,6 +2245,13 @@ class HttpOpenAICompatibleLLMStream:
         ``RetryPolicyPort.next_attempt(..., server_advised_delay_s=...)`` so
         the THROTTLING backoff honours the server directive. Absent →
         key omitted → existing exponential backoff unchanged.
+
+        ``provider_message`` (additive, §3.1) is the raw upstream response
+        body (truncated) preserved verbatim for frontend diagnostics — the
+        chat error card's [Copy diagnostics] path surfaces it so the user
+        can see what the provider actually said (e.g. a 403 body naming the
+        exact model / plan restriction) without cluttering the primary
+        localized ``message``. Emitted only when non-``None`` / non-empty.
         """
         payload: dict[str, Any] = {
             "code": code,
@@ -2248,6 +2272,8 @@ class HttpOpenAICompatibleLLMStream:
             payload["model_id"] = model_id
         if retry_after_seconds is not None:
             payload["retry_after_seconds"] = float(retry_after_seconds)
+        if provider_message:
+            payload["provider_message"] = str(provider_message)
         yield StreamFrame(
             frame_id=self._ids.new_id(),
             frame_type=StreamFrameType.ERROR,

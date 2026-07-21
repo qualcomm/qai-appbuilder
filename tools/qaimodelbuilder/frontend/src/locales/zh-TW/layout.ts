@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 // =============================================================================
 // i18n locale sub-file — 手工维护，UTF-8（无 BOM）。
 //
@@ -13,14 +18,14 @@
 
 const layout = {
   clear: "清除對話",
-  collapse_all: "摺疊所有訊息",
   collapse_sidebar: "摺疊側欄",
+  collapse_tool_cards: "摺疊所有工具卡",
   command_palette_empty: "沒有相符的命令。",
   command_palette_placeholder: "輸入命令或頁面名稱…",
   command_palette_shortcut: "命令面板（Ctrl+K）",
   command_palette_title: "命令面板",
-  expand_all: "展開所有訊息",
   expand_sidebar: "展開側欄",
+  expand_tool_cards: "展開所有工具卡",
   export: "匯出對話",
   header_aria: "應用程式標題列",
   main_aria: "主內容區",
@@ -29,11 +34,10 @@ const layout = {
   overflowMenu: "更多操作",
   pending_permissions: "待處理權限請求",
   sidebar_aria: "側欄導覽",
-  sidebar_toggle: "切換側欄",
+  toggle_sidebar: "切換側欄",
   skip_to_content: "跳至主內容",
   switch_to_dark: "切換至深色主題",
   switch_to_light: "切換至淺色主題",
-  toggle_tool_messages: "切換工具呼叫訊息",
 };
 
 export default layout;

@@ -1,4 +1,9 @@
 <!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
+<!--
   Aria2cBanner — V1 5-state banner above the Download Center tabs.
 
   V1 reference: DownloadCenterPanel.js:104-152

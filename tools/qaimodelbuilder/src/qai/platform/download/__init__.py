@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Multi-threaded download shared kernel (aria2c engines + VOs + port).
 
 This sub-package is the cross-context home of the ``aria2c`` download

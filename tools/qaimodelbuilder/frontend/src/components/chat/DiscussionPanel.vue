@@ -1,4 +1,9 @@
 <!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
+<!--
   DiscussionPanel.vue — Multi-Agent discussion configuration panel (block-5).
 
   A self-contained panel (rendered from the chat composer toolbar) that lets the
@@ -31,6 +36,7 @@ import { useToast } from "@/composables/useToast";
 import { useDiscussion } from "@/composables/chat/useDiscussion";
 import { useCloudModelStatus } from "@/composables/useCloudModelStatus";
 import { useCloudModelOptions } from "@/composables/chat/useCloudModelOptions";
+import { useTemplateI18n } from "@/composables/chat/useTemplateI18n";
 import TemplateLibraryDialog from "@/components/chat/TemplateLibraryDialog.vue";
 import AgentRoleForm, {
   type RoleFormData,
@@ -62,6 +68,7 @@ import {
 const { t } = useI18n();
 const { confirm } = useConfirm();
 const toast = useToast();
+const { resolve: resolveI18n } = useTemplateI18n();
 const router = useRouter();
 const discussion = useDiscussion();
 const rosterTemplates = useRosterTemplateStore();
@@ -282,9 +289,15 @@ const selectedMode = computed<ModeTemplateView | null>(
 const selectedModePolicy = computed<ModeToolPolicy | null>(
   () => (selectedMode.value?.toolPolicy as ModeToolPolicy) ?? null,
 );
-const selectedModeName = computed<string | null>(
-  () => selectedMode.value?.name ?? null,
+const selectedModeName = computed<string | null>(() =>
+  selectedMode.value ? modeName(selectedMode.value) : null,
 );
+
+/** Localised mode name for built-in presets (custom modes fall back to own
+ *  name). Display layer only — see useTemplateI18n. */
+function modeName(m: ModeTemplateView): string {
+  return resolveI18n(m.nameI18n, m.name);
+}
 
 onMounted(async () => {
   try {
@@ -298,12 +311,14 @@ async function onModeChange(event: Event): Promise<void> {
   const id = (event.target as HTMLSelectElement).value;
   if (!id) return;
   try {
-    const name = await modeTemplates.applyToConversation(
+    await modeTemplates.applyToConversation(
       id,
       (await discussion.ensureConversation()) ?? "",
     );
     await discussion.reload();
     if (!isDiscussion.value) await discussion.setDiscussionEnabled(true);
+    const applied = modeTemplates.templates.find((m) => m.id === id);
+    const name = applied ? modeName(applied) : id;
     toast.success(t("chat.discussion.modes.selected", { name }));
   } catch (e) {
     toast.error(e instanceof Error ? e.message : String(e));
@@ -323,7 +338,7 @@ async function selectModeFromLibrary(m: ModeTemplateView): Promise<void> {
     await modeTemplates.applyToConversation(m.id, convId);
     await discussion.reload();
     if (!isDiscussion.value) await discussion.setDiscussionEnabled(true);
-    toast.success(t("chat.discussion.modes.selected", { name: m.name }));
+    toast.success(t("chat.discussion.modes.selected", { name: modeName(m) }));
     showLibrary.value = false;
   } catch (e) {
     toast.error(e instanceof Error ? e.message : String(e));
@@ -674,7 +689,7 @@ function onCallOn(id: string): void {
         >
           <option value="">{{ t("chat.discussion.modes.none") }}</option>
           <option v-for="m in modeOptions" :key="m.id" :value="m.id">
-            {{ m.name }}
+            {{ modeName(m) }}
           </option>
         </select>
       </div>

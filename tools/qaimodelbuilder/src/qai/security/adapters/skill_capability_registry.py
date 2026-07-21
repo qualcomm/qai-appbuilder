@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """In-memory :class:`SkillCapabilityRegistryPort` adapter (PR-504).
 
 Single-process, dict-backed registry. The new flow re-registers

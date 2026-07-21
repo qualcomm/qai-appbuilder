@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Network-proxy settings use cases (R4/R5).
 
 The ``GET/POST /api/proxy`` endpoints persist the proxy **username** into

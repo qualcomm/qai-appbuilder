@@ -1,6 +1,11 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """App Builder — import workflow routes (``/import`` family).
 
-Dry-run / commit / rollback / candidates / scan-bins / auto-export. The
+Dry-run / commit / rollback / scan-bins / auto-export. The
 auto-export handler reaches the cross-context ``qai.model_builder`` export
 pipeline through ``container.auto_export_bridge`` (AGENTS.md §3.2), so it
 needs the raw ``container`` in addition to ``container.app_builder``.
@@ -17,9 +22,9 @@ from fastapi import APIRouter, HTTPException, status
 from ._dto import (
     AutoExportRequestBody,
     AutoExportResponseBody,
-    CandidatesRequestBody,
     BinScanResponse,
     BinScanResultResponse,
+    NeedsNormalizePayload,
     ImportCommitRequest,
     ImportCommitResponse,
     ImportDryRunRequest,
@@ -96,17 +101,7 @@ def register(router: APIRouter, *, container: "Container") -> None:
         await uc.execute(commit_id=cid)
         return ImportRollbackResponse(commit_id=cid.value, status="rolled_back")
 
-    # ---- 4. import/candidates -----------------------------------------
-    @router.post(
-        "/import/candidates",
-        response_model=ImportPlanResponse,
-    )
-    async def import_candidates(body: CandidatesRequestBody) -> ImportPlanResponse:
-        uc: ImportDryRunUseCase = _services().import_dry_run_use_case
-        plan = await uc.execute(body.candidates)
-        return _plan_to_dto(plan)
-
-    # ---- 5. import/scan-bins ------------------------------------------
+    # ---- 4. import/scan-bins ------------------------------------------
     @router.post("/import/scan-bins", response_model=BinScanResponse)
     async def import_scan_bins(
         body: ScanBinsRequestBody | None = None,
@@ -116,6 +111,18 @@ def register(router: APIRouter, *, container: "Container") -> None:
             raise HTTPException(status_code=503, detail="scan-bins use case not wired")
         model_workdir = body.model_workdir if body is not None else None
         results = await uc.execute(model_workdir=model_workdir)
+        # When the scan found no variants but the workdir holds an
+        # un-normalized AI Hub download (weight + metadata.json, often in a
+        # nested subfolder), surface an actionable hint so the UI can guide the
+        # user to run Step 6.5 normalization instead of showing a blank panel.
+        needs_normalize: NeedsNormalizePayload | None = None
+        if not results and model_workdir:
+            hint = uc.detect_unnormalized_aihub(model_workdir)
+            if hint is not None:
+                needs_normalize = NeedsNormalizePayload(
+                    model_workdir=hint.model_workdir,
+                    detected_weight=hint.detected_weight,
+                )
         return BinScanResponse(
             results=[
                 BinScanResultResponse(
@@ -127,7 +134,8 @@ def register(router: APIRouter, *, container: "Container") -> None:
                     mtime=r.mtime,
                 )
                 for r in results
-            ]
+            ],
+            needs_normalize=needs_normalize,
         )
 
     # ---- 6. import/auto-export ----------------------------------------

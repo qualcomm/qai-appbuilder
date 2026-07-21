@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 // =============================================================================
 // i18n locale sub-file — 手工维护，UTF-8（无 BOM）。
 //
@@ -128,7 +133,7 @@ const index = {
   gomasterDisconnect: "断开",
   gomasterDisconnected: "未连接",
   gomasterIntro: "连接到 GoMaster 在线 Agent。会话凭据由后端处理，无需手动填写。",
-  gomasterMode: "GoMaster 在线",
+  gomasterMode: "GoMaster",
   gomasterOpenNative: "打开原版",
   gomasterOptional: "选填",
   gomasterSave: "保存",
@@ -274,6 +279,19 @@ const index = {
   manageDatasetFiles: "管理已上传的数据集文件",
   manageUploadedModels: "管理已上传的模型文件",
   modelBuilder: "模型构建器",
+  modelHub: "模型市场",
+  modelHubFrame: {
+    pickModel: "选择 AI Hub 模型",
+    pickModelHint: "从 Qualcomm AI Hub 选择一个预编译模型",
+    pickModelHeader: "Qualcomm AI Hub 模型",
+    pickModelPlaceholder: "如 Llama-v3-8B、YOLOv8-Detection…",
+    pickModelConfirm: "确定",
+    pickModelDesc: "输入 AI Hub 模型名称或 id，然后在对话中描述你的需求——Agent 会为你下载预编译好的模型包。",
+    export: "导出到 App Builder",
+    exportTitle: "把已下载的模型导出到 App Builder",
+    exportHeader: "导出到 App Builder",
+    exportDesc: "模型下载完成后，用此功能将其注册给 App Builder 模式使用。",
+  },
   modelDownloadingBody: "模型正在下载中，下载完成后还需安装，完成后将自动更新列表。",
   modelDownloadingHint: "📥 模型下载中，下载完成后需安装才可使用…",
   modelDownloadingTitle: "模型下载中...",
@@ -330,7 +348,16 @@ const index = {
   proMode: "增强",
   proOptional: "选填",
   proPoolAllBusy: "当前 {count} 台机器全部繁忙，请稍后再试。",
-  proPoolAllOffline: "远端 Agent 机器全部离线。",
+  proPoolAllBusyWithQueue: "当前 {count} 台机器全部繁忙（队列 {queueTotal} 人等待），请稍后再试。",
+  proPoolAllOffline: "远端 Agent 服务离线，请联系管理员。",
+  proPoolNetworkError: "无法连接远端 Agent，请检查网络连接后重试。",
+  proPinnedMachineOffline: "本 tab 绑定的机器 {url} 暂时无法连接。请稍后重试，或新建一个 tab 以使用其他机器。",
+  proAccessDeniedTitle: "您暂无 Model Builder Pro 使用权限",
+  proAccessDeniedBody: "请加入 ModelBuilderProUsers 邮件列表以获取使用权限。",
+  proAccessApply: "申请加入",
+  proAccessRefresh: "刷新权限",
+  proAccessRefreshing: "检查中…",
+  proAccessLdapError: "权限服务暂时不可用，请稍后重试。",
   proProbing: "正在寻找空闲机器…",
   proSave: "保存",
   proSettings: "设置",

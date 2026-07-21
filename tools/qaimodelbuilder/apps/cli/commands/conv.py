@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``qai conv`` subcommands — chat conversation / tab / experience / snapshot CRUD.
 
 Desktop App Plan §2.1.1 group F1. Thin wrappers around the chat bounded

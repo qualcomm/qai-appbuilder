@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * Downloads page consumer types — mirrors the V2 backend `service_release`
  * context wire schemas 1:1 (V1 ``backend/version_manager.py`` +

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """LRU result cache for ``appbuilder_run`` repeats (PR-094 §17.5 #12).
 
 Restores the legacy ``backend/app_builder/result_cache.py`` (124 LOC) as an

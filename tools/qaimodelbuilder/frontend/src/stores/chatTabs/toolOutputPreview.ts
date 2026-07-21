@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * Bounded head+tail preview for streaming tool-card output (perf: stop the
  * O(n²) accumulation that塞满界面 + crawls the UI).

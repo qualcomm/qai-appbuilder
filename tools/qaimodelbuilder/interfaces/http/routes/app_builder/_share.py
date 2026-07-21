@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """App Builder — share routes (``/share`` family, PR-045 / issue d).
 
 ``POST /share`` mints a share token for a run; ``GET /share/{token}``

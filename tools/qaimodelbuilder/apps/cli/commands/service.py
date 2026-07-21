@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``qai service`` subcommands — control the local GenieAPIService daemon.
 
 Desktop App Plan §2.1.1 group B. Thin wrappers over use cases in

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Single resolution point for the model-builder *workspace root*.
 
 The workspace root (historically the hard-coded ``C:\\WoS_AI``) is the
@@ -45,7 +50,6 @@ __all__ = [
     "build_explicit_session_workspace_resolver",
     "resolve_global_allow_paths",
     "resolve_read_only_allow_paths",
-    "resolve_temp_rw_paths",
     "resolve_runtime_exec_allow_paths",
     "resolve_system_exec_allow_paths",
     "resolve_file_guard_masked_paths",
@@ -716,19 +720,6 @@ def resolve_read_only_allow_paths(container: "Container") -> tuple[str, ...]:
         _add(str(root))
 
     return _dedupe_paths(paths)
-
-
-def resolve_temp_rw_paths(container: "Container") -> tuple[str, ...]:
-    """Resolve the TEMP read/WRITE prefixes for ``container``.
-
-    .. deprecated::
-        2026-07-09 — TEMP directory allow is now handled in the native layer
-        (``guard.cpp::IsTempPath``) which covers any user account without
-        depending on the API server's ``%TEMP%`` environment variable. This
-        function is retained for backward-compat but returns an empty tuple;
-        callers should be updated to remove the call.
-    """
-    return ()
 
 
 def resolve_runtime_exec_allow_paths(container: "Container") -> tuple[str, ...]:

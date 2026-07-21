@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``qai dep`` and ``qai exec`` subcommands — broker-side approval / profiles.
 
 Desktop App Plan §2.1.1 group J2. Two BCs are exposed here because they

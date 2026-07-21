@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <script setup lang="ts">
 /**
  * ModeFrameModelBuilder — chat-input sub-toolbar for `model-build` mode.
@@ -34,7 +39,11 @@ import {
 } from "@/stores/chatTabs";
 import { useAppBuilderStore } from "@/stores/appBuilder";
 import { useForgeConfig } from "@/composables/useForgeConfig";
-import { extractModelWorkdirFromMessages } from "@/utils/modelWorkdir";
+import {
+  extractAllModelWorkdirsFromMessages,
+} from "@/utils/modelWorkdir";
+import { usePromoteReadyDetection } from "@/composables/usePromoteReadyDetection";
+import { useModeFrameTriggers } from "@/composables/useModeFrameTriggers";
 import PromoteToAppBuilderCard from "@/components/app-builder/model-builder/PromoteToAppBuilderCard.vue";
 
 const { t } = useI18n();
@@ -395,34 +404,84 @@ function toggleDatasetPanel(): void {
 
 // ── Promote to App Builder ───────────────────────────────────────────────────
 const promotePanelOpen = ref(false);
-// Session model workdir (V1 sessionModelWorkdir parity, app.js:1406-1419).
-// Two sources, in priority order:
-//   1. the uploaded model_path's directory (when the user uploaded a model
-//      file via the "Upload model" button);
-//   2. FALLBACK — scan the conversation for a `C:\WoS_AI\<model>` path (the
-//      directory the conversion pipeline writes to). V1 always scanned the
-//      messages, so promote works for a chat-driven conversion too (no manual
-//      upload). Without this fallback, converting a model via chat and then
-//      hitting "Promote to App Builder" wrongly reported "No model workspace
-//      detected" because model_path was empty.
+
+// SINGLE SOURCE OF TRUTH for "which model is promotable" — shared with the
+// ChatView promote-ready notice. usePromoteReadyDetection pulls ALL
+// `<root>\<model>` candidates from the conversation and picks the FIRST one
+// that ACTUALLY has precision variants (.bin/.dlc) on disk. The Promote CARD
+// and the notice MUST agree on the workdir; previously the card used its own
+// "modelPath || last-mentioned path" logic while the notice used verified
+// detection — so the notice could say "inception_v3 ready (2 variants)" while
+// the card opened on "yolov8" (last mentioned, no variants). They now share
+// this one detection.
+const promoteDetection = usePromoteReadyDetection();
+
+// Session model workdir fed to the promote card. Priority:
+//   1. promoteDetection.detectedWorkdir — a candidate VERIFIED to have
+//      precision variants on disk. This is the MOST trustworthy source and
+//      is IDENTICAL to what the promote-ready notice shows, so notice + card
+//      always agree. It MUST come first: previously `model_path` won
+//      unconditionally, so if the agent set `model_path` to an ONNX source
+//      dir (e.g. C:\WoS_AI\yolov8\model.onnx → dir "yolov8") that has NO
+//      output/ variants — or doesn't even exist — the card opened on that
+//      empty/nonexistent dir while the notice (and Model Hub, which has no
+//      model_path branch) correctly pointed at the real converted workdir
+//      (e.g. yolov8_det). Verified-variants-first fixes that divergence.
+//   2. the uploaded model_path's directory — the manual-upload source, used
+//      when nothing has been converted yet (detectedWorkdir still empty), so
+//      "upload then promote" keeps working before any variant exists.
+//   3. FALLBACK — the most-recently-referenced candidate even without
+//      variants, so the card can still scan it and surface the
+//      "un-normalized model — normalize it" guidance instead of a bare
+//      "no workspace".
 const sessionModelWorkdir = computed(() => {
+  const verified = promoteDetection.detectedWorkdir.value;
+  if (verified !== "") return verified;
   const p = modelPath.value;
   if (p !== "") {
     const idx = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
     if (idx > 0) return p.slice(0, idx);
   }
-  // FALLBACK — scan the conversation for a `<root>\<model>` path, where
-  // `<root>` is the configured workspace.model_root (default C:\WoS_AI when
-  // unset / not yet loaded).
-  return extractModelWorkdirFromMessages(
+  const candidates = extractAllModelWorkdirsFromMessages(
     activeTab.value?.messages,
     workspaceModelRoot.value || undefined,
   );
+  return candidates[0] ?? "";
 });
 
 function togglePromotePanel(): void {
   promotePanelOpen.value = !promotePanelOpen.value;
 }
+
+// ── Cross-component trigger from ModeIntroCard ──────────────────────────────
+// The intro card's "Promote to App Builder" chip in Model Builder mode
+// requests this popover via `useModeFrameTriggers.requestOpenPromote`. We
+// only react when Model Builder is the ACTIVE mode — otherwise the App
+// Builder mode-frame owns its own Promote panel (see ModeFrameAppBuilder).
+const { openPromoteToken } = useModeFrameTriggers();
+watch(openPromoteToken, () => {
+  if (activeTab.value?.activeMode === "model-build") {
+    promotePanelOpen.value = true;
+  }
+});
+
+// "Ready" badge on the Promote button — visually strengthens the affordance
+// when a promote-able model workdir has been detected (either from an
+// uploaded model path or by scanning the conversation for a `<root>\<model>`
+// path). Purely cosmetic; the actual eligibility check still runs inside
+// PromoteToAppBuilderCard on click, so a false-positive dot is harmless.
+// "Ready" badge on the Promote button. ON when either:
+//   * a model was uploaded via the button (modelPath set — the manual source),
+//     OR
+//   * usePromoteReadyDetection VERIFIED precision variants on disk for a
+//     conversation candidate (identical signal to the promote-ready notice, so
+//     dot + notice + card all agree). No longer merely "some path string
+//     exists" (State-Truth-First).
+const promoteReady = computed<boolean>(
+  () =>
+    modelPath.value !== "" ||
+    promoteDetection.detectedVariants.value.length > 0,
+);
 
 function onPromoteImported(): void {
   promotePanelOpen.value = false;
@@ -1018,7 +1077,10 @@ function onExit(): void {
       <button
         type="button"
         class="rit-btn"
-        :class="{ 'rit-model-upload--active': promotePanelOpen }"
+        :class="{
+          'rit-model-upload--active': promotePanelOpen,
+          'mb-promote-btn--ready': promoteReady,
+        }"
         :title="t('modelBuilder.promote.title')"
         data-testid="mb-toggle-promote"
         @click="togglePromotePanel"
@@ -1034,9 +1096,18 @@ function onExit(): void {
           stroke-linejoin="round"
         ><path d="M4 14h6v6H4z" /><path d="M14 4h6v6h-6z" /><path d="M7 14V7h7" /><polyline points="14 10 7 10" /></svg>
         <span>{{ t("modelBuilder.promote.title") }}</span>
+        <!-- Ready dot (§14 UX): a subtle 6px accent dot when a promote-able
+             model workdir has been detected in the chat / upload. Draws the
+             eye without shouting; purely cosmetic. -->
+        <span
+          v-if="promoteReady"
+          class="mb-promote-ready-dot"
+          role="status"
+          :aria-label="t('modelBuilder.promote.readyBadgeAria')"
+        ></span>
       </button>
       <div
-        v-if="promotePanelOpen"
+        v-show="promotePanelOpen"
         class="rit-submenu rit-submenu--wide"
         style="min-width: 400px; max-height: 500px; overflow-y: auto"
         data-testid="mb-promote-panel"
@@ -1059,5 +1130,18 @@ function onExit(): void {
 .mb-frame {
   position: relative;
   flex-wrap: wrap;
+}
+
+/* "Ready" dot on the Promote button — accent-colored 6px pill anchored top-
+   right of the button. Purely CSS + theme tokens; no i18n text needed
+   (aria-label on the dot conveys meaning to AT). */
+.mb-promote-ready-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent, #6d5efc);
+  box-shadow: 0 0 0 2px var(--bg-secondary, #1c1c22);
+  margin-left: 2px;
+  flex: 0 0 auto;
 }
 </style>

@@ -1,10 +1,16 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """qai.platform.config — Application configuration and path resolution.
 
 The ``Settings`` class centralises every tunable that used to live in:
 - hard-coded literals scattered across ``backend/main.py`` (the V1 port literal
-  was 8899; the V2 default is ``ServerSettings.port`` = 8989, see
-  ``settings.py``), host "127.0.0.1", "data/" path prefixes — see inventory
-  01 / 09 for counts
+  was 8899; the V2 default is ``ServerSettings.port`` = 4099, matching the
+  Okta redirect_uri ``http://localhost:4099/callback`` registered on the
+  authorization server — see ``settings.py``), host "127.0.0.1", "data/" path
+  prefixes — see inventory 01 / 09 for counts
 - ``config/service_config.json`` / ``config/forge_config.json``
 - environment variables read with ``os.environ.get(...)`` directly
 

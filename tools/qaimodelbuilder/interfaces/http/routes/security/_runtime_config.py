@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Security routes — unified runtime-config surface (security/tools switches).
 
 ``GET / PUT /api/security/runtime-config`` is the single authoritative surface

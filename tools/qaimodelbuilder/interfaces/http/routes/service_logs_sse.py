@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Service logs SSE route — live tail of inference daemon stdout/stderr.
 
 PR-095 / S9 audit §3.3 A-26.  The legacy

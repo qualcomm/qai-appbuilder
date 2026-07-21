@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``ListCloudModelsUseCase`` -- flatten the cloud-inference model catalog.
 
 Functional block 2 (cloud models real-availability). This use case is the

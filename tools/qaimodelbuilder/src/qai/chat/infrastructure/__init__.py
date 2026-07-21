@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Public API for ``qai.chat.infrastructure`` (PR-042).
 
 Houses non-SQLite adapters (network / process / filesystem). Currently

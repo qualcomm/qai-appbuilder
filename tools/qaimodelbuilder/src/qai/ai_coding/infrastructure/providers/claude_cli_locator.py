@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Locate a usable native ``claude`` CLI executable for the SDK provider.
 
 V1 parity (``backend/ai_coding/session_manager.py:481-496,1863-1865``)

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Deterministic SoftStop scoring rules — "no new information" detection (DISC-2 P1-step4).
 
 The Manager early-END signal (P1-step3) lets an LLM moderator conclude a

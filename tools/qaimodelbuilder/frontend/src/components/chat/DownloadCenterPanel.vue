@@ -1,4 +1,9 @@
 <!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
+<!--
   DownloadCenterPanel — top-level Download Center panel.
 
   V1-parity layout (`DownloadCenterPanel.js:81-1210`):

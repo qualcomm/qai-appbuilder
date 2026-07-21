@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <script setup lang="ts">
 /**
  * Sidebar user button — signed-in identity indicator + account menu.
@@ -33,6 +38,17 @@ import { redirectToLogout } from "@/api/auth";
 import { useAuthStore } from "@/stores/auth";
 import { useConfirm } from "@/composables/useConfirm";
 import { useReboot } from "@/composables/useReboot";
+import { IS_INTERNAL } from "@/edition";
+
+/**
+ * Internal-only support contact. Rendered only when `IS_INTERNAL === true`
+ * (Rollup dead-code-eliminates the menu item on external/Release builds),
+ * so the internal Qualcomm support address never ships in the open-source
+ * bundle. The mailto: click hands off to the OS default mail client; if
+ * no client is configured the browser silently no-ops — this is a best-effort
+ * shortcut, not a critical path.
+ */
+const SUPPORT_EMAIL = "qai-appbuilder.support@qti.qualcomm.com";
 
 const props = withDefaults(
   defineProps<{ collapsed?: boolean }>(),
@@ -110,6 +126,19 @@ function restart(): void {
   close();
   // useReboot() shows its own danger confirm dialog + full-screen overlay.
   void requestReboot();
+}
+
+/**
+ * Open the OS mail client with a pre-filled To: for the internal support
+ * address. Uses `window.location.href` (not `window.open`) so the browser
+ * doesn't try to open a blank tab that then immediately closes — Windows
+ * hands the mailto: off to the registered handler in place. If no handler
+ * is registered, the browser no-ops silently, which is fine (the address
+ * is still visible in the /help output as a fallback per the release plan).
+ */
+function contactSupport(): void {
+  close();
+  window.location.href = `mailto:${SUPPORT_EMAIL}`;
 }
 
 async function signOut(): Promise<void> {
@@ -216,6 +245,32 @@ onBeforeUnmount(() => {
             <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
           </svg>
           <span class="sidebar-user-item-label">{{ t("sidebar.reboot") }}</span>
+        </button>
+
+        <!-- Contact Support (internal-only) — opens the OS mail client with
+             the Qualcomm internal support address pre-filled. IS_INTERNAL
+             is a build-time constant; the entire button is DCE'd out of the
+             external/Release bundle, so the internal email never ships. -->
+        <button
+          v-if="IS_INTERNAL"
+          type="button"
+          class="sidebar-user-item"
+          role="menuitem"
+          data-testid="sidebar-user-contact-support"
+          @click="contactSupport"
+        >
+          <svg
+            class="sidebar-user-item-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            aria-hidden="true"
+          >
+            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+            <polyline points="22,6 12,13 2,6" />
+          </svg>
+          <span class="sidebar-user-item-label">{{ t("auth.contact_support") }}</span>
         </button>
 
         <!-- Sign out (behind a confirm dialog) -->

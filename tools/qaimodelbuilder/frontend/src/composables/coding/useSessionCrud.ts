@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * Session CRUD + mode/panel control slice of `useCodingSession`
  * (cohesion split). Owns session list fetch, start/stop/delete/rename,

@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * Roster-template store — reusable multi-Agent discussion "teams".
  *
@@ -48,6 +53,11 @@ interface RosterTemplateWire {
   cloned_from_id?: string | null;
   created_at: string;
   updated_at: string;
+  /** Per-locale i18n maps for built-in presets (migration 056); null/absent
+   *  for custom rows. ``members_i18n`` is index-aligned with ``members``. */
+  name_i18n?: Record<string, string> | null;
+  description_i18n?: Record<string, string> | null;
+  members_i18n?: Record<string, RosterMemberWire[]> | null;
 }
 
 interface RosterTemplateListWire {
@@ -73,6 +83,10 @@ export interface RosterTemplateMemberView {
   allowedTools: string[];
   enabledSkills: string[];
   color?: number;
+  /** Per-locale i18n maps for a built-in team's member; undefined for custom
+   *  teams. Assembled by index from the template's members_i18n. */
+  displayNameI18n?: Record<string, string>;
+  personaI18n?: Record<string, string>;
 }
 
 export interface RosterTemplateView {
@@ -86,6 +100,9 @@ export interface RosterTemplateView {
   /** Source template id when this is a clone (esp. a clone of a factory preset);
    *  "" / undefined = not a clone. Reset is only meaningful when set. */
   clonedFromId?: string;
+  /** Per-locale i18n maps for built-in presets; undefined for custom rows. */
+  nameI18n?: Record<string, string>;
+  descriptionI18n?: Record<string, string>;
 }
 
 /** Body for create / update (id is route/response only). */
@@ -109,7 +126,13 @@ export interface RosterApplyResult {
 // Wire ↔ view-model mappers
 // ---------------------------------------------------------------------------
 
-function wireToMember(w: RosterMemberWire): RosterTemplateMemberView {
+function wireToMember(
+  w: RosterMemberWire,
+  i18n?: {
+    displayName?: Record<string, string>;
+    persona?: Record<string, string>;
+  },
+): RosterTemplateMemberView {
   return {
     displayName: w.display_name,
     ...(w.model_id != null && w.model_id !== "" ? { modelId: w.model_id } : {}),
@@ -121,6 +144,33 @@ function wireToMember(w: RosterMemberWire): RosterTemplateMemberView {
       ? [...(w.config?.enabled_skills as string[])]
       : [],
     ...(typeof w.config?.color === "number" ? { color: w.config?.color } : {}),
+    ...(i18n?.displayName != null ? { displayNameI18n: i18n.displayName } : {}),
+    ...(i18n?.persona != null ? { personaI18n: i18n.persona } : {}),
+  };
+}
+
+/**
+ * Pivot a template's nested members_i18n ({locale: [member,...]}) into a
+ * per-member-index map ({displayName:{locale:str}, persona:{locale:str}}), so
+ * each member view can carry its own compact i18n maps.
+ */
+function memberI18nByIndex(
+  membersI18n: Record<string, RosterMemberWire[]> | null | undefined,
+  index: number,
+): { displayName?: Record<string, string>; persona?: Record<string, string> } {
+  if (membersI18n == null) return {};
+  const displayName: Record<string, string> = {};
+  const persona: Record<string, string> = {};
+  for (const [loc, arr] of Object.entries(membersI18n)) {
+    const m = Array.isArray(arr) ? arr[index] : undefined;
+    if (m == null) continue;
+    if (typeof m.display_name === "string") displayName[loc] = m.display_name;
+    if (typeof m.persona === "string" && m.persona !== "")
+      persona[loc] = m.persona;
+  }
+  return {
+    ...(Object.keys(displayName).length > 0 ? { displayName } : {}),
+    ...(Object.keys(persona).length > 0 ? { persona } : {}),
   };
 }
 
@@ -129,13 +179,19 @@ function wireToTemplate(w: RosterTemplateWire): RosterTemplateView {
     id: w.id,
     name: w.name,
     description: w.description,
-    members: Array.isArray(w.members) ? w.members.map(wireToMember) : [],
+    members: Array.isArray(w.members)
+      ? w.members.map((m, i) => wireToMember(m, memberI18nByIndex(w.members_i18n, i)))
+      : [],
     isBuiltin: w.is_builtin === true,
     ...(w.default_mode_id != null && w.default_mode_id !== ""
       ? { defaultModeId: w.default_mode_id }
       : {}),
     ...(w.cloned_from_id != null && w.cloned_from_id !== ""
       ? { clonedFromId: w.cloned_from_id }
+      : {}),
+    ...(w.name_i18n != null ? { nameI18n: w.name_i18n } : {}),
+    ...(w.description_i18n != null
+      ? { descriptionI18n: w.description_i18n }
       : {}),
   };
 }

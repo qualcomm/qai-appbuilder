@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * useAggregatedMetrics — fetch the App Builder server-side aggregated metrics
  * for a given (modelId, variantId?) pair (V1 `MetricsView.js` L255-300 parity:

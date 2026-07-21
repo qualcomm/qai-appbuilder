@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Streaming download engine: aria2c (preferred) with httpx fallback.
 
 Ports the V1 ``stream_download`` algorithm (``backend/version_manager.py``
@@ -49,7 +54,7 @@ _CHUNK_SIZE = 65536
 # outer watchdog still gets us unstuck. 90 s is a good balance between
 # "tolerate a slow connection blip" and "don't make users wait minutes on a
 # truly dead download".
-_STALL_TIMEOUT = 90.0
+_STALL_TIMEOUT = 180.0
 
 
 def _filename_from_url(url: str) -> str:

@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 // =============================================================================
 // i18n locale sub-file — 手工维护，UTF-8（无 BOM）。
 //
@@ -26,7 +31,7 @@ const voiceInput = {
     zipformer: "Zipformer (Chinese)",
   },
   engineLabel: "Engine",
-  engineMenuHint: "Cold start ~10-15s · then resident · auto-released after 10 min idle",
+  engineMenuHint: "ⓘ Tip: first use loads the model (~10-15s), then stays ready; auto-releases after 10 min idle",
   engineMenuTitle: "Voice input engine",
   errorTitle: "Voice input failed",
   inferError: "Speech model \"{model}\" failed: {detail}. Try switching to {other} from the engine menu, or re-download the model in AppBuilder.",

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Skill-policy discovery + listing use cases (R9 cohesion fix).
 
 Moves the skill aggregation algorithm out of
@@ -51,7 +56,14 @@ __all__ = [
 # as ``source="features"`` (built-in) vs ``source="skills"`` (user-installed
 # agent skill).
 _FEATURE_SKILL_NAMES: frozenset[str] = frozenset(
-    {"model-builder", "ppt-gen", "code-assist", "translate", "app-builder"}
+    {
+        "model-builder",
+        "model-hub",
+        "ppt-gen",
+        "code-assist",
+        "translate",
+        "app-builder",
+    }
 )
 
 # Bucket key inside ``SecurityRuntimeStateService.settings`` storing the

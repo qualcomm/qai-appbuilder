@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Streaming chat use cases (StreamChat + StopChat).
 
 These two use cases are the heart of the chat bounded context: they
@@ -43,6 +48,7 @@ import asyncio
 import contextlib
 import json
 import math
+import re
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Mapping
 from pathlib import Path
@@ -67,6 +73,7 @@ from qai.chat.application.ports import (
     LLMStreamRequest,
     PromptSnapshot,
     PromptSnapshotStorePort,
+    PromoteReadyScanPort,
     RetryCategory,
     RetryPolicyPort,
     StreamAbortHandle,
@@ -507,6 +514,45 @@ def _session_workspace_from_conv(conv: Any) -> str | None:
     return None
 
 
+def _extract_model_workdir_from_text(
+    text: str,
+    workspace_root: str | None = None,
+) -> str:
+    """Extract the model workspace dir (``<root>\\<model>``) mentioned LAST in
+    ``text``, or ``""`` when none is present.
+
+    Backend mirror of the frontend ``extractModelWorkdirFromMessages``
+    (``frontend/src/utils/modelWorkdir.ts``): the turn-end promote-ready
+    detector scans the assistant's FINAL summary text for a
+    ``C:\\WoS_AI\\<model>`` path (the directory the model-conversion / AI-Hub
+    download pipeline writes to). The SKILL contract guarantees every round's
+    final summary prints this top-level path (user-visible), so the LAST match
+    is the model this turn worked on.
+
+    Separator tolerance mirrors the frontend regex: each run of ``\\`` / ``/``
+    in ``root`` becomes ``[\\/]+`` (so ``C:\\``, ``C:/`` and the JSON-escaped
+    ``C:\\\\`` forms all match); the model dir group is ``[A-Za-z0-9_-]+``. The
+    non-separator segments of ``root`` are escaped so a drive letter / dot /
+    paren matches literally.
+    """
+    if not text:
+        return ""
+    root = (workspace_root or "").strip() or _DEFAULT_WORKSPACE_ROOT
+    segments = [seg for seg in re.split(r"[\\/]+", root) if seg]
+    if not segments:
+        return ""
+    sep = r"[\\/]+"
+    body = sep.join(re.escape(seg) for seg in segments)
+    pattern = re.compile(body + sep + r"([A-Za-z0-9_-]+)")
+    matches = list(pattern.finditer(text))
+    if not matches:
+        return ""
+    # LAST match = most recently mentioned (frontend "take the last match").
+    model = matches[-1].group(1)
+    normalised_root = "\\".join(segments)
+    return f"{normalised_root}\\{model}"
+
+
 def _build_local_workspace_directive(workspace_root: str) -> str:
     """Render the working-directory directive for the LOCAL (on-device) prompt.
 
@@ -747,6 +793,27 @@ def _session_disabled_tools(extra: dict[str, Any] | None) -> frozenset[str]:
     if isinstance(raw, (list, tuple)):
         return frozenset(str(n) for n in raw if n)
     return frozenset()
+
+
+def _persona_disabled_tools(extra: dict[str, Any] | None) -> frozenset[str]:
+    """Derive disabled tools from the resolved code persona's groups.
+
+    When a code persona is resolved (``extra["persona_groups"]`` is set),
+    any tool whose group is NOT in the persona's allowed groups is
+    disabled — hard tool-level isolation.  Returns an empty set when no
+    persona groups are active (meaning all tools remain available).
+
+    This is merged (unioned) with ``_session_disabled_tools`` so both
+    user-initiated and persona-mandated restrictions apply simultaneously.
+    """
+    raw = (extra or {}).get("persona_groups")
+    if raw is None:
+        return frozenset()
+    if not isinstance(raw, (list, tuple)):
+        return frozenset()
+    from qai.chat.domain.tool_groups import groups_to_disabled_tools
+
+    return groups_to_disabled_tools(list(raw))
 
 
 def _apply_cloud_tool_description_overrides(
@@ -1431,6 +1498,20 @@ class StreamChatUseCase:
         # frontend applies the raise via ``PATCH .../budget`` then resends a
         # continuation turn (no in-stream suspend — see the budget-decision flow).
         budget_raise_pct: int = 20,
+        # ---- Promote-ready turn-end detection (migration 057) ----
+        # Optional ``PromoteReadyScanPort`` used at turn end to scan the model
+        # workspace path mentioned in the final summary for promote-eligible
+        # precision variants; the result is persisted onto
+        # ``Conversation.detected_model`` so the frontend "Promote to App
+        # Builder" CTA needs ZERO on-open disk scans and refreshes once per
+        # turn (replacing the old every-message global scan). ``None`` (default
+        # / unit stubs) disables detection — the turn is byte-for-byte
+        # unchanged. Wired at ``_chat_di.py`` via the apps-layer
+        # ``_promote_ready_scan_bridge`` adapter (chat never imports
+        # ``qai.app_builder``; the bridge maps this port onto
+        # ``ImportScanBinsUseCase``). Best-effort: any extraction / scan / save
+        # failure is swallowed and never breaks turn completion.
+        promote_ready_scan: "PromoteReadyScanPort | None" = None,
     ) -> None:
         self._conversations = conversations
         self._tabs = tabs
@@ -1442,6 +1523,8 @@ class StreamChatUseCase:
         self._events = events
         self._abort_handle_factory = abort_handle_factory
         self._budget_raise_pct = max(1, int(budget_raise_pct))
+        # Promote-ready turn-end detector (optional; None disables detection).
+        self._promote_ready_scan = promote_ready_scan
         # PR-401c
         self._retry_policy = retry_policy
         self._guardrail_factory = guardrail_factory
@@ -4952,6 +5035,16 @@ class StreamChatUseCase:
                 )
         except Exception:  # noqa: BLE001 - never break persistence
             pass
+        # Promote-ready turn-end detection (migration 057): extract the model
+        # workspace path from THIS turn's final summary text, scan it for
+        # promote-eligible precision variants, and stash the result on
+        # ``conv.detected_model`` so the ``save_messages`` below persists it
+        # (both ON CONFLICT branches write ``detected_model_json``). The
+        # frontend CTA then reads it with ZERO on-open disk scans. Runs BEFORE
+        # ``_save_parent_conv`` so the write is durable in the same save. Fully
+        # best-effort: any failure is swallowed so a bookkeeping hiccup never
+        # breaks turn completion (AGENTS.md §5).
+        await self._detect_promote_ready(conv=conv, joined=joined)
         await self._save_parent_conv(
             conv, is_takeover=self._is_subagent_takeover_turn(request)
         )
@@ -4986,6 +5079,65 @@ class StreamChatUseCase:
         outcome.assistant_msg = assistant_msg
         outcome.frame_count = frame_count
         outcome.synth_seq = synth_seq
+
+    async def _detect_promote_ready(self, *, conv: Any, joined: str) -> None:
+        """Turn-end promote-ready detection → ``conv.detected_model`` (057).
+
+        Extracts the model workspace path (``C:\\WoS_AI\\<model>``) from THIS
+        turn's final summary ``joined`` text (the SKILL contract guarantees
+        every round's summary prints that top-level path, user-visible), asks
+        the injected :class:`PromoteReadyScanPort` whether that directory holds
+        promote-eligible precision variants, and stashes the result on
+        ``conv.detected_model`` for the caller's ``save_messages`` to persist.
+
+        Result shape (``conv.detected_model``):
+          * variants found → ``{"workdir": <path>, "variants": [{"precision",
+            "label"}...], "checked_at": <iso>}``;
+          * path found but NO variants → ``{"workdir": "", "variants": [],
+            "checked_at": <iso>}`` (records "checked, nothing to promote" so the
+            CTA hides without a re-scan);
+          * no port wired / no path in the summary → left UNCHANGED (a prior
+            detection from an earlier turn survives; ``None`` stays ``None``).
+
+        Fully best-effort (AGENTS.md §5): never raises. A missing port, an
+        unparseable summary, a scan error or a bad conversation are all
+        swallowed so turn completion is never blocked.
+        """
+        port = self._promote_ready_scan
+        if port is None:
+            return
+        try:
+            root = _session_workspace_from_conv(conv) or None
+            workdir = _extract_model_workdir_from_text(joined, root)
+            if not workdir:
+                # No model workspace path in this turn's summary — leave any
+                # prior detection intact (do NOT clobber to "nothing").
+                return
+            variants = await port.scan(workdir)
+            checked_at = self._clock.now().isoformat()
+            if variants:
+                conv.detected_model = {
+                    "workdir": workdir,
+                    "variants": [
+                        {"precision": v.precision, "label": v.label}
+                        for v in variants
+                    ],
+                    "checked_at": checked_at,
+                }
+            else:
+                # Scanned, nothing promotable — record the empty result so the
+                # CTA hides deterministically (distinct from "never checked").
+                conv.detected_model = {
+                    "workdir": "",
+                    "variants": [],
+                    "checked_at": checked_at,
+                }
+        except Exception:  # noqa: BLE001 — detection must never break the turn
+            _log.debug(
+                "chat.promote_ready.detect_failed",
+                conversation_id=getattr(getattr(conv, "id", None), "value", "?"),
+                exc_info=True,
+            )
 
     async def _emit_turn_warning(
         self,
@@ -6342,6 +6494,21 @@ class StreamChatUseCase:
         if extra_overrides:
             extra.update(extra_overrides)
 
+        # R12 dealign: resolve a selected code persona (id → prompt +
+        # display name + groups) into ``extra`` BEFORE tool schemas are
+        # collected, so persona-based tool filtering (hard permission
+        # isolation) can remove tools the persona should not access, and
+        # the system-prompt builder injects it as the active working role.
+        # Used to be done after _collect_tool_schemas; moved ahead so
+        # the groups are available for tool filtering.
+        await self._resolve_code_persona(extra)
+        # Propagate persona_groups back to request.extra so the execution
+        # gates (_execute_single_tool_call, sub-agent spawn) can enforce
+        # persona tool restrictions even though they read request.extra
+        # (not the local copy built here for _build_llm_request).
+        if "persona_groups" in extra and request.extra is not None:
+            request.extra["persona_groups"] = extra["persona_groups"]
+
         self._collect_tool_schemas(extra, request=request)
 
         # Sampling-parameter resolution (V1 chat_handler.py:1209-1362 parity).
@@ -6356,13 +6523,6 @@ class StreamChatUseCase:
         # ``temperature=1.0``; DeepSeek-R1 etc.) + the classic ``0.7`` default
         # via the domain ``ModelProfile`` so the cloud payload matches V1.
         self._apply_sampling_params(extra=extra, model_hint=request.model_hint)
-
-        # R12 dealign: resolve a selected code persona (id → prompt +
-        # display name) into ``extra`` BEFORE the system prompt is built
-        # so the builder injects it as the active working role.  Used to
-        # be done in the SSE / WS route layer; now resolved here through
-        # the injected cross-BC port.
-        await self._resolve_code_persona(extra)
 
         # PR-091 H-4: pre-resolve App Builder Pack catalog before
         # building the system prompt, so the (sync) builder can read
@@ -6817,7 +6977,8 @@ class StreamChatUseCase:
             inject_agent=inject_agent,
             agent_schema_factory=_agent_tool_schema,
             profile=None,
-            disabled_tools=_session_disabled_tools(extra),
+            disabled_tools=_session_disabled_tools(extra)
+            | _persona_disabled_tools(extra),
         )
 
         # Tools-JSON体积压缩 (A1): edit / apply_patch are mutually exclusive on
@@ -6881,12 +7042,16 @@ class StreamChatUseCase:
         persona_id = tool_params.get("persona")
         if not isinstance(persona_id, str) or not persona_id.strip():
             return
-        resolved = await self._code_persona_resolver.resolve(persona_id.strip())
+        resolved = await self._code_persona_resolver.resolve(
+            persona_id.strip(), locale=extra.get("locale")
+        )
         if resolved is None:
             return
         extra["persona"] = resolved.prompt
         if resolved.name:
             extra["persona_name"] = resolved.name
+        if resolved.groups is not None:
+            extra["persona_groups"] = list(resolved.groups)
 
     async def _inject_memory_context(
         self,
@@ -8257,10 +8422,14 @@ class StreamChatUseCase:
             # operator hook and can adapt.
             raw_result: Any = f"[hook_blocked] {_hook_deny_reason}"
             success = False
-        elif tool_name in _session_disabled_tools(request.extra):
-            # Per-session ("this conversation only") EXECUTION gate. The user
-            # switched this tool OFF for this conversation via the
-            # SessionToolsPopover. The advertise filter
+        elif tool_name in (
+            _session_disabled_tools(request.extra)
+            | _persona_disabled_tools(request.extra)
+        ):
+            # Per-session + per-persona EXECUTION gate. The user switched
+            # this tool OFF for this conversation via the
+            # SessionToolsPopover, or the active coding persona does not
+            # permit this tool group. The advertise filter
             # (``_collect_tool_schemas``) already hides it from the model, but
             # this gate is the AUTHORITATIVE, defensive backstop: even if the
             # model calls a non-advertised tool (from history / habit), it is
@@ -8270,7 +8439,7 @@ class StreamChatUseCase:
             # global tool-safety config.
             raw_result = (
                 f"[tool_disabled] tool {tool_name!r} is turned off for this "
-                f"conversation (per-session setting)"
+                f"conversation (per-session setting or persona restriction)"
             )
             success = False
         elif verdict.decision is GuardrailDecision.BLOCK:
@@ -8437,7 +8606,10 @@ class StreamChatUseCase:
         # the ``[tool_disabled]`` result without invoking the tool. A hook veto
         # (``_hook_denied_stream``) likewise routes to the one-shot path so the
         # ``[hook_blocked]`` result is emitted there without streaming.
-        _disabled_this_turn = tool_name in _session_disabled_tools(request.extra)
+        _disabled_this_turn = tool_name in (
+            _session_disabled_tools(request.extra)
+            | _persona_disabled_tools(request.extra)
+        )
         if (
             stream_factory is not None
             and not _disabled_this_turn
@@ -10846,6 +11018,7 @@ class StreamChatUseCase:
                 # impl (``AgentToolHandler``) accepts it.
                 _disabled_tools_list = sorted(
                     _session_disabled_tools(request.extra)
+                    | _persona_disabled_tools(request.extra)
                 )
                 if _disabled_tools_list:
                     _spawn_kwargs["disabled_tools"] = _disabled_tools_list

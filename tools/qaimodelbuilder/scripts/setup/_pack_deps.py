@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """App Builder Pack 依赖聚合的可复用纯逻辑（V1 对齐修复 D-1）。
 
 本模块把原先内联在 ``scripts/setup/setup_qairt_env.py`` 里的 Pack 依赖解析 /

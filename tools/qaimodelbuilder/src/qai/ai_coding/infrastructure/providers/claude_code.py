@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Claude Code provider adapter (PR-046, PR-102).
 
 Real upstream is the Anthropic Messages API.  PR-102 wires the SSE

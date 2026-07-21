@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Broker HTTP routes (PR-603) — dependency_approval + command_policy.
 
 Surfaces the dependency_approval approval queue and command_policy profile

@@ -1,21 +1,17 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Version management HTTP routes.
 
-Two route families share the ``/api/versions`` prefix:
-
-1. **Package-manager stubs** (legacy WebUI version panel, consumed by
-   ``useVersions.ts``): ``GET /installed`` / ``GET /available`` /
-   ``POST /install`` (pip-style). Kept verbatim — these are a frozen
-   contract.
-
-2. **GenieAPIService download center** (V1 ``backend/version_manager.py``
-   parity, consumed by the rewritten Downloads view): ``GET /api/versions``
-   (list release versions), ``POST /api/versions/download`` (SSE stream),
-   ``POST /api/versions/install`` is the *package* install above —— the
-   download-center service install is ``POST /api/versions/service-install``
-   to avoid clobbering the frozen pip ``/install`` contract,
-   ``DELETE /api/versions/install/{version}``,
-   ``DELETE /api/versions/download/{version}``,
-   ``GET /api/versions/local-status``.
+**GenieAPIService download center** (V1 ``backend/version_manager.py``
+parity, consumed by the rewritten Downloads view): ``GET /api/versions``
+(list release versions), ``POST /api/versions/download`` (SSE stream),
+the download-center service install is ``POST /api/versions/service-install``,
+``DELETE /api/versions/install/{version}``,
+``DELETE /api/versions/download/{version}``,
+``GET /api/versions/local-status``.
 
 The download-center routes delegate to the ``service_release`` bounded
 context (``container.service_release``).
@@ -24,15 +20,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, Body
+from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from interfaces.http.routes._sse import sse_data, sse_done
-from qai.platform.packages import (
-    ImportlibInstalledPackages,
-    ListInstalledPackagesUseCase,
-)
 from qai.service_release.application.use_cases import (
     InstallServiceCommand,
     StartServiceDownloadCommand,
@@ -40,44 +32,6 @@ from qai.service_release.application.use_cases import (
 
 if TYPE_CHECKING:  # pragma: no cover
     from apps.api.di import Container
-
-
-# ---------------------------------------------------------------------------
-# Package-manager stub DTOs (frozen — consumed by useVersions.ts)
-# ---------------------------------------------------------------------------
-
-
-class InstalledPackage(BaseModel):
-    name: str
-    version: str
-    location: str = ""
-
-
-class InstalledVersionsResponse(BaseModel):
-    packages: list[InstalledPackage]
-
-
-class AvailableUpdate(BaseModel):
-    name: str
-    current_version: str
-    latest_version: str
-    update_type: str = "patch"
-
-
-class AvailableVersionsResponse(BaseModel):
-    updates: list[AvailableUpdate]
-    checked_at: str
-
-
-class InstallRequest(BaseModel):
-    packages: list[str] = Field(..., min_length=1, max_length=64)
-    upgrade: bool = False
-
-
-class InstallResponse(BaseModel):
-    status: str
-    requested: list[str]
-    message: str
 
 
 # ---------------------------------------------------------------------------
@@ -117,50 +71,6 @@ class DownloadSettingsBody(BaseModel):
 
 def build_router(*, container: "Container") -> APIRouter:
     router = APIRouter(prefix="/api/versions", tags=["versions"])
-
-    # Installed-package enumeration is a platform shared-kernel concern:
-    # the importlib.metadata source is wrapped behind a port and the
-    # dedup/sort/truncate algorithm lives in the use case, so this route
-    # only orchestrates use-case → DTO serialisation.
-    list_installed_packages_use_case = ListInstalledPackagesUseCase(
-        source=ImportlibInstalledPackages(),
-    )
-
-    # ── Package-manager stubs (frozen) ────────────────────────────────
-
-    @router.get("/installed", response_model=InstalledVersionsResponse)
-    async def get_installed() -> InstalledVersionsResponse:
-        packages = list_installed_packages_use_case.execute()
-        return InstalledVersionsResponse(
-            packages=[
-                InstalledPackage(
-                    name=p.name,
-                    version=p.version,
-                    location=p.location,
-                )
-                for p in packages
-            ]
-        )
-
-    @router.get("/available", response_model=AvailableVersionsResponse)
-    async def get_available() -> AvailableVersionsResponse:
-        from datetime import datetime, timezone
-
-        return AvailableVersionsResponse(
-            updates=[],
-            checked_at=datetime.now(timezone.utc).isoformat(),
-        )
-
-    @router.post("/install", response_model=InstallResponse)
-    async def install_packages(body: InstallRequest) -> InstallResponse:
-        return InstallResponse(
-            status="accepted",
-            requested=body.packages,
-            message=(
-                "Installation request queued (stub — not yet wired to package "
-                "manager)"
-            ),
-        )
 
     # ── GenieAPIService download center (V1 parity) ───────────────────
 

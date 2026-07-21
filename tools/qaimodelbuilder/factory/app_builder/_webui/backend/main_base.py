@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------
-# Copyright (c) 2026 Qualcomm Innovation Center, Inc. All rights reserved.
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
 """
@@ -67,12 +67,21 @@ log = logging.getLogger(__name__)
 # package (<pkg>/models/<id>/ and <pkg>/pack/<id>/). See the _resolve_dir()
 # helper in inference.py. Do NOT "fix" an empty MODEL_ROOT/PACK_ROOT by hard-
 # coding an install path — that breaks the packaged app on other machines.
+#
+# P4 双根（user-imported packs）：APP_BUILDER_USER_MODEL_ROOT /
+# APP_BUILDER_USER_PACK_ROOT 是 host 为用户导入的 pack 注入的额外锚点。运行
+# 时打包的 zip 不需要它们（zip 内文件通过 ancestor walk 兜底），但开发时的
+# host 必须传下去，否则用户 pack 的权重会找不到。inference.load_model 会
+# 把 built-in + user 两对 env 都塞给 _resolve_dir 的 4-tier fallback。
 APP_ROOT         = os.environ.get("APP_ROOT", "")
 APP_PROJECT_ROOT = Path(
     os.environ.get("APP_PROJECT_ROOT", str(Path(__file__).resolve().parent.parent))
 )
 MODEL_ROOT = os.environ.get("APP_BUILDER_MODEL_ROOT", "")
 PACK_ROOT  = os.environ.get("APP_BUILDER_PACK_ROOT",  "")
+# P4 user anchors (empty in packaged zip; populated by host for dev-time run).
+USER_MODEL_ROOT = os.environ.get("APP_BUILDER_USER_MODEL_ROOT", "")
+USER_PACK_ROOT  = os.environ.get("APP_BUILDER_USER_PACK_ROOT",  "")
 
 FRONTEND_DIR = APP_PROJECT_ROOT / "frontend"
 
@@ -105,6 +114,8 @@ async def lifespan(app: FastAPI):
     log.info("[startup] APP_ROOT         = %s", APP_ROOT or "(not set)")
     log.info("[startup] MODEL_ROOT       = %s", MODEL_ROOT or "(not set)")
     log.info("[startup] PACK_ROOT        = %s", PACK_ROOT or "(not set)")
+    log.info("[startup] USER_MODEL_ROOT  = %s", USER_MODEL_ROOT or "(not set)")
+    log.info("[startup] USER_PACK_ROOT   = %s", USER_PACK_ROOT or "(not set)")
     log.info("[startup] APP_PROJECT_ROOT = %s", APP_PROJECT_ROOT)
     log.info("[startup] Loading model …")
     t0 = time.perf_counter()
@@ -112,7 +123,12 @@ async def lifespan(app: FastAPI):
     try:
         _MODEL = await loop.run_in_executor(
             None,
-            lambda: inference.load_model(model_root=MODEL_ROOT, pack_root=PACK_ROOT),
+            lambda: inference.load_model(
+                model_root=MODEL_ROOT,
+                pack_root=PACK_ROOT,
+                user_model_root=USER_MODEL_ROOT,
+                user_pack_root=USER_PACK_ROOT,
+            ),
         )
         log.info("[startup] Model ready in %.0f ms.", (time.perf_counter() - t0) * 1000)
     except Exception as exc:  # noqa: BLE001

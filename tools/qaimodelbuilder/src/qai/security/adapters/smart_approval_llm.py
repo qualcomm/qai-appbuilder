@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """LLM-backed :class:`SmartApprovalPort` adapter (PR-092 §2.1 C-7 / §17.5 #8).
 
 Reads ``Settings.security.smart_approval_llm_endpoint`` /

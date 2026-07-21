@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``edition_secrets`` — provision internal-edition factory credentials.
 
 The internal edition ships a default cloud provider (cloud LLM service) whose

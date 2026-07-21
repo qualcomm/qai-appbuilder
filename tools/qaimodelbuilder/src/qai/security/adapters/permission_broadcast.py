@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """EventBus-backed :class:`PermissionBroadcastPort` adapter (PR-501).
 
 Translates use-case-level broadcast calls into

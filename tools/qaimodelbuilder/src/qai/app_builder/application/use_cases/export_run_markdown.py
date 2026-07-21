@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Export run as Markdown — application use case (PR-094 §17.5 #14).
 
 Loads a :class:`qai.app_builder.domain.run.Run` via

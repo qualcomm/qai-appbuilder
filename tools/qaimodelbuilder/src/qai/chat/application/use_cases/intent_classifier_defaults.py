@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Grey-zone LLM intent-classifier feature flags — central constants + resolver.
 
 DISC-2 P2-step1 (§22A.5): on top of the pure-heuristic ``classify_intent``

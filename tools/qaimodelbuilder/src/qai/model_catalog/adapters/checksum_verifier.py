@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """SHA-256 backed :class:`ChecksumVerifierPort` (PR-044).
 
 Re-uses :class:`qai.platform.crypto.hashes.Hash256` for the digest

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Chat-side feature SKILL.md content provider (Batch D / D-1).
 
 Bridges the on-disk ``features/<dir>/SKILL.md`` files into the
@@ -90,6 +95,10 @@ TOOL_MODE_DIR_MAP: dict[str, str] = {
     "model-build":  "model-builder",
     "model_build":  "model-builder",
     "model_builder": "model-builder",
+    # Model Hub (promoted former ``aihub-model-run`` skill) — download
+    # pre-built AI Hub packages + export to App Builder. Dir name == tool_mode.
+    "model-hub":    "model-hub",
+    "model_hub":    "model-hub",
     # Other v1 features (registered for parity; will become useful
     # when batches E+ port them).
     "app-builder":  "app-builder",

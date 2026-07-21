@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * `chatErrorActions` — declarative chat-error display registry.
  *
@@ -98,6 +103,19 @@ const selectModel: ChatErrorAction = {
   id: A.selectModel,
   labelKey: "chatErrors.actions.selectModel",
   style: "primary",
+};
+/**
+ * Ghost-styled `selectModel` — used as the SECONDARY affordance on the
+ * `permission_denied` bubble (primary is "Open Cloud Model settings", the
+ * long-term fix; secondary is "pick another model right now", the immediate
+ * fix). Same action id → the executor's existing `selectModel` handler
+ * (`useChatErrorActions.ts:152`) opens the same model-picker route; only
+ * the label + visual weight differ.
+ */
+const selectModelGhost: ChatErrorAction = {
+  id: A.selectModel,
+  labelKey: "chatErrors.actions.switchModel",
+  style: "ghost",
 };
 const compressContext: ChatErrorAction = {
   id: A.compressContext,
@@ -200,6 +218,15 @@ const SPECS: readonly ChatErrorSpec[] = [
     code: "chat.llm.permission_denied",
     messageKey: "chatErrors.messages.permissionDenied",
     primaryAction: openProviderSettings,
+    // Secondary: let the user pick a different model right now (deep-links
+    // to Cloud Model settings where the picker lives — same route as the
+    // primary, but a distinct label because the user's intent is different:
+    // "I want to switch models" vs "I want to configure this provider").
+    // The backend's ``permission_denied`` snapshot separately hides denied
+    // models from the composer dropdown (see `stores/cloudModelPermissions.ts`
+    // + `ModelDropdown.vue`), so any model the user picks from the settings
+    // page will be one their key actually has access to.
+    secondaryAction: selectModelGhost,
   },
   {
     code: "chat.llm.model_unavailable",

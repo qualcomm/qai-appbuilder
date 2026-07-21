@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <script setup lang="ts">
 /**
  * ToolCallList — 主 / 子 Agent 共用的「一组工具调用」渲染组件。
@@ -20,8 +25,6 @@ import TaskListCard from "@/components/chat/TaskListCard.vue";
 import ChatQuestionCard from "@/components/chat/ChatQuestionCard.vue";
 import BackgroundProcessCard from "@/components/chat/BackgroundProcessCard.vue";
 import ConfigReviewCard from "@/components/chat/ConfigReviewCard.vue";
-import StepProgressCard from "@/components/chat/StepProgressCard.vue";
-import PipelineCard from "@/components/chat/PipelineCard.vue";
 
 const props = defineProps<{
   /** 归一化后的工具调用视图数组（主 / 子 Agent 各自 map 而来）。 */
@@ -143,16 +146,6 @@ function isRichBackgroundProcess(args: Record<string, unknown>): boolean {
     <ConfigReviewCard
       v-else-if="call.toolName === 'config_review'"
       :args="call.args"
-    />
-    <!-- show_step_progress 渲染进度表格卡（MB Pro 任务进度可视化） -->
-    <StepProgressCard
-      v-else-if="call.toolName === 'show_step_progress'"
-      :result="call.result"
-    />
-    <!-- show_pipeline 渲染依赖图卡（markdown 渲染，保留 file:line 证据） -->
-    <PipelineCard
-      v-else-if="call.toolName === 'show_pipeline'"
-      :result="call.result"
     />
     <ToolExecPanel
       v-else

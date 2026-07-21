@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Infrastructure layer for ``qai.user_prefs`` — currently empty.
 
 The ``user_prefs`` BC's persistence is fully covered by adapters

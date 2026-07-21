@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # ---------------------------------------------------------------------
-# Copyright (c) 2026 Qualcomm Innovation Center, Inc. All rights reserved.
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
 """
@@ -90,12 +90,13 @@ from telemetry import StageTimer
 SAMPLE_RATE = 44100
 MAX_SEQ_LEN = 512
 UPSAMPLED_MAX_SEQ_LEN = 1536  # MAX_SEQ_LEN * 3
-DECODER_Z_TIME_DIM = 128
+DECODER_Z_TIME_DIM = 64
 UPSAMPLE_FACTOR = 512
 BERT_MAX_LEN = 200
 
-# Decoder streaming parameters for T=128
-DEC_MAIN_LEN = 104
+# Decoder streaming parameters for decoder.bin T=64
+# metadata.json: decoder z input [1, 192, 64], audio output [1, 1, 32768]
+DEC_MAIN_LEN = 40
 DEC_OVERLAP = 12
 
 # Short-flow fast path thresholds
@@ -747,9 +748,16 @@ def load_model(cmd: dict) -> ModelContext:
     (DataType, LogLevel, PerfProfile, ProfilingLevel,
      QNNConfig, QNNContext, Runtime) = _import_qai()
 
-    # Initialize QNN (qai_appbuilder 2.47 signature: no leading lib-dir arg;
-    # internal libs/ is used automatically).
-    QNNConfig.Config(Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+    # Initialize QNN. Use keyword arguments because qai_appbuilder builds in
+    # the field can expose either a leading optional qnn_lib_path or the newer
+    # runtime-first convenience shape; positional args silently shift
+    # runtime=LogLevel.WARN (an int) on the former and break backend path
+    # construction ("can only concatenate str (not int) to str").
+    QNNConfig.Config(
+        runtime=Runtime.HTP,
+        log_level=LogLevel.WARN,
+        profiling_level=ProfilingLevel.BASIC,
+    )
 
     # G2P warmup runs in a background thread WHILE NPU models load.
     # This IS effective parallelism because QNNContext() is a C extension

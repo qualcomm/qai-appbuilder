@@ -1,3 +1,8 @@
+/* ---------------------------------------------------------------------
+ * Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * --------------------------------------------------------------------- */
+
 /* =============================================================================
  * Migrated from frontend/css/patch-review.css (S7.5 L8 PR-802a).
  * Selectors stay global so legacy class names remain reachable from new

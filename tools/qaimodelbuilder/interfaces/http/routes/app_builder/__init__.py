@@ -1,14 +1,24 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """App Builder HTTP routes (PR-034 + PR-304 + S9 close).
 
-S3 scope (15 endpoints under ``/api/app-builder``) — covers the
+S3 scope (endpoints under ``/api/app-builder``) — covers the
 runnable slice of the legacy ``02-routes.md`` §3.3 surface (37 routes
 total). PR-304 added 16 use cases backing the lane-2 history / batch /
-share / cache / metrics / files-local / install / uninstall / manifest
-routes. PR-094 added ``GET /runs/{run_id}/export.md``. S9 close wires
-the previously surface-only ``feedback`` / ``benchmark`` /
+share / cache / metrics / manifest routes. PR-094 added
+``GET /runs/{run_id}/export.md``. S9 close wires the previously
+surface-only ``feedback`` / ``benchmark`` /
 ``history/runs/{run_id}`` delete routes to real persistence + use
 cases (see :class:`SubmitFeedbackUseCase`,
 :class:`RunBenchmarkUseCase`, :class:`DeleteRunHistoryUseCase`).
+
+> Note (2026-07-21 dead-code cleanup): the zero-consumer
+> ``files-local`` / ``system-prompt`` / ``tool-descriptor`` /
+> ``import/candidates`` routes were removed; their use cases had no
+> production wiring. See ``PROJECT-RULES.md §7``.
 
 Route groups (split across sibling modules — pure architectural split,
 zero behaviour change)
@@ -20,13 +30,12 @@ zero behaviour change)
                      streaming ``GET /artifacts/{run_id}/{path:path}/blob``
                      / upload / batch / list / history / export.md / metrics
 * :mod:`._import`  — ``POST /import/dry-run`` + ``commit`` + ``rollback`` +
-                     ``candidates`` + ``scan-bins`` + ``auto-export``
+                     ``scan-bins`` + ``auto-export``
 * :mod:`._share`   — ``POST /share`` / ``GET /share/{token}``
 * :mod:`._voice`   — ``GET|PUT /voice-preference`` + ``voice-input/preload``
                      + ``feedback`` + ``benchmark`` (POST + status GET)
 * :mod:`._catalog` — worker status / taxonomy / deps-status / cache /
-                     files-local / manifest / system-prompt / schema /
-                     tool-descriptor
+                     manifest / schema
 
 All groups register onto a SINGLE :class:`fastapi.APIRouter` built once
 per :func:`build_router` call. The single-router shape keeps the

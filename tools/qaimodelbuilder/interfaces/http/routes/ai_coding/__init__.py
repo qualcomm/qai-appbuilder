@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """AI coding HTTP routes for both Claude Code (CC) and OpenCode (OC).
 
 S3 PR-035 scope (22 endpoints = 11 templates x 2 providers):
@@ -67,7 +72,6 @@ behaviour change):
 * :mod:`._config`          — config + credentials routes
 * :mod:`._session_ext`     — abort / revert / checkpoint / context routes
 * :mod:`._oc_service`      — OC-only subprocess control routes
-* :mod:`._universal_tool`  — universal ``/api/tool_execute(_stream)`` routes
 """
 
 from __future__ import annotations
@@ -84,7 +88,6 @@ from ._oc_service import _register_oc_service_routes
 from ._provider import _register_provider_routes
 from ._session_ext import _register_session_extension_routes
 from ._sessions import _register_cc_only_routes
-from ._universal_tool import _register_universal_tool_routes
 
 if TYPE_CHECKING:  # pragma: no cover
     from apps.api.di import Container
@@ -174,12 +177,6 @@ def build_router(*, container: "Container") -> APIRouter:
 
     aggregate.include_router(cc_router)
     aggregate.include_router(oc_router)
-    # PR-108c: universal /api/tool_execute(_stream) routes.  Mounted
-    # on the aggregate (NOT under the /api/cc or /api/oc sub-routers)
-    # because the legacy paths sit at the application root with no
-    # provider prefix.  Routes have absolute paths so the empty
-    # aggregate prefix is correct.
-    _register_universal_tool_routes(aggregate, container=container)
     return aggregate
 
 

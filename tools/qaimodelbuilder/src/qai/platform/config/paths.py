@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """DataPaths — the single port for resolving runtime filesystem paths.
 
 This is THE place that knows the on-disk layout for ``data/``. Business

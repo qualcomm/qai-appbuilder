@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 // Resolve an App Builder asset path (a run INPUT/source image path written by a
 // Pack runner) into a browser-usable HTTP URL.
 //

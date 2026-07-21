@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <script setup lang="ts">
 /**
  * ModeFrameCoding — chat-input sub-toolbar for `code` mode.
@@ -19,12 +24,14 @@
  * (ChatComposer) stores them on the active tab's `toolParams` for the
  * transport to forward to the backend.
  */
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { useCodePersonas } from "@/composables/useCodePersonas";
 import { useUpload } from "@/composables/useUpload";
 import { useToast } from "@/composables/useToast";
+import { useChatTabsStore } from "@/stores/chatTabs";
+import { useModeFrameTriggers } from "@/composables/useModeFrameTriggers";
 
 const { t, te } = useI18n();
 const toast = useToast();
@@ -205,6 +212,24 @@ async function handleCodeFileSelect(e: Event): Promise<void> {
 // ── Import open-source repo (V1 confirmCodeRepoUrl, app.js L1325-1349) ────────
 const repoInputOpen = ref(false);
 const repoUrlDraft = ref<string>("");
+
+// ── Cross-component triggers from ModeIntroCard chips ───────────────────────
+// The ModeIntroCard "Pick persona" / "Upload code / repo" chips route through
+// `useModeFrameTriggers` — module-level bump tokens we watch here to open
+// the corresponding local menus. Only reacts when this frame is actually
+// the active mode (mirrors the gate in the other mode-frames).
+const _chatTabsStore = useChatTabsStore();
+const { openCodePersonaToken, openCodeContextToken } = useModeFrameTriggers();
+watch(openCodePersonaToken, () => {
+  if (_chatTabsStore.activeTab?.activeMode !== "code") return;
+  // Open the persona picker (same effect as clicking the persona button).
+  personaMenuOpen.value = true;
+});
+watch(openCodeContextToken, () => {
+  if (_chatTabsStore.activeTab?.activeMode !== "code") return;
+  // Open the repo/file URL input row (same effect as clicking the repo button).
+  repoInputOpen.value = true;
+});
 
 function toggleRepoInput(): void {
   repoInputOpen.value = !repoInputOpen.value;

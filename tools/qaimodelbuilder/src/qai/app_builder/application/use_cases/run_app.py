@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``RunAppUseCase`` — orchestrate one model run end-to-end.
 
 Responsibilities:
@@ -54,7 +59,7 @@ DI wires from ``Settings.app_builder``:
   consumed by :func:`_extract_pack_deps` to read the manifest's
   ``runner.requirements`` file path and derive the dynamic dep list.
   Wired by ``apps/api/_app_builder_di.py`` from the same provider used
-  by :class:`BuildSystemPromptUseCase`.
+  by :class:`ResolveSkillFilesUseCase`.
 
 All three default to ``None``; pre-PR-094 callers see byte-for-byte the
 original behaviour.

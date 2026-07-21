@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <script setup lang="ts">
 /**
  * CloudModelApiKeyOnboarding — in-place "set API key" prompt card.
@@ -22,6 +27,9 @@
  * - Theme-aware: all colors come from global CSS variables.
  */
 import { useI18n } from "vue-i18n";
+// Shared help-manual affordance — see components/common/HelpButton.vue.
+// Docs live under `frontend/src/help-content/cloud-model-api-key.<locale>.md`.
+import HelpButton from "@/components/common/HelpButton.vue";
 
 const { t } = useI18n();
 
@@ -45,9 +53,18 @@ const KEY_SVG =
       v-html="KEY_SVG"
     />
     <div class="cloud-onboarding__body">
-      <p class="cloud-onboarding__title">
-        {{ t("cloudModels.apiKeyOnboarding.title") }}
-      </p>
+      <div class="cloud-onboarding__title-row">
+        <p class="cloud-onboarding__title">
+          {{ t("cloudModels.apiKeyOnboarding.title") }}
+        </p>
+        <!-- Help entry: explains WHY an API key is needed and lists the
+             per-vendor request URLs. Not tied to a single provider so no
+             `external-url` is passed. -->
+        <HelpButton
+          doc-key="cloud-model-api-key"
+          size="sm"
+        />
+      </div>
       <p class="cloud-onboarding__desc">
         {{ t("cloudModels.apiKeyOnboarding.desc") }}
       </p>
@@ -87,6 +104,15 @@ const KEY_SVG =
 .cloud-onboarding__body {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+/* Title + inline HelpButton row inside the onboarding card. Keeps the
+ * baseline alignment consistent so the ℹ️ affordance reads as part of the
+ * title rather than a floating action. */
+.cloud-onboarding__title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .cloud-onboarding__title {

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Use cases for agent-template management (CRUD + apply-to-conversation).
 
 An **agent template** (``docs/70-multi-agent/multi-agent-conversation-design.md``
@@ -437,6 +442,10 @@ class ApplyAgentTemplateUseCase:
             model_id=template.model_id,
             persona=template.persona,
             config=dict(template.config) if template.config else None,
+            # Provenance for runtime i18n persona override (migration 056):
+            # a single-role import stores the bare agent template id so the
+            # discussion orchestrator can re-resolve persona by (id + locale).
+            template_id=template.id.value,
         )
         await self._participants.save(participant)
         _log.info(

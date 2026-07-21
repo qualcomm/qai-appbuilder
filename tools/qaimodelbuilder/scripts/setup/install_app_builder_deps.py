@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """安装阶段聚合安装 App Builder Pack 依赖（V1 对齐修复 D-1，瘦入口）。
 
 由 ``Setup.bat`` Step 4e 调用（统一 ``qai install-pack-deps`` 子命令；

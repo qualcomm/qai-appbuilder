@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Bridge: PackManifest → RunnerCommandRegistry (PR-303).
 
 Drives :class:`qai.app_builder.infrastructure.command_resolver.InMemoryRunnerCommandRegistry`

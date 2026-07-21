@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * `useCodingSession(kind)` — shared core for the Claude Code (`cc`) and
  * Open Code (`oc`) chat-side working surfaces (功能块 6 + 7).

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """DI wiring for the ``user_prefs`` bounded context (PR-601a/b).
 
 S7.5 lane L6 introduces this BC from scratch: PR-601a ships the

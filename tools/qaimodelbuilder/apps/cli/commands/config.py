@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``qai config`` subcommands — user-prefs documents + cloud-provider wizard.
 
 Desktop App Plan §2.1.1 group A + cli-interactive-design §4bis. Two surfaces:

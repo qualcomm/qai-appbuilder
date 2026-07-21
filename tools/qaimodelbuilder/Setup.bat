@@ -1,6 +1,6 @@
 @echo off
 REM ---------------------------------------------------------------------
-REM Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+REM Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 REM SPDX-License-Identifier: BSD-3-Clause
 REM ---------------------------------------------------------------------
 REM QAIModelBuilder - One-click Python environment setup (uv)
@@ -16,6 +16,11 @@ echo  +--------------------------------------------------+
 echo.
 
 set "ROOT_DIR=%~dp0"
+
+REM Route Python bytecode caches out of the source tree into data\caches\pycache
+REM (keeps the source tree clean; data\ is the per-user runtime root and is
+REM git-ignored). %~dp0 has a trailing backslash so no extra separator is needed.
+set "PYTHONPYCACHEPREFIX=%~dp0data\caches\pycache"
 
 REM Switch to the script's own directory so all relative paths work correctly,
 REM and uv does not receive absolute paths with spaces or CJK characters.
@@ -2065,6 +2070,14 @@ exit /b 0
 :sb_install_qairt_sdk
 if exist "%QAIRT_SDK_ROOT%\bin\aarch64-windows-msvc\qnn-context-binary-generator.exe" (
     echo [SKIP] QAIRT SDK already installed: %QAIRT_SDK_ROOT%
+    REM Even when we skip the (big) SDK extraction, still make sure 7za.exe is
+    REM bootstrapped. :ensure_7za used to be reachable ONLY from the extraction
+    REM path below (line ~2175); on a machine where the SDK was already present,
+    REM that path never ran, so 7za.exe was never created -- which is exactly
+    REM why it went missing despite Setup.bat completing successfully. It is
+    REM idempotent (early-exits if 7za.exe is already cached) and never deletes
+    REM 7za.exe, so calling it here on the skip path is safe and cheap.
+    call :ensure_7za
     goto :sb_keep_qairt_zip
 )
 if exist "%QAIRT_VENDOR_ZIP%" (

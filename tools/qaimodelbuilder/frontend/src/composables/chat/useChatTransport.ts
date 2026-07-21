@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * useChatTransport — chat transport with WS-first / SSE-fallback (PR-054).
  *
@@ -194,6 +199,14 @@ export function deriveToolPayload(tab: ChatTab | undefined): {
       out.last_run_summary = tp.last_run_summary;
     }
     params = Object.keys(out).length > 0 ? out : null;
+  } else if (mode === "model-hub") {
+    // Model Hub — download pre-compiled models from Qualcomm AI Hub and
+    // export them to App Builder. No per-mode tool_params are required at
+    // launch (the backend feature prompt drives the AI Hub search/download
+    // flow), so we emit `tool_mode='model-hub'` with `tool_params=null`.
+    // Extend here (e.g. selected AI Hub model id / target device) once the
+    // ModeFrameModelHub sub-toolbar surfaces a concrete selection.
+    params = null;
   }
   return { toolMode: mode, toolParams: params };
 }

@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 // =============================================================================
 // i18n locale sub-file — 手工维护，UTF-8（无 BOM）。
 //
@@ -13,6 +18,7 @@
 
 const auth = {
   account_menu: "账户菜单",
+  contact_support: "联系支持",
   prompt_hint: "您将被跳转到 Qualcomm 登录页面。",
   prompt_message: "请使用您的 Qualcomm 账号登录后继续使用 QAI AppBuilder。",
   prompt_title: "需要登录",

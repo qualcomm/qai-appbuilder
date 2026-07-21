@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Model catalog HTTP routes.
 
 S3 PR-032 scope: 12 routes under ``/api/model-catalog`` exposing the 11
@@ -258,6 +263,27 @@ class CloudModelsResponse(BaseModel):
     """Plural envelope mirroring the legacy ``/api/models`` cloud merge."""
 
     models: list[CloudModelDTO]
+
+
+class CloudModelPermissionsResponse(BaseModel):
+    """Envelope for ``GET /api/model-catalog/cloud-models/permissions``.
+
+    Reports the current per-``(provider_id, model_id)`` permission snapshot
+    filled in by the lifespan background scan. Values are the string form of
+    :class:`qai.model_catalog.application.use_cases.PermissionStatus`
+    (``"unknown"`` / ``"allowed"`` / ``"denied"``). ``UNKNOWN`` covers both
+    "not probed yet" and "probe failed" — the frontend treats both as "show"
+    (never-preset-unavailable). Missing (provider_id, model_id) entries are
+    equivalent to ``"unknown"``.
+
+    Contract note (§3.1): purely additive route + response — the frozen
+    ``/cloud-models`` list shape is untouched. The scan is best-effort and
+    non-blocking; this endpoint can return an empty ``permissions`` object
+    at any time (e.g. before the first scan completes) and the frontend
+    degrades gracefully.
+    """
+
+    permissions: dict[str, dict[str, str]]
 
 
 class QueryServiceDTO(BaseModel):
@@ -677,6 +703,40 @@ def build_router(*, container: "Container") -> APIRouter:
         return CloudModelsResponse(
             models=[CloudModelDTO(**row) for row in rows]
         )
+
+    @router.get(
+        "/cloud-models/permissions",
+        response_model=CloudModelPermissionsResponse,
+    )
+    async def list_cloud_model_permissions() -> CloudModelPermissionsResponse:
+        """Return the current per-model permission snapshot.
+
+        Additive route (§3.1). The snapshot is populated once by the lifespan
+        background task (see ``apps/api/lifespan.py`` — permission scan). The
+        response is safe to call at any point in the app's lifetime:
+
+        * before the scan completes → ``permissions`` is ``{}`` (frontend
+          treats every model as ``UNKNOWN`` → visible);
+        * probe of a given provider failed → that provider's models resolve
+          to ``UNKNOWN`` (again → visible);
+        * probe succeeded → ``ALLOWED`` / ``DENIED`` per model based on the
+          upstream ``GET /v1/models`` response.
+
+        No credentials are read here — the ``SecretStore`` lookup happens
+        inside the use case (writer). This route only serialises the snapshot.
+        """
+        store = container.model_catalog.permission_snapshot_store
+        raw = store.get_snapshot()
+        # Serialise ``PermissionStatus`` enum values to their string form so
+        # the wire payload stays dict-of-dict-of-string (JSON-friendly, no
+        # custom serialiser needed).
+        wire: dict[str, dict[str, str]] = {}
+        for provider_id, per_model in raw.items():
+            wire[provider_id] = {
+                model_id: status.value
+                for model_id, status in per_model.items()
+            }
+        return CloudModelPermissionsResponse(permissions=wire)
 
     @router.get("/query-services", response_model=QueryServicesResponse)
     async def list_query_services() -> QueryServicesResponse:

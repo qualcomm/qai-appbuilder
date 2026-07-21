@@ -1,6 +1,6 @@
 @echo off
 REM ---------------------------------------------------------------------
-REM Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+REM Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 REM SPDX-License-Identifier: BSD-3-Clause
 REM ---------------------------------------------------------------------
 REM QAIModelBuilder - Open an activated environment console
@@ -33,6 +33,13 @@ echo.
 set "ROOT_DIR=%~dp0"
 set "VENV_DIR=%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_arm64_313"
 set "ACTIVATE=%VENV_DIR%\Scripts\activate.bat"
+
+REM Route Python bytecode caches out of the source tree into data\caches\pycache
+REM (keeps the source tree clean; data\ is the per-user runtime root and is
+REM git-ignored). Exported into the interactive shell so ad-hoc python / pytest /
+REM ruff / mypy runs inside Console.bat also honour it. %~dp0 has a trailing
+REM backslash so no extra separator is needed.
+set "PYTHONPYCACHEPREFIX=%~dp0data\caches\pycache"
 
 if not exist "%ACTIVATE%" goto :no_venv
 

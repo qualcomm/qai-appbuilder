@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Chat-side "agent harness" tool handlers — ``todowrite`` and ``question``.
 
 These two tools are V2 enhancements (V1 has no equivalent) registered directly
@@ -761,8 +766,10 @@ class SkillToolHandler:
         dir — the same way the ``read`` tool does when returning a SKILL.md body.
         Otherwise a placeholder would leak to the model as a literal and the
         agent would build a broken path. Unavailable placeholders are left
-        verbatim (fail-safe). The expansion helper is imported lazily to keep
-        this adapter free of an eager ``qai.ai_coding`` import.
+        verbatim (fail-safe). The expansion helper lives in the platform
+        shared kernel (``qai.platform.skills.placeholders``) so both the chat
+        skill loader and the ``ai_coding`` tool handlers read the same
+        ``APP_ROOT`` binding without crossing a Bounded-Context boundary.
         """
         from pathlib import Path
 
@@ -770,7 +777,7 @@ class SkillToolHandler:
         if "${" not in text:
             return text
         try:
-            from qai.ai_coding.infrastructure.tools.handlers import (
+            from qai.platform.skills.placeholders import (
                 expand_skill_placeholders,
             )
         except Exception:  # noqa: BLE001 — never break skill loading

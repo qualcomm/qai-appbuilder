@@ -291,6 +291,9 @@ exclude = [
 line-length = 100
 target-version = "py312"
 src = ["src", "apps", "interfaces", "tests"]
+# Route ruff's cache out of the source tree into data/caches/ruff (data/ is
+# git-ignored per-user runtime root). Keeps the source tree clean.
+cache-dir = "data/caches/ruff"
 
 # Skip legacy code so ruff stays useful during S1..S7. These will all be deleted
 # in S8 (PR-080..085); keeping them lint-clean is not a goal.
@@ -405,6 +408,9 @@ warn_unused_ignores = true
 warn_unreachable = true
 disallow_untyped_decorators = true
 exclude = "(^backend/|^features/|^frontend/|^scripts/_archive/|^docs/)"
+# Route mypy's cache out of the source tree into data/caches/mypy (data/ is
+# git-ignored per-user runtime root). Keeps the source tree clean.
+cache_dir = "data/caches/mypy"
 
 [[tool.mypy.overrides]]
 module = ["tests.*"]
@@ -428,6 +434,9 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
+# Route pytest's cache out of the source tree into data/caches/pytest (data/
+# is git-ignored per-user runtime root). Keeps the source tree clean.
+cache_dir = "data/caches/pytest"
 addopts = [
   "-ra",
   "--strict-markers",
@@ -503,6 +512,11 @@ filterwarnings = [
 source = ["src/qai", "apps", "interfaces"]
 branch = true
 parallel = true
+# Route coverage's data file out of the source tree into data/caches/coverage
+# (data/ is git-ignored per-user runtime root). Keeps the source tree clean.
+# ``parallel = true`` writes ``.coverage.<host>.<pid>.<rand>`` shards next to
+# this file; ``coverage combine`` merges them into ``.coverage``.
+data_file = "data/caches/coverage/.coverage"
 omit = [
   "*/__init__.py",
   "*/tests/*",

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``RosterTemplate`` aggregate for the chat bounded context.
 
 A :class:`RosterTemplate` is a *named, reusable bundle of discussion role
@@ -131,6 +136,17 @@ class RosterTemplate:
     #: editing it; ``reset`` restores the copy's business fields from
     #: ``cloned_from_id`` in place (the copy keeps its own id / created_at).
     cloned_from_id: str | None = None
+    #: Optional per-locale i18n maps for built-in presets (migration 056).
+    #: ``name_i18n`` / ``description_i18n`` are ``{"en": "...", ...}`` maps;
+    #: ``members_i18n`` is ``{"en": [{"display_name","persona","config"},...],
+    #: "zh-CN": [...], "zh-TW": [...]}`` — the WHOLE localised members array per
+    #: locale, positionally aligned with :attr:`members`. ``None`` for custom
+    #: (``is_builtin=0``) templates and pre-056 rows, which then always render
+    #: their canonical single-language fields as the fallback (AGENTS.md §8
+    #: forward-compatibility). Tail-appended optional fields (§3.1 additive).
+    name_i18n: dict[str, str] | None = None
+    description_i18n: dict[str, str] | None = None
+    members_i18n: dict[str, list[dict[str, Any]]] | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -5,7 +5,7 @@
  * ========================================================================== */
 
 /* ---------------------------------------------------------------------
- * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause
  * --------------------------------------------------------------------- */
 /* ── Chat ───────────────────────────────────────────────────────────────── */
@@ -20,6 +20,53 @@
   flex-direction: column;
   overflow: hidden;
   position: relative;
+}
+
+/* Top-right anchor for the mode-intro overlay (ⓘ button + pop-out card).
+ *
+ * Design intent: the intro overlay is an ambient onboarding affordance
+ * that must NOT consume a permanent row of layout height (that was the
+ * previous inline-strip design; user feedback: "not really floating, it
+ * steals a row"). Absolute positioning inside `.chat-view` keeps the
+ * button on top of the chat content while message list / composer keep
+ * their full height.
+ *
+ * Placement (stacks below the task-list pill, but NOT below its dropdown):
+ *   - Top-right corner of the chat viewport, offset from the edges by
+ *     var(--space-3) so it aligns with the composer / header inner
+ *     padding without feeling cramped;
+ *   - `top` is `--qai-task-pill-bottom` (published by TaskListBar and
+ *     tracking JUST the pill, NOT the dropdown) + var(--space-2), so
+ *     this button sits directly BELOW the task-list pill when one is
+ *     showing (feedback: the two floats overlapped because both anchored
+ *     to `top: var(--space-3)`), and RISES back to the corner when no
+ *     task list is active (the CSS var falls back to 0 on unmount).
+ *
+ *     Deliberately DOES NOT track the dropdown — when the user expands
+ *     the task list, the dropdown just occludes this button briefly.
+ *     That is acceptable because the user is looking at tasks, not
+ *     onboarding, at that moment; jumping the ⓘ button down every time
+ *     the dropdown opens would be jarring. Same rationale as why
+ *     MessageQueuePanel DOES track the full stack (its queue is
+ *     genuinely part of the top-right float stack, ours is separate).
+ *
+ *   - z-index above the message list but below the task-list bar (30)
+ *     so the task-list dropdown always wins when both are open at once;
+ *   - `pointer-events: none` on the anchor itself so the empty space
+ *     around the pill button does not eat clicks meant for the message
+ *     list. The button + pop-out inside re-enable pointer events on
+ *     themselves.
+ */
+.chat-view__intro-anchor {
+  position: absolute;
+  top: calc(var(--qai-task-pill-bottom, 0px) + var(--space-3, 12px));
+  right: var(--space-3, 12px);
+  z-index: 20;
+  pointer-events: none;
+  transition: top 180ms ease;
+}
+.chat-view__intro-anchor > * {
+  pointer-events: auto;
 }
 
 /* Non-scrolling pane wrapper (V1 `.chat-view` parity, index.html:401 +
@@ -3316,58 +3363,6 @@ html:not(.light) .message-bubble pre code.hljs {
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   border-color: var(--border-light);
   color: color-mix(in srgb, var(--accent) 80%, var(--text-primary));
-}
-
-/* ── Per-message collapse button ────────────────────────────────────────── */
-.msg-collapse-btn {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  color: var(--text-muted);
-  opacity: 0;
-  transition: opacity var(--transition), background var(--transition), color var(--transition);
-  margin-left: 2px;
-}
-.message-row:hover .msg-collapse-btn { opacity: 1; }
-/* 折叠时即使不 hover 也显示（提示有内容被折叠） */
-.message-row.msg-collapsed .msg-collapse-btn {
-  opacity: 0.55;
-  color: var(--accent);
-}
-.msg-collapse-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.msg-collapse-arrow {
-  display: inline-block;
-  font-size: var(--text-xs);
-  line-height: 1;
-  transform: rotate(0deg);
-  transition: transform 0.15s ease;
-  color: inherit;
-}
-.msg-collapse-arrow.collapsed {
-  transform: rotate(-90deg);
-}
-
-/* ── Collapsed message row ──────────────────────────────────────────────── */
-.message-row.msg-collapsed {
-  opacity: 0.75;
-}
-.message-row.msg-collapsed .message-meta {
-  color: var(--text-muted);
-  padding-bottom: 2px;
-  border-bottom: 1px dashed var(--border);
-  margin-bottom: 0;
 }
 
 /* ── Image attachment (pending + message preview) ───────────────────────── */

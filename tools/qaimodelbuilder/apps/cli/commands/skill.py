@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``qai skill`` subcommands — manage the on-disk skill registry + policy.
 
 Desktop App Plan §2.1.1 group J1. Thin wrappers over use cases in

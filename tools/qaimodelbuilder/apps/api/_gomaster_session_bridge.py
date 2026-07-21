@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Apps-layer bridge: GoMaster session-lifecycle controller (internal-only).
 
 The chat composer's「GoMaster 在线」mode exposes user-controlled connect /

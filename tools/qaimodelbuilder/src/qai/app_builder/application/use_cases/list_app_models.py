@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``ListAppModelsUseCase`` — return all registered app model definitions.
 
 Wraps :class:`AppModelRepositoryPort.list_all` and enforces the V1

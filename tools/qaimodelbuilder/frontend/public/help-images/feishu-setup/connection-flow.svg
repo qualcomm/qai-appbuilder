@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Feishu channel connection flow — a sequence diagram showing how a
+  developer registers a Feishu custom app, records the four credentials,
+  and lets QAI ModelBuilder open a WebSocket long-connection to the
+  Feishu event gateway. Rendered on the "Help" dialog in FeishuConfigPanel.
+
+  Structure mirrors wechat-ilink/authorization-flow.svg deliberately so
+  the two channel help modals feel like siblings (same viewBox, same
+  colour semantics, same legend). Actors differ because Feishu has no
+  QR-scan step — it's credential-based.
+
+  Design notes:
+    - viewBox is used (not fixed width/height) so the diagram scales
+      with the modal width; the parent <img> in HelpButton clamps
+      `max-width: 100%`.
+    - Colour palette matches the WeChat diagram; a `prefers-color-scheme:
+      dark` media query flips neutrals for dark mode.
+    - `system-ui, sans-serif` matches the app font stack.
+    - Fully self-contained: no external <image href>, no scripts, no
+      fonts loaded from the web.
+-->
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 720 420"
+     role="img"
+     aria-label="Feishu channel connection sequence diagram: developer registers a custom app, pastes credentials, and QAI ModelBuilder opens a WebSocket long-connection to the Feishu event gateway"
+     font-family="system-ui, -apple-system, 'Segoe UI', sans-serif"
+     font-size="14">
+  <style>
+    .actor-box  { fill: #f5f7fa; stroke: #4b5563; stroke-width: 1.5; }
+    .actor-txt  { fill: #111827; font-weight: 600; text-anchor: middle; }
+    .lifeline   { stroke: #9ca3af; stroke-width: 1; stroke-dasharray: 4 4; }
+    .arrow      { stroke: #2563eb; stroke-width: 1.8; fill: none; marker-end: url(#arrowHead); }
+    .arrow-back { stroke: #10b981; stroke-width: 1.8; fill: none; stroke-dasharray: 5 4; marker-end: url(#arrowHeadBack); }
+    .msg        { fill: #111827; font-size: 12px; }
+    .msg-back   { fill: #047857; font-size: 12px; }
+    .step-num   { fill: #2563eb; font-weight: 700; font-size: 12px; }
+    @media (prefers-color-scheme: dark) {
+      .actor-box  { fill: #1f2937; stroke: #d1d5db; }
+      .actor-txt  { fill: #f9fafb; }
+      .lifeline   { stroke: #6b7280; }
+      .arrow      { stroke: #60a5fa; }
+      .arrow-back { stroke: #34d399; }
+      .msg        { fill: #f3f4f6; }
+      .msg-back   { fill: #6ee7b7; }
+      .step-num   { fill: #60a5fa; }
+    }
+  </style>
+
+  <defs>
+    <marker id="arrowHead" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2563eb" />
+    </marker>
+    <marker id="arrowHeadBack" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#10b981" />
+    </marker>
+  </defs>
+
+  <!-- Actor headers (three lifelines: Developer / Feishu Open Platform / QAI ModelBuilder + gateway).
+       Wide middle actor to fit "Feishu Open Platform"; other two mirror the
+       WeChat diagram's widths so the paired SVGs align visually. -->
+  <g>
+    <rect class="actor-box" x="40"  y="20" width="160" height="40" rx="6" />
+    <text class="actor-txt" x="120" y="45">👤 Developer</text>
+
+    <rect class="actor-box" x="260" y="20" width="200" height="40" rx="6" />
+    <text class="actor-txt" x="360" y="45">🪶 Feishu Open Platform</text>
+
+    <rect class="actor-box" x="520" y="20" width="160" height="40" rx="6" />
+    <text class="actor-txt" x="600" y="45">🖥 QAI ModelBuilder</text>
+  </g>
+
+  <!-- Lifelines -->
+  <line class="lifeline" x1="120" y1="60"  x2="120" y2="400" />
+  <line class="lifeline" x1="360" y1="60"  x2="360" y2="400" />
+  <line class="lifeline" x1="600" y1="60"  x2="600" y2="400" />
+
+  <!-- Step 1: Developer creates a custom app -->
+  <text class="step-num" x="50" y="95">1</text>
+  <path class="arrow" d="M120 100 L360 100" />
+  <text class="msg" x="150" y="93">Create custom app</text>
+
+  <!-- Step 2: Platform returns App ID + App Secret -->
+  <text class="step-num" x="270" y="135">2</text>
+  <path class="arrow-back" d="M360 140 L120 140" />
+  <text class="msg-back" x="150" y="133">App ID + App Secret</text>
+
+  <!-- Step 3: Developer enables WebSocket mode + generates keys -->
+  <text class="step-num" x="50" y="180">3</text>
+  <path class="arrow" d="M120 185 L360 185" />
+  <text class="msg" x="150" y="178">Enable WebSocket + generate keys</text>
+
+  <!-- Step 4: Platform returns Encrypt Key + Verification Token -->
+  <text class="step-num" x="270" y="220">4</text>
+  <path class="arrow-back" d="M360 225 L120 225" />
+  <text class="msg-back" x="130" y="218">Encrypt Key + Verification Token</text>
+
+  <!-- Step 5: Developer pastes all 4 credentials into panel + clicks Connect -->
+  <text class="step-num" x="50" y="265">5</text>
+  <path class="arrow" d="M120 270 L600 270" />
+  <text class="msg" x="200" y="263">Paste 4 credentials + click "Connect"</text>
+
+  <!-- Step 6: QAI opens WebSocket long-connection to Feishu gateway -->
+  <text class="step-num" x="380" y="305">6</text>
+  <path class="arrow" d="M600 310 L360 310" />
+  <text class="msg" x="380" y="303">Open WebSocket long-connection</text>
+
+  <!-- Step 7: Feishu pushes message events over the long-connection -->
+  <text class="step-num" x="380" y="345">7</text>
+  <path class="arrow-back" d="M360 350 L600 350" />
+  <text class="msg-back" x="380" y="343">Push message events</text>
+
+  <!-- Legend -->
+  <g transform="translate(40, 380)">
+    <line class="arrow" x1="0" y1="4" x2="30" y2="4" />
+    <text class="msg" x="36" y="8">Outbound / user action</text>
+    <line class="arrow-back" x1="200" y1="4" x2="230" y2="4" />
+    <text class="msg-back" x="236" y="8">Inbound / system response</text>
+  </g>
+</svg>

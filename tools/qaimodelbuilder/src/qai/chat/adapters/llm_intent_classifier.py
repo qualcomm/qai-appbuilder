@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """LLM-backed grey-zone intent classifier adapter (DISC-2 P2-step1 — §22A.5).
 
 Implements :class:`~qai.chat.application.use_cases.discussion_intent.IntentClassifierPort`

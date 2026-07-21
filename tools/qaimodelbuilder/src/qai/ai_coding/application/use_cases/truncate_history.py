@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Use case: truncate a trailing slice of a session's message history.
 
 Backs the legacy ``POST /api/cc/sessions/{id}/truncate_history`` route

@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 // =============================================================================
 // Vite configuration — QAIModelBuilder new frontend
 // Created in S1 PR-011, definitively shaped in S5 PR-050.
@@ -61,10 +66,6 @@ export default defineConfig(({ mode }) => {
           replacement: emptyComponent,
         },
         {
-          find: "@/components/chat/GomasterSettingsDialog.vue",
-          replacement: emptyComponent,
-        },
-        {
           find: "@/components/chat/ProSettingsDialog.vue",
           replacement: emptyComponent,
         },
@@ -86,6 +87,12 @@ export default defineConfig(({ mode }) => {
   return {
     root: fileURLToPath(new URL(".", import.meta.url)),
     base: "/",
+
+    // Route Vite's dep-optimize cache out of the source tree — data/ is the
+    // per-user runtime root (git-ignored). Keeps frontend/ clean of
+    // frontend/.vite/ scratch dirs. Path is relative to this config file
+    // (frontend/), so it resolves to <repo-root>/data/caches/vite/ at runtime.
+    cacheDir: "../data/caches/vite",
 
     define: {
       __APP_VERSION__: JSON.stringify(pkg.version as string),

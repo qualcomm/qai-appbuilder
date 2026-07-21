@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * SSE stream-frame handlers for the chat store (F3 cohesion split).
  *
@@ -80,6 +85,8 @@ export function normaliseDetectedToolMode(raw: string): ToolModeKey | null {
     "model_build": "model-build",
     "model_builder": "model-build",
     "model-build": "model-build",
+    "model_hub": "model-hub",
+    "model-hub": "model-hub",
     "app-builder": "app-builder",
     "app_builder": "app-builder",
     "code": "code",

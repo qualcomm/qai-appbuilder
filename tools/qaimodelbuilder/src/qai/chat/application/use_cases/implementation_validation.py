@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Item completion gates — verify-command (判定 B) + LLM validator (step5).
 
 DISC-1 三期-step5 + 完成判定 B layer two OPTIONAL, independently-gated quality

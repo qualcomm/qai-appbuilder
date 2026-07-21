@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Process-backed :class:`RunnerPort` (PR-045 + PR-302).
 
 Wraps :class:`qai.platform.process.ports.ProcessRunnerPort` (introduced

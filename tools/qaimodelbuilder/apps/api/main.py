@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """FastAPI ``create_app()`` factory + ``main()`` entry point.
 
 Constraints (refactor-plan v2.5 §6):
@@ -371,6 +376,27 @@ def main(argv: list[str] | None = None) -> int:
         # logger is pure noise here.
         access_log=False,
         timeout_graceful_shutdown=30,
+        # WebSocket protocol-level keepalive (RFC 6455 Ping/Pong).
+        #
+        # ``ws="auto"`` selects the legacy ``websockets`` backend (the
+        # ``websockets`` package is installed), which honours these two
+        # kwargs. Uvicorn's DEFAULTS are an aggressive 20s interval + 20s
+        # pong timeout: the server pings every ~20s and FAILS the connection
+        # (``keepalive ping timeout`` -> internal 1011, observed by the ASGI
+        # layer as an abnormal 1006 close) if a matching pong is not
+        # processed within 20s of that ping.
+        #
+        # A long chat turn (many tool rounds over 10+ minutes) plus any
+        # brief stall on the client side (Windows Modern Standby / sleep-
+        # resume, browser Network Service pause, tab discard) or a server
+        # event-loop hiccup can let the pong miss that 20s window, dropping
+        # the socket mid-turn. Widening the window to 30s interval / 90s
+        # timeout keeps genuine dead-connection detection while tolerating
+        # transient suspend/resume gaps. The chat routes ALSO emit a 15s
+        # application-level ``{"type":"ping"}`` heartbeat (``_ws.py`` /
+        # ``_sse.py``) as a second, independent liveness signal.
+        ws_ping_interval=30.0,
+        ws_ping_timeout=90.0,
     )
     server = uvicorn.Server(config)
 

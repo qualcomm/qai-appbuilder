@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``AgentTemplate`` aggregate for the chat bounded context.
 
 An :class:`AgentTemplate` is a *named, reusable definition of a SINGLE
@@ -97,6 +102,17 @@ class AgentTemplate:
     #: editing the copy — the original stays read-only and untouched. ``reset``
     #: restores a copy's business fields from ``cloned_from_id`` in place.
     cloned_from_id: str | None = None
+    #: Optional per-locale i18n maps for built-in presets (migration 056).
+    #: Each is ``{"en": "...", "zh-CN": "...", "zh-TW": "..."}`` loaded from the
+    #: matching ``*_i18n_json`` column; ``None`` for custom (``is_builtin=0``)
+    #: templates and pre-056 rows — which then always render their canonical
+    #: single-language field (name / description / display_name / persona) as the
+    #: fallback (AGENTS.md §8 forward-compatibility). Tail-appended optional
+    #: fields (§3.1 additive) so old constructors / old data are unaffected.
+    name_i18n: dict[str, str] | None = None
+    description_i18n: dict[str, str] | None = None
+    display_name_i18n: dict[str, str] | None = None
+    persona_i18n: dict[str, str] | None = None
     created_at: datetime
     updated_at: datetime
 

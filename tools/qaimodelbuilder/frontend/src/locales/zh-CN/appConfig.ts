@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 // =============================================================================
 // i18n locale sub-file — 手工维护，UTF-8（无 BOM）。
 //
@@ -38,6 +43,10 @@ const appConfig = {
   bindHostLabel: "WebUI 绑定地址",
   bindLocalOnly: "127.0.0.1 — 仅本机访问（推荐）",
   channelsTitle: "通道",
+  chatDisplayTitle: "对话显示",
+  chatDisplayDesc: "控制对话区域中消息的渲染方式。这些偏好会在重启后保留。",
+  showToolCallsLabel: "显示工具调用卡片",
+  showToolCallsDesc: "启用后，工具调用卡片（参数 + 输出）会内嵌显示在助手回复中。<b>关闭</b>后仅隐藏对话视图中的卡片显示——工具调用照常执行、历史记录照常保留。大多数用户保持开启；希望对话视图更简洁时可关闭。",
   compactionProtectDesc: "最近的对话中有多少（占模型窗口的百分比）始终保留原文、永不压缩。默认 35%。",
   compactionProtectLabel: "最近对话保护大小",
   compactionTargetDesc: "压缩后，把上下文缩减到模型窗口的百分之几。越低压缩越激进（例如 35% 会把 200K 窗口压到约 70K）。默认 35%。",
@@ -47,6 +56,14 @@ const appConfig = {
   appBuilderDesc: "应用构建器设置。默认进入应用构建器模式时不会打开较重的模型工作台——你在工具栏中选择已导入的模型，由 Agent 帮你构建 WebUI 应用。",
   showWorkbench: "显示模型工作台",
   showWorkbenchDesc: "开启后，进入应用构建器模式会打开完整的模型试用/运行工作台（运行、性能、历史、对比）。默认关闭；无论开关与否，工作台及其全部功能都保留。",
+  modeIntroTitle: "模式引导提示",
+  modeIntroDesc: "App Builder / GoMaster / Model Builder 模式内的引导卡片可被「不再显示」勾选后永久关闭。在此处重新打开开关即可恢复显示。",
+  modeIntroAppBuilder: "显示 App Builder 引导",
+  modeIntroGomaster: "显示 GoMaster 引导",
+  modeIntroModelBuilder: "显示 Model Builder 引导",
+  modeIntroModelHub: "显示 Model Hub 引导",
+  modeIntroPro: "显示增强模式引导",
+  modeIntroCode: "显示编程模式引导",
   enableCCInToolbar: "在工具栏中启用 Claude Code",
   enableCCInToolbarDesc: "启用后，聊天输入框上方显示 Claude Code 按钮（🤖）。点击进入 Claude Code 模式；右键退出。",
   enableOCInToolbar: "在工具栏中启用 Open Code",

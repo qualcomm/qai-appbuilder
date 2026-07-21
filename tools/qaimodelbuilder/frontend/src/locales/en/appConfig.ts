@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 // =============================================================================
 // i18n locale sub-file — 手工维护，UTF-8（无 BOM）。
 //
@@ -38,6 +43,10 @@ const appConfig = {
   bindHostLabel: "WebUI Bind Address",
   bindLocalOnly: "127.0.0.1 — Localhost only (recommended)",
   channelsTitle: "Channels",
+  chatDisplayTitle: "Chat Display",
+  chatDisplayDesc: "Control how the chat area renders individual messages. These preferences persist across restarts.",
+  showToolCallsLabel: "Show tool-call cards",
+  showToolCallsDesc: "When enabled, tool-call cards (arguments + output) appear inline in the assistant's replies. Turn <b>off</b> to hide them from the chat view — the calls still execute and are still recorded in history; only the on-screen cards are collapsed. Most users leave this on; disable it when you want the chat to feel more like a plain conversation.",
   compactionProtectDesc: "How much of the most-recent conversation (as a percentage of the model window) is always kept verbatim and never compressed. Default 35%.",
   compactionProtectLabel: "Recent History Protection",
   compactionTargetDesc: "After compression, how much of the model window the context is shrunk down to. Lower = more aggressive compression (e.g. 35% shrinks a 200K window to ~70K). Default 35%.",
@@ -47,6 +56,14 @@ const appConfig = {
   appBuilderDesc: "App Builder settings. By default, entering App Builder mode does not open the heavy model workbench — you select imported models from the toolbar and let the Agent help you build a WebUI app.",
   showWorkbench: "Show model workbench",
   showWorkbenchDesc: "When enabled, entering App Builder mode opens the full model test/run workbench (run, metrics, history, compare). Off by default; the workbench and all its features are retained regardless.",
+  modeIntroTitle: "Mode Intro Hints",
+  modeIntroDesc: "The in-conversation intro card for App Builder / GoMaster / Model Builder can be permanently dismissed via its \"Don't show again\" checkbox. Turn these back on here to restore them.",
+  modeIntroAppBuilder: "Show App Builder intro",
+  modeIntroGomaster: "Show GoMaster intro",
+  modeIntroModelBuilder: "Show Model Builder intro",
+  modeIntroModelHub: "Show Model Hub intro",
+  modeIntroPro: "Show Pro-mode intro",
+  modeIntroCode: "Show Code-mode intro",
   enableCCInToolbar: "Enable Claude Code in toolbar",
   enableCCInToolbarDesc: "When enabled, the Claude Code pill (🤖) appears in the chat input toolbar. Click the pill to enter Claude Code mode; right-click to exit.",
   enableOCInToolbar: "Enable Open Code in toolbar",

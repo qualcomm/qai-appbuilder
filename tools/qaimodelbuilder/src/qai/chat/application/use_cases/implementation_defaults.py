@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Implementation-mode enablement flag — pure resolver (DISC-1 §22.3/§22.7).
 
 DISC-1 step3 wires the ``implement`` intent through to an actual

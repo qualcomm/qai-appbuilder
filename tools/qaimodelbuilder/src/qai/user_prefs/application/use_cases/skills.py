@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Skills policy + business-registry use cases (R6).
 
 Two families of skill endpoints live in ``user_prefs``:
@@ -86,10 +91,11 @@ def _coerce_section(raw: Any) -> dict[str, Any]:
 #: ``skills.overrides[<skill_id>]`` entry in ``forge.config``. Skills absent
 #: from this map fall through to ``"cloud"`` (enabled). This is how a built-in
 #: chat-feature skill ships DISABLED-by-default while remaining user-toggleable
-#: (a persisted override always wins over this default). ``aihub-model-run`` is
-#: ``pinned: true`` and never gated here, so it stays always-on regardless.
+#: (a persisted override always wins over this default). ``model-hub`` (the
+#: promoted former ``aihub-model-run`` skill) is a first-class feature mode and
+#: falls through to ``"cloud"`` (enabled) here like ``model-builder``.
 #: Requested default: ppt-gen / code-assist / meetingminutes ship OFF; the
-#: rest (e.g. model-builder) stay on.
+#: rest (e.g. model-builder, model-hub) stay on.
 _DEFAULT_SKILL_MODE: dict[str, str] = {
     "ppt-gen": "off",
     "code-assist": "off",

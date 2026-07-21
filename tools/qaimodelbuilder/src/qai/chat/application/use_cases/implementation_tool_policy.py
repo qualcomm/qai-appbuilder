@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Implementation-mode tool policy — pure intersection helpers (DISC-1 §22.5).
 
 DISC-1 step2 "safe ground floor": the multi-layer tool-permission **intersection**

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Minimal JSON-RPC 2.0 transports for MCP (Model Context Protocol) servers.
 
 This module implements the *transport* half of the chat context's MCP

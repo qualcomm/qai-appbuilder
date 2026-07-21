@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 // =============================================================================
 // i18n locale sub-file — 手工维护，UTF-8（无 BOM）。
 //
@@ -13,6 +18,7 @@
 
 const fontSize = {
   decrease: "Decrease font size",
+  globalHint: "Adjust the global WebUI font size. All pages update immediately.",
   increase: "Increase font size",
   label: "Font Size",
   reset: "Reset to default",

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``scripts.release`` — Clean-Cutover release packaging (PR-074).
 
 This package replaces the legacy ``build_external_release.py`` /

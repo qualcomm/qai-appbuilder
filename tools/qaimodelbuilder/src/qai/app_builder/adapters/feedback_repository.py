@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """aiosqlite-backed :class:`FeedbackRepositoryPort` (S9 close).
 
 Schema reference: ``qai-db-schema.md`` §3.8 (``app_builder_feedback``;
@@ -42,15 +47,6 @@ _LIST_SQL = (
     "FROM app_builder_feedback "
     "WHERE run_id = ? "
     "ORDER BY created_at DESC"
-)
-
-
-_LATEST_SQL = (
-    "SELECT id, run_id, rating, text, extra_json, created_at "
-    "FROM app_builder_feedback "
-    "WHERE run_id = ? "
-    "ORDER BY created_at DESC "
-    "LIMIT 1"
 )
 
 
@@ -118,23 +114,6 @@ class SqliteFeedbackRepository:
                 cause=exc,
             ) from exc
         return tuple(self._row_to_domain(row) for row in rows)
-
-    async def latest_for_run(self, run_id: RunId) -> Feedback | None:
-        try:
-            async with self._db.connection() as conn:
-                cur = await conn.execute(_LATEST_SQL, (run_id.value,))
-                row = await cur.fetchone()
-                await cur.close()
-        except Exception as exc:  # noqa: BLE001
-            raise PersistenceError(
-                "app_builder.feedback.latest_failed",
-                f"failed to fetch latest feedback for {run_id!r}: {exc}",
-                operation="feedback.latest_for_run",
-                cause=exc,
-            ) from exc
-        if row is None:
-            return None
-        return self._row_to_domain(row)
 
     async def latest_ratings_for_runs(
         self, run_ids: Iterable[RunId]

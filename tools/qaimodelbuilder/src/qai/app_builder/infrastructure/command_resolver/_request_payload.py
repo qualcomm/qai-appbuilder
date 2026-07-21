@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Helpers that serialise the runner request envelope (batch E).
 
 The 4 built-in App Builder Pack runners
@@ -10,7 +15,7 @@ file)")`` and the run never produces frames.
 This module is the platform-agnostic side of the contract: it builds
 the JSON payload (matching the field names the runners actually read:
 ``repoRoot`` / ``packDir`` / ``inputs`` / optional ``params`` /
-optional ``variant``) and returns the UTF-8 encoded line so the
+optional ``variant`` / optional ``runId``) and returns the UTF-8 encoded line so the
 :class:`qai.platform.process.SubprocessProcessRunner` can write it
 into the child's stdin via ``ProcessExecutionRequest.stdin_data``.
 
@@ -36,6 +41,7 @@ def build_runner_request_payload(
     inputs: Mapping[str, Any] | None,
     params: Mapping[str, Any] | None = None,
     variant: str | None = None,
+    run_id: str | None = None,
 ) -> bytes:
     """Build the JSON request bytes consumed by a Pack ``runner.py``.
 
@@ -52,6 +58,8 @@ def build_runner_request_payload(
       its own keys (``inputs.image`` for ppocrv4, ``inputs.audio`` for
       whisper-base / zipformer-zh, ``inputs.text`` for melotts-zh).
     * Optional ``params`` and ``variant`` ride alongside.
+    * Optional ``runId`` lets runners write per-run output artifacts instead
+      of falling back to pack-level fixed filenames.
 
     The line **must** be a single line terminated with ``\\n`` because
     ``read_request`` consumes the request via ``sys.stdin.readline()``.
@@ -82,6 +90,13 @@ def build_runner_request_payload(
             )
         if variant:
             payload["variant"] = variant
+    if run_id is not None:
+        if not isinstance(run_id, str):
+            raise TypeError(
+                f"run_id must be str or None, got {type(run_id).__name__}"
+            )
+        if run_id:
+            payload["runId"] = run_id
 
     # ``ensure_ascii=False`` keeps CJK / Unicode payloads compact and
     # human-readable on the wire; ``read_request`` calls

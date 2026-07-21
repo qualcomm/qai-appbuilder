@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Security routes — custom dangerous-command patterns (P-10).
 
 ``GET / PUT /api/security/dangerous-command-patterns`` is the operator surface

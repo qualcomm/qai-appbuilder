@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Inject ``quality_score`` into the catalog prompt build flow (PR-094 §17.5 #15).
 
 Restores the legacy ``backend/app_builder/telemetry.py:77-168`` pipeline
@@ -16,8 +21,8 @@ Pure-application use case
 
 This use case does NOT mutate the catalog prompt directly — it returns a
 ``dict[AppModelId, float]`` that the prompt-building flow
-(:class:`qai.app_builder.application.use_cases.skill_and_schema.BuildSystemPromptUseCase`
-+ :class:`...GetAppBuilderToolDescriptorUseCase`) can layer on top of the
+(:class:`qai.app_builder.application.use_cases.skill_and_schema.GeneratePackCatalogUseCase`)
+can layer on top of the
 per-model SKILL.md fragments. We keep the concerns separate so:
 
 * tests can drive the score injection in isolation;

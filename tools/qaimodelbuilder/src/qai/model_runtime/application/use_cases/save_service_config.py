@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``SaveServiceConfigUseCase`` — persist service_config.json + api_keys.
 
 Encapsulates the write side of the GenieAPIService config surface that

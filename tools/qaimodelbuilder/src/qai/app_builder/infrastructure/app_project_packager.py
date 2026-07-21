@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Filesystem-backed app-project packager (plan §2.4 / §5.6 / §10.4).
 
 Builds a distributable ``.zip`` of a generated standalone app project —
@@ -138,13 +143,35 @@ class PackageProgress:
 class FileSystemAppProjectPackager:
     """Package a standalone app project into a workspace-rooted ``.zip``.
 
-    ``repo_root`` anchors ``${APP_ROOT}`` expansion + the model / pack roots
-    (``repo_root/models``, ``repo_root/factory/app_builder/models``).
+    ``repo_root`` anchors ``${APP_ROOT}`` expansion + the built-in model /
+    pack roots (``repo_root/models``, ``repo_root/factory/app_builder/models``).
     ``workspace_root`` is the user workspace the final zip lands under
     (``<workspace>/app_builder_packages/``). ``apps_root`` is the
     ``data/app_builder`` dir every app must resolve under (path-safety
     containment). ``clock`` returns the timestamp used in the zip file name
     (injectable for deterministic tests; defaults to ``datetime.now``).
+
+    Dual-anchor support (built-in + user Pack roots) — P4 分层
+    ---------------------------------------------------------
+    Since P4 the runtime tracks two sets of Pack anchors (与 packager 外的
+    ``FileSystemWeightsPresence`` / ``FilesystemSkillPathLocator`` 双 anchor
+    语义一致，State-Truth-First §5 铁律 1):
+
+    * **built-in** — ``model_root`` (``<repo>/models``) + ``pack_root``
+      (``<repo>/factory/app_builder/models``);
+    * **user-imported** — ``user_weights_root``
+      (``<data>/app_builder/user_model_weights``) + ``user_pack_root``
+      (``<data>/app_builder/user_models``).
+
+    Weight / pack directories may resolve under **either** anchor pair; the
+    containment check accepts a path that lies under any of the four roots.
+    Missing user anchors (``None``) degrade to built-in-only behaviour so
+    lean test containers keep working.
+
+    **Arcnames stay unchanged** (``models/<id>/…`` and ``pack/<id>/…``) so
+    the on-disk layout inside the packaged zip is identical for built-in
+    and user packs — the generated ``_resolve_dir`` in the app's
+    ``inference.py`` finds either via the same ancestor-walk fallback.
     """
 
     def __init__(
@@ -153,22 +180,49 @@ class FileSystemAppProjectPackager:
         repo_root: Path,
         workspace_root: Path,
         apps_root: Path,
+        user_pack_root: Path | None = None,
+        user_weights_root: Path | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._repo_root = Path(repo_root)
         self._workspace_root = Path(workspace_root)
         self._apps_root = Path(apps_root)
+        self._user_pack_root = (
+            Path(user_pack_root) if user_pack_root is not None else None
+        )
+        self._user_weights_root = (
+            Path(user_weights_root) if user_weights_root is not None else None
+        )
         self._clock = clock or (lambda: datetime.now(UTC))
 
     @property
     def model_root(self) -> Path:
-        """``APP_BUILDER_MODEL_ROOT`` — real weight tree (``repo_root/models``)."""
+        """``APP_BUILDER_MODEL_ROOT`` — built-in weight tree (``repo_root/models``)."""
         return self._repo_root / "models"
 
     @property
     def pack_root(self) -> Path:
-        """``APP_BUILDER_PACK_ROOT`` — pack manifests / assets tree."""
+        """``APP_BUILDER_PACK_ROOT`` — built-in pack manifests / assets tree."""
         return self._repo_root / "factory" / "app_builder" / "models"
+
+    @property
+    def user_weights_root(self) -> Path | None:
+        """``APP_BUILDER_USER_MODEL_ROOT`` — user-imported weight tree.
+
+        User weight files live at ``user_weights_root/models/<id>/<bin>``
+        (note the extra ``models/`` layer, matching the manifest
+        ``installPath = "models/<id>/<bin>"`` convention).
+        """
+        return self._user_weights_root
+
+    @property
+    def user_pack_root(self) -> Path | None:
+        """``APP_BUILDER_USER_PACK_ROOT`` — user-imported pack tree.
+
+        User pack directories live at ``user_pack_root/<id>/…`` (no extra
+        ``models/`` layer — the pack IS the ``<id>`` dir).
+        """
+        return self._user_pack_root
 
     # ── public port method ───────────────────────────────────────────────
 
@@ -443,20 +497,46 @@ class FileSystemAppProjectPackager:
     def _collect_model_weights(
         self, ref: AppProjectModelRef, warnings: list[str]
     ) -> list[tuple[Path, str]]:
-        """Weight files for ``ref`` under ``models/<id>/`` (plan §10.4)."""
+        """Weight files for ``ref`` under ``models/<id>/`` (plan §10.4).
+
+        P4 双根：weights 可能落在 built-in ``model_root``（``<repo>/models/<id>/``）
+        或 user ``user_weights_root``（``<data>/app_builder/user_model_weights/
+        models/<id>/``）。containment check 接受任一根，fallback 探测顺序：
+        built-in 先查 → miss 再查 user（与运行时探测语义一致）。
+        Arcname 保持 ``models/<id>/…``——zip 内部结构对两种来源统一，
+        目标机上生成的 ``_resolve_dir`` 无需区分来源。
+
+        Expand-miss fallback（防御 LLM 生成的 app.yaml 硬编码 built-in 路径）：
+        当 ``ref.model_dir`` 展开后指向 built-in 层但磁盘上不存在（典型
+        错误：``${APP_ROOT}/models/inception-v3`` for a user pack），
+        packager **不直接放弃**——先按 ``ref.id`` 走 ``_fallback_weights_dir``
+        再探测 user root。这样即使 LLM 按 SKILL 的老 yaml 模板生成了
+        单根路径，只要 pack 实际存在于 user root，打包仍能成功。
+        """
         out: list[tuple[Path, str]] = []
-        # Weights: expand model_dir (or fall back to repo_root/models/<id>).
+        # Weights: expand model_dir (or fall back through the four roots).
         if ref.model_dir:
             model_dir = self._expand(ref.model_dir)
+            # Expand-miss fallback: 展开后不存在 → 再走双根 fallback
+            # 探测（既保留 explicit model_dir 的优先级，又救 LLM 硬编码
+            # 单根的常见错误，见 docstring）。
+            if not model_dir.is_dir():
+                fallback = self._fallback_weights_dir(ref.id)
+                if fallback.is_dir():
+                    model_dir = fallback
         else:
-            model_dir = (self.model_root / ref.id).resolve()
-        if not self._is_under(model_dir, self.model_root):
+            model_dir = self._fallback_weights_dir(ref.id)
+        if not self._is_under_any_weights_root(model_dir):
             warnings.append(
-                f"model {ref.id!r}: model_dir {model_dir} outside models root; skipped"
+                f"model {ref.id!r}: model_dir {model_dir} outside built-in "
+                f"({self.model_root}) and user "
+                f"({self._user_weights_root}) weights roots; skipped"
             )
         elif not model_dir.is_dir():
             warnings.append(
-                f"model {ref.id!r}: weights dir {model_dir} missing; skipped"
+                f"model {ref.id!r}: weights dir {model_dir} missing "
+                f"(also tried fallback under user root "
+                f"{self._user_weights_root}); skipped"
             )
         else:
             for src in _iter_files(model_dir):
@@ -464,23 +544,70 @@ class FileSystemAppProjectPackager:
                 out.append((src, f"models/{ref.id}/{rel}"))
         return out
 
+    def _fallback_weights_dir(self, model_id: str) -> Path:
+        """Locate a ref's weights dir when ``ref.model_dir`` is empty.
+
+        Probes built-in first, then user. Returns the first existing dir; if
+        neither exists, returns the built-in candidate so the caller records
+        a "missing" warning against the canonical path.
+        """
+        candidates: list[Path] = [(self.model_root / model_id).resolve()]
+        if self._user_weights_root is not None:
+            # User weights layout: user_weights_root/models/<id>/
+            candidates.append(
+                (self._user_weights_root / "models" / model_id).resolve()
+            )
+        for c in candidates:
+            if c.is_dir():
+                return c
+        return candidates[0]
+
+    def _is_under_any_weights_root(self, path: Path) -> bool:
+        """Whether ``path`` lies under built-in ``model_root`` OR
+        ``user_weights_root``。missing anchors are ignored (degrade to
+        built-in-only)."""
+        if self._is_under(path, self.model_root):
+            return True
+        if self._user_weights_root is not None and self._is_under(
+            path, self._user_weights_root
+        ):
+            return True
+        return False
+
     def _collect_model_pack(
         self, ref: AppProjectModelRef, warnings: list[str]
     ) -> list[tuple[Path, str]]:
-        """Pack manifests / assets for ``ref`` under ``pack/<id>/`` (plan §10.4)."""
+        """Pack manifests / assets for ``ref`` under ``pack/<id>/`` (plan §10.4).
+
+        P4 双根：pack 目录可能落在 built-in ``pack_root``
+        （``<repo>/factory/app_builder/models/<id>/``）或 user
+        ``user_pack_root``（``<data>/app_builder/user_models/<id>/``）。
+        Arcname 保持 ``pack/<id>/…``——zip 内部对两种来源统一。
+
+        Expand-miss fallback: 与 ``_collect_model_weights`` 同理，防御
+        LLM 生成 app.yaml 硬编码单根 pack_dir 的常见错误。
+        """
         out: list[tuple[Path, str]] = []
-        # Pack: expand pack_dir (or fall back to pack_root/<id>).
+        # Pack: expand pack_dir (or fall back through the four roots).
         if ref.pack_dir:
             pack_dir = self._expand(ref.pack_dir)
+            if not pack_dir.is_dir():
+                fallback = self._fallback_pack_dir(ref.id)
+                if fallback.is_dir():
+                    pack_dir = fallback
         else:
-            pack_dir = (self.pack_root / ref.id).resolve()
-        if not self._is_under(pack_dir, self.pack_root):
+            pack_dir = self._fallback_pack_dir(ref.id)
+        if not self._is_under_any_pack_root(pack_dir):
             warnings.append(
-                f"model {ref.id!r}: pack_dir {pack_dir} outside pack root; skipped"
+                f"model {ref.id!r}: pack_dir {pack_dir} outside built-in "
+                f"({self.pack_root}) and user "
+                f"({self._user_pack_root}) pack roots; skipped"
             )
         elif not pack_dir.is_dir():
             warnings.append(
-                f"model {ref.id!r}: pack dir {pack_dir} missing; skipped"
+                f"model {ref.id!r}: pack dir {pack_dir} missing "
+                f"(also tried fallback under user root "
+                f"{self._user_pack_root}); skipped"
             )
         else:
             for name in _PACK_INCLUDE_FILES:
@@ -494,6 +621,33 @@ class FileSystemAppProjectPackager:
                         rel = src.relative_to(pack_dir).as_posix()
                         out.append((src, f"pack/{ref.id}/{rel}"))
         return out
+
+    def _fallback_pack_dir(self, model_id: str) -> Path:
+        """Locate a ref's pack dir when ``ref.pack_dir`` is empty.
+
+        Probes built-in first, then user. Returns the first existing dir; if
+        neither exists, returns the built-in candidate so the caller records
+        a "missing" warning against the canonical path.
+        """
+        candidates: list[Path] = [(self.pack_root / model_id).resolve()]
+        if self._user_pack_root is not None:
+            # User pack layout: user_pack_root/<id>/ (no extra "models/" layer)
+            candidates.append((self._user_pack_root / model_id).resolve())
+        for c in candidates:
+            if c.is_dir():
+                return c
+        return candidates[0]
+
+    def _is_under_any_pack_root(self, path: Path) -> bool:
+        """Whether ``path`` lies under built-in ``pack_root`` OR
+        ``user_pack_root``. missing anchors are ignored."""
+        if self._is_under(path, self.pack_root):
+            return True
+        if self._user_pack_root is not None and self._is_under(
+            path, self._user_pack_root
+        ):
+            return True
+        return False
 
 
 # ---------------------------------------------------------------------------

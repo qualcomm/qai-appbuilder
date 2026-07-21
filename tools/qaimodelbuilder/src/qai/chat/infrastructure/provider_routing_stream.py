@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Provider-aware :class:`LLMStreamPort` wrapper (block-2 routing fix).
 
 The single-endpoint :class:`HttpOpenAICompatibleLLMStream` is constructed

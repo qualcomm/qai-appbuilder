@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``OrchestrateDiscussionUseCase`` — the multi-agent discussion orchestrator.
 
 This use case runs the OUTER speaker-selection loop of a multi-agent discussion
@@ -55,6 +60,7 @@ from pathlib import Path
 from typing import Any
 
 from qai.chat.application.ports import (
+    AgentTemplateRepositoryPort,
     BudgetTrackerPort,
     ContextCompressionPort,
     ConversationRepositoryPort,
@@ -64,6 +70,7 @@ from qai.chat.application.ports import (
     ParticipantRepositoryPort,
     PromptSnapshot,
     PromptSnapshotStorePort,
+    RosterTemplateRepositoryPort,
     StreamAbortHandle,
     StreamAbortRegistryPort,
     SystemPromptBuilderPort,
@@ -207,11 +214,19 @@ from qai.chat.application.use_cases.speaker_selection import (
 from qai.chat.domain.budget import BudgetCheckResult
 from qai.chat.domain.content import MessageContent, MessageRole
 from qai.chat.domain.conversation import Conversation
-from qai.chat.domain.ids import ConversationId, MessageId, ModeTemplateId, TabId
+from qai.chat.domain.ids import (
+    AgentTemplateId,
+    ConversationId,
+    MessageId,
+    ModeTemplateId,
+    RosterTemplateId,
+    TabId,
+)
 from qai.chat.domain.message import Message
 from qai.chat.domain.mode_template import ModeTemplate
 from qai.chat.domain.participant import Participant
 from qai.chat.domain.stream_frame import StreamFrame, StreamFrameType
+from qai.chat.domain.template_i18n import normalize_ui_language, resolve_i18n
 from qai.platform.ids import IdGenerator
 from qai.platform.logging import get_logger
 from qai.platform.time import Clock
@@ -624,6 +639,17 @@ class OrchestrateDiscussionInput:
     #: 的模型"), so a discussant without an explicit model still resolves a
     #: real LLM endpoint instead of erroring with "no LLM endpoint configured".
     default_model_id: str | None = None
+    #: The UI language (``en`` / ``zh-CN`` / ``zh-TW``) chosen by the user, from
+    #: the HTTP/WS layer (``extra["locale"]`` / the SSE ``locale`` query param).
+    #: Drives the runtime i18n override of a built-in role's persona and the
+    #: selected mode's framing (migration 056, method A): a built-in participant
+    #: carrying a ``template_id`` re-resolves its persona translation by
+    #: (template_id + this locale) each turn, so switching the UI language
+    #: re-localises even already-imported built-in roles. ``None`` / unknown →
+    #: normalises to ``zh-CN`` (the product default) → built-in presets render
+    #: their Simplified text, byte-for-byte the pre-056 behaviour. Tail-appended
+    #: optional field (§3.1 additive).
+    locale: str | None = None
 
 
 class OrchestrateDiscussionUseCase:
@@ -637,6 +663,7 @@ class OrchestrateDiscussionUseCase:
     __slots__ = (
         "_abort_handle_factory",
         "_abort_registry",
+        "_agent_templates",
         "_budget_tracker",
         "_clock",
         "_conversations",
@@ -648,6 +675,7 @@ class OrchestrateDiscussionUseCase:
         "_participants",
         "_per_speaker_max_rounds",
         "_prompt_snapshot_store",
+        "_roster_templates",
         "_system_prompt_builder",
         "_tools",
     )
@@ -683,6 +711,17 @@ class OrchestrateDiscussionUseCase:
         # applies its framing + tool intersection. ``None`` (or no selected
         # mode) → existing behaviour byte-for-byte (deep_task zero-regression).
         mode_templates: ModeTemplateRepositoryPort | None = None,
+        # ── Additive 2026-07 (built-in template i18n, migration 056) ────────
+        # OPTIONAL so existing call sites (unit tests + harness rigs) still
+        # construct the use case unchanged. When injected, the orchestrator
+        # re-resolves a built-in participant's persona translation at runtime by
+        # (participant.template_id + request.locale): a single-role import stores
+        # the agent template id (looked up here), a team member import stores the
+        # composite ``<roster_id>#<index>`` key (looked up in the roster's
+        # ``members_i18n``). ``None`` / no template_id / no i18n → the
+        # participant's own persona is used verbatim (fallback, zero-regression).
+        agent_templates: AgentTemplateRepositoryPort | None = None,
+        roster_templates: RosterTemplateRepositoryPort | None = None,
         # ── Additive 2026-06-24 (grey-zone LLM intent classifier, §22A.5) ──
         # OPTIONAL so existing call sites (unit tests + harness rigs) still
         # construct the use case unchanged. When wired AND the per-conversation
@@ -723,6 +762,8 @@ class OrchestrateDiscussionUseCase:
         self._abort_registry = abort_registry
         self._abort_handle_factory = abort_handle_factory
         self._mode_templates = mode_templates
+        self._agent_templates = agent_templates
+        self._roster_templates = roster_templates
         self._intent_classifier = intent_classifier
         # No-op fallback (``None`` from a unit/harness call site) so ``observe``
         # / ``check`` are safe to call unconditionally below without a null
@@ -769,6 +810,15 @@ class OrchestrateDiscussionUseCase:
 
         # ① Persist the user turn (role=user, no sender_id).
         await self._persist_user_message(conv, request.user_message)
+
+        # Built-in template i18n (migration 056, method A): re-resolve each
+        # built-in participant's persona translation by (template_id + locale)
+        # so switching the UI language re-localises even already-imported
+        # built-in roles. Mutates the IN-MEMORY roster only (never persisted);
+        # a participant without a template_id / without an i18n translation is
+        # left untouched (fallback → its own persona), so custom roles and the
+        # default zh-CN locale behave byte-for-byte as before.
+        await self._localize_roster_personas(roster, request.locale)
 
         # @mention parsing (additive, §3.1): the user can target a subset of
         # roster members via ``@<display_name>``.  ``parse_mentions`` is exported
@@ -956,6 +1006,16 @@ class OrchestrateDiscussionUseCase:
         # ``flow_policy.system_model_id`` (the discussion is self-contained and
         # never depends on an external ``model_id``).
         active_mode = await self._resolve_mode(discussion)
+        # Built-in mode i18n (migration 056): when the selected mode is built-in
+        # and carries a ``framing_i18n`` translation for the current locale,
+        # override its in-memory ``framing`` so the collaboration framing sent to
+        # the speakers follows the UI language. NULL i18n / custom mode / default
+        # zh-CN → framing unchanged (fallback). NOTE: the built-in 讨论 mode's
+        # framing is empty in all locales on purpose — an empty translation is
+        # NOT substituted (resolve_i18n keeps the empty fallback), so the empty
+        # framing stays empty and the orchestrator falls through to its default
+        # discussion prompt exactly as before.
+        self._localize_mode_framing(active_mode, request.locale)
         selector = self._build_selector(
             discussion,
             effective_roster=roster,
@@ -1191,6 +1251,129 @@ class OrchestrateDiscussionUseCase:
             conversation_id
         )
         return named_agents(list(participants))
+
+    # ------------------------------------------------------------------
+    # Built-in template i18n (migration 056, method A runtime override)
+    # ------------------------------------------------------------------
+    async def _localize_roster_personas(
+        self, roster: list[Participant], locale: str | None
+    ) -> None:
+        """Override each built-in participant's persona for the current locale.
+
+        Method A (migration 056): a participant imported from a built-in
+        template carries a ``template_id`` (see ``ApplyAgentTemplateUseCase`` /
+        ``ApplyRosterTemplateUseCase``). Here we look the source template up and,
+        when it carries a ``persona_i18n`` (single role) / ``members_i18n`` (team
+        member) translation for the resolved locale, we replace the in-memory
+        ``participant.persona`` with it. This makes switching the UI language
+        re-localise even a role that was imported long ago — WITHOUT persisting
+        (the DB keeps the canonical Simplified text; only the runtime wire is
+        localised for this turn).
+
+        Encoding of ``template_id`` (mirrors the apply use cases):
+          * ``"<agent_id>"``          — single-role import → agent template's
+            ``persona_i18n[locale]``.
+          * ``"<roster_id>#<index>"`` — team member import → roster template's
+            ``members_i18n[locale][index].persona``.
+
+        Every failure mode is a graceful no-op (fallback to the participant's own
+        persona): no repo wired, no template_id, template not found, malformed
+        composite key, index out of range, or no translation for the locale.
+        This guarantees custom roles and the default zh-CN locale are unchanged.
+        """
+        norm_locale = normalize_ui_language(locale)
+        for participant in roster:
+            template_id = participant.template_id
+            if not template_id:
+                continue
+            try:
+                translated = await self._resolve_persona_i18n(
+                    template_id, norm_locale
+                )
+            except Exception:  # noqa: BLE001 — i18n is best-effort, never fatal
+                _log.debug(
+                    "chat.discussion.persona_i18n_failed",
+                    template_id=template_id,
+                    exc_info=True,
+                )
+                continue
+            # resolve returns the translation ONLY when present + non-empty;
+            # otherwise None → keep the participant's own persona (fallback).
+            if translated is not None:
+                participant.persona = translated
+
+    async def _resolve_persona_i18n(
+        self, template_id: str, norm_locale: str
+    ) -> str | None:
+        """Look up the localised persona for a participant's ``template_id``.
+
+        Returns the translation string when the source built-in template has a
+        non-empty persona translation for ``norm_locale``, else ``None`` (caller
+        keeps the fallback). Pure lookup — no mutation.
+        """
+        if "#" in template_id:
+            # Composite team-member key: ``<roster_id>#<member_index>``.
+            if self._roster_templates is None:
+                return None
+            roster_id, _, index_str = template_id.rpartition("#")
+            if not roster_id or not index_str.isdigit():
+                return None
+            member_index = int(index_str)
+            roster_tpl = await self._roster_templates.find(
+                RosterTemplateId.of(roster_id)
+            )
+            if roster_tpl is None or not roster_tpl.members_i18n:
+                return None
+            localized_members = roster_tpl.members_i18n.get(norm_locale)
+            if not isinstance(localized_members, list):
+                return None
+            if not 0 <= member_index < len(localized_members):
+                return None
+            entry = localized_members[member_index]
+            if not isinstance(entry, dict):
+                return None
+            persona = entry.get("persona")
+            return persona if isinstance(persona, str) and persona else None
+        # Single-role import: bare agent template id.
+        if self._agent_templates is None:
+            return None
+        agent_tpl = await self._agent_templates.find(
+            AgentTemplateId.of(template_id)
+        )
+        if agent_tpl is None:
+            return None
+        # Use a unique sentinel as the fallback so we can tell "no translation
+        # for this locale" (sentinel returned) apart from "translated to the
+        # same text" — only a genuine, non-empty translation overrides the
+        # participant's own persona; anything else is a no-op (fallback).
+        _MISS = object()
+        resolved = resolve_i18n(
+            agent_tpl.persona_i18n, norm_locale, _MISS  # type: ignore[arg-type]
+        )
+        return resolved if isinstance(resolved, str) else None
+
+    def _localize_mode_framing(
+        self, mode: ModeTemplate | None, locale: str | None
+    ) -> None:
+        """Override a built-in mode's framing for the current locale (in-memory).
+
+        When ``mode`` is built-in and its ``framing_i18n`` carries a non-empty
+        translation for the resolved locale, replace the in-memory
+        ``mode.framing`` so ``resolve_mode_framing`` picks the localised prose.
+        A NULL i18n / custom mode / missing-locale entry / empty translation is
+        a no-op (fallback → the canonical framing). Mutates in-memory only (the
+        mode is a throwaway per-turn object; the DB keeps the canonical text).
+
+        Empty framing is deliberately preserved: the built-in 讨论 mode has empty
+        framing in every locale, so no translation is substituted and the
+        orchestrator falls through to its default discussion prompt — unchanged.
+        """
+        if mode is None or not mode.framing_i18n:
+            return
+        norm_locale = normalize_ui_language(locale)
+        translated = mode.framing_i18n.get(norm_locale)
+        if isinstance(translated, str) and translated:
+            mode.framing = translated
 
     async def _resolve_mode(
         self, discussion: dict[str, Any]

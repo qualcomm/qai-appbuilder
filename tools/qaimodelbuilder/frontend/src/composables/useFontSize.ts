@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * `useFontSize` — global font-size preference.
  *
@@ -5,13 +10,13 @@
  * (`ui.fontSize`) + `setFontSize` / `cycle`. Those are retained
  * verbatim for backward compatibility (and the PR-703 shape test).
  *
- * M-align (V1→V2): adds (additive only) the *functional* percentage
- * scale that V1's `useFontSize.js` implemented — it scales the global
- * `--text-*` CSS custom properties on `:root` so every page font
- * resizes uniformly, persists the choice to localStorage, and exposes
- * a slider/step + reset API consumed by the sidebar font-size popover.
+ * M-align (V1→V2): adds (additive only) the *functional* global
+ * pixel-size layer — it scales the global `--text-*` CSS custom
+ * properties on `:root` so every page font resizes uniformly, persists
+ * the choice to localStorage, and exposes a slider/step + reset API
+ * consumed by the sidebar font-size popover and Settings page.
  * The enum layer (`fontSize` / `setFontSize` / `cycle`) is left
- * untouched; the percentage layer is what actually moves pixels.
+ * untouched; the pixel-size layer is what actually moves pixels.
  */
 import { computed, ref, watch, type ComputedRef, type Ref } from "vue";
 
@@ -22,14 +27,18 @@ import { useUiStore, type FontSize } from "@/stores/ui";
 const STORAGE_KEY = "qai-font-size";
 const SIZE_ORDER: readonly FontSize[] = ["sm", "md", "lg", "xl"];
 
-// ─── Percentage-scale layer (V1 parity — useFontSize.js) ─────────────────────
+// ─── Pixel-size layer (global font slider) ───────────────────────────────────
 
-/** Preset scale steps in percent (V1: every 10% from 50% to 200%). */
-const FONT_SIZE_STEPS: readonly number[] = [
-  50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200,
-];
-const DEFAULT_SCALE = 100;
-const SCALE_STORAGE_KEY = "qai-font-size-scale";
+/** Global body/base font-size range requested by product settings. */
+const MIN_FONT_SIZE_PX = 12;
+const MAX_FONT_SIZE_PX = 24;
+const DEFAULT_FONT_SIZE_PX = 16;
+/** Preset pixel steps for slider/buttons: every 1px from 12px to 24px. */
+const FONT_SIZE_STEPS: readonly number[] = Array.from(
+  { length: MAX_FONT_SIZE_PX - MIN_FONT_SIZE_PX + 1 },
+  (_, i) => MIN_FONT_SIZE_PX + i,
+);
+const FONT_SIZE_PX_STORAGE_KEY = "qai-font-size-px";
 
 /** Base sizes (px) — must match styles/variables.css `--text-*` defaults. */
 const BASE_SIZES: Readonly<Record<string, number>> = {
@@ -42,30 +51,58 @@ const BASE_SIZES: Readonly<Record<string, number>> = {
   "--text-2xl": 24,
 };
 
-// Module-level singleton scale ref so every `useFontSize()` caller
-// shares the same reactive value (a single global font scale).
-let _scaleRef: Ref<number> | null = null;
-let _scaleWired = false;
+// Module-level singleton px ref so every `useFontSize()` caller shares the same
+// reactive value (a single global font-size preference).
+let _fontSizePxRef: Ref<number> | null = null;
+let _fontSizePxWired = false;
 
-/** Apply a percentage scale to the `:root` `--text-*` variables. */
-function applyScale(scale: number): void {
+function clampFontSizePx(px: number): number {
+  if (!Number.isFinite(px)) return DEFAULT_FONT_SIZE_PX;
+  return Math.max(MIN_FONT_SIZE_PX, Math.min(MAX_FONT_SIZE_PX, Math.round(px)));
+}
+
+/**
+ * Apply a selected base/body font size to the `:root` `--text-*` variables.
+ *
+ * `--text-base` becomes the exact selected px value. The smaller/larger token
+ * sizes keep their original proportions from styles/variables.css, so changing
+ * one slider updates the entire UI typography scale globally.
+ */
+function applyFontSizePx(px: number): void {
   if (typeof document === "undefined") {
     return;
   }
   const root = document.documentElement;
-  const factor = scale / 100;
+  const safePx = clampFontSizePx(px);
+  const baseTextSize = BASE_SIZES["--text-base"] ?? 13;
+  const factor = safePx / baseTextSize;
   for (const [varName, baseVal] of Object.entries(BASE_SIZES)) {
     root.style.setProperty(varName, `${Math.round(baseVal * factor)}px`);
   }
 }
 
-function readStoredScale(): number {
+function readStoredFontSizePx(): number {
   try {
-    const saved = localStorage.getItem(SCALE_STORAGE_KEY);
-    const parsed = saved !== null ? parseInt(saved, 10) : NaN;
-    return FONT_SIZE_STEPS.includes(parsed) ? parsed : DEFAULT_SCALE;
+    // Try the current px key first.
+    const saved = localStorage.getItem(FONT_SIZE_PX_STORAGE_KEY);
+    if (saved !== null) {
+      const parsed = parseInt(saved, 10);
+      return clampFontSizePx(parsed);
+    }
+    // Migration: the old key stored a percentage scale (50–200).
+    // Convert to px so users don't lose their preference on upgrade.
+    const oldScale = localStorage.getItem("qai-font-size-scale");
+    if (oldScale !== null) {
+      const pct = parseInt(oldScale, 10);
+      if (Number.isFinite(pct) && pct > 0) {
+        // Old 100% ≈ 13px base; convert proportionally and clamp.
+        const asPx = Math.round((pct / 100) * 13);
+        return clampFontSizePx(asPx);
+      }
+    }
+    return DEFAULT_FONT_SIZE_PX;
   } catch {
-    return DEFAULT_SCALE;
+    return DEFAULT_FONT_SIZE_PX;
   }
 }
 
@@ -108,35 +145,40 @@ export function useFontSize() {
     ui.setFontSize(next);
   }
 
-  // --- Percentage-scale layer (V1 parity, functional) ---
-  if (_scaleRef === null) {
-    _scaleRef = ref<number>(readStoredScale());
+  // --- Pixel-size layer (functional) ---
+  if (_fontSizePxRef === null) {
+    _fontSizePxRef = ref<number>(readStoredFontSizePx());
   }
-  const fontSizeScale = _scaleRef;
+  const fontSizeScale = _fontSizePxRef;
 
-  if (!_scaleWired) {
-    _scaleWired = true;
-    // Apply immediately so the page reflects the stored preference, then
-    // keep CSS + localStorage in sync on every change.
-    applyScale(fontSizeScale.value);
+  if (!_fontSizePxWired) {
+    _fontSizePxWired = true;
+    // Apply immediately so the page reflects the stored preference, then keep
+    // CSS + localStorage in sync on every change.
+    applyFontSizePx(fontSizeScale.value);
     watch(fontSizeScale, (val) => {
+      const safeVal = clampFontSizePx(val);
+      if (safeVal !== val) {
+        fontSizeScale.value = safeVal;
+        return;
+      }
       try {
-        localStorage.setItem(SCALE_STORAGE_KEY, String(val));
+        localStorage.setItem(FONT_SIZE_PX_STORAGE_KEY, String(safeVal));
       } catch {
         /* storage unavailable */
       }
-      applyScale(val);
+      applyFontSizePx(safeVal);
     });
   }
 
   const currentStepIndex = computed(() =>
-    FONT_SIZE_STEPS.indexOf(fontSizeScale.value),
+    FONT_SIZE_STEPS.indexOf(clampFontSizePx(fontSizeScale.value)),
   );
   const canIncrease = computed(
     () => currentStepIndex.value < FONT_SIZE_STEPS.length - 1,
   );
   const canDecrease = computed(() => currentStepIndex.value > 0);
-  const fontSizeLabel = computed(() => `${fontSizeScale.value}%`);
+  const fontSizeLabel = computed(() => `${clampFontSizePx(fontSizeScale.value)}px`);
   /** 0–100 fill percent for the slider track. */
   const fontSizePercent = computed(() => {
     const max = FONT_SIZE_STEPS.length - 1;
@@ -160,7 +202,7 @@ export function useFontSize() {
   }
 
   function resetFontSize(): void {
-    fontSizeScale.value = DEFAULT_SCALE;
+    fontSizeScale.value = DEFAULT_FONT_SIZE_PX;
   }
 
   return {
@@ -168,7 +210,7 @@ export function useFontSize() {
     fontSize,
     setFontSize,
     cycle,
-    // Percentage-scale layer (V1 parity)
+    // Pixel-size layer (global typography scale)
     fontSizeScale,
     fontSizeLabel,
     fontSizePercent,
@@ -178,5 +220,8 @@ export function useFontSize() {
     decreaseFontSize,
     resetFontSize,
     FONT_SIZE_STEPS,
+    MIN_FONT_SIZE_PX,
+    MAX_FONT_SIZE_PX,
+    DEFAULT_FONT_SIZE_PX,
   };
 }

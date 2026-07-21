@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Shared LLM tool description fragments.
 
 Both the ``exec`` (:mod:`qai.ai_coding.infrastructure.tools.handlers._shared`)
@@ -121,11 +126,11 @@ SHELL_NOTES_SECTION: str = (
 #
 # Both tools have a working-directory parameter (``exec`` uses ``cwd``,
 # ``background_process`` uses ``workdir``); we phrase the guidance
-# generically so the same fragment fits both. The rule mirrors Kilo Code's
-# bash-tool advice: never ``cd`` inside the command — the tool parameter
-# is the single source of truth for the child's initial directory, and
-# combining it with a mid-command ``cd`` produces path bugs when the
-# command is retried / resumed / logged.
+# generically so the same fragment fits both. The rule follows the
+# standard shell-tool convention: never ``cd`` inside the command — the
+# tool parameter is the single source of truth for the child's initial
+# directory, and combining it with a mid-command ``cd`` produces path
+# bugs when the command is retried / resumed / logged.
 
 WORKDIR_GUIDANCE_SECTION: str = (
     "WORKDIR: The command runs in the current working directory by "

@@ -1,4 +1,9 @@
 <!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
+<!--
   ImplementationPanel.vue — implementation-run observability + control panel
   (DISC-1 二期 §22.9).
 

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Feishu tenant_access_token cache (PR-097 §2 R-2 Feishu half).
 
 Restores the tenant_access_token caching that the legacy

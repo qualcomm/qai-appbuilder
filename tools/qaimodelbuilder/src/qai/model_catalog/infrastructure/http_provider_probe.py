@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """HTTP-backed :class:`ProviderProbePort` (cloud provider connectivity test).
 
 Issues a minimal ``GET {base_url}/v1/models`` (OpenAI-compatible) request to
@@ -48,7 +53,16 @@ class HttpProviderProbe:
     async def probe(
         self, *, base_url: str, api_key: str | None
     ) -> ProviderProbeResult:
-        url = base_url.rstrip("/") + "/v1/models"
+        # The OpenAI-compatible models endpoint sits under ``/v1``. Operator
+        # base_urls come in both flavours — with or without a trailing ``/v1``
+        # (e.g. ``https://host/v1`` vs ``https://host``). Normalise to end at
+        # ``/v1`` before appending ``/models`` so a base_url that already
+        # carries ``/v1`` doesn't produce ``/v1/v1/models`` (→ 404). Mirrors
+        # the CC adapter's ``_get_fetcher`` normalisation (claude_code.py).
+        normalised = base_url.rstrip("/")
+        if not normalised.endswith("/v1"):
+            normalised = f"{normalised}/v1"
+        url = f"{normalised}/models"
         headers: dict[str, str] = {}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"

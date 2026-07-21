@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Deferred legacy session routes (``_register_cc_only_routes``).
 
 Mounted on BOTH the CC and OC sub-routers (per-mount prefix /

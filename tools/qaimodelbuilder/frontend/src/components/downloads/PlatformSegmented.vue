@@ -1,4 +1,9 @@
 <!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
+<!--
   PlatformSegmented — V1 multi-platform / multi-variant segmented selector.
 
   Renders a horizontal pill row where each pill represents one option

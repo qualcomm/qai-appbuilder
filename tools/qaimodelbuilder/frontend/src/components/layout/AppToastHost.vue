@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <script setup lang="ts">
 /**
  * Toast host.
@@ -15,11 +20,16 @@
  * harmless.
  *
  * V1 parity (alignment 2026-06-05): reuses the global toast CSS from
- * `styles/components/components.css` (`.toast-container` top-right
+ * `styles/components/components.css` (`.toast-container` top-center
  * container, `.toast` + `.toast.success/.error/.info/.warning` colours,
  * `toast-in` entry animation, `.toast-close` button, `.toast-progress`
  * countdown bar). No component-scoped styling — the global classes are
  * the single source of truth, matching V1 `index.html:152-174`.
+ *
+ * 2026-07-17: container position moved from top-right → top-center so
+ * toasts no longer occlude the top-bar action cluster (Workspace / Tool
+ * Calls / Collapse / Export / Clear). See
+ * `docs/30-ui-ux/ux-feedback-2026-07-implementation.md` §3.1.
  */
 import { storeToRefs } from "pinia";
 import { onBeforeUnmount, watch } from "vue";

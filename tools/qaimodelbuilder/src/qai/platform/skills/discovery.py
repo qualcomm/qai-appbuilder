@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """SKILL.md / skill.json discovery + NPU detection.
 
 Ported faithfully from v1 ``backend/skill_manager.py`` (the discovery

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """In-process sub-agent event broadcast + SSE replay state machine.
 
 Runtime-defect fix (block 2): a sub-agent has two *disconnected* event

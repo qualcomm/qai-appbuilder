@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """In-memory registry holding a tab's pending mid-turn user *injections*.
 
 A V2 enhancement (V1 has no equivalent): while a turn is streaming the user

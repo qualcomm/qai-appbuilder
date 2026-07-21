@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Filesystem-backed :class:`ImportPort` — full-capability implementation.
 
 Reads model-definition manifests from the filesystem and converts them
@@ -98,8 +103,23 @@ _MIN_WEIGHTS_BYTES = 1 * 1024 * 1024
 
 #: Pack files copied verbatim from ``app_pack/`` into ``pack_root/<id>/`` on
 #: commit (V1 ``importer._copy_pack_files`` single-file set + dir set).
+#:
+#: P4 分层修复：``"weights"`` 已被移出 ``_PACK_COPY_DIRS``。V1 layout 只有一个
+#: root，pack 目录下的 ``weights/`` 与 ``models/<id>/`` 指同一份文件；P4 拆双
+#: root 后，pack 目录（``user_pack_root``）与权重锚点（``user_weights_root``）
+#: 分离，仍把 ``weights/`` 随 pack 目录复制会产生**冗余副本**——真值源是
+#: ``user_weights_root`` 下 manifest ``installPath`` 解析出的那份（见
+#: ``weights_presence.py:102-128``；``FileSystemWeightsPresence.install_path_present``
+#: 只按 installPath 锚定到 weights root 探测，从不读取 ``<pack_dir>/weights/``
+#: 里的 ``.bin``）。``_stage_weights`` 现在直接从**源 app_pack** 目录读 ``.bin``
+#: 拷到 weights root，不再依赖 pack 目录下的 ``weights/`` 副本。
+#:
+#: 为保留 ``weights_presence.py:130-147`` 的 legacy "present-but-empty" fallback
+#: 语义（``pack_weights_dir_is_present_but_empty`` 检查目录存在且为空），
+#: ``_install_pack`` 在拷完 pack 元数据后会显式创建**空的**
+#: ``<pack_dir>/weights/`` 目录。
 _PACK_COPY_FILES = ("manifest.json", "runner.py", "requirements.txt", "SKILL.md")
-_PACK_COPY_DIRS = ("examples", "provenance", "assets", "weights")
+_PACK_COPY_DIRS = ("examples", "provenance", "assets")
 
 
 class FileSystemAppImportAdapter:
@@ -843,6 +863,13 @@ class FileSystemAppImportAdapter:
                     shutil.copytree(
                         str(s), str(staging / dname), dirs_exist_ok=True
                     )
+            # P4 分层修复：``weights/`` 不再随 pack 目录复制（真值源在
+            # ``user_weights_root``；见 ``_PACK_COPY_DIRS`` 顶部注释）。
+            # 但 ``weights_presence.py:130-147`` 的 legacy fallback
+            # (``pack_weights_dir_is_present_but_empty``) 会检查
+            # ``<pack_dir>/weights/`` 目录是否 present-but-empty，所以这里
+            # 显式创建**空目录**保留该 fallback 语义。
+            (staging / "weights").mkdir(exist_ok=True)
 
             # Rewrite the staged manifest's version so disk == DB.
             staged_manifest = staging / "manifest.json"
@@ -927,6 +954,7 @@ class FileSystemAppImportAdapter:
             self._stage_weights(
                 item.model_id.value,
                 dest,
+                weights_src_dir=src / "weights",
                 weights_root=target_weights_root,
             )
         except Exception:
@@ -935,20 +963,32 @@ class FileSystemAppImportAdapter:
         return dest
 
     def _stage_weights(
-        self, model_id: str, pack_dir: Path, *, weights_root: Path
+        self,
+        model_id: str,
+        pack_dir: Path,
+        *,
+        weights_src_dir: Path,
+        weights_root: Path,
     ) -> None:
         """Copy each variant's ``.bin`` to its manifest ``installPath`` anchor.
 
         Reads the just-written ``pack_dir/manifest.json`` for the install
         path(s) (top-level ``assets.installPath`` + each ``variants[].assets.
         installPath``) and copies the corresponding ``.bin`` from
-        ``pack_dir/weights/`` to ``<weights_root>/<installPath>`` (V1 copied
+        ``weights_src_dir`` (原始 ``app_pack/weights/``, 见下) to
+        ``<weights_root>/<installPath>`` (V1 copied
         weights to ``models/<id>/``; the manifest ``installPath`` is exactly
         that ``models/<id>/<bin>`` so we honour it verbatim). ``weights_root``
         is:
 
         * ``repo_root`` for built-in Packs (legacy layout);
         * ``user_weights_root`` for user-imported Packs (P4 layout).
+
+        P4 分层修复：源目录 ``weights_src_dir`` 指向**原始 app_pack** 的
+        ``weights/``（``_install_pack`` 传入 ``src / "weights"``），而不是
+        pack_dir 下的副本——``_PACK_COPY_DIRS`` 已剥离 ``"weights"``，pack_dir
+        下不再有可读的 ``.bin`` 副本（只有空目录以保 legacy fallback 语义）。
+        真值源统一到 ``weights_root`` 下。
 
         缺陷 O — hard-fail semantics (State-Truth-First 铁律 3):
 
@@ -977,7 +1017,7 @@ class FileSystemAppImportAdapter:
             return
         if not isinstance(data, dict):
             return
-        weights_src_dir = pack_dir / "weights"
+        # ``weights_src_dir`` 来自参数（原始 app_pack/weights/），见 docstring。
         install_paths: list[str] = []
         assets = data.get("assets")
         if isinstance(assets, dict):
@@ -1747,14 +1787,18 @@ def _locate_default_weights(
         p = Path(wap)
         if p.is_file():
             return p
-    # 3. any .bin in weights/
+    # 3. any NPU weight in weights/ (.bin QNN context binary OR .dlc QNN DLC —
+    #    the app_pack contract is format-neutral; QNNContext loads either).
+    #    Probe .bin first (deterministic), then .dlc.
     if weights_dir.is_dir():
-        for f in sorted(weights_dir.iterdir()):
-            try:
-                if f.is_file() and f.suffix.lower() == ".bin":
-                    return f
-            except OSError:
-                continue
+        entries = sorted(weights_dir.iterdir())
+        for ext in (".bin", ".dlc"):
+            for f in entries:
+                try:
+                    if f.is_file() and f.suffix.lower() == ext:
+                        return f
+                except OSError:
+                    continue
     return None
 
 

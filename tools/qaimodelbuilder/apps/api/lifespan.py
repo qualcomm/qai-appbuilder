@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Application lifespan: startup / shutdown orchestration.
 
 Replaces the old ``backend/main.py`` lifespan() (570 lines of inline init).
@@ -687,6 +692,51 @@ def make_lifespan(
             _log.info("lifespan.edit_trash_cleanup_spawned")
         except Exception:  # noqa: BLE001 — cleanup spawn must never abort startup
             _log.warning("lifespan.edit_trash_cleanup_spawn_failed", exc_info=True)
+
+        # Cloud-model permission scan — one lightweight ``GET /v1/models`` per
+        # configured cloud provider, comparing the returned model ids against
+        # the configured catalog to derive per-model ALLOWED / DENIED status.
+        # Purely advisory: the chat model dropdown hides models the current
+        # API key has no access to (before the user hits 403 mid-turn), while
+        # a failed / never-completed scan keeps every model visible
+        # (never-preset-unavailable). Best-effort + non-blocking:
+        #
+        #   * spawned AFTER every other startup step so a slow provider probe
+        #     never delays uvicorn's "ready to serve" moment;
+        #   * the use case itself never raises (each provider is guarded), so
+        #     the outermost try/except here is a defence-in-depth net;
+        #   * the task is fire-and-forget: no shutdown drain, no await; even
+        #     if the scan is still in flight when the app stops it will just
+        #     be cancelled by the event loop.
+        try:
+            _probe_permissions_uc = (
+                container.model_catalog.probe_cloud_model_permissions_use_case
+            )
+
+            async def _run_permission_scan() -> None:
+                try:
+                    result = await _probe_permissions_uc.execute()
+                    _log.info(
+                        "lifespan.cloud_model_permissions_scanned",
+                        probed=len(result.probed_providers),
+                        skipped=len(result.skipped_providers),
+                    )
+                except Exception:  # noqa: BLE001 — scan must never surface
+                    _log.warning(
+                        "lifespan.cloud_model_permissions_scan_failed",
+                        exc_info=True,
+                    )
+
+            asyncio.create_task(
+                _run_permission_scan(),
+                name="cloud-model-permissions-scan",
+            )
+            _log.info("lifespan.cloud_model_permissions_scan_spawned")
+        except Exception:  # noqa: BLE001 — spawn must never abort startup
+            _log.warning(
+                "lifespan.cloud_model_permissions_scan_spawn_failed",
+                exc_info=True,
+            )
 
         try:
             # Write the runtime endpoint file (single source of truth for

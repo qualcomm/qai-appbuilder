@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Apps-layer bridge: GoMaster REST/stream capability-proxy controller.
 
 Builds the :class:`~qai.model_builder.infrastructure.gomaster_service_adapter.GomasterServiceAdapter`

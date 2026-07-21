@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Pre-send message sanitisation pipeline (PR-090, S9 C-4 + F-6).
 
 Implements audit items :ref:`C-4` (orphan tool-message + invalid

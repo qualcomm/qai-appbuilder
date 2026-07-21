@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """``qai policy`` / ``perm`` / ``security`` / ``audit`` -- security ops CLI.
 
 Desktop App Plan §2.1.1 group H. Four sibling top-level command groups all

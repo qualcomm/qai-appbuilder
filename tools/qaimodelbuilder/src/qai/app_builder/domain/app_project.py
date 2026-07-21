@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Domain model for a *standalone fullstack app project* (plan §6.1).
 
 An "app project" is a self-contained FastAPI + frontend application that
@@ -20,7 +25,6 @@ VOs / entities defined (plan §6.1, §1.4):
 * :class:`AppProjectModelRef` — one bundled model reference.
 * :class:`AppProjectDefinition` — the parsed ``app.yaml`` + on-disk facts.
 * :class:`AppProjectRunInfo` — managed-run status snapshot (Phase 3).
-* :class:`AppProjectPackageInfo` — packaging job snapshot (Phase 5).
 
 Domain errors carry a stable :attr:`code` (plan §5.7) so the application
 / interface layers route on the machine code, not the subclass.
@@ -45,7 +49,6 @@ __all__ = [
     "AppProjectNotFoundError",
     "AppProjectNotRunningError",
     "AppProjectPackageFailedError",
-    "AppProjectPackageInfo",
     "AppProjectPortInUseError",
     "AppProjectRunInfo",
     "AppProjectStartFailedError",
@@ -261,37 +264,6 @@ class AppProjectRunInfo:
     def __post_init__(self) -> None:
         if not isinstance(self.app_id, str) or not self.app_id:
             raise ValueError("AppProjectRunInfo.app_id must be a non-empty str")
-
-
-# ---------------------------------------------------------------------------
-# Packaging snapshot (Phase 5)
-# ---------------------------------------------------------------------------
-@dataclass(frozen=True, slots=True, kw_only=True)
-class AppProjectPackageInfo:
-    """Snapshot of an app project's packaging job (plan §5.6)."""
-
-    app_id: str
-    job_id: str
-    status: str
-    zip_path: str | None = None
-    size_bytes: int | None = None
-    message: str | None = None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.app_id, str) or not self.app_id:
-            raise ValueError("AppProjectPackageInfo.app_id must be a non-empty str")
-        if not isinstance(self.job_id, str) or not self.job_id:
-            raise ValueError("AppProjectPackageInfo.job_id must be a non-empty str")
-        if not isinstance(self.status, str) or not self.status:
-            raise ValueError("AppProjectPackageInfo.status must be a non-empty str")
-        if self.size_bytes is not None and (
-            not isinstance(self.size_bytes, int)
-            or isinstance(self.size_bytes, bool)
-            or self.size_bytes < 0
-        ):
-            raise ValueError(
-                "AppProjectPackageInfo.size_bytes must be an int >= 0 or None"
-            )
 
 
 # ---------------------------------------------------------------------------

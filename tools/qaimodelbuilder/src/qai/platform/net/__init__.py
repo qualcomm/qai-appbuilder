@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Network primitives shared across contexts (``qai.platform.net``).
 
 Currently exposes :mod:`qai.platform.net.port_allocator` -- the single

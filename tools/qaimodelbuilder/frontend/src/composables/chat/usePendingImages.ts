@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 /**
  * `usePendingImages` — chat-composer image attachment state + lifecycle
  * (V1 `useChat.js:194-225` handlePaste + `app.js:604-619` addImageFile).

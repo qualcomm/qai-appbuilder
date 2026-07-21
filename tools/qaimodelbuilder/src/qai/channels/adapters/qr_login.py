@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Real :class:`QrLoginPort` adapters (PR-047 + PR-097 R-13).
 
 Two implementations — one per :class:`ChannelKind` — each persists

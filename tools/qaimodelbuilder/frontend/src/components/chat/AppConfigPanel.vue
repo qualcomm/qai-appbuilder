@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+  SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <script setup lang="ts">
 /**
  * AppConfigPanel — V1-parity accordion/toggle configuration form.
@@ -16,7 +21,7 @@
  * via `useForgeConfig`, so toggling a module instantly hides its
  * button in `ChatComposer.vue` (shared module-singleton refs).
  */
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useConfig, type AppConfig } from "@/composables/useConfig";
 import {
@@ -29,8 +34,15 @@ import { useReboot } from "@/composables/useReboot";
 import { useProxy } from "@/composables/useProxy";
 import { useToastStore } from "@/stores/toast";
 import { useModelCatalogStore } from "@/stores/modelCatalog";
+import { useUiStore } from "@/stores/ui";
 import { fetchServiceModels } from "@/api/serviceControl";
 import ComposerModeIcon from "@/components/chat/composer/ComposerModeIcon.vue";
+import {
+  clearHidden as clearModeIntroHidden,
+  hidePermanently as hideModeIntroPermanently,
+  type IntroMode,
+} from "@/composables/useModeIntroCardVisibility";
+import { useFontSize } from "@/composables/useFontSize";
 
 const { t } = useI18n();
 const toast = useToastStore();
@@ -205,6 +217,66 @@ async function onShowWorkbenchToggle(show: boolean): Promise<void> {
   await patchAppBuilderShowWorkbench(show);
 }
 
+// ─── Chat display: tool-call cards visibility ──────────────────────────────
+// Previously exposed as a header toolbar button (ChatView useHeaderActions
+// "Tool Calls" pill, 2026-07-20 sunset). It is a low-frequency preference —
+// most users leave it on — so it moved into Settings → App Config where it
+// belongs, and localStorage persists it across restarts. The store action
+// itself writes localStorage (see stores/ui.ts::setShowToolMessages).
+const ui = useUiStore();
+function onShowToolCallsToggle(show: boolean): void {
+  ui.setShowToolMessages(show);
+}
+
+// ─── Mode-intro hint visibility (per-mode restore) ─────────────────────────
+// The chat-view ModeIntroCard (Plan §7 decision 5 — C+D) can be permanently
+// hidden via its "don't show again" checkbox + ×. This settings block lets a
+// user restore any of those hidden intros without a page reload: each toggle
+// reflects the current localStorage flag, and flipping it clears (or re-sets)
+// the flag. State lives entirely in localStorage — no backend / forge_config
+// round-trip needed. The composable's module-level bump token drives the
+// live ModeIntroCard to re-render immediately when the user restores.
+const MODE_INTRO_MODES: IntroMode[] = [
+  "app-builder",
+  "gomaster",
+  "model-build",
+  "model-hub",
+  "pro",
+  "code",
+];
+const modeIntroVisible = reactive<Record<IntroMode, boolean>>({
+  "app-builder": true,
+  "gomaster": true,
+  "model-build": true,
+  "model-hub": true,
+  "pro": true,
+  "code": true,
+});
+function refreshModeIntroVisibility(): void {
+  for (const m of MODE_INTRO_MODES) {
+    // Storage read failures fall back to `not hidden` → toggle shows ON.
+    let hidden = false;
+    try {
+      hidden = window.localStorage.getItem(`modeIntro.hidden.${m}`) === "1";
+    } catch {
+      hidden = false;
+    }
+    modeIntroVisible[m] = !hidden;
+  }
+}
+function onToggleModeIntro(mode: IntroMode, show: boolean): void {
+  modeIntroVisible[mode] = show;
+  if (show) {
+    // Turning "show intro" on → clear both local + session hides so the
+    // card comes back on the next mode switch (and immediately if a live
+    // conversation is already in that mode).
+    clearModeIntroHidden(mode);
+  } else {
+    // Turning "show intro" off → permanently hide (localStorage tier).
+    hideModeIntroPermanently(mode);
+  }
+}
+
 // ─── Accordion collapse state ─────────────────────────────────────────────
 const collapsedGroups = reactive(new Set<string>());
 
@@ -370,6 +442,17 @@ onMounted(async () => {
   await fetchRuntimeConfig();
   sslVerify.value = runtimeConfig.value.ssl_verify;
   proxyUrlModel.value = runtimeConfig.value.global_proxy ?? "";
+  refreshModeIntroVisibility();
+});
+
+// ─── Global font size (moved here from SettingsView so it lives inside the
+// "App Config" tab rather than above all settings tabs) ──────────────────────
+const fontSizeCtl = useFontSize();
+const globalFontSizePx = computed<number>({
+  get: () => fontSizeCtl.fontSizeScale.value,
+  set: (value: number) => {
+    fontSizeCtl.fontSizeScale.value = Number(value);
+  },
 });
 </script>
 
@@ -384,6 +467,51 @@ onMounted(async () => {
     </div>
 
     <template v-else>
+      <!-- ═══ Global font size ═══ -->
+      <section
+        class="app-config-font-size-card"
+        :aria-label="t('fontSize.label')"
+      >
+        <div class="app-config-font-size-card__main">
+          <div class="app-config-font-size-card__title-row">
+            <span class="app-config-font-size-card__icon" aria-hidden="true">Aa</span>
+            <div>
+              <h3 class="app-config-font-size-card__title">
+                {{ t("fontSize.label") }}
+              </h3>
+              <p class="app-config-font-size-card__desc">
+                {{ t("fontSize.globalHint") }}
+              </p>
+            </div>
+          </div>
+          <output class="app-config-font-size-card__value">
+            {{ fontSizeCtl.fontSizeLabel.value }}
+          </output>
+        </div>
+
+        <div class="app-config-font-size-slider-row">
+          <span class="app-config-font-size-slider-row__bound">{{ fontSizeCtl.MIN_FONT_SIZE_PX }}px</span>
+          <input
+            v-model.number="globalFontSizePx"
+            class="app-config-font-size-slider"
+            type="range"
+            :min="fontSizeCtl.MIN_FONT_SIZE_PX"
+            :max="fontSizeCtl.MAX_FONT_SIZE_PX"
+            step="1"
+            :aria-label="t('fontSize.label')"
+          />
+          <span class="app-config-font-size-slider-row__bound">{{ fontSizeCtl.MAX_FONT_SIZE_PX }}px</span>
+          <button
+            class="app-config-font-size-reset"
+            type="button"
+            :title="t('fontSize.reset')"
+            @click="fontSizeCtl.resetFontSize()"
+          >
+            {{ t("fontSize.reset") }}
+          </button>
+        </div>
+      </section>
+
       <!-- ═══ Security ═══ -->
       <div class="config-group">
         <div
@@ -616,6 +744,58 @@ onMounted(async () => {
         </div>
       </div>
 
+      <!-- ═══ Chat Display ═══ -->
+      <!-- Preferences that affect how the chat area renders. Currently a
+           single toggle (tool-call cards visibility) — kept as its own
+           section so future "chat rendering" prefs (e.g. per-message
+           timestamps) have a clear home. Persistence: localStorage inside
+           the setter (see stores/ui.ts). No forge_config round-trip. -->
+      <div class="config-group">
+        <div
+          class="config-group-header"
+          @click="toggleGroup('chatDisplay')"
+        >
+          <span>💬</span>
+          <span>{{ t("appConfig.chatDisplayTitle") }}</span>
+          <span
+            class="collapse-arrow"
+            :class="{ collapsed: collapsedGroups.has('chatDisplay') }"
+          >▼</span>
+        </div>
+        <div
+          v-show="!collapsedGroups.has('chatDisplay')"
+          class="config-group-body"
+        >
+          <div class="config-comment">
+            {{ t("appConfig.chatDisplayDesc") }}
+          </div>
+          <!-- Show tool-call cards -->
+          <div class="config-field">
+            <label class="config-label">
+              {{ t("appConfig.showToolCallsLabel") }}
+              <label
+                class="toggle"
+                style="margin-left: auto;"
+              >
+                <input
+                  type="checkbox"
+                  :checked="ui.showToolMessages"
+                  data-testid="chat-display-show-tool-calls-toggle"
+                  @change="onShowToolCallsToggle(($event.target as HTMLInputElement).checked)"
+                />
+                <span class="toggle-slider"></span>
+              </label>
+            </label>
+            <!-- eslint-disable vue/no-v-html -- trusted static i18n string with <b> markup -->
+            <div
+              class="config-comment"
+              v-html="t('appConfig.showToolCallsDesc')"
+            ></div>
+            <!-- eslint-enable vue/no-v-html -->
+          </div>
+        </div>
+      </div>
+
       <!-- ═══ Workspace ═══ -->
       <div class="config-group">
         <div
@@ -816,6 +996,138 @@ onMounted(async () => {
         </div>
       </div>
 
+      <!-- ═══ Mode Intro Hints ═══ -->
+      <!-- Per-mode "restore the in-conversation intro card" toggles (Plan §7
+           decision 5 — C+D). Each toggle mirrors the localStorage flag set
+           by the ModeIntroCard's "don't show again" checkbox: ON = the intro
+           will show next time the tab enters that mode; OFF = permanently
+           hidden. Flipping ON immediately re-shows the card in any tab that
+           is currently in that mode (via the composable's shared reset
+           token — no page reload needed). -->
+      <div class="config-group">
+        <div
+          class="config-group-header"
+          @click="toggleGroup('modeIntro')"
+        >
+          <span>💡</span>
+          <span>{{ t("appConfig.modeIntroTitle") }}</span>
+          <span
+            class="collapse-arrow"
+            :class="{ collapsed: collapsedGroups.has('modeIntro') }"
+          >▼</span>
+        </div>
+        <div
+          v-show="!collapsedGroups.has('modeIntro')"
+          class="config-group-body"
+        >
+          <div class="config-comment">
+            {{ t("appConfig.modeIntroDesc") }}
+          </div>
+          <div class="config-field">
+            <label class="config-label">
+              {{ t("appConfig.modeIntroAppBuilder") }}
+              <label
+                class="toggle"
+                style="margin-left: auto;"
+              >
+                <input
+                  type="checkbox"
+                  :checked="modeIntroVisible['app-builder']"
+                  data-testid="mode-intro-toggle-app-builder"
+                  @change="onToggleModeIntro('app-builder', ($event.target as HTMLInputElement).checked)"
+                />
+                <span class="toggle-slider"></span>
+              </label>
+            </label>
+          </div>
+          <div class="config-field">
+            <label class="config-label">
+              {{ t("appConfig.modeIntroGomaster") }}
+              <label
+                class="toggle"
+                style="margin-left: auto;"
+              >
+                <input
+                  type="checkbox"
+                  :checked="modeIntroVisible['gomaster']"
+                  data-testid="mode-intro-toggle-gomaster"
+                  @change="onToggleModeIntro('gomaster', ($event.target as HTMLInputElement).checked)"
+                />
+                <span class="toggle-slider"></span>
+              </label>
+            </label>
+          </div>
+          <div class="config-field">
+            <label class="config-label">
+              {{ t("appConfig.modeIntroModelBuilder") }}
+              <label
+                class="toggle"
+                style="margin-left: auto;"
+              >
+                <input
+                  type="checkbox"
+                  :checked="modeIntroVisible['model-build']"
+                  data-testid="mode-intro-toggle-model-build"
+                  @change="onToggleModeIntro('model-build', ($event.target as HTMLInputElement).checked)"
+                />
+                <span class="toggle-slider"></span>
+              </label>
+            </label>
+          </div>
+          <div class="config-field">
+            <label class="config-label">
+              {{ t("appConfig.modeIntroModelHub") }}
+              <label
+                class="toggle"
+                style="margin-left: auto;"
+              >
+                <input
+                  type="checkbox"
+                  :checked="modeIntroVisible['model-hub']"
+                  data-testid="mode-intro-toggle-model-hub"
+                  @change="onToggleModeIntro('model-hub', ($event.target as HTMLInputElement).checked)"
+                />
+                <span class="toggle-slider"></span>
+              </label>
+            </label>
+          </div>
+          <div class="config-field">
+            <label class="config-label">
+              {{ t("appConfig.modeIntroPro") }}
+              <label
+                class="toggle"
+                style="margin-left: auto;"
+              >
+                <input
+                  type="checkbox"
+                  :checked="modeIntroVisible['pro']"
+                  data-testid="mode-intro-toggle-pro"
+                  @change="onToggleModeIntro('pro', ($event.target as HTMLInputElement).checked)"
+                />
+                <span class="toggle-slider"></span>
+              </label>
+            </label>
+          </div>
+          <div class="config-field">
+            <label class="config-label">
+              {{ t("appConfig.modeIntroCode") }}
+              <label
+                class="toggle"
+                style="margin-left: auto;"
+              >
+                <input
+                  type="checkbox"
+                  :checked="modeIntroVisible['code']"
+                  data-testid="mode-intro-toggle-code"
+                  @change="onToggleModeIntro('code', ($event.target as HTMLInputElement).checked)"
+                />
+                <span class="toggle-slider"></span>
+              </label>
+            </label>
+          </div>
+        </div>
+      </div>
+
       <!-- ═══ Debug ═══ -->
       <div class="config-group">
         <div
@@ -924,6 +1236,91 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+/* ── Global font size card (moved from SettingsView) ─────────────────────── */
+.app-config-font-size-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  margin-bottom: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-secondary);
+  box-shadow: var(--shadow-sm);
+}
+.app-config-font-size-card__main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.app-config-font-size-card__title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.app-config-font-size-card__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  color: var(--accent);
+  background: var(--accent-light);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+.app-config-font-size-card__title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--text-lg);
+  font-weight: 700;
+}
+.app-config-font-size-card__desc {
+  margin: var(--space-1) 0 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.app-config-font-size-card__value {
+  min-width: 72px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  color: var(--accent);
+  background: var(--bg-tertiary);
+  text-align: center;
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+.app-config-font-size-slider-row {
+  display: grid;
+  grid-template-columns: auto minmax(160px, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-3);
+}
+.app-config-font-size-slider-row__bound {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+.app-config-font-size-slider {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.app-config-font-size-reset {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  cursor: pointer;
+}
+.app-config-font-size-reset:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
 .toolbar-module-icon {
   display: inline-flex;
   align-items: center;

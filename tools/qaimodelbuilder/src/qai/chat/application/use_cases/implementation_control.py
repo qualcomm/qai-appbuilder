@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Implementation Control Router (§22.9) — heuristic, dependency-free classifier.
 
 When an implementation phase is ``implementing`` (DISC-1 二期 step3b), the user's
