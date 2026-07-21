@@ -45,8 +45,58 @@ name: CI
 # runner) and are not part of this workflow.
 
 on:
+  # Path filtering — skip a CI run when a push/PR touches ONLY files that no
+  # build/test/lint job consumes. What the jobs actually read:
+  #   - wheel + libappbuilder.so builds  -> src/, pybind/, script/ (+ QNN SDK,
+  #     pybind/pybind11 submodule)
+  #   - genie c++ Service builds (3 jobs) -> samples/genie/c++/**
+  #   - lint (ruff)                       -> script/, tests/, samples/python/utils/
+  # tools/ is referenced by ZERO jobs, so it is always safe to ignore.
+  # samples/ is NOT wholesale-ignorable: samples/genie/** is compiled by 3 jobs
+  # and samples/python/** is linted. Hence we ignore only the sample sub-dirs
+  # that are pure example code no job builds — genie/ and python/ are omitted
+  # from the ignore list so edits there still trigger CI.
+  # Any path NOT matched here (src/, pybind/, script/, tests/, samples/genie/**,
+  # samples/python/**, .github/**, setup.py, CMakeLists.txt, ...) triggers a run.
+  # workflow_dispatch has no filter: manual runs always execute the full matrix.
   push:
+    paths-ignore:
+      - 'tools/**'
+      - 'docs/**'
+      - '**/*.md'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.gitattributes'
+      - 'samples/ComputerVision/**'
+      - 'samples/GenerativeAI/**'
+      - 'samples/Multimodal/**'
+      - 'samples/android/**'
+      - 'samples/apps/**'
+      - 'samples/audio/**'
+      - 'samples/c\+\+/**'     # backslash-escape the literal + (filter glob treats + as special)
+      - 'samples/common/**'
+      - 'samples/qai_libs/**'
+      - 'samples/tools/**'
+      - 'samples/webui/**'
   pull_request:
+    paths-ignore:
+      - 'tools/**'
+      - 'docs/**'
+      - '**/*.md'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.gitattributes'
+      - 'samples/ComputerVision/**'
+      - 'samples/GenerativeAI/**'
+      - 'samples/Multimodal/**'
+      - 'samples/android/**'
+      - 'samples/apps/**'
+      - 'samples/audio/**'
+      - 'samples/c\+\+/**'     # backslash-escape the literal + (filter glob treats + as special)
+      - 'samples/common/**'
+      - 'samples/qai_libs/**'
+      - 'samples/tools/**'
+      - 'samples/webui/**'
   workflow_dispatch:
 
 # Opt every step into the Node 24 runtime for JavaScript actions.
