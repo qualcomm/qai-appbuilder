@@ -28,9 +28,6 @@
 [submodule "samples/genie/c++/External/LibrosaCpp"]
 	path = samples/genie/c++/External/LibrosaCpp
 	url = https://github.com/ewan-xu/LibrosaCpp.git
-[submodule "samples/genie/c++/External/CLI11"]
-	path = samples/genie/c++/External/CLI11
-	url = https://github.com/CLIUtils/CLI11.git
 [submodule "samples/genie/c++/External/stb"]
 	path = samples/genie/c++/External/stb
 	url = https://github.com/nothings/stb.git
