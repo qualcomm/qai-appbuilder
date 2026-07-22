@@ -135,7 +135,7 @@ set(EXTERNAL_HEADER_PATH
         ${G_EXTERNAL_DIR}/stb
         ${G_EXTERNAL_DIR}/cpp-httplib
         ${G_EXTERNAL_DIR}/json/single_include
-        ${G_EXTERNAL_DIR}/CLI11/include
+        ${G_EXTERNAL_DIR}/cli11/include
         ${G_EXTERNAL_INCLUDE_PATH}/Genie
         $ENV{QNN_SDK_ROOT}/include/Genie
         ${LIBAPPBUILDER_ROOT}/src
