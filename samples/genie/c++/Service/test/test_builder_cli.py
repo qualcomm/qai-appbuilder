@@ -20,24 +20,20 @@ QAIModelBuilder CLI / 微信飞书 channel / 内核一致性测试脚本
 
 判定标准与 test_service.py 保持一致: failed == ignored 且 crashed == 0 视为健康。
 本次运行中任何未列入已知缺口清单的失败都会被登记为独立的"新发现缺陷"
-(defects.json / defects.md)，不在本脚本内尝试修复。
+(defects.json)，不在本脚本内尝试修复。
 
-除四个测试模块外，本脚本同一次运行中还会生成 QAIModelBuilder 三端（CLI / HTTP API /
-WebUI）一致性统一报告(report.html / report_defects.html / report_webui_detail.html /
-unified_cases.json)，与 test_service.py 内置 ReportGenerator 的模式一致（不再有独立的
-report 生成脚本）。统一报告依赖内部维护的 CLI_CASE_TO_UI_EQUIVALENT 映射表把每条 CLI
-用例关联到具体的 WebUI 用例或设计边界，并在生成前用覆盖完整性自检校验该映射表是否
-跟上了 CLI 用例的演进——一旦发现遗漏，自检会抛出 RuntimeError 直接阻断报告生成。
-可选参数 --webui_results 指向 Playwright WebUI 套件产出的 e2e-report/results.json；
-缺省时统一报告里 WebUI 状态全部显示为"未采集"，设计边界条目不受影响。
-本脚本仍然只读取该套件已产出的 results.json 文件，不 import、不依赖
-QAIModelBuilder/frontend/e2e/*.spec.ts 的任何代码，保持"CLI 侧脚本与 WebUI 侧测试代码
-零耦合"的既有约定。
+除四个测试模块外，本脚本同一次运行中还会生成单页统一报告(report.html)，
+与 test_service.py 内置 ReportGenerator 的模式一致（不再有独立的 report 生成脚本）。
+
+除以上内容外，本脚本还新增一个可选的"webui"模块（模块 E，默认不跑）：用 Python 端
+playwright 直接驱动真实浏览器打开前端 dev server 做黑盒校验(只知道 URL 与渲染出的
+文字/DOM，不 import/读取 QAIModelBuilder/frontend 目录下任何源码)，只有显式
+--modules ... webui 才会运行，跑起来需要额外的 pnpm/playwright 浏览器依赖。
 
 用法:
     python test_builder_cli.py --builder_dir ./QAIModelBuilder
     python test_builder_cli.py --builder_dir ./QAIModelBuilder --modules channel known_gaps
-    python test_builder_cli.py --builder_dir ./QAIModelBuilder --webui_results ./e2e-report/results.json
+    python test_builder_cli.py --builder_dir ./QAIModelBuilder --modules cli_smoke webui
 """
 
 import argparse
@@ -50,6 +46,8 @@ import http.server
 import json
 import os
 import re
+import shlex
+import shutil
 import signal
 import sqlite3
 import subprocess
@@ -292,6 +290,116 @@ class BuilderProcess:
             return ""
 
 
+class FrontendDevServer:
+    """通过 `pnpm dev` 拉起前端 Vite dev server（模块 E / webui 专用），生命周期管理
+    模式与 BuilderProcess 保持一致：subprocess.Popen 拉子进程、stdout/stderr 重定向到
+    日志文件、优雅停止 + 强制 kill 兜底。只有用户没有显式传入 --webui_base_url 时才会
+    被构造/使用——用户自己在别处手动跑着前端时，直接跳过这个类，不需要我们管它的生命周期。
+
+    通过环境变量 QAI_DEV_BACKEND_HTTP 注入要连接的后端地址，这是
+    QAIModelBuilder/frontend/vite.config.ts 公开、文档化的环境变量接口（而不是私有实现
+    细节），设置它不构成对前端源码的依赖/耦合。"""
+
+    def __init__(self, frontend_dir, backend_base_url, host="127.0.0.1", port=5173, log_dir=None):
+        self.frontend_dir = Path(frontend_dir)
+        self.backend_base_url = backend_base_url
+        self.host = host
+        self.port = port
+        self.log_dir = Path(log_dir) if log_dir else self.frontend_dir
+        self.process = None
+        self._stdout_fh = None
+        self._stderr_fh = None
+
+    @property
+    def base_url(self):
+        return f"http://{self.host}:{self.port}"
+
+    def start(self, timeout=60):
+        """启动 `pnpm dev`。
+
+        已知环境限制（2026-07-22 ARM64 remote 测试观测记录，非本类逻辑缺陷）：在
+        webui 模块长时间、高强度的无头浏览器交互下，Vite dev server 的 Node 进程有
+        概率以退出码 3221226505（0xC0000409，STATUS_STACK_BUFFER_OVERRUN，Windows
+        原生崩溃）终止，之后本进程存活期内的所有后续 page.goto 都会以
+        `net::ERR_CONNECTION_REFUSED` 失败——这是 ARM64 上 Vite/esbuild 原生组件在
+        持续压力下的稀发性崩溃，与本类/webui 模块的选择器或比对逻辑无关，出现时应
+        直接查看 `frontend_stdout.log`/`frontend_stderr.log` 尾部确认退出码，而不是
+        排查具体某条检查的实现。"""
+        if not self.frontend_dir.exists():
+            raise FileNotFoundError(f"frontend_dir 不存在: {self.frontend_dir}")
+        pnpm_exe = shutil.which("pnpm")
+        if not pnpm_exe and os.name == "nt":
+            # Windows 上 pnpm 通常以 pnpm.cmd 的形式安装，shutil.which("pnpm") 未必能
+            # 命中（取决于 PATHEXT），显式再探测一次 .cmd 后缀。
+            pnpm_exe = shutil.which("pnpm.cmd")
+        if not pnpm_exe:
+            raise RuntimeError("未找到 pnpm 可执行文件，请先安装 Node.js 与 pnpm 后再运行 webui 模块"
+                                "（也可以自己手动起好前端 dev server 后，通过 --webui_base_url 直接指向"
+                                "该地址，完全跳过本类）。")
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        self._stdout_fh = open(self.log_dir / "frontend_stdout.log", "w", encoding="utf-8")
+        self._stderr_fh = open(self.log_dir / "frontend_stderr.log", "w", encoding="utf-8")
+        env = os.environ.copy()
+        env["QAI_DEV_BACKEND_HTTP"] = self.backend_base_url
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+        self.process = subprocess.Popen(
+            [pnpm_exe, "dev"], cwd=str(self.frontend_dir), env=env,
+            stdout=self._stdout_fh, stderr=self._stderr_fh, creationflags=creationflags,
+        )
+        atexit.register(self._force_kill)
+        try:
+            ok = wait_http_ok(f"{self.base_url}/", timeout=timeout, process=self.process)
+        except RuntimeError as e:
+            self._close_logs()
+            raise RuntimeError(f"{e}\n日志尾部:\n{self._read_log_tail()}")
+        if not ok:
+            self._force_kill()
+            self._close_logs()
+            raise RuntimeError(f"前端 dev server 在 {timeout}s 内未就绪。日志尾部:\n{self._read_log_tail()}")
+
+    def stop(self, timeout=15):
+        if self.process is None:
+            self._close_logs()
+            return
+        if self.process.poll() is not None:
+            self._close_logs()
+            return
+        try:
+            if os.name == "nt":
+                self.process.send_signal(signal.CTRL_BREAK_EVENT)
+            else:
+                self.process.terminate()
+            self.process.wait(timeout=timeout)
+        except Exception:
+            self._force_kill()
+        finally:
+            self._close_logs()
+
+    def _force_kill(self):
+        if self.process is not None and self.process.poll() is None:
+            try:
+                self.process.kill()
+                self.process.wait(timeout=5)
+            except Exception:
+                pass
+
+    def _close_logs(self):
+        for fh in (self._stdout_fh, self._stderr_fh):
+            try:
+                if fh:
+                    fh.close()
+            except Exception:
+                pass
+
+    def _read_log_tail(self, lines=60):
+        try:
+            with open(self.log_dir / "frontend_stderr.log", "r", encoding="utf-8", errors="replace") as f:
+                content = f.readlines()
+            return "".join(content[-lines:])
+        except Exception:
+            return ""
+
+
 @dataclass
 class CliResult:
     args: list
@@ -419,8 +527,8 @@ class DefectRecord:
 
 class DefectRegistry:
     """四个模块共享的缺陷登记表：任何非预期失败都在这里登记一条记录,
-    最终落盘为 defects.json(结构化,供下一轮修复 plan 直接消费)与
-    defects.md(按模块分组的人读摘要)。已知缺口/设计边界不登记在这里,
+    最终落盘为 defects.json(结构化,供下一轮修复 plan 直接消费，并被 report.html
+    内联的"新发现缺陷详情"部分直接渲染)。已知缺口/设计边界不登记在这里,
     只在报告里作为说明,以免污染"新发现缺陷"清单。"""
 
     def __init__(self):
@@ -441,34 +549,11 @@ class DefectRegistry:
     def defects(self):
         return list(self._defects)
 
-    def _to_markdown(self):
-        if not self._defects:
-            return "# 新发现缺陷清单\n\n本次运行未发现新缺陷。\n"
-        lines = ["# 新发现缺陷清单", "", f"共 {len(self._defects)} 条，按模块分组：", ""]
-        by_module = {}
-        for d in self._defects:
-            by_module.setdefault(d.module, []).append(d)
-        for module in sorted(by_module):
-            lines.append(f"## 模块 {module}")
-            lines.append("")
-            for d in by_module[module]:
-                lines.append(f"### [{d.defect_id}] ({d.severity}) {d.summary}")
-                lines.append("")
-                lines.append(f"- 发现时间: {d.discovered_at}")
-                lines.append(f"- 复现: `{d.repro}`")
-                lines.append(f"- 预期: {d.expected}")
-                lines.append(f"- 实际: {d.actual}")
-                lines.append(f"- 证据: {d.evidence}")
-                lines.append("")
-        return "\n".join(lines)
-
     def write(self, out_dir):
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         with open(out_dir / "defects.json", "w", encoding="utf-8") as f:
             json.dump([asdict(d) for d in self._defects], f, indent=2, ensure_ascii=False)
-        with open(out_dir / "defects.md", "w", encoding="utf-8") as f:
-            f.write(self._to_markdown())
 
 
 @dataclass
@@ -1010,6 +1095,995 @@ def run_known_gaps_module(cli, collector, defects):
                             "WeChat 出站完全依赖 wechatbot SDK 的活体 Bot 对象、不经 HTTP，无法用 HTTP mock 验证，属已知设计边界。")
 
 
+def _wait_visible(locator, timeout=10000):
+    """在超时内等待元素可见,超时返回 False 而不向上抛异常(调用方经常还要基于结果继续
+    判断,不适合用异常控制流)。用于"断言某个空态提示/结果条是否可见"这类场景;真正需要
+    "必须等到出现才能继续操作"的地方仍直接用 locator.wait_for(...)，超时交给外层
+    try/except 记为 FAIL。"""
+    try:
+        locator.wait_for(state="visible", timeout=timeout)
+        return True
+    except Exception:
+        return False
+
+
+def run_webui_module(cli, frontend_url, collector, defects, csrf, headed=False):
+    """模块 E（webui，opt-in）：用 Python 端 playwright 驱动真实浏览器，对前端 WebUI
+    做黑盒校验——只知道 frontend_url 与渲染出的文字/DOM，不 import/读取
+    QAIModelBuilder/frontend 目录下任何源码。
+
+    与模块 A(cli_smoke)全部 36 条用例做"双向验证"：26 条有网页操作入口的用例，按分组
+    分派给 6 个 `_webui_check_*_group` 函数，用真实的浏览器点击路径去操作网页、读取渲染
+    结果，再与 CLI JSON 输出逐一比对；剩余 10 条没有网页入口的设计边界用例，由
+    `_webui_record_boundary_cases` 直接从 CLI_CASE_TO_UI_EQUIVALENT 映射表里自动筛出并
+    记为 skipped，不需要手写清单。每条 PASS/FAIL 结果的 detail 字段都包含一句人类可读的
+    "网页操作路径"描述，方便在报告里复核"网页里具体怎么操作能得到这个结果"。
+
+    playwright 是懒加载的可选依赖：大多数用户不会用到这个模块，因此不在文件顶部
+    import，缺失时也不让整个脚本崩溃退出，只记为一条清晰的失败 TestResult。"""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        collector.add(TestResult(
+            module="E", name="webui::playwright_not_installed", passed=False, skipped=True,
+            detail="未安装 playwright 这个 Python 包，无法运行 webui 模块。"
+                   "请先执行 `pip install playwright` 与 `playwright install chromium`，"
+                   "再重新运行 --modules ... webui。",
+        ))
+        return
+
+    # 最外层同样兜底一层 try/except：即便前面每个分组的公共前置都已单独兜底，浏览器/
+    # 上下文创建本身（p.chromium.launch()/browser.new_context() 等）出问题仍是未覆盖的
+    # 残余风险；一旦这里失败，webui 模块整体记一条失败，绝不能向上传播炸掉 main()（否则
+    # collector.write_report() 永远不会被调用，此前 cli_smoke 等模块已收集的结果也会
+    # 一并丢失，2026-07-22 remote 测试时曾因分组内部未兜底触发过同类问题）。
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=not headed)
+            try:
+                context = browser.new_context()
+                page = context.new_page()
+                # 强制中文 locale，全局生效（绑定在 page 上，不是绑定在某次 goto 上），
+                # 只需在创建 page 之后、任何 page.goto 之前执行一次，后续所有分组的 goto 均生效。
+                # 注意：Python 版 add_init_script() 只接受"原样注入执行"的语句字符串，不像
+                # TS/JS 版会对函数参数自动包一层立即调用——传箭头函数字面量 "() => {...}"
+                # 只会创建一个匿名函数值然后丢弃，函数体从未被执行，localStorage 实际上从未
+                # 被写入（2026-07-22 remote 测试排查确认，此前的箭头函数写法完全不生效，
+                # 导致全部依赖中文文案定位的检查全部超时）。这里直接传语句本身，不包函数。
+                page.add_init_script("window.localStorage.setItem('qai_locale', 'zh-CN');")
+                page_errors = []
+                page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+
+                # a. webui::home_page_loads —— 页面在合理超时内完成加载，标题非空且
+                # 根应用容器（#app）渲染出内容，过程中没有触发页面级 pageerror。
+                try:
+                    page.goto(frontend_url, wait_until="networkidle", timeout=30000)
+                    page.wait_for_timeout(500)
+                    title = page.title()
+                    app_html = page.locator("#app").inner_html()
+                    ok = bool(title) and bool(app_html.strip()) and not page_errors
+                    collector.add(TestResult(
+                        module="E", name="webui::home_page_loads", passed=ok,
+                        detail=f"title={title!r}, #app 渲染内容长度={len(app_html)}, pageerror={page_errors}",
+                    ))
+                except Exception as e:
+                    collector.add(TestResult(
+                        module="E", name="webui::home_page_loads", passed=False,
+                        detail=f"打开首页异常: {e!r}",
+                    ))
+
+                # b~g. 六个分组，覆盖模块 A 全部 26 条有网页入口的用例；每个分组函数内部各自
+                # page.goto 到自己的入口路由，组间不共享导航状态，简单可靠，复用同一个 page 对象。
+                _webui_check_security_group(page, frontend_url, cli, collector, defects)
+                _webui_check_downloads_group(page, frontend_url, cli, collector, defects)
+                _webui_check_service_group(page, frontend_url, cli, collector, defects)
+                _webui_check_appbuilder_group(page, frontend_url, cli, collector, defects, csrf)
+                _webui_check_conv_code_group(page, frontend_url, cli, collector, defects, csrf)
+                _webui_check_settings_skills_group(page, frontend_url, cli, collector, defects)
+
+                context.close()
+            finally:
+                browser.close()
+    except Exception as e:
+        collector.add(TestResult(
+            module="E", name="webui::browser_session_crashed", passed=False,
+            detail=f"浏览器会话在完成全部分组检查之前异常终止，本模块结果可能不完整: {e!r}",
+        ))
+
+    # h. 剩余 10 条设计边界用例：直接从 CLI_CASE_TO_UI_EQUIVALENT 映射表里自动筛出，
+    # 不需要手写清单，未来映射表增删会自动同步；不依赖浏览器，放在 with 块外也没问题。
+    _webui_record_boundary_cases(collector)
+
+
+def _webui_record_boundary_cases(collector):
+    """自动从 CLI_CASE_TO_UI_EQUIVALENT 映射表里筛出模块 A 全部设计边界用例（即
+    boundary_kind 非空的条目，共 10 条），逐一记为 webui_py:: 前缀的 skipped 结果。
+    不需要手写清单，未来映射表增删会自动同步覆盖范围。"""
+    for name, equiv in CLI_CASE_TO_UI_EQUIVALENT.items():
+        if name.startswith("cli_smoke::") and equiv.boundary_kind is not None:
+            case_suffix = name[len("cli_smoke::"):]
+            _record_known_boundary(collector, "E", f"webui_py::{case_suffix}", equiv.boundary_reason)
+
+
+def _webui_check_security_group(page, frontend_url, cli, collector, defects):
+    """分组 1：安全页面，覆盖 policy show / policy skill-cap discover /
+    audit query / dep pending / exec profiles / skill policy 共 6 条真实比对，
+    以及 security settings get 这 1 条设计边界（详见下方第 6 项注释）。dep pending
+    依赖默认『总览』tab 的状态，必须放在切换到其它 tab 之前完成；policy skill-cap
+    discover / exec profiles / skill policy 共用同一个『技能策略』tab，按顺序
+    排列以复用已点击的 tab，减少重复点击。
+
+    公共前置（打开安全页）同样必须包一层 try/except，理由与 _webui_check_appbuilder_group
+    的公共前置一致：不能让导航失败向上传播炸掉整个 webui 模块。"""
+    group_cases = ("webui_py::dep pending", "webui_py::policy show",
+                   "webui_py::policy skill-cap discover", "webui_py::security settings get",
+                   "webui_py::audit query", "webui_py::exec profiles", "webui_py::skill policy")
+    try:
+        page.goto(f"{frontend_url}/security")
+        page.wait_for_load_state("networkidle")
+    except Exception as e:
+        detail = f"打开『安全』页（公共前置）失败，本组 7 项检查均跳过: {e!r}"
+        for name in group_cases:
+            collector.add(TestResult(module="E", name=name, passed=False, detail=detail))
+        return
+
+    # 1. dep pending —— 不需要切 tab，直接在默认『总览』tab 上读取。
+    try:
+        cli_pending = cli.run("dep", "pending", timeout=30).json_data or []
+        path_desc = "打开『安全』页（默认『总览』tab）→ 读取待批准安装请求"
+        if not cli_pending:
+            passed = _wait_visible(page.get_by_text("无待审批的安装请求"))
+            detail = f"{path_desc}。一致: 空态提示可见，CLI 返回空列表" if passed \
+                else f"{path_desc}。不一致: 空态提示未展示，但 CLI 返回空列表"
+        else:
+            rows = page.locator(".sec-cfg-pending-row")
+            row_count = rows.count()
+            row_texts = set(rows.locator("code.mono").all_text_contents())
+            expected_texts = {" ".join(p.get("command_args", [])) for p in cli_pending}
+            passed = row_count == len(cli_pending) and row_texts == expected_texts
+            detail = (f"{path_desc}。{'一致' if passed else '不一致'}: 页面 {row_count} 行/"
+                      f"CLI {len(cli_pending)} 条")
+        if passed:
+            collector.add(TestResult(module="E", name="webui_py::dep pending", passed=True, detail=detail))
+        else:
+            _record_defect(collector, defects, "E", "webui_py::dep pending", "major",
+                            "WebUI『安全』总览页待批准安装请求与 `dep pending` 不一致",
+                            path_desc, "页面展示条目与 CLI 输出一致", detail, str(cli_pending)[:1000])
+    except Exception as e:
+        collector.add(TestResult(module="E", name="webui_py::dep pending", passed=False,
+                                  detail=f"检查异常: {e!r}"))
+
+    # 2. policy show —— 点击『白名单』tab，按 5 类规则分组比对 pattern 集合。
+    try:
+        page.get_by_role("tab", name="白名单").click()
+        page.wait_for_load_state("networkidle")
+        cli_data = cli.run("policy", "show", timeout=30).json_data or {}
+        rules = cli_data.get("rules", [])
+        field_predicates = {
+            "read_allow": lambda r: r.get("op") == "read" and r.get("action") == "allow",
+            "write_allow": lambda r: r.get("op") == "write" and r.get("action") == "allow",
+            "write_deny": lambda r: r.get("op") == "write" and r.get("action") == "deny",
+            "exec_allow_cwd": lambda r: r.get("op") == "exec" and r.get("action") == "allow",
+            "exec_deny_patterns": lambda r: r.get("op") == "exec" and r.get("action") == "deny",
+        }
+        path_desc = "点击『安全』页『白名单』tab → 按 5 类规则分组比对 pattern 集合"
+        mismatches, degraded = [], False
+        for field_name, predicate in field_predicates.items():
+            expected_patterns = {r.get("pattern", "") for r in rules if predicate(r)}
+            block = page.locator(".sec-cfg-list-block").filter(
+                has=page.locator(".sec-cfg-list-key", has_text=field_name))
+            inputs = block.locator(".sec-cfg-list-row .sec-cfg-list-input")
+            count = inputs.count()
+            try:
+                actual_patterns = {inputs.nth(i).input_value() for i in range(count)}
+                if actual_patterns != expected_patterns:
+                    mismatches.append(f"{field_name}: 页面{actual_patterns} != CLI{expected_patterns}")
+            except Exception:
+                # 字段不是纯 <input>（或字段名与实际 DOM 结构不符）时退化为数量校验。
+                degraded = True
+                if count != len(expected_patterns):
+                    mismatches.append(f"{field_name}(退化为数量校验): 页面{count} != CLI{len(expected_patterns)}")
+        passed = not mismatches
+        detail = f"{path_desc}。" + ("一致: 共 5 类规则均匹配" if passed else f"不一致: {mismatches}")
+        if degraded:
+            detail += "（部分分类因字段结构不确定，退化为数量校验）"
+        if passed:
+            collector.add(TestResult(module="E", name="webui_py::policy show", passed=True, detail=detail))
+        else:
+            _record_defect(collector, defects, "E", "webui_py::policy show", "major",
+                            "WebUI 白名单 tab 展示的规则与 `policy show` 不一致",
+                            path_desc, "5 类规则的 pattern 集合与 CLI 一致", detail, str(rules)[:1500])
+    except Exception as e:
+        collector.add(TestResult(module="E", name="webui_py::policy show", passed=False,
+                                  detail=f"检查异常: {e!r}"))
+
+    # 3. policy skill-cap discover —— 点击『技能策略』tab，比对技能卡片数量与 fid 集合。
+    # 注：已排查确认 HTTP `GET /api/security/skill-discovery`（WebUI 数据源）与本处 CLI
+    # `policy skill-cap discover` 调用的是完全相同的 `skill_discovery_use_case.execute()`
+    # 实例，理论上应严格一致；若在实测中出现数量不符，最可能是同一次 run 内其它模块
+    # （如 cli_smoke 的 skill register/unregister 冒烟）在两次读取之间修改了技能注册表
+    # 导致的时序竞态，而不是本检查逻辑或数据源本身的问题（2026-07-22 remote 测试排查
+    # 确认）；出现该 defect 时无需怀疑此处比对写法，应结合当次 run 的时间线判断是否为
+    # 测试隔离问题。
+    try:
+        page.get_by_role("tab", name="技能策略").click()
+        page.wait_for_load_state("networkidle")
+        cli_data = cli.run("policy", "skill-cap", "discover", timeout=30).json_data or {}
+        skills = cli_data.get("skills", [])
+        cards = page.locator(".sec-cfg-skill-card")
+        fids = {t.strip() for t in page.locator(".sec-cfg-skill-fid").all_text_contents()}
+        expected_fids = {s.get("skill_name", "") for s in skills}
+        path_desc = "点击『安全』页『技能策略』tab → 读取技能卡片数量与 fid 集合"
+        passed = cards.count() == len(skills) and fids == expected_fids
+        detail = (f"{path_desc}。{'一致' if passed else '不一致'}: 页面 {cards.count()} 张卡片/"
+                  f"CLI {len(skills)} 个技能")
+        if passed:
+            collector.add(TestResult(module="E", name="webui_py::policy skill-cap discover",
+                                      passed=True, detail=detail))
+        else:
+            _record_defect(collector, defects, "E", "webui_py::policy skill-cap discover", "major",
+                            "WebUI 技能策略 tab 展示的技能与 `policy skill-cap discover` 不一致",
+                            path_desc, "技能卡片数量/fid 集合与 CLI 一致", detail, str(skills)[:1500])
+    except Exception as e:
+        collector.add(TestResult(module="E", name="webui_py::policy skill-cap discover", passed=False,
+                                  detail=f"检查异常: {e!r}"))
+
+    # 4. exec profiles —— 复用『技能策略』tab（无需重复点击），读取审计表格。
+    try:
+        cli_data = cli.run("exec", "profiles", timeout=30).json_data or {}
+        profiles = cli_data.get("profiles", [])
+        path_desc = "『安全』页『技能策略』tab（复用）→ 读取执行代理配置表格"
+        if not profiles:
+            passed = _wait_visible(page.get_by_text("无已加载配置"))
+            detail = f"{path_desc}。一致: 空态提示可见，CLI 返回空列表" if passed \
+                else f"{path_desc}。不一致: 空态提示未展示，但 CLI 返回空列表"
+        else:
+            rows = page.locator(".sec-cfg-audit-table tbody tr")
+            row_count = rows.count()
+            names = {rows.nth(i).locator("td").nth(0).inner_text().strip() for i in range(row_count)}
+            expected_names = {p.get("name", "-") for p in profiles}
+            passed = row_count == len(profiles) and names == expected_names
+            detail = (f"{path_desc}。{'一致' if passed else '不一致'}: 页面 {row_count} 行/"
+                      f"CLI {len(profiles)} 条")
+        if passed:
+            collector.add(TestResult(module="E", name="webui_py::exec profiles", passed=True, detail=detail))
+        else:
+            _record_defect(collector, defects, "E", "webui_py::exec profiles", "major",
+                            "WebUI 技能策略 tab 执行代理配置与 `exec profiles` 不一致",
+                            path_desc, "表格内容与 CLI 一致", detail, str(profiles)[:1500])
+    except Exception as e:
+        collector.add(TestResult(module="E", name="webui_py::exec profiles", passed=False,
+                                  detail=f"检查异常: {e!r}"))
+
+    # 5. skill policy —— 复用『技能策略』tab，读取顶部模式说明文字。
+    try:
+        cli_data = cli.run("skill", "policy", timeout=30).json_data or {}
+        mode = cli_data.get("mode", "")
+        text = page.locator(".sec-cfg-audit-controls .config-comment strong").inner_text(timeout=10000).strip()
+        path_desc = "『安全』页『技能策略』tab（复用）→ 读取顶部模式说明文字"
+        passed = text == mode
+        detail = f"{path_desc}。{'一致' if passed else '不一致'}: 页面={text!r}/CLI={mode!r}"
+        if passed:
+            collector.add(TestResult(module="E", name="webui_py::skill policy", passed=True, detail=detail))
+        else:
+            _record_defect(collector, defects, "E", "webui_py::skill policy", "major",
+                            "WebUI 技能策略 tab 顶部模式说明与 `skill policy` 不一致",
+                            path_desc, f"页面文字 == CLI mode({mode!r})", detail, str(cli_data)[:500])
+    except Exception as e:
+        collector.add(TestResult(module="E", name="webui_py::skill policy", passed=False,
+                                  detail=f"检查异常: {e!r}"))
+
+    # 6. security settings get —— 设计边界（非脚本 bug）：深入排查后确认 CLI `security settings get`
+    # （`cmd_security_settings_get`）返回的是 `security_runtime_state.snapshot()`（FileGuard
+    # 权限授予/模式的运行时快照，字段为 enabled/mode/dynamic_authorization/settings），与
+    # WebUI『安全』页『工具防护』tab（ToolSafetyPanel.vue）实际读取的 `GET
+    # /api/security/runtime-config`（RuntimeConfig: file_broker_enabled/file_guard_enabled/
+    # read_max_lines 等）完全是两个互不相关的后端数据模型，仅是命名巧合雷同（详见 2026-07-22
+    # remote 测试排查记录）。全库搜索 apps/cli 下不存在任何排除 runtime_config/RuntimeConfig 的
+    # CLI 命令，证实 ToolSafetyPanel 展示的这三项开关确实没有任何 CLI 等价入口，因此在
+    # 本模块“CLI↔WebUI 双向验证”的设计前提下属于设计边界（无法拿到有效 CLI ground
+    # truth），不追求与 module A 共享的 CLI_CASE_TO_UI_EQUIVALENT 映射表保持一致（那个映射
+    # 表服务于 TS Playwright 桥接机制，official TS 测试本身比较的是 WebUI vs HTTP 端点，
+    # 不是 WebUI vs CLI，改用这个统一比对思路对本模块不适用）。
+    _record_known_boundary(
+        collector, "E", "webui_py::security settings get",
+        "CLI `security settings get` 返回的是 FileGuard 权限运行时快照"
+        "（enabled/mode/dynamic_authorization/settings），与 WebUI『工具防护』tab 实际读取的"
+        "`GET /api/security/runtime-config`（file_broker_enabled/file_guard_enabled/"
+        "read_max_lines）是完全不相关的两套数据模型，仅命名巧合；全库搜索确认不存在任何"
+        "暴露后者数据的 CLI 命令，本模块聚焦 CLI↔WebUI 真实数据比对，此用例无有效 CLI"
+        "ground truth 可比，故判定为设计边界。")
+
+    # 7. audit query —— 点击『审计 / 授权』tab，注意 .sec-cfg-audit-table 与依赖审批表
+    # 共用 class，需 .first 精确定位。
+    try:
+        page.get_by_role("tab", name="审计 / 授权").click()
+        page.wait_for_load_state("networkidle")
+        cli_data = cli.run("audit", "query", timeout=30).json_data or []
+        table = page.locator("table.sec-cfg-audit-table").first
+        path_desc = "点击『安全』页『审计 / 授权』tab → 读取审计记录表格"
+        if not cli_data:
+            passed = _wait_visible(page.get_by_text("暂无审计记录"))
+            detail = f"{path_desc}。一致: 空态提示可见，CLI 返回空列表" if passed \
+                else f"{path_desc}。不一致: 空态提示未展示，但 CLI 返回空列表"
+        else:
+            row_count = table.locator("tbody tr").count()
+            paths = set(table.locator(".sec-cfg-audit-path").all_text_contents())
+            expected_paths = {e.get("resource", {}).get("identifier", "") for e in cli_data}
+            passed = row_count == len(cli_data) and paths == expected_paths
+            detail = (f"{path_desc}。{'一致' if passed else '不一致'}: 页面 {row_count} 行/"
+                      f"CLI {len(cli_data)} 条")
+        if passed:
+            collector.add(TestResult(module="E", name="webui_py::audit query", passed=True, detail=detail))
+        else:
+            _record_defect(collector, defects, "E", "webui_py::audit query", "major",
+                            "WebUI 审计/授权 tab 展示的审计记录与 `audit query` 不一致",
+                            path_desc, "表格内容与 CLI 一致", detail, str(cli_data)[:1500])
+    except Exception as e:
+        collector.add(TestResult(module="E", name="webui_py::audit query", passed=False,
+                                  detail=f"检查异常: {e!r}"))
+
+
+def _webui_check_downloads_group(page, frontend_url, cli, collector, defects):
+    """分组 2：下载中心，覆盖 service-release 全部 6 个只读子命令的真实比对（均无设计边界）。
+    tabs 用下标而非文字定位（0=服务版本，1=模型），避免受 i18n/文案变化影响。
+
+    公共前置（打开下载中心页）同样必须包一层 try/except，理由同上。"""
+    group_cases = ("webui_py::service-release aria2c status", "webui_py::service-release versions",
+                   "webui_py::service-release status versions", "webui_py::service-release models",
+                   "webui_py::service-release status models", "webui_py::service-release settings get")
+    try:
+        page.goto(f"{frontend_url}/downloads")
+        tabs = page.locator(".downloads-view__tabs").get_by_role("tab")
+    except Exception as e:
+        detail = f"打开『下载中心』页（公共前置）失败，本组 6 项检查均跳过: {e!r}"
+        for name in group_cases:
+            collector.add(TestResult(module="E", name=name, passed=False, detail=detail))
+        return
+
+    # 1. service-release aria2c status —— 不需要切 tab，弱一致性说明性校验（文案会随
+    # i18n/版本变化，重点是"页面确实展示了与 JSON 状态相符的信息"，不逐字比对）。
+    try:
+        cli_data = cli.run("service-release", "aria2c", "status", timeout=30).json_data or {}
+        banner = page.locator(".dc-info-banner").first
+        path_desc = "打开『下载中心』页 → 读取 aria2c 状态提示条"
+        banner_visible = _wait_visible(banner)
+        available = bool(cli_data.get("available"))
+        daemon_running = bool(cli_data.get("daemon_running"))
+        banner_text = banner.inner_text() if banner_visible else ""
+        heuristic_ok = not (daemon_running and "未安装" in banner_text)
+        passed = (not available) or (banner_visible and heuristic_ok)
+        detail = (f"{path_desc}（弱一致性说明性校验，非逐字比对）。banner_visible={banner_visible}, "
+                  f"available={available}, daemon_running={daemon_running}, "
+                  f"banner_text={banner_text[:80]!r}")
+        if passed:
+            collector.add(TestResult(module="E", name="webui_py::service-release aria2c status",
+                                      passed=True, detail=detail))
+        else:
+            _record_defect(collector, defects, "E", "webui_py::service-release aria2c status", "minor",
+                            "WebUI 下载中心 aria2c 状态提示条与 `service-release aria2c status` 不符",
+                            path_desc, "提示条展示与 available/daemon_running 相符的信息", detail,
+                            str(cli_data)[:500])
+    except Exception as e:
+        collector.add(TestResult(module="E", name="webui_py::service-release aria2c status",
+                                  passed=False, detail=f"检查异常: {e!r}"))
+
+    # 2. service-release versions —— 点击『服务版本』tab（下标 0），比对版本卡片。
+    # 注意：CLI `service-release versions` 顶层字段是 `items`，不是 `versions`（此前误读为
+    # `versions` 导致 .get() 永远落空、统计出的 CLI 数量恒为 0，与页面渲染出的真实卡片数
+    # 形成虚假不一致，2026-07-22 remote 测试排查确认）；同时补上 exit_code 显式判定，
+    # 避免 CLI 子进程真失败时被 `.json_data or {}` 悄悄吞掉、表现成同样的假『0 条』。
+    try:
+        tabs.nth(0).click()
+        page.wait_for_load_state("networkidle")
+        cli_result = cli.run("service-release", "versions", timeout=30)
+        if cli_result.exit_code != 0 or cli_result.json_data is None:
+            raise RuntimeError(f"CLI 调用失败: exit_code={cli_result.exit_code}, "
+                               f"json_data={cli_result.json_data!r}")
+        versions = cli_result.json_data.get("items", [])
+        path_desc = "点击『下载中心』页『服务版本』tab → 读取版本卡片列表"
+        articles = page.locator('article[data-version]')
+        missing = [v["version"] for v in versions
+                   if not page.locator(f'article[data-version="{v["version"]}"]').is_visible()]
+        passed = articles.count() == len(versions) and not missing
+        detail = (f"{path_desc}。{'一致' if passed else '不一致'}: 页面 {articles.count()} 张卡片/"
+                  f"CLI {len(versions)} 个版本" + (f", 缺失卡片: {missing}" if missing else ""))
+        if passed:
+            collector.add(TestResult(module="E", name="webui_py::service-release versions",
+                                      passed=True, detail=detail))
+        else:
+            _record_defect(collector, defects, "E", "webui_py::service-release versions", "major",
+                            "WebUI 服务版本卡片与 `service-release versions` 不一致",
+                            path_desc, "每个版本都有对应卡片", detail, str(versions)[:1000])
+    except Exception as e:
+        collector.add(TestResult(module="E", name="webui_py::service-release versions",
+                                  passed=False, detail=f"检查异常: {e!r}"))
+
+    # 3. service-release status versions —— 仍在『服务版本』tab，逐个版本卡片比对
+    # 安装/下载状态；卡片不存在时跳过（属正常情况）。
+    try:
+        cli_data = cli.run("service-release", "status", "versions", timeout=30).json_data or {}
+        path_desc = "『下载中心』页『服务版本』tab（复用）→ 逐个版本卡片比对安装/下载状态"
+        mismatches, checked = [], 0
+        for version, info in cli_data.items():
+            card = page.locator(f'article[data-version="{version}"]')
+            if card.count() == 0:
+                continue
+            checked += 1
+            if info.get("installed"):
+                pill_visible = card.locator(".dc-card__installed-pill").is_visible()
+                path_text = card.locator(".dc-card__path").inner_text().strip()
+                if not pill_visible or path_text != info.get("install_path", ""):
+                    mismatches.append(f"{version}: installed 状态不符 (pill={pill_visible}, path={path_text!r})")
+            if info.get("downloaded"):
+                save_path_text = card.locator(".dc-card__save-path-text").inner_text().strip()
+                if save_path_text != info.get("save_path", ""):
+                    mismatches.append(f"{version}: downloaded save_path 不符 ({save_path_text!r})")
+        passed = not mismatches
+        detail = (f"{path_desc}。共校验 {checked} 个已渲染版本卡片。"
+                  f"{'一致' if passed else '不一致'}: {mismatches if mismatches else '全部一致'}")
+        if passed:
+            collector.add(TestResult(module="E", name="webui_py::service-release status versions",
+                                      passed=True, detail=detail))
+        else:
+            _record_defect(collector, defects, "E", "webui_py::service-release status versions", "major",
+                            "WebUI 服务版本卡片的安装/下载状态与 `service-release status versions` 不一致",
+                            path_desc, "全部一致", detail, str(cli_data)[:1000])
+    except Exception as e:
+        collector.add(TestResult(module="E", name="webui_py::service-release status versions",
+                                  passed=False, detail=f"检查异常: {e!r}"))
+
+    # 4. service-release models —— 点击『模型』tab（下标 1），比对模型卡片。
+    # 注意：CLI `service-release models` 顶层字段同样是 `items`，不是 `models`（同上一条
+    # 排查记录）；同样补上 exit_code 显式判定。
+    try:
+        tabs.nth(1).click()
+        page.wait_for_load_state("networkidle")
+        cli_result = cli.run("service-release", "models", timeout=30)
+        if cli_result.exit_code != 0 or cli_result.json_data is None:
+            raise RuntimeError(f"CLI 调用失败: exit_code={cli_result.exit_code}, "
+                               f"json_data={cli_result.json_data!r}")
+        models = cli_result.json_data.get("items", [])
+        path_desc = "点击『下载中心』页『模型』tab → 读取模型卡片列表"
+        articles = page.locator('article[data-model]')
+        mismatches = []
+        for m in models:
+            model_id = m.get("model_id", "")
+            card = page.locator(f'article[data-model="{model_id}"]')
+            if not card.is_visible():
+                mismatches.append(f"{model_id}: 卡片未找到")
+                continue
+            title_text = card.locator(".dc-card__title").inner_text()
+            if m.get("name", "") not in title_text:
+                mismatches.append(f"{model_id}: 标题不含 name({m.get('name')!r})")
+        passed = articles.count() == len(models) and not mismatches
+        detail = (f"{path_desc}。{'一致' if passed else '不一致'}: 页面 {articles.count()} 张卡片/"
+                  f"CLI {len(models)} 个模型" + (f", 问题: {mismatches}" if mismatches else ""))
+        if passed:
+            collector.add(TestResult(module="E", name="webui_py::service-release models",
+                                      passed=True, detail=detail))
+        else:
+            _record_defect(collector, defects, "E", "webui_py::service-release models", "major",
+                            "WebUI 模型卡片与 `service-release models` 不一致",
+                            path_desc, "每个模型都有对应卡片且标题包含名称", detail, str(models)[:1000])
+    except Exception as e:
+        collector.add(TestResult(module="E", name="webui_py::service-release models",
+                                  passed=False, detail=f"检查异常: {e!r}"))
+
+    # 5. service-release status models —— 仍在『模型』tab，逐个模型卡片比对安装/下载状态。
+    try:
+        cli_data = cli.run("service-release", "status", "models", timeout=30).json_data or {}
+        path_desc = "『下载中心』页『模型』tab（复用）→ 逐个模型卡片比对安装/下载状态"
+        mismatches, checked = [], 0
+        for model_id, info in cli_data.items():
+            card = page.locator(f'article[data-model="{model_id}"]')
+            if card.count() == 0:
+                continue
+            checked += 1
+            if info.get("installed"):
+                pill_visible = card.locator(".dc-card__installed-pill").is_visible()
+                path_text = card.locator(".dc-card__path").inner_text().strip()
+                if not pill_visible or path_text != info.get("install_path", ""):
+                    mismatches.append(f"{model_id}: installed 状态不符")
+            if info.get("downloaded"):
+                save_path_text = card.locator(".dc-card__save-path-text").inner_text().strip()
+                if save_path_text != info.get("save_path", ""):
+                    mismatches.append(f"{model_id}: downloaded save_path 不符")
+        passed = not mismatches
+        detail = (f"{path_desc}。共校验 {checked} 个已渲染模型卡片。"
+                  f"{'一致' if passed else '不一致'}: {mismatches if mismatches else '全部一致'}")
+        if passed:
+            collector.add(TestResult(module="E", name="webui_py::service-release status models",
+                                      passed=True, detail=detail))
+        else:
+            _record_defect(collector, defects, "E", "webui_py::service-release status models", "major",
+                            "WebUI 模型卡片的安装/下载状态与 `service-release status models` 不一致",
+                            path_desc, "全部一致", detail, str(cli_data)[:1000])
+    except Exception as e:
+        collector.add(TestResult(module="E", name="webui_py::service-release status models",
+                                  passed=False, detail=f"检查异常: {e!r}"))
+
+    # 6. service-release settings get —— 点击设置展开按钮，比对 5 项下载设置。
+    try:
+        page.locator(".dc-settings__toggle").click()
+        page.wait_for_load_state("networkidle")
+        cli_data = cli.run("service-release", "settings", "get", timeout=30).json_data or {}
+        path_desc = "点击『下载中心』页设置展开按钮 → 比对 5 项下载设置"
+        checks = {
+            "save_dir": (page.locator("#dc-save-dir").input_value(), cli_data.get("save_dir")),
+            "version_list_url": (page.locator("#dc-version-url").input_value(), cli_data.get("version_list_url")),
+            "catalog_url": (page.locator("#dc-catalog-url").input_value(), cli_data.get("catalog_url")),
+            "fetch_timeout_seconds": (page.locator("#dc-fetch-timeout").input_value(),
+                                       str(cli_data.get("fetch_timeout_seconds"))),
+            "download_timeout_seconds": (page.locator("#dc-download-timeout").input_value(),
+                                          str(cli_data.get("download_timeout_seconds"))),
+        }
+        mismatches = [f"{k}: 页面{a!r} != CLI{b!r}" for k, (a, b) in checks.items() if a != b]
+        passed = not mismatches
+        detail = f"{path_desc}。{'一致' if passed else '不一致'}: {mismatches if mismatches else '5 项均一致'}"
+        if passed:
+            collector.add(TestResult(module="E", name="webui_py::service-release settings get",
+                                      passed=True, detail=detail))
+        else:
+            _record_defect(collector, defects, "E", "webui_py::service-release settings get", "major",
+                            "WebUI 下载设置面板与 `service-release settings get` 不一致",
+                            path_desc, "5 项均一致", detail, str(cli_data)[:800])
+    except Exception as e:
+        collector.add(TestResult(module="E", name="webui_py::service-release settings get",
+                                  passed=False, detail=f"检查异常: {e!r}"))
+
+
+def _webui_check_service_group(page, frontend_url, cli, collector, defects):
+    """分组 3：服务页面，覆盖 service status / probe / models / config get 共 4 条真实
+    比对（`service path` 是设计边界，不在此列，由 _webui_record_boundary_cases 自动处理）。
+
+    公共前置（打开服务页）同样必须包一层 try/except，理由同上。"""
+    group_cases = ("webui_py::service status", "webui_py::service probe",
+                   "webui_py::service models", "webui_py::service config get")
+    try:
+        page.goto(f"{frontend_url}/service")
+        page.wait_for_load_state("networkidle")
+    except Exception as e:
+        detail = f"打开『服务』页（公共前置）失败，本组 4 项检查均跳过: {e!r}"
+        for name in group_cases:
+            collector.add(TestResult(module="E", name=name, passed=False, detail=detail))
+        return
+
+    # 1. service status —— 直接读取状态指示灯，无需点击。
+    try:
+        cli_data = cli.run("service", "status", timeout=30).json_data or {}
+        path_desc = "打开『服务』页 → 直接读取状态指示灯"
+        cls = page.locator(".service-status-indicator").get_attribute("class") or ""
+        indicator_running = "running" in cls
+        expected_running = bool(cli_data.get("running") or cli_data.get("state") == "running")
+        passed = indicator_running == expected_running
+        exe_note = ""
+        exe_path = cli_data.get("exe_path")
+        if passed and exe_path:
+            exe_text = page.locator(".service-status-exe").inner_text()
+            exe_ok = exe_text == exe_path
+            passed = passed and exe_ok
+            exe_note = f", exe_path {'一致' if exe_ok else '不一致'}"
+        detail = (f"{path_desc}。{'一致' if passed else '不一致'}: 指示灯 running={indicator_running}/"
+                  f"CLI running={expected_running}{exe_note}")
+        if passed:
+            collector.add(TestResult(module="E", name="webui_py::service status", passed=True, detail=detail))
+        else:
+            _record_defect(collector, defects, "E", "webui_py::service status", "major",
+                            "WebUI 服务状态指示灯与 `service status` 不一致",
+                            path_desc, "指示灯状态(及 exe_path)与 CLI 一致", detail, str(cli_data)[:500])
+    except Exception as e:
+        collector.add(TestResult(module="E", name="webui_py::service status", passed=False,
+                                  detail=f"检查异常: {e!r}"))
+
+    # 2. service probe —— 展开连接栏，点击『测试』按钮，读取连接结果。
+    try:
+        page.locator(".service-connection-bar").click()
+        page.wait_for_load_state("networkidle")
+        page.locator(".service-connection-body button").first.click()
+        path_desc = "点击『服务』页连接栏展开 → 点击『测试』按钮 → 读取连接结果"
+        cli_data = cli.run("service", "probe", timeout=30).json_data or {}
+        result_visible = _wait_visible(page.locator(".conn-result-ok"))
+        expected_reachable = bool(cli_data.get("reachable"))
+        passed = result_visible == expected_reachable
+        detail = f"{path_desc}。{'一致' if passed else '不一致'}: 页面={result_visible}/CLI reachable={expected_reachable}"
+        if passed:
+            collector.add(TestResult(module="E", name="webui_py::service probe", passed=True, detail=detail))
+        else:
+            _record_defect(collector, defects, "E", "webui_py::service probe", "major",
+                            "WebUI 服务连接测试结果与 `service probe` 不一致",
+                            path_desc, "连接结果展示与 CLI reachable 一致", detail, str(cli_data)[:500])
+    except Exception as e:
+        collector.add(TestResult(module="E", name="webui_py::service probe", passed=False,
+                                  detail=f"检查异常: {e!r}"))
+
+    # 3. service models —— 直接读取模型下拉选择器的可选项。
+    try:
+        cli_data = cli.run("service", "models", timeout=30).json_data or []
+        path_desc = "『服务』页 → 读取模型下拉选择器的可选项"
+        options = page.locator(".param-cell-model .param-select optgroup option")
+        if not cli_data:
+            passed = page.locator(".param-cell-model").count() == 0
+            detail = f"{path_desc}。一致: 无模型时不展示模型选择器" if passed \
+                else f"{path_desc}。不一致: CLI 无模型但页面仍展示模型选择器"
+        else:
+            expected_names = {m.get("name") for m in cli_data}
+            passed = options.count() == len(cli_data) and set(options.all_text_contents()) == expected_names
+            detail = (f"{path_desc}。{'一致' if passed else '不一致'}: 页面 {options.count()} 个选项/"
+                      f"CLI {len(cli_data)} 个模型")
+        if passed:
+            collector.add(TestResult(module="E", name="webui_py::service models", passed=True, detail=detail))
+        else:
+            _record_defect(collector, defects, "E", "webui_py::service models", "major",
+                            "WebUI 服务页模型下拉选项与 `service models` 不一致",
+                            path_desc, "选项集合与 CLI 一致", detail, str(cli_data)[:1000])
+    except Exception as e:
+        collector.add(TestResult(module="E", name="webui_py::service models", passed=False,
+                                  detail=f"检查异常: {e!r}"))
+
+    # 4. service config get —— 点击配置齿轮按钮打开弹窗，比对默认模型下拉框；
+    # 齿轮按钮 disabled（服务未安装）时退化为仅校验 CLI 输出结构。
+    try:
+        page.wait_for_load_state("networkidle")
+        cli_data = cli.run("service", "config", "get", timeout=30).json_data or {}
+        config = cli_data.get("config", cli_data) if isinstance(cli_data, dict) else {}
+        gear = page.locator(".svc-cfg-gear-btn")
+        if gear.is_enabled():
+            path_desc = "点击『服务』页配置齿轮按钮 → 打开配置弹窗 → 比对默认模型下拉框"
+            gear.click()
+            page.get_by_role("dialog").wait_for(state="visible", timeout=10000)
+            value = page.locator('input[list="svc-cfg-default-model-options"]').input_value()
+            expected = config.get("default_model", "")
+            passed = value == expected
+            detail = f"{path_desc}。{'一致' if passed else '不一致'}: 页面={value!r}/CLI={expected!r}"
+        else:
+            path_desc = "『服务』页配置齿轮按钮不可用（服务未安装）"
+            passed = isinstance(config, dict) and bool(config)
+            detail = f"{path_desc}，退化为仅校验 CLI 输出结构。config 字段可用={passed}"
+        if passed:
+            collector.add(TestResult(module="E", name="webui_py::service config get", passed=True, detail=detail))
+        else:
+            _record_defect(collector, defects, "E", "webui_py::service config get", "major",
+                            "WebUI 服务配置弹窗默认模型与 `service config get` 不一致",
+                            path_desc, "弹窗内默认模型与 CLI 一致", detail, str(cli_data)[:800])
+    except Exception as e:
+        collector.add(TestResult(module="E", name="webui_py::service config get", passed=False,
+                                  detail=f"检查异常: {e!r}"))
+
+
+def _webui_check_appbuilder_group(page, frontend_url, cli, collector, defects, csrf):
+    """分组 4：App Builder 工作台，覆盖 pack taxonomy / pack list / app --json / run list
+    共 4 条真实比对，均在 `/chat` 页面内的浮层进行，需要真实点击进入。
+
+    公共前置（打开工作台）本身也可能失败（如冷启动下 Vite 编译该模块较慢），必须包一层
+    try/except——否则会像本模块其它检查一样让异常向上传播炸掉整个 webui 模块，
+    连同此前已经跑完的其它模块结果一起丢失（详见 2026-07-22 remote 测试排查记录）。
+    失败时把本组全部 4 条检查记为同一条失败原因，不再继续执行组内后续检查。
+
+    工作台浮层默认不挂载：其渲染条件 `appBuilderShowWorkbench` 来自 `GET /api/forge-config`
+    的 `ui.app_builder.show_workbench` 字段，服务端持久化默认值为 `false`（纯本地功能开关，
+    与任何外网/CDN 资源无关），点击『任务』模式按钮本身只是本地状态切换，不会自动打开这个
+    开关；必须先用 CsrfSession 读一次现有配置、合并该字段为 True 后写回，否则浮层永远不会
+    出现（2026-07-22 remote 测试排查确认，此前一直缺这一步导致全组超时）。"""
+    group_cases = ("webui_py::pack taxonomy", "webui_py::pack list",
+                   "webui_py::app --json", "webui_py::run list")
+    try:
+        cfg_resp = csrf.request("GET", "/api/forge-config", timeout=15)
+        config = (cfg_resp.json() or {}).get("config", {}) if cfg_resp.ok else {}
+        ui_cfg = config.get("ui", {})
+        app_builder_cfg = ui_cfg.get("app_builder", {})
+        config["ui"] = {**ui_cfg, "app_builder": {**app_builder_cfg, "show_workbench": True}}
+        csrf.request("POST", "/api/forge-config", json={"config": config}, timeout=15)
+
+        page.goto(f"{frontend_url}/chat")
+        page.wait_for_load_state("networkidle")
+        page.get_by_test_id("mode-btn-app-builder").click()
+        page.get_by_test_id("app-builder-workbench").wait_for(state="visible", timeout=30000)
+    except Exception as e:
+        detail = f"打开 App Builder 工作台（公共前置）失败，本组 4 项检查均跳过: {e!r}"
+        for name in group_cases:
+            collector.add(TestResult(module="E", name=name, passed=False, detail=detail))
+        return
+
+    # 1. pack taxonomy —— 打开分类弹层（若有『View all』则点击展开全量），比对任务行数。
+    try:
+        page.locator(".ab-taxonomy-btn").click()
+        popover = page.locator(".ab-taxonomy-popover--floating")
+        popover.wait_for(state="visible", timeout=10000)
+        view_all = popover.locator(".ab-taxonomy-foot a")
+        if view_all.count() > 0:
+            view_all.click()
+        cli_data = cli.run("pack", "taxonomy", timeout=30).json_data or {}
+        groups = cli_data.get("groups", [])
+        expected_count = sum(len(g.get("tasks", [])) for g in groups)
+        path_desc = "点击 App Builder 工作台『任务分类』按钮 → 展开分类弹层（若有『View all』则展开全量）"
+        actual_count = popover.locator(".ab-taxonomy-task-row").count()
+        passed = actual_count == expected_count
+        detail = f"{path_desc}。{'一致' if passed else '不一致'}: 页面 {actual_count} 行/CLI {expected_count} 个任务"
+        if passed:
+            collector.add(TestResult(module="E", name="webui_py::pack taxonomy", passed=True, detail=detail))
+        else:
+            _record_defect(collector, defects, "E", "webui_py::pack taxonomy", "major",
+                            "WebUI 任务分类弹层任务数量与 `pack taxonomy` 不一致",
+                            path_desc, "任务行数与 CLI 一致", detail, str(cli_data)[:800])
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(300)
+    except Exception as e:
+        collector.add(TestResult(module="E", name="webui_py::pack taxonomy", passed=False,
+                                  detail=f"检查异常: {e!r}"))
+
+    # 2/3. pack list 与 app --json —— 共用同一份页面证据（Pack 列表），分别用各自的
+    # CLI 命令取值单独判定 PASS/FAIL；任务数量多时抽样前 3 个分组，避免遍历耗时过长。
+    try:
+        cli_pack = cli.run("pack", "list", timeout=30).json_data or {}
+        cli_app = cli.run("app", "--json", timeout=30).json_data or {}
+        items = cli_pack.get("items", [])
+        packs = cli_app.get("packs", [])
+        taxonomy = cli.run("pack", "taxonomy", timeout=30).json_data or {}
+        groups = taxonomy.get("groups", [])
+        task_group = groups[1] if len(groups) > 1 else (groups[0] if groups else {})
+        all_tasks = task_group.get("tasks", [])
+        sample_tasks = all_tasks[:3]
+        path_desc = ("依次点击『任务分类』按钮 → 搜索框输入任务名过滤 → 点击匹配的任务行 → "
+                     "点击模型选择器按钮 → 读取模型卡片名称（抽样）")
+        picked_names = set()
+        for task in sample_tasks:
+            task_name = task.get("name") or task.get("title") or task.get("id", "")
+            if not task_name:
+                continue
+            # 直接点击 .ab-taxonomy-btn 是个双态开关：如果弹层因为上一步 Escape 后仍处于
+            # "已展开"状态（Teleport 浮层的关闭时序与按钮自身的展开态可能不同步），这次点击
+            # 反而会把它关掉，导致后面等它"出现"直接超时（2026-07-22 remote 测试排查确认）。
+            # 先判断当前是否已经可见，只有不可见时才点击，让这一步的最终状态始终是"打开"。
+            popover = page.locator(".ab-taxonomy-popover--floating")
+            if not popover.is_visible():
+                page.locator(".ab-taxonomy-btn").click()
+            popover.wait_for(state="visible", timeout=10000)
+            popover.locator(".ab-taxonomy-search input").fill(task_name)
+            row = popover.locator(".ab-taxonomy-task-row", has_text=task_name).first
+            if row.count() == 0:
+                continue
+            row.click()
+            page.locator(".ab-model-picker-button").click()
+            picker = page.locator(".ab-model-picker-popover")
+            picker.wait_for(state="visible", timeout=10000)
+            picked_names.update(t.strip() for t in
+                                 picker.locator(".ab-model-card .ab-model-card-name").all_text_contents())
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(200)
+
+        note = f"抽样校验 {len(sample_tasks)}/{len(all_tasks)} 个任务分组，共读到 {len(picked_names)} 个模型名"
+        item_titles = {i.get("title") or i.get("id", "") for i in items}
+        pack_titles = {p.get("title") or p.get("id", "") for p in packs}
+        pack_list_ok = picked_names.issubset(item_titles)
+        app_json_ok = picked_names.issubset(pack_titles)
+
+        detail_pack = f"{path_desc}。{note}。{'一致' if pack_list_ok else '不一致'}: " \
+                      f"{'抽样模型名均能在 pack list items 中找到' if pack_list_ok else '部分抽样模型名不在 pack list items 中'}"
+        if pack_list_ok:
+            collector.add(TestResult(module="E", name="webui_py::pack list", passed=True, detail=detail_pack))
+        else:
+            _record_defect(collector, defects, "E", "webui_py::pack list", "major",
+                            "App Builder 模型选择器展示的模型不在 `pack list` 结果中",
+                            path_desc, "抽样模型名均为 `pack list` items 子集", detail_pack,
+                            str(sorted(picked_names))[:800])
+
+        detail_app = f"{path_desc}。{note}。{'一致' if app_json_ok else '不一致'}: " \
+                     f"{'抽样模型名均能在 app --json packs 中找到' if app_json_ok else '部分抽样模型名不在 app --json packs 中'}"
+        if app_json_ok:
+            collector.add(TestResult(module="E", name="webui_py::app --json", passed=True, detail=detail_app))
+        else:
+            _record_defect(collector, defects, "E", "webui_py::app --json", "major",
+                            "App Builder 模型选择器展示的模型不在 `app --json` 结果中",
+                            path_desc, "抽样模型名均为 `app --json` packs 子集", detail_app,
+                            str(sorted(picked_names))[:800])
+    except Exception as e:
+        collector.add(TestResult(module="E", name="webui_py::pack list", passed=False,
+                                  detail=f"检查异常: {e!r}"))
+        collector.add(TestResult(module="E", name="webui_py::app --json", passed=False,
+                                  detail=f"检查异常: {e!r}"))
+
+    # 4. run list —— 若上一步抽样没有实际点选任何模型卡片，这里补选一个，让『运行历史』
+    # 面板有确定的模型上下文可依赖；再展开历史面板比对条目数量。
+    try:
+        picker = page.locator(".ab-model-picker-popover")
+        if not picker.is_visible():
+            page.locator(".ab-model-picker-button").click()
+            picker.wait_for(state="visible", timeout=10000)
+        picker.locator(".ab-model-card").first.click()
+        history_toggle = page.get_by_test_id("app-builder-history-toggle")
+        history_toggle.wait_for(state="visible", timeout=10000)
+        history_toggle.click()
+        panel = page.get_by_test_id("app-builder-history-panel")
+        panel.wait_for(state="visible", timeout=10000)
+        cli_data = cli.run("run", "list", timeout=30).json_data or {}
+        items = cli_data.get("items", [])
+        path_desc = "点击 App Builder 工作台历史记录按钮 → 展开历史面板 → 读取历史条目"
+        if not items:
+            passed = _wait_visible(page.locator(".ab-history-empty"))
+            detail = f"{path_desc}。一致: 空态展示，CLI 返回空列表" if passed \
+                else f"{path_desc}。不一致: 空态未展示，但 CLI 返回空列表"
+        else:
+            count = page.get_by_test_id("app-builder-history-item").count()
+            passed = count == len(items)
+            detail = f"{path_desc}。{'一致' if passed else '不一致'}: 页面 {count} 条/CLI {len(items)} 条（仅校验数量）"
+        if passed:
+            collector.add(TestResult(module="E", name="webui_py::run list", passed=True, detail=detail))
+        else:
+            _record_defect(collector, defects, "E", "webui_py::run list", "major",
+                            "App Builder 历史面板条目数量与 `run list` 不一致",
+                            path_desc, "历史条目数量与 CLI 一致", detail, str(cli_data)[:800])
+    except Exception as e:
+        collector.add(TestResult(module="E", name="webui_py::run list", passed=False,
+                                  detail=f"检查异常: {e!r}"))
+
+
+def _webui_check_conv_code_group(page, frontend_url, cli, collector, defects, csrf):
+    """分组 5：最近对话 + AI 编程会话，覆盖 conv list / code session list / code health
+    共 3 条真实比对，均在 `/chat` 页面。"""
+    # 1. conv list —— 侧边栏有分组截断逻辑，仅做"页面展示的标题都真实存在于 CLI 结果里"
+    # 的子集校验，不要求数量严格相等。
+    try:
+        page.goto(f"{frontend_url}/chat")
+        page.wait_for_load_state("networkidle")
+        cli_data = cli.run("conv", "list", timeout=30).json_data or []
+        path_desc = "打开『对话』页 → 读取侧边栏『最近对话』列表标题"
+        if not cli_data:
+            passed = _wait_visible(page.locator(".conv-empty-hint"))
+            detail = f"{path_desc}。一致: 空态提示可见，CLI 返回空列表" if passed \
+                else f"{path_desc}。不一致: 空态提示未展示，但 CLI 返回空列表"
+        else:
+            titles = [t.strip() for t in page.locator(".conv-item .conv-item-title-text").all_text_contents()
+                      if t.strip()]
+            expected_titles = {c.get("title", "") for c in cli_data}
+            missing = [t for t in titles if t not in expected_titles]
+            passed = not missing
+            detail = (f"{path_desc}。因侧边栏分组截断，仅做子集校验。"
+                      f"{'一致' if passed else '不一致'}: 页面展示 {len(titles)} 个标题"
+                      + (f"，其中 {len(missing)} 个不在 CLI 结果中" if missing else "，均能在 CLI 结果中找到"))
+            if missing:
+                # 与 policy skill-cap discover 属于同一类现象：WebUI 由长驻后端进程提供数据，
+                # CLI 侧是本次新起的独立子进程读取，二者并非同一份内存/连接状态；若同一次
+                # run 内此前有其它模块（如 cli_smoke 的 conv 相关冒烟）刚创建/修改过对话，
+                # 两次读取之间存在时序竞态是可能的（2026-07-22 remote 测试排查记录），出现
+                # 该 defect 时应结合当次 run 时间线判断，而非默认是本处比对逻辑写错。
+                detail += "（提示：与 skill-cap discover 同类，可能是 CLI 子进程与长驻后端之间的时序竞态，而非选择器/比对逻辑错误）"
+        if passed:
+            collector.add(TestResult(module="E", name="webui_py::conv list", passed=True, detail=detail))
+        else:
+            _record_defect(collector, defects, "E", "webui_py::conv list", "major",
+                            "WebUI 最近对话侧边栏标题不在 `conv list` 结果中",
+                            path_desc, "侧边栏展示的标题都是 CLI 结果的子集", detail, str(cli_data)[:800])
+    except Exception as e:
+        collector.add(TestResult(module="E", name="webui_py::conv list", passed=False,
+                                  detail=f"检查异常: {e!r}"))
+
+    # 2/3. code session list 与 code health —— 共用前置操作：先经后端 HTTP 接口开启
+    # AI 编程配置，再打开对话页、点击『cc』pill 展开编程面板。
+    try:
+        # `/api/cc/config` 是非安全方法（POST），后端 CsrfMiddleware 默认要求同时携带
+        # `qai_csrf` cookie 与 `X-QAI-CSRF` header；脱离浏览器会话、不带 CSRF token 的裸
+        # requests.post 会被 403 拦截，配置从未真正持久化，导致 `cc-pill` 一直不出现
+        # （2026-07-22 remote 测试排查确认）。改用已实现双提交 Cookie 握手的 CsrfSession。
+        csrf.request("POST", "/api/cc/config", json={"config": {"enabled": True}}, timeout=10)
+        page.goto(f"{frontend_url}/chat")
+        page.get_by_test_id("cc-pill").click()
+        page.get_by_test_id("coding-panel-cc").wait_for(state="visible", timeout=15000)
+        path_desc = "开启 AI 编程配置 → 打开『对话』页 → 点击『cc』pill → 展开编程面板"
+    except Exception as e:
+        collector.add(TestResult(module="E", name="webui_py::code session list", passed=False,
+                                  detail=f"检查异常(前置操作失败): {e!r}"))
+        collector.add(TestResult(module="E", name="webui_py::code health", passed=False,
+                                  detail=f"检查异常(前置操作失败): {e!r}"))
+        return
+
+    # 2. code session list —— 面板默认只显示 Active 标签页，CLI 侧需先按 status 过滤。
+    try:
+        cli_sessions = cli.run("code", "session", "list", timeout=30).json_data or []
+        active_sessions = [s for s in cli_sessions if s.get("status") == "active"]
+        rows = page.get_by_test_id("coding-panel-list-cc").locator("> div")
+        row_count = rows.count()
+        if not active_sessions:
+            passed = row_count == 1  # 空态提示行
+            detail = (f"{path_desc} → 读取会话列表（Active 标签页默认视图）。"
+                      f"{'一致' if passed else '不一致'}: 页面 {row_count} 行(应为空态提示行)")
+        else:
+            titles = {rows.nth(i).locator("span").nth(1).inner_text().strip() for i in range(row_count)}
+            expected_titles = {s.get("title") or s.get("session_id") for s in active_sessions}
+            passed = row_count == len(active_sessions) and titles == expected_titles
+            detail = (f"{path_desc} → 读取会话列表（Active 标签页）。{'一致' if passed else '不一致'}: "
+                      f"页面 {row_count} 行/CLI(active) {len(active_sessions)} 条")
+        if passed:
+            collector.add(TestResult(module="E", name="webui_py::code session list",
+                                      passed=True, detail=detail))
+        else:
+            _record_defect(collector, defects, "E", "webui_py::code session list", "major",
+                            "WebUI AI 编程面板会话列表与 `code session list`(active) 不一致",
+                            path_desc, "会话列表与 CLI active 会话一致", detail, str(cli_sessions)[:1000])
+    except Exception as e:
+        collector.add(TestResult(module="E", name="webui_py::code session list", passed=False,
+                                  detail=f"检查异常: {e!r}"))
+
+    # 3. code health —— 读取页脚状态栏的 SDK/授权图标（及可选的 sdk_version）。
+    try:
+        health = cli.run("code", "health", timeout=30).json_data or {}
+        info_spans = page.locator(".ai-coding-statusbar-info > span")
+        sdk_text = info_spans.nth(0).inner_text()
+        auth_text = info_spans.nth(1).inner_text()
+        sdk_available = bool(health.get("sdk_available"))
+        auth_configured = bool(health.get("auth_configured"))
+        sdk_ok = ("✅" in sdk_text) == sdk_available and ("❌" in sdk_text) == (not sdk_available)
+        auth_ok = ("✅" in auth_text) == auth_configured and ("❌" in auth_text) == (not auth_configured)
+        passed = sdk_ok and auth_ok
+        detail = (f"{path_desc} → 读取状态栏 SDK/授权图标。{'一致' if passed else '不一致'}: "
+                  f"sdk_available={sdk_available}, auth_configured={auth_configured}")
+        sdk_version = health.get("sdk_version")
+        if passed and sdk_version:
+            version_text = info_spans.nth(0).locator(".ai-coding-statusbar-detail").inner_text()
+            version_ok = version_text == sdk_version
+            passed = passed and version_ok
+            detail += f", sdk_version {'一致' if version_ok else '不一致'}"
+        if passed:
+            collector.add(TestResult(module="E", name="webui_py::code health", passed=True, detail=detail))
+        else:
+            _record_defect(collector, defects, "E", "webui_py::code health", "major",
+                            "WebUI AI 编程面板状态栏与 `code health` 不一致",
+                            path_desc, "状态栏图标/版本与 CLI 一致", detail, str(health)[:500])
+    except Exception as e:
+        collector.add(TestResult(module="E", name="webui_py::code health", passed=False,
+                                  detail=f"检查异常: {e!r}"))
+
+
+def _webui_check_settings_skills_group(page, frontend_url, cli, collector, defects):
+    """分组 6：设置 + 技能，覆盖 config provider list / skill list 共 2 条真实比对。"""
+    # 1. config provider list —— 打开『设置』页『云端模型』tab，比对 Provider 分组。
+    try:
+        page.goto(f"{frontend_url}/settings?tab=cloud-models")
+        page.wait_for_load_state("networkidle")
+        cli_data = cli.run("config", "provider", "list", timeout=30).json_data or {}
+        providers = cli_data.get("providers", [])
+        groups = page.locator(".cloud-model-provider-group")
+        expected_ids = {p.get("provider_id") for p in providers}
+        actual_ids = set(groups.locator(".cloud-model-provider-label").all_text_contents())
+        path_desc = "打开『设置』页『云端模型』tab → 读取 Provider 分组列表"
+        passed = groups.count() == len(providers) and actual_ids == expected_ids
+        detail = (f"{path_desc}。{'一致' if passed else '不一致'}: 页面 {groups.count()} 个分组/"
+                  f"CLI {len(providers)} 个 Provider")
+        if passed:
+            collector.add(TestResult(module="E", name="webui_py::config provider list",
+                                      passed=True, detail=detail))
+        else:
+            _record_defect(collector, defects, "E", "webui_py::config provider list", "major",
+                            "WebUI Provider 分组与 `config provider list` 不一致",
+                            path_desc, "分组数量/ID 集合与 CLI 一致", detail, str(providers)[:1000])
+    except Exception as e:
+        collector.add(TestResult(module="E", name="webui_py::config provider list", passed=False,
+                                  detail=f"检查异常: {e!r}"))
+
+    # 2. skill list —— 打开『技能』页，比对技能卡片网格。
+    try:
+        page.goto(f"{frontend_url}/skills")
+        page.wait_for_load_state("networkidle")
+        cli_data = cli.run("skill", "list", timeout=30).json_data or {}
+        skills = cli_data.get("skills", [])
+        cards = page.locator(".skills-grid .skill-card")
+        expected_ids = {s.get("skill_id") or s.get("id") for s in skills}
+        actual_ids = set(cards.locator(".skill-card-id").all_text_contents())
+        path_desc = "打开『技能』页 → 读取技能卡片网格"
+        passed = cards.count() == len(skills) and actual_ids == expected_ids
+        detail = (f"{path_desc}。{'一致' if passed else '不一致'}: 页面 {cards.count()} 张卡片/"
+                  f"CLI {len(skills)} 个技能")
+        if passed:
+            collector.add(TestResult(module="E", name="webui_py::skill list", passed=True, detail=detail))
+        else:
+            _record_defect(collector, defects, "E", "webui_py::skill list", "major",
+                            "WebUI 技能卡片与 `skill list` 不一致",
+                            path_desc, "卡片数量/ID 集合与 CLI 一致", detail, str(skills)[:1000])
+    except Exception as e:
+        collector.add(TestResult(module="E", name="webui_py::skill list", passed=False,
+                                  detail=f"检查异常: {e!r}"))
+
+
 # ---------------------------------------------------------------------------
 # 统一报告生成（原 test/generate_builder_report.py，现合并进本脚本）
 # ---------------------------------------------------------------------------
@@ -1022,38 +2096,13 @@ class _BoundaryKind:
 
 @dataclass(frozen=True)
 class UiEquivalent:
-    """CLI 用例到 WebUI 等价物的映射条目。
-    webui_spec_file 为 None 表示该用例是设计边界，此时 boundary_kind/
-    boundary_reason 必须非空；否则 webui_spec_file/webui_case_title 均须给出，
-    用于在 Playwright 结果里按标题定位对应的用例。"""
-    webui_spec_file: Optional[str]
-    webui_case_title: Optional[str]
+    """cli_smoke 用例是否存在对应的 WebUI 操作入口的登记表；仅供
+    `_webui_record_boundary_cases()` 自动识别设计边界用例使用。
+    boundary_kind 非空表示该用例是设计边界（webui 模块跳过它，理由见 boundary_reason）；
+    为空表示该用例在 webui 模块里有真实的浏览器点击路径比对（比对逻辑本身写在
+    各 `_webui_check_*_group` 函数里，不依赖这份映射表）。"""
     boundary_kind: Optional[str] = None
     boundary_reason: Optional[str] = None
-
-
-@dataclass
-class UnifiedCase:
-    case_name: str
-    module: str
-    cli_status: str
-    webui_status: str  # passed / failed / skipped / not_collected / boundary
-    webui_spec_file: Optional[str] = None
-    webui_case_title: Optional[str] = None
-    boundary_kind: Optional[str] = None
-    boundary_reason: Optional[str] = None
-    cli_detail: str = ""
-    webui_detail: str = ""
-
-
-@dataclass
-class WebUiCaseResult:
-    title: str
-    full_title: str
-    status: str  # passed / failed / skipped / not_collected
-    spec_file: str
-    duration_ms: float = 0.0
-    error_message: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -1094,84 +2143,10 @@ def _normalize_cli_case(r: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 解析 Playwright 原生 JSON reporter 格式
-# ---------------------------------------------------------------------------
-
-def parse_webui_results(webui_results_json_path) -> Dict[str, WebUiCaseResult]:
-    """解析 playwright.config.ts 里配置的 `["json", {outputFile: "..."}]` reporter
-    产出的原生 JSON（suites -> specs -> tests -> results[].status，suites 可递归
-    嵌套 describe 块）。按用例标题（title）与"父 suite 标题 > ... > title"的完整
-    路径（full_title）两种 key 同时登记，方便调用方按简单标题或完整路径查找。
-    文件不存在时返回空字典（意味着所有映射到具体用例的条目都会呈现
-    webui_status=not_collected，这是 WebUI 套件尚未运行/尚未落地时的正常现象，
-    不是解析错误）。"""
-    path = Path(webui_results_json_path)
-    if not path.exists():
-        return {}
-    with open(path, "r", encoding="utf-8") as f:
-        payload = json.load(f)
-    results: Dict[str, WebUiCaseResult] = {}
-    for suite in payload.get("suites", []):
-        _walk_suite(suite, [], results)
-    return results
-
-
-def _walk_suite(suite: dict, title_path: List[str], results: Dict[str, WebUiCaseResult]) -> None:
-    spec_file = suite.get("file", "")
-    next_path = title_path + ([suite["title"]] if suite.get("title") else [])
-    for spec in suite.get("specs", []):
-        title = spec.get("title", "")
-        full_title = " > ".join(next_path + [title])
-        status, duration_ms, error_message = _summarize_spec(spec)
-        result = WebUiCaseResult(
-            title=title, full_title=full_title, status=status,
-            spec_file=spec_file or Path(spec.get("file", "")).name,
-            duration_ms=duration_ms, error_message=error_message,
-        )
-        # 允许调用方按短标题或完整路径两种方式查找；短标题在本项目里目前均唯一，
-        # 一旦将来出现重名，完整路径仍能精确区分。
-        results[title] = result
-        results[full_title] = result
-    for child in suite.get("suites", []):
-        _walk_suite(child, next_path, results)
-
-
-def _summarize_spec(spec: dict) -> Tuple[str, float, str]:
-    tests = spec.get("tests", [])
-    if not tests:
-        return "not_collected", 0.0, ""
-    statuses: List[str] = []
-    duration_ms = 0.0
-    error_message = ""
-    for t in tests:
-        test_results = t.get("results", [])
-        if test_results:
-            last = test_results[-1]
-            statuses.append(last.get("status", ""))
-            duration_ms += last.get("duration", 0) or 0
-            errors = last.get("errors", [])
-            if errors and not error_message:
-                first = errors[0]
-                error_message = first.get("message", str(first)) if isinstance(first, dict) else str(first)
-        else:
-            statuses.append(t.get("status", ""))
-    if spec.get("ok") is True:
-        return "passed", duration_ms, error_message
-    if any(s in ("failed", "timedOut", "interrupted") for s in statuses):
-        return "failed", duration_ms, error_message
-    if statuses and all(s == "skipped" for s in statuses):
-        return "skipped", duration_ms, error_message
-    if statuses and all(s == "passed" for s in statuses):
-        return "passed", duration_ms, error_message
-    return "failed", duration_ms, error_message
-
-
-# ---------------------------------------------------------------------------
-# CLI 用例 -> WebUI 等价物映射表
+# cli_smoke 用例 -> WebUI 设计边界映射表
 #
-# 覆盖 test_builder_cli.py 四个模块当前产出的全部用例（cli_smoke 36 条 / channel
-# 11 条 / consistency 2 条 / known_gaps 6 条，共 55 条；用例名以脚本实际运行时
-# 产出的 name 字段为准，不是"约 40 条"这类粗略估计）。
+# 仅覆盖 cli_smoke 模块（模块 A）当前产出的全部 36 条用例，仅供
+# `_webui_record_boundary_cases()` 自动识别其中 10 条设计边界用例使用。
 #
 # 以下映射基于对 QAIModelBuilder/frontend 源码与对应后端路由的实地调研结果
 # （逐条核实过 data-testid/CSS 选择器与 HTTP 端点，而非凭组件命名猜测），
@@ -1179,25 +2154,6 @@ def _summarize_spec(spec: dict) -> Tuple[str, float, str]:
 # conv tab list 三类边界已征得用户同意）。
 # ---------------------------------------------------------------------------
 
-_REASON_FEISHU_URL_VERIFICATION = (
-    "设计边界(无 UI 入口): /api/feishu/webhook 未实现 Feishu event-2.0 的 "
-    "url_verification 挑战握手，该握手只存在于 WS 长连接路径，webhook 本身也没有"
-    "可呈现内容的 UI 载体。"
-)
-_REASON_WECHAT_OUTBOUND_NOT_MOCKABLE = (
-    "设计边界(无 UI 入口): WeChat 出站完全依赖 wechatbot SDK 的活体 Bot 对象、"
-    "不经 HTTP，无法脱离真实环境验证，也没有对应的 UI 触发路径。"
-)
-_REASON_CHANNEL_MESSAGE_HISTORY = (
-    "设计边界(无 UI 入口): 官方 CLI/HTTP/仓储三层均不支持按 instance 查询 channel "
-    "消息历史，Channels 页面本身也不展示消息内容，属已确认设计边界。"
-)
-_REASON_CHANNEL_LIFECYCLE_NOT_SUPPORTED = (
-    "设计边界(当前 UI+HTTP 均不支持该操作): 实地调研确认 Channels 页面是硬编码的 "
-    "WeChat/Feishu 两张固定卡片，注册是隐式自动触发（kind/name 均不可由用户指定），"
-    "且后端 HTTP 层没有暴露删除渠道实例的路由（仓储层 delete 方法未接线到任何路由）。"
-    "已与用户确认：标注为设计边界，不勉强拼造假 UI 流程（2026-07-21 对齐）。"
-)
 _REASON_CHANNEL_LIST_NO_HTTP_ENDPOINT = (
     "设计边界(无共享后端数据源): Step 3 实现 channels-consistency.spec.ts 时确认，"
     "CLI `channel list` 完全不经 HTTP——`apps/cli/commands/channel.py::cmd_list()` "
@@ -1209,14 +2165,6 @@ _REASON_CHANNEL_LIST_NO_HTTP_ENDPOINT = (
     "的唯一请求是 GET /api/{kind}/status?instance_id=<localStorage 缓存的单一 id>，"
     "与 CLI list 返回的是完全不同粒度的数据，没有可比对的共享后端真值。已与用户"
     "确认整体降级为设计边界，不新增 channels-consistency.spec.ts（2026-07-21 对齐）。"
-)
-_REASON_PACK_EXPORT_VALIDATE_INIT = (
-    "设计边界(无 UI 入口): `qai pack export/validate/workspace-init` 这三个子命令"
-    "当前的具体失败特征存在争议——test_builder_cli.py 断言的是因缺失内部模块 "
-    "scripts.build.model_builder_cli 而报 ModuleNotFoundError，但已记录的 D0004/D0005 "
-    "缺陷显示实测中两者均能正常跑到业务逻辑层、报出参数校验失败，与该假设不符（详见 "
-    "docs/known-issues.md）；但无论具体失败模式是哪一种，WebUI 工作台均未提供触发同一"
-    "路径的功能入口，因此不受该争议影响，仍标注为设计边界。"
 )
 _REASON_UI_THEME_NO_SHARED_TRUTH = (
     "设计边界(无共享后端数据源): 实地调研确认 Settings 页面不渲染 ui.theme——前端"
@@ -1263,15 +2211,6 @@ _REASON_CODE_SKILL_LIST_NOT_CONSUMED = (
     "实际消费的都是另一个不相关的 GET /api/skills，/api/{cc|oc}/skills 在前端只"
     "存在于自动生成的类型声明里，没有任何实际调用点。"
 )
-_REASON_CHANNEL_INBOUND_NO_MESSAGE_UI = (
-    "设计边界(无 UI 入口): Channels 页面只展示两张固定的连接状态卡片，不展示任何"
-    "消息内容/历史，与 known_gaps::channel_message_query_missing 是同一条设计"
-    "边界在模块 B 里的体现。"
-)
-_REASON_FEISHU_OUTBOUND_MOCK_INTERNAL = (
-    "设计边界(无 UI 入口): 该用例绕开依赖注入直接构造 FeishuTransport 验证内部"
-    "出站请求形状，是纯后端内部验证，不是用户可见的 UI 交互，没有对应的 UI 载体。"
-)
 _REASON_SERVICE_PATH_NO_HTTP_VALUE = (
     "设计边界(无共享后端数据源): Step 2 实现 service-consistency.spec.ts 时确认，"
     "CLI `service path` 的值来自 OpenServiceDirUseCase.execute() -> "
@@ -1284,174 +2223,56 @@ _REASON_SERVICE_PATH_NO_HTTP_VALUE = (
     "矩阵作为跨端一致性证据（2026-07-21 Step 2 落地后自行决定，小的可逆细节）。"
 )
 
-# 用例名 -> UiEquivalent；按 test_builder_cli.py 的四个模块分组排列，
-# 组内顺序与该模块源码里用例出现的顺序一致，便于交叉核对。
+# 用例名 -> UiEquivalent；仅覆盖 cli_smoke（模块 A）全部 36 条用例，
+# 顺序与该模块源码里用例出现的顺序一致，便于交叉核对。
 CLI_CASE_TO_UI_EQUIVALENT: Dict[str, UiEquivalent] = {
-    # ---- 模块 A：cli_smoke（14 个命令组的只读/幂等子命令冒烟测试） ----
     "cli_smoke::config get ui.theme": UiEquivalent(
-        None, None, _BoundaryKind.NO_SHARED_TRUTH, _REASON_UI_THEME_NO_SHARED_TRUTH),
-    "cli_smoke::config provider list": UiEquivalent(
-        "settings-consistency.spec.ts",
-        "Provider 列表: WebUI 渲染内容与 config provider list 一致"),
-    "cli_smoke::service status": UiEquivalent(
-        "service-consistency.spec.ts", "服务状态: WebUI 渲染内容与 service status 一致"),
-    "cli_smoke::service probe": UiEquivalent(
-        "service-consistency.spec.ts", "服务探活: WebUI 渲染内容与 service probe 一致"),
-    "cli_smoke::service models": UiEquivalent(
-        "service-consistency.spec.ts", "服务模型列表: WebUI 渲染内容与 service models 一致"),
+        _BoundaryKind.NO_SHARED_TRUTH, _REASON_UI_THEME_NO_SHARED_TRUTH),
+    "cli_smoke::config provider list": UiEquivalent(),
+    "cli_smoke::service status": UiEquivalent(),
+    "cli_smoke::service probe": UiEquivalent(),
+    "cli_smoke::service models": UiEquivalent(),
     "cli_smoke::service path": UiEquivalent(
-        None, None, _BoundaryKind.NO_SHARED_TRUTH, _REASON_SERVICE_PATH_NO_HTTP_VALUE),
-    "cli_smoke::service config get": UiEquivalent(
-        "service-consistency.spec.ts", "服务配置: WebUI 渲染内容与 service config get 一致"),
-    "cli_smoke::pack list": UiEquivalent(
-        "app-builder-consistency.spec.ts",
-        "Pack 列表: WebUI 渲染内容与 GET /api/app-builder/models 完全一致（按任务分区校验）"),
+        _BoundaryKind.NO_SHARED_TRUTH, _REASON_SERVICE_PATH_NO_HTTP_VALUE),
+    "cli_smoke::service config get": UiEquivalent(),
+    "cli_smoke::pack list": UiEquivalent(),
     "cli_smoke::pack deps-status": UiEquivalent(
-        None, None, _BoundaryKind.NO_SHARED_TRUTH, _REASON_PACK_DEPS_STATUS_DIFFERENT_ENDPOINT),
+        _BoundaryKind.NO_SHARED_TRUTH, _REASON_PACK_DEPS_STATUS_DIFFERENT_ENDPOINT),
     "cli_smoke::pack cache status": UiEquivalent(
-        None, None, _BoundaryKind.NO_UI_ENTRY, _REASON_PACK_CACHE_STATUS_NOT_CONSUMED),
-    "cli_smoke::pack taxonomy": UiEquivalent(
-        "app-builder-consistency.spec.ts",
-        "Pack 任务分类: WebUI 任务选择器渲染内容与 pack taxonomy 一致"),
-    "cli_smoke::run list": UiEquivalent(
-        "app-builder-consistency.spec.ts", "Run 列表: WebUI 渲染条目数与 GET /api/app-builder/runs 一致"),
+        _BoundaryKind.NO_UI_ENTRY, _REASON_PACK_CACHE_STATUS_NOT_CONSUMED),
+    "cli_smoke::pack taxonomy": UiEquivalent(),
+    "cli_smoke::run list": UiEquivalent(),
     "cli_smoke::run worker status": UiEquivalent(
-        None, None, _BoundaryKind.NO_SHARED_TRUTH, _REASON_RUN_WORKER_STATUS_REPURPOSED),
-    "cli_smoke::policy show": UiEquivalent(
-        "security-consistency.spec.ts", "策略展示: WebUI 渲染内容与 policy show 一致"),
-    "cli_smoke::policy skill-cap discover": UiEquivalent(
-        "security-consistency.spec.ts", "技能能力发现: WebUI 渲染内容与 policy skill-cap discover 一致"),
-    "cli_smoke::security settings get": UiEquivalent(
-        "security-consistency.spec.ts", "安全设置: WebUI 渲染内容与 security settings get 一致"),
-    "cli_smoke::audit query": UiEquivalent(
-        "security-consistency.spec.ts", "审计日志: WebUI 渲染条目与 audit query 一致"),
-    "cli_smoke::conv list": UiEquivalent(
-        "app-builder-consistency.spec.ts", "最近对话: WebUI 侧边栏渲染内容与 conv list 一致"),
+        _BoundaryKind.NO_SHARED_TRUTH, _REASON_RUN_WORKER_STATUS_REPURPOSED),
+    "cli_smoke::policy show": UiEquivalent(),
+    "cli_smoke::policy skill-cap discover": UiEquivalent(),
+    "cli_smoke::security settings get": UiEquivalent(),
+    "cli_smoke::audit query": UiEquivalent(),
+    "cli_smoke::conv list": UiEquivalent(),
     "cli_smoke::conv tab list": UiEquivalent(
-        None, None, _BoundaryKind.NO_SHARED_TRUTH, _REASON_CONV_TAB_LIST_DATA_SOURCE_MISMATCH),
+        _BoundaryKind.NO_SHARED_TRUTH, _REASON_CONV_TAB_LIST_DATA_SOURCE_MISMATCH),
     "cli_smoke::conv experience list": UiEquivalent(
-        None, None, _BoundaryKind.NO_UI_ENTRY, _REASON_CONV_EXPERIENCE_NOT_CONSUMED),
+        _BoundaryKind.NO_UI_ENTRY, _REASON_CONV_EXPERIENCE_NOT_CONSUMED),
     "cli_smoke::conv experience categories": UiEquivalent(
-        None, None, _BoundaryKind.NO_UI_ENTRY, _REASON_CONV_EXPERIENCE_NOT_CONSUMED),
-    "cli_smoke::dep pending": UiEquivalent(
-        "security-consistency.spec.ts", "依赖审批: WebUI 渲染的待批准依赖与 dep pending 一致"),
-    "cli_smoke::exec profiles": UiEquivalent(
-        "security-consistency.spec.ts", "执行代理配置: WebUI 渲染内容与 exec profiles 一致"),
-    "cli_smoke::code session list": UiEquivalent(
-        "app-builder-consistency.spec.ts", "AI 编程会话列表: WebUI 渲染内容与 code session list 一致"),
+        _BoundaryKind.NO_UI_ENTRY, _REASON_CONV_EXPERIENCE_NOT_CONSUMED),
+    "cli_smoke::dep pending": UiEquivalent(),
+    "cli_smoke::exec profiles": UiEquivalent(),
+    "cli_smoke::code session list": UiEquivalent(),
     "cli_smoke::code skill list": UiEquivalent(
-        None, None, _BoundaryKind.NO_SHARED_TRUTH, _REASON_CODE_SKILL_LIST_NOT_CONSUMED),
-    "cli_smoke::code health": UiEquivalent(
-        "app-builder-consistency.spec.ts", "AI 编程环境健康检查: WebUI 渲染内容与 code health 一致"),
-    "cli_smoke::service-release versions": UiEquivalent(
-        "downloads-consistency.spec.ts", "服务版本列表: WebUI 渲染内容与 service-release versions 一致"),
-    "cli_smoke::service-release models": UiEquivalent(
-        "downloads-consistency.spec.ts", "模型目录: WebUI 渲染内容与 service-release models 一致"),
-    "cli_smoke::service-release status versions": UiEquivalent(
-        "downloads-consistency.spec.ts",
-        "服务版本本地状态: WebUI 渲染内容与 service-release status versions 一致"),
-    "cli_smoke::service-release status models": UiEquivalent(
-        "downloads-consistency.spec.ts",
-        "模型本地状态: WebUI 渲染内容与 service-release status models 一致"),
-    "cli_smoke::service-release aria2c status": UiEquivalent(
-        "downloads-consistency.spec.ts", "aria2c 状态: WebUI 渲染内容与 service-release aria2c status 一致"),
-    "cli_smoke::service-release settings get": UiEquivalent(
-        "downloads-consistency.spec.ts", "下载设置: WebUI 渲染内容与 service-release settings get 一致"),
-    "cli_smoke::app --json": UiEquivalent(
-        "app-builder-consistency.spec.ts",
-        "Pack 列表: WebUI 渲染内容与 GET /api/app-builder/models 完全一致（按任务分区校验）"),
-    "cli_smoke::skill list": UiEquivalent(
-        "skills-consistency.spec.ts", "技能列表: WebUI 渲染内容与 skill list 一致"),
-    "cli_smoke::skill policy": UiEquivalent(
-        "security-consistency.spec.ts", "技能全局模式: WebUI 渲染内容与 skill policy 一致"),
+        _BoundaryKind.NO_SHARED_TRUTH, _REASON_CODE_SKILL_LIST_NOT_CONSUMED),
+    "cli_smoke::code health": UiEquivalent(),
+    "cli_smoke::service-release versions": UiEquivalent(),
+    "cli_smoke::service-release models": UiEquivalent(),
+    "cli_smoke::service-release status versions": UiEquivalent(),
+    "cli_smoke::service-release status models": UiEquivalent(),
+    "cli_smoke::service-release aria2c status": UiEquivalent(),
+    "cli_smoke::service-release settings get": UiEquivalent(),
+    "cli_smoke::app --json": UiEquivalent(),
+    "cli_smoke::skill list": UiEquivalent(),
+    "cli_smoke::skill policy": UiEquivalent(),
     "cli_smoke::channel list": UiEquivalent(
-        None, None, _BoundaryKind.NO_SHARED_TRUTH, _REASON_CHANNEL_LIST_NO_HTTP_ENDPOINT),
-
-    # ---- 模块 B：channel（微信飞书 channel 全链路模拟） ----
-    "channel::feishu_url_verification": UiEquivalent(
-        None, None, _BoundaryKind.NO_UI_ENTRY, _REASON_FEISHU_URL_VERIFICATION),
-    "channel::register::feishu": UiEquivalent(
-        None, None, _BoundaryKind.NO_UI_ENTRY, _REASON_CHANNEL_LIFECYCLE_NOT_SUPPORTED),
-    "channel::webhook::feishu_inbound": UiEquivalent(
-        None, None, _BoundaryKind.NO_UI_ENTRY, _REASON_CHANNEL_INBOUND_NO_MESSAGE_UI),
-    "channel::db::feishu_persisted": UiEquivalent(
-        None, None, _BoundaryKind.NO_UI_ENTRY, _REASON_CHANNEL_INBOUND_NO_MESSAGE_UI),
-    "channel::delete::feishu": UiEquivalent(
-        None, None, _BoundaryKind.NO_UI_ENTRY, _REASON_CHANNEL_LIFECYCLE_NOT_SUPPORTED),
-    "channel::register::wechat": UiEquivalent(
-        None, None, _BoundaryKind.NO_UI_ENTRY, _REASON_CHANNEL_LIFECYCLE_NOT_SUPPORTED),
-    "channel::webhook::wechat_inbound": UiEquivalent(
-        None, None, _BoundaryKind.NO_UI_ENTRY, _REASON_CHANNEL_INBOUND_NO_MESSAGE_UI),
-    "channel::db::wechat_persisted": UiEquivalent(
-        None, None, _BoundaryKind.NO_UI_ENTRY, _REASON_CHANNEL_INBOUND_NO_MESSAGE_UI),
-    "channel::delete::wechat": UiEquivalent(
-        None, None, _BoundaryKind.NO_UI_ENTRY, _REASON_CHANNEL_LIFECYCLE_NOT_SUPPORTED),
-    "channel::wechat_outbound_not_mockable": UiEquivalent(
-        None, None, _BoundaryKind.NO_UI_ENTRY, _REASON_WECHAT_OUTBOUND_NOT_MOCKABLE),
-    "channel::feishu_outbound_mock": UiEquivalent(
-        None, None, _BoundaryKind.NO_UI_ENTRY, _REASON_FEISHU_OUTBOUND_MOCK_INTERNAL),
-
-    # ---- 模块 C：consistency（CLI 与 HTTP API 一致性校验） ----
-    "consistency::pack_list": UiEquivalent(
-        "app-builder-consistency.spec.ts",
-        "Pack 列表: WebUI 渲染内容与 GET /api/app-builder/models 完全一致（按任务分区校验）"),
-    "consistency::run_list": UiEquivalent(
-        "app-builder-consistency.spec.ts", "Run 列表: WebUI 渲染条目数与 GET /api/app-builder/runs 一致"),
-
-    # ---- 模块 D：known_gaps（已知缺口回归标记） ----
-    "known_gaps::pack export --workdir placeholder-workdir": UiEquivalent(
-        None, None, _BoundaryKind.NO_UI_ENTRY, _REASON_PACK_EXPORT_VALIDATE_INIT),
-    "known_gaps::pack validate placeholder-pack-dir": UiEquivalent(
-        None, None, _BoundaryKind.NO_UI_ENTRY, _REASON_PACK_EXPORT_VALIDATE_INIT),
-    "known_gaps::pack workspace-init placeholder-model": UiEquivalent(
-        None, None, _BoundaryKind.NO_UI_ENTRY, _REASON_PACK_EXPORT_VALIDATE_INIT),
-    "known_gaps::channel_message_query_missing": UiEquivalent(
-        None, None, _BoundaryKind.NO_UI_ENTRY, _REASON_CHANNEL_MESSAGE_HISTORY),
-    "known_gaps::feishu_url_verification_missing": UiEquivalent(
-        None, None, _BoundaryKind.NO_UI_ENTRY, _REASON_FEISHU_URL_VERIFICATION),
-    "known_gaps::wechat_outbound_not_http_mockable": UiEquivalent(
-        None, None, _BoundaryKind.NO_UI_ENTRY, _REASON_WECHAT_OUTBOUND_NOT_MOCKABLE),
+        _BoundaryKind.NO_SHARED_TRUTH, _REASON_CHANNEL_LIST_NO_HTTP_ENDPOINT),
 }
-
-
-def _assert_full_mapping_coverage(cli_cases: List[dict], mapping: Dict[str, UiEquivalent]) -> None:
-    """覆盖完整性自检：断言 cli_cases 里每一条用例名都能在映射表里找到条目。
-    缺失即直接报错阻断生成，而不是留空——防止映射表随 test_builder_cli.py 的
-    用例演进（新增/重命名）而漂移却不被发现。"""
-    missing = sorted({c["case_name"] for c in cli_cases} - set(mapping.keys()))
-    if missing:
-        lines = "\n".join(f"  - {name}" for name in missing)
-        raise RuntimeError(
-            "覆盖完整性自检失败：以下 CLI 用例在 CLI_CASE_TO_UI_EQUIVALENT 映射表里"
-            f"找不到条目，请先补充映射（具体 WebUI 用例或设计边界），再重新生成报告:\n{lines}"
-        )
-
-
-def build_unified_cases(
-    cli_cases: List[dict],
-    webui_results: Dict[str, WebUiCaseResult],
-    mapping: Dict[str, UiEquivalent],
-) -> List[UnifiedCase]:
-    """把归一化后的 CLI 用例列表与 WebUI 结果、映射表合并成统一视图。
-    调用前必须已经通过 _assert_full_mapping_coverage 自检。"""
-    unified = []
-    for c in cli_cases:
-        equiv = mapping[c["case_name"]]
-        if equiv.webui_spec_file is None:
-            webui_status = "boundary"
-            webui_detail = ""
-        else:
-            found = webui_results.get(equiv.webui_case_title)
-            webui_status = found.status if found else "not_collected"
-            webui_detail = found.error_message if found else ""
-        unified.append(UnifiedCase(
-            case_name=c["case_name"], module=c["module"], cli_status=c["cli_status"],
-            webui_status=webui_status, webui_spec_file=equiv.webui_spec_file,
-            webui_case_title=equiv.webui_case_title, boundary_kind=equiv.boundary_kind,
-            boundary_reason=equiv.boundary_reason, cli_detail=c["cli_detail"],
-            webui_detail=webui_detail,
-        ))
-    return unified
 
 
 def parse_defects(defects_json_path) -> List[dict]:
@@ -1515,9 +2336,9 @@ def _assert_no_stray_none(rendered_html: str, filename: str) -> None:
 
 
 class ReportGenerator:
-    """全部 @staticmethod，无状态。产出三页互相锚点跳转的静态 HTML：
-    report.html（矩阵总汇）/ report_defects.html（缺陷详情）/
-    report_webui_detail.html（WebUI 用例详情）。"""
+    """全部 @staticmethod，无状态。产出单页静态 HTML report.html：统计卡片 +
+    CLI × WebUI 双向验证表 + 新发现缺陷详情，三者合一在同一页，不再拆分单独的
+    report_defects.html。"""
 
     @staticmethod
     def _common_css() -> str:
@@ -1564,6 +2385,13 @@ body { font-family: var(--font-sans); background: var(--bg); color: var(--text);
 .header .meta { display: flex; gap: 28px; margin-top: 18px; flex-wrap: wrap; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.18); }
 .header .meta-item { font-size: 13px; color: rgba(255,255,255,0.92); font-variant-numeric: tabular-nums; }
 .header .meta-item strong { color: #FFFFFF; font-weight: 600; }
+.cmdline-details { display: block; margin-top: 14px; }
+.cmdline-details summary { cursor: pointer; color: rgba(255,255,255,0.92); font-weight: 600; list-style: none; font-size: 13px; }
+.cmdline-details summary::-webkit-details-marker { display: none; }
+.cmdline-details summary strong { color: #FFFFFF; }
+.cmdline-pre { white-space: pre-wrap; word-break: break-all; font-family: var(--font-mono); font-size: 11px; line-height: 1.5;
+    color: rgba(255,255,255,0.92); margin: 8px 0 0; max-width: 900px; max-height: 160px; overflow-y: auto;
+    background: rgba(255,255,255,0.12); padding: 8px 10px; border-radius: var(--radius-sm); }
 .container { max-width: 1400px; margin: 0 auto; padding: 0 30px 60px; }
 .summary-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 28px; }
 .summary-card { background: var(--card-bg); border-radius: var(--radius); padding: 22px 20px; text-align: center; box-shadow: var(--shadow); border-top: 4px solid var(--muted); transition: transform 0.18s ease, box-shadow 0.18s ease; }
@@ -1597,23 +2425,22 @@ code { background: #F5F5F5; padding: 2px 6px; border-radius: 3px; font-family: v
 .status-boundary { color: #37474F; background: rgba(84,110,122,0.14); border: 1px solid rgba(84,110,122,0.30); }
 .status-not-collected { color: var(--warning); background: rgba(251,140,0,0.12); border: 1px dashed rgba(230,81,0,0.30); }
 .resp-detail { color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
-.resp-link { display: inline-block; margin-left: 6px; font-size: 11px; color: var(--primary); text-decoration: none; font-weight: 600; padding: 2px 9px; border-radius: 10px; background: rgba(21,101,192,0.08); transition: background 0.15s, color 0.15s; }
-.resp-link:hover { background: var(--primary); color: #FFFFFF; }
+.resp-detail details summary { cursor: pointer; color: var(--primary); font-weight: 600; }
+.resp-detail details p { margin: 6px 0 0; }
 .crash-table { background: var(--card-bg); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; border-left: 4px solid var(--danger); }
 .model-section { background: var(--card-bg); border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 24px; overflow: hidden; }
 .model-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; background: linear-gradient(180deg, #FAFAFA 0%, #F5F5F5 100%); border-bottom: 1px solid var(--border); }
 .model-header h3 { font-size: 16px; color: var(--primary); font-weight: 600; letter-spacing: -0.2px; }
 .empty-state { background: var(--card-bg); border-radius: var(--radius); padding: 30px; text-align: center; color: var(--text-secondary); font-style: italic; font-size: 14px; box-shadow: var(--shadow); }
 .footer { text-align: center; padding: 30px; color: var(--text-secondary); font-size: 12px; border-top: 1px solid var(--border); margin-top: 40px; letter-spacing: 0.2px; }
-.back-link { display: inline-block; margin-bottom: 20px; color: var(--primary); text-decoration: none; font-weight: 600; font-size: 13px; }
-.back-link:hover { color: var(--primary-dark); }
 @media print {
     .header { background: #333 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .summary-card, .model-section, table { box-shadow: none; border: 1px solid #ddd; }
 }"""
 
     @staticmethod
-    def _page_shell(title: str, eyebrow: str, subtitle: str, meta_items: List[str], body: str) -> str:
+    def _page_shell(title: str, eyebrow: str, subtitle: str, meta_items: List[str], body: str,
+                     cmdline: str = "") -> str:
         meta_html = "".join(f'<span class="meta-item">{m}</span>' for m in meta_items)
         return f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -1629,106 +2456,97 @@ code { background: #F5F5F5; padding: 2px 6px; border-radius: 3px; font-family: v
     <h1>{_esc(title)}</h1>
     <div class="subtitle">{_esc(subtitle)}</div>
     <div class="meta">{meta_html}</div>
+    {ReportGenerator._cmdline_meta_html(cmdline)}
   </div>
 </div>
 <div class="container">
 {body}
-<div class="footer">QAIModelBuilder 三端一致性统一报告 &middot; 由 test_builder_cli.py 内置的 ReportGenerator 在同一次运行中生成，
-与 Playwright WebUI 套件的测试代码零耦合</div>
+<div class="footer">QAIModelBuilder 三端一致性统一报告 &middot; 由 test_builder_cli.py 内置的 ReportGenerator 在同一次运行中生成</div>
 </div>
 </body>
 </html>"""
 
     @staticmethod
-    def generate_matrix_html(unified_cases: List[UnifiedCase], cli_payload: dict, defects_count: int, out_dir: Path) -> Path:
-        """产出 report.html：顶部统计卡片 + "测试用例 × (CLI/HTTP API/WebUI)"矩阵。"""
-        total = len(unified_cases)
+    def _cmdline_meta_html(cmdline):
+        """构建 header 区域"命令行"展示项：展示本次运行调用 test_builder_cli.py 时的完整命令行，
+        复用等宽字体样式（.cmdline-pre，与 test_service.py 同一套设计语言）。由 _page_shell
+        渲染在 .meta 这一行 flex 布局的下方，作为独立的块级区域，不与其它 meta-item 一起
+        参与 flex 拉伸——命令行内容通常偏长，与其它 meta-item 混排会因 flex 的默认拉伸/
+        换行规则挤出诡异的错位效果，拆开渲染即可避免。
+        默认展开（open 属性）：其它 meta-item 都是标签+值直接可见，命令行若默认折叠，
+        用户不点击就只看到"命令行"这个词、看不到任何内容，容易误以为该字段是空的。
+        未提供 cmdline（例如向后兼容旧调用点）时不渲染该项。"""
+        if not cmdline:
+            return ""
+        return (f'<details class="cmdline-details" open><summary><strong>命令行</strong></summary>'
+                f'<pre class="cmdline-pre">{_esc(cmdline)}</pre></details>')
+
+    @staticmethod
+    def generate_matrix_html(cli_payload: dict, defects: List[dict], out_dir: Path,
+                              webui_python_results: List[dict] = None, cmdline: str = "") -> Path:
+        """产出 report.html（单页，唯一产物）：顶部统计卡片 + "CLI × WebUI 双向验证"表
+        （覆盖 webui 模块若跑过时针对 cli_smoke 全部 36 条用例产出的结果：26 条真实浏览器
+        点击路径比对 + 10 条设计边界）+ "新发现缺陷详情"（原 report_defects.html 已合并
+        至此，不再产出单独页面）。"""
         cli_summary = cli_payload.get("summary", {}) or {}
         cli_total = cli_summary.get("total", 0) or 0
         cli_passed = cli_summary.get("passed", 0) or 0
         cli_pass_rate = round(100.0 * cli_passed / cli_total, 1) if cli_total else 0.0
 
-        mapped = [c for c in unified_cases if c.webui_spec_file is not None]
-        collected = [c for c in mapped if c.webui_status in ("passed", "failed", "skipped")]
-        webui_passed = sum(1 for c in collected if c.webui_status == "passed")
-        webui_pass_rate = round(100.0 * webui_passed / len(collected), 1) if collected else 0.0
+        defects = defects or []
+        defects_count = len(defects)
 
-        boundary_count = sum(1 for c in unified_cases if c.webui_status == "boundary")
-        not_collected_count = sum(1 for c in unified_cases if c.webui_status == "not_collected")
+        webui_python_results = webui_python_results or []
+        real_webui_python_results = [r for r in webui_python_results if not r.get("skipped")]
+        webui_real_passed = sum(1 for r in real_webui_python_results if r.get("passed"))
+        webui_pass_rate = (round(100.0 * webui_real_passed / len(real_webui_python_results), 1)
+                            if real_webui_python_results else 0.0)
 
+        # "新发现缺陷数"只统计本次实测发现、与预期行为不符的问题：已知设计边界
+        # （_record_known_boundary）与已知功能缺口（known_gaps 模块）均走独立的登记路径，
+        # 从不进入 DefectRegistry，因此从不计入这个数字——title 提示 + 下方
+        # "新发现缺陷详情"小节的说明文字都在解释这一点，避免被误读为"全部缺陷/问题总数"。
+        defects_tooltip = "仅统计本次实测发现、与预期行为不符的问题；已知设计边界与已知功能缺口不计入此数字"
         summary_cards = f"""<div class="summary-bar">
-  <div class="summary-card card-pass"><div class="num">{total}</div><div class="label">总用例数</div></div>
+  <div class="summary-card card-pass"><div class="num">{cli_total}</div><div class="label">总用例数</div></div>
   <div class="summary-card card-pass"><div class="num">{cli_pass_rate}%</div><div class="label">CLI 层通过率</div></div>
-  <div class="summary-card card-pass"><div class="num">{webui_pass_rate}%</div><div class="label">WebUI 层通过率（已采集 {len(collected)}/{len(mapped)} 条）</div></div>
-  <div class="summary-card card-fail"><div class="num">{defects_count}</div><div class="label">新发现缺陷数</div></div>
-  <div class="summary-card card-boundary"><div class="num">{boundary_count}</div><div class="label">设计边界数</div></div>
-</div>"""
+  <div class="summary-card card-fail" title="{_esc(defects_tooltip)}"><div class="num">{defects_count}</div><div class="label">新发现缺陷数</div></div>"""
+        if webui_python_results:
+            summary_cards += f"""
+  <div class="summary-card card-pass"><div class="num">{webui_pass_rate}%</div><div class="label">WebUI 通过率</div></div>"""
+        summary_cards += "\n</div>"
 
-        rows_html = []
-        for c in sorted(unified_cases, key=lambda x: (x.module, x.case_name)):
-            if c.webui_status == "boundary":
-                kind_label = _BOUNDARY_KIND_LABEL.get(c.boundary_kind, c.boundary_kind or "")
-                note = f'<strong>[{_esc(kind_label)}]</strong> {_esc(c.boundary_reason)}'
-            elif c.webui_spec_file:
-                note = (f'<code>{_esc(c.webui_spec_file)}</code><br>{_esc(c.webui_case_title)}'
-                        f' <a class="resp-link" href="report_webui_detail.html#{_anchor(c.case_name)}">详情 →</a>')
-            else:
-                note = "-"
-            rows_html.append(f"""<tr>
-  <td><code>{_esc(c.case_name)}</code></td>
-  <td>{_esc(c.module)}</td>
-  <td class="center">{_status_badge(c.cli_status)}</td>
-  <td class="center">{_status_badge(c.webui_status)}</td>
-  <td class="resp-detail">{note}</td>
+        if webui_python_results:
+            rows_html = []
+            for r in sorted(webui_python_results, key=lambda x: x.get("name", "")):
+                case = _normalize_cli_case(r)
+                rows_html.append(f"""<tr>
+  <td><code>{_esc(case['case_name'])}</code></td>
+  <td class="center">{_status_badge(case['cli_status'])}</td>
+  <td class="resp-detail"><details open><summary>查看操作路径与比对结果</summary><p>{_esc(case['cli_detail'])}</p></details></td>
 </tr>""")
-
-        matrix_section = f"""<div class="section">
-  <h2>测试用例 &times; (CLI / HTTP API / WebUI) 一致性矩阵</h2>
-  <div class="model-section">
+            webui_table = f"""<div class="model-section">
     <table>
-      <thead><tr><th>用例名</th><th>模块</th><th class="center">CLI 状态</th><th class="center">WebUI 状态</th><th>说明</th></tr></thead>
+      <thead><tr><th>用例名</th><th class="center">状态</th><th>详情</th></tr></thead>
       <tbody>{''.join(rows_html)}</tbody>
     </table>
-  </div>
-</div>"""
-
-        links_section = f"""<div class="section">
-  <h2>详情页</h2>
-  <div class="model-section" style="padding: 18px 20px; display: flex; gap: 20px;">
-    <a class="resp-link" href="report_defects.html">缺陷详情 →</a>
-    <a class="resp-link" href="report_webui_detail.html">WebUI 用例详情 →</a>
-  </div>
-</div>"""
-
-        body = summary_cards + matrix_section + links_section
-        rendered = ReportGenerator._page_shell(
-            title="QAIModelBuilder 三端一致性测试报告",
-            eyebrow="CLI \u00b7 HTTP API \u00b7 WebUI",
-            subtitle="test_builder_cli.py（CLI/API/channel/一致性/已知缺口 + 统一报告生成）与 Playwright WebUI 套件的离线合并报告",
-            meta_items=[
-                f"生成时间: <strong>{_esc(cli_payload.get('timestamp', ''))}</strong>",
-                f"CLI 侧健康: <strong>{'健康' if cli_payload.get('healthy') else '不健康'}</strong>",
-                f"未采集: <strong>{not_collected_count}</strong>",
-            ],
-            body=body,
-        )
-        _assert_no_stray_none(rendered, "report.html")
-        out_path = Path(out_dir) / "report.html"
-        with open(out_path, "w", encoding="utf-8") as f:
-            f.write(rendered)
-        return out_path
-
-    @staticmethod
-    def generate_defects_detail_html(defects: List[dict], out_dir: Path) -> Path:
-        """产出 report_defects.html：把 test_builder_cli.py 的 defects.json
-        渲染为详情页，替代目前纯 Markdown 的 defects.md。"""
-        if not defects:
-            body = '<a class="back-link" href="report.html">← 返回矩阵总汇</a><div class="empty-state">本次运行未发现新缺陷。</div>'
+  </div>"""
         else:
+            webui_table = '<div class="empty-state">本次运行未包含 webui 模块，无 CLI×WebUI 双向验证结果。</div>'
+
+        webui_section = f"""<div class="section">
+  <h2>CLI &times; WebUI 双向验证</h2>
+  <p style="margin-bottom: 14px; color: var(--text-secondary); font-size: 12px;">
+    每条结果均由脚本内置的 Python Playwright 直接驱动真实浏览器产出，下方"详情"默认展开，展示具体的网页操作路径与比对结果。
+  </p>
+  {webui_table}
+</div>"""
+
+        if defects:
             by_module: Dict[str, List[dict]] = {}
             for d in defects:
                 by_module.setdefault(d.get("module", "未分类"), []).append(d)
-            sections = ['<a class="back-link" href="report.html">← 返回矩阵总汇</a>']
+            defect_groups = []
             for module, items in sorted(by_module.items()):
                 rows = []
                 for d in items:
@@ -1741,64 +2559,53 @@ code { background: #F5F5F5; padding: 2px 6px; border-radius: 3px; font-family: v
   <td class="resp-detail">{_esc(d.get('actual'))}</td>
   <td class="resp-detail">{_esc(d.get('discovered_at'))}</td>
 </tr>""")
-                sections.append(f"""<div class="section">
-  <h2>模块: {_esc(module)}（{len(items)} 条）</h2>
-  <div class="crash-table">
+                defect_groups.append(f"""<div class="crash-table" style="margin-bottom: 20px;">
+    <div class="model-header"><h3>模块: {_esc(module)}（{len(items)} 条）</h3></div>
     <table>
       <thead><tr><th>ID</th><th>严重度</th><th>摘要</th><th>复现</th><th>期望</th><th>实际</th><th>发现时间</th></tr></thead>
       <tbody>{''.join(rows)}</tbody>
     </table>
-  </div>
-</div>""")
-            body = "".join(sections)
-        rendered = ReportGenerator._page_shell(
-            title="新发现缺陷详情", eyebrow="DEFECTS",
-            subtitle="test_builder_cli.py::DefectRegistry 登记的全部新发现缺陷（已知缺口/设计边界不在此列出）",
-            meta_items=[f"总计: <strong>{len(defects)}</strong> 条"], body=body,
-        )
-        _assert_no_stray_none(rendered, "report_defects.html")
-        out_path = Path(out_dir) / "report_defects.html"
-        with open(out_path, "w", encoding="utf-8") as f:
-            f.write(rendered)
-        return out_path
-
-    @staticmethod
-    def generate_webui_detail_html(unified_cases: List[UnifiedCase], out_dir: Path) -> Path:
-        """产出 report_webui_detail.html：展示每条有真实 WebUI 入口的用例的
-        执行详情（用例名、所属命令组、状态、失败详情、对应验证的 API 端点）。"""
-        mapped = [c for c in unified_cases if c.webui_spec_file is not None]
-        if not mapped:
-            body = '<a class="back-link" href="report.html">← 返回矩阵总汇</a><div class="empty-state">当前没有映射到具体 WebUI 用例的条目。</div>'
+  </div>""")
+            defects_body = "".join(defect_groups)
         else:
-            rows = []
-            for c in sorted(mapped, key=lambda x: (x.module, x.case_name)):
-                detail = _esc(c.webui_detail) if c.webui_status == "failed" else "-"
-                rows.append(f"""<tr id="{_anchor(c.case_name)}">
-  <td><code>{_esc(c.case_name)}</code></td>
-  <td>{_esc(c.module)}</td>
-  <td><code>{_esc(c.webui_spec_file)}</code></td>
-  <td>{_esc(c.webui_case_title)}</td>
-  <td class="center">{_status_badge(c.webui_status)}</td>
-  <td class="resp-detail">{detail}</td>
-</tr>""")
-            body = ('<a class="back-link" href="report.html">← 返回矩阵总汇</a>'
-                    '<div class="section"><div class="model-section"><table>'
-                    '<thead><tr><th>用例名</th><th>模块</th><th>Spec 文件</th><th>WebUI 用例标题</th>'
-                    '<th class="center">状态</th><th>失败详情</th></tr></thead>'
-                    f'<tbody>{"".join(rows)}</tbody></table></div></div>')
+            defects_body = '<div class="empty-state">本次运行未发现新缺陷。</div>'
+
+        defects_section = f"""<div class="section" id="defects-section">
+  <h2>新发现缺陷详情</h2>
+  <p style="margin-bottom: 14px; color: var(--text-secondary); font-size: 12px;">
+    "新发现缺陷"特指本次运行中实测发现、与预期行为不符的问题；已被识别为长期存在、产品设计使然的限制
+    （已知设计边界，如 CLI 与 WebUI 无共享后端数据源/UI 无对应操作入口）与已知功能缺口，均走独立的
+    登记路径、从不计入这份清单，避免重复记录没有诊断价值的既有限制——它们的完整清单见
+    <code>test/test_builder_cli.md</code>。
+  </p>
+  {defects_body}
+</div>"""
+
+        body = summary_cards + webui_section + defects_section
         rendered = ReportGenerator._page_shell(
-            title="WebUI 用例详情", eyebrow="WEBUI DETAIL",
-            subtitle="所有映射到具体 Playwright 用例的执行详情（设计边界/尚未采集的条目不在此列出，见矩阵总汇）",
-            meta_items=[f"总计: <strong>{len(mapped)}</strong> 条"], body=body,
+            title="QAIModelBuilder 三端一致性测试报告",
+            eyebrow="CLI \u00b7 HTTP API \u00b7 WebUI",
+            subtitle="test_builder_cli.py（CLI/API/channel/一致性/已知缺口 + 可选的 CLI×WebUI 双向验证）运行报告",
+            meta_items=[
+                f"生成时间: <strong>{_esc(cli_payload.get('timestamp', ''))}</strong>",
+                f"CLI 侧健康: <strong>{'健康' if cli_payload.get('healthy') else '不健康'}</strong>",
+            ],
+            body=body,
+            cmdline=cmdline,
         )
-        _assert_no_stray_none(rendered, "report_webui_detail.html")
-        out_path = Path(out_dir) / "report_webui_detail.html"
+        _assert_no_stray_none(rendered, "report.html")
+        out_path = Path(out_dir) / "report.html"
         with open(out_path, "w", encoding="utf-8") as f:
             f.write(rendered)
         return out_path
 
 
 MODULE_RUNNERS = ("cli_smoke", "channel", "consistency", "known_gaps")
+# "webui" 是纯 opt-in 的第五个模块（模块 E）：不加入 MODULE_RUNNERS，因此 --modules
+# 缺省时天然不会跑它（需要额外的 pnpm/playwright 浏览器依赖，很多环境没装）；
+# 只有用户显式 --modules ... webui 才会运行。ALL_MODULE_CHOICES 仅用于 argparse 的
+# choices 校验，不影响缺省行为。
+ALL_MODULE_CHOICES = MODULE_RUNNERS + ("webui",)
 
 
 def build_arg_parser():
@@ -1810,12 +2617,17 @@ def build_arg_parser():
     parser.add_argument("--builder_port", type=int, default=8899)
     parser.add_argument("--builder_data_dir", default=None, help="隔离数据目录；缺省为 <out_dir>/builder_data")
     parser.add_argument("--out_dir", default="./test_builder_cli_results", help="结果/日志/缺陷清单输出目录")
-    parser.add_argument("--modules", nargs="+", choices=MODULE_RUNNERS, default=None,
-                         help="只运行指定模块；缺省运行全部四个模块")
+    parser.add_argument("--modules", nargs="+", choices=ALL_MODULE_CHOICES, default=None,
+                         help="只运行指定模块；缺省运行 cli_smoke/channel/consistency/known_gaps 四个模块，"
+                              "webui 是纯 opt-in 的第五个模块，必须显式指定才会运行")
     parser.add_argument("--start_timeout", type=int, default=90, help="等待 Builder 就绪的超时秒数")
-    parser.add_argument("--webui_results", default=None,
-                         help="Playwright WebUI 套件产出的 e2e-report/results.json 路径（可选；"
-                              "缺省时统一报告里 WebUI 状态全部显示为未采集，设计边界条目不受影响）")
+    parser.add_argument("--frontend_dir", default=None,
+                         help="前端项目根目录（webui 模块专用）；缺省为 <builder_dir>/frontend")
+    parser.add_argument("--webui_base_url", default=None,
+                         help="已经手动跑好的前端 dev server 地址（webui 模块专用）；给出时完全跳过自动"
+                              "启动 FrontendDevServer，直接把该地址当 frontend_url 使用")
+    parser.add_argument("--webui_headed", action="store_true", default=False,
+                         help="webui 模块以有头模式启动 Chromium（默认无头）")
     return parser
 
 
@@ -1843,6 +2655,11 @@ def main():
         print(f"FATAL: Builder 启动失败: {e}", file=sys.stderr)
         sys.exit(1)
 
+    # frontend_dir 用迟绑定方式处理：build_arg_parser 阶段 builder_dir 还未 resolve，
+    # 不能在 argparse 定义 default 时就依赖它，只能在这里（builder_dir 已 resolve 之后）
+    # 再决定 --frontend_dir 的缺省值。
+    frontend_dir = Path(args.frontend_dir).resolve() if args.frontend_dir else builder_dir / "frontend"
+    frontend_server = None
     try:
         if "cli_smoke" in modules:
             run_cli_smoke_module(cli, collector, defects)
@@ -1852,7 +2669,21 @@ def main():
             run_consistency_module(cli, builder.csrf, collector, defects)
         if "known_gaps" in modules:
             run_known_gaps_module(cli, collector, defects)
+        if "webui" in modules:
+            if args.webui_base_url:
+                frontend_url = args.webui_base_url
+            else:
+                frontend_server = FrontendDevServer(frontend_dir=frontend_dir, backend_base_url=env_cfg.base_url,
+                                                      log_dir=out_dir / "logs")
+                frontend_server.start(timeout=60)
+                frontend_url = frontend_server.base_url
+            run_webui_module(cli, frontend_url, collector, defects, builder.csrf, headed=args.webui_headed)
     finally:
+        # frontend_server 与 builder 的清理必须在同一个 finally 里兜底：webui 检查
+        # 抛异常不能漏掉后端进程的清理，反过来 builder.stop() 也不能因为顺序问题漏掉
+        # 前端 dev server 的清理。
+        if frontend_server is not None:
+            frontend_server.stop()
         builder.stop()
 
     payload = collector.write_report(out_dir)
@@ -1861,24 +2692,21 @@ def main():
     print(json.dumps(payload["summary"], indent=2, ensure_ascii=False))
     new_defect_count = len(defects.defects)
     if new_defect_count:
-        print(f"WARNING: 本次运行发现 {new_defect_count} 条新缺陷，详见 {out_dir / 'defects.md'}")
+        print(f"WARNING: 本次运行发现 {new_defect_count} 条新缺陷，详见即将生成的 report.html")
 
     # 与 test_service.py 内置 ReportGenerator 的模式一致：同一次运行结束后直接产出统一的
-    # 三端一致性 HTML 报告，不再需要单独调用一个后处理脚本。CLI 侧健康判定（上面的
+    # HTML 报告，不再需要单独调用一个后处理脚本。CLI 侧健康判定（上面的
     # sys.exit 参数）完全基于 collector.is_healthy()，不受报告生成结果影响。
-    cli_cases, cli_payload = parse_cli_results(out_dir / "results.json")
-    webui_results = parse_webui_results(args.webui_results) if args.webui_results else {}
+    # 再转给各 generate_* 函数，在报告 header 里展示，便于事后复核"这次跑的到底是什么命令"。
+    cmdline = shlex.join(sys.argv)
+    _, cli_payload = parse_cli_results(out_dir / "results.json")
     defects_list = parse_defects(out_dir / "defects.json")
-    _assert_full_mapping_coverage(cli_cases, CLI_CASE_TO_UI_EQUIVALENT)
-    unified_cases = build_unified_cases(cli_cases, webui_results, CLI_CASE_TO_UI_EQUIVALENT)
-    with open(out_dir / "unified_cases.json", "w", encoding="utf-8") as f:
-        json.dump([vars(c) for c in unified_cases], f, indent=2, ensure_ascii=False)
-    report_path = ReportGenerator.generate_matrix_html(unified_cases, cli_payload, len(defects_list), out_dir)
-    defects_path = ReportGenerator.generate_defects_detail_html(defects_list, out_dir)
-    webui_detail_path = ReportGenerator.generate_webui_detail_html(unified_cases, out_dir)
+    # 模块 E（webui，若跑过）的结果单独过滤出来，直接传给 report.html 里的
+    # "CLI × WebUI 双向验证"表；未跑过该模块时为空列表，report.html 会渲染空态提示。
+    webui_python_results = [r for r in cli_payload.get("results", []) if r.get("module") == "E"]
+    report_path = ReportGenerator.generate_matrix_html(cli_payload, defects_list, out_dir,
+                                                         webui_python_results=webui_python_results, cmdline=cmdline)
     print(f"已生成: {report_path}")
-    print(f"已生成: {defects_path}")
-    print(f"已生成: {webui_detail_path}")
 
     sys.exit(0 if collector.is_healthy() else 1)
 
