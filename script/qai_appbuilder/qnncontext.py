@@ -53,10 +53,25 @@ g_base_path = (_path_env if _path_env else "") + os.pathsep + g_base_path + os.p
 # To make lifecycle management safe we:
 #   1. Track every live context object in a weak registry.
 #   2. Expose a module-level ``release_all()`` that deterministically releases
-#      every registered context.
-#   3. Register ``release_all()`` as an ``os.register_at_fork(before=...)``
-#      handler so the parent's C++ state is drained *before* any fork, leaving
-#      the child with a clean slate.
+#      every registered context. This is an OPT-IN helper the caller may invoke
+#      explicitly; it is intentionally NOT wired to any fork handler.
+#
+# NOTE (issue #122): earlier revisions registered an ``os.register_at_fork``
+# handler to "clean up" around ``fork()``. Both variants proved harmful and are
+# deliberately NOT used:
+#   * ``before=release_all`` drains the *parent's* live contexts on every fork,
+#     so a caller that keeps a context across a fork loses it ("context has
+#     been released").
+#   * ``after_in_child`` that nulls ``m_context`` drops the last Python ref in
+#     the child, which fires the pybind ``QNNContext`` destructor -> C++
+#     ``ModelDestroy`` in the child. Because the child inherited the parent's
+#     fastRPC/DSP session fds via ``fork()``, that tears down the DSP session
+#     the parent is still using and the parent's next inference fails with
+#     ``skelExecute ... err 1003``.
+# A plain forked child that never touches QNN and exits via ``os._exit()`` skips
+# C++ destructors entirely, so leaving the contexts untouched across a fork is
+# the correct behavior. Child processes that themselves want to use QNN should
+# create their own contexts (and may call ``release_all()`` first if desired).
 import threading
 import weakref
 
@@ -81,8 +96,9 @@ def release_all():
 
     This drains the active-context registry and calls ``release()`` on each
     registered object. It is safe to call multiple times (each ``release()``
-    is idempotent) and is registered as a pre-fork handler so child processes
-    never inherit live C++ context state.
+    is idempotent). It is an explicit, opt-in helper - it is NOT registered as
+    a fork handler (see the note above for why automatic fork-time cleanup was
+    removed).
     """
     with _active_contexts_lock:
         contexts = list(_active_contexts)
@@ -92,14 +108,6 @@ def release_all():
         except Exception as e:  # never let cleanup raise
             print(f"[WARN] release_all: failed to release a context: {e}")
 
-
-# Register the pre-fork handler exactly once. ``register_at_fork`` only exists
-# on platforms that support fork (POSIX); guard accordingly.
-if hasattr(os, "register_at_fork"):
-    try:
-        os.register_at_fork(before=release_all)
-    except (RuntimeError, ValueError):
-        pass
 
 
 def timer(func):
@@ -489,12 +497,6 @@ class OnnxRuntimeContext:
         self.release()
         return False
 
-    def __del__(self):
-        try:
-            self.release()
-        except Exception:
-            pass
-
 
 class LogLevel:
     ERROR = 1
@@ -644,9 +646,12 @@ class _QNNContextBase:
     - resource cleanup (deterministic, idempotent release - issue#109)
     """
 
-    # Set True once the underlying C++ context has been released. Guards against
-    # repeated release (e.g. via gc.collect()) and operating on a stale context.
-    _released = False
+    def __init__(self):
+        # Instance-level flag: set True once the underlying C++ context has been
+        # released. Declared here (not as a class attribute) so each instance
+        # gets its own independent flag and there is no risk of the class-level
+        # default being read before the first write.
+        self._released = False
 
     def _validate_model_path(self):
         if self.model_path == "None":
@@ -745,12 +750,6 @@ class _QNNContextBase:
         self.release()
         return False
 
-    def __del__(self):
-        try:
-            self.release()
-        except Exception:
-            pass
-
 
 class QNNContext(_QNNContextBase):
     """High-level Python wrapper for a AppBuilder model."""
@@ -770,6 +769,7 @@ class QNNContext(_QNNContextBase):
         Args:
             model_path (str): model path
         """
+        super().__init__()
         self.model_path = model_path
         self.model_name = model_name
         self.input_data_type = input_data_type
@@ -831,6 +831,7 @@ class QNNContextProc(_QNNContextBase):
         Args:
             model_path (str): model path
         """
+        super().__init__()
         self.model_path = model_path
         self.proc_name = proc_name
         self.input_data_type = input_data_type
@@ -906,6 +907,8 @@ class QNNLoraContext(_QNNContextBase):
             model_path (str): model path
             bin_files (str) : List of LoraAdapter class objects.
         """
+        super().__init__()
+        self.model_name = model_name
         self.model_path = model_path
         self.lora_adapters = lora_adapters
         self.input_data_type = input_data_type
@@ -942,8 +945,6 @@ class QNNLoraContext(_QNNContextBase):
 class QNNShareMemory:
     """High-level Python wrapper for a AppBuilder model."""
 
-    _released = False
-
     def __init__(self,
                  share_memory_name: str = "None",
                  share_memory_size: int = 0,
@@ -952,6 +953,9 @@ class QNNShareMemory:
         Args:
             model_path (str): model path
         """
+        # Instance-level flag so each QNNShareMemory object tracks its own
+        # release state independently (no shared class-level default).
+        self._released = False
         self.share_memory_name = share_memory_name
         self.m_memory = appbuilder.ShareMemory(share_memory_name, share_memory_size)
         self.share_memory_size = share_memory_size
@@ -976,13 +980,6 @@ class QNNShareMemory:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.release()
         return False
-
-    #@timer
-    def __del__(self):
-        try:
-            self.release()
-        except Exception:
-            pass
 
 
 class LoraAdapter:  # this will just hold data
