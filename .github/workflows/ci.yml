@@ -731,24 +731,24 @@ jobs:
           genie-runtime-url: ${{ matrix.qnn.genie-url }}
           genie-runtime-version: ${{ matrix.qnn.version }}_v73
 
-      - name: Append trailing slash to QNN_SDK_ROOT
+      - name: Verify QNN SDK layout
         shell: pwsh
-        # Service/src/GenieAPIService/dependents.cmake builds QNN paths by
-        # string-concatenating $ENV{QNN_SDK_ROOT} + "lib\\<abi>" with no
-        # separator (lines 17-18), so it requires QNN_SDK_ROOT to end with
-        # a path separator. setup-qnn-sdk action exports it without one
-        # (the wheel build's pathlib-based code does not care). Add it
-        # back for this job — same pattern as the Android job, just in
-        # PowerShell.
+        # platform.cmake (src/GenieAPIService/platform.cmake:69) now
+        # normalizes the path with file(TO_CMAKE_PATH ...) and joins with
+        # explicit '/' separators, so the old trailing-slash workaround the
+        # deleted dependents.cmake needed is obsolete — leave QNN_SDK_ROOT
+        # as setup-qnn-sdk exported it. This step is now pure validation:
+        # fail early with a readable message if the Windows ARM64 Genie
+        # import lib is missing from the SDK.
         run: |
-          $root = $env:QNN_SDK_ROOT.TrimEnd('\','/') + '\'
-          "QNN_SDK_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          Write-Host "QNN_SDK_ROOT=$root"
-          if (-not (Test-Path "${root}lib\aarch64-windows-msvc\Genie.lib")) {
-            Write-Error "Expected Genie.lib not found at ${root}lib\aarch64-windows-msvc\Genie.lib"
-            Get-ChildItem "${root}lib\aarch64-windows-msvc" 2>$null | Select-Object Name
+          $root = $env:QNN_SDK_ROOT.TrimEnd('\','/')
+          $genieLib = Join-Path $root 'lib\aarch64-windows-msvc\Genie.lib'
+          if (-not (Test-Path $genieLib)) {
+            Write-Error "Expected Genie.lib not found at $genieLib"
+            Get-ChildItem (Join-Path $root 'lib\aarch64-windows-msvc') 2>$null | Select-Object Name
             exit 1
           }
+          Write-Host "Genie.lib present: $genieLib"
 
       - name: Install build helpers
         shell: pwsh
@@ -787,21 +787,28 @@ jobs:
       - name: Verify output
         shell: pwsh
         working-directory: samples/genie/c++/Service
+        # Refactored CMakeLists.txt (line 47) sets a fixed, version-free
+        # BUILD_PATH = ${CMAKE_BINARY_DIR}/GenieService-win-arm64, so with
+        # -B build the artifacts land in build/GenieService-win-arm64/.
         run: |
-          $out = Get-ChildItem -Directory -Filter "GenieService_v*" | Select-Object -First 1
-          if (-not $out) {
-            Write-Error "Expected GenieService_v*/ directory was not produced. Tree under Service/:"
-            Get-ChildItem -Recurse -Depth 2 | Select-Object FullName
+          $out = "build/GenieService-win-arm64"
+          if (-not (Test-Path $out)) {
+            Write-Error "Expected $out directory was not produced. Tree under Service/build:"
+            Get-ChildItem build -Recurse -Depth 2 -ErrorAction SilentlyContinue | Select-Object FullName
             exit 1
           }
-          Write-Host "Output dir: $($out.FullName)"
-          Get-ChildItem $out.FullName -Recurse -File | Select-Object FullName, Length
+          Write-Host "Output dir: $out"
+          Get-ChildItem $out -Recurse -File | Select-Object FullName, Length
+          if (-not (Test-Path (Join-Path $out 'GenieAPIService.exe'))) {
+            Write-Error "Required artifact missing: GenieAPIService.exe"
+            exit 1
+          }
 
       - name: Upload GenieService artifact
         uses: actions/upload-artifact@v4
         with:
           name: GenieService-windows-arm64-qnn${{ matrix.qnn.version }}
-          path: samples/genie/c++/Service/GenieService_v*/**
+          path: samples/genie/c++/Service/build/GenieService-win-arm64/**
           if-no-files-found: error
 
       - name: Upload CMake logs on failure
@@ -828,10 +835,12 @@ jobs:
   # samples/genie/c++/Service — GenieAPIService Linux ARM64 build via
   # the project-provided build_linux.sh.
   #
-  # Runs on ubuntu-22.04-arm (native aarch64). The script does the
-  # configure + build of Service/, also builds libsamplerate from the
-  # bundled External/ submodule, and copies QAIRT runtime libs +
-  # default model config files into Service/GenieService_v<APPVER>_qnn<SDKVER>/.
+  # Runs on ubuntu-22.04-arm (native aarch64). build_linux.sh does the
+  # configure + build of Service/ (configuring into Service/build-linux),
+  # builds libappbuilder.so + libsamplerate from the bundled External/
+  # submodules via ExternalProject, and copies QAIRT runtime libs +
+  # default model config into the fixed-name output dir
+  # Service/build-linux/GenieService-linux-arm64/.
   #
   # Build-only — running GenieAPIService needs an LLM model and an
   # NPU/HTP backend, which is Stage B real-hardware territory.
@@ -866,43 +875,53 @@ jobs:
         with:
           version: '2.48.40.260702'
 
-      - name: Append trailing slash to QNN_SDK_ROOT
-        # build_linux.sh's downstream cmake (in dependents.cmake) does
-        # string concat with QNN_SDK_ROOT — same trailing-slash convention
-        # as the Windows Service / Android jobs.
+      - name: Verify QNN SDK layout
+        # platform.cmake normalizes QNN_SDK_ROOT with file(TO_CMAKE_PATH)
+        # and joins with explicit '/' separators (line 69-71), so the old
+        # trailing-slash workaround the deleted dependents.cmake needed is
+        # obsolete. Leave QNN_SDK_ROOT as setup-qnn-sdk exported it; just
+        # validate the Linux ARM64 runtime dir is present.
         run: |
-          root="${QNN_SDK_ROOT%/}/"
-          echo "QNN_SDK_ROOT=$root" >> "$GITHUB_ENV"
-          echo "QNN_SDK_ROOT=$root"
-          test -d "${root}lib/aarch64-oe-linux-gcc11.2" \
-            || { echo "Expected aarch64-oe-linux-gcc11.2 lib dir missing under $root"; ls "${root}lib" || true; exit 1; }
+          root="${QNN_SDK_ROOT%/}"
+          test -d "${root}/lib/aarch64-oe-linux-gcc11.2" \
+            || { echo "Expected aarch64-oe-linux-gcc11.2 lib dir missing under $root"; ls "${root}/lib" || true; exit 1; }
+          echo "QNN Linux runtime dir present: ${root}/lib/aarch64-oe-linux-gcc11.2"
 
       - name: Build GenieAPIService via build_linux.sh
         # Run the project-provided helper script verbatim — the same path
-        # local devs follow per BUILD_LINUX.md. USE_MNN/USE_GGUF stay OFF
-        # for the same toolchain reasons we hit on Windows.
+        # local devs follow per BUILD_LINUX.md. The script lives in
+        # Service/ (not c++/) and configures -B Service/build-linux, so it
+        # must be invoked from Service/. USE_MNN/USE_GGUF stay OFF (Linux
+        # is QNN-only; CMakeLists.txt FATAL_ERRORs on them anyway).
         run: |
-          chmod +x samples/genie/c++/build_linux.sh
-          (cd samples/genie/c++ && ./build_linux.sh)
+          chmod +x samples/genie/c++/Service/build_linux.sh
+          (cd samples/genie/c++/Service && ./build_linux.sh)
 
       - name: Locate output and verify
         id: locate
+        # Refactored: fixed, version-free output dir
+        # Service/build-linux/GenieService-linux-arm64/ (CMakeLists.txt:49,
+        # BUILD_DIR=Service/build-linux from build_linux.sh).
         run: |
-          out_dir=$(find samples/genie/c++/Service -maxdepth 1 -type d -name 'GenieService_v*_qnn*' | head -n1)
-          if [ -z "$out_dir" ]; then
-            echo "Expected GenieService_v*_qnn*/ output directory not found:"
-            ls -la samples/genie/c++/Service/ || true
+          out_dir="samples/genie/c++/Service/build-linux/GenieService-linux-arm64"
+          if [ ! -d "$out_dir" ]; then
+            echo "Expected $out_dir output directory not found:"
+            ls -la samples/genie/c++/Service/build-linux/ 2>/dev/null || true
+            exit 1
+          fi
+          if [ ! -f "$out_dir/GenieAPIService" ]; then
+            echo "Required artifact missing: GenieAPIService"
+            ls -la "$out_dir" || true
             exit 1
           fi
           echo "Output dir: $out_dir"
           ls -lh "$out_dir"
-          echo "out-name=$(basename "$out_dir")" >> "$GITHUB_OUTPUT"
           echo "out-dir=$out_dir" >> "$GITHUB_OUTPUT"
 
       - name: Upload GenieService artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.locate.outputs.out-name }}-linux_aarch64
+          name: GenieService-linux-arm64-qnn2.48.40.260702
           path: ${{ steps.locate.outputs.out-dir }}/**
           if-no-files-found: error
 
@@ -912,9 +931,9 @@ jobs:
         with:
           name: cmake-logs-genie-service-linux-arm64
           path: |
-            samples/genie/c++/Service/build/**/CMakeFiles/CMakeOutput.log
-            samples/genie/c++/Service/build/**/CMakeFiles/CMakeError.log
-            samples/genie/c++/Service/build/**/CMakeCache.txt
+            samples/genie/c++/Service/build-linux/**/CMakeFiles/CMakeOutput.log
+            samples/genie/c++/Service/build-linux/**/CMakeFiles/CMakeError.log
+            samples/genie/c++/Service/build-linux/**/CMakeCache.txt
           if-no-files-found: ignore
 
   # -----------------------------------------------------------------
@@ -922,22 +941,24 @@ jobs:
   # project-provided build_android.bat.
   #
   # Runs on windows-2022 (the .bat is Windows-only). The script builds
-  # libappbuilder.so, libGenieAPIService.so, libJNIGenieAPIService.so,
-  # then attempts to assemble a release APK via Gradle. The APK step
-  # requires a release-signing keystore (configured in
-  # Android/app/build.gradle.kts) which doesn't exist on the runner —
-  # the script's :skip_apk fallback gracefully exits with the .so files
-  # already produced. continue-on-error keeps the run "green-with-
-  # unsigned-libs" until proper signing secrets are wired up.
+  # libsamplerate.so, libappbuilder.so, then the native
+  # libGenieAPIService.so / libJNIGenieAPIService.so, copies the QNN
+  # runtime libs alongside them into build-android/output/libs/arm64-v8a,
+  # and only THEN runs `gradlew assembleRelease` to package a signed APK.
+  #
+  # The APK step needs a release-signing keystore (Android/app/
+  # build.gradle.kts points at a placeholder path that doesn't exist on
+  # the runner), so it is expected to fail here. That failure is confined
+  # to the build step (step-level continue-on-error); because the .so
+  # files are copied to output BEFORE the gradle step, the subsequent
+  # "Verify .so output" step still runs as a HARD gate on the native
+  # libraries. A genuine native build break fails the job; only APK
+  # signing is best-effort until signing secrets are wired up.
   # -----------------------------------------------------------------
   build-android-genie-service:
     name: genie c++ Service · android arm64-v8a · qnn2.48.40.260702
     runs-on: windows-2022
     timeout-minutes: 60
-    # APK-signing step is expected to fail on hosted runners until a
-    # release keystore is wired up via secrets. .so artifacts produced
-    # before that step are still uploaded.
-    continue-on-error: true
     steps:
       - name: Checkout (with genie submodules)
         uses: actions/checkout@v4
@@ -984,50 +1005,58 @@ jobs:
         shell: pwsh
         run: choco install -y ninja --no-progress
 
-      - name: Patch build_android.bat for CI paths
+      - name: Export build_android.bat environment
         shell: pwsh
-        # The script hard-codes:
-        #   set "QNN_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\2.46.0.260424\"
-        #   set "NDK_ROOT=C:\work\android-ndk-r26d-windows\android-ndk-r26d\"
-        # Rewrite both lines in-place so the script picks up the runner-
-        # provisioned QNN SDK + NDK. Trailing slash kept (the script's
-        # downstream make/cmake assumes it).
+        # The refactored build_android.bat no longer hard-codes QNN_SDK_ROOT
+        # or NDK_ROOT — it reads them from the environment and aborts if
+        # unset. So instead of patching the script, export the vars the
+        # runner provisioned.
         #
-        # NDK path uses FORWARD slashes — the project Makefile (line 24)
-        # passes ANDROID_NDK_ROOT directly to a shell command that's
-        # parsed by GNU make's bash, which eats backslashes as escape
-        # characters. Forward slashes work everywhere on Windows for
-        # this NDK shipped with cmd.exe + bash.
+        # QNN_SDK_ROOT needs a TRAILING SLASH here (unlike the Win/Linux
+        # CMake jobs): scripts/Android.mk line 31 does a bare string concat
+        # `${QNN_SDK_ROOT}lib/aarch64-android/libGenie.so` with no separator.
+        #
+        # NDK path uses FORWARD slashes — the project Makefile passes
+        # ANDROID_NDK_ROOT to a command parsed by GNU make's bash, which
+        # eats backslashes. Forward slashes work everywhere on Windows here.
         run: |
-          $bat = 'samples/genie/c++/build_android.bat'
-          $qnn = ($env:QNN_SDK_ROOT.TrimEnd('\','/') + '\').Replace('/', '\')
+          $qnn = ($env:QNN_SDK_ROOT.TrimEnd('\','/') + '\')
           $ndk = ('${{ steps.ndk.outputs.ndk-path }}'.TrimEnd('\','/') + '/').Replace('\', '/')
-          (Get-Content $bat) `
-            -replace 'set "QNN_SDK_ROOT=.*?"', ('set "QNN_SDK_ROOT=' + $qnn + '"') `
-            -replace 'set "NDK_ROOT=.*?"',     ('set "NDK_ROOT='     + $ndk + '"') `
-            | Set-Content $bat
-          Write-Host "Patched paths:"
-          Select-String -Path $bat -Pattern 'set "QNN_SDK_ROOT=|set "NDK_ROOT=' | Select-Object -ExpandProperty Line
+          "QNN_SDK_ROOT=$qnn"     | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "NDK_ROOT=$ndk"         | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ANDROID_NDK_ROOT=$ndk" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          if (-not (Test-Path (Join-Path $qnn 'lib\aarch64-android\libGenie.so'))) {
+            Write-Error "Expected Android libGenie.so not found under ${qnn}lib\aarch64-android"
+            exit 1
+          }
+          Write-Host "QNN_SDK_ROOT=$qnn"
+          Write-Host "NDK_ROOT=$ndk"
 
       - name: Build via build_android.bat
         shell: cmd
-        working-directory: samples/genie/c++
+        working-directory: samples/genie/c++/Service
+        # continue-on-error: the gradle assembleRelease step at the end of
+        # build_android.bat fails without a release keystore. The native
+        # .so files are copied to output BEFORE that step, so the next
+        # step verifies them independently as the real gate.
+        continue-on-error: true
         run: |
           call build_android.bat
 
       - name: Verify .so output
         shell: pwsh
         # The .so files land here regardless of whether the later APK
-        # signing step succeeds, so verify them independently.
+        # signing step succeeded, so verify them independently. This is
+        # the hard gate for the native Android build.
         run: |
-          $out = 'samples/genie/c++/build_android/output/libs/arm64-v8a'
+          $out = 'samples/genie/c++/Service/build-android/output/libs/arm64-v8a'
           if (-not (Test-Path $out)) {
             Write-Error "Expected output dir $out not found."
-            Get-ChildItem 'samples/genie/c++/build_android' -Recurse -Depth 3 -ErrorAction SilentlyContinue | Select-Object FullName
+            Get-ChildItem 'samples/genie/c++/Service/build-android' -Recurse -Depth 3 -ErrorAction SilentlyContinue | Select-Object FullName
             exit 1
           }
           Get-ChildItem $out | Select-Object Name, Length
-          $required = @('libappbuilder.so', 'libGenieAPIService.so')
+          $required = @('libappbuilder.so', 'libGenieAPIService.so', 'libJNIGenieAPIService.so')
           foreach ($f in $required) {
             if (-not (Test-Path (Join-Path $out $f))) {
               Write-Error "Required artifact missing: $f"
@@ -1040,7 +1069,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: GenieService-android-arm64v8a-libs-qnn2.48.40.260702
-          path: samples/genie/c++/build_android/output/libs/arm64-v8a/*.so
+          path: samples/genie/c++/Service/build-android/output/libs/arm64-v8a/*.so
           if-no-files-found: error
 
       - name: Upload Android APK if produced
@@ -1048,6 +1077,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: GenieService-android-arm64v8a-apk-qnn2.48.40.260702
-          path: samples/genie/c++/build_android/output/apk/*.apk
+          path: samples/genie/c++/Service/build-android/output/*.apk
           if-no-files-found: ignore
 
