@@ -61,6 +61,11 @@ _D2_GROUPS = (
 
 __all__ = ["main", "build_parser"]
 
+#: The subparsers ``metavar`` (also used verbatim in the hand-rolled usage
+#: error :func:`main` raises for the no-command + non-TTY case, so the two
+#: never drift apart — see ``main``'s ``args.command is None`` branch).
+_COMMAND_METAVAR = "<command>"
+
 
 # ---------------------------------------------------------------------------
 # Placeholders for D2 (Desktop App Plan §2.1.1):
@@ -130,8 +135,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(
         dest="command",
-        required=True,
-        metavar="<command>",
+        required=False,
+        metavar=_COMMAND_METAVAR,
         title="commands",
     )
 
@@ -199,6 +204,14 @@ def _force_utf8_streams() -> None:
                 reconfigure(encoding="utf-8", errors="replace")
 
 
+def _stdin_is_tty() -> bool:
+    """Defensive ``sys.stdin.isatty()`` (see ``_render.py``'s ``_stream_is_tty``)."""
+    try:
+        return bool(sys.stdin.isatty())
+    except Exception:  # noqa: BLE001 — closed / fake stream
+        return False
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """``python -m apps.cli`` / ``qai`` entry point.
 
@@ -221,14 +234,36 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     handler = getattr(args, "handler", None)
     if handler is None:
-        # Should not happen — every leaf subparser must call
-        # ``set_defaults(handler=...)``. Guard explicitly so we surface a
-        # clear message instead of an AttributeError trace if a future
-        # group forgets the wiring.
-        sys.stderr.write(
-            f"qai: no handler registered for command {args.command!r}\n"
-        )
-        return 2
+        if args.command is None:
+            # The top-level subparsers are now ``required=False`` (rather
+            # than letting argparse itself raise the usage error) so this
+            # branch can first check whether stdin is an interactive TTY —
+            # if so, ``qai`` with no subcommand drops into the default chat
+            # REPL (Phase 2 §Step 4) instead of a usage error.
+            if _stdin_is_tty():
+                from apps.cli.commands.chat import cmd_chat  # noqa: PLC0415
+
+                handler = cmd_chat
+            else:
+                # Non-TTY (pipe / CI) with no subcommand: reproduce the
+                # exact usage-error text + exit code argparse itself used
+                # to raise for the same input when the subparsers were
+                # ``required=True`` (see ``_COMMAND_METAVAR``).
+                try:
+                    parser.error(
+                        f"the following arguments are required: {_COMMAND_METAVAR}"
+                    )
+                except SystemExit as exc:
+                    return int(exc.code) if exc.code is not None else 2
+        else:
+            # Should not happen — every leaf subparser must call
+            # ``set_defaults(handler=...)``. Guard explicitly so we surface a
+            # clear message instead of an AttributeError trace if a future
+            # group forgets the wiring.
+            sys.stderr.write(
+                f"qai: no handler registered for command {args.command!r}\n"
+            )
+            return 2
 
     try:
         return int(handler(args))

@@ -71,7 +71,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from rich.console import Console
+from rich.text import Text
+
+from apps.cli._pager import show_pager
 from apps.cli._render import RenderOptions, StreamFrameRenderer
+from apps.cli._render_theme import build_console, icon
 from apps.cli._repl import (
     InterruptController,
     PermissionBridge,
@@ -79,6 +84,7 @@ from apps.cli._repl import (
     async_read_line,
     repl_container,
 )
+from apps.cli._session_log import SessionLog, cleanup_repl_session
 
 __all__ = ["register", "build_extra", "QUANT_PRECISIONS"]
 
@@ -146,6 +152,14 @@ def build_extra(session: BuildSession) -> dict[str, Any]:
     if session.dataset_path:
         tool_params["dataset_path"] = session.dataset_path
     return {"tool_mode": TOOL_MODE, "tool_params": tool_params}
+
+
+def _out_console(opts: RenderOptions) -> Console:
+    return build_console(color=opts.color, emoji=opts.emoji, stream=sys.stdout)
+
+
+def _err_console(opts: RenderOptions) -> Console:
+    return build_console(color=opts.color, emoji=opts.emoji, stream=sys.stderr)
 
 
 def _params_summary(session: BuildSession) -> str:
@@ -303,7 +317,6 @@ async def _run_build(args: argparse.Namespace) -> int:
     config_file: Path | None = getattr(args, "config_file", None)
 
     opts = RenderOptions.from_streams(sys.stdout, sys.stderr)
-    renderer = StreamFrameRenderer(opts, out=sys.stdout, err=sys.stderr)
 
     async with repl_container(
         config_file=config_file, repo_root=repo_root
@@ -342,6 +355,13 @@ async def _run_build(args: argparse.Namespace) -> int:
         conversation_id = ConversationId.of(conv_id_str)
         tab_id: Any = tab.id if not isinstance(tab.id, str) else TabId.of(tab.id)
 
+        # ── Session log tees every themed-console print from here on into
+        #    <cli_sessions_dir>/<conv_id>.log; must open before the first
+        #    print (banner below) and before `renderer` is built so its
+        #    captured stdout/stderr reference is already teed.
+        session_log = SessionLog(c.data_paths, conv_id_str)
+        renderer = StreamFrameRenderer(opts, out=sys.stdout, err=sys.stderr)
+
         # ── Session state from initial flags.
         session = BuildSession(
             model_paths=list(getattr(args, "model_files", None) or []),
@@ -359,7 +379,7 @@ async def _run_build(args: argparse.Namespace) -> int:
 
         interrupts = InterruptController()
 
-        _print_banner(conv_id_str, session, model_hint)
+        _print_banner(conv_id_str, session, model_hint, opts)
 
         dispatcher = _build_dispatcher(
             c=c,
@@ -369,6 +389,7 @@ async def _run_build(args: argparse.Namespace) -> int:
             renderer=renderer,
             model_hint=model_hint,
             interrupts=interrupts,
+            opts=opts,
         )
 
         try:
@@ -382,24 +403,28 @@ async def _run_build(args: argparse.Namespace) -> int:
                 model_hint=model_hint,
                 interrupts=interrupts,
                 perm_bridge=perm_bridge,
+                opts=opts,
             )
         finally:
             await perm_bridge.unsubscribe()
+            cleanup_repl_session(session_log)
 
 
 def _print_banner(
-    conv_id: str, session: BuildSession, model_hint: str | None
+    conv_id: str,
+    session: BuildSession,
+    model_hint: str | None,
+    opts: RenderOptions,
 ) -> None:
-    out = sys.stdout
-    out.write("Model Builder 会话已就绪。\n")
-    out.write(f"  会话 id  : {conv_id}\n")
+    console = _out_console(opts)
+    console.print(Text("Model Builder 会话已就绪。", style="heading"))
+    console.print(Text(f"  会话 id  : {conv_id}"))
     if model_hint:
-        out.write(f"  Agent LLM: {model_hint}\n")
-    out.write(_params_summary(session) + "\n")
-    out.write(
-        "输入自然语言与 Agent 对话，或用斜杠命令调整参数（/help 查看全部）。\n"
+        console.print(Text(f"  Agent LLM: {model_hint}"))
+    console.print(Text(_params_summary(session)))
+    console.print(
+        Text("输入自然语言与 Agent 对话，或用斜杠命令调整参数（/help 查看全部）。")
     )
-    out.flush()
 
 
 # ---------------------------------------------------------------------------
@@ -417,6 +442,7 @@ async def _stream_turn(
     renderer: StreamFrameRenderer,
     model_hint: str | None,
     interrupts: InterruptController,
+    opts: RenderOptions,
 ) -> None:
     """Send one user message and render the streamed frames.
 
@@ -450,11 +476,20 @@ async def _stream_turn(
     except asyncio.CancelledError:
         # Turn was cancelled by Ctrl+C; abort the backend stream by tab id.
         await _abort_turn(c, tab_id)
-        sys.stderr.write("\n（已中断当前回合）\n")
-        sys.stderr.flush()
+        warn = icon("warning", emoji=opts.emoji)
+        prefix = f"{warn} " if warn else ""
+        _err_console(opts).print(
+            Text(f"\n{prefix}（已中断当前回合）", style="warning")
+        )
     except Exception as exc:  # noqa: BLE001 — REPL must survive a bad turn
-        sys.stderr.write(f"\n回合失败: {type(exc).__name__}: {exc}\n")
-        sys.stderr.flush()
+        cross = icon("error", emoji=opts.emoji)
+        prefix = f"{cross} " if cross else ""
+        _err_console(opts).print(
+            Text(
+                f"\n{prefix}回合失败: {type(exc).__name__}: {exc}",
+                style="error",
+            )
+        )
 
 
 async def _abort_turn(c: Any, tab_id: Any) -> None:
@@ -483,6 +518,7 @@ def _build_dispatcher(
     renderer: StreamFrameRenderer,
     model_hint: str | None,
     interrupts: InterruptController,
+    opts: RenderOptions,
 ) -> SlashDispatcher:
     """Register every ``/`` command (cli-interactive-design §3.4).
 
@@ -494,33 +530,36 @@ def _build_dispatcher(
     own progressive availability).
     """
 
-    d = SlashDispatcher()
+    d = SlashDispatcher(console=_out_console(opts))
 
     async def _help(_rest: str) -> bool:
-        sys.stdout.write(d.render_help() + "\n")
-        sys.stdout.flush()
+        _out_console(opts).print(Text(d.render_help()))
         return True
 
     async def _model(rest: str) -> bool:
         rest = rest.strip()
+        console = _out_console(opts)
         if not rest:
             cur = ", ".join(session.model_paths) if session.model_paths else "(未设置)"
-            sys.stdout.write(f"当前模型文件: {cur}\n")
+            console.print(Text(f"当前模型文件: {cur}"))
         else:
             session.model_paths = [p for p in rest.split() if p]
-            sys.stdout.write(
-                f"已设置模型文件: {', '.join(session.model_paths)}\n"
+            ok = icon("success", emoji=opts.emoji)
+            prefix = f"{ok} " if ok else ""
+            console.print(
+                Text(
+                    f"{prefix}已设置模型文件: {', '.join(session.model_paths)}",
+                    style="success",
+                )
             )
-        sys.stdout.flush()
         return True
 
     async def _precision(rest: str) -> bool:
         rest = rest.strip()
         if not rest:
-            sys.stdout.write(
-                f"当前量化精度: {session.quant_precision or '(未设置)'}\n"
+            _out_console(opts).print(
+                Text(f"当前量化精度: {session.quant_precision or '(未设置)'}")
             )
-            sys.stdout.flush()
             return True
         invalid = [
             lvl
@@ -528,52 +567,66 @@ def _build_dispatcher(
             if lvl and lvl not in QUANT_PRECISIONS
         ]
         if invalid:
-            sys.stderr.write(
-                f"无效精度级别: {', '.join(invalid)}；"
-                f"可选: {', '.join(QUANT_PRECISIONS)}\n"
+            cross = icon("error", emoji=opts.emoji)
+            prefix = f"{cross} " if cross else ""
+            _err_console(opts).print(
+                Text(
+                    f"{prefix}无效精度级别: {', '.join(invalid)}；"
+                    f"可选: {', '.join(QUANT_PRECISIONS)}",
+                    style="error",
+                )
             )
-            sys.stderr.flush()
             return True
         session.quant_precision = rest
-        sys.stdout.write(f"已设置量化精度: {session.quant_precision}\n")
-        sys.stdout.flush()
+        ok = icon("success", emoji=opts.emoji)
+        prefix = f"{ok} " if ok else ""
+        _out_console(opts).print(
+            Text(f"{prefix}已设置量化精度: {session.quant_precision}", style="success")
+        )
         return True
 
     async def _dataset(rest: str) -> bool:
         rest = rest.strip()
+        console = _out_console(opts)
         if not rest:
-            sys.stdout.write(
-                f"当前数据集: {session.dataset_path or '(未设置)'}\n"
-            )
+            console.print(Text(f"当前数据集: {session.dataset_path or '(未设置)'}"))
         else:
             session.dataset_path = rest
-            sys.stdout.write(f"已设置数据集: {session.dataset_path}\n")
-        sys.stdout.flush()
+            ok = icon("success", emoji=opts.emoji)
+            prefix = f"{ok} " if ok else ""
+            console.print(
+                Text(f"{prefix}已设置数据集: {session.dataset_path}", style="success")
+            )
         return True
 
     async def _params(_rest: str) -> bool:
-        sys.stdout.write("当前会话参数:\n" + _params_summary(session) + "\n")
-        sys.stdout.flush()
+        _out_console(opts).print(Text("当前会话参数:\n" + _params_summary(session)))
         return True
 
     async def _mode(rest: str) -> bool:
         rest = rest.strip().lower()
+        console = _out_console(opts)
         if rest not in ("batch", "interactive"):
-            sys.stdout.write(
-                f"当前模式: {session.mode}（用 /mode batch|interactive 切换）\n"
+            console.print(
+                Text(f"当前模式: {session.mode}（用 /mode batch|interactive 切换）")
             )
         else:
             session.mode = rest
-            sys.stdout.write(f"已切换模式: {session.mode}\n")
-        sys.stdout.flush()
+            ok = icon("success", emoji=opts.emoji)
+            prefix = f"{ok} " if ok else ""
+            console.print(Text(f"{prefix}已切换模式: {session.mode}", style="success"))
         return True
 
     async def _run(_rest: str) -> bool:
         if not session.model_paths:
-            sys.stderr.write(
-                "尚未设置模型文件，请先 /model <path> 或启动时用 --model-file。\n"
+            cross = icon("error", emoji=opts.emoji)
+            prefix = f"{cross} " if cross else ""
+            _err_console(opts).print(
+                Text(
+                    f"{prefix}尚未设置模型文件，请先 /model <path> 或启动时用 --model-file。",
+                    style="error",
+                )
             )
-            sys.stderr.flush()
             return True
         instruction = _standard_run_instruction(session)
         await _stream_turn(
@@ -585,13 +638,17 @@ def _build_dispatcher(
             renderer=renderer,
             model_hint=model_hint,
             interrupts=interrupts,
+            opts=opts,
         )
         return True
 
     async def _retry(_rest: str) -> bool:
         if not session.last_user_message:
-            sys.stderr.write("没有可重发的上一条消息。\n")
-            sys.stderr.flush()
+            cross = icon("error", emoji=opts.emoji)
+            prefix = f"{cross} " if cross else ""
+            _err_console(opts).print(
+                Text(f"{prefix}没有可重发的上一条消息。", style="error")
+            )
             return True
         await _stream_turn(
             c=c,
@@ -602,13 +659,17 @@ def _build_dispatcher(
             renderer=renderer,
             model_hint=model_hint,
             interrupts=interrupts,
+            opts=opts,
         )
         return True
 
     async def _stop(_rest: str) -> bool:
         await _abort_turn(c, tab_id)
-        sys.stdout.write("已请求中止当前回合。\n")
-        sys.stdout.flush()
+        ok = icon("success", emoji=opts.emoji)
+        prefix = f"{ok} " if ok else ""
+        _out_console(opts).print(
+            Text(f"{prefix}已请求中止当前回合。", style="success")
+        )
         return True
 
     async def _clear(_rest: str) -> bool:
@@ -634,15 +695,19 @@ def _build_dispatcher(
         _ID_HOLDER["conversation_id"] = new_conv
         _ID_HOLDER["tab_id"] = new_tab
         session.last_user_message = None
-        sys.stdout.write(f"已开启新会话: {conv.id.value}\n")
-        sys.stdout.flush()
+        ok = icon("success", emoji=opts.emoji)
+        prefix = f"{ok} " if ok else ""
+        _out_console(opts).print(
+            Text(f"{prefix}已开启新会话: {conv.id.value}", style="success")
+        )
         return True
 
     async def _history(_rest: str) -> bool:
         getter = getattr(c.chat, "get_conversation_messages_use_case", None)
         if getter is None:
-            sys.stdout.write("历史读取尚未接通（CLI 暂不可达该用例）。\n")
-            sys.stdout.flush()
+            _out_console(opts).print(
+                Text("历史读取尚未接通（CLI 暂不可达该用例）。", style="dim")
+            )
             return True
         try:
             from qai.chat.application.use_cases.conversation_management import (
@@ -657,42 +722,78 @@ def _build_dispatcher(
                 )
             )
         except Exception as exc:  # noqa: BLE001 — robust print, no trace
-            sys.stderr.write(f"读取历史失败: {type(exc).__name__}: {exc}\n")
-            sys.stderr.flush()
+            cross = icon("error", emoji=opts.emoji)
+            prefix = f"{cross} " if cross else ""
+            _err_console(opts).print(
+                Text(
+                    f"{prefix}读取历史失败: {type(exc).__name__}: {exc}",
+                    style="error",
+                )
+            )
             return True
         items = list(getattr(page, "items", ()) or ())
         if not items:
-            sys.stdout.write("（暂无历史消息）\n")
-            sys.stdout.flush()
+            _out_console(opts).print(Text("（暂无历史消息）", style="dim"))
             return True
+        console = _out_console(opts)
         for msg in items:
             role = getattr(getattr(msg, "role", None), "value", "?")
             content = getattr(msg, "content", "")
-            sys.stdout.write(f"[{role}] {content}\n")
-        sys.stdout.flush()
+            console.print(Text(f"[{role}] {content}"))
         return True
 
     async def _status(_rest: str) -> bool:
-        sys.stdout.write(
-            "运行状态查询尚未接通（依赖 Model Builder 后端用例）。"
-            "可用 /params 查看当前参数。\n"
+        _out_console(opts).print(
+            Text(
+                "运行状态查询尚未接通（依赖 Model Builder 后端用例）。"
+                "可用 /params 查看当前参数。",
+                style="dim",
+            )
         )
-        sys.stdout.flush()
         return True
 
     async def _workspace(_rest: str) -> bool:
-        sys.stdout.write(
-            "工作区查看尚未接通（依赖 Model Builder 后端用例）。\n"
+        _out_console(opts).print(
+            Text("工作区查看尚未接通（依赖 Model Builder 后端用例）。", style="dim")
         )
-        sys.stdout.flush()
         return True
 
     async def _promote(_rest: str) -> bool:
-        sys.stdout.write(
-            "导出/晋升为 pack 尚未在 CLI 接通。"
-            "转换产物就绪后可运行: qai pack import <artifact>\n"
+        _out_console(opts).print(
+            Text(
+                "导出/晋升为 pack 尚未在 CLI 接通。"
+                "转换产物就绪后可运行: qai pack import <artifact>",
+                style="dim",
+            )
         )
-        sys.stdout.flush()
+        return True
+
+    async def _show(rest: str) -> bool:
+        rest = rest.strip()
+        idx: int | None
+        if rest:
+            try:
+                idx = int(rest)
+            except ValueError:
+                cross = icon("error", emoji=opts.emoji)
+                prefix = f"{cross} " if cross else ""
+                _err_console(opts).print(
+                    Text(f"{prefix}用法: /show [<折叠序号>]", style="error")
+                )
+                return True
+        else:
+            idx = None
+        folded_text = renderer.folded(idx)
+        if folded_text is None:
+            _out_console(opts).print(
+                Text(
+                    "没有可展开的内容（尚无折叠的工具结果，或序号超出范围）。",
+                    style="dim",
+                )
+            )
+            return True
+        shown_idx = idx if idx is not None else renderer.last_fold_index
+        await show_pager(folded_text, title=f"/show {shown_idx}")
         return True
 
     async def _exit(_rest: str) -> bool:
@@ -711,6 +812,7 @@ def _build_dispatcher(
     d.register("workspace", "查看工作区（尚未接通）", _workspace)
     d.register("promote", "导出为 pack（提示用 qai pack import）", _promote)
     d.register("history", "打印会话历史消息", _history)
+    d.register("show", "[<n>] 全屏查看折叠的工具结果（不带参数查看最近一次）", _show)
     d.register("clear", "开启新会话", _clear)
     d.register("exit", "退出会话", _exit, aliases=("quit",))
     return d
@@ -755,6 +857,7 @@ async def _repl_loop(
     model_hint: str | None,
     interrupts: InterruptController,
     perm_bridge: Any = None,
+    opts: RenderOptions,
 ) -> int:
     """Drive the interactive loop until ``/exit`` / EOF / double Ctrl+C.
 
@@ -777,17 +880,18 @@ async def _repl_loop(
         try:
             line = await async_read_line("build › ")
         except EOFError:
-            sys.stdout.write("\n再见。\n")
-            sys.stdout.flush()
+            _out_console(opts).print(Text("\n再见。", style="dim"))
             return 0
         except KeyboardInterrupt:
             # A bare Ctrl+C at the prompt: second within the window exits.
             if interrupts.signal():
-                sys.stdout.write("\n再见。\n")
-                sys.stdout.flush()
+                _out_console(opts).print(Text("\n再见。", style="dim"))
                 return 0
-            sys.stderr.write("\n（再次按 Ctrl+C 退出）\n")
-            sys.stderr.flush()
+            warn = icon("warning", emoji=opts.emoji)
+            prefix = f"{warn} " if warn else ""
+            _err_console(opts).print(
+                Text(f"\n{prefix}（再次按 Ctrl+C 退出）", style="warning")
+            )
             continue
 
         if line is None:
@@ -799,8 +903,7 @@ async def _repl_loop(
         if is_slash(line):
             _handled, keep = await dispatcher.dispatch(line)
             if not keep:
-                sys.stdout.write("再见。\n")
-                sys.stdout.flush()
+                _out_console(opts).print(Text("再见。", style="dim"))
                 return 0
             continue
 
@@ -813,6 +916,7 @@ async def _repl_loop(
             renderer=renderer,
             model_hint=model_hint,
             interrupts=interrupts,
+            opts=opts,
         )
 
         # Resolve any permission requests queued during the turn (D5).
@@ -828,6 +932,7 @@ async def _run_turn_with_interrupt(
     renderer: StreamFrameRenderer,
     model_hint: str | None,
     interrupts: InterruptController,
+    opts: RenderOptions,
 ) -> None:
     """Run one turn; convert a Ctrl+C during the turn into a turn cancel."""
 
@@ -841,6 +946,7 @@ async def _run_turn_with_interrupt(
             renderer=renderer,
             model_hint=model_hint,
             interrupts=interrupts,
+            opts=opts,
         )
     )
     try:

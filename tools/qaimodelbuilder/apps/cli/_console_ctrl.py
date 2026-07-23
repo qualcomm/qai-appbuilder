@@ -31,6 +31,7 @@ from collections.abc import Callable
 __all__ = [
     "ANSI",
     "ConsoleCtrlInterceptor",
+    "restore_terminal",
     "show_exit_menu",
 ]
 
@@ -64,6 +65,16 @@ def _write(text: str) -> None:
         sys.stdout.flush()
     except OSError:
         pass
+
+
+def restore_terminal() -> None:
+    """Show the cursor again (best-effort).
+
+    Call from any REPL exit path that may have left the cursor hidden — a
+    Rich ``Progress``/``Live`` bar that never reached its normal stop point,
+    or :func:`show_exit_menu` itself when interrupted mid-render.
+    """
+    _write(ANSI.SHOW_CURSOR)
 
 
 # ---------------------------------------------------------------------------

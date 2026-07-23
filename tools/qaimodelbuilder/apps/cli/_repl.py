@@ -34,6 +34,8 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
+from rich.text import Text
+
 from apps.cli._runtime import cli_container
 from apps.api.di import Container
 
@@ -136,10 +138,11 @@ class SlashDispatcher:
     input content.
     """
 
-    __slots__ = ("_commands",)
+    __slots__ = ("_commands", "_console")
 
-    def __init__(self) -> None:
+    def __init__(self, *, console: Any = None) -> None:
         self._commands: dict[str, SlashCommand] = {}
+        self._console = console
 
     def register(
         self,
@@ -167,10 +170,12 @@ class SlashDispatcher:
         cmd_name, rest = split_slash(line)
         cmd = self._commands.get(cmd_name)
         if cmd is None:
-            sys.stdout.write(
-                f"未知命令: /{cmd_name}（/help 查看全部命令）\n"
-            )
-            sys.stdout.flush()
+            message = f"未知命令: /{cmd_name}（/help 查看全部命令）"
+            if self._console is not None:
+                self._console.print(Text(message, style="warning"))
+            else:
+                sys.stdout.write(message + "\n")
+                sys.stdout.flush()
             return (True, True)
         keep = await cmd.handler(rest)
         return (True, keep)

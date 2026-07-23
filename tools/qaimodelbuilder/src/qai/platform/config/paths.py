@@ -93,6 +93,15 @@ class DataPaths:
         return self._root / "secrets"
 
     @property
+    def cli_sessions_dir(self) -> Path:
+        """``data/cache/cli_sessions/`` — ``qai build``/``qai app`` REPL transcripts.
+
+        Not created here; callers use ``ensure(...)`` on first write (mirrors
+        the ``config_dir`` policy — off ``_KNOWN_SUBDIRS``).
+        """
+        return self.cache_dir / "cli_sessions"
+
+    @property
     def config_dir(self) -> Path:
         """``data/config/`` — runtime-editable JSON config documents.
 

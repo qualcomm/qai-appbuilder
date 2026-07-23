@@ -67,7 +67,7 @@ Server 启动时自动选取可用端口，实际 URL 写入
 
 | 命令 | 用途 |
 |---|---|
-| `qai.bat <args>` | 不进 venv 直接跑 CLI（`qai --help` / `qai config provider list` / `qai build`…） |
+| `qai.bat <args>` | 不进 venv 直接跑 CLI（`qai --help` / `qai config provider list` / `qai build`…，完整子命令参考见 [`CLI-GUIDE.zh-CN.md`](CLI-GUIDE.zh-CN.md)） |
 | `Console.bat` | 双击进入激活好的 venv 交互 shell，用 `pip install <pkg>` 装额外包 / 跑 ad-hoc Python |
 | `Uninstall.bat` | 卸载 Setup.bat 装到项目外的东西（venv / PortableGit / Node）；**不动 `data/`** |
 | `Uninstall.bat --all` | 上面 + uv 缓存 + QAIRT SDK + Playwright Chromium + `vendor/` 运行时缓存 |

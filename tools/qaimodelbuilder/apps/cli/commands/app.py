@@ -35,18 +35,24 @@ import json
 import shutil
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any
+
+from rich.console import Console
+from rich.text import Text
 
 from apps.api.di import Container
 from apps.cli import _render
 from apps.cli._render import RenderOptions, RunFrameRenderer, RunResult
+from apps.cli._render_theme import build_console, icon
 from apps.cli._repl import (
     SlashDispatcher,
     async_read_line,
     repl_container,
 )
 from apps.cli._runtime import run_use_case
+from apps.cli._session_log import SessionLog, cleanup_repl_session
 from apps.cli.commands.pack import (
     _emit,
     _resolved_config_file,
@@ -318,20 +324,23 @@ async def _run_once(
     opts: RenderOptions,
     *,
     err: Any = None,
+    renderer: RunFrameRenderer | None = None,
 ) -> RunResult:
     """Drive one ``RunAppUseCase`` stream → :class:`RunResult`.
 
     The single source of truth for "run a pack and capture its outcome",
     shared by the one-shot handler and the REPL turn loop. Progress frames
     render to ``err`` (stderr by default); the result / error are captured on
-    the returned :class:`RunResult`.
+    the returned :class:`RunResult`. A caller that needs to force-stop a
+    live progress bar from outside (e.g. REPL exit cleanup) can build the
+    ``renderer`` itself and pass it in; otherwise one is built internally.
     """
 
     from qai.app_builder.domain.value_objects import AppModelId  # noqa: PLC0415
 
     err = err if err is not None else sys.stderr
     result = RunResult()
-    renderer = RunFrameRenderer(opts, err=err)
+    renderer = renderer if renderer is not None else RunFrameRenderer(opts, err=err)
 
     # ``execute`` is an ``async def`` returning the async iterator.
     iterator = await c.app_builder.run_app_use_case.execute(
@@ -703,7 +712,14 @@ def _cmd_list_packs(args: argparse.Namespace) -> int:
 class _AppReplState:
     """Mutable per-session state for the App Builder REPL."""
 
-    __slots__ = ("pack", "manifest", "variant", "params", "last_result")
+    __slots__ = (
+        "pack",
+        "manifest",
+        "variant",
+        "params",
+        "last_result",
+        "active_renderer",
+    )
 
     def __init__(self, pack: str) -> None:
         self.pack = pack
@@ -711,6 +727,10 @@ class _AppReplState:
         self.variant: str | None = None
         self.params: dict[str, object] = {}
         self.last_result: RunResult | None = None
+        #: The in-flight turn's ``RunFrameRenderer`` (set only while a turn is
+        #: streaming), so REPL exit cleanup can force-stop a live progress
+        #: bar left running by an exception escaping mid-turn.
+        self.active_renderer: RunFrameRenderer | None = None
 
 
 def _run_repl(args: argparse.Namespace, opts: RenderOptions) -> int:
@@ -726,46 +746,63 @@ async def _repl_main(args: argparse.Namespace, opts: RenderOptions) -> int:
         config_file=_resolved_config_file(args),
         repo_root=_resolved_repo_root(args),
     ) as c:
+        # ── Session log tees every themed-console print from here on into
+        #    <cli_sessions_dir>/<session_id>.log; no existing session-id
+        #    concept threads through this REPL (unlike `qai build`'s
+        #    conversation id), so a fresh id is minted for the log filename.
+        session_log = SessionLog(c.data_paths, uuid.uuid4().hex)
+
         await _seed_factory_packs_if_empty(c)
         state.manifest = await _load_manifest(c, state.pack)
 
         dispatcher = _build_repl_dispatcher(c, state, opts)
-        _print_repl_banner(state)
+        _print_repl_banner(state, opts)
 
-        while True:
-            try:
-                line = await async_read_line(f"app({state.pack}) › ")
-            except EOFError:
-                sys.stdout.write("\n")
-                break
-            except KeyboardInterrupt:
-                # First Ctrl+C at the prompt: cancel the line, keep running.
-                sys.stdout.write("\n(已取消，/exit 退出)\n")
-                continue
-
-            line = line.strip()
-            if not line:
-                continue
-
-            handled, keep_running = await dispatcher.dispatch(line)
-            if handled:
-                if not keep_running:
+        try:
+            while True:
+                try:
+                    line = await async_read_line(f"app({state.pack}) › ")
+                except EOFError:
+                    _out_console(opts).print(Text(""))
                     break
-                continue
+                except KeyboardInterrupt:
+                    # First Ctrl+C at the prompt: cancel the line, keep running.
+                    warn = icon("warning", emoji=opts.emoji)
+                    prefix = f"{warn} " if warn else ""
+                    _out_console(opts).print(
+                        Text(f"\n{prefix}(已取消，/exit 退出)", style="warning")
+                    )
+                    continue
 
-            # Non-slash line → main input value for one inference turn.
-            await _repl_run_turn(c, state, line, opts)
+                line = line.strip()
+                if not line:
+                    continue
+
+                handled, keep_running = await dispatcher.dispatch(line)
+                if handled:
+                    if not keep_running:
+                        break
+                    continue
+
+                # Non-slash line → main input value for one inference turn.
+                await _repl_run_turn(c, state, line, opts)
+        finally:
+            cleanup_repl_session(session_log, active_renderer=state.active_renderer)
 
     return 0
 
 
-def _print_repl_banner(state: _AppReplState) -> None:
+def _out_console(opts: RenderOptions) -> Console:
+    return build_console(color=opts.color, emoji=opts.emoji, stream=sys.stdout)
+
+
+def _print_repl_banner(state: _AppReplState, opts: RenderOptions) -> None:
     kind = _manifest_input_kind(state.manifest) or "?"
-    sys.stdout.write(
-        f"App Builder 会话 — Pack: {state.pack} (输入类型: {kind})\n"
-        f"直接输入内容（路径或文本）回车运行；/help 查看命令，/exit 退出。\n"
+    console = _out_console(opts)
+    console.print(
+        Text(f"App Builder 会话 — Pack: {state.pack} (输入类型: {kind})", style="heading")
     )
-    sys.stdout.flush()
+    console.print(Text("直接输入内容（路径或文本）回车运行；/help 查看命令，/exit 退出。"))
 
 
 async def _repl_run_turn(
@@ -783,9 +820,14 @@ async def _repl_run_turn(
         value = value.strip().strip('"').strip("'")
         p = Path(value)
         if not p.exists():
-            sys.stdout.write(
-                f"找不到文件: {value}\n"
-                "请输入存在的文件路径（可把文件拖入终端，或用 Explorer“复制为路径”）。\n"
+            cross = icon("error", emoji=opts.emoji)
+            prefix = f"{cross} " if cross else ""
+            _out_console(opts).print(
+                Text(
+                    f"{prefix}找不到文件: {value}\n"
+                    "请输入存在的文件路径（可把文件拖入终端，或用 Explorer“复制为路径”）。",
+                    style="error",
+                )
             )
             return
     inputs = build_inputs(
@@ -794,11 +836,15 @@ async def _repl_run_turn(
         variant_id=state.variant,
         params=state.params,
     )
+    renderer = RunFrameRenderer(opts, err=sys.stderr)
+    state.active_renderer = renderer
     try:
-        result = await _run_once(c, state.pack, inputs, opts)
+        result = await _run_once(c, state.pack, inputs, opts, renderer=renderer)
     except KeyboardInterrupt:
-        sys.stdout.write("\n(本轮已中断)\n")
+        state.active_renderer = None
+        _out_console(opts).print(Text("\n(本轮已中断)", style="warning"))
         return
+    state.active_renderer = None
     state.last_result = result
     _render_result(
         result,
@@ -815,55 +861,67 @@ def _build_repl_dispatcher(
 ) -> SlashDispatcher:
     """Wire the ``/`` commands for the App Builder REPL."""
 
-    dispatcher = SlashDispatcher()
+    dispatcher = SlashDispatcher(console=_out_console(opts))
 
     async def _model(rest: str) -> bool:
         new_pack = rest.strip()
+        console = _out_console(opts)
         if not new_pack:
-            sys.stdout.write(f"当前 Pack: {state.pack}\n")
+            console.print(Text(f"当前 Pack: {state.pack}"))
             return True
         state.pack = new_pack
         state.manifest = await _load_manifest(c, new_pack)
         state.variant = None
-        sys.stdout.write(f"已切换 Pack: {new_pack}\n")
-        _print_repl_banner(state)
+        ok = icon("success", emoji=opts.emoji)
+        prefix = f"{ok} " if ok else ""
+        console.print(Text(f"{prefix}已切换 Pack: {new_pack}", style="success"))
+        _print_repl_banner(state, opts)
         return True
 
     async def _variant(rest: str) -> bool:
         state.variant = rest.strip() or None
-        sys.stdout.write(f"变体: {state.variant or '(默认)'}\n")
+        _out_console(opts).print(Text(f"变体: {state.variant or '(默认)'}"))
         return True
 
     async def _param(rest: str) -> bool:
         try:
             raw = parse_param_assignments([rest.strip()] if rest.strip() else [])
         except ValueError as exc:
-            sys.stdout.write(f"{exc}\n")
+            cross = icon("error", emoji=opts.emoji)
+            prefix = f"{cross} " if cross else ""
+            _out_console(opts).print(Text(f"{prefix}{exc}", style="error"))
             return True
         coerced = _coerce_params_with_manifest(raw, state.manifest)
         state.params.update(coerced)
-        sys.stdout.write(f"参数: {json.dumps(state.params, ensure_ascii=False)}\n")
+        _out_console(opts).print(
+            Text(f"参数: {json.dumps(state.params, ensure_ascii=False)}")
+        )
         return True
 
     async def _params(rest: str) -> bool:
-        sys.stdout.write(
-            f"当前参数: {json.dumps(state.params, ensure_ascii=False)}\n"
-            f"当前变体: {state.variant or '(默认)'}\n"
+        _out_console(opts).print(
+            Text(
+                f"当前参数: {json.dumps(state.params, ensure_ascii=False)}\n"
+                f"当前变体: {state.variant or '(默认)'}"
+            )
         )
         return True
 
     async def _examples(rest: str) -> bool:
         examples = list(getattr(state.manifest, "examples", ()) or ())
+        console = _out_console(opts)
         if not examples:
-            sys.stdout.write("该 Pack 没有内置示例。\n")
+            console.print(Text("该 Pack 没有内置示例。", style="dim"))
             return True
         choice = rest.strip()
         if not choice:
             for i, ex in enumerate(examples):
-                sys.stdout.write(f"  [{i}] {getattr(ex, 'name', '')}\n")
-            sys.stdout.write(
-                "用 /examples <序号> 运行内置示例，\n"
-                "或 /examples <序号> <你的文件路径> 用该示例的参数跑你自己的输入。\n"
+                console.print(Text(f"  [{i}] {getattr(ex, 'name', '')}"))
+            console.print(
+                Text(
+                    "用 /examples <序号> 运行内置示例，\n"
+                    "或 /examples <序号> <你的文件路径> 用该示例的参数跑你自己的输入。"
+                )
             )
             return True
         # Allow "<idx>" or "<idx> <override-input-path-or-text>".
@@ -872,8 +930,13 @@ def _build_repl_dispatcher(
             idx = int(parts[0])
             ex = examples[idx]
         except (ValueError, IndexError):
-            sys.stdout.write(
-                f"无效的示例序号: {parts[0]!r}（用 /examples 查看可用序号）\n"
+            cross = icon("error", emoji=opts.emoji)
+            prefix = f"{cross} " if cross else ""
+            console.print(
+                Text(
+                    f"{prefix}无效的示例序号: {parts[0]!r}（用 /examples 查看可用序号）",
+                    style="error",
+                )
             )
             return True
         override = parts[1].strip().strip('"').strip("'") if len(parts) > 1 else ""
@@ -885,8 +948,11 @@ def _build_repl_dispatcher(
         if override:
             # Run THIS example's params/variant against the user's own input.
             if input_key is None:
-                sys.stdout.write(
-                    "该 Pack 的输入类型不支持命令行覆盖，请直接用 /param 调参。\n"
+                console.print(
+                    Text(
+                        "该 Pack 的输入类型不支持命令行覆盖，请直接用 /param 调参。",
+                        style="dim",
+                    )
                 )
                 return True
             ex_inputs[input_key] = override
@@ -896,12 +962,17 @@ def _build_repl_dispatcher(
             pack_dir = _pack_dir(c, state.pack)
             ex_inputs, missing = _resolve_example_inputs(ex_inputs, pack_dir)
             if missing:
-                sys.stdout.write(
-                    f"内置示例 [{idx}] 的样例文件未随 Pack 附带：\n"
-                    + "".join(f"  缺失 {m}\n" for m in missing)
-                    + "可改用自己的文件运行该示例的参数：\n"
-                    + f"  /examples {idx} <你的文件路径>\n"
-                    + "或直接在提示符输入你的文件路径回车运行。\n"
+                warn = icon("warning", emoji=opts.emoji)
+                prefix = f"{warn} " if warn else ""
+                console.print(
+                    Text(
+                        f"{prefix}内置示例 [{idx}] 的样例文件未随 Pack 附带：\n"
+                        + "".join(f"  缺失 {m}\n" for m in missing)
+                        + "可改用自己的文件运行该示例的参数：\n"
+                        + f"  /examples {idx} <你的文件路径>\n"
+                        + "或直接在提示符输入你的文件路径回车运行。",
+                        style="warning",
+                    )
                 )
                 return True
 
@@ -922,24 +993,27 @@ def _build_repl_dispatcher(
 
     async def _history(rest: str) -> bool:
         uc = c.app_builder.list_runs_use_case
+        console = _out_console(opts)
         if uc is None:
-            sys.stdout.write("运行历史不可用（容器未接入 list_runs）。\n")
+            console.print(Text("运行历史不可用（容器未接入 list_runs）。", style="dim"))
             return True
         runs = await uc.execute(limit=20, offset=0)
         if not runs:
-            sys.stdout.write("暂无运行历史。\n")
+            console.print(Text("暂无运行历史。", style="dim"))
             return True
         for run in runs:
-            sys.stdout.write(
-                f"  {getattr(run, 'id', '?')}  "
-                f"{getattr(run, 'model_id', '?')}  "
-                f"{getattr(run, 'status', '?')}\n"
+            console.print(
+                Text(
+                    f"  {getattr(run, 'id', '?')}  "
+                    f"{getattr(run, 'model_id', '?')}  "
+                    f"{getattr(run, 'status', '?')}"
+                )
             )
         return True
 
     async def _last(rest: str) -> bool:
         if state.last_result is None:
-            sys.stdout.write("还没有运行结果。\n")
+            _out_console(opts).print(Text("还没有运行结果。", style="dim"))
             return True
         _render_result(
             state.last_result, state.manifest, opts,
@@ -949,17 +1023,17 @@ def _build_repl_dispatcher(
 
     async def _out(rest: str) -> bool:
         if state.last_result is None or state.last_result.output is None:
-            sys.stdout.write("没有可导出的输出。\n")
+            _out_console(opts).print(Text("没有可导出的输出。", style="dim"))
             return True
         dest = rest.strip()
         if not dest:
-            sys.stdout.write("用法: /out <path>\n")
+            _out_console(opts).print(Text("用法: /out <path>"))
             return True
         _write_output_artifact(state.last_result.output, dest, err=sys.stdout)
         return True
 
     async def _help(rest: str) -> bool:
-        sys.stdout.write(dispatcher.render_help() + "\n")
+        _out_console(opts).print(Text(dispatcher.render_help()))
         return True
 
     async def _exit(rest: str) -> bool:

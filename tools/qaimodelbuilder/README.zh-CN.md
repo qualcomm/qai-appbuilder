@@ -13,6 +13,8 @@
 
 > ⚡ **想快速上手？** 查看 **[`QUICK-START.zh-CN.md`](QUICK-START.zh-CN.md)** ——
 > 一页速查表覆盖三种使用模式（**开发模式 / 桌面 App（Tauri）/ 发布包**），告诉你什么场景该跑哪个 `.bat`。
+>
+> 📟 **想用命令行操作？** 查看 **[`CLI-GUIDE.zh-CN.md`](CLI-GUIDE.zh-CN.md)** —— `qai` 统一 CLI 的全部命令组、子命令与交互式会话（`qai build` / `qai app`）参考。
 
 ---
 

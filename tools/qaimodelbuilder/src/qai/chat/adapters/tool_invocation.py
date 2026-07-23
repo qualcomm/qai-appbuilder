@@ -70,6 +70,16 @@ TOOL_ORDER: tuple[str, ...] = (
     # Conditional / mode-specific tools last (only advertised in their mode).
     "appbuilder_run",
     "appbuilder_batch_run",
+    # CLI-exclusive read-only tools (apps/cli/_chat_tool_bridge.py, Step 5):
+    # only registered on the CLI-side container, never on apps/api's.
+    "qai_skill_list",
+    "qai_pack_list",
+    "qai_service_status",
+    "qai_run_list",
+    # CLI-exclusive Model Builder delegation tool
+    # (apps/cli/_chat_build_tool_bridge.py, Step 7): mutating/long-running,
+    # listed last so the model reaches for the read-only tools first.
+    "qai_build",
 )
 
 

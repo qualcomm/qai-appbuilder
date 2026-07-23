@@ -45,6 +45,8 @@ from qai.platform.persistence import migrate
 
 from apps.api._runtime_config_store import load_runtime_config_overrides
 from apps.api.di import Container
+from apps.cli._chat_build_tool_bridge import register_cli_build_tool
+from apps.cli._chat_tool_bridge import register_cli_tools
 
 __all__ = ["cli_container", "run_use_case"]
 
@@ -189,6 +191,8 @@ async def cli_container(
     )
 
     container = Container.build(settings=settings, repo_root=resolved_root)
+    register_cli_tools(container)
+    register_cli_build_tool(container)
     migrations_dir = _resolve_migrations_dir(resolved_root)
 
     await container.database.start()

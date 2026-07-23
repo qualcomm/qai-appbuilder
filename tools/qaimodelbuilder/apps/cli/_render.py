@@ -5,19 +5,30 @@ Shared by the Model Builder session (``qai build``, consumes
 consumes ``RunFrame`` payloads). All rendering is pure formatting glue:
 no business logic, no use-case calls — frames in, terminal text out.
 
-Design (cli-interactive-design.md §3.3 / §4.2 / §5)
+Design (cli-interactive-design.md §3.3 / §4.2 / §5; cli-render-redesign
+plan, Technical Design decision 1-8)
 ---------------------------------------------------
 * TTY vs non-TTY: when stdout is not a TTY (a pipe / file / CI), colour
-  + emoji + box-drawing are suppressed so ``qai app ... | jq`` and log
-  capture stay clean. ``rich`` already does most of this detection; we
-  layer an explicit ``no_color`` switch on top for determinism in tests.
-* StreamFrame (13 variants) → human-readable Agent transcript lines.
+  + emoji + the live progress bar are suppressed so ``qai app ... | jq``
+  and log capture stay clean. ``RenderOptions.color`` doubles as the
+  TTY/"rich terminal" switch feeding both the ``rich.console.Console``
+  construction and :class:`RunFrameRenderer`'s progress-bar-vs-plain-line
+  choice — there is no separate flag to keep in sync.
+* StreamFrame (13 variants) → human-readable Agent transcript lines,
+  rendered through a themed :class:`rich.console.Console` (see
+  ``_render_theme.py``). Long ``tool_result`` bodies are folded and
+  registered under an incrementing index so ``/show <n>`` can retrieve
+  the full text later (decision 6).
 * RunFrame payloads (``status`` / ``progress`` / ``result`` / ``error``)
-  → progress to *stderr*, structured result to *stdout* per outputSchema.
+  → progress to *stderr* (a live bar on a real terminal, plain lines
+  otherwise), structured result to *stdout* per outputSchema.
 
 The renderers write through injected text sinks (default
 ``sys.stdout`` / ``sys.stderr``) so tests can capture output without
-monkeypatching globals.
+monkeypatching globals. Model/tool text is always composed as
+``rich.text.Text`` (never interpolated into markup strings) so stray
+``[`` / ``]`` characters in LLM output or tool arguments can never be
+misparsed as Rich markup.
 """
 
 from __future__ import annotations
@@ -26,6 +37,15 @@ import json
 import sys
 from dataclasses import dataclass, field
 from typing import Any, TextIO
+
+from rich.console import Console
+from rich.padding import Padding
+from rich.progress import Progress
+from rich.syntax import Syntax
+from rich.table import Table
+from rich.text import Text
+
+from apps.cli._render_theme import build_console, icon
 
 __all__ = [
     "RenderOptions",
@@ -69,27 +89,14 @@ class RenderOptions:
         return cls(color=tty, emoji=tty, fold_lines=fold_lines)
 
 
-# ANSI colour helpers (only emitted when ``color`` is on).
-_ANSI = {
-    "reset": "\033[0m",
-    "dim": "\033[2m",
-    "bold": "\033[1m",
-    "red": "\033[31m",
-    "green": "\033[32m",
-    "yellow": "\033[33m",
-    "cyan": "\033[36m",
-    "magenta": "\033[35m",
-}
+def _console(opts: RenderOptions, stream: TextIO) -> Console:
+    """Build the shared themed console bound to *stream* for *opts*.
 
-
-def _c(opts: RenderOptions, color: str, text: str) -> str:
-    if not opts.color or color not in _ANSI:
-        return text
-    return f"{_ANSI[color]}{text}{_ANSI['reset']}"
-
-
-def _sym(opts: RenderOptions, emoji: str, plain: str) -> str:
-    return emoji if opts.emoji else plain
+    Thin wrapper over :func:`apps.cli._render_theme.build_console` — the
+    single construction site every CLI terminal surface shares (see that
+    function's docstring for the ``no_color``/``legacy_windows`` rationale).
+    """
+    return build_console(color=opts.color, emoji=opts.emoji, stream=stream)
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +114,15 @@ class StreamFrameRenderer:
     (``stream_frame.py:StreamFrameType``).
     """
 
-    __slots__ = ("_opts", "_out", "_err", "_mid_chunk")
+    __slots__ = (
+        "_opts",
+        "_out",
+        "_err",
+        "_console",
+        "_mid_chunk",
+        "_folded",
+        "_fold_seq",
+    )
 
     def __init__(
         self,
@@ -119,9 +134,13 @@ class StreamFrameRenderer:
         self._opts = opts
         self._out = out if out is not None else sys.stdout
         self._err = err if err is not None else sys.stderr
+        self._console = _console(opts, self._out)
         #: True while a stream of ``chunk`` frames is being printed without
         #: a trailing newline, so the next non-chunk frame can break the line.
         self._mid_chunk = False
+        #: ``/show`` fold registry: index -> full (un-folded) text.
+        self._folded: dict[int, str] = {}
+        self._fold_seq = 0
 
     def render(self, frame: Any) -> None:
         ftype = _frame_type_str(frame)
@@ -130,9 +149,24 @@ class StreamFrameRenderer:
         if handler is None:
             # Unknown frame type: surface dimly so nothing is silently lost.
             self._break_chunk()
-            self._line(_c(self._opts, "dim", f"· {ftype}: {payload}"))
+            self._console.print(Text(f"· {ftype}: {payload}", style="dim"))
             return
         handler(self, payload)
+
+    def folded(self, index: int | None = None) -> str | None:
+        """Return the full text registered for ``/show <index>``.
+
+        ``index=None`` returns the most recently folded entry. Returns
+        ``None`` when nothing has been folded yet, or *index* is unknown.
+        """
+        if index is None:
+            index = self._fold_seq
+        return self._folded.get(index)
+
+    @property
+    def last_fold_index(self) -> int:
+        """Most recently assigned fold index (0 = nothing folded yet)."""
+        return self._fold_seq
 
     # -- per-frame handlers -------------------------------------------------
 
@@ -142,9 +176,9 @@ class StreamFrameRenderer:
             return
         if not self._mid_chunk:
             # Open an Agent block header on the first chunk of a turn.
-            self._out.write(
-                _c(self._opts, "magenta", _sym(self._opts, "🧞 ", "")) + ""
-            )
+            prefix = icon("agent", emoji=self._opts.emoji)
+            if prefix:
+                self._console.print(Text(prefix + " ", style="agent"), end="")
         self._out.write(text)
         self._out.flush()
         self._mid_chunk = True
@@ -153,11 +187,12 @@ class StreamFrameRenderer:
         self._break_chunk()
         name = str(payload.get("tool_name", "tool"))
         args = payload.get("arguments", {})
-        gear = _sym(self._opts, "⚙ ", "» ")
         summary = _summarize_tool_args(args)
-        self._line(
-            "  " + _c(self._opts, "cyan", f"{gear}{name}") + f" › {summary}"
-        )
+        gear = icon("tool", emoji=self._opts.emoji)
+        line = Text("  ")
+        line.append(f"{gear} {name}".strip(), style="tool")
+        line.append(f" › {summary}", style="tool.arg")
+        self._console.print(line)
 
     def _on_tool_result(self, payload: dict[str, Any]) -> None:
         # Partial (streamed exec stdout) updates refresh in place; print the
@@ -171,44 +206,69 @@ class StreamFrameRenderer:
             return
         self._break_chunk()
         result = payload.get("result", "")
-        text = result if isinstance(result, str) else json.dumps(
-            result, ensure_ascii=False
+        is_json = not isinstance(result, str)
+        text = (
+            result
+            if isinstance(result, str)
+            else json.dumps(result, ensure_ascii=False, indent=2)
         )
         lines = text.splitlines() or [""]
-        ok = _sym(self._opts, "✓", "[ok]")
+        ok = icon("success", emoji=self._opts.emoji)
+        self._console.print(Text("     " + ok, style="success"))
         if len(lines) > self._opts.fold_lines:
-            shown = "\n".join("     " + ln for ln in lines[: self._opts.fold_lines])
+            self._fold_seq += 1
+            self._folded[self._fold_seq] = text
+            shown = "\n".join(lines[: self._opts.fold_lines])
+            self._print_result_body(shown, is_json)
             more = len(lines) - self._opts.fold_lines
-            self._line("     " + _c(self._opts, "green", ok))
-            self._line(shown)
-            self._line(
-                _c(self._opts, "dim", f"     … {more} 行已折叠（/show 展开）")
+            self._console.print(
+                Text(
+                    f"     … {more} 行已折叠（/show {self._fold_seq} 展开）",
+                    style="dim",
+                )
             )
         else:
-            body = "\n".join("     " + ln for ln in lines)
-            self._line("     " + _c(self._opts, "green", ok))
-            if body.strip():
-                self._line(body)
+            if text.strip():
+                self._print_result_body(text, is_json)
+
+    def _print_result_body(self, text: str, is_json: bool) -> None:
+        if is_json:
+            self._console.print(
+                Padding(
+                    Syntax(
+                        text,
+                        "json",
+                        theme="ansi_dark",
+                        word_wrap=True,
+                        background_color="default",
+                    ),
+                    (0, 0, 0, 5),
+                )
+            )
+        else:
+            for ln in text.splitlines():
+                self._console.print(Text("     " + ln))
 
     def _on_tool_mode_changed(self, payload: dict[str, Any]) -> None:
         self._break_chunk()
         mode = str(payload.get("mode", ""))
-        self._line(
-            _c(self._opts, "dim", f"· 已进入 {mode} 模式")
-        )
+        self._console.print(Text(f"· 已进入 {mode} 模式", style="dim"))
 
     def _on_turn_warning(self, payload: dict[str, Any]) -> None:
         self._break_chunk()
         count = payload.get("turn_count")
         msg = payload.get("message") or f"已 {count} 轮工具调用，接近上限"
-        self._line(_c(self._opts, "yellow", f"⚠ {msg}"))
+        warn = icon("warning", emoji=self._opts.emoji)
+        self._console.print(Text(f"{warn} {msg}".strip(), style="warning"))
 
     def _on_error(self, payload: dict[str, Any]) -> None:
         self._break_chunk()
         code = str(payload.get("code", "ERROR"))
         message = str(payload.get("message", ""))
-        cross = _sym(self._opts, "✗", "[x]")
-        self._line(_c(self._opts, "red", f"{cross} {code}: {message}"))
+        cross = icon("error", emoji=self._opts.emoji)
+        self._console.print(
+            Text(f"{cross} {code}: {message}".strip(), style="error")
+        )
 
     def _on_end(self, payload: dict[str, Any]) -> None:
         self._break_chunk()
@@ -218,38 +278,39 @@ class StreamFrameRenderer:
         if total:
             bits.append(f"{total} tok")
         if bits:
-            self._line(_c(self._opts, "dim", "· " + " · ".join(bits)))
+            self._console.print(Text("· " + " · ".join(bits), style="dim"))
 
     def _on_subagent_start(self, payload: dict[str, Any]) -> None:
         self._break_chunk()
         idx = payload.get("index")
         total = payload.get("total")
         preview = str(payload.get("prompt_preview", ""))
-        self._line(
-            _c(self._opts, "dim", f"  └ 子任务 {idx}/{total}: {preview}")
+        self._console.print(
+            Text(f"  └ 子任务 {idx}/{total}: {preview}", style="dim")
         )
 
     def _on_subagent_output(self, payload: dict[str, Any]) -> None:
         content = str(payload.get("content", ""))
         if content:
-            self._line(_c(self._opts, "dim", "    " + content))
+            self._console.print(Text("    " + content, style="dim"))
 
     def _on_subagent_tool(self, payload: dict[str, Any]) -> None:
         name = str(payload.get("tool_name", "tool"))
-        self._line(_c(self._opts, "dim", f"    ⚙ {name}"))
+        gear = icon("tool", emoji=self._opts.emoji)
+        self._console.print(Text(f"    {gear} {name}".strip(), style="dim"))
 
     def _on_subagent_done(self, payload: dict[str, Any]) -> None:
         idx = payload.get("index")
-        self._line(_c(self._opts, "dim", f"  └ 子任务 {idx} 完成"))
+        self._console.print(Text(f"  └ 子任务 {idx} 完成", style="dim"))
 
     def _on_subagent_error(self, payload: dict[str, Any]) -> None:
         idx = payload.get("index")
         msg = str(payload.get("message", ""))
-        self._line(_c(self._opts, "red", f"  └ 子任务 {idx} 失败: {msg}"))
+        self._console.print(Text(f"  └ 子任务 {idx} 失败: {msg}", style="error"))
 
     def _on_agent_summary(self, payload: dict[str, Any]) -> None:
         n = payload.get("total_agents")
-        self._line(_c(self._opts, "dim", f"· 共 {n} 个子 Agent"))
+        self._console.print(Text(f"· 共 {n} 个子 Agent", style="dim"))
 
     # -- low-level ----------------------------------------------------------
 
@@ -258,10 +319,6 @@ class StreamFrameRenderer:
             self._out.write("\n")
             self._out.flush()
             self._mid_chunk = False
-
-    def _line(self, text: str) -> None:
-        self._out.write(text + "\n")
-        self._out.flush()
 
 
 _STREAM_DISPATCH: dict[str, Any] = {
@@ -330,16 +387,33 @@ class RunFrameRenderer:
     RunFrame payloads carry an ``event`` *or* ``type`` discriminator
     (``run_app.py`` checks ``event``, the runner subprocess emits
     ``type``) — both are tolerated. Progress goes to stderr so ``--json``
-    stdout stays clean for piping.
+    stdout stays clean for piping. ``opts.color`` (already TTY-derived by
+    :meth:`RenderOptions.from_streams`) doubles as the "real terminal"
+    switch: on a TTY the progress bar refreshes in place via
+    ``rich.progress.Progress``; otherwise each update is a plain line
+    (identical to the pre-Rich behaviour).
     """
 
-    __slots__ = ("_opts", "_err")
+    __slots__ = (
+        "_opts",
+        "_err",
+        "_console",
+        "_progress",
+        "_task_id",
+        "_last_pct",
+        "_last_stage",
+    )
 
     def __init__(
         self, opts: RenderOptions, *, err: TextIO | None = None
     ) -> None:
         self._opts = opts
         self._err = err if err is not None else sys.stderr
+        self._console = _console(opts, self._err)
+        self._progress: Progress | None = None
+        self._task_id: Any = None
+        self._last_pct: float = 0.0
+        self._last_stage: str = ""
 
     def consume(self, payload: dict[str, Any], result: RunResult) -> None:
         """Process one RunFrame payload, mutating ``result`` in place."""
@@ -347,15 +421,13 @@ class RunFrameRenderer:
         kind = _payload_kind(payload)
         if kind == "status":
             state = payload.get("state") or payload.get("status") or ""
-            self._progress(f"… {state}")
+            self._progress_line(f"… {state}")
         elif kind == "progress":
             pct = payload.get("percent")
             stage = payload.get("stage") or payload.get("phase") or ""
-            if pct is not None:
-                self._progress(f"… {stage} {pct}%")
-            elif stage:
-                self._progress(f"… {stage}")
+            self._update_progress(stage, pct)
         elif kind == "result":
+            self._stop_progress()
             out = payload.get("output")
             if isinstance(out, dict):
                 result.output = out
@@ -367,14 +439,57 @@ class RunFrameRenderer:
                     if k not in ("event", "type")
                 }
         elif kind == "error":
+            self._stop_progress()
             result.error_code = str(payload.get("code", "INFER_ERROR"))
             result.error_message = str(payload.get("message", ""))
         elif kind == "done":
-            pass  # terminal marker; nothing to render
+            self._stop_progress()  # terminal marker; just release the bar
 
-    def _progress(self, text: str) -> None:
-        self._err.write(text + "\n")
-        self._err.flush()
+    def stop(self) -> None:
+        """Force-stop a live progress bar from outside (REPL exit cleanup).
+
+        A no-op if no progress bar is currently running.
+        """
+        self._stop_progress()
+
+    def _progress_line(self, text: str) -> None:
+        self._console.print(Text(text, style="dim"))
+
+    def _update_progress(self, stage: str, pct: Any) -> None:
+        if isinstance(pct, (int, float)):
+            self._last_pct = float(pct)
+        if stage:
+            self._last_stage = stage
+        if self._opts.color:
+            if self._progress is None:
+                # ``auto_refresh=False`` + an explicit ``refresh()`` below
+                # keeps rendering synchronous with ``update()`` instead of
+                # relying on Rich's background refresh thread, so every
+                # progress frame is reflected immediately (deterministic
+                # for tests, and no lag for a real terminal either).
+                self._progress = Progress(
+                    console=self._console, transient=False, auto_refresh=False
+                )
+                self._progress.start()
+                self._task_id = self._progress.add_task(
+                    self._last_stage or "run", total=100
+                )
+            self._progress.update(
+                self._task_id,
+                completed=self._last_pct,
+                description=self._last_stage or "run",
+            )
+            self._progress.refresh()
+        elif isinstance(pct, (int, float)):
+            self._progress_line(f"… {stage} {pct}%" if stage else f"… {pct}%")
+        elif stage:
+            self._progress_line(f"… {stage}")
+
+    def _stop_progress(self) -> None:
+        if self._progress is not None:
+            self._progress.stop()
+            self._progress = None
+            self._task_id = None
 
 
 def _payload_kind(payload: dict[str, Any]) -> str:
@@ -397,86 +512,112 @@ def render_run_output(
 ) -> None:
     """Human-readable render of a run ``output`` dict by ``outputSchema.kind``.
 
-    Falls back to pretty JSON for shapes we don't have a bespoke layout
-    for. ``--json`` callers bypass this and dump ``output`` raw.
+    Falls back to pretty JSON (syntax-highlighted) for shapes we don't
+    have a bespoke layout for. ``--json`` callers bypass this and dump
+    ``output`` raw.
     """
     sink = out if out is not None else sys.stdout
+    console = _console(opts, sink)
     if output is None:
-        sink.write(_c(opts, "dim", "(无输出)\n"))
-        sink.flush()
+        console.print(Text("(无输出)", style="dim"))
         return
 
     kind = (output_kind or "").lower()
     if kind == "audio" or "audio_path" in output:
         path = output.get("audio_path") or output.get("path")
-        sink.write(_sym(opts, "🔊 ", "") + f"已生成音频: {path}\n")
+        prefix = icon("audio", emoji=opts.emoji)
+        console.print(Text(f"{prefix} 已生成音频: {path}".strip()))
     elif kind == "image" or "image_path" in output:
         path = output.get("image_path") or output.get("path")
-        sink.write(_sym(opts, "🖼 ", "") + f"已生成图片: {path}\n")
+        prefix = icon("image", emoji=opts.emoji)
+        console.print(Text(f"{prefix} 已生成图片: {path}".strip()))
     elif "lines" in output and isinstance(output["lines"], list):
-        _render_ocr(output, opts, sink)
+        _render_ocr(output, opts, console)
     elif "segments" in output and isinstance(output["segments"], list):
-        _render_asr(output, opts, sink)
+        _render_asr(output, opts, console)
     elif "predictions" in output and isinstance(output["predictions"], list):
-        _render_predictions(output, opts, sink)
+        _render_predictions(output, opts, console)
     elif "detections" in output and isinstance(output["detections"], list):
-        _render_detections(output, opts, sink)
+        _render_detections(output, opts, console)
     else:
-        sink.write(json.dumps(output, ensure_ascii=False, indent=2) + "\n")
-    sink.flush()
+        console.print(
+            Syntax(
+                json.dumps(output, ensure_ascii=False, indent=2),
+                "json",
+                theme="ansi_dark",
+                word_wrap=True,
+                background_color="default",
+            )
+        )
 
 
-def _render_ocr(output: dict[str, Any], opts: RenderOptions, sink: TextIO) -> None:
+def _render_ocr(output: dict[str, Any], opts: RenderOptions, console: Console) -> None:
     lines = output["lines"]
     lang = output.get("language", "")
-    sink.write(
-        _sym(opts, "📄 ", "")
-        + f"OCR 结果 (检测到 {len(lines)} 行, 语言: {lang})\n"
+    prefix = icon("ocr", emoji=opts.emoji)
+    console.print(
+        Text(
+            f"{prefix} OCR 结果 (检测到 {len(lines)} 行, 语言: {lang})".strip(),
+            style="heading",
+        )
     )
+    table = Table(show_header=False, box=None, padding=(0, 1))
     for item in lines:
         if isinstance(item, dict):
-            text = item.get("text", "")
+            text = str(item.get("text", ""))
             conf = item.get("confidence") or item.get("score")
-            conf_s = f"  {conf:.1%}" if isinstance(conf, (int, float)) else ""
-            sink.write(f"  {text}{conf_s}\n")
+            conf_s = f"{conf:.1%}" if isinstance(conf, (int, float)) else ""
+            table.add_row(text, conf_s)
         else:
-            sink.write(f"  {item}\n")
+            table.add_row(str(item))
+    console.print(table)
 
 
-def _render_asr(output: dict[str, Any], opts: RenderOptions, sink: TextIO) -> None:
+def _render_asr(output: dict[str, Any], opts: RenderOptions, console: Console) -> None:
     full = output.get("fullText") or output.get("full_text") or ""
+    prefix = icon("asr", emoji=opts.emoji)
     if full:
-        sink.write(_sym(opts, "📝 ", "") + f"{full}\n")
+        console.print(Text(f"{prefix} {full}".strip()))
+    table = Table(show_header=False, box=None, padding=(0, 1))
     for seg in output["segments"]:
         if isinstance(seg, dict):
             start = seg.get("start")
-            text = seg.get("text", "")
-            ts = f"[{start:.1f}s] " if isinstance(start, (int, float)) else ""
-            sink.write(f"  {ts}{text}\n")
+            text = str(seg.get("text", ""))
+            ts = f"[{start:.1f}s]" if isinstance(start, (int, float)) else ""
+            table.add_row(ts, text)
+    console.print(table)
 
 
 def _render_predictions(
-    output: dict[str, Any], opts: RenderOptions, sink: TextIO
+    output: dict[str, Any], opts: RenderOptions, console: Console
 ) -> None:
-    sink.write(_sym(opts, "🏷 ", "") + "分类结果 (top-k)\n")
+    prefix = icon("predict", emoji=opts.emoji)
+    console.print(Text(f"{prefix} 分类结果 (top-k)".strip(), style="heading"))
+    table = Table(show_header=False, box=None, padding=(0, 1))
     for pred in output["predictions"]:
         if isinstance(pred, dict):
-            label = pred.get("label", "")
+            label = str(pred.get("label", ""))
             prob = pred.get("probability") or pred.get("score")
-            prob_s = f"  {prob:.1%}" if isinstance(prob, (int, float)) else ""
-            sink.write(f"  {label}{prob_s}\n")
+            prob_s = f"{prob:.1%}" if isinstance(prob, (int, float)) else ""
+            table.add_row(label, prob_s)
+    console.print(table)
 
 
 def _render_detections(
-    output: dict[str, Any], opts: RenderOptions, sink: TextIO
+    output: dict[str, Any], opts: RenderOptions, console: Console
 ) -> None:
     dets = output["detections"]
-    sink.write(_sym(opts, "🎯 ", "") + f"检测结果 ({len(dets)} 个目标)\n")
+    prefix = icon("detect", emoji=opts.emoji)
+    console.print(
+        Text(f"{prefix} 检测结果 ({len(dets)} 个目标)".strip(), style="heading")
+    )
+    table = Table(show_header=False, box=None, padding=(0, 1))
     for det in dets:
         if isinstance(det, dict):
-            label = det.get("label", "")
+            label = str(det.get("label", ""))
             bbox = det.get("bbox") or det.get("box")
-            sink.write(f"  {label}  {bbox}\n")
+            table.add_row(label, str(bbox))
+    console.print(table)
 
 
 # ---------------------------------------------------------------------------
