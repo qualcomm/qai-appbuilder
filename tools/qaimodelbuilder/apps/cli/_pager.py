@@ -2,9 +2,12 @@
 
 ``/show [n]`` (``commands/build.py``) opens this pager to view one folded
 ``tool_result`` body in full. Built entirely on ``prompt_toolkit`` (already a
-project dependency) — no ``textual``, no new dependency. Runs via
-``Application.run_async()`` so it nests inside the caller's own asyncio event
-loop (the REPL loop in ``_repl.py``) instead of starting a new one.
+project dependency); ``textual`` is now a project dependency too (see
+``apps.cli._tui``, used by the new full-screen REPL shell), but this module
+intentionally keeps its own ``prompt_toolkit`` implementation for the
+non-TTY/fallback REPL path. Runs via ``Application.run_async()`` so it nests
+inside the caller's own asyncio event loop (the REPL loop in ``_repl.py``)
+instead of starting a new one.
 """
 
 from __future__ import annotations

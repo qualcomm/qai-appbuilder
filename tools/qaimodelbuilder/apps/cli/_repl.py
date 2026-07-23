@@ -49,6 +49,7 @@ __all__ = [
     "PermissionBridge",
     "resolve_pending_permissions",
     "is_slash_command",
+    "is_real_tty",
     "split_slash",
 ]
 
@@ -94,6 +95,24 @@ def is_slash_command(line: str) -> bool:
     """
     stripped = line.lstrip()
     return stripped.startswith("/")
+
+
+def is_real_tty() -> bool:
+    """True when stdin, stdout and stderr are all real terminals.
+
+    Shared by every REPL command module that decides between the persistent
+    ``apps.cli._tui.app.QaiReplApp`` (real TTY) and its plain-print
+    ``_repl_loop`` fallback (``qai chat``/``qai build``, and eventually
+    ``qai app``) — factored out of ``commands/chat.py`` once a second module
+    needed the identical check.
+    """
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        try:
+            if not stream.isatty():
+                return False
+        except Exception:  # noqa: BLE001 — closed / fake stream
+            return False
+    return True
 
 
 def split_slash(line: str) -> tuple[str, str]:
@@ -303,6 +322,11 @@ class InterruptController:
         self._window = window_seconds
         self._last_ts = 0.0
         self.interrupt_event = asyncio.Event()
+
+    @property
+    def window_seconds(self) -> float:
+        """The exit-confirmation window :meth:`signal` enforces (seconds)."""
+        return self._window
 
     def signal(self) -> bool:
         """Record an interrupt; return ``True`` if it should EXIT the REPL.

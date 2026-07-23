@@ -31,11 +31,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib.metadata
 import json
 import shutil
 import sys
 import tempfile
 import uuid
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -47,8 +49,10 @@ from apps.cli import _render
 from apps.cli._render import RenderOptions, RunFrameRenderer, RunResult
 from apps.cli._render_theme import build_console, icon
 from apps.cli._repl import (
+    InterruptController,
     SlashDispatcher,
     async_read_line,
+    is_real_tty,
     repl_container,
 )
 from apps.cli._runtime import run_use_case
@@ -750,10 +754,65 @@ async def _repl_main(args: argparse.Namespace, opts: RenderOptions) -> int:
         #    <cli_sessions_dir>/<session_id>.log; no existing session-id
         #    concept threads through this REPL (unlike `qai build`'s
         #    conversation id), so a fresh id is minted for the log filename.
-        session_log = SessionLog(c.data_paths, uuid.uuid4().hex)
+        session_id = uuid.uuid4().hex
+        session_log = SessionLog(c.data_paths, session_id)
 
         await _seed_factory_packs_if_empty(c)
         state.manifest = await _load_manifest(c, state.pack)
+
+        if is_real_tty():
+            from apps.cli._tui.app import QaiReplApp  # noqa: PLC0415
+            from apps.cli._tui.logging_bridge import make_warning_notifier  # noqa: PLC0415
+            from apps.cli._tui.widgets import ProgressPanel  # noqa: PLC0415
+            from qai.platform.logging import configure_logging  # noqa: PLC0415
+
+            try:
+                version = importlib.metadata.version("qaimodelbuilder")
+            except importlib.metadata.PackageNotFoundError:
+                version = "0.0.0.dev0"
+
+            kind = _manifest_input_kind(state.manifest) or "?"
+            banner_extra_lines = [f"Pack: {state.pack} (输入类型: {kind})"]
+
+            # ── Restore target for the logging redirect below: whatever
+            #    level ``repl_container`` already configured for this
+            #    process (mirrors ``commands/build.py::_run_build``).
+            log_level_for_session = c.settings.logging.level
+            progress_panel = ProgressPanel()
+            app = QaiReplApp(
+                c=c,
+                conversation_id=None,
+                tab_id=None,
+                interrupts=InterruptController(),
+                perm_bridge=None,
+                opts=opts,
+                session_id=session_id,
+                version=version,
+                banner_extra_lines=banner_extra_lines,
+                extra_widgets=[progress_panel],
+                dispatcher_factory=_make_dispatcher_factory(
+                    c=c, state=state, opts=opts
+                ),
+                run_turn=_make_run_turn(
+                    c=c, state=state, opts=opts, progress_panel=progress_panel
+                ),
+            )
+            configure_logging(
+                level=log_level_for_session,  # type: ignore[arg-type]
+                fmt="console",
+                stream=session_log.log_stream,
+                extra_processors=[make_warning_notifier(app)],
+            )
+            try:
+                await app.run_async()
+                return 0
+            finally:
+                configure_logging(
+                    level=log_level_for_session,  # type: ignore[arg-type]
+                    fmt="console",
+                    stream=sys.stderr,
+                )
+                cleanup_repl_session(session_log, active_renderer=state.active_renderer)
 
         dispatcher = _build_repl_dispatcher(c, state, opts)
         _print_repl_banner(state, opts)
@@ -806,9 +865,20 @@ def _print_repl_banner(state: _AppReplState, opts: RenderOptions) -> None:
 
 
 async def _repl_run_turn(
-    c: Container, state: _AppReplState, line: str, opts: RenderOptions
+    c: Container,
+    state: _AppReplState,
+    line: str,
+    opts: RenderOptions,
+    *,
+    progress_sink: _render.ProgressSink | None = None,
 ) -> None:
-    """Run one inference turn from a non-slash REPL line."""
+    """Run one inference turn from a non-slash REPL line.
+
+    ``progress_sink`` is the same injection point :class:`RunFrameRenderer`
+    exposes elsewhere — unset (the plain REPL path) it renders to stderr
+    exactly as before; the persistent TUI's ``run_turn`` closure passes its
+    ``ProgressPanel`` instead so progress lands in the widget.
+    """
 
     kind = _manifest_input_kind(state.manifest)
     input_key = kind_to_input_key(kind) or "text"
@@ -836,7 +906,7 @@ async def _repl_run_turn(
         variant_id=state.variant,
         params=state.params,
     )
-    renderer = RunFrameRenderer(opts, err=sys.stderr)
+    renderer = RunFrameRenderer(opts, err=sys.stderr, progress_sink=progress_sink)
     state.active_renderer = renderer
     try:
         result = await _run_once(c, state.pack, inputs, opts, renderer=renderer)
@@ -1050,3 +1120,54 @@ def _build_repl_dispatcher(
     dispatcher.register("help", "查看命令列表", _help)
     dispatcher.register("exit", "退出会话", _exit, aliases=("quit",))
     return dispatcher
+
+
+# ---------------------------------------------------------------------------
+# Persistent TUI wiring (apps.cli._tui.app.QaiReplApp closures)
+# ---------------------------------------------------------------------------
+
+
+def _make_dispatcher_factory(
+    *,
+    c: Container,
+    state: _AppReplState,
+    opts: RenderOptions,
+) -> Callable[[Any], SlashDispatcher]:
+    """Build the ``QaiReplApp`` ``dispatcher_factory`` closure for this entry point.
+
+    Unlike ``qai build``'s factory, no ``tui_app`` handle is threaded into
+    :func:`_build_repl_dispatcher` — ``app.py`` has no ``/show``-equivalent
+    folded-content concept to redirect at a modal screen.
+    """
+
+    def factory(app: Any) -> SlashDispatcher:
+        return _build_repl_dispatcher(c, state, opts)
+
+    return factory
+
+
+def _make_run_turn(
+    *,
+    c: Container,
+    state: _AppReplState,
+    opts: RenderOptions,
+    progress_panel: Any,
+) -> Callable[[Any, str], Awaitable[None]]:
+    """Build the ``QaiReplApp`` ``run_turn`` closure for this entry point.
+
+    Structurally different from chat/build's multi-frame agent-turn
+    streaming: one submitted line drives exactly one :func:`_run_once`
+    inference call, with progress routed into ``progress_panel`` instead of
+    stderr. ``state.active_renderer`` is tracked the same way the non-TTY
+    loop does, so an exception escaping mid-turn still leaves the panel in
+    a force-stoppable state — though in practice a cancelled Textual worker
+    (Ctrl+C) unwinds this closure via ``asyncio.CancelledError``, which
+    ``_repl_run_turn`` does not special-case here (unlike the non-TTY path's
+    own ``KeyboardInterrupt`` handling), so cancellation propagates to the
+    shell's own ``_turn_worker`` cleanup instead.
+    """
+
+    async def run_turn(app: Any, line: str) -> None:
+        await _repl_run_turn(c, state, line, opts, progress_sink=progress_panel)
+
+    return run_turn

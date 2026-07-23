@@ -95,6 +95,12 @@ dependencies = [
   # Windows ARM64 cp313 environment and any future Linux CI lane.
   "prompt_toolkit>=3.0,<4.0",
 
+  # full-screen TUI shell for the real-TTY REPL (qai chat / qai build /
+  # qai app), replacing the plain print-based REPL for interactive
+  # sessions step by step. Pure-Python wheel (py3-none-any), no native
+  # build — safe for the Windows ARM64 cp313 environment.
+  "textual>=0.60,<1.0",
+
   # ids / time
   "ulid-py>=1.1,<2.0",
 

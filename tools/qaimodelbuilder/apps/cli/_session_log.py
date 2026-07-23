@@ -73,6 +73,16 @@ class SessionLog:
         sys.stdout = _TeeStream(self._orig_stdout, self._file)
         sys.stderr = _TeeStream(self._orig_stderr, self._file)
 
+    @property
+    def log_stream(self) -> TextIO | None:
+        """The open log file object (``None`` after :meth:`close`).
+
+        Lets a persistent TTY session point ``configure_logging(stream=...)``
+        at the SAME file this ``SessionLog`` already opened, instead of
+        duplicating the path-construction logic or opening a second file.
+        """
+        return self._file
+
     def close(self) -> None:
         if self._file is None:
             return

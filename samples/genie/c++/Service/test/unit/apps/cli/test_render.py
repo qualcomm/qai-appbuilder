@@ -32,6 +32,36 @@ class _Frame:
         self.payload = payload
 
 
+class _FakeSink:
+    """Stand-in :class:`~apps.cli._render.TranscriptSink` for the refactor's
+    default (no-sink) behaviour sanity check."""
+
+    def __init__(self) -> None:
+        self.chunks: list[str] = []
+        self.blocks: list[object] = []
+        self.breaks = 0
+
+    def write_chunk(self, text: str) -> None:
+        self.chunks.append(text)
+
+    def break_line(self) -> None:
+        self.breaks += 1
+
+    def print_block(self, renderable: object) -> None:
+        self.blocks.append(renderable)
+
+
+def test_injected_sink_receives_chunk_then_break_then_block():
+    sink = _FakeSink()
+    opts = RenderOptions(color=False, emoji=False)
+    r = StreamFrameRenderer(opts, sink=sink)
+    r.render(_Frame("chunk", {"text": "hello"}))
+    r.render(_Frame("tool_call", {"tool_name": "read", "arguments": {}}))
+    assert sink.chunks == ["hello"]
+    assert sink.breaks == 1
+    assert len(sink.blocks) == 1
+
+
 def _renderer(*, color: bool, emoji: bool, fold_lines: int = 20):
     out, err = io.StringIO(), io.StringIO()
     opts = RenderOptions(color=color, emoji=emoji, fold_lines=fold_lines)
@@ -220,6 +250,40 @@ def test_run_frame_renderer_progress_bar_stops_on_result():
     assert r._progress is not None
     r.consume({"event": "result", "output": {"ok": True}}, result)
     assert r._progress is None
+
+
+class _FakeProgressSink:
+    def __init__(self) -> None:
+        self.status_calls: list[str] = []
+        self.progress_calls: list[tuple[str, float | None]] = []
+        self.stopped = False
+
+    def set_status(self, text: str) -> None:
+        self.status_calls.append(text)
+
+    def set_progress(self, stage: str, percent: float | None) -> None:
+        self.progress_calls.append((stage, percent))
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
+def test_run_frame_renderer_progress_sink_receives_status_and_progress():
+    sink = _FakeProgressSink()
+    opts = RenderOptions(color=False, emoji=False)
+    r = RunFrameRenderer(opts, progress_sink=sink)
+    result = RunResult()
+
+    r.consume({"event": "status", "state": "starting"}, result)
+    assert sink.status_calls == ["… starting"]
+    assert r._progress is None  # default Rich-progress path never touched
+
+    r.consume({"event": "progress", "stage": "loading", "percent": 50}, result)
+    assert sink.progress_calls == [("loading", 50.0)]
+
+    r.consume({"event": "result", "output": {"ok": True}}, result)
+    assert sink.stopped is True
+    assert result.output == {"ok": True}
 
 
 @pytest.mark.parametrize("color", [True, False])

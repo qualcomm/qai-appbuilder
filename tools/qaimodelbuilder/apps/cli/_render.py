@@ -36,7 +36,7 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import dataclass, field
-from typing import Any, TextIO
+from typing import Any, Protocol, TextIO
 
 from rich.console import Console
 from rich.padding import Padding
@@ -49,7 +49,10 @@ from apps.cli._render_theme import build_console, icon
 
 __all__ = [
     "RenderOptions",
+    "TranscriptSink",
+    "ConsoleSink",
     "StreamFrameRenderer",
+    "ProgressSink",
     "RunFrameRenderer",
     "render_run_output",
     "friendly_error",
@@ -104,6 +107,47 @@ def _console(opts: RenderOptions, stream: TextIO) -> Console:
 # ---------------------------------------------------------------------------
 
 
+class TranscriptSink(Protocol):
+    """Write target for :class:`StreamFrameRenderer` — a dumb sink, ignorant
+    of frame types: raw incremental text, a "finalize the current line"
+    signal, or one complete structured Rich renderable.
+    """
+
+    def write_chunk(self, text: str) -> None:
+        """Append raw incremental text (no implied newline)."""
+
+    def break_line(self) -> None:
+        """Finalize the in-progress line (insert a line break)."""
+
+    def print_block(self, renderable: Any) -> None:
+        """Print one complete Rich renderable as a new block."""
+
+
+class ConsoleSink:
+    """Default :class:`TranscriptSink`: a plain ``TextIO`` + themed ``Console``.
+
+    Reproduces exactly what :class:`StreamFrameRenderer` wrote directly
+    before the sink indirection existed (see module docstring).
+    """
+
+    __slots__ = ("_out", "_console")
+
+    def __init__(self, out: TextIO, console: Console) -> None:
+        self._out = out
+        self._console = console
+
+    def write_chunk(self, text: str) -> None:
+        self._out.write(text)
+        self._out.flush()
+
+    def break_line(self) -> None:
+        self._out.write("\n")
+        self._out.flush()
+
+    def print_block(self, renderable: Any) -> None:
+        self._console.print(renderable)
+
+
 class StreamFrameRenderer:
     """Render ``StreamFrame`` payloads to a chat-style terminal transcript.
 
@@ -112,13 +156,17 @@ class StreamFrameRenderer:
     the renderer free of a context dependency (and import-linter clean).
     The 13 frame-type strings are the contract
     (``stream_frame.py:StreamFrameType``).
+
+    All writes go through an injected :class:`TranscriptSink` (default a
+    :class:`ConsoleSink` bound to ``out``/``err``, unchanged terminal
+    behaviour) — e.g. the persistent Textual REPL shell (``_tui/app.py``)
+    binds a widget-backed sink instead so the same turn-streaming logic
+    lands in the chat transcript widget.
     """
 
     __slots__ = (
         "_opts",
-        "_out",
-        "_err",
-        "_console",
+        "_sink",
         "_mid_chunk",
         "_folded",
         "_fold_seq",
@@ -130,11 +178,13 @@ class StreamFrameRenderer:
         *,
         out: TextIO | None = None,
         err: TextIO | None = None,
+        sink: TranscriptSink | None = None,
     ) -> None:
         self._opts = opts
-        self._out = out if out is not None else sys.stdout
-        self._err = err if err is not None else sys.stderr
-        self._console = _console(opts, self._out)
+        if sink is None:
+            out = out if out is not None else sys.stdout
+            sink = ConsoleSink(out, _console(opts, out))
+        self._sink = sink
         #: True while a stream of ``chunk`` frames is being printed without
         #: a trailing newline, so the next non-chunk frame can break the line.
         self._mid_chunk = False
@@ -149,7 +199,7 @@ class StreamFrameRenderer:
         if handler is None:
             # Unknown frame type: surface dimly so nothing is silently lost.
             self._break_chunk()
-            self._console.print(Text(f"· {ftype}: {payload}", style="dim"))
+            self._sink.print_block(Text(f"· {ftype}: {payload}", style="dim"))
             return
         handler(self, payload)
 
@@ -178,9 +228,8 @@ class StreamFrameRenderer:
             # Open an Agent block header on the first chunk of a turn.
             prefix = icon("agent", emoji=self._opts.emoji)
             if prefix:
-                self._console.print(Text(prefix + " ", style="agent"), end="")
-        self._out.write(text)
-        self._out.flush()
+                self._sink.write_chunk(prefix + " ")
+        self._sink.write_chunk(text)
         self._mid_chunk = True
 
     def _on_tool_call(self, payload: dict[str, Any]) -> None:
@@ -192,7 +241,7 @@ class StreamFrameRenderer:
         line = Text("  ")
         line.append(f"{gear} {name}".strip(), style="tool")
         line.append(f" › {summary}", style="tool.arg")
-        self._console.print(line)
+        self._sink.print_block(line)
 
     def _on_tool_result(self, payload: dict[str, Any]) -> None:
         # Partial (streamed exec stdout) updates refresh in place; print the
@@ -200,8 +249,7 @@ class StreamFrameRenderer:
         if payload.get("partial"):
             delta = str(payload.get("delta", ""))
             if delta:
-                self._out.write(delta)
-                self._out.flush()
+                self._sink.write_chunk(delta)
                 self._mid_chunk = True
             return
         self._break_chunk()
@@ -214,14 +262,14 @@ class StreamFrameRenderer:
         )
         lines = text.splitlines() or [""]
         ok = icon("success", emoji=self._opts.emoji)
-        self._console.print(Text("     " + ok, style="success"))
+        self._sink.print_block(Text("     " + ok, style="success"))
         if len(lines) > self._opts.fold_lines:
             self._fold_seq += 1
             self._folded[self._fold_seq] = text
             shown = "\n".join(lines[: self._opts.fold_lines])
             self._print_result_body(shown, is_json)
             more = len(lines) - self._opts.fold_lines
-            self._console.print(
+            self._sink.print_block(
                 Text(
                     f"     … {more} 行已折叠（/show {self._fold_seq} 展开）",
                     style="dim",
@@ -233,7 +281,7 @@ class StreamFrameRenderer:
 
     def _print_result_body(self, text: str, is_json: bool) -> None:
         if is_json:
-            self._console.print(
+            self._sink.print_block(
                 Padding(
                     Syntax(
                         text,
@@ -247,26 +295,26 @@ class StreamFrameRenderer:
             )
         else:
             for ln in text.splitlines():
-                self._console.print(Text("     " + ln))
+                self._sink.print_block(Text("     " + ln))
 
     def _on_tool_mode_changed(self, payload: dict[str, Any]) -> None:
         self._break_chunk()
         mode = str(payload.get("mode", ""))
-        self._console.print(Text(f"· 已进入 {mode} 模式", style="dim"))
+        self._sink.print_block(Text(f"· 已进入 {mode} 模式", style="dim"))
 
     def _on_turn_warning(self, payload: dict[str, Any]) -> None:
         self._break_chunk()
         count = payload.get("turn_count")
         msg = payload.get("message") or f"已 {count} 轮工具调用，接近上限"
         warn = icon("warning", emoji=self._opts.emoji)
-        self._console.print(Text(f"{warn} {msg}".strip(), style="warning"))
+        self._sink.print_block(Text(f"{warn} {msg}".strip(), style="warning"))
 
     def _on_error(self, payload: dict[str, Any]) -> None:
         self._break_chunk()
         code = str(payload.get("code", "ERROR"))
         message = str(payload.get("message", ""))
         cross = icon("error", emoji=self._opts.emoji)
-        self._console.print(
+        self._sink.print_block(
             Text(f"{cross} {code}: {message}".strip(), style="error")
         )
 
@@ -278,46 +326,45 @@ class StreamFrameRenderer:
         if total:
             bits.append(f"{total} tok")
         if bits:
-            self._console.print(Text("· " + " · ".join(bits), style="dim"))
+            self._sink.print_block(Text("· " + " · ".join(bits), style="dim"))
 
     def _on_subagent_start(self, payload: dict[str, Any]) -> None:
         self._break_chunk()
         idx = payload.get("index")
         total = payload.get("total")
         preview = str(payload.get("prompt_preview", ""))
-        self._console.print(
+        self._sink.print_block(
             Text(f"  └ 子任务 {idx}/{total}: {preview}", style="dim")
         )
 
     def _on_subagent_output(self, payload: dict[str, Any]) -> None:
         content = str(payload.get("content", ""))
         if content:
-            self._console.print(Text("    " + content, style="dim"))
+            self._sink.print_block(Text("    " + content, style="dim"))
 
     def _on_subagent_tool(self, payload: dict[str, Any]) -> None:
         name = str(payload.get("tool_name", "tool"))
         gear = icon("tool", emoji=self._opts.emoji)
-        self._console.print(Text(f"    {gear} {name}".strip(), style="dim"))
+        self._sink.print_block(Text(f"    {gear} {name}".strip(), style="dim"))
 
     def _on_subagent_done(self, payload: dict[str, Any]) -> None:
         idx = payload.get("index")
-        self._console.print(Text(f"  └ 子任务 {idx} 完成", style="dim"))
+        self._sink.print_block(Text(f"  └ 子任务 {idx} 完成", style="dim"))
 
     def _on_subagent_error(self, payload: dict[str, Any]) -> None:
         idx = payload.get("index")
         msg = str(payload.get("message", ""))
-        self._console.print(Text(f"  └ 子任务 {idx} 失败: {msg}", style="error"))
+        self._sink.print_block(Text(f"  └ 子任务 {idx} 失败: {msg}", style="error"))
 
     def _on_agent_summary(self, payload: dict[str, Any]) -> None:
         n = payload.get("total_agents")
-        self._console.print(Text(f"· 共 {n} 个子 Agent", style="dim"))
+        self._sink.print_block(Text(f"· 共 {n} 个子 Agent", style="dim"))
 
     # -- low-level ----------------------------------------------------------
 
     def _break_chunk(self) -> None:
         if self._mid_chunk:
-            self._out.write("\n")
-            self._out.flush()
+            self._sink.break_line()
             self._mid_chunk = False
 
 
@@ -381,6 +428,24 @@ class RunResult:
         return self.error_code is None
 
 
+class ProgressSink(Protocol):
+    """Write target for :class:`RunFrameRenderer`'s progress updates.
+
+    Mirrors :class:`TranscriptSink`'s injection precedent: a dumb sink,
+    ignorant of the RunFrame payload shape — just "show this status text",
+    "update the bar to this stage/percent", "hide/reset the bar".
+    """
+
+    def set_status(self, text: str) -> None:
+        """Show a status line with no percent yet (the ``status`` payload)."""
+
+    def set_progress(self, stage: str, percent: float | None) -> None:
+        """Update the bar (the ``progress`` payload)."""
+
+    def stop(self) -> None:
+        """Hide/reset the bar (run finished, errored, or force-stopped)."""
+
+
 class RunFrameRenderer:
     """Consume RunFrame payloads: progress→stderr, capture result/error.
 
@@ -392,12 +457,21 @@ class RunFrameRenderer:
     switch: on a TTY the progress bar refreshes in place via
     ``rich.progress.Progress``; otherwise each update is a plain line
     (identical to the pre-Rich behaviour).
+
+    ``progress_sink`` is an optional injection point (same precedent as
+    :class:`StreamFrameRenderer`'s ``sink``) — e.g. the persistent Textual
+    REPL shell binds a widget-backed sink instead, so progress lands in a
+    panel rather than on stderr. Left unset, behaviour is byte-for-byte the
+    pre-existing stderr/Rich-Progress path (kept inline below rather than
+    factored into a default sink object, since existing tests assert
+    directly on this class's ``_progress``/``_task_id`` internals).
     """
 
     __slots__ = (
         "_opts",
         "_err",
         "_console",
+        "_progress_sink",
         "_progress",
         "_task_id",
         "_last_pct",
@@ -405,11 +479,16 @@ class RunFrameRenderer:
     )
 
     def __init__(
-        self, opts: RenderOptions, *, err: TextIO | None = None
+        self,
+        opts: RenderOptions,
+        *,
+        err: TextIO | None = None,
+        progress_sink: ProgressSink | None = None,
     ) -> None:
         self._opts = opts
         self._err = err if err is not None else sys.stderr
         self._console = _console(opts, self._err)
+        self._progress_sink = progress_sink
         self._progress: Progress | None = None
         self._task_id: Any = None
         self._last_pct: float = 0.0
@@ -421,7 +500,11 @@ class RunFrameRenderer:
         kind = _payload_kind(payload)
         if kind == "status":
             state = payload.get("state") or payload.get("status") or ""
-            self._progress_line(f"… {state}")
+            text = f"… {state}"
+            if self._progress_sink is not None:
+                self._progress_sink.set_status(text)
+            else:
+                self._progress_line(text)
         elif kind == "progress":
             pct = payload.get("percent")
             stage = payload.get("stage") or payload.get("phase") or ""
@@ -460,6 +543,12 @@ class RunFrameRenderer:
             self._last_pct = float(pct)
         if stage:
             self._last_stage = stage
+        if self._progress_sink is not None:
+            self._progress_sink.set_progress(
+                self._last_stage,
+                self._last_pct if isinstance(pct, (int, float)) else None,
+            )
+            return
         if self._opts.color:
             if self._progress is None:
                 # ``auto_refresh=False`` + an explicit ``refresh()`` below
@@ -486,6 +575,9 @@ class RunFrameRenderer:
             self._progress_line(f"… {stage}")
 
     def _stop_progress(self) -> None:
+        if self._progress_sink is not None:
+            self._progress_sink.stop()
+            return
         if self._progress is not None:
             self._progress.stop()
             self._progress = None

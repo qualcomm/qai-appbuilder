@@ -84,7 +84,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import importlib.metadata
 import sys
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -99,6 +101,7 @@ from apps.cli._repl import (
     PermissionBridge,
     SlashDispatcher,
     async_read_line,
+    is_real_tty,
     repl_container,
 )
 from apps.cli._session_log import SessionLog, cleanup_repl_session
@@ -523,9 +526,10 @@ async def _run_chat(args: argparse.Namespace) -> int:
     config_file: Path | None = getattr(args, "config_file", None)
 
     opts = RenderOptions.from_streams(sys.stdout, sys.stderr)
+    log_level_for_session = "WARNING"
 
     async with repl_container(
-        config_file=config_file, repo_root=repo_root, log_level="WARNING"
+        config_file=config_file, repo_root=repo_root, log_level=log_level_for_session
     ) as c:
         # ── Provider check is READ-ONLY here (Step 9 redesign — see module
         #    docstring): entering the session must never block on, or
@@ -566,6 +570,58 @@ async def _run_chat(args: argparse.Namespace) -> int:
         await perm_bridge.subscribe(c)
 
         interrupts = InterruptController()
+
+        if is_real_tty():
+            from apps.cli._tui.app import QaiReplApp  # noqa: PLC0415
+            from apps.cli._tui.logging_bridge import make_warning_notifier  # noqa: PLC0415
+            from qai.platform.logging import configure_logging  # noqa: PLC0415
+
+            try:
+                version = importlib.metadata.version("qaimodelbuilder")
+            except importlib.metadata.PackageNotFoundError:
+                version = "0.0.0.dev0"
+            app = QaiReplApp(
+                c=c,
+                conversation_id=conversation_id,
+                tab_id=tab_id,
+                interrupts=interrupts,
+                perm_bridge=perm_bridge,
+                opts=opts,
+                session_id=conv_id_str,
+                version=version,
+                has_provider=has_provider,
+                dispatcher_factory=_make_dispatcher_factory(c=c, opts=opts),
+                run_turn=_make_run_turn(c=c, opts=opts),
+            )
+            # ── Redirect structlog output at the session log file instead
+            #    of the raw terminal stderr for the session's duration (root
+            #    cause: the process-startup ``configure_logging`` call above
+            #    captured a direct reference to ``sys.stderr`` AT THAT
+            #    MOMENT, so later reassigning ``sys.stderr`` — as this
+            #    session's ``TranscriptStream`` does — has no effect on
+            #    already-configured structlog output). ``app`` must exist
+            #    first so the warning-notifier processor has a live
+            #    ``LogPanel`` to forward into.
+            configure_logging(
+                level=log_level_for_session,  # type: ignore[arg-type]
+                fmt="console",
+                stream=session_log.log_stream,
+                extra_processors=[make_warning_notifier(app)],
+            )
+            try:
+                await app.run_async()
+                return 0
+            finally:
+                # Restore process-wide logging to the same settings the
+                # process-startup ``configure_logging`` call (above, inside
+                # ``repl_container``) used, for whatever runs after.
+                configure_logging(
+                    level=log_level_for_session,  # type: ignore[arg-type]
+                    fmt="console",
+                    stream=sys.stderr,
+                )
+                await perm_bridge.unsubscribe()
+                cleanup_repl_session(session_log)
 
         _print_banner(conv_id_str, opts, has_provider=has_provider)
 
@@ -837,6 +893,7 @@ def _build_dispatcher(
     c: Any,
     renderer: StreamFrameRenderer,
     opts: RenderOptions,
+    tui_app: Any | None = None,
 ) -> SlashDispatcher:
     """Register the minimal generic ``/`` command set for this entry point.
 
@@ -844,6 +901,11 @@ def _build_dispatcher(
     ``/clear``/``/show``/``/exit``) are wired here, mirroring
     ``commands/build.py``'s implementations of the same commands rather than
     reinventing them — no Model-Builder-specific commands.
+
+    ``tui_app`` (the persistent ``apps.cli._tui.app.QaiReplApp`` session, set
+    only on a real TTY) redirects ``/show`` to a modal screen instead of the
+    ``prompt_toolkit`` pager, which would otherwise fight the already-running
+    Textual app over the terminal.
     """
 
     d = SlashDispatcher(console=_out_console(opts))
@@ -941,7 +1003,14 @@ def _build_dispatcher(
             )
             return True
         shown_idx = idx if idx is not None else renderer.last_fold_index
-        await show_pager(folded_text, title=f"/show {shown_idx}")
+        if tui_app is not None:
+            from apps.cli._tui.screens import FoldedContentScreen  # noqa: PLC0415
+
+            await tui_app.push_screen(
+                FoldedContentScreen(folded_text, title=f"/show {shown_idx}")
+            )
+        else:
+            await show_pager(folded_text, title=f"/show {shown_idx}")
         return True
 
     async def _model(rest: str) -> bool:
@@ -1012,6 +1081,54 @@ def _build_dispatcher(
 
 
 # ---------------------------------------------------------------------------
+# Persistent TUI wiring (apps.cli._tui.app.QaiReplApp closures)
+# ---------------------------------------------------------------------------
+
+
+def _make_dispatcher_factory(
+    *, c: Any, opts: RenderOptions
+) -> Callable[[Any], SlashDispatcher]:
+    """Build the ``QaiReplApp`` ``dispatcher_factory`` closure for this entry point.
+
+    Seeds ``_ID_HOLDER`` the same way the non-TTY ``_repl_loop`` does before
+    its first read, then builds the dispatcher wired with ``tui_app``. Called
+    once, inside ``QaiReplApp.__init__`` (after ``renderer`` exists).
+    """
+
+    def factory(app: Any) -> SlashDispatcher:
+        _ID_HOLDER["conversation_id"] = app._conversation_id
+        _ID_HOLDER["tab_id"] = app._tab_id
+        _ID_HOLDER["model_hint"] = None
+        _ID_HOLDER["model_catalog"] = None
+        return _build_dispatcher(c=c, renderer=app.renderer, opts=opts, tui_app=app)
+
+    return factory
+
+
+def _make_run_turn(
+    *, c: Any, opts: RenderOptions
+) -> Callable[[Any, str], Awaitable[None]]:
+    """Build the ``QaiReplApp`` ``run_turn`` closure for this entry point.
+
+    Wraps ``_run_turn_with_interrupt`` + the post-turn permission resolve —
+    the same pair ``_repl_loop`` calls per natural-language line.
+    """
+
+    async def run_turn(app: Any, line: str) -> None:
+        await _run_turn_with_interrupt(
+            c=c,
+            text=line,
+            renderer=app.renderer,
+            interrupts=app._interrupts,
+            opts=opts,
+        )
+        if app._perm_bridge is not None:
+            await _resolve_permissions(c, app._perm_bridge, app._allow_set)
+
+    return run_turn
+
+
+# ---------------------------------------------------------------------------
 # REPL loop
 # ---------------------------------------------------------------------------
 
@@ -1032,6 +1149,10 @@ async def _repl_loop(
     Same interrupt/permission discipline as ``commands/build.py``'s
     ``_repl_loop``: a first Ctrl+C cancels the current turn, a second within
     the interrupt window exits; Ctrl+D (EOFError) exits cleanly.
+
+    Only used by the non-real-TTY fallback path — the real-TTY session is
+    now driven entirely by the persistent ``apps.cli._tui.app.QaiReplApp``
+    (see ``_run_chat``).
     """
 
     _ID_HOLDER["conversation_id"] = conversation_id
