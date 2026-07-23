@@ -427,7 +427,12 @@ ignore_missing_imports = true
 # =============================================================================
 [tool.pytest.ini_options]
 minversion = "8.0"
-testpaths = ["tests"]
+# QAIModelBuilder-related pytest suites physically live under the top-level
+# ``Service/test/unit`` (see Service/test/unit/unit.md) rather than inside
+# this package — Service/.junie/AGENTS.md mandates that ALL QAIModelBuilder
+# tests be placed there. Imports still resolve via this package's editable
+# install regardless of where the test files sit.
+testpaths = ["../test/unit"]
 addopts = [
   "-ra",
   "--strict-markers",
