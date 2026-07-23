@@ -49,12 +49,25 @@ point is already TTY-gated) and only when the user explicitly asks for it
 via ``/model`` — never automatically, and never before the session's first
 interactive read.
 
+Model selection (Step 10)
+----------------------------
+``/model`` with zero providers configured no longer silently downloads a
+single hard-coded default model. It lists the full remote catalog
+(:func:`_show_installable_catalog`) and lets the user pick any entry by
+1-based index or literal ``model_id`` (:func:`_resolve_catalog_choice`),
+then drives local-first activation for THAT specific model
+(:func:`_activate_local_model`'s optional ``model_id`` argument). The old
+"first NPU entry, else the first entry" rule (below) is now only the
+fallback used when no explicit model was requested (e.g. by a caller other
+than ``/model`` itself).
+
 Judgement calls (no built-in "pick something sensible" default upstream)
 --------------------------------------------------------------------------
 * Default service version: the catalog entry with ``is_recommended`` set,
   else the first entry ``list_service_versions_use_case`` returns.
-* Default model: the first catalog entry with ``hardware == NPU`` (GenieAPIService's
-  always-on backend), else the first entry ``list_catalog_models_use_case`` returns.
+* Default model (only when none was explicitly requested): the first
+  catalog entry with ``hardware == NPU`` (GenieAPIService's always-on
+  backend), else the first entry ``list_catalog_models_use_case`` returns.
 * Local endpoint base url: delegated verbatim to
   ``apps/api/_local_service_endpoint_bridge.make_local_service_endpoint_provider``
   (the same bridge ``apps/api/_chat_di.py`` wires into the API-side chat
@@ -143,13 +156,21 @@ def _print_no_model_guidance(opts: RenderOptions) -> None:
     )
 
 
-async def _local_service_and_model_present(c: Any) -> tuple[bool, str | None]:
+async def _local_service_and_model_present(
+    c: Any, *, requested_model_id: str | None = None
+) -> tuple[bool, str | None]:
     """Idempotency check: is a usable local install already on disk?
 
     Reuses the same use cases ``service-release status versions/models``
     call (:func:`apps.cli.commands.service_release.cmd_status_versions` /
     ``cmd_status_models``). Returns ``(service_installed, installed_model_id)``
     — ``installed_model_id`` is ``None`` when no model is installed.
+
+    When ``requested_model_id`` is given (Step 10: an explicit ``/model``
+    choice), the check is scoped to that SPECIFIC model — a different
+    already-installed model must not short-circuit the caller into skipping
+    the requested download. Without it (legacy default-pick callers), any
+    already-installed model counts, matching the original behaviour.
     """
 
     versions_status = (
@@ -159,10 +180,16 @@ async def _local_service_and_model_present(c: Any) -> tuple[bool, str | None]:
     service_installed = any(
         item.installed for item in versions_status.versions.values()
     )
-    installed_model_id = next(
-        (mid for mid, item in models_status.models.items() if item.installed),
-        None,
-    )
+    if requested_model_id:
+        item = models_status.models.get(requested_model_id)
+        installed_model_id = (
+            requested_model_id if item is not None and item.installed else None
+        )
+    else:
+        installed_model_id = next(
+            (mid for mid, item in models_status.models.items() if item.installed),
+            None,
+        )
     return service_installed, installed_model_id
 
 
@@ -295,12 +322,16 @@ async def _install_default_service(c: Any, opts: RenderOptions) -> None:
     )
 
 
-async def _install_default_model(c: Any, opts: RenderOptions) -> str:
-    """Download + install the first NPU catalog model (else the first entry).
+async def _install_default_model(
+    c: Any, opts: RenderOptions, *, model_id: str | None = None
+) -> str:
+    """Download + install a catalog model. Returns the installed ``model_id``.
 
-    Reuses ``service-release install model``'s own use cases verbatim; NPU is
-    preferred because it is GenieAPIService's always-on backend (§5 of the
-    project playbook). Returns the installed ``model_id``.
+    Reuses ``service-release install model``'s own use cases verbatim. When
+    ``model_id`` is given (Step 10: an explicit ``/model`` choice), installs
+    exactly that catalog entry (raises if it is not found); otherwise falls
+    back to the first NPU entry (GenieAPIService's always-on backend, §5 of
+    the project playbook), else the first entry.
     """
 
     from qai.service_release.application.use_cases import (
@@ -315,9 +346,14 @@ async def _install_default_model(c: Any, opts: RenderOptions) -> str:
     models = await c.service_release.list_catalog_models_use_case.execute()
     if not models:
         raise RuntimeError("远程模型目录为空，无法安装默认模型")
-    chosen = next(
-        (m for m in models if m.hardware == ModelHardware.NPU), models[0]
-    )
+    if model_id:
+        chosen = next((m for m in models if m.model_id == model_id), None)
+        if chosen is None:
+            raise RuntimeError(f"远程模型目录中未找到 model_id={model_id!r}")
+    else:
+        chosen = next(
+            (m for m in models if m.hardware == ModelHardware.NPU), models[0]
+        )
     download_url = chosen.download_url or (
         chosen.variants[0].download_url if chosen.variants else ""
     )
@@ -389,7 +425,9 @@ async def _register_local_provider(
     return probe.ok, base_url, probe.error
 
 
-async def _activate_local_model(c: Any, opts: RenderOptions) -> bool:
+async def _activate_local_model(
+    c: Any, opts: RenderOptions, *, model_id: str | None = None
+) -> bool:
     """Best-effort local-first activation for a zero-provider chat session.
 
     Only ever runs on a TTY (defensive re-check; the caller is already
@@ -399,27 +437,37 @@ async def _activate_local_model(c: Any, opts: RenderOptions) -> bool:
     catalog data, download/install error, Ctrl+C, or a probe failure — e.g.
     a freshly installed daemon that is not actually running yet), in which
     case the caller falls back to :func:`_print_no_model_guidance`.
+
+    ``model_id`` (Step 10) optionally pins activation to one SPECIFIC
+    catalog model — e.g. the user's ``/model <choice>`` pick
+    (:func:`_resolve_catalog_choice`) — instead of the fallback default pick
+    :func:`_install_default_model` otherwise applies.
     """
 
     if not sys.stdin.isatty():
         return False
 
     console = _out_console(opts)
-    service_installed, model_id = await _local_service_and_model_present(c)
+    service_installed, installed_model_id = await _local_service_and_model_present(
+        c, requested_model_id=model_id
+    )
 
-    if not (service_installed and model_id):
+    if not (service_installed and installed_model_id):
+        model_desc = f"模型 {model_id}" if model_id else "默认版本/模型"
         console.print(
             Text(
                 "尚未检测到本地 GenieAPIService 安装或可用模型；"
-                "即将下载并安装默认版本/模型（真实网络下载，可能耗时较久）。",
+                f"即将下载并安装{model_desc}（真实网络下载，可能耗时较久）。",
                 style="warning",
             )
         )
         try:
             if not service_installed:
                 await _install_default_service(c, opts)
-            if not model_id:
-                model_id = await _install_default_model(c, opts)
+            if not installed_model_id:
+                installed_model_id = await _install_default_model(
+                    c, opts, model_id=model_id
+                )
         except KeyboardInterrupt:
             warn = icon("warning", emoji=opts.emoji)
             prefix = f"{warn} " if warn else ""
@@ -438,9 +486,11 @@ async def _activate_local_model(c: Any, opts: RenderOptions) -> bool:
             )
             return False
 
-    assert model_id is not None  # narrowed above: either pre-existing or just installed
+    assert installed_model_id is not None  # narrowed above: pre-existing or just installed
     try:
-        ok, base_url, error = await _register_local_provider(c, model_id=model_id)
+        ok, base_url, error = await _register_local_provider(
+            c, model_id=installed_model_id
+        )
     except Exception as exc:  # noqa: BLE001 — activation must never crash
         cross = icon("error", emoji=opts.emoji)
         prefix = f"{cross} " if cross else ""
@@ -647,8 +697,139 @@ async def _abort_turn(c: Any, tab_id: Any) -> None:
 
 #: Holder so ``/clear`` can rebind the frozen ConversationId / TabId VOs the
 #: REPL loop reads each turn (set up in :func:`_run_chat` before the loop) —
-#: mirrors ``commands/build.py``'s ``_ID_HOLDER`` pattern.
+#: mirrors ``commands/build.py``'s ``_ID_HOLDER`` pattern. ``model_catalog``
+#: (Step 10) caches the last remote catalog listing :func:`/model` showed, so
+#: a follow-up ``/model <n>`` can resolve a numeric index against it (see
+#: :func:`_resolve_catalog_choice`).
 _ID_HOLDER: dict[str, Any] = {}
+
+
+def _format_size(size_bytes: int) -> str:
+    """Human-readable size for the ``/model`` catalog table (MB/GB)."""
+
+    if size_bytes <= 0:
+        return "-"
+    mb = size_bytes / (1024 * 1024)
+    if mb >= 1024:
+        return f"{mb / 1024:.1f} GB"
+    return f"{mb:.0f} MB"
+
+
+async def _show_installable_catalog(c: Any, opts: RenderOptions) -> None:
+    """Zero-provider ``/model`` (no args): list downloadable catalog models.
+
+    Step 10: replaces the old behaviour of silently activating one
+    hard-coded default model — the remote catalog has many entries (e.g.
+    several model families across NPU/GPU/CPU), all of which should be
+    choosable. Caches the shown list in ``_ID_HOLDER["model_catalog"]`` so a
+    follow-up ``/model <n>`` can resolve a numeric index against exactly
+    this listing (:func:`_resolve_catalog_choice`); a literal ``model_id``
+    always works too, regardless of this cache.
+    """
+
+    try:
+        models = await c.service_release.list_catalog_models_use_case.execute()
+    except Exception as exc:  # noqa: BLE001 — robust print, no trace
+        cross = icon("error", emoji=opts.emoji)
+        prefix = f"{cross} " if cross else ""
+        _err_console(opts).print(
+            Text(
+                f"{prefix}读取远程模型目录失败: {type(exc).__name__}: {exc}",
+                style="error",
+            )
+        )
+        return
+
+    if not models:
+        _out_console(opts).print(Text("远程模型目录为空。", style="dim"))
+        return
+
+    _ID_HOLDER["model_catalog"] = list(models)
+
+    from rich.table import Table
+
+    table = Table(title="可下载的本地模型（尚未配置任何 provider）")
+    table.add_column("#")
+    table.add_column("model_id")
+    table.add_column("name")
+    table.add_column("family")
+    table.add_column("parameter_size")
+    table.add_column("hardware")
+    table.add_column("size")
+    for idx, model in enumerate(models, start=1):
+        table.add_row(
+            str(idx),
+            model.model_id,
+            model.name,
+            model.family or "-",
+            model.parameter_size or "-",
+            model.hardware.value,
+            _format_size(model.size_bytes),
+        )
+    _out_console(opts).print(table)
+    _out_console(opts).print(
+        Text(
+            "用法: /model <序号或 model_id> 下载并激活该模型（若本地 "
+            "GenieAPIService 尚未安装也会一并安装）。",
+            style="dim",
+        )
+    )
+
+
+def _resolve_catalog_choice(rest: str) -> str:
+    """Resolve ``/model <arg>``'s argument to a concrete ``model_id``.
+
+    ``<arg>`` is either a 1-based index into the catalog listing last shown
+    by :func:`_show_installable_catalog` (``_ID_HOLDER["model_catalog"]``),
+    or a literal ``model_id`` string — the latter always works, even if the
+    catalog was never listed this session (e.g. a returning user who
+    already knows the id they want).
+    """
+
+    cached = _ID_HOLDER.get("model_catalog") or []
+    if rest.isdigit():
+        idx = int(rest)
+        if 1 <= idx <= len(cached):
+            return cached[idx - 1].model_id
+    return rest
+
+
+def _render_provider_table(
+    opts: RenderOptions, rows: list[dict], *, current: str | None
+) -> None:
+    """Render the "configured provider" table shared by both ``/model``
+    branches that end up with a non-empty ``rows`` (no-args listing, and the
+    refresh right after a successful Step 10 catalog-driven activation).
+    """
+
+    from rich.table import Table
+
+    table = Table(title="已配置的模型 provider")
+    table.add_column("provider")
+    table.add_column("base_url")
+    table.add_column("models")
+    table.add_column("api_key")
+    table.add_column("当前")
+    for row in rows:
+        provider_id = str(row.get("provider_id", ""))
+        config = row.get("config") or {}
+        base_url = str(config.get("base_url", ""))
+        model_ids = [
+            str(m.get("model_id", "")) for m in config.get("models", []) or []
+        ]
+        has_key = bool(config.get("has_api_key"))
+        is_current = current == provider_id or current in model_ids
+        table.add_row(
+            provider_id,
+            base_url,
+            ", ".join(model_ids) or str(config.get("default_model", "")),
+            "✓" if has_key else "-",
+            "★" if is_current else "",
+        )
+    _out_console(opts).print(table)
+    _out_console(opts).print(
+        Text("用法: /model <provider_id 或 model_id> 切换当前回合使用的模型", style="dim")
+    )
 
 
 def _build_dispatcher(
@@ -779,49 +960,35 @@ def _build_dispatcher(
             return True
 
         if not rest:
-            current = _ID_HOLDER.get("model_hint")
             if not rows:
-                # Step 9 redesign: `/model` is the (only) trigger point for
-                # local-first activation — entering the session itself never
-                # downloads anything (see `_run_chat`).
-                activated = await _activate_local_model(c, opts)
-                if not activated:
-                    _print_no_model_guidance(opts)
-                    return True
-                try:
-                    rows = await c.model_catalog.list_provider_configs_use_case.execute()
-                except Exception:  # noqa: BLE001 — activation already reported success
-                    return True
-                if not rows:
-                    return True
-            from rich.table import Table
+                # Step 10: list the remote catalog for the user to CHOOSE
+                # from, instead of the old behaviour of silently activating
+                # one hard-coded default model (see module docstring
+                # "Model selection").
+                await _show_installable_catalog(c, opts)
+                return True
+            _render_provider_table(opts, rows, current=_ID_HOLDER.get("model_hint"))
+            return True
 
-            table = Table(title="已配置的模型 provider")
-            table.add_column("provider")
-            table.add_column("base_url")
-            table.add_column("models")
-            table.add_column("api_key")
-            table.add_column("当前")
-            for row in rows:
-                provider_id = str(row.get("provider_id", ""))
-                config = row.get("config") or {}
-                base_url = str(config.get("base_url", ""))
-                model_ids = [
-                    str(m.get("model_id", "")) for m in config.get("models", []) or []
-                ]
-                has_key = bool(config.get("has_api_key"))
-                is_current = current == provider_id or current in model_ids
-                table.add_row(
-                    provider_id,
-                    base_url,
-                    ", ".join(model_ids) or str(config.get("default_model", "")),
-                    "✓" if has_key else "-",
-                    "★" if is_current else "",
-                )
-            _out_console(opts).print(table)
-            _out_console(opts).print(
-                Text("用法: /model <provider_id 或 model_id> 切换当前回合使用的模型", style="dim")
+        if not rows:
+            # Zero providers + an argument → resolve it against the last
+            # shown catalog (index or literal model_id) and drive
+            # local-first activation for THAT specific model (Step 10).
+            requested_model_id = _resolve_catalog_choice(rest)
+            activated = await _activate_local_model(
+                c, opts, model_id=requested_model_id
             )
+            if not activated:
+                _print_no_model_guidance(opts)
+                return True
+            try:
+                rows = await c.model_catalog.list_provider_configs_use_case.execute()
+            except Exception:  # noqa: BLE001 — activation already reported success
+                return True
+            if rows:
+                _render_provider_table(
+                    opts, rows, current=_ID_HOLDER.get("model_hint")
+                )
             return True
 
         _ID_HOLDER["model_hint"] = rest
@@ -836,7 +1003,7 @@ def _build_dispatcher(
         return False  # request REPL exit
 
     d.register("help", "显示全部命令", _help, aliases=("?",))
-    d.register("model", "[<provider 或 model id>] 查看/切换当前使用的模型", _model)
+    d.register("model", "[<序号/provider/model id>] 查看/切换模型；无 provider 时列出可下载模型", _model)
     d.register("history", "打印会话历史消息", _history)
     d.register("show", "[<n>] 全屏查看折叠的工具结果（不带参数查看最近一次）", _show)
     d.register("clear", "开启新会话", _clear)
@@ -870,6 +1037,7 @@ async def _repl_loop(
     _ID_HOLDER["conversation_id"] = conversation_id
     _ID_HOLDER["tab_id"] = tab_id
     _ID_HOLDER["model_hint"] = None
+    _ID_HOLDER["model_catalog"] = None
 
     from apps.cli._repl import build_slash_completer, is_slash_command
 
