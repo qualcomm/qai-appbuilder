@@ -10,3 +10,5 @@ todo/
 build-*
 __pycache__
 QAIModelBuilder
+*.MD
+*.md
