@@ -253,21 +253,22 @@ runs:
         $stage = "${{ steps.genie-vars-windows.outputs.stage-dir }}"
         $sdk   = $env:QNN_SDK_ROOT
 
-        # The overlay zip extracts as either:  <stage>/QAIRT_Runtime_*/...  or
-        # directly  <stage>/arm64x-windows-msvc/...  Probe for it.
+        # The ABI dirs (arm64x-windows-msvc / aarch64-windows-msvc) can sit at
+        # varying depths depending on the zip:
+        #   <stage>/arm64x-windows-msvc/...            (flat)
+        #   <stage>/QAIRT_Runtime_*/arm64x-.../...     (one level)
+        #   <stage>/QAIRT_v*/lib/arm64x-.../...        (two levels, current
+        #                                               v2.48.40 / v2.47.0 zips)
+        # A fixed 1-2 level probe silently missed the `lib/` layer, so the
+        # overlay was skipped and the build shipped the SDK's upstream Genie
+        # (wrong-ABI Genie.dll in the x64/ARM64EC wheel). Search recursively for
+        # either ABI dir and take its parent as the overlay root.
         $overlayRoot = $null
-        if ((Test-Path (Join-Path $stage "arm64x-windows-msvc")) -or
-            (Test-Path (Join-Path $stage "aarch64-windows-msvc"))) {
-          $overlayRoot = $stage
-        } else {
-          Get-ChildItem $stage -Directory | ForEach-Object {
-            if (-not $overlayRoot -and (
-                (Test-Path (Join-Path $_.FullName "arm64x-windows-msvc")) -or
-                (Test-Path (Join-Path $_.FullName "aarch64-windows-msvc"))
-              )) {
-              $overlayRoot = $_.FullName
-            }
-          }
+        $abiDir = Get-ChildItem $stage -Recurse -Directory `
+                    -Include "arm64x-windows-msvc", "aarch64-windows-msvc" `
+                    -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($abiDir) {
+          $overlayRoot = $abiDir.Parent.FullName
         }
         if (-not $overlayRoot) {
           Write-Host "::warning::Genie overlay zip layout not recognized under $stage. Skipping overlay (build will use upstream Genie). Tree:"
