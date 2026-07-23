@@ -1,11 +1,12 @@
 """Unit tests for ``apps.cli.commands.chat``'s local-first activation flow
-(delivery plan Phase 2 §Step 6).
+(delivery plan Phase 2 §Step 6, redesigned §Step 9).
 
 Covers: (a) an already-present local install skips download/install and goes
 straight to provider registration; (b) nothing present drives the same
 install use cases ``service-release install service/model`` use, then
-registers + probes the ``"local-genie"`` provider; (c) a non-zero provider
-count skips activation entirely (Step 4's fast path, unchanged); (d) a
+registers + probes the ``"local-genie"`` provider; (c) ``_run_chat`` never
+auto-triggers activation itself regardless of provider count — activation is
+only ever reachable from inside the session via ``/model`` (Step 9); (d) a
 non-TTY invocation never triggers activation, regardless of provider count
 (must not hang); (e) a ``KeyboardInterrupt`` mid-install is caught, prints a
 clear message, and never propagates as an unhandled crash.
@@ -171,13 +172,17 @@ async def test_activate_local_model_installs_then_registers_when_absent(monkeypa
 
 
 # ---------------------------------------------------------------------------
-# (c) non-zero providers → activation flow skipped entirely
+# (c) `_run_chat` never auto-triggers activation itself (Step 9 redesign):
+#     entering the session must never block on / silently start a real
+#     download, regardless of provider count. Activation is only ever
+#     reachable from inside the session via `/model` (see
+#     test_chat_model_command.py for that path).
 # ---------------------------------------------------------------------------
 
 
-async def test_run_chat_skips_activation_when_provider_already_configured(monkeypatch):
+async def test_run_chat_never_auto_triggers_activation(monkeypatch):
     async def _has_provider(_c):
-        return True
+        return False  # zero providers — the interesting case to prove safe
 
     monkeypatch.setattr(chat_mod, "_precheck_cloud_provider", _has_provider)
 

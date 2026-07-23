@@ -69,11 +69,76 @@ async def test_model_no_args_lists_configured_providers(capsys):
     assert "gpt-4o" in out
 
 
-async def test_model_no_args_with_zero_providers_prints_hint(capsys):
-    dispatcher = _dispatcher(rows=[])
+class _SequencedAsyncResult:
+    """``list_provider_configs_use_case`` stand-in returning successive values.
+
+    Used by the zero-provider ``/model`` tests below: the *first* call (the
+    initial listing) must see an empty catalog to reach the activation
+    branch; the *second* call (the refresh right after a successful
+    activation) must see the newly-registered provider, mirroring what a
+    real ``UpdateProviderConfigUseCase`` write would make visible.
+    """
+
+    def __init__(self, values: list) -> None:
+        self._values = list(values)
+
+    async def execute(self, *args, **kwargs):
+        if len(self._values) > 1:
+            return self._values.pop(0)
+        return self._values[0]
+
+
+async def test_model_no_args_with_zero_providers_triggers_local_activation(
+    monkeypatch, capsys
+):
+    """Step 9 redesign: `/model` (not session entry) is the activation trigger."""
+
+    opts = _opts()
+    renderer = _renderer(opts)
+    c = SimpleNamespace(
+        model_catalog=SimpleNamespace(
+            list_provider_configs_use_case=_SequencedAsyncResult(
+                [[], [_provider_row("local-genie", model_id="m1")]]
+            )
+        )
+    )
+    activate_calls: list = []
+
+    async def _activate(_c, _opts):
+        activate_calls.append((_c, _opts))
+        return True
+
+    monkeypatch.setattr(chat_mod, "_activate_local_model", _activate)
+    dispatcher = chat_mod._build_dispatcher(c=c, renderer=renderer, opts=opts)
+
     handled, keep = await dispatcher.dispatch("/model")
+
     assert (handled, keep) == (True, True)
-    assert "尚未配置任何 provider" in capsys.readouterr().out
+    assert len(activate_calls) == 1
+    out = capsys.readouterr().out
+    assert "local-genie" in out
+
+
+async def test_model_no_args_with_zero_providers_activation_failure_prints_guidance(
+    monkeypatch, capsys
+):
+    opts = _opts()
+    renderer = _renderer(opts)
+    c = SimpleNamespace(
+        model_catalog=SimpleNamespace(list_provider_configs_use_case=_AsyncResult([]))
+    )
+
+    async def _activate(_c, _opts):
+        return False
+
+    monkeypatch.setattr(chat_mod, "_activate_local_model", _activate)
+    dispatcher = chat_mod._build_dispatcher(c=c, renderer=renderer, opts=opts)
+
+    handled, keep = await dispatcher.dispatch("/model")
+
+    assert (handled, keep) == (True, True)
+    err = capsys.readouterr().err
+    assert "当前没有可用的模型" in err
 
 
 async def test_model_lookup_failure_reports_error_not_crash(capsys):

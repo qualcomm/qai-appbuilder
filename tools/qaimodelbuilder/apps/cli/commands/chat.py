@@ -30,20 +30,24 @@ falsy. So a generic default chat entry point behaves most correctly with
 string — that is the actual "generic/default" system-prompt behaviour this
 entry point should offer.
 
-Provider precheck + local-first activation (Step 6)
------------------------------------------------------
+Provider precheck + local-first activation (Step 6, redesigned in Step 9)
+----------------------------------------------------------------------------
 Reuses ``commands/build.py``'s ``_precheck_cloud_provider`` verbatim (no
-change to ``qai build``'s own behaviour). Unlike ``qai build`` (which prints
-a short message and exits when no provider is configured), a zero-provider
-default chat session tries a best-effort LOCAL-FIRST activation
-(:func:`_activate_local_model`): confirm (or install) a local GenieAPIService
-+ model via the same ``qai.service_release`` use cases the
-``service-release install service/model`` commands use, then register its
-OpenAI-compatible endpoint as the ``"local-genie"`` provider
-(``UpdateProviderConfigUseCase`` + ``ProbeProviderCommand``, same shape
-``commands/config.py``'s ``_setup_one_provider`` writes). Only ever runs on a
-TTY — a non-interactive invocation must fail exactly like Step 4 (guidance +
-exit 1), never hang on a network operation.
+change to ``qai build``'s own behaviour) — but here it is only ever a
+READ-ONLY check, used solely to decide whether the welcome banner shows a
+"no model configured" hint. Entering this session never blocks on, and never
+silently triggers, a real network download: LOCAL-FIRST activation
+(:func:`_activate_local_model`) is user-triggered from *inside* the session
+via the ``/model`` command (see the ``_model`` dispatcher handler) —
+confirm (or install) a local GenieAPIService + model via the same
+``qai.service_release`` use cases the ``service-release install
+service/model`` commands use, then register its OpenAI-compatible endpoint
+as the ``"local-genie"`` provider (``UpdateProviderConfigUseCase`` +
+``ProbeProviderCommand``, same shape ``commands/config.py``'s
+``_setup_one_provider`` writes). Only ever runs on a TTY (the whole entry
+point is already TTY-gated) and only when the user explicitly asks for it
+via ``/model`` — never automatically, and never before the session's first
+interactive read.
 
 Judgement calls (no built-in "pick something sensible" default upstream)
 --------------------------------------------------------------------------
@@ -133,7 +137,7 @@ def _print_no_model_guidance(opts: RenderOptions) -> None:
         Text(
             f"{prefix}当前没有可用的模型：本地模型激活未能完成，"
             "且尚未配置云端 provider。请运行 qai config setup 配置云端 "
-            "provider，或重试本地激活后再试。",
+            "provider，或运行 /model 重试本地激活。",
             style="warning",
         )
     )
@@ -473,12 +477,12 @@ async def _run_chat(args: argparse.Namespace) -> int:
     async with repl_container(
         config_file=config_file, repo_root=repo_root, log_level="WARNING"
     ) as c:
-        # ── Cloud-provider precheck (MUST run before any interactive read so
-        #    a non-tty / no-provider invocation exits cleanly without hanging).
-        if not await _precheck_cloud_provider(c):
-            if not await _activate_local_model(c, opts):
-                _print_no_model_guidance(opts)
-                return 1
+        # ── Provider check is READ-ONLY here (Step 9 redesign — see module
+        #    docstring): entering the session must never block on, or
+        #    silently trigger, a real network download. It only decides
+        #    whether the banner below shows a "no model configured" hint;
+        #    local activation itself is user-triggered via `/model`.
+        has_provider = await _precheck_cloud_provider(c)
 
         from qai.chat.application.use_cases.conversation_management import (
             CreateConversationInput,
@@ -513,7 +517,7 @@ async def _run_chat(args: argparse.Namespace) -> int:
 
         interrupts = InterruptController()
 
-        _print_banner(conv_id_str, opts)
+        _print_banner(conv_id_str, opts, has_provider=has_provider)
 
         dispatcher = _build_dispatcher(
             c=c,
@@ -537,7 +541,9 @@ async def _run_chat(args: argparse.Namespace) -> int:
             cleanup_repl_session(session_log)
 
 
-def _print_banner(conv_id: str, opts: RenderOptions) -> None:
+def _print_banner(
+    conv_id: str, opts: RenderOptions, *, has_provider: bool = True
+) -> None:
     from rich.panel import Panel
 
     console = _out_console(opts)
@@ -553,6 +559,10 @@ def _print_banner(conv_id: str, opts: RenderOptions) -> None:
     body.append(" 查看/切换模型，", style="dim")
     body.append("/help", style="heading")
     body.append(" 查看全部）。", style="dim")
+    if not has_provider:
+        body.append("\n尚未配置任何模型 — 输入 ", style="warning")
+        body.append("/model", style="heading")
+        body.append(" 激活本地模型或查看配置方式。", style="warning")
     console.print(Panel(body, border_style="agent", expand=False))
 
 
@@ -771,10 +781,19 @@ def _build_dispatcher(
         if not rest:
             current = _ID_HOLDER.get("model_hint")
             if not rows:
-                _out_console(opts).print(
-                    Text("（尚未配置任何 provider，运行 qai config setup 添加）", style="dim")
-                )
-                return True
+                # Step 9 redesign: `/model` is the (only) trigger point for
+                # local-first activation — entering the session itself never
+                # downloads anything (see `_run_chat`).
+                activated = await _activate_local_model(c, opts)
+                if not activated:
+                    _print_no_model_guidance(opts)
+                    return True
+                try:
+                    rows = await c.model_catalog.list_provider_configs_use_case.execute()
+                except Exception:  # noqa: BLE001 — activation already reported success
+                    return True
+                if not rows:
+                    return True
             from rich.table import Table
 
             table = Table(title="已配置的模型 provider")

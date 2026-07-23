@@ -1,13 +1,15 @@
 """Unit tests for ``apps.cli.commands.chat``'s slash-command dispatcher and
-zero-provider guidance path (delivery plan Phase 2 §Step 4).
+zero-provider banner hint (delivery plan Phase 2 §Step 4, redesigned §Step 9).
 
 Mirrors ``test_build_repl.py``'s pattern: drives
 :func:`apps.cli.commands.chat._build_dispatcher` through the public
 ``SlashDispatcher.dispatch`` surface and asserts each generic handler
 (``/help``/``/history``/``/clear``/``/show``/``/exit``) behaves the same as
-its ``commands/build.py`` counterpart; plus a dedicated test for the
-zero-cloud-provider guidance message this entry point prints instead of
-``qai build``'s "print + exit" precheck behaviour.
+its ``commands/build.py`` counterpart; plus dedicated tests for
+:func:`apps.cli.commands.chat._print_banner`'s zero-provider hint. Since
+Step 9, entering this session never blocks on / auto-triggers local-model
+activation (see ``test_chat_local_activation.py``); that is now only ever
+reachable interactively via ``/model`` (see ``test_chat_model_command.py``).
 """
 
 from __future__ import annotations
@@ -123,39 +125,25 @@ async def test_show_valid_index_opens_pager(monkeypatch, capsys):
 
 
 # ---------------------------------------------------------------------------
-# Zero-provider guidance path
+# Zero-provider banner hint (Step 9 redesign)
+#
+# ``_run_chat`` no longer blocks entry or auto-triggers activation on a
+# zero-provider session (see test_chat_local_activation.py's
+# ``test_run_chat_never_auto_triggers_activation`` for that ordering
+# guarantee, and test_chat_model_command.py for the `/model`-triggered
+# activation path itself) — the precheck result now only feeds a one-line
+# hint into the welcome banner.
 # ---------------------------------------------------------------------------
 
 
-async def test_run_chat_prints_guidance_and_returns_error_when_no_provider_and_activation_fails(
-    monkeypatch, capsys
-):
-    """No cloud provider + local-first activation also fails → clear guidance, no hang/crash."""
+def test_print_banner_shows_hint_when_no_provider(capsys):
+    chat_mod._print_banner("conv-1", _opts(), has_provider=False)
+    out = capsys.readouterr().out
+    assert "尚未配置任何模型" in out
+    assert "/model" in out
 
-    async def _no_provider(_c):
-        return False
 
-    async def _activation_fails(_c, _opts):
-        return False
-
-    monkeypatch.setattr(chat_mod, "_precheck_cloud_provider", _no_provider)
-    monkeypatch.setattr(chat_mod, "_activate_local_model", _activation_fails)
-
-    class _FakeContainer:
-        async def __aenter__(self):
-            return SimpleNamespace()
-
-        async def __aexit__(self, *exc_info):
-            return False
-
-    monkeypatch.setattr(chat_mod, "repl_container", lambda **_kw: _FakeContainer())
-
-    import argparse
-
-    args = argparse.Namespace(repo_root=None, config_file=None)
-    rc = await chat_mod._run_chat(args)
-
-    assert rc == 1
-    err = capsys.readouterr().err
-    assert "没有可用的模型" in err
-    assert "本地模型激活未能完成" in err
+def test_print_banner_omits_hint_when_provider_present(capsys):
+    chat_mod._print_banner("conv-1", _opts(), has_provider=True)
+    out = capsys.readouterr().out
+    assert "尚未配置任何模型" not in out
