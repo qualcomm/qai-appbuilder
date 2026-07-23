@@ -44,6 +44,7 @@ __all__ = [
     "SlashDispatcher",
     "SlashCommand",
     "async_read_line",
+    "build_slash_completer",
     "InterruptController",
     "PermissionBridge",
     "resolve_pending_permissions",
@@ -61,6 +62,7 @@ def repl_container(
     *,
     config_file: Path | None = None,
     repo_root: Path | None = None,
+    log_level: str | None = None,
 ) -> Any:
     """Open a long-lived :class:`Container` for one REPL session.
 
@@ -68,8 +70,14 @@ def repl_container(
     enters it once (``async with``) and reuses ``c`` for every turn. Naming
     it separately documents intent: this context spans an interactive
     session, not a single command.
+
+    ``log_level`` overrides the CLI's default operator-facing verbosity
+    (see :func:`apps.cli._runtime.cli_container`); omit it to keep that
+    default unchanged.
     """
-    return cli_container(config_file=config_file, repo_root=repo_root)
+    return cli_container(
+        config_file=config_file, repo_root=repo_root, log_level=log_level
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -200,39 +208,66 @@ class SlashDispatcher:
 
 _PTK_SESSION: Any = None
 _PTK_TRIED = False
+_PTK_COMPLETER: Any = None
 
 
-def _get_ptk_session() -> Any:
+def _get_ptk_session(completer: Any = None) -> Any:
     """Lazily build a single ``prompt_toolkit`` PromptSession (or None).
 
     Returns ``None`` when prompt_toolkit is unavailable or stdin is not a
     usable terminal, so :func:`async_read_line` can fall back to ``input()``.
+    The session is rebuilt whenever ``completer`` changes identity (each
+    interactive entry point builds its own completer once and reuses it for
+    the life of the session, so this only re-triggers on a genuine switch).
     """
-    global _PTK_SESSION, _PTK_TRIED
-    if _PTK_TRIED:
+    global _PTK_SESSION, _PTK_TRIED, _PTK_COMPLETER
+    if _PTK_TRIED and completer is _PTK_COMPLETER:
         return _PTK_SESSION
     _PTK_TRIED = True
+    _PTK_COMPLETER = completer
     try:
         if not sys.stdin.isatty():
             _PTK_SESSION = None
             return None
         from prompt_toolkit import PromptSession  # noqa: PLC0415
 
-        _PTK_SESSION = PromptSession()
+        _PTK_SESSION = PromptSession(
+            completer=completer, complete_while_typing=True
+        )
     except Exception:  # noqa: BLE001 — no terminal / import failure
         _PTK_SESSION = None
     return _PTK_SESSION
 
 
-async def async_read_line(prompt: str = "") -> str:
+def build_slash_completer(dispatcher: "SlashDispatcher") -> Any:
+    """Build a ``WordCompleter`` suggesting ``dispatcher``'s registered commands.
+
+    Returns ``None`` when prompt_toolkit is unavailable. Uses the stock
+    ``WordCompleter`` (``sentence=True`` so the whole typed prefix is
+    matched, ``meta_dict`` to show each command's help text) instead of a
+    hand-rolled ``Completer`` subclass.
+    """
+    try:
+        from prompt_toolkit.completion import WordCompleter  # noqa: PLC0415
+    except Exception:  # noqa: BLE001 — degrade to no completion menu
+        return None
+    commands = dispatcher.commands()
+    words = [f"/{cmd.name}" for cmd in commands]
+    meta = {f"/{cmd.name}": cmd.help for cmd in commands}
+    return WordCompleter(words, meta_dict=meta, sentence=True, match_middle=False)
+
+
+async def async_read_line(prompt: str = "", *, completer: Any = None) -> str:
     """Read one line of input without blocking the event loop.
 
     Uses ``prompt_toolkit`` (async ``prompt_async``) when available; falls
     back to ``input()`` wrapped in ``run_in_executor`` so the loop keeps
     servicing stream consumption + EventBus callbacks while we wait. Raises
     :class:`EOFError` on Ctrl+D / closed stdin (caller treats as exit).
+    ``completer`` (e.g. from :func:`build_slash_completer`) is only used when
+    prompt_toolkit is active; the ``input()`` fallback ignores it.
     """
-    session = _get_ptk_session()
+    session = _get_ptk_session(completer)
     if session is not None:
         # prompt_toolkit runs its own input loop cooperatively.
         return await session.prompt_async(prompt)

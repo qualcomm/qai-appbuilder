@@ -241,7 +241,7 @@ async def test_activate_local_model_catches_keyboard_interrupt_during_install(
     monkeypatch.setattr(chat_mod.sys.stdin, "isatty", lambda: True)
     c = _container(service_installed=False, model_id=None)
 
-    async def _raise_interrupt(_c):
+    async def _raise_interrupt(_c, _opts):
         raise KeyboardInterrupt
 
     monkeypatch.setattr(chat_mod, "_install_default_service", _raise_interrupt)

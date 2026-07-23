@@ -162,24 +162,91 @@ async def _local_service_and_model_present(c: Any) -> tuple[bool, str | None]:
     return service_installed, installed_model_id
 
 
-async def _drain_download(iterator: Any) -> Any:
-    """Await a ``DownloadProgress`` stream to its terminal frame."""
+async def _drain_download(
+    iterator: Any, *, opts: RenderOptions | None = None, label: str = "下载中"
+) -> Any:
+    """Await a ``DownloadProgress`` stream to its terminal frame.
+
+    Mirrors ``_render.RunFrameRenderer``'s TTY/non-TTY progress split
+    (delivery plan Step 1): on a real terminal (``opts.color``) a Rich
+    progress bar refreshes in place (``auto_refresh=False`` + explicit
+    ``refresh()``, that renderer's proven pattern); otherwise progress
+    degrades to periodic plain lines. Without ``opts`` at all (legacy
+    silent drain), a real download's ONLY visible feedback in this entry
+    point would be raw ``structlog``/``httpx`` log lines.
+    """
 
     from qai.service_release.domain.value_objects import DownloadStatus
 
+    if opts is None:
+        final = None
+        async for progress in iterator:
+            final = progress
+            if progress.status in (
+                DownloadStatus.DONE,
+                DownloadStatus.ERROR,
+                DownloadStatus.CANCELLED,
+            ):
+                break
+        return final
+
+    console = _out_console(opts)
+    terminal_statuses = (
+        DownloadStatus.DONE,
+        DownloadStatus.ERROR,
+        DownloadStatus.CANCELLED,
+    )
     final = None
-    async for progress in iterator:
-        final = progress
-        if progress.status in (
-            DownloadStatus.DONE,
-            DownloadStatus.ERROR,
-            DownloadStatus.CANCELLED,
-        ):
-            break
+
+    if not opts.color:
+        last_pct = -1.0
+        async for progress in iterator:
+            final = progress
+            pct = progress.percent
+            if pct != last_pct:
+                console.print(Text(f"… {label} {pct}%", style="dim"))
+                last_pct = pct
+            if progress.status in terminal_statuses:
+                break
+        return final
+
+    from rich.progress import (
+        BarColumn,
+        DownloadColumn,
+        Progress,
+        TextColumn,
+        TransferSpeedColumn,
+    )
+
+    bar = Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        DownloadColumn(),
+        TransferSpeedColumn(),
+        console=console,
+        transient=False,
+        auto_refresh=False,
+    )
+    bar.start()
+    task_id = bar.add_task(label, total=None)
+    try:
+        async for progress in iterator:
+            final = progress
+            if progress.total_bytes:
+                bar.update(
+                    task_id,
+                    total=progress.total_bytes,
+                    completed=progress.downloaded_bytes,
+                )
+            bar.refresh()
+            if progress.status in terminal_statuses:
+                break
+    finally:
+        bar.stop()
     return final
 
 
-async def _install_default_service(c: Any) -> None:
+async def _install_default_service(c: Any, opts: RenderOptions) -> None:
     """Download + install the recommended (else first) service version.
 
     Reuses ``service-release install service``'s own use cases
@@ -210,7 +277,11 @@ async def _install_default_service(c: Any) -> None:
             checksum_sha256=chosen.checksum_sha256,
         )
     )
-    progress = await _drain_download(iterator)
+    progress = await _drain_download(
+        iterator,
+        opts=opts,
+        label=f"下载 GenieAPIService {chosen.version}",
+    )
     if progress is None or progress.status != DownloadStatus.DONE:
         error = progress.error if progress is not None else "未知错误"
         raise RuntimeError(f"下载 GenieAPIService {chosen.version} 失败: {error}")
@@ -220,7 +291,7 @@ async def _install_default_service(c: Any) -> None:
     )
 
 
-async def _install_default_model(c: Any) -> str:
+async def _install_default_model(c: Any, opts: RenderOptions) -> str:
     """Download + install the first NPU catalog model (else the first entry).
 
     Reuses ``service-release install model``'s own use cases verbatim; NPU is
@@ -257,7 +328,9 @@ async def _install_default_model(c: Any) -> str:
             checksum_sha256=checksum,
         )
     )
-    progress = await _drain_download(iterator)
+    progress = await _drain_download(
+        iterator, opts=opts, label=f"下载模型 {chosen.model_id}"
+    )
     if progress is None or progress.status != DownloadStatus.DONE:
         error = progress.error if progress is not None else "未知错误"
         raise RuntimeError(f"下载模型 {chosen.model_id} 失败: {error}")
@@ -340,9 +413,9 @@ async def _activate_local_model(c: Any, opts: RenderOptions) -> bool:
         )
         try:
             if not service_installed:
-                await _install_default_service(c)
+                await _install_default_service(c, opts)
             if not model_id:
-                model_id = await _install_default_model(c)
+                model_id = await _install_default_model(c, opts)
         except KeyboardInterrupt:
             warn = icon("warning", emoji=opts.emoji)
             prefix = f"{warn} " if warn else ""
@@ -398,7 +471,7 @@ async def _run_chat(args: argparse.Namespace) -> int:
     opts = RenderOptions.from_streams(sys.stdout, sys.stderr)
 
     async with repl_container(
-        config_file=config_file, repo_root=repo_root
+        config_file=config_file, repo_root=repo_root, log_level="WARNING"
     ) as c:
         # ── Cloud-provider precheck (MUST run before any interactive read so
         #    a non-tty / no-provider invocation exits cleanly without hanging).
@@ -465,12 +538,22 @@ async def _run_chat(args: argparse.Namespace) -> int:
 
 
 def _print_banner(conv_id: str, opts: RenderOptions) -> None:
+    from rich.panel import Panel
+
     console = _out_console(opts)
-    console.print(Text("Chat 会话已就绪。", style="heading"))
-    console.print(Text(f"  会话 id  : {conv_id}"))
-    console.print(
-        Text("输入自然语言与 Agent 对话，或用斜杠命令调整参数（/help 查看全部）。")
-    )
+    agent = icon("agent", emoji=opts.emoji)
+    prefix = f"{agent} " if agent else ""
+    body = Text()
+    body.append(f"{prefix}QAI Agent\n", style="agent")
+    body.append(f"会话 id: {conv_id}\n", style="dim")
+    body.append("直接输入自然语言即可对话；输入 ", style="dim")
+    body.append("/", style="heading")
+    body.append(" 弹出命令列表（", style="dim")
+    body.append("/model", style="heading")
+    body.append(" 查看/切换模型，", style="dim")
+    body.append("/help", style="heading")
+    body.append(" 查看全部）。", style="dim")
+    console.print(Panel(body, border_style="agent", expand=False))
 
 
 # ---------------------------------------------------------------------------
@@ -504,7 +587,7 @@ async def _stream_turn(
         tab_id=tab_id,
         conversation_id=conversation_id,
         user_message=MessageContent(text=text),
-        model_hint=None,
+        model_hint=_ID_HOLDER.get("model_hint"),
         extra=build_extra(),
     )
 
@@ -670,10 +753,71 @@ def _build_dispatcher(
         await show_pager(folded_text, title=f"/show {shown_idx}")
         return True
 
+    async def _model(rest: str) -> bool:
+        rest = rest.strip()
+        try:
+            rows = await c.model_catalog.list_provider_configs_use_case.execute()
+        except Exception as exc:  # noqa: BLE001 — robust print, no trace
+            cross = icon("error", emoji=opts.emoji)
+            prefix = f"{cross} " if cross else ""
+            _err_console(opts).print(
+                Text(
+                    f"{prefix}读取 provider 列表失败: {type(exc).__name__}: {exc}",
+                    style="error",
+                )
+            )
+            return True
+
+        if not rest:
+            current = _ID_HOLDER.get("model_hint")
+            if not rows:
+                _out_console(opts).print(
+                    Text("（尚未配置任何 provider，运行 qai config setup 添加）", style="dim")
+                )
+                return True
+            from rich.table import Table
+
+            table = Table(title="已配置的模型 provider")
+            table.add_column("provider")
+            table.add_column("base_url")
+            table.add_column("models")
+            table.add_column("api_key")
+            table.add_column("当前")
+            for row in rows:
+                provider_id = str(row.get("provider_id", ""))
+                config = row.get("config") or {}
+                base_url = str(config.get("base_url", ""))
+                model_ids = [
+                    str(m.get("model_id", "")) for m in config.get("models", []) or []
+                ]
+                has_key = bool(config.get("has_api_key"))
+                is_current = current == provider_id or current in model_ids
+                table.add_row(
+                    provider_id,
+                    base_url,
+                    ", ".join(model_ids) or str(config.get("default_model", "")),
+                    "✓" if has_key else "-",
+                    "★" if is_current else "",
+                )
+            _out_console(opts).print(table)
+            _out_console(opts).print(
+                Text("用法: /model <provider_id 或 model_id> 切换当前回合使用的模型", style="dim")
+            )
+            return True
+
+        _ID_HOLDER["model_hint"] = rest
+        ok = icon("success", emoji=opts.emoji)
+        prefix = f"{ok} " if ok else ""
+        _out_console(opts).print(
+            Text(f"{prefix}后续回合将使用模型: {rest}", style="success")
+        )
+        return True
+
     async def _exit(_rest: str) -> bool:
         return False  # request REPL exit
 
     d.register("help", "显示全部命令", _help, aliases=("?",))
+    d.register("model", "[<provider 或 model id>] 查看/切换当前使用的模型", _model)
     d.register("history", "打印会话历史消息", _history)
     d.register("show", "[<n>] 全屏查看折叠的工具结果（不带参数查看最近一次）", _show)
     d.register("clear", "开启新会话", _clear)
@@ -706,14 +850,16 @@ async def _repl_loop(
 
     _ID_HOLDER["conversation_id"] = conversation_id
     _ID_HOLDER["tab_id"] = tab_id
+    _ID_HOLDER["model_hint"] = None
 
-    from apps.cli._repl import is_slash_command
+    from apps.cli._repl import build_slash_completer, is_slash_command
 
+    completer = build_slash_completer(dispatcher)
     allow_set: set[str] = set()
 
     while True:
         try:
-            line = await async_read_line("chat › ")
+            line = await async_read_line("chat › ", completer=completer)
         except EOFError:
             _out_console(opts).print(Text("\n再见。", style="dim"))
             return 0

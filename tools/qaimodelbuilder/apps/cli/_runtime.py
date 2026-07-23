@@ -144,6 +144,7 @@ async def cli_container(
     *,
     config_file: Path | None = None,
     repo_root: Path | None = None,
+    log_level: str | None = None,
 ) -> AsyncIterator[Container]:
     """Build, start, yield, then tear down a :class:`Container` for one CLI call.
 
@@ -156,6 +157,12 @@ async def cli_container(
         Repository root (the directory containing ``src/`` / ``apps/``).
         ``None`` auto-detects from this module's location, matching the API
         server's behaviour.
+    log_level:
+        Optional override for ``settings.logging.level``. ``None`` keeps the
+        existing "operator is the audience" default used by every command
+        (``build``/``app``/``service-release``/...); the default chat entry
+        point (``commands/chat.py``) passes ``"WARNING"`` to keep startup
+        quiet, since that entry point owns its own Rich-rendered feedback.
 
     Yields
     ------
@@ -185,7 +192,7 @@ async def cli_container(
     # the operator readable lines (the API server uses ``auto`` which picks
     # JSON in non-TTY contexts, but for CLI the operator IS the audience).
     configure_logging(
-        level=settings.logging.level,  # type: ignore[arg-type]
+        level=log_level or settings.logging.level,  # type: ignore[arg-type]
         fmt="console",
         stream=sys.stderr,
     )
