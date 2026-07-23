@@ -6,7 +6,7 @@
 """Helpers that serialise the runner request envelope (batch E).
 
 The 4 built-in App Builder Pack runners
-(``factory/app_builder/models/<pack>/runner.py``) consume their
+(``factory/chat_features/app-builder/models/<pack>/runner.py``) consume their
 inputs through ``runner_protocol.read_request()`` — a single line of
 JSON read from stdin. Without that envelope the runner immediately
 raises ``RuntimeError("no request received on stdin (and no argv[1]
@@ -45,14 +45,14 @@ def build_runner_request_payload(
 ) -> bytes:
     """Build the JSON request bytes consumed by a Pack ``runner.py``.
 
-    Schema mirrors ``factory/app_builder/shared/runner_protocol.py``
+    Schema mirrors ``factory/chat_features/app-builder/shared/runner_protocol.py``
     ``read_request()``:
 
     * ``repoRoot``: absolute path string of the repository root (the
       runner uses it to anchor relative ``inputs.image`` / weight
       lookups under ``<repo>/models/<pack>/``).
     * ``packDir``: absolute path string of
-      ``<repo>/factory/app_builder/models/<pack>/`` (where the
+      ``<repo>/factory/chat_features/app-builder/models/<pack>/`` (where the
       runner's ``weights/`` and ``assets/`` siblings live).
     * ``inputs``: opaque mapping forwarded verbatim. Each runner reads
       its own keys (``inputs.image`` for ppocrv4, ``inputs.audio`` for

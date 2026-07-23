@@ -634,7 +634,7 @@ def resolve_read_only_allow_paths(container: "Container") -> tuple[str, ...]:
     Resolved set (de-duplicated, order-preserving):
 
     1. the three business dirs under ``<repo_root>`` — ``skills`` +
-       ``factory/chat_features`` + ``factory/app_builder`` (``<repo_root>`` =
+       ``factory/chat_features`` (``<repo_root>`` =
        ``data_paths.root`` parent, absolutised);
     2. the system read surface (``%SystemRoot%`` + the Python runtime prefixes
        + ``%ProgramFiles%`` / ``%ProgramFiles(x86)%``) — see
@@ -660,7 +660,6 @@ def resolve_read_only_allow_paths(container: "Container") -> tuple[str, ...]:
     if root is not None:
         _add(str(root / "skills"))
         _add(str(root / "factory" / "chat_features"))
-        _add(str(root / "factory" / "app_builder"))
 
     # 2) system read surface (OS + Python runtime).
     try:

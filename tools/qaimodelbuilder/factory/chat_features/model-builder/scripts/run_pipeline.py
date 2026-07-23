@@ -1,3 +1,7 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
 """
 run_pipeline.py - End-to-End QNN DLC Pipeline for WoS ARM64 (QAIRT 2.45+)
 

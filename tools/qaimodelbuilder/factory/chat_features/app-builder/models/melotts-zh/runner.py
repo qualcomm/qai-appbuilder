@@ -56,18 +56,23 @@ if _THIS_DIR not in sys.path:
 # Without this injection, the first inference on a fresh machine would either
 # block on a network download or hard-fail offline.
 #
-# We use a fixed relative jump (parents[4]) instead of waiting for the JSON
-# request that carries ``repoRoot``, because the G2P warm-up thread in
-# ``main()`` is started in parallel with NPU model loading and may begin
-# importing g2p_en immediately — by then the request has already been read,
-# but routing through it would couple two unrelated pieces of state.  The
-# fixed path keeps this guard pure and side-effect-free.
+# We resolve ``vendor/nltk_data`` by walking UP from this file looking for an
+# existing ``vendor/`` dir, instead of a fixed relative jump. A fixed
+# ``parents[N]`` breaks across layouts: in the dev repo the pack sits at
+# ``<repo>/factory/chat_features/app-builder/models/melotts-zh`` (vendor is parents[4]), but
+# in a PACKAGED app it sits at ``<app>/pack/melotts-zh`` (vendor is parents[2]).
+# The ancestor-walk finds ``<root>/vendor/nltk_data`` in both. This runs at
+# import time (before the JSON request that carries ``repoRoot`` is routed),
+# so it must stay pure and side-effect-free apart from the nltk.data.path edit.
 try:
     import nltk as _nltk  # type: ignore[import-not-found]
-    _VENDOR_NLTK = (
-        Path(__file__).resolve().parents[4] / "vendor" / "nltk_data"
-    )
-    if _VENDOR_NLTK.is_dir():
+    _VENDOR_NLTK = None
+    for _parent in Path(__file__).resolve().parents:
+        _cand = _parent / "vendor" / "nltk_data"
+        if _cand.is_dir():
+            _VENDOR_NLTK = _cand
+            break
+    if _VENDOR_NLTK is not None:
         _vendor_nltk_str = str(_VENDOR_NLTK)
         if _vendor_nltk_str not in _nltk.data.path:
             _nltk.data.path.insert(0, _vendor_nltk_str)

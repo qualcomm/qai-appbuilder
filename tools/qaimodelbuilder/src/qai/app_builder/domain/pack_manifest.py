@@ -7,7 +7,7 @@
 
 These VOs faithfully model the on-disk ``manifest.json`` schema used by
 the legacy ``features/app-builder/models/<id>/manifest.json`` and the
-new release path ``factory/app_builder/models/<id>/manifest.json``
+new release path ``factory/chat_features/app-builder/models/<id>/manifest.json``
 (after PR-306). They are pure domain types — no IO, no framework
 dependencies — so the application layer can manipulate manifests
 without touching the filesystem.

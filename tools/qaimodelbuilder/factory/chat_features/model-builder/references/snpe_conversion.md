@@ -3,6 +3,8 @@
 ## Scope
 Use this reference when `{FLOW}=SNPE` and output target is `.dlc`.
 
+> **Quantization**: this reference covers SNPE/DLC conversion and its DLC quantization path. For the general quantization guide (INT8/W8A8/W8A16, CLE, calibration data), see `references/model_quantization.md`.
+
 ## Host toolchain
 - Windows x86: `x86_64-windows-msvc`
 - windows arm : `x86_64-windows-msvc` ,emulation mode
@@ -101,8 +103,8 @@ set PYTHONPATH=%QAIRT%\lib\python
 
 For W8A16: use `--act_bitwidth 16 --weights_bitwidth 8`.
 
-> ⚠️ **Calibration list format for `qairt-quantizer`**: plain file paths (one per line), **without** the `input:=` prefix.
-> The `input:=` prefix is only used by `qnn-onnx-converter` / `qai_convert_int.py`.
+> ⚠️ **Calibration list format — `qairt-quantizer` ONLY**: plain file paths (one per line), **without** the `input:=` prefix.
+> The `input:=` prefix is a *different tool's* format, used by `qnn-onnx-converter` / `qai_convert_int.py` (Flow C) — see `references/model_quantization.md` for that path. These two formats are genuinely different; do not mix them.
 >
 > ✅ Correct (`qairt-quantizer`):
 > ```

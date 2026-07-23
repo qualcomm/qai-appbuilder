@@ -12,7 +12,11 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from qai.command_policy.domain import ExecAction, CommandProfile
+from qai.command_policy.domain import (
+    ClassifyReason,
+    ExecAction,
+    CommandProfile,
+)
 
 __all__ = ["ExecBrokerPort"]
 
@@ -46,7 +50,7 @@ class ExecBrokerPort(Protocol):
 
     def evaluate(
         self, command: str, *, project_root: str = ""
-    ) -> tuple[ExecAction, str, CommandProfile | None]:
+    ) -> tuple[ExecAction, ClassifyReason, CommandProfile | None]:
         """Classify ``command`` into ``ALLOW`` / ``ASK`` / ``DENY``.
 
         Returns ``(action, reason, matched_profile)``:

@@ -51,7 +51,7 @@ class FileSystemWeightsPresence:
     -----------------------------------------------
     Since P4 the runtime tracks two Pack anchors:
 
-    * **built-in** — ``pack_root`` (``<repo_root>/factory/app_builder/models``)
+    * **built-in** — ``pack_root`` (``<repo_root>/factory/chat_features/app-builder/models``)
       + ``repo_root`` (``installPath`` relative to repo_root; V1 layout);
     * **user-imported** — ``user_pack_root``
       (``<data_dir>/app_builder/user_models``) +

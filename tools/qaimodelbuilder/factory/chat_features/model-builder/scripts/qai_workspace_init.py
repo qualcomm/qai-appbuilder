@@ -1,3 +1,7 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
 """``qai_workspace_init.py`` — bootstrap a clean Model Builder workspace.
 
 V1-parity entry point for the SKILL workflow.  The WebUI / Desktop chat

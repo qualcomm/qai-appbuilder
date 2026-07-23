@@ -516,7 +516,14 @@ def flatten_tool_calls_without_signature(
                 or (orig_last_role == "assistant" and orig_last_has_tc)
             )
             if tail_was_safe:
-                _log.warning(
+                # DEBUG, not WARNING: this rollback is the DESIGNED-safe
+                # outcome (return the un-flattened wire, which is at most
+                # subject to the known signature-missing 400 the caller can
+                # recover from) — it is NOT an anomaly. On Vertex / Gemini it
+                # fires on essentially every tool-carrying turn, so at WARNING
+                # it floods the log (hundreds of identical lines per session)
+                # and drowns real warnings. Keep it observable at DEBUG.
+                _log.debug(
                     "chat.message_sanitizer.flatten_rolled_back",
                     reason="flatten_produced_trailing_assistant",
                     orig_tail_role=orig_last_role,

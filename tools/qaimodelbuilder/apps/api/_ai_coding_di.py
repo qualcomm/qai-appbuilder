@@ -763,11 +763,21 @@ def build_ai_coding_services(container: Container) -> AiCodingServices:
     # ``QAI_FILEGUARD_GUARD_TOKEN``. Resolved here in the composition root
     # (only layer allowed to read the ``qai.security`` native-guard adapter);
     # re-read per invocation. ``None`` (guard off / not started) → no marker.
-    from ._guard_token import build_ask_pending_probe, build_guard_token_provider
+    from ._guard_token import (
+        build_ask_flush_for_pid,
+        build_ask_pending_probe,
+        build_guard_token_provider,
+    )
     from ._native_denial_probe import build_native_denial_probe
 
     _guard_token_provider = build_guard_token_provider(container)
     _ask_pending_probe = build_ask_pending_probe(container)
+    # Problem ② — chat-Stop directed ASK flush. On exec-task cancellation the
+    # exec handler calls this to resolve the killed child's queued native ASKs
+    # (DENY) + push an SSE close frame so lingering FileGuard dialogs close
+    # immediately instead of after the 10s subprocess-gone backstop. Composed
+    # here in the composition root (only layer allowed to read qai.security).
+    _ask_flush_for_pid = build_ask_flush_for_pid(container)
     # D2-D: FileGuard denial probe. Composes AuditQueryPort.query_native_denies_by_pid_tree
     # + build_native_guard_denial_note into a single stdlib-typed callable so the
     # exec handler (qai.ai_coding) can consume it without violating the
@@ -781,6 +791,7 @@ def build_ai_coding_services(container: Container) -> AiCodingServices:
         process_runner=_exec_process_runner,
         guard_token_provider=_guard_token_provider,
         ask_pending_probe=_ask_pending_probe,
+        ask_flush_for_pid=_ask_flush_for_pid,
         native_denial_probe=_native_denial_probe,
         allow_x86=container.settings.security.allow_x86_processes,
     ).items():

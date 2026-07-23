@@ -520,6 +520,7 @@ class _StreamingToolInvocationBridge:
         guard_token_provider: object | None = None,
         file_guard: object | None = None,
         ask_pending_probe: object | None = None,
+        ask_flush_for_pid: object | None = None,
         app_root: str | None = None,
         native_denial_probe: object | None = None,
         allow_x86: bool = False,
@@ -578,6 +579,13 @@ class _StreamingToolInvocationBridge:
         # Passed to stream_exec so the timeout PAUSES instead of killing
         # the child while the user decides on a native FileGuard dialog.
         self._ask_pending_probe = ask_pending_probe
+        # Problem ② — flush(child_pid) → resolve the killed child's queued
+        # native ASKs (DENY) + push an SSE close frame. Passed to stream_exec
+        # so a chat "Stop" (which tears the generator down via aclose) closes
+        # any lingering FileGuard dialog immediately instead of leaving it for
+        # the 10s subprocess-gone backstop. ``None`` (not wired) → prior
+        # behaviour (the sweep is the only path that closes it).
+        self._ask_flush_for_pid = ask_flush_for_pid
         # D2-E: FileGuard native-denial probe (apps/api/_native_denial_probe.py).
         # Composed with build_native_guard_denial_note by the composition root.
         # ``None`` (not wired) → the append helper is a no-op (fail-open), so
@@ -931,6 +939,7 @@ class _StreamingToolInvocationBridge:
                 ),
                 timeout=timeout,
                 ask_pending_probe=self._ask_pending_probe,
+                ask_flush_for_pid=self._ask_flush_for_pid,
             )
             child_pid: int | None = None
             async for frame in frames:
@@ -1346,9 +1355,14 @@ def _wire_streaming_exec_into_chat(
         from ._guard_token import build_guard_token_provider
 
         _guard_token_provider = build_guard_token_provider(container)
-    from ._guard_token import build_ask_pending_probe
+    from ._guard_token import build_ask_flush_for_pid, build_ask_pending_probe
 
     _ask_pending_probe = build_ask_pending_probe(container)
+    # Problem ② — chat-Stop directed ASK flush for the streaming exec path
+    # (the path chat "Stop" actually hits). Composed in the composition root
+    # (only layer allowed to read qai.security); resolves a killed exec
+    # child's queued native ASKs + pushes an SSE close frame on teardown.
+    _ask_flush_for_pid = build_ask_flush_for_pid(container)
 
     from ._native_denial_probe import build_native_denial_probe
 
@@ -1380,6 +1394,7 @@ def _wire_streaming_exec_into_chat(
         guard_token_provider=_guard_token_provider,
         file_guard=_file_guard,
         ask_pending_probe=_ask_pending_probe,
+        ask_flush_for_pid=_ask_flush_for_pid,
         native_denial_probe=_native_denial_probe,
         allow_x86=(
             container.settings.security.allow_x86_processes

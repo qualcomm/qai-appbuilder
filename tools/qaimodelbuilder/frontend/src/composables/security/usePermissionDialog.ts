@@ -92,6 +92,15 @@ export interface PermissionRequestEvent {
    * ASK, in which case the dialog renders no reason banner.
    */
   reason?: string;
+  /**
+   * i18n contract (A2): the stable reason CODE + interpolation ARGS the
+   * dialog uses to render the localized "why confirm?" text from the
+   * frontend locale catalog (`security.askReason.<code>`). TAIL-appended,
+   * backward-compatible: when absent (operator-custom rule / legacy frame)
+   * the dialog falls back to the verbatim `reason` string.
+   */
+  reason_code?: string;
+  reason_args?: Record<string, string>;
 }
 
 /** Grant scope vocabulary (V1 `resolve_permission`). */
@@ -226,6 +235,11 @@ export interface UsePermissionDialog {
   queueCount: ComputedRef<number>;
   currentBootId: Ref<string>;
   enqueue: (req: PermissionRequestEvent | null | undefined) => void;
+  // Problem ② — remove a dialog by id WITHOUT a local user response. Called by
+  // App.vue on a `permission_resolved` SSE frame (server-side flush / cleanup
+  // backstop) so a FileGuard dialog closes the instant the backend resolves its
+  // ASK, instead of lingering until an SSE-reconnect re-fetch.
+  dequeue: (id: string) => void;
   fetchPending: () => Promise<void>;
   respond: (id: string, grant: GrantScope, range?: GrantRange) => Promise<void>;
   respondAll: (grant: GrantScope) => Promise<void>;
@@ -453,6 +467,7 @@ export function usePermissionDialog(): UsePermissionDialog {
     queueCount,
     currentBootId,
     enqueue,
+    dequeue,
     fetchPending,
     respond,
     respondAll,

@@ -74,7 +74,7 @@ _DEFAULT_WOS_AI_ROOT = Path("C:/WoS_AI")
 # it can load the live ``.bin`` and record its REAL input/output shapes into
 # ``manifest.io_contract`` — exactly what V1's exporter did by inserting
 # ``features/app-builder/shared`` onto ``sys.path``.
-_DEFAULT_SHARED_REL = ("factory", "app_builder", "shared")
+_DEFAULT_SHARED_REL = ("factory", "chat_features", "app-builder", "shared")
 
 
 def _resolve_smoke_test_child_launch(
@@ -141,7 +141,7 @@ def _resolve_app_builder_shared_dir(container: "Container") -> Path | None:
 
     1. ``container.app_builder_shared_dir`` when explicitly injected
        (lifespan hook / test override) and it points at a real dir.
-    2. ``<repo_root>/factory/app_builder/shared`` — the bundled helpers
+    2. ``<repo_root>/factory/chat_features/app-builder/shared`` — the bundled helpers
        shipped with the v2.7 install layout.
 
     Returns ``None`` when neither exists; the probe then surfaces a clear
@@ -225,7 +225,7 @@ def build_model_builder_services(
     # Resolve the Pack ``shared/`` helpers so the export-time I/O contract
     # probe can ``import qnn_helper`` / ``io_validator`` and record the live
     # model's REAL shapes into ``manifest.io_contract``. When the caller did
-    # not pin one, fall back to ``<repo_root>/factory/app_builder/shared``
+    # not pin one, fall back to ``<repo_root>/factory/chat_features/app-builder/shared``
     # (same dir the runtime runners use). Without this the probe's import
     # fails, the non-strict exporter writes a placeholder ``io_contract``
     # (empty ``inputs``/``outputs``), and App Builder later rejects the Pack

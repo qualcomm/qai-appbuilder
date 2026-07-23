@@ -118,6 +118,8 @@ from qai.security.application.ports import (
 )
 from qai.security.application.pending_cleanup import PendingCleanupService
 from qai.security.application.permission_wait import PermissionWaitRegistry
+from qai.security.domain.events import PermissionResolvedEvent
+from qai.security.domain.value_objects import RequestId
 from qai.security.application.security_audit_facade import SecurityAuditFacade
 from qai.security.application.security_runtime_state import (
     SecurityRuntimeStateService,
@@ -461,10 +463,26 @@ def build_security_services(container: "Container") -> SecurityServices:
         permission_pending_store = SqlitePendingPermissionStore(db=db)
     else:
         permission_pending_store = NullPermissionPendingStore()
+    # Problem ② backstop-honesty — publish a UI-close ``PermissionResolvedEvent``
+    # whenever the sweep resolves a stale ASK whose subprocess died silently
+    # (no local user response, no exec-cancel flush, so this sweep is the only
+    # thing that can close its dialog). Built as an apps-layer callback so the
+    # dependency-free application service stays EventBus-free (§3.2 layering);
+    # best-effort inside the service (a publish glitch never breaks the sweep).
+    async def _publish_resolved(request_id: str, resolution: str) -> None:
+        await events.publish(
+            PermissionResolvedEvent(
+                request_id=RequestId(value=request_id),
+                resolution=resolution,
+                occurred_at=clock.now(),
+            )
+        )
+
     pending_cleanup_service = PendingCleanupService(
         wait_registry=permission_wait_registry,
         pending_store=permission_pending_store,
         clock=clock,
+        on_resolved=_publish_resolved,
     )
 
     update_policy = UpdatePolicyUseCase(

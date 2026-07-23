@@ -52,6 +52,8 @@ import sys
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from qai.platform.process.arch import current_arch
+
 __all__ = [
     "PythonInterpreterResolver",
     "QairtEnvJsonResolver",
@@ -136,14 +138,18 @@ class QairtEnvJsonResolver:
 
     __slots__ = ("_env_file", "_repo_root", "_fallback")
 
-    # Sub-directories under ``qairt_root`` that hold the QNN runtime
-    # DLLs the Pack subprocess must find on ``PATH``. Order matters:
-    # ``bin`` is searched before ``lib`` (matches the legacy module's
-    # ordering and how the Qualcomm SDK ships the binaries).
-    _PATH_SUBDIRS: tuple[str, ...] = (
-        "bin/arm64x-windows-msvc",
-        "lib/arm64x-windows-msvc",
-    )
+    # QNN runtime subdir per process arch. The ``qairt_root``'s ``bin``
+    # and ``lib`` sub-directories hold the QNN runtime DLLs the Pack
+    # subprocess must find on ``PATH`` (arm64: QnnHtp*; x64: QnnCpu +
+    # QnnModelDlc). ``bin`` is searched before ``lib`` (matches the
+    # legacy module's ordering and how the Qualcomm SDK ships the
+    # binaries). The active subdir is picked at runtime from the
+    # ``qairt_runtime_subdir`` field (written by setup_qairt_env.py) or
+    # falls back to :func:`current_arch`.
+    _RUNTIME_SUBDIR_BY_ARCH: dict[str, str] = {
+        "arm64": "arm64x-windows-msvc",
+        "x64": "x86_64-windows-msvc",
+    }
 
     def __init__(
         self,
@@ -174,8 +180,13 @@ class QairtEnvJsonResolver:
                 p = self._resolve_path(candidate)
                 if p.is_file():
                     return p
-        # Try venv directory shape.
-        venv_dir = data.get("python_arm64_venv")
+        # Try venv directory shape. Prefer the arch-resolved
+        # ``python_runtime_venv`` (written by setup_qairt_env.py per
+        # host arch); fall back to legacy ``python_arm64_venv`` so
+        # pre-x64 configs keep byte-identical behaviour.
+        venv_dir = data.get("python_runtime_venv") or data.get(
+            "python_arm64_venv"
+        )
         if isinstance(venv_dir, str) and venv_dir:
             p = self._resolve_path(venv_dir)
             python_exe = p / "Scripts" / "python.exe"
@@ -221,21 +232,41 @@ class QairtEnvJsonResolver:
             "QNN_SDK_ROOT": root_str,
         }
 
+    def _runtime_subdir(self, data: dict | None) -> str:
+        """QNN runtime arch subdir (``arm64x-`` / ``x86_64-windows-msvc``).
+
+        Prefers the ``qairt_runtime_subdir`` field written by
+        ``setup_qairt_env.py``; falls back to :func:`current_arch` when
+        the field is missing (pre-x64 configs → ``arm64x-windows-msvc``,
+        byte-identical to the legacy hardcoding on ARM64 hosts).
+        """
+        if data is not None:
+            raw = data.get("qairt_runtime_subdir")
+            if isinstance(raw, str) and raw:
+                return raw
+        return self._RUNTIME_SUBDIR_BY_ARCH[current_arch()]
+
     def path_segments(self) -> list[str]:
         """Absolute directories to prepend to ``PATH`` (in order).
 
         Empty list when ``qairt_root`` is unset; otherwise the SDK's
         ``bin/`` and ``lib/`` arch sub-directories so the QNN runtime
         DLLs load from the SDK install rather than any system-wide
-        copy. Existence is *not* checked here (the SDK install layout
-        is the user's responsibility); a missing dir simply means the
-        loader falls through, which is the same behaviour as the
-        legacy module.
+        copy. The arch subdir is chosen at runtime (``qairt_runtime_subdir``
+        field, else :func:`current_arch`). Existence is *not* checked
+        here (the SDK install layout is the user's responsibility); a
+        missing dir simply means the loader falls through, which is the
+        same behaviour as the legacy module.
         """
+        data = self._load()
         root = self.qairt_root
         if root is None:
             return []
-        return [str((root / sub).resolve()) for sub in self._PATH_SUBDIRS]
+        subdir = self._runtime_subdir(data)
+        return [
+            str((root / "bin" / subdir).resolve()),
+            str((root / "lib" / subdir).resolve()),
+        ]
 
     # ------------------------------------------------------------------
     # Internals

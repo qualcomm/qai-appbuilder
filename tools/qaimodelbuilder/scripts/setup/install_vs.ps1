@@ -8,11 +8,15 @@
 # =============================================================================
 #
 # Installs or updates Visual Studio 2022 Community with the components required
-# for QAIRT ARM64 model compilation, fully silently with real-time progress.
+# for QAIRT model compilation on BOTH ARM64 (WoS) and x64 hosts. The component
+# list below is a superset that satisfies either target arch, so a single
+# invocation covers both -- no -Arch parameter is needed (installing an extra
+# tool set is safe and idempotent, and lets a WoS host cross-compile x64 tools
+# and vice versa without a second run).
 #
 # Required components:
 #   Microsoft.Component.MSBuild                              - MSBuild
-#   Microsoft.VisualStudio.Component.VC.Tools.x86.x64       - MSVC x64/x86
+#   Microsoft.VisualStudio.Component.VC.Tools.x86.x64        - MSVC x64/x86
 #   Microsoft.VisualStudio.Component.VC.Tools.ARM64          - MSVC ARM64
 #   Microsoft.VisualStudio.Component.VC.CMake.Project        - CMake
 #   Microsoft.VisualStudio.ComponentGroup.NativeDesktop.Llvm.Clang - clang-cl

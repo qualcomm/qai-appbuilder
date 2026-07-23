@@ -1,3 +1,7 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
 """``qai_pack_export.py`` — export a workspace to an App Builder Pack.
 
 V1-parity entry point for the SKILL workflow.  Driven exactly like V1 —

@@ -285,7 +285,7 @@ const index = {
     pickModel: "Pick AI Hub model",
     pickModelHint: "Choose a pre-compiled model from Qualcomm AI Hub",
     pickModelHeader: "Qualcomm AI Hub model",
-    pickModelPlaceholder: "e.g. Llama-v3-8B, YOLOv8-Detection…",
+    pickModelPlaceholder: "e.g. Llama-v3-8B, Zipformer…",
     pickModelConfirm: "Set",
     pickModelDesc: "Type an AI Hub model name or id, then describe what you need in chat — the Agent downloads the pre-compiled package for you.",
     export: "Export to App Builder",

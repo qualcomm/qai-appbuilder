@@ -355,6 +355,13 @@ function _codeOf(e: unknown): string | null {
 }
 
 async function onRunApp(app: AppEntry): Promise<void> {
+  // Re-entry guard: the button is :disabled when isBusy(), but Vue applies
+  // that attribute on the next flush (a microtask after the click), so two
+  // clicks dispatched in the same task can both land here before the DOM
+  // disables. Bail if a launch/run is already in flight so a fast double-tap
+  // cannot fire a second POST /run (which the backend would answer with
+  // "already running" but the user perceives as an error).
+  if (isBusy(app)) return;
   try {
     const res = await store.runApp(app.id);
     if (typeof res.url === "string" && res.url !== "") {

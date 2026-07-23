@@ -44,16 +44,18 @@ or run one from AI Hub.
 Setup.bat
 ```
 
-Does everything: download uv / install Python 3.13 ARM64 / create venv at
-`%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_arm64_313` / install every dep from
-`pyproject.toml` / install PortableGit + Node.js + pnpm / install QAIRT SDK
-(needed for model conversion, ~2 GB) / pre-download Whisper / Zipformer / MeloTTS
-weights / initialize `data/` (`qai.db`, factory seeds, secret namespaces).
+Does everything: download uv / install Python 3.13 (ARM64 by default, or x64 with
+`--arch x64`) / create venv at `%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_arm64_313`
+(or `.venv_x64_313`) / install every dep from `pyproject.toml` / install PortableGit
++ Node.js + pnpm / install QAIRT SDK (needed for model conversion, ~2 GB) /
+pre-download Whisper / Zipformer / MeloTTS weights / initialize `data/` (`qai.db`,
+factory seeds, secret namespaces).
 
 Common flags:
 
 | Flag | Purpose |
 |---|---|
+| `--arch arm64\|x64` | Force architecture (default: auto-detect from host). Use `--arch x64` on WoS to install the x64 stack under Prism emulation for validation |
 | `--no-builder` | Skip QAIRT SDK / VS toolchain (~2 GB saved when you won't convert models) |
 | `--dev` | Also install contributor toolchain (pytest / mypy / ruff / playwright + Chromium) |
 | `--no-pause` | Don't pause at the end (use from CI) |

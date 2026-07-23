@@ -37,6 +37,7 @@ from typing import Final
 
 __all__ = [
     "ExecAction",
+    "ClassifyReason",
     "CommandProfile",
     "extract_args",
     "extract_binary",
@@ -53,6 +54,43 @@ class ExecAction(str, Enum):
     ASK = "ask"
     DENY = "deny"
 
+
+
+@dataclass(frozen=True, slots=True)
+class ClassifyReason:
+    """Structured, locale-free classification reason (i18n contract).
+
+    The domain NEVER emits user-facing prose. Instead a classification
+    carries a **stable machine code** + interpolation ``args`` so the
+    presentation layer (the frontend ``SecurityDialog``, via the SSE
+    ``reason_code`` / ``reason_args`` fields) renders the localized text
+    from its own locale catalog. This keeps all user-visible wording in
+    the frontend locale files (single source of truth) and the backend
+    language-agnostic — a UI language switch re-localizes with zero
+    backend round-trip.
+
+    * ``code`` — a stable reason code (e.g. ``"ask_network_exec"``);
+      empty string means "no code" (operator-authored custom rule text,
+      or ALLOW) → the presentation layer falls back to ``text``.
+    * ``args`` — interpolation params for the code's template (e.g.
+      ``{"pattern": "--force"}``). Values are plain strings.
+    * ``text`` — an English fallback rendered ONLY when a consumer cannot
+      resolve ``code`` (legacy client, operator custom rule, or a code the
+      frontend catalog does not know yet). NEVER localized here.
+
+    ``__str__`` / ``__bool__`` keep the object drop-in compatible with the
+    former plain-``str`` reason (``f"...{reason}"`` and ``if reason:``).
+    """
+
+    code: str = ""
+    args: dict[str, str] = field(default_factory=dict)
+    text: str = ""
+
+    def __str__(self) -> str:
+        return self.text
+
+    def __bool__(self) -> bool:
+        return bool(self.text or self.code)
 
 #: Shell operators that terminate a command's own argument list — args
 #: after these belong to a piped/chained command (V1 ``_extract_args``).
@@ -299,7 +337,7 @@ class CommandProfile:
         project_root: str,
         workspace: str = "",
         temp_dir: str = "",
-    ) -> tuple[ExecAction, str]:
+    ) -> tuple[ExecAction, ClassifyReason]:
         """Classify ``args`` into ``ALLOW`` / ``ASK`` / ``DENY`` + reason.
 
         Order (first match wins):
@@ -323,8 +361,15 @@ class CommandProfile:
         if matched:
             return (
                 ExecAction.DENY,
-                f"命令被拒绝：参数命中硬拒规则（{pattern}），"
-                f"该操作具破坏性且不被允许。",
+                ClassifyReason(
+                    code="deny_hard_arg",
+                    args={"pattern": pattern},
+                    text=(
+                        f"Command denied: argument matched a hard-deny rule "
+                        f"({pattern}); this operation is destructive and not "
+                        f"allowed."
+                    ),
+                ),
             )
 
         io_violation, io_reason = self.check_io_constraints(
@@ -337,26 +382,55 @@ class CommandProfile:
         if ask_matched:
             return (
                 ExecAction.ASK,
-                f"该命令带有高风险参数（{ask_pattern}），可能造成"
-                f"破坏性或非预期后果，需要你确认后才能执行。",
+                ClassifyReason(
+                    code="ask_danger_arg",
+                    args={"pattern": ask_pattern},
+                    text=(
+                        f"This command carries a high-risk argument "
+                        f"({ask_pattern}) that may cause destructive or "
+                        f"unintended effects; your confirmation is required "
+                        f"before it can run."
+                    ),
+                ),
             )
 
         rule_matched, rule_reason = self._match_ask_rules(args)
         if rule_matched:
+            # An operator-authored ``ask_rules`` reason is custom prose: pass
+            # it through verbatim as the fallback ``text`` with NO code, so the
+            # presentation layer renders the operator's own wording (not a
+            # catalog string). A rule that omits its own reason falls back to
+            # the generic ``ask_destructive`` code.
+            if rule_reason:
+                return (
+                    ExecAction.ASK,
+                    ClassifyReason(code="", text=rule_reason),
+                )
             return (
                 ExecAction.ASK,
-                rule_reason
-                or "该命令为破坏性操作，需要你确认后才能执行。",
+                ClassifyReason(
+                    code="ask_destructive",
+                    text=(
+                        "This command is a destructive operation; your "
+                        "confirmation is required before it can run."
+                    ),
+                ),
             )
 
         if self.ask_always:
             return (
                 ExecAction.ASK,
-                "该命令可访问网络/注册表/执行外部程序等文件守卫无法覆盖的"
-                "操作，需要你确认后才能执行。",
+                ClassifyReason(
+                    code="ask_network_exec",
+                    text=(
+                        "This command can access the network / registry / run "
+                        "external programs — operations FileGuard cannot cover "
+                        "— so your confirmation is required before it can run."
+                    ),
+                ),
             )
 
-        return (ExecAction.ALLOW, "")
+        return (ExecAction.ALLOW, ClassifyReason())
 
     def check_io_constraints(
         self,
@@ -364,7 +438,7 @@ class CommandProfile:
         project_root: str,
         workspace: str = "",
         temp_dir: str = "",
-    ) -> tuple[bool, str]:
+    ) -> tuple[bool, ClassifyReason]:
         """Return ``(violation, reason)`` for output path args.
 
         Only ``output_dirs`` is enforced (``input_dirs`` has been removed from
@@ -380,10 +454,10 @@ class CommandProfile:
         a no-op for now in case a future profile reintroduces output_dirs.
         """
         if not self.io_constraints:
-            return (False, "")
+            return (False, ClassifyReason())
         output_dirs = self.io_constraints.get("output_dirs", [])
         if not output_dirs:
-            return (False, "")
+            return (False, ClassifyReason())
 
         def _expand(pattern: str) -> str:
             result = (
@@ -449,10 +523,17 @@ class CommandProfile:
             if out_arg and not _within(out_arg, output_dirs):
                 return (
                     True,
-                    f"输出路径 '{out_arg}' 不在 profile '{self.name}' "
-                    f"的 io_constraints.output_dirs 允许范围内。",
+                    ClassifyReason(
+                        code="deny_io_output_escape",
+                        args={"path": out_arg, "profile": self.name},
+                        text=(
+                            f"Output path '{out_arg}' is outside profile "
+                            f"'{self.name}' io_constraints.output_dirs "
+                            f"allow-list."
+                        ),
+                    ),
                 )
-        return (False, "")
+        return (False, ClassifyReason())
 
 
 def extract_binary(command: str) -> str:

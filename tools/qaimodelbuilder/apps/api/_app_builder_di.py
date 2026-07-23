@@ -589,7 +589,7 @@ def build_app_builder_services(container: "Container") -> AppBuilderServices:
     # subdirectory per built-in model (``<root>/<model_id>/manifest.json``
     # + ``runner.py`` + ``SKILL.md``). V1 scanned ``features/app-builder/
     # models/`` directly; the v2.7 install layout ships the same assets
-    # under ``factory/app_builder/models/``. When the lifespan hook
+    # under ``factory/chat_features/app-builder/models/``. When the lifespan hook
     # (or a test) has not injected ``container.app_builder_pack_root``,
     # fall back to the bundled factory directory rooted at the repo so
     # the manifest reader / runner registry / SKILL loader are wired with
@@ -803,14 +803,14 @@ def build_app_builder_services(container: "Container") -> AppBuilderServices:
         else None
     )
     # Resolve shared_dir with the same fallback the PYTHONPATH builder uses
-    # (factory/app_builder/shared) so deps-status reports the directory
+    # (factory/chat_features/app-builder/shared) so deps-status reports the directory
     # as present whenever the bundled shared/ helpers ship with the install.
     shared_dir = getattr(container, "app_builder_shared_dir", None)
     if shared_dir is None:
         repo_root = getattr(container, "repo_root", None)
         if repo_root is not None:
             candidate = Path(repo_root).joinpath(
-                "factory", "app_builder", "shared"
+                "factory", "chat_features", "app-builder", "shared"
             )
             if candidate.is_dir():
                 shared_dir = candidate
@@ -1424,8 +1424,8 @@ _logger = logging.getLogger(__name__)
 # Bundled App Builder Pack root relative to the repository root. V1 read
 # the built-in models from ``features/app-builder/models/``; the v2.7
 # install layout ships the identical assets under this path.
-_DEFAULT_PACK_ROOT_REL = ("factory", "app_builder", "models")
-_DEFAULT_SHARED_REL = ("factory", "app_builder", "shared")
+_DEFAULT_PACK_ROOT_REL = ("factory", "chat_features", "app-builder", "models")
+_DEFAULT_SHARED_REL = ("factory", "chat_features", "app-builder", "shared")
 
 
 def _resolve_app_builder_pack_root(container: "Container") -> Path | None:
@@ -1435,7 +1435,7 @@ def _resolve_app_builder_pack_root(container: "Container") -> Path | None:
 
     1. ``container.app_builder_pack_root`` when explicitly injected
        (lifespan hook / test override) and it points at a real dir.
-    2. ``<repo_root>/factory/app_builder/models`` — the bundled
+    2. ``<repo_root>/factory/chat_features/app-builder/models`` — the bundled
        built-in Pack assets shipped with the v2.7 install layout.
 
     Returns ``None`` only when neither candidate exists, in which case
@@ -1458,7 +1458,7 @@ def _pack_shared_pythonpath(container: "Container") -> tuple[Path, ...]:
 
     V1 spawned runners with ``features/app-builder/shared/`` on the path
     so packs can ``import`` the shared helpers. The v2.7 install layout
-    ships them under ``factory/app_builder/shared/``. Returns an
+    ships them under ``factory/chat_features/app-builder/shared/``. Returns an
     empty tuple when no shared dir is available.
     """
     injected = getattr(container, "app_builder_shared_dir", None)

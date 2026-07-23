@@ -22,6 +22,8 @@ from fastapi import APIRouter, HTTPException, status
 from ._dto import (
     AutoExportRequestBody,
     AutoExportResponseBody,
+    AutoExportStatusRequestBody,
+    AutoExportStatusResponse,
     BinScanResponse,
     BinScanResultResponse,
     NeedsNormalizePayload,
@@ -217,3 +219,29 @@ def register(router: APIRouter, *, container: "Container") -> None:
             output=job.output,
             errors=list(job.errors),
         )
+
+    # ---- 6b. import/auto-export/status --------------------------------
+    @router.post(
+        "/import/auto-export/status",
+        response_model=AutoExportStatusResponse,
+    )
+    async def import_auto_export_status(
+        body: AutoExportStatusRequestBody,
+    ) -> AutoExportStatusResponse:
+        # ``auto-export`` is synchronous and keeps no in-memory job, so the
+        # only durable record of an in-flight / finished generation is on
+        # disk under ``<source_path>/app_pack/``. This cheap probe lets the
+        # Import panel recover that state on (re)open — showing "生成中..."
+        # while a run is under way and advancing to the commit stage once it
+        # finished — instead of falling back to the initial button when the
+        # window was closed mid-generation. Reached through the same bridge
+        # as auto-export so ``qai.app_builder`` never imports
+        # ``qai.model_builder`` (AGENTS.md §3.2).
+        bridge = getattr(container, "auto_export_bridge", None)
+        if bridge is None:
+            raise HTTPException(
+                status_code=503,
+                detail="auto-export bridge not wired",
+            )
+        status_token = bridge.probe_export_status(model_workdir=body.source_path)
+        return AutoExportStatusResponse(status=status_token)

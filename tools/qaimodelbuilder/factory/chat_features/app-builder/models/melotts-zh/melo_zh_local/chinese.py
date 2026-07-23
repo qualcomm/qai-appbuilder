@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Derived from MeloTTS (https://github.com/myshell-ai/MeloTTS)
+# Copyright (c) 2024 MyShell.ai
+# SPDX-License-Identifier: MIT
+# ---------------------------------------------------------------------
 import os
 import re
 import sys

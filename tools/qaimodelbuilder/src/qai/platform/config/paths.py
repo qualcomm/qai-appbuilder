@@ -117,7 +117,7 @@ class DataPaths:
     # Layering (needs-2 / decision "Plan C — conservative"):
     #
     #   Built-in Packs (release-distributed):
-    #     Pack definition (manifest / runner / SKILL): factory/app_builder/models/<id>/
+    #     Pack definition (manifest / runner / SKILL): factory/chat_features/app-builder/models/<id>/
     #     Weight .bin files:                           <repo_root>/models/<id>/*.bin
     #
     #   User-imported Packs (per-user runtime state):
@@ -135,7 +135,7 @@ class DataPaths:
     #      the release channel.
     #   5. Prevents the built-in-seed startup hook from mis-promoting a
     #      user Pack into a built-in row when the DB is missing/reset
-    #      (the seed scanner only looks at factory/app_builder/models/,
+    #      (the seed scanner only looks at factory/chat_features/app-builder/models/,
     #      never at these two roots — see apps/api/lifespan.py
     #      ``_resolve_seed_pack_root``).
 
@@ -146,7 +146,7 @@ class DataPaths:
         Import commit lands each user Pack at
         ``<data_dir>/app_builder/user_models/<id>/`` — a data-only location
         that mirrors the on-disk layout of the built-in Pack root
-        (``factory/app_builder/models/<id>/``) so every adapter reading
+        (``factory/chat_features/app-builder/models/<id>/``) so every adapter reading
         ``manifest.json`` / ``runner.py`` / ``SKILL.md`` from a Pack
         directory works identically whether the Pack is built-in or user-
         imported.

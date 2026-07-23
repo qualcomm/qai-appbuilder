@@ -55,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     aggregate = _load_aggregate()
 
     root = _repo_root()
-    pack_root = root / "factory" / "app_builder" / "models"
+    pack_root = root / "factory" / "chat_features" / "app-builder" / "models"
     normal, no_deps, sources = aggregate(pack_root)
 
     if not normal and not no_deps:

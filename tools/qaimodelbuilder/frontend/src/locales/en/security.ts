@@ -348,6 +348,19 @@ const security = {
     process_label: "Process",
     cmdline_label: "Command",
   },
+  // i18n contract (A2): localized "why confirm?" bodies for the exec-broker
+  // ASK dialog. The backend sends a locale-free `reason_code` (+ optional
+  // interpolation args like `{pattern}`); SecurityDialog renders these so a
+  // UI language switch re-localizes with no backend round-trip. Keep keys in
+  // sync across en / zh-CN / zh-TW (schema parity test).
+  askReason: {
+    ask_network_exec:
+      "This command can access the network / registry / run external programs — operations FileGuard cannot cover — so your confirmation is required before it can run.",
+    ask_danger_arg:
+      "This command carries a high-risk argument ({pattern}) that may cause destructive or unintended effects; your confirmation is required before it can run.",
+    ask_destructive:
+      "This command is a destructive operation; your confirmation is required before it can run.",
+  },
   policyUpdated: "Policy updated",
   processGrantsLabel: "Process grants",
   processGrantsTitle: "Process ({n})",

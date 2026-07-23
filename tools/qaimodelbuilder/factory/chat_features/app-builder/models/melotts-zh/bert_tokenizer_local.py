@@ -1,3 +1,7 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
 """Local BERT WordPiece tokenizer using bert_zh_tokenizer.bin + bert_normalizer.bin.
 
 Replaces the `transformers.AutoTokenizer` dependency for bert-base-multilingual-uncased.

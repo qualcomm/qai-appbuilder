@@ -1,4 +1,8 @@
 # -*- coding: utf-8 -*-
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
 """
 pptx_base.py — 轻量可编辑 PPTX 基础库（通用深色鎏金典雅风）
 

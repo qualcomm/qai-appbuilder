@@ -61,6 +61,7 @@ from qai.app_builder.domain.app_project import (
     AppProjectPackageFailedError,
 )
 from qai.platform.logging import get_logger
+from qai.platform.process.arch import current_arch
 
 logger = get_logger(__name__)
 
@@ -83,7 +84,10 @@ _APP_INCLUDE_FILES = (
     "requirements.txt",
     "app.yaml",
 )
-_APP_INCLUDE_DIRS = ("backend", "frontend")
+# ``vendor`` (when present) carries offline / ARM64 wheels + runtime data the
+# startup dependency check (``backend/ensure_deps.py``) installs from — kept
+# beside the app so a bare target machine can self-heal without network access.
+_APP_INCLUDE_DIRS = ("backend", "frontend", "vendor")
 
 # Directory names excluded ANYWHERE in the app tree (venvs / caches / the
 # package output dir itself / user uploads / logs). Matched case-insensitively
@@ -110,15 +114,12 @@ _EXCLUDE_SUFFIXES = frozenset({".pyc", ".pyo", ".pyd"})
 # and small non-log files may pass, but in practice we skip the whole dir.
 _EXCLUDE_LOG_DIR = "logs"
 
-# Pack manifest / doc files copied (per §10.4) from the expanded pack dir.
-_PACK_INCLUDE_FILES = (
-    "manifest.json",
-    "weights.json",
-    "SKILL.md",
-    "runner.py",
-    "requirements.txt",
-)
-_PACK_INCLUDE_DIRS = ("assets", "provenance")
+# Project-level shared-helper dir name. It sits beside ``pack_root`` at
+# ``<repo>/factory/chat_features/app-builder/shared`` and holds the framework modules the
+# generated app's in-process runner import needs (``runner_protocol``,
+# ``telemetry``, ``audio_io``, ``weight_downloader`` …). See
+# :meth:`_collect_shared_members`.
+_SHARED_DIRNAME = "shared"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -144,7 +145,7 @@ class FileSystemAppProjectPackager:
     """Package a standalone app project into a workspace-rooted ``.zip``.
 
     ``repo_root`` anchors ``${APP_ROOT}`` expansion + the built-in model /
-    pack roots (``repo_root/models``, ``repo_root/factory/app_builder/models``).
+    pack roots (``repo_root/models``, ``repo_root/factory/chat_features/app-builder/models``).
     ``workspace_root`` is the user workspace the final zip lands under
     (``<workspace>/app_builder_packages/``). ``apps_root`` is the
     ``data/app_builder`` dir every app must resolve under (path-safety
@@ -158,7 +159,7 @@ class FileSystemAppProjectPackager:
     语义一致，State-Truth-First §5 铁律 1):
 
     * **built-in** — ``model_root`` (``<repo>/models``) + ``pack_root``
-      (``<repo>/factory/app_builder/models``);
+      (``<repo>/factory/chat_features/app-builder/models``);
     * **user-imported** — ``user_weights_root``
       (``<data>/app_builder/user_model_weights``) + ``user_pack_root``
       (``<data>/app_builder/user_models``).
@@ -203,7 +204,7 @@ class FileSystemAppProjectPackager:
     @property
     def pack_root(self) -> Path:
         """``APP_BUILDER_PACK_ROOT`` — built-in pack manifests / assets tree."""
-        return self._repo_root / "factory" / "app_builder" / "models"
+        return self._repo_root / "factory" / "chat_features" / "app-builder" / "models"
 
     @property
     def user_weights_root(self) -> Path | None:
@@ -248,15 +249,20 @@ class FileSystemAppProjectPackager:
         app_members = self._collect_app_members(app_dir)
         warnings: list[str] = []
         model_plan: list[tuple[AppProjectModelRef, list[tuple[Path, str]]]] = []
+        shared_members: list[tuple[Path, str]] = []
         if definition.package_include_models:
             for ref in definition.models:
                 members = self._collect_model_members(ref, warnings)
                 model_plan.append((ref, members))
+            # Framework helpers the in-process pack runner imports by bare name
+            # (runner_protocol / telemetry / …). Bundled once regardless of the
+            # model count. See :meth:`_collect_shared_members`.
+            shared_members = self._collect_shared_members(warnings)
 
         app_bytes = _sum_size(m[0] for m in app_members)
         model_bytes = _sum_size(
             src for _, members in model_plan for src, _ in members
-        )
+        ) + _sum_size(src for src, _ in shared_members)
         total_bytes = max(app_bytes + model_bytes, 1)
         copied = 0
 
@@ -334,6 +340,29 @@ class FileSystemAppProjectPackager:
                             message=f"packaged model {ref.id!r}",
                         )
 
+                # Framework shared helpers (runner_protocol / telemetry / …)
+                # the in-process pack runner imports. Small + numerous; yield
+                # periodically like the app files.
+                if shared_members:
+                    yield PackageProgress(
+                        phase="copying_models",
+                        percent=_pct(copied, total_bytes) * 0.9,
+                        message="packaging shared helpers",
+                    )
+                    _since_yield = 0
+                    for src, arcname in shared_members:
+                        await asyncio.to_thread(zf.write, src, arcname)
+                        copied += _safe_size(src)
+                        _since_yield += 1
+                        if _since_yield >= 8:
+                            _since_yield = 0
+                            yield PackageProgress(
+                                phase="copying_models",
+                                percent=_pct(copied, total_bytes) * 0.9,
+                                message="packaging shared helpers",
+                            )
+                            await asyncio.sleep(0)
+
                 # Manifest + running doc (small, computed last).
                 yield PackageProgress(
                     phase="writing_zip",
@@ -352,7 +381,7 @@ class FileSystemAppProjectPackager:
                     "package_manifest.json",
                     json.dumps(manifest, ensure_ascii=False, indent=2),
                 )
-                zf.writestr("RUNNING.md", _RUNNING_MD)
+                zf.writestr("RUNNING.md", _running_md())
         except AppProjectPackageFailedError:
             _unlink_quiet(tmp_path)
             raise
@@ -577,15 +606,26 @@ class FileSystemAppProjectPackager:
     def _collect_model_pack(
         self, ref: AppProjectModelRef, warnings: list[str]
     ) -> list[tuple[Path, str]]:
-        """Pack manifests / assets for ``ref`` under ``pack/<id>/`` (plan §10.4).
+        """Pack sources for ``ref`` under ``pack/<id>/`` (plan §10.4).
 
         P4 双根：pack 目录可能落在 built-in ``pack_root``
-        （``<repo>/factory/app_builder/models/<id>/``）或 user
+        （``<repo>/factory/chat_features/app-builder/models/<id>/``）或 user
         ``user_pack_root``（``<data>/app_builder/user_models/<id>/``）。
         Arcname 保持 ``pack/<id>/…``——zip 内部对两种来源统一。
 
         Expand-miss fallback: 与 ``_collect_model_weights`` 同理，防御
         LLM 生成 app.yaml 硬编码单根 pack_dir 的常见错误。
+
+        **Bundle the WHOLE pack dir (caches excluded), not a file whitelist.**
+        The generated app reuses the pack's ``runner.py`` *in-process*
+        (``import runner``), so every pack-local module the runner imports —
+        e.g. ``melo_zh_local/``, ``bert_tokenizer_local.py``,
+        ``melo_symbol_to_id.json`` — MUST ride along, or the packaged app
+        dies at import with ``ModuleNotFoundError``. Heavy weight ``.bin`` /
+        ``.onnx`` files are copied separately under ``models/<id>/`` (from
+        ``model_dir``), so a full pack walk here does not double-ship weights
+        for well-formed packs; the ``__pycache__`` / cache dirs are pruned by
+        the shared exclude rules in :func:`_iter_files`.
         """
         out: list[tuple[Path, str]] = []
         # Pack: expand pack_dir (or fall back through the four roots).
@@ -610,16 +650,43 @@ class FileSystemAppProjectPackager:
                 f"{self._user_pack_root}); skipped"
             )
         else:
-            for name in _PACK_INCLUDE_FILES:
-                src = pack_dir / name
-                if src.is_file():
-                    out.append((src, f"pack/{ref.id}/{name}"))
-            for dirname in _PACK_INCLUDE_DIRS:
-                sub = pack_dir / dirname
-                if sub.is_dir():
-                    for src in _iter_files(sub):
-                        rel = src.relative_to(pack_dir).as_posix()
-                        out.append((src, f"pack/{ref.id}/{rel}"))
+            for src in _iter_files(pack_dir):
+                rel = src.relative_to(pack_dir).as_posix()
+                out.append((src, f"pack/{ref.id}/{rel}"))
+        return out
+
+    def _collect_shared_members(
+        self, warnings: list[str]
+    ) -> list[tuple[Path, str]]:
+        """Framework shared-helper modules bundled under ``shared/`` in the zip.
+
+        The generated app imports the pack's ``runner.py`` in-process, and that
+        runner imports project-level framework modules by bare name —
+        ``runner_protocol``, ``telemetry``, ``audio_io``, ``weight_downloader``,
+        ``qnn_helper`` … — which live at ``<repo>/factory/chat_features/app-builder/shared``
+        and are normally injected on ``PYTHONPATH`` by the dev host. A packaged
+        app on another machine has no such host, so the generated
+        ``model_refs.resolve_shared_dir()`` walks up from ``backend/`` looking
+        for a bundled ``<pkg>/shared/runner_protocol.py``. This copies that dir
+        in so the walk-up succeeds; without it the app dies at startup with
+        ``ModuleNotFoundError: No module named 'runner_protocol'``.
+
+        Absent ``shared/`` (lean test repo) is recorded as a warning, not a
+        crash — apps that re-implement inference without the pack runner do not
+        need it.
+        """
+        out: list[tuple[Path, str]] = []
+        shared_dir = (self.pack_root.parent / _SHARED_DIRNAME).resolve()
+        if not shared_dir.is_dir():
+            warnings.append(
+                f"shared helper dir {shared_dir} not found; packaged app "
+                f"may fail to import runner_protocol / telemetry if it reuses "
+                f"the pack runner in-process"
+            )
+            return out
+        for src in _iter_files(shared_dir):
+            rel = src.relative_to(shared_dir).as_posix()
+            out.append((src, f"{_SHARED_DIRNAME}/{rel}"))
         return out
 
     def _fallback_pack_dir(self, model_id: str) -> Path:
@@ -738,35 +805,67 @@ def _build_manifest(
         "include_outputs": definition.package_include_outputs,
         "total_size_bytes": total_size_bytes,
         "target_platform": (
-            "Windows on Snapdragon (WoS) ARM64 with a QAI ModelBuilder "
+            f"{_platform_label()} with a QAI ModelBuilder "
             "Python environment. Not a fully self-contained offline package."
         ),
         "warnings": list(warnings),
     }
 
 
-_RUNNING_MD = """\
-# Running this packaged app
+def _platform_label() -> str:
+    """Human-readable target platform for the packaged app manifest."""
+    return (
+        "Windows on Snapdragon (WoS) ARM64"
+        if current_arch() == "arm64"
+        else "Windows x64 (Intel/AMD)"
+    )
 
-This ZIP contains the app's source (backend + frontend), its launch
-scripts, and — when bundled — the minimal model weight / pack files each
-model needs.
 
-## Important: this is NOT a fully offline package
+def _cpython_label() -> str:
+    """Human-readable CPython arch label for RUNNING.md prerequisites."""
+    return "ARM64 CPython" if current_arch() == "arm64" else "x64 CPython"
 
-The target machine MUST already have a working **QAI ModelBuilder Python
-environment** (the `qai_appbuilder` runtime + QAIRT SDK) available. This
-package does not ship a Python interpreter or the QNN runtime, so it will
-not run on an arbitrary Windows machine without that environment.
 
-## Steps
+def _running_md() -> str:
+    """Return the RUNNING.md body with arch-specific labels resolved.
 
-1. Unzip this package on a Windows on Snapdragon (WoS) ARM64 machine that
-   has the QAI ModelBuilder Python environment installed.
-2. Open a terminal in the unzipped directory.
-3. Run `run.bat` (or `run.ps1`).
-4. Open the printed local URL in your browser.
-
-Bundled model weights are under `models/<model_id>/`; the corresponding
-pack manifests / assets are under `pack/<model_id>/`.
-"""
+    Arch labels are decided at package time from :func:`current_arch`
+    (the packaging process's arch) so the doc matches the environment
+    the packaged app is intended to run on.
+    """
+    return (
+        "# Running this packaged app\n"
+        "\n"
+        "This ZIP contains the app's source (backend + frontend), its launch\n"
+        "scripts, and — when bundled — the minimal model weight / pack files each\n"
+        "model needs.\n"
+        "\n"
+        "## Requirements: a Python interpreter (+ NPU runtime for on-device inference)\n"
+        "\n"
+        f"The target machine needs a **Python interpreter** ({_cpython_label()} matching the\n"
+        "one used to build the app). `run.bat` (or `run.ps1` / `run.sh`) first runs the\n"
+        "startup dependency check `backend/ensure_deps.py`, which reads\n"
+        "`requirements.txt` and pip-installs anything missing — preferring bundled\n"
+        "wheels under `vendor/whl/` and falling back to the configured pip index.\n"
+        "\n"
+        "The NPU runtime (`qai_appbuilder` + QAIRT) is installed the same way when it is\n"
+        "declared in `requirements.txt` and reachable from the configured index or a\n"
+        "bundled wheel. If a required package cannot be installed, the launcher stops\n"
+        "with a clear message naming what to install — never a mysterious traceback on\n"
+        "the first request.\n"
+        "\n"
+        "## Steps\n"
+        "\n"
+        f"1. Unzip this package on a {_platform_label()} machine with a\n"
+        "   Python interpreter available.\n"
+        "2. Open a terminal in the unzipped directory.\n"
+        "3. Run `run.bat` (or `run.ps1`). The first launch checks/installs\n"
+        "   dependencies; subsequent launches skip straight through via a sentinel.\n"
+        "4. Open the printed local URL in your browser.\n"
+        "\n"
+        "Bundled model weights are under `models/<model_id>/`; the corresponding\n"
+        "pack sources (runner + pack-local modules) are under `pack/<model_id>/`;\n"
+        "the framework shared helpers the pack runner imports (`runner_protocol`,\n"
+        "`telemetry`, …) are under `shared/`. Optional offline wheels + per-pack\n"
+        "runtime data live under `vendor/`.\n"
+    )

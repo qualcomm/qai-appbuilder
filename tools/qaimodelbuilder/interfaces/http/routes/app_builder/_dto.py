@@ -696,6 +696,36 @@ class AutoExportResponseBody(BaseModel):
     errors: list[str] = Field(default_factory=list)
 
 
+class AutoExportStatusRequestBody(BaseModel):
+    """``POST /import/auto-export/status`` request body.
+
+    Cheap on-disk probe the Import panel polls on (re)open so an
+    in-flight generation survives closing the window: the synchronous
+    ``auto-export`` route keeps no in-memory job, and the frontend's
+    ``exporting`` flag is lost on close, so the durable state lives in
+    ``<source_path>/app_pack/`` (``.generating`` sentinel while running,
+    ``_candidate.json`` once finished).
+    """
+
+    source_path: str = Field(..., min_length=1, max_length=4096)
+
+
+class AutoExportStatusResponse(BaseModel):
+    """``POST /import/auto-export/status`` response body.
+
+    ``status`` is one of:
+
+    * ``"generating"`` — an export is running (fresh ``.generating``
+      sentinel, no candidate yet) → the panel keeps showing "生成中...";
+    * ``"generated"`` — ``_candidate.json`` exists (export finished) →
+      the panel advances to the commit / import stage;
+    * ``"idle"`` — never generated, or a stale/abandoned run → the panel
+      shows the pick-precision / Generate stage.
+    """
+
+    status: str = "idle"
+
+
 class PackManifestResponse(BaseModel):
     """``GET /models/{model_id}/manifest`` body.
 

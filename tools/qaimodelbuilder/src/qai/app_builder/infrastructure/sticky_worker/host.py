@@ -257,7 +257,7 @@ async def _default_spawn(spec: BootstrapSpec) -> asyncio.subprocess.Process:
         env = dict(spec.env)
 
     # Resolve shared/ and runner dir from the argv or cwd.
-    # Convention: cwd is the pack root (factory/app_builder/) OR
+    # Convention: cwd is the pack root (factory/chat_features/app-builder/) OR
     # we can infer shared/ from argv (the bootstrap script path).
     #
     # IMPORTANT (runner_protocol shadowing fix): we must NOT put the

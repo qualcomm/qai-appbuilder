@@ -96,7 +96,7 @@ QAI ModelBuilder has been **fully rewritten as a Clean Architecture / DDD applic
 
 ## 🧩 App Builder — Run On-Device AI Models
 
-> **The fastest way to use AI models on your Snapdragon NPU.** App Builder is a workbench inside the chat UI where each model is a self-contained **Model Pack** under `factory/app_builder/models/<id>/`. Upload an image / record audio / type text, click **Run**, and the result is rendered with the right viewer. Everything runs on-device via QAI AppBuilder + QNN HTP — **nothing is uploaded**.
+> **The fastest way to use AI models on your Snapdragon NPU.** App Builder is a workbench inside the chat UI where each model is a self-contained **Model Pack** under `factory/chat_features/app-builder/models/<id>/`. Upload an image / record audio / type text, click **Run**, and the result is rendered with the right viewer. Everything runs on-device via QAI AppBuilder + QNN HTP — **nothing is uploaded**.
 
 ### Quick Tour
 
@@ -120,7 +120,7 @@ QAI ModelBuilder has been **fully rewritten as a Clean Architecture / DDD applic
 
 > The built-in Packs currently cover **ASR / TTS**. The Pack taxonomy also supports SR / CV and more — convert your own models with [Model Builder](#-highlight-model-builder-skill) and one-click **Promote to App Builder** to add new Packs (e.g. image classification or super-resolution). Demo models such as `inception-v3` / `real-esrgan` ship as part of the `model-hub` built-in mode, not as built-in App Builder Packs.
 >
-> **Adding a new Pack is a directory copy:** clone the `_template`, edit `manifest.json` + `runner.py`, drop weights in. The backend auto-scans `factory/app_builder/models/*/manifest.json` at startup.
+> **Adding a new Pack is a directory copy:** clone the `_template`, edit `manifest.json` + `runner.py`, drop weights in. The backend auto-scans `factory/chat_features/app-builder/models/*/manifest.json` at startup.
 
 ### Key Capabilities
 
@@ -186,7 +186,7 @@ Once you've converted a model with [`model-builder`](#-highlight-model-builder-s
 
 1. Finish a Model Builder run (the converted `.bin` files land under the workspace `output/` folder).
 2. In the Model Builder UI a **Promote to App Builder** card scans the output, detects each precision (`fp16` / `fp32` / `int8`→`w8a8` / `w8a16` / `w4a16` / `int4`→`w4a8` / `w8a8b8`), and lets you check the variants to ship and pick a default.
-3. The importer (`FileSystemAppImportAdapter`, `src/qai/app_builder/infrastructure/app_import_adapter.py`) runs a `scan-bins → dry-run → commit → rollback`-safe cycle — `dry-run` validates the runner, weight checksums, and schema and smoke-tests the default variant on the NPU; `commit` atomically copies the Pack into `factory/app_builder/models/<id>/` and exposes it in App Builder.
+3. The importer (`FileSystemAppImportAdapter`, `src/qai/app_builder/infrastructure/app_import_adapter.py`) runs a `scan-bins → dry-run → commit → rollback`-safe cycle — `dry-run` validates the runner, weight checksums, and schema and smoke-tests the default variant on the NPU; `commit` atomically copies the Pack into `factory/chat_features/app-builder/models/<id>/` and exposes it in App Builder.
 
 ---
 
@@ -366,11 +366,11 @@ There are two shipping usage modes (full cheat-sheet in [`QUICK-START.md`](QUICK
 
 | Script | Purpose |
 |--------|---------|
-| `Setup.bat` | **The single install entry point.** Downloads `uv`, installs Python 3.13 ARM64, creates the venv at `%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_arm64_313`, installs runtime deps (`uv pip install -e .`), initializes the `data/` directory (via `python -m scripts.init.install`), and installs PortableGit / Node+pnpm / QAIRT SDK / VS 2022 / TTS data / WebView2. Flags: `--no-builder` (skip conversion toolchain), `--dev`, `--desktop`, `--no-pause`. |
+| `Setup.bat` | **The single install entry point.** Downloads `uv`, installs Python 3.13, creates the venv at `%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_arm64_313` (or `.venv_x64_313` with `--arch x64`), installs runtime deps (`uv pip install -e .`), initializes the `data/` directory (via `python -m scripts.init.install`), and installs PortableGit / Node+pnpm / QAIRT SDK / VS 2022 / TTS data / WebView2. Flags: `--arch arm64|x64`, `--no-builder` (skip conversion toolchain), `--dev`, `--desktop`, `--no-pause`. |
 | `Start.bat` | Starts the server (supervised). The port is **not hard-coded** — the supervisor probes a fallback list and writes the real URL to `data/runtime/server.endpoint.json`, then opens your browser. `Start.bat --reload` enables hot-reload. |
 | `Build.bat` | Builds the Vue 3 SPA into `frontend/dist/` (pnpm). `--full` (typecheck+lint+test), `--install`, `--clean`, `--desktop` (Tauri bundle). |
 | `Release.bat` | Builds a clean-cutover release artifact ready to ship to end users. |
-| `Console.bat` | Opens an interactive shell with the ARM64 venv activated (install extra packages, run Python commands). |
+| `Console.bat` | Opens an interactive shell with the host-arch venv activated (ARM64 or x64 per `data/config/host_arch`). |
 | `Uninstall.bat` | Uninstaller — rolls back what `Setup.bat` installed outside the project dir; **does not delete `data/`**. |
 
 > The legacy `Install.bat` / `Launch.bat` flow has been removed — installation is `Setup.bat`, startup is `Start.bat`.

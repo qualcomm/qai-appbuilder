@@ -20,7 +20,7 @@ Two pieces:
   :class:`ProcessBackedAppRunner` knows how to spawn each Pack.
 
 PR-306 will move the Pack root from ``features/app-builder/models/``
-to ``factory/app_builder/models/`` (release artifacts); the reader
+to ``factory/chat_features/app-builder/models/`` (release artifacts); the reader
 accepts whatever root path the caller passes, so that migration is a
 DI / lifespan change, not a reader change.
 """

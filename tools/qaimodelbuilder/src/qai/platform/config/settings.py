@@ -603,7 +603,7 @@ class SecuritySettings(BaseModel):
     # read-only ALLOW short-circuit (matches only when the request is
     # read-only). The apps layer seeds the three business dirs
     # (``<repo_root>/skills`` + ``<repo_root>/factory/chat_features`` +
-    # ``<repo_root>/factory/app_builder``) into ``read_only_allow_paths``
+    # ``<repo_root>/factory/chat_features/app-builder``) into ``read_only_allow_paths``
     # and the system read surface (``%SystemRoot%``, the Python runtime
     # prefixes, ``%ProgramFiles%`` / ``%ProgramFiles(x86)%``) into
     # ``system_read_allow_paths`` at startup; the two exist as separate
@@ -618,7 +618,7 @@ class SecuritySettings(BaseModel):
             "read-only surface — operators may add prefixes here; the apps "
             "layer additionally seeds ``<repo_root>/skills`` + "
             "``<repo_root>/factory/chat_features`` + "
-            "``<repo_root>/factory/app_builder``. Enforced by both FileGuard "
+            "``<repo_root>/factory/chat_features/app-builder``. Enforced by both FileGuard "
             "layers (native op-aware read-only whitelist + Python read-only "
             "ALLOW short-circuit). ``protected_write_paths`` (black) still "
             "wins."

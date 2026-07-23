@@ -6,7 +6,7 @@
 """Weight-download configuration value object (App Builder domain).
 
 Pure, framework-free VO describing the per-Pack ``weights.json`` a
-built-in App Builder model ships with (``factory/app_builder/models/<id>/
+built-in App Builder model ships with (``factory/chat_features/app-builder/models/<id>/
 weights.json``). The concrete reader lives in
 ``qai.app_builder.infrastructure.weight_download_config_reader`` and is
 wired by the DI root; the application layer only ever sees this VO via

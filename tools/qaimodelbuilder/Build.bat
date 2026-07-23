@@ -51,6 +51,46 @@ set "DO_INSTALL=0"
 set "DO_CLEAN=0"
 set "DO_DESKTOP=0"
 set "DESKTOP_MODE=build"
+
+REM --- Host architecture selection (three-tier) -----------------------------
+REM Priority: 1) --arch <value> CLI flag  2) data\config\host_arch file
+REM           3) Auto-detect via %PROCESSOR_ARCHITECTURE% / PROCESSOR_ARCHITEW6432
+REM Build.bat itself does not spawn Python from the venv, but keeping HOST_ARCH
+REM here means every launcher exposes the same selector and downstream tools
+REM (pnpm sub-scripts, Tauri) inherit a consistent value.
+set "FORCED_ARCH="
+set "_NEXT_IS_ARCH="
+for %%A in (%*) do (
+    if defined _NEXT_IS_ARCH (
+        set "FORCED_ARCH=%%~A"
+        set "_NEXT_IS_ARCH="
+    ) else if /i "%%~A"=="--arch" (
+        set "_NEXT_IS_ARCH=1"
+    )
+)
+set "HOST_ARCH="
+if defined FORCED_ARCH (
+    if /i "!FORCED_ARCH!"=="x64"   set "HOST_ARCH=x64"
+    if /i "!FORCED_ARCH!"=="arm64" set "HOST_ARCH=arm64"
+)
+if not defined HOST_ARCH (
+    if exist "%~dp0data\config\host_arch" (
+        set "_FILE_ARCH="
+        for /f "usebackq tokens=1 delims= " %%B in ("%~dp0data\config\host_arch") do (
+            if not defined _FILE_ARCH set "_FILE_ARCH=%%B"
+        )
+        if /i "!_FILE_ARCH!"=="x64"   set "HOST_ARCH=x64"
+        if /i "!_FILE_ARCH!"=="arm64" set "HOST_ARCH=arm64"
+    )
+)
+if not defined HOST_ARCH (
+    set "HOST_ARCH=arm64"
+    if /i "%PROCESSOR_ARCHITECTURE%"=="AMD64" set "HOST_ARCH=x64"
+    if /i "%PROCESSOR_ARCHITEW6432%"=="AMD64" set "HOST_ARCH=x64"
+)
+set "VENV_DIR_NAME=.venv_arm64_313"
+if /i "%HOST_ARCH%"=="x64" set "VENV_DIR_NAME=.venv_x64_313"
+
 :parse_args
 if "%~1"=="" goto args_done
 if /I "%~1"=="--help" goto print_help
@@ -61,6 +101,7 @@ if /I "%~1"=="--install" set "DO_INSTALL=1"
 if /I "%~1"=="--clean" ( set "DO_CLEAN=1" & set "DO_INSTALL=1" )
 if /I "%~1"=="--desktop" set "DO_DESKTOP=1"
 if /I "%~1"=="--desktop-dev" ( set "DO_DESKTOP=1" & set "DESKTOP_MODE=dev" )
+if /I "%~1"=="--arch" shift
 shift
 goto parse_args
 :args_done
@@ -72,7 +113,7 @@ echo  +------------------------------------------+
 echo.
 
 REM -- Node.js / pnpm PATH injection -----------------------------------------
-REM Setup.bat installs a portable ARM64 Node into %LOCALAPPDATA%\QAIModelBuilder
+REM Setup.bat installs a portable host-arch Node into %LOCALAPPDATA%\QAIModelBuilder
 REM \node and enables pnpm there via corepack. Build.bat runs standalone (not
 REM through Setup.bat), so prepend that dir to PATH here too. If absent, fall
 REM back to whatever node/pnpm is already on PATH.
@@ -92,7 +133,7 @@ REM Verify pnpm is reachable before doing anything; give a clear hint otherwise.
 where pnpm >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] pnpm not found. Node.js / pnpm is missing.
-    echo [ERROR] Run Setup.bat first ^(it installs portable ARM64 Node + pnpm into
+    echo [ERROR] Run Setup.bat first ^(it installs portable Node + pnpm into
     echo [ERROR] %NODE_DIR%^), then re-run Build.bat.
     exit /b 1
 )
@@ -336,7 +377,7 @@ echo        Setup.bat does NOT install them by default ^(opt-in to keep the
 echo        base install slim^). Enable them once with:
 echo            Setup.bat --desktop
 echo        which runs Step 5c ^(rustup + `cargo install tauri-cli --locked`,
-echo        ~600MB download + 5-10min compile on ARM64^). Or install manually:
+echo        ~600MB download + 5-10min compile^). Or install manually:
 echo            https://rustup.rs    ^(Rust toolchain^)
 echo            cargo install tauri-cli --version "^>=2.0.0" --locked
 echo.

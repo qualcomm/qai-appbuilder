@@ -9,14 +9,16 @@
 
 一个 **Tauri 2.x** 写成的桌面 UI 壳，作用只有两件：
 
-1. 启动时 **spawn** 一个 `qai-serve` 后端子进程（用工程预装的 ARM64 venv），让
+1. 启动时 **spawn** 一个 `qai-serve` 后端子进程（用工程预装的 venv，按
+   `data/config/host_arch` 选择 `.venv_arm64_313` 或 `.venv_x64_313`），让
    FastAPI 跑在自动选的空闲端口上；
 2. 打开一个 WebView 窗口指向 `http://127.0.0.1:<port>/`，加载 `frontend/dist/`
    的 SPA。
 
-**它不与后端共进程**——后端始终是独立的 Python 进程，跑在 `.venv_arm64_313`
+**它不与后端共进程**——后端始终是独立的 Python 进程，跑在对应架构的 venv
+（`.venv_arm64_313` 或 `.venv_x64_313`，取决于 `data/config/host_arch`）
 里。壳本身是 Rust 编译产物（`.exe`/`.msi`），**不进 Python venv**，因此完全
-规避了 ARM64 cp313 wheel 兼容性风险（详见 `desktop-app-plan.md` §3.3）。
+规避了 wheel 兼容性风险（详见 `desktop-app-plan.md` §3.3）。
 
 退出时（关窗口）壳先走 HTTP 优雅停止，再兜底强杀（见下「关闭流程」）。
 
@@ -26,7 +28,7 @@
 - Tauri CLI 2.11+：`npm install -g @tauri-apps/cli@^2`
 - WebView2 Runtime（Windows 10 1803+ 已默认装配）
 - Visual Studio Build Tools 2022（含 MSVC + Windows SDK）
-- 工程预装环境：`Setup.bat` 已跑过（生成 `.venv_arm64_313`）
+- 工程预装环境：`Setup.bat` 已跑过（生成 `.venv_arm64_313` 或 `--arch x64` 时 `.venv_x64_313`）
 - 前端产物：`pnpm -C frontend build` 已跑过（`frontend/dist/` 存在）
 
 ## 构建（推荐：一条命令，自动拷到 dist/）
@@ -83,8 +85,9 @@ cargo tauri dev
 2) 选一个空闲端口（如 51626）
 3) 用 find_repo_root() 从 exe 向上查找含 src/ + apps/ 的目录作为 repo root
    （鲁棒：不依赖固定层数，target 重定向到 .build/ 后仍正确）
-4) spawn:  %LOCALAPPDATA%\QAIModelBuilder\envs\.venv_arm64_313\Scripts\python.exe
+4) spawn:  %LOCALAPPDATA%\QAIModelBuilder\envs\<venv>\Scripts\python.exe
            -m apps.cli.serve --port 51626   （CWD = repo root）
+   <venv> = .venv_arm64_313 或 .venv_x64_313（由 data/config/host_arch 决定）
    flags: CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
           （后者抑制后端 python 的黑色 console 窗口）
 5) 探活：connect 127.0.0.1:51626 直到成功（超时 15s）
@@ -138,8 +141,9 @@ NPU 芯片 + 四角节点 + 深色圆角底，与应用内 `.sidebar-logo-glyph`
 
 ## 已知限制
 
-1. **`.venv_arm64_313` 必须存在**：壳找不到该 venv 时回退到 PATH 上的 `python.exe`，
-   多半跑不通；后续可加 first-run 引导跳到 Setup。
+1. **venv 必须存在**：壳依次尝试 host_arch 指定的 venv、`.venv_arm64_313`、
+   `.venv_x64_313`；全部不存在时回退到 PATH 上的 `python.exe`，多半跑不通；
+   后续可加 first-run 引导跳到 Setup。
 2. **MSI 安装版的资源定位**：`find_repo_root` 靠源码树标记（`src/`+`apps/`）定位，
    dev-checkout 与 `.build/` 重定向下都正确；但**真实最终用户机（无源码树）** 上会
    找不到，需 D5 用 PyInstaller 把后端冻结成 sidecar（PENDING-WORK ARCH-DESK-2）。
@@ -151,7 +155,7 @@ NPU 芯片 + 四角节点 + 深色圆角底，与应用内 `.sidebar-logo-glyph`
 ## 跨平台说明
 
 按 `AGENTS.md` 跨平台前瞻原则，所有 Windows 专用代码（`creation_flags`、
-`%LOCALAPPDATA%\...\.venv_arm64_313` 路径、`GenerateConsoleCtrlEvent`）都在
+`%LOCALAPPDATA%\...\<venv>` 路径选择、`GenerateConsoleCtrlEvent`）都在
 `#[cfg(target_os = "windows")]` 守护下。非 Windows 编译可通过，运行时回退到
 `python3`，未做实测——当前不支持。
 

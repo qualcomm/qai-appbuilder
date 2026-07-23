@@ -239,7 +239,7 @@ def make_lifespan(
         # One-shot user-Pack relocation (Sub-E). Before Sub-C wired the
         # ``DataPaths.app_builder_user_pack_root`` split, user-imported
         # App Builder Packs were committed to
-        # ``<repo_root>/factory/app_builder/models/<id>/`` alongside
+        # ``<repo_root>/factory/chat_features/app-builder/models/<id>/`` alongside
         # built-in Packs (with weight ``.bin`` blobs at
         # ``<repo_root>/models/<id>/``). Sub-D updates the adapters so
         # **future** imports land at the data-dir tree; this hook
@@ -249,7 +249,7 @@ def make_lifespan(
         # resolve weights against the new anchor. Runs AFTER schema
         # migrations (needs the DB up to read ``user_imported``) and
         # BEFORE the built-in seed (so the seed scan of
-        # ``factory/app_builder/models/`` no longer sees the just-
+        # ``factory/chat_features/app-builder/models/`` no longer sees the just-
         # relocated user Packs and cannot mis-promote them to
         # ``user_imported=False``). Idempotent per-id via a ``.migrated_at``
         # sentinel: rerun is a no-op after the first success and
@@ -1156,7 +1156,7 @@ async def _seed_app_builder_models(container: Container) -> list[str]:
     """Register bundled App Builder models that aren't yet in the DB.
 
     Scans ``<pack_root>/<id>/manifest.json`` (default Pack root:
-    ``<repo_root>/factory/app_builder/models``) and inserts an
+    ``<repo_root>/factory/chat_features/app-builder/models``) and inserts an
     :class:`AppModelDefinition` row for every manifest whose ``modelId``
     is absent from ``app_builder_model_definition``. Existing rows are
     never modified — this is a one-way "seed if missing" so user edits /
@@ -1242,7 +1242,7 @@ async def _reconcile_orphan_app_builder_models(container: Container) -> list[str
     "listed == pack exists on disk" by removing every row (built-in OR
     user-imported — the user chose full V1 parity) whose
     ``manifest.json`` is gone under **either** the built-in Pack root
-    (``<repo_root>/factory/app_builder/models``) OR the user-import Pack
+    (``<repo_root>/factory/chat_features/app-builder/models``) OR the user-import Pack
     root (``<data_dir>/app_builder/user_models``).
 
     Runs after the seed (so freshly-seeded built-ins are kept) and before
@@ -1322,13 +1322,13 @@ def _resolve_seed_pack_root(container: Container) -> Path | None:
     """Resolve the **built-in** Pack root used by the model seed.
 
     Returns the on-disk directory holding release-distributed built-in Packs
-    (``<repo_root>/factory/app_builder/models``) — or ``None`` when it does
+    (``<repo_root>/factory/chat_features/app-builder/models``) — or ``None`` when it does
     not exist. Preference order:
 
     1. ``container.app_builder_pack_root`` — an explicit override supplied by
        tests / the lifespan wiring. Callers MUST only inject a built-in
        Pack root here (see invariant below).
-    2. ``<repo_root>/factory/app_builder/models`` — the release-distributed
+    2. ``<repo_root>/factory/chat_features/app-builder/models`` — the release-distributed
        built-in root.
 
     Invariant (must be preserved by every caller that ever wires this):
@@ -1377,7 +1377,7 @@ def _resolve_seed_pack_root(container: Container) -> Path | None:
                 pass
         return injected
     candidate = (
-        container.repo_root / "factory" / "app_builder" / "models"
+        container.repo_root / "factory" / "chat_features" / "app-builder" / "models"
     )
     return candidate if candidate.is_dir() else None
 
@@ -1788,7 +1788,7 @@ async def _spawn_sticky_worker(container: Container) -> None:
         shared_dir = getattr(container, "app_builder_shared_dir", None)
         if shared_dir is None:
             candidate = Path(repo_root).joinpath(
-                "factory", "app_builder", "shared"
+                "factory", "chat_features", "app-builder", "shared"
             )
             if candidate.is_dir():
                 shared_dir = candidate

@@ -62,7 +62,7 @@ Path layout (v2)
 ================
 ::
 
-    factory/app_builder/
+    factory/chat_features/app-builder/
         shared/              <- runner_protocol.py, audio_io.py, etc.
         models/<model_id>/
             runner.py        <- does ``from runner_protocol import emit``

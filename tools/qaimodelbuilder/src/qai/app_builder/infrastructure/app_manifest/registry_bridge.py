@@ -144,6 +144,7 @@ def _build_runner_spec(
         cwd=pack_dir,
         extra_pythonpath=extra_pythonpath,
         timeout_s=timeout_s,
+        delegate=manifest.runtime.delegate,
     )
 
 
@@ -159,6 +160,13 @@ def _select_interpreter(
     intentionally not implemented — production packs declare
     ``"arm64"`` and the fallback already covers dev/test, so the
     extra knob would add complexity without a real-world driver.
+
+    The ``"arm64"`` manifest value is a stable policy token, NOT a hard
+    architecture pin: no arch is hardcoded here. QairtEnvJsonResolver
+    resolves the concrete runtime venv + QNN subdir from qairt_env.json
+    per host arch (``python_runtime_venv`` / ``qairt_runtime_subdir``,
+    with legacy arm64 fallback), so an x64 host transparently gets its
+    x64 venv without any manifest change.
     """
     if qairt_env_file is None:
         return SysExecutableResolver()

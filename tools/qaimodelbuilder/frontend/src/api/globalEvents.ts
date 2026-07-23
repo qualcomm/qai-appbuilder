@@ -92,6 +92,15 @@ export interface GlobalEventsOptions {
  *     browser silently drops the frame, the request sits PENDING for 60s and
  *     then fails closed — the "文件访问不弹授权窗口、直接返回安全策略拒绝"
  *     bug (a named-event registration regression; the ASK path itself is intact).
+ *   - `security.permission_resolved` — the backend publishes this when a
+ *     PENDING native ASK is resolved WITHOUT a local user response: the chat
+ *     "Stop" exec-cancel flush (`build_ask_flush_for_pid`) resolving a killed
+ *     child's queued ASKs, or the subprocess-gone cleanup backstop. Its
+ *     `.to_dict()` payload carries `type: "permission_resolved"` + `id`; App.vue
+ *     `onEvent` routes it to `usePermissionDialog.dequeue(id)` so the FileGuard
+ *     authorization dialog CLOSES immediately. Without registering it here the
+ *     browser silently drops the frame and the dialog keeps popping until a full
+ *     SSE-reconnect re-fetch — the "点停止后授权窗仍反复弹出" bug (problem ②).
  *
  * All named frames are routed into the SAME `onEvent` callback as the unnamed
  * `onmessage` events, so subscribers discriminate purely on the JSON payload.
@@ -102,6 +111,7 @@ export const KNOWN_NAMED_EVENTS = [
   "background_process.updated",
   "background_process.deleted",
   "security.permission_requested",
+  "security.permission_resolved",
 ] as const;
 
 // ---------------------------------------------------------------------------

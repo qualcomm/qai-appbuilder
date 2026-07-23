@@ -9,7 +9,7 @@
  * behavior parity.
  *
  * V2 reimplementation in TS/Composition API. Output schema (field source of
- * truth: factory/app_builder/models/{whisper-base,zipformer-zh}/manifest.json
+ * truth: factory/chat_features/app-builder/models/{whisper-base,zipformer-zh}/manifest.json
  * `outputSchema.jsonSchema`):
  *
  *   segments[].start — start time in seconds

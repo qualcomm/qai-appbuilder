@@ -1,3 +1,7 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
 """
 Zipformer ASR Inference Script (standalone, qai_appbuilder / NPU)
 =================================================================
@@ -11,7 +15,7 @@ The three .bin files are QNN context binaries loaded directly by
 ``qai_appbuilder.QNNContext`` (runtime="Htp", NATIVE dtype I/O). This is the
 same NPU-inference path used by the other aihub-model-run models
 (beit / melotts_zh / resnet50) and by the App Builder runner
-``factory/app_builder/models/zipformer-zh/runner.py`` — this script is a
+``factory/chat_features/app-builder/models/zipformer-zh/runner.py`` — this script is a
 standalone port of that reference algorithm.
 
 Usage:

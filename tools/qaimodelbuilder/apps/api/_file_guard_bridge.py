@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, NamedTuple
 
 from qai.ai_coding.application.ports import FileGuardPort
@@ -53,6 +53,7 @@ if TYPE_CHECKING:  # pragma: no cover
 
     from qai.dependency_approval.application.ports import DepBrokerPort
     from qai.command_policy.application.ports import ExecBrokerPort
+    from qai.command_policy.domain import ClassifyReason
     from qai.security.application.permission_wait import PermissionWaitRegistry
     from qai.security.domain.value_objects import PolicyAction
 
@@ -144,6 +145,141 @@ def _build_exec_error(command: str, reason: str) -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# Exec lib-storm read-only-tree derivation (module-private helpers)
+# ---------------------------------------------------------------------------
+# When a guarded child process is a toolchain driver (e.g. a compiler / linker
+# like ``C:\Programs\llvm-mingw-ucrt-aarch64\bin\clang.exe``) it concurrently
+# reads HUNDREDS of header / lib files out of its own install tree the instant
+# it starts. The native ``guard64.dll`` intercepts every one of those reads; if
+# the toolchain directory is not whitelisted each read becomes its own ASK
+# popup, flooding the operator. Worse, the reads **burst at process startup** —
+# they all fire BEFORE the operator can approve even the first one, so any
+# "approve, then it applies" grant is already too late for the storm.
+#
+# The mitigation (see ``plans/fileguard-exec-lib-storm-fix.md``): at the moment
+# an exec command is ALLOWED (``enforce_exec`` runs BEFORE the child spawns and
+# sees the un-rewritten command string), derive the executable's install root
+# and inject it as a READ-ONLY prefix into the native whitelist. The rule lands
+# before the child's read storm happens — those reads then match the
+# ``white_ro`` prefix in the DLL's local decision and are allowed WITHOUT any
+# callback / popup. Only READ is bypassed for that tree; write / delete /
+# execute still go through ASK, and the blacklist / protected_write_paths still
+# hard-deny.
+#
+# Why the *grandparent* of the exe: for ``...\llvm-mingw-ucrt-aarch64\bin\
+# clang.exe`` the exe's directory is ``...\bin`` and its parent
+# ``...\llvm-mingw-ucrt-aarch64`` is the toolchain root, whose subtree (``bin``
+# / ``lib`` / ``include`` / ...) covers the reads. Injecting the single
+# grandparent prefix therefore covers BOTH the exe dir AND its sibling dirs in
+# one rule — the agreed "exe dir + one level up" scope.
+#
+# Why the guardrails: a read-only prefix is far weaker than a full whitelist
+# (it bypasses ONLY reads), but injecting a shallow root (``C:\``,
+# ``C:\Windows``, ``C:\Users``, ...) would still silently allow reads across an
+# enormous, sensitive tree. So we reject a candidate root that is too shallow:
+# it must sit at least two components below its drive anchor, and it must not be
+# one of a small set of well-known shallow system roots (nor any bare drive
+# root). A rejected candidate simply falls back to the normal per-file ASK path
+# — no injection, no weakening.
+#
+# These helpers are PURE: they never touch the filesystem (no ``resolve()`` —
+# the API process may not share the child's filesystem view, and resolve() could
+# hit I/O) and never raise. They only normalize / inspect the path string
+# handed in.
+
+#: Well-known shallow roots that must never be injected as a read-only prefix,
+#: stored as casefolded normalized Windows path strings for an exact-match test
+#: against the (casefolded) candidate root. The bare drive-root case (``C:\``,
+#: ``D:\`` ...) is handled generically by the anchor-only check in
+#: :func:`_derive_exec_readonly_root`, but ``C:\`` is kept here too for
+#: explicitness.
+_SHALLOW_ROOT_BLACKLIST: frozenset[str] = frozenset(
+    p.casefold()
+    for p in (
+        "C:\\",
+        "C:\\Windows",
+        "C:\\Program Files",
+        "C:\\Program Files (x86)",
+        "C:\\Users",
+        "C:\\ProgramData",
+    )
+)
+
+
+def _exec_root_depth(path: PureWindowsPath) -> int:
+    """Return the number of path components BELOW the drive anchor.
+
+    ``C:\\A\\B`` → 2 (``[A, B]``); ``C:\\A`` → 1; ``C:\\`` → 0. Used by the
+    minimum-depth guardrail so a candidate root that sits directly under a
+    drive root (or is the drive root itself) is rejected.
+    """
+    # ``parts`` includes the anchor (e.g. ``C:\\``) as the first element;
+    # everything after it is a real directory component.
+    return max(0, len(path.parts) - 1)
+
+
+def _derive_exec_readonly_root(exe_path: str) -> str | None:
+    """Derive the read-only install-tree root for an executable.
+
+    Parameters
+    ----------
+    exe_path:
+        The absolute path of the executable about to run. May be ``""``,
+        ``None``, relative, or junk.
+
+    Returns
+    -------
+    str | None
+        The candidate read-only root — the PARENT of the exe's directory
+        (``Path(exe_path).parent.parent``) — as a normalized absolute Windows
+        path string, or ``None`` when the input is not a usable absolute path
+        or when the candidate fails a guardrail (too shallow / a blacklisted
+        system root / any drive root). ``None`` means "do not inject; fall back
+        to normal per-file ASK".
+
+    Never raises — any parsing error yields ``None``.
+    """
+    try:
+        if not exe_path:
+            return None
+
+        exe = PureWindowsPath(exe_path)
+
+        # Only absolute paths can be safely scoped; a relative / bare name
+        # gives no trustworthy install root. ``is_absolute`` on a
+        # PureWindowsPath requires both a drive and a root anchor.
+        if not exe.is_absolute():
+            return None
+
+        # Grandparent of the exe = exe dir + one level up (the toolchain
+        # root whose subtree covers the read storm).
+        candidate = exe.parent.parent
+
+        # Guardrail 1 — minimum depth: reject C:\\A (1 component) and C:\\
+        # (0 components); require at least 2 components below the anchor.
+        if _exec_root_depth(candidate) < 2:
+            return None
+
+        # Guardrail 2 — any bare drive root (anchor-only path, i.e. a path
+        # whose parent is itself). Defensive: depth < 2 already covers this,
+        # but the generic anchor check documents the intent and guards
+        # against future component-counting drift.
+        if candidate == candidate.parent:
+            return None
+
+        candidate_str = str(candidate)
+
+        # Guardrail 3 — explicit shallow blacklist (case-insensitive exact
+        # match against the normalized candidate).
+        if candidate_str.casefold() in _SHALLOW_ROOT_BLACKLIST:
+            return None
+
+        return candidate_str
+    except Exception:  # noqa: BLE001 — never raise; a bad path just skips injection
+        return None
+
+
 class FileGuardFacade:
     """FileGuardPort adapter backed by PolicyCenter + dep/exec brokers.
 
@@ -173,6 +309,7 @@ class FileGuardFacade:
         boot_id_provider: "Callable[[], str] | None" = None,
         ask_conversation_registry: "AskConversationRegistry | None" = None,
         native_guard_active_provider: "Callable[[], bool] | None" = None,
+        native_guard: object | None = None,
     ) -> None:
         # Master-switch (file_guard_enabled) baked value + optional LIVE
         # provider. When ``enabled_provider`` is wired the ``_enabled``
@@ -247,6 +384,22 @@ class FileGuardFacade:
             if ask_conversation_registry is not None
             else ASK_CONVERSATION_REGISTRY
         )
+        # exec lib-storm mitigation — the native guard port whose
+        # ``add_read_only_allow_rule(path, session_only=False)`` injects an
+        # allowed executable's install-tree as a read-only prefix. This runs
+        # in-process from ``enforce_exec`` (BEFORE the child is spawned, with
+        # the un-rewritten command string in hand), so the read-only rule
+        # lands in the DLL's whitelist ahead of the toolchain driver's startup
+        # read storm — those reads then match the ``white_ro`` prefix locally
+        # and never fan out into per-file ASK popups. ``None`` disables it
+        # (tests / no-guard containers).
+        self._native_guard = native_guard
+        # Idempotency cache of already-injected roots (casefolded). ``enforce_
+        # exec`` may run concurrently for different commands, but ``set.add``
+        # is atomic and a duplicate ``add_read_only_allow_rule`` call is
+        # harmless (the DLL de-dupes prefixes), so re-injecting the same root
+        # from a race is a benign no-op — no lock needed.
+        self._injected_exec_roots: set[str] = set()
 
     @property
     def _enabled(self) -> bool:
@@ -462,6 +615,7 @@ class FileGuardFacade:
             # covered by a still-valid grant); return so we do NOT fall through
             # to Gate ③ PolicyCenter which — for an ``once`` scope that stored
             # no grant — would pop a SECOND dialog when file_guard is ON.
+            self._maybe_inject_exec_readonly_root(command)
             return
 
         if not self._enabled:
@@ -495,6 +649,7 @@ class FileGuardFacade:
         # / arbitrary program exec) remain covered by Gate ② exec_broker, which
         # ran above regardless of this branch.
         if self._native_guard_active():
+            self._maybe_inject_exec_readonly_root(command)
             return
         await self._enforce_path(
             path=command,
@@ -507,6 +662,10 @@ class FileGuardFacade:
             op="exec",
             exec_command=command,
         )
+        # ``_enforce_path`` returned without raising ⇒ the command is allowed;
+        # inject the executable's read-only install tree before the child
+        # spawns (mirrors the two early-return allow points above).
+        self._maybe_inject_exec_readonly_root(command)
 
     def _native_guard_active(self) -> bool:
         """Return whether the native OS file guard is active (best-effort).
@@ -522,6 +681,95 @@ class FileGuardFacade:
             return bool(provider())
         except Exception:  # noqa: BLE001 — uncertainty → conservative (inactive)
             return False
+
+    # ------------------------------------------------------------------
+    # Exec lib-storm read-only tree injection (in-process, pre-spawn)
+    # ------------------------------------------------------------------
+    def _maybe_inject_exec_readonly_root(self, command: str) -> None:
+        """Inject an allowed command's executable install-tree as read-only.
+
+        Called at every ALLOW return point of :meth:`enforce_exec` — which
+        runs synchronously in-process BEFORE the child is spawned and sees
+        the un-rewritten command string. A toolchain driver (compiler /
+        linker) reads hundreds of header / lib files the instant it starts;
+        pre-seeding the DLL's ``white_ro`` prefix with the executable's
+        install root here lets those reads match the read-only prefix in the
+        DLL's local decision — no per-file ASK storm. Only READ is bypassed
+        for the tree; write / delete / execute still ASK and the blacklist
+        still hard-denies.
+
+        Fully best-effort — any failure is swallowed (``_log.warning``) and
+        NEVER re-raised, so it can never affect the exec ALLOW. Idempotent via
+        :attr:`_injected_exec_roots`. A guard that returns ``False`` (DLL
+        predates the read-only export / mutation failed) is NOT cached, so a
+        later working call can retry the same root.
+        """
+        try:
+            if self._native_guard is None:
+                return
+            # Parse the leading token (the executable) out of the command
+            # string. Skip leading whitespace; honour a quoted first token
+            # (paths with spaces), else read up to the first whitespace.
+            i = 0
+            n = len(command)
+            while i < n and command[i].isspace():
+                i += 1
+            if i >= n:
+                return
+            if command[i] == '"':
+                i += 1
+                start = i
+                while i < n and command[i] != '"':
+                    i += 1
+                exe_token = command[start:i]
+            else:
+                start = i
+                while i < n and not command[i].isspace():
+                    i += 1
+                exe_token = command[start:i]
+            if not exe_token:
+                return
+
+            # Resolve to an absolute exe path. An already-absolute token is
+            # used verbatim; a bare / relative name is resolved via PATH
+            # (best-effort) so a ``clang`` on PATH still yields its install
+            # tree. An unresolved token is passed through to the derive helper,
+            # which returns None for a non-absolute path (no injection).
+            if PureWindowsPath(exe_token).is_absolute():
+                resolved = exe_token
+            else:
+                import shutil
+
+                resolved = shutil.which(exe_token) or exe_token
+
+            root = _derive_exec_readonly_root(resolved)
+            if root is None:
+                return
+            key = root.casefold()
+            if key in self._injected_exec_roots:
+                return
+            ok = self._native_guard.add_read_only_allow_rule(  # type: ignore[attr-defined]
+                root, session_only=False
+            )
+            if ok:
+                self._injected_exec_roots.add(key)
+                _log.info(
+                    "native_guard.exec_readonly_root_injected",
+                    root=root,
+                    command=command[:120],
+                )
+            else:
+                # DLL predates the read-only export or the mutation failed —
+                # do NOT cache, so a later working call can retry this root.
+                _log.debug(
+                    "native_guard.exec_readonly_root_inject_noop",
+                    root=root,
+                )
+        except Exception:  # noqa: BLE001 — never affect the exec ALLOW
+            _log.warning(
+                "native_guard.exec_readonly_root_inject_error",
+                exc_info=True,
+            )
 
     # ------------------------------------------------------------------
     # Exec gates (extracted from enforce_exec — one responsibility each)
@@ -560,27 +808,33 @@ class FileGuardFacade:
             )
 
             if action is ExecAction.DENY:
-                # Tailor the suffix to the denial reason so the model gets
-                # actionable guidance instead of a generic "high-risk command"
-                # warning that is misleading for io_constraints violations.
-                if "input_dirs" in reason or "output_dirs" in reason or "允许范围" in reason:
+                # ``reason`` is a structured ``ClassifyReason`` (code + args +
+                # English fallback text). This message is fed to the LLM (not
+                # the user dialog), so it is neutral English keyed off the
+                # stable ``code`` — never hardcoded Chinese. The io-escape code
+                # gets path-oriented guidance; everything else gets the generic
+                # "don't try to bypass" guidance.
+                if reason.code == "deny_io_output_escape":
                     # io_constraints path violation — the command itself is not
                     # dangerous; the path is simply outside the allowed scope.
                     suffix = (
-                        "命令引用的路径不在安全策略允许的目录范围内。"
-                        "请改用绝对路径，或确认目标路径在工作区/项目目录内。"
+                        "The referenced path is outside the security policy's "
+                        "allowed directories. Use an absolute path, or make "
+                        "sure the target path is inside the workspace / project "
+                        "directory."
                     )
                 else:
                     # Dangerous argument / hard-deny rule — the command itself
                     # is the problem; warn the model not to try to bypass it.
                     suffix = (
-                        "这是一条被安全策略拒绝的高风险命令，不要尝试"
-                        "变形绕过（改写参数、换工具、拆分命令等）。请改用"
-                        "安全的等效做法，或如确有必要，请让用户在安全设置"
-                        "中调整策略后再试。"
+                        "This command was denied by the security policy. Do "
+                        "not try to bypass it (rewriting arguments, switching "
+                        "tools, splitting the command, etc.). Use a safe "
+                        "equivalent, or if truly necessary ask the user to "
+                        "adjust the policy in Security settings and retry."
                     )
                 raise ToolGuardDenied(
-                    message=f"{reason}\n{suffix}",
+                    message=f"{reason.text}\n{suffix}",
                     error_code="ai_coding.tool.exec_denied",
                 )
             if action is ExecAction.ASK:
@@ -604,7 +858,7 @@ class FileGuardFacade:
             return False
 
     async def _exec_broker_ask(
-        self, *, command: str, caller: str, reason: str
+        self, *, command: str, caller: str, reason: "ClassifyReason"
     ) -> bool:
         """Handle an exec-broker ASK: grant-reuse → dialog → decision.
 
@@ -645,7 +899,9 @@ class FileGuardFacade:
                     op="exec",
                     path=command,
                     caller=caller,
-                    reason=reason,
+                    reason=reason.text,
+                    reason_code=reason.code,
+                    reason_args=reason.args,
                 )
             else:
                 outcome = _AskOutcome(allow=False, timed_out=False)
@@ -662,9 +918,10 @@ class FileGuardFacade:
             )
             raise ToolGuardDenied(
                 message=(
-                    f"{reason}\n该命令的授权流程发生错误，已按安全"
-                    "策略拒绝执行（fail-closed）。请稍后重试或改用"
-                    "不含高风险参数的安全做法。"
+                    f"{reason.text}\nThe authorization flow for this command "
+                    "errored, so it was denied by security policy "
+                    "(fail-closed). Retry later, or use a safe approach "
+                    "without high-risk arguments."
                 ),
                 error_code="ai_coding.tool.exec_denied",
             ) from _ask_exc
@@ -677,19 +934,25 @@ class FileGuardFacade:
                 # blind-retry loop the user observed).
                 raise ToolGuardDenied(
                     message=(
-                        f"命令需要用户在安全确认框中授权，但本次未在等待时间内"
-                        f"收到用户响应（超时）。原因：{reason}\n"
-                        "请让用户在弹出的安全确认对话框中点击『允许』，然后"
-                        "重试**完全相同**的命令。不要改用其它库、不要变形参数、"
-                        "不要拆分命令——这些都不能绕过授权，只会制造更多待确认项。"
+                        "This command needs the user to authorize it in the "
+                        "security confirmation dialog, but no user response "
+                        f"arrived within the wait window (timeout). Reason: "
+                        f"{reason.text}\n"
+                        "Ask the user to click 'Allow' in the popped-up "
+                        "security dialog, then retry the EXACT same command. "
+                        "Do not switch libraries, mutate arguments, or split "
+                        "the command — none of that bypasses authorization; it "
+                        "only creates more pending confirmations."
                     ),
                     error_code="ai_coding.tool.exec_ask_timeout",
                 )
             raise ToolGuardDenied(
                 message=(
-                    f"用户拒绝了该命令的执行请求。原因：{reason}\n"
-                    "请不要重试或变形绕过；改用不含高风险参数的"
-                    "安全做法，或询问用户后再继续。"
+                    f"The user rejected this command's execution request. "
+                    f"Reason: {reason.text}\n"
+                    "Do not retry or mutate to bypass; use a safe approach "
+                    "without high-risk arguments, or ask the user before "
+                    "continuing."
                 ),
                 error_code="ai_coding.tool.exec_denied",
             )
@@ -960,6 +1223,8 @@ class FileGuardFacade:
         path: str,
         caller: str,
         reason: str = "",
+        reason_code: str = "",
+        reason_args: "dict[str, str] | None" = None,
     ) -> _AskOutcome:
         """Pop the authorization dialog and block for the user's decision.
 
@@ -997,17 +1262,22 @@ class FileGuardFacade:
                 resource=resource,
                 requested_mask=requested_mask,
             )
-            if reason:
-                # Forward the reason only if the use case accepts it, so a
-                # use case predating the ``reason`` param is unaffected.
+            if reason or reason_code:
+                # Forward the reason (+ structured code/args for i18n) only if
+                # the use case accepts each param, so a use case predating any
+                # of them is unaffected (guarded per-param).
                 try:
                     import inspect
 
-                    _sig = inspect.signature(
+                    _params = inspect.signature(
                         self._request_permission.execute  # type: ignore[attr-defined]
-                    )
-                    if "reason" in _sig.parameters:
+                    ).parameters
+                    if reason and "reason" in _params:
                         _rp_kwargs["reason"] = reason
+                    if reason_code and "reason_code" in _params:
+                        _rp_kwargs["reason_code"] = reason_code
+                    if reason_code and "reason_args" in _params:
+                        _rp_kwargs["reason_args"] = dict(reason_args or {})
                 except (TypeError, ValueError):
                     pass
             request = await self._request_permission.execute(  # type: ignore[attr-defined]
@@ -1302,5 +1572,17 @@ def build_file_guard(container: "Container") -> FileGuardPort:
         # ASK when the native path-allow-list backstop is genuinely active.
         native_guard_active_provider=(
             _native_guard_active_provider if security is not None else None
+        ),
+        # exec lib-storm mitigation — the native guard port whose
+        # ``add_read_only_allow_rule`` pre-seeds an allowed executable's
+        # install-tree as a read-only prefix so a toolchain driver's startup
+        # read storm matches the white_ro prefix in the DLL instead of
+        # flooding ASK popups. Injected in-process from ``enforce_exec`` before
+        # the child spawns (the only layer that sees the un-rewritten command
+        # string ahead of the read storm). ``None`` disables it.
+        native_guard=(
+            getattr(security, "native_file_guard", None)
+            if security is not None
+            else None
         ),
     )

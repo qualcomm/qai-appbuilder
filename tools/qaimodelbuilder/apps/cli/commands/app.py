@@ -625,7 +625,7 @@ async def _load_manifest(c: Container, pack: str) -> Any:
 
 
 def _pack_dir(c: Container, pack: str) -> Path | None:
-    """Resolve a Pack's on-disk directory ``<repo_root>/factory/app_builder/models/<pack>``.
+    """Resolve a Pack's on-disk directory ``<repo_root>/factory/chat_features/app-builder/models/<pack>``.
 
     Mirrors the lifespan seed root (``_resolve_seed_pack_root``). Returns
     ``None`` if it cannot be located so callers can degrade gracefully.
@@ -634,7 +634,7 @@ def _pack_dir(c: Container, pack: str) -> Path | None:
     repo_root = getattr(c, "repo_root", None)
     if repo_root is None:
         return None
-    candidate = Path(repo_root) / "factory" / "app_builder" / "models" / pack
+    candidate = Path(repo_root) / "factory" / "chat_features" / "app-builder" / "models" / pack
     return candidate if candidate.is_dir() else None
 
 

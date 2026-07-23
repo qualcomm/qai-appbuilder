@@ -1635,17 +1635,20 @@ const handleTurnWarning: FrameHandler = (tab, frame, ctx) => {
   const rawMessage = payload.message;
   const rawTurn = payload.turn_count;
   let warnText: string;
-  if (typeof rawMessage === "string" && rawMessage !== "") {
+  // i18n: PREFER the structured `turn_count` and localize via
+  // `chat.turnLimitWarn` (composed by ChatMessageList.renderTurnWarning from
+  // the `__turn_warning__:N` placeholder). The backend `message` is a
+  // language-neutral fallback for non-vue-i18n consumers (IM channels); the
+  // WebUI must NOT render it verbatim or a non-en/zh locale sees the wrong
+  // language (the reported "英文界面里冒中文" bug). Fall back to the backend
+  // `message` only when `turn_count` is absent, and to a recognizable
+  // placeholder when both are missing so the notice never renders empty.
+  if (typeof rawTurn === "number" && Number.isFinite(rawTurn)) {
+    warnText = `__turn_warning__:${rawTurn}`;
+  } else if (typeof rawMessage === "string" && rawMessage !== "") {
     warnText = rawMessage;
   } else {
-    // Compose locally via i18n. The store has no `t` instance, so we stash
-    // the raw value on `meta` and let the renderer localize. Fall back to
-    // a recognizable placeholder for the rare case `turn_count` is also
-    // absent so the notice never renders empty.
-    warnText =
-      typeof rawTurn === "number" && Number.isFinite(rawTurn)
-        ? `__turn_warning__:${rawTurn}`
-        : `__turn_warning__:?`;
+    warnText = `__turn_warning__:?`;
   }
   ctx.patchTab({
     messages: [

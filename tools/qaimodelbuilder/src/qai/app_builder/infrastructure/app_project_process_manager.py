@@ -203,6 +203,19 @@ class AppProjectProcessManager:
         # instance per app. The manual command is captured at spawn so
         # status()/run() can surface it without re-resolving the definition.
         self._active: dict[str, tuple[str, int, str]] = {}
+        # Ports this manager has handed out and not yet released — the union
+        # of in-flight (mid-spawn) AND running app ports. Port allocation
+        # excludes this set so two apps launched in quick succession never
+        # collide on the same port: the auto-port ``can_bind`` probe only
+        # asks the OS "is anyone listening YET", and a freshly-spawned
+        # uvicorn takes seconds to actually bind, so without this set app B's
+        # probe would happily re-pick app A's not-yet-bound port (the
+        # cross-app probe→bind TOCTOU window). Mutated directly (never behind
+        # ``_lock``) so it is safe to release from lock-held teardown paths;
+        # the resolve+reserve step is the only critical section and takes
+        # ``_lock`` (see :meth:`_reserve_bindable_port`). ``set`` add/discard
+        # are atomic under the GIL.
+        self._reserved_ports: set[int] = set()
         # app_id -> full ``/health`` URL, captured at spawn so status()/the
         # frontend status poll can do a live health probe WITHOUT re-reading
         # the definition. This is the authoritative "is it ready" signal:
@@ -273,16 +286,21 @@ class AppProjectProcessManager:
 
             if requested is not None:
                 # Explicit port: honour it or fail loudly (no silent swap).
-                chosen = self._resolve_port(requested=requested)
+                chosen = await self._reserve_port(requested=requested)
                 return await self._spawn_and_wait(
                     definition, app_dir, extra_env, chosen
                 )
 
-            # Auto port: allocate + spawn, retrying on TOCTOU collision.
+            # Auto port: allocate + spawn, retrying on TOCTOU collision. Each
+            # attempt reserves its port (so a concurrent run() cannot pick the
+            # same one); ``_spawn_and_wait`` releases the reservation on its
+            # own failure paths, so a failed attempt frees its port before the
+            # next candidate is reserved. ``tried`` still excludes it this run
+            # so we advance to a fresh candidate rather than re-picking it.
             last_error: Exception | None = None
             tried: list[int] = []
             for _ in range(_MAX_SPAWN_ATTEMPTS):
-                chosen = self._resolve_port(
+                chosen = await self._reserve_port(
                     requested=None, exclude=tuple(tried)
                 )
                 tried.append(chosen)
@@ -335,9 +353,12 @@ class AppProjectProcessManager:
                 )
             bgp_id, _port, _manual = entry
             # Remove now so a racing run() sees "not running" and re-spawns
-            # cleanly rather than adopting a process we are tearing down.
+            # cleanly rather than adopting a process we are tearing down. Free
+            # the port reservation so a fresh run() (or another app) can reuse
+            # it immediately.
             self._active.pop(app_id, None)
             self._health_urls.pop(app_id, None)
+            self._release_port(_port)
         await self._manager.stop(bgp_id)
         return AppProjectRunInfo(
             app_id=app_id,
@@ -412,6 +433,50 @@ class AppProjectProcessManager:
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+    async def _reserve_port(
+        self,
+        *,
+        requested: int | None,
+        exclude: tuple[int, ...] = (),
+    ) -> int:
+        """Atomically pick AND reserve a bindable port under ``_lock``.
+
+        Excludes both ``exclude`` (this run's own already-tried ports) and
+        every port currently reserved for another managed app so two apps
+        launched in quick succession can never be handed the same port. The
+        reservation closes the *cross-app* probe→bind TOCTOU window: the
+        ``can_bind`` probe only tells us "no one is listening on this port
+        YET", but a freshly-spawned uvicorn takes seconds to actually bind,
+        so without reserving the chosen port here app B's probe would happily
+        re-pick app A's not-yet-bound port (the shared-``18420`` symptom).
+
+        The whole resolve+reserve is one critical section (``_lock``) so two
+        concurrent ``run()`` calls cannot both observe the same port as free
+        before either reserves it. The caller MUST release the port via
+        :meth:`_release_port` on every path where the app does NOT end up
+        occupying it (spawn failure, startup exit, stop, stale cleanup).
+        """
+        async with self._lock:
+            if requested is not None and requested in self._reserved_ports:
+                # Explicit port already spoken for by another managed app —
+                # honour the intent by failing loudly rather than colliding.
+                raise AppProjectPortInUseError(
+                    message=(
+                        f"port {requested} is already reserved by another "
+                        "running app"
+                    ),
+                    details={"port": requested},
+                )
+            excluded = tuple(self._reserved_ports.union(exclude))
+            chosen = self._resolve_port(requested=requested, exclude=excluded)
+            self._reserved_ports.add(chosen)
+            return chosen
+
+    def _release_port(self, port: int | None) -> None:
+        """Drop a port reservation (idempotent; ``None`` is a no-op)."""
+        if port is not None:
+            self._reserved_ports.discard(port)
+
     def _resolve_port(
         self,
         *,
@@ -531,6 +596,9 @@ class AppProjectProcessManager:
                 )
             )
         except Exception as exc:
+            # Spawn failed before the process took the port — free the
+            # reservation so this port stays available to other apps / retries.
+            self._release_port(port)
             raise AppProjectStartFailedError(
                 message=f"failed to spawn app {app_id!r}: {exc}",
                 details={
@@ -555,7 +623,9 @@ class AppProjectProcessManager:
                 cancelled = False
         if cancelled:
             # stop() arrived mid-spawn — tear down the process we just
-            # started rather than orphaning it, and report it stopped.
+            # started rather than orphaning it, and report it stopped. The
+            # app never ends up occupying the port, so free the reservation.
+            self._release_port(port)
             await self._manager.stop(info.id)
             return AppProjectRunInfo(
                 app_id=app_id,
@@ -580,13 +650,18 @@ class AppProjectProcessManager:
         except Exception:
             await self._safe_stop(info.id)
             self._active.pop(app_id, None)
+            self._health_urls.pop(app_id, None)
+            self._release_port(port)
             raise
         if live is None or live.status in ("exited", "failed", "stopped"):
             # Process died during startup — clean up + fail (caller may
             # retry the next port for the TOCTOU auto-port case). Surface
             # the copy-pasteable manual command so the user can retry / debug
-            # outside the host (plan §4.4 / §5.7).
+            # outside the host (plan §4.4 / §5.7). Free the port so the retry
+            # (or another app) can take the next candidate cleanly.
             self._active.pop(app_id, None)
+            self._health_urls.pop(app_id, None)
+            self._release_port(port)
             tail = await self._safe_logs(info.id)
             raise AppProjectStartFailedError(
                 message=(
@@ -675,8 +750,10 @@ class AppProjectProcessManager:
         bgp_id, port, manual = entry
         info = await self._manager.get(bgp_id)
         if info is None or info.status in ("exited", "failed", "stopped"):
-            # Stale entry — the process is gone; forget it.
+            # Stale entry — the process is gone; forget it AND free its port.
             self._active.pop(app_id, None)
+            self._health_urls.pop(app_id, None)
+            self._release_port(port)
             return None
         return self._to_run_info(app_id, port, bgp_id, info, manual)
 
@@ -709,6 +786,7 @@ class AppProjectProcessManager:
         if info is None:
             self._active.pop(app_id, None)
             self._health_urls.pop(app_id, None)
+            self._release_port(port)
             return AppProjectRunInfo(
                 app_id=app_id,
                 status="stopped",
@@ -722,8 +800,13 @@ class AppProjectProcessManager:
         is_ready = ready_override if ready_override is not None else info.ready
         if info.status in ("exited", "failed"):
             status = "failed"
+            # A dead process no longer holds its port — free the reservation
+            # so another app can take it even before the stale ``_active``
+            # entry is reaped on the next run()/stop().
+            self._release_port(port)
         elif info.status == "stopped":
             status = "stopped"
+            self._release_port(port)
         elif is_ready:
             # Ready when a live /health probe passed (ready_override) or, when
             # no probe was done, the bg-process manager's own readiness flag.

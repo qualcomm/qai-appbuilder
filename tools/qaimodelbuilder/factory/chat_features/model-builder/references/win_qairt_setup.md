@@ -2,22 +2,19 @@
 
 ## Overview
 
-This reference covers environment setup for **Windows on Snapdragon (WoS) ARM64** devices
-(e.g., Snapdragon X Elite) using **QAIRT SDK `<QAIRT SDK version>`** (the installed version is recorded in `${APP_ROOT}\data\config\qairt_env.json`).
+Setup for **WoS ARM64** (Snapdragon X Elite) using **QAIRT SDK `<QAIRT SDK version>`** (recorded in `${APP_ROOT}\data\config\qairt_env.json`).
 
-> ℹ️ **Environment is pre-configured by `Setup.bat`.**
-> All paths are recorded in `${APP_ROOT}\data\config\qairt_env.json`. Scripts read it automatically.
-> This file is the troubleshooting and reference guide — no manual setup needed for normal use.
+> ℹ️ **Pre-configured by `Setup.bat`.** All paths in `qairt_env.json`; scripts read automatically. This file is troubleshooting/reference only.
 
 ---
 
 ## What `Setup.bat` Configures
 
 Runs once. Creates:
-- `venv\.venv_x64_310` — x86_64 Python 3.10 (conversion env, key: `python_x64_venv`)
-- `venv\.venv_arm64_313` — ARM64 Python 3.13 (inference env, key: `python_arm64_venv`)
-- `${APP_ROOT}\data\config\qairt_env.json` — records all paths (SDK root, venv paths, VS paths)
-- QAIRT SDK installed to `C:\Qualcomm\AIStack\QAIRT\<version>\` (default, configurable)
+- `venv\.venv_x64_310` — x86_64 Python 3.10 (conversion, key: `python_x64_venv`)
+- `venv\.venv_arm64_313` — ARM64 Python 3.13 (inference, key: `python_arm64_venv`)
+- `qairt_env.json` — all paths (SDK root, venvs, VS paths)
+- QAIRT SDK at `C:\Qualcomm\AIStack\QAIRT\<version>\`
 
 `${APP_ROOT}\data\config\qairt_env.json` structure:
 ```json
@@ -30,39 +27,30 @@ Runs once. Creates:
 }
 ```
 
-> ⚠️ Both Python environments are managed by `uv` inside the QAIModelBuilder project.
-> Actual paths are recorded in `${APP_ROOT}\data\config\qairt_env.json` after running `Setup.bat`.
-> See SKILL.md § "Python Environment Management" for the full environment management policy.
+> ⚠️ Both envs managed by `uv`. See SKILL.md § "Python Environments".
 
-> ℹ️ **Package versions are managed by `Setup.bat`** → `scripts/setup/setup_qairt_env.py`.
-> The install scripts pin all validated versions. Do NOT manually install different versions.
+> ℹ️ Versions managed by `Setup.bat` → `scripts/setup/setup_qairt_env.py`. Do NOT manually install different versions.
 
-> ⚠️ **`onnx` and `tensorflow` have conflicting `protobuf` requirements** — the install scripts pin compatible versions.
-> If you manually install packages outside the install scripts, you may break this compatibility.
->
-> **Symptom when protobuf version is wrong**:
-> ```
-> ImportError: cannot import name 'builder' from 'google.protobuf.internal'
-> ```
-> **Fix**: Re-run `Setup.bat` to restore pinned versions.
+> ⚠️ **`onnx`/`tensorflow` have conflicting `protobuf` requirements** — scripts pin compatible versions. Manual installs may break.
+> **Symptom**: `ImportError: cannot import name 'builder' from 'google.protobuf.internal'`
+> **Fix**: Re-run `Setup.bat`.
 
 ### PyTorch / torchvision — `--index-url` Rules
 
-> ⚠️ **CRITICAL**: The `--index-url` rule differs between the two Python environments.
-> Using `--index-url` when not needed will break other package installations.
+> ⚠️ **CRITICAL**: Rule differs between envs. Wrong usage breaks other installs.
 
-| Environment | Python | torch/torchvision | All other packages |
-|-------------|--------|-------------------|--------------------|
-| `python_x64_venv` | x86_64 3.10 | Standard PyPI (no `--index-url`) — `win_amd64` wheels available | Standard PyPI |
-| `python_arm64_venv` | ARM64 3.13 | **MUST use** `--index-url https://download.pytorch.org/whl` — no ARM64 Windows wheels on PyPI | Standard PyPI (no `--index-url`) |
+| Environment | torch/torchvision | Other packages |
+|-------------|-------------------|----------------|
+| `python_x64_venv` (x86_64 3.10) | Standard PyPI — `win_amd64` wheels available | Standard PyPI |
+| `python_arm64_venv` (ARM64 3.13) | **MUST** `--index-url https://download.pytorch.org/whl` | Standard PyPI (no `--index-url`) |
 
-**x86_64 python_x64_venv (conversion env):**
+**x86_64 (conversion env):**
 ```bat
 REM No --index-url needed — PyPI has win_amd64 wheels for torch/torchvision
 <python_x64_venv>\Scripts\python.exe -m pip install torch torchvision
 ```
 
-**ARM64 python_arm64_venv (inference env) — torch/torchvision ONLY:**
+**ARM64 (inference env) — torch/torchvision ONLY:**
 ```bat
 REM ARM64 Windows wheels NOT on PyPI — must use PyTorch index
 data\bin\uv\uv.exe pip install torch torchvision --index-url https://download.pytorch.org/whl
@@ -71,35 +59,28 @@ REM All other packages: standard PyPI, no --index-url
 data\bin\uv\uv.exe pip install Pillow numpy scipy matplotlib
 ```
 
-> 💡 **Note**: If model weight download fails with `SSLCertVerificationError`, use PowerShell to download:
+> 💡 `SSLCertVerificationError` on weight download → use PowerShell:
 > ```powershell
 > Invoke-WebRequest -Uri "https://download.pytorch.org/models/model.pth" -OutFile "model.pth" -UseBasicParsing
 > ```
-> Then re-run the export script (torchvision will find the cached file automatically).
+> Re-run export script; torchvision finds cached file.
 
-> 💡 **Note**: PyTorch 2.x exports ONNX with opset 18 (not 13). This is fine for QAIRT 2.45.
-> The ONNX file may use external data format (`.onnx` + `.onnx.data`) for large models — pass the `.onnx` path to the converter, it will find the `.data` file automatically.
+> 💡 PyTorch 2.x exports ONNX opset 18 (fine for QAIRT 2.45). Large models use `.onnx` + `.onnx.data`; pass `.onnx` path.
 
 ---
 
 ## QAIRT 2.45 WoS ARM64 Tool Path Rules
 
-> ⚠️ **CRITICAL**: These paths differ from older QAIRT versions and from Linux.
+> ⚠️ **CRITICAL**: Paths differ from older QAIRT and Linux.
 
 | Step | Tool | Arch Directory | Notes |
 |------|------|---------------|-------|
-| ONNX → C++/bin | `qnn-onnx-converter` | `bin/x86_64-windows-msvc/` | Python script, runs under x86 emulation |
-| C++/bin → DLL | `qnn-model-lib-generator` | `bin/aarch64-windows-msvc/` | **NOT x86_64** — compiles native ARM64 DLL |
-| DLL → Context Binary | `qnn-context-binary-generator.exe` | `bin/aarch64-windows-msvc/` | Native ARM64 executable |
+| ONNX → C++/bin | `qnn-onnx-converter` | `bin/x86_64-windows-msvc/` | Python, x86 emulation |
+| C++/bin → DLL | `qnn-model-lib-generator` | `bin/aarch64-windows-msvc/` | Compiles native ARM64 DLL |
+| DLL → Context Binary | `qnn-context-binary-generator.exe` | `bin/aarch64-windows-msvc/` | Native ARM64 exe |
 | Inference | `qai_appbuilder` | ARM64 Python 3.13 (`python_arm64_venv`) | `model.Inference([inp])` |
 
-### Why Two Different Arch Dirs?
-
-- `qnn-onnx-converter` is a **Python script** that runs under x86 emulation on WoS.
-  It lives in `x86_64-windows-msvc/` and is invoked with `python <path>`.
-- `qnn-model-lib-generator` is also a Python script but **invokes the ARM64 MSVC compiler**
-  to build a native ARM64 DLL. It lives in `aarch64-windows-msvc/`.
-- `qnn-context-binary-generator.exe` is a **native ARM64 executable** in `aarch64-windows-msvc/`.
+`qnn-onnx-converter` (Python/x86 emulation) → `x86_64-windows-msvc/`. `qnn-model-lib-generator` + `qnn-context-binary-generator.exe` (ARM64 native) → `aarch64-windows-msvc/`.
 
 ---
 
@@ -107,14 +88,14 @@ data\bin\uv\uv.exe pip install Pillow numpy scipy matplotlib
 
 `qnn-model-lib-generator` and `qnn-context-binary-generator.exe` require VS ARM64 build env.
 
-**Key rules:**
-- `vcvarsall.bat arm64` must be called in the **same `.bat` file process** — it does NOT propagate across `cmd /c "..."` subprocess calls
-- `VCTargetsPath` must point to **VS 2022 Community** (NOT BuildTools)
+**Rules:**
+- `vcvarsall.bat arm64` in **same `.bat` process** — does NOT propagate across `cmd /c` subprocesses
+- `VCTargetsPath` → **VS 2022 Community** (NOT BuildTools)
   - ✅ `C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\VC\v170\`
-  - ❌ `C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\...` ← will FAIL
-- `run_pipeline.bat` handles this automatically from `${APP_ROOT}\data\config\qairt_env.json` — use it
+  - ❌ `C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\...` ← FAILS
+- `run_pipeline.bat` handles automatically from `qairt_env.json`
 
-**Template for custom `.bat` files** (read all values from `${APP_ROOT}\data\config\qairt_env.json`):
+**Template for custom `.bat`:**
 ```bat
 @echo off
 REM Read from ${APP_ROOT}\data\config\qairt_env.json -- do NOT hardcode paths
@@ -132,61 +113,40 @@ set PATH=%QAIRT_SDK_ROOT%\lib\aarch64-windows-msvc;%QAIRT_SDK_ROOT%\bin\aarch64-
 
 ## HTP Runtime Files (Context Binary Generation)
 
-`run_pipeline.bat` copies these automatically. For manual runs, copy to working dir first:
+`run_pipeline.bat` copies automatically. For manual runs:
 ```bat
 copy %QAIRT_SDK_ROOT%\lib\aarch64-windows-msvc\QnnHtp.dll          <working_dir>\
 copy %QAIRT_SDK_ROOT%\lib\hexagon-v73\unsigned\libqnnhtpv73.cat     <working_dir>\
 copy %QAIRT_SDK_ROOT%\lib\hexagon-v73\unsigned\libQnnHtpV73Skel.so  <working_dir>\
 ```
 
-Missing these causes: `loadRemoteSymbols failed` / `DspTransport.openSession qnn_open failed`.
+Missing → `loadRemoteSymbols failed` / `DspTransport.openSession qnn_open failed`.
 
 ---
 
 ## Verification Checklist
 
 ```powershell
-# Read qairt_env.json to get paths
 $cfg = Get-Content ${APP_ROOT}\data\config\qairt_env.json | ConvertFrom-Json
-
-# 1. Check converter exists (x86_64)
-Test-Path "$($cfg.qairt_sdk_root)\bin\x86_64-windows-msvc\qnn-onnx-converter"
-
-# 2. Check lib generator exists (aarch64 — QAIRT 2.45 WoS)
-Test-Path "$($cfg.qairt_sdk_root)\bin\aarch64-windows-msvc\qnn-model-lib-generator"
-
-# 3. Check context binary generator exists (aarch64)
-Test-Path "$($cfg.qairt_sdk_root)\bin\aarch64-windows-msvc\qnn-context-binary-generator.exe"
-
-# 4. Check VCTargetsPath points to Community (not BuildTools)
-echo $cfg.vc_targets_path
-# Should contain: Microsoft Visual Studio\2022\Community
-
-# 5. Check MSBuild is from Community
-where.exe MSBuild.exe
-# Should show: C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\...
-# NOT: C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\...
-
-# 6. Check Python envs
+Test-Path "$($cfg.qairt_sdk_root)\bin\x86_64-windows-msvc\qnn-onnx-converter"     # converter
+Test-Path "$($cfg.qairt_sdk_root)\bin\aarch64-windows-msvc\qnn-model-lib-generator" # lib gen
+Test-Path "$($cfg.qairt_sdk_root)\bin\aarch64-windows-msvc\qnn-context-binary-generator.exe" # ctx gen
+echo $cfg.vc_targets_path  # Must contain "Community", NOT "BuildTools"
 & "$($cfg.python_x64_venv)\Scripts\python.exe" -c "import onnx; print('conversion env OK')"
 & "$($cfg.python_arm64_venv)\Scripts\python.exe" -c "import qai_appbuilder; print('inference env OK')"
 ```
-
-> ℹ️ The import check above is the correct way to verify the inference env.
 
 ---
 
 ## Common Issues
 
-### Issue: `qnn-model-lib-generator` fails with CMake error
+### `qnn-model-lib-generator` CMake error
 
 **Symptom**: `CMake Error: CMAKE_C_COMPILER not found`
+**Cause**: `vcvarsall.bat arm64` not called, or `VCTargetsPath` → BuildTools.
+**Fix**: Use `run_pipeline.bat`, or read `vs_vcvarsall`/`vc_targets_path` from `qairt_env.json` (see template).
 
-**Cause**: `vcvarsall.bat arm64` was not called, or `VCTargetsPath` points to BuildTools.
-
-**Fix**: Use `run_pipeline.bat` (handles automatically), or in custom `.bat` files read `vs_vcvarsall` and `vc_targets_path` from `${APP_ROOT}\data\config\qairt_env.json` (see template above).
-
-### Issue: `qnn-model-lib-generator` fails with `VCTargetsPath.vcxproj` / `BaseOutputPath not set`
+### `qnn-model-lib-generator` — `BaseOutputPath not set`
 
 **Symptom**:
 ```
@@ -195,66 +155,44 @@ C:\...\Microsoft.Common.CurrentVersion.targets: error : The BaseOutputPath/Outpu
 Configuration='Debug'  Platform='ARM64'
 ```
 
-**Cause**: `VCTargetsPath` points to **VS 2022 BuildTools** instead of **VS 2022 Community**.
-BuildTools MSBuild cannot compile ARM64 DLLs for QNN model library generation.
-
-**Fix**: `vc_targets_path` in `${APP_ROOT}\data\config\qairt_env.json` already points to Community. Ensure it is read correctly:
+**Cause**: `VCTargetsPath` → BuildTools (cannot compile ARM64 DLLs for QNN).
+**Fix**: Ensure `vc_targets_path` read correctly:
 ```bat
 for /f "delims=" %%T in ('powershell -NoProfile -Command "(Get-Content ${APP_ROOT}\data\config\qairt_env.json | ConvertFrom-Json).vc_targets_path"') do set VCTargetsPath=%%T
 ```
-
-**Verification**: Check which MSBuild is being used:
+**Verify**:
 ```bat
 where MSBuild.exe
 REM Should show: C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\...
 REM NOT: C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\...
 ```
 
-### Issue: `Unknown Key` warnings during context binary generation
+### `Unknown Key` warnings (context binary generation)
 
-**Symptom**: Warnings like `[WARNING] Unknown Key: ...` in generator output.
-
-**Cause**: Non-fatal warnings from HTP backend config parsing.
-
-**Fix**: These are **non-fatal**. Check if the `.bin` file was created — if yes, proceed normally.
+`[WARNING] Unknown Key: ...` — **non-fatal**. If `.bin` created, proceed.
 
 ---
 
 ## run_pipeline.bat
 
-Known issues (QAIRT_SDK_ROOT not read from `qairt_env.json`, DLL search picking `QnnHtp.dll`, context binary exit code false failure) are all fixed in the current version. Use `run_pipeline.bat` directly — no manual workarounds needed.
+Known issues (QAIRT_SDK_ROOT read, DLL search, exit code) all fixed. Use directly.
 
-### Issue: `qai_appbuilder` import error
+### `qai_appbuilder` import error
 
 **Symptom**: `ModuleNotFoundError: No module named 'qai_appbuilder'`
-
-**Fix**: Use ARM64 Python from `python_arm64_venv` in `${APP_ROOT}\data\config\qairt_env.json`:
+**Fix**: Use ARM64 Python from `python_arm64_venv`:
 ```bat
 for /f "delims=" %%P in ('powershell -NoProfile -Command "(Get-Content ${APP_ROOT}\data\config\qairt_env.json | ConvertFrom-Json).python_arm64_venv"') do set PYTHON_ARM64=%%P\Scripts\python.exe
 %PYTHON_ARM64% -c "import qai_appbuilder; print('OK')"
 ```
-If this fails → run `Setup.bat` from the QAIModelBuilder project directory.
+If fails → re-run `Setup.bat`.
 
-### Issue: Architecture detection unreliable
+### Host architecture detection under x86 emulation
 
-**Do NOT use** `$env:PROCESSOR_ARCHITECTURE` or Python's `platform.machine()` on WoS —
-both can be affected by x86 emulation.
-
-**Use instead**:
-```powershell
-# Reliable: WMI Win32_Processor.Architecture
-(Get-WmiObject Win32_Processor).Architecture
-# 0 = x86, 5 = ARM, 9 = x64 (AMD64), 12 = ARM64
-
-# Or check DLL architecture:
-dumpbin /headers C:\path\to\model.dll | find "machine"
-```
-
+`platform.machine()` returns **process arch** (correct for runtime dispatch). **Host arch** (physical CPU, for converter toolchain) → `data/config/host_arch` (set by `Setup.bat --arch`) or WMI `(Get-WmiObject Win32_Processor).Architecture` (12 = ARM64).
 ---
 
 ## Platform SoC Identification (HTP Version Detection)
-
-Run this command to identify the SoC and determine the correct `--htp_version`:
 
 ```powershell
 Get-ChildItem "HKLM:\SYSTEM\CurrentControlSet\Services" |
@@ -262,39 +200,56 @@ Get-ChildItem "HKLM:\SYSTEM\CurrentControlSet\Services" |
   Get-ItemProperty | Select-Object PSChildName, ImagePath
 ```
 
-Read the 4-digit code from the INF filename in `ImagePath`:
+Read 4-digit code from INF filename in `ImagePath`:
 
 | INF code | Device | `--htp_version` | `--soc_model` |
 |:--------:|--------|:---------------:|:-------------:|
-| `8380` | Snapdragon X Elite (X1E-80-100 etc.) | `v73` | `60` |
-| `8480` | Snapdragon X2 Elite (XG102006 etc.) | `v73` | `88` |
+| `8380` | Snapdragon X Elite (X1E-80-100) | `v73` | `60` |
+| `8480` | Snapdragon X2 Elite (XG102006) | `v73` | `88` |
 
-> ⚠️ **Never use `Get-PnpDeviceProperty`** for this purpose — it wakes the DSP subsystem
-> and can block for 300-400 seconds on Snapdragon platforms.
-> ⚠️ **Never use `Get-WmiObject Win32_SystemDriver`** — WMI provider throttling causes this query
-> to hang indefinitely on busy systems (verified: hangs even with 120s timeout).
+> ⚠️ **Never `Get-PnpDeviceProperty`** — wakes DSP, blocks 300-400s.
+> ⚠️ **Never `Get-WmiObject Win32_SystemDriver`** — WMI throttling → indefinite hang.
 
 ---
 
-## QAIRT 2.45 Specific Notes
+### Context Binary (Windows)
 
-### Context Binary Generation (Windows-specific)
-
-- **`Wrong number of Parameters 5` / `Conv2d failed 3110`**: Root cause is **missing VS ARM64 environment**, NOT an operator patching issue. Fix: run `qnn-context-binary-generator.exe` inside a `.bat` file that calls `vcvarsall.bat arm64` at the top. Only resort to `.cpp` patching if the error persists after correct env setup.
-- **HTP runtime files required in working dir**: Copy these before running `qnn-context-binary-generator.exe`:
-  - `QnnHtp.dll` (from `%QAIRT_SDK_ROOT%\lib\aarch64-windows-msvc\`)
-  - `libqnnhtpv73.cat` (from `%QAIRT_SDK_ROOT%\lib\hexagon-v73\unsigned\`)
-  - `libQnnHtpV73Skel.so` (from `%QAIRT_SDK_ROOT%\lib\hexagon-v73\unsigned\`)
-  - Missing these causes: `loadRemoteSymbols failed` / `DspTransport.openSession qnn_open failed`
-- **VS ARM64 env scope**: `vcvarsall.bat arm64` only takes effect in the same process — always use a `.bat` file, never `cmd /c "..."` from a separate terminal
-- **`--no_simplification`**: Use with `qnn-onnx-converter` on WoS to avoid simplification issues
+- `Wrong number of Parameters 5` / `Conv2d failed 3110` = missing VS ARM64 env (NOT operator patching). Fix: `.bat` with `vcvarsall.bat arm64`.
+- Copy HTP runtime files to working dir: `QnnHtp.dll`, `libqnnhtpv73.cat`, `libQnnHtpV73Skel.so` (missing → `loadRemoteSymbols failed`).
+- VS env same-process only — use `.bat`, not `cmd /c`. Add `--no_simplification` on WoS.
 
 ### Inference API (qai_appbuilder)
 
-For full API reference → see `references/inference.md`. Quick summary:
-- `QNNConfig.Config(Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)` — call before `QNNContext`; qai_appbuilder 2.47 dropped the old leading lib-dir arg (internal `libs/` used automatically)
-- `QNNContext("model_name", "model.bin")` — supports `.bin` / `.dlc` / `.dll`; `.bin` is preferred
-- Subclass `QNNContext`, override `Inference(self, input_data)`
-- Input format: check `model.getInputShapes()` — NCHW if `--preserve_io` used (default), NHWC otherwise. See `references/inference.md` for details.
-- Wrap with `PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)` / `RelPerfProfileGlobal()`
-- Always `del model` after use
+Full → `references/inference.md`. Key: `QNNConfig.Config(Runtime.HTP, ...)` before `QNNContext`; 2.47 dropped lib-dir arg. Input layout: NCHW if `--preserve_io`. BURST lifecycle: set once/release once. `del model` after use.
+
+## Reference Times (NOT for timeouts)
+
+> All commands MUST use `timeout=0`. Estimates only.
+
+| Operation | Time | Notes |
+|-----------|------|-------|
+| ONNX export (≤256×256, torch 2.x) | ~10s | No forward pass + `do_constant_folding=False` |
+| ONNX export (512×512, torch 2.x) | ~41s | Optimized |
+| ONNX export (512×512, torch 1.13) | ~163s | ~275s unoptimized |
+| FP16/FP32 conversion | ~30-120s | Per model |
+| Context binary generation | ~200s | Per model |
+| W8A8 quant (512×512, 2 samples) | ~392s | Scales with size × samples |
+| W8A16 quant (256×256, 20 samples) | ~482s | Reference |
+| W8A8 quant (256×256, 20 samples) | ~351s | Reference |
+
+> ⚠️ Quantization scales with H×W × sample count (512×512 ≈ 4× of 256×256). Check shape via `qai_inspect_onnxio.py`.
+
+## ARM64 Inference venv — Packages & Offline Install
+
+| Package | Status | Notes |
+|---------|--------|-------|
+| `numpy` | Pre-installed (`vendor\whl\`) | Do not reinstall |
+| `opencv-python-headless` | Pre-installed (`vendor\whl\`) | Headless; no `cv2.imshow`. **Never install `opencv-python` GUI — conflicts.** |
+| `Pillow` | Via `pip install -e .` | Official `win_arm64` cp313 wheels |
+| `torch`/`torchvision` | Not pre-installed | See `--index-url` rule above; install only if needed |
+
+> `import cv2`/`from PIL import Image` fails → `Setup.bat` incomplete. Re-run it (don't `pip install opencv-python`).
+
+**Verify**: `<python_arm64_venv>\Scripts\python.exe -c "import qai_appbuilder; print('OK')"`
+
+**Offline install**: `data\bin\uv\uv.exe pip install vendor\whl\qai_appbuilder-*.whl`

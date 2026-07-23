@@ -57,9 +57,9 @@ two-stage model:
   `policy_templates/` review-only TOML byproducts.
 - `db_staging/` — JSONL seed rows for `qai.db` (consumed by the
   `seed_defaults` install stage).
-- `app_builder/` — packaged AppBuilder model runner files (descriptors
-  + assets).
-- `chat_features/` — packaged chat feature / skill packs.
+- `chat_features/` — packaged chat feature / skill packs (model-builder,
+  model-hub, app-builder, etc.). Each subdirectory is a self-contained
+  skill with its own `SKILL.md`, references, and optional runtime scripts.
 - `user_config.toml` — TOML default user config (copied into `data/`
   on first run).
 - `secrets_manifest.json` — SecretStore namespace declaration (no

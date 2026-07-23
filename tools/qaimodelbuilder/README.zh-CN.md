@@ -94,7 +94,7 @@ QAI ModelBuilder 已**全面重写为 Clean Architecture / DDD 应用**。代码
 
 ## 🧩 App Builder —— 一键运行端侧 AI 模型
 
-> **在骁龙 NPU 上使用 AI 模型最快的方式。** App Builder 在聊天界面中嵌入了一个工作台，每个模型都是位于 `factory/app_builder/models/<id>/` 的自包含 **Model Pack**。上传图片 / 录音 / 输入文字，点击 **Run** 即可拿到结果，并由对应查看器渲染。所有推理通过 QAI AppBuilder + QNN HTP 在本机完成——**输入数据不上传**。
+> **在骁龙 NPU 上使用 AI 模型最快的方式。** App Builder 在聊天界面中嵌入了一个工作台，每个模型都是位于 `factory/chat_features/app-builder/models/<id>/` 的自包含 **Model Pack**。上传图片 / 录音 / 输入文字，点击 **Run** 即可拿到结果，并由对应查看器渲染。所有推理通过 QAI AppBuilder + QNN HTP 在本机完成——**输入数据不上传**。
 
 ### 快速上手
 
@@ -118,7 +118,7 @@ QAI ModelBuilder 已**全面重写为 Clean Architecture / DDD 应用**。代码
 
 > 当前内置 Pack 覆盖 **ASR / TTS**。Pack 的分类体系也支持 SR / CV 等更多类别——可用 [Model Builder](#-核心亮点model-builder-技能) 转换自有模型，再一键 **导入到 App Builder** 新增 Pack（如图像分类或超分辨率）。`inception-v3` / `real-esrgan` 等演示模型随 `model-hub` 内置模式提供，并非 App Builder 内置 Pack。
 >
-> **新增 Pack 只需复制目录：** 拷贝 `_template` 模板，修改 `manifest.json` + `runner.py`，放入权重即可。后端启动时自动扫描 `factory/app_builder/models/*/manifest.json`。
+> **新增 Pack 只需复制目录：** 拷贝 `_template` 模板，修改 `manifest.json` + `runner.py`，放入权重即可。后端启动时自动扫描 `factory/chat_features/app-builder/models/*/manifest.json`。
 
 ### 核心能力
 
@@ -184,7 +184,7 @@ QAI ModelBuilder 已**全面重写为 Clean Architecture / DDD 应用**。代码
 
 1. 完成一次 Model Builder 运行（转换好的 `.bin` 位于工作区 `output/` 目录）。
 2. Model Builder UI 出现 **Promote to App Builder** 卡片，扫描输出、识别每种精度（`fp16` / `fp32` / `int8`→`w8a8` / `w8a16` / `w4a16` / `int4`→`w4a8` / `w8a8b8`），让你勾选要打包的变体并选默认精度。
-3. Importer（`FileSystemAppImportAdapter`，`src/qai/app_builder/infrastructure/app_import_adapter.py`）执行 `scan-bins → dry-run → commit → rollback` 安全流程——`dry-run` 校验 runner、权重 checksum、Schema 并对默认变体做 NPU 冒烟测试；`commit` 原子复制 Pack 到 `factory/app_builder/models/<id>/` 并暴露到 App Builder。
+3. Importer（`FileSystemAppImportAdapter`，`src/qai/app_builder/infrastructure/app_import_adapter.py`）执行 `scan-bins → dry-run → commit → rollback` 安全流程——`dry-run` 校验 runner、权重 checksum、Schema 并对默认变体做 NPU 冒烟测试；`commit` 原子复制 Pack 到 `factory/chat_features/app-builder/models/<id>/` 并暴露到 App Builder。
 
 ---
 
@@ -361,11 +361,11 @@ AI 会自动完成源模型下载、ONNX 导出、多精度转换、推理执行
 
 | 脚本 | 作用 |
 |------|------|
-| `Setup.bat` | **唯一安装入口。** 下载 `uv`、安装 Python 3.13 ARM64、在 `%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_arm64_313` 建 venv、安装运行时依赖（`uv pip install -e .`）、初始化 `data/` 目录（经 `python -m scripts.init.install`），并安装 PortableGit / Node+pnpm / QAIRT SDK / VS 2022 / TTS 数据 / WebView2。可选参数：`--no-builder`（跳过转换工具链）、`--dev`、`--desktop`、`--no-pause`。 |
+| `Setup.bat` | **唯一安装入口。** 下载 `uv`、安装 Python 3.13（默认 ARM64；`--arch x64` 可装 x64 版）、在 `%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_arm64_313`（或 `.venv_x64_313`）建 venv、安装运行时依赖（`uv pip install -e .`）、初始化 `data/` 目录（经 `python -m scripts.init.install`），并安装 PortableGit / Node+pnpm / QAIRT SDK / VS 2022 / TTS 数据 / WebView2。可选参数：`--arch arm64|x64`、`--no-builder`（跳过转换工具链）、`--dev`、`--desktop`、`--no-pause`。 |
 | `Start.bat` | 启动服务（受监管）。端口**不硬编码**——监管器探测回退列表，把真实 URL 写入 `data/runtime/server.endpoint.json` 并自动开浏览器。`Start.bat --reload` 启用热重载。 |
 | `Build.bat` | 把 Vue 3 SPA 构建到 `frontend/dist/`（pnpm）。`--full`（typecheck+lint+test）、`--install`、`--clean`、`--desktop`（Tauri 打包）。 |
 | `Release.bat` | 构建可直接分发给最终用户的 clean-cutover 发布产物。 |
-| `Console.bat` | 打开已激活 ARM64 venv 的交互式 shell（装额外包、运行 Python 命令）。 |
+| `Console.bat` | 打开已激活宿主架构 venv 的交互式 shell（按 `data/config/host_arch` 选择 ARM64 或 x64）。 |
 | `Uninstall.bat` | 卸载器——回滚 `Setup.bat` 装在项目目录外的内容；**不删除 `data/`**。 |
 
 > 旧的 `Install.bat` / `Launch.bat` 流程已移除——安装用 `Setup.bat`，启动用 `Start.bat`。

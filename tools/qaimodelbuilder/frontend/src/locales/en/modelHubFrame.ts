@@ -17,7 +17,7 @@ const modelHubFrame = {
   pickModel: "Pick a model",
   pickModelHint: "Search and pick a pre-built model from Qualcomm AI Hub",
   pickModelHeader: "Select an AI Hub model",
-  pickModelPlaceholder: "e.g. resnet50, whisper-base, yolov8-det",
+  pickModelPlaceholder: "e.g. resnet50, whisper-base, zipformer",
   pickModelConfirm: "Confirm",
   pickModelDesc:
     "Enter the AI Hub model name; the agent downloads the pre-compiled package and runs it on-device — no conversion needed.",

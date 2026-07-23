@@ -26,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import time
 from pathlib import Path
 
 from qai.model_builder.domain import Precision
@@ -36,9 +37,15 @@ __all__ = [
     "IMAGE_EXTENSIONS",
     "STALE_TOP_FILES",
     "PACK_KEEP_DIRS",
+    "GENERATING_SENTINEL",
+    "CANDIDATE_FILE",
+    "GENERATING_STALE_SECONDS",
     "sha256_file",
     "link_or_copy",
     "clean_for_re_export",
+    "mark_generating",
+    "clear_generating",
+    "probe_export_status",
     "find_context_binary",
     "collect_example_images",
 ]
@@ -63,6 +70,36 @@ STALE_TOP_FILES: tuple[str, ...] = (
 PACK_KEEP_DIRS: tuple[str, ...] = (
     "examples", "provenance", "weights", "assets",
 )
+
+GENERATING_SENTINEL = ".generating"
+"""In-flight marker written to ``app_pack/`` while an export runs.
+
+The auto-export route is synchronous (it blocks until the whole 13-step
+pipeline finishes), so the ONLY durable record that generation is under
+way lives on disk: this sentinel is written at the start of the export
+(before any long-running step) and removed in a ``finally`` when the
+export returns — success OR failure. The Import panel polls
+``probe_export_status`` on (re)open so a user who closes the window
+mid-generation still sees "生成中..." on reopen instead of the initial
+button (the frontend ``exporting`` ref is ephemeral and lost on close).
+"""
+
+CANDIDATE_FILE = "_candidate.json"
+"""Top-level structural marker written LAST by the export (step 13).
+
+Its presence is the authoritative "generation finished" signal used by
+both the dry-run candidate resolver and ``probe_export_status``.
+"""
+
+GENERATING_STALE_SECONDS = 3600.0
+"""Age after which a lingering ``.generating`` sentinel is treated as stale.
+
+A crash / hard-kill between ``mark_generating`` and ``clear_generating``
+would otherwise strand the panel in a permanent "生成中..." state. If the
+sentinel is older than this and no ``_candidate.json`` exists, the status
+probe reports ``idle`` so the user can retry. One hour comfortably
+exceeds a real multi-precision export (minutes).
+"""
 
 
 def sha256_file(path: Path) -> str:
@@ -134,6 +171,79 @@ def clean_for_re_export(
     # ``keep`` is consulted by callers that want to know what to
     # preserve; the function itself only removes what's listed above.
     _ = keep
+
+
+def mark_generating(pack_dir: Path) -> None:
+    """Write the in-flight ``.generating`` sentinel into ``pack_dir``.
+
+    Called once at the very start of an export, before the pipeline's
+    long-running steps, so a concurrent Import-panel (re)open can observe
+    that generation is under way. Also removes any stale ``_candidate.json``
+    from a previous export so ``probe_export_status`` cannot report a fresh
+    run as already ``generated`` before it actually finishes. Best-effort:
+    a failure to write the sentinel must not abort the export.
+    """
+    try:
+        pack_dir.mkdir(parents=True, exist_ok=True)
+        stale = pack_dir / CANDIDATE_FILE
+        if stale.is_file():
+            try:
+                stale.unlink()
+            except OSError:
+                pass
+        (pack_dir / GENERATING_SENTINEL).write_text(
+            _now_iso(), encoding="utf-8"
+        )
+    except OSError:
+        pass
+
+
+def clear_generating(pack_dir: Path) -> None:
+    """Remove the ``.generating`` sentinel. Best-effort, idempotent.
+
+    Called in a ``finally`` when the export returns (success or failure)
+    so the transient in-flight state never outlives the request.
+    """
+    try:
+        (pack_dir / GENERATING_SENTINEL).unlink()
+    except OSError:
+        pass
+
+
+def probe_export_status(workdir: Path) -> str:
+    """Report the on-disk export state of ``<workdir>/app_pack`` as a token.
+
+    Returns one of:
+
+    * ``"generated"`` — ``_candidate.json`` exists (export finished);
+    * ``"generating"`` — the ``.generating`` sentinel exists, is not stale
+      (younger than :data:`GENERATING_STALE_SECONDS`) and no candidate is
+      present yet;
+    * ``"idle"`` — neither (never generated, or a stale/abandoned run).
+
+    ``_candidate.json`` wins over the sentinel so a completed export whose
+    ``clear_generating`` did not run (e.g. hard kill after step 13) still
+    reports ``generated``.
+    """
+    pack_dir = workdir / "app_pack"
+    if (pack_dir / CANDIDATE_FILE).is_file():
+        return "generated"
+    sentinel = pack_dir / GENERATING_SENTINEL
+    if sentinel.is_file():
+        try:
+            age = time.time() - sentinel.stat().st_mtime
+        except OSError:
+            age = 0.0
+        if age <= GENERATING_STALE_SECONDS:
+            return "generating"
+    return "idle"
+
+
+def _now_iso() -> str:
+    """UTC ISO-8601 timestamp for the sentinel body (diagnostic only)."""
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
 
 
 def find_context_binary(

@@ -284,7 +284,7 @@ const index = {
     pickModel: "選擇 AI Hub 模型",
     pickModelHint: "從 Qualcomm AI Hub 選擇一個預編譯模型",
     pickModelHeader: "Qualcomm AI Hub 模型",
-    pickModelPlaceholder: "如 Llama-v3-8B、YOLOv8-Detection…",
+    pickModelPlaceholder: "如 Llama-v3-8B、Zipformer…",
     pickModelConfirm: "確定",
     pickModelDesc: "輸入 AI Hub 模型名稱或 id，然後在對話中描述你的需求——Agent 會為你下載預編譯好的模型包。",
     export: "匯出到 App Builder",

@@ -1430,20 +1430,11 @@ def build_chat_services(container: "Container") -> ChatServices:
         _workspace_root = resolve_workspace_root(container)
     except Exception:  # noqa: BLE001
         _workspace_root = None
-    # ``app-builder`` SKILL.md lives directly under ``factory/app_builder/``
-    # (not under ``factory/chat_features/``), so we pass an absolute-path
-    # override for that tool mode.  All other tool modes continue to resolve
-    # relative to ``_features_dir`` (factory/chat_features).
     _feature_skill_provider = FeatureSkillProvider(
         features_dir=_features_dir,
         workspace_root=_workspace_root,
         app_root=str(container.repo_root),
-        tool_mode_dir_map={
-            **TOOL_MODE_DIR_MAP,
-            # Override: point app-builder directly at factory/app_builder/
-            # so FeatureSkillProvider resolves factory/app_builder/SKILL.md.
-            "app-builder": str(container.repo_root / "factory" / "app_builder"),
-        },
+        tool_mode_dir_map=TOOL_MODE_DIR_MAP,
     )
 
     system_prompt_builder: SystemPromptBuilderPort = RichSystemPromptBuilder(

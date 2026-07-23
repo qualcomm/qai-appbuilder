@@ -69,6 +69,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -98,7 +99,36 @@ DEFAULT_QAIRT_DOWNLOAD_URL_TEMPLATE = (
 LOCALAPPDATA_RELATIVE = Path("QAIModelBuilder")
 ARM64_VENV_RELATIVE = LOCALAPPDATA_RELATIVE / "envs" / ".venv_arm64_313"
 X64_VENV_RELATIVE = LOCALAPPDATA_RELATIVE / "envs" / ".venv_x64_310"
+# x64 host runtime venv (Python 3.13, mirrors setup_qairt_env.py). Distinct
+# from X64_VENV_RELATIVE which is the x64 CONVERTER venv (Python 3.10).
+X64_RUNTIME_VENV_RELATIVE = LOCALAPPDATA_RELATIVE / "envs" / ".venv_x64_313"
 QAIRT_CONFIG_RELATIVE = LOCALAPPDATA_RELATIVE / "config" / "qairt_env.json"
+
+
+def _current_arch() -> str:
+    """Return ``"arm64"`` / ``"x64"`` per :func:`platform.machine`.
+
+    Mirrors ``qai.platform.process.arch.current_arch`` (kept independent
+    to avoid importing app-facing packages from an installer script).
+    """
+    machine = (platform.machine() or "").lower()
+    if machine in ("arm64", "aarch64"):
+        return "arm64"
+    return "x64"
+
+
+def _runtime_venv_relative() -> Path:
+    """Host-arch runtime venv relative path (Python 3.13)."""
+    if _current_arch() == "arm64":
+        return ARM64_VENV_RELATIVE
+    return X64_RUNTIME_VENV_RELATIVE
+
+
+def _qairt_runtime_subdir() -> str:
+    """QNN runtime SDK subdir per host arch."""
+    if _current_arch() == "arm64":
+        return "arm64x-windows-msvc"
+    return "x86_64-windows-msvc"
 
 # Visual Studio 2022 toolchain locations (parity with
 # scripts/setup/setup_qairt_env.py — the model-builder pipeline's QNN
@@ -155,6 +185,13 @@ class InstallPaths:
 
     repo_root: Path
     localappdata: Path
+    # Host-arch runtime venv (Python 3.13). On arm64 == arm64_venv; on x64
+    # points at .venv_x64_313. Used by verify() + the qairt_env.json daemon
+    # keys so the resolver picks a real python.exe on either host.
+    runtime_venv: Path
+    # Literal per-arch runtime venv paths (kept for schema back-compat: the
+    # pipeline reads python_arm64_venv, we still write it as the literal
+    # arm64 path regardless of host).
     arm64_venv: Path
     x64_venv: Path
     qairt_sdk_root: Path
@@ -193,6 +230,7 @@ def _resolve_paths(args: argparse.Namespace) -> InstallPaths:
     lad = _localappdata()
     arm64 = lad / "QAIModelBuilder" / "envs" / ".venv_arm64_313"
     x64 = lad / "QAIModelBuilder" / "envs" / ".venv_x64_310"
+    runtime = lad / _runtime_venv_relative()
 
     sdk_root_str = args.sdk_root or os.environ.get("QAIRT_SDK_ROOT") or (
         DEFAULT_QAIRT_SDK_ROOT_TEMPLATE.format(version=args.qairt_version)
@@ -214,6 +252,7 @@ def _resolve_paths(args: argparse.Namespace) -> InstallPaths:
     return InstallPaths(
         repo_root=repo,
         localappdata=lad,
+        runtime_venv=runtime,
         arm64_venv=arm64,
         x64_venv=x64,
         qairt_sdk_root=sdk_root,
@@ -510,6 +549,10 @@ def write_qairt_env_json(
     x64_python = str(paths.x64_venv / "Scripts" / "python.exe").replace(
         "\\", "/"
     )
+    runtime_python = str(paths.runtime_venv / "Scripts" / "python.exe").replace(
+        "\\", "/"
+    )
+    runtime_venv_fwd = str(paths.runtime_venv).replace("\\", "/")
     download_url = DEFAULT_QAIRT_DOWNLOAD_URL_TEMPLATE.format(
         version=qairt_version
     )
@@ -533,9 +576,12 @@ def write_qairt_env_json(
         "vs_vcvarsall": vcvarsall,
         "vc_targets_path": vc_targets,
         "vs_cmake_path": vs_cmake_path,
+        # ----- host-arch runtime keys (setup_qairt_env.py parity) -----
+        "python_runtime_venv": runtime_venv_fwd,
+        "qairt_runtime_subdir": _qairt_runtime_subdir(),
         # ----- daemon runtime keys (interpreter_resolver / di.py) -----
         "qairt_root": sdk_root_fwd,
-        "venv_python": arm64_python,
+        "venv_python": runtime_python,
         # ----- back-compat interpreter pointers (kept from prior schema) -----
         "venv_arm64_python": arm64_python,
         "venv_x64_python": x64_python,
@@ -565,13 +611,15 @@ def verify(paths: InstallPaths, *, qairt_version: str) -> bool:
 
     issues: list[str] = []
 
-    arm64_python = paths.arm64_venv / "Scripts" / "python.exe"
-    if not arm64_python.is_file():
-        issues.append(f"ARM64 venv missing: {arm64_python}")
-    elif not _venv_is_complete(paths.arm64_venv):
+    runtime_python = paths.runtime_venv / "Scripts" / "python.exe"
+    if not runtime_python.is_file():
         issues.append(
-            f"ARM64 venv incomplete (python.exe present but activate.bat / "
-            f"pip missing): {paths.arm64_venv}"
+            f"Runtime venv missing ({_current_arch()}): {runtime_python}"
+        )
+    elif not _venv_is_complete(paths.runtime_venv):
+        issues.append(
+            f"Runtime venv incomplete (python.exe present but activate.bat / "
+            f"pip missing): {paths.runtime_venv}"
         )
 
     x64_python = paths.x64_venv / "Scripts" / "python.exe"
@@ -691,6 +739,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     _info(f"repo_root         = {paths.repo_root}")
     _info(f"localappdata      = {paths.localappdata}")
+    _info(f"runtime_venv      = {paths.runtime_venv}  ({_current_arch()})")
     _info(f"arm64_venv        = {paths.arm64_venv}")
     _info(f"x64_venv          = {paths.x64_venv}")
     _info(f"qairt_sdk_root    = {paths.qairt_sdk_root}")

@@ -966,12 +966,27 @@ class ImportScanBinsUseCase:
             return ()
 
         model_name = workdir.name
-        prefix = model_name + "_"
         out: list[BinScanResult] = []
+
+        # ── (1) Authoritative variant from inference_manifest.json ────────────
+        # The manifest (``<workdir>/inference_manifest.json``, single-precision:
+        # {precision, context_binary}) is the SOURCE OF TRUTH for the DEFAULT
+        # variant's precision — crucially, it works even when the weight file
+        # has NO ``_<label>`` suffix in its name (e.g. ``output/yolov8n.dlc``),
+        # which the filename-suffix scan below cannot classify. We read it FIRST
+        # so precision is taken from the manifest's ``precision`` field, not
+        # guessed from the filename. Best-effort: any error → skip, fall back to
+        # the filename scan. Additional (non-default) precisions still come from
+        # the suffix scan in (2).
+        manifest_variant = self._read_manifest_variant(workdir, output_dir)
+        if manifest_variant is not None:
+            out.append(manifest_variant)
+
+        # ── (2) Additional variants by filename suffix ───────────────────────
         try:
             entries = sorted(output_dir.iterdir())
         except OSError:
-            return ()
+            return tuple(out)  # manifest variant (if any) still stands
 
         for f in entries:
             try:
@@ -983,12 +998,22 @@ class ImportScanBinsUseCase:
             except OSError:
                 continue
 
+            # Extract the precision label as the segment AFTER THE LAST ``_``.
+            # We deliberately do NOT require the filename to be prefixed by the
+            # workdir's directory name: the ``output/`` dir is already this
+            # model's own output folder, so any ``*_<label>.{bin,dlc}`` inside
+            # it is a variant of this model. Requiring ``<dirname>_`` broke real
+            # cases where the model_name used in filenames differs from the
+            # workspace folder name — e.g. workspace ``C:\WoS_AI\yolov8`` but
+            # files named ``yolov8n_fp16.bin`` (the "yolov8n" YOLOv8-nano
+            # model). The label suffix + ``_LABEL_TO_PRECISION`` membership is
+            # the real signal; the model-name prefix is informational only.
             stem = f.stem
-            if not stem.startswith(prefix):
+            us = stem.rfind("_")
+            if us <= 0 or us == len(stem) - 1:
                 continue
-            label_raw = stem[len(prefix):].lower()
-            if not label_raw:
-                continue
+            label_raw = stem[us + 1:].lower()
+            file_model = stem[:us]  # informational (may differ from dir name)
             precision = _LABEL_TO_PRECISION.get(label_raw)
             if not precision:
                 _log.debug(
@@ -1010,7 +1035,7 @@ class ImportScanBinsUseCase:
                 BinScanResult(
                     path=str(f.as_posix()),
                     size_bytes=stat.st_size,
-                    suspected_model_id=model_name,
+                    suspected_model_id=file_model or model_name,
                     precision=precision,
                     label=display_label,
                     mtime=mtime_iso,
@@ -1045,6 +1070,81 @@ class ImportScanBinsUseCase:
         # Stable order: by display label (deterministic UI rendering).
         deduped.sort(key=lambda r: r.label or "")
         return tuple(deduped)
+
+    def _read_manifest_variant(
+        self, workdir: Path, output_dir: Path
+    ) -> "BinScanResult | None":
+        """Read the DEFAULT variant from ``<workdir>/inference_manifest.json``.
+
+        The manifest is the authoritative source for the default weight's
+        precision (its ``precision`` field), so this works even when the weight
+        file name carries NO ``_<label>`` suffix (e.g. ``output/yolov8n.dlc``) —
+        the case the filename-suffix scan cannot classify. Returns a
+        ``BinScanResult`` when the manifest resolves to an existing, large-enough
+        weight with a known precision, else ``None`` (best-effort: any parse /
+        IO error is swallowed and the caller falls back to         the suffix scan).
+        """
+        import json
+        from datetime import datetime, timezone
+
+        manifest_path = workdir / "inference_manifest.json"
+        if not manifest_path.is_file():
+            return None
+        try:
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, UnicodeDecodeError):
+            return None
+        if not isinstance(data, dict):
+            return None
+
+        prec_raw = data.get("precision")
+        cb_rel = data.get("context_binary")
+        if not isinstance(prec_raw, str) or not isinstance(cb_rel, str):
+            return None
+        if prec_raw.strip() == "" or cb_rel.strip() == "":
+            return None
+
+        precision = _LABEL_TO_PRECISION.get(prec_raw.strip().lower())
+        if not precision:
+            return None
+
+        # Resolve context_binary (a relative posix path like
+        # ``output/<model>_<prec>.bin``) against the workdir. Guard against path
+        # escape (``..``) and only accept a weight actually under output_dir.
+        try:
+            weight = (workdir / cb_rel).resolve()
+        except (OSError, ValueError):
+            return None
+        try:
+            weight.relative_to(output_dir.resolve())
+        except ValueError:
+            return None  # manifest points outside output/ — ignore, be safe
+        if weight.suffix.lower() not in self._WEIGHT_SUFFIXES:
+            return None
+        try:
+            if not weight.is_file():
+                return None
+            stat = weight.stat()
+            if stat.st_size < _SCAN_BIN_MIN_BYTES:
+                return None
+        except OSError:
+            return None
+
+        mtime_iso = datetime.fromtimestamp(
+            stat.st_mtime, tz=timezone.utc
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        display_label = _PLAN_TO_DISPLAY_LABEL.get(precision, precision.upper())
+        model_id = data.get("model_name")
+        return BinScanResult(
+            path=str(weight.as_posix()),
+            size_bytes=stat.st_size,
+            suspected_model_id=(
+                model_id if isinstance(model_id, str) and model_id else workdir.name
+            ),
+            precision=precision,
+            label=display_label,
+            mtime=mtime_iso,
+        )
 
     def detect_unnormalized_aihub(
         self, model_workdir: str

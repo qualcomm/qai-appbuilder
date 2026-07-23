@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 
 from qai.command_policy.domain import (
+    ClassifyReason,
     ExecAction,
     CommandProfile,
     extract_args,
@@ -77,7 +78,7 @@ class InMemoryExecBroker:
 
     def evaluate(
         self, command: str, *, project_root: str = ""
-    ) -> tuple[ExecAction, str, CommandProfile | None]:
+    ) -> tuple[ExecAction, ClassifyReason, CommandProfile | None]:
         """Classify ``command`` into ``ALLOW`` / ``ASK`` / ``DENY``.
 
         Returns ``(action, reason, matched_profile)``. When disabled or no
@@ -86,7 +87,7 @@ class InMemoryExecBroker:
         """
         profile = self.find_profile(command)
         if profile is None:
-            return (ExecAction.ALLOW, "", None)
+            return (ExecAction.ALLOW, ClassifyReason(), None)
         args = extract_args(command)
         root = project_root or self._project_root
         action, reason = profile.classify(

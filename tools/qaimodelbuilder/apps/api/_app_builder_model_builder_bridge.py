@@ -118,6 +118,29 @@ class AppBuilderModelBuilderBridge:
             errors=tuple(result.errors),
         )
 
+    def probe_export_status(self, *, model_workdir: str) -> str:
+        """Report the on-disk auto-export state of a workspace.
+
+        Returns ``"generating"`` while an export is running (the exporter's
+        ``.generating`` sentinel is present and fresh), ``"generated"`` once
+        ``app_pack/_candidate.json`` exists, or ``"idle"`` otherwise. Pure
+        filesystem probe — cheap enough for the Import panel to poll on
+        (re)open, which is what lets a user who closed the window
+        mid-generation still see "生成中..." instead of the initial button.
+
+        Lives on the bridge (not the App Builder route) because the probe
+        helper ships in ``qai.model_builder`` and
+        ``[importlinter:contract:context-isolation]`` forbids
+        ``qai.app_builder`` from importing it directly.
+        """
+        # Imported lazily so the module import graph stays clean and the
+        # helper's own dependencies load only when the route is exercised.
+        from qai.model_builder.adapters._pack_layout import (
+            probe_export_status as _probe,
+        )
+
+        return _probe(Path(model_workdir))
+
 
 def build_auto_export_bridge(*, container: Any) -> AppBuilderModelBuilderBridge:
     """Construct the bridge from an :class:`apps.api.di.Container`.

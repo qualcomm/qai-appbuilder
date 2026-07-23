@@ -5,7 +5,7 @@
 
 """Adapter loading the shared ``weight_downloader`` helper by file path.
 
-``factory/app_builder/shared/weight_downloader.py`` holds the single
+``factory/chat_features/app-builder/shared/weight_downloader.py`` holds the single
 shared implementation of the device-detection + archive-extract logic used
 by both the Pack runner subprocesses and the API side. Because ``factory/``
 is NOT a Python package (it is shipped install assets, imported by the
@@ -19,7 +19,7 @@ This adapter exposes exactly the two callables the
 :class:`~qai.app_builder.application.use_cases.download_weights.DownloadModelWeightsUseCase`
 needs — ``extract_weights_archive`` and ``detect_device_model`` — resolved
 lazily on first use and cached. The DI root passes the resolved shared dir
-(the same ``<repo_root>/factory/app_builder/shared`` path
+(the same ``<repo_root>/factory/chat_features/app-builder/shared`` path
 ``_pack_shared_pythonpath`` computes).
 """
 

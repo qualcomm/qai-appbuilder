@@ -7,38 +7,35 @@ sources: ["references/operator_patching.md", "SKILL.md Step 3"]
 
 # Operator Patching (base)
 
-> 🧭 通用诊断骨架（四阶段 + 三铁律 + 反向追溯 + 多层加固）见 [`../_diagnosis-framework.md`](../_diagnosis-framework.md)；本 SKILL 是该总纲在"算子不支持/替换"领域的症状库。
+> 🧭 诊断骨架见 [`../_diagnosis-framework.md`](../_diagnosis-framework.md)；本 SKILL 覆盖"算子不支持/替换"。
 
 ## Responsibility
 
 Replace unsupported operators (`Einsum`, `GridSample`, `ScatterND`, `Mod`, `Floor`, `Ceil`, `Round`)
-with QNN/SNPE-compatible equivalents built from supported base ops (`MatMul`, `Reshape`, `Transpose`,
-`Concat`, `Div`, `Mul`, `Sub`, `Where`, `Add`), **in-memory only** — never edit library source code.
-Patch at whatever stage fails: ONNX export, converter dry-run, FP conversion, context binary, or inference.
+with QNN-compatible equivalents from supported base ops (`MatMul`, `Reshape`, `Transpose`,
+`Concat`, `Div`, `Mul`, `Sub`, `Where`, `Add`), **in-memory only**. Patch at whichever stage fails.
 
 ## Trigger signals
 
-- Converter/context-binary error mentioning an operator name + `unsupported` / `not implemented`
-- Error code `0xc26 Op validation failed` on a specific node
-- Dry-run flags an op in its unsupported table (`--dry_run`)
-- Context binary compile fails `Failed to compile layer 'Einsum_123'`
+- Converter/context-binary error: operator name + `unsupported` / `not implemented`
+- `0xc26 Op validation failed` on a specific node
+- `--dry_run` flags op as unsupported
+- `Failed to compile layer 'Einsum_123'`
 
 ## Core knowledge
 
-### RULE 1 — check input TYPES before choosing a pattern
+### RULE 1 — check input TYPES first
 
-The same op (`Mod`) needs a completely different patch for INT vs FLOAT inputs. Wrong type = #1 failure cause.
-Determine types from the **producer node**:
+Same op needs different patch for INT vs FLOAT. Determine types from **producer node**:
 
 | Producer | Output type |
 |----------|-------------|
 | TopK (indices) | INT64 |
-| Constant dims=[] data_type=7 / =1 | INT64 / FLOAT32 scalar |
+| Constant data_type=7/=1 | INT64 / FLOAT32 |
 | Conv / MatMul / Gemm | FLOAT32 |
 | Softmax / Sigmoid / Relu | FLOAT32 |
-| Reshape / Transpose | inherits input |
+| Reshape / Transpose | inherits |
 
-Inspect with Netron or:
 ```python
 import onnx
 m = onnx.load("model.onnx")
@@ -47,7 +44,7 @@ for n in m.graph.node:
         print(n.name, list(n.input), list(n.output))
 ```
 
-### Approach selection decision tree
+### Approach decision tree
 
 ```
 Can you modify the PyTorch export code?
@@ -57,79 +54,72 @@ Can you modify the PyTorch export code?
          ├─ YES → Approach 2: Module Replacement (patch module.forward in-memory). High success.
          └─ NO  → Approach 3: ONNX Surgery (direct graph edit). Last resort; topo-sort / drift risk.
 ```
-Always prefer Approach 1.
 
-### Error -> Action quick table (type-aware)
+### Error → Action table (type-aware)
 
-| Op | Input types | Action | Success |
-|----|-------------|--------|---------|
-| **Mod** | INT/INT | `Sub(a, Mul(b, Div(a,b)))` — all INT, no Cast (INT div truncates = floor for +) | ★★★★★ |
-| **Mod** | FLOAT/FLOAT | `Sub(a, Mul(b, Floor(Div(a,b))))` — ⚠️ Floor may also fail | ★★ |
-| **Mod** | FLOAT/CONST(int) | `Div→Cast(INT)→Cast(FLOAT)→Mul(b)→Sub(a)`; add `Add(0.0)` after final Cast to break type chain | ★★ |
-| **Floor** | INT | Remove — Floor of int is itself → Identity / rewire | ★★★★★ |
-| **Floor** | FLOAT | `Cast(x,INT32)→Cast(FLOAT)` — ⚠️ downstream type issues | ★★ |
-| **Ceil** | FLOAT | `Neg(Floor(Neg(x)))` | ★★ |
-| **Round** | FLOAT | `Floor(Add(x,0.5))` | ★★ |
-| **Cast** | `Only numerical type cast supported` | **WARNING not error** — verify with actual conversion | Warn |
-| **Cast** | `Tensor mismatch 0x32 != 0x216` | Add `Add(0.0)` after Cast: `Cast→Add(0.0)→Mul` | — |
-| **Einsum** | FLOAT | Decompose to MatMul+Transpose+Reshape (see 5 patterns) | ★★★★ |
-| **ScatterND** | non-overlapping idx | `Gather→Where(mask)→Add(updates)` | ★★★★ |
-| **ScatterND** | overlapping idx | loop/custom op → escalate **B7** | ★ |
-| **GridSample** | bilinear | AffineGrid + Resize(bilinear) | ★★ |
-| **GridSample** | nearest/bicubic | complex → consider arch change | ★ |
-| **MaxPool** | `dilations: unsupported` / `unsupported version` | **WARNING** — actual conversion succeeds (exit 0). **Do NOT patch.** | ★★★★★ |
-| **MaxPool** | dilation>1 | may fail actual conv → `Slice+Stack+ReduceMax` (last resort, +size, FP16 loss) | ★★★ |
-| Any other unknown op | no known pattern | escalate **B7** (document op name, types, attempts) | — |
+| Op | Types | Action | ★ |
+|----|-------|--------|---|
+| **Mod** | INT/INT | `Sub(a, Mul(b, Div(a,b)))` | 5 |
+| **Mod** | FLOAT/FLOAT | `Sub(a, Mul(b, Floor(Div(a,b))))` ⚠️ Floor may fail | 2 |
+| **Mod** | FLOAT/CONST(int) | `Div→Cast(INT)→Cast(FLOAT)→Mul→Sub`; `Add(0.0)` after Cast | 2 |
+| **Floor** | INT | Remove (identity) | 5 |
+| **Floor** | FLOAT | `Cast(INT32)→Cast(FLOAT)` ⚠️ type issues | 2 |
+| **Ceil** | FLOAT | `Neg(Floor(Neg(x)))` | 2 |
+| **Round** | FLOAT | `Floor(Add(x,0.5))` | 2 |
+| **Cast** | `Only numerical type cast supported` | WARNING — verify with actual conversion | — |
+| **Cast** | `Tensor mismatch 0x32 != 0x216` | `Cast→Add(0.0)→Mul` | — |
+| **Einsum** | FLOAT | Decompose to MatMul+Transpose+Reshape | 4 |
+| **ScatterND** | non-overlapping | `Gather→Where(mask)→Add(updates)` | 4 |
+| **ScatterND** | overlapping | escalate **B7** | 1 |
+| **GridSample** | bilinear | AffineGrid + Resize(bilinear) | 2 |
+| **GridSample** | nearest/bicubic | consider arch change | 1 |
+| **MaxPool** | `dilations: unsupported` | **WARNING only** — conversion succeeds. **Do NOT patch.** | 5 |
+| **MaxPool** | dilation>1 | `Slice+Stack+ReduceMax` (last resort) | 3 |
+| Unknown op | — | escalate **B7** | — |
 
-> **MaxPool insight:** PyTorch ONNX export always adds `dilations=[1,1]`/`ceil_mode=0`. Dry-run flags it
-> as a warning but FP16 conversion, context binary, and HTP inference all succeed. Don't waste time patching.
+> **MaxPool:** PyTorch always adds `dilations=[1,1]`/`ceil_mode=0`. Dry-run warns but conversion + HTP succeed.
 
-### Einsum — 5 decomposition patterns
+### Einsum — 5 patterns
 
-Einsum = batched MatMul with dim rearrangement. Expose the MatMul by permute+reshape.
+Einsum = batched MatMul with dim rearrangement (permute+reshape to expose MatMul):
 
-- **A. 5D attention** `bmchw,bnmc->bmhwn` (YOLO-World MaxSigmoidAttnBlock): permute embed→`[b*m,h*w,c]`, guide→`[b*m,c,n]`, MatMul→`[b*m,h*w,n]`, reshape→`[b,m,h,w,n]`.
-- **B. 4D contrastive head** `bchw,bkc->bkhw` (BNContrastiveHead): x→`[b,h*w,c]`, w.transpose→`[b,c,k]`, MatMul→`[b,h*w,k]`, permute+reshape→`[b,k,h,w]`.
-- **C. simple batched** `bij,bjk->bik` → `torch.matmul(A,B)` directly.
-- **D. multi-batch** `bhij,bhjk->bhik` → merge `[b*h,i,j]@[b*h,j,k]` then reshape back.
-- **General algo:** shared indices = reduced dims; batch indices stay; reshape to merge batch + reduced → MatMul → reshape back to batch structure.
+- **A.** `bmchw,bnmc->bmhwn` → `[b*m,h*w,c]@[b*m,c,n]` → reshape `[b,m,h,w,n]`
+- **B.** `bchw,bkc->bkhw` → `[b,h*w,c]@[b,c,k]` → permute → `[b,k,h,w]`
+- **C.** `bij,bjk->bik` → `torch.matmul(A,B)`
+- **D.** `bhij,bhjk->bhik` → merge `[b*h,i,j]@[b*h,j,k]` → reshape
+- **General:** shared indices=reduced; batch stays; merge batch+reduced → MatMul → reshape back.
 
-## Validation — Mandatory Gates (run ALL after EACH patch)
+## Validation Gates (ALL after EACH patch)
 
-| Gate | Check | Pass criteria |
-|------|-------|---------------|
-| **1 Structural** | `onnx.checker.check_model()` | no exception, well-formed, consistent types |
-| **2 Converter** | `qnn-onnx-converter --dry_run` (or `qairt-converter`) | "ops evaluated", no unsupported errors |
-| **3 Numerical** | run orig vs patched ONNX on same input (CPUExecutionProvider) | shapes match, cosine ≥ 0.95, no NaN/Inf |
-| **4 Full conversion** (final only) | `python qai_convert_fp.py --onnx ...` | "Conversion complete!", `.bin/.cpp/.json` |
+| Gate | Check | Pass |
+|------|-------|------|
+| 1 Structural | `onnx.checker.check_model()` | no exception |
+| 2 Converter | `qnn-onnx-converter --dry_run` | no unsupported errors |
+| 3 Numerical | orig vs patched (CPUExecutionProvider) | cosine ≥ 0.95, no NaN |
+| 4 Full (final) | `python qai_convert_fp.py --onnx ...` | "Conversion complete!" |
 
-**Cosine interpretation (Gate 3):** ≥0.999 correct · 0.99–0.999 minor drift OK · 0.95–0.99 investigate (may be OK for INT8) · <0.95 patch incorrect, try next pattern.
+**Cosine:** ≥0.999 correct · 0.99–0.999 OK · 0.95–0.99 investigate · <0.95 wrong pattern.
+**On failure:** Gate1→topo/names. Gate2→more patching. Gate3→wrong pattern, next row. Gate4→`Add(0.0)` after Cast.
 
-**Decision matrix:** Gate1 fail → check topo order/tensor names. Gate2 fail → more patching (Floor/Cast may add new unsupported ops). Gate3 fail → wrong pattern/type mismatch, try next row. Gate4 fail → add `Add(0.0)` after Cast to break type inference.
+> ⚠️ Einsum patches can silently change numerics — validate **all output channels**.
 
-> ⚠️ Einsum patches can silently change numerics if dims misalign. Validate **all output channels**,
-> not just top-1 (a patch OK for `person` may fail for `bus` in a contrastive head).
+## Discipline
 
-## Discipline — NEVER use CPU runtime as workaround
+| ❌ Forbidden | ✅ Required |
+|---|---|
+| CPU fallback / `QnnCpu.dll` as solution | Patch for HTP/DSP compatibility |
+| Skip patching, CPU only | Model MUST run on HTP |
 
-| ❌ Not allowed | ✅ Required |
-|---------------|-------------|
-| CPU fallback for unsupported ops | Patch ops for HTP/DSP compatibility |
-| `QnnCpu.dll` context binary as "solution" | HTP-compatible operator decomposition |
-| Skip patching, run on CPU only | Model MUST run on target accelerator (HTP/DSP) |
+Can't patch → escalate B7. Patch in-memory only; validate each patch; stop if dry-run passes (don't over-patch).
 
-Target is a Qualcomm AI PC with HTP; CPU-only defeats the purpose. If you can't patch for HTP → escalate B7, do not silently fall back to CPU.
-
-Other discipline: patch in-memory only; validate after every patch (dry-run alone is not enough); don't over-patch (if dry-run passes, stop — extra patches add numerical drift); inspect first, patch only the unsupported ops.
-
-## Escalation path (stop and report to user)
+## Escalation
 
 | Condition | Code | Evidence |
 |-----------|------|----------|
-| No replacement pattern exists for the op | **B7** | op name, input types, literature search |
-| Patch changes model semantics | **B4** | describe semantic change, accuracy impact; await approval |
-| 7+ iterations, same ops still failing, no progress | **B3** | attempted patches, dry-run logs, ONNX snapshot |
+| No pattern exists | **B7** | op name, types, search |
+| Patch changes semantics | **B4** | describe change, impact |
+| 7+ iterations, no progress | **B3** | patches, logs, ONNX |
 
-Progress rule (iteration 5+): resolving ops faster than discovering new ones → continue; new ops appearing faster → escalate early.
+Iteration 5+: resolving faster than discovering → continue; new ops faster → escalate.
 
-Full patterns, code templates and per-op surgery → `references/operator_patching.md`.
+Full patterns + code → `references/operator_patching.md`.

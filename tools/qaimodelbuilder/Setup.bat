@@ -43,6 +43,7 @@ set "NO_BUILDER=0"
 set "NO_PAUSE=0"
 set "DEV_EXTRAS=0"
 set "DESKTOP_EXTRAS=0"
+set "FORCED_ARCH="
 :parse_setup_args
 if "%~1"=="" goto :args_done
 if /i "%~1"=="--help" goto :print_help
@@ -52,11 +53,104 @@ if /i "%~1"=="--no-builder" ( set "NO_BUILDER=1" & shift & goto :parse_setup_arg
 if /i "%~1"=="--no-pause" ( set "NO_PAUSE=1" & shift & goto :parse_setup_args )
 if /i "%~1"=="--dev" ( set "DEV_EXTRAS=1" & shift & goto :parse_setup_args )
 if /i "%~1"=="--desktop" ( set "DESKTOP_EXTRAS=1" & shift & goto :parse_setup_args )
+if /i "%~1"=="--arch" goto :opt_arch
 shift & goto :parse_setup_args
+:opt_arch
+REM Consume "--arch <value>". Value must be arm64 or x64 (case-insensitive);
+REM store lowercase in FORCED_ARCH. Anything else is a hard error (exit 1)
+REM so a typo does not silently fall through to auto-detection.
+set "_ARCH_VAL=%~2"
+if "%_ARCH_VAL%"=="" (
+    echo [ERROR] --arch requires a value: arm64 or x64
+    exit /b 1
+)
+if /i "%_ARCH_VAL%"=="arm64" ( set "FORCED_ARCH=arm64" & set "_ARCH_VAL=" & shift & shift & goto :parse_setup_args )
+if /i "%_ARCH_VAL%"=="x64"   ( set "FORCED_ARCH=x64"   & set "_ARCH_VAL=" & shift & shift & goto :parse_setup_args )
+echo [ERROR] Invalid --arch value: %_ARCH_VAL% ^(expected arm64 or x64^)
+set "_ARCH_VAL="
+exit /b 1
 :args_done
 
 REM Clear deprecated UV_NATIVE_TLS if set by old activate scripts or parent shell
 set "UV_NATIVE_TLS="
+
+REM --- Host architecture detection (one-time) --------------------------------
+REM Priority (highest -> lowest):
+REM   1. --arch <arm64|x64> command-line flag (FORCED_ARCH), for cross-arch
+REM      installs on WoS ("Setup.bat --arch x64" installs the x64 stack under
+REM      Prism emulation for validation).
+REM   2. data\config\host_arch file left by a prior Setup run (single-line
+REM      lowercase arm64/x64). Locks the arch across re-runs and lets sibling
+REM      launchers (Start.bat / qai.bat / Console.bat) agree on the arch
+REM      without re-probing PROCESSOR_ARCHITECTURE (which lies under Prism).
+REM   3. Auto-detect via %PROCESSOR_ARCHITECTURE% / %PROCESSOR_ARCHITEW6432%.
+REM      Snapdragon/WoS hosts report ARM64; native x64 hosts report AMD64
+REM      (or, when a 32-bit shell runs on 64-bit Windows, ARCHITEW6432=AMD64).
+REM Two independent `if` lines (not else) so the WOW64 var can override.
+REM Every arch-specific download/venv below derives from HOST_ARCH so the arm64
+REM path stays byte-for-byte identical to before (defaults == the old arm64 values).
+set "HOST_ARCH="
+set "_ARCH_SOURCE="
+if defined FORCED_ARCH (
+    set "HOST_ARCH=%FORCED_ARCH%"
+    set "_ARCH_SOURCE=forced via --arch"
+    goto :arch_resolved
+)
+if not exist "%~dp0data\config\host_arch" goto :arch_autodetect
+REM Read first non-empty line of host_arch and trim whitespace. usebackq
+REM handles paths with spaces; delims= keeps the whole line, then a nested
+REM tokenised pass strips leading/trailing spaces + tabs. Only the first
+REM line wins (subsequent lines are ignored).
+for /f "usebackq tokens=* delims=" %%L in ("%~dp0data\config\host_arch") do (
+    if not defined HOST_ARCH (
+        for /f "tokens=* delims= 	" %%V in ("%%L") do (
+            if not defined HOST_ARCH set "HOST_ARCH=%%V"
+        )
+    )
+)
+REM Validate + normalise to lowercase. A corrupt / unrecognised value falls
+REM through to auto-detect rather than aborting Setup (defensive: user might
+REM have hand-edited the file).
+if /i "%HOST_ARCH%"=="arm64" (
+    set "HOST_ARCH=arm64"
+    set "_ARCH_SOURCE=from data/config/host_arch"
+    goto :arch_resolved
+)
+if /i "%HOST_ARCH%"=="x64" (
+    set "HOST_ARCH=x64"
+    set "_ARCH_SOURCE=from data/config/host_arch"
+    goto :arch_resolved
+)
+echo [WARN] data/config/host_arch has unrecognised value; falling back to auto-detect.
+set "HOST_ARCH="
+:arch_autodetect
+set "HOST_ARCH=arm64"
+if /i "%PROCESSOR_ARCHITECTURE%"=="AMD64" set "HOST_ARCH=x64"
+if /i "%PROCESSOR_ARCHITEW6432%"=="AMD64" set "HOST_ARCH=x64"
+set "_ARCH_SOURCE=auto-detected"
+:arch_resolved
+
+REM Per-arch variable group. arm64 branch reproduces the previous hardcoded values.
+if /i "%HOST_ARCH%"=="x64" (
+    set "UV_ARCH=x86_64"
+    set "PY_SPEC=cpython-3.13-windows-x86_64"
+    set "GIT_ARCH=64-bit"
+    set "NODE_ARCH=x64"
+    set "RUSTUP_SLUG=x86_64"
+    set "RUST_HOST=x86_64-pc-windows-msvc"
+    set "VCVARS_ARCH=x64"
+    set "VENV_DIR_NAME=.venv_x64_313"
+) else (
+    set "UV_ARCH=aarch64"
+    set "PY_SPEC=cpython-3.13-windows-aarch64"
+    set "GIT_ARCH=arm64"
+    set "NODE_ARCH=arm64"
+    set "RUSTUP_SLUG=aarch64"
+    set "RUST_HOST=aarch64-pc-windows-msvc"
+    set "VCVARS_ARCH=arm64"
+    set "VENV_DIR_NAME=.venv_arm64_313"
+)
+echo [INFO] Host architecture: %HOST_ARCH% ^(%_ARCH_SOURCE%^)
 
 set "_T=%TIME: =0%"
 for /f "tokens=1-3 delims=:." %%a in ("%_T%") do set /a "_START_S=(1%%a-100)*3600+(1%%b-100)*60+(1%%c-100)"
@@ -71,9 +165,9 @@ REM uninstaller to clean these up -- delete temp archives inline after use.
 set "DL_DIR=data\downloads"
 set "UV_BIN_DIR=data\bin\uv"
 set "UV_EXE=data\bin\uv\uv.exe"
-set "UV_URL=https://github.com/astral-sh/uv/releases/latest/download/uv-aarch64-pc-windows-msvc.zip"
+set "UV_URL=https://github.com/astral-sh/uv/releases/latest/download/uv-%UV_ARCH%-pc-windows-msvc.zip"
 set "UV_ZIP=data\downloads\_uv_tmp.zip"
-set "VENV_DIR=%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_arm64_313"
+set "VENV_DIR=%LOCALAPPDATA%\QAIModelBuilder\envs\%VENV_DIR_NAME%"
 set "VENDOR_DIR=vendor"
 set "WHL_DIR=vendor\whl"
 REM Only ARM64-native wheels that PyPI does NOT provide (or has revoked
@@ -189,7 +283,7 @@ REM retries and no size verification -- a corrupt 0-byte download would
 REM pass straight through to extraction and crash there).
 if exist "%UV_EXE%" goto :uv_ready
 
-echo [INFO] Downloading uv ^(ARM64^)...
+echo [INFO] Downloading uv ^(%HOST_ARCH%^)...
 echo [INFO] URL: %UV_URL%
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup\download_with_aria2c.ps1" ^
@@ -224,19 +318,19 @@ REM ``uv python install`` round-trip (which is itself idempotent but prints
 REM "already installed" and re-resolves every run).
 REM NOTE: use a goto-based branch (not if/else blocks) so the literal "(ARM64)"
 REM in the echo text below is never parsed as a cmd block delimiter.
-uv python find cpython-3.13-windows-aarch64 >nul 2>&1
+uv python find %PY_SPEC% >nul 2>&1
 if not errorlevel 1 goto :py313_ready
-echo [INFO] Installing Python 3.13 ARM64...
+echo [INFO] Installing Python 3.13 ^(%HOST_ARCH%^)...
 REM --no-bin: skip writing python3.13.exe shim into ~/.local/bin (we use the
 REM venv's python.exe directly; the shim PATH-warning + leftover-shim
 REM "Failed to install executable" line otherwise alarm users for no reason).
 REM --no-registry: skip Windows registry registration (one fewer thing to
 REM clean up at uninstall time; the venv reference works without it).
-uv python install --no-bin --no-registry cpython-3.13-windows-aarch64
+uv python install --no-bin --no-registry %PY_SPEC%
 if errorlevel 1 goto :python_error
 goto :py313_done
 :py313_ready
-echo [SKIP] Python 3.13 ARM64 already installed ^(uv-managed^).
+echo [SKIP] Python 3.13 already installed ^(%HOST_ARCH%, uv-managed^).
 :py313_done
 
 REM --- Step 3: Create virtual environment ---
@@ -269,10 +363,10 @@ if exist "%VENV_DIR%\Scripts\python.exe" echo [WARN] Existing venv is incomplete
 echo [INFO] Creating virtual environment ^(.venv^)...
 REM --seed: automatically installs pip/setuptools/wheel into the venv.
 REM --allow-existing: don't fail if directory already exists (just recreate scripts).
-uv venv "%VENV_DIR%" --python cpython-3.13-windows-aarch64 --seed --allow-existing
+uv venv "%VENV_DIR%" --python %PY_SPEC% --seed --allow-existing
 if errorlevel 1 (
     REM If --allow-existing not supported by this uv version, try without it
-    uv venv "%VENV_DIR%" --python cpython-3.13-windows-aarch64 --seed 2>nul
+    uv venv "%VENV_DIR%" --python %PY_SPEC% --seed 2>nul
     if errorlevel 1 (
         REM Last resort: only proceed if the venv is actually USABLE -- it
         REM must have BOTH python.exe AND activate.bat (Step :venv_ready calls
@@ -346,6 +440,11 @@ REM IMPORTANT: vendor\whl\ files are precious - three wheels
 REM (aiohttp 3.13.5 / cryptography 45.0.5 / MarkupSafe 2.1.5) have been
 REM revoked from PyPI for cp313 ARM64 and the local copies are the only
 REM source.  Do NOT delete files from vendor\whl\.  See vendor\whl\README.md.
+REM x64 has no vendored wheels: skip Step 4a wholesale and let uv resolve every
+REM dependency from PyPI in Step 4b2 (qai-appbuilder + aiohttp/cryptography/
+REM MarkupSafe all ship x64 cp313 wheels). No _constraints_tmp.txt is written,
+REM so the 4b2/4b-extra branches below take their PyPI-only (no --find-links) path.
+if /i "%HOST_ARCH%"=="x64" goto :skip_vendor_whls
 if not exist "%WHL_DIR%" goto :skip_vendor_whls
 echo [INFO] Installing pre-built ARM64 wheels from %WHL_DIR%...
 uv pip install --no-deps ^
@@ -421,6 +520,9 @@ REM enables the extra explicitly here.
 echo [INFO] Installing editable package ^(pip install -e .[cc-sdk]^)...
 if exist "_constraints_tmp.txt" (
     uv pip install -e ".[cc-sdk]" --find-links "%WHL_DIR%" -c "_constraints_tmp.txt"
+) else if /i "%HOST_ARCH%"=="x64" (
+    REM x64: no vendored wheels, resolve everything from PyPI.
+    uv pip install -e ".[cc-sdk]"
 ) else (
     uv pip install -e ".[cc-sdk]" --find-links "%WHL_DIR%"
 )
@@ -447,6 +549,9 @@ if not "%DEV_EXTRAS%"=="1" (
 echo [INFO] Installing dev + e2e extras from pyproject.toml...
 if exist "_constraints_tmp.txt" (
     uv pip install --find-links "%WHL_DIR%" -c "_constraints_tmp.txt" -e ".[dev,e2e,cc-sdk]"
+) else if /i "%HOST_ARCH%"=="x64" (
+    REM x64: no vendored wheels, resolve everything from PyPI.
+    uv pip install -e ".[dev,e2e,cc-sdk]"
 ) else (
     uv pip install --find-links "%WHL_DIR%" -e ".[dev,e2e,cc-sdk]"
 )
@@ -498,7 +603,7 @@ REM dispatcher (and its ``install-pack-deps`` subcommand) is on PATH inside
 REM the venv. Non-fatal: individual package failures only warn; setup still
 REM succeeds (matches V1 install_app_builder_deps behaviour).
 echo.
-echo [INFO] Installing App Builder Pack dependencies ^(factory\app_builder\models\*\requirements.txt^)...
+echo [INFO] Installing App Builder Pack dependencies ^(factory\chat_features\app-builder\models\*\requirements.txt^)...
 "%VENV_DIR%\Scripts\python.exe" -m scripts.setup.install_app_builder_deps
 if errorlevel 1 (
     echo [WARN] Some App Builder Pack deps failed to install. Voice / OCR / TTS
@@ -594,7 +699,7 @@ echo -- Step 5: PortableGit ----------------------------------------------------
 
 set "PORTABLE_GIT_DIR=%LOCALAPPDATA%\QAIModelBuilder\git"
 set "GIT_VERSION=2.54.0"
-set "GIT_URL=https://github.com/git-for-windows/git/releases/download/v%GIT_VERSION%.windows.1/PortableGit-%GIT_VERSION%-arm64.7z.exe"
+set "GIT_URL=https://github.com/git-for-windows/git/releases/download/v%GIT_VERSION%.windows.1/PortableGit-%GIT_VERSION%-%GIT_ARCH%.7z.exe"
 
 REM === Step 5a: Ensure 7zr.exe is available in data\bin\7zr\ ====================
 REM 7zr.exe is a small standalone tool (~600 KB) from 7-zip.org that handles .7z
@@ -636,7 +741,7 @@ if exist "%PORTABLE_GIT_DIR%\bin\git.exe" (
     goto :git_done
 )
 
-set "GIT_ARCHIVE=%DL_DIR%\PortableGit-%GIT_VERSION%-arm64.7z.exe"
+set "GIT_ARCHIVE=%DL_DIR%\PortableGit-%GIT_VERSION%-%GIT_ARCH%.7z.exe"
 if not exist "%DL_DIR%" mkdir "%DL_DIR%"
 
 REM === Download via the unified wrapper ============================================
@@ -749,13 +854,13 @@ REM Uninstall.bat together with the rest of %LOCALAPPDATA%\QAIModelBuilder).
 REM pnpm is enabled via Node's bundled corepack. Idempotent: skips when
 REM node.exe + a pnpm shim are already present.
 echo.
-echo -- Step 5b: Node.js ^(ARM64^) + pnpm -------------------------------------------
+echo -- Step 5b: Node.js ^(%HOST_ARCH%^) + pnpm -------------------------------------------
 
 set "NODE_VERSION=22.20.0"
 set "NODE_DIR=%LOCALAPPDATA%\QAIModelBuilder\node"
 set "NODE_EXE=%NODE_DIR%\node.exe"
-set "NODE_URL=https://nodejs.org/dist/v%NODE_VERSION%/node-v%NODE_VERSION%-win-arm64.zip"
-set "NODE_ZIP=%DL_DIR%\node-v%NODE_VERSION%-win-arm64.zip"
+set "NODE_URL=https://nodejs.org/dist/v%NODE_VERSION%/node-v%NODE_VERSION%-win-%NODE_ARCH%.zip"
+set "NODE_ZIP=%DL_DIR%\node-v%NODE_VERSION%-win-%NODE_ARCH%.zip"
 
 REM Skip if node.exe already present and a pnpm shim exists.
 if not exist "%NODE_EXE%" goto :node_install
@@ -772,7 +877,7 @@ set "PATH=%NODE_DIR%;%PATH%"
 goto :node_done
 
 :node_install
-echo [INFO] Downloading Node.js %NODE_VERSION% ^(ARM64^)...
+echo [INFO] Downloading Node.js %NODE_VERSION% ^(%HOST_ARCH%^)...
 echo [INFO] URL: %NODE_URL%
 REM Modest -Connections 4 because some CDNs / corporate proxies do not
 REM honour HTTP Range and reply with the whole body per chunk; -ZipTest
@@ -793,7 +898,7 @@ goto :node_extract
 
 :node_dl_failed
 echo [WARN] Failed to download Node.js. Frontend build will be unavailable.
-echo [WARN] Re-run Setup.bat later, or install Node.js ARM64 manually.
+echo [WARN] Re-run Setup.bat later, or install Node.js %HOST_ARCH% manually.
 goto :node_done
 
 :node_extract
@@ -801,7 +906,7 @@ echo [INFO] Extracting Node.js to %NODE_DIR% ...
 if exist "%NODE_DIR%" rmdir /s /q "%NODE_DIR%" 2>nul
 set "NODE_TMP=%DL_DIR%\_node_tmp"
 if exist "%NODE_TMP%" rmdir /s /q "%NODE_TMP%" 2>nul
-REM The zip nests everything under node-v<VER>-win-arm64\ ; flatten that one
+REM The zip nests everything under node-v<VER>-win-%NODE_ARCH%\ ; flatten that one
 REM level so node.exe lands directly in %NODE_DIR%.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ^
     "$ProgressPreference='SilentlyContinue'; " ^
@@ -963,7 +1068,7 @@ REM aria2c (multi-thread + resume) when available, or PowerShell as fallback,
 REM then extracted with our bundled 7zr.exe.
 REM
 REM Hard-constraint (2): missing weights NEVER crash the app. The runner-side
-REM auto-download (factory\app_builder\shared\weight_downloader.py) covers the
+REM auto-download (factory\chat_features\app-builder\shared\weight_downloader.py) covers the
 REM "first inference on a fresh machine" case at runtime; this step only
 REM warms the cache so the first inference is fast. Any failure here is
 REM logged as [WARN] and Setup proceeds (overall exit 0).
@@ -1055,6 +1160,17 @@ echo.
 echo [INFO] Model conversion ^(model-builder^) environment was set up in Step 8
 echo [INFO] ^(QAIRT SDK + x64 converter venv + VS build tools + qairt_env.json^).
 echo.
+REM --- Persist the resolved architecture for sibling launchers ---------------
+REM Written only on the success path so an aborted / half-broken install does
+REM not leave a misleading record behind. Uninstall.bat deletes this file.
+REM Contents: single ASCII line, lowercase "arm64" or "x64", no BOM (cmd's
+REM `echo >` is a plain-bytes redirect), no trailing whitespace. Downstream
+REM readers (Start.bat, qai.bat, Console.bat, onnxwrapper._get_actual_architecture)
+REM strip whitespace defensively regardless.
+if not exist "%~dp0data\config" mkdir "%~dp0data\config" >nul 2>&1
+<nul set /p "=%HOST_ARCH%" >"%~dp0data\config\host_arch"
+echo.>>"%~dp0data\config\host_arch"
+
 REM Only pause when run directly (not when --no-pause is passed for scripted runs)
 call :print_elapsed
 if "%NO_PAUSE%"=="0" pause
@@ -1352,6 +1468,15 @@ echo.
 echo      --no-pause     Do not pause at the end ^(used when Setup.bat is
 echo                     called from another script^).
 echo.
+echo      --arch arm64^|x64
+echo                     Force the install architecture instead of auto-
+echo                     detecting from %%PROCESSOR_ARCHITECTURE%%. Use on a
+echo                     Snapdragon/WoS host to install the x64 stack under
+echo                     Prism emulation for validation ^(Setup.bat --arch x64^),
+echo                     or vice versa. The resolved value is written to
+echo                     data\config\host_arch and picked up by sibling
+echo                     launchers ^(Start.bat / qai.bat / Console.bat^).
+echo.
 echo      --help, -h, /? Show this help and exit ^(installs nothing^).
 echo.
 echo  EXAMPLES:
@@ -1430,7 +1555,7 @@ where cargo >nul 2>&1
 if not errorlevel 1 goto :sd_rust_ready
 
 echo [INFO] cargo not found; installing Rust toolchain via rustup-init...
-set "RUSTUP_URL=https://win.rustup.rs/aarch64"
+set "RUSTUP_URL=https://win.rustup.rs/%RUSTUP_SLUG%"
 set "RUSTUP_EXE=%DL_DIR%\rustup-init.exe"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup\download_with_aria2c.ps1" ^
     -Url "%RUSTUP_URL%" ^
@@ -1505,7 +1630,7 @@ goto :sd_cargo_functional
 REM Full fresh install via rustup-init (handles the case where both shim and
 REM ~/.rustup are in a broken state — rustup-init will overwrite/recreate).
 echo [INFO] Downloading rustup-init for fresh Rust install...
-set "RUSTUP_URL=https://win.rustup.rs/aarch64"
+set "RUSTUP_URL=https://win.rustup.rs/%RUSTUP_SLUG%"
 set "RUSTUP_EXE=%DL_DIR%\rustup-init.exe"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup\download_with_aria2c.ps1" ^
     -Url "%RUSTUP_URL%" ^
@@ -1571,17 +1696,20 @@ if not defined VCVARSALL (
     echo [WARN] vswhere^). tauri-cli's native deps ^(ring^) need cl.exe + the CRT /
     echo [WARN] Windows SDK headers. Step 8.3 ^(install_vs.ps1^) should have
     echo [WARN] installed them; re-run Setup.bat --desktop ^(without --no-builder^),
-    echo [WARN] or open "x64_arm64 Native Tools Command Prompt for VS" and run:
+    echo [WARN]     or open the Native Tools Command Prompt for VS matching your host and run:
     echo [WARN]     cargo install tauri-cli --version "^>=2.0.0" --locked
     exit /b 0
 )
 
-REM Host is ARM64; target is ARM64 -> use the native arm64 vcvars argument.
-echo [INFO] Loading MSVC build environment: "%VCVARSALL%" arm64
-call "%VCVARSALL%" arm64 >nul
+REM Target the host arch's native tools (arm64 on WoS, x64 on x64 hosts). On
+REM arm64 hosts we also keep the x64_arm64 cross-tools fallback below.
+echo [INFO] Loading MSVC build environment: "%VCVARSALL%" %VCVARS_ARCH%
+call "%VCVARSALL%" %VCVARS_ARCH% >nul
 if errorlevel 1 (
-    echo [WARN] vcvarsall.bat arm64 failed; trying x64_arm64 cross tools...
-    call "%VCVARSALL%" x64_arm64 >nul
+    if /i "%HOST_ARCH%"=="arm64" (
+        echo [WARN] vcvarsall.bat arm64 failed; trying x64_arm64 cross tools...
+        call "%VCVARSALL%" x64_arm64 >nul
+    )
 )
 REM Re-prepend cargo bin: vcvarsall rewrote PATH and may have dropped it.
 if exist "%CARGO_BIN%\cargo.exe" set "PATH=%CARGO_BIN%;%PATH%"
@@ -1638,7 +1766,7 @@ REM  Idempotent, non-fatal.
 REM ===========================================================================
 :install_webview2
 echo.
-echo -- Step 10: WebView2 Fixed Version Runtime ^(ARM64^) ---------------------------
+echo -- Step 10: WebView2 Fixed Version Runtime ^(%HOST_ARCH%^) ---------------------------
 
 REM First, check if the system WebView2 Evergreen Runtime is properly registered
 REM and usable. If it is, we don't need our own Fixed Version copy (~811 MB).
