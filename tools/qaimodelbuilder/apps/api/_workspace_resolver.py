@@ -633,9 +633,10 @@ def resolve_read_only_allow_paths(container: "Container") -> tuple[str, ...]:
 
     Resolved set (de-duplicated, order-preserving):
 
-    1. the three business dirs under ``<repo_root>`` — ``skills`` +
-       ``factory/chat_features`` (``<repo_root>`` =
-       ``data_paths.root`` parent, absolutised);
+    1. the two business dirs under ``<repo_root>`` — ``skills`` +
+       ``factory/chat_features`` (the latter is a prefix that already
+       covers every feature under it, e.g. ``factory/chat_features/app-builder``);
+       (``<repo_root>`` = ``data_paths.root`` parent, absolutised);
     2. the system read surface (``%SystemRoot%`` + the Python runtime prefixes
        + ``%ProgramFiles%`` / ``%ProgramFiles(x86)%``) — see
        :func:`_collect_system_read_prefixes`;

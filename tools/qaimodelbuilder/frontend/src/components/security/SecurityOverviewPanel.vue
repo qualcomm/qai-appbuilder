@@ -171,22 +171,10 @@ async function toggleDepBroker(): Promise<void> {
   await depBroker.setEnabled(!depBroker.settings.value.enabled);
 }
 
-// ── FileGuard status card toggles (V1 toggleEnabled/Mode/DynamicAuth) ──
-
-async function toggleEnabled(next: boolean): Promise<void> {
-  if (!next) {
-    const ok = await confirm({
-      icon: "🛡️",
-      title: t("security.masterSwitchLabel"),
-      message: t("security.masterSwitchDesc"),
-      confirmStyle: "danger",
-      confirmText: t("common.confirm"),
-      cancelText: t("common.cancel"),
-    });
-    if (!ok) return;
-  }
-  await store.updatePolicyToggles({ enabled: next });
-}
+// ── FileGuard status card toggles (run-mode / dynamic-auth) ──
+// The master on/off is driven solely by the 3-state master-mode segment
+// (`onSetSecurityMode`) — the backend keeps `disabled ⟺ policy.enabled=false`
+// in lock-step, so a separate `enabled` bool toggle was redundant and removed.
 
 async function setMode(next: "enforce" | "audit_only"): Promise<void> {
   // Defensive: the run-mode sub-switch is meaningless while the master
@@ -690,25 +678,6 @@ defineExpose({ refreshAll });
         v-if="store.policy"
         class="sec-cfg-status-card"
       >
-        <div class="sec-cfg-status-row">
-          <div class="sec-cfg-status-label">
-            <div class="sec-cfg-status-name">
-              {{ t('security.masterSwitchLabel') }}
-            </div>
-            <div class="sec-cfg-status-hint">
-              {{ t('security.masterSwitchDesc') }}
-            </div>
-          </div>
-          <label class="toggle">
-            <input
-              type="checkbox"
-              :checked="store.policy.enabled"
-              @change="toggleEnabled(($event.target as HTMLInputElement).checked)"
-            />
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-
         <!-- Native sub-process hook status (READ-ONLY; 🔴 State-Truth-First).
            Surfaces the real guard64.dll hook state so "Python on but DLL
            failed to load" shows as 降级/degraded instead of "healthy". -->
@@ -787,24 +756,6 @@ defineExpose({ refreshAll });
           </label>
         </div>
 
-        <div class="sec-cfg-status-row">
-          <div class="sec-cfg-status-label">
-            <div class="sec-cfg-status-name">
-              {{ t('harness.config.security.smartApproval.label') }}
-            </div>
-            <div class="sec-cfg-status-hint">
-              {{ t('harness.config.security.smartApproval.desc') }}
-            </div>
-          </div>
-          <label class="toggle">
-            <input
-              type="checkbox"
-              :checked="overview.smartApprovalEnabled.value"
-              @change="overview.setSmartApproval(($event.target as HTMLInputElement).checked)"
-            />
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
       </section>
 
       <!-- 6. IM channel authorization (V1 1274-1346) -->

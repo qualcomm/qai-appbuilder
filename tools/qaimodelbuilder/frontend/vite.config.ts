@@ -77,10 +77,21 @@ export default defineConfig(({ mode }) => {
           find: "@/components/chat/toolbar-modes/ModeFrameGomaster.vue",
           replacement: emptyComponent,
         },
+        // Internal-only MB Pro welcome screen → empty render component. Its
+        // only render site (ChatMessageList) is IS_INTERNAL-guarded, so this
+        // alias is defence-in-depth for any residual specifier.
+        {
+          find: "@/components/chat/ProEmptyState.vue",
+          replacement: emptyComponent,
+        },
         // Internal-only composables / modules → inert module stub.
         { find: "@/composables/useGomasterConnection", replacement: emptyModule },
         { find: "@/composables/useGomasterOptimize", replacement: emptyModule },
         { find: "@/composables/useProConnection", replacement: emptyModule },
+        // MB Pro LDAP access-gate composable (imported only by the internal-only
+        // ProEmptyState.vue + the excluded ModeFramePro.vue). Stubbed so an
+        // external tree with the source physically removed still resolves.
+        { find: "@/composables/useMbProAccessGate", replacement: emptyModule },
       ]
     : [];
 

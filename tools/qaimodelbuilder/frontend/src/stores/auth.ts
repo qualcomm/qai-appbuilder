@@ -175,7 +175,7 @@ export const useAuthStore = defineStore("auth", {
     },
 
     /**
-     * Re-check ModelBuilderProUsers membership without logging out.
+     * Re-check Model Builder Pro authorization without logging out.
      * Updates the session cookie server-side and refreshes local auth state.
      * Called from the Pro toolbar's「刷新权限」button.
      */

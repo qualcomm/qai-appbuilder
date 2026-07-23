@@ -11,9 +11,10 @@ The 2026-06 security-settings unification gave the WebUI three authoritative
 state surfaces that must each survive a restart (decision 2A):
 
 1. **Typed security/tools switches** — ``file_guard_enabled`` /
-   ``allow_exec_tool`` / ``sandbox_enabled`` (``SecuritySettings``) and
-   ``file_broker_enabled`` / ``ssl_verify`` / ``project_skip_dirs`` /
-   ``global_proxy`` (``ToolsSettings``). These drive backend behaviour but the
+   ``allow_exec_tool`` / ``native_file_guard_enabled`` (``SecuritySettings``)
+   and ``file_broker_enabled`` / ``ssl_verify`` / ``project_skip_dirs`` /
+   ``global_proxy`` / ``command_policy_enabled`` / ``dependency_approval_*``
+   (``ToolsSettings``). These drive backend behaviour but the
    pydantic ``Settings`` model is immutable per process, so the
    ``GET/PUT /api/security/runtime-config`` route persists operator edits here
    and :func:`load_runtime_config_overrides` feeds them back into
@@ -76,7 +77,6 @@ _LEGACY_RUNTIME_STATE_KEY = "sandbox_runtime_state"
 SECURITY_SWITCH_FIELDS: tuple[str, ...] = (
     "file_guard_enabled",
     "allow_exec_tool",
-    "sandbox_enabled",
     "native_file_guard_enabled",
 )
 TOOLS_SWITCH_FIELDS: tuple[str, ...] = (
@@ -87,6 +87,11 @@ TOOLS_SWITCH_FIELDS: tuple[str, ...] = (
     # as a top-level override, not nested under "tools". See TOP_LEVEL_FIELDS.
     "project_skip_dirs",
     "global_proxy",
+    # command execution (layer 3) — persisted so a UI toggle survives restart.
+    "dependency_approval_enabled",
+    "dependency_approval_deny_args",
+    "dependency_approval_timeout_s",
+    "command_policy_enabled",
 )
 # Top-level Settings fields that are persisted via the runtime-config route
 # and must be mapped back as top-level overrides (not nested under a sub-model).

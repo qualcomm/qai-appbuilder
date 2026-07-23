@@ -26,3 +26,14 @@ export default { render: () => null };
 export const useGomasterConnection = noop;
 export const useGomasterOptimize = noop;
 export const useProConnection = noop;
+// MB Pro LDAP access-gate composable stub. Returns an inert shape so a stray
+// `const { … } = useMbProAccessGate()` destructure resolves without throwing;
+// never invoked externally (the only call sites are IS_INTERNAL-gated).
+export const useMbProAccessGate = () => ({
+  isRefreshingAccess: { value: false },
+  accessTooltipVisible: { value: false },
+  showAccessTooltip: noop,
+  hideAccessTooltip: noop,
+  onRefreshAccess: noop,
+  onApplyToJoin: noop,
+});

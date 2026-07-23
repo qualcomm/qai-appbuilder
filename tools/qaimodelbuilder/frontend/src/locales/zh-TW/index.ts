@@ -353,7 +353,7 @@ const index = {
   proPoolNetworkError: "無法連接遠端 Agent，請檢查網路連線後重試。",
   proPinnedMachineOffline: "本 tab 綁定的機器 {url} 暫時無法連接。請稍後重試，或新建一個 tab 以使用其他機器。",
   proAccessDeniedTitle: "您暫無 Model Builder Pro 使用權限",
-  proAccessDeniedBody: "請加入 ModelBuilderProUsers 郵件清單以獲取使用權限。",
+  proAccessDeniedBody: "請申請 Model Builder Pro 使用權限以開始使用。",
   proAccessApply: "申請加入",
   proAccessRefresh: "刷新權限",
   proAccessRefreshing: "檢查中…",

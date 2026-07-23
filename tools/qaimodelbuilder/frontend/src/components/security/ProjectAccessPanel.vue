@@ -8,10 +8,9 @@
  * ProjectAccessPanel — project directory access control.
  *
  * V1 parity (`components/ProjectAccessPanel.js` + `composables/useProjectAccess.js`):
- * a single project root (`enabled` / `path` / `skip_dirs`) edited as a local
- * draft, saved explicitly. Six regions: status overview + enable switch,
- * disabled-warning banner, project-path input, skip-dirs editor, save/cancel
- * actions, loading + error overlays.
+ * a single project root (`enabled` / `path`) edited as a local draft, saved
+ * explicitly. Regions: status overview + enable switch, disabled-warning
+ * banner, project-path input, save/cancel actions, loading + error overlays.
  *
  * V2 structure notes (designed > V1):
  *   - Server state + API live in `useProjectAccess` composable; this component
@@ -20,7 +19,7 @@
  *     (§3.9 — no native confirm/alert), replacing V1's bespoke per-panel
  *     confirm overlay. The transient save banner replaces V1's inline timer.
  *   - Reuses the global shared `sec-*` CSS classes shared with the sibling
- *     panels; only the skip-dir chip list is panel-scoped (V1 inlined it).
+ *     panels.
  */
 import { reactive, ref, computed, onMounted, onBeforeUnmount, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -28,7 +27,6 @@ import { useI18n } from "vue-i18n";
 import { useConfirm } from "@/composables/useConfirm";
 import {
   useProjectAccess,
-  DEFAULT_SKIP_DIRS,
   type ProjectAccessStatus,
 } from "@/composables/useProjectAccess";
 
@@ -47,22 +45,15 @@ const { status, loading, saving, lastError, fetchStatus, updateStatus } =
 const draft = reactive<ProjectAccessStatus>({
   enabled: false,
   path: "",
-  skip_dirs: [],
 });
-
-const newSkipDir = ref("");
 
 function syncDraft(): void {
   draft.enabled = status.enabled;
   draft.path = status.path;
-  draft.skip_dirs = [...status.skip_dirs];
 }
 
 const hasUnsavedChanges = computed(
-  () =>
-    draft.enabled !== status.enabled ||
-    draft.path !== status.path ||
-    JSON.stringify(draft.skip_dirs) !== JSON.stringify(status.skip_dirs),
+  () => draft.enabled !== status.enabled || draft.path !== status.path,
 );
 
 // ─── Transient save banner (replaces V1 inline timer) ──────────────────────────
@@ -113,7 +104,6 @@ async function handleSave(): Promise<void> {
     await updateStatus({
       enabled: draft.enabled,
       path: draft.path,
-      skip_dirs: draft.skip_dirs,
     });
     syncDraft();
     showStatus("success", t("projectAccess.notifications.saved"));
@@ -125,23 +115,6 @@ async function handleSave(): Promise<void> {
   }
 }
 
-// ─── Skip-dir management (mirrors V1) ──────────────────────────────────────────
-
-function addSkipDir(): void {
-  const dir = newSkipDir.value.trim();
-  if (dir && !draft.skip_dirs.includes(dir)) {
-    draft.skip_dirs = [...draft.skip_dirs, dir];
-    newSkipDir.value = "";
-  }
-}
-
-function removeSkipDir(index: number): void {
-  draft.skip_dirs = draft.skip_dirs.filter((_, i) => i !== index);
-}
-
-function resetSkipDirs(): void {
-  draft.skip_dirs = [...DEFAULT_SKIP_DIRS];
-}
 
 // ─── Lifecycle ─────────────────────────────────────────────────────────────────
 
@@ -229,79 +202,6 @@ watch(
         <p class="sec-field-desc">
           {{ t("projectAccess.pathHint") }}
         </p>
-      </div>
-    </section>
-
-    <!-- ── Skip directories ──────────────────────────────────────────────── -->
-    <section class="sec-section">
-      <h3 class="sec-section-title">
-        {{ t("projectAccess.skipDirsLabel") }}
-      </h3>
-      <div class="sec-field">
-        <p class="sec-field-desc">
-          {{ t("projectAccess.skipDirsHint") }}
-        </p>
-
-        <!-- Chip list -->
-        <div class="pacl-tag-list">
-          <span
-            v-for="(dir, idx) in draft.skip_dirs"
-            :key="dir"
-            class="pacl-tag"
-          >
-            {{ dir }}
-            <button
-              type="button"
-              class="pacl-tag-remove"
-              :title="t('common.remove')"
-              :disabled="saving"
-              data-testid="project-access-skip-remove"
-              @click="removeSkipDir(idx)"
-            >
-              ×
-            </button>
-          </span>
-          <span
-            v-if="!draft.skip_dirs.length"
-            class="pacl-tag-empty"
-          >
-            {{ t("projectAccess.skipDirsEmpty") }}
-          </span>
-        </div>
-
-        <!-- Add new directory -->
-        <div class="sec-list-header pacl-add-row">
-          <div class="sec-field-row pacl-add-field">
-            <input
-              v-model="newSkipDir"
-              type="text"
-              class="sec-input mono pacl-add-input"
-              :placeholder="t('projectAccess.skipDirPlaceholder')"
-              :disabled="saving"
-              data-testid="project-access-skip-input"
-              @keydown.enter.prevent="addSkipDir"
-            />
-            <button
-              type="button"
-              class="btn btn-ghost btn-sm"
-              :disabled="saving || !newSkipDir.trim()"
-              data-testid="project-access-skip-add"
-              @click="addSkipDir"
-            >
-              + {{ t("common.add") }}
-            </button>
-            <button
-              type="button"
-              class="btn btn-ghost btn-sm"
-              :disabled="saving"
-              :title="t('projectAccess.resetSkipDirs')"
-              data-testid="project-access-skip-reset"
-              @click="resetSkipDirs"
-            >
-              🔄 {{ t("common.reset") }}
-            </button>
-          </div>
-        </div>
       </div>
     </section>
 

@@ -29,7 +29,7 @@ export interface AuthUser {
   readonly display_name: string;
   readonly sub: string;
   readonly auth_source: string;
-  /** True when the user is a member of ModelBuilderProUsers. */
+  /** True when the user is authorized to use Model Builder Pro. */
   readonly is_mb_pro_authorized: boolean;
   /** True when the LDAP membership check failed at login (service unavailable). */
   readonly mb_pro_access_check_failed: boolean;

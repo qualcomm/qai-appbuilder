@@ -35,11 +35,6 @@ const projectAccess = {
   pathHint: "專案目錄的絕對路徑（例如 C:\\Users\\you\\MyProject）",
   pathLabel: "專案目錄路徑",
   pathPlaceholder: "C:\\Users\\you\\MyProject",
-  resetSkipDirs: "恢復預設值",
-  skipDirPlaceholder: "新增目錄名稱...",
-  skipDirsEmpty: "未設定任何目錄",
-  skipDirsHint: "glob/grep 工具自動略過的目錄名稱（如 venv、node_modules），可提升效能並減少無關結果。",
-  skipDirsLabel: "略過的目錄",
   status: {
     disabled: "專案存取已停用",
     enabled: "專案存取已啟用",

@@ -89,7 +89,7 @@ def _load_settings_with_persisted_overrides(repo_root: Path) -> Settings:
     """Load Settings, layering operator-persisted security/tools switches on top.
 
     The ``GET/PUT /api/security/runtime-config`` surface persists the typed
-    security/tools switches (``file_guard_enabled`` / ``sandbox_enabled`` /
+    security/tools switches (``file_guard_enabled`` / ``command_policy_enabled`` /
     ``file_broker_enabled`` / ``ssl_verify`` / …) into the shared
     ``forge_config`` document so an operator edit survives a restart
     (decision 2A). The pydantic ``Settings`` model is immutable per process,

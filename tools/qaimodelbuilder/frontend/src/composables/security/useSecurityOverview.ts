@@ -259,33 +259,6 @@ export function useSecurityOverview(options?: { autoPollHealth?: boolean }) {
     }
   }
 
-  // ── Smart Approval (forge-config security.smart_approval — V1 757-779) ──
-  const smartApprovalEnabled = ref(false);
-  async function loadSmartApproval(): Promise<void> {
-    try {
-      const res = await apiJson<{ config: Record<string, unknown> }>(
-        "GET",
-        "/api/forge-config",
-      );
-      const security = res.config?.["security"] as
-        | { smart_approval?: boolean }
-        | undefined;
-      smartApprovalEnabled.value = Boolean(security?.smart_approval);
-    } catch {
-      // silent — default off
-    }
-  }
-  async function setSmartApproval(value: boolean): Promise<void> {
-    smartApprovalEnabled.value = value;
-    try {
-      await apiJson("POST", "/api/forge-config", {
-        config: { security: { smart_approval: value } },
-      });
-    } catch {
-      smartApprovalEnabled.value = !value;
-    }
-  }
-
   // ── Health polling (V1 30s interval; persists while view mounted) ───
   let healthTimer: number | null = null;
   function startHealthPolling(): void {
@@ -315,9 +288,6 @@ export function useSecurityOverview(options?: { autoPollHealth?: boolean }) {
     onDeactivated(stopHealthPolling);
     onBeforeUnmount(stopHealthPolling);
   }
-  onMounted(() => {
-    void loadSmartApproval();
-  });
 
   return {
     expanded,
@@ -332,8 +302,6 @@ export function useSecurityOverview(options?: { autoPollHealth?: boolean }) {
     dryRunResult,
     dryRunLoading,
     runDryRun,
-    smartApprovalEnabled,
-    setSmartApproval,
     startHealthPolling,
     stopHealthPolling,
   };

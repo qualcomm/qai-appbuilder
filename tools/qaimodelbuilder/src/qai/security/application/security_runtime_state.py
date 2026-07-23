@@ -105,10 +105,7 @@ class SecurityRuntimeStateService:
                 "enabled": False,
                 "trusted_paths": [],
             },
-            "path_patterns": {
-                "deny": [],
-                "allow": [],
-            },
+            "path_patterns": {},
             "project_access": {
                 "enabled": True,
             },
@@ -336,7 +333,7 @@ class SecurityRuntimeStateService:
             )
             self._settings = {
                 "auto_approve": {"enabled": False, "trusted_paths": []},
-                "path_patterns": {"deny": [], "allow": []},
+                "path_patterns": {},
                 "project_access": {"enabled": True},
                 "skill_policies": {},
                 # master switch back ON — single truth bucket.

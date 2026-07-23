@@ -38,8 +38,6 @@ def _register_paths_routes(router: "APIRouter", *, container: "Container") -> No
         rp_raw = cfg.get("read_allow_patterns", {}) or {}
         wp_raw = cfg.get("write_allow_patterns", {}) or {}
         return PathPatternsResponse(
-            deny=list(cfg.get("deny", [])),
-            allow=list(cfg.get("allow", [])),
             read_allow_patterns=PatternConfig(
                 enabled=bool(rp_raw.get("enabled", False)),
                 patterns=list(rp_raw.get("patterns", [])),
@@ -65,16 +63,14 @@ def _register_paths_routes(router: "APIRouter", *, container: "Container") -> No
     async def path_patterns_put(
         body: PathPatternsRequest,
     ) -> PathPatternsResponse:
-        # Read existing bucket so V1 tail-appended fields support partial
-        # updates (legacy callers only sending deny/allow keep their
-        # read_allow_patterns / write_allow_patterns intact).
+        # Read existing bucket so partial updates preserve sibling fields
+        # (a caller sending only read_allow_patterns keeps write_allow_patterns
+        # intact).
         existing = container.security.security_runtime_state.get_settings(
             "path_patterns"
         ) or {}
         merged: dict[str, Any] = {
-            "deny": list(body.deny),
-            "allow": list(body.allow),
-            # Preserve existing tail-appended fields by default.
+            # Preserve existing fields by default.
             "read_allow_patterns": dict(
                 existing.get("read_allow_patterns", {})
                 or {"enabled": False, "patterns": []}
@@ -96,21 +92,6 @@ def _register_paths_routes(router: "APIRouter", *, container: "Container") -> No
 
     # ── project_access (2) ────────────────────────────────────────────
 
-    # V1-aligned default skip directories (mirrors
-    # frontend `useProjectAccess.DEFAULT_SKIP_DIRS` / V1 `resetSkipDirs`).
-    _DEFAULT_SKIP_DIRS = [
-        "venv",
-        ".venv",
-        "env",
-        ".env",
-        "node_modules",
-        "__pycache__",
-        ".git",
-        "build",
-        "dist",
-        ".mypy_cache",
-    ]
-
     @router.get(
         "/project_access", response_model=ProjectAccessResponse
     )
@@ -121,7 +102,6 @@ def _register_paths_routes(router: "APIRouter", *, container: "Container") -> No
         return ProjectAccessResponse(
             enabled=bool(cfg.get("enabled", True)),
             path=str(cfg.get("path", "")),
-            skip_dirs=list(cfg.get("skip_dirs", _DEFAULT_SKIP_DIRS)),
         )
 
     @router.put(
@@ -139,14 +119,9 @@ def _register_paths_routes(router: "APIRouter", *, container: "Container") -> No
         merged: dict[str, Any] = {
             "enabled": body.enabled,
             "path": str(current.get("path", "")),
-            "skip_dirs": list(
-                current.get("skip_dirs", _DEFAULT_SKIP_DIRS)
-            ),
         }
         if body.path is not None:
             merged["path"] = body.path
-        if body.skip_dirs is not None:
-            merged["skip_dirs"] = list(body.skip_dirs)
 
         updated = container.security.security_runtime_state.update_settings(
             "project_access",
@@ -164,5 +139,4 @@ def _register_paths_routes(router: "APIRouter", *, container: "Container") -> No
         return ProjectAccessResponse(
             enabled=bool(updated["enabled"]),
             path=str(updated.get("path", "")),
-            skip_dirs=list(updated.get("skip_dirs", [])),
         )

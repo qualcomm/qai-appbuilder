@@ -132,7 +132,7 @@ def build_router(*, container: "Container") -> APIRouter:
     @router.post("/connect", response_model=SessionStateResponse)
     async def connect(body: ConnectRequest, request: Request) -> SessionStateResponse:
         user = getattr(getattr(request, "state", None), "user", None) or {}
-        # Access control gate: only members of ModelBuilderProUsers may connect.
+        # Access control gate: only authorized MB Pro members may connect.
         # Checked before the ctrl=None guard so unauthorized users see 403
         # rather than 404 on external/unconfigured editions.
         if not user.get("is_mb_pro_authorized", False):
@@ -147,7 +147,7 @@ def build_router(*, container: "Container") -> APIRouter:
         if ctrl is None:
             raise HTTPException(status_code=404, detail="MB Pro not available")
         raw_username: str = user.get("username") or ""
-        # Strip email domain if present (e.g. "jinweif@qti.qualcomm.com" → "jinweif")
+        # Strip email domain if present (e.g. "alice@example.com" → "alice")
         # so the value is a valid MB Pro session_id ([A-Za-z0-9_.-]+ only).
         username: str | None = (raw_username.split("@")[0] or None) if raw_username else None
         try:
@@ -230,7 +230,7 @@ def build_router(*, container: "Container") -> APIRouter:
     async def refresh_access(
         request: Request, response: Response
     ) -> RefreshAccessResponse:
-        """Re-check ModelBuilderProUsers LDAP membership and update the session cookie.
+        """Re-check MB Pro LDAP membership and update the session cookie.
 
         Allows a user who was just added to the list to gain access without
         logging out. The session expiry (``exp``) is preserved — this endpoint

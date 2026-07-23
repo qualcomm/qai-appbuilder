@@ -84,8 +84,25 @@ _PENDING_STATES: dict[str, dict[str, Any]] = {}
 
 # ── MB Pro LDAP access check ──────────────────────────────────────────────────
 
-_LDAP_GROUP = "ModelBuilderProUsers"
 _LDAP_TIMEOUT = 3.0
+
+
+def _resolve_ldap_group() -> str:
+    """Return the MB Pro LDAP membership group identifier, or ``""`` if absent.
+
+    Like :func:`_resolve_ldap_validate_url`, the group name is an internal-only
+    value: it lives in the external-excluded ``qai.platform.edition`` package
+    (``internal_config.toml [mb_pro] ldap_group``) so the open-source artifact
+    carries no internal distribution-list name. On external editions the import
+    fails and this returns ``""``; the access check never reaches the point of
+    using it because :func:`_resolve_ldap_validate_url` already returned ``""``
+    and short-circuited the check.
+    """
+    try:
+        from qai.platform.edition import get_mb_pro_ldap_group
+    except ImportError:
+        return ""
+    return get_mb_pro_ldap_group()
 
 
 def _resolve_ldap_validate_url() -> str:
@@ -112,11 +129,11 @@ def _resolve_ldap_validate_url() -> str:
 async def _check_mb_pro_access(
     username: str, *, ssl_verify: bool = True
 ) -> tuple[bool, bool]:
-    """Check if ``username`` is a member of the ModelBuilderProUsers group.
+    """Check if ``username`` is a member of the MB Pro access group.
 
-    Calls the ceflow LDAP validate endpoint, which returns the full member
+    Calls the internal LDAP validate endpoint, which returns the full member
     list. We check whether ``username`` (email-domain-stripped, e.g.
-    ``"jinweif"``) appears in ``members``.
+    ``"alice"``) appears in ``members``.
 
     The endpoint URL is resolved via :func:`_resolve_ldap_validate_url`. On the
     external edition it resolves to ``""`` (MB Pro is internal-only) and this
@@ -124,18 +141,18 @@ async def _check_mb_pro_access(
     graceful "not authorized, not an error" so external login succeeds and MB
     Pro simply stays unavailable.
 
-    **Username normalization** (2026-07-19): ceflow's LDAP endpoint returns
-    members as SHORT usernames (``"jinweif"``, ``"zhanweiw"``, …), never full
+    **Username normalization** (2026-07-19): the LDAP endpoint returns
+    members as SHORT usernames (``"alice"``, ``"bob"``, …), never full
     email addresses. Callers may pass either form:
-      • Okta OIDC ``preferred_username`` = ``"zhanweiw@qti.qualcomm.com"`` →
+      • Okta OIDC ``preferred_username`` = ``"alice@example.com"`` →
         login callback path
       • Session-cookie ``username`` already stripped by caller →
         ``mb_pro_session.py`` refresh path
     We normalize inside this function so both call sites agree without each
     having to remember to ``.split("@")[0]``. The prior bug: the login
-    callback compared ``"zhanweiw@qti.qualcomm.com" in ["zhanweiw", ...]``
+    callback compared ``"alice@example.com" in ["alice", ...]``
     which is always False, so every user was denied at login even when
-    ceflow returned a valid membership. See release notes 2026-07-19.
+    the LDAP endpoint returned a valid membership. See release notes 2026-07-19.
 
     Returns ``(authorized, ldap_error)``. On any failure (timeout, non-200,
     malformed response, ``valid=false``), returns ``(False, True)`` so the
@@ -174,7 +191,7 @@ async def _check_mb_pro_access(
         ) as client:
             r = await client.post(
                 ldap_validate_url,
-                json={"identifier": _LDAP_GROUP},
+                json={"identifier": _resolve_ldap_group()},
             )
         if r.status_code != 200:
             logger.warning(

@@ -509,27 +509,22 @@ class AutoApproveFullResponse(BaseModel):
     command_blacklist: CommandListConfig
 
 
-# ── Path-pattern config (pre-existing deny/allow + V1 tail-appended fields) ─
-# `read_allow_patterns` / `write_allow_patterns` are V1-parity additions; on
-# PUT they are partial-update (None = preserve existing bucket value), so
-# legacy callers writing only deny/allow keep working.
+# ── Path-pattern config (read/write allow-pattern glob allowlists) ──────────
+# `read_allow_patterns` / `write_allow_patterns` drive the auto-approve
+# path-pattern allowlist (`RuntimeStateAutoApproveAdapter`). On PUT they are
+# partial-update (None = preserve existing bucket value).
 class PatternConfig(BaseModel):
     enabled: bool = False
     patterns: list[str] = Field(default_factory=list)
 
 
 class PathPatternsRequest(BaseModel):
-    deny: list[str] = Field(default_factory=list)
-    allow: list[str] = Field(default_factory=list)
-    # V1-aligned tail-appended fields (optional → partial update).
+    # Optional → partial update (None = preserve existing bucket value).
     read_allow_patterns: PatternConfig | None = None
     write_allow_patterns: PatternConfig | None = None
 
 
 class PathPatternsResponse(BaseModel):
-    deny: list[str]
-    allow: list[str]
-    # V1-aligned tail-appended fields (always present in response).
     read_allow_patterns: PatternConfig = Field(default_factory=PatternConfig)
     write_allow_patterns: PatternConfig = Field(default_factory=PatternConfig)
 
@@ -583,16 +578,13 @@ class DangerousCommandPatternsUpdateResponse(DangerousCommandPatternsResponse):
 
 class ProjectAccessRequest(BaseModel):
     enabled: bool
-    # V1-aligned tail-appended fields (optional → partial update).
+    # Optional → partial update.
     path: str | None = None
-    skip_dirs: list[str] | None = None
 
 
 class ProjectAccessResponse(BaseModel):
     enabled: bool
-    # V1-aligned tail-appended fields.
     path: str = ""
-    skip_dirs: list[str] = Field(default_factory=list)
 
 
 class SkillPolicyResponse(BaseModel):

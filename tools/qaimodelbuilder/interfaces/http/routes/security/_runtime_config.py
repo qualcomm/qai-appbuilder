@@ -26,16 +26,12 @@ Three-layer mental model (one switch per layer):
   (no reboot): FileGuardFacade reads ``file_guard_enabled`` live and
   the native hook is start()/stop()'d in place on PUT. ``allow_exec_tool``
   is a DI-build decision → reboot.
-* **Process exec routing (layer 3)** — ``sandbox_enabled``
-  (``SecuritySettings``). Legacy gate for a (now-removed) OS-isolation
-  sandbox layer — despite the name it performs **NO OS isolation**. The
-  field + reboot semantics are preserved verbatim (§3.1 field-name lock).
-  Flipping the flag still chooses between two equivalent exec branches at
-  DI build time (so a change still needs a reboot), but the ONLY runtime
-  difference is shell vs no-shell invocation + audit attribution — both
-  branches spawn an un-isolated subprocess. The field exists so test
-  fixtures, the forge_config persistence surface and the WebUI Sandbox tab
-  keep working; it does not affect process-isolation semantics.
+* **Command execution (layer 3)** — ``command_policy_enabled`` (exec-profile
+  master switch) + ``dependency_approval_enabled`` /
+  ``dependency_approval_deny_args`` / ``dependency_approval_timeout_s``
+  (pip/uv install approval broker). Both gate command execution and
+  **hot-apply** in place: the exec/dep brokers hold a live reference and
+  read their enabled/tuning state at the next intercepted command.
 
 Persistence (decision 2A): edits are written to the shared ``forge_config``
 document via :mod:`apps.api._runtime_config_store`; ``create_app`` feeds them
@@ -72,8 +68,6 @@ class RuntimeConfigResponse(BaseModel):
     # Layer 2 — policy guard (SecuritySettings)
     file_guard_enabled: bool
     allow_exec_tool: bool
-    # Layer 3 — OS isolation (SecuritySettings)
-    sandbox_enabled: bool
     # 2026-07-04 native-hook integration — the OS-level guard64.dll hook
     # master switch. Tail-appended per §3.1. Part of the UNIFIED FileGuard
     # switch: the UI toggles it together with ``file_guard_enabled`` and both
@@ -110,7 +104,6 @@ class RuntimeConfigUpdateRequest(BaseModel):
     global_proxy: str | None = None
     file_guard_enabled: bool | None = None
     allow_exec_tool: bool | None = None
-    sandbox_enabled: bool | None = None
     native_file_guard_enabled: bool | None = None
     dependency_approval_enabled: bool | None = None
     dependency_approval_deny_args: list[str] | None = None
@@ -153,7 +146,6 @@ _REBOOT_FIELDS = frozenset(
         # is start()/stop()'d in place). ``native_file_guard_enabled`` is
         # likewise hot-applied and intentionally NOT listed here.
         "allow_exec_tool",
-        "sandbox_enabled",
         "file_broker_enabled",
         "file_broker_max_entries",
         # tool_output caps are installed into the ai_coding tool-handler seam
@@ -224,7 +216,6 @@ def _effective(container: "Container") -> dict[str, object]:
         "global_proxy": tools.global_proxy,
         "file_guard_enabled": bool(sec.file_guard_enabled),
         "allow_exec_tool": bool(sec.allow_exec_tool),
-        "sandbox_enabled": bool(sec.sandbox_enabled),
         "native_file_guard_enabled": bool(
             getattr(sec, "native_file_guard_enabled", False)
         ),

@@ -18,12 +18,16 @@
  *             reboot. (`ssl_verify` and the proxy URL `global_proxy` moved to
  *             Settings → 🔧 App Config on 2026-07 — they are application/network
  *             settings, not file-protection ones.)
- *   Layer 2 — Policy Guard (FileGuard / PolicyCenter). Build-time → reboot.
+ *   Layer 2 — Policy Guard (FileGuard / PolicyCenter): the unified FileGuard
+ *             switch (`file_guard_enabled` + `native_file_guard_enabled`,
+ *             hot-applied) + `allow_exec_tool`.
+ *   Layer 3 — Command Execution (hot-applied): `command_policy_enabled`
+ *             (exec-profile broker) + `dependency_approval_*` (pip/uv install
+ *             approval), rendered above the custom dangerous-command patterns
+ *             so all command gating lives in one cluster.
  *
- * (Layer 3 — OS Isolation Sandbox / Windows AppContainer was removed
- * 2026-07-01 along with the persistent ACL / sandbox cleanup; the
- * `sandbox_enabled` field on the runtime-config DTO is preserved on the
- * backend for now but no UI surface drives it.)
+ * (The former OS-Isolation Sandbox layer / `sandbox_enabled` field were
+ * removed 2026-07 — the gate was a no-op that performed no OS isolation.)
  *
  * Decision 3B: saving a reboot-requiring switch returns `needs_reboot=true`;
  * we show the custom reboot-confirm dialog (§3.9 — no native confirm) and, on
@@ -187,6 +191,36 @@ function toggleFileGuard(): void {
 function toggleAllowExec(): void {
   draft.allow_exec_tool = !draft.allow_exec_tool;
   void persist({ allow_exec_tool: draft.allow_exec_tool });
+}
+
+// ── Layer 3 — command execution (hot-applies) ──
+function toggleCommandPolicy(): void {
+  draft.command_policy_enabled = !draft.command_policy_enabled;
+  void persist({ command_policy_enabled: draft.command_policy_enabled });
+}
+function toggleDepApproval(): void {
+  draft.dependency_approval_enabled = !draft.dependency_approval_enabled;
+  void persist({ dependency_approval_enabled: draft.dependency_approval_enabled });
+}
+const newDenyArg = ref("");
+function addDenyArg(): void {
+  const a = newDenyArg.value.trim();
+  if (a && !draft.dependency_approval_deny_args.includes(a)) {
+    draft.dependency_approval_deny_args = [...draft.dependency_approval_deny_args, a];
+    newDenyArg.value = "";
+    void persist({ dependency_approval_deny_args: draft.dependency_approval_deny_args });
+  }
+}
+function removeDenyArg(arg: string): void {
+  draft.dependency_approval_deny_args = draft.dependency_approval_deny_args.filter(
+    (a) => a !== arg,
+  );
+  void persist({ dependency_approval_deny_args: draft.dependency_approval_deny_args });
+}
+function onDepTimeoutChange(value: number): void {
+  if (!Number.isFinite(value) || value < 0) return;
+  draft.dependency_approval_timeout_s = value;
+  void persist({ dependency_approval_timeout_s: value });
 }
 
 // ── Custom dangerous-command patterns (P-10) ──
@@ -388,6 +422,100 @@ function onGrepMaxOutputBytesChange(value: number): void {
           />
           <span class="sec-switch-slider"></span>
         </label>
+      </div>
+    </section>
+
+    <!-- Layer 3 — Command execution (hot-applies). The single place command
+       gating is controlled: exec-profile broker + dependency-install approval
+       broker. Rendered directly above the custom dangerous-command patterns so
+       all command gating lives in one cluster (#8 consolidation). -->
+    <section class="sec-section">
+      <h4>{{ t("toolSafety.layer3Title") }}</h4>
+      <p class="tool-safety-desc">
+        {{ t("toolSafety.layer3Desc") }}
+      </p>
+
+      <div class="tool-safety-row">
+        <div class="tool-safety-label">
+          <span>{{ t("toolSafety.commandPolicyEnabled") }}</span>
+          <small>{{ t("toolSafety.commandPolicyDesc") }}</small>
+        </div>
+        <label class="sec-switch">
+          <input
+            type="checkbox"
+            :checked="draft.command_policy_enabled"
+            @change="toggleCommandPolicy"
+          />
+          <span class="sec-switch-slider"></span>
+        </label>
+      </div>
+
+      <div class="tool-safety-row">
+        <div class="tool-safety-label">
+          <span>{{ t("toolSafety.depApprovalEnabled") }}</span>
+          <small>{{ t("toolSafety.depApprovalDesc") }}</small>
+        </div>
+        <label class="sec-switch">
+          <input
+            type="checkbox"
+            :checked="draft.dependency_approval_enabled"
+            @change="toggleDepApproval"
+          />
+          <span class="sec-switch-slider"></span>
+        </label>
+      </div>
+
+      <div class="tool-safety-row tool-safety-row--column">
+        <div class="tool-safety-label">
+          <span>{{ t("toolSafety.depDenyArgs") }}</span>
+          <small>{{ t("toolSafety.depDenyArgsDesc") }}</small>
+        </div>
+        <div class="tool-safety-chips">
+          <span
+            v-for="arg in draft.dependency_approval_deny_args"
+            :key="arg"
+            class="tool-safety-chip"
+          >
+            <code>{{ arg }}</code>
+            <button
+              type="button"
+              :aria-label="t('toolSafety.remove')"
+              @click="removeDenyArg(arg)"
+            >
+              ×
+            </button>
+          </span>
+        </div>
+        <div class="tool-safety-add">
+          <input
+            v-model="newDenyArg"
+            class="tool-safety-text"
+            type="text"
+            :placeholder="t('toolSafety.depDenyArgsPlaceholder')"
+            @keyup.enter="addDenyArg"
+          />
+          <button
+            type="button"
+            class="tool-safety-add-btn"
+            @click="addDenyArg"
+          >
+            {{ t("toolSafety.add") }}
+          </button>
+        </div>
+      </div>
+
+      <div class="tool-safety-row">
+        <div class="tool-safety-label">
+          <span>{{ t("toolSafety.depTimeout") }}</span>
+          <small>{{ t("toolSafety.depTimeoutDesc") }}</small>
+        </div>
+        <input
+          class="tool-safety-number"
+          type="number"
+          min="0"
+          :value="draft.dependency_approval_timeout_s"
+          @change="onDepTimeoutChange(Number(($event.target as HTMLInputElement).value))"
+        />
       </div>
     </section>
 

@@ -739,25 +739,14 @@ def build_ai_coding_services(container: Container) -> AiCodingServices:
         _set_tool_project_skip_dirs(
             tuple(getattr(_tools_settings, "project_skip_dirs", ()) or ())
         )
-    # When ``security.sandbox_enabled`` is True, route the ``exec`` tool
-    # through the security context's ``process_runner``.  Post Phase 3
-    # cleanup (2026-07-01) this is the plain :class:`SubprocessProcessRunner`
-    # (the AppContainer launcher wrap was deleted); the flag still selects
-    # between two equivalent runner-routed exec branches, but neither
-    # performs OS isolation — the only runtime difference is shell vs
-    # no-shell invocation + audit attribution. When off / security not
-    # booted, ``process_runner`` stays None and the exec tool falls back to
-    # a bare subprocess (prior behaviour). Sub-process file writes are
-    # guarded by the native guard64.dll hook, not by this flag.
+    # Post the 2026-07-01 sandbox cleanup + the sandbox_enabled removal, the
+    # ``exec`` tool always runs as a bare subprocess (no runner routing). The
+    # former ``security.sandbox_enabled`` gate selected an equivalent
+    # runner-routed branch that performed NO OS isolation (only shell vs
+    # no-shell + audit attribution); it was removed as a redundant,
+    # reboot-costing no-op. Sub-process file writes are guarded by the native
+    # guard64.dll hook, not by any exec-branch selector.
     _exec_process_runner = None
-    _settings = getattr(container, "settings", None)
-    _security_settings = getattr(_settings, "security", None) if _settings else None
-    if _security_settings and getattr(
-        _security_settings, "sandbox_enabled", False
-    ):
-        _exec_process_runner = getattr(
-            getattr(container, "security", None), "process_runner", None
-        )
     # FileGuard guard-token provider (2026-07-06 guard-only reversal): the
     # one-shot ``exec`` handler marks its spawned subtree as guarded via
     # ``QAI_FILEGUARD_GUARD_TOKEN``. Resolved here in the composition root
