@@ -217,6 +217,23 @@ class EventBus:
 
         # snapshot subscriptions to avoid holding the lock while delivering
         async with self._lock:
+            # Lazily GC unsubscribed subscriptions. ``EventSubscription.
+            # unsubscribe()`` poison-pills the worker task (so nothing ever
+            # drains that subscription's queue again) and flips ``_closed``,
+            # but — being a method on the subscription, which holds no
+            # back-reference to the bus — it cannot de-register itself from
+            # this list. Left registered, a closed subscription is still a
+            # publish target: its orphaned 256-slot queue fills once and then
+            # EVERY later publish raises QueueFull -> BackpressureError, which
+            # is exactly the multi-thousand-line "events.backpressure" traceback
+            # flood a leaked ``/api/events`` SSE/WS subscription produced. Prune
+            # here (the one place that already holds the lock and is on the
+            # bus's own loop) so a disconnected client's subscription stops
+            # receiving events the moment it is closed.
+            if any(s._closed for s in self._subscriptions):
+                self._subscriptions = [
+                    s for s in self._subscriptions if not s._closed
+                ]
             targets = [s for s in self._subscriptions if _matches(s, event)]
 
         if not targets:

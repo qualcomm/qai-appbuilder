@@ -138,7 +138,7 @@ class FilesystemSkillFileLoader:
     ``FileSystemWeightsPresence`` 双 anchor 探测语义一致，
     State-Truth-First 铁律 1):
 
-    * **built-in** — ``pack_root`` (``<repo_root>/factory/app_builder/models``);
+    * **built-in** — ``pack_root`` (``<repo_root>/factory/chat_features/app-builder/models``);
     * **user-imported** — ``user_pack_root``
       (``<data_dir>/app_builder/user_models``).
 
@@ -266,7 +266,7 @@ class ResolveSkillFilesUseCase:
     V1 parity (``backend/app_builder/skill_resolver.resolve_skill_files``):
     returns an ordered tuple of absolute, existing SKILL.md path strings:
 
-    1. the top-level App Builder SKILL (``factory/app_builder/SKILL.md``),
+    1. the top-level App Builder SKILL (``factory/chat_features/app-builder/SKILL.md``),
        injected unconditionally when present;
     2. the SKILL of the currently selected Pack
        (``tool_params["selected_model_id"]``), gated by the Pack manifest's
@@ -591,7 +591,7 @@ class GeneratePackCatalogUseCase:
         lines.extend(self._usage_rules())
 
         if truncated:
-            # P4 双根：built-in packs 在 ``factory/app_builder/models/``，
+            # P4 双根：built-in packs 在 ``factory/chat_features/app-builder/models/``，
             # user-imported packs 在 ``data/app_builder/user_models/``。
             # 主推 API：让 LLM 通过 App Builder catalog 接口拿完整列表
             # （API 契约稳定，路径可能演进）。若必须直接扫盘，须同时覆盖
@@ -729,7 +729,7 @@ class GeneratePackCatalogUseCase:
         Renders (only when ``self._origin_by_id`` has an entry for ``mid``)::
 
             - 位置: 内置 pack (V1 built-in layout)
-              - Pack 目录: `${APP_ROOT}/factory/app_builder/models/<id>/`
+              - Pack 目录: `${APP_ROOT}/factory/chat_features/app-builder/models/<id>/`
               - 权重目录: `${APP_ROOT}/models/<id>/`
               - app.yaml: `builtin: true`
 

@@ -259,7 +259,7 @@ include = [
   "/scripts/init",
   "/scripts/release",
   "/src/qai/platform/persistence/migrations_sql",
-  "/defaults",
+  "/factory",
   "/frontend/dist",
   "/README.md",
   "/pyproject.toml",

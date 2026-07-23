@@ -47,7 +47,7 @@ SUPPORTED_AUDIO_FORMATS: tuple[str, ...] = (
 
 Lower-case, no leading dot. Extending this list MUST be paired with
 the corresponding decoder support in ``shared/audio_io.py``
-(post-PR-306 path: ``factory/app_builder/shared/audio_io.py``).
+(post-PR-306 path: ``factory/chat_features/app-builder/shared/audio_io.py``).
 """
 
 

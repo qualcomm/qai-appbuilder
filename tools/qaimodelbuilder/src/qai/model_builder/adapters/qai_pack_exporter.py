@@ -78,9 +78,11 @@ from ._naming import (
 )
 from ._pack_layout import (
     clean_for_re_export,
+    clear_generating,
     collect_example_images,
     find_context_binary,
     link_or_copy,
+    mark_generating,
     sha256_file,
 )
 from ._runner_templates import render_runner
@@ -179,137 +181,153 @@ class QaiPackExporter:
         log.append(f"[INFO] === QAI Pack Export ===")
         log.append(f"[INFO] Workdir: {workspace.workdir}")
 
-        # Step 1: precision selection.
-        precisions, default_precision = self._resolve_precisions(
-            workspace=workspace,
-            command=command,
-            log=log,
-        )
-        log.append(
-            f"[INFO]   PRECISIONS = {[p.plan_key for p in precisions]} "
-            f"(default = {default_precision.plan_key})"
-        )
-        # Step 2: taxonomy + display metadata.
-        meta = self._resolve_metadata(
-            workspace=workspace,
-            command=command,
-            precisions=precisions,
-            default_precision=default_precision,
-            log=log,
-        )
-        # Step 3: locate context binaries.
-        per_precision = self._locate_context_binaries(
-            workspace=workspace,
-            precisions=precisions,
-            default_precision=default_precision,
-            log=log,
-            errors=errors,
-        )
-        default_info = per_precision[default_precision.plan_key]
-        default_bin: Path = default_info["bin"]
-        # Step 4: app_pack/ layout (incremental).
-        layout = self._setup_pack_layout(
-            workspace=workspace,
-            per_precision=per_precision,
-            log=log,
-        )
-        # Step 5: I/O contract extraction (smoke test).
-        io_contract = await self._extract_io_contract(
-            default_bin=default_bin,
-            log=log,
-            errors=errors,
-        )
-        # Step 6: build variants[].
-        variants = self._build_variants(
-            per_precision=per_precision,
-            default_precision=default_precision,
-            pack_id=meta.pack_id,
-            latencies_ms=workspace.latencies_ms,
-        )
-        # Step 7: manifest.json.
-        manifest_path = self._write_manifest(
-            workspace=workspace,
-            meta=meta,
-            default_precision=default_precision,
-            default_bin=default_bin,
-            default_info=default_info,
-            io_contract=io_contract,
-            variants=variants,
-            pack_dir=layout.pack_dir,
-            log=log,
-        )
-        # Step 8: runner.py.
-        runner_path, runner_compiles = self._write_runner(
-            workspace=workspace,
-            meta=meta,
-            default_precision=default_precision,
-            default_bin=default_bin,
-            pack_dir=layout.pack_dir,
-            log=log,
-            errors=errors,
-        )
-        # Step 8.5: SKILL.md skeleton — gives the App Builder chat Agent a
-        # pack-specific summary + a pointer to runner.py's ``_resolve_weights``
-        # for weight-path logic (P4 dual-root awareness).
-        # Without this, the runtime ``FilesystemSkillFileLoader`` finds
-        # nothing under either anchor and the LLM only sees the generic
-        # top-level SKILL, missing all pack-specific I/O guidance.
-        self._write_skill(
-            meta=meta,
-            default_precision=default_precision,
-            variants=variants,
-            pack_dir=layout.pack_dir,
-            log=log,
-            errors=errors,
-        )
-        # Step 9: requirements.txt.
-        requirements_path = self._write_requirements(
-            pack_id=meta.pack_id,
-            pack_dir=layout.pack_dir,
-            log=log,
-        )
-        # Step 10: example outputs + LICENSES.md.
-        self._write_examples(
-            workspace=workspace,
-            examples_dir=layout.examples_dir,
-            log=log,
-        )
-        # Step 11: assets (labels / vocab).
-        self._collect_assets(
-            workspace=workspace,
-            classify_result=meta.classify_result,
-            assets_dir=layout.assets_dir,
-            log=log,
-        )
-        # Step 12: provenance.
-        self._write_provenance(
-            workspace=workspace,
-            meta=meta,
-            default_precision=default_precision,
-            provenance_dir=layout.provenance_dir,
-            log=log,
-        )
-        # Step 13: _candidate.json.
-        checks, all_pass, failed_checks, candidate_json_path = (
-            self._write_candidate(
+        # In-flight marker: the route is synchronous, so this on-disk
+        # sentinel is the only durable record that generation is under way.
+        # Written BEFORE any long-running step (smoke test etc.) and cleared
+        # in the ``finally`` below so a mid-generation Import-panel reopen
+        # sees "生成中..." instead of the initial button. ``mark_generating``
+        # also drops any stale ``_candidate.json`` so the status probe can't
+        # report this fresh run as already finished before it is.
+        pack_dir_early = workspace.workdir / "app_pack"
+        mark_generating(pack_dir_early)
+        try:
+            # Step 1: precision selection.
+            precisions, default_precision = self._resolve_precisions(
+                workspace=workspace,
+                command=command,
+                log=log,
+            )
+            log.append(
+                f"[INFO]   PRECISIONS = {[p.plan_key for p in precisions]} "
+                f"(default = {default_precision.plan_key})"
+            )
+            # Step 2: taxonomy + display metadata.
+            meta = self._resolve_metadata(
+                workspace=workspace,
+                command=command,
+                precisions=precisions,
+                default_precision=default_precision,
+                log=log,
+            )
+            # Step 3: locate context binaries.
+            per_precision = self._locate_context_binaries(
+                workspace=workspace,
+                precisions=precisions,
+                default_precision=default_precision,
+                log=log,
+                errors=errors,
+            )
+            default_info = per_precision[default_precision.plan_key]
+            default_bin: Path = default_info["bin"]
+            # Step 4: app_pack/ layout (incremental).
+            layout = self._setup_pack_layout(
+                workspace=workspace,
+                per_precision=per_precision,
+                log=log,
+            )
+            # Step 5: I/O contract extraction (smoke test).
+            io_contract = await self._extract_io_contract(
+                default_bin=default_bin,
+                log=log,
+                errors=errors,
+            )
+            # Step 6: build variants[].
+            variants = self._build_variants(
+                per_precision=per_precision,
+                default_precision=default_precision,
+                pack_id=meta.pack_id,
+                latencies_ms=workspace.latencies_ms,
+            )
+            # Step 7: manifest.json.
+            manifest_path = self._write_manifest(
                 workspace=workspace,
                 meta=meta,
                 default_precision=default_precision,
                 default_bin=default_bin,
                 default_info=default_info,
-                runner_compiles=runner_compiles,
-                manifest_path=manifest_path,
+                io_contract=io_contract,
                 variants=variants,
                 pack_dir=layout.pack_dir,
                 log=log,
             )
-        )
-        self._log_completion(
-            pack_dir=layout.pack_dir,
-            all_pass=all_pass,
-            failed_checks=failed_checks,
-            log=log,
-        )
+            # Step 8: runner.py.
+            runner_path, runner_compiles = self._write_runner(
+                workspace=workspace,
+                meta=meta,
+                default_precision=default_precision,
+                default_bin=default_bin,
+                pack_dir=layout.pack_dir,
+                log=log,
+                errors=errors,
+            )
+            # Step 8.5: SKILL.md skeleton — gives the App Builder chat Agent a
+            # pack-specific summary + a pointer to runner.py's ``_resolve_weights``
+            # for weight-path logic (P4 dual-root awareness).
+            # Without this, the runtime ``FilesystemSkillFileLoader`` finds
+            # nothing under either anchor and the LLM only sees the generic
+            # top-level SKILL, missing all pack-specific I/O guidance.
+            self._write_skill(
+                meta=meta,
+                default_precision=default_precision,
+                variants=variants,
+                pack_dir=layout.pack_dir,
+                log=log,
+                errors=errors,
+            )
+            # Step 9: requirements.txt.
+            requirements_path = self._write_requirements(
+                pack_id=meta.pack_id,
+                pack_dir=layout.pack_dir,
+                log=log,
+            )
+            # Step 10: example outputs + LICENSES.md.
+            self._write_examples(
+                workspace=workspace,
+                examples_dir=layout.examples_dir,
+                log=log,
+            )
+            # Step 11: assets (labels / vocab).
+            self._collect_assets(
+                workspace=workspace,
+                classify_result=meta.classify_result,
+                assets_dir=layout.assets_dir,
+                log=log,
+            )
+            # Step 12: provenance.
+            self._write_provenance(
+                workspace=workspace,
+                meta=meta,
+                default_precision=default_precision,
+                provenance_dir=layout.provenance_dir,
+                log=log,
+            )
+            # Step 13: _candidate.json.
+            checks, all_pass, failed_checks, candidate_json_path = (
+                self._write_candidate(
+                    workspace=workspace,
+                    meta=meta,
+                    default_precision=default_precision,
+                    default_bin=default_bin,
+                    default_info=default_info,
+                    runner_compiles=runner_compiles,
+                    manifest_path=manifest_path,
+                    variants=variants,
+                    pack_dir=layout.pack_dir,
+                    log=log,
+                )
+            )
+            self._log_completion(
+                pack_dir=layout.pack_dir,
+                all_pass=all_pass,
+                failed_checks=failed_checks,
+                log=log,
+            )
+        finally:
+            # Clear the in-flight marker whether the export succeeded, hit a
+            # soft-failure, or raised — the transient "生成中..." state must
+            # never outlive the request. On success ``_candidate.json`` is the
+            # durable "generated" signal the status probe reports instead.
+            clear_generating(pack_dir_early)
         return PackExportResult(
             success=all_pass,
             pack_id=meta.pack_id,

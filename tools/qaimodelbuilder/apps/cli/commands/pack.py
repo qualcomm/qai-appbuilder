@@ -624,7 +624,7 @@ def cmd_pack_deps_install(args: argparse.Namespace) -> int:
         # provider; resolve it via the same factory fallback the DI
         # builder uses so the directory we hand to ``ensure_installed``
         # is the one runtime-wired ``RunAppUseCase`` would pick.
-        pack_root = (c.repo_root / "factory" / "app_builder" / "models").resolve()
+        pack_root = (c.repo_root / "factory" / "chat_features" / "app-builder" / "models").resolve()
         if not pack_root.is_dir():
             raise RuntimeError(
                 f"factory pack root not found at {pack_root} "

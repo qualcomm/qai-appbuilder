@@ -1,3 +1,7 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
 """
 run_pipeline_legacy.py - LEGACY End-to-End QNN Pipeline (ONNX -> C++/BIN -> DLL -> .bin)
 

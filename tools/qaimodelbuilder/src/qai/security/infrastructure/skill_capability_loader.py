@@ -315,7 +315,7 @@ async def load_all(
     """Scan ``factory/chat_features/**/skill.policy.json`` and register each.
 
     Walks the chat-feature skill packs (and the AppBuilder model packs
-    under ``factory/app_builder/**``) for ``skill.policy.json`` sidecars,
+    under ``factory/chat_features/app-builder/**``) for ``skill.policy.json`` sidecars,
     parses each into a :class:`SkillCapability`, and registers it with
     ``registry``. Malformed files are skipped (logged). Returns the list
     of skill names that registered successfully so callers can log the
@@ -335,7 +335,7 @@ async def load_all(
 
     scan_roots = (
         project_root / "factory" / "chat_features",
-        project_root / "factory" / "app_builder",
+        project_root / "factory" / "chat_features" / "app-builder",
     )
     seen_files: set[Path] = set()
     for root in scan_roots:

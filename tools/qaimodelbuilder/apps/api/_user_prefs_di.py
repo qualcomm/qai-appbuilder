@@ -229,12 +229,11 @@ def _resolve_skills_dirs(container: Container) -> list[Path]:
     1. ``<repo_root>/skills``              — user-installed skills (highest priority)
     2. ``<repo_root>/factory/chat_features`` — built-in chat-feature skill packs
 
-    ``factory/app_builder`` is intentionally NOT scanned here: its skill is
-    defined by a ROOT-level ``SKILL.md`` (not a subdir SKILL.md), so feeding
-    it to :class:`SkillDiscovery` (which scans *subdirs*) would miss the
-    App Builder skill and wrongly surface the ``_template`` placeholder
-    subdir. App Builder is surfaced via the security ``SkillDiscoveryUseCase``
-    (root-SKILL.md registration) and the startup capability registry instead.
+    ``factory/chat_features/app-builder`` is now a standard subdirectory of
+    ``factory/chat_features`` and is discovered by :class:`SkillDiscovery`
+    (which scans immediate subdirs) alongside model-builder, model-hub, etc.
+    Its internal ``_template/`` and ``models/<id>/`` subdirs are NOT surfaced
+    because ``SkillDiscovery`` only iterates first-level children.
 
     Production wiring reads ``container.repo_root`` (the repository root
     resolved in :func:`apps.api.main.create_app`). The defensive

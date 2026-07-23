@@ -22,7 +22,7 @@
 
 ``_NO_DEPS_PKGS`` 修正了 V1 既有缺陷：``openai-whisper`` 的传递依赖
 ``numba`` / ``llvmlite`` 在 ARM64 Windows 无 wheel，必须 ``--no-deps`` 安装
-（见 ``factory/app_builder/models/whisper-base/requirements.txt`` 注释）。V1 的聚合器
+（见 ``factory/chat_features/app-builder/models/whisper-base/requirements.txt`` 注释）。V1 的聚合器
 不带 ``--no-deps``，本模块把这类包单独归到 ``no_deps`` 桶里交给调用方处理。
 """
 

@@ -8,12 +8,12 @@ install_app_builder_weights.py — App Builder Pack weight bootstrapper.
 Why this script exists
 ======================
 
-App Builder Packs (``factory/app_builder/models/<id>/``) are *source-only*
+App Builder Packs (``factory/chat_features/app-builder/models/<id>/``) are *source-only*
 artifacts in the repo. The actual QNN context-binary weights live outside the
 Pack tree:
 
     Real file:    <repo>/models/<modelId>/<weight>.bin
-    Pack symlink: <repo>/factory/app_builder/models/<modelId>/weights/<weight>.bin
+    Pack symlink: <repo>/factory/chat_features/app-builder/models/<modelId>/weights/<weight>.bin
 
 The Pack's ``manifest.json`` declares the canonical weight location via
 ``assets.installPath`` — this is the *single source of truth* the backend
@@ -56,7 +56,7 @@ from typing import Dict, List, Optional, Tuple
 # ─── Constants ────────────────────────────────────────────────────────────────
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-PACK_ROOT = REPO_ROOT / "factory" / "app_builder" / "models"
+PACK_ROOT = REPO_ROOT / "factory" / "chat_features" / "app-builder" / "models"
 
 
 # ─── Tiny printer helpers (match setup_qairt_env.py style) ────────────────────

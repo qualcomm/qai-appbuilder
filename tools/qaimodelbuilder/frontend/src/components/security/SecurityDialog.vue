@@ -33,7 +33,7 @@ import {
   type GrantRange,
 } from "@/composables/security/usePermissionDialog";
 
-const { t } = useI18n();
+const { t, te } = useI18n();
 
 const {
   currentRequest,
@@ -97,8 +97,26 @@ const parentDir = computed(() => {
  * P-EXEC (2026-07-06): the exec-broker dangerous-command ASK rationale
  * ("why does this need confirmation?"). Empty / absent for the plain
  * FileGuard path ASK → the reason banner is not rendered.
+ *
+ * i18n contract (A2): the backend sends a locale-free `reason_code` (+ optional
+ * `reason_args`); we render the localized text from the frontend locale catalog
+ * (`security.askReason.<code>`) so switching the UI language re-localizes with
+ * NO backend round-trip. Fallback order: known `reason_code` → localized text;
+ * unknown/absent code → the verbatim `reason` string (operator-custom rule text
+ * or a legacy frame). This keeps ALL user-visible wording in the locale files.
  */
-const reason = computed(() => currentRequest.value?.reason ?? "");
+const reason = computed(() => {
+  const req = currentRequest.value;
+  if (!req) return "";
+  const code = req.reason_code;
+  if (code) {
+    const key = `security.askReason.${code}`;
+    if (te(key)) {
+      return t(key, (req.reason_args ?? {}) as Record<string, unknown>);
+    }
+  }
+  return req.reason ?? "";
+});
 /**
  * Phase 2: the current request's pid (if the backend supplied it via the
  * native-hook bridge). Used to decide whether to show the "Cancel all from

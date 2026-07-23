@@ -1,3 +1,7 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
 """``qai_pack_validate.py`` — structurally validate a candidate Pack.
 
 V1-parity entry point for the SKILL workflow.  Driven exactly like V1 —

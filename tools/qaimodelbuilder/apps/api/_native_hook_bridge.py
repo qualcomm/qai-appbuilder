@@ -349,7 +349,7 @@ class NativeFileInterceptorBridge:
             and self._request_permission is not None
             and self._wait_registry is not None
         ):
-            return await self._ask_user(
+            allowed = await self._ask_user(
                 subject=subject,
                 resource=resource,
                 requested_mask=mask,
@@ -357,6 +357,7 @@ class NativeFileInterceptorBridge:
                 process_path=process_path,
                 command_line=command_line,
             )
+            return allowed
         # explicit DENY / ASK not wired
         return False
 

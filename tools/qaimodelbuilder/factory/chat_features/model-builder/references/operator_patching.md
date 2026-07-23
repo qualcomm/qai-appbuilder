@@ -6,45 +6,25 @@
 
 ## RULE 1: Check Input Types BEFORE Choosing a Pattern
 
-Every unsupported operator patch depends on the **data types of its inputs**.
-The same operator (e.g., `Mod`) has completely different patch strategies for
-INT64 vs FLOAT inputs. Choosing the wrong pattern is the #1 cause of patch failures.
+Every patch depends on **input data types**. Same operator → different strategies for INT64 vs FLOAT.
 
-### How to Determine Input Types
-
-When a converter or context binary error mentions an unsupported operator:
-
-1. **Note the operator name and node** from the error log (e.g., `/model.23/Mod`)
-2. **Open the ONNX model in Netron** (https://netron.app) or inspect with Python:
+**How to determine input types:**
+1. Note operator name + node from error log (e.g., `/model.23/Mod`)
+2. Inspect with `onnx.load()` or Netron:
    ```python
    import onnx
    model = onnx.load("model.onnx")
    for node in model.graph.node:
        if node.op_type == "Mod":  # replace with your op
-           print(f"Node: {node.name}")
-           print(f"  Inputs: {list(node.input)}")
-           print(f"  Outputs: {list(node.output)}")
+           print(f"Node: {node.name}, Inputs: {list(node.input)}, Outputs: {list(node.output)}")
    ```
-3. **Check the input tensor types** — look at the producer of each input:
-   - If input comes from **TopK** → it's INT64 (indices)
-   - If input comes from **Conv/MatMul/Softmax** → it's FLOAT
-   - If input comes from **Constant** → check the constant's dtype in Netron
-4. **Match the type signature** to the Error → Action table below
-
-### Quick Type Check Reference
-
-| Producer Node Type | Output Tensor Type |
-|-------------------|-------------------|
-| TopK (indices output) | INT64 |
-| Constant (dims=[], data_type=7) | INT64 scalar |
-| Constant (dims=[], data_type=1) | FLOAT32 scalar |
-| Conv / MatMul / Gemm | FLOAT32 |
-| Softmax / Sigmoid / Relu | FLOAT32 |
-| Reshape / Transpose | Inherits input type |
-
+3. Determine input tensor type from producer:
+   - TopK indices → INT64 | Constant(data_type=7) → INT64 | Constant(data_type=1) → FLOAT32
+   - Conv/MatMul/Gemm/Softmax/Sigmoid → FLOAT32 | Reshape/Transpose → inherits input
+4. Match type signature to Error → Action table below
 ### Manual Type-First Decision Tree
 
-If patching manually, follow this flow:
+This is the per-operator, type-first flow. For *how* to patch (in-memory vs ONNX surgery vs AI-assisted), see the [Approach Selection Decision Tree](#approach-selection-decision-tree) below.
 
 ```
 Step 1: Identify the failing operator from error log
@@ -68,6 +48,8 @@ Step 5: If validation fails, try next-ranked pattern in table
 
 ### Operator Pattern Table (Type-Aware)
 
+*Quick index — full ONNX surgery code, success rates, and error signatures for each row are in the [Error → Action Table](#error--action-table) chapters below.*
+
 | Operator | Input A Type | Input B Type | Pattern | Operators Needed | QNN Compatible | Priority |
 |----------|-------------|-------------|---------|-----------------|---------------|----------|
 | **Mod** | INT64/32 | INT64/32 | `Sub(a, Mul(b, Div(a,b)))` | Div, Mul, Sub | ✅ Yes | ★★★★★ |
@@ -80,28 +62,11 @@ Step 5: If validation fails, try next-ranked pattern in table
 | **Einsum** | FLOAT | — | Decompose to MatMul+Transpose+Reshape | MatMul, Transpose, Reshape | ✅ Yes | ★★★★ |
 | **ScatterND** | FLOAT | — | Where + Add + Mul | Where, Add, Mul | ✅ Yes | ★★★ |
 
-### Critical Insights from Real Projects
-
-1. **Type-preserving patches have the highest success rate.** When both inputs are INT, keep everything in INT. Avoid Cast whenever possible.
-
-2. **ONNX integer division truncates toward zero.** For positive values, `Div(INT, INT)` is equivalent to `floor(a/b)`. This means `Mod` decomposition works correctly without needing a separate Floor operator.
-
-3. **Constants in INT type stay INT.** Don't assume FLOAT just because the model is FP16. TopK outputs INT64 indices, and constant values from the graph may be INT64 even in a float model.
-
-4. **Cast-based patches often fail QNN validation.** The QNN converter rejects mixed-type operations (e.g., Mul with one INT32 input and one FLOAT input). If you must use Cast, add an `Add(0.0)` after the final Cast to break the type inference chain.
-
-5. **Dry-run warnings are not always blockers.** `qnn-onnx-converter --dry_run` may report "unsupported version" for operators like MaxPool, but actual conversion may succeed. Always test actual conversion even with dry-run warnings.
+**Key:** Type-preserving patches (both inputs INT → keep in INT, no Cast) have highest success. INT type isn't implied by model precision — TopK outputs INT64 even in FP16 models. See each operator chapter below for surgery code and dry-run caveats.
 
 ---
 
-> ⚠️ **Manual Patching Process**
->
-> Operator patching is a manual process. Follow this workflow:
-> 1. Identify the unsupported operator from the error log
-> 2. Check its input types using Netron or the Python snippet above
-> 3. Follow the Error → Action table below to find the correct replacement pattern
-> 4. Apply the ONNX surgery code to your model
-> 5. Validate with `onnx.checker.check_model()`, dry-run, and accuracy comparison (see Validation section below)
+> ⚠️ **Manual Patching Process** — operator patching is a manual, per-node workflow: identify the unsupported op, check its input types (Netron or the Python snippet above), match the [Error → Action Table](#error--action-table) row, apply the ONNX surgery code, then validate. See the [Manual Type-First Decision Tree](#manual-type-first-decision-tree) for the full loop and [Validation](#validation) / [Post-Patch Validation — Mandatory Gates](#post-patch-validation--mandatory-gates) for the mandatory checks.
 
 ---
 
@@ -111,11 +76,7 @@ When QNN conversion or context binary generation fails, match the error to the a
 
 ### How to Use This Table
 
-1. **Identify the error** from converter logs (look for "unsupported", "validation failed", error codes like `0xc26`)
-2. **Determine input types** (see "How to Determine Input Types" above)
-3. **Match the row** that fits your operator + input type combination
-4. **Apply the patch code** to your ONNX model
-5. **Validate** with `onnx.checker.check_model()` then re-convert
+Follow the same identify → determine-types → match-row → apply-code → validate loop documented in the [Manual Type-First Decision Tree](#manual-type-first-decision-tree) above. Then re-convert.
 
 ---
 
@@ -164,7 +125,7 @@ sub_node = helper.make_node("Sub", [input_a, "mul_out"], [output_name], name="mo
 
 ### Einsum Operator
 
-Einsum is one of the most commonly unsupported operators in QNN/SNPE conversion. It appears frequently in attention mechanisms, contrastive heads, and vision-language models. The good news: **most Einsum equations can be decomposed into supported base operators** (`MatMul`, `Transpose`, `Reshape`, `ReduceSum`).
+Einsum appears frequently in attention/contrastive heads. **Most equations decompose into supported ops** (`MatMul`, `Transpose`, `Reshape`, `ReduceSum`).
 
 | Error | Einsum Equation | Action | Success Rate |
 |-------|----------------|--------|-------------|
@@ -205,7 +166,7 @@ aw = torch.matmul(embed_r, guide_r).view(bs, self.nh, h, w, guide.shape[1])
 
 **Operators used:** `Permute`, `Reshape`, `MatMul` — all QNN-compatible ✅
 
-**Why it works:** Einsum is essentially batched matrix multiplication with dimension rearrangement. By explicitly permuting and reshaping, we expose the underlying MatMul structure that QNN can optimize.
+**Why:** Einsum = batched MatMul with dimension rearrangement. Explicit permute/reshape exposes the MatMul structure QNN can optimize.
 
 ---
 
@@ -239,7 +200,7 @@ out = out.permute(0, 2, 1).reshape(bs, w.shape[1], h, w_dim)
 
 **Operators used:** `Permute`, `Reshape`, `Transpose`, `MatMul` — all QNN-compatible ✅
 
-**Why it works:** The Einsum computes a dot product between each spatial location and each class embedding. This is exactly a batched matrix multiplication once we flatten the spatial dimensions.
+**Why:** The Einsum computes a dot product between each spatial location and each class embedding — exactly a batched MatMul once spatial dims are flattened.
 
 ---
 
@@ -358,7 +319,7 @@ After patching Einsum, verify:
 | Output shape | `original.shape == patched.shape` | Exact match |
 | Class scores | Check all class channels (not just top-1) | All within tolerance |
 
-> ⚠️ **Critical:** Einsum patches can silently change numerical behavior if dimensions are misaligned. Always validate **all output channels**, not just the top-1 detection. In YOLO-World, a patched Einsum that passes for `person` class may still fail for `bus` class if the contrastive head precision is affected.
+> ⚠️ Einsum patches can silently change numerical behavior if dimensions are misaligned. Always validate **all output channels** (not just top-1).
 
 ---
 
@@ -387,24 +348,9 @@ After patching Einsum, verify:
 | `MaxPool: unsupported version` / `dilations: unsupported in Converter` | Any MaxPool2d (even with dilation=1) | **This is a WARNING, not a blocking error.** Conversion succeeds (exit code 0). Do NOT patch. | ★★★★★ |
 | `MaxPool: unsupported version` | dilation > 1 | May fail actual conversion. Test with actual conversion, not just dry-run. If it fails, replace with Slice+Stack+Max pattern. | ★★★ |
 
-**Critical Insight:** PyTorch ONNX export always adds `dilations=[1,1]` and `ceil_mode=0` attributes to MaxPool nodes, even when using default values. The QNN converter flags `dilations: unsupported in Converter` as a **warning in the dry-run table**, but **actual conversion still succeeds**.
+**Critical:** Dry-run flags this as WARNING only — actual conversion succeeds (exit 0). PyTorch always exports `dilations=[1,1]`+`ceil_mode=0`. **Proceed with conversion; do NOT patch unless actual conversion fails.**
 
-**Verification test results:**
-
-| Test | Exit Code | Result |
-|------|-----------|--------|
-| Dry-run (`--dry_run`) | 0 | MaxPool listed in warning table |
-| Actual FP16 conversion | 0 | `Conversion complete!` — `.cpp` + `.bin` generated |
-| Context binary generation | 0 | `.dll.bin` generated successfully |
-| Inference on HTP | 0 | Correct outputs (once HTP driver is stable) |
-
-**What this means:** If you see `MaxPool: unsupported version` in dry-run output, **proceed with conversion** — it will succeed. Do not waste time patching MaxPool2d unless actual conversion fails (which is rare).
-
-**When TO patch MaxPool2d:**
-- Only if actual conversion (not dry-run) fails with a MaxPool-related error
-- Replace with `Slice + Stack + ReduceMax` pattern (see below)
-
-**MaxPool2d replacement pattern (last resort):**
+**Patch MaxPool2d only if actual conversion fails** (rare). Use `Slice + Stack + ReduceMax`:
 ```python
 # Only use if actual conversion fails, not for dry-run warnings
 class QNNMaxPool(nn.Module):
@@ -462,17 +408,13 @@ Stop patching and escalate when ANY condition is met:
 | `QnnCpu.dll` context binary as solution | HTP-compatible operator decomposition |
 | Skip patching and run on CPU only | Model must run on target accelerator (HTP/DSP) |
 
-**Rationale:**
-- Target platform is Qualcomm AI PC with HTP accelerator
-- CPU-only inference defeats the purpose of QNN/SNPE conversion
-- Context binary generation MUST succeed with HTP backend, not CPU
-- **Blocking Condition B7**: If unable to patch for HTP, escalate to user (do not silently fall back to CPU)
+**Context binary generation MUST succeed on HTP.** CPU fallback (`QnnCpu.dll`) is NEVER acceptable — defeats QNN/SNPE purpose. If unable to patch for HTP → escalate B7.
 
 ---
 
 ## When to Patch
 
-Patch your model when you encounter operator-related failures at **any stage** of the pipeline:
+Patch when operator-related failures occur at **any pipeline stage**:
 
 | Stage | Symptom | Action |
 |-------|---------|--------|
@@ -482,20 +424,7 @@ Patch your model when you encounter operator-related failures at **any stage** o
 | **Context Binary** | HTP compilation fails (e.g., `QnnHtp.dll` error) | Patch ONNX, regenerate context binary |
 | **Inference** | Runtime crash or incorrect output on target device | Patch ONNX, rebuild all artifacts |
 
-**Common operators requiring patches:**
-
-| Operator | Issue |
-|----------|-------|
-| `Einsum` | Not supported by QNN |
-| `GridSample` | Limited support |
-| `ScatterND` | Conversion failures |
-| `Mod` | HTP unsupported |
-| `Floor` | HTP unsupported |
-| `Transpose` | HTP unsupported |
-| `Ceil` | HTP unsupported |
-| Custom attention | Varies by implementation |
-
-**Note:** For operator replacement patterns, consult the QNN/SNPE documentation and search for equivalent implementations using supported base operators (`MatMul`, `Reshape`, `Transpose`, `Concat`, etc.). Each patch must be validated for numerical correctness.
+Common ops needing patches: `Einsum`, `GridSample`, `ScatterND`, `Mod`, `Floor`, `Transpose`, `Ceil`. Consult QNN/SNPE docs for equivalent decompositions using supported base ops.
 
 ---
 
@@ -504,18 +433,14 @@ Patch your model when you encounter operator-related failures at **any stage** o
 | Agent Phase | Patching Action |
 |-------------|-----------------|
 | **Model Export Agent** (Phase 1) | Apply in-memory patches before `torch.onnx.export()` |
-| **Model Inspector Agent** (Phase 2) | Verify patched model via dry-run; if issues remain → loop back to Export Agent |
-
-**Mode Behavior:**
+| **Model Inspector Agent** (Phase 2) | Verify patched model via dry-run; if issues remain → loop back |
 
 | Mode | Patching Behavior |
 |------|-------------------|
-| `batch` | Apply patches autonomously; log all decisions in `qai_plan.md` Issue Log |
-| `interactive` | Ask for confirmation before applying patches, especially if semantics may change |
+| `batch` | Apply patches autonomously; log in `qai_plan.md` Issue Log |
+| `interactive` | Ask confirmation before applying, especially if semantics may change |
 
-**Blocking Condition B4:** If a patch would change model semantics (e.g., replace attention with different behavior), **stop and ask user** for approval — regardless of mode.
-
-**Tracking:** Record `PATCH_NEEDED` and `PATCH_OPS` in `qai_plan.md` Prerequisites section.
+**B4:** Patch changes model semantics → **stop and ask user** regardless of mode. Track `PATCH_NEEDED`/`PATCH_OPS` in `qai_plan.md` Prerequisites.
 
 ---
 
@@ -561,43 +486,24 @@ Step 2: Is the unsupported op a known PyTorch module?
 
 ## Patching Template
 
-> **Hint: Identify Before Patching (PyTorch — Approach 1)**
->
-> 1. **Run dry-run first** to get the exact list of unsupported operators
-> 2. **Inspect the PyTorch model** using `named_modules()` to find which layers use the unsupported op
-> 3. **Patch only those layers** — no need to read or rewrite the entire source code
-> 4. **Re-run dry-run** — if it passes, stop; don't add unnecessary patches
->
+> **Approach 1 (PyTorch):** Run dry-run → `named_modules()` → patch only failing layers → re-run dry-run → stop if passes.
 > ```python
-> # Quick inspection: find all module types in the PyTorch model
 > for name, module in model.named_modules():
 >     print(f"{name}: {type(module).__name__}")
 > ```
->
-> This approach avoids over-engineering and reduces numerical risk.
 
-> **Hint: Identify in ONNX Graph (ONNX Surgery — Approach 2)**
->
-> If you don't have PyTorch source and must patch the ONNX directly:
->
+> **Approach 2 (ONNX Surgery):** When no PyTorch source available:
 > ```python
 > import onnx
->
 > model = onnx.load("model.onnx")
->
-> # List all operator types in the ONNX graph
 > op_types = set(node.op_type for node in model.graph.node)
-> print("Operators in model:", sorted(op_types))
->
-> # Find nodes using a specific unsupported op
+> print("Operators:", sorted(op_types))
 > for node in model.graph.node:
->     if node.op_type == "Einsum":  # replace with your unsupported op
->         print(f"Found {node.op_type} at node: {node.name}")
+>     if node.op_type == "Einsum":  # your unsupported op
+>         print(f"Found {node.op_type} at: {node.name}")
 > ```
->
-> This helps you locate exactly which nodes need modification without guessing.
 
-The following generic template shows how to patch a model in-memory. For specific operator replacement patterns, you must derive them based on the mathematical definition of the operator and available supported operators.
+Generic in-memory patch template (for specific replacements, derive from mathematical definition + supported ops):
 
 ```python
 import torch
@@ -679,36 +585,18 @@ print(f"Cosine Similarity: {cosine_sim:.4f}")
 
 > ⚠️ **Confirm with user** if numerical error is acceptable for their use case.
 
-### 2. Task-Specific Validation (Recommended)
-
-For computer vision tasks (e.g., object detection):
-
-- **Visual Check**: Generate annotated images from both models and compare
-- **Result Check**: Compare high-level outputs:
-  - Bounding box coordinates
-  - Class labels
-  - Confidence scores
-
-**If detection results are identical or very similar**, the model is likely safe for conversion even with minor numerical MSE.
-
+For vision tasks: compare annotated outputs visually + numerically. Identical bounding boxes/labels/scores = safe.
 ---
 
 ## Post-Patch Validation — Mandatory Gates
 
-**After EACH patch iteration, run ALL validation gates before proceeding:**
+**After EACH patch, run all gates sequentially:**
 
 ### Gate 1: ONNX Structural Validity
-
 ```bash
 python -c "import onnx; onnx.checker.check_model('model_patched.onnx')"
 ```
-
-**Pass criteria:**
-- ✓ No exceptions raised
-- ✓ Graph is well-formed
-- ✓ All tensor types consistent
-
-**Fail action:** Fix ONNX structure, re-validate
+Pass: no exceptions. Fail → fix graph structure.
 
 ---
 
@@ -722,11 +610,7 @@ python -c "import onnx; onnx.checker.check_model('model_patched.onnx')"
 {QAIRT_ROOT}/bin/{HOST_ARCH}/qairt-converter --input_network model_patched.onnx --dry_run
 ```
 
-**Pass criteria:**
-- ✓ "Model ops, op attributes, inputs and outputs have been evaluated"
-- ✓ No "unsupported operator" errors
-
-**Fail action:** Identify new unsupported ops, return to patching
+Pass: "Model ops…evaluated", no "unsupported operator" errors. Fail → identify new unsupported ops, return to patching.
 
 ---
 
@@ -762,26 +646,15 @@ for i, (o, p) in enumerate(zip(out_orig, out_patch)):
     print(f"  {'PASS' if cos >= 0.99 else 'FAIL (threshold: 0.99)'}")
 ```
 
-**Pass criteria:**
-- ✓ Output shapes match
-- ✓ Cosine similarity ≥ 0.95 (initial patch)
-- ✓ No NaN/Inf introduced
-
-**Fail action:** Review patch for numerical stability issues
+Pass: shapes match, cosine ≥ 0.95, no NaN/Inf. Fail → review patch numerical stability.
 
 ---
 
 ### Gate 4: Full Conversion (final iteration only)
-
 ```bash
 python qai_convert_fp.py --onnx model_patched.onnx ...
 ```
-
-**Pass criteria:**
-- ✓ "Conversion complete!"
-- ✓ .bin, .cpp, .json generated
-
-**Fail action:** Review converter error logs, identify root cause
+Pass: `.bin`/`.cpp`/`.json` generated. Fail → review converter error logs.
 
 ---
 
@@ -789,37 +662,19 @@ python qai_convert_fp.py --onnx model_patched.onnx ...
 
 | Gate 1 | Gate 2 | Gate 3 | Gate 4 | Action |
 |--------|--------|--------|--------|--------|
-| ✅ Pass | ✅ Pass | ✅ Pass | ✅ Pass | Proceed to next iteration |
-| ❌ Fail | — | — | — | Invalid graph structure → check topological order, tensor names |
-| ✅ Pass | ❌ Fail | — | — | More patching needed → check if Floor/Cast introduced new unsupported ops |
-| ✅ Pass | ✅ Pass | ❌ Fail | — | Wrong pattern or type mismatch → try next pattern in Error → Action table |
-| ✅ Pass | ✅ Pass | ✅ Pass | ❌ Fail | Type inference error → add `Add(0.0)` after Cast to break type chain |
+| ❌ | — | — | — | Invalid structure → check topo order, tensor names |
+| ✅ | ❌ | — | — | More patching → check if Floor/Cast introduced unsupported ops |
+| ✅ | ✅ | ❌ | — | Wrong pattern or type mismatch → try next pattern in Error→Action table |
+| ✅ | ✅ | ✅ | ❌ | Type inference error → add `Add(0.0)` after Cast to break type chain |
+| ✅ | ✅ | ✅ | ✅ | Done — proceed |
 
-**Cosine interpretation** (Gate 3):
-- ≥ 0.999: bit-identical or near-identical — patch correct
-- 0.99–0.999: minor drift — acceptable for most use cases
-- 0.95–0.99: noticeable drift — investigate, may be acceptable for INT8
-- < 0.95: significant error — patch incorrect, try different pattern
+**Cosine interpretation:** ≥0.999 = correct; 0.99–0.999 = acceptable drift; 0.95–0.99 = investigate (OK for INT8); <0.95 = patch incorrect.
 
 ---
 
 ## Post-Patch Verification (Final)
 
-**After ALL patches complete, before conversion:**
-
-1. **Run converter dry-run** to confirm all unsupported operators are resolved:
-   ```bash
-   # QNN Flow
-   {QAIRT_ROOT}/bin/{HOST_ARCH}/qnn-onnx-converter --input_network model.onnx --dry_run
-
-   # SNPE Flow
-   {QAIRT_ROOT}/bin/{HOST_ARCH}/qairt-converter --input_network model.onnx --dry_run
-   ```
-
-2. **Confirm no unsupported ops flagged** — if any remain, apply additional patches and re-run dry-run.
-
-3. **Hand off to Model Inspector Agent** — proceed to Phase 2 only after dry-run passes.
-
+After ALL patches: run converter dry-run → confirm zero unsupported ops → proceed to conversion. If ops remain → return to patching loop.
 ---
 
 ## Troubleshooting
@@ -840,25 +695,11 @@ python qai_convert_fp.py --onnx model_patched.onnx ...
 
 ## References
 
-- Agent Workflow: See SKILL.md §"Blocking Conditions" for escalation criteria (B3/B4/B7)
-- Project Plan: [`../assets/plan.md`](../assets/plan.md)
-- Model Export Guide: [`model_export_validation.md`](model_export_validation.md)
-- QNN Conversion: [`qnn_conversion.md`](qnn_conversion.md)
-- SNPE Conversion: [`snpe_conversion.md`](snpe_conversion.md)
-- Troubleshooting: [`troubleshooting.md`](troubleshooting.md)
+- Escalation criteria: SKILL.md § Blocking Conditions (B3/B4/B7)
+- [`qnn_conversion.md`](qnn_conversion.md) | [`snpe_conversion.md`](snpe_conversion.md) | [`troubleshooting.md`](troubleshooting.md)
 
 ---
 
 ## Pattern Documentation Template
 
-For each new pattern discovered, document:
-
-```markdown
-#### Pattern {X}{n}: {Name}
-- **Applicability:** When to use
-- **Structure:** Diagram or pseudocode
-- **I/O Preservation:** Requirements
-- **Known Limitations:** Edge cases, tolerances
-- **Validation Checklist:** Tests to run
-- **Example Implementation:** Code snippet
-```
+For new patterns: document applicability, structure, I/O preservation, limitations, validation checklist, and example code.

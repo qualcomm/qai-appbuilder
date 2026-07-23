@@ -154,7 +154,7 @@ class FileSystemAppImportAdapter:
         self._app_models = app_models
         self._clock = clock
         self._ids = ids
-        # ``pack_root`` (``factory/app_builder/models``) is the built-in Pack
+        # ``pack_root`` (``factory/chat_features/app-builder/models``) is the built-in Pack
         # anchor the runtime manifest provider + runner registry read from;
         # ``repo_root`` anchors manifest ``installPath`` for built-in weights.
         #

@@ -10,7 +10,7 @@ network access or cold dictionary builds.
 What this script does (idempotent):
 
   1. Download required NLTK corpora into ``<repo_root>/vendor/nltk_data/``.
-     This vendored copy is what ``factory/app_builder/models/melotts-zh/runner.py``
+     This vendored copy is what ``factory/chat_features/app-builder/models/melotts-zh/runner.py``
      prepends to ``nltk.data.path`` at startup.
 
   2. Warm up jieba.posseg so that its tag dictionary cache is built once,
@@ -204,7 +204,7 @@ def _warmup_g2p_en() -> None:
 
 def _verify_end_to_end() -> None:
     _step("end-to-end verification: clean_text('你好world', 'ZH') ...")
-    pack_dir = REPO_ROOT / "factory" / "app_builder" / "models" / "melotts-zh"
+    pack_dir = REPO_ROOT / "factory" / "chat_features" / "app-builder" / "models" / "melotts-zh"
     if not pack_dir.is_dir():
         _warn(
             f"melotts-zh pack dir not found ({pack_dir}); skipping end-to-end check. "
@@ -256,16 +256,16 @@ def _precompile_pyc() -> None:
     worker process cold-start uses cached .pyc files and avoids re-compilation.
 
     We compile:
-      - factory/app_builder/models/melotts-zh/ (runner + melo_zh_local)
-      - factory/app_builder/shared/ (runner_protocol, telemetry, etc.)
+      - factory/chat_features/app-builder/models/melotts-zh/ (runner + melo_zh_local)
+      - factory/chat_features/app-builder/shared/ (runner_protocol, telemetry, etc.)
       - key site-packages (numpy, jieba, g2p_en, nltk, etc.)
     """
     import compileall
     _step("pre-compiling .pyc bytecode caches ...")
 
     dirs_to_compile = [
-        REPO_ROOT / "factory" / "app_builder" / "models" / "melotts-zh",
-        REPO_ROOT / "factory" / "app_builder" / "shared",
+        REPO_ROOT / "factory" / "chat_features" / "app-builder" / "models" / "melotts-zh",
+        REPO_ROOT / "factory" / "chat_features" / "app-builder" / "shared",
     ]
     # Also compile key site-packages if accessible
     try:

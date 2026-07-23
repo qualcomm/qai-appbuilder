@@ -55,7 +55,12 @@ arr.tofile(f"calibration_raw/input_{i:04d}.raw")
 ```
 
 ### Step 2: Create Input List
-`calibration_list.txt`:
+
+> ⚠️ **Two calibration-list formats exist — they are a real tool difference, not interchangeable:**
+> - **`qai_convert_int.py` (QNN, Flow C)** → **`input:=` prefix** (shown below).
+> - **`qairt-quantizer` (SNPE / DLC, Flow A)** → **plain paths, one per line, no prefix** (see [snpe_conversion.md § ONNX → DLC Quantization](snpe_conversion.md#onnx--dlc-quantization-w8a8--w8a16-via-qairt-quantizer)).
+
+`calibration_list.txt` for **`qai_convert_int.py` (Flow C, `input:=` prefix):**
 ```
 input:=calibration_raw/input_0000.raw
 input:=calibration_raw/input_0001.raw
@@ -81,6 +86,23 @@ python3 [QNN_CONVERT_SCRIPT] \
 act_bw 16/weight_bw 8 is suggested setting for vision model.
 show
 **Output:** `model_a{act_bw}_w{weight_bw}.*` (e.g., `model_a16_w8.cpp`, `model_a8_w8.cpp`)
+
+## Tool Parameter Mapping (quantization args across the three converters)
+
+Same quantization intent, three different flag spellings. Use this to translate between tools:
+
+| Intent | `run_pipeline.py` (Flow A, default) | `qairt-quantizer` (Flow A backend) | `qai_convert_int.py` (Flow C) |
+|--------|-------------------------------------|------------------------------------|-------------------------------|
+| Precision (combined) | `--precision w8a8` \| `w8a16` \| `w8a8b8` \| `w4a8` \| `w4a16` \| `w16a16` \| `fp16` \| `bf16` \| `fp32` | — (set act/weight bitwidths individually) | — (set act/weight bitwidths individually) |
+| Activation bitwidth | `--act_bw <4\|8\|16>` (with `--weight_bw`) | `--act_bitwidth <8\|16>` | `--act_bw <8\|16>` |
+| Weight bitwidth | `--weight_bw <4\|8\|16>` (with `--act_bw`) | `--weights_bitwidth <4\|8>` | `--weight_bw <8>` |
+| Bias bitwidth | `--bias_bw <8\|32>` | `--bias_bitwidth <8\|32>` | `--bias_bw <8>` |
+| Calibration list | `--calib_list <file>` (**plain paths, no prefix**) | `--input_list <file>` (**plain paths, no prefix**) | `--input_list <file>` (**`input:=` prefix**) |
+| Per-channel weights | `--per_channel` | `--use_per_channel_quantization` | — |
+| CLE | `--cle` | `--algorithms cle` | — |
+| Quantizer scheme | (internal `tf`) | `--param_quantizer tf --act_quantizer tf` | (internal `tf`) |
+
+> ⚠️ **Two distinct spellings, same meaning:** `run_pipeline.py`/`qai_convert_int.py` use `--act_bw`/`--weight_bw`/`--bias_bw`; `qairt-quantizer` uses `--act_bitwidth`/`--weights_bitwidth`/`--bias_bitwidth` (note the `s` in `weights`). And the calibration-list format differs by tool (see § Step 2). Full `run_pipeline.py` flag reference → [qnn_conversion.md § run_pipeline.py — Full Argument Reference](qnn_conversion.md); `qairt-quantizer` full command → [snpe_conversion.md § ONNX → DLC Quantization](snpe_conversion.md#onnx--dlc-quantization-w8a8--w8a16-via-qairt-quantizer).
 
 ## Key Points
 - **FP16:** Fast conversion, no calibration needed

@@ -341,6 +341,17 @@ const security = {
     process_label: "进程",
     cmdline_label: "命令行",
   },
+  // i18n 契约 (A2)：exec-broker ASK 弹窗的"风险原因"本地化文案。后端只发送
+  // 与语言无关的 reason_code（+ 可选插值参数如 {pattern}），由 SecurityDialog
+  // 按当前 UI 语言渲染，切换语言无需后端往返。三语 en / zh-CN / zh-TW 键需保持
+  // 一致（schema 校验）。
+  askReason: {
+    ask_network_exec:
+      "该命令可访问网络 / 注册表 / 执行外部程序等文件守卫无法覆盖的操作，需要你确认后才能执行。",
+    ask_danger_arg:
+      "该命令带有高风险参数（{pattern}），可能造成破坏性或非预期后果，需要你确认后才能执行。",
+    ask_destructive: "该命令为破坏性操作，需要你确认后才能执行。",
+  },
   policyUpdated: "策略已更新",
   processGrantsLabel: "进程授权",
   processGrantsTitle: "进程（{n}）",

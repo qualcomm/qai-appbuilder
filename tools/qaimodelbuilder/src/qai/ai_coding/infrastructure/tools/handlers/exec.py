@@ -87,6 +87,17 @@ from qai.platform.process.ports import (
 # hints coexist when both are relevant.
 NativeGuardDenialProbe = Callable[[int, datetime], Awaitable[str]]
 
+# Problem ② — chat-Stop directed ASK flush. Given the killed exec child's pid,
+# resolves every native ASK future queued for that pid (or its descendants) as
+# DENY and pushes an SSE close-frame so the FileGuard authorization dialog is
+# dismissed immediately instead of lingering until the 10s subprocess-gone
+# backstop. Injected by the apps composition root (only layer allowed to touch
+# ``qai.security``) via ``apps.api._guard_token.build_ask_flush_for_pid``;
+# ``None`` when unwired (tests / no security context) → the cancel path behaves
+# exactly as before. Returns the request_ids flushed (unused by the caller —
+# the cancel branch re-raises immediately for responsiveness).
+AskFlushForPid = Callable[[int], Awaitable[list[str]]]
+
 # ---------------------------------------------------------------------------
 # Shell auto-detection (7-M4) — V1 parity: ``_exec._detect_shell_type``.
 #
@@ -668,6 +679,7 @@ async def tool_exec(
     process_runner: ProcessRunnerPort | None = None,
     guard_token_provider: "Callable[[], str | None] | None" = None,
     ask_pending_probe: "Callable[[int], bool] | None" = None,
+    ask_flush_for_pid: "AskFlushForPid | None" = None,
     native_denial_probe: NativeGuardDenialProbe | None = None,
     allow_x86: bool = False,
 ) -> dict[str, Any]:
@@ -769,6 +781,7 @@ async def tool_exec(
             process_runner=process_runner,
             guard_token=guard_token,
             ask_pending_probe=ask_pending_probe,
+            ask_flush_for_pid=ask_flush_for_pid,
             native_denial_probe=native_denial_probe,
             allow_x86=allow_x86,
         )
@@ -789,6 +802,7 @@ async def _dispatch_exec(
     process_runner: ProcessRunnerPort | None,
     guard_token: str | None = None,
     ask_pending_probe: "Callable[[int], bool] | None" = None,
+    ask_flush_for_pid: "AskFlushForPid | None" = None,
     native_denial_probe: NativeGuardDenialProbe | None = None,
     allow_x86: bool = False,
 ) -> dict[str, Any]:
@@ -807,6 +821,7 @@ async def _dispatch_exec(
             timeout=timeout,
             guard_token=guard_token,
             ask_pending_probe=ask_pending_probe,
+            ask_flush_for_pid=ask_flush_for_pid,
             native_denial_probe=native_denial_probe,
             allow_x86=allow_x86,
         )
@@ -937,6 +952,22 @@ async def _dispatch_exec(
         with contextlib.suppress(ProcessLookupError, OSError):
             best_effort_tree_kill(proc)
         _reap_in_background(proc)
+        # Problem ② — the child (and its tree) is now force-killed, but any
+        # native FileGuard ASK it queued is still live in the registry and
+        # its dialog would keep popping until the 10s subprocess-gone
+        # backstop. Flush those ASKs NOW (resolve DENY + push an SSE close
+        # frame) so the dialog closes the instant Stop takes effect. The
+        # flush resolves futures synchronously and only awaits a fast SSE
+        # publish; it NEVER raises. We schedule it as a detached task so the
+        # re-raise below is not delayed even by that fast await (the child is
+        # already dead — responsiveness of the re-raise is what the caller /
+        # UI waits on). ``asyncio.shield`` so this later-cancelled task still
+        # finishes the flush rather than orphaning half-closed dialogs.
+        if ask_flush_for_pid is not None and proc.pid is not None:
+            with contextlib.suppress(Exception):
+                asyncio.ensure_future(
+                    asyncio.shield(ask_flush_for_pid(proc.pid))
+                )
         raise
     finally:
         # Disarm the deadline on the happy path so a completed exec does not
@@ -1310,6 +1341,7 @@ async def _run_via_process_runner(
     timeout: float,
     guard_token: str | None = None,
     ask_pending_probe: "Callable[[int], bool] | None" = None,
+    ask_flush_for_pid: "AskFlushForPid | None" = None,
     native_denial_probe: NativeGuardDenialProbe | None = None,
     allow_x86: bool = False,
 ) -> dict[str, Any]:
@@ -1383,6 +1415,26 @@ async def _run_via_process_runner(
                 # The runner trimmed+killed the child when its combined output
                 # exceeded ``output_byte_cap`` (the OOM guard).
                 output_capped = bool(getattr(frame.status, "truncated", False))
+    except asyncio.CancelledError:
+        # Problem ② (PRODUCTION path) — chat-Stop / single-tool cancel while
+        # the runner stream is being drained. The runner owns tearing down
+        # the child on cancel (it consumes the same ``ask_pending_probe`` and
+        # force-kills its process tree), but nothing resolves the native ASK
+        # futures the child queued — their FileGuard dialogs would keep
+        # popping until the 10s subprocess-gone backstop. Flush them NOW for
+        # the captured ``child_pid`` (resolve DENY + push an SSE close frame)
+        # so the dialog closes the instant Stop takes effect, then re-raise so
+        # the cancel propagates unchanged. Scheduled as a detached shielded
+        # task so the re-raise is not delayed by the fast SSE publish; the
+        # flush NEVER raises. ``child_pid is None`` (runner never emitted a
+        # ProcessStartedFrame — e.g. spawn failed before any ASK) → nothing to
+        # flush, behaviour identical to before.
+        if ask_flush_for_pid is not None and child_pid is not None:
+            with contextlib.suppress(Exception):
+                asyncio.ensure_future(
+                    asyncio.shield(ask_flush_for_pid(child_pid))
+                )
+        raise
     except FileNotFoundError as e:
         raise ToolError(f"exec: shell binary not found: {e}") from e
     except OSError as e:

@@ -39,7 +39,47 @@ echo  +------------------------------------------+
 echo.
 
 set "ROOT_DIR=%~dp0"
-set "VENV=%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_arm64_313"
+REM --- Host architecture selection (three-tier) -----------------------------
+REM Priority: 1) --arch <value> CLI flag  2) data\config\host_arch file
+REM           3) Auto-detect via %PROCESSOR_ARCHITECTURE% / PROCESSOR_ARCHITEW6432
+REM PASS_ARGS is the arg list with any --arch <value> pair removed so it can
+REM be forwarded downstream without leaking the flag to Python.
+set "FORCED_ARCH="
+set "PASS_ARGS="
+set "_NEXT_IS_ARCH="
+for %%A in (%*) do (
+    if defined _NEXT_IS_ARCH (
+        set "FORCED_ARCH=%%~A"
+        set "_NEXT_IS_ARCH="
+    ) else if /i "%%~A"=="--arch" (
+        set "_NEXT_IS_ARCH=1"
+    ) else (
+        set "PASS_ARGS=!PASS_ARGS! %%A"
+    )
+)
+set "HOST_ARCH="
+if defined FORCED_ARCH (
+    if /i "!FORCED_ARCH!"=="x64"   set "HOST_ARCH=x64"
+    if /i "!FORCED_ARCH!"=="arm64" set "HOST_ARCH=arm64"
+)
+if not defined HOST_ARCH (
+    if exist "%~dp0data\config\host_arch" (
+        set "_FILE_ARCH="
+        for /f "usebackq tokens=1 delims= " %%B in ("%~dp0data\config\host_arch") do (
+            if not defined _FILE_ARCH set "_FILE_ARCH=%%B"
+        )
+        if /i "!_FILE_ARCH!"=="x64"   set "HOST_ARCH=x64"
+        if /i "!_FILE_ARCH!"=="arm64" set "HOST_ARCH=arm64"
+    )
+)
+if not defined HOST_ARCH (
+    set "HOST_ARCH=arm64"
+    if /i "%PROCESSOR_ARCHITECTURE%"=="AMD64" set "HOST_ARCH=x64"
+    if /i "%PROCESSOR_ARCHITEW6432%"=="AMD64" set "HOST_ARCH=x64"
+)
+set "VENV_DIR_NAME=.venv_arm64_313"
+if /i "%HOST_ARCH%"=="x64" set "VENV_DIR_NAME=.venv_x64_313"
+set "VENV=%LOCALAPPDATA%\QAIModelBuilder\envs\%VENV_DIR_NAME%"
 set "PYTHON=%VENV%\Scripts\python.exe"
 
 REM Route Python bytecode caches out of the source tree into data\caches\pycache
@@ -144,7 +184,7 @@ REM   mismatch". It is placed BEFORE %* so an explicit ``Start.bat -- --port
 REM   <n>`` still overrides it (argparse takes the last occurrence).
 echo [INFO] Launching server on port 4099 (Okta SSO redirect_uri) ...
 echo [INFO] Keep this window open. Close it (or press Ctrl+C) to stop the server.
-call "%PYTHON%" -m apps.cli.serve --port 4099 %*
+call "%PYTHON%" -m apps.cli.serve --port 4099 %PASS_ARGS%
 
 endlocal
 exit /b 0

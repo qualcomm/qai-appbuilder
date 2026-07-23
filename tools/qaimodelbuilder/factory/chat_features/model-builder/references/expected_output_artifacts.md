@@ -46,7 +46,7 @@ finished correctly.
 
 ## Validation Report — Task-Specific Metrics, Latency & Regression Detail
 
-> SKILL.md Core Workflow Step 8 keeps inline the MANDATORY ONNX baseline comparison, the
+> `references/core_workflow.md § Step 8` keeps inline the MANDATORY ONNX baseline comparison, the
 > Cosine Similarity Summary format (a hard parser contract), the B6 threshold rule, and the
 > "must not stop in batch mode" rule. The supplementary detail below (per-task accuracy
 > thresholds, latency breakdown, regression test) lives here.

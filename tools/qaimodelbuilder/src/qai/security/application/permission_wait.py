@@ -382,6 +382,29 @@ class PermissionWaitRegistry:
                 alive.add(pid)
         return alive
 
+    def pending_request_ids_by_pid(self) -> dict[int, list[str]]:
+        """Return ``{pid: [request_id, ...]}`` for every LIVE native ASK.
+
+        Companion to :meth:`pending_pids` (same ``_dedupe_index`` walk +
+        live-future guard) but keyed the other way so a caller that already
+        knows a pid (or its descendant pids) can recover the request_ids to
+        RESOLVE. Introduced for the chat-Stop directed flush
+        (``apps.api._guard_token.build_ask_flush_for_pid``): when the exec
+        task is cancelled the flush must wake the queued ASK futures for the
+        killed child's pid tree instead of leaving them for the 10s
+        subprocess-gone backstop. Only reflects native-subprocess ASKs
+        (those registered with a pid key via :meth:`register_or_dedupe`);
+        in-process ASKs carry no pid and are irrelevant here. Snapshot
+        semantics like :meth:`list_pending` (a concurrent resolve may prune
+        an id between listing and touching it).
+        """
+        by_pid: dict[int, list[str]] = {}
+        for (pid, _path, _event), rid in self._dedupe_index.items():
+            fut = self._waiters.get(rid)
+            if fut is not None and not fut.done():
+                by_pid.setdefault(pid, []).append(rid)
+        return by_pid
+
     # -- internal ------------------------------------------------------
     def _scrub_dedupe_by_request(self, request_id: str) -> None:
         """Remove the ``(pid, path, event)`` entry for ``request_id``.

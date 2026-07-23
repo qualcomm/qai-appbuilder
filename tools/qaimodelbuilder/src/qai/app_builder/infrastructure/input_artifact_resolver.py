@@ -19,7 +19,7 @@ returned **logical** path back as the run input:
 The Pack runners (``zipformer-zh`` / ``whisper-base`` / ``ppocrv4`` …)
 resolve a relative ``inputs.audio`` / ``inputs.image`` against
 ``repoRoot`` / ``packDir`` / ``cwd`` only (see e.g.
-``factory/app_builder/models/zipformer-zh/runner.py:_resolve_input_audio``).
+``factory/chat_features/app-builder/models/zipformer-zh/runner.py:_resolve_input_audio``).
 None of those bases is the data blob root, so a logical ``uploads/…`` key
 never resolves and the run fails with ``INVALID_INPUT: input audio not
 found``.

@@ -326,12 +326,12 @@ class SkillDiscoveryUseCase:
             by_name,
         )
         # The App Builder skill is defined by a ROOT-level SKILL.md
-        # (``factory/app_builder/SKILL.md``), not by a subdir SKILL.md, so it
+        # (``factory/chat_features/app-builder/SKILL.md``), not by a subdir SKILL.md, so it
         # must be registered from that one file — a directory scan of
-        # ``factory/app_builder`` would miss it and wrongly surface the
+        # ``factory/chat_features/app-builder`` would miss it and wrongly surface the
         # ``_template`` placeholder subdir instead.
         self._register_root_skill(
-            self._repo_root / "factory" / "app_builder",
+            self._repo_root / "factory" / "chat_features" / "app-builder",
             "features",
             skills_list,
             by_name,

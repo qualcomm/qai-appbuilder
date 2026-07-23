@@ -1,3 +1,7 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
 """ADB deploy + on-device qnn-net-run inference for aarch64 targets.
 
 Supports Linux x86_64 host only (P1). Pushes model, QNN runtime libs (including

@@ -130,6 +130,7 @@ def _wrap(
     search_registry: Any | None = None,
     guard_token_provider: "Callable[[], str | None] | None" = None,
     ask_pending_probe: "Callable[[int], bool] | None" = None,
+    ask_flush_for_pid: "Callable[[int], Awaitable[list[str]]] | None" = None,
     native_denial_probe: "NativeGuardDenialProbe | None" = None,
     allow_x86: bool = False,
 ) -> _ToolHandler:
@@ -172,6 +173,7 @@ def _wrap(
                     process_runner=process_runner,
                     guard_token_provider=guard_token_provider,
                     ask_pending_probe=ask_pending_probe,
+                    ask_flush_for_pid=ask_flush_for_pid,
                     native_denial_probe=native_denial_probe,
                     allow_x86=allow_x86,
                 )
@@ -184,6 +186,7 @@ def _wrap(
                     file_guard=file_guard,
                     guard_token_provider=guard_token_provider,
                     ask_pending_probe=ask_pending_probe,
+                    ask_flush_for_pid=ask_flush_for_pid,
                     native_denial_probe=native_denial_probe,
                     allow_x86=allow_x86,
                 )
@@ -318,6 +321,7 @@ def build_default_tool_handlers(
     search_registry: Any | None = None,
     guard_token_provider: "Callable[[], str | None] | None" = None,
     ask_pending_probe: "Callable[[int], bool] | None" = None,
+    ask_flush_for_pid: "Callable[[int], Awaitable[list[str]]] | None" = None,
     native_denial_probe: "NativeGuardDenialProbe | None" = None,
     allow_x86: bool = False,
 ) -> dict[str, _ToolHandler]:
@@ -368,6 +372,7 @@ def build_default_tool_handlers(
             search_registry=search_registry,
             guard_token_provider=guard_token_provider,
             ask_pending_probe=ask_pending_probe,
+            ask_flush_for_pid=ask_flush_for_pid,
             native_denial_probe=native_denial_probe,
             allow_x86=allow_x86,
         )

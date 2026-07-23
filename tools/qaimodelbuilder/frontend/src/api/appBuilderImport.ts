@@ -104,6 +104,40 @@ export async function autoExport(
   );
 }
 
+// ── auto-export status ───────────────────────────────────────────────────────
+
+/** On-disk generation state of a workspace's `app_pack/`.
+ *
+ *   `generating` — an export is running (keep showing "生成中...");
+ *   `generated`  — `_candidate.json` exists (advance to the commit stage);
+ *   `idle`       — never generated / stale run (show the Generate stage).
+ */
+export type AutoExportStatus = "idle" | "generating" | "generated";
+
+export interface AutoExportStatusResponseDTO {
+  readonly status: AutoExportStatus;
+}
+
+/**
+ * Probe whether a Pack export for `sourcePath` is in flight or finished.
+ *
+ * The `auto-export` route is synchronous and keeps no in-memory job, so the
+ * PromoteToAppBuilder panel polls this cheap on-disk probe on (re)open to
+ * recover an in-flight / finished generation — the panel's own `exporting`
+ * flag is lost when the window closes.
+ */
+export async function autoExportStatus(
+  sourcePath: string,
+  opts?: ApiRequestOptions,
+): Promise<AutoExportStatusResponseDTO> {
+  return apiJson<AutoExportStatusResponseDTO>(
+    "POST",
+    "/api/app-builder/import/auto-export/status",
+    { source_path: sourcePath },
+    opts,
+  );
+}
+
 // ── dry-run / commit / rollback ──────────────────────────────────────────────
 
 export interface ImportPlanItemDTO {

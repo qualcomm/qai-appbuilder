@@ -9,7 +9,7 @@
  * behavior parity).
  *
  * V2 reimplementation in TS/Composition API of V1's JS viewer. The runner
- * output schema (factory/app_builder/models/ppocrv4/manifest.json
+ * output schema (factory/chat_features/app-builder/models/ppocrv4/manifest.json
  * `outputSchema.jsonSchema`) is the field source of truth:
  *
  *   lines[].box      — quadrilateral [x1,y1,x2,y2,x3,y3,x4,y4] in PIXEL coords

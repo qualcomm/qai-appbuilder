@@ -20,11 +20,19 @@
  * Behaviour, state-machine and number formatting mirror V1; the data
  * source is the redesigned `app_builder` import API (snake_case wire).
  */
-import { computed, ref, watch, type Ref } from "vue";
+import {
+  computed,
+  getCurrentScope,
+  onScopeDispose,
+  ref,
+  watch,
+  type Ref,
+} from "vue";
 import { useI18n } from "vue-i18n";
 import {
   scanBins,
   autoExport,
+  autoExportStatus,
   importDryRun,
   importCommit,
   importRollback,
@@ -33,6 +41,13 @@ import {
   type ImportPlanItemDTO,
 } from "@/api/appBuilderImport";
 import { ApiError } from "@/api";
+
+// Poll interval (ms) for the on-disk auto-export status probe while a
+// generation is in flight. The export is a synchronous server call with no
+// job store, so the panel re-checks `<workdir>/app_pack/` state periodically
+// to learn when a run started elsewhere (e.g. before the window was closed)
+// finishes. Short enough to feel responsive, long enough not to hammer disk.
+const _STATUS_POLL_MS = 2000;
 
 // ── module-level "user generated a Pack for this workdir" registry ──────────
 // Records the workdirs the user has ACTIVELY generated an App Builder Pack for
@@ -381,11 +396,17 @@ export function usePromoteToAppBuilder(
     scanLoading.value = true;
     try {
       const res = await scanBins(workdir);
-      // Drop this response if a newer scan has been dispatched meanwhile or the
-      // workspace changed under us — prevents an out-of-order / stale-workdir
-      // result from overwriting the correct one (the "sometimes normal,
-      // sometimes empty" race).
-      if (token !== scanToken || sessionModelWorkdir.value !== workdir) return;
+      // Drop this response only if a NEWER scan has been dispatched meanwhile
+      // (monotonic token). We deliberately do NOT also compare
+      // `sessionModelWorkdir.value !== workdir`: that computed depends on
+      // `detectedWorkdir` (async, backend-seeded) + messages, so it can
+      // re-evaluate to the SAME value mid-scan; the extra guard then
+      // false-positived and DISCARDED the correct result — the reported bug
+      // where the ready-dot/notice already found the model (e.g.
+      // C:\WoS_AI\inception_v3) but the just-opened card showed "no precision
+      // binaries", and only reopening the panel (fresh scan) fixed it. The
+      // token alone correctly supersedes stale dispatches.
+      if (token !== scanToken) return;
       // Only rows the backend decoded into a precision variant are
       // checklist candidates (workspace mode). Legacy listing rows
       // (no precision) are ignored here.
@@ -456,8 +477,87 @@ export function usePromoteToAppBuilder(
     defaultPrecision.value = precision;
   }
 
+  // ── in-flight generation recovery (on-disk status poll) ──────────────────
+  // The auto-export route is synchronous with no server-side job store, and
+  // the `exporting` ref is instance-level (lost when the panel closes). So a
+  // user who clicks Generate, sees "生成中...", then closes + reopens the
+  // panel would otherwise land back on the initial button even though the
+  // export is still running (or already finished) on disk. We recover that
+  // state by polling `POST /import/auto-export/status`, which reports the
+  // workspace's `app_pack/` state (`generating` / `generated` / `idle`) from
+  // the `.generating` sentinel + `_candidate.json` the exporter writes.
+  //
+  // `localRun` is true only while THIS instance's `generatePack()` is awaiting
+  // the export call; the poller must not clear `exporting` out from under an
+  // in-progress local generate (whose own `finally` owns that transition).
+  let localRun = false;
+  // Whether the current poll cycle has observed a `generating` status — i.e.
+  // an export was genuinely in flight while this panel was open. Gates the
+  // auto-advance to the commit card on completion so a truly COLD stale
+  // `app_pack/` on disk (a `generated` we never saw start, from a previous
+  // session — the Strict Generate-first / needs-3 case) does NOT auto-jump.
+  let sawGenerating = false;
+  let statusTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function clearStatusPoll(): void {
+    if (statusTimer !== null) {
+      clearTimeout(statusTimer);
+      statusTimer = null;
+    }
+  }
+
+  async function checkExportStatus(): Promise<void> {
+    const workdir = sessionModelWorkdir.value;
+    if (workdir === "") {
+      if (!localRun) exporting.value = false;
+      return;
+    }
+    let status: string;
+    try {
+      const res = await autoExportStatus(workdir);
+      status = res.status;
+    } catch {
+      // Transient probe failure is not proof of any state — retry unless the
+      // workdir changed meanwhile (a newer cycle owns the timer).
+      if (workdir === sessionModelWorkdir.value) {
+        statusTimer = setTimeout(() => void checkExportStatus(), _STATUS_POLL_MS);
+      }
+      return;
+    }
+    // A late response for a workspace the user already navigated away from
+    // must not drive the current one's UI.
+    if (workdir !== sessionModelWorkdir.value) return;
+
+    if (status === "generating") {
+      // Keep (or restore) the "生成中..." button and keep polling for the
+      // completion edge.
+      sawGenerating = true;
+      exporting.value = true;
+      statusTimer = setTimeout(() => void checkExportStatus(), _STATUS_POLL_MS);
+      return;
+    }
+
+    // Terminal (generated / idle): stop the "生成中..." indicator unless a
+    // local generate owns it, and stop polling.
+    if (!localRun) exporting.value = false;
+    if (
+      status === "generated" &&
+      (sawGenerating || _hasGenerated(workdir))
+    ) {
+      // Either we watched this run finish, or the session already knows this
+      // workdir was generated — advance to the commit/import stage. This is
+      // the "生成完成 → 显示下一个导入界面" case. `_markGenerated` makes the
+      // fact survive future reopens; `scanCandidates` surfaces the candidate
+      // so `showCommitCard` renders.
+      _markGenerated(workdir);
+      await scanCandidates();
+    }
+    sawGenerating = false;
+  }
+
   async function generatePack(): Promise<void> {
     if (!hasWorkdir.value || !canGenerate.value) return;
+    localRun = true;
     exporting.value = true;
     error.value = "";
     success.value = "";
@@ -511,6 +611,7 @@ export function usePromoteToAppBuilder(
       error.value = asMessage(err);
     } finally {
       exporting.value = false;
+      localRun = false;
     }
   }
 
@@ -542,6 +643,15 @@ export function usePromoteToAppBuilder(
       // A different workspace means any forced pick-precision override no
       // longer applies — reset it so the new workspace shows its natural stage.
       forceVariantPicker.value = false;
+      // Restart the in-flight status poll against the new (or just-mounted)
+      // workspace. This is what recovers "生成中..." on reopen: if an export
+      // is running on disk for this workdir, the first poll flips `exporting`
+      // back on; when it finishes we advance to the commit card. A fresh cycle
+      // starts from "haven't seen it running yet" so a cold stale app_pack
+      // (needs-3) is not mistaken for a run we watched.
+      clearStatusPoll();
+      sawGenerating = false;
+      void checkExportStatus();
       // Strict Generate-first ordering (needs-3): switching workspaces drops
       // the session-generated flag so the new workspace shows its
       // pick-precision stage first even if it has a stale ``app_pack/`` on
@@ -554,6 +664,12 @@ export function usePromoteToAppBuilder(
     },
     { immediate: true },
   );
+
+  // Stop the status poll when the composable's scope is torn down (panel
+  // unmounted) so a closed panel leaves no dangling timer. Guarded by
+  // `getCurrentScope()` so calling the composable outside a component /
+  // effect scope (unit tests) does not warn.
+  if (getCurrentScope()) onScopeDispose(clearStatusPoll);
 
   // ↻ refresh button: re-scan BOTH the candidate dry-run AND the output/ bin
   // variants, so a precision freshly built in Model Builder shows up without

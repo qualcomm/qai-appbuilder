@@ -368,6 +368,17 @@ function startAppMount(): void {
         permissionDialog.enqueue(
           evt as unknown as Parameters<typeof permissionDialog.enqueue>[0],
         );
+      } else if (evt.type === "permission_resolved") {
+        // Problem ② — the backend resolved a PENDING native ASK WITHOUT a
+        // local user response (chat "Stop" exec-cancel flush, or the
+        // subprocess-gone cleanup backstop) and pushed this UI-close signal.
+        // Dequeue the matching dialog by id so the FileGuard authorization
+        // window closes immediately instead of continuing to pop up. Guard on
+        // a non-empty string id (a malformed frame is ignored).
+        const resolvedId = typeof evt.id === "string" ? evt.id : "";
+        if (resolvedId !== "") {
+          permissionDialog.dequeue(resolvedId);
+        }
       } else if (
         evt.type === "wechat_update_conv" ||
         evt.type === "feishu_update_conv"

@@ -4,7 +4,14 @@
   "version": 1,
   "entries": [
     {
-      "_note": "The tool's own per-user runtime root (venv, models, data, blobs, caches). Full read/write/execute - the application's own working tree.",
+      "_note": "The per-user AppData root (C:\\Users\\<user>\\AppData, covering Local + Roaming + LocalLow). Full read/write/execute so the app and its child processes never prompt (ASK) for anything under a user's AppData tree. NOTE: this is a DELIBERATELY WIDE grant - it opens every application's per-user data (caches, tokens, credential stores) under AppData for r/w/execute; it supersedes the narrower %LOCALAPPDATA%\\QAIModelBuilder entry (kept below for documentation). %USERPROFILE%\\AppData generalizes across users and drive letters.",
+      "path": "%USERPROFILE%\\AppData",
+      "read": true,
+      "write": true,
+      "execute": true
+    },
+    {
+      "_note": "The tool's own per-user runtime root (venv, models, data, blobs, caches). Full read/write/execute - the application's own working tree. Subsumed by the %USERPROFILE%\\AppData entry above; kept explicit for clarity.",
       "path": "%LOCALAPPDATA%\\QAIModelBuilder",
       "read": true,
       "write": true,
@@ -16,6 +23,13 @@
       "read": true,
       "write": false,
       "execute": true
+    },
+    {
+      "_note": "The uv package-manager cache (downloaded/unpacked wheels, package metadata). The app reads/writes it constantly at runtime when uv resolves and installs dependencies. Read + write so those cache operations never prompt (ASK) or block. %LOCALAPPDATA%\\uv\\cache == C:\\Users\\<user>\\AppData\\Local\\uv\\cache, generalized across users.",
+      "path": "%LOCALAPPDATA%\\uv\\cache",
+      "read": true,
+      "write": true,
+      "execute": false
     }
   ]
 }

@@ -35,7 +35,7 @@ it avoids adding a second token generator for no behavioural gain.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from qai.platform.logging import get_logger
@@ -44,6 +44,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only
     from .di import Container
 
 __all__ = [
+    "build_ask_flush_for_pid",
     "build_ask_pending_probe",
     "build_guard_token_provider",
     "resolve_guard_token",
@@ -149,3 +150,140 @@ def build_ask_pending_probe(
             return False
 
     return _probe
+
+
+def build_ask_flush_for_pid(
+    container: Container | None,
+) -> Callable[[int], Awaitable[list[str]]]:
+    """Return ``flush(child_pid) -> Awaitable[list[str]]``: resolve its ASKs.
+
+    Problem ② directed flush. When a chat session is STOPPED, the exec tool
+    task is cancelled and the child process tree is killed — but nothing
+    resolves the native ASK futures already queued in
+    ``PermissionWaitRegistry`` for that child (or its descendants), so the
+    FileGuard authorization dialogs keep popping until the 10s
+    subprocess-gone backstop notices the pid died. This callable is the
+    IMMEDIATE path: given the killed child's pid, it resolves every pending
+    ASK whose registered pid == ``child_pid`` OR is a descendant of it as
+    DENY, publishes a :class:`PermissionResolvedEvent` (``resolution=
+    "stopped"``) so the front-end closes the dialog, and best-effort marks
+    the durable store row resolved.
+
+    Mirrors :func:`build_ask_pending_probe`'s pid + psutil-descendants
+    matching but ACTS on the matches (resolve) instead of merely reporting
+    them. It "silences the POPUP, not withdraws the REQUEST" (mirrors the
+    ``/permission/cancel`` route): the domain aggregate is untouched — the
+    published event is a pure UI-close signal.
+
+    Layering: apps composition root — the only layer allowed to read
+    ``qai.security``; hands a context-neutral ``Callable`` to the exec-tool
+    cancel site. Resolving futures is synchronous/instant; the SSE publish
+    is a fast ``await``. NEVER raises — a flush glitch must never break the
+    cancel path (the caller re-raises ``CancelledError`` for responsiveness).
+    Returns the list of request_ids actually flushed (``[]`` on any miss).
+    """
+
+    async def _flush(child_pid: int) -> list[str]:
+        try:
+            security = getattr(container, "security", None)
+            registry = getattr(security, "permission_wait_registry", None)
+            by_pid_getter = getattr(
+                registry, "pending_request_ids_by_pid", None
+            )
+            if by_pid_getter is None:
+                return []
+            by_pid = by_pid_getter()
+            if not by_pid:
+                return []
+
+            # Which pids to flush: the child itself + any of its descendants
+            # still holding a live ASK. Descendant lookup is best-effort (the
+            # tree may already be partly reaped by the time the cancel branch
+            # calls us — the 10s backstop mops up anything psutil can no
+            # longer see). Same matching shape as build_ask_pending_probe.
+            target_pids: set[int] = {int(child_pid)}
+            try:
+                import psutil  # local import — optional dep, apps-layer only
+
+                proc = psutil.Process(int(child_pid))
+                target_pids |= {p.pid for p in proc.children(recursive=True)}
+            except Exception:  # noqa: BLE001 — dead/unknown pid → child only
+                pass
+
+            rids: list[str] = []
+            for pid in target_pids:
+                rids.extend(by_pid.get(pid, ()))
+            if not rids:
+                return []
+
+            events = getattr(container, "events", None)
+            store = getattr(security, "permission_pending_store", None)
+            clock = getattr(container, "clock", None)
+
+            flushed: list[str] = []
+            for rid in rids:
+                # Resolve the queued ASK future as DENY (synchronous/instant).
+                try:
+                    woke = registry.resolve(rid, allow=False, scope="deny")
+                except Exception:  # noqa: BLE001 — one bad rid must not abort
+                    _log.debug(
+                        "ask_flush.resolve_failed", exc_info=True
+                    )
+                    continue
+                if not woke:
+                    # Already resolved / unknown (a concurrent local response,
+                    # or the backstop beat us) — nothing to close in the UI.
+                    continue
+                flushed.append(rid)
+                # Publish the UI-close signal (fast await; best-effort).
+                if events is not None:
+                    try:
+                        from qai.security.domain.events import (
+                            PermissionResolvedEvent,
+                        )
+                        from qai.security.domain.value_objects import RequestId
+
+                        occurred_at = (
+                            clock.now() if clock is not None else None
+                        )
+                        if occurred_at is None:
+                            from datetime import datetime, timezone
+
+                            occurred_at = datetime.now(tz=timezone.utc)
+                        await events.publish(
+                            PermissionResolvedEvent(
+                                request_id=RequestId(value=rid),
+                                resolution="stopped",
+                                occurred_at=occurred_at,
+                            )
+                        )
+                    except Exception:  # noqa: BLE001 — publish glitch is non-fatal
+                        _log.debug(
+                            "ask_flush.publish_failed", exc_info=True
+                        )
+                # Best-effort durable mark so a restart / audit query can
+                # distinguish this stop-flush from a user DENY.
+                if store is not None:
+                    try:
+                        mark = getattr(store, "mark_resolved", None)
+                        if mark is not None:
+                            resolved_at = (
+                                clock.now() if clock is not None else None
+                            )
+                            if resolved_at is None:
+                                from datetime import datetime, timezone
+
+                                resolved_at = datetime.now(tz=timezone.utc)
+                            await mark(
+                                request_id=rid,
+                                resolved_at=resolved_at,
+                                resolution="stopped",
+                            )
+                    except Exception:  # noqa: BLE001 — mark is best-effort
+                        _log.debug("ask_flush.mark_failed", exc_info=True)
+            return flushed
+        except Exception:  # noqa: BLE001 — flush must never break the cancel path
+            _log.debug("ask_flush.failed", exc_info=True)
+            return []
+
+    return _flush

@@ -5167,13 +5167,18 @@ class StreamChatUseCase:
                 conv.id, _user_turn_count,
             )
             if _warn_threshold > 0:
-                # V1 message template (main.py:6726-6730).  Kept in sync
-                # with V1 wording; the frontend also has an i18n fallback
-                # (chat.turnLimitWarn) when the server omits ``message``.
+                # i18n: the WebUI localizes this warning via
+                # ``chat.turnLimitWarn`` (frameHandlers prefers the structured
+                # ``turn_count`` over this string — see handleTurnWarning). This
+                # ``message`` is a language-neutral English fallback for
+                # non-vue-i18n consumers (IM channels / SSE clients) and the
+                # contract's non-empty guarantee — NEVER hardcoded Chinese
+                # (it would leak zh into a non-zh WebUI, the reported bug).
                 _warn_msg = (
-                    f"⚠️ 当前会话已达到 {_user_turn_count} 轮对话。\n"
-                    "为避免上下文过长影响回复质量，建议尽快清理历史记录或创建新会话。\n"
-                    "（WebUI：点击左侧历史记录 → 新建会话；通道：发送 /new 开启新会话）"
+                    f"This session has reached {_user_turn_count} turns. "
+                    "To avoid an overly long context degrading reply quality, "
+                    "consider clearing history or starting a new session "
+                    "(WebUI: history panel -> new session; channel: send /new)."
                 )
                 synth_seq += 1
                 turn_warning_frame = StreamFrame.turn_warning(

@@ -79,6 +79,8 @@ class RequestPermissionUseCase:
         resource: Resource,
         requested_mask: AceMask,
         reason: str = "",
+        reason_code: str = "",
+        reason_args: dict[str, str] | None = None,
     ) -> PermissionRequest:
         """Create a PENDING permission request and publish the event.
 
@@ -110,6 +112,8 @@ class RequestPermissionUseCase:
                 requested_mask=requested_mask,
                 occurred_at=now,
                 reason=reason,
+                reason_code=reason_code,
+                reason_args=dict(reason_args or {}),
             )
         )
 

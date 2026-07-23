@@ -55,7 +55,7 @@ def build_persistent_bootstrap_spec(
         ``qai_appbuilder`` / the QNN runtime load; tests can pass
         ``sys.executable``).
     shared_dir:
-        Pack ``shared/`` helper directory (``factory/app_builder/shared``)
+        Pack ``shared/`` helper directory (``factory/chat_features/app-builder/shared``)
         prepended to ``PYTHONPATH`` when present.
     base_env:
         Base environment (defaults to ``os.environ``); the runner_protocol

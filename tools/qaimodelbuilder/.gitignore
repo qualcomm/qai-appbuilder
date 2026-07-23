@@ -58,12 +58,12 @@ npm-debug.log*
 # happen to be named "models/" deeper in the tree (e.g. the shipped skill code
 # at skills/*/models/, the promoted model-hub skill at
 # factory/chat_features/model-hub/models/, or the App Builder Pack code at
-# factory/app_builder/models/). Those are source and MUST stay committable.
+# factory/chat_features/app-builder/models/). Those are source and MUST stay committable.
 /models/
-!factory/app_builder/models/
-!factory/app_builder/models/**
-factory/app_builder/models/**/__pycache__/
-factory/app_builder/models/**/*.pyc
+!factory/chat_features/app-builder/models/
+!factory/chat_features/app-builder/models/**
+factory/chat_features/app-builder/models/**/__pycache__/
+factory/chat_features/app-builder/models/**/*.pyc
 # Skill code shipped under skills/*/models/ and factory/chat_features/*/models/
 # (e.g. the model-hub skill's per-model NOTES.md + infer scripts) is source,
 # not a runtime weight cache — keep it committable. (Belt-and-braces: the

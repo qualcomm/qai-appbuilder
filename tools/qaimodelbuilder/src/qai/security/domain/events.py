@@ -18,7 +18,7 @@ Naming follows the spec §9: ``<Subject><Verb>Event`` with
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, ClassVar
 
@@ -41,6 +41,7 @@ __all__ = [
     "PermissionRejectedEvent",
     "PermissionRequestCancelledEvent",
     "PermissionRequestedEvent",
+    "PermissionResolvedEvent",
     "PolicyChangedEvent",
     "PolicyShadowDetectedEvent",
 ]
@@ -80,6 +81,14 @@ class PermissionRequestedEvent(DomainEvent):
     # keeps the dataclass constructor backward-compatible for every S0-S7
     # caller that omits it (e.g. the plain FileGuard path ASK).
     reason: str = ""
+    # i18n contract (A2): the structured reason CODE + interpolation ARGS the
+    # frontend uses to render the localized "why confirm?" text from its own
+    # locale catalog (so the backend stays language-agnostic and a UI language
+    # switch re-localizes with zero backend round-trip). TAIL-appended optional
+    # (§3.1 additive) — empty ``reason_code`` keeps S0-S7 / operator-custom
+    # frames byte-for-byte unchanged (the frontend falls back to ``reason``).
+    reason_code: str = ""
+    reason_args: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Project onto the V1 ``permission_request`` SSE frame shape.
@@ -135,7 +144,60 @@ class PermissionRequestedEvent(DomainEvent):
         # ASK sets it so the front-end can render "why confirm?".
         if self.reason:
             frame["reason"] = self.reason
+        # i18n contract (A2): the structured code + args the frontend renders
+        # via its locale catalog. Emitted only when a code is present so
+        # operator-custom / legacy frames (no code) stay unchanged and the
+        # frontend falls back to the verbatim ``reason`` string.
+        if self.reason_code:
+            frame["reason_code"] = self.reason_code
+            if self.reason_args:
+                frame["reason_args"] = dict(self.reason_args)
         return frame
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PermissionResolvedEvent(DomainEvent):
+    """Fired to tell the UI a pending ASK popup should CLOSE (problem ②).
+
+    Pure UI-close signal — it does NOT mutate any aggregate. When the
+    backend resolves an already-queued native ASK future WITHOUT a local
+    user response (chat-Stop flush of an exec child's pending ASKs, or the
+    subprocess-gone backstop sweep), there is otherwise no SSE frame telling
+    the front-end to dequeue the dialog, so the FileGuard authorization
+    popup keeps demanding a choice until a full SSE-reconnect re-fetch.
+
+    This is deliberately DISTINCT from
+    :class:`PermissionRequestCancelledEvent` (which carries the aggregate
+    PENDING → CANCELLED transition semantics for a subject *withdrawing*
+    their own request): the flush must "silence the POPUP, not withdraw the
+    REQUEST" (mirrors the ``/permission/cancel`` route comment), so it
+    emits this lightweight resolved-notification instead.
+
+    ``resolution`` is a free-form UI hint (``"stopped"`` for the chat-Stop
+    flush, ``"subprocess_gone"`` for the cleanup backstop) so the front-end
+    / audit can distinguish *why* the dialog auto-closed; the front-end only
+    needs ``id`` to dequeue.
+    """
+
+    event_type: ClassVar[str] = "security.permission_resolved"
+
+    request_id: RequestId
+    resolution: str
+    occurred_at: datetime
+
+    def to_dict(self) -> dict[str, Any]:
+        """Project onto the ``permission_resolved`` SSE close-frame shape.
+
+        The global ``/api/events`` serialiser prefers a ``to_dict()`` when
+        present; emitting ``type="permission_resolved"`` + ``id`` lets the
+        front-end ``App.vue`` ``onEvent`` dispatch to
+        ``permissionDialog.dequeue(id)`` and close the matching dialog.
+        """
+        return {
+            "type": "permission_resolved",
+            "id": self.request_id.value,
+            "resolution": self.resolution,
+        }
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

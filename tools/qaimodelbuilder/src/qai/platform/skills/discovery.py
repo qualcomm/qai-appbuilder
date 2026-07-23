@@ -86,7 +86,7 @@ def parse_skill_metadata(md_file: Path) -> tuple[str, str] | None:
 
     Unlike :meth:`SkillDiscovery.scan` (which treats a directory's *subdirs*
     as skills), this reads one ``SKILL.md`` file whose front-matter *is* the
-    skill definition (e.g. ``factory/app_builder/SKILL.md``). ``name`` comes
+    skill definition (e.g. ``factory/chat_features/app-builder/SKILL.md``). ``name`` comes
     from the front-matter ``name:`` key (falling back to the file's parent
     directory name); ``description`` from the ``description:`` key or the
     first body paragraph. Returns ``None`` when the file is unreadable.

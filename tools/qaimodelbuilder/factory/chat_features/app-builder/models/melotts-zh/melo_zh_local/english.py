@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Derived from MeloTTS (https://github.com/myshell-ai/MeloTTS)
+# Copyright (c) 2024 MyShell.ai
+# SPDX-License-Identifier: MIT
+# ---------------------------------------------------------------------
 """English G2P for melo_zh_local (Chinese-English mixed TTS).
 
 Minimal English phoneme conversion matching upstream melo/text/english.py,
@@ -37,10 +42,22 @@ arpa = {
 # Lazy-initialized G2p instance (avoids slow import if English is unused)
 _g2p_instance = None
 
-# Cache file location: <repo_root>/vendor/g2p_cache.pkl
-# Path resolution: english.py is at features/app-builder/models/melotts-zh/melo_zh_local/english.py
-# repo_root is 5 levels up: melo_zh_local -> melotts-zh -> models -> app-builder -> features -> repo
-_G2P_CACHE_PATH = Path(__file__).resolve().parents[5] / "vendor" / "g2p_data" / "g2p_cache.pkl"
+# Cache file location: <root>/vendor/g2p_data/g2p_cache.pkl
+# Resolved by walking UP for an existing ``vendor/`` dir rather than a fixed
+# ``parents[N]`` jump — a fixed jump breaks across layouts (dev repo:
+# vendor is parents[5]; packaged app <app>/pack/<id>/melo_zh_local: parents[3]).
+# The ancestor-walk finds it in both; None means "no cache, use the live import".
+def _find_g2p_cache() -> Path:
+    for _parent in Path(__file__).resolve().parents:
+        _cand = _parent / "vendor" / "g2p_data" / "g2p_cache.pkl"
+        if _cand.is_file():
+            return _cand
+    # No cache found — return a non-existent canonical path so the
+    # ``.is_file()`` guard in _load_g2p_from_cache() falls back cleanly.
+    return Path(__file__).resolve().parents[-1] / "vendor" / "g2p_data" / "g2p_cache.pkl"
+
+
+_G2P_CACHE_PATH = _find_g2p_cache()
 
 
 def _load_g2p_from_cache():

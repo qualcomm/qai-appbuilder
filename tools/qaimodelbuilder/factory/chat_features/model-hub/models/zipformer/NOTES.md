@@ -151,7 +151,7 @@ opts.mel_opts.high_freq = -400.0
 ## Vocabulary
 
 - 6254-dim logit (matching the joiner output); `assets/tokens.txt` is in sherpa-onnx `<token> <id>` format.
-- The repo already has `factory/app_builder/models/zipformer-zh/assets/tokens.txt` for reuse;
+- The repo already has `factory/chat_features/app-builder/models/zipformer-zh/assets/tokens.txt` for reuse;
   or obtain the `tokens.txt` of the same checkpoint from the sherpa-onnx upstream.
 
 ---
@@ -188,7 +188,7 @@ Invoke-WebRequest `
   "...\infer_zipformer.py" `
   --audio "C:\path\to\audio.wav" `
   --model_dir "C:\WoS_AI\zipformer\zipformer-qnn_context_binary-float-qualcomm_snapdragon_x2_elite" `
-  --tokens "${APP_ROOT}\factory\app_builder\models\zipformer-zh\assets\tokens.txt"
+  --tokens "${APP_ROOT}\factory\chat_features\app-builder\models\zipformer-zh\assets\tokens.txt"
 ```
 
 `<python_arm64_venv>` is read from `${APP_ROOT}\data\config\qairt_env.json`, do not hardcode it.
@@ -233,6 +233,6 @@ and use a real 16 kHz mono speech WAV.
 
 ## Reference Implementation
 
-The repo's `factory/app_builder/models/zipformer-zh/runner.py` is the complete `qai_appbuilder` inference implementation
+The repo's `factory/chat_features/app-builder/models/zipformer-zh/runner.py` is the complete `qai_appbuilder` inference implementation
 of the same model under the App Builder module (streaming encoder + greedy RNN-T decoding + token de-mapping);
 this directory's `infer_zipformer.py` was ported from its algorithm into a standalone script. The two share the same algorithm/geometry constants.

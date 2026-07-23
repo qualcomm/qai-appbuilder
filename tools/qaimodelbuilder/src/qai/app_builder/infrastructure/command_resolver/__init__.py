@@ -43,6 +43,7 @@ from .registry import (
     InMemoryRunnerCommandRegistry,
     RunnerCommandRegistryPort,
     RunnerSpec,
+    UnsupportedBackendError,
     build_command_resolver,
 )
 
@@ -53,5 +54,6 @@ __all__ = [
     "RunnerCommandRegistryPort",
     "RunnerSpec",
     "SysExecutableResolver",
+    "UnsupportedBackendError",
     "build_command_resolver",
 ]

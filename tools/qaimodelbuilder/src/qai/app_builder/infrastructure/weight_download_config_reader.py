@@ -7,7 +7,7 @@
 
 Concrete adapter implementing
 :class:`qai.app_builder.application.ports.WeightDownloadConfigPort`. Reads
-the bundled ``<repo_root>/factory/app_builder/models/<id>/weights.json``
+the bundled ``<repo_root>/factory/chat_features/app-builder/models/<id>/weights.json``
 (the per-pack weight-config file that ships with each built-in App Builder
 model) and decodes it into the pure
 :class:`qai.app_builder.domain.weight_download_config.WeightDownloadConfig`
@@ -60,7 +60,8 @@ class FileSystemWeightDownloadConfigReader:
         path = (
             self._repo_root
             / "factory"
-            / "app_builder"
+            / "chat_features"
+            / "app-builder"
             / "models"
             / model_id
             / "weights.json"

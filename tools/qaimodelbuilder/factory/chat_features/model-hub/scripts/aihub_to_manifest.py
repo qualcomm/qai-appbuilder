@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
 """aihub_to_manifest.py — bridge AI Hub downloads into the model-builder export chain.
 
 AI Hub ships prebuilt QNN/DLC packages whose on-disk layout does NOT match

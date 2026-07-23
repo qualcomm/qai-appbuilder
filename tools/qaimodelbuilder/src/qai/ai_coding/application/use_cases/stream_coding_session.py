@@ -256,9 +256,15 @@ class StreamCodingSessionUseCase:
                         payload={
                             "type": "ai_coding.turn_timeout",
                             "code": TURN_TIMEOUT_ERROR_CODE,
+                            # i18n: the frontend localizes by ``code`` (=
+                            # ``timeout`` → ``claudeCode.errTimeout``), so this
+                            # ``message`` is only a language-neutral English
+                            # fallback for non-UI consumers — NEVER hardcoded
+                            # Chinese (it would leak into a non-zh UI).
                             "message": (
-                                f"处理超时（已等待 {timeout_s:.0f} 秒）。"
-                                "会话已重置，可重新发送消息。"
+                                f"Processing timed out (waited "
+                                f"{timeout_s:.0f}s). The session was reset; "
+                                f"you can send the message again."
                             ),
                             "details": {
                                 "session_id": str(command.session_id),
@@ -348,15 +354,17 @@ class StreamCodingSessionUseCase:
                         yield CodingStreamFrame(
                             kind=StreamFrameKind.TEXT,
                             payload={
+                                # i18n: emit only structured fields; the
+                                # frontend composes the localized warning from
+                                # ``turn_count`` via ``chat.turnLimitWarn``
+                                # (frameHandlers → ``__turn_warning__:N`` →
+                                # ChatMessageList.renderTurnWarning). No
+                                # hardcoded ``message`` — that would leak zh
+                                # into a non-zh UI (the string was rendered
+                                # verbatim in preference to the i18n fallback).
                                 "turn_warning": {
                                     "turn_count": session.turn_count,
                                     "threshold": threshold,
-                                    "message": (
-                                        f"⚠️ 当前会话已达到 "
-                                        f"{session.turn_count} 轮对话。\n"
-                                        "为避免上下文过长影响回复质量，"
-                                        "建议尽快创建新会话。"
-                                    ),
                                 }
                             },
                             sequence=session.last_stream_sequence + 1,

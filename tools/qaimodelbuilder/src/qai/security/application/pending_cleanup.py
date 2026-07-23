@@ -46,7 +46,9 @@ from __future__ import annotations
 import asyncio
 import ctypes
 import ctypes.wintypes
+import inspect
 import sys
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -56,6 +58,13 @@ from qai.platform.time import Clock
 if TYPE_CHECKING:  # pragma: no cover
     from qai.security.application.permission_wait import PermissionWaitRegistry
     from qai.security.application.ports import PermissionPendingStorePort
+
+#: Optional resolved-notification callback: ``on_resolved(request_id,
+#: resolution)`` — invoked (best-effort) after the sweep wakes a stale ASK
+#: future so an apps-layer publisher can push a UI-close SSE frame
+#: (``PermissionResolvedEvent``). May be sync or async; either is awaited /
+#: called defensively. ``None`` keeps the sweep byte-for-byte unchanged.
+OnResolvedCallback = Callable[[str, str], "Awaitable[None] | None"]
 
 __all__ = ["PendingCleanupService"]
 
@@ -103,6 +112,7 @@ class PendingCleanupService:
         "_interval",
         "_task",
         "_stopping",
+        "_on_resolved",
     )
 
     def __init__(
@@ -112,6 +122,7 @@ class PendingCleanupService:
         pending_store: "PermissionPendingStorePort | None" = None,
         clock: Clock,
         scan_interval_seconds: float = 10.0,
+        on_resolved: "OnResolvedCallback | None" = None,
     ) -> None:
         self._registry = wait_registry
         self._store = pending_store
@@ -119,6 +130,12 @@ class PendingCleanupService:
         self._interval = float(scan_interval_seconds)
         self._task: "asyncio.Task[None] | None" = None
         self._stopping = False
+        # Problem ② backstop-honesty — optional apps-layer notification called
+        # after a stale ASK is resolved subprocess_gone, so a dialog left open
+        # after a SILENT subprocess death still closes in the UI (the sweep is
+        # the only path that resolves it in that case). ``None`` keeps the
+        # sweep byte-for-byte unchanged (additive, backward-compatible).
+        self._on_resolved = on_resolved
 
     # -- lifecycle -----------------------------------------------------
     def start(self) -> "asyncio.Task[None]":
@@ -212,6 +229,13 @@ class PendingCleanupService:
                 continue
             # Subprocess is gone — resolve as DENY + mark the durable row.
             woke = self._registry.resolve(rid, allow=False, scope="deny")
+            # Problem ② backstop-honesty — tell the UI to close the dialog for
+            # this now-resolved ASK (a silent subprocess death has no local
+            # user response and no exec-cancel flush, so this sweep is the only
+            # thing that can close it). Best-effort: a notify glitch must never
+            # break the sweep. Only fire when we actually woke a live waiter.
+            if woke and self._on_resolved is not None:
+                await self._notify_resolved(rid, "subprocess_gone")
             if self._store is not None:
                 try:
                     await self._store.mark_resolved(
@@ -230,6 +254,27 @@ class PendingCleanupService:
                 request_id=rid,
                 pid=pid,
                 woke=woke,
+            )
+
+    async def _notify_resolved(self, request_id: str, resolution: str) -> None:
+        """Fire the optional resolved-notification callback (best-effort).
+
+        Supports a sync OR async ``on_resolved``; an async return is awaited.
+        NEVER raises — a UI-close notification glitch must not break or crash
+        the periodic sweep (the resolve + durable mark already happened).
+        """
+        cb = self._on_resolved
+        if cb is None:
+            return
+        try:
+            outcome = cb(request_id, resolution)
+            if inspect.isawaitable(outcome):
+                await outcome
+        except Exception:  # noqa: BLE001 — notify must never break the sweep
+            _log.warning(
+                "security.pending_cleanup.notify_failed",
+                request_id=request_id,
+                exc_info=True,
             )
 
 

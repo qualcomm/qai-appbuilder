@@ -482,6 +482,8 @@ _INSTALL_TEMP_FILE_PATTERNS = (
     "PortableGit-*.7z.exe.aria2",
     "node-v*-win-arm64.zip",
     "node-v*-win-arm64.zip.aria2",
+    "node-v*-win-x64.zip",
+    "node-v*-win-x64.zip.aria2",
     "_uv_tmp.zip",
     "_uv_tmp.zip.aria2",
     "_qairt_tmp.zip",
@@ -582,6 +584,7 @@ def clean_uv_pythons(targets: UninstallTargets, *, dry_run: bool = False) -> Non
 
     for child in (
         "cpython-3.13-windows-aarch64-none",
+        "cpython-3.13-windows-x86_64-none",
         "cpython-3.10-windows-x86_64-none",
     ):
         path = interp_root / child

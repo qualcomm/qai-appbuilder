@@ -51,13 +51,33 @@ from qai.platform.process.ports import ProcessExecutionRequest
 from ._request_payload import build_runner_request_payload
 from .interpreter_resolver import PythonInterpreterResolver, SysExecutableResolver
 
+import platform as _platform
+
 __all__ = [
     "InMemoryRunnerCommandRegistry",
     "RunnerCommandRegistryPort",
     "RunnerSpec",
+    "UnsupportedBackendError",
     "build_command_resolver",
 ]
 
+
+class UnsupportedBackendError(RuntimeError):
+    """Raised when a Pack requires a QNN delegate unavailable on this host.
+
+    Specifically: HTP (Hexagon Tensor Processor) delegate on an x64 host
+    — the Hexagon DSP hardware only exists on Snapdragon SoCs (ARM64).
+    """
+
+    def __init__(self, model_id: str, delegate: str, host_arch: str) -> None:
+        self.model_id = model_id
+        self.delegate = delegate
+        self.host_arch = host_arch
+        super().__init__(
+            f"Model '{model_id}' requires the '{delegate.upper()}' backend "
+            f"(Hexagon NPU), which is not available on this {host_arch} host. "
+            f"HTP inference requires a Snapdragon ARM64 device with Hexagon DSP."
+        )
 
 _DEFAULT_TIMEOUT_S: float = 300.0
 """Five-minute hard wall-clock cap (parity with legacy
@@ -88,6 +108,9 @@ class RunnerSpec:
     * :attr:`timeout_s` — wall-clock cap; ``None`` = unlimited;
     * :attr:`output_byte_cap` — combined stdout+stderr cap; ``None`` =
       unlimited.
+    * :attr:`delegate` — QNN delegate declared by the Pack manifest
+      (``"htp"`` / ``"cpu"`` / ``""``). Used by the command resolver to
+      reject HTP-only models on x64 hosts (no Hexagon DSP available).
     """
 
     script_path: Path
@@ -96,6 +119,7 @@ class RunnerSpec:
     extra_pythonpath: tuple[Path, ...] = field(default_factory=tuple)
     timeout_s: float | None = _DEFAULT_TIMEOUT_S
     output_byte_cap: int | None = _DEFAULT_OUTPUT_BYTE_CAP
+    delegate: str = ""
 
     def __post_init__(self) -> None:
         if not isinstance(self.script_path, Path):
@@ -129,6 +153,8 @@ class RunnerSpec:
                 "output_byte_cap must be > 0 or None, got "
                 f"{self.output_byte_cap!r}"
             )
+        if not isinstance(self.delegate, str):
+            raise TypeError("delegate must be a str")
 
 
 @runtime_checkable
@@ -241,7 +267,7 @@ def build_command_resolver(
         ``repoRoot`` field of the runner request envelope written to
         the child's stdin (see :func:`build_runner_request_payload`).
         Production DI passes ``container.repo_root`` so the Pack
-        runners (``factory/app_builder/models/<pack>/runner.py``)
+        runners (``factory/chat_features/app-builder/models/<pack>/runner.py``)
         can resolve their weight + asset paths under
         ``<repo>/models/<pack>/`` and ``<repo>/factory/...``. When
         ``None`` no stdin envelope is attached and the resolver
@@ -290,6 +316,18 @@ def build_command_resolver(
         spec = registry.get(model, run)
         if spec is None:
             return None
+        # Phase D: reject HTP-only models on x64 hosts (no Hexagon DSP).
+        # This pre-check gives a clear error instead of a cryptic DLL load
+        # failure from the subprocess. See x64-windows-support-plan.md §D-4.
+        if (
+            spec.delegate.lower() == "htp"
+            and _platform.machine() in ("AMD64", "x86_64")
+        ):
+            raise UnsupportedBackendError(
+                model_id=str(model.id),
+                delegate=spec.delegate,
+                host_arch=_platform.machine(),
+            )
         env = _materialise_env(base_env, spec, interp)
         # 缺口 10: inject the live global-proxy URL (mechanism B) into the
         # runner subprocess so its ``urllib`` weight downloads route through

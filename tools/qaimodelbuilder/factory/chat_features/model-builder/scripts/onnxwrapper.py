@@ -571,6 +571,24 @@ class BaseRunner:
 
     def _get_actual_architecture(self):
         """Get the actual architecture, handling Windows ARM64 emulation quirks."""
+        # Allow explicit host arch override via data/config/host_arch (single-line
+        # ASCII: arm64 or x64). Used by --arch forced end-to-end validation where a
+        # x64 python runs under WoS Prism emulation and platform/env would mislead
+        # us into picking the aarch64 toolchain. Missing/invalid file = fall through.
+        try:
+            repo_root = Path(__file__).resolve().parents[4]
+            host_arch_file = repo_root / "data" / "config" / "host_arch"
+            if host_arch_file.is_file():
+                value = host_arch_file.read_text(encoding="utf-8").strip().lower()
+                if value == "arm64":
+                    return "ARM64"
+                if value in ("x64", "amd64", "x86_64"):
+                    # platform.machine() on Windows x64 returns "AMD64"; match that
+                    # so _get_toolchain picks x86_64-windows-msvc.
+                    return "AMD64"
+        except (OSError, ValueError):
+            pass
+
         if not self.is_windows:
             return platform.machine()
          

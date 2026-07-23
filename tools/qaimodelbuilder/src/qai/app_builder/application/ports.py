@@ -1039,7 +1039,7 @@ class WeightDownloadConfigPort(Protocol):
     (:class:`qai.app_builder.application.use_cases.download_weights.DownloadModelWeightsUseCase`).
     The concrete adapter
     (:mod:`qai.app_builder.infrastructure.weight_download_config_reader`)
-    reads ``repo_root/factory/app_builder/models/<id>/weights.json``, but
+    reads ``repo_root/factory/chat_features/app-builder/models/<id>/weights.json``, but
     the use case only ever sees this Port + the returned VO — no path /
     filesystem knowledge leaks into the application layer (satisfies the
     ``layered-app_builder`` contract).

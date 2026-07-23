@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Derived from MeloTTS (https://github.com/myshell-ai/MeloTTS)
+# Copyright (c) 2024 MyShell.ai
+# SPDX-License-Identifier: MIT
+# ---------------------------------------------------------------------
 """Local minimal subset of melo.text for Chinese-only TTS preprocessing.
 
 This package re-implements the parts of melo.text that are needed by

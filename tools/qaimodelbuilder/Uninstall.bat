@@ -79,20 +79,67 @@ echo.
 
 REM -- Locate Python -----------------------------------------------------------
 REM Lookup order (most-likely-to-be-present first):
-REM   1. The ARM64 venv python (gone after default uninstall though).
+REM   1. The host-arch runtime venv python (gone after default uninstall though).
 REM   2. The uv-managed cpython interpreter Setup.bat installed
-REM      (%APPDATA%\uv\python\cpython-3.13-windows-aarch64-none\python.exe).
+REM      (%APPDATA%\uv\python\cpython-3.13-windows-<aarch64|x86_64>-none\python.exe).
 REM      This survives a default uninstall (only the venv link inside it is
 REM      removed), so a follow-up `Uninstall.bat --all` / `--vs` can still
 REM      use Python to drive the heavier cleanup.
 REM   3. System python on PATH.
 REM   4. None of the above -> fall through to :manual_cleanup, which now
 REM      handles --all and --vs in pure batch / PowerShell.
+REM
+REM NOTE: the venv/interpreter locator only picks WHICH python drives
+REM uninstall.py; the actual cleanup deletes the whole
+REM %LOCALAPPDATA%\QAIModelBuilder tree (both .venv_arm64_313 and
+REM .venv_x64_313) and, below, uv interpreters for BOTH architectures,
+REM so removal is host-arch-independent.
+
+REM --- Host architecture selection (three-tier) -----------------------------
+REM Priority: 1) --arch <value> CLI flag  2) data\config\host_arch file
+REM           3) Auto-detect via %PROCESSOR_ARCHITECTURE% / PROCESSOR_ARCHITEW6432
+REM Note: cleanup below still wipes BOTH .venv_arm64_313 and .venv_x64_313 plus
+REM uv interpreters for both archs, so HOST_ARCH here only selects the driver
+REM python for scripts/init/uninstall.py.
+set "FORCED_ARCH="
+set "_NEXT_IS_ARCH="
+for %%A in (%*) do (
+    if defined _NEXT_IS_ARCH (
+        set "FORCED_ARCH=%%~A"
+        set "_NEXT_IS_ARCH="
+    ) else if /i "%%~A"=="--arch" (
+        set "_NEXT_IS_ARCH=1"
+    )
+)
+set "HOST_ARCH="
+if defined FORCED_ARCH (
+    if /i "!FORCED_ARCH!"=="x64"   set "HOST_ARCH=x64"
+    if /i "!FORCED_ARCH!"=="arm64" set "HOST_ARCH=arm64"
+)
+if not defined HOST_ARCH (
+    if exist "%~dp0data\config\host_arch" (
+        set "_FILE_ARCH="
+        for /f "usebackq tokens=1 delims= " %%B in ("%~dp0data\config\host_arch") do (
+            if not defined _FILE_ARCH set "_FILE_ARCH=%%B"
+        )
+        if /i "!_FILE_ARCH!"=="x64"   set "HOST_ARCH=x64"
+        if /i "!_FILE_ARCH!"=="arm64" set "HOST_ARCH=arm64"
+    )
+)
+if not defined HOST_ARCH (
+    set "HOST_ARCH=arm64"
+    if /i "%PROCESSOR_ARCHITECTURE%"=="AMD64" set "HOST_ARCH=x64"
+    if /i "%PROCESSOR_ARCHITEW6432%"=="AMD64" set "HOST_ARCH=x64"
+)
+set "VENV_DIR_NAME=.venv_arm64_313"
+set "UV_CPY_ARCH=aarch64"
+if /i "%HOST_ARCH%"=="x64" set "VENV_DIR_NAME=.venv_x64_313"
+if /i "%HOST_ARCH%"=="x64" set "UV_CPY_ARCH=x86_64"
 
 set "LOCALAPP_QAI=%LOCALAPPDATA%\QAIModelBuilder"
-set "VENV_PYTHON=%LOCALAPP_QAI%\envs\.venv_arm64_313\Scripts\python.exe"
+set "VENV_PYTHON=%LOCALAPP_QAI%\envs\%VENV_DIR_NAME%\Scripts\python.exe"
 set "UV_PYTHON_ROOT=%APPDATA%\uv\python"
-set "UV_CPY313=%UV_PYTHON_ROOT%\cpython-3.13-windows-aarch64-none\python.exe"
+set "UV_CPY313=%UV_PYTHON_ROOT%\cpython-3.13-windows-%UV_CPY_ARCH%-none\python.exe"
 set "PYTHON="
 set "PYTHON_IN_TREE="
 
@@ -293,13 +340,15 @@ if exist "%~dp0data\bin" (
 
 echo -- Manual fallback: removing install temp archives in data\downloads ------
 REM Whitelist (mirror clean_install_temp_downloads in uninstall.py):
-REM   PortableGit-*.7z.exe, node-v*-win-arm64.zip, _uv_tmp.zip, _qairt_tmp.zip,
+REM   PortableGit-*.7z.exe, node-v*-win-arm64.zip, node-v*-win-x64.zip,
+REM   _uv_tmp.zip, _qairt_tmp.zip,
 REM   vendor-deps.7z, _aria2c_tmp.zip (and their .aria2 control files);
 REM   plus subdirs: log/, _aria2c_tmp/, _node_tmp/, _vendor_deps_tmp/.
 if exist "%~dp0data\downloads" (
     pushd "%~dp0data\downloads" >nul
     for %%P in (PortableGit-*.7z.exe PortableGit-*.7z.exe.aria2 ^
                 node-v*-win-arm64.zip node-v*-win-arm64.zip.aria2 ^
+                node-v*-win-x64.zip node-v*-win-x64.zip.aria2 ^
                 _uv_tmp.zip _uv_tmp.zip.aria2 ^
                 _qairt_tmp.zip _qairt_tmp.zip.aria2 ^
                 vendor-deps.7z vendor-deps.7z.aria2 ^
@@ -315,13 +364,24 @@ if exist "%~dp0data\downloads" (
     echo    [SKIP] data\downloads not present.
 )
 
+echo -- Manual fallback: removing host_arch selector file ---------------------
+REM data\config\host_arch is written by Setup.bat to record the selected
+REM architecture for later launcher invocations. Uninstall wipes it so a
+REM fresh Setup starts from clean auto-detection state.
+if exist "%~dp0data\config\host_arch" (
+    del /f /q "%~dp0data\config\host_arch" >nul 2>&1
+    echo    [OK] data\config\host_arch removed.
+) else (
+    echo    [SKIP] data\config\host_arch not present.
+)
+
 echo -- Manual fallback: removing uv-managed Python interpreters ---------------
 REM uv places Python interpreters under %APPDATA%\uv\python\ as directory
 REM SYMLINKS or JUNCTIONS pointing into uv's cache. PowerShell's
 REM Remove-Item -Force unlinks the link without recursing into the target,
 REM preserving uv cache integrity.
 if exist "%APPDATA%\uv\python" (
-    powershell -NoProfile -Command "$root = '%APPDATA%\uv\python'; $patterns = @('cpython-3.13-windows-aarch64*','cpython-3.13.*-windows-aarch64*','cpython-3.10-windows-x86_64*','cpython-3.10.*-windows-x86_64*'); $count = 0; foreach ($p in $patterns) { Get-ChildItem -LiteralPath $root -Directory -Filter $p -ErrorAction SilentlyContinue | ForEach-Object { try { Remove-Item -LiteralPath $_.FullName -Force -Recurse -ErrorAction Stop; $count++ } catch { Write-Host ('   [WARN] could not remove ' + $_.FullName + ': ' + $_.Exception.Message) } } }; Write-Host ('   [OK] removed ' + $count + ' uv python interpreter(s).')"
+    powershell -NoProfile -Command "$root = '%APPDATA%\uv\python'; $patterns = @('cpython-3.13-windows-aarch64*','cpython-3.13.*-windows-aarch64*','cpython-3.13-windows-x86_64*','cpython-3.13.*-windows-x86_64*','cpython-3.10-windows-x86_64*','cpython-3.10.*-windows-x86_64*'); $count = 0; foreach ($p in $patterns) { Get-ChildItem -LiteralPath $root -Directory -Filter $p -ErrorAction SilentlyContinue | ForEach-Object { try { Remove-Item -LiteralPath $_.FullName -Force -Recurse -ErrorAction Stop; $count++ } catch { Write-Host ('   [WARN] could not remove ' + $_.FullName + ': ' + $_.Exception.Message) } } }; Write-Host ('   [OK]   Removed ' + $count + ' interpreter directory/directories.')"
 ) else (
     echo    [SKIP] %APPDATA%\uv\python not present.
 )

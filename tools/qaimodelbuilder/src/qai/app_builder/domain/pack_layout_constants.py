@@ -32,23 +32,23 @@ Mirror points that CANNOT import Python (漂移风险显式化)
 Some occurrences of these strings live outside Python and **cannot** import
 from this module. When you change a value here, you MUST also update:
 
-1. ``factory/app_builder/fullstack-authoring.SKILL.md`` — the LLM-facing
-   authoring guide contains YAML examples (§3 case 1 / case 2) and the
-   ``_resolve_dir()`` 4-tier template (§4) that hard-code the same strings.
+1. ``factory/chat_features/app-builder/app-authoring.md`` — the LLM-facing authoring guide
+   contains YAML examples (§3 case 1 / case 2) and the ``_resolve_dir()``
+   4-tier template (§4) that hard-code the same strings.
 
-2. ``factory/app_builder/SKILL.md`` — the top-level Agent SKILL references
+2. ``factory/chat_features/app-builder/SKILL.md`` — the top-level Agent SKILL references
    both the built-in and user pack roots in its "what you do / don't do"
    sections.
 
 3. Generated ``run.bat`` / ``run.ps1`` / ``run.sh`` templates in
-   ``fullstack-authoring.SKILL.md`` §7 — the shell-side env-var derivation
+   ``app-authoring.md`` §7 — the shell-side env-var derivation
    guards (``if exist "%REPO_ROOT%\\...\\"``) hard-code the same paths.
    Every existing app's checked-in ``run.bat`` under
    ``data/app_builder/*/run.bat`` is a materialised copy of that template
    and would need re-generation.
 
 4. Any docstring in ``src/qai/app_builder/**`` that mentions these paths for
-   explanation purposes (grep for ``factory/app_builder/models`` /
+   explanation purposes (grep for ``factory/chat_features/app-builder/models`` /
    ``data/app_builder/user_models``). These are read by humans, not code —
    they will not cause runtime bugs if they drift, but they will confuse
    readers.
@@ -64,7 +64,7 @@ from typing import Final
 #: Built-in pack directory (metadata: manifest.json / runner.py / SKILL.md /
 #: assets / provenance). ``${APP_ROOT}/<BUILTIN_PACK_REL>/<pack_id>/``.
 #: Mirrors ``FileSystemAppProjectPackager.pack_root``.
-BUILTIN_PACK_REL: Final[str] = "factory/app_builder/models"
+BUILTIN_PACK_REL: Final[str] = "factory/chat_features/app-builder/models"
 
 #: Built-in weights directory (``.bin`` files under
 #: ``${APP_ROOT}/<BUILTIN_WEIGHTS_REL>/<pack_id>/<bin>``).

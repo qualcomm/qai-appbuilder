@@ -15,7 +15,7 @@ const modelHubFrame: MessageSchema["modelHubFrame"] = {
   pickModel: "選擇模型",
   pickModelHint: "搜尋並選擇一個高通 AI Hub 預編譯模型",
   pickModelHeader: "選擇 AI Hub 模型",
-  pickModelPlaceholder: "例如 resnet50、whisper-base、yolov8-det",
+  pickModelPlaceholder: "例如 resnet50、whisper-base、zipformer",
   pickModelConfirm: "確認",
   pickModelDesc:
     "輸入 AI Hub 模型名稱，Agent 會下載預編譯模型包並在端側直接執行——無需轉換。",

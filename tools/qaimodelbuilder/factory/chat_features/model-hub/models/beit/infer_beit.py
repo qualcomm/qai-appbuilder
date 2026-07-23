@@ -1,3 +1,7 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
 """
 infer_beit.py — BEiT Image Classification on Snapdragon X Elite (QNN DLC)
 

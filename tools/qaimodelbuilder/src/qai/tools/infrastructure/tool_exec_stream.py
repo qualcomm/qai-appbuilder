@@ -33,7 +33,7 @@ from __future__ import annotations
 import asyncio
 import enum
 import logging
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -190,6 +190,7 @@ async def stream_exec(
     timeout: float | None = None,
     cap_bytes: int = STREAM_CAP_BYTES,
     ask_pending_probe: "Callable[[int], bool] | None" = None,
+    ask_flush_for_pid: "Callable[[int], Awaitable[list[str]]] | None" = None,
 ) -> tuple[AsyncIterator[ExecStreamFrame], ExecStreamResult]:
     """Spawn *command* in a shell and stream output in real time.
 
@@ -217,7 +218,8 @@ async def stream_exec(
     result = ExecStreamResult()
     return _stream_impl(command, cwd=cwd, env=env, timeout=timeout,
                         cap_bytes=cap_bytes, result=result,
-                        ask_pending_probe=ask_pending_probe), result
+                        ask_pending_probe=ask_pending_probe,
+                        ask_flush_for_pid=ask_flush_for_pid), result
 
 
 async def _stream_impl(
@@ -229,6 +231,7 @@ async def _stream_impl(
     cap_bytes: int,
     result: ExecStreamResult,
     ask_pending_probe: "Callable[[int], bool] | None" = None,
+    ask_flush_for_pid: "Callable[[int], Awaitable[list[str]]] | None" = None,
 ) -> AsyncIterator[ExecStreamFrame]:
     """Core async generator implementing the streaming tee logic."""
     effective_timeout = timeout if (timeout and timeout > 0) else None
@@ -569,6 +572,26 @@ async def _stream_impl(
         # is then a best-effort zombie collection.
         if proc.returncode is None:
             best_effort_tree_kill(proc)
+        # Problem ② (chat-Stop path) — this finally runs on the user "Stop"
+        # ``aclose()`` (GeneratorExit / CancelledError at a ``yield``). The
+        # tree is now force-killed above, but any native FileGuard ASK the
+        # child queued is still live in the registry and its dialog would keep
+        # popping until the 10s subprocess-gone backstop. Flush those ASKs NOW
+        # (resolve DENY + push an SSE close frame) so the dialog closes the
+        # instant Stop takes effect. Scheduled as a detached shielded task so
+        # the teardown is not delayed by the fast SSE publish and the flush
+        # (which NEVER raises) still completes even as this generator finishes
+        # closing. ``proc.pid is None`` (spawn failed) → nothing to flush.
+        if ask_flush_for_pid is not None and proc.pid is not None:
+            try:
+                asyncio.ensure_future(
+                    asyncio.shield(ask_flush_for_pid(proc.pid))
+                )
+            except Exception:  # noqa: BLE001 — flush scheduling must not break teardown
+                _log.debug(
+                    "tools.exec_stream.ask_flush_schedule_failed",
+                    exc_info=True,
+                )
         for task in (stdout_task, stderr_task):
             if task is not None and not task.done():
                 task.cancel()

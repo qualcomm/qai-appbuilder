@@ -38,6 +38,7 @@ Public surface (curated)
 
 from __future__ import annotations
 
+from .arch import current_arch
 from .bundled_path import (
     bundled_bin_dirs,
     prepend_bundled_paths,
@@ -59,6 +60,7 @@ from .spawn_flags import no_window_creationflags
 from .tree_kill import best_effort_tree_kill, terminate_process_tree
 
 __all__ = [
+    "current_arch",
     "ProcessExecutionRequest",
     "ProcessExitStatus",
     "ProcessFrame",

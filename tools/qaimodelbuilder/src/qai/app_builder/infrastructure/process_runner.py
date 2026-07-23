@@ -477,7 +477,29 @@ class ProcessBackedAppRunner:
     async def _stream(
         self, run: Run, model: AppModelDefinition
     ) -> AsyncIterator[RunFrame]:
-        request = self._resolver(run, model)
+        try:
+            request = self._resolver(run, model)
+        except Exception as exc:  # noqa: BLE001
+            # Phase D: surface UnsupportedBackendError (and any future
+            # resolver errors) as a structured error frame rather than
+            # letting the exception propagate and crash the run with an
+            # opaque traceback.
+            from qai.app_builder.infrastructure.command_resolver.registry import (
+                UnsupportedBackendError,
+            )
+            if isinstance(exc, UnsupportedBackendError):
+                yield RunFrame(
+                    sequence=0,
+                    payload={
+                        "event": "error",
+                        "code": "UNSUPPORTED_BACKEND",
+                        "message": str(exc),
+                        "model_id": str(model.id),
+                        "run_id": str(run.id),
+                    },
+                )
+                return
+            raise
         if request is None:
             # No command bound — emit a single informational frame and
             # let the caller's RunAppUseCase complete the run cleanly.

@@ -4,19 +4,17 @@
 
 For direct `qai_appbuilder` inference (WoS ARM64), use the scripts in `scripts/inference/`.
 
-> ## 🚨 Rules for using `onnxruntime` in this skill (MANDATORY)
+> ## 🚨 `onnxruntime` Rules (MANDATORY)
 >
 > | Scenario | Allowed EP | Note |
 > |------|-----------|------|
-> | Accuracy comparison (ONNX vs QNN) | `CPUExecutionProvider` ✅ | The only allowed use of `onnxruntime` in this skill |
-> | Performance benchmark comparison | `CPUExecutionProvider` ✅ | Same as above |
-> | NPU inference (this skill's models) | `qai_appbuilder` / `QNNContext` ✅ | The standard inference tool of this skill |
-> | Running a model on the NPU | using `onnxruntime` ❌ | **Forbidden** — NPU inference always goes through `qai_appbuilder` / `QNNContext` |
+> | Accuracy/perf comparison (ONNX vs QNN) | `CPUExecutionProvider` ✅ | Only allowed use of `onnxruntime` |
+> | NPU inference | `qai_appbuilder` / `QNNContext` ✅ | Standard inference tool |
+> | Running model on NPU via onnxruntime | ❌ **Forbidden** | Always use `qai_appbuilder` / `QNNContext` |
 >
-> **General principle**: in this skill, `onnxruntime` is used ONLY for **CPU baseline comparison** (accuracy validation, numerical comparison before/after a patch).
-> NPU inference MUST go through `qai_appbuilder` / `QNNContext`; never use `onnxruntime` to run a model on the NPU.
+> **Principle**: `onnxruntime` = CPU baseline comparison ONLY. NPU inference = `qai_appbuilder` / `QNNContext`.
 >
-> 🚨 **The ONNX CPU baseline MUST run in a separate process from the QNN inference.** `qai_runner.py` uses `onnxwrapper.py` to do a **process-level** hot-swap of `sys.modules["onnxruntime"]` — any `import onnxruntime` later in the same process gets the QNN wrapper, which would route the baseline into QNN too (loading the `.onnx` as a QNN model → failure). Standard approach: **Process A** (x64, or not via qai_runner) runs the ONNX CPU baseline and saves `.npy`; **Process B** (ARM64 + qai_runner) runs QNN and saves `.npy`; **Process C** reads both sets of `.npy` and computes the cosine.
+> 🚨 **ONNX CPU baseline MUST run in a separate process from QNN inference.** `qai_runner.py` hot-swaps `sys.modules["onnxruntime"]` — any later `import onnxruntime` in the same process gets the QNN wrapper. Standard: **Process A** runs ONNX CPU → saves `.npy`; **Process B** (ARM64 + qai_runner) runs QNN → saves `.npy`; **Process C** computes cosine.
 
 ## ⚠️ CRITICAL: Model File Format and Context Binary
 
@@ -42,30 +40,17 @@ For direct `qai_appbuilder` inference (WoS ARM64), use the scripts in `scripts/i
 
 ### Format selection (`.bin` vs `.dlc`) — when which
 
-**Decision priority** (apply top-down):
+**Decision priority** (top-down):
+1. **User specifies format** → honor it.
+2. **Same machine (ARM64 host == target)** → `.bin` (best p50).
+3. **Cross-target** (different HTP versions/devices) → `.dlc` (portable; target compiles on first load).
+4. **Linux / x64** → not yet finalized; ask user.
 
-1. **User explicitly asks for `.bin` or `.dlc`** → honor the user's choice. No further decision needed.
-2. **Same machine: ARM64 Windows host == inference target** (the common case for local validation / development) → **prefer `.bin`** for best p50 latency.
-3. **Cross-target deployment** (build on one machine, ship to another / many devices, possibly with different HTP versions) → **prefer `.dlc`**:
-   - `.bin` is **locked to one HTP version + host arch** — a `.bin` built against `htp_v73` will not load on a `htp_v81` device, and vice-versa
-   - `.dlc` is **portable**: the target device compiles `.dlc` → context-on-device at first load (one-time cold-start cost), then caches it
-   - For ship-once / run-many-devices scenarios, `.dlc` is the correct artifact
-4. **Linux / x64 Windows targets** (not yet supported by this skill, but on the roadmap) → format choice is **not yet finalized**. Until guidance is added, ask the user before assuming.
+> 💡 `.dlc` direct load = same numerical result as `.bin`, just slower first run (on-the-fly compilation).
 
-> 💡 **Quick validation / debugging**: `.dlc` direct load is also handy when you don't
-> want to wait for `.bin` generation — same numerical result, just slower first run.
+**Platform notes:** ARM Windows: both work. ARM Linux: `.so` directly, `.so.bin` optional. x86 Linux: CPU-only wrapper.
 
-**Platform notes:**
-- **ARM Windows (current focus)**: both `.bin` and `.dlc` work; pick per the decision above.
-- **ARM Linux**: `.so` works directly; `.so.bin` improves load time (optional).
-- **x86 Linux**: CPU-only, use x86 wrapper.
-
-**If context binary generation failed:**
-- **Windows**: → **Blocking Condition B8** — cannot generate `.bin`. Falling back to `.dll` is technically possible but not recommended; **using `.dlc` directly is usually the better fallback** (especially if cross-target portability is also desired).
-- **Linux**: → Can proceed with `.so` library directly
-- **Alternative**: Try SNPE flow (`.dlc`) if QNN HTP is incompatible
-
-Linux: if generation fails, skip and run inference with `.so`. Record skip reason.
+**If `.bin` generation failed:** Windows → B8 blocker; use `.dlc` as fallback. Linux → proceed with `.so`.
 
 > **⚠️ IMPORTANT** (qai_runner.py wrapper): Pass the `.onnx` file path to `InferenceSession`. The wrapper searches for a matching QAIRT model file **in the same directory**. See [Model File Resolution](#model-file-resolution) below.
 
@@ -108,23 +93,11 @@ else:                            # NHWC: [N, H, W, C]
 
 ## WoS ARM64 Direct Inference (QAIRT 2.45)
 
-> ⚠️ **Python environment**: Use ARM64 Python 3.13 (`python_arm64_venv` from `${APP_ROOT}\data\config\qairt_env.json`).
-> Read the actual path from `${APP_ROOT}\data\config\qairt_env.json` — do not hardcode.
-> If this fails → run `Setup.bat` from the QAIModelBuilder project directory.
+> ⚠️ **Python**: ARM64 Python 3.13 (`python_arm64_venv` from `${APP_ROOT}\data\config\qairt_env.json`). If fails → run `Setup.bat`.
 
-For Windows on Snapdragon ARM64, use `qai_appbuilder` directly.
-The `scripts/inference/` directory contains **reference templates** for common model types.
+`scripts/inference/` contains reference templates. **These are starting points — customize for your model's I/O shapes/dtypes/pre-post processing.**
 
-> ⚠️ **IMPORTANT: Inference scripts are templates, not final scripts.**
-> The scripts in `scripts/inference/` are starting-point templates. They may not work
-> out-of-the-box for every model. When a user's model has different I/O shapes, data types,
-> or pre/post-processing requirements, **you must customize the script** for that specific model.
->
-> **Decision flow:**
-> 1. Check model I/O with `infer_generic.py --model model.bin` (prints shapes and dtypes)
-> 2. Select the closest template: classify / detect / segment / sr / generic
-> 3. If the template doesn't match the model's output format → adapt the post-processing
-> 4. Test with random input first, then with real data
+> **Template workflow:** 1) `infer_generic.py --model model.bin` → inspect I/O 2) Select closest template 3) Adapt post-processing 4) Test with random then real data.
 
 ### Inference Script Templates
 
@@ -136,9 +109,7 @@ The `scripts/inference/` directory contains **reference templates** for common m
 | `inference/infer_segment.py` | Semantic segmentation | Output channels, color palette |
 | `inference/infer_sr.py` | Super-resolution | Input/output size, scale factor |
 
-### How to Customize an Inference Script
-
-When the template doesn't match the model:
+### Customizing Templates
 
 ```bash
 # Step 1: Always start with infer_generic.py to inspect model I/O
@@ -203,15 +174,11 @@ print(f"Output shapes: {model.getOutputShapes()}")
 print(f"Input  dtypes: {model.getInputDataType()}")
 print(f"Output dtypes: {model.getOutputDataType()}")
 
-# Step 5: Prepare input — format depends on --preserve_io flag used during conversion
-# ALWAYS check model input shape first: model.getInputShapes()
-#   [1, C, H, W] → NCHW (qai_convert_fp.py uses --preserve_io by default) → pass NCHW directly
-#   [1, H, W, C] → NHWC (no --preserve_io) → transpose from NCHW
-input_shape = model.getInputShapes()[0]
-if input_shape[1] == channels:  # NCHW: channel is dim 1
-    inp = image_nchw.astype(np.float32)                          # no transpose needed
-else:                            # NHWC: channel is last dim
-    inp = np.transpose(image_nchw, (0, 2, 3, 1)).astype(np.float32)
+# Step 5: Prepare input — NCHW vs NHWC depends on the --preserve_io flag.
+#   Authoritative rule + decision code → this file § "Input Format — NCHW vs NHWC"
+#   (above). In short: check model.getInputShapes(), pass NCHW directly if
+#   channel is dim 1, else np.transpose(x, (0,2,3,1)).
+inp = image_nchw.astype(np.float32)  # adjust per the NCHW/NHWC section above
 
 # Step 6: Run inference with BURST performance mode
 # CRITICAL: SetPerfProfileGlobal MUST be called AFTER at least one QNNContext
@@ -256,28 +223,13 @@ del model
 
 ### 🚀 HTP BURST performance lifecycle (session / streaming workloads)
 
-`PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)` raises the HTP to its
-highest clock. For **streaming / session-based** inference (voice input / ASR,
-TTS, or any task that runs many inferences over one logical session), the
-lifecycle matters as much as the call itself:
+`PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)` raises HTP to highest clock.
 
-1. **BURST only works AFTER ≥1 model (QNNContext) is loaded** in the process.
-   Calling it with no context loaded silently does nothing (`setPowerConfig
-   error 0x32c9`).
-2. **Set BURST ONCE when the session/task begins, hold it for the WHOLE
-   session, release ONCE when the task finishes.** Never Set/Rel per inference
-   call — doing so makes the HTP ramp its clock up/down every call, giving slow
-   and jittery latency (the first NPU call of each run pays the ramp-up cost).
-   - **Voice input / streaming ASR**: raise HTP to BURST the moment recording
-     starts (model begins working), hold it across **all** interim + final
-     inference chunks, release only after the **entire** voice session ends
-     (voice output finished). Not per audio chunk.
-   - **TTS / multi-model pipeline**: Set once before the first NPU stage, hold
-     across all cooperating models (BERT/encoder/flow/decoder…), release once
-     after the last stage.
-   - **One-shot single inference**: Set → infer → Release is fine (one call).
-3. **Release BEFORE destroying contexts** (`RelPerfProfileGlobal()` while models
-   are still loaded), else `You should set perf profile before you release it!`.
+> 🔗 Multi-model rules: see § Multi-model same-process below. Symptoms: `troubleshooting/inference-troubleshooting/SKILL.md`.
+
+1. **BURST requires ≥1 loaded QNNContext** — calling before any model loaded silently does nothing (`setPowerConfig error 0x32c9`).
+2. **Set ONCE per session, hold for all inferences, release ONCE at end.** Never per-call (causes HTP clock ramp jitter). Streaming ASR: set at recording start → hold across all chunks → release after voice session ends. TTS pipeline: set once before first NPU stage → release after last.
+3. **Release BEFORE `del model`** — else `You should set perf profile before you release it!`.
 
 ```python
 # Session-scoped BURST (correct for streaming/ASR/TTS)
@@ -320,6 +272,55 @@ QNNContext(
     input_data_type: str = DataType.FLOAT,   # DataType.FLOAT or DataType.NATIVE
     output_data_type: str = DataType.FLOAT   # DataType.FLOAT or DataType.NATIVE
 )
+```
+
+> 🔗 The `input_data_type` / `output_data_type` above are the **runtime** dtypes
+> (`DataType.FLOAT` vs `DataType.NATIVE`). The **packaged** output type declared
+> for deployment (`output.type` in `inference_manifest.json`) is defined in
+> `references/pack_export.md`.
+
+### Multi-model same-process (sticky worker) rules
+
+When multiple QNN models run **in one process** (e.g. a sticky worker with whisper-base + zipformer-zh + melotts-zh), these rules MUST hold to avoid `Incorrect amount of Input Buffers` / graph-binding errors. (Diagnostic symptom view → `troubleshooting/inference-troubleshooting/SKILL.md`; this is the authoritative reference with full code.)
+
+**Rule 1 — `model_name` must be globally unique.** `QNNContext(model_name, model_path, …)` uses `model_name` as an internal key; two contexts sharing a name make the QNN runtime **reuse the first-loaded graph** for the second. Symptom: `Incorrect amount of Input Buffers for graphIdx: 0. Expected: N, received: M` where N belongs to a *different* model. Use `{model_id}_{filename_stem}`:
+```python
+# BAD — name collision across models (second reuses the first's graph!)
+QNNContext("encoder", "models/whisper-base/encoder.bin", ...)
+QNNContext("encoder", "models/zipformer-zh/encoder.bin", ...)
+# GOOD — globally unique names
+QNNContext("whisper-base_encoder", "models/whisper-base/encoder.bin", ...)
+QNNContext("zipformer-zh_encoder", "models/zipformer-zh/encoder.bin", ...)
+```
+
+**Rule 2 — `QNNConfig.Config()` exactly once per process.** It sets global runtime state (backend lib path, log level, profiling); repeated calls may corrupt loaded graph state. Guard with a module-level flag. Canonical: `QNNConfig.Config(Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)`.
+
+**Rule 3 — `input_data_type` / `output_data_type` is per-context.** Each context can pick its dtype independently:
+```python
+# NATIVE — pass tensors in the model's native dtype (int32, float16, …).
+# Better performance, no type-conversion overhead. You MUST feed the exact native dtype;
+# the model will NOT auto-convert in NATIVE mode.
+QNNContext("whisper-base_encoder", path, input_data_type=DataType.NATIVE, output_data_type=DataType.NATIVE)
+# FLOAT (default) — all tensors converted to float32 internally.
+QNNContext("melotts_bert", path, input_data_type=DataType.FLOAT, output_data_type=DataType.FLOAT)
+```
+`DataType.NATIVE` = `"native"`, `DataType.FLOAT` = `"float"` (strings). In NATIVE mode ensure inputs match the model's expected dtype (e.g. `np.float16` mel spectrograms, `np.int32` token indices).
+
+**Rule 4 — canonical multi-model setup** (from `whisper_base_en.py`):
+```python
+from qai_appbuilder import QNNContext, QNNConfig, Runtime, LogLevel, ProfilingLevel, DataType
+
+# 1. Config once
+QNNConfig.Config(Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
+
+# 2. Load contexts with unique names + NATIVE for best performance
+encoder = QNNContext("whisper_encoder", encoder_path,
+                     input_data_type=DataType.NATIVE, output_data_type=DataType.NATIVE)
+decoder = QNNContext("whisper_decoder", decoder_path,
+                     input_data_type=DataType.NATIVE, output_data_type=DataType.NATIVE)
+
+# 3. Inference — pass a list of numpy arrays matching the native dtypes
+output = encoder.Inference([mel_input])   # mel_input: np.float16
 ```
 
 ### Using Inference Templates (`scripts/inference/`)
@@ -380,7 +381,7 @@ QNNContext(
 
 `infer_sr.py` and `infer_classify.py` both auto-detect NCHW/NHWC I/O.
 
-> ⚠️ **For detection, prefer using the `infer_detect.py` template directly — do not hand-write NMS.** Hand-written NMS very easily hits `IndexError` when a class has only 1 candidate box left (still doing `cls_boxes[0]` after the candidate array has been emptied); if you must write your own, add `if len(cls_boxes)==0: break` before extracting results.
+> ⚠️ **Detection: use `infer_detect.py` directly — avoid hand-written NMS** (common `IndexError` when `cls_boxes` empties mid-loop; guard with `if len(cls_boxes)==0: break`).
 
 ---
 
@@ -433,12 +434,7 @@ python qai_runner.py path/to/inference_script.py
 
 ### Target Device Inference over SSH
 
-Inference can also be run directly on the target device over SSH. Before launching inference, you **must** source the QAIRT setup script on the target device.
-
-This setup script path is **user-provided** (it is environment-specific) and typically performs tasks such as:
-- Exporting required environment variables (e.g., `PATH`, `LD_LIBRARY_PATH`, `PYTHONPATH`, `QNN_SDK_ROOT`, etc.)
-- Activating a Python virtual environment (if your workflow uses one)
-- Initializing QAIRT/QNN runtime environment
+Source the user-provided QAIRT setup script on target before inference (sets `PATH`, `LD_LIBRARY_PATH`, `PYTHONPATH`, `QNN_SDK_ROOT`, activates venv):
 
 Example:
 
@@ -454,11 +450,11 @@ If HTP initialization fails on Linux ARM, you need to set `QAIRT_SDK_ROOT` /
 `QNN_SDK_ROOT` / `PRODUCT_SOC` / `DSP_ARCH` / `ADSP_LIBRARY_PATH` /
 `LD_LIBRARY_PATH` in the shell before running. **Full setup, error symptoms
 (`Stub lib id mismatch`, `Failed to create transport ... error: 1008`),
-diagnostic checklist, and SSH-one-liner pattern → [troubleshooting.md § HTP transport/version mismatch (Linux ARM)](troubleshooting.md).**
+diagnostic checklist, and SSH-one-liner pattern → [`troubleshooting/inference-troubleshooting/SKILL.md` § Linux ARM: HTP transport / version mismatch](../troubleshooting/inference-troubleshooting/SKILL.md).**
 
 ### x86 Host Inference (ONNX Wrapper Variant)
 
-For x86 inference, use the x86-specific wrapper source file and place it in your project as `onnxwrapper.py`:
+Copy x86 wrapper as `onnxwrapper.py` into your project:
 
 ```bash
 # From skill scripts folder to project folder:
@@ -467,12 +463,7 @@ cp ${APP_ROOT}/factory/chat_features/model-builder/scripts/qai_runner.py ./
 python qai_runner.py path/to/inference_script.py
 ```
 
-This keeps your inference script unchanged (`import onnxruntime as ort`) while routing execution through the x86-compatible QAIRT wrapper.
-
-Note for x86 wrapper behavior:
-- `onnxwrapper_x86.py` is CPU-only by design for stable host execution.
-- Runtime selection like `QAI_QNN_RUNTIME=HTP` is ignored by this wrapper.
-- Recommended usage remains simply:
+x86 wrapper is CPU-only; `QAI_QNN_RUNTIME=HTP` is ignored. Standard usage:
 ```bash
 python qai_runner.py path/to/inference_script.py
 ```
@@ -556,8 +547,7 @@ outputs:
 - [ ] Preprocessing matches training/export assumptions
 - [ ] **Input format verified**: check `model.getInputShapes()` — NCHW if `--preserve_io` used (default with `qai_convert_fp.py`), NHWC otherwise. Wrong format → completely wrong results.
 - [ ] Output tensor mapping is correct (check autogen YAML if wrong)
-- [ ] Cosine similarity vs ONNX CPU baseline ≥ 0.99 (FP) / ≥ 0.95 (INT8)
-  > ⚠️ **If below threshold: do NOT auto-apply fixes.** First run a zero-cost diagnosis (e.g. is calibration data a single image / its augmentations?), then STOP and report to the user — present the accuracy-fix options **with a one-line principle each** and ask which to try: (1) improve calibration diversity (real multi-class data) — *quantizer estimates activation ranges from calibration data*; (2) `run_pipeline.py --cle --per_channel` (built into Flow A) — *CLE equalizes per-channel weight ranges across layers*; (3) raise to W8A16 (`--precision w8a16`) — *16-bit activations keep more dynamic range*; (4) keep FP16 or try `--precision bf16` — *no quant loss; bf16 gives wider dynamic range than FP16*; (5) accept current precision if Top-K is correct. Same policy as SKILL.md B6 / inference-validation step 6.
+- [ ] Cosine vs ONNX CPU baseline ≥ 0.99 (FP) / ≥ 0.95 (INT8). If below: do NOT auto-fix. Run zero-cost diagnosis first (single-image calibration?), then STOP and ask user which fix to try: (1) calibration diversity, (2) CLE+per_channel, (3) W8A16, (4) FP16/BF16, (5) accept. See `references/quantization-sensitivity.md`.
 - [ ] Latency / FPS collected on target runtime
 
 ---
@@ -567,3 +557,4 @@ outputs:
 - `scripts/inference/infer_generic.py` — Generic inference script for WoS ARM64 (qai_appbuilder)(auto-detects NCHW/NHWC I/O)
 - `references/context_binary.md` — Context binary generation guide
 - `references/win_qairt_setup.md` — WoS ARM64 environment setup
+- `references/pack_export.md` — deployment packaging: `inference_manifest.json` / `output.type`

@@ -182,8 +182,8 @@ class FeatureSkillProvider:
         dir_name = self._map.get(tool_mode)
         if not dir_name:
             return None
-        # dir_name may be an absolute path (for skill packs that live outside
-        # _features_dir, e.g. factory/app_builder).  Fall back to the
+        # dir_name may be an absolute path (for skill packs whose SKILL.md
+        # is not relative to _features_dir).  Fall back to the standard
         # relative-to-_features_dir lookup for all other entries.
         _dir = Path(dir_name)
         skill_path = _dir / "SKILL.md" if _dir.is_absolute() else self._features_dir / dir_name / "SKILL.md"
