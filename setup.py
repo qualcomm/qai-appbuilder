@@ -146,11 +146,13 @@ def _is_wos_device() -> bool:
     Returns True if running on a WOS (ARM64) device, False on a real x86_64 PC.
     """
     # Explicit user request via QAI_TOOLCHAINS overrides host detection.
-    # This is the path CI uses: cross-build ARM64EC / ARM64 wheels from an
-    # x86_64 hosted runner. Without this hook, _detect_arch() would pick
-    # "x86_64" on the x64 build machine and request a non-existent
-    # x86_64-windows-msvc SDK toolchain.
+    # QAI_TOOLCHAINS=x86_64-windows-msvc means the user explicitly wants an
+    # x86_64 build, even on a WOS device - treat it as non-WOS so that
+    # _detect_arch() returns "x86_64" and CMake uses -A x64.
     qai_toolchains = os.environ.get("QAI_TOOLCHAINS", "").lower()
+    if qai_toolchains == "x86_64-windows-msvc":
+        return False
+    # arm64x / aarch64 toolchains explicitly request a WOS/ARM build.
     if qai_toolchains in ("arm64x-windows-msvc", "aarch64-windows-msvc"):
         return True
 
@@ -351,16 +353,20 @@ def _get_dsp_arches(toolchain: Optional[str] = None, hexagonarch: Optional[str] 
     if _is_windows():
         return ["73", "81"]
     else:
-        return ["68", "73", "75", "79"]
+        return ["68", "73", "75", "79", "81"]
 
 def _compute_version_with_dsp_suffix(default_base: str) -> str:
     """
-    VERSION = <SDK X.Y.Z from QNN_SDK_ROOT> + '.' + <hexagon arch>
-    Priority:
-      1) If env/arg provides QAI_HEXAGONARCH / --hexagonarch, use it.
-      2) Otherwise, use _get_dsp_arch() default.
+    VERSION = <SDK X.Y.Z from QNN_SDK_ROOT>
+    When QAI_TOOLCHAINS=x86_64-windows-msvc, append '.1' suffix to distinguish
+    the x86_64 Windows wheel from the ARM64EC wheel built from the same SDK.
+    e.g. QNN_SDK_ROOT=.../2.48.40.260702/ + QAI_TOOLCHAINS=x86_64-windows-msvc
+         => VERSION = '2.48.40.1'
     """
     base = _get_base_version_from_qnn_sdk_root(default_base)
+    qai_toolchains = os.environ.get("QAI_TOOLCHAINS", "").lower()
+    if qai_toolchains == "x86_64-windows-msvc":
+        return f"{base}.1"
     return f"{base}"
 
 def _patch_setup_py_version(version3: str) -> None:
