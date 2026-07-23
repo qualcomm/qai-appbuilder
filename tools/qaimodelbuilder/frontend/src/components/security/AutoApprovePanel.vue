@@ -151,6 +151,9 @@ function removeWritePattern(idx: number): void {
         <h3 class="sec-section-title">
           {{ t("security.autoApprove.whitelist") }}
         </h3>
+        <p class="sec-field-desc">
+          {{ t("security.autoApprove.commandListsNote") }}
+        </p>
         <label class="sec-field-label">
           <input
             v-model="commandWhitelist.enabled"
@@ -265,6 +268,9 @@ function removeWritePattern(idx: number): void {
         <h3 class="sec-section-title">
           {{ t("security.autoApprove.readPatterns") }}
         </h3>
+        <p class="sec-field-desc">
+          {{ t("security.autoApprove.pathPatternsNote") }}
+        </p>
         <label class="sec-field-label">
           <input
             v-model="readPatterns.enabled"

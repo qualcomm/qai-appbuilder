@@ -16,7 +16,7 @@
 
 const toolSafety = {
   title: "工具防护",
-  subtitle: "为大模型工具调用提供两层防护。",
+  subtitle: "为大模型工具调用提供三层防护。",
   // ── 第 1 层 — 纯软件工具防护（热生效）──
   layer1Title: "工具防护（始终可用）",
   layer1Desc:
@@ -40,6 +40,23 @@ const toolSafety = {
   fileGuardDesc: "对工具的读 / 写 / 执行权限进行强制校验，并同时守护子进程发起的文件访问。",
   allowExecTool: "允许 exec 工具",
   allowExecToolDesc: "关闭后，exec 工具会在任何 broker 校验前被直接拒绝。",
+  // ── 第 3 层 — 命令执行（热生效）──
+  layer3Title: "命令执行",
+  layer3Desc:
+    "对模型运行的命令进行把关。这里是控制命令执行的唯一入口——执行配置（exec-profile）broker 加依赖安装审批 broker。改动立即生效。",
+  commandPolicyEnabled: "启用命令策略",
+  commandPolicyDesc:
+    "执行配置 broker：将每条命令与内置执行配置比对，对危险命令弹窗确认。与下方的自定义危险命令模式配合工作。",
+  depApprovalEnabled: "启用依赖安装审批",
+  depApprovalDesc:
+    "拦截带有不可信来源参数的 pip / uv 安装命令，运行前要求批准。",
+  depDenyArgs: "被拦截的安装参数",
+  depDenyArgsDesc:
+    "依赖 broker 拦截并要求审批的安装参数（例如 -e、git+、--extra-index-url）。",
+  depDenyArgsPlaceholder: "--extra-index-url",
+  depTimeout: "审批超时（秒）",
+  depTimeoutDesc:
+    "待处理的安装请求等待用户的时长，超时后自动拒绝。",
   // ── 始终开启的安全底线（3c 开关树 §6.4）——不可关的基线防护 ──
   alwaysOn: {
     title: "始终开启的底线",

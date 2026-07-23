@@ -78,6 +78,10 @@ const security = {
       write: "写入文件",
     },
     patternPlaceholder: "Glob 模式，如 src*.py",
+    pathPatternsNote:
+      "这些 glob 模式用于自动批准读 / 写访问。若要拒绝或限制哪些路径可读 / 可写，请使用「允许清单」标签页（强制生效的路径策略在那里）。",
+    commandListsNote:
+      "这些前缀在审批层自动批准或拦截命令。真正强制生效的命令闸是执行配置 broker 与自定义危险命令模式（工具防护 → 命令执行）。",
     readPatterns: "读取路径模式",
     resetDefaults: "恢复默认",
     saved: "自动审批设置已保存",

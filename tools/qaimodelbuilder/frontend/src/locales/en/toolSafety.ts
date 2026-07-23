@@ -12,15 +12,16 @@
 // GBK/CP437 等非 UTF-8 编码，禁止双重编码损坏）。
 //
 // toolSafety — 工具防护 / Tool Safety 面板（2026-06 安全设置统一治理）。
-// 承载 /api/security/runtime-config 的两层安全开关：
-//   层 1 工具防护（tools.*，热生效）/ 层 2 策略守卫（FileGuard，需重启）。
-// （Layer 3 OS 隔离沙箱 / Windows AppContainer 已于 2026-07-01 与 Persistent ACL
-//  一起清理；运行时 DTO 上的 sandbox_enabled 字段保留但无 UI 入口。）
+// 承载 /api/security/runtime-config 的三层安全开关：
+//   层 1 工具防护（tools.*，热生效）/ 层 2 策略守卫（FileGuard）/
+//   层 3 命令执行（command_policy + dependency_approval，热生效）。
+// （原 OS 隔离沙箱层 / sandbox_enabled 字段已于 2026-07 删除——该闸为
+//  无 OS 隔离作用的 no-op。）
 // =============================================================================
 
 const toolSafety = {
   title: "Tool Safety",
-  subtitle: "Two layers of protection for LLM tool calls.",
+  subtitle: "Three layers of protection for LLM tool calls.",
   // ── Layer 1 — pure-software tool guard (hot-applies) ──
   layer1Title: "Tool Guard (always available)",
   layer1Desc:
@@ -45,6 +46,23 @@ const toolSafety = {
     "Enforces read / write / exec permissions for tools and also guards file access made by spawned subprocesses.",
   allowExecTool: "Allow exec tool",
   allowExecToolDesc: "When off, the exec tool is hard-denied before any broker check.",
+  // ── Layer 3 — command execution (hot-applies) ──
+  layer3Title: "Command Execution",
+  layer3Desc:
+    "Guards that gate the commands the model runs. These are the ONE place command execution is controlled — the exec-profile broker plus the dependency-install approval broker. Changes take effect immediately.",
+  commandPolicyEnabled: "Enable command policy",
+  commandPolicyDesc:
+    "Exec-profile broker: matches each command against the built-in execution profiles and asks for confirmation on dangerous commands. Works together with the custom dangerous-command patterns below.",
+  depApprovalEnabled: "Enable dependency-install approval",
+  depApprovalDesc:
+    "Intercepts pip / uv install commands carrying untrusted-source arguments and requires approval before they run.",
+  depDenyArgs: "Blocked install arguments",
+  depDenyArgsDesc:
+    "Install arguments the dependency broker intercepts for approval (e.g. -e, git+, --extra-index-url).",
+  depDenyArgsPlaceholder: "--extra-index-url",
+  depTimeout: "Approval timeout (seconds)",
+  depTimeoutDesc:
+    "How long a pending install request waits for the user before it is auto-denied.",
   // ── Always-on security floors (3c switch-tree §6.4) — immutable baseline ──
   alwaysOn: {
     title: "Always-on baseline",
@@ -59,8 +77,9 @@ const toolSafety = {
     mainProcessHookLabel: "Main-process audit hook",
     mainProcessHookDesc: "The main process and its children are always audited; the audit sentinels never read the master switch.",
   },
-  // ── Layer 3 removed 2026-07-01 (Windows ACL / sandbox cleanup) ──
-  // ── Custom dangerous-command patterns (P-10) — union-only override ──
+  // ── Command execution cont'd: custom dangerous-command patterns (P-10) ──
+  // Rendered directly under the Layer 3 command-execution toggles so all
+  // command gating lives in one place (union-only override on the floor).
   dangerousCommands: {
     title: "Custom dangerous-command patterns",
     desc: "Add extra regular expressions that block destructive commands, on top of the always-on built-in floor. Custom patterns can only ADD coverage — they never remove the built-in protections.",

@@ -354,7 +354,7 @@ const index = {
   proPoolNetworkError: "Cannot reach the remote Agent. Please check your network connection and try again.",
   proPinnedMachineOffline: "This tab is bound to {url}, which is temporarily unreachable. Please try again later, or open a new tab to use a different machine.",
   proAccessDeniedTitle: "You don't have access to Model Builder Pro",
-  proAccessDeniedBody: "Join the ModelBuilderProUsers distribution list to get access.",
+  proAccessDeniedBody: "Request access to Model Builder Pro to get started.",
   proAccessApply: "Apply to join",
   proAccessRefresh: "Refresh access",
   proAccessRefreshing: "Checking…",

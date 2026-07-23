@@ -35,11 +35,6 @@ const projectAccess = {
   pathHint: "项目目录的绝对路径（例如 C:\\Users\\you\\MyProject）",
   pathLabel: "项目目录路径",
   pathPlaceholder: "C:\\Users\\you\\MyProject",
-  resetSkipDirs: "恢复默认",
-  skipDirPlaceholder: "添加目录名...",
-  skipDirsEmpty: "未配置任何目录",
-  skipDirsHint: "glob/grep 工具自动跳过的目录名（如 venv、node_modules），可提高性能并减少无关结果。",
-  skipDirsLabel: "跳过的目录",
   status: {
     disabled: "项目访问已关闭",
     enabled: "项目访问已启用",

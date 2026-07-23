@@ -47,9 +47,10 @@ was removed 2026-07-01 and these entries are FileGuard's path
 authorization store. Pure rename, no behaviour change. The
 ``process_runner`` field (a plain
 :class:`qai.platform.process.subprocess_runner.SubprocessProcessRunner`)
-plus the still-inert ``Settings.security.sandbox_enabled`` /
-``sandbox_launcher_path`` / ``SandboxSettings`` remain a separate,
-not-yet-renamed batch.
+remains. The former ``Settings.security.sandbox_enabled`` field + its
+exec-branch gate were removed 2026-07 (a no-op that performed no OS
+isolation); ``sandbox_launcher_path`` / ``SandboxSettings`` remain a
+separate, not-yet-renamed batch.
 
 Two fields appeared on :class:`SecurityServices` in PR-040 and
 remain:

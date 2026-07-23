@@ -35,11 +35,6 @@ const projectAccess = {
   pathHint: "Absolute path to your project directory (e.g. C:\\Users\\you\\MyProject)",
   pathLabel: "Project directory path",
   pathPlaceholder: "C:\\Users\\you\\MyProject",
-  resetSkipDirs: "Reset to defaults",
-  skipDirPlaceholder: "Add directory name...",
-  skipDirsEmpty: "No directories configured",
-  skipDirsHint: "Directory names that glob/grep tools will automatically skip (e.g. venv, node_modules). This improves performance and reduces noise.",
-  skipDirsLabel: "Directories to skip",
   status: {
     disabled: "Project access disabled",
     enabled: "Project access enabled",

@@ -1302,16 +1302,13 @@ def _wire_streaming_exec_into_chat(
     before the final consolidated frame.  Every other tool is untouched
     (the bridge returns ``None`` from ``invoke_streaming``).
 
-    When ``container`` is supplied and ``security.sandbox_enabled`` is True,
-    the security context's plain ``process_runner``
-    (:class:`SubprocessProcessRunner` post Phase 3 cleanup; previously the
-    ``SandboxedProcessRunner`` wrapper) is injected into the bridge so the
-    streamed ``exec`` is routed through the same runner the one-shot
-    ai_coding path uses (``_ai_coding_di.py``).  When the gate is off /
-    security not booted the runner stays ``None`` and the bare
-    ``stream_exec`` path is used.  Both branches now execute commands
-    directly on the host; the gate is retained for branch-selection
-    parity, not OS isolation.
+    Post the ``sandbox_enabled`` removal the streamed ``exec`` always runs
+    bare (``process_runner=None``) — matching the one-shot ai_coding path.
+    The former gate selected an equivalent runner-routed branch that
+    performed NO OS isolation (only shell vs no-shell + audit attribution);
+    it was removed as a redundant, reboot-costing no-op. Sub-process file
+    writes are guarded by the native guard64.dll hook, not by any
+    exec-branch selector.
     """
     uc = getattr(chat, "stream_chat_use_case", None)
     if uc is None:
@@ -1322,7 +1319,11 @@ def _wire_streaming_exec_into_chat(
     # Idempotent: never double-wrap.
     if isinstance(inner, _StreamingToolInvocationBridge):
         return
-    process_runner = _resolve_sandbox_process_runner(container)
+    # Post the sandbox_enabled removal the streaming ``exec`` always runs bare
+    # (no runner routing) — the former gate selected an equivalent branch that
+    # performed NO OS isolation. Sub-process writes are guarded by the native
+    # guard64.dll hook, not by an exec-branch selector.
+    process_runner = None
     # Build the session workspace resolver so the streaming exec + the
     # delegated file tools default their CWD / relative-path base to the
     # active session's workspace (→ global configured workspace), not the
@@ -1422,36 +1423,3 @@ def _wire_streaming_exec_into_chat(
         _inner_exec = getattr(agent_handler, "_tool_executor", None)
         if not isinstance(_inner_exec, _StreamingToolInvocationBridge):
             agent_handler._tool_executor = bridge
-
-
-def _resolve_sandbox_process_runner(container: "Container | None") -> object | None:
-    """Return the security context's ``process_runner`` when ``sandbox_enabled``.
-
-    Thin reader off :class:`SecurityServices`. Phase 3 cleanup (2026-07-01)
-    deleted the AppContainer/LPAC launcher wrap; ``container.security.process_runner``
-    is now the plain :class:`SubprocessProcessRunner`. The
-    ``security.sandbox_enabled`` gate is retained (§3.1 field-name lock) but
-    is now inert with respect to OS isolation — flipping it only chooses
-    between the chat streaming branches (``_exec_stream_via_runner`` vs
-    ``_exec_stream_bare``). The ONLY observable difference is shell vs
-    no-shell invocation + audit attribution; both branches execute an
-    un-isolated subprocess (no AppContainer/LPAC). Setting
-    ``sandbox_enabled=True`` therefore costs an EXIT-75 reboot for a
-    no-op OS-isolation gain — sub-process file writes are guarded by the
-    native guard64.dll hook (``native_file_guard_enabled``), not this flag.
-    Returns ``None`` (= legacy bare ``stream_exec`` path) when no container
-    is provided or ``sandbox_enabled`` is False; otherwise returns the
-    security context's :class:`ProcessRunnerPort`.
-    """
-    if container is None:
-        return None
-    settings = getattr(container, "settings", None)
-    security_settings = getattr(settings, "security", None) if settings else None
-    if not (
-        security_settings
-        and getattr(security_settings, "sandbox_enabled", False)
-    ):
-        return None
-    return getattr(
-        getattr(container, "security", None), "process_runner", None
-    )

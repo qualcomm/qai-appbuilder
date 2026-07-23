@@ -68,7 +68,6 @@ import CloudModelOnboarding from "@/components/chat/CloudModelOnboarding.vue";
 import CloudModelApiKeyOnboarding from "@/components/chat/CloudModelApiKeyOnboarding.vue";
 import SetApiKeyDialog from "@/components/chat/SetApiKeyDialog.vue";
 import AppBuilderEmptyState from "@/components/chat/AppBuilderEmptyState.vue";
-import ProEmptyState from "@/components/chat/ProEmptyState.vue";
 import CodeEmptyState from "@/components/chat/CodeEmptyState.vue";
 import ModelBuilderEmptyState from "@/components/chat/ModelBuilderEmptyState.vue";
 import ModelHubEmptyState from "@/components/chat/ModelHubEmptyState.vue";
@@ -81,6 +80,13 @@ import { IS_INTERNAL } from "@/edition";
 // physically absent; source file removable without a broken static import).
 const GomasterEmptyState = IS_INTERNAL
   ? defineAsyncComponent(() => import("@/components/gomaster/GomasterEmptyState.vue"))
+  : null;
+// Internal-only MB Pro empty-state. Same edition-gating as GomasterEmptyState:
+// lazily referenced ONLY on the internal edition so the external open-source
+// build tree-shakes it away (module physically absent; source file removable
+// without a broken static import). External renders nothing for `pro` mode.
+const ProEmptyState = IS_INTERNAL
+  ? defineAsyncComponent(() => import("@/components/chat/ProEmptyState.vue"))
   : null;
 import { useCloudModelStatus } from "@/composables/useCloudModelStatus";
 import { useServiceStore } from "@/stores/service";
@@ -2065,7 +2071,7 @@ onBeforeUnmount(() => {
         v-if="isAppBuilderMode"
         @fill-prompt="emit('fill-prompt', $event)"
       />
-      <ProEmptyState v-else-if="isProMode" />
+      <component :is="ProEmptyState" v-else-if="ProEmptyState && isProMode" />
       <CodeEmptyState v-else-if="isCodeMode" />
       <ModelBuilderEmptyState
         v-else-if="isModelBuildMode"

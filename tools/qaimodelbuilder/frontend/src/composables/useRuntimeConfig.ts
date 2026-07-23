@@ -11,7 +11,8 @@
  *
  *   GET /api/security/runtime-config
  *     → { file_broker_enabled, ssl_verify, project_skip_dirs, global_proxy,
- *         file_guard_enabled, allow_exec_tool, sandbox_enabled }
+ *         file_guard_enabled, native_file_guard_enabled, allow_exec_tool,
+ *         command_policy_enabled, dependency_approval_* , tool_output caps }
  *   PUT /api/security/runtime-config (partial; every field optional)
  *     → { ...effective view, needs_reboot, persisted }
  *
@@ -20,11 +21,14 @@
  * field drives real backend behaviour — it replaces the six dead
  * `/api/settings/*` KV sections that had no consumer.
  *
- * Reboot (decision 3B): changing a build-time switch (`file_guard_enabled` /
- * `allow_exec_tool` / `sandbox_enabled` / `file_broker_enabled`) returns
- * `needs_reboot=true`; callers show the custom reboot-confirm dialog and, on
- * confirm, drive `useReboot`. The hot-applicable tools switches (`ssl_verify`
- * / `project_skip_dirs` / `global_proxy`) take effect immediately.
+ * Reboot (decision 3B): changing a build-time switch (`allow_exec_tool` /
+ * `file_broker_enabled` / tool_output caps) returns `needs_reboot=true`;
+ * callers show the custom reboot-confirm dialog and, on confirm, drive
+ * `useReboot`. The unified FileGuard switch (`file_guard_enabled` /
+ * `native_file_guard_enabled`), the command-execution switches
+ * (`command_policy_enabled` / `dependency_approval_*`) and the hot tools
+ * switches (`ssl_verify` / `project_skip_dirs` / `global_proxy`) all take
+ * effect immediately.
  */
 import { ref, type Ref } from "vue";
 
@@ -43,10 +47,13 @@ export interface RuntimeConfig {
   // together with `file_guard_enabled` by the single unified FileGuard switch.
   native_file_guard_enabled: boolean;
   allow_exec_tool: boolean;
-  // Layer 3 — OS isolation (SecuritySettings)
-  sandbox_enabled: boolean;
-  // dependency_approval — controlled dependency-install approval (hot-applied)
+  // Layer 3 — command execution (hot-applied). command_policy_enabled is the
+  // exec-profile broker master switch; dependency_approval_* gate pip/uv
+  // install commands.
+  command_policy_enabled: boolean;
   dependency_approval_enabled: boolean;
+  dependency_approval_deny_args: string[];
+  dependency_approval_timeout_s: number;
   // Tool output limits — caps on the result volume each tool hands back to the
   // model (build-time → reboot, same nature as file_broker_max_entries).
   read_max_lines: number;
@@ -72,8 +79,10 @@ const DEFAULTS: RuntimeConfig = {
   file_guard_enabled: false,
   native_file_guard_enabled: false,
   allow_exec_tool: true,
-  sandbox_enabled: false,
+  command_policy_enabled: true,
   dependency_approval_enabled: false,
+  dependency_approval_deny_args: [],
+  dependency_approval_timeout_s: 120,
   read_max_lines: 2000,
   read_max_bytes: 102400,
   read_max_line_length: 2000,
@@ -100,8 +109,12 @@ export function useRuntimeConfig() {
       file_guard_enabled: Boolean(res.file_guard_enabled),
       native_file_guard_enabled: Boolean(res.native_file_guard_enabled),
       allow_exec_tool: Boolean(res.allow_exec_tool),
-      sandbox_enabled: Boolean(res.sandbox_enabled),
+      command_policy_enabled: res.command_policy_enabled ?? true,
       dependency_approval_enabled: Boolean(res.dependency_approval_enabled),
+      dependency_approval_deny_args: Array.isArray(res.dependency_approval_deny_args)
+        ? res.dependency_approval_deny_args.map(String)
+        : [],
+      dependency_approval_timeout_s: Number(res.dependency_approval_timeout_s ?? 120),
       read_max_lines: Number(res.read_max_lines ?? 2000),
       read_max_bytes: Number(res.read_max_bytes ?? 102400),
       read_max_line_length: Number(res.read_max_line_length ?? 2000),

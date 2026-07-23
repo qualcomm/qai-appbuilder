@@ -78,6 +78,10 @@ const security = {
       write: "Write files",
     },
     patternPlaceholder: "Glob pattern, e.g. src*.py",
+    pathPatternsNote:
+      "These glob patterns auto-approve read/write access. To DENY or restrict which paths are readable/writable, use the Allow Lists tab (that is where the enforced path policy lives).",
+    commandListsNote:
+      "These prefixes auto-approve or block commands at the approval layer. The exec-profile broker and custom dangerous-command patterns (Tool Safety → Command Execution) are the enforced command gate.",
     readPatterns: "Read Allow Patterns",
     resetDefaults: "Reset to Defaults",
     saved: "Auto-approve settings saved",

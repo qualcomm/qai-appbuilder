@@ -440,10 +440,12 @@ REM IMPORTANT: vendor\whl\ files are precious - three wheels
 REM (aiohttp 3.13.5 / cryptography 45.0.5 / MarkupSafe 2.1.5) have been
 REM revoked from PyPI for cp313 ARM64 and the local copies are the only
 REM source.  Do NOT delete files from vendor\whl\.  See vendor\whl\README.md.
-REM x64 has no vendored wheels: skip Step 4a wholesale and let uv resolve every
-REM dependency from PyPI in Step 4b2 (qai-appbuilder + aiohttp/cryptography/
-REM MarkupSafe all ship x64 cp313 wheels). No _constraints_tmp.txt is written,
-REM so the 4b2/4b-extra branches below take their PyPI-only (no --find-links) path.
+REM x64 has no vendored wheels: skip Step 4a wholesale and let uv resolve most
+REM dependencies from PyPI in Step 4b2 (aiohttp/cryptography/MarkupSafe all ship
+REM x64 cp313 wheels on PyPI). qai_appbuilder is NOT on PyPI -- it is downloaded
+REM from GitHub releases and installed separately after :skip_all_installs (see
+REM the :qai_appbuilder_x64 section). No _constraints_tmp.txt is written, so the
+REM 4b2/4b-extra branches below take their PyPI-only (no --find-links) path.
 if /i "%HOST_ARCH%"=="x64" goto :skip_vendor_whls
 if not exist "%WHL_DIR%" goto :skip_vendor_whls
 echo [INFO] Installing pre-built ARM64 wheels from %WHL_DIR%...
@@ -618,6 +620,14 @@ REM The qai_appbuilder package is tightly coupled to the QAIRT SDK version and
 REM must always match the pinned wheel in vendor\whl\. Because the general dep
 REM skip-check above (import qai) cannot distinguish versions, we unconditionally
 REM force-reinstall here so a version bump is never missed on re-run.
+REM
+REM ARM64: vendored wheel lives in vendor\whl\ (pre-downloaded, offline-safe).
+REM x64: NOT vendored (x64 hosts are typically online); download from GitHub
+REM      release on first install, cache in data\downloads\, install from cache.
+REM      Skip download if already cached AND the correct version is installed.
+set "QAI_APPBUILDER_VERSION=2.48.40"
+if /i "%HOST_ARCH%"=="x64" goto :qai_appbuilder_x64
+REM --- ARM64 path: install from vendored wheel ---
 if exist "%WHL_QAI_APPBUILDER%" (
     echo [INFO] Force-installing %WHL_QAI_APPBUILDER% ...
     uv pip install --reinstall --no-deps "%WHL_QAI_APPBUILDER%"
@@ -629,6 +639,46 @@ if exist "%WHL_QAI_APPBUILDER%" (
 ) else (
     echo [WARN] qai_appbuilder wheel not found: %WHL_QAI_APPBUILDER%
 )
+goto :qai_appbuilder_done
+
+:qai_appbuilder_x64
+REM --- x64 path: download from GitHub releases if not installed at correct version ---
+set "QAI_AB_X64_WHL_NAME=qai_appbuilder-%QAI_APPBUILDER_VERSION%.1-cp313-cp313-win_amd64.whl"
+set "QAI_AB_X64_WHL_CACHED=%DL_DIR%\%QAI_AB_X64_WHL_NAME%"
+set "QAI_AB_X64_URL=https://github.com/qualcomm/qai-appbuilder/releases/download/v%QAI_APPBUILDER_VERSION%/%QAI_AB_X64_WHL_NAME%"
+REM Check if qai_appbuilder is already installed at the correct version.
+"%VENV_DIR%\Scripts\python.exe" -c "import qai_appbuilder; v=getattr(qai_appbuilder,'__version__',''); exit(0 if v.startswith('%QAI_APPBUILDER_VERSION%') else 1)" >nul 2>&1
+if not errorlevel 1 (
+    echo [SKIP] qai_appbuilder %QAI_APPBUILDER_VERSION% already installed ^(x64^).
+    goto :qai_appbuilder_done
+)
+REM Not installed or wrong version — download if not cached, then install.
+if exist "%QAI_AB_X64_WHL_CACHED%" goto :qai_appbuilder_x64_install
+echo [INFO] Downloading qai_appbuilder x64 wheel from GitHub...
+echo [INFO] URL: %QAI_AB_X64_URL%
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup\download_with_aria2c.ps1" ^
+    -Url "%QAI_AB_X64_URL%" ^
+    -OutFile "%QAI_AB_X64_WHL_CACHED%" ^
+    -Aria2cExe "data\bin\aria2c\aria2c.exe" ^
+    -MinSize 500000 ^
+    -MaxRetries 3 ^
+    -StallTimeoutSec 60 ^
+    -AttemptTimeoutSec 300
+if not exist "%QAI_AB_X64_WHL_CACHED%" (
+    echo [WARN] Failed to download qai_appbuilder x64 wheel. App Builder inference
+    echo [WARN] will not work until it is installed. Re-run Setup.bat or install manually:
+    echo [WARN]     uv pip install "%QAI_AB_X64_URL%"
+    goto :qai_appbuilder_done
+)
+:qai_appbuilder_x64_install
+echo [INFO] Installing qai_appbuilder %QAI_APPBUILDER_VERSION% ^(x64^)...
+uv pip install --reinstall --no-deps "%QAI_AB_X64_WHL_CACHED%"
+if errorlevel 1 (
+    echo [WARN] Failed to install qai_appbuilder x64 wheel.
+) else (
+    echo [OK]   qai_appbuilder %QAI_APPBUILDER_VERSION% installed ^(x64, from GitHub^).
+)
+:qai_appbuilder_done
 
 REM --- Step 4f: Initialize the runtime data/ tree (install pipeline) ---
 REM

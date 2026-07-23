@@ -43,6 +43,7 @@ DLL resolution (:func:`resolve_dll_path`):
 
 from __future__ import annotations
 
+import os
 import platform
 import secrets
 from pathlib import Path
@@ -75,12 +76,26 @@ FilterCallable = Callable[[FilterEventV2], bool]
 def current_guard_arch() -> str:
     """Return ``"arm64"`` / ``"x64"`` for the current *process* arch.
 
-    Uses ``platform.machine()`` of the running interpreter (NOT the OS)
-    so an x64 python.exe running under Windows-on-ARM x64 emulation
-    correctly resolves the x64 DLL — the DLL must match the process it
-    is injected into, not the host CPU. Any non-ARM machine maps to
-    ``x64`` (the only other artefact we ship).
+    The guard DLL is loaded into (and injected from) *this* Python
+    process, so the DLL bitness MUST match the process arch, not the
+    host CPU. On Windows-on-ARM an x64 ``python.exe`` runs under x64
+    emulation: the process is x64 even though the CPU is ARM64, and it
+    can only load an x64 DLL (an arm64 DLL fails with ``WinError 193``).
+
+    ``platform.machine()`` is the wrong source here: under WoA x64
+    emulation it reports the *OS* CPU (``ARM64``), which would pick the
+    arm64 DLL for an x64 process and make the guard silently fail to
+    load. Windows exposes the true *process* arch via
+    ``PROCESSOR_ARCHITECTURE`` (``AMD64`` for an emulated x64 process,
+    ``ARM64`` for a native arm64 process), so we key off that. Only
+    ``ARM64`` maps to ``arm64``; everything else (``AMD64`` / ``x86`` /
+    unset) maps to ``x64`` — the only other artefact we ship.
     """
+    proc = (os.environ.get("PROCESSOR_ARCHITECTURE") or "").lower()
+    if proc:
+        return "arm64" if proc == "arm64" else "x64"
+    # Fallback (PROCESSOR_ARCHITECTURE unset — not expected on Windows):
+    # platform.machine() at least distinguishes a native arm64 process.
     machine = (platform.machine() or "").lower()
     if machine in ("arm64", "aarch64"):
         return "arm64"

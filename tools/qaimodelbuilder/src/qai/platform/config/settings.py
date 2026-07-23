@@ -309,25 +309,6 @@ class SecuritySettings(BaseModel):
             "because they are not browser-driven (S-3 / align D2)."
         ),
     )
-    sandbox_enabled: bool = Field(
-        default=False,
-        description=(
-            "Runtime exec-branch selector; formerly the OS-isolation "
-            "sandbox master switch. The OS-isolation layer was removed "
-            "on 2026-07-01 (see docs/85-tasks/windows-acl-sandbox-cleanup-"
-            "2026-07-01.md); the field name is retained per v2.7 §3.1 "
-            "(field-name lock) and its value is **still consulted at DI "
-            "build time** to select between two equivalent runner-routed "
-            "exec branches (a change requires reboot). Both branches now "
-            "execute directly through :class:`SubprocessProcessRunner`, "
-            "so the flag no longer drives OS isolation — the actual IO "
-            "guardrails come from the Protected Paths / FileBroker "
-            "software layers + the permission-approval workflow. Not "
-            "marked ``deprecated=True`` because the field is still an "
-            "active configuration input; only its OS-isolation semantics "
-            "are gone. Defaults OFF (user decision 2026-06-09)."
-        ),
-    )
     smart_approval_enabled: bool = Field(
         default=False,
         description=(

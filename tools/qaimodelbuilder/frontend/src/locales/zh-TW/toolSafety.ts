@@ -16,7 +16,7 @@
 
 const toolSafety = {
   title: "工具防護",
-  subtitle: "為大模型工具呼叫提供兩層防護。",
+  subtitle: "為大模型工具呼叫提供三層防護。",
   // ── 第 1 層 — 純軟體工具防護（熱生效）──
   layer1Title: "工具防護（始終可用）",
   layer1Desc:
@@ -40,6 +40,23 @@ const toolSafety = {
   fileGuardDesc: "對工具的讀 / 寫 / 執行權限進行強制校驗，並同時守護子行程發起的檔案存取。",
   allowExecTool: "允許 exec 工具",
   allowExecToolDesc: "關閉後，exec 工具會在任何 broker 校驗前被直接拒絕。",
+  // ── 第 3 層 — 命令執行（熱生效）──
+  layer3Title: "命令執行",
+  layer3Desc:
+    "對模型執行的命令進行把關。這裡是控制命令執行的唯一入口——執行設定（exec-profile）broker 加相依安裝審批 broker。改動立即生效。",
+  commandPolicyEnabled: "啟用命令策略",
+  commandPolicyDesc:
+    "執行設定 broker：將每條命令與內建執行設定比對，對危險命令彈窗確認。與下方的自訂危險命令模式配合運作。",
+  depApprovalEnabled: "啟用相依安裝審批",
+  depApprovalDesc:
+    "攔截帶有不可信來源參數的 pip / uv 安裝命令，執行前要求批准。",
+  depDenyArgs: "被攔截的安裝參數",
+  depDenyArgsDesc:
+    "相依 broker 攔截並要求審批的安裝參數（例如 -e、git+、--extra-index-url）。",
+  depDenyArgsPlaceholder: "--extra-index-url",
+  depTimeout: "審批逾時（秒）",
+  depTimeoutDesc:
+    "待處理的安裝請求等待使用者的時長，逾時後自動拒絕。",
   // ── 始終開啟的安全底線（3c 開關樹 §6.4）——不可關的基線防護 ──
   alwaysOn: {
     title: "始終開啟的底線",
