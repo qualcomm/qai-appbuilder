@@ -288,11 +288,12 @@ class ModelManager::QNNImpl
             embedding_type_ = QNNEmbeddingType::QWEN3_VL;
             model_type_ = ModelType::Text;
             embedding_file_set.emplace(ModelType{ModelType::Vision}, EmbeddingFileSet{
-                    model_path + "/veg.serialized.bin",
+                    model_path + "/vision_encoder.bin",
                     {
-                            model_path + "/raw/position_ids_cos.raw",
-                            model_path + "/raw/position_ids_sin.raw",
-                            model_path + "/raw/full_attention_mask.raw"
+                            model_path + "/sample_inputs/position_ids_cos.raw",
+                            model_path + "/sample_inputs/position_ids_sin.raw",
+                            model_path + "/sample_inputs/window_attention_mask.raw",
+                            model_path + "/sample_inputs/full_attention_mask.raw"
                     }
             });
         }

@@ -25,7 +25,7 @@ public:
 
         kPaddedList_ = "<|vision_start|><|image_pad|><|vision_end|>";
 
-        kHeight = kWidth = 768;
+        kHeight = kWidth = 512;
         cols_ = 2560;
 
         token_to_embed_callback_fn_ = &TokenToEmbedCallback<float, float>;
