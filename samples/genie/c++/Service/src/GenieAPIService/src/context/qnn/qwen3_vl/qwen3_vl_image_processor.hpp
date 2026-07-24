@@ -81,19 +81,19 @@ namespace qwen3_vl
 
     private:
         // --- 工具函数（与 qwen25_image_processor.hpp 相同的数学公式，仅对齐因子不同） ---
-        static inline int round_by_factor(int number, int factor)
+        static inline int round_by_factor(double number, int factor)
         {
-            return static_cast<int>(std::llround(static_cast<double>(number) / factor) * factor);
+            return static_cast<int>(std::llround(number / factor) * factor);
         }
 
-        static inline int ceil_by_factor(int number, int factor)
+        static inline int ceil_by_factor(double number, int factor)
         {
-            return static_cast<int>(std::ceil(static_cast<double>(number) / factor) * factor);
+            return static_cast<int>(std::ceil(number / factor) * factor);
         }
 
-        static inline int floor_by_factor(int number, int factor)
+        static inline int floor_by_factor(double number, int factor)
         {
-            return static_cast<int>(std::floor(static_cast<double>(number) / factor) * factor);
+            return static_cast<int>(std::floor(number / factor) * factor);
         }
 
         static std::pair<int, int> smart_resize_impl(
@@ -113,24 +113,24 @@ namespace qwen3_vl
             if (area > max_pixels)
             {
                 double beta = std::sqrt((static_cast<double>(height) * width) / max_pixels);
-                h_bar = floor_by_factor(static_cast<int>(height / beta), factor);
-                w_bar = floor_by_factor(static_cast<int>(width / beta), factor);
+                h_bar = floor_by_factor(height / beta, factor);
+                w_bar = floor_by_factor(width / beta, factor);
             }
             else
                 if (area < min_pixels)
                 {
                     double beta =
                             std::sqrt(static_cast<double>(min_pixels) / (static_cast<double>(height) * width));
-                    h_bar = ceil_by_factor(static_cast<int>(height * beta), factor);
-                    w_bar = ceil_by_factor(static_cast<int>(width * beta), factor);
+                    h_bar = ceil_by_factor(height * beta, factor);
+                    w_bar = ceil_by_factor(width * beta, factor);
                 }
             return {h_bar, w_bar};
         }
 
         static inline std::pair<int, int> smart_resize(int height, int width, int factor)
         {
-            const int min_pixels = 4 * factor * factor;
-            const int max_pixels = 16384 * factor * factor;
+            const int min_pixels = 65536;
+            const int max_pixels = 16777216;
             return smart_resize_impl(height, width, factor, min_pixels, max_pixels);
         }
 

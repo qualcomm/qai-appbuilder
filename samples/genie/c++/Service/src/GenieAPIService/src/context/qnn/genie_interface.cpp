@@ -265,6 +265,51 @@ IEmbedding &IEmbedding::BuildInferredBuffer(const QNNEmbedding::InferResource *i
     return *this;
 }
 
+IEmbedding &IEmbedding::BuildInferredBuffer(const QNNEmbedding::InferResource *infer_resource,
+                                            std::vector<std::vector<uint8_t *>> &input_buffers,
+                                            std::vector<std::vector<uint8_t>> &inferred_buffers,
+                                            std::vector<std::vector<uint8_t>> &extra_outputs)
+{
+    static std::string perfProfile = "burst";
+    auto app_builder = infer_resource->app_builder_;
+    std::vector<uint8_t *> outputBuffers;
+    std::vector<size_t> outputSize;
+
+    inferred_buffers.resize(input_buffers.size());
+    extra_outputs.clear();
+    for (auto i = 0; i < input_buffers.size(); ++i)
+    {
+        if (!app_builder->ModelInference(infer_resource->tag_,
+                                         input_buffers[i],
+                                         outputBuffers,
+                                         outputSize,
+                                         perfProfile))
+        {
+            throw std::runtime_error("call model inference failed");
+        }
+        std::string output_sizes_str;
+        for (auto sz : outputSize)
+        {
+            output_sizes_str += std::to_string(sz) + " ";
+        }
+        My_Log("[Qwen3VL DIAG] vision encoder returned " + std::to_string(outputBuffers.size())
+               + " output buffer(s), sizes: " + output_sizes_str, My_Log::Level::kWarning);
+
+        inferred_buffers[i].assign(outputBuffers.at(0), outputBuffers.at(0) + outputSize.at(0));
+        for (size_t k = 1; k < outputBuffers.size(); ++k)
+        {
+            extra_outputs.emplace_back(outputBuffers[k], outputBuffers[k] + outputSize[k]);
+        }
+        for (auto *buf : outputBuffers)
+        {
+            free(buf);
+        }
+        outputSize.clear();
+        outputBuffers.clear();
+    }
+    return *this;
+}
+
 std::string QInterfaceImpl::IEmbedding::BuildPrompt(const std::string &system,
                                                     const std::string &user,
                                                     const std::string &padded_prompt)
