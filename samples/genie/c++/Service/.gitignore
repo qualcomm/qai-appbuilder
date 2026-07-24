@@ -1,6 +1,5 @@
 ai-engine-direct-helper/
 *build/
-.toolchain/
 GenieService_v*
 .idea
 .junie/
