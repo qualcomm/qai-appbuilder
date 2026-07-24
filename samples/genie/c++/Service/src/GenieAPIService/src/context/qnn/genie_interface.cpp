@@ -198,6 +198,13 @@ Genie_Status_t QInterfaceImpl::IEmbedding::GenieDialogQueryImpl()
                                          token_to_embed_callback_fn_,
                                          GenieCallBack,
                                          this);
+    if (context_->model_config_.i_model_config_.get_qnn_embedding().embedding_type_ == QNNEmbeddingType::QWEN3_VL)
+    {
+        My_Log("[Qwen3VL DIAG] GenieDialog_embeddingQuery returned rs=" + std::to_string(int(rs))
+               + " input_len_=" + std::to_string(input_len_)
+               + " stream_answer_len=" + std::to_string(context_->m_stream_answer.size()),
+               My_Log::Level::kWarning);
+    }
     return rs;
 }
 

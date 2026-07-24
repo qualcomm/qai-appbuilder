@@ -12,6 +12,7 @@
 #include "qwen_3_vl.h"
 #include "qwen3_vl_image_processor.hpp"
 #include "../../torch_helper/masked_scatter.h"
+#include <log.h>
 
 IVisionEmbedding &QInterface::Qwen3VL::BuildImgPixel()
 {
@@ -44,6 +45,13 @@ IVisionEmbedding &QInterface::Qwen3VL::MergeEmbedding()
         embedded_bin_ = std::move(embedded_raw_fbuf);
         input_data_ = reinterpret_cast<uint8_t*>(embedded_bin_.data());
         input_len_ = embedded_bin_.size() * sizeof(float);
+        My_Log("[Qwen3VL DIAG] text-only embedding built: token_count=" + std::to_string(token_count)
+               + " cols_=" + std::to_string(cols_)
+               + " embedded_bin_.size()=" + std::to_string(embedded_bin_.size())
+               + " input_len_=" + std::to_string(input_len_)
+               + " sample[0..3]=" + std::to_string(embedded_bin_[0]) + "," + std::to_string(embedded_bin_[1])
+               + "," + std::to_string(embedded_bin_[2]) + "," + std::to_string(embedded_bin_[3]),
+               My_Log::Level::kWarning);
         return *this;
     }
 

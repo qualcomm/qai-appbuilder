@@ -13,3 +13,6 @@ QAIModelBuilder
 *.MD
 *.md
 tools/
+*webui/
+!examples/WebUI/
+!examples/WebUI/**
