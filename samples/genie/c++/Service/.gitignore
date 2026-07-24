@@ -12,3 +12,4 @@ __pycache__
 QAIModelBuilder
 *.MD
 *.md
+tools/

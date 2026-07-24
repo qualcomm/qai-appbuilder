@@ -24,6 +24,7 @@ void IEmbedding::TokenToEmbedCallback<float, float>(int32_t token,
 #include "phi4mm/phi4mm.h"
 #include "qwen2_5/qwen_2_5.h"
 #include "qwen2_5_omini/qwen_2_5_omini.h"
+#include "qwen3_vl/qwen_3_vl.h"
 
 IEmbedding::IEmbedding(GenieContext *context) :
         QInterface(context),
@@ -78,6 +79,8 @@ IEmbedding *IEmbedding::CreateInterface(GenieContext *context)
             return new Qwen2_5(context);
         case QNNEmbeddingType::QWEN2_5_OMINI:
             return new Qwen2_5OMINI(context);
+        case QNNEmbeddingType::QWEN3_VL:
+            return new Qwen3VL(context);
     }
     return nullptr;
 }

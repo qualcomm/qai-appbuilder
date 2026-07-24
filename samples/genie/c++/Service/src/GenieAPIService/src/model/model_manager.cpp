@@ -281,6 +281,23 @@ class ModelManager::QNNImpl
         }
     };
 
+    struct Qwen3VLVerifier : public EmbeddingVerifier
+    {
+        explicit Qwen3VLVerifier(const std::string &model_path)
+        {
+            embedding_type_ = QNNEmbeddingType::QWEN3_VL;
+            model_type_ = ModelType::Text;
+            embedding_file_set.emplace(ModelType{ModelType::Vision}, EmbeddingFileSet{
+                    model_path + "/veg.serialized.bin",
+                    {
+                            model_path + "/raw/position_ids_cos.raw",
+                            model_path + "/raw/position_ids_sin.raw",
+                            model_path + "/raw/full_attention_mask.raw"
+                    }
+            });
+        }
+    };
+
 public:
     static QNNEmbedding TryCreate(const std::string &model_path, const std::string &raw_path)
     {
@@ -294,6 +311,7 @@ public:
                 {{QNNEmbeddingType::PHI4MM},        [model_path]() { return PHI4Verifier(model_path).CreateIfVerified(); }},
                 {{QNNEmbeddingType::QWEN2_5},       [model_path]() { return Qwen2_5Verifier(model_path).CreateIfVerified(); }},
                 {{QNNEmbeddingType::QWEN2_5_OMINI}, [model_path]() { return Qwen2_5_OMINI_Verifier(model_path).CreateIfVerified(); }},
+                {{QNNEmbeddingType::QWEN3_VL},      [model_path]() { return Qwen3VLVerifier(model_path).CreateIfVerified(); }},
         };
 
         QNNEmbedding embedding;

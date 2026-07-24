@@ -71,6 +71,8 @@ struct GenieContext::QInterfaceImpl
 
         class Qwen2_5OMINI;
 
+        class Qwen3VL;
+
     protected:
         GenieContext *context_;
         uint8_t *input_data_{};
