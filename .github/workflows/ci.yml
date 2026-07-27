@@ -192,14 +192,15 @@ jobs:
       # toolchain. CMake's VS-instance discovery has been flaky on the
       # windows-latest -> windows-2025 transition; running vcvarsall up
       # front and exporting its env via GITHUB_ENV makes the build
-      # robust to that. ARM64EC binaries link against the ARM64 toolset
-      # so amd64_arm64 is the correct vcvars arch.
+      # robust to that. This job builds a NATIVE x64 wheel (QAI_TOOLCHAINS
+      # =x86_64-windows-msvc, see the Build step), so amd64 is the correct
+      # vcvars arch (x64 host -> x64 target, no cross-compilation).
       #
       # Inlined instead of using ilammy/msvc-dev-cmd@v1 because the
       # qualcomm/qai-appbuilder enterprise GitHub Actions allowlist
       # rejects third-party actions not in its policy. vcvarsall.bat
       # comes with VS itself on the windows-2022 hosted runner.
-      - name: Setup MSVC (amd64_arm64)
+      - name: Setup MSVC (amd64)
         shell: pwsh
         run: |
           $vsRoot = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise"
@@ -216,7 +217,7 @@ jobs:
           }
           # Diff env before/after vcvarsall so we know which keys to export.
           $before = cmd /c "set"
-          $after  = cmd /c "`"$vcvars`" amd64_arm64 && set"
+          $after  = cmd /c "`"$vcvars`" amd64 && set"
           $beforeMap = @{}
           foreach ($line in $before) {
             if ($line -match '^([^=]+)=(.*)$') { $beforeMap[$matches[1]] = $matches[2] }
@@ -229,7 +230,7 @@ jobs:
               }
             }
           }
-          Write-Host "MSVC env staged from $vcvars (amd64_arm64)"
+          Write-Host "MSVC env staged from $vcvars (amd64)"
 
       - name: Setup QNN SDK
         uses: ./.github/actions/setup-qnn-sdk
@@ -248,7 +249,7 @@ jobs:
       - name: Build wheel
         shell: pwsh
         env:
-          QAI_TOOLCHAINS: arm64x-windows-msvc
+          QAI_TOOLCHAINS: x86_64-windows-msvc
           QAI_HEXAGONARCH: '81'
         run: |
           python -m build -w --no-isolation
@@ -260,33 +261,26 @@ jobs:
           $whl = Get-ChildItem dist/qai_appbuilder-*.whl | Select-Object -First 1
           if (-not $whl) { Write-Error "No wheel produced in dist/"; exit 1 }
 
-          # Rename wheel so its name reflects the actual ABI (ARM64EC),
-          # not setuptools' generic win_arm64 tag. Without this the file
-          # name is byte-for-byte identical to the native windows-arm64
-          # wheel produced by the other matrix, which is confusing for
-          # end users and collides on upload.
-          # Naming follows PEP 425 conventions but uses a non-standard
-          # platform tag — pip will still install it on x64 Python that
-          # was launched from a WOS device.
-          $renamed = $whl.Name -replace 'win_arm64', 'win_arm64ec'
-          if ($renamed -ne $whl.Name) {
-            Rename-Item $whl.FullName $renamed
-            $whl = Get-ChildItem dist/qai_appbuilder-*-win_arm64ec.whl | Select-Object -First 1
-          }
+          # QAI_TOOLCHAINS=x86_64-windows-msvc makes setup.py build a native
+          # x64 wheel: setuptools tags it win_amd64 natively (filename AND
+          # internal .dist-info/WHEEL metadata agree), and setup.py suffixes
+          # the version with .1 (e.g. 2.48.40.1) so this x64 wheel coexists
+          # with the native windows-arm64 wheel (2.48.40) on the same index
+          # without a filename/version collision. No post-build rename needed.
 
           Write-Host "Built: $($whl.Name)"
           python -c "import sys, zipfile; [print(n) for n in zipfile.ZipFile(sys.argv[1]).namelist()]" $whl.FullName
           # Expose the wheel basename (no .whl suffix) so upload-artifact can
           # mirror the canonical wheel filename: e.g.
-          #   qai_appbuilder-2.47.0-cp312-cp312-win_arm64ec
+          #   qai_appbuilder-2.48.40.1-cp312-cp312-win_amd64
           $stem = [System.IO.Path]::GetFileNameWithoutExtension($whl.Name)
           "wheel-stem=$stem" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with:
-          # Wheel was renamed above to carry `win_arm64ec` instead of
-          # `win_arm64`, so the artifact name is naturally disjoint from
+          # setup.py builds a native x64 wheel tagged win_amd64 (version
+          # suffixed .1), so the artifact name is naturally disjoint from
           # the native windows-arm64 job's artifact.
           name: ${{ steps.list-x64.outputs.wheel-stem }}-qnn${{ matrix.qnn.version }}
           path: |
