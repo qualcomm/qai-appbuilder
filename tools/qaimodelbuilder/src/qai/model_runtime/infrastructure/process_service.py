@@ -64,6 +64,15 @@ _PROBE_TIMEOUT_S = 5.0
 # reclaiming an orphan-held port (V1 ``start_server.py:_kill_port`` parity).
 _MIN_KILLABLE_PID = 4
 
+# Maps ``detect_model_format()`` results to the (backend, device) pair
+# GenieAPIService expects in service_config.json. ``unknown`` maps to
+# ("", "") so callers can skip the sync rather than write an unsure value.
+_FORMAT_TO_BACKEND_DEVICE: dict[str, tuple[str, str]] = {
+    "qnn": ("qnn", "npu"),
+    "gguf": ("GGUF", "gpu"),
+    "mnn": ("mnn", "cpu"),
+}
+
 
 class ProcessBackedInferenceService:
     """Subprocess-backed implementation of :class:`InferenceServicePort`.
@@ -733,9 +742,11 @@ class ProcessBackedInferenceService:
         ``[E] Model directory does not exist`` errors when its ``models[*]``
         names drift away from the on-disk directory. This method updates
         the first enabled NPU slot (``backend in {"qnn", ""}``) plus
-        ``default_model``, mirroring V1 exactly. The file is written only
-        when something changed, with ``ensure_ascii=False`` + 4-space
-        indent (V1 wire format).
+        ``default_model``, mirroring V1 exactly. It also syncs ``backend``
+        (and ``device`` for GGUF) to the target model's real on-disk format
+        so a GGUF/MNN selection is no longer loaded under a stale ``qnn``
+        backend. The file is written only when something changed, with
+        ``ensure_ascii=False`` + 4-space indent (V1 wire format).
 
         All filesystem failures are caught and logged at WARNING per V1's
         non-fatal contract: the daemon may still start with a stale config
@@ -755,6 +766,9 @@ class ProcessBackedInferenceService:
             logger.warning("_sync_service_config_model read failed (non-fatal): %s", exc)
             return
 
+        fmt = self._detect_format(self._resolve_models_root() / model_name)
+        backend, device = _FORMAT_TO_BACKEND_DEVICE.get(fmt, ("", ""))
+
         models = cfg.get("models", []) if isinstance(cfg, dict) else []
         changed = False
         if isinstance(models, list):
@@ -765,6 +779,10 @@ class ProcessBackedInferenceService:
                     if m.get("name") != model_name or m.get("path") != model_name:
                         m["name"] = model_name
                         m["path"] = model_name
+                        changed = True
+                    if backend and (m.get("backend") != backend or m.get("device") != device):
+                        m["backend"] = backend
+                        m["device"] = device
                         changed = True
                     break
         if isinstance(cfg, dict) and cfg.get("default_model") != model_name:
