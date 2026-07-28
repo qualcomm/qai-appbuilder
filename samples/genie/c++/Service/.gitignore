@@ -10,3 +10,4 @@ todo/
 build-*
 __pycache__
 QAIModelBuilder
+examples/AiHubLauncher/*
