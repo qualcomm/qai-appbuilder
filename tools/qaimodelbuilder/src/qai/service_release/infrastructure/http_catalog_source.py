@@ -311,6 +311,19 @@ def _parse_version_list_text(text: str) -> list[ServiceVersion]:
     return out
 
 
+# Known-broken remote model_catalog.json download URLs, corrected here. The
+# catalog is maintained externally (GitHub Release assets); we can't edit its
+# content, so we patch it precisely at parse time.
+_DOWNLOAD_URL_CORRECTIONS: dict[str, str] = {
+    "https://www.aidevhome.com/data/adh2/models/suggested/qwen2.5vl3b-8480-2.42.zip":
+        "https://www.aidevhome.com/data/adh2/models/suggested/qwen2.5vl3b-8480.zip",
+}
+
+
+def _correct_download_url(url: str) -> str:
+    return _DOWNLOAD_URL_CORRECTIONS.get(url, url)
+
+
 def _parse_variants(raw_variants: Any) -> tuple[ModelVariant, ...]:
     if not isinstance(raw_variants, list):
         return ()
@@ -318,7 +331,7 @@ def _parse_variants(raw_variants: Any) -> tuple[ModelVariant, ...]:
     for raw in raw_variants:
         if not isinstance(raw, Mapping):
             continue
-        url = str(raw.get("download_url", "")).strip()
+        url = _correct_download_url(str(raw.get("download_url", "")).strip())
         if not url.lower().startswith("http"):
             continue
         out.append(
@@ -359,7 +372,7 @@ def _parse_model_catalog(data: Any) -> list[CatalogModel]:
             continue
         seen.add(model_id)
         variants = _parse_variants(raw.get("variants"))
-        download_url = str(raw.get("download_url", "")).strip()
+        download_url = _correct_download_url(str(raw.get("download_url", "")).strip())
         # V1: top-level url may be backfilled from variants[0] for the
         # legacy download API.
         if not download_url and variants:

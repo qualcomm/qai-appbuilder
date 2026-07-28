@@ -6319,7 +6319,9 @@ class QAIModelBuilderLocalModelTester:
         每次调用前都重新调用一次 neutralize_service_config_models()（见其文档字符串关于
         "必须在每一次 start 之前都重新调用"的实测说明），确保 Builder 的 V1 兼容 sync 逻辑
         不会在两次 start 之间悄悄往 service_config.json 里补回一条会误导后端判定的旧条目。"""
-        self.neutralize_service_config_models()
+        # 历史规避逻辑：绕开 _sync_service_config_model() 不同步 backend 字段的 bug，该 bug
+        # 已在 QAIModelBuilder 侧修复（同步写入正确的 backend/device），此处保留注释供追溯。
+        # self.neutralize_service_config_models()
         name = f"BUILDER-LOCAL: start_and_wait_ready model={model_name}"
         body = {"model_name": model_name, "port": port}
         r, latency = self._csrf_request("POST", "/api/service/start", body=body, timeout=30)
@@ -6879,8 +6881,10 @@ class QAIModelBuilderLocalModelTester:
         """按顺序串联：配置根目录 → 注入 → 发现 → 主模型加载与直连推理验证 → 切换 → 停止
         → 异常边界。前置失败不阻塞后续独立用例（例如异常边界必须始终跑，验证防护本身生效）。"""
         root_ok = self.configure_genie_root()
-        if root_ok:
-            self.neutralize_service_config_models()
+        # 历史规避逻辑：绕开 _sync_service_config_model() 不同步 backend 字段的 bug，该 bug
+        # 已在 QAIModelBuilder 侧修复（同步写入正确的 backend/device），此处保留注释供追溯。
+        # if root_ok:
+        #     self.neutralize_service_config_models()
         inject_ok = self.inject_local_models()
         found = self.discover_models_via_builder() if inject_ok else []
         found_names = {m.get("name") for m in found if isinstance(m, dict)}
@@ -7024,10 +7028,13 @@ def run_builder_local_model_integration(args, models, all_results, all_crash_eve
             detail=f"套件级未捕获异常: {e}", crashed=True))
     finally:
         if tester is not None:
-            try:
-                tester.restore_service_config()
-            except Exception:
-                pass
+            # 历史规避逻辑：绕开 _sync_service_config_model() 不同步 backend 字段的 bug，该 bug
+            # 已在 QAIModelBuilder 侧修复（同步写入正确的 backend/device），此处保留注释供追溯。
+            # try:
+            #     tester.restore_service_config()
+            # except Exception:
+            #     pass
+            pass
         try:
             builder.stop()
         except Exception:
