@@ -9,3 +9,4 @@ docs/
 todo/
 build-*
 __pycache__
+examples/AiHubLauncher/*
