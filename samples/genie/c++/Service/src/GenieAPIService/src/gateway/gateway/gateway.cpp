@@ -91,12 +91,14 @@ GenieRoutingGateway::GenieRoutingGateway(IModelConfig &model_config,
     // 测试时可通过 SetLocalAvailabilityChecker 注入返回 false 的函数，
     // 以验证 S2+本地不可用（HTTP 403）等场景。
     //
-    // 缓存本地可用性状态，避免每个请求在路由决策阶段持有全局 models_mutex_。
-    // 在当前架构下，模型在服务启动时加载，运行期间不变，因此缓存是安全的。
-    // 若未来支持运行时动态加载/卸载模型，需改用原子变量或其他无锁机制。
-    bool local_available_cached = model_config.IsLocalModelAvailable();
-    local_availability_checker_ = [local_available_cached]() -> bool {
-        return local_available_cached;  // 无锁读取缓存值
+    // 不能在构造时缓存这个值：单模型模式下若启动未带 -l（不预加载），或多模型模式下
+    // service_config.json 的模型仍在后台线程异步加载，GenieRoutingGateway 构造时
+    // IsLocalModelAvailable() 必然是 false；之后请求触发的动态加载（见
+    // ChatCompletions 里的 LoadModelByName）即使成功，缓存值也不会更新，导致路由
+    // 永远误判"本地不可用"并 fallback 到云端（实测复现为 503 all_routes_unavailable）。
+    // 每次实时调用，让路由决策反映模型的真实加载状态。
+    local_availability_checker_ = [this]() -> bool {
+        return model_config_.IsLocalModelAvailable();
     };
 
     My_Log{} << "[GenieRoutingGateway] Initialized, routing.enabled=" << routing_config.enabled

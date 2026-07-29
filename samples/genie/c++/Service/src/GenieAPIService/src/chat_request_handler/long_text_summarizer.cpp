@@ -450,7 +450,7 @@ std::string LongTextSummarizer::BuildMapPrompt(const std::string& chunk,
         // 最小推理 prompt 结构（无历史消息）：
         //   str_replace(system, "string", instruction + "/no_think")  ← 禁止思考
         //   + str_replace(user,   "string", task_str)
-        //   + start + FILL_THINK  ← 注入空 think 块，与主推理保持一致
+        //   + start  （不预填空 think 块：真机实测该预填内容会导致 qwen3 在极短文本下退化）
         const auto& j = instance_config_.get_prompt_template();
 
         if (j.is_object()
@@ -458,8 +458,9 @@ std::string LongTextSummarizer::BuildMapPrompt(const std::string& chunk,
                 && j.contains("user")   && j["user"].is_string()
                 && j.contains("start")  && j["start"].is_string())
         {
-            // 若为 thinking 模型，追加 /no_think 并注入空 think 块，避免模型进入思考模式
-            // 思考模式会大幅增加摘要推理耗时，且摘要任务不需要深度推理
+            // 若为 thinking 模型，追加 /no_think 避免模型进入思考模式
+            // 思考模式会大幅增加摘要推理耗时，且摘要任务不需要深度推理；
+            // 注意：不在 start 里预填空 think 块（真机实测确认该预填内容会导致 qwen3 在极短文本下退化）
             std::string system_instruction =
                 "You are a compression assistant. Your task is to summarize content accurately.";
             std::string start_str = j["start"].get<std::string>();
@@ -467,7 +468,6 @@ std::string LongTextSummarizer::BuildMapPrompt(const std::string& chunk,
             if (instance_config_.is_thinking_model())
             {
                 system_instruction += "/no_think";
-                start_str += "<think>\n\n</think>\n\n";
             }
 
             return str_replace(j["system"].get<std::string>(), "string", system_instruction)
@@ -525,7 +525,6 @@ std::string LongTextSummarizer::BuildReducePrompt(const std::string& combined_su
             if (instance_config_.is_thinking_model())
             {
                 system_instruction += "/no_think";
-                start_str += "<think>\n\n</think>\n\n";
             }
 
             return str_replace(j["system"].get<std::string>(), "string", system_instruction)

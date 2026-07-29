@@ -221,7 +221,7 @@ public:
     void ResolveServerSessionIds(const json &request, InspectionContext &ctx);
 
     // 设置本地可用性检测函数（用于测试注入或未来动态模型卸载场景）
-    // 默认实现：检查 model_config.get_genie_model_handle().lock() != nullptr
+    // 默认实现：实时调用 model_config_.IsLocalModelAvailable()
     // 测试时可通过注入返回 false 的函数，以验证 S2+本地不可用（HTTP 403）等场景：
     //   agent->SetLocalAvailabilityChecker([]{ return false; });
     void SetLocalAvailabilityChecker(std::function<bool()> checker);
