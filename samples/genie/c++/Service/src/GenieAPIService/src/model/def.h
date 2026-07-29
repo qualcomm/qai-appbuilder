@@ -157,6 +157,7 @@ struct QNNEmbeddingType : public BaseEnum
         PHI4MM,
         QWEN2_5,
         QWEN2_5_OMINI,
+        QWEN3_VL,
     };
 
     constexpr const char *to_string() const noexcept
@@ -169,6 +170,8 @@ struct QNNEmbeddingType : public BaseEnum
                 return "qwen2.5";
             case QWEN2_5_OMINI:
                 return "qwen2.5-omini";
+            case QWEN3_VL:
+                return "qwen3-vl";
             default:
                 return "none";
         }

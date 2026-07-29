@@ -11,3 +11,6 @@ build-*
 __pycache__
 QAIModelBuilder
 examples/AiHubLauncher/*
+*.MD
+*.md
+tools/
