@@ -68,7 +68,9 @@ inline std::string BuildLocalModelPrompt(
         return instance_config ? instance_config->get_prompt_template() : model_config->get_prompt_template();
     };
 
-    auto append_think_control = [&](std::string& system_text, std::string& start_prompt) {
+    // 注意：关闭 thinking 时不再预填空 think 块——真机实测确认该预填内容会导致
+    // qwen3 系列模型在极短用户提问下退化，/no_think 单独即可正确抑制思考。
+    auto append_think_control = [&](std::string& system_text) {
         if (!is_thinking()) {
             return;
         }
@@ -76,7 +78,6 @@ inline std::string BuildLocalModelPrompt(
             system_text += "/think";
         } else {
             system_text += "/no_think";
-            start_prompt += "<think>\n\n</think>\n\n";
         }
     };
 
@@ -105,8 +106,7 @@ inline std::string BuildLocalModelPrompt(
             knowledge_cutoff, current_date, reasoning_level, false);
 
         std::string effective_system_prompt = system_prompt;
-        std::string ignored_start_prompt;
-        append_think_control(effective_system_prompt, ignored_start_prompt);
+        append_think_control(effective_system_prompt);
 
         std::string developer_msg  = "<|start|>developer<|message|># Instructions\n\n";
         developer_msg += effective_system_prompt;
@@ -144,7 +144,7 @@ inline std::string BuildLocalModelPrompt(
 
         std::string effective_system_prompt = system_prompt;
         std::string start_prompt = j["start"].get<std::string>();
-        append_think_control(effective_system_prompt, start_prompt);
+        append_think_control(effective_system_prompt);
 
         std::string formatted_system = replace_placeholder(j["system"].get<std::string>(), effective_system_prompt);
         std::string formatted_user   = replace_placeholder(j["user"].get<std::string>(),   user_message);

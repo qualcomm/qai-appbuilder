@@ -55,6 +55,7 @@ SERVICE_SRC_FILES :=            ../src/GenieAPIService/src/chat_history/chat_his
                                     ../src/GenieAPIService/src/context/qnn/phi4mm/phi4mm.cpp \
                                     ../src/GenieAPIService/src/context/qnn/qwen2_5/qwen_2_5.cpp \
                                     ../src/GenieAPIService/src/context/qnn/qwen2_5_omini/qwen_2_5_omini.cpp \
+                                    ../src/GenieAPIService/src/context/qnn/qwen3_vl/qwen_3_vl.cpp \
                                     ../src/GenieAPIService/src/model/model_manager.cpp \
                                     ../src/GenieAPIService/src/port_available.cpp \
                                     ../src/GenieAPIService/src/processor/harmony.cpp \

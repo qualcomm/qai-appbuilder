@@ -10,3 +10,6 @@ todo/
 build-*
 __pycache__
 examples/AiHubLauncher/*
+*.MD
+*.md
+tools/

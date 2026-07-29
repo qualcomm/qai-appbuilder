@@ -27,6 +27,7 @@ list(APPEND SERVICE_SOURCES
         src/context/qnn/phi4mm/phi4mm.cpp
         src/context/qnn/qwen2_5/qwen_2_5.cpp
         src/context/qnn/qwen2_5_omini/qwen_2_5_omini.cpp
+        src/context/qnn/qwen3_vl/qwen_3_vl.cpp
         src/context/context_base.cpp
         src/GenieAPIService.cpp
         src/port_available.cpp

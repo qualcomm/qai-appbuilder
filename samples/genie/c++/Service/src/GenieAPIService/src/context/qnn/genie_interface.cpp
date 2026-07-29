@@ -24,6 +24,7 @@ void IEmbedding::TokenToEmbedCallback<float, float>(int32_t token,
 #include "phi4mm/phi4mm.h"
 #include "qwen2_5/qwen_2_5.h"
 #include "qwen2_5_omini/qwen_2_5_omini.h"
+#include "qwen3_vl/qwen_3_vl.h"
 
 IEmbedding::IEmbedding(GenieContext *context) :
         QInterface(context),
@@ -78,6 +79,8 @@ IEmbedding *IEmbedding::CreateInterface(GenieContext *context)
             return new Qwen2_5(context);
         case QNNEmbeddingType::QWEN2_5_OMINI:
             return new Qwen2_5OMINI(context);
+        case QNNEmbeddingType::QWEN3_VL:
+            return new Qwen3VL(context);
     }
     return nullptr;
 }
@@ -195,6 +198,13 @@ Genie_Status_t QInterfaceImpl::IEmbedding::GenieDialogQueryImpl()
                                          token_to_embed_callback_fn_,
                                          GenieCallBack,
                                          this);
+    if (context_->model_config_.i_model_config_.get_qnn_embedding().embedding_type_ == QNNEmbeddingType::QWEN3_VL)
+    {
+        My_Log("[Qwen3VL DIAG] GenieDialog_embeddingQuery returned rs=" + std::to_string(int(rs))
+               + " input_len_=" + std::to_string(input_len_)
+               + " stream_answer_len=" + std::to_string(context_->m_stream_answer.size()),
+               My_Log::Level::kWarning);
+    }
     return rs;
 }
 
@@ -249,6 +259,51 @@ IEmbedding &IEmbedding::BuildInferredBuffer(const QNNEmbedding::InferResource *i
         }
         inferred_buffers[i].assign(outputBuffers.at(0), outputBuffers.at(0) + outputSize.at(0));
         free(outputBuffers[0]);
+        outputSize.clear();
+        outputBuffers.clear();
+    }
+    return *this;
+}
+
+IEmbedding &IEmbedding::BuildInferredBuffer(const QNNEmbedding::InferResource *infer_resource,
+                                            std::vector<std::vector<uint8_t *>> &input_buffers,
+                                            std::vector<std::vector<uint8_t>> &inferred_buffers,
+                                            std::vector<std::vector<uint8_t>> &extra_outputs)
+{
+    static std::string perfProfile = "burst";
+    auto app_builder = infer_resource->app_builder_;
+    std::vector<uint8_t *> outputBuffers;
+    std::vector<size_t> outputSize;
+
+    inferred_buffers.resize(input_buffers.size());
+    extra_outputs.clear();
+    for (auto i = 0; i < input_buffers.size(); ++i)
+    {
+        if (!app_builder->ModelInference(infer_resource->tag_,
+                                         input_buffers[i],
+                                         outputBuffers,
+                                         outputSize,
+                                         perfProfile))
+        {
+            throw std::runtime_error("call model inference failed");
+        }
+        std::string output_sizes_str;
+        for (auto sz : outputSize)
+        {
+            output_sizes_str += std::to_string(sz) + " ";
+        }
+        My_Log("[Qwen3VL DIAG] vision encoder returned " + std::to_string(outputBuffers.size())
+               + " output buffer(s), sizes: " + output_sizes_str, My_Log::Level::kWarning);
+
+        inferred_buffers[i].assign(outputBuffers.at(0), outputBuffers.at(0) + outputSize.at(0));
+        for (size_t k = 1; k < outputBuffers.size(); ++k)
+        {
+            extra_outputs.emplace_back(outputBuffers[k], outputBuffers[k] + outputSize[k]);
+        }
+        for (auto *buf : outputBuffers)
+        {
+            free(buf);
+        }
         outputSize.clear();
         outputBuffers.clear();
     }

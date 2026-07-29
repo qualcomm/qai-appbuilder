@@ -326,7 +326,6 @@ private:
 
         std::string userToolsPrompt = "";
         std::string systemDefaultPrompt = "You are a helpful assistant.";
-        std::string startDefaultPrompt;
 
         My_Log{My_Log::Level::kDebug} << "[Context] Window size: " << instance_config_->get_context_size() << " tokens" << std::endl;
 
@@ -407,7 +406,9 @@ private:
         // 必须在 PreFilterMessages 之前追加 /think 或 /no_think，
         // 确保两阶段（PreFilterMessages 和 FitMessagesToContext）使用相同的 system prompt 进行 token 计算。
         // 按需求：只要当前模型是 instance_config_->is_thinking_model()，无论主推理还是其它场景，
-        // 都必须统一追加 /think 或 /no_think；当关闭 thinking 时，还必须同时注入 FILL_THINK。
+        // 都必须统一追加 /think 或 /no_think。
+        // 注意：关闭 thinking 时不再注入 FILL_THINK 预填空 think 块——真机实测确认该预填内容会导致
+        // qwen3 系列模型在极短用户提问下退化（原样复述上一轮对话后立即结束），/no_think 单独即可正确抑制思考。
         if (instance_config_->is_thinking_model())
         {
             if (instance_config_->getenableThinking())
@@ -417,7 +418,6 @@ private:
             else
             {
                 systemDefaultPrompt += "/no_think";
-                startDefaultPrompt += FILL_THINK;
             }
         }
 
@@ -508,7 +508,7 @@ private:
 
         std::string modelInputContent = chat_history_.GetUserMessage(
                                                           str_replace(j["system"], "string", systemDefaultPrompt),
-                                                          j["start"].get<std::string>() + startDefaultPrompt);
+                                                          j["start"].get<std::string>());
 
         // 计算最终提示词的真实 token 数
         // 修复：使用注入的 context_（多模型并发安全），而非 model_config_.get_genie_model_handle()
@@ -1721,8 +1721,6 @@ private:
         model_input_.agent_type_ = "sub";  // 默认为子 Agent，由 Build() 中检测后覆盖
         tool_call_id_to_name_.clear();
     }
-
-    static inline const std::string FILL_THINK = "<think>\n\n</think>\n\n";
 
     static inline const std::string BLANK_STRING;
 
