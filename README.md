@@ -357,6 +357,27 @@ See [samples/README.md](samples/README.md) for the full guide including environm
 
 ---
 
+## Community Apps
+
+On-device AI apps built by **the community** on top of QAI AppBuilder — every app
+runs locally on the Snapdragon NPU, no internet needed at inference time. Browse
+the full gallery (with category filters and a contributor wall) in
+[`CommunityApps/`](CommunityApps/); each app is auto-discovered from its `app.json`.
+
+| App | Category | Author | Description |
+|-----|----------|--------|-------------|
+| [Real-ESRGAN x4plus](samples/ComputerVision/Super_Resolution/real_esrgan_x4plus) | vision | shengtin | Upscale any image 4× with Real-ESRGAN x4plus, running fully on the Snapdragon NPU (HTP) via QAI AppBuilder. |
+| [Track-Anything](samples/ComputerVision/video_object_tracking/track_anything) | vision | [@tim202503](https://github.com/tim202503) | Click a target in any video and track it frame-by-frame with XMem segmentation, running fully on the Snapdragon NPU. |
+| [Edge Inferencer](https://github.com/YeWenxuan64/Edge_Inferencer) | other | [@YeWenxuan64](https://github.com/YeWenxuan64) | Reusable QNN inference executors (single/multi-process, async, shared-memory) for running models on the Snapdragon NPU, with a runnable demo. |
+
+> **Want your app here?** See the [Community Apps submission guide](docs/community.md)
+> or post in
+> [Discussions → Show & Tell](https://github.com/qualcomm/qai-appbuilder/discussions/categories/show-and-tell).
+> Add a folder with an `app.json`, run `python CommunityApps/build_gallery.py`, and
+> your app appears in the gallery, the index table, and the contributor wall.
+
+---
+
 ## Third-Party App List
 
 | App | Description |
