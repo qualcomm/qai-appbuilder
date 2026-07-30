@@ -1,3 +1,8 @@
+@REM ---------------------------------------------------------------------
+@REM Copyright (c) 2026 Qualcomm Innovation Center, Inc. All rights reserved.
+@REM SPDX-License-Identifier: BSD-3-Clause
+@REM ---------------------------------------------------------------------
+
 @echo off
 REM start.bat — one-click launcher for Windows on Snapdragon (WoS).
 REM Creates/uses a local venv, installs deps, then runs the app.
