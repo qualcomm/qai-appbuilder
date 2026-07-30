@@ -52,12 +52,12 @@ shengtin, [@tim202503](https://github.com/tim202503), [@YeWenxuan64](https://git
 
 | Skill | Location | Author | Description |
 |-------|----------|--------|-------------|
-| 🧞 GenieAPIService Docs | [tools/…/genie_api_service](../tools/skills/knowledge-skills/genie_api_service/) | zhanweiw | OpenAI-compatible local LLM/VLM API service docs — run models on Qualcomm WoS / Android / Linux via NPU(HTP)/CPU. |
-| 📘 QAI AppBuilder Docs | [tools/…/qai_app_builder](../tools/skills/knowledge-skills/qai_app_builder/) | zhanweiw | QAI AppBuilder framework docs — deploy QNN (`*.bin`) models on the Qualcomm NPU (HTP). |
 | AI Hub Model Run | [tools/…/aihub-model-run](../tools/qaimodelbuilder/skills/aihub-model-run/) | zhanweiw | Download pre-exported models from Qualcomm AI Hub and run on-device (NPU/HTP) inference via qai_appbuilder. |
 | Data Analyst | [tools/…/data-analyst](../tools/qaimodelbuilder/skills/data-analyst/) | zhanweiw | Analyze CSV/JSON data, compute statistics, and generate visualizations & insight reports. |
+| 🧞 GenieAPIService Docs | [tools/…/genie_api_service](../tools/skills/knowledge-skills/genie_api_service/) | shengtin | OpenAI-compatible local LLM/VLM API service docs — run models on Qualcomm WoS / Android / Linux via NPU(HTP)/CPU. |
+| 📘 QAI AppBuilder Docs | [tools/…/qai_app_builder](../tools/skills/knowledge-skills/qai_app_builder/) | zejiteng | QAI AppBuilder framework docs — deploy QNN (`*.bin`) models on the Qualcomm NPU (HTP). |
 
 ### 🙌 Skill Contributors
 
-zhanweiw
+zhanweiw, shengtin, zejiteng
 
