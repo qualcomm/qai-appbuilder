@@ -1,6 +1,6 @@
 {
   "generatedAt": "unknown",
-  "count": 2,
+  "count": 3,
   "discussions": "https://github.com/qualcomm/qai-appbuilder/discussions/categories/show-and-tell",
   "issues": "https://github.com/qualcomm/qai-appbuilder/issues",
   "contributors": [
@@ -12,6 +12,11 @@
     {
       "name": "Tim",
       "github": "tim202503",
+      "apps": 1
+    },
+    {
+      "name": "YeWenxuan64",
+      "github": "YeWenxuan64",
       "apps": 1
     }
   ],
@@ -37,7 +42,8 @@
       "screenshot": "../samples/ComputerVision/Super_Resolution/real_esrgan_x4plus/assets/screenshot.png",
       "run": "python real_esrgan_x4plus.py",
       "homepage": "https://aihub.qualcomm.com/compute/models/real_esrgan_x4plus",
-      "source": "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/ComputerVision/Super_Resolution/real_esrgan_x4plus"
+      "source": "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/ComputerVision/Super_Resolution/real_esrgan_x4plus",
+      "createdAt": "2026-07-22"
     },
     {
       "slug": "track-anything",
@@ -58,8 +64,33 @@
       ],
       "screenshot": "../samples/ComputerVision/video_object_tracking/track_anything/assets/screenshot.png",
       "run": "python main.py",
-      "homepage": "https://huggingface.co/qualcomm/Track-Anything",
-      "source": "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/ComputerVision/Video_Classification/resnet_3d"
+      "homepage": "https://aihub.qualcomm.com/compute/models/track_anything?domain=Computer+Vision&useCase=Video+Object+Tracking",
+      "source": "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/ComputerVision/video_object_tracking/track_anything",
+      "createdAt": "2026-07-22"
+    },
+    {
+      "slug": "edge-inferencer",
+      "name": "Edge Inferencer",
+      "path": "edge-inferencer",
+      "category": "other",
+      "official": false,
+      "author": "YeWenxuan64",
+      "authorGithub": "YeWenxuan64",
+      "short": "Reusable QNN inference executors (single/multi-process, async, shared-memory) for running models on the Snapdragon NPU, with a runnable demo.",
+      "tags": [
+        "qnn",
+        "npu",
+        "htp",
+        "inference",
+        "multiprocessing",
+        "shared-memory",
+        "library"
+      ],
+      "screenshot": "edge-inferencer/assets/screenshot.png",
+      "run": "python main.py",
+      "homepage": "https://github.com/YeWenxuan64/Edge_Inferencer",
+      "source": "https://github.com/YeWenxuan64/Edge_Inferencer",
+      "createdAt": "2026-07-30"
     }
   ]
 }

@@ -1,7 +1,3 @@
-# ---------------------------------------------------------------------
-# Copyright (c) 2026 Qualcomm Innovation Center, Inc. All rights reserved.
-# SPDX-License-Identifier: BSD-3-Clause
-# ---------------------------------------------------------------------
 #!/usr/bin/env python3
 """
 build_gallery.py — auto-discover community apps and regenerate every derived
@@ -139,6 +135,7 @@ def make_record(meta_path):
         "run": run.get("command", ""),
         "homepage": meta.get("homepage", ""),
         "source": meta.get("source", ""),
+        "createdAt": meta.get("createdAt", ""),
     }
     return record, []
 
@@ -158,10 +155,10 @@ def _iter_meta_paths():
 
 
 def discover_apps(strict):
-    """Return normalized app records sorted by name. In strict mode, raise on any
-    invalid app.json; otherwise print a warning and skip it. Apps are discovered
-    from CommunityApps/ and recursively from samples/; a slug appearing in more
-    than one place is an error (skipped in non-strict mode)."""
+    """Return normalized app records sorted by createdAt (oldest first). In strict
+    mode, raise on any invalid app.json; otherwise print a warning and skip it.
+    Apps are discovered from CommunityApps/ and recursively from samples/; a slug
+    appearing in more than one place is an error (skipped in non-strict mode)."""
     apps = []
     errors = []
     seen_slugs = {}
@@ -187,7 +184,9 @@ def discover_apps(strict):
     if errors and strict:
         raise SystemExit(1)
 
-    apps.sort(key=lambda a: a["name"].lower())
+    # Sort by createdAt (ISO YYYY-MM-DD sorts lexicographically), oldest first.
+    # Apps missing a createdAt sort last; ties broken alphabetically by name.
+    apps.sort(key=lambda a: (a["createdAt"] == "", a["createdAt"], a["name"].lower()))
     return apps
 
 
@@ -215,6 +214,13 @@ def render_manifest(apps, date):
     }
 
 
+def app_link(a):
+    """Where an app card/row should point. Prefer the app's declared source
+    (where it was submitted from / its upstream repo), then homepage (external
+    project page, AI Hub, HF, …); fall back to the in-repo folder."""
+    return a.get("source") or a.get("homepage") or f"{a['path']}/"
+
+
 def render_table(apps):
     lines = [
         "| App | Category | Author | Description |",
@@ -225,7 +231,7 @@ def render_table(apps):
         return "\n".join(lines)
     for a in apps:
         author = f"[@{a['authorGithub']}](https://github.com/{a['authorGithub']})" if a["authorGithub"] else a["author"]
-        link = f"[{a['name']}]({a['path']}/)"
+        link = f"[{a['name']}]({app_link(a)})"
         short = a["short"].replace("|", "\\|")
         lines.append(f"| {link} | {a['category']} | {author} | {short} |")
     return "\n".join(lines)
@@ -242,14 +248,15 @@ def render_gallery(apps, cols=3):
 
     def cell(a):
         thumb = a["screenshot"] or ""
-        img = (f'<a href="{a["path"]}/"><img src="{thumb}" alt="{a["name"]}" width="260"></a>'
+        href = app_link(a)
+        img = (f'<a href="{href}"><img src="{thumb}" alt="{a["name"]}" width="260"></a>'
                if thumb else '<em>no screenshot</em>')
         author = (f'<a href="https://github.com/{a["authorGithub"]}">@{a["authorGithub"]}</a>'
                   if a["authorGithub"] else a["author"])
         short = a["short"]
         return (f'<td align="center" valign="top" width="33%">'
                 f'{img}<br>'
-                f'<a href="{a["path"]}/"><b>{a["name"]}</b></a><br>'
+                f'<a href="{href}"><b>{a["name"]}</b></a><br>'
                 f'<sub><code>{a["category"]}</code> · by {author}</sub><br>'
                 f'<sub>{short}</sub>'
                 f'</td>')
