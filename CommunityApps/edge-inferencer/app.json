@@ -1,0 +1,54 @@
+{
+  "$schema": "../schema/app.schema.json",
+  "name": "Edge Inferencer",
+  "slug": "edge-inferencer",
+  "version": "1.0.0",
+  "author": {
+    "name": "YeWenxuan64",
+    "github": "YeWenxuan64",
+    "email": ""
+  },
+  "description": {
+    "short": "Reusable QNN inference executors (single/multi-process, async, shared-memory) for running models on the Snapdragon NPU, with a runnable demo.",
+    "long": "Edge Inferencer wraps QAI AppBuilder's QNNContext / QNNContextProc / QNNShareMemory into a small library of drop-in inference executors: QnnExecutor (single-process synchronous), QnnTaskExecutor (cross-process via shared memory), QnnProcessPool / QnnExecutor3 (multi-process pool built on Pipe + Manager + SharedMemory), and QnnTaskPool (async InferenceAsync/InferenceWait). It handles ARM performance-core affinity, NHWC/NCHW input normalization, and zero-copy shared-memory I/O so you can pipeline frames across processes on the HTP. The included main.py demo downloads a small public QNN DLC on first run, loads it with QnnExecutor, and runs one inference; it degrades gracefully on machines without an NPU."
+  },
+  "category": "other",
+  "tags": ["qnn", "npu", "htp", "inference", "multiprocessing", "shared-memory", "library"],
+  "license": "MIT",
+  "homepage": "https://github.com/YeWenxuan64/Edge_Inferencer",
+  "source": "https://github.com/YeWenxuan64/Edge_Inferencer",
+  "screenshot": "assets/screenshot.png",
+  "screenshots": [],
+  "demoVideo": "",
+  "models": [
+    {
+      "name": "real_esrgan_x4plus (demo model, float DLC)",
+      "type": "vision",
+      "runtime": "QNN",
+      "precision": "float",
+      "source": "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/real_esrgan_x4plus/releases/v0.55.0/real_esrgan_x4plus-qnn_dlc-float.zip",
+      "sizeMB": 0
+    }
+  ],
+  "requirements": {
+    "os": ["windows-arm64", "linux-aarch64"],
+    "python": ">=3.10",
+    "qai_appbuilder": ">=2.24.0",
+    "dependencies": ["numpy"],
+    "hardware": {
+      "npu": "Snapdragon X Elite / X Plus",
+      "minRamGB": 16
+    }
+  },
+  "run": {
+    "setup": "pip install -r requirements.txt",
+    "windows": "start.bat",
+    "command": "python main.py",
+    "entrypoint": "main.py",
+    "port": null
+  },
+  "official": false,
+  "hidden": false,
+  "createdAt": "2026-07-30",
+  "updatedAt": "2026-07-30"
+}
