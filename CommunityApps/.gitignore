@@ -1,0 +1,32 @@
+# --- Downloaded / generated model weights (never commit; auto-fetched at runtime) ---
+models/
+*.onnx
+*.onnx_ctx.onnx
+*.bin
+*.dlc
+*.zip
+
+# --- Sample media downloaded on first run ---
+*.mp4
+*.mov
+*.avi
+*.mkv
+tracked_*.mp4
+
+# --- Python virtual environments ---
+.venv/
+venv/
+env/
+
+# --- Python caches ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# --- OS / editor cruft ---
+.DS_Store
+Thumbs.db
+*.swp
+
+# NOTE: app screenshots under <app>/assets/ ARE committed — they power the gallery.
