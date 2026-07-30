@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>QAI AppBuilder — Community Apps</title>
+<style>
+  :root {
+    --bg: #0f1115; --card: #191c23; --ink: #e8eaed; --muted: #9aa0aa;
+    --accent: #6ea8fe; --border: #262a33; --chip: #232732;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font: 15px/1.5 -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg); color: var(--ink);
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  header { padding: 40px 24px 8px; max-width: 1100px; margin: 0 auto; }
+  h1 { margin: 0 0 6px; font-size: 30px; }
+  .sub { color: var(--muted); margin: 0 0 18px; }
+  .banner {
+    background: linear-gradient(90deg, #1c2333, #17202e);
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 16px; margin: 0 auto 20px; max-width: 1100px;
+  }
+  .stats { display: flex; gap: 22px; flex-wrap: wrap; margin: 6px 0 18px; }
+  .stat b { font-size: 22px; }
+  .stat span { color: var(--muted); display: block; font-size: 12px; }
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
+  .filters button {
+    background: var(--chip); color: var(--ink); border: 1px solid var(--border);
+    border-radius: 999px; padding: 6px 14px; cursor: pointer; font-size: 13px;
+  }
+  .filters button.active { background: var(--accent); color: #0a0d12; border-color: var(--accent); }
+  main { max-width: 1100px; margin: 0 auto; padding: 0 24px 60px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 18px; }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    overflow: hidden; display: flex; flex-direction: column;
+  }
+  .thumb {
+    aspect-ratio: 16/9; background: #0b0e13 center/cover no-repeat;
+    display: flex; align-items: center; justify-content: center; color: var(--muted);
+    font-size: 13px; border-bottom: 1px solid var(--border);
+  }
+  .card .body { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+  .card h3 { margin: 0; font-size: 17px; }
+  .card p { margin: 0; color: var(--muted); font-size: 13px; flex: 1; }
+  .meta { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--muted); }
+  .tag { background: var(--chip); border-radius: 5px; padding: 1px 7px; }
+  .run { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: #0b0e13; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; color: var(--ink); overflow-x: auto; }
+  .src { font-size: 12px; }
+  section.wall { margin-top: 46px; }
+  section.wall h2 { font-size: 20px; }
+  .contributors { display: flex; gap: 10px; flex-wrap: wrap; }
+  .contributor { background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; font-size: 13px; }
+  .contributor small { color: var(--muted); }
+  footer { color: var(--muted); font-size: 12px; text-align: center; padding: 30px; }
+  .empty { color: var(--muted); padding: 40px; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>QAI AppBuilder — Community Apps</h1>
+  <p class="sub">On-device AI apps built by the community, powered by the Qualcomm NPU.</p>
+</header>
+
+<div class="banner">
+  💬 Built something? Show it off in
+  <a id="discuss" href="https://github.com/qualcomm/qai-appbuilder/discussions/categories/show-and-tell" target="_blank" rel="noopener">Discussions → Show &amp; Tell</a>
+  or open an <a id="issues" href="https://github.com/qualcomm/qai-appbuilder/issues" target="_blank" rel="noopener">Issue</a>
+  — lower barrier than a PR, and the fastest way to get on the wall.
+</div>
+
+<main>
+  <div class="stats">
+    <div class="stat"><b id="stat-count">–</b><span>apps</span></div>
+    <div class="stat"><b id="stat-contrib">–</b><span>contributors</span></div>
+    <div class="stat"><b id="stat-updated">–</b><span>updated</span></div>
+  </div>
+
+  <div class="filters" id="filters"></div>
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty" hidden>No apps found. Add one — see the README.</div>
+
+  <section class="wall">
+    <h2>🙌 Contributor Wall</h2>
+    <p class="sub">Every app here is credited in the gallery and in each Release. Thank you!</p>
+    <div class="contributors" id="contributors"></div>
+  </section>
+</main>
+
+<footer>
+  Generated from <code>apps.json</code> by <code>build_gallery.py</code>.
+  Add your app: copy <code>_template/</code>, fill <code>app.json</code>, open a PR.
+</footer>
+
+<script>
+const grid = document.getElementById('grid');
+const filtersEl = document.getElementById('filters');
+let apps = [], active = 'all';
+
+function card(a) {
+  const thumb = a.screenshot
+    ? `<div class="thumb" style="background-image:url('${a.screenshot}')"></div>`
+    : `<div class="thumb">no screenshot</div>`;
+  const tags = (a.tags || []).slice(0, 4).map(t => `<span class="tag">${t}</span>`).join(' ');
+  const author = a.authorGithub
+    ? `<a href="https://github.com/${a.authorGithub}" target="_blank" rel="noopener">@${a.authorGithub}</a>`
+    : a.author;
+  const run = a.run ? `<div class="run">$ ${a.run}</div>` : '';
+  const title = a.homepage
+    ? `<a href="${a.homepage}" target="_blank" rel="noopener">${a.name}</a>`
+    : a.name;
+  const src = a.source
+    ? `<div class="src"><a href="${a.source}" target="_blank" rel="noopener">submitted via ↗</a></div>`
+    : '';
+  return `<article class="card">
+    ${thumb}
+    <div class="body">
+      <h3>${title}</h3>
+      <div class="meta"><span class="tag">${a.category}</span> by ${author}</div>
+      <p>${a.short || ''}</p>
+      <div class="meta">${tags}</div>
+      ${run}
+      ${src}
+    </div>
+  </article>`;
+}
+
+function render() {
+  const list = active === 'all' ? apps : apps.filter(a => a.category === active);
+  grid.innerHTML = list.map(card).join('');
+  document.getElementById('empty').hidden = list.length > 0;
+}
+
+function buildFilters() {
+  const cats = ['all', ...Array.from(new Set(apps.map(a => a.category))).sort()];
+  filtersEl.innerHTML = cats.map(c =>
+    `<button data-cat="${c}" class="${c === 'all' ? 'active' : ''}">${c}</button>`).join('');
+  filtersEl.querySelectorAll('button').forEach(b => b.onclick = () => {
+    active = b.dataset.cat;
+    filtersEl.querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b));
+    render();
+  });
+}
+
+function renderContributors(contributors) {
+  const el = document.getElementById('contributors');
+  if (!contributors || !contributors.length) { el.innerHTML = '<span class="empty">Be the first!</span>'; return; }
+  el.innerHTML = contributors.map(c => {
+    const who = c.github ? `<a href="https://github.com/${c.github}" target="_blank" rel="noopener">@${c.github}</a>` : c.name;
+    return `<span class="contributor">${who} <small>· ${c.apps} app${c.apps > 1 ? 's' : ''}</small></span>`;
+  }).join('');
+}
+
+fetch('apps.json')
+  .then(r => r.json())
+  .then(data => {
+    apps = data.apps || [];
+    document.getElementById('stat-count').textContent = data.count ?? apps.length;
+    document.getElementById('stat-contrib').textContent = (data.contributors || []).length;
+    document.getElementById('stat-updated').textContent = data.generatedAt || '—';
+    if (data.discussions) document.getElementById('discuss').href = data.discussions;
+    if (data.issues) document.getElementById('issues').href = data.issues;
+    buildFilters();
+    render();
+    renderContributors(data.contributors);
+  })
+  .catch(err => {
+    document.getElementById('empty').hidden = false;
+    document.getElementById('empty').textContent =
+      'Could not load apps.json. Run: python build_gallery.py, then serve with: python -m http.server';
+    console.error(err);
+  });
+</script>
+</body>
+</html>

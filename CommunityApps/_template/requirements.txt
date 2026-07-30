@@ -1,0 +1,7 @@
+# Core dependency for every QAI AppBuilder app.
+qai_appbuilder>=2.24.0
+
+# Add your app's dependencies below, for example:
+# numpy
+# opencv-python-headless
+# onnxruntime

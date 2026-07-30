@@ -1,0 +1,65 @@
+{
+  "generatedAt": "unknown",
+  "count": 2,
+  "discussions": "https://github.com/qualcomm/qai-appbuilder/discussions/categories/show-and-tell",
+  "issues": "https://github.com/qualcomm/qai-appbuilder/issues",
+  "contributors": [
+    {
+      "name": "shengtin",
+      "github": "",
+      "apps": 1
+    },
+    {
+      "name": "Tim",
+      "github": "tim202503",
+      "apps": 1
+    }
+  ],
+  "apps": [
+    {
+      "slug": "real-esrgan-x4plus",
+      "name": "Real-ESRGAN x4plus",
+      "path": "../samples/ComputerVision/Super_Resolution/real_esrgan_x4plus",
+      "category": "vision",
+      "official": false,
+      "author": "shengtin",
+      "authorGithub": "",
+      "short": "Upscale any image 4× with Real-ESRGAN x4plus, running fully on the Snapdragon NPU (HTP) via QAI AppBuilder.",
+      "tags": [
+        "super-resolution",
+        "upscale",
+        "real-esrgan",
+        "rrdbnet",
+        "dlc",
+        "onnx",
+        "offline"
+      ],
+      "screenshot": "../samples/ComputerVision/Super_Resolution/real_esrgan_x4plus/assets/screenshot.png",
+      "run": "python real_esrgan_x4plus.py",
+      "homepage": "https://aihub.qualcomm.com/compute/models/real_esrgan_x4plus",
+      "source": "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/ComputerVision/Super_Resolution/real_esrgan_x4plus"
+    },
+    {
+      "slug": "track-anything",
+      "name": "Track-Anything",
+      "path": "../samples/ComputerVision/video_object_tracking/track_anything",
+      "category": "vision",
+      "official": false,
+      "author": "Tim",
+      "authorGithub": "tim202503",
+      "short": "Click a target in any video and track it frame-by-frame with XMem segmentation, running fully on the Snapdragon NPU.",
+      "tags": [
+        "segmentation",
+        "video",
+        "tracking",
+        "xmem",
+        "onnx",
+        "offline"
+      ],
+      "screenshot": "../samples/ComputerVision/video_object_tracking/track_anything/assets/screenshot.png",
+      "run": "python main.py",
+      "homepage": "https://huggingface.co/qualcomm/Track-Anything",
+      "source": "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/ComputerVision/Video_Classification/resnet_3d"
+    }
+  ]
+}
