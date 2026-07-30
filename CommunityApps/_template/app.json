@@ -1,0 +1,53 @@
+{
+  "$schema": "../schema/app.schema.json",
+  "name": "Your App Name",
+  "slug": "your-app-name",
+  "version": "1.0.0",
+  "author": {
+    "name": "Your Name",
+    "github": "your-github-handle",
+    "email": ""
+  },
+  "description": {
+    "short": "One-line summary shown on the gallery card and index table (<= 160 chars).",
+    "long": "Longer description: what the app does, why it is useful, and how it uses the Qualcomm NPU via QAI AppBuilder. Prefer keeping data/inference local and offline."
+  },
+  "category": "vision",
+  "tags": ["onnx", "offline", "npu"],
+  "license": "MIT",
+  "homepage": "",
+  "source": "https://github.com/qualcomm/qai-appbuilder/discussions/categories/show-and-tell",
+  "screenshot": "assets/screenshot.png",
+  "screenshots": [],
+  "demoVideo": "",
+  "models": [
+    {
+      "name": "your-model-name",
+      "type": "vision",
+      "runtime": "QNN",
+      "precision": "int8",
+      "source": "https://aihub.qualcomm.com/",
+      "sizeMB": 0
+    }
+  ],
+  "requirements": {
+    "os": ["windows-arm64"],
+    "python": ">=3.10",
+    "qai_appbuilder": ">=2.24.0",
+    "dependencies": [],
+    "hardware": {
+      "npu": "Snapdragon X Elite / X Plus",
+      "minRamGB": 16
+    }
+  },
+  "run": {
+    "setup": "pip install -r requirements.txt",
+    "windows": "start.bat",
+    "command": "python main.py",
+    "entrypoint": "main.py",
+    "port": null
+  },
+  "official": false,
+  "createdAt": "2026-07-22",
+  "updatedAt": "2026-07-22"
+}
