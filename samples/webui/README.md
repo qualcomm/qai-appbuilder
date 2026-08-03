@@ -23,9 +23,10 @@ This directory contains three Gradio-based WebUI applications that run AI models
 | [GenieWebUI.py](#3-geniewebui) | 50000 | LLM (via GenieAPIService) | Multi-function LLM chat app |
 
 ### Screenshots
-![ImageRepairApp](screenshot/ImageRepairApp.jpg)
-![StableDiffusionApp](screenshot/StableDiffusionApp.jpg)
-![GenieWebUI](screenshot/GenieWebUI.png)
+
+| ImageRepairApp | StableDiffusionApp | GenieWebUI |
+|-----------------|---------------------|------------|
+| ![ImageRepairApp](screenshot/ImageRepairApp.jpg) | ![StableDiffusionApp](screenshot/StableDiffusionApp.jpg) | ![GenieWebUI chat home screen](screenshot/GenieWebUI1.png) |
 
 ---
 
@@ -217,6 +218,12 @@ The app opens automatically in your browser at `http://localhost:8978`.
 - Real-time performance metrics: first token latency, prompt tokens/s, eval tokens/s
 - Multimodal input: text, images (PNG/JPG), and audio (WAV)
 - Model switching at runtime
+
+#### Screenshots
+
+| Chat Home | Multimodal Chat (Image & Audio) |
+|-----------|----------------------------------|
+| ![GenieWebUI chat home screen](screenshot/GenieWebUI1.png) | ![GenieWebUI multimodal chat with image and audio input](screenshot/GenieWebUI2.png) |
 
 #### Prerequisites — Set Up GenieAPIService
 
