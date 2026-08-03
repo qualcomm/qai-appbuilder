@@ -384,7 +384,7 @@ struct ModelManager::ModeVerifier
                 return nullptr;
             }
 
-            std::string new_config_path{self_->known_model_path_ + "/config.json"};
+            std::string new_config_path{File::ResolveModelConfigPath(self_->known_model_path_)};
             My_Log{My_Log::Level::kError} << "config file: " << self_->config_file_ << " "
                                           << "is not exist, will use default ver: " << new_config_path
                                           << std::endl;
@@ -844,7 +844,7 @@ bool ModelManager::LoadModelByName(const std::string &new_model, bool &first_loa
             found = true;
             model_name_ = name;
             model_path_ = model_root_ + "/" + name;
-            config_file_ = model_path_ + "/config.json";
+            config_file_ = File::ResolveModelConfigPath(model_path_);
             break;
         }
     }
@@ -1851,9 +1851,21 @@ bool ModelManager::LoadSingleModel()
     {
         config->set_device(startup_device_override_);
     }
+    // config.json 的 dialog.context.size（已由上面 LoadPromptTemplates 解析进 context_size_）是模型
+    // 编译时固化的真实上限，service_config.json 的覆盖值不能超过它，否则 token 预算会与实际引擎容量不一致。
     if (startup_context_size_override_ > 0)
     {
-        config->set_context_size(startup_context_size_override_);
+        if (context_size_ > 0 && startup_context_size_override_ > context_size_)
+        {
+            My_Log{My_Log::Level::kWarning}
+                    << "[LoadSingleModel] context_size override (" << startup_context_size_override_
+                    << ") exceeds config.json max (" << context_size_
+                    << "), capping to config.json value" << std::endl;
+        }
+        else
+        {
+            config->set_context_size(startup_context_size_override_);
+        }
     }
     // Copy other config fields as needed
     config->set_lora_adapter(loraAdapter);
@@ -2009,7 +2021,7 @@ std::vector<json> ModelManager::ScanModelDirectory() const
         if (!entry.is_directory())
             continue;
 
-        std::string config_path = entry.path().generic_string() + "/config.json";
+        std::string config_path = File::ResolveModelConfigPath(entry.path().generic_string());
         if (!File::IsFileExist(config_path))
             continue;
 
@@ -2291,25 +2303,10 @@ bool ModelManager::LoadAllModelsFromConfig(const std::string &backend_filter)
     // 若推导失败（config_file_ 为空或层级不足），则回退到 RootDir。
     fs::path models_base_dir;
     {
-        fs::path cfg_path(config_file_);
-        // 若 config_file_ 是相对路径，先转换为绝对路径（基于 CurrentDir）
-        if (cfg_path.is_relative())
+        std::string derived_models_dir = File::DeriveAncestorDir(config_file_, CurrentDir, 2);
+        if (!derived_models_dir.empty())
         {
-            cfg_path = fs::path(CurrentDir) / cfg_path;
-        }
-        // 规范化路径（消除 ".." 等符号）
-        std::error_code ec;
-        fs::path canonical_cfg = fs::weakly_canonical(cfg_path, ec);
-        if (!ec)
-        {
-            cfg_path = canonical_cfg;
-        }
-        // 向上两级：config.json → model_dir → models_dir
-        fs::path model_dir = cfg_path.parent_path();       // 第一级：模型目录（如 gpt-oss-20b-GGUF）
-        fs::path candidate_models_dir = model_dir.parent_path(); // 第二级：models 目录
-        if (!candidate_models_dir.empty() && candidate_models_dir != model_dir)
-        {
-            models_base_dir = candidate_models_dir;
+            models_base_dir = derived_models_dir;
             My_Log{My_Log::Level::kInfo} << "[LoadAllModelsFromConfig] Derived models base dir from -c param: "
                                          << models_base_dir.generic_string() << "\n";
         }
@@ -2573,7 +2570,7 @@ bool ModelManager::LoadModel(const std::string &model_name,
     auto config = std::make_shared<ModelInstanceConfig>();
     config->set_model_name(model_name);
     config->set_model_path(model_path_in.empty() ? model_root_ + "/" + model_name : model_path_in);
-    config_file_ = config->get_model_path() + "/config.json";
+    config_file_ = File::ResolveModelConfigPath(config->get_model_path());
     config->set_backend(backend);
     config->set_device(device);
 
@@ -2662,14 +2659,17 @@ bool ModelManager::LoadModel(const std::string &model_name,
                 << " for model '" << model_name << "'\n";
 
         // context_size 优先级：service_config.json > config.json > prompt.json > 默认值
+        // config.json 的 dialog.context.size 是模型编译时固化的真实上限，任何外部覆盖值都不能超过它，
+        // 否则会导致 token 预算与实际引擎容量不一致（预算按覆盖值算，引擎仍按 config.json 建）。
         if (context_size_in > 0)
         {
-            // service_config.json 显式指定，优先级最高，保持不变
-            if (config_json_ctx_size > 0 && context_size_in != config_json_ctx_size)
+            if (config_json_ctx_size > 0 && context_size_in > config_json_ctx_size)
             {
                 My_Log{My_Log::Level::kWarning}
                         << "[LoadModel] Model " << model_name << ": context_size in service_config ("
-                        << context_size_in << ") overrides config.json (" << config_json_ctx_size << ")\n";
+                        << context_size_in << ") exceeds config.json max (" << config_json_ctx_size
+                        << "), capping to config.json value\n";
+                context_size = config_json_ctx_size;
             }
             else if (json_ctx_size > 0 && context_size_in != json_ctx_size)
             {
@@ -3045,7 +3045,7 @@ PromptType ModelManager::LoadPromptTemplates(std::string &&prompt_path)
     // 优先级：service_config.json（context_size_ 已由外部设置）> config.json > prompt.json > 默认值
     // 优先使用 known_model_path_（已解析的模型路径），否则使用 model_path_
     std::string base_path = !known_model_path_.empty() ? known_model_path_ : model_path_;
-    int config_json_ctx_size = ParseContextSizeFromConfigJson(base_path + "/config.json", model_name_, "[LoadPromptTemplates]");
+    int config_json_ctx_size = ParseContextSizeFromConfigJson(File::ResolveModelConfigPath(base_path), model_name_, "[LoadPromptTemplates]");
 
     // 更新 context_size_（优先级：已由外部设置的值 > config.json > prompt.json > 默认值）
     // 注意：context_size_ 初始值为 DEFAULT_CONTEXT_SIZE（4096），若外部未显式设置则仍为默认值

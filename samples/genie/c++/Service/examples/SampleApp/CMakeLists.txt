@@ -25,10 +25,17 @@ target_link_libraries(SampleApp PRIVATE
 )
 
 if (UNIX)
-    # Mirrors platform.cmake's LIBAPPBUILDER_ROOT/lib (qai-appbuilder repo root); that
-    # variable lives in the sibling src/GenieAPIService subdirectory scope and isn't
-    # visible here, so the equivalent relative path is spelled out directly.
-    target_link_directories(SampleApp PRIVATE ${CMAKE_SOURCE_DIR}/../../../../lib)
+    # Mirrors platform.cmake's LIBAPPBUILDER_ROOT/lib (qai-appbuilder repo root) and
+    # QNN_LIB_PATH; those variables live in the sibling src/GenieAPIService subdirectory
+    # scope and aren't visible here, so the equivalent paths are spelled out directly.
+    target_link_directories(SampleApp PRIVATE
+            ${CMAKE_SOURCE_DIR}/../../../../lib
+            $ENV{QNN_SDK_ROOT}/lib/aarch64-oe-linux-gcc11.2
+    )
+    # GenieAPILibrary links Genie/appbuilder PRIVATE, so that requirement doesn't
+    # propagate to SampleApp; this executable's own link step must resolve them
+    # directly too, same as GenieAPIService's target_link_libraries in its CMakeLists.
+    target_link_libraries(SampleApp PRIVATE Genie appbuilder)
     set_target_properties(SampleApp PROPERTIES
             BUILD_WITH_INSTALL_RPATH TRUE
             INSTALL_RPATH "$ORIGIN"

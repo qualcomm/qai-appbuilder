@@ -249,8 +249,7 @@ public class MainActivity extends AppCompatActivity {
 
     private boolean isValidModel(String dirName) {
         LogUtils.logDebug(TAG, "isValidModel : " + dirName, LogUtils.LOG_DEBUG);
-        String configFile = modelRoot + "/" + dirName + "/config.json";
-        File file = new File(configFile);
+        File file = ModelConfigUtils.resolveConfigFile(modelRoot + "/" + dirName);
         if (file.exists()) {
             return true;
         }

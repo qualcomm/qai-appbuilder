@@ -395,7 +395,12 @@ private:
             std::string tool_tmpl = instance_config_->get_tool_prompt_template();
 
             if (optimize_prompt) {
-                userToolsPrompt = optimizer_.OptimizeToolsPrompt(userToolsPrompt, tool_tmpl);
+                // 用剩余预算（contextSize 减去 identity/system 部分已占用的 token 数）
+                // 作为工具部分压缩的硬上限，确保 systemDefaultPrompt 组合后始终 < contextSize
+                size_t identity_tokens = context_->TokenLength(systemDefaultPrompt);
+                size_t tools_budget = (static_cast<size_t>(std::max(contextSize, 0)) > identity_tokens)
+                                     ? static_cast<size_t>(contextSize) - identity_tokens : 0;
+                userToolsPrompt = optimizer_.OptimizeToolsPrompt(userToolsPrompt, tool_tmpl, tools_budget);
             } else {
                 userToolsPrompt = str_replace(tool_tmpl, "{tool_descs}", userToolsPrompt);
             }
@@ -1611,9 +1616,9 @@ private:
             // 至少保留 512 tokens 输出，最多使用整个 context_size
             available_output = std::max(available_output, 512);
             available_output = std::min(available_output, context_size);
-            context_->SetParams("temperature", "0.3");
-            context_->SetParams("top_k", "20");
-            context_->SetParams("top_p", "0.8");
+            context_->SetParamsByConfig(json{{"temp", 0.3},
+                                             {"top_k", 20},
+                                             {"top_p", 0.8}});
         }
 
         std::string result;

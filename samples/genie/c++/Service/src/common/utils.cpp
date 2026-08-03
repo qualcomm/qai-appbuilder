@@ -85,6 +85,45 @@ bool File::IsFileExist(const std::string &file_path)
     return std::ifstream(file_path.c_str()).good() || fs::is_directory(file_path);
 }
 
+std::string File::ResolveModelConfigPath(const std::string &model_dir)
+{
+    std::string genie_config_path = model_dir + "/genie_config.json";
+    if (IsFileExist(genie_config_path))
+    {
+        return genie_config_path;
+    }
+    return model_dir + "/config.json";
+}
+
+std::string File::DeriveAncestorDir(const std::string &file_path, const std::string &base_dir, int levels)
+{
+    if (file_path.empty() || levels <= 0)
+        return "";
+
+    fs::path path{file_path};
+    if (path.is_relative())
+    {
+        path = fs::path(base_dir) / path;
+    }
+    std::error_code ec;
+    fs::path canonical_path = fs::weakly_canonical(path, ec);
+    if (!ec)
+    {
+        path = canonical_path;
+    }
+
+    for (int i = 0; i < levels; ++i)
+    {
+        fs::path parent = path.parent_path();
+        if (parent.empty() || parent == path)
+        {
+            return "";
+        }
+        path = parent;
+    }
+    return path.generic_string();
+}
+
 bool File::MatchFileInDir(const std::string &dir_path, const std::string &part, std::vector<std::string> *files)
 {
     // 修复：当调用方传入 files 指针（希望收集全部匹配文件）时，原代码在找到第一个匹配项后就

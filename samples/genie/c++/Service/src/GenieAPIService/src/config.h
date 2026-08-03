@@ -125,11 +125,20 @@ inline bool Config::Process()
     CurrentDir = fs::path{buffer}.generic_string();
     My_Log{} << "current work dir: " << CurrentDir << std::endl;
 
-    RootDir = fs::path{argv_[0]}.is_absolute()
+    std::string argv0_root_dir = fs::path{argv_[0]}.is_absolute()
                   ? fs::path{argv_[0]}.parent_path().generic_string()
                   : fs::path{CurrentDir + "/" + argv_[0]}
                     .parent_path()
                     .generic_string();
+#ifdef __ANDROID__
+    // Android 上 argv[0] 固定是字符串 "main"、App 进程的 getcwd() 恒为 "/"，
+    // 上面推导出的 argv0_root_dir 毫无意义；改为从 -c 参数指向的配置文件路径向上两级反推
+    // （模型根目录/模型目录/config.json），推导失败（层级不足）时回退到 argv0_root_dir。
+    std::string derived_root_dir = File::DeriveAncestorDir(config_file, CurrentDir, 2);
+    RootDir = derived_root_dir.empty() ? argv0_root_dir : derived_root_dir;
+#else
+    RootDir = argv0_root_dir;
+#endif
     My_Log{} << "root dir: " << RootDir << std::endl;
     My_Log::ShowStatus();
 

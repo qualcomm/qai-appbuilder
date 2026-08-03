@@ -512,76 +512,103 @@ std::string PromptOptimizer::BuildFewShotExamples(const RuntimeSkillMappings& ru
 
 std::string PromptOptimizer::OptimizeToolsPrompt(
     const std::string& tool_descriptions,
-    const std::string& tool_prompt_template)
+    const std::string& tool_prompt_template,
+    size_t token_budget)
 {
     My_Log{My_Log::Level::kDebug} << "[Optimizer] Processing tool descriptions" << std::endl;
-    
+
     std::string result;
-    
+
+    // 用给定模板包装工具签名文本，并去掉末尾多余换行（避免 </tools> 前出现空行）
+    auto wrap = [&](std::string descs) {
+        while (!descs.empty() && descs.back() == '\n') descs.pop_back();
+        return tool_prompt_template.empty() ? descs : str_replace(tool_prompt_template, "{tool_descs}", descs);
+    };
+
     // tool_descriptions 现在直接是原始 JSON 数组字符串
     try {
         json tools_array = json::parse(tool_descriptions);
-        
+
         if (tools_array.is_array()) {
-            std::string optimized_tools;
             size_t original_tokens = CountTokens(tool_descriptions);
-            
-            // 遍历每个工具，使用 GetOptimizedToolDefinition 优化
+
+            // Tier 1：已知工具用 GetOptimizedToolDefinition 的预定义精简定义；
+            // 未知工具退化为 GenerateBasicTypeScriptDefinition
+            // 生成的基础签名，而不是原样保留完整 JSON Schema——这曾是压缩对映射表外
+            // 工具完全失效、只能把它们原样带过的直接原因。
+            std::string optimized_tools;
             for (const auto& tool : tools_array) {
                 std::string tool_name;
                 if (tool.contains("function") && tool["function"].contains("name")) {
                     tool_name = tool["function"]["name"].get<std::string>();
                 }
-                
-                // 尝试获取优化后的定义
+                if (tool_name == "image") {
+                    My_Log{My_Log::Level::kDebug} << "[Optimizer] Filtered out 'image' tool" << std::endl;
+                    continue;
+                }
+
                 std::string optimized_def = GetOptimizedToolDefinition(tool_name);
-                
                 if (!optimized_def.empty()) {
-                    // 使用优化后的定义
                     optimized_tools += optimized_def + "\n";
                     My_Log{My_Log::Level::kDebug} << "[Optimizer] Optimized tool: " << tool_name << std::endl;
-                } else {
-                    // 如果是 image 工具，过滤掉
-                    if (tool_name == "image") {
-                        My_Log{My_Log::Level::kDebug} << "[Optimizer] Filtered out 'image' tool" << std::endl;
-                        continue;
-                    }
-                    // 其他未知工具，保留原始定义
-                    optimized_tools += tool.dump() + "\n";
-                    My_Log{My_Log::Level::kDebug} << "[Optimizer] Kept original definition for: " << tool_name << std::endl;
+                    continue;
                 }
+
+                std::string basic_def = GenerateBasicTypeScriptDefinition(tool);
+                optimized_tools += (!basic_def.empty() ? basic_def : tool.dump()) + "\n";
+                My_Log{My_Log::Level::kDebug} << "[Optimizer] Generated basic signature for: " << tool_name << std::endl;
             }
-            
-            // 计算 token 节省
+
+            result = wrap(optimized_tools);
+
+            // Tier 2：仍超预算时剥离 `//` 描述性注释，只保留类型签名骨架
+            if (CountTokens(result) > token_budget) {
+                optimized_tools = StripToolCommentLines(optimized_tools);
+                result = wrap(optimized_tools);
+                My_Log{My_Log::Level::kInfo} << "[Optimizer] Tools still over budget after Tier1, stripped comments" << std::endl;
+            }
+
+            // Tier 3：仍超预算时退化为最简单行签名 name(param1, param2?)
+            if (CountTokens(result) > token_budget) {
+                std::string minimal;
+                for (const auto& tool : tools_array) {
+                    std::string sig = BuildMinimalToolSignature(tool);
+                    if (!sig.empty()) minimal += sig + "\n";
+                }
+                optimized_tools = minimal;
+                result = wrap(optimized_tools);
+                My_Log{My_Log::Level::kInfo} << "[Optimizer] Tools still over budget after Tier2, degraded to minimal signatures" << std::endl;
+            }
+
+            // Tier 4（硬性兜底）：工具数量过多导致极简签名仍超预算时，逐条追加
+            // 直至预算用尽即止，保证返回结果的 token 数始终不超过 token_budget。
+            if (CountTokens(result) > token_budget) {
+                std::istringstream iss(optimized_tools);
+                std::string line, truncated;
+                while (std::getline(iss, line)) {
+                    std::string candidate = truncated + line + "\n";
+                    if (CountTokens(wrap(candidate)) > token_budget) break;
+                    truncated = candidate;
+                }
+                optimized_tools = truncated;
+                result = wrap(optimized_tools);
+                My_Log{My_Log::Level::kWarning} << "[Optimizer] Tool list truncated to fit token budget of "
+                                                 << token_budget << " tokens" << std::endl;
+            }
+
             size_t optimized_tokens = CountTokens(optimized_tools);
             float savings = ComputeSavingsPercent(original_tokens, optimized_tokens);
-            
+
             My_Log{My_Log::Level::kDebug} << "[Optimizer] Tools - Original: " << original_tokens
                                            << " tokens, Optimized: " << optimized_tokens
                                            << " tokens, Savings: " << savings << "%" << std::endl;
-            
-            // 使用传入的模板包装优化后的工具（复用 prompt.h 中的定义）
-            // 去掉 optimized_tools 末尾多余的换行，避免 </tools> 前出现空行
-            while (!optimized_tools.empty() && optimized_tools.back() == '\n') {
-                optimized_tools.pop_back();
-            }
-            if (!tool_prompt_template.empty()) {
-                result = str_replace(tool_prompt_template, "{tool_descs}", optimized_tools);
-            } else {
-                // 如果没有传入模板，直接添加优化后的工具
-                result = optimized_tools;
-            }
         }
     } catch (const std::exception& e) {
         My_Log{} << "Failed to parse/optimize tools: " << e.what() << std::endl;
         // 解析失败，使用原始工具描述
-        if (!tool_prompt_template.empty()) {
-            result = str_replace(tool_prompt_template, "{tool_descs}", tool_descriptions);
-        } else {
-            result = tool_descriptions;
-        }
+        result = wrap(tool_descriptions);
     }
-    
+
     return result;
 }
 
@@ -1311,6 +1338,50 @@ std::string PromptOptimizer::GenerateBasicTypeScriptDefinition(const json& tool)
             << "Failed to generate TypeScript definition: " << e.what() << std::endl;
         return "";
     }
+}
+
+std::string PromptOptimizer::StripToolCommentLines(const std::string& text)
+{
+    // 逐行剥离 `//` 之后的内容（整行注释与行内注释统一处理），
+    // 只保留类型签名骨架；纯注释行会被整行丢弃。
+    std::istringstream iss(text);
+    std::string line, out;
+    while (std::getline(iss, line)) {
+        size_t comment_pos = line.find("//");
+        std::string code_part = (comment_pos != std::string::npos) ? line.substr(0, comment_pos) : line;
+        while (!code_part.empty() && (code_part.back() == ' ' || code_part.back() == '\t')) {
+            code_part.pop_back();
+        }
+        if (code_part.empty()) continue;
+        out += code_part + "\n";
+    }
+    return out;
+}
+
+std::string PromptOptimizer::BuildMinimalToolSignature(const nlohmann::ordered_json& tool)
+{
+    // 仅保留参数名与是否必需（如 read(path, offset?, limit?)），
+    // 不含类型/描述，用于压缩预算仍不足时的最终降级。
+    if (!tool.contains("function") || !tool["function"].contains("name")) return "";
+    std::string name = tool["function"]["name"];
+    if (name.empty() || name == "image") return "";
+
+    std::ostringstream sig;
+    sig << name << "(";
+    if (tool["function"].contains("parameters") && tool["function"]["parameters"].contains("properties")) {
+        const auto& properties = tool["function"]["parameters"]["properties"];
+        const auto& required = tool["function"]["parameters"].value("required", json::array());
+        bool first = true;
+        for (auto it = properties.begin(); it != properties.end(); ++it) {
+            if (!first) sig << ", ";
+            first = false;
+            sig << it.key();
+            bool is_required = std::find(required.begin(), required.end(), it.key()) != required.end();
+            if (!is_required) sig << "?";
+        }
+    }
+    sig << ")";
+    return sig.str();
 }
 
 // ========== 原始提示词段落过滤实现 ==========
