@@ -218,6 +218,11 @@ int main(int argc, char **argv)
     std::string active_config = std::string(external_config_path);
     std::string active_model_path =
             std::filesystem::path(external_config_path).parent_path().generic_string();
+    // 只在传入默认文件名 config.json 时才探测同目录下的 genie_config.json,自定义文件名原样使用。
+    if (std::filesystem::path(active_config).filename() == "config.json")
+    {
+        active_config = File::ResolveModelConfigPath(active_model_path);
+    }
 
     // model_name(.bin 列表)与 hwinfo 在 -c 模式下被引擎忽略,传空 vector 与占位值即可,
     // 保持 api_loadmodel 现有函数签名不变。

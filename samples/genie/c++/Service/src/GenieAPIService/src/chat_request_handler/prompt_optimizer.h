@@ -58,10 +58,14 @@ public:
         const nlohmann::ordered_json& request_data = nlohmann::ordered_json::object()
     );
 
-    // 处理和优化工具定义
+    // 处理和优化工具定义。token_budget 为工具部分（含模板包装后）允许占用的
+    // 最大 token 数（通常是 contextSize 减去已被 system 部分占用的 token 数），
+    // 压缩按 已知签名 -> 剥离注释 -> 极简签名 -> 按预算截断工具列表 逐级降级，
+    // 确保返回结果的 token 数始终不超过该预算。
     std::string OptimizeToolsPrompt(
         const std::string& tool_descriptions, 
-        const std::string& tool_prompt_template
+        const std::string& tool_prompt_template,
+        size_t token_budget
     );
 
     // 转换 OpenAI 格式的工具调用到内部格式
@@ -168,6 +172,14 @@ private:
     
     // 为未知工具生成基本的 TypeScript 定义
     std::string GenerateBasicTypeScriptDefinition(const nlohmann::ordered_json& tool);
+
+    // 剥离工具签名文本中的 `//` 注释（整行注释与行内注释），只保留类型签名骨架，
+    // 用于 OptimizeToolsPrompt 压缩预算不足时的降级
+    std::string StripToolCommentLines(const std::string& text);
+
+    // 生成单个工具的极简签名 "name(param1, param2?)"（不含类型/描述），
+    // 作为 OptimizeToolsPrompt 压缩预算仍不足时的最终降级格式
+    std::string BuildMinimalToolSignature(const nlohmann::ordered_json& tool);
 
     // ========== 原始提示词段落过滤 ==========
 

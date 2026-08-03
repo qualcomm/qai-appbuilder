@@ -49,6 +49,16 @@ struct File
                                const std::string &part,
                                std::vector<std::string> *files = nullptr);
 
+    // 优先返回 model_dir + "/genie_config.json"（若存在），否则回退返回 model_dir + "/config.json"。
+    // 不强制返回路径实际存在，调用点保留原有的 IsFileExist 判断逻辑。
+    static std::string ResolveModelConfigPath(const std::string &model_dir);
+
+    // 把 file_path（若为相对路径则先相对 base_dir 展开）weakly_canonical 规范化后向上 levels 级，
+    // 层级不足/规范化失败时返回空字符串，由调用点决定回退策略。
+    static std::string DeriveAncestorDir(const std::string &file_path,
+                                         const std::string &base_dir,
+                                         int levels);
+
     template<typename T>
     static std::vector<T> ReadFile(const std::string &file_name, bool binary = true);
 

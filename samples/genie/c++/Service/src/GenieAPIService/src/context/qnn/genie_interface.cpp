@@ -191,21 +191,13 @@ void IEmbedding::TokenToEmbedCallback(const int32_t token,
 
 Genie_Status_t QInterfaceImpl::IEmbedding::GenieDialogQueryImpl()
 {
-    auto rs = GenieDialog_embeddingQuery(context_->m_DialogHandle,
-                                         input_data_,
-                                         input_len_,
-                                         GENIE_DIALOG_SENTENCE_COMPLETE,
-                                         token_to_embed_callback_fn_,
-                                         GenieCallBack,
-                                         this);
-    if (context_->model_config_.i_model_config_.get_qnn_embedding().embedding_type_ == QNNEmbeddingType::QWEN3_VL)
-    {
-        My_Log("[Qwen3VL DIAG] GenieDialog_embeddingQuery returned rs=" + std::to_string(int(rs))
-               + " input_len_=" + std::to_string(input_len_)
-               + " stream_answer_len=" + std::to_string(context_->m_stream_answer.size()),
-               My_Log::Level::kWarning);
-    }
-    return rs;
+    return GenieDialog_embeddingQuery(context_->m_DialogHandle,
+                                      input_data_,
+                                      input_len_,
+                                      GENIE_DIALOG_SENTENCE_COMPLETE,
+                                      token_to_embed_callback_fn_,
+                                      GenieCallBack,
+                                      this);
 }
 
 std::string QInterfaceImpl::IEmbedding::GeneratePaddingPrompt(const std::string &bos,
@@ -287,14 +279,6 @@ IEmbedding &IEmbedding::BuildInferredBuffer(const QNNEmbedding::InferResource *i
         {
             throw std::runtime_error("call model inference failed");
         }
-        std::string output_sizes_str;
-        for (auto sz : outputSize)
-        {
-            output_sizes_str += std::to_string(sz) + " ";
-        }
-        My_Log("[Qwen3VL DIAG] vision encoder returned " + std::to_string(outputBuffers.size())
-               + " output buffer(s), sizes: " + output_sizes_str, My_Log::Level::kWarning);
-
         inferred_buffers[i].assign(outputBuffers.at(0), outputBuffers.at(0) + outputSize.at(0));
         for (size_t k = 1; k < outputBuffers.size(); ++k)
         {

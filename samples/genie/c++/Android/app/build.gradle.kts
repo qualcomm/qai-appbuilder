@@ -36,6 +36,13 @@ val sourceFiles = listOf(
 
 val libsDir = file("libs/arm64-v8a")
 
+// From app/build.gradle.kts (Android/app/), go up 3 levels to samples/genie, then into
+// python/models — the same config-template source Windows/Linux CMake copies at build time
+// (src/GenieAPIService/CMakeLists.txt: copy_directory ${CMAKE_SOURCE_DIR}/../../python/models
+// ${BUILD_PATH}/config). Mirrored here instead of committing a duplicate copy into assets/.
+val configTemplatesSourceDir = file("../../../python/models")
+val configTemplatesAssetsDir = file("src/main/assets/config")
+
 println("Build output directory: ${buildOutputDir.absolutePath}")
 println("Libs directory: ${libsDir.absolutePath}")
 
@@ -66,8 +73,19 @@ val copyHttpServiceTask = tasks.register<Copy>("copyHttpService") {
     }
 }
 
+val copyConfigTemplatesTask = tasks.register<Copy>("copyConfigTemplates") {
+    from(configTemplatesSourceDir)
+    into(configTemplatesAssetsDir)
+
+    doFirst {
+        if (!configTemplatesSourceDir.exists()) {
+            throw GradleException("Config templates source directory does not exist: ${configTemplatesSourceDir.absolutePath}")
+        }
+    }
+}
+
 tasks.preBuild {
-    dependsOn(copyHttpServiceTask)
+    dependsOn(copyHttpServiceTask, copyConfigTemplatesTask)
 }
 
 plugins {
@@ -141,6 +159,7 @@ android {
 
     buildFeatures {
         viewBinding = true
+        buildConfig = true
     }
 
     packaging {

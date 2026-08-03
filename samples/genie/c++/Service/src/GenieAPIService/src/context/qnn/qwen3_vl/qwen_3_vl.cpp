@@ -12,7 +12,6 @@
 #include "qwen_3_vl.h"
 #include "qwen3_vl_image_processor.hpp"
 #include "../../torch_helper/masked_scatter.h"
-#include <log.h>
 
 IVisionEmbedding &QInterface::Qwen3VL::BuildImgPixel()
 {
@@ -78,9 +77,6 @@ IVisionEmbedding &QInterface::Qwen3VL::MergeEmbedding()
             deepstack_fbufs.emplace_back(buf);
         }
         torch_helper::AddDeepstackResidual(image_rows, static_cast<size_t>(cols_), deepstack_fbufs, embedded_bin_);
-        My_Log("[Qwen3VL DIAG] folded " + std::to_string(deepstack_buffers_.size())
-               + " deepstack buffer(s) additively into " + std::to_string(image_rows.size())
-               + " image row(s) before embeddingQuery.", My_Log::Level::kWarning);
     }
 
     input_data_ = reinterpret_cast<uint8_t*>(embedded_bin_.data());

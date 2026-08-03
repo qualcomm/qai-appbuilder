@@ -18,7 +18,7 @@ public:
     explicit Qwen3VL(GenieContext *context) : IVisionEmbedding(context), IEmbedding(context)
     {
         kPromptTemplate = "<|im_start|>system\n"
-                          "%s.<|im_end|>\n"
+                          "%s<|im_end|>\n"
                           "<|im_start|>user\n%s"
                           "%s"  //<|vision_start|><|image_pad|><|vision_end|>
                           "<|im_end|>\n"

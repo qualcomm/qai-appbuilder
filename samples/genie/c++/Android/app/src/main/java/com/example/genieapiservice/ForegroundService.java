@@ -32,6 +32,7 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.net.HttpURLConnection;
@@ -124,13 +125,70 @@ public class ForegroundService extends Service {
         LogUtils.logDebug(TAG,"onCreate called ",LogUtils.LOG_DEBUG);
     }
 
+    // 与 Windows/Linux 发布包里的 <BUILD_PATH>/config/ 对齐：把同款配置模板解压到
+    // modelRoot/config/，为 native 侧已有的 ModelManager::ResolveKnownModelPath() 提供匹配源；
+    // 已存在则跳过，不重复解压。
+    private void ensureConfigTemplatesExtracted() {
+        File configDir = new File(modelRoot, "config");
+        if (configDir.exists()) {
+            return;
+        }
+        try {
+            String[] modelDirs = getAssets().list("config");
+            if (modelDirs == null || modelDirs.length == 0) {
+                return;
+            }
+            for (String modelDirName : modelDirs) {
+                String assetModelDir = "config/" + modelDirName;
+                String[] files = getAssets().list(assetModelDir);
+                if (files == null || files.length == 0) {
+                    continue;
+                }
+                File destModelDir = new File(configDir, modelDirName);
+                destModelDir.mkdirs();
+                for (String fileName : files) {
+                    try (InputStream in = getAssets().open(assetModelDir + "/" + fileName);
+                         FileOutputStream out = new FileOutputStream(new File(destModelDir, fileName))) {
+                        byte[] buffer = new byte[4096];
+                        int read;
+                        while ((read = in.read(buffer)) != -1) {
+                            out.write(buffer, 0, read);
+                        }
+                    }
+                }
+            }
+            LogUtils.logDebug(TAG, "Extracted config templates to " + configDir.getAbsolutePath(), LogUtils.LOG_DEBUG);
+        } catch (IOException e) {
+            LogUtils.logDebug(TAG, "Failed to extract config templates: " + e, LogUtils.LOG_ERROR);
+        }
+    }
+
+    // Android 多用户场景下 UID = userId * 100000 + appId，单用户设备该值恒为 0；这是不依赖
+    // 隐藏 API/权限的标准推导方式，取不到再回退遍历 /storage/emulated/ 下已存在的数字子目录。
+    private static String detectStorageUserId() {
+        int detected = android.os.Process.myUid() / 100000;
+        if (new File("/storage/emulated/" + detected).exists()) {
+            return String.valueOf(detected);
+        }
+        File[] subDirs = new File("/storage/emulated/").listFiles();
+        if (subDirs != null) {
+            for (File subDir : subDirs) {
+                if (subDir.isDirectory() && subDir.getName().matches("\\d+")) {
+                    return subDir.getName();
+                }
+            }
+        }
+        return String.valueOf(detected);
+    }
+
     private String resolveModelRoot() {
         String internal = getApplicationContext().getFilesDir().getAbsolutePath() + "/GenieModels";
+        String storageUserId = detectStorageUserId();
         String[] candidates = {
                 internal,
-                "/storage/emulated/10/GenieModels",
+                "/storage/emulated/" + storageUserId + "/GenieModels",
                 "/sdcard/GenieModels",
-                "/data/media/10/GenieModels",
+                "/data/media/" + storageUserId + "/GenieModels",
                 "/data/local/tmp"
         };
         for (String candidate : candidates) {
@@ -139,7 +197,7 @@ public class ForegroundService extends Service {
                 LogUtils.logDebug(TAG, "Using model root: " + candidate, LogUtils.LOG_DEBUG);
                 return candidate;
             }
-            File cfg = new File(candidate + "/" + DEFAULT_MODEL_NAME + "/config.json");
+            File cfg = ModelConfigUtils.resolveConfigFile(candidate + "/" + DEFAULT_MODEL_NAME);
             if (cfg.exists()) {
                 LogUtils.logDebug(TAG, "Using model root (default model present): " + candidate, LogUtils.LOG_DEBUG);
                 return candidate;
@@ -196,8 +254,7 @@ public class ForegroundService extends Service {
 
     private boolean isValidModel(String dirName, String modelRoot) {
         LogUtils.logDebug(TAG, "isValidModel : " + dirName, LogUtils.LOG_DEBUG);
-        String configFile = modelRoot + "/" + dirName + "/config.json";
-        File file = new File(configFile);
+        File file = ModelConfigUtils.resolveConfigFile(modelRoot + "/" + dirName);
         if (file.exists()) {
             return true;
         }
@@ -215,13 +272,10 @@ public class ForegroundService extends Service {
             LogUtils.logDebug(TAG,"logFileName = " + logFileName + " mLogLevelIndex = " + mLogLevelIndex,LogUtils.LOG_DEBUG);
             nativeLib = new MyNativeLib();
             modelRoot = resolveModelRoot();
+            ensureConfigTemplatesExtracted();
             String currentModel = getFirstModel(modelRoot);
-            String configFile = null;
-            if (currentModel != null) {
-                configFile = modelRoot + "/" + currentModel + "/config.json";
-            } else {
-                configFile = modelRoot + "/" + DEFAULT_MODEL_NAME + "/config.json";
-            }
+            String configFile = ModelConfigUtils.resolveConfigFile(
+                    modelRoot + "/" + (currentModel != null ? currentModel : DEFAULT_MODEL_NAME)).getPath();
             LogUtils.logDebug(TAG,"config file = " + configFile,LogUtils.LOG_DEBUG);
             File cfg = new File(configFile);
             LogUtils.logDebug(TAG,"config exists=" + cfg.exists() + " size=" + (cfg.exists() ? cfg.length() : -1),LogUtils.LOG_DEBUG);
@@ -234,7 +288,12 @@ public class ForegroundService extends Service {
                 LogUtils.logDebug(TAG, "No valid config.json found; aborting service start.", LogUtils.LOG_ERROR);
                 return;
             }
-            String[] commandArgs = {"main", "-c", configFile, "-l", "-d", mLogLevelIndex != -1 ? String.valueOf(mLogLevelIndex) : "2", "-f", logFileName};
+            // Debug 构建下不传 -f,原生日志走 log.h 的 LogConsole -> __android_log_print,
+            // 直接进 logcat,不必再受生产设备无法访问应用私有日志文件的权限限制。
+            String logLevelArg = mLogLevelIndex != -1 ? String.valueOf(mLogLevelIndex) : "2";
+            String[] commandArgs = BuildConfig.DEBUG
+                    ? new String[]{"main", "-c", configFile, "-l", "-d", logLevelArg}
+                    : new String[]{"main", "-c", configFile, "-l", "-d", logLevelArg, "-f", logFileName};
             nativeLib.runService(commandArgs);
             System.out.println("after runService");
         }).start();

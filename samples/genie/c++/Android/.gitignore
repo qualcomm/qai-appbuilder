@@ -1,3 +1,4 @@
 .gradle/
 app/.cxx/
 app/libs/
+app/src/main/assets/config/

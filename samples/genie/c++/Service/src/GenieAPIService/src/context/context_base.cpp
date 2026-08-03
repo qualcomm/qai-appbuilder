@@ -8,6 +8,7 @@
 
 #include "context_base.h"
 #include "log.h"
+#include <algorithm>
 
 bool ContextBase::Stop()
 {
@@ -40,12 +41,18 @@ bool ContextBase::SetParamsByConfig(const json &j)
     for (auto it = sample_config.begin(); it != sample_config.end(); ++it)
     {
         const std::string &key = it.key();
-        if (!j.contains(key))
+        // 请求侧传入的采样参数键名有 "top-k"/"top_k" 两种连字符/下划线写法混用的历史遗留
+        // （config.json 的 sampler schema 用连字符，部分调用方用下划线拼 json），
+        // 这里做双写法容错匹配，避免其中一种写法被静默丢弃、覆盖失效。
+        std::string alt_key = key;
+        std::replace(alt_key.begin(), alt_key.end(), '-', '_');
+        const std::string &lookup_key = j.contains(key) ? key : alt_key;
+        if (!j.contains(lookup_key))
         {
             continue;
         }
 
-        const auto &j_val = j[key];
+        const auto &j_val = j[lookup_key];
         auto &c_val = it.value();
         if (j_val == c_val)
         {
