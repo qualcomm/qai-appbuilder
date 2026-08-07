@@ -173,11 +173,4 @@ You can use the pre-compiled version directly and download the version you need 
 QAI AppBuilder is licensed under the BSD 3-clause "New" or "Revised" License. Check out the [LICENSE](LICENSE) for more details.
 
 ## Star History
-
-<a href="https://www.star-history.com/#qualcomm/qai-appbuilder&Date">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=qualcomm/qai-appbuilder&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=qualcomm/qai-appbuilder&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=qualcomm/qai-appbuilder&type=Date" />
- </picture>
-</a>
+[![Star History Chart](https://star-history.dera.page/svg?repos=qualcomm/qai-appbuilder&type=date&legend=top-left)](https://star-history.dera.page/#qualcomm/qai-appbuilder&type=date&legend=top-left)
