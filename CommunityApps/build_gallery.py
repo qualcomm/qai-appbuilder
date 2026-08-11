@@ -55,6 +55,24 @@ CONTRIB_END = "<!-- CONTRIBUTORS:END -->"
 SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 VALID_CATEGORIES = {"genai", "vision", "audio", "multimodal", "agent", "other"}
 
+# Language sub-directories used by the samples/ tree, e.g.
+# samples/.../real_esrgan_x4plus/python/app.json. For these the slug must match
+# the parent *model* folder (real_esrgan_x4plus), not the language folder.
+LANG_SUBDIRS = {"python", "cpp", "c++", "csharp", "c#"}
+
+
+def slug_folder(meta_path):
+    """Folder name the slug must match.
+
+    Normally the folder containing app.json, but when app.json lives inside a
+    language sub-directory (python/, cpp/, …) it is the parent model folder so
+    that nested samples like real_esrgan_x4plus/python/app.json validate against
+    'real_esrgan_x4plus' rather than 'python'."""
+    parent = meta_path.parent
+    if parent.name.lower() in LANG_SUBDIRS:
+        return parent.parent.name
+    return parent.name
+
 
 def validate(meta, folder):
     """Lightweight structural validation mirroring schema/app.schema.json.
@@ -110,7 +128,7 @@ def make_record(meta_path):
         print(f"ERROR: {meta_path} is not valid JSON: {exc}", file=sys.stderr)
         raise SystemExit(2)
 
-    folder = meta_path.parent.name
+    folder = slug_folder(meta_path)
     problems = validate(meta, folder)
     if problems:
         return None, problems
@@ -125,6 +143,12 @@ def make_record(meta_path):
     desc = meta.get("description", {}) or {}
     run = meta.get("run", {}) or {}
     screenshot = meta.get("screenshot") or ""
+    # Resolve the screenshot relative to app.json's folder, then normalize so a
+    # "../assets/..." reference (used by nested samples where app.json lives in a
+    # python/ sub-dir) collapses to a clean path instead of ".../python/../assets".
+    screenshot_path = (
+        Path(os.path.normpath(f"{rel_path}/{screenshot}")).as_posix() if screenshot else ""
+    )
     record = {
         "slug": meta.get("slug", folder),
         "name": meta.get("name", folder),
@@ -135,7 +159,7 @@ def make_record(meta_path):
         "authorGithub": author.get("github", ""),
         "short": desc.get("short", ""),
         "tags": meta.get("tags", []),
-        "screenshot": f"{rel_path}/{screenshot}" if screenshot else "",
+        "screenshot": screenshot_path,
         "run": run.get("command", ""),
         "homepage": meta.get("homepage", ""),
         "source": meta.get("source", ""),

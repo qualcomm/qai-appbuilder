@@ -1,5 +1,5 @@
 {
-  "generatedAt": "unknown",
+  "generatedAt": "2026-08-11",
   "count": 3,
   "discussions": "https://github.com/qualcomm/qai-appbuilder/discussions/categories/show-and-tell",
   "issues": "https://github.com/qualcomm/qai-appbuilder/issues",
@@ -24,7 +24,7 @@
     {
       "slug": "real-esrgan-x4plus",
       "name": "Real-ESRGAN x4plus",
-      "path": "../samples/ComputerVision/Super_Resolution/real_esrgan_x4plus",
+      "path": "../samples/models/computer_vision/super_resolution/real_esrgan_x4plus/python",
       "category": "vision",
       "official": false,
       "author": "shengtin",
@@ -39,16 +39,16 @@
         "onnx",
         "offline"
       ],
-      "screenshot": "../samples/ComputerVision/Super_Resolution/real_esrgan_x4plus/assets/screenshot.png",
+      "screenshot": "../samples/models/computer_vision/super_resolution/real_esrgan_x4plus/assets/screenshot.png",
       "run": "python real_esrgan_x4plus.py",
       "homepage": "https://aihub.qualcomm.com/compute/models/real_esrgan_x4plus",
-      "source": "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/ComputerVision/Super_Resolution/real_esrgan_x4plus",
+      "source": "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/models/computer_vision/super_resolution/real_esrgan_x4plus/python",
       "createdAt": "2026-07-22"
     },
     {
       "slug": "track-anything",
       "name": "Track-Anything",
-      "path": "../samples/ComputerVision/video_object_tracking/track_anything",
+      "path": "../samples/models/computer_vision/video_object_tracking/track_anything/python",
       "category": "vision",
       "official": false,
       "author": "Tim",
@@ -62,10 +62,10 @@
         "onnx",
         "offline"
       ],
-      "screenshot": "../samples/ComputerVision/video_object_tracking/track_anything/assets/screenshot.png",
-      "run": "python main.py",
+      "screenshot": "../samples/models/computer_vision/video_object_tracking/track_anything/assets/screenshot.png",
+      "run": "python track_anything.py",
       "homepage": "https://aihub.qualcomm.com/compute/models/track_anything?domain=Computer+Vision&useCase=Video+Object+Tracking",
-      "source": "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/ComputerVision/video_object_tracking/track_anything",
+      "source": "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/models/computer_vision/video_object_tracking/track_anything/python",
       "createdAt": "2026-07-22"
     },
     {

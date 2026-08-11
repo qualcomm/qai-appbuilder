@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="colorPrimary">#075E54</color>
+    <color name="colorPrimaryDark">#054D44</color>
+    <color name="colorAccent">#25D366</color>
+    <color name="background_chat">#ECE5DD</color>
+    <color name="bubble_user">#E1FFC7</color>
+    <color name="bubble_bot">#FFFFFF</color>
+    <color name="text_color_primary">#333333</color>
+    <color name="input_background">#FFFFFF</color>
+</resources>

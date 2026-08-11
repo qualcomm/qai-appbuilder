@@ -88,11 +88,11 @@ Refere to [python.md](docs/python.md) for instructions on setting up the Python(
 You can also run the batch file from [QAI AppBuilder Launcher](tools/launcher/) to setup the environment automatically.
 
 ## WebUI AI Application
-We have developed several [WebUI AI applications](samples/webui/README.md) based on QAI AppBuilder, allowing you to experience them quickly. <br>
-All these applications run on a local PC, requiring *no internet connection* and are *completely free*. <br>
-You can run WebUI AI applications througn the batch file [3.Start_WebUI.bat](tools/launcher/).
+We have developed several [WebUI AI applications](samples/apps/webui/) based on QAI AppBuilder, allowing you to experience them quickly.
+All these applications run on a local PC, requiring *no internet connection* and are *completely free*.
+You can run WebUI AI applications through the batch file [4.Start_WebUI.bat](tools/launcher/4.Start_WebUI.bat).
 <br><br>
-<a href="samples/webui/README.md"><img src="https://img.shields.io/badge/Note: - Before trying other functions, we suggest that you try these WebUI AI Application first.-important"></a>
+<a href="samples/apps/webui/README.md"><img src="https://img.shields.io/badge/Note: - Before trying other functions, we suggest that you try these WebUI AI Application first.-important"></a>
 
 |  App   | Description  |
 |  ----  | :----    |
@@ -109,9 +109,31 @@ We have also implemented the client sample code of Genie API Service through bot
 2. [C++ based service](samples/genie/c++/README.md): Guide to run OpenAI compatible API services developed with C++.<br>
 
 ## Samples
-We have many [Python](samples/python/README.md), [Python_Linux](samples/linux/README.md) and [C++](samples/c++/) samples which can be run directly. The models used in these samples are from [AI-Hub](https://aihub.qualcomm.com/compute/models).<br>
-*We suggest that you try to run these sample code before you actually start writing your own code.*<br>
+We have a rich set of samples covering multiple categories. All models are sourced from [AI Hub](https://aihub.qualcomm.com/compute/models) and automatically downloaded on first run.
 
+Use the interactive launcher to run any sample without writing code:
+
+```bash
+cd qai-appbuilder\samples
+python run_inference.py                    # interactive menu
+python run_inference.py --list             # list all available models
+python run_inference.py --model whisper_base_en --args "--audio_file input.wav"
+```
+
+| Category | Description | Link |
+|----------|-------------|------|
+| **Audio** | TTS (PiperTTS / MeloTTS), ASR (Whisper Base/Tiny, Zipformer), Audio Classification (YAMNet) | [models/audio/](samples/models/audio/) |
+| **Computer Vision** | Image classification, object detection, segmentation, depth estimation, pose estimation, face analysis, super-resolution, inpainting, video tracking | [models/computer_vision/](samples/models/computer_vision/) |
+| **Generative AI** | Stable Diffusion v1.5 / v2.1 / v3.5 (text → image) | [models/generative_ai/](samples/models/generative_ai/) |
+| **Multimodal** | CLIP, VLM (Qwen-VL), OCR (EasyOCR EN+ZH), NomicEmbed text embedding, OpusMT Chinese→English translation | [models/multimodal/](samples/models/multimodal/) |
+| **WebUI Apps** | Gradio-based apps: ImageRepairApp, StableDiffusionApp, GenieWebUI | [apps/webui/](samples/apps/webui/) |
+| **Genie Apps** | StorySeed (AI story + image → Xiaohongshu), FletUI desktop app | [apps/](samples/apps/) |
+| **Genie LLM Service** | OpenAI-compatible LLM API service (Python + C++) for Llama, Qwen, Phi, Granite | [genie/](samples/genie/) |
+| **Android** | GenieChat (LLM/VLM) and SuperResolution Android apps | [apps/android/](samples/apps/android/) |
+
+See [samples/README.md](samples/README.md) for the full guide including environment setup, model download instructions, and run examples.
+
+---
 ## Tools
 
 ### 1. QAI AppBuilder Launcher
@@ -138,7 +160,22 @@ We provide [QAI AppBuilder Launcher](tools/launcher/), enabling you to experienc
 [Qwen2 7B SSD](https://www.aidevhome.com/data/adh2/models/8380/qwen2_7b_ssd_250702.html) <br>
 [DeepSeek-R1-Distill-Qwen-7B](https://aiot.aidlux.com/zh/models/detail/78) <br>
 
-## Thrid Party App List
+---
+## Community Apps
+
+On-device AI apps built by **the community** on top of QAI AppBuilder — every app
+runs locally on the Snapdragon NPU, no internet needed at inference time. Browse
+the full gallery (with category filters and a contributor wall) in
+[`CommunityApps/`](CommunityApps/); each app is auto-discovered from its `app.json`.
+
+> **Want your app here?** See the [Community Apps submission guide](docs/community.md)
+> or post in
+> [Discussions → Show & Tell](https://github.com/qualcomm/qai-appbuilder/discussions/categories/show-and-tell).
+> Add a folder with an `app.json`, run `python CommunityApps/build_gallery.py`, and
+> your app appears in the gallery, the index table, and the contributor wall.
+
+---
+## Third-Party App List
 [stable-diffusion-webui Extension](https://github.com/quic/wos-ai-plugins/tree/main/plugins/stable-diffusion-webui/qairt_accelerate) <br>
 [Blender ControlNet Plugin](https://github.com/quic/wos-ai-plugins/tree/main/plugins/blender/SnapdragonImageGeneration) <br>
 [无痕修图软件](https://www.aidevhome.com/?id=30) <br>

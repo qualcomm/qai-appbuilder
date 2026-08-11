@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <!-- Toolbar replaces the system ActionBar -->
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        android:background="?attr/colorPrimary"
+        app:title="SuperResolution"
+        app:titleTextColor="@android:color/white" />
+
+    <!-- Scrollable content below the Toolbar -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <!-- Model selection label -->
+            <TextView
+                android:id="@+id/models"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Select Model:"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="4dp"
+                android:textSize="18sp"
+                android:textStyle="bold"/>
+
+            <!-- Model spinner: always visible with a fixed height.
+                 The selected item text scrolls (marquee) when too long. -->
+            <Spinner
+                android:id="@+id/spinnerModelsList"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginBottom="8dp"
+                android:minWidth="200dp"
+                android:spinnerMode="dropdown"/>
+
+            <!-- Pre/post-processing mode: label + radio buttons on the same row -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginTop="2dp"
+                android:layout_marginBottom="4dp">
+
+                <TextView
+                    android:id="@+id/processingModeLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Pre/Post process:"
+                    android:layout_marginEnd="8dp"
+                    android:textSize="16sp"/>
+
+                <RadioGroup
+                    android:id="@+id/processingModeGroup"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <RadioButton
+                        android:id="@+id/modeJava"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="8dp"
+                        android:checked="true"
+                        android:text="Java" />
+
+                    <RadioButton
+                        android:id="@+id/modeCpp"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="C++" />
+                </RadioGroup>
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="2dp"
+                android:layout_marginBottom="6dp">
+
+            <Button
+                android:id="@+id/selectImageButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="8dp"
+                android:text="Input Image" />
+
+            <Button
+                android:id="@+id/covertImageButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Convert" />
+        </LinearLayout>
+
+        <!-- Progress indicator shown during inference -->
+        <LinearLayout
+            android:id="@+id/inferenceProgressLayout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="4dp"
+            android:visibility="gone">
+
+            <ProgressBar
+                android:id="@+id/inferenceProgressBar"
+                style="?android:attr/progressBarStyleSmall"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp" />
+
+            <TextView
+                android:id="@+id/inferenceStatusText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Running inference, please wait..."
+                android:textSize="14sp"
+                android:textColor="?attr/colorPrimary" />
+        </LinearLayout>
+            <ImageView
+                android:id="@+id/inputImagePreview"
+                android:layout_width="match_parent"
+                android:layout_height="220dp"
+                android:layout_marginBottom="8dp"
+                android:scaleType="centerCrop"
+                android:background="#DDDDDD" />
+
+            <ImageView
+                android:id="@+id/outputImagePreview"
+                android:layout_width="match_parent"
+                android:layout_height="220dp"
+                android:scaleType="centerCrop"
+                android:background="#EEEEEE" />
+
+        </LinearLayout>
+    </ScrollView>
+
+</LinearLayout>
