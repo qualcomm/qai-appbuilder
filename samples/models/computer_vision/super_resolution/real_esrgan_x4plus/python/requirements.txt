@@ -1,0 +1,28 @@
+# Core dependency — on-device NPU inference via QAI AppBuilder.
+qai_appbuilder>=2.24.0
+
+# Image I/O and array math. Pillow loads/saves the images and runs the
+# resize/pad pre- and post-processing; numpy handles the tensor math.
+numpy
+pillow
+
+# ── ONNX mode (optional, only needed for `--onnx`) ───────────────────────────
+# The default runtime uses a .dlc / .bin model and needs none of the packages
+# below. They are only required when running with `--onnx`, which loads
+# models/real_esrgan_x4plus.onnx through qai_appbuilder.OnnxRuntimeContext.
+
+# ONNX Runtime — the backend OnnxRuntimeContext loads for .onnx models.
+# onnxruntime
+
+# NPU/HTP acceleration (Snapdragon, Windows on ARM64 only). Provides the
+# `onnxruntime_qnn` module the QNN execution provider needs. On x64 / machines
+# without a Snapdragon NPU it is unavailable and OnnxRuntimeContext falls back
+# to the CPU execution provider.
+# onnxruntime-qnn
+
+# FP16 ONNX auto-generation. Only used the first time `--onnx` runs and the
+# ONNX file is missing: the RealESRGAN_x4plus.pth weights are downloaded, the
+# RRDBNet is rebuilt, exported to FP32 ONNX and converted to FP16.
+# torch
+# onnx
+# onnxconverter-common

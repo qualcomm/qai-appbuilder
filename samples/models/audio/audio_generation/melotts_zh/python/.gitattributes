@@ -1,0 +1,4 @@
+# Windows batch/cmd scripts must use CRLF line endings, or cmd.exe
+# misreads them (reads mid-line and errors on comment fragments).
+*.bat text eol=crlf
+*.cmd text eol=crlf

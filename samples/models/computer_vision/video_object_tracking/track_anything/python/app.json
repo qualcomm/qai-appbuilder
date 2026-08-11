@@ -1,0 +1,53 @@
+{
+  "$schema": "../schema/app.schema.json",
+  "name": "Track-Anything",
+  "slug": "track-anything",
+  "version": "1.0.0",
+  "author": {
+    "name": "Tim",
+    "github": "tim202503",
+    "email": ""
+  },
+  "description": {
+    "short": "Click a target in any video and track it frame-by-frame with XMem segmentation, running fully on the Snapdragon NPU.",
+    "long": "Track-Anything lets you click one or more targets on the first frame of a video and produces an output video with the target mask-overlaid on every frame. It runs the Track-Anything (XMem) ONNX models on the Qualcomm NPU via QAI AppBuilder's OnnxRuntimeContext with HTP acceleration. Models are auto-downloaded from the Qualcomm AI Hub public asset bucket on first run; a default surfing clip is fetched if you don't provide your own video. Point selection uses matplotlib so it works with the headless OpenCV build shipped on Windows on ARM."
+  },
+  "category": "vision",
+  "tags": ["segmentation", "video", "tracking", "xmem", "onnx", "offline"],
+  "license": "BSD-3-Clause",
+  "homepage": "https://aihub.qualcomm.com/compute/models/track_anything?domain=Computer+Vision&useCase=Video+Object+Tracking",
+  "source": "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/models/computer_vision/video_object_tracking/track_anything/python",
+  "screenshot": "../assets/screenshot.png",
+  "demoVideo": "",
+  "models": [
+    {
+      "name": "track-anything (XMem, 4 ONNX graphs)",
+      "type": "vision",
+      "runtime": "ONNX",
+      "precision": "float",
+      "source": "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/track_anything/releases/v0.58.0/track_anything-onnx-float.zip",
+      "sizeMB": 255
+    }
+  ],
+  "requirements": {
+    "os": ["windows-arm64"],
+    "python": ">=3.10",
+    "qai_appbuilder": ">=2.24.0",
+    "dependencies": ["opencv-python-headless", "numpy", "onnxruntime", "matplotlib"],
+    "hardware": {
+      "npu": "Snapdragon X Elite / X Plus",
+      "minRamGB": 16
+    }
+  },
+  "run": {
+    "setup": "pip install -r requirements.txt",
+    "windows": "start.bat",
+    "command": "python track_anything.py",
+    "entrypoint": "track_anything.py",
+    "port": null
+  },
+  "official": false,
+  "hidden": false,
+  "createdAt": "2026-07-22",
+  "updatedAt": "2026-08-11"
+}

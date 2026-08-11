@@ -1,0 +1,20 @@
+# Core dependency — on-device NPU inference via QAI AppBuilder.
+qai_appbuilder>=2.24.0
+
+# Video I/O and array math. Use the headless OpenCV build: the Windows-on-ARM
+# wheel has no GUI backend, so point selection is done with matplotlib instead.
+opencv-python-headless
+numpy
+
+# ONNX Runtime — the backend qai_appbuilder.OnnxRuntimeContext loads for .onnx
+# models. Required (the app fails with ModuleNotFoundError without it).
+onnxruntime
+
+# NPU/HTP acceleration (Snapdragon, Windows on ARM64 only). Provides the
+# `onnxruntime_qnn` module the QNN execution provider needs. Optional: on x64 /
+# machines without a Snapdragon NPU it is unavailable, and the app automatically
+# falls back to the CPU execution provider.
+# onnxruntime-qnn
+
+# Interactive first-frame point selection (GUI backend for headless OpenCV).
+matplotlib

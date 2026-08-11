@@ -1,0 +1,88 @@
+# ---------------------------------------------------------------------
+# MeloTTS-ZH runtime dependencies (Windows ARM64 and x86/AMD64).
+#
+# IMPORTANT: install this file with --no-deps:
+#     pip install --no-deps -r requirements.txt
+#
+# Why --no-deps: MeloTTS' dependency chain pulls build-only / heavyweight
+# packages that either have no ARM64 wheel (e.g. numba, llvmlite via librosa)
+# or are never used on the TTS path. We install the exact leaf packages we
+# need and stub the unavailable native ones in-process (see melotts_zh.py §1).
+# On x86/AMD64 the same --no-deps approach is used for consistency and to
+# avoid accidentally pulling CUDA-enabled or heavyweight wheels.
+#
+# Packages that are NOT in this file and are installed separately by
+# setup_env.bat (they either need dependency resolution or a special index):
+#     - melotts        -> patched sdist (PyPI sdist is broken; see NOTES.md Step 4)
+#     - torch          -> PyTorch CPU wheel index (both ARM64 and x86/AMD64)
+#     - qai_appbuilder, numpy, soundfile, requests, pyyaml -> installed WITH deps
+#
+# See README.md ("Environment Setup") and NOTES.md for the full procedure.
+# ---------------------------------------------------------------------
+
+# ── HuggingFace stack: this version TRIPLE is tightly coupled ──────────────
+# transformers 4.56.x needs tokenizers >=0.22,<0.23 AND huggingface_hub >=0.34,<1.0.
+# Any other combination raises "X is required for a normal functioning of this
+# module" at `from transformers import AutoTokenizer`. Do NOT bump these.
+# Applies to both ARM64 and x86/AMD64 — wheels are available for both.
+transformers==4.56.2
+tokenizers==0.22.2
+huggingface_hub==0.34.4
+safetensors
+regex
+tqdm
+
+# ── MeloTTS text / phonemizer (G2P) deps ──
+num2words
+g2p_en
+cn2an
+pypinyin
+jieba
+unidecode
+txtsplit
+narwhals
+pykakasi
+anyascii
+jamo
+g2pk2
+gruut
+gruut-ipa
+gruut-lang-en
+gruut-lang-fr
+gruut-lang-de
+cached_path
+jaconv
+
+# ── audio / DSP (librosa & friends; --no-deps avoids pulling numba/llvmlite) ──
+librosa
+lazy_loader
+scipy
+audioread
+pooch
+scikit-learn
+msgpack
+threadpoolctl
+decorator
+
+# ── transitive deps that MeloTTS' chain imports at load time but that are
+#    MISSED under --no-deps (discovered while bringing the sample up) ──
+proces        # required by cn2an
+nltk          # required by g2p_en
+typeguard     # required by inflect
+inflect       # required by g2p_en.expand
+distance      # required by g2p_en
+click         # required by nltk
+joblib        # required by nltk / scikit-learn
+defusedxml    # required by nltk.corpus (xmldocs) at import time
+
+# ── gruut transitive deps (french/spanish text modules pull gruut at import) ──
+babel
+networkx
+dateparser
+python-crfsuite
+tzlocal
+python-dateutil
+pytz
+jsonlines
+deprecated
+wrapt

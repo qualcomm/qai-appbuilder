@@ -1,13 +1,30 @@
+﻿# Model binary files (downloaded at runtime, not tracked)
 *.bin
-!multimodal/Image_To_Text/easy_ocr/Char/ch_en_character.bin
-!multimodal/Image_To_Text/easy_ocr/Char/ch_en_lang_char.bin
-!multimodal/Image_To_Text/easy_ocr/Char/en_character.bin
-!multimodal/Image_To_Text/easy_ocr/Char/en_lang_char.bin
+# Exception: easy_ocr character data files (small, needed at runtime, tracked in repo)
+!models/multimodal/image_to_text/easy_ocr/assets/Char/ch_en_character.bin
+!models/multimodal/image_to_text/easy_ocr/assets/Char/ch_en_lang_char.bin
+!models/multimodal/image_to_text/easy_ocr/assets/Char/en_character.bin
+!models/multimodal/image_to_text/easy_ocr/assets/Char/en_lang_char.bin
 
 *.raw
 __pycache__/
+
+# Inference output files (generated at runtime, not tracked)
+**/python/output.wav
+**/python/output.png
+**/python/output.jpg
+**/python/output.mp4
+**/python/output_mask.png
+**/python/output_frames/
+**/python/images/
+**/python/embeddings.npy
+**/python/*.tmp
+
+# Download tools (installed at runtime)
 tools/wget/
 tools/aria2c/
 tools/wget.zip
 tools/aria2c.zip
+
+# QNN runtime libraries (installed at runtime)
 qai_libs/

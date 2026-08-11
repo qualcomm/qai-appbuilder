@@ -1,0 +1,57 @@
+<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <PreferenceCategory app:title="网络设置">
+
+        <EditTextPreference
+            app:key="ip_address"
+            app:title="API 地址"
+            app:summary="输入您的本地服务地址"
+            app:useSimpleSummaryProvider="true"
+            app:defaultValue="127.0.0.1:8910" />
+
+    </PreferenceCategory>
+
+    <!-- 这个 Category 将用来动态显示模型列表 -->
+    <PreferenceCategory
+        app:key="models_category"
+        app:title="模型管理">
+
+        <!-- 这个 Preference 将作为“添加新模型”的按钮 -->
+        <Preference
+            app:key="add_model"
+            app:title="添加新模型"
+            app:icon="@drawable/ic_add"
+            app:summary="点击以添加一个新的模型名称" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="模型参数">
+        <!-- 模型参数部分保持不变 -->
+        <SeekBarPreference
+            app:key="temperature"
+            app:title="温度 (Temperature)"
+            app:summary="控制生成的随机性，值越高越随机"
+            app:defaultValue="150"
+            android:min="0"
+            android:max="200"
+            app:showSeekBarValue="true" />
+        <SeekBarPreference
+            app:key="top_p"
+            app:title="Top P"
+            app:summary="控制生成文本的多样性"
+            app:defaultValue="60"
+            android:min="0"
+            android:max="100"
+            app:showSeekBarValue="true" />
+        <SeekBarPreference
+            app:key="top_k"
+            app:title="Top K"
+            app:summary="限制下一个词的选择范围"
+            app:defaultValue="13"
+            android:min="1"
+            android:max="50"
+            app:showSeekBarValue="true" />
+    </PreferenceCategory>
+
+</PreferenceScreen>

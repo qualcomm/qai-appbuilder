@@ -1,0 +1,53 @@
+{
+  "$schema": "../schema/app.schema.json",
+  "name": "Real-ESRGAN x4plus",
+  "slug": "real-esrgan-x4plus",
+  "version": "1.0.0",
+  "author": {
+    "name": "shengtin",
+    "github": "",
+    "email": ""
+  },
+  "description": {
+    "short": "Upscale any image 4× with Real-ESRGAN x4plus, running fully on the Snapdragon NPU (HTP) via QAI AppBuilder.",
+    "long": "Real-ESRGAN x4plus is a state-of-the-art image super-resolution model that upscales images by 4x using an RRDBNet (23 residual-in-residual dense blocks). It runs on the Snapdragon NPU (HTP) via QAI AppBuilder's QNNContext / OnnxRuntimeContext with HTP acceleration, and supports multiple model formats (float DLC, w8a8 quantized DLC, precompiled BIN, FP16 ONNX) and runtimes (HTP, GPU, CPU). The script auto-detects the platform (Windows on Snapdragon, x86 Windows, ARM64/x86 Linux) and picks a sensible runtime, forcing CPU+DLC on x86 Windows. The float DLC is auto-downloaded from the Qualcomm AI Hub public asset bucket on first run; the FP16 ONNX is generated on demand from the public PyTorch weights. The pipeline resize/pads the input to the model input size, normalizes, auto-detects NCHW/NHWC layout, runs inference, and reassembles the 4x upscaled result. No weights are committed to this repo."
+  },
+  "category": "vision",
+  "tags": ["super-resolution", "upscale", "real-esrgan", "rrdbnet", "dlc", "onnx", "offline"],
+  "license": "BSD-3-Clause",
+  "homepage": "https://aihub.qualcomm.com/compute/models/real_esrgan_x4plus",
+  "source": "https://github.com/qualcomm/qai-appbuilder/tree/main/samples/models/computer_vision/super_resolution/real_esrgan_x4plus/python",
+  "screenshot": "../assets/screenshot.png",
+  "demoVideo": "",
+  "models": [
+    {
+      "name": "real_esrgan_x4plus (float DLC, auto-downloaded)",
+      "type": "vision",
+      "runtime": "QNN",
+      "precision": "float",
+      "source": "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/real_esrgan_x4plus/releases/v0.55.0/real_esrgan_x4plus-qnn_dlc-float.zip",
+      "sizeMB": 67
+    }
+  ],
+  "requirements": {
+    "os": ["windows-arm64", "windows-x64", "linux-aarch64", "linux-x64"],
+    "python": ">=3.10",
+    "qai_appbuilder": ">=2.24.0",
+    "dependencies": ["numpy", "pillow"],
+    "hardware": {
+      "npu": "Snapdragon X Elite / X Plus",
+      "minRamGB": 16
+    }
+  },
+  "run": {
+    "setup": "pip install -r requirements.txt",
+    "windows": "start.bat",
+    "command": "python real_esrgan_x4plus.py",
+    "entrypoint": "real_esrgan_x4plus.py",
+    "port": null
+  },
+  "official": false,
+  "hidden": false,
+  "createdAt": "2026-07-22",
+  "updatedAt": "2026-08-11"
+}
