@@ -28,7 +28,7 @@ name: CI
 #
 # Matrix:
 #   - Windows x64 + Windows ARM64: 3 Python (3.11/3.12/3.13) x 3 QNN SDK
-#       (2.46/2.47/2.48.40) per OS = 18 jobs total across both Windows OSes
+#       (2.47/2.48.40/2.49) per OS = 18 jobs total across both Windows OSes
 #   - Linux aarch64: 1 job (py3.12 x QNN 2.47), expanded once stable
 #
 # fail-fast disabled so a single broken combination does not mask the rest.
@@ -166,12 +166,9 @@ jobs:
           - version: '2.47.0.260601'
             url: ''
             genie-url: 'https://github.com/qualcomm/qai-appbuilder/releases/download/v2.47.0/QAIRT_v2.47.0.260601.zip'
-          # Rows below use the SDK-bundled (upstream) Genie because no
-          # matching customized-Genie overlay is published on
-          # qualcomm/qai-appbuilder for that version yet.
-          - version: '2.46.0.260424'
-            url: 'https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.46.0.260424/v2.46.0.260424.zip'
-            genie-url: ''
+          - version: '2.49.0.260730'
+            url: 'https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.49.0.260730/v2.49.0.260730.zip'
+            genie-url: 'https://github.com/qualcomm/qai-appbuilder/releases/download/v2.49.0/QAIRT_v2.49.0.260730.zip'
     steps:
       - name: Checkout (with pybind11 submodule only)
         uses: actions/checkout@v4
@@ -315,9 +312,9 @@ jobs:
           - version: '2.47.0.260601'
             url: ''
             genie-url: 'https://github.com/qualcomm/qai-appbuilder/releases/download/v2.47.0/QAIRT_v2.47.0.260601.zip'
-          - version: '2.46.0.260424'
-            url: 'https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.46.0.260424/v2.46.0.260424.zip'
-            genie-url: ''
+          - version: '2.49.0.260730'
+            url: 'https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.49.0.260730/v2.49.0.260730.zip'
+            genie-url: 'https://github.com/qualcomm/qai-appbuilder/releases/download/v2.49.0/QAIRT_v2.49.0.260730.zip'
     steps:
       - name: Checkout (with pybind11 submodule only)
         uses: actions/checkout@v4
@@ -670,6 +667,9 @@ jobs:
           - version: '2.48.40.260702'
             url: 'https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.48.40.260702/v2.48.40.260702.zip'
             genie-url: 'https://github.com/qualcomm/qai-appbuilder/releases/download/v2.48.40/QAIRT_v2.48.40.260702.zip'
+          - version: '2.49.0.260730'
+            url: 'https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.49.0.260730/v2.49.0.260730.zip'
+            genie-url: 'https://github.com/qualcomm/qai-appbuilder/releases/download/v2.49.0/QAIRT_v2.49.0.260730.zip'
     steps:
       - name: Checkout (with genie submodules)
         uses: actions/checkout@v4
