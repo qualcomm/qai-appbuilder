@@ -102,6 +102,10 @@ class VaeDecoder(VaeDecoderBase):
 
 ####################################################################
 
+def Soc_ID_config(soc_id):
+    global SOC_ID
+    SOC_ID = soc_id
+
 def model_initialize():
     global model_inited
     global scheduler, tokenizer, text_encoder, unet, vae_decoder, share_memory

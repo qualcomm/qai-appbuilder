@@ -9,6 +9,7 @@ sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "models", "generative_ai", "image_generation"))
 import stable_diffusion_v2_1.python.stable_diffusion_v2_1 as stable_diffusion_v2_1 # We need add this line before import 'gradio'.
 import gradio as gr
+import argparse
 
 
 ####################################################################
@@ -51,6 +52,7 @@ footer{display:none !important}
 ####################################################################
 
 execution_ws = os.path.dirname(os.path.abspath(__file__))
+output_dir = os.path.join(execution_ws, "images")
 
 user_prompt = ""
 uncond_prompt = ""
@@ -84,7 +86,7 @@ def infer(text, text2, step, guidance, seed, number):
 
     for i in range(number):
         stable_diffusion_v2_1.setup_parameters(user_prompt, uncond_prompt, user_seed, user_step, user_text_guidance)
-        image_path = stable_diffusion_v2_1.model_execute(modelExecuteCallback, execution_ws + "\\images", False)
+        image_path = stable_diffusion_v2_1.model_execute(modelExecuteCallback, output_dir, False)
         image_paths.append(image_path)
 
     return image_paths
@@ -92,6 +94,14 @@ def infer(text, text2, step, guidance, seed, number):
 ####################################################################
 
 if __name__ == '__main__':
+
+    parser = argparse.ArgumentParser(description='Stable Diffusion App')
+    parser.add_argument('--soc_id', type=str, default="wos", help='Chipset ID for the device')
+    args = parser.parse_args()
+
+    print(f"StableDiffusionApp: args.soc_id = {args.soc_id}")
+    stable_diffusion_v2_1.Soc_ID_config(soc_id=args.soc_id)
+    stable_diffusion_v2_1.model_initialize()
 
     with gr.Blocks(fill_width=True, fill_height=True, css=css, theme=gr.themes.Glass()) as demo:
         demo.title = "文生图应用"
@@ -116,7 +126,7 @@ if __name__ == '__main__':
 
         btn_gr.click(infer, inputs=[text_gr, text2_gr, step_gr, guidance_gr, seed_gr, number_gr], outputs=gallery_gr)
 
-    stable_diffusion_v2_1.model_initialize()
+    # stable_diffusion_v2_1.model_initialize()
 
     # Bypass system proxy for localhost so Gradio 5.x internal startup health check succeeds.
     # Gradio calls httpx.get("http://localhost:<port>/gradio_api/startup-events") after starting
