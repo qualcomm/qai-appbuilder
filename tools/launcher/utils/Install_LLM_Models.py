@@ -12,7 +12,7 @@ from Install_Helper import *
 models = {
     "IBM-Granite-v3.1-8B": {
         "model_zip_url": "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/ibm_granite_v3_1_8b_instruct/v1/snapdragon_x_elite/models.zip",
-        "tokenizer_url": "https://gitee.com/hf-models/granite-3.1-8b-base/raw/main/tokenizer.json"
+        "tokenizer_url": "https://huggingface.co/ibm-granite/granite-3.1-8b-base/resolve/main/tokenizer.json"
     }
 }
 

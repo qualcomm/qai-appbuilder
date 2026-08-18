@@ -36,14 +36,21 @@ python models/multimodal/vision_language_model/qwen_vl/python/qwen_vl.py
 ```
 
 With a specific model:
+Qwen2：
 ```bash
-python models/multimodal/vision_language_model/qwen_vl/python/qwen_vl.py --path /path/to/model/dir
+python models/multimodal/vision_language_model/qwen_vl/python/qwen_vl.py --model qwen2 --path models/multimodal/vision_language_model/qwen_vl/models/qwen2
+```
+
+Qwen3：
+```bash
+python models/multimodal/vision_language_model/qwen_vl/python/qwen_vl.py --model qwen3 --path models/multimodal/vision_language_model/qwen_vl/models/qwen3
 ```
 
 ## Scripts
 
 | Script | Description |
 | ------ | ----------- |
+| `python/install_model.py` | Downloads and extracts models |
 | `python/qwen_vl.py` | Main entry point with Gradio web UI |
 | `python/qwen2_vlm_qnn.py` | Qwen2-VL QNN inference implementation |
 | `python/qwen3_vlm_qnn.py` | Qwen3-VL QNN inference implementation |

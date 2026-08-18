@@ -5,6 +5,12 @@
 
 import sys
 import platform
+import subprocess
+import os
+
+# Add install_model to path for importing
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from install_model import download_qwen_models, check_model_files
 
 # ── WoS (Windows on Snapdragon) guard ─────────────────────────────────────
 # This script is designed for Linux (aarch64-oe-linux) runtime.
@@ -196,17 +202,34 @@ with gr.Blocks(title="Qwen VL Demo") as demo:
 def cleanup():
     pass
 
-def check_model_files(dir:str) -> bool:
-    required_files = [
-        "veg.serialized.bin",
-        "config.json",
-        "embedding_weights_151936x1536.raw",
-        "tokenizer.json"
-    ]
-    for file in required_files:
-        if not os.path.exists(os.path.join(dir, file)):
-            return False
-    return True
+# def check_model_files(dir:str) -> bool:
+#     required_files = [
+#         "veg.serialized.bin",
+#         "config.json",
+#         "embedding_weights_151936x1536.raw",
+#         "tokenizer.json"
+#     ]
+#     for file in required_files:
+#         if not os.path.exists(os.path.join(dir, file)):
+#             return False
+#     return True
+
+def model_download(model_type, model_dir):
+    """Download model if not already present"""
+    ret = True
+    
+    desc = f"Downloading {model_type.upper()} model... "
+    fail = f"\nFailed to download {model_type.upper()} model."
+    
+    print(desc)
+    ret = download_qwen_models(model_type=model_type)
+    
+    if model_dir is None or not check_model_files(model_dir):
+        print(fail)
+        return False, None
+    
+    print(f"Model download successful: {model_dir}")
+    return ret
 
 def load_qwen2_vlm(qwen2_vl_model_dir:str):
     veg_model_path = os.path.join(qwen2_vl_model_dir, "veg.serialized.bin")
@@ -285,13 +308,13 @@ if __name__ == "__main__":
         epilog="""
 Examples:
   # Use Qwen2-VL model (default)
-  python demo_app.py /path/to/qwen2_vl_model
+  python qwen_vl.py /path/to/qwen2_vl_model
   
   # Use Qwen3-VL model
-  python demo_app.py --model qwen3 --path /path/to/qwen3_vl_model
+  python qwen_vl.py --model qwen3 --path /path/to/qwen3_vl_model
   
   # Specify server port
-  python demo_app.py --model qwen2 --path /path/to/qwen2_vl_model --port 8080
+  python qwen_vl.py --model qwen2 --path /path/to/qwen2_vl_model --port 8080
         """
     )
     
@@ -336,15 +359,34 @@ Examples:
     # Determine model path: prioritize --path, then use positional argument
     model_dir = args.model_path if args.model_path else args.path
     
+    # if not model_dir:
+    #     parser.print_help()
+    #     print("\nError: Model path is required")
+    #     sys.exit(1)
+    
+    # if not os.path.exists(model_dir):
+    #     print(f"Error: Model directory does not exist: {model_dir}")
+    #     sys.exit(1)
+
+    # Determine model path: prioritize --path, then use positional argument
+    model_dir = args.model_path if args.model_path else args.path
+    
+    # If no path provided, attempt to download the model
     if not model_dir:
-        parser.print_help()
-        print("\nError: Model path is required")
-        sys.exit(1)
+        print(f"No model path provided. Attempting to download {args.model.upper()} model...")
+        ret = model_download(args.model, model_dir)
+        if not ret or not model_dir:
+            print(f"Error: Failed to download model or model path is invalid")
+            sys.exit(1)
     
     if not os.path.exists(model_dir):
-        print(f"Error: Model directory does not exist: {model_dir}")
-        sys.exit(1)
-    
+        print(f"Model directory does not exist: {model_dir}")
+        print(f"Attempting to download {args.model.upper()} model...")
+        ret = model_download(args.model, model_dir)
+        if not ret or not model_dir:
+            print(f"Error: Failed to download model")
+            sys.exit(1)
+
     # Load the corresponding model based on the selected model type
     print(f"Loading model: {args.model.upper()}")
     print(f"Model path: {model_dir}")
