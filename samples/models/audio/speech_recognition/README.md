@@ -11,6 +11,7 @@ Automatic speech recognition (ASR) models that transcribe spoken audio to text.
 | [whisper_tiny_en](whisper_tiny_en/) | English ASR | English | Encoder-decoder, 4 layers, 6 heads | Fast |
 
 - **Zipformer** uses float32/int32 native I/O and supports streaming chunked inference.
+  Silence-detection VAD chunking (via `ffmpeg`) is on by default; disable with `--no-use_vad`.
 - **Whisper** models use float16 KV cache and support audio of any length (auto-chunked at 30 seconds).
 
 ## Quick Start
@@ -40,6 +41,9 @@ python run_inference.py --model whisper_base_en --args "--audio_file path/to/aud
 ```
 pip install qai_appbuilder numpy soundfile scipy kaldi_native_fbank
 ```
+> `ffmpeg` on PATH is optional but recommended — it enables the default
+> silence-detection VAD chunking (skips silent regions, splits long audio at
+> natural pauses). Without it the script decodes the whole waveform in one pass.
 
 ### Whisper (Base / Tiny)
 ```

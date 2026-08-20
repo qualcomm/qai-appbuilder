@@ -5,7 +5,7 @@
 import sys
 import os
 sys.path.append(".")
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "common"))
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "..", "..", "shared", "python"))
 import install
 import cv2
 import numpy as np
@@ -102,6 +102,27 @@ def ensure_default_video():
         exit()
     print(f"Download complete: {local_path}")
     return local_path
+
+
+def play_video(path):
+    """Open the given video in the OS default player (cross-platform, best-effort)."""
+    if not os.path.exists(path):
+        print(f"[WARN] Cannot play, file not found: {path}")
+        return
+    print(f"Opening output video in the default player: {path}")
+    try:
+        if sys.platform.startswith("win"):
+            os.startfile(path)  # type: ignore[attr-defined]  # Windows only
+        elif sys.platform == "darwin":
+            import subprocess
+            subprocess.Popen(["open", path])
+        else:
+            import subprocess
+            subprocess.Popen(["xdg-open", path])
+    except Exception as e:
+        print(f"[WARN] Failed to auto-play the video ({e}). "
+              f"Please open it manually: {path}")
+
 
 # Use matplotlib for point selection (on Windows on ARM only opencv-python-headless is
 # available, which has no GUI backend, so cv2.imshow/namedWindow cannot be used)
@@ -467,3 +488,6 @@ if __name__ == "__main__":
 
     print(f"\nTracking complete! Output video saved to: {output_path}")
     print("Track-Anything HTP inference finished")
+
+    # Auto-play the resulting output video in the OS default player
+    play_video(output_path)

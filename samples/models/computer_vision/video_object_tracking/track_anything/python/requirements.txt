@@ -1,10 +1,36 @@
 # Core dependency — on-device NPU inference via QAI AppBuilder.
 qai_appbuilder>=2.24.0
 
-# Video I/O and array math. Use the headless OpenCV build: the Windows-on-ARM
-# wheel has no GUI backend, so point selection is done with matplotlib instead.
-opencv-python-headless
+# Model / video download helper (samples/shared/python/install.py) needs these:
+# it imports `requests` (HTTP download) and `tqdm` (progress bar) at import time,
+# so they must be installed even before any model is fetched.
+requests
+tqdm
+
+# Video I/O and array math.  The Windows-on-ARM cp313 build of Python has NO
+# prebuilt opencv-python / opencv-python-headless wheel on PyPI (verified with
+# ``pip download --only-binary=:all:`` — every 4.x/5.x version returns "no
+# matching distribution" for cp313-win_arm64).  Falling back to the sdist
+# fails because pip's own extraction hits a MAX_PATH boundary on the
+# ``video_capture_xaml.WindowsPhone.vcxproj.filters`` file inside the tarball,
+# which aborts the *entire* ``pip install -r`` transaction and drops requests
+# / tqdm / qai_appbuilder along with it.
+#
+# Workarounds actually used:
+#   * ``start.bat`` creates the venv with ``--system-site-packages`` so any
+#     opencv the user has already installed system-wide is reused inside the
+#     venv, and it also installs opencv AFTER the core deps in its own pip
+#     transaction so an opencv failure no longer takes requests/tqdm down.
+#   * We do not put opencv in this file any more, to keep
+#     ``pip install -r requirements.txt`` (used by IDE integrations that
+#     ignore start.bat) from failing catastrophically for the same reason.
+#     Instead, ``start.bat`` installs opencv as a best-effort separate step;
+#     if pip cannot find a wheel, the script prints a clear message telling
+#     the user to install opencv-python-headless (or opencv-python) manually
+#     into their Python and re-run.  See start.bat for details.
 numpy
+
+
 
 # ONNX Runtime — the backend qai_appbuilder.OnnxRuntimeContext loads for .onnx
 # models. Required (the app fails with ModuleNotFoundError without it).

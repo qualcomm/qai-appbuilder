@@ -80,6 +80,7 @@ if PLATFORM in ("wos", "x86_win"):
         ("computervision",  "real_esrgan_general_x4v3",      r"models\computer_vision\super_resolution\real_esrgan_general_x4v3\python\real_esrgan_general_x4v3.py", None),
         ("computervision",  "real_esrgan_x4plus",            r"models\computer_vision\super_resolution\real_esrgan_x4plus\python\real_esrgan_x4plus.py", None),
         ("computervision",  "resnet_3d",                     r"models\computer_vision\video_classification\resnet_3d\python\resnet_3d.py",               None),
+        ("computervision",  "track_anything",                r"models\computer_vision\video_object_tracking\track_anything\python\track_anything.py",    None),
         ("computervision",  "unet_segmentation",             r"models\computer_vision\semantic_segmentation\unet_segmentation\python\unet_segmentation.py", None),
         ("computervision",  "yolov8_det",                    r"models\computer_vision\object_detection\yolov8_det\python\yolov8_det.py",                 None),
 
@@ -165,8 +166,8 @@ def list_models():
             print(f"  {cat}")
             print(f"  {'-'*50}")
             current_cat = cat
-        status = "  " if exists else " !"  # '!' = script not found
-        print(f"  {idx:>3}. {status} {name:<40} {path}")
+        status = " " if exists else "!"  # '!' = script not found
+        print(f" {idx:>3}. {status} {name:<25} {path}")
         index_map[idx] = name
         idx += 1
     print()

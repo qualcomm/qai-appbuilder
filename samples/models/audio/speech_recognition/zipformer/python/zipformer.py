@@ -425,6 +425,161 @@ def decode_tokens(token_ids, vocab):
     return text.strip()
 
 
+# ─── Silence-detection VAD helpers (opt-in via --use_vad, on by default) ─────
+# Ported from ``qaiappbuilder_speech_recognition_windows_py/speech_recognition.py``.
+# Uses ffmpeg's ``silencedetect`` filter (pure ffmpeg + numpy, no extra Python
+# packages) to skip silent regions and split long audio at natural pauses
+# before it is fed to the streaming Zipformer decoder.  When ffmpeg is not
+# available on PATH (or fails) the caller silently falls back to decoding the
+# full waveform as a single segment — preserving the previous behaviour.
+
+def _vad_parse_silencedetect(text):
+    """Parse the stderr of ``ffmpeg -af silencedetect`` into (start, end) tuples."""
+    import re
+    silences = []
+    current_start = None
+    for line in text.splitlines():
+        m = re.search(r"silence_start:\s*(-?[0-9.]+)", line)
+        if m:
+            current_start = max(0.0, float(m.group(1)))
+            continue
+        m = re.search(r"silence_end:\s*(-?[0-9.]+)", line)
+        if m and current_start is not None:
+            silences.append((current_start, float(m.group(1))))
+            current_start = None
+    return silences
+
+
+def _vad_invert_silences(silences, duration):
+    if duration <= 0:
+        return []
+    if not silences:
+        return [(0.0, duration)]
+    segments = []
+    cursor = 0.0
+    for s, e in sorted(silences):
+        s = max(0.0, min(duration, s))
+        e = max(0.0, min(duration, e))
+        if s > cursor:
+            segments.append((cursor, s))
+        cursor = max(cursor, e)
+    if cursor < duration:
+        segments.append((cursor, duration))
+    return segments
+
+
+def _vad_merge_segments(segments, max_gap):
+    if not segments:
+        return []
+    merged = [segments[0]]
+    for s, e in segments[1:]:
+        ps, pe = merged[-1]
+        if s - pe <= max_gap:
+            merged[-1] = (ps, max(pe, e))
+        else:
+            merged.append((s, e))
+    return merged
+
+
+def _vad_split_long_segments(segments, max_segment, overlap):
+    """Split any speech segment longer than ``max_segment`` seconds into
+    overlapping windows of length ``max_segment`` (with ``overlap`` seconds
+    of overlap between adjacent windows)."""
+    result = []
+    for s, e in segments:
+        if e - s <= max_segment:
+            result.append((s, e))
+            continue
+        cursor = s
+        while cursor < e:
+            chunk_end = min(e, cursor + max_segment)
+            result.append((cursor, chunk_end))
+            if chunk_end >= e:
+                break
+            cursor = max(cursor + 0.1, chunk_end - overlap)
+    return result
+
+
+def _vad_detect_speech_segments(audio_path, duration,
+                                noise_db=-35.0, min_silence=0.6,
+                                overlap=0.3, min_speech=1.0,
+                                max_segment=25.0):
+    """Run ``ffmpeg silencedetect`` on the file at ``audio_path`` and return
+    a list of (start, end) speech segments in seconds.
+
+    Returns an empty list on any ffmpeg failure — the caller is expected to
+    fall back to processing the full waveform in one pass.
+    """
+    import subprocess
+    try:
+        completed = subprocess.run(
+            [
+                "ffmpeg", "-hide_banner", "-nostats",
+                "-i", str(audio_path),
+                "-af", f"silencedetect=noise={noise_db}dB:d={min_silence}",
+                "-f", "null", "-",
+            ],
+            check=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace",
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError) as e:
+        print(f"[WARN] VAD ffmpeg failed ({type(e).__name__}: {e}) — "
+              f"falling back to full-waveform decode.")
+        return []
+
+    silences = _vad_parse_silencedetect(completed.stderr)
+    raw = _vad_invert_silences(silences, duration)
+
+    expanded = []
+    for s, e in raw:
+        if e - s < min_speech:
+            continue
+        expanded.append((max(0.0, s - overlap), min(duration, e + overlap)))
+
+    merged = _vad_merge_segments(expanded, max_gap=overlap * 2)
+    return _vad_split_long_segments(merged, max_segment=max_segment, overlap=overlap)
+
+
+def chunk_waveform_by_vad(audio_path, waveform, sample_rate,
+                          noise_db=-35.0, min_silence=0.6, overlap=0.3,
+                          min_speech=1.0, max_segment=25.0):
+    """Return a list of (start_time_s, waveform_slice) at 16 kHz using
+    ffmpeg's ``silencedetect``.  On any failure (or when no speech regions
+    are found) returns ``[(0.0, waveform)]`` so the caller falls back to
+    decoding the full waveform in one pass.
+    """
+    # Resample once to SAMPLE_RATE if needed so slice indices are consistent.
+    if sample_rate != SAMPLE_RATE:
+        import scipy.signal
+        n = int(len(waveform) * SAMPLE_RATE / sample_rate)
+        waveform = scipy.signal.resample(waveform, n).astype(np.float32)
+        sample_rate = SAMPLE_RATE
+
+    duration = len(waveform) / float(sample_rate)
+    speech = _vad_detect_speech_segments(
+        audio_path, duration,
+        noise_db=noise_db, min_silence=min_silence, overlap=overlap,
+        min_speech=min_speech, max_segment=max_segment,
+    )
+    if not speech:
+        print("[INFO] VAD produced no segments — falling back to full-waveform decode.")
+        return [(0.0, waveform)]
+
+    chunks = []
+    for s, e in speech:
+        i0 = int(round(s * sample_rate))
+        i1 = int(round(e * sample_rate))
+        if i1 - i0 >= int(0.1 * sample_rate):
+            chunks.append((s, waveform[i0:i1].astype(np.float32, copy=False)))
+    if not chunks:
+        return [(0.0, waveform)]
+    print(f"[INFO] VAD produced {len(chunks)} speech segment(s) "
+          f"(silent regions skipped).")
+    return chunks
+
+
+
 # ─── Streaming RNN-T greedy decode ───────────────────────────────────────────
 
 def streaming_decode(encoder, decoder, joiner, features):
@@ -494,7 +649,44 @@ def main():
         help="Path to sherpa-onnx tokens.txt. "
              "Defaults to the tokens.txt inside the downloaded model directory.",
     )
+    # ── Silence-detection VAD chunking (opt-out; ON by default) ──────────────
+    # Ported from ``qaiappbuilder_speech_recognition_windows_py/speech_recognition.py``.
+    # Uses ffmpeg's ``silencedetect`` to skip silent regions and split long
+    # audio at natural pauses before it is fed to the streaming decoder.
+    # Requires ``ffmpeg`` on PATH — if unavailable the code silently falls
+    # back to decoding the full waveform in one pass.
+    parser.add_argument(
+        "--use_vad",
+        action=argparse.BooleanOptionalAction,
+        default=True,          # enabled by default; pass --no-use_vad to turn off.
+        help="Enable silence-detection VAD chunking (default: on; "
+             "use --no-use_vad to decode the whole waveform in one pass). "
+             "Requires ffmpeg on PATH.  Falls back silently to a "
+             "single-segment decode if ffmpeg is unavailable or fails.",
+    )
+    parser.add_argument(
+        "--vad_noise_db",     type=float, default=-35.0,
+        help="[--use_vad] silencedetect noise floor (dB).",
+    )
+    parser.add_argument(
+        "--vad_min_silence",  type=float, default=0.6,
+        help="[--use_vad] Minimum silence duration (s) to split at.",
+    )
+    parser.add_argument(
+        "--vad_overlap",      type=float, default=0.3,
+        help="[--use_vad] Segment overlap (s).",
+    )
+    parser.add_argument(
+        "--vad_min_speech",   type=float, default=1.0,
+        help="[--use_vad] Discard speech segments shorter than this (s).",
+    )
+    parser.add_argument(
+        "--vad_max_segment",  type=float, default=25.0,
+        help="[--use_vad] Max segment length (s) — long segments are "
+             "further split with overlap.",
+    )
     args = parser.parse_args()
+
 
     if not args.audio:
         print("[ERROR] No audio file specified and test audio download failed.\n"
@@ -530,19 +722,47 @@ def main():
     if energy < 1e-3:
         print("    [WARN] audio looks like silence/synthetic — empty result is expected")
 
-    # [2] Features.
-    print("\n[2] Extracting 80-dim log-mel features ...")
-    t0 = time.perf_counter()
-    features = compute_fbank(waveform, sr)
-    print(f"    Shape    : {features.shape}  ({time.perf_counter() - t0:.3f}s)")
+    # [2] VAD segmentation (opt-out; see --use_vad / --no-use_vad).
+    # When enabled, ffmpeg's silencedetect is used to skip silent regions and
+    # split the input into speech segments; each segment is decoded on its own
+    # streaming encoder state so a long file doesn't leak stale context
+    # across a natural pause.  On any ffmpeg failure the code falls back
+    # transparently to a single-segment (whole-waveform) decode.
+    if getattr(args, "use_vad", False):
+        print("\n[2] VAD segmentation (ffmpeg silencedetect) ...")
+        t0 = time.perf_counter()
+        segments = chunk_waveform_by_vad(
+            args.audio, waveform, sr,
+            noise_db=args.vad_noise_db,
+            min_silence=args.vad_min_silence,
+            overlap=args.vad_overlap,
+            min_speech=args.vad_min_speech,
+            max_segment=args.vad_max_segment,
+        )
+        print(f"    Segments : {len(segments)}  ({time.perf_counter() - t0:.3f}s)")
+    else:
+        segments = [(0.0, waveform if sr == SAMPLE_RATE else None)]
+        if segments[0][1] is None:
+            # Match chunk_waveform_by_vad's resampling behaviour so the
+            # single-segment path also delivers a 16 kHz waveform.
+            import scipy.signal
+            n = int(len(waveform) * SAMPLE_RATE / sr)
+            segments = [(0.0, scipy.signal.resample(waveform, n).astype(np.float32))]
 
-    # [3] Tokens.
-    print("\n[3] Loading vocabulary ...")
+    # [3] Features (per-segment).
+    print("\n[3] Extracting 80-dim log-mel features (per segment) ...")
+    t0 = time.perf_counter()
+    seg_features = [(s, compute_fbank(w, SAMPLE_RATE)) for s, w in segments]
+    total_frames = sum(f.shape[0] for _, f in seg_features)
+    print(f"    Total frames: {total_frames}  ({time.perf_counter() - t0:.3f}s)")
+
+    # [4] Tokens.
+    print("\n[4] Loading vocabulary ...")
     vocab = load_tokens(args.tokens)
     print(f"    Vocab size: {len(vocab) if vocab else 'N/A (token IDs only)'}")
 
-    # [4] Load the three QNN context binaries on the NPU.
-    print("\n[4] Loading QNN context binaries (encoder/decoder/joiner.bin) on HTP ...")
+    # [5] Load the three QNN context binaries on the NPU.
+    print("\n[5] Loading QNN context binaries (encoder/decoder/joiner.bin) on HTP ...")
     t0 = time.perf_counter()
     encoder = EncoderModel("zipformer_encoder", encoder_path,
                            input_data_type="native", output_data_type="native")
@@ -552,24 +772,40 @@ def main():
                           input_data_type="native", output_data_type="native")
     print(f"    Load time: {time.perf_counter() - t0:.2f}s")
 
-    # [5] Inference (BURST perf around the decode loop).
-    print("\n[5] Running streaming greedy search ...")
+    # [6] Inference (BURST perf around the decode loop).  Decode each VAD
+    # segment independently and concatenate the transcripts.
+    print("\n[6] Running streaming greedy search ...")
     PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
     t0 = time.perf_counter()
     try:
-        token_ids = streaming_decode(encoder, decoder, joiner, features)
+        segment_texts = []
+        all_token_ids = []
+        for i, (start_s, features) in enumerate(seg_features):
+            ids = streaming_decode(encoder, decoder, joiner, features)
+            seg_text = decode_tokens(ids, vocab)
+            if len(seg_features) > 1:
+                print(f"    [seg {i+1}/{len(seg_features)}  t={start_s:6.2f}s  "
+                      f"tokens={len(ids)}]  {seg_text}")
+            all_token_ids.extend(ids)
+            if seg_text:
+                segment_texts.append(seg_text)
     finally:
         PerfProfile.RelPerfProfileGlobal()
     infer_time = time.perf_counter() - t0
     rtf = infer_time / duration if duration > 0 else float("nan")
 
-    text = decode_tokens(token_ids, vocab)
+    # Join segment transcripts.  For mixed Mandarin/English output we use a
+    # single space so Latin words stay separated; adjacent CJK characters
+    # remain contiguous inside each segment.
+    text = " ".join(segment_texts).strip()
 
     print("\n" + "=" * 60)
     print("  RECOGNITION RESULT")
     print("=" * 60)
     print(f"  Text     : {text}")
-    print(f"  Tokens   : {len(token_ids)}")
+    print(f"  Tokens   : {len(all_token_ids)}")
+    print(f"  Segments : {len(seg_features)}  "
+          f"(VAD {'on' if getattr(args, 'use_vad', False) else 'off'})")
     print(f"  Audio    : {duration:.2f}s")
     print(f"  Infer    : {infer_time:.3f}s")
     print(f"  RTF      : {rtf:.4f}  (< 1.0 = faster than real-time)")
@@ -577,6 +813,7 @@ def main():
 
     # Release NPU contexts.
     del encoder, decoder, joiner
+
 
 
 if __name__ == "__main__":
