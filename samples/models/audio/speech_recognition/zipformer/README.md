@@ -43,6 +43,12 @@ pip install qai_appbuilder numpy soundfile scipy kaldi_native_fbank
 > ```
 > pip install kaldi_native_fbank
 > ```
+>
+> **`ffmpeg`** (optional, on PATH) enables the silence-detection VAD chunking that
+> is **on by default** — it skips silent regions and splits long audio at natural
+> pauses before decoding. If `ffmpeg` is not found (or fails), the script silently
+> falls back to decoding the whole waveform in one pass. Pass `--no-use_vad` to
+> disable VAD explicitly.
 
 ## Quick Start
 
@@ -69,6 +75,12 @@ python models\audio\speech_recognition\zipformer\python\zipformer.py --audio pat
 | `--audio` | `models/test_zh.wav` (auto-downloaded) | Path to input WAV (16 kHz mono preferred) |
 | `--model_dir` | Auto-downloaded model directory | Directory holding `encoder.bin` / `decoder.bin` / `joiner.bin` |
 | `--tokens` | `tokens.txt` inside model directory | Path to sherpa-onnx `tokens.txt` vocabulary file |
+| `--use_vad` / `--no-use_vad` | on | Enable/disable silence-detection VAD chunking (requires `ffmpeg` on PATH; falls back to a single-segment decode if unavailable) |
+| `--vad_noise_db` | `-35.0` | `[--use_vad]` `silencedetect` noise floor (dB) |
+| `--vad_min_silence` | `0.6` | `[--use_vad]` Minimum silence duration (s) to split at |
+| `--vad_overlap` | `0.3` | `[--use_vad]` Segment overlap (s) |
+| `--vad_min_speech` | `1.0` | `[--use_vad]` Discard speech segments shorter than this (s) |
+| `--vad_max_segment` | `25.0` | `[--use_vad]` Max segment length (s); longer segments are split with overlap |
 
 ## Model Download
 
@@ -151,8 +163,10 @@ bucket (no authentication required).
 ```
 Audio file (WAV, 16 kHz mono)
     ↓ soundfile.read + optional scipy resample
-    ↓ kaldi_native_fbank log-mel (80 bins, dither=0, snip_edges=False, high_freq=-400)
-Features [T, 80] float32
+    ↓ VAD segmentation (ffmpeg silencedetect; on by default, --no-use_vad to skip)
+      → list of speech segments, silent regions skipped, long segments split
+    ↓ per segment: kaldi_native_fbank log-mel (80 bins, dither=0, snip_edges=False, high_freq=-400)
+Features [T, 80] float32  (per segment; each decoded on its own encoder state)
     ↓ for each 71-frame chunk (stride=64):
         Encoder (NPU, native I/O)
             inputs : chunk [1,71,80] + 35 cache tensors (int32/float32)
@@ -192,22 +206,26 @@ On Snapdragon X2 Elite (verified):
 [1] Loading audio: ...\models\test_zh.wav
     Duration : 5.63 s  |  Samples: 90080  |  SR: 16000
 
-[2] Extracting 80-dim log-mel features ...
-    Shape    : (351, 80)  (0.012s)
+[2] VAD segmentation (ffmpeg silencedetect) ...
+    Segments : 1  (0.043s)
 
-[3] Loading vocabulary ...
+[3] Extracting 80-dim log-mel features (per segment) ...
+    Total frames: 351  (0.012s)
+
+[4] Loading vocabulary ...
     Vocab size: 6254
 
-[4] Loading QNN context binaries (encoder/decoder/joiner.bin) on HTP ...
+[5] Loading QNN context binaries (encoder/decoder/joiner.bin) on HTP ...
     Load time: 1.23s
 
-[5] Running streaming greedy search ...
+[6] Running streaming greedy search ...
 
 ============================================================
   RECOGNITION RESULT
 ============================================================
   Text     : 对我做了介绍啊那么我想说的是呢大家如果对我的研究感兴趣
   Tokens   : 31
+  Segments : 1  (VAD on)
   Audio    : 5.63s
   Infer    : 0.11s
   RTF      : 0.0195  (< 1.0 = faster than real-time)
@@ -226,6 +244,12 @@ On Snapdragon X2 Elite (verified):
   `output_data_type="native"` — do not uniformly cast to float.
 - **Use real speech** (Issue Z-4): Synthetic audio (sine wave / silence) produces
   empty output. The auto-downloaded `test_zh.wav` is a real Chinese speech sample.
+- **VAD chunking** is **on by default** and uses `ffmpeg`'s `silencedetect` filter
+  to skip silent regions and split long audio at natural pauses; each speech
+  segment is decoded on its own streaming encoder state so context doesn't leak
+  across pauses. It requires `ffmpeg` on PATH — if `ffmpeg` is missing or fails,
+  the script silently falls back to decoding the whole waveform in one pass.
+  Disable it with `--no-use_vad` and tune it with the `--vad_*` arguments.
 - A harmless `<E> Error 0x200: failed to close queue ...` may print on exit.
   It is a QNN HTP context-teardown warning and does not affect the output.
 - Files in this directory:

@@ -247,6 +247,22 @@ class OnnxRuntimeContext:
             return ortq.get_qnn_gpu_path()
         return ortq.get_qnn_htp_path()
 
+    @staticmethod
+    def _model_has_epcontext(model_path):
+        """Return True if the ONNX graph already contains an EPContext node.
+
+        Such models are precompiled QNN context wrappers and must be loaded
+        directly (never recompiled). Detection reads only the graph structure
+        (no external data); any failure conservatively returns False so the
+        normal compile path is used.
+        """
+        try:
+            import onnx
+            m = onnx.load(model_path, load_external_data=False)
+            return any(n.op_type == "EPContext" for n in m.graph.node)
+        except Exception:
+            return False
+
     def _build_qnn_session(self, ort, ortq, use_context_cache: bool):
         """Build a single QNN/HTP ORT InferenceSession.
 
@@ -319,6 +335,18 @@ class OnnxRuntimeContext:
         # place mirrors the proven yolov8_det-npu.py path.
         so.add_provider_for_devices([chosen_device], self._provider_options)
         print(f"[OnnxRuntimeContext]use_context_cache: {use_context_cache}")
+        if self._model_has_epcontext(self.model_path):
+            # The model is ALREADY a precompiled EPContext wrapper (its graph
+            # contains an EPContext node pointing at a QNN *_qairt_context.bin).
+            # Do NOT set ep.context_enable / ep.context_file_path here: asking the
+            # QNN EP to *recompile* an already-compiled context makes it return a
+            # NULL EPContext node ("OrtEp::Compile() returned a NULL EPContext
+            # node"), after which the CPU fallback cannot run the QNN-sourced
+            # EPContext node. Just load it directly and let the QNN EP consume
+            # the embedded/adjacent context binary.
+            print("[OnnxRuntimeContext] Model is already an EPContext graph; "
+                  "loading precompiled QNN context directly (no recompile).")
+            return ort.InferenceSession(self.model_path, so)
         if use_context_cache:
             # Compile/serialize the QNN HTP graph into an EPContext binary that
             # sits next to the model. On subsequent runs ORT loads the prebuilt
@@ -422,7 +450,7 @@ class OnnxRuntimeContext:
         if arr.dtype != target_dtype:
             arr = arr.astype(target_dtype, copy=False)
 
-        if arr.ndim == 1 and expected_shape:
+        if arr.ndim <= 1 and expected_shape:
             concrete = [d for d in expected_shape if isinstance(d, int) and d > 0]
             if len(concrete) == len(expected_shape):
                 expected_size = 1
