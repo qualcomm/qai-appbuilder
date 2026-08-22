@@ -67,7 +67,7 @@
     <line x1="82" y1="64" x2="90" y2="64" stroke="#00c8ff" stroke-width="1.2"/>
   </g>
 
-  <!-- ═══ RIGHT: Model Conversion Pipeline (ModelBuilder) ═══ -->
+  <!-- ═══ RIGHT: Model Conversion Pipeline ═══ -->
   <g transform="translate(742, 22)" opacity="0.55">
     <!-- Box 1: ONNX/PyTorch source -->
     <rect x="0" y="18" width="36" height="26" rx="4"
@@ -130,14 +130,14 @@
   <!-- Blue underline -->
   <rect x="230" y="72" width="440" height="2" rx="1" fill="url(#blueAccent)" opacity="0.6"/>
 
-  <!-- ModelBuilder mention: bordered badge -->
+  <!-- Product summary badge -->
   <rect x="90" y="88" width="720" height="32" rx="16"
         fill="none" stroke="#3a6a9a" stroke-width="1" opacity="0.7"/>
   <text x="450" y="109" text-anchor="middle"
         font-family="'Segoe UI', Arial, sans-serif"
         font-size="13.5" font-weight="400" letter-spacing="0.5"
         fill="#a0c8e8">Powering
-    <tspan font-weight="700" fill="#f59e0b"> QAI ModelBuilder</tspan>
+    <tspan font-weight="700" fill="#f59e0b"> QAI AppBuilder</tspan>
     <tspan fill="#a0c8e8"> — Local-first AI Workspace · QNN Model Conversion · On-Device App Builder</tspan>
   </text>
 </svg>
