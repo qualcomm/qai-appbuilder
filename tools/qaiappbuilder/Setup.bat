@@ -1480,7 +1480,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup\download_
     -Url "%GUARD_URL%" ^
     -OutFile "%GUARD_ZIP%" ^
     -Aria2cExe "data\bin\aria2c\aria2c.exe" ^
-    -MinSize 500000 ^
+    -MinSize 300000 ^
     -ZipTest ^
     -MaxRetries 5 ^
     -StallTimeoutSec 60 ^
