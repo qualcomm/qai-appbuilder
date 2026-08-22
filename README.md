@@ -1,7 +1,7 @@
 <br>
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/qualcomm/qai-appbuilder/main/docs/images/qai_banner.svg" alt="QAI AppBuilder & QAI ModelBuilder" width="900" height="150">
+  <img src="https://raw.githubusercontent.com/qualcomm/qai-appbuilder/main/docs/images/qai_banner.svg" alt="QAI AppBuilder" width="900" height="150">
 </div>
 
 <br>
@@ -60,15 +60,15 @@ every model ends up running on the same on-device NPU engine (`QNNContext` via
 
 ---
 
-### Get Started with QAI ModelBuilder
+### Get Started with QAI AppBuilder
 
-> **QAI ModelBuilder** is the natural-language Agent front-end of QAI AppBuilder — the App Builder,
+> **QAI AppBuilder** is the natural-language Agent platform for the App Builder,
 > Model Builder, and AI Hub Model Run capabilities described above all live here. Grab the
 > pre-built package below and you'll have a running, on-device AI app builder in **two commands**.
 
 <div align="center">
   <a href="https://github.com/qualcomm/qai-appbuilder/releases/download/v2.48.40/qaiappbuilder.zip">
-    <img src="https://img.shields.io/badge/Download-QAI%20ModelBuilder%20v3.0.0-2ea44f?style=for-the-badge" alt="Download QAI ModelBuilder">
+    <img src="https://img.shields.io/badge/Download-QAI%20AppBuilder%20v3.0.0-2ea44f?style=for-the-badge" alt="Download QAI AppBuilder">
   </a>
   &nbsp;&nbsp;
   <a href="https://github.com/qualcomm/qai-appbuilder/tree/main/tools/qaiappbuilder">
@@ -95,14 +95,14 @@ Setup.bat
 Start.bat
 ```
 
-Your browser opens the QAI ModelBuilder WebUI — start chatting to build an app, convert a model,
+Your browser opens the QAI AppBuilder WebUI — start chatting to build an app, convert a model,
 or run one straight from AI Hub.
 
-**Want to read or modify the code?** The complete QAI ModelBuilder project lives at
+**Want to read or modify the code?** The complete QAI AppBuilder project lives at
 [`tools/qaiappbuilder`](https://github.com/qualcomm/qai-appbuilder/tree/main/tools/qaiappbuilder).
 Clone the repo, then run `Setup.bat` → `Build.bat` → `Start.bat` to launch from source.
 
-> 📖 **Docs inside the QAI ModelBuilder project:**
+> 📖 **Docs inside the QAI AppBuilder project:**
 >
 > | Document | Description |
 > |----------|-------------|
