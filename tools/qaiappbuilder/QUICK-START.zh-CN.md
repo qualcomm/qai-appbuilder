@@ -1,6 +1,6 @@
 # 编译与运行 快速指南
 
-> 两种使用模式 + 一张速查表。
+> QAI AppBuilder 的安装、构建、运行与打包速查表。
 >
 > 英文版：[`QUICK-START.md`](QUICK-START.md)。
 
@@ -25,12 +25,9 @@ Start.bat
 
 ---
 
-## 开发者——两种模式一览
+## 开发者
 
-| 模式 | 用什么 | 适合谁 | 第一次准备 | 日常启动 |
-|---|---|---|---|---|
-| **A. 开发模式（源码运行）** | `Setup.bat` → `Build.bat` → `Start.bat` | 改代码 / 调试 / 贡献者 | `Setup.bat` + `Build.bat` | `Start.bat`（改后端）/ `Build.bat` + `Start.bat`（改前端） |
-| **B. 发布包（External / Internal）** | `Release.bat [版本号] [--internal]` | 打包给最终用户 | `Setup.bat` 一次 | `.build\release\` 下的归档 → 解压 → 跑 `Setup.bat` → `Start.bat` |
+`Setup.bat` 准备本地环境；使用 `Build.bat` 更新前端，再用 `Start.bat` 运行应用。
 
 ---
 
@@ -91,27 +88,23 @@ Server 启动时自动选取可用端口，实际 URL 写入
 
 ---
 
-## B. 发布包（给最终用户）
+## 打包给最终用户
 
-`Release.bat` 跑完整流水线：clean → 前端 build → factory 编译 → assemble → 写
-`build_info.json` → 清洗 internal-only 资产（external 时） → manifest 白名单校验 → 归档。
-
-```cmd
-Release.bat                  REM 默认：external 版，版本号 3.1.0
-Release.bat 3.1.0            REM external 版，指定版本号
-Release.bat --internal       REM internal 全功能版（保留内部 provider / 上报）
-Release.bat 3.1.0 --internal REM 组合
-```
-
-产物：`.build\release\` 下的目录 + 归档；`build_info.json` 自报版本和 edition。
-
-**用户机器上的安装流程**（参考——这是发布包发给终端用户后他们要做的）：
+先构建前端，再创建发布压缩包：
 
 ```cmd
-解压发布包  →  Setup.bat  →  Start.bat
+Build.bat --install
 ```
 
-> 用户机不需要 Python / Node / git，`Setup.bat` 全自动搞定。
+将完整的 `tools\qaiappbuilder\` 目录压缩为 **`qaiappbuilder.zip`**。不要包含本地运行时产物，例如 `data\`、`frontend\node_modules\` 或临时构建缓存。
+
+**最终用户安装流程：**
+
+```cmd
+解压 qaiappbuilder.zip  →  Setup.bat  →  Start.bat
+```
+
+> 最终用户机器无需预装 Python、Node.js 或 Git；`Setup.bat` 会安装所需运行时工具。
 
 ---
 
@@ -125,9 +118,9 @@ Release.bat 3.1.0 --internal REM 组合
 | 改了前端依赖 (`package.json`) | `Build.bat --install` |
 | `node_modules` 坏了 | `Build.bat --clean` |
 | 写贡献者测试 / 跑 pytest | `Setup.bat --dev` 一次，之后 `Console.bat` 进 venv 跑测试 |
-| 打发布包给用户 | `Release.bat [版本号]` |
+| 打包给最终用户 | `Build.bat --install`，然后将 `tools\qaiappbuilder\` 压缩为 `qaiappbuilder.zip` |
 | 一次性敲 CLI 命令 | `qai.bat <args>` |
 | 装额外 Python 包临时试试 | `Console.bat` 进 venv，`pip install <pkg>` |
 | 彻底清理（保留 `data/`） | `Uninstall.bat`（或 `--all` 更深度） |
 
-> **`Setup.bat` / `Build.bat` / `Uninstall.bat` 支持 `--help` / `-h` / `/?`** ——例如 `Build.bat --help` 看全部开关。`Release.bat` 支持 `--help` 和 `/?`。`Start.bat` / `qai.bat` 会将额外参数透传给底层 Python 入口。
+> **`Setup.bat` / `Build.bat` / `Uninstall.bat` 支持 `--help` / `-h` / `/?`** ——例如 `Build.bat --help` 看全部开关。`Start.bat` / `qai.bat` 会将额外参数透传给底层 Python 入口。

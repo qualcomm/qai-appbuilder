@@ -10,8 +10,7 @@
 
 ---
 
-> ⚡ **想快速上手？** 查看 **[`QUICK-START.zh-CN.md`](QUICK-START.zh-CN.md)** ——
-> 一页速查表覆盖两种发布模式（**开发模式 / 发布包**），告诉你什么场景该跑哪个 `.bat`。（另有一个可选的、仅供开发者的 Tauri 桌面壳，详见下文。）
+> 一页速查表覆盖安装、构建与运行 QAI AppBuilder 的常用命令。（另有一个可选的、仅供开发者的 Tauri 桌面壳，详见下文。）
 
 ---
 
@@ -348,14 +347,13 @@ AI 会自动完成源模型下载、ONNX 导出、多精度转换、推理执行
 
 > **平台：** Windows on Snapdragon（ARM64）。`Setup.bat` 自动把 `uv`、Python 3.13 ARM64、PortableGit、Node.js 下载到 `%LOCALAPPDATA%\QAIModelBuilder\` —— **无需管理员权限，无需手动安装 Python**。
 
-共两种发布使用模式（完整速查见 [`QUICK-START.zh-CN.md`](QUICK-START.zh-CN.md)）：
+源码开发时，依次运行 `Setup.bat` → `Build.bat` → `Start.bat`。
 
-| 模式 | 适用 | 脚本链 |
-|------|------|--------|
-| **开发模式（源码运行）** | 贡献者、调试 | `Setup.bat` → `Build.bat` → `Start.bat` |
-| **发布包** | 给最终用户打包 | `Release.bat [version]` → 分发 `.build\release\` → 用户跑 `Setup.bat` → `Start.bat` |
+创建外部发布包 `qaiappbuilder.zip` 时，先运行 `Build.bat --install` 更新
+`frontend/dist/`，再将完整的 `tools/qaiappbuilder/` 目录压缩为
+`qaiappbuilder.zip`。最终用户解压后运行 `Setup.bat` → `Start.bat`。
 
-> 另有一个**可选、仅供开发者**的桌面壳（Tauri 2.x，`Setup.bat --desktop` → `Build.bat --desktop`）——面向 Windows ARM64/x64 的可跑骨架。它**不包含在发布包内**，目前也不是面向最终用户的分发路径。
+> 另有一个**可选、仅供开发者**的桌面壳（Tauri 2.x，`Setup.bat --desktop` → `Build.bat --desktop`）——面向 Windows ARM64/x64 的可跑骨架；目前不是面向最终用户的分发路径。
 
 ### 启动器脚本（仓库根）
 
@@ -364,7 +362,6 @@ AI 会自动完成源模型下载、ONNX 导出、多精度转换、推理执行
 | `Setup.bat` | **唯一安装入口。** 下载 `uv`、安装 Python 3.13（默认 ARM64；`--arch x64` 可装 x64 版）、在 `%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_arm64_313`（或 `.venv_x64_313`）建 venv、安装运行时依赖（`uv pip install -e .`）、初始化 `data/` 目录（经 `python -m scripts.init.install`），并安装 PortableGit / Node+pnpm / QAIRT SDK / VS 2022 / TTS 数据 / WebView2。可选参数：`--arch arm64|x64`、`--no-builder`（跳过转换工具链）、`--dev`、`--desktop`、`--no-pause`。 |
 | `Start.bat` | 启动服务（受监管）。端口**不硬编码**——监管器探测回退列表，把真实 URL 写入 `data/runtime/server.endpoint.json` 并自动开浏览器。`Start.bat --reload` 启用热重载。 |
 | `Build.bat` | 把 Vue 3 SPA 构建到 `frontend/dist/`（pnpm）。`--full`（typecheck+lint+test）、`--install`、`--clean`、`--desktop`（Tauri 打包）。 |
-| `Release.bat` | 构建可直接分发给最终用户的 clean-cutover 发布产物。 |
 | `Console.bat` | 打开已激活宿主架构 venv 的交互式 shell（按 `data/config/host_arch` 选择 ARM64 或 x64）。 |
 | `Uninstall.bat` | 卸载器——回滚 `Setup.bat` 装在项目目录外的内容；**不删除 `data/`**。 |
 
@@ -403,12 +400,12 @@ QAIAppBuilder/
 │   ├── db_staging/       #   编译入库种子（*.jsonl）
 │   └── config/           #   编译配置种子
 ├── skills/               # 用户可安装技能（每个含 SKILL.md）
-├── scripts/              # build / ci / dev / init / release / setup 脚本
+├── scripts/              # init / migrate / setup 脚本
 ├── tools/                # 可导入工具包（factory_compiler、install pipeline、openapi）
 ├── models/               # 预置端侧模型权重
 ├── data/                 # 运行时数据（install 生成；gitignore）
 ├── vendor/               # 离线 wheel（ARM64）+ 内置二进制 + g2p/nltk 数据
-├── Setup.bat  Start.bat  Build.bat  Release.bat  Console.bat  Uninstall.bat  qai.bat
+├── Setup.bat  Start.bat  Build.bat  Console.bat  Uninstall.bat  qai.bat
 └── pyproject.toml        # Python 依赖与控制台脚本（唯一权威）
 ```
 

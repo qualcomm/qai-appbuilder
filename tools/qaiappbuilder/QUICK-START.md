@@ -1,6 +1,6 @@
 # Build & Run — Quick Guide
 
-> Two usage modes + one cheat-sheet.
+> A concise guide to install, build, run, and package QAI AppBuilder.
 >
 > 中文版：[`QUICK-START.zh-CN.md`](QUICK-START.zh-CN.md).
 
@@ -27,12 +27,9 @@ or run one from AI Hub.
 
 ---
 
-## For developers — two modes at a glance
+## For developers
 
-| Mode | Scripts | Who it's for | First-time prep | Daily run |
-|---|---|---|---|---|
-| **A. Dev mode (run from source)** | `Setup.bat` → `Build.bat` → `Start.bat` | Code changes / debugging / contributors | `Setup.bat` + `Build.bat` | `Start.bat` (backend change) / `Build.bat` + `Start.bat` (frontend change) |
-| **B. Release artifact (External / Internal)** | `Release.bat [version] [--internal]` | Packaging for end-users | `Setup.bat` once | Ship archive from `.build\release\` → user extracts → runs `Setup.bat` → `Start.bat` |
+`Setup.bat` prepares the local environment. Use `Build.bat` to refresh the frontend, then use `Start.bat` to run the application.
 
 ---
 
@@ -98,29 +95,23 @@ automatically. Press `Ctrl+C` to stop.
 
 ---
 
-## B. Release artifact (for end-users)
+## Package for end users
 
-`Release.bat` runs the full pipeline: clean → frontend build → factory compile →
-assemble → write `build_info.json` → sanitize internal-only assets (when external) →
-manifest whitelist check → archive.
+Build the frontend bundle, then create the distribution archive:
 
 ```cmd
-Release.bat                  REM Default: external edition, version 3.1.0
-Release.bat 3.1.0            REM External edition, custom version
-Release.bat --internal       REM Internal full-feature edition (keeps internal providers / telemetry)
-Release.bat 3.1.0 --internal REM Combined
+Build.bat --install
 ```
 
-Output: directory + archive under `.build\release\`; `build_info.json` self-reports
-version and edition.
+Archive the complete `tools\qaiappbuilder\` directory as **`qaiappbuilder.zip`**. Do not include local runtime artifacts such as `data\`, `frontend\node_modules\`, or temporary build caches.
 
-**End-user install flow** (what the user does after receiving the release archive):
+**End-user install flow:**
 
 ```cmd
-Extract release archive  →  Setup.bat  →  Start.bat
+Extract qaiappbuilder.zip  →  Setup.bat  →  Start.bat
 ```
 
-> User machines need no Python / Node / git — `Setup.bat` handles all of it.
+> End-user machines need no preinstalled Python, Node.js, or Git; `Setup.bat` installs the required runtime tools.
 
 ---
 
@@ -134,9 +125,9 @@ Extract release archive  →  Setup.bat  →  Start.bat
 | Changed frontend deps (`package.json`) | `Build.bat --install` |
 | `node_modules` is broken | `Build.bat --clean` |
 | Run pytest / write contributor tests | `Setup.bat --dev` once, then `Console.bat` to enter venv |
-| Cut a release for end-users | `Release.bat [version]` |
+| Package for end users | `Build.bat --install`, then archive `tools\qaiappbuilder\` as `qaiappbuilder.zip` |
 | Run a one-shot CLI command | `qai.bat <args>` |
 | Install an extra Python pkg temporarily | `Console.bat` then `pip install <pkg>` |
 | Full cleanup (keep `data/`) | `Uninstall.bat` (or `--all` for deeper cleanup) |
 
-> **`Setup.bat` / `Build.bat` / `Uninstall.bat` support `--help` / `-h` / `/?`** — e.g. `Build.bat --help` lists every flag. `Release.bat` accepts `--help` and `/?`. `Start.bat` / `qai.bat` forward any extra arguments to the underlying Python entry point.
+> **`Setup.bat` / `Build.bat` / `Uninstall.bat` support `--help` / `-h` / `/?`** — e.g. `Build.bat --help` lists every flag. `Start.bat` / `qai.bat` forward any extra arguments to the underlying Python entry point.
