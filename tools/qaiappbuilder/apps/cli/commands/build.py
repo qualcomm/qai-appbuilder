@@ -1,0 +1,858 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
+"""``qai build`` — Model Builder agentic chat session (interactive REPL, D4/L1).
+
+Desktop App Plan §2.1.1 group L1 + cli-interactive-design §3.2 / §3.4. This is
+the CLI surface for the *Model Builder* experience the WebUI exposes through
+``ModeFrameModelBuilder.vue`` — a streaming, agentic chat session whose turns
+carry ``tool_mode == "model-build"`` plus three tool params (model file paths /
+quantisation precision / dataset path). The Agent (a cloud LLM) drives the
+conversion conversation; the user steers it with natural language plus a small
+set of slash commands that mirror the six WebUI controls.
+
+Relationship to the rest of the CLI
+------------------------------------
+Unlike ``qai conv`` / ``qai config`` (one-shot ``qai <verb>`` via
+:func:`apps.cli._runtime.run_use_case`), ``qai build`` is a **long-lived REPL**:
+it opens ONE :class:`~apps.api.di.Container` (via
+:func:`apps.cli._repl.repl_container`) and keeps it alive for the whole session
+so the chat stream + EventBus subscriptions stay live across many turns. All
+terminal rendering is delegated to the shared kernel
+(:class:`apps.cli._render.StreamFrameRenderer`) and all ``/`` routing to
+:class:`apps.cli._repl.SlashDispatcher` — this file holds *no* business logic
+and *no* frame formatting, only session-state plumbing.
+
+``--model-file`` vs ``--llm`` (deliberate disambiguation — 判据1)
+----------------------------------------------------------------
+cli-interactive-design §3.2 shows ``qai build --model ./yolov8n.pt`` (the file
+to convert) AND notes ``--model <model-id>`` can pick the Agent's cloud LLM —
+the same flag name for two unrelated things. That ambiguity would bite an
+operator the moment they tried to pass both. We split it cleanly:
+
+* ``--model-file`` / ``-f <path>``  → the model FILE to convert
+  (→ ``tool_params.model_paths``; repeatable).
+* ``--llm <model-id>``              → the Agent's cloud LLM
+  (→ ``StreamChatInput.model_hint``).
+
+This is clearer than V1's single overloaded knob (V1 had no CLI at all) while
+keeping behaviour aligned with the WebUI's model-build tool params.
+
+Permission handling (research finding 2026-06-11)
+--------------------------------------------------
+Chat streaming exec does **not** trigger the ai_coding ``PERMISSION_REQUESTED``
+gate — it relies on ``file_guard`` (default OFF) and has no interactive
+permission path. So ``qai build`` will not normally receive permission events.
+We still wire :class:`apps.cli._repl.PermissionBridge` *defensively* (subscribe
+so that IF an event ever fires it is queued rather than lost), but we never
+block a turn waiting on permissions. The full decide-loop
+(``decide_permission_use_case``) is D5's concern.
+
+待 SDK / 待后端
+---------------
+* Real LLM round-trips need a configured cloud provider (precheck below) and
+  network; the conversion itself needs QAIRT + a model runner. Neither is
+  available in the smoke test, which exercises only the non-streaming surface.
+* ``/promote`` (export to a pack) and ``/workspace`` / ``/status`` full wiring
+  depend on Model Builder backend use cases not yet reachable from the CLI;
+  they print a clear hint rather than crash (see handlers).
+
+Exit codes
+----------
+* 0   — clean ``/exit`` / EOF / normal end.
+* 1   — precheck failed (no cloud provider configured).
+* 130 — SIGINT (the top-level dispatcher maps ``KeyboardInterrupt`` → 130).
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import contextlib
+import sys
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from apps.cli._render import RenderOptions, StreamFrameRenderer
+from apps.cli._repl import (
+    InterruptController,
+    PermissionBridge,
+    SlashDispatcher,
+    async_read_line,
+    repl_container,
+)
+
+from qai.platform.i18n import t
+
+__all__ = ["register", "build_extra", "QUANT_PRECISIONS"]
+
+
+#: The seven quantisation precision levels the Model Builder tool accepts
+#: (cli-interactive-design / ModeFrameModelBuilder.vue). ``--precision`` stores
+#: the raw CSV string into ``tool_params.quant_precision`` (design uses a single
+#: string field), so callers can pass ``fp16`` or ``fp16,w8a8`` verbatim.
+QUANT_PRECISIONS = (
+    "fp32",
+    "fp16",
+    "w8a16",
+    "w8a8",
+    "w8a8b8",
+    "w4a16",
+    "w4a8",
+)
+
+#: The canonical request-side tool_mode string. The system-prompt builder
+#: normalises the aliases ``model-build`` / ``model_build`` / ``model_builder``
+#: (``system_prompt_builder.py:_MODEL_BUILD_MODES``); the frontend wire value is
+#: the hyphenated ``model-build``, which we send for parity.
+TOOL_MODE = "model-build"
+
+
+# ---------------------------------------------------------------------------
+# Session state + pure extra-builder (unit-testable, no I/O)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class BuildSession:
+    """Mutable per-session Model Builder state steered by slash commands.
+
+    Mirrors the six ``ModeFrameModelBuilder.vue`` controls: model file(s),
+    quant precision, dataset path, and the batch/interactive mode toggle.
+    """
+
+    model_paths: list[str] = field(default_factory=list)
+    quant_precision: str | None = None
+    dataset_path: str | None = None
+    mode: str = "interactive"  # "batch" | "interactive"
+    last_user_message: str | None = None
+
+
+def build_extra(session: BuildSession) -> dict[str, Any]:
+    """Build the ``StreamChatInput.extra`` dict from current session state.
+
+    Pure function (no I/O) so the smoke test can assert the exact shape::
+
+        {"tool_mode": "model-build",
+         "tool_params": {"model_paths": [...], "quant_precision": "...",
+                         "dataset_path": "..."}}
+
+    Only keys that are actually set are emitted into ``tool_params`` so a
+    half-configured session does not send empty/None values the backend would
+    have to defend against.
+    """
+
+    tool_params: dict[str, Any] = {}
+    if session.model_paths:
+        tool_params["model_paths"] = list(session.model_paths)
+    if session.quant_precision:
+        tool_params["quant_precision"] = session.quant_precision
+    if session.dataset_path:
+        tool_params["dataset_path"] = session.dataset_path
+    return {"tool_mode": TOOL_MODE, "tool_params": tool_params}
+
+
+def _params_summary(session: BuildSession) -> str:
+    """Human-readable one-block summary of the current session params."""
+
+    unset = t("cli.build.label.unset")
+    files = ", ".join(session.model_paths) if session.model_paths else unset
+    prec = session.quant_precision or unset
+    ds = session.dataset_path or unset
+    return t(
+        "cli.build.params.summary",
+        files=files,
+        prec=prec,
+        ds=ds,
+        mode=session.mode,
+    )
+
+
+# ---------------------------------------------------------------------------
+# argparse registration
+# ---------------------------------------------------------------------------
+
+
+def register(subparsers: argparse._SubParsersAction) -> None:
+    """Register the ``qai build`` command (group L1)."""
+
+    p = subparsers.add_parser(
+        "build",
+        help=t("cli.build.help.summary"),
+        description=t("cli.build.help.description"),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument(
+        "--model-file",
+        "-f",
+        action="append",
+        default=None,
+        metavar="<path>",
+        dest="model_files",
+        help=t("cli.build.help.model_file"),
+    )
+    p.add_argument(
+        "--llm",
+        default=None,
+        metavar="<model-id>",
+        dest="llm",
+        help=t("cli.build.help.llm"),
+    )
+    p.add_argument(
+        "--precision",
+        default=None,
+        metavar="<csv>",
+        dest="precision",
+        help=t("cli.build.help.precision", levels=", ".join(QUANT_PRECISIONS)),
+    )
+    p.add_argument(
+        "--dataset",
+        default=None,
+        metavar="<path>",
+        dest="dataset",
+        help=t("cli.build.help.dataset"),
+    )
+    p.add_argument(
+        "--mode",
+        choices=("batch", "interactive"),
+        default="interactive",
+        dest="initial_mode",
+        help=t("cli.build.help.mode"),
+    )
+    p.add_argument(
+        "--resume",
+        nargs="?",
+        const="__latest__",
+        default=None,
+        metavar="<conversation-id>",
+        dest="resume",
+        help=t("cli.build.help.resume"),
+    )
+    p.set_defaults(handler=cmd_build)
+
+
+# ---------------------------------------------------------------------------
+# Handler (sync argparse boundary → async REPL)
+# ---------------------------------------------------------------------------
+
+
+def cmd_build(args: argparse.Namespace) -> int:
+    """Sync entry point. Runs the async REPL via :func:`asyncio.run`."""
+
+    return asyncio.run(_run_build(args))
+
+
+async def _precheck_cloud_provider(c: Any) -> bool:
+    """Return True iff at least one cloud provider is configured.
+
+    ``model_catalog`` is a different bounded context, but ``apps/cli`` is the
+    cross-context entry layer (same pattern ``config.py`` uses for
+    ``qai config provider list``).
+    """
+
+    try:
+        rows = await c.model_catalog.list_provider_configs_use_case.execute()
+    except Exception:  # noqa: BLE001 — precheck must never mask with a trace
+        return False
+    return bool(rows)
+
+
+async def _resolve_resume_conversation(c: Any, resume: str) -> str | None:
+    """Best-effort resolve a conversation id to resume.
+
+    A specific id is returned verbatim (the backend validates it on open).
+    ``__latest__`` tries ``list_conversations_use_case`` and picks the most
+    recently updated row; if that path is unavailable we return ``None`` so the
+    caller falls back to creating a fresh conversation (resume-latest is
+    documented as best-effort).
+    """
+
+    if resume != "__latest__":
+        return resume
+    lister = getattr(c.chat, "list_conversations_use_case", None)
+    if lister is None:
+        return None
+    try:
+        from qai.chat.application.use_cases.conversation_management import (
+            ListConversationsInput,
+        )
+
+        rows = await lister.execute(ListConversationsInput(limit=1, offset=0))
+    except Exception:  # noqa: BLE001 — best-effort; fall back to new conv
+        return None
+    if not rows:
+        return None
+    row = rows[0]
+    conv = getattr(row, "conversation", None)
+    conv_id = getattr(conv, "id", None)
+    return getattr(conv_id, "value", None)
+
+
+async def _run_build(args: argparse.Namespace) -> int:
+    repo_root: Path | None = getattr(args, "repo_root", None)
+    config_file: Path | None = getattr(args, "config_file", None)
+
+    opts = RenderOptions.from_streams(sys.stdout, sys.stderr)
+    renderer = StreamFrameRenderer(opts, out=sys.stdout, err=sys.stderr)
+
+    async with repl_container(
+        config_file=config_file, repo_root=repo_root
+    ) as c:
+        # ── Cloud-provider precheck (MUST run before any interactive read so
+        #    a non-tty / no-provider invocation exits cleanly without hanging).
+        if not await _precheck_cloud_provider(c):
+            sys.stderr.write(t("cli.build.error.no_cloud_provider"))
+            sys.stderr.flush()
+            return 1
+
+        # ── Conversation FIRST, then tab (open_tab does NOT auto-create one).
+        from qai.chat.application.use_cases.conversation_management import (
+            CreateConversationInput,
+        )
+        from qai.chat.application.use_cases.tab_management import OpenTabInput
+
+        resume_target = getattr(args, "resume", None)
+        conv_id_str: str | None = None
+        if resume_target is not None:
+            conv_id_str = await _resolve_resume_conversation(c, resume_target)
+
+        if conv_id_str is None:
+            conv = await c.chat.create_conversation_use_case.execute(
+                CreateConversationInput(title="Model Build")
+            )
+            conv_id_str = conv.id.value
+        tab = await c.chat.open_tab_use_case.execute(
+            OpenTabInput(conversation_id=conv_id_str)
+        )
+
+        from qai.chat.domain.ids import ConversationId, TabId
+
+        conversation_id = ConversationId.of(conv_id_str)
+        tab_id: Any = tab.id if not isinstance(tab.id, str) else TabId.of(tab.id)
+
+        # ── Session state from initial flags.
+        session = BuildSession(
+            model_paths=list(getattr(args, "model_files", None) or []),
+            quant_precision=getattr(args, "precision", None),
+            dataset_path=getattr(args, "dataset", None),
+            mode=getattr(args, "initial_mode", "interactive") or "interactive",
+        )
+        model_hint: str | None = getattr(args, "llm", None)
+
+        # ── Defensive permission bridge (chat path normally never fires; see
+        #    module docstring). Subscribe so an event is queued not lost; we
+        #    never block a turn on it. Full decide-loop is D5.
+        perm_bridge = PermissionBridge()
+        await perm_bridge.subscribe(c)
+
+        interrupts = InterruptController()
+
+        _print_banner(conv_id_str, session, model_hint)
+
+        dispatcher = _build_dispatcher(
+            c=c,
+            session=session,
+            conversation_id=conversation_id,
+            tab_id=tab_id,
+            renderer=renderer,
+            model_hint=model_hint,
+            interrupts=interrupts,
+        )
+
+        try:
+            return await _repl_loop(
+                c=c,
+                dispatcher=dispatcher,
+                session=session,
+                conversation_id=conversation_id,
+                tab_id=tab_id,
+                renderer=renderer,
+                model_hint=model_hint,
+                interrupts=interrupts,
+                perm_bridge=perm_bridge,
+            )
+        finally:
+            await perm_bridge.unsubscribe()
+
+
+def _print_banner(
+    conv_id: str, session: BuildSession, model_hint: str | None
+) -> None:
+    out = sys.stdout
+    out.write(t("cli.build.banner.ready"))
+    out.write(t("cli.build.banner.conv_id", conv_id=conv_id))
+    if model_hint:
+        out.write(t("cli.build.banner.agent_llm", model_hint=model_hint))
+    out.write(_params_summary(session) + "\n")
+    out.write(t("cli.build.banner.hint"))
+    out.flush()
+
+
+# ---------------------------------------------------------------------------
+# Streaming a turn
+# ---------------------------------------------------------------------------
+
+
+async def _stream_turn(
+    *,
+    c: Any,
+    text: str,
+    session: BuildSession,
+    conversation_id: Any,
+    tab_id: Any,
+    renderer: StreamFrameRenderer,
+    model_hint: str | None,
+    interrupts: InterruptController,
+) -> None:
+    """Send one user message and render the streamed frames.
+
+    A first Ctrl+C aborts this turn (via ``stop_chat_use_case`` keyed by
+    ``tab_id``) without exiting the REPL; the renderer's partial output is left
+    as-is. Errors during streaming surface through an ``error`` frame from the
+    backend; an unexpected exception is reported to stderr (not a traceback).
+    """
+
+    from qai.chat.application.use_cases.streaming import StreamChatInput
+    from qai.chat.domain.content import MessageContent
+
+    session.last_user_message = text
+    interrupts.reset()
+    request = StreamChatInput(
+        tab_id=tab_id,
+        conversation_id=conversation_id,
+        user_message=MessageContent(text=text),
+        model_hint=model_hint,
+        extra=build_extra(session),
+    )
+
+    async def _consume() -> None:
+        iterator = await c.chat.stream_chat_use_case.execute(request)
+        async for frame in iterator:
+            renderer.render(frame)
+
+    task = asyncio.ensure_future(_consume())
+    try:
+        await task
+    except asyncio.CancelledError:
+        # Turn was cancelled by Ctrl+C; abort the backend stream by tab id.
+        await _abort_turn(c, tab_id)
+        sys.stderr.write(t("cli.build.hint.turn_interrupted"))
+        sys.stderr.flush()
+    except Exception as exc:  # noqa: BLE001 — REPL must survive a bad turn
+        sys.stderr.write(t("cli.build.error.turn_failed", exc_type=type(exc).__name__, exc=exc))
+        sys.stderr.flush()
+
+
+async def _abort_turn(c: Any, tab_id: Any) -> None:
+    """Abort the in-flight stream for ``tab_id`` (best-effort)."""
+
+    stop = getattr(c.chat, "stop_chat_use_case", None)
+    if stop is None:
+        return
+    with contextlib.suppress(Exception):
+        result = stop.execute(tab_id)
+        if asyncio.iscoroutine(result):
+            await result
+
+
+# ---------------------------------------------------------------------------
+# Slash command wiring
+# ---------------------------------------------------------------------------
+
+
+def _build_dispatcher(
+    *,
+    c: Any,
+    session: BuildSession,
+    conversation_id: Any,
+    tab_id: Any,
+    renderer: StreamFrameRenderer,
+    model_hint: str | None,
+    interrupts: InterruptController,
+) -> SlashDispatcher:
+    """Register every ``/`` command (cli-interactive-design §3.4).
+
+    Commands that map directly onto session state (/model /precision /dataset
+    /params /mode /clear /exit /help /stop /retry /run) are fully wired. The
+    ones that need Model Builder backend use cases not reachable from the CLI
+    (/status /workspace /promote /history) print a clear "尚未接通" note rather
+    than crash — keeping the REPL robust (判据2: no regression vs the WebUI's
+    own progressive availability).
+    """
+
+    d = SlashDispatcher()
+
+    async def _help(_rest: str) -> bool:
+        sys.stdout.write(d.render_help() + "\n")
+        sys.stdout.flush()
+        return True
+
+    async def _model(rest: str) -> bool:
+        rest = rest.strip()
+        if not rest:
+            cur = ", ".join(session.model_paths) if session.model_paths else t("cli.build.label.unset")
+            sys.stdout.write(t("cli.build.model.current", cur=cur))
+        else:
+            session.model_paths = [p for p in rest.split() if p]
+            sys.stdout.write(
+                t("cli.build.model.set", files=", ".join(session.model_paths))
+            )
+        sys.stdout.flush()
+        return True
+
+    async def _precision(rest: str) -> bool:
+        rest = rest.strip()
+        if not rest:
+            sys.stdout.write(
+                t("cli.build.precision.current", prec=session.quant_precision or t("cli.build.label.unset"))
+            )
+            sys.stdout.flush()
+            return True
+        invalid = [
+            lvl
+            for lvl in (s.strip() for s in rest.split(","))
+            if lvl and lvl not in QUANT_PRECISIONS
+        ]
+        if invalid:
+            sys.stderr.write(
+                t(
+                    "cli.build.precision.invalid",
+                    invalid=", ".join(invalid),
+                    levels=", ".join(QUANT_PRECISIONS),
+                )
+            )
+            sys.stderr.flush()
+            return True
+        session.quant_precision = rest
+        sys.stdout.write(t("cli.build.precision.set", prec=session.quant_precision))
+        sys.stdout.flush()
+        return True
+
+    async def _dataset(rest: str) -> bool:
+        rest = rest.strip()
+        if not rest:
+            sys.stdout.write(
+                t("cli.build.dataset.current", ds=session.dataset_path or t("cli.build.label.unset"))
+            )
+        else:
+            session.dataset_path = rest
+            sys.stdout.write(t("cli.build.dataset.set", ds=session.dataset_path))
+        sys.stdout.flush()
+        return True
+
+    async def _params(_rest: str) -> bool:
+        sys.stdout.write(t("cli.build.params.header") + _params_summary(session) + "\n")
+        sys.stdout.flush()
+        return True
+
+    async def _mode(rest: str) -> bool:
+        rest = rest.strip().lower()
+        if rest not in ("batch", "interactive"):
+            sys.stdout.write(
+                t("cli.build.mode.current", mode=session.mode)
+            )
+        else:
+            session.mode = rest
+            sys.stdout.write(t("cli.build.mode.set", mode=session.mode))
+        sys.stdout.flush()
+        return True
+
+    async def _run(_rest: str) -> bool:
+        if not session.model_paths:
+            sys.stderr.write(t("cli.build.error.no_model"))
+            sys.stderr.flush()
+            return True
+        instruction = _standard_run_instruction(session)
+        await _stream_turn(
+            c=c,
+            text=instruction,
+            session=session,
+            conversation_id=conversation_id,
+            tab_id=tab_id,
+            renderer=renderer,
+            model_hint=model_hint,
+            interrupts=interrupts,
+        )
+        return True
+
+    async def _retry(_rest: str) -> bool:
+        if not session.last_user_message:
+            sys.stderr.write(t("cli.build.error.no_last_message"))
+            sys.stderr.flush()
+            return True
+        await _stream_turn(
+            c=c,
+            text=session.last_user_message,
+            session=session,
+            conversation_id=conversation_id,
+            tab_id=tab_id,
+            renderer=renderer,
+            model_hint=model_hint,
+            interrupts=interrupts,
+        )
+        return True
+
+    async def _stop(_rest: str) -> bool:
+        await _abort_turn(c, tab_id)
+        sys.stdout.write(t("cli.build.stop.requested"))
+        sys.stdout.flush()
+        return True
+
+    async def _clear(_rest: str) -> bool:
+        # Start a fresh conversation + tab in place (re-bind handled by the
+        # loop closure capturing mutable holders is overkill here; we instead
+        # mutate the VO objects the loop already references).
+        from qai.chat.application.use_cases.conversation_management import (
+            CreateConversationInput,
+        )
+        from qai.chat.application.use_cases.tab_management import OpenTabInput
+        from qai.chat.domain.ids import ConversationId, TabId
+
+        conv = await c.chat.create_conversation_use_case.execute(
+            CreateConversationInput(title="Model Build")
+        )
+        tab = await c.chat.open_tab_use_case.execute(
+            OpenTabInput(conversation_id=conv.id.value)
+        )
+        # Rebind the captured ids via the holder the loop reads each turn
+        # (the VOs are frozen, so we swap the holder entries rather than mutate).
+        new_conv = ConversationId.of(conv.id.value)
+        new_tab = tab.id if not isinstance(tab.id, str) else TabId.of(tab.id)
+        _ID_HOLDER["conversation_id"] = new_conv
+        _ID_HOLDER["tab_id"] = new_tab
+        session.last_user_message = None
+        sys.stdout.write(t("cli.build.clear.new", conv_id=conv.id.value))
+        sys.stdout.flush()
+        return True
+
+    async def _history(_rest: str) -> bool:
+        getter = getattr(c.chat, "get_conversation_messages_use_case", None)
+        if getter is None:
+            sys.stdout.write(t("cli.build.history.unavailable"))
+            sys.stdout.flush()
+            return True
+        try:
+            from qai.chat.application.use_cases.conversation_management import (
+                GetConversationMessagesInput,
+            )
+
+            page = await getter.execute(
+                GetConversationMessagesInput(
+                    conversation_id=_ID_HOLDER["conversation_id"],
+                    cursor=None,
+                    limit=50,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — robust print, no trace
+            sys.stderr.write(t("cli.build.error.history_failed", exc_type=type(exc).__name__, exc=exc))
+            sys.stderr.flush()
+            return True
+        items = list(getattr(page, "items", ()) or ())
+        if not items:
+            sys.stdout.write(t("cli.build.history.empty"))
+            sys.stdout.flush()
+            return True
+        for msg in items:
+            role = getattr(getattr(msg, "role", None), "value", "?")
+            content = getattr(msg, "content", "")
+            sys.stdout.write(f"[{role}] {content}\n")
+        sys.stdout.flush()
+        return True
+
+    async def _status(_rest: str) -> bool:
+        sys.stdout.write(t("cli.build.status.unavailable"))
+        sys.stdout.flush()
+        return True
+
+    async def _workspace(_rest: str) -> bool:
+        sys.stdout.write(t("cli.build.workspace.unavailable"))
+        sys.stdout.flush()
+        return True
+
+    async def _promote(_rest: str) -> bool:
+        sys.stdout.write(t("cli.build.promote.unavailable"))
+        sys.stdout.flush()
+        return True
+
+    async def _exit(_rest: str) -> bool:
+        return False  # request REPL exit
+
+    d.register("help", t("cli.build.cmd.help.help"), _help, aliases=("?",))
+    d.register("model", t("cli.build.cmd.help.model"), _model)
+    d.register("precision", t("cli.build.cmd.help.precision"), _precision)
+    d.register("dataset", t("cli.build.cmd.help.dataset"), _dataset)
+    d.register("params", t("cli.build.cmd.help.params"), _params)
+    d.register("mode", t("cli.build.cmd.help.mode"), _mode)
+    d.register("run", t("cli.build.cmd.help.run"), _run)
+    d.register("retry", t("cli.build.cmd.help.retry"), _retry)
+    d.register("stop", t("cli.build.cmd.help.stop"), _stop)
+    d.register("status", t("cli.build.cmd.help.status"), _status)
+    d.register("workspace", t("cli.build.cmd.help.workspace"), _workspace)
+    d.register("promote", t("cli.build.cmd.help.promote"), _promote)
+    d.register("history", t("cli.build.cmd.help.history"), _history)
+    d.register("clear", t("cli.build.cmd.help.clear"), _clear)
+    d.register("exit", t("cli.build.cmd.help.exit"), _exit, aliases=("quit",))
+    return d
+
+
+#: Holder so ``/clear`` can rebind the frozen ConversationId / TabId VOs the
+#: REPL loop reads each turn (set up in :func:`_run_build` before the loop).
+_ID_HOLDER: dict[str, Any] = {}
+
+
+def _standard_run_instruction(session: BuildSession) -> str:
+    """Build the natural-language instruction ``/run`` sends to the Agent.
+
+    The Agent's system prompt already renders the model-build tool_params
+    (``system_prompt_builder._render_model_build_params``); this message just
+    asks it to proceed, so the transcript reads naturally.
+    """
+
+    files = "、".join(session.model_paths)
+    parts = [t("cli.build.run.head", files=files)]
+    if session.quant_precision:
+        parts.append(t("cli.build.run.precision_suffix", precision=session.quant_precision))
+    if session.dataset_path:
+        parts.append(t("cli.build.run.dataset_suffix", dataset=session.dataset_path))
+    parts.append("。")
+    return "".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# REPL loop
+# ---------------------------------------------------------------------------
+
+
+async def _repl_loop(
+    *,
+    c: Any,
+    dispatcher: SlashDispatcher,
+    session: BuildSession,
+    conversation_id: Any,
+    tab_id: Any,
+    renderer: StreamFrameRenderer,
+    model_hint: str | None,
+    interrupts: InterruptController,
+    perm_bridge: Any = None,
+) -> int:
+    """Drive the interactive loop until ``/exit`` / EOF / double Ctrl+C.
+
+    Ctrl+C: a first press cancels the current turn (handled inside
+    :func:`_stream_turn`); pressing it again at the prompt within the
+    interrupt window exits. Ctrl+D (EOFError) / closed stdin exits cleanly.
+
+    After each natural-language turn, any permission events the backend
+    published mid-stream are drained + resolved interactively (D5; the chat
+    path rarely fires one — see module docstring).
+    """
+
+    _ID_HOLDER["conversation_id"] = conversation_id
+    _ID_HOLDER["tab_id"] = tab_id
+
+    is_slash = _import_is_slash()
+    allow_set: set[str] = set()
+
+    while True:
+        try:
+            line = await async_read_line(t("cli.build.prompt.repl"))
+        except EOFError:
+            sys.stdout.write("\n" + t("cli.build.repl.goodbye"))
+            sys.stdout.flush()
+            return 0
+        except KeyboardInterrupt:
+            # A bare Ctrl+C at the prompt: second within the window exits.
+            if interrupts.signal():
+                sys.stdout.write("\n" + t("cli.build.repl.goodbye"))
+                sys.stdout.flush()
+                return 0
+            sys.stderr.write(t("cli.build.repl.ctrl_c_hint"))
+            sys.stderr.flush()
+            continue
+
+        if line is None:
+            continue
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        if is_slash(line):
+            _handled, keep = await dispatcher.dispatch(line)
+            if not keep:
+                sys.stdout.write(t("cli.build.repl.goodbye"))
+                sys.stdout.flush()
+                return 0
+            continue
+
+        # Natural-language turn → stream. Wrap so a turn-level Ctrl+C cancels
+        # the turn (not the whole REPL).
+        await _run_turn_with_interrupt(
+            c=c,
+            text=line,
+            session=session,
+            renderer=renderer,
+            model_hint=model_hint,
+            interrupts=interrupts,
+        )
+
+        # Resolve any permission requests queued during the turn (D5).
+        if perm_bridge is not None:
+            await _resolve_permissions(c, perm_bridge, allow_set)
+
+
+async def _run_turn_with_interrupt(
+    *,
+    c: Any,
+    text: str,
+    session: BuildSession,
+    renderer: StreamFrameRenderer,
+    model_hint: str | None,
+    interrupts: InterruptController,
+) -> None:
+    """Run one turn; convert a Ctrl+C during the turn into a turn cancel."""
+
+    turn = asyncio.ensure_future(
+        _stream_turn(
+            c=c,
+            text=text,
+            session=session,
+            conversation_id=_ID_HOLDER["conversation_id"],
+            tab_id=_ID_HOLDER["tab_id"],
+            renderer=renderer,
+            model_hint=model_hint,
+            interrupts=interrupts,
+        )
+    )
+    try:
+        await turn
+    except KeyboardInterrupt:
+        # Cancel the turn task; _stream_turn handles the abort + message.
+        turn.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await turn
+
+
+def _import_is_slash() -> Any:
+    """Import ``is_slash_command`` lazily (kept off module import for clarity)."""
+
+    from apps.cli._repl import is_slash_command
+
+    return is_slash_command
+
+
+async def _resolve_permissions(c: Any, perm_bridge: Any, allow_set: set[str]) -> None:
+    """Drain + interactively resolve queued permission requests (D5).
+
+    Delegates to the shared kernel resolver, which prompts (custom terminal
+    confirm, §3.9.2) and decides via ai_coding ``decide_permission_use_case``.
+    Best-effort: a resolver error never breaks the REPL.
+    """
+
+    from apps.cli._repl import resolve_pending_permissions
+
+    with contextlib.suppress(Exception):
+        await resolve_pending_permissions(
+            c, perm_bridge, allow_set=allow_set
+        )

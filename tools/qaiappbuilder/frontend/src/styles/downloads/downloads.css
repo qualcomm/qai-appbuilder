@@ -1,0 +1,1051 @@
+/* =============================================================================
+ * Migrated from frontend/css/downloads.css (S7.5 L8 PR-802b).
+ * Selectors stay global so legacy class names remain reachable from new
+ * SFCs that reuse them.
+ * ========================================================================== */
+
+/* ---------------------------------------------------------------------
+ * Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * --------------------------------------------------------------------- */
+/* ── Download Center ─────────────────────────────────────────────────────── */
+/* 统一下载中心样式：GenieAPIService 版本下载 + 本地模型下载                  */
+/* 两个下载界面共享此样式，保持视觉一致性。                                   */
+
+/* ── 下载中心容器 ─────────────────────────────────────────────────────────── */
+.download-center {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  height: 100%;
+}
+
+/* ── Tab 导航 ────────────────────────────────────────────────────────────── */
+.dc-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid var(--border);
+  margin-bottom: var(--space-5);
+  flex-shrink: 0;
+}
+
+/* Tab nav items only — scoped to ``.dc-tabs >`` so the same class name when
+   used as a Tab pane root in ServiceVersionsTab/ModelCatalogTab does NOT
+   inherit ``display:flex; align-items:center;`` from this rule (which would
+   collapse the pane width to its content and break the empty-state full-width
+   layout). V1 parity is preserved for actual nav items inside ``.dc-tabs``. */
+.dc-tabs > .dc-tab {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5);
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: color var(--transition), border-color var(--transition);
+  user-select: none;
+  white-space: nowrap;
+}
+
+.dc-tabs > .dc-tab:hover {
+  color: var(--text-primary);
+}
+
+.dc-tabs > .dc-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.dc-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: var(--accent-light);
+  color: var(--accent);
+  border-radius: 9px;
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+
+.dc-tab-badge.downloading {
+  background: rgba(255, 152, 0, 0.15);
+  color: var(--warning);
+  animation: pulse-badge 1.5s infinite;
+}
+
+@keyframes pulse-badge {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ── 信息横幅（aria2c 状态、说明文字）────────────────────────────────────── */
+.dc-info-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-4);
+  flex-shrink: 0;
+}
+
+.dc-info-banner.info {
+  background: var(--banner-info-bg);
+  border: 1px solid var(--banner-info-border);
+  color: var(--info);
+}
+
+.dc-info-banner.success {
+  background: var(--banner-success-bg);
+  border: 1px solid var(--banner-success-border);
+  color: var(--success);
+}
+
+.dc-info-banner.warning {
+  background: var(--banner-warn-bg);
+  border: 1px solid var(--banner-warn-border);
+  color: var(--warning);
+}
+
+.dc-info-banner.error {
+  background: var(--banner-error-bg);
+  border: 1px solid var(--banner-error-border);
+  color: var(--error);
+}
+
+.dc-info-banner-icon {
+  font-size: var(--text-lg);
+  flex-shrink: 0;
+}
+
+.dc-info-banner-text {
+  flex: 1;
+  line-height: 1.5;
+}
+
+/* ── 版本/模型列表 ───────────────────────────────────────────────────────── */
+.dc-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+/* ── 下载卡片 ────────────────────────────────────────────────────────────── */
+.dc-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-4) 18px;
+  transition: border-color var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out);
+  position: relative;
+}
+
+.dc-card:hover {
+  border-color: var(--border-light);
+}
+.dc-card {
+  animation: card-in var(--duration-slow) var(--ease-out) both;
+}
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.dc-card.downloading {
+  border-color: var(--warning);
+  background: rgba(255, 152, 0, 0.03);
+}
+
+.dc-card.done {
+  border-color: var(--success);
+  background: rgba(76, 175, 80, 0.03);
+}
+
+.dc-card.error {
+  border-color: var(--error);
+  background: rgba(244, 67, 54, 0.03);
+}
+
+/* ── 卡片头部 ────────────────────────────────────────────────────────────── */
+.dc-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.dc-card-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-lg);
+  flex-shrink: 0;
+}
+
+.dc-card-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.dc-card-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.dc-card-subtitle {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dc-card-tags {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-top: 5px;
+}
+
+.dc-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: var(--radius-xs);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.dc-tag-npu  { background: rgba(108, 99, 255, 0.15); color: var(--accent); }
+.dc-tag-gpu  { background: rgba(33, 150, 243, 0.15); color: var(--info); }
+.dc-tag-cpu  { background: rgba(76, 175, 80, 0.15);  color: var(--success); }
+.dc-tag-qnn  { background: rgba(108, 99, 255, 0.12); color: var(--accent); }
+.dc-tag-gguf { background: rgba(33, 150, 243, 0.12); color: var(--info); }
+.dc-tag-mnn  { background: rgba(76, 175, 80, 0.12);  color: var(--success); }
+.dc-tag-recommended { background: rgba(255, 152, 0, 0.15); color: var(--warning); }
+.dc-tag-stable { background: rgba(76, 175, 80, 0.12); color: var(--success); }
+.dc-tag-default { background: var(--bg-tertiary); color: var(--text-muted); }
+
+/* ── 版本/大小信息行 ─────────────────────────────────────────────────────── */
+.dc-card-info-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.dc-card-info-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.dc-card-info-label {
+  color: var(--text-muted);
+}
+
+/* ── 进度区域 ────────────────────────────────────────────────────────────── */
+.dc-progress-area {
+  margin-bottom: var(--space-3);
+}
+
+.dc-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: var(--text-sm);
+}
+
+.dc-progress-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+
+.dc-progress-status.status-downloading { color: var(--warning); }
+.dc-progress-status.status-done        { color: var(--success); }
+.dc-progress-status.status-error       { color: var(--error); }
+.dc-progress-status.status-cancelled   { color: var(--text-muted); }
+.dc-progress-status.status-exists      { color: var(--success); }
+
+.dc-progress-stats {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  display: flex;
+  gap: var(--space-3);
+}
+
+.dc-progress-bar-wrap {
+  height: 6px;
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: var(--space-1);
+}
+
+.dc-progress-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+  background: var(--accent);
+}
+
+.dc-progress-bar-fill.done    { background: var(--success); }
+.dc-progress-bar-fill.error   { background: var(--error); }
+.dc-progress-bar-fill.downloading {
+  background: linear-gradient(90deg, var(--accent), var(--warning));
+  animation: progress-shimmer 2s infinite;
+}
+
+/* V1 progress detail row: bytes / speed / ETA (DownloadJobResponse fields). */
+.dc-progress-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-1);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+.dc-progress-speed { color: var(--accent); }
+.dc-progress-eta { color: var(--text-secondary); }
+
+@keyframes progress-shimmer {
+  0%   { filter: brightness(1); }
+  50%  { filter: brightness(1.2); }
+  100% { filter: brightness(1); }
+}
+
+.dc-progress-detail {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+/* ── 错误信息 ────────────────────────────────────────────────────────────── */
+.dc-error-msg {
+  font-size: var(--text-sm);
+  color: var(--error);
+  background: var(--banner-error-bg);
+  border: 1px solid var(--banner-error-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+/* ── 保存路径 ────────────────────────────────────────────────────────────── */
+.dc-save-path {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px var(--space-3);
+  margin-bottom: var(--space-3);
+  overflow: hidden;
+}
+
+.dc-save-path-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── 操作按钮区 ──────────────────────────────────────────────────────────── */
+.dc-card-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* ── 引擎标签 ────────────────────────────────────────────────────────────── */
+.dc-engine-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: var(--radius-xs);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.dc-engine-badge.aria2c {
+  background: rgba(108, 99, 255, 0.12);
+  color: var(--accent);
+  border: 1px solid rgba(108, 99, 255, 0.2);
+}
+
+.dc-engine-badge.httpx {
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+/* ── 硬件分组标题 ────────────────────────────────────────────────────────── */
+.dc-group-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0 6px;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--space-2);
+  flex-shrink: 0;
+}
+
+.dc-group-header-icon {
+  font-size: var(--text-md);
+}
+
+/* ── 空状态 ──────────────────────────────────────────────────────────────── */
+.dc-empty {
+  text-align: center;
+  padding: 60px var(--space-5);
+  color: var(--text-muted);
+}
+
+.dc-empty-icon {
+  font-size: 48px;
+  margin-bottom: var(--space-3);
+}
+
+.dc-empty-title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--text-secondary);
+}
+
+.dc-empty-text {
+  font-size: var(--text-base);
+  line-height: 1.6;
+  max-width: 360px;
+  margin: 0 auto;
+}
+
+/* ── 更新日志折叠 ────────────────────────────────────────────────────────── */
+.dc-changelog {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.6;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  margin-top: var(--space-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+/* ── 下载中心顶部工具栏 ──────────────────────────────────────────────────── */
+.dc-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.dc-toolbar-spacer {
+  flex: 1;
+}
+
+/* ── 活跃下载摘要条 ──────────────────────────────────────────────────────── */
+.dc-active-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  background: rgba(255, 152, 0, 0.06);
+  border: 1px solid rgba(255, 152, 0, 0.2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--warning);
+  margin-bottom: var(--space-3);
+  flex-shrink: 0;
+}
+
+.dc-active-bar-dot {
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: 50%;
+  background: var(--warning);
+  animation: pulse-green 1.5s infinite;
+  flex-shrink: 0;
+}
+
+/* ── 进度条（复用 service.css 中的 progress-wrap/progress-bar）────────────── */
+.progress-wrap {
+  height: 6px;
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+/* ── 版本卡片特有：推荐标记 ──────────────────────────────────────────────── */
+.dc-recommended-star {
+  color: var(--warning);
+  font-size: var(--text-md);
+}
+
+/* ── 模型描述文字 ────────────────────────────────────────────────────────── */
+.dc-model-desc {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: var(--space-2);
+}
+
+/* ── 驱动版本要求 ────────────────────────────────────────────────────────── */
+.dc-driver-req {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  padding: 2px 7px;
+  border-radius: var(--radius-xs);
+}
+
+/* ── 响应式 ──────────────────────────────────────────────────────────────── */
+@media (max-width: 700px) {
+  .dc-card-header { flex-direction: column; }
+  .dc-card-actions { flex-direction: column; align-items: stretch; }
+  .dc-card-actions .btn { justify-content: center; }
+  .dc-tabs { overflow-x: auto; }
+}
+
+/* ── VLM 标签 ────────────────────────────────────────────────────────────── */
+.dc-tag-vlm {
+  background: rgba(233, 30, 99, 0.15);
+  color: #e91e63;
+}
+
+/* ── VLM 图标背景 ────────────────────────────────────────────────────────── */
+.dc-card-icon-vlm {
+  background: rgba(233, 30, 99, 0.1);
+}
+
+/* ── 推荐模型卡片顶部渐变条 ──────────────────────────────────────────────── */
+.dc-card-recommended::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--warning), var(--accent));
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+
+/* ── 模型详情展开切换按钮 ────────────────────────────────────────────────── */
+.dc-detail-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-sm);
+  color: var(--accent);
+  cursor: pointer;
+  user-select: none;
+  padding: 2px 0;
+  transition: opacity var(--transition);
+}
+
+.dc-detail-toggle:hover {
+  opacity: 0.75;
+}
+
+/* ── 模型详情展开面板 ────────────────────────────────────────────────────── */
+.dc-model-detail {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-4);
+  margin-top: var(--space-2);
+}
+
+/* ── 特性列表 ────────────────────────────────────────────────────────────── */
+.dc-feature-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.dc-feature-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.dc-feature-list li::before {
+  content: '◆';
+  color: var(--accent);
+  font-size: 8px;
+  margin-top: var(--space-1);
+  flex-shrink: 0;
+}
+
+/* ── 平台选择器（多平台版本下载）────────────────────────────────────────── */
+.dc-platform-label {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: var(--space-2);
+}
+
+.dc-platform-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: var(--space-4);
+}
+
+.dc-platform-card {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition);
+  background: var(--bg-primary);
+  user-select: none;
+}
+
+.dc-platform-card:hover {
+  border-color: var(--accent);
+  background: var(--accent-muted);
+}
+
+.dc-platform-card.selected {
+  border-color: var(--accent);
+  background: var(--accent-muted);
+}
+
+.dc-platform-radio {
+  width: var(--space-4);
+  height: var(--space-4);
+  border-radius: 50%;
+  border: 2px solid var(--border-light);
+  flex-shrink: 0;
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color var(--transition);
+}
+
+.dc-platform-card.selected .dc-platform-radio {
+  border-color: var(--accent);
+}
+
+.dc-platform-radio-dot {
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.dc-platform-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.dc-platform-name {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.dc-platform-desc {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.dc-platform-driver {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-top: var(--space-1);
+}
+
+.dc-platform-status-dot {
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 5px;
+  transition: background var(--transition);
+}
+
+.dc-platform-status-dot.done        { background: var(--success); }
+.dc-platform-status-dot.downloading,
+.dc-platform-status-dot.preparing   { background: var(--warning); animation: pulse-badge 1.5s infinite; }
+.dc-platform-status-dot.error       { background: var(--error); }
+.dc-platform-status-dot.cancelled   { background: var(--text-muted); }
+
+/* ── 版本卡片说明（复用 dc-model-desc 样式）────────────────────────────── */
+.dc-version-desc {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-top: var(--space-1);
+  margin-bottom: 0;
+}
+
+/* ── 详情面板完整描述段落 ────────────────────────────────────────────────── */
+.dc-model-detail-desc {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin: var(--space-3) 0 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+/* ── 多架构版本下载区 ─────────────────────────────────────────────────────── */
+.dc-variants {
+  margin-top: var(--space-1);
+}
+
+.dc-variants-hdr {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: var(--space-2);
+}
+
+/* 每个平台变体卡片 */
+.dc-variant-card {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  transition: border-color var(--transition), background var(--transition);
+}
+
+.dc-variant-card + .dc-variant-card {
+  margin-top: 6px;
+}
+
+.dc-variant-card.downloading {
+  border-color: var(--warning);
+  background: rgba(255, 152, 0, 0.03);
+}
+
+.dc-variant-card.done {
+  border-color: var(--success);
+  background: rgba(76, 175, 80, 0.03);
+}
+
+.dc-variant-card.error {
+  border-color: var(--error);
+  background: rgba(244, 67, 54, 0.03);
+}
+
+/* 状态指示圆点 */
+.dc-variant-status-dot {
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: 50%;
+  background: var(--border-light);
+  flex-shrink: 0;
+  margin-top: 5px;
+  transition: background var(--transition);
+}
+
+.dc-variant-status-dot.done        { background: var(--success); }
+.dc-variant-status-dot.downloading,
+.dc-variant-status-dot.preparing   { background: var(--warning); animation: pulse-badge 1.5s infinite; }
+.dc-variant-status-dot.error       { background: var(--error); }
+.dc-variant-status-dot.cancelled   { background: var(--text-muted); }
+
+/* 内容区（名称 + 描述 + 进度） */
+.dc-variant-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.dc-variant-platform-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.dc-variant-platform-name {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.dc-variant-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.dc-variant-size {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.dc-variant-desc {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+
+/* 操作按钮区（右侧列） */
+.dc-variant-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
+/* ── 响应式：变体卡片在小屏幕折行 ───────────────────────────────────────── */
+@media (max-width: 500px) {
+  .dc-variant-card { flex-wrap: wrap; }
+  .dc-variant-actions { flex-direction: row; }
+}
+
+/* ── 单平台版本：紧凑操作行 ──────────────────────────────────────────────── */
+/* 当模型只有一个平台变体时，不显示 section 标题，直接用 card-actions 行展示 */
+.dc-card-actions-split {
+  justify-content: space-between;
+  align-items: center;
+}
+
+.dc-single-variant-platform {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  flex-wrap: wrap;
+}
+
+/* ── Downloads 界面优化（Phase 3）───────────────────────────────────────── */
+
+/* 平台选择器 — Segmented Control 样式 */
+.platform-segmented {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  margin-bottom: var(--space-3);
+}
+
+.platform-segment {
+  flex: 1;
+  padding: var(--space-3) var(--space-4);
+  text-align: center;
+  cursor: pointer;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium, 500);
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  transition: all var(--transition);
+  user-select: none;
+}
+
+.platform-segment:last-child {
+  border-right: none;
+}
+
+.platform-segment:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.platform-segment.active {
+  background: var(--accent-light);
+  color: var(--accent);
+  font-weight: var(--weight-semibold, 600);
+}
+
+.platform-hint {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  padding: var(--space-1) 0 var(--space-3);
+  line-height: var(--leading-normal);
+}
+
+/* 已安装路径行布局优化 */
+.dc-installed-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  margin-top: var(--space-3);
+}
+
+.dc-installed-path {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.dc-installed-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* 版本卡片焦点强化 */
+.dc-card.recommended {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-glow);
+}
+
+.dc-card-badge-recommended {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium, 500);
+  background: var(--accent-light);
+  color: var(--accent);
+  margin-left: var(--space-2);
+}
+
+/* 信息横幅精简 */
+.dc-info-banner {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+}
+
+/* ── 下载设置折叠面板 ───────────────────────────────────────────────────── */
+.dc-settings-panel {
+  margin: var(--space-3) 0;
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-lg, 8px);
+  overflow: hidden;
+}
+
+.dc-settings-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  cursor: pointer;
+  background: var(--bg-secondary);
+  user-select: none;
+  transition: background 0.15s;
+}
+.dc-settings-header:hover {
+  background: var(--bg-tertiary);
+}
+
+.dc-settings-toggle-icon {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  width: 14px;
+  text-align: center;
+}
+
+.dc-settings-toggle-label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium, 500);
+  color: var(--text-primary);
+}
+
+.dc-settings-body {
+  padding: var(--space-4);
+  border-top: 1px solid var(--border-secondary);
+}

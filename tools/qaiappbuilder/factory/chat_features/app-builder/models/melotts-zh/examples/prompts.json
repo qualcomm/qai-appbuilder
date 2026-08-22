@@ -1,0 +1,5 @@
+[
+  {"name": "short-greeting", "text": "你好，今天天气真好。", "expected_voice": "female-1"},
+  {"name": "classical-poem",  "text": "床前明月光，疑是地上霜。举头望明月，低头思故乡。", "expected_voice": "female-2"},
+  {"name": "mixed-en-digits", "text": "今天 8 点 30 分有 3 个 meeting，请准时参加。", "expected_voice": "male-1"}
+]

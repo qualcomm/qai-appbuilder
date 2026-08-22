@@ -1,0 +1,142 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
+// =============================================================================
+// i18n locale sub-file — 手工维护，UTF-8（无 BOM）。
+//
+// 真值源说明：本项目 i18n 已无自动生成管道（旧的 _L8-locale-gen.py 与
+// _migrated/*.json 均未保留在仓库）。因此本文件就是当前唯一真值源，
+// 必须手工维护。修改时严守 AGENTS.md §3.10 文件编码铁律（UTF-8，禁止
+// GBK/CP437 等非 UTF-8 编码，禁止双重编码损坏）。
+//
+// 类型：en/{ns}.ts 经主入口 en.ts 组装后由 typeof 推导出 MessageSchema；
+// zh-CN / zh-TW 的同名子文件须保持与 en 完全一致的 key 结构（由 locale
+// parity 测试 + tsc 强制）。
+// =============================================================================
+
+const service = {
+  adapter: "LoRA 适配器",
+  allText: "纯文本模式",
+  autoScroll: "自动滚动",
+  clearLogs: "清除日志",
+  close: "关闭",
+  commandPreview: "命令预览",
+  config: "配置",
+  configRequiresInstall: "需先安装 GenieAPIService 后才能配置",
+  copyFailed: "复制失败",
+  editInConfig: "在 服务配置 中编辑",
+  enableThinking: "启用思考模式",
+  host: "主机",
+  launchParams: "启动参数",
+  launchParamsHint: "以下参数反映 GenieAPIService 启动配置（service_launch），请在 服务配置 弹窗中编辑。",
+  loadModel: "启动时加载模型",
+  localMode: "本地",
+  logLevel: "日志级别",
+  logLevelError: "错误",
+  logLevelWarning: "警告",
+  logLevelInfo: "信息",
+  logLevelDebug: "调试",
+  logLevelVerbose: "详细",
+  logs: "服务日志",
+  logsCopied: "已复制 {n} 行日志到剪贴板",
+  loraAlpha: "LoRA Alpha",
+  model: "模型",
+  modelAuto: "使用配置的默认值",
+  modelsRoot: "模型根目录",
+  noLogs: "暂无日志...",
+  noModels: "未找到模型",
+  noModelsAvailable: "模型目录中没有可用模型，请检查模型根目录配置",
+  off: "关闭",
+  on: "开启",
+  paramsSaved: "参数已保存",
+  pid: "进程 ID",
+  port: "端口",
+  portDefault: "默认（service_launch）",
+  promptDebug: "提示词调试",
+  reboot: "重启",
+  rebooting: "重启中...",
+  remoteMode: "远程",
+  running: "运行中",
+  saveFailed: "保存失败",
+  saveParams: "保存参数",
+  selectModel: "选择模型",
+  selectModelFirst: "请先选择一个模型",
+  start: "启动",
+  startFailed: "服务启动失败",
+  portInUse:
+    "端口 {port} 已被占用——可能已有服务在运行。请先停止现有服务或更换端口后再试。",
+  startSuccess: "服务启动成功",
+  starting: "启动中...",
+  stop: "停止",
+  stopFailed: "服务停止失败",
+  stopSuccess: "服务已停止",
+  stopped: "已停止",
+  stopping: "停止中...",
+  uptime: "运行时间",
+  connection: "连接",
+  localPrefix: "本机 · ",
+  remotePrefix: "远程 · ",
+  editArrow: "编辑 ▾",
+  closeArrow: "收起 ▴",
+  connectionQuestion: "模型服务运行在哪里？",
+  thisMachine: "本机 (localhost)",
+  remoteMachine: "远程主机",
+  ipAddress: "IP 地址",
+  test: "测试",
+  reachable: "可达",
+  unreachable: "不可达",
+  save: "保存",
+  remoteModeStartStopWarn: "⚠ 远程模式：启动/停止按钮已禁用，请在远程机器上手动操作服务。",
+  remoteModeStartHint: "⚠ 远程模式：请在远程机器上手动启动服务",
+  warnPathChineseSpaces: "安装路径含中文或空格，可能导致模型加载失败",
+  warnPathQnnDesc1: "GenieAPIService 的 QNN 后端在初始化时无法处理含中文或空格的路径。",
+  warnPathMigrate: "请将 GenieAPIService 及模型文件迁移到{bold}的目录，例如：",
+  pureEnglishNoSpaces: "纯英文、无空格",
+  orWord: "或",
+  modifyInstallPath: "🔧 修改安装路径 →",
+  redownloadInstall: "📥 重新下载安装 →",
+  serviceNotFound: "⚠ 未找到 GenieAPIService",
+  downloadArrow: "📥 下载 →",
+  noModelsAvailablePrefix: "⚠ 无可用模型，",
+  goDownloadArrow: "前往下载 →",
+  geniesvcNotFoundTitle: "GenieAPIService 未找到",
+  geniesvcNotFoundBody:
+    "未检测到 GenieAPIService 可执行文件。请下载安装，或在 App Config 中指定已有的安装路径。",
+  gotoDownloadGeniesvc: "📥 前往下载 GenieAPIService",
+  gotoDownloadCenterModels: "📥 前往下载中心下载模型",
+  noUsableModelsTitle: "未找到可用模型",
+  noUsableModelsBody: "模型目录中未找到可用模型（QNN / GGUF / MNN）。",
+  loadingDots: "加载中...",
+  streamingLive: "实时流式",
+  linesUnit: "行",
+  copyLogs: "复制日志",
+  collapseLogArea: "收起日志区",
+  expandLogArea: "展开日志区",
+  scrollTop: "滚动到顶部",
+  scrollBottomLog: "滚动到底部",
+  refreshStatus: "刷新状态",
+  setPathArrow: "🔧 设置路径 →",
+  setGeniesvcPath: "🔧 设置 GenieAPIService 安装路径",
+  setModelsRootRescan: "🔧 设置模型根目录，然后点击 🔍 重新扫描",
+  // 下载 / 安装进行中提示（V1 isAnyModelDownloading / isAnyModelInstalling）
+  modelDownloadingHint: "📥 模型下载中，下载完成后需安装才可使用…",
+  modelDownloadingTitle: "模型下载进行中",
+  modelDownloadingBody:
+    "正在下载模型，完成后会出现在下方列表中。你可以在下载中心查看进度。",
+  modelInstallingHint: "📦 模型安装中，安装完成后将出现在列表中…",
+  modelInstallingTitle: "模型安装中...",
+  modelInstallingBody: "正在解压安装模型，完成后会出现在下方列表中。",
+  installingPleaseWait: "安装中，请稍候……",
+  installingShort: "安装中。",
+  downloadingShort: "下载中。",
+  viewProgressArrow: "查看进度 →",
+  viewInDownloadCenter: "📥 在 Download Center 查看进度",
+  downloadingPleaseWait: "下载中，请稍候……",
+  // 模型数量后缀（V1 index.html:2942 "(N model(s))"）
+  modelsCount: "{n} 个模型",
+  versionCheckFailed: "检查版本更新失败",
+};
+
+export default service;

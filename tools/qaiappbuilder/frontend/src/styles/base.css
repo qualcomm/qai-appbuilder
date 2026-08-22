@@ -1,0 +1,364 @@
+/* ---------------------------------------------------------------------
+ * Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * --------------------------------------------------------------------- */
+
+/* =============================================================================
+ * Base stylesheet — design tokens + minimal reset + global style barrel.
+ *
+ * S5 PR-050 baseline.
+ * S5 PR-052: extended for layout shell.
+ * PR-056: @font-face declarations for Inter + JetBrains Mono loaded from
+ *         public/fonts/ (copied from vendor/fonts/). The new Vite frontend
+ *         does NOT reference frontend/vendor/ at all.
+ * S7.5 L8 PR-802: this file is the single CSS entry imported by main.ts;
+ *         it now @imports the design-token system and the per-domain
+ *         stylesheets that L8 migrates from legacy `frontend/css/` in
+ *         PR-802a/b/c. Selectors stay global (scoping is L7 SFC's job).
+ *
+ * @import order matters — variables come first so every downstream file
+ * can reference --bg-primary, --space-N, --accent, etc.
+ * ========================================================================== */
+
+/* --- 1. Design-token system (PR-802a) ----------------------------------- */
+@import "./variables.css";
+
+/* --- 2. Domain stylesheets (PR-802a — security + channels) ------------- */
+@import "./security/security.css";
+@import "./security/auto-approve.css";
+@import "./security/security-panels.css";
+@import "./security/patch-review.css";
+@import "./channels/channels.css";
+
+/* --- 3. Domain stylesheets (PR-802b — app-builder + chat + downloads) -- */
+@import "./app-builder/app-builder.css";
+@import "./chat/chat.css";
+@import "./downloads/downloads.css";
+
+/* --- 4. Layout / common / utility (PR-802c) ---------------------------- */
+@import "./layout/layout.css";
+@import "./components/components.css";
+@import "./common/utilities.css";
+@import "./common/service.css";
+@import "./common/settings.css";
+/* fonts.css NOT imported — legacy file referenced /vendor/fonts/ which is
+ * gone (S8 [exclude]); the @font-face declarations below cover the same
+ * Inter / JetBrains Mono families using public/fonts/. */
+
+/* --- Font declarations -------------------------------------------------- */
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/Inter-Regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/Inter-Medium.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/Inter-SemiBold.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/Inter-Bold.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/JetBrainsMono-Regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/JetBrainsMono-Medium.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/JetBrainsMono-SemiBold.woff2") format("woff2");
+}
+
+/*
+ * Dark-theme support: legacy PR-050 used `[data-theme="dark"]`, the
+ * PR-802a token system uses `:root` (default dark) + `html.light` for
+ * light. Keep the [data-theme="dark"] hook working by mapping it to
+ * the same defaults — flipping data-theme is now a no-op (the system
+ * defaults to dark already), and html.light is the light override.
+ */
+[data-theme="dark"] {
+  /* defaults already dark from variables.css :root — no overrides needed */
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* V1 parity (base.css `input, textarea, select, button { font-family: inherit;
+   line-height: inherit }`). Native form controls otherwise fall back to the UA
+   default font (Arial / system) instead of inheriting Inter — that was the root
+   cause of the "font looks different" difference on buttons (e.g. the model
+   selector chip rendered in Arial) and inputs. `line-height: inherit` is
+   likewise required: without it buttons fall back to UA `line-height: normal`
+   (~1.2) instead of the body's `--leading-normal` (1.6), making un-padded
+   chips like `.model-selector-btn` / `.rit-btn` render ~3-4px shorter than V1. */
+input,
+textarea,
+select,
+button {
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+/* V1 parity (base.css:53-59): global anchor styling. Without this, links
+   rendered inside markdown AI replies (and any class-less `<a>`) fall back to
+   the UA default blue + underline instead of the accent-purple, no-underline
+   treatment V1 uses everywhere. Nav links carry their own colors so they are
+   unaffected; this only restores the default for content links. */
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--accent-hover);
+}
+
+#app {
+  isolation: isolate;
+}
+
+/* --- V1 Background gradient noise (dark theme) --- */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 20% 50%, rgba(124, 108, 255, 0.03) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 20%, rgba(96, 165, 250, 0.02) 0%, transparent 40%),
+    radial-gradient(ellipse at 50% 80%, rgba(236, 72, 153, 0.015) 0%, transparent 45%);
+}
+html.light body::before {
+  background: none;
+}
+
+/* --- Scrollbar --- */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-light); }
+
+/* --- Selection --- */
+::selection {
+  background: rgba(124, 108, 255, 0.4);
+  color: white;
+}
+/* 用户消息气泡背景为紫色（--user-bubble = --accent），全局选中色也是半透明紫，
+   两者叠加后选中文本几乎不可辨识，故气泡内 selection 改用深底对比色（深浅主题通用）。 */
+.message-row.user .message-bubble ::selection,
+.message-row.user .message-bubble::selection {
+  background: #1a1a2e;
+  color: #ffffff;
+}
+
+/* --- Focus visible --- */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* --- Reduced motion --- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  /* V1 parity: welcome logo float + frame-flow are subtle decorative
+     motions preserved regardless of reduced-motion preference (V1
+     displays them on all machines including those with system-level
+     animation reduction enabled). */
+  .welcome-icon {
+    animation-duration: 3s !important;
+    animation-iteration-count: infinite !important;
+  }
+  .welcome-logo-frame line {
+    animation-duration: 12s !important;
+    animation-iteration-count: infinite !important;
+  }
+}
+
+/* --- Forced colors (Windows High Contrast / `forced-colors: active`) ------
+ *
+ * GAP-REMEDIATION-PLAN-2026-06-06 §F-18 / v1-ui-reference §11 / v3 §8.2.
+ *
+ * V1 had NO forced-colors handling at all (frontend/css/ — 0 matches for
+ * forced-colors / forced-color-adjust / system color keywords). This block is
+ * therefore an enhancement, not a regression: normal-mode rendering is
+ * untouched (rules only activate when the OS reports forced-colors: active),
+ * and high-contrast users now get readable buttons / inputs / dialogs / focus
+ * rings / links / icons instead of the brand-color tokens being collapsed by
+ * the UA into a low-contrast monochrome.
+ *
+ * Implementation notes:
+ *   - We use the standard CSS system color keywords (CanvasText / ButtonText /
+ *     ButtonFace / Highlight / HighlightText / LinkText / Canvas) directly —
+ *     these are the *only* colors the UA honors in forced-colors mode (every
+ *     other color value is overridden). Per AGENTS.md, CSS tokens use real
+ *     names with no `--qai-*` prefix; system colors are likewise used by their
+ *     CSS-spec real names.
+ *   - `forced-color-adjust: auto` is the UA default and is set explicitly on
+ *     icons / SVGs / images so author CSS using `currentColor` (which would
+ *     otherwise lock SVG strokes to a single forced color) lets the UA recolor
+ *     each glyph normally for contrast. `forced-color-adjust: none` is NOT
+ *     used anywhere — that would defeat the user's accessibility setting.
+ *   - All rules are scoped inside the @media query so 0 cascade impact on
+ *     normal rendering.
+ * ------------------------------------------------------------------------ */
+@media (forced-colors: active) {
+  /* Body / page chrome: let the UA pick Canvas/CanvasText so the gradient
+     noise pseudo-element collapses gracefully. */
+  html,
+  body {
+    background: Canvas;
+    color: CanvasText;
+  }
+  body::before {
+    /* Decorative gradient fully suppressed in forced-colors — it would only
+       paint with a single forced color and add visual noise without contrast
+       value. */
+    background: none;
+  }
+
+  /* Links — use the UA's LinkText so they remain distinguishable from body
+     text (V1 used the accent token which collapses to ButtonText otherwise). */
+  a,
+  a:hover {
+    color: LinkText;
+  }
+
+  /* Form controls — give every button / input / textarea / select an
+     explicit ButtonText border + ButtonFace background so the UA does not
+     render them as borderless ButtonFace-on-ButtonFace blobs. */
+  button,
+  .btn,
+  input,
+  textarea,
+  select {
+    border: 1px solid ButtonText;
+    color: ButtonText;
+    background: ButtonFace;
+    forced-color-adjust: auto;
+  }
+
+  /* Disabled controls: GrayText is the spec-defined dimmed token. */
+  button[disabled],
+  .btn[disabled],
+  .btn:disabled,
+  input[disabled],
+  textarea[disabled],
+  select[disabled] {
+    color: GrayText;
+    border-color: GrayText;
+  }
+
+  /* Focus ring — Highlight is the spec-defined "selection / focus" color and
+     is guaranteed to contrast against Canvas/ButtonFace. Overrides the brand
+     accent in :focus-visible above. */
+  :focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+
+  /* Selected / active states (sidebar items, list rows, tabs) — surface them
+     with the system Highlight pair so the user can tell what's selected. */
+  ::selection {
+    background: Highlight;
+    color: HighlightText;
+  }
+  [aria-selected="true"],
+  [aria-current="true"],
+  [aria-current="page"],
+  .is-active,
+  .is-selected {
+    background: Highlight;
+    color: HighlightText;
+    forced-color-adjust: auto;
+  }
+
+  /* Dialogs / modals — give them a real CanvasText border so the modal
+     surface is visibly delineated against the (also Canvas-painted) page. */
+  [role="dialog"],
+  [role="alertdialog"],
+  .confirm-dialog,
+  .modal-content,
+  .modal-dialog {
+    border: 1px solid CanvasText;
+    background: Canvas;
+    color: CanvasText;
+  }
+  /* Backdrops: in forced-colors the UA ignores rgba alphas, so a solid
+     Canvas backdrop is the safest visible-but-not-distracting choice. */
+  .confirm-overlay,
+  .modal-overlay,
+  .dialog-overlay {
+    background: Canvas;
+  }
+
+  /* Icons / SVGs — turn off any author-side `forced-color-adjust: none` and
+     drop fixed fills so the UA can recolor each glyph for contrast. Critical
+     because most of our toolbar/sidebar icons use `currentColor` which would
+     otherwise be locked to a single forced color across the whole UI. */
+  svg,
+  img,
+  [role="img"] {
+    forced-color-adjust: auto;
+  }
+}
+

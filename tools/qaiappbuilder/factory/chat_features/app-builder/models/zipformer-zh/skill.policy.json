@@ -1,0 +1,14 @@
+{
+  "_comment": "FileGuard 白名单：仅当 LLM 进入 app-builder 模式 (mode=app-builder) 且当前选中模型为 zipformer-zh 时，由 tool_executor 在调工具时校验访问范围。直连 Run 路径 (/api/appbuilder/run) 由 features/app-builder/shared/policy_guard.py 独立处理。",
+  "version": 1,
+  "required_read": [
+    "${PROJECT_ROOT}/features/app-builder/models/zipformer-zh",
+    "${PROJECT_ROOT}/data/uploads",
+    "${PROJECT_ROOT}/data/outputs"
+  ],
+  "required_write": [
+    "${PROJECT_ROOT}/data/outputs",
+    "${TEMP}"
+  ],
+  "trusted_binaries": []
+}

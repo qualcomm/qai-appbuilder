@@ -1,0 +1,50 @@
+{
+    "version": 1,
+    "_comment": "程序固定副产品路径放行（program-path allowlist）。某些程序启动时会写它自己的运行时目录（如 powershell 写 PSReadLine 历史、模块缓存、profile 探测），这些写与用户命令逻辑无关，但会触发 native FileGuard 弹窗。此处按程序声明放行它相关的固定路径，避免每次遇到都改代码——新增程序只需在 programs[] 追加一段。安全约束：(1) 只放行程序运行时自管目录（历史/缓存/profile 专属子目录），绝不放行 %USERPROFILE% / %APPDATA% 裸根或任意用户目录；(2) native 层是进程全局前缀白名单、无法做 per-process 规则，故 program/binary_globs 仅作分组与审计文档，paths 最终对所有子进程全局放行；(3) 黑名单（protected_write_paths / C:\\Qualcomm）仍最高优先级，此处放行不能穿透；(4) op 最小化，探测类只给 read，确需写历史/缓存才给 write。路径用 %ENV%（复用 file_guard_paths.json 的展开规则，变量未设则跳过该条）。",
+    "programs": [
+        {
+            "program": "powershell",
+            "binary_globs": [
+                "**/powershell.exe",
+                "**/pwsh.exe"
+            ],
+            "paths": [
+                {
+                    "_note": "Windows PowerShell 5.1 PSReadLine 命令历史，反复读写。",
+                    "path": "%APPDATA%\\Microsoft\\Windows\\PowerShell\\PSReadLine",
+                    "read": true,
+                    "write": true,
+                    "execute": false
+                },
+                {
+                    "_note": "PowerShell 7+ (pwsh) 用户模块/配置根。",
+                    "path": "%LOCALAPPDATA%\\Microsoft\\PowerShell",
+                    "read": true,
+                    "write": true,
+                    "execute": false
+                },
+                {
+                    "_note": "Windows PowerShell 用户 profile / 模块目录 (Documents\\WindowsPowerShell)。",
+                    "path": "%USERPROFILE%\\Documents\\WindowsPowerShell",
+                    "read": true,
+                    "write": true,
+                    "execute": false
+                },
+                {
+                    "_note": "PowerShell 7+ 用户 profile 目录 (Documents\\PowerShell)。",
+                    "path": "%USERPROFILE%\\Documents\\PowerShell",
+                    "read": true,
+                    "write": true,
+                    "execute": false
+                },
+                {
+                    "_note": "Windows PowerShell 5.1 运行时缓存目录：StartupProfileData-NonInteractive（启动性能缓存）、ModuleAnalysisCache（模块分析缓存）等。PowerShell 每次启动都会读写这些文件，与执行的命令无关。注意区分：%LOCALAPPDATA%\\Microsoft\\PowerShell 是 pwsh 7+ 的目录；此条是 Windows PowerShell 5.1 的 Windows 子目录。",
+                    "path": "%LOCALAPPDATA%\\Microsoft\\Windows\\PowerShell",
+                    "read": true,
+                    "write": true,
+                    "execute": false
+                }
+            ]
+        }
+    ]
+}

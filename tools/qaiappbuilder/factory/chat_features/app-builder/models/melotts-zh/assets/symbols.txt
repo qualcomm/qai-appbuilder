@@ -1,0 +1,4 @@
+# This file is NOT used by the real MeloTTS-ZH runner.
+# The actual phoneme inventory is embedded in melo_zh_local/symbols.py
+# and the symbol-to-ID mapping is in melo_symbol_to_id.json.
+# This placeholder is kept for backward compatibility with the manifest schema validation.

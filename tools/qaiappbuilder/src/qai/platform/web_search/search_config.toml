@@ -1,0 +1,331 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Independent web search — the ``web`` provider's engine roster + tuning.
+#
+# This roster ships to BOTH editions: the ``web`` provider (baidu / bing /
+# mojeek / google_browser / brave / tavily / gemini) is available internally
+# AND externally. It lives here in the shared-kernel package
+# ``qai.platform.web_search`` (NOT under the external-excluded
+# ``qai.platform.edition``), read by ``config.get_search_engines()`` /
+# ``config.get_independent_search_config()`` via tomllib.
+#
+# Each [[search_engines]] entry declares one engine loaded by
+# qai.platform.web_search.independent.engine_loader via ``handler_class``
+# (importlib). Adding/removing an engine = editing this array only; no code
+# change in the loader / provider / bridge. The api_key is NOT stored here — a
+# keyed engine names a ``credential_key`` read from the SecretStore namespace
+# qai.model_catalog.provider (same store the CEBot bridge uses).
+#
+# engine_type: "http_keyless" | "http_api" | "browser".
+# enabled_by_default: false hides an engine from the default fallback until the
+#   user turns it on. requires_credential: true engines are skipped (shown as
+#   "needs config") until their credential_key is provisioned.
+# priority_hint: tie-break order when every engine's health score is equal
+#   (notably the first search); higher first. Also drives the display order in
+#   the Settings → Search panel, so it is the single source of truth for "which
+#   engine should we lean on" and must not be duplicated in the frontend.
+#
+#   The credential-free band (93-100) is ordered by MEASURED result quality, not
+#   by guesswork: relevance / authority / snippet coverage / cross-engine
+#   uniqueness / latency over a mixed query set, scored on both the direct and
+#   the proxied route (see docs/85-tasks/web-search-engine-roster-and-reachability).
+#   Route-independent engines rank above proxy-only ones so the order does not
+#   flip when the proxy is toggled. Re-measure before reshuffling these.
+#
+#   Credential-free engines occupy 93-100 and therefore outrank every keyed
+#   engine (max 92): they cost nothing to try and need no provisioning.
+# ---------------------------------------------------------------------------
+[[search_engines]]
+engine_id = "google_browser"
+display_name = "Google (Browser)"
+engine_type = "browser"
+handler_class = "qai.platform.web_search.independent.engines.google_browser:GoogleBrowserEngine"
+enabled_by_default = false
+requires_credential = false
+credential_key = ""
+endpoint = "https://www.google.com/search"
+priority_hint = 94
+description_i18n_key = "search.engines.google_browser.desc"
+
+[[search_engines]]
+engine_id = "mojeek"
+display_name = "Mojeek"
+engine_type = "http_keyless"
+handler_class = "qai.platform.web_search.independent.engines.mojeek:MojeekEngine"
+enabled_by_default = false
+requires_credential = false
+credential_key = ""
+endpoint = "https://www.mojeek.com/search"
+priority_hint = 93
+description_i18n_key = "search.engines.mojeek.desc"
+
+[[search_engines]]
+engine_id = "brave"
+display_name = "Brave Search"
+engine_type = "http_api"
+handler_class = "qai.platform.web_search.independent.engines.brave:BraveEngine"
+enabled_by_default = true
+requires_credential = true
+credential_key = "web_brave"
+endpoint = "https://api.search.brave.com/res/v1/web/search"
+priority_hint = 90
+description_i18n_key = "search.engines.brave.desc"
+
+[[search_engines]]
+engine_id = "serpapi"
+display_name = "SerpApi (Google)"
+engine_type = "http_api"
+handler_class = "qai.platform.web_search.independent.engines.serpapi:SerpApiEngine"
+enabled_by_default = true
+requires_credential = true
+credential_key = "web_serpapi"
+endpoint = "https://serpapi.com/search"
+priority_hint = 92
+description_i18n_key = "search.engines.serpapi.desc"
+
+[[search_engines]]
+engine_id = "tavily"
+display_name = "Tavily"
+engine_type = "http_api"
+handler_class = "qai.platform.web_search.independent.engines.tavily:TavilyEngine"
+enabled_by_default = true
+requires_credential = true
+credential_key = "web_tavily"
+endpoint = "https://api.tavily.com/search"
+priority_hint = 85
+description_i18n_key = "search.engines.tavily.desc"
+
+[[search_engines]]
+engine_id = "gemini"
+display_name = "Gemini (Grounding)"
+engine_type = "http_api"
+handler_class = "qai.platform.web_search.independent.engines.gemini:GeminiEngine"
+enabled_by_default = true
+requires_credential = true
+credential_key = "web_gemini"
+endpoint = "https://generativelanguage.googleapis.com"
+priority_hint = 70
+description_i18n_key = "search.engines.gemini.desc"
+
+[[search_engines]]
+engine_id = "baidu"
+display_name = "百度"
+engine_type = "http_keyless"
+handler_class = "qai.platform.web_search.independent.engines.baidu:BaiduEngine"
+enabled_by_default = true
+requires_credential = false
+credential_key = ""
+endpoint = "https://www.baidu.com/s"
+priority_hint = 97
+description_i18n_key = "search.engines.baidu.desc"
+
+[[search_engines]]
+engine_id = "bing"
+display_name = "Bing / 必应"
+engine_type = "http_keyless"
+handler_class = "qai.platform.web_search.independent.engines.bing:BingEngine"
+enabled_by_default = true
+requires_credential = false
+credential_key = ""
+endpoint = "https://www.bing.com/search"
+priority_hint = 98
+description_i18n_key = "search.engines.bing.desc"
+
+
+[[search_engines]]
+engine_id = "duckduckgo"
+display_name = "DuckDuckGo"
+engine_type = "http_keyless"
+handler_class = "qai.platform.web_search.independent.engines.duckduckgo:DuckDuckGoEngine"
+enabled_by_default = true
+requires_credential = false
+credential_key = ""
+endpoint = "https://html.duckduckgo.com/html/"
+priority_hint = 96
+description_i18n_key = "search.engines.duckduckgo.desc"
+
+# ---------------------------------------------------------------------------
+# Engines ported from the reference implementation (parity work).
+#
+# ``priority_hint`` intentionally does NOT copy the reference implementation's chain order. the reference implementation orders
+# answer-synthesizing providers first (perplexity, gemini, anthropic, codex,
+# xai); this aggregator instead merges ranked hits from several engines, so the
+# hint means "try the most reliably reachable engine first". Keyless engines
+# that need no provisioning therefore outrank credentialed ones, matching the
+# existing entries above. Relative order *within* the credentialed group follows
+# the reference implementation.
+# ---------------------------------------------------------------------------
+
+[[search_engines]]
+engine_id = "exa"
+display_name = "Exa"
+engine_type = "http_api"
+handler_class = "qai.platform.web_search.independent.engines.exa:ExaEngine"
+enabled_by_default = true
+# Keyless: falls back to Exa's public MCP endpoint when no key is provisioned.
+requires_credential = false
+credential_key = "web_exa"
+endpoint = "https://api.exa.ai/search"
+priority_hint = 99
+description_i18n_key = "search.engines.exa.desc"
+
+[[search_engines]]
+engine_id = "firecrawl"
+display_name = "Firecrawl"
+engine_type = "http_api"
+handler_class = "qai.platform.web_search.independent.engines.firecrawl:FirecrawlEngine"
+enabled_by_default = true
+# Keyless: omits the bearer header and uses Firecrawl's unauthenticated mode.
+requires_credential = false
+credential_key = "web_firecrawl"
+endpoint = "https://api.firecrawl.dev/v2/search"
+priority_hint = 100
+description_i18n_key = "search.engines.firecrawl.desc"
+
+[[search_engines]]
+engine_id = "kagi"
+display_name = "Kagi"
+engine_type = "http_api"
+handler_class = "qai.platform.web_search.independent.engines.kagi:KagiEngine"
+enabled_by_default = true
+requires_credential = true
+credential_key = "web_kagi"
+endpoint = "https://kagi.com/api/v1/search"
+priority_hint = 68
+description_i18n_key = "search.engines.kagi.desc"
+
+[[search_engines]]
+engine_id = "jina"
+display_name = "Jina"
+engine_type = "http_api"
+handler_class = "qai.platform.web_search.independent.engines.jina:JinaEngine"
+enabled_by_default = true
+requires_credential = true
+credential_key = "web_jina"
+endpoint = "https://s.jina.ai"
+priority_hint = 66
+description_i18n_key = "search.engines.jina.desc"
+
+[[search_engines]]
+engine_id = "tinyfish"
+display_name = "TinyFish"
+engine_type = "http_api"
+handler_class = "qai.platform.web_search.independent.engines.tinyfish:TinyfishEngine"
+enabled_by_default = true
+requires_credential = true
+credential_key = "web_tinyfish"
+endpoint = "https://api.search.tinyfish.ai"
+priority_hint = 64
+description_i18n_key = "search.engines.tinyfish.desc"
+
+[[search_engines]]
+engine_id = "parallel"
+display_name = "Parallel"
+engine_type = "http_api"
+handler_class = "qai.platform.web_search.independent.engines.parallel:ParallelEngine"
+enabled_by_default = true
+requires_credential = true
+credential_key = "web_parallel"
+endpoint = "https://api.parallel.ai/v1beta/search"
+priority_hint = 62
+description_i18n_key = "search.engines.parallel.desc"
+
+[[search_engines]]
+engine_id = "synthetic"
+display_name = "Synthetic"
+engine_type = "http_api"
+handler_class = "qai.platform.web_search.independent.engines.synthetic:SyntheticEngine"
+enabled_by_default = true
+requires_credential = true
+credential_key = "web_synthetic"
+endpoint = "https://api.synthetic.new/v2/search"
+priority_hint = 60
+description_i18n_key = "search.engines.synthetic.desc"
+
+[[search_engines]]
+engine_id = "kimi"
+display_name = "Kimi"
+engine_type = "http_api"
+handler_class = "qai.platform.web_search.independent.engines.kimi:KimiEngine"
+enabled_by_default = true
+# Needs a Kimi Code Console key (api.kimi.com), NOT a Moonshot Open Platform
+# key — the latter 401s against this endpoint.
+requires_credential = true
+credential_key = "web_kimi"
+endpoint = "https://api.kimi.com/coding/v1/search"
+priority_hint = 58
+description_i18n_key = "search.engines.kimi.desc"
+
+[[search_engines]]
+engine_id = "zai"
+display_name = "Z.AI"
+engine_type = "http_api"
+handler_class = "qai.platform.web_search.independent.engines.zai:ZaiEngine"
+enabled_by_default = true
+requires_credential = true
+credential_key = "web_zai"
+endpoint = "https://api.z.ai/api/mcp/web_search_prime/mcp"
+priority_hint = 56
+description_i18n_key = "search.engines.zai.desc"
+
+[[search_engines]]
+engine_id = "xai"
+display_name = "xAI (Grok)"
+engine_type = "http_api"
+handler_class = "qai.platform.web_search.independent.engines.xai:XaiEngine"
+enabled_by_default = true
+requires_credential = true
+credential_key = "web_xai"
+endpoint = "https://api.x.ai/v1/responses"
+priority_hint = 54
+description_i18n_key = "search.engines.xai.desc"
+
+[[search_engines]]
+engine_id = "anthropic"
+display_name = "Claude (Web Search)"
+engine_type = "http_api"
+handler_class = "qai.platform.web_search.independent.engines.anthropic:AnthropicEngine"
+enabled_by_default = true
+requires_credential = true
+credential_key = "web_anthropic"
+endpoint = "https://api.anthropic.com/v1/messages"
+priority_hint = 52
+description_i18n_key = "search.engines.anthropic.desc"
+# Aggregator + browser + health-scoring knobs (platform-operator tuning; users
+# cannot override these from forge_config). Read by the ``web`` provider via
+# get_independent_search_config().
+#
+# Two-tier wait policy for the keyless phase (every enabled engine is started
+# CONCURRENTLY; these bound how long the merge waits for them):
+#   * soft_deadline_seconds — the "good enough" checkpoint. If at least 2 engines
+#     have produced hits by now, return and cancel the stragglers.
+#   * hard_deadline_seconds — the ceiling. When the soft checkpoint had fewer
+#     than 2 contributors, keep waiting up to here for more sources to land.
+#
+# Sized from MEASURED latency, not guessed: plain-HTTP engines answer in
+# 1.5-2.7s, Exa's MCP path routinely needs ~6s, and the browser upgrade longer.
+# The former 5s soft deadline cut exactly where Exa lands — the engine with the
+# highest measured authority — letting one fast-but-weak engine define the whole
+# result set. Re-measure before changing these.
+[independent_search]
+soft_deadline_seconds = 10.0
+hard_deadline_seconds = 20.0
+# Kept below soft_deadline: a browser engine that has not answered within the
+# soft window is not going to beat the plain-HTTP engines, and letting its
+# minimum wait exceed the checkpoint would silently push every search past it.
+browser_min_wait_seconds = 9.0
+
+[independent_search.browser]
+idle_close_seconds = 60.0
+
+[independent_search.scoring]
+score_max = 50
+score_min = -50
+initial_score = 0
+disable_threshold = -25
+daily_change_cap = 3
+dedup_window_seconds = 300
+consecutive_fails_hard = 20

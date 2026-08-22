@@ -1,0 +1,271 @@
+/* =============================================================================
+ * Migrated from frontend/css/utilities.css (S7.5 L8 PR-802c).
+ * Selectors stay global so legacy class names remain reachable from new
+ * SFCs that reuse them.
+ * ========================================================================== */
+
+/* ---------------------------------------------------------------------
+ * Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * --------------------------------------------------------------------- */
+/* ── Utilities & Shared Components ─────────────────────────────────────── */
+/* Reusable utility classes and unified component base styles.             */
+/* All values reference tokens from variables.css.                         */
+
+/* ═══════════════════════════════════════════════════════════════════════ */
+/* ── Unified Input Base (.ui-input) ──────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════ */
+
+.ui-input {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-base);
+  color: var(--text-primary);
+  transition: border-color var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out);
+  outline: none;
+}
+.ui-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-muted);
+}
+.ui-input::placeholder {
+  color: var(--text-muted);
+}
+.ui-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.ui-input.mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════ */
+/* ── Layout Utilities ────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════ */
+
+.flex { display: flex; }
+.flex-col { flex-direction: column; }
+.items-center { align-items: center; }
+.justify-between { justify-content: space-between; }
+.gap-1 { gap: var(--space-1); }
+.gap-2 { gap: var(--space-2); }
+.gap-3 { gap: var(--space-3); }
+.gap-4 { gap: var(--space-4); }
+
+/* ═══════════════════════════════════════════════════════════════════════ */
+/* ── Text Utilities ──────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════ */
+
+.text-xs { font-size: var(--text-xs); }
+.text-sm { font-size: var(--text-sm); }
+.text-base { font-size: var(--text-base); }
+.text-muted { color: var(--text-muted); }
+.text-secondary { color: var(--text-secondary); }
+.font-medium { font-weight: var(--weight-medium); }
+.font-semibold { font-weight: var(--weight-semibold); }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ═══════════════════════════════════════════════════════════════════════ */
+/* ── Spacing Utilities ───────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════ */
+
+.mt-1 { margin-top: var(--space-1); }
+.mt-2 { margin-top: var(--space-2); }
+.mt-3 { margin-top: var(--space-3); }
+.mt-4 { margin-top: var(--space-4); }
+.mb-2 { margin-bottom: var(--space-2); }
+.mb-3 { margin-bottom: var(--space-3); }
+.mb-4 { margin-bottom: var(--space-4); }
+
+/* ═══════════════════════════════════════════════════════════════════════ */
+/* ── Card 基础类 (.ui-card) ──────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════ */
+
+.ui-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: border-color var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out);
+}
+.ui-card:hover {
+  border-color: var(--border-light);
+}
+.ui-card.interactive:hover {
+  box-shadow: var(--shadow-sm);
+  border-color: var(--border-light);
+}
+.ui-card-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+.ui-card-body {
+  padding: var(--space-4);
+}
+
+.ui-card-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════ */
+/* ── Accessibility ───────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════ */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════ */
+/* ── Command Palette ─────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════ */
+
+.cmd-palette-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  background: var(--overlay-bg);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 15vh;
+  animation: cmd-fade-in var(--duration-fast) var(--ease-out);
+}
+.cmd-palette {
+  width: min(560px, 90vw);
+  max-height: 60vh;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: cmd-dropdown-in var(--duration-normal) var(--ease-out);
+}
+.cmd-palette-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+.cmd-palette-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.cmd-palette-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: var(--text-lg);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+}
+.cmd-palette-input::placeholder {
+  color: var(--text-muted);
+}
+.cmd-palette-kbd {
+  padding: 2px 6px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+.cmd-palette-results {
+  overflow-y: auto;
+  padding: var(--space-2) 0;
+  max-height: calc(60vh - 60px);
+}
+.cmd-palette-group {
+  padding: var(--space-1) 0;
+}
+.cmd-palette-group-label {
+  padding: var(--space-1) var(--space-4);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wider);
+}
+.cmd-palette-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+  border-radius: 0;
+  transition: background var(--duration-fast);
+}
+.cmd-palette-item:hover,
+.cmd-palette-item.active {
+  background: var(--bg-hover);
+}
+.cmd-palette-item.active {
+  background: var(--accent-light);
+}
+.cmd-palette-item-icon {
+  font-size: var(--text-base);
+  width: 20px;
+  text-align: center;
+}
+.cmd-palette-item-label {
+  flex: 1;
+  font-size: var(--text-base);
+  color: var(--text-primary);
+}
+.cmd-palette-item-kbd {
+  padding: 1px 5px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+.cmd-palette-empty {
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+@keyframes cmd-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes cmd-dropdown-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}

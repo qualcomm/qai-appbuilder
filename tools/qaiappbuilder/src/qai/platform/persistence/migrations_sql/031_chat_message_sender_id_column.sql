@@ -1,0 +1,33 @@
+-- ============================================================================
+-- Migration 031: chat_message sender_id column (participant speaker attribution)
+--
+-- Adds one nullable column to chat_message so every message can record WHICH
+-- participant produced it — the "speaker identity" dimension, ORTHOGONAL to the
+-- existing role column (system/user/assistant/tool):
+--   role       = the message's kind (what category of turn it is)
+--   sender_id  = the speaker's identity (who produced it)
+--
+-- sender_id is a SOFT reference to chat_participant.id (NO FK constraint):
+--   chat_message rows are rewritten with a DELETE-then-INSERT strategy on each
+--   conversation save, so a hard FK from chat_message to chat_participant (or
+--   vice-versa) would fight that rewrite. A plain TEXT soft ref lets the message
+--   rewrite proceed untouched; a sender_id pointing at a since-removed
+--   participant is harmless (the row simply renders without attribution).
+--
+-- Today sender_id carries the attribution of sub-agent output (linking a turn to
+-- its sub_agent chat_participant); in the future it carries the speaker
+-- attribution of a multi-agent conversation (named_agent participants).
+--
+-- NULL means an ordinary message with no explicit participant attribution —
+-- this keeps every pre-existing row valid (backward compatible): older messages
+-- and plain single-agent turns simply leave sender_id NULL.
+--
+-- Done as a standalone ALTER migration (NOT by editing 002 or 030) so existing
+-- databases that already applied those are upgraded in-place; the migration
+-- runner applies each versioned file exactly once.
+--
+-- runner manages BEGIN/COMMIT — file MUST NOT contain them.
+-- ============================================================================
+
+
+ALTER TABLE chat_message ADD COLUMN sender_id TEXT;

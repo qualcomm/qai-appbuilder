@@ -1,0 +1,80 @@
+diff --git a/package.json b/package.json
+index c9f54edd9f394c267429a4b1393d67df42fbbe45..ceb6b34895066c648cecd9d172a4f410e398dc24 100644
+--- a/package.json
++++ b/package.json
+@@ -1,38 +1,39 @@
+ {
+-	"name": "estree-walker",
+-	"description": "Traverse an ESTree-compliant AST",
+-	"version": "3.0.3",
+-	"private": false,
+-	"author": "Rich Harris",
+-	"license": "MIT",
+-	"repository": {
+-		"type": "git",
+-		"url": "https://github.com/Rich-Harris/estree-walker"
+-	},
+-	"type": "module",
+-	"module": "./src/index.js",
+-	"exports": {
+-		"./package.json": "./package.json",
+-		".": {
+-			"types": "./types/index.d.ts",
+-			"import": "./src/index.js"
+-		}
+-	},
+-	"types": "types/index.d.ts",
+-	"scripts": {
+-		"prepublishOnly": "tsc && npm test",
+-		"test": "uvu test"
+-	},
+-	"dependencies": {
+-		"@types/estree": "^1.0.0"
+-	},
+-	"devDependencies": {
+-		"typescript": "^4.9.0",
+-		"uvu": "^0.5.1"
+-	},
+-	"files": [
+-		"src",
+-		"types",
+-		"README.md"
+-	]
++  "name": "estree-walker",
++  "description": "Traverse an ESTree-compliant AST",
++  "version": "3.0.3",
++  "private": false,
++  "author": "Rich Harris",
++  "license": "MIT",
++  "repository": {
++    "type": "git",
++    "url": "https://github.com/Rich-Harris/estree-walker"
++  },
++  "type": "module",
++  "module": "./src/index.js",
++  "exports": {
++    "./package.json": "./package.json",
++    ".": {
++      "types": "./types/index.d.ts",
++      "import": "./src/index.js",
++      "require": "./src/index.js"
++    }
++  },
++  "types": "types/index.d.ts",
++  "scripts": {
++    "prepublishOnly": "tsc && npm test",
++    "test": "uvu test"
++  },
++  "dependencies": {
++    "@types/estree": "^1.0.0"
++  },
++  "devDependencies": {
++    "typescript": "^4.9.0",
++    "uvu": "^0.5.1"
++  },
++  "files": [
++    "src",
++    "types",
++    "README.md"
++  ]
+ }

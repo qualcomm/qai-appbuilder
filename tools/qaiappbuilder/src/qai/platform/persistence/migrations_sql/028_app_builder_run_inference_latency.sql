@@ -1,0 +1,41 @@
+-- ============================================================================
+-- Migration 028: app_builder_run.inference_latency_ms column (缺口 #6)
+--
+-- Adds one nullable REAL column to app_builder_run so the runner-reported
+-- pure-inference latency (V1 ``metrics`` NDJSON event ``latencyMs``, see
+-- features/app-builder/models/<pack>/runner.py + useAppBuilder.js:601-606)
+-- survives a restart and is observable on the REST DTO + history panel.
+--
+-- This is distinct from the run's end-to-end wall-clock duration
+-- (derived on read from started_at/finished_at by GetMetricsForRunUseCase):
+-- ``inference_latency_ms`` is the time the model spent doing inference,
+-- which V1 displayed in the history "Inference" column
+-- (HistoryPanel.js:237-238 ``r.metrics.latencyMs``ms) and persisted in
+-- ``last_results.json``.
+--
+-- Domain: ``Run.inference_latency_ms: float | None``
+--   * Set by ``Run.with_inference_latency(...)`` when the runner streamed a
+--     ``metrics`` event carrying ``latencyMs`` before completing.
+--   * ``None`` for runs whose runner emitted no ``metrics`` event (the
+--     frontend then honestly falls back to duration_ms / "—").
+--
+-- Backward compatibility (v2.7 §3.1 — append-only / additive):
+--   * NULLable, default NULL — existing rows read back as ``None``.
+--   * The repository SELECT tolerates short rows from databases that
+--     applied 003 but not yet 028 (``len(row) > N`` guard), mirroring the
+--     ``error_code`` graceful read in run_repository.py.
+--
+-- Wire/contract impact (append-only):
+--   * REST DTO ``RunMetricsResponse.latency_ms: float | None`` (tail-appended).
+--   * No SSE frame shape change — the ``metrics`` frame already carries
+--     ``latencyMs``; this only persists + reads it back.
+--
+-- Done as a standalone ALTER migration (NOT by editing 003) so existing
+-- databases that already applied 003 are upgraded in-place; the schema
+-- migration runner applies each versioned file exactly once.
+--
+-- runner manages BEGIN/COMMIT -- file MUST NOT contain them.
+-- ============================================================================
+
+
+ALTER TABLE app_builder_run ADD COLUMN inference_latency_ms REAL;

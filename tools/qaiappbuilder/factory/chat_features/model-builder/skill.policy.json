@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "required_read": [
+    "C:/Qualcomm/AIStack/QAIRT",
+    "C:/Program Files/Microsoft Visual Studio/2022",
+    "C:/Program Files (x86)/Microsoft Visual Studio",
+    "C:/Program Files (x86)/Windows Kits/10",
+    "C:/Program Files/CMake",
+    "${HOME}/.cmake",
+    "${PROJECT_ROOT}/factory/chat_features/model-builder"
+  ],
+  "required_write": [
+    "${PROJECT_ROOT}/logs",
+    "${TEMP}"
+  ],
+  "trusted_binaries": [
+    "C:/Qualcomm/AIStack/QAIRT/*/bin/**/*.exe",
+    "C:/Program Files/Microsoft Visual Studio/2022/**/cl.exe",
+    "C:/Program Files/Microsoft Visual Studio/2022/**/link.exe",
+    "C:/Program Files/Microsoft Visual Studio/2022/**/cmake.exe",
+    "C:/Program Files/CMake/bin/cmake.exe",
+    "C:/Program Files (x86)/Microsoft Visual Studio/**/cl.exe",
+    "C:/Program Files (x86)/Microsoft Visual Studio/**/link.exe",
+    "**/QAIModelBuilder/git/bin/git.exe",
+    "**/QAIModelBuilder/git/usr/bin/*.exe"
+  ]
+}

@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 112 112" fill="none">
+  <!--
+    QAI ModelBuilder V2 Welcome Logo
+    Design: Neural network nodes + NPU chip motif
+    Brand: #7c6cff (violet) → #60a5fa (sky-blue) gradient
+  -->
+  <defs>
+    <linearGradient id="wl-brand-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7c6cff"/>
+      <stop offset="100%" stop-color="#60a5fa"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background tile -->
+  <rect x="4" y="4" width="104" height="104" rx="24"
+        fill="#0f1219" stroke="rgba(124,108,255,0.25)" stroke-width="1"/>
+
+  <!-- Neural network connection lines -->
+  <g stroke="rgba(124,108,255,0.4)" stroke-width="1"
+     stroke-dasharray="3 2.5">
+    <line x1="56" y1="22" x2="34" y2="38"/>
+    <line x1="56" y1="22" x2="78" y2="38"/>
+    <line x1="34" y1="38" x2="22" y2="56"/>
+    <line x1="78" y1="38" x2="90" y2="56"/>
+    <line x1="22" y1="56" x2="34" y2="74"/>
+    <line x1="90" y1="56" x2="78" y2="74"/>
+    <line x1="34" y1="74" x2="56" y2="90"/>
+    <line x1="78" y1="74" x2="56" y2="90"/>
+    <line x1="34" y1="38" x2="56" y2="56"/>
+    <line x1="78" y1="38" x2="56" y2="56"/>
+    <line x1="22" y1="56" x2="56" y2="56"/>
+    <line x1="90" y1="56" x2="56" y2="56"/>
+    <line x1="34" y1="74" x2="56" y2="56"/>
+    <line x1="78" y1="74" x2="56" y2="56"/>
+  </g>
+
+  <!-- Center NPU chip -->
+  <g fill="none" stroke="url(#wl-brand-grad)" stroke-width="1.6"
+     stroke-linecap="round">
+    <rect x="44" y="44" width="24" height="24" rx="4"/>
+    <!-- Chip pins (top) -->
+    <line x1="50" y1="44" x2="50" y2="39"/>
+    <line x1="56" y1="44" x2="56" y2="39"/>
+    <line x1="62" y1="44" x2="62" y2="39"/>
+    <!-- Chip pins (bottom) -->
+    <line x1="50" y1="68" x2="50" y2="73"/>
+    <line x1="56" y1="68" x2="56" y2="73"/>
+    <line x1="62" y1="68" x2="62" y2="73"/>
+    <!-- Chip pins (left) -->
+    <line x1="44" y1="50" x2="39" y2="50"/>
+    <line x1="44" y1="56" x2="39" y2="56"/>
+    <line x1="44" y1="62" x2="39" y2="62"/>
+    <!-- Chip pins (right) -->
+    <line x1="68" y1="50" x2="73" y2="50"/>
+    <line x1="68" y1="56" x2="73" y2="56"/>
+    <line x1="68" y1="62" x2="73" y2="62"/>
+    <!-- Inner circuit -->
+    <line x1="49" y1="52" x2="56" y2="52"/>
+    <line x1="56" y1="52" x2="56" y2="60"/>
+    <line x1="56" y1="60" x2="63" y2="60"/>
+  </g>
+
+  <!-- Neural network nodes -->
+  <g fill="url(#wl-brand-grad)" opacity="0.9">
+    <circle cx="56" cy="22" r="4.5"/>
+    <circle cx="34" cy="38" r="3.5"/>
+    <circle cx="78" cy="38" r="3.5"/>
+    <circle cx="22" cy="56" r="3"/>
+    <circle cx="90" cy="56" r="3"/>
+    <circle cx="34" cy="74" r="3.5"/>
+    <circle cx="78" cy="74" r="3.5"/>
+    <circle cx="56" cy="90" r="4.5"/>
+  </g>
+</svg>

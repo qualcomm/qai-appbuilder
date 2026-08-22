@@ -1,0 +1,18 @@
+# Line-ending policy for the published artifact.
+#
+# Mirrors the source repository's .gitattributes, kept to the rules that apply
+# to this tree (it ships no .githooks/ and no tools/openapi/ snapshot).
+#
+# Git for Windows installs with core.autocrlf=true by default, so without this
+# file every shell script would be checked out with CRLF. A trailing \r turns
+# `#!/usr/bin/env bash\r` into an invalid interpreter path and breaks every
+# line end, so `bash setup.sh` fails on Linux with errors like
+# `$'\r': command not found`. Force LF regardless of the user's core.autocrlf.
+*.sh text eol=lf
+
+# pnpm patch files are applied by diff context matching. A CRLF checkout
+# changes every line of the payload, so `pnpm install` fails to apply the
+# patches referenced from frontend/pnpm-workspace.yaml (patchedDependencies).
+# The source repository stores them as LF; pin that here so the checked-out
+# bytes stay appliable regardless of the user's core.autocrlf.
+*.patch text eol=lf

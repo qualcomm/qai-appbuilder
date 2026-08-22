@@ -1,0 +1,19 @@
+{
+  "_comment": "Executable PATH-preference dirs. This is a RUNTIME BASELINE, NOT a user preference: it declares the application-owned directories that hold bundled executables (uvx / npx / git / aria2c / uv / 7zr ...), which are prepended to the process PATH at startup so a bare command name resolves to OUR bundled copy BEFORE any unrelated tool on the host PATH (e.g. C:\\Programs\\Python\\Python312\\Scripts\\uvx.exe). It is loaded once at startup and prepended to os.environ['PATH']; every child process the app spawns inherits that PATH, so this single list governs command resolution universally (no per-spawn-site patching). Like file_guard_paths.json it is DELIBERATELY NOT editable via the UI / runtime-config API - to change it, edit this file directly. Each 'root' entry: {path, subdirs?, globs?, include_children?}. 'path' may contain %ENV% variables (e.g. %LOCALAPPDATA%), expanded at load time; a root whose variable is unset is skipped. Only directories that actually EXIST on disk are prepended, in the order listed here (earlier roots win). Paths are resolved at runtime, never hard-coded.",
+  "_schema": "version 1: roots[] of {path: str, subdirs?: str[], globs?: str[], include_children?: bool}. subdirs are direct child dir names probed under path ('' means path itself). globs are glob patterns evaluated under path. include_children=true also probes every immediate sub-directory of the resolved dir.",
+  "version": 1,
+  "roots": [
+    {
+      "_note": "Per-user application data root (venv Scripts, bundled tools). The '' subdir means the root itself; 'bin'/'Scripts' are conventional executable dirs; 'node' is the bundled portable Node.js toolchain dir (node.exe/npx.cmd/npm.cmd/pnpm.cmd) so a bare 'npx'/'node'/'pnpm' resolves to OUR portable copy before any host Node install; the globs cover installer-created venv script dirs (envs/.venv_arm64_313/Scripts ...).",
+      "path": "%LOCALAPPDATA%\\QAIModelBuilder",
+      "subdirs": ["", "bin", "Scripts", "node"],
+      "globs": ["envs/*/Scripts", "envs/*/bin"]
+    },
+    {
+      "_note": "The current project's download/binary directory (<data_root>/bin). include_children picks up download-center layout where a tool lives in its own sub-dir (data/bin/uv/uvx.exe, data/bin/aria2c/aria2c.exe, data/bin/7zr, data/bin/webview2 ...). '${DATA_ROOT}' is substituted at load time with the resolved runtime data root; it is NOT an OS environment variable.",
+      "path": "${DATA_ROOT}\\bin",
+      "subdirs": [""],
+      "include_children": true
+    }
+  ]
+}

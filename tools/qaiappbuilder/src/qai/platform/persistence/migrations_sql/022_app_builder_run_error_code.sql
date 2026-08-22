@@ -1,0 +1,32 @@
+-- ============================================================================
+-- Migration 022: app_builder_run.error_code column (PR-F1 / F-15)
+--
+-- Adds one nullable TEXT column to app_builder_run so the runner-side
+-- structured failure code (V1 ``_UserError("WEIGHTS_NOT_INSTALLED", ...)``
+-- parity, see features/app-builder/models/<pack>/runner.py) survives a
+-- restart and is observable on the REST DTO + SSE replay error frame.
+--
+-- Domain: ``Run.error_code: str | None``
+--   * Set by ``Run.fail(code=...)`` when the runner streamed an
+--     NDJSON ``error`` event with a structured ``code`` (e.g.
+--     ``WEIGHTS_NOT_INSTALLED`` / ``AUDIO_DECODE_ERROR``) before
+--     exiting.
+--   * ``None`` for non-FAILED runs and for FAILED runs whose underlying
+--     failure was an unstructured exception (only ``error_message`` is
+--     populated in that case).
+--
+-- Wire/contract impact (v2.7 §3.1 — append-only):
+--   * REST DTO ``RunResponse.error_code: str | None`` (tail-appended).
+--   * SSE ``error`` frame payload gains ``details.error_code`` (no
+--     change to top-level ``code`` which keeps its envelope semantic
+--     ``"app_builder.run_failed"``, api-contract.md §2.1).
+--
+-- Done as a standalone ALTER migration (NOT by editing 003) so existing
+-- databases that already applied 003 are upgraded in-place; the schema
+-- migration runner applies each versioned file exactly once.
+--
+-- runner manages BEGIN/COMMIT -- file MUST NOT contain them.
+-- ============================================================================
+
+
+ALTER TABLE app_builder_run ADD COLUMN error_code TEXT;

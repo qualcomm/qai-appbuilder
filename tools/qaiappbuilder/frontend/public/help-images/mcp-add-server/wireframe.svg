@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MCP add-server form wireframe — a simplified sketch of the QAI ModelBuilder
+  MCP server side-panel: name / command / args inputs, a "Test connectivity"
+  button, and a "Save" button. Referenced from the MCP help dialog so users
+  can see at a glance which fields the docs are talking about.
+-->
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 640 460"
+     role="img"
+     aria-label="MCP add-server form wireframe with name, command, args inputs and test / save buttons"
+     font-family="system-ui, -apple-system, 'Segoe UI', sans-serif"
+     font-size="13">
+  <style>
+    .panel        { fill: #ffffff; stroke: #94a3b8; stroke-width: 1.5; }
+    .panel-head   { fill: #f1f5f9; stroke: none; }
+    .field-box    { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1; }
+    .label        { fill: #0f172a; font-weight: 600; }
+    .placeholder  { fill: #94a3b8; font-style: italic; }
+    .btn-primary  { fill: #2563eb; stroke: none; }
+    .btn-primary-t { fill: #ffffff; font-weight: 600; text-anchor: middle; }
+    .btn-ghost    { fill: #ffffff; stroke: #94a3b8; stroke-width: 1; }
+    .btn-ghost-t  { fill: #0f172a; text-anchor: middle; }
+    .callout      { fill: #fef3c7; stroke: #f59e0b; stroke-width: 1; }
+    .callout-t    { fill: #78350f; font-size: 12px; }
+    .head-t       { fill: #0f172a; font-weight: 700; }
+    .arrow        { stroke: #ef4444; stroke-width: 1.5; fill: none; marker-end: url(#note-arrow); }
+    .note-t       { fill: #b91c1c; font-size: 11px; font-weight: 600; }
+    @media (prefers-color-scheme: dark) {
+      .panel        { fill: #0f172a; stroke: #64748b; }
+      .panel-head   { fill: #1e293b; }
+      .field-box    { fill: #1e293b; stroke: #475569; }
+      .label        { fill: #f8fafc; }
+      .placeholder  { fill: #64748b; }
+      .btn-primary  { fill: #3b82f6; }
+      .btn-ghost    { fill: #1e293b; stroke: #64748b; }
+      .btn-ghost-t  { fill: #f8fafc; }
+      .callout      { fill: #422006; stroke: #d97706; }
+      .callout-t    { fill: #fcd34d; }
+      .head-t       { fill: #f8fafc; }
+      .arrow        { stroke: #f87171; }
+      .note-t       { fill: #fca5a5; }
+    }
+  </style>
+
+  <defs>
+    <marker id="note-arrow" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#ef4444" />
+    </marker>
+  </defs>
+
+  <!-- Panel chrome -->
+  <rect class="panel" x="30" y="20" width="500" height="420" rx="10" />
+  <rect class="panel-head" x="30" y="20" width="500" height="40" rx="10" />
+  <text class="head-t" x="55" y="46">+ Add MCP server</text>
+  <text class="head-t" x="500" y="46" text-anchor="end" font-size="18">✕</text>
+
+  <!-- Name field -->
+  <text class="label" x="55" y="90">Name  *</text>
+  <rect class="field-box" x="55" y="100" width="450" height="34" rx="5" />
+  <text class="placeholder" x="65" y="122">my-mcp-server</text>
+
+  <!-- Command field -->
+  <text class="label" x="55" y="160">Command  *</text>
+  <rect class="field-box" x="55" y="170" width="450" height="34" rx="5" />
+  <text class="placeholder" x="65" y="192">npx  (or python, node, path/to/binary)</text>
+
+  <!-- Args field -->
+  <text class="label" x="55" y="230">Arguments</text>
+  <rect class="field-box" x="55" y="240" width="450" height="60" rx="5" />
+  <text class="placeholder" x="65" y="262">-y @modelcontextprotocol/server-filesystem</text>
+  <text class="placeholder" x="65" y="282">C:\Users\me\projects</text>
+
+  <!-- env vars callout -->
+  <rect class="callout" x="55" y="320" width="450" height="34" rx="5" />
+  <text class="callout-t" x="65" y="342">💡 Optional env vars can be added below (KEY=VALUE lines).</text>
+
+  <!-- Button row -->
+  <rect class="btn-ghost"   x="55"  y="380" width="150" height="36" rx="5" />
+  <text class="btn-ghost-t" x="130" y="403">🔌 Test connectivity</text>
+
+  <rect class="btn-primary"   x="405" y="380" width="100" height="36" rx="5" />
+  <text class="btn-primary-t" x="455" y="403">Save</text>
+
+  <!-- Right-side annotations -->
+  <path class="arrow" d="M580 117 L510 117" />
+  <text class="note-t" x="545" y="105">Unique per server</text>
+
+  <path class="arrow" d="M580 187 L510 187" />
+  <text class="note-t" x="545" y="175">Must exist on PATH</text>
+
+  <path class="arrow" d="M580 267 L510 267" />
+  <text class="note-t" x="545" y="255">One arg per line OK</text>
+
+  <path class="arrow" d="M580 397 L510 397" />
+  <text class="note-t" x="545" y="385">Run this before Save</text>
+</svg>

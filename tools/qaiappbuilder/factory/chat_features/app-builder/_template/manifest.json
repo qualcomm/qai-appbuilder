@@ -1,0 +1,89 @@
+{
+  "_comment": "Model Pack 模板。复制本目录到 features/app-builder/models/<your-pack-id>/，把 modelId 改成与目录同名，再按需填字段。manifest schema 详见 plans/.../1779105878246-neon-eagle.md 的 E.1 节。",
+
+  "schema_version": 1,
+  "modelId": "_template",
+  "displayName": "Pack Template",
+  "category": "SR",
+  "_categoryDeprecated": "category will be removed in v1.x+2; consume taxonomy.{group,task} instead",
+  "_taxonomyHint": "Pick group + task from /api/appbuilder/taxonomy. Group must be one of: audio | computer-vision | generative-ai | multimodal. Task must be a valid task id under that group (e.g. super-resolution, ocr, speech-recognition).",
+  "taxonomy": {
+    "group": "computer-vision",
+    "task":  "super-resolution",
+    "tags":  []
+  },
+  "version": "0.0.0",
+  "vendor": "QAIModelBuilder",
+  "description": "Model Pack 模板，仅用于演示协议接线。",
+  "longDescription": "复制本目录到 features/app-builder/models/<id>/，把 modelId 改名后再补 weights / examples。",
+  "tags": ["template"],
+
+  "runtime": {
+    "backend": "cpu",
+    "delegate": "cpu",
+    "quantization": "fp32",
+    "modelSizeMB": 0,
+    "supportedDevices": ["any"]
+  },
+
+  "inputSchema":  { "kind": "image" },
+  "outputSchema": { "kind": "image" },
+
+  "params": [],
+
+  "metrics": { "latencyMs": 0, "memoryMB": 0 },
+
+  "examples": [],
+
+  "assets": {
+    "weightsUrl": "",
+    "checksum": "",
+    "sizeBytes": 0
+  },
+
+  "runner": {
+    "type": "python-script",
+    "script": "runner.py",
+    "venv": "system",
+    "timeoutMs": 60000
+  },
+
+  "skill": {
+    "enabled": false,
+    "file": "SKILL.md"
+  },
+
+  "capabilities": {
+    "streaming": false,
+    "batch": false,
+    "benchmark": false,
+    "cancel": true
+  },
+
+  "_variantsHint": "Multi-variant Pack support (docs/30-ui-ux/multi-variant-pack-contract.md §1). Optional. When present: length>=1; exactly one entry has default=true; each id is url-safe and unique. Top-level runtime/assets/metrics MUST equal the default variant's. Omit this field for legacy single-variant Packs.",
+  "variants": [
+    {
+      "id": "fp32",
+      "label": "FP32",
+      "longLabel": "FP32 · Reference precision",
+      "default": true,
+      "runtime": {
+        "backend": "cpu",
+        "delegate": "cpu",
+        "quantization": "fp32",
+        "modelSizeMB": 0,
+        "supportedDevices": ["any"]
+      },
+      "assets": {
+        "weightsUrl": "",
+        "checksum": "",
+        "sizeBytes": 0,
+        "installPath": "models/_template/weights.bin"
+      },
+      "metrics": {
+        "latencyMs": 0,
+        "memoryMB": 0
+      }
+    }
+  ]
+}

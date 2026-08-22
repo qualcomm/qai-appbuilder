@@ -1,0 +1,21 @@
+# Server deployment config (overrides code defaults; lower priority than env / CLI overrides).
+#
+# NOTE: do NOT hard-code [auth].enabled here. The auth master switch is
+# platform-dependent by default (AuthSettings.enabled via default_factory ->
+# settings._default_auth_enabled):
+#   * Windows ARM64/x64      -> True
+#   * Linux WITH a graphical session (DISPLAY / WAYLAND_DISPLAY set, e.g. an
+#     Ubuntu desktop that has a browser for the Okta loopback callback) -> True
+#   * Linux headless (server / container / IoT board, no DISPLAY) -> False,
+#     because the gate would 303 every request to /auth/login with nothing able
+#     to complete the flow.
+# Pinning it here would force one value globally on ALL platforms and defeat
+# that per-platform gate — in particular it would lock out headless Linux
+# deployments. Only set [auth].enabled below to intentionally override the
+# platform default for a specific deployment.
+#
+# Example (commented out — uncomment only to force a non-default value):
+# [auth]
+# enabled = true
+[auth]
+enabled = true

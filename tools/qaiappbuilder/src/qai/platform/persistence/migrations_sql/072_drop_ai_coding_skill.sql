@@ -1,0 +1,30 @@
+-- ============================================================================
+-- Migration 072: drop the ai_coding_skill table
+--
+-- PR-103 (S7.5 L1) routed the ai_coding ``SkillRegistryPort`` through
+-- ``apps/api/_skill_registry_bridge.SkillRegistryBridge`` onto the canonical
+-- ``model_catalog_skill`` table (§6.6). From that point the ``ai_coding_skill``
+-- table (§4.5, created in migration 004) was never read or written by any
+-- runtime path: ``Container.build`` always wires the ``model_catalog``
+-- namespace before ``ai_coding``, so the bridge is the ONLY implementation the
+-- production container ever constructs. The sole remaining reader was the
+-- legacy ``SqliteAiCodingSkillRegistry`` adapter, whose only caller was a test
+-- asserting that the (unreachable) fallback branch existed.
+--
+-- This migration completes that cleanup: the adapter, the DI fallback branch
+-- and the table are all removed, leaving ONE skill registry table instead of
+-- the two that schema doc §10.3 had provisionally kept side by side.
+--
+-- SAFETY / forward-compatibility (AGENTS.md §8): this is a destructive change,
+-- explicitly authorised by the user after verifying the table holds no data.
+-- ``DROP TABLE IF EXISTS`` keeps the migration idempotent and lets a database
+-- that never had the table (or already dropped it) apply cleanly. Dropping the
+-- table also drops its partial index ``ix_ai_coding_skill_enabled``, so no
+-- separate DROP INDEX is needed. No data is migrated because no runtime path
+-- ever wrote a row: the canonical registry is ``model_catalog_skill``.
+--
+-- The runner applies each versioned file exactly once and manages
+-- BEGIN/COMMIT -- this file MUST NOT contain transaction statements.
+-- ============================================================================
+
+DROP TABLE IF EXISTS ai_coding_skill;

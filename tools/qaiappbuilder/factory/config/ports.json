@@ -1,0 +1,19 @@
+{
+  "_comment": "Single source of truth for ALL network ports across backend (Python), frontend (Vite/TS) and desktop (Tauri/Rust). Edit here only; the three runtimes read this file. See docs/80-operations/dev-environment.md.",
+  "backend": 8989,
+  "frontend_dev": 5173,
+  "preview": 4173,
+  "dev_backend_proxy": 8900,
+  "legacy_packaged": 8989,
+  "fallbacks": [8989, 28688],
+  "cors_extra_origins": [8989, 28688, 5173],
+  "_notes": {
+    "backend": "Server bind port. PINNED by the Okta SSO redirect_uri http://localhost:8989/callback registered on the authorization server. A SECOND redirect_uri http://localhost:28688/callback is ALSO registered as the SSO-approved fallback — see ``fallbacks`` below. Any port outside ``fallbacks`` breaks SSO because Okta rejects unregistered redirect_uris.",
+    "frontend_dev": "Vite dev server (frontend/vite.config.ts server.port).",
+    "preview": "Vite preview server (frontend/vite.config.ts preview.port).",
+    "dev_backend_proxy": "Dev-only Vite proxy target — the bare uvicorn debug backend developers run alongside the 5173 dev server.",
+    "legacy_packaged": "Legacy packaged default; kept for CORS backward-compat and as the first supervisor fallback candidate.",
+    "fallbacks": "apps/cli/serve.py FALLBACK_PORTS — probed in order when --port is omitted (Windows excluded-port-range resilience). BOTH entries MUST be Okta-registered redirect_uris (currently 8989 primary + 28688 secondary). Do NOT add a port here without registering the matching http://localhost:<port>/callback on the Okta side — every login on the unregistered port would fail with redirect_uri mismatch.",
+    "cors_extra_origins": "Extra ports (besides backend) whose http://127.0.0.1:<port> and http://localhost:<port> origins are added to the CORS allow-list."
+  }
+}

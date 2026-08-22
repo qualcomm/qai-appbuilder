@@ -1,0 +1,166 @@
+{
+  "schema_version": 1,
+  "modelId": "real-esrgan-x4plus",
+  "displayName": "Real-ESRGAN x4plus",
+  "category": "super-resolution",
+  "_categoryDeprecated": "category will be removed in v1.x+2; consume taxonomy.{group,task} instead",
+  "taxonomy": {
+    "group": "computer-vision",
+    "task":  "super-resolution",
+    "tags":  ["image-upscale", "video-upscale", "4x", "real-esrgan"]
+  },
+  "version": "1.0.0",
+  "vendor": "Tencent ARC / xinntao",
+  "description": "4x image/video super-resolution using Real-ESRGAN x4plus on QNN HTP NPU. / 基于 QNN HTP NPU 的 4 倍图像/视频超分辨率。",
+  "longDescription": "Real-ESRGAN x4plus (xinntao/Real-ESRGAN) ported to Snapdragon QNN HTP backend, FP16. Single context binary: real_esrgan_480x640_fp16.bin (input shape [1,3,480,640] NCHW). Produces 4x upscaled output [1,3,1920,2560]. Supports arbitrary image sizes via tiled inference with overlap blending (tile 640x480, overlap 32px input-side). Ideal for photo enhancement, video upscaling, and restoring low-resolution content. Platform: QAIRT >=2.44.0, HTP v73. Dependencies: numpy, opencv-python-headless, Pillow, qai_appbuilder.",
+  "tags": ["image", "video", "super-resolution", "4x-upscale", "fp16", "real-esrgan"],
+
+  "runtime": {
+    "backend": "qnn",
+    "delegate": "htp",
+    "quantization": "fp16",
+    "modelSizeMB": 67,
+    "contextBins": ["real_esrgan_480x640_fp16.bin"],
+    "supportedDevices": ["snapdragon-x-elite"],
+    "requiresQairtVersion": ">=2.44.0"
+  },
+
+  "inputSchema": {
+    "kind": "image",
+    "constraints": {
+      "maxMB": 20,
+      "formats": ["png", "jpg", "jpeg", "webp", "bmp", "tiff"]
+    }
+  },
+  "outputSchema": {
+    "kind": "image",
+    "jsonSchema": {
+      "type": "object",
+      "required": ["output_path", "original_size", "upscaled_size", "scale"],
+      "properties": {
+        "output_path": {
+          "type": "string",
+          "description": "Repo-relative path to the upscaled image under data/outputs/, e.g. 'data/outputs/<runId>_SRx4.png'."
+        },
+        "original_size": {
+          "type": "array",
+          "description": "Original image [width, height] in pixels.",
+          "items": { "type": "integer" },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "upscaled_size": {
+          "type": "array",
+          "description": "Upscaled image [width, height] in pixels (4x original).",
+          "items": { "type": "integer" },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "scale": {
+          "type": "integer",
+          "description": "Upscale factor. Always 4.",
+          "const": 4
+        }
+      }
+    }
+  },
+
+  "params": [
+    {
+      "name": "tile_size",
+      "label": "Tile Size",
+      "type": "select",
+      "options": ["480x640", "360x480"],
+      "default": "480x640",
+      "advanced": true
+    },
+    {
+      "name": "tile_overlap",
+      "label": "Tile Overlap (px)",
+      "type": "number",
+      "min": 0,
+      "max": 64,
+      "step": 8,
+      "default": 32,
+      "advanced": true
+    }
+  ],
+
+  "metrics": {
+    "latencyMs": 800,
+    "memoryMB": 400
+  },
+
+  "examples": [
+    {
+      "name": "photo-upscale",
+      "inputs": { "image": "examples/low_res_photo.jpg" }
+    },
+    {
+      "name": "text-enhance",
+      "inputs": { "image": "examples/blurry_text.png" }
+    }
+  ],
+  "examples_extra": "examples/prompts.json",
+
+  "assets": {
+    "weightsUrl": "",
+    "checksum": "",
+    "sizeBytes": 67108864,
+    "installPath": "models/real-esrgan-x4plus/"
+  },
+
+  "runner": {
+    "type": "python-script",
+    "script": "runner.py",
+    "venv": "arm64",
+    "requirements": "requirements.txt",
+    "timeoutMs": 120000
+  },
+
+  "skill": {
+    "enabled": true,
+    "file": "SKILL.md"
+  },
+
+  "sendToChatPrompt": {
+    "en": "This is the 4x super-resolution result produced by the [Real-ESRGAN x4plus] model. Please evaluate the upscaling quality.",
+    "zh-CN": "这是通过 [Real-ESRGAN x4plus] 模型产生的 4 倍超分辨率结果，请对超分效果进行评价和分析。",
+    "zh-TW": "這是通過 [Real-ESRGAN x4plus] 模型產生的 4 倍超解析度結果，請對超分效果進行評價與分析。"
+  },
+
+  "capabilities": {
+    "streaming": false,
+    "batch": false,
+    "benchmark": true,
+    "cancel": true
+  },
+
+  "variants": [
+    {
+      "id": "fp16",
+      "label": "FP16",
+      "longLabel": "FP16 · NPU optimized · 480x640 tile",
+      "default": true,
+      "runtime": {
+        "backend": "qnn",
+        "delegate": "htp",
+        "quantization": "fp16",
+        "modelSizeMB": 67,
+        "contextBins": ["real_esrgan_480x640_fp16.bin"],
+        "supportedDevices": ["snapdragon-x-elite"],
+        "requiresQairtVersion": ">=2.44.0"
+      },
+      "assets": {
+        "weightsUrl": "",
+        "checksum": "",
+        "sizeBytes": 67108864,
+        "installPath": "models/real-esrgan-x4plus/"
+      },
+      "metrics": {
+        "latencyMs": 800,
+        "memoryMB": 400
+      }
+    }
+  ]
+}

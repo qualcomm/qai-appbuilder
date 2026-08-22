@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <title>QAIModelBuilder</title>
+    <!--
+      Brand favicon — same mark used by the in-app `.welcome-logo-glyph`
+      and `.sidebar-logo-glyph`: dark rounded tile, faint violet connector
+      lines from four corner nodes to a center NPU chip, all filled with a
+      violet->sky-blue gradient (#7c6cff -> #60a5fa). The desktop (Tauri)
+      app icon is generated from this exact geometry/colors via
+      desktop/src-tauri/icons/source-icon.svg + _render_icon.py, so the
+      browser tab and the desktop window/taskbar icon match 1:1. Encoded
+      as a data-URI here to avoid shipping a separate asset file.
+    -->
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40' fill='none'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0%25' stop-color='%237c6cff'/><stop offset='100%25' stop-color='%2360a5fa'/></linearGradient></defs><rect x='2' y='2' width='36' height='36' rx='9' fill='%230f1218' stroke='%237c6cff' stroke-opacity='0.25'/><line x1='12' y1='12' x2='20' y2='20' stroke='%237c6cff' stroke-opacity='0.4' stroke-width='0.8'/><line x1='28' y1='12' x2='20' y2='20' stroke='%237c6cff' stroke-opacity='0.4' stroke-width='0.8'/><line x1='12' y1='28' x2='20' y2='20' stroke='%237c6cff' stroke-opacity='0.4' stroke-width='0.8'/><line x1='28' y1='28' x2='20' y2='20' stroke='%237c6cff' stroke-opacity='0.4' stroke-width='0.8'/><rect x='16' y='16' width='8' height='8' rx='1.5' fill='url(%23g)'/><circle cx='12' cy='12' r='2.5' fill='url(%23g)' opacity='0.8'/><circle cx='28' cy='12' r='2.5' fill='url(%23g)' opacity='0.8'/><circle cx='12' cy='28' r='2.5' fill='url(%23g)' opacity='0.8'/><circle cx='28' cy='28' r='2.5' fill='url(%23g)' opacity='0.8'/></svg>"
+    />
+    <!--
+      Vite dev/build entry — the sole frontend entry. The legacy
+      no-build frontend was removed in S8 PR-081 (see
+      docs/90-refactor/refactor-plan.md §13.2 and the
+      release-artifact whitelist in v2.7 §1).
+    -->
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
