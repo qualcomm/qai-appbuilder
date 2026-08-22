@@ -1,0 +1,68 @@
+/* =============================================================================
+ * Migrated from frontend/css/auto-approve.css (S7.5 L8 PR-802a).
+ * Selectors stay global so legacy class names remain reachable from new
+ * SFCs that reuse them. Scoped overrides belong inside each SFC's own
+ * <style scoped> block (L7 lane).
+ * ========================================================================== */
+
+/* ----------------------------------------------------------------------
+ * Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * ----------------------------------------------------------------------
+ * auto-approve.css
+ * AutoApprovePanel 专属样式 — 仅保留通用 security-panels.css / components.css
+ * 没有提供的少量布局补充。颜色全部使用 CSS 变量，自动跟随主题。
+ */
+
+/* 顶层容器：复用 .sec-config-panel 的 flex/gap 即可。 */
+.auto-approve-panel {
+    /* 从 .sec-config-panel 继承 display/gap/padding */
+}
+
+/* ── 工具类型 toggle 网格 ────────────────────────────────────────────── */
+.auto-approve-toggles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+}
+
+.auto-approve-toggle {
+    margin: 0;
+    font-weight: 400;
+    cursor: pointer;
+}
+
+/* ── 列表项：编码块 + 删除按钮 ───────────────────────────────────────── */
+.auto-approve-list-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--radius-md, 6px);
+    background: var(--bg-primary, rgba(0, 0, 0, 0.15));
+    border: 1px solid var(--border);
+}
+
+.auto-approve-list-item code {
+    flex: 1;
+    font-family: var(--font-mono, monospace);
+    font-size: var(--text-xs);
+    color: var(--text-primary);
+    background: transparent;
+    padding: 0;
+    overflow-wrap: anywhere;
+}
+
+.auto-approve-list-remove {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    line-height: 1;
+    font-size: var(--text-base);
+    color: var(--text-muted);
+}
+
+.auto-approve-list-remove:hover {
+    color: var(--error, #f87171);
+}

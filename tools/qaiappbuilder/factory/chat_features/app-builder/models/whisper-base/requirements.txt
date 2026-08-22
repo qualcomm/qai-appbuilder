@@ -1,0 +1,53 @@
+# Whisper base.en (QNN HTP) inference dependencies
+# ------------------------------------------------------------------
+# Setup_Builder_Env.bat collects this file at install time and merges
+# it into the shared App Builder ARM64 venv.
+#
+# Last verified: 2025-06-25 against
+#   .venv_arm64_313 (CPython 3.13, ARM64 Windows)
+#   App Builder Run: 14742 ms / HTP / "And so my fellow Americans..."
+#
+# ── ARM64 vendor wheels (must be installed before pip install -r) ─────────────
+# The following packages have no usable ARM64 wheel on PyPI and must be
+# installed from vendor/whl/ first:
+#
+#   uv pip install vendor/whl/numpy-2.3.1-cp313-cp313-win_arm64.whl
+#   uv pip install vendor/whl/tiktoken-0.12.0-cp313-cp313-win_arm64.whl
+#   uv pip install vendor/whl/soundfile-0.13.1-cp313-cp313-win_arm64.whl
+#   uv pip install vendor/whl/qai_appbuilder-2.46.0-cp313-cp313-win_arm64.whl
+#
+# ── Tokenizer ────────────────────────────────────────────────────────────────
+# The runner uses a custom _TiktokenDecoder built from the gpt2.tiktoken vocab
+# file bundled inside openai-whisper (assets/gpt2.tiktoken). No network access
+# is required at runtime; openai-whisper itself is never imported.
+#
+# openai-whisper must be installed with --no-deps to avoid pulling
+# numba/llvmlite, which have no pre-built ARM64 Windows wheels:
+#   uv pip install --no-deps openai-whisper==20250625
+# tiktoken, more-itertools, tqdm, regex are the only runtime deps actually
+# used and are listed here so Setup_Builder_Env installs them separately.
+#
+# ── Audio I/O ────────────────────────────────────────────────────────────────
+# soundfile must be installed from vendor/whl/ (PyPI wheel lacks the bundled
+# libsndfile.dll for ARM64 Windows). See vendor wheel install command above.
+#
+# ── QNN inference ────────────────────────────────────────────────────────────
+# Uses shared/qnn_helper.QnnContext (same pattern as ppocrv4).
+# qai-appbuilder must be installed from vendor/whl/. See above.
+
+# --- Core numeric / signal processing ---
+numpy==2.3.1             # log-mel spectrogram + decoder cache arrays (ARM64 vendor wheel)
+scipy>=1.17.1            # log_softmax / logsumexp in the timestamp filter
+
+# --- Audio decoding ---
+soundfile==0.13.1        # wav/flac/ogg via bundled libsndfile (ARM64 vendor wheel)
+
+# --- Tokenizer ---
+openai-whisper==20250625 # provides assets/gpt2.tiktoken vocab file only; install --no-deps
+tiktoken==0.12.0         # BPE engine that reads gpt2.tiktoken offline (ARM64 vendor wheel)
+more-itertools>=11.0.2   # runtime dep of openai-whisper
+tqdm>=4.67.3             # runtime dep of openai-whisper
+regex>=2026.5.9          # runtime dep of tiktoken
+
+# --- QNN inference ---
+qai-appbuilder==2.45.40  # QNN HTP binding (ARM64 vendor wheel)

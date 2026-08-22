@@ -1,0 +1,166 @@
+{
+  "_comment": "Generic model configuration template for QAIRT WoS ARM64 pipeline",
+  "_version": "2.47.1.260610",
+  "_version_note": "Template example only. Actual SDK version is read from data/config/qairt_env.json (_version field) at runtime; this _version literal is not consumed by any script and may lag behind the installed SDK version.",
+  "_platform": "Windows on Snapdragon (WoS) ARM64 - Snapdragon X Elite (V73)",
+
+  "model": {
+    "name": "my_model",
+    "onnx_path": "model.onnx",
+    "output_dir": "qairt_output",
+
+    "input": {
+      "name": "input",
+      "shape": [1, 3, 512, 512],
+      "layout": "NCHW",
+      "_note": "QNN HTP inference uses NHWC internally; converter handles transposition"
+    },
+
+    "outputs": [
+      {
+        "name": "output",
+        "shape": [1, 3, 512, 512]
+      }
+    ]
+  },
+
+  "conversion": {
+    "_comment": "Precision variants to build. Each entry produces a separate DLL + context binary.",
+    "variants": [
+      {
+        "tag": "fp16",
+        "precision": "fp16",
+        "float_bitwidth": 16,
+        "no_simplification": true,
+        "_note": "Recommended for WoS ARM64. Use --no_simplification for QAIRT 2.45."
+      },
+      {
+        "tag": "fp32",
+        "precision": "fp32",
+        "float_bitwidth": 32,
+        "no_simplification": true
+      },
+      {
+        "tag": "a16w8",
+        "precision": "a16w8",
+        "act_bw": 16,
+        "weight_bw": 8,
+        "calib_list": "calibration_list.txt",
+        "no_simplification": true,
+        "_note": "Recommended for vision models. Requires calibration data."
+      },
+      {
+        "tag": "int8",
+        "precision": "int8",
+        "act_bw": 8,
+        "weight_bw": 8,
+        "calib_list": "calibration_list.txt",
+        "no_simplification": true
+      },
+      {
+        "tag": "a8w8b8",
+        "precision": "a8w8b8",
+        "act_bw": 8,
+        "weight_bw": 8,
+        "bias_bw": 8,
+        "calib_list": "calibration_list.txt",
+        "no_simplification": true,
+        "_note": "INT8 with 8-bit bias quantization."
+      }
+    ],
+
+    "tool_paths": {
+      "_comment": "QAIRT 2.45 WoS ARM64 tool path rules",
+      "converter_arch": "x86_64-windows-msvc",
+      "lib_generator_arch": "aarch64-windows-msvc",
+      "context_binary_arch": "aarch64-windows-msvc",
+      "_warning": "qnn-model-lib-generator is in aarch64-windows-msvc/, NOT x86_64-windows-msvc/"
+    },
+
+    "target_arch": "windows-aarch64"
+  },
+
+  "context_binary": {
+    "_comment": "HTP backend configuration for context binary generation",
+    "backend_extensions_json": "backend_extensions.json",
+    "htp_config_json": "htp_backend_config_v73.json",
+
+    "backend_extensions_template": {
+      "backend_extensions": {
+        "shared_library_path": "<qairt_sdk_root>\\lib\\aarch64-windows-msvc\\QnnHtpNetRunExtensions.dll",
+        "config_file_path": "${WORKSPACE}\\<model_name>\\output\\htp_backend_config_v73.json"
+      }
+    },
+
+    "htp_config_v73_template": {
+      "graphs": [
+        {
+          "graph_names": ["<model_name>"],
+          "vtcm_mb": 8,
+          "O": 3
+        }
+      ],
+      "devices": [
+        {
+          "cores": [
+            {
+              "rpc_control_latency": 100,
+              "perf_profile": "burst"
+            }
+          ]
+        }
+      ]
+    }
+  },
+
+  "inference": {
+    "_comment": "qai_appbuilder inference (python_runtime_venv from data\\config\\qairt_env.json; .venv_arm64_313 on WoS, .venv_x64_313 on x64 Windows)",
+    "runtime": "Htp",
+    "log_level": 1,
+    "profiling_level": 0,
+    "log_path": "None",
+    "qnn_lib_path": "",
+    "_note": "qnn_lib_path='' uses qai_appbuilder built-in libs. Input format: NHWC numpy array.",
+    "_api": "model.Inference([inp])  # NOT model.Execute()"
+  },
+
+  "environment": {
+    "_comment": "Required environment setup for WoS ARM64 (QAIRT 2.45). All paths read from data\\config\\qairt_env.json.",
+    "required_vars": {
+      "QAIRT_SDK_ROOT": "<qairt_sdk_root from data\\config\\qairt_env.json>",
+      "PYTHONPATH": "%QAIRT_SDK_ROOT%\\lib\\python",
+      "VCTargetsPath": "<vc_targets_path from data\\config\\qairt_env.json>"
+    },
+    "required_setup": [
+      "vcvarsall.bat arm64 (path from vs_vcvarsall in data\\config\\qairt_env.json)",
+      "set PYTHONPATH=%QAIRT_SDK_ROOT%\\lib\\python",
+      "PATH must include aarch64-windows-msvc and x86_64-windows-msvc"
+    ],
+    "python_venv": "conversion=python_x64_venv (.venv_x64_310); inference=python_runtime_venv (.venv_arm64_313 or .venv_x64_313 per host_arch)",
+    "qairt_notes": [
+      "QAIRT 2.45: No need to patch Conv2d reuse_sparse_indices",
+      "QAIRT 2.45: Unknown Key warnings during context binary generation are non-fatal",
+      "QAIRT 2.45: Use --no_simplification with qnn-onnx-converter on WoS"
+    ]
+  },
+
+  "calibration": {
+    "_comment": "Calibration data configuration for INT quantization",
+    "calib_data_dir": "calib_data",
+    "calib_list": "calibration_list.txt",
+    "num_samples": 100,
+    "input_format": "NHWC",
+    "dtype": "float32",
+    "_note": "Each .raw file: float32 binary, shape matching model input in NHWC layout"
+  },
+
+  "multi_size_variants": {
+    "_comment": "Example multi-size configuration for models supporting variable input sizes",
+    "sizes": [
+      {"tag": "256", "input_shape": [1, 3, 256, 256]},
+      {"tag": "512", "input_shape": [1, 3, 512, 512]},
+      {"tag": "1024", "input_shape": [1, 3, 1024, 1024]}
+    ],
+    "_usage": "Run pipeline once per size variant, using --input_dim for each"
+  }
+}

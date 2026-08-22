@@ -1,0 +1,189 @@
+{
+  "schema_version": 1,
+  "modelId": "melotts-zh",
+  "displayName": "MeloTTS (Chinese)",
+  "category": "TTS",
+  "_categoryDeprecated": "category will be removed in v1.x+2; consume taxonomy.{group,task} instead",
+  "taxonomy": {
+    "group": "audio",
+    "task":  "audio-generation",
+    "tags":  ["tts", "chinese-only", "full-npu"]
+  },
+  "version": "1.0.0",
+  "vendor": "MyShell.ai",
+  "description": "Chinese text-to-speech with full NPU inference on Snapdragon X Elite, mixed-precision (w8a16), ~5.5× realtime. / 基于 Snapdragon X Elite 全 NPU 推理的中文文本转语音，混合精度量化，约 5.5 倍实时率。",
+  "longDescription": "MeloTTS Chinese (myshell-ai/MeloTTS) ported to Snapdragon X Elite QNN HTP v73 backend with full NPU inference — no CPU vocoder fallback. Five NPU context binaries: bert_wrapper (BERT text encoder, float), encoder (VITS encoder, float), flow/flow_short (flow matching, w8a16), decoder (HiFi-GAN vocoder, w8a16, T=128). Dual flow-path optimization: flow_short.bin handles short sentences (phone_len ≤ 256) for ~284ms latency; flow.bin handles longer sentences at ~1018ms. Single speaker (ZH female, speaker_id=1), variable speed (0.5×–2.0×), 44100 Hz mono 16-bit PCM WAV output. Chinese text frontend with jieba segmentation, pypinyin tone, cn2an number conversion, and g2p_en for mixed English tokens. Max 500 characters input. Platform: QAIRT 2.45, HTP v73. Dependencies: numpy, jieba, pypinyin, cn2an, g2p_en, qai_appbuilder.",
+  "tags": ["audio", "tts", "chinese", "quant-w8a16", "melotts", "full-npu"],
+
+  "runtime": {
+    "backend": "qnn",
+    "delegate": "htp",
+    "quantization": "mixed",
+    "quantizationDetail": "bert_wrapper/encoder: float; flow/flow_short/decoder: w8a16 (uint16)",
+    "modelSizeMB": 386,
+    "contextBins": ["bert_wrapper.bin", "encoder.bin", "flow.bin", "flow_short.bin", "decoder.bin"],
+    "supportedDevices": ["snapdragon-x-elite"],
+    "htpVersion": "v73",
+    "qairtVersion": "2.45"
+  },
+
+  "inputSchema": {
+    "kind": "text",
+    "constraints": {
+      "maxChars": 500,
+      "languages": ["zh"],
+      "mixedLanguage": true,
+      "placeholder": "输入要合成的中文文本（支持中英混合）"
+    }
+  },
+  "outputSchema": {
+    "kind": "audio",
+    "constraints": {
+      "sampleRate": 44100,
+      "channels": 1,
+      "bitDepth": 16,
+      "formats": ["wav"]
+    },
+    "jsonSchema": {
+      "type": "object",
+      "required": ["audio_path", "duration_s", "sample_rate"],
+      "properties": {
+        "audio_path": {
+          "type": "string",
+          "description": "Repo-relative path to the synthesized WAV under data/outputs/, e.g. 'data/outputs/<runId>.wav'. Mono PCM-16 at 44100 Hz."
+        },
+        "duration_s": {
+          "type": "number",
+          "description": "Length of the synthesized audio in seconds (float). Equals waveform length / 44100.",
+          "minimum": 0.0
+        },
+        "sample_rate": {
+          "type": "number",
+          "description": "Output sample rate in Hz. Always 44100.",
+          "const": 44100
+        }
+      }
+    }
+  },
+
+  "params": [
+    {
+      "name": "speed",
+      "label": "Speed",
+      "type": "number",
+      "min": 0.5,
+      "max": 2.0,
+      "step": 0.1,
+      "default": 1.0
+    },
+    {
+      "name": "noise_scale",
+      "label": "Noise Scale",
+      "type": "number",
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.05,
+      "default": 0.3,
+      "advanced": true
+    },
+    {
+      "name": "sdp_ratio",
+      "label": "SDP Ratio",
+      "type": "number",
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.05,
+      "default": 0.2,
+      "advanced": true
+    }
+  ],
+
+  "metrics": {
+    "latencyMs": 1018,
+    "latencyShortMs": 284,
+    "memoryMB": 500,
+    "realtimeFactor": 5.5
+  },
+
+  "examples": [
+    {
+      "name": "short-greeting",
+      "inputs": { "text": "你好，今天天气真好。" },
+      "params": { "speed": 1.0 }
+    },
+    {
+      "name": "classical-poem",
+      "inputs": { "text": "床前明月光，疑是地上霜。举头望明月，低头思故乡。" },
+      "params": { "speed": 0.9 }
+    },
+    {
+      "name": "mixed-en-digits",
+      "inputs": { "text": "今天 8 点 30 分有 3 个 meeting，请准时参加。" },
+      "params": { "speed": 1.0 }
+    }
+  ],
+  "examples_extra": "examples/prompts.json",
+
+  "assets": {
+    "weightsUrl": "",
+    "checksum": "",
+    "sizeBytes": 404750336,
+    "installPath": "models/melotts-zh/"
+  },
+
+  "runner": {
+    "type": "python-script",
+    "script": "runner.py",
+    "venv": "arm64",
+    "requirements": "requirements.txt",
+    "timeoutMs": 60000
+  },
+
+  "skill": {
+    "enabled": true,
+    "file": "SKILL.md"
+  },
+
+  "sendToChatPrompt": {
+    "en": "This is the Mandarin-Chinese speech synthesized by the [MeloTTS] model (full NPU inference). Please evaluate and analyze the synthesis quality.",
+    "zh-CN": "这是通过 [MeloTTS] 模型（全 NPU 推理）合成的中文语音结果，请对合成效果进行评价和分析。",
+    "zh-TW": "這是通過 [MeloTTS] 模型（全 NPU 推理）合成的中文語音結果，請對合成效果進行評價與分析。"
+  },
+
+  "capabilities": {
+    "streaming": false,
+    "batch": false,
+    "benchmark": true,
+    "cancel": true
+  },
+
+  "variants": [
+    {
+      "id": "w8a16",
+      "label": "W8A16 Mixed",
+      "longLabel": "W8A16 mixed precision · full NPU",
+      "default": true,
+      "runtime": {
+        "backend": "qnn",
+        "delegate": "htp",
+        "quantization": "mixed",
+        "quantizationDetail": "bert_wrapper/encoder: float; flow/flow_short/decoder: w8a16",
+        "modelSizeMB": 386,
+        "contextBins": ["bert_wrapper.bin", "encoder.bin", "flow.bin", "flow_short.bin", "decoder.bin"],
+        "supportedDevices": ["snapdragon-x-elite"]
+      },
+      "assets": {
+        "weightsUrl": "",
+        "checksum": "",
+        "sizeBytes": 404750336,
+        "installPath": "models/melotts-zh/"
+      },
+      "metrics": {
+        "latencyMs": 1018,
+        "latencyShortMs": 284,
+        "memoryMB": 500,
+        "realtimeFactor": 5.5
+      }
+    }
+  ]
+}

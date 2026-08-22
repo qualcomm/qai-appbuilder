@@ -1,0 +1,171 @@
+{
+  "schema_version": 1,
+  "modelId": "whisper-base",
+  "displayName": "Whisper Base (English)",
+  "category": "ASR",
+  "_categoryDeprecated": "category will be removed in v1.x+2; consume taxonomy.{group,task} instead",
+  "taxonomy": {
+    "group": "audio",
+    "task":  "speech-recognition",
+    "tags":  ["multilingual", "english"]
+  },
+  "version": "1.0.0",
+  "vendor": "OpenAI",
+  "description": "English speech-to-text on Snapdragon QNN HTP. / 基于 QNN HTP 的英文语音识别。",
+  "longDescription": "OpenAI Whisper base.en (~74M params) running on Snapdragon QNN HTP. Two-stage encoder/decoder pipeline with 30-second sequential chunking. Outputs English text with chunk-level timestamps. Adapted from the QAI AppBuilder reference sample whisper_base_en.py. App Builder Pack — fully isolated from features/model-builder.",
+  "tags": ["audio", "asr", "english", "timestamps"],
+
+  "runtime": {
+    "backend": "qnn",
+    "delegate": "htp",
+    "quantization": "fp16",
+    "modelSizeMB": 235,
+    "contextBins": ["encoder.bin", "decoder.bin"],
+    "supportedDevices": ["snapdragon-x-elite"]
+  },
+
+  "inputSchema": {
+    "kind": "audio",
+    "constraints": {
+      "sampleRate": 16000,
+      "channels": 1,
+      "maxSec": 120,
+      "formats": ["wav", "mp3", "flac", "webm"],
+      "allowMic": true
+    }
+  },
+  "outputSchema": {
+    "kind": "json",
+    "jsonSchema": {
+      "type": "object",
+      "required": ["language", "task", "fullText", "segments"],
+      "properties": {
+        "language": {
+          "type": "string",
+          "const": "en",
+          "description": "Always 'en' — whisper_base_en is English-only."
+        },
+        "task": {
+          "type": "string",
+          "const": "transcribe",
+          "description": "Always 'transcribe'. Translate is not supported by base.en."
+        },
+        "fullText": {
+          "type": "string",
+          "description": "All segment texts concatenated in time order, segments separated by a single space. Empty string if the audio contained only silence / non-speech."
+        },
+        "segments": {
+          "type": "array",
+          "description": "Time-aligned recognized segments, sorted by start ASC. Boundaries are 30-second chunk edges; granularity is +-0.5 s in practice.",
+          "items": {
+            "type": "object",
+            "required": ["start", "end", "text", "conf"],
+            "properties": {
+              "start": {
+                "type": "number",
+                "description": "Segment start time in seconds, relative to the start of the input audio.",
+                "minimum": 0.0
+              },
+              "end": {
+                "type": "number",
+                "description": "Segment end time in seconds, relative to the start of the input audio.",
+                "minimum": 0.0
+              },
+              "text": {
+                "type": "string",
+                "description": "Recognized English text for this segment."
+              },
+              "conf": {
+                "type": "number",
+                "description": "Mean per-step softmax probability of the chosen token along the decoded path. Rough proxy, not a calibrated probability.",
+                "minimum": 0.0,
+                "maximum": 1.0
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+
+  "params": [
+    {
+      "name": "vad",
+      "label": "Voice-activity-detection chunking",
+      "type": "boolean",
+      "default": true
+    }
+  ],
+
+  "metrics": {
+    "latencyMs": 5800,
+    "memoryMB": 320
+  },
+
+  "examples": [
+    {
+      "name": "jfk",
+      "inputs": { "audio": "examples/jfk.wav" }
+    }
+  ],
+
+  "assets": {
+    "weightsUrl": "",
+    "checksum": "",
+    "sizeBytes": 0,
+    "installPath": "models/whisper-base/encoder.bin"
+  },
+
+  "runner": {
+    "type": "python-script",
+    "script": "runner.py",
+    "venv": "arm64",
+    "requirements": "requirements.txt",
+    "timeoutMs": 180000
+  },
+
+  "skill": {
+    "enabled": true,
+    "file": "SKILL.md"
+  },
+
+  "sendToChatPrompt": {
+    "en": "This is the English speech-to-text transcript produced by the [Whisper Base (English)] model. Please summarize the content.",
+    "zh-CN": "这是通过 [Whisper Base (English)] 模型对音频的英文语音识别结果，请对这个转写内容进行总结。",
+    "zh-TW": "這是通過 [Whisper Base (English)] 模型對音訊的英文語音識別結果，請對這個轉寫內容進行總結。"
+  },
+
+  "capabilities": {
+    "streaming": false,
+    "batch": false,
+    "benchmark": false,
+    "cancel": true
+  },
+
+  "variants": [
+    {
+      "id": "fp16",
+      "label": "FP16",
+      "longLabel": "FP16 · NPU optimized",
+      "default": true,
+      "runtime": {
+        "backend": "qnn",
+        "delegate": "htp",
+        "quantization": "fp16",
+        "modelSizeMB": 235,
+        "contextBins": ["encoder.bin", "decoder.bin"],
+        "supportedDevices": ["snapdragon-x-elite"]
+      },
+      "assets": {
+        "weightsUrl": "",
+        "checksum": "",
+        "sizeBytes": 0,
+        "installPath": "models/whisper-base/encoder.bin"
+      },
+      "metrics": {
+        "latencyMs": 5800,
+        "memoryMB": 320
+      }
+    }
+  ]
+}

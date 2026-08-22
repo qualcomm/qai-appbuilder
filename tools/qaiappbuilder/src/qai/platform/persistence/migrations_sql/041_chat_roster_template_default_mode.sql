@@ -1,0 +1,24 @@
+-- ============================================================================
+-- Migration 041: chat_roster_template.default_mode_id — team's default mode
+--
+-- Tail-appends ONE nullable column to chat_roster_template (migration 038):
+--   default_mode_id  TEXT NULL  — optional reference to a chat_mode_template.id
+--                                 (migration 040). When set, applying the team
+--                                 to a conversation also selects this mode
+--                                 (sets meta["discussion"]["selected_mode_id"]).
+--
+-- This is the last V2 tail of the three-tier template system (design §26.9 /
+-- §27): a team answers "谁参与" (chat_roster_template); a mode answers "怎么协作"
+-- (chat_mode_template). They stay ORTHOGONAL — this is just an OPTIONAL default
+-- binding, NOT a hard FK (deliberately no FOREIGN KEY: a referenced mode may be
+-- a user-deleted custom mode; apply-time validation tolerates a stale id by
+-- simply not selecting any mode).
+--
+-- ZERO legacy-data migration (v2.7 §2): the column is nullable with no default,
+-- so every pre-existing row reads back NULL (no bound mode) and existing apply
+-- behaviour is byte-for-byte unchanged.
+--
+-- runner manages BEGIN/COMMIT — file MUST NOT contain them.
+-- ============================================================================
+
+ALTER TABLE chat_roster_template ADD COLUMN default_mode_id TEXT;

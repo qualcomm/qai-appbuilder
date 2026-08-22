@@ -1,0 +1,45 @@
+-- ============================================================================
+-- Migration 035: chat_subagent_session usage + per-round prompt snapshots
+--
+-- Multi-agent / sub-agent回看对齐 (docs/70-multi-agent/multi-agent-conversation-design.md
+-- §15). Brings the standalone sub-agent tab's回看 experience to parity with the
+-- main agent by persisting, per :class:`SubAgentSession`, two nullable columns:
+--
+--   usage_json            TEXT  -- JSON object: the CUMULATIVE token usage
+--                                --   summed across every round of this
+--                                --   sub-agent run (same shape the main agent
+--                                --   accumulates + surfaces on its terminal END
+--                                --   frame, e.g.
+--                                --   {"prompt_tokens": N, "completion_tokens": M,
+--                                --    "total_tokens": K}). NULL = no usage seen.
+--   round_snapshots_json  TEXT  -- JSON object mapping a round number (string
+--                                --   key, the cumulative ``rounds`` counter) to
+--                                --   that round's prompt snapshot — the EXACT
+--                                --   OpenAI wire list sent to the model that
+--                                --   round (system + history + per-round
+--                                --   assistant{tool_calls}/tool blocks). Lets a
+--                                --   standalone sub-agent tab show a "查看提示词
+--                                --   快照" affordance per round, mirroring the
+--                                --   main agent's per-``request_id`` snapshot.
+--                                --   NULL = no snapshots captured.
+--
+-- Why option (a) — two columns on chat_subagent_session, NOT a child table:
+-- a sub-agent's snapshots are SMALL (one focused task, ≤ ~15 rounds), their
+-- lifecycle is ENTIRELY bound to the session row (created/woken/deleted with
+-- it — already cascade-deleted via delete_by_parent), and they are NEVER
+-- queried independently of the session (the回看 path loads the whole session).
+-- A JSON column round-trips with the existing whole-row UPSERT + version CAS
+-- (no second write path, no extra join, no separate FK cascade) — strictly
+-- simpler than a child table for this access pattern.
+--
+-- Both NULL by default — existing rows read NULL, which the aggregate maps to
+-- its ``usage=None`` / ``round_snapshots=None`` defaults (full backward compat).
+-- Done as standalone ALTERs (NOT by editing 030) so existing databases upgrade
+-- in-place; the runner applies each file once.
+--
+-- runner manages BEGIN/COMMIT — file MUST NOT contain them.
+-- ============================================================================
+
+
+ALTER TABLE chat_subagent_session ADD COLUMN usage_json TEXT;
+ALTER TABLE chat_subagent_session ADD COLUMN round_snapshots_json TEXT;

@@ -1,0 +1,1033 @@
+/* =============================================================================
+ * Migrated from frontend/css/security.css (S7.5 L8 PR-802a).
+ * Selectors stay global so legacy class names remain reachable from new
+ * SFCs that reuse them. Scoped overrides belong inside each SFC's own
+ * <style scoped> block (L7 lane).
+ * ========================================================================== */
+
+/* ----------------------------------------------------------------------
+ * Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * ----------------------------------------------------------------------
+ * security.css
+ * SecurityConfigPanel — FileGuard 安全策略面板样式
+ *
+ * 与项目其它面板一致的设计语言：
+ *   - 颜色 token 使用 var(--bg-secondary) / var(--text-primary) 等
+ *   - 间距 token 使用 var(--space-N)
+ *   - 圆角 token 使用 var(--radius-*)
+ * 决定（decision）配色：
+ *   - allow → 绿  - deny → 红  - ask → 琥珀  - info → 灰
+ */
+
+/* ── 顶层容器 ─────────────────────────────────────────────────────────── */
+.security-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: 0;
+  position: relative;
+}
+
+.security-panel .panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.sec-cfg-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.sec-cfg-status {
+  font-size: var(--text-sm);
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+.sec-cfg-status--success { color: var(--success); border-color: rgba(52,211,153,0.45); background: rgba(52,211,153,0.10); }
+.sec-cfg-status--error   { color: var(--error);   border-color: rgba(248,113,113,0.45); background: rgba(248,113,113,0.10); }
+
+/* Security sub-tabs are now rendered by the shared <UiTabs variant="underline">
+   (with a count badge via UiTabs' `badge` field), unifying page-level tabs on
+   one implementation. The former `.security-tabs` / `.security-tab` /
+   `.security-tab-dot` / `.security-tab-badge` rules were removed as dead code. */
+
+.security-tab-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.security-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-2) 0;
+}
+
+/* ── 通用空 / 加载占位 ───────────────────────────────────────────────── */
+.sec-cfg-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.sec-cfg-unsaved {
+  color: var(--warning);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+/* ── 健康状态横幅与药丸 ───────────────────────────────────────────── */
+.sec-cfg-health-banner {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid;
+  margin-bottom: var(--space-4);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.sec-cfg-health-banner--down {
+  color: var(--error);
+  background: rgba(248, 113, 113, 0.10);
+  border-color: rgba(248, 113, 113, 0.45);
+}
+
+.sec-cfg-health-banner--warn {
+  color: var(--warning);
+  background: rgba(251, 191, 36, 0.10);
+  border-color: rgba(251, 191, 36, 0.45);
+}
+
+.sec-cfg-health-icon {
+  font-size: var(--text-lg);
+  line-height: 1.4;
+  flex: 0 0 auto;
+}
+
+.sec-cfg-health-text {
+  flex: 1;
+}
+
+.sec-cfg-health-hint {
+  display: block;
+  opacity: 0.85;
+  font-size: var(--text-xs);
+  margin-top: 2px;
+}
+
+.sec-cfg-health-pill {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  border: 1px solid;
+  margin-left: 2px;
+}
+
+.sec-cfg-health-pill--ok      { color: var(--success); background: rgba(52,211,153,0.10);  border-color: rgba(52,211,153,0.45); }
+.sec-cfg-health-pill--down    { color: var(--error);   background: rgba(248,113,113,0.12); border-color: rgba(248,113,113,0.55); }
+.sec-cfg-health-pill--warn    { color: var(--warning); background: rgba(251,191,36,0.10);  border-color: rgba(251,191,36,0.45); }
+.sec-cfg-health-pill--unknown { color: var(--text-muted); background: var(--bg-tertiary);  border-color: var(--border); }
+
+/* ── Tab 1: 总览 — 状态卡片 ─────────────────────────────────────────── */
+.sec-cfg-status-card {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.sec-cfg-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border);
+}
+.sec-cfg-status-row:last-child { border-bottom: 0; }
+
+.sec-cfg-status-label { flex: 1; }
+.sec-cfg-status-name {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+.sec-cfg-status-hint {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* 模式切换按钮组 */
+.sec-cfg-mode-switch {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.sec-cfg-mode-btn {
+  background: transparent;
+  border: 0;
+  padding: 6px 14px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  font-family: inherit;
+}
+.sec-cfg-mode-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.sec-cfg-mode-btn.active {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* 计数瓦片 */
+.sec-cfg-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-3);
+}
+.sec-cfg-tile {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  text-align: center;
+}
+.sec-cfg-tile-num {
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1;
+  margin-bottom: 6px;
+}
+.sec-cfg-tile-label {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.sec-cfg-actions-row {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* ── Tab 2: 白名单 ────────────────────────────────────────────────────── */
+.sec-cfg-list-block {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.sec-cfg-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.sec-cfg-list-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.sec-cfg-list-key {
+  font-size: var(--text-xs);
+  color: var(--accent);
+  opacity: 0.75;
+  font-weight: 500;
+  margin-left: 4px;
+}
+.sec-cfg-list-desc {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.55;
+  margin-bottom: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: rgba(124,58,237,0.06);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+}
+.sec-cfg-list-hint {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+.sec-cfg-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sec-cfg-list-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.sec-cfg-list-input {
+  flex: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  color: var(--text-primary);
+  padding: 6px 10px;
+  font-size: var(--text-sm);
+  font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+}
+.sec-cfg-list-input:focus {
+  outline: 0;
+  border-color: var(--accent);
+  background: var(--bg-secondary);
+}
+.sec-cfg-list-del {
+  flex-shrink: 0;
+  color: var(--error);
+}
+.sec-cfg-list-empty {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 6px 2px;
+}
+
+/* Factory (author-declared) policy rows — visible but not editable.
+   Muted + locked so they read as "context", never as "your entries". */
+.sec-cfg-list--factory {
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed var(--border);
+}
+.sec-cfg-list-row--readonly .sec-cfg-list-input {
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  border-style: dashed;
+  cursor: not-allowed;
+}
+.sec-cfg-list-lock {
+  flex-shrink: 0;
+  width: 24px;
+  text-align: center;
+  font-size: var(--text-sm);
+  opacity: 0.65;
+}
+.sec-cfg-list-note {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  padding: 4px 2px 0;
+  line-height: 1.5;
+}
+
+.sec-cfg-save-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-top: var(--space-3);
+}
+
+/* ── Tab 3: 审计 / 授权 ─────────────────────────────────────────────── */
+.sec-cfg-audit-block,
+.sec-cfg-grants-block,
+.sec-cfg-pending-block {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.sec-cfg-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.sec-cfg-block-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sec-cfg-audit-controls {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.sec-cfg-audit-controls select {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  color: var(--text-primary);
+  padding: 4px 8px;
+  font-size: var(--text-sm);
+}
+.sec-cfg-audit-pathfilter {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  color: var(--text-primary);
+  padding: 4px 8px;
+  font-size: var(--text-sm);
+  min-width: 220px;
+  flex: 1 1 220px;
+}
+.sec-cfg-audit-pathfilter:focus {
+  outline: none;
+  border-color: var(--accent, #7c3aed);
+}
+.sec-cfg-audit-pathfilter--invalid {
+  border-color: var(--danger, #ef4444);
+}
+.sec-cfg-autorefresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.sec-cfg-audit-tablewrap {
+  max-height: 420px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--bg-code);
+}
+.sec-cfg-audit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+  font-size: var(--text-xs);
+}
+.sec-cfg-audit-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-weight: 600;
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  z-index: 1;
+  white-space: nowrap;
+}
+.sec-cfg-audit-table tbody td {
+  padding: 4px 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  color: var(--text-primary);
+  vertical-align: top;
+}
+.sec-cfg-audit-table tbody tr:hover td {
+  background: var(--bg-hover);
+}
+.sec-cfg-audit-empty {
+  text-align: center;
+  padding: var(--space-6) !important;
+  color: var(--text-muted) !important;
+  font-style: italic;
+}
+.sec-cfg-audit-path,
+.sec-cfg-audit-caller,
+.sec-cfg-audit-reason {
+  word-break: break-all;
+  overflow: hidden;
+}
+
+/* 决定徽章配色 */
+.sec-cfg-decision {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.sec-cfg-decision--allow {
+  color: var(--success);
+  background: rgba(52, 211, 153, 0.14);
+  border: 1px solid rgba(52, 211, 153, 0.4);
+}
+.sec-cfg-decision--deny {
+  color: var(--error);
+  background: rgba(248, 113, 113, 0.14);
+  border: 1px solid rgba(248, 113, 113, 0.4);
+}
+.sec-cfg-decision--ask {
+  color: var(--warning);
+  background: rgba(251, 191, 36, 0.14);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+}
+.sec-cfg-decision--info {
+  color: var(--text-muted);
+  background: rgba(150, 150, 150, 0.10);
+  border: 1px solid var(--border);
+}
+
+/* 临时授权 */
+.sec-cfg-grants-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--space-3);
+}
+.sec-cfg-grants-col {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sec-cfg-grants-col-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.sec-cfg-grants-empty {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 4px;
+}
+.sec-cfg-grant-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.sec-cfg-grant-row:last-child { border-bottom: 0; }
+.sec-cfg-grant-info { flex: 1; min-width: 0; overflow: hidden; }
+.sec-cfg-grant-op {
+  display: inline-block;
+  padding: 1px 6px;
+  margin-right: 6px;
+  border-radius: 3px;
+  background: var(--accent-muted);
+  color: var(--accent);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+.sec-cfg-grant-path {
+  font-size: var(--text-xs);
+  color: var(--text-primary);
+  word-break: break-all;
+}
+.sec-cfg-grant-meta {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.sec-cfg-grant-revoke {
+  flex-shrink: 0;
+  color: var(--error);
+}
+
+.sec-cfg-pending-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+.sec-cfg-pending-row:last-child { border-bottom: 0; }
+.sec-cfg-pending-info {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: var(--text-sm);
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Tab 4: SKILL ────────────────────────────────────────────────────── */
+.sec-cfg-skill-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: var(--space-3);
+}
+.sec-cfg-skill-card {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.sec-cfg-skill-card--editing {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.18);
+}
+.sec-cfg-skill-name {
+  font-size: var(--text-md);
+  font-weight: 700;
+  color: var(--accent);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 6px;
+}
+/* Feature card header */
+.sec-cfg-skill-feature-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+.sec-cfg-skill-ficon  { font-size: 1.1em; flex-shrink: 0; }
+.sec-cfg-skill-flabel { font-size: var(--text-md); font-weight: 700; color: var(--accent); white-space: nowrap; }
+.sec-cfg-skill-fid    { font-size: var(--text-xs); color: var(--text-secondary); font-weight: 400; flex: 1; min-width: 0; }
+.sec-cfg-skill-feature-meta .sec-cfg-skill-fid { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sec-cfg-skill-card-actions { margin-left: auto; display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+/* Section header */
+.sec-cfg-skill-section-header {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: var(--space-3);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sec-cfg-skill-section-header::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.sec-cfg-skill-section-sub {
+  font-size: var(--text-xs);
+  font-weight: 400;
+  color: var(--text-muted);
+  text-transform: none;
+  letter-spacing: 0;
+}
+/* Path summary */
+.sec-cfg-skill-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  padding: 4px 0;
+}
+.sec-cfg-skill-summary-empty { color: var(--text-muted); }
+/* Operator's own entry count — visually distinct from the factory counts so
+   the two layers are never conflated at a glance. */
+.sec-cfg-skill-summary-custom {
+  color: #6366f1;
+  font-weight: 500;
+}
+.sec-cfg-skill-revoke:hover { color: var(--error); }
+/* Edit section */
+.sec-cfg-skill-edit-section { display: flex; flex-direction: column; gap: 2px; }
+/* Custom-policy badge — the operator authored a per-skill path policy
+   (merged onto the skill's own declaration and enforced by FileGuard). */
+.sec-cfg-skill-badge--policy {
+  background: rgba(99, 102, 241, 0.14);
+  color: #6366f1;
+  border: 1px solid rgba(99, 102, 241, 0.4);
+}
+/* Legacy classes kept for backward compat */
+.sec-cfg-skill-section { display: flex; flex-direction: column; gap: 2px; }
+.sec-cfg-skill-label { font-size: var(--text-xs); color: var(--text-secondary); font-weight: 600; }
+.sec-cfg-skill-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sec-cfg-skill-list li {
+  font-size: var(--text-xs);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px 6px;
+  word-break: break-all;
+  color: var(--text-primary);
+}
+.sec-cfg-skill-binrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sec-cfg-pin-icon {
+  font-size: var(--text-sm);
+  flex-shrink: 0;
+}
+.sec-cfg-skill-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  vertical-align: middle;
+  letter-spacing: 0.02em;
+}
+.sec-cfg-skill-badge--active {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.4);
+}
+.sec-cfg-skill-badge--inactive {
+  background: rgba(156, 163, 175, 0.12);
+  color: var(--text-secondary);
+  border: 1px solid rgba(156, 163, 175, 0.25);
+}
+.sec-cfg-skill-source {
+  margin-left: 8px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.sec-cfg-skill-active-count {
+  margin-left: 8px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: #22c55e;
+}
+
+/* ── 内置确认对话框 ──────────────────────────────────────────────────── */
+.sec-cfg-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+.sec-cfg-confirm-dialog {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  min-width: 360px;
+  max-width: 500px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+}
+.sec-cfg-confirm-title {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--warning);
+  margin-bottom: var(--space-2);
+}
+.sec-cfg-confirm-msg {
+  font-size: var(--text-md);
+  color: var(--text-primary);
+  margin-bottom: var(--space-4);
+  line-height: 1.5;
+}
+.sec-cfg-confirm-footer {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+/* ── 错误横幅 ────────────────────────────────────────────────────────── */
+.sec-cfg-error-banner {
+  position: fixed;
+  bottom: var(--space-4);
+  right: var(--space-4);
+  background: rgba(248, 113, 113, 0.18);
+  color: var(--error);
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  max-width: 480px;
+  z-index: 10000;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+.sec-cfg-error-banner:hover {
+  background: rgba(248, 113, 113, 0.28);
+}
+
+/* ── mono 工具类（若全局未提供）──────────────────────────────────────── */
+.security-panel .mono {
+  font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+}
+
+/* ── Light theme overrides (若全局有 .light 切换主题) ────────────────── */
+.light .security-panel .sec-cfg-decision--info {
+  background: rgba(0,0,0,0.05);
+}
+.light .sec-cfg-audit-table thead th {
+  background: var(--bg-tertiary);
+}
+
+/* ── 权限摘要卡片（Overview tab）─────────────────────────────────────── */
+.sec-cfg-perm-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.sec-cfg-perm-title {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.02em;
+  margin-bottom: var(--space-1);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+.sec-cfg-perm-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+}
+.sec-cfg-perm-row--ask {
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border);
+  margin-top: var(--space-1);
+}
+.sec-cfg-perm-icon {
+  font-size: 1rem;
+  flex-shrink: 0;
+  width: 24px;
+  text-align: center;
+  margin-top: 1px;
+}
+.sec-cfg-perm-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+.sec-cfg-perm-label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.sec-cfg-perm-paths {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.sec-cfg-perm-path {
+  font-size: var(--text-xs);
+  font-family: var(--font-mono, monospace);
+  background: rgba(124, 58, 237, 0.08);
+  color: var(--accent);
+  border: 1px solid rgba(124, 58, 237, 0.2);
+  border-radius: var(--radius-xs);
+  padding: 1px 7px;
+  word-break: break-all;
+}
+.sec-cfg-perm-path--trusted {
+  background: rgba(52, 211, 153, 0.08);
+  color: var(--success);
+  border-color: rgba(52, 211, 153, 0.25);
+}
+.sec-cfg-perm-note {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.sec-cfg-perm-empty {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* ── 测一测（dry-run checker）─────────────────────────────────────────── */
+.sec-cfg-checker {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.sec-cfg-checker-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.sec-cfg-checker-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+.sec-cfg-checker-op {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px var(--space-2);
+  font-size: var(--text-sm);
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.sec-cfg-checker-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px var(--space-3);
+  font-size: var(--text-sm);
+}
+.sec-cfg-checker-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.sec-cfg-checker-result {
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sec-cfg-checker-result--allow {
+  background: rgba(52, 211, 153, 0.10);
+  border: 1px solid rgba(52, 211, 153, 0.35);
+}
+.sec-cfg-checker-result--ask {
+  background: rgba(251, 191, 36, 0.10);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+}
+.sec-cfg-checker-result--deny,
+.sec-cfg-checker-result--error {
+  background: rgba(248, 113, 113, 0.10);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+}
+.sec-cfg-checker-verdict {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.sec-cfg-checker-reason {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.sec-cfg-checker-msg {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+/* V1 parity (SecurityConfigPanel.js:1159-1162): matched_rule + explanation
+   detail block under the dry-run verdict. */
+.sec-check-detail {
+  margin-top: 8px;
+  padding: 8px;
+  background: var(--bg-tertiary, rgba(255, 255, 255, 0.04));
+  border-radius: 4px;
+  font-size: 0.85em;
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ── Overview 可折叠权限行 ──────────────────────────────────────────── */
+.sec-cfg-perm-collapsible-hdr {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  padding: 2px 0;
+  border-radius: var(--radius-xs);
+  transition: opacity 120ms;
+}
+.sec-cfg-perm-collapsible-hdr:hover { opacity: 0.8; }
+.sec-cfg-perm-count-badge {
+  display: inline-block;
+  padding: 0 7px;
+  height: 18px;
+  line-height: 18px;
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  background: rgba(124, 58, 237, 0.10);
+  color: var(--accent);
+  border: 1px solid rgba(124, 58, 237, 0.22);
+  white-space: nowrap;
+}
+.sec-cfg-perm-count-badge--dim {
+  background: rgba(156, 163, 175, 0.10);
+  color: var(--text-secondary);
+  border-color: rgba(156, 163, 175, 0.25);
+}
+.sec-cfg-perm-chevron {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+/* Skill group header inside run section */
+.sec-cfg-perm-skill-group-hdr {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  margin-bottom: 3px;
+}
+.sec-cfg-perm-skill-group-name {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+/* Dimmed style for inactive skill binaries */
+.sec-cfg-perm-path--dimmed {
+  opacity: 0.55;
+  background: rgba(156, 163, 175, 0.08);
+  color: var(--text-secondary);
+  border-color: rgba(156, 163, 175, 0.20);
+}

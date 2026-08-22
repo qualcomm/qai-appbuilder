@@ -1,0 +1,177 @@
+{
+  "schema_version": 1,
+  "modelId": "zipformer-zh",
+  "displayName": "Zipformer (Chinese)",
+  "category": "ASR",
+  "_categoryDeprecated": "category will be removed in v1.x+2; consume taxonomy.{group,task} instead",
+  "taxonomy": {
+    "group": "audio",
+    "task":  "speech-recognition",
+    "tags":  ["chinese-only"]
+  },
+  "version": "1.0.0",
+  "vendor": "k2-fsa / sherpa-onnx",
+  "description": "Streaming Mandarin Chinese RNN-T ASR on QNN HTP, INT8. / 基于 QNN HTP 的中文流式 RNN-T 语音识别。",
+  "longDescription": "Sherpa-onnx Zipformer streaming RNN-T model (k2-fsa) for Mandarin Chinese, running on Snapdragon QNN HTP backend, INT8 quantized. Three-stage encoder/decoder/joiner pipeline with optional VAD chunking and hotword biasing. Outputs time-aligned segments. Lighter and ~2x faster than whisper-base for clean Mandarin clips, but Chinese-only with no translation. App Builder Pack — fully isolated from features/model-builder.",
+  "tags": ["audio", "asr", "chinese", "streaming", "quant-int8"],
+
+  "runtime": {
+    "backend": "qnn",
+    "delegate": "htp",
+    "quantization": "int8",
+    "modelSizeMB": 157,
+    "contextBins": ["encoder.bin", "decoder.bin", "joiner.bin"],
+    "supportedDevices": ["snapdragon-x-elite", "snapdragon-x2-elite", "8gen3"]
+  },
+
+  "inputSchema": {
+    "kind": "audio",
+    "constraints": {
+      "sampleRate": 16000,
+      "channels": 1,
+      "maxSec": 120,
+      "formats": ["wav", "mp3", "flac", "webm"],
+      "allowMic": true
+    }
+  },
+  "outputSchema": {
+    "kind": "json",
+    "jsonSchema": {
+      "type": "object",
+      "required": ["fullText", "segments"],
+      "properties": {
+        "fullText": {
+          "type": "string",
+          "description": "All segment texts concatenated in time order, separated by a single space. Always Mandarin Chinese (Simplified). Empty string if the audio contained only silence / non-speech."
+        },
+        "segments": {
+          "type": "array",
+          "description": "Time-aligned recognized segments, sorted by start ASC.",
+          "items": {
+            "type": "object",
+            "required": ["start", "end", "text"],
+            "properties": {
+              "start": {
+                "type": "number",
+                "description": "Segment start time in seconds, relative to the start of the input audio.",
+                "minimum": 0.0
+              },
+              "end": {
+                "type": "number",
+                "description": "Segment end time in seconds, relative to the start of the input audio.",
+                "minimum": 0.0
+              },
+              "text": {
+                "type": "string",
+                "description": "Recognized Mandarin Chinese text for this segment, BPE-detokenized. No `conf` field — RNN-T greedy decoding does not produce a calibrated per-segment confidence."
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+
+  "params": [
+    {
+      "name": "language",
+      "label": "Language",
+      "type": "select",
+      "options": ["zh"],
+      "default": "zh"
+    },
+    {
+      "name": "vad",
+      "label": "Voice-activity-detection chunking",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "name": "hotwords",
+      "label": "Hotwords (one per line)",
+      "type": "text",
+      "default": "",
+      "advanced": true
+    }
+  ],
+
+  "metrics": {
+    "latencyMs": 1800,
+    "memoryMB": 320
+  },
+
+  "examples": [
+    {
+      "name": "mandarin-dialog",
+      "inputs": { "audio": "examples/mandarin-dialog.wav" }
+    },
+    {
+      "name": "mandarin-reading",
+      "inputs": { "audio": "examples/mandarin-reading.wav" }
+    },
+    {
+      "name": "mandarin-light-accent",
+      "inputs": { "audio": "examples/mandarin-light-accent.wav" }
+    }
+  ],
+
+  "assets": {
+    "weightsUrl": "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/zipformer/releases/v0.55.0/zipformer-qnn_context_binary-float-qualcomm_snapdragon_x_elite.zip",
+    "checksum": "",
+    "sizeBytes": 130230000,
+    "installPath": "models/zipformer-zh/encoder.bin"
+  },
+
+  "runner": {
+    "type": "python-script",
+    "script": "runner.py",
+    "venv": "arm64",
+    "requirements": "requirements.txt",
+    "timeoutMs": 120000
+  },
+
+  "skill": {
+    "enabled": true,
+    "file": "SKILL.md"
+  },
+
+  "sendToChatPrompt": {
+    "en": "This is the Mandarin-Chinese speech-to-text transcript produced by the [Zipformer] model. Please summarize the content.",
+    "zh-CN": "这是通过 [Zipformer] 模型对中文音频的语音识别结果，请对这个转写内容进行总结。",
+    "zh-TW": "這是通過 [Zipformer] 模型對中文音訊的語音識別結果，請對這個轉寫內容進行總結。"
+  },
+
+  "capabilities": {
+    "streaming": true,
+    "batch": false,
+    "benchmark": false,
+    "cancel": true
+  },
+
+  "variants": [
+    {
+      "id": "int8",
+      "label": "INT8",
+      "longLabel": "INT8 · NPU optimized",
+      "default": true,
+      "runtime": {
+        "backend": "qnn",
+        "delegate": "htp",
+        "quantization": "int8",
+        "modelSizeMB": 157,
+        "contextBins": ["encoder.bin", "decoder.bin", "joiner.bin"],
+        "supportedDevices": ["snapdragon-x-elite", "snapdragon-x2-elite", "8gen3"]
+      },
+      "assets": {
+        "weightsUrl": "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/zipformer/releases/v0.55.0/zipformer-qnn_context_binary-float-qualcomm_snapdragon_x_elite.zip",
+        "checksum": "",
+        "sizeBytes": 130230000,
+        "installPath": "models/zipformer-zh/encoder.bin"
+      },
+      "metrics": {
+        "latencyMs": 1800,
+        "memoryMB": 320
+      }
+    }
+  ]
+}

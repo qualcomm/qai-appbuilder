@@ -1,0 +1,16 @@
+{
+  "_comment": "FileGuard 白名单：仅在 LLM 进入 app-builder 模式 (mode=app-builder) 时通过 tool_executor 调工具的访问范围。直连 Run 路径 (/api/appbuilder/run) 的 subprocess 路径校验由 features/app-builder/shared/policy_guard.py 独立处理（v1.2 起）。",
+  "version": 1,
+  "required_read": [
+    "${PROJECT_ROOT}/features/app-builder",
+    "${PROJECT_ROOT}/data/uploads",
+    "${PROJECT_ROOT}/data/outputs",
+    "${PROJECT_ROOT}/models"
+  ],
+  "required_write": [
+    "${PROJECT_ROOT}/data/outputs",
+    "${PROJECT_ROOT}/logs",
+    "${TEMP}"
+  ],
+  "trusted_binaries": []
+}

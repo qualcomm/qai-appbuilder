@@ -1,0 +1,156 @@
+/* =============================================================================
+ * Migrated from frontend/css/patch-review.css (S7.5 L8 PR-802a).
+ * Selectors stay global so legacy class names remain reachable from new
+ * SFCs that reuse them. Scoped overrides belong inside each SFC's own
+ * <style scoped> block (L7 lane).
+ *
+ * 2026-06-11 主题修复（V1 既有缺陷）：原文件用外部命名空间 `--color-*`（全仓
+ * 未定义）+ 浅色 fallback，且 dark 覆盖挂在死钩子 `[data-theme="dark"]`
+ * （base.css 已将其设为 no-op），导致**默认深色主题下整个面板反向渲染成浅色**。
+ * 现统一改用项目真实主题 token（`--bg-*`/`--text-*`/`--border`，:root 深色、
+ * html.light 浅色自动切换），diff 增删/hunk 用主题感知低透状态色。
+ * ========================================================================== */
+
+/* ---------------------------------------------------------------------
+ * Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * --------------------------------------------------------------------- */
+
+/* patch-review.css – Diff visualization styles (§5.2) */
+
+.patch-review-panel {
+  padding: 1rem;
+}
+
+.patch-review-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.patch-review-header h3 {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.patch-review-header .badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--error);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.patch-review-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.patch-review-empty {
+  text-align: center;
+  padding: 2rem;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.patch-item {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  overflow: hidden;
+}
+
+.patch-item-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.patch-filename {
+  font-family: monospace;
+  font-size: 0.875rem;
+  font-weight: 600;
+  flex: 1;
+}
+
+.patch-status {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.patch-status.status-added {
+  background: rgba(52, 211, 153, 0.18);
+  color: var(--success);
+}
+
+.patch-status.status-modified {
+  background: rgba(251, 191, 36, 0.18);
+  color: var(--warning);
+}
+
+.patch-status.status-deleted {
+  background: rgba(248, 113, 113, 0.18);
+  color: var(--error);
+}
+
+.patch-item-actions {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.patch-diff {
+  max-height: 400px;
+  overflow-y: auto;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.diff-line {
+  padding: 0 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.diff-added {
+  background: rgba(52, 211, 153, 0.14);
+  color: var(--success);
+}
+
+.diff-removed {
+  background: rgba(248, 113, 113, 0.14);
+  color: var(--error);
+}
+
+.diff-hunk {
+  background: var(--accent-light);
+  color: var(--accent);
+  font-weight: 600;
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+}
+
+.diff-context {
+  color: var(--text-primary);
+}
+
+.diff-binary {
+  padding: 1rem;
+  text-align: center;
+  color: var(--text-secondary);
+  font-style: italic;
+}

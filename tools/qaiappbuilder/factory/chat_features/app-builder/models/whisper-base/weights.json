@@ -1,0 +1,17 @@
+{
+  "tag": "whisper-medium",
+  "required_files": ["encoder.bin", "decoder.bin"],
+  "optional_files": ["metadata.json"],
+  "download_configs": {
+    "snapdragon_x_elite": {
+      "url": "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/whisper_medium/releases/v0.55.0/whisper_medium-qnn_context_binary-float-qualcomm_snapdragon_x_elite.zip",
+      "archive_name": "whisper_medium-qnn_context_binary-float-qualcomm_snapdragon_x_elite.zip",
+      "extracted_dir": "whisper_medium-qnn_context_binary-float-qualcomm_snapdragon_x_elite"
+    },
+    "snapdragon_x2_elite": {
+      "url": "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/whisper_medium/releases/v0.55.0/whisper_medium-qnn_context_binary-float-qualcomm_snapdragon_x2_elite.zip",
+      "archive_name": "whisper_medium-qnn_context_binary-float-qualcomm_snapdragon_x2_elite.zip",
+      "extracted_dir": "whisper_medium-qnn_context_binary-float-qualcomm_snapdragon_x2_elite"
+    }
+  }
+}

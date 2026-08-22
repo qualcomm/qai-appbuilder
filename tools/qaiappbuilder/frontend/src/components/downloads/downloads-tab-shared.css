@@ -1,0 +1,94 @@
+/* ---------------------------------------------------------------------
+ * Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * --------------------------------------------------------------------- */
+
+/**
+ * Shared download-center tab CSS — extracted from the duplicated scoped
+ * blocks in ModelCatalogTab.vue and ServiceVersionsTab.vue (they were
+ * byte-for-byte identical). Both tabs `@import` this so the BEM
+ * `.dc-tab__*` info-banner / empty / loading / spinner styles live in one
+ * place (V1 downloads.css parity). Tab-specific styles (`.dc-tab__groups`,
+ * `.dc-tab__list`, `.qai-sr-only`, ...) stay in their own components.
+ *
+ * Imported into each component's `<style scoped>`, so Vue still scopes
+ * these rules with the per-component `[data-v-*]` attribute — the classes
+ * are only used inside each tab's own template, so behaviour is identical
+ * to the previous inlined copies.
+ */
+
+/* Top info banner — V1 parity (downloads.css:78-86): full-width, radius-sm,
+   info-blue text, info banner bg/border tokens. Vertical padding uses
+   --space-2 (8px) to match V1 line 81 (8px 16px). */
+.dc-tab__desc {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  align-self: stretch;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--banner-info-border, var(--border));
+  border-radius: var(--radius-sm);
+  background: var(--banner-info-bg, var(--bg-secondary));
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--banner-info-text, var(--info));
+}
+
+.dc-tab__desc-icon {
+  flex-shrink: 0;
+}
+
+/* Empty / loading state — V1 parity (.dc-empty, downloads.css:423-446):
+   block + text-align:center (NOT flex), so the inner <p>'s max-width:360px
+   margin:0 auto centres within the full parent width instead of collapsing
+   the empty container itself to the paragraph width. */
+.dc-tab__empty,
+.dc-tab__loading {
+  padding: 60px var(--space-5);
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.dc-tab__empty strong {
+  display: block;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.dc-tab__empty p {
+  font-size: var(--text-base);
+  line-height: 1.6;
+  max-width: 360px;
+  margin: 0 auto;
+}
+
+/* V1 .dc-empty-icon (downloads.css): 48px glyph above the empty title. */
+.dc-tab__empty-icon {
+  font-size: 48px;
+  margin-bottom: var(--space-3);
+}
+
+/* V1 loading spinner (rotating ring) instead of plain text. */
+.dc-tab__spinner {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  margin-right: var(--space-2);
+  vertical-align: middle;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: dc-tab-spin 0.8s linear infinite;
+}
+
+@keyframes dc-tab-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.dc-tab__empty--error strong {
+  color: var(--error);
+}

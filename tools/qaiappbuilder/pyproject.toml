@@ -1,0 +1,590 @@
+# =============================================================================
+# QAIModelBuilder — root pyproject.toml
+# Created in S1 PR-011 (Clean Cutover refactor; refactor-plan v2.5 §15.1)
+# Python: 3.12+ / Node: 22+ (see frontend/package.json)
+# Package layout: src layout. Sources at src/qai/, apps/, interfaces/.
+# =============================================================================
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+# -----------------------------------------------------------------------------
+# Project metadata
+# -----------------------------------------------------------------------------
+[project]
+name = "qaimodelbuilder"
+# PEP 440 normalised form so ``pip install -e .`` does not rewrite the
+# string under our feet — keeps ``info.version`` in the OpenAPI snapshot
+# stable across plain checkouts and editable installs (PR-074 §11 #5).
+version = "0.0.0.dev0"
+description = "QAIModelBuilder — local-first AI workspace (Clean Architecture rewrite)"
+readme = "README.md"
+requires-python = ">=3.12,<4.0"
+license = { text = "Proprietary" }
+authors = [{ name = "QAIModelBuilder team" }]
+keywords = ["ai", "qai", "fastapi", "vue", "vite", "qualcomm", "qairt"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: Other/Proprietary License",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+]
+
+# -----------------------------------------------------------------------------
+# Runtime dependencies
+#
+# Post-S8 PR-084 (root ``requirements.txt`` deleted): this section is now the
+# **single source of truth** for runtime dependencies.  ``Setup.bat`` reads
+# from here via ``pip install -e .`` (editable path) and the wheel build path
+# uses the same metadata, so both venvs install equivalent dependency closures.
+#
+# When changing runtime deps, edit this block only.  ARM64-specific wheel
+# pinning lives in ``vendor/whl/`` (see ``vendor/whl/README.md`` and
+# ``Setup.bat`` step 4a) and stays orthogonal to version ranges declared
+# here.
+# -----------------------------------------------------------------------------
+dependencies = [
+  # web framework + server
+  "fastapi>=0.115,<1.0",
+  "uvicorn[standard]>=0.30,<1.0",
+  "starlette>=0.40,<2.0",                  # fastapi 0.136 pulls starlette 1.x; range widened
+  "websockets>=13,<17",
+  "httpx>=0.27,<1.0",
+  "anyio>=4.4,<5.0",
+
+  # data / serialization
+  "pydantic>=2.7,<3.0",
+  "pydantic-settings>=2.4,<3.0",
+  "python-multipart>=0.0.10,<1.0",         # FastAPI form/upload
+  "orjson>=3.10,<4.0",
+  "tomli-w>=1.0,<2.0",                     # TOML write (read uses stdlib tomllib)
+
+  # persistence
+  "aiosqlite>=0.20,<1.0",
+  "sqlalchemy>=2.0,<3.0",                  # used in adapters/infrastructure only
+  "alembic>=1.13,<2.0",                    # schema migrations (S2/S6)
+
+  # crypto / secrets
+  # ARM64 (Windows aarch64) note: vendor/whl/ pins cryptography 45.0.5
+  # (PyPI revoked 45.x cp313 ARM64; the vendored wheel is the only source).
+  # 46.0.x is available on PyPI as a fallback.  47.0+ are sdist-only and
+  # require Rust + OpenSSL toolchain.  Upper bound stays below 47.
+  "cryptography>=45,<47",
+  "keyring>=25,<26",                       # OS-level credential store (PR-013)
+  # Okta OIDC SSO (interfaces/http/auth/jwt.py):
+  #   * decode id_token (RS256, JWKS-based verification)
+  #   * sign private_key_jwt client assertion when the app is registered as
+  #     a confidential client on Okta
+  # The `[crypto]` extra pulls the ``cryptography`` bindings PyJWT needs for
+  # RSA operations. Explicit dependency (never rely on transitive) — the
+  # SSO gate is on by default wherever a local browser exists (Windows, and
+  # Linux with a graphical session; see AuthSettings.enabled), so these
+  # bindings are needed in a default install, not only a configured one.
+  "PyJWT[crypto]>=2.8,<3.0",
+
+  # observability
+  "structlog>=24.4,<27",
+  "rich>=13.7,<17",                        # CLI / startup banner
+
+  # interactive CLI input (qai build / qai app REPL sessions). Pure-Python
+  # wheel (py3-none-any), cross-platform, no native build — safe for the
+  # Windows ARM64 cp313 environment and any future Linux CI lane.
+  "prompt_toolkit>=3.0,<4.0",
+
+  # ids / time
+  "ulid-py>=1.1,<2.0",
+
+  # cron-expression parsing for the scheduled-task feature
+  # (qai.platform.scheduling.schedule_parser). Only the 5-field cron schedule
+  # kind needs it; interval and one-shot schedules parse without it. The
+  # import is lazily guarded (CronUnavailableError) so a deployment that never
+  # uses cron expressions is not hard-broken if the wheel is absent. Pure
+  # Python (py3-none-any, no native build) — safe on ARM64 cp313.
+  "croniter>=2.0,<7.0",
+
+  # token counting (chat compaction trigger precise sizing).
+  # ``qai.chat.application._token_estimate_helpers.precise_text_tokens`` uses
+  # tiktoken to exactly size large new user messages for the compaction-trigger
+  # ``实发`` decision. Loaded OFFLINE: the BPE vocab files are vendored under
+  # ``vendor/tiktoken/`` and the helper sets ``TIKTOKEN_CACHE_DIR`` to that dir,
+  # so no network fetch (offline → SSLError otherwise). The ARM64 cp313 wheel is
+  # vendored in ``vendor/whl/``. Lazily imported + fully try/except-guarded, so a
+  # missing wheel degrades to a coarse ``len//2`` estimate (never crashes chat).
+  "tiktoken>=0.12.0,<1.0",
+
+  # tools / process
+  "psutil>=6.0,<8.0",
+
+  # IM channel SDKs used by inbound transports (S9 PR-093 D-3 / D-4).
+  # Both are runtime dependencies in the legacy stack (see old
+  # ``requirements.txt`` and old ``backend/channels/{wechat,feishu}/channel.py``)
+  # and remain so in the new architecture:
+  #
+  # * ``lark-oapi`` is the only path for Feishu / Lark inbound when the
+  #   operator runs without a public webhook URL — Sub-D's
+  #   ``src/qai/channels/infrastructure/feishu_ws.py`` wraps
+  #   ``lark_oapi.ws.client`` for the long-lived WebSocket connection.
+  #   Outbound message-send is hand-rolled via ``httpx`` in
+  #   ``transports.py`` and does **not** depend on lark-oapi.
+  # * ``wechatbot-sdk`` is the long-poll SDK for personal-account WeChat
+  #   ingress (Sub-D's ``wechat_longpoll.py``); there is no REST
+  #   alternative for the personal-account flow. NOTE: the PyPI distribution
+  #   name is ``wechatbot-sdk`` (the import name is ``wechatbot``); declaring
+  #   the bare ``wechatbot`` here resolves to a non-existent PyPI project
+  #   (404) and breaks ``uv pip install -e .`` on a fresh machine.
+  #
+  # Both modules use ``try: import …`` so a missing wheel surfaces as a
+  # graceful ``sdk_missing`` log entry rather than an import-time crash;
+  # but operators who use these channels need them installed, hence the
+  # hard dependency.
+  "lark-oapi>=1.5,<2.0",
+  "wechatbot-sdk>=0.2,<1.0",
+
+  # WeChat personal-account login QR-code rendering (S9 channels parity).
+  # ``qr_image.py`` (RenderQrImageUseCase) does a module-level ``import
+  # qrcode`` and renders the login URL to a PNG via ``qrcode.make(url)
+  # .save(buf, format="PNG")`` — the default PIL image factory, so Pillow
+  # is REQUIRED at runtime. This import sits on the API startup path
+  # (main.py -> interfaces.http.routes.channels -> qr_image), so a missing
+  # ``qrcode`` crashes the API process at boot (``ModuleNotFoundError:
+  # qrcode``) rather than degrading gracefully. Declaring it here mirrors
+  # V1 ``requirements.txt`` ``qrcode[pil]>=7.4.2``.
+  #
+  # Cross-platform: ``qrcode`` is pure-Python (py3-none-any, no build).
+  # ``Pillow`` ships official win_arm64 cp313 + manylinux wheels (10.x+),
+  # so the ``[pil]`` extra installs a prebuilt binary wheel with no native
+  # toolchain required — safe for the ARM64 dev env and any future Linux lane.
+  "qrcode[pil]>=7.4.2,<9.0",
+]
+
+# -----------------------------------------------------------------------------
+# Optional / dev / test extras
+# Install with: pip install -e ".[dev]"
+# -----------------------------------------------------------------------------
+[project.optional-dependencies]
+dev = [
+  # lint / format / type
+  "ruff>=0.6,<1.0",
+  "mypy>=1.11,<3.0",
+  # ARM64 (Windows aarch64) note: grimp is Rust + maturin and PyPI does
+  # not ship win_arm64 wheels.  ``vendor/whl/grimp-3.14-cp313-cp313-win_arm64.whl``
+  # is locally compiled (2026-05-30) so import-linter is no longer
+  # constrained to 1.10.0 and tracks the latest 2.x release.  When
+  # bumping grimp here, also rebuild and replace the vendor wheel.
+  "import-linter>=2.11,<3.0",
+  "grimp>=3.14,<4.0",
+  "pre-commit>=3.7,<5.0",
+
+  # test
+  "pytest>=8.3,<10.0",
+  "pytest-asyncio>=0.23,<2.0",
+  "pytest-cov>=5.0,<8.0",
+  "pytest-mock>=3.14,<4.0",
+  "hypothesis>=6.112,<7.0",
+  "freezegun>=1.5,<2.0",                   # time travel for Clock tests
+  "respx>=0.21,<1.0",                      # httpx mock
+  "syrupy>=4.7,<6.0",                      # snapshot testing
+
+  # dev tooling
+  "watchfiles>=0.24,<2.0",
+]
+
+# Web-search browser engine (RUNTIME, not test-only): the ``web`` search
+# provider's ``google_browser`` engine drives Playwright + Chromium to scrape
+# a rendered Google SERP when a plain HTTP fetch is bot-challenged. Split out
+# from ``e2e`` so the end-user Setup.bat installs it by DEFAULT (the engine is
+# import-guarded, so a deployment without this extra simply drops the
+# browser-backed engine and keeps the keyless/API engines). ``selectolax`` /
+# ``lxml`` back the HTML parsing with a runtime import-guard fallback.
+search = [
+  "playwright==1.61.0",
+  "selectolax>=0.3,<1.0",
+  # lxml is the parser fallback when selectolax is unavailable; ``cssselect``
+  # is REQUIRED for lxml's ``.cssselect()`` (the engines select by CSS), so it
+  # must ship alongside lxml or the fallback path raises ImportError.
+  "lxml>=5.0,<7.0",
+  "cssselect>=1.2,<2.0",
+  # Dynamic per-request browser fingerprint (header-generator port). Generates
+  # random, self-consistent navigation headers so the keyless scrapers do not
+  # repeat one static signature that trips bot detection. Import-guarded: a
+  # build without it falls back to the static desktop-Chrome header set.
+  "browserforge>=1.2,<2.0",
+]
+
+# Heavy e2e / browser deps split out so pr-fast workflow can skip them. Reuses
+# the ``search`` browser stack (playwright) + adds the pytest plugin.
+e2e = [
+  "playwright==1.61.0",
+  "pytest-playwright>=0.5,<1.0",
+]
+
+# Stubs (optional, type-only)
+typing = [
+  "types-PyYAML",
+  "types-requests",
+]
+
+# Claude Code SDK backend (V1 file checkpoint/rewind parity).
+# Optional / platform-specific: the ``claude_agent_sdk`` drives the native
+# ``claude`` CLI subprocess to support TRUE on-disk file checkpoint/rewind
+# (``ClaudeSDKClient.rewind_files``).  Kept OUT of the core ``dependencies``
+# per the AGENTS.md cross-platform constraint — a cloud-only / Linux install
+# is never forced to pull it, and the SDK provider is import-guarded so a
+# deployment without this extra silently runs the pure-HTTP CC adapter.
+# The wheel ships in ``vendor/whl/`` for the ARM64 cp313 dev env.
+cc-sdk = [
+  "claude-agent-sdk>=0.1.72,<1.0",
+]
+
+# -----------------------------------------------------------------------------
+# CLI entry points
+#
+# Single-entry strategy (Desktop App Plan §2.4, landed in CLI D3 2026-06-10):
+# the unified ``qai <subcommand>`` dispatcher (``apps.cli.__main__:main``) is
+# the single operator-facing CLI surface for every command listed in
+# §2.1.1.A..K.  Two console-script entries are intentionally kept alongside
+# ``qai`` as documented exceptions:
+#
+# * ``qai-serve``   — bound to the ``REBOOT_EXIT_CODE=75`` supervisor contract
+#                     (AGENTS.md §3.1) and invoked verbatim by ``Start.bat``.
+#                     Process supervisors (systemd / nssm / Task Manager) read
+#                     the executable name as ``qai-serve``, which is the
+#                     operator-visible identifier we intend to keep stable.
+# * ``qai-uninstall`` — invoked verbatim by ``Uninstall.bat`` (§3.8 release
+#                     artifact); a dedicated entry keeps error output free of
+#                     the top-level dispatcher's stack frames during failure
+#                     triage.
+#
+# All other ``qai-*`` entries that previously existed (qai-api / qai-compile-
+# factory / qai-pack-{export,validate} / qai-workspace-init / qai-install-qairt
+# / qai-install-pack-deps) have been removed.  Their behaviour is reachable
+# verbatim via ``qai <subcommand>`` (see ``apps.cli.commands.{install,pack}``).
+# Removing console-scripts does not touch §3.1's locked surfaces (HTTP
+# routes / SSE-WS frames / REBOOT_EXIT_CODE / CSRF / OpenAI compat); the
+# entry-points table is explicitly outside that lock.
+# -----------------------------------------------------------------------------
+[project.scripts]
+qai = "apps.cli.__main__:main"
+qai-serve = "apps.cli.serve:main"
+qai-uninstall = "scripts.init.uninstall:main"
+
+# -----------------------------------------------------------------------------
+# Hatchling: src layout configuration
+# -----------------------------------------------------------------------------
+[tool.hatch.build]
+packages = ["src/qai", "apps", "interfaces"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/qai", "apps", "interfaces"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/apps",
+  "/interfaces",
+  "/tools",
+  "/scripts/init",
+  "/scripts/release",
+  "/src/qai/platform/persistence/migrations_sql",
+  "/factory",
+  "/frontend/dist",
+  "/README.md",
+  "/pyproject.toml",
+]
+exclude = [
+  "/backend",                              # legacy: deleted in S8 PR-080
+  "/features",                             # legacy: deleted in S8 PR-082
+  "/frontend/index.html",                  # legacy
+  "/frontend/js",                          # legacy
+  "/frontend/css",                         # legacy
+  "/frontend/vendor",                      # legacy
+  "/frontend/locales",                     # legacy
+  "/data",
+  "/downloads",
+  "/models",
+  "/native",
+  "/samples",
+  "/vendor",
+  "/scripts/_archive",
+  "/docs/40-security/scripts/tmp",
+  "/docs/40-security/scripts/.pytest_cache",
+]
+
+# =============================================================================
+# Linting / formatting (ruff)
+# Spec: refactor-plan v2.5 §15.1
+# =============================================================================
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "apps", "interfaces", "tests"]
+# Route ruff's cache out of the source tree into data/caches/ruff (data/ is
+# git-ignored per-user runtime root). Keeps the source tree clean.
+cache-dir = "data/caches/ruff"
+
+# Skip legacy code so ruff stays useful during S1..S7. These will all be deleted
+# in S8 (PR-080..085); keeping them lint-clean is not a goal.
+extend-exclude = [
+  "backend",
+  "features",
+  "frontend/js",
+  "frontend/vendor",
+  "frontend/locales",
+  "scripts/_archive",
+  "docs/40-security/scripts/tmp",
+  "docs/40-security/scripts/.pytest_cache",
+  "docs/90-refactor/inventory/_pytest_collect*.txt",
+]
+
+[tool.ruff.lint]
+select = [
+  "E", "F", "W", "I",                      # pycodestyle / pyflakes / isort
+  "N",                                      # pep8-naming
+  "UP",                                     # pyupgrade
+  "B",                                      # flake8-bugbear
+  "C4",                                     # comprehensions
+  "SIM",                                    # simplify
+  "PL",                                     # pylint subset
+  "RUF",                                    # ruff-own
+  "BLE",                                    # blind except (BLE001)
+  "T20",                                    # flake8-print (T201, T203)
+  "TRY",                                    # try/except patterns
+  "DTZ",                                    # naive datetime
+  "S",                                      # bandit (security)
+]
+ignore = [
+  "PLR0913",                               # use cases may legitimately take many params via DI
+  "TRY003",                                # long messages in exceptions are fine for domain errors
+  "S101",                                  # assert is allowed (tests + dev assertions)
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests may use magic values, asserts, broad excepts in fixtures.
+"tests/**" = ["S101", "PLR2004", "S105", "S106", "PLR0915"]
+# Allow CLI startup banner to print.
+"apps/api/banner.py" = ["T201", "T203"]
+"apps/cli/**" = ["T201", "T203"]
+# Win32 console Ctrl+C handling: ctypes / kernel32 idioms require lazy
+# in-function imports (msvcrt/ctypes are Windows-only, must not import at
+# module top on POSIX), UPPER_CASE Win32 constants as locals, and best-effort
+# try/except-pass around every kernel32 call (cosmetic console tweaks must
+# never crash the supervisor).
+"apps/cli/_console_ctrl.py" = [
+  "PLC0415", "N806", "S110", "SIM105", "PLR0911", "BLE001",
+]
+# Win32 Job Object orphan-kill safeguard: ctypes / kernel32 idioms require
+# lazy in-function imports (ctypes.wintypes is Windows-only, must not import
+# at module top on POSIX), UPPER_CASE Win32 struct/constant names as locals,
+# and ctypes Structure classes named with a leading underscore.
+"src/qai/model_runtime/infrastructure/process_group.py" = [
+  "PLC0415", "N806", "N801",
+]
+# Shared cross-context Job Object kill-group (platform kernel) — same ctypes /
+# kernel32 idioms as process_group.py (lazy Windows-only imports, UPPER_CASE
+# Win32 constants as locals, leading-underscore ctypes Structure classes).
+"src/qai/platform/process/kill_group.py" = [
+  "PLC0415", "N806", "N801",
+]
+# M-9: aria2c daemon Windows Job Object (KILL_ON_JOB_CLOSE) orphan safeguard —
+# same ctypes / kernel32 idioms as process_group.py (lazy Windows-only imports,
+# UPPER_CASE Win32 constants/struct names as locals, leading-underscore ctypes
+# Structure classes).
+"src/qai/service_release/infrastructure/aria2c_daemon.py" = [
+  "PLC0415", "N806", "N801",
+]
+# `__init__.py` re-exports
+"**/__init__.py" = ["F401", "F403"]
+# CC SDK provider: the ``claude_agent_sdk`` is an OPTIONAL dependency, so its
+# imports MUST be lazy / in-function (import guard — PLC0415) so a deployment
+# without the ``cc-sdk`` extra still imports the module and falls back to the
+# HTTP adapter. The SDK message→frame mapper and the V1-parity error-code
+# classifier inherently fan out into many branches/returns (PLR0911/PLR0912).
+# Structured logging keeps the ``error=`` field convention used across the
+# context (TRY300/TRY400) rather than re-raising.
+"src/qai/ai_coding/infrastructure/providers/claude_code_sdk.py" = [
+  "PLC0415", "PLR0911", "PLR0912", "TRY300", "TRY400",
+]
+# Inventory scripts may print and use os.system-style calls.
+"scripts/dev/inventory/**" = ["T201", "S603", "S607", "PLR0915", "PLR0912", "C901"]
+# Setup-time scripts: console-style tools that print progress, spawn pip/uv,
+# and carry Chinese docstrings/comments (fullwidth punctuation -> RUF002/RUF003).
+"scripts/setup/**" = ["T201", "T203", "S603", "S607", "RUF002", "RUF003"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["qai", "apps", "interfaces"]
+combine-as-imports = true
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+# =============================================================================
+# Type checking (mypy)
+# Spec: refactor-plan v2.5 §15.1
+# =============================================================================
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src", "apps", "interfaces"]
+plugins = ["pydantic.mypy"]
+mypy_path = "src"
+namespace_packages = true
+explicit_package_bases = true
+warn_unused_ignores = true
+warn_unreachable = true
+disallow_untyped_decorators = true
+exclude = "(^backend/|^features/|^frontend/|^scripts/_archive/|^docs/)"
+# Route mypy's cache out of the source tree into data/caches/mypy (data/ is
+# git-ignored per-user runtime root). Keeps the source tree clean.
+cache_dir = "data/caches/mypy"
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+check_untyped_defs = true
+
+# Third-party libs without stubs
+[[tool.mypy.overrides]]
+module = ["ulid.*", "psutil.*", "respx.*", "freezegun.*"]
+ignore_missing_imports = true
+
+# =============================================================================
+# Pytest
+# Spec: refactor-plan v2.5 §12 / §15.3
+# S7 PR-070: registered the per-context markers used by the new layout's
+# auto-injection in ``tests/conftest.py``.  Starlette deprecation warnings
+# from FastAPI's TestClient are silenced via per-module DeprecationWarning
+# filters below (modern Starlette 0.40+ uses stdlib ``DeprecationWarning``;
+# no custom warning subclass is exposed any more).
+# =============================================================================
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+# Route pytest's cache out of the source tree into data/caches/pytest (data/
+# is git-ignored per-user runtime root). Keeps the source tree clean.
+cache_dir = "data/caches/pytest"
+addopts = [
+  "-ra",
+  "--strict-markers",
+  "--strict-config",
+  "--showlocals",
+  # ``tests/integration/http`` spins up the full FastAPI app + DB per test
+  # (~782 tests, >10 min measured), which is too slow for the iterative loop
+  # every other suite is tuned for. Skipped by default; opt back in with
+  # ``pytest -m http_routes`` or the ``--http-routes`` flag registered in
+  # tests/conftest.py. They are NOT deleted — route / DI changes must still run
+  # them (see the marker description).
+  "-m", "not http_routes",
+]
+asyncio_mode = "auto"
+markers = [
+  # Tier markers
+  "unit: unit-level tests (no I/O, no network, no fs writes)",
+  "integration: integration tests (DB, FS, FastAPI TestClient)",
+  "e2e: end-to-end tests (browser, full stack)",
+  "contract: contract tests (port double-adapter parity)",
+  # Platform / environment selectors
+  "release: release packaging / strip verification",
+  "slow: tests slower than ~5s",
+  "windows_only: only on Windows",
+  "linux_only: only on Linux",
+  "darwin_only: only on macOS / Darwin",
+  "qairt: requires QAIRT toolchain (skipped without it)",
+  "network: tests requiring real network (skipped by default)",
+  "subprocess: spawns a real child process (best-effort, may be slow / OS-bound)",
+  "http_routes: FastAPI TestClient route tests under tests/integration/http (~782 tests, >10 min: each builds the whole app + DB). Auto-applied by tests/conftest.py and EXCLUDED BY DEFAULT via addopts. Run them explicitly with `pytest -m http_routes` (or `pytest --http-routes`) before touching route / DI wiring.",
+  "native: loads the compiled guard64.dll via ctypes (installs process-wide Detours hooks). Runs the real init/destroy in an ISOLATED child process; skip in iterative runs with -m \"not native\".",
+  # Per-context markers (auto-injected from path by tests/conftest.py)
+  "context_ai_coding: ai_coding context tests",
+  "context_app_builder: app_builder context tests",
+  "context_channels: channels context tests",
+  "context_chat: chat context tests",
+  "context_model_catalog: model_catalog context tests",
+  "context_persistence: platform persistence integration tests",
+  "context_platform: platform shared infra tests",
+  "context_security: security context tests",
+]
+filterwarnings = [
+  "error",
+  "ignore::DeprecationWarning:google.*",
+  "ignore::DeprecationWarning:starlette.*",
+  "ignore::DeprecationWarning:fastapi.*",
+  # lark_oapi (Feishu SDK) vendors an old protobuf that calls the
+  # Python-3.13-deprecated ``datetime.utcfromtimestamp`` at import time
+  # (``lark_oapi/ws/pb/google/protobuf/internal/well_known_types.py:91``).
+  # It is a third-party module-load warning, not a project bug; the SDK
+  # imports and runs fine.  Its module prefix is ``lark_oapi.ws.pb.google``
+  # so it is NOT covered by the ``google.*`` rule above — match it
+  # explicitly so the real-SDK channel tests are not falsely failed by
+  # ``filterwarnings = error``.
+  "ignore::DeprecationWarning:lark_oapi.*",
+  # lark_oapi.ws imports ``websockets.legacy`` at module load, which emits
+  # a DeprecationWarning (websockets 14.0+).  Third-party transitive import
+  # of the Feishu SDK — not a project bug; ignore so the real-SDK Feishu
+  # channel tests are not falsely failed by ``filterwarnings = error``.
+  "ignore::DeprecationWarning:websockets.*",
+  "ignore::pytest.PytestUnraisableExceptionWarning",
+  # starlette 1.2.0 reintroduced ``StarletteDeprecationWarning`` (a subclass
+  # of ``UserWarning``, NOT of ``DeprecationWarning``, so the
+  # ``ignore::DeprecationWarning:starlette.*`` rule above does not cover it).
+  # ``starlette.testclient`` / ``fastapi.testclient`` emit it to suggest the
+  # optional ``httpx2`` package; the bundled httpx is fully supported, so the
+  # warning is pure noise and must not become an error under
+  # ``filterwarnings = error``.
+  #
+  # It is matched by *message regex* rather than by category symbol on
+  # purpose.  Referencing the class as ``ignore::starlette.exceptions.
+  # StarletteDeprecationWarning`` makes pytest import and getattr the symbol
+  # while *parsing this config*: on any starlette < 1.2.0 (the symbol does
+  # not exist there) that raises ``AttributeError`` before collection, so
+  # EVERY pytest invocation dies — the whole suite, not one test.  Our
+  # constraint is ``starlette>=0.40,<2.0``, which does not guarantee the
+  # symbol exists, so a symbol reference is simply not safe here.  A message
+  # regex + built-in category is never symbol-resolved, so this entry works
+  # both on 0.4x (no such class) and on 1.2.0+ (class present, still
+  # silenced).  Same style as the OpenSSL entry below.
+  "ignore:.*httpx2:UserWarning",
+  # ARM64 (Windows aarch64) ``cryptography`` Rust binding emits a stdlib
+  # ``Warning`` at import time when OpenSSL 3 cannot load the legacy
+  # provider (no DES / Blowfish / RC4 etc. — none of which the project
+  # uses; Fernet is AES-128-CBC + HMAC-SHA256, both in the default
+  # provider).  Kept as a defensive ignore for older cryptography
+  # versions still in the wild; cryptography 46+ no longer raises this.
+  "ignore:OpenSSL 3's legacy provider failed to load:Warning",
+]
+
+# =============================================================================
+# Coverage (pytest-cov)
+# =============================================================================
+[tool.coverage.run]
+source = ["src/qai", "apps", "interfaces"]
+branch = true
+parallel = true
+# Route coverage's data file out of the source tree into data/caches/coverage
+# (data/ is git-ignored per-user runtime root). Keeps the source tree clean.
+# ``parallel = true`` writes ``.coverage.<host>.<pid>.<rand>`` shards next to
+# this file; ``coverage combine`` merges them into ``.coverage``.
+data_file = "data/caches/coverage/.coverage"
+omit = [
+  "*/__init__.py",
+  "*/tests/*",
+]
+
+[tool.coverage.report]
+precision = 1
+show_missing = true
+skip_covered = false
+fail_under = 0       # raised gradually: S2 → 50, S4 → 70, S7 → 85 for core contexts
+exclude_also = [
+  "raise NotImplementedError",
+  "if TYPE_CHECKING:",
+  "if __name__ == .__main__.:",
+  "@overload",
+]

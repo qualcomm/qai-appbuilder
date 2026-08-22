@@ -1,0 +1,84 @@
+{
+  "_comment": "FileGuard base-environment path whitelist. This is a RUNTIME BASELINE, NOT a user preference: it declares the paths the tool's own runtime legitimately needs to read / write / execute so the native OS file guard (guard64.dll) and the in-process permission check do not prompt (ASK) or block them. Loaded once at startup and merged into the FileGuard op-masked whitelist (guard64.dll white_ops). DELIBERATELY NOT editable via the UI / runtime-config API (not part of the reboot/hot-apply switch set) - to change the base environment, edit this file directly. Each entry: {path, read, write, execute, delete}. Per-op precision is THREE-STATE: each op is 'allow' | 'deny' | 'ask' (omitted => 'ask'). 'allow' = the op is permitted with no prompt; 'deny' = the op is HARD-DENIED under the entry's subtree (no prompt, no override - a grant cannot unlock it); 'ask' = the op FALLS THROUGH to the authorization prompt (and a prior session/process/permanent user grant is honoured). DENY is evaluated before ALLOW both natively and in the Python check. This replaces the old bool schema whose 'false' meant a SILENT hard-deny of any unlisted op (the design flaw): an op you don't list is now ASK, not a silent deny - list 'deny' explicitly to hard-deny. 'delete' defaults to follow 'write' when omitted. 'path' may contain %ENV% variables (e.g. %USERPROFILE%), expanded at load; an entry whose variable is unset is skipped. Matching is prefix + component-boundary aware. The built-in protected_write_paths black list (e.g. C:\\Qualcomm) still hard-denies writes with highest priority, so 'write: deny' on a protected tree is doubly enforced.",
+  "_schema": "version 2: entries[] of {path: str, read/write/execute/delete: 'allow'|'deny'|'ask'}",
+  "version": 2,
+  "entries": [
+    {
+      "_note": "The per-user profile root (C:\\Users\\<user>, covering AppData Local/Roaming/LocalLow plus dot-config dirs like .gitconfig / .cache / .cargo / Downloads). Full read/write/execute so the app and its child processes never prompt (ASK) for anything under a user's home. NOTE: this is a DELIBERATELY WIDE grant - it opens the whole per-user home tree for r/w/execute, including credential stores (.ssh, .aws, .git-credentials) and any binary a user placed under their home (which will run WITHOUT the execute-authorization prompt). This entry subsumes the former %USERPROFILE%\\AppData entry (and the app's own %LOCALAPPDATA%\\QAIModelBuilder + %LOCALAPPDATA%\\uv\\cache trees under it), all now removed as redundant. %USERPROFILE% generalizes across users and drive letters.",
+      "path": "%USERPROFILE%",
+      "read": "allow",
+      "write": "allow",
+      "execute": "allow"
+    },
+    {
+      "_note": "The system Program Files root (installed applications / toolchains). Read + execute are allowed (run installed binaries) without a prompt. WRITE is 'ask' (NOT 'deny'): some programs legitimately write into their own install directory (config, caches, self-update), and hard-denying that would break them; instead a write falls through to the authorization prompt so the user decides (and a session/permanent grant is then remembered). Only the 64-bit Program Files root is listed; %ProgramFiles(x86)% would need its own entry if 32-bit installs must also be covered.",
+      "path": "%ProgramFiles%",
+      "read": "allow",
+      "write": "ask",
+      "execute": "allow"
+    },
+    {
+      "_note": "The Qualcomm toolchain / QAIRT SDK install root. Read + execute (run qnn-* / SDK binaries) are allowed. WRITE is 'deny' - a HARD protection: writes under C:\\Qualcomm are denied with no prompt and no grant override, and are doubly enforced by the built-in protected_write_paths black list. 'delete' follows write => also denied.",
+      "path": "C:\\Qualcomm",
+      "read": "allow",
+      "write": "deny",
+      "execute": "allow"
+    },
+    {
+      "_note": "The Windows system root (C:\\Windows). MIGRATED from _workspace_resolver.py's hard-coded static OS paths (todo #12 'static-path unification'). Merges TWO former code channels: (a) the read-only surface (_collect_system_read_prefixes) which allowed READ, and (b) the system-exec op-mask (resolve_system_exec_allow_paths) which allowed READ+EXECUTE for %SystemRoot% AND %SystemRoot%\\System32. Net: read+execute=allow, write=ask (NEITHER former channel allowed write => falls through to the prompt). Because op-mask matching is PREFIX + component-boundary aware, this single %SystemRoot% entry SUBSUMES the former System32 (execute), System32\\CatRoot and System32\\catroot2 (read) sub-entries - they are all under C:\\Windows, so read=allow / execute=allow already cover their subtrees. They are therefore NOT listed separately.",
+      "path": "%SystemRoot%",
+      "read": "allow",
+      "write": "ask",
+      "execute": "allow"
+    },
+    {
+      "_note": "The 32-bit Program Files root (C:\\Program Files (x86)). MIGRATED from _workspace_resolver.py's static read-only surface (_collect_system_read_prefixes). That code channel allowed READ ONLY - execute fell through to ASK and write fell through to ASK. So this entry is read=allow, execute=ask, write=ask. NOTE: this is deliberately NOT symmetric with the sibling %ProgramFiles% entry (which allows execute): the static code NEVER put %ProgramFiles(x86)% on the system-exec (execute-allow) channel, only the read-only channel, so granting execute here would WIDEN the surface beyond the migrated behaviour. Conservative migration keeps execute at ask.",
+      "path": "%ProgramFiles(x86)%",
+      "read": "allow",
+      "write": "ask",
+      "execute": "ask"
+    },
+    {
+      "_note": "The machine-wide application data root (C:\\ProgramData). MIGRATED from _workspace_resolver.py's static read-only surface (_collect_system_read_prefixes) - the Windows on-access scanner / toolchains read here en masse at startup. That channel allowed READ ONLY; write and execute fell through to ASK. So: read=allow, write=ask, execute=ask.",
+      "path": "%ProgramData%",
+      "read": "allow",
+      "write": "ask",
+      "execute": "ask"
+    },
+    {
+      "_note": "The per-user roaming application data root (C:\\Users\\<user>\\AppData\\Roaming). MIGRATED from _workspace_resolver.py's static read-only surface (_collect_system_read_prefixes). That channel allowed READ ONLY; write/execute fell through to ASK. So: read=allow, write=ask, execute=ask. This entry SUBSUMES the former %APPDATA%\\uv sub-entry (uv package-manager cache) - it is under %APPDATA%, so read=allow covers it; not listed separately. NOTE: %APPDATA% normally lives under %USERPROFILE% (which is rwx=allow above); when it does, the broader %USERPROFILE% entry already covers reads/writes/execute here, so this entry is effectively a no-op in that common case. It is kept for environments where %APPDATA% is redirected outside the home tree, preserving the migrated read-allow.",
+      "path": "%APPDATA%",
+      "read": "allow",
+      "write": "ask",
+      "execute": "ask"
+    },
+    {
+      "_note": "The uv package-manager cache under per-user LOCAL application data (C:\\Users\\<user>\\AppData\\Local\\uv). MIGRATED from _workspace_resolver.py's static read-only surface (_collect_system_read_prefixes), which listed ONLY the \\uv subdirectory of %LOCALAPPDATA% (not %LOCALAPPDATA% itself). That channel allowed READ ONLY; write/execute fell through to ASK. So: read=allow, write=ask, execute=ask. As with %APPDATA%, %LOCALAPPDATA% normally lives under %USERPROFILE% (rwx=allow), which already covers this subtree; kept for redirected-home environments.",
+      "path": "%LOCALAPPDATA%\\uv",
+      "read": "allow",
+      "write": "ask",
+      "execute": "ask"
+    },
+    {
+      "_note": "The Windows driver-INF store (C:\\Windows\\INF). Listed separately from its %SystemRoot% parent ONLY to hard-deny write: read and execute deliberately repeat the parent's 'allow' so this entry narrows exactly one op and nothing else (the op-mask consumer treats the most specific matching prefix as authoritative, so every op must be restated - omitting one would silently downgrade it to 'ask'). WHY write='deny': the guard hooks NtCreateFile and classifies the OPEN by its DesiredAccess (guard.cpp: GENERIC_WRITE | FILE_APPEND_DATA | FILE_WRITE_DATA | CreateDisposition==FILE_CREATE => kWrite), so a write-intent OPEN is gated even when nothing is ever written. SetupAPI opens the precompiled-INF cache (*.PNF) write-intent during ordinary device enumeration - a bare 'import onnxruntime; get_available_providers()' reaches it via provider init - and falls back to re-parsing the .inf when that open fails. Measured on this machine: a non-elevated process gets ACCESS_DENIED (errno 13) opening cpu.PNF read-write while a read-only open succeeds, and onnxruntime still enumerates QNNExecutionProvider fine in exactly that state; cpu.PNF's own mtime is 22 days old, i.e. nothing has actually rewritten it. So the OS ACL already refuses this write for every non-elevated child, and 'ask' was prompting for something the user could not grant even by clicking Allow - all 7 recorded prompts resolved to deny, none to allow. 'deny' makes the existing refusal explicit and silent instead of raising an unanswerable dialog whose writer never waits for the verdict (it exits within seconds, so the subprocess-gone sweep closes the dialog and leaves a ghost request row). This does NOT block the setupapi.*.log files under this directory: those are written by SYSTEM-level services, which the guard does not hook (it covers this backend process and its children only). NOTE the scope caveat: the config format matches by PREFIX with no globbing, so this cannot be narrowed to '*.PNF'. If a future feature legitimately needs an elevated child to write here (e.g. driver installation), this entry must be revisited - the denial is silent, though still recorded in the audit log.",
+      "path": "%SystemRoot%\\INF",
+      "read": "allow",
+      "write": "deny",
+      "execute": "allow"
+    },
+    {
+      "_note": "The machine-wide temporary directory (C:\\Windows\\Temp). Full read/write/execute so the agent and its child processes never prompt for scratch files. WHY it is listed even though its %SystemRoot% parent already grants read+execute: the parent leaves write at 'ask', and this is the ONE writable location under C:\\Windows that the agent realistically touches - build tools, installers, archive extraction and %TMP%-honouring libraries all land scratch data here when a child process inherits the machine TMP rather than the per-user one. A survey of this tree found ~18 directories a non-elevated process can write (Temp, Tasks, System32\\Tasks, System32\\spool\\drivers\\color, System32\\LogFiles\\WMI, Registration\\CRMLog, debug\\WIA, plus environment-specific CCM\\* and PLA\\* trees); all of them are left at the parent's write='ask' on purpose, because the agent has no reason to write there and a prompt is the right outcome if it ever tries (Tasks / System32\\Tasks in particular are the scheduled-task stores, where a write means creating an autostart entry - exactly the case a human should see). Note that such a survey can NEVER be exhaustive: C:\\Windows\\Temp and System32\\Tasks are writable yet refuse directory enumeration, so a walk misses them, and the CCM / PLA trees only exist on managed machines. That is why the parent stays 'ask' rather than being flipped to a blanket 'deny' with an exception list - an omission then fails towards a harmless prompt instead of a silent block. EXECUTE=allow matches the existing %USERPROFILE% grant (which already permits execution from the per-user Temp), so this does not open a new class of surface. 'delete' follows write => also allowed, which scratch cleanup needs.",
+      "path": "%SystemRoot%\\Temp",
+      "read": "allow",
+      "write": "allow",
+      "execute": "allow"
+    },
+    {
+      "_note": "The recycle-bin store (C:\\$Recycle.Bin). Hard-denied for write and delete; read is left at 'ask' rather than 'allow' because the bin holds whatever the user deleted, which is not agent-readable material by default. Listed 2026-08-09 when the V1 `dangerous_paths` pre-call screen was removed: that screen carried its own parallel prefix list which happened to include this path, so deleting it would have been the one real reduction in coverage (every other path on that list is covered here or by protected_paths). Writing into the bin is never a legitimate agent action - it is how a deletion is disguised as a move - so it is expressed as a hard deny rather than a prompt. Note the path is a per-volume hidden system directory; only the system-drive instance is listed, matching the V1 list it replaces.",
+      "path": "C:\\$Recycle.Bin",
+      "read": "ask",
+      "write": "deny",
+      "execute": "deny"
+    }
+  ]
+}

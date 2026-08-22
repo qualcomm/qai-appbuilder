@@ -1,0 +1,38 @@
+-- ============================================================================
+-- Migration 065: Generation counter for compaction checkpoint (Task R)
+--
+-- Adds ``generation INTEGER NOT NULL DEFAULT 1`` to
+-- ``chat_compaction_checkpoint``. The generation is a monotonically increasing
+-- version tag used to defend the row against three classes of race:
+--
+--   1. Two concurrent ``maybe_compress`` runs writing the SAME checkpoint row
+--      would previously overwrite each other blindly. With the generation
+--      column, ``save_core`` refuses to update a row whose stored generation
+--      is greater-or-equal to the incoming one (Compare-And-Swap on the row).
+--   2. Fragment writers (``save_digest`` / ``save_turn_prefix``) carry the
+--      core generation they observed at ``load`` time. A write whose expected
+--      generation does not match the current core row's generation is a
+--      stale write and is dropped (physically the fragment row is not touched
+--      or the write returns False).
+--   3. In-memory replays (``engine.replace_digest_fragment`` /
+--      ``replace_turn_prefix_fragment``) compare the incoming ``core_gen``
+--      to the frozen checkpoint they are trying to update. A mismatch
+--      degrades to a no-op — no stale digest / turn-prefix can resurrect a
+--      dropped checkpoint.
+--
+-- Additive only (AGENTS.md §8): one new NOT NULL column with a DEFAULT.
+-- Existing rows implicitly take generation = 1, matching the value the
+-- application assigns when it observes a pre-migration row (the checkpoint
+-- dataclass's own default is also 1). No existing column, index, or FK is
+-- touched.
+--
+-- Idempotence: the migration runner records applied ids in
+-- ``_qai_schema_migrations`` and skips already-applied files (see
+-- ``qai.platform.persistence.migrations.MigrationRunner``). SQLite's
+-- ``ADD COLUMN`` has no ``IF NOT EXISTS`` clause; the runner's applied-set is
+-- the only guard we need. The runner manages BEGIN/COMMIT — this file MUST
+-- NOT contain transaction statements.
+-- ============================================================================
+
+ALTER TABLE chat_compaction_checkpoint
+    ADD COLUMN generation INTEGER NOT NULL DEFAULT 1;

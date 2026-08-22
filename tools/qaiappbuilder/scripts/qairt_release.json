@@ -1,0 +1,6 @@
+{
+  "_comment": "SINGLE SOURCE OF TRUTH for the QAIRT SDK release the build/setup tooling targets by default. To bump the QAIRT version, change ONLY the fields below; all active code, setup scripts, and tests derive their default version from this file. Consumers: scripts/qairt_version.py (Python), Setup.bat / Uninstall.bat (PowerShell JSON parse). Docs/comments use the placeholder '<QAIRT SDK version>' and are intentionally NOT auto-synced (they are historical verification notes).",
+  "qairt_version": "2.48.40.260702",
+  "qairt_sdk_root_template": "C:\\Qualcomm\\AIStack\\QAIRT\\{version}",
+  "qairt_download_url_template": "https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/{version}/v{version}.zip"
+}

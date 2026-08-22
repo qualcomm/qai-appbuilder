@@ -1,0 +1,4480 @@
+/* =============================================================================
+ * Migrated from frontend/css/chat.css (S7.5 L8 PR-802b).
+ * Selectors stay global so legacy class names remain reachable from new
+ * SFCs that reuse them.
+ * ========================================================================== */
+
+/* ---------------------------------------------------------------------
+ * Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * --------------------------------------------------------------------- */
+/* ── Chat ───────────────────────────────────────────────────────────────── */
+/* Chat view, message bubbles (user/AI), markdown rendering inside bubbles, */
+/* code blocks, typing indicator, input area, send button, message queue    */
+/* float panel, token badge, and model selector button.                     */
+
+/* ── Chat View ──────────────────────────────────────────────────────────── */
+.chat-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Top-right anchor for the mode-intro overlay (ⓘ button + pop-out card).
+ *
+ * Design intent: the intro overlay is an ambient onboarding affordance
+ * that must NOT consume a permanent row of layout height (that was the
+ * previous inline-strip design; user feedback: "not really floating, it
+ * steals a row"). Absolute positioning inside `.chat-view` keeps the
+ * button on top of the chat content while message list / composer keep
+ * their full height.
+ *
+ * Placement (stacks below the task-list pill, but NOT below its dropdown):
+ *   - Top-right corner of the chat viewport, offset from the edges by
+ *     var(--space-3) so it aligns with the composer / header inner
+ *     padding without feeling cramped;
+ *   - `top` is `--qai-task-pill-bottom` (published by TaskListBar and
+ *     tracking JUST the pill, NOT the dropdown) + var(--space-2), so
+ *     this button sits directly BELOW the task-list pill when one is
+ *     showing (feedback: the two floats overlapped because both anchored
+ *     to `top: var(--space-3)`), and RISES back to the corner when no
+ *     task list is active (the CSS var falls back to 0 on unmount).
+ *
+ *     Deliberately DOES NOT track the dropdown — when the user expands
+ *     the task list, the dropdown just occludes this button briefly.
+ *     That is acceptable because the user is looking at tasks, not
+ *     onboarding, at that moment; jumping the ⓘ button down every time
+ *     the dropdown opens would be jarring. Same rationale as why
+ *     MessageQueuePanel DOES track the full stack (its queue is
+ *     genuinely part of the top-right float stack, ours is separate).
+ *
+ *   - z-index above the message list but below the task-list bar (30)
+ *     so the task-list dropdown always wins when both are open at once;
+ *   - `pointer-events: none` on the anchor itself so the empty space
+ *     around the pill button does not eat clicks meant for the message
+ *     list. The button + pop-out inside re-enable pointer events on
+ *     themselves.
+ */
+.chat-view__intro-anchor {
+  position: absolute;
+  top: calc(
+    var(--qai-task-pill-bottom, 0px) +
+    var(--qai-mbp-iframe-bottom, 0px) +
+    var(--space-3, 12px)
+  );
+  right: var(--space-3, 12px);
+  z-index: 20;
+  pointer-events: none;
+  transition: top 180ms ease;
+}
+.chat-view__intro-anchor > * {
+  pointer-events: auto;
+}
+
+/* Non-scrolling pane wrapper (V1 `.chat-view` parity, index.html:401 +
+   chat.css:11-17). This is the positioning ancestor for the floating
+   scroll-nav group: the buttons are anchored here, NOT inside the
+   scrollable `.messages-container`, so `bottom`/`right` resolve against
+   the stable viewport box instead of the scrolled content height. */
+.chat-message-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+
+.messages-container {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin: 8px 12px;
+  /* Theme-driven: must follow light/dark so the welcome empty-state text
+     (which uses --text-primary) doesn't end up dark-on-dark in light mode.
+     Previously hardcoded #161430 / #2a2750 (dark-only) — broke light theme. */
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+}
+
+.welcome-screen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-10);
+  text-align: center;
+  background: radial-gradient(ellipse at 50% 40%, var(--accent-muted) 0%, transparent 60%);
+}
+.welcome-icon {
+  width: 112px;
+  height: 112px;
+  display: grid;
+  place-items: center;
+  filter: drop-shadow(0 0 24px rgba(124, 108, 255, 0.35));
+  animation: welcome-float 3s ease-in-out infinite;
+}
+.welcome-logo-glyph {
+  width: 112px;
+  height: 112px;
+  display: block;
+}
+.welcome-logo-tile {
+  fill: #0f1219;
+  stroke: rgba(124, 108, 255, 0.25);
+  stroke-width: 1;
+}
+.welcome-logo-frame line {
+  stroke: rgba(124, 108, 255, 0.4);
+  stroke-width: 1;
+  stroke-dasharray: 3 2.5;
+  animation: welcome-frame-flow 12s linear infinite;
+}
+.welcome-logo-pulse {
+  fill: none;
+  stroke: #7c6cff;
+  stroke: url(#wl-brand-grad);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 5px rgba(124, 108, 255, 0.5));
+}
+.welcome-logo-pulse rect {
+  fill: none;
+}
+.welcome-logo-nodes circle {
+  fill: #7c6cff;
+  fill: url(#wl-brand-grad);
+  opacity: 0.9;
+}
+@keyframes welcome-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+@keyframes welcome-frame-flow {
+  to { stroke-dashoffset: -48; }
+}
+/* Light theme overrides for welcome logo */
+html.light .welcome-icon {
+  filter: drop-shadow(0 0 20px rgba(124, 108, 255, 0.2));
+}
+html.light .welcome-logo-tile {
+  fill: #f0eeff;
+  stroke: rgba(124, 108, 255, 0.3);
+}
+html.light .welcome-logo-frame line {
+  stroke: rgba(124, 108, 255, 0.35);
+}
+html.light .welcome-logo-pulse line,
+html.light .welcome-logo-pulse rect {
+  stroke: #6c5ce7;
+}
+html.light .welcome-logo-nodes circle {
+  fill: #6c5ce7;
+}
+/* Reduced motion: frame-flow animation is preserved (V1 parity —
+    subtle low-frequency decorative motion, see base.css exemption). */
+.welcome-title { font-size: var(--text-2xl); font-weight: 700; color: var(--text-primary); }
+.welcome-subtitle { font-size: var(--text-md); color: var(--text-secondary); max-width: 400px; }
+.welcome-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: center;
+  margin-top: var(--space-2);
+}
+.welcome-chip {
+  /* V1 index.html:435-443 chip 是单 div（"🖼️ Real-ESRGAN…"），emoji 与
+     文字间靠字符串自带空格自然分隔。V2 拆成双 span（emoji icon span +
+     label span）以便 i18n label 保持纯文本，但拆分后两个 span 之间没有
+     空白节点 → emoji 与文字贴在一起。改为 inline-flex + gap，让两个 span
+     之间统一 6px 间距，同时与"单文本节点 + 自然空格"的 ChatViewCC/OC 写
+     法兼容（inline-flex 不会拆文本节点）。 */
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: var(--space-2) var(--space-4);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  font-size: var(--text-base);
+  /* V1 .welcome-chip is a <div> so it inherits the base body line-height
+     (1.6 ≈ 20.8px). V2 renders welcome-chip as a <button>, which defaults
+     to line-height: normal. Pin the line-height explicitly so the chip
+     height matches V1 1:1 (38px instead of 35px). V1 frontend/css/chat.css:96-105 */
+  line-height: 1.6;
+  /* Reset button-default font / inline behaviour so a <button> chip
+     renders identically to V1's <div> chip. */
+  font-family: inherit;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.welcome-chip:hover {
+  background: var(--accent-light);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ── Skeleton Loading (V1 index.html:407-419 parity) ────────────────────── */
+/* Shown when switching to an existing conversation while history loads.
+   Uses the global .skeleton-* classes from components.css for card/line
+   styling; this block only positions the skeleton stack within the
+   messages-container layout context. */
+.messages-skeleton {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-6) var(--space-5);
+  max-width: min(700px, 90%);
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* ── Message Bubble ─────────────────────────────────────────────────────── */
+.message-row {
+  display: flex;
+  gap: var(--space-3);
+  max-width: min(800px, 85%);
+  width: 100%;
+  margin: 0 auto;
+}
+.message-row.user { flex-direction: row-reverse; }
+
+.message-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-lg);
+  flex-shrink: 0;
+  background: var(--bg-tertiary);
+}
+.message-row.ai .message-avatar {
+  color: var(--accent);
+}
+.message-row.user .message-avatar {
+  background: var(--accent);
+}
+/* Multi-Agent discussion speaker avatar (block-5): a generated "initial on a
+   theme-aware palette colour" circle. The background colour comes from the
+   participant's `--discussion-speaker-N` token via an inline style (set in
+   ChatMessageList); this rule only handles the initial glyph typography so it
+   reads cleanly on the coloured circle. */
+.message-avatar--speaker {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: #fff;
+}
+
+.message-content-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.message-row.user .message-content-wrap { align-items: flex-end; }
+
+.message-meta {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  opacity: 0.7;
+  transition: opacity var(--duration-fast);
+}
+.message-row:hover .message-meta {
+  opacity: 1;
+}
+.message-row.user .message-meta { flex-direction: row-reverse; }
+
+.message-bubble {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  max-width: 100%;
+  word-break: break-word;
+  line-height: 1.7;
+  position: relative;
+}
+.message-row.user .message-bubble {
+  background: var(--user-bubble);
+  color: var(--user-text);
+  border-bottom-right-radius: 4px;
+  /* B4 — preserve user newlines (V1 escHtml replaces \n→<br>, utils.js:67).
+     V2 renders the user bubble as plain-text interpolation, so honour line
+     breaks via white-space rather than injecting <br>. */
+  white-space: pre-wrap;
+}
+.message-row.ai .message-bubble {
+  background: var(--ai-bubble);
+  color: var(--ai-text);
+  border-bottom-left-radius: 4px;
+  border: 1px solid var(--border);
+}
+/* Slash-command reply bubble (V1 index.html:682-683, is_command_reply):
+   verbatim plain text — preserve emoji / indentation / newlines, no markdown. */
+.message-command-reply {
+  white-space: pre-wrap;
+}
+
+/* Markdown inside bubbles */
+.message-bubble h1, .message-bubble h2, .message-bubble h3 {
+  margin: var(--space-3) 0 6px;
+  font-weight: 600;
+}
+.message-bubble h1 { font-size: 1.3em; }
+.message-bubble h2 { font-size: 1.15em; }
+.message-bubble h3 { font-size: 1.05em; }
+.message-bubble p { margin: 6px 0; }
+.message-bubble ul, .message-bubble ol { padding-left: var(--space-5); margin: 6px 0; }
+.message-bubble li { margin: 3px 0; }
+.message-bubble blockquote {
+  border-left: 3px solid var(--accent);
+  padding-left: var(--space-3);
+  margin: var(--space-2) 0;
+  color: var(--text-secondary);
+}
+.message-bubble code:not(pre code) {
+  background: rgba(108,99,255,0.15);
+  color: #a78bfa;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+}
+.message-row.user .message-bubble code:not(pre code) {
+  background: rgba(255,255,255,0.2);
+  color: #e0d7ff;
+}
+.message-bubble pre {
+  margin: var(--space-3) 0;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  position: relative;
+}
+.message-bubble pre code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  display: block;
+  padding: var(--space-3) var(--space-4);
+  overflow-x: auto;
+}
+/* The bundled highlight.js themes define `pre code.hljs { padding: 1em }`.
+   styles/codeBlockThemes.ts now scopes those rules under `html.light` /
+   `html:not(.light)` so they follow the app theme — but that scope also raises
+   their specificity above a plain `.message-bubble pre code.hljs`. Add the same
+   theme prefix here so our rule out-specifies the scoped theme and V2 padding
+   stays at 12px/16px in both themes. */
+html.light .message-bubble pre code.hljs,
+html:not(.light) .message-bubble pre code.hljs {
+  padding: var(--space-3) var(--space-4);
+}
+.code-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-code);
+  padding: 6px var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+.copy-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 2px var(--space-2);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: var(--text-xs);
+  transition: all var(--transition);
+}
+.copy-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+/* ── Native Mermaid diagram rendering (markdown-mermaid.ts) ─────────────────
+ * `.mermaid-code` is the marker wrapper emitted by renderMarkdown for a
+ * ```mermaid``` block: it holds the raw <pre><code> source (shown while
+ * streaming / on failure) and — once the post-render hook runs on committed
+ * DOM — a `.mermaid-panel` containing the sanitised SVG. Theme colours come
+ * from the same design tokens used elsewhere so light (html.light) + dark
+ * (:root) both work; the SVG's own fills are driven by mermaid themeVariables
+ * derived from these tokens in markdown-mermaid.ts. */
+.mermaid-code {
+  margin: 0;
+}
+.mermaid-code[data-mermaid-state="rendered"] > pre {
+  display: none;
+}
+.mermaid-panel {
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  padding: var(--space-3) var(--space-4);
+  /* Narrow screens: let wide diagrams scroll horizontally instead of
+     overflowing the bubble. */
+  overflow-x: auto;
+  text-align: center;
+}
+.mermaid-panel > svg {
+  max-width: 100%;
+  height: auto;
+}
+/* Transient "rendering…" + error fallback states are plain text labels. */
+.mermaid-panel[data-state="rendering"] {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
+  text-align: left;
+}
+.mermaid-panel[data-state="error"] {
+  color: var(--banner-error-text);
+  background: var(--banner-error-bg);
+  border-color: var(--banner-error-border);
+  font-size: var(--text-sm);
+  text-align: left;
+}
+/* When the diagram failed, keep the source code visible BELOW the error so the
+   user can still read / copy the original Mermaid text. */
+.mermaid-code[data-mermaid-state="error"] > pre {
+  display: block;
+}
+
+/* ── Mermaid action toolbar (copy / download) + click-to-zoom ───────────────
+ * Injected by markdown-mermaid.ts as the wrapper's FIRST child (above the
+ * panel) once a diagram renders. Buttons carry data-mermaid-action and are
+ * resolved by ChatMessageList's onContainerClick delegation. Colours use the
+ * shared design tokens so light (html.light) + dark (:root) both work. */
+.mermaid-toolbar {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: flex-end;
+  padding: var(--space-1) var(--space-2);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+/* The panel sits directly under the toolbar — square its top corners so the
+   two read as one card. */
+.mermaid-toolbar + .mermaid-panel {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+.mermaid-menu {
+  position: relative;
+  display: inline-flex;
+}
+.mermaid-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.mermaid-tool-btn:hover,
+.mermaid-menu[data-open] > .mermaid-tool-btn {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.mermaid-menu-list {
+  position: absolute;
+  top: calc(100% + 2px);
+  right: 0;
+  z-index: 20;
+  display: none;
+  flex-direction: column;
+  min-width: 140px;
+  padding: var(--space-1);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md, 0 4px 12px rgb(0 0 0 / 0.2));
+}
+.mermaid-menu[data-open] > .mermaid-menu-list {
+  display: flex;
+}
+.mermaid-menu-item {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-sm);
+  text-align: left;
+  color: var(--text-primary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mermaid-menu-item:hover {
+  background: var(--bg-hover);
+}
+/* The rendered diagram is a click-to-zoom target. */
+.mermaid-panel[data-mermaid-zoom] {
+  cursor: zoom-in;
+}
+
+.message-bubble table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: var(--space-2) 0;
+  font-size: 0.9em;
+}
+.message-bubble th, .message-bubble td {
+  border: 1px solid var(--border);
+  padding: 6px var(--space-3);
+  text-align: left;
+}
+.message-bubble th { background: var(--bg-tertiary); font-weight: 600; }
+.message-bubble a { color: var(--accent); text-decoration: none; }
+.message-bubble a:hover { text-decoration: underline; }
+.message-bubble hr { border: none; border-top: 1px solid var(--border); margin: var(--space-3) 0; }
+
+/* Tool result bubble */
+.tool-result-bubble {
+  background: var(--bg-tertiary);
+  border-left: 3px solid var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: var(--space-2) var(--space-3);
+}
+
+/* Tool indicator bubble (transient "executing…" state) */
+.tool-indicator-bubble {
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--text-secondary);
+  font-size: 0.85em;
+  padding: 6px var(--space-3);
+}
+
+.message-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  opacity: 0;
+  transition: opacity var(--transition);
+}
+.message-row:hover .message-actions { opacity: 1; }
+
+/* A4 复制按钮（V1 index.html:520-545）：现在直接复用全局 `.btn .btn-icon`
+   36×36 + padding:8px 击中区，与 V1 一致。早期 V2 的 `.message-action-btn`
+   （pill 风格）+ `.message-copy-icon`（极小 14px borderless）两段死规则
+   已删除 —— 复制按钮挂在 `.message-actions` 容器内，平时隐藏 (opacity:0)，
+   `.message-row:hover` 时才显示，行为与 V1 chat.css:279-286 一致。 */
+
+/* A3 timestamp in the meta row (V1 index.html:517). */
+.message-time {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Discussion-mode model badge (V2 enhancement 2026-06-21).
+   Rendered as "· claude-4-6-sonnet" next to the speaker name so the user
+   sees which model each role is using. Subtle / secondary so it never
+   competes with the (coloured) speaker name; uses --text-muted to harmonise
+   with the timestamp on the same line. */
+.discussion-speaker-model {
+  color: var(--text-muted);
+  font-size: 0.92em;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  user-select: text;
+}
+
+/* Tool call/result cards container — V1 index.html:455-494 */
+.message-tool-calls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+/* `.token-badge` 真值规则在本文件 §"Token usage bar"（V1 chat.css:1495-1502
+   verbatim：display:flex / gap / font-size / color，无 bg/border/padding/radius）。
+   早期 V2 在此处自创了一个 pill 胶囊样式（bg + border + radius + padding +
+   monospace），与 V1 不符 —— 已删除以恢复 V1 无边框纯文字外观。 */
+
+/* ── Typing indicator ───────────────────────────────────────────────────── */
+.typing-indicator {
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-1) 0;
+}
+.typing-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--text-muted);
+  border-radius: 50%;
+  animation: typing-bounce 1.4s infinite ease-in-out;
+}
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes typing-bounce {
+  0%, 80%, 100% { transform: scale(0.8); opacity: 0.5; }
+  40% { transform: scale(1.2); opacity: 1; }
+}
+/* Override prefers-reduced-motion for functional typing indicator —
+   this animation serves as a status indicator, not decorative motion,
+   so it must remain active even when the OS "reduce animations" setting is on.
+   Without this, the global rule in base.css kills the animation after one iteration. */
+@media (prefers-reduced-motion: reduce) {
+  .typing-dot {
+    animation: typing-bounce 1.4s infinite ease-in-out !important;
+    animation-duration: 1.4s !important;
+    animation-iteration-count: infinite !important;
+  }
+  .typing-dot:nth-child(2) { animation-delay: 0.2s !important; }
+  .typing-dot:nth-child(3) { animation-delay: 0.4s !important; }
+}
+
+/* ── Input Area ─────────────────────────────────────────────────────────── */
+.input-area {
+  display: flex;
+  flex-direction: column;
+  /* The composer is the fixed bottom region of the chat-view flex column; it
+     must NEVER be shrunk by the flex:1 message pane. Without this, a transient
+     re-render (e.g. async discussion re-hydration on opening a history
+     conversation) could let the message pane squeeze the input area to 0
+     height for a frame and the composer "disappears" until a relayout. */
+  flex-shrink: 0;
+  /* NOTE: do NOT add `overflow:hidden` here. The onboarding bubble
+     (.assistant-onboarding-bubble, position:absolute; bottom: calc(100% + 14px))
+     is anchored inside .input-toolbar and intentionally overflows above the
+     toolbar; clipping .input-area would cut its top off. The "composer pushed
+     off-screen" fix lives at the real contention layer (.chat-view → workbench
+     yields space), see .ab-workbench-host in app-builder.css. */
+  padding: 0 12px 12px;
+  background: transparent;
+  border-top: 0;
+}
+
+/* 顶部功能 chips（claude-4-6-sonnet / 参数 / Claude Code / Open Code）
+   通过 flex order 把它移到工作台之后、文本输入框之前，紧贴 textarea 上方。 */
+.input-toolbar {
+  /* V1 index.html:941 — inline `style="position:relative"`. The
+     onboarding bubble is `position:absolute` and is placed *inside*
+     the toolbar so it can anchor to the CC/OC pill via getBoundingClientRect.
+     Without `position:relative` on the toolbar, the bubble would
+     escape upward (using the next ancestor with positioning) and the
+     `bottom: calc(100% + 14px)` rule would point at the wrong reference. */
+  position: relative;
+  order: 3;
+  flex-shrink: 0;  /* toolbar chips 永不被压缩 */
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  /* Desktop: keep the toolbar on ONE line so the `.workdir-chip` on the
+   * right can absorb leftover horizontal space (see ChatComposer.vue).
+   * Small screens re-enable wrap in the `@media (max-width: 768px)`
+   * override in layout.css — a phone with many pills correctly stacks. */
+  flex-wrap: nowrap;
+  padding: 8px 10px;
+  margin: 0 0 6px;
+  /* Theme-driven (was hardcoded #161430 / #2a2750 dark-only) so the input
+     toolbar matches the messages container in both light and dark. */
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+/* Pills on the input-toolbar keep their natural width — only `.workdir-chip`
+ * gives up space when the row overflows. Without this, `flex-wrap: nowrap`
+ * would let every pill compress uniformly and the model/params/pill labels
+ * would truncate before the (deliberately shrinkable) workdir chip did. */
+.input-toolbar > *:not(.workdir-chip) {
+  flex-shrink: 0;
+}
+
+/* NOTE: In V2 the App Builder workbench (.ab-workbench-host / .ab-collapsed-bar)
+   is rendered by <AppBuilderWorkbenchOverlay> as a SIBLING of .input-area under
+   .chat-view (ChatView.vue: workbench overlay and <ChatComposer> are siblings),
+   NOT as a child of .input-area like in V1. So `.input-area > .ab-*` selectors
+   match nothing here and only document the historical V1 ordering. The actual
+   "workbench must not push the composer off-screen" fix lives on
+   .ab-workbench-host in app-builder.css (it yields space inside .chat-view). */
+.input-area > .ab-collapsed-bar { order: 1; }
+.input-area > .ab-workbench-host { order: 2; }
+
+/* 输入框区在最下，永远不被压缩 */
+.input-area > .chat-input-wrap { order: 4; flex-shrink: 0; }
+
+/* ── Unified toolbar pill (Item 14) ─────────────────────────────────────── */
+.input-toolbar .toolbar-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 20px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background var(--duration-fast) ease, border-color var(--duration-fast) ease, color var(--duration-fast) ease;
+}
+.input-toolbar .toolbar-pill:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+.input-toolbar .toolbar-pill.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.model-selector-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 var(--space-3);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  transition: all var(--transition);
+  white-space: nowrap;
+}
+.model-selector-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.model-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  flex-shrink: 0;
+}
+
+/* ── Multi-function rich input box ─────────────────────────────────────── */
+.chat-input-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rich-input-box {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+/* @mention autocomplete anchor: the textarea + popover share a relatively-
+ * positioned wrapper so the absolutely-positioned popover (bottom:100%) sits
+ * directly above the textarea — not above the entire ``.rich-input-box``
+ * (which would float it over the pending-images strip / mode toolbar). */
+.rich-input-textarea-wrap {
+  position: relative;
+}
+.rich-input-box:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-muted);
+}
+.rich-input-textarea {
+  display: block;
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: var(--space-4) var(--space-4) var(--space-2);
+  color: var(--text-primary);
+  font-size: var(--text-md);
+  font-family: inherit;
+  resize: none;
+  min-height: 52px;
+  /* Cap at ~6 text lines using design tokens so the cap follows user font
+     settings / accessibility zoom instead of a hard-coded px ceiling.
+     Math: 6 lines * (font-size * line-height) + top + bottom padding.
+     With the defaults (`--text-md` = 14px, line-height 1.6, `--space-4` = 16px,
+     `--space-2` = 8px): 6*14*1.6 + 16 + 8 = 158.4px. The JS auto-resize
+     (`ChatComposer.vue autoResize`) reads the live line-height from
+     `getComputedStyle` so both layers agree under any user font scale.
+     Beyond 6 lines the textarea scrolls internally (`overflow-y: auto`
+     below). */
+  max-height: calc((var(--text-md) * 1.6 * 6) + var(--space-4) + var(--space-2));
+  /* Explicit overflow so the "scrolls internally past 6 lines" intent is not
+     left to UA defaults (all current browsers default textarea to auto, but
+     making it explicit guards against future resets / reset stylesheets). */
+  overflow-y: auto;
+  line-height: 1.6;
+  box-sizing: border-box;
+}
+/* Align with V1: the focus ring is provided solely by
+   `.rich-input-box:focus-within` (single soft ring). Without this
+   override the global `:focus-visible { outline: 2px solid accent }`
+   (base.css, loaded after chat.css via @import hoisting) would paint a
+   second hard outline on the textarea — the "ugly extra border". */
+.rich-input-textarea:focus-visible { outline: none; }
+.rich-input-textarea::placeholder { color: var(--text-muted); }
+
+/* rit = rich input toolbar */
+.rit-toolbar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-1) var(--space-2) 7px;
+  /* No top border — V1 visual: textarea + rit-toolbar appear as one
+     unified block inside .rich-input-box (the rich-input-box itself
+     supplies the outer frame). */
+}
+.rit-left, .rit-right {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+.rit-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--border);
+  margin: 0 var(--space-1);
+  flex-shrink: 0;
+}
+.rit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 5px var(--space-2);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+  white-space: nowrap;
+  user-select: none;
+}
+.rit-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+/* Compare 入口（App Builder）：仅当 compareItems 非空时显示。
+   active 态用 accent 色边框 + 浅背景，提示"面板已展开"。 */
+.rit-btn--compare {
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  font-variant-numeric: tabular-nums;
+}
+.rit-btn--compare.rit-btn--active {
+  background: var(--accent-soft, rgba(124, 108, 240, 0.15));
+  color: var(--accent, #a594ff);
+  border-color: var(--accent, #a594ff);
+}
+.rit-attach {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  justify-content: center;
+  flex-shrink: 0;
+}
+/* ── 语音输入 ──────────────────────────────────────────────────────────
+ * 设计理念（GUI 设计师标准）：
+ *   1. 录音区只放"操作"，把"配置"搬到顶部 toolbar 的胶囊按钮里
+ *      （rit-voice-engine-pill 与 Params 按钮同行，长期可见）。
+ *   2. 录音 / 处理状态用一条窄的内联状态条（rit-voice-inline）在按钮
+ *      左侧原地展开，不弹浮窗、不遮挡聊天区，只展示用户必须看的信息：
+ *      红点 + 计时 + 电平条 + ✕（录音中）/ spinner + 短文案 + ✕（处理中）。
+ *   3. 错误反馈走 toast，UI 上不留持续滞留的错误浮窗。
+ *   4. 颜色全部走 design tokens (--accent / --error / --success / --bg-* /
+ *      --text-*)，暗 / 浅主题自动适配；select 这种原生控件已下线。
+ */
+
+/* ── 麦克风按钮：四态 idle / recording / processing / error ─────────── */
+.rit-voice {
+  position: relative;
+  padding: 5px var(--space-2);
+  transition: color var(--transition), background var(--transition);
+}
+.rit-voice-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.rit-voice--unsupported {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+/* 处理中（disabled）：保留 processing 视觉色（accent + spinner），但禁
+ * 用 hover/active，避免给用户"还能点"的误信号。专用的 ✕ 取消按钮在
+ * 内联状态条上提供。 */
+.rit-voice:disabled {
+  cursor: not-allowed;
+}
+.rit-voice--processing:disabled,
+.rit-voice--processing:disabled:hover {
+  background: var(--accent-muted);
+  color: var(--accent);
+}
+.rit-voice--listening {
+  color: var(--error);
+  background: rgba(248, 113, 113, 0.14);
+  animation: rit-voice-mic-pulse 1.4s ease-in-out infinite;
+}
+.rit-voice--listening:hover {
+  background: rgba(248, 113, 113, 0.22);
+}
+.rit-voice--processing {
+  color: var(--accent);
+  background: var(--accent-muted);
+}
+.rit-voice--processing:hover {
+  background: var(--accent-light);
+}
+.rit-voice--error {
+  color: var(--error);
+  background: rgba(248, 113, 113, 0.10);
+}
+.rit-voice--error:hover {
+  background: rgba(248, 113, 113, 0.18);
+}
+.rit-voice-pulse {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  pointer-events: none;
+  box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.45);
+  animation: rit-voice-ring 1.4s ease-out infinite;
+}
+.rit-voice-spin { animation: rit-voice-rotate 1s linear infinite; }
+@keyframes rit-voice-mic-pulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.06); }
+}
+@keyframes rit-voice-ring {
+  0%   { box-shadow: 0 0 0 0    rgba(248, 113, 113, 0.50); }
+  70%  { box-shadow: 0 0 0 10px rgba(248, 113, 113, 0);    }
+  100% { box-shadow: 0 0 0 0    rgba(248, 113, 113, 0);    }
+}
+@keyframes rit-voice-rotate { to { transform: rotate(360deg); } }
+
+/* ── 提示词增强按钮 ─────────────────────────────────────────────────────
+ * 设计要点：
+ *   · 与 .rit-voice 完全对称（同尺寸 / padding / hover / disabled），
+ *     视觉上像"魔杖兄弟"出现在麦克风按钮的左侧。
+ *   · idle 态用淡 accent 色暗示"AI 智能"功能；hover 高亮；
+ *     loading 态复用 .rit-voice-spin 动画，保持一致感。
+ *   · disabled（输入为空 / 正在增强）使用 0.45 透明度，避免误点。
+ */
+.rit-prompt-enhance {
+  position: relative;
+  padding: 5px var(--space-2);
+  color: var(--text-secondary);
+  transition: color var(--transition), background var(--transition), opacity var(--transition);
+}
+.rit-prompt-enhance:hover:not(:disabled) {
+  color: var(--accent, #a594ff);
+  background: var(--accent-soft, rgba(124, 108, 240, 0.12));
+}
+.rit-prompt-enhance:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.rit-prompt-enhance--loading {
+  color: var(--accent, #a594ff) !important;
+  background: var(--accent-soft, rgba(124, 108, 240, 0.12));
+  opacity: 0.85 !important;
+}
+.rit-prompt-enhance--loading:disabled {
+  cursor: progress;
+}
+/* 撤销态：成功增强后短暂窗口（默认 8s）按钮变为撤销图标。
+ * 使用更柔和的 success/info 色调（区别于 accent 的"魔法"色），
+ * 给用户清晰的"这是另一种操作"信号。 */
+.rit-prompt-enhance--undo {
+  color: var(--success, #4ade80);
+  background: rgba(74, 222, 128, 0.10);
+  /* 进入动画：让按钮微微闪烁一下，提醒用户"现在可以撤销" */
+  animation: rit-pe-undo-pulse 0.9s ease-out 1;
+}
+.rit-prompt-enhance--undo:hover:not(:disabled) {
+  color: var(--success, #4ade80);
+  background: rgba(74, 222, 128, 0.18);
+}
+@keyframes rit-pe-undo-pulse {
+  0%   { transform: scale(0.92); opacity: 0.5; }
+  50%  { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1.00); opacity: 1; }
+}
+
+/* ── 录音 / 处理：内联状态条（在麦克风按钮左侧原地展开） ───────────── */
+/* 设计意图：用户视线焦点是按钮本身（"现在还能不能停？"），状态条只
+ * 是在它旁边给一些必要的反馈（红点 / 秒数 / 电平 / 取消）。所以它必须：
+ *   - 不抢焦点（柔和背景，无强阴影）
+ *   - 不挡输入框（只 ~140px 宽，inline-flex 对齐按钮基线）
+ *   - 与按钮共享语义：再点同一个麦克风按钮 = 停止并转写
+ */
+.rit-voice-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-tertiary);
+  font-size: var(--text-xs);
+  line-height: 1.2;
+  color: var(--text-primary);
+  white-space: nowrap;
+  animation: rit-voice-inline-in 0.18s var(--ease-out);
+}
+@keyframes rit-voice-inline-in {
+  from { opacity: 0; transform: translateX(4px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.rit-voice-inline--listening {
+  border-color: rgba(248, 113, 113, 0.30);
+  background: rgba(248, 113, 113, 0.08);
+}
+.rit-voice-inline--processing {
+  border-color: var(--accent-light);
+  background: var(--accent-muted);
+  color: var(--accent);
+}
+.rit-voice-inline-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--error);
+  animation: rit-voice-mic-pulse 1.0s ease-in-out infinite;
+  flex-shrink: 0;
+}
+.rit-voice-inline-secs {
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-medium);
+  color: var(--text-primary);
+  min-width: 22px;
+  text-align: right;
+}
+.rit-voice-inline-meter {
+  display: inline-block;
+  width: 50px;
+  height: 4px;
+  background: var(--bg-secondary);
+  border-radius: 2px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.rit-voice-inline-meter-fill {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--success) 0%, var(--warning) 70%, var(--error) 100%);
+  transition: width 80ms linear;
+  border-radius: 2px;
+}
+.rit-voice-inline-phase {
+  font-weight: var(--weight-medium);
+  color: var(--accent);
+}
+.rit-voice-inline-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+  flex-shrink: 0;
+}
+.rit-voice-inline-icon:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.rit-voice-inline-icon--cancel:hover {
+  color: var(--error);
+  background: rgba(248, 113, 113, 0.12);
+}
+
+/* ── footer "正在聆听 / 正在转写"小条（保留，用于无障碍朗读） ────────── */
+.rit-voice-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--error);
+  font-weight: var(--weight-medium);
+}
+.rit-voice-status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--error);
+  animation: rit-voice-mic-pulse 1.0s ease-in-out infinite;
+}
+.rit-voice-status-dot--processing { background: var(--accent); }
+
+/* ── 顶部 toolbar：语音引擎胶囊按钮（与 Params 按钮同行） ────────────── */
+/* 这是把"引擎选择 / Ready 状态"从录音区搬出来的载体：长期可见、点击
+ * 弹一个小菜单，让用户随时切换并看到模型驻留状态，不再干扰录音体验。
+ */
+.rit-voice-engine-pill {
+  /* 与同行 Params 按钮一致的视觉规则（圆角 12px、ghost 风格） */
+  font-family: inherit;
+  white-space: nowrap;
+  user-select: none;
+}
+.rit-voice-engine-pill.is-active,
+.rit-voice-engine-pill:hover {
+  color: var(--text-primary);
+}
+.rit-voice-engine-pill-label {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rit-voice-engine-pill-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+  transition: background var(--transition);
+}
+.rit-voice-engine-pill-dot.is-warm {
+  background: var(--success);
+  box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.18);
+}
+.rit-voice-engine-pill-dot.is-loading {
+  background: var(--accent);
+  animation: rit-voice-mic-pulse 1.0s ease-in-out infinite;
+}
+
+/* ── 引擎选择小菜单 ──────────────────────────────────────────────── */
+/* 锚定方向：因为该按钮位于聊天工具栏顶部，下方是聊天历史/输入区且空间
+ * 经常受限（终端日志、System 状态条会把胶囊压到很靠下），所以菜单统一
+ * 向上展开（bottom: calc(100% + 6px)），并相对按钮右侧对齐，避免水平
+ * 方向出窗。 */
+.rit-voice-engine-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  min-width: 240px;
+  max-width: 320px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  padding: 4px;
+  z-index: 60;
+  animation: rit-voice-engine-menu-in 0.15s var(--ease-out);
+  transform-origin: bottom right;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+@keyframes rit-voice-engine-menu-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+/* 菜单尾部小三角，朝下指向胶囊按钮 */
+.rit-voice-engine-menu::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  right: 16px;
+  width: 0; height: 0;
+  border: 6px solid transparent;
+  border-top-color: var(--bg-secondary);
+}
+.rit-voice-engine-menu-header {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--text-muted);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  padding: 6px 8px 4px;
+}
+.rit-voice-engine-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--transition);
+}
+.rit-voice-engine-menu-item:hover {
+  background: var(--bg-hover);
+}
+.rit-voice-engine-menu-item.is-selected {
+  background: var(--accent-muted);
+  color: var(--text-primary);
+}
+.rit-voice-engine-menu-radio {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-light);
+  flex-shrink: 0;
+  background: var(--bg-tertiary);
+}
+.rit-voice-engine-menu-item.is-selected .rit-voice-engine-menu-radio {
+  border-color: var(--accent);
+}
+.rit-voice-engine-menu-radio-inner {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.rit-voice-engine-menu-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rit-voice-engine-menu-status {
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.rit-voice-engine-menu-status.is-warm {
+  color: var(--success);
+  background: rgba(52, 211, 153, 0.10);
+  border-color: rgba(52, 211, 153, 0.25);
+}
+.rit-voice-engine-menu-status.is-loading {
+  color: var(--accent);
+  background: var(--accent-muted);
+  border-color: var(--accent-light);
+}
+.rit-voice-engine-menu-foot {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  padding: 6px 8px 4px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+/* ── Prompt history / favorites popover ────────────────────────────────────
+ * The clock-icon button in `.rit-right` opens a bottom-anchored popover that
+ * lists pinned favorites (default top 5) + recent prompts. Mirrors the
+ * `.rit-voice-engine-menu*` pattern (same tokens, same bottom-anchored card)
+ * so it sits visually with its toolbar-popover neighbours. Light/dark safe —
+ * colors are all design tokens, no magic hex.
+ */
+.rit-prompt-history-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.rit-history {
+  padding: 5px var(--space-2);
+}
+.rit-history--active {
+  color: var(--accent);
+  background: var(--accent-soft, var(--accent-muted));
+}
+
+/* ── Active running sessions popover ─────────────────────────────────────── */
+.rit-active-runs-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.rit-active-runs-btn {
+  position: relative;
+  padding: 5px var(--space-2);
+}
+.rit-active-runs-btn--active {
+  color: var(--accent);
+  background: var(--accent-soft, var(--accent-muted));
+}
+.rit-active-runs-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--success, var(--accent));
+  color: var(--bg-primary);
+  font-size: 10px;
+  line-height: 14px;
+  font-weight: 700;
+}
+.rit-active-runs-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  width: 380px;
+  max-width: min(380px, 88vw);
+  max-height: min(70vh, 620px);
+  overflow-y: auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light, var(--border));
+  border-radius: var(--radius-md, var(--radius-sm));
+  box-shadow: var(--shadow-lg);
+  padding: 10px;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  animation: rit-voice-engine-menu-in 0.15s var(--ease-out);
+  transform-origin: bottom right;
+}
+.rit-active-runs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.rit-active-runs-refresh,
+.rit-active-runs-stop {
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.rit-active-runs-refresh:hover,
+.rit-active-runs-stop:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.rit-active-runs-state {
+  padding: 16px 10px;
+  color: var(--text-muted);
+  text-align: center;
+  min-height: 1.4em;
+}
+.rit-active-runs-state--error {
+  color: var(--error);
+}
+.rit-active-runs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rit-active-runs-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  padding: 9px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+.rit-active-runs-item:hover,
+.rit-active-runs-item--current {
+  border-color: var(--accent);
+  background: var(--accent-soft, var(--bg-hover));
+}
+.rit-active-runs-item--disabled {
+  opacity: 0.82;
+}
+.rit-active-runs-main {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.rit-active-runs-open {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+.rit-active-runs-open:disabled {
+  cursor: not-allowed;
+}
+.rit-active-runs-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.rit-active-runs-meta,
+.rit-active-runs-model {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+.rit-active-runs-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success, var(--accent));
+}
+.rit-active-runs-stop {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+}
+
+/* ── Scheduled continuation ("定时继续检查") button + popover ───────────────
+ * The alarm-icon button in `.rit-right` opens a bottom-anchored popover with
+ * the per-tab timer settings + a list of ALL timers. Same bottom-anchored card
+ * pattern + design tokens as the prompt-history / session-tools popovers, so it
+ * sits visually with its toolbar-popover neighbours (light/dark safe).
+ */
+.rit-scheduler-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.rit-scheduler {
+  position: relative;
+  padding: 5px var(--space-2);
+}
+.rit-scheduler--active {
+  color: var(--accent);
+  background: var(--accent-soft, var(--accent-muted));
+}
+.rit-scheduler-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.sched-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  width: 360px;
+  max-width: min(360px, 88vw);
+  max-height: min(70vh, 620px);
+  overflow-y: auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light, var(--border));
+  border-radius: var(--radius-md, var(--radius-sm));
+  box-shadow: var(--shadow-lg);
+  padding: 12px 14px 14px;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  animation: rit-voice-engine-menu-in 0.15s var(--ease-out);
+  transform-origin: bottom right;
+}
+.sched-header {
+  display: flex;
+  align-items: center;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+.sched-intro {
+  margin: 0 0 10px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+.sched-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sched-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.sched-label {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+.sched-interval {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.sched-unit {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+.sched-input {
+  background: var(--bg-tertiary, var(--bg-primary));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs, 6px);
+  color: var(--text-primary);
+  padding: 5px 8px;
+  font-size: var(--text-sm);
+}
+.sched-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.sched-input--num {
+  width: 84px;
+}
+.sched-input--wide {
+  width: 110px;
+}
+.sched-textarea {
+  width: 100%;
+  resize: vertical;
+  line-height: 1.45;
+  font-family: inherit;
+}
+.sched-radios {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sched-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.sched-radio input[type="radio"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.sched-threshold {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sched-note {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+.sched-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+.sched-btn {
+  padding: 5px 14px;
+  border: 1px solid var(--border);
+  background: var(--bg-tertiary, transparent);
+  color: var(--text-primary);
+  border-radius: var(--radius-xs, 6px);
+  cursor: pointer;
+  font-size: var(--text-sm);
+}
+.sched-btn:hover {
+  background: var(--bg-hover);
+}
+.sched-btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast, #fff);
+}
+.sched-btn--primary:hover {
+  filter: brightness(1.05);
+}
+.sched-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.sched-list-section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-light, var(--border));
+}
+.sched-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.sched-stop-all {
+  background: transparent;
+  border: none;
+  color: var(--error);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  padding: 2px 4px;
+}
+.sched-empty {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+.sched-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sched-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs, 6px);
+  background: var(--bg-primary, transparent);
+}
+.sched-item--error {
+  border-color: var(--error);
+}
+.sched-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.sched-item-title {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  font-size: var(--text-sm);
+  text-align: left;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  max-width: 220px;
+}
+.sched-item-meta {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+.sched-item-error {
+  font-size: var(--text-xs);
+  color: var(--error);
+}
+.sched-item-ops {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.sched-op {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px 5px;
+  border-radius: var(--radius-xs, 6px);
+  font-size: var(--text-sm);
+}
+.sched-op:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.sched-op--danger:hover {
+  color: var(--error);
+}
+.sched-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+.rit-prompt-history-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  width: 340px;
+  max-width: min(340px, 80vw);
+  /* Cap the popover height and scroll inside it: the recent list can hold up
+   * to MAX_RECENT (50) entries, which would otherwise run off-screen. */
+  max-height: min(60vh, 480px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  padding: 6px;
+  z-index: 60;
+  animation: rit-voice-engine-menu-in 0.15s var(--ease-out);
+  transform-origin: bottom right;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+/* Prompt-history popover only: widen to show more prompt text (double the
+ * shared 340px base). Scoped to .riph-menu so the sibling user-message jump
+ * popover, which reuses .rit-prompt-history-menu, keeps its original width. */
+.rit-prompt-history-menu.riph-menu {
+  width: 680px;
+  max-width: min(680px, 92vw);
+}
+.rit-prompt-history-menu::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  right: 16px;
+  width: 0;
+  height: 0;
+  border: 6px solid transparent;
+  border-top-color: var(--bg-secondary);
+}
+/* Search row */
+.riph-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  margin-bottom: 4px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+}
+.riph-search-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.riph-search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  outline: none;
+}
+.riph-search-input::placeholder {
+  color: var(--text-muted);
+}
+/* Empty / no-results */
+.riph-empty {
+  padding: 14px 10px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  text-align: center;
+}
+/* Groups */
+.riph-group + .riph-group {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+.riph-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px 2px;
+}
+.riph-group-title {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--text-muted);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+.riph-group-empty {
+  padding: 4px 8px 8px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+.riph-clear {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: var(--radius-xs);
+  transition: color var(--transition), background var(--transition);
+}
+.riph-clear:hover {
+  color: var(--error);
+  background: var(--bg-hover);
+}
+/* Rows */
+.riph-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.riph-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: var(--radius-xs);
+  transition: background var(--transition);
+}
+.riph-row:hover {
+  background: var(--bg-hover);
+}
+.riph-row-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  padding: 7px 8px;
+}
+.riph-row-star,
+.riph-row-del {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-xs);
+  transition: color var(--transition), background var(--transition);
+}
+.riph-row-star:hover {
+  color: var(--accent);
+  background: var(--bg-tertiary);
+}
+.riph-row-star.is-fav {
+  color: var(--accent);
+}
+.riph-row-del {
+  opacity: 0;
+}
+.riph-row:hover .riph-row-del {
+  opacity: 1;
+}
+.riph-row-del:hover {
+  color: var(--error);
+  background: var(--bg-tertiary);
+}
+/* "Show all / fewer" favorites toggle */
+.riph-more {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  padding: 5px 8px;
+  border-radius: var(--radius-xs);
+  text-align: left;
+  transition: color var(--transition), background var(--transition);
+}
+.riph-more:hover {
+  color: var(--accent);
+  background: var(--bg-hover);
+}
+/* Keyboard-path footer hint (↑/↓ browse the same recent list from the composer).
+ * Tokens mirror `.ab-taxonomy-foot-hint kbd` so both <kbd> hints look alike. */
+.riph-kbd-hint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 5px 8px 1px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.riph-kbd-hint kbd {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  background: var(--bg-tertiary);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+/* ── UserMessageJumpPopover (composer-toolbar button → list of MY messages) ──
+ * Reuses `.rit-prompt-history-menu` + `.riph-*` tokens. Only the per-row
+ * inner layout (#N pill / HH:MM time / preview) is additive. Layout matches
+ * its sibling popovers (light/dark safe; design tokens only). */
+.rit-user-jump-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.rit-user-jump-menu {
+  /* Widened to 2x so more of each message preview shows on one line. */
+  width: 720px;
+  max-width: min(720px, 92vw);
+}
+.rumj-count {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.rumj-row-btn {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  /* `.riph-row-text` defaults to white-space:nowrap + ellipsis on the WHOLE
+   * button — that would clip the index/time too. Re-enable nowrap on the
+   * preview span only (below) so #N and HH:MM stay fully visible. */
+  white-space: nowrap;
+}
+.rumj-index {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-weight: var(--weight-semibold);
+  min-width: 28px;
+}
+.rumj-time {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+.rumj-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+.rit-send {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background var(--transition), transform var(--transition), opacity var(--transition);
+  margin-left: var(--space-1);
+}
+.rit-send:hover:not(:disabled) {
+  background: var(--accent-hover);
+  transform: scale(1.08);
+}
+.rit-send:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+/* 工具栏子菜单 */
+.rit-submenu-wrap {
+  position: relative;
+}
+.rit-submenu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  min-width: 180px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  z-index: 102;
+  overflow: hidden;
+  padding: var(--space-1) 0;
+}
+.rit-submenu-header {
+  padding: var(--space-2) var(--space-3) 6px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--space-1);
+}
+.rit-submenu-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: 7px var(--space-3);
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.rit-submenu-item:hover {
+  background: var(--bg-hover);
+}
+.rit-submenu-item.active {
+  color: var(--accent);
+}
+.rit-submenu-item.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.rit-submenu-item-body {
+  flex: 1;
+  min-width: 0;
+}
+.rit-submenu-item-label {
+  font-size: var(--text-base);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.rit-submenu-item.active .rit-submenu-item-label {
+  color: var(--accent);
+}
+.rit-submenu-item-desc {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+.rit-submenu-check {
+  font-size: var(--text-sm);
+  color: var(--accent);
+  margin-left: auto;
+  flex-shrink: 0;
+  align-self: center;
+}
+.rit-submenu-badge {
+  font-size: var(--text-xs);
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--accent-muted);
+  color: var(--accent);
+  font-weight: 600;
+}
+.rit-submenu-divider {
+  height: 1px;
+  background: var(--border);
+  margin: var(--space-1) 0;
+}
+
+/* 宽版子菜单（量化精度列表需要更多空间） */
+.rit-submenu--wide {
+  min-width: 280px;
+}
+.rit-submenu--wide .rit-submenu-item-desc {
+  white-space: nowrap;
+}
+
+/* ── Mode badge / close pill (T2.7-A) ─────────────────────────────────────
+ * Migrated from V1 css/chat.css:1225-1260 — only the actually-used
+ * `.rit-mode-badge` + `.rit-close` rules. Used by all five
+ * `ModeFrameXxx.vue` sub-toolbars to render the "✕ exit" badge that
+ * doubles as the active-mode label. */
+.rit-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--accent);
+  background: var(--accent-muted);
+  color: var(--accent);
+  font-size: var(--text-sm);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+  white-space: nowrap;
+  user-select: none;
+}
+.rit-mode-badge:hover {
+  background: var(--accent-light, var(--accent-muted));
+}
+.rit-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  font-size: var(--text-xs);
+  background: rgba(108, 99, 255, 0.2);
+  color: var(--accent);
+  line-height: 1;
+  flex-shrink: 0;
+  transition: background var(--transition), color var(--transition);
+}
+.rit-mode-badge:hover .rit-close {
+  background: var(--accent);
+  color: white;
+}
+
+/* ── 编程模式 persona 切换器 ─────────────────────────────────────────────── */
+/* persona 按钮：与其他 rit-btn 风格统一，但当用户自定义过 prompt 时给出
+   细微的视觉提示（左侧极淡的强调色边）。 */
+.rit-code-persona-btn {
+  position: relative;
+}
+.rit-code-persona-btn--customized {
+  /* 与现有 rit-model-upload--active 类似的"已激活"视觉，但更克制 */
+  border-color: rgba(99, 102, 241, 0.45) !important;
+}
+/* 已自定义的小圆点提示（按钮右上角 / 菜单项行尾） */
+.rit-code-persona-dot {
+  display: inline-block;
+  color: #818cf8;            /* indigo-400，与现有 accent 一致但弱化 */
+  font-size: 10px;
+  line-height: 1;
+  margin-left: 2px;
+  user-select: none;
+}
+.rit-code-persona-dot--inline {
+  font-size: 8px;
+  margin-left: 4px;
+  vertical-align: 1px;
+}
+/* persona 菜单整体宽一些，给描述文字留空间。
+   说明（description）单行不换行：每个角色的副标题"系统化地定位并修复问题" /
+   "在保持功能不变的前提下提升性能与可维护性"等长度差距大，为视觉对齐与减少
+   视觉割裂，统一单行 + 超出省略；hover 显示原生 title。菜单 min-width 320px
+   能容纳目前最长的描述（"在保持功能不变的前提下提升性能与可维护性"）。 */
+.rit-code-persona-menu {
+  min-width: 320px;
+}
+.rit-code-persona-menu .rit-submenu-item-desc {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.45;
+  margin-top: 2px;
+}
+/* "编辑提示词…" 入口的视觉降级，避免被误以为是普通 persona 项 */
+.rit-submenu-item.rit-code-persona-edit {
+  background: transparent;
+}
+.rit-submenu-item.rit-code-persona-edit:hover {
+  background: var(--bg-hover, rgba(99, 102, 241, 0.08));
+}
+
+
+/* 数据集必填星号标记 */
+.rit-dataset-required {
+  color: var(--error);
+  font-size: var(--text-base);
+  font-weight: 700;
+  line-height: 1;
+  margin-left: 1px;
+}
+
+/* 上传模型按钮激活态（已上传到服务器时高亮） */
+.rit-model-upload--active {
+  color: var(--accent) !important;
+  background: var(--accent-muted) !important;
+}
+.rit-model-upload--active:hover {
+  background: var(--accent-light) !important;
+}
+
+/* 上传中状态：禁用点击，降低透明度 */
+.rit-model-upload--uploading {
+  opacity: 0.7;
+  cursor: not-allowed !important;
+  pointer-events: none;
+}
+
+/* 上传成功勾选标记 */
+.rit-upload-ok {
+  color: var(--success);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  line-height: 1;
+  margin-left: 2px;
+}
+
+/* 旋转加载动画（上传中图标） */
+.rit-spin {
+  animation: rit-spin-anim 0.9s linear infinite;
+  display: inline-block;
+  vertical-align: middle;
+}
+@keyframes rit-spin-anim {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* 已选文件名截断显示 */
+.rit-model-filename {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* 数据集文件管理面板 */
+.rit-dataset-panel {
+  min-width: 260px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+/* 滚动时标题固定在顶部，仅文件列表滚动 */
+.rit-dataset-panel .rit-submenu-header {
+  position: sticky;
+  top: calc(var(--space-1) * -1);
+  z-index: 1;
+  background: var(--bg-secondary);
+  margin-top: calc(var(--space-1) * -1);
+}
+
+.rit-dataset-file-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px var(--space-3);
+  border-bottom: 1px solid var(--bg-hover);
+  font-size: var(--text-sm);
+}
+.rit-dataset-file-row:last-child {
+  border-bottom: none;
+}
+
+.rit-dataset-file-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.rit-dataset-file-size {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.rit-dataset-file-del {
+  background: none;
+  border: none;
+  color: rgba(248,113,113,0.7);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  padding: 1px var(--space-1);
+  border-radius: 3px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.rit-dataset-file-del:hover {
+  color: var(--error);
+  background: rgba(248,113,113,0.12);
+}
+
+.rit-dataset-refresh {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: var(--text-base);
+  padding: 1px 5px;
+  border-radius: 3px;
+  line-height: 1;
+}
+.rit-dataset-refresh:hover {
+  background: var(--accent-muted);
+}
+
+/* 翻译模式：自动检测标记（"自动"小徽章） */
+.rit-translate-auto {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(108,99,255,0.18);
+  color: var(--accent);
+  margin-left: 3px;
+  vertical-align: middle;
+  letter-spacing: 0.02em;
+}
+
+/* 翻译模式：重置为自动检测按钮（子菜单 header 右侧） */
+.rit-translate-reset {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--accent);
+  cursor: pointer;
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 4px;
+  float: right;
+  opacity: 0.85;
+}
+.rit-translate-reset:hover {
+  opacity: 1;
+  background: var(--accent-muted);
+}
+
+/* 工具栏按钮禁用态：`.rit-btn--disabled`（class，如 Compare 空态）与原生
+   `:disabled` 属性（如「发送到对话」未推理时 `:disabled="!hasRunOutput"`）
+   共用同一套变灰 + 禁用光标视觉，避免"已禁用却看起来可点"的困惑
+   （AGENTS.md 🟡 修 V1 视觉缺陷——V1 该按钮 `:disabled` 时也不变灰）。 */
+.rit-btn--disabled,
+.rit-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed !important;
+  color: var(--text-muted) !important;
+}
+.rit-btn--disabled:hover,
+.rit-btn:disabled:hover {
+  background: transparent !important;
+  color: var(--text-muted) !important;
+}
+
+/* 量化精度标签徽章 */
+.rit-quant-tag {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 5px;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  font-family: var(--font-mono);
+  background: rgba(108,99,255,0.12);
+  color: var(--accent);
+  border: 1px solid rgba(108,99,255,0.25);
+}
+/* FP 系列：蓝绿色调 */
+.rit-quant-tag--fp16,
+.rit-quant-tag--fp32 {
+  background: rgba(56,189,248,0.12);
+  color: #38bdf8;
+  border-color: rgba(56,189,248,0.28);
+}
+/* W8/A8 系列：紫色调 */
+.rit-quant-tag--w8a8b8,
+.rit-quant-tag--w8a16,
+.rit-quant-tag--w8a8 {
+  background: rgba(167,139,250,0.13);
+  color: #a78bfa;
+  border-color: rgba(167,139,250,0.28);
+}
+/* W4 系列：橙色调（极致压缩） */
+.rit-quant-tag--w4a8,
+.rit-quant-tag--w4a16 {
+  background: rgba(251,146,60,0.12);
+  color: #fb923c;
+  border-color: rgba(251,146,60,0.28);
+}
+
+/* 激活模式徽章 / close pill 的样式已在上方（L1116-1151）统一定义，
+   此处不再重复（V1 css/chat.css:1225-1260 单份对齐）。 */
+
+.input-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+/* ── 快速跳转按钮组（跳到顶部 / 跳到底部）────────────────────────────────── */
+/* D3 load-more sentinel + spinner (V1 useChat.js:904-916). The sentinel
+   is a thin zero-content row at the top of the message list; the spinner
+   shows while the previous page is loading. */
+.messages-load-more-sentinel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1px;
+  padding: var(--space-2) 0;
+}
+.messages-load-more-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: messages-load-more-spin 0.8s linear infinite;
+}
+@keyframes messages-load-more-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.scroll-nav-group {
+  /* V1 parity: absolute-anchored to the bottom-right of the message list
+     (`.messages-container` is `position: relative`). The earlier `sticky`
+     approach pinned it to its in-flow position — for a short conversation
+     that's "just below the last message", i.e. floating in the MIDDLE of the
+     chat area instead of near the bottom input. `absolute` + `bottom`/`right`
+     keeps it anchored to the panel's bottom-right regardless of content
+     height (matches V1 `.scroll-nav-group { position:absolute; right/bottom }`). */
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  pointer-events: auto;
+  transition: top 0.2s ease, bottom 0.2s ease;
+}
+.scroll-nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 36px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  user-select: none;
+  line-height: 1;
+}
+.scroll-nav-btn:first-child {
+  border-bottom: 1px solid var(--border);
+}
+.scroll-nav-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+/* 底部按钮在用户向上滚动时高亮，提示有新内容 */
+.scroll-nav-btn--active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.scroll-nav-btn--active:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+/* 淡入淡出过渡动画 */
+.scroll-btn-fade-enter-active,
+.scroll-btn-fade-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.scroll-btn-fade-enter-from,
+.scroll-btn-fade-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.scroll-btn-fade-enter-to,
+.scroll-btn-fade-leave-from {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ── Message Queue Float ────────────────────────────────────────────────── */
+/* The pending-send queue stacks at the TOP-RIGHT of the chat view, directly
+   BELOW the task-list bar (V2 layout per user spec — top-right floats stack
+   top→down; when one disappears the ones below slide up). `.task-bar`
+   publishes its visible bottom edge (pill, or the open dropdown) as
+   `--qai-task-stack-bottom` on `.chat-view`; the queue offsets its `top` by
+   that amount so it sits just below the bar and slides further down when the
+   dropdown expands. When no task list is present the var is `0px`, so the
+   queue pins to the top of the chat view. */
+.queue-float {
+  position: absolute;
+  top: calc(
+    var(--qai-task-stack-bottom, 0px) +
+    var(--qai-mbp-iframe-bottom, 0px) +
+    var(--space-3)
+  );
+  right: var(--space-3);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  pointer-events: none;
+  transition: top 0.2s ease;
+}
+.queue-float > * { pointer-events: auto; }
+
+/* ── Stop streaming button: floating overlay above the input area ──
+   Replaces the previous in-flow row. The button sits centered at the bottom
+   of the chat scroll area, hovering above the input-area so it doesn't
+   reserve its own vertical row.  Slight overlap with chat text is acceptable. */
+.stop-streaming-float {
+  /* V1 parity: float pinned just above the input area, at the bottom-center
+     of the chat surface — NOT in the middle of the message flow. V1 used
+     `position:absolute; bottom: inputAreaHeight+13px` anchored to `.chat-view`.
+     V2 publishes the composer's measured height as `--qai-chat-input-h`
+     on the nearest `.chat-view` (ChatComposer's ResizeObserver), so the
+     float sits ``inputAreaHeight + space-2`` above the message-container
+     bottom — i.e. just above the composer regardless of how tall the
+     toolbar grows. Falls back to a static offset when the var is unset
+     (e.g. mounting order race, ResizeObserver-less environment) so the
+     button still appears in a sensible place. */
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--qai-chat-input-h, 0px) + var(--space-2));
+  transform: translateX(-50%);
+  z-index: 51;
+  pointer-events: none;
+}
+.stop-streaming-float > .stop-streaming-btn {
+  pointer-events: auto;
+  border: 1.5px solid var(--warning, #f97316);
+  color: var(--warning, #f97316);
+  background: var(--glass-bg);
+  backdrop-filter: blur(6px);
+  border-radius: 20px;
+  padding: 5px 16px;
+  font-size: var(--text-sm);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+}
+.stop-streaming-float > .stop-streaming-btn:hover {
+  background: rgba(249, 115, 22, 0.12);
+}
+
+/* Collapsed badge */
+.queue-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px var(--space-3);
+  background: var(--accent);
+  color: white;
+  border-radius: 20px;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  transition: all var(--transition);
+  user-select: none;
+}
+.queue-badge:hover { filter: brightness(1.1); transform: translateY(-1px); }
+.queue-badge-count {
+  background: white;
+  color: var(--accent);
+  border-radius: 10px;
+  padding: 1px 6px;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  min-width: 18px;
+  text-align: center;
+}
+
+/* Expanded panel */
+.queue-panel {
+  width: 280px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+}
+.queue-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+  transition: background var(--transition);
+}
+.queue-panel-header:hover { background: var(--bg-hover); }
+.queue-panel-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: var(--text-md);
+  padding: 0 2px;
+  line-height: 1;
+  transition: color var(--transition);
+}
+.queue-panel-close:hover { color: var(--text-primary); }
+.queue-panel-list {
+  max-height: 220px;
+  overflow-y: auto;
+}
+.queue-panel-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 7px var(--space-3);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.queue-panel-item:last-child { border-bottom: none; }
+.queue-panel-item-index {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.queue-panel-item-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.queue-panel-item-del {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-xs);
+  padding: 0;
+  transition: all var(--transition);
+}
+.queue-panel-item-del:hover { background: var(--error); color: white; }
+/* Copy / edit affordances on each pending item (V2 enhancement) — same
+   round icon-button shape as the delete button; accent hover (non-destructive,
+   vs the delete button's error-red hover). */
+.queue-panel-item-act {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-xs);
+  padding: 0;
+  transition: all var(--transition);
+}
+.queue-panel-item-act:hover { background: var(--accent); color: white; }
+/* Mid-turn injection bubble (the "inject" button, V2 enhancement) renders
+   directly in the CONVERSATION as a pending grey/accent-tinted user bubble
+   while the backend folds it into the live run; once the `injected_message`
+   frame commits it the `msg-pending-injection` class is dropped and it reads
+   as an ordinary user bubble. Theme-token-only (AGENTS.md §3.10 — no
+   hardcoded palette). */
+.message-row.msg-pending-injection {
+  /* Pending injection cue is kept SUBTLE: a slightly dimmed bubble plus the
+     "待注入" status strip below (three breathing dots) — no heavy frame/border.
+     (The earlier accent border on `.message-content-wrap` — a full-height
+     `flex:1` wrapper — drew a tall bar down the side of the row, which read as
+     an obtrusive box; dropped.) Theme-token-only. */
+  opacity: 0.75;
+}
+/* "待注入" status strip: three breathing dots + a small accent label, shown
+   while the injection is still pending. Pure CSS animation (no JS); the dots
+   fade in/out out of phase for a calm "waiting / in-progress" feel (NOT a
+   spinner). Disappears with the bubble's pending state once committed. */
+.inject-pending-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1, 4px);
+  margin-top: var(--space-1, 4px);
+  font-size: var(--text-xs, 0.75rem);
+  color: color-mix(in srgb, var(--accent) 75%, var(--text-muted));
+  user-select: none;
+}
+.inject-pending-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.inject-pending-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.3;
+  animation: inject-pending-breathe 1.4s ease-in-out infinite;
+}
+.inject-pending-dot:nth-child(2) { animation-delay: 0.2s; }
+.inject-pending-dot:nth-child(3) { animation-delay: 0.4s; }
+.inject-pending-label {
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+@keyframes inject-pending-breathe {
+  0%, 80%, 100% { opacity: 0.3; }
+  40% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .inject-pending-dot { animation: none; opacity: 0.7; }
+}
+/* Cancel / edit / copy affordances on a still-pending injection bubble (V2
+   enhancement). Reuses the queue panel's round icon buttons
+   (`.queue-panel-item-act` / `.queue-panel-item-del`); this rule only lays them
+   out in a small row directly under the bubble text. Shown only while pending
+   (the `v-if="isPendingInjection(msg)"` guard), so they vanish once the run
+   folds the injection in. */
+.inject-pending-actions {
+  display: flex;
+  gap: var(--space-1, 4px);
+  align-items: center;
+  margin-top: var(--space-1, 4px);
+}
+
+/* ── M6 aside note (system-note card) ─────────────────────────────
+   Rendered for messages carrying meta.aside === true (posted via the
+   ``aside_message`` frame from a backend producer, typically a
+   background-process completion notification).  NOT a user bubble —
+   a small centred grey card with a subtle icon prefix.  Theme-token-
+   only per AGENTS.md §3.10 (no hardcoded palette). */
+.message-row.msg-aside {
+  justify-content: center;
+}
+.message-row.msg-aside .message-content-wrap {
+  flex: 0 1 auto;
+  max-width: 80%;
+}
+.message-row.msg-aside .message-content-wrap > * {
+  background: var(--surface-2, color-mix(in srgb, var(--text-muted) 12%, transparent));
+  color: var(--text-muted);
+  border: 1px dashed color-mix(in srgb, var(--text-muted) 40%, transparent);
+  border-radius: var(--radius-md, 8px);
+  padding: var(--space-2, 8px) var(--space-3, 12px);
+  font-size: var(--text-sm, 0.875rem);
+  font-style: italic;
+  text-align: center;
+}
+.message-row.msg-aside .message-content-wrap > *::before {
+  content: "ⓘ ";
+  font-style: normal;
+  opacity: 0.8;
+  margin-right: var(--space-1, 4px);
+}
+
+/* ── Auto-backgrounded tool card ────────────────────────────────────
+   The ``tool-card--backgrounded`` class is a STATE HOOK on the tool card
+   root when its command outran the foreground-wait threshold and was
+   handed to the background-process manager (still running, not finished).
+   No visual rules today — the header-left slot already renders the 🚀
+   icon + "已转后台" label from ``ToolExecPanel``'s ``statusLabel`` (fed by
+   the STRUCTURED ``backgrounded`` field on ``tool_result``, never sniffed
+   out of prose). The class is kept as an anchor for future targeted
+   styles (e.g. a subtle background tint) and for test assertions that
+   lock the state → DOM mapping. */
+.tool-card--backgrounded {
+  /* intentionally empty — see block comment above. */
+}
+
+/* ── Task list (V2 enhancement: `todowrite` tool) ────────────────────────
+   Two surfaces, all colours from theme tokens (AGENTS.md §3.10 — no
+   hardcoded palette; theme-aware in light + dark):
+     1. `.task-bar`  — compact top-right floating pill (latest state);
+        collapsed by default, click drops down an overlay panel that
+        covers (does not push) the conversation.
+     2. `.task-card` — in-conversation snapshot rendered per `todowrite`
+        call inside the assistant tool-call area; default expanded.
+   Shared `.task-status-*` rules drive per-status icon/text emphasis. */
+
+/* Shared status emphasis (applies to both bar + card item rows). */
+.task-status-in_progress .task-bar-item-icon,
+.task-status-in_progress .task-card-item-icon { color: var(--accent); }
+.task-status-in_progress .task-bar-item-text,
+.task-status-in_progress .task-card-item-text {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.task-status-completed .task-bar-item-icon,
+.task-status-completed .task-card-item-icon { color: var(--success, #16a34a); }
+.task-status-completed .task-bar-item-text,
+.task-status-completed .task-card-item-text {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+.task-status-cancelled .task-bar-item-text,
+.task-status-cancelled .task-card-item-text {
+  color: var(--text-muted);
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+/* ── Top-right floating pill + dropdown ── */
+.task-bar {
+  position: absolute;
+  top: calc(var(--qai-mbp-iframe-bottom, 0px) + var(--space-3));
+  right: var(--space-3);
+  z-index: 30;
+}
+.task-bar-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: var(--glass-bg, var(--bg-secondary));
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  cursor: pointer;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+  box-shadow: var(--shadow-sm);
+  transition: all var(--transition);
+}
+.task-bar-pill:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+.task-bar-pill--open {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+.task-bar-pill--done { color: var(--success, #16a34a); }
+.task-bar-glyph { flex-shrink: 0; }
+.task-bar-count { line-height: 1; }
+.task-bar-chevron { color: var(--text-muted); font-size: 9px; }
+
+/* Dropdown overlay: drops DOWN from the pill, elevated above the
+   conversation (does NOT push it). */
+.task-bar-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 320px;
+  max-width: min(320px, 80vw);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg, var(--shadow-md));
+  overflow: hidden;
+  z-index: 31;
+}
+.task-bar-dropdown-head {
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.task-bar-dropdown-title--done { color: var(--success, #16a34a); }
+.task-bar-list {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  max-height: 320px;
+  overflow-y: auto;
+}
+.task-bar-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: 5px 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.task-bar-item-icon {
+  flex-shrink: 0;
+  width: 16px;
+  text-align: center;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.task-bar-item-text { flex: 1; overflow-wrap: anywhere; }
+
+/* ── In-conversation snapshot card ── */
+.task-card {
+  margin: var(--space-2) 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.task-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-tertiary);
+  border: none;
+  cursor: pointer;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+  transition: background var(--transition);
+}
+.task-card-header:hover { background: var(--bg-hover); }
+.task-card-title { display: flex; align-items: center; gap: 8px; }
+.task-card-glyph { flex-shrink: 0; color: var(--success, #16a34a); }
+.task-card-count {
+  background: var(--accent);
+  color: white;
+  border-radius: 10px;
+  padding: 1px 8px;
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+.task-card-chevron { color: var(--text-muted); font-size: var(--text-xs); }
+.task-card-list {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+}
+.task-card-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: 5px 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.task-card-item-icon {
+  flex-shrink: 0;
+  width: 16px;
+  text-align: center;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.task-card-item-text { flex: 1; overflow-wrap: anywhere; }
+
+
+/* ── In-conversation question card (V2 enhancement: paginated `question`
+   tool). Full-width card that scrolls with the conversation; ANSWERING /
+   REVIEW / ANSWERED states. Theme tokens only — no hardcoded colours. ───── */
+.question-card {
+  margin: var(--space-2) 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.question-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.question-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.question-card-glyph {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  color: var(--accent, #a594ff);
+  filter: drop-shadow(0 0 0.5px currentColor);
+}
+.question-card-glyph-bg {
+  fill: color-mix(in srgb, var(--accent, #a594ff) 18%, transparent);
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+.question-card-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.question-card-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: var(--text-md);
+  line-height: 1;
+  transition: all var(--transition);
+}
+.question-card-arrow:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.question-card-arrow:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.question-card-body {
+  padding: var(--space-3);
+}
+.question-card-header-text {
+  margin: 0 0 var(--space-1) 0;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.question-card-q {
+  margin: 0 0 4px 0;
+  color: var(--text-primary);
+  font-size: var(--text-md);
+  font-weight: 600;
+  line-height: 1.5;
+}
+.question-card-sub {
+  margin: 0 0 var(--space-3) 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+.question-card-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.question-card-option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  color: var(--text-primary);
+  transition: all var(--transition);
+}
+.question-card-option:hover {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+.question-card-option--selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.question-card-option-input {
+  flex-shrink: 0;
+  margin-top: 2px;
+  accent-color: var(--accent);
+}
+.question-card-option-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.question-card-option-label { font-weight: 500; }
+.question-card-option-desc {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+.question-card-custom {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.question-card-custom-label {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+.question-card-custom-input {
+  width: 100%;
+  resize: vertical;
+  padding: var(--space-2);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+}
+.question-card-custom-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.question-card-attach-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.question-card-attach-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  transition: all var(--transition);
+}
+.question-card-attach-btn:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.question-card-file-input { display: none; }
+.question-card-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.question-card-thumb-item {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.question-card-thumb-item--failed {
+  border-color: var(--error);
+  box-shadow: 0 0 0 1px var(--error) inset;
+}
+.question-card-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  cursor: pointer;
+  display: block;
+}
+.question-card-thumb-remove {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-overlay, rgba(0, 0, 0, 0.55));
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1;
+}
+.question-card-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border);
+  background: var(--bg-tertiary);
+}
+.question-card-footer-spacer { flex: 1; }
+
+/* ── Away auto-answer countdown badge — lives in the question-card HEADER
+   (per-tab feature, default-off). High-contrast accent so the "auto-answer is
+   pending" state is immediately obvious above the fold; a compact pill with
+   icon + MM:SS + inline ✕ to dismiss for THIS question only. ── */
+.question-card-away-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-left: auto;
+  margin-right: 4px;
+  padding: 2px 4px 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent, #a594ff) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent, #a594ff) 55%, transparent);
+  color: var(--accent, #a594ff);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+  animation: question-card-away-pulse 1.6s ease-in-out infinite;
+}
+.question-card-away-badge-icon {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+.question-card-away-badge-time {
+  letter-spacing: 0.02em;
+}
+.question-card-away-badge-skip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 2px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.75;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+.question-card-away-badge-skip:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--accent, #a594ff) 25%, transparent);
+}
+@keyframes question-card-away-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent, #a594ff) 35%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent, #a594ff) 0%, transparent);
+  }
+}
+
+/* ── REVIEW state ── */
+.question-review-item {
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border);
+}
+.question-review-item:last-child { border-bottom: none; }
+.question-review-q {
+  margin: 0 0 2px 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.question-review-a {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.question-review-a--empty { color: var(--text-muted); font-style: italic; }
+.question-review-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+/* ── ANSWERED (read-only) state ── */
+.question-card-header--static { cursor: default; }
+/* Header / title click-to-collapse affordance (V2 enhancement): on ANSWERED
+   and REVIEW the WHOLE header is clickable; on ANSWERING only the title span
+   is clickable so the inline nav buttons (prev / next / chevron / away-badge ✕)
+   keep their own click behaviour. Both share the same hover tint + outline so
+   the affordance is consistent across states. */
+.question-card-header--clickable,
+.question-card-title--clickable {
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.question-card-header--clickable:hover .question-card-title,
+.question-card-title--clickable:hover {
+  color: var(--text-primary);
+}
+.question-card-header--clickable:focus-visible,
+.question-card-title--clickable:focus-visible {
+  outline: 2px solid var(--accent, #a594ff);
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+.question-card-arrow--static {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+.question-answered-item {
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border);
+}
+.question-answered-item:last-child { border-bottom: none; }
+.question-answered-q {
+  margin: 0 0 var(--space-2) 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+.question-answered-index { color: var(--text-muted); margin-right: 4px; }
+.question-answered-options {
+  list-style: none;
+  margin: 0 0 var(--space-1) 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.question-answered-option {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.question-answered-option--chosen { color: var(--text-primary); font-weight: 500; }
+.question-answered-check {
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+  color: var(--success, #16a34a);
+}
+.question-answered-label { overflow-wrap: anywhere; }
+.question-answered-desc { font-size: var(--text-xs); color: var(--text-muted); }
+.question-answered-custom {
+  margin: var(--space-1) 0 0 0;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.question-answered-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.question-answered-thumb {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+
+/* ── Token usage bar ─────────────────────────────────────────────────────
+ * Developer-oriented perf metrics ([I]/[O] tokens, tok/sec, TTFT, total).
+ * Hidden by default and revealed on message-row hover so the reading area
+ * stays clean; the same `.message-row:hover ${target} { opacity: 1 }`
+ * mechanism `.message-actions` already uses (single hover-reveal pattern
+ * across message meta / actions / metrics — see ChatMessageList.vue). */
+.token-badge {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.message-row:hover .token-badge,
+.token-badge:focus-within {
+  opacity: 1;
+}
+
+/* ── Topbar chat toolbar toggles ────────────────────────────────────────── */
+/* 工具调用显隐按钮 / 全部折叠展开按钮 */
+.chat-toolbar-toggle {
+  gap: 5px;
+}
+/* Active (pressed) state — deliberately restrained. These toggles (Tool Calls,
+   Collapse All) are usually left "on", so a saturated filled accent block — or
+   even a full accent-tinted border ring — reads as too heavy and visually
+   "selected", competing with the active session tab's own accent ring. Instead
+   we keep the SAME neutral ghost border as the idle neighbours (so the button
+   doesn't look "framed"/selected nor lose an edge) and signal "on" only with a
+   faint accent wash plus a subtle accent tint on the icon — present but quiet,
+   matching the monochrome topbar and never out-shouting the active tab. */
+.chat-toolbar-toggle.active {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  color: color-mix(in srgb, var(--accent) 80%, var(--text-primary));
+  border-color: var(--border);
+}
+.chat-toolbar-toggle.active:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border-color: var(--border-light);
+  color: color-mix(in srgb, var(--accent) 80%, var(--text-primary));
+}
+
+/* ── Image attachment (pending + message preview) ───────────────────────── */
+.pending-images-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3) var(--space-2);
+}
+.pending-image-item {
+  position: relative;
+  display: inline-flex;
+}
+.pending-image-thumb {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  display: block;
+}
+.pending-image-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  transition: background var(--transition), color var(--transition);
+}
+.pending-image-remove:hover {
+  background: var(--error);
+  color: white;
+  border-color: transparent;
+}
+
+/* 消息气泡中的图片预览 */
+.msg-image-preview {
+  margin-top: var(--space-2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.msg-image-thumb {
+  max-width: 240px;
+  max-height: 180px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  object-fit: cover;
+  cursor: pointer;
+  transition: opacity var(--transition);
+}
+.msg-image-thumb:hover {
+  opacity: 0.85;
+}
+
+/* Assistant markdown inline images (e.g. a ``computer`` tool screenshot
+   rendered from ``![screenshot](url)``). Match the user-upload thumbnail:
+   bounded size + clickable so ``onBubbleImageClick`` opens the shared
+   lightbox (zoom / drag / close), keeping assistant + user image display
+   consistent instead of a full-bleed oversized image. */
+.markdown-body img {
+  max-width: 320px;
+  max-height: 240px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  object-fit: contain;
+  cursor: zoom-in;
+  transition: opacity var(--transition);
+}
+.markdown-body img:hover {
+  opacity: 0.85;
+}
+
+/* 图片丢失占位符（文件被删除时显示） */
+.msg-image-missing {
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+  border: 1px dashed var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  flex-direction: column;
+  gap: var(--space-1);
+  cursor: default;
+  padding: var(--space-1);
+}
+
+/* ── Image Lightbox ──────────────────────────────────────────────────────── */
+.lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+  animation: lightbox-fadein 0.15s ease-out;
+}
+@keyframes lightbox-fadein {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.lightbox-image {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 6px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  user-select: none;
+  transition: transform 0.1s ease-out;
+  transform-origin: center center;
+}
+.lightbox-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+.lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+.lightbox-hint {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* Make pending image thumbs clickable */
+.pending-image-thumb {
+  cursor: pointer;
+}
+
+/* ── Sub-agent blocks ────────────────────────────────────────────────────── */
+.subagent-block {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: var(--space-2);
+  overflow: hidden;
+  background: var(--bg-secondary);
+  font-size: 0.88em;
+}
+.subagent-block.subagent-status-running { border-color: var(--info); }
+.subagent-block.subagent-status-done    { border-color: var(--success); }
+.subagent-block.subagent-status-error   { border-color: var(--error); }
+
+.subagent-block-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 7px var(--space-3);
+  cursor: pointer;
+  user-select: none;
+  background: var(--bg-tertiary);
+  transition: background var(--transition);
+}
+.subagent-block-header:hover { background: var(--bg-hover); }
+
+.subagent-block-icon  { font-size: 1em; flex-shrink: 0; }
+.subagent-block-title { font-weight: 600; color: var(--text-primary); flex-shrink: 0; }
+.subagent-block-rounds { font-weight: 400; color: var(--text-secondary); font-size: 0.9em; }
+
+.subagent-block-preview {
+  color: var(--text-secondary);
+  font-size: 0.85em;
+  flex: 1;
+  min-width: 0;
+  word-break: break-all;
+  white-space: normal;
+  line-height: 1.4;
+}
+.subagent-block-toggle { color: var(--text-secondary); font-size: 0.75em; flex-shrink: 0; margin-left: auto; }
+
+.subagent-block-body {
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.subagent-tool-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 0.85em;
+  color: var(--text-secondary);
+}
+.subagent-tool-icon { flex-shrink: 0; }
+.subagent-tool-name {
+  color: var(--info);
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+}
+.subagent-tool-args {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  word-break: break-all;
+  white-space: normal;
+}
+
+.subagent-block-content {
+  margin-top: var(--space-1);
+  padding-top: var(--space-1);
+  border-top: 1px dashed var(--border);
+  color: var(--text-primary);
+  font-size: 0.9em;
+  /* No max-height/overflow-y: let content expand fully so outer page scroll works */
+}
+.subagent-block-error { color: var(--error); font-size: 0.88em; padding: var(--space-1) 0; }
+
+.subagent-summary-separator {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-3) 0 6px;
+  color: var(--text-secondary);
+  font-size: 0.85em;
+  font-weight: 600;
+}
+.subagent-summary-separator::before,
+.subagent-summary-separator::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* ── Tool Execution Panel (tool_indicator) ──────────────────────────────── */
+/* Inspired by Roo Code's "正在运行" panel: collapsible, shows live output,  */
+/* elapsed time, cancel button, and a spinner while running.                 */
+
+.tool-exec-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-secondary);
+  font-size: var(--text-base);
+  min-width: 320px;
+  max-width: 100%;
+  transition: border-color var(--transition);
+}
+.tool-exec-panel--done {
+  border-color: rgba(76, 175, 80, 0.35);
+}
+
+/* Header bar */
+.tool-exec-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px var(--space-3);
+  background: var(--bg-tertiary);
+  cursor: pointer;
+  user-select: none;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--border);
+  transition: background var(--transition);
+}
+.tool-exec-header:hover {
+  background: var(--bg-hover);
+}
+.tool-exec-panel--done .tool-exec-header {
+  border-bottom-color: rgba(76, 175, 80, 0.2);
+}
+
+.tool-exec-header-left {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex: 1;
+}
+.tool-exec-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Spinner inside header */
+.tool-exec-spinner {
+  width: 13px;
+  height: 13px;
+  border-width: 2px;
+  flex-shrink: 0;
+}
+
+/* Done checkmark */
+.tool-exec-done-icon {
+  color: var(--success);
+  font-size: var(--text-base);
+  font-weight: 700;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.tool-exec-title {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+.tool-exec-panel--done .tool-exec-title {
+  color: var(--success);
+}
+
+.tool-exec-name {
+  background: rgba(108, 99, 255, 0.12);
+  color: var(--accent);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+/* Elapsed time badge */
+.tool-exec-elapsed {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  background: var(--bg-primary);
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+  min-width: 44px;
+  text-align: right;
+}
+
+/* Cancel button */
+.tool-exec-cancel-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid rgba(244, 67, 54, 0.5);
+  background: rgba(244, 67, 54, 0.08);
+  color: #f44336;
+  cursor: pointer;
+  transition: all var(--transition);
+  flex-shrink: 0;
+  padding: 0;
+}
+.tool-exec-cancel-btn:hover {
+  background: rgba(244, 67, 54, 0.2);
+  border-color: #f44336;
+  transform: scale(1.1);
+}
+
+/* Collapse arrow */
+.tool-exec-arrow {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  transition: transform var(--transition);
+  display: inline-block;
+  flex-shrink: 0;
+}
+.tool-exec-arrow--collapsed {
+  transform: rotate(-90deg);
+}
+
+/* Body */
+.tool-exec-body {
+  padding: var(--space-2) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Section label */
+.tool-exec-label {
+  display: block;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 3px;
+}
+/* Inline variant used inside the args/output header bars: sits on the header
+   row (no block margin) so 参数 / 输出 labels align identically. */
+.tool-exec-label--inline {
+  display: inline;
+  margin-bottom: 0;
+}
+
+/* Arguments block — mirrors the output block's "header bar + code area"
+   structure so 参数 and 输出 look consistent (was: a bare label on a plain
+   --bg-primary box, which read as unfinished next to the output card). */
+.tool-exec-args {
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden; /* clip header + pre inside rounded corners */
+}
+/* Args header: same title bar (bg + bottom divider) as the output header. */
+.tool-exec-args-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px var(--space-3);
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--border);
+  min-height: 28px;
+}
+.tool-exec-args-pre {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--code-text);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: calc(13px * 1.55 * 6 + 2px);
+  overflow-y: auto;
+  padding: var(--space-2) var(--space-3);
+}
+/* "Generating arguments…" content area (streaming sub-state): same padding as
+   the args <pre> so the live indicator sits in the card body, below the header
+   bar, consistent with the settled JSON view. */
+.tool-exec-args-generating {
+  padding: var(--space-2) var(--space-3);
+}
+
+/* DISC-1 三期-step6: file-change diff preview (shared `useDiffPreview` helper).
+   Renders only for write/edit/apply_patch tool cards — a ```diff fenced block
+   highlighted by highlight.js. Same body padding as the args view. */
+.tool-exec-diff-body {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  overflow-x: auto;
+}
+
+/* Computer-tool screenshot thumbnails: rendered inside the tool card, above
+   the raw output block. Click opens the shared lightbox (delegated on
+   .message-tool-calls in ChatMessageList). */
+.tool-exec-screenshots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.tool-exec-screenshot-thumb {
+  max-width: 320px;
+  max-height: 200px;
+  width: auto;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: zoom-in;
+  object-fit: contain;
+  background: var(--bg-code);
+}
+.tool-exec-screenshot-thumb:hover {
+  border-color: var(--border-light);
+}
+
+/* Live output block */
+.tool-exec-output {
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden; /* clip header + pre inside rounded corners */
+}
+
+/* Output header: label + size badge + truncation warning + view tabs */
+.tool-exec-output-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 5px var(--space-3);
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--border);
+  min-height: 28px;
+}
+
+/* Size badge */
+.tool-exec-size-badge {
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+.tool-exec-size-badge--large {
+  color: var(--warning);
+  background: rgba(251, 191, 36, 0.12);
+}
+
+/* Truncation warning badge */
+.tool-exec-truncated-badge {
+  font-size: var(--text-xs);
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.10);
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  border-radius: 3px;
+  padding: 1px 6px;
+  cursor: help;
+  white-space: nowrap;
+}
+
+/* View-slice tabs (完整输出 / 开头 25KB / 结尾 25KB) */
+.tool-exec-view-tabs {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+.tool-exec-tab {
+  font-size: var(--text-xs);
+  padding: 2px var(--space-2);
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+.tool-exec-tab:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-primary);
+}
+.tool-exec-tab.active {
+  background: rgba(108, 99, 255, 0.18);
+  border-color: rgba(108, 99, 255, 0.45);
+  color: #a78bfa;
+}
+
+.tool-exec-output-pre {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--code-text);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 260px;
+  overflow-y: auto;
+  line-height: 1.55;
+  padding: var(--space-2) var(--space-3);
+}
+/* Large output: taller scrollable area */
+.tool-exec-output-pre--large {
+  max-height: 420px;
+}
+
+/* Slimmer scrollbars for tool exec scroll areas (args + output).
+   Only use the ::-webkit-scrollbar pseudo-elements (matching the global
+   scrollbar in base.css). Do NOT set the standard `scrollbar-width` /
+   `scrollbar-color` here: when present, Chromium honours the standard
+   property and renders the classic OS scrollbar (with arrow buttons,
+   ~10px wide), ignoring the pseudo-elements. */
+.tool-exec-args-pre::-webkit-scrollbar,
+.tool-exec-output-pre::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+.tool-exec-args-pre::-webkit-scrollbar-track,
+.tool-exec-output-pre::-webkit-scrollbar-track {
+  background: transparent;
+}
+.tool-exec-args-pre::-webkit-scrollbar-thumb,
+.tool-exec-output-pre::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+.tool-exec-args-pre::-webkit-scrollbar-thumb:hover,
+.tool-exec-output-pre::-webkit-scrollbar-thumb:hover {
+  background: var(--border-light);
+}
+
+/* Waiting dots animation */
+.tool-exec-waiting {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+}
+.tool-exec-waiting-dots {
+  display: flex;
+  gap: var(--space-1);
+}
+.tool-exec-waiting-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.4;
+  animation: tool-exec-dot-bounce 1.4s infinite ease-in-out;
+}
+.tool-exec-waiting-dots span:nth-child(2) { animation-delay: 0.2s; }
+.tool-exec-waiting-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes tool-exec-dot-bounce {
+  0%, 80%, 100% { transform: scale(0.7); opacity: 0.3; }
+  40% { transform: scale(1.1); opacity: 0.9; }
+}
+/* Keep tool-exec waiting dots animating under reduced-motion (functional indicator) */
+@media (prefers-reduced-motion: reduce) {
+  .tool-exec-waiting-dots span {
+    animation: tool-exec-dot-bounce 1.4s infinite ease-in-out !important;
+    animation-duration: 1.4s !important;
+    animation-iteration-count: infinite !important;
+  }
+  .tool-exec-waiting-dots span:nth-child(2) { animation-delay: 0.2s !important; }
+  .tool-exec-waiting-dots span:nth-child(3) { animation-delay: 0.4s !important; }
+}
+
+/* Light theme overrides */
+html.light .tool-exec-output,
+html.light .tool-exec-args {
+  background: var(--bg-code);
+  border-color: #d0d7de;
+}
+html.light .tool-exec-output-header,
+html.light .tool-exec-args-header {
+  background: rgba(0, 0, 0, 0.03);
+  border-bottom-color: #d0d7de;
+}
+html.light .tool-exec-output-pre,
+html.light .tool-exec-args-pre {
+  color: var(--code-text);
+}
+html.light .tool-exec-size-badge {
+  background: rgba(0, 0, 0, 0.06);
+}
+html.light .tool-exec-tab {
+  border-color: rgba(0, 0, 0, 0.15);
+}
+html.light .tool-exec-tab:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text-primary);
+}
+
+/* ── Input Status Bar（底部模型/上下文/Skills 状态行）──────────────────── */
+.input-status-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  min-height: 28px;
+  flex-shrink: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.input-status-bar::-webkit-scrollbar { display: none; }
+
+.input-status-sep {
+  width: 1px;
+  height: 12px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+.input-status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+  cursor: pointer;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-xs);
+  transition: background var(--duration-fast);
+}
+.input-status-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.input-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  flex-shrink: 0;
+}
+
+/* ── AI Coding Assistant Pills (Claude Code / Open Code) ─────────────────
+ * 输入框上方的"编程助手"开关按钮，独立于普通模型选择器。
+ *  - 未激活：虚线边框 + 静音文字色，提示这是"可开启的能力"而非永久启用
+ *  - 激活：高亮色描边 + 半透明背景 + 实线（已通过内联 :style 控制）
+ * ----------------------------------------------------------------------- */
+.assistant-pill {
+  position: relative;
+  border-style: dashed !important;
+  color: var(--text-muted) !important;
+  background: transparent;
+  transition: border-color var(--transition), color var(--transition), background var(--transition);
+}
+.assistant-pill:hover {
+  border-style: solid !important;
+}
+.assistant-pill-cc:hover:not(.active) {
+  color: #7eb8f7 !important;
+  border-color: #7eb8f7 !important;
+  background: rgba(126, 184, 247, 0.06);
+}
+.assistant-pill-oc:hover:not(.active) {
+  color: #63b3ed !important;
+  border-color: #63b3ed !important;
+  background: rgba(99, 179, 237, 0.06);
+}
+.assistant-pill.active {
+  border-style: solid !important;
+}
+
+/* ── First-time onboarding bubble for Assistant Pills ────────────────── */
+.assistant-onboarding-bubble {
+  position: absolute;
+  /* 显示在输入工具栏上方 */
+  bottom: calc(100% + 14px);
+  /* 水平位置由 JS 动态计算（recalcAssistantOnboardingPos）通过 :style 注入。
+     工具栏前置元素（模型选择器、Params、"N skills active"指示器…）宽度可变，
+     硬编码 left 必然错位；这里给一个安全兜底，DOM 渲染后会被覆盖。 */
+  left: 0;
+  z-index: 200;
+  width: 320px;
+  padding: 12px 14px 12px 14px;
+  background: linear-gradient(135deg, rgba(126, 184, 247, 0.14), rgba(99, 179, 237, 0.14));
+  border: 1px solid rgba(126, 184, 247, 0.55);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  color: var(--text-primary);
+  animation: assistant-onboarding-pop 0.25s var(--ease-out);
+}
+.assistant-onboarding-arrow {
+  position: absolute;
+  bottom: -6px;
+  /* left 由 JS 动态注入（与气泡 left 解耦，始终指向 pill 中点） */
+  left: 36px;
+  width: 12px;
+  height: 12px;
+  background: rgba(126, 184, 247, 0.18);
+  border-right: 1px solid rgba(126, 184, 247, 0.55);
+  border-bottom: 1px solid rgba(126, 184, 247, 0.55);
+  transform: rotate(45deg);
+}
+.assistant-onboarding-title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--text-primary);
+}
+.assistant-onboarding-body {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.55;
+  margin-bottom: 10px;
+}
+.assistant-onboarding-close {
+  display: inline-block;
+  padding: 4px 12px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  background: rgba(126, 184, 247, 0.20);
+  color: #7eb8f7;
+  border: 1px solid rgba(126, 184, 247, 0.55);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.assistant-onboarding-close:hover {
+  background: rgba(126, 184, 247, 0.32);
+}
+@keyframes assistant-onboarding-pop {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── AI Coding Panel header buttons (collapse / exit-mode) ───────────────
+ * 头部右上角双按钮设计：
+ *   .panel-header-collapse-btn  (—)  仅折叠面板，CC/OC 模式保持激活
+ *   .panel-header-exit-btn      (✕)  退出 CC/OC 模式（彻底关闭）
+ * 与 Windows 窗口控件（最小化/关闭）的视觉与交互习惯保持一致，
+ * 让用户一眼区分两种操作的不同后果。
+ * ----------------------------------------------------------------------- */
+.panel-header-collapse-btn,
+.panel-header-exit-btn {
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+}
+.panel-header-collapse-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.panel-header-exit-btn:hover {
+  background: rgba(248, 113, 113, 0.18);
+  color: #fca5a5 !important;
+  border-color: rgba(248, 113, 113, 0.45);
+}
+
+/* ── Promote to App Builder Card ─────────────────────────────────────────── */
+.promote-card { padding: 12px; }
+.promote-card__header {
+  display: flex; align-items: center; gap: 8px;
+  font-size: var(--text-sm); font-weight: 600;
+  color: var(--text-primary); margin-bottom: 10px;
+}
+.promote-card__icon { font-size: 16px; }
+.promote-card__refresh {
+  margin-left: auto; background: none; border: none;
+  color: var(--text-muted); cursor: pointer; font-size: 16px;
+}
+.promote-card__refresh:hover { color: var(--text-primary); }
+.promote-card__subtitle {
+  font-size: 11px; color: var(--text-muted); opacity: 0.7;
+  margin-bottom: 10px; padding-left: 24px;
+}
+.promote-card__loading,
+.promote-card__empty { font-size: var(--text-sm); color: var(--text-muted); padding: 8px 0; }
+.promote-card__error { font-size: var(--text-sm); color: var(--color-error, #f87171); padding: 4px 0; }
+.promote-card__success { font-size: var(--text-sm); color: var(--color-success, #34d399); padding: 4px 0; }
+.promote-card__item {
+  border: 1px solid var(--border-color, rgba(255,255,255,0.08));
+  border-radius: 8px; padding: 10px; margin-bottom: 8px;
+  background: rgba(255,255,255,0.02);
+}
+.promote-card__item-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 4px;
+}
+.promote-card__badge {
+  font-size: 11px; padding: 2px 6px; border-radius: 4px;
+  background: rgba(52, 211, 153, 0.15); color: #34d399;
+}
+.promote-card__item-meta {
+  display: flex; gap: 12px; font-size: 11px; color: var(--text-muted); margin-bottom: 4px;
+}
+.promote-card__item-source {
+  font-size: 11px; color: var(--text-muted); opacity: 0.7;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 8px;
+}
+.promote-card__actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.promote-card__select {
+  font-size: 11px; padding: 3px 6px; border-radius: 4px;
+  background: var(--bg-secondary, #1e1e2e); color: var(--text-primary);
+  border: 1px solid var(--border-color, rgba(255,255,255,0.1));
+}
+.promote-card__btn {
+  font-size: 11px; padding: 4px 10px; border-radius: 4px; border: none; cursor: pointer;
+}
+.promote-card__btn--secondary {
+  background: rgba(255,255,255,0.06); color: var(--text-primary);
+}
+.promote-card__btn--secondary:hover { background: rgba(255,255,255,0.1); }
+.promote-card__btn--primary {
+  background: var(--accent-color, #7c3aed); color: #fff;
+}
+.promote-card__btn--primary:hover { opacity: 0.9; }
+.promote-card__btn--primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.promote-card__dryrun { margin-top: 8px; font-size: 11px; }
+.promote-card__dryrun--ok { color: #34d399; }
+.promote-card__dryrun--fail { color: #f87171; }
+.promote-card__dryrun--warn { color: #fbbf24; }
+.promote-card__dryrun--conflict { color: #f97316; }
+
+/* ── Multi-variant precision picker (P4 — multi-variant pack export) ───────── */
+.promote-card__variants {
+  margin: 8px 0 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color, rgba(255,255,255,0.08));
+  border-radius: 6px;
+  background: rgba(255,255,255,0.02);
+}
+.promote-card__variants-title {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin-bottom: 6px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.promote-card__variant-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+.promote-card__variant-row + .promote-card__variant-row {
+  border-top: 1px solid rgba(255,255,255,0.04);
+}
+.promote-card__variant-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  flex: 0 0 auto;
+  min-width: 80px;
+  user-select: none;
+}
+.promote-card__variant-check input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: var(--accent-color, #7c3aed);
+  width: 13px;
+  height: 13px;
+  margin: 0;
+}
+.promote-card__variant-label {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text-primary);
+  font-family: 'Space Grotesk', monospace, system-ui;
+  letter-spacing: 0.02em;
+}
+.promote-card__variant-size {
+  font-size: 11px;
+  color: var(--text-muted);
+  flex: 0 0 auto;
+  min-width: 60px;
+}
+.promote-card__variant-time {
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.7;
+  flex: 1 1 auto;
+  text-align: right;
+  white-space: nowrap;
+}
+.promote-card__variants-default {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(255,255,255,0.06);
+  font-size: 11px;
+  flex-wrap: wrap;
+}
+.promote-card__variants-default-label {
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-right: 4px;
+}
+.promote-card__variant-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 11px;
+  color: var(--text-primary);
+}
+.promote-card__variant-radio input[type="radio"] {
+  cursor: pointer;
+  accent-color: var(--accent-color, #7c3aed);
+  width: 12px;
+  height: 12px;
+  margin: 0;
+}
+.promote-card__variant-radio.is-disabled,
+.promote-card__variant-radio:has(input[type="radio"]:disabled) {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.promote-card__variant-radio.is-disabled span,
+.promote-card__variant-radio:has(input[type="radio"]:disabled) span {
+  text-decoration: line-through;
+}
+.promote-card__no-bins {
+  margin: 8px 0;
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+  border: 1px dashed rgba(255,255,255,0.08);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.01);
+  line-height: 1.5;
+}
+

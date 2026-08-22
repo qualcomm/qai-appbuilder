@@ -1,0 +1,26 @@
+# MeloTTS-ZH Full NPU - Python Dependencies
+# Platform: Windows ARM64 (Snapdragon X Elite)
+# Python: 3.13 ARM64
+#
+# Install: pip install -r requirements.txt
+#
+# The generated app's backend/ensure_deps.py reads this file at startup and
+# installs anything missing (preferring a bundled wheel under vendor/whl/,
+# then the configured pip index). List EVERY runtime dependency here — the
+# target machine may have only a bare Python interpreter.
+
+# NPU inference runtime. Installs from the configured pip index; if your index
+# lacks an ARM64 wheel, drop one into the app's vendor/whl/ so ensure_deps.py
+# picks it up offline.
+qai_appbuilder>=2.45.0
+
+# Array operations
+numpy>=1.26
+
+# Chinese G2P (text-to-phonemes)
+jieba>=0.42
+pypinyin>=0.50
+cn2an>=0.5
+
+# English G2P (for Chinese-English mixed text)
+g2p_en>=2.1

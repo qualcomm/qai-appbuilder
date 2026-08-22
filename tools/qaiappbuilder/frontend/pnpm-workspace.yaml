@@ -1,0 +1,40 @@
+packages:
+  - "."
+
+# pnpm settings (pnpm-workspace.yaml). Since pnpm 10+ this file — not the
+# package.json "pnpm" key — is the home for these settings. See
+# https://pnpm.io/settings
+#
+# overrides.entities: pin the transitive `entities` dependency to 4.5.0 (kept
+# from the previous package.json "pnpm.overrides"). patchedDependencies was
+# empty and is intentionally omitted.
+overrides:
+  entities: 4.5.0
+
+# allowBuilds: pnpm 10.26+/11 no longer runs dependency install/build scripts
+# (postinstall etc.) by default for supply-chain safety; unreviewed build
+# scripts fail the install with ERR_PNPM_IGNORED_BUILDS (strictDepBuilds
+# defaults to true -> non-zero exit), which would hang/fail automated builds.
+# We explicitly allow ONLY the packages that genuinely need a build step, so
+# `pnpm install` runs them non-interactively (no `pnpm approve-builds` prompt)
+# for every user. NOTE: pnpm 11 REPLACED the old `onlyBuiltDependencies` list
+# with this `allowBuilds` map (name: true/false).
+#   - esbuild:  places its platform-native binary (vite depends on it; without
+#               this node_modules/esbuild is incomplete and `vite build` fails).
+#   - vue-demi: postinstall switches its shim to match the installed Vue major.
+# See https://pnpm.io/settings#allowbuilds
+allowBuilds:
+  esbuild: true
+  vue-demi: true
+
+patchedDependencies:
+  entities@4.5.0: patches/entities@4.5.0.patch
+  estree-walker@3.0.3: patches/estree-walker@3.0.3.patch
+
+# virtualStoreDir: route the pnpm virtual store (the bulk of the 1.2 GB
+# dependency content) out of the source tree into the per-user runtime data
+# directory. frontend/node_modules/ keeps only the thin symlink layer and
+# .bin/ — a few MB — so the source tree stays clean and easy to back up.
+# data/ is git-ignored (root .gitignore) and is the designated home for all
+# runtime-generated content. pnpm install / build / exec all work normally.
+virtualStoreDir: ../data/pnpm-virtual-store

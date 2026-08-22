@@ -1,0 +1,17 @@
+{
+  "tag": "melotts-zh",
+  "required_files": ["encoder.bin", "flow.bin", "decoder.bin", "bert_wrapper.bin"],
+  "optional_files": ["flow_short.bin", "bert_zh_tokenizer.bin", "bert_normalizer.bin", "metadata.json"],
+  "download_configs": {
+    "snapdragon_x_elite": {
+      "url": "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/melotts_zh/releases/v0.55.0/melotts_zh-voice_ai-mixed_with_float-qualcomm_snapdragon_x_elite.zip",
+      "archive_name": "melotts_zh-voice_ai-mixed_with_float-qualcomm_snapdragon_x_elite.zip",
+      "extracted_dir": "melotts_zh-voice_ai-mixed_with_float-qualcomm_snapdragon_x_elite"
+    },
+    "snapdragon_x2_elite": {
+      "url": "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/melotts_zh/releases/v0.55.0/melotts_zh-voice_ai-mixed_with_float-qualcomm_snapdragon_x2_elite.zip",
+      "archive_name": "melotts_zh-voice_ai-mixed_with_float-qualcomm_snapdragon_x2_elite.zip",
+      "extracted_dir": "melotts_zh-voice_ai-mixed_with_float-qualcomm_snapdragon_x2_elite"
+    }
+  }
+}

@@ -1,0 +1,142 @@
+# Build & Run — Quick Guide
+
+> Two usage modes + one cheat-sheet.
+>
+> 中文版：[`QUICK-START.zh-CN.md`](QUICK-START.zh-CN.md).
+
+> **Platform**: Windows on Snapdragon (ARM64). Run every `.bat` from the repo root
+> by double-click or in `cmd.exe`. The scripts auto-download uv / Python 3.13 ARM64 /
+> PortableGit / Node.js into `%LOCALAPPDATA%\QAIModelBuilder\` — **no admin rights,
+> no manual Python install needed.**
+
+---
+
+## Just want to use it? (No coding)
+
+```cmd
+Setup.bat
+Start.bat
+```
+
+That's it. `Setup.bat` installs everything automatically (first time only); `Start.bat`
+launches the WebUI and opens your browser. Start chatting to build an app, convert a model,
+or run one from AI Hub.
+
+> **First screen is a login.** The WebUI is gated behind Okta single sign-on (on by default),
+> so you sign in before you reach the tool. Disable it only for local `pnpm dev`.
+
+---
+
+## For developers — two modes at a glance
+
+| Mode | Scripts | Who it's for | First-time prep | Daily run |
+|---|---|---|---|---|
+| **A. Dev mode (run from source)** | `Setup.bat` → `Build.bat` → `Start.bat` | Code changes / debugging / contributors | `Setup.bat` + `Build.bat` | `Start.bat` (backend change) / `Build.bat` + `Start.bat` (frontend change) |
+| **B. Release artifact (External / Internal)** | `Release.bat [version] [--internal]` | Packaging for end-users | `Setup.bat` once | Ship archive from `.build\release\` → user extracts → runs `Setup.bat` → `Start.bat` |
+
+---
+
+## A. Dev mode (most common)
+
+### First time: one-shot environment setup
+
+```cmd
+Setup.bat
+```
+
+Does everything: download uv / install Python 3.13 (ARM64 by default, or x64 with
+`--arch x64`) / create venv at `%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_arm64_313`
+(or `.venv_x64_313`) / install every dep from `pyproject.toml` / install PortableGit
++ Node.js + pnpm / install QAIRT SDK (needed for model conversion, ~2 GB) /
+pre-download Whisper / Zipformer / MeloTTS weights / initialize `data/` (`qai.db`,
+factory seeds, secret namespaces).
+
+Common flags:
+
+| Flag | Purpose |
+|---|---|
+| `--arch arm64\|x64` | Force architecture (default: auto-detect from host). Use `--arch x64` on WoS to install the x64 stack under Prism emulation for validation |
+| `--no-builder` | Skip QAIRT SDK / VS toolchain (~2 GB saved when you won't convert models) |
+| `--dev` | Also install contributor toolchain (pytest / mypy / ruff / playwright + Chromium) |
+| `--no-pause` | Don't pause at the end (use from CI) |
+
+> Idempotent — safe to re-run. **`data/` is NOT tracked in git**; delete it and
+> re-run `Setup.bat` to regenerate from scratch.
+
+### Building the frontend
+
+The Python backend is interpreted — **no build step**. The Vue/Vite frontend
+must be built into `frontend\dist\` so `Start.bat` can serve it:
+
+```cmd
+Build.bat              REM Fast incremental: vite build only (iteration loop)
+Build.bat --full       REM Verified: gen:types + typecheck + lint + test + build (pre-commit/pre-release)
+Build.bat --clean      REM node_modules is corrupt: wipe and reinstall
+```
+
+> **Changed Python backend?** Just restart `Start.bat`; you do NOT need `Build.bat`.
+> **Changed Vue/TS frontend?** Run `Build.bat` once, then `Start.bat`.
+
+### Launching the server
+
+```cmd
+Start.bat
+```
+
+The server picks an available port at startup and writes the resolved URL to
+`data\runtime\server.endpoint.json`; the browser is opened to the right address
+automatically. Press `Ctrl+C` to stop.
+
+### Other handy entry points
+
+| Command | Purpose |
+|---|---|
+| `qai.bat <args>` | Run the unified CLI without activating the venv (`qai --help` / `qai config provider list` / `qai build`…) |
+| `Console.bat` | Drop into an activated venv shell for `pip install <pkg>` / ad-hoc Python |
+| `Uninstall.bat` | Remove everything Setup installed OUTSIDE the project (venv / PortableGit / Node); **leaves `data/` untouched** |
+| `Uninstall.bat --all` | Above + uv cache + QAIRT SDK + Playwright Chromium + `vendor/` runtime caches |
+
+---
+
+## B. Release artifact (for end-users)
+
+`Release.bat` runs the full pipeline: clean → frontend build → factory compile →
+assemble → write `build_info.json` → sanitize internal-only assets (when external) →
+manifest whitelist check → archive.
+
+```cmd
+Release.bat                  REM Default: external edition, version 3.1.0
+Release.bat 3.1.0            REM External edition, custom version
+Release.bat --internal       REM Internal full-feature edition (keeps internal providers / telemetry)
+Release.bat 3.1.0 --internal REM Combined
+```
+
+Output: directory + archive under `.build\release\`; `build_info.json` self-reports
+version and edition.
+
+**End-user install flow** (what the user does after receiving the release archive):
+
+```cmd
+Extract release archive  →  Setup.bat  →  Start.bat
+```
+
+> User machines need no Python / Node / git — `Setup.bat` handles all of it.
+
+---
+
+## Cheat-sheet — what should I run right now?
+
+| I want to … | Run |
+|---|---|
+| First-time checkout from source | `Setup.bat` |
+| Changed Python backend | `Start.bat` (just restart) |
+| Changed Vue/TS frontend | `Build.bat` then `Start.bat` |
+| Changed frontend deps (`package.json`) | `Build.bat --install` |
+| `node_modules` is broken | `Build.bat --clean` |
+| Run pytest / write contributor tests | `Setup.bat --dev` once, then `Console.bat` to enter venv |
+| Cut a release for end-users | `Release.bat [version]` |
+| Run a one-shot CLI command | `qai.bat <args>` |
+| Install an extra Python pkg temporarily | `Console.bat` then `pip install <pkg>` |
+| Full cleanup (keep `data/`) | `Uninstall.bat` (or `--all` for deeper cleanup) |
+
+> **`Setup.bat` / `Build.bat` / `Uninstall.bat` support `--help` / `-h` / `/?`** — e.g. `Build.bat --help` lists every flag. `Release.bat` accepts `--help` and `/?`. `Start.bat` / `qai.bat` forward any extra arguments to the underlying Python entry point.

@@ -1,0 +1,167 @@
+# Taxonomy rule database for backend.app_builder.taxonomy_classifier.
+# Edit this file when you want to teach the rule classifier new keywords.
+#
+# Structure:
+#   tasks:    map<task-id, { keywords: [...] }>  -- precise keyword -> task (confidence 0.95)
+#   groups:   map<group-id, [keywords]>          -- group fallback (confidence 0.6) when no
+#                                                    task-level rule matches.
+#
+# Rules:
+#   1. A keyword must NOT appear in two different tasks. Loader asserts uniqueness.
+#   2. Use single-word, distinctive tokens. Do NOT include short generic tokens like
+#      `vit` / `swin` / `bert` at the task level -- those collide across tasks
+#      (e.g. `mobilevit`, `levit`, LLaVA's ViT encoder, BERT-conditioned MeloTTS).
+#      Put them in `groups.computer-vision` so the LLM has the final say.
+#   3. Word boundaries are enforced by the classifier ((?<![a-z0-9]) ... (?![a-z0-9])),
+#      so multi-letter keywords are matched as whole tokens after _normalize_name.
+#
+# Spec: docs/30-ui-ux/model-taxonomy-redesign.md (section 6.1).
+
+tasks:
+  super-resolution:
+    keywords:
+      - esrgan
+      - srgan
+      - swinir
+      - edsr
+      - rcan
+      - hat-sr
+      - real-esrgan
+      - realesrgan
+      - realsr
+  ocr:
+    keywords:
+      - ocr
+      - ppocr
+      - paddleocr
+      - dbnet
+      - crnn
+      - east-text
+  speech-recognition:
+    keywords:
+      - whisper
+      - zipformer
+      - conformer-asr
+      - wenet
+      - deepspeech
+      - paraformer
+      - wav2vec
+  audio-generation:
+    keywords:
+      - tts
+      - melotts
+      - vits
+      - fastspeech
+      - hifigan
+      - wavenet
+      - tacotron
+      - bark-tts
+  text-generation:
+    keywords:
+      - llama
+      - qwen
+      - phi-2
+      - phi-3
+      - mistral
+      - gemma
+      - chatglm
+      - baichuan
+      - yi-6b
+      - yi-9b
+      - yi-34b
+  object-detection:
+    keywords:
+      - yolo
+      - yolov
+      - yolox
+      - ssd
+      - fcos
+      - detr
+      - rtmdet
+      - nanodet
+      - retinanet
+  image-classification:
+    keywords:
+      - resnet
+      - mobilenet
+      - efficientnet-lite
+      - efficientnet-v2
+      - regnet
+      - convnext
+      - inception
+      - densenet
+      - shufflenet
+      - squeezenet
+  semantic-segmentation:
+    keywords:
+      - deeplabv3
+      - segformer
+      - u2net
+      - unet
+      - maskrcnn
+  pose-estimation:
+    keywords:
+      - movenet
+      - rtmpose
+      - hrnet-pose
+      - blazepose
+      - openpose
+  depth-estimation:
+    keywords:
+      - midas
+      - dpt-large
+      - zoedepth
+  image-text-retrieval:
+    keywords:
+      - clip-vit
+      - openclip
+      - siglip
+  embedding:
+    keywords:
+      - bge-small
+      - bge-base
+      - bge-large
+      - e5-small
+      - e5-base
+      - e5-large
+      - gte-small
+      - gte-base
+      - instructor-xl
+      - jina-embed
+  image-to-text:
+    keywords:
+      - blip
+      - florence-2
+      - llava
+      - minicpm-v
+      - qwen-vl
+  audio-enhancement:
+    keywords:
+      - rnnoise
+      - dtln
+      - deepfilternet
+  image-generation:
+    keywords:
+      - sd-turbo
+      - sdxl-turbo
+      - stable-diffusion
+
+# 兜底 group：命中后 task = None，由 LLM / 人工补判细分。
+groups:
+  computer-vision:
+    - vit
+    - swin
+    - deit
+    - dino
+    - sam-base
+    - sam-large
+  generative-ai:
+    - diffusion
+    - sdxl
+  multimodal:
+    - vlm
+    - multimodal
+  audio:
+    - audio
+    - speech
+    - sound

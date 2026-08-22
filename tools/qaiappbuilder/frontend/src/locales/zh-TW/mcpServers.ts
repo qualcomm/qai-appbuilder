@@ -1,0 +1,165 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
+// =============================================================================
+// i18n locale sub-file — 手工維護，UTF-8（無 BOM）。見 AGENTS.md §3.10。
+// MCP (Model Context Protocol) 伺服器設定面板。
+// =============================================================================
+
+const mcpServers = {
+  title: "MCP 伺服器",
+  subtitle:
+    "連接外部 Model Context Protocol 伺服器，為聊天智慧代理提供額外工具。",
+  gateDisabled:
+    "MCP 已停用，打開上方開關即可啟用。停用狀態下可以設定伺服器，但其工具不會提供給模型。",
+  toolCount: "{count} 個工具",
+  resourceCount: "{count} 個資源",
+  promptCount: "{count} 個提示詞",
+  capabilities: {
+    toolsTooltip: "該 MCP 伺服器向 AI 提供的可呼叫工具數量。",
+    resourcesTooltip: "該 MCP 伺服器向 AI 提供的可讀取資源數量。",
+    promptsTooltip: "該 MCP 伺服器向 AI 提供的提示詞範本數量。",
+  },
+  lastTest: {
+    testing: "測試中…",
+    pass: "✓ 測試通過",
+    passWithTools: "✓ 測試通過 · {count} 個工具",
+    fail: "✕ 測試失敗",
+  },
+  empty: {
+    title: "尚未設定 MCP 伺服器",
+    hint: "新增一個伺服器即可將其工具提供給聊天智慧代理 —— 例如本機 stdio 子行程或遠端 SSE/HTTP 端點。",
+  },
+  status: {
+    connected: "已連接",
+    idle: "未連接",
+    disabledBadge: "已停用",
+  },
+  global: {
+    label: "MCP",
+    on: "MCP 已啟用",
+    off: "MCP 已停用",
+    enable: "啟用 MCP",
+    disable: "停用 MCP",
+  },
+  group: {
+    added: "已新增",
+    addedHint: "你已設定的 MCP 連線。",
+    browse: "瀏覽市集",
+    browseHint: "從內建或線上來源新增連線。",
+  },
+  field: {
+    name: "名稱",
+    transport: "傳輸方式",
+    command: "命令",
+    args: "參數",
+    url: "URL",
+    headers: "請求標頭",
+    timeout: "逾時（秒）",
+  },
+  placeholder: {
+    name: "my-server",
+    command: "npx",
+    args: "-y {'@'}modelcontextprotocol/server-filesystem /path",
+    url: "https://example.com/mcp",
+    headerKey: "標頭名稱",
+    headerValue: "值（安全儲存）",
+  },
+  modal: {
+    title: "新增 MCP 伺服器",
+  },
+  market: {
+    title: "瀏覽市集",
+    subtitle: "瀏覽 MCP 連線，一鍵新增。",
+    docs: "文件",
+    install: "安裝",
+    reinstall: "重新安裝",
+    installing: "安裝中…",
+    installTitle: "安裝 {name}",
+    installHint: "該伺服器在啟動前需要填寫一些值。",
+    added: "已新增",
+    sourceAll: "全部",
+    sourceBadge: {
+      curated: "內建推薦",
+      registry: "線上取得",
+      builtin: "內建",
+      builtinRegistry: "Anthropic官方MCP來源",
+    },
+    manageSources: "管理來源",
+    sourcesTitle: "登錄表來源",
+    refresh: "重新整理",
+    refreshing: "載入中…",
+    loadRegistry: "載入目錄",
+    search: "依名稱搜尋…",
+    loadMore: "載入更多",
+    loadingMore: "載入中…",
+    registryEmpty: "尚未載入線上伺服器",
+    registryEmptyHint:
+      "從線上 MCP 目錄載入可安裝的伺服器。點擊將連網擷取清單。",
+    registryError: "無法連接線上 MCP 目錄（{error}），僅顯示內建伺服器。",
+    sourceOAuthPending: "瀏覽器認證頁面已開啟 — 請登入後即可載入該登錄表來源。",
+    envFieldsHint: "該伺服器需要憑證。",
+    headerFieldsHint: "該伺服器需要憑證。",
+    headerLabels: {
+      cebotXUserId: "Qualcomm 使用者名稱（郵箱前綴，如 johndoe）",
+    },
+    credentialDeferredHint: "注意：使用者名稱將在首次呼叫工具時驗證，請確保填寫正確。",
+    oauthHint: "點擊「認證」按鈕開啟 Microsoft Entra 登入頁面，登入後 Bearer token 將自動填入。",
+    oauthButton: "認證",
+    oauthPending: "等待登入完成…",
+    addSource: "新增來源",
+    addSourceUrl: "登錄表 URL",
+    addSourceName: "顯示名稱（選填）",
+    addSourceToken: "Bearer Token（選填，用於需要認證的登錄表）",
+    addSourceCookie: "Cookie（選填，用於 SSO/session 認證的登錄表）",
+    addSourceHint: "輸入任意 MCP 伺服器登錄表的 URL，支援 MCP Registry API（/v0/servers）、Smithery（smithery.ai/servers）及其他常見格式。例如：https://registry.modelcontextprotocol.io",
+    addSourceConfirm: "新增",
+    addSourceCancel: "取消",
+    configureSource: "設定認證",
+    configureSourceHint: "為此內建登錄表填寫存取令牌（Bearer Token）或工作階段 Cookie。",
+    removeSource: "刪除來源",
+    removeSourceConfirm: "刪除來源「{name}」？",
+  },
+  action: {
+    add: "新增伺服器",
+    addHeader: "新增標頭",
+    connect: "連接",
+    connecting: "連接中…",
+    test: "測試",
+    testing: "測試中…",
+    remove: "移除",
+    enable: "啟用",
+    disable: "停用",
+  },
+  confirm: {
+    removeTitle: "移除 MCP 伺服器",
+    removeMessage: "移除「{name}」並從聊天智慧代理中刪除其全部工具？",
+  },
+  toast: {
+    added: "已連接「{name}」 —— 可用 {count} 個工具",
+    savedDisabled: '已儲存「{name}」（MCP 已停用 —— 未連接）',
+    savedConnecting: '已儲存「{name}」 —— 正在背景連線',
+    connectFailed: '連接「{name}」失敗：{error}',
+    tested: "「{name}」可達 —— {count} 個工具",
+    removed: "已移除「{name}」",
+    installed: "已安裝「{name}」 —— 可用 {count} 個工具",
+    installedNoTools: "已安裝「{name}」，但未發現任何工具，請確認憑證是否正確",
+    installedCredentialWarn: "已安裝「{name}」，但連線驗證失敗（{error}），請確認憑證是否正確",
+    credentialCheckFailed: "憑證驗證失敗",
+    enabled: "已啟用「{name}」",
+    disabled: "已停用「{name}」",
+    globalEnabled: "MCP 已啟用",
+    globalDisabled: "MCP 已停用",
+    globalFailed: "切換 MCP 失敗：{error}",
+    refreshed: "已載入 {count} 個線上伺服器",
+    refreshFailed: "重新整理目錄失敗：{error}",
+    searchFailed: "搜尋失敗：{error}",
+    sourceAdded: "已新增登錄表來源",
+    sourceRemoved: "已刪除登錄表來源",
+    sourceCredentialsSaved: "已儲存認證資訊",
+  },
+};
+
+export default mcpServers;

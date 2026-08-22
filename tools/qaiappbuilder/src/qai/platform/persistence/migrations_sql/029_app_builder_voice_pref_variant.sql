@@ -1,0 +1,35 @@
+-- ============================================================================
+-- Migration 029: app_builder_voice_pref.preferred_variant_id column (缺口 #8)
+--
+-- Adds one nullable TEXT column to app_builder_voice_pref so the voice-input
+-- preference can pin the exact precision VARIANT the user picked (V1 stored
+-- ``{modelId, variantId}`` in data/app_builder/voice_input_pref.json), not
+-- just the model. The next-boot warm-up then loads that variant
+-- (whisper-base→fp16 / zipformer-zh→int8) instead of an adapter-resolved
+-- default.
+--
+-- Domain: ``VoiceInputPreference.preferred_variant_id: str | None`` already
+-- existed; the repository (voice_pref_repository.py) already had dual-flavour
+-- SQL detecting this column — but no migration ever created it, so the column
+-- was always absent and the variant was silently dropped on write. This
+-- migration closes that gap.
+--
+-- Backward compatibility (v2.7 A3.1 — append-only / additive):
+--   * NULLable, default NULL — existing rows read back as ``None``.
+--   * The repository SELECT already tolerates the column being absent
+--     (``_has_variant_column`` probe), so databases that applied 003 but not
+--     029 keep working (variant reported as None).
+--
+-- Wire/contract impact (append-only):
+--   * REST DTO ``VoicePreferenceResponse/Request.preferred_variant_id``
+--     (tail-appended, optional).
+--
+-- Done as a standalone ALTER migration (NOT by editing 003) so existing
+-- databases that already applied 003 are upgraded in-place; the schema
+-- migration runner applies each versioned file exactly once.
+--
+-- runner manages BEGIN/COMMIT -- file MUST NOT contain them.
+-- ============================================================================
+
+
+ALTER TABLE app_builder_voice_pref ADD COLUMN preferred_variant_id TEXT;

@@ -1,0 +1,326 @@
+/* =============================================================================
+ * Migrated from frontend/css/sandbox.css (S7.5 L8 PR-802a).
+ * Renamed 2026-07-04: the OS-isolation "sandbox" stack was removed 2026-07-01
+ * and replaced by FileGuard. These classes are no longer about an OS sandbox —
+ * they are the *shared visual language* for the live security panels
+ * (AutoApprovePanel / ProjectAccessPanel / ToolSafetyPanel), so the neutral
+ * `.sec-*` prefix is used and dead rules for the deleted SandboxConfigPanel /
+ * SandboxStatusIndicator / SandboxNotification components were dropped.
+ *
+ * Selectors stay global so class names remain reachable from the SFCs that
+ * reuse them. Scoped overrides belong inside each SFC's own <style scoped>
+ * block (L7 lane).
+ * ========================================================================== */
+
+/* ----------------------------------------------------------------------
+ * Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * ----------------------------------------------------------------------
+ * security-panels.css
+ * Shared panel styles for AutoApprovePanel / ProjectAccessPanel /
+ * ToolSafetyPanel.
+ *
+ * 与项目其它面板一致的设计语言：
+ *   - 颜色 token 使用 var(--bg-secondary) / var(--text-primary) 等
+ *   - 间距 token 使用 var(--space-N)
+ *   - 圆角 token 使用 var(--radius-*)
+ * 状态配色：
+ *   - green → 启用  - blue → 备用启用态
+ *   - gray → 禁用  - yellow → 降级  - red → 错误/不可用
+ */
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Panel container
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── 顶层容器 ───────────────────────────────────────────────────────────
+ * 注意：父级 SecurityConfigPanel 的 .security-section 已经提供了
+ * padding: var(--space-2) 0。如果这里再加 padding，会与 Allow Lists 等
+ * 内嵌型 tab 出现明显视觉差距（第一个 section 显得过于靠下）。
+ * 因此 padding 设为 0，由父级统一控制外边距。
+ * 同时 .project-access-panel 复用此样式，确保 sections 之间正确换行 + 间距。
+ */
+.sec-config-panel,
+.project-access-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: 0;
+  position: relative;
+}
+
+/* ── Section ──────────────────────────────────────────────────────────── */
+.sec-section {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 8px);
+  padding: var(--space-4);
+}
+
+.sec-section--disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.sec-section-title {
+  font-size: var(--text-base, 1rem);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 var(--space-3) 0;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+/* ── Overview ─────────────────────────────────────────────────────────── */
+.sec-overview {
+  background: var(--bg-tertiary, var(--bg-secondary));
+}
+
+.sec-overview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+
+.sec-overview-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.sec-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.sec-status-dot--green  { background: #34d399; box-shadow: 0 0 6px rgba(52,211,153,0.5); }
+.sec-status-dot--blue   { background: #60a5fa; box-shadow: 0 0 6px rgba(96,165,250,0.5); }
+.sec-status-dot--gray   { background: #6b7280; }
+.sec-status-dot--yellow { background: #fbbf24; box-shadow: 0 0 6px rgba(251,191,36,0.5); }
+.sec-status-dot--red    { background: #f87171; box-shadow: 0 0 6px rgba(248,113,113,0.5); }
+.sec-status-dot--orange { background: #fb923c; box-shadow: 0 0 6px rgba(251,146,60,0.5); }
+
+.sec-status-label {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+/* ── Toggle switch ────────────────────────────────────────────────────── */
+.sec-overview-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.sec-switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+  flex-shrink: 0;
+}
+.sec-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.sec-switch-slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: var(--bg-tertiary, #374151);
+  border-radius: 22px;
+  transition: background var(--duration-fast, 150ms);
+  border: 1px solid var(--border);
+}
+.sec-switch-slider::before {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  left: 2px;
+  top: 2px;
+  background: var(--text-muted);
+  border-radius: 50%;
+  transition: transform var(--duration-fast, 150ms), background var(--duration-fast, 150ms);
+}
+.sec-switch input:checked + .sec-switch-slider {
+  background: rgba(52,211,153,0.25);
+  border-color: rgba(52,211,153,0.5);
+}
+.sec-switch input:checked + .sec-switch-slider::before {
+  transform: translateX(18px);
+  background: #34d399;
+}
+.sec-switch input:disabled + .sec-switch-slider {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sec-switch-text {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+/* ── Fields ───────────────────────────────────────────────────────────── */
+.sec-field {
+  margin-bottom: var(--space-3);
+}
+.sec-field:last-child {
+  margin-bottom: 0;
+}
+
+.sec-field-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: var(--space-1);
+  cursor: pointer;
+}
+.sec-field-label input[type="checkbox"] {
+  accent-color: #34d399;
+}
+
+.sec-field-desc {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin: var(--space-1) 0 0 0;
+  line-height: 1.4;
+}
+
+.sec-field-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.sec-input {
+  background: var(--bg-primary, #1f2937);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 6px);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  width: 100%;
+  transition: border-color var(--duration-fast, 150ms);
+}
+.sec-input:focus {
+  outline: none;
+  border-color: rgba(96,165,250,0.6);
+  box-shadow: 0 0 0 2px rgba(96,165,250,0.15);
+}
+.sec-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.sec-input--number {
+  width: 100px;
+}
+
+.sec-input-unit {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* ── List editing ─────────────────────────────────────────────────────── */
+.sec-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-1);
+}
+
+.sec-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.sec-list-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.sec-list-row .sec-input {
+  flex: 1;
+}
+
+.sec-list-del {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.sec-list-del:hover {
+  color: var(--error, #f87171);
+}
+
+.sec-list-empty {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  padding: var(--space-2) 0;
+  text-align: center;
+  font-style: italic;
+}
+
+/* ── Actions ──────────────────────────────────────────────────────────── */
+.sec-actions {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.sec-actions-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.sec-save-status {
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md, 6px);
+}
+.sec-save-status--success {
+  color: #34d399;
+  background: rgba(52,211,153,0.08);
+}
+.sec-save-status--error {
+  color: #f87171;
+  background: rgba(248,113,113,0.08);
+}
+
+/* ── Loading overlay ──────────────────────────────────────────────────── */
+.sec-loading-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-lg, 8px);
+  z-index: 10;
+}
+
+/* ── Error banner ─────────────────────────────────────────────────────── */
+.sec-error-banner {
+  position: sticky;
+  bottom: var(--space-2);
+  background: rgba(248,113,113,0.12);
+  border: 1px solid rgba(248,113,113,0.35);
+  color: #f87171;
+  font-size: var(--text-sm);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md, 6px);
+  cursor: pointer;
+}

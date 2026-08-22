@@ -1,0 +1,259 @@
+/* ---------------------------------------------------------------------
+ * Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * --------------------------------------------------------------------- */
+
+/**
+ * Local-only styles for ServiceConfigPanel Tab components.
+ *
+ * 2026-06-05 重构：先前本文件自创了一套并行的 ``.field*`` / ``.card*`` /
+ * ``.svc-config-tab*`` / ``.svc-banner*`` / ``.model-slot*`` 类系统，与全局
+ * ``frontend/src/styles/common/settings.css:725-970`` 中已 1:1 移植 V1 的
+ * ``.svc-cfg-*`` 系统并行存在，导致 A-1 Tab 风格 / A-2 Card 结构 / A-3 Input
+ * 规格 / A-4 label·hint 数值漂移（与 V1 不一致）。本次清理把所有"全局已经
+ * 提供的 V1-parity 等价规则"全部删掉，模板改用全局 ``.svc-cfg-*`` 类直接
+ * 复用——即"V1 是行为/UI 事实来源，V2 复用更优结构表达"原则的落地。
+ *
+ * 仅保留 V2 真正新增的、全局未覆盖的 selector：
+ *   • ``.service-config-panel*``      —— 弹窗自身布局 + Save 按钮
+ *   • ``.svc-cfg-field--row``           —— 行内 label+toggle 的 V2 抽象
+ *     （V1 在每个 toggle 上 inline ``margin-left:auto``；V2 把它抽成类，
+ *     行为相同但结构更优）
+ *   • ``.svc-cfg-hint--row``/``--no-indent`` —— 行内 hint 缩进 modifier
+ *   • ``.svc-cfg-textarea``             —— textarea 高度/字体（V1 inline style）
+ *   • ``.svc-cfg-card-body``            —— V2 把 card 内容区抽成类，统一
+ *     padding/gap（V1 的内容区是无类 div，每张 card 各自靠 inline 间距）
+ *   • ``.collapsible-card*``            —— V2 的折叠卡组件实现（封装 V1 的
+ *     ``svc-cfg-collapse-arrow.collapsed`` 行为为可复用组件）
+ *   • ``.detection-rule-row*``          —— Security Tab 检测规则行专用 grid
+ *   • ``.entity-switches-grid``         —— Security Tab 实体开关响应式 grid
+ *   • ``.svc-cfg-row--2`` / ``--3``     —— V2 在全局 ``.svc-cfg-row`` 基础上
+ *     的两列 / 三列 modifier（全局只提供基础 flex-wrap）
+ *   • ``.field-row-2col`` / ``-3col``   —— CSS Grid 等列版本（与 ``.svc-cfg-row``
+ *     的 flex 版本互补，针对需要"严格等宽列"的检测规则对 / [label|num|unit]）
+ *   • ``.svc-cfg-slot-dot*``            —— 槽位前小圆点（V1 用 emoji 🔷/💚/🟦，
+ *     V2 抽出可访问性更好的彩点 + emoji 组合）
+ *
+ * 全部使用全局 token，不引入任何 hard-coded 颜色 / 尺寸。
+ */
+
+.service-config-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+
+.service-config-panel__title {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.service-config-panel__loading {
+  color: var(--text-muted);
+}
+
+.service-config-panel__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* ── Card body (V2 内聚抽象，V1 没有专门 body 类) ──────────────────────── */
+.svc-cfg-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* ── Collapsible card (V1 svc-cfg-card-header / svc-cfg-collapse-arrow 行为) ── */
+.collapsible-card__header {
+  cursor: pointer;
+  user-select: none;
+  justify-content: space-between;
+}
+
+.collapsible-card__title-content {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* ── Field-row 行内布局（V1 用 inline ``margin-left:auto`` 单点处理；
+       V2 抽成类） ──────────────────────────────────────────────────────── */
+.svc-cfg-field--row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.svc-cfg-field--row > :last-child {
+  margin-left: auto;
+}
+
+/* ── Hint placement modifiers（V2 行内 hint 与 row 同缩进 / 无缩进） ──── */
+.svc-cfg-hint--row {
+  margin-left: 1.6em;
+}
+
+.svc-cfg-hint--no-indent {
+  margin-left: 0;
+}
+
+/* ── textarea（V1 inline style；V2 抽出 modifier） ───────────────────── */
+.svc-cfg-textarea {
+  resize: vertical;
+  min-height: 80px;
+  font-family: monospace;
+  font-size: var(--text-xs);
+  /* textarea 默认 inline (vertical-align: baseline) 会在底部留缝，导致原生
+     resize 手柄与圆角边框错位/重叠。改 block 消除基线缝隙，手柄贴齐右下角。 */
+  display: block;
+  line-height: 1.5;
+}
+/* 原生 resize 手柄改用主题色，避免在圆角边框上突出一块默认浅色三角。 */
+.svc-cfg-textarea::-webkit-resizer {
+  border-color: transparent var(--text-muted) var(--text-muted) transparent;
+}
+
+/* ── Save button ──────────────────────────────────────────────────────── */
+.service-config-panel__save {
+  align-self: flex-start;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+}
+
+.service-config-panel__save:hover {
+  opacity: 0.9;
+}
+
+.service-config-panel__save:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ── Detection rule rows（Security Tab 专用 grid 行） ─────────────────── */
+.detection-rule-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.detection-rule-row:last-child {
+  border-bottom: none;
+}
+
+.detection-rule-row__toggle {
+  flex: 1;
+  margin: 0;
+}
+
+.detection-rule-row__level {
+  width: 80px;
+  flex-shrink: 0;
+}
+
+/* ── Entity switches grid（Security Tab 实体开关响应式 grid） ─────────── */
+.entity-switches-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--space-2);
+}
+
+/* ── Sub-card（PromptTab Summary Cache 等内嵌折叠子卡） ──────────────── */
+.sub-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-top: var(--space-2);
+}
+
+.sub-card__title {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border);
+}
+
+.sub-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+
+/* details/summary used as collapsible sub-card */
+details.sub-card > summary.sub-card__title {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+details.sub-card > summary.sub-card__title::before {
+  content: "▶ ";
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+details.sub-card[open] > summary.sub-card__title::before {
+  content: "▼ ";
+}
+
+/* ── ``.svc-cfg-row`` 的两列 / 三列 modifier（V2 在全局基础上扩展，
+   全局只定义了基础 ``.svc-cfg-row`` flex-wrap）───────────────────────── */
+.svc-cfg-row--2 > .svc-cfg-field {
+  flex: 1 1 calc(50% - var(--space-3));
+  min-width: 140px;
+}
+.svc-cfg-row--3 > .svc-cfg-field {
+  flex: 1 1 calc(33.333% - var(--space-3));
+  min-width: 120px;
+}
+
+/* ── CSS-grid field row（与 ``.svc-cfg-row`` 的 flex 版本互补；适用于
+   需要"严格等宽列"的 [name|level] / [label|num|unit] 等布局）─────────── */
+.field-row-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+.field-row-3col {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-3);
+}
+@media (max-width: 600px) {
+  .field-row-2col,
+  .field-row-3col {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Slot dot（V1 用 emoji 🔷/💚/🟦 表达槽位类型；V2 同时保留 emoji
+   且补一个可访问性彩点；全局已提供 ``.svc-cfg-slot-badge``，dot 是 V2 新增）── */
+.svc-cfg-slot-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.svc-cfg-slot-dot--npu {
+  background: var(--info, #60a5fa);
+}
+.svc-cfg-slot-dot--gpu {
+  background: var(--success, #34d399);
+}
+.svc-cfg-slot-dot--cpu {
+  background: var(--accent);
+}

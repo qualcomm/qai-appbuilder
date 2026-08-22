@@ -1,0 +1,15 @@
+# Zipformer (Chinese) (QNN HTP) inference dependencies.
+#
+# Setup_Builder_Env.bat collects this file at install time. The runner is
+# written for the ARM64 Python venv with Qualcomm QAIRT 2.45+ on PATH;
+# without that environment the runner emits QAI_APPBUILDER_UNAVAILABLE
+# and exits 1 (per the runner_protocol contract).
+#
+# Hot-path imports (must be present in the ARM64 venv):
+numpy>=1.24                  # streaming chunk loop, decoder context book-keeping
+soundfile>=0.12              # decode wav / ogg / flac (webm via ffmpeg shim in shared/audio_io.py)
+qai-appbuilder>=2.34         # QNN binding (vendor-supplied wheel); needs DataType.NATIVE support
+kaldi_native_fbank>=1.18     # 80-channel kaldi-style log-mel fbank (matches sherpa-onnx training recipe)
+
+# Optional but recommended:
+psutil>=5.9                  # peak-RSS sampling for telemetry.StageTimer (graceful no-op if missing)

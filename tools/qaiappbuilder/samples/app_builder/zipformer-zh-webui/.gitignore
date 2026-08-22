@@ -1,0 +1,6 @@
+# (Runtime uploads/outputs live under <repo>/data/app_builder/<app_id>/ — not here.)
+
+# Python
+__pycache__/
+*.pyc
+*.pyo

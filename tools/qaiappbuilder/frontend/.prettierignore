@@ -1,0 +1,11 @@
+dist
+node_modules
+js
+css
+vendor
+locales
+public
+src/types/api.ts
+coverage
+playwright-report
+test-results

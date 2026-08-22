@@ -1,0 +1,22 @@
+-- ============================================================================
+-- Migration 042: chat_mode_template.hard_constraints_json — meeting-room caps
+--
+-- Tail-appends ONE nullable column to chat_mode_template (migration 040):
+--   hard_constraints_json  TEXT NULL  — JSON object
+--       {"max_chars_per_turn": int|null, "max_seconds_per_turn": int|null}
+--     Two INDEPENDENT optional soft constraints (decisions 3 + 9): a per-turn
+--     length cap and a per-round time cap. Either field null = that constraint
+--     is NOT enabled; the whole column null = no constraint.
+--
+-- SOFT-only (decision 4): the orchestrator appends a prose instruction to the
+-- speaker's persona — it never truncates the stream nor asyncio.wait_for()s the
+-- turn. So this column only feeds prompt text, never runtime enforcement.
+--
+-- ZERO legacy-data migration (v2.7 §2): the column is nullable with no default,
+-- so every pre-existing row reads back NULL → ModeHardConstraints() (both None)
+-- → no constraint appended; existing behaviour byte-for-byte unchanged.
+--
+-- runner manages BEGIN/COMMIT — file MUST NOT contain them.
+-- ============================================================================
+
+ALTER TABLE chat_mode_template ADD COLUMN hard_constraints_json TEXT;

@@ -1,0 +1,284 @@
+/* =============================================================================
+ * Migrated from frontend/css/variables.css (S7.5 L8 PR-802a).
+ * Selectors stay global so legacy class names remain reachable from new
+ * SFCs that reuse them. Scoped overrides belong inside each SFC's own
+ * <style scoped> block (L7 lane).
+ * ========================================================================== */
+
+/* ---------------------------------------------------------------------
+ * Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * --------------------------------------------------------------------- */
+/* ── Variables & Themes ─────────────────────────────────────────────────── */
+/* CSS custom properties for colors, spacing, typography, shadows, etc.     */
+/* Includes dark mode (:root) and light mode (html.light) theme overrides.  */
+/*                                                                          */
+/* Token system overview (see plans/ui-redesign.md §3, §4):                 */
+/*   A. Color       — Surface 层级 / Text / Border / Accent / Status        */
+/*   B. Typography  — font family, scale, line-height                       */
+/*   C. Spacing     — 8px 基线网格 (--space-1 .. --space-12)                */
+/*   D. Radius      — xs / sm / md / lg / xl / full（保留旧别名）           */
+/*   E. Shadow      — sm / md / lg / glow（保留旧别名）                     */
+/*   F. Motion      — duration & easing（保留 --transition 别名）           */
+/*                                                                          */
+/* 向后兼容：所有旧 Token 名（--accent, --bg-primary, --radius, --shadow,   */
+/* --transition, --font-mono 等）保持可用，下游 CSS 无需立即修改。          */
+
+:root {
+  /* ───────── A. Color — Surface 层级 ───────── */
+  --bg-primary:    #0c0e14;   /* 应用最底层背景（深空蓝黑） */
+  --bg-secondary:  #161922;   /* 侧边栏、面板容器 */
+  --bg-tertiary:   #1e2230;   /* 卡片、AI 气泡、输入区 */
+  --bg-hover:      #272b3d;   /* 悬停态背景 */
+  --bg-input:      #1e2230;   /* 表单输入控件 */
+
+  /* ───────── A. Color — Text ───────── */
+  --text-primary:   #f0f2f8;  /* 主文案 */
+  --text-secondary: #9ba3c0;  /* 次要文案、说明 */
+  --text-muted:     #6b7394;  /* 占位、禁用、辅助 */
+
+  /* ───────── A. Color — Border ───────── */
+  --border:        #2a3050;
+  --border-light:  #3a4468;
+
+  /* ───────── A. Color — Accent (品牌主色) ───────── */
+  --accent:        #7c6cff;
+  --accent-hover:  #9488ff;
+  --accent-light:  rgba(124, 108, 255, 0.18);
+  --accent-glow:   rgba(124, 108, 255, 0.30);
+  --accent-muted:  rgba(124, 108, 255, 0.12);
+
+  /* ───────── A. Color — Status ───────── */
+  --success:       #34d399;
+  --warning:       #fbbf24;
+  --error:         #f87171;
+  --info:          #60a5fa;
+
+  /* ───────── A. Color — Domain (NPU / Cloud) ───────── */
+  --npu:           #22d3ee;
+  --npu-light:     rgba(34, 211, 238, 0.15);
+  --cloud-light:   rgba(96, 165, 250, 0.15);
+
+  /* ───────── A. Color — Chat Bubble ───────── */
+  --user-bubble:   var(--accent);
+  --user-text:     #ffffff;
+  --ai-bubble:     var(--bg-tertiary);
+  --ai-text:       var(--text-primary);
+
+  /* ───────── A. Color — Code / Log Surface ───────── */
+  --bg-code:       #0d1117;   /* 代码块、日志面板专用 */
+  --code-text:     #c9d1d9;
+
+  /* ───────── A. Color — Banner / Alert ───────── */
+  --banner-warn-bg:      rgba(251, 191, 36, 0.10);
+  --banner-warn-border:  rgba(251, 191, 36, 0.30);
+  --banner-warn-text:    #fbbf24;
+  --banner-info-bg:      rgba(96, 165, 250, 0.10);
+  --banner-info-border:  rgba(96, 165, 250, 0.30);
+  --banner-info-text:    var(--info);
+  --banner-error-bg:     rgba(248, 113, 113, 0.08);
+  --banner-error-border: rgba(248, 113, 113, 0.30);
+  --banner-error-text:   var(--error);
+  --banner-success-bg:     rgba(52, 211, 153, 0.08);
+  --banner-success-border: rgba(52, 211, 153, 0.30);
+  --banner-success-text:   var(--success);
+
+  /* ───────── A. Color — Modal / Overlay ───────── */
+  --overlay-bg:    rgba(0, 0, 0, 0.55);
+
+  /* ───────── B. Typography — Font Family ───────── */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+
+  /* ───────── B. Typography — Scale ───────── */
+  --text-xs:   11px;   /* 极小辅助文字（角标、版本号） */
+  --text-sm:   12px;   /* 小字（次要说明、标签） */
+  --text-base: 13px;   /* 正文默认 */
+  --text-md:   14px;   /* 强调正文 / 按钮 */
+  --text-lg:   16px;   /* 小标题 */
+  --text-xl:   20px;   /* 区块标题 */
+  --text-2xl:  24px;   /* 页面主标题 */
+
+  /* ───────── B. Typography — Line Height ───────── */
+  /* V1 parity (css/variables.css): normal 1.6 / relaxed 1.7. V2 had
+     drifted to 1.65 / 1.75 which made body text look slightly looser
+     than V1. */
+  --leading-tight:   1.4;
+  --leading-normal:  1.6;
+  --leading-relaxed: 1.7;
+
+  /* ───────── C. Spacing — 8px 基线网格 ───────── */
+  --space-1:   4px;
+  --space-2:   8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* ───────── D. Radius ─────────                                   */
+  /* 「保守优先」：保留既有 --radius/--radius-sm/--radius-lg 数值， */
+  /* 新增 xs / md / xl / full 与 --radius-md 作为 --radius 同义。   */
+  --radius-xs:   4px;
+  --radius-sm:   8px;                    /* 旧值，保持兼容 */
+  --radius:     12px;                    /* 旧值，保持兼容（= --radius-md） */
+  --radius-md:  var(--radius);           /* 新别名指向旧 --radius */
+  --radius-lg:  16px;                    /* 旧值，保持兼容 */
+  --radius-xl:  20px;
+  --radius-full: 9999px;
+
+  /* ───────── E. Shadow ───────── */
+  --shadow-sm:   0 1px 3px rgba(0, 0, 0, 0.30);
+  --shadow-md:   0 4px 16px rgba(0, 0, 0, 0.35);
+  --shadow-lg:   0 12px 48px rgba(0, 0, 0, 0.45);
+  --shadow-glow: 0 0 0 3px var(--accent-muted);
+  --shadow:      var(--shadow-md);  /* 旧别名兼容 */
+
+  /* ───────── F. Motion — Duration & Easing ───────── */
+  --duration-fast:   150ms;
+  --duration-normal: 200ms;
+  --duration-slow:   350ms;
+  --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --transition:  var(--duration-normal) var(--ease-out);  /* 旧别名兼容 */
+
+  /* ───────── A. Color — AI Coding Domain ───────── */
+  --cc-accent:        #7eb8f7;
+  --cc-accent-bg:     rgba(126, 184, 247, 0.12);
+  --cc-accent-border: rgba(126, 184, 247, 0.25);
+  --oc-accent:        #63b3ed;
+  --oc-accent-bg:     rgba(99, 179, 237, 0.10);
+  --oc-accent-border: rgba(99, 179, 237, 0.20);
+
+  /* ───────── A. Color — Gradient ───────── */
+  --gradient-brand: linear-gradient(135deg, #7c6cff 0%, #60a5fa 100%);
+  --gradient-warm:  linear-gradient(135deg, #7c6cff 0%, #ec4899 100%);
+
+  /* ───────── A. Color — Glass Morphism ───────── */
+  --glass-bg:      rgba(22, 25, 34, 0.85);
+  --glass-border:  rgba(255, 255, 255, 0.06);
+  --glass-blur:    12px;
+
+  /* ───────── A. Color — Focus Ring ───────── */
+  --focus-ring:    0 0 0 2px var(--bg-primary), 0 0 0 4px var(--accent);
+
+  /* ───────── B. Typography — Font Weight ───────── */
+  --weight-normal:   400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+
+  /* ───────── B. Typography — Letter Spacing ───────── */
+  --tracking-tight:  -0.01em;
+  --tracking-normal:  0;
+  --tracking-wide:    0.02em;
+  --tracking-wider:   0.05em;
+
+  /* ───────── A. Color — Multi-Agent Discussion Speaker Palette ─────────
+   * 8 distinct, theme-aware speaker colours (multi-agent block-5, design §5.3).
+   * Each named participant's avatar background + name accent uses one of these
+   * tokens (resolved via `discussionColorToken(index)` → `var(--discussion-
+   * speaker-N)`). NEVER write a participant colour as a hardcoded literal in a
+   * component — always reference these tokens so both dark (here) and light
+   * (html.light below) themes stay covered (§3.10 / 主题铁律). Dark-theme values
+   * are tuned for contrast on the dark AI-bubble surface. */
+  --discussion-speaker-0: #7c6cff;  /* brand violet  */
+  --discussion-speaker-1: #34d399;  /* emerald       */
+  --discussion-speaker-2: #f59e0b;  /* amber         */
+  --discussion-speaker-3: #60a5fa;  /* sky blue      */
+  --discussion-speaker-4: #f472b6;  /* pink          */
+  --discussion-speaker-5: #22d3ee;  /* cyan          */
+  --discussion-speaker-6: #a78bfa;  /* lavender      */
+  --discussion-speaker-7: #fb7185;  /* rose          */
+}
+
+/* ───────────────────────── Light Theme ─────────────────────────────────── */
+/* 仅覆盖与暗色主题不同的 Token，其他从 :root 继承。                        */
+
+html.light {
+  /* Surface 层级 */
+  --bg-primary:    #f8f9fc;
+  --bg-secondary:  #ffffff;
+  --bg-tertiary:   #f1f3f9;
+  --bg-hover:      #e8ecf4;
+  --bg-input:      #ffffff;
+
+  /* Border */
+  --border:        #dde1f0;
+  --border-light:  #c8cde8;
+
+  /* Text */
+  --text-primary:   #1a1f36;
+  --text-secondary: #4a5578;
+  --text-muted:     #7a84a0;
+
+  /* Accent */
+  --accent:        #5b4edb;
+  --accent-hover:  #4a3dc8;
+  --accent-light:  rgba(91, 78, 219, 0.12);
+  --accent-glow:   rgba(91, 78, 219, 0.20);
+  --accent-muted:  rgba(91, 78, 219, 0.08);
+
+  /* Chat Bubble */
+  --user-bubble:   var(--accent);
+  --user-text:     #ffffff;
+  --ai-bubble:     #ffffff;
+  --ai-text:       var(--text-primary);
+
+  /* Code / Log Surface */
+  --bg-code:       #f6f8fa;
+  --code-text:     #24292f;
+
+  /* Banner — 文字提高对比度（深底浅字 → 浅底深字） */
+  --banner-warn-text: #92400e;
+  --banner-info-text: #1e40af;
+  /* success / error 此前漏了亮色覆盖:深色主题的 #34d399 / #f87171 直接用在白底
+     上对比度不足(绿色尤其明显)。补齐后 --banner-*-text 四色在两个主题下都可读。 */
+  --banner-success-text: #065f46;
+  --banner-error-text: #991b1b;
+
+  /* Domain colors（亮色版） */
+  --npu:           #00acc1;
+  --npu-light:     rgba(0, 172, 193, 0.12);
+  --cloud-light:   rgba(33, 150, 243, 0.10);
+
+  /* Shadow — 亮色主题更柔和 */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 12px 48px rgba(0, 0, 0, 0.12);
+  --shadow:    var(--shadow-md);
+
+  /* Modal Overlay */
+  --overlay-bg: rgba(15, 17, 30, 0.45);
+
+  /* AI Coding Domain（亮色版） */
+  --cc-accent:        #2563eb;
+  --cc-accent-bg:     rgba(37, 99, 235, 0.08);
+  --cc-accent-border: rgba(37, 99, 235, 0.20);
+  --oc-accent:        #1d4ed8;
+  --oc-accent-bg:     rgba(29, 78, 216, 0.08);
+  --oc-accent-border: rgba(29, 78, 216, 0.20);
+
+  /* Gradient（亮色版） */
+  --gradient-brand: linear-gradient(135deg, #5b4edb 0%, #3b82f6 100%);
+  --gradient-warm:  linear-gradient(135deg, #5b4edb 0%, #db2777 100%);
+
+  /* Glass Morphism（亮色版） */
+  --glass-bg:      rgba(255, 255, 255, 0.90);
+  --glass-border:  rgba(0, 0, 0, 0.05);
+  --glass-blur:    12px;
+
+  /* Multi-Agent Discussion Speaker Palette（亮色版 — 加深以在浅底上保持对比，
+   * 多 Agent block-5 / design §5.3）。与 :root 深色版一一对应，浅色主题下
+   * 头像底色 + 名字强调色仍走同名 token，杜绝硬编码。 */
+  --discussion-speaker-0: #5b4edb;
+  --discussion-speaker-1: #059669;
+  --discussion-speaker-2: #d97706;
+  --discussion-speaker-3: #2563eb;
+  --discussion-speaker-4: #db2777;
+  --discussion-speaker-5: #0891b2;
+  --discussion-speaker-6: #7c3aed;
+  --discussion-speaker-7: #e11d48;
+}

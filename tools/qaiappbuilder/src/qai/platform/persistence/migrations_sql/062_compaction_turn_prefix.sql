@@ -1,0 +1,40 @@
+-- ============================================================================
+-- Migration 062: Turn-prefix summaries for compaction checkpoint (P3)
+--
+-- Adds ``turn_prefix_summaries_json`` to ``chat_compaction_checkpoint``. The
+-- column is NULL for rows written before this migration ran; the wire-assembly
+-- path treats a NULL / empty / malformed list as absent (no
+-- ``[Turn Prefix Summary]`` system messages injected), so a pre-migration-062
+-- row is byte-for-byte identical to a fresh row whose turn-prefix history has
+-- not been populated yet. Rehydration
+-- (``SqliteCompactionCheckpointRepository._row_to_checkpoint``) maps NULL /
+-- whitespace / invalid JSON back to the dataclass's ``None`` default.
+--
+-- Additive only (AGENTS.md §8): one new nullable column on an existing table.
+-- No existing column, index, or FK is touched. This migration is standalone
+-- (NOT edited into 044 / 059 / 060) — existing databases upgrade in-place.
+--
+-- The column holds an opaque JSON payload written by
+-- :class:`qai.chat.application.use_cases.summarize_turn_prefix.
+-- SummarizeTurnPrefixUseCase`. The wire shape is a list of objects, each
+-- ``{"user_message_id": str, "summary_text": str, "created_at": str}``,
+-- capped at three entries FIFO (oldest evicted first). The repository
+-- stores the whole list as one TEXT blob; no per-entry index is needed
+-- (the reader always fetches the full list and iterates it in
+-- insertion order).
+--
+-- Numbering: the spec text refers to "061" but migration id 061 was already
+-- claimed by ``061_pending_permission_conversation_gone.sql`` shipped in the
+-- same review cycle. This migration takes the next free id (062) so both
+-- can coexist in a single upgrade.
+--
+-- Idempotence: the migration runner records applied ids in
+-- ``_qai_schema_migrations`` and skips already-applied files (see
+-- ``qai.platform.persistence.migrations.MigrationRunner``). SQLite's
+-- ``ADD COLUMN`` has no ``IF NOT EXISTS`` clause; the runner's applied-set is
+-- the only guard we need. The runner manages BEGIN/COMMIT — this file MUST
+-- NOT contain transaction statements.
+-- ============================================================================
+
+ALTER TABLE chat_compaction_checkpoint
+    ADD COLUMN turn_prefix_summaries_json TEXT;

@@ -1,0 +1,5 @@
+# This file is NOT used by the real MeloTTS-ZH runner.
+# The actual pinyin-to-phoneme mapping is in melo_zh_local/opencpop-strict.txt
+# and the phoneme inventory is in melo_zh_local/symbols.py.
+# This placeholder is kept for backward compatibility with the manifest schema validation.
+# See melo_zh_local/ for the real G2P implementation.
