@@ -523,6 +523,11 @@ if errorlevel 1 (
 REM Activate the venv so all subsequent "uv pip install" calls use it automatically,
 REM avoiding --python with an absolute path that may contain spaces or CJK characters.
 call "%VENV_DIR%\Scripts\activate.bat"
+REM The shared venv holds third-party dependencies; load this installation's
+REM application source directly rather than registering an editable project.
+set "PYTHONPATH=%ROOT_DIR%src;%ROOT_DIR%"
+echo [INFO] Setup source root: %ROOT_DIR%
+"%VENV_DIR%\Scripts\python.exe" -c "import qai; print('[INFO] Setup qai source: ' + qai.__file__)"
 
 REM Install the bytecode-cache redirect .pth into the venv so EVERY process
 REM using this venv (IDE, bare ``python`` / ``pytest``, automation agents —
@@ -534,19 +539,17 @@ REM re-run on every rebuild. Best-effort: a failure here never aborts Setup.
 REM --- Check if dependencies are already installed (skip reinstall) ---
 REM State-Truth-First (AGENTS.md): probe the REAL completion marker, not a
 REM proxy. The old check imported only ``fastapi`` -- but fastapi is one of
-REM the FIRST packages to land during ``uv pip install -e .``, so a run that
-REM was interrupted after fastapi but before the rest (structlog, ..., and the
-REM editable ``qai`` package whose .pth / dist-info are written LAST) would
-REM leave a HALF-installed venv that still passed ``import fastapi`` -- and the
-REM skip below then made that broken state permanent (Setup printed SUCCESS but
-REM Start.bat crashed with ``No module named 'structlog' / 'qai'``).
+REM the FIRST packages to land during ``uv pip install -r pyproject.toml``,
+REM so a run that was interrupted after fastapi but before the rest
+REM (structlog, claude_agent_sdk, ...) would leave a HALF-installed venv that
+REM still passed ``import fastapi`` -- and the skip below then made that
+REM broken state permanent (Setup printed SUCCESS but Start.bat crashed with
+REM ``No module named 'structlog'``).
 REM
-REM Fix: require the WHOLE closure to import -- including ``qai`` (the editable
-REM package, which only resolves once ``pip install -e .`` fully completed) and
-REM ``structlog`` (a late-installed runtime dep). If ANY is missing we do NOT
-REM skip; we fall through and (re)run the install. ``uv pip install`` is
-REM idempotent, so already-present packages are skipped and only the missing
-REM ones are fetched -- a re-run is cheap and self-heals a half install.
+REM Fix: require the WHOLE dependency closure to import -- NOT ``qai`` itself
+REM (the app source is never installed into this venv; it is loaded via
+REM PYTHONPATH from %ROOT_DIR%src, see above) -- and ``structlog`` (a
+REM late-installed runtime dep). If ANY is missing we do NOT skip; we fall
 REM
 REM ``claude_agent_sdk`` is included in the probe too: Step 4a installs its
 REM vendored wheel with ``--no-deps`` and Step 4b2 resolves its ``mcp`` (and
@@ -581,9 +584,9 @@ REM ``browserforge`` is probed for the same reason: it generates the dynamic
 REM per-request browser fingerprint the keyless scrapers use to evade bot
 REM detection (import-guarded, so its absence only drops back to a static
 REM header set), and ships a pure-Python wheel so probing it forces no rebuild.
-"%VENV_DIR%\Scripts\python.exe" -c "import fastapi, uvicorn, structlog, qai, claude_agent_sdk, croniter, playwright, selectolax, lxml, browserforge" >nul 2>&1
+"%VENV_DIR%\Scripts\python.exe" -c "import fastapi, uvicorn, structlog, claude_agent_sdk, croniter, playwright, selectolax, lxml, browserforge" >nul 2>&1
 if not errorlevel 1 (
-    echo [SKIP] Dependencies already installed and complete ^(fastapi, uvicorn, structlog, qai, claude_agent_sdk, croniter, playwright^). Skipping pip steps.
+    echo [SKIP] Dependencies already installed and complete ^(fastapi, uvicorn, structlog, claude_agent_sdk, croniter, playwright^). Skipping pip steps.
     goto :skip_all_installs
 )
 echo [INFO] Dependency closure incomplete or missing; running full install to ^(re^)complete it...
@@ -662,19 +665,29 @@ REM --- Step 4b: Install all runtime dependencies (from pyproject.toml) ---
 REM
 REM The legacy requirements.txt was removed in S8 PR-084; pyproject.toml
 REM [project].dependencies is now the single source of truth for runtime
-REM deps. They are installed by step 4b2's editable install (`pip install
-REM -e .`) below, so there is no separate `-r requirements.txt` step here.
+REM deps. They are installed by step 4b2's dependency install (`uv pip
+REM install -r pyproject.toml`) below, so there is no separate `-r
+REM requirements.txt` step here.
 echo.
 echo [INFO] Installing dependencies from pyproject.toml...
 echo [INFO] ^(First run may take a few minutes^)
 echo.
 
-REM --- Step 4b2: Editable install (runtime deps + entry points + src layout) ---
+REM --- Step 4b2: Install runtime dependencies (no editable src install) ---
 REM
-REM ``pip install -e .`` reads pyproject.toml [project].dependencies and
-REM installs all runtime dependencies, registers console-script entry points
-REM (qai, qai-serve, qai-uninstall - see pyproject.toml [project.scripts]
-REM for the single-entry strategy) and the ``src/`` package in develop mode.
+REM ``uv pip install -r pyproject.toml`` reads pyproject.toml
+REM [project].dependencies and installs all third-party runtime dependencies
+REM into the SHARED venv. It deliberately does NOT install the local
+REM ``qaimodelbuilder``/``qai`` package itself (no ``-e .`` / ``.``), and so
+REM registers no console-script entry points (qai / qai-serve /
+REM qai-uninstall) -- the shared venv is used by every installation on this
+REM machine, so binding it to one project's source tree would make every
+REM OTHER installation load the wrong code. Instead, every launcher
+REM (Start.bat / qai.bat / Console.bat) sets PYTHONPATH to ITS OWN
+REM %ROOT_DIR%src before invoking ``python -m apps.cli`` /
+REM ``apps.cli.serve`` / ``scripts.init.uninstall`` directly, so each
+REM installation always resolves its own source regardless of which project
+REM last ran Setup.bat in this venv.
 REM
 REM The ``[cc-sdk]`` extra is included so the Claude Code SDK backend
 REM (``claude_agent_sdk``, V1 file checkpoint/rewind parity) is actually
@@ -691,7 +704,7 @@ REM The extra remains OPTIONAL in pyproject.toml (cloud-only / Linux installs
 REM that never run Setup.bat are not forced to pull it; the SDK provider is
 REM import-guarded) -- Setup.bat is the Windows full-install entry point, so it
 REM enables the extra explicitly here.
-echo [INFO] Installing editable package ^(pip install -e .[cc-sdk,search]^)...
+echo [INFO] Installing dependencies ^(uv pip install -r pyproject.toml --extra cc-sdk --extra search^)...
 REM The ``search`` extra (playwright + selectolax + lxml) is a RUNTIME extra
 REM installed by DEFAULT (not gated on --dev). TWO runtime features depend on
 REM it: (1) the ``web`` search provider's browser-backed ``google_browser``
@@ -701,12 +714,12 @@ REM control). Both share the SAME pinned ``playwright==1.61.0`` + the Chromium
 REM binary fetched in Step 4d, so installing this by default gives end users
 REM both the browser search path AND the browser tool out of the box.
 if exist "_constraints_tmp.txt" (
-    uv pip install -e ".[cc-sdk,search]" --find-links "%WHL_DIR%" -c "_constraints_tmp.txt"
+    uv pip install -r pyproject.toml --extra cc-sdk --extra search --find-links "%WHL_DIR%" -c "_constraints_tmp.txt"
 ) else if /i "%HOST_ARCH%"=="x64" (
     REM x64: no vendored wheels, resolve everything from PyPI.
-    uv pip install -e ".[cc-sdk,search]"
+    uv pip install -r pyproject.toml --extra cc-sdk --extra search
 ) else (
-    uv pip install -e ".[cc-sdk,search]" --find-links "%WHL_DIR%"
+    uv pip install -r pyproject.toml --extra cc-sdk --extra search --find-links "%WHL_DIR%"
 )
 if errorlevel 1 goto :install_error
 
@@ -730,12 +743,12 @@ if not "%DEV_EXTRAS%"=="1" (
 )
 echo [INFO] Installing dev + e2e extras from pyproject.toml...
 if exist "_constraints_tmp.txt" (
-    uv pip install --find-links "%WHL_DIR%" -c "_constraints_tmp.txt" -e ".[dev,e2e,cc-sdk]"
+    uv pip install --find-links "%WHL_DIR%" -c "_constraints_tmp.txt" -r pyproject.toml --extra dev --extra e2e --extra cc-sdk
 ) else if /i "%HOST_ARCH%"=="x64" (
     REM x64: no vendored wheels, resolve everything from PyPI.
-    uv pip install -e ".[dev,e2e,cc-sdk]"
+    uv pip install -r pyproject.toml --extra dev --extra e2e --extra cc-sdk
 ) else (
-    uv pip install --find-links "%WHL_DIR%" -e ".[dev,e2e,cc-sdk]"
+    uv pip install --find-links "%WHL_DIR%" -r pyproject.toml --extra dev --extra e2e --extra cc-sdk
 )
 if errorlevel 1 goto :install_error
 
@@ -783,9 +796,10 @@ REM scipy / jieba / pypinyin / cn2an / g2p_en / pillow / more-itertools /
 REM tqdm / regex) must be installed here for whisper-base / melotts-zh /
 REM ppocrv4 inference to work out of the box.
 REM
-REM Runs AFTER the editable install (Step 4b2) so the unified ``qai`` CLI
-REM dispatcher (and its ``install-pack-deps`` subcommand) is on PATH inside
-REM the venv. Non-fatal: individual package failures only warn; setup still
+REM Runs AFTER Step 4b2's dependency install so the unified ``qai`` CLI
+REM dispatcher (and its ``install-pack-deps`` subcommand) is importable from
+REM %ROOT_DIR%src via PYTHONPATH inside the venv. Non-fatal: individual
+REM package failures only warn; setup still
 REM succeeds (matches V1 install_app_builder_deps behaviour).
 echo.
 echo [INFO] Installing App Builder Pack dependencies ^(factory\chat_features\app-builder\models\*\requirements.txt^)...

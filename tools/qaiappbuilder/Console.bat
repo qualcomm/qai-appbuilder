@@ -79,8 +79,8 @@ set "PYTHONPYCACHEPREFIX=%~dp0data\caches\pycache"
 
 if not exist "%ACTIVATE%" goto :no_venv
 
-REM Add tools\ to PATH so uv is available inside the shell.
-set "PATH=%ROOT_DIR%tools;%PATH%"
+REM Prefer this installation's launchers before the shared venv console scripts.
+set "PATH=%ROOT_DIR%;%ROOT_DIR%tools;%PATH%"
 
 REM PortableGit PATH injection (parity with Start.bat / qai.bat) so commands
 REM that shell out to git -- e.g. `pip install git+https://...`, editable
@@ -93,6 +93,10 @@ if exist "%PORTABLE_GIT_DIR%\cmd\git.exe" (
     set "PATH=%PORTABLE_GIT_DIR%\bin;%PORTABLE_GIT_DIR%\usr\bin;%PATH%"
 )
 
+set "PYTHONPATH=%ROOT_DIR%src;%ROOT_DIR%"
+cd /d "%ROOT_DIR%"
+echo [INFO] Console source root: %ROOT_DIR%
+echo [INFO] Console qai.bat: %ROOT_DIR%qai.bat
 cmd /k call "%ACTIVATE%"
 exit /b 0
 
