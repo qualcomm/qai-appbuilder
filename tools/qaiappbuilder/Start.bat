@@ -173,6 +173,8 @@ exit /b 1
 REM -- Set PYTHONPATH for src layout ------------------------------------------
 set "PYTHONPATH=src;."
 cd /d "%ROOT_DIR%"
+echo [INFO] Application source root: %ROOT_DIR%
+"%PYTHON%" -c "import qai; print('[INFO] Application qai source: ' + qai.__file__)"
 
 REM -- Resolve backend port(s) from the single source of truth ---------------
 REM NO port literal is authored here: the backend bind candidates are read at

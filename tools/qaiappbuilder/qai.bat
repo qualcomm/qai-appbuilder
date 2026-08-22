@@ -5,29 +5,26 @@ REM SPDX-License-Identifier: BSD-3-Clause
 REM ---------------------------------------------------------------------
 REM qai.bat - convenience wrapper for the unified "qai" command-line tool.
 REM
-REM After Setup.bat has installed the environment, the "qai" console
-REM script lives in the host-arch runtime venv at
-REM   %LOCALAPPDATA%\QAIModelBuilder\envs\<.venv_arm64_313|.venv_x64_313>\Scripts\qai.exe
-REM
-REM This wrapper lets you run it from the project directory WITHOUT activating
-REM the venv or typing the full path:
+REM The runtime venv supplies third-party dependencies. This wrapper loads the
+REM current installation's apps/ and src/qai/ through PYTHONPATH, so separate
+REM installations never depend on the venv's editable-project state.
 REM
 REM   qai --help
 REM   qai config provider list
 REM   qai app whisper-base --audio clip.wav
 REM   qai build
 REM
-REM All arguments are forwarded verbatim to qai.exe. The wrapper also injects
-REM PortableGit onto PATH (when present) so CLI commands that shell out to git
-REM behave the same as Start.bat. Exit code is propagated from qai.exe.
+REM All arguments are forwarded verbatim. PortableGit is added to PATH when
+REM present so CLI commands that shell out to git behave like Start.bat.
 
 setlocal EnableDelayedExpansion
+set "ROOT_DIR=%~dp0"
 
 REM --- Host architecture selection (three-tier) -----------------------------
 REM Priority: 1) --arch <value> CLI flag  2) data\config\host_arch file
 REM           3) Auto-detect via %PROCESSOR_ARCHITECTURE% / PROCESSOR_ARCHITEW6432
 REM PASS_ARGS is the arg list with any --arch <value> pair removed so it can
-REM be forwarded to qai.exe without leaking the flag.
+REM be forwarded to apps.cli without leaking the launcher-only flag.
 set "FORCED_ARCH="
 set "PASS_ARGS="
 set "_NEXT_IS_ARCH="
@@ -64,13 +61,12 @@ if not defined HOST_ARCH (
 set "VENV_DIR_NAME=.venv_arm64_313"
 if /i "%HOST_ARCH%"=="x64" set "VENV_DIR_NAME=.venv_x64_313"
 set "VENV=%LOCALAPPDATA%\QAIModelBuilder\envs\%VENV_DIR_NAME%"
-set "QAI_EXE=%VENV%\Scripts\qai.exe"
+set "PYTHON=%VENV%\Scripts\python.exe"
 
-if not exist "%QAI_EXE%" (
-    echo [ERROR] qai is not installed yet.
-    echo [ERROR] Expected: %QAI_EXE%
-    echo [ERROR] Run Setup.bat first to create the environment and install
-    echo [ERROR] the "qai" command-line tool.
+if not exist "%PYTHON%" (
+    echo [ERROR] Python runtime is not installed yet.
+    echo [ERROR] Expected: %PYTHON%
+    echo [ERROR] Run Setup.bat first to create the environment.
     exit /b 1
 )
 
@@ -83,5 +79,9 @@ if exist "%PORTABLE_GIT_DIR%\cmd\git.exe" (
     set "PATH=%PORTABLE_GIT_DIR%\bin;%PORTABLE_GIT_DIR%\usr\bin;%PATH%"
 )
 
-"%QAI_EXE%" %PASS_ARGS%
+set "PYTHONPATH=%ROOT_DIR%src;%ROOT_DIR%"
+cd /d "%ROOT_DIR%"
+echo [INFO] CLI source root: %ROOT_DIR%
+"%PYTHON%" -c "import qai; print('[INFO] CLI qai source: ' + qai.__file__)"
+"%PYTHON%" -m apps.cli %PASS_ARGS%
 exit /b %ERRORLEVEL%
