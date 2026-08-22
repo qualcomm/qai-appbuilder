@@ -1,4 +1,4 @@
-# 🤖 QAI ModelBuilder
+# 🤖 QAI AppBuilder
 
 > **A local-first AI workspace for Snapdragon® X-Series PCs — built on a clean DDD/Clean-Architecture core. Featuring an on-device App Builder workbench (ASR / TTS) running natively on the Snapdragon NPU, an AI-driven QNN Model Conversion & Optimization skill (Model Builder), multi-agent streaming chat, and a built Vue 3 WebUI.**
 
@@ -59,7 +59,7 @@
 
 ## 🏛️ Architecture Overview
 
-QAI ModelBuilder has been **fully rewritten as a Clean Architecture / DDD application**. The codebase is organized into bounded contexts under `src/qai/`, an application entry layer under `apps/`, a thin protocol-adapter layer under `interfaces/`, and out-of-the-box assets under `factory/`.
+QAI AppBuilder has been **fully rewritten as a Clean Architecture / DDD application**. The codebase is organized into bounded contexts under `src/qai/`, an application entry layer under `apps/`, a thin protocol-adapter layer under `interfaces/`, and out-of-the-box assets under `factory/`.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -192,7 +192,7 @@ Once you've converted a model with [`model-builder`](#-highlight-model-builder-s
 
 ## 🌟 Highlight: Model Builder Skill
 
-> **The most powerful feature of QAI ModelBuilder** — a built-in chat skill (`factory/chat_features/model-builder/`) that lets you convert, quantize, and validate AI models for the Qualcomm Snapdragon NPU through natural-language conversation, powered by cloud LLMs.
+> **A flagship capability of QAI AppBuilder** — a built-in chat skill (`factory/chat_features/model-builder/`) that lets you convert, quantize, and validate AI models for the Qualcomm Snapdragon NPU through natural-language conversation, powered by cloud LLMs.
 
 > ### ⚠️ Scope & Limitations
 >
@@ -388,7 +388,7 @@ After installation, double-click **`Start.bat`** (or launch the desktop app). Th
 ## 📁 Project Structure
 
 ```
-QAIModelBuilder/
+QAIAppBuilder/
 ├── apps/                 # Application entry layer
 │   ├── api/              #   FastAPI app factory (create_app), DI container, lifespan
 │   └── cli/              #   qai CLI + qai-serve supervisor
@@ -568,7 +568,7 @@ The **Sticky Worker** keeps the inference subprocess alive between runs on the s
 
 ## 📄 License
 
-QAI ModelBuilder is licensed under the BSD 3-Clause "New" or "Revised" License. See [LICENSE](LICENSE) for details.
+QAI AppBuilder is licensed under the BSD 3-Clause "New" or "Revised" License. See [LICENSE](LICENSE) for details.
 
 ---
 

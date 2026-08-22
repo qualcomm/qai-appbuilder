@@ -1,4 +1,4 @@
-# 🤖 QAI ModelBuilder
+# 🤖 QAI AppBuilder
 
 > **专为 Snapdragon® X-Series PC 打造的本地优先 AI 工作站，构建于干净的 DDD / Clean Architecture 内核之上。核心亮点包括：在骁龙 NPU 上原生运行的端侧 App Builder 工作台（ASR / TTS）、AI 驱动的 QNN 模型转换与优化技能（Model Builder）、多 Agent 流式聊天，以及构建型 Vue 3 WebUI。**
 
@@ -57,7 +57,7 @@
 
 ## 🏛️ 架构总览
 
-QAI ModelBuilder 已**全面重写为 Clean Architecture / DDD 应用**。代码按限界上下文组织于 `src/qai/`，应用入口层在 `apps/`，薄协议适配层在 `interfaces/`，出厂资产在 `factory/`。
+QAI AppBuilder 已**全面重写为 Clean Architecture / DDD 应用**。代码按限界上下文组织于 `src/qai/`，应用入口层在 `apps/`，薄协议适配层在 `interfaces/`，出厂资产在 `factory/`。
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -190,7 +190,7 @@ QAI ModelBuilder 已**全面重写为 Clean Architecture / DDD 应用**。代码
 
 ## 🌟 核心亮点：Model Builder 技能
 
-> **QAI ModelBuilder 最强大的功能** —— 一个内置聊天技能（`factory/chat_features/model-builder/`），让你借助云端 LLM，通过自然语言对话完成 AI 模型到高通骁龙 NPU 的转换、量化与验证全流程。
+> **QAI AppBuilder 的核心能力之一** —— 一个内置聊天技能（`factory/chat_features/model-builder/`），让你借助云端 LLM，通过自然语言对话完成 AI 模型到高通骁龙 NPU 的转换、量化与验证全流程。
 
 > ### ⚠️ 适用范围说明
 >
@@ -383,7 +383,7 @@ AI 会自动完成源模型下载、ONNX 导出、多精度转换、推理执行
 ## 📁 项目结构
 
 ```
-QAIModelBuilder/
+QAIAppBuilder/
 ├── apps/                 # 应用入口层
 │   ├── api/              #   FastAPI app 工厂（create_app）、DI 容器、lifespan
 │   └── cli/              #   qai CLI + qai-serve 监管器
@@ -563,7 +563,7 @@ use_for: 适用场景描述
 
 ## 📄 许可证
 
-QAI ModelBuilder 采用 BSD 3-Clause "New" or "Revised" License 授权。详情请查阅 [LICENSE](LICENSE) 文件。
+QAI AppBuilder 采用 BSD 3-Clause "New" or "Revised" License 授权。详情请查阅 [LICENSE](LICENSE) 文件。
 
 ---
 
