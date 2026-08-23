@@ -226,7 +226,6 @@ def build_router(*, container: "Container") -> APIRouter:
                     )
                     instance.tunnel_state = "running"
                     await container.remote_deploy.repository.save(instance)
-                    import json
                     done_payload = json.dumps({
                         "instance_id": instance_id,
                         "remote_url": instance.remote_url,

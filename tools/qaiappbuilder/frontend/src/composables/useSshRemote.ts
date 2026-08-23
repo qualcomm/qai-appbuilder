@@ -112,13 +112,12 @@ export function useSshRemote() {
       onProgress(data: unknown) {
         const d = data as DeployProgress;
         if (d.line) {
+          // Do NOT auto-open here: this line streams mid-deploy, before the
+          // local tunnel exists, and its URL is the (often unreachable)
+          // remote host — opening it races with the correct tunnel-aware
+          // open in deploy()'s post-SSE handling below, which waits for
+          // the local_url to be ready. See onDone / the try block below.
           deployLog.value.push(d.line);
-          // Auto-open browser when service is confirmed running
-          // Matches both fresh deploy and "already running" fast-path
-          const m = d.line.match(/\[done\].*?(https?:\/\/[^\s]+)/);
-          if (m) {
-            openRemoteUrl(m[1]!);
-          }
         }
         if (typeof d.percent === "number") deployPercent.value = d.percent;
       },
