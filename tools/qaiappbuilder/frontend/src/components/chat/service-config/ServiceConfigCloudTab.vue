@@ -60,33 +60,42 @@ const { t } = useI18n();
 // vue/no-mutating-props on the prop path.
 const cfg = computed(() => props.cfg);
 
-// API Key masking: if value is "****" treat as unchanged (don't send). // Per call-site draft — kept here, not in MaskedPasswordInput, since the // "**** = unchanged" semantics depends on parent's save flow.
+// API Key masking: backend returns "****" when a key is saved. We display
+// an empty input with a "saved" placeholder so the user knows a key exists
+// without revealing it. When the user types a new key, the draft updates
+// normally. On save, "****" is sent to the backend to mean "keep existing".
+const _MASK = "****";
 const cloudApiKeyDraft = ref<string | null>(null);
 const enterpriseApiKeyDraft = ref<string | null>(null);
 
+// Computed display values: "****" → "" (show placeholder instead of mask chars)
+const cloudApiKeyDisplay = computed(() =>
+  cloudApiKeyDraft.value === _MASK ? "" : (cloudApiKeyDraft.value ?? "")
+);
+const enterpriseApiKeyDisplay = computed(() =>
+  enterpriseApiKeyDraft.value === _MASK ? "" : (enterpriseApiKeyDraft.value ?? "")
+);
+
 watch(
   () => props.cfg.cloud_model?.api_key,
-  (v) => { if (cloudApiKeyDraft.value === null && v !== undefined) cloudApiKeyDraft.value = v; },
+  (v) => { if (cloudApiKeyDraft.value === null && !!v) cloudApiKeyDraft.value = v; },
   { immediate: true },
 );
 watch(
   () => props.cfg.enterprise_cloud_model?.api_key,
-  (v) => { if (enterpriseApiKeyDraft.value === null && v !== undefined) enterpriseApiKeyDraft.value = v; },
+  (v) => { if (enterpriseApiKeyDraft.value === null && !!v) enterpriseApiKeyDraft.value = v; },
   { immediate: true },
 );
 
 function onCloudApiKeyChange(value: string): void {
+  // User typed something: store as real key (not mask).
   cloudApiKeyDraft.value = value;
-  if (value !== "****") {
-    cloudModel(props.cfg).api_key = value;
-  }
+  cloudModel(props.cfg).api_key = value;
 }
 
 function onEnterpriseApiKeyChange(value: string): void {
   enterpriseApiKeyDraft.value = value;
-  if (value !== "****") {
-    enterpriseCloudModel(props.cfg).api_key = value;
-  }
+  enterpriseCloudModel(props.cfg).api_key = value;
 }
 
 // -- Endpoint helpers (V1 ServiceConfigPanel.js:368 / :386 / :464 / :482) --
@@ -171,9 +180,10 @@ function removeEnterpriseEndpoint(idx: number): void {
         <label class="svc-cfg-field">
           <span class="svc-cfg-label">{{ t("serviceConfig.apiKeyLabel") }}</span>
           <MaskedPasswordInput
-            :model-value="cloudApiKeyDraft ?? cloudModel(cfg).api_key ?? ''"
+            :model-value="cloudApiKeyDisplay"
             prefix-icon="🔑"
-            placeholder="your-cloud-api-key"
+            :placeholder="cloudApiKeyDraft === _MASK ? t('serviceConfig.apiKeySavedPlaceholder') : 'your-cloud-api-key'"
+            :hide-toggle="cloudApiKeyDraft === _MASK"
             :aria-label="t('serviceConfig.apiKeyLabel')"
             @update:model-value="onCloudApiKeyChange"
           />
@@ -349,9 +359,10 @@ function removeEnterpriseEndpoint(idx: number): void {
         <label class="svc-cfg-field">
           <span class="svc-cfg-label">{{ t("serviceConfig.apiKeyLabel") }}</span>
           <MaskedPasswordInput
-            :model-value="enterpriseApiKeyDraft ?? enterpriseCloudModel(cfg).api_key ?? ''"
+            :model-value="enterpriseApiKeyDisplay"
             prefix-icon="🔑"
-            placeholder="your-enterprise-api-key"
+            :placeholder="enterpriseApiKeyDraft === _MASK ? t('serviceConfig.apiKeySavedPlaceholder') : 'your-enterprise-api-key'"
+            :hide-toggle="enterpriseApiKeyDraft === _MASK"
             :aria-label="t('serviceConfig.apiKeyLabel')"
             @update:model-value="onEnterpriseApiKeyChange"
           />

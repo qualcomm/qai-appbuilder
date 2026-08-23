@@ -86,6 +86,7 @@ class StatusResponse(BaseModel):
     """Wire form of ``/api/service/status`` response."""
 
     status: str
+    warnings: list[str] | None = None
 
 
 class LoadModelResponse(BaseModel):
@@ -209,7 +210,7 @@ def build_router(*, container: "Container") -> APIRouter:
         result = await container.model_runtime.start_service_use_case.execute(
             model_name=model_name, port=port, loglevel=loglevel
         )
-        return StatusResponse(status=result["status"])
+        return StatusResponse(status=result["status"], warnings=result.get("warnings") or None)
 
     async def _apply_log_buffer_size() -> None:
         """Push the configured log buffer size onto the inference service.

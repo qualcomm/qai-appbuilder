@@ -144,6 +144,11 @@ const service = {
   // Model count suffix (V1 index.html:2942 "(N model(s))")
   modelsCount: "{n} model(s)",
   versionCheckFailed: "Failed to check versions",
+  cloudNotConfiguredTitle: "Cloud model not fully configured",
+  cloudNotConfiguredBody:
+    "One or more cloud_model fields are missing or still set to the factory placeholder (base_url, api_key). When the on-device model cannot handle a complex request, smart routing cannot fall back to the cloud model. Configure the cloud endpoint URL, API key, and model in Service Config, then restart the service.",
+  cloudNotConfiguredConfirm: "Open Service Config",
+  cloudNotConfiguredCancel: "Later",
 };
 
 export default service;

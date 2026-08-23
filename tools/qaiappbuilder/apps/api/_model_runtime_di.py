@@ -362,23 +362,73 @@ def _make_genie_root_provider(
     """Build an async callable returning ``genie_service.root_path``.
 
     Injected into the service-config use cases so they can resolve the
-    active config path without importing ``qai.user_prefs``. Reads through
-    the live ``container.user_prefs`` namespace; any failure yields ``""``.
+    active config path without importing ``qai.user_prefs``. Resolution
+    order (first non-empty wins):
+      1. Live ``container.user_prefs`` DB (``forge.config`` document).
+      2. ``data/config/forge_config.json`` file (sync fallback used when
+         the DB entry is missing or predates the first service install).
+      3. ``_scan_bin_for_install()`` — newest ``data/bin/<...>`` dir that
+         actually contains ``GenieAPIService.exe`` (self-heal for a fresh
+         install where neither the DB nor the config file has been updated
+         yet by the download center).
+    Any failure yields ``""`` — callers handle the empty case by raising
+    ``PreconditionFailedError("GenieAPIService is not installed")``.
     """
+    # Reuse the same scan logic as _make_install_dir_provider so there is
+    # a single source of truth for the "where is the binary" discovery.
+    data_paths = getattr(container, "data_paths", None)
+    data_root = getattr(data_paths, "root", None)
+    project_root = Path(data_root).parent if data_root is not None else None
+    bin_dir = Path(data_root) / "bin" if data_root is not None else None
+
+    def _resolve_abs(raw: str) -> str:
+        p = Path(raw)
+        if p.is_absolute():
+            return str(p)
+        base = project_root if project_root is not None else Path.cwd()
+        return str((base / p).resolve())
+
+    def _scan_bin_for_install() -> str:
+        if bin_dir is None or not bin_dir.is_dir():
+            return ""
+        candidates = [
+            child
+            for child in bin_dir.iterdir()
+            if child.is_dir()
+            and not child.name.endswith(".bak")
+            and (child / "GenieAPIService.exe").is_file()
+        ]
+        if not candidates:
+            return ""
+        candidates.sort(key=lambda c: c.stat().st_mtime, reverse=True)
+        return str(candidates[0])
 
     async def _provider() -> str:
+        # 1. Try DB (live user_prefs document).
         user_prefs = getattr(container, "user_prefs", None)
         load_uc = getattr(user_prefs, "load_document_use_case", None)
-        if load_uc is None:
-            return ""
-        try:
-            forge_doc = await load_uc.execute("forge.config")
-            gs = forge_doc.get("genie_service", {})
-            if isinstance(gs, dict):
-                return str(gs.get("root_path", "") or "").strip()
-        except Exception:  # noqa: BLE001 — convenience read; never fatal
-            return ""
-        return ""
+        if load_uc is not None:
+            try:
+                forge_doc = await load_uc.execute("forge.config")
+                gs = forge_doc.get("genie_service", {})
+                if isinstance(gs, dict):
+                    raw = str(gs.get("root_path", "") or "").strip()
+                    if raw:
+                        return _resolve_abs(raw)
+            except Exception:  # noqa: BLE001 — convenience read; never fatal
+                pass
+
+        # 2. Fallback: forge_config.json file (may have root_path the DB lacks).
+        forge_file = _read_forge_config(container)
+        gs_file = forge_file.get("genie_service", {})
+        if isinstance(gs_file, dict):
+            raw_file = str(gs_file.get("root_path", "") or "").strip()
+            if raw_file:
+                return _resolve_abs(raw_file)
+
+        # 3. Last resort: scan data/bin/ for an installed binary.
+        scanned = _scan_bin_for_install()
+        return scanned
 
     return _provider
 
@@ -496,7 +546,12 @@ def build_model_runtime_services(
     return ModelRuntimeServices(
         inference_service=service,
         service_config_repository=service_config_repository,
-        start_service_use_case=StartServiceUseCase(service=service),
+        start_service_use_case=StartServiceUseCase(
+            service=service,
+            config_repository=service_config_repository,
+            genie_root_provider=genie_root_provider if service_config_repository is not None else None,
+            secret_store=secret_store if service_config_repository is not None else None,
+        ),
         stop_service_use_case=StopServiceUseCase(service=service),
         probe_service_use_case=ProbeServiceUseCase(service=service),
         get_status_use_case=GetStatusUseCase(

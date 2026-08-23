@@ -154,13 +154,11 @@ const availableModelsByFormat = ref<LocalModelsByFormat>({
 
 async function loadServiceConfig(): Promise<void> {
   try {
-    const res = await fetch("/api/config");
-    if (!res.ok) return;
-    const data = (await res.json()) as ServiceConfigResponse;
+    const data = await apiJson<ServiceConfigResponse>("GET", "/api/config");
     svcCfg.value = data.config ?? {};
     svcCfgMeta.value = data.meta ?? null;
-  } catch {
-    // ignore — backend may not be running
+  } catch (err) {
+    console.error("[ServiceConfigPanel] loadServiceConfig failed:", err);
   }
 }
 
@@ -219,12 +217,7 @@ async function postServiceConfig(): Promise<void> {
       slot.path = slot.name;
     });
   }
-  const res = await fetch("/api/config", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ config: payload }),
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  await apiJson<unknown, { config: typeof payload }>("POST", "/api/config", { config: payload });
 }
 
 async function saveServiceConfig(): Promise<void> {

@@ -60,7 +60,7 @@ const logPanelComp = ref<InstanceType<typeof ServiceLogPanel> | null>(null);
 const logPanelEl = computed<HTMLElement | null>(
   () => logPanelComp.value?.logPanel ?? null,
 );
-const svc = useServiceControl(logPanelEl);
+const svc = useServiceControl(logPanelEl, () => openConfigModal());
 
 const {
   serviceStatus,

@@ -22,6 +22,7 @@ previously lived inline in ``interfaces/http/routes/model_runtime.py``:
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,8 @@ from qai.platform.persistence.secrets import SecretStore
 _CLOUD_MODEL_SECRET_SVC = "qai.cloud.cloud_model"
 _ENTERPRISE_CLOUD_SECRET_SVC = "qai.cloud.enterprise_cloud_model"
 _API_KEY_KEY = "api_key"
+
+_logger = logging.getLogger("qai.model_runtime.application.get_service_config")
 
 
 class GetServiceConfigUseCase:
@@ -60,15 +63,21 @@ class GetServiceConfigUseCase:
         cfg = self._repository.load(path=active_path)
 
         secret = self._secret_store
-        try:
-            has_cloud_key = secret.exists(_CLOUD_MODEL_SECRET_SVC, _API_KEY_KEY)
-        except Exception:  # noqa: BLE001 — keyring unavailable; fall back to doc
+        has_cloud_key = self._key_exists(secret, _CLOUD_MODEL_SECRET_SVC, _API_KEY_KEY)
+        _logger.info(
+            "get_service_config: genie_root=%r active_path=%r "
+            "has_cloud_key_from_secret=%s json_api_key_len=%d",
+            genie_root,
+            active_path,
+            has_cloud_key,
+            len(cfg.get("cloud_model", {}).get("api_key", "") or ""),
+        )
+        if not has_cloud_key:
             has_cloud_key = bool(cfg.get("cloud_model", {}).get("api_key", ""))
-        try:
-            has_enterprise_key = secret.exists(
-                _ENTERPRISE_CLOUD_SECRET_SVC, _API_KEY_KEY
-            )
-        except Exception:  # noqa: BLE001
+        has_enterprise_key = self._key_exists(
+            secret, _ENTERPRISE_CLOUD_SECRET_SVC, _API_KEY_KEY
+        )
+        if not has_enterprise_key:
             has_enterprise_key = bool(
                 cfg.get("enterprise_cloud_model", {}).get("api_key", "")
             )
@@ -97,6 +106,26 @@ class GetServiceConfigUseCase:
                 "genie_root_configured": bool(genie_root),
             },
         }
+
+    @staticmethod
+    def _key_exists(secret: SecretStore, service: str, key: str) -> bool:
+        """Return True when a key is present in the secret store.
+
+        Tries ``exists()`` first; on failure (or False) also tries ``get()``
+        as a second probe.  This guards against ``_FallbackSecretStore``
+        silently swallowing keyring errors inside ``exists()`` and returning
+        False even when the value is actually stored in the OS keyring.
+        """
+        try:
+            if secret.exists(service, key):
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            value = secret.get(service, key)
+            return bool(value)
+        except Exception:  # noqa: BLE001
+            return False
 
 
 __all__ = ["GetServiceConfigUseCase"]

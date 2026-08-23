@@ -77,6 +77,9 @@ dependencies = [
   # require Rust + OpenSSL toolchain.  Upper bound stays below 47.
   "cryptography>=45,<47",
   "keyring>=25,<26",                       # OS-level credential store (PR-013)
+  # SSH remote deployment (qai.remote_deploy): paramiko 5.x is the stable
+  # asyncio-friendly release; already installed in the dev venv (5.0.0).
+  "paramiko>=5.0,<6.0",
   # Okta OIDC SSO (interfaces/http/auth/jwt.py):
   #   * decode id_token (RS256, JWKS-based verification)
   #   * sign private_key_jwt client assertion when the app is registered as

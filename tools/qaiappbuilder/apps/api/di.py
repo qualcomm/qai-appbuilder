@@ -81,6 +81,7 @@ from ._chat_di import (
     wire_tool_result_store_into_chat,
 )
 from ._command_policy_di import CommandPolicyServices, build_command_policy_services
+from ._remote_deploy_di import RemoteDeployServices, build_remote_deploy_services
 from ._computer_di import (
     ComputerServices,
     build_computer_services,
@@ -175,6 +176,10 @@ class Container:
     user_prefs: UserPrefsServices = field(init=False)
     dependency_approval: DependencyApprovalServices = field(init=False)
     command_policy: CommandPolicyServices = field(init=False)
+    # Tail-appended: SSH-based remote QAI AppBuilder deployment.
+    # Manages SSH connections, remote install/start, and instance lifecycle.
+    # AGENTS.md §3.1 permits tail-append.
+    remote_deploy: RemoteDeployServices = field(init=False)
     model_runtime: ModelRuntimeServices = field(init=False)
     # Tail-appended (S9 close): ``model_builder`` context wires the
     # ModelBuilder -> AppBuilder Pack export pipeline; the
@@ -341,6 +346,7 @@ class Container:
         # left those gates unwired (the bridges saw ``None``).
         self.dependency_approval = build_dependency_approval_services(self)
         self.command_policy = build_command_policy_services(self)
+        self.remote_deploy = build_remote_deploy_services(self)
         self.ai_coding = build_ai_coding_services(self)
         # PR-fix-cloud-tools-di (2026-06-05): post-build hook — register the
         # ai_coding 9 production tools (with their OpenAI function-calling

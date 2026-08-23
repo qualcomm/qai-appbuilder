@@ -113,14 +113,28 @@ class _FallbackSecretStore:
         return self._fl.get(service, key)
 
     def set(self, service: str, key: str, value: str) -> None:
+        kr_ok = False
         try:
             self._kr.set(service, key, value)
+            kr_ok = True
         except Exception as exc:
             _LOGGER.debug(
                 "secrets.keyring_set_failed_using_file service=%s key=%s: %s",
                 service, key, exc,
             )
+        # Always mirror to the file backend so that exists() / get() succeed
+        # even when the keyring is available for writes but flaky on reads
+        # (observed on arm64 Windows where keyring.get_password silently
+        # raises in a new process after keyring.set_password succeeded).
+        try:
             self._fl.set(service, key, value)
+        except Exception as exc:
+            if not kr_ok:
+                raise  # Both backends failed; propagate to caller
+            _LOGGER.debug(
+                "secrets.file_mirror_failed service=%s key=%s: %s",
+                service, key, exc,
+            )
 
     def delete(self, service: str, key: str) -> None:
         kr_ok = True
@@ -152,6 +166,15 @@ class _FallbackSecretStore:
     def exists(self, service: str, key: str) -> bool:
         try:
             if self._kr.exists(service, key):
+                return True
+        except Exception:
+            pass
+        # Keyring returned False or raised; also try get() in case exists()
+        # is unreliable (e.g. _FallbackSecretStore on arm64 where the
+        # keyring lib fails silently inside exists() but get() works).
+        try:
+            value = self._kr.get(service, key)
+            if value:
                 return True
         except Exception:
             pass
