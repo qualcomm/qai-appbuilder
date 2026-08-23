@@ -65,6 +65,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from collections.abc import Callable
 
     from qai.platform.config.settings import AuthSettings
+    from qai.platform.persistence.secrets import SecretStore
 
 __all__ = [
     "AuthMiddleware",
@@ -86,7 +87,7 @@ logger = get_logger("qai.auth")
 
 # ── last-known login name (process-level) ──────────────────────────────────
 # Single-user desktop deployment: the login gate binds ``request.state.user``
-# per request, but background jobs (e.g. the usage reporter — a 24h scheduled
+# per request, but background jobs (e.g. the usage reporter — a scheduled
 # task with NO request context) have no request to read it from. This holder
 # is the ONE process-wide truth source for "the most recent logged-in user
 # name", written on every authenticated request AND at login (``/callback``),
@@ -97,10 +98,11 @@ logger = get_logger("qai.auth")
 # the module-global against concurrent request writes.
 _last_login_lock = threading.Lock()
 _last_login_name: str = ""
-#: Best-effort "a login just happened" observers (apps layer registers e.g. the
-#: usage-reporter's ``trigger_now`` so login pushes a fresh report immediately
-#: instead of waiting for the next 12h tick). Fired AFTER the name is recorded,
-#: OUTSIDE the lock, each guarded so one bad observer cannot break login.
+#: Best-effort "a login just happened" observers. The lifecycle registers the
+#: usage recorder enqueue callback so the event is delivered by its worker,
+#: rather than waiting for the next periodic heartbeat. Fired AFTER the name is
+#: recorded, OUTSIDE the lock, each guarded so one bad observer cannot break
+#: login.
 _login_callbacks: "list[Callable[[str], None]]" = []
 
 
@@ -110,13 +112,10 @@ def register_login_callback(fn: "Callable[[str], None]") -> None:
 
 
 def set_last_login_name(name: str) -> None:
-    """Record the most recent logged-in user name (trimmed; blank ignored).
+    """Record the most recent login and notify transition observers.
 
-    On a non-blank name this also fires the registered login callbacks (best
-    effort — each is guarded so an observer error never breaks the login /
-    request path). Note: this runs on EVERY authenticated request (the
-    middleware calls it), so observers must be cheap + idempotent-friendly; the
-    usage ``trigger_now`` observer is a bounded fire-and-forget nudge.
+    This runs on every authenticated request, so observers fire only on a name
+    transition and must remain cheap, idempotent enqueue operations.
     """
     trimmed = (name or "").strip().split("@")[0]
     if not trimmed:
@@ -368,12 +367,24 @@ class AuthMiddleware(BaseHTTPMiddleware):
         *,
         settings: "AuthSettings",
         data_root: Path,
+        secret_store: "SecretStore | None" = None,
+        ssl_verify_provider: "Callable[[], bool] | None" = None,
     ) -> None:
         super().__init__(app)
         self._settings = settings
         self._enabled: bool = bool(settings.enabled)
         self._cookie_name: str = settings.session_cookie_name
         self._data_root: Path = data_root
+        # Device-flow (RFC 8628) silent bootstrap: when enabled, a request
+        # with no valid session cookie is minted from the stored refresh_token
+        # (see interfaces.http.auth.device_session). ``secret_store`` is the
+        # same SecretStore the CLI writes the token to; ``ssl_verify_provider``
+        # is the LIVE global Settings.ssl_verify reader (the outbound Okta
+        # call must follow the same TLS-verification policy as the rest of the
+        # app and hot-apply to a runtime toggle). Both are optional so a
+        # stripped test container keeps the prior behaviour.
+        self._secret_store = secret_store
+        self._ssl_verify_provider = ssl_verify_provider
         # Resolve the secret ONCE at construction time. Subsequent
         # requests must never race on generating a fresh key.
         self._secret: str = session_secret(settings.session_secret, data_root)
@@ -394,6 +405,62 @@ class AuthMiddleware(BaseHTTPMiddleware):
             # reporter) can report the logged-in name, not just the OS name.
             set_last_login_name(str(user.get("username") or ""))
             return await call_next(request)
+
+        # ── Device-flow (RFC 8628) silent bootstrap ──────────────────────
+        # Headless / remote servers have no local browser for the Okta
+        # loopback callback, so the operator authenticates once via
+        # ``qai auth device-login`` (SSH terminal). When that stored
+        # refresh_token exists, mint the session HERE — transparently, with
+        # no Okta round-trip per request (the bootstrap module caches
+        # successes for 2 s and cools down failures for 60 s). The issued
+        # cookie is the SAME HMAC session the desktop login flow sets, so
+        # every downstream consumer (usage reporter, MB Pro flags, QAI
+        # Service JWT) behaves identically.
+        if (
+            bool(getattr(self._settings, "device_flow_enabled", False))
+            and self._secret_store is not None
+        ):
+            from interfaces.http.auth.device_session import try_device_session
+
+            try:
+                ssl_verify = (
+                    bool(self._ssl_verify_provider())
+                    if self._ssl_verify_provider is not None
+                    else self._settings.ssl_verify
+                )
+                device_user = await try_device_session(
+                    settings=self._settings,
+                    secret_store=self._secret_store,
+                    ssl_verify=ssl_verify,
+                )
+            except Exception as exc:  # noqa: BLE001 — never break the gate
+                logger.warning(
+                    "auth.middleware.device_bootstrap_error",
+                    error=repr(exc),
+                )
+                device_user = None
+            if device_user is not None:
+                # Set request.state BEFORE dispatching the protected handler;
+                # routes must see the bootstrapped identity on this very first
+                # request, not only on the next request after the cookie lands.
+                request.state.user = device_user
+                set_last_login_name(str(device_user.get("username") or ""))
+                response = await call_next(request)
+                cookie = dump_session(
+                    device_user,
+                    self._settings.session_ttl_seconds,
+                    self._secret,
+                )
+                response.set_cookie(
+                    key=self._cookie_name,
+                    value=cookie,
+                    max_age=self._settings.session_ttl_seconds,
+                    httponly=True,
+                    secure=self._settings.cookie_secure,
+                    samesite="lax",
+                    path="/",
+                )
+                return response
 
         # ── Missing / invalid session — differentiated by client type ─────
         #

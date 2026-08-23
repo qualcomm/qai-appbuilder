@@ -399,12 +399,21 @@ def build_router(
     data_root: Path,
     ssl_verify: bool | None = None,
     ssl_verify_provider: "Callable[[], bool] | None" = None,
+    secret_store: "Any" = None,
 ) -> APIRouter:
     """Build the router bound to the given ``AuthSettings`` snapshot.
 
     ``server_port`` is passed explicitly (not read from ``settings``) so
     the redirect_uri stays in sync with the actual bound port on
     ``server.port``.
+
+    ``secret_store`` is the SecretStore holding the RFC 8628 device-flow
+    refresh_token (written by ``qai auth device-login``). When present and
+    ``auth.device_flow_enabled`` is True, ``/api/auth/me`` mints a session
+    from it for a cookie-less request — the SPA introspects this route FIRST
+    (it is public, so the middleware never sees it), which is what makes the
+    headless login prompt disappear instead of pointing at a browser flow
+    the server cannot complete.
 
     ``ssl_verify`` is the unified outbound-TLS switch (top-level
     ``Settings.ssl_verify``, edition-derived default); it governs the
@@ -735,13 +744,82 @@ def build_router(
         payload = (
             load_session_full(raw, secret) if raw is not None else None
         )
+        # ``device_flow`` tells the SPA whether the headless RFC 8628 path is
+        # the login mode for this deployment: when True (auth enabled AND
+        # device_flow_enabled) the browser loopback flow cannot complete on a
+        # server without a local browser, so the UI must point the operator at
+        # ``qai auth device-login`` instead of offering a browser sign-in.
+        device_flow = bool(
+            settings.enabled
+            and getattr(settings, "device_flow_enabled", False)
+        )
         if payload is None:
+            # RFC 8628 device-flow bootstrap: this route is PUBLIC (the SPA
+            # calls it before the middleware would mint anything), so a
+            # cookie-less request on a headless server is minted HERE from
+            # the stored refresh_token. Same module the middleware uses —
+            # cached / cooldown-guarded, never raises. The issued cookie
+            # makes every subsequent request (and the middleware itself)
+            # see a normal session.
+            if (
+                bool(getattr(settings, "device_flow_enabled", False))
+                and secret_store is not None
+            ):
+                try:
+                    from interfaces.http.auth.device_session import (
+                        try_device_session,
+                    )
+
+                    _ssl_verify = _resolve_ssl_verify()
+                    device_user = await try_device_session(
+                        settings=settings,
+                        secret_store=secret_store,
+                        ssl_verify=_ssl_verify,
+                    )
+                except Exception as exc:  # noqa: BLE001 — introspection never 500s
+                    logger.warning(
+                        "auth.me.device_bootstrap_error",
+                        error=repr(exc),
+                    )
+                    device_user = None
+                if device_user is not None:
+                    new_exp = int(time.time()) + int(
+                        settings.session_ttl_seconds or 28800
+                    )
+                    response = JSONResponse(
+                        {
+                            "auth_enabled": True,
+                            "authenticated": True,
+                            "user": public_user(device_user),
+                            "expires_at": new_exp,
+                            "device_flow": device_flow,
+                        }
+                    )
+                    cookie = dump_session(
+                        device_user, settings.session_ttl_seconds, secret
+                    )
+                    response.set_cookie(
+                        key=settings.session_cookie_name,
+                        value=cookie,
+                        max_age=settings.session_ttl_seconds,
+                        httponly=True,
+                        secure=settings.cookie_secure,
+                        samesite="lax",
+                        path="/",
+                    )
+                    set_last_login_name(str(device_user.get("username") or ""))
+                    logger.info(
+                        "auth.me.device_session_ok",
+                        username=device_user.get("username"),
+                    )
+                    return response
             return JSONResponse(
                 {
                     "auth_enabled": True,
                     "authenticated": False,
                     "user": None,
                     "expires_at": None,
+                    "device_flow": device_flow,
                 }
             )
         user = payload.get("user")
@@ -751,6 +829,7 @@ def build_router(
                 "authenticated": True,
                 "user": public_user(user) if isinstance(user, dict) else None,
                 "expires_at": int(payload.get("exp") or 0) or None,
+                "device_flow": device_flow,
             }
         )
 

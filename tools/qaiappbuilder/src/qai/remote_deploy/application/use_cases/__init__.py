@@ -219,10 +219,12 @@ class DeployRemoteUseCase:
         # --- Step 2: check if port already in use ---
         _port_check_cmd = f"ss -tlnp 2>/dev/null | grep ':{remote_port} ' | head -1"
         yield f"[ssh] Checking port {remote_port} …"
-        yield f"[cmd] {_port_check_cmd}"
-        _, port_stdout, _ = await self.executor.run_command(
+        port_code, port_stdout, port_stderr = await self.executor.run_command(
             remote, _port_check_cmd, timeout=15,
         )
+        yield f"[ssh] port_check_exit={port_code}"
+        if port_stderr.strip():
+            yield f"[ssh] port_check_stderr={port_stderr.strip()}"
         if port_stdout.strip():
             # Port already listening — service is already running, just open it
             yield f"[ssh] Port {remote_port} is already in use — service appears to be running."
@@ -293,9 +295,10 @@ class DeployRemoteUseCase:
             f"> /tmp/qai_modelbuilder_{remote_port}.log 2>&1 & echo PID:$!'"
         )
         yield f"[cmd] {start_cmd}"
-        _, start_stdout, start_stderr = await self.executor.run_command(
+        start_code, start_stdout, start_stderr = await self.executor.run_command(
             remote, start_cmd, timeout=30
         )
+        yield f"[ssh] start_command_exit={start_code}"
         if start_stdout.strip():
             yield f"[out] {start_stdout.strip()}"
         if start_stderr.strip():
@@ -319,21 +322,35 @@ class DeployRemoteUseCase:
             f"done"
         )
         yield f"[cmd] {ready_cmd}"
-        _, ready_out, ready_err = await self.executor.run_command(
+        ready_code, ready_out, ready_err = await self.executor.run_command(
             remote, ready_cmd, timeout=100
         )
+        yield f"[ssh] readiness_exit={ready_code}"
         yield f"[out] ready_check={ready_out.strip()!r}"
         if ready_err.strip():
             yield f"[err] {ready_err.strip()}"
         if "READY" not in ready_out:
-            # Dump last 20 lines of service log to help diagnose
-            _, tail_out, _ = await self.executor.run_command(
-                remote,
-                f"tail -20 /tmp/qai_modelbuilder_{remote_port}.log 2>/dev/null || echo '(no log)'",
-                timeout=10,
+            # Dump the service log plus process/socket diagnostics. This is
+            # deliberately verbose: the deploy UI is the only place an
+            # operator can see what happened on a headless SSH target.
+            diag_cmd = (
+                f"echo '--- service log ---'; "
+                f"if [ -f /tmp/qai_modelbuilder_{remote_port}.log ]; then "
+                f"  tail -80 /tmp/qai_modelbuilder_{remote_port}.log; "
+                f"else echo '(no service log file)'; fi; "
+                f"echo '--- process ---'; ps -ef | grep '[s]tart.sh\\|[q]ai' || true; "
+                f"echo '--- listening socket ---'; "
+                f"(ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null || true) | "
+                f"grep ':{remote_port}' || true"
             )
-            for log_line in tail_out.splitlines():
-                yield f"[svclog] {log_line}"
+            diag_code, diag_out, diag_err = await self.executor.run_command(
+                remote, diag_cmd, timeout=20,
+            )
+            yield f"[ssh] diagnostics_exit={diag_code}"
+            for log_line in diag_out.splitlines():
+                yield f"[remote] {log_line}"
+            for log_line in diag_err.splitlines():
+                yield f"[remote-stderr] {log_line}"
             instance.state = DeploymentState.FAILED
             instance.error_message = "Service did not become ready within 90 s."
             await self.repository.save(instance)

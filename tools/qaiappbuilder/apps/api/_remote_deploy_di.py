@@ -52,6 +52,9 @@ class RemoteDeployServices:
     deploy_use_case: DeployRemoteUseCase
     list_instances_use_case: ListInstancesUseCase
     stop_instance_use_case: StopInstanceUseCase
+    # Local Paramiko tunnel service; tail-appended to preserve the public
+    # container field contract.
+    tunnel_manager: SshExecutorPort
 
 
 def build_remote_deploy_services(container: "Container") -> RemoteDeployServices:
@@ -77,4 +80,5 @@ def build_remote_deploy_services(container: "Container") -> RemoteDeployServices
         stop_instance_use_case=StopInstanceUseCase(
             executor=executor, repository=repository
         ),
+        tunnel_manager=executor,
     )

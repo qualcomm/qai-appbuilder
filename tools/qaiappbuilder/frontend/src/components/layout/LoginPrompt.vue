@@ -15,6 +15,7 @@ const { t } = useI18n();
 const auth = useAuthStore();
 
 const visible = computed<boolean>(() => auth.showLoginPrompt);
+const deviceFlow = computed<boolean>(() => auth.deviceFlow);
 
 const signingIn = ref(false);
 const popupBlocked = ref(false);
@@ -109,19 +110,32 @@ watch(visible, async (v) => {
         <h2 class="login-prompt-title">{{ t("auth.prompt_title") }}</h2>
         <p class="login-prompt-message">{{ t("auth.prompt_message") }}</p>
 
-        <button
-          ref="signInBtn"
-          type="button"
-          class="btn btn-primary login-prompt-btn"
-          :disabled="signingIn"
-          data-testid="login-prompt-signin"
-          @click="signIn"
-        >
-          <span v-if="!signingIn">{{ t("auth.sign_in") }}</span>
-          <span v-else>{{ t("auth.redirecting") }}</span>
-        </button>
+        <template v-if="deviceFlow">
+          <p class="login-prompt-message login-prompt-device-message">
+            This server uses headless SSO. Run the following command in the
+            server terminal, then complete Okta verification in any browser:
+          </p>
+          <code class="login-prompt-command">qai auth device-login</code>
+          <p class="login-prompt-hint">
+            After authorization, reload this page. The server will pick up the
+            stored device session automatically.
+          </p>
+        </template>
 
-        <!-- Register link. Opens Qualcomm's public account-signup page in a
+        <template v-else>
+          <button
+            ref="signInBtn"
+            type="button"
+            class="btn btn-primary login-prompt-btn"
+            :disabled="signingIn"
+            data-testid="login-prompt-signin"
+            @click="signIn"
+          >
+            <span v-if="!signingIn">{{ t("auth.sign_in") }}</span>
+            <span v-else>{{ t("auth.redirecting") }}</span>
+          </button>
+
+          <!-- Register link. Opens Qualcomm's public account-signup page in a
              NEW tab so the login prompt (and any app state behind it) stays
              intact while the user completes registration. After creating
              their Qualcomm ID the user returns to this tab and clicks
@@ -140,8 +154,8 @@ watch(visible, async (v) => {
           data-testid="login-prompt-register"
         >{{ t("auth.register_prompt") }}</a>
 
-        <!-- Popup blocked fallback -->
-        <div v-if="popupBlocked" class="login-prompt-blocked">
+          <!-- Popup blocked fallback -->
+          <div v-if="popupBlocked" class="login-prompt-blocked">
           <p class="login-prompt-blocked-msg">
             Popup window was blocked by your browser.
           </p>
@@ -163,7 +177,8 @@ watch(visible, async (v) => {
           </div>
         </div>
 
-        <p class="login-prompt-hint">{{ t("auth.prompt_hint") }}</p>
+          <p class="login-prompt-hint">{{ t("auth.prompt_hint") }}</p>
+        </template>
       </div>
     </div>
   </Teleport>
@@ -232,6 +247,25 @@ watch(visible, async (v) => {
   font-size: var(--text-md, 14px);
   line-height: 1.5;
   color: var(--text-secondary);
+}
+
+.login-prompt-device-message {
+  margin-bottom: var(--space-3);
+}
+
+.login-prompt-command {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: var(--text-sm, 13px);
+  text-align: left;
+  user-select: all;
 }
 
 .login-prompt-btn {

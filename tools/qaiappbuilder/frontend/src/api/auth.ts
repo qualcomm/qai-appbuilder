@@ -56,6 +56,8 @@ export interface AuthMeResponse {
    * Drives the client-side keep-alive renewal timer.
    */
   readonly expires_at?: number | null;
+  /** True when headless RFC 8628 device login is the configured SSO path. */
+  readonly device_flow?: boolean;
 }
 
 /** Response shape of `POST /api/auth/renew`. */
@@ -85,7 +87,12 @@ export async function fetchAuthMe(
     // Any failure (network, malformed JSON) → treat as "auth off" so the
     // SPA still renders. If the gate is truly on, the next protected
     // request will 401 and the login prompt will take over.
-    return { auth_enabled: false, authenticated: false, user: null };
+    return {
+      auth_enabled: false,
+      authenticated: false,
+      user: null,
+      device_flow: false,
+    };
   }
 }
 

@@ -39,6 +39,9 @@ export interface RemoteInstance {
   username: string;
   state: string;
   remote_url: string;
+  local_url?: string;
+  local_port?: number;
+  tunnel_state?: string;
   error_message: string;
 }
 
@@ -141,14 +144,26 @@ export function useSshRemote() {
       });
       // After SSE done, fetch final instance state
       await loadInstances();
-      // Find by the specific instance_id from the done frame; fall back to
-      // the first running instance only if the server did not send an id.
-      const inst = doneInstanceId
-        ? (instances.value.find((i) => i.instance_id === doneInstanceId) ?? null)
-        : (instances.value.find((i) => i.state === "running") ?? null);
+      // Find the exact instance: prefer the instance_id from the done SSE
+      // frame (precise even when multiple deploys ran concurrently); fall
+      // back to host+port (this deploy's target) when the server did not
+      // send an id; last resort is the first running instance.
+      const targetPort = params.remote_port ?? 8989;
+      const inst =
+        (doneInstanceId
+          ? instances.value.find((i) => i.instance_id === doneInstanceId)
+          : undefined) ??
+        instances.value.find(
+          (i) => i.state === "running" && i.host === params.host && i.port === targetPort,
+        ) ??
+        instances.value.find((i) => i.state === "running") ??
+        null;
       deployedInstance.value = inst;
-      // Also open URL from instance record if not already opened via log line
-      if (inst?.remote_url) {
+      // Prefer the local tunnel URL (browser reaches it directly); fall
+      // back to the remote URL only when no tunnel was established.
+      if (inst?.local_url) {
+        openRemoteUrl(inst.local_url);
+      } else if (inst?.remote_url) {
         openRemoteUrl(inst.remote_url);
       }
       return inst;

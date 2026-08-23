@@ -275,7 +275,12 @@ class ProbeCloudModelPermissionsUseCase:
         provider_id: str,
         config: Mapping[str, object],
     ) -> tuple[str, dict[str, PermissionStatus] | None]:
-        """Probe ONE provider and return its (allowed / denied / unknown) map.
+        """Probe ONE provider and return its (allowed / unknown) map.
+
+        ``DENIED`` is never emitted — all models remain visible regardless
+        of what the upstream ``GET /v1/models`` returns.  A probe that
+        succeeds marks matching models ``ALLOWED``; everything else
+        (non-matching, probe failure, 403, empty list) is ``UNKNOWN``.
 
         Returns ``(provider_id, None)`` when the provider is skipped (no
         api_key, no base_url, no configured models); otherwise returns the
@@ -312,31 +317,20 @@ class ProbeCloudModelPermissionsUseCase:
                 )
 
         if not result.ok:
-            # 403 on the probe itself means the KEY has no access at all →
-            # every model configured under this provider is denied (rare;
-            # normally an invalid key returns 401 which is a separate flow).
-            if result.status == 403:
-                return (
-                    provider_id,
-                    {mid: PermissionStatus.DENIED for mid in configured_ids},
-                )
-            # Any other failure (transport / 500 / malformed body) → unknown.
+            # Any probe failure (403, 401, 500, transport error) → unknown.
+            # We never emit DENIED so that all models stay visible in the
+            # dropdown regardless of key scope or probe outcome.
             return (
                 provider_id,
                 {mid: PermissionStatus.UNKNOWN for mid in configured_ids},
             )
 
-        # Success: derive allowed / denied by comparing configured ids vs the
-        # ids the upstream returned. The upstream MAY return either the raw
-        # model id (``claude-4-8-opus``) OR the provider-prefixed id
-        # (``anthropic::claude-4-8-opus``, matching how this app stores
-        # ``model_id`` in the provider config). Match both forms so the diff
-        # is stable across providers that follow either convention.
+        # Success: mark models found in the upstream list as ALLOWED;
+        # models absent from the list stay UNKNOWN (never DENIED) so they
+        # remain visible in the dropdown.
         returned = set(result.model_ids)
         if not returned:
-            # Upstream returned an empty list — we cannot distinguish
-            # allowed from denied. Fall back to unknown for safety
-            # (never-preset-unavailable).
+            # Upstream returned an empty list — treat all as unknown.
             return (
                 provider_id,
                 {mid: PermissionStatus.UNKNOWN for mid in configured_ids},
@@ -347,7 +341,7 @@ class ProbeCloudModelPermissionsUseCase:
             if _matches_returned(configured, returned):
                 per_model[configured] = PermissionStatus.ALLOWED
             else:
-                per_model[configured] = PermissionStatus.DENIED
+                per_model[configured] = PermissionStatus.UNKNOWN
         return (provider_id, per_model)
 
     def _resolve_key(self, provider_id: str) -> str | None:

@@ -34,7 +34,6 @@ const {
   instances,
   loadInstances,
   stopInstance,
-  openRemoteUrl,
 } = useSshRemote();
 
 // ── Server draft ──────────────────────────────────────────────────────────────
@@ -46,6 +45,8 @@ interface ServerDraft {
   authMethod: "password" | "private_key";
   authRef: string;
   keyPath: string;
+  sshPort: number;
+  remotePort: number;
   showLog: boolean;
   expanded: boolean;
   saved: boolean;
@@ -98,6 +99,8 @@ function newDraft(): ServerDraft {
     authMethod: "password",
     authRef: "",
     keyPath: "",
+    sshPort: 22,
+    remotePort: DEFAULT_REMOTE_APP_PORT,
     showLog: false,
     expanded: true,
     saved: false,
@@ -119,8 +122,15 @@ function loadSavedServers(): void {
   try {
     const raw = localStorage.getItem("qai_ssh_servers");
     if (!raw) return;
-    const parsed: Omit<ServerDraft, "authRef">[] = JSON.parse(raw);
-    servers.value = parsed.map((p) => ({ ...p, authRef: "", saved: true }));
+    const parsed: Array<Partial<ServerDraft>> = JSON.parse(raw);
+    servers.value = parsed.map((p) => ({
+      ...newDraft(),
+      ...p,
+      sshPort: Number(p.sshPort) || 22,
+      remotePort: Number(p.remotePort) || DEFAULT_REMOTE_APP_PORT,
+      authRef: "",
+      saved: true,
+    }));
   } catch {
     // corrupt storage — ignore
   }
@@ -140,8 +150,61 @@ function toggleExpand(s: ServerDraft): void {
   s.expanded = !s.expanded;
 }
 
+// The local WebUI keeps its default port (8989). Each SSH server gets the next
+// local port so a remote WebUI never collides with the local WebUI or another
+// tunnel: server #1 -> 8990, #2 -> 8991, ... . The remote service port stays
+// 8989; only the local listening side changes.
+const DEFAULT_REMOTE_APP_PORT = 8989;
+function serverIndex(s: ServerDraft): number {
+  const index = servers.value.findIndex((item) => item.id === s.id);
+  return index < 0 ? 0 : index;
+}
+function localTunnelPort(s: ServerDraft): number {
+  return DEFAULT_REMOTE_APP_PORT + serverIndex(s) + 1;
+}
+function tunnelCommand(s: ServerDraft): string {
+  const port = s.sshPort === 22 ? "" : ` -p ${s.sshPort}`;
+  const key = s.authMethod === "private_key" && s.keyPath
+    ? ` -i ${s.keyPath}`
+    : "";
+  return `ssh -N${port}${key} -L ${localTunnelPort(s)}:127.0.0.1:${s.remotePort} ${s.username}@${s.host}`;
+}
+function tunnelUrl(s: ServerDraft): string {
+  return `http://127.0.0.1:${localTunnelPort(s)}/chat`;
+}
+function openTunnelUrl(s: ServerDraft): void {
+  window.open(tunnelUrl(s), "_blank", "noopener,noreferrer");
+}
+function tunnelUrlForHost(host: string): string {
+  const normalizedHost = host.trim().toLowerCase();
+  const s = servers.value.find(
+    (item) => item.host.trim().toLowerCase() === normalizedHost,
+  );
+  return s ? tunnelUrl(s) : `http://127.0.0.1:${DEFAULT_REMOTE_APP_PORT + 1}/chat`;
+}
+function tunnelDisplayForHost(host: string): string {
+  return tunnelUrlForHost(host).replace(/^https?:\/\//, "").replace(/\/chat$/, "");
+}
+function openInstanceTunnel(host: string): void {
+  const s = servers.value.find((item) => item.host === host);
+  if (s) openTunnelUrl(s);
+  else {
+    // Fallback for an instance loaded from a previous browser session: use
+    // the first assigned tunnel port instead of opening an unreachable URL.
+    window.open(`http://127.0.0.1:${DEFAULT_REMOTE_APP_PORT + 1}/chat`, "_blank", "noopener,noreferrer");
+  }
+}
+
 // ── Actions ───────────────────────────────────────────────────────────────────
 async function onTestConnect(s: ServerDraft): Promise<void> {
+  await testConnect({
+    host: s.host,
+    ssh_port: s.sshPort,
+    username: s.username,
+    auth_method: s.authMethod,
+    auth_ref: s.authRef,
+    key_path: s.keyPath,
+  });
   const cr = getConnectResult(s.id);
   cr.connecting = true;
   cr.success = false;
@@ -168,6 +231,16 @@ async function onTestConnect(s: ServerDraft): Promise<void> {
 async function onDeploy(s: ServerDraft): Promise<void> {
   activeDeployId.value = s.id;
   s.showLog = true;
+  await deploy({
+    host: s.host,
+    ssh_port: s.sshPort,
+    username: s.username,
+    auth_method: s.authMethod,
+    auth_ref: s.authRef,
+    key_path: s.keyPath,
+    remote_port: s.remotePort,
+  });
+  activeDeployId.value = null;
   const ds = getDeployState(s.id);
   ds.log = [];
   ds.percent = 0;
@@ -263,12 +336,12 @@ watch(
               :class="`ssh-chip--${inst.state}`"
             >
               <span class="ssh-chip-dot"></span>
-              <span class="ssh-chip-host">{{ inst.host }}:{{ inst.port }}</span>
+              <span class="ssh-chip-host">{{ inst.local_url ? inst.local_url.replace(/^https?:\/\//, '').replace(/\/chat$/, '') : tunnelDisplayForHost(inst.host) }}</span>
               <button
-                v-if="inst.state === 'running' && inst.remote_url"
+                v-if="inst.state === 'running'"
                 type="button"
                 class="ssh-chip-action"
-                @click="openRemoteUrl(inst.remote_url)"
+                @click="openInstanceTunnel(inst.host)"
               >{{ t("index.sshOpen") }}</button>
               <button
                 type="button"
@@ -347,6 +420,31 @@ watch(
                 />
               </div>
 
+              <div class="ssh-row">
+                <div class="ssh-field">
+                  <label class="ssh-label" :for="`ssh-port-${s.id}`">{{ t("index.sshPort") }}</label>
+                  <input
+                    :id="`ssh-port-${s.id}`"
+                    v-model.number="s.sshPort"
+                    type="number"
+                    min="1"
+                    max="65535"
+                    class="config-input"
+                  />
+                </div>
+                <div class="ssh-field">
+                  <label class="ssh-label" :for="`ssh-remote-port-${s.id}`">{{ t("index.sshRemotePort") }}</label>
+                  <input
+                    :id="`ssh-remote-port-${s.id}`"
+                    v-model.number="s.remotePort"
+                    type="number"
+                    min="1"
+                    max="65535"
+                    class="config-input"
+                  />
+                </div>
+              </div>
+
               <!-- Row 2: username / auth method -->
               <div class="ssh-row">
                 <div class="ssh-field">
@@ -398,6 +496,25 @@ watch(
                   class="config-input mono"
                   placeholder="~/.ssh/id_rsa"
                 />
+              </div>
+
+              <!-- SSH tunnel information. The command is intentionally shown
+                   rather than executed by the browser: browsers cannot open
+                   a local SSH process. The operator runs it in PowerShell /
+                   Terminal, then opens the localhost URL below. -->
+              <div class="ssh-tunnel-box">
+                <p class="ssh-tunnel-title">{{ t("index.sshTunnelTitle") }}</p>
+                <p class="ssh-tunnel-hint">
+                  {{ t("index.sshTunnelHint", { port: localTunnelPort(s) }) }}
+                </p>
+                <code class="ssh-tunnel-command">{{ tunnelCommand(s) }}</code>
+                <button
+                  type="button"
+                  class="rename-dialog-btn rename-dialog-btn--cancel ssh-tunnel-open"
+                  @click="openTunnelUrl(s)"
+                >
+                  {{ t("index.sshOpenTunnel", { port: localTunnelPort(s) }) }}
+                </button>
               </div>
 
               <!-- Actions -->
@@ -680,6 +797,38 @@ watch(
   font-size: var(--text-xs);
   color: var(--text-secondary);
   font-weight: var(--weight-medium);
+}
+
+/* ── Local SSH tunnel instructions ──────────────────────────────────────── */
+.ssh-tunnel-box {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-secondary);
+}
+.ssh-tunnel-title {
+  margin: 0 0 var(--space-1);
+  font-weight: var(--weight-semibold, 600);
+}
+.ssh-tunnel-hint {
+  margin: 0 0 var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm, 13px);
+}
+.ssh-tunnel-command {
+  display: block;
+  overflow-x: auto;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: var(--text-xs, 12px);
+  user-select: all;
+}
+.ssh-tunnel-open {
+  margin-top: var(--space-2);
 }
 
 /* ── Actions row ─────────────────────────────────────────────────────────── */

@@ -214,6 +214,13 @@ def create_app(
         AuthMiddleware,
         settings=resolved_settings.auth,
         data_root=container.data_paths.root,
+        # RFC 8628 device-flow silent bootstrap (headless / remote servers):
+        # a request with no session cookie is minted from the refresh_token
+        # stored by ``qai auth device-login``. Same SecretStore the CLI wrote
+        # it to; the LIVE ssl_verify provider so the outbound Okta call
+        # follows the global TLS-verification toggle (hot-applies).
+        secret_store=container.secret_store,
+        ssl_verify_provider=build_ssl_verify_provider(container),
     )
 
     # CORS middleware — S-2: explicit trusted-origin allow-list (no longer
@@ -266,6 +273,11 @@ def create_app(
         # takes precedence over the ``ssl_verify`` bool above (which stays as the
         # standalone/test fallback). Okta IS included in the global toggle.
         ssl_verify_provider=build_ssl_verify_provider(container),
+        # RFC 8628 device-flow: /api/auth/me (a PUBLIC route the SPA calls
+        # before the middleware mints anything) mints a session from the
+        # refresh_token stored by ``qai auth device-login`` for headless
+        # servers — same SecretStore the CLI wrote it to.
+        secret_store=container.secret_store,
     ))
     # Give the QAI Service token holder its persistent backing store so a
     # backend restart does not drop the pool's bearer (it is only minted inside
