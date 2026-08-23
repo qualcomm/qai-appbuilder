@@ -10,16 +10,16 @@ previously lived inline in ``interfaces/http/routes/model_runtime.py``:
 
 1. Resolve the active config path via an injected ``genie_root`` provider +
    the :class:`ServiceConfigRepositoryPort` (same logic as the read path).
-2. Extract the two cloud ``api_key`` fields, store them in the platform
-   :class:`SecretStore`, and strip them from the JSON document so plaintext
-   keys are never written to disk (§3.3 credentials rule).
-3. Strip any stale ``api_key`` from the existing document, then deep-merge
-   the submitted document on top and persist.
+2. Extract the two cloud ``api_key`` fields and mirror them to the platform
+   :class:`SecretStore` (so the UI read path can detect their presence).
+3. Write the complete document — including plaintext ``api_key`` values —
+   to ``service_config.json``.  GenieAPIService.exe is a standalone C++
+   process that reads only this file; it has no access to the Python
+   SecretStore.  Keeping the key in the JSON is therefore a hard
+   requirement for the service to authenticate against the cloud endpoint.
 
-SecretStore failure is no longer silently swallowed: it is logged AND
-surfaced in the response (``secret_store_errors``) so a failed key save is
-not lost — the config document still persists (best-effort, V1 parity), but
-the caller learns the key did not stick.
+SecretStore failure is logged but never fatal: the document still
+persists with the plaintext key so GenieAPIService.exe can use it.
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ _NOT_INSTALLED_CODE = "model_runtime.service_not_installed"
 
 
 class SaveServiceConfigUseCase:
-    """Persist service_config.json; api_keys go to the SecretStore."""
+    """Persist service_config.json; api_keys also mirrored to SecretStore."""
 
     def __init__(
         self,
@@ -72,10 +72,7 @@ class SaveServiceConfigUseCase:
 
         # Single source of truth: the config file next to GenieAPIService.exe.
         # When the service is not installed there is no authoritative file to
-        # write — fail fast (before touching the SecretStore) so a save never
-        # half-applies (keys stored, document refused) and no zombie fallback
-        # is created. The frontend disables the config entrypoints as the
-        # primary guard; this is the hard backend guarantee.
+        # write — fail fast so a save never half-applies.
         if not active_path:
             raise PreconditionFailedError(
                 _NOT_INSTALLED_CODE,
@@ -86,40 +83,68 @@ class SaveServiceConfigUseCase:
         data = copy.deepcopy(config)
         secret_errors: dict[str, str] = {}
 
-        # Extract and store api_keys in SecretStore (never write to JSON).
-        cloud_key = data.get("cloud_model", {}).pop("api_key", None)
-        self._store_key(
-            _CLOUD_MODEL_SECRET_SVC, cloud_key, "cloud_model", secret_errors
+        # Resolve the real api_key values to write:
+        # - If the submitted value is "****" (unchanged mask), read the
+        #   current value from SecretStore so we don't erase a saved key.
+        # - If the submitted value is a real key, use it as-is.
+        # - If empty, keep empty (user explicitly cleared the field).
+        cloud_key = self._resolve_key(
+            _CLOUD_MODEL_SECRET_SVC,
+            data.get("cloud_model", {}).get("api_key"),
         )
-        enterprise_key = data.get("enterprise_cloud_model", {}).pop("api_key", None)
-        self._store_key(
+        enterprise_key = self._resolve_key(
             _ENTERPRISE_CLOUD_SECRET_SVC,
-            enterprise_key,
-            "enterprise_cloud_model",
-            secret_errors,
+            data.get("enterprise_cloud_model", {}).get("api_key"),
         )
 
-        # Strip any stale api_key from the submitted data so the merge never
-        # reintroduces a plaintext key into the document.
-        data.get("cloud_model", {}).pop("api_key", None)
-        data.get("enterprise_cloud_model", {}).pop("api_key", None)
+        # Mirror real keys to SecretStore (so UI exists() check works).
+        if cloud_key:
+            self._store_key(
+                _CLOUD_MODEL_SECRET_SVC, cloud_key, "cloud_model", secret_errors
+            )
+        if enterprise_key:
+            self._store_key(
+                _ENTERPRISE_CLOUD_SECRET_SVC,
+                enterprise_key,
+                "enterprise_cloud_model",
+                secret_errors,
+            )
 
-        # Read-modify-write (V1 parity): load the existing document, strip
-        # its api_key fields too, deep-merge the submitted data on top, then
-        # write the result. Stripping both sides guarantees no ``api_key``
-        # ever lands on disk in plaintext.
+        # Write api_key back into the document so GenieAPIService.exe can
+        # read it. The file lives in the per-user data directory and is
+        # protected by OS-level ACLs (same protection as before this change).
+        if "cloud_model" in data:
+            data["cloud_model"]["api_key"] = cloud_key or ""
+        if "enterprise_cloud_model" in data:
+            data["enterprise_cloud_model"]["api_key"] = enterprise_key or ""
+
+        # Read-modify-write: deep-merge the submitted data on top of the
+        # existing document, then write the result.
         existing = self._repository.load(path=active_path)
-        existing.get("cloud_model", {}).pop("api_key", None)
-        existing.get("enterprise_cloud_model", {}).pop("api_key", None)
         merged = deep_merge_defaults(existing, data)
         self._repository.save(merged, path=active_path)
 
         result: dict[str, Any] = {"status": "saved"}
         if secret_errors:
-            # Surface the failure rather than silently dropping it: the
-            # document persisted but the key did not reach the SecretStore.
             result["secret_store_errors"] = secret_errors
         return result
+
+    def _resolve_key(self, service: str, submitted: str | None) -> str | None:
+        """Return the real key to persist.
+
+        - Non-empty value that is not ``"****"`` → use as-is (new key from user).
+        - ``"****"`` or ``None`` / ``""`` → read existing value from SecretStore.
+          The empty-string case guards against the UI sending "" because
+          GetServiceConfigUseCase returned "" due to a SecretStore read failure;
+          we preserve the stored key rather than overwriting it with empty.
+        """
+        if submitted and submitted != _MASK:
+            return submitted
+        try:
+            existing = self._secret_store.get(service, _API_KEY_KEY)
+            return existing or None
+        except Exception:  # noqa: BLE001
+            return None
 
     def _store_key(
         self,
@@ -128,14 +153,14 @@ class SaveServiceConfigUseCase:
         section: str,
         errors: dict[str, str],
     ) -> None:
-        """Store *value* under *service* if it is a real (non-masked) key."""
+        """Mirror *value* to SecretStore; log but don't raise on failure."""
         if not value or value == _MASK:
             return
         try:
             self._secret_store.set(service, _API_KEY_KEY, value)
-        except Exception as exc:  # noqa: BLE001 — non-fatal for config save
+        except Exception as exc:  # noqa: BLE001 — non-fatal; key is already in JSON
             logger.warning(
-                "Failed to store %s api_key in SecretStore: %s", section, exc
+                "Failed to mirror %s api_key to SecretStore: %s", section, exc
             )
             errors[section] = str(exc)
 

@@ -137,6 +137,11 @@ const service = {
   // 模型數量後綴（V1 index.html:2942 "(N model(s))"）
   modelsCount: "{n} 個模型",
   versionCheckFailed: "檢查版本更新失敗",
+  cloudNotConfiguredTitle: "雲端模型設定不完整",
+  cloudNotConfiguredBody:
+    "cloud_model 的部分欄位（base_url 或 api_key）為空或仍為出廠預設值。當端側模型無法處理複雜問題時，智慧路由將無法轉發至雲端模型。請在 服務配置 中填寫實際的雲端 endpoint URL、api_key 與 model 欄位，然後重新啟動服務以使設定生效。",
+  cloudNotConfiguredConfirm: "開啟 服務配置",
+  cloudNotConfiguredCancel: "稍後",
 };
 
 export default service;

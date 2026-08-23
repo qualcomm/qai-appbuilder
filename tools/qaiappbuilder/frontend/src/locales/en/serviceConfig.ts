@@ -23,6 +23,7 @@ const serviceConfig = {
   allowCloudRerouteHint: "After cleaning historical S2, allow re-routing to CLOUD if cloud is more suitable",
   allowedToolsHint: "Comma-separated list of tool names",
   apiKeyLabel: "API Key",
+  apiKeySavedPlaceholder: "Saved — leave blank to keep",
   baseUrlLabel: "Base URL",
   c1KeywordsHint: "Match upgrades to C1 (comma-separated); <b>leave empty to use built-in defaults</b>",
   c1KeywordsPlaceholder: "analyze, reason, compare, ...",

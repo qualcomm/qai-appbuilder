@@ -31,6 +31,7 @@ defineProps<{
 const emit = defineEmits<{
   attach: [];
   "pick-mode": [mode: string];
+  ssh: [];
 }>();
 
 const { t } = useI18n();
@@ -70,6 +71,35 @@ const { t } = useI18n();
           y2="7"
         />
       </svg>
+    </button>
+    <span class="rit-sep"></span>
+    <!-- SSH remote deploy — permanent button (always visible, left of App Builder).
+         Clicking opens the SSH server management panel without switching modes. -->
+    <button
+      type="button"
+      class="rit-btn rit-tool-ssh"
+      data-testid="mode-btn-ssh"
+      :title="t('index.sshMode') + ' — ' + t('index.sshModeHint')"
+      :aria-label="t('index.sshMode')"
+      @click="emit('ssh')"
+    >
+      <!-- Terminal >_ icon -->
+      <svg
+        width="13"
+        height="13"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <rect x="2" y="3" width="20" height="15" rx="2" />
+        <path d="M6 8l4 4-4 4" />
+        <path d="M12 16h6" />
+      </svg>
+      <span>{{ t('index.sshMode') }}</span>
     </button>
     <span class="rit-sep"></span>
     <!-- Data-driven mode buttons: v-for over enabled modules,

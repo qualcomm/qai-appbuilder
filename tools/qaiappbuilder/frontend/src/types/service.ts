@@ -89,6 +89,13 @@ export interface LoadServiceModelResponse {
   model: string;
 }
 
+/** Wire form of `POST /api/service/start`. */
+export interface StartServiceResponse {
+  status: string;
+  /** Advisory warnings emitted during startup (e.g. unconfigured cloud endpoint). */
+  warnings?: string[] | null;
+}
+
 /**
  * Body of `POST /api/service/start`.
  *

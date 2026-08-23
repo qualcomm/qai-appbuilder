@@ -89,6 +89,7 @@ import ModeFrameAppBuilder from "./toolbar-modes/ModeFrameAppBuilder.vue";
 import ModeFrameCoding from "./toolbar-modes/ModeFrameCoding.vue";
 import ModeFrameTranslate from "./toolbar-modes/ModeFrameTranslate.vue";
 import ModeFramePpt from "./toolbar-modes/ModeFramePpt.vue";
+import ModeFrameSsh from "./toolbar-modes/ModeFrameSsh.vue";
 // Internal-only sub-toolbars (MB Pro / GoMaster). Referenced lazily and ONLY
 // on the internal edition so the external open-source build tree-shakes the
 // dynamic import() away — the modules are physically absent from that bundle
@@ -152,6 +153,9 @@ const {
 // submit, and pill composables can all reference them.
 const claudeCode = useClaudeCode();
 const openCode = useOpenCode();
+// SSH panel visibility (permanent button — not a toolbar mode)
+const showSshPanel = ref(false);
+
 
 const text = ref("");
 const modelDropdownOpen = ref(false);
@@ -1961,6 +1965,7 @@ const {
             :effective-mode="effectiveMode"
             @attach="openFilePicker"
             @pick-mode="setToolModeFromKey"
+            @ssh="showSshPanel = true"
           />
 
           <!-- Active-mode sub-toolbars — only one renders at a time. -->
@@ -2014,6 +2019,9 @@ const {
             v-else-if="ModeFrameGomaster && effectiveMode === 'gomaster'"
             @exit="exitMode"
           />
+
+          <!-- SSH panel: permanent, rendered outside the mode chain -->
+          <ModeFrameSsh :visible="showSshPanel" @close="showSshPanel = false" />
 
           <div class="rit-right">
             <button

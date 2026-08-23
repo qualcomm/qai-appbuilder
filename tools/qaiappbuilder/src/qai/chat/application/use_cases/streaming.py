@@ -7722,7 +7722,7 @@ class StreamChatUseCase:
         # adjacent assistant text keeps the wire valid so nothing is dropped
         # round after round. Clean histories are byte-for-byte unaffected.
         # P1.d/P2 (§6): inject the checkpoint's ``[Session Digest]`` (P2) and
-        # ``[References Ledger]`` (P1.d) blocks as ``role: system`` messages
+        # ``[References Ledger]`` (P1.d) blocks as ``role: user`` messages
         # immediately BEFORE the trailing current-user turn. Digest first
         # (higher-level context), ledger second (concrete references) — the
         # order matters because both are prepended one at a time via
@@ -7739,7 +7739,7 @@ class StreamChatUseCase:
     ) -> None:
         """Insert the checkpoint's digest + reference-ledger prefix blocks.
 
-        Two ``role: system`` messages inserted immediately BEFORE the trailing
+        Two ``role: user`` messages inserted immediately BEFORE the trailing
         current-user turn (``messages.insert(-1, ...)``):
 
         1. ``[Session Digest]`` (P2, §6) — a structured Markdown summary of
@@ -7778,16 +7778,16 @@ class StreamChatUseCase:
             messages.insert(
                 -1,
                 {
-                    "role": "system",
+                    "role": "user",
                     "content": f"[Session Digest]\n{digest_text.strip()}",
                 },
             )
         if ckpt.reference_ledger is not None:
             block = ckpt.reference_ledger.render_wire_block()
             if block:
-                messages.insert(-1, {"role": "system", "content": block})
+                messages.insert(-1, {"role": "user", "content": block})
         # P3 (§7.1): after the ledger, inject each retained turn-prefix
-        # summary as its own ``role: system`` message via ``insert(-1, ...)``.
+        # summary as its own ``role: user`` message via ``insert(-1, ...)``.
         # Insertion order (oldest to newest across the list means the NEWEST
         # summary sits closest to the trailing user turn — matching the FIFO
         # storage口径 in :func:`append_turn_prefix_summary`, which keeps the
@@ -7808,7 +7808,7 @@ class StreamChatUseCase:
                         messages.insert(
                             -1,
                             {
-                                "role": "system",
+                                "role": "user",
                                 "content": (
                                     "[Turn Prefix Summary]\n"
                                     + summary_text.strip()
@@ -9738,8 +9738,27 @@ class StreamChatUseCase:
         if live_wire is None and len(history) <= _COMPRESS_PRESERVE_TAIL:
             return False
 
+        # E2 FILTER: strip compaction-injected prefix blocks from live_wire
+        # before feeding it to the compressor. Without this, a mid-turn
+        # compaction would see the [Session Digest] / [References Ledger] /
+        # [Turn Prefix Summary] blocks injected by _inject_compaction_prefix_blocks
+        # and fold them into the new compacted head, causing duplicate blocks on the
+        # next round after round. Filter is pure + idempotent — a wire without
+        # injected blocks passes through unchanged.
         assembled = (
-            list(live_wire)
+            [
+                dict(m) for m in live_wire
+                if not (
+                    isinstance(m, dict)
+                    and m.get("role") == "user"
+                    and isinstance(m.get("content"), str)
+                    and (
+                        m["content"].startswith("[Session Digest]")
+                        or m["content"].startswith("[References Ledger]")
+                        or m["content"].startswith("[Turn Prefix Summary]")
+                    )
+                )
+            ]
             if live_wire is not None
             else self._assemble_history_wire(conv=conv, request=request)
         )

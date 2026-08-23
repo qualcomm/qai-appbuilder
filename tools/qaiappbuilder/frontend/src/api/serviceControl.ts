@@ -20,6 +20,7 @@
 import { apiJson, apiRaw, buildApiUrl, type ApiRequestOptions } from "./http";
 import type {
   StartServiceRequest,
+  StartServiceResponse,
   ServiceStatusResponse,
   ServiceLogsClearResponse,
   ServiceModelsResponse,
@@ -65,8 +66,8 @@ export async function probeService(
 export async function startService(
   params?: StartServiceRequest,
   opts?: ApiRequestOptions,
-): Promise<ServiceStatusResponse> {
-  return apiJson<ServiceStatusResponse, StartServiceRequest | undefined>(
+): Promise<StartServiceResponse> {
+  return apiJson<StartServiceResponse, StartServiceRequest | undefined>(
     "POST",
     "/api/service/start",
     params,

@@ -81,6 +81,7 @@ from interfaces.http.routes.gomaster import build_router as build_gomaster_route
 from interfaces.http.routes.gomaster_optimize import build_router as build_gomaster_optimize_router
 from interfaces.http.routes.gallery_submit import build_router as build_gallery_submit_router
 from interfaces.http.routes.search_engines import build_router as build_search_engines_router
+from interfaces.http.routes.remote_deploy import build_router as build_remote_deploy_router
 from qai.platform.config import Settings, load_settings
 from qai.platform.logging import get_logger
 
@@ -342,6 +343,7 @@ def create_app(
     # edition-dual-form-design.md §7), and a comment is the easiest place for
     # one to survive a refactor unnoticed.
     app.include_router(build_gallery_submit_router(container=container))
+    app.include_router(build_remote_deploy_router(container=container))
 
     # Chat image files + SPA static bundle (PR-074). Both must register
     # AFTER all API/WS routers so FastAPI matches /api/*, /openapi.json,

@@ -260,6 +260,11 @@ class ProcessBackedInferenceService:
             except Exception as exc:  # noqa: BLE001 — best-effort, V1 parity
                 logger.warning("service_config.json sync failed (non-fatal): %r", exc)
 
+        # Pre-spawn: warn when cloud_model.base_url is still the factory placeholder.
+        # The daemon starts regardless — the warning is advisory so operators can
+        # configure the cloud endpoint without blocking the local inference path.
+        await asyncio.to_thread(self._warn_if_cloud_model_unconfigured)
+
         await asyncio.to_thread(self._do_start, args, effective_port, model_name)
 
     async def _guard_port_for_spawn(self, port: int) -> None:
@@ -514,40 +519,39 @@ class ProcessBackedInferenceService:
         return str(exe_path) if exe_path.is_file() else ""
 
     async def load_model(self, model_name: str) -> None:
-        """Load *model_name*; start the daemon first if it isn't running.
+        """Load *model_name*; (re)start the daemon with the new model.
 
-        V1 parity (``backend/main.py:_do_load_local_model`` @5300-5400): the
-        ``/api/service/load-model`` endpoint **starts the GenieAPIService with
-        the requested model when the service is not already running** (the
-        daemon loads the model from its ``-c <model>/config.json`` at boot),
-        rather than erroring out. This is exactly the chat dropdown / ``/model``
-        auto-load path (#4): the user picks a stopped local model and expects
-        it to come up. Only when the service is *already running* do we send
-        the in-process ``/load_model`` switch command.
+        V1 parity (``backend/main.py:_do_load_local_model`` @5300-5400):
+        GenieAPIService does **not** expose a runtime ``/load_model`` HTTP
+        endpoint for hot-switching models.  The only supported way to change
+        the active model is to stop the running daemon and start a fresh one
+        with the new ``-c <model>/config.json`` flag.  V1 always did this:
+        ``_do_load_local_model`` called ``stop_service`` then
+        ``start_service(model_name=...)``.  Attempting a POST to
+        ``/load_model`` on a running daemon returns 404 Not Found.
 
-        Previously this raised ``RuntimeError("Service is not running")`` →
-        HTTP 500, which broke the auto-load UX (audit A1).
+        This method therefore always follows the stop → start path:
+        - Service down  → start directly with the requested model.
+        - Service running with the SAME model → no-op (fast path).
+        - Service running with a DIFFERENT model → stop then start.
         """
         self._refresh_state()
-        if self._state != ServiceState.RUNNING or self._port is None:
-            # Service down → start it with the requested model (V1 starts the
-            # daemon, which loads the model via its ``-c`` config at boot).
-            await self.start(model_name=model_name)
-            self._loaded_model = model_name
+        # Fast path: already running the requested model — nothing to do.
+        if (
+            self._state == ServiceState.RUNNING
+            and self._loaded_model == model_name
+        ):
+            self._append_log(f"Model already loaded: {model_name}")
             return
-        try:
-            import httpx
-
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(
-                    f"http://127.0.0.1:{self._port}/load_model",
-                    json={"model": model_name},
-                )
-                resp.raise_for_status()
-            self._loaded_model = model_name
-            self._append_log(f"Model loaded: {model_name}")
-        except Exception as exc:
-            raise RuntimeError(f"Failed to load model '{model_name}': {exc}") from exc
+        # Service running with a different model → stop first.
+        if self._state == ServiceState.RUNNING:
+            self._append_log(
+                f"Switching model: stopping current daemon before loading '{model_name}'"
+            )
+            await self.stop()
+        # Service down (or just stopped above) → start with the new model.
+        await self.start(model_name=model_name)
+        self._loaded_model = model_name
 
     async def get_logs(self) -> list[str]:
         """Return snapshot of the log buffer."""
@@ -798,6 +802,47 @@ class ProcessBackedInferenceService:
             )
         except OSError as exc:
             logger.warning("_sync_service_config_model write failed (non-fatal): %s", exc)
+
+    # Markers that identify an unconfigured cloud_model.base_url
+    # (empty string, or still the factory placeholder shipped in the template).
+    _PLACEHOLDER_BASE_URL_MARKERS = (
+        "your-api-endpoint.example.com",
+        "example.com",
+    )
+
+    def _warn_if_cloud_model_unconfigured(self) -> None:
+        """Log a WARNING when cloud_model.base_url is empty or a placeholder.
+
+        Reads service_config.json directly (same file _sync writes).  Failures
+        are swallowed — this check is purely advisory and must never block spawn.
+        """
+        if not self._install_dir:
+            return
+        cfg_path = Path(self._install_dir) / "service_config.json"
+        if not cfg_path.is_file():
+            return
+        try:
+            with cfg_path.open("r", encoding="utf-8") as f:
+                cfg = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return
+        if not isinstance(cfg, dict):
+            return
+        cloud_cfg = cfg.get("cloud_model", {})
+        if not isinstance(cloud_cfg, dict) or not cloud_cfg.get("enabled", False):
+            return
+        base_url = (cloud_cfg.get("base_url") or "").strip()
+        unconfigured = not base_url or any(
+            m in base_url for m in self._PLACEHOLDER_BASE_URL_MARKERS
+        )
+        if unconfigured:
+            logger.warning(
+                "cloud_model.base_url 尚未配置（当前值：%r）。"
+                " 当端侧模型无法处理复杂问题时，智能路由将无法转发至云端模型。"
+                " 请在 service_config.json 中填写实际的云端 endpoint URL、api_key 和 model，"
+                " 然后重启服务以使配置生效。",
+                base_url or "(空)",
+            )
 
     def _do_start(self, args: list[str], port: int, model_name: str | None) -> None:
         """Blocking start logic — run in a thread."""

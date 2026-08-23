@@ -23,6 +23,7 @@ const serviceConfig = {
   allowCloudRerouteHint: "清洗历史 S2 后，若云端更适合则允许重新路由到 CLOUD",
   allowedToolsHint: "逗号分隔的工具名称列表",
   apiKeyLabel: "API Key",
+  apiKeySavedPlaceholder: "已保存 — 留空则保持不变",
   baseUrlLabel: "接口地址",
   c1KeywordsHint: "命中后升级为 C1（逗号分隔）；<b>留空则使用内置默认值</b>",
   c1KeywordsPlaceholder: "分析, 推理, 归纳, analyze, compare, ...",

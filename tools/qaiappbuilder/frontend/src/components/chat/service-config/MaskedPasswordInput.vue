@@ -32,6 +32,7 @@ defineProps<{
   prefixIcon?: string;
   placeholder?: string;
   disabled?: boolean;
+  hideToggle?: boolean;
   ariaLabel?: string;
   inputId?: string;
 }>();
@@ -64,6 +65,7 @@ function toggleVisible(): void {
       @input="$emit('update:modelValue', ($event.target as HTMLInputElement).value)"
     />
     <button
+      v-if="!hideToggle"
       type="button"
       class="svc-cfg-eye-btn"
       :aria-label="visible ? 'Hide' : 'Show'"

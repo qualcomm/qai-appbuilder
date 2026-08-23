@@ -37,6 +37,7 @@ import {
   streamServiceLogs,
 } from "@/api/serviceControl";
 import { useToastStore } from "@/stores/toast";
+import { useConfirm } from "@/composables/useConfirm";
 import type {
   ServiceModelEntry,
   ServiceStatusResponse,
@@ -80,12 +81,16 @@ function defaultSvcParams(): SvcParams {
   };
 }
 
-export function useServiceControl(logPanel: Ref<HTMLElement | null>) {
+export function useServiceControl(
+  logPanel: Ref<HTMLElement | null>,
+  onCloudNotConfigured?: () => void,
+) {
   const { t } = useI18n();
   const toast = useToastStore();
+  const { confirm } = useConfirm();
 
-  function notify(kind: "success" | "error" | "info", message: string): void {
-    toast.push({ id: crypto.randomUUID(), kind, message, timeoutMs: kind === "error" ? 5000 : 3000 });
+  function notify(kind: "success" | "error" | "info" | "warning", message: string): void {
+    toast.push({ id: crypto.randomUUID(), kind, message, timeoutMs: kind === "error" ? 5000 : kind === "warning" ? 8000 : 3000 });
   }
 
   // ── Core reactive state ────────────────────────────────────────────────
@@ -352,15 +357,19 @@ export function useServiceControl(logPanel: Ref<HTMLElement | null>) {
       });
       serviceStatus.value = {
         ...serviceStatus.value,
-        ...result,
         running: true,
       };
-      notify(
-        "success",
-        result.pid != null
-          ? `${t("service.startSuccess")} (PID: ${result.pid})`
-          : t("service.startSuccess"),
-      );
+      notify("success", t("service.startSuccess"));
+      if (result.warnings?.length && onCloudNotConfigured) {
+        const go = await confirm({
+          icon: "⚠️",
+          title: t("service.cloudNotConfiguredTitle"),
+          message: t("service.cloudNotConfiguredBody"),
+          confirmText: t("service.cloudNotConfiguredConfirm"),
+          cancelText: t("service.cloudNotConfiguredCancel"),
+        });
+        if (go) onCloudNotConfigured();
+      }
       paramsCollapsed.value = true;
       paramsAutoCollapsed = true;
       void streamLogs();

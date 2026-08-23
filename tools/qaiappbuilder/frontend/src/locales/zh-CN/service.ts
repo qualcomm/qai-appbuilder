@@ -137,6 +137,11 @@ const service = {
   // 模型数量后缀（V1 index.html:2942 "(N model(s))"）
   modelsCount: "{n} 个模型",
   versionCheckFailed: "检查版本更新失败",
+  cloudNotConfiguredTitle: "云端模型配置不完整",
+  cloudNotConfiguredBody:
+    "cloud_model 的部分字段（base_url 或 api_key）为空或仍为出厂占位符。当端侧模型无法处理复杂问题时，智能路由将无法转发至云端模型。请在 服务配置 中填写实际的云端 endpoint URL、api_key 和 model 字段，然后重启服务以使配置生效。",
+  cloudNotConfiguredConfirm: "打开 服务配置",
+  cloudNotConfiguredCancel: "稍后",
 };
 
 export default service;
