@@ -584,9 +584,9 @@ REM ``browserforge`` is probed for the same reason: it generates the dynamic
 REM per-request browser fingerprint the keyless scrapers use to evade bot
 REM detection (import-guarded, so its absence only drops back to a static
 REM header set), and ships a pure-Python wheel so probing it forces no rebuild.
-"%VENV_DIR%\Scripts\python.exe" -c "import fastapi, uvicorn, structlog, claude_agent_sdk, croniter, playwright, selectolax, lxml, browserforge" >nul 2>&1
+"%VENV_DIR%\Scripts\python.exe" -c "import fastapi, uvicorn, structlog, claude_agent_sdk, croniter, playwright, selectolax, lxml, browserforge, paramiko" >nul 2>&1
 if not errorlevel 1 (
-    echo [SKIP] Dependencies already installed and complete ^(fastapi, uvicorn, structlog, claude_agent_sdk, croniter, playwright^). Skipping pip steps.
+    echo [SKIP] Dependencies already installed and complete ^(fastapi, uvicorn, structlog, claude_agent_sdk, croniter, playwright, paramiko^). Skipping pip steps.
     goto :skip_all_installs
 )
 echo [INFO] Dependency closure incomplete or missing; running full install to ^(re^)complete it...
