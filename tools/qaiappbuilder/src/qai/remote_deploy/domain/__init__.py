@@ -92,6 +92,10 @@ class RemoteInstance:
     error_message: str = ""
     # pid of the remote process (0 = unknown)
     remote_pid: int = 0
+    # Local Paramiko SSH tunnel. These fields are runtime-only and are not
+    # credentials: the tunnel itself is owned by the local API process.
+    local_port: int = 0
+    tunnel_state: str = "stopped"
     # log lines captured during install/start (bounded buffer)
     log_lines: list[str] = field(default_factory=list)
 

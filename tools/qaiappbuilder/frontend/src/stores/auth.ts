@@ -51,6 +51,8 @@ const LOGIN_FLOW_TIMEOUT_MS = 120_000;
 interface AuthState {
   /** Master switch — `settings.auth.enabled` on the server. */
   authEnabled: boolean;
+  /** True when the server expects RFC 8628 device-login instead of browser SSO. */
+  deviceFlow: boolean;
   /** True when a valid session cookie is present (or gate is disabled). */
   authenticated: boolean;
   /** Signed-in user; `null` when unauthenticated or gate disabled. */
@@ -103,6 +105,7 @@ interface AuthState {
 export const useAuthStore = defineStore("auth", {
   state: (): AuthState => ({
     authEnabled: false,
+    deviceFlow: false,
     authenticated: false,
     user: null,
     expiresAt: null,
@@ -174,6 +177,7 @@ export const useAuthStore = defineStore("auth", {
         try {
           const me = await fetchAuthMe();
           this.authEnabled = me.auth_enabled;
+          this.deviceFlow = me.device_flow === true;
           this.authenticated = me.authenticated;
           this.user = me.user;
           this.expiresAt = me.expires_at ?? null;

@@ -71,6 +71,25 @@ class SshExecutorPort(Protocol):
         """Upload a local file to ``remote_path`` via SFTP."""
         ...
 
+    async def start_tunnel(
+        self,
+        instance_id: str,
+        host: RemoteHost,
+        *,
+        local_port: int,
+        remote_port: int,
+    ) -> int:
+        """Start a local TCP forward and return the bound local port."""
+        ...
+
+    async def stop_tunnel(self, instance_id: str) -> None:
+        """Stop the local TCP forward for an instance."""
+        ...
+
+    async def tunnel_state(self, instance_id: str) -> str:
+        """Return ``stopped``, ``starting`` or ``running``."""
+        ...
+
 
 @runtime_checkable
 class RemoteInstanceRepositoryPort(Protocol):

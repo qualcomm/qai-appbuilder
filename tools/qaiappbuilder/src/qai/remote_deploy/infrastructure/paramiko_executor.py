@@ -19,8 +19,12 @@ Connection strategy:
 from __future__ import annotations
 
 import asyncio
+import base64
 import io
 import logging
+import select
+import socket
+import threading
 from typing import AsyncIterator
 
 import paramiko
@@ -47,6 +51,8 @@ class ParamikoSshExecutor:
 
     def __init__(self, secret_store) -> None:  # type: ignore[annotation]
         self._secret_store = secret_store
+        self._tunnels: dict[str, tuple[socket.socket, threading.Event, threading.Thread]] = {}
+        self._tunnels_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # SshExecutorPort implementation
@@ -122,6 +128,153 @@ class ParamikoSshExecutor:
             None, self._put_file_sync, host, local_path, remote_path
         )
 
+    async def start_tunnel(
+        self,
+        instance_id: str,
+        host: RemoteHost,
+        *,
+        local_port: int,
+        remote_port: int,
+    ) -> int:
+        return await asyncio.get_running_loop().run_in_executor(
+            None,
+            self._start_tunnel_sync,
+            instance_id,
+            host,
+            local_port,
+            remote_port,
+        )
+
+    async def stop_tunnel(self, instance_id: str) -> None:
+        await asyncio.get_running_loop().run_in_executor(
+            None, self._stop_tunnel_sync, instance_id
+        )
+
+    async def tunnel_state(self, instance_id: str) -> str:
+        return await asyncio.get_running_loop().run_in_executor(
+            None, self._tunnel_state_sync, instance_id
+        )
+
+    # ------------------------------------------------------------------
+    # Local Paramiko TCP tunnel
+    # ------------------------------------------------------------------
+
+    def _start_tunnel_sync(
+        self,
+        instance_id: str,
+        host: RemoteHost,
+        local_port: int,
+        remote_port: int,
+    ) -> int:
+        self._stop_tunnel_sync(instance_id)
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            listener.bind(("127.0.0.1", local_port))
+            listener.listen(16)
+            listener.settimeout(0.5)
+        except OSError:
+            listener.close()
+            raise
+        stop_event = threading.Event()
+
+        def serve() -> None:
+            try:
+                while not stop_event.is_set():
+                    try:
+                        client, address = listener.accept()
+                    except socket.timeout:
+                        continue
+                    except OSError:
+                        break
+                    threading.Thread(
+                        target=self._forward_connection,
+                        args=(client, address, host, remote_port, stop_event),
+                        daemon=True,
+                    ).start()
+            finally:
+                try:
+                    listener.close()
+                except OSError:
+                    pass
+
+        thread = threading.Thread(
+            target=serve, name=f"qai-ssh-tunnel-{instance_id}", daemon=True
+        )
+        with self._tunnels_lock:
+            self._tunnels[instance_id] = (listener, stop_event, thread)
+        thread.start()
+        return local_port
+
+    def _stop_tunnel_sync(self, instance_id: str) -> None:
+        with self._tunnels_lock:
+            record = self._tunnels.pop(instance_id, None)
+        if record is None:
+            return
+        listener, stop_event, _thread = record
+        stop_event.set()
+        try:
+            listener.close()
+        except OSError:
+            pass
+
+    def _tunnel_state_sync(self, instance_id: str) -> str:
+        with self._tunnels_lock:
+            record = self._tunnels.get(instance_id)
+        if record is None:
+            return "stopped"
+        return "running" if record[2].is_alive() else "stopped"
+
+    def _forward_connection(
+        self,
+        client: socket.socket,
+        address: tuple[str, int],
+        host: RemoteHost,
+        remote_port: int,
+        stop_event: threading.Event,
+    ) -> None:
+        ssh_client: paramiko.SSHClient | None = None
+        channel = None
+        try:
+            ssh_client = self._connect_sync(host)
+            transport = ssh_client.get_transport()
+            if transport is None or not transport.is_active():
+                return
+            channel = transport.open_channel(
+                "direct-tcpip",
+                ("127.0.0.1", remote_port),
+                address,
+            )
+            channel.settimeout(0.5)
+            client.settimeout(0.5)
+            sockets = [client, channel]
+            while not stop_event.is_set():
+                readable, _, _ = select.select(sockets, [], [], 0.5)
+                if not readable:
+                    if getattr(channel, "closed", False):
+                        break
+                    continue
+                for source in readable:
+                    try:
+                        data = source.recv(65536)
+                    except (socket.timeout, TimeoutError):
+                        continue
+                    except (OSError, EOFError):
+                        return
+                    if not data:
+                        return
+                    target = channel if source is client else client
+                    target.sendall(data)
+        except Exception as exc:  # tunnel connection is isolated per browser socket
+            _LOG.debug("SSH tunnel connection failed for %s: %s", address, exc)
+        finally:
+            for resource in (channel, client, ssh_client):
+                try:
+                    if resource is not None:
+                        resource.close()
+                except Exception:
+                    pass
+
     # ------------------------------------------------------------------
     # Sync helpers (run inside ThreadPoolExecutor)
     # ------------------------------------------------------------------
@@ -187,13 +340,47 @@ class ParamikoSshExecutor:
     ) -> tuple[int, str, str]:
         client = self._connect_sync(host)
         try:
-            _, stdout_f, stderr_f = client.exec_command(command, timeout=timeout)
+            # ``exec_command`` still passes the command through the account's
+            # login shell before Bash starts. On VM24 that shell is csh/tcsh;
+            # even a quoted ``bash -lc '... $((...))'`` can be parsed by csh
+            # first and fail with "Illegal variable name". Base64 carries only
+            # alphanumeric data, so the login shell cannot interpret the
+            # deployer's POSIX/Bash syntax. Bash then receives the original
+            # command byte-for-byte.
+            payload = base64.b64encode(command.encode("utf-8")).decode("ascii")
+            bash_command = f"printf '%s' {payload} | base64 -d | bash -s"
+            _, stdout_f, stderr_f = client.exec_command(
+                bash_command, timeout=timeout
+            )
             stdout = stdout_f.read().decode("utf-8", errors="replace")
             stderr = stderr_f.read().decode("utf-8", errors="replace")
             exit_code = stdout_f.channel.recv_exit_status()
             return exit_code, stdout, stderr
         finally:
             client.close()
+
+    def _collect_lines_sync(
+        self, host: RemoteHost, command: str, timeout: int
+    ) -> list[str]:
+        client = self._connect_sync(host)
+        lines: list[str] = []
+        try:
+            # Keep streamed commands on the same encoded Bash execution path
+            # as ``run_command``; otherwise setup/build and readiness checks
+            # can be interpreted by different remote login shells. Include
+            # stderr in the stream so an SSH deployment failure carries the
+            # actual remote diagnostic instead of only "not ready".
+            payload = base64.b64encode(command.encode("utf-8")).decode("ascii")
+            bash_command = f"printf '%s' {payload} | base64 -d | bash -s 2>&1"
+            _, stdout_f, _ = client.exec_command(
+                bash_command, timeout=timeout
+            )
+            for raw in stdout_f:
+                line = raw.rstrip("\n")
+                lines.append(line)
+        finally:
+            client.close()
+        return lines
 
     def _put_file_sync(
         self, host: RemoteHost, local_path: str, remote_path: str
