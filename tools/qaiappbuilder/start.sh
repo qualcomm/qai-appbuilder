@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
 # start.sh — Ubuntu 启动入口（reboot supervisor）
 # Usage: bash start.sh [--port N]
 #

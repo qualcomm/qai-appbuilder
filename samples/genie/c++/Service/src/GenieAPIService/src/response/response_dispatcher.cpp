@@ -479,7 +479,7 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
         // 历史存储是服务端内部状态管理，与客户端连接状态无关。
         // 即使客户端在生成完成后主动断开连接，服务端仍应保存历史，
         // 以确保下次请求时上下文完整（当 numResponse != -1 时）。
-        if (GetEffectiveNumResponse() != -1)
+        if (!GetEffectiveStatelessMode())
         {
             // 正常模式：服务端维护历史
             if (GetEffectivePromptType() == PromptType::Harmony && proc_)

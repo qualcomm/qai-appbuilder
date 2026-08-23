@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Locale normalisation for qai.platform.i18n.
 
 Behavior-identical copy of :func:`qai.chat.domain.template_i18n.normalize_ui_language`

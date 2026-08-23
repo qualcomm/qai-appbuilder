@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 MESSAGES: dict[str, str] = {
     "_meta.locale": "繁體中文",
     "cli.build.help.summary": "Model Builder 互動式會話（agentic 模型轉換 REPL）",

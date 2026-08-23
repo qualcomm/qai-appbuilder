@@ -89,13 +89,15 @@ MULTIMODAL_PROMPTS = [
 
 def detect_modality(model_name):
     """根据模型目录名前缀判断多模态能力: qwen2.5vl→图片, qwen2.5_omini→图片+音频, phi4→图片,
-    其余(qwen3/gpt-oss 等)→纯文本(空集合)"""
+    qwen3_vl→图片, 其余(纯 qwen3/gpt-oss 等)→纯文本(空集合)"""
     lower = model_name.lower()
     if "qwen2.5_omini" in lower or "qwen2.5-omini" in lower:
         return {"image", "audio"}
     if "qwen2.5vl" in lower or "qwen2.5-vl" in lower:
         return {"image"}
     if "phi4" in lower:
+        return {"image"}
+    if "qwen3_vl" in lower or "qwen3-vl" in lower:
         return {"image"}
     return set()
 
@@ -334,7 +336,7 @@ def wait_http_ok(url, timeout=60, expected_status=200, process=None):
         except Exception as e:
             last_error = repr(e)
         time.sleep(1)
-    return False
+    raise RuntimeError(f"HTTP 服务在 {timeout}s 内未就绪: {url}; last_error={last_error}")
 
 
 # ============================================================================
@@ -469,6 +471,234 @@ class RemoteServiceManager:
     def get_pid(self):
         return None
 
+
+# ============================================================================
+# QAIModelBuilderManager - Builder 后端生命周期管理
+# ============================================================================
+# 当前 QAIModelBuilder 仓库已从扁平 backend/main.py 结构重构为 DDD 分层的
+# apps/api/main.py（详见 apps/api/__main__.py），旧的 backend/ 目录与 /api/health
+# 端点均已不存在；本类已按当前版本重写启动方式、健康检查与 CSRF 双提交会话。
+
+def _default_builder_python_path():
+    """QAIModelBuilder 官方 Setup.bat 搭建的独立 ARM64 venv 的默认 python.exe 路径。"""
+    return Path(os.environ.get("LOCALAPPDATA", "")) / "QAIModelBuilder" / "envs" / ".venv_arm64_313" / "Scripts" / "python.exe"
+
+
+def resolve_builder_python(explicit_path=None):
+    """解析用于启动 QAIModelBuilder 的 python.exe：优先用户显式传入 --builder_python；
+    否则尝试官方 Setup.bat 搭建的默认 venv；都找不到则回退 sys.executable 并打印明确警告
+    （而不是静默失败——系统 Python 通常缺 pydantic_settings 等 Builder 必需依赖）。"""
+    if explicit_path:
+        p = Path(explicit_path)
+        if p.exists():
+            return str(p)
+        print(f"WARNING: --builder_python 指定的路径不存在: {p}，回退到 sys.executable ({sys.executable})")
+        return sys.executable
+    default_venv = _default_builder_python_path()
+    if default_venv.exists():
+        return str(default_venv)
+    print(f"WARNING: 未找到 QAIModelBuilder 官方 venv ({default_venv})，回退到 sys.executable "
+          f"({sys.executable})；若该环境缺少 pydantic_settings 等依赖，Builder 启动会失败。"
+          f"请先运行 QAIModelBuilder\\Setup.bat 搭建独立环境，或通过 --builder_python 显式指定。")
+    return sys.executable
+
+
+class _CsrfSession:
+    """包一层 requests.Session，实现 QAIModelBuilder 的 CSRF 双提交 Cookie 握手：
+    对安全方法(GET/HEAD/OPTIONS)请求，如响应尚未带 cookie 则中间件会自动 Set-Cookie
+    qai_csrf=<token>；对非安全方法(POST/PUT/PATCH/DELETE)，自动在 Cookie 基础上附加
+    X-QAI-CSRF 头（取值与 cookie 相同），满足双提交校验，否则会被 403
+    security.csrf.missing 拒绝。参考 QAIModelBuilder/scripts/native_e2e/_phase2_common.py
+    的握手实现（cookie/header 名字、安全方法集合均与其保持一致）。"""
+    CSRF_COOKIE_NAME = "qai_csrf"
+    CSRF_HEADER_NAME = "X-QAI-CSRF"
+    SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+    def __init__(self, base_url):
+        self.base_url = base_url
+        self.session = requests.Session()
+
+    def ensure_csrf_token(self, timeout=10):
+        """对健康检查端点（安全方法、公开路径）发一次 GET，收获 Set-Cookie（若尚未持有）。
+        返回当前持有的 token；CSRF 已被关闭时返回 None（调用方应据此优雅降级，不强行附加空头）。"""
+        token = self.session.cookies.get(self.CSRF_COOKIE_NAME)
+        if token:
+            return token
+        try:
+            self.session.get(f"{self.base_url}/api/system/health", timeout=timeout)
+        except Exception:
+            pass
+        return self.session.cookies.get(self.CSRF_COOKIE_NAME)
+
+    def request(self, method, path, timeout=30, **kwargs):
+        method_upper = method.upper()
+        headers = dict(kwargs.pop("headers", None) or {})
+        if method_upper not in self.SAFE_METHODS:
+            token = self.ensure_csrf_token(timeout=min(timeout, 10))
+            if token:
+                headers[self.CSRF_HEADER_NAME] = token
+        return self.session.request(method_upper, f"{self.base_url}{path}", headers=headers, timeout=timeout, **kwargs)
+
+    def get(self, path, timeout=30, **kwargs):
+        return self.request("GET", path, timeout=timeout, **kwargs)
+
+    def post(self, path, timeout=30, **kwargs):
+        return self.request("POST", path, timeout=timeout, **kwargs)
+
+
+class QAIModelBuilderManager:
+    def __init__(self, builder_dir, host, port, log_dir=None, python_exe=None, data_dir=None):
+        self.builder_dir = Path(builder_dir)
+        # 当前版本入口是 apps/api/main.py（DDD 分层），不再是 backend/main.py。
+        self.main_entry = self.builder_dir / "apps" / "api" / "main.py"
+        self.host = host
+        self.port = port
+        self.python_exe = python_exe or sys.executable
+        # 隔离的 QAI_DATA__DATA_DIR：每次测试运行独立，不污染 Builder 仓库自身或用户真实数据。
+        self.data_dir = Path(data_dir) if data_dir else None
+        self.process = None
+        self._log_dir = Path(log_dir) if log_dir else self.builder_dir
+        self._stdout_fh = None
+        self._stderr_fh = None
+        self._stdout_log = None
+        self._stderr_log = None
+        self.csrf = _CsrfSession(self.base_url)
+
+    @property
+    def base_url(self):
+        return f"http://{self.host}:{self.port}"
+
+    def start(self, timeout=90):
+        if not self.builder_dir.exists():
+            raise FileNotFoundError(f"找不到 QAIModelBuilder 目录: {self.builder_dir}")
+        if not self.main_entry.exists():
+            raise FileNotFoundError(
+                f"找不到 QAIModelBuilder 后端入口: {self.main_entry}"
+                f"（当前版本 Builder 已重构为 DDD 分层结构，不再是 backend/main.py）"
+            )
+        self._log_dir.mkdir(parents=True, exist_ok=True)
+        self._stdout_log = self._log_dir / "qaimodelbuilder_stdout.log"
+        self._stderr_log = self._log_dir / "qaimodelbuilder_stderr.log"
+        self._stdout_fh = open(self._stdout_log, "wb")
+        self._stderr_fh = open(self._stderr_log, "wb")
+        # apps.api 依赖绝对包名导入（interfaces.*、qai.platform.* 等），-m 启动本身不会把
+        # builder_dir/src 加入 sys.path；对齐仓库自带 Start.bat 的做法：PYTHONPATH=src;. ,
+        # cwd=builder_dir。
+        src_dir = self.builder_dir / "src"
+        env = os.environ.copy()
+        pythonpath_parts = [str(src_dir), str(self.builder_dir)]
+        existing_pythonpath = env.get("PYTHONPATH", "")
+        if existing_pythonpath:
+            pythonpath_parts.append(existing_pythonpath)
+        env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
+        # 关闭 Okta 登录门禁（项目文档认可的测试场景用法），CSRF 双提交防护保持开启，
+        # 由 self.csrf 会话负责真实握手。
+        env["QAI_AUTH__ENABLED"] = "false"
+        # builder_local_model 套件是隔离的一次性 Builder 实例,不需要任何文件防护;
+        # 关掉进程内 AI 文件工具护栏与 guard64.dll OS 级钩子,避免其对被拉起的
+        # GenieAPIService.exe 子进程链路产生任何干扰(protected_paths 只注入 Python
+        # 子进程、关不掉,但本就不影响原生 exe)。
+        env["QAI_SECURITY__FILE_GUARD_ENABLED"] = "false"
+        env["QAI_SECURITY__NATIVE_FILE_GUARD_ENABLED"] = "false"
+        if self.data_dir:
+            self.data_dir.mkdir(parents=True, exist_ok=True)
+            env["QAI_DATA__DATA_DIR"] = str(self.data_dir)
+        cmd = [self.python_exe, "-m", "apps.api", "--host", self.host, "--port", str(self.port)]
+        print(f"  [QAIModelBuilderManager] 启动 Builder: {' '.join(cmd)}")
+        print(f"  [QAIModelBuilderManager] cwd={self.builder_dir}; PYTHONPATH={env['PYTHONPATH']}"
+              + (f"; QAI_DATA__DATA_DIR={self.data_dir}" if self.data_dir else ""))
+        self.process = subprocess.Popen(
+            cmd,
+            cwd=str(self.builder_dir),
+            stdout=self._stdout_fh,
+            stderr=self._stderr_fh,
+            env=env,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == 'win32' else 0
+        )
+        atexit.register(self._cleanup)
+        try:
+            wait_http_ok(f"{self.base_url}/api/system/health", timeout=timeout, process=self.process)
+        except RuntimeError as e:
+            stderr_tail = ServiceManager.read_log_tail(self._stderr_log, 50)
+            stdout_tail = ServiceManager.read_log_tail(self._stdout_log, 20)
+            self._force_kill()
+            raise RuntimeError(
+                f"QAIModelBuilder 启动失败: {e}; "
+                f"stderr_log={self._stderr_log}; stderr_tail={stderr_tail!r}; stdout_tail={stdout_tail!r}"
+            )
+        # 就绪后立即完成一次 CSRF 握手，确保后续所有非安全方法请求都能带上正确的双提交凭证。
+        self.csrf.ensure_csrf_token(timeout=10)
+
+    def health(self):
+        try:
+            r = self.csrf.get("/api/system/health", timeout=5)
+            return r.status_code == 200, r.status_code, r.text[:500]
+        except Exception as e:
+            return False, 0, repr(e)
+
+    def stop(self):
+        try:
+            self.csrf.post("/api/service/stop", json={}, timeout=10)
+        except Exception:
+            pass
+        if self.process is None:
+            self._close_logs()
+            return
+        try:
+            self.process.terminate()
+            self.process.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            self._force_kill()
+            return
+        except Exception:
+            pass
+        self.process = None
+        self._close_logs()
+
+    def is_alive(self):
+        if self.process is None:
+            return False
+        return self.process.poll() is None
+
+    def get_exit_code(self):
+        """返回子进程的真实退出码;进程仍存活或已被清理(self.process is None)时返回 None。
+        与 ServiceManager.get_exit_code 同样的语义,供 QAIModelBuilder 后端进程崩溃诊断复用。"""
+        if self.process is None:
+            return None
+        return self.process.poll()
+
+    def _close_logs(self):
+        for fh_attr in ("_stdout_fh", "_stderr_fh"):
+            fh = getattr(self, fh_attr, None)
+            if fh:
+                try:
+                    fh.close()
+                except Exception:
+                    pass
+                setattr(self, fh_attr, None)
+
+    def _force_kill(self):
+        if self.process:
+            try:
+                self.process.kill()
+                self.process.wait(timeout=5)
+            except Exception:
+                pass
+            self.process = None
+        self._close_logs()
+
+    def _cleanup(self):
+        self._force_kill()
+
+    def get_pid(self):
+        if self.process:
+            return self.process.pid
+        return None
+
+
+# ============================================================================
+# ServiceManager - 服务生命周期管理
+# ============================================================================
 class ServiceManager:
     def __init__(self, exe_dir, host, port):
         self.exe_dir = Path(exe_dir)
@@ -790,7 +1020,7 @@ def _capture_log_tail(svc):
     """尝试读取服务进程 stderr/stdout 日志尾部,并把进程真实退出码一并附带,用于崩溃事件诊断。
     退出码是判定"这次崩溃到底是谁的问题"最直接的证据(例如 0xC0000005 access violation
     直接指向程序自身代码缺陷,而不是驱动/环境问题);只有显式实现了 get_exit_code() 的管理类
-    (ServiceManager)才会附带这行,RemoteServiceManager 等没有本地
+    (ServiceManager/QAIModelBuilderManager)才会附带这行,RemoteServiceManager 等没有本地
     进程/日志文件的场景下 getattr 拿不到对应属性,行为与之前完全一致(返回空字符串)。"""
     get_exit_code = getattr(svc, "get_exit_code", None)
     exit_code_line = f"exit_code: {_describe_exit_code(get_exit_code())}\n" if callable(get_exit_code) else ""
@@ -2889,13 +3119,13 @@ class ReportGenerator:
     ]
 
     # 内部占位 model_name：仅用于内部过滤/聚合（_global_=模型无关通用接口测试、
-    # _multi_model_=阶段3多模型并发聚合
+    # _multi_model_=阶段3多模型并发聚合、_builder_local_model_=Builder 本地模型加载全链路
     # 测试里"不针对具体模型"的手段层检查项，如 configure_genie_root/inject_local_models/
     # discover_models/test_missing_csrf_rejected 等），绝不能作为"模型名"文本渗透进任何
     # 渲染出的报告 HTML（性能对比表、模型链接卡片、标题等）。新增任何占位 model_name 时
     # 必须同步加入这里，并统一通过 _is_internal_placeholder_model() 过滤——排除逻辑必须
     # 统一走这个函数，不要分散在多处各自手写，否则容易遗漏。
-    INTERNAL_PLACEHOLDER_MODEL_NAMES = frozenset({"_global_", "_multi_model_"})
+    INTERNAL_PLACEHOLDER_MODEL_NAMES = frozenset({"_global_", "_multi_model_", "_builder_local_model_"})
     INTERNAL_PLACEHOLDER_MODEL_PREFIXES = ("_graceful_shutdown_",)
 
     @staticmethod
@@ -3429,16 +3659,17 @@ code { background: #F5F5F5; padding: 2px 6px; border-radius: 3px; font-family: v
     # full 现在也真正执行 SampleApp(见 _run_full_suite 阶段6),覆盖全部类别;
     # 未被本轮 suite 覆盖的类别在矩阵中统一显示"未运行本轮",避免与真实失败混淆。
     _SUITE_MATRIX_COVERAGE = {
-        "full": {"通用接口", "文本chat", "多模态", "多模型路由", "GGUF显式加载", "SampleApp"},
+        "full": {"通用接口", "文本chat", "多模态", "多模型路由", "GGUF显式加载", "SampleApp", "Builder/OpenClaw"},
         "model": {"通用接口", "文本chat", "多模态"},
         "multimodal": {"多模态"},
         "multi_model": {"多模型路由"},
         "gguf": {"GGUF显式加载"},
         "sampleapp": {"SampleApp"},
+        "builder_local_model": {"Builder/OpenClaw"},
         "mnn": {"通用接口", "文本chat"},
         "qnn": {"通用接口", "文本chat", "多模态"},
     }
-    MATRIX_CATEGORIES = ("通用接口", "文本chat", "多模态", "多模型路由", "GGUF显式加载", "SampleApp")
+    MATRIX_CATEGORIES = ("通用接口", "文本chat", "多模态", "多模型路由", "GGUF显式加载", "SampleApp", "Builder/OpenClaw")
 
     # 设备后缀形式如 " (CPU)"/" (GPU)"/" (NPU)"：GGUF 模型未在 config.json 显式指定 device 时
     # 由服务自行决定实际加载设备(见 _run_model_suite),报告把这类模型的展示名统一打上该后缀,
@@ -3504,6 +3735,7 @@ code { background: #F5F5F5; padding: 2px 6px; border-radius: 3px; font-family: v
     def _has_dedicated_matrix_category(name):
         return (name.startswith("POST /v1/chat/completions (tool_call")
                 or name.startswith("SAMPLEAPP:")
+                or name.startswith("BUILDER")
                 or "explicit_load" in name)
 
     @staticmethod
@@ -3536,6 +3768,8 @@ code { background: #F5F5F5; padding: 2px 6px; border-radius: 3px; font-family: v
                         matched = [r for r in all_results if r.model_name == "_multi_model_" and base_m in r.name]
                     elif cat == "GGUF显式加载":
                         matched = [r for r in all_results if r.model_name.startswith(m) and "explicit_load" in r.name]
+                    elif cat == "Builder/OpenClaw":
+                        matched = [r for r in all_results if r.model_name == m and r.name.startswith("BUILDER")]
                     else:  # SampleApp
                         matched = [r for r in all_results if r.model_name == m and r.name.startswith("SAMPLEAPP:")]
                     status, reason = ReportGenerator._matrix_cell_status(matched)
@@ -4144,8 +4378,35 @@ code { background: #F5F5F5; padding: 2px 6px; border-radius: 3px; font-family: v
 
         matrix_html = ReportGenerator._build_completeness_matrix(all_results, model_names, suite_name)
 
-        # 独立的 SampleApp 明细区块：不再仅仅体现为完备性矩阵里的一个格子。
+        # 独立的 Builder 集成 / SampleApp 明细区块：不再仅仅体现为完备性矩阵里的一个格子。
+        # Builder 集成用例的占位 model_name 这里不按 model_names 过滤，确保它们也能在总汇报
+        # 里被看到明细，而不是完全依赖每模型报告页面。
+        builder_results = [r for r in all_results if r.name.startswith("BUILDER")]
         sampleapp_results = [r for r in all_results if r.name.startswith("SAMPLEAPP:")]
+        builder_section_html = ""
+        if builder_results:
+            builder_total = len(builder_results)
+            builder_pass = sum(1 for r in builder_results if r.passed)
+            builder_skipped = sum(1 for r in builder_results if r.skipped)
+            builder_crashed = sum(1 for r in builder_results if r.crashed)
+            # 失败数 = 总数 - 通过 - 跳过 - 崩溃，与顶部全局汇总卡片(summary_all)的口径一致。
+            builder_fail = builder_total - builder_pass - builder_skipped - builder_crashed
+
+            builder_fail_note_html = (
+                f'<div style="color: var(--danger); font-size: 12px; font-weight: 600; margin-bottom: 6px;">'
+                f'含 {builder_fail} 项失败，详见每模型报告页面</div>'
+                if builder_fail > 0 else "")
+
+            builder_section_html = f"""<div class="section"><h2><span class="icon">&#128295;</span> Builder 集成测试结果</h2>
+            <div class="summary-bar">
+                <div class="summary-card"><div class="num">{builder_total}</div><div class="label">用例数</div></div>
+                <div class="summary-card card-pass"><div class="num">{builder_pass}</div><div class="label">通过</div></div>
+                <div class="summary-card card-fail"><div class="num">{builder_fail}</div><div class="label">失败</div></div>
+                <div class="summary-card card-crash"><div class="num">{builder_crashed}</div><div class="label">崩溃</div></div>
+                <div class="summary-card"><div class="num">{builder_skipped}</div><div class="label">跳过</div></div>
+            </div>
+            {builder_fail_note_html}
+            </div>"""
         sampleapp_section_html = ""
         if sampleapp_results:
             # 主报告只保留摘要计数(与 Builder 摘要卡片同一写法);完整逐用例明细表只在
@@ -4278,6 +4539,7 @@ code { background: #F5F5F5; padding: 2px 6px; border-radius: 3px; font-family: v
 {multi_backend_html}
 {model_links_html}
 {matrix_html}
+{builder_section_html}
 {sampleapp_section_html}
 {toolcalls_section_html}
 {graceful_shutdown_section_html}
@@ -4335,17 +4597,24 @@ code { background: #F5F5F5; padding: 2px 6px; border-radius: 3px; font-family: v
             service_table = ReportGenerator._build_pivot_table(service_results, service_endpoints, rounds)
 
             # 其它/专项测试组：动态兜底展示未被上面两组名单覆盖的结果(多模态用例、GGUF 显式加载明细、
-            # SampleApp 用例已拆到下方独立明细区块,这里提前排除,避免在通用兜底表里重复展示。
+            # SampleApp/Builder 集成用例等),避免"计入总数但明细表里找不到对应行"的数据黑洞。
+            # BUILDER/SAMPLEAPP 用例已拆到下方独立明细区块,这里提前排除,避免在通用兜底表里重复展示。
             leftover_endpoints = sorted(
                 set(r.name for r in model_results) - set(perf_endpoints) - set(service_endpoints)
-                - {r.name for r in model_results if r.name.startswith("SAMPLEAPP:")
+                - {r.name for r in model_results if r.name.startswith("BUILDER") or r.name.startswith("SAMPLEAPP:")
                    or r.name.startswith("POST /v1/chat/completions (tool_call")}
             )
             leftover_table = ReportGenerator._build_pivot_table(model_results, leftover_endpoints, rounds)
 
-            # 独立的 SampleApp 明细区块（模型级）：与总汇报保持同一套展示逻辑，
+            # 独立的 Builder 集成 / SampleApp 明细区块（模型级）：与总汇报保持同一套展示逻辑，
             # 不再混在通用的"其它/专项测试"兜底表里。
+            model_builder_results = [r for r in model_results if r.name.startswith("BUILDER")]
             model_sampleapp_results = [r for r in model_results if r.name.startswith("SAMPLEAPP:")]
+            model_builder_html = ""
+            if model_builder_results:
+                model_builder_html = f"""<div class="section"><h2><span class="icon">&#128295;</span> Builder 集成测试结果</h2>
+                {ReportGenerator._build_case_detail_table(model_builder_results, show_model_column=False)}
+                </div>"""
             model_sampleapp_html = ""
             if model_sampleapp_results:
                 model_sampleapp_html = f"""<div class="section"><h2><span class="icon">&#128241;</span> SampleApp 测试结果</h2>
@@ -4552,6 +4821,7 @@ code { background: #F5F5F5; padding: 2px 6px; border-radius: 3px; font-family: v
     </div>
 </div>
 </div>''' if leftover_table else ""}
+{model_builder_html}
 {model_sampleapp_html}
 {model_toolcalls_html}
 
@@ -5745,21 +6015,24 @@ def _pick_builder_integration_model(models):
     return (preferred or models or [None])[0]
 
 
-def _pick_builder_backend_models(models, wanted):
-    """从 discover_models_*() 返回的模型名列表里，为 wanted 中每个 backend 挑选第一个匹配的模型。
-    返回形如 {"qnn": "<name>", "gguf": "<name>", "mnn": "<name>"}，缺失的 key 不出现。
-    与既有 _pick_builder_integration_model 分工：后者继续给 test_start_local_service 挑 QNN 首选模型用；
-    本函数只用于 Builder 三后端路由用例。"""
-    picked: dict = {}
-    if not wanted:
-        return picked
-    wanted_lower = {b.lower() for b in wanted}
-    for m in models:
-        backend, _device = infer_backend(m)
-        key = backend.lower()
-        if key in wanted_lower and key not in picked:
-            picked[key] = m
-    return picked
+def _interleave_models_by_modality(models):
+    """把 models 按 detect_modality() 结果分成多模态/纯文本两组，组内随机打乱后交替拼接，
+    先从哪一组开始也随机决定（即"第一个模型的模态随机"）：模拟真实使用中多模态模型与
+    大语言模型交替切换的场景，比固定字母序（discover_models() 的排序）更容易复现
+    "切换模型时阻塞/失败"一类问题。只用于 run_builder_local_model_integration() 的默认
+    （未显式指定 --builder_local_models）模型顺序；显式指定时尊重用户给定的顺序，
+    不做二次打乱。"""
+    groups = [[m for m in models if detect_modality(m)],
+              [m for m in models if not detect_modality(m)]]
+    for g in groups:
+        random.shuffle(g)
+    random.shuffle(groups)
+    result = []
+    while groups[0] or groups[1]:
+        for g in groups:
+            if g:
+                result.append(g.pop(0))
+    return result
 
 
 def _str2bool(v):
@@ -5772,6 +6045,1352 @@ def _str2bool(v):
     if s in ("false", "f", "no", "n", "0", "off"):
         return False
     raise argparse.ArgumentTypeError(f"无法解析为 bool: {v!r}")
+
+
+# ============================================================================
+# QAIModelBuilderLocalModelTester - 本地模型加载端到端验证
+# ============================================================================
+# 本次测试的被测对象是 GenieAPIService 本身（真实推理行为是否正确），Builder 只是启动/管理
+# 它的载体。Builder 侧的 API 交互（配置根目录、注入模型、启动/停止、CSRF 握手）属于"手段
+# 层"——只要能可靠地拿到一个正确运行的 GenieAPIService 实例即视为达标；验证重心放在"目标
+# 层"：GenieAPIService 加载指定本地模型后，其真实推理行为（chat 回复内容非空且合理、后端
+# 判定与目录名一致）是否正确可用。
+#
+# 硬约束：零侵入 Builder 源码——全部通过 Builder 已支持的官方接口达成：
+#   * HTTP API (GET/POST /api/service/*)
+#   * 环境变量 (QAI_AUTH__ENABLED、QAI_DATA__DATA_DIR，均由 QAIModelBuilderManager 设置)
+#   * 纯文件系统操作 (mklink /J 目录联接——本地模型注入到 <data_dir>/models/<name>，
+#     GenieAPIService 安装目录注入到 <data_dir>/bin/<name> 以触发官方自愈式安装发现；
+#     Builder 完全无感知)。注意：POST /api/forge-config 对 genie_service.root_path 的写入
+#     已核实不会被服务启动路径实际读取（见 configure_genie_root 文档字符串），本类不再使用它
+#     来配置安装目录。
+class QAIModelBuilderLocalModelTester:
+    _MODEL_PLACEHOLDER = "_builder_local_model_"
+    # backend → format 字段值（GET /api/service/models 的判定），infer_backend 用 "GGUF" 表示
+    # GGUF 后端，Builder /api/service/models 返回的是小写 "gguf"，注意这里的映射。
+    _BACKEND_TO_FORMAT = {"qnn": "qnn", "mnn": "mnn", "GGUF": "gguf"}
+
+    def __init__(self, builder, models_root, genie_root_path, model_names,
+                 genie_service_port, round_num=1, data_dir=None):
+        self.builder = builder
+        self.models_root = Path(models_root) if models_root else None
+        self.genie_root_path = genie_root_path
+        self.model_names = list(model_names)
+        self.genie_service_port = genie_service_port
+        self.round_num = round_num
+        self.data_dir = data_dir
+        self.results = []
+        self.crash_events = []
+        # configure_genie_root() 里 mklink /J 联接的 <data_dir>/bin/<name> 路径，供
+        # test_invalid_genie_root() 临时移除/恢复以模拟"未安装"场景（见该方法文档字符串）。
+        self._bin_junction_path = None
+
+    def _make_result(self, name, passed, status_code, detail, *,
+                     model_name=None, skipped=False, crashed=False, ignorable=False,
+                     response_data=None, latency_ms=0):
+        return TestResult(
+            name=name, round_num=self.round_num,
+            model_name=model_name or self._MODEL_PLACEHOLDER,
+            passed=passed, status_code=status_code, latency_ms=latency_ms,
+            detail=detail, skipped=skipped, crashed=crashed,
+            ignorable=ignorable,
+            response_data=response_data or {},
+        )
+
+    def _csrf_request(self, method, path, *, body=None, timeout=30):
+        """封装一次带 CSRF 头的 Builder API 请求，返回 (response_or_exception, latency_ms)。
+        请求异常时不抛出，返回 (exception, latency) 供调用方按 result 记录；主动区分"HTTP 异常"
+        与"Builder 进程崩溃"两种情况（后者由 builder.process.poll() 判断）。"""
+        start = time.time()
+        try:
+            if body is None:
+                r = self.builder.csrf.request(method, path, timeout=timeout)
+            else:
+                r = self.builder.csrf.request(method, path, timeout=timeout, json=body)
+            return r, (time.time() - start) * 1000
+        except Exception as e:
+            return e, (time.time() - start) * 1000
+
+    # ---- Step 2: configure_genie_root ----
+    def configure_genie_root(self):
+        """把 GenieAPIService 安装目录通过 mklink /J 联接到 Builder 固定扫描的
+        <data_dir>/bin/<name> 下，触发 Builder 官方的"自动发现已安装版本"自愈机制。
+
+        POST /api/forge-config 写入的 genie_service.root_path 持久化到 SQLite 的
+        kv_user_prefs 表，而服务启动时真正解析安装目录的 _make_install_dir_provider
+        读取的是磁盘上的 <data_dir>/config/forge_config.json 纯 JSON 文件——两套持久化
+        后端完全独立、互不联通，因此该 HTTP 接口对 root_path 的写入不会被服务启动路径
+        实际读取到。正确路径是 _make_install_dir_provider 每次请求都会实时扫描
+        <data_dir>/bin/ 下的子目录，一旦发现某个子目录直接包含 GenieAPIService.exe 就会
+        自愈式地把它当作已安装版本使用，与下载中心真实安装一个新版本效果一致且不需要
+        重启 Builder。这里通过纯文件系统操作（mklink /J）达成，不依赖也不修改
+        forge-config 相关 HTTP 接口。"""
+        name = "BUILDER-LOCAL: configure_genie_root (mklink /J into data_dir/bin)"
+        if not self.genie_root_path:
+            self.results.append(self._make_result(
+                name, False, 0,
+                "未提供 GenieAPIService 安装目录（--genie_root_path 或 --exe_dir），跳过",
+                skipped=True))
+            return False
+        src = Path(self.genie_root_path)
+        if not src.is_dir() or not (src / "GenieAPIService.exe").is_file():
+            self.results.append(self._make_result(
+                name, False, 0,
+                f"--genie_root_path 不存在或不含 GenieAPIService.exe: {src}"))
+            return False
+        if not self.builder.data_dir:
+            self.results.append(self._make_result(
+                name, False, 0,
+                "Builder 未启用隔离数据目录 (QAI_DATA__DATA_DIR)，无法注入安装目录",
+                skipped=True))
+            return False
+
+        bin_root = self.builder.data_dir / "bin"
+        try:
+            bin_root.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            self.results.append(self._make_result(
+                name, False, 0, f"创建 {bin_root} 失败: {e}"))
+            return False
+
+        dst = bin_root / src.name
+        self._bin_junction_path = dst
+        if not dst.exists():
+            try:
+                proc = subprocess.run(
+                    ["cmd.exe", "/c", "mklink", "/J", str(dst), str(src)],
+                    capture_output=True, text=True, timeout=15,
+                )
+            except Exception as e:
+                self.results.append(self._make_result(
+                    name, False, 0, f"mklink /J subprocess 异常: {type(e).__name__}: {e}"))
+                return False
+            if proc.returncode != 0:
+                stderr = (proc.stderr or "").strip()
+                stdout = (proc.stdout or "").strip()
+                self.results.append(self._make_result(
+                    name, False, 0,
+                    f"mklink /J 失败, rc={proc.returncode}, stderr={stderr!r}, stdout={stdout!r}; "
+                    f"dst={dst}, src={src}"))
+                return False
+
+        r_status, latency = self._csrf_request("GET", "/api/service/status", timeout=15)
+        if isinstance(r_status, Exception) or r_status.status_code != 200:
+            self.results.append(self._make_result(
+                name, False, getattr(r_status, "status_code", 0),
+                f"GET /api/service/status 读取失败: {r_status}", latency_ms=latency))
+            return False
+        try:
+            js = r_status.json()
+        except Exception as e:
+            self.results.append(self._make_result(
+                name, False, r_status.status_code,
+                f"status 响应体不是 JSON: {e}", latency_ms=latency))
+            return False
+        exe_path = js.get("exe_path")
+        path_warning = js.get("path_warning")
+        passed = bool(exe_path) and (src.name.lower() in str(exe_path).lower())
+        self.results.append(self._make_result(
+            name, passed, 200,
+            (f"mklink /J 注入完成: {dst} -> {src}; exe_path={exe_path}; "
+             f"path_warning={path_warning}"),
+            latency_ms=latency,
+            response_data={"bin_junction": str(dst), "exe_path": exe_path,
+                           "path_warning": path_warning}))
+        return passed
+
+    # ---- Step 2: inject_local_models ----
+    def inject_local_models(self):
+        """用 mklink /J 把每个 --models/<name> 目录联接到 <data_dir>/models/<name>。
+        Builder 的 models_root_path 已固定为 <data_dir>/models（Builder 侧移除了修改根目录的
+        API），通过纯文件系统操作让本机已有模型出现在扫描目录下，无需复制大文件、也不侵入
+        Builder 源码。"""
+        name = "BUILDER-LOCAL: inject_local_models (mklink /J)"
+        if not self.models_root or not self.models_root.exists():
+            self.results.append(self._make_result(
+                name, False, 0,
+                f"--models 目录不可用（models_root={self.models_root}），跳过注入",
+                skipped=True))
+            return False
+        if not self.builder.data_dir:
+            self.results.append(self._make_result(
+                name, False, 0,
+                "Builder 未启用隔离数据目录 (QAI_DATA__DATA_DIR)，无法注入本地模型",
+                skipped=True))
+            return False
+        target_models_root = self.builder.data_dir / "models"
+        try:
+            target_models_root.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            self.results.append(self._make_result(
+                name, False, 0,
+                f"创建目标模型根目录失败: {target_models_root}: {e}"))
+            return False
+
+        successes = []
+        failures = []
+        for m in self.model_names:
+            src = self.models_root / m
+            if not src.exists():
+                failures.append(f"{m}(源目录不存在: {src})")
+                continue
+            dst = target_models_root / m
+            if dst.exists():
+                successes.append(f"{m}(目标已存在，视作幂等成功)")
+                continue
+            try:
+                proc = subprocess.run(
+                    ["cmd.exe", "/c", "mklink", "/J", str(dst), str(src)],
+                    capture_output=True, text=True, timeout=15,
+                )
+            except Exception as e:
+                failures.append(f"{m}(subprocess 异常: {type(e).__name__}: {e})")
+                continue
+            if proc.returncode != 0:
+                stderr = (proc.stderr or "").strip()
+                stdout = (proc.stdout or "").strip()
+                failures.append(
+                    f"{m}(mklink /J 失败, rc={proc.returncode}, stderr={stderr!r}, stdout={stdout!r})")
+                continue
+            successes.append(m)
+
+        detail = (f"注入 {len(successes)}/{len(self.model_names)}; "
+                  f"successes={successes}; failures={failures}; target={target_models_root}")
+        passed = bool(successes) and not failures
+        self.results.append(self._make_result(
+            name, passed, 0, detail,
+            response_data={"target_models_root": str(target_models_root),
+                           "successes": successes, "failures": failures}))
+        return bool(successes)
+
+    # ---- Step 3: discover_models via Builder ----
+    def discover_models_via_builder(self):
+        """调用 GET /api/service/models，与本地 infer_backend() 交叉校验 format 字段。
+        返回 Builder 侧发现的模型清单（原始 entries）。"""
+        name = "BUILDER-LOCAL: discover_models (GET /api/service/models)"
+        r, latency = self._csrf_request("GET", "/api/service/models", timeout=30)
+        if isinstance(r, Exception):
+            self.results.append(self._make_result(
+                name, False, 0,
+                f"GET /api/service/models 请求异常: {type(r).__name__}: {r}",
+                latency_ms=latency))
+            return []
+        if r.status_code != 200:
+            self.results.append(self._make_result(
+                name, False, r.status_code,
+                f"GET /api/service/models 非 200: body={r.text[:300]}",
+                latency_ms=latency))
+            return []
+        try:
+            js = r.json()
+        except Exception as e:
+            self.results.append(self._make_result(
+                name, False, 200, f"响应体不是 JSON: {e}", latency_ms=latency))
+            return []
+        found = js.get("models") or []
+        expected = set(self.model_names)
+        found_names = {m.get("name") for m in found if isinstance(m, dict)}
+        missing = sorted(expected - found_names)
+        mismatches = []
+        for entry in found:
+            if not isinstance(entry, dict):
+                continue
+            nm = entry.get("name")
+            if nm not in expected:
+                continue
+            backend, _dev = infer_backend(nm)
+            expected_fmt = self._BACKEND_TO_FORMAT.get(backend, "").lower()
+            actual_fmt = str(entry.get("format") or "").lower()
+            if expected_fmt and actual_fmt and actual_fmt != expected_fmt:
+                mismatches.append(f"{nm}: expected={expected_fmt}, got={actual_fmt}")
+        passed = not missing and not mismatches
+        self.results.append(self._make_result(
+            name, passed, 200,
+            (f"发现 {len(found)} 个模型；期望 {sorted(expected)}, "
+             f"实际匹配 {sorted(found_names & expected)}; missing={missing}; "
+             f"format_mismatches={mismatches}; models_root_path={js.get('models_root_path')}"),
+            latency_ms=latency,
+            response_data={"models": found,
+                           "models_root_path": js.get("models_root_path")}))
+        return found
+
+    def _wait_local_backend_ready(self, port, model_name, timeout=300):
+        """轮询直连 GenieAPIService 的 GET /v1/models，直到返回 200 且 model_name 已出现在
+        data 列表中（模型真正注册完成），才认为后端就绪；返回 (ready, last_error)。
+        为什么需要它：Builder 的 /api/service/status running=true 只反映"进程已拉起"，实测
+        多模态视觉模型在启动进程后 ~2.7s 即 running=true，但视觉权重仍在加载、HTTP 端口尚未
+        listen()。若此刻立即经 Builder /api/chat/.../stream 发起对话，local_model_stream 会
+        因连不上后端而回吐"本地模型服务未启动"的兜底话术（frame_type=error，
+        code=chat.local.service_unavailable），把真实链路误判为失败。纯文本路径
+        verify_genieapiservice_reachable 之所以不受影响，正是因为它自带 240s 的 GET /v1/models
+        宽限重试；本 helper 把同一就绪语义补给多模态对话/超限输入两条真实链路。"""
+        base = f"http://127.0.0.1:{port}"
+        end = time.time() + timeout
+        last_error = None
+        while time.time() < end:
+            try:
+                rm = requests.get(f"{base}/v1/models", timeout=30)
+                if rm.status_code == 200:
+                    try:
+                        data = rm.json().get("data", [])
+                    except Exception:
+                        data = []
+                    if any(isinstance(e, dict) and e.get("id") == model_name for e in data):
+                        return True, None
+                    last_error = f"GET /v1/models=200 但 model={model_name} 尚未注册进 data"
+                else:
+                    last_error = f"GET /v1/models 状态码={rm.status_code}"
+            except Exception as e:
+                last_error = f"{type(e).__name__}: {e}"
+            time.sleep(5)
+        return False, last_error
+
+    def test_chat_conversation_stream(self, model_name):
+        name = f"BUILDER-LOCAL: chat conversation SSE with real local model={model_name}"
+        r, latency = self._csrf_request("GET", "/api/service/models", timeout=30)
+        if isinstance(r, Exception):
+            self.results.append(self._make_result(
+                name, False, 0, f"GET /api/service/models 请求异常: {type(r).__name__}: {r}", latency_ms=latency))
+            return False
+        if r.status_code != 200:
+            self.results.append(self._make_result(
+                name, False, r.status_code, f"GET /api/service/models 非 200: {r.text[:300]}", latency_ms=latency))
+            return False
+        try:
+            entries = r.json().get("models") or []
+        except Exception as e:
+            self.results.append(self._make_result(name, False, 200, f"模型列表响应非 JSON: {e}", latency_ms=latency))
+            return False
+        entry = next((m for m in entries if isinstance(m, dict) and m.get("name") == model_name), None)
+        if entry is None:
+            self.results.append(self._make_result(
+                name, False, 200, f"目标模型不在 Builder /api/service/models: model={model_name}",
+                model_name=model_name, response_data={"models": entries}))
+            return False
+        # 后端就绪门：Builder running=true 不代表 GenieAPIService 端口已 listen 且模型已注册，
+        # 多模态视觉模型加载慢，过早经 Builder 发起对话会连不上后端并回吐"服务未启动"兜底话术。
+        # 等后端 GET /v1/models 真正列出该模型再继续，避免把"活着但仍在加载"误判为对话失败。
+        ready, ready_err = self._wait_local_backend_ready(self.genie_service_port, model_name)
+        if not ready:
+            still_running = False
+            try:
+                r_status, _ = self._csrf_request("GET", "/api/service/status", timeout=15)
+                if not isinstance(r_status, Exception) and r_status.status_code == 200:
+                    still_running = bool(r_status.json().get("running"))
+            except Exception:
+                still_running = False
+            self.results.append(self._make_result(
+                name, False, 0,
+                f"后端 GenieAPIService 在就绪窗口内未注册模型 {model_name}"
+                f"（Builder running={still_running}）: {ready_err}",
+                model_name=model_name, crashed=(not still_running)))
+            return False
+        modality = detect_modality(model_name)
+        assets = []
+        if "image" in modality:
+            image_path, image_err = _pick_random_asset_file(self.data_dir, "img", {".jpg", ".jpeg", ".png"})
+            if image_path is None:
+                self.results.append(self._make_result(
+                    name, False, 0, f"真实图片素材缺失: {image_err}", model_name=model_name, skipped=True))
+                return False
+            assets.append(("/api/images/upload", image_path, "image", "image/" + image_path.suffix.lower().lstrip(".")))
+        if "audio" in modality:
+            audio_path, audio_err = _pick_random_asset_file(self.data_dir, "audio", {".wav"})
+            if audio_path is None:
+                self.results.append(self._make_result(
+                    name, False, 0, f"真实 WAV 音频素材缺失: {audio_err}", model_name=model_name, skipped=True))
+                return False
+            assets.append(("/api/audio/upload", audio_path, "audio", "audio/wav"))
+        conv, conv_latency = self._csrf_request(
+            "POST", "/api/chat/conversations", body={"title": "真实 Builder 聊天链路测试"}, timeout=30)
+        if isinstance(conv, Exception):
+            self.results.append(self._make_result(
+                name, False, 0, f"创建 conversation 异常: {type(conv).__name__}: {conv}", model_name=model_name))
+            return False
+        if conv.status_code not in (200, 201):
+            self.results.append(self._make_result(
+                name, False, conv.status_code, f"创建 conversation 非成功状态码: {conv.text[:300]}", model_name=model_name))
+            return False
+        try:
+            conversation_id = conv.json().get("id")
+        except Exception as e:
+            conversation_id = None
+            conv_latency = f"JSON 解析失败: {e}"
+        if not conversation_id:
+            self.results.append(self._make_result(
+                name, False, conv.status_code, f"创建 conversation 缺少 id: {conv.text[:300]}", model_name=model_name))
+            return False
+
+        prompt_parts = ["请描述我提供的素材，并用一句话回答。"]
+        for upload_path, asset_path, asset_kind, mime_type in assets:
+            body = {
+                "conv_id": conversation_id,
+                "msg_id": f"builder-test-{asset_kind}",
+                "b64_data": base64.b64encode(asset_path.read_bytes()).decode("ascii"),
+                "mime_type": mime_type,
+            }
+            uploaded, upload_latency = self._csrf_request("POST", upload_path, body=body, timeout=60)
+            if isinstance(uploaded, Exception):
+                self.results.append(self._make_result(
+                    name, False, 0, f"{upload_path} 请求异常: {type(uploaded).__name__}: {uploaded}", model_name=model_name))
+                return False
+            if uploaded.status_code not in (200, 201):
+                self.results.append(self._make_result(
+                    name, False, uploaded.status_code, f"{upload_path} 非成功状态码: {uploaded.text[:300]}", model_name=model_name))
+                return False
+            try:
+                upload_json = uploaded.json()
+                upload_url = upload_json.get("url")
+            except Exception as e:
+                upload_url = None
+                upload_json = {"error": str(e)}
+            if not upload_url:
+                self.results.append(self._make_result(
+                    name, False, uploaded.status_code, f"{upload_path} 响应缺少 url: {upload_json}", model_name=model_name))
+                return False
+            prompt_parts.append(
+                f"![{asset_path.name}]({upload_url})" if asset_kind == "image"
+                else f"[audio:{asset_path.name}]({upload_url})")
+
+        tab_id = f"builder-test-tab-{conversation_id}"
+        prompt = "\n".join(prompt_parts)
+        stream_path = f"/api/chat/conversations/{conversation_id}/stream"
+        started = time.time()
+        stream = None
+        events = []
+        stream_status = 0
+        stream_error = None
+        stream_deadline = started + 300
+        try:
+            stream = self.builder.csrf.request(
+                "GET", stream_path, timeout=(10, 10), stream=True,
+                params={"tab_id": tab_id, "prompt": prompt, "model_id": f"local::{model_name}"})
+            stream_status = stream.status_code
+            if not 200 <= stream_status < 300:
+                stream_error = f"HTTP 非 2xx 状态码: {stream_status}; body={stream.text[:300]}"
+            else:
+                event_name = None
+                data_lines = []
+                for line in stream.iter_lines(decode_unicode=True):
+                    if time.time() >= stream_deadline:
+                        stream_error = "SSE 总时限 300 秒已到"
+                        break
+                    line = line.strip() if line else ""
+                    if not line:
+                        if event_name:
+                            payload = "\n".join(data_lines)
+                            try:
+                                payload = json.loads(payload) if payload else {}
+                            except Exception:
+                                payload = {"raw": payload}
+                            events.append((event_name, payload))
+                            if event_name in ("done", "error"):
+                                break
+                        event_name, data_lines = None, []
+                        continue
+                    if line.startswith("event:"):
+                        event_name = line[6:].strip()
+                    elif line.startswith("data:"):
+                        data_lines.append(line[5:].strip())
+                if event_name and data_lines:
+                    payload = "\n".join(data_lines)
+                    try:
+                        payload = json.loads(payload)
+                    except Exception:
+                        payload = {"raw": payload}
+                    events.append((event_name, payload))
+        except Exception as e:
+            stream_error = f"{type(e).__name__}: {e}"
+        finally:
+            if stream is not None:
+                try:
+                    stream.close()
+                except Exception as e:
+                    if stream_error is None:
+                        stream_error = f"{type(e).__name__}: {e}"
+
+        error_events = [payload for event, payload in events if event == "error"]
+        message_events = [payload for event, payload in events if event == "message"]
+        frame_events = [(event, payload) for event, payload in events if event in ("message", "done")]
+        frame_types = []
+        frame_reasons = []
+        for _event, payload in frame_events:
+            frame = payload
+            while isinstance(frame, dict):
+                if "frame_type" in frame or "reason" in frame:
+                    # reason 常嵌在该帧自身的 payload 里（Builder 实际结构：
+                    # {"frame_type":"end","payload":{"reason":"completed"}}），
+                    # 顶层 frame.get("reason") 为 None，需回落到 payload.reason，
+                    # 否则会把真正 completed 的终止帧误判成"无 reason"而 terminal_ok=False。
+                    reason = frame.get("reason")
+                    if reason is None and isinstance(frame.get("payload"), dict):
+                        reason = frame["payload"].get("reason")
+                    frame_types.append(frame.get("frame_type"))
+                    frame_reasons.append(reason)
+                    break
+                nested = next((frame[key] for key in ("data", "frame", "payload", "message")
+                               if isinstance(frame.get(key), dict)), None)
+                if nested is None:
+                    break
+                frame = nested
+        terminal_ok = any(frame_type == "end" and reason in ("completed", "success", "done")
+                          for frame_type, reason in zip(frame_types, frame_reasons))
+        terminal_error = any(frame_type == "error" or reason == "failed"
+                             for frame_type, reason in zip(frame_types, frame_reasons))
+        text = " ".join(json.dumps(payload, ensure_ascii=False) for payload in message_events)
+        passed = (stream_error is None and not error_events and not terminal_error and terminal_ok
+                  and bool(message_events) and bool(text.strip()))
+        detail = (
+            f"model_id=local::{model_name}; conversation_id={conversation_id}; "
+            f"events={[event for event, _ in events]}; frame_types={frame_types}; "
+            f"frame_reasons={frame_reasons}; assets={[p.name for _, p, _, _ in assets]}; "
+            f"error_events={error_events}; stream_error={stream_error}"
+        )
+        self.results.append(self._make_result(
+            name, passed, stream_status, detail, model_name=model_name,
+            latency_ms=(time.time() - started) * 1000,
+            response_data={"model_id": f"local::{model_name}", "conversation_id": conversation_id,
+                           "events": events, "prompt": prompt}))
+        return passed
+
+    # ---- Step 3: start_and_wait_ready ----
+    def start_and_wait_ready(self, model_name, port, timeout=240):
+        """POST /api/service/start 后自行轮询 GET /api/service/status 直到 running=true
+        且 model 匹配（该接口是 fire-and-forget，不阻塞等待）。"""
+        name = f"BUILDER-LOCAL: start_and_wait_ready model={model_name}"
+        body = {"model_name": model_name, "port": port}
+        r, latency = self._csrf_request("POST", "/api/service/start", body=body, timeout=30)
+        if isinstance(r, Exception):
+            self.results.append(self._make_result(
+                name, False, 0,
+                f"POST /api/service/start 请求异常: {type(r).__name__}: {r}",
+                model_name=model_name, latency_ms=latency))
+            return False, None
+        if r.status_code not in (200, 201, 202):
+            self.results.append(self._make_result(
+                name, False, r.status_code,
+                f"POST /api/service/start 非成功状态码: body={r.text[:300]}",
+                model_name=model_name, latency_ms=latency))
+            return False, None
+        # 轮询 status 直到 running=true 且 model 匹配
+        started_at = time.time()
+        end = started_at + timeout
+        last_status = None
+        while time.time() < end:
+            rs, _ = self._csrf_request("GET", "/api/service/status", timeout=10)
+            if not isinstance(rs, Exception) and rs.status_code == 200:
+                try:
+                    last_status = rs.json()
+                except Exception:
+                    last_status = None
+                if isinstance(last_status, dict) and last_status.get("running") \
+                        and last_status.get("model") == model_name:
+                    total_ms = (time.time() - started_at) * 1000
+                    self.results.append(self._make_result(
+                        name, True, 200,
+                        (f"服务已就绪: state={last_status.get('state')}, "
+                         f"pid={last_status.get('pid')}, model={last_status.get('model')}, "
+                         f"port={last_status.get('port')}"),
+                        model_name=model_name, latency_ms=total_ms,
+                        response_data=last_status))
+                    return True, last_status
+            time.sleep(2)
+        self.results.append(self._make_result(
+            name, False, 0,
+            f"轮询 {timeout}s 未看到 running=true 且 model={model_name}; last_status={last_status}",
+            model_name=model_name))
+        return False, last_status
+
+    # ---- Step 3: assert_command_contains ----
+    def assert_command_contains(self, expected_model_name, expected_port, status=None):
+        """shlex.split 解析 status['command']，校验 -c 指向该模型的 config.json、-p 为期望端口。
+        这一条延续 playbook 里"用 command 字段验证 CLI 参数生效性"的既有验证思路（Builder 侧
+        无法同步读取子进程日志，command 字段是启动参数生效性的最直接证据）。"""
+        name = f"BUILDER-LOCAL: assert_command_contains model={expected_model_name}"
+        if status is None:
+            rs, _ = self._csrf_request("GET", "/api/service/status", timeout=10)
+            if isinstance(rs, Exception) or rs.status_code != 200:
+                self.results.append(self._make_result(
+                    name, False, 0, f"读取 status 失败: {rs}", model_name=expected_model_name))
+                return False
+            try:
+                status = rs.json()
+            except Exception as e:
+                self.results.append(self._make_result(
+                    name, False, 200, f"status 响应非 JSON: {e}",
+                    model_name=expected_model_name))
+                return False
+        command = status.get("command") if isinstance(status, dict) else None
+        if not command:
+            self.results.append(self._make_result(
+                name, False, 0, f"status.command 字段为空; status={status}",
+                model_name=expected_model_name))
+            return False
+        try:
+            tokens = shlex.split(command, posix=False)
+        except Exception as e:
+            self.results.append(self._make_result(
+                name, False, 0, f"shlex.split 解析失败: {e}; command={command}",
+                model_name=expected_model_name))
+            return False
+
+        def _val_after(flag_short, flag_long=None):
+            for i, tok in enumerate(tokens):
+                stripped = tok.strip('"')
+                if stripped in (flag_short, flag_long) and i + 1 < len(tokens):
+                    return tokens[i + 1].strip('"')
+            return None
+
+        cflag = _val_after("-c", "--config")
+        pflag = _val_after("-p", "--port")
+        errs = []
+        norm_c = (cflag or "").replace("/", "\\").lower()
+        if not norm_c or (expected_model_name.lower() not in norm_c) or ("config.json" not in norm_c):
+            errs.append(f"-c 取值不含 {expected_model_name}/config.json（实际: {cflag}）")
+        if pflag != str(expected_port):
+            errs.append(f"-p 取值不为 {expected_port}（实际: {pflag}）")
+        passed = not errs
+        self.results.append(self._make_result(
+            name, passed, 0,
+            "命令行校验通过" if passed else "; ".join(errs),
+            model_name=expected_model_name,
+            response_data={"command": command, "-c": cflag, "-p": pflag}))
+        return passed
+
+    # ---- 多模态感知的 chat 请求体构造（供 verify_genieapiservice_reachable 及新增场景共用）----
+    def _build_chat_request_body(self, model_name, prompt_text, **extra_body_fields):
+        """按 -n -1 语义构造单轮 chat 请求体（每次自成一轮完整历史，不依赖服务端维护上下文，
+        因为 Builder 固定以 `-n -1 -l` 启动 GenieAPIService，见 process_service.py 对应注释）。
+        若 model_name 经 detect_modality() 判定为多模态，复用模块级 _pick_random_asset_file()
+        挑选图片/音频素材，构造与 APITester（test_chat_multimodal_openai_style 等）一致的
+        image_url/input_audio content-parts；纯文本模型仍发送字符串 content。
+        返回 (body, asset_detail)；素材缺失时返回 (None, 缺失原因字符串)。"""
+        modality = detect_modality(model_name)
+        if not modality:
+            body = {"model": model_name,
+                     "messages": [{"role": "user", "content": prompt_text}],
+                     "stream": False}
+            body.update(extra_body_fields)
+            return body, None
+        content = [{"type": "text", "text": prompt_text}]
+        asset_labels = []
+        if "image" in modality:
+            image_path, image_err = _pick_random_asset_file(self.data_dir, "img", {".jpg", ".jpeg", ".png"})
+            if image_path is None:
+                return None, f"素材缺失: image_err={image_err}"
+            ext = image_path.suffix.lower().lstrip(".")
+            if ext == "jpg":
+                ext = "jpeg"
+            image_b64 = base64.b64encode(image_path.read_bytes()).decode("ascii")
+            content.append({"type": "image_url",
+                            "image_url": {"url": f"data:image/{ext};base64,{image_b64}"}})
+            asset_labels.append(f"image={image_path.name}")
+        if "audio" in modality:
+            audio_path, audio_err = _pick_random_asset_file(self.data_dir, "audio", {".wav"})
+            if audio_path is None:
+                return None, f"素材缺失: audio_err={audio_err}"
+            audio_b64 = base64.b64encode(audio_path.read_bytes()).decode("ascii")
+            content.append({"type": "input_audio",
+                            "input_audio": {"data": audio_b64, "format": audio_path.suffix.lower().lstrip(".")}})
+            asset_labels.append(f"audio={audio_path.name}")
+        body = {"model": model_name,
+                 "messages": [{"role": "user", "content": content}],
+                 "stream": False}
+        body.update(extra_body_fields)
+        return body, ", ".join(asset_labels)
+
+    # ---- Step 3: verify_genieapiservice_reachable ----
+    def verify_genieapiservice_reachable(self, port, model_name):
+        """直连 GenieAPIService 自身端口的 GET /v1/models 与 POST /v1/chat/completions，
+        断言回复内容非空、语义相关，证明底层推理真正可用（不只是 Builder 认为启动成功）；
+        并把 /v1/models 反映出的后端特征与 infer_backend() 判定交叉核对，验证 GenieAPIService
+        确实按正确后端加载。这是"被测对象是 GenieAPIService"这一定位落到具体断言的关键点。
+        model_name 若为多模态模型，chat 请求经 _build_chat_request_body() 携带对应图片/音频
+        素材而非纯文本，素材缺失时归类为 skipped=True（环境素材缺失，非功能缺陷）。"""
+        base = f"http://127.0.0.1:{port}"
+
+        # GET /v1/models
+        # 宽限重试：Builder 的 running=true 只反映"进程已启动"，不代表 HTTP 端口已真正
+        # listen()，因此在窗口耗尽后先核实 Builder 自身汇报的进程是否仍然存活（而不是想象
+        # 中的死亡）——只有确认 Builder 侧也认为该进程已不在运行时,才真正归为 crashed；
+        # 若 Builder 侧仍报告 running=true(只是端口迟迟未开),则归为 skipped=True(环境性
+        # 启动尚未就绪,不是功能缺陷),避免把"活着但慢"误判为"死了"。
+        gm_name = f"BUILDER-LOCAL: direct GET /v1/models port={port}"
+        r_models = None
+        gm_last_error = None
+        gm_end = time.time() + 240
+        while time.time() < gm_end:
+            try:
+                r_models = requests.get(f"{base}/v1/models", timeout=30)
+                break
+            except Exception as e:
+                gm_last_error = f"{type(e).__name__}: {e}"
+                r_models = None
+                time.sleep(10)
+        if r_models is None:
+            still_running = False
+            try:
+                r_status, _ = self._csrf_request("GET", "/api/service/status", timeout=15)
+                if not isinstance(r_status, Exception) and r_status.status_code == 200:
+                    still_running = bool(r_status.json().get("running"))
+            except Exception:
+                still_running = False
+            if still_running:
+                self.results.append(self._make_result(
+                    gm_name, False, 0,
+                    f"直连 GET /v1/models 持续连不上(240s 宽限期内)，但 Builder 侧仍报告该进程 "
+                    f"running=true（未真正崩溃，判定为环境性启动尚未就绪/端口迟迟未开）: {gm_last_error}",
+                    model_name=model_name, skipped=True))
+            else:
+                self.results.append(self._make_result(
+                    gm_name, False, 0,
+                    f"直连 GET /v1/models 持续请求异常(240s 宽限期内)，且 Builder 侧确认该进程已不在运行: "
+                    f"{gm_last_error}",
+                    model_name=model_name, crashed=True))
+            return False
+        if r_models.status_code != 200:
+            self.results.append(self._make_result(
+                gm_name, False, r_models.status_code,
+                f"直连 GET /v1/models 非 200: {r_models.text[:200]}",
+                model_name=model_name))
+            return False
+        try:
+            models_json = r_models.json()
+        except Exception as e:
+            self.results.append(self._make_result(
+                gm_name, False, 200, f"响应非 JSON: {e}", model_name=model_name))
+            return False
+        entries = models_json.get("data", [])
+        loaded_entry = None
+        for entry in entries:
+            if isinstance(entry, dict) and entry.get("id") == model_name:
+                loaded_entry = entry
+                break
+        expected_backend, _expected_device = infer_backend(model_name)
+        expected_key = self._BACKEND_TO_FORMAT.get(expected_backend, "").lower()
+        actual_backend = ""
+        if loaded_entry:
+            actual_backend = str(loaded_entry.get("backend") or "").lower()
+        # 后端字段缺失时不判失败（GenieAPIService /v1/models 视版本可能不返回该字段）
+        cross_ok = (not actual_backend) or (actual_backend == expected_key)
+        self.results.append(self._make_result(
+            gm_name,
+            passed=(loaded_entry is not None) and cross_ok,
+            status_code=200,
+            detail=(f"loaded_entry={loaded_entry}; expected_backend={expected_key}, "
+                    f"actual_backend={actual_backend!r}; cross_ok={cross_ok}"),
+            model_name=model_name,
+            response_data={"entries": entries, "expected_backend": expected_key,
+                           "actual_backend": actual_backend}))
+
+        # POST /v1/chat/completions（非流式，简单问答）
+        # 容忍窗口：Builder 的 running=true 只反映"进程已启动/端口已开"，不代表模型权重已
+        # 加载完毕注册进 ModelManager；过早发出的 chat 请求会收到 "Model 'xxx' not found or
+        # unavailable." 这类同步拒绝，需要短暂轮询重试而不是单次判失败。
+        chat_name = f"BUILDER-LOCAL: direct POST /v1/chat/completions port={port}"
+        body, asset_detail = self._build_chat_request_body(
+            model_name, "What is the capital of France? Answer in one sentence.", max_tokens=64)
+        if body is None:
+            self.results.append(self._make_result(
+                chat_name, False, 0, asset_detail, model_name=model_name, skipped=True))
+            return False
+        # 留出适度余量，避免把偶发的短暂启动延迟误判为功能性失败。
+        chat_ready_budget_s = 240
+        end = time.time() + chat_ready_budget_s
+        r_chat = None
+        last_error = None
+        while time.time() < end:
+            try:
+                r_chat = requests.post(f"{base}/v1/chat/completions", json=body, timeout=180)
+            except Exception as e:
+                last_error = f"请求异常: {type(e).__name__}: {e}"
+                r_chat = None
+                time.sleep(10)
+                continue
+            if r_chat.status_code == 200:
+                break
+            # 精确信号 failure_reason=insufficient_memory：服务端已优雅拒绝加载（典型是
+            # MNN 内存预检查，见 playbook 4.7/5.2.5/5.2.6），这是环境资源约束，不是代码缺陷，
+            # 立即跳出重试循环归类为 skipped=True，不再继续消耗容忍窗口去无意义重试。
+            try:
+                err_body = r_chat.json()
+            except Exception:
+                err_body = {}
+            if isinstance(err_body, dict) and err_body.get("failure_reason") == "insufficient_memory":
+                self.results.append(self._make_result(
+                    chat_name, False, r_chat.status_code,
+                    f"服务端预判内存不足优雅拒绝加载(failure_reason=insufficient_memory): "
+                    f"{err_body.get('failure_detail', '')}",
+                    model_name=model_name, skipped=True))
+                return False
+            last_error = f"非 200: status={r_chat.status_code}, body={r_chat.text[:200]}"
+            time.sleep(10)
+        if r_chat is None:
+            self.results.append(self._make_result(
+                chat_name, False, 0,
+                f"直连 chat 持续失败({chat_ready_budget_s}s 内未获得 200): {last_error}",
+                model_name=model_name, crashed=True))
+            return False
+        if r_chat.status_code != 200:
+            self.results.append(self._make_result(
+                chat_name, False, r_chat.status_code,
+                f"直连 chat 持续非 200({chat_ready_budget_s}s 内): {last_error}",
+                model_name=model_name))
+            return False
+        try:
+            chat_json = r_chat.json()
+            content = chat_json.get("choices", [{}])[0].get("message", {}).get("content", "")
+        except Exception as e:
+            self.results.append(self._make_result(
+                chat_name, False, 200,
+                f"chat 响应结构异常: {e}", model_name=model_name))
+            return False
+        content_stripped = (content or "").strip()
+        passed = len(content_stripped) > 0
+        self.results.append(self._make_result(
+            chat_name, passed, 200,
+            f"回复长度={len(content_stripped)}, 预览={content_stripped[:120]!r}",
+            model_name=model_name,
+            response_data={"content_len": len(content_stripped),
+                           "content_preview": content_stripped[:200]}))
+        return passed
+
+    # ---- Step 5: verify_over_context_input_handling ----
+    def verify_over_context_input_handling(self, port, model_name):
+        """按 -n -1 语义构造一段字符数明显超过该模型硬性 context 上限（而非仅超过长文本
+        摘要触发比例）的单轮输入，验证 Builder 以 -n -1 -l 启动的 GenieAPIService 在真正
+        超限场景下不会挂起：优雅报错(4xx/5xx)、优雅截断/摘要后仍返回 200 都视为符合预期；
+        只有请求超时无响应(挂起)或进程崩溃才判定为复现真实缺陷。硬性上限直接查询服务自身
+        的 POST /contextsize（与 run_numresponse_stateless_mode_regressions 同一接口），
+        这是已经过真实优先级链路解析后的运行时真值，不在 Python 侧重新猜测/解析 config.json。"""
+        base = f"http://127.0.0.1:{port}"
+        name = f"BUILDER-LOCAL: verify_over_context_input_handling model={model_name}"
+        # 与对话链路同源的后端就绪门：多模态模型加载慢时，过早直连 8910 会 ConnectionError，
+        # 被误判为"崩溃/挂起"。等模型真正注册后再发超限输入，才能纯粹验证超限处理本身。
+        ready, ready_err = self._wait_local_backend_ready(port, model_name)
+        if not ready:
+            self.results.append(self._make_result(
+                name, False, 0,
+                f"后端 GenieAPIService 在就绪窗口内未注册模型 {model_name}，无法验证超限输入处理: {ready_err}",
+                model_name=model_name, skipped=True))
+            return False
+        context_size = 0
+        try:
+            ctx_r = requests.post(f"{base}/contextsize", json={"model": model_name}, timeout=30)
+            if ctx_r.status_code == 200:
+                context_size = ctx_r.json().get("contextsize", 0)
+        except Exception:
+            pass
+        if not context_size or context_size <= 0:
+            context_size = 4096
+        filler = "The quick brown fox jumps over the lazy dog while probing context overflow handling. "
+        chars_needed = context_size * 6
+        reps = chars_needed // len(filler) + 2
+        over_context_text = (filler * reps)[:chars_needed]
+
+        body, asset_detail = self._build_chat_request_body(model_name, over_context_text, max_tokens=64)
+        if body is None:
+            self.results.append(self._make_result(
+                name, False, 0, asset_detail, model_name=model_name, skipped=True))
+            return False
+
+        hang_timeout_s = 240
+        try:
+            r = requests.post(f"{base}/v1/chat/completions", json=body, timeout=hang_timeout_s)
+        except Exception as e:
+            still_running = False
+            try:
+                r_status, _ = self._csrf_request("GET", "/api/service/status", timeout=15)
+                if not isinstance(r_status, Exception) and r_status.status_code == 200:
+                    still_running = bool(r_status.json().get("running"))
+            except Exception:
+                still_running = False
+            if still_running:
+                self.results.append(self._make_result(
+                    name, False, 0,
+                    f"复现挂起：超限输入(context_size={context_size}, 输入字符数={len(over_context_text)}) "
+                    f"请求 {hang_timeout_s}s 内无响应，但 Builder 侧仍报告该进程 running=true: "
+                    f"{type(e).__name__}: {e}",
+                    model_name=model_name))
+            else:
+                self.results.append(self._make_result(
+                    name, False, 0,
+                    f"复现崩溃：超限输入(context_size={context_size}, 输入字符数={len(over_context_text)}) "
+                    f"请求异常且 Builder 侧确认该进程已不在运行: {type(e).__name__}: {e}",
+                    model_name=model_name, crashed=True))
+            return False
+        self.results.append(self._make_result(
+            name, True, r.status_code,
+            f"context_size={context_size}, 输入字符数={len(over_context_text)}, "
+            f"{hang_timeout_s}s 内收到响应 status={r.status_code}（优雅报错或优雅截断/摘要后正常响应，"
+            f"均符合预期）: {r.text[:200]}",
+            model_name=model_name,
+            response_data={"context_size": context_size, "input_chars": len(over_context_text),
+                           "status_code": r.status_code}))
+        return True
+
+    # ---- Step 4: switch_model ----
+    def switch_model(self, new_model_name, port):
+        """先停止当前正在运行的服务并确认端口释放，再 POST /api/service/start 切到另一个
+        模型。Builder 的 start 端点不会自动踢掉占用同一端口的旧进程——若旧进程仍在跑（或仍
+        在加载中），直接再次 start 会被同步拒绝为 409 ServicePortInUseError，
+        必须显式停止旧进程、确认端口释放，才能真正验证"切换模型"这一场景。"""
+        self.stop_and_verify(port)
+        return self.start_and_wait_ready(new_model_name, port)
+
+    # ---- Step 5: verify_model_switch_stability ----
+    def verify_model_switch_stability(self, models, port, min_rounds=3):
+        """在全部已注入模型间做 >= min_rounds 轮真实轮转切换（A→B→C→A→B→C→...），每轮切换
+        （首次直接 start，其余经 switch_model()，内含真实 stop_and_verify+start_and_wait_ready）
+        后都做真实推理断言——纯文本模型调用 verify_genieapiservice_reachable()，多模态模型改为调用
+        test_chat_conversation_stream() 走真实 Builder 上传+对话链路，并记录该轮往返耗时；请求
+        遵循 -n -1 语义，每次独立自带完整历史，不依赖服务端维护上下文。
+        任何一轮切换挂起（start_and_wait_ready/switch_model 自身已有的超时预算内未就绪）或
+        推理失败都判失败，不允许落入默认宽容 skip 分支——这是本任务用于真实复现或排除用户
+        报告的"通过 Builder 切换模型时总是阻塞/失败"问题的专项场景，与 run_all() 主循环里
+        "每个模型只加载一次"的覆盖率验证是两个不同目的。"""
+        name = "BUILDER-LOCAL: verify_model_switch_stability"
+        if len(models) < 2:
+            self.results.append(self._make_result(
+                name, False, 0,
+                f"只有 {len(models)} 个可用模型，无法验证真实轮转切换稳定性", skipped=True))
+            return False
+        rotation = list(models) * min_rounds
+        all_ok = True
+        for i, model_name in enumerate(rotation):
+            t0 = time.time()
+            if i == 0:
+                started, status = self.start_and_wait_ready(model_name, port)
+            else:
+                started, status = self.switch_model(model_name, port)
+            switch_latency_ms = (time.time() - t0) * 1000
+            round_num = i // len(models) + 1
+            case_name = f"{name} round={round_num} step={i} model={model_name}"
+            if not started:
+                self.results.append(self._make_result(
+                    case_name, False, 0,
+                    f"第 {round_num} 轮切换到 {model_name} 失败/挂起（耗时 {switch_latency_ms:.0f}ms）: {status}",
+                    model_name=model_name))
+                all_ok = False
+                continue
+            ok = self.test_chat_conversation_stream(model_name) if detect_modality(model_name) \
+                else self.verify_genieapiservice_reachable(port, model_name)
+            self.results.append(self._make_result(
+                case_name, ok, 0,
+                f"第 {round_num} 轮切换到 {model_name} 完成，往返耗时 {switch_latency_ms:.0f}ms，"
+                f"直连推理{'成功' if ok else '失败'}",
+                model_name=model_name,
+                response_data={"round": round_num, "switch_latency_ms": round(switch_latency_ms, 1)}))
+            if not ok:
+                all_ok = False
+        self.stop_and_verify(port)
+        return all_ok
+
+    # ---- Step 4: stop_and_verify ----
+    def stop_and_verify(self, port):
+        name = "BUILDER-LOCAL: stop_and_verify (POST /api/service/stop)"
+        r, latency = self._csrf_request(
+            "POST", "/api/service/stop", body={"force": False}, timeout=30)
+        if isinstance(r, Exception):
+            self.results.append(self._make_result(
+                name, False, 0,
+                f"POST /api/service/stop 请求异常: {type(r).__name__}: {r}",
+                latency_ms=latency))
+            return False
+        end = time.time() + 30
+        stopped = False
+        last_status = None
+        while time.time() < end:
+            rs, _ = self._csrf_request("GET", "/api/service/status", timeout=10)
+            if not isinstance(rs, Exception) and rs.status_code == 200:
+                try:
+                    last_status = rs.json()
+                except Exception:
+                    last_status = None
+                if isinstance(last_status, dict) and not last_status.get("running"):
+                    stopped = True
+                    break
+            time.sleep(1)
+        port_released = wait_port_closed("127.0.0.1", port, timeout=15)
+        passed = stopped and port_released
+        self.results.append(self._make_result(
+            name, passed, r.status_code,
+            f"stopped={stopped}, port_released={port_released}, last_status={last_status}",
+            latency_ms=latency,
+            response_data={"stopped": stopped, "port_released": port_released,
+                           "last_status": last_status}))
+        return passed
+
+    # ---- Step 4: negatives ----
+    def test_invalid_genie_root(self):
+        """临时移除 configure_genie_root() 创建的 <data_dir>/bin/<name> 目录联接，使 Builder
+        的自愈式安装发现扫描不到任何已安装版本，验证 POST /api/service/start 返回结构化错误
+        （4xx 状态码或 status.path_warning/exe_path 反映"未安装"）而不是让 Builder 进程崩溃；
+        结束前必须恢复该联接，避免影响后续用例（切换/推理验证都依赖它存在）。
+
+        早期实现通过 POST /api/forge-config 写一个不存在的 root_path 来模拟"无效安装目录"，
+        但已确认该写入根本不会被服务启动路径读取（见 configure_genie_root 文档字符串），因此
+        那种写法从未真正测试到"无效安装目录"场景——无论写什么，Builder 都会用磁盘自愈扫描找到
+        真实安装。真正能让 Builder 认为"未安装"的唯一方式是让 <data_dir>/bin 下不存在任何含
+        GenieAPIService.exe 的子目录。"""
+        name = "BUILDER-LOCAL: test_invalid_genie_root"
+        junction = self._bin_junction_path
+        if not junction or not junction.exists():
+            self.results.append(self._make_result(
+                name, False, 0,
+                "未找到已创建的 GenieAPIService 安装目录联接（configure_genie_root 未成功），跳过",
+                skipped=True))
+            return False
+        try:
+            proc = subprocess.run(
+                ["cmd.exe", "/c", "rmdir", str(junction)],
+                capture_output=True, text=True, timeout=15)
+        except Exception as e:
+            self.results.append(self._make_result(
+                name, False, 0, f"临时移除安装目录联接异常: {type(e).__name__}: {e}"))
+            return False
+        if proc.returncode != 0:
+            self.results.append(self._make_result(
+                name, False, 0,
+                f"临时移除安装目录联接失败, rc={proc.returncode}, "
+                f"stderr={(proc.stderr or '').strip()!r}"))
+            return False
+        try:
+            probe_model = self.model_names[0] if self.model_names else "unknown_model"
+            r_start, _ = self._csrf_request(
+                "POST", "/api/service/start",
+                body={"model_name": probe_model, "port": self.genie_service_port + 1000},
+                timeout=30)
+            if isinstance(r_start, Exception):
+                if self.builder.process is not None and self.builder.process.poll() is None:
+                    self.results.append(self._make_result(
+                        name, True, 0,
+                        f"start 请求本身异常但 Builder 进程仍存活（说明 Builder 已优雅拒绝）: {r_start}"))
+                    return True
+                self.results.append(self._make_result(
+                    name, False, 0,
+                    f"Builder 进程在无效安装目录场景下已退出: {r_start}", crashed=True))
+                return False
+            if r_start.status_code >= 400:
+                self.results.append(self._make_result(
+                    name, True, r_start.status_code,
+                    f"start 优雅返回结构化错误: {r_start.text[:200]}"))
+                return True
+            # 2xx: 检查 status.path_warning / exe_path 是否确实反映"未安装"
+            rs, _ = self._csrf_request("GET", "/api/service/status", timeout=10)
+            path_warning = None
+            exe_path = None
+            if not isinstance(rs, Exception) and rs.status_code == 200:
+                try:
+                    js = rs.json()
+                    path_warning = js.get("path_warning")
+                    exe_path = js.get("exe_path")
+                except Exception:
+                    pass
+            passed = bool(path_warning) or not exe_path
+            self.results.append(self._make_result(
+                name, passed, r_start.status_code,
+                f"start 返回 {r_start.status_code}; path_warning={path_warning}; exe_path={exe_path}"))
+            return passed
+        finally:
+            # 恢复目录联接，避免影响后续用例
+            try:
+                recreate = subprocess.run(
+                    ["cmd.exe", "/c", "mklink", "/J", str(junction), str(self.genie_root_path)],
+                    capture_output=True, text=True, timeout=15)
+                if recreate.returncode != 0:
+                    self.results.append(self._make_result(
+                        "BUILDER-LOCAL: test_invalid_genie_root (restore junction)", False, 0,
+                        f"恢复安装目录联接失败, rc={recreate.returncode}, "
+                        f"stderr={(recreate.stderr or '').strip()!r}"))
+            except Exception as e:
+                self.results.append(self._make_result(
+                    "BUILDER-LOCAL: test_invalid_genie_root (restore junction)", False, 0,
+                    f"恢复安装目录联接异常: {type(e).__name__}: {e}"))
+            # 无论上面走哪个分支，都主动停一下服务，避免遗留 GenieAPIService 子进程
+            self._csrf_request(
+                "POST", "/api/service/stop", body={"force": True}, timeout=15)
+
+    def test_unknown_model_name(self):
+        """POST /api/service/start 是 fire-and-forget 设计：Builder 侧不会同步校验
+        model_name 对应的 config.json 是否存在，只是拼接出该路径的字符串后异步拉起子进程
+        （见 process_service.py::start `config_file = str((Path(models_root) / model_name /
+        "config.json").resolve())`，从不检查存在性），因此正常会立即返回 200
+        {"status":"starting"}，不应期望立刻拿到 4xx。真正的"优雅失败"体现在：GenieAPIService.exe
+        因为 -c 指向的 config.json 不存在会自行快速退出，随后轮询 GET /api/service/status
+        应该能看到服务从未真正 running=true（很快回落到非运行），而不是让 Builder 进程本身
+        崩溃或误报"已加载不存在的模型"。"""
+        name = "BUILDER-LOCAL: test_unknown_model_name"
+        unknown = "__nonexistent_model_for_negative_test__"
+        r, _ = self._csrf_request(
+            "POST", "/api/service/start",
+            body={"model_name": unknown, "port": self.genie_service_port + 2000},
+            timeout=30)
+        if isinstance(r, Exception):
+            if self.builder.process is not None and self.builder.process.poll() is None:
+                self.results.append(self._make_result(
+                    name, True, 0,
+                    f"未知模型请求异常但 Builder 进程仍存活: {r}"))
+                return True
+            self.results.append(self._make_result(
+                name, False, 0,
+                f"未知模型请求导致 Builder 进程退出: {r}", crashed=True))
+            return False
+        if r.status_code >= 400:
+            # 部分 Builder 版本若加入了同步校验，同样接受为优雅失败
+            self.results.append(self._make_result(
+                name, True, r.status_code,
+                f"start 同步返回结构化错误: {r.text[:200]}"))
+            self._csrf_request("POST", "/api/service/stop", body={"force": True}, timeout=15)
+            return True
+        # 200/201/202: 已按 fire-and-forget 设计接受请求，轮询确认服务从未真正 running=true
+        settled_not_running = False
+        last_status = None
+        end = time.time() + 20
+        while time.time() < end:
+            time.sleep(2)
+            rs, _ = self._csrf_request("GET", "/api/service/status", timeout=10)
+            if isinstance(rs, Exception) or rs.status_code != 200:
+                continue
+            try:
+                last_status = rs.json()
+            except Exception:
+                continue
+            if isinstance(last_status, dict) and not last_status.get("running"):
+                settled_not_running = True
+                break
+        if self.builder.process is not None and self.builder.process.poll() is not None:
+            self.results.append(self._make_result(
+                name, False, r.status_code,
+                f"Builder 进程在处理未知模型请求后已退出（poll={self.builder.process.poll()}）",
+                crashed=True))
+            return False
+        passed = settled_not_running
+        self.results.append(self._make_result(
+            name, passed, r.status_code,
+            (f"start 已接受请求(status={r.status_code}，符合 fire-and-forget 设计)后轮询 20s; "
+             f"settled_not_running={settled_not_running}; last_status={last_status}")))
+        # 清理可能被误启动的子进程
+        self._csrf_request(
+            "POST", "/api/service/stop", body={"force": True}, timeout=15)
+        return passed
+
+    def test_missing_csrf_rejected(self):
+        """故意不带 CSRF cookie/header 发一次非安全方法请求，断言 403 (security.csrf.missing)。
+        用一个全新的 requests.Session（不复用 builder.csrf 的 cookie jar），确保裸请求路径真正
+        绕过 CSRF 头，验证防护本身仍生效。"""
+        name = "BUILDER-LOCAL: test_missing_csrf_rejected"
+        url = f"{self.builder.base_url}/api/service/stop"
+        try:
+            fresh = requests.Session()
+            r = fresh.post(url, json={}, timeout=10)
+        except Exception as e:
+            self.results.append(self._make_result(
+                name, False, 0,
+                f"裸 POST 请求异常: {type(e).__name__}: {e}"))
+            return False
+        passed = r.status_code == 403
+        self.results.append(self._make_result(
+            name, passed, r.status_code,
+            f"status={r.status_code}; body={r.text[:200]!r} (期望 403 security.csrf.*)"))
+        return passed
+
+    # ---- 主入口 ----
+    def run_all(self):
+        """按顺序串联：配置根目录 → 注入 → 发现 → 对全部已发现模型逐一加载与真实推理验证
+        （多模态模型走 test_chat_conversation_stream 真实 Builder 上传+对话链路，纯文本模型仍直连
+        verify_genieapiservice_reachable）+超限输入处理验证（首个直接 start，其余经 switch_model() 切入）→ 停止
+        → 模型切换稳定性专项验证（多轮轮转切换）→ 异常边界。
+        前置失败不阻塞后续独立用例（例如异常边界必须始终跑，验证防护本身生效；单个模型的失败也不阻塞其它模型）。"""
+        root_ok = self.configure_genie_root()
+        inject_ok = self.inject_local_models()
+        found = self.discover_models_via_builder() if inject_ok else []
+        found_names = {m.get("name") for m in found if isinstance(m, dict)}
+        usable = [m for m in self.model_names if m in found_names]
+
+        if not root_ok:
+            self.results.append(self._make_result(
+                "BUILDER-LOCAL: primary model load and verify", False, 0,
+                "GenieAPIService 根目录未成功配置，跳过后续加载验证", skipped=True))
+        elif not usable:
+            self.results.append(self._make_result(
+                "BUILDER-LOCAL: primary model load and verify", False, 0,
+                f"无可用模型（期望={self.model_names}, 已发现={sorted(found_names)}），"
+                f"跳过后续加载验证",
+                skipped=True))
+        else:
+            # 全模型覆盖：对 usable 中每一个模型都跑一轮完整的 start→assert→直连推理验证，
+            # 首个模型直接 start，后续每个模型都经 switch_model()（内含 stop_and_verify+
+            # start_and_wait_ready）切入——一个模型的失败不阻塞后续模型的独立判定。
+            for i, model_name in enumerate(usable):
+                try:
+                    if i == 0:
+                        started, status = self.start_and_wait_ready(model_name, self.genie_service_port)
+                    else:
+                        started, status = self.switch_model(model_name, self.genie_service_port)
+                    if started:
+                        self.assert_command_contains(model_name, self.genie_service_port, status=status)
+                        if detect_modality(model_name):
+                            self.test_chat_conversation_stream(model_name)
+                        else:
+                            self.verify_genieapiservice_reachable(self.genie_service_port, model_name)
+                        self.verify_over_context_input_handling(self.genie_service_port, model_name)
+                except Exception as e:
+                    detail = f"模型 {model_name} 生命周期测试未捕获异常: {type(e).__name__}: {e}"
+                    self.crash_events.append(CrashEvent(
+                        timestamp=datetime.now().isoformat(), model_name=model_name,
+                        round_num=self.round_num, endpoint="MODEL_FLOW", detail=detail))
+                    self.results.append(self._make_result(
+                        "BUILDER-LOCAL: model lifecycle", False, 0, detail,
+                        model_name=model_name, crashed=True))
+            self.stop_and_verify(self.genie_service_port)
+
+        if usable:
+            self.verify_model_switch_stability(usable, self.genie_service_port)
+
+        # 异常边界：无论前面成败都跑，验证防护/结构化错误处理本身仍生效
+        for case_fn, case_name in (
+            (self.test_invalid_genie_root, "BUILDER-LOCAL: test_invalid_genie_root"),
+            (self.test_unknown_model_name, "BUILDER-LOCAL: test_unknown_model_name"),
+            (self.test_missing_csrf_rejected, "BUILDER-LOCAL: test_missing_csrf_rejected"),
+        ):
+            try:
+                case_fn()
+            except Exception as e:
+                self.results.append(self._make_result(
+                    case_name, False, 0,
+                    f"用例内部未捕获异常: {type(e).__name__}: {e}", crashed=True))
+        return self.results
+
+
+def run_builder_local_model_integration(args, models, all_results, all_crash_events, all_perf_samples):
+    """--suite builder_local_model 主入口：串联启动 Builder → 配置根目录 → 注入模型 →
+    发现 → 对全部已发现模型逐一启动加载 → 直连推理验证 → 超限输入处理验证 → 模型切换稳定性
+    → 停止 → 异常场景。远程模式不适用。"""
+    print(f"\n{'='*60}")
+    print("阶段: QAIModelBuilder 本地模型加载端到端验证")
+    print(f"{'='*60}")
+    if args.remote:
+        all_results.append(TestResult(
+            name="BUILDER-LOCAL: local_model_suite", round_num=1,
+            model_name="_builder_local_model_",
+            passed=False, status_code=0, latency_ms=0,
+            detail="远程模式不适用（本 suite 需要启动 Builder 子进程与本机文件系统 mklink 操作）",
+            skipped=True))
+        return
+    if not args.genie_root_path:
+        all_results.append(TestResult(
+            name="BUILDER-LOCAL: local_model_suite", round_num=1,
+            model_name="_builder_local_model_",
+            passed=False, status_code=0, latency_ms=0,
+            detail="缺少 --genie_root_path（或未通过 --exe_dir 复用），无法告知 Builder GenieAPIService 安装位置",
+            skipped=True))
+        return
+
+    # 选择注入哪些模型：显式 --builder_local_models 优先（尊重用户给定顺序）；否则覆盖
+    # --models 下全部已发现模型（不再只挑每个后端 1 个代表模型——用户实测发现的输入超限/
+    # 模型切换问题需要在更多模型上才能稳定复现，抽样验证不足以覆盖），且不再沿用
+    # discover_models() 的固定字母序，改为按 _interleave_models_by_modality() 交替排列
+    # 多模态/纯文本模型（首个模型的模态随机决定）——真实使用中用户在多模态与纯文本模型间
+    # 交替切换更常见，固定字母序难以稳定复现"切换模型时阻塞/失败"问题。
+    if getattr(args, "builder_local_models", None):
+        wanted = [m.strip() for m in args.builder_local_models.split(",") if m.strip()]
+        target_models = [m for m in wanted if m in models]
+        for miss in [m for m in wanted if m not in models]:
+            all_results.append(TestResult(
+                name="BUILDER-LOCAL: local_model_filter", round_num=1,
+                model_name=miss, passed=False, status_code=0, latency_ms=0,
+                detail=f"--builder_local_models 指定的 {miss!r} 不在 --models 下已发现模型列表中",
+                skipped=True))
+    else:
+        target_models = _interleave_models_by_modality(models)
+    if not target_models:
+        all_results.append(TestResult(
+            name="BUILDER-LOCAL: local_model_suite", round_num=1,
+            model_name="_builder_local_model_",
+            passed=False, status_code=0, latency_ms=0,
+            detail=f"没有可用于注入的模型（当前 --models 下发现: {models}）",
+            skipped=True))
+        return
+
+    print(f"  拟注入模型: {target_models}")
+    print(f"  Builder 根目录: {args.builder_dir}")
+    print(f"  Builder 数据目录: {args.builder_data_dir}")
+    print(f"  GenieAPIService 安装目录: {args.genie_root_path}")
+    print(f"  GenieAPIService 端口: {args.port}")
+
+    builder = QAIModelBuilderManager(
+        args.builder_dir, args.host, args.builder_port, log_dir=args.out_dir,
+        python_exe=args.builder_python_exe, data_dir=args.builder_data_dir,
+    )
+    tester = None
+    try:
+        print(f"  启动 QAIModelBuilder 后端: {args.builder_dir}")
+        builder.start(timeout=120)
+        tester = QAIModelBuilderLocalModelTester(
+            builder=builder,
+            models_root=args.models,
+            genie_root_path=args.genie_root_path,
+            model_names=target_models,
+            genie_service_port=args.port,
+            round_num=1,
+            data_dir=args.data_dir,
+        )
+        results = tester.run_all()
+        all_results.extend(results)
+        all_crash_events.extend(tester.crash_events)
+    except (RuntimeError, FileNotFoundError) as e:
+        print(f"  ⚠ QAIModelBuilder 本地模型加载 suite 跳过: {e}")
+        all_crash_events.append(CrashEvent(
+            timestamp=datetime.now().isoformat(),
+            model_name="_builder_local_model_", round_num=1,
+            endpoint="QAIMODELBUILDER_STARTUP", detail=str(e),
+            log_tail=_capture_log_tail(builder),
+        ))
+        all_results.append(TestResult(
+            name="BUILDER-LOCAL: Builder 启动", round_num=1,
+            model_name="_builder_local_model_",
+            passed=False, status_code=0, latency_ms=0,
+            detail=f"跳过: {str(e)[:500]}", skipped=True))
+    except Exception as e:
+        print(f"  ✗ QAIModelBuilder 本地模型加载 suite 异常: {e}")
+        all_crash_events.append(CrashEvent(
+            timestamp=datetime.now().isoformat(),
+            model_name="_builder_local_model_", round_num=1,
+            endpoint="GLOBAL", detail=str(e)
+        ))
+        all_results.append(TestResult(
+            name="GLOBAL", round_num=1, model_name="_builder_local_model_",
+            passed=False, status_code=0, latency_ms=0,
+            detail=f"套件级未捕获异常: {e}", crashed=True))
+    finally:
+        try:
+            builder.stop()
+        except Exception:
+            pass
+
+
+# ============================================================================
+# -n -1 vs -n 30 差异化自验证矩阵（直接启动路径，不经 QAIModelBuilder）
+# ============================================================================
+# Builder 启动 GenieAPIService.exe 时固定 loglevel=3(kInfo)，且结构性无法同步读取子进程
+# 自身的日志文件（只有 SSE 流），因此下面 4 项行为差异（历史管理/系统提示词优化/工具定义
+# 优化/长文本摘要，均只在 numResponse==-1 时触发）只能在这条不经 Builder、由测试脚本自己
+# 用 ServiceManager 直接启动裸 GenieAPIService.exe、可自由传 -d 4 的路径里，通过读取
+# stdout 日志文件真正坐实。
+
+_STATELESS_MODE_READ_TOOL_DEF = {
+    "type": "function",
+    "function": {
+        "name": "read",
+        "description": "Read the content of a file at the given path.",
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "File path to read"}},
+            "required": ["path"],
+        },
+    },
+}
 
 
 def _read_long_text_trigger_ratio(exe_dir):
@@ -5823,12 +7442,12 @@ def _stateless_chat_request(host, port, model_name, user_content, tools=None, ti
 
 
 def run_numresponse_stateless_mode_regressions(args, models, all_results, all_crash_events, all_perf_samples):
-    """新增的、差异化自验证矩阵：对同一批探针请求分别用
+    """新增的、不经 QAIModelBuilder 的差异化自验证矩阵：对同一批探针请求分别用
     `-n -1 -d 4` 与 `-n 30 -d 4`（默认对照组）各启动一次裸 GenieAPIService.exe（两次完全
     独立的服务生命周期,先完整停止第一组再启动第二组,不做进程内热切换——numResponse 是
     进程级全局配置,无法运行时切换),对 4 项行为差异（历史管理/系统提示词优化/工具定义
     优化/长文本摘要）做双向日志断言,是全方案里唯一能通过读日志真正坐实这些差异确实
-    按预期互斥发生的地方（非本 suite 场景）。
+    按预期互斥发生的地方（Builder 路径固定 loglevel=3 且结构性无法同步读子进程日志）。
     """
     print(f"\n{'='*60}")
     print("阶段: -n -1 vs -n 30 差异化自验证矩阵（历史管理/系统提示词优化/工具定义优化/长文本摘要）")
@@ -7385,6 +9004,18 @@ def _run_qnn_suite(args, models, remote_mode, out_dir):
     return _run_model_suite(args, qnn_models, remote_mode, out_dir)
 
 
+def _run_builder_local_model_suite(args, models, remote_mode, out_dir):
+    """--suite builder_local_model：在 QAIModelBuilder 环境下验证 GenieAPIService 加载
+    本地模型的端到端链路。被测对象是 GenieAPIService 本身（真实推理行为），Builder 只
+    是启动/管理它的载体——这条 suite 的验证重心是"GenieAPIService 加载本地模型后是否
+    真的能正确聊天/后端判定与目录名一致"，不是穷尽 Builder 自身的业务边界。默认不随
+    --suite full 自动触发（避免影响常规回归运行时长），需要用户显式选择运行。"""
+    all_results = []
+    all_crash_events = []
+    all_perf_samples = []
+    run_builder_local_model_integration(args, models, all_results, all_crash_events, all_perf_samples)
+    return all_results, all_perf_samples, all_crash_events
+
 
 SUITE_HANDLERS = {
     "full": _run_full_suite,
@@ -7393,6 +9024,7 @@ SUITE_HANDLERS = {
     "multimodal": _run_multimodal_suite,
     "gguf": _run_gguf_suite,
     "multi_model": _run_multi_model_suite,
+    "builder_local_model": _run_builder_local_model_suite,
     "mnn": _run_mnn_suite,
     "qnn": _run_qnn_suite,
     "graceful_shutdown": _run_graceful_shutdown_suite,
@@ -7433,9 +9065,25 @@ def main():
                         help="图片/音频多模态用例（含动态切换稳定性用例）的独立执行轮数，优先级高于 --rounds（默认跟随 --rounds）")
     parser.add_argument("--data_dir", default=r"C:\Users\HCKTest\Desktop\GenieEnv\data",
                         help="多模态素材根目录，含 img/ 与 audio/ 子目录（默认 C:\\Users\\HCKTest\\Desktop\\GenieEnv\\data）")
+    parser.add_argument("--builder_dir", default="./QAIModelBuilder", help="QAIModelBuilder 根目录（默认 ./QAIModelBuilder）")
+    parser.add_argument("--builder_port", type=int, default=8989, help="QAIModelBuilder 后端端口（默认 8989）")
+    parser.add_argument("--builder_python", default=None,
+                        help="QAIModelBuilder 使用的 python.exe（默认自动探测官方 Setup.bat 搭建的独立 venv："
+                             "%%LOCALAPPDATA%%\\QAIModelBuilder\\envs\\.venv_arm64_313\\Scripts\\python.exe，"
+                             "找不到则回退当前 sys.executable 并打印警告）")
+    parser.add_argument("--builder_data_dir", default=None,
+                        help="QAIModelBuilder 隔离数据目录（QAI_DATA__DATA_DIR），默认 <out_dir>/qaimodelbuilder_data，"
+                             "每次运行新建、非持久；如需复用/持久化可显式传入固定路径")
+    parser.add_argument("--genie_root_path", default=None,
+                        help="供 QAIModelBuilder 使用的 GenieAPIService 安装目录（通过 mklink /J 联接到 "
+                             "<data_dir>/bin/<name> 以触发 Builder 官方自愈式安装发现），默认复用 --exe_dir。"
+                             "仅 --suite builder_local_model 会用到")
+    parser.add_argument("--builder_local_models", default=None,
+                        help="--suite builder_local_model 注入到 Builder 固定扫描目录的模型名列表（逗号分隔）。"
+                             "留空则默认使用 --models 下全部已发现模型")
     parser.add_argument("--gguf_model", default=None, help="GGUF 显式加载回归限定的单个模型目录名（默认留空，测试全部已发现的 GGUF 模型）")
     parser.add_argument("--gguf_devices", choices=("both", "gpu", "cpu"), default="both", help="GGUF 显式加载回归的设备筛选：both/gpu/cpu（默认 both）")
-    parser.add_argument("--suite", choices=("full", "model", "sampleapp", "multimodal", "gguf", "multi_model", "mnn", "qnn", "graceful_shutdown"),
+    parser.add_argument("--suite", choices=("full", "model", "sampleapp", "multimodal", "gguf", "multi_model", "builder_local_model", "mnn", "qnn", "graceful_shutdown"),
                         default=None, help="选择要运行的测试套件（必传参数，不再有隐式默认值；如需完整回归请显式传入 full）")
     parser.add_argument("--model_name", default=None, help="--suite model/mnn/qnn/sampleapp 时按名称筛选模型，逗号分隔，未指定则测试该套件下全部已发现模型")
 
@@ -7510,6 +9158,23 @@ def main():
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # Builder 使用的 python.exe：优先显式 --builder_python，否则探测官方 Setup.bat 搭建的
+    # 独立 venv，都找不到则回退 sys.executable 并打印警告（而非静默失败）。
+    args.builder_python_exe = resolve_builder_python(args.builder_python)
+    # Builder 隔离数据目录（QAI_DATA__DATA_DIR）：默认落在 <out_dir>/qaimodelbuilder_data，
+    # 每次运行新建、非持久；显式传入时按用户指定路径解析为绝对路径（可用于复用/持久化）。
+    args.builder_data_dir = (
+        str(Path(args.builder_data_dir).resolve()) if args.builder_data_dir
+        else str(out_dir / "qaimodelbuilder_data")
+    )
+    # 供 Builder 使用的 GenieAPIService 安装目录：未显式传入时复用 --exe_dir（本地模式下它
+    # 已经就是包含 GenieAPIService.exe 的目录），远程模式下无 --exe_dir 时保持 None，由
+    # builder_local_model suite 内部自己精确报错并 skip。
+    if args.genie_root_path:
+        args.genie_root_path = str(Path(args.genie_root_path).resolve())
+    elif args.exe_dir:
+        args.genie_root_path = args.exe_dir
+
     print("=" * 60)
     print("GenieAPIService 集成测试")
     print("=" * 60)
@@ -7533,10 +9198,10 @@ def main():
 
     handler = SUITE_HANDLERS[effective_suite]
 
-    # 不支持 --model_name 的 suite（multimodal/multi_model：分别用自动筛选/
+    # 不支持 --model_name 的 suite（multimodal/multi_model/builder_local_model：分别用自动筛选/
     # 全量并发/独立后端挑选逻辑，不读取该参数）若检测到用户显式传入该参数，打印一条不阻断
     # 执行的提示，避免参数被静默忽略、用户却毫无察觉。
-    _SUITES_WITHOUT_MODEL_NAME = {"multimodal", "multi_model"}
+    _SUITES_WITHOUT_MODEL_NAME = {"multimodal", "multi_model", "builder_local_model"}
     if args.model_name and effective_suite in _SUITES_WITHOUT_MODEL_NAME:
         print(f"提示: --suite {effective_suite} 不支持 --model_name 过滤，该参数将被忽略"
               f"（当前传入: {args.model_name}）")

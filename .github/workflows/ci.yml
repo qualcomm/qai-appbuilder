@@ -1013,9 +1013,11 @@ jobs:
         # NDK path uses FORWARD slashes — the project Makefile passes
         # ANDROID_NDK_ROOT to a command parsed by GNU make's bash, which
         # eats backslashes. Forward slashes work everywhere on Windows here.
+        env:
+          NDK_PATH: ${{ steps.ndk.outputs.ndk-path }}
         run: |
           $qnn = ($env:QNN_SDK_ROOT.TrimEnd('\','/') + '\')
-          $ndk = ('${{ steps.ndk.outputs.ndk-path }}'.TrimEnd('\','/') + '/').Replace('\', '/')
+          $ndk = ($env:NDK_PATH.TrimEnd('\','/') + '/').Replace('\', '/')
           "QNN_SDK_ROOT=$qnn"     | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "NDK_ROOT=$ndk"         | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "ANDROID_NDK_ROOT=$ndk" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
