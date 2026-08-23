@@ -49,9 +49,12 @@ runs:
       id: vars-windows
       if: runner.os == 'Windows'
       shell: pwsh
+      env:
+        QNN_VERSION: ${{ inputs.version }}
+        QNN_URL: ${{ inputs.url }}
       run: |
-        $version = "${{ inputs.version }}"
-        $url = "${{ inputs.url }}"
+        $version = $env:QNN_VERSION
+        $url = $env:QNN_URL
         if ([string]::IsNullOrEmpty($url)) {
           $url = "https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/$version/v$version.zip"
         }
@@ -63,9 +66,12 @@ runs:
       id: vars-linux
       if: runner.os == 'Linux'
       shell: bash
+      env:
+        QNN_VERSION: ${{ inputs.version }}
+        QNN_URL: ${{ inputs.url }}
       run: |
-        version="${{ inputs.version }}"
-        url="${{ inputs.url }}"
+        version="$QNN_VERSION"
+        url="$QNN_URL"
         if [ -z "$url" ]; then
           url="https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/${version}/v${version}.zip"
         fi
@@ -89,9 +95,12 @@ runs:
     - name: Download and extract QNN SDK (Windows)
       if: runner.os == 'Windows' && steps.cache.outputs.cache-hit != 'true'
       shell: pwsh
+      env:
+        QNN_SDK_URL: ${{ steps.vars-windows.outputs.url }}
+        QNN_INSTALL_DIR: ${{ steps.vars-windows.outputs.install-dir }}
       run: |
-        $url        = "${{ steps.vars-windows.outputs.url }}"
-        $installDir = "${{ steps.vars-windows.outputs.install-dir }}"
+        $url        = $env:QNN_SDK_URL
+        $installDir = $env:QNN_INSTALL_DIR
         $zipPath    = Join-Path $env:RUNNER_TEMP "qnn-sdk.zip"
 
         Write-Host "Downloading QNN SDK from $url"
@@ -104,9 +113,12 @@ runs:
     - name: Download and extract QNN SDK (Linux)
       if: runner.os == 'Linux' && steps.cache.outputs.cache-hit != 'true'
       shell: bash
+      env:
+        QNN_SDK_URL: ${{ steps.vars-linux.outputs.url }}
+        QNN_INSTALL_DIR: ${{ steps.vars-linux.outputs.install-dir }}
       run: |
-        url="${{ steps.vars-linux.outputs.url }}"
-        install_dir="${{ steps.vars-linux.outputs.install-dir }}"
+        url="$QNN_SDK_URL"
+        install_dir="$QNN_INSTALL_DIR"
         zip_path="${RUNNER_TEMP}/qnn-sdk.zip"
 
         echo "Downloading QNN SDK from $url"
@@ -123,13 +135,22 @@ runs:
       id: expose-windows
       if: runner.os == 'Windows'
       shell: pwsh
-      run: |
-        $installDir = "${{ steps.vars-windows.outputs.install-dir }}"
+      env:
+        QNN_INSTALL_DIR: ${{ steps.vars-windows.outputs.install-dir }}
+        QNN_VERSION: ${{ inputs.version }}
+      # QNN_SDK_ROOT below is written to GITHUB_ENV so downstream build steps
+      # (cmake/build_*.bat/.sh) can read it as a plain env var, per this
+      # action's documented purpose. The value is derived solely from the
+      # env vars above, which come from this action's own trusted inputs
+      # (SDK version/URL) — not from any attacker-controlled context.
+      run: | # zizmor: ignore[github-env] value derives only from this action's own trusted version/URL inputs, not attacker-controlled data
+        $installDir = $env:QNN_INSTALL_DIR
+        $version = $env:QNN_VERSION
 
         $candidates = @(
           $installDir,
           (Join-Path $installDir "qairt"),
-          (Join-Path $installDir "qairt/${{ inputs.version }}")
+          (Join-Path $installDir "qairt/$version")
         )
         $sdkRoot = $null
         foreach ($c in $candidates) {
@@ -169,9 +190,17 @@ runs:
       id: expose-linux
       if: runner.os == 'Linux'
       shell: bash
-      run: |
-        install_dir="${{ steps.vars-linux.outputs.install-dir }}"
-        version="${{ inputs.version }}"
+      env:
+        QNN_INSTALL_DIR: ${{ steps.vars-linux.outputs.install-dir }}
+        QNN_VERSION: ${{ inputs.version }}
+      # QNN_SDK_ROOT below is written to GITHUB_ENV so downstream build steps
+      # (cmake/build_*.bat/.sh) can read it as a plain env var, per this
+      # action's documented purpose. The value is derived solely from the
+      # env vars above, which come from this action's own trusted inputs
+      # (SDK version/URL) — not from any attacker-controlled context.
+      run: | # zizmor: ignore[github-env] value derives only from this action's own trusted version/URL inputs, not attacker-controlled data
+        install_dir="$QNN_INSTALL_DIR"
+        version="$QNN_VERSION"
 
         sdk_root=""
         for c in "$install_dir" "$install_dir/qairt" "$install_dir/qairt/$version"; do
@@ -214,8 +243,10 @@ runs:
       id: genie-vars-windows
       if: runner.os == 'Windows' && inputs.genie-runtime-url != ''
       shell: pwsh
+      env:
+        GENIE_RUNTIME_VERSION: ${{ inputs.genie-runtime-version }}
       run: |
-        $stage = Join-Path $env:RUNNER_TEMP "qairt-runtime-${{ inputs.genie-runtime-version }}"
+        $stage = Join-Path $env:RUNNER_TEMP "qairt-runtime-$env:GENIE_RUNTIME_VERSION"
         "stage-dir=$stage" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
     - name: Restore Genie overlay from cache
@@ -229,9 +260,12 @@ runs:
     - name: Download Genie overlay (Windows)
       if: runner.os == 'Windows' && inputs.genie-runtime-url != '' && steps.genie-cache.outputs.cache-hit != 'true'
       shell: pwsh
+      env:
+        GENIE_RUNTIME_URL: ${{ inputs.genie-runtime-url }}
+        GENIE_STAGE_DIR: ${{ steps.genie-vars-windows.outputs.stage-dir }}
       run: |
-        $url   = "${{ inputs.genie-runtime-url }}"
-        $stage = "${{ steps.genie-vars-windows.outputs.stage-dir }}"
+        $url   = $env:GENIE_RUNTIME_URL
+        $stage = $env:GENIE_STAGE_DIR
         $zip   = Join-Path $env:RUNNER_TEMP "qairt-runtime.zip"
 
         Write-Host "Downloading Genie overlay from $url"
@@ -243,6 +277,8 @@ runs:
     - name: Apply Genie overlay (Windows)
       if: runner.os == 'Windows' && inputs.genie-runtime-url != ''
       shell: pwsh
+      env:
+        GENIE_STAGE_DIR: ${{ steps.genie-vars-windows.outputs.stage-dir }}
       # Per BUILD.md: copy Genie.dll/Genie.lib from the overlay zip's
       # arm64x-windows-msvc/ and aarch64-windows-msvc/ subdirs into the
       # SDK's same-named lib subdirs. Also copy the GenieDialog.h header
@@ -250,7 +286,7 @@ runs:
       # may not match every layout) so this is best-effort with a clear
       # log of what got copied.
       run: |
-        $stage = "${{ steps.genie-vars-windows.outputs.stage-dir }}"
+        $stage = $env:GENIE_STAGE_DIR
         $sdk   = $env:QNN_SDK_ROOT
 
         # The ABI dirs (arm64x-windows-msvc / aarch64-windows-msvc) can sit at

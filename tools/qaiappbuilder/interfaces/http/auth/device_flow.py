@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """OAuth 2.0 Device Authorization Grant (RFC 8628) — headless SSO.
 
 All HTTP calls use httpx with the same ``ssl_verify`` convention as

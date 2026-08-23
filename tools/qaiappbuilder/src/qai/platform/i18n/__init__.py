@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """qai.platform.i18n — backend i18n resolver + catalog.
 
 Use ``t(key, **params)`` from route handlers / command bridges to look up

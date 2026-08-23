@@ -157,7 +157,7 @@ public:
         // 以减少本地输入溢出概率。摘要失败时静默降级，保留原文继续走现有流程。
         {
             const auto& sum_cfg = po_cfg.long_text_summarization;
-            if (instance_config_->getnumResponse() == -1
+            if (instance_config_->IsStatelessMode()
                     && sum_cfg.enabled
                     && data.contains("messages")
                     && data["messages"].is_array())
@@ -307,61 +307,13 @@ private:
         model_input_.audio_ = get_value(user_content, "audio");
     }
 
-    std::string BuildPrompt(json &data, bool &is_tool, int contextSize)
+    // 根据 is_stateless_mode 分岔：无状态模式下对系统提示词与工具定义做压缩优化，否则原样使用。
+    // raw_tools_str 输出未经优化的原始 tools JSON 字符串，供调用方后续调试统计使用。
+    void PrepareOptimizedSystemAndToolPrompt(bool is_stateless_mode, const json &tools, int contextSize, bool &is_tool,
+                                              std::string &systemDefaultPrompt, std::string &raw_tools_str)
     {
-        is_tool = false;
-        // 修复：检查 messages 字段是否存在且为 array
-        if (!data.contains("messages") || !data["messages"].is_array()) {
-            throw ReportError{std::string{"messages field is missing or not an array in BuildPrompt"}};
-        }
-        json msg = data["messages"];
-        // 使用 contains 检查避免 nlohmann::json 在键不存在时静默插入 null 值
-        json tools = (data.contains("tools") && data["tools"].is_array())
-                     ? data["tools"] : json::array();
-
-        // optimize_prompt: 当 numResponse == -1（参数 n==-1）时，启用所有压缩优化逻辑
-        // 包括系统提示词优化、工具定义优化、消息预过滤（PreFilterMessages）和消息适配（FitMessagesToContext）
-        // 修复：使用 instance_config_（per-model）而非 model_config_（全局 IModelConfig）
-        bool optimize_prompt = (instance_config_->getnumResponse() == -1);
-
-        std::string userToolsPrompt = "";
-        std::string systemDefaultPrompt = "You are a helpful assistant.";
-
-        My_Log{My_Log::Level::kDebug} << "[Context] Window size: " << instance_config_->get_context_size() << " tokens" << std::endl;
-
-        systemDefaultPrompt = model_input_.system_;
-        
-        // 收集优化前统计信息（延迟打印，避免被 PreFilterMessages 日志打断）
-        // 修复：使用注入的 context_（多模型并发安全），而非 model_config_.get_genie_model_handle()
-        // 在多模型场景下，get_genie_model_handle() 返回的是全局单模型句柄，会导致所有请求
-        // 使用同一个模型句柄进行 TokenLength 计算，破坏多模型路由的正确性。
-        struct BeforeOptStats {
-            bool valid = false;
-            json messages_snapshot;
-            std::string system_prompt_snapshot;
-            std::shared_ptr<ContextBase> handle;
-            int context_size_val = 0;
-            const json* tools_ptr = nullptr;
-            json tools_snapshot;
-            size_t full_context_size_val = 0;
-        } before_opt_stats;
-        if (instance_config_->getenablePromptDebug()) {
-            // 使用注入的 context_ 引用，包装为 shared_ptr（不拥有所有权）
-            // 注意：context_ 的生命周期由 ChatRequestHandler::ChatCompletions 中的 handle（shared_ptr）保证
-            before_opt_stats.valid = true;
-            before_opt_stats.messages_snapshot = msg;
-            before_opt_stats.system_prompt_snapshot = systemDefaultPrompt;
-            before_opt_stats.handle = context_;
-            before_opt_stats.context_size_val = contextSize;
-            before_opt_stats.full_context_size_val = instance_config_->get_context_size();
-            if (tools.is_array() && !tools.empty()) {
-                before_opt_stats.tools_snapshot = tools;
-                before_opt_stats.tools_ptr = &before_opt_stats.tools_snapshot;
-            }
-        }
-
-        // 优化系统提示词（在 PreFilterMessages 之前，只在 optimize_prompt 时执行）
-        if (optimize_prompt)
+        // 优化系统提示词（在 PreFilterMessages 之前，只在 is_stateless_mode 时执行）
+        if (is_stateless_mode)
         {
             My_Log{My_Log::Level::kDebug} << "[Optimization] Enabled (n=-1)" << std::endl;
 
@@ -380,7 +332,7 @@ private:
         }
 
         // 必须在 PreFilterMessages 之前处理工具定义，确保 token 预算计算包含工具定义的 tokens
-        std::string raw_tools_str;  // 原始 tools JSON 字符串（未经 OptimizeToolsPrompt 处理）
+        std::string userToolsPrompt = "";
         if (tools.is_array() && !tools.empty())
         {
             is_tool = true;
@@ -394,7 +346,7 @@ private:
             // [Refactor] 从 instance_config 获取工具提示词模板
             std::string tool_tmpl = instance_config_->get_tool_prompt_template();
 
-            if (optimize_prompt) {
+            if (is_stateless_mode) {
                 // 用剩余预算（contextSize 减去 identity/system 部分已占用的 token 数）
                 // 作为工具部分压缩的硬上限，确保 systemDefaultPrompt 组合后始终 < contextSize
                 size_t identity_tokens = context_->TokenLength(systemDefaultPrompt);
@@ -407,28 +359,15 @@ private:
             userToolsPrompt += "\n\n";
             systemDefaultPrompt += userToolsPrompt;
         }
+    }
 
-        // 必须在 PreFilterMessages 之前追加 /think 或 /no_think，
-        // 确保两阶段（PreFilterMessages 和 FitMessagesToContext）使用相同的 system prompt 进行 token 计算。
-        // 按需求：只要当前模型是 instance_config_->is_thinking_model()，无论主推理还是其它场景，
-        // 都必须统一追加 /think 或 /no_think。
-        // 注意：关闭 thinking 时不再注入 FILL_THINK 预填空 think 块——真机实测确认该预填内容会导致
-        // qwen3 系列模型在极短用户提问下退化（原样复述上一轮对话后立即结束），/no_think 单独即可正确抑制思考。
-        if (instance_config_->is_thinking_model())
-        {
-            if (instance_config_->getenableThinking())
-            {
-                systemDefaultPrompt += "/think";
-            }
-            else
-            {
-                systemDefaultPrompt += "/no_think";
-            }
-        }
-
+    // 根据 is_stateless_mode 分岔：无状态模式下先做 PreFilterMessages 压缩过滤再 FitMessagesToContext 适配，
+    // 否则原样收集消息、直接写入 chat_history_。msg 会被就地更新为过滤后的消息列表。
+    OptimizedMessages PrepareFilteredMessages(bool is_stateless_mode, json &msg, const std::string &systemDefaultPrompt, int contextSize)
+    {
         // ========== 消息预过滤 ==========
-        // 只在 optimize_prompt（n==-1）时执行压缩过滤
-        if (optimize_prompt) {
+        // 只在 is_stateless_mode（n==-1）时执行压缩过滤
+        if (is_stateless_mode) {
             msg = pre_filter_.PreFilterMessages(msg, contextSize, systemDefaultPrompt, /*is_harmony=*/false, &tool_call_id_to_name_);
         }
 
@@ -472,7 +411,7 @@ private:
 
         chat_history_.Clear();
         OptimizedMessages optimized;
-        if (optimize_prompt) {
+        if (is_stateless_mode) {
             optimized = ApplyFitMessagesToContext(
                 all_messages,
                 systemDefaultPrompt,
@@ -490,6 +429,86 @@ private:
             optimized.success = true;
             optimized.total_tokens = 0;
         }
+
+        return optimized;
+    }
+
+    std::string BuildPrompt(json &data, bool &is_tool, int contextSize)
+    {
+        is_tool = false;
+        // 修复：检查 messages 字段是否存在且为 array
+        if (!data.contains("messages") || !data["messages"].is_array()) {
+            throw ReportError{std::string{"messages field is missing or not an array in BuildPrompt"}};
+        }
+        json msg = data["messages"];
+        // 使用 contains 检查避免 nlohmann::json 在键不存在时静默插入 null 值
+        json tools = (data.contains("tools") && data["tools"].is_array())
+                     ? data["tools"] : json::array();
+
+        // is_stateless_mode: 当 numResponse == -1（参数 n==-1）时，启用所有压缩优化逻辑
+        // 包括系统提示词优化、工具定义优化、消息预过滤（PreFilterMessages）和消息适配（FitMessagesToContext）
+        // 修复：使用 instance_config_（per-model）而非 model_config_（全局 IModelConfig）
+        bool is_stateless_mode = instance_config_->IsStatelessMode();
+
+        std::string systemDefaultPrompt = "You are a helpful assistant.";
+
+        My_Log{My_Log::Level::kDebug} << "[Context] Window size: " << instance_config_->get_context_size() << " tokens" << std::endl;
+
+        systemDefaultPrompt = model_input_.system_;
+        
+        // 收集优化前统计信息（延迟打印，避免被 PreFilterMessages 日志打断）
+        // 修复：使用注入的 context_（多模型并发安全），而非 model_config_.get_genie_model_handle()
+        // 在多模型场景下，get_genie_model_handle() 返回的是全局单模型句柄，会导致所有请求
+        // 使用同一个模型句柄进行 TokenLength 计算，破坏多模型路由的正确性。
+        struct BeforeOptStats {
+            bool valid = false;
+            json messages_snapshot;
+            std::string system_prompt_snapshot;
+            std::shared_ptr<ContextBase> handle;
+            int context_size_val = 0;
+            const json* tools_ptr = nullptr;
+            json tools_snapshot;
+            size_t full_context_size_val = 0;
+        } before_opt_stats;
+        if (instance_config_->getenablePromptDebug()) {
+            // 使用注入的 context_ 引用，包装为 shared_ptr（不拥有所有权）
+            // 注意：context_ 的生命周期由 ChatRequestHandler::ChatCompletions 中的 handle（shared_ptr）保证
+            before_opt_stats.valid = true;
+            before_opt_stats.messages_snapshot = msg;
+            before_opt_stats.system_prompt_snapshot = systemDefaultPrompt;
+            before_opt_stats.handle = context_;
+            before_opt_stats.context_size_val = contextSize;
+            before_opt_stats.full_context_size_val = instance_config_->get_context_size();
+            if (tools.is_array() && !tools.empty()) {
+                before_opt_stats.tools_snapshot = tools;
+                before_opt_stats.tools_ptr = &before_opt_stats.tools_snapshot;
+            }
+        }
+
+        // 优化系统提示词与工具定义（在 PreFilterMessages 之前，只在 is_stateless_mode 时压缩优化，否则原样使用）
+        std::string raw_tools_str;  // 原始 tools JSON 字符串（未经 OptimizeToolsPrompt 处理）
+        PrepareOptimizedSystemAndToolPrompt(is_stateless_mode, tools, contextSize, is_tool, systemDefaultPrompt, raw_tools_str);
+
+        // 必须在 PreFilterMessages 之前追加 /think 或 /no_think，
+        // 确保两阶段（PreFilterMessages 和 FitMessagesToContext）使用相同的 system prompt 进行 token 计算。
+        // 按需求：只要当前模型是 instance_config_->is_thinking_model()，无论主推理还是其它场景，
+        // 都必须统一追加 /think 或 /no_think。
+        // 注意：关闭 thinking 时不再注入 FILL_THINK 预填空 think 块——真机实测确认该预填内容会导致
+        // qwen3 系列模型在极短用户提问下退化（原样复述上一轮对话后立即结束），/no_think 单独即可正确抑制思考。
+        if (instance_config_->is_thinking_model())
+        {
+            if (instance_config_->getenableThinking())
+            {
+                systemDefaultPrompt += "/think";
+            }
+            else
+            {
+                systemDefaultPrompt += "/no_think";
+            }
+        }
+
+        // 消息预过滤 + FitMessagesToContext 适配（只在 is_stateless_mode 时执行压缩，否则原样收集消息）
+        OptimizedMessages optimized = PrepareFilteredMessages(is_stateless_mode, msg, systemDefaultPrompt, contextSize);
 
         // build model input
         // 修复：使用 instance_config_（per-model）的 prompt template，而非 model_config_（全局 IModelConfig）
@@ -536,7 +555,7 @@ private:
             log_stream << ", Length: " << modelInputContent.length() << " chars";
             My_Log{My_Log::Level::kInfo} << log_stream.str() << std::endl;
 
-            if (optimize_prompt && instance_config_->getenablePromptDebug()) {
+            if (is_stateless_mode && instance_config_->getenablePromptDebug()) {
                 // 打印详细的消息列表（PreFilter 后的原始 JSON 消息，与 Harmony 路径对齐）
                 My_Log{My_Log::Level::kInfo} << "\n========== 详细过程日志 ==========" << std::endl;
                 My_Log{My_Log::Level::kInfo} << "[PreFilter] Output message details (raw JSON, before prompt conversion, oldest to newest):" << std::endl;
@@ -621,51 +640,14 @@ private:
 
     // ========== Harmony 格式构建方法 ==========
 
-    std::string BuildHarmonyPrompt(json &data, bool &is_tool, int contextSize)
+    // 根据 is_stateless_mode 分岔：无状态模式下对 Harmony system/developer 消息做压缩优化（含 agent 类型检测），
+    // 否则使用标准的 HarmonyProcessor 构建未优化消息。
+    void PrepareOptimizedHarmonySystemMessages(bool is_stateless_mode, const std::string &instructions, bool has_tools,
+                                                const json &tools, const std::string &knowledge_cutoff, const std::string &current_date,
+                                                const std::string &reasoning_level, const IModelConfig &model_config,
+                                                std::string &system_msg, std::string &developer_msg)
     {
-        const IModelConfig & model_config{instance_config_->i_model_config_};
-        is_tool = false;
-
-        // 修复：检查 messages 字段是否存在且为 array
-        if (!data.contains("messages") || !data["messages"].is_array()) {
-            throw ReportError{std::string{"messages field is missing or not an array in BuildHarmonyPrompt"}};
-        }
-        json msg = data["messages"];
-        // 使用 contains 检查避免 nlohmann::json 在键不存在时静默插入 null 值
-        json tools = (data.contains("tools") && data["tools"].is_array())
-                     ? data["tools"] : json::array();
-
-        bool has_tools = tools.is_array() && !tools.empty();
-        if (has_tools) {
-            is_tool = true;
-        }
-
-        std::string current_date = getCurrentDate();
-
-        auto &j = instance_config_->get_prompt_template();
-        std::string reasoning_level = j.value("reasoning_level", "medium");
-        std::string knowledge_cutoff = j.value("knowledge_cutoff", "2024-06");
-
-        // 从消息中提取 system 指令
-        std::string instructions = "You are a helpful assistant.";
-        for (const auto &element: msg)
-        {
-            auto role = get_json_value(element, "role", BLANK_STRING);
-            if (role == "system")
-            {
-                instructions = get_json_value(element, "content", BLANK_STRING);
-                instructions = str_replace(instructions, "\\n", "\n");
-                break;
-            }
-        }
-
-        // optimize_prompt: 当 numResponse == -1（参数 n==-1）时，启用所有压缩优化逻辑
-        bool optimize_prompt = (instance_config_->getnumResponse() == -1);
-
-        std::string system_msg;
-        std::string developer_msg;
-
-        if (optimize_prompt) {
+        if (is_stateless_mode) {
             My_Log{My_Log::Level::kDebug} << "[Harmony] System prompt optimization enabled (n=-1)" << std::endl;
 
             AgentType agentType = DetectAgentTypeAndLog(instructions, "Harmony");
@@ -753,6 +735,149 @@ private:
                 );
             }
         }
+    }
+
+    // 根据 is_stateless_mode 分岔：无状态模式下先包装 user 消息为 Harmony 格式再 FitMessagesToContext 压缩，
+    // 并把还原后的原始文本写入 chat_history_；否则原样写入历史。processed_messages 会被就地修改，
+    // messages 会被追加最终提示词片段。
+    OptimizedMessages PrepareHarmonyMessages(bool is_stateless_mode, std::vector<GenieChatMessage> &processed_messages,
+                                              const std::string &system_msg, const std::string &developer_msg,
+                                              int contextSize, std::vector<std::string> &messages)
+    {
+        // 应用 FitMessagesToContext 进行 Token 控制
+        std::string full_system_prompt = system_msg + developer_msg;
+
+        OptimizedMessages optimized;
+        chat_history_.Clear();
+        if (is_stateless_mode) {
+            // 包装 user 消息为 Harmony 格式（用于 FitMessagesToContext 的 token 计算）
+            // 保存原始内容，避免写入 chat_history_ 时依赖字符串解包
+            std::unordered_map<size_t, std::string> user_original_content;
+            for (size_t pm_idx = 0; pm_idx < processed_messages.size(); pm_idx++) {
+                if (processed_messages[pm_idx].role == "user") {
+                    user_original_content[pm_idx] = processed_messages[pm_idx].content;
+                    processed_messages[pm_idx].content = HarmonyProcessor::BuildUserMessage(processed_messages[pm_idx].content);
+                }
+            }
+
+            optimized = ApplyFitMessagesToContext(
+                processed_messages,
+                full_system_prompt,
+                contextSize,
+                "Harmony"
+            );
+
+            // 写入 chat_history_ 时使用原始文本（非 Harmony 格式），
+            // 避免 export_to_json 等外部接口读取到 Harmony 格式内容
+            // 使用索引顺序匹配，不依赖内容相等性
+            std::vector<std::string> user_original_ordered;
+            {
+                std::vector<size_t> sorted_indices;
+                for (const auto& kv : user_original_content) {
+                    sorted_indices.push_back(kv.first);
+                }
+                std::sort(sorted_indices.begin(), sorted_indices.end());
+                for (size_t idx : sorted_indices) {
+                    user_original_ordered.push_back(user_original_content[idx]);
+                }
+            }
+            size_t total_user_in_optimized = 0;
+            for (const auto& m : optimized.messages) {
+                if (m.role == "user") total_user_in_optimized++;
+            }
+            size_t dropped_user_count = (user_original_ordered.size() >= total_user_in_optimized)
+                                        ? (user_original_ordered.size() - total_user_in_optimized)
+                                        : 0;
+            size_t user_original_cursor = dropped_user_count;
+            for (const auto& opt_msg : optimized.messages) {
+                if (opt_msg.role == "user") {
+                    if (user_original_cursor < user_original_ordered.size()) {
+                        chat_history_.AddMessage(opt_msg.role, user_original_ordered[user_original_cursor]);
+                        user_original_cursor++;
+                    } else {
+                        My_Log{My_Log::Level::kWarning}
+                            << "[Harmony] user_original_ordered exhausted, storing opt_msg.content directly" << std::endl;
+                        chat_history_.AddMessage(opt_msg.role, opt_msg.content);
+                    }
+                } else {
+                    chat_history_.AddMessage(opt_msg.role, opt_msg.content);
+                }
+            }
+
+            // 5. 构建当前请求的提示词（使用优化后的消息）
+            for (const auto &msg_info : optimized.messages)
+            {
+                messages.push_back(msg_info.content);
+            }
+        } else {
+            // n != -1：不压缩，直接写入历史并构建提示词
+            for (const auto& msg_item : processed_messages) {
+                chat_history_.AddMessage(msg_item.role, msg_item.content);
+            }
+            // 构建提示词（需要包装 user 消息为 Harmony 格式）
+            for (const auto& msg_item : processed_messages) {
+                if (msg_item.role == "user") {
+                    messages.push_back(HarmonyProcessor::BuildUserMessage(msg_item.content));
+                } else {
+                    messages.push_back(msg_item.content);
+                }
+            }
+            optimized.messages = processed_messages;
+            optimized.success = true;
+            optimized.total_tokens = 0;
+        }
+
+        return optimized;
+    }
+
+    std::string BuildHarmonyPrompt(json &data, bool &is_tool, int contextSize)
+    {
+        const IModelConfig & model_config{instance_config_->i_model_config_};
+        is_tool = false;
+
+        // 修复：检查 messages 字段是否存在且为 array
+        if (!data.contains("messages") || !data["messages"].is_array()) {
+            throw ReportError{std::string{"messages field is missing or not an array in BuildHarmonyPrompt"}};
+        }
+        json msg = data["messages"];
+        // 使用 contains 检查避免 nlohmann::json 在键不存在时静默插入 null 值
+        json tools = (data.contains("tools") && data["tools"].is_array())
+                     ? data["tools"] : json::array();
+
+        bool has_tools = tools.is_array() && !tools.empty();
+        if (has_tools) {
+            is_tool = true;
+        }
+
+        std::string current_date = getCurrentDate();
+
+        auto &j = instance_config_->get_prompt_template();
+        std::string reasoning_level = j.value("reasoning_level", "medium");
+        std::string knowledge_cutoff = j.value("knowledge_cutoff", "2024-06");
+
+        // 从消息中提取 system 指令
+        std::string instructions = "You are a helpful assistant.";
+        for (const auto &element: msg)
+        {
+            auto role = get_json_value(element, "role", BLANK_STRING);
+            if (role == "system")
+            {
+                instructions = get_json_value(element, "content", BLANK_STRING);
+                instructions = str_replace(instructions, "\\n", "\n");
+                break;
+            }
+        }
+
+        // is_stateless_mode: 当 numResponse == -1（参数 n==-1）时，启用所有压缩优化逻辑
+        bool is_stateless_mode = instance_config_->IsStatelessMode();
+
+        std::string system_msg;
+        std::string developer_msg;
+
+        // 优化 Harmony system/developer 消息（is_stateless_mode 时压缩优化，否则使用标准 HarmonyProcessor 构建）
+        PrepareOptimizedHarmonySystemMessages(is_stateless_mode, instructions, has_tools, tools,
+                                               knowledge_cutoff, current_date, reasoning_level, model_config,
+                                               system_msg, developer_msg);
 
         // ========== 预扫描：建立完整的 tool_call_id → 函数名映射 ==========
         // 必须在 PreFilterMessages 之前对原始 msg 进行扫描，确保即使后续过滤
@@ -796,8 +921,8 @@ private:
         // 保存优化前统计所需的数据快照（msg 在 PreFilterMessages 后会被修改）
         json before_opt_msg_snapshot = msg;
         // ========== 消息预过滤 ==========
-        // 只在 optimize_prompt（n==-1）时执行压缩过滤
-        if (optimize_prompt) {
+        // 只在 is_stateless_mode（n==-1）时执行压缩过滤
+        if (is_stateless_mode) {
             msg = pre_filter_.PreFilterMessages(msg, contextSize, system_msg + developer_msg, /*is_harmony=*/true, &tool_call_id_to_name_);
         }
 
@@ -1283,88 +1408,9 @@ private:
             }
         }
 
-        // 应用 FitMessagesToContext 进行 Token 控制
-        std::string full_system_prompt = system_msg + developer_msg;
-
-        OptimizedMessages optimized;
-        chat_history_.Clear();
-        if (optimize_prompt) {
-            // 包装 user 消息为 Harmony 格式（用于 FitMessagesToContext 的 token 计算）
-            // 保存原始内容，避免写入 chat_history_ 时依赖字符串解包
-            std::unordered_map<size_t, std::string> user_original_content;
-            for (size_t pm_idx = 0; pm_idx < processed_messages.size(); pm_idx++) {
-                if (processed_messages[pm_idx].role == "user") {
-                    user_original_content[pm_idx] = processed_messages[pm_idx].content;
-                    processed_messages[pm_idx].content = HarmonyProcessor::BuildUserMessage(processed_messages[pm_idx].content);
-                }
-            }
-
-            optimized = ApplyFitMessagesToContext(
-                processed_messages,
-                full_system_prompt,
-                contextSize,
-                "Harmony"
-            );
-
-            // 写入 chat_history_ 时使用原始文本（非 Harmony 格式），
-            // 避免 export_to_json 等外部接口读取到 Harmony 格式内容
-            // 使用索引顺序匹配，不依赖内容相等性
-            std::vector<std::string> user_original_ordered;
-            {
-                std::vector<size_t> sorted_indices;
-                for (const auto& kv : user_original_content) {
-                    sorted_indices.push_back(kv.first);
-                }
-                std::sort(sorted_indices.begin(), sorted_indices.end());
-                for (size_t idx : sorted_indices) {
-                    user_original_ordered.push_back(user_original_content[idx]);
-                }
-            }
-            size_t total_user_in_optimized = 0;
-            for (const auto& m : optimized.messages) {
-                if (m.role == "user") total_user_in_optimized++;
-            }
-            size_t dropped_user_count = (user_original_ordered.size() >= total_user_in_optimized)
-                                        ? (user_original_ordered.size() - total_user_in_optimized)
-                                        : 0;
-            size_t user_original_cursor = dropped_user_count;
-            for (const auto& opt_msg : optimized.messages) {
-                if (opt_msg.role == "user") {
-                    if (user_original_cursor < user_original_ordered.size()) {
-                        chat_history_.AddMessage(opt_msg.role, user_original_ordered[user_original_cursor]);
-                        user_original_cursor++;
-                    } else {
-                        My_Log{My_Log::Level::kWarning}
-                            << "[Harmony] user_original_ordered exhausted, storing opt_msg.content directly" << std::endl;
-                        chat_history_.AddMessage(opt_msg.role, opt_msg.content);
-                    }
-                } else {
-                    chat_history_.AddMessage(opt_msg.role, opt_msg.content);
-                }
-            }
-
-            // 5. 构建当前请求的提示词（使用优化后的消息）
-            for (const auto &msg_info : optimized.messages)
-            {
-                messages.push_back(msg_info.content);
-            }
-        } else {
-            // n != -1：不压缩，直接写入历史并构建提示词
-            for (const auto& msg_item : processed_messages) {
-                chat_history_.AddMessage(msg_item.role, msg_item.content);
-            }
-            // 构建提示词（需要包装 user 消息为 Harmony 格式）
-            for (const auto& msg_item : processed_messages) {
-                if (msg_item.role == "user") {
-                    messages.push_back(HarmonyProcessor::BuildUserMessage(msg_item.content));
-                } else {
-                    messages.push_back(msg_item.content);
-                }
-            }
-            optimized.messages = processed_messages;
-            optimized.success = true;
-            optimized.total_tokens = 0;
-        }
+        // 应用 FitMessagesToContext 进行 Token 控制（is_stateless_mode 时压缩，否则原样写入历史）
+        OptimizedMessages optimized = PrepareHarmonyMessages(is_stateless_mode, processed_messages,
+                                                              system_msg, developer_msg, contextSize, messages);
 
         // 6. 添加 assistant 起始标记
         messages.push_back("<|start|>assistant");
@@ -1379,7 +1425,7 @@ private:
         // 修复：使用注入的 context_（多模型并发安全），而非 model_config_.get_genie_model_handle()
         // 在多模型场景下，get_genie_model_handle() 返回的是全局单模型句柄，会导致所有请求
         // 使用同一个模型句柄进行 TokenLength 计算，破坏多模型路由的正确性。
-        if (optimize_prompt && instance_config_->getenablePromptDebug()) {
+        if (is_stateless_mode && instance_config_->getenablePromptDebug()) {
             // 包装 context_ 为非拥有 shared_ptr，传给需要 shared_ptr 参数的统计辅助函数
 
             // 打印详细的消息列表（PreFilter 后的原始 JSON 消息）

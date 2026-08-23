@@ -8,6 +8,7 @@ workspace/
 docs/
 todo/
 build-*
+build_*
 __pycache__
 examples/AiHubLauncher/*
 *.MD

@@ -295,53 +295,66 @@ bool GenieContext::Query(const ModelInput &model_input, const Callback &callback
 GenieContext::GenieContext(const ModelInstanceConfig &model_config) :
         ContextBase(model_config)
 {
-    Genie_Status_t status = 0;
     auto fixer = ConfigFixer{model_config};
 
-    if (GENIE_STATUS_SUCCESS != GenieDialogConfig_createFromJson(fixer.FixConfig().dump().c_str(), &m_ConfigHandle))
+    // [修复] 构造函数任意一步抛异常都会导致对象被视为未完成构造，~GenieContext() 永不会
+    // 被调用（C++ 语义），此前已成功创建的句柄（含 GenieDialog_create 内部已在驱动侧完成的
+    // memRegister 注册）会被静默泄漏、从未释放。用 try/catch 包裹全部句柄创建步骤，失败时
+    // 显式复用 ReleaseHandles()（与析构函数共用同一套释放逻辑）清理已创建的部分，再重新抛出。
+    try
     {
-        throw std::runtime_error("Failed to create the Genie Dialog config.");
-    }
+        Genie_Status_t status = 0;
 
-    status = GenieLog_create(nullptr, GenieLog_Callback, get_genie_log_level(), &m_LogHandle);
-    if ((GENIE_STATUS_SUCCESS != status) || (!m_LogHandle))
-    {
-        throw std::runtime_error("Failed to create the Log handle.");
-    }
+        if (GENIE_STATUS_SUCCESS != GenieDialogConfig_createFromJson(fixer.FixConfig().dump().c_str(), &m_ConfigHandle))
+        {
+            throw std::runtime_error("Failed to create the Genie Dialog config.");
+        }
 
-    status = GenieDialogConfig_bindLogger(m_ConfigHandle, m_LogHandle);
-    if (GENIE_STATUS_SUCCESS != status)
-    {
-        throw std::runtime_error("Failed to bind the log handle with the dialog config");
-    }
+        status = GenieLog_create(nullptr, GenieLog_Callback, get_genie_log_level(), &m_LogHandle);
+        if ((GENIE_STATUS_SUCCESS != status) || (!m_LogHandle))
+        {
+            throw std::runtime_error("Failed to create the Log handle.");
+        }
 
-    status = GenieProfile_create(nullptr, &m_ProfileHandle);
-    if (GENIE_STATUS_SUCCESS != status)
-    {
-        throw std::runtime_error("Failed to create the profile handle");
-    }
+        status = GenieDialogConfig_bindLogger(m_ConfigHandle, m_LogHandle);
+        if (GENIE_STATUS_SUCCESS != status)
+        {
+            throw std::runtime_error("Failed to bind the log handle with the dialog config");
+        }
 
-    status = GenieDialogConfig_bindProfiler(m_ConfigHandle, m_ProfileHandle);
-    if (GENIE_STATUS_SUCCESS != status)
-    {
-        throw std::runtime_error("Failed to bind the profile handle with the dialog config");
-    }
+        status = GenieProfile_create(nullptr, &m_ProfileHandle);
+        if (GENIE_STATUS_SUCCESS != status)
+        {
+            throw std::runtime_error("Failed to create the profile handle");
+        }
 
-    if (GENIE_STATUS_SUCCESS != GenieDialog_create(m_ConfigHandle, &m_DialogHandle))
-    {
-        throw std::runtime_error("create the genie dialog failed");
-    }
+        status = GenieDialogConfig_bindProfiler(m_ConfigHandle, m_ProfileHandle);
+        if (GENIE_STATUS_SUCCESS != status)
+        {
+            throw std::runtime_error("Failed to bind the profile handle with the dialog config");
+        }
 
-    status = GenieSamplerConfig_createFromJson(fixer.FixSampler().dump().c_str(), &m_SamplerConfigHandle);
-    if (GENIE_STATUS_SUCCESS != status)
-    {
-        throw std::runtime_error("Failed to create sampler config");
-    }
+        if (GENIE_STATUS_SUCCESS != GenieDialog_create(m_ConfigHandle, &m_DialogHandle))
+        {
+            throw std::runtime_error("create the genie dialog failed");
+        }
 
-    status = GenieDialog_getSampler(m_DialogHandle, &m_SamplerHandle);
-    if (GENIE_STATUS_SUCCESS != status)
+        status = GenieSamplerConfig_createFromJson(fixer.FixSampler().dump().c_str(), &m_SamplerConfigHandle);
+        if (GENIE_STATUS_SUCCESS != status)
+        {
+            throw std::runtime_error("Failed to create sampler config");
+        }
+
+        status = GenieDialog_getSampler(m_DialogHandle, &m_SamplerHandle);
+        if (GENIE_STATUS_SUCCESS != status)
+        {
+            throw std::runtime_error("Failed to get sampler");
+        }
+    }
+    catch (...)
     {
-        throw std::runtime_error("Failed to get sampler");
+        ReleaseHandles();
+        throw;
     }
 
     std::vector<std::string> store_paths;
@@ -379,8 +392,6 @@ GenieContext::~GenieContext()
 {
     My_Log{} << "GenieContext::~GenieContext():\n";
 
-    int32_t status = 0;
-
     // [修复] 析构顺序竞态：必须先 join 推理线程，确保线程完全退出后再释放任何 SDK 句柄。
     // 原始代码在 notify_one() 后立即释放 m_DialogHandle，而推理线程可能刚被唤醒正在执行
     // GenieDialogQuery()，访问已释放的 SDK 内部 mutex，导致
@@ -398,13 +409,26 @@ GenieContext::~GenieContext()
         m_thread_exit = false;
     }
 
-    // 推理线程已退出，现在安全地释放所有 SDK 句柄
+    // 推理线程已退出，现在安全地释放所有 SDK 句柄（与构造函数失败路径共用同一套释放逻辑）
+    ReleaseHandles();
+
+    delete inf_impl_;
+    inf_impl_ = nullptr;
+    My_Log{} << "GenieContext::~GenieContext() Done:\n";
+}
+
+void GenieContext::ReleaseHandles()
+{
+    // 逐个检查非空再释放：既覆盖正常析构时全部句柄均已创建的情形，也覆盖构造函数在
+    // 中途某一步失败时、后续句柄仍为默认值 nullptr（见 genie.h 成员初始值）的情形，
+    // 避免对未创建的句柄调用 Free 函数。
     if (m_ConfigHandle != nullptr)
     {
         if (GENIE_STATUS_SUCCESS != GenieDialogConfig_free(m_ConfigHandle))
         {
             My_Log{} << "Failed to free the Genie Dialog config.\n";
         }
+        m_ConfigHandle = nullptr;
     }
 
     if (m_DialogHandle != nullptr)
@@ -413,29 +437,35 @@ GenieContext::~GenieContext()
         {
             My_Log{} << "Failed to free the Genie Dialog.\n";
         }
+        m_DialogHandle = nullptr;
     }
 
-    status = GenieSamplerConfig_free(m_SamplerConfigHandle);
-    if (GENIE_STATUS_SUCCESS != status)
+    if (m_SamplerConfigHandle != nullptr)
     {
-        My_Log{} << "Failed to free the sampler config." << std::endl;
+        if (GENIE_STATUS_SUCCESS != GenieSamplerConfig_free(m_SamplerConfigHandle))
+        {
+            My_Log{} << "Failed to free the sampler config." << std::endl;
+        }
+        m_SamplerConfigHandle = nullptr;
     }
 
-    status = GenieLog_free(m_LogHandle);
-    if (GENIE_STATUS_SUCCESS != status)
+    if (m_LogHandle != nullptr)
     {
-        My_Log{} << "Failed to free the Log handle." << std::endl;
+        if (GENIE_STATUS_SUCCESS != GenieLog_free(m_LogHandle))
+        {
+            My_Log{} << "Failed to free the Log handle." << std::endl;
+        }
+        m_LogHandle = nullptr;
     }
 
-    status = GenieProfile_free(m_ProfileHandle);
-    if (GENIE_STATUS_SUCCESS != status)
+    if (m_ProfileHandle != nullptr)
     {
-        My_Log{} << "Failed to free the profile handle." << std::endl;
+        if (GENIE_STATUS_SUCCESS != GenieProfile_free(m_ProfileHandle))
+        {
+            My_Log{} << "Failed to free the profile handle." << std::endl;
+        }
+        m_ProfileHandle = nullptr;
     }
-
-    delete inf_impl_;
-    inf_impl_ = nullptr;
-    My_Log{} << "GenieContext::~GenieContext() Done:\n";
 }
 
 bool GenieContext::Stop()

@@ -484,7 +484,13 @@ struct ModelManager::ModeVerifier
             My_Log{} << "check qnn embedding model type: " << self_->qnn_embedding_.model_types_.to_string() << "\n";
 
             if (!j.contains(json::json_pointer("/dialog/embedding/datatype")))
+            {
+                // 校验失败前必须先清理已成功创建的视觉/音频 HTP 会话（ModelInitialize 已在
+                // QNNImpl::TryCreate 内部完成），否则该会话会随异常直接抛出而静默泄漏，
+                // 从未被 ModelDestroy() 释放。
+                self_->qnn_embedding_.Clean();
                 throw std::runtime_error("qnn embedding has bad config in datatype");
+            }
 
             dtype_str = j.at(json::json_pointer("/dialog/embedding/datatype")).get_ref<const std::string &>();
             for (auto &item: embedding_dtype_map)
@@ -497,7 +503,11 @@ struct ModelManager::ModeVerifier
             }
 
             if (self_->qnn_embedding_.data_type == EmbeddingDataType::None)
+            {
+                // 同上：datatype 字符串未匹配到任何已知类型时，也要先清理已创建的 HTP 会话再抛出。
+                self_->qnn_embedding_.Clean();
                 throw std::runtime_error("qnn embedding has bad datatype");
+            }
 
             My_Log{} << "check qnn embedding data type: " << self_->qnn_embedding_.data_type.to_string() << "\n";
             ahead:
@@ -2566,7 +2576,21 @@ bool ModelManager::LoadModel(const std::string &model_name,
     // 被误读为本次加载失败的原因。
     SetLastLoadFailureReason(LoadFailureReason::kNone, "");
 
-    Clean();
+    // 只有本次加载的是 qnn 模型时才需要 Clean()：genieModelHandle/qnn_embedding_ 是
+    // ModelManager 级别的共享暂存状态，已加载的 QNN 模型的 GenieContext 以引用方式
+    // （IEmbedding::qnn_embedding_info_）持有它。上面 LoadAllModelsFromConfig() 的
+    // npu 设备互斥检查已保证同一时刻最多驻留一个 qnn 模型，因此加载 qnn 模型时调用
+    // Clean() 是安全的；但加载 GGUF/MNN 等跨设备共存的模型时若也无条件 Clean()，
+    // 会把仍在使用中的 QNN 模型（例如其 Vision embedding）一并销毁，导致该模型后续
+    // 请求报 "model not found or released"。
+    std::string backend_lower_for_clean = backend;
+    std::transform(backend_lower_for_clean.begin(), backend_lower_for_clean.end(),
+                   backend_lower_for_clean.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (backend_lower_for_clean == "qnn")
+    {
+        Clean();
+    }
     auto config = std::make_shared<ModelInstanceConfig>();
     config->set_model_name(model_name);
     config->set_model_path(model_path_in.empty() ? model_root_ + "/" + model_name : model_path_in);
@@ -3123,16 +3147,24 @@ void ModelManager::Clean()
 {
     // 记录本次清理前是否持有 QNN/NPU 句柄：genieModelHandle 置空触发 shared_ptr 归零、
     // 同步执行 ~GenieContext()（NPU/HTP 驱动异步释放资源，需要显式等待才安全）。
+    // 多模态模型的 qnn_embedding_（视觉/音频编码器）走的是另一套独立的 LibAppBuilder QNN/HTP
+    // 会话，Clean() 内部会调用 ModelDestroy() 触发它自己的驱动侧异步释放，必须同样纳入等待判断，
+    // 否则像 qwen3_vl_8b-8480 这种同时持有两个会话的模型会在等待窗口不足时把进程退出前留下未
+    // 释放干净的 HTP 资源，导致下一个进程加载时驱动内部状态错乱而崩溃。
     // 这是全项目里唯一真正触发该释放的位置，UnloadModel()/UnloadModelsByDevice() 均经过此处，
     // 因此把等待下沉到这里可以让两条路径同时获得同等保护，且不拖慢 MNN/GGUF（不持有该句柄）的卸载耗时。
     bool had_qnn_handle = (genieModelHandle != nullptr);
+    bool had_embedding_handle = std::any_of(
+            qnn_embedding_.infer_resources_.begin(), qnn_embedding_.infer_resources_.end(),
+            [](const auto &entry) { return entry.second.app_builder_ != nullptr; });
     known_model_path_.clear();
     genieModelHandle = nullptr;
     qnn_embedding_.Clean();
-    if (had_qnn_handle)
+    if (had_qnn_handle || had_embedding_handle)
     {
         // Extra delay to ensure NPU resources are fully released before the next load/restart.
-        std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+        // 文本与视觉/音频两套会话同时存在时，驱动侧要分别完成两份异步释放，适当延长等待窗口。
+        std::this_thread::sleep_for(std::chrono::milliseconds(had_qnn_handle && had_embedding_handle ? 4000 : 2000));
     }
 }
 

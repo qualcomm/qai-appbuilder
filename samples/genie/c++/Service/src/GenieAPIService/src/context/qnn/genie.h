@@ -66,6 +66,12 @@ public:
 private:
     void inference_thread();
 
+    // 释放已成功创建的全部 QNN/Genie SDK 句柄（含 GenieDialog_create 内部已注册的
+    // HTP/memRegister 状态）。既被 ~GenieContext() 复用，也被构造函数在任意一步失败时
+    // 复用（构造函数抛异常时 ~GenieContext() 永不会被调用，若不在此显式清理，已创建
+    // 的句柄会被静默泄漏，另见 model_manager.md 关于 qwen3_vl_8b-8480 堆损坏崩溃根因分析）。
+    void ReleaseHandles();
+
     static GenieLog_Level_t get_genie_log_level();
 
     bool GenerateTextToken(const std::string &text, const int32_t *&buf, uint32_t &len);

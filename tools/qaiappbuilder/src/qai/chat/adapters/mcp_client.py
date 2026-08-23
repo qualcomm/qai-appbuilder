@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """MCP server registry adapter for the chat bounded context.
 
 Implements :class:`qai.chat.application.ports.McpServerRegistryPort`.  Owns:

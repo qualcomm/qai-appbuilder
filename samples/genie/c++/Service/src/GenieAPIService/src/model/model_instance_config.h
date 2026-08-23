@@ -64,6 +64,10 @@ public:
     int getnumResponse() const { return numResponse_; }
     void set_num_response(int num) { numResponse_ = num; }
 
+    // numResponse == -1 的唯一权威判定入口：客户端自管历史 + 启用 prompt 压缩优化的无状态模式。
+    // 新增判断点必须复用此方法，不要再手写 == -1 / != -1。
+    bool IsStatelessMode() const { return numResponse_ == -1; }
+
     int getminOutputNum() const { return minOutputNum_; }
     void set_min_output_num(int num) { minOutputNum_ = num; }
 

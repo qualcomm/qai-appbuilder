@@ -85,6 +85,13 @@ private:
         return instance_config_ ? instance_config_->getnumResponse() : model_config_.getnumResponse();
     }
 
+    // 辅助方法：获取当前模型是否为无状态模式（numResponse == -1）。
+    // 复用 GetEffectiveNumResponse() 已有的 instance/global 回退逻辑；权威定义见 ModelInstanceConfig::IsStatelessMode()。
+    bool GetEffectiveStatelessMode() const
+    {
+        return GetEffectiveNumResponse() == -1;
+    }
+
     // 辅助方法：获取当前模型的 isOutputAllText（优先使用 instance_config_）
     bool GetEffectiveIsOutputAllText() const
     {
