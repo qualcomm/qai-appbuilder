@@ -197,14 +197,6 @@ function openInstanceTunnel(host: string): void {
 
 // ── Actions ───────────────────────────────────────────────────────────────────
 async function onTestConnect(s: ServerDraft): Promise<void> {
-  await testConnect({
-    host: s.host,
-    ssh_port: s.sshPort,
-    username: s.username,
-    auth_method: s.authMethod,
-    auth_ref: s.authRef,
-    key_path: s.keyPath,
-  });
   const cr = getConnectResult(s.id);
   cr.connecting = true;
   cr.success = false;
@@ -212,7 +204,7 @@ async function onTestConnect(s: ServerDraft): Promise<void> {
   try {
     const ok = await testConnect({
       host: s.host,
-      ssh_port: 22,
+      ssh_port: s.sshPort,
       username: s.username,
       auth_method: s.authMethod,
       auth_ref: s.authRef,
@@ -231,16 +223,6 @@ async function onTestConnect(s: ServerDraft): Promise<void> {
 async function onDeploy(s: ServerDraft): Promise<void> {
   activeDeployId.value = s.id;
   s.showLog = true;
-  await deploy({
-    host: s.host,
-    ssh_port: s.sshPort,
-    username: s.username,
-    auth_method: s.authMethod,
-    auth_ref: s.authRef,
-    key_path: s.keyPath,
-    remote_port: s.remotePort,
-  });
-  activeDeployId.value = null;
   const ds = getDeployState(s.id);
   ds.log = [];
   ds.percent = 0;
@@ -249,12 +231,12 @@ async function onDeploy(s: ServerDraft): Promise<void> {
   try {
     await deploy({
       host: s.host,
-      ssh_port: 22,
+      ssh_port: s.sshPort,
       username: s.username,
       auth_method: s.authMethod,
       auth_ref: s.authRef,
       key_path: s.keyPath,
-      remote_port: 8989,
+      remote_port: s.remotePort,
     });
   } catch (err) {
     ds.error = err instanceof Error ? err.message : String(err);
