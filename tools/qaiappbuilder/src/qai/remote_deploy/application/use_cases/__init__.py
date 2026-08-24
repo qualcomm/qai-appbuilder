@@ -44,12 +44,14 @@ __all__ = [
 ]
 
 # ---------------------------------------------------------------------------
-# Remote repo / install constants
+# Remote deploy constants
 # ---------------------------------------------------------------------------
-# NOTE: _REPO_URL points to the public QAI AppBuilder repository.
-# The remote install directory matches the repo structure.
-_REPO_URL = "https://github.com/qualcomm/qai-appbuilder.git"
-_REMOTE_INSTALL_DIR = "~/qai-appbuilder/tools/qaiappbuilder"
+# External (open-source) edition: download a pre-built release zip from GitHub
+# Releases rather than git-cloning the source. The zip ships a ready-to-run
+# bundle (frontend/dist/ already built), so only `setup.sh --no-frontend`
+# (Python venv + deps + data init) is needed — no Node/pnpm required.
+_RELEASE_URL = "https://github.com/qualcomm/qai-appbuilder/releases/download/v3.0.0/qaiappbuilder.zip"
+_REMOTE_INSTALL_DIR = "~/qaiappbuilder"
 _DEFAULT_REMOTE_PORT = 8989
 
 
@@ -235,48 +237,43 @@ class DeployRemoteUseCase:
             yield f"[done] QAI ModelBuilder already running at http://{host}:{remote_port}"
             return
 
-        # --- Step 3: clone or update repo ---
+        # --- Step 3: download and extract release zip (or skip if already installed) ---
         instance.state = DeploymentState.INSTALLING
         await self.repository.save(instance)
-        yield "[install] Cloning / updating QAI ModelBuilder …"
-        clone_cmd = (
-            f"if [ -d {_REMOTE_INSTALL_DIR}/.git ]; then "
-            f"  cd {_REMOTE_INSTALL_DIR} && git pull --ff-only; "
+        yield "[install] Downloading QAI AppBuilder release …"
+        download_cmd = (
+            f"if [ -f {_REMOTE_INSTALL_DIR}/start.sh ]; then "
+            f"  echo 'Already installed — skipping download.'; "
             f"else "
-            f"  git clone {_REPO_URL} {_REMOTE_INSTALL_DIR}; "
+            f"  _TMP=/tmp/qaiappbuilder_extract_$$ && "
+            f"  mkdir -p \"$_TMP\" && "
+            f"  curl -fSL '{_RELEASE_URL}' -o /tmp/qaiappbuilder.zip && "
+            f"  unzip -qo /tmp/qaiappbuilder.zip -d \"$_TMP\" && "
+            f"  rm -f /tmp/qaiappbuilder.zip && "
+            # Handle both flat (start.sh at root) and nested (single subdir) zip layouts
+            f"  if [ -f \"$_TMP/start.sh\" ]; then "
+            f"    mv \"$_TMP\" {_REMOTE_INSTALL_DIR}; "
+            f"  else "
+            f"    _SUB=$(find \"$_TMP\" -maxdepth 1 -mindepth 1 -type d | head -1) && "
+            f"    mv \"$_SUB\" {_REMOTE_INSTALL_DIR} && "
+            f"    rm -rf \"$_TMP\"; "
+            f"  fi && "
+            f"  echo 'Download and extract complete.'; "
             f"fi"
         )
-        yield f"[cmd] {clone_cmd}"
-        async for line in self.executor.stream_command(remote, clone_cmd, timeout=300):
+        yield f"[cmd] {download_cmd}"
+        async for line in self.executor.stream_command(remote, download_cmd, timeout=300):
             instance.append_log(line)
             yield f"[out] {line}"
 
-        # --- Step 4: setup — Python venv + deps (skip frontend, done separately) ---
+        # --- Step 4: setup — Python venv + deps (no frontend build needed,
+        #     the release zip ships pre-built frontend/dist/) ---
         yield "[setup] Running setup.sh --no-frontend …"
         setup_cmd = (
-            f"export NVM_DIR=\"$HOME/.nvm\"; "
-            f"[ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\"; "
             f"cd {_REMOTE_INSTALL_DIR} && bash setup.sh --no-frontend 2>&1"
         )
         yield f"[cmd] {setup_cmd}"
         async for line in self.executor.stream_command(remote, setup_cmd, timeout=600):
-            instance.append_log(line)
-            yield f"[out] {line}"
-
-        # --- Step 5: build — install Node deps + build frontend ---
-        instance.state = DeploymentState.INSTALLING
-        await self.repository.save(instance)
-        yield "[build] Installing frontend dependencies …"
-        build_cmd = (
-            f"export NVM_DIR=\"$HOME/.nvm\"; "
-            f"[ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\"; "
-            f"cd {_REMOTE_INSTALL_DIR} && "
-            f"pnpm -C frontend install 2>&1 && "
-            f"echo '[build] Building frontend …' && "
-            f"pnpm -C frontend build 2>&1"
-        )
-        yield f"[cmd] {build_cmd}"
-        async for line in self.executor.stream_command(remote, build_cmd, timeout=900):
             instance.append_log(line)
             yield f"[out] {line}"
 
