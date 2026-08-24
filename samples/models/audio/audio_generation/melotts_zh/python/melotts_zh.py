@@ -254,6 +254,44 @@ MAX_DEC_SEQ_LEN       = 64
 UPSAMPLE_FACTOR       = 512
 SAMPLE_RATE           = 44100
 
+
+def _read_decoder_time_dim_from_metadata(model_dir):
+    """Read the decoder.bin ``z`` input time-dim (T) from metadata.json.
+
+    Dragon Bridge ``qai_modelbuilder_hotfix.py`` approach: the ground-truth
+    decoder shape ships in the model package's ``metadata.json``
+    (``model_files -> decoder.bin -> inputs -> z -> shape``).  Reading it is a
+    reliable fallback for when the live ``getInputShapes()`` probe is
+    unavailable or returns an unexpected layout, so we never fall back to a
+    stale compiled-in constant that would produce wrong-length / corrupted
+    audio against a differently-shaped release.
+
+    Returns the integer T, or ``None`` if metadata.json is absent / malformed
+    (never raises — a failed read must not break synthesis).
+    """
+    import json
+
+    meta_path = os.path.join(model_dir, "metadata.json")
+    if not os.path.isfile(meta_path):
+        return None
+    try:
+        with open(meta_path, encoding="utf-8") as f:
+            metadata = json.load(f)
+        shape = (
+            metadata.get("model_files", {})
+            .get("decoder.bin", {})
+            .get("inputs", {})
+            .get("z", {})
+            .get("shape")
+        )
+        if isinstance(shape, (list, tuple)) and len(shape) >= 1:
+            t = int(shape[-1])
+            if t > 0:
+                return t
+    except Exception as e:  # pylint: disable=broad-except
+        print(f"[WARN] Could not read decoder z time-dim from metadata.json ({e}).")
+    return None
+
 # ── 5. QNN model wrappers ──────────────────────────────────────────────────────
 class EncoderModel(QNNContext):
     """float32 I/O"""
@@ -330,6 +368,44 @@ decoder_model = DecoderModel(
     input_data_type="native", output_data_type="native",
 )
 print("[INFO] All models loaded.")
+
+# ── Resolve the decoder's real z time-dim (do NOT hardcode) ───────────────────
+# decoder.bin expects z shaped [1, 192, T].  Different AI Hub releases compile
+# different T (public v0.55/v0.56 ZIPs use T=64; the App-Builder "full" variant
+# uses T=128).  Hardcoding MAX_DEC_SEQ_LEN=64 against a T=128 binary silently
+# produces wrong-length / corrupted audio.  Resolve T in three tiers, each more
+# authoritative than the next fallback:
+#   1. live getInputShapes() probe of the loaded decoder (actual binary);
+#   2. metadata.json shipped in the model package (Dragon Bridge hotfix);
+#   3. the compiled-in constant (last resort only).
+DEC_SEQ_LEN = None
+_dec_seq_src = None
+try:
+    _dec_shapes = decoder_model.getInputShapes()
+    for _s in _dec_shapes:
+        # z is the 3-D input whose feature dim is 192; its last dim is T.
+        if len(_s) == 3 and _s[1] == 192:
+            DEC_SEQ_LEN = int(_s[2])
+            _dec_seq_src = "getInputShapes() probe"
+            break
+except Exception as _e:  # pylint: disable=broad-except
+    print(f"[WARN] Could not probe decoder z time-dim ({_e}); trying metadata.json ...")
+
+if DEC_SEQ_LEN is None:
+    _meta_t = _read_decoder_time_dim_from_metadata(MODEL_DIR)
+    if _meta_t is not None:
+        DEC_SEQ_LEN = _meta_t
+        _dec_seq_src = "metadata.json"
+
+if DEC_SEQ_LEN is None:
+    DEC_SEQ_LEN = MAX_DEC_SEQ_LEN
+    _dec_seq_src = "compiled constant (fallback)"
+
+if DEC_SEQ_LEN != MAX_DEC_SEQ_LEN:
+    print(f"[INFO] Decoder z time-dim resolved as T={DEC_SEQ_LEN} via {_dec_seq_src} "
+          f"(compiled constant was {MAX_DEC_SEQ_LEN}); using resolved value.")
+else:
+    print(f"[INFO] Decoder z time-dim T={DEC_SEQ_LEN} via {_dec_seq_src} (matches constant).")
 
 # ── 9. Text preprocessing ──────────────────────────────────────────────────────
 def preprocess_text(text):
@@ -423,10 +499,12 @@ def synthesize(text: str, output_path: str,
         print("[TTS] Step 4/4: Decoder (chunked)...")
         audio_chunks = []
         z_total = z.shape[2]  # 1536
-        for start in range(0, z_total, MAX_DEC_SEQ_LEN):
-            end = start + MAX_DEC_SEQ_LEN
+        # Use the runtime-resolved decoder time-dim (DEC_SEQ_LEN) rather than the
+        # compiled-in MAX_DEC_SEQ_LEN so we stay correct across model releases.
+        for start in range(0, z_total, DEC_SEQ_LEN):
+            end = start + DEC_SEQ_LEN
             if end > z_total:
-                z_slice = np.zeros([1, z.shape[1], MAX_DEC_SEQ_LEN], dtype=np.float32)
+                z_slice = np.zeros([1, z.shape[1], DEC_SEQ_LEN], dtype=np.float32)
                 z_slice[:, :, : z_total - start] = z[:, :, start:z_total]
             else:
                 z_slice = z[:, :, start:end]
