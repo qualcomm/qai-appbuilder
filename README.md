@@ -8,7 +8,7 @@
 
 <div align="center">
   <a href="https://github.com/qualcomm/qai-appbuilder"><img src="https://img.shields.io/github/stars/qualcomm/qai-appbuilder" alt="stars"></a>
-  <a href="https://github.com/qualcomm/qai-appbuilder/releases/tag/v2.48.40"><img src="https://img.shields.io/badge/Release-v3.0.0-green" alt="Release"></a>
+  <a href="https://github.com/qualcomm/qai-appbuilder/releases/tag/v3.0.0"><img src="https://img.shields.io/badge/Release-v3.0.0-green" alt="Release"></a>
   <a href="https://opensource.org/license/BSD-3-clause"><img src="https://img.shields.io/badge/License-BSD--3--Clause-blue" alt="License: BSD 3-Clause"></a>
   <a href="https://www.python.org/downloads/windows/"><img src="https://img.shields.io/badge/Python-00599C?logo=Python" alt="Python"></a>
   <a href="https://en.cppreference.com/w/cpp/compiler_support"><img src="https://img.shields.io/badge/C++-999999?logo=c%2B%2B" alt="C++"></a>
@@ -67,7 +67,7 @@ every model ends up running on the same on-device NPU engine (`QNNContext` via
 > pre-built package below and you'll have a running, on-device AI app builder in **two commands**.
 
 <div align="center">
-  <a href="https://github.com/qualcomm/qai-appbuilder/releases/download/v2.48.40/qaiappbuilder.zip">
+  <a href="https://github.com/qualcomm/qai-appbuilder/releases/download/v3.0.0/qaiappbuilder.zip">
     <img src="https://img.shields.io/badge/Download-QAI%20AppBuilder%20v3.0.0-2ea44f?style=for-the-badge" alt="Download QAI AppBuilder">
   </a>
   &nbsp;&nbsp;
@@ -84,7 +84,7 @@ every model ends up running on the same on-device NPU engine (`QNNContext` via
 > downloads Python, Node.js, QAIRT SDK, and model weights for you.
 
 1. **Download & unzip**
-   [`qaiappbuilder.zip`](https://github.com/qualcomm/qai-appbuilder/releases/download/v2.48.40/qaiappbuilder.zip),
+   [`qaiappbuilder.zip`](https://github.com/qualcomm/qai-appbuilder/releases/download/v3.0.0/qaiappbuilder.zip),
    then open `cmd.exe` in the extracted folder.
 
 2. **Run two commands** — the first installs the environment (one-time), the second launches the
