@@ -22,6 +22,17 @@ import time
 import numpy as np
 from qai_appbuilder import appbuilder
 
+# Suppress the benign native "Error 0x200: failed to close queue" line that the
+# HTP/fastRPC runtime writes to fd 2 at DSP-queue teardown. It bypasses the QNN
+# logger and sys.stderr, so only an fd-2 filter can hide it. Installed here (at
+# import) so every consumer of qai_appbuilder is covered. Opt out with
+# QAI_KEEP_QUEUE_WARNING=1. Never let this break the import.
+try:
+    from qai_appbuilder import _stderr_filter
+    _stderr_filter.install()
+except Exception:
+    pass
+
 QNN_SYSTEM_LIB = "QnnSystem.dll"
 QNN_LIB_EXT = ".dll"
 QNN_LIB_PRE = ""
