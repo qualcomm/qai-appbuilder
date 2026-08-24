@@ -228,14 +228,27 @@ _PUNCT_MAP = {
 def text_to_piper_ids(text: str, lang: str = "en-us",
                       verbose: bool = False) -> np.ndarray:
     """
-    Text -> piper phoneme ids (BOS + phonemes + EOS).
-    Uses gruut for G2P (espeak-ng compatible, pure Python).
-    Format: BOS word1 SPACE PUNCT SPACE word2 EOS
+    Text -> piper phoneme ids, matching rhasspy/piper-phonemize exactly.
+
+    The Qualcomm PiperTTS acoustic model (encoder.bin) was trained on phoneme-id
+    sequences produced by piper_phonemize.phoneme_ids_espeak, i.e. piper's
+    phonemes_to_ids() with the default config:
+        addBos=True, addEos=True, interspersePad=True (pad='_'=0)
+    producing:  [BOS, PAD, p1, PAD, p2, PAD, ..., pN, PAD, EOS]
+    piper_phonemize has NO win-arm64 wheel, so we phonemize with gruut and then
+    reproduce piper's id assembly (incl. the interspersed PAD, whose earlier
+    omission garbled every sentence except the single tuned demo string).
+    espeak/piper iterate phonemes per Unicode codepoint over NFD-normalised
+    text, so we NFD-normalise and split multi-codepoint gruut phonemes.
     """
+    import unicodedata
+
     try:
         import gruut
     except ImportError:
         raise ImportError("gruut not installed. Run: pip install gruut")
+
+    PAD_ID = PIPER_PHONEME_ID_MAP['_']  # 0
 
     # Collect (word_text, phonemes_list, is_break) entries
     word_entries = []
@@ -250,49 +263,58 @@ def text_to_piper_ids(text: str, lang: str = "en-us",
             break_marker = " [BREAK]" if is_break else ""
             print(f"    {repr(wt):20s} -> {ph}{break_marker}")
 
-    # Map to piper ids
-    ids = [PIPER_BOS_ID]
+    # -- Step 1: flat list of single-phoneme ids (NO bos/eos/pad yet) ----------
+    units = []          # list[int] — one entry per phoneme codepoint
     skipped = []
-    prev_was_word = False  # track whether to insert space between words
+    prev_was_word = False
+
+    def _emit_codepoints(token):
+        """Map a (possibly multi-codepoint) phoneme string to ids, one id per
+        mapped codepoint, matching piper's per-codepoint iteration."""
+        emitted = False
+        for ch in unicodedata.normalize("NFD", token):
+            if ch in _GRUUT_SKIP_CHARS:
+                continue
+            if ch in PIPER_PHONEME_ID_MAP:
+                units.append(PIPER_PHONEME_ID_MAP[ch])
+                emitted = True
+            else:
+                skipped.append(repr(ch))
+        return emitted
 
     for word_text, phonemes, is_break in word_entries:
         if is_break:
             # Punctuation word: SPACE PUNCT SPACE
             if prev_was_word:
-                ids.append(PIPER_PHONEME_ID_MAP[' '])
+                units.append(PIPER_PHONEME_ID_MAP[' '])
             for ch in word_text:
                 if ch in _PUNCT_MAP:
-                    ids.append(_PUNCT_MAP[ch])
-            ids.append(PIPER_PHONEME_ID_MAP[' '])
+                    units.append(_PUNCT_MAP[ch])
+            units.append(PIPER_PHONEME_ID_MAP[' '])
             prev_was_word = False
         else:
             # Regular word: insert space between adjacent words
             if prev_was_word:
-                ids.append(PIPER_PHONEME_ID_MAP[' '])
-            # Map phonemes one by one
+                units.append(PIPER_PHONEME_ID_MAP[' '])
             for p in phonemes:
                 if p in _GRUUT_BOUNDARY_MAP:
-                    ids.append(_GRUUT_BOUNDARY_MAP[p])
+                    units.append(_GRUUT_BOUNDARY_MAP[p])
                 elif p in PIPER_PHONEME_ID_MAP:
-                    ids.append(PIPER_PHONEME_ID_MAP[p])
+                    units.append(PIPER_PHONEME_ID_MAP[p])
                 else:
-                    # Decompose char by char (e.g. 'oU' -> 'o'=27, 'U'=100)
-                    found_any = False
-                    for ch in p:
-                        if ch in _GRUUT_SKIP_CHARS:
-                            continue  # silently skip combining tie
-                        if ch in PIPER_PHONEME_ID_MAP:
-                            ids.append(PIPER_PHONEME_ID_MAP[ch])
-                            found_any = True
-                        else:
-                            skipped.append(repr(ch))
-                    if not found_any:
+                    if not _emit_codepoints(p):
                         skipped.append(repr(p))
             prev_was_word = True
 
-    # Remove trailing space
-    while ids and ids[-1] == PIPER_PHONEME_ID_MAP[' ']:
-        ids.pop()
+    # Trim trailing word separators (space) before EOS.
+    while units and units[-1] == PIPER_PHONEME_ID_MAP[' ']:
+        units.pop()
+
+    # -- Step 2: piper phonemes_to_ids assembly (bos + interspersed pad) -------
+    ids = [PIPER_BOS_ID, PAD_ID]
+    for u in units:
+        ids.append(u)
+        ids.append(PAD_ID)   # pad after every phoneme (interspersePad=True)
     ids.append(PIPER_EOS_ID)
 
     if verbose:
