@@ -494,25 +494,25 @@ class OnnxRuntimeContext:
 
         return self.session.run([o.name for o in self._outputs], feed)
 
-    def getInputShapes(self):
+    def getInputShapes(self, graph_index: int = 0):
         return [self._shape_list(i.shape) for i in self._inputs]
 
-    def getOutputShapes(self):
+    def getOutputShapes(self, graph_index: int = 0):
         return [self._shape_list(o.shape) for o in self._outputs]
 
-    def getInputDataType(self):
+    def getInputDataType(self, graph_index: int = 0):
         return [_onnx_dtype_to_simple(i.type) for i in self._inputs]
 
-    def getOutputDataType(self):
+    def getOutputDataType(self, graph_index: int = 0):
         return [_onnx_dtype_to_simple(o.type) for o in self._outputs]
 
-    def getGraphName(self):
+    def getGraphName(self, graph_index: int = 0):
         return self.model_name
 
-    def getInputName(self):
+    def getInputName(self, graph_index: int = 0):
         return [i.name for i in self._inputs]
 
-    def getOutputName(self):
+    def getOutputName(self, graph_index: int = 0):
         return [o.name for o in self._outputs]
 
     def getProfilingEvent(self, eventType):
@@ -713,44 +713,44 @@ class _QNNContextBase:
                 f"'{getattr(self, 'model_name', '<unknown>')}' has been released."
             )
 
-    def _call_ctx_getter(self, method_name: str):
+    def _call_ctx_getter(self, method_name: str, graph_index: int = 0):
         self._ensure_live(method_name)
         method = getattr(self.m_context, method_name)
         if hasattr(self, "proc_name"):
             return method(self.proc_name)
-        return method()
+        return method(graph_index)
 
     # issue#24
-    def getInputShapes(self):
-        return self._call_ctx_getter("getInputShapes")
+    def getInputShapes(self, graph_index: int = 0):
+        return self._call_ctx_getter("getInputShapes", graph_index)
 
-    def getOutputShapes(self):
-        return self._call_ctx_getter("getOutputShapes")
+    def getOutputShapes(self, graph_index: int = 0):
+        return self._call_ctx_getter("getOutputShapes", graph_index)
 
-    def getInputDataType(self):
-        return self._call_ctx_getter("getInputDataType")
+    def getInputDataType(self, graph_index: int = 0):
+        return self._call_ctx_getter("getInputDataType", graph_index)
 
-    def getOutputDataType(self):
-        return self._call_ctx_getter("getOutputDataType")
+    def getOutputDataType(self, graph_index: int = 0):
+        return self._call_ctx_getter("getOutputDataType", graph_index)
 
-    def getGraphName(self):
-        return self._call_ctx_getter("getGraphName")
+    def getGraphName(self, graph_index: int = 0):
+        return self._call_ctx_getter("getGraphName", graph_index)
 
-    def getInputName(self):
-        return self._call_ctx_getter("getInputName")
+    def getInputName(self, graph_index: int = 0):
+        return self._call_ctx_getter("getInputName", graph_index)
 
-    def getOutputName(self):
-        return self._call_ctx_getter("getOutputName")
+    def getOutputName(self, graph_index: int = 0):
+        return self._call_ctx_getter("getOutputName", graph_index)
     
     def getProfilingEvent(self, eventType):
         self._ensure_live("getProfilingEvent")
         return self.m_context.getProfilingEvent(eventType)
 
-    def _inference_and_reshape(self, input, infer_fn):
+    def _inference_and_reshape(self, input, infer_fn, graph_index: int = 0):
         self._ensure_live("Inference")
         input = reshape_input(input)
         output = infer_fn(input)
-        outputshape_list = self.getOutputShapes()
+        outputshape_list = self.getOutputShapes(graph_index)
         output = reshape_output(output, outputshape_list)
         return output
 
@@ -836,7 +836,8 @@ class QNNContext(_QNNContextBase):
 
         return self._inference_and_reshape(
             input,
-            lambda _in: self.m_context.Inference(_in, perf_profile, graphIndex, self.input_data_type, self.output_data_type)
+            lambda _in: self.m_context.Inference(_in, perf_profile, graphIndex, self.input_data_type, self.output_data_type),
+            graph_index=graphIndex
         )
 
     def isOnnxModel(self):
@@ -969,7 +970,8 @@ class QNNLoraContext(_QNNContextBase):
     def Inference(self, input, perf_profile=PerfProfile.DEFAULT, graphIndex=0):
         return self._inference_and_reshape(
             input,
-            lambda _in: self.m_context.Inference(_in, perf_profile, graphIndex, self.input_data_type, self.output_data_type)
+            lambda _in: self.m_context.Inference(_in, perf_profile, graphIndex, self.input_data_type, self.output_data_type),
+            graph_index=graphIndex
         )
 
     def apply_binary_update(self, lora_adapters=None):

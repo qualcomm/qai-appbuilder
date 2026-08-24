@@ -50,32 +50,32 @@ QNNContext::QNNContext(const std::string& model_name,
 }
 
 // issue#24
-std::vector<std::vector<size_t>> QNNContext::getInputShapes(){
-    return g_LibAppBuilder.getInputShapes(m_model_name);
+std::vector<std::vector<size_t>> QNNContext::getInputShapes(size_t graphIdx){
+    return g_LibAppBuilder.getInputShapes(m_model_name, graphIdx);
 };
 
-std::vector<std::string> QNNContext::getInputDataType(){
-    return g_LibAppBuilder.getInputDataType(m_model_name);
+std::vector<std::string> QNNContext::getInputDataType(size_t graphIdx){
+    return g_LibAppBuilder.getInputDataType(m_model_name, graphIdx);
 };
 
-std::vector<std::vector<size_t>> QNNContext::getOutputShapes(){
-    return g_LibAppBuilder.getOutputShapes(m_model_name);
+std::vector<std::vector<size_t>> QNNContext::getOutputShapes(size_t graphIdx){
+    return g_LibAppBuilder.getOutputShapes(m_model_name, graphIdx);
 };
 
-std::vector<std::string> QNNContext::getOutputDataType(){
-    return g_LibAppBuilder.getOutputDataType(m_model_name);
+std::vector<std::string> QNNContext::getOutputDataType(size_t graphIdx){
+    return g_LibAppBuilder.getOutputDataType(m_model_name, graphIdx);
 };
 
-std::string  QNNContext::getGraphName(){
-    return g_LibAppBuilder.getGraphName(m_model_name);
+std::string  QNNContext::getGraphName(size_t graphIdx){
+    return g_LibAppBuilder.getGraphName(m_model_name, graphIdx);
 };
 
-std::vector<std::string> QNNContext::getInputName(){
-    return g_LibAppBuilder.getInputName(m_model_name);
+std::vector<std::string> QNNContext::getInputName(size_t graphIdx){
+    return g_LibAppBuilder.getInputName(m_model_name, graphIdx);
 };
 
-std::vector<std::string> QNNContext::getOutputName(){
-    return g_LibAppBuilder.getOutputName(m_model_name);
+std::vector<std::string> QNNContext::getOutputName(size_t graphIdx){
+    return g_LibAppBuilder.getOutputName(m_model_name, graphIdx);
 };
 
 std::vector<std::vector<size_t>> QNNContext::getInputShapes(const std::string& proc_name){
@@ -283,13 +283,20 @@ PYBIND11_MODULE(appbuilder, m) {
              py::arg("request_id"), py::arg("share_memory"),
              py::arg("output_data_type") = "float")
         .def("ApplyBinaryUpdate", &QNNContext::ApplyBinaryUpdate, "Apply Lora binary update")
-        .def("getInputShapes", py::overload_cast<>(&QNNContext::getInputShapes)) 
-        .def("getInputDataType", py::overload_cast<>(&QNNContext::getInputDataType)) 
-        .def("getOutputShapes", py::overload_cast<>(&QNNContext::getOutputShapes)) 
-        .def("getOutputDataType", py::overload_cast<>(&QNNContext::getOutputDataType)) 
-        .def("getInputName", py::overload_cast<>(&QNNContext::getInputName))
-        .def("getOutputName", py::overload_cast<>(&QNNContext::getOutputName))
-        .def("getGraphName", py::overload_cast<>(&QNNContext::getGraphName)) 
+        .def("getInputShapes", py::overload_cast<size_t>(&QNNContext::getInputShapes),
+             py::arg("graphIdx") = 0)
+        .def("getInputDataType", py::overload_cast<size_t>(&QNNContext::getInputDataType),
+             py::arg("graphIdx") = 0)
+        .def("getOutputShapes", py::overload_cast<size_t>(&QNNContext::getOutputShapes),
+             py::arg("graphIdx") = 0)
+        .def("getOutputDataType", py::overload_cast<size_t>(&QNNContext::getOutputDataType),
+             py::arg("graphIdx") = 0)
+        .def("getInputName", py::overload_cast<size_t>(&QNNContext::getInputName),
+             py::arg("graphIdx") = 0)
+        .def("getOutputName", py::overload_cast<size_t>(&QNNContext::getOutputName),
+             py::arg("graphIdx") = 0)
+        .def("getGraphName", py::overload_cast<size_t>(&QNNContext::getGraphName),
+             py::arg("graphIdx") = 0)
         .def("getInputShapes", py::overload_cast<const std::string&>(&QNNContext::getInputShapes))
         .def("getInputDataType", py::overload_cast<const std::string&>(&QNNContext::getInputDataType))
         .def("getOutputDataType", py::overload_cast<const std::string&>(&QNNContext::getOutputDataType))

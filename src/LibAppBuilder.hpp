@@ -96,13 +96,13 @@ public:
     bool CreateShareMemory(std::string share_memory_name, size_t share_memory_size);
     bool DeleteShareMemory(std::string share_memory_name);
 
-    std::vector<std::vector<size_t>> getInputShapes(std::string model_name);
-    std::vector<std::string> getInputDataType(std::string model_name);
-    std::vector<std::string> getOutputDataType(std::string model_name);
-    std::vector<std::vector<size_t>> getOutputShapes(std::string model_name);
-    std::string getGraphName(std::string model_name);
-    std::vector<std::string> getInputName(std::string model_name);
-    std::vector<std::string> getOutputName(std::string model_name);
+    std::vector<std::vector<size_t>> getInputShapes(std::string model_name, size_t graphIdx = 0);
+    std::vector<std::string> getInputDataType(std::string model_name, size_t graphIdx = 0);
+    std::vector<std::string> getOutputDataType(std::string model_name, size_t graphIdx = 0);
+    std::vector<std::vector<size_t>> getOutputShapes(std::string model_name, size_t graphIdx = 0);
+    std::string getGraphName(std::string model_name, size_t graphIdx = 0);
+    std::vector<std::string> getInputName(std::string model_name, size_t graphIdx = 0);
+    std::vector<std::string> getOutputName(std::string model_name, size_t graphIdx = 0);
 
     std::vector<std::vector<size_t>> getInputShapes(std::string model_name, std::string proc_name);
     std::vector<std::string> getInputDataType(std::string model_name, std::string proc_name);

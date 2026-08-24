@@ -832,79 +832,79 @@ bool LibAppBuilder::DeleteShareMemory(std::string share_memory_name) {
 }
 
 // issue#24
-std::vector<std::vector<size_t>> LibAppBuilder::getOutputShapes(std::string model_name){
+std::vector<std::vector<size_t>> LibAppBuilder::getOutputShapes(std::string model_name, size_t graphIdx){
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     if (nullptr == app) {  // issue#109/#4: guard against released/missing context.
         QNN_WARN("getOutputShapes: model not found or released: %s\n", model_name.c_str());
         return {};
     }
-    m_outputShapes = app->getOutputShapes();
+    m_outputShapes = app->getOutputShapes(graphIdx);
     putQnnApp(model_name, std::move(app));
     return m_outputShapes;
 };
 
-std::vector<std::vector<size_t>> LibAppBuilder::getInputShapes(std::string model_name){
+std::vector<std::vector<size_t>> LibAppBuilder::getInputShapes(std::string model_name, size_t graphIdx){
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     if (nullptr == app) {  // issue#109/#4
         QNN_WARN("getInputShapes: model not found or released: %s\n", model_name.c_str());
         return {};
     }
-    m_inputShapes = app->getInputShapes();
+    m_inputShapes = app->getInputShapes(graphIdx);
     putQnnApp(model_name, std::move(app));
     return m_inputShapes;
 };
 
-std::vector<std::string> LibAppBuilder::getInputDataType(std::string model_name){
+std::vector<std::string> LibAppBuilder::getInputDataType(std::string model_name, size_t graphIdx){
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     if (nullptr == app) {  // issue#109/#4
         QNN_WARN("getInputDataType: model not found or released: %s\n", model_name.c_str());
         return {};
     }
-    m_inputDataType = app->getInputDataType();
+    m_inputDataType = app->getInputDataType(graphIdx);
     putQnnApp(model_name, std::move(app));
     return m_inputDataType;
 };
 
-std::vector<std::string> LibAppBuilder::getOutputDataType(std::string model_name){
+std::vector<std::string> LibAppBuilder::getOutputDataType(std::string model_name, size_t graphIdx){
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     if (nullptr == app) {  // issue#109/#4
         QNN_WARN("getOutputDataType: model not found or released: %s\n", model_name.c_str());
         return {};
     }
-    m_outputDataType = app->getOutputDataType();
+    m_outputDataType = app->getOutputDataType(graphIdx);
     putQnnApp(model_name, std::move(app));
     return m_outputDataType;
 };
 
-std::string LibAppBuilder::getGraphName(std::string model_name){
+std::string LibAppBuilder::getGraphName(std::string model_name, size_t graphIdx){
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     if (nullptr == app) {  // issue#109/#4
         QNN_WARN("getGraphName: model not found or released: %s\n", model_name.c_str());
         return {};
     }
-    m_graphName = app->getGraphName();
+    m_graphName = app->getGraphName(graphIdx);
     putQnnApp(model_name, std::move(app));
     return m_graphName;
 };
 
-std::vector<std::string> LibAppBuilder::getInputName(std::string model_name){
+std::vector<std::string> LibAppBuilder::getInputName(std::string model_name, size_t graphIdx){
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     if (nullptr == app) {  // issue#109/#4
         QNN_WARN("getInputName: model not found or released: %s\n", model_name.c_str());
         return {};
     }
-    m_inputName = app->getInputName();
+    m_inputName = app->getInputName(graphIdx);
     putQnnApp(model_name, std::move(app));
     return m_inputName;
 };
 
-std::vector<std::string> LibAppBuilder::getOutputName(std::string model_name){
+std::vector<std::string> LibAppBuilder::getOutputName(std::string model_name, size_t graphIdx){
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     if (nullptr == app) {  // issue#109/#4
         QNN_WARN("getOutputName: model not found or released: %s\n", model_name.c_str());
         return {};
     }
-    m_outputName = app->getOutputName();
+    m_outputName = app->getOutputName(graphIdx);
     putQnnApp(model_name, std::move(app));
     return m_outputName;
 };

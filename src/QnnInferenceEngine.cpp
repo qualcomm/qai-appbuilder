@@ -1650,117 +1650,185 @@ std::string dataTypeToString(Qnn_DataType_t dtype) {
     }
 }
 
-std::vector<std::vector<size_t>> qnn_app::QnnInferenceEngine::getInputShapes(){
-	if(m_inputShapes.empty()){
- 		size_t graphIdx = 0;
- 		auto graphInfo = (*m_graphsInfo)[graphIdx];
- 		Qnn_Tensor_t* inputs  = m_inputTensors[graphIdx];
-		for (size_t inputIdx = 0; inputIdx < graphInfo.numInputTensors; inputIdx++) {
-			if (QNN_TENSOR_GET_DIMENSIONS(inputs[inputIdx]) == nullptr || QNN_TENSOR_GET_RANK(inputs[inputIdx]) == 0) {
-				//printf("[ERROR] input tensor %zu has nullptr dimensions or rank == 0\n", inputIdx);
-				continue;
-			}
-			std::vector<size_t> dims;
-			m_ioTensor.fillDims(dims, QNN_TENSOR_GET_DIMENSIONS(inputs[inputIdx]), QNN_TENSOR_GET_RANK(inputs[inputIdx]));
-			m_inputShapes.push_back(dims);
-		}
-	}
-#ifdef DEBUG_INFERENCE
-  printf("[DEBUG]m_inputShapes:");
-  printArrayOfVector(m_inputShapes);
-#endif  
-  return m_inputShapes;
-}
+std::vector<std::vector<size_t>> qnn_app::QnnInferenceEngine::getInputShapes(size_t graphIdx){
+  if (nullptr == m_graphsInfo || graphIdx >= m_graphsCount) {
+    QNN_ERROR("getInputShapes: invalid graphIdx: %zu, graphsCount: %zu", graphIdx, m_graphsCount);
+    return {};
+  }
+  auto it = m_inputShapes.find(graphIdx);
+  if (it != m_inputShapes.end()) {
+    return it->second;
+  }
 
-std::string qnn_app::QnnInferenceEngine::getGraphName(){
-	if(m_graphName.empty()){
-		auto graphInfo = (*m_graphsInfo)[0/*graphIdx*/];
-		m_graphName  = graphInfo.graphName;
-	}
-    return m_graphName;
-}
-
-std::vector<std::string> qnn_app::QnnInferenceEngine::getInputName(){
-	if(m_inputName.empty()){
- 		size_t graphIdx = 0;
- 		auto graphInfo = (*m_graphsInfo)[graphIdx];
- 		Qnn_Tensor_t* inputs  = m_inputTensors[graphIdx];
- 		for (size_t inputIdx = 0; inputIdx < graphInfo.numInputTensors; inputIdx++) {
-			std::string inputName = QNN_TENSOR_GET_NAME(inputs[inputIdx]);
-			m_inputName.push_back(inputName);
-		}
+  auto graphInfo = (*m_graphsInfo)[graphIdx];
+  Qnn_Tensor_t* inputs = m_inputTensors[graphIdx];
+  if (nullptr == inputs) { return {}; }
+  std::vector<std::vector<size_t>> shapes;
+  for (size_t inputIdx = 0; inputIdx < graphInfo.numInputTensors; inputIdx++) {
+    if (QNN_TENSOR_GET_DIMENSIONS(inputs[inputIdx]) == nullptr ||
+        QNN_TENSOR_GET_RANK(inputs[inputIdx]) == 0) {
+        continue;
     }
-	return m_inputName;
-}
-
-
-std::vector<std::string> qnn_app::QnnInferenceEngine::getOutputName(){
-	if(m_outputName.empty()){
- 		size_t graphIdx = 0;
- 		auto graphInfo = (*m_graphsInfo)[graphIdx];
- 		Qnn_Tensor_t* outputs  = m_outputTensors[graphIdx];
-		for (size_t outputIdx = 0; outputIdx < graphInfo.numOutputTensors; outputIdx++) {
-			std::string outputName = QNN_TENSOR_GET_NAME(outputs[outputIdx]);
-			m_outputName.push_back(outputName);
-		}
-	}
-	return m_outputName;
-}
-
-std::vector<std::string> qnn_app::QnnInferenceEngine::getInputDataType(){
-	if(m_inputDataType_s.empty()){
- 		size_t graphIdx = 0;
- 		auto graphInfo = (*m_graphsInfo)[graphIdx];
- 		Qnn_Tensor_t* inputs  = m_inputTensors[graphIdx];
-		for (size_t inputIdx = 0; inputIdx < graphInfo.numInputTensors; inputIdx++) {
-			Qnn_DataType_t dims_inputDataType = QNN_TENSOR_GET_DATA_TYPE(inputs[inputIdx]);
-			m_inputDataType_s.push_back(dataTypeToString(dims_inputDataType));
-		}
-	}
+    std::vector<size_t> dims;
+    m_ioTensor.fillDims(dims, QNN_TENSOR_GET_DIMENSIONS(inputs[inputIdx]),
+                        QNN_TENSOR_GET_RANK(inputs[inputIdx]));
+    shapes.push_back(dims);
+  }
+  m_inputShapes[graphIdx] = shapes;
 #ifdef DEBUG_INFERENCE
-    printf("[DEBUG]m_inputDataType_s:");
-    printDataTypes(m_inputDataType_s);
-#endif 
-    return m_inputDataType_s;  
-}
-
-std::vector<std::vector<size_t>> qnn_app::QnnInferenceEngine::getOutputShapes(){
-	if(m_outputShapes.empty()){
- 		size_t graphIdx = 0;
- 		auto graphInfo = (*m_graphsInfo)[graphIdx];
- 		Qnn_Tensor_t* outputs  = m_outputTensors[graphIdx];
-		for (size_t outputIdx = 0; outputIdx < graphInfo.numOutputTensors; outputIdx++) {
-			if (QNN_TENSOR_GET_DIMENSIONS(outputs[outputIdx]) == nullptr || QNN_TENSOR_GET_RANK(outputs[outputIdx]) == 0) {
-				//printf("[ERROR] Output tensor %zu has nullptr dimensions or rank == 0\n", outputIdx);
-				continue;
-			}
-			std::vector<size_t> dims;
-			m_ioTensor.fillDims(dims, QNN_TENSOR_GET_DIMENSIONS(outputs[outputIdx]), QNN_TENSOR_GET_RANK(outputs[outputIdx]));
-			m_outputShapes.push_back(dims);
-		}
-	}
-#ifdef DEBUG_INFERENCE
-  printf("[DEBUG]m_outputShapes:");
-  printArrayOfVector(m_outputShapes);
+  printf("[DEBUG]m_inputShapes[%zu]:", graphIdx);
+  printArrayOfVector(shapes);
 #endif
-  return m_outputShapes;
+  return shapes;
 }
 
-std::vector<std::string> qnn_app::QnnInferenceEngine::getOutputDataType(){
-	if(m_outputDataType_s.empty()){
- 		size_t graphIdx = 0;
- 		auto graphInfo = (*m_graphsInfo)[graphIdx];
- 		Qnn_Tensor_t* outputs  = m_outputTensors[graphIdx];
-		for (size_t outputIdx = 0; outputIdx < graphInfo.numOutputTensors; outputIdx++) {
-			Qnn_DataType_t dims_outputDataType = QNN_TENSOR_GET_DATA_TYPE(outputs[outputIdx]);
-			m_outputDataType_s.push_back(dataTypeToString(dims_outputDataType));
-		}
-	}
+std::string qnn_app::QnnInferenceEngine::getGraphName(size_t graphIdx){
+  if (nullptr == m_graphsInfo || graphIdx >= m_graphsCount) {
+    QNN_ERROR("getGraphName: invalid graphIdx: %zu, graphsCount: %zu", graphIdx, m_graphsCount);
+    return {};
+  }
+  auto it = m_graphName.find(graphIdx);
+  if (it != m_graphName.end()) {
+    return it->second;
+  }
+  const char* name = (*m_graphsInfo)[graphIdx].graphName;
+  std::string result = (nullptr != name) ? name : "";
+  m_graphName[graphIdx] = result;
+  return result;
+}
+
+std::vector<std::string> qnn_app::QnnInferenceEngine::getInputName(size_t graphIdx){
+  if (nullptr == m_graphsInfo || graphIdx >= m_graphsCount) {
+    QNN_ERROR("getInputName: invalid graphIdx: %zu, graphsCount: %zu", graphIdx, m_graphsCount);
+    return {};
+  }
+  auto it = m_inputName.find(graphIdx);
+  if (it != m_inputName.end()) {
+    return it->second;
+  }
+
+  auto graphInfo = (*m_graphsInfo)[graphIdx];
+  Qnn_Tensor_t* inputs = m_inputTensors[graphIdx];
+  if (nullptr == inputs) { return {}; }
+  std::vector<std::string> names;
+  for (size_t inputIdx = 0; inputIdx < graphInfo.numInputTensors; inputIdx++) {
+    names.push_back(QNN_TENSOR_GET_NAME(inputs[inputIdx]));
+  }
+  m_inputName[graphIdx] = names;
+  return names;
+}
+
+
+std::vector<std::string> qnn_app::QnnInferenceEngine::getOutputName(size_t graphIdx){
+  if (nullptr == m_graphsInfo || graphIdx >= m_graphsCount) {
+    QNN_ERROR("getOutputName: invalid graphIdx: %zu, graphsCount: %zu", graphIdx, m_graphsCount);
+    return {};
+  }
+  auto it = m_outputName.find(graphIdx);
+  if (it != m_outputName.end()) {
+    return it->second;
+  }
+
+  auto graphInfo = (*m_graphsInfo)[graphIdx];
+  Qnn_Tensor_t* outputs  = m_outputTensors[graphIdx];
+  if (nullptr == outputs) { return {}; }  // no tensors set up for this graph
+  std::vector<std::string> names;
+  for (size_t outputIdx = 0; outputIdx < graphInfo.numOutputTensors; outputIdx++) {
+    names.push_back(QNN_TENSOR_GET_NAME(outputs[outputIdx]));
+  }
+  m_outputName[graphIdx] = names;
+  return names;
+}
+
+std::vector<std::string> qnn_app::QnnInferenceEngine::getInputDataType(size_t graphIdx){
+  if (nullptr == m_graphsInfo || graphIdx >= m_graphsCount) {
+    QNN_ERROR("getInputDataType: invalid graphIdx: %zu, graphsCount: %zu", graphIdx, m_graphsCount);
+    return {};
+  }
+  auto it = m_inputDataType_s.find(graphIdx);
+  if (it != m_inputDataType_s.end()) {
+    return it->second;
+  }
+
+  auto graphInfo = (*m_graphsInfo)[graphIdx];
+  Qnn_Tensor_t* inputs  = m_inputTensors[graphIdx];
+  if (nullptr == inputs) { return {}; }  // no tensors set up for this graph
+  std::vector<std::string> dtypes;
+  for (size_t inputIdx = 0; inputIdx < graphInfo.numInputTensors; inputIdx++) {
+    dtypes.push_back(dataTypeToString(QNN_TENSOR_GET_DATA_TYPE(inputs[inputIdx])));
+  }
+  m_inputDataType_s[graphIdx] = dtypes;
 #ifdef DEBUG_INFERENCE
-	printf("[DEBUG]m_outputDataType_s:");
-	printDataTypes(m_outputDataType_s);
+  printf("[DEBUG]m_inputDataType_s[%zu]:", graphIdx);
+  printDataTypes(dtypes);
 #endif
-	return m_outputDataType_s;
+  return dtypes;
+}
+
+std::vector<std::vector<size_t>> qnn_app::QnnInferenceEngine::getOutputShapes(size_t graphIdx){
+  if (nullptr == m_graphsInfo || graphIdx >= m_graphsCount) {
+    QNN_ERROR("getOutputShapes: invalid graphIdx: %zu, graphsCount: %zu", graphIdx, m_graphsCount);
+    return {};
+  }
+  auto it = m_outputShapes.find(graphIdx);
+  if (it != m_outputShapes.end()) {
+    return it->second;
+  }
+
+  std::vector<std::vector<size_t>> shapes;
+  auto graphInfo = (*m_graphsInfo)[graphIdx];
+  Qnn_Tensor_t* outputs = m_outputTensors[graphIdx];
+  if (nullptr == outputs) {
+    QNN_ERROR("getOutputShapes: no output tensors for graph %zu", graphIdx);
+    return {};
+  }
+  for (size_t outputIdx = 0; outputIdx < graphInfo.numOutputTensors; outputIdx++) {
+    if (QNN_TENSOR_GET_DIMENSIONS(outputs[outputIdx]) == nullptr ||
+        QNN_TENSOR_GET_RANK(outputs[outputIdx]) == 0) {
+        continue;
+    }
+    std::vector<size_t> dims;
+    m_ioTensor.fillDims(dims, QNN_TENSOR_GET_DIMENSIONS(outputs[outputIdx]),
+                        QNN_TENSOR_GET_RANK(outputs[outputIdx]));
+    shapes.push_back(dims);
+  }
+  m_outputShapes[graphIdx] = shapes;
+
+#ifdef DEBUG_INFERENCE
+  printf("[DEBUG]m_outputShapes[%zu]:", graphIdx);
+  printArrayOfVector(shapes);
+#endif
+  return shapes;
+}
+
+std::vector<std::string> qnn_app::QnnInferenceEngine::getOutputDataType(size_t graphIdx){
+  if (nullptr == m_graphsInfo || graphIdx >= m_graphsCount) {
+    QNN_ERROR("getOutputDataType: invalid graphIdx: %zu, graphsCount: %zu", graphIdx, m_graphsCount);
+    return {};
+  }
+  auto it = m_outputDataType_s.find(graphIdx);
+  if (it != m_outputDataType_s.end()) {
+    return it->second;
+  }
+
+  std::vector<std::string> dtypes;
+  auto graphInfo = (*m_graphsInfo)[graphIdx];
+  Qnn_Tensor_t* outputs = m_outputTensors[graphIdx];
+  if (nullptr == outputs) {
+    QNN_ERROR("getOutputDataType: no output tensors for graph %zu", graphIdx);
+    return {};
+  }
+  for (size_t outputIdx = 0; outputIdx < graphInfo.numOutputTensors; outputIdx++) {
+    Qnn_DataType_t dims_outputDataType = QNN_TENSOR_GET_DATA_TYPE(outputs[outputIdx]);
+    dtypes.push_back(dataTypeToString(dims_outputDataType));
+  }
+  m_outputDataType_s[graphIdx] = dtypes;
+
+#ifdef DEBUG_INFERENCE
+  printf("[DEBUG]m_outputDataType_s[%zu]:", graphIdx);
+  printDataTypes(dtypes);
+#endif
+  return dtypes;
 }
 
 qnn_app::StatusCode qnn_app::QnnInferenceEngine::executeGraphsBuffers(std::vector<uint8_t*>& inputBuffers, 
