@@ -67,13 +67,9 @@ every model ends up running on the same on-device NPU engine (`QNNContext` via
 > pre-built package below and you'll have a running, on-device AI app builder in **two commands**.
 
 <div align="center">
-  <a href="https://github.com/qualcomm/qai-appbuilder/releases/download/v3.0.0/qaiappbuilder.zip">
-    <img src="https://img.shields.io/badge/Download-QAI%20AppBuilder%20v3.0.0-2ea44f?style=for-the-badge" alt="Download QAI AppBuilder">
-  </a>
+  <a href="https://github.com/qualcomm/qai-appbuilder/releases/download/v3.0.0/qaiappbuilder.zip"><img src="https://img.shields.io/badge/Download-QAI%20AppBuilder%20v3.0.0-2ea44f?style=for-the-badge" alt="Download QAI AppBuilder"></a>
   &nbsp;&nbsp;
-  <a href="https://github.com/qualcomm/qai-appbuilder/tree/main/tools/qaiappbuilder">
-    <img src="https://img.shields.io/badge/Browse%20Source-tools/qaiappbuilder-24292e?style=for-the-badge&logo=github" alt="Browse QAI AppBuilder source code">
-  </a>
+  <a href="https://github.com/qualcomm/qai-appbuilder/tree/main/tools/qaiappbuilder"><img src="https://img.shields.io/badge/Browse%20Source-tools/qaiappbuilder-24292e?style=for-the-badge&logo=github" alt="Browse QAI AppBuilder source code"></a>
 </div>
 
 <br>
