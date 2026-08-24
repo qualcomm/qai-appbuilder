@@ -262,9 +262,9 @@ std::vector<py::array> inference(std::string model_name, const std::vector<py::a
     //QNN_INF("inference::inference output vector length: %d\n", outputBuffers.size());
 
     // dtype list like: ['float16', 'float16', ...]
-    std::vector<std::string> outDtypes = g_LibAppBuilder.getOutputDataType(model_name);
+    std::vector<std::string> outDtypes = g_LibAppBuilder.getOutputDataType(model_name, graphIndex);
     // output shapes for robust element count & float/native dtype inference
-    std::vector<std::vector<size_t>> outShapes = g_LibAppBuilder.getOutputShapes(model_name);
+    std::vector<std::vector<size_t>> outShapes = g_LibAppBuilder.getOutputShapes(model_name, graphIndex);
 
     std::vector<py::array> output;
 
@@ -455,13 +455,13 @@ public:
     bool ApplyBinaryUpdate(const std::vector<LoraAdapter>& lora_adapters);
 
     // issue#24
-    std::vector<std::vector<size_t>> getInputShapes();
-    std::vector<std::string>  getInputDataType();
-    std::vector<std::string>  getOutputDataType();
-    std::vector<std::vector<size_t>> getOutputShapes();
-    std::string getGraphName();
-    std::vector<std::string>  getInputName();
-    std::vector<std::string>  getOutputName();
+    std::vector<std::vector<size_t>> getInputShapes(size_t graphIdx);
+    std::vector<std::string>  getInputDataType(size_t graphIdx);
+    std::vector<std::string>  getOutputDataType(size_t graphIdx);
+    std::vector<std::vector<size_t>> getOutputShapes(size_t graphIdx);
+    std::string getGraphName(size_t graphIdx);
+    std::vector<std::string>  getInputName(size_t graphIdx);
+    std::vector<std::string>  getOutputName(size_t graphIdx);
 
     std::vector<std::vector<size_t>> getInputShapes(const std::string& proc_name);
     std::vector<std::string>  getInputDataType(const std::string& proc_name);

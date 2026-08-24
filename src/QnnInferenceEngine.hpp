@@ -9,6 +9,7 @@
 
 #include <memory>
 #include <queue>
+#include <map>
 
 #include "IOTensor.hpp"
 #include "DynamicLoadUtil.hpp"
@@ -153,13 +154,13 @@ class QnnInferenceEngine {
                                   std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
                                   std::string perfProfile, size_t graphIndex = 0, size_t share_memory_size = 0);
   // issue#24
-  std::vector<std::vector<size_t>> getInputShapes();
-  std::vector<std::string> getInputDataType();
-  std::vector<std::vector<size_t>> getOutputShapes();
-  std::vector<std::string> getOutputDataType();
-  std::string getGraphName();
-  std::vector<std::string> getInputName();
-  std::vector<std::string> getOutputName();
+  std::vector<std::vector<size_t>> getInputShapes(size_t graphIdx = 0);
+  std::vector<std::string> getInputDataType(size_t graphIdx = 0);
+  std::vector<std::vector<size_t>> getOutputShapes(size_t graphIdx = 0);
+  std::vector<std::string> getOutputDataType(size_t graphIdx = 0);
+  std::string getGraphName(size_t graphIdx = 0);
+  std::vector<std::string> getInputName(size_t graphIdx = 0);
+  std::vector<std::string> getOutputName(size_t graphIdx = 0);
   uint64_t getProfilingEvent(uint32_t eventType);
   qnn_wrapper_api::GraphInfo_t **m_graphsInfo;
   uint32_t m_graphsCount;
@@ -230,13 +231,13 @@ class QnnInferenceEngine {
   bool m_isGpu = false;
 
   // issue#24
-  std::vector<std::vector<size_t>> m_inputShapes;
-  std::vector<std::string> m_inputDataType_s;
-  std::vector<std::vector<size_t>> m_outputShapes;
-  std::vector<std::string> m_outputDataType_s;
-  std::string m_graphName;
-  std::vector<std::string>  m_inputName;
-  std::vector<std::string>  m_outputName;
+  std::map<size_t, std::vector<std::vector<size_t>>> m_inputShapes;
+  std::map<size_t, std::vector<std::string>> m_inputDataType_s;
+  std::map<size_t, std::vector<std::vector<size_t>>> m_outputShapes;
+  std::map<size_t, std::vector<std::string>> m_outputDataType_s;
+  std::map<size_t, std::string> m_graphName;
+  std::map<size_t,  std::vector<std::string>> m_inputName;
+  std::map<size_t, std::vector<std::string>> m_outputName;
 
   std::string m_dlcPath;
   QnnSystemDlc_Handle_t m_dlcHandle = nullptr;
