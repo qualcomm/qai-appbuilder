@@ -56,7 +56,7 @@ class LIBAPPBUILDER_API LibAppBuilder
 public:
     bool ModelInitialize(const std::string& model_name, const std::string& model_path,
                                const std::string& backend_lib_path, const std::string& system_lib_path,
-                               bool async = false, const std::string& input_data_type="float", const std::string& output_data_type="float", uint32_t deviceID=0, std::string coreIdsStr="");
+                               bool async = false, const std::string& input_data_type="float", const std::string& output_data_type="float", uint32_t deviceID=0, std::string coreIdsStr="", const std::vector<std::string>& enable_graphs={});
     bool ModelInitialize(const std::string& model_name, const std::string& proc_name, const std::string& model_path,
                                const std::string& backend_lib_path, const std::string& system_lib_path,
                                bool async = false, const std::string& input_data_type="float", const std::string& output_data_type="float", uint32_t deviceID=0, std::string coreIdsStr="");
@@ -64,7 +64,7 @@ public:
     bool ModelInitialize(const std::string& model_name, const std::string& model_path,
                          const std::string& backend_lib_path, const std::string& system_lib_path,
                          std::vector<LoraAdapter>& lora_adapters,
-                         bool async = false, const std::string& input_data_type="float", const std::string& output_data_type="float", uint32_t deviceID=0, std::string coreIdsStr="");
+                         bool async = false, const std::string& input_data_type="float", const std::string& output_data_type="float", uint32_t deviceID=0, std::string coreIdsStr="", const std::vector<std::string>& enable_graphs={});
 
     bool ModelInference(std::string model_name, std::vector<uint8_t*>& inputBuffers, 
                         std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,

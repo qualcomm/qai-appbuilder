@@ -802,7 +802,8 @@ class QNNContext(_QNNContextBase):
                  input_data_type: str = DataType.FLOAT,
                  output_data_type: str = DataType.FLOAT,
                  deviceID: int = 0,
-                 coreIdsStr: str = "None"
+                 coreIdsStr: str = "None",
+                 enable_graphs=None
                  ) -> None:
         """Load a QNN model from `model_path`
         Args:
@@ -825,7 +826,7 @@ class QNNContext(_QNNContextBase):
         backend_lib_path, system_lib_path = self._resolve_lib_paths(backend_lib_path, system_lib_path)
 
         self.m_context = appbuilder.QNNContext(model_name, model_path, backend_lib_path, system_lib_path,
-                                              is_async, input_data_type, output_data_type, deviceID, coreIdsStr)
+                                              is_async, input_data_type, output_data_type, deviceID, coreIdsStr, list(enable_graphs) if enable_graphs else [])
         _register_context(self)
 
     #@timer
@@ -939,7 +940,8 @@ class QNNLoraContext(_QNNContextBase):
                  input_data_type: str = DataType.FLOAT,
                  output_data_type: str = DataType.FLOAT,
                  deviceID: int = 0,
-                 coreIdsStr: str = "None"
+                 coreIdsStr: str = "None",
+                 enable_graphs=None
                  ) -> None:
         """Load a QNN model from `model_path`
         Args:
@@ -963,7 +965,7 @@ class QNNLoraContext(_QNNContextBase):
         backend_lib_path, system_lib_path = self._resolve_lib_paths(backend_lib_path, system_lib_path)
 
         self.m_context = appbuilder.QNNContext(model_name, model_path, backend_lib_path, system_lib_path, m_lora_adapters,
-                                              is_async, input_data_type, output_data_type, deviceID, coreIdsStr)
+                                              is_async, input_data_type, output_data_type, deviceID, coreIdsStr, list(enable_graphs) if enable_graphs else [])
         _register_context(self)
 
     #@timer
