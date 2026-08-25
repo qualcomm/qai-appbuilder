@@ -446,6 +446,10 @@ qnn_app::StatusCode qnn_app::QnnInferenceEngine::freeContext() {
   }
   free(m_graphsInfo);
   m_graphsInfo = nullptr;
+  m_contextConfig = nullptr;
+  m_contextConfigPtrs.clear();
+  m_enabledGraphCstr.clear();
+  m_enabledGraphIndex.clear();
 
   if (QNN_CONTEXT_NO_ERROR !=
       m_qnnFunctionPointers.qnnInterface.contextFree(m_context, m_profileBackendHandle)) {
@@ -940,6 +944,12 @@ qnn_app::StatusCode qnn_app::QnnInferenceEngine::createFromBinary() {
   }
 
   if (StatusCode::SUCCESS == returnStatus &&
+      StatusCode::SUCCESS != setupContextConfigs()) {
+    QNN_ERROR("Failed to set up context configs.");
+    returnStatus = StatusCode::FAILURE;
+  }
+
+  if (StatusCode::SUCCESS == returnStatus &&
       nullptr == m_qnnFunctionPointers.qnnInterface.contextCreateFromBinary) {
     QNN_ERROR("contextCreateFromBinaryFnHandle is nullptr.");
     returnStatus = StatusCode::FAILURE;
@@ -1155,6 +1165,58 @@ uint64_t qnn_app::QnnInferenceEngine::getProfilingEvent(uint32_t eventType) {
     }
   }
   return 0;
+}
+
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::setupContextConfigs() {
+  m_contextConfig = nullptr;
+  m_enabledGraphIndex.clear();
+  m_enabledGraphCstr.clear();
+  m_contextConfigPtrs.clear();
+
+  // enable all graphs
+  if (m_enabledGraphs.empty()) {
+    return StatusCode::SUCCESS;
+  }
+  // Set up enabled graphs config.
+  if (m_qnnFunctionPointers.qnnInterface.propertyHasCapability(
+          QNN_PROPERTY_CONTEXT_SUPPORT_CONFIG_ENABLE_GRAPHS) != QNN_PROPERTY_SUPPORTED) {
+    QNN_WARN("Backend does not support graph selection, Disabling this feature");
+    m_enabledGraphs.clear();
+    return StatusCode::SUCCESS;
+  }
+
+
+  // Keep track of which indices are enabled. (-1 means not enabled)
+  // Set enabled graphs to the corresponding index in the enabled graph arg so we know the
+  // corresponding input list.
+  m_enabledGraphIndex = std::vector<int>(m_graphsCount, -1);
+  m_enabledGraphCstr  = std::vector<const char*>(m_enabledGraphs.size() + 1, nullptr);
+  for (size_t enabledIter = 0; enabledIter < m_enabledGraphs.size(); ++enabledIter) {
+    // Check to make sure that the graph exists in the context.
+    bool found = false;
+    for (size_t graphNameIter = 0; graphNameIter < m_graphsCount; ++graphNameIter) {
+      if (nullptr != (*m_graphsInfo)[graphNameIter].graphName &&
+          m_enabledGraphs[enabledIter] == (*m_graphsInfo)[graphNameIter].graphName) {
+        m_enabledGraphCstr[enabledIter]    = (*m_graphsInfo)[graphNameIter].graphName;
+        m_enabledGraphIndex[graphNameIter] = enabledIter;
+        found                              = true;
+        break;
+      }
+    }
+    if (!found) {
+      QNN_ERROR("Enabled graph %s not found in context", m_enabledGraphs[enabledIter].c_str());
+      return StatusCode::FAILURE;
+    }
+  }
+  m_enabledGraphsCfg.option       = QnnContext_ConfigOption_t::QNN_CONTEXT_CONFIG_ENABLE_GRAPHS;
+  m_enabledGraphsCfg.enableGraphs = m_enabledGraphCstr.data();
+  m_contextConfigPtrs.push_back(&m_enabledGraphsCfg);
+  m_contextConfigPtrs.push_back(nullptr);   // QNN expects a null-terminated array
+  m_contextConfig = m_contextConfigPtrs.data();
+
+  QNN_INFO("Creating %d of %d graphs", (int)m_enabledGraphs.size(), (int)m_graphsCount);
+
+  return StatusCode::SUCCESS;
 }
 
 qnn_app::StatusCode qnn_app::QnnInferenceEngine::verifyFailReturnStatus(Qnn_ErrorHandle_t errCode) {
@@ -1583,6 +1645,12 @@ qnn_app::StatusCode qnn_app::QnnInferenceEngine::setupInputAndOutputTensors()
   auto returnStatus = qnn::tools::iotensor::StatusCode::SUCCESS;
 
   for (size_t graphIdx = 0; graphIdx < m_graphsCount; graphIdx++) {
+    // push nullptr so both tensors stay indexed by graphIdx
+    if(!m_enabledGraphIndex.empty() && m_enabledGraphIndex[graphIdx] < 0){
+      m_inputTensors.push_back(nullptr);
+      m_outputTensors.push_back(nullptr);
+      continue;
+    }
     auto& graphInfo = (*m_graphsInfo)[graphIdx];
     Qnn_Tensor_t* inputs  = nullptr;
     Qnn_Tensor_t* outputs = nullptr;

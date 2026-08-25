@@ -455,7 +455,7 @@ void split(std::vector<std::string> &splitString,
 bool ModelInitializeEx(const std::string& model_name, const std::string& proc_name, const std::string& model_path,
                        const std::string& backend_lib_path, const std::string& system_lib_path, 
                        std::vector<LoraAdapter>& lora_adapters,
-                       bool async, const std::string& input_data_type, const std::string& output_data_type, uint32_t deviceID=0, std::string coreIdsStr="") {
+                       bool async, const std::string& input_data_type, const std::string& output_data_type, uint32_t deviceID=0, std::string coreIdsStr="", const std::vector<std::string>& enable_graphs={}) {
   QNN_INFO("LibAppBuilder::ModelInitialize: %s \n", model_name.c_str());
 
   bool result = false;
@@ -538,6 +538,10 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
     if (nullptr == app) {
       return false;
     }
+
+    // Must be set before createFromBinary(), which is where the selection is
+    // turned into a context config.
+    app->setEnabledGraphs(enable_graphs);
 
     QNN_INFO("LibAppBuilder   build version: %s", qnn::tools::getBuildId().c_str());
     QNN_INFO("Backend        build version: %s", app->getBackendBuildId().c_str());
@@ -733,16 +737,16 @@ bool LibAppBuilder::ModelInitialize(const std::string& model_name, const std::st
 
 bool LibAppBuilder::ModelInitialize(const std::string& model_name, const std::string& model_path,
                                     const std::string& backend_lib_path, const std::string& system_lib_path,
-                                    bool async, const std::string& input_data_type, const std::string& output_data_type, uint32_t deviceID, std::string coreIdsStr) {
+                                    bool async, const std::string& input_data_type, const std::string& output_data_type, uint32_t deviceID, std::string coreIdsStr, const std::vector<std::string>& enable_graphs) {
     std::vector<LoraAdapter> Adapters = std::vector<LoraAdapter>();
-    return ModelInitializeEx(model_name, "", model_path, backend_lib_path, system_lib_path, Adapters, async, input_data_type, output_data_type, deviceID, coreIdsStr);   
+    return ModelInitializeEx(model_name, "", model_path, backend_lib_path, system_lib_path, Adapters, async, input_data_type, output_data_type, deviceID, coreIdsStr, enable_graphs);
 }
 
 bool LibAppBuilder::ModelInitialize(const std::string& model_name, const std::string& model_path,
                                     const std::string& backend_lib_path, const std::string& system_lib_path,
                                     std::vector<LoraAdapter>& lora_adapters,
-                                    bool async, const std::string& input_data_type, const std::string& output_data_type, uint32_t deviceID, std::string coreIdsStr) {
-    return ModelInitializeEx(model_name, "", model_path, backend_lib_path, system_lib_path, lora_adapters, async, input_data_type, output_data_type, deviceID, coreIdsStr);
+                                    bool async, const std::string& input_data_type, const std::string& output_data_type, uint32_t deviceID, std::string coreIdsStr, const std::vector<std::string>& enable_graphs) {
+    return ModelInitializeEx(model_name, "", model_path, backend_lib_path, system_lib_path, lora_adapters, async, input_data_type, output_data_type, deviceID, coreIdsStr, enable_graphs);
 }
 
 bool LibAppBuilder::ModelInference(std::string model_name, std::string proc_name, std::string share_memory_name,

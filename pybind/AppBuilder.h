@@ -435,10 +435,10 @@ public:
     std::vector<LoraAdapter> m_lora_adapters;  
 
     QNNContext(const std::string& model_name, const std::string& model_path, const std::string& backend_lib_path, const std::string& system_lib_path, 
-               bool async = false, const std::string& input_data_type="float", const std::string& output_data_type="float", uint32_t deviceID=0, std::string coreIdsStr="");
+               bool async = false, const std::string& input_data_type="float", const std::string& output_data_type="float", uint32_t deviceID=0, std::string coreIdsStr="", const std::vector<std::string>& enable_graphs={});
 
     QNNContext(const std::string& model_name, const std::string& model_path, const std::string& backend_lib_path, const std::string& system_lib_path, const std::vector<LoraAdapter>& lora_adapters, 
-               bool async = false, const std::string& input_data_type="float", const std::string& output_data_type="float", uint32_t deviceID=0, std::string coreIdsStr="");   
+               bool async = false, const std::string& input_data_type="float", const std::string& output_data_type="float", uint32_t deviceID=0, std::string coreIdsStr="", const std::vector<std::string>& enable_graphs={});
 
     QNNContext(const std::string& model_name, const std::string& proc_name, const std::string& model_path, const std::string& backend_lib_path, const std::string& system_lib_path, 
                bool async = false, const std::string& input_data_type="float", const std::string& output_data_type="float", uint32_t deviceID=0, std::string coreIdsStr="");

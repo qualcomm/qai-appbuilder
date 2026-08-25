@@ -170,6 +170,7 @@ class QnnInferenceEngine {
 
   void setIsGpu(bool isGpu) { m_isGpu = isGpu; }
   void setIsCpu(bool isCpu) { m_runInCpu = isCpu; }
+  void setEnabledGraphs(const std::vector<std::string>& graphNames) { m_enabledGraphs = graphNames; }
 
   StatusCode initializePerformance();
   StatusCode destroyPerformance();
@@ -186,6 +187,7 @@ class QnnInferenceEngine {
   StatusCode composeGraphsFromDlc();
   StatusCode getDevicePlatformInfo(const QnnDevice_PlatformInfo_t *&platformInfoPtr);
   StatusCode setupDeviceConfig(QnnDevice_Config_t* devConfigPtr, MultiCoreDeviceConfig_t* multicoreConfigPtr);
+  StatusCode setupContextConfigs();
   static const std::string s_defaultOutputPath;
 
   QnnFunctionPointers m_qnnFunctionPointers;
@@ -202,6 +204,12 @@ class QnnInferenceEngine {
   QnnBackend_Config_t **m_backendConfig = nullptr;
   Qnn_ContextHandle_t m_context         = nullptr;
   QnnContext_Config_t **m_contextConfig = nullptr;
+  std::vector<std::string> m_enabledGraphs;
+  std::vector<int> m_enabledGraphIndex;
+  // Memory needs to be maintained.
+  std::vector<const char *> m_enabledGraphCstr;
+  QnnContext_Config_t m_enabledGraphsCfg;
+  std::vector<QnnContext_Config_t *> m_contextConfigPtrs;
   bool m_debug;
   iotensor::OutputDataType m_outputDataType;
   iotensor::InputDataType m_inputDataType;
