@@ -1667,16 +1667,25 @@ set "VOICE_MODEL_DIR=models\whisper-base"
 set "VOICE_ARCHIVE=whisper_medium-qnn_context_binary-float-qualcomm_%VOICE_PLATFORM%.zip"
 set "VOICE_URL=%VOICE_S3%/whisper_medium/releases/v0.55.0/%VOICE_ARCHIVE%"
 call :predownload_one_model "whisper_medium" "%VOICE_MODEL_DIR%" "%VOICE_ARCHIVE%" "%VOICE_URL%" "encoder.bin" "decoder.bin"
+REM Retry once: cmd.exe's internal label-lookup cache occasionally reports
+REM "cannot find the batch label specified" for this exact CALL despite the
+REM label existing (observed empirically -- the very next identical CALL
+REM always succeeds). errorlevel is forced to 1 ONLY on that failure mode
+REM (a normal return from the subroutine never sets it), so this retry never
+REM fires on a genuine subroutine failure.
+if errorlevel 1 call :predownload_one_model "whisper_medium" "%VOICE_MODEL_DIR%" "%VOICE_ARCHIVE%" "%VOICE_URL%" "encoder.bin" "decoder.bin"
 
 set "VOICE_MODEL_DIR=models\zipformer-zh"
 set "VOICE_ARCHIVE=zipformer-qnn_context_binary-float-qualcomm_%VOICE_PLATFORM%.zip"
 set "VOICE_URL=%VOICE_S3%/zipformer/releases/v0.55.0/%VOICE_ARCHIVE%"
 call :predownload_one_model "zipformer" "%VOICE_MODEL_DIR%" "%VOICE_ARCHIVE%" "%VOICE_URL%" "encoder.bin" "decoder.bin" "joiner.bin"
+if errorlevel 1 call :predownload_one_model "zipformer" "%VOICE_MODEL_DIR%" "%VOICE_ARCHIVE%" "%VOICE_URL%" "encoder.bin" "decoder.bin" "joiner.bin"
 
 set "VOICE_MODEL_DIR=models\melotts-zh"
 set "VOICE_ARCHIVE=melotts_zh-voice_ai-mixed_with_float-qualcomm_%VOICE_PLATFORM%.zip"
 set "VOICE_URL=%VOICE_S3%/melotts_zh/releases/v0.55.0/%VOICE_ARCHIVE%"
 call :predownload_one_model "melotts_zh" "%VOICE_MODEL_DIR%" "%VOICE_ARCHIVE%" "%VOICE_URL%" "encoder.bin" "flow.bin" "decoder.bin" "bert_wrapper.bin"
+if errorlevel 1 call :predownload_one_model "melotts_zh" "%VOICE_MODEL_DIR%" "%VOICE_ARCHIVE%" "%VOICE_URL%" "encoder.bin" "flow.bin" "decoder.bin" "bert_wrapper.bin"
 
 REM Return from the called :predownload_voice_models subroutine.
 goto :eof
