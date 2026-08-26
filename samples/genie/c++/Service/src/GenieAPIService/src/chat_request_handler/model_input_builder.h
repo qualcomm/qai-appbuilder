@@ -372,15 +372,42 @@ private:
         }
 
         std::vector<GenieChatMessage> all_messages;
-        all_messages.push_back({"user", model_input_.text_});
+
+        // 找到 msg 中最后一条 role=="user" 的下标：当前轮用户消息的完整内容（含多模态/
+        // 默认提示词回退逻辑）已在 Build() 阶段解析进 model_input_.text_，这里复用它，
+        // 而不是重新从 element["content"] 提取，避免丢失图片/音频场景下的特殊处理。
+        int last_user_msg_index = -1;
+        for (size_t i = 0; i < msg.size(); ++i) {
+            if (get_json_value(msg[i], "role", BLANK_STRING) == "user") {
+                last_user_msg_index = static_cast<int>(i);
+            }
+        }
 
         // 第一遍：收集所有消息
+        int element_index = -1;
         for (auto &element: msg)
         {
+            ++element_index;
             auto role = get_json_value(element, "role", BLANK_STRING);
             std::string content;
 
-            if (role == "assistant")
+            if (role == "user")
+            {
+                if (element_index == last_user_msg_index)
+                {
+                    // 当前轮用户消息：复用 model_input_.text_，保持在 chronological 顺序里的正确位置
+                    all_messages.push_back({role, model_input_.text_});
+                }
+                else
+                {
+                    // 修复：历史 user 消息此前从未被处理，导致多轮无状态对话中历史用户消息被静默丢弃
+                    content = get_json_value(element, "content", BLANK_STRING);
+                    if (!content.empty()) {
+                        all_messages.push_back({role, content});
+                    }
+                }
+            }
+            else if (role == "assistant")
             {
                 // 检查是否有 tool_calls 字段（OpenAI 标准格式）
                 if (element.contains("tool_calls") && !element["tool_calls"].is_null() &&
@@ -407,6 +434,12 @@ private:
                 all_messages.push_back({role, content});
             }
             // system 消息已在前面处理，这里跳过
+        }
+
+        // 兜底：msg 中不存在任何 role=="user" 条目（异常场景），仍保留 model_input_.text_，
+        // 与改动前的无条件行为一致，避免引入新的边界回归。
+        if (last_user_msg_index < 0) {
+            all_messages.push_back({"user", model_input_.text_});
         }
 
         chat_history_.Clear();
