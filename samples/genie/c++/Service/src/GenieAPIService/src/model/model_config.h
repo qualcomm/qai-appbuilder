@@ -414,6 +414,16 @@ struct PromptOptimizationConfig {
     float tool_call_temperature = 0.1f;
     SystemPromptsConfig system_prompts;
 
+    // ── 相关性过滤：按本轮问题字符串/关键词匹配筛选 SKILL/工具 ──────
+    // 只有名称或描述关键词与本轮用户提问发生字符串匹配的 SKILL/工具，才会保留在
+    // 提示词里；未命中整条删除。纯字符串规则匹配，不引入向量/embedding 语义匹配，
+    // 零额外推理延迟。enabled=false 时完全回退到"全量携带"行为，便于快速回滚。
+    struct RelevanceFilterConfig {
+        bool enabled = true;                     // 总开关
+        size_t name_token_weight = 3;            // 名称子词命中权重
+        size_t description_keyword_weight = 1;   // 描述关键词命中权重
+    } relevance_filter;
+
     // ── 上下文窗口分配 ──────────────────────────────────────
     float output_reserve_ratio = 0.20f;    // 为输出预留的上下文比率（默认 20%）
                                             // 对应 Build() 中 context_size / 5 的硬编码

@@ -14,11 +14,13 @@
 #include "utils.h"
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <sstream>
 #include <ctime>
 #include <regex>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <nlohmann/json.hpp>
 
 using json = nlohmann::ordered_json;
@@ -63,8 +65,6 @@ std::string PromptOptimizer::OptimizeSubagentSystemPrompt(
 {
     try {
         last_stats_.original_tokens = CountTokens(system_prompt);
-        last_stats_.detected_intent = IntentType::GENERAL_CHAT;
-        last_stats_.matched_skill = "";
 
         // ── Step 1: 模板重建（与 MainAgent 的 OptimizeSystemPrompt 完全相同）────────
         // 调用 BuildSystemContext() 重建核心骨架：
@@ -72,7 +72,12 @@ std::string PromptOptimizer::OptimizeSubagentSystemPrompt(
         // 这与 MainAgent 的处理完全一致，复用同一套配置驱动的模板逻辑。
         // BuildSystemContext() 内部会调用 ExtractSkillsFromRequest() 解析 Skills，
         // 并调用 SetRuntimeSkillMappings() 写入运行时映射（供 AutoCorrectSkillCall 使用）。
-        std::string optimized = BuildSystemContext(request_data);
+        // 同时接收本轮相关性筛选得到的意图判定结果，用于填充 OptimizationStats。
+        IntentType detected_intent = IntentType::GENERAL_CHAT;
+        std::string matched_skill;
+        std::string optimized = BuildSystemContext(request_data, &detected_intent, &matched_skill);
+        last_stats_.detected_intent = detected_intent;
+        last_stats_.matched_skill = matched_skill;
 
         // ── Step 2: 从原始提示词中过滤并附加 SubAgent 特有段落 ──────────────────────
         // 使用独立的 subagent_prompt_sections 配置（区别于 MainAgent 的 prompt_sections），
@@ -115,7 +120,10 @@ std::string PromptOptimizer::OptimizeSystemPrompt(
         // 1. 使用统一的系统上下文（从配置文件 system_context.sections 读取）
         // BuildSystemContext 内部会调用 ExtractSkillsFromRequest 动态提取 SKILL 信息，
         // 并调用 BuildFewShotExamples 动态生成示例，无需在此重复调用
-        std::string optimized = BuildSystemContext(request_data);
+        // 同时接收本轮相关性筛选得到的意图判定结果，用于填充 OptimizationStats
+        IntentType detected_intent = IntentType::GENERAL_CHAT;
+        std::string matched_skill;
+        std::string optimized = BuildSystemContext(request_data, &detected_intent, &matched_skill);
 
         // 2. 根据 prompt_sections 配置，从原始提示词中提取额外段落并追加
         std::string filtered = AppendFilteredSections(system_prompt);
@@ -129,8 +137,8 @@ std::string PromptOptimizer::OptimizeSystemPrompt(
         last_stats_.optimized_tokens = CountTokens(optimized);
         last_stats_.savings_percent =
             ComputeSavingsPercent(last_stats_.original_tokens, last_stats_.optimized_tokens);
-        last_stats_.detected_intent = IntentType::GENERAL_CHAT;
-        last_stats_.matched_skill = "";
+        last_stats_.detected_intent = detected_intent;
+        last_stats_.matched_skill = matched_skill;
 
         // 4. 输出日志
         My_Log{My_Log::Level::kDebug} << "[Optimizer] Original: " << last_stats_.original_tokens
@@ -146,26 +154,45 @@ std::string PromptOptimizer::OptimizeSystemPrompt(
     }
 }
 
-std::string PromptOptimizer::BuildSystemContext(const nlohmann::ordered_json& request_data)
+std::string PromptOptimizer::BuildSystemContext(const nlohmann::ordered_json& request_data,
+                                                 IntentType* out_intent,
+                                                 std::string* out_matched_skill)
 {
     std::ostringstream oss;
 
     const auto& config = model_config_.GetPromptOptimizationConfig();
     const auto& se = config.system_prompts.sections_enabled;
 
-    // 0. 提前解析 runtime_skills，供后续各段落条件判断使用
+    // 0. 提前解析 runtime_skills（全量），供后续各段落条件判断使用
     // （原位于步骤 5，提前至此以便 skill_rule 能根据是否有 SKILL 决定是否输出）
     RuntimeSkillMappings runtime_skills = ExtractSkillsFromRequest(request_data);
+
+    // 0b. 相关性筛选：只影响"展示给模型看哪些 SKILL"，绝不影响下方步骤 5 & 6 之前
+    // SetRuntimeSkillMappings() 写入安全网时使用的 runtime_skills（必须是全量）。
+    // relevance_filter.enabled=false 时 filtered_skills 直接等于 runtime_skills，
+    // 完全回退到改动前的"全量携带"行为，便于线上快速回滚。
+    const auto& relevance_cfg = config.relevance_filter;
+    std::vector<std::string> relevance_keywords;
+    RuntimeSkillMappings filtered_skills = runtime_skills;
+    if (relevance_cfg.enabled) {
+        relevance_keywords = BuildRelevanceKeywords(request_data);
+        if (!runtime_skills.empty()) {
+            filtered_skills = FilterSkillsByRelevance(runtime_skills, relevance_keywords, ComputeRelevanceTokenBudget());
+        }
+    }
 
     // 1a. 身份声明（始终输出，与是否有 SKILL 无关）
     if (se.identity_intro && !config.system_prompts.identity_intro.empty()) {
         oss << config.system_prompts.identity_intro;
     }
 
-    // 1b & 2. Skill 规则 + 工具列表（仅在有 SKILL 时输出）
+    // 1b & 2. Skill 规则 + 工具列表（仅在筛选后仍有 SKILL 时输出）
     // 原因：tools_intro 的作用是配合 skill_rule 告知模型"哪些是工具、哪些是 Skill"，
     // 当没有 SKILL 时，这两段提示均无意义，省略可减少 token 消耗并避免引入不存在的概念。
-    if (!runtime_skills.empty()) {
+    // 改用 filtered_skills 判断：全部未命中时（零命中兜底）skill_rule/tools_intro
+    // 与下方 Skill Catalog/Few-shot 一并清空，与既有"仅在有 SKILL 时才输出"的分支
+    // 逻辑天然衔接，无需新增 if 分支。
+    if (!filtered_skills.empty()) {
         // 1b. Skill 与 Tool 区分规则
         if (se.skill_rule && !config.system_prompts.skill_rule.empty()) {
             oss << config.system_prompts.skill_rule;
@@ -175,6 +202,8 @@ std::string PromptOptimizer::BuildSystemContext(const nlohmann::ordered_json& re
         // 优先级：
         //   a. 配置文件有 tools_intro → 使用配置文件值，但过滤掉客户端未传入的工具行
         //   b. 配置文件无 tools_intro → 根据客户端 tools 数组动态生成
+        // FilterToolsIntroByRequest()/BuildDynamicToolsIntro() 内部会自行套用
+        // FilterToolsByRelevance() 缩小候选工具集合，此处无需重复处理。
         if (se.tools_intro) {
             std::string tools_intro_str;
             if (!config.system_prompts.tools_intro.empty()) {
@@ -212,11 +241,14 @@ std::string PromptOptimizer::BuildSystemContext(const nlohmann::ordered_json& re
     }
 
     // 5 & 6. Skill Catalog + Few-shot 示例
-    // runtime_skills 已在步骤 0 提前解析，此处直接使用
+    // runtime_skills（全量）已在步骤 0 提前解析，filtered_skills（筛选后子集）已在步骤 0b 计算
 
     // 将运行时 SKILL 映射（name->path）写入 model_config_，
     // 供 ResponseDispatcher::AutoCorrectSkillCall() 在推理完成后读取，
-    // 以纠正模型错误地将 SKILL 名当作工具直接调用的情况
+    // 以纠正模型错误地将 SKILL 名当作工具直接调用的情况。
+    // ★ 安全网边界：此处必须使用未经相关性过滤的全量 runtime_skills，不能改成
+    // filtered_skills——过滤只影响"展示给模型看什么"，不影响"推理完成后能不能被
+    // 纠偏"；若误用 filtered_skills，模型调用了未展示的 SKILL 名时将无法被纠正。
     if (!runtime_skills.empty()) {
         SkillMappings name_to_path;
         for (const auto& [name, info] : runtime_skills) {
@@ -227,24 +259,25 @@ std::string PromptOptimizer::BuildSystemContext(const nlohmann::ordered_json& re
         model_config_.SetRuntimeSkillMappings(name_to_path);
     }
 
-    if (!runtime_skills.empty()) {
-        // 5. Skill Catalog
+    if (!filtered_skills.empty()) {
+        // 5. Skill Catalog（用筛选后的子集构建，展示给模型的候选缩小到本轮相关的部分）
         // catalog_structured_intro 的开关在 BuildStructuredSkillCatalog 内部读取，
         // 但 Skill Catalog 的条目列表（路径/描述）始终输出（仅头部说明受开关控制）
         const auto& opt_config = model_config_.GetPromptOptimizationConfig();
         std::string skill_section;
         if (opt_config.skill_catalog_format == "structured") {
-            skill_section = BuildStructuredSkillCatalog(runtime_skills);
+            skill_section = BuildStructuredSkillCatalog(filtered_skills);
         } else {
-            skill_section = BuildSimpleSkillCatalog(runtime_skills);
+            skill_section = BuildSimpleSkillCatalog(filtered_skills);
         }
         if (!skill_section.empty()) {
             oss << skill_section;
         }
 
-        // 6. Few-shot 示例（动态生成，受 few_shot_examples_enabled.enabled 总开关控制）
+        // 6. Few-shot 示例（动态生成，受 few_shot_examples_enabled.enabled 总开关控制；
+        // 同样基于筛选后的子集生成，避免示例引用未展示的 SKILL）
         if (opt_config.system_prompts.few_shot_examples_enabled.enabled) {
-            std::string few_shot = BuildFewShotExamples(runtime_skills);
+            std::string few_shot = BuildFewShotExamples(filtered_skills);
             if (!few_shot.empty()) {
                 oss << few_shot;
             }
@@ -253,10 +286,42 @@ std::string PromptOptimizer::BuildSystemContext(const nlohmann::ordered_json& re
         }
     }
 
+    // 意图判定（供 OptimizationStats::detected_intent/matched_skill 使用，仅用于
+    // 日志/回归排查，不影响上方任何提示词构建逻辑）：
+    // - 筛选后仍有命中的 SKILL → SKILL_QUERY，matched_skill 取其中一个命中的 SKILL 名
+    //   （用于问题排查，不保证是分数最高者，命中集合通常很小，代表性足够）
+    // - 否则若存在相关性命中的工具 → TOOL_CALL
+    // - 否则 → GENERAL_CHAT
+    if (out_intent) {
+        if (!filtered_skills.empty()) {
+            *out_intent = IntentType::SKILL_QUERY;
+            if (out_matched_skill) {
+                *out_matched_skill = filtered_skills.begin()->first;
+            }
+        } else {
+            bool tool_hit = false;
+            if (request_data.contains("tools") && request_data["tools"].is_array() && !request_data["tools"].empty()) {
+                if (relevance_cfg.enabled) {
+                    nlohmann::ordered_json relevant_tools =
+                        FilterToolsByRelevance(request_data["tools"], relevance_keywords, ComputeRelevanceTokenBudget());
+                    tool_hit = !relevant_tools.empty();
+                } else {
+                    // 相关性过滤总开关关闭时，无法判断"是否相关"，客户端传了 tools
+                    // 即视为本轮可能用到工具，与改动前"全量携带"的语义保持一致
+                    tool_hit = true;
+                }
+            }
+            *out_intent = tool_hit ? IntentType::TOOL_CALL : IntentType::GENERAL_CHAT;
+            if (out_matched_skill) {
+                out_matched_skill->clear();
+            }
+        }
+    }
+
     return oss.str();
 }
 
-size_t PromptOptimizer::CountTokens(const std::string& text) {
+size_t PromptOptimizer::CountTokens(const std::string& text) const {
     // 修复：多模型场景下优先使用 context_override_（per-model 的 ContextBase），
     // 而非 model_config_.get_genie_model_handle()（全局单模型句柄）
     if (context_override_) {
@@ -371,6 +436,355 @@ RuntimeSkillMappings PromptOptimizer::ExtractSkillsFromRequest(const nlohmann::o
     }
 
     return runtime_skills;
+}
+
+// ========== 相关性打分与预算贪心筛选实现 ==========
+//
+// 设备侧上下文极为有限（如 Omni 模型仅 2048 token），全量携带客户端传入的全部
+// SKILL/工具定义是模型第一轮就容易溢出/回答质量下降的直接原因。以下方法用纯
+// 字符串/规则匹配（不引入向量/embedding 语义匹配，零额外推理延迟）判定"本轮
+// 问题是否真的用得上某个 skill/tool"：命中才保留，未命中整条删除。
+
+namespace {
+
+// 解码 UTF-8 字符串在 pos 处的一个 code point，返回 {code point, 字节长度}。
+// 非法/截断的多字节序列按单字节处理，避免越界读取。
+std::pair<uint32_t, size_t> DecodeUtf8CodePoint(const std::string& text, size_t pos) {
+    unsigned char c = static_cast<unsigned char>(text[pos]);
+    if (c < 0x80) {
+        return {c, 1};
+    }
+
+    size_t len = 0;
+    uint32_t cp = 0;
+    if ((c & 0xE0) == 0xC0) { len = 2; cp = c & 0x1F; }
+    else if ((c & 0xF0) == 0xE0) { len = 3; cp = c & 0x0F; }
+    else if ((c & 0xF8) == 0xF0) { len = 4; cp = c & 0x07; }
+    else { return {c, 1}; } // 非法首字节，按单字节处理
+
+    if (pos + len > text.size()) {
+        return {c, 1};
+    }
+    for (size_t i = 1; i < len; ++i) {
+        unsigned char cc = static_cast<unsigned char>(text[pos + i]);
+        if ((cc & 0xC0) != 0x80) {
+            return {c, 1}; // 续字节不合法，按单字节处理
+        }
+        cp = (cp << 6) | (cc & 0x3F);
+    }
+    return {cp, len};
+}
+
+// 判断 code point 是否属于常见的中文/全角标点或空白区间（作为切词边界）：
+//   U+2000-U+206F 通用标点（引号/破折号/省略号等）
+//   U+3000-U+303F CJK 符号和标点（含全角空格、书名号、顿号等）
+//   U+FF00-U+FFEF 半角/全角形式（含全角句号/逗号/括号等）
+bool IsCjkPunctuationOrSpace(uint32_t cp) {
+    return (cp >= 0x2000 && cp <= 0x206F) ||
+           (cp >= 0x3000 && cp <= 0x303F) ||
+           (cp >= 0xFF00 && cp <= 0xFFEF);
+}
+
+// 判断一个关键词是否达到参与相关性匹配的最小门槛：纯 ASCII 字符组成的关键词
+// 长度必须 >= 3，避免 "s"/"i"/"a" 这类英文缩写残留/停用词几乎命中一切 skill/tool
+// 名称或描述，从而破坏"零命中即整段清空"的兜底策略；含非 ASCII 字节（中日韩等）
+// 的关键词在 BuildRelevanceKeywords 中本就逐字符独立成词，跨字母表误判概率低，
+// 不设长度门槛，保留现有行为。
+bool IsEligibleRelevanceKeyword(const std::string& kw) {
+    if (kw.empty()) {
+        return false;
+    }
+    bool all_ascii = true;
+    for (unsigned char c : kw) {
+        if (c >= 0x80) {
+            all_ascii = false;
+            break;
+        }
+    }
+    if (all_ascii && kw.size() < 3) {
+        return false;
+    }
+    return true;
+}
+
+} // namespace
+
+std::vector<std::string> PromptOptimizer::BuildRelevanceKeywords(
+    const nlohmann::ordered_json& request_data) const
+{
+    std::vector<std::string> keywords;
+    if (!request_data.contains("messages") || !request_data["messages"].is_array()) {
+        return keywords;
+    }
+
+    const auto& messages = request_data["messages"];
+    const size_t recent_window = model_config_.GetPromptOptimizationConfig().recent_window;
+
+    // 复用 message_pre_filter 中 "最近 N 条非 system 消息视为新消息" 的窗口语义，
+    // 只取窗口内 role=="user" 的消息文本作为匹配语料
+    size_t non_system_count = 0;
+    for (const auto& msg : messages) {
+        if (!msg.is_object()) continue;
+        if (get_json_value<std::string>(msg, "role", "") != "system") {
+            ++non_system_count;
+        }
+    }
+    size_t old_cutoff = (non_system_count > recent_window) ? (non_system_count - recent_window) : 0;
+
+    std::string corpus;
+    size_t non_system_idx = 0;
+    for (const auto& msg : messages) {
+        if (!msg.is_object()) continue;
+        std::string role = get_json_value<std::string>(msg, "role", "");
+        if (role == "system") continue;
+
+        bool is_recent = (non_system_idx >= old_cutoff);
+        ++non_system_idx;
+        if (!is_recent || role != "user") continue;
+
+        // content 可能是字符串也可能是 OpenAI 多段数组，统一走双格式兼容读取
+        std::string text = SecurityUtils::ExtractMessageContentText(msg);
+        if (!text.empty()) {
+            corpus += text;
+            corpus += " ";
+        }
+    }
+
+    if (corpus.empty()) {
+        return keywords;
+    }
+
+    std::string lower_corpus = ToLower(corpus);
+
+    // 按非字母数字字符（含中文/全角标点、空格等）为边界切词，中文汉字（无空格分隔）
+    // 逐字符视为独立词元；返回去重后的关键词列表
+    std::unordered_set<std::string> seen;
+    auto flush_token = [&](std::string& token) {
+        if (!token.empty()) {
+            if (seen.insert(token).second) {
+                keywords.push_back(token);
+            }
+            token.clear();
+        }
+    };
+
+    std::string current_token;
+    size_t i = 0;
+    while (i < lower_corpus.size()) {
+        auto [cp, len] = DecodeUtf8CodePoint(lower_corpus, i);
+        if (cp < 0x80) {
+            if (std::isalnum(static_cast<int>(cp))) {
+                current_token += static_cast<char>(cp);
+            } else {
+                flush_token(current_token);
+            }
+        } else if (IsCjkPunctuationOrSpace(cp)) {
+            flush_token(current_token);
+        } else {
+            // 非标点的多字节字符（如中文汉字）：与 ASCII 词元切分开，逐字符独立成词
+            flush_token(current_token);
+            std::string ch = lower_corpus.substr(i, len);
+            if (seen.insert(ch).second) {
+                keywords.push_back(ch);
+            }
+        }
+        i += len;
+    }
+    flush_token(current_token);
+
+    My_Log{My_Log::Level::kInfo} << "[BuildRelevanceKeywords] Extracted " << keywords.size()
+                                  << " keyword(s) from recent_window=" << recent_window
+                                  << " user message(s)" << std::endl;
+    return keywords;
+}
+
+size_t PromptOptimizer::ScoreRelevance(
+    const std::string& name,
+    const std::string& description,
+    const std::vector<std::string>& keywords) const
+{
+    if (keywords.empty()) {
+        return 0;
+    }
+
+    const auto& relevance_cfg = model_config_.GetPromptOptimizationConfig().relevance_filter;
+    size_t score = 0;
+
+    // 名称按 '-'/'_' 拆分为子词，每个子词若与任一 keyword 发生子串双向匹配
+    // （大小写不敏感）即命中，命中一次加 name_token_weight
+    std::string lower_name = ToLower(name);
+    std::vector<std::string> name_subwords;
+    {
+        std::string token;
+        for (char c : lower_name) {
+            if (c == '-' || c == '_') {
+                if (!token.empty()) { name_subwords.push_back(token); token.clear(); }
+            } else {
+                token += c;
+            }
+        }
+        if (!token.empty()) name_subwords.push_back(token);
+    }
+
+    for (const auto& subword : name_subwords) {
+        if (subword.empty()) continue;
+        for (const auto& kw : keywords) {
+            if (!IsEligibleRelevanceKeyword(kw)) continue;
+            if (subword.find(kw) != std::string::npos || kw.find(subword) != std::string::npos) {
+                score += relevance_cfg.name_token_weight;
+                break; // 该子词只计一次分，避免同一子词命中多个 keyword 时被重复加分
+            }
+        }
+    }
+
+    // 描述做关键词命中计数（子串匹配，大小写不敏感），每命中一个 keyword 加
+    // description_keyword_weight
+    if (!description.empty()) {
+        std::string lower_desc = ToLower(description);
+        for (const auto& kw : keywords) {
+            if (!IsEligibleRelevanceKeyword(kw)) continue;
+            if (lower_desc.find(kw) != std::string::npos) {
+                score += relevance_cfg.description_keyword_weight;
+            }
+        }
+    }
+
+    return score;
+}
+
+RuntimeSkillMappings PromptOptimizer::FilterSkillsByRelevance(
+    const RuntimeSkillMappings& all_skills,
+    const std::vector<std::string>& keywords,
+    size_t token_budget) const
+{
+    if (all_skills.empty()) {
+        return RuntimeSkillMappings{};
+    }
+    if (keywords.empty()) {
+        // 无关键词可用（通常是调用方未提供 request_data，或本轮
+        // recent_window 窗口内没有任何用户文本），这是"无法判断相关性"而
+        // 非"确定无关"，直接跳过过滤、原样返回全量，避免误伤
+        My_Log{My_Log::Level::kInfo} << "[FilterSkillsByRelevance] Empty keywords, bypassing filter ("
+                                      << all_skills.size() << " skill(s) kept as-is)" << std::endl;
+        return all_skills;
+    }
+
+    RuntimeSkillMappings filtered;
+
+    // 打分并过滤掉零分项
+    std::vector<std::pair<std::string, size_t>> scored; // name -> score
+    scored.reserve(all_skills.size());
+    for (const auto& [name, info] : all_skills) {
+        size_t score = ScoreRelevance(name, info.use_for, keywords);
+        if (score > 0) {
+            scored.emplace_back(name, score);
+        }
+    }
+
+    // 按分数降序排序；分数相同时用名称做次级排序键，避免 unordered_map 遍历顺序不确定
+    std::sort(scored.begin(), scored.end(), [](const auto& a, const auto& b) {
+        if (a.second != b.second) return a.second > b.second;
+        return a.first < b.first;
+    });
+
+    // 按 token 预算贪心保留，超预算即停止
+    size_t used_tokens = 0;
+    for (const auto& entry : scored) {
+        const std::string& name = entry.first;
+        const auto& info = all_skills.at(name);
+        // 用 name+path+use_for 拼接近似估算这条 SKILL 加入 Catalog 后的 token 占用
+        std::string approx = name + " " + info.path + " " + info.use_for;
+        size_t item_tokens = CountTokens(approx);
+        if (used_tokens + item_tokens > token_budget) {
+            break;
+        }
+        used_tokens += item_tokens;
+        filtered[name] = info;
+    }
+
+    My_Log{My_Log::Level::kInfo} << "[FilterSkillsByRelevance] " << all_skills.size()
+                                  << " candidate(s) -> " << filtered.size()
+                                  << " kept within token_budget=" << token_budget << std::endl;
+    return filtered;
+}
+
+nlohmann::ordered_json PromptOptimizer::FilterToolsByRelevance(
+    const nlohmann::ordered_json& tools_array,
+    const std::vector<std::string>& keywords,
+    size_t token_budget) const
+{
+    if (!tools_array.is_array() || tools_array.empty()) {
+        return nlohmann::ordered_json::array();
+    }
+    if (keywords.empty()) {
+        // 无关键词可用，同 FilterSkillsByRelevance：视为"无法判断相关性"，
+        // 直接跳过过滤、原样返回 tools_array 全量
+        My_Log{My_Log::Level::kInfo} << "[FilterToolsByRelevance] Empty keywords, bypassing filter ("
+                                      << tools_array.size() << " tool(s) kept as-is)" << std::endl;
+        return tools_array;
+    }
+
+    nlohmann::ordered_json filtered = nlohmann::ordered_json::array();
+
+    // 打分并过滤掉零分项
+    std::vector<std::pair<size_t, size_t>> scored; // (tools_array 中的下标, score)
+    scored.reserve(tools_array.size());
+    for (size_t idx = 0; idx < tools_array.size(); ++idx) {
+        const auto& tool = tools_array[idx];
+        if (!tool.contains("function") || !tool["function"].contains("name")) continue;
+        // name 字段必须显式校验 is_string()：畸形/攻击性 tools 数组（如 name 为数字）
+        // 不应导致未捕获的 json::type_error，而是跳过该工具（视为不相关，不崩溃）
+        if (!tool["function"]["name"].is_string()) continue;
+        std::string name = tool["function"]["name"].get<std::string>();
+        // description 同理：字段存在但非字符串（畸形/攻击性输入）时不调用 .value()
+        // 的隐式 get<T>()，直接按空描述处理，避免同类 json::type_error
+        std::string description;
+        if (tool["function"].contains("description") && tool["function"]["description"].is_string()) {
+            description = tool["function"]["description"].get<std::string>();
+        }
+        size_t score = ScoreRelevance(name, description, keywords);
+        if (score > 0) {
+            scored.emplace_back(idx, score);
+        }
+    }
+
+    // 按分数降序排序（分数相同保持原始顺序，用 stable_sort）
+    std::stable_sort(scored.begin(), scored.end(), [](const auto& a, const auto& b) {
+        return a.second > b.second;
+    });
+
+    // 按 token 预算贪心保留 Top-K
+    size_t used_tokens = 0;
+    for (const auto& entry : scored) {
+        size_t idx = entry.first;
+        const auto& tool = tools_array[idx];
+        size_t item_tokens = CountTokens(tool.dump());
+        if (used_tokens + item_tokens > token_budget) {
+            break;
+        }
+        used_tokens += item_tokens;
+        filtered.push_back(tool);
+    }
+
+    My_Log{My_Log::Level::kInfo} << "[FilterToolsByRelevance] " << tools_array.size()
+                                  << " candidate(s) -> " << filtered.size()
+                                  << " kept within token_budget=" << token_budget << std::endl;
+    return filtered;
+}
+
+size_t PromptOptimizer::ComputeRelevanceTokenBudget() const
+{
+    // 复用与 model_input_builder.h 中 tools_budget 完全相同的"可用上下文空间"
+    // 推导：context_size 减去按 output_reserve_ratio 预留的输出空间。这不是为
+    // 相关性筛选新引入的硬编码魔数，而是复用已有的、语义上"这部分内容最多能占多少"
+    // 的现有配置概念。BuildSystemContext/BuildDynamicToolsIntro/
+    // FilterToolsIntroByRequest/OptimizeHarmonyDeveloperMessage/
+    // ConvertToolsToOptimizedTypeScript 均未接收显式的 token_budget 参数，
+    // 需要自行推导时统一调用此方法。
+    const auto& config = model_config_.GetPromptOptimizationConfig();
+    int total_context = model_config_.context_size();
+    int reserved_output = static_cast<int>(total_context * config.output_reserve_ratio);
+    return static_cast<size_t>(std::max(total_context - reserved_output, 0));
 }
 
 std::string PromptOptimizer::BuildStructuredSkillCatalog(
@@ -513,7 +927,8 @@ std::string PromptOptimizer::BuildFewShotExamples(const RuntimeSkillMappings& ru
 std::string PromptOptimizer::OptimizeToolsPrompt(
     const std::string& tool_descriptions,
     const std::string& tool_prompt_template,
-    size_t token_budget)
+    size_t token_budget,
+    const nlohmann::ordered_json& request_data)
 {
     My_Log{My_Log::Level::kDebug} << "[Optimizer] Processing tool descriptions" << std::endl;
 
@@ -528,6 +943,18 @@ std::string PromptOptimizer::OptimizeToolsPrompt(
     // tool_descriptions 现在直接是原始 JSON 数组字符串
     try {
         json tools_array = json::parse(tool_descriptions);
+
+        // Tier 0（相关性筛选，在 Tier1 逐级压缩之前）：按本轮问题缩小候选工具集合，
+        // 未命中的工具整条不出现，而不是被压缩得更简。request_data 为空 object 时
+        // （调用点拿不到真实请求上下文）BuildRelevanceKeywords 返回空 keywords，
+        // FilterToolsByRelevance 会直接跳过过滤、保留全部候选，不会误伤。
+        if (tools_array.is_array()) {
+            const auto& relevance_cfg = model_config_.GetPromptOptimizationConfig().relevance_filter;
+            if (relevance_cfg.enabled) {
+                std::vector<std::string> keywords = BuildRelevanceKeywords(request_data);
+                tools_array = FilterToolsByRelevance(tools_array, keywords, ComputeRelevanceTokenBudget());
+            }
+        }
 
         if (tools_array.is_array()) {
             size_t original_tokens = CountTokens(tool_descriptions);
@@ -633,7 +1060,16 @@ std::string PromptOptimizer::BuildDynamicToolsIntro(const nlohmann::ordered_json
         return "";  // 无 tools → 调用方回退到配置文件硬编码值
     }
 
-    const auto& tools_array = request_data["tools"];
+    // 相关性筛选：先缩小候选工具集合，再生成 tools_intro；未命中的工具行直接不出现
+    json tools_array = request_data["tools"];
+    const auto& relevance_cfg = model_config_.GetPromptOptimizationConfig().relevance_filter;
+    if (relevance_cfg.enabled) {
+        std::vector<std::string> keywords = BuildRelevanceKeywords(request_data);
+        tools_array = FilterToolsByRelevance(tools_array, keywords, ComputeRelevanceTokenBudget());
+    }
+    if (tools_array.empty()) {
+        return "";  // 全部未命中 → 与"无 tools"等价，回退到配置文件硬编码值
+    }
 
     // 收集工具名列表（保持请求中的顺序）
     std::vector<std::string> tool_names;
@@ -690,9 +1126,18 @@ std::string PromptOptimizer::FilterToolsIntroByRequest(
         return tools_intro;
     }
 
-    // 收集客户端实际传入的工具名集合
+    // 相关性筛选：先缩小候选工具集合，client_tools 只收集筛选后仍相关的工具名，
+    // 未命中的工具行与"客户端未传入此工具"走同一条逐行过滤逻辑，不重复实现
+    json relevant_tools = request_data["tools"];
+    const auto& relevance_cfg = model_config_.GetPromptOptimizationConfig().relevance_filter;
+    if (relevance_cfg.enabled) {
+        std::vector<std::string> keywords = BuildRelevanceKeywords(request_data);
+        relevant_tools = FilterToolsByRelevance(relevant_tools, keywords, ComputeRelevanceTokenBudget());
+    }
+
+    // 收集客户端实际传入且通过相关性筛选的工具名集合
     std::unordered_set<std::string> client_tools;
-    for (const auto& tool : request_data["tools"]) {
+    for (const auto& tool : relevant_tools) {
         if (tool.contains("function") && tool["function"].contains("name")) {
             client_tools.insert(tool["function"]["name"].get<std::string>());
         }
@@ -920,7 +1365,18 @@ std::string PromptOptimizer::OptimizeHarmonyDeveloperMessage(
     }
 
     // 4. 如果有工具，添加工具定义和使用指导
-    if (!tools.is_null() && !tools.empty()) {
+    // 相关性筛选：在生成 TypeScript 定义之前先按本轮问题缩小候选工具集合，复用
+    // 与 OptimizeToolsPrompt 相同的 FilterToolsByRelevance，两条路径不重复实现；
+    // 用筛选后的 relevant_tools 判断"是否有工具"，全部未命中时与"客户端未传 tools"
+    // 等价，不输出 Tool Usage Guidelines/namespace functions 空壳段落。
+    json relevant_tools = tools;
+    const auto& relevance_cfg = model_config_.GetPromptOptimizationConfig().relevance_filter;
+    if (relevance_cfg.enabled && !tools.is_null() && tools.is_array() && !tools.empty()) {
+        std::vector<std::string> keywords = BuildRelevanceKeywords(request_data);
+        relevant_tools = FilterToolsByRelevance(tools, keywords, ComputeRelevanceTokenBudget());
+    }
+
+    if (!relevant_tools.is_null() && !relevant_tools.empty()) {
         // 从 system_context 配置中读取 "Tool Usage Guidelines" 段落
         const SystemContextConfig& ctx_cfg = model_config_.GetSystemContextConfig();
 
@@ -939,7 +1395,10 @@ std::string PromptOptimizer::OptimizeHarmonyDeveloperMessage(
         std::string tools_section = "\n# Tools\n\n## functions\n\n";
         tools_section += "namespace functions {\n\n";
         
-        std::string ts_tools = ConvertToolsToOptimizedTypeScript(tools);
+        // relevant_tools 已完成相关性筛选，此处不再传 request_data，让
+        // ConvertToolsToOptimizedTypeScript 内部的过滤天然退化为直通（keywords 为空
+        // 时的 bypass 语义），避免用同一套 keywords/budget 重复过滤一次
+        std::string ts_tools = ConvertToolsToOptimizedTypeScript(relevant_tools);
         tools_section += ts_tools;
         
         tools_section += "\n} // namespace functions";
@@ -980,7 +1439,9 @@ std::string PromptOptimizer::AppendFilteredSections(const std::string& source_pr
     return filtered;
 }
 
-std::string PromptOptimizer::ConvertToolsToOptimizedTypeScript(const json& tools)
+std::string PromptOptimizer::ConvertToolsToOptimizedTypeScript(
+    const json& tools,
+    const nlohmann::ordered_json& request_data)
 {
     // 将 OpenAI JSON 格式的工具定义转换为精简的 TypeScript 格式
     // 根据 openai-harmony.md 第 319-371 行的规范
@@ -992,8 +1453,20 @@ std::string PromptOptimizer::ConvertToolsToOptimizedTypeScript(const json& tools
         My_Log{My_Log::Level::kInfo} << "Tools is not an array, skipping conversion" << std::endl;
         return result;
     }
+
+    // 相关性筛选：request_data 默认空 object，调用方若已自行筛选过 tools
+    // （如 OptimizeHarmonyDeveloperMessage 内部），不传 request_data 时
+    // BuildRelevanceKeywords 返回空 keywords，FilterToolsByRelevance 会直接跳过
+    // 过滤、原样返回 tools，天然避免重复过滤；直接外部调用点（如 SUBAGENT Harmony
+    // 分支）传入真实 request_data 时才会真正生效。
+    json relevant_tools = tools;
+    const auto& relevance_cfg = model_config_.GetPromptOptimizationConfig().relevance_filter;
+    if (relevance_cfg.enabled) {
+        std::vector<std::string> keywords = BuildRelevanceKeywords(request_data);
+        relevant_tools = FilterToolsByRelevance(tools, keywords, ComputeRelevanceTokenBudget());
+    }
     
-    for (const auto& tool : tools) {
+    for (const auto& tool : relevant_tools) {
         if (!tool.contains("function") || !tool["function"].contains("name")) {
             My_Log{My_Log::Level::kInfo} << "Tool missing function or name field, skipping" << std::endl;
             continue;

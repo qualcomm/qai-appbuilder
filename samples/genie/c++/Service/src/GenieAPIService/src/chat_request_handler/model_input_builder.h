@@ -352,7 +352,7 @@ private:
                 size_t identity_tokens = context_->TokenLength(systemDefaultPrompt);
                 size_t tools_budget = (static_cast<size_t>(std::max(contextSize, 0)) > identity_tokens)
                                      ? static_cast<size_t>(contextSize) - identity_tokens : 0;
-                userToolsPrompt = optimizer_.OptimizeToolsPrompt(userToolsPrompt, tool_tmpl, tools_budget);
+                userToolsPrompt = optimizer_.OptimizeToolsPrompt(userToolsPrompt, tool_tmpl, tools_budget, request_data_);
             } else {
                 userToolsPrompt = str_replace(tool_tmpl, "{tool_descs}", userToolsPrompt);
             }
@@ -691,7 +691,7 @@ private:
                         }
                         developer_msg += "\n# Tools\n\n## functions\n\n";
                         developer_msg += "namespace functions {\n\n";
-                        developer_msg += optimizer_.ConvertToolsToOptimizedTypeScript(tools);
+                        developer_msg += optimizer_.ConvertToolsToOptimizedTypeScript(tools, request_data_);
                         developer_msg += "\n} // namespace functions";
                     }
                     developer_msg += "<|end|>";

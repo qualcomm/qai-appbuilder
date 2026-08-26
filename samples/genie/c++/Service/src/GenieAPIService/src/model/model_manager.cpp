@@ -1690,6 +1690,23 @@ bool ModelManager::InitializeConfig(bool load)
                             prompt_optimization_config_.system_prompts.few_shot_no_skill_response = sp.value("few_shot_no_skill_response", "I have the following skills: [list from catalog above]. No tool call needed.");
                     }
 
+                    // [relevance_filter] 相关性过滤配置（旧配置文件中没有该节时使用默认值，不报错）
+                    if (po.contains("relevance_filter") && po["relevance_filter"].is_object())
+                    {
+                        const auto &rf = po["relevance_filter"];
+                        prompt_optimization_config_.relevance_filter.enabled =
+                                rf.value("enabled", true);
+                        prompt_optimization_config_.relevance_filter.name_token_weight =
+                                rf.value("name_token_weight", (size_t) 3);
+                        prompt_optimization_config_.relevance_filter.description_keyword_weight =
+                                rf.value("description_keyword_weight", (size_t) 1);
+                        My_Log{} << "[Config] relevance_filter loaded: "
+                                 << "enabled=" << prompt_optimization_config_.relevance_filter.enabled
+                                 << ", name_token_weight=" << prompt_optimization_config_.relevance_filter.name_token_weight
+                                 << ", description_keyword_weight=" << prompt_optimization_config_.relevance_filter.description_keyword_weight
+                                 << std::endl;
+                    }
+
                     // 加载 spawn_guard 配置
                     if (po.contains("spawn_guard"))
                     {

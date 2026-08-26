@@ -60,12 +60,17 @@ public:
 
     // 处理和优化工具定义。token_budget 为工具部分（含模板包装后）允许占用的
     // 最大 token 数（通常是 contextSize 减去已被 system 部分占用的 token 数），
-    // 压缩按 已知签名 -> 剥离注释 -> 极简签名 -> 按预算截断工具列表 逐级降级，
-    // 确保返回结果的 token 数始终不超过该预算。
+    // 压缩按 相关性筛选 -> 已知签名 -> 剥离注释 -> 极简签名 -> 按预算截断工具列表
+    // 逐级降级，确保返回结果的 token 数始终不超过该预算。
+    // request_data 用于提取本轮相关性关键词（BuildRelevanceKeywords），在 Tier1
+    // 压缩之前先按相关性缩小候选工具集合；未命中的工具整条不出现，而不是被压缩得
+    // 更简。默认空 object 保持向后兼容：拿不到 request_data 的调用点等价于
+    // "无法判断相关性"，FilterToolsByRelevance 会直接跳过过滤、保留全部候选。
     std::string OptimizeToolsPrompt(
         const std::string& tool_descriptions, 
         const std::string& tool_prompt_template,
-        size_t token_budget
+        size_t token_budget,
+        const nlohmann::ordered_json& request_data = nlohmann::ordered_json::object()
     );
 
     // 转换 OpenAI 格式的工具调用到内部格式
@@ -102,8 +107,12 @@ public:
     );
     
     // 将 OpenAI JSON 格式的工具定义转换为精简的 TypeScript 格式
+    // request_data（可选）：用于按本轮相关性筛选候选工具（复用 FilterToolsByRelevance），
+    // 默认空 object；调用方若已自行筛选过 tools（如 OptimizeHarmonyDeveloperMessage
+    // 内部），不传 request_data 即可让这里的过滤天然退化为直通，避免重复过滤
     std::string ConvertToolsToOptimizedTypeScript(
-        const nlohmann::ordered_json& tools
+        const nlohmann::ordered_json& tools,
+        const nlohmann::ordered_json& request_data = nlohmann::ordered_json::object()
     );
     
     // 获取优化统计信息
@@ -128,7 +137,7 @@ private:
     OptimizationStats last_stats_;
     
     // 计算 token 数量
-    size_t CountTokens(const std::string& text);
+    size_t CountTokens(const std::string& text) const;
     
     // 从客户端请求中提取 Skills 信息
     RuntimeSkillMappings ExtractSkillsFromRequest(const nlohmann::ordered_json& request_data) const;
@@ -155,12 +164,68 @@ private:
     // 若请求中无 tools 数组，则原样返回配置文件值（不过滤）。
     std::string FilterToolsIntroByRequest(const std::string& tools_intro,
                                           const nlohmann::ordered_json& request_data) const;
-    
+
+    // ========== 相关性打分与预算贪心筛选 ==========
+    // 设备侧上下文极为有限（如 Omni 模型仅 2048 token），全量携带客户端传入的
+    // 全部 SKILL/工具定义会挤占宝贵的上下文空间。以下方法用于判定"本轮问题是否
+    // 真的用得上某个 skill/tool"：命中才保留在提示词里，未命中整条删除（不是
+    // 压缩，是不出现）。全部为纯字符串/规则匹配，不引入向量/embedding 语义匹配，
+    // 保证零额外推理延迟。
+
+    // 复用 PromptOptimizationConfig::recent_window 语义（与 message_pre_filter 中
+    // "最近 N 条非 system 消息视为新消息"一致），从 request_data["messages"] 里
+    // 提取该窗口内 role=="user" 的消息文本（content 可能是字符串也可能是 OpenAI
+    // 多段数组，统一通过 SecurityUtils::ExtractMessageContentText 读取），小写化后
+    // 按非字母数字字符（含中文/全角标点、空格等）为边界切词，返回去重后的关键词列表。
+    std::vector<std::string> BuildRelevanceKeywords(const nlohmann::ordered_json& request_data) const;
+
+    // 对 name/description 与 keywords 打分：
+    // - name 按 '-'/'_' 拆分成子词，每个子词若与任一 keyword 发生子串双向匹配
+    //   （大小写不敏感）则命中，命中一次加 relevance_filter.name_token_weight；
+    // - description 做关键词命中计数（子串匹配），每命中一个 keyword 加
+    //   relevance_filter.description_keyword_weight。
+    // 返回总分，0 表示完全不相关。
+    size_t ScoreRelevance(const std::string& name, const std::string& description,
+                          const std::vector<std::string>& keywords) const;
+
+    // 对 all_skills 中每个 SKILL 用 ScoreRelevance() 打分，过滤掉零分项，按分数
+    // 降序排序后按 token_budget 贪心保留，超预算即停止。all_skills 为空时返回空集；
+    // keywords 为空时（通常意味着调用方未提供/本轮窗口内没有任何用户文本，视为
+    // "无法判断相关性"而非"确定无关"）直接跳过过滤、原样返回 all_skills 全量，
+    // 避免误伤——这是 Step2 接入调用链时对 Step1 空 keywords 语义的唯一微调。
+    RuntimeSkillMappings FilterSkillsByRelevance(const RuntimeSkillMappings& all_skills,
+                                                 const std::vector<std::string>& keywords,
+                                                 size_t token_budget) const;
+
+    // 对 tools_array（OpenAI tools 格式）中每个工具用 ScoreRelevance() 打分，
+    // 过滤掉零分项，按分数降序排序后按 token_budget 贪心保留 Top-K，返回筛选后的
+    // json 数组（保持原始 tool 对象结构不变，只是子集）。tools_array 为空时返回
+    // 空数组；keywords 为空时同 FilterSkillsByRelevance，直接跳过过滤、原样返回
+    // tools_array 全量。
+    nlohmann::ordered_json FilterToolsByRelevance(const nlohmann::ordered_json& tools_array,
+                                                  const std::vector<std::string>& keywords,
+                                                  size_t token_budget) const;
+
+    // 计算相关性筛选可用的 token 预算：复用现有"可用上下文空间"推导（context_size
+    // 减去按 output_reserve_ratio 预留的输出空间），与 model_input_builder.h 中
+    // 计算 OptimizeToolsPrompt 的 tools_budget 采用的是同一套已有概念，避免为
+    // 相关性筛选引入新的强耦合硬编码魔数。供 BuildSystemContext/
+    // BuildDynamicToolsIntro/FilterToolsIntroByRequest/OptimizeHarmonyDeveloperMessage/
+    // ConvertToolsToOptimizedTypeScript 共用（这些函数自身未接收显式 token_budget
+    // 参数，需要自行推导）。
+    size_t ComputeRelevanceTokenBudget() const;
+
     // ========== 共享辅助函数 ==========
     
     // 生成统一的系统上下文内容（供普通模型和 Harmony 模型复用）
     // [重构] 接受 request_data，以便从客户端请求中提取 Skill 描述
-    std::string BuildSystemContext(const nlohmann::ordered_json& request_data);
+    // out_intent/out_matched_skill（可选，默认 nullptr）：将本轮相关性筛选得到的
+    // 意图判定结果回传给调用方（OptimizeSystemPrompt/OptimizeSubagentSystemPrompt
+    // 用它们填充 OptimizationStats::detected_intent/matched_skill），调用方不关心
+    // 时传 nullptr 即可
+    std::string BuildSystemContext(const nlohmann::ordered_json& request_data,
+                                   IntentType* out_intent = nullptr,
+                                   std::string* out_matched_skill = nullptr);
     
     // ========== Harmony 格式辅助函数 ==========
     
