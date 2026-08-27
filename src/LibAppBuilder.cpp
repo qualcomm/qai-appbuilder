@@ -39,6 +39,15 @@
   #include <execution>
 #endif
 
+#ifdef __linux__
+// issue#97: getpid() / dlmopen / dl_iterate_phdr / /proc/self/fd scanning used
+// by the fork()-child backend reset (see resetAppBuilderBackendForForkedChild).
+#include <unistd.h>
+#include <dlfcn.h>
+#include <link.h>
+#include <dirent.h>
+#endif
+
 using namespace qnn;
 using namespace qnn::log;
 using namespace qnn::tools;
@@ -63,6 +72,23 @@ std::unordered_map<std::string, std::unique_ptr<qnn_app::QnnInferenceEngine>> sg
 // (the actual HTP inference) runs OUTSIDE the lock, so parallelism is kept.
 static std::mutex sg_model_map_mutex;
 static qnn_app::ProfilingLevel sg_parsedProfilingLevel = qnn_app::ProfilingLevel::OFF;
+
+// issue#97: PID of the process that originally loaded the QNN backend (i.e. the
+// process the inherited dlopen handles / device handles belong to). When a
+// QNNContext is created in a process with a different PID (a fork()ed child),
+// the inherited backend state is invalid in that process and must be discarded
+// so the child re-initializes QNN from scratch instead of corrupting the
+// DSP-side state shared with the parent.
+static pid_t sg_backendInitPid = -1;
+// issue#97: when this process is a fork()ed child of the process that loaded
+// the QNN backend, the inherited library instances (rpcmem pool / fastrpc
+// session handles inside libcdsprpc) are invalid here and cannot be unloaded
+// (QNN loads them with RTLD_NODELETE semantics). Instead the child loads the
+// whole QNN/fastrpc chain into a fresh link-map namespace via dlmopen, giving
+// it clean static state without touching the inherited copies.
+static bool sg_useNewNamespace = false;
+static long sg_qnnLmid = 0;  // 0 == LM_ID_BASE
+static std::vector<std::string> sg_qnnDepLibPaths;  // cdsprpc/xdsprpc/stub paths
 
 namespace qnn {
 namespace tools {
@@ -120,13 +146,44 @@ std::unique_ptr<qnn_app::QnnInferenceEngine> initQnnInferenceEngine(std::string 
   bool debug                                      = false;
   
   qnn_app::QnnFunctionPointers qnnFunctionPointers;
+  // issue#97: in a fork()ed child, load the backend (and its QNN/fastrpc
+  // dependency chain) into a fresh link-map namespace so this process gets
+  // clean rpcmem/fastrpc state instead of the parent's inherited handles.
+  long loadLmid = 0;
+  if (sg_useNewNamespace) {
+    if (sg_qnnLmid == 0) {
+      for (const auto& dep : sg_qnnDepLibPaths) {
+        void* h = pal::dynamicloading::dlOpenInNamespace(
+            LM_ID_NEWLM, dep.c_str(),
+            pal::dynamicloading::DL_NOW | pal::dynamicloading::DL_LOCAL);
+        if (h == nullptr) {
+          QNN_ERROR("dlmopen dependency failed: %s (%s)", dep.c_str(),
+                    pal::dynamicloading::dlError());
+          continue;
+        }
+        if (sg_qnnLmid == 0) {
+          Lmid_t lm = 0;
+          if (::dlinfo(h, RTLD_DI_LMID, &lm) == 0) {
+            sg_qnnLmid = (long)lm;
+          }
+        }
+      }
+      if (sg_qnnLmid == 0) {
+        QNN_ERROR("Failed to create a fresh link-map namespace for QNN backend; "
+                  "falling back to the inherited libraries.");
+        sg_useNewNamespace = false;
+      }
+    }
+    loadLmid = sg_qnnLmid;
+  }
   // Load backend and model .so and validate all the required function symbols are resolved
   auto statusCode = dynamicloadutil::getQnnFunctionPointers(backEndPath,
                                                             modelPath,
                                                             &qnnFunctionPointers,
                                                             &sg_backendHandle,
                                                             !loadFromCachedBinary,
-                                                            &sg_modelHandle);
+                                                            &sg_modelHandle,
+                                                            loadLmid);
   if (dynamicloadutil::StatusCode::SUCCESS != statusCode) {
     if (dynamicloadutil::StatusCode::FAIL_LOAD_BACKEND == statusCode) {
       qnn_app::exitWithMessage(
@@ -137,6 +194,13 @@ std::unique_ptr<qnn_app::QnnInferenceEngine> initQnnInferenceEngine(std::string 
     } else {
       qnn_app::exitWithMessage("Error initializing QNN Function Pointers", EXIT_FAILURE);
     }
+  }
+
+  // issue#97: record which process owns the backend state loaded above. If this
+  // is a fork()ed child that just discarded its parent's state, the PID was
+  // already updated by resetAppBuilderBackendForForkedChild().
+  if (sg_backendInitPid == -1) {
+    sg_backendInitPid = getpid();
   }
 
   if (loadFromCachedBinary) {
@@ -183,6 +247,127 @@ void putQnnApp(std::string model_name,
                      std::unique_ptr<qnn_app::QnnInferenceEngine> app) {
   std::lock_guard<std::mutex> lk(sg_model_map_mutex);
   sg_model_map.insert(std::make_pair(std::move(model_name), std::move(app)));
+}
+
+// issue#97: close the fastrpc / rpcmem dma-buf fds inherited from the parent
+// process. After fork() the child holds copies of the parent's /dev/fastrpc
+// and dma-buf descriptors; the fastrpc driver associates those with the
+// parent's PID sessions, and any child-side interaction with them (or even
+// their presence) corrupts the DSP state shared with the parent, so a later
+// context create in the parent fails with "could not initialize memory"
+// (err 1002). Verified: a fork()ed child that closes its inherited fds no
+// longer breaks the parent. stdio / pipes / shared-memory fds are kept.
+static void closeInheritedQnnFds() {
+  const std::string fdDir = "/proc/self/fd";
+  DIR* d = ::opendir(fdDir.c_str());
+  if (d == nullptr) {
+    return;
+  }
+  struct dirent* e = nullptr;
+  while ((e = ::readdir(d)) != nullptr) {
+    if (e->d_name[0] == '.') {
+      continue;
+    }
+    int fd = ::atoi(e->d_name);
+    if (fd <= 2) {
+      continue;  // keep stdio
+    }
+    std::string linkPath = fdDir + "/" + e->d_name;
+    char buf[256];
+    ssize_t n = ::readlink(linkPath.c_str(), buf, sizeof(buf) - 1);
+    if (n <= 0) {
+      continue;
+    }
+    buf[n] = '\0';
+    std::string target(buf);
+    if (target.find("fastrpc") != std::string::npos ||
+        target.find("adsprpc") != std::string::npos ||
+        target.find("dmabuf") != std::string::npos) {
+      ::close(fd);
+    }
+  }
+  ::closedir(d);
+}
+
+// issue#97: this process is a fork()ed child of the process that loaded the QNN
+// backend. Every piece of backend state inherited from the parent is invalid
+// here (the dlopen handles, the QNN interface, the HTP device infrastructure,
+// the cached Qnn_DeviceHandle_t and the fastrpc session handles inside the QNN
+// client libraries all belong to the parent's PID). Reusing it makes QNN
+// contexts created in this child corrupt the DSP-side state that is still
+// shared with the parent, so later context creation in the parent fails with
+// "could not initialize memory" / "fastrpc memory map ... failed" (err 1002).
+// Discard everything and let the next ModelInitializeEx re-load the backend
+// from scratch.
+static void resetAppBuilderBackendForForkedChild() {
+  QNN_WAR("fork()ed child detected: pid=%d (backend was initialized in pid=%d). "
+          "Resetting inherited QNN backend state in this process.\n",
+          (int)getpid(), (int)sg_backendInitPid);
+
+  // issue#97: drop the inherited fastrpc/dma-buf fds first - they belong to the
+  // parent's DSP sessions and must not be touched by this child.
+  closeInheritedQnnFds();
+
+  // Drop inherited model entries WITHOUT destroying them: the QnnInferenceEngine
+  // destructor would call QNN teardown APIs (contextFree/backendFree/...) on
+  // handles that do not belong to this process. Leaking them is safe here.
+  {
+    std::lock_guard<std::mutex> lk(sg_model_map_mutex);
+    for (auto& kv : sg_model_map) {
+      kv.second.release();
+    }
+    sg_model_map.clear();
+  }
+
+  // Deliberately do NOT dlclose() the inherited QNN libraries here: this child
+  // will use fresh copies loaded into a new link-map namespace below, and
+  // dlclose() would run the QNN backend destructors (backendFree) against the
+  // parent's inherited DSP contexts, producing transport errors ("Failed to
+  // delete context ... 1003", "fastrpc memory failed to unmap ... 0x14",
+  // "Backend free cleanup called during process exit") and leaving garbage on
+  // the DSP. The inherited mappings simply stay (COW) and are never touched.
+
+  // issue#97: the inherited libcdsprpc/libxdsprpc/stub instances cannot be
+  // unloaded (they are loaded with RTLD_NODELETE-like semantics), so instead
+  // record their paths and have the next ModelInitializeEx load the whole
+  // chain into a fresh link-map namespace (dlmopen) with clean static state.
+  sg_qnnDepLibPaths.clear();
+  ::dl_iterate_phdr([](struct dl_phdr_info* info, size_t, void* data) -> int {
+    if (info->dlpi_name != nullptr && info->dlpi_name[0] != '\0') {
+      std::string n(info->dlpi_name);
+      if (n.find("cdsprpc") != std::string::npos ||
+          n.find("xdsprpc") != std::string::npos ||
+          n.find("fastrpc") != std::string::npos ||
+          (n.find("libQnn") != std::string::npos && n.find("Stub") != std::string::npos)) {
+        static_cast<std::vector<std::string>*>(data)->push_back(n);
+      }
+    }
+    return 0;
+  }, &sg_qnnDepLibPaths);
+  sg_useNewNamespace = true;
+  sg_qnnLmid = 0;
+
+  // Forget inherited interface/handles/flags.
+  sg_qnnInterface = {};
+  gs_htpInfra = nullptr;
+  sg_perf_global = false;
+  gs_isGpu = false;
+  gs_isCpu = false;
+
+  // Clear the process-wide device-handle cache (devicesHandles / m_deviceHandle).
+  qnn_app::QnnInferenceEngine::resetStaticDeviceState();
+
+  // This process is now the owner of any newly loaded backend state.
+  sg_backendInitPid = getpid();
+}
+
+// issue#97: called at the entry of every local (in-process) backend operation.
+// If we are in a fork()ed child that inherited backend state from its parent,
+// drop the inherited state first so this process starts from a clean backend.
+static void ensureBackendStateOwnedByThisProcess() {
+  if (sg_backendInitPid != -1 && getpid() != sg_backendInitPid) {
+    resetAppBuilderBackendForForkedChild();
+  }
 }
 void SetProcInfo(std::string proc_name, uint64_t epoch) {
     setEpoch(epoch);
@@ -234,6 +419,16 @@ bool SetLogLevel(int32_t log_level, const std::string log_path) {
 }
 
 bool SetPerfProfileGlobal(const std::string& perf_profile) {
+    // issue#97: in a fork()ed child that re-initialized the backend in a fresh
+    // link-map namespace, skip the global HTP perf profile. Applying it here
+    // talks power/perf config to the DSP from the child and fails (the DSP
+    // power state is owned by the parent's sessions), and the failed
+    // setPowerConfig() corrupts the shared DSP state so a later context create
+    // in the parent fails with "could not initialize memory" (err 1002).
+    if (sg_useNewNamespace) {
+        QNN_WAR("SetPerfProfileGlobal: skipping global perf profile in fork()ed child\n");
+        return true;
+    }
     // In cross-process mode the model lives in the Svc child process, so the
     // perf profile must be applied there. Forward to all Svc processes; if any
     // exist, that is authoritative and we return its result. With no Svc process
@@ -271,6 +466,13 @@ bool SetPerfProfileGlobal(const std::string& perf_profile) {
 }
 
 bool RelPerfProfileGlobal() {
+    // issue#97: mirror SetPerfProfileGlobal - nothing was set in a fork()ed
+    // child, and releasing would tear down DSP perf state that does not belong
+    // to this process (observed: destroy perf context failure -> SSR).
+    if (sg_useNewNamespace) {
+        QNN_WAR("RelPerfProfileGlobal: skipping global perf profile release in fork()ed child\n");
+        return true;
+    }
     // Mirror SetPerfProfileGlobal: forward to Svc processes in cross-process mode.
     if (!sg_proc_info_map.empty()) {
         return TalkToSvc_RelPerfProfileGlobal();
@@ -457,6 +659,10 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
                        std::vector<LoraAdapter>& lora_adapters,
                        bool async, const std::string& input_data_type, const std::string& output_data_type, uint32_t deviceID=0, std::string coreIdsStr="", const std::vector<std::string>& enable_graphs={}) {
   QNN_INFO("LibAppBuilder::ModelInitialize: %s \n", model_name.c_str());
+
+  // issue#97: if this process is a fork()ed child that inherited the parent's
+  // QNN backend state, discard the inherited state before creating a context.
+  ensureBackendStateOwnedByThisProcess();
 
   bool result = false;
 

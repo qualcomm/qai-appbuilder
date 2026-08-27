@@ -52,6 +52,28 @@ void *dlOpen(const char *filename, int flags);
 
 //---------------------------------------------------------------------------
 /// @brief
+///   Loads a shared object into the link-map namespace identified by lmid
+///   (glibc dlmopen). Used on Linux to give a fork()ed child a fresh copy of
+///   the QNN/fastrpc client libraries whose inherited static state (rpcmem
+///   pool, fastrpc session handles) is invalid in the child. lmid is a plain
+///   long here to keep this header platform-neutral; on non-Linux platforms
+///   this falls back to a plain dlOpen() into the base namespace.
+///   NOTE: dlmopen does NOT accept RTLD_GLOBAL, so DL_GLOBAL is dropped when
+///   lmid is not the base namespace.
+///   (issue#97: fork()ed child QNN backend isolation)
+/// @param lmid
+///   The namespace to load into; 0 (LM_ID_BASE) means the default namespace.
+/// @param filename
+///   Pathname of the shared object.
+/// @param flags
+///   Same flag values as dlOpen.
+/// @return
+///   On success, a non-NULL handle. On error, NULL.
+//---------------------------------------------------------------------------
+void *dlOpenInNamespace(long lmid, const char *filename, int flags);
+
+//---------------------------------------------------------------------------
+/// @brief
 ///   Obtain address of a symbol in a shared object or executable
 /// @param handle
 ///   A handle of a dynamic loaded shared object returned by dlopen

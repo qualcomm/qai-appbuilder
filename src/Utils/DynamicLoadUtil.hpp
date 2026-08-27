@@ -62,7 +62,8 @@ StatusCode getQnnFunctionPointers(std::string backendPath,
                                   qnn_app::QnnFunctionPointers* qnnFunctionPointers,
                                   void** backendHandle,
                                   bool loadModelLib,
-                                  void** modelHandleRtn);
+                                  void** modelHandleRtn,
+                                  long loadLmid = 0 /* LM_ID_BASE */);  // issue#97: fork()ed child loads backend into a fresh link-map namespace
 StatusCode getQnnSystemFunctionPointers(std::string systemLibraryPath,
                                         qnn_app::QnnFunctionPointers* qnnFunctionPointers,
                                         void** systemLibraryHandleRtn);  // zw. Save systemHandle for free later.

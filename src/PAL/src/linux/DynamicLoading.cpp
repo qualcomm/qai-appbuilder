@@ -8,6 +8,7 @@
 
 #include <dlfcn.h>
 #include <stdlib.h>
+#include <link.h>  // issue#97: Lmid_t / LM_ID_BASE for dlOpenInNamespace (dlmopen)
 
 #include "PAL/Debug.hpp"
 #include "PAL/DynamicLoading.hpp"
@@ -28,6 +29,34 @@ void *pal::dynamicloading::dlOpen(const char *filename, int flags) {
   }
 
   return ::dlopen(filename, realFlags);
+}
+
+// issue#97: dlmopen wrapper - load a library into a specific link-map
+// namespace. Used by the fork()ed-child backend reset to get a fresh copy of
+// the QNN/fastrpc client libraries with clean static state (rpcmem pool /
+// fastrpc session handles) instead of the parent's inherited ones.
+void *pal::dynamicloading::dlOpenInNamespace(long lmid, const char *filename, int flags) {
+  int realFlags = 0;
+
+  if (flags & DL_NOW) {
+    realFlags |= RTLD_NOW;
+  }
+
+  if (flags & DL_LOCAL) {
+    realFlags |= RTLD_LOCAL;
+  }
+
+  // dlmopen does not accept RTLD_GLOBAL (EINVAL); drop it for non-base
+  // namespaces. Local visibility is fine: QNN resolves symbols relative to its
+  // own handles.
+  if ((flags & DL_GLOBAL) && lmid == LM_ID_BASE) {
+    realFlags |= RTLD_GLOBAL;
+  }
+
+  if (lmid == LM_ID_BASE) {
+    return ::dlopen(filename, realFlags);
+  }
+  return ::dlmopen((Lmid_t)lmid, filename, realFlags);
 }
 
 void *pal::dynamicloading::dlSym(void *handle, const char *symbol) {

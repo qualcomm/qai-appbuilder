@@ -175,6 +175,14 @@ class QnnInferenceEngine {
   StatusCode initializePerformance();
   StatusCode destroyPerformance();
 
+  // issue#97: reset the process-wide device-handle cache (devicesHandles /
+  // devicesRefCounts / the shared static m_deviceHandle). Called from
+  // LibAppBuilder when a QNNContext is created in a process that differs from
+  // the one which originally loaded the QNN backend (i.e. a fork()ed child).
+  // Without this, the child reuses the parent's inherited Qnn_DeviceHandle_t,
+  // corrupting DSP-side state shared with the parent.
+  static void resetStaticDeviceState();
+
   virtual ~QnnInferenceEngine();
 
  private:

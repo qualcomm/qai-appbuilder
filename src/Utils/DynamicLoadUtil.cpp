@@ -38,9 +38,17 @@ dynamicloadutil::StatusCode dynamicloadutil::getQnnFunctionPointers(
     qnn_app::QnnFunctionPointers* qnnFunctionPointers,
     void** backendHandleRtn,
     bool loadModelLib,
-    void** modelHandleRtn) {
-  void* libBackendHandle = pal::dynamicloading::dlOpen(
-      backendPath.c_str(), pal::dynamicloading::DL_NOW | pal::dynamicloading::DL_GLOBAL);
+    void** modelHandleRtn,
+    long loadLmid) {
+  // issue#97: when loadLmid is not the base namespace (a fork()ed child), load
+  // the backend into a fresh link-map namespace so the QNN/fastrpc client
+  // libraries get clean static state instead of the parent's inherited
+  // rpcmem/fastrpc handles.
+  void* libBackendHandle = (loadLmid == 0)
+      ? pal::dynamicloading::dlOpen(
+            backendPath.c_str(), pal::dynamicloading::DL_NOW | pal::dynamicloading::DL_GLOBAL)
+      : pal::dynamicloading::dlOpenInNamespace(
+            loadLmid, backendPath.c_str(), pal::dynamicloading::DL_NOW | pal::dynamicloading::DL_LOCAL);
   if (nullptr == libBackendHandle) {
     QNN_ERROR("Unable to load backend. pal::dynamicloading::dlError(): %s",
               pal::dynamicloading::dlError());

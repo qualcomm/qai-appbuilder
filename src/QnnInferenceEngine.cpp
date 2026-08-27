@@ -1,4 +1,4 @@
-﻿//==============================================================================
+//==============================================================================
 //
 // Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 // 
@@ -1400,6 +1400,19 @@ static std::string makeDeviceKey(uint32_t deviceId, const std::vector<uint32_t>&
     oss << cores[i];
   }
   return oss.str();
+}
+
+// issue#97: drop all inherited device handles when running in a fork()ed child
+// process. The handles (and the refcounts) were created by the parent and are
+// not valid in the child; reusing them poisons the shared DSP state so that a
+// later context create in the parent fails with "could not initialize memory".
+// We intentionally leak the handle values instead of calling deviceFree() on
+// them (tearing down inherited handles from the child is not safe).
+void qnn_app::QnnInferenceEngine::resetStaticDeviceState() {
+  std::lock_guard<std::mutex> lk(devicesHandlesMutex);
+  devicesHandles.clear();
+  devicesRefCounts.clear();
+  m_deviceHandle = nullptr;
 }
 
 qnn_app::StatusCode qnn_app::QnnInferenceEngine::createDevice() {
