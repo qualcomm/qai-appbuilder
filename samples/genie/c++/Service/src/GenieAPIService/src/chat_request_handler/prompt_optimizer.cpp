@@ -180,6 +180,10 @@ std::string PromptOptimizer::BuildSystemContext(const nlohmann::ordered_json& re
             filtered_skills = FilterSkillsByRelevance(runtime_skills, relevance_keywords, ComputeRelevanceTokenBudget());
         }
     }
+    // 供 PromptLedger 可观测性回报使用：不新增第二套统计，直接写入 last_stats_
+    // （与 OptimizeToolsPrompt 写入的 tools_tier/total/kept 互不覆盖）
+    last_stats_.skills_total = runtime_skills.size();
+    last_stats_.skills_kept = filtered_skills.size();
 
     // 1a. 身份声明（始终输出，与是否有 SKILL 无关）
     if (se.identity_intro && !config.system_prompts.identity_intro.empty()) {
@@ -568,7 +572,17 @@ std::vector<std::string> PromptOptimizer::BuildRelevanceKeywords(
         }
     };
 
+    // CJK 相邻二字组（bigram）：BuildRelevanceKeywords 默认逐字符切分中文（单字词元
+    // 噪声大，如"的"几乎命中一切），额外生成相邻两个非标点 CJK 字符的二字组
+    // （如"上海的天气怎么样"生成"上海""海的""的天""天气"...），提升"中文提问 vs
+    // 中文技能描述"场景的匹配精度；不跨标点/空格生成，也不产生中英翻译映射（不会让
+    // "天气"命中"weather"——中文提问命中纯英文工具名真正生效的是下面 Filter 函数里
+    // 的 zero_hit_keep_all 全零分兜底，这里只是锦上添花）。cjk_bigram=false 时逐字节
+    // 回退：不生成任何 bigram 词元，只保留单字词元。
+    const bool cjk_bigram_enabled = model_config_.GetPromptOptimizationConfig().relevance_filter.cjk_bigram;
+
     std::string current_token;
+    std::string prev_cjk_char;  // 上一个连续 CJK 字符，遇到 ASCII/标点边界时清空
     size_t i = 0;
     while (i < lower_corpus.size()) {
         auto [cp, len] = DecodeUtf8CodePoint(lower_corpus, i);
@@ -578,8 +592,10 @@ std::vector<std::string> PromptOptimizer::BuildRelevanceKeywords(
             } else {
                 flush_token(current_token);
             }
+            prev_cjk_char.clear();  // ASCII 边界，中断 bigram 连续性
         } else if (IsCjkPunctuationOrSpace(cp)) {
             flush_token(current_token);
+            prev_cjk_char.clear();  // 标点边界，bigram 不跨标点生成
         } else {
             // 非标点的多字节字符（如中文汉字）：与 ASCII 词元切分开，逐字符独立成词
             flush_token(current_token);
@@ -587,6 +603,13 @@ std::vector<std::string> PromptOptimizer::BuildRelevanceKeywords(
             if (seen.insert(ch).second) {
                 keywords.push_back(ch);
             }
+            if (cjk_bigram_enabled && !prev_cjk_char.empty()) {
+                std::string bigram = prev_cjk_char + ch;
+                if (seen.insert(bigram).second) {
+                    keywords.push_back(bigram);
+                }
+            }
+            prev_cjk_char = ch;
         }
         i += len;
     }
@@ -681,6 +704,25 @@ RuntimeSkillMappings PromptOptimizer::FilterSkillsByRelevance(
         }
     }
 
+    // 全零分兜底：keywords 非空但全部候选都得 0 分（典型场景：中文提问 vs 纯英文
+    // SKILL 名，中文逐字/bigram 分词永远不会匹配英文单词），与上面 keywords.empty()
+    // 分支是同一性质的"无法判断相关性≠确定无关"，理应同样整段回退保留，而不是
+    // 让技能目录对模型隐身。zero_hit_keep_all=false 时逐字节回退当前行为（全零分
+    // 仍返回空集合）。
+    const auto& relevance_cfg = model_config_.GetPromptOptimizationConfig().relevance_filter;
+    if (scored.empty()) {
+        if (relevance_cfg.zero_hit_keep_all) {
+            My_Log{My_Log::Level::kInfo} << "[FilterSkillsByRelevance] All " << all_skills.size()
+                                          << " candidate(s) scored zero, zero_hit_keep_all bypassing filter ("
+                                          << all_skills.size() << " skill(s) kept as-is)" << std::endl;
+            return all_skills;
+        }
+        My_Log{My_Log::Level::kInfo} << "[FilterSkillsByRelevance] All " << all_skills.size()
+                                      << " candidate(s) scored zero, zero_hit_keep_all disabled, "
+                                         "returning empty set (legacy behavior)" << std::endl;
+        return filtered;
+    }
+
     // 按分数降序排序；分数相同时用名称做次级排序键，避免 unordered_map 遍历顺序不确定
     std::sort(scored.begin(), scored.end(), [](const auto& a, const auto& b) {
         if (a.second != b.second) return a.second > b.second;
@@ -746,6 +788,36 @@ nlohmann::ordered_json PromptOptimizer::FilterToolsByRelevance(
         if (score > 0) {
             scored.emplace_back(idx, score);
         }
+    }
+
+    // 全零分兜底：与 FilterSkillsByRelevance 同一性质的"无法判断相关性≠确定无关"，
+    // 但工具的完整 JSON Schema 体量远大于 SKILL 目录条目，无条件全量保留可能反而
+    // 直接把预算打爆，因此不做"全量保留"，而是按 token 预算、原始顺序（无分数可排序，
+    // 保留客户端原始意图顺序）贪心 Top-K——复用与下方完全相同的预算累加方式，不发明
+    // 新的截断方式。zero_hit_keep_all=false 时逐字节回退当前行为（全零分仍返回空数组）。
+    const auto& relevance_cfg = model_config_.GetPromptOptimizationConfig().relevance_filter;
+    if (scored.empty()) {
+        if (!relevance_cfg.zero_hit_keep_all) {
+            My_Log{My_Log::Level::kInfo} << "[FilterToolsByRelevance] All " << tools_array.size()
+                                          << " candidate(s) scored zero, zero_hit_keep_all disabled, "
+                                             "returning empty set (legacy behavior)" << std::endl;
+            return filtered;
+        }
+        size_t zero_hit_used_tokens = 0;
+        for (size_t idx = 0; idx < tools_array.size(); ++idx) {
+            const auto& tool = tools_array[idx];
+            size_t item_tokens = CountTokens(tool.dump());
+            if (zero_hit_used_tokens + item_tokens > token_budget) {
+                break;
+            }
+            zero_hit_used_tokens += item_tokens;
+            filtered.push_back(tool);
+        }
+        My_Log{My_Log::Level::kInfo} << "[FilterToolsByRelevance] All " << tools_array.size()
+                                      << " candidate(s) scored zero, zero_hit_keep_all fallback -> "
+                                      << filtered.size() << " kept (original order) within token_budget="
+                                      << token_budget << std::endl;
+        return filtered;
     }
 
     // 按分数降序排序（分数相同保持原始顺序，用 stable_sort）
@@ -959,6 +1031,12 @@ std::string PromptOptimizer::OptimizeToolsPrompt(
         if (tools_array.is_array()) {
             size_t original_tokens = CountTokens(tool_descriptions);
 
+            // PromptLedger 可观测：记录本次实际落到的降级档位（1~4）与相关性过滤后
+            // 候选总数/最终保留数——不新增第二套统计，直接写入既有 last_stats_。
+            int tier = 1;
+            size_t tools_total = tools_array.size();
+            size_t tools_kept_count = 0;
+
             // Tier 1：已知工具用 GetOptimizedToolDefinition 的预定义精简定义；
             // 未知工具退化为 GenerateBasicTypeScriptDefinition
             // 生成的基础签名，而不是原样保留完整 JSON Schema——这曾是压缩对映射表外
@@ -977,12 +1055,14 @@ std::string PromptOptimizer::OptimizeToolsPrompt(
                 std::string optimized_def = GetOptimizedToolDefinition(tool_name);
                 if (!optimized_def.empty()) {
                     optimized_tools += optimized_def + "\n";
+                    tools_kept_count++;
                     My_Log{My_Log::Level::kDebug} << "[Optimizer] Optimized tool: " << tool_name << std::endl;
                     continue;
                 }
 
                 std::string basic_def = GenerateBasicTypeScriptDefinition(tool);
                 optimized_tools += (!basic_def.empty() ? basic_def : tool.dump()) + "\n";
+                tools_kept_count++;
                 My_Log{My_Log::Level::kDebug} << "[Optimizer] Generated basic signature for: " << tool_name << std::endl;
             }
 
@@ -992,18 +1072,26 @@ std::string PromptOptimizer::OptimizeToolsPrompt(
             if (CountTokens(result) > token_budget) {
                 optimized_tools = StripToolCommentLines(optimized_tools);
                 result = wrap(optimized_tools);
+                tier = 2;
+                // tools_kept_count 不变：仍是同一批工具，只是剥掉了注释文本。
                 My_Log{My_Log::Level::kInfo} << "[Optimizer] Tools still over budget after Tier1, stripped comments" << std::endl;
             }
 
             // Tier 3：仍超预算时退化为最简单行签名 name(param1, param2?)
             if (CountTokens(result) > token_budget) {
                 std::string minimal;
+                size_t minimal_kept = 0;
                 for (const auto& tool : tools_array) {
                     std::string sig = BuildMinimalToolSignature(tool);
-                    if (!sig.empty()) minimal += sig + "\n";
+                    if (!sig.empty()) {
+                        minimal += sig + "\n";
+                        minimal_kept++;
+                    }
                 }
                 optimized_tools = minimal;
                 result = wrap(optimized_tools);
+                tier = 3;
+                tools_kept_count = minimal_kept;
                 My_Log{My_Log::Level::kInfo} << "[Optimizer] Tools still over budget after Tier2, degraded to minimal signatures" << std::endl;
             }
 
@@ -1012,13 +1100,17 @@ std::string PromptOptimizer::OptimizeToolsPrompt(
             if (CountTokens(result) > token_budget) {
                 std::istringstream iss(optimized_tools);
                 std::string line, truncated;
+                size_t truncated_kept = 0;
                 while (std::getline(iss, line)) {
                     std::string candidate = truncated + line + "\n";
                     if (CountTokens(wrap(candidate)) > token_budget) break;
                     truncated = candidate;
+                    truncated_kept++;
                 }
                 optimized_tools = truncated;
                 result = wrap(optimized_tools);
+                tier = 4;
+                tools_kept_count = truncated_kept;
                 My_Log{My_Log::Level::kWarning} << "[Optimizer] Tool list truncated to fit token budget of "
                                                  << token_budget << " tokens" << std::endl;
             }
@@ -1026,14 +1118,21 @@ std::string PromptOptimizer::OptimizeToolsPrompt(
             size_t optimized_tokens = CountTokens(optimized_tools);
             float savings = ComputeSavingsPercent(original_tokens, optimized_tokens);
 
+            last_stats_.tools_tier = tier;
+            last_stats_.tools_total = tools_total;
+            last_stats_.tools_kept = tools_kept_count;
+
             My_Log{My_Log::Level::kDebug} << "[Optimizer] Tools - Original: " << original_tokens
                                            << " tokens, Optimized: " << optimized_tokens
                                            << " tokens, Savings: " << savings << "%" << std::endl;
         }
     } catch (const std::exception& e) {
         My_Log{} << "Failed to parse/optimize tools: " << e.what() << std::endl;
-        // 解析失败，使用原始工具描述
+        // 解析失败：使用原始工具描述，账本档位归零（PromptLedger 约定：tier=0 表示未压缩）。
         result = wrap(tool_descriptions);
+        last_stats_.tools_tier = 0;
+        last_stats_.tools_total = 0;
+        last_stats_.tools_kept = 0;
     }
 
     return result;

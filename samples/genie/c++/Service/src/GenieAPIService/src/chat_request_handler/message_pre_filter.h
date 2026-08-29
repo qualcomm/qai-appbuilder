@@ -35,8 +35,11 @@ struct OptimizedMessages {
     size_t dropped_count;
     bool success;
     std::string error_message;
+    // Phase 4（FitMessagesToContext 内的紧急截断）是否被实际触发过；供 PromptLedger 回报
+    // 调用方「本轮最末尾的巨型 tool 响应是否被紧急截断过」。
+    bool emergency_truncated;
 
-    OptimizedMessages() : total_tokens(0), dropped_count(0), success(false) {}
+    OptimizedMessages() : total_tokens(0), dropped_count(0), success(false), emergency_truncated(false) {}
 };
 
 // ========== 消息预过滤器 ==========

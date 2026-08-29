@@ -422,6 +422,20 @@ struct PromptOptimizationConfig {
         bool enabled = true;                     // 总开关
         size_t name_token_weight = 3;            // 名称子词命中权重
         size_t description_keyword_weight = 1;   // 描述关键词命中权重
+        // 全零分兜底：中文提问与纯英文 SKILL/工具名之间中文逐字/bigram 分词永远不会
+        // 命中英文单词，导致全部候选得 0 分后被当作"全部不相关"整段清空——这与
+        // keywords.empty() 的"无法判断相关性"是同一性质的情形，理应同样回退保留。
+        // true（默认）：全部候选得 0 分时按 token 预算回退保留（skills 全量；
+        //   tools 按原始顺序 Top-K），语义上等价于"无法判断相关性≠确定无关"。
+        // false：逐字节回退到当前行为（全零分仍返回空集合，技能/工具目录整段消失）。
+        bool zero_hit_keep_all = true;
+        // CJK 相邻二字组（bigram）词元：BuildRelevanceKeywords 默认逐字符切分中文
+        // （单字词元噪声大），额外生成相邻两个非标点 CJK 字符的二字组（如"天气"
+        // "上海"），只解决"中文提问 vs 中文技能描述"场景，不产生中英翻译映射
+        // （不会让"天气"命中"weather"——中文提问命中纯英文工具名真正生效的是
+        // 上面的 zero_hit_keep_all，bigram 只是锦上添花）。false 时逐字节回退：
+        // 不生成任何 bigram 词元，只保留单字词元。
+        bool cjk_bigram = true;
     } relevance_filter;
 
     // ── 上下文窗口分配 ──────────────────────────────────────
@@ -445,11 +459,36 @@ struct PromptOptimizationConfig {
     // 当最后一条 tool 消息超大导致 context overflow 时的兜底机制
     struct EmergencyTruncationConfig {
         bool enabled = true;                // 是否启用紧急截断（默认 true）
-        float max_truncation_ratio = 0.40f; // 最大截断比例（0.0-1.0）；
+        float max_truncation_ratio = 0.95f; // 最大截断比例（0.0-1.0）；
                                             // 若需要截断的 token 数超过最后一条 tool 消息的此比例，
-                                            // 则放弃截断，直接走 local_input_overflow 流程；默认 40%
+                                            // 则放弃截断，直接走 local_input_overflow 流程；默认 95%。
+                                            // 注：ContentCondenser（见 content_condenser.h）本身已具备
+                                            // 「预算过小退化为纯头部保留」的兜底，可安全处理任意高压缩比，
+                                            // 此阈值只需拦截「就算清空整条 tool 消息也不够」的极端病态场景，
+                                            // 不应再按旧的「仅保头」截断逻辑设置成 40% 这类保守值——否则
+                                            // 超大 tool 响应（如 80K 字符压进 8K 上下文）会被直接判定放弃
+                                            // 截断、转入 local_input_overflow，而不是走 Phase 4 真正截断。
         int safety_margin_tokens = 30;      // 安全余量（token 数）；截断时额外预留，防止边界情况；默认 30
     } emergency_truncation;
+
+    // ── 保真截断配置（ContentCondenser：token 口径 + 头尾双保留 + 丢弃留痕）───
+    // 所有字段均可独立关闭，关闭后逐字节回退到该特性引入之前的行为：
+    //   budget_unit="chars"     → 恢复纯字符阈值语义（不接入 tokenizer，token_len 传 nullptr）
+    //   preserve_tail=false     → 退化为仅保留头部（tail_ratio 在传参时强制视为 0）
+    //   extract_high_signal=false → 不提取高信号行
+    //   drop_placeholder=false  → 整条丢弃旧消息时不插入占位痕迹
+    struct FidelityConfig {
+        std::string budget_unit = "tokens";     // "tokens" 或 "chars"；tokens 模式下 *_compress_len
+                                                 // 按既有 4:1 估算比例换算为 token 预算，字符值继续
+                                                 // 作为快筛与硬上限，不产生新魔数
+        bool   preserve_tail = true;            // false 时逐字节回退到仅保留头部
+        double tail_ratio = 0.30;               // 尾部占保留额度的比例
+        bool   extract_high_signal = true;      // 是否提取高信号行（错误/异常/退出码等）
+        bool   drop_placeholder = true;         // 整条丢弃旧消息后是否插入占位痕迹
+        size_t json_head_items = 3;             // JSON 数组截断保留的首部项数
+        size_t json_tail_items = 1;             // JSON 数组截断保留的尾部项数
+        size_t max_token_probe_per_message = 8; // 单条消息 tokenizer 调用次数上限（性能护栏）
+    } fidelity;
 
     // ── 原始系统提示词段落过滤配置 ──────────────────────────
     // 通过配置文件选定哪些原始提示词段落被追加到优化后的提示词中

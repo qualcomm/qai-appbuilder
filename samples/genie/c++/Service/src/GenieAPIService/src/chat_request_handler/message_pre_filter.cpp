@@ -7,6 +7,7 @@
 //==============================================================================
 
 #include "message_pre_filter.h"
+#include "content_condenser.h"
 #include "../processor/harmony.h"
 #include "../gateway/security/security_utils.h"
 #include <utils.h>
@@ -160,6 +161,20 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
             }
         }
 
+        // 找到最后一条 tool 消息的位置——它可能出现在 last_user_index 之前（例如
+        // assistant(tool_calls) → tool(响应) → user(追问) 这种真实存在的对话形态）。
+        // PreFilterMessages 的 Phase 2B 已把这条消息标记为「truncate-protected」并跳过
+        // 压缩，本意是留给下面的 Phase 4 紧急截断（ContentCondenser 头尾双保留）兜底；
+        // 如果这里不同步保护它，Step 3a/3b 会把它当作普通旧消息连同其 assistant 一起
+        // 整段丢弃，Phase 4 永远等不到执行机会，尾部 canary/退出码等关键信息因此丢失。
+        int last_tool_index = -1;
+        for (int i = (int)final_messages.size() - 1; i >= 0; i--) {
+            if (final_messages[i].role == "tool") {
+                last_tool_index = i;
+                break;
+            }
+        }
+
         // 计算 recent_boundary：keep_recent_full 条消息之前的边界
         auto compute_recent_boundary = [&]() -> int {
             if (last_user_index < 0) return 0;
@@ -168,10 +183,12 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
         };
 
         // 判断索引 idx 是否受保护（不可丢弃）
-        // 保护条件：idx >= last_user_index（最后一条 user 及其之后的消息）
+        // 保护条件：idx >= last_user_index（最后一条 user 及其之后的消息），
+        // 或 idx >= last_tool_index（最后一条 tool 消息及其之后的消息，交给 Phase 4 兜底）。
         auto is_fit_protected = [&](int idx) -> bool {
-            if (last_user_index < 0) return false;
-            return idx >= last_user_index;
+            if (last_user_index >= 0 && idx >= last_user_index) return true;
+            if (last_tool_index >= 0 && idx >= last_tool_index) return true;
+            return false;
         };
 
         // 尝试从 [0, drop_before) 范围内丢弃最旧的一条（或一链）消息
@@ -192,6 +209,10 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
                 // 整条 assistant+tool 链超出 drop_before 边界时，不截断删除（避免孤立 tool 消息）
                 if ((int)drop_count > drop_before) return false;
                 if (drop_count == 0) return false;
+                // 级联范围内含受保护的「最后一条 tool 消息」时放弃整段丢弃——它应交给
+                // 下面的 Phase 4 紧急截断（ContentCondenser 头尾双保留），wholesale 丢弃会
+                // 让 canary/退出码等关键尾部信息在 Phase 4 有机会介入之前就彻底消失。
+                if (last_tool_index >= 0 && last_tool_index < (int)drop_count) return false;
 
                 size_t dropped_tokens = 0;
                 for (size_t k = 0; k < drop_count; k++)
@@ -203,6 +224,8 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
 
                 if (last_user_index >= (int)drop_count) last_user_index -= (int)drop_count;
                 else last_user_index = -1;
+                if (last_tool_index >= (int)drop_count) last_tool_index -= (int)drop_count;
+                else last_tool_index = -1;
 
                 My_Log{My_Log::Level::kDebug}
                     << "[FitMessagesToContext]   Dropped assistant+" << tool_count
@@ -211,8 +234,9 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
                 return true;
             }
 
-            // 孤立 tool 消息警告
+            // 孤立 tool 消息：若正是受保护的最后一条 tool 消息，同样放弃丢弃，交给 Phase 4。
             if (role_to_drop == "tool") {
+                if (last_tool_index == 0) return false;
                 My_Log{My_Log::Level::kWarning}
                     << "[FitMessagesToContext] Found orphaned tool message at position 0, dropping it" << std::endl;
             }
@@ -225,6 +249,8 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
 
             if (last_user_index >= 1) last_user_index -= 1;
             else last_user_index = -1;
+            if (last_tool_index >= 1) last_tool_index -= 1;
+            else last_tool_index = -1;
 
             My_Log{My_Log::Level::kDebug}
                 << "[FitMessagesToContext]   Dropped oldest message (role: " << role_to_drop
@@ -251,10 +277,16 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
             if (is_fit_protected(0)) {
                 My_Log{My_Log::Level::kWarning}
                     << "[FitMessagesToContext] All remaining messages are protected (last_user_index="
-                    << last_user_index << "), cannot drop further" << std::endl;
+                    << last_user_index << ", last_tool_index=" << last_tool_index
+                    << "), cannot drop further" << std::endl;
                 break;
             }
-            if (!try_drop_oldest_before(last_user_index >= 0 ? last_user_index : (int)final_messages.size())) break;
+            {
+                int drop_before = (int)final_messages.size();
+                if (last_user_index >= 0) drop_before = std::min(drop_before, last_user_index);
+                if (last_tool_index >= 0) drop_before = std::min(drop_before, last_tool_index);
+                if (!try_drop_oldest_before(drop_before)) break;
+            }
         }
 
         // 检查是否仍然超出（保护集本身超出 context_size）
@@ -264,6 +296,7 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
             // 策略：对最后一条 tool 消息（SKILL.md 等超大工具返回）进行强制截断
             // 前置检查：若需截断量超过最后一条 tool 消息的 max_truncation_ratio，则放弃截断
             const auto& et_cfg = model_config_.GetPromptOptimizationConfig().emergency_truncation;
+            const auto& fid_cfg = model_config_.GetPromptOptimizationConfig().fidelity;
             bool phase4_applied = false;
 
             if (et_cfg.enabled) {
@@ -317,10 +350,26 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
                             : 0;
 
                         if (target_chars > 0 && target_chars < tool_content.length()) {
-                            // UTF-8 安全截断
-                            std::string truncated = safe_utf8_truncate(
-                                tool_content, target_chars,
-                                "\n...[Tool response truncated by emergency truncation due to context overflow]");
+                            // 保真截断：高信号行提取 + 头尾双保留，确保最末尾的报错/退出码/
+                            // 结论不会像旧的 safe_utf8_truncate（保头弃尾）那样被整段丢弃。
+                            // 沿用 cfg.fidelity 的开关，与 truncate_content/truncate_tool_content
+                            // 保持一致：preserve_tail=false 时 tail_ratio 视为 0（仅保留头部），
+                            // extract_high_signal/json_head_items/json_tail_items 关闭时同样整段回退。
+                            // token_len 绑定 CountTokens：target_chars 本身已按 token/char 比例估算
+                            // 过一次，这里再用真实 tokenizer 收敛，避免估算误差导致仍然溢出。
+                            CondenseBudget emergency_budget;
+                            emergency_budget.max_chars = target_chars;
+                            emergency_budget.max_tokens = target_tokens;
+                            emergency_budget.tail_ratio = fid_cfg.preserve_tail ? fid_cfg.tail_ratio : 0.0;
+                            emergency_budget.extract_high_signal = fid_cfg.extract_high_signal;
+                            emergency_budget.json_head_items = fid_cfg.json_head_items;
+                            emergency_budget.json_tail_items = fid_cfg.json_tail_items;
+                            emergency_budget.max_token_probe = fid_cfg.max_token_probe_per_message;
+                            std::function<size_t(const std::string&)> emergency_token_len =
+                                [this](const std::string& text) { return CountTokens(text); };
+                            CondenseResult condensed = ContentCondenser::Condense(
+                                tool_content, ContentKind::kToolResponse, emergency_budget, &emergency_token_len);
+                            std::string truncated = condensed.text;
                             final_messages[last_tool_idx].content = truncated;
 
                             // 重新计算 total_tokens
@@ -363,6 +412,8 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
                         << "skipping emergency truncation" << std::endl;
                 }
             }
+
+            result.emergency_truncated = phase4_applied;
 
             // Phase 4 未能解决溢出，进入错误流程
             if (!phase4_applied) {
@@ -408,7 +459,16 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
     }
 
     // 步骤 4: 最终检查
-    if (total_tokens > context_size) {
+    const auto& fidelity_cfg_drop = model_config_.GetPromptOptimizationConfig().fidelity;
+    // 占位符触发条件必须统计「本次请求全部丢弃来源」，不能只看 result.dropped_count（本函数自身的
+    // Step3/Phase4 丢弃）——PreFilterMessages() 的 Step1（消息数上限）/Phase3（批量丢弃最后手段）
+    // 往往在进入本函数前就已丢掉大部分历史（同一个 pre_filter_ 实例、同一次请求，prefilter_stats_
+    // 在 PreFilterMessages() 开头 Reset() 后一直保留到本函数执行完），若只看 result.dropped_count，
+    // 会出现「响应头 Messages-Dropped > 0 但占位符从未插入」的口径不一致（真实 bug，已实测复现）。
+    const size_t total_dropped_all_phases = prefilter_stats_.total_dropped + result.dropped_count;
+    if (total_tokens > context_size ||
+        (total_dropped_all_phases > 0 && fidelity_cfg_drop.drop_placeholder && !final_messages.empty() &&
+         context_size - total_tokens < 20)) {
         // 即使丢弃所有历史消息，仍然超出 contextSize
         result.success = false;
         result.error_message = "Context size exceeded even after dropping all history. "
@@ -417,6 +477,27 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
                               std::to_string(context_size) + " tokens).";
         My_Log{My_Log::Level::kError} << result.error_message << std::endl;
         return result;
+    }
+
+    // 整条丢弃留痕：本次请求（含 PreFilterMessages 阶段）总计有消息被丢弃且 drop_placeholder
+    // 开启时，在保留区首条消息前插入极短占位说明，避免模型对已被丢弃的历史一无所知、在后续回答里
+    // 凭空重建这些事实。占位文案用 total_dropped_all_phases（全部丢弃来源之和）而不是
+    // result.dropped_count，与响应头 X-Genie-Prompt-Messages-Dropped（pf_stats.total_dropped +
+    // optimized.dropped_count，见 model_input_builder.h）口径保持一致。
+    // GenieChatMessage::role 只能是 user/assistant/tool（ChatHistory::AddMessage/
+    // import_from_json 对其它角色会静默产出空内容或直接拒绝新消息），因此占位痕迹不新增
+    // 消息条目——作为保留区首条消息 content 的前缀注入，不占用额外角色槛位，也不改变
+    // 消息数量/角色序列（assistant+tool 配对等既有约束不受影响）。
+    // 关闭 drop_placeholder 时完全不产生这段前缀，逐字节回退到当前行为。
+    if (total_dropped_all_phases > 0 && fidelity_cfg_drop.drop_placeholder && !final_messages.empty()) {
+        std::string placeholder = "[" + std::to_string(total_dropped_all_phases) +
+            " earlier message(s) omitted]\n";
+        total_tokens += CountTokens(placeholder);
+        final_messages[0].content = placeholder + final_messages[0].content;
+        My_Log{My_Log::Level::kDebug} << "[FitMessagesToContext] Inserted drop placeholder for "
+                                       << total_dropped_all_phases << " dropped message(s) (prefilter="
+                                       << prefilter_stats_.total_dropped << " + fit=" << result.dropped_count
+                                       << ")" << std::endl;
     }
 
     // 成功
@@ -1449,85 +1530,62 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
         return flags;
     };
 
-    // 语义感知截断（只有节省足够字符才截断）
-    // 优先在段落/行边界截断
+    // 保真截断（ContentCondenser）：高信号行提取 + 头尾双保留，取代旧的"只保留前缀/仅保头弃尾"
+    // 策略——报错行、退出码、汇总结论多出现在内容尾部，不应被整段丢弃。
+    //
+    // Step 4：预算单位改为 token 口径（cfg.fidelity.budget_unit=="tokens"，默认）——现有字符
+    // 阈值（max_len，即 old/recent/tool_compress_len）按 4 字符≈1 token 的保守估算换算为
+    // token 预算；字符阈值本身继续原样传入 budget.max_chars，充当 Condense 内部第 1 步"长度
+    // 快筛"的判据与最终硬上限，不产生新魔数。budget_unit=="chars" 时 token_len_ptr 为
+    // nullptr、max_tokens=0，逐字节回退到 Step 3（纯字符模式，不接入 tokenizer）。
+    //
+    // 性能护栏：token_len_fn 绑定到 CountTokens()（与 FitMessagesToContext 同一套 per-model
+    // handle 优先、无 handle 时粗略估算的逻辑），只有 Condense 内部快筛判定"内容明显超预算、
+    // 需要收敛"时才会被调用，且二分探测次数不超过 cfg.fidelity.max_token_probe_per_message
+    // （CondenseBudget::max_token_probe）——短消息（长度 ≤ 字符预算）在第 1 步即原样返回，
+    // 完全不触发 tokenizer 调用。
+    const auto& fidelity_cfg = cfg.fidelity;
+    const bool use_token_budget = (fidelity_cfg.budget_unit == "tokens");
+    constexpr size_t kCharsPerTokenEstimate = 4;  // 与 ContentCondenser 内部换算比例一致
+    std::function<size_t(const std::string&)> token_len_fn = [this](const std::string& text) {
+        return CountTokens(text);
+    };
+    const std::function<size_t(const std::string&)>* token_len_ptr = use_token_budget ? &token_len_fn : nullptr;
+
+    // 统一构造 CondenseBudget：preserve_tail=false 时 tail_ratio 强制为 0（等价于仅保留头部，
+    // 逐字节回退到该特性引入之前的行为），extract_high_signal/json_head_items/json_tail_items/
+    // max_token_probe 均直接来自 cfg.fidelity，关闭对应开关即整段回退。
+    auto make_condense_budget = [&](size_t max_len) -> CondenseBudget {
+        CondenseBudget budget;
+        budget.max_chars = max_len;
+        if (use_token_budget) {
+            budget.max_tokens = std::max<size_t>(1, max_len / kCharsPerTokenEstimate);
+        }
+        budget.tail_ratio = fidelity_cfg.preserve_tail ? fidelity_cfg.tail_ratio : 0.0;
+        budget.extract_high_signal = fidelity_cfg.extract_high_signal;
+        budget.json_head_items = fidelity_cfg.json_head_items;
+        budget.json_tail_items = fidelity_cfg.json_tail_items;
+        budget.max_token_probe = fidelity_cfg.max_token_probe_per_message;
+        return budget;
+    };
+
     auto truncate_content = [&](const std::string& content, size_t max_len) -> std::string {
         if (content.length() <= max_len + cfg.min_compress_threshold) return content;
 
-        // 优先在段落边界（\n\n）截断
-        size_t boundary = content.rfind("\n\n", max_len);
-        if (boundary != std::string::npos && boundary >= max_len / 2) {
-            return content.substr(0, boundary) + "\n...[truncated]";
-        }
-
-        // 其次在行边界（\n）截断
-        boundary = content.rfind('\n', max_len);
-        if (boundary != std::string::npos && boundary >= max_len / 2) {
-            return content.substr(0, boundary) + "\n...[truncated]";
-        }
-
-        // 兜底：UTF-8 安全字符截断
-        return safe_utf8_truncate(content, max_len, "...");
+        CondenseBudget budget = make_condense_budget(max_len);
+        CondenseResult condensed = ContentCondenser::Condense(content, ContentKind::kGenericText, budget, token_len_ptr);
+        return condensed.text;
     };
 
-    // JSON 感知的 tool 消息截断函数
-    // tool 消息通常是 JSON 格式的搜索结果、文件内容或 API 响应
-    // 策略（按优先级）：
-    //   1. JSON 数组：只保留前 N 个元素，追加 "[M more items truncated]" 说明
-    //   2. JSON 对象：截断到 max_len 字符，追加 "...[JSON truncated]" 说明
-    //   3. 非 JSON 内容：回退到通用语义感知截断（truncate_content）
+    // JSON 感知的 tool 消息截断函数：tool 消息通常是 JSON 格式的搜索结果、文件内容或 API 响应。
+    // ContentCondenser 内部会判断内容是否为 JSON 数组，命中则保留首 N + 尾 M 项（不再是旧版
+    // "只保留前缀元素"的二分逻辑），未命中则回退到高信号行提取 + 头尾双保留的通用文本路径。
     auto truncate_tool_content = [&](const std::string& content, size_t max_len) -> std::string {
         if (content.length() <= max_len + cfg.min_compress_threshold) return content;
 
-        // 尝试 JSON 解析
-        try {
-            auto j = json::parse(content);
-
-            if (j.is_array() && j.size() > 1) {
-                // JSON 数组：用二分搜索确定最大可保留元素数
-                size_t lo = 0, hi = j.size();
-                while (lo + 1 < hi) {
-                    size_t mid = lo + (hi - lo) / 2;
-                    json tmp = json::array();
-                    for (size_t k = 0; k < mid; k++) tmp.push_back(j[k]);
-                    if (tmp.dump().length() <= max_len) {
-                        lo = mid;
-                    } else {
-                        hi = mid;
-                    }
-                }
-                if (lo >= 1) {
-                    json truncated_arr = json::array();
-                    for (size_t k = 0; k < lo; k++) truncated_arr.push_back(j[k]);
-                    size_t dropped = j.size() - lo;
-                    return truncated_arr.dump() + "\n...[" + std::to_string(dropped) + " more items truncated]";
-                }
-                // lo == 0：即使只保留 1 个元素仍超出，回退到字符截断
-                std::string single = json::array({j[0]}).dump();
-                if (single.length() <= max_len) {
-                    return single + "\n...[" + std::to_string(j.size() - 1) + " more items truncated]";
-                }
-                return truncate_content(single, max_len);
-            }
-
-            if (j.is_object()) {
-                // JSON 对象：序列化后字符截断，追加说明
-                std::string serialized = j.dump(2);
-                if (serialized.length() > max_len) {
-                    size_t boundary = serialized.rfind('\n', max_len);
-                    if (boundary != std::string::npos && boundary >= max_len / 2) {
-                        return serialized.substr(0, boundary) + "\n...[JSON truncated]";
-                    }
-                    return safe_utf8_truncate(serialized, max_len, "...[JSON truncated]");
-                }
-                return serialized;
-            }
-        } catch (...) {
-            // JSON 解析失败（非 JSON 内容），回退到通用语义感知截断
-        }
-
-        // 非 JSON 内容：使用通用语义感知截断
-        return truncate_content(content, max_len);
+        CondenseBudget budget = make_condense_budget(max_len);
+        CondenseResult condensed = ContentCondenser::Condense(content, ContentKind::kToolResponse, budget, token_len_ptr);
+        return condensed.text;
     };
 
     // 初始 token 统计

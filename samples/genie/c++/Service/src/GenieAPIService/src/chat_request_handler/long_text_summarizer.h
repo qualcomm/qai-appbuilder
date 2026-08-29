@@ -56,7 +56,9 @@ public:
 
     // 对 messages 数组执行 Phase -1 摘要化处理
     // 直接修改 messages 中目标消息的 content 字段（仅当摘要成功且更短时）
-    void ProcessMessages(json& messages);
+    // 返回值：本次调用是否实际替换过任意一条消息的 content（供 PromptLedger 回报
+    // 调用方「本轮是否发生过摘要化」），未触发/触发但无收益时返回 false。
+    bool ProcessMessages(json& messages);
 
 private:
     // ── 目标消息识别 ──────────────────────────────────────────

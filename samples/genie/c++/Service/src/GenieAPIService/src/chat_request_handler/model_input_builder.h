@@ -18,6 +18,7 @@
 #include "message_pre_filter.h"
 #include "long_text_summarizer.h"
 #include "summary_cache.h"
+#include "prompt_ledger.h"
 
 
 using json = nlohmann::ordered_json;
@@ -184,7 +185,7 @@ public:
                     is_alive_fn  // 连接存活检测：stream 路径传入 sink.is_writable()，非 stream 为 nullptr
                 );
 
-                summarizer.ProcessMessages(data["messages"]);
+                last_ledger_.summarized = summarizer.ProcessMessages(data["messages"]);
             }
         }
 
@@ -200,6 +201,10 @@ public:
         }
         return model_input_;
     }
+
+    // 本轮压缩账本（只读）：调用方（chat_request_handler.cpp）在 Build() 之后读取，
+    // 非流式写入 X-Genie-Prompt-* 响应头，流式通过 status="prompt_optimized" 帧回报。
+    const PromptLedger &GetLedger() const { return last_ledger_; }
 
 private:
     void ProcessArray(const json &user_content)
@@ -478,6 +483,18 @@ private:
         json tools = (data.contains("tools") && data["tools"].is_array())
                      ? data["tools"] : json::array();
 
+        // PromptLedger 快照：在任何压缩发生之前记录原始规模，不依赖 getenablePromptDebug()（
+        // 因为响应头/流式账本需要在每一次请求上都回报，而不是只在开启调试时才有）。
+        size_t ledger_messages_in = msg.size();
+        std::string ledger_raw_content_concat;
+        for (const auto& ledger_m : msg) {
+            std::string ledger_c = get_json_value(ledger_m, "content", BLANK_STRING);
+            if (!ledger_c.empty()) {
+                ledger_raw_content_concat += ledger_c;
+                ledger_raw_content_concat += "\n";
+            }
+        }
+
         // is_stateless_mode: 当 numResponse == -1（参数 n==-1）时，启用所有压缩优化逻辑
         // 包括系统提示词优化、工具定义优化、消息预过滤（PreFilterMessages）和消息适配（FitMessagesToContext）
         // 修复：使用 instance_config_（per-model）而非 model_config_（全局 IModelConfig）
@@ -488,7 +505,11 @@ private:
         My_Log{My_Log::Level::kDebug} << "[Context] Window size: " << instance_config_->get_context_size() << " tokens" << std::endl;
 
         systemDefaultPrompt = model_input_.system_;
-        
+
+        // PromptLedger 快照：此时 systemDefaultPrompt 仍是优化前的原始系统提示词（下方
+        // PrepareOptimizedSystemAndToolPrompt 会就地重写它），在重写之前先留一份快照。
+        std::string ledger_system_snapshot = systemDefaultPrompt;
+
         // 收集优化前统计信息（延迟打印，避免被 PreFilterMessages 日志打断）
         // 修复：使用注入的 context_（多模型并发安全），而非 model_config_.get_genie_model_handle()
         // 在多模型场景下，get_genie_model_handle() 返回的是全局单模型句柄，会导致所有请求
@@ -521,6 +542,12 @@ private:
         // 优化系统提示词与工具定义（在 PreFilterMessages 之前，只在 is_stateless_mode 时压缩优化，否则原样使用）
         std::string raw_tools_str;  // 原始 tools JSON 字符串（未经 OptimizeToolsPrompt 处理）
         PrepareOptimizedSystemAndToolPrompt(is_stateless_mode, tools, contextSize, is_tool, systemDefaultPrompt, raw_tools_str);
+
+        // PromptLedger 快照：此时 raw_tools_str 已由 PrepareOptimizedSystemAndToolPrompt 内部在优化工具
+        // 定义之前赋值（不依赖 debug 开关），可直接复用。一次 TokenLength 调用估算优化前
+        // 系统提示词 + 原始消息内容 + 原始 tools 字符串的总 token 数，避免逐条多次 tokenize。
+        size_t ledger_tokens_in = context_->TokenLength(
+            ledger_system_snapshot + "\n" + ledger_raw_content_concat + raw_tools_str);
 
         // 必须在 PreFilterMessages 之前追加 /think 或 /no_think，
         // 确保两阶段（PreFilterMessages 和 FitMessagesToContext）使用相同的 system prompt 进行 token 计算。
@@ -573,6 +600,26 @@ private:
 
         {
             size_t final_tokens = context_->TokenLength(modelInputContent);
+
+            // PromptLedger 最终写入：数据源均取自既有统计（MessagePreFilter::GetStats()/
+            // PromptOptimizer::GetLastStats()/optimized 返回值），不引入第二套统计。
+            {
+                const auto& pf_stats = pre_filter_.GetStats();
+                const auto& opt_stats = optimizer_.GetLastStats();
+                last_ledger_.context_size = instance_config_->get_context_size();
+                last_ledger_.tokens_in = ledger_tokens_in;
+                last_ledger_.tokens_out = final_tokens;
+                last_ledger_.messages_in = ledger_messages_in;
+                last_ledger_.messages_kept = optimized.messages.size();
+                last_ledger_.messages_dropped = pf_stats.total_dropped + optimized.dropped_count;
+                last_ledger_.messages_truncated = pf_stats.truncated_count;
+                last_ledger_.tools_tier = opt_stats.tools_tier;
+                last_ledger_.tools_total = opt_stats.tools_total;
+                last_ledger_.tools_kept = opt_stats.tools_kept;
+                last_ledger_.skills_total = opt_stats.skills_total;
+                last_ledger_.skills_kept = opt_stats.skills_kept;
+                last_ledger_.emergency_truncated = optimized.emergency_truncated;
+            }
 
             std::ostringstream log_stream;
             log_stream << "[Normal] Final prompt - Tokens: " << final_tokens;
@@ -877,6 +924,18 @@ private:
         json tools = (data.contains("tools") && data["tools"].is_array())
                      ? data["tools"] : json::array();
 
+        // PromptLedger 快照（Harmony 路径）：在任何压缩发生之前记录原始规模，
+        // 与 BuildPrompt() 同样不依赖 getenablePromptDebug()。
+        size_t ledger_messages_in = msg.size();
+        std::string ledger_raw_content_concat;
+        for (const auto& ledger_m : msg) {
+            std::string ledger_c = get_json_value(ledger_m, "content", BLANK_STRING);
+            if (!ledger_c.empty()) {
+                ledger_raw_content_concat += ledger_c;
+                ledger_raw_content_concat += "\n";
+            }
+        }
+
         bool has_tools = tools.is_array() && !tools.empty();
         if (has_tools) {
             is_tool = true;
@@ -903,6 +962,13 @@ private:
 
         // is_stateless_mode: 当 numResponse == -1（参数 n==-1）时，启用所有压缩优化逻辑
         bool is_stateless_mode = instance_config_->IsStatelessMode();
+
+        // PromptLedger 快照（Harmony 路径）：instructions 是优化前的原始 system 指令
+        // （传给 PrepareOptimizedHarmonySystemMessages 的是 const 引用，函数内部不会修改它），
+        // 一次 TokenLength 调用估算优化前 instructions + 原始消息内容 + 原始 tools 的总 token 数。
+        std::string ledger_raw_tools_str = has_tools ? tools.dump() : "";
+        size_t ledger_tokens_in = context_->TokenLength(
+            instructions + "\n" + ledger_raw_content_concat + ledger_raw_tools_str);
 
         std::string system_msg;
         std::string developer_msg;
@@ -1458,6 +1524,9 @@ private:
         // 修复：使用注入的 context_（多模型并发安全），而非 model_config_.get_genie_model_handle()
         // 在多模型场景下，get_genie_model_handle() 返回的是全局单模型句柄，会导致所有请求
         // 使用同一个模型句柄进行 TokenLength 计算，破坏多模型路由的正确性。
+        // PromptLedger 只需要一次 tokenize：不依赖 getenablePromptDebug()，无论调试块是否执行
+        // 都要素化计算，debug 块内直接复用这个结果，避免重复调用 TokenLength(result)。
+        size_t ledger_final_tokens = context_->TokenLength(result);
         if (is_stateless_mode && instance_config_->getenablePromptDebug()) {
             // 包装 context_ 为非拥有 shared_ptr，传给需要 shared_ptr 参数的统计辅助函数
 
@@ -1535,10 +1604,31 @@ private:
             ComputeAndPrintFitStats(optimized, context_, system_tokens, tools_tokens, contextSize);
 
             // 4. 打印最终提示词统计信息
-            size_t final_tokens = context_->TokenLength(result);
-            PromptStatsHelper::PrintFinalStats(final_tokens, result.length(), contextSize, has_tools,
+            PromptStatsHelper::PrintFinalStats(ledger_final_tokens, result.length(), contextSize, has_tools,
                                                instance_config_->get_context_size());
         }
+
+        // PromptLedger 最终写入（Harmony 路径）：不依赖 getenablePromptDebug()，确保每一次请求都回报。
+        // 数据源与 BuildPrompt() 完全一致（MessagePreFilter::GetStats()/PromptOptimizer::GetLastStats()/
+        // optimized 返回值），不引入第二套统计。
+        {
+            const auto& pf_stats = pre_filter_.GetStats();
+            const auto& opt_stats = optimizer_.GetLastStats();
+            last_ledger_.context_size = instance_config_->get_context_size();
+            last_ledger_.tokens_in = ledger_tokens_in;
+            last_ledger_.tokens_out = ledger_final_tokens;
+            last_ledger_.messages_in = ledger_messages_in;
+            last_ledger_.messages_kept = optimized.messages.size();
+            last_ledger_.messages_dropped = pf_stats.total_dropped + optimized.dropped_count;
+            last_ledger_.messages_truncated = pf_stats.truncated_count;
+            last_ledger_.tools_tier = opt_stats.tools_tier;
+            last_ledger_.tools_total = opt_stats.tools_total;
+            last_ledger_.tools_kept = opt_stats.tools_kept;
+            last_ledger_.skills_total = opt_stats.skills_total;
+            last_ledger_.skills_kept = opt_stats.skills_kept;
+            last_ledger_.emergency_truncated = optimized.emergency_truncated;
+        }
+
         return result;
     }
 
@@ -1804,6 +1894,7 @@ private:
         model_input_.audio_.clear();
         model_input_.agent_type_ = "sub";  // 默认为子 Agent，由 Build() 中检测后覆盖
         tool_call_id_to_name_.clear();
+        last_ledger_ = PromptLedger{};
     }
 
     static inline const std::string BLANK_STRING;
@@ -1829,6 +1920,10 @@ private:
     // 使 ExtractSkillsFromRequest 无法从 request_data_ 中解析到 <available_skills> XML，
     // 导致本地模型路径的 Skill Catalog 丢失。
     json request_data_;
+
+    // 本轮压缩账本（PromptLedger）：Build()/BuildPrompt()/BuildHarmonyPrompt() 内部填充，
+    // 通过 GetLedger() 只读暴露。Reset() 会将其重置为默认值。
+    PromptLedger last_ledger_;
 };
 
 #endif //PROMPT_H

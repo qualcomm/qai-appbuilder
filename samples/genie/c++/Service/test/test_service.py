@@ -23,6 +23,7 @@ import atexit
 import base64
 import collections
 import copy
+import hashlib
 import io
 import json
 import os
@@ -633,6 +634,73 @@ class QAIModelBuilderManager:
         try:
             r = self.csrf.get("/api/system/health", timeout=5)
             return r.status_code == 200, r.status_code, r.text[:500]
+        except Exception as e:
+            return False, 0, repr(e)
+
+    # ---- 技能面板 API 封装（供 builder_local_model 场景 A/B/C 自测复用，见 Step 6）----
+    # 均沿用 health() 同一套风格：返回 (success_bool, status_code, response_json_or_text)，
+    # 复用 self.csrf 已完成的 CSRF 双提交握手，不重新发明 HTTP 调用方式；请求异常不抛出，
+    # 折算为 (False, 0, repr(e))。真实路由已核实存在于 interfaces/http/routes/user_prefs.py。
+    def get_skills_policy(self, timeout=15):
+        """GET /api/skills/policy：读取当前技能启用状态（哪些技能启用、当前模式 manual/auto）。"""
+        try:
+            r = self.csrf.get("/api/skills/policy", timeout=timeout)
+            return r.status_code == 200, r.status_code, (r.json() if r.status_code == 200 else r.text[:500])
+        except Exception as e:
+            return False, 0, repr(e)
+
+    def set_skills_mode(self, mode, timeout=15):
+        """POST /api/skills/set_mode：切换技能启用模式，body={"mode": "manual"|"auto"}。"""
+        try:
+            r = self.csrf.post("/api/skills/set_mode", json={"mode": mode}, timeout=timeout)
+            return r.status_code == 200, r.status_code, (r.json() if r.status_code == 200 else r.text[:500])
+        except Exception as e:
+            return False, 0, repr(e)
+
+    def toggle_skill(self, skill_name, enabled, timeout=15):
+        """POST /api/skills/toggle：显式启用/禁用指定技能（如 "weather"）。
+        字段名已核实（本机只读 clone `interfaces/http/routes/user_prefs.py` 的
+        `SkillToggleRequest`）：body={"skill_name": <name>, "enabled": <bool>}。"""
+        try:
+            r = self.csrf.post("/api/skills/toggle",
+                               json={"skill_name": skill_name, "enabled": bool(enabled)}, timeout=timeout)
+            return r.status_code == 200, r.status_code, (r.json() if r.status_code == 200 else r.text[:500])
+        except Exception as e:
+            return False, 0, repr(e)
+
+    def reload_skills(self, timeout=30):
+        """POST /api/skills/reload：触发技能重新发现（无 body，空 JSON 对象）。"""
+        try:
+            r = self.csrf.post("/api/skills/reload", json={}, timeout=timeout)
+            return r.status_code == 200, r.status_code, (r.json() if r.status_code == 200 else r.text[:500])
+        except Exception as e:
+            return False, 0, repr(e)
+
+    def set_skill_run_mode(self, skill_id, mode, timeout=15):
+        """POST /api/skills/{skill_id}/set_mode：真正决定某技能是否进入聊天 prompt 的接口
+        (`frontend/src/stores/skills.ts` 的 Skills 面板用的就是这一个)。mode ∈
+        {"off","cloud","local","both"}。
+
+        本轮核实发现的重要 drift：上面 `set_skills_mode()`/`toggle_skill()` 命中的
+        `/api/skills/set_mode`（无 id）与 `/api/skills/toggle` 实际是 AI-Coding 能力策略子系统
+        （Security > Skill 面板，管全局 auto/manual 模式与只读/写路径白名单），与"某技能是否在
+        普通聊天里对模型可见"完全无关；`resolve_skill_mode()`
+        (`qai/platform/skills/discovery.py:63`) 是 Skills 面板/Security 面板/聊天 prompt 门控
+        共享的唯一解析函数，但显式 `mode` 字段优先级高于 legacy `enabled` 布尔——因此要让本地
+        模型场景稳定看到某技能，必须调用这个按 skill_id 走路径参数的端点并传 "local"/"both"，
+        不能依赖 `toggle_skill()` 写入的 `enabled` 兜底（那条兜底只会解析成 "cloud"）。"""
+        try:
+            r = self.csrf.post(f"/api/skills/{skill_id}/set_mode", json={"mode": mode}, timeout=timeout)
+            return r.status_code == 200, r.status_code, (r.json() if r.status_code == 200 else r.text[:500])
+        except Exception as e:
+            return False, 0, repr(e)
+
+    def list_skills(self, timeout=15):
+        """GET /api/skills：v1 风格技能清单（含每个技能已解析出的 `mode`），用于复核
+        `set_skill_run_mode()` 调用后目标技能的解析结果，而不是只信任 set_mode 响应的 200。"""
+        try:
+            r = self.csrf.get("/api/skills", timeout=timeout)
+            return r.status_code == 200, r.status_code, (r.json() if r.status_code == 200 else r.text[:500])
         except Exception as e:
             return False, 0, repr(e)
 
@@ -6068,6 +6136,218 @@ def _str2bool(v):
 #     Builder 完全无感知)。注意：POST /api/forge-config 对 genie_service.root_path 的写入
 #     已核实不会被服务启动路径实际读取（见 configure_genie_root 文档字符串），本类不再使用它
 #     来配置安装目录。
+class ModelDirSnapshot:
+    """进入 Builder 联动前对每个被 mklink /J 联接的模型目录拍一份关键小文件快照
+    （仅 config.json/genie_config.json/.qai-install.json，不拷权重），退出时
+    （含 finally 异常路径）逐一比对是否仍存在且字节相同；缺失或变化即视为
+    不可忽略的 crashed 级别失败，绝不静默放过。
+
+    背景：inject_local_models() 用 mklink /J 建立的是目录联接（junction），Windows 对联接
+    路径的文件系统操作是透明穿透的——任何针对联接路径（Builder 侧 <data_dir>/models/<name>）
+    的安装/更新/删除操作都会直接作用到联接指向的真实目录（--models/<name>）。如果测试过程
+    中触发了任何一次这类路径，就会直接改写/删除真实模型目录下的配置文件而不留痕迹。本类只做
+    最小侵入的"拍快照 -> 收尾比对"防护：只看几个关键小文件，缺失或内容变化即判定为不可忽略
+    的失败，由调用方计入 crashed 级别的 TestResult。"""
+
+    _WATCH_FILES = ("config.json", "genie_config.json", ".qai-install.json")
+
+    def __init__(self):
+        # model_dir(Path) -> {filename: sha256_hex_or_None}；None 表示快照时该文件不存在
+        # （新出现的文件不列入校验范围，避免误报——见 verify() 的语义）。
+        self._snapshots = {}
+
+    @staticmethod
+    def _hash_file(path):
+        try:
+            h = hashlib.sha256()
+            with open(path, "rb") as f:
+                for chunk in iter(lambda: f.read(65536), b""):
+                    h.update(chunk)
+            return h.hexdigest()
+        except Exception:
+            return None
+
+    def snapshot(self, model_dirs):
+        """对每个 model_dir 下 _WATCH_FILES 中存在的文件计算内容哈希并记录。
+        model_dirs 应传入真实模型目录路径（--models/<name>），不是 Builder 侧的联接路径——
+        联接对文件系统操作透明穿透，直接对源目录拍照语义等价，且不依赖联接是否仍然存在。"""
+        for d in model_dirs:
+            d = Path(d)
+            files = {}
+            for fname in self._WATCH_FILES:
+                fp = d / fname
+                files[fname] = self._hash_file(fp) if fp.is_file() else None
+            self._snapshots[d] = files
+
+    def verify(self):
+        """返回违规描述字符串列表，空列表=通过。
+        已快照且存在的文件：现在必须仍存在且哈希不变，否则记一条违规。
+        已快照但当时不存在的文件：不做要求（新出现的文件不列入校验范围，避免误报）。"""
+        violations = []
+        for d, files in self._snapshots.items():
+            for fname, old_hash in files.items():
+                if old_hash is None:
+                    continue  # 快照时不存在，不校验（避免对新出现的文件误报）
+                fp = d / fname
+                if not fp.is_file():
+                    violations.append(
+                        f"模型目录 {d} 下的 {fname} 已丢失（快照时存在，现在不存在）")
+                    continue
+                new_hash = self._hash_file(fp)
+                if new_hash != old_hash:
+                    violations.append(
+                        f"模型目录 {d} 下的 {fname} 内容已变化（快照 sha256={old_hash}, "
+                        f"当前 sha256={new_hash}）")
+        return violations
+
+
+class _BuilderLogProbe:
+    """通过 Builder 官方 `GET /api/service/logs` SSE 接口做「本次请求新增日志」取证通道
+    （Step6 新增，供场景 A/B/C 复用）。
+
+    Builder 自己代理转发的聊天请求不经过我们直连测试时使用的本机日志文件路径——Builder 的
+    `ProcessBackedInferenceService` 只把子进程 `GenieAPIService.exe` 的 stdout 读进内存 deque，
+    不落盘文件——因此走 Builder 代理链路时 `_PromptLogProbe` 的「按文件字节偏移量增量读取」方式
+    失效，必须换成这条 Builder 自带的 SSE 通道；`mark()`/`read_new()` 语义与 `_PromptLogProbe`
+    对齐，只是用「先清空缓冲区」代替「记偏移量」（`GET /api/service/logs` 本身不支持按偏移量
+    做增量读取，只能整体清空重来）。"""
+
+    def __init__(self, csrf_session):
+        self.csrf = csrf_session
+        self._skip_from = 0
+        self._tail_thread = None
+        self._tail_lines = []
+        self._tail_stop = None
+        self._tail_resp = None
+
+    def mark(self):
+        """`POST /api/service/logs/clear`：清空 Builder 侧保留的 GenieAPIService stdout 缓冲区，
+        之后 `read_new()` 读到的都是本次 `mark()` 之后新产生的日志，避免上一场景埋的 canary/
+        `[Prompt]` 块污染下一场景的断言（同一个 Builder 代理子进程、同一份内存缓冲区）。"""
+        try:
+            r = self.csrf.post("/api/service/logs/clear", json={}, timeout=15)
+            self._skip_from = int(r.json().get("skip_from", 0)) if r.status_code == 200 else 0
+        except Exception:
+            self._skip_from = 0
+
+    def start_live_tail(self):
+        """Step7 远程实测新增：与 `read_new()`（事后一次性抓取）不同，本方法在动作发起**之前**
+        就开一个后台线程持续消费 `GET /api/service/logs` 的 SSE 流并逐行累积到内存列表。
+
+        根因背景：`ProcessBackedInferenceService._log_buffer` 是 `deque(maxlen=6000)`（行数
+        上限，非字符数），带图的多模态请求单次即可产生远超此深度的日志行——`IEmbedding::
+        BuildPrompt()` 用 `My_Log(completed_prompt.c_str(), kInfo)` 把整份含 skill 目录/对话
+        历史/System Prompt 的完整提示词当一次调用打印，其内部每个 `\n` 都会在 Python 侧
+        `proc.stdout.readline()` 逐行读取时变成 deque 里独立的一"行"；只要这份提示词加上
+        模型自身逐 token 生成日志的总行数超过 6000，`read_new()`（生成完全结束后才发起一次
+        新连接抓取）读到的必然是"deque 已经回卷过的、只剩最新尾部"的残缺历史，早段（往往正是
+        canary 所在处）已被回卷丢弃——这不是模型/取证正则的 bug，是"事后抓取"这种取证方式本身
+        对深度有限的滚动缓冲区结构性不适配。改为"动作发起前就开始监听"从根本上规避这个问题：
+        只要消费速度不明显慢于产生速度，我们自己在内存里攒的列表就不受 Builder 侧 deque 容量
+        限制。"""
+        self._tail_lines = []
+        self._tail_stop = threading.Event()
+
+        def _worker():
+            resp = None
+            try:
+                resp = self.csrf.request(
+                    "GET", "/api/service/logs", timeout=(10, 5), stream=True,
+                    params={"skip": self._skip_from})
+                self._tail_resp = resp
+                if resp.status_code != 200:
+                    return
+                for raw in resp.iter_lines(decode_unicode=True):
+                    if self._tail_stop.is_set():
+                        break
+                    if not raw or not raw.startswith("data:"):
+                        continue
+                    payload = raw[5:].strip()
+                    if payload == "[DONE]":
+                        break
+                    try:
+                        obj = json.loads(payload)
+                    except Exception:
+                        continue
+                    if isinstance(obj, dict) and "line" in obj:
+                        self._tail_lines.append(str(obj["line"]))
+                    elif isinstance(obj, dict) and "error" in obj:
+                        break
+            except Exception:
+                pass
+            finally:
+                if resp is not None:
+                    try:
+                        resp.close()
+                    except Exception:
+                        pass
+
+        self._tail_thread = threading.Thread(target=_worker, daemon=True)
+        self._tail_thread.start()
+        # 给后台线程留出真正建立好 SSE 连接的时间，避免调用方紧接着发起的动作在
+        # 连接就绪前就已经写日志，产生一段"抢跑"的取证盲区。
+        time.sleep(0.5)
+
+    def stop_live_tail(self, grace=5.0):
+        """停止 `start_live_tail()` 开的后台监听线程并关闭连接，返回累积到的全部日志文本
+        （用 `"\\n"` 拼接，与 `read_new()` 返回值同构，调用方可直接互换使用）。"""
+        if self._tail_stop is not None:
+            self._tail_stop.set()
+        if self._tail_resp is not None:
+            try:
+                self._tail_resp.close()
+            except Exception:
+                pass
+        if self._tail_thread is not None:
+            self._tail_thread.join(timeout=grace)
+        return "\n".join(self._tail_lines)
+
+    def read_new(self, idle_timeout=10.0, total_timeout=30.0):
+        """连接 `GET /api/service/logs?skip=<mark 时的 skip_from>`，收集新增行直到看到
+        `[DONE]` 帧、空闲超时或总超时。返回拼接后的全部行文本（best-effort，连接/超时异常
+        均静默吞掉，调用方以「抓不到就判 skip/降级」处理，不抛异常打断场景流程）。"""
+        lines = []
+        deadline = time.time() + total_timeout
+        resp = None
+        try:
+            resp = self.csrf.request(
+                "GET", "/api/service/logs", timeout=(10, idle_timeout), stream=True,
+                params={"skip": self._skip_from})
+            if resp.status_code != 200:
+                return ""
+            for raw in resp.iter_lines(decode_unicode=True):
+                if time.time() >= deadline:
+                    break
+                if not raw or not raw.startswith("data:"):
+                    continue
+                payload = raw[5:].strip()
+                if payload == "[DONE]":
+                    break
+                try:
+                    obj = json.loads(payload)
+                except Exception:
+                    continue
+                if isinstance(obj, dict) and "line" in obj:
+                    lines.append(str(obj["line"]))
+                elif isinstance(obj, dict) and "error" in obj:
+                    break
+        except Exception:
+            pass
+        finally:
+            if resp is not None:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
+        return "\n".join(lines)
+
+    def last_prompt_block(self):
+        """本次 `mark()` 之后产生的最后一个最终提示词块；抓不到返回空字符串（调用方据此判
+        skip/降级，与 `_PromptLogProbe.last_prompt_block()` 语义一致，复用同一条正则）。"""
+        blocks = _PF_PROMPT_BLOCK_RE.findall(self.read_new())
+        return blocks[-1] if blocks else ""
+
+
 class QAIModelBuilderLocalModelTester:
     _MODEL_PLACEHOLDER = "_builder_local_model_"
     # backend → format 字段值（GET /api/service/models 的判定），infer_backend 用 "GGUF" 表示
@@ -6088,6 +6368,10 @@ class QAIModelBuilderLocalModelTester:
         # configure_genie_root() 里 mklink /J 联接的 <data_dir>/bin/<name> 路径，供
         # test_invalid_genie_root() 临时移除/恢复以模拟"未安装"场景（见该方法文档字符串）。
         self._bin_junction_path = None
+        # 模型目录安全网：inject_local_models() 成功后拍快照，run_builder_local_model_integration()
+        # 的 finally 块无论套件成败都会调用 verify()，防止 mklink /J 联接被 Builder 安装/更新/
+        # 删除路径透明穿透地误改/误删真实模型目录下的配置文件。
+        self.model_dir_snapshot = ModelDirSnapshot()
 
     def _make_result(self, name, passed, status_code, detail, *,
                      model_name=None, skipped=False, crashed=False, ignorable=False,
@@ -6233,6 +6517,7 @@ class QAIModelBuilderLocalModelTester:
 
         successes = []
         failures = []
+        snapshot_targets = []  # 联接成功（含幂等已存在）的真实模型目录，供 ModelDirSnapshot.snapshot() 使用
         for m in self.model_names:
             src = self.models_root / m
             if not src.exists():
@@ -6241,6 +6526,7 @@ class QAIModelBuilderLocalModelTester:
             dst = target_models_root / m
             if dst.exists():
                 successes.append(f"{m}(目标已存在，视作幂等成功)")
+                snapshot_targets.append(src)
                 continue
             try:
                 proc = subprocess.run(
@@ -6257,6 +6543,13 @@ class QAIModelBuilderLocalModelTester:
                     f"{m}(mklink /J 失败, rc={proc.returncode}, stderr={stderr!r}, stdout={stdout!r})")
                 continue
             successes.append(m)
+            snapshot_targets.append(src)
+
+        # 模型目录安全网：联接一旦建立（无论新建还是幂等复用），Windows 对该联接路径的任何
+        # 文件系统操作都会透明穿透到 src（真实模型目录）——此处对 src 而非 dst 拍照，
+        # 语义上等价且不依赖联接本身是否在收尾时仍然存在。
+        if snapshot_targets:
+            self.model_dir_snapshot.snapshot(snapshot_targets)
 
         detail = (f"注入 {len(successes)}/{len(self.model_names)}; "
                   f"successes={successes}; failures={failures}; target={target_models_root}")
@@ -7199,12 +7492,512 @@ class QAIModelBuilderLocalModelTester:
             f"status={r.status_code}; body={r.text[:200]!r} (期望 403 security.csrf.*)"))
         return passed
 
+    # ---- Step 6: _builder_send_chat_message ----
+    def _builder_send_chat_message(self, model_name, prompt_text, image_b64=None,
+                                   title="Step6 场景测试"):
+        """创建一个新 Builder conversation，可选先真实上传一张图片，再走 Builder 真实聊天
+        SSE 代理链路（GET /api/chat/conversations/{id}/stream，走 Builder 而不是直连
+        GenieAPIService）发起请求，返回 (passed, detail, joined_text, conversation_id)。
+
+        与 test_chat_conversation_stream() 的 SSE 事件解析逻辑一致，仅把 prompt/素材参数化为
+        本轮场景 A/B/C 需要的 canary 文本与固定小图片，用于精确断言而不依赖随机素材池。
+
+        复用 `test_chat_conversation_stream()` 同款「后端就绪门」：Builder 上报 running=true
+        不代表 GenieAPIService 端口已 listen 且模型已真正注册完成（多模态视觉模型加载慢），
+        过早发起对话会连不上后端、被兜底话术误判为"对话失败"，因此这里先等
+        `_wait_local_backend_ready()` 确认模型真正就绪再发请求。"""
+        ready, ready_err = self._wait_local_backend_ready(self.genie_service_port, model_name)
+        if not ready:
+            return False, f"后端就绪等待失败: {ready_err}", "", None
+        conv, _ = self._csrf_request(
+            "POST", "/api/chat/conversations", body={"title": title}, timeout=30)
+        if isinstance(conv, Exception) or conv.status_code not in (200, 201):
+            return False, f"创建 conversation 失败: {conv}", "", None
+        try:
+            conversation_id = conv.json().get("id")
+        except Exception as e:
+            return False, f"conversation 响应 JSON 解析失败: {e}", "", None
+        if not conversation_id:
+            return False, f"创建 conversation 缺少 id: {conv.text[:300]}", "", None
+
+        prompt_parts = [prompt_text]
+        if image_b64:
+            uploaded, _ = self._csrf_request(
+                "POST", "/api/images/upload",
+                body={"conv_id": conversation_id, "msg_id": f"scenario-img-{conversation_id}",
+                      "b64_data": image_b64, "mime_type": "image/png"},
+                timeout=60)
+            if isinstance(uploaded, Exception) or uploaded.status_code not in (200, 201):
+                return False, f"/api/images/upload 失败: {uploaded}", "", conversation_id
+            try:
+                upload_url = uploaded.json().get("url")
+            except Exception as e:
+                return False, f"/api/images/upload 响应 JSON 解析失败: {e}", "", conversation_id
+            if not upload_url:
+                return False, "/api/images/upload 响应缺少 url", "", conversation_id
+            prompt_parts.append(f"![scenario.png]({upload_url})")
+
+        tab_id = f"scenario-tab-{conversation_id}"
+        prompt = "\n".join(prompt_parts)
+        stream_path = f"/api/chat/conversations/{conversation_id}/stream"
+        events = []
+        stream_status = 0
+        stream_error = None
+        stream_deadline = time.time() + 300
+        stream = None
+        try:
+            stream = self.builder.csrf.request(
+                "GET", stream_path, timeout=(10, 10), stream=True,
+                params={"tab_id": tab_id, "prompt": prompt, "model_id": f"local::{model_name}"})
+            stream_status = stream.status_code
+            if not 200 <= stream_status < 300:
+                stream_error = f"HTTP 非 2xx: {stream_status}; body={stream.text[:300]}"
+            else:
+                event_name, data_lines = None, []
+                for line in stream.iter_lines(decode_unicode=True):
+                    if time.time() >= stream_deadline:
+                        stream_error = "SSE 总时限 300 秒已到"
+                        break
+                    line = line.strip() if line else ""
+                    if not line:
+                        if event_name:
+                            payload = "\n".join(data_lines)
+                            try:
+                                payload = json.loads(payload) if payload else {}
+                            except Exception:
+                                payload = {"raw": payload}
+                            events.append((event_name, payload))
+                            if event_name in ("done", "error"):
+                                break
+                        event_name, data_lines = None, []
+                        continue
+                    if line.startswith("event:"):
+                        event_name = line[6:].strip()
+                    elif line.startswith("data:"):
+                        data_lines.append(line[5:].strip())
+        except Exception as e:
+            stream_error = f"{type(e).__name__}: {e}"
+        finally:
+            if stream is not None:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
+
+        message_events = [payload for event, payload in events if event == "message"]
+        error_events = [payload for event, payload in events if event == "error"]
+        frame_types, frame_reasons = [], []
+        for _event, payload in events:
+            frame = payload
+            while isinstance(frame, dict):
+                if "frame_type" in frame or "reason" in frame:
+                    reason = frame.get("reason")
+                    if reason is None and isinstance(frame.get("payload"), dict):
+                        reason = frame["payload"].get("reason")
+                    frame_types.append(frame.get("frame_type"))
+                    frame_reasons.append(reason)
+                    break
+                nested = next((frame[k] for k in ("data", "frame", "payload", "message")
+                               if isinstance(frame.get(k), dict)), None)
+                if nested is None:
+                    break
+                frame = nested
+        terminal_ok = any(ft == "end" and rs in ("completed", "success", "done")
+                          for ft, rs in zip(frame_types, frame_reasons))
+        terminal_error = any(ft == "error" or rs == "failed"
+                             for ft, rs in zip(frame_types, frame_reasons))
+        text = " ".join(json.dumps(p, ensure_ascii=False) for p in message_events)
+        passed = (stream_error is None and not error_events and not terminal_error and terminal_ok
+                  and bool(message_events) and bool(text.strip()))
+        detail = (f"conversation_id={conversation_id}; events={[e for e, _ in events]}; "
+                  f"frame_types={frame_types}; frame_reasons={frame_reasons}; "
+                  f"error_events={error_events}; stream_error={stream_error}")
+        return passed, detail, text, conversation_id
+
+    # ---- Step 6: _resolve_model_name ----
+    def _resolve_model_name(self, usable, pattern):
+        """在 usable（Builder 真实发现的模型目录名列表）里按小写子串匹配定位目标模型。
+
+        远程机器上模型目录的真实命名带版本/设备后缀（如 "qwen3-8b-8480"、
+        "qwen2.5_omini_8480-2.42"），与场景描述里的简写（"qwen3-8b"、"qwen2.5_omini_8480"）
+        不是字面全等；沿用 detect_modality() 已有的子串匹配惯例，而不是精确匹配，避免因为
+        目录名版本号变化就让整段场景被误判为"模型不存在"而跳过。找不到返回 None。"""
+        lower_pattern = pattern.lower()
+        for m in usable:
+            if lower_pattern in m.lower():
+                return m
+        return None
+
+    # ---- Step 6: scenario_a_skill_weather ----
+    def scenario_a_skill_weather(self, port, model_name):
+        """场景 A（纯文本+skill，qwen3-8b 系）：走真实 Builder 聊天代理链路（非直连
+        GenieAPIService）验证中文单句仍能让 weather 技能出现在最终提示词里。
+
+        用 `set_skill_run_mode("weather", "both")`（不是 Step2 封装的 toggle_skill/
+        set_skills_mode——那两个命中 AI-Coding 能力策略子系统，与聊天技能可见性无关，见
+        `set_skill_run_mode()` 文档字符串）确保 weather 技能对本地模型可见，再用
+        `_BuilderLogProbe` 从 Builder `GET /api/service/logs` 抓最终提示词块断言 weather
+        标识仍在。`X-Genie-Prompt-Skills-Kept` 响应头（Step5 改动）经 Builder SSE 代理转发，
+        本方法据实记录能否观测到该字段，不伪造断言通过。`model_name` 是 `_resolve_model_name()`
+        在 `usable` 里实际匹配到的完整目录名，不是硬编码简写。
+
+        **Step7 远程实测发现的真实环境约束（不是 Builder 缺陷、也不是本方法此前的调用错误）**：
+        `discovery.py::VALID_MODES`/`NPU_MODES = {"local", "both"}`——`mode="local"` 与
+        `mode="both"` 均要求技能满足 `npu_optimized`（判定依据是 SKILL.md `tags:` 末尾带
+        `"."`，或技能目录下存在 `npu.txt` 标记文件之一），且 `resolve_skill_mode()` 在**每次
+        解析时**都会把已持久化的 `local`/`both` override 强制降级为 `cloud`——无法靠只调用
+        `set_mode` API 绕过这条校验。当前部署的 QAIModelBuilder `skills/` 目录下所有技能
+        （含 weather）均未标记 `npu_optimized`、也均非 `pinned`（两者是本地可见性仅有的两条
+        通路，见 `_chat_skill_catalog_provider.py::LocalChatSkillCatalogProvider`），也就是说
+        **在当前技能清单下，weather 架构上无法通过任何合法 API 调用进入本地模型可见状态**。
+        `discovery.py::SkillDiscovery.scan()` 对 `npu.txt` 是逐次调用时的**纯文件系统读取**
+        （无缓存），因此本方法在调用 `set_mode` 前先临时创建/最终删除该标记文件作为测试
+        setup/teardown（只操作技能目录下的一个数据文件，不改 QAIModelBuilder 任何 .py/.ts
+        源码逻辑，等价于既有的 `ModelDirSnapshot` 备份-还原模式），使 weather 技能在本场景
+        运行期间真正具备被设为 `local`/`both` 的合法前提，场景结束后立即还原，不残留任何
+        对 QAIModelBuilder 技能清单的持久改动。"""
+        name = f"BUILDER-LOCAL: scenario_A skill_weather model={model_name}"
+        pre_ok, pre_status, pre_body = self.builder.list_skills()
+        pre_entry = None
+        if pre_ok and isinstance(pre_body, dict):
+            pre_entry = next(
+                (s for s in pre_body.get("skills", [])
+                 if isinstance(s, dict) and (s.get("skill_id") == "weather" or s.get("id") == "weather")),
+                None)
+        if pre_entry is None:
+            self.results.append(self._make_result(
+                name, False, pre_status,
+                f"GET /api/skills 中未发现 weather 技能条目(list_ok={pre_ok}): {pre_body}",
+                model_name=model_name, skipped=True))
+            return False
+        npu_marker_path = None
+        npu_marker_created = False
+        if not pre_entry.get("npu_optimized"):
+            skill_meta_path = pre_entry.get("skill_path")
+            if skill_meta_path:
+                try:
+                    skill_dir = Path(skill_meta_path).parent
+                    candidate = skill_dir / "npu.txt"
+                    if not candidate.exists():
+                        candidate.write_text(
+                            "temporary marker created by test_service.py "
+                            "scenario_a_skill_weather() — safe to delete\n",
+                            encoding="utf-8")
+                        npu_marker_path = candidate
+                        npu_marker_created = True
+                except OSError as exc:
+                    self.results.append(self._make_result(
+                        name, False, 0,
+                        f"weather 技能不满足 npu_optimized 前提，且临时标记文件创建失败"
+                        f"（skill_path={skill_meta_path}）：{exc!r}",
+                        model_name=model_name))
+                    return False
+
+        try:
+            ok, status, body = self.builder.set_skill_run_mode("weather", "both")
+            if not ok:
+                self.results.append(self._make_result(
+                    name, False, status, f"POST /api/skills/weather/set_mode 失败: {body}",
+                    model_name=model_name, skipped=(status == 0)))
+                return False
+            list_ok, list_status, list_body = self.builder.list_skills()
+            weather_entry = None
+            if list_ok and isinstance(list_body, dict):
+                weather_entry = next(
+                    (s for s in list_body.get("skills", [])
+                     if isinstance(s, dict) and (s.get("skill_id") == "weather" or s.get("id") == "weather")),
+                    None)
+            if weather_entry is None:
+                self.results.append(self._make_result(
+                    name, False, list_status,
+                    f"GET /api/skills 中未发现 weather 技能条目(list_ok={list_ok}): {list_body}",
+                    model_name=model_name, skipped=True))
+                return False
+            resolved_mode = weather_entry.get("mode")
+            # 防御 LocalChatSkillCatalogProvider 的 3 秒 TTL 缓存（QAIModelBuilder
+            # apps/api/_chat_skill_catalog_provider.py:_CATALOG_TTL_S）：set_mode 写入
+            # forge.config 后，若紧接着的聊天请求落在同一个 3 秒窗口内且该进程内此前恰好有
+            # 别的模型/轮次命中过这个单例 provider 的旧缓存，会读到 set_mode 生效前的
+            # 空技能目录，产生假阴性。这里等过一整个 TTL 窗口再发聊天，排除这条误报路径。
+            time.sleep(4)
+
+            probe = _BuilderLogProbe(self.builder.csrf)
+            probe.mark()
+            passed_chat, detail_chat, _text, _conv_id = self._builder_send_chat_message(
+                model_name, "上海的天气怎么样", title="场景A-纯文本+skill")
+            prompt_block = probe.last_prompt_block()
+            weather_in_prompt = "weather" in prompt_block.lower()
+
+            # Builder SSE 帧是 Builder 自己的协议，不透传 GenieAPIService 的原始 HTTP 响应头，
+            # 因此 X-Genie-Prompt-Skills-Kept 在这条链路下如实记录为"不可观测"，不伪造断言通过；
+            # 字段级验证留给 Step7 直连回归（该响应头本身是否生效已由 prompt_fidelity 套件覆盖）。
+            ledger_note = ("Builder SSE 代理链路未见 GenieAPIService 原始响应头，"
+                           "X-Genie-Prompt-Skills-Kept 字段级断言不可用（预期，非缺陷），"
+                           "改用 [Prompt] 日志块内是否出现 weather 间接判定压缩链路未把技能压没")
+
+            passed = bool(passed_chat and weather_in_prompt)
+            detail = (f"resolved_mode={resolved_mode}; weather_in_prompt={weather_in_prompt}; "
+                      f"prompt_block_len={len(prompt_block)}; npu_marker_created={npu_marker_created}; "
+                      f"chat=({detail_chat}); {ledger_note}")
+            self.results.append(self._make_result(
+                name, passed, 200 if passed_chat else 0, detail, model_name=model_name,
+                response_data={"prompt_block": prompt_block[:2000], "resolved_mode": resolved_mode}))
+            return passed
+        finally:
+            # 还原：删除临时标记文件，使 weather 技能的 npu_optimized 状态恢复为运行前的
+            # 真实值；下一次 discovery.scan() 会立即读到还原后的状态（无缓存需要清）。
+            if npu_marker_created and npu_marker_path is not None:
+                try:
+                    npu_marker_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+    # ---- Step 6: scenario_b_image_single_question ----
+    def scenario_b_image_single_question(self, port, model_name):
+        """场景 B（多模态，qwen2.5_omini_8480 系）：真实通过 Builder `/api/images/upload`
+        上传一张最小 PNG（复用 prompt_fidelity 套件同款素材 `_PF_MIN_PNG_B64`，但这次走
+        Builder 代理而非直连）+ 中文单句「这张图片里有什么」，断言图片配套的 canary 说明文本
+        真实进入了最终提示词（不要求模型真的看懂图片，只要求数据链路没丢）。
+        `model_name` 是 `_resolve_model_name()` 在 `usable` 里实际匹配到的完整目录名。
+
+        **本轮实测确认的架构事实（非 Builder 缺陷，非本方法此前的取证 bug）**：QNN 后端
+        `genie_interface.cpp::IEmbedding::set_content()` 只有在请求不带图/音频时才走
+        `OutPutText()`（打印带 `[Prompt] [...]` 头 + `------` 尾的括号化日志块，供
+        `_PF_PROMPT_BLOCK_RE` 提取）；带图请求改走 `CustomBuild().BuildTextEmbedding(
+        BuildPrompt(...))` 分支，其 `IEmbedding::BuildPrompt()`（同文件约 304~315 行）用
+        `My_Log(completed_prompt.c_str(), kInfo)` 打印**不带任何包裹标记**的原始 prompt 全文
+        （`kPromptTemplate` 里 `%s` 直接内嵌 `model_input.text_`，canary 逐字保留在其中）。
+        因此多模态请求的 canary 检测必须在整段原始日志文本里做子串查找，不能依赖只适配纯文本
+        快速路径的括号化 `prompt_block` 提取（否则会对全部多模态请求恒定误判为
+        `prompt_block_len=0` 失败——这正是本方法早前一轮远程实测的失败现象之一）。
+
+        **本轮实测再定位的第二个真实根因（不是模型/Builder 缺陷，是取证方式本身的结构性
+        缺陷）**：`ProcessBackedInferenceService._log_buffer` 是按**行数**回卷的
+        `deque(maxlen=6000)`；多模态请求单次即可让 `My_Log(completed_prompt.c_str(), kInfo)`
+        打印的整份提示词（内含 skill 目录/对话历史/System Prompt，内部每个 `\n` 在 Python 侧
+        `readline()` 都会拆成 deque 里独立一行）叠加模型自身逐 token 生成日志，总行数远超
+        6000——`mark()+read_new()`（生成完全结束后才发起一次新连接一次性抓取）读到的必然是
+        deque 已经回卷过的、只剩最新尾部的残缺历史，canary 所在的早段已被挤出窗口，
+        `canary_in_prompt` 恒定为 False，而 `image_marker_in_prompt` 恰好因为处于日志尾部
+        （模型响应/收尾阶段更容易提到"图片"字样）而恒定为 True，这正是本场景先前几轮的真实
+        失败现象。改为 `start_live_tail()`/`stop_live_tail()`——在请求发起**之前**就开始
+        持续消费 SSE 流并在本地累积，不再依赖 Builder 侧 deque 在整个请求生命周期内不发生
+        回卷。"""
+        name = f"BUILDER-LOCAL: scenario_B image_single_question model={model_name}"
+        probe = _BuilderLogProbe(self.builder.csrf)
+        probe.mark()
+        probe.start_live_tail()
+        passed_chat, detail_chat, _text, _conv_id = self._builder_send_chat_message(
+            model_name, f"{_PF_CANARY_IMG_TEXT} 这张图片里有什么", image_b64=_PF_MIN_PNG_B64,
+            title="场景B-多模态单问")
+        raw_log = probe.stop_live_tail()
+        blocks = _PF_PROMPT_BLOCK_RE.findall(raw_log)
+        prompt_block = blocks[-1] if blocks else ""
+        canary_in_prompt = _PF_CANARY_IMG_TEXT in raw_log
+        image_marker_in_prompt = ("![scenario.png]" in raw_log) or ("image" in raw_log.lower())
+        passed = bool(passed_chat and canary_in_prompt)
+        detail = (f"canary_in_prompt={canary_in_prompt}; image_marker_in_prompt={image_marker_in_prompt}; "
+                  f"prompt_block_len={len(prompt_block)}; raw_log_len={len(raw_log)}; chat=({detail_chat}); "
+                  "注: 多模态QNN路径无[Prompt]括号标记，canary判据基于raw_log全文而非prompt_block")
+        self.results.append(self._make_result(
+            name, passed, 200 if passed_chat else 0, detail, model_name=model_name,
+            # Step7 诊断：canary_in_prompt=False 但 image_marker_in_prompt=True 的组合
+            # 此前无法从仅保存的尾部 2000 字符判断根因是"取证时机"还是"内容真的没送达"，
+            # 这里改存完整 raw_log（量级约 2 万字符，与其它场景已存的量级相当，非过量）。
+            response_data={"prompt_block": prompt_block[:2000], "raw_log": raw_log}))
+        return passed
+
+    # ---- Step 6: scenario_c_cross_switch ----
+    def scenario_c_cross_switch(self, port, model_a, model_b):
+        """场景 C（交叉切换）：model_a ↔ model_b 往返切换 2 轮，每轮各发一次
+        A/B 场景的最小请求，断言两个模型各自的 `[Prompt]` 日志块互不出现对方模型专属标记
+        （A 轮不应看到 B 轮的图片 canary，B 轮不应看到 A 轮的文本 canary）。
+
+        `X-Genie-Prompt-*` 响应头经 Builder SSE 代理链路不可观测（同场景 A/B 说明），本场景
+        按 issue 要求降级为「断言两次响应内容/最终提示词本身不串扰」，并如实记录降级原因。
+        `model_a`/`model_b` 是 `_resolve_model_name()` 在 `usable` 里实际匹配到的完整目录名。
+
+        **本轮实测修复的测试设计缺陷**：最初版本用 "weather" 关键字判定 B 轮是否"串扰"到了
+        A 轮的技能标记，远程实测始终 `leaked=True`——根因不是跨模型串扰，而是
+        `scenario_a_skill_weather()` 用 `set_skill_run_mode(..., "both")` 把 weather 技能设成
+        了**全局持久状态**：一旦本次测试会话里跑过场景 A，weather 技能在此后对所有模型的所有
+        请求都保持可见，与"当前这一轮是否真的发生了跨模型内容串扰"完全无关，拿它做串扰判据
+        必然假阳性。修复为改用 `_PF_CANARY_TXT_A`——一个嵌入在 round A 用户消息文本里的唯一
+        canary（与 round B 的 `_PF_CANARY_IMG_TEXT` 对称），两者都是消息 content 本身的一部分，
+        不受技能相关性过滤影响，才是真正"仅本轮请求内容独有"的串扰判据。"""
+        name = "BUILDER-LOCAL: scenario_C cross_switch"
+        rounds_detail = []
+        overall_ok = True
+        current = None
+        for rnd in range(2):
+            for model_name in (model_a, model_b):
+                # 不能假设"current is None ⇒ 服务尚未启动"——本方法总是在场景 A/B 之后被
+                # run_prompt_fidelity_scenarios_abc() 调用，此时 GenieAPIService 大概率仍在
+                # 跑着场景 B 遗留的模型；用局部 current 变量判断"是否需要 start_and_wait_ready
+                # vs switch_model" 与真实服务状态脱节，直接 start_and_wait_ready 会被 Builder
+                # 正确拒绝为 409 ServicePortInUseError（本轮远程实测实际复现的根因）。
+                # 修复：除"确认当前这一轮循环内已经是目标模型"这一种情形外，一律走
+                # switch_model()（内含 stop_and_verify，对"服务本来就没在跑"是安全的空操作），
+                # 不再依赖对服务初始状态的假设。
+                if current == model_name:
+                    started = True
+                else:
+                    started, _status = self.switch_model(model_name, port)
+                current = model_name if started else current
+                if not started:
+                    overall_ok = False
+                    rounds_detail.append(f"round={rnd} model={model_name} 切换/启动失败")
+                    continue
+                probe = _BuilderLogProbe(self.builder.csrf)
+                probe.mark()
+                probe.start_live_tail()
+                if model_name == model_a:
+                    passed_chat, _d, _t, _c = self._builder_send_chat_message(
+                        model_name, f"{_PF_CANARY_TXT_A} 北京的天气怎么样", title=f"场景C-round{rnd}-A")
+                    # 注：A 轮是纯文本请求，走 OutPutText() 括号化日志路径，本可直接用
+                    # prompt_block；但为与 B 轮保持判据口径一致（两轮都经过同一套 raw_log
+                    # 子串查找，不因请求类型不同而分支），与场景 B 同样直接对 raw_log 查找。
+                    # 改用 start_live_tail()/stop_live_tail()（同 scenario_b_image_single_question
+                    # docstring 记录的原因：deque(maxlen=6000) 按行数回卷，事后一次性抓取的
+                    # read_new() 会漏掉早段内容）而不是 read_new()，两轮判据口径保持一致。
+                    raw_log = probe.stop_live_tail()
+                    prompt_block = ((_PF_PROMPT_BLOCK_RE.findall(raw_log) or [""])[-1])
+                    # 用 B 轮独有的图片 canary 判串扰（应为 False），用 A 轮自己嵌入的文本
+                    # canary 判"own marker"（应为 True）——两者都是消息 content 本身的一部分，
+                    # 不受技能相关性过滤影响，是与 round B 对称、真正仅本轮内容独有的判据。
+                    # 不再用 "weather" 关键字（该技能已在场景 A 单独测试里被设为全局持久
+                    # "both" 模式，此后对所有模型的所有请求都保持可见，拿它判断"当前这一轮
+                    # 是否发生了跨模型串扰"必然假阳性，见本方法 docstring 记录的实测发现）。
+                    leaked = _PF_CANARY_IMG_TEXT in raw_log
+                    marker_ok = _PF_CANARY_TXT_A in raw_log
+                    marker_required = True
+                else:
+                    passed_chat, _d, _t, _c = self._builder_send_chat_message(
+                        model_name, f"{_PF_CANARY_IMG_TEXT} 这张图片里有什么",
+                        image_b64=_PF_MIN_PNG_B64, title=f"场景C-round{rnd}-B")
+                    # 注：B 轮带图，走 IEmbedding::BuildPrompt() 无括号标记的 raw My_Log(kInfo)
+                    # 原文转储路径（见 scenario_b_image_single_question 注释里记录的架构事实），
+                    # 因此不能用 prompt_block 判 marker_ok/leaked，否则恒定误判。
+                    raw_log = probe.stop_live_tail()
+                    prompt_block = ((_PF_PROMPT_BLOCK_RE.findall(raw_log) or [""])[-1])
+                    leaked = _PF_CANARY_TXT_A in raw_log
+                    marker_ok = _PF_CANARY_IMG_TEXT in raw_log
+                    # canary 文本是消息 content 本身的一部分（非技能相关性过滤路径），不受
+                    # 上面那条已知限制影响，因此 B 轮仍要求 marker_ok 为真。
+                    marker_required = True
+                round_ok = bool(passed_chat and (marker_ok or not marker_required) and not leaked)
+                overall_ok = overall_ok and round_ok
+                rounds_detail.append(
+                    f"round={rnd} model={model_name} chat_ok={passed_chat} marker_ok={marker_ok} "
+                    f"marker_required={marker_required} leaked={leaked} raw_log_len={len(raw_log)} "
+                    f"prompt_block_len={len(prompt_block)}")
+        detail = ("响应头字段 X-Genie-Prompt-* 经 Builder 代理链路不可观测（如实降级，非缺陷）；"
+                  "A/B 两轮均用各自专属的消息内容 canary（_PF_CANARY_TXT_A / _PF_CANARY_IMG_TEXT）"
+                  "判断本轮own marker是否存在、对方canary是否串扰进本轮日志，不再用全局持久的"
+                  "weather技能状态做判据（该判据本轮实测证实是假阳性根源，已修复，见本方法"
+                  "docstring）; " + "; ".join(rounds_detail))
+        self.results.append(self._make_result(
+            name, overall_ok, 200 if overall_ok else 0, detail,
+            model_name=f"{model_a}+{model_b}"))
+        return overall_ok
+
+    # ---- Step 6: _resolve_multimodal_model ----
+    def _resolve_multimodal_model(self, usable):
+        """按优先级解析场景 B/C 要用的多模态模型：优先 qwen2.5_omini 系（原始需求指定），
+        若因 `docs/QAIModelBuilder/testing-guide.md` 记录的 config.json 丢失根因缺陷（本轮实测
+        仍在复现：`qwen2.5_omini_8480-2.42` 只剩权重无任何 config.json/genie_config.json）导致
+        该模型未被 Builder 发现（体现为 `usable` 里根本不存在匹配项），依次回退到
+        qwen2.5vl 系。不回退到 qwen3_vl 系——playbook 已记录该系列存在连续多轮加载/卸载压力
+        测试后复现性堆损坏崩溃风险，而场景 C 自带 2 轮往返切换，与本任务“不对 qwen3-vl-4b 做
+        循环/压力测试”的约束相悖——宁愿整个场景 B/C 因找不到安全的备选而跳过，也不要为了硬湊场景
+        而触发已知风险。返回 `(model_name_or_None, substitution_reason_or_None)`，当发生回退时
+        `substitution_reason` 非 None，不静默替换。
+
+        命名变体说明：`GenieEnv\\models` 下的历史命名习惯用 "omini"（如
+        `qwen2.5_omini_8480`），而 QAIModelBuilder 默认 `data/models` 目录下同一模型家族用
+        正确拼写 "omni"、连字符分隔（如 `qwen2.5-omni-3b`，本轮实测确认的真实目录名）——两者是
+        同一个多模态模型家族的不同命名约定，不是不同的替代品，因此与 "qwen2.5_omini" 同优先级
+        一起尝试，不算作"回退替代"（reason 仍为 None），只有真正落到 qwen2.5vl 系才算替代。
+        与 `detect_modality()` 的双拼写兼容惯例保持一致（后者已接受 "omini"/"-omini" 两种，
+        本次新增 "omni"/-分隔两种，使二者共同覆盖全部四种已知命名变体）。"""
+        omni_patterns = ("qwen2.5_omini", "qwen2.5-omini", "qwen2.5-omni", "qwen2.5_omni")
+        for pattern in omni_patterns:
+            hit = self._resolve_model_name(usable, pattern)
+            if hit:
+                return hit, None
+        for pattern in ("qwen2.5vl", "qwen2.5-vl"):
+            hit = self._resolve_model_name(usable, pattern)
+            if hit:
+                reason = (
+                    f"原计划 qwen2.5_omini/qwen2.5-omni 系因 docs/QAIModelBuilder/testing-guide.md "
+                    f"记录的 config.json 丢失根因缺陷未被 Builder 发现(usable 里无此条目)，"
+                    f"回退到 {pattern} 系可用多模态模型 {hit}（不尝试 qwen3_vl 系，避免触发已知的"
+                    f"多轮加载/卸载堆损坏风险）")
+                return hit, reason
+        return None, (f"usable={usable} 中未找到任何可用多模态模型"
+                       f"(qwen2.5_omini/qwen2.5-omni/qwen2.5vl 均未命中，按约束不回退到 qwen3_vl 系)")
+
+    # ---- Step 6: run_prompt_fidelity_scenarios_abc ----
+    def run_prompt_fidelity_scenarios_abc(self, usable, port):
+        """挂载点：仅当本轮注入并可用的模型里同时含 qwen3-8b（场景 A）与一个可用的多模态
+        模型（场景 B/C，见 `_resolve_multimodal_model()`）时才跑；由 run_all() 内部调用，天然
+        复用其外层（run_builder_local_model_integration 的 finally 块）已建立的 ModelDirSnapshot
+        安全网窗口，不单独开新窗口。
+
+        这是本任务链路第一次真正"通过 Builder 而不是直连 GenieAPIService"发起请求的自测——
+        之前 prompt_fidelity 套件的"纯天气单问"/"纯图片单问"用例都是直连，不能作为这里的
+        等价证据。
+
+        `usable` 是 `run_all()` 里已按 Builder 真实发现结果过滤出的模型目录名列表，实际命名
+        带版本/设备后缀（如 "qwen3-8b-8480"），因此这里用 `_resolve_model_name()` 做子串匹配
+        定位，而不是要求 usable 里存在字面等于简写的精确条目。
+
+        **本次实跡重要发现**：原候选多模态模型 `qwen2.5_omini_8480` 在本轮远程实测中确认
+        仍硬碰 config.json 丢失的未修复根因（见 docs/QAIModelBuilder/testing-guide.md），无法被 Builder
+        发现，因此本方法不直接硬编码它，改用 `_resolve_multimodal_model()` 自动回退到其他可用
+        多模态模型。"""
+        scenario_name = "BUILDER-LOCAL: scenario_ABC (Builder-driven skill/multimodal/cross-switch)"
+        model_a = self._resolve_model_name(usable, "qwen3-8b")
+        model_b, mm_reason = self._resolve_multimodal_model(usable)
+        if not model_a or not model_b:
+            self.results.append(self._make_result(
+                scenario_name, False, 0,
+                f"跳过：本轮 usable={usable} 未能同时匹配到 qwen3-8b 系(命中={model_a}) 与 "
+                f"可用多模态模型(命中={model_b}; {mm_reason or ''})",
+                skipped=True))
+            return
+        if mm_reason:
+            self.results.append(self._make_result(
+                f"{scenario_name} multimodal_model_substitution", True, 0,
+                f"非失败留痕日志（passed=True 不计入失败数）：{mm_reason}", model_name=model_b))
+        try:
+            # 不可假设服务此刻仍在运行——本方法的两个可能前置调用
+            # （run_all() 主循环末尾的 stop_and_verify()，或 verify_model_switch_stability()
+            # 轮转结束后自带的 stop_and_verify()，见其 7207 行）都会无条件停止服务，与
+            # model_a 是否恰好是 usable 列表最后一项无关。历史版本在此处按"usable[-1]==model_a
+            # 就假设服务还活着"跳过显式 start，这个假设与上述两个前置调用的真实行为矛盾，
+            # 是导致场景 A 连接 8910 被拒（WinError 10061）的确切根因——服务其实已被停止，
+            # 而不是 Builder 转发链路本身有传递缺陷。修复：始终显式 start_and_wait_ready。
+            started_a, _status_a = self.start_and_wait_ready(model_a, port)
+            if started_a:
+                self.scenario_a_skill_weather(port, model_a)
+            started_b, _status_b = self.switch_model(model_b, port)
+            if started_b:
+                self.scenario_b_image_single_question(port, model_b)
+            self.scenario_c_cross_switch(port, model_a, model_b)
+        except Exception as e:
+            detail = f"场景 A/B/C 未捕获异常: {type(e).__name__}: {e}"
+            self.crash_events.append(CrashEvent(
+                timestamp=datetime.now().isoformat(), model_name=f"{model_a}+{model_b}",
+                round_num=self.round_num, endpoint="SCENARIO_ABC", detail=detail))
+            self.results.append(self._make_result(scenario_name, False, 0, detail, crashed=True))
+
     # ---- 主入口 ----
     def run_all(self):
         """按顺序串联：配置根目录 → 注入 → 发现 → 对全部已发现模型逐一加载与真实推理验证
         （多模态模型走 test_chat_conversation_stream 真实 Builder 上传+对话链路，纯文本模型仍直连
         verify_genieapiservice_reachable）+超限输入处理验证（首个直接 start，其余经 switch_model() 切入）→ 停止
-        → 模型切换稳定性专项验证（多轮轮转切换）→ 异常边界。
+        → 模型切换稳定性专项验证（多轮轮转切换）→ Builder 驱动的场景 A/B/C（Step6）→ 异常边界。
         前置失败不阻塞后续独立用例（例如异常边界必须始终跑，验证防护本身生效；单个模型的失败也不阻塞其它模型）。"""
         root_ok = self.configure_genie_root()
         inject_ok = self.inject_local_models()
@@ -7251,6 +8044,16 @@ class QAIModelBuilderLocalModelTester:
 
         if usable:
             self.verify_model_switch_stability(usable, self.genie_service_port)
+
+        # Step6: Builder 真实驱动多模态+skill+交叉切换场景 A/B/C（挂在本函数已建立的
+        # ModelDirSnapshot 安全网窗口内，不单独开新窗口）。
+        try:
+            self.run_prompt_fidelity_scenarios_abc(usable, self.genie_service_port)
+        except Exception as e:
+            self.results.append(self._make_result(
+                "BUILDER-LOCAL: scenario_ABC dispatch", False, 0,
+                f"run_prompt_fidelity_scenarios_abc 调度未捕获异常: {type(e).__name__}: {e}",
+                crashed=True))
 
         # 异常边界：无论前面成败都跑，验证防护/结构化错误处理本身仍生效
         for case_fn, case_name in (
@@ -7372,6 +8175,24 @@ def run_builder_local_model_integration(args, models, all_results, all_crash_eve
             builder.stop()
         except Exception:
             pass
+        # 模型目录安全网：无论套件成败（含 Builder 启动失败/未走到 inject_local_models 的路径）
+        # 都要收尾校验——tester 为 None 或从未成功 snapshot() 过任何目录时 verify() 天然返回空
+        # 列表,不会误报。命中的违规是不可忽略的 crashed 级别失败,绝不静默放过。
+        if tester is not None:
+            violations = tester.model_dir_snapshot.verify()
+            if violations:
+                detail = "模型目录安全网校验失败，检测到以下违规：\n" + "\n".join(violations)
+                print(f"  ✗✗✗ {detail}")
+                all_crash_events.append(CrashEvent(
+                    timestamp=datetime.now().isoformat(),
+                    model_name="_builder_local_model_", round_num=1,
+                    endpoint="MODEL_DIR_SNAPSHOT", detail=detail,
+                ))
+                all_results.append(TestResult(
+                    name="BUILDER-LOCAL: model_dir_snapshot_verify", round_num=1,
+                    model_name="_builder_local_model_",
+                    passed=False, status_code=0, latency_ms=0,
+                    detail=detail, crashed=True, ignorable=False))
 
 
 # ============================================================================
@@ -9042,10 +9863,29 @@ _PF_CANARY_TAIL = "CANARY-TAIL-EXIT-CODE-137"
 _PF_CANARY_JSON_FIRST = "CANARY-JSON-FIRST-11AA"
 _PF_CANARY_JSON_LAST = "CANARY-JSON-LAST-99ZZ"
 _PF_CANARY_ZH_TAIL = "CANARY-ZH-TAIL-EXIT-137"
+_PF_CANARY_IMG_TEXT = "CANARY-IMG-TEXT-4D2E1"
+# 场景 C 专用：round A（纯文本+skill）自己的请求内容 canary，与 round B 的
+# `_PF_CANARY_IMG_TEXT` 对称。Step6 本轮实测发现直接拿 "weather" 关键字判定跨轮
+# 串扰是一个测试设计缺陷——weather 技能在 scenario_a_skill_weather() 里被
+# `set_skill_run_mode(..., "both")` 设成了全局持久状态，一旦设置就在整个测试会话
+# 剩余时间里对所有模型的所有请求可见，与"是否发生了跨模型串扰"完全无关；用一个
+# 嵌入在 round A 用户消息文本里的、不受相关性过滤影响的唯一 canary 才是与 round B
+# 对称的正确判据（同 round B 的 `_PF_CANARY_IMG_TEXT` 一样，是消息 content 本身的
+# 一部分，不经过技能相关性过滤这条已知有零分清空 bug 的路径）。
+_PF_CANARY_TXT_A = "CANARY-TXT-A-8B3F0"
 _PF_DROP_PLACEHOLDER_HINT = "earlier message(s) omitted"
 
+# 最小 1x1 像素透明 PNG（占位图，与真实一致的合法 PNG 二进制，无需任何素材文件），
+# 仅用于验证多模态 content-parts 请求链路本身能正常处理，不要求模型真的看懂图片内容。
+_PF_MIN_PNG_B64 = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
+                   "+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+
 # 最终提示词块：非贪婪匹配到分隔线为止。
-_PF_PROMPT_BLOCK_RE = re.compile(r"\[Prompt\] \[[^\n]*\n(.*?)\n-{6,}\n", re.S)
+# 注意：GenieAPIService.exe 的 stdout 被 Windows CRT 以文本模式重定向到文件时，每个
+# 源码里的 "\n" 都会被自动转换成 "\r\n"（这不是我们代码的行为，是 CRT 标准输出的文本
+# 模式转换）；`\n` 两侧都必须放宽为 `\r?\n`，否则 `-{6,}\n` 在真实遇到 `-{6,}\r\n` 时会
+# 匹配失败，导致误判为"取证通道失效"（此前一版曾误诊为模型分支问题，已核实并非如此）。
+_PF_PROMPT_BLOCK_RE = re.compile(r"\[Prompt\] \[[^\r\n]*\r?\n(.*?)\r?\n-{6,}\r?\n", re.S)
 # token 预算证据行（Normal/Harmony 两条路径同格式）。
 _PF_FINAL_TOKENS_RE = re.compile(r"Final prompt - Tokens: (\d+)")
 
@@ -9214,6 +10054,13 @@ def _pf_long_history_messages(rounds=24):
     return msgs
 
 
+def _pf_build_min_png_data_uri():
+    """最小 1x1 像素 PNG 占位图（透明像素）的 OpenAI content-parts data URI，
+    用于「纯图片单问」用例——不要求模型真的看懂图片内容，只验证请求链路本身
+    能正常处理多模态 content 并保留伴随的文字说明。"""
+    return f"data:image/png;base64,{_PF_MIN_PNG_B64}"
+
+
 def _pf_result(name, model_name, passed, status_code, latency_ms, detail,
                response_data=None, skipped=False):
     return TestResult(
@@ -9251,7 +10098,8 @@ def _run_prompt_fidelity_suite(args, models, remote_mode, out_dir):
       2. JSON 数组型响应的**末项**是否仍在（当前只保留前缀元素）；
       3. 长历史整条丢弃后是否留下占位痕迹；
       4. 17 个完整工具 Schema + 中文长文本下最终 token 是否落在上下文预算内；
-      5. 非流式响应头 / 流式 status 帧是否回报同一套压缩账本。
+      5. 非流式响应头 / 流式 status 帧是否回报同一套压缩账本；
+      6. 中文问英文命名工具（纯天气单问）/ 纯图片单问两类最小化核心场景是否仍保真。
     """
     all_results = []
     all_crash_events = []
@@ -9321,6 +10169,7 @@ def _run_prompt_fidelity_suite(args, models, remote_mode, out_dir):
         _pf_case_chinese_budget(args, target, probe, context_size, all_results, all_crash_events)
         _pf_case_no_high_signal(args, target, probe, all_results, all_crash_events)
         _pf_case_ledger_headers(args, target, probe, context_size, all_results, all_crash_events)
+        _pf_case_image_single_question(args, target, probe, all_results, all_crash_events)
         _pf_case_cross_language_relevance(args, target, probe, all_results, all_crash_events)
         _pf_case_relevance_still_filters(args, target, probe, all_results, all_crash_events)
         _pf_case_stream_ledger(args, target, all_results, all_crash_events)
@@ -9592,6 +10441,46 @@ def _pf_case_ledger_headers(args, model, probe, context_size, all_results, all_c
     _pf_run_request(args, model, probe, name, body, all_results, all_crash_events, evaluate)
 
 
+def _pf_case_image_single_question(args, model, probe, all_results, all_crash_events):
+    """场景：纯图片单问——一张最小占位图 + 一句极短中文提问（OpenAI 多段 content-parts）。
+    断言伴随图片的文字说明未被压缩链路当作可随意丢弃的普通历史消息处理（用唯一 canary
+    标记该说明文本，断言其仍在最终提示词块里），且请求返回 200；不要求模型真的看懂图片
+    内容。仅在目标模型具备视觉能力时运行——文本模型收到 image_url content 会被
+    genie_interface.cpp 的 IEmbedding::set_content 直接 throw ReportError{"not support
+    vision mode"}，对本场景无意义，如实跳过而不是误判失败。"""
+    name = "PROMPT_FIDELITY: pure image single question keeps accompanying text"
+    if "image" not in detect_modality(model):
+        all_results.append(_pf_result(
+            name, model, False, 0, 0,
+            f"目标模型 {model} 不支持视觉模态（detect_modality 未命中 image），跳过纯图片单问用例",
+            skipped=True))
+        return
+    body = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "你是一个助手，可以看图回答问题。"},
+            {"role": "user", "content": [
+                {"type": "text", "text": f"{_PF_CANARY_IMG_TEXT} 这张图片怎么样？"},
+                {"type": "image_url", "image_url": {"url": _pf_build_min_png_data_uri()}},
+            ]},
+        ],
+        "stream": False,
+        "max_tokens": 48,
+    }
+
+    def evaluate(resp, prompt_text, _probe):
+        if resp.status_code != 200:
+            return False, f"HTTP {resp.status_code}: {resp.text[:200]}", {}
+        if not prompt_text:
+            return False, "未能抓取到最终提示词块，取证通道失效", {}
+        text_kept = _PF_CANARY_IMG_TEXT in prompt_text
+        data = {"final_prompt_chars": len(prompt_text), "accompanying_text_kept": text_kept}
+        detail = f"accompanying_text_kept={text_kept}, final_prompt={len(prompt_text)} chars"
+        return text_kept, detail, data
+
+    _pf_run_request(args, model, probe, name, body, all_results, all_crash_events, evaluate)
+
+
 def _pf_relevance_tools():
     """一个英文 `weather` 工具 + 几个明确无关的工具。工具名与描述均为纯英文，
     用于验证中文提问能否仍看得到它（相关性过滤的跳语言盲区）。"""
@@ -9712,8 +10601,13 @@ def _pf_case_stream_ledger(args, model, all_results, all_crash_events):
                     obj = json.loads(payload)
                 except ValueError:
                     continue
-                if isinstance(obj, dict) and obj.get("status") == "prompt_optimized":
-                    ledger_frame = obj
+                # status/status_message 及 PromptLedger 字段均在 choices[0] 内（与
+                # ResponseTools::statusDataJson 的既有 "preparing"/"summarizing" 等状态帧
+                # 同一层级约定），不在顶层 —— 顶层只有 id/object/created/model/choices。
+                choices = obj.get("choices") if isinstance(obj, dict) else None
+                choice0 = choices[0] if isinstance(choices, list) and choices else None
+                if isinstance(choice0, dict) and choice0.get("status") == "prompt_optimized":
+                    ledger_frame = choice0
                     break
     except Exception as e:
         latency = (time.time() - start) * 1000

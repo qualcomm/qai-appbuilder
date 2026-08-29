@@ -122,6 +122,17 @@ public:
         float savings_percent;
         IntentType detected_intent;
         std::string matched_skill;
+
+        // ── 供 PromptLedger 可观测性回报使用（不新增第二套统计，直接复用本结构）──
+        // tools_tier：OptimizeToolsPrompt 实际落到的降级档位，0=未经过该函数优化
+        //   （无 tools 或解析失败），1~4 对应 Tier1（已知签名/基础签名）~Tier4（硬性
+        //   预算截断）。由 BuildSystemContext 写入 skills_total/kept，OptimizeToolsPrompt
+        //   写入 tools_tier/total/kept，二者互不覆盖对方字段。
+        int tools_tier = 0;
+        size_t tools_total = 0;   // 相关性过滤后进入 Tier1~4 处理的候选工具总数
+        size_t tools_kept = 0;    // 最终实际保留在提示词里的工具数
+        size_t skills_total = 0;  // ExtractSkillsFromRequest 解析出的 SKILL 候选总数（全量，未经相关性过滤）
+        size_t skills_kept = 0;   // FilterSkillsByRelevance 筛选后实际保留的 SKILL 数
     };
     
     OptimizationStats GetLastStats() const { return last_stats_; }

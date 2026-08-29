@@ -1549,7 +1549,7 @@ bool ModelManager::InitializeConfig(bool load)
                         prompt_optimization_config_.emergency_truncation.enabled =
                                 et.value("enabled", true);
                         prompt_optimization_config_.emergency_truncation.max_truncation_ratio =
-                                et.value("max_truncation_ratio", 0.40f);
+                                et.value("max_truncation_ratio", 0.95f);
                         prompt_optimization_config_.emergency_truncation.safety_margin_tokens =
                                 et.value("safety_margin_tokens", 30);
                         My_Log{} << "[Config] emergency_truncation loaded: "
@@ -1558,6 +1558,31 @@ bool ModelManager::InitializeConfig(bool load)
                                  << prompt_optimization_config_.emergency_truncation.max_truncation_ratio
                                  << ", safety_margin_tokens="
                                  << prompt_optimization_config_.emergency_truncation.safety_margin_tokens
+                                 << std::endl;
+                    }
+
+                    // [fidelity] 保真截断配置（旧配置文件中没有该节时使用默认值，不报错）
+                    if (po.contains("fidelity") && po["fidelity"].is_object())
+                    {
+                        const auto &fid = po["fidelity"];
+                        auto &fid_cfg = prompt_optimization_config_.fidelity;
+                        fid_cfg.budget_unit = fid.value("budget_unit", std::string("tokens"));
+                        fid_cfg.preserve_tail = fid.value("preserve_tail", true);
+                        fid_cfg.tail_ratio = fid.value("tail_ratio", 0.30);
+                        fid_cfg.extract_high_signal = fid.value("extract_high_signal", true);
+                        fid_cfg.drop_placeholder = fid.value("drop_placeholder", true);
+                        fid_cfg.json_head_items = fid.value("json_head_items", (size_t) 3);
+                        fid_cfg.json_tail_items = fid.value("json_tail_items", (size_t) 1);
+                        fid_cfg.max_token_probe_per_message = fid.value("max_token_probe_per_message", (size_t) 8);
+                        My_Log{} << "[Config] fidelity loaded: "
+                                 << "budget_unit=" << fid_cfg.budget_unit
+                                 << ", preserve_tail=" << fid_cfg.preserve_tail
+                                 << ", tail_ratio=" << fid_cfg.tail_ratio
+                                 << ", extract_high_signal=" << fid_cfg.extract_high_signal
+                                 << ", drop_placeholder=" << fid_cfg.drop_placeholder
+                                 << ", json_head_items=" << fid_cfg.json_head_items
+                                 << ", json_tail_items=" << fid_cfg.json_tail_items
+                                 << ", max_token_probe_per_message=" << fid_cfg.max_token_probe_per_message
                                  << std::endl;
                     }
 
@@ -1700,10 +1725,16 @@ bool ModelManager::InitializeConfig(bool load)
                                 rf.value("name_token_weight", (size_t) 3);
                         prompt_optimization_config_.relevance_filter.description_keyword_weight =
                                 rf.value("description_keyword_weight", (size_t) 1);
+                        prompt_optimization_config_.relevance_filter.zero_hit_keep_all =
+                                rf.value("zero_hit_keep_all", true);
+                        prompt_optimization_config_.relevance_filter.cjk_bigram =
+                                rf.value("cjk_bigram", true);
                         My_Log{} << "[Config] relevance_filter loaded: "
                                  << "enabled=" << prompt_optimization_config_.relevance_filter.enabled
                                  << ", name_token_weight=" << prompt_optimization_config_.relevance_filter.name_token_weight
                                  << ", description_keyword_weight=" << prompt_optimization_config_.relevance_filter.description_keyword_weight
+                                 << ", zero_hit_keep_all=" << prompt_optimization_config_.relevance_filter.zero_hit_keep_all
+                                 << ", cjk_bigram=" << prompt_optimization_config_.relevance_filter.cjk_bigram
                                  << std::endl;
                     }
 

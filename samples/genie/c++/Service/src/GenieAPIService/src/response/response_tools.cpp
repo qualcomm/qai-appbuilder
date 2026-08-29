@@ -56,7 +56,8 @@ bool ResponseTools::status_content_visible = true;
 // 静态成员定义：默认 false（推理输出流程调试日志默认关闭）
 bool ResponseTools::log_inference_stream = false;
 
-std::string ResponseTools::statusDataJson(const std::string &status, const std::string &message)
+std::string ResponseTools::statusDataJson(const std::string &status, const std::string &message,
+                                          const json &extra_payload)
 {
     std::string id = generate_uuid4();
     int created = timer.GetSystemTime();
@@ -66,18 +67,27 @@ std::string ResponseTools::statusDataJson(const std::string &status, const std::
     // delta.content：debug.status_update_content_visible=true 时填充 message（客户端可见），
     //               false 时为空字符串（客户端不显示，仅用于保活连接）。
     const std::string delta_content = status_content_visible ? (message + "\n") : "";
+    json choice = {
+        {"index",          0},
+        {"finish_reason",  nullptr},
+        {"delta",          {{"content", delta_content}}},
+        {"status",         status},
+        {"status_message", message}
+    };
+    // extra_payload（如 PromptLedger::ToJson()）与 status/status_message 同层合并进
+    // choices[0]，不新增协议面、不改变既有 status 帧（"preparing"/"summarizing"/
+    // "cloud_fallback" 等）的结构——默认空对象时 for 循环零次迭代，行为与改动前逐字节一致。
+    if (extra_payload.is_object()) {
+        for (const auto &item : extra_payload.items()) {
+            choice[item.key()] = item.value();
+        }
+    }
     json data = {
         {"id",      id},
         {"object",  "chat.completion.chunk"},
         {"created", created},
         {"model",   ""},
-        {"choices", json::array({{
-            {"index",          0},
-            {"finish_reason",  nullptr},
-            {"delta",          {{"content", delta_content}}},
-            {"status",         status},
-            {"status_message", message}
-        }})}
+        {"choices", json::array({choice})}
     };
     return json_to_str(data);
 }
