@@ -9910,6 +9910,12 @@ _PF_LEDGER_HEADERS = (
     # legacy 档（budget_partition.enabled=false）与 optimized 档（竞争时分区生效）下
     # 该值必然不同，是「D3 开关真实生效」的机械证据，不需要读日志判断。
     "X-Genie-Prompt-Skills-Budget-Tokens",
+    # D2（Step3）新增：技能目录三档渐进披露的各档计数。三项之和恒等于 Skills-Kept；
+    # skill_disclosure.enabled=false 时逐字节退化为 L2==Kept、L1/L0 恒为 0，
+    # 这是「三档开关真实生效」的机械证据（不需要读日志判断）。
+    "X-Genie-Prompt-Skills-L2",
+    "X-Genie-Prompt-Skills-L1",
+    "X-Genie-Prompt-Skills-L0",
 )
 
 
@@ -11263,6 +11269,202 @@ def _sc_case_chinese_budget(args, model, probe, arm, results, timeout):
     results.append(_sc_result(name, model, ok, detail, data=measurement))
 
 
+_SC_CN_QUERY = ("请问如何对磁通电容器做校准？三级时间异常时的电容校准步骤是什么？"
+                "请使用合适的技能回答。")
+
+# D4 别名扩展的服务端日志行（prompt_optimizer.cpp::BuildRelevanceKeywords）。
+# 它是「中文词元真的被扩展成英文意图词」的唯一直接机械证据；
+# intent_aliases_enabled=false 时该行根本不会输出。
+_SC_ALIAS_EXPANSION_RE = re.compile(r"intent alias expansion: (\d+) -> (\d+) keyword")
+
+
+def _sc_target_disclosure_form(block, target):
+    """从 `[Prompt]` 日志块里机械判定目标技能的披露档位形态。
+
+    三种渲染形态互斥，可逐字节区分：
+      L0 = 单行 `- <name> -> <loc>`；
+      L2 = `Path: <loc>` 且 description **完整**（尾部可见）；
+      L1 = `Path: <loc>` 但 description 被截断（尾部不可见）。
+    拿不到日志块时返回 None（调用方不当失败）。"""
+    if not block:
+        return None
+    if f"- {target['name']} -> {target['location']}" in block:
+        return "L0"
+    if f"Path: {target['location']}" in block:
+        tail = (target["description"] or "")[-24:]
+        return "L2" if (tail and tail in block) else "L1"
+    return "absent"
+
+
+def _sc_skill_pool_system_text(skills_xml):
+    return ("You are a helpful assistant. Skills are not tools — you must call "
+            "the read tool on a skill's SKILL.md location before using it.\n" + skills_xml)
+
+
+def _sc_case_cn_query_en_pool(args, model, probe, arm, results, timeout):
+    """场景 2（D4 跨语言相关性升级的机械断言）：中文提问 + **纯英文**技能池。
+
+    ↳ 判据设计的一次更正（实测驱动，已留证）：本用例最初用的是
+    `Skills-Kept < Skills-Total`，实测得到 32/32 而失败——这不是 D4 没生效，而是
+    该指标在 D2 三档披露下根本不再成立：D2 的设计目标就是「预算耗尽时降档而不是
+    整条删除」，降档后全部技能都放得进预算 → Kept 必然等于 Total。
+    改为三条真正针对 D4 的机械判据：
+      (a) 服务端日志出现 `[BuildRelevanceKeywords] intent alias expansion: X -> Y`
+          且 Y > X（中文词元真的被扩展成了英文意图词）——这是 D4 生效的直接证据；
+      (b) 目标技能在纯中文提问下仍被排进最高档 L2（排序真的有区分度）；
+      (c) `Skills-L0 >= 1`（确实拉开了档位差，不是全员同档）。
+    legacy 档（intent_aliases_enabled=false）断言该日志行**不应出现**，
+    两档差异即 D4 开关真实生效的机械证据。"""
+    n = 32
+    skills_xml, metas, target = _sc_build_skill_pool(n)
+    body = {
+        "model": model, "stream": False,
+        "messages": [
+            {"role": "system", "content": _sc_skill_pool_system_text(skills_xml)},
+            {"role": "user", "content": _SC_CN_QUERY},
+        ],
+        "tools": [_STATELESS_MODE_READ_TOOL_DEF],
+        "max_tokens": 96,
+    }
+    name = f"SKILL_CAPACITY: {arm} scenario2 cn_query_en_pool"
+    if probe is not None:
+        probe.mark()
+    try:
+        r = _pf_post_chat(args.host, args.port, body, timeout=timeout)
+    except Exception as e:
+        results.append(_sc_result(name, model, False, f"请求异常: {str(e)[:300]}"))
+        return
+    if r.status_code != 200:
+        results.append(_sc_result(name, model, False, f"HTTP {r.status_code}: {r.text[:200]}"))
+        return
+    missing, invalid, values = _pf_check_ledger_headers(r.headers)
+    block = probe.last_prompt_block() if probe is not None else ""
+    new_log = probe.read_new() if probe is not None else ""
+    alias_hits = _SC_ALIAS_EXPANSION_RE.findall(new_log)
+    alias_expanded = any(int(b) > int(a) for a, b in alias_hits)
+    kept = values.get("X-Genie-Prompt-Skills-Kept")
+    total = values.get("X-Genie-Prompt-Skills-Total")
+    l2 = values.get("X-Genie-Prompt-Skills-L2")
+    l0 = values.get("X-Genie-Prompt-Skills-L0")
+    target_form = _sc_target_disclosure_form(block, target)
+    measurement = {
+        "skills_kept": kept, "skills_total": total,
+        "skills_budget_tokens": values.get("X-Genie-Prompt-Skills-Budget-Tokens"),
+        "skills_l2": l2,
+        "skills_l1": values.get("X-Genie-Prompt-Skills-L1"),
+        "skills_l0": l0,
+        "tokens_out": values.get("X-Genie-Prompt-Tokens-Out"),
+        "context_size": values.get("X-Genie-Prompt-Context-Size"),
+        "target_in_prompt": (target["location"] in block) if block else None,
+        "target_form": target_form,
+        "alias_expansion_log": alias_hits[:4], "alias_expanded": alias_expanded,
+        "prompt_block_available": bool(block),
+    }
+    _SC_SCENARIO_MEASUREMENTS.setdefault((model, "scenario2"), {})[arm] = measurement
+    if missing:
+        results.append(_sc_result(name, model, False,
+                                  f"账本响应头缺失 {missing}，无法机械核验跨语言区分度", data=measurement))
+        return
+    if arm == "legacy":
+        # legacy 档：D4 已关，别名扩展日志行必须不出现（回滚等价性的直接证据）。
+        rollback_ok = (not alias_hits)
+        results.append(_sc_result(
+            name, model, rollback_ok,
+            f"legacy 档（intent_aliases_enabled=false）回滚等价性：别名扩展日志行未出现 ? "
+            f"{rollback_ok}（实测 hits={alias_hits[:4]}，要求为空）；"
+            f"skills_kept={kept}/{total}, L2/L1/L0={l2}/{measurement['skills_l1']}/{l0}, "
+            f"target_form={target_form}",
+            data=measurement))
+        return
+    tiered = (l0 is not None and l0 >= 1)
+    target_ok = target_form in (None, "L2")
+    ok = alias_expanded and tiered and target_ok
+    detail = (f"中文提问 + 纯英文技能池 N={n}：别名扩展生效（日志 X->Y 且 Y>X）? "
+              f"{alias_expanded}（hits={alias_hits[:4]}）；目标技能档位={target_form}"
+              f"（要求 L2；拿不到 [Prompt] 日志块时为 None，不当失败）；"
+              f"L0>=1（档位真的拉开）? {tiered}；"
+              f"L2/L1/L0={l2}/{measurement['skills_l1']}/{l0}，Kept={kept}/{total}"
+              f"（注：D2 降档而不删除，Kept==Total 是预期行为，不作为区分度指标）")
+    results.append(_sc_result(name, model, ok, detail, data=measurement))
+
+
+def _sc_case_disclosure_tiers(args, model, probe, arm, results, timeout):
+    """场景 3（D2 三档渐进披露的机械断言）：同一 N 下
+
+      - 两档共同硬断言：`Skills-L2 + Skills-L1 + Skills-L0 == Skills-Kept`；
+      - optimized 档：`L1 + L0 >= 1`（三档真的分了档，不是退化成全 L2），且目标技能
+        以 L2 形态出现在最终提示词里（`Path:` 行 + description 尾部完整可见，
+        而不是被截断的 L1 摘要或单行 L0）；
+      - legacy 档（skill_disclosure.enabled=false）：`L2 == Kept` 且 `L1 == L0 == 0`，
+        即逐字节退化到旧两档行为——这是回滚等价性的机械证据。"""
+    n = 24
+    skills_xml, metas, target = _sc_build_skill_pool(n)
+    body = {
+        "model": model, "stream": False,
+        "messages": [
+            {"role": "system", "content": _sc_skill_pool_system_text(skills_xml)},
+            {"role": "user", "content": _SC_QUESTION},
+        ],
+        "tools": [_STATELESS_MODE_READ_TOOL_DEF],
+        "max_tokens": 96,
+    }
+    name = f"SKILL_CAPACITY: {arm} scenario3 disclosure_tiers"
+    if probe is not None:
+        probe.mark()
+    try:
+        r = _pf_post_chat(args.host, args.port, body, timeout=timeout)
+    except Exception as e:
+        results.append(_sc_result(name, model, False, f"请求异常: {str(e)[:300]}"))
+        return
+    if r.status_code != 200:
+        results.append(_sc_result(name, model, False, f"HTTP {r.status_code}: {r.text[:200]}"))
+        return
+    missing, invalid, values = _pf_check_ledger_headers(r.headers)
+    block = probe.last_prompt_block() if probe is not None else ""
+    kept = values.get("X-Genie-Prompt-Skills-Kept")
+    l2 = values.get("X-Genie-Prompt-Skills-L2")
+    l1 = values.get("X-Genie-Prompt-Skills-L1")
+    l0 = values.get("X-Genie-Prompt-Skills-L0")
+    # 目标技能是否以 L2 全量形态出现（三种渲染形态互斥，可机械区分，见
+    # _sc_target_disclosure_form）。
+    target_form = _sc_target_disclosure_form(block, target)
+    measurement = {
+        "skills_kept": kept, "skills_total": values.get("X-Genie-Prompt-Skills-Total"),
+        "skills_l2": l2, "skills_l1": l1, "skills_l0": l0,
+        "skills_budget_tokens": values.get("X-Genie-Prompt-Skills-Budget-Tokens"),
+        "tokens_out": values.get("X-Genie-Prompt-Tokens-Out"),
+        "context_size": values.get("X-Genie-Prompt-Context-Size"),
+        "target_form": target_form, "prompt_block_available": bool(block),
+    }
+    _SC_SCENARIO_MEASUREMENTS.setdefault((model, "scenario3"), {})[arm] = measurement
+    if missing:
+        results.append(_sc_result(name, model, False,
+                                  f"账本响应头缺失 {missing}，无法机械核验三档披露", data=measurement))
+        return
+    if None in (kept, l2, l1, l0):
+        results.append(_sc_result(name, model, False,
+                                  f"三档账本字段解析失败：L2={l2}, L1={l1}, L0={l0}, Kept={kept}",
+                                  data=measurement))
+        return
+    sum_ok = (l2 + l1 + l0 == kept)
+    if arm == "legacy":
+        rollback_ok = sum_ok and l1 == 0 and l0 == 0 and l2 == kept
+        detail = (f"legacy 档（skill_disclosure.enabled=false）回滚等价性："
+                  f"L2+L1+L0={l2}+{l1}+{l0}={l2 + l1 + l0} == Kept={kept} ? {sum_ok}；"
+                  f"L2==Kept 且 L1==L0==0 ? {rollback_ok}（要求 True：逐字节退化到旧两档行为）；"
+                  f"target_form={target_form}")
+        results.append(_sc_result(name, model, rollback_ok, detail, data=measurement))
+        return
+    tiered = (l1 + l0) >= 1
+    target_ok = target_form in (None, "L2")
+    ok = sum_ok and tiered and target_ok
+    detail = (f"N={n}：L2+L1+L0={l2}+{l1}+{l0}={l2 + l1 + l0} == Kept={kept} ? {sum_ok}；"
+              f"三档真的分档（L1+L0>=1）? {tiered}；目标技能形态={target_form}"
+              f"（要求 L2；拿不到 [Prompt] 日志块时为 None，不当失败）；"
+              f"skills_budget_tokens={measurement['skills_budget_tokens']}")
+    results.append(_sc_result(name, model, ok, detail, data=measurement))
+
+
 def _sc_append_arm_contrast_results(model, results):
     """两档都跑过后追加跨档位对照断言：
       - 场景 4：skills_budget_tokens 在 legacy（budget_partition.enabled=false，
@@ -11271,7 +11473,9 @@ def _sc_append_arm_contrast_results(model, results):
       - 场景 6：中文场景两档必须出现可观测差异（HTTP 状态、tokens_out、
         提示词块体量、是否越界任一不同），否则如实判失败，说明 P1 在该用例上
         无区分力、不能声称是真实修复。"""
-    for scenario, key_desc in (("scenario4", "skills_budget_tokens 差异（D3 开关生效证据）"),
+    for scenario, key_desc in (("scenario2", "中文提问下的排序区分度（D4 开关生效证据）"),
+                               ("scenario3", "三档披露计数差异（D2 开关生效证据）"),
+                               ("scenario4", "skills_budget_tokens 差异（D3 开关生效证据）"),
                                ("scenario6", "中文场景两档可观测差异（P1 真实修复证据）")):
         arms_data = _SC_SCENARIO_MEASUREMENTS.get((model, scenario), {})
         name = f"SKILL_CAPACITY: {scenario} arm_contrast"
@@ -11282,7 +11486,33 @@ def _sc_append_arm_contrast_results(model, results):
                 skipped=True, data=arms_data))
             continue
         legacy, opt = arms_data.get("legacy", {}), arms_data.get("optimized", {})
-        if scenario == "scenario4":
+        if scenario == "scenario2":
+            # D4：两档对照的机械证据是「别名扩展日志行只在 optimized 档出现」
+            # ——不能用 Kept 差异（D2 降档而不删除，Kept 在两档都等于 Total，
+            # 实测 32/32 vs 32/32，已在场景 2 的 docstring 里留证）。
+            ok = (not legacy.get("alias_expanded")) and bool(opt.get("alias_expanded"))
+            detail = (f"{key_desc}：legacy alias_expanded={legacy.get('alias_expanded')}"
+                      f"（hits={legacy.get('alias_expansion_log')}，要求 False） vs "
+                      f"optimized alias_expanded={opt.get('alias_expanded')}"
+                      f"（hits={opt.get('alias_expansion_log')}，要求 True）；"
+                      f"legacy L2/L1/L0="
+                      f"{legacy.get('skills_l2')}/{legacy.get('skills_l1')}/{legacy.get('skills_l0')} vs "
+                      f"optimized={opt.get('skills_l2')}/{opt.get('skills_l1')}/{opt.get('skills_l0')}；"
+                      f"legacy target_form={legacy.get('target_form')} vs "
+                      f"optimized={opt.get('target_form')}；"
+                      f"（Kept 两档均 == Total 是 D2 降档而不删除的预期行为，不作判据）")
+        elif scenario == "scenario3":
+            # D2：legacy 档必然 L1==L0==0（旧两档），optimized 档必然 L1+L0>=1（真分档）
+            l_tier = (legacy.get("skills_l1") or 0) + (legacy.get("skills_l0") or 0)
+            o_tier = (opt.get("skills_l1") or 0) + (opt.get("skills_l0") or 0)
+            ok = (l_tier == 0 and o_tier >= 1)
+            detail = (f"{key_desc}：legacy L2/L1/L0="
+                      f"{legacy.get('skills_l2')}/{legacy.get('skills_l1')}/{legacy.get('skills_l0')}"
+                      f"（要求 L1+L0==0） vs optimized="
+                      f"{opt.get('skills_l2')}/{opt.get('skills_l1')}/{opt.get('skills_l0')}"
+                      f"（要求 L1+L0>=1）；legacy target_form={legacy.get('target_form')} vs "
+                      f"optimized={opt.get('target_form')}")
+        elif scenario == "scenario4":
             l_budget, o_budget = legacy.get("skills_budget_tokens"), opt.get("skills_budget_tokens")
             ok = (l_budget is not None and o_budget is not None and l_budget != o_budget)
             detail = (f"{key_desc}：legacy skills_budget_tokens={l_budget} vs "
@@ -11318,10 +11548,9 @@ def _sc_append_arm_contrast_results(model, results):
 
 def _sc_arm_overrides(arm):
     """按档位（legacy/optimized）生成要写入 service_config.json 的
-    prompt_optimization 子节覆盖字典。legacy = 全部 P1/D3 新开关关闭/退回旧值；
-    optimized = 空字典（不覆盖，使用 model_config.h 里的新默认值，即 Step2 改造
-    后的默认档位）。仅覆盖本 Step（P1+D3）已实现的两个子节，D2/D4/P2/D6/D5
-    留给 Step3-4 落地后再扩展本函数。"""
+    prompt_optimization 子节覆盖字典。legacy = 全部 P1/D3/D2/D4 新开关关闭/退回旧值；
+    optimized = 空字典（不覆盖，使用 model_config.h 里的新默认值）。
+    P2/D6/D5 留给 Step4 落地后再扩展本函数。"""
     if arm == "legacy":
         return {
             "fidelity": {
@@ -11333,8 +11562,19 @@ def _sc_arm_overrides(arm):
             "budget_partition": {
                 "enabled": False,
             },
+            # D2：关掉三档渐进披露，退回旧两档行为
+            # （FilterSkillsByRelevance + 全 L2 渲染，L1/L0 账本字段恒为 0）
+            "skill_disclosure": {
+                "enabled": False,
+            },
+            # D4：关掉跨语言意图别名表与 tags 参与打分，
+            # 关键词集合与打分口径逐字节回退到 D4 引入前
+            "relevance_filter": {
+                "intent_aliases_enabled": False,
+                "tag_weight": 0,
+            },
         }
-    # optimized：不写覆盖，直接依赖 C++ 侧默认值（cjk=3.0/ascii=4.0 字节，budget_partition.enabled=true）
+    # optimized：不写覆盖，直接依赖 C++ 侧默认值
     return {}
 
 
@@ -11501,6 +11741,9 @@ def _run_skill_capacity_suite(args, models, remote_mode, out_dir):
                         _sc_case_tool_flood_skill_floor(args, target, probe, arm, all_results, timeout)
                         _sc_case_tools_kept_no_regress(args, target, probe, arm, all_results, timeout)
                         _sc_case_chinese_budget(args, target, probe, arm, all_results, timeout)
+                        # 场景 2/3（Step3 D4/D2 的机械断言）
+                        _sc_case_cn_query_en_pool(args, target, probe, arm, all_results, timeout)
+                        _sc_case_disclosure_tiers(args, target, probe, arm, all_results, timeout)
 
                         frontier, converged, curve = _sc_binary_search(args, target, probe, max_n, repeat, timeout)
                         # 预算饱和判定（本轮修正第 1(c) 条）：取前沿点对应的曲线条目，
@@ -11527,15 +11770,19 @@ def _run_skill_capacity_suite(args, models, remote_mode, out_dir):
                                 note = note + "；" + sat_note
                             detail = (f"frontier_skills≥{frontier}（{note}）；"
                                       f"曲线点数={len(curve)}；末次曲线条目={curve[-1] if curve else None}")
-                        # converged=False 或 饱和 时 passed 同步标 False：这不是「测试失败」，
-                        # 而是「数字不可用于计算提升倍数」的机械信号，禁止下游报告把它当
-                        # 真实前沿值消费（Step1/Step2 修正条款，不接受争辩）。
+                        # converged=False 或 饱和 时不再走「失败」通道，而是精确记为
+                        # skipped=True（上一轮评审采纳项）：这不是「测试失败」，而是
+                        # 「该数字不可用于计算提升倍数」的机械信号；把它计作不可豁免失败
+                        # 会打破健康判据 failed == ignored 并淹没日后真正的新增失败。
+                        # converged/frontier_saturated/usable_for_gain_ratio/probe_curve
+                        # 全部 data 字段原样保留，语义不变。
+                        usable = bool(converged and not saturated)
                         all_results.append(_sc_result(
                             f"SKILL_CAPACITY: {short_name} {arm}_frontier", target,
-                            converged and not saturated, detail,
+                            usable, detail, skipped=not usable,
                             data={"model": target, "arm": arm, "frontier_skills": frontier,
                                   "converged": converged, "frontier_saturated": saturated,
-                                  "usable_for_gain_ratio": bool(converged and not saturated),
+                                  "usable_for_gain_ratio": usable,
                                   "note": note, "probe_curve": curve}))
                     except Exception as e:
                         detail = f"二分搜索未捕获异常（可能服务已崩溃）: {type(e).__name__}: {str(e)[:300]}"

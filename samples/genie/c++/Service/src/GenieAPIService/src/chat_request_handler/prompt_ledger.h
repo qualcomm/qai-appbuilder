@@ -36,6 +36,10 @@ struct PromptLedger {
     size_t skills_total = 0, skills_kept = 0;
     // D3：skills 分区预算（token），数据源取 OptimizationStats::skills_budget_tokens，不新建第二套统计口径。
     size_t skills_budget_tokens = 0;
+    // D2：三档渐进披露的各档技能数（L2 全量 / L1 摘要 / L0 仅名字）。
+    // 三项之和恒等于 skills_kept；skill_disclosure.enabled=false 时逐字节退化为
+    // skills_l2 == skills_kept、L1/L0 恒为 0（旧两档行为：要么全 L2，要么整条删）。
+    size_t skills_l2 = 0, skills_l1 = 0, skills_l0 = 0;
     bool   emergency_truncated = false;
     bool   summarized = false;
 
@@ -57,6 +61,9 @@ struct PromptLedger {
         j["skills_total"] = skills_total;
         j["skills_kept"] = skills_kept;
         j["skills_budget_tokens"] = skills_budget_tokens;
+        j["skills_l2"] = skills_l2;
+        j["skills_l1"] = skills_l1;
+        j["skills_l0"] = skills_l0;
         j["emergency_truncated"] = emergency_truncated;
         j["summarized"] = summarized;
         return j;
@@ -79,6 +86,9 @@ struct PromptLedger {
         res.set_header("X-Genie-Prompt-Skills-Total", std::to_string(skills_total));
         res.set_header("X-Genie-Prompt-Skills-Kept", std::to_string(skills_kept));
         res.set_header("X-Genie-Prompt-Skills-Budget-Tokens", std::to_string(skills_budget_tokens));
+        res.set_header("X-Genie-Prompt-Skills-L2", std::to_string(skills_l2));
+        res.set_header("X-Genie-Prompt-Skills-L1", std::to_string(skills_l1));
+        res.set_header("X-Genie-Prompt-Skills-L0", std::to_string(skills_l0));
         res.set_header("X-Genie-Prompt-Emergency-Truncated", emergency_truncated ? "1" : "0");
         res.set_header("X-Genie-Prompt-Summarized", summarized ? "1" : "0");
     }

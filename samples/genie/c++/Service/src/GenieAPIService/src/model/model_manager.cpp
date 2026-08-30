@@ -1749,12 +1749,38 @@ bool ModelManager::InitializeConfig(bool load)
                                 rf.value("zero_hit_keep_all", true);
                         prompt_optimization_config_.relevance_filter.cjk_bigram =
                                 rf.value("cjk_bigram", true);
+                        // D4：跨语言别名表 + tags 参与打分（缺字段时按结构体默认值工作）
+                        prompt_optimization_config_.relevance_filter.intent_aliases_enabled =
+                                rf.value("intent_aliases_enabled", true);
+                        prompt_optimization_config_.relevance_filter.tag_weight =
+                                rf.value("tag_weight", (size_t) 2);
                         My_Log{} << "[Config] relevance_filter loaded: "
                                  << "enabled=" << prompt_optimization_config_.relevance_filter.enabled
                                  << ", name_token_weight=" << prompt_optimization_config_.relevance_filter.name_token_weight
                                  << ", description_keyword_weight=" << prompt_optimization_config_.relevance_filter.description_keyword_weight
                                  << ", zero_hit_keep_all=" << prompt_optimization_config_.relevance_filter.zero_hit_keep_all
                                  << ", cjk_bigram=" << prompt_optimization_config_.relevance_filter.cjk_bigram
+                                 << ", intent_aliases_enabled=" << prompt_optimization_config_.relevance_filter.intent_aliases_enabled
+                                 << ", tag_weight=" << prompt_optimization_config_.relevance_filter.tag_weight
+                                 << std::endl;
+                    }
+
+                    // [skill_disclosure] D2：技能目录三档渐进披露（旧配置文件中没有该节时使用默认值，不报错）
+                    if (po.contains("skill_disclosure") && po["skill_disclosure"].is_object())
+                    {
+                        const auto &sd = po["skill_disclosure"];
+                        auto &sd_cfg = prompt_optimization_config_.skill_disclosure;
+                        sd_cfg.enabled = sd.value("enabled", true);
+                        sd_cfg.l2_top_k = sd.value("l2_top_k", (size_t) 2);
+                        sd_cfg.l1_top_k = sd.value("l1_top_k", (size_t) 6);
+                        sd_cfg.l1_summary_max_chars = sd.value("l1_summary_max_chars", (size_t) 240);
+                        sd_cfg.l0_summary_max_chars = sd.value("l0_summary_max_chars", (size_t) 80);
+                        My_Log{} << "[Config] skill_disclosure loaded: "
+                                 << "enabled=" << sd_cfg.enabled
+                                 << ", l2_top_k=" << sd_cfg.l2_top_k
+                                 << ", l1_top_k=" << sd_cfg.l1_top_k
+                                 << ", l1_summary_max_chars=" << sd_cfg.l1_summary_max_chars
+                                 << ", l0_summary_max_chars=" << sd_cfg.l0_summary_max_chars
                                  << std::endl;
                     }
 

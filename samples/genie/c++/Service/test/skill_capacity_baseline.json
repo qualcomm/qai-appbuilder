@@ -123,5 +123,101 @@
   "not_implemented": {
     "history_budget_partition": "未实现，如实标注：message_pre_filter 已有独立的历史 token 预算口径，在 ComputeRelevanceTokenBudget() 里再切一份 history 会造成两套口径重复计算同一段预算。本 Step 只落 skills / tools 两分区。",
     "skill_capacity_mode_builder": "--skill_capacity_mode builder/both 仍未实现（留给 Step 5），已改为显式 skipped=True 机械记录，不再运行时静默忽略。"
+  },
+  "step3": {
+    "step": "Step 3 (D2 技能三档渐进披露 + D4 跨语言相关性升级)",
+    "recorded_at": "2026-08-30",
+    "model": "qwen3-8b-8480",
+    "context_size": 8192,
+    "_commands": [
+      "python test\\test_service.py --suite skill_capacity --exe_dir <repo>\\build_fidelity\\GenieService-win-arm64 --models <models_backup_20260828> --out_dir <repo>\\test_results\\sc_step3_frontier --skill_capacity_models qwen3-8b --skill_capacity_max 64 --skill_capacity_repeat 1 --skill_capacity_arms both",
+      "python test\\test_service.py --suite prompt_fidelity --exe_dir <repo>\\build_fidelity\\GenieService-win-arm64 --models <models_backup_20260828> --out_dir <repo>\\test_results\\sc_step3_pf",
+      "python test\\test_service.py --suite qnn --exe_dir <repo>\\build_fidelity\\GenieService-win-arm64 --models <models_backup_20260828> --out_dir <repo>\\test_results\\sc_step3_qnn"
+    ],
+    "frontier": {
+      "legacy": {
+        "frontier_skills": 44,
+        "converged": true,
+        "frontier_saturated": false,
+        "usable_for_gain_ratio": true,
+        "fail_point_n45": {
+          "picked": true, "answered": false, "target_in_prompt": true,
+          "skills_kept": 45, "skills_total": 45,
+          "skills_kept_at_budget_cap": false,
+          "skills_budget_tokens": 6554, "tokens_out": 6438
+        },
+        "_note": "与 Step 1 / Step 2 记录的基线逐值一致，是本轮实验有效性的前提证据"
+      },
+      "optimized": {
+        "frontier_skills_lower_bound": 64,
+        "converged": false,
+        "frontier_saturated": false,
+        "usable_for_gain_ratio": false,
+        "pass_point_n64": {
+          "picked": true, "answered": true, "target_in_prompt": true,
+          "skills_kept": 64, "skills_total": 64,
+          "skills_kept_at_budget_cap": false,
+          "skills_budget_tokens": 6496, "tokens_out": 3845
+        },
+        "_note": "≥64 是下界不是精确前沿；converged=false 已按处置记为 skipped=True，禁止用于计算精确提升倍数。需 --skill_capacity_max 128/256 续测定住真实撞墙点（本轮未做）。"
+      },
+      "gain_lower_bound": "≥1.45x（44 -> ≥64），仅作下界引用",
+      "not_a_saturation_artifact": "与 Step 2 那次被证伪的 ≥256 有本质区别：本轮前沿点 skills_kept == skills_total == 64（一条技能都没被丢弃）且 skills_kept_at_budget_cap == false，而 tokens_out 仅 3845（legacy 装 45 条就已吃到 6438）。机制是 L0 单行条目替代 L2 全量条目，不是把技能从目录里删掉，故不是过滤器旁路。"
+    },
+    "scenario2_cn_query_en_pool": {
+      "n": 32,
+      "legacy": {"skills_kept": 32, "skills_total": 32, "skills_l2": 32, "skills_l1": 0, "skills_l0": 0, "target_form": "L2", "alias_expanded": false, "alias_expansion_log": []},
+      "optimized": {"skills_kept": 32, "skills_total": 32, "skills_l2": 2, "skills_l1": 6, "skills_l0": 24, "target_form": "L2", "alias_expanded": true, "alias_expansion_log": [[68, 102]]},
+      "arm_contrast": "PASS（别名扩展日志行只在 optimized 档出现：68 -> 102 个关键词；legacy hits=[]）",
+      "_criterion_correction": "本用例最初按计划文案用的判据是 Skills-Kept < Skills-Total，实测 32/32 而失败。根因不是 D4 没生效，而是该指标在 D2 三档披露下根本不成立——D2 的设计就是降档而不删除，故 Kept 必然等于 Total。判据已改为：别名扩展日志 X->Y 且 Y>X、目标技能进 L2、Skills-L0>=1。"
+    },
+    "scenario3_disclosure_tiers": {
+      "n": 24,
+      "legacy": {"skills_l2": 24, "skills_l1": 0, "skills_l0": 0, "skills_kept": 24, "target_form": "L2", "sum_equals_kept": true},
+      "optimized": {"skills_l2": 2, "skills_l1": 6, "skills_l0": 16, "skills_kept": 24, "target_form": "L2", "sum_equals_kept": true, "skills_budget_tokens": 6496},
+      "arm_contrast": "PASS（legacy L1+L0==0 即逐字节退化到旧两档；optimized L1+L0>=1 即三档真分档）"
+    },
+    "rollback_equivalence": {
+      "D2": "skill_disclosure.enabled=false 时逐字节退化到旧两档行为（FilterSkillsByRelevance + 全 L2 渲染），账本 L1/L0 恒为 0；实测 legacy 24/0/0 且 legacy 前沿精确回到 44",
+      "D4": "relevance_filter.intent_aliases_enabled=false + tag_weight=0 时关键词集合与打分口径逐字节回退；实测 legacy 档 intent alias expansion 日志行完全不出现（hits=[]）"
+    },
+    "guards": {
+      "prompt_fidelity": {"total": 11, "passed": 10, "failed": 0, "crashed": 0, "skipped": 1, "verdict": "与基线 10/0/1 一致，无退化"},
+      "qnn": {"total": 54, "passed": 49, "failed": 4, "ignored": 4, "crashed": 0, "skipped": 1,
+              "failed_cases": [
+                {"name": "POST /images/generations", "status": 501, "ignorable": true},
+                {"name": "POST /v1/images/generations", "status": 501, "ignorable": true},
+                {"name": "POST /images/generations (round 2 model)", "status": 501, "ignorable": true},
+                {"name": "POST /v1/images/generations (round 2 model)", "status": 501, "ignorable": true}
+              ],
+              "skipped_cases": [{"name": "POST /v1/chat/completions (multimodal audio openai-style)", "ignorable": false}],
+              "verdict": "failed == ignored (4==4) 且 crashed == 0，健康"},
+      "skill_capacity": {"total": 16, "passed": 15, "failed": 0, "crashed": 0, "skipped": 1,
+                         "skipped_cases": [{"name": "SKILL_CAPACITY: qwen3-8b optimized_frontier", "reason": "converged=false（前沿 ≥64，未探到撞墙点），按处置记为 skipped 而非失败"}],
+                         "verdict": "failed == ignored (0==0) 且 crashed == 0，健康，无常红失败"}
+    },
+    "ledger_headers_count": 18,
+    "new_ledger_headers": ["X-Genie-Prompt-Skills-L2", "X-Genie-Prompt-Skills-L1", "X-Genie-Prompt-Skills-L0"],
+    "not_implemented_or_uncovered": {
+      "optimized_frontier_exact_value": "未收敛，≥64 是下界；需 --skill_capacity_max 128/256 续测",
+      "relevance_filter_tag_weight": "已实现但本套件未覆盖：CollectSkillSignalLines() 按行前缀提取 tags/触发条件，而合成技能池的 <description> 是单行文本（Tags: 不独占一行），提取结果为空、tag 打分为 no-op。刻意不改合成池——改成多行会让 legacy 44 基线不再可比。",
+      "history_budget_partition": "仍未实现，理由同 Step 2",
+      "repeat_3_recheck": "本轮用 repeat=1；legacy 44 与 Step 1（repeat=1/3 两次一致）相符，但未再做 repeat=3 复核"
+    },
+    "copilot_review": {
+      "role": "设备侧小模型上下文工程评审员 + 反对派（禁止“视场景而定”，每条须表态并给可一次实测证伪的判据）",
+      "model_confirmed": "GPT 5.6 思考",
+      "rc": 0,
+      "conclusions": [
+        {"topic": "L1 字段取舍", "verdict": "该改", "suggestion": "不保 description 前 240 字节，改保触发条件段 + description 尾段（能力边界/反例通常在后半）", "falsification": "构造 20 个仅后半段有区别的近似技能比 Top-1 选中率，当前方案若 ≤ 尾段方案 −10% 即判错", "disposition": "不采纳（当前用例不可实测）", "reason": "合成池 description 逐词同构（Step 2 第二轮为消除唯一词优势刻意所为），对“保前半段 vs 保尾段”零区分力；要测须另造异构语义池，会引入与 legacy 44 不可比的新基线"},
+        {"topic": "L0 档是否有害", "verdict": "该删", "suggestion": "80 字节摘要不足以支持决策却持续占注意力，诱发见名选技", "falsification": "固定预算下比 L0=16 与 L0=0，若前者误选率或首 token 延迟上升 ≥5% 则有害", "disposition": "不采纳（与本 Step 设计前提冲突，且已有反向实测）", "reason": "删 L0 等于回到“整条删除”，与计划要求的“降档而不是删除”直接冲突；且 N=64 前沿点 L0 占绝大多数条目而 answered/picked/target_in_prompt 全为 true、前沿由 44 涨到 ≥64，即 L0 在场时前沿是涨的"},
+        {"topic": "别名表覆盖面策略", "verdict": "该改", "suggestion": "全组扩词制造假高分稀释排序；改为原词命中=1 分、别名命中=0.25 分、同组最多加 0.5 分，且按去重命中组数而非命中词数计分", "falsification": "统计 Top-2 与 Top-3 分差，新法若显著拉大分差且命中率不降即旧法错", "disposition": "不采纳（当前用例不可实测）", "reason": "同第 1 条：逐词同构的 description 对“等权扩词 vs 同组封顶”零区分力，所有条目同步涨分或同步不涨分"}
+      ],
+      "_note": "三条建议的证伪判据原文已完整留档，作为后续 Step 的待验项；采纳与否以那时的实测为准，不凭观点改实现。"
+    },
+    "_corrections_to_step2_entries_above": {
+      "scenario6_chinese_budget.arm_contrast": "上面 step2 段里该字段仍写作「FAIL（有意保留）」，已在第三轮按处置 (c) 改为 skipped=True（detail 说明 fidelity.{cjk,ascii}_bytes_per_token 只在 tokenizer 不可用的回退分支参与运算，正常路径无可观测差异，故该对照不可测），两档实测字段原样保留。本轮实测该对照为 PASS（差异字段=['tokens_out','prompt_block_bytes']，因 D2 改变了提示词体量）。",
+      "guards_added.distractor_same_score_wording": "上面 step2 段里若仍留有「干扰项同样具备该特征」这类措辞，以第三轮的更正为准：加入 4 条三子词全命中的同构干扰名之前，目标恒得 9 分而 64 条干扰项最高仅 6 分（分布 {0:18,3:34,6:13}），该句在加入之前并不成立。"
+    }
   }
 }

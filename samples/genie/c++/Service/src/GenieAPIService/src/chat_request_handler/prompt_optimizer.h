@@ -46,6 +46,27 @@ enum class BudgetPartitionKind {
     kTools
 };
 
+// D2：技能目录的三档渐进披露档位。原实现只有「全量展开 / 整条删除」两档，
+// 预算不够时技能直接从目录里消失（模型再也无法得知它存在）；三档之后
+// 预算耗尽只降档，只有连 kNameOnly 都放不进才真正丢弃。
+enum class SkillDetailLevel {
+    kNameOnly,   // L0：单行「- name -> path (一句话摘要)」
+    kSummary,    // L1：Path + description 摘要 + 触发条件/tags 行
+    kFull        // L2：Path + 完整 description（与 D2 引入前的渲染逐字节一致）
+};
+
+// D2：带相关性分数与披露档位的技能条目。tags 不是新协议面：服务端
+// <available_skills> XML 只解析 <name>/<description>/<location>，这里的 tags 是从
+// description 正文里提取出的「tags: …」/「标签: …」行。
+struct ScoredSkill {
+    std::string name;
+    std::string description;   // 对应 SkillInfo::use_for
+    std::string location;      // 对应 SkillInfo::path
+    std::string tags;          // 从 description 提取的 tags 段（可为空）
+    size_t score = 0;
+    SkillDetailLevel level = SkillDetailLevel::kFull;
+};
+
 // 注意：MessageCompressionConfig 和 OptimizedMessages 已迁移到 message_pre_filter.h
 
 class PromptOptimizer {
@@ -146,6 +167,12 @@ public:
         // D3：ComputeRelevanceTokenBudget(BudgetPartitionKind::kSkills) 实际算出的
         // skills 分区预算（token），budget_partition.enabled=false 时等于单一总预算。
         size_t skills_budget_tokens = 0;
+        // D2：三档渐进披露的各档技能数，三项之和恒等于 skills_kept。
+        // skill_disclosure.enabled=false（或 skill_catalog_format != "structured"）时
+        // 逐字节退化为 skills_l2 == skills_kept、L1/L0 恒为 0。
+        size_t skills_l2 = 0;
+        size_t skills_l1 = 0;
+        size_t skills_l0 = 0;
     };
     
     OptimizationStats GetLastStats() const { return last_stats_; }
@@ -208,9 +235,12 @@ private:
     //   （大小写不敏感）则命中，命中一次加 relevance_filter.name_token_weight；
     // - description 做关键词命中计数（子串匹配），每命中一个 keyword 加
     //   relevance_filter.description_keyword_weight。
+    // - D4：tags 非空时额外做一轮关键词命中计数，每命中一个加 relevance_filter.tag_weight
+    //   （tag_weight=0 或 tags 为空时逐字节等价于 D4 引入前）。
     // 返回总分，0 表示完全不相关。
     size_t ScoreRelevance(const std::string& name, const std::string& description,
-                          const std::vector<std::string>& keywords) const;
+                          const std::vector<std::string>& keywords,
+                          const std::string& tags = std::string()) const;
 
     // 对 all_skills 中每个 SKILL 用 ScoreRelevance() 打分，过滤掉零分项，按分数
     // 降序排序后按 token_budget 贪心保留，超预算即停止。all_skills 为空时返回空集；
@@ -220,6 +250,22 @@ private:
     RuntimeSkillMappings FilterSkillsByRelevance(const RuntimeSkillMappings& all_skills,
                                                  const std::vector<std::string>& keywords,
                                                  size_t token_budget) const;
+
+    // D2：按相关性分数 + skills 分区预算给每个技能分配披露档位。
+    // 与 FilterSkillsByRelevance 的关键区别：预算耗尽时**降档**（L2→L1→L0）而不是
+    // 整条删除，只有连 L0 单行都放不进预算时才真正丢弃。零分丢弃与
+    // zero_hit_keep_all 全零分兜底的语义与 FilterSkillsByRelevance 完全一致（不另起一套
+    // 判据）；区别只在“保留下来的那些怎么展示”。返回值按分数降序（同分按名称）。
+    std::vector<ScoredSkill> AssignSkillDetailLevels(const RuntimeSkillMappings& all_skills,
+                                                     const std::vector<std::string>& keywords,
+                                                     size_t skills_token_budget) const;
+
+    // D2：渲染单条技能在指定档位下的目录文本（含末尾换行）。
+    std::string RenderSkillEntry(const ScoredSkill& skill) const;
+
+    // D2：按档位渲染整份结构化 Skill Catalog（头部说明与
+    // BuildStructuredSkillCatalog 完全一致，只是条目体按档位变化）。
+    std::string BuildLeveledSkillCatalog(const std::vector<ScoredSkill>& skills) const;
 
     // 对 tools_array（OpenAI tools 格式）中每个工具用 ScoreRelevance() 打分，
     // 过滤掉零分项，按分数降序排序后按 token_budget 贪心保留 Top-K，返回筛选后的

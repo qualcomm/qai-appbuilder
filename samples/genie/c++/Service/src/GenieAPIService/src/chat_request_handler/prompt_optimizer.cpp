@@ -172,12 +172,36 @@ std::string PromptOptimizer::BuildSystemContext(const nlohmann::ordered_json& re
     // relevance_filter.enabled=false 时 filtered_skills 直接等于 runtime_skills，
     // 完全回退到改动前的"全量携带"行为，便于线上快速回滚。
     const auto& relevance_cfg = config.relevance_filter;
+    const auto& disclosure_cfg = config.skill_disclosure;
     std::vector<std::string> relevance_keywords;
     RuntimeSkillMappings filtered_skills = runtime_skills;
+    // D2：三档渐进披露的档位分配结果（只在 structured 目录格式下使用）。
+    std::vector<ScoredSkill> leveled_skills;
     size_t skills_budget_tokens = ComputeRelevanceTokenBudget(BudgetPartitionKind::kSkills, &request_data);
+    // D2 仅对默认的 structured 格式生效；"simple" 本身已是单行渲染，
+    // 不引入第二套档位口径。skill_disclosure.enabled=false 时逐字节回退到
+    // 旧两档行为（FilterSkillsByRelevance + 全 L2 渲染）。
+    const bool use_leveled_disclosure =
+        disclosure_cfg.enabled && config.skill_catalog_format == "structured";
     if (relevance_cfg.enabled) {
         relevance_keywords = BuildRelevanceKeywords(request_data);
-        if (!runtime_skills.empty()) {
+    }
+    if (!runtime_skills.empty()) {
+        if (use_leveled_disclosure) {
+            // 注：relevance_cfg.enabled=false 时 relevance_keywords 为空，
+            // AssignSkillDetailLevels 与 FilterSkillsByRelevance 同样不做任何筛选（全保留），
+            // 但仍会按预算降档——这正是 D2 要解决的「全量保留在小 context 模型上
+            // 等于必然溢出」，与相关性开关解耦。
+            leveled_skills = AssignSkillDetailLevels(runtime_skills, relevance_keywords,
+                                                     skills_budget_tokens);
+            filtered_skills.clear();
+            for (const auto& scored : leveled_skills) {
+                auto it = runtime_skills.find(scored.name);
+                if (it != runtime_skills.end()) {
+                    filtered_skills[scored.name] = it->second;
+                }
+            }
+        } else if (relevance_cfg.enabled) {
             filtered_skills = FilterSkillsByRelevance(runtime_skills, relevance_keywords,
                                                        skills_budget_tokens);
         }
@@ -187,6 +211,23 @@ std::string PromptOptimizer::BuildSystemContext(const nlohmann::ordered_json& re
     last_stats_.skills_total = runtime_skills.size();
     last_stats_.skills_kept = filtered_skills.size();
     last_stats_.skills_budget_tokens = skills_budget_tokens;
+    // D2：三档计数，三项之和恒等于 skills_kept。未启用三档时逐字节退化为
+    // skills_l2 == skills_kept、L1/L0 为 0（旧两档行为：要么全 L2，要么整条删）。
+    last_stats_.skills_l1 = 0;
+    last_stats_.skills_l0 = 0;
+    if (use_leveled_disclosure) {
+        size_t l2 = 0, l1 = 0, l0 = 0;
+        for (const auto& scored : leveled_skills) {
+            if (scored.level == SkillDetailLevel::kFull) ++l2;
+            else if (scored.level == SkillDetailLevel::kSummary) ++l1;
+            else ++l0;
+        }
+        last_stats_.skills_l2 = l2;
+        last_stats_.skills_l1 = l1;
+        last_stats_.skills_l0 = l0;
+    } else {
+        last_stats_.skills_l2 = filtered_skills.size();
+    }
 
     // 1a. 身份声明（始终输出，与是否有 SKILL 无关）
     if (se.identity_intro && !config.system_prompts.identity_intro.empty()) {
@@ -272,7 +313,10 @@ std::string PromptOptimizer::BuildSystemContext(const nlohmann::ordered_json& re
         // 但 Skill Catalog 的条目列表（路径/描述）始终输出（仅头部说明受开关控制）
         const auto& opt_config = model_config_.GetPromptOptimizationConfig();
         std::string skill_section;
-        if (opt_config.skill_catalog_format == "structured") {
+        if (use_leveled_disclosure && !leveled_skills.empty()) {
+            // D2：按档位渲染（全部为 L2 时与旧输出逐字节相同，仅排序改为按分数）
+            skill_section = BuildLeveledSkillCatalog(leveled_skills);
+        } else if (opt_config.skill_catalog_format == "structured") {
             skill_section = BuildStructuredSkillCatalog(filtered_skills);
         } else {
             skill_section = BuildSimpleSkillCatalog(filtered_skills);
@@ -515,6 +559,148 @@ bool IsEligibleRelevanceKeyword(const std::string& kw) {
     return true;
 }
 
+// ── D4：内置中英意图别名表 ─────────────────────────────────────────────
+// 目的：让「中文提问 vs 纯英文技能名/描述」也能产生**有区分度的分数**。在此之前
+// 中文逐字/bigram 词元永远命中不了英文单词，全部候选得 0 分后只能退化成
+// relevance_filter.zero_hit_keep_all 全量保留——而全量保留在小 context 模型上等于
+// 必然溢出（这正是前沿值上不去的一条真实成因）。
+// 同一组内还刻意收纳了英文自身的词形变体（如 calibrate/calibration/calibrating）：
+// ScoreRelevance() 的描述侧是单向 find，"calibrate" 命不中 "calibration"，靠别名组
+// 补齐。纯静态查表，零额外推理延迟。
+// 全部小写；匹配与扩展见 ExpandIntentAliases()。
+const std::vector<std::vector<std::string>>& IntentAliasGroups() {
+    static const std::vector<std::vector<std::string>> kGroups = {
+        {"天气", "气象", "weather", "forecast"},
+        {"时间", "时刻", "time", "clock", "timezone"},
+        {"日期", "日历", "日程", "date", "calendar", "schedule"},
+        {"文件", "档案", "file", "files", "filesystem"},
+        {"目录", "folder", "directory"},
+        {"代码", "code", "coding", "source"},
+        {"搜索", "查找", "检索", "search", "find", "query", "lookup"},
+        {"翻译", "translate", "translation"},
+        {"邮件", "邮箱", "email", "mail", "inbox"},
+        {"图片", "图像", "image", "picture", "photo"},
+        {"音频", "声音", "audio", "sound", "voice"},
+        {"视频", "video", "movie"},
+        {"数据库", "database", "sql"},
+        {"网络", "网页", "network", "http", "url"},
+        {"日志", "log", "logs", "logging"},
+        {"测试", "test", "testing", "tests"},
+        {"校准", "标定", "calibrate", "calibration", "calibrating", "calibrated"},
+        {"通量", "磁通", "flux"},
+        {"电容", "电容器", "capacitor", "capacitance"},
+        {"配置", "设置", "config", "configuration", "configure", "settings"},
+        {"部署", "deploy", "deployment"},
+        {"监控", "监测", "monitor", "monitoring"},
+        {"备份", "backup", "backups"},
+        {"加密", "encrypt", "encryption", "crypto"},
+        {"报告", "报表", "report", "reporting"},
+        {"地图", "导航", "map", "maps", "navigation"},
+        {"股票", "金融", "stock", "stocks", "finance"},
+        {"新闻", "news"},
+        {"音乐", "music", "song"},
+        {"提醒", "闹钟", "reminder", "remind", "alarm"},
+        {"诊断", "diagnose", "diagnostics", "diagnosis"},
+        {"分析", "analyze", "analysis", "analytics"},
+        {"优化", "optimize", "optimization"},
+        {"摘要", "总结", "summary", "summarize", "summarization"},
+        {"换算", "单位", "convert", "conversion", "unit"},
+        {"温度", "temperature", "thermal"},
+        {"压力", "pressure"},
+        {"传感器", "sensor", "sensors"},
+        {"固件", "firmware"},
+        {"电池", "电源", "battery", "power"},
+        {"用户", "账号", "user", "account"},
+        {"权限", "认证", "授权", "permission", "auth", "authorization"},
+        {"通知", "notify", "notification"},
+        {"任务", "作业", "task", "job"},
+        {"工作流", "流水线", "workflow", "pipeline"},
+        {"版本", "发布", "version", "release"},
+        {"缓存", "cache", "caching"},
+        {"队列", "queue"},
+        {"索引", "index", "indexing"},
+        {"迁移", "migrate", "migration"},
+        {"校验", "验证", "validate", "validation", "verify", "checksum"},
+    };
+    return kGroups;
+}
+
+// 判断一个（已小写化的）关键词是否命中某个别名组组员。
+// 关键词侧可能是中文 bigram（如"校准"）或英文整词；组员侧可能比关键词更长
+// （如组员"传感器" vs bigram 关键词"传感"），因此做受限的双向包含判断：
+//   - 完全相等；或
+//   - 关键词长度 >= 2 字节且是组员的子串（覆盖 CJK bigram 命中三字词）；或
+//   - 组员长度 >= 3 字节且是关键词的子串（覆盖长词包含短组员）。
+bool AliasMemberHit(const std::string& lower_kw, const std::string& member) {
+    if (lower_kw == member) return true;
+    if (lower_kw.size() >= 2 && member.find(lower_kw) != std::string::npos) return true;
+    if (member.size() >= 3 && lower_kw.find(member) != std::string::npos) return true;
+    return false;
+}
+
+// D4：把命中别名组的关键词扩展为同组全部组员（去重后追加到 keywords 末尾）。
+// 只做追加、不删除任何原有关键词，因此 intent_aliases_enabled=false 时不调用本函数
+// 即逐字节回退到 D4 引入前的关键词集合。
+void ExpandIntentAliases(std::vector<std::string>& keywords) {
+    std::unordered_set<std::string> present(keywords.begin(), keywords.end());
+    std::vector<std::string> additions;
+    for (const auto& group : IntentAliasGroups()) {
+        bool group_hit = false;
+        for (const auto& kw : keywords) {
+            for (const auto& member : group) {
+                if (AliasMemberHit(kw, member)) { group_hit = true; break; }
+            }
+            if (group_hit) break;
+        }
+        if (!group_hit) continue;
+        for (const auto& member : group) {
+            if (present.insert(member).second) {
+                additions.push_back(member);
+            }
+        }
+    }
+    keywords.insert(keywords.end(), additions.begin(), additions.end());
+}
+
+// D4/D2：从 SKILL description 正文里提取「信号行」——tags / 触发条件这类高价值短行。
+// 服务端 <available_skills> XML 只有 <name>/<description>/<location>（见
+// ParseAvailableSkillsXml），没有 <tags> 标签，因此 tags/触发条件只能从 description
+// 文本里按前缀识别；这不是新协议面，只是对既有文本的结构化利用。
+// out_lines 收集**整行原文**（供 L1 档位渲染），返回值是去掉前缀后的取值拼接
+// （供 ScoreRelevance 的 tag_weight 打分，不含前缀噪声）。
+std::string CollectSkillSignalLines(const std::string& description,
+                                    std::vector<std::string>* out_lines) {
+    static const std::vector<std::string> kPrefixes = {
+        "tags:", "tag:", "keywords:", "triggers:", "trigger:", "use when:", "used when:",
+        "标签:", "标签：", "触发:", "触发：", "触发条件:", "触发条件：", "适用于:", "适用于：",
+    };
+    std::string values;
+    std::istringstream iss(description);
+    std::string line;
+    while (std::getline(iss, line)) {
+        // 去掉行首空白与 Markdown 列表/加粗前缀，便于前缀匹配
+        size_t begin = line.find_first_not_of(" \t\r-*#");
+        if (begin == std::string::npos) continue;
+        std::string trimmed = line.substr(begin);
+        std::string lower_trimmed = trimmed;
+        std::transform(lower_trimmed.begin(), lower_trimmed.end(), lower_trimmed.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        for (const auto& prefix : kPrefixes) {
+            if (lower_trimmed.compare(0, prefix.size(), prefix) == 0) {
+                if (out_lines) {
+                    std::string one = trimmed;
+                    if (!one.empty() && one.back() == '\r') one.pop_back();
+                    out_lines->push_back(one);
+                }
+                values += trimmed.substr(prefix.size());
+                values += " ";
+                break;
+            }
+        }
+    }
+    return values;
+}
+
 } // namespace
 
 std::vector<std::string> PromptOptimizer::BuildRelevanceKeywords(
@@ -619,6 +805,16 @@ std::vector<std::string> PromptOptimizer::BuildRelevanceKeywords(
     }
     flush_token(current_token);
 
+    // D4：跨语言意图别名扩展（纯静态查表，零额外推理延迟）。只追加同组别名，
+    // 不删除任何原有关键词；intent_aliases_enabled=false 时整段跳过，
+    // 关键词集合与 D4 引入前逐字节一致。
+    if (model_config_.GetPromptOptimizationConfig().relevance_filter.intent_aliases_enabled) {
+        size_t before = keywords.size();
+        ExpandIntentAliases(keywords);
+        My_Log{My_Log::Level::kInfo} << "[BuildRelevanceKeywords] intent alias expansion: "
+                                      << before << " -> " << keywords.size() << " keyword(s)" << std::endl;
+    }
+
     My_Log{My_Log::Level::kInfo} << "[BuildRelevanceKeywords] Extracted " << keywords.size()
                                   << " keyword(s) from recent_window=" << recent_window
                                   << " user message(s)" << std::endl;
@@ -628,7 +824,8 @@ std::vector<std::string> PromptOptimizer::BuildRelevanceKeywords(
 size_t PromptOptimizer::ScoreRelevance(
     const std::string& name,
     const std::string& description,
-    const std::vector<std::string>& keywords) const
+    const std::vector<std::string>& keywords,
+    const std::string& tags) const
 {
     if (keywords.empty()) {
         return 0;
@@ -676,6 +873,20 @@ size_t PromptOptimizer::ScoreRelevance(
         }
     }
 
+    // D4：tags 段（从 description 正文提取的 "tags:"/"触发条件:" 等信号行取值）额外
+    // 做一轮关键词命中计数，每命中一个加 tag_weight。目的是让**排序有区分度**：
+    // 长 description 里一个偶然出现的词与 tags 里显式声明的意图词不应等价。
+    // tag_weight=0 或 tags 为空时整段跳过，逐字节等价于 D4 引入前。
+    if (!tags.empty() && relevance_cfg.tag_weight > 0) {
+        std::string lower_tags = ToLower(tags);
+        for (const auto& kw : keywords) {
+            if (!IsEligibleRelevanceKeyword(kw)) continue;
+            if (lower_tags.find(kw) != std::string::npos) {
+                score += relevance_cfg.tag_weight;
+            }
+        }
+    }
+
     return score;
 }
 
@@ -702,7 +913,10 @@ RuntimeSkillMappings PromptOptimizer::FilterSkillsByRelevance(
     std::vector<std::pair<std::string, size_t>> scored; // name -> score
     scored.reserve(all_skills.size());
     for (const auto& [name, info] : all_skills) {
-        size_t score = ScoreRelevance(name, info.use_for, keywords);
+        // D4：tags 从 description 正文里提取（服务端 XML 无 <tags> 标签），参与打分；
+        // tag_weight=0 时 ScoreRelevance 内部会整段跳过，逐字节等价于 D4 引入前。
+        std::string tags = CollectSkillSignalLines(info.use_for, nullptr);
+        size_t score = ScoreRelevance(name, info.use_for, keywords, tags);
         if (score > 0) {
             scored.emplace_back(name, score);
         }
@@ -752,6 +966,179 @@ RuntimeSkillMappings PromptOptimizer::FilterSkillsByRelevance(
                                   << " candidate(s) -> " << filtered.size()
                                   << " kept within token_budget=" << token_budget << std::endl;
     return filtered;
+}
+
+// ============================================================
+// D2：技能目录三档渐进披露
+// ============================================================
+
+std::vector<ScoredSkill> PromptOptimizer::AssignSkillDetailLevels(
+    const RuntimeSkillMappings& all_skills,
+    const std::vector<std::string>& keywords,
+    size_t skills_token_budget) const
+{
+    std::vector<ScoredSkill> result;
+    if (all_skills.empty()) {
+        return result;
+    }
+
+    const auto& po_cfg = model_config_.GetPromptOptimizationConfig();
+    const auto& relevance_cfg = po_cfg.relevance_filter;
+    const auto& disclosure_cfg = po_cfg.skill_disclosure;
+
+    // 1) 打分。零分丢弃 / keywords 为空 / 全零分兜底 三条语义与
+    //    FilterSkillsByRelevance 完全一致（不另起一套判据），区别只在“保留下来的
+    //    那些怎么展示”。
+    std::vector<ScoredSkill> candidates;
+    candidates.reserve(all_skills.size());
+    bool any_positive = false;
+    for (const auto& [name, info] : all_skills) {
+        ScoredSkill s;
+        s.name = name;
+        s.description = info.use_for;
+        s.location = info.path;
+        s.tags = CollectSkillSignalLines(info.use_for, nullptr);
+        s.score = keywords.empty() ? 0 : ScoreRelevance(name, info.use_for, keywords, s.tags);
+        if (s.score > 0) any_positive = true;
+        candidates.push_back(std::move(s));
+    }
+
+    if (!keywords.empty() && !any_positive && !relevance_cfg.zero_hit_keep_all) {
+        My_Log{My_Log::Level::kInfo} << "[AssignSkillDetailLevels] All " << all_skills.size()
+                                      << " candidate(s) scored zero, zero_hit_keep_all disabled, "
+                                         "returning empty set (legacy behavior)" << std::endl;
+        return result;
+    }
+    if (!keywords.empty() && any_positive) {
+        // 零分丢弃（与 FilterSkillsByRelevance 一致：至少有一个正分候选时才丢弃零分项）
+        candidates.erase(std::remove_if(candidates.begin(), candidates.end(),
+                                        [](const ScoredSkill& s) { return s.score == 0; }),
+                         candidates.end());
+    }
+
+    // 2) 按分数降序（同分按名称）排序，避开 unordered_map 遍历顺序不确定
+    std::sort(candidates.begin(), candidates.end(), [](const ScoredSkill& a, const ScoredSkill& b) {
+        if (a.score != b.score) return a.score > b.score;
+        return a.name < b.name;
+    });
+
+    // 3) 按“Top-K 期望档位 + 预算降档”分配。关键：预算不够时**降档**
+    //    （L2→L1→L0），只有连 L0 单行都放不进时才真正丢弃。
+    size_t used_tokens = 0;
+    size_t dropped = 0;
+    for (size_t idx = 0; idx < candidates.size(); ++idx) {
+        ScoredSkill entry = candidates[idx];
+        SkillDetailLevel desired = SkillDetailLevel::kNameOnly;
+        if (idx < disclosure_cfg.l2_top_k) {
+            desired = SkillDetailLevel::kFull;
+        } else if (idx < disclosure_cfg.l2_top_k + disclosure_cfg.l1_top_k) {
+            desired = SkillDetailLevel::kSummary;
+        }
+
+        bool placed = false;
+        for (;;) {
+            entry.level = desired;
+            size_t item_tokens = CountTokens(RenderSkillEntry(entry));
+            if (used_tokens + item_tokens <= skills_token_budget) {
+                used_tokens += item_tokens;
+                result.push_back(entry);
+                placed = true;
+                break;
+            }
+            if (desired == SkillDetailLevel::kFull) {
+                desired = SkillDetailLevel::kSummary;
+            } else if (desired == SkillDetailLevel::kSummary) {
+                desired = SkillDetailLevel::kNameOnly;
+            } else {
+                break; // 连 L0 都放不进，真正丢弃
+            }
+        }
+        if (!placed) {
+            // 与旧行为一致：保留集始终是按分数排序后的一个前缀，超预算即停
+            dropped = candidates.size() - idx;
+            break;
+        }
+    }
+
+    size_t l2 = 0, l1 = 0, l0 = 0;
+    for (const auto& s : result) {
+        if (s.level == SkillDetailLevel::kFull) ++l2;
+        else if (s.level == SkillDetailLevel::kSummary) ++l1;
+        else ++l0;
+    }
+    My_Log{My_Log::Level::kInfo} << "[AssignSkillDetailLevels] " << all_skills.size()
+                                  << " candidate(s) -> " << result.size()
+                                  << " kept (L2=" << l2 << ", L1=" << l1 << ", L0=" << l0
+                                  << ", dropped=" << dropped
+                                  << ") within skills_token_budget=" << skills_token_budget
+                                  << " (used=" << used_tokens << ")" << std::endl;
+    return result;
+}
+
+std::string PromptOptimizer::RenderSkillEntry(const ScoredSkill& skill) const
+{
+    const auto& disclosure_cfg = model_config_.GetPromptOptimizationConfig().skill_disclosure;
+    std::ostringstream oss;
+
+    switch (skill.level) {
+        case SkillDetailLevel::kFull:
+            // L2：与 D2 引入前 BuildStructuredSkillCatalog 的条目渲染**逐字节一致**
+            //（Path 行 + use_for 非空时的 Use for 行 + 一个空行，不输出技能名标题）。
+            oss << "Path: " << skill.location << "\n";
+            if (!skill.description.empty()) {
+                oss << "Use for: " << skill.description << "\n";
+            }
+            oss << "\n";
+            break;
+        case SkillDetailLevel::kSummary: {
+            // L1：结构与 L2 一致，只把 description 换成摘要，并把从 description 里提取的
+            // 触发条件/tags 行单独补回——保住“什么时候用”这一最高信号的部分，
+            // 舍弃步骤/示例类长正文（那些内容模型 read(SKILL.md) 后一样能拿到）。
+            std::vector<std::string> signal_lines;
+            CollectSkillSignalLines(skill.description, &signal_lines);
+            oss << "Path: " << skill.location << "\n";
+            if (!skill.description.empty()) {
+                oss << "Use for: "
+                    << safe_utf8_truncate(skill.description, disclosure_cfg.l1_summary_max_chars, "...")
+                    << "\n";
+            }
+            for (const auto& line : signal_lines) {
+                oss << line << "\n";
+            }
+            oss << "\n";
+            break;
+        }
+        case SkillDetailLevel::kNameOnly:
+        default:
+            // L0：单行。保留 path 是必需的——skill_rule 要求模型先 read(SKILL.md)，
+            // 没有 path 就算选对了也无法拉取正文。
+            oss << "- " << skill.name << " -> " << skill.location;
+            if (!skill.description.empty()) {
+                oss << " (" << safe_utf8_truncate(skill.description, disclosure_cfg.l0_summary_max_chars, "...") << ")";
+            }
+            oss << "\n";
+            break;
+    }
+    return oss.str();
+}
+
+std::string PromptOptimizer::BuildLeveledSkillCatalog(const std::vector<ScoredSkill>& skills) const
+{
+    if (skills.empty()) {
+        return "";
+    }
+    std::ostringstream oss;
+    // 头部说明与 BuildStructuredSkillCatalog 完全一致（同一个配置项与开关），
+    // 只有条目体按档位变化；全部为 L2 时与旧输出逐字节相同（除排序变为按分数）。
+    const auto& config = model_config_.GetPromptOptimizationConfig();
+    if (config.system_prompts.sections_enabled.catalog_structured_intro &&
+        !config.system_prompts.catalog_structured_intro.empty()) {
+        oss << config.system_prompts.catalog_structured_intro;
+    }
+    for (const auto& skill : skills) {
+        oss << RenderSkillEntry(skill);
+    }
+    return oss.str();
 }
 
 nlohmann::ordered_json PromptOptimizer::FilterToolsByRelevance(

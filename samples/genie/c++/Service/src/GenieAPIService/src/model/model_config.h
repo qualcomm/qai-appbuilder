@@ -436,7 +436,39 @@ struct PromptOptimizationConfig {
         // 上面的 zero_hit_keep_all，bigram 只是锦上添花）。false 时逐字节回退：
         // 不生成任何 bigram 词元，只保留单字词元。
         bool cjk_bigram = true;
+        // ── D4：跨语言意图别名表 ────────────────────────────────
+        // 内置中英意图别名组（如 天气/weather、校准/calibrate/calibration）：命中任一
+        // 组员的关键词会把同组其余组员一并加入关键词集合，使「中文提问 vs 纯英文技能名」
+        // 也能产生**有区分度的分数**，而不是全员零分后退化成 zero_hit_keep_all 全量保留
+        // （全量保留在小 context 模型上等于必然溢出）。纯静态查表，零额外推理延迟。
+        // false 时逐字节回退：不做任何别名扩展，关键词集合与 D4 引入前完全一致。
+        bool intent_aliases_enabled = true;
+        // SKILL 描述里 tags 段（形如 "tags: a, b, c" / "标签: …"）命中关键词的权重。
+        // 服务端 <available_skills> XML 只有 <name>/<description>/<location> 三个标签
+        // （ParseAvailableSkillsXml），没有 <tags>，因此 tags 只能从 description 正文里
+        // 提取——这不是新协议面，只是对既有 description 文本的结构化利用。
+        // tag_weight=0 时逐字节回退：tags 不参与打分（等价于 D4 引入前）。
+        size_t tag_weight = 2;
     } relevance_filter;
+
+    // ── D2：技能目录三档渐进披露（L0/L1/L2）────────────────────────────────
+    // 原实现只有「全量展开」与「整条删除」两档：预算不够时技能直接从目录里消失，
+    // 模型再也看不到它的存在。改为按相关性分数与 skills 分区预算自动分档，
+    // **预算耗尽时降档而不是整条删除**：
+    //   L2 (kFull)     = Path + 完整 description（与 D2 引入前的渲染逐字节一致）
+    //   L1 (kSummary)  = Path + description 摘要 + 从 description 提取的触发条件/tags 行
+    //   L0 (kNameOnly) = 单行「- name -> path (一句话摘要)」
+    // 只有连 L0 都放不进预算时才真正丢弃该技能。
+    // enabled=false 时逐字节回退到旧两档行为（FilterSkillsByRelevance + 全 L2 渲染）。
+    // 注：仅对 skill_catalog_format=="structured"（默认）生效；"simple" 格式本身已是
+    // 单行渲染，不引入第二套档位口径。
+    struct SkillDisclosureConfig {
+        bool enabled = true;
+        size_t l2_top_k = 2;                 // 分数最高的前 K 条优先给 L2 全量
+        size_t l1_top_k = 6;                 // 紧随其后的 K 条给 L1 摘要
+        size_t l1_summary_max_chars = 240;   // L1 摘要正文的 UTF-8 安全截断上限
+        size_t l0_summary_max_chars = 80;    // L0 一句话摘要的 UTF-8 安全截断上限
+    } skill_disclosure;
 
     // ── 上下文窗口分配 ──────────────────────────────────────
     float output_reserve_ratio = 0.20f;    // 为输出预留的上下文比率（默认 20%）

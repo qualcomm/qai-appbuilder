@@ -619,6 +619,9 @@ private:
                 last_ledger_.skills_total = opt_stats.skills_total;
                 last_ledger_.skills_kept = opt_stats.skills_kept;
                 last_ledger_.skills_budget_tokens = opt_stats.skills_budget_tokens;
+                last_ledger_.skills_l2 = opt_stats.skills_l2;
+                last_ledger_.skills_l1 = opt_stats.skills_l1;
+                last_ledger_.skills_l0 = opt_stats.skills_l0;
                 last_ledger_.emergency_truncated = optimized.emergency_truncated;
             }
 
@@ -1628,6 +1631,9 @@ private:
             last_ledger_.skills_total = opt_stats.skills_total;
             last_ledger_.skills_kept = opt_stats.skills_kept;
             last_ledger_.skills_budget_tokens = opt_stats.skills_budget_tokens;
+            last_ledger_.skills_l2 = opt_stats.skills_l2;
+            last_ledger_.skills_l1 = opt_stats.skills_l1;
+            last_ledger_.skills_l0 = opt_stats.skills_l0;
             last_ledger_.emergency_truncated = optimized.emergency_truncated;
         }
 
