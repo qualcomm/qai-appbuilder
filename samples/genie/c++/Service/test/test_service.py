@@ -3189,12 +3189,20 @@ class ReportGenerator:
     # 内部占位 model_name：仅用于内部过滤/聚合（_global_=模型无关通用接口测试、
     # _multi_model_=阶段3多模型并发聚合、_builder_local_model_=Builder 本地模型加载全链路
     # 测试里"不针对具体模型"的手段层检查项，如 configure_genie_root/inject_local_models/
-    # discover_models/test_missing_csrf_rejected 等），绝不能作为"模型名"文本渗透进任何
+    # discover_models/test_missing_csrf_rejected 等，_skill_capacity_ / _skill_capacity_builder_
+    # =skill_capacity 套件里"整套件级/环境前置"的检查项，如两个目标模型都没匹配到时的
+    # suite precondition），绝不能作为"模型名"文本渗透进任何
     # 渲染出的报告 HTML（性能对比表、模型链接卡片、标题等）。新增任何占位 model_name 时
     # 必须同步加入这里，并统一通过 _is_internal_placeholder_model() 过滤——排除逻辑必须
     # 统一走这个函数，不要分散在多处各自手写，否则容易遗漏。
-    INTERNAL_PLACEHOLDER_MODEL_NAMES = frozenset({"_global_", "_multi_model_", "_builder_local_model_"})
-    INTERNAL_PLACEHOLDER_MODEL_PREFIXES = ("_graceful_shutdown_",)
+    #
+    # ⚠ 曾漏注册的实例（本机干跑渲染时被 _assert_no_placeholder_leak 之外的显式核验抓到）：
+    # skill_capacity 套件的 _skill_capacity_ 系列占位名一度未登记，于是它作为"模型"渗进了
+    # 主报告的模型链接卡片。新增套件时若引入了新的占位 model_name，务必同步登记到下面两个
+    # 常量，否则防泄漏断言也扫不到它（该断言只认已登记的名字）。
+    INTERNAL_PLACEHOLDER_MODEL_NAMES = frozenset({"_global_", "_multi_model_", "_builder_local_model_",
+                                                  "_skill_capacity_"})
+    INTERNAL_PLACEHOLDER_MODEL_PREFIXES = ("_graceful_shutdown_", "_skill_capacity_")
 
     @staticmethod
     def _is_internal_placeholder_model(model_name):
@@ -4006,6 +4014,358 @@ code { background: #F5F5F5; padding: 2px 6px; border-radius: 3px; font-family: v
         print(f"[输出] 多类型同时加载详情: {out_path}")
         return True
 
+    # ------------------------------------------------------------------
+    # skill_capacity 套件（技能装载前沿）报告
+    # ------------------------------------------------------------------
+    # 设计约束：这里**不硬编码任何前沿数值**，全部从本次运行的 TestResult.response_data
+    # 里读（数据契约见 _run_skill_capacity_suite 里 `{arm}_frontier` 结果的 data 字段）。
+    # 报告表述纪律（不得夸大也不得埋没）：
+    #   * 只有 usable_for_gain_ratio=True（converged 且前沿点未预算饱和）的数字才允许
+    #     以精确值/精确倍数呈现；
+    #   * 未收敛或饱和一律渲染成「≥N 下界」并附机械原因，禁止四舍五入成看起来精确的倍数；
+    #   * repeat 次数一并展示，且固定附「repeat=1 时不声称统计显著」的口径说明。
+    # 历史作废数字（旧技能池 44/77/1.75x、tie_aware_l2=true 下的 111/2.5227）只在
+    # 「追溯」小节以「已作废/已被取代」的措辞出现，永不进结论位置。
+    _SC_ARM_LABEL = {
+        "legacy": "改造前 legacy（全部新开关关闭）",
+        "optimized": "改造后 optimized（出厂默认）",
+    }
+
+    _SC_DISCIPLINE_HTML = """<ul class="sc-note">
+    <li><strong>可引用口径</strong>：容量池（目标技能分数严格最高、不存在同分 tie-break，且池组成跨 N 严格前缀稳定）+ 直连 GenieAPIService（<code>-n -1 -g -d 3</code>）+ 出厂默认 <code>skill_disclosure.tie_aware_l2=false</code>。</li>
+    <li><strong>统计强度</strong>：本套件默认 <code>--skill_capacity_repeat</code> 次采样取多数票。<em>repeat=1 时未做重复性检验，只能表述为「效应量极大且方向明确」，不声称统计显著。</em></li>
+    <li><strong>真伪三字段</strong>：只有同时满足 <code>Skills-Kept == Skills-Total</code>（一条技能都没被丢弃）、<code>skills_kept_at_budget_cap=False</code>（未咬预算上限）、<code>Tokens-Out</code> 随 N 单调递增，才能说<em>本次测量未观察到</em>「预算耗尽导致保留条数被钉死」这种旁路式假提升的迹象（这是「未观察到迹象」，不是因果层面的「已排除」）——历史上曾因 skills 预算被砍导致保留条数恒定、体量不随 N 增长，测出过一个假的高前沿值。</li>
+    <li><strong>已作废、不得引用的数字</strong>：旧技能池的前沿 44 / 77 与 1.75x 倍数（旧池组成随 N 跳变，是构造产物而非容量差）；<code>tie_aware_l2=true</code> 下的 111 / 2.5227（已被该开关默认值翻转为 false 后的新测量取代，仅供追溯）。</li>
+    <li><strong>不构成旧数字的复活</strong>：容量池 legacy 与旧池 legacy 撞到同一个前沿值是<em>机制同源的必然</em>——两池共用同一套技能 description/正文生成器，legacy 档全部按 L2 全量渲染时单条目录条目体量几乎相同，容量边界由「N × 单条体量」直接决定。禁止跨池互相引用。</li>
+    <li><strong>环境性跳过如实标注</strong>：目标模型或其 <code>config.json</code>/<code>genie_config.json</code> 缺失时精确跳过并标注环境原因，不伪造数字（<code>qwen2.5_omini</code> 历史上即因两处目录缺 <code>config.json</code> 被跳过）。</li>
+    </ul>"""
+
+    _SC_TIE_PATHOLOGY_HTML = """<ul class="sc-note">
+    <li><strong>结论（与容量数字独立，不参与倍数计算）</strong>：当多个候选技能相关性得分<em>完全相同</em>时，<strong>技能目录里的排列顺序单独决定模型去读哪一条</strong>。判别实验：固定技能数、分数、正文与全部开关，<em>仅</em>把目标技能改名使其在同分组内排到首位，目标被选中率由 <code>0.000</code> 变为 <code>1.000</code>。</li>
+    <li>与之配套被严格证伪的三条竞争解释：「提前满足（未 read 就直接作答）」、「工具调用阈值过高（不敢调用工具）」、「池内位置偏置」——实测模型 <strong>100% 发起 read</strong>，只是读了排序在目标之前的同分干扰项。</li>
+    <li><strong><code>skill_disclosure.tie_aware_l2</code> 默认值为 false 的实测依据</strong>：该开关会把整个同分组一起提升到 L2；在「整池同分」的守门用例（N=64）下显式置为 <code>true</code> 会直接触发 <code>HTTP 422 (local input overflow)</code>，而默认 <code>false</code> 时 <code>Skills-Kept == Skills-Total</code> 且提示词体量远低于上下文上限。该开关另已被其自身预设判据证伪（目标 5/5 次成功升到 L2 而选中率仍为 0.000），<em>保留为默认安全开关，不得作为瓶颈修复呈现</em>。</li>
+    </ul>"""
+
+    @staticmethod
+    def _sc_collect_frontiers(all_results):
+        """把 skill_capacity 的前沿结果聚合成 {model: {arm: entry}}。
+
+        识别依据是 response_data 里有 frontier_skills 字段（而不是靠用例名做字符串
+        猜测），这样即使日后新增档位/改名也不会静默漏掉。"""
+        frontiers = {}
+        for r in all_results:
+            if not r.name.startswith("SKILL_CAPACITY:"):
+                continue
+            data = r.response_data or {}
+            if "frontier_skills" not in data:
+                continue
+            model = data.get("model") or r.model_name
+            arm = data.get("arm") or "unknown"
+            curve = data.get("probe_curve") or []
+            frontier = data.get("frontier_skills")
+            point = next((e for e in reversed(curve) if e.get("n") == frontier), None)
+            frontiers.setdefault(model, {})[arm] = {
+                "frontier": frontier,
+                "converged": bool(data.get("converged")),
+                "saturated": bool(data.get("frontier_saturated")),
+                "usable": bool(data.get("usable_for_gain_ratio")),
+                "note": data.get("note") or "",
+                "curve": curve,
+                "point": point,
+                "result": r,
+            }
+        return frontiers
+
+    @staticmethod
+    def _sc_frontier_text(entry):
+        """单档前沿值的展示文本 + 机械原因。未收敛/饱和一律写成「≥N 下界」。"""
+        if not entry:
+            return "N/A", "本次未产生该档位的前沿搜索结果"
+        n = entry["frontier"]
+        if entry["usable"]:
+            return str(n), ""
+        reasons = []
+        if not entry["converged"]:
+            reasons.append("未收敛（倍增探测到 --skill_capacity_max 仍全部通过，真实前沿在上界之外）")
+        if entry["saturated"]:
+            reasons.append("前沿点预算饱和（Skills-Kept < Skills-Total，保留条数由预算而非 N 决定，与装载能力解耦）")
+        return f"&ge; {n}（下界）", "；".join(reasons) or "usable_for_gain_ratio=False"
+
+    @staticmethod
+    def _sc_gain_text(legacy, optimized):
+        """提升倍数：两档都 usable 才允许给精确倍数，否则只给下界或直接 N/A。"""
+        if not legacy or not optimized:
+            return "N/A", "缺少对照档位（需要 --skill_capacity_arms both）"
+        lf, of = legacy["frontier"], optimized["frontier"]
+        if not isinstance(lf, int) or not isinstance(of, int) or lf <= 0:
+            return "N/A", f"legacy 前沿为 {lf}，无法作为倍数分母"
+        ratio = of / lf
+        if legacy["usable"] and optimized["usable"]:
+            return f"{ratio:.4f}x", ""
+        return (f"&ge; {ratio:.2f}x（下界）",
+                "至少一档 usable_for_gain_ratio=False，按纪律只能给下界，不得呈现为精确倍数")
+
+    @staticmethod
+    def _sc_capability_rows(frontiers):
+        """能力矩阵表体（主报告卡片与详情页共用同一份渲染，避免两处口径漂移）。"""
+        rows = ""
+        for model in sorted(frontiers):
+            arms = frontiers[model]
+            legacy, optimized = arms.get("legacy"), arms.get("optimized")
+            legacy_text, legacy_note = ReportGenerator._sc_frontier_text(legacy)
+            opt_text, opt_note = ReportGenerator._sc_frontier_text(optimized)
+            gain_text, gain_note = ReportGenerator._sc_gain_text(legacy, optimized)
+            ref = optimized or legacy
+            point = (ref or {}).get("point") or {}
+            tokens_out, ctx = point.get("tokens_out"), point.get("context_size")
+            if isinstance(tokens_out, int) and isinstance(ctx, int) and ctx > 0:
+                ctx_text = f"{tokens_out / ctx * 100:.1f}%<br><small>{tokens_out} / {ctx} tokens</small>"
+            else:
+                ctx_text = "N/A"
+            kept, total = point.get("skills_kept"), point.get("skills_total")
+            if isinstance(kept, int) and isinstance(total, int) and total > 0:
+                keep_text = f"{kept / total * 100:.0f}%<br><small>{kept} / {total}</small>"
+            else:
+                keep_text = "N/A"
+            trials = point.get("trials")
+            repeat_text = f"repeat={trials}" if isinstance(trials, int) else "repeat=?"
+            note_bits = [b for b in (
+                (f"legacy: {legacy_note}" if legacy_note else ""),
+                (f"optimized: {opt_note}" if opt_note else ""),
+                (f"倍数: {gain_note}" if gain_note else ""),
+            ) if b]
+            note_html = (f'<div class="resp-detail" style="margin-top:4px;">{_html_escape("；".join(note_bits))}</div>'
+                         if note_bits else "")
+            rows += f"""<tr>
+                <td><strong>{_html_escape(model)}</strong><div class="resp-detail">{_html_escape(repeat_text)}</div>{note_html}</td>
+                <td class="center">{legacy_text}</td>
+                <td class="center"><strong>{opt_text}</strong></td>
+                <td class="center">{gain_text}</td>
+                <td class="center">{keep_text}</td>
+                <td class="center">{ctx_text}</td>
+            </tr>"""
+        return rows
+
+    _SC_CAPABILITY_HEADER = ("<thead><tr><th>模型</th><th class=\"center\">改造前前沿<br><small>legacy</small></th>"
+                             "<th class=\"center\">改造后前沿<br><small>optimized</small></th>"
+                             "<th class=\"center\">提升倍数</th><th class=\"center\">技能保留率<br><small>前沿点 Kept/Total</small></th>"
+                             "<th class=\"center\">上下文占用率<br><small>前沿点 Tokens-Out/Context</small></th></tr></thead>")
+
+    @staticmethod
+    def _sc_curve_table_html(entry):
+        """单档二分搜索曲线：N × 判据 × 全部账本字段（含 422 与紧急截断）。"""
+        rows = ""
+        for e in entry["curve"]:
+            err = e.get("error") or ""
+            is_422 = "422" in err
+            def _flag(v, good="是", bad="否"):
+                if v is None:
+                    return '<span class="status-skip">未知</span>'
+                return (f'<span class="status-pass">{good}</span>' if v
+                        else f'<span class="status-fail">{bad}</span>')
+            verdict = ('<span class="badge pass">PASS</span>' if e.get("passed")
+                       else ('<span class="badge ignored">PARTIAL</span>' if e.get("partial")
+                             else '<span class="badge fail">FAIL</span>'))
+            is_frontier = (e.get("n") == entry["frontier"])
+            row_style = ' style="background: rgba(25,118,210,0.08);"' if is_frontier else ""
+            kept, total = e.get("skills_kept"), e.get("skills_total")
+            kept_text = f"{kept} / {total}"
+            if isinstance(kept, int) and isinstance(total, int) and kept < total:
+                kept_text += ' <span class="status-fail">(&lt;)</span>'
+            tiers = "/".join("?" if e.get(k) is None else str(e.get(k))
+                             for k in ("skills_l2", "skills_l1", "skills_l0"))
+            tokens_out, ctx = e.get("tokens_out"), e.get("context_size")
+            occupancy = (f"{tokens_out} / {ctx}" if tokens_out is not None and ctx is not None else "N/A")
+            rows += f"""<tr{row_style}>
+                <td class="num"><strong>{e.get('n')}</strong>{' &#9733;' if is_frontier else ''}</td>
+                <td class="center">{verdict}</td>
+                <td class="center">{_flag(e.get('answered'))}</td>
+                <td class="center">{_flag(e.get('picked'))}</td>
+                <td class="center">{_flag(e.get('target_in_prompt'))}</td>
+                <td class="center"><code>{_html_escape(str(e.get('target_form') or '-'))}</code></td>
+                <td class="center">{kept_text}</td>
+                <td class="center">{_html_escape(tiers)}</td>
+                <td class="center">{_html_escape(str(e.get('skills_budget_tokens')))}</td>
+                <td class="center">{_html_escape(occupancy)}</td>
+                <td class="center">{_flag(e.get('emergency_truncated'), good='是', bad='否')}</td>
+                <td class="center">{'<span class="status-fail">422</span>' if is_422 else '-'}</td>
+                <td class="resp-detail">{_html_escape(err[:200])}</td>
+            </tr>"""
+        head = ("<thead><tr><th>N</th><th class=\"center\">判定</th><th class=\"center\">答对</th>"
+                "<th class=\"center\">选对</th><th class=\"center\">目标在提示词</th><th class=\"center\">目标披露形态</th>"
+                "<th class=\"center\">Skills<br>Kept/Total</th><th class=\"center\">L2/L1/L0</th>"
+                "<th class=\"center\">Skills<br>Budget-Tokens</th><th class=\"center\">Tokens-Out<br>/ Context-Size</th>"
+                "<th class=\"center\">紧急截断</th><th class=\"center\">422</th><th>错误原文</th></tr></thead>")
+        return f'<table class="compare-table">{head}<tbody>{rows}</tbody></table>'
+
+    @staticmethod
+    def _generate_skill_capacity_detail_html(all_results, out_dir, remote_mode=False, cmdline=""):
+        """生成技能装载能力前沿的完整详情页(report_skill_capacity.html)。
+
+        与 _generate_multi_backend_detail_html 同一范式：主报告只留能力矩阵卡片 +
+        链接，二分搜索的完整曲线（每个 N 的判据与全部账本字段）、表述纪律与追溯、
+        同分顺序病理、逐项检查记录全部下沉到本页。仅在本次运行确实产生了
+        SKILL_CAPACITY 用例时才生成并返回 True，调用方据此决定是否渲染链接。
+        """
+        sc_results = [r for r in all_results if r.name.startswith("SKILL_CAPACITY:")]
+        if not sc_results:
+            return False
+
+        frontiers = ReportGenerator._sc_collect_frontiers(all_results)
+        matrix_html = (f'<table class="compare-table">{ReportGenerator._SC_CAPABILITY_HEADER}'
+                       f'<tbody>{ReportGenerator._sc_capability_rows(frontiers)}</tbody></table>'
+                       if frontiers else
+                       '<div class="empty-state">本次未产生任何前沿搜索结果（可能因模型/配置缺失被精确跳过）</div>')
+
+        curves_html = ""
+        for model in sorted(frontiers):
+            sections = ""
+            for arm in ("legacy", "optimized"):
+                entry = frontiers[model].get(arm)
+                if not entry:
+                    continue
+                label = ReportGenerator._SC_ARM_LABEL.get(arm, arm)
+                note = _html_escape(entry["note"]) if entry["note"] else ""
+                note_html = (f'<div class="resp-detail" style="margin: -4px 0 8px;">{note}</div>'
+                             if note else "")
+                sections += (f'<div class="group-section"><div class="group-title">'
+                             f'{_html_escape(label)} &middot; 前沿值 '
+                             f'{ReportGenerator._sc_frontier_text(entry)[0]}（曲线 {len(entry["curve"])} 点，'
+                             f'&#9733; 标记前沿点）</div>{note_html}'
+                             f'{ReportGenerator._sc_curve_table_html(entry)}</div>')
+            for arm in sorted(set(frontiers[model]) - {"legacy", "optimized"}):
+                entry = frontiers[model][arm]
+                sections += (f'<div class="group-section"><div class="group-title">'
+                             f'{_html_escape(arm)}</div>'
+                             f'{ReportGenerator._sc_curve_table_html(entry)}</div>')
+            curves_html += (f'<div class="model-section"><h3 style="font-size: 15px; margin: 4px 0 10px;">'
+                            f'{_html_escape(model)}</h3>{sections}</div>')
+        if not curves_html:
+            curves_html = '<div class="empty-state">本次未产生二分搜索曲线</div>'
+
+        check_rows = ""
+        for r in sc_results:
+            if r.skipped:
+                status_text, status_class = "SKIP", "skip"
+            elif r.crashed:
+                status_text, status_class = "CRASH", "crash"
+            elif r.passed:
+                status_text, status_class = "PASS", "pass"
+            elif getattr(r, "ignorable", False):
+                status_text, status_class = "IGN", "ignored"
+            else:
+                status_text, status_class = "FAIL", "fail"
+            check_rows += f"""<tr>
+                <td><code>{_html_escape(r.name)}</code></td>
+                <td class="center"><span class="badge {status_class}">{status_text}</span></td>
+                <td>{_html_escape(r.detail)}</td>
+            </tr>"""
+        checks_html = (f'<table class="compare-table"><thead><tr><th>用例</th><th class="center">状态</th>'
+                       f'<th>详情</th></tr></thead><tbody>{check_rows}</tbody></table>')
+
+        # Builder 真实驱动端到端确认（--skill_capacity_mode builder/both 才会产生）。
+        # 背书边界的措辞按外部审查逐条收紧过：这条通道验证的是「由真实 QAIModelBuilder
+        # 启动并运行的 GenieAPIService 实例在 N 上仍选对 + 答对」，**不**验证 Builder 的
+        # 聊天协议/请求组帧/tools 注入/日志链路——因为容量池的 N 个合成 <available_skills>
+        # 与自定义 tools 结构性无法经 Builder 聊天帧协议注入，请求只能直发服务端口。
+        # 全部文案取自该用例 response_data 的 known_limitations，报告层不另写一份结论。
+        builder_html = ""
+        b_res = next((r for r in sc_results
+                      if (r.response_data or {}).get("builder_e2e")), None)
+        if b_res is not None:
+            b = b_res.response_data or {}
+            ev = b.get("evidence") or {}
+            limits = "".join(f"<li>{_html_escape(str(x))}</li>"
+                             for x in (b.get("known_limitations") or []))
+            builder_html = f"""<div class="section">
+<h2><span class="icon">&#128279;</span> Builder 真实驱动端到端确认（N={b.get('n')}）</h2>
+<ul class="sc-note">
+<li><strong>判定</strong>：选对={ev.get('picked')} / 答对={ev.get('answered')}；
+<code>Skills-Kept/Total={ev.get('skills_kept')}/{ev.get('skills_total')}</code>、
+<code>L2/L1/L0={ev.get('skills_l2')}/{ev.get('skills_l1')}/{ev.get('skills_l0')}</code>、
+<code>Tokens-Out/Context={ev.get('tokens_out')}/{ev.get('context_size')}</code>。</li>
+<li><strong>Builder 侧实测</strong>：<code>settings.auth.enabled={b.get('auth_enabled')}</code>
+（未修改 Builder 任何源码）；Builder 拉起的真实命令行
+<code>{_html_escape(str(b.get('builder_command')))}</code>；本次可观测账本字段
+{_html_escape(str(b.get('ledger_headers_observed')))}。</li>
+{limits}
+</ul>
+</div>"""
+
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        html = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>技能装载能力前沿 - 详细记录</title>
+<style>
+{ReportGenerator._common_css()}
+.sc-note {{ margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.75; color: var(--text-secondary); }}
+.sc-note li {{ margin-bottom: 6px; }}
+</style>
+</head>
+<body>
+<div class="header">
+    <div class="header-inner">
+        <div class="eyebrow">Skill Capacity Frontier Detail</div>
+        <h1>技能装载能力前沿 &middot; 详细记录</h1>
+        <p class="subtitle">二分搜索完整曲线、账本字段与表述纪律</p>
+        <div class="meta">
+            <span class="meta-item"><strong>生成时间:</strong> {now_str}</span>
+            <span class="meta-item"><strong>模式:</strong> {"远程" if remote_mode else "本地"}</span>
+            <span class="meta-item"><a href="report.html" style="color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--accent); font-weight: 600;">← 返回总汇报</a></span>
+            {ReportGenerator._cmdline_meta_html(cmdline)}
+        </div>
+    </div>
+</div>
+
+<div class="container">
+
+<div class="section">
+<h2><span class="icon">&#128202;</span> 能力矩阵（模型 &times; 改造前/后前沿值 &times; 保留率 &times; 上下文占用 &times; 提升倍数）</h2>
+<div class="resp-detail" style="margin: -4px 0 10px;">前沿值 = 该档位下「同时装载 N 个技能仍能选对目标技能并答出其正文里唯一答案码」的最大 N（二分搜索求得，前沿点已用 &#9733; 标注在下方曲线里）。倍数只在两档均收敛且前沿点未预算饱和时给精确值，否则一律呈现为「&ge;N 下界」。</div>
+{matrix_html}
+</div>
+
+<div class="section">
+<h2><span class="icon">&#128207;</span> 表述纪律与追溯</h2>
+{ReportGenerator._SC_DISCIPLINE_HTML}
+</div>
+
+<div class="section">
+<h2><span class="icon">&#128200;</span> 二分搜索完整曲线</h2>
+<div class="resp-detail" style="margin: -4px 0 10px;">「目标披露形态」取值 L2（全量条目）/ L1（摘要 + 触发条件）/ L0（仅名字 + 一行摘要）/ absent（未进最终提示词）；判据由目标 description 尾部唯一 canary 是否可见机械判定，不靠人工读日志。</div>
+{curves_html}
+</div>
+
+<div class="section">
+<h2><span class="icon">&#9878;</span> 同分顺序病理（独立结论，不参与容量倍数）</h2>
+{ReportGenerator._SC_TIE_PATHOLOGY_HTML}
+</div>
+
+{builder_html}
+
+<div class="section">
+<h2><span class="icon">&#128203;</span> 逐项用例记录（{len(sc_results)}）</h2>
+{checks_html}
+</div>
+
+<div class="footer">
+    技能装载能力前沿详细记录 &middot; <a href="report.html">返回总汇报</a> &middot; {now_str}
+</div>
+
+</div>
+</body>
+</html>"""
+
+        ReportGenerator._assert_no_placeholder_leak(html, "技能装载前沿详情页 report_skill_capacity.html")
+        out_path = Path(out_dir) / "report_skill_capacity.html"
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(html)
+        print(f"[输出] 技能装载前沿详情: {out_path}")
+        return True
+
     @staticmethod
     def _crash_event_anchor(idx):
         return f"crash-{idx}"
@@ -4383,6 +4743,66 @@ code { background: #F5F5F5; padding: 2px 6px; border-radius: 3px; font-family: v
             {detail_link_html}
             </div>"""
 
+        # 技能装载能力前沿（--suite skill_capacity）：主报告只保留能力矩阵卡片
+        # （模型 × 改造前/后前沿值 × 提升倍数 × 保留率 × 上下文占用率）+ 指向详情页
+        # 的链接，二分搜索完整曲线与表述纪律全部下沉到 report_skill_capacity.html，
+        # 与"多类型同时加载"的下沉模式一致。倍数的可引用性由 _sc_gain_text() 按
+        # usable_for_gain_ratio 机械判定，报告层不做任何数值硬编码。
+        skill_capacity_html = ""
+        sc_results = [r for r in all_results if r.name.startswith("SKILL_CAPACITY:")]
+        if sc_results:
+            has_sc_detail = ReportGenerator._generate_skill_capacity_detail_html(
+                all_results, out_dir, remote_mode=remote_mode, cmdline=cmdline)
+            sc_frontiers = ReportGenerator._sc_collect_frontiers(all_results)
+            sc_pass = sum(1 for r in sc_results if r.passed)
+            sc_skipped = sum(1 for r in sc_results if r.skipped)
+            sc_crashed = sum(1 for r in sc_results if r.crashed)
+            sc_fail = len(sc_results) - sc_pass - sc_skipped - sc_crashed
+            sc_matrix_html = (
+                f'<table class="compare-table">{ReportGenerator._SC_CAPABILITY_HEADER}'
+                f'<tbody>{ReportGenerator._sc_capability_rows(sc_frontiers)}</tbody></table>'
+                if sc_frontiers else
+                '<div class="empty-state">本次未产生前沿搜索结果（模型或配置缺失时按设计精确跳过，不伪造数字）</div>')
+            sc_fail_note_html = (
+                f'<div style="color: var(--danger); font-size: 12px; font-weight: 600; margin-bottom: 6px;">'
+                f'含 {sc_fail} 项失败，详见详情页逐项用例记录</div>'
+                if sc_fail > 0 else "")
+            sc_link_html = (
+                f'{sc_fail_note_html}<div class="model-link-card"><a href="report_skill_capacity.html">查看二分搜索完整曲线、表述纪律与同分顺序病理 →</a></div>'
+                if has_sc_detail else sc_fail_note_html)
+            # Builder 端到端确认的一行摘要。措辞按外部审查收紧：只说「由真实 Builder
+            # 启动并运行的服务实例在 N 上仍选对+答对」，绝不写成「已由 Builder 链路
+            # 端到端确认」——那会被读成 Builder 的聊天/转发链路也被覆盖，而实测请求
+            # 是直发服务端口的（Builder 在请求面已退出因果链）。
+            sc_builder_note_html = ""
+            b_res = next((r for r in sc_results if (r.response_data or {}).get("builder_e2e")), None)
+            if b_res is not None:
+                b = b_res.response_data or {}
+                bev = b.get("evidence") or {}
+                sc_builder_note_html = (
+                    f'<div class="resp-detail" style="margin: 8px 0 0;">'
+                    f'<strong>Builder 真实驱动端到端确认</strong>：由真实 QAIModelBuilder 启动并运行的 '
+                    f'GenieAPIService 实例，在 N={b.get("n")} 上选对={bev.get("picked")} / '
+                    f'答对={bev.get("answered")}（<code>settings.auth.enabled='
+                    f'{b.get("auth_enabled")}</code>，未修改 Builder 源码）。'
+                    f'该确认<strong>不覆盖</strong> Builder 自身的聊天协议 / 请求组帧 / tools 注入 / '
+                    f'日志链路——容量池的合成 <code>&lt;available_skills&gt;</code> 与自定义 '
+                    f'<code>tools</code> 无法经 Builder 聊天帧协议注入，验证请求为直发服务端口。</div>')
+            skill_capacity_html = f"""<div class="section">
+            <h2><span class="icon">&#128202;</span> 技能装载能力前沿（能力矩阵）</h2>
+            <div class="summary-bar">
+                <div class="summary-card"><div class="num">{len(sc_results)}</div><div class="label">用例数</div></div>
+                <div class="summary-card card-pass"><div class="num">{sc_pass}</div><div class="label">通过</div></div>
+                <div class="summary-card card-fail"><div class="num">{sc_fail}</div><div class="label">失败</div></div>
+                <div class="summary-card card-crash"><div class="num">{sc_crashed}</div><div class="label">崩溃</div></div>
+                <div class="summary-card"><div class="num">{sc_skipped}</div><div class="label">跳过</div></div>
+            </div>
+            <div class="resp-detail" style="margin: 4px 0 10px;">前沿值 = 该档位下「同时装载 N 个技能仍能选对目标技能并答出其正文里唯一答案码」的最大 N。提升倍数只在两档均收敛（converged）且前沿点未预算饱和时给精确值，否则一律呈现为「&ge;N 下界」；采样次数见「模型」列，<strong>repeat=1 时未做重复性检验，只能表述为「效应量极大且方向明确」，不声称统计显著</strong>。</div>
+            {sc_matrix_html}
+            {sc_builder_note_html}
+            {sc_link_html}
+            </div>"""
+
         # 模型列表（带链接）
         model_links_html = '<div class="section"><h2><span class="icon">&#128218;</span> 详细报告</h2>'
         for model in model_names:
@@ -4609,6 +5029,7 @@ code { background: #F5F5F5; padding: 2px 6px; border-radius: 3px; font-family: v
 
 {model_compare_html}
 {multi_backend_html}
+{skill_capacity_html}
 {model_links_html}
 {matrix_html}
 {builder_section_html}
@@ -11004,7 +11425,8 @@ def _sc_single_trial(args, model, probe, n, target_skill, skills_xml, all_metas,
     evidence = {"n": n, "picked": False, "answered": False, "emergency_truncated": False,
                 "tokens_out": None, "context_size": None, "skills_total": None,
                 "skills_kept": None, "tools_tier": None, "http_ok": False, "error": None,
-                "skills_budget_tokens": None, "target_in_prompt": None, "target_form": None}
+                "skills_budget_tokens": None, "target_in_prompt": None, "target_form": None,
+                "skills_l2": None, "skills_l1": None, "skills_l0": None}
     try:
         if probe is not None:
             probe.mark()
@@ -11024,6 +11446,11 @@ def _sc_single_trial(args, model, probe, n, target_skill, skills_xml, all_metas,
     evidence["tokens_out"] = values.get("X-Genie-Prompt-Tokens-Out")
     evidence["context_size"] = values.get("X-Genie-Prompt-Context-Size")
     evidence["skills_budget_tokens"] = values.get("X-Genie-Prompt-Skills-Budget-Tokens")
+    # 三档披露账本（D2）：Step 6 报告详情页要按 N 展示 L2/L1/L0 分布，这里只是把
+    # 已经解析出来的既有账本头顺带记进证据字典，不新增第二套统计口径。
+    evidence["skills_l2"] = values.get("X-Genie-Prompt-Skills-L2")
+    evidence["skills_l1"] = values.get("X-Genie-Prompt-Skills-L1")
+    evidence["skills_l0"] = values.get("X-Genie-Prompt-Skills-L0")
 
     # 独立机械断言（本轮修正第 1(b) 条）：目标技能必须真的进了最终提示词，
     # 即它必须在 Skills-Kept 集合内。账本只给数量不给名单，因此直接查 [Prompt]
@@ -11355,8 +11782,11 @@ def _sc_majority_probe(args, model, probe, n, repeat, timeout, pool_builder=None
     curve_entry = {
         "n": n, "answered": last["answered"], "picked": last["picked"],
         "target_in_prompt": last["target_in_prompt"],
+        "target_form": last.get("target_form"),
         "skills_kept": last["skills_kept"], "skills_total": last["skills_total"],
         "skills_budget_tokens": last["skills_budget_tokens"],
+        "skills_l2": last.get("skills_l2"), "skills_l1": last.get("skills_l1"),
+        "skills_l0": last.get("skills_l0"),
         "skills_kept_at_budget_cap": saturated,
         "tokens_out": last["tokens_out"], "context_size": last["context_size"],
         "tools_tier": last["tools_tier"], "emergency_truncated": last["emergency_truncated"],
@@ -11715,7 +12145,9 @@ def _sc_case_cn_query_en_pool(args, model, probe, arm, results, timeout):
     改为三条真正针对 D4 的机械判据：
       (a) 服务端日志出现 `[BuildRelevanceKeywords] intent alias expansion: X -> Y`
           且 Y > X（中文词元真的被扩展成了英文意图词）——这是 D4 生效的直接证据；
-      (b) 目标技能在纯中文提问下仍被排进最高档 L2（排序真的有区分度）；
+      (b) 目标技能在纯中文提问下未被降到 L0（排序真的把它留在高档）——`tie_aware_l2`
+          实测为 true 时收紧为「必须在最高档 L2」，为 false 时 L2 名额会被同分锚点按
+          名字升序占满、目标落 L1 属预期，故只断言「不被降到 L0」；
       (c) `Skills-L0 >= 1`（确实拉开了档位差，不是全员同档）。
     legacy 档（intent_aliases_enabled=false）断言该日志行**不应出现**，
     两档差异即 D4 开关真实生效的机械证据。"""
@@ -11781,11 +12213,25 @@ def _sc_case_cn_query_en_pool(args, model, probe, arm, results, timeout):
             data=measurement))
         return
     tiered = (l0 is not None and l0 >= 1)
-    target_ok = target_form in (None, "L2")
+    # 目标档位判据必须按 `skill_disclosure.tie_aware_l2` 的**实测取值**分档，理由与场景 3
+    # 完全一致（Step 5 收口已在那里修过同一处语义冲突，本用例当时漏改）：该开关默认 false
+    # 时不会把整组同分技能一起提到 L2，于是 `l2_top_k=2` 被两条同分锚点（名字升序在目标之前）
+    # 吃满、目标必然落到 L1 —— 这不是产品缺陷，「真正同分时谁进 L2」本就没有原则性答案。
+    # 关闭档位下改用一条仍然成立、且**非恒真**的断言：目标不得被降到 L0（目标与锚点同属
+    # 最高分组，必须落在 L2/L1；若被降到 L0 或整条缺失，断言照样失败）。
+    tie_aware = _sc_tie_aware_l2_enabled(probe)
+    measurement["tie_aware_l2"] = tie_aware
+    if tie_aware is True:
+        target_ok = target_form in (None, "L2")
+        target_req = "要求 L2（tie_aware_l2=true 时同分组整组进 L2）"
+    else:
+        target_ok = target_form in (None, "L1", "L2")
+        target_req = ("要求不被降到 L0（tie_aware_l2 未开启，L2 名额被同分锚点按名字升序占满，"
+                      "目标落 L1 属预期，非缺陷）")
     ok = alias_expanded and tiered and target_ok
     detail = (f"中文提问 + 纯英文技能池 N={n}：别名扩展生效（日志 X->Y 且 Y>X）? "
               f"{alias_expanded}（hits={alias_hits[:4]}）；目标技能档位={target_form}"
-              f"（要求 L2；拿不到 [Prompt] 日志块时为 None，不当失败）；"
+              f"（{target_req}；拿不到 [Prompt] 日志块时为 None，不当失败）；"
               f"L0>=1（档位真的拉开）? {tiered}；"
               f"L2/L1/L0={l2}/{measurement['skills_l1']}/{l0}，Kept={kept}/{total}"
               f"（注：D2 降档而不删除，Kept==Total 是预期行为，不作为区分度指标）")
@@ -12252,10 +12698,346 @@ def _sc_result(name, model, passed, detail, skipped=False, data=None):
     )
 
 
+# Builder 端到端确认用的技能数：与容量池 optimized 档已收敛前沿同源（Step 5 收口实测
+# legacy 44 / optimized 118 / gain 2.6818x，`repeat=1`、`tie_aware_l2=false` 出厂默认）。
+# 做成模块级常量而不是写死在函数体里，日后前沿被重测后只需改这一处。
+_SC_BUILDER_TARGET_N = 118
+
+
+def _sc_probe_builder_auth(builder):
+    """机械探测 QAIModelBuilder 侧 `settings.auth.enabled` 的实际取值，返回
+    (enabled_or_None, 人类可读判据)。
+
+    判据来自 Builder 源码事实（`apps/api/main.py:206-210`）：SSO 相关路由
+    （`/auth/login`、`/callback`、`/api/auth/me`）**只在 `settings.auth.enabled`
+    为真时才注册**，且 enabled 为假时整条鉴权中间件被短路。因此
+    `GET /api/auth/me` 返回 404 就是"鉴权关闭"的直接证据（路由不存在）。
+
+    ↳ 一处按远程实测更正的判据（不要退回旧写法）：曾把「200 即已注册即已开启」
+    直接当结论，实测该端点在**鉴权关闭**时同样返回 200，且响应体明写
+    `{"auth_enabled": false, "authenticated": true, ...}` —— 即该路由并非严格
+    只在 enabled 时注册。故现在优先采信响应体里的 `auth_enabled` 字段，
+    只有拿不到该字段时才退回"路由存在 ⇒ 可能已开启"这条弱推断。
+    探测异常返回 None（未知），不当成开启也不当成关闭——真正判断"是否被拦住"
+    始终由调用方看业务 API 的实际状态码。"""
+    try:
+        r = builder.csrf.get("/api/auth/me", timeout=10)
+    except Exception as e:
+        return None, f"探测 GET /api/auth/me 异常: {type(e).__name__}: {str(e)[:160]}"
+    if r.status_code == 404:
+        return False, ("GET /api/auth/me → 404：SSO 路由未注册，即 settings.auth.enabled=False"
+                       "（出厂默认），鉴权中间件已被短路，自动化请求不会被拦")
+    body = None
+    try:
+        body = r.json()
+    except ValueError:
+        body = None
+    if isinstance(body, dict) and isinstance(body.get("auth_enabled"), bool):
+        enabled = body["auth_enabled"]
+        return enabled, (f"GET /api/auth/me → {r.status_code}，响应体 auth_enabled={enabled}"
+                         f"（直接采信该字段，优先于「路由是否注册」这条弱推断）；"
+                         f"响应={r.text[:160]}")
+    return True, (f"GET /api/auth/me → {r.status_code} 且响应体无 auth_enabled 字段："
+                  f"退回弱推断「路由已注册 ⇒ 可能已开启」；响应={r.text[:160]}")
+
+
+def _sc_case_builder_e2e(args, models, all_results, all_crash_events,
+                         target_n=_SC_BUILDER_TARGET_N, timeout=180):
+    """`--skill_capacity_mode builder/both` 的真实 Builder 驱动端到端确认。
+
+    目的与直连通道**互补而非重复**：直连通道负责二分搜索求前沿（能读服务 stdout
+    的 `[Prompt]` 块、能自定义启动参数），本用例只在直连已测出的前沿值 N 上确认
+    「经真实 QAIModelBuilder 启动的 GenieAPIService 同样选对 + 答对」，是端到端背书。
+
+    链路构成（每一步都只走 Builder 官方接口/文件系统标记，不改 Builder 任何源码）：
+      1. `QAIModelBuilderManager.start()` 起 Builder（隔离数据目录 + 已注入
+         `QAI_AUTH__ENABLED`，见该类 start() 实现）；
+      2. `_sc_probe_builder_auth()` 先读一次鉴权实际取值并打印，真被拦住才处置；
+      3. `list_skills()` → 临时 `npu.txt` 标记 → `set_skill_run_mode(id,"local")`
+         → `reload_skills()`，让 Builder 侧本地技能目录提供者这条路径真实带电
+         （范式与 `scenario_a_skill_weather()` 完全一致，`try/finally` 删除标记）；
+      4. 复用 `QAIModelBuilderLocalModelTester` 的 `configure_genie_root()` /
+         `inject_local_models()` / `discover_models_via_builder()` /
+         `start_and_wait_ready()` 让 Builder 真正把 GenieAPIService 拉起来；
+      5. 用容量池 `_sc_build_capacity_pool(N)`（与前沿同源，目标分数严格最高）
+         向该服务端口发一次两轮对话，判据仍是「选对（read 命中目标 SKILL.md）
+         且答对（回答含唯一答案码）」，与直连通道逐字节同一套 `_sc_single_trial`。
+
+    **两条必须如实标注、不得伪造的架构限制**：
+      * 容量池只能靠向 Builder 拉起的服务端口**直发 OpenAI 请求**注入——Builder
+        自己的 conversation 聊天协议无法承载 118 个合成 `<available_skills>` 条目
+        与自定义 `tools`。因此本用例验证的是"Builder 启动的服务进程"这条链路，
+        不是"Builder 的聊天代理"这条链路。
+      * 正因为走的是直发请求，`X-Genie-Prompt-*` 账本头在**这条注入通道上实际可
+        观测**；而经 Builder SSE 聊天代理时它们结构性不可观测（Builder 帧协议不
+        透传上游 HTTP 响应头，见 `scenario_a_skill_weather()` 的 ledger_note）。
+        两种情形都按实际观测结果记录，既不伪造账本断言，也不谎称观测不到。
+
+    环境不具备（远程模式 / Builder 起不来 / 技能列不出 / 目标模型或 config.json 缺失
+    / 服务未就绪）一律 `skipped=True` 并写明环境原因，不伪造通过。`ModelDirSnapshot`
+    安全网覆盖全程：0 违规静默通过（不产生正面记录），违规记 `crashed=True` /
+    `ignorable=False`（崩溃永不豁免）。"""
+    prefix = "SKILL_CAPACITY: builder_e2e"
+    ph = "_skill_capacity_builder_"
+
+    if getattr(args, "remote", False):
+        all_results.append(_sc_result(
+            f"{prefix} precondition", ph, False,
+            "远程模式不适用（Builder 分支需要本机启动 Builder 子进程与 mklink /J 文件系统操作），"
+            "精确跳过", skipped=True))
+        return
+    if not getattr(args, "genie_root_path", None):
+        all_results.append(_sc_result(
+            f"{prefix} precondition", ph, False,
+            "缺少 --genie_root_path（或未通过 --exe_dir 复用），无法告知 Builder "
+            "GenieAPIService 安装位置，精确跳过", skipped=True))
+        return
+    builder_dir = Path(getattr(args, "builder_dir", "") or "")
+    if not builder_dir.is_dir():
+        all_results.append(_sc_result(
+            f"{prefix} precondition", ph, False,
+            f"--builder_dir 不存在: {builder_dir}，精确跳过", skipped=True))
+        return
+    model = _sc_resolve_model(models, "qwen3-8b")
+    if not model:
+        all_results.append(_sc_result(
+            f"{prefix} precondition", ph, False,
+            f"未在已发现模型中匹配到 qwen3-8b（models={models}），精确跳过", skipped=True))
+        return
+    config_path = Path(args.models) / model / "config.json"
+    if not config_path.exists():
+        all_results.append(_sc_result(
+            f"{prefix} precondition", model, False,
+            f"缺失 config.json: {config_path}，精确跳过", skipped=True))
+        return
+
+    print(f"\n{'='*60}")
+    print(f"阶段: skill_capacity Builder 真实驱动端到端确认（模型: {model}, N={target_n}）")
+    print(f"{'='*60}")
+
+    builder = QAIModelBuilderManager(
+        args.builder_dir, args.host, args.builder_port, log_dir=args.out_dir,
+        python_exe=getattr(args, "builder_python_exe", None),
+        data_dir=getattr(args, "builder_data_dir", None),
+    )
+    tester = None
+    npu_marker = None
+    try:
+        try:
+            builder.start(timeout=120)
+        except (RuntimeError, FileNotFoundError) as e:
+            all_results.append(_sc_result(
+                f"{prefix} precondition", model, False,
+                f"Builder 启动失败（环境不具备）: {str(e)[:400]}", skipped=True))
+            return
+
+        auth_enabled, auth_detail = _sc_probe_builder_auth(builder)
+        print(f"  [builder_e2e] settings.auth.enabled 探测: {auth_enabled}; {auth_detail}")
+
+        list_ok, list_status, list_body = builder.list_skills()
+        if not list_ok and list_status in (401, 403):
+            all_results.append(_sc_result(
+                f"{prefix} auth", model, False,
+                f"Builder 鉴权实际拦截了自动化请求（GET /api/skills → {list_status}）：{auth_detail}；"
+                "本切片不改 Builder 源码——请先在隔离数据目录下关闭鉴权"
+                "（环境变量 QAI_AUTH__ENABLED=false，QAIModelBuilderManager.start() 已注入该变量，"
+                "若仍被拦请检查该数据目录下的持久化配置是否显式打开了 auth）后重跑，精确跳过",
+                skipped=True, data={"auth_enabled": auth_enabled, "auth_probe": auth_detail}))
+            return
+        if not list_ok:
+            all_results.append(_sc_result(
+                f"{prefix} precondition", model, False,
+                f"GET /api/skills 失败（status={list_status}）: {str(list_body)[:240]}，精确跳过",
+                skipped=True, data={"auth_enabled": auth_enabled, "auth_probe": auth_detail}))
+            return
+
+        skills = list_body.get("skills", []) if isinstance(list_body, dict) else []
+        entry = next((s for s in skills if isinstance(s, dict)
+                      and (s.get("skill_id") == "weather" or s.get("id") == "weather")), None)
+        if entry is None:
+            entry = next((s for s in skills if isinstance(s, dict)), None)
+        if entry is None:
+            all_results.append(_sc_result(
+                f"{prefix} precondition", model, False,
+                f"Builder 技能清单为空（GET /api/skills 返回 {str(list_body)[:200]}），"
+                "无法验证 Builder 侧本地技能目录路径带电，精确跳过", skipped=True))
+            return
+        skill_id = entry.get("skill_id") or entry.get("id")
+
+        # 临时 npu.txt 标记：`discovery.py` 要求技能满足 npu_optimized 才允许被设为
+        # local/both（否则 resolve_skill_mode() 每次解析都会强制降级回 cloud），而
+        # scan() 对该标记文件是逐次纯文件系统读取（无缓存）。范式与
+        # scenario_a_skill_weather() 一致，finally 里无条件删除。
+        if not entry.get("npu_optimized") and entry.get("skill_path"):
+            try:
+                candidate = Path(entry["skill_path"]).parent / "npu.txt"
+                if not candidate.exists():
+                    candidate.write_text(
+                        "temporary marker created by test_service.py "
+                        "_sc_case_builder_e2e() — safe to delete\n", encoding="utf-8")
+                    npu_marker = candidate
+            except OSError as exc:
+                print(f"  [builder_e2e] 临时 npu.txt 标记创建失败（不阻塞本用例）: {exc!r}")
+
+        mode_ok, mode_status, _mode_body = builder.set_skill_run_mode(skill_id, "local")
+        reload_ok, reload_status, _reload_body = builder.reload_skills()
+        print(f"  [builder_e2e] set_skill_run_mode({skill_id},'local') ok={mode_ok} "
+              f"status={mode_status}; reload_skills ok={reload_ok} status={reload_status}")
+
+        tester = QAIModelBuilderLocalModelTester(
+            builder=builder, models_root=args.models,
+            genie_root_path=args.genie_root_path, model_names=[model],
+            genie_service_port=args.port, round_num=1,
+            data_dir=getattr(args, "data_dir", None),
+        )
+        root_ok = tester.configure_genie_root()
+        inject_ok = tester.inject_local_models() if root_ok else False
+        found = tester.discover_models_via_builder() if inject_ok else []
+        found_names = {m.get("name") for m in found if isinstance(m, dict)}
+        if model not in found_names:
+            all_results.append(_sc_result(
+                f"{prefix} precondition", model, False,
+                f"Builder 未发现注入的模型（root_ok={root_ok}, inject_ok={inject_ok}, "
+                f"已发现={sorted(n for n in found_names if n)}），精确跳过", skipped=True))
+            return
+
+        started, status = tester.start_and_wait_ready(model, args.port)
+        if not started:
+            all_results.append(_sc_result(
+                f"{prefix} precondition", model, False,
+                f"Builder 未能把 GenieAPIService 拉到就绪状态（last_status={status}），精确跳过",
+                skipped=True))
+            return
+        # Builder 固定以 `-n -1 -l` 启动 GenieAPIService（见
+        # QAIModelBuilderLocalModelTester._build_chat_request_body 的说明），因此
+        # IsStatelessMode() 成立、整条压缩链在这条链路上真实生效，N=118 在此有意义。
+        command = status.get("command") if isinstance(status, dict) else None
+        # Builder 的 /api/service/start 是 fire-and-forget，status.running=true 早于
+        # GenieAPIService 真正 bind 端口（远程实测过一次 running=true 但随后直发请求被
+        # WinError 10061 拒绝）。这里补一次真实 TCP 端口等待，把「还没起来」与「起来了
+        # 但答不对」两种情形分开：等不到就精确跳过在 precondition 阶段，而不是把连接层
+        # 异常混进能力判据。
+        if not wait_port_open(args.host, args.port, timeout=180):
+            all_results.append(_sc_result(
+                f"{prefix} precondition", model, False,
+                f"Builder 报告服务就绪（status={status}）但 {args.host}:{args.port} 在 180s 内"
+                "始终不可连接，精确跳过（环境/链路问题，非能力结论）", skipped=True))
+            return
+        # 等过 LocalChatSkillCatalogProvider 的 3 秒 TTL 窗口，排除 set_mode 刚写入即
+        # 读到旧缓存这条已知假阴性路径（同 scenario_a_skill_weather()）。
+        time.sleep(4)
+
+        skills_xml, metas, target = _sc_build_capacity_pool(target_n)
+        bprobe = _BuilderLogProbe(builder.csrf)
+        bprobe.mark()
+        bprobe.start_live_tail()
+        ev = _sc_single_trial(args, model, None, target_n, target, skills_xml, metas, timeout)
+        raw_log = bprobe.stop_live_tail()
+        target_in_builder_log = bool(raw_log) and (target["location"] in raw_log)
+
+        ledger_seen = sorted(k for k in ("skills_total", "skills_kept", "skills_l2", "skills_l1",
+                                        "skills_l0", "skills_budget_tokens", "tokens_out",
+                                        "context_size") if ev.get(k) is not None)
+        # 三条限制的措辞按 Copilot 反对派审查（Step 6）逐条回代码核实后收紧——原措辞
+        # 「背书 Builder 启动的服务进程链路」被判**仍过强**，因为第 4 步之后 Builder 在
+        # 请求面已完全退出因果链。不采纳它的 Q4（改走 Builder 官方 chat/SSE）：118 个合成
+        # <available_skills> 条目 + 自定义 tools 结构性无法经 Builder 聊天帧协议注入。
+        known_limitations = [
+            "背书边界（已按外部审查收紧措辞）：本用例只背书「Builder 产出的 GenieAPIService "
+            "启动参数与进程配置」这条链路（实测命令行含 -l -n -1 -d 3，故 IsStatelessMode() "
+            "成立、整条压缩链真实生效），**不**背书 Builder 对这次推理请求有任何介入——"
+            "容量池（合成技能 + read 工具）只能向 Builder 拉起的服务端口直发 OpenAI 请求注入，"
+            "Builder 自身 conversation 聊天协议无法承载自定义 <available_skills> 与 tools。"
+            "证伪判据：Builder 起完服务后立刻 kill Builder 后端，若选对/答对/账本头全部不变，"
+            "则连「Builder 启动的服务进程链路」都算过强，实际只背书「Builder 曾启动过该进程」",
+            "Builder 侧技能操作（set_skill_run_mode/reload_skills/npu.txt）对本用例的判定"
+            "**没有因果影响**（代码事实：本次请求的技能目录全部来自合成容量池，不经 Builder 的"
+            "本地技能目录提供者）——保留这三步只为让该 Builder 代码路径真实带电，其功能性验证"
+            "由 --suite builder_local_model 的 scenario_a_skill_weather() 独立承担。证伪判据："
+            "整段删掉这三步，若 Skills-Kept/Total、L2/L1/L0、选对、答对四项全同（token 波动 ≤1%），"
+            "则「这三步有影响」被一次证伪",
+            f"target_in_builder_log={target_in_builder_log} 的准确解释是「Builder 未参与转发"
+            "这次请求」（直发服务端口，Builder 不在链路上），不是「日志缓冲回卷」——按外部审查"
+            "更正后不再用后者遮盖；该字段仅作辅助记录，不参与通过判据",
+            "X-Genie-Prompt-* 账本头在经 Builder SSE 聊天代理时结构性不可观测（Builder 帧协议"
+            f"不透传上游 HTTP 响应头）；本用例因走直发请求而实际观测到 {len(ledger_seen)} 个"
+            f"账本字段（{ledger_seen}），按实际观测记录，既不伪造账本断言也不谎称观测不到",
+        ]
+        if not ev["http_ok"] and (ev.get("error") or "").startswith("round1 请求异常"):
+            # 连接层异常（Builder 拉起的服务已消失/端口不通）——属环境/链路问题，
+            # 不是「答不对」这个能力结论，精确跳过而不是记假失败。
+            all_results.append(_sc_result(
+                f"{prefix} N={target_n}", model, False,
+                f"经 Builder 的服务端口请求层异常（环境/链路问题，非能力结论）: {ev['error']}",
+                skipped=True, data={"evidence": ev, "command": command}))
+            return
+        passed = bool(ev["picked"] and ev["answered"])
+        detail = (f"N={target_n}（与容量池 optimized 收敛前沿同源）；选对={ev['picked']}；"
+                  f"答对={ev['answered']}；Skills-Kept/Total={ev['skills_kept']}/{ev['skills_total']}；"
+                  f"L2/L1/L0={ev['skills_l2']}/{ev['skills_l1']}/{ev['skills_l0']}；"
+                  f"Skills-Budget-Tokens={ev['skills_budget_tokens']}；"
+                  f"Tokens-Out/Context={ev['tokens_out']}/{ev['context_size']}；"
+                  f"紧急截断={ev['emergency_truncated']}；auth_enabled={auth_enabled}；"
+                  f"builder_command={command}；error={ev['error']}；"
+                  "已知架构限制: " + " | ".join(known_limitations))
+        all_results.append(_sc_result(
+            f"{prefix} N={target_n}", model, passed, detail,
+            data={"builder_e2e": True, "n": target_n, "evidence": ev,
+                  "auth_enabled": auth_enabled, "auth_probe": auth_detail,
+                  "builder_command": command, "ledger_headers_observed": ledger_seen,
+                  "target_in_builder_log": target_in_builder_log,
+                  "known_limitations": known_limitations}))
+    except Exception as e:
+        detail = (f"Builder 端到端用例未捕获异常（可能 Builder/GenieAPIService 已崩溃）: "
+                  f"{type(e).__name__}: {str(e)[:300]}")
+        all_results.append(_sc_result(f"{prefix} N={target_n}", model, False, detail))
+        all_crash_events.append(CrashEvent(
+            timestamp=datetime.now().isoformat(), model_name=model, round_num=1,
+            endpoint="skill_capacity_builder_e2e", detail=detail,
+            request_history=_trace_snapshot()))
+    finally:
+        # 还原临时 npu.txt 标记（异常路径同样还原，不残留对 Builder 技能清单的持久改动）
+        if npu_marker is not None:
+            try:
+                npu_marker.unlink(missing_ok=True)
+            except OSError:
+                pass
+        if tester is not None:
+            try:
+                tester.stop_and_verify(args.port)
+            except Exception:
+                pass
+        try:
+            builder.stop()
+        except Exception:
+            pass
+        if tester is not None:
+            # tester 自身产生的机械记录（configure/inject/discover/start/stop）一并纳入
+            # 结果集，precondition 类失败才有可追溯的出处，而不是只剩一句"环境不具备"。
+            all_results.extend(tester.results)
+            all_crash_events.extend(tester.crash_events)
+            # 模型目录安全网：0 违规静默通过（不产生正面记录），违规永不豁免。
+            violations = tester.model_dir_snapshot.verify()
+            if violations:
+                detail = ("模型目录安全网校验失败（Builder 路径），检测到以下违规：\n"
+                          + "\n".join(violations))
+                print(f"  ✗✗✗ {detail}")
+                all_crash_events.append(CrashEvent(
+                    timestamp=datetime.now().isoformat(), model_name=model, round_num=1,
+                    endpoint="MODEL_DIR_SNAPSHOT", detail=detail))
+                all_results.append(TestResult(
+                    name=f"{prefix} model_dir_snapshot_verify", round_num=1,
+                    model_name=model, passed=False, status_code=0, latency_ms=0,
+                    detail=detail, crashed=True, ignorable=False))
+
+
 def _run_skill_capacity_suite(args, models, remote_mode, out_dir):
     """--suite skill_capacity：二分搜索求两个目标模型（qwen3-8b/qwen2.5_omini）
-    「最多能同时装载多少个 skill 且仍能答对」的前沿值（本轮只求改造前基线，档位/
-    Builder 驱动分支见 .junie/plans/skill-capacity-frontier.md Step 2-5）。"""
+    「最多能同时装载多少个 skill 且仍能答对」的前沿值。
+
+    `--skill_capacity_mode`：`direct` 只跑直连取证的二分搜索通道（唯一能出前沿数字的通道）；
+    `builder` 只跑 `_sc_case_builder_e2e()` 的真实 Builder 端到端确认；`both` 两者都跑
+    （Builder 分支先跑，它自管 Builder/服务生命周期并在结束时释放端口）。"""
     all_results = []
     all_crash_events = []
     all_perf_samples = []
@@ -12274,13 +13056,14 @@ def _run_skill_capacity_suite(args, models, remote_mode, out_dir):
 
     mode = getattr(args, "skill_capacity_mode", "direct")
     if mode in ("builder", "both"):
-        # Builder 真实驱动端到端确认通道留给 Step 5 落地（QAIModelBuilderManager +
-        # 临时 npu.txt + 账本响应头不可观测的已知架构限制）；本 Step 只把「未实现」
-        # 显式记为机械可核验的 skipped，不静默忽略、不假装跑过。
-        all_results.append(_sc_result(
-            "SKILL_CAPACITY: builder mode", suite_model, False,
-            "--skill_capacity_mode=builder/both 的 Builder 驱动分支尚未实现（留给 Step 5），"
-            "本次运行仅执行 direct 直连通道，精确跳过 builder 部分", skipped=True))
+        # Builder 真实驱动端到端确认通道（Step 6 落地）：在直连已测出的前沿值上
+        # 确认真实 QAIModelBuilder 拉起的 GenieAPIService 同样选对 + 答对。放在直连
+        # 二分搜索**之前**跑：它自己完整管理 Builder/服务的启停生命周期，跑完
+        # 会把端口释放干净，不与后面每档各自 ServiceManager.start() 的窗口重叠。
+        _sc_case_builder_e2e(args, models, all_results, all_crash_events)
+        if mode == "builder":
+            # 纯 builder 模式不跑直连二分搜索（它是 direct 通道的职责），直接收工。
+            return all_results, all_perf_samples, all_crash_events
     arms_arg = getattr(args, "skill_capacity_arms", "legacy")
     arms = ["legacy", "optimized"] if arms_arg == "both" else [arms_arg]
 
@@ -12508,9 +13291,10 @@ def main():
     parser.add_argument("--skill_capacity_repeat", type=int, default=3,
                         help="--suite skill_capacity 每个 N 重复试探取多数票的次数（默认 3）")
     parser.add_argument("--skill_capacity_mode", choices=("direct", "builder", "both"), default="direct",
-                        help="--suite skill_capacity 驱动路径：direct=直连取证前沿搜索通道（本 Step 已实现）；"
-                             "builder=真实 QAIModelBuilder 端到端确认通道（Step 5 才落地，目前传入不影响直连结果）；"
-                             "both=两者都跑（默认仅 direct，Builder 分支留给 Step 5）")
+                        help="--suite skill_capacity 驱动路径：direct=直连取证前沿搜索通道（唯一能测出前沿数字的通道）；"
+                             "builder=真实 QAIModelBuilder 端到端确认通道（在直连已测出的前沿 N 上确认选对+答对，"
+                             "需要 --builder_dir/--genie_root_path 具备，环境不具备时精确跳过）；"
+                             "both=两者都跑（Builder 分支先跑并自管 Builder/服务生命周期）。默认 direct")
     parser.add_argument("--skill_capacity_arms", choices=("legacy", "optimized", "both"), default="legacy",
                         help="--suite skill_capacity 档位对照：legacy=改造前基线（临时改写 service_config.json 的 "
                              "fidelity.{cjk,ascii}_chars_per_token=4.0 + budget_partition.enabled=false，改前备份、"

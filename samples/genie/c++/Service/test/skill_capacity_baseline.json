@@ -3115,5 +3115,348 @@
         "algorithm_changes": "未实施 P2 / D5 / D6 / 分页拉取 / (b) / (c) 的任何算法改动。"
       }
     }
+  },
+  "step6": {
+    "_doc": "Step 6 第一片：Builder 真实驱动端到端确认（报告 HTML / 能力矩阵卡片 / 四份归口文档留给下一片，本片未做）",
+    "recorded_at": "2026-08-31",
+    "commit": "32c1611 之后的收口小修（known_limitations 措辞按 Copilot 反对派审查收紧）",
+    "environment": {
+      "host": "远程 ARM64 Windows 测试机（本轮 IP 已更换为 10.92.138.209，以 windows-remote-test 技能当前值为准）",
+      "repo": "C:\\Users\\HCKTest\\Desktop\\GenieEnv\\Tmp\\qai-appbuilder (branch main-fix)",
+      "exe_dir": "<repo>\\samples\\genie\\c++\\Service\\build_fidelity\\GenieService-win-arm64",
+      "models": "C:\\Users\\HCKTest\\Desktop\\GenieEnv\\models_backup_20260828",
+      "builder_dir": "<repo>\\samples\\genie\\c++\\Service\\QAIModelBuilder (junction 指向不参与本仓库 git 的外部项目)",
+      "out_dir": "<repo>\\samples\\genie\\c++\\Service\\test_results\\s6_final"
+    },
+    "_command": "python test_service.py --exe_dir <exe_dir> --models <models> --out_dir <out_dir> --suite skill_capacity --skill_capacity_mode both --skill_capacity_max 8 --skill_capacity_repeat 1 --skill_capacity_arms both --builder_dir <builder_dir>",
+    "builder_e2e": {
+      "case_name": "SKILL_CAPACITY: builder_e2e N=118",
+      "passed": true,
+      "skipped": false,
+      "crashed": false,
+      "ignorable": false,
+      "n": 118,
+      "n_source": "容量池 optimized 档已收敛前沿（legacy 44 / optimized 118 / gain 2.6818，usable_for_gain_ratio=True）；本用例只取该单点，不做二分",
+      "target_skill_name": "flux-capacitor-calibration",
+      "target_skill_location": "<临时技能目录>\\flux-capacitor-calibration\\SKILL.md",
+      "picked": true,
+      "answered": true,
+      "model": "qwen3-8b-8480",
+      "ledger": {
+        "skills_kept": 118,
+        "skills_total": 118,
+        "skills_l2": 2,
+        "skills_l1": 6,
+        "skills_l0": 110,
+        "skills_budget_tokens": 6496,
+        "tokens_out": 6315,
+        "context_size": 8192,
+        "emergency_truncated": false,
+        "headers_observed_count": 8,
+        "headers_observed": [
+          "context_size",
+          "skills_budget_tokens",
+          "skills_kept",
+          "skills_l0",
+          "skills_l1",
+          "skills_l2",
+          "skills_total",
+          "tokens_out"
+        ]
+      },
+      "target_in_builder_log": false,
+      "builder_path": "C:\\Users\\HCKTest\\Desktop\\GenieEnv\\Tmp\\qai-appbuilder\\samples\\genie\\c++\\Service\\QAIModelBuilder",
+      "builder_launched_service_cmdline": "<exe_dir>\\GenieAPIService.exe -c <models>\\qwen3-8b-8480\\config.json -l -n -1 -p 8910 -d 3",
+      "builder_api_calls": [
+        "GET /api/auth/me",
+        "GET /api/skills",
+        "POST /api/skills/{id}/run-mode (set_skill_run_mode local)",
+        "POST /api/skills/reload",
+        "GET /api/service/models",
+        "POST /api/service/start",
+        "POST /api/service/stop"
+      ],
+      "npu_marker": "临时 npu.txt 写在目标技能目录下，finally 中 unlink(missing_ok=True) 还原；实测无残留",
+      "model_dir_snapshot_violations": 0,
+      "model_dir_snapshot_note": "0 违规按设计静默通过、不产生正面记录（results.json 中无 model_dir_snapshot_verify 条目即为 0 违规）"
+    },
+    "auth": {
+      "settings_auth_enabled": false,
+      "probe": "GET /api/auth/me -> 200，响应体含 \"auth_enabled\": false",
+      "source_of_truth": "apps/api/main.py:206-210（enabled=False 时短路整条鉴权中间件）",
+      "builder_source_modified": false,
+      "conclusion": "鉴权默认关闭、未拦截自动化请求，因此**没有**修改 QAIModelBuilder 任何源码，也不需要在 docs/QAIModelBuilder/testing-guide.md 留改动档",
+      "earlier_probe_defect_fixed": "此前一版探针把 200 + auth_enabled:false 误记成 auth_enabled=true（只看 HTTP 状态码），本轮已改为解析响应体字段，实测记为 False"
+    },
+    "known_limitations": [
+      "背书边界（已按 Copilot 反对派审查收紧）：只背书「Builder 产出的 GenieAPIService 启动参数与进程配置」这条链路（实测命令行含 -l -n -1 -d 3，故 IsStatelessMode() 成立、整条压缩链真实生效），**不**背书 Builder 对这次推理请求有任何介入",
+      "Builder 侧技能操作（set_skill_run_mode/reload_skills/npu.txt）对本用例判定**没有因果影响**——本次请求的技能目录全部来自合成容量池，不经 Builder 的本地技能目录提供者；保留这三步只为让该 Builder 代码路径真实带电，其功能性验证由 --suite builder_local_model 的 scenario_a_skill_weather() 独立承担",
+      "target_in_builder_log=False 的准确解释是「Builder 未参与转发这次请求」（直发 Builder 拉起的服务端口），不是「日志缓冲回卷」；该字段仅作辅助记录，不参与通过判据",
+      "X-Genie-Prompt-* 账本头在经 Builder SSE 聊天代理时结构性不可观测（Builder 帧协议不透传上游 HTTP 响应头）；本用例因走直发请求而实际观测到 8 个账本字段，按实际观测记录，既不伪造账本断言也不谎称观测不到"
+    ],
+    "copilot_round4_adversarial_review": {
+      "script": "copilot_round.py 快路径（--owner step6-builder-e2e-review-d --prompt-file --reply-out）",
+      "model_confirmed": "GPT 5.6 思考",
+      "rc": 0,
+      "reply_chars": 1140,
+      "role": "端到端测试有效性的反对派审查者（禁止「视场景而定」，每条须给可一次实测证伪的判据）",
+      "note": "前三次调用（owner ...-a/-b/-c）均死在 wait_for_conversation_ready（fallback_hint: tab lost its own marker），第四次同参数重试即成功；session_broker.py 无 doctor 子命令（只有 checkout/renew/checkin/drive-*/window/escalate/status/gc/ensure-browser/stop-browser）",
+      "verdicts": [
+        {
+          "q": "Q1 「背书 Builder 启动的服务进程链路」是否仍过强",
+          "copilot": "仍过强；应弱化为「只背书 Builder 产出的进程配置与启动参数链路，不背书 Builder 对单次推理请求的任何介入能力」",
+          "criterion": "Builder 起完服务后立刻 kill Builder 后端，只留 GenieAPIService：若选对/答对/X-Genie-Prompt-* 全部不变，则连「Builder 启动的服务进程链路」都过强，实际只背书「Builder 曾启动过该进程」",
+          "disposition": "采纳（代码事实核实：直发请求不经 Builder 转发，Builder 在请求面确已退出因果链）→ 已据此改写 known_limitations 第 1 条并把该判据原文写进代码注释；判据本身未实跑"
+        },
+        {
+          "q": "Q2 set_skill_run_mode/reload_skills/npu.txt 是否纯装饰性动作",
+          "copilot": "大概率是无效动作，在看到反例前应视为装饰性",
+          "criterion": "整段删掉这三步，若 Skills-Kept/Total、L2/L1/L0、选对、答对四项全同（token 波动 ≤1%），则「它有影响」被一次证伪",
+          "disposition": "采纳（代码事实即可定论，无需实跑：合成容量池的 <available_skills> 由测试侧直接构造，与 Builder 侧技能目录提供者无数据通路）→ known_limitations 第 2 条如实写明「无因果影响」，并说明保留三步的唯一目的是让该 Builder 代码路径带电"
+        },
+        {
+          "q": "Q3 target_in_builder_log=False 是缺口还是日志缓冲",
+          "copilot": "是缺口不是辅助记录；不接受「仅日志缓冲」的解释",
+          "criterion": "把服务端口改成 Builder 不知道的新端口，看 Builder SSE 日志是否出现连接/转发失败记录：无变化 => 日志对请求路径无观测能力；有变化 => 更支持「Builder 未参与转发」",
+          "disposition": "采纳（代码事实已足以定论：请求直发服务端口，Builder 不在链路上，故日志本就不该有记录）→ 措辞由「日志缓冲回卷」更正为「Builder 未参与转发这次请求」，不再用前者遮盖；判据未实跑"
+        },
+        {
+          "q": "Q4 只给一次真机运行如何把弱背书变强",
+          "copilot": "改走 Builder 官方 chat/SSE 链路发这次请求，四项判据同时成立才算强背书",
+          "disposition": "不采纳，理由是结构性不可行：Builder conversation 聊天帧协议不承载自定义 <available_skills> 与 tools 数组，118 个合成技能无法经该通道注入（改造 Builder 协议属「为新增功能改 Builder 源码」，本步 Constraints 明令禁止）。Builder 聊天链路的技能可达性另由 --suite builder_local_model 的 scenario A（真实 weather 技能进入本地 prompt）独立背书，与本用例互补而非替代"
+        }
+      ]
+    },
+    "gate_smoke": {
+      "_doc": "本片只跑 skill_capacity 冒烟；prompt_fidelity/qnn 全量守门按任务要求留给下一片",
+      "command_args": "--skill_capacity_mode both --skill_capacity_max 8 --skill_capacity_repeat 1 --skill_capacity_arms both",
+      "total": 26,
+      "passed": 21,
+      "failed": 0,
+      "crashed": 0,
+      "skipped": 5,
+      "health": "failed(0) == ignored(0) 且 crashed == 0 —— 成立",
+      "skipped_cases": [
+        {
+          "name": "SKILL_CAPACITY: legacy scenario3b tie_group_kept_no_regress",
+          "reason": "legacy 档 skill_disclosure.enabled=false 时 AssignSkillDetailLevels() 完全不参与，该断言按设计不适用"
+        },
+        {
+          "name": "SKILL_CAPACITY: qwen3-8b legacy_frontier",
+          "reason": "max_n=8 冒烟上限太小、未收敛（正式数字取自 max_n=128 那次运行）"
+        },
+        {
+          "name": "SKILL_CAPACITY: qwen3-8b optimized_frontier",
+          "reason": "同上，max_n=8 未收敛"
+        },
+        {
+          "name": "SKILL_CAPACITY: bottleneck_experiment n=8",
+          "reason": "n=8 远未触及前沿边界，三实验在该点无判别力"
+        },
+        {
+          "name": "SKILL_CAPACITY: suite precondition qwen2.5_omini",
+          "reason": "两处模型目录均缺 config.json，如实精确跳过，不伪造数字"
+        }
+      ]
+    },
+    "not_done_this_slice": {
+      "report_html": "report_skill_capacity.html 详情页与主报告能力矩阵卡片留给下一片",
+      "docs": "prompt_optimizer.md 新建 + content_condenser.md/message_pre_filter.md/test_service.md/playbook.md 归口更新留给下一片",
+      "gate_suites": "prompt_fidelity / qnn 全量守门未跑（本片只改测试侧 known_limitations 措辞，未动 C++）",
+      "copilot_criteria_unrun": "Copilot Q1/Q2/Q3 三条证伪判据均未实跑（Q1/Q2/Q3 已由代码事实定论，判据原文留档供后续需要时执行）"
+    }
+  },
+  "step6_final": {
+    "step": "Step 6 收尾片（报告 + 文档归口 + 全量守门）",
+    "recorded_at": "2026-08-31",
+    "model": "qwen3-8b-8480",
+    "context_size": 8192,
+    "_commands": [
+      "python test_service.py --exe_dir <build>\\GenieService-win-arm64 --models <models_backup_20260828> --out_dir <repo>\\test_results\\s6_gate_sc --suite skill_capacity --skill_capacity_mode both --skill_capacity_max 128 --skill_capacity_repeat 1 --skill_capacity_arms both --builder_dir <repo>\\QAIModelBuilder   (16.5 min, SC_EXIT=0)",
+      "python test_service.py ... --out_dir <repo>\\test_results\\s6_gate_pf --suite prompt_fidelity   (1.6 min, PF_EXIT=0)",
+      "python test_service.py ... --out_dir <repo>\\test_results\\s6_gate_qnn --suite qnn   (2.0 min, QNN_EXIT=1 = 预期，因存在 ignorable=True 的已知失败)",
+      "python rerender.py  (一次性脚本：用 s6_gate_sc/results.json 反序列化回 TestResult，用同步后的新代码重渲染报告到 test_results\\s6_report 并做 13 项机械核验)"
+    ],
+    "frontier_reproduced_this_run": {
+      "_why": "本轮守门是一次**独立复现**：同机同模型同用例重跑两档二分搜索，与 Step 5 收口数字逐值一致，因此报告引用的 44/118/2.6818x 不是单次运行的孤证",
+      "legacy": {
+        "frontier_skills": 44,
+        "converged": true,
+        "frontier_saturated": false,
+        "usable_for_gain_ratio": true,
+        "probe_curve_points": 12
+      },
+      "optimized": {
+        "frontier_skills": 118,
+        "converged": true,
+        "frontier_saturated": false,
+        "usable_for_gain_ratio": true,
+        "probe_curve_points": 14
+      },
+      "gain_ratio": {
+        "value": 2.6818,
+        "formula": "118 / 44",
+        "usable": true,
+        "_discipline": "repeat=1、未做重复性检验 → 只能表述为「效应量极大且方向明确」，不得声称统计显著"
+      }
+    },
+    "builder_e2e_reproduced_this_run": {
+      "n": 118,
+      "picked": true,
+      "answered": true,
+      "auth_enabled": false,
+      "skills_kept": 118,
+      "skills_total": 118,
+      "skills_l2": 2,
+      "skills_l1": 6,
+      "skills_l0": 110,
+      "tokens_out": 6315,
+      "context_size": 8192,
+      "ledger_headers_observed_count": 8,
+      "model_dir_snapshot_violations": 0,
+      "_snapshot_note": "0 违规是静默的：results.json 里没有 model_dir_snapshot_verify 条目即等于 0 违规，不存在正面记录"
+    },
+    "gate_suites": {
+      "skill_capacity": {
+        "summary": {
+          "total": 26,
+          "passed": 24,
+          "failed": 0,
+          "crashed": 0,
+          "skipped": 2,
+          "ignored": 0
+        },
+        "verdict": "failed(0) == ignored(0) 且 crashed == 0 → 健康",
+        "skipped_cases": [
+          {
+            "name": "SKILL_CAPACITY: legacy scenario3b tie_group_kept_no_regress",
+            "reason": "该断言针对 D2 三档披露下的 tie_aware_l2 目录截断风险，legacy 档 skill_disclosure.enabled=false 时 AssignSkillDetailLevels() 完全不参与 → 按设计不适用",
+            "ignorable": false,
+            "skipped": true
+          },
+          {
+            "name": "SKILL_CAPACITY: suite precondition qwen2.5_omini",
+            "reason": "已发现模型仅 ['qwen3-8b-8480','qwen3_vl_4b-8480']，四种命名变体均未匹配到 → 如实精确跳过，不回退到 qwen2.5vl/qwen3_vl、不伪造数字",
+            "ignorable": false,
+            "skipped": true
+          }
+        ],
+        "failed_cases": [],
+        "results_json": "<repo>\\test_results\\s6_gate_sc\\results.json"
+      },
+      "prompt_fidelity": {
+        "summary": {
+          "total": 11,
+          "passed": 10,
+          "failed": 0,
+          "crashed": 0,
+          "skipped": 1,
+          "ignored": 0
+        },
+        "verdict": "基线 10/0/1 未退化",
+        "skipped_cases": [
+          {
+            "name": "PROMPT_FIDELITY: pure image single question keeps accompanying text",
+            "reason": "目标模型 qwen3-8b-8480 不支持图片输入（detect_modality 判为 image 后按设计跳过）",
+            "ignorable": false,
+            "skipped": true
+          }
+        ],
+        "failed_cases": [],
+        "results_json": "<repo>\\test_results\\s6_gate_pf\\results.json"
+      },
+      "qnn": {
+        "summary": {
+          "total": 54,
+          "passed": 49,
+          "failed": 4,
+          "crashed": 0,
+          "skipped": 1,
+          "ignored": 4
+        },
+        "verdict": "failed(4) == ignored(4) 且 crashed == 0 → 健康；4 项失败逐条核实为已知的图片生成端点未实现",
+        "failed_cases": [
+          {
+            "name": "POST /images/generations",
+            "status_code": 501,
+            "ignorable": true,
+            "crashed": false
+          },
+          {
+            "name": "POST /v1/images/generations",
+            "status_code": 501,
+            "ignorable": true,
+            "crashed": false
+          },
+          {
+            "name": "POST /images/generations",
+            "status_code": 501,
+            "ignorable": true,
+            "crashed": false
+          },
+          {
+            "name": "POST /v1/images/generations",
+            "status_code": 501,
+            "ignorable": true,
+            "crashed": false
+          }
+        ],
+        "skipped_cases": [
+          {
+            "name": "POST /v1/chat/completions (multimodal audio openai-style)",
+            "reason": "该模型不支持音频输入",
+            "ignorable": false,
+            "skipped": true
+          }
+        ],
+        "results_json": "<repo>\\test_results\\s6_gate_qnn\\results.json"
+      }
+    },
+    "report_verification": {
+      "_method": "用守门那次运行真实产出的 results.json 反序列化回 TestResult，再用同步后的新代码重渲染，数字与 results.json 逐值同源，报告层零硬编码数值",
+      "out_dir": "<repo>\\test_results\\s6_report",
+      "checks_passed": 13,
+      "checks": [
+        "detail_generated",
+        "detail_gain_2.6818x",
+        "detail_legacy_44",
+        "detail_optimized_118",
+        "detail_builder_section",
+        "detail_no_stale_1.75x",
+        "detail_omini_skip",
+        "main_matrix",
+        "main_gain_2.6818x",
+        "main_builder_note",
+        "main_link",
+        "no_placeholder_leak",
+        "no_unrendered_brace"
+      ],
+      "all_ok": true
+    },
+    "defect_found_and_fixed": {
+      "what": "skill_capacity 的占位 model_name `_skill_capacity_` / `_skill_capacity_builder_` 从未登记进 ReportGenerator.INTERNAL_PLACEHOLDER_MODEL_NAMES/_PREFIXES",
+      "impact": "它会作为一个「模型」渗进主报告的模型链接卡片，而 _assert_no_placeholder_leak() 扫不到（该断言只比对已登记的名字）",
+      "how_found": "本机干跑渲染时的显式核验项 no_placeholder（不是防泄漏断言自己抓到的）",
+      "fix": "两个常量同步登记 + 注释写明「新增套件引入新占位名必须同步登记」；test/test_service.md 留档"
+    },
+    "copilot_round_step6b": {
+      "role": "技术文档编辑 + 过度声称审查者",
+      "model_confirmed": "GPT 5.6 思考",
+      "rc": 0,
+      "adopted": [
+        "「排除过滤器旁路式假提升」过强 → 改为「本次测量未观察到该旁路迹象」（未观察到迹象 != 因果层面已排除）",
+        "「已由真实 QAIModelBuilder 链路端到端确认」过强 → 改为「由真实 Builder 启动并运行的服务实例在 N=118 上选对+答对；不覆盖 Builder 的聊天协议/请求组帧/tools 注入/日志链路」",
+        "任务 B 的 test_service.md 小节初稿结构（背书什么/不背书什么/为什么必须直发端口/日志无痕迹的准确解释）"
+      ],
+      "rejected": [
+        "把「2.6818 倍」改成区间或只写「约 2.7 倍」：倍数由 118/44 机械算出且两档均 converged、usable_for_gain_ratio=True，四舍五入反而丢失可核验性；统计强度的局限已由固定的 repeat=1 口径说明承担"
+      ],
+      "_discipline": "产出只当线索：采纳的三条均先回代码/实测核实后才改，且改的只是报告与文档措辞，未动任何判据阈值或实现逻辑"
+    },
+    "not_done_this_slice": [
+      "未跑 Copilot Q1/Q2/Q3 三条证伪判据（Step 6 第一片已落档，本片同样未实跑）",
+      "未实施任何服务端算法改动（本片只改 test_service.py 的报告层 + 占位名登记 + 文档）",
+      "qwen2.5_omini 仍无 config.json，能力矩阵里该行如实显示为环境性精确跳过"
+    ]
   }
 }
