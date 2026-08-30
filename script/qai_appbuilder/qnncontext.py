@@ -691,6 +691,9 @@ class _QNNContextBase:
         # gets its own independent flag and there is no risk of the class-level
         # default being read before the first write.
         self._released = False
+        # issue#97: record the PID that created this context so we can detect
+        # inherited instances in fork()ed children and skip C++ teardown.
+        self._creator_pid = os.getpid()
 
     def _validate_model_path(self):
         if self.model_path == "None":
@@ -707,6 +710,15 @@ class _QNNContextBase:
 
     def _ensure_live(self, op: str):
         """Raise if the context has already been released (issue#109, issue#4)."""
+        # issue#97: detect inherited context in a fork()ed child.
+        if getattr(self, "_creator_pid", None) is not None and os.getpid() != self._creator_pid:
+            raise RuntimeError(
+                f"Cannot perform '{op}': this QNN context was created in process "
+                f"{self._creator_pid} and inherited via fork() into child process "
+                f"{os.getpid()}. The inherited QNN/FastRPC state cannot be used "
+                f"safely. Use multiprocessing with the 'spawn' start method, or "
+                f"create the child process before initializing QNN."
+            )
         if getattr(self, "_released", False) or getattr(self, "m_context", None) is None:
             raise RuntimeError(
                 f"Cannot perform '{op}': context "
@@ -768,6 +780,20 @@ class _QNNContextBase:
         if getattr(self, "_released", False):
             return
         self._released = True
+        # issue#97: in a fork()ed child, do NOT call del on the inherited C++
+        # context — the pybind destructor would trigger QNN teardown APIs
+        # (contextFree, backendFree) via inherited FastRPC fds, corrupting the
+        # parent's DSP session. Simply drop the Python reference; the C++ side
+        # has its own PID guard in ~QnnInferenceEngine() as a safety net. The
+        # leaked C++ object is reclaimed by the OS when the child exits.
+        creator_pid = getattr(self, "_creator_pid", None)
+        if creator_pid is not None and os.getpid() != creator_pid:
+            self.m_context = None
+            try:
+                _unregister_context(self)
+            except Exception:
+                pass
+            return
         m_context = getattr(self, "m_context", None)
         if m_context is not None:
             self.m_context = None

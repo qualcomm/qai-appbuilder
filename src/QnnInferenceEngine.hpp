@@ -21,6 +21,9 @@
 
 
 #include "QnnDevice.h"
+#ifdef __linux__
+#include <unistd.h>  // issue#97: pid_t for fork-safety guard
+#endif
 
 bool disableDcvs(QnnHtpDevice_PerfInfrastructure_t perfInfra);
 bool enableDcvs(QnnHtpDevice_PerfInfrastructure_t perfInfra);
@@ -254,6 +257,12 @@ class QnnInferenceEngine {
   std::vector<Qnn_Tensor_t*> m_inputTensors;
   std::vector<Qnn_Tensor_t*> m_outputTensors;
   MultiCoreDeviceConfig_t m_multiCoreDeviceConfig = {};
+
+#ifdef __linux__
+  // issue#97: PID of the process that created this engine instance. Used to
+  // detect inherited instances in fork()ed children and skip teardown.
+  pid_t m_creatorPid{-1};
+#endif
 };
 }  // namespace qnn_app
 }  // namespace tools
