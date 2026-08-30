@@ -10627,6 +10627,485 @@ def _pf_case_stream_ledger(args, model, all_results, all_crash_events):
                                   {"ledger_frame": ledger_frame or {}}))
 
 
+# ============================================================================
+# --suite skill_capacity：二分搜索求「每个模型最多能同时装载多少个 skill 且仍能答对」
+# 的具体前沿值（能力矩阵基线，见 .junie/plans/skill-capacity-frontier.md Step 1）。
+#
+# 判据（FR1，唯一通过条件）：
+#   picked（选对技能）：round1 响应里 tool_calls[].function.name == "read" 且
+#       arguments.path 命中目标技能 <location>；
+#   answered（答对）：round2（把模拟的 SKILL.md 正文回填为 tool 消息后追问）的最终
+#       回答文本里出现该技能唯一规定的答案码。
+#   两条都满足才 pass；只满足其一记为 partial（不计入前沿，仅进曲线）。
+#
+# 复用既有 prompt_fidelity 取证设施（不新造统计口径）：_PromptLogProbe/
+# _PF_PROMPT_BLOCK_RE/_pf_check_ledger_headers、`svc.start(..., extra_args=
+# ["-n","-1","-g","-d","3"])`；`-g` 只能给一次，见 _run_prompt_fidelity_suite 注释。
+# ============================================================================
+
+# 合成技能池的主题词表：每个主题生成一个独立技能名，保证 N 个技能之间语义可区分
+# （不是靠"只有一个技能"蒙对），干扰项与目标技能共享部分关键词以构成真正的相关性
+# 竞争。目标技能固定用 "flux-capacitor-calibration"（index 由 _sc_build_skill_pool
+# 的 target_index 参数决定它在池中的位置，默认放在池首）。
+_SC_TARGET_TOPIC = "flux-capacitor-calibration"
+_SC_DISTRACTOR_TOPICS = [
+    "flux-capacitor-diagnostics", "capacitor-array-maintenance", "anomaly-classification",
+    "warp-core-calibration", "reactor-flux-monitoring", "capacitor-bank-replacement",
+    "temporal-anomaly-triage", "power-grid-calibration", "flux-sensor-cleaning",
+    "capacitor-firmware-update", "anomaly-log-analysis", "reactor-startup-checklist",
+    "capacitor-thermal-inspection", "flux-relay-configuration", "warp-field-diagnostics",
+    "capacitor-voltage-tuning", "anomaly-alert-routing", "reactor-shutdown-procedure",
+    "capacitor-cell-balancing", "flux-capacitor-decommission", "sensor-array-calibration",
+    "anomaly-report-archival", "capacitor-leak-detection", "flux-emitter-alignment",
+    "reactor-fuel-rotation", "capacitor-noise-filtering", "anomaly-pattern-tagging",
+    "flux-capacitor-backup-restore", "warp-drive-cooldown", "capacitor-grid-sync",
+    "reactor-pressure-check", "flux-capacitor-firmware-rollback", "anomaly-escalation-policy",
+    "capacitor-humidity-control", "sensor-drift-correction", "reactor-core-realignment",
+    "flux-capacitor-spare-parts", "capacitor-discharge-safety", "anomaly-severity-scoring",
+    "warp-coil-degauss", "reactor-vibration-analysis", "capacitor-mount-torque-check",
+    "flux-capacitor-cloning", "anomaly-timeline-reconstruction", "capacitor-dust-removal",
+    "sensor-array-recalibration", "reactor-fuel-purity-check", "flux-capacitor-export",
+    "capacitor-array-relabeling", "anomaly-false-positive-review", "warp-field-dampening",
+    "reactor-emergency-vent", "capacitor-serial-audit", "flux-capacitor-import",
+    "sensor-baseline-reset", "reactor-noise-suppression", "capacitor-array-rewiring",
+    "anomaly-cluster-merge", "flux-capacitor-benchmark", "warp-core-realignment",
+    "reactor-log-rotation", "capacitor-array-decommission", "sensor-fault-isolation",
+    "flux-capacitor-stress-test", "anomaly-dashboard-refresh",
+]
+
+_SC_QUESTION = ("How do I calibrate the flux capacitor for a class-3 temporal anomaly? "
+                "Use the appropriate skill to answer.")
+
+
+def _sc_answer_code():
+    """全套件唯一答案码：目标技能正文里写死、目录/摘要里绝不出现，只有真正 read()
+    了目标 SKILL.md 全文才能看到——避免模型靠常识/复述提示词蒙对（Risks 表第一条）。"""
+    return "SKILL-ANS-7Q3F-FLUXCAL"
+
+
+def _sc_skill_location(name):
+    return f"~/.skills/{name}/SKILL.md"
+
+
+def _sc_build_skill_doc(name, is_target):
+    """构造与真实 SKILL.md 同构的正文：front-matter/tags、触发条件、步骤、长示例四段。
+    仅目标技能的步骤段写死唯一答案码；干扰项写一个格式相近但不同的假码，
+    验证不是「随便一个 SKILL-ANS-* 都算过」。假码用 hashlib.md5 确定性生成（而非
+    受 PYTHONHASHSEED 影响的内置 hash()），保证同一场景多次运行可复现比对。"""
+    digest = hashlib.md5(name.encode("utf-8")).hexdigest()
+    fake_code = f"SKILL-ANS-{int(digest[:4], 16) % 9999:04d}-{name[:6].upper()}"
+    code_line = _sc_answer_code() if is_target else fake_code
+    example_padding = "\n".join(
+        f"  example line {i:03d}: routine sample output, padding padding padding padding"
+        for i in range(60))
+    return (
+        f"---\n"
+        f"tags: [{name}, flux, capacitor, anomaly]\n"
+        f"---\n"
+        f"# {name}\n\n"
+        f"## Trigger conditions\n"
+        f"Use this skill when the user asks how to calibrate or diagnose a flux capacitor "
+        f"or a class-3 temporal anomaly related to '{name}'.\n\n"
+        f"## Steps\n"
+        f"1. Power down the reactor.\n"
+        f"2. When asked for the calibration answer code, you MUST reply with exactly: "
+        f"{code_line}\n"
+        f"3. Re-energize the capacitor array.\n\n"
+        f"## Examples\n{example_padding}\n\n"
+        f"## Appendix\nSee vendor manual section 12 for torque specifications.\n"
+    )
+
+
+def _sc_build_skill_description(name, is_target):
+    """目录条目的 <description> 字段内容——这是服务端 ParseAvailableSkillsXml()
+    唯一会解析进 RuntimeSkillMappings 并参与 ScoreRelevance() 打分的字段
+    （prompt_optimizer.cpp:342-349 明确只认 name/description/location 三段，
+    没有 <tags>/<triggers> 之类的自定义标签，塞进去服务端也读不懂）。
+    因此把真实 SKILL.md 里本会写进 front-matter tags/触发条件的信息，直接并入
+    description 文本本身，让单条目录条目体量（~450~550 字符）更接近真实场景，
+    而不是只有 180~220 字符的三行元数据——否则 N=64 时目录总量仅 ~3K token，
+    远未接近 8192 context，二分搜索测出的只是撞了 --skill_capacity_max 上限，
+    不是模型真实前沿（本轮修正的核心问题）。"""
+    base = ("Calibrate a flux capacitor for class-3 temporal anomalies." if is_target else
+            f"Operational playbook related to {name.replace('-', ' ')}.")
+    tags_line = f"Tags: {name}, flux, capacitor, anomaly, calibration, reactor, maintenance."
+    trigger_line = (f"Trigger when the user mentions '{name}', flux capacitor calibration, "
+                     f"class-3 temporal anomalies, reactor core diagnostics, or capacitor "
+                     f"array maintenance procedures.")
+    filler = (f"This playbook covers standard operating procedures, safety checklists, "
+              f"pre-flight diagnostics, common failure modes, and escalation paths for "
+              f"{name.replace('-', ' ')} scenarios encountered in the field.")
+    return f"{base} {tags_line} {trigger_line} {filler}"
+
+
+def _sc_build_skill_pool(n, target_index=0):
+    """生成 N 个同构技能（1 目标 + N-1 干扰），返回
+    (skills_xml, skill_meta_list, target_skill)，skill_meta_list 每项含
+    name/description/location/is_target/doc（doc 只在"模拟 read 命中"时才回填给模型，
+    目录 XML 本身只含 name/description/location，与客户端 <available_skills> 真实
+    格式一致，见 prompt_optimizer.cpp:342-349）。"""
+    n = max(1, n)
+    target_index = max(0, min(target_index, n - 1))
+    names = []
+    for i in range(n):
+        if i == target_index:
+            names.append(_SC_TARGET_TOPIC)
+        else:
+            distractor = _SC_DISTRACTOR_TOPICS[(i * 7 + 3) % len(_SC_DISTRACTOR_TOPICS)]
+            names.append(f"{distractor}-{i:03d}")
+    metas = []
+    xml_parts = ["<available_skills>"]
+    for i, name in enumerate(names):
+        is_target = (i == target_index)
+        desc = _sc_build_skill_description(name, is_target)
+        location = _sc_skill_location(name)
+        xml_parts.append(
+            f"<skill><name>{name}</name><description>{desc}</description>"
+            f"<location>{location}</location></skill>")
+        metas.append({
+            "name": name, "description": desc, "location": location,
+            "is_target": is_target, "doc": _sc_build_skill_doc(name, is_target),
+        })
+    xml_parts.append("</available_skills>")
+    skills_xml = "".join(xml_parts)
+    target_skill = next(m for m in metas if m["is_target"])
+    return skills_xml, metas, target_skill
+
+
+def _sc_extract_read_calls(msg):
+    """从 assistant message 里提取全部 tool_calls 中 function.name=="read" 的
+    arguments.path 列表（解析失败的条目跳过，不让 400/畸形 JSON 拖垮统计）。"""
+    paths = []
+    if not isinstance(msg, dict):
+        return paths
+    for tc in msg.get("tool_calls") or []:
+        fn = tc.get("function") if isinstance(tc, dict) else None
+        if not isinstance(fn, dict) or fn.get("name") != "read":
+            continue
+        try:
+            args_obj = json.loads(fn.get("arguments") or "{}")
+        except ValueError:
+            continue
+        path = args_obj.get("path")
+        if isinstance(path, str):
+            paths.append(path)
+    return paths
+
+
+def _sc_single_trial(args, model, probe, n, target_skill, skills_xml, all_metas, timeout):
+    """跑一次完整两轮对话，返回本次试探的原始证据字典（未做 majority vote）。"""
+    system_text = ("You are a helpful assistant. Skills are not tools — you must call "
+                   "the read tool on a skill's SKILL.md location before using it.\n" + skills_xml)
+    round1_body = {
+        "model": model, "stream": False,
+        "messages": [
+            {"role": "system", "content": system_text},
+            {"role": "user", "content": _SC_QUESTION},
+        ],
+        "tools": [_STATELESS_MODE_READ_TOOL_DEF],
+    }
+    evidence = {"n": n, "picked": False, "answered": False, "emergency_truncated": False,
+                "tokens_out": None, "context_size": None, "skills_total": None,
+                "skills_kept": None, "tools_tier": None, "http_ok": False, "error": None}
+    try:
+        if probe is not None:
+            probe.mark()
+        r1 = _pf_post_chat(args.host, args.port, round1_body, timeout=timeout)
+    except Exception as e:
+        evidence["error"] = f"round1 请求异常: {str(e)[:300]}"
+        return evidence
+    if r1.status_code != 200:
+        evidence["error"] = f"round1 HTTP {r1.status_code}: {r1.text[:200]}"
+        return evidence
+    evidence["http_ok"] = True
+    missing, invalid, values = _pf_check_ledger_headers(r1.headers)
+    evidence["skills_total"] = values.get("X-Genie-Prompt-Skills-Total")
+    evidence["skills_kept"] = values.get("X-Genie-Prompt-Skills-Kept")
+    evidence["tools_tier"] = values.get("X-Genie-Prompt-Tools-Tier")
+    evidence["emergency_truncated"] = bool(values.get("X-Genie-Prompt-Emergency-Truncated"))
+    evidence["tokens_out"] = values.get("X-Genie-Prompt-Tokens-Out")
+    evidence["context_size"] = values.get("X-Genie-Prompt-Context-Size")
+
+    try:
+        msg1 = r1.json()["choices"][0]["message"]
+    except (KeyError, IndexError, ValueError):
+        evidence["error"] = "round1 响应结构异常（无 choices[0].message）"
+        return evidence
+    read_paths = _sc_extract_read_calls(msg1)
+    picked_by_read = any(target_skill["location"] in p or p in target_skill["location"]
+                          for p in read_paths)
+    content1 = msg1.get("content") or ""
+    picked_by_canary = _sc_answer_code() in content1
+    evidence["picked"] = bool(picked_by_read or picked_by_canary)
+    # 只答对/未选技能且未直接命中答案码 → 判 fail，不再花第二轮请求成本。
+    if picked_by_canary and not read_paths:
+        evidence["answered"] = _sc_answer_code() in content1
+        return evidence
+    if not read_paths:
+        evidence["answered"] = False
+        return evidence
+
+    # 模拟文件系统：把 round1 里第一条 read 调用对应技能的正文回填为 tool 结果
+    # （命中目标技能则回填含答案码的正文，命中干扰技能则回填其假码正文——不代读者作弊）。
+    first_path = read_paths[0]
+    matched_meta = next((m for m in all_metas if m["location"] == first_path
+                          or first_path in m["location"] or m["location"] in first_path), None)
+    tool_call = next((tc for tc in (msg1.get("tool_calls") or [])
+                       if isinstance(tc, dict) and tc.get("function", {}).get("name") == "read"), None)
+    if matched_meta is None or tool_call is None:
+        evidence["answered"] = False
+        return evidence
+    # 弱化新近效应偏置（本轮修正第 3 条）：在含答案码的 tool 消息与最终追问之间插入
+    # 若干与本题无关的填充轮次，让 answered 不再退化为「最后一条 tool 消息是否整条
+    # 存活」的复述测试，而是要求模型跨过若干轮次仍能定位并保留住高负载下的正确信息。
+    filler_turns = [
+        {"role": "user", "content": "Before that, what is 17 + 25?"},
+        {"role": "assistant", "content": "17 + 25 = 42."},
+        {"role": "user", "content": "And what's the capital of Iceland?"},
+        {"role": "assistant", "content": "The capital of Iceland is Reykjavik."},
+    ]
+    round2_body = {
+        "model": model, "stream": False,
+        "messages": round1_body["messages"] + [
+            {"role": "assistant", "content": msg1.get("content") or "",
+             "tool_calls": msg1.get("tool_calls")},
+            {"role": "tool", "tool_call_id": tool_call.get("id", "call_sc_1"),
+             "name": "read", "content": matched_meta["doc"]},
+        ] + filler_turns + [
+            {"role": "user", "content": "Now reply with the exact calibration answer code."},
+        ],
+        "tools": [_STATELESS_MODE_READ_TOOL_DEF],
+    }
+    try:
+        if probe is not None:
+            probe.mark()
+        r2 = _pf_post_chat(args.host, args.port, round2_body, timeout=timeout)
+    except Exception as e:
+        evidence["error"] = f"round2 请求异常: {str(e)[:300]}"
+        return evidence
+    if r2.status_code != 200:
+        evidence["error"] = f"round2 HTTP {r2.status_code}: {r2.text[:200]}"
+        return evidence
+    try:
+        content2 = r2.json()["choices"][0]["message"].get("content") or ""
+    except (KeyError, IndexError, ValueError):
+        evidence["error"] = "round2 响应结构异常（无 choices[0].message）"
+        return evidence
+    evidence["answered"] = _sc_answer_code() in content2
+    return evidence
+
+
+def _sc_majority_probe(args, model, probe, n, repeat, timeout):
+    """对同一个 N 重复 repeat 次取多数票，返回聚合曲线条目 + pass/partial 判定。"""
+    skills_xml, all_metas, target_skill = _sc_build_skill_pool(n)
+    trials = []
+    for _ in range(max(1, repeat)):
+        trials.append(_sc_single_trial(args, model, probe, n, target_skill, skills_xml, all_metas, timeout))
+    pass_votes = sum(1 for t in trials if t["picked"] and t["answered"])
+    partial_votes = sum(1 for t in trials if (t["picked"] or t["answered"]) and not (t["picked"] and t["answered"]))
+    passed = pass_votes * 2 > len(trials)  # 多数票
+    partial = (not passed) and partial_votes * 2 >= len(trials)
+    last = trials[-1]
+    curve_entry = {
+        "n": n, "answered": last["answered"], "picked": last["picked"],
+        "skills_kept": last["skills_kept"], "skills_total": last["skills_total"],
+        "tokens_out": last["tokens_out"], "context_size": last["context_size"],
+        "tools_tier": last["tools_tier"], "emergency_truncated": last["emergency_truncated"],
+        "http_ok": last["http_ok"], "error": last["error"],
+        "pass_votes": pass_votes, "partial_votes": partial_votes, "trials": len(trials),
+        "passed": passed, "partial": partial,
+    }
+    return passed, curve_entry
+
+
+def _sc_binary_search(args, model, probe, max_n, repeat, timeout):
+    """求最大可通过的 N（FR2），并如实标注是否真实收敛（本轮修正第 1 条）。
+
+    先从 N=1 起倍增探测（1,2,4,8,...）找到一个真实失败的上界；如果倍增到
+    `max_n`（硬上限）仍全部通过，说明真实前沿 ≥ max_n，返回
+    `converged=False`——调用方必须据此标注「未收敛，需调大 --skill_capacity_max
+    重测」，不得把 `frontier==max_n` 当成真实前沿去算提升倍数。
+    找到失败上界后，再在 [last_pass, first_fail) 区间二分收敛到精确前沿值，
+    返回 `converged=True`。
+
+    返回 (frontier, converged, curve)。"""
+    curve = []
+
+    def test(n):
+        passed, entry = _sc_majority_probe(args, model, probe, n, repeat, timeout)
+        curve.append(entry)
+        return passed
+
+    if not test(1):
+        return 0, True, curve
+
+    last_pass, first_fail = 1, None
+    n = 2
+    while n <= max_n:
+        if test(n):
+            last_pass = n
+            n *= 2
+        else:
+            first_fail = n
+            break
+
+    if first_fail is None:
+        # 倍增到硬上限仍全部通过：真实前沿 >= max_n，未收敛，如实标注，
+        # 不得让调用方把 last_pass/max_n 误当成真实前沿值。
+        return last_pass, False, curve
+
+    if first_fail <= last_pass + 1:
+        # 倍增探测本身已收敛到相邻整数，无需再二分。
+        return last_pass, True, curve
+
+    lo, hi, best = last_pass + 1, first_fail - 1, last_pass
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        if test(mid):
+            best = mid
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return best, True, curve
+
+
+def _sc_resolve_model(models, pattern):
+    """在已发现模型目录名列表里按小写子串匹配定位目标模型，与
+    _resolve_model_name()（Builder 集成类方法，7618 行）语义一致的独立函数版本，
+    供直连模式（不依赖 Builder 的 usable 列表）复用。找不到返回 None。"""
+    lower_pattern = pattern.lower()
+    for m in models:
+        if lower_pattern in m.lower():
+            return m
+    return None
+
+
+def _sc_resolve_multimodal_model(models):
+    """`qwen2.5_omini` 的四种命名变体兼容，与 _resolve_multimodal_model()（7905 行）
+    同一惯例的独立函数版本（本套件不回退到 qwen2.5vl/qwen3_vl——按 FR4，模型缺失时
+    如实精确跳过，不假装通过，不做模型替代）。"""
+    for pattern in ("qwen2.5_omini", "qwen2.5-omini", "qwen2.5-omni", "qwen2.5_omni"):
+        hit = _sc_resolve_model(models, pattern)
+        if hit:
+            return hit
+    return None
+
+
+def _sc_result(name, model, passed, detail, skipped=False, data=None):
+    return TestResult(
+        name=name, round_num=1, model_name=model, passed=passed, status_code=0,
+        latency_ms=0, detail=detail, skipped=skipped, ignorable=False,
+        response_data=data or {},
+    )
+
+
+def _run_skill_capacity_suite(args, models, remote_mode, out_dir):
+    """--suite skill_capacity：二分搜索求两个目标模型（qwen3-8b/qwen2.5_omini）
+    「最多能同时装载多少个 skill 且仍能答对」的前沿值（本轮只求改造前基线，档位/
+    Builder 驱动分支见 .junie/plans/skill-capacity-frontier.md Step 2-5）。"""
+    all_results = []
+    all_crash_events = []
+    all_perf_samples = []
+    suite_model = "_skill_capacity_"
+
+    if remote_mode:
+        all_results.append(_sc_result(
+            "SKILL_CAPACITY: suite precondition", suite_model, False,
+            "远程模式无法自定义服务命令行（需 -n -1 -g -d 3）也拿不到 stdout 日志，"
+            "拿不到启动参数与日志就测不出前沿，按设计精确跳过", skipped=True))
+        return all_results, all_perf_samples, all_crash_events
+
+    max_n = getattr(args, "skill_capacity_max", 64)
+    repeat = getattr(args, "skill_capacity_repeat", 3)
+    timeout = 120
+
+    requested_models = None
+    if getattr(args, "skill_capacity_models", None):
+        requested_models = {s.strip() for s in args.skill_capacity_models.split(",") if s.strip()}
+
+    targets = []
+    m1 = _sc_resolve_model(models, "qwen3-8b")
+    if not requested_models or "qwen3-8b" in requested_models:
+        if m1:
+            targets.append(("qwen3-8b", m1))
+        else:
+            all_results.append(_sc_result(
+                "SKILL_CAPACITY: suite precondition qwen3-8b", suite_model, False,
+                f"未在已发现模型中匹配到 qwen3-8b（models={models}），精确跳过", skipped=True))
+    m2 = _sc_resolve_multimodal_model(models)
+    if not requested_models or "qwen2.5_omini" in requested_models:
+        if m2:
+            targets.append(("qwen2.5_omini", m2))
+        else:
+            all_results.append(_sc_result(
+                "SKILL_CAPACITY: suite precondition qwen2.5_omini", suite_model, False,
+                f"未在已发现模型中匹配到 qwen2.5_omini 四种命名变体之一（models={models}），"
+                "精确跳过（不回退到 qwen2.5vl/qwen3_vl，避免假装通过）", skipped=True))
+
+    if not targets:
+        all_results.append(_sc_result(
+            "SKILL_CAPACITY: suite precondition", suite_model, False,
+            "两个目标模型均未匹配到，套件整体精确跳过", skipped=True))
+        return all_results, all_perf_samples, all_crash_events
+
+    for short_name, target in targets:
+        config_path = Path(args.models) / target / "config.json"
+        if not config_path.exists():
+            all_results.append(_sc_result(
+                f"SKILL_CAPACITY: {short_name} precondition", target, False,
+                f"缺失 config.json: {config_path}，精确跳过", skipped=True))
+            continue
+
+        print(f"\n{'='*60}")
+        print(f"阶段: skill_capacity 二分搜索前沿（模型: {target}, max_n={max_n}, repeat={repeat}）")
+        print(f"{'='*60}")
+
+        wait_port_closed(args.host, args.port, timeout=15)
+        svc = ServiceManager(args.exe_dir, args.host, args.port)
+        svc._log_dir = args.out_dir
+        try:
+            svc.start(str(config_path), extra_args=["-n", "-1", "-g", "-d", "3"])
+            if not wait_port_open(args.host, args.port, timeout=180, process=svc.process):
+                all_results.append(_sc_result(
+                    f"SKILL_CAPACITY: {short_name} precondition", target, False,
+                    "端口 180s 内未可连接，精确跳过", skipped=True))
+                continue
+            probe = _PromptLogProbe(svc._stdout_log)
+            try:
+                frontier, converged, curve = _sc_binary_search(args, target, probe, max_n, repeat, timeout)
+                if converged:
+                    note = None
+                    detail = (f"前沿值(legacy 基线)={frontier}（已收敛：N={frontier + 1} 一致失败）；"
+                              f"曲线点数={len(curve)}；末次曲线条目={curve[-1] if curve else None}")
+                else:
+                    note = "≥max，未收敛，需调大 --skill_capacity_max 重测"
+                    detail = (f"frontier_skills={frontier}（{note}）；"
+                              f"曲线点数={len(curve)}；末次曲线条目={curve[-1] if curve else None}")
+                # converged=False 时 passed 同步标 False：这不是「测试失败」，而是
+                # 「撞了硬上限、数字不可用于计算提升倍数」的机械信号，禁止下游报告
+                # 把它当真实前沿值消费（本轮修正第 1 条，不接受争辩）。
+                all_results.append(_sc_result(
+                    f"SKILL_CAPACITY: {short_name} legacy_frontier", target, converged, detail,
+                    data={"model": target, "arm": "legacy", "frontier_skills": frontier,
+                          "converged": converged, "note": note, "probe_curve": curve}))
+            except Exception as e:
+                detail = f"二分搜索未捕获异常（可能服务已崩溃）: {type(e).__name__}: {str(e)[:300]}"
+                all_results.append(_sc_result(
+                    f"SKILL_CAPACITY: {short_name} legacy_frontier", target, False, detail))
+                all_crash_events.append(CrashEvent(
+                    timestamp=datetime.now().isoformat(), model_name=target, round_num=1,
+                    endpoint="skill_capacity", detail=detail, request_history=_trace_snapshot()))
+        except (RuntimeError, FileNotFoundError) as e:
+            all_results.append(_sc_result(
+                f"SKILL_CAPACITY: {short_name} precondition", target, False,
+                f"服务启动失败: {str(e)[:300]}", skipped=True))
+        finally:
+            svc.stop()
+            svc._force_kill()
+
+    return all_results, all_perf_samples, all_crash_events
+
+
 SUITE_HANDLERS = {
     "full": _run_full_suite,
     "model": _run_model_suite,
@@ -10639,6 +11118,7 @@ SUITE_HANDLERS = {
     "qnn": _run_qnn_suite,
     "graceful_shutdown": _run_graceful_shutdown_suite,
     "prompt_fidelity": _run_prompt_fidelity_suite,
+    "skill_capacity": _run_skill_capacity_suite,
 }
 
 
@@ -10694,7 +11174,23 @@ def main():
                              "留空则默认使用 --models 下全部已发现模型")
     parser.add_argument("--gguf_model", default=None, help="GGUF 显式加载回归限定的单个模型目录名（默认留空，测试全部已发现的 GGUF 模型）")
     parser.add_argument("--gguf_devices", choices=("both", "gpu", "cpu"), default="both", help="GGUF 显式加载回归的设备筛选：both/gpu/cpu（默认 both）")
-    parser.add_argument("--suite", choices=("full", "model", "sampleapp", "multimodal", "gguf", "multi_model", "builder_local_model", "mnn", "qnn", "graceful_shutdown", "prompt_fidelity"),
+    parser.add_argument("--skill_capacity_models", default=None,
+                        help="--suite skill_capacity 限定测试的目标模型简写，逗号分隔（qwen3-8b/qwen2.5_omini），"
+                             "留空则两个目标模型都测（各自缺失时精确跳过，不影响另一个）")
+    parser.add_argument("--skill_capacity_max", type=int, default=64,
+                        help="--suite skill_capacity 倍增探测+二分搜索的硬上限 N（默认 64）；"
+                             "倍增到该上限仍全部通过时结果标 converged=False，需调大重测，不当真实前沿使用")
+    parser.add_argument("--skill_capacity_repeat", type=int, default=3,
+                        help="--suite skill_capacity 每个 N 重复试探取多数票的次数（默认 3）")
+    parser.add_argument("--skill_capacity_mode", choices=("direct", "builder", "both"), default="direct",
+                        help="--suite skill_capacity 驱动路径：direct=直连取证前沿搜索通道（本 Step 已实现）；"
+                             "builder=真实 QAIModelBuilder 端到端确认通道（Step 5 才落地，目前传入不影响直连结果）；"
+                             "both=两者都跑（默认仅 direct，Builder 分支留给 Step 5）")
+    parser.add_argument("--skill_capacity_arms", choices=("legacy", "optimized", "both"), default="legacy",
+                        help="--suite skill_capacity 档位对照：legacy=改造前基线（本 Step 产出的即是这一档）；"
+                             "optimized/both 依赖 Step2-4 新增的 service_config.json 开关，本 Step 尚未实现，"
+                             "传入非 legacy 时行为等同于 legacy（如实说明，不伪造差异）")
+    parser.add_argument("--suite", choices=("full", "model", "sampleapp", "multimodal", "gguf", "multi_model", "builder_local_model", "mnn", "qnn", "graceful_shutdown", "prompt_fidelity", "skill_capacity"),
                         default=None, help="选择要运行的测试套件（必传参数，不再有隐式默认值；如需完整回归请显式传入 full）")
     parser.add_argument("--model_name", default=None, help="--suite model/mnn/qnn/sampleapp 时按名称筛选模型，逗号分隔，未指定则测试该套件下全部已发现模型")
 
