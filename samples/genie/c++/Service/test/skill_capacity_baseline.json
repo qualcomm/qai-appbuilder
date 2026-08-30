@@ -1,0 +1,127 @@
+{
+  "_doc": "skill_capacity 前沿值与守门套件基线（可核验留档）。同目录 skill-capacity-baseline.md 是本文件的叙述版，但 Service/.gitignore 的 *.md 规则会把它排除在本仓库 git 之外（本机私有知识库策略，见 .junie/AGENTS.md），因此机器可读的数字必须落在本 JSON 里，才能被后续 Step 逐条对比。",
+  "_source": "远程 ARM64 测试机真实运行，非估算。命令见 _commands。",
+  "recorded_at": "2026-08-30",
+  "step": "Step 2 (P1 token 口径精确化 + D3 预算分区)",
+  "commit": "main-fix / Step2: P1 token 口径 CJK 感知换算 + D3 预算分区",
+  "environment": {
+    "model": "qwen3-8b-8480",
+    "context_size": 8192,
+    "backend": "QNN",
+    "exe_dir": "build_fidelity\\GenieService-win-arm64",
+    "models_dir": "models_backup_20260828",
+    "qwen2.5_omini": "两处模型目录均缺 config.json，套件如实 skipped，未伪造数字"
+  },
+  "_commands": {
+    "skill_capacity": "python test\\test_service.py --exe_dir \"build_fidelity\\GenieService-win-arm64\" --models <models> --suite skill_capacity --skill_capacity_models qwen3-8b --skill_capacity_arms both --skill_capacity_max 64 --skill_capacity_repeat 1",
+    "prompt_fidelity": "python test\\test_service.py --exe_dir ... --suite prompt_fidelity",
+    "qnn": "python test\\test_service.py --exe_dir ... --suite qnn",
+    "incremental_build": "winrs ... cmake --build <repo>\\samples\\genie\\c++\\Service\\build_fidelity --config Release --target GenieAPIService"
+  },
+  "usability_rule": "前沿值只有在 converged==true 且 frontier_saturated==false 时才可用于计算提升倍数。skills_kept < skills_total 即为饱和：保留条数由 skills_budget_tokens 而非 N 决定，提示词体量不再随 N 增长，判据与装载能力解耦，套件会标 usable_for_gain_ratio=false 且 passed=false。",
+  "pass_criteria": "单次试探通过 = read 命中目标 SKILL.md（选对） 且 回答含唯一答案码（答对） 且 目标技能真在最终提示词里（target_in_prompt is not False，查 [Prompt] 日志块 Path 行）。",
+  "frontier": {
+    "legacy": {
+      "frontier_skills": 44,
+      "converged": true,
+      "frontier_saturated": false,
+      "usable_for_gain_ratio": true,
+      "fail_point": {
+        "n": 45, "picked": true, "answered": false, "target_in_prompt": true,
+        "skills_kept": 45, "skills_total": 45,
+        "skills_budget_tokens": 6554, "tokens_out": 6404, "context_size": 8192,
+        "emergency_truncated": false
+      }
+    },
+    "optimized": {
+      "frontier_skills": 44,
+      "converged": true,
+      "frontier_saturated": false,
+      "usable_for_gain_ratio": true,
+      "fail_point": {
+        "n": 45, "picked": true, "answered": false, "target_in_prompt": true,
+        "skills_kept": 45, "skills_total": 45,
+        "skills_budget_tokens": 6496, "tokens_out": 6404, "context_size": 8192,
+        "emergency_truncated": false
+      }
+    },
+    "gain_ratio": 1.0,
+    "conclusion": "P1 + D3 对前沿值的提升为 0（44 -> 44）。两档在 N=45 的失败形态逐字段一致（选对技能但答不出答案码），说明该点瓶颈不在预算换算也不在预算分区，而在模型本身在 45 条目录压力下的答题能力。主要收益预期仍在 Step 3 的 D2/D4。"
+  },
+  "invalidated_earlier_claim": {
+    "claim": "optimized 前沿 >=256，相对 legacy 提升 >=5.8 倍",
+    "verdict": "已证伪，是判据饱和的假象",
+    "mechanism": "那一版 D3 一旦 skills/tools 同时在场就固定按 skills 65% / tools 35% 切预算，skills 预算被无故砍掉 35% 后 FilterSkillsByRelevance() 开始按预算丢弃技能、保留条数恒定 31 条，N 再大提示词体量也不增长，永不触发 422，二分搜索一路通过到硬上限；同时目标技能 description 独含 Calibrate 而干扰项只有 calibration，ScoreRelevance 描述侧单向子串 find 命中不了，目标技能恒排第 1 恒在 Top-31 内。",
+    "guards_added": [
+      "干扰项与目标技能 description 逐词同构，区分度只能来自 name 子词命中（干扰项同样具备该特征）",
+      "目标技能位置按 md5(n) 确定性派生，不再恒为首位",
+      "判据新增独立断言：目标技能必须真在最终提示词里",
+      "曲线新增 skills_kept_at_budget_cap；前沿点饱和时整条结果标 frontier_saturated/usable_for_gain_ratio=false/passed=false"
+    ]
+  },
+  "gate_suites": {
+    "prompt_fidelity": {"total": 11, "passed": 10, "failed": 0, "crashed": 0, "skipped": 1,
+      "baseline_match": true,
+      "note": "新增第 15 个账本头 X-Genie-Prompt-Skills-Budget-Tokens 已被 C++ 侧真实发出，否则 _pf_case_ledger_headers 会失败",
+      "case_level_evidence_round3": {
+        "source": "test_results\\step2_r3_pf\\results.json (远程 ARM64，qwen3-8b-8480 round_1)",
+        "skipped_cases": [
+          {"name": "PROMPT_FIDELITY: pure image single question keeps accompanying text", "ignorable": false}
+        ]
+      }},
+    "qnn": {"total": 54, "passed": 49, "failed": 4, "ignored": 4, "crashed": 0, "skipped": 1,
+      "baseline_match": true,
+      "note": "failed == ignored 且 crashed == 0，健康；4 项失败均为已知范围外 /images/generations 501",
+      "case_level_evidence_round3": {
+        "source": "test_results\\step2_r3_qnn\\results.json (远程 ARM64，qwen3_vl_4b-8480 + qwen3-8b-8480 round_1)",
+        "failed_cases": [
+          {"model": "qwen3_vl_4b-8480", "name": "POST /images/generations", "ignorable": true},
+          {"model": "qwen3_vl_4b-8480", "name": "POST /v1/images/generations", "ignorable": true},
+          {"model": "qwen3-8b-8480", "name": "POST /images/generations", "ignorable": true},
+          {"model": "qwen3-8b-8480", "name": "POST /v1/images/generations", "ignorable": true}
+        ],
+        "skipped_cases": [
+          {"model": "qwen3_vl_4b-8480", "name": "POST /v1/chat/completions (multimodal audio openai-style)", "ignorable": false}
+        ]
+      }}
+  },
+  "step2_round3_closure": {
+    "summary": "第三轮收口，前沿数字（44/44/gain=1.0）保持不变、未重测；只修 5 项：(1) 场景6跨档对照由常红失败改 skipped=True + 新增纯函数级验证 verify_cjk_bytes_per_token.cpp（远程 MSVC /utf-8 实测 6/6 PASS）；(2) _SC_DISTRACTOR_TOPICS 加入 4 条与目标同分的干扰名，docstring 由声明改为如实描述；(3) 删除 ComputeRelevanceTokenBudget() kTools 分支里自相矛盾的 std::max 撤销逻辑；(4) 新增场景4b（17 工具 Schema + 8 技能，触发 D3 竞争）硬断言 Tools-Kept 不退化，实测 legacy=optimized=17/17；(5) 本 JSON 补齐 prompt_fidelity/qnn 逐用例判定。",
+    "smoke_test": {
+      "command": "--suite skill_capacity --skill_capacity_models qwen3-8b --skill_capacity_max 8 --skill_capacity_repeat 1 --skill_capacity_arms both",
+      "result": "7/10 通过，2 失败（legacy_frontier/optimized_frontier 因 max_n=8 太小未收敛，预期内非缺陷），1 skipped（scenario6 arm_contrast，处置(c)），0 崩溃；场景4/4b 全部 PASS",
+      "note": "本轮只做冒烟级验证（max_n=8），未重跑 max_n=64/repeat=3 的完整前沿搜索，第二轮的 44/44 已被接受为最终数字"
+    },
+    "scenario4b_tools_kept_no_regress": {
+      "setup": "8 个技能 + _pf_build_tool_schemas(17)，触发 HasBudgetContention() 竞争",
+      "legacy": {"tools_kept": 17, "tools_total": 17},
+      "optimized": {"tools_kept": 17, "tools_total": 17},
+      "result": "PASS —— optimized tools_kept(17) >= legacy tools_kept(17)"
+    },
+    "scenario6_disposition_change": "由处置 (b) 常红失败改为处置 (c) skipped=True；data 里两档实测字段原样保留（legacy tokens_out=6240, optimized tokens_out=6240）作为“正常路径无可观测差异”这一事实的机械凭证"
+  },
+  "scenarios": {
+    "scenario4_tool_flood_skill_floor": {
+      "setup": "约 80K 字符工具输出 + N=24 技能 + 1 个 read 工具",
+      "assertion": "Skills-Kept >= 1 且目标技能在最终提示词内",
+      "legacy": {"skills_kept": 24, "skills_total": 24, "skills_budget_tokens": 6554, "tokens_out": 6266, "target_in_prompt": true},
+      "optimized": {"skills_kept": 24, "skills_total": 24, "skills_budget_tokens": 6496, "tokens_out": 6266, "target_in_prompt": true},
+      "arm_contrast": "PASS —— skills_budget_tokens 6554 vs 6496 两档不同，是 budget_partition 开关真实生效的机械证据（6496 = 6554 − tools 真实需求 58 token；旧的静态 65/35 实现下该值是 4261）"
+    },
+    "scenario6_chinese_budget": {
+      "setup": "中文技能池 N=24 + 中文超长工具输出 + 中文提问",
+      "assertion": "Tokens-Out <= Context-Size 且日志无 'exceeds context size'",
+      "legacy": {"tokens_out": 6240, "context_size": 8192, "prompt_block_bytes": 25324, "emergency_truncated": 1, "overflow_log_hit": false},
+      "optimized": {"tokens_out": 6240, "context_size": 8192, "prompt_block_bytes": 25324, "emergency_truncated": 1, "overflow_log_hit": false},
+      "arm_contrast": "FAIL（有意保留，如实记录）—— 两档逐字段完全一致，差异字段集合为空。根因：MessagePreFilter::CountTokens() 优先用真实 tokenizer，fidelity.{cjk,ascii}_bytes_per_token 只在拿不到 tokenizer 的回退分支参与运算，服务正常运行时该分支基本不触发。因此 P1 在正常路径上零可观测收益，不能声称它是前沿提升的原因；这条失败断言是该事实的唯一机械凭证。"
+    }
+  },
+  "rollback_equivalence": {
+    "P1": "fidelity.cjk_bytes_per_token 与 ascii_bytes_per_token 都设 4.0 时 EstimateCjkAwareBytesPerToken() 恒返回 4.0，三个调用点逐字节等于旧的 length()/4",
+    "D3": "budget_partition.enabled=false 时 ComputeRelevanceTokenBudget() 两种 kind 都返回同一个 total_budget，与 D3 引入前一致；legacy 档实测前沿 44 与 Step 1 基线完全一致即为实证"
+  },
+  "not_implemented": {
+    "history_budget_partition": "未实现，如实标注：message_pre_filter 已有独立的历史 token 预算口径，在 ComputeRelevanceTokenBudget() 里再切一份 history 会造成两套口径重复计算同一段预算。本 Step 只落 skills / tools 两分区。",
+    "skill_capacity_mode_builder": "--skill_capacity_mode builder/both 仍未实现（留给 Step 5），已改为显式 skipped=True 机械记录，不再运行时静默忽略。"
+  }
+}

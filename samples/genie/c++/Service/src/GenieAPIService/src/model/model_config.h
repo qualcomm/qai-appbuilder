@@ -488,7 +488,36 @@ struct PromptOptimizationConfig {
         size_t json_head_items = 3;             // JSON 数组截断保留的首部项数
         size_t json_tail_items = 1;             // JSON 数组截断保留的尾部项数
         size_t max_token_probe_per_message = 8; // 单条消息 tokenizer 调用次数上限（性能护栏）
+
+        // ── P1：token 口径精确化（CJK 感知 byte↔token 换算）───────────────
+        // 只在拿不到真实 tokenizer 时生效（CountTokens 回退分支、
+        // ContentCondenser::Condense 把 token 预算反算为字节预算时）；
+        // 有真实 tokenizer（context_override_/model_config_ 提供的 handle）
+        // 时优先使用 tokenizer，本换算比例不参与。
+        // 单位是 **UTF-8 字节**（不是字符）——全部调用点拿到的都是
+        // std::string::length()；UTF-8 中文 1 字 = 3 字节 ≈ 1 token，故 CJK 默认 3.0。
+        // 把两者都改回 4.0 即逐字节回退到旧的统一 length()/4 估算（P1 引入前的行为），
+        // 用于验证"这是真实修复"而非新魔数。
+        double cjk_bytes_per_token = 3.0;       // CJK 字节的 bytes/token 估算比例
+        double ascii_bytes_per_token = 4.0;     // 非 CJK（ASCII 等）字节的 bytes/token 估算比例
     } fidelity;
+
+    // ── D3：预算分区（skills / tools 分区 + 技能保底名额）──────────────────
+    // ComputeRelevanceTokenBudget() 原为单一总预算，一条超长工具输出可以把
+    // 技能目录挤没。
+    //
+    // 关键语义（曾踩坑，务必保持）：分区是**竞争时才生效**的，不是静态切蛋糕。
+    // 只有 skills 与 tools 同时存在候选（即真的会互相抢预算）时才按比例约束；
+    // 单方存在时该方可用到接近总预算，绝不无故削减 D3 引入前的既有行为。
+    // enabled=false 时逐字节回退为原先的单一总预算语义。
+    struct BudgetPartitionConfig {
+        bool enabled = true;
+        // 竞争发生时 skills 分区相对总预算的保底比例：无论 tools 占用多少，
+        // skills 分区至少能拿到 total_budget * skills_floor_ratio。
+        double skills_floor_ratio = 0.15;
+        // 竞争发生时 tools 分区相对总预算的比例上限（软上限）。
+        double tools_ratio = 0.35;
+    } budget_partition;
 
     // ── 原始系统提示词段落过滤配置 ──────────────────────────
     // 通过配置文件选定哪些原始提示词段落被追加到优化后的提示词中

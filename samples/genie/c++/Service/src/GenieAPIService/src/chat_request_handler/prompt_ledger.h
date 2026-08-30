@@ -34,6 +34,8 @@ struct PromptLedger {
     int    tools_tier = 0;
     size_t tools_total = 0, tools_kept = 0;
     size_t skills_total = 0, skills_kept = 0;
+    // D3：skills 分区预算（token），数据源取 OptimizationStats::skills_budget_tokens，不新建第二套统计口径。
+    size_t skills_budget_tokens = 0;
     bool   emergency_truncated = false;
     bool   summarized = false;
 
@@ -54,6 +56,7 @@ struct PromptLedger {
         j["tools_kept"] = tools_kept;
         j["skills_total"] = skills_total;
         j["skills_kept"] = skills_kept;
+        j["skills_budget_tokens"] = skills_budget_tokens;
         j["emergency_truncated"] = emergency_truncated;
         j["summarized"] = summarized;
         return j;
@@ -75,6 +78,7 @@ struct PromptLedger {
         res.set_header("X-Genie-Prompt-Tools-Tier", std::to_string(tools_tier));
         res.set_header("X-Genie-Prompt-Skills-Total", std::to_string(skills_total));
         res.set_header("X-Genie-Prompt-Skills-Kept", std::to_string(skills_kept));
+        res.set_header("X-Genie-Prompt-Skills-Budget-Tokens", std::to_string(skills_budget_tokens));
         res.set_header("X-Genie-Prompt-Emergency-Truncated", emergency_truncated ? "1" : "0");
         res.set_header("X-Genie-Prompt-Summarized", summarized ? "1" : "0");
     }

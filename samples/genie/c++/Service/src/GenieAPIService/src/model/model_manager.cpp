@@ -1574,6 +1574,9 @@ bool ModelManager::InitializeConfig(bool load)
                         fid_cfg.json_head_items = fid.value("json_head_items", (size_t) 3);
                         fid_cfg.json_tail_items = fid.value("json_tail_items", (size_t) 1);
                         fid_cfg.max_token_probe_per_message = fid.value("max_token_probe_per_message", (size_t) 8);
+                        // P1：CJK 感知 byte↔token 换算比例（单位 UTF-8 字节）；均改回 4.0 即逐字节回退到旧的 length()/4 估算
+                        fid_cfg.cjk_bytes_per_token = fid.value("cjk_bytes_per_token", 3.0);
+                        fid_cfg.ascii_bytes_per_token = fid.value("ascii_bytes_per_token", 4.0);
                         My_Log{} << "[Config] fidelity loaded: "
                                  << "budget_unit=" << fid_cfg.budget_unit
                                  << ", preserve_tail=" << fid_cfg.preserve_tail
@@ -1583,6 +1586,23 @@ bool ModelManager::InitializeConfig(bool load)
                                  << ", json_head_items=" << fid_cfg.json_head_items
                                  << ", json_tail_items=" << fid_cfg.json_tail_items
                                  << ", max_token_probe_per_message=" << fid_cfg.max_token_probe_per_message
+                                 << ", cjk_bytes_per_token=" << fid_cfg.cjk_bytes_per_token
+                                 << ", ascii_bytes_per_token=" << fid_cfg.ascii_bytes_per_token
+                                 << std::endl;
+                    }
+
+                    // [budget_partition] D3：skills/tools 竞争时才生效的分区预算配置（旧配置文件中没有该节时使用默认值，不报错）
+                    if (po.contains("budget_partition") && po["budget_partition"].is_object())
+                    {
+                        const auto &bp = po["budget_partition"];
+                        auto &bp_cfg = prompt_optimization_config_.budget_partition;
+                        bp_cfg.enabled = bp.value("enabled", true);
+                        bp_cfg.skills_floor_ratio = bp.value("skills_floor_ratio", 0.15);
+                        bp_cfg.tools_ratio = bp.value("tools_ratio", 0.35);
+                        My_Log{} << "[Config] budget_partition loaded: "
+                                 << "enabled=" << bp_cfg.enabled
+                                 << ", skills_floor_ratio=" << bp_cfg.skills_floor_ratio
+                                 << ", tools_ratio=" << bp_cfg.tools_ratio
                                  << std::endl;
                     }
 

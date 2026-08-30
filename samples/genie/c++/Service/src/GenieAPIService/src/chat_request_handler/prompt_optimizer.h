@@ -36,6 +36,16 @@ enum class AgentType {
     SUBAGENT,       // 子 agent：system prompt 中不包含 "agent=main"（包括空 prompt、任务上下文等）
 };
 
+// D3：预算分区类别。ComputeRelevanceTokenBudget() 原为单一总预算，一条超长工具输出可以
+// 把技能目录整段挤没。分区**仅在真的发生竞争时生效**（skills 与 tools 同时存在候选）：
+// 此时 kSkills 至少拿到 budget_partition.skills_floor_ratio，kTools 受 tools_ratio 软上限；
+// 单方存在（如既有的“只有 tools、没有 skills”场景）时两种 kind 都拿到完整总预算。
+// budget_partition.enabled=false 时逐字节回退为原先的单一总预算语义。
+enum class BudgetPartitionKind {
+    kSkills,
+    kTools
+};
+
 // 注意：MessageCompressionConfig 和 OptimizedMessages 已迁移到 message_pre_filter.h
 
 class PromptOptimizer {
@@ -133,6 +143,9 @@ public:
         size_t tools_kept = 0;    // 最终实际保留在提示词里的工具数
         size_t skills_total = 0;  // ExtractSkillsFromRequest 解析出的 SKILL 候选总数（全量，未经相关性过滤）
         size_t skills_kept = 0;   // FilterSkillsByRelevance 筛选后实际保留的 SKILL 数
+        // D3：ComputeRelevanceTokenBudget(BudgetPartitionKind::kSkills) 实际算出的
+        // skills 分区预算（token），budget_partition.enabled=false 时等于单一总预算。
+        size_t skills_budget_tokens = 0;
     };
     
     OptimizationStats GetLastStats() const { return last_stats_; }
@@ -224,7 +237,16 @@ private:
     // BuildDynamicToolsIntro/FilterToolsIntroByRequest/OptimizeHarmonyDeveloperMessage/
     // ConvertToolsToOptimizedTypeScript 共用（这些函数自身未接收显式 token_budget
     // 参数，需要自行推导）。
-    size_t ComputeRelevanceTokenBudget() const;
+    // D3：kind 默认 kTools（历史上大多数调用点都是工具预算）；skills 路径显式传 kSkills。
+    // request_data 用于判定是否真的发生了预算竞争（skills 与 tools 同时存在候选）；
+    // 传 nullptr 或无竞争时直接返回单一总预算，绝不无故削减 D3 引入前的既有行为。
+    size_t ComputeRelevanceTokenBudget(BudgetPartitionKind kind = BudgetPartitionKind::kTools,
+                                       const nlohmann::ordered_json* request_data = nullptr) const;
+
+    // D3：预算竞争判定——仅当 system prompt 里带了 <available_skills> 目录
+    // **且** 请求带了非空 tools 数组时才算竞争。单方存在时不分区，避免把
+    // “17 工具 Schema、无技能”这类既有场景的工具预算静默削到 tools_ratio。
+    bool HasBudgetContention(const nlohmann::ordered_json& request_data) const;
 
     // ========== 共享辅助函数 ==========
     

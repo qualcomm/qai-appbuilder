@@ -44,8 +44,14 @@ size_t MessagePreFilter::CountTokens(const std::string& text)
     if (handle) {
         return handle->TokenLength(text);
     }
-    // 如果无法获取 handle，使用粗略估算（1 token ≈ 4 字符）
-    return text.length() / 4;
+    // P1：如果无法获取 handle，按 text 内实际 CJK 字节占比推算有效 bytes/token
+    // （EstimateCjkAwareBytesPerToken，utils.h），不再统一按 length()/4——该比例只对
+    // 纯 ASCII 文本成立，UTF-8 中文 1 字 = 3 字节 ≈ 1 token，按 4 字节/token 会把
+    // token 数低估约 25%。两者都设为 4.0 即逐字节回退到 P1 引入前的 length()/4。
+    const auto& fid_cfg = model_config_.GetPromptOptimizationConfig().fidelity;
+    double bytes_per_token = EstimateCjkAwareBytesPerToken(
+        text, fid_cfg.cjk_bytes_per_token, fid_cfg.ascii_bytes_per_token);
+    return static_cast<size_t>(static_cast<double>(text.length()) / bytes_per_token);
 }
 
 // ============================================================
@@ -365,6 +371,8 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
                             emergency_budget.json_head_items = fid_cfg.json_head_items;
                             emergency_budget.json_tail_items = fid_cfg.json_tail_items;
                             emergency_budget.max_token_probe = fid_cfg.max_token_probe_per_message;
+                            emergency_budget.cjk_bytes_per_token = fid_cfg.cjk_bytes_per_token;
+                            emergency_budget.ascii_bytes_per_token = fid_cfg.ascii_bytes_per_token;
                             std::function<size_t(const std::string&)> emergency_token_len =
                                 [this](const std::string& text) { return CountTokens(text); };
                             CondenseResult condensed = ContentCondenser::Condense(
@@ -1546,7 +1554,6 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
     // 完全不触发 tokenizer 调用。
     const auto& fidelity_cfg = cfg.fidelity;
     const bool use_token_budget = (fidelity_cfg.budget_unit == "tokens");
-    constexpr size_t kCharsPerTokenEstimate = 4;  // 与 ContentCondenser 内部换算比例一致
     std::function<size_t(const std::string&)> token_len_fn = [this](const std::string& text) {
         return CountTokens(text);
     };
@@ -1555,11 +1562,20 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
     // 统一构造 CondenseBudget：preserve_tail=false 时 tail_ratio 强制为 0（等价于仅保留头部，
     // 逐字节回退到该特性引入之前的行为），extract_high_signal/json_head_items/json_tail_items/
     // max_token_probe 均直接来自 cfg.fidelity，关闭对应开关即整段回退。
-    auto make_condense_budget = [&](size_t max_len) -> CondenseBudget {
+    // P1：max_len -> max_tokens 的换算不再统一按 4:1（该比例只对纯 ASCII 文本成立），而是按
+    // content 内实际 CJK 字节占比推算有效 bytes/token
+    // （EstimateCjkAwareBytesPerToken，utils.h）；budget 本身也带上这两个比例，供
+    // ContentCondenser::Condense 内部的硬截断兜底复用同一口径。
+    auto make_condense_budget = [&](const std::string& content, size_t max_len) -> CondenseBudget {
         CondenseBudget budget;
         budget.max_chars = max_len;
+        budget.cjk_bytes_per_token = fidelity_cfg.cjk_bytes_per_token;
+        budget.ascii_bytes_per_token = fidelity_cfg.ascii_bytes_per_token;
         if (use_token_budget) {
-            budget.max_tokens = std::max<size_t>(1, max_len / kCharsPerTokenEstimate);
+            double bytes_per_token = EstimateCjkAwareBytesPerToken(
+                content, fidelity_cfg.cjk_bytes_per_token, fidelity_cfg.ascii_bytes_per_token);
+            budget.max_tokens = std::max<size_t>(1, static_cast<size_t>(
+                static_cast<double>(max_len) / bytes_per_token));
         }
         budget.tail_ratio = fidelity_cfg.preserve_tail ? fidelity_cfg.tail_ratio : 0.0;
         budget.extract_high_signal = fidelity_cfg.extract_high_signal;
@@ -1572,7 +1588,7 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
     auto truncate_content = [&](const std::string& content, size_t max_len) -> std::string {
         if (content.length() <= max_len + cfg.min_compress_threshold) return content;
 
-        CondenseBudget budget = make_condense_budget(max_len);
+        CondenseBudget budget = make_condense_budget(content, max_len);
         CondenseResult condensed = ContentCondenser::Condense(content, ContentKind::kGenericText, budget, token_len_ptr);
         return condensed.text;
     };
@@ -1583,7 +1599,7 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
     auto truncate_tool_content = [&](const std::string& content, size_t max_len) -> std::string {
         if (content.length() <= max_len + cfg.min_compress_threshold) return content;
 
-        CondenseBudget budget = make_condense_budget(max_len);
+        CondenseBudget budget = make_condense_budget(content, max_len);
         CondenseResult condensed = ContentCondenser::Condense(content, ContentKind::kToolResponse, budget, token_len_ptr);
         return condensed.text;
     };

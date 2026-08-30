@@ -35,6 +35,13 @@ struct CondenseBudget {
     size_t max_token_probe     = 8;   // 单条消息 tokenizer 调用次数上限
     size_t json_head_items     = 3;   // JSON 数组截断保留的首部项数
     size_t json_tail_items     = 1;   // JSON 数组截断保留的尾部项数
+
+    // P1：token 口径精确化。max_tokens 反算 max_chars 时（token_len 为 nullptr 或
+    // 探测次数用尽后的硬截断兜底）不再统一按 4:1，而是按 content 内实际 CJK 字节
+    // 占比推算有效 bytes/token（见 EstimateCjkAwareBytesPerToken，utils.h）。两个都设为
+    // 4.0 即逐字节回退到 P1 引入前的统一 4:1 估算。max_chars 本身也是字节预算。
+    double cjk_bytes_per_token   = 3.0;
+    double ascii_bytes_per_token = 4.0;
 };
 
 // 截断结果。

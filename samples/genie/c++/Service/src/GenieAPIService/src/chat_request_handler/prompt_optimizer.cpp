@@ -174,16 +174,19 @@ std::string PromptOptimizer::BuildSystemContext(const nlohmann::ordered_json& re
     const auto& relevance_cfg = config.relevance_filter;
     std::vector<std::string> relevance_keywords;
     RuntimeSkillMappings filtered_skills = runtime_skills;
+    size_t skills_budget_tokens = ComputeRelevanceTokenBudget(BudgetPartitionKind::kSkills, &request_data);
     if (relevance_cfg.enabled) {
         relevance_keywords = BuildRelevanceKeywords(request_data);
         if (!runtime_skills.empty()) {
-            filtered_skills = FilterSkillsByRelevance(runtime_skills, relevance_keywords, ComputeRelevanceTokenBudget());
+            filtered_skills = FilterSkillsByRelevance(runtime_skills, relevance_keywords,
+                                                       skills_budget_tokens);
         }
     }
     // 供 PromptLedger 可观测性回报使用：不新增第二套统计，直接写入 last_stats_
     // （与 OptimizeToolsPrompt 写入的 tools_tier/total/kept 互不覆盖）
     last_stats_.skills_total = runtime_skills.size();
     last_stats_.skills_kept = filtered_skills.size();
+    last_stats_.skills_budget_tokens = skills_budget_tokens;
 
     // 1a. 身份声明（始终输出，与是否有 SKILL 无关）
     if (se.identity_intro && !config.system_prompts.identity_intro.empty()) {
@@ -307,7 +310,8 @@ std::string PromptOptimizer::BuildSystemContext(const nlohmann::ordered_json& re
             if (request_data.contains("tools") && request_data["tools"].is_array() && !request_data["tools"].empty()) {
                 if (relevance_cfg.enabled) {
                     nlohmann::ordered_json relevant_tools =
-                        FilterToolsByRelevance(request_data["tools"], relevance_keywords, ComputeRelevanceTokenBudget());
+                        FilterToolsByRelevance(request_data["tools"], relevance_keywords,
+                                               ComputeRelevanceTokenBudget(BudgetPartitionKind::kTools, &request_data));
                     tool_hit = !relevant_tools.empty();
                 } else {
                     // 相关性过滤总开关关闭时，无法判断"是否相关"，客户端传了 tools
@@ -844,7 +848,32 @@ nlohmann::ordered_json PromptOptimizer::FilterToolsByRelevance(
     return filtered;
 }
 
-size_t PromptOptimizer::ComputeRelevanceTokenBudget() const
+bool PromptOptimizer::HasBudgetContention(const nlohmann::ordered_json& request_data) const
+{
+    // tools 侧候选：请求带了非空 tools 数组
+    bool has_tools = request_data.contains("tools") && request_data["tools"].is_array() &&
+                     !request_data["tools"].empty();
+    if (!has_tools) {
+        return false;
+    }
+    // skills 侧候选：第一个 system 消息里带 <available_skills> 目录块。
+    // 这里只做子串探测（不重新解析整份 XML），与 ExtractSkillsFromRequest 同一判据，
+    // 避免为预算判定引入第二次完整解析开销。
+    if (!request_data.contains("messages") || !request_data["messages"].is_array()) {
+        return false;
+    }
+    for (const auto& msg : request_data["messages"]) {
+        if (!msg.contains("role") || !msg["role"].is_string()) continue;
+        if (msg["role"].get<std::string>() != "system") continue;
+        if (!msg.contains("content") || !msg["content"].is_string()) break;
+        const std::string& content = msg["content"].get_ref<const std::string&>();
+        return content.find("<available_skills>") != std::string::npos;
+    }
+    return false;
+}
+
+size_t PromptOptimizer::ComputeRelevanceTokenBudget(BudgetPartitionKind kind,
+                                                    const nlohmann::ordered_json* request_data) const
 {
     // 复用与 model_input_builder.h 中 tools_budget 完全相同的"可用上下文空间"
     // 推导：context_size 减去按 output_reserve_ratio 预留的输出空间。这不是为
@@ -856,7 +885,69 @@ size_t PromptOptimizer::ComputeRelevanceTokenBudget() const
     const auto& config = model_config_.GetPromptOptimizationConfig();
     int total_context = model_config_.context_size();
     int reserved_output = static_cast<int>(total_context * config.output_reserve_ratio);
-    return static_cast<size_t>(std::max(total_context - reserved_output, 0));
+    size_t total_budget = static_cast<size_t>(std::max(total_context - reserved_output, 0));
+
+    // D3：预算分区（skills / tools 两个分区，history 仍由 message_pre_filter 自己的
+    // token 预算控制，不在此处引入重复口径）。enabled=false 时逐字节回退为单一
+    // 总预算语义（两种 kind 都返回 total_budget，与 D3 引入前完全一致）。
+    const auto& bp_cfg = config.budget_partition;
+    if (!bp_cfg.enabled) {
+        return total_budget;
+    }
+
+    // 关键语义：分区只在真的发生竞争时生效。没有竞争（只有 tools 没有 skills，
+    // 或反之）时两种 kind 都拿到完整总预算——D3 的目的是"不让一方把另一方挤没"，
+    // 不是"无条件按比例削减双方"。拿不到请求上下文时同样按无竞争处理（保守，
+    // 不削减既有行为）。
+    if (request_data == nullptr || !HasBudgetContention(*request_data)) {
+        return total_budget;
+    }
+
+    // 竞争成立：按**实际占用**而不是"对象是否出现"来约束（这一条是外部独立评审
+    // 与代码复核共同得出的结论，务必保持）。早先的实现一旦 skills/tools 同时在场
+    // 就固定按 65/35 切，等于把"skills 保底 15%"实现成了"skills 限额 65%"——语义
+    // 完全翻转，且 tools 只用 200 token 时也会白占 35% 预算、把技能目录无谓截断。
+    //
+    // 现在的语义：
+    //   - 先按 tools 的**真实体量**估算它需要多少 token（纯字符串计算，零额外推理）；
+    //   - tools 需求未超过 tools_ratio 上限时，它只拿走自己真正需要的那部分，
+    //     skills 拿走全部剩余（不被无故削减）；
+    //   - tools 需求超过上限时才截到 tools_ratio，此时 skills 拿剩余，并由
+    //     skills_floor_ratio 兜住下限（真正的"保底"语义）。
+    size_t skills_floor = static_cast<size_t>(static_cast<double>(total_budget) * bp_cfg.skills_floor_ratio);
+    size_t tools_budget_cap = static_cast<size_t>(static_cast<double>(total_budget) * bp_cfg.tools_ratio);
+
+    // tools 真实需求估算：直接量 tools 数组序列化后的字节数，按 CJK 感知
+    // bytes/token 比例折成 token（与 P1 同一口径，不引入第二套换算）。
+    size_t tools_need_tokens = 0;
+    if (request_data->contains("tools") && (*request_data)["tools"].is_array()) {
+        std::string tools_text = (*request_data)["tools"].dump();
+        const auto& fid_cfg = config.fidelity;
+        double bytes_per_token = EstimateCjkAwareBytesPerToken(
+            tools_text, fid_cfg.cjk_bytes_per_token, fid_cfg.ascii_bytes_per_token);
+        if (bytes_per_token > 0.0) {
+            tools_need_tokens = static_cast<size_t>(static_cast<double>(tools_text.length()) / bytes_per_token);
+        }
+    }
+
+    size_t tools_budget = std::min(tools_need_tokens, tools_budget_cap);
+    size_t skills_budget = (total_budget > tools_budget) ? (total_budget - tools_budget) : 0;
+    if (skills_budget < skills_floor) {
+        skills_budget = std::min(skills_floor, total_budget);
+        tools_budget = (total_budget > skills_budget) ? (total_budget - skills_budget) : 0;
+    }
+
+    switch (kind) {
+        case BudgetPartitionKind::kSkills:
+            return skills_budget;
+        case BudgetPartitionKind::kTools:
+        default:
+            // 直接返回 933 行已算好的 tools_budget（= min(真实需求, 上限)）。
+            // 注意：不能再用 std::max(tools_budget, min(need, cap)) 撤销 skills_floor
+            // 咬合后的削减——那会让 skills+tools > total_budget，使
+            // skills_floor_ratio 变成空操作（已被外部评审 + 代码复核共同证伪）。
+            return tools_budget;
+    }
 }
 
 std::string PromptOptimizer::BuildStructuredSkillCatalog(
@@ -1024,7 +1115,8 @@ std::string PromptOptimizer::OptimizeToolsPrompt(
             const auto& relevance_cfg = model_config_.GetPromptOptimizationConfig().relevance_filter;
             if (relevance_cfg.enabled) {
                 std::vector<std::string> keywords = BuildRelevanceKeywords(request_data);
-                tools_array = FilterToolsByRelevance(tools_array, keywords, ComputeRelevanceTokenBudget());
+                tools_array = FilterToolsByRelevance(tools_array, keywords,
+                                                     ComputeRelevanceTokenBudget(BudgetPartitionKind::kTools, &request_data));
             }
         }
 
@@ -1164,7 +1256,8 @@ std::string PromptOptimizer::BuildDynamicToolsIntro(const nlohmann::ordered_json
     const auto& relevance_cfg = model_config_.GetPromptOptimizationConfig().relevance_filter;
     if (relevance_cfg.enabled) {
         std::vector<std::string> keywords = BuildRelevanceKeywords(request_data);
-        tools_array = FilterToolsByRelevance(tools_array, keywords, ComputeRelevanceTokenBudget());
+        tools_array = FilterToolsByRelevance(tools_array, keywords,
+                                             ComputeRelevanceTokenBudget(BudgetPartitionKind::kTools, &request_data));
     }
     if (tools_array.empty()) {
         return "";  // 全部未命中 → 与"无 tools"等价，回退到配置文件硬编码值
@@ -1231,7 +1324,8 @@ std::string PromptOptimizer::FilterToolsIntroByRequest(
     const auto& relevance_cfg = model_config_.GetPromptOptimizationConfig().relevance_filter;
     if (relevance_cfg.enabled) {
         std::vector<std::string> keywords = BuildRelevanceKeywords(request_data);
-        relevant_tools = FilterToolsByRelevance(relevant_tools, keywords, ComputeRelevanceTokenBudget());
+        relevant_tools = FilterToolsByRelevance(relevant_tools, keywords,
+                                                ComputeRelevanceTokenBudget(BudgetPartitionKind::kTools, &request_data));
     }
 
     // 收集客户端实际传入且通过相关性筛选的工具名集合
@@ -1472,7 +1566,8 @@ std::string PromptOptimizer::OptimizeHarmonyDeveloperMessage(
     const auto& relevance_cfg = model_config_.GetPromptOptimizationConfig().relevance_filter;
     if (relevance_cfg.enabled && !tools.is_null() && tools.is_array() && !tools.empty()) {
         std::vector<std::string> keywords = BuildRelevanceKeywords(request_data);
-        relevant_tools = FilterToolsByRelevance(tools, keywords, ComputeRelevanceTokenBudget());
+        relevant_tools = FilterToolsByRelevance(tools, keywords,
+                                                ComputeRelevanceTokenBudget(BudgetPartitionKind::kTools, &request_data));
     }
 
     if (!relevant_tools.is_null() && !relevant_tools.empty()) {
@@ -1562,7 +1657,8 @@ std::string PromptOptimizer::ConvertToolsToOptimizedTypeScript(
     const auto& relevance_cfg = model_config_.GetPromptOptimizationConfig().relevance_filter;
     if (relevance_cfg.enabled) {
         std::vector<std::string> keywords = BuildRelevanceKeywords(request_data);
-        relevant_tools = FilterToolsByRelevance(tools, keywords, ComputeRelevanceTokenBudget());
+        relevant_tools = FilterToolsByRelevance(tools, keywords,
+                                                ComputeRelevanceTokenBudget(BudgetPartitionKind::kTools, &request_data));
     }
     
     for (const auto& tool : relevant_tools) {
@@ -2113,8 +2209,13 @@ std::string PromptOptimizer::FilterSectionsByConfig(
         if (config.max_section_tokens > 0) {
             size_t token_count = CountTokens(content);
             if (token_count > static_cast<size_t>(config.max_section_tokens)) {
-                // 按比例估算截断字符数（粗略：1 token ≈ 4 chars）
-                size_t max_chars = static_cast<size_t>(config.max_section_tokens) * 4;
+                // P1：按 CJK 感知 bytes/token 换算比例估算截断字节数，不再统一按 4:1
+                // （max_chars 传给 safe_utf8_truncate，量纲是字节，与该函数返回值一致）
+                const auto& fid_cfg = model_config_.GetPromptOptimizationConfig().fidelity;
+                double bytes_per_token = EstimateCjkAwareBytesPerToken(
+                    content, fid_cfg.cjk_bytes_per_token, fid_cfg.ascii_bytes_per_token);
+                size_t max_chars = static_cast<size_t>(
+                    static_cast<double>(config.max_section_tokens) * bytes_per_token);
                 if (content.size() > max_chars) {
                     // 使用 UTF-8 安全截断，避免在多字节字符（如中文）中间截断
                     // 原来的 content.substr(0, max_chars) 是纯字节截断，

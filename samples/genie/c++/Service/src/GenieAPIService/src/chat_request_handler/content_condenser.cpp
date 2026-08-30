@@ -128,11 +128,16 @@ CondenseResult ContentCondenser::Condense(const std::string& content,
     CondenseResult result;
     result.text = content;
 
-    // 字符预算：max_chars 优先；仅当未设置字符预算但给了 token 预算时才粗略换算
-    // （1 token ≈ 4 字符，保守估算，避免砍太狠）。
+    // 字节预算：max_chars 优先；仅当未设置字节预算但给了 token 预算时才换算。
+    // P1：不再统一按 4:1（该比例只对纯 ASCII 文本成立），而是按 content 内实际
+    // CJK 字节占比推算有效 bytes/token（EstimateCjkAwareBytesPerToken，utils.h）——
+    // UTF-8 中文 1 字 = 3 字节 ≈ 1 token，英文 ≈ 4 字节/token。量纲统一为字节，
+    // 与 result.text 的 length()/safe_utf8_truncate 字节口径自洽。
+    double effective_bytes_per_token = EstimateCjkAwareBytesPerToken(
+        content, budget.cjk_bytes_per_token, budget.ascii_bytes_per_token);
     size_t char_budget = budget.max_chars;
     if (char_budget == 0 && budget.max_tokens > 0) {
-        char_budget = budget.max_tokens * 4;
+        char_budget = static_cast<size_t>(static_cast<double>(budget.max_tokens) * effective_bytes_per_token);
     }
 
     // 步骤 1：长度快筛，命中即原样返回，不调 tokenizer
@@ -209,8 +214,9 @@ CondenseResult ContentCondenser::Condense(const std::string& content,
             cur_tokens = (*token_len)(result.text);
         }
         if (cur_tokens > budget.max_tokens) {
-            // 探测次数用尽仍超预算：按更激进的字符估算（3 chars/token）硬截断，保证不越界
-            size_t hard_chars = budget.max_tokens * 3;
+            // 探测次数用尽仍超预算：按更激进（0.75x）的 CJK 感知字节估算硬截断，保证不越界
+            size_t hard_chars = static_cast<size_t>(
+                static_cast<double>(budget.max_tokens) * effective_bytes_per_token * 0.75);
             if (hard_chars < result.text.length()) {
                 result.text = safe_utf8_truncate(result.text, hard_chars, "...[truncated]");
             }
