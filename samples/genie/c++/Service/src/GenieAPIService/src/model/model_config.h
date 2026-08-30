@@ -468,6 +468,33 @@ struct PromptOptimizationConfig {
         size_t l1_top_k = 6;                 // 紧随其后的 K 条给 L1 摘要
         size_t l1_summary_max_chars = 240;   // L1 摘要正文的 UTF-8 安全截断上限
         size_t l0_summary_max_chars = 80;    // L0 一句话摘要的 UTF-8 安全截断上限
+        // Step 5 阶段 C 主线 (a)：l2_top_k 边界落在同分组内部时不切开该组——
+        // 整组同分技能一起进 L2，而不是按到达顺序把组内一部分压到 L1/L0。
+        // 动机（实测，qwen3-8b-8480 N=78 锚点池）：目标技能与同分锚点在 L1 档
+        // 被截断后 description 可见部分逐字节相同，模型 100% 发起 read 但稳定
+        // 读到目录里排序更靠前的同分候选——即"同分不可区分 + 目录 tie-break
+        // 事实上变成了选择决策器"。让整组同分一起升档，消除的正是"同一组里
+        // 谁在 L2、谁在 L1"这个人为分界。预算越界防护：每条目仍逐条过
+        // AssignSkillDetailLevels() 既有的按 token_budget 降档循环（L2 放不进
+        // 就自动退到 L1/L0，连 L0 都放不进才真正丢弃），因此扩组不会让 skills
+        // 预算溢出，只会让该组更多条目参与"能不能塞进 L2"的逐条判定。
+        //
+        // ⚠ 默认值 Step 5 收口时由 true 改为 **false**，两条实测理由：
+        //  1) 该开关已被它自己预设的判据证伪——同分池 N=78 下目标 5/5 次成功
+        //     升到 L2，`picked_rate` 仍是 0.000（与关闭时逐字段一致），零实测收益；
+        //  2) 默认开启存在未被任何用例覆盖过的目录截断风险：扩组会一直扩到覆盖
+        //     整个同分组，极端情形（如 relevance_filter.zero_hit_keep_all 兜底路径下
+        //     全体候选同得 0 分 → 同分组 = 整池）会让前若干条按 L2 吃掉几乎全部
+        //     skills 预算，随后第一个连 L0 都放不进的条目触发
+        //     AssignSkillDetailLevels() 的 `dropped = candidates.size() - idx; break;`
+        //     **整段丢弃剩余后缀**（保留集永远是按分数排序的一个前缀）。
+        //     即"逐条降档"只保证不越界，并不保证 Skills-Kept 不退化。
+        // 故默认关闭以同时满足"新行为默认安全"与"不把被证伪的行为留在默认路径上"；
+        // 开关本体保留，需要度量同分 tie-break 行为时显式置 true 即可。
+        // 该最坏情形已由 test_service.py 的
+        // `SKILL_CAPACITY: optimized scenario3b tie_group_kept_no_regress`
+        // （全同分池 N=64 断言 Skills-Kept == Skills-Total）机械覆盖。
+        bool tie_aware_l2 = false;
     } skill_disclosure;
 
     // ── 上下文窗口分配 ──────────────────────────────────────

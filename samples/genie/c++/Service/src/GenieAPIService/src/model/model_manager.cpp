@@ -1775,12 +1775,17 @@ bool ModelManager::InitializeConfig(bool load)
                         sd_cfg.l1_top_k = sd.value("l1_top_k", (size_t) 6);
                         sd_cfg.l1_summary_max_chars = sd.value("l1_summary_max_chars", (size_t) 240);
                         sd_cfg.l0_summary_max_chars = sd.value("l0_summary_max_chars", (size_t) 80);
+                        // 缺字段时一律取结构体默认值（Step 5 收口后为 false），
+                        // 不在此处硬编码 true —— 否则「旧配置文件写了 skill_disclosure
+                        // 节但没写 tie_aware_l2」会拿到与出厂默认相反的行为。
+                        sd_cfg.tie_aware_l2 = sd.value("tie_aware_l2", sd_cfg.tie_aware_l2);
                         My_Log{} << "[Config] skill_disclosure loaded: "
                                  << "enabled=" << sd_cfg.enabled
                                  << ", l2_top_k=" << sd_cfg.l2_top_k
                                  << ", l1_top_k=" << sd_cfg.l1_top_k
                                  << ", l1_summary_max_chars=" << sd_cfg.l1_summary_max_chars
                                  << ", l0_summary_max_chars=" << sd_cfg.l0_summary_max_chars
+                                 << ", tie_aware_l2=" << sd_cfg.tie_aware_l2
                                  << std::endl;
                     }
 

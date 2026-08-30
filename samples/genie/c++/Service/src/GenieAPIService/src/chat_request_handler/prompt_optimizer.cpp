@@ -1028,14 +1028,31 @@ std::vector<ScoredSkill> PromptOptimizer::AssignSkillDetailLevels(
 
     // 3) 按“Top-K 期望档位 + 预算降档”分配。关键：预算不够时**降档**
     //    （L2→L1→L0），只有连 L0 单行都放不进时才真正丢弃。
+    //
+    // Step 5 阶段 C 主线 (a)：tie_aware_l2=true 时，把 l2_top_k 边界向后扩展到
+    // 覆盖完整的同分组，不切开一组同分技能——否则组内排序更靠前（同分按名字
+    // 升序）的技能进 L2，稍靠后的同分技能被压到 L1，而 L1 摘要截断后往往与
+    // L2 同分兄弟 description 逐字节相同（无区分特征），模型会稳定选中目录里
+    // 排序最靠前的那个同分候选而不是真正想要的目标。tie_aware_l2=false 时
+    // 逐字节退化为改动前的固定边界行为。
+    size_t effective_l2_top_k = disclosure_cfg.l2_top_k;
+    if (disclosure_cfg.tie_aware_l2 && effective_l2_top_k > 0 &&
+        effective_l2_top_k < candidates.size()) {
+        size_t boundary_score = candidates[effective_l2_top_k - 1].score;
+        while (effective_l2_top_k < candidates.size() &&
+               candidates[effective_l2_top_k].score == boundary_score) {
+            ++effective_l2_top_k;
+        }
+    }
+
     size_t used_tokens = 0;
     size_t dropped = 0;
     for (size_t idx = 0; idx < candidates.size(); ++idx) {
         ScoredSkill entry = candidates[idx];
         SkillDetailLevel desired = SkillDetailLevel::kNameOnly;
-        if (idx < disclosure_cfg.l2_top_k) {
+        if (idx < effective_l2_top_k) {
             desired = SkillDetailLevel::kFull;
-        } else if (idx < disclosure_cfg.l2_top_k + disclosure_cfg.l1_top_k) {
+        } else if (idx < effective_l2_top_k + disclosure_cfg.l1_top_k) {
             desired = SkillDetailLevel::kSummary;
         }
 

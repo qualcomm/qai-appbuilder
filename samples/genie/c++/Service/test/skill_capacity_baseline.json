@@ -1668,6 +1668,1452 @@
       "两档前沿重测（legacy 与 optimized 都必须重测，旧的 44 / 77 在新池下均不可比）",
       "prompt_fidelity / qnn / skill_capacity 三套件守门",
       "Copilot 第 2 轮（实验设计者角色）"
-    ]
+    ],
+    "mainline_a_tie_aware_l2_cpp_impl": {
+      "_doc": "Step 5 stage C slice 2/3: C++ implementation of mainline (a) + remote falsification test.",
+      "implementation": {
+        "files": [
+          "src/GenieAPIService/src/model/model_config.h",
+          "src/GenieAPIService/src/model/model_manager.cpp",
+          "src/GenieAPIService/src/chat_request_handler/prompt_optimizer.cpp"
+        ],
+        "config_key": "prompt_optimization.skill_disclosure.tie_aware_l2",
+        "default": true,
+        "semantics": "When the l2_top_k boundary falls inside a group of same-score candidates, extend L2 to cover the whole tie group instead of cutting it. Budget overflow protection is inherited from the existing per-item degrade loop in AssignSkillDetailLevels() (L2->L1->L0, only dropped if even L0 does not fit).",
+        "rollback": "tie_aware_l2=false reproduces byte-identical fixed-boundary legacy behavior (effective_l2_top_k == disclosure_cfg.l2_top_k, no extension).",
+        "binary_verified": "GenieAPIService.exe (remote ARM64, commit d35ee3a) contains literal string 'tie_aware_l2' confirming the build includes this change."
+      },
+      "falsification_test": {
+        "_pre_declared_threshold": "Fixed N=78 and anchor pool composition, only raise l2_top_k / enable tie extension; if target already reaches L2 but picked_rate remains <0.8, mainline (a) loses its mainline status.",
+        "model": "qwen3-8b-8480",
+        "n": 78,
+        "repeat": 5,
+        "arm_enabled_default": {
+          "tie_aware_l2": true,
+          "l2_top_k": 2,
+          "target_form_all_trials": [
+            "L2",
+            "L2",
+            "L2",
+            "L2",
+            "L2"
+          ],
+          "picked": 0,
+          "answered": 0,
+          "picked_rate": 0.0,
+          "pass_rate": 0.0
+        },
+        "arm_disabled_tie_aware": {
+          "tie_aware_l2": false,
+          "l2_top_k": 2,
+          "target_form_all_trials": [
+            "L1",
+            "L1",
+            "L1",
+            "L1",
+            "L1"
+          ],
+          "picked": 0,
+          "answered": 0,
+          "picked_rate": 0.0,
+          "pass_rate": 0.0
+        },
+        "rollback_equivalence": "Confirmed: tie_aware_l2=false exactly reproduces the stage-B baseline failure form (target stuck at L1); the flag genuinely changes behavior byte-for-byte on the disclosure-form axis.",
+        "verdict": "MAINLINE (a) FALSIFIED per its own pre-declared threshold: even with tie_aware_l2 promoting the target to full L2 disclosure (5/5 trials), picked_rate stayed at 0.000 -- identical to the tie_aware_l2=false control. Getting the target into L2 is NOT sufficient to make the model read it on the anchor pool. This directly contradicts the stage-B (old, non-anchor pool) finding that raising l2_top_k 2->8 moved picked_rate 0.000->1.000 -- meaning that stage-B result was very likely itself an artifact of the old pool's composition confound (raising l2_top_k to 8 in the OLD pool changed which OTHER items entered L2 alongside the target, not just the target's own form), the same class of confound stage-C's anchor-pool refactor was built to eliminate for the frontier search.",
+        "implication": "The anchor pool now holds the tie-break group (2 anchors + target, all L2) in a fixed relative order: anchor-audit-000, anchor-replica-001, target. The model still reads only the FIRST item in that group on all 10/10 trials (consistent with stage-B's byte-level finding that read_paths were 100% the first-sorted same-score candidate). Promoting the target's OWN disclosure level does not change its ORDER in the catalog. This suggests the real lever is catalog position/order among tied candidates, not disclosure depth -- i.e. line (c) 'stronger tie-break signal' is the better next candidate, not (a)."
+      },
+      "disposition": "Per task constraint: mainline (a) is downgraded to 'implemented but falsified', config flag stays merged (default-safe, rollback-verified, zero extra inference latency, no protocol surface added) but MUST NOT be reported as the fix for the N=77/78 selection bottleneck. Lines (b)/(c) and the two-arm frontier re-measurement on the anchor pool, D6, and Copilot round 2 were NOT attempted in this pass due to severe time budget; left to the next slice with this falsification result as the starting fact."
+    },
+    "copilot_round2_experiment_designer": {
+      "_doc": "New session, role=experiment designer, no --continue-url (avoid history pollution). Prompt included tie_aware_l2 falsification data before asking.",
+      "model_confirmed": "GPT 5.6",
+      "key_answers": {
+        "A_not_unique": "Order-dominance is consistent but NOT uniquely supported; Copilot listed several competing hypotheses fully consistent with the same data (first-hit stopping rule, limited tie-scan budget, deterministic canonical-representative selection, position-cached shortlist, read-without-attend, weak-but-nonzero content weighting).",
+        "B_discard": "Discard 'L2 visibility alone fixes selection' -- direct intervention (tie_aware_l2) changed visibility 0/5->5/5 while picked_rate stayed exactly 0.000; the earlier l2_top_k 2->8 apparent fix can no longer be attributed to depth alone.",
+        "C_cheapest_experiment": "Single variable: alphabetical order within the tied trio -- move target to sort first, keep scores/descriptions/N/tie_aware_l2 identical. Pass threshold: target selected in >=1/1 run.",
+        "D_benchmark_validity": "Advised the anchor pool is NOT a clean capacity benchmark as constructed (3-way score tie lets tie-resolution behavior decide the outcome before real discrimination). Proposed smallest fix: break the tie with a tiny score epsilon (anchor=s+eps, target=s, anchor=s-eps) and compare old vs new design at same N -- if behavior changes materially, the prior frontier was a tie-artifact, not a capacity measurement."
+      }
+    },
+    "line_c_order_experiment": {
+      "_doc": "Executed Copilot round-2 cheapest single-variable experiment: renamed ONLY the target skill (aaa-flux-capacitor-calibration) so it sorts FIRST within the tied trio, keeping score (18, verified unchanged by offline recompute) and description/canary/N identical. Everything else (anchors, fillers, service config, tie_aware_l2=true default) unchanged.",
+      "offline_check": {
+        "target_score": 18,
+        "target_catalog_pos": 1,
+        "top4": [
+          [
+            "aaa-flux-capacitor-calibration",
+            18
+          ],
+          [
+            "calibration-flux-capacitor-audit-000",
+            18
+          ],
+          [
+            "calibration-flux-capacitor-replica-001",
+            18
+          ],
+          [
+            "reactor-core-realignment-007",
+            9
+          ]
+        ]
+      },
+      "remote_result": {
+        "model": "qwen3-8b-8480",
+        "n": 78,
+        "repeat": 3,
+        "picked": [
+          true,
+          true,
+          true
+        ],
+        "answered": [
+          true,
+          true,
+          true
+        ],
+        "target_in_prompt": [
+          true,
+          true,
+          true
+        ],
+        "http_ok": [
+          true,
+          true,
+          true
+        ],
+        "picked_rate": 1.0,
+        "pass_rate": 1.0
+      },
+      "verdict": "CONFIRMED per Copilot pass threshold (>=1/1): picked_rate flipped 0.000 (baseline, target catalog rank 3) -> 1.000 (3/3, target catalog rank 1), with score/content/N held constant. This is now the cleanest evidence in the whole investigation: pure catalog ORDER, independent of disclosure depth or content, determines which tied candidate the model reads.",
+      "disposition": "NOT implemented as a server-side algorithm change in this slice. Reason: for genuinely tied relevance scores there is no principled signal available (without embeddings/extra inference, which are out of scope) to decide which candidate \"deserves\" to sort first in production -- swapping the current arbitrary alphabetical tie-break for a different arbitrary rule would just relocate the same primacy bias onto a different skill, not fix it. This is recorded as an open architectural finding (LM primacy bias on tied catalog entries), not as a falsified-then-abandoned line. D6 self-heal (retry with top-1-only full text after a wrong pick) remains the most defensible mitigant for this exact failure mode but is out of this slice's scope per task constraints.",
+      "not_done_in_this_slice": [
+        "two-arm frontier re-measurement on anchor pool",
+        "prompt_fidelity/qnn gating suites",
+        "line (b) L1-tail-retention experiment (superseded in priority by the order finding)",
+        "D6 implementation"
+      ]
+    }
+  },
+  "step5_final": {
+    "capacity_pool_offline_validation": {
+      "_why": "容量池要求目标分数严格最高、跨 N 组成恒定，验证前沿不会被同分 tie-break 污染",
+      "recompute_method": "本地重实现 ScoreRelevance 语义（name 子词双向子串 x3 + description 单向 find x1，门槛 len>=3），目录序 = 分数降序 + 同分名字升序；未叠加 D4 中英别名扩展（问题串与池全英文，该场景下别名不引入新命中词）",
+      "probed_n": [
+        8,
+        16,
+        24,
+        44,
+        64,
+        76,
+        77,
+        78,
+        96,
+        128
+      ],
+      "repeat_runs_identical": true,
+      "per_n": {
+        "8": {
+          "target_score": 18,
+          "target_catalog_pos": 1,
+          "max_other_score": 15,
+          "strictly_highest": true,
+          "near_scores": [
+            15
+          ],
+          "top3_names": [
+            "flux-capacitor-calibration",
+            "flux-capacitor-backup-restore-001",
+            "flux-capacitor-diagnostics-000"
+          ]
+        },
+        "16": {
+          "target_score": 18,
+          "target_catalog_pos": 1,
+          "max_other_score": 15,
+          "strictly_highest": true,
+          "near_scores": [
+            15
+          ],
+          "top3_names": [
+            "flux-capacitor-calibration",
+            "flux-capacitor-backup-restore-001",
+            "flux-capacitor-diagnostics-000"
+          ]
+        },
+        "24": {
+          "target_score": 18,
+          "target_catalog_pos": 1,
+          "max_other_score": 15,
+          "strictly_highest": true,
+          "near_scores": [
+            15
+          ],
+          "top3_names": [
+            "flux-capacitor-calibration",
+            "flux-capacitor-backup-restore-001",
+            "flux-capacitor-diagnostics-000"
+          ]
+        },
+        "44": {
+          "target_score": 18,
+          "target_catalog_pos": 1,
+          "max_other_score": 15,
+          "strictly_highest": true,
+          "near_scores": [
+            15
+          ],
+          "top3_names": [
+            "flux-capacitor-calibration",
+            "flux-capacitor-backup-restore-001",
+            "flux-capacitor-diagnostics-000"
+          ]
+        },
+        "64": {
+          "target_score": 18,
+          "target_catalog_pos": 1,
+          "max_other_score": 15,
+          "strictly_highest": true,
+          "near_scores": [
+            15
+          ],
+          "top3_names": [
+            "flux-capacitor-calibration",
+            "flux-capacitor-backup-restore-001",
+            "flux-capacitor-diagnostics-000"
+          ]
+        },
+        "76": {
+          "target_score": 18,
+          "target_catalog_pos": 1,
+          "max_other_score": 15,
+          "strictly_highest": true,
+          "near_scores": [
+            15
+          ],
+          "top3_names": [
+            "flux-capacitor-calibration",
+            "flux-capacitor-backup-restore-001",
+            "flux-capacitor-diagnostics-000"
+          ]
+        },
+        "77": {
+          "target_score": 18,
+          "target_catalog_pos": 1,
+          "max_other_score": 15,
+          "strictly_highest": true,
+          "near_scores": [
+            15
+          ],
+          "top3_names": [
+            "flux-capacitor-calibration",
+            "flux-capacitor-backup-restore-001",
+            "flux-capacitor-diagnostics-000"
+          ]
+        },
+        "78": {
+          "target_score": 18,
+          "target_catalog_pos": 1,
+          "max_other_score": 15,
+          "strictly_highest": true,
+          "near_scores": [
+            15
+          ],
+          "top3_names": [
+            "flux-capacitor-calibration",
+            "flux-capacitor-backup-restore-001",
+            "flux-capacitor-diagnostics-000"
+          ]
+        },
+        "96": {
+          "target_score": 18,
+          "target_catalog_pos": 1,
+          "max_other_score": 15,
+          "strictly_highest": true,
+          "near_scores": [
+            15
+          ],
+          "top3_names": [
+            "flux-capacitor-calibration",
+            "flux-capacitor-backup-restore-001",
+            "flux-capacitor-diagnostics-000"
+          ]
+        },
+        "128": {
+          "target_score": 18,
+          "target_catalog_pos": 1,
+          "max_other_score": 15,
+          "strictly_highest": true,
+          "near_scores": [
+            15
+          ],
+          "top3_names": [
+            "flux-capacitor-calibration",
+            "flux-capacitor-backup-restore-001",
+            "flux-capacitor-diagnostics-000"
+          ]
+        }
+      },
+      "verdict": "PASS: 全部 N 上 target_score(18) 严格高于 max_other_score(15，来自 _SC_CAP_NEAR_TOPICS)，目标目录序号恒为 1（无同分平局，不存在 tie-break），3 次复算逐字段一致。"
+    },
+    "not_done_this_slice": {
+      "_reason": "本切片分配的 effort 预算远低于任务范围要求（两档前沿在容量池上重测到收敛需要多次约 18 分钟的远程运行、D6 的 C++ 实现+编译+验证、至少一轮 Copilot、两套守门套件），本次只完成了最低成本、可本机独立验证的部分：容量池/同分池拆分（代码 + 离线复算验证），如实标注剩余未完成项，不编造数字。",
+      "done": [
+        "拆出 _sc_build_capacity_pool()（目标分数严格最高 18 > 15，跨 N 组成恒定）与既有 _sc_build_skill_pool() 重命名概念为同分池（tie pool），模块级注释显式区分二者用途",
+        "_sc_majority_probe()/_sc_binary_search() 新增 pool_builder 参数（默认同分池，向后兼容），_run_skill_capacity_suite() 的两档前沿二分搜索已改为显式传_sc_build_capacity_pool",
+        "容量池离线复算验证（N in 8/16/24/44/64/76/77/78/96/128，3 次重复逐字段一致）：target_score=18 严格高于 max_other_score=15，target_catalog_pos 恒为 1（见 step5_final.capacity_pool_offline_validation）",
+        "python -m py_compile test/test_service.py 通过"
+      ],
+      "not_done": [
+        "两档（legacy/optimized）在容量池上的远程真实前沿重测（--skill_capacity_max 128 直到 converged=True）——完全未跑，旧的 44/77/1.75x 保持作废标注，容量池上目前没有任何真实前沿数字，禁止在报告中引用任何前沿/提升倍数",
+        "D6 选错自愈的最终处置——本证据链最强证据（目录顺序单独决定同分组内选择）指向 D6 是最贴切的缓解手段，但本切片既没有实现也没有正式写出\"不做+证伪判据\"，留给下一切片先做这个决定并落地或明确放弃",
+        "Copilot 第 3 轮（统计显著性审查者角色）——未执行",
+        "两套守门套件（prompt_fidelity/qnn）重跑——未执行，因为本次未改任何服务端 C++ 代码，行为不受影响，但仍需要在下一次涉及前沿重测的远程运行时一并跑一次",
+        ".junie/plans/skill-capacity-frontier.md 追加叙事版本——未做（本次改动量较小，叙事已完整落在这份 JSON 里；下一切片完成前沿重测后再一并追加，避免用不完整的中间结论污染该文件）"
+      ],
+      "recommendation_for_next_slice": "下一切片应优先跑通容量池上的两档前沿二分搜索（工具链已就位：_sc_binary_search(..., pool_builder=_sc_build_capacity_pool) 直接可用，预计 legacy 与 optimized 各一次 --skill_capacity_max 128 的远程运行，每次约 18 分钟），拿到数字后再决定 D6 是否实现——如果容量池前沿本身就未接近8192 context 上限（大概率，因为容量池不存在 tie-break 拖累），D6 的 ROI 判断应基于容量池上是否仍观测到\"目标在场但未被 read\"这一模式，而不是直接照搬同分池的证据。"
+    },
+    "capacity_pool_frontier": {
+      "recorded_at": "2026-08-31",
+      "model": "qwen3-8b-8480",
+      "context_size": 8192,
+      "pool": "capacity pool (_sc_build_capacity_pool): 目标严格最高分 18 > 近似干扰 15 > 填充 9，组成跨 N 恒定，目标目录序号恒 1，无同分候选 → 不存在 tie-break 产物",
+      "_command": "python test\\test_service.py --suite skill_capacity --exe_dir <repo>\\build_fidelity\\GenieService-win-arm64 --models <models_backup_20260828> --out_dir <repo>\\test_results\\sc_cap --skill_capacity_models qwen3-8b --skill_capacity_max 128 --skill_capacity_repeat 1 --skill_capacity_arms both",
+      "_source": "test_results\\sc_cap\\results.json (远程 ARM64，round_1)",
+      "repeat": 1,
+      "legacy": {
+        "frontier_skills": 44,
+        "converged": true,
+        "frontier_saturated": false,
+        "usable_for_gain_ratio": true,
+        "probe_curve": [
+          {
+            "n": 1,
+            "answered": true,
+            "picked": true,
+            "target_in_prompt": true,
+            "skills_kept": 1,
+            "skills_total": 1,
+            "skills_budget_tokens": 6554,
+            "skills_kept_at_budget_cap": false,
+            "tokens_out": 628,
+            "context_size": 8192,
+            "tools_tier": 1,
+            "emergency_truncated": false,
+            "http_ok": true,
+            "error": null,
+            "pass_votes": 1,
+            "partial_votes": 0,
+            "trials": 1,
+            "passed": true,
+            "partial": false
+          },
+          {
+            "n": 2,
+            "answered": true,
+            "picked": true,
+            "target_in_prompt": true,
+            "skills_kept": 2,
+            "skills_total": 2,
+            "skills_budget_tokens": 6554,
+            "skills_kept_at_budget_cap": false,
+            "tokens_out": 761,
+            "context_size": 8192,
+            "tools_tier": 1,
+            "emergency_truncated": false,
+            "http_ok": true,
+            "error": null,
+            "pass_votes": 1,
+            "partial_votes": 0,
+            "trials": 1,
+            "passed": true,
+            "partial": false
+          },
+          {
+            "n": 4,
+            "answered": true,
+            "picked": true,
+            "target_in_prompt": true,
+            "skills_kept": 4,
+            "skills_total": 4,
+            "skills_budget_tokens": 6554,
+            "skills_kept_at_budget_cap": false,
+            "tokens_out": 1033,
+            "context_size": 8192,
+            "tools_tier": 1,
+            "emergency_truncated": false,
+            "http_ok": true,
+            "error": null,
+            "pass_votes": 1,
+            "partial_votes": 0,
+            "trials": 1,
+            "passed": true,
+            "partial": false
+          },
+          {
+            "n": 8,
+            "answered": true,
+            "picked": true,
+            "target_in_prompt": true,
+            "skills_kept": 8,
+            "skills_total": 8,
+            "skills_budget_tokens": 6554,
+            "skills_kept_at_budget_cap": false,
+            "tokens_out": 1551,
+            "context_size": 8192,
+            "tools_tier": 1,
+            "emergency_truncated": false,
+            "http_ok": true,
+            "error": null,
+            "pass_votes": 1,
+            "partial_votes": 0,
+            "trials": 1,
+            "passed": true,
+            "partial": false
+          },
+          {
+            "n": 16,
+            "answered": true,
+            "picked": true,
+            "target_in_prompt": true,
+            "skills_kept": 16,
+            "skills_total": 16,
+            "skills_budget_tokens": 6554,
+            "skills_kept_at_budget_cap": false,
+            "tokens_out": 2600,
+            "context_size": 8192,
+            "tools_tier": 1,
+            "emergency_truncated": false,
+            "http_ok": true,
+            "error": null,
+            "pass_votes": 1,
+            "partial_votes": 0,
+            "trials": 1,
+            "passed": true,
+            "partial": false
+          },
+          {
+            "n": 32,
+            "answered": true,
+            "picked": true,
+            "target_in_prompt": true,
+            "skills_kept": 32,
+            "skills_total": 32,
+            "skills_budget_tokens": 6554,
+            "skills_kept_at_budget_cap": false,
+            "tokens_out": 4680,
+            "context_size": 8192,
+            "tools_tier": 1,
+            "emergency_truncated": false,
+            "http_ok": true,
+            "error": null,
+            "pass_votes": 1,
+            "partial_votes": 0,
+            "trials": 1,
+            "passed": true,
+            "partial": false
+          },
+          {
+            "n": 64,
+            "answered": false,
+            "picked": false,
+            "target_in_prompt": null,
+            "skills_kept": null,
+            "skills_total": null,
+            "skills_budget_tokens": null,
+            "skills_kept_at_budget_cap": false,
+            "tokens_out": null,
+            "context_size": null,
+            "tools_tier": null,
+            "emergency_truncated": false,
+            "http_ok": false,
+            "error": "round1 HTTP 422: {\"error\":{\"message\":\"Unprocessable Content: Cloud routing persistently failed and local processing is unavailable (local input overflow). Maximum retry attempts reached. Please reduce the request size",
+            "pass_votes": 0,
+            "partial_votes": 0,
+            "trials": 1,
+            "passed": false,
+            "partial": false
+          },
+          {
+            "n": 48,
+            "answered": false,
+            "picked": false,
+            "target_in_prompt": null,
+            "skills_kept": null,
+            "skills_total": null,
+            "skills_budget_tokens": null,
+            "skills_kept_at_budget_cap": false,
+            "tokens_out": null,
+            "context_size": null,
+            "tools_tier": null,
+            "emergency_truncated": false,
+            "http_ok": false,
+            "error": "round1 HTTP 422: {\"error\":{\"message\":\"Unprocessable Content: Cloud routing persistently failed and local processing is unavailable (local input overflow). Maximum retry attempts reached. Please reduce the request size",
+            "pass_votes": 0,
+            "partial_votes": 0,
+            "trials": 1,
+            "passed": false,
+            "partial": false
+          },
+          {
+            "n": 40,
+            "answered": true,
+            "picked": true,
+            "target_in_prompt": true,
+            "skills_kept": 40,
+            "skills_total": 40,
+            "skills_budget_tokens": 6554,
+            "skills_kept_at_budget_cap": false,
+            "tokens_out": 5721,
+            "context_size": 8192,
+            "tools_tier": 1,
+            "emergency_truncated": false,
+            "http_ok": true,
+            "error": null,
+            "pass_votes": 1,
+            "partial_votes": 0,
+            "trials": 1,
+            "passed": true,
+            "partial": false
+          },
+          {
+            "n": 44,
+            "answered": true,
+            "picked": true,
+            "target_in_prompt": true,
+            "skills_kept": 44,
+            "skills_total": 44,
+            "skills_budget_tokens": 6554,
+            "skills_kept_at_budget_cap": false,
+            "tokens_out": 6239,
+            "context_size": 8192,
+            "tools_tier": 1,
+            "emergency_truncated": false,
+            "http_ok": true,
+            "error": null,
+            "pass_votes": 1,
+            "partial_votes": 0,
+            "trials": 1,
+            "passed": true,
+            "partial": false
+          },
+          {
+            "n": 46,
+            "answered": false,
+            "picked": true,
+            "target_in_prompt": true,
+            "skills_kept": 46,
+            "skills_total": 46,
+            "skills_budget_tokens": 6554,
+            "skills_kept_at_budget_cap": false,
+            "tokens_out": 6494,
+            "context_size": 8192,
+            "tools_tier": 1,
+            "emergency_truncated": false,
+            "http_ok": true,
+            "error": "round2 HTTP 422: {\"error\":{\"message\":\"Unprocessable Content: Cloud routing persistently failed and local processing is unavailable (local input overflow). Maximum retry attempts reached. Please reduce the request size",
+            "pass_votes": 0,
+            "partial_votes": 1,
+            "trials": 1,
+            "passed": false,
+            "partial": true
+          },
+          {
+            "n": 45,
+            "answered": false,
+            "picked": true,
+            "target_in_prompt": true,
+            "skills_kept": 45,
+            "skills_total": 45,
+            "skills_budget_tokens": 6554,
+            "skills_kept_at_budget_cap": false,
+            "tokens_out": 6364,
+            "context_size": 8192,
+            "tools_tier": 1,
+            "emergency_truncated": false,
+            "http_ok": true,
+            "error": null,
+            "pass_votes": 0,
+            "partial_votes": 1,
+            "trials": 1,
+            "passed": false,
+            "partial": true
+          }
+        ],
+        "first_422_at_n": 46,
+        "tokens_out_monotonic_in_n": true,
+        "tokens_out_sequence": [
+          [
+            1,
+            628
+          ],
+          [
+            2,
+            761
+          ],
+          [
+            4,
+            1033
+          ],
+          [
+            8,
+            1551
+          ],
+          [
+            16,
+            2600
+          ],
+          [
+            32,
+            4680
+          ],
+          [
+            40,
+            5721
+          ],
+          [
+            44,
+            6239
+          ],
+          [
+            45,
+            6364
+          ],
+          [
+            46,
+            6494
+          ]
+        ]
+      },
+      "optimized": {
+        "frontier_skills": 111,
+        "converged": true,
+        "frontier_saturated": false,
+        "usable_for_gain_ratio": true,
+        "probe_curve": [
+          {
+            "n": 1,
+            "answered": true,
+            "picked": true,
+            "target_in_prompt": true,
+            "skills_kept": 1,
+            "skills_total": 1,
+            "skills_budget_tokens": 6496,
+            "skills_kept_at_budget_cap": false,
+            "tokens_out": 628,
+            "context_size": 8192,
+            "tools_tier": 1,
+            "emergency_truncated": false,
+            "http_ok": true,
+            "error": null,
+            "pass_votes": 1,
+            "partial_votes": 0,
+            "trials": 1,
+            "passed": true,
+            "partial": false
+          },
+          {
+            "n": 2,
+            "answered": true,
+            "picked": true,
+            "target_in_prompt": true,
+            "skills_kept": 2,
+            "skills_total": 2,
+            "skills_budget_tokens": 6496,
+            "skills_kept_at_budget_cap": false,
+            "tokens_out": 761,
+            "context_size": 8192,
+            "tools_tier": 1,
+            "emergency_truncated": false,
+            "http_ok": true,
+            "error": null,
+            "pass_votes": 1,
+            "partial_votes": 0,
+            "trials": 1,
+            "passed": true,
+            "partial": false
+          },
+          {
+            "n": 4,
+            "answered": true,
+            "picked": true,
+            "target_in_prompt": true,
+            "skills_kept": 4,
+            "skills_total": 4,
+            "skills_budget_tokens": 6496,
+            "skills_kept_at_budget_cap": false,
+            "tokens_out": 980,
+            "context_size": 8192,
+            "tools_tier": 1,
+            "emergency_truncated": false,
+            "http_ok": true,
+            "error": null,
+            "pass_votes": 1,
+            "partial_votes": 0,
+            "trials": 1,
+            "passed": true,
+            "partial": false
+          },
+          {
+            "n": 8,
+            "answered": true,
+            "picked": true,
+            "target_in_prompt": true,
+            "skills_kept": 8,
+            "skills_total": 8,
+            "skills_budget_tokens": 6496,
+            "skills_kept_at_budget_cap": false,
+            "tokens_out": 1295,
+            "context_size": 8192,
+            "tools_tier": 1,
+            "emergency_truncated": false,
+            "http_ok": true,
+            "error": null,
+            "pass_votes": 1,
+            "partial_votes": 0,
+            "trials": 1,
+            "passed": true,
+            "partial": false
+          },
+          {
+            "n": 16,
+            "answered": true,
+            "picked": true,
+            "target_in_prompt": true,
+            "skills_kept": 16,
+            "skills_total": 16,
+            "skills_budget_tokens": 6496,
+            "skills_kept_at_budget_cap": false,
+            "tokens_out": 1702,
+            "context_size": 8192,
+            "tools_tier": 1,
+            "emergency_truncated": false,
+            "http_ok": true,
+            "error": null,
+            "pass_votes": 1,
+            "partial_votes": 0,
+            "trials": 1,
+            "passed": true,
+            "partial": false
+          },
+          {
+            "n": 32,
+            "answered": true,
+            "picked": true,
+            "target_in_prompt": true,
+            "skills_kept": 32,
+            "skills_total": 32,
+            "skills_budget_tokens": 6496,
+            "skills_kept_at_budget_cap": false,
+            "tokens_out": 2437,
+            "context_size": 8192,
+            "tools_tier": 1,
+            "emergency_truncated": false,
+            "http_ok": true,
+            "error": null,
+            "pass_votes": 1,
+            "partial_votes": 0,
+            "trials": 1,
+            "passed": true,
+            "partial": false
+          },
+          {
+            "n": 64,
+            "answered": true,
+            "picked": true,
+            "target_in_prompt": true,
+            "skills_kept": 64,
+            "skills_total": 64,
+            "skills_budget_tokens": 6496,
+            "skills_kept_at_budget_cap": false,
+            "tokens_out": 3908,
+            "context_size": 8192,
+            "tools_tier": 1,
+            "emergency_truncated": false,
+            "http_ok": true,
+            "error": null,
+            "pass_votes": 1,
+            "partial_votes": 0,
+            "trials": 1,
+            "passed": true,
+            "partial": false
+          },
+          {
+            "n": 128,
+            "answered": false,
+            "picked": false,
+            "target_in_prompt": null,
+            "skills_kept": null,
+            "skills_total": null,
+            "skills_budget_tokens": null,
+            "skills_kept_at_budget_cap": false,
+            "tokens_out": null,
+            "context_size": null,
+            "tools_tier": null,
+            "emergency_truncated": false,
+            "http_ok": false,
+            "error": "round1 HTTP 422: {\"error\":{\"message\":\"Unprocessable Content: Cloud routing persistently failed and local processing is unavailable (local input overflow). Maximum retry attempts reached. Please reduce the request size",
+            "pass_votes": 0,
+            "partial_votes": 0,
+            "trials": 1,
+            "passed": false,
+            "partial": false
+          },
+          {
+            "n": 96,
+            "answered": true,
+            "picked": true,
+            "target_in_prompt": true,
+            "skills_kept": 96,
+            "skills_total": 96,
+            "skills_budget_tokens": 6496,
+            "skills_kept_at_budget_cap": false,
+            "tokens_out": 5386,
+            "context_size": 8192,
+            "tools_tier": 1,
+            "emergency_truncated": false,
+            "http_ok": true,
+            "error": null,
+            "pass_votes": 1,
+            "partial_votes": 0,
+            "trials": 1,
+            "passed": true,
+            "partial": false
+          },
+          {
+            "n": 112,
+            "answered": false,
+            "picked": true,
+            "target_in_prompt": true,
+            "skills_kept": 112,
+            "skills_total": 112,
+            "skills_budget_tokens": 6496,
+            "skills_kept_at_budget_cap": false,
+            "tokens_out": 6126,
+            "context_size": 8192,
+            "tools_tier": 1,
+            "emergency_truncated": false,
+            "http_ok": true,
+            "error": null,
+            "pass_votes": 0,
+            "partial_votes": 1,
+            "trials": 1,
+            "passed": false,
+            "partial": true
+          },
+          {
+            "n": 104,
+            "answered": true,
+            "picked": true,
+            "target_in_prompt": true,
+            "skills_kept": 104,
+            "skills_total": 104,
+            "skills_budget_tokens": 6496,
+            "skills_kept_at_budget_cap": false,
+            "tokens_out": 5756,
+            "context_size": 8192,
+            "tools_tier": 1,
+            "emergency_truncated": false,
+            "http_ok": true,
+            "error": null,
+            "pass_votes": 1,
+            "partial_votes": 0,
+            "trials": 1,
+            "passed": true,
+            "partial": false
+          },
+          {
+            "n": 108,
+            "answered": true,
+            "picked": true,
+            "target_in_prompt": true,
+            "skills_kept": 108,
+            "skills_total": 108,
+            "skills_budget_tokens": 6496,
+            "skills_kept_at_budget_cap": false,
+            "tokens_out": 5942,
+            "context_size": 8192,
+            "tools_tier": 1,
+            "emergency_truncated": false,
+            "http_ok": true,
+            "error": null,
+            "pass_votes": 1,
+            "partial_votes": 0,
+            "trials": 1,
+            "passed": true,
+            "partial": false
+          },
+          {
+            "n": 110,
+            "answered": true,
+            "picked": true,
+            "target_in_prompt": true,
+            "skills_kept": 110,
+            "skills_total": 110,
+            "skills_budget_tokens": 6496,
+            "skills_kept_at_budget_cap": false,
+            "tokens_out": 6033,
+            "context_size": 8192,
+            "tools_tier": 1,
+            "emergency_truncated": false,
+            "http_ok": true,
+            "error": null,
+            "pass_votes": 1,
+            "partial_votes": 0,
+            "trials": 1,
+            "passed": true,
+            "partial": false
+          },
+          {
+            "n": 111,
+            "answered": true,
+            "picked": true,
+            "target_in_prompt": true,
+            "skills_kept": 111,
+            "skills_total": 111,
+            "skills_budget_tokens": 6496,
+            "skills_kept_at_budget_cap": false,
+            "tokens_out": 6080,
+            "context_size": 8192,
+            "tools_tier": 1,
+            "emergency_truncated": false,
+            "http_ok": true,
+            "error": null,
+            "pass_votes": 1,
+            "partial_votes": 0,
+            "trials": 1,
+            "passed": true,
+            "partial": false
+          }
+        ],
+        "first_422_at_n": 128,
+        "tokens_out_monotonic_in_n": true,
+        "tokens_out_sequence": [
+          [
+            1,
+            628
+          ],
+          [
+            2,
+            761
+          ],
+          [
+            4,
+            980
+          ],
+          [
+            8,
+            1295
+          ],
+          [
+            16,
+            1702
+          ],
+          [
+            32,
+            2437
+          ],
+          [
+            64,
+            3908
+          ],
+          [
+            96,
+            5386
+          ],
+          [
+            104,
+            5756
+          ],
+          [
+            108,
+            5942
+          ],
+          [
+            110,
+            6033
+          ],
+          [
+            111,
+            6080
+          ],
+          [
+            112,
+            6126
+          ]
+        ]
+      },
+      "gain_ratio": {
+        "value": 2.5227,
+        "formula": "111 / 44",
+        "usable": true,
+        "_note": "两档均 converged=true 且均未饱和 → 允许算精确倍数。这是容量池（无同分候选）上的第一组前沿数字；旧池上的 44 / 77 / 1.75x 保持作废，不得复活（此处 legacy 恰好同为 44 属数值巧合，两者不是同一个池、不可互相引用）。"
+      },
+      "authenticity_three_fields": {
+        "skills_kept_equals_total_on_all_pass_points": true,
+        "skills_kept_at_budget_cap_always_false": true,
+        "tokens_out_monotonic_both_arms": true,
+        "_evidence": "两档全部 pass 点均 skills_kept == skills_total（一条未丢弃）、skills_kept_at_budget_cap 恒 false（未咬预算上限）、tokens_out 随 N 单调增长 → 排除 Step 2 那次「过滤器旁路」式假提升。"
+      },
+      "overflow_boundary": {
+        "legacy_first_422_at_n": 46,
+        "optimized_first_422_at_n": 128,
+        "_legacy_note": "legacy 最小出现 422 的 N 是 46（round2，即回填 SKILL.md 正文之后越界）；前沿点 N=45 无 422 但 answered=False、picked=True、tokens_out=6364/8192 —— legacy 的边界紧贴溢出区。",
+        "_optimized_note": "optimized 首个 422 在 N=128（round1）；N=112 失败时无 422（tokens_out=6126）。即 111→112 这个边界的成因不是 round1 目录溢出。"
+      },
+      "bottleneck_experiment_at_frontier_plus_1": {
+        "n": 112,
+        "repeat": 1,
+        "oracle_pass": true,
+        "selection_pass": false,
+        "selection_picked": true,
+        "nobody_pass": false,
+        "harness_classification": "post_readback_overflow",
+        "detail": "三实验 @N=112（repeat=1）：oracle_pass=True，selection_pass=False（其中 selection_picked=True），nobody_pass=False（对照档，False 才健康；适用样本数=1/1，round1 未选中目标技能的试探不计入）；结论：oracle 成、selection 选对了目标技能但读完正文后仍答错：回填后二次溢出/注意力退化是瓶颈，指向 P2（SKILL.md 分节压缩）。",
+        "_significance": "这是本项目第一次拿到 selection_picked=True 却 answered=False 的形态：模型在容量池上**选对了**目标技能并发起 read，却在读完正文后答错。分类从旧池时代的 long_catalog_selection 翻转为 post_readback_overflow，指向 P2（SKILL.md 分节压缩）。",
+        "_caveat_not_yet_conclusive": "按既有留档纪律，下 post_readback_overflow 结论前必须先对齐自变量：_sc_experiment_oracle() 没有 _sc_single_trial() 的 4 轮 filler，oracle 档少了「跨轮次仍能定位」这道压力，因此 oracle 通过不足以严格排除注意力退化。本切片范围内未补 filler、未重复采样（repeat=1），故该分类只作为线索记录，**不得**作为 P2 已被证实为瓶颈的依据。"
+      },
+      "suite_health": {
+        "total": 17,
+        "passed": 16,
+        "failed": 1,
+        "crashed": 0,
+        "skipped": 0,
+        "ignored": 0,
+        "failed_equals_ignored": false,
+        "failed_cases": [
+          {
+            "model": "qwen3-8b-8480",
+            "name": "SKILL_CAPACITY: optimized scenario3 disclosure_tiers",
+            "ignorable": false,
+            "detail": "N=24：L2+L1+L0=3+6+15=24 == Kept=24 ? True；三档真的分档（L1+L0>=1）? True；目标技能形态=L2（要求 L2；拿不到 [Prompt] 日志块时为 None，不当失败）；skills_budget_tokens=6496；D4 排序区分度：同分干扰项 2 条，目标档位=2，同分干扰项档位=[2, 2]，目标严格跑赢中位数？False（同分干扰项为 0 条时不适用，不当失败）",
+            "_root_cause": "该用例的 D4 排序区分度断言要求「目标档位严格高于同分干扰项档位的中位数」。上一切片实现的 skill_disclosure.tie_aware_l2（默认 true）会把整个同分组一起提升到 L2，于是 N=24 下目标与 2 条同分干扰项档位全为 2，严格大于不再成立（此前 tie_aware_l2 不存在时为 [1,2]、中位数 1.5 → 通过）。",
+            "_disposition": "如实记为真失败、未修。这是断言与 tie_aware_l2 的语义冲突，不是产品缺陷；修法二选一（本切片范围外）：断言改为「目标档位 >= 同分组档位且不低于任何同分项」，或该用例显式以 tie_aware_l2=false 跑。"
+          }
+        ],
+        "_note": "本次 skill_capacity 的 failed(1) != ignored(0)，健康判据未满足，如实记录，不豁免。守门套件 prompt_fidelity / qnn 本切片按范围未跑。"
+      }
+    },
+    "scenario3_assertion_fix": {
+      "_why": "唯一一条不可豁免失败 `SKILL_CAPACITY: optimized scenario3 disclosure_tiers`（ignorable=False）导致 failed(1) != ignored(0)，违反健康判据。根因是断言与Step 5 阶段 C 新增的 skill_disclosure.tie_aware_l2（默认 true）语义冲突：该开关刻意不切开一组同分技能、把整组一起提到 L2，于是原判据「目标档位严格高于同分干扰项档位中位数」在数学上永不可能成立（N=24 下目标与 2 条同分锚点档位全为 2，中位数 2，2 > 2 为假）。tie_aware_l2 存在前档位是 [1,2]、中位数 1.5 故通过。这是断言与新开关的语义冲突，不是产品缺陷。",
+      "chosen_option": "改断言（而不是让该用例以 tie_aware_l2=false 跑）",
+      "_why_this_option": [
+        "改断言是单一判据同时覆盖开关两种状态，不需要为一个用例额外起一次配置覆盖 + 服务重启（`_ScArmConfigOverride` 改 service_config.json 必须重启服务才生效，成本约 35s 冷启）；",
+        "更重要的是新判据表达的才是 D4 真正要保证的性质：**不允许任何与目标同分的干扰项被披露到比目标更高的档位**。原「严格高于」实际上要求目标独占最高档，那是比 D4 设计目标更强的、与 tie_aware_l2 直接矛盾的要求。"
+      ],
+      "old_assertion": "target_rank > median(distractor_ranks)",
+      "new_assertion": "target_rank >= max(distractor_ranks)",
+      "function_renamed": "_sc_target_outranks_same_score_distractors -> _sc_target_not_outranked_by_same_score",
+      "measurement_key_renamed": "outranks_same_score_median -> not_outranked_by_same_score",
+      "_not_weakened_to_vacuous_truth": "新判据没有被削弱到恒真：它仍然精确地拒绝阶段 B 实测到的那种病理形态——`l2_top_k=2` 且 `tie_aware_l2=false` 时，两条同分锚点吃掉 L2 名额而目标被压到 L1（target_rank=1 < max=2）→ 断言失败。也就是说 tie_aware_l2=false 下它依然保有真实的排序区分力，只是不再要求目标必须**独占**最高档。"
+    },
+    "d6_self_heal_final_disposition": {
+      "decision": "不做（not implemented）",
+      "switch_not_added": "skill_disclosure.self_heal 未加入 model_config.h；response_dispatcher.cpp 未改动",
+      "_reason": [
+        "D6 的目标故障模式是「候选内选错」——模型发起了 read 但读了错的技能，检测到后下一轮只带 Top-1 技能的 L2 全文补救。这个故障模式在**要交付的容量指标**上不成立：容量池 optimized 前沿点 N=111 的形态是 picked=True/answered=True，即模型第一次就读对了目标技能；legacy 前沿点 N=44 同理。",
+        "它只在**同分池**那种三路完全同分的对抗构造上成立（阶段 B 实测：read_rate=1.000 但 picked_rate=0.000，模型 10/10 次读了排序在目标前面的同分干扰项）。而同分池是刻意构造的病理度量工具，不是容量指标；为它上一套服务端自愈机制，等于为一个人工构造的对抗输入增加默认路径复杂度。",
+        "更根本的是：即便实现了 D6，它接受「第一次选错」再补救，而同分场景下「谁该排第一」这个问题在不引入向量/额外推理的前提下**没有原则性答案**（见 line_c_order_experiment 的结论）——自愈只能把 primacy bias 的受害者换一个，无法给出正确的第一选择。",
+        "容量池两档前沿点均无畸形工具调用（`unknow` 计数器从未触发），因此复用该计数器作为触发信号在当前用例上也拿不到信号。"
+      ],
+      "falsification_criterion": "可一次实测证伪：在**容量池**上（不是同分池）固定 N 取该档前沿点，repeat>=5 采样，若出现 `any_read=True` 且 `picked=False` 的比例 > 20%（即模型确实发起了 read 但稳定读错，且这发生在非对抗的容量池构造上），或 response_dispatcher 的 `unknow` 畸形工具调用计数器在该采样中被触发 >= 1 次，则 D6 的触发前提在真实容量场景上成立，本条「不做」结论被证伪，应实现 D6。当前实测值：容量池前沿点 picked=True（0% 读错），`unknow` 计数器 0 次触发。"
+    },
+    "explicit_not_doing": {
+      "_doc": "以下各项显式记为「不做 + 原因 + 可一次实测证伪的判据」，不为凑齐清单写代码。",
+      "P2_skill_md_section_aware_compression": {
+        "decision": "不做",
+        "reason": "Step 4 已实测排除为当时的瓶颈（N=78 无 422、oracle 档通过）；容量池上 optimized 前沿点 tokens_out=6080/8192、emergency_truncated=False、skills_kept_at_budget_cap=False，「回填后二次溢出」在前沿点没有发生。",
+        "falsification_criterion": "固定容量池前沿点 N=111，repeat>=5：若出现 `picked=True` 且 `answered=False` 并伴随 `emergency_truncated=True` 或 round2 422 的比例 > 20%，则回填后二次溢出成立，应实现 P2。",
+        "_open_lead": "N=112（前沿之上第一个失败点）已首次出现 oracle_pass=True + selection_picked=True + answered=False，套件机械分类翻转为 post_readback_overflow。**未采信为结论**（oracle 档缺 selection 档的 4 轮 filler，且 repeat=1）。Copilot 第 3 轮给的最便宜单变量实验：固定 N=112 与目标/目录，仅删除 selection 对话里那 4 轮 filler，其余全不变；若 answered 由 False 变 True 而 picked 仍 True → 支持二次溢出/注意力退化；若仍 picked=True/answered=False → 该解释被削弱，转向「正文利用失败/检索后推理失败」。本轮未跑。"
+      },
+      "catalog_active_pagination": {
+        "decision": "不做（且不新增该协议面）",
+        "reason": "它解决「目录装不下/挤不进/翻不到页」，而容量池全曲线 skills_kept==skills_total、skills_kept_at_budget_cap 恒 false，optimized 前沿点 tokens_out 6080/8192——该症状实测不存在。",
+        "falsification_criterion": "若在某个 N 上观测到 `skills_kept < skills_total` 或 `skills_kept_at_budget_cap=True` 且该 N 低于当前前沿，则「装不下」成立；分页成立的进一步判据是分页后前沿 ≈ N 且总 token 增长次线性。"
+      },
+      "D5_two_phase_skill_selection": {
+        "decision": "不做（计划已定默认不实施）",
+        "reason": "它为「目录太大看不完」设计，而 optimized 档把 111 条技能压进 6080 token 且一条未丢弃，症状实测不存在；且它需要额外一次推理，违反零额外推理延迟约束。",
+        "falsification_criterion": "N=128/256 下「仅 name+一行摘要目录」的 Top-1 命中率与单阶段打分 Top-1 相差 >= 1% 且前沿提升，则 D5 有贡献。"
+      },
+      "a_tie_aware_l2": {
+        "decision": "已实现并保留为默认安全开关，但**禁止报告为瓶颈修复**",
+        "reason": "被自身预设判据证伪：同分池 N=78 上目标 5/5 次成功进 L2（内容完整可见）而 picked_rate 仍为 0.000，与 tie_aware_l2=false 对照组逐字段一致。它只改变披露深度，不改变目标在目录里的相对顺序，而顺序才是决策变量。",
+        "retained_because": "回滚等价性已实测成立（false 时逐字节退化）、零额外推理延迟、未新增协议面；且它是本轮 scenario3 断言修正的直接动因，删掉反而会让该断言语义回退。",
+        "_default_flipped_to_false": "Step 5 收口小修：默认值由 true 改为 **false**（见 step5_final_default_flip 节）。原留档写的「默认安全」不成立——默认开启时扩组可覆盖整个同分组，极端同分场景下会让目录后缀被整段丢弃（Skills-Kept 退化），该风险此前没有任何用例覆盖。",
+        "falsification_criterion": "同分池固定 N=78，只切 tie_aware_l2 true/false，若 picked_rate 差 > 0.3，则它确实是瓶颈修复。当前实测两档均 0.000。"
+      },
+      "b_l1_keep_description_tail": {
+        "decision": "不做",
+        "reason": "与 (a) 修同一个 E 假设（L1 截断导致信息塌缩），而 (a) 已被证伪说明「让目标内容更可见」这条路线不改变选择结果；且合成池的尾部 canary 是构造产物，真实 SKILL.md 未必把判别信息放尾部。",
+        "falsification_criterion": "固定同分池 N=78 与全体 L1，只把 L1 摘要由前 N 字节改为保留 description 尾段，若 picked_rate >= 0.8 则 (b) 成立。",
+        "_criterion_class": "requires_code_change_first（明确标注类别：该判据必须先实现「保尾段」这个替代实现才能测，不属于纯测量。本轮不要求改写，只如实标注其可执行程度低于 (c) 与 a/P2/分页/D5 那几条纯测量判据）"
+      },
+      "c_stronger_tie_break": {
+        "decision": "机制已实测确认，但**不改算法**",
+        "reason": "line_c_order_experiment 已确认「分数完全相同时目录顺序单独决定模型读哪一条」（仅改名置首 → picked_rate 0.000→1.000, 3/3）。但对**真正同分**的候选，压缩链路在不引入 embedding/额外推理的前提下没有任何原则性信号可判断「谁更应该排前面」；把「按名字字母序」换成任何别的确定性规则，只是把模型的首位偏置（primacy bias）转移到另一个技能上，不是修复。",
+        "falsification_criterion": "固定同分池 N=78 与全部其他变量，**仅把同分组内的 tie-break 由名字升序改为名字降序**（纯测量，不需要发明任何新信号）：若 picked_rate 仍 < 0.8，则确认「替换一条确定性顺序规则」对选择结果无效（只是把 primacy bias 的受害者换一个），(c) 的「不改算法」结论成立；若 picked_rate >= 0.8，则说明顺序规则的具体选择本身有救，(c) 应重新升为候选。",
+        "_criterion_class": "pure_measurement（本轮按评审意见由存在性条件改写为一次可执行的测量：原判据写成「若能给出一个信号 S…」，属存在性条件、不可一次实测）"
+      }
+    },
+    "copilot_round3_statistical_reviewer": {
+      "_meta": "copilot_round.py 快路径，--owner step5-final-stats，**新会话**（未用 --continue-url），rc=0，model_confirmed = GPT 5.6 思考。角色 = 统计显著性审查者（前两轮已用反对派、实验设计者）。先把本轮容量池全部新数字（两档曲线、44/111/2.5227、首个 422 的 N、repeat=1、N=112 那条 selection_picked=True/answered=False 线索）喂给它再提问；限 600 字、禁 markdown 表格。",
+      "q1_pool_split_removed_confound": {
+        "copilot": "「池组成随 N 跳变」混淆已基本消除（目标分数优势、近似干扰项集合、目标目录序号跨 N 恒定），44 与 111 可解释为同一任务族下的容量差。剩余未排除混淆：**两档的失败机制是否相同**。证伪判据：在各自前沿附近（44/45/46 与 111/112/113）统计失败用例的 picked/answered 结构，若两档失败类型分布显著不同（一档主要未 picked、另一档主要已 picked 未 answered），则「同一种容量前沿」的解释不成立。",
+        "my_disposition": "**部分采纳且用手上已有数据直接部分回答**：legacy 前沿+1（N=45）失败形态是 picked=True/answered=False；optimized 前沿+1（N=112）失败形态同样是 picked=True/answered=False。两档在各自前沿边界上的失败形态**同类**，因此 Copilot 担心的这条残余混淆在 N±1 这一层上没有出现。但它给的完整判据要求 44/46 与 111/113 也统计，本轮未跑，如实标为未完全排除。"
+      },
+      "q2_statistical_significance": {
+        "copilot": "repeat=1 下**不能称统计显著**，只能称「效应量极大且方向明确」。最小补强：只测 44、45、111、112 四点各 repeat=5。证伪判据：若 44 或 111 的 pass_rate <= 0.8，或 45、112 出现与当前相反的结果占多数，则 44→111 不稳；四点均 >= 4/5 保持当前方向即足以支持前沿差远大于随机波动。",
+        "my_disposition": "**采纳为表述纪律，本轮未跑补强实验**。据此，本项目对外表述从「44→111 具有统计显著性」降级为「效应量极大且方向明确（2.5227x），repeat=1，未做重复性检验」。四点 repeat=5 的补强实验（约 4 点 × 5 次 × 65s ≈ 22 分钟）留作后续，判据原文已落档。"
+      },
+      "q3_curve_self_consistency": {
+        "copilot": "未见真正自相矛盾：46 出 422 而 45 不出是阈值现象；96 过而 112 不过是二分搜索本就在验证单调边界。最值得复核的是 legacy 的 N=45——picked=True/answered=False 且**无 422**，说明失败可发生在预算未溢出的区域。证伪判据：N=45 重复 10 次，若失败形态稳定复现且仍无 422，则存在独立于上下文溢出的第二失效机制；若多数转为 pass，则原观测可能是随机失误。",
+        "my_disposition": "**采纳其判断（曲线自洽）**，并记下 N=45 的复核判据。这条与本项目 Step 4 已独立得到的结论一致：前沿边界的成因不是上下文溢出。N=45 重复 10 次的复核本轮未跑。"
+      },
+      "q4_cheapest_experiment_for_n112_lead": {
+        "copilot": "固定 N=112、固定目标技能与目录，**仅删除 selection 对话里那 4 轮 filler 消息**，其余完全不变。证伪判据：若删 filler 后 answered 由 False 变 True 而 picked 仍 True，则支持「回填后二次溢出/注意力退化」；若仍 picked=True/answered=False，则该解释被削弱，应转向「正文利用失败/检索后推理失败」。",
+        "my_disposition": "**采纳为下一轮的首个动作**。它正好把本项目此前自己标注的「未对齐自变量」（_sc_experiment_oracle() 没有 _sc_single_trial() 的 4 轮 filler）变成一个可执行的单变量实验——不是给 oracle 补 filler，而是给 selection 去掉 filler，成本更低、自变量更干净。本轮未跑。"
+      },
+      "_discipline": "产出只当线索：本轮 Copilot 的四条结论没有任何一条被用来改实现。Q1 用手上已有数据做了部分实测回答；Q2 被采纳为**表述降级**（不再声称统计显著）；Q3/Q4 全部以「可一次实测证伪的判据」原文落档，留作后续动手前的收口清单。"
+    },
+    "gate_suites_step5_final": {
+      "_doc": "本切片（scenario3 断言修正后）的守门实测。逐用例列出所有 passed=false 的条目（含 skipped）+ ignorable 标记 + results.json 出处，不只留汇总数字。远程 ARM64，qwen3-8b-8480（qnn 套件另含 qwen3_vl_4b-8480）。",
+      "skill_capacity_smoke": {
+        "_command": "--suite skill_capacity --skill_capacity_models qwen3-8b --skill_capacity_max 8 --skill_capacity_repeat 1 --skill_capacity_arms both",
+        "source": "test_results\\sc_fix\\results.json",
+        "summary": {
+          "total": 17,
+          "passed": 14,
+          "failed": 0,
+          "crashed": 0,
+          "skipped": 3,
+          "ignored": 0
+        },
+        "health_verdict": "failed(0) == ignored(0) 且 crashed==0 → 健康判据成立。本轮修复达成目标：此前那条不可豁免失败 optimized scenario3 disclosure_tiers 已通过。",
+        "scenario3_optimized_detail": "N=24：L2+L1+L0=3+6+15=24 == Kept=24 ? True；三档真的分档（L1+L0>=1）? True；目标技能形态=L2；skills_budget_tokens=6496；D4 排序区分度：同分干扰项 2 条，目标档位=2，同分干扰项档位=[2, 2]，目标未被任何同分项压过档位？True（要求 target_rank >= max(distractor_ranks)）",
+        "scenario3_legacy_detail": "legacy 档（skill_disclosure.enabled=false）回滚等价性：L2+L1+L0=24+0+0=24 == Kept=24 ? True；L2==Kept 且 L1==L0==0 ? True；target_form=L2 —— 回滚等价性未受本次断言修正影响",
+        "skipped_cases": [
+          {
+            "model": "qwen3-8b-8480",
+            "name": "SKILL_CAPACITY: qwen3-8b legacy_frontier",
+            "skipped": true,
+            "ignorable": false,
+            "detail": "frontier >= 8（倍增测试到 max_n=8 仍全部通过，未收敛）——冒烟刻意调小上限，正式前沿数字取自 max_n=128 那次运行（legacy 44）。按设计跳过，非缺陷。"
+          },
+          {
+            "model": "qwen3-8b-8480",
+            "name": "SKILL_CAPACITY: qwen3-8b optimized_frontier",
+            "skipped": true,
+            "ignorable": false,
+            "detail": "frontier >= 8（同上）——正式数字 optimized 111。按设计跳过，非缺陷。"
+          },
+          {
+            "model": "qwen3-8b-8480",
+            "name": "SKILL_CAPACITY: bottleneck_experiment n=8",
+            "skipped": true,
+            "ignorable": false,
+            "detail": "三实验 @N=8：oracle_pass=True、selection_pass=True(selection_picked=True)、nobody_pass=False（对照档 False 才健康）→ 本探测点未触及瓶颈边界，该实验必须在真实前沿之上的失败点才有判别力。按设计跳过，非缺陷。"
+          }
+        ],
+        "failed_cases": []
+      },
+      "prompt_fidelity": {
+        "source": "test_results\\sc_fix_pf\\results.json",
+        "summary": {
+          "total": 11,
+          "passed": 10,
+          "failed": 0,
+          "crashed": 0,
+          "skipped": 1
+        },
+        "baseline_match": true,
+        "_verdict": "基线 10/0/1 未退化",
+        "failed_cases": [],
+        "skipped_cases": [
+          {
+            "model": "qwen3-8b-8480",
+            "name": "PROMPT_FIDELITY: pure image single question keeps accompanying text",
+            "skipped": true,
+            "ignorable": false,
+            "detail": "目标模型 qwen3-8b-8480 不支持视觉模态（detect_modality 未命中 image），按设计精确跳过"
+          }
+        ]
+      },
+      "qnn": {
+        "source": "test_results\\sc_fix_qnn\\results.json",
+        "summary": {
+          "total": 54,
+          "passed": 49,
+          "failed": 4,
+          "ignored": 4,
+          "crashed": 0,
+          "skipped": 1
+        },
+        "baseline_match": true,
+        "_verdict": "4 项失败逐条核实为已知 /images/generations 与 /v1/images/generations 501 且 ignorable=True；crashed=0 —— 与基线一致",
+        "failed_cases": [
+          {
+            "model": "qwen3_vl_4b-8480",
+            "name": "POST /images/generations",
+            "ignorable": true,
+            "detail": "FAIL: status=501, body="
+          },
+          {
+            "model": "qwen3_vl_4b-8480",
+            "name": "POST /v1/images/generations",
+            "ignorable": true,
+            "detail": "FAIL: status=501, body="
+          },
+          {
+            "model": "qwen3-8b-8480",
+            "name": "POST /images/generations",
+            "ignorable": true,
+            "detail": "FAIL: status=501, body="
+          },
+          {
+            "model": "qwen3-8b-8480",
+            "name": "POST /v1/images/generations",
+            "ignorable": true,
+            "detail": "FAIL: status=501, body="
+          }
+        ]
+      }
+    },
+    "_reporting_discipline_step5_final": {
+      "gain_ratio_wording": "**最新数字（Step 5 收口小修后）**：容量池 legacy 44 / optimized **118** / gain **2.6818**，两档 converged、未饱和、usable_for_gain_ratio=True、真伪三字段齐备 → 可作为精确倍数引用（见 step5_final_default_flip.frontier_update）。此前的 optimized 111 / gain 2.5227 是 skill_disclosure.tie_aware_l2=true（当时默认值）下的数字，默认值改为 false 后**已被取代**，报告不得再引用。表述纪律不变：repeat=1、未做重复性检验，**不得**声称统计显著，只能表述为「效应量极大且方向明确」。",
+      "invalidated_numbers_stay_invalidated": "旧池上的前沿 44 / 77 与提升 1.75x 保持作废。容量池 legacy 恰好也是 44 **不是数值巧合，而是机制同源的必然**（本轮按评审意见更正此前「数值巧合」的失实表述）：两池共用同一套 _sc_build_skill_description() / _sc_build_skill_doc() 生成器，legacy 档 skill_disclosure.enabled=false 走全 L2 渲染，单条目录条目体量在两池里几乎相同，于是容量边界由「N × 单条体量」直接决定、两池撞同一个边界。这条机制解释**不构成对旧池数字的复活**：旧池 44 的问题从来不是数值本身，而是它与 optimized 77 的对照被池组成随 N 跳变污染，因此禁止跨池引用（不得用容量池 legacy 44 去佐证旧池 44/77/1.75x）的纪律不变。",
+      "tie_aware_l2_not_a_fix": "skill_disclosure.tie_aware_l2 保留为可配置开关，**禁止在报告里表述为瓶颈修复**（被自身判据证伪）。注：其默认值已在 Step 5 收口小修中由 true 改为 **false**，见 step5_final_default_flip 节。"
+    },
+    "step5_final_default_flip": {
+      "_doc": "Step 5 收口小修（本切片）：SkillDisclosureConfig::tie_aware_l2 默认值由 true 改为 false，开关本体与 prompt_optimizer.cpp 一字未改；顺带补一条最坏情形机械断言；并按评审意见修正两处留档表述。远程 ARM64 qwen3-8b-8480 / 8192 context 实测。",
+      "recorded_at": "2026-08-31",
+      "code_changes": {
+        "model_config.h": "SkillDisclosureConfig::tie_aware_l2 默认值 true -> false（含注释写明两条实测理由）",
+        "model_manager.cpp": "同步修掉一处与新默认值冲突的缺陷：解析处原写 sd.value(\"tie_aware_l2\", true) 把缺字段回退硬编码为 true，与「旧配置缺字段按结构体默认值工作」的既定约定相反（旧配置文件若写了 skill_disclosure 节但没写该键，会拿到与出厂默认相反的行为）。改为 sd.value(\"tie_aware_l2\", sd_cfg.tie_aware_l2)。",
+        "test_service.py": "① 新增 _sc_build_uniform_tie_pool(n) + 场景 3b _sc_case_tie_group_kept_no_regress（见下）；② 新增 _sc_tie_aware_l2_enabled(probe)：从服务启动日志的 `[Config] skill_disclosure loaded: ... tie_aware_l2=0/1` 回显机械读出实际开关取值；③ 场景 3 的排序子断言改为按该实测取值决定适用性，并新增仍非恒真的「目标不得被降到 L0」硬断言。",
+        "_not_changed": "prompt_optimizer.cpp（含 AssignSkillDetailLevels 的扩组实现）、前沿判据核心语义、legacy 档行为，均一字未改。"
+      },
+      "why_default_false": {
+        "reason_1_falsified_by_own_criterion": "该开关已被它自己预设的判据证伪：同分池 N=78 下目标 5/5 次成功升到 L2（内容完整可见），picked_rate 仍为 0.000，与 tie_aware_l2=false 对照组逐字段一致 —— 零实测收益。",
+        "reason_2_uncovered_truncation_risk": "默认开启存在此前没有任何用例覆盖的目录截断风险：effective_l2_top_k 会一直扩到覆盖整个同分组，极端情形（如 relevance_filter.zero_hit_keep_all 兜底下全体候选同得 0 分 → 同分组 = 整池）会让前若干条按 L2 吃掉几乎全部 skills 预算，随后第一个连 L0 都放不进的条目触发 AssignSkillDetailLevels() 的 `dropped = candidates.size() - idx; break;`，整段丢弃剩余后缀。即既有的「逐条 L2→L1→L0 降档」只保证不越界，并不保证 Skills-Kept 不退化。",
+        "discipline": "默认关闭同时满足两条既定纪律：新行为默认安全 + 不把被证伪的行为留在默认路径上。开关本体保留（需要度量同分 tie-break 行为时显式置 true）。"
+      },
+      "guard_choice": {
+        "_options": "任务给的二选一：(i) 给扩组加上限（扩组后 L2 条数不得超过 skills 预算某个比例，超出即不扩）；(ii) 补一条「全同分 + N 较大 → Skills-Kept 不退化」的机械断言。",
+        "chosen": "(ii) 补机械断言",
+        "tradeoff": "选 (ii) 的理由：① 本切片的硬约束是「开关本体与其余代码一字不改」，(i) 必须改 prompt_optimizer.cpp 的算法逻辑，越界；② 默认值已改为 false，该风险在默认路径上不复存在，真正需要的是「有人再把它打开时能当场看到后果」这条可机械核验的守门，而不是在算法里再加一层只在非默认路径上生效的启发式上限（那会引入新的、同样未被覆盖的比例常数）；③ 断言比上限更能如实暴露风险量级 —— 实测证明后果比预估更严重（见 assertion_is_not_vacuous）。",
+        "case": "SKILL_CAPACITY: optimized scenario3b tie_group_kept_no_regress",
+        "pool": "_sc_build_uniform_tie_pool(64)：只取 _SC_FILLER_TOPICS，整池逐词同构、彼此得分完全相同，因此排序后 l2_top_k 边界分数 == 全池分数 → tie_aware_l2=true 时扩组 = 整池",
+        "assertion": "Skills-Kept == Skills-Total（目录后缀不得被整段丢弃）",
+        "legacy_arm": "legacy 档 skill_disclosure.enabled=false 时 AssignSkillDetailLevels() 完全不参与，该断言按设计精确跳过（skipped=True）"
+      },
+      "local_confirmation": {
+        "_doc": "按任务要求只做局部确认，不重跑整条前沿曲线。远程增量重编后在同一服务进程内跑。",
+        "scenario3_default_false": {
+          "passed": true,
+          "skills_l2_l1_l0": "2/6/16",
+          "skills_kept": 24,
+          "skills_total": 24,
+          "target_form": "L1",
+          "target_rank": 1,
+          "distractor_ranks": [
+            2,
+            2
+          ],
+          "not_outranked_by_same_score": false,
+          "rank_assertion_applicable": false,
+          "_why_applicable_false": "tie_aware_l2 关闭时 l2_top_k=2 会被两条同分锚点按名字升序吃掉、目标必然落到 L1，`target_rank >= max(distractor_ranks)` 物理上不可达。这不是产品缺陷也不是断言写错，而是「真正同分时谁进 L2」本就没有原则性答案（见 explicit_not_doing.c_stronger_tie_break）。故该子断言按实测开关取值判定为不适用；同时新增的「目标不得被降到 L0」在关闭档位下仍然成立且非恒真（目标与锚点同属最高分组，必须落在 L2/L1），本次实测 True。",
+          "_tie_aware_l2_from_log": null,
+          "_note_on_log_readout": "optimized 档的配置覆盖不写 skill_disclosure 节（走结构体默认值），因此启动日志里没有 [Config] skill_disclosure loaded 回显 → 读出 None → 排序子断言同样按不适用处理。显式写了该节时（如下面 tie_aware_true 档）能正确读出 true。"
+        },
+        "scenario3_explicit_true": {
+          "passed": true,
+          "tie_aware_l2_from_log": true,
+          "skills_l2_l1_l0": "3/6/15",
+          "skills_kept": 24,
+          "skills_total": 24,
+          "target_form": "L2",
+          "target_rank": 2,
+          "distractor_ranks": [
+            2,
+            2
+          ],
+          "not_outranked_by_same_score": true,
+          "rank_assertion_applicable": true,
+          "_verdict": "显式开启该开关时，场景 3 的原本语义（排序区分度断言）仍被完整测到且通过 —— 改默认值没有让这条断言失效，只是让它在默认路径上按设计不适用。"
+        },
+        "scenario3b_default_false": {
+          "passed": true,
+          "n": 64,
+          "skills_kept": 64,
+          "skills_total": 64,
+          "skills_l2_l1_l0": "2/6/56",
+          "skills_budget_tokens": 6496,
+          "tokens_out": 3825,
+          "context_size": 8192
+        },
+        "assertion_is_not_vacuous": {
+          "_doc": "同一条断言在显式 tie_aware_l2=true 下的实测结果 —— 证明它不是恒真的装饰。",
+          "tie_aware_l2_from_log": true,
+          "passed": false,
+          "observed": "HTTP 422 Unprocessable Content: ... (local input overflow). Maximum retry attempts reached.",
+          "_verdict": "后果比预估更严重：不只是「后缀被丢弃、Skills-Kept 退化」，而是整条请求直接因输入越界被 422 拒绝（全同分 N=64 时扩组把整池 64 条都置为期望 L2，每条约 137 token → 远超 skills 预算与上下文）。这条实测把「默认关闭」从「谨慎选择」变成「必须」。"
+        }
+      },
+      "frontier_update": {
+        "_doc": "改默认值后 optimized 前沿**发生了变化**，按任务要求如实更新（不重跑整条曲线，只在原前沿边界之上续测）。legacy 档 skill_disclosure.enabled=false → AssignSkillDetailLevels() 完全不参与 → legacy 44 与该开关无关，未重测。",
+        "legacy": {
+          "frontier_skills": 44,
+          "converged": true,
+          "_note": "沿用 capacity_pool_frontier 的已收敛数字，未重测"
+        },
+        "optimized_old_under_tie_aware_true": {
+          "frontier_skills": 111,
+          "converged": true,
+          "_status": "作废（superseded）：该数字是在 tie_aware_l2=true（当时的默认值）下测出的，与改默认值后的出厂行为不再对应。保留在 capacity_pool_frontier 节供追溯，但报告一律引用下面的新数字。"
+        },
+        "optimized_new_under_tie_aware_false": {
+          "frontier_skills": 118,
+          "converged": true,
+          "frontier_saturated": false,
+          "usable_for_gain_ratio": true,
+          "search_range": "(112, 128]（起点：默认 false 下 N=111 与 N=112 各复测 1 次均通过，说明原边界 111 已上移，故在 112 之上二分）",
+          "probe_curve": [
+            {
+              "n": 111,
+              "passed": true,
+              "picked": true,
+              "answered": true,
+              "target_in_prompt": true,
+              "skills_kept": 111,
+              "skills_total": 111,
+              "skills_kept_at_budget_cap": false,
+              "tokens_out": 5997,
+              "http_422": false
+            },
+            {
+              "n": 112,
+              "passed": true,
+              "picked": true,
+              "answered": true,
+              "target_in_prompt": true,
+              "skills_kept": 112,
+              "skills_total": 112,
+              "skills_kept_at_budget_cap": false,
+              "tokens_out": 6043,
+              "http_422": false,
+              "_note": "该点在 tie_aware_l2=true 下曾失败（capacity_pool_frontier 记录 picked=True/answered=False），默认改 false 后通过"
+            },
+            {
+              "n": 116,
+              "passed": true,
+              "picked": true,
+              "answered": true,
+              "target_in_prompt": true,
+              "skills_kept": 116,
+              "skills_total": 116,
+              "skills_kept_at_budget_cap": false,
+              "tokens_out": 6226,
+              "http_422": false
+            },
+            {
+              "n": 118,
+              "passed": true,
+              "picked": true,
+              "answered": true,
+              "target_in_prompt": true,
+              "skills_kept": 118,
+              "skills_total": 118,
+              "skills_kept_at_budget_cap": false,
+              "skills_budget_tokens": 6496,
+              "tokens_out": 6315,
+              "context_size": 8192,
+              "emergency_truncated": false,
+              "tools_tier": 1,
+              "http_422": false,
+              "_role": "新前沿点"
+            },
+            {
+              "n": 119,
+              "passed": false,
+              "picked": true,
+              "answered": false,
+              "target_in_prompt": true,
+              "skills_kept": 119,
+              "skills_total": 119,
+              "skills_kept_at_budget_cap": false,
+              "tokens_out": 6360,
+              "http_422": false,
+              "partial": true,
+              "_role": "前沿+1 实测失败 → converged=True 名副其实"
+            },
+            {
+              "n": 120,
+              "passed": false,
+              "picked": true,
+              "answered": false,
+              "target_in_prompt": true,
+              "skills_kept": 120,
+              "skills_total": 120,
+              "skills_kept_at_budget_cap": false,
+              "tokens_out": 6413,
+              "http_422": false,
+              "partial": true
+            }
+          ],
+          "authenticity_three_fields": {
+            "skills_kept_equals_total": "全部探测点成立（111/111、112/112、116/116、118/118、119/119、120/120）—— 一条技能都没被丢弃",
+            "skills_kept_at_budget_cap": "全部探测点恒 false —— 从未咬到预算上限",
+            "tokens_out_monotonic": "5997 → 6043 → 6226 → 6315 → 6360 → 6413 随 N 单调递增",
+            "_verdict": "三字段齐备 → 排除 Step 2 那次「skills 预算被砍 → kept 恒定 → 体量不随 N 增长 → 永不撞 422 → 假 ≥256」式的过滤器旁路假提升"
+          },
+          "_failure_mode_at_boundary": "119/120 失败形态为 picked=True/answered=False 且**无 422**（tokens_out 6360/6413 << 8192）—— 与 legacy N=45、optimized(true) N=112 的边界失败形态同类，前沿边界的成因不是上下文溢出这条既有结论继续成立。"
+        },
+        "gain_ratio": {
+          "value": 2.6818,
+          "formula": "118 / 44",
+          "usable": true,
+          "_note": "两档均 converged=true、均未饱和、真伪三字段齐备 → 允许作为精确倍数引用。**取代**此前的 111/44=2.5227（那是 tie_aware_l2=true 下的数字）。旧池的 44/77/1.75x 仍然保持作废，不得复活。",
+          "_wording_discipline": "repeat=1，未做重复性检验 → 只能表述为「效应量极大且方向明确（2.6818x）」，不得声称统计显著（沿用 Copilot 第 3 轮采纳的表述纪律）。"
+        },
+        "_honest_note_repeat": "新前沿的 4 个探测点（116/118/119/120）与复测点（111/112）均为 repeat=1。与 capacity_pool_frontier 那次运行的采样强度相同，可比；但同样不具备统计显著性。"
+      },
+      "doc_corrections": {
+        "c_stronger_tie_break_criterion": "原判据写成存在性条件（「若能给出一个不引入额外推理、且在同分组内可判别优劣的确定性信号 S…」），不可一次实测。已改为纯测量形式：固定同分池 N=78 与全部其他变量，仅把同分组内的 tie-break 由名字升序改为名字降序，若 picked_rate 仍 < 0.8 则确认「替换一条确定性顺序规则」无效。并加 _criterion_class = pure_measurement。",
+        "b_l1_keep_description_tail_class": "按要求只标注类别不改写：加 _criterion_class = requires_code_change_first（该判据必须先实现「L1 保尾段」这个替代实现才能测，可执行程度低于其余纯测量判据）。",
+        "reporting_discipline_coincidence": "把「容量池 legacy 恰好也是 44 属数值巧合」更正为准确说法：两池共用同一套 _sc_build_skill_description() / _sc_build_skill_doc() 生成器，legacy 档走全 L2 渲染、单条目录条目体量在两池里几乎相同，于是容量边界由「N × 单条体量」直接决定、两池撞同一个边界 —— 这是**机制同源的必然**，不是随机重合。禁止跨池引用的纪律不变（不得用容量池 legacy 44 去佐证旧池 44/77/1.75x）。"
+      },
+      "gate_prompt_fidelity_after_flip": {
+        "_doc": "本轮改了 C++（默认值 + 解析回退），故重跑 prompt_fidelity 作为回归守门。",
+        "_command": "--suite prompt_fidelity --out_dir test_results\\sc_flip_pf2",
+        "source": "test_results\\sc_flip_pf2\\results.json",
+        "summary": {
+          "total": 11,
+          "passed": 10,
+          "failed": 0,
+          "crashed": 0,
+          "skipped": 1,
+          "ignored": 0
+        },
+        "baseline_match": true,
+        "_verdict": "基线 10/0/1 未退化，crashed=0",
+        "failed_cases": [],
+        "skipped_cases": [
+          {
+            "model": "qwen3-8b-8480",
+            "name": "PROMPT_FIDELITY: pure image single question keeps accompanying text",
+            "skipped": true,
+            "ignorable": false,
+            "detail": "目标模型不支持视觉模态（detect_modality 未命中 image），按设计精确跳过"
+          }
+        ]
+      },
+      "not_done_this_slice": {
+        "qnn_suite": "未重跑。本轮 C++ 改动只影响 skill_disclosure 的一个披露档位分配开关默认值，不触碰 qnn 端点/路由/多模态路径；prompt_fidelity 已重跑作为回归守门。",
+        "full_frontier_curve": "按任务要求未重跑整条二分曲线，只在原边界之上续测（(112,128] 四点 + 111/112 各复测 1 次）。legacy 44 未重测（该开关与 legacy 档无关）。",
+        "copilot_round": "本切片未跑 Copilot 轮（任务范围未要求；前三轮已用反对派 / 实验设计者 / 统计显著性审查者三个互斥角色）。",
+        "algorithm_changes": "未实施 P2 / D5 / D6 / 分页拉取 / (b) / (c) 的任何算法改动。"
+      }
+    }
   }
 }

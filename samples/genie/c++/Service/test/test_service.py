@@ -10727,6 +10727,102 @@ _SC_FILLER_TOPICS = [
 _SC_QUESTION = ("How do I perform flux capacitor calibration for a class-3 temporal anomaly? "
                 "Use the appropriate skill to answer.")
 
+# Step 5 收口切片：两个用途明确、互不混淆的池。
+#
+# _sc_build_skill_pool()（下方，未改名以保持向后兼容）= **同分池（tie pool）**：
+# 目标与 k=2 条锚点严格同分（18 分），专门度量"同分时目录顺序决定选择"这一病理
+# （Step 5 阶段 B/C 全部实验的载体）。**不得用它测前沿数字**——阶段 C 已实测证明
+# 旧版本（干扰名/目标位置随 N 跳变）测出的"前沿 77"是构造产物而非真实容量，
+# 即便重构为锚点池消除了跨 N 跳变，三路完全同分这个设计本身仍可能让前沿主要由
+# tie-break 运气决定（Copilot 第 2 轮 D 项明确提出的风险）。
+#
+# _sc_build_capacity_pool()（新增）= **容量池（capacity pool）**：目标分数**严格
+# 最高**，没有任何干扰项与它同分——因此目录里目标恒排第 1（分数降序排序下没有
+# 平局可打破），前沿数字反映的是"预算/篇幅能不能同时容纳 N 个技能且模型仍答对"，
+# 不再可能被"读错同分候选"这条病理污染。用于前沿二分搜索与两档提升倍数计算。
+_SC_CAP_NEAR_TOPICS = [
+    # 与目标共享 2/3 个 name 子词（flux+capacitor，命中 "calibration" 的那个不占），
+    # 分数低于目标但高于填充项——用于确认"严格最高"里的"严格"二字是真的有验证过
+    # 而不是目标一家独大到没有对照。恒在池内、跨 N 组成不变。
+    "flux-capacitor-diagnostics",
+    "flux-capacitor-backup-restore",
+]
+
+
+def _sc_build_capacity_pool(n, target_index=None):
+    """容量池：目标分数严格最高、组成跨 N 恒定，专供前沿二分搜索使用（区别于
+    上面 _sc_build_skill_pool 的"同分池"，见上方模块级注释）。
+
+    构造（与 _sc_build_skill_pool 同一套 doc/description 生成器，只换名单）：
+      * 目标固定为 `_SC_TARGET_TOPIC`（"flux-capacitor-calibration"，18 分，
+        name 侧 flux/capacitor/calibration 三词全命中）。
+      * `_SC_CAP_NEAR_TOPICS`（k=2，恒在池内）：与目标共享 flux+capacitor 两个
+        子词但不含 "calibration"，分数**严格低于**目标（离线复算见
+        skill_capacity_baseline.json 的 step5_final.capacity_pool_offline_validation），
+        用于证明"严格最高"不是没有近似分数的对照组、而是真的验证过目标仍然胜出。
+      * 其余为填充项（复用 `_SC_FILLER_TOPICS`，name 侧关键词命中数恒为 0，
+        分数恒最低），改变 N 只增删它们，不影响目标/near 的相对排序。
+      * 目标固定池内 index 0（`target_index` 保留仅为兼容旧实验入口——阶段 B
+        已证明池内 index 不影响目录序号）。"""
+    n = max(1, n)
+    names = [_SC_TARGET_TOPIC]
+    for j, topic in enumerate(_SC_CAP_NEAR_TOPICS):
+        if len(names) >= n:
+            break
+        names.append(f"{topic}-{j:03d}")
+    fi = 0
+    while len(names) < n:
+        topic = _SC_FILLER_TOPICS[fi % len(_SC_FILLER_TOPICS)]
+        names.append(f"{topic}-{fi:03d}")
+        fi += 1
+    target_pos = 0
+    if target_index is not None:
+        target_pos = max(0, min(int(target_index), len(names) - 1))
+        names[0], names[target_pos] = names[target_pos], names[0]
+    metas = []
+    xml_parts = ["<available_skills>"]
+    for i, name in enumerate(names):
+        is_target = (i == target_pos)
+        desc = _sc_build_skill_description(name, is_target)
+        location = _sc_skill_location(name)
+        xml_parts.append(
+            f"<skill><name>{name}</name><description>{desc}</description>"
+            f"<location>{location}</location></skill>")
+        metas.append({
+            "name": name, "description": desc, "location": location,
+            "is_target": is_target, "doc": _sc_build_skill_doc(name, is_target),
+        })
+    xml_parts.append("</available_skills>")
+    skills_xml = "".join(xml_parts)
+    target_skill = next(m for m in metas if m["is_target"])
+    return skills_xml, metas, target_skill
+
+
+def _sc_build_uniform_tie_pool(n):
+    """全同分技能池：整池构成**一个**同分组，专用于 `skill_disclosure.tie_aware_l2`
+    的最坏情形防护断言（不用于前沿搜索，也没有目标技能与答案码）。
+
+    构造：只取 `_SC_FILLER_TOPICS`（离线复算与远程实测均确认它们彼此得分完全相同
+    ——name 侧对本问题的关键词命中数恒为 0，description 逐词同构），因此
+    `AssignSkillDetailLevels()` 排序后 `candidates[l2_top_k-1].score` 这个边界分数
+    等于全池分数，`tie_aware_l2=true` 时扩组会一直扩到覆盖整池。"""
+    n = max(1, n)
+    names, fi = [], 0
+    while len(names) < n:
+        names.append(f"{_SC_FILLER_TOPICS[fi % len(_SC_FILLER_TOPICS)]}-{fi:03d}")
+        fi += 1
+    metas, xml_parts = [], ["<available_skills>"]
+    for name in names:
+        desc = _sc_build_skill_description(name, False)
+        location = _sc_skill_location(name)
+        xml_parts.append(
+            f"<skill><name>{name}</name><description>{desc}</description>"
+            f"<location>{location}</location></skill>")
+        metas.append({"name": name, "description": desc, "location": location,
+                      "is_target": False})
+    xml_parts.append("</available_skills>")
+    return "".join(xml_parts), metas
+
 
 def _sc_answer_code():
     """全套件唯一答案码：目标技能正文里写死、目录/摘要里绝不出现，只有真正 read()
@@ -11227,13 +11323,18 @@ def _sc_run_bottleneck_experiments(args, model, probe, n, repeat, timeout, resul
     return data
 
 
-def _sc_majority_probe(args, model, probe, n, repeat, timeout):
+def _sc_majority_probe(args, model, probe, n, repeat, timeout, pool_builder=None):
     """对同一个 N 重复 repeat 次取多数票，返回聚合曲线条目 + pass/partial 判定。
 
     通过判据（本轮修正后）三条同时成立：选对技能（read 命中目标 SKILL.md）
     + 答对答案码 + **目标技能真的在 Skills-Kept 集合内**（target_in_prompt 不为
-    False；拓不到日志时为 None，不当失败）。"""
-    skills_xml, all_metas, target_skill = _sc_build_skill_pool(n)
+    False；拓不到日志时为 None，不当失败）。
+
+    `pool_builder`：Step 5 收口切片新增，默认 `_sc_build_skill_pool`（同分池，
+    历史行为不变）。真实前沿二分搜索必须传 `_sc_build_capacity_pool`（容量池，
+    目标分数严格最高，不受 tie-break 病理污染），见模块级注释与 `_sc_binary_search`。"""
+    builder = pool_builder or _sc_build_skill_pool
+    skills_xml, all_metas, target_skill = builder(n)
     trials = []
     for _ in range(max(1, repeat)):
         trials.append(_sc_single_trial(args, model, probe, n, target_skill, skills_xml, all_metas, timeout))
@@ -11266,8 +11367,13 @@ def _sc_majority_probe(args, model, probe, n, repeat, timeout):
     return passed, curve_entry
 
 
-def _sc_binary_search(args, model, probe, max_n, repeat, timeout):
+def _sc_binary_search(args, model, probe, max_n, repeat, timeout, pool_builder=None):
     """求最大可通过的 N（FR2），并如实标注是否真实收敛（本轮修正第 1 条）。
+
+    `pool_builder`：Step 5 收口切片新增，透传给 `_sc_majority_probe`。前沿数字
+    只能用容量池（`_sc_build_capacity_pool`）测出才可信——同分池（默认值）测出
+    的"前沿"已被证明可能是 tie-break 产物（见 step5_stage_c 与 step5_final 留档），
+    调用方求真实前沿时必须显式传容量池。
 
     先从 N=1 起倍增探测（1,2,4,8,...）找到一个真实失败的上界；如果倍增到
     `max_n`（硬上限）仍全部通过，说明真实前沿 ≥ max_n，返回
@@ -11280,7 +11386,8 @@ def _sc_binary_search(args, model, probe, max_n, repeat, timeout):
     curve = []
 
     def test(n):
-        passed, entry = _sc_majority_probe(args, model, probe, n, repeat, timeout)
+        passed, entry = _sc_majority_probe(args, model, probe, n, repeat, timeout,
+                                            pool_builder=pool_builder)
         curve.append(entry)
         return passed
 
@@ -11721,10 +11828,21 @@ def _sc_same_score_distractor_metas(n, metas, target):
     return same_score
 
 
-def _sc_target_outranks_same_score_distractors(block, target, same_score_metas):
+def _sc_target_not_outranked_by_same_score(block, target, same_score_metas):
     """D4 排序区分度的直接机械断言（不再只靠"别名扩展日志出现"这一间接信号）：
-    目标条目的披露档位必须严格高于同分干扰项档位的中位数。若同分干扰项一个都
-    没进入本次池（n 太小），返回 (None, ...) 由调用方按不适用处理，不当失败。"""
+    **同分干扰项里没有任何一条被披露到比目标更高的档位**，即
+    `target_rank >= max(distractor_ranks)`。若同分干扰项一个都没进入本次池
+    （n 太小），返回 (None, ...) 由调用方按不适用处理，不当失败。
+
+    判据从「严格高于同分干扰项档位中位数」改成这条，原因是与 Step 5 阶段 C 新增的
+    `skill_disclosure.tie_aware_l2`（默认 true）存在**语义冲突**：该开关刻意不切开一组
+    同分技能、把整组一起提到 L2，于是「严格高于」在数学上永不可能成立（三者档位全为
+    2），会制造一条与产品行为无关的常红失败。这是断言与开关的语义冲突，不是产品缺陷。
+
+    改后的判据**没有被削弱到恒真**：它仍然精确地拒绝阶段 B 实测到的那种病理形态
+    ——`l2_top_k=2` 且 `tie_aware_l2=false` 时，两条同分锚点吃掉 L2 名额而目标被压到
+    L1（target_rank=1 < max=2）→ 断言失败。也就是说，`tie_aware_l2=false` 下它依然
+    保有真实的排序区分力，只是不再要求目标必须**独占**最高档。"""
     if not same_score_metas:
         return None, None, None
     target_form = _sc_target_disclosure_form(block, target)
@@ -11734,12 +11852,31 @@ def _sc_target_outranks_same_score_distractors(block, target, same_score_metas):
         for m in same_score_metas)
     if target_rank is None or any(r < 0 for r in distractor_ranks):
         return None, target_rank, distractor_ranks
-    mid = len(distractor_ranks) // 2
-    if len(distractor_ranks) % 2 == 1:
-        median = distractor_ranks[mid]
-    else:
-        median = (distractor_ranks[mid - 1] + distractor_ranks[mid]) / 2.0
-    return (target_rank > median), target_rank, distractor_ranks
+    return (target_rank >= max(distractor_ranks)), target_rank, distractor_ranks
+
+
+def _sc_tie_aware_l2_enabled(probe):
+    """从服务 stdout 日志里机械读出本次运行的 `skill_disclosure.tie_aware_l2` 实际取值
+    （`model_manager.cpp` 启动时回显 `[Config] skill_disclosure loaded: ... tie_aware_l2=0/1`）。
+
+    为什么需要它：场景 3 的「目标未被任何同分干扰项压过档位」这条断言**只有在
+    `tie_aware_l2=true` 时才可能成立**——该开关关闭（Step 5 收口后的出厂默认）时，
+    `l2_top_k=2` 会被两条同分锚点吃掉、目标按「同分名字升序」排第 3 而落到 L1，
+    于是 `target_rank(1) >= max(distractor_ranks)(2)` 必然为假。这不是产品缺陷，
+    也不是断言写错，而是「真正同分时谁进 L2」本就没有原则性答案（见留档 (c) 条）。
+    因此该子断言按实际开关取值决定是否适用，而不是靠猜或恒当通过。
+
+    返回 True/False，日志里找不到该回显时返回 None（不当通过也不当失败）。"""
+    if probe is None or probe.log_path is None or not probe.log_path.exists():
+        return None
+    try:
+        text = probe.log_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    hits = re.findall(r"skill_disclosure loaded:.*?tie_aware_l2=(\d)", text)
+    if not hits:
+        return None
+    return hits[-1] == "1"
 
 
 def _sc_case_disclosure_tiers(args, model, probe, arm, results, timeout):
@@ -11751,9 +11888,11 @@ def _sc_case_disclosure_tiers(args, model, probe, arm, results, timeout):
         而不是被截断的 L1 摘要或单行 L0）；
       - legacy 档（skill_disclosure.enabled=false）：`L2 == Kept` 且 `L1 == L0 == 0`，
         即逐字节退化到旧两档行为——这是回滚等价性的机械证据；
-      - Step 4 新增：D4 排序区分度的直接断言——目标条目披露档位严格高于同分干扰项
-        （见 `_SC_SAME_SCORE_DISTRACTOR_INDEX_RANGE`）档位的中位数，不再只靠
-        「别名扩展日志出现」这一间接信号。"""
+      - Step 4 新增、Step 5 收口修正：D4 排序区分度的直接断言——同分干扰项里没有
+        任何一条被披露到**比目标更高**的档位（`target_rank >= max(distractor_ranks)`），
+        不再只靠「别名扩展日志出现」这一间接信号。原「严格高于中位数」与
+        `skill_disclosure.tie_aware_l2`（整组同分一起提到 L2）语义冲突，见
+        `_sc_target_not_outranked_by_same_score()` 的说明。"""
     n = 24
     skills_xml, metas, target = _sc_build_skill_pool(n)
     body = {
@@ -11786,7 +11925,7 @@ def _sc_case_disclosure_tiers(args, model, probe, arm, results, timeout):
     # _sc_target_disclosure_form）。
     target_form = _sc_target_disclosure_form(block, target)
     same_score_metas = _sc_same_score_distractor_metas(n, metas, target)
-    outranks, target_rank, distractor_ranks = _sc_target_outranks_same_score_distractors(
+    outranks, target_rank, distractor_ranks = _sc_target_not_outranked_by_same_score(
         block, target, same_score_metas)
     measurement = {
         "skills_kept": kept, "skills_total": values.get("X-Genie-Prompt-Skills-Total"),
@@ -11796,7 +11935,7 @@ def _sc_case_disclosure_tiers(args, model, probe, arm, results, timeout):
         "context_size": values.get("X-Genie-Prompt-Context-Size"),
         "target_form": target_form, "prompt_block_available": bool(block),
         "same_score_distractor_count": len(same_score_metas),
-        "outranks_same_score_median": outranks,
+        "not_outranked_by_same_score": outranks,
         "target_rank": target_rank, "distractor_ranks": distractor_ranks,
     }
     _SC_SCENARIO_MEASUREMENTS.setdefault((model, "scenario3"), {})[arm] = measurement
@@ -11820,23 +11959,114 @@ def _sc_case_disclosure_tiers(args, model, probe, arm, results, timeout):
         return
     tiered = (l1 + l0) >= 1
     target_ok = target_form in (None, "L2")
-    # D4 排序区分度断言：同分干扰项若一个都没进池（outranks is None），不当失败，
-    # 如实标 skipped；否则要求目标严格跑赢同分干扰项档位中位数。
-    rank_assertion_applicable = outranks is not None
+    # D4 排序区分度断言的适用性（Step 5 收口小修）：该断言要求目标未被任何同分干扰项
+    # 压过档位，而这一性质**只有 tie_aware_l2=true 时才可能成立**（关闭时两条同分锚点
+    # 按名字升序吃掉 l2_top_k=2 的 L2 名额、目标必然落到 L1）。开关取值从服务启动
+    # 日志的 `[Config] skill_disclosure loaded: ... tie_aware_l2=` 回显机械读出，
+    # 关闭时该子断言不适用（如实记录实测档位，不当通过也不当失败），其余三条
+    # （三档之和自洽 / 真的分档 / 目标不被降到 L0）仍然生效。
+    tie_aware = _sc_tie_aware_l2_enabled(probe)
+    measurement["tie_aware_l2"] = tie_aware
+    rank_assertion_applicable = (outranks is not None) and (tie_aware is True)
     rank_ok = (outranks is True) if rank_assertion_applicable else True
-    ok = sum_ok and tiered and target_ok and rank_ok
+    # 开关关闭时目标仍不得被降到 L0（这是关闭档位下仍然成立、且非恒真的性质：
+    # 目标与同分锚点同属最高分组，必须落在 L2/L1，绝不能掉到只有名字的 L0）。
+    target_not_l0 = target_form in (None, "L2", "L1")
+    ok = sum_ok and tiered and target_ok and rank_ok and target_not_l0
     detail = (f"N={n}：L2+L1+L0={l2}+{l1}+{l0}={l2 + l1 + l0} == Kept={kept} ? {sum_ok}；"
               f"三档真的分档（L1+L0>=1）? {tiered}；目标技能形态={target_form}"
-              f"（要求 L2；拿不到 [Prompt] 日志块时为 None，不当失败）；"
+              f"（拿不到 [Prompt] 日志块时为 None，不当失败）；"
               f"skills_budget_tokens={measurement['skills_budget_tokens']}；"
+              f"实测 tie_aware_l2={tie_aware}；"
               f"D4 排序区分度：同分干扰项 {len(same_score_metas)} 条，目标档位={target_rank}，"
-              f"同分干扰项档位={distractor_ranks}，目标严格跑赢中位数？{outranks}"
-              f"（同分干扰项为 0 条时不适用，不当失败）")
+              f"同分干扰项档位={distractor_ranks}，目标未被任何同分项压过档位？{outranks}"
+              f"（该子断言仅在 tie_aware_l2=true 时适用：开关关闭时 l2_top_k=2 会被两条"
+              f"同分锚点按名字升序吃掉、目标必然落到 L1，此性质物理上不可达；"
+              f"本次适用？{rank_assertion_applicable}）；"
+              f"目标未被降到 L0 ? {target_not_l0}")
     if not rank_assertion_applicable:
-        results.append(_sc_result(name, model, sum_ok and tiered and target_ok, detail,
-                                  data=measurement))
+        results.append(_sc_result(
+            name, model, sum_ok and tiered and target_not_l0,
+            detail + "；注：tie_aware_l2 关闭（或同分干扰项为 0 条 / 拿不到日志块），"
+                     "排序子断言按设计不适用，其余三条仍生效",
+            data=measurement))
         return
     results.append(_sc_result(name, model, ok, detail, data=measurement))
+
+
+def _sc_case_tie_group_kept_no_regress(args, model, probe, arm, results, timeout):
+    """场景 3b（Step 5 收口新增的最坏情形防护断言）：**全同分技能池 + N 较大**时
+    `Skills-Kept` 不得退化，即 `Skills-Kept == Skills-Total`。
+
+    为什么需要这条：`skill_disclosure.tie_aware_l2` 会把 `l2_top_k` 边界向后扩展到
+    覆盖完整同分组，而 `AssignSkillDetailLevels()` 的降档链只保证"不越界"，**不保证
+    不丢弃**——第一个连 L0 都放不进预算的条目会触发
+    `dropped = candidates.size() - idx; break;`，**整段丢弃剩余后缀**。整池同分
+    （如 `zero_hit_keep_all` 兜底路径下全体候选同得 0 分）时扩组 = 整池 → 前若干条
+    按 L2（每条约 137 token）吃掉几乎全部 skills 预算（约 6.5K token，约 47 条）→
+    N=64 时必然丢弃后缀。既有用例测不到这一点：容量池边界同分组只有 2 条、同分池
+    只有 3 条、场景 2 的 N=32 全 L2 仍在预算内。
+
+    该开关默认值已在本轮改为 false（默认路径安全）；本断言的作用是：**任何人把它
+    改回 true（或用配置打开）都会当场看到这条失败**，而不是让目录被静默截断。"""
+    name = f"SKILL_CAPACITY: {arm} scenario3b tie_group_kept_no_regress"
+    if arm != "optimized":
+        results.append(_sc_result(
+            name, model, False,
+            "该断言针对 D2 三档披露路径（tie_aware_l2 的扩组风险），而 legacy 档"
+            "skill_disclosure.enabled=false 时 AssignSkillDetailLevels() 完全不参与，"
+            "按设计精确跳过", skipped=True))
+        return
+    n = 64
+    skills_xml, metas = _sc_build_uniform_tie_pool(n)
+    body = {
+        "model": model, "stream": False,
+        "messages": [
+            {"role": "system", "content": _sc_skill_pool_system_text(skills_xml)},
+            {"role": "user", "content": _SC_QUESTION},
+        ],
+        "tools": [_STATELESS_MODE_READ_TOOL_DEF],
+        "max_tokens": 32,
+    }
+    if probe is not None:
+        probe.mark()
+    try:
+        r = _pf_post_chat(args.host, args.port, body, timeout=timeout)
+    except Exception as e:
+        results.append(_sc_result(name, model, False, f"请求异常: {str(e)[:300]}"))
+        return
+    if r.status_code != 200:
+        results.append(_sc_result(name, model, False, f"HTTP {r.status_code}: {r.text[:200]}"))
+        return
+    missing, invalid, values = _pf_check_ledger_headers(r.headers)
+    kept = values.get("X-Genie-Prompt-Skills-Kept")
+    total = values.get("X-Genie-Prompt-Skills-Total")
+    measurement = {
+        "n": n, "skills_kept": kept, "skills_total": total,
+        "skills_l2": values.get("X-Genie-Prompt-Skills-L2"),
+        "skills_l1": values.get("X-Genie-Prompt-Skills-L1"),
+        "skills_l0": values.get("X-Genie-Prompt-Skills-L0"),
+        "skills_budget_tokens": values.get("X-Genie-Prompt-Skills-Budget-Tokens"),
+        "tokens_out": values.get("X-Genie-Prompt-Tokens-Out"),
+        "context_size": values.get("X-Genie-Prompt-Context-Size"),
+    }
+    _SC_SCENARIO_MEASUREMENTS.setdefault((model, "scenario3b"), {})[arm] = measurement
+    if missing or kept is None or total is None:
+        results.append(_sc_result(
+            name, model, False,
+            f"账本响应头缺失 {missing}（Kept={kept}, Total={total}），无法机械核验",
+            data=measurement))
+        return
+    ok = (kept == total)
+    results.append(_sc_result(
+        name, model, ok,
+        f"全同分技能池 N={n}（整池构成一个同分组）：Skills-Kept={kept} == "
+        f"Skills-Total={total} ? {ok}（要求 True：目录后缀不得被整段丢弃）；"
+        f"L2/L1/L0={measurement['skills_l2']}/{measurement['skills_l1']}/"
+        f"{measurement['skills_l0']}；skills_budget_tokens="
+        f"{measurement['skills_budget_tokens']}；tokens_out={measurement['tokens_out']}/"
+        f"{measurement['context_size']}",
+        data=measurement))
 
 
 def _sc_append_arm_contrast_results(model, results):
@@ -12118,8 +12348,17 @@ def _run_skill_capacity_suite(args, models, remote_mode, out_dir):
                         # 场景 2/3（Step3 D4/D2 的机械断言）
                         _sc_case_cn_query_en_pool(args, target, probe, arm, all_results, timeout)
                         _sc_case_disclosure_tiers(args, target, probe, arm, all_results, timeout)
+                        # 场景 3b（Step 5 收口）：tie_aware_l2 扩组的最坏情形防护——
+                        # 全同分池 N=64 下目录后缀不得被整段丢弃。
+                        _sc_case_tie_group_kept_no_regress(args, target, probe, arm,
+                                                           all_results, timeout)
 
-                        frontier, converged, curve = _sc_binary_search(args, target, probe, max_n, repeat, timeout)
+                        # Step 5 收口切片：真实前沿数字必须用容量池（目标分数严格最高、
+                        # 不存在同分 tie-break）测，不能再用默认的同分池——同分池测出的
+                        # 前沿已被证明可能是 tie-break 产物，不反映真实装载容量。
+                        frontier, converged, curve = _sc_binary_search(
+                            args, target, probe, max_n, repeat, timeout,
+                            pool_builder=_sc_build_capacity_pool)
                         # 预算饱和判定（本轮修正第 1(c) 条）：取前沿点对应的曲线条目，
                         # 若该点 skills_kept < skills_total，说明提示词体量已由预算而非 N
                         # 决定，前沿数字与装载能力解耦，**禁止用于计算提升倍数**。
