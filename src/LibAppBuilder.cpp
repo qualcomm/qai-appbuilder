@@ -39,6 +39,21 @@
   #include <execution>
 #endif
 
+// ---------------------------------------------------------------------------
+// issue#97: fork()-safety — detect forked children and prevent them from
+// using or tearing down the parent's inherited QNN/FastRPC state.
+// ---------------------------------------------------------------------------
+#ifdef __linux__
+#include <unistd.h>
+// PID of the process that first initialized the QNN backend. A forked child
+// inherits this value; comparing it with getpid() detects the fork.
+static pid_t sg_qnnOwnerPid = -1;
+
+static bool isForkedChildWithInheritedQnnState() noexcept {
+    return sg_qnnOwnerPid > 0 && getpid() != sg_qnnOwnerPid;
+}
+#endif
+
 using namespace qnn;
 using namespace qnn::log;
 using namespace qnn::tools;
@@ -152,6 +167,13 @@ std::unique_ptr<qnn_app::QnnInferenceEngine> initQnnInferenceEngine(std::string 
 #endif
 
   sg_qnnInterface = qnnFunctionPointers.qnnInterface;
+
+#ifdef __linux__
+  // issue#97: record which process owns the backend state loaded above.
+  if (sg_qnnOwnerPid == -1) {
+      sg_qnnOwnerPid = getpid();
+  }
+#endif
   std::unique_ptr<qnn_app::QnnInferenceEngine> app(new qnn_app::QnnInferenceEngine(qnnFunctionPointers, "null", opPackagePaths, sg_backendHandle, "null",
                                                                              debug, parsedOutputDataType, parsedInputDataType, sg_parsedProfilingLevel,
                                                                              dumpOutputs, cachedBinaryPath2, saveBinaryName, lora_adapters, cachedBinaryPath2, multiCoreDeviceConfig));
@@ -234,6 +256,12 @@ bool SetLogLevel(int32_t log_level, const std::string log_path) {
 }
 
 bool SetPerfProfileGlobal(const std::string& perf_profile) {
+#ifdef __linux__
+    if (isForkedChildWithInheritedQnnState()) {
+        QNN_WARN("SetPerfProfileGlobal: skipping in fork()ed child (issue#97).\n");
+        return true;
+    }
+#endif
     // In cross-process mode the model lives in the Svc child process, so the
     // perf profile must be applied there. Forward to all Svc processes; if any
     // exist, that is authoritative and we return its result. With no Svc process
@@ -271,6 +299,12 @@ bool SetPerfProfileGlobal(const std::string& perf_profile) {
 }
 
 bool RelPerfProfileGlobal() {
+#ifdef __linux__
+    if (isForkedChildWithInheritedQnnState()) {
+        QNN_WARN("RelPerfProfileGlobal: skipping in fork()ed child (issue#97).\n");
+        return true;
+    }
+#endif
     // Mirror SetPerfProfileGlobal: forward to Svc processes in cross-process mode.
     if (!sg_proc_info_map.empty()) {
         return TalkToSvc_RelPerfProfileGlobal();
@@ -458,6 +492,19 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
                        bool async, const std::string& input_data_type, const std::string& output_data_type, uint32_t deviceID=0, std::string coreIdsStr="", const std::vector<std::string>& enable_graphs={}) {
   QNN_INFO("LibAppBuilder::ModelInitialize: %s \n", model_name.c_str());
 
+#ifdef __linux__
+  // issue#97: reject QNN operations in a fork()ed child that inherited the
+  // parent's backend state. The inherited QNN/FastRPC handles, device fds and
+  // library static state cannot be reused or rebuilt safely in the child.
+  if (isForkedChildWithInheritedQnnState()) {
+      QNN_ERROR("ModelInitializeEx: QNN was initialized before fork(). The inherited "
+                "QNN/FastRPC state cannot be used safely in this child process. "
+                "Use multiprocessing with the 'spawn' start method, or create "
+                "the child before initializing QNN.\n");
+      return false;
+  }
+#endif
+
   bool result = false;
 
   if(!proc_name.empty()) {
@@ -636,6 +683,14 @@ bool ModelInferenceEx(std::string model_name, std::string proc_name, std::string
 
     QNN_INFO("LibAppBuilder::ModelInference: %s \n", model_name.c_str());
 
+#ifdef __linux__
+    if (isForkedChildWithInheritedQnnState()) {
+        QNN_ERROR("ModelInferenceEx: cannot run inference in a fork()ed child "
+                  "with inherited QNN state (issue#97).\n");
+        return false;
+    }
+#endif
+
     if (!proc_name.empty()) {
         // If proc_name, run the model in that process.
         result = TalkToSvc_Inference(model_name, proc_name, share_memory_name, inputBuffers, inputSize, outputBuffers, outputSize, perfProfile, graphIndex);
@@ -667,6 +722,14 @@ bool ModelInferenceEx(std::string model_name, std::string proc_name, std::string
 
 bool ModelDestroyEx(std::string model_name, std::string proc_name) {
     QNN_INFO("LibAppBuilder::ModelDestroy: %s \n", model_name.c_str());
+
+#ifdef __linux__
+    if (isForkedChildWithInheritedQnnState()) {
+        QNN_WARN("ModelDestroyEx: skipping teardown in fork()ed child to protect "
+                 "the parent's QNN/FastRPC session (issue#97).\n");
+        return true;  // no-op success — resources leak intentionally
+    }
+#endif
 
     bool result = false;
 

@@ -232,10 +232,24 @@ qnn_app::QnnInferenceEngine::QnnInferenceEngine(QnnFunctionPointers qnnFunctionP
       QNN_DEBUG("Run model on HTP.");
   }
 
+#ifdef __linux__
+  m_creatorPid = getpid();
+#endif
+
   return;
 }
 
 qnn_app::QnnInferenceEngine::~QnnInferenceEngine() {
+#ifdef __linux__
+  // issue#97: this instance was inherited from a fork()ed parent. Do NOT call
+  // any QNN teardown APIs (contextFree, backendFree, profileFree, logFree) —
+  // they would operate on the parent's DSP/FastRPC session via inherited fds,
+  // corrupting the parent's state. The leaked resources are reclaimed by the
+  // OS when this child process exits.
+  if (m_creatorPid > 0 && getpid() != m_creatorPid) {
+      return;
+  }
+#endif
   // Free DLC resources using utility function
   dlc_utils::freeDlcResources(m_qnnFunctionPointers.qnnSystemInterfaceHandle,
                               m_dlcHandle,
