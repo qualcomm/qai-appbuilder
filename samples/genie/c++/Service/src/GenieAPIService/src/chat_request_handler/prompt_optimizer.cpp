@@ -169,8 +169,12 @@ std::string PromptOptimizer::BuildSystemContext(const nlohmann::ordered_json& re
 
     // 0b. 相关性筛选：只影响"展示给模型看哪些 SKILL"，绝不影响下方步骤 5 & 6 之前
     // SetRuntimeSkillMappings() 写入安全网时使用的 runtime_skills（必须是全量）。
-    // relevance_filter.enabled=false 时 filtered_skills 直接等于 runtime_skills，
-    // 完全回退到改动前的"全量携带"行为，便于线上快速回滚。
+    // ⚠ relevance_filter.enabled=false 单独关闭时并不能完整回退到 D2 引入前的
+    // "全量携带"行为：AssignSkillDetailLevels() 在 use_leveled_disclosure=true
+    // 时仍会按预算把技能降档（见下方 189-207 行注释），只是不再按相关性排序。
+    // 要逐字节回退到改动前的两档行为，必须同时关闭 skill_disclosure.enabled
+    // （此时 use_leveled_disclosure=false，filtered_skills 才会直接等于
+    // runtime_skills）。
     const auto& relevance_cfg = config.relevance_filter;
     const auto& disclosure_cfg = config.skill_disclosure;
     std::vector<std::string> relevance_keywords;

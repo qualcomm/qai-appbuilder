@@ -27,9 +27,15 @@
       "frontier_saturated": false,
       "usable_for_gain_ratio": true,
       "fail_point": {
-        "n": 45, "picked": true, "answered": false, "target_in_prompt": true,
-        "skills_kept": 45, "skills_total": 45,
-        "skills_budget_tokens": 6554, "tokens_out": 6404, "context_size": 8192,
+        "n": 45,
+        "picked": true,
+        "answered": false,
+        "target_in_prompt": true,
+        "skills_kept": 45,
+        "skills_total": 45,
+        "skills_budget_tokens": 6554,
+        "tokens_out": 6404,
+        "context_size": 8192,
         "emergency_truncated": false
       }
     },
@@ -39,9 +45,15 @@
       "frontier_saturated": false,
       "usable_for_gain_ratio": true,
       "fail_point": {
-        "n": 45, "picked": true, "answered": false, "target_in_prompt": true,
-        "skills_kept": 45, "skills_total": 45,
-        "skills_budget_tokens": 6496, "tokens_out": 6404, "context_size": 8192,
+        "n": 45,
+        "picked": true,
+        "answered": false,
+        "target_in_prompt": true,
+        "skills_kept": 45,
+        "skills_total": 45,
+        "skills_budget_tokens": 6496,
+        "tokens_out": 6404,
+        "context_size": 8192,
         "emergency_truncated": false
       }
     },
@@ -60,30 +72,66 @@
     ]
   },
   "gate_suites": {
-    "prompt_fidelity": {"total": 11, "passed": 10, "failed": 0, "crashed": 0, "skipped": 1,
+    "prompt_fidelity": {
+      "total": 11,
+      "passed": 10,
+      "failed": 0,
+      "crashed": 0,
+      "skipped": 1,
       "baseline_match": true,
       "note": "新增第 15 个账本头 X-Genie-Prompt-Skills-Budget-Tokens 已被 C++ 侧真实发出，否则 _pf_case_ledger_headers 会失败",
       "case_level_evidence_round3": {
         "source": "test_results\\step2_r3_pf\\results.json (远程 ARM64，qwen3-8b-8480 round_1)",
         "skipped_cases": [
-          {"name": "PROMPT_FIDELITY: pure image single question keeps accompanying text", "ignorable": false}
+          {
+            "name": "PROMPT_FIDELITY: pure image single question keeps accompanying text",
+            "ignorable": false
+          }
         ]
-      }},
-    "qnn": {"total": 54, "passed": 49, "failed": 4, "ignored": 4, "crashed": 0, "skipped": 1,
+      }
+    },
+    "qnn": {
+      "total": 54,
+      "passed": 49,
+      "failed": 4,
+      "ignored": 4,
+      "crashed": 0,
+      "skipped": 1,
       "baseline_match": true,
       "note": "failed == ignored 且 crashed == 0，健康；4 项失败均为已知范围外 /images/generations 501",
       "case_level_evidence_round3": {
         "source": "test_results\\step2_r3_qnn\\results.json (远程 ARM64，qwen3_vl_4b-8480 + qwen3-8b-8480 round_1)",
         "failed_cases": [
-          {"model": "qwen3_vl_4b-8480", "name": "POST /images/generations", "ignorable": true},
-          {"model": "qwen3_vl_4b-8480", "name": "POST /v1/images/generations", "ignorable": true},
-          {"model": "qwen3-8b-8480", "name": "POST /images/generations", "ignorable": true},
-          {"model": "qwen3-8b-8480", "name": "POST /v1/images/generations", "ignorable": true}
+          {
+            "model": "qwen3_vl_4b-8480",
+            "name": "POST /images/generations",
+            "ignorable": true
+          },
+          {
+            "model": "qwen3_vl_4b-8480",
+            "name": "POST /v1/images/generations",
+            "ignorable": true
+          },
+          {
+            "model": "qwen3-8b-8480",
+            "name": "POST /images/generations",
+            "ignorable": true
+          },
+          {
+            "model": "qwen3-8b-8480",
+            "name": "POST /v1/images/generations",
+            "ignorable": true
+          }
         ],
         "skipped_cases": [
-          {"model": "qwen3_vl_4b-8480", "name": "POST /v1/chat/completions (multimodal audio openai-style)", "ignorable": false}
+          {
+            "model": "qwen3_vl_4b-8480",
+            "name": "POST /v1/chat/completions (multimodal audio openai-style)",
+            "ignorable": false
+          }
         ]
-      }}
+      }
+    }
   },
   "step2_round3_closure": {
     "summary": "第三轮收口，前沿数字（44/44/gain=1.0）保持不变、未重测；只修 5 项：(1) 场景6跨档对照由常红失败改 skipped=True + 新增纯函数级验证 verify_cjk_bytes_per_token.cpp（远程 MSVC /utf-8 实测 6/6 PASS）；(2) _SC_DISTRACTOR_TOPICS 加入 4 条与目标同分的干扰名，docstring 由声明改为如实描述；(3) 删除 ComputeRelevanceTokenBudget() kTools 分支里自相矛盾的 std::max 撤销逻辑；(4) 新增场景4b（17 工具 Schema + 8 技能，触发 D3 竞争）硬断言 Tools-Kept 不退化，实测 legacy=optimized=17/17；(5) 本 JSON 补齐 prompt_fidelity/qnn 逐用例判定。",
@@ -94,8 +142,14 @@
     },
     "scenario4b_tools_kept_no_regress": {
       "setup": "8 个技能 + _pf_build_tool_schemas(17)，触发 HasBudgetContention() 竞争",
-      "legacy": {"tools_kept": 17, "tools_total": 17},
-      "optimized": {"tools_kept": 17, "tools_total": 17},
+      "legacy": {
+        "tools_kept": 17,
+        "tools_total": 17
+      },
+      "optimized": {
+        "tools_kept": 17,
+        "tools_total": 17
+      },
       "result": "PASS —— optimized tools_kept(17) >= legacy tools_kept(17)"
     },
     "scenario6_disposition_change": "由处置 (b) 常红失败改为处置 (c) skipped=True；data 里两档实测字段原样保留（legacy tokens_out=6240, optimized tokens_out=6240）作为“正常路径无可观测差异”这一事实的机械凭证"
@@ -104,15 +158,39 @@
     "scenario4_tool_flood_skill_floor": {
       "setup": "约 80K 字符工具输出 + N=24 技能 + 1 个 read 工具",
       "assertion": "Skills-Kept >= 1 且目标技能在最终提示词内",
-      "legacy": {"skills_kept": 24, "skills_total": 24, "skills_budget_tokens": 6554, "tokens_out": 6266, "target_in_prompt": true},
-      "optimized": {"skills_kept": 24, "skills_total": 24, "skills_budget_tokens": 6496, "tokens_out": 6266, "target_in_prompt": true},
+      "legacy": {
+        "skills_kept": 24,
+        "skills_total": 24,
+        "skills_budget_tokens": 6554,
+        "tokens_out": 6266,
+        "target_in_prompt": true
+      },
+      "optimized": {
+        "skills_kept": 24,
+        "skills_total": 24,
+        "skills_budget_tokens": 6496,
+        "tokens_out": 6266,
+        "target_in_prompt": true
+      },
       "arm_contrast": "PASS —— skills_budget_tokens 6554 vs 6496 两档不同，是 budget_partition 开关真实生效的机械证据（6496 = 6554 − tools 真实需求 58 token；旧的静态 65/35 实现下该值是 4261）"
     },
     "scenario6_chinese_budget": {
       "setup": "中文技能池 N=24 + 中文超长工具输出 + 中文提问",
       "assertion": "Tokens-Out <= Context-Size 且日志无 'exceeds context size'",
-      "legacy": {"tokens_out": 6240, "context_size": 8192, "prompt_block_bytes": 25324, "emergency_truncated": 1, "overflow_log_hit": false},
-      "optimized": {"tokens_out": 6240, "context_size": 8192, "prompt_block_bytes": 25324, "emergency_truncated": 1, "overflow_log_hit": false},
+      "legacy": {
+        "tokens_out": 6240,
+        "context_size": 8192,
+        "prompt_block_bytes": 25324,
+        "emergency_truncated": 1,
+        "overflow_log_hit": false
+      },
+      "optimized": {
+        "tokens_out": 6240,
+        "context_size": 8192,
+        "prompt_block_bytes": 25324,
+        "emergency_truncated": 1,
+        "overflow_log_hit": false
+      },
       "arm_contrast": "FAIL（有意保留，如实记录）—— 两档逐字段完全一致，差异字段集合为空。根因：MessagePreFilter::CountTokens() 优先用真实 tokenizer，fidelity.{cjk,ascii}_bytes_per_token 只在拿不到 tokenizer 的回退分支参与运算，服务正常运行时该分支基本不触发。因此 P1 在正常路径上零可观测收益，不能声称它是前沿提升的原因；这条失败断言是该事实的唯一机械凭证。"
     }
   },
@@ -141,10 +219,14 @@
         "frontier_saturated": false,
         "usable_for_gain_ratio": true,
         "fail_point_n45": {
-          "picked": true, "answered": false, "target_in_prompt": true,
-          "skills_kept": 45, "skills_total": 45,
+          "picked": true,
+          "answered": false,
+          "target_in_prompt": true,
+          "skills_kept": 45,
+          "skills_total": 45,
           "skills_kept_at_budget_cap": false,
-          "skills_budget_tokens": 6554, "tokens_out": 6438
+          "skills_budget_tokens": 6554,
+          "tokens_out": 6438
         },
         "_note": "与 Step 1 / Step 2 记录的基线逐值一致，是本轮实验有效性的前提证据"
       },
@@ -154,10 +236,14 @@
         "frontier_saturated": false,
         "usable_for_gain_ratio": false,
         "pass_point_n64": {
-          "picked": true, "answered": true, "target_in_prompt": true,
-          "skills_kept": 64, "skills_total": 64,
+          "picked": true,
+          "answered": true,
+          "target_in_prompt": true,
+          "skills_kept": 64,
+          "skills_total": 64,
           "skills_kept_at_budget_cap": false,
-          "skills_budget_tokens": 6496, "tokens_out": 3845
+          "skills_budget_tokens": 6496,
+          "tokens_out": 3845
         },
         "_note": "≥64 是下界不是精确前沿；converged=false 已按处置记为 skipped=True，禁止用于计算精确提升倍数。需 --skill_capacity_max 128/256 续测定住真实撞墙点（本轮未做）。"
       },
@@ -166,15 +252,53 @@
     },
     "scenario2_cn_query_en_pool": {
       "n": 32,
-      "legacy": {"skills_kept": 32, "skills_total": 32, "skills_l2": 32, "skills_l1": 0, "skills_l0": 0, "target_form": "L2", "alias_expanded": false, "alias_expansion_log": []},
-      "optimized": {"skills_kept": 32, "skills_total": 32, "skills_l2": 2, "skills_l1": 6, "skills_l0": 24, "target_form": "L2", "alias_expanded": true, "alias_expansion_log": [[68, 102]]},
+      "legacy": {
+        "skills_kept": 32,
+        "skills_total": 32,
+        "skills_l2": 32,
+        "skills_l1": 0,
+        "skills_l0": 0,
+        "target_form": "L2",
+        "alias_expanded": false,
+        "alias_expansion_log": []
+      },
+      "optimized": {
+        "skills_kept": 32,
+        "skills_total": 32,
+        "skills_l2": 2,
+        "skills_l1": 6,
+        "skills_l0": 24,
+        "target_form": "L2",
+        "alias_expanded": true,
+        "alias_expansion_log": [
+          [
+            68,
+            102
+          ]
+        ]
+      },
       "arm_contrast": "PASS（别名扩展日志行只在 optimized 档出现：68 -> 102 个关键词；legacy hits=[]）",
       "_criterion_correction": "本用例最初按计划文案用的判据是 Skills-Kept < Skills-Total，实测 32/32 而失败。根因不是 D4 没生效，而是该指标在 D2 三档披露下根本不成立——D2 的设计就是降档而不删除，故 Kept 必然等于 Total。判据已改为：别名扩展日志 X->Y 且 Y>X、目标技能进 L2、Skills-L0>=1。"
     },
     "scenario3_disclosure_tiers": {
       "n": 24,
-      "legacy": {"skills_l2": 24, "skills_l1": 0, "skills_l0": 0, "skills_kept": 24, "target_form": "L2", "sum_equals_kept": true},
-      "optimized": {"skills_l2": 2, "skills_l1": 6, "skills_l0": 16, "skills_kept": 24, "target_form": "L2", "sum_equals_kept": true, "skills_budget_tokens": 6496},
+      "legacy": {
+        "skills_l2": 24,
+        "skills_l1": 0,
+        "skills_l0": 0,
+        "skills_kept": 24,
+        "target_form": "L2",
+        "sum_equals_kept": true
+      },
+      "optimized": {
+        "skills_l2": 2,
+        "skills_l1": 6,
+        "skills_l0": 16,
+        "skills_kept": 24,
+        "target_form": "L2",
+        "sum_equals_kept": true,
+        "skills_budget_tokens": 6496
+      },
       "arm_contrast": "PASS（legacy L1+L0==0 即逐字节退化到旧两档；optimized L1+L0>=1 即三档真分档）"
     },
     "rollback_equivalence": {
@@ -182,22 +306,72 @@
       "D4": "relevance_filter.intent_aliases_enabled=false + tag_weight=0 时关键词集合与打分口径逐字节回退；实测 legacy 档 intent alias expansion 日志行完全不出现（hits=[]）"
     },
     "guards": {
-      "prompt_fidelity": {"total": 11, "passed": 10, "failed": 0, "crashed": 0, "skipped": 1, "verdict": "与基线 10/0/1 一致，无退化"},
-      "qnn": {"total": 54, "passed": 49, "failed": 4, "ignored": 4, "crashed": 0, "skipped": 1,
-              "failed_cases": [
-                {"name": "POST /images/generations", "status": 501, "ignorable": true},
-                {"name": "POST /v1/images/generations", "status": 501, "ignorable": true},
-                {"name": "POST /images/generations (round 2 model)", "status": 501, "ignorable": true},
-                {"name": "POST /v1/images/generations (round 2 model)", "status": 501, "ignorable": true}
-              ],
-              "skipped_cases": [{"name": "POST /v1/chat/completions (multimodal audio openai-style)", "ignorable": false}],
-              "verdict": "failed == ignored (4==4) 且 crashed == 0，健康"},
-      "skill_capacity": {"total": 16, "passed": 15, "failed": 0, "crashed": 0, "skipped": 1,
-                         "skipped_cases": [{"name": "SKILL_CAPACITY: qwen3-8b optimized_frontier", "reason": "converged=false（前沿 ≥64，未探到撞墙点），按处置记为 skipped 而非失败"}],
-                         "verdict": "failed == ignored (0==0) 且 crashed == 0，健康，无常红失败"}
+      "prompt_fidelity": {
+        "total": 11,
+        "passed": 10,
+        "failed": 0,
+        "crashed": 0,
+        "skipped": 1,
+        "verdict": "与基线 10/0/1 一致，无退化"
+      },
+      "qnn": {
+        "total": 54,
+        "passed": 49,
+        "failed": 4,
+        "ignored": 4,
+        "crashed": 0,
+        "skipped": 1,
+        "failed_cases": [
+          {
+            "name": "POST /images/generations",
+            "status": 501,
+            "ignorable": true
+          },
+          {
+            "name": "POST /v1/images/generations",
+            "status": 501,
+            "ignorable": true
+          },
+          {
+            "name": "POST /images/generations (round 2 model)",
+            "status": 501,
+            "ignorable": true
+          },
+          {
+            "name": "POST /v1/images/generations (round 2 model)",
+            "status": 501,
+            "ignorable": true
+          }
+        ],
+        "skipped_cases": [
+          {
+            "name": "POST /v1/chat/completions (multimodal audio openai-style)",
+            "ignorable": false
+          }
+        ],
+        "verdict": "failed == ignored (4==4) 且 crashed == 0，健康"
+      },
+      "skill_capacity": {
+        "total": 16,
+        "passed": 15,
+        "failed": 0,
+        "crashed": 0,
+        "skipped": 1,
+        "skipped_cases": [
+          {
+            "name": "SKILL_CAPACITY: qwen3-8b optimized_frontier",
+            "reason": "converged=false（前沿 ≥64，未探到撞墙点），按处置记为 skipped 而非失败"
+          }
+        ],
+        "verdict": "failed == ignored (0==0) 且 crashed == 0，健康，无常红失败"
+      }
     },
     "ledger_headers_count": 18,
-    "new_ledger_headers": ["X-Genie-Prompt-Skills-L2", "X-Genie-Prompt-Skills-L1", "X-Genie-Prompt-Skills-L0"],
+    "new_ledger_headers": [
+      "X-Genie-Prompt-Skills-L2",
+      "X-Genie-Prompt-Skills-L1",
+      "X-Genie-Prompt-Skills-L0"
+    ],
     "not_implemented_or_uncovered": {
       "optimized_frontier_exact_value": "未收敛，≥64 是下界；需 --skill_capacity_max 128/256 续测",
       "relevance_filter_tag_weight": "已实现但本套件未覆盖：CollectSkillSignalLines() 按行前缀提取 tags/触发条件，而合成技能池的 <description> 是单行文本（Tags: 不独占一行），提取结果为空、tag 打分为 no-op。刻意不改合成池——改成多行会让 legacy 44 基线不再可比。",
@@ -209,15 +383,198 @@
       "model_confirmed": "GPT 5.6 思考",
       "rc": 0,
       "conclusions": [
-        {"topic": "L1 字段取舍", "verdict": "该改", "suggestion": "不保 description 前 240 字节，改保触发条件段 + description 尾段（能力边界/反例通常在后半）", "falsification": "构造 20 个仅后半段有区别的近似技能比 Top-1 选中率，当前方案若 ≤ 尾段方案 −10% 即判错", "disposition": "不采纳（当前用例不可实测）", "reason": "合成池 description 逐词同构（Step 2 第二轮为消除唯一词优势刻意所为），对“保前半段 vs 保尾段”零区分力；要测须另造异构语义池，会引入与 legacy 44 不可比的新基线"},
-        {"topic": "L0 档是否有害", "verdict": "该删", "suggestion": "80 字节摘要不足以支持决策却持续占注意力，诱发见名选技", "falsification": "固定预算下比 L0=16 与 L0=0，若前者误选率或首 token 延迟上升 ≥5% 则有害", "disposition": "不采纳（与本 Step 设计前提冲突，且已有反向实测）", "reason": "删 L0 等于回到“整条删除”，与计划要求的“降档而不是删除”直接冲突；且 N=64 前沿点 L0 占绝大多数条目而 answered/picked/target_in_prompt 全为 true、前沿由 44 涨到 ≥64，即 L0 在场时前沿是涨的"},
-        {"topic": "别名表覆盖面策略", "verdict": "该改", "suggestion": "全组扩词制造假高分稀释排序；改为原词命中=1 分、别名命中=0.25 分、同组最多加 0.5 分，且按去重命中组数而非命中词数计分", "falsification": "统计 Top-2 与 Top-3 分差，新法若显著拉大分差且命中率不降即旧法错", "disposition": "不采纳（当前用例不可实测）", "reason": "同第 1 条：逐词同构的 description 对“等权扩词 vs 同组封顶”零区分力，所有条目同步涨分或同步不涨分"}
+        {
+          "topic": "L1 字段取舍",
+          "verdict": "该改",
+          "suggestion": "不保 description 前 240 字节，改保触发条件段 + description 尾段（能力边界/反例通常在后半）",
+          "falsification": "构造 20 个仅后半段有区别的近似技能比 Top-1 选中率，当前方案若 ≤ 尾段方案 −10% 即判错",
+          "disposition": "不采纳（当前用例不可实测）",
+          "reason": "合成池 description 逐词同构（Step 2 第二轮为消除唯一词优势刻意所为），对“保前半段 vs 保尾段”零区分力；要测须另造异构语义池，会引入与 legacy 44 不可比的新基线"
+        },
+        {
+          "topic": "L0 档是否有害",
+          "verdict": "该删",
+          "suggestion": "80 字节摘要不足以支持决策却持续占注意力，诱发见名选技",
+          "falsification": "固定预算下比 L0=16 与 L0=0，若前者误选率或首 token 延迟上升 ≥5% 则有害",
+          "disposition": "不采纳（与本 Step 设计前提冲突，且已有反向实测）",
+          "reason": "删 L0 等于回到“整条删除”，与计划要求的“降档而不是删除”直接冲突；且 N=64 前沿点 L0 占绝大多数条目而 answered/picked/target_in_prompt 全为 true、前沿由 44 涨到 ≥64，即 L0 在场时前沿是涨的"
+        },
+        {
+          "topic": "别名表覆盖面策略",
+          "verdict": "该改",
+          "suggestion": "全组扩词制造假高分稀释排序；改为原词命中=1 分、别名命中=0.25 分、同组最多加 0.5 分，且按去重命中组数而非命中词数计分",
+          "falsification": "统计 Top-2 与 Top-3 分差，新法若显著拉大分差且命中率不降即旧法错",
+          "disposition": "不采纳（当前用例不可实测）",
+          "reason": "同第 1 条：逐词同构的 description 对“等权扩词 vs 同组封顶”零区分力，所有条目同步涨分或同步不涨分"
+        }
       ],
       "_note": "三条建议的证伪判据原文已完整留档，作为后续 Step 的待验项；采纳与否以那时的实测为准，不凭观点改实现。"
     },
     "_corrections_to_step2_entries_above": {
       "scenario6_chinese_budget.arm_contrast": "上面 step2 段里该字段仍写作「FAIL（有意保留）」，已在第三轮按处置 (c) 改为 skipped=True（detail 说明 fidelity.{cjk,ascii}_bytes_per_token 只在 tokenizer 不可用的回退分支参与运算，正常路径无可观测差异，故该对照不可测），两档实测字段原样保留。本轮实测该对照为 PASS（差异字段=['tokens_out','prompt_block_bytes']，因 D2 改变了提示词体量）。",
       "guards_added.distractor_same_score_wording": "上面 step2 段里若仍留有「干扰项同样具备该特征」这类措辞，以第三轮的更正为准：加入 4 条三子词全命中的同构干扰名之前，目标恒得 9 分而 64 条干扰项最高仅 6 分（分布 {0:18,3:34,6:13}），该句在加入之前并不成立。"
+    }
+  },
+  "step4": {
+    "step": "Step 4 (收敛精确前沿 + oracle/selection/nobody 三实验正交定位瓶颈)",
+    "recorded_at": "2026-08-30",
+    "model": "qwen3-8b-8480",
+    "context_size": 8192,
+    "_commands": [
+      "python test\\test_service.py --suite skill_capacity --exe_dir <repo>\\build_fidelity\\GenieService-win-arm64 --models <models_backup_20260828> --out_dir <repo>\\test_results\\sc_step4 --skill_capacity_models qwen3-8b --skill_capacity_max 128 --skill_capacity_repeat 1 --skill_capacity_arms optimized",
+      "python sc_noise.py --n 78 --repeat 9  (一次性复核脚本，复用 test_service.py 的 ServiceManager/_ScArmConfigOverride/_sc_single_trial，不进套件)",
+      "python test\\test_service.py --suite prompt_fidelity ... --out_dir <repo>\\test_results\\sc_step4_pf",
+      "python test\\test_service.py --suite qnn ... --out_dir <repo>\\test_results\\sc_step4_qnn"
+    ],
+    "frontier": {
+      "legacy": {
+        "frontier_skills": 44,
+        "converged": true,
+        "_note": "沿用 Step 1/2/3 的已收敛基线，本 Step 按指令未重测"
+      },
+      "optimized": {
+        "frontier_skills": 77,
+        "converged": true,
+        "frontier_saturated": false,
+        "usable_for_gain_ratio": true,
+        "pass_point_n77": {
+          "picked": true,
+          "answered": true,
+          "target_in_prompt": true,
+          "skills_kept": 77,
+          "skills_total": 77,
+          "skills_kept_at_budget_cap": false,
+          "skills_budget_tokens": 6496,
+          "tokens_out": 4466,
+          "context_size": 8192,
+          "emergency_truncated": false,
+          "tools_tier": 1
+        },
+        "fail_point_n78": {
+          "picked": false,
+          "answered": false,
+          "target_in_prompt": true,
+          "skills_kept": 78,
+          "skills_total": 78,
+          "skills_kept_at_budget_cap": false,
+          "tokens_out": 4521,
+          "http_422": false
+        },
+        "probe_curve_n_passed": [
+          [
+            1,
+            true
+          ],
+          [
+            2,
+            true
+          ],
+          [
+            4,
+            true
+          ],
+          [
+            8,
+            true
+          ],
+          [
+            16,
+            true
+          ],
+          [
+            32,
+            true
+          ],
+          [
+            64,
+            true
+          ],
+          [
+            128,
+            false
+          ],
+          [
+            96,
+            false
+          ],
+          [
+            80,
+            false
+          ],
+          [
+            72,
+            true
+          ],
+          [
+            76,
+            true
+          ],
+          [
+            78,
+            false
+          ],
+          [
+            77,
+            true
+          ]
+        ],
+        "_authenticity": "三字段口径齐备：skills_kept == skills_total（一条未丢弃）+ skills_kept_at_budget_cap == false（未咬预算上限）+ tokens_out 4466 随 N 单调增长，排除 Step 2 那次「过滤器旁路」式假提升"
+      },
+      "gain_ratio": {
+        "value": 1.75,
+        "formula": "77 / 44",
+        "usable": true,
+        "_note": "两档均 converged=true 且均未饱和，这是本项目首个可用于报告的精确提升倍数；Step 6 报告可直接引用 1.75x，不必再写「≥N 下界」"
+      }
+    },
+    "overflow_boundary": {
+      "first_422_at_n": 96,
+      "_evidence": "N=78 / N=80 失败时 tokens_out 仅 4521 / 4618，远低于 context 8192 且无 422；只有 N=96（tokens_out 5366）与 N=128 才出现 422 Unprocessable Content (local input overflow)。即 77→78 这个前沿边界的成因不是上下文溢出。"
+    },
+    "bottleneck_experiments": {
+      "probe_n": 78,
+      "_why_n_plus_1": "探测点必须取前沿之上第一个失败点：前沿的定义就是 selection 在那里通过，在前沿本身跑三实验必然恒判 none_observed",
+      "repeat": 1,
+      "oracle_pass": true,
+      "selection_pass": false,
+      "selection_picked": false,
+      "nobody_pass": null,
+      "nobody_applicable_count": 0,
+      "judge_contaminated": false,
+      "harness_classification": "long_catalog_selection",
+      "_nobody_not_applicable_reason": "nobody 档要求 round1 先选中目标技能才有意义，而 N=78 上 round1 从不发起 read，故该档 0/1 样本适用，如实记为 None，不强行归类",
+      "refined_conclusion": "瓶颈发生在 read 之前、且与上下文溢出无关：oracle 档（正文直接注入历史）在同一 N 上通过，说明答题能力与 SKILL.md 正文理解不是瓶颈；selection 档 9/9 次连 read 都不发起。但**目标技能确实在最终提示词里**（target_in_prompt=True，9/9），因此不能表述为「目标技能被长目录挤掉/选错」——准确表述是「目标技能在场、模型却不发起 read 工具调用」。",
+      "_step5_implication": "P2（SKILL.md 分节压缩）已被本 Step 实测排除为当前瓶颈（回填后二次溢出未发生：N=78 无 422、oracle 通过）。指向「目录侧」，但「分页拉取」并非唯一对症动作——先做成本最低的鉴别实验（见 unseparated_sub_hypotheses）再决定。"
+    },
+    "sampling_noise_check": {
+      "_why": "Copilot 反对派复核指出前沿点来自 repeat=1，可能只是采样噪声而非真实相变；它给的硬阈值是 N=78 多次采样 picked_rate > 30% 即证伪「78 必然失败」",
+      "n": 78,
+      "repeat": 9,
+      "http_ok": 9,
+      "picked": 0,
+      "answered": 0,
+      "passed": 0,
+      "picked_rate": 0.0,
+      "target_in_prompt_all_trials": true,
+      "verdict": "Copilot 的采样噪声假设被实测证伪：9/9 全部 picked=False，picked_rate=0.000 << 30% 阈值。77/78 是真实相变点，77 这个前沿值与 1.75 倍提升可用。"
+    },
+    "unseparated_sub_hypotheses": {
+      "_doc": "Copilot 反对派审查提出、本 Step **未能**互相分开的子机制（三者都产生同一组可观测字段：target_in_prompt=True 且 picked=False）。Step 5 动手前应先用最便宜的那条鉴别实验收口，不要直接假定分页拉取就是答案。",
+      "B_tool_call_threshold": "候选已进入工作记忆但模型不敢调用工具。判据：system 明确要求「候选数<=5 时必须 read 验证」后，N=78 的 read_rate 从 <10% 升到 >80% 即证伪「纯目录检索失败」",
+      "C_position_bias": "决定因素可能不是 N=78 而是目标条目的排名位置。判据：固定 N=78，只洗牌目标排名（5/20/40/70），若 rank5 与 rank70 的 picked 率差 >40pct 则是位置偏置而非容量瓶颈",
+      "E_l0_summary_insufficient": "目标被降档到 L0 后失去关键区分特征、无法建立检索线索。判据：保持 N=78 与总 token 不变，仅把目标技能单独升到 L2，若成功率 0% → >80% 则是摘要信息缺失而非规模本身",
+      "F_premature_termination": "Copilot 提出的第四类假设（本 Step 完全未测）：模型在目录阶段自认已有自洽答案、短路掉 read。判据：仅改 system 为「未 read 任何 SKILL.md 前禁止输出最终答案」，若 read_rate 从 <5% 升到 >80% 则「长目录选择」降为次要因素"
+    },
+    "judge_fixes": {
+      "target_disclosure_form": "此前 `_sc_target_disclosure_form()` 用 description 末 24 字节判档，而合成池所有技能结尾逐字节相同 → 该函数恒返回 L2，「目标技能在 L2」这一结论**从未被证实**。现改为只有目标 description 才带的尾部 canary `[SC-TAIL-9K2Q]`（不含计分关键词，不破坏 Step 2 的同分约束），canary 可见=L2、不可见=L1、单行条目=L0。此前留档里「目标技能在 L2」的表述据此降级为「目标技能未被降到 L0，且其档位严格高于同分干扰项档位中位数」。",
+      "d4_ranking_assertion": "场景 3 新增直接断言 `_sc_target_outranks_same_score_distractors()`：目标条目档位必须严格高于同分干扰项（`_SC_DISTRACTOR_TOPICS` 索引 64-67）档位的中位数，不再只靠「别名扩展日志出现」这一间接信号。N=24 实测：目标档位=2(L2)，同分干扰项档位=[1,2]，中位数 1.5，2>1.5 通过。",
+      "rollback_comment": "`prompt_optimizer.cpp` 注释更正（仅注释、无行为变化）：`relevance_filter.enabled=false` 单独关闭**不足以**完整回退到 D2 引入前行为，必须同时关闭 `skill_disclosure.enabled`。",
+      "bottleneck_classifier_defect": "冒烟暴露并修掉一处真实分类缺陷：初版把「nobody 档答不出」当成 post_readback_overflow 的证据，而 nobody 本是**判据有效性对照**（答案码只写在正文里，不回填时本就该答不出）。现改为：nobody 答对 → judge_contaminated（真失败）；selection 失败再按 selection_picked 二分层（未选中→long_catalog_selection，选中但答错→post_readback_overflow）。"
+    },
+    "gate_suites": {
+      "prompt_fidelity": "10/11 通过, 0 失败, 0 崩溃, 1 按设计跳过 —— 与基线一致，无退化",
+      "qnn": "49/54 通过, 4 失败, 0 崩溃, 1 跳过；4 项失败全部为已知 /images/generations 与 /v1/images/generations 501 且 ignorable=True —— 与基线一致",
+      "skill_capacity": "7 项中 6 通过 / 0 失败 / 0 崩溃 / 1 按设计跳过（builder mode 未实现，精确跳过）→ failed == ignored 成立"
     }
   }
 }

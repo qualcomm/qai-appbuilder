@@ -10657,6 +10657,11 @@ def _pf_case_stream_ledger(args, model, all_results, all_crash_events):
 # （不是靠"只有一个技能"蒙对），干扰项与目标技能共享部分关键词以构成真正的相关性
 # 竞争。目标技能固定用 "flux-capacitor-calibration"（index 由 _sc_build_skill_pool
 # 的 target_index 参数决定它在池中的位置，默认放在池首）。
+# Step 4：只有目标技能 description 才带的尾部 canary（不含任何计分关键词，不
+# 影响 ScoreRelevance() 的同分约束），用于机械区分 L1（description 被截断）
+# 与 L2（description 完整保留）——此前所有技能的 description 尾部逐字节相同，
+# 使得 _sc_target_disclosure_form() 恒判定为 L2。
+_SC_TARGET_TAIL_CANARY = "[SC-TAIL-9K2Q]"
 _SC_TARGET_TOPIC = "flux-capacitor-calibration"
 _SC_DISTRACTOR_TOPICS = [
     "flux-capacitor-diagnostics", "capacitor-array-maintenance", "anomaly-classification",
@@ -10767,6 +10772,12 @@ def _sc_build_skill_description(name, is_target):
     filler = (f"This playbook covers standard operating procedures, safety checklists, "
               f"pre-flight diagnostics, common failure modes, and escalation paths for "
               f"{topic} scenarios encountered in the field.")
+    # Step 4 判据修正：为目标技能追加一个只有它才有的尾部 canary
+    # （不含任何计分关键词、不影响 ScoreRelevance() 的同分约束），使
+    # _sc_target_disclosure_form() 能靠"尾部是否可见"机械区分 L1/L2，而不是像
+    # 之前那样所有技能结尾逐字节相同、L2 判定恒为真。干扰项不追加，保持逐词同构。
+    if is_target:
+        return f"{base} {tags_line} {trigger_line} {filler} {_SC_TARGET_TAIL_CANARY}"
     return f"{base} {tags_line} {trigger_line} {filler}"
 
 
@@ -10940,6 +10951,220 @@ def _sc_single_trial(args, model, probe, n, target_skill, skills_xml, all_metas,
         return evidence
     evidence["answered"] = _sc_answer_code() in content2
     return evidence
+
+
+# ============================================================================
+# Step 4：三实验正交定位下一个真瓶颈（Copilot 提出、采纳为测量手段，见
+# skill-capacity-frontier.md「方案定稿前的 Copilot 交叉审」Q2/Q4）。
+#
+#   oracle    —— 直接注入正确 SKILL.md 全文，跳过选择，只测"答题能力"；
+#   selection —— 正常 D2+D4 自选流程（即 _sc_single_trial 的两轮判据）；
+#   nobody    —— 选中技能后不回填正文，只凭目录（技能名 + 描述）作答。
+#
+# 判据（写入 skill_capacity_baseline.json 供 Step 5 使用）：
+#   oracle 就失败                        → 答题能力瓶颈（P2/D6/分页拉取都救不了）
+#   oracle 成 / selection 败              → 长目录选择瓶颈（分页拉取路线对症）
+#   selection 选对但读正文后失败、oracle 成 → 回填后二次溢出/注意力退化（P2 对症）
+# ============================================================================
+
+def _sc_experiment_oracle(args, model, probe, n, target_skill, skills_xml, all_metas, timeout):
+    """oracle 档：跳过整个选择环节，构造"已经选中并读完目标 SKILL.md 正文"的
+    对话历史，直接问答案码。system prompt 仍携带完整技能目录（与 selection 档
+    同一提示词体量），只是不给模型实际做选择的机会——用于隔离"答题能力"。"""
+    system_text = ("You are a helpful assistant. Skills are not tools — you must call "
+                   "the read tool on a skill's SKILL.md location before using it.\n" + skills_xml)
+    fake_call_id = "call_sc_oracle_1"
+    fake_tool_calls = [{
+        "id": fake_call_id, "type": "function",
+        "function": {"name": "read", "arguments": json.dumps({"path": target_skill["location"]})},
+    }]
+    body = {
+        "model": model, "stream": False,
+        "messages": [
+            {"role": "system", "content": system_text},
+            {"role": "user", "content": _SC_QUESTION},
+            {"role": "assistant", "content": "", "tool_calls": fake_tool_calls},
+            {"role": "tool", "tool_call_id": fake_call_id, "name": "read",
+             "content": target_skill["doc"]},
+            {"role": "user", "content": "Now reply with the exact calibration answer code."},
+        ],
+        "tools": [_STATELESS_MODE_READ_TOOL_DEF],
+    }
+    evidence = {"n": n, "mode": "oracle", "answered": False, "http_ok": False, "error": None}
+    try:
+        if probe is not None:
+            probe.mark()
+        r = _pf_post_chat(args.host, args.port, body, timeout=timeout)
+    except Exception as e:
+        evidence["error"] = f"oracle 请求异常: {str(e)[:300]}"
+        return evidence
+    if r.status_code != 200:
+        evidence["error"] = f"oracle HTTP {r.status_code}: {r.text[:200]}"
+        return evidence
+    evidence["http_ok"] = True
+    try:
+        content = r.json()["choices"][0]["message"].get("content") or ""
+    except (KeyError, IndexError, ValueError):
+        evidence["error"] = "oracle 响应结构异常（无 choices[0].message）"
+        return evidence
+    evidence["answered"] = _sc_answer_code() in content
+    return evidence
+
+
+def _sc_experiment_nobody(args, model, probe, n, target_skill, skills_xml, all_metas, timeout):
+    """nobody 档：正常走 round1 选择，但 round2 不回填目标 SKILL.md 正文
+    （tool 消息内容替换为一句不含答案码的确认语），直接追问答案码——用于隔离
+    "选对技能"与"读到正文才能答对"是否真的有因果关系。picked=False 时该次
+    试探记为不适用（选择本身失败，与 nobody 想测的问题无关），不计入判据。"""
+    system_text = ("You are a helpful assistant. Skills are not tools — you must call "
+                   "the read tool on a skill's SKILL.md location before using it.\n" + skills_xml)
+    round1_body = {
+        "model": model, "stream": False,
+        "messages": [
+            {"role": "system", "content": system_text},
+            {"role": "user", "content": _SC_QUESTION},
+        ],
+        "tools": [_STATELESS_MODE_READ_TOOL_DEF],
+    }
+    evidence = {"n": n, "mode": "nobody", "picked": False, "answered": False,
+                "applicable": False, "http_ok": False, "error": None}
+    try:
+        if probe is not None:
+            probe.mark()
+        r1 = _pf_post_chat(args.host, args.port, round1_body, timeout=timeout)
+    except Exception as e:
+        evidence["error"] = f"round1 请求异常: {str(e)[:300]}"
+        return evidence
+    if r1.status_code != 200:
+        evidence["error"] = f"round1 HTTP {r1.status_code}: {r1.text[:200]}"
+        return evidence
+    evidence["http_ok"] = True
+    try:
+        msg1 = r1.json()["choices"][0]["message"]
+    except (KeyError, IndexError, ValueError):
+        evidence["error"] = "round1 响应结构异常（无 choices[0].message）"
+        return evidence
+    read_paths = _sc_extract_read_calls(msg1)
+    picked = any(target_skill["location"] in p or p in target_skill["location"] for p in read_paths)
+    evidence["picked"] = bool(picked)
+    if not picked:
+        # 首轮没选中目标技能，与"选对了但不给正文"这个问题无关，不适用。
+        return evidence
+    evidence["applicable"] = True
+    tool_call = next((tc for tc in (msg1.get("tool_calls") or [])
+                       if isinstance(tc, dict) and tc.get("function", {}).get("name") == "read"), None)
+    if tool_call is None:
+        return evidence
+    round2_body = {
+        "model": model, "stream": False,
+        "messages": round1_body["messages"] + [
+            {"role": "assistant", "content": msg1.get("content") or "",
+             "tool_calls": msg1.get("tool_calls")},
+            {"role": "tool", "tool_call_id": tool_call.get("id", "call_sc_nobody_1"),
+             "name": "read", "content": "OK, file located. (content intentionally withheld)"},
+            {"role": "user", "content": "Now reply with the exact calibration answer code."},
+        ],
+        "tools": [_STATELESS_MODE_READ_TOOL_DEF],
+    }
+    try:
+        if probe is not None:
+            probe.mark()
+        r2 = _pf_post_chat(args.host, args.port, round2_body, timeout=timeout)
+    except Exception as e:
+        evidence["error"] = f"round2 请求异常: {str(e)[:300]}"
+        return evidence
+    if r2.status_code != 200:
+        evidence["error"] = f"round2 HTTP {r2.status_code}: {r2.text[:200]}"
+        return evidence
+    try:
+        content2 = r2.json()["choices"][0]["message"].get("content") or ""
+    except (KeyError, IndexError, ValueError):
+        evidence["error"] = "round2 响应结构异常（无 choices[0].message）"
+        return evidence
+    evidence["answered"] = _sc_answer_code() in content2
+    return evidence
+
+
+def _sc_run_bottleneck_experiments(args, model, probe, n, repeat, timeout, results):
+    """在给定 N（调用方取「前沿+1」这个第一个失败点）上跑 oracle/selection/nobody
+    三实验各 repeat 次多数票，返回结论字典（写入 baseline json），并把分类结论追加
+    进 results。
+
+    健康判据归类（`_sc_result()` 恒 `ignorable=False`，故必须精确）：能给出确定分类
+    时记 `passed=True`；`none_observed`/`inconclusive` 这两种「测不出」的情况记
+    `skipped=True`（不是失败）；只有 `judge_contaminated`（nobody 档不读正文也答对，
+    说明判据本身被污染）才真的记失败——那确实是必须立刻修的缺陷。"""
+    skills_xml, all_metas, target_skill = _sc_build_skill_pool(n)
+
+    def majority(trials, key):
+        applicable = [t for t in trials if t.get("applicable", True) and t.get("http_ok")]
+        if not applicable:
+            return None
+        votes = sum(1 for t in applicable if t.get(key))
+        return votes * 2 > len(applicable)
+
+    oracle_trials = [_sc_experiment_oracle(args, model, probe, n, target_skill, skills_xml, all_metas, timeout)
+                      for _ in range(max(1, repeat))]
+    selection_trials = [_sc_single_trial(args, model, probe, n, target_skill, skills_xml, all_metas, timeout)
+                         for _ in range(max(1, repeat))]
+    nobody_trials = [_sc_experiment_nobody(args, model, probe, n, target_skill, skills_xml, all_metas, timeout)
+                      for _ in range(max(1, repeat))]
+
+    oracle_pass = majority(oracle_trials, "answered")
+    selection_pass = majority(
+        [{"answered": t["picked"] and t["answered"] and t["target_in_prompt"] is not False,
+          "http_ok": t["http_ok"], "applicable": True} for t in selection_trials], "answered")
+    # selection 档失败时必须再分一层：是"没选中目标技能"（长目录选择瓶颈）还是
+    # "选中并读完正文后仍答错"（回填后二次溢出/注意力退化）。只看 selection_pass
+    # 无法区分这两者，而它们分别对应 Step 5 的两条完全不同的动作。
+    selection_picked = majority(
+        [{"answered": t["picked"], "http_ok": t["http_ok"], "applicable": True}
+         for t in selection_trials], "answered")
+    nobody_pass = majority(nobody_trials, "answered")
+    nobody_applicable_count = sum(1 for t in nobody_trials if t.get("applicable"))
+    # nobody 档是**判据有效性对照**，不是瓶颈指示器：答案码只写在 SKILL.md 正文里，
+    # 因此不回填正文时模型**应当答不出**（nobody_pass=False 才是健康）。若它反而
+    # 答对了，说明答案码可以不读正文猜到 / 从目录泄漏，整套判据被污染，此时任何
+    # 瓶颈结论都不可信。
+    judge_contaminated = (nobody_pass is True)
+
+    if judge_contaminated:
+        bottleneck = "judge_contaminated"
+        conclusion = ("nobody 档（不回填 SKILL.md 正文）竟然也答对了：答案码可在不读正文的情况下"
+                      "获得，判据被污染，本次瓶颈结论一律不可信，需先修判据。")
+    elif oracle_pass is False:
+        bottleneck = "answering_ability"
+        conclusion = "oracle 档（正文已直接注入、无需选择）就失败：答题能力本身是瓶颈，P2/D6/分页拉取均无法解决。"
+    elif oracle_pass and selection_pass is False and selection_picked is False:
+        bottleneck = "long_catalog_selection"
+        conclusion = "oracle 成、selection 败且多数试探连目标技能都没选中：长目录选择是瓶颈，指向分页拉取路线。"
+    elif oracle_pass and selection_pass is False and selection_picked:
+        bottleneck = "post_readback_overflow"
+        conclusion = ("oracle 成、selection 选对了目标技能但读完正文后仍答错："
+                      "回填后二次溢出/注意力退化是瓶颈，指向 P2（SKILL.md 分节压缩）。")
+    elif oracle_pass and selection_pass:
+        bottleneck = "none_observed"
+        conclusion = ("三档在本 N 上均按预期表现（oracle/selection 通过、nobody 如期答不出），"
+                      "本探测点未触及瓶颈边界——需在真实前沿之上的失败点重测才能定位瓶颈。")
+    else:
+        bottleneck = "inconclusive"
+        conclusion = "三实验结果组合未落入任何一条预设判据（如实标注，不强行归类）。"
+
+    detail = (f"三实验 @N={n}（repeat={repeat}）：oracle_pass={oracle_pass}，"
+              f"selection_pass={selection_pass}（其中 selection_picked={selection_picked}），"
+              f"nobody_pass={nobody_pass}（对照档，False 才健康；适用样本数="
+              f"{nobody_applicable_count}/{len(nobody_trials)}，round1 未选中目标技能的试探不计入）；"
+              f"结论：{conclusion}")
+    data = {"n": n, "oracle_pass": oracle_pass, "selection_pass": selection_pass,
+            "selection_picked": selection_picked, "nobody_pass": nobody_pass,
+            "nobody_applicable_count": nobody_applicable_count,
+            "judge_contaminated": judge_contaminated,
+            "bottleneck": bottleneck, "conclusion": conclusion}
+    indeterminate = bottleneck in ("inconclusive", "none_observed")
+    results.append(_sc_result(f"SKILL_CAPACITY: bottleneck_experiment n={n}", model,
+                              not indeterminate and not judge_contaminated, detail,
+                              skipped=indeterminate, data=data))
+    return data
 
 
 def _sc_majority_probe(args, model, probe, n, repeat, timeout):
@@ -11281,18 +11506,24 @@ _SC_ALIAS_EXPANSION_RE = re.compile(r"intent alias expansion: (\d+) -> (\d+) key
 def _sc_target_disclosure_form(block, target):
     """从 `[Prompt]` 日志块里机械判定目标技能的披露档位形态。
 
+    Step 4 修正：此前用 `description[-24:]` 判 L2/L1，但合成池所有技能结尾
+    逐字节相同（"...scenarios encountered in the field."），且 `l2_top_k=2`
+    保证必有 L2 条目，导致该函数恒返回 "L2"（只能区分 L0 vs 非 L0，"目标技能
+    在 L2" 这一结论此前从未被真正证实）。现在只有目标技能的 description 携带
+    唯一尾部 canary（`_SC_TARGET_TAIL_CANARY`），因此 canary 是否出现在日志块
+    里才是判据；干扰项 description 没有 canary，不受此修正影响。
+
     三种渲染形态互斥，可逐字节区分：
       L0 = 单行 `- <name> -> <loc>`；
-      L2 = `Path: <loc>` 且 description **完整**（尾部可见）；
-      L1 = `Path: <loc>` 但 description 被截断（尾部不可见）。
+      L2 = `Path: <loc>` 且 description **完整**（canary 尾部可见）；
+      L1 = `Path: <loc>` 但 description 被截断（canary 尾部不可见）。
     拿不到日志块时返回 None（调用方不当失败）。"""
     if not block:
         return None
     if f"- {target['name']} -> {target['location']}" in block:
         return "L0"
     if f"Path: {target['location']}" in block:
-        tail = (target["description"] or "")[-24:]
-        return "L2" if (tail and tail in block) else "L1"
+        return "L2" if _SC_TARGET_TAIL_CANARY in block else "L1"
     return "absent"
 
 
@@ -11388,6 +11619,63 @@ def _sc_case_cn_query_en_pool(args, model, probe, arm, results, timeout):
     results.append(_sc_result(name, model, ok, detail, data=measurement))
 
 
+def _sc_entry_disclosure_form(block, meta):
+    """通用版 `_sc_target_disclosure_form()`：对任意技能条目（目标或干扰项）判定
+    其在 `[Prompt]` 日志块里的披露档位形态。判据是完整 description 是否整段出现
+    （逐字节子串匹配），对干扰项同样有效（干扰项没有 canary，但完整 description
+    本身就是唯一的、可直接子串匹配的字符串）。"""
+    if not block:
+        return None
+    if f"- {meta['name']} -> {meta['location']}" in block:
+        return "L0"
+    if f"Path: {meta['location']}" in block:
+        return "L2" if (meta.get("description") or "") in block else "L1"
+    return "absent"
+
+
+_SC_DISCLOSURE_LEVEL_RANK = {"L0": 0, "L1": 1, "L2": 2}
+
+# 与目标技能同分的干扰名在 _SC_DISTRACTOR_TOPICS 里的索引区间（Step 2 第三轮引入，
+# 见 _sc_build_skill_description 的 docstring）：flux/capacitor/calibration 三词
+# 全部命中，name 子词打分与目标相同。
+_SC_SAME_SCORE_DISTRACTOR_INDEX_RANGE = range(64, 68)
+
+
+def _sc_same_score_distractor_metas(n, metas, target):
+    """从技能池 metas 里挑出与目标同分的干扰项（按 _sc_build_skill_pool 的确定性
+    命名规则 `(i*7+3) % len(_SC_DISTRACTOR_TOPICS)` 反推索引是否落在同分区间）。"""
+    total_topics = len(_SC_DISTRACTOR_TOPICS)
+    same_score = []
+    for i, meta in enumerate(metas):
+        if meta["is_target"]:
+            continue
+        topic_index = (i * 7 + 3) % total_topics
+        if topic_index in _SC_SAME_SCORE_DISTRACTOR_INDEX_RANGE:
+            same_score.append(meta)
+    return same_score
+
+
+def _sc_target_outranks_same_score_distractors(block, target, same_score_metas):
+    """D4 排序区分度的直接机械断言（不再只靠"别名扩展日志出现"这一间接信号）：
+    目标条目的披露档位必须严格高于同分干扰项档位的中位数。若同分干扰项一个都
+    没进入本次池（n 太小），返回 (None, ...) 由调用方按不适用处理，不当失败。"""
+    if not same_score_metas:
+        return None, None, None
+    target_form = _sc_target_disclosure_form(block, target)
+    target_rank = _SC_DISCLOSURE_LEVEL_RANK.get(target_form)
+    distractor_ranks = sorted(
+        _SC_DISCLOSURE_LEVEL_RANK.get(_sc_entry_disclosure_form(block, m), -1)
+        for m in same_score_metas)
+    if target_rank is None or any(r < 0 for r in distractor_ranks):
+        return None, target_rank, distractor_ranks
+    mid = len(distractor_ranks) // 2
+    if len(distractor_ranks) % 2 == 1:
+        median = distractor_ranks[mid]
+    else:
+        median = (distractor_ranks[mid - 1] + distractor_ranks[mid]) / 2.0
+    return (target_rank > median), target_rank, distractor_ranks
+
+
 def _sc_case_disclosure_tiers(args, model, probe, arm, results, timeout):
     """场景 3（D2 三档渐进披露的机械断言）：同一 N 下
 
@@ -11396,7 +11684,10 @@ def _sc_case_disclosure_tiers(args, model, probe, arm, results, timeout):
         以 L2 形态出现在最终提示词里（`Path:` 行 + description 尾部完整可见，
         而不是被截断的 L1 摘要或单行 L0）；
       - legacy 档（skill_disclosure.enabled=false）：`L2 == Kept` 且 `L1 == L0 == 0`，
-        即逐字节退化到旧两档行为——这是回滚等价性的机械证据。"""
+        即逐字节退化到旧两档行为——这是回滚等价性的机械证据；
+      - Step 4 新增：D4 排序区分度的直接断言——目标条目披露档位严格高于同分干扰项
+        （见 `_SC_SAME_SCORE_DISTRACTOR_INDEX_RANGE`）档位的中位数，不再只靠
+        「别名扩展日志出现」这一间接信号。"""
     n = 24
     skills_xml, metas, target = _sc_build_skill_pool(n)
     body = {
@@ -11428,6 +11719,9 @@ def _sc_case_disclosure_tiers(args, model, probe, arm, results, timeout):
     # 目标技能是否以 L2 全量形态出现（三种渲染形态互斥，可机械区分，见
     # _sc_target_disclosure_form）。
     target_form = _sc_target_disclosure_form(block, target)
+    same_score_metas = _sc_same_score_distractor_metas(n, metas, target)
+    outranks, target_rank, distractor_ranks = _sc_target_outranks_same_score_distractors(
+        block, target, same_score_metas)
     measurement = {
         "skills_kept": kept, "skills_total": values.get("X-Genie-Prompt-Skills-Total"),
         "skills_l2": l2, "skills_l1": l1, "skills_l0": l0,
@@ -11435,6 +11729,9 @@ def _sc_case_disclosure_tiers(args, model, probe, arm, results, timeout):
         "tokens_out": values.get("X-Genie-Prompt-Tokens-Out"),
         "context_size": values.get("X-Genie-Prompt-Context-Size"),
         "target_form": target_form, "prompt_block_available": bool(block),
+        "same_score_distractor_count": len(same_score_metas),
+        "outranks_same_score_median": outranks,
+        "target_rank": target_rank, "distractor_ranks": distractor_ranks,
     }
     _SC_SCENARIO_MEASUREMENTS.setdefault((model, "scenario3"), {})[arm] = measurement
     if missing:
@@ -11457,11 +11754,22 @@ def _sc_case_disclosure_tiers(args, model, probe, arm, results, timeout):
         return
     tiered = (l1 + l0) >= 1
     target_ok = target_form in (None, "L2")
-    ok = sum_ok and tiered and target_ok
+    # D4 排序区分度断言：同分干扰项若一个都没进池（outranks is None），不当失败，
+    # 如实标 skipped；否则要求目标严格跑赢同分干扰项档位中位数。
+    rank_assertion_applicable = outranks is not None
+    rank_ok = (outranks is True) if rank_assertion_applicable else True
+    ok = sum_ok and tiered and target_ok and rank_ok
     detail = (f"N={n}：L2+L1+L0={l2}+{l1}+{l0}={l2 + l1 + l0} == Kept={kept} ? {sum_ok}；"
               f"三档真的分档（L1+L0>=1）? {tiered}；目标技能形态={target_form}"
               f"（要求 L2；拿不到 [Prompt] 日志块时为 None，不当失败）；"
-              f"skills_budget_tokens={measurement['skills_budget_tokens']}")
+              f"skills_budget_tokens={measurement['skills_budget_tokens']}；"
+              f"D4 排序区分度：同分干扰项 {len(same_score_metas)} 条，目标档位={target_rank}，"
+              f"同分干扰项档位={distractor_ranks}，目标严格跑赢中位数？{outranks}"
+              f"（同分干扰项为 0 条时不适用，不当失败）")
+    if not rank_assertion_applicable:
+        results.append(_sc_result(name, model, sum_ok and tiered and target_ok, detail,
+                                  data=measurement))
+        return
     results.append(_sc_result(name, model, ok, detail, data=measurement))
 
 
@@ -11784,6 +12092,18 @@ def _run_skill_capacity_suite(args, models, remote_mode, out_dir):
                                   "converged": converged, "frontier_saturated": saturated,
                                   "usable_for_gain_ratio": usable,
                                   "note": note, "probe_curve": curve}))
+                        # Step 4：三实验正交定位瓶颈，只在 optimized 档跑一次（legacy 44
+                        # 已 converged，本 Step 不重测 legacy，三实验同理只关心 optimized
+                        # 的瓶颈成因）。
+                        # 探测点**必须取前沿之上的第一个失败点 frontier+1**，不能取前沿本身：
+                        # 前沿的定义就是"selection 档在这里通过"，在那里跑三实验必然得到
+                        # selection_pass=True → 恒判 none_observed，永远定位不出瓶颈。
+                        # 未收敛时（frontier 是下界、上面没有已知失败点）退回 frontier 本身，
+                        # 结论会如实落在 none_observed 并标 skipped，不强行归类。
+                        if arm == "optimized" and frontier >= 1:
+                            probe_n = (frontier + 1) if converged else frontier
+                            _sc_run_bottleneck_experiments(args, target, probe, probe_n,
+                                                           repeat, timeout, all_results)
                     except Exception as e:
                         detail = f"二分搜索未捕获异常（可能服务已崩溃）: {type(e).__name__}: {str(e)[:300]}"
                         all_results.append(_sc_result(
