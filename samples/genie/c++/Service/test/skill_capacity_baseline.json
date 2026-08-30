@@ -572,9 +572,1102 @@
       "bottleneck_classifier_defect": "冒烟暴露并修掉一处真实分类缺陷：初版把「nobody 档答不出」当成 post_readback_overflow 的证据，而 nobody 本是**判据有效性对照**（答案码只写在正文里，不回填时本就该答不出）。现改为：nobody 答对 → judge_contaminated（真失败）；selection 失败再按 selection_picked 二分层（未选中→long_catalog_selection，选中但答错→post_readback_overflow）。"
     },
     "gate_suites": {
-      "prompt_fidelity": "10/11 通过, 0 失败, 0 崩溃, 1 按设计跳过 —— 与基线一致，无退化",
-      "qnn": "49/54 通过, 4 失败, 0 崩溃, 1 跳过；4 项失败全部为已知 /images/generations 与 /v1/images/generations 501 且 ignorable=True —— 与基线一致",
-      "skill_capacity": "7 项中 6 通过 / 0 失败 / 0 崩溃 / 1 按设计跳过（builder mode 未实现，精确跳过）→ failed == ignored 成立"
-    }
+      "_doc": "逐用例证据格式沿用 Step 2 第三轮的 case_level_evidence_round3：只列 passed=false 的用例（含 skipped），逐条给出 model / name / ignorable / skipped 与 results.json 出处，不只留汇总字符串。",
+      "prompt_fidelity": {
+        "summary": "10/11 通过, 0 失败, 0 崩溃, 1 按设计跳过 —— 与基线一致，无退化",
+        "total": 11,
+        "passed": 10,
+        "failed": 0,
+        "crashed": 0,
+        "skipped": 1,
+        "baseline_match": true,
+        "case_level_evidence_step4": {
+          "source": "test_results\\sc_step4_pf\\results.json (远程 ARM64，qwen3-8b-8480 round_1)",
+          "failed_cases": [],
+          "skipped_cases": [
+            {
+              "model": "qwen3-8b-8480",
+              "name": "PROMPT_FIDELITY: pure image single question keeps accompanying text",
+              "skipped": true,
+              "ignorable": false
+            }
+          ]
+        }
+      },
+      "qnn": {
+        "summary": "49/54 通过, 4 失败, 0 崩溃, 1 跳过；4 项失败全部为已知 /images/generations 与 /v1/images/generations 501 且 ignorable=True —— 与基线一致",
+        "total": 54,
+        "passed": 49,
+        "failed": 4,
+        "ignored": 4,
+        "crashed": 0,
+        "skipped": 1,
+        "baseline_match": true,
+        "case_level_evidence_step4": {
+          "source": "test_results\\sc_step4_qnn\\results.json (远程 ARM64，qwen3_vl_4b-8480 + qwen3-8b-8480 round_1)",
+          "failed_cases": [
+            {
+              "model": "qwen3_vl_4b-8480",
+              "name": "POST /images/generations",
+              "skipped": false,
+              "ignorable": true
+            },
+            {
+              "model": "qwen3_vl_4b-8480",
+              "name": "POST /v1/images/generations",
+              "skipped": false,
+              "ignorable": true
+            },
+            {
+              "model": "qwen3-8b-8480",
+              "name": "POST /images/generations",
+              "skipped": false,
+              "ignorable": true
+            },
+            {
+              "model": "qwen3-8b-8480",
+              "name": "POST /v1/images/generations",
+              "skipped": false,
+              "ignorable": true
+            }
+          ],
+          "skipped_cases": [
+            {
+              "model": "qwen3_vl_4b-8480",
+              "name": "POST /v1/chat/completions (multimodal audio openai-style)",
+              "skipped": true,
+              "ignorable": false
+            }
+          ]
+        }
+      },
+      "skill_capacity": {
+        "summary": "7 项中 6 通过 / 0 失败 / 0 崩溃 / 1 按设计跳过 → failed == ignored 成立",
+        "total": 7,
+        "passed": 6,
+        "failed": 0,
+        "crashed": 0,
+        "skipped": 1,
+        "case_level_evidence_step4": {
+          "source": "test_results\\sc_step4\\results.json (远程 ARM64，qwen3-8b-8480 round_1，--skill_capacity_arms optimized)",
+          "failed_cases": [],
+          "skipped_cases": [
+            {
+              "model": "qwen3-8b-8480",
+              "name": "SKILL_CAPACITY: optimized scenario4b tools_kept_no_regress",
+              "skipped": true,
+              "ignorable": false,
+              "detail": "缺 legacy 对照数据（需 --skill_capacity_arms both），故精确跳过"
+            }
+          ],
+          "_correction": "本节此前笼统写作「1 按设计跳过（builder mode 未实现，精确跳过）」，与 results.json 实测不符：本次 Step 4 运行用的是 --skill_capacity_arms optimized，跳过的那一条实际是 optimized scenario4b tools_kept_no_regress（原因是缺 legacy 对照），builder mode 那条跳过只在 --skill_capacity_mode both/builder 的运行里出现。据实测更正。"
+        }
+      }
+    },
+    "_invalidated_by_step5_stage_b": "⚠ 本节的 frontier.optimized.frontier_skills=77 与 frontier.gain_ratio=1.75 两个数字已被 Step 5 阶段 B **作废**，禁止写进任何报告：N=77 与 N=78 之间除技能数量外还差了一个混淆变量——唯一名字排序先于目标的同分干扰项 calibration-flux-capacitor-audit-068 固定占池内 index 68，而 n=77 恰好 target_index=68（目标本身占掉该位）使它不在池内，n=76/78 在池内。同时本节 bottleneck_experiments.refined_conclusion 里「模型不发起 read 工具调用」的表述也已被更正为「发起了 read 但读了排序在前的同分候选」（read_rate 实测 1.000）。详见 step5_stage_b。"
+  },
+  "step5_stage_b": {
+    "step": "Step 5 阶段 B：把 B/C/E/F 四条竞争假设互相分开的判别实验（本轮不实施任何服务端算法改动）",
+    "recorded_at": "2026-08-30",
+    "model": "qwen3-8b-8480",
+    "context_size": 8192,
+    "probe_n": 78,
+    "repeat": 5,
+    "arm": "optimized（默认开关，_ScArmConfigOverride 写入后 finally 还原）",
+    "_commands": [
+      "sc_stage_b.py --n 78 --repeat 5（一次性测量脚手架，import test_service as T 复用 ServiceManager/_ScArmConfigOverride/_PromptLogProbe/_sc_build_skill_pool/_pf_check_ledger_headers；串行跑完四组以复用同一服务进程；按约定不进仓库）",
+      "原始落盘：test_results\\sc_stage_b\\stage_b.json（远程 ARM64）；本节 samples 为其逐字段子集"
+    ],
+    "_new_measurements": {
+      "any_read": "本轮新增：是否发起了**任意** read 工具调用（不限目标）。Step 4 只记 picked（read 命中**目标**），因此把「读了别的技能」误述为「连 read 都不发起」。",
+      "target_catalog_pos": "本轮新增：目标条目在 [Prompt] 目录里的实际 1-based 序号（按 `Path: <loc>` 与 `- name -> loc` 两种渲染逐行扫描）。C 假设的自变量是否真的移动，靠它机械判定。"
+    },
+    "arms": {
+      "baseline": {
+        "label": "baseline",
+        "independent_variable": "无（对照组）",
+        "repeat": 5,
+        "http_ok": 5,
+        "read_rate": 1.0,
+        "picked_rate": 0.0,
+        "pass_rate": 0.0,
+        "target_forms": [
+          "L1"
+        ],
+        "target_catalog_pos": [
+          3
+        ],
+        "samples": [
+          {
+            "n": 78,
+            "target_index": null,
+            "any_read": true,
+            "picked": false,
+            "answered": false,
+            "target_in_prompt": true,
+            "target_form": "L1",
+            "target_catalog_pos": 3,
+            "catalog_entries": 78,
+            "skills_kept": 78,
+            "skills_total": 78,
+            "skills_l2": 2,
+            "skills_l1": 6,
+            "skills_l0": 70,
+            "tokens_out": 4521,
+            "context_size": 8192,
+            "emergency_truncated": false,
+            "read_paths": [
+              "~/.skills/calibration-flux-capacitor-audit-068/SKILL.md"
+            ],
+            "http_ok": true,
+            "error": null
+          },
+          {
+            "n": 78,
+            "target_index": null,
+            "any_read": true,
+            "picked": false,
+            "answered": false,
+            "target_in_prompt": true,
+            "target_form": "L1",
+            "target_catalog_pos": 3,
+            "catalog_entries": 78,
+            "skills_kept": 78,
+            "skills_total": 78,
+            "skills_l2": 2,
+            "skills_l1": 6,
+            "skills_l0": 70,
+            "tokens_out": 4521,
+            "context_size": 8192,
+            "emergency_truncated": false,
+            "read_paths": [
+              "~/.skills/calibration-flux-capacitor-audit-068/SKILL.md"
+            ],
+            "http_ok": true,
+            "error": null
+          },
+          {
+            "n": 78,
+            "target_index": null,
+            "any_read": true,
+            "picked": false,
+            "answered": false,
+            "target_in_prompt": true,
+            "target_form": "L1",
+            "target_catalog_pos": 3,
+            "catalog_entries": 78,
+            "skills_kept": 78,
+            "skills_total": 78,
+            "skills_l2": 2,
+            "skills_l1": 6,
+            "skills_l0": 70,
+            "tokens_out": 4521,
+            "context_size": 8192,
+            "emergency_truncated": false,
+            "read_paths": [
+              "~/.skills/calibration-flux-capacitor-audit-068/SKILL.md"
+            ],
+            "http_ok": true,
+            "error": null
+          },
+          {
+            "n": 78,
+            "target_index": null,
+            "any_read": true,
+            "picked": false,
+            "answered": false,
+            "target_in_prompt": true,
+            "target_form": "L1",
+            "target_catalog_pos": 3,
+            "catalog_entries": 78,
+            "skills_kept": 78,
+            "skills_total": 78,
+            "skills_l2": 2,
+            "skills_l1": 6,
+            "skills_l0": 70,
+            "tokens_out": 4521,
+            "context_size": 8192,
+            "emergency_truncated": false,
+            "read_paths": [
+              "~/.skills/calibration-flux-capacitor-audit-068/SKILL.md"
+            ],
+            "http_ok": true,
+            "error": null
+          },
+          {
+            "n": 78,
+            "target_index": null,
+            "any_read": true,
+            "picked": false,
+            "answered": false,
+            "target_in_prompt": true,
+            "target_form": "L1",
+            "target_catalog_pos": 3,
+            "catalog_entries": 78,
+            "skills_kept": 78,
+            "skills_total": 78,
+            "skills_l2": 2,
+            "skills_l1": 6,
+            "skills_l0": 70,
+            "tokens_out": 4521,
+            "context_size": 8192,
+            "emergency_truncated": false,
+            "read_paths": [
+              "~/.skills/calibration-flux-capacitor-audit-068/SKILL.md"
+            ],
+            "http_ok": true,
+            "error": null
+          }
+        ]
+      },
+      "F_premature_termination": {
+        "label": "F_premature_termination",
+        "independent_variable": "HARD CONSTRAINT: you MUST NOT produce a final answer before ...",
+        "repeat": 5,
+        "http_ok": 5,
+        "read_rate": 1.0,
+        "picked_rate": 0.0,
+        "pass_rate": 0.0,
+        "target_forms": [
+          "L1"
+        ],
+        "target_catalog_pos": [
+          3
+        ],
+        "samples": [
+          {
+            "n": 78,
+            "target_index": null,
+            "any_read": true,
+            "picked": false,
+            "answered": false,
+            "target_in_prompt": true,
+            "target_form": "L1",
+            "target_catalog_pos": 3,
+            "catalog_entries": 78,
+            "skills_kept": 78,
+            "skills_total": 78,
+            "skills_l2": 2,
+            "skills_l1": 6,
+            "skills_l0": 70,
+            "tokens_out": 4521,
+            "context_size": 8192,
+            "emergency_truncated": false,
+            "read_paths": [
+              "~/.skills/calibration-flux-capacitor-audit-068/SKILL.md"
+            ],
+            "http_ok": true,
+            "error": null
+          },
+          {
+            "n": 78,
+            "target_index": null,
+            "any_read": true,
+            "picked": false,
+            "answered": false,
+            "target_in_prompt": true,
+            "target_form": "L1",
+            "target_catalog_pos": 3,
+            "catalog_entries": 78,
+            "skills_kept": 78,
+            "skills_total": 78,
+            "skills_l2": 2,
+            "skills_l1": 6,
+            "skills_l0": 70,
+            "tokens_out": 4521,
+            "context_size": 8192,
+            "emergency_truncated": false,
+            "read_paths": [
+              "~/.skills/calibration-flux-capacitor-audit-068/SKILL.md"
+            ],
+            "http_ok": true,
+            "error": null
+          },
+          {
+            "n": 78,
+            "target_index": null,
+            "any_read": true,
+            "picked": false,
+            "answered": false,
+            "target_in_prompt": true,
+            "target_form": "L1",
+            "target_catalog_pos": 3,
+            "catalog_entries": 78,
+            "skills_kept": 78,
+            "skills_total": 78,
+            "skills_l2": 2,
+            "skills_l1": 6,
+            "skills_l0": 70,
+            "tokens_out": 4521,
+            "context_size": 8192,
+            "emergency_truncated": false,
+            "read_paths": [
+              "~/.skills/calibration-flux-capacitor-audit-068/SKILL.md"
+            ],
+            "http_ok": true,
+            "error": null
+          },
+          {
+            "n": 78,
+            "target_index": null,
+            "any_read": true,
+            "picked": false,
+            "answered": false,
+            "target_in_prompt": true,
+            "target_form": "L1",
+            "target_catalog_pos": 3,
+            "catalog_entries": 78,
+            "skills_kept": 78,
+            "skills_total": 78,
+            "skills_l2": 2,
+            "skills_l1": 6,
+            "skills_l0": 70,
+            "tokens_out": 4521,
+            "context_size": 8192,
+            "emergency_truncated": false,
+            "read_paths": [
+              "~/.skills/calibration-flux-capacitor-audit-068/SKILL.md"
+            ],
+            "http_ok": true,
+            "error": null
+          },
+          {
+            "n": 78,
+            "target_index": null,
+            "any_read": true,
+            "picked": false,
+            "answered": false,
+            "target_in_prompt": true,
+            "target_form": "L1",
+            "target_catalog_pos": 3,
+            "catalog_entries": 78,
+            "skills_kept": 78,
+            "skills_total": 78,
+            "skills_l2": 2,
+            "skills_l1": 6,
+            "skills_l0": 70,
+            "tokens_out": 4521,
+            "context_size": 8192,
+            "emergency_truncated": false,
+            "read_paths": [
+              "~/.skills/calibration-flux-capacitor-audit-068/SKILL.md"
+            ],
+            "http_ok": true,
+            "error": null
+          }
+        ]
+      },
+      "C_rank5_probe": {
+        "label": "C_rank5_probe",
+        "independent_variable": "target_index=5",
+        "repeat": 1,
+        "http_ok": 1,
+        "read_rate": 1.0,
+        "picked_rate": 0.0,
+        "pass_rate": 0.0,
+        "target_forms": [
+          "L1"
+        ],
+        "target_catalog_pos": [
+          3
+        ],
+        "samples": [
+          {
+            "n": 78,
+            "target_index": 5,
+            "any_read": true,
+            "picked": false,
+            "answered": false,
+            "target_in_prompt": true,
+            "target_form": "L1",
+            "target_catalog_pos": 3,
+            "catalog_entries": 78,
+            "skills_kept": 78,
+            "skills_total": 78,
+            "skills_l2": 2,
+            "skills_l1": 6,
+            "skills_l0": 70,
+            "tokens_out": 4523,
+            "context_size": 8192,
+            "emergency_truncated": false,
+            "read_paths": [
+              "~/.skills/calibration-flux-capacitor-audit-068/SKILL.md"
+            ],
+            "http_ok": true,
+            "error": null
+          }
+        ]
+      },
+      "C_rank20_probe": {
+        "label": "C_rank20_probe",
+        "independent_variable": "target_index=20",
+        "repeat": 1,
+        "http_ok": 1,
+        "read_rate": 1.0,
+        "picked_rate": 0.0,
+        "pass_rate": 0.0,
+        "target_forms": [
+          "L1"
+        ],
+        "target_catalog_pos": [
+          3
+        ],
+        "samples": [
+          {
+            "n": 78,
+            "target_index": 20,
+            "any_read": true,
+            "picked": false,
+            "answered": false,
+            "target_in_prompt": true,
+            "target_form": "L1",
+            "target_catalog_pos": 3,
+            "catalog_entries": 78,
+            "skills_kept": 78,
+            "skills_total": 78,
+            "skills_l2": 2,
+            "skills_l1": 6,
+            "skills_l0": 70,
+            "tokens_out": 4522,
+            "context_size": 8192,
+            "emergency_truncated": false,
+            "read_paths": [
+              "~/.skills/calibration-flux-capacitor-audit-068/SKILL.md"
+            ],
+            "http_ok": true,
+            "error": null
+          }
+        ]
+      },
+      "C_rank40_probe": {
+        "label": "C_rank40_probe",
+        "independent_variable": "target_index=40",
+        "repeat": 1,
+        "http_ok": 1,
+        "read_rate": 1.0,
+        "picked_rate": 0.0,
+        "pass_rate": 0.0,
+        "target_forms": [
+          "L1"
+        ],
+        "target_catalog_pos": [
+          3
+        ],
+        "samples": [
+          {
+            "n": 78,
+            "target_index": 40,
+            "any_read": true,
+            "picked": false,
+            "answered": false,
+            "target_in_prompt": true,
+            "target_form": "L1",
+            "target_catalog_pos": 3,
+            "catalog_entries": 78,
+            "skills_kept": 78,
+            "skills_total": 78,
+            "skills_l2": 2,
+            "skills_l1": 6,
+            "skills_l0": 70,
+            "tokens_out": 4525,
+            "context_size": 8192,
+            "emergency_truncated": false,
+            "read_paths": [
+              "~/.skills/calibration-flux-capacitor-audit-068/SKILL.md"
+            ],
+            "http_ok": true,
+            "error": null
+          }
+        ]
+      },
+      "C_rank70_probe": {
+        "label": "C_rank70_probe",
+        "independent_variable": "target_index=70",
+        "repeat": 1,
+        "http_ok": 1,
+        "read_rate": 1.0,
+        "picked_rate": 0.0,
+        "pass_rate": 0.0,
+        "target_forms": [
+          "L1"
+        ],
+        "target_catalog_pos": [
+          3
+        ],
+        "samples": [
+          {
+            "n": 78,
+            "target_index": 70,
+            "any_read": true,
+            "picked": false,
+            "answered": false,
+            "target_in_prompt": true,
+            "target_form": "L1",
+            "target_catalog_pos": 3,
+            "catalog_entries": 78,
+            "skills_kept": 78,
+            "skills_total": 78,
+            "skills_l2": 2,
+            "skills_l1": 6,
+            "skills_l0": 70,
+            "tokens_out": 4526,
+            "context_size": 8192,
+            "emergency_truncated": false,
+            "read_paths": [
+              "~/.skills/calibration-flux-capacitor-audit-068/SKILL.md"
+            ],
+            "http_ok": true,
+            "error": null
+          }
+        ]
+      },
+      "E_target_upgraded_to_l2": {
+        "label": "E_target_upgraded_to_l2",
+        "independent_variable": "无（对照组）",
+        "repeat": 5,
+        "http_ok": 5,
+        "read_rate": 1.0,
+        "picked_rate": 1.0,
+        "pass_rate": 1.0,
+        "target_forms": [
+          "L2"
+        ],
+        "target_catalog_pos": [
+          3
+        ],
+        "samples": [
+          {
+            "n": 78,
+            "target_index": null,
+            "any_read": true,
+            "picked": true,
+            "answered": true,
+            "target_in_prompt": true,
+            "target_form": "L2",
+            "target_catalog_pos": 3,
+            "catalog_entries": 78,
+            "skills_kept": 78,
+            "skills_total": 78,
+            "skills_l2": 8,
+            "skills_l1": 6,
+            "skills_l0": 64,
+            "tokens_out": 5052,
+            "context_size": 8192,
+            "emergency_truncated": false,
+            "read_paths": [
+              "~/.skills/flux-capacitor-calibration/SKILL.md"
+            ],
+            "http_ok": true,
+            "error": null
+          },
+          {
+            "n": 78,
+            "target_index": null,
+            "any_read": true,
+            "picked": true,
+            "answered": true,
+            "target_in_prompt": true,
+            "target_form": "L2",
+            "target_catalog_pos": 3,
+            "catalog_entries": 78,
+            "skills_kept": 78,
+            "skills_total": 78,
+            "skills_l2": 8,
+            "skills_l1": 6,
+            "skills_l0": 64,
+            "tokens_out": 5052,
+            "context_size": 8192,
+            "emergency_truncated": false,
+            "read_paths": [
+              "~/.skills/flux-capacitor-calibration/SKILL.md"
+            ],
+            "http_ok": true,
+            "error": null
+          },
+          {
+            "n": 78,
+            "target_index": null,
+            "any_read": true,
+            "picked": true,
+            "answered": true,
+            "target_in_prompt": true,
+            "target_form": "L2",
+            "target_catalog_pos": 3,
+            "catalog_entries": 78,
+            "skills_kept": 78,
+            "skills_total": 78,
+            "skills_l2": 8,
+            "skills_l1": 6,
+            "skills_l0": 64,
+            "tokens_out": 5052,
+            "context_size": 8192,
+            "emergency_truncated": false,
+            "read_paths": [
+              "~/.skills/flux-capacitor-calibration/SKILL.md"
+            ],
+            "http_ok": true,
+            "error": null
+          },
+          {
+            "n": 78,
+            "target_index": null,
+            "any_read": true,
+            "picked": true,
+            "answered": true,
+            "target_in_prompt": true,
+            "target_form": "L2",
+            "target_catalog_pos": 3,
+            "catalog_entries": 78,
+            "skills_kept": 78,
+            "skills_total": 78,
+            "skills_l2": 8,
+            "skills_l1": 6,
+            "skills_l0": 64,
+            "tokens_out": 5052,
+            "context_size": 8192,
+            "emergency_truncated": false,
+            "read_paths": [
+              "~/.skills/flux-capacitor-calibration/SKILL.md"
+            ],
+            "http_ok": true,
+            "error": null
+          },
+          {
+            "n": 78,
+            "target_index": null,
+            "any_read": true,
+            "picked": true,
+            "answered": true,
+            "target_in_prompt": true,
+            "target_form": "L2",
+            "target_catalog_pos": 3,
+            "catalog_entries": 78,
+            "skills_kept": 78,
+            "skills_total": 78,
+            "skills_l2": 8,
+            "skills_l1": 6,
+            "skills_l0": 64,
+            "tokens_out": 5052,
+            "context_size": 8192,
+            "emergency_truncated": false,
+            "read_paths": [
+              "~/.skills/flux-capacitor-calibration/SKILL.md"
+            ],
+            "http_ok": true,
+            "error": null
+          }
+        ]
+      }
+    },
+    "c_variable_moved": {
+      "positions_by_rank": {
+        "5": [
+          3
+        ],
+        "20": [
+          3
+        ],
+        "40": [
+          3
+        ],
+        "70": [
+          3
+        ]
+      },
+      "moved": false
+    },
+    "e_resolution": {
+      "extra_arm_needed": true,
+      "override": {
+        "skill_disclosure": {
+          "l2_top_k": 8
+        }
+      },
+      "observed_forms": [
+        "L1"
+      ]
+    },
+    "hypothesis_verdicts": {
+      "F_premature_termination": {
+        "verdict": "falsified",
+        "criterion": "read_rate 由 <5% 升到 >80% 才算命中",
+        "observed": "baseline read_rate=1.000（5/5），F 档 read_rate=1.000（5/5）——分母本来就是 100%，该判据在当前用例上根本不可能被满足；picked_rate 两档同为 0.000"
+      },
+      "B_tool_call_threshold": {
+        "verdict": "falsified（未单独起档位即可判定）",
+        "criterion": "read_rate 由 <10% 升到 >80%",
+        "observed": "baseline read_rate 已是 1.000，「模型不敢调用工具」这个前提直接不成立，无需再花机器时间起 B 档"
+      },
+      "C_position_bias": {
+        "verdict": "falsified（自变量未移动 + Δpicked=0）",
+        "criterion": "rank5 与 rank70 的 picked 率差 >40pct",
+        "observed": "target_index=5/20/40/70 四个值下 target_catalog_pos **恒为 3**、picked_rate 恒为 0.000（Δ=0）。根因已代码核实：AssignSkillDetailLevels() 按分数降序、同分按**名字升序**排序，目录序号与技能在池内 index 完全无关，所以「洗 pool index」这个自变量物理上不移动。"
+      },
+      "E_summary_insufficient": {
+        "verdict": "confirmed（本轮唯一命中）",
+        "criterion": "固定 N=78 与池组成，仅把目标升到 L2 后 pass_rate 由 0% 升到 >80%",
+        "observed": "唯一自变量 skill_disclosure.l2_top_k 2→8：目标形态 L1→L2，picked_rate 0.000→**1.000**（5/5），pass_rate 0.000→**1.000**（5/5），tokens_out 4521→5052（context 8192，仍无溢出、无 422）",
+        "mechanism": "目标 description 被 L1 截断后，其**可见**部分与 4 条同分干扰项逐字节相同（唯一差别是尾部 canary，被截掉了）→ 目录里再无任何可区分信号 → 模型稳定选中目录里的第一条同分候选。baseline/F 共 10/10 次读的都是同一条 `calibration-flux-capacitor-audit-068`（同分 18 且名字升序排在目标之前，故排第 1，目标排第 3）。"
+      }
+    },
+    "step4_conclusion_correction": {
+      "wrong_statement": "「目标技能在场，模型却不发起 read 工具调用」（Step 4 第 3 节与 bottleneck_experiments.refined_conclusion）",
+      "corrected_statement": "目标技能在场，模型**发起了 read（100%）**，但读的是排序在它前面的同分干扰项——是「候选内选错」，不是「不发起调用」。",
+      "why_step4_got_it_wrong": "Step 4 只记录 picked（read 命中**目标**路径），没有记录 any_read（是否发起任意 read）。picked=False 同时兼容「不发起 read」与「发起但读错」，Step 4 取了前一种解读且未做区分测量。",
+      "harness_classification_still_valid": "套件机械分类 long_catalog_selection 字面上仍成立（失败发生在选择阶段），但其物理机制必须改述为「同分候选不可区分 + L1 截断把唯一区分信号截掉 + 同分按名字升序 tie-break 成为实际决策器」。"
+    },
+    "frontier_77_confound": {
+      "severity": "高——原「精确前沿 77」与「1.75x 精确提升」两个数字据此作废，不得写进任何报告",
+      "mechanism": "唯一名字排序**先于**目标的同分干扰项是 `calibration-flux-capacitor-audit-068`（池内 index 固定为 68，因为干扰名由 (i*7+3)%68 派生）。而 _sc_build_skill_pool 用 md5(n) 派生 target_index：n=77 恰好 target_index=68 → 目标本身占掉了 index 68 → 该干扰项**不在** n=77 的池里；n=76 与 n=78 的池里都在。",
+      "verified_by": "本机复算 _sc_build_skill_pool(n) 实测：n=44 target_index=11 / n=64→41 / n=76→51 / n=77→**68** / n=78→56；n=76 与 n=78 含 calibration-flux-capacitor-audit-068，n=44/64/77 不含。",
+      "consequence": "77→78 这个「相变点」差的不只是技能数量，还差了「池内是否存在一条排序先于目标的同分候选」这个混淆变量。此前的 N=78×9 噪声复核（picked_rate=0.000）只证明「N=78 的失败是稳定的」，并不能证明「77/78 是容量相变」。",
+      "_note_n76": "N=76 的池里同样含该干扰项却被记为通过——但那是 repeat=1 的单次采样，不足以推翻上述混淆，只说明混淆之外还有噪声成分。",
+      "remediation_plan": "（Copilot 建议 + 我采纳，待下一轮执行）改造合成池为「锚点池」：固定保留 k 条 description 完全相同、名字字典序早于目标的同分干扰项作为锚点，保证**无论 N 怎么变它们都在池内且都排在目标前**；改变 N 只增删与目标/锚点都无关的尾部填充技能。然后对 N 二分。可用判据：在 N*±1（最好 ±2）处目标与锚点集合完全不变、仅目标的 L2/L1 身份发生切换，且切换点重复 3 次一致。"
+    },
+    "stage_c_route": {
+      "_rule": "只实施被实测指向的那一条；其余显式记为「不做 + 原因 + 证伪判据」，不为凑齐清单写代码。本轮（阶段 B）不实施任何算法改动。",
+      "main_line": {
+        "action": "(a) 高分技能保底 L2 名额：让分数处于最高档（或 Top-K 分数并列）的技能不因 l2_top_k 太小而被降到 L1/L0，配置开关 + 默认安全 + 关掉后逐字节退化到当前行为",
+        "why": "它是本轮唯一被实测直接证明有效的动作：唯一自变量 l2_top_k 2→8 让目标进 L2，pass_rate 0.000→1.000（5/5）",
+        "falsification_criterion": "固定 N=78 与池组成，只提高 l2_top_k：若目标已进入 L2 而 picked_rate 仍 <0.8，则 (a) 失去主线资格"
+      },
+      "secondary": {
+        "b_l1_tail_summary": "L1 摘要改为保留 description **尾段**而非前 N 字节。降为二线：它与 (a) 修的是同一个 E（L1 信息塌缩），只是换一种保留方式；且本轮的「尾部 canary」是合成池构造产物，真实 SKILL.md 未必把判别信息放尾部。证伪判据：固定全体 L1、只把摘要改为尾段，若 picked_rate <0.8 则不是主线。",
+        "c_stronger_tie_break": "同分打破改用比「名字升序」更强的信号。降为二线：它依赖打分器知道谁更好，而本轮实验构造恰恰刻意消灭了所有可区分信号。证伪判据：固定全体 L1、只改 tie-break，若 picked_rate <0.8 则淘汰。"
+      },
+      "not_doing": {
+        "P2_skill_section_aware": "不做。Step 4 已实测排除：回填后二次溢出未发生（N=78 无 422、oracle 档通过）。证伪判据：出现 picked=True 但 answered=False 且伴随 emergency_truncated=True 或 422，才回头做 P2。",
+        "catalog_paging": "不做（Copilot 也判其降到最低）。它解决「目录装不下/挤不进」，而实测 skills_kept=78/78 一条未丢弃、未咬预算上限、tokens_out 4521/8192。证伪判据：N=256 时 skills_kept < skills_total 或出现 422，且分页后前沿 ≈ N，才成立。新增协议面，若做必须默认关闭。",
+        "D6_self_heal": "不做（本轮降为兜底补丁，不是主线）。触发前提「检测到选错/畸形调用」在本轮**确实成立**（模型稳定读错技能），因此 D6 技术上可用——但它接受第一次选错再补救，而 (a) 已被实测证明能让第一次就选对，工程上优先修根因。证伪判据（Copilot 给出）：若首次错误率 >20%，即便自愈后 pass=1 也不能算主线。",
+        "D5_two_phase": "不做（Copilot 判其最可能白干，症状实测不存在）。证伪判据留档：N=128/256 下「仅 name+一行摘要目录」的 Top-1 命中率与单阶段打分 Top-1 差 <1% 且前沿不提升，即 D5 贡献 ≈ 0。"
+      }
+    },
+    "copilot_round1": {
+      "_meta": "copilot_round.py 快路径，--owner step5-stage-b-review / step5-stage-b-review-b，rc=0，model_confirmed = GPT 5.6 思考；先拿到本节全部实测数字再提问，角色 = 设备侧小模型上下文/技能目录工程的反对派，禁止「视场景而定」，每条须给可一次实测证伪的判据",
+      "verdicts": [
+        "B / C / F 三条**全部**判为已被严格证伪（B/F 被 baseline read_rate=1.000 直接击穿；C 因池内 index 换 4 个值目录序号恒为 3、Δpicked=0）",
+        "剩余主假设只有 E，且强度「接近教科书级因果实验」（唯一变量 L1→L2，picked/pass 双双 0→1）",
+        "主线动作 = (a) 高分技能保底 L2；(b)(c) 二线；(d) 分页拉取降到最低（预计分页前后 picked 都是 0）；(e) 自愈是兜底补丁不是主线",
+        "前沿 77 与 1.75x **必须全部作废**——77 与 78 之间差的不是技能数量而是池组成",
+        "补测方案：锚点池 + 只增删无关尾部填充技能来改变 N，判据见 frontier_77_confound.remediation_plan",
+        "下一轮最便宜的单变量实验：固定池组成只逐步加 l2_top_k，阈值——目标首次进入 L2 时成功率由 ≤20% 跃迁到 ≥80%（最好 5/5）则支持「L2 保底名额」为主因；若进 L2 后仍 ≤40% 或只是平滑提升而非跃迁，则说明 read 后还有选择阶段因素、L2 不是唯一主因"
+      ],
+      "disposition": "四条采纳：①B/C/F 判为证伪（与我的实测逐格一致，本就是我的数据推出来的）；②主线 (a)；③77/1.75x 作废；④锚点池补测方案与下一轮单变量实验判据。本轮**未**据其观点改任何实现（阶段 C 算法改动按任务约束留给下一轮）。"
+    },
+    "gates_not_run_this_pass": "本轮按任务范围**未**跑 prompt_fidelity / qnn / skill_capacity 守门套件，也未重测前沿——因为本轮没有改动任何服务端代码，测试侧改动只有 _sc_single_trial 的 target_in_prompt 判据（A1）与本节留档。A1 的行为等价性尚未在远程套件里回归验证，留给下一轮。"
+  },
+  "step5_stage_c": {
+    "step": "Step 5 阶段 C 第一切片（纯离线）：锚点池重构 + 本机离线复算验证",
+    "recorded_at": "2026-08-30",
+    "scope": "本切片完全未接触远程 ARM64、未改任何 C++、未跑任何套件、未跑 Copilot；只做测试侧合成池重构与离线复算。",
+    "anchor_pool_offline_validation": {
+      "_why": "旧 _sc_build_skill_pool() 的干扰名由 _SC_DISTRACTOR_TOPICS[(i*7+3)%68] 派生、目标位置由 md5(n) 派生 → 「名字字典序早于目标的同分（18 分）干扰项」在不在池里随 N 无规律开关（实测 n=44→池内 index 11、64→41、76→51、77→68、78→56）。因为目录按「分数降序 + 同分名字升序」排，目标的目录序号与 L2/L1 身份会随 N 跳变，于是 Step 4 的「N=77 通过 / N=78 失败」里混进了一个与技能数量无关的变量 —— 这正是前沿 77 与 1.75x 作废的原因。",
+      "design": {
+        "anchor_count_k": 2,
+        "anchor_topics": [
+          "calibration-flux-capacitor-audit",
+          "calibration-flux-capacitor-replica"
+        ],
+        "_k_rationale": "k=2 的理由：2 条锚点已足够同时成立阶段 B 证明为决定性的两个条件——(1) 目标身边恒有与它逐字节同构的同分候选（同分竞争真实存在），(2) 目标恒非目录首条（目录序号恒为 3，因此在 l2_top_k=2 下恒被降到 L1，可复现阶段 B 的 baseline 形态）。再多锚点只会白占 skills 预算、把池体量与 token 曲线一起抬高，反而削弱跨 N 可比性；k=1 则目标序号变 2，在 l2_top_k=2 下会误进 L2，测不到那个被证实的失败形态。",
+        "_anchor_selection": "两条锚点都取自 Step 2 第三轮引入的 4 条同分名里以 \"calibration\" 开头的部分——另两条 flux-capacitor-calibration-mirror/-backup 名字排序**晚于**目标（同前缀更长者更大），排在目标之后，做不了锚点。",
+        "filler_topics_count": 18,
+        "_filler_rationale": "填充项取自 _SC_DISTRACTOR_TOPICS 中名字侧关键词命中数恒为 0 的 18 条（离线复算得到），只拿与全体技能相同的描述侧 9 分，因此恒排在目标与锚点之后；改变 N 只增删它们，不会挤动目录前三位。名字仍是有真实感的主题词（reactor-/warp-/sensor- 系列），以维持单条目录条目体量接近真实场景。",
+        "target_pool_index": 0,
+        "_target_index_note": "目标默认停在池内 index 0，不再由 md5(n) 派生。池内 index 与目录序号完全无关（目录只按分数降序 + 同分名字升序），target_index 参数只为兼容既有实验入口保留；阶段 B 已实测洗池内 index 根本移动不了目录序号。"
+      },
+      "recompute_method": {
+        "score_relevance": "name 子词按 -/_ 拆 + **双向**子串匹配 ×3；description **单向** find ×1；关键词门槛 len>=3；关键词集 = re.findall('[a-z0-9]+', _SC_QUESTION.lower())",
+        "keywords": [
+          "anomaly",
+          "answer",
+          "appropriate",
+          "calibration",
+          "capacitor",
+          "class",
+          "flux",
+          "for",
+          "how",
+          "perform",
+          "skill",
+          "temporal",
+          "the",
+          "use"
+        ],
+        "catalog_order": "AssignSkillDetailLevels()：分数降序 + 同分按名字升序（prompt_optimizer.cpp）",
+        "_alias_expansion_note": "本次离线复算未叠加 D4 的中英意图别名扩展（relevance_filter.intent_aliases_enabled）——问题串与技能池全为英文，别名扩展在该场景下不会引入新命中词，因此不影响相对排序；这是离线复算与服务端实际打分之间唯一已知的口径差，如实标注。",
+        "repeats": 3,
+        "_command": "python sc_anchor_offline.py（一次性离线脚本，sys.path.insert(0,'test') + import test_service as T，约 1 秒/轮，不进仓库）"
+      },
+      "probed_n": [
+        8,
+        16,
+        24,
+        44,
+        64,
+        76,
+        77,
+        78,
+        96,
+        128
+      ],
+      "per_n": {
+        "8": {
+          "target_name": "flux-capacitor-calibration",
+          "target_score": 18,
+          "target_catalog_pos": 3,
+          "catalog_top5": [
+            "calibration-flux-capacitor-audit-000",
+            "calibration-flux-capacitor-replica-001",
+            "flux-capacitor-calibration",
+            "reactor-fuel-rotation-003",
+            "reactor-shutdown-procedure-002"
+          ],
+          "anchor_names": [
+            "calibration-flux-capacitor-audit-000",
+            "calibration-flux-capacitor-replica-001"
+          ],
+          "anchor_scores": [
+            18
+          ],
+          "score_distribution": {
+            "9": 5,
+            "18": 3
+          },
+          "pool_size": 8
+        },
+        "16": {
+          "target_name": "flux-capacitor-calibration",
+          "target_score": 18,
+          "target_catalog_pos": 3,
+          "catalog_top5": [
+            "calibration-flux-capacitor-audit-000",
+            "calibration-flux-capacitor-replica-001",
+            "flux-capacitor-calibration",
+            "reactor-core-realignment-007",
+            "reactor-emergency-vent-012"
+          ],
+          "anchor_names": [
+            "calibration-flux-capacitor-audit-000",
+            "calibration-flux-capacitor-replica-001"
+          ],
+          "anchor_scores": [
+            18
+          ],
+          "score_distribution": {
+            "9": 13,
+            "18": 3
+          },
+          "pool_size": 16
+        },
+        "24": {
+          "target_name": "flux-capacitor-calibration",
+          "target_score": 18,
+          "target_catalog_pos": 3,
+          "catalog_top5": [
+            "calibration-flux-capacitor-audit-000",
+            "calibration-flux-capacitor-replica-001",
+            "flux-capacitor-calibration",
+            "reactor-core-realignment-007",
+            "reactor-emergency-vent-012"
+          ],
+          "anchor_names": [
+            "calibration-flux-capacitor-audit-000",
+            "calibration-flux-capacitor-replica-001"
+          ],
+          "anchor_scores": [
+            18
+          ],
+          "score_distribution": {
+            "9": 21,
+            "18": 3
+          },
+          "pool_size": 24
+        },
+        "44": {
+          "target_name": "flux-capacitor-calibration",
+          "target_score": 18,
+          "target_catalog_pos": 3,
+          "catalog_top5": [
+            "calibration-flux-capacitor-audit-000",
+            "calibration-flux-capacitor-replica-001",
+            "flux-capacitor-calibration",
+            "reactor-core-realignment-007",
+            "reactor-core-realignment-025"
+          ],
+          "anchor_names": [
+            "calibration-flux-capacitor-audit-000",
+            "calibration-flux-capacitor-replica-001"
+          ],
+          "anchor_scores": [
+            18
+          ],
+          "score_distribution": {
+            "9": 41,
+            "18": 3
+          },
+          "pool_size": 44
+        },
+        "64": {
+          "target_name": "flux-capacitor-calibration",
+          "target_score": 18,
+          "target_catalog_pos": 3,
+          "catalog_top5": [
+            "calibration-flux-capacitor-audit-000",
+            "calibration-flux-capacitor-replica-001",
+            "flux-capacitor-calibration",
+            "reactor-core-realignment-007",
+            "reactor-core-realignment-025"
+          ],
+          "anchor_names": [
+            "calibration-flux-capacitor-audit-000",
+            "calibration-flux-capacitor-replica-001"
+          ],
+          "anchor_scores": [
+            18
+          ],
+          "score_distribution": {
+            "9": 61,
+            "18": 3
+          },
+          "pool_size": 64
+        },
+        "76": {
+          "target_name": "flux-capacitor-calibration",
+          "target_score": 18,
+          "target_catalog_pos": 3,
+          "catalog_top5": [
+            "calibration-flux-capacitor-audit-000",
+            "calibration-flux-capacitor-replica-001",
+            "flux-capacitor-calibration",
+            "reactor-core-realignment-007",
+            "reactor-core-realignment-025"
+          ],
+          "anchor_names": [
+            "calibration-flux-capacitor-audit-000",
+            "calibration-flux-capacitor-replica-001"
+          ],
+          "anchor_scores": [
+            18
+          ],
+          "score_distribution": {
+            "9": 73,
+            "18": 3
+          },
+          "pool_size": 76
+        },
+        "77": {
+          "target_name": "flux-capacitor-calibration",
+          "target_score": 18,
+          "target_catalog_pos": 3,
+          "catalog_top5": [
+            "calibration-flux-capacitor-audit-000",
+            "calibration-flux-capacitor-replica-001",
+            "flux-capacitor-calibration",
+            "reactor-core-realignment-007",
+            "reactor-core-realignment-025"
+          ],
+          "anchor_names": [
+            "calibration-flux-capacitor-audit-000",
+            "calibration-flux-capacitor-replica-001"
+          ],
+          "anchor_scores": [
+            18
+          ],
+          "score_distribution": {
+            "9": 74,
+            "18": 3
+          },
+          "pool_size": 77
+        },
+        "78": {
+          "target_name": "flux-capacitor-calibration",
+          "target_score": 18,
+          "target_catalog_pos": 3,
+          "catalog_top5": [
+            "calibration-flux-capacitor-audit-000",
+            "calibration-flux-capacitor-replica-001",
+            "flux-capacitor-calibration",
+            "reactor-core-realignment-007",
+            "reactor-core-realignment-025"
+          ],
+          "anchor_names": [
+            "calibration-flux-capacitor-audit-000",
+            "calibration-flux-capacitor-replica-001"
+          ],
+          "anchor_scores": [
+            18
+          ],
+          "score_distribution": {
+            "9": 75,
+            "18": 3
+          },
+          "pool_size": 78
+        },
+        "96": {
+          "target_name": "flux-capacitor-calibration",
+          "target_score": 18,
+          "target_catalog_pos": 3,
+          "catalog_top5": [
+            "calibration-flux-capacitor-audit-000",
+            "calibration-flux-capacitor-replica-001",
+            "flux-capacitor-calibration",
+            "reactor-core-realignment-007",
+            "reactor-core-realignment-025"
+          ],
+          "anchor_names": [
+            "calibration-flux-capacitor-audit-000",
+            "calibration-flux-capacitor-replica-001"
+          ],
+          "anchor_scores": [
+            18
+          ],
+          "score_distribution": {
+            "9": 93,
+            "18": 3
+          },
+          "pool_size": 96
+        },
+        "128": {
+          "target_name": "flux-capacitor-calibration",
+          "target_score": 18,
+          "target_catalog_pos": 3,
+          "catalog_top5": [
+            "calibration-flux-capacitor-audit-000",
+            "calibration-flux-capacitor-replica-001",
+            "flux-capacitor-calibration",
+            "reactor-core-realignment-007",
+            "reactor-core-realignment-025"
+          ],
+          "anchor_names": [
+            "calibration-flux-capacitor-audit-000",
+            "calibration-flux-capacitor-replica-001"
+          ],
+          "anchor_scores": [
+            18
+          ],
+          "score_distribution": {
+            "9": 125,
+            "18": 3
+          },
+          "pool_size": 128
+        }
+      },
+      "verdict": {
+        "anchor_set_constant": true,
+        "target_catalog_pos_constant": true,
+        "target_catalog_pos": 3,
+        "repeat_runs_identical": true,
+        "score_distribution_shape": "每个 N 恒为 {18: 3（目标 + 2 锚点）, 9: N-3（填充项）}，即随 N 变化的只有填充项条数",
+        "_conclusion": "锚点集合、目标目录序号（恒为 3）、目录前三位（锚点 audit-000 → 锚点 replica-001 → 目标）在 N ∈ {8,16,24,44,64,76,77,78,96,128} 上全部恒定，3 次复算逐字段一致 → 跨 N 比较的混淆变量已消除，前沿二分搜索在这个池上重新具备可比性。",
+        "_not_yet_verified": "这只是**离线**复算（按文档化的 ScoreRelevance 口径在本机重算）。服务端真实目录序号、真实 L2/L1 身份、以及新池下的真实前沿值，本切片一律未在远程 ARM64 上测量，留给下一切片；因此不得据此声明任何前沿数字。"
+      }
+    },
+    "not_done_in_this_slice": [
+      "主线算法 (a) 高分技能保底 L2 名额的 C++ 实现（prompt_optimizer.cpp / model_config.h / model_manager.cpp）",
+      "远程 N=78 repeat>=5 局部实测（开关开/关的形态与 picked_rate/pass_rate、l2_top_k 阈值曲线）",
+      "两档前沿重测（legacy 与 optimized 都必须重测，旧的 44 / 77 在新池下均不可比）",
+      "prompt_fidelity / qnn / skill_capacity 三套件守门",
+      "Copilot 第 2 轮（实验设计者角色）"
+    ]
   }
 }

@@ -10697,6 +10697,33 @@ _SC_DISTRACTOR_TOPICS = [
     "flux-capacitor-calibration-backup", "calibration-flux-capacitor-replica",
 ]
 
+# Step 5 阶段 C：锚点池的两个固定名单（详见 _sc_build_skill_pool 的 docstring）。
+#
+# _SC_ANCHOR_TOPICS —— k=2 条**锚点**：与目标同分（18 分）且名字字典序**早于**
+# 目标 "flux-capacitor-calibration"（"calibration…" < "flux…"），因此在目录里
+# （分数降序 + 同分名字升序）恒排在目标之前，使「目标恒非首条、且首条是一个
+# 与它逐字节同构的同分候选」这个被阶段 B 证明为决定性的竞争条件在**所有 N 上
+# 恒定存在**。两条都取自下面那 4 条同分名里 "calibration" 开头的部分——另两条
+# ("flux-capacitor-calibration-mirror/-backup") 名字排序**晚于**目标，做不了锚点。
+_SC_ANCHOR_TOPICS = [
+    "calibration-flux-capacitor-audit",
+    "calibration-flux-capacitor-replica",
+]
+
+# _SC_FILLER_TOPICS —— 填充项名单：这 18 条的名字侧关键词命中数**恒为 0**
+# （离线复算自 _SC_DISTRACTOR_TOPICS，见 step5_stage_c.anchor_pool_offline_validation），
+# 只拿与全体技能相同的描述侧 9 分，因此恒排在目标与锚点之后，改变 N 只会增删
+# 它们、不会挤动目录前三位。仍保留真实感十足的主题词（不是 filler-000 这种
+# 明显合成名），以维持单条目录条目体量与真实场景接近。
+_SC_FILLER_TOPICS = [
+    "reactor-startup-checklist", "warp-field-diagnostics", "reactor-shutdown-procedure",
+    "reactor-fuel-rotation", "warp-drive-cooldown", "reactor-pressure-check",
+    "sensor-drift-correction", "reactor-core-realignment", "warp-coil-degauss",
+    "reactor-vibration-analysis", "reactor-fuel-purity-check", "warp-field-dampening",
+    "reactor-emergency-vent", "sensor-baseline-reset", "reactor-noise-suppression",
+    "warp-core-realignment", "reactor-log-rotation", "sensor-fault-isolation",
+]
+
 _SC_QUESTION = ("How do I perform flux capacitor calibration for a class-3 temporal anomaly? "
                 "Use the appropriate skill to answer.")
 
@@ -10782,27 +10809,55 @@ def _sc_build_skill_description(name, is_target):
 
 
 def _sc_build_skill_pool(n, target_index=None):
-    """生成 N 个同构技能（1 目标 + N-1 干扰），返回
+    """生成 N 个同构技能（1 目标 + k 条锚点 + 填充项），返回
     (skills_xml, skill_meta_list, target_skill)。
 
-    target_index=None 时按 N 确定性派生一个位置（本轮修正：不再恒为 0）——
-    固定在首位会让「目标恒在目录开头」本身成为一个与打分无关的额外优势；
-    用 md5(n) 而不是 random 保证同一个 N 多次运行位置一致、可复现可审计。"""
+    ⚠ Step 5 阶段 C 的**锚点池重构**（消除跨 N 不可比的构造产物）。旧实现：
+    干扰名由 `_SC_DISTRACTOR_TOPICS[(i*7+3)%68]` 派生、目标位置由 `md5(n)` 派生，
+    于是「名字字典序早于目标的同分（18 分）干扰项」在不在池里随 N 无规律开关
+    （实测 n=44→池内 index 11、64→41、76→51、**77→68**、78→56，其中 index 68
+    这一格恰好是唯一那条排序先于目标的同分名，n=77 时被目标本身占掉）。
+    后果：`AssignSkillDetailLevels()` 按「分数降序 + 同分名字升序」排目录，
+    目标的目录序号（以及它落在 L2 还是 L1）会随 N 跳变，于是「N=77 通过 /
+    N=78 失败」这个所谓相变点里混进了一个**与技能数量无关**的变量，
+    Step 4 记录的前沿 77 与 1.75x 因此作废。
+
+    现在的构造（保证跨 N 可比）：
+      * 固定 k=2 条**锚点**（`_SC_ANCHOR_TOPICS`）恒在池内。它们与目标同分
+        （名字侧 flux/capacitor/calibration 三词全命中 ×3 = 9，描述侧与全体
+        同构 = 9，合计 18），且名字以 "calibration" 开头 → 字典序**恒早于**
+        目标 "flux-capacitor-calibration"，因此在目录里**恒排在目标之前**。
+        k=2 的取值理由：2 条已足够构成「同分竞争 + 目标恒非首条」这两个被阶段 B
+        证明为决定性的条件（目标目录序号恒为 3，`l2_top_k=2` 下恒被降到 L1），
+        再多只会白占预算、把池体量与 token 曲线一起抬高，反而削弱跨 N 可比性。
+      * 其余为**填充项**（`_SC_FILLER_TOPICS`），名字侧关键词命中数恒为 0
+        （离线复算：全部 18 条 name_score=0），只拿与全体相同的描述侧 9 分，
+        因此恒排在目标与锚点之后、且不会因 N 变化挤动前三位。
+      * 目标默认停在池内 index 0，不再由 `md5(n)` 派生。
+
+    ⚠ 池内 index 与目录序号**完全无关**（目录只按分数降序 + 同分名字升序排，
+    见 prompt_optimizer.cpp `AssignSkillDetailLevels()`），因此 `target_index`
+    参数只保留给既有实验入口做兼容；阶段 B 已实测「洗池内 index」根本移动不了
+    目录序号（四个 target_index 下 `target_catalog_pos` 恒为 3）。"""
     n = max(1, n)
-    if target_index is None:
-        target_index = int(hashlib.md5(f"sc-target-{n}".encode("utf-8")).hexdigest()[:8], 16) % n
-    target_index = max(0, min(target_index, n - 1))
-    names = []
-    for i in range(n):
-        if i == target_index:
-            names.append(_SC_TARGET_TOPIC)
-        else:
-            distractor = _SC_DISTRACTOR_TOPICS[(i * 7 + 3) % len(_SC_DISTRACTOR_TOPICS)]
-            names.append(f"{distractor}-{i:03d}")
+    names = [_SC_TARGET_TOPIC]
+    for j, topic in enumerate(_SC_ANCHOR_TOPICS):
+        if len(names) >= n:
+            break
+        names.append(f"{topic}-{j:03d}")
+    fi = 0
+    while len(names) < n:
+        topic = _SC_FILLER_TOPICS[fi % len(_SC_FILLER_TOPICS)]
+        names.append(f"{topic}-{fi:03d}")
+        fi += 1
+    target_pos = 0
+    if target_index is not None:
+        target_pos = max(0, min(int(target_index), len(names) - 1))
+        names[0], names[target_pos] = names[target_pos], names[0]
     metas = []
     xml_parts = ["<available_skills>"]
     for i, name in enumerate(names):
-        is_target = (i == target_index)
+        is_target = (i == target_pos)
         desc = _sc_build_skill_description(name, is_target)
         location = _sc_skill_location(name)
         xml_parts.append(
@@ -10853,7 +10908,7 @@ def _sc_single_trial(args, model, probe, n, target_skill, skills_xml, all_metas,
     evidence = {"n": n, "picked": False, "answered": False, "emergency_truncated": False,
                 "tokens_out": None, "context_size": None, "skills_total": None,
                 "skills_kept": None, "tools_tier": None, "http_ok": False, "error": None,
-                "skills_budget_tokens": None, "target_in_prompt": None}
+                "skills_budget_tokens": None, "target_in_prompt": None, "target_form": None}
     try:
         if probe is not None:
             probe.mark()
@@ -10878,11 +10933,16 @@ def _sc_single_trial(args, model, probe, n, target_skill, skills_xml, all_metas,
     # 即它必须在 Skills-Kept 集合内。账本只给数量不给名单，因此直接查 [Prompt]
     # 日志块里有没有目标技能的 Path 行（BuildStructuredSkillCatalog 渲染的就是
     # "Path: <location>"）。拓不到日志块时置 None（未知），不当成失败也不当成通过。
+    # Step 5 A1：原判据 `location in block or name in block` 有假阳性通道——Step 2
+    # 引入的同分干扰名（如 flux-capacitor-calibration-mirror-009）把目标名整段包含
+    # 为子串，一旦筛选开始丢弃技能，该断言会把「干扰项在场」误判为「目标在场」。
+    # 改为复用形态判据 _sc_target_disclosure_form()：形态非 None/absent 才算在场。
     if probe is not None:
         block = probe.last_prompt_block()
         if block:
-            evidence["target_in_prompt"] = (target_skill["location"] in block
-                                            or target_skill["name"] in block)
+            form = _sc_target_disclosure_form(block, target_skill)
+            evidence["target_form"] = form
+            evidence["target_in_prompt"] = (form not in (None, "absent"))
 
     try:
         msg1 = r1.json()["choices"][0]["message"]
@@ -11326,7 +11386,12 @@ def _sc_case_tool_flood_skill_floor(args, model, probe, arm, results, timeout):
         return
     missing, invalid, values = _pf_check_ledger_headers(r.headers)
     block = probe.last_prompt_block() if probe is not None else ""
-    target_in_prompt = (target["location"] in block or target["name"] in block) if block else None
+    # Step 5 阶段 A1 修正：原 `location in block or name in block` 对名字子串有
+    # 假阳性通道——Step 2 引入的同分干扰名（如 `flux-capacitor-calibration-mirror-009`）
+    # 把目标名整段包含为子串，一旦筛选开始丢弃技能该断言会静默失真。改为复用形态
+    # 判据 `_sc_target_disclosure_form()`：形态非 None/absent 才算目标真的在场。
+    target_form = _sc_target_disclosure_form(block, target)
+    target_in_prompt = (target_form not in (None, "absent")) if block else None
     kept = values.get("X-Genie-Prompt-Skills-Kept")
     total = values.get("X-Genie-Prompt-Skills-Total")
     measurement = {
@@ -11337,7 +11402,8 @@ def _sc_case_tool_flood_skill_floor(args, model, probe, arm, results, timeout):
         "tokens_out": values.get("X-Genie-Prompt-Tokens-Out"),
         "context_size": values.get("X-Genie-Prompt-Context-Size"),
         "emergency_truncated": values.get("X-Genie-Prompt-Emergency-Truncated"),
-        "target_in_prompt": target_in_prompt, "prompt_block_available": bool(block),
+        "target_in_prompt": target_in_prompt, "target_form": target_form,
+        "prompt_block_available": bool(block),
     }
     _SC_SCENARIO_MEASUREMENTS.setdefault((model, "scenario4"), {})[arm] = measurement
     if missing:
@@ -11635,22 +11701,22 @@ def _sc_entry_disclosure_form(block, meta):
 
 _SC_DISCLOSURE_LEVEL_RANK = {"L0": 0, "L1": 1, "L2": 2}
 
-# 与目标技能同分的干扰名在 _SC_DISTRACTOR_TOPICS 里的索引区间（Step 2 第三轮引入，
-# 见 _sc_build_skill_description 的 docstring）：flux/capacitor/calibration 三词
-# 全部命中，name 子词打分与目标相同。
-_SC_SAME_SCORE_DISTRACTOR_INDEX_RANGE = range(64, 68)
+# 与目标技能同分的干扰项识别方式。Step 5 阶段 C 锚点池重构后，同分干扰项就是那
+# k=2 条**锚点**（名字以 `_SC_ANCHOR_TOPICS` 里的主题词开头），不再需要按旧的
+# `(i*7+3) % len(_SC_DISTRACTOR_TOPICS)` 规则反推池内 index——那条规则已随锚点池
+# 一起废弃，继续用它会挑出一批与目标**不同分**的填充项，让 D4 排序断言失真。
 
 
 def _sc_same_score_distractor_metas(n, metas, target):
-    """从技能池 metas 里挑出与目标同分的干扰项（按 _sc_build_skill_pool 的确定性
-    命名规则 `(i*7+3) % len(_SC_DISTRACTOR_TOPICS)` 反推索引是否落在同分区间）。"""
-    total_topics = len(_SC_DISTRACTOR_TOPICS)
+    """从技能池 metas 里挑出与目标同分（18 分）的干扰项，即锚点。
+
+    锚点名形如 `calibration-flux-capacitor-audit-000`，按 `_SC_ANCHOR_TOPICS`
+    前缀匹配即可，与它们在池内的 index 无关（目录序号本就与池内 index 无关）。"""
     same_score = []
-    for i, meta in enumerate(metas):
+    for meta in metas:
         if meta["is_target"]:
             continue
-        topic_index = (i * 7 + 3) % total_topics
-        if topic_index in _SC_SAME_SCORE_DISTRACTOR_INDEX_RANGE:
+        if any(meta["name"].startswith(f"{topic}-") for topic in _SC_ANCHOR_TOPICS):
             same_score.append(meta)
     return same_score
 
