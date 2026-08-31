@@ -162,9 +162,14 @@ QNNContext::InferenceAsync(const ShareMemory& share_memory, const std::vector<py
     }
 
     std::string perf = perf_profile;
-    return g_LibAppBuilder.ModelInferenceAsync(
-        m_model_name, m_proc_name, share_memory.m_share_memory_name,
-        inputBuffers, inputSize, perf, graphIndex);
+    std::string result;
+    {
+        py::gil_scoped_release release;
+        result = g_LibAppBuilder.ModelInferenceAsync(
+            m_model_name, m_proc_name, share_memory.m_share_memory_name,
+            inputBuffers, inputSize, perf, graphIndex);
+    }
+    return result;
 }
 
 std::vector<py::array>
@@ -173,9 +178,13 @@ QNNContext::InferenceWait(const std::string& request_id, const ShareMemory& shar
     std::vector<uint8_t*> outputBuffers;
     std::vector<size_t>   outputSize;
 
-    bool success = g_LibAppBuilder.ModelWaitInference(
-        request_id, m_proc_name, share_memory.m_share_memory_name,
-        outputBuffers, outputSize);
+    bool success;
+    {
+        py::gil_scoped_release release;
+        success = g_LibAppBuilder.ModelWaitInference(
+            request_id, m_proc_name, share_memory.m_share_memory_name,
+            outputBuffers, outputSize);
+    }
 
     if (!success) {
         QNN_ERR("InferenceWait failed for request_id: %s\n", request_id.c_str());

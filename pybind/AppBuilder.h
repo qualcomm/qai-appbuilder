@@ -197,30 +197,36 @@ int set_profiling_level(int32_t log_level) {
 }
 
 int set_perf_profile(const std::string& perf_profile) {
+    py::gil_scoped_release release;
     return SetPerfProfileGlobal(perf_profile);
 }
 
 int rel_perf_profile() {
+    py::gil_scoped_release release;
     return RelPerfProfileGlobal();
 }
 
 int initialize(const std::string& model_name,
                const std::string& model_path, const std::string& backend_lib_path, const std::string& system_lib_path, 
                bool async, const std::string& input_data_type, const std::string& output_data_type) {
+    py::gil_scoped_release release;
     return g_LibAppBuilder.ModelInitialize(model_name, model_path, backend_lib_path, system_lib_path, async, input_data_type, output_data_type);
 }
 
 int initialize_P(const std::string& model_name, const std::string& proc_name,
                  const std::string& model_path, const std::string& backend_lib_path, const std::string& system_lib_path, 
                  bool async, const std::string& input_data_type, const std::string& output_data_type) {
+    py::gil_scoped_release release;
     return g_LibAppBuilder.ModelInitialize(model_name, proc_name, model_path, backend_lib_path, system_lib_path, async, input_data_type, output_data_type);
 }
 
 int destroy(std::string model_name) {
+    py::gil_scoped_release release;
     return g_LibAppBuilder.ModelDestroy(model_name);
 }
 
 int destroy_P(std::string model_name, std::string proc_name) {
+    py::gil_scoped_release release;
     return g_LibAppBuilder.ModelDestroy(model_name, proc_name);
 }
 
@@ -257,7 +263,18 @@ std::vector<py::array> inference(std::string model_name, const std::vector<py::a
         }
     }
 
-    g_LibAppBuilder.ModelInference(model_name, inputBuffers, outputBuffers, outputSize, perf_profile, graphIndex);
+    // issue#97: release the GIL during the blocking HTP/NPU inference call so
+    // other Python threads can run concurrently. All arguments are raw C++
+    // pointers/vectors extracted above; no py:: objects are accessed until the
+    // output construction below.
+    bool inference_ok;
+    {
+        py::gil_scoped_release release;
+        inference_ok = g_LibAppBuilder.ModelInference(model_name, inputBuffers, outputBuffers, outputSize, perf_profile, graphIndex);
+    }
+    if (!inference_ok) {
+        return {};
+    }
 
     //QNN_INF("inference::inference output vector length: %d\n", outputBuffers.size());
 
@@ -351,7 +368,13 @@ std::vector<py::array> inference_P(std::string model_name, std::string proc_name
         }
     }
 
-    bool success = g_LibAppBuilder.ModelInference(model_name, proc_name, share_memory_name, inputBuffers, inputSize, outputBuffers, outputSize, perf_profile, graphIndex);
+    // issue#97: release the GIL during the blocking IPC call to the service
+    // process so other Python threads can run concurrently.
+    bool success;
+    {
+        py::gil_scoped_release release;
+        success = g_LibAppBuilder.ModelInference(model_name, proc_name, share_memory_name, inputBuffers, inputSize, outputBuffers, outputSize, perf_profile, graphIndex);
+    }
     if (!success) {
         QNN_ERR("ModelInference failed for model: %s, proc: %s", model_name.c_str(), proc_name.c_str());
         return {};
