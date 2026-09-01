@@ -23,7 +23,7 @@ shared/
 | `_face_recognition.py` | face_attrib_net, facemap_3dmm | `FaceRecognitionQNNContext`, `preprocess_face_image`, `save_face_attributes_json`, `download_asset` |
 | `_pose_estimation.py` | mediapipe_hand, openpose | `HAND_LANDMARK_CONNECTIONS`, `MediaPipePyTorchAsRoot`, `batched_nms`, geometry helpers |
 | `_speech_recognition.py` | whisper_base_en, whisper_tiny_en | `log_mel_spectrogram`, `apply_timestamp_rules`, `download_whisper_models`, `get_whisper_tokenizer`, Whisper model classes |
-| `_text_generation.py` | nomic_embed_text, opus_mt_zh_en | `TextGenerationQNNContext`, `init_htp_model`, `run_inference_with_perf_profile`, `get_tokenizer`, `tokenize_text` |
+| `_text_generation.py` | nomic_embed_text, opus_mt_zh_en, opus_mt_en_zh | `TextGenerationQNNContext`, `init_htp_model`, `run_inference_with_perf_profile`, `get_tokenizer`, `tokenize_text` |
 | `_stable_diffusion.py` | stable_diffusion_v1_5, stable_diffusion_v2_1 | `set_qnn_config`, `download_sd_component`, `generate_initial_latent`, `decode_vae_output` |
 | `_genai_sd.py` | stable_diffusion_v1_5, stable_diffusion_v2_1 | `TextEncoderQNNContext`, `UnetQNNContext`, `VaeDecoderQNNContext`, `get_tokenizer`, `tokenize_prompt`, `get_scheduler` |
 | `python_samples_guide.md` | — | Complete developer guide for all shared utilities |

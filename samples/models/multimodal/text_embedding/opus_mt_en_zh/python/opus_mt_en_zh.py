@@ -1,12 +1,12 @@
-﻿# ---------------------------------------------------------------------
+# ---------------------------------------------------------------------
 # Copyright (c) 2026 Qualcomm Innovation Center, Inc. All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
 #
-# OpusMT-Zh-En Inference Script
-# Chinese -> English Neural Machine Translation on Snapdragon X Elite / X2 Elite NPU
+# OpusMT-En-Zh Inference Script
+# English -> Chinese Neural Machine Translation on Snapdragon X Elite / X2 Elite NPU
 #
-# Model: Helsinki-NLP/opus_mt_zh_en (MarianMT)
+# Model: Helsinki-NLP/opus_mt_en_zh (MarianMT)
 # Runtime: VOICE_AI (encoder.bin + decoder.bin via qai_appbuilder.QNNContext)
 # Device: Snapdragon X Elite / X2 Elite (HTP v73/v79)
 #
@@ -36,15 +36,15 @@ from pathlib import Path
 # Model Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 
-MODEL_NAME = "opus_mt_zh_en"
-MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/blob/main/samples/multimodal/Text_Generation/opus_mt_zh_en/README.md"
+MODEL_NAME = "opus_mt_en_zh"
+MODEL_HELP_URL = "https://github.com/qualcomm/qai-appbuilder/blob/main/samples/multimodal/Text_Generation/opus_mt_en_zh/README.md"
 
 MODEL_URLS = {
-    "snapdragon_x2_elite": "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/opus_mt_zh_en/releases/v0.57.1/opus_mt_zh_en-voice_ai-float-qualcomm_snapdragon_x2_elite.zip",
-    "snapdragon_x_elite":  "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/opus_mt_zh_en/releases/v0.57.1/opus_mt_zh_en-voice_ai-float-qualcomm_snapdragon_x_elite.zip",
+    "snapdragon_x2_elite": "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/opus_mt_en_zh/releases/v0.61.0/opus_mt_en_zh-voice_ai-float-qualcomm_snapdragon_x2_elite.zip",
+    "snapdragon_x_elite":  "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/opus_mt_en_zh/releases/v0.61.0/opus_mt_en_zh-voice_ai-float-qualcomm_snapdragon_x_elite.zip",
 }
 
-HF_MODEL_ID = "Helsinki-NLP/opus-mt-zh-en"
+HF_MODEL_ID = "Helsinki-NLP/opus-mt-en-zh"
 
 MAX_SEQ_LEN = 256   # encoder fixed input length
 MAX_GEN_LEN = 256   # max decoder steps
@@ -108,21 +108,23 @@ class OpusMTDecoder(TextGenerationQNNContext):
 
 def download_opus_model() -> Path:
     """Download and extract the encoder/decoder zip for the detected device.
-    Returns the path to the extracted model subdirectory."""
+    All extracted files are flattened directly into ``model_dir`` (no per-zip
+    subdirectory). Returns the path to ``model_dir``."""
+    import shutil
+    import tempfile
+
     device_model = detect_device_model()
     print(f"[INFO] Detected device: {device_model}")
 
     url = MODEL_URLS.get(device_model, MODEL_URLS["snapdragon_x_elite"])
-    zip_name      = url.split("/")[-1]
-    model_subdir  = zip_name.replace(".zip", "")
-    model_subdir_path = model_dir / model_subdir
+    zip_name = url.split("/")[-1]
 
-    encoder_bin = model_subdir_path / "encoder.bin"
-    decoder_bin = model_subdir_path / "decoder.bin"
+    encoder_bin = model_dir / "encoder.bin"
+    decoder_bin = model_dir / "decoder.bin"
 
     if encoder_bin.exists() and decoder_bin.exists():
-        print(f"[INFO] Model already exists: {model_subdir_path}")
-        return model_subdir_path
+        print(f"[INFO] Model already exists: {model_dir}")
+        return model_dir
 
     model_dir.mkdir(parents=True, exist_ok=True)
     zip_path = model_dir / zip_name
@@ -136,25 +138,38 @@ def download_opus_model() -> Path:
         sys.exit(1)
 
     print(f"[INFO] Extracting {zip_name} ...")
+    tmp_dir = Path(tempfile.mkdtemp(prefix="opus_extract_", dir=str(model_dir)))
     try:
         with zipfile.ZipFile(str(zip_path), "r") as zf:
-            zf.extractall(str(model_dir))
+            zf.extractall(str(tmp_dir))
+
+        # Flatten: move every extracted file into model_dir directly,
+        # regardless of any wrapping subdirectory inside the zip.
+        for src in tmp_dir.rglob("*"):
+            if src.is_file():
+                dst = model_dir / src.name
+                if dst.exists():
+                    dst.unlink()
+                shutil.move(str(src), str(dst))
     except Exception as e:
         print(f"[ERROR] Extraction failed: {e}")
         if zip_path.exists():
             zip_path.unlink()
+        shutil.rmtree(str(tmp_dir), ignore_errors=True)
         sys.exit(1)
+
+    shutil.rmtree(str(tmp_dir), ignore_errors=True)
 
     if zip_path.exists():
         zip_path.unlink()
         print(f"[INFO] Removed archive: {zip_name}")
 
     if not encoder_bin.exists() or not decoder_bin.exists():
-        print(f"[ERROR] Model files not found after extraction in: {model_subdir_path}")
+        print(f"[ERROR] Model files not found after extraction in: {model_dir}")
         sys.exit(1)
 
-    print(f"[INFO] Model ready: {model_subdir_path}")
-    return model_subdir_path
+    print(f"[INFO] Model ready: {model_dir}")
+    return model_dir
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -229,7 +244,7 @@ def Init():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def translate(text: str, verbose: bool = True) -> str:
-    """Translate Chinese text to English using encoder+decoder on NPU."""
+    """Translate English text to Chinese using encoder+decoder on NPU."""
     BOS_TOKEN_ID = tokenizer.pad_token_id
     EOS_TOKEN_ID = tokenizer.eos_token_id
 
@@ -361,11 +376,11 @@ def main(input_text=None):
         translate(input_text, verbose=True)
     else:
         test_sentences = [
-            "我爱中国。",
-            "今天天气很好。",
-            "人工智能正在改变世界。",
-            "高通骁龙芯片是移动计算的先驱。",
-            "这款模型在NPU上运行，速度非常快。",
+            "I love China.",
+            "The weather is very nice today.",
+            "Artificial intelligence is changing the world.",
+            "Qualcomm Snapdragon chips are pioneers of mobile computing.",
+            "This model runs on the NPU and is extremely fast.",
         ]
 
         results = []
@@ -376,23 +391,23 @@ def main(input_text=None):
         print("\n" + "=" * 60)
         print("Summary of translations:")
         print("=" * 60)
-        for zh, en in results:
-            print(f"  ZH: {zh}")
+        for en, zh in results:
             print(f"  EN: {en}")
+            print(f"  ZH: {zh}")
             print()
 
     Release()
-    print("[DONE] OpusMT-Zh-En inference completed.")
+    print("[DONE] OpusMT-En-Zh inference completed.")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="OpusMT Chinese→English translation on NPU")
+    parser = argparse.ArgumentParser(description="OpusMT English→Chinese translation on NPU")
     parser.add_argument(
-        "--input-text",
+        "--text",
         type=str,
         default=None,
-        help="Chinese text to translate. If not provided, runs built-in test sentences.",
+        help="English text to translate. If not provided, runs built-in test sentences.",
     )
     args = parser.parse_args()
 
-    main(args.input_text)
+    main(args.text)

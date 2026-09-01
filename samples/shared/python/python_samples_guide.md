@@ -32,7 +32,7 @@ python run_inference.py --help-model <name>      # show a model's --help and exi
 python run_inference.py --model whisper_base_en
 python run_inference.py --model stable_diffusion_v2_1 --args "--prompt 'a cat'"
 python run_inference.py --model openai_clip --args "--text 'camping under the stars'"
-python run_inference.py --model opus_mt_zh_en --args "--input-text '今天天气很好'"
+python run_inference.py --model opus_mt_zh_en --args "--text '今天天气很好'"
 python run_inference.py --model pipertts_en --args "--text 'Hello world.'"
 ```
 
@@ -71,7 +71,8 @@ python run_inference.py --model pipertts_en --args "--text 'Hello world.'"
 | 25 | Multimodal | nomic_embed_text | `Multimodal\Text_Generation\nomic_embed_text\nomic_embed_text.py` |
 | 26 | Multimodal | openai_clip | `Multimodal\Image_Classification\openai_clip\openai_clip.py` |
 | 27 | Multimodal | opus_mt_zh_en | `Multimodal\Text_Generation\opus_mt_zh_en\opus_mt_zh_en.py` |
-| 28 | Multimodal | qwen_vl *(Linux only)* | `Multimodal\qwen_vl\qwen_vl.py` |
+| 28 | Multimodal | opus_mt_en_zh | `Multimodal\Text_Generation\opus_mt_en_zh\opus_mt_en_zh.py` |
+| 29 | Multimodal | qwen_vl *(Linux only)* | `Multimodal\qwen_vl\qwen_vl.py` |
 
 ---
 
@@ -329,7 +330,7 @@ audio [float32, 16kHz] → pad/trim to 30s → STFT (N_FFT=400, hop=160) → mel
 
 ### 2.10 `_text_generation.py` — Text Generation Utilities
 
-Used by: `nomic_embed_text`, `opus_mt_zh_en`
+Used by: `nomic_embed_text`, `opus_mt_zh_en`, `opus_mt_en_zh`
 
 ```python
 from _text_generation import (
@@ -580,7 +581,15 @@ Encoder-decoder (MarianMT). Encoder: `[1,256]` tokens → cross-KV cache.
 Decoder: autoregressive, greedy, max 256 steps. Vocab: 65001 tokens.
 Model auto-downloaded as zip (device-specific).
 ```
-python run_inference.py --model opus_mt_zh_en --args "--input-text '人工智能正在改变世界'"
+python run_inference.py --model opus_mt_zh_en --args "--text '人工智能正在改变世界'"
+```
+
+#### opus_mt_en_zh — English→Chinese Translation
+Encoder-decoder (MarianMT, Helsinki-NLP/opus-mt-en-zh). Encoder: `[1,256]` tokens → cross-KV cache.
+Decoder: autoregressive, greedy, max 256 steps.
+Model auto-downloaded as zip (device-specific).
+```
+python run_inference.py --model opus_mt_en_zh --args "--text 'Artificial intelligence is changing the world.'"
 ```
 
 #### qwen_vl — Vision Language Model *(Linux only)*

@@ -20,7 +20,7 @@ Examples:
     python run_inference.py --model whisper_base_en
     python run_inference.py --model stable_diffusion_v2_1 --args "--prompt 'a cat'"
     python run_inference.py --model openai_clip --args "--text 'camping under the stars'"
-    python run_inference.py --model opus_mt_zh_en --args "--input-text '今天天气很好'"
+    python run_inference.py --model opus_mt_zh_en --args "--text '今天天气很好'"
 """
 
 import os
@@ -91,9 +91,11 @@ if PLATFORM in ("wos", "x86_win"):
 
         # ── multimodal ─────────────────────────────────────────────────────────
         ("multimodal",      "easy_ocr",                      r"models\multimodal\image_to_text\easy_ocr\python\easy_ocr.py",                            None),
+        ("multimodal",      "tr_ocr",                        r"models\multimodal\image_to_text\tr_ocr\python\tr_ocr.py",                                None),
         ("multimodal",      "nomic_embed_text",              r"models\multimodal\text_embedding\nomic_embed_text\python\nomic_embed_text.py",           None),
         ("multimodal",      "openai_clip",                   r"models\multimodal\image_classification\openai_clip\python\openai_clip.py",               None),
-        ("multimodal",      "opus_mt_zh_en",                 r"models\multimodal\translation\opus_mt_zh_en\python\opus_mt_zh_en.py",                None),
+        ("multimodal",      "opus_mt_zh_en",                 r"models\multimodal\text_embedding\opus_mt_zh_en\python\opus_mt_zh_en.py",                None),
+        ("multimodal",      "opus_mt_en_zh",                 r"models\multimodal\text_embedding\opus_mt_en_zh\python\opus_mt_en_zh.py",                None),
         # qwen_vl requires Linux (aarch64-oe-linux) runtime; not supported on WoS
         ("multimodal",      "qwen_vl",                       r"models\multimodal\vision_language_model\qwen_vl\python\qwen_vl.py",                                           ["Linux"]),
     ]
