@@ -178,8 +178,6 @@ def download_opus_model() -> Path:
 
 def get_marian_tokenizer(cache_dir: Path):
     """Load MarianTokenizer from local HuggingFace cache or download it."""
-    import ssl
-    ssl._create_default_https_context = ssl._create_unverified_context
     os.environ["TRANSFORMERS_VERBOSITY"] = "error"
     from transformers import MarianTokenizer
 
