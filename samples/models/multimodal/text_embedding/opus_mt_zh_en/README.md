@@ -27,19 +27,19 @@ pip install transformers sentencepiece torch numpy
 
 ```bash
 cd qai-appbuilder\samples
-python run_inference.py --model opus_mt_zh_en --args "--input-text '人工智能正在改变世界'"
+python run_inference.py --model opus_mt_zh_en --args "--text '人工智能正在改变世界'"
 ```
 
 Or run directly:
 ```bash
-python models\multimodal\translation\opus_mt_zh_en\python\opus_mt_zh_en.py --input-text "今天天气很好"
+python models\multimodal\text_embedding\opus_mt_zh_en\python\opus_mt_zh_en.py --text "今天天气很好"
 ```
 
 ## Arguments
 
 | Argument | Default | Description |
 | -------- | ------- | ----------- |
-| `--input-text` | Built-in demo text | Chinese text to translate |
+| `--text` | Built-in demo text | Chinese text to translate |
 | `--chipset` | Auto-detected | SoC ID for model download |
 
 ## Model Download

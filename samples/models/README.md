@@ -1,6 +1,6 @@
 ﻿# Models
 
-This directory contains Python inference samples for 28 AI models organized by domain. Each model runs on the Snapdragon NPU (HTP) via QAI AppBuilder and follows the `Init → Inference → Release` pattern.
+This directory contains Python inference samples for 29 AI models organized by domain. Each model runs on the Snapdragon NPU (HTP) via QAI AppBuilder and follows the `Init → Inference → Release` pattern.
 
 ## Directory Structure
 
@@ -25,8 +25,7 @@ models/
 └── multimodal/               # Multimodal models
     ├── image-classification/ # Vision-language classification (CLIP)
     ├── image-to-text/        # OCR
-    ├── text-embedding/       # Text embedding for RAG
-    ├── translation/          # Machine translation
+    ├── text-embedding/       # Text embedding for RAG + machine translation
     └── vision-language-model/# Vision-language models (Qwen-VL)
 ```
 
@@ -86,7 +85,8 @@ Each model directory has the following structure:
 | Image to Text | [easy_ocr](multimodal/image_to_text/easy_ocr/) | Image → text (English + Chinese OCR) | [Link](https://aihub.qualcomm.com/compute/models/easy_ocr) |
 | Image Classification | [openai_clip](multimodal/image_classification/openai_clip/) | Images + text → similarity scores (CLIP ViT-B/16) | [Link](https://aihub.qualcomm.com/compute/models/openai_clip) |
 | Text Embedding | [nomic_embed_text](multimodal/text_embedding/nomic_embed_text/) | Text → 768-dim embedding (BERT-based, for RAG) | [Link](https://aihub.qualcomm.com/compute/models/nomic_embed_text) |
-| Translation | [opus_mt_zh_en](multimodal/translation/opus_mt_zh_en/) | Chinese text → English (MarianMT) | [Link](https://aihub.qualcomm.com/compute/models/opus_mt_zh_en) |
+| Translation | [opus_mt_zh_en](multimodal/text_embedding/opus_mt_zh_en/) | Chinese text → English (MarianMT) | [Link](https://aihub.qualcomm.com/compute/models/opus_mt_zh_en) |
+| Translation | [opus_mt_en_zh](multimodal/text_embedding/opus_mt_en_zh/) | English text → Chinese (MarianMT) | [Link](https://aihub.qualcomm.com/compute/models/opus_mt_en_zh) |
 | Vision Language Model | [qwen_vl](multimodal/vision_language_model/qwen_vl/) *(Linux only)* | Image/video + question → answer (Qwen2-VL/Qwen3-VL) | — |
 
 ## Running Models

@@ -138,7 +138,8 @@ See [models/README.md](models/README.md) for the full model catalog.
 | [easy_ocr](models/multimodal/image_to_text/easy_ocr/) | `models\multimodal\image_to_text\easy_ocr\python\easy_ocr.py` | EasyOCR: image → detected text (English + Chinese). 2-stage: CRAFT + CRNN. |
 | [openai_clip](models/multimodal/image_classification/openai_clip/) | `models\multimodal\image_classification\openai_clip\python\openai_clip.py` | OpenAI CLIP (ViT-B/16): images + text query → similarity scores. |
 | [nomic_embed_text](models/multimodal/text_embedding/nomic_embed_text/) | `models\multimodal\text_embedding\nomic_embed_text\python\nomic_embed_text.py` | NomicEmbedText: text → 768-dim embedding vector (BERT-based). For RAG/semantic search. |
-| [opus_mt_zh_en](models/multimodal/translation/opus_mt_zh_en/) | `models\multimodal\translation\opus_mt_zh_en\python\opus_mt_zh_en.py` | OpusMT: Chinese text → English translation (MarianMT). |
+| [opus_mt_zh_en](models/multimodal/text_embedding/opus_mt_zh_en/) | `models\multimodal\text_embedding\opus_mt_zh_en\python\opus_mt_zh_en.py` | OpusMT: Chinese text → English translation (MarianMT). |
+| [opus_mt_en_zh](models/multimodal/text_embedding/opus_mt_en_zh/) | `models\multimodal\text_embedding\opus_mt_en_zh\python\opus_mt_en_zh.py` | OpusMT: English text → Chinese translation (MarianMT). |
 | [qwen_vl](models/multimodal/vision_language_model/qwen_vl/) *(Linux only)* | `models\multimodal\vision_language_model\qwen_vl\python\qwen_vl.py` | Qwen2-VL / Qwen3-VL: image/video + question → answer. Gradio web UI. |
 
 ---
