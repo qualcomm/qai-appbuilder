@@ -81,8 +81,51 @@ g_base_path = (_path_env if _path_env else "") + os.pathsep + g_base_path + os.p
 #     ``skelExecute ... err 1003``.
 # A plain forked child that never touches QNN and exits via ``os._exit()`` skips
 # C++ destructors entirely, so leaving the contexts untouched across a fork is
-# the correct behavior. Child processes that themselves want to use QNN should
-# create their own contexts (and may call ``release_all()`` first if desired).
+# the correct behavior.
+#
+# --------------------------------------------------------------------------
+# Recommended patterns for concurrent / multi-process QNN usage
+# --------------------------------------------------------------------------
+# 1) Multi-threading (preferred for "front-end thread + inference thread"):
+#    a single QNNContext's Inference() may be called repeatedly, sequentially,
+#    from ONE dedicated worker thread while other Python threads (e.g. a GUI
+#    main thread) keep running. The pybind layer releases the GIL for the
+#    duration of the blocking C++ call (see issue #97 fix), so this pattern
+#    does not block unrelated Python work. Two threads must NOT call
+#    Inference() concurrently on two different QNNContext objects — that is a
+#    separate, still-unsupported case due to QNN backend internal
+#    characteristics (see issue #97 discussion), not something GIL release
+#    changes.
+#
+#         ctx = QNNContext(model_name=..., model_path=...)
+#         worker = threading.Thread(target=lambda: ctx.Inference(data))
+#         worker.start()          # main thread stays responsive
+#         worker.join()
+#
+# 2) Multi-process split (e.g. front-end process + back-end inference
+#    process): fork() the child BEFORE any process in the tree has
+#    initialized QNN (i.e. before the first QNNContext() / QNNConfig.Config()
+#    call). Each process then creates and owns its own QNNContext
+#    independently - this is fully supported and imposes no restriction.
+#
+#         if os.fork() == 0:
+#             ctx = QNNContext(...)   # child's own context - always safe
+#             ...
+#         else:
+#             ctx = QNNContext(...)   # parent's own context - always safe
+#             ...
+#
+#    Calling fork() AFTER a process has already initialized QNN, and then
+#    trying to use/create QNN contexts in the child, is explicitly
+#    UNDEFINED BEHAVIOR: the child inherits FastRPC/DSP session file
+#    descriptors and backend library static state from the parent, and no
+#    safe way to rebuild independent QNN state in that child exists today
+#    (see issue #97; a raw dlopen() on the same .so returns the parent's
+#    already-loaded instance, not a fresh one). Do not rely on it working,
+#    even if the code above did not raise.
+#
+# Child processes that themselves want to use QNN should create their own
+# contexts (and may call ``release_all()`` first if desired).
 import threading
 import weakref
 
