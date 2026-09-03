@@ -437,8 +437,12 @@ def build_router(*, container: "Container") -> APIRouter:
         # Drop the cached credentials for this instance — they are no
         # longer needed once the remote process and tunnel are stopped,
         # and leaving them would grow _DEPLOY_HOSTS unboundedly across
-        # repeated deploy/stop cycles.
-        _DEPLOY_HOSTS.pop(instance_id, None)
+        # repeated deploy/stop cycles. Only on confirmed success: if the
+        # remote process could not be confirmed stopped, a retry needs the
+        # same credentials — dropping them here would strand it with no way
+        # to try again short of a full redeploy.
+        if result.stopped:
+            _DEPLOY_HOSTS.pop(instance_id, None)
         return StopInstanceResponse(
             instance_id=result.instance_id,
             stopped=result.stopped,
