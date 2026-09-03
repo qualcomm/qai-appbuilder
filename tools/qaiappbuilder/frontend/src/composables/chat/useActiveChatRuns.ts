@@ -218,6 +218,11 @@ export function useActiveChatRuns(open: Ref<boolean>) {
           }
         }
         await refresh();
+        return;
+      }
+      if (run.kind === "background_process") {
+        await apiJson(run.stop.method, run.stop.path, run.stop.body);
+        await refresh();
       }
     } catch (err) {
       stoppingIds.value = new Set(

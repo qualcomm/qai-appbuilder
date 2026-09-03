@@ -82,6 +82,7 @@ import argparse
 import json
 import os
 import platform
+import re
 import shlex
 import shutil
 import subprocess
@@ -350,6 +351,77 @@ def _copy_and_verify_htp_runtime_files(
         sys.exit(1)
 
     print("[INFO] Preflight OK -- all HTP runtime files present in CWD.")
+
+
+def _copy_hexagon_runtime_linux(
+    sdk_root: str,
+    dst_dir: str,
+    htp_version: str = "v73",
+) -> None:
+    """Copy the requested SDK Hexagon runtime files into the generator CWD.
+
+    The SDK layout encodes the HTP version as ``hexagon-vNN`` and file names
+    use the same version suffix.  Deriving paths from ``htp_version`` supports
+    every version shipped by the installed SDK (for example v73, v75, v79,
+    and v81) without silently substituting an incompatible DSP runtime.
+    """
+    normalized_version = htp_version.lower()
+    if not re.fullmatch(r"v\d+", normalized_version):
+        print(f"[ERROR] Invalid HTP version: {htp_version!r}; expected v followed by digits.")
+        sys.exit(2)
+
+    sdk_path = Path(sdk_root)
+    dst_path = Path(dst_dir)
+    dst_path.mkdir(parents=True, exist_ok=True)
+    version_number = normalized_version[1:]
+    hexagon_files = [
+        f"lib/hexagon-{normalized_version}/unsigned/libqnnhtp{normalized_version}.cat",
+        f"lib/hexagon-{normalized_version}/unsigned/libQnnHtpV{version_number}Skel.so",
+    ]
+
+    print(f"[INFO] Preflight: copying hexagon {normalized_version} runtime files to CWD: {dst_dir}")
+    for rel in hexagon_files:
+        src = sdk_path / Path(rel)
+        dst = dst_path / src.name
+
+        if dst.exists():
+            if src.exists() and dst.stat().st_size == src.stat().st_size:
+                print(f"[INFO]   already present (up-to-date): {src.name}")
+                continue
+            if not src.exists():
+                print(f"[INFO]   already present (SDK source absent, keeping): {src.name}")
+                continue
+            print(f"[INFO]   stale, refreshing: {src.name}")
+
+        if not src.exists():
+            print(f"[ERROR]   source not found: {src}")
+            continue
+
+        try:
+            shutil.copy2(src, dst)
+            print(f"[INFO]   copied: {src.name}")
+        except OSError as exc:
+            print(f"[ERROR]   copy failed: {src.name} -- {exc}")
+
+    still_missing = [
+        Path(rel).name for rel in hexagon_files
+        if not (dst_path / Path(rel).name).exists()
+    ]
+    if still_missing:
+        available_versions = sorted(
+            path.name.removeprefix("hexagon-")
+            for path in (sdk_path / "lib").glob("hexagon-v*")
+            if path.is_dir()
+        )
+        print("[ERROR] Preflight FAILED -- missing hexagon runtime files in CWD:")
+        for name in still_missing:
+            print(f"[ERROR]   MISSING: {name}")
+        if available_versions:
+            print(f"[ERROR] SDK provides HTP runtime versions: {', '.join(available_versions)}")
+        print(f"[ERROR] Check QAIRT SDK at '{sdk_root}' is complete.")
+        sys.exit(1)
+
+    print("[INFO] Preflight OK -- hexagon runtime files present in CWD.")
 
 
 # ---------------------------------------------------------------------------
@@ -695,12 +767,8 @@ def run_generator(model_path, output_path=None, output_dir=None, binary_file=Non
     Args:
         model_path:   Path to .dll or .so model library
         output_path:  Full output path for context binary (e.g. model.dll.bin)
-        output_dir:   Output directory (used with binary_file)
-        binary_file:  Binary name without extension (used with output_dir)
-        profiling:    Enable HTP optrace profiling
-        config_file:  Path to backend_extensions.json (QAIRT 2.45 WoS V73)
-        auto_config:  Auto-generate backend config files (WoS ARM64 only)
-        htp_version: HTP version to use ("v73" or "v81")
+        htp_version: HTP version to use. Linux accepts any SDK-provided
+            ``hexagon-vNN`` runtime; Windows supports v73 and v81.
     """
     model_path = os.path.abspath(model_path)
     if output_path:
@@ -841,21 +909,21 @@ def run_generator(model_path, output_path=None, output_dir=None, binary_file=Non
         config_file = os.path.abspath(config_file)
 
     # -----------------------------------------------------------------------
-    # PREFLIGHT GATE 2: HTP runtime files in generator CWD (Windows only)
+    # PREFLIGHT GATE 2: HTP runtime files in the generator CWD
     #
-    # Copy the required runtime files from the SDK into gen_output_dir, then
-    # verify every file is present.  Hard exit if any are still missing.
-    # The generator is launched with cwd=gen_output_dir so it finds them.
-    # DLC inputs need extra DLLs (is_dlc flag).
+    # The generator is launched with cwd=gen_output_dir and resolves its
+    # Hexagon runtime files relative to that directory.
     # -----------------------------------------------------------------------
     if system == "windows":
         _copy_and_verify_htp_runtime_files(
             sdk_root, gen_output_dir, htp_version,
             host_arch_dir=backend_lib_dir, is_dlc=is_dlc_input,
         )
+    elif system == "linux" and has_local_htp():
+        _copy_hexagon_runtime_linux(sdk_root, gen_output_dir, htp_version)
 
-    # Build generator command. DLC inputs use QnnModelDlc.dll + --dlc_path +
-    # --soc_model (no config_file); DLL inputs use --model directly.
+    # Build generator command. DLC inputs use QnnModelDlc.dll + --dlc_path;
+    # DLL inputs use --model directly.
     if is_dlc_input:
         dlc_loader_name = "libQnnModelDlc.so" if system == "linux" else "QnnModelDlc.dll"
         dlc_loader_path = os.path.join(sdk_root, "lib", backend_lib_dir, dlc_loader_name)
@@ -870,8 +938,11 @@ def run_generator(model_path, output_path=None, output_dir=None, binary_file=Non
             "--dlc_path", model_path,
             "--output_dir", gen_output_dir,
             "--binary_file", bin_name,
-            "--soc_model", soc_model,
         ]
+        # Offline Windows compilation needs the target SoC. On real Linux HTP
+        # hardware the backend detects it and rejects an explicit duplicate.
+        if system == "windows":
+            command.extend(["--soc_model", soc_model])
     else:
         command = [
             generator_path,
@@ -1062,7 +1133,7 @@ Examples:
                         help="Auto-generate backend_extensions.json and htp_backend_config_v73.json (WoS ARM64 only)")
     parser.add_argument("--profiling", action="store_true", help="Enable HTP optrace profiling")
     parser.add_argument("--htp_version", default="v73",
-                        help="HTP version to use ('v73' or 'v81', default: v73)")
+                        help="HTP version (Linux: any SDK hexagon-vNN; Windows: v73 or v81; default: v73)")
 
     args = parser.parse_args()
 

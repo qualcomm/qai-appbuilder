@@ -49,7 +49,7 @@ import time
 import webbrowser
 from pathlib import Path
 
-from apps.api._runtime_endpoint import (
+from qai.platform.process.runtime_endpoint import (
     clear_endpoint,
     endpoint_path,
     read_endpoint,
@@ -160,32 +160,13 @@ def _is_pid_alive(pid: int) -> bool:
 
 
 def _parent_pid(pid: int) -> int | None:
-    """Return the parent PID of ``pid`` on Windows, or ``None`` if unknown.
-
-    Why this exists
-    ---------------
-    ``Start.bat`` does NOT launch the API server directly — it launches
-    the *supervisor* (``python -m apps.cli.serve``), which in turn spawns
-    the real API child (``python -m apps.api``). Only the **child** binds
-    a port, so the port sweep below finds the child's PID. Killing only
-    the child is not enough: the supervisor parent observes the child
-    exit with a non-zero (signal-killed) code and, per its crash
-    self-heal logic (``apps/cli/serve.py`` ``_run_loop``), immediately
-    respawns a fresh API child — so the "stopped" server appears to
-    restart itself. To guarantee "a fresh Start.bat always wins" we must
-    also reap the supervisor parent; this helper walks the parent chain
-    so :func:`_sweep_fallback_ports` can include it in the kill set.
-
-    Implemented with the CIM/WMI ``ParentProcessId`` property via
-    ``wmic`` (present on all supported Windows builds; falls back to a
-    PowerShell ``Get-CimInstance`` query if ``wmic`` is absent on newer
-    Windows where it is being deprecated). Returns ``None`` on any
-    failure so the caller degrades to killing just the child (no worse
-    than the previous behaviour).
-    """
-
+    """Return *pid*'s parent process id, or ``None`` when unavailable."""
     if sys.platform != "win32":
-        return None
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+            return int(stat.rsplit(") ", 1)[1].split()[1])
+        except (OSError, IndexError, ValueError):
+            return None
 
     import subprocess
 
@@ -243,21 +224,14 @@ def _parent_pid(pid: int) -> int | None:
 
 
 def _is_supervisor_pid(pid: int) -> bool:
-    """Return ``True`` iff ``pid`` looks like our reboot supervisor.
-
-    Guards :func:`_sweep_fallback_ports` from walking the parent chain
-    into an unrelated process (e.g. the ``cmd.exe`` / terminal that
-    launched ``Start.bat``, or some other tool that happens to be an
-    ancestor). We only want to escalate the kill to the parent when the
-    parent is genuinely ``python -m apps.cli.serve``.
-
-    Matches on the process command line containing ``apps.cli.serve``.
-    Returns ``False`` on any lookup failure so we never kill an
-    ancestor we are not certain about.
-    """
-
+    """Return True iff *pid* belongs to the reboot supervisor."""
     if sys.platform != "win32":
-        return False
+        try:
+            return "apps.cli.serve" in Path(f"/proc/{pid}/cmdline").read_text(
+                encoding="utf-8", errors="replace"
+            )
+        except OSError:
+            return False
 
     import subprocess
 
@@ -299,10 +273,6 @@ def _is_supervisor_pid(pid: int) -> bool:
                         f"\"ProcessId={pid}\").CommandLine"
                     ),
                 ],
-                capture_output=True,
-                text=True,
-                timeout=8,
-                check=False,
             )
             cmdline = result.stdout.strip()
         except (OSError, subprocess.SubprocessError):
@@ -314,16 +284,12 @@ def _is_supervisor_pid(pid: int) -> bool:
 def _kill_pid(pid: int) -> bool:
     """Best-effort terminate ``pid`` and its descendants. Returns True iff accepted.
 
-    On Windows we use ``taskkill /F /T`` so the **entire process tree**
-    rooted at ``pid`` is terminated in one call. This matters when
-    ``pid`` is the supervisor (``apps.cli.serve``): ``/T`` reaps the
-    supervisor *and* its spawned API child together, so the child cannot
-    be left behind and the supervisor cannot survive to respawn it. When
-    ``pid`` is a leaf (e.g. an orphaned API child with no live
-    supervisor), ``/T`` simply has no descendants to also kill and
-    behaves like a plain ``/F``.
+    A previous supervised API uses a separate POSIX session for its API child,
+    so signalling only the supervisor can leave the listener alive during its
+    graceful shutdown window. Terminate the discovered process tree, then
+    force any survivor after a short bound; a fresh launcher must not race a
+    stale listener for its fixed port.
     """
-
     if sys.platform == "win32":
         import subprocess
 
@@ -338,7 +304,26 @@ def _kill_pid(pid: int) -> bool:
             return True
         except (OSError, subprocess.SubprocessError):
             return False
-    else:
+
+    try:
+        import psutil
+
+        root = psutil.Process(pid)
+        targets = root.children(recursive=True) + [root]
+        for proc in targets:
+            try:
+                proc.terminate()
+            except psutil.NoSuchProcess:
+                pass
+        _, alive = psutil.wait_procs(targets, timeout=3)
+        for proc in alive:
+            try:
+                proc.kill()
+            except psutil.NoSuchProcess:
+                pass
+        psutil.wait_procs(alive, timeout=2)
+        return True
+    except Exception:  # noqa: BLE001 — fallback to a single-process signal
         import os as _os
         import signal as _signal
 
@@ -348,45 +333,34 @@ def _kill_pid(pid: int) -> bool:
         except (OSError, ProcessLookupError):
             return False
 
-
 # ---------------------------------------------------------------------------
-# Port-based sweep (V1 ``start_server.py`` ``_check_port`` / ``_kill_port``
-# parity, generalised to the whole fallback-port list).
+# Port-based sweep (same policy on Windows and POSIX).
 # ---------------------------------------------------------------------------
 
 
 def _pids_listening_on_ports(ports: "tuple[int, ...]") -> set[int]:
-    """Return the PIDs of processes LISTENING on any of ``ports`` (Windows).
-
-    Why this exists
-    ---------------
-    Before the supervisor learned to auto-pick a fallback port (see
-    ``apps/cli/serve.py:FALLBACK_PORTS``), the launcher could free the
-    single fixed port and a fresh start always replaced the old server.
-    Now a previous run may be LISTENING on *any* of the fallback ports
-    (e.g. it bound a secondary fallback because the primary was reserved),
-    and a new start, far
-    from killing it, deliberately *avoids* that port and picks another —
-    so two servers end up running side by side. To guarantee "a fresh
-    Start.bat always wins" (the user-confirmed policy) we must reap every
-    previous instance regardless of which fallback port it grabbed.
-
-    This is the State-Truth-First rule (AGENTS.md §3.10 rule 1): the
-    authoritative answer to "who owns this port" comes from the OS, not
-    from the (possibly stale / missing) endpoint file. We parse
-    ``netstat -ano`` — the same mechanism V1's ``_kill_port`` used — and
-    keep only rows in the ``LISTENING`` state (TIME_WAIT / ESTABLISHED
-    sockets are transient and must not trigger a kill).
-
-    Non-Windows: ``netstat -ano`` is Windows-specific; returns an empty
-    set so the caller falls back to the PID path (the launcher is a
-    Windows-only entry point in practice, but we keep it from raising).
-    """
+    """Return PIDs of processes listening on any requested TCP port."""
+    import re
+    import subprocess
 
     if sys.platform != "win32":
-        return set()
+        try:
+            result = subprocess.run(
+                ["ss", "-ltnp"],
+                capture_output=True,
+                text=True,
+                timeout=8,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return set()
+        pids: set[int] = set()
+        for line in result.stdout.splitlines():
+            if not any(re.search(rf":{port}(?:\s|$)", line) for port in ports):
+                continue
+            pids.update(int(pid) for pid in re.findall(r"pid=(\d+)", line))
+        return pids
 
-    import subprocess
 
     wanted = {f":{p}" for p in ports}
     try:

@@ -56,6 +56,11 @@ fi
 # shellcheck source=/dev/null
 source "$VENV/bin/activate"
 export PYTHONPATH="$REPO_ROOT/src:$REPO_ROOT"
+# A prior Ctrl+C can be followed immediately by a second launch while the API
+# is still in its bounded graceful shutdown. Reap only a stale QAI endpoint
+# before binding the fixed SSO port; this prevents a misleading EADDRINUSE
+# while leaving unrelated processes alone.
+python -m apps.cli._endpoint_helper cleanup-stale || true
 
 echo "[start] QAIModelBuilder starting at http://127.0.0.1:$PORT"
 echo "[start] Press Ctrl+C to stop."

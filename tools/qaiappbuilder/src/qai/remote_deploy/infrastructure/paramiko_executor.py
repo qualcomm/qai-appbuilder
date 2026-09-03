@@ -20,24 +20,55 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import io
 import logging
 import select
 import socket
 import threading
+from collections import deque
 from typing import AsyncIterator
 
 import paramiko
 
 from qai.remote_deploy.application.ports import SshExecutorPort
 from qai.remote_deploy.domain import AuthMethod, RemoteHost
-from qai.remote_deploy.domain.errors import RemoteSshConnectError
+from qai.remote_deploy.domain.errors import (
+    RemoteCommandFailedError,
+    RemotePortInUseError,
+    RemoteSshConnectError,
+)
 
 _LOG = logging.getLogger(__name__)
 
 _CONNECT_TIMEOUT = 15  # seconds for TCP + banner + auth
 
+#: How many trailing output lines travel with a non-zero-exit error. Enough to
+#: carry a Python traceback or a pip resolver failure without bloating the SSE
+#: frame the browser has to parse.
+_ERROR_TAIL_LINES = 40
+
+#: Queue sentinel marking normal end-of-stream in :meth:`stream_command`.
+#: Distinct from an exception instance, which signals failure.
+_STREAM_EOF = object()
+
 __all__ = ["ParamikoSshExecutor"]
+
+
+def _bash_payload(command: str, *, merge_stderr: bool) -> str:
+    """Wrap ``command`` so the remote login shell cannot reinterpret it.
+
+    ``exec_command`` still passes the command through the account's login
+    shell before Bash starts. On VM24 that shell is csh/tcsh; even a quoted
+    ``bash -lc '... $((...))'`` can be parsed by csh first and fail with
+    "Illegal variable name". Base64 carries only alphanumeric data, so the
+    login shell cannot interpret the deployer's POSIX/Bash syntax. Bash then
+    receives the original command byte-for-byte.
+
+    ``merge_stderr`` folds stderr into stdout — required for the streaming
+    path, where stderr would otherwise be dropped on the floor.
+    """
+    payload = base64.b64encode(command.encode("utf-8")).decode("ascii")
+    suffix = " 2>&1" if merge_stderr else ""
+    return f"printf '%s' {payload} | base64 -d | bash -s{suffix}"
 
 
 class ParamikoSshExecutor:
@@ -51,7 +82,9 @@ class ParamikoSshExecutor:
 
     def __init__(self, secret_store) -> None:  # type: ignore[annotation]
         self._secret_store = secret_store
-        self._tunnels: dict[str, tuple[socket.socket, threading.Event, threading.Thread]] = {}
+        self._tunnels: dict[
+            str, tuple[list[socket.socket], threading.Event, threading.Thread]
+        ] = {}
         self._tunnels_lock = threading.Lock()
 
     # ------------------------------------------------------------------
@@ -88,35 +121,61 @@ class ParamikoSshExecutor:
 
         A ``asyncio.Queue`` bridges the blocking paramiko I/O (running in a
         thread-pool executor) and the async caller.  The sync thread pushes
-        each decoded line into the queue; a sentinel ``None`` signals EOF.
-        This means the caller receives output incrementally rather than
-        waiting for the entire command to finish.
+        each decoded line into the queue; ``_STREAM_EOF`` signals a clean end
+        and an exception instance signals failure, which this generator
+        re-raises on the caller's task.
+
+        Failures are NOT swallowed: a connection error, or a non-zero exit
+        status, raises out of the ``async for``.  Otherwise a broken
+        ``setup.sh`` would be indistinguishable from a successful one and the
+        pipeline would march on to start a service that cannot come up.
         """
         loop = asyncio.get_running_loop()
-        queue: asyncio.Queue[str | None] = asyncio.Queue()
+        queue: asyncio.Queue[str | BaseException | object] = asyncio.Queue()
 
         def _stream_sync() -> None:
+            failure: BaseException | None = None
             try:
                 client = self._connect_sync(host)
                 try:
-                    _, stdout_f, _ = client.exec_command(command, timeout=timeout)
+                    # Same encoded-Bash path as ``run_command`` — otherwise
+                    # streamed commands (download / setup) get interpreted by
+                    # the remote login shell while one-shot commands do not.
+                    # stderr is merged in so an install failure carries the
+                    # actual remote diagnostic instead of only "not ready".
+                    _, stdout_f, _ = client.exec_command(
+                        _bash_payload(command, merge_stderr=True), timeout=timeout
+                    )
+                    tail: deque[str] = deque(maxlen=_ERROR_TAIL_LINES)
                     for raw in stdout_f:
                         line = raw.rstrip("\n")
+                        tail.append(line)
                         loop.call_soon_threadsafe(queue.put_nowait, line)
+                    exit_code = stdout_f.channel.recv_exit_status()
+                    if exit_code != 0:
+                        failure = RemoteCommandFailedError(
+                            host.host, command, exit_code, "\n".join(tail)
+                        )
                 finally:
                     client.close()
             except Exception as exc:  # noqa: BLE001
-                _LOG.warning("stream_command error: %s", exc)
+                _LOG.warning("stream_command failed on %s: %s", host.host, exc)
+                failure = exc
             finally:
-                loop.call_soon_threadsafe(queue.put_nowait, None)
+                loop.call_soon_threadsafe(
+                    queue.put_nowait,
+                    failure if failure is not None else _STREAM_EOF,
+                )
 
         loop.run_in_executor(None, _stream_sync)
 
         while True:
             item = await queue.get()
-            if item is None:
+            if item is _STREAM_EOF:
                 break
-            yield item
+            if isinstance(item, BaseException):
+                raise item
+            yield item  # type: ignore[misc]
 
     async def put_file(
         self,
@@ -159,6 +218,51 @@ class ParamikoSshExecutor:
     # Local Paramiko TCP tunnel
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _bind_loopback_listeners(local_port: int) -> list[socket.socket]:
+        """Bind ``local_port`` on both loopback families.
+
+        The OIDC callback arrives at ``http://localhost:<port>/callback`` —
+        Okta rejects a ``127.0.0.1`` redirect_uri (see
+        ``platform.config.settings.LOOPBACK_HOST_NAME``) — and on Windows
+        ``localhost`` can resolve to ``::1`` ahead of ``127.0.0.1``. Binding
+        only ``AF_INET`` would make that callback fail with a connection
+        refused that reads like an SSH fault.
+
+        IPv4 is required; IPv6 is best-effort so a host with IPv6 disabled
+        still works. A taken port raises :class:`RemotePortInUseError` — the
+        expected outcome when the operator picks the port the local QAI
+        instance already serves on.
+        """
+        listeners: list[socket.socket] = []
+        for family, address in ((socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1")):
+            try:
+                listener = socket.socket(family, socket.SOCK_STREAM)
+            except OSError:
+                continue  # address family unavailable on this host
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if family == socket.AF_INET6:
+                # Keep the two listeners independent: without V6ONLY a
+                # dual-stack ``::1`` bind can also claim the IPv4 port, making
+                # the sibling bind fail for no real reason.
+                try:
+                    listener.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+                except OSError:
+                    pass
+            try:
+                listener.bind((address, local_port))
+                listener.listen(16)
+                listener.settimeout(0.5)
+            except OSError:
+                listener.close()
+                if family == socket.AF_INET:
+                    for opened in listeners:
+                        opened.close()
+                    raise RemotePortInUseError("127.0.0.1", local_port) from None
+                continue  # IPv6 unavailable — the IPv4 listener is enough
+            listeners.append(listener)
+        return listeners
+
     def _start_tunnel_sync(
         self,
         instance_id: str,
@@ -167,42 +271,41 @@ class ParamikoSshExecutor:
         remote_port: int,
     ) -> int:
         self._stop_tunnel_sync(instance_id)
-        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            listener.bind(("127.0.0.1", local_port))
-            listener.listen(16)
-            listener.settimeout(0.5)
-        except OSError:
-            listener.close()
-            raise
+        listeners = self._bind_loopback_listeners(local_port)
         stop_event = threading.Event()
 
         def serve() -> None:
             try:
                 while not stop_event.is_set():
                     try:
-                        client, address = listener.accept()
-                    except socket.timeout:
-                        continue
+                        readable, _, _ = select.select(listeners, [], [], 0.5)
                     except OSError:
                         break
-                    threading.Thread(
-                        target=self._forward_connection,
-                        args=(client, address, host, remote_port, stop_event),
-                        daemon=True,
-                    ).start()
+                    for listener in readable:
+                        try:
+                            client, address = listener.accept()
+                        except (socket.timeout, TimeoutError):
+                            continue
+                        except OSError:
+                            stop_event.set()
+                            break
+                        threading.Thread(
+                            target=self._forward_connection,
+                            args=(client, address, host, remote_port, stop_event),
+                            daemon=True,
+                        ).start()
             finally:
-                try:
-                    listener.close()
-                except OSError:
-                    pass
+                for listener in listeners:
+                    try:
+                        listener.close()
+                    except OSError:
+                        pass
 
         thread = threading.Thread(
             target=serve, name=f"qai-ssh-tunnel-{instance_id}", daemon=True
         )
         with self._tunnels_lock:
-            self._tunnels[instance_id] = (listener, stop_event, thread)
+            self._tunnels[instance_id] = (listeners, stop_event, thread)
         thread.start()
         return local_port
 
@@ -211,12 +314,13 @@ class ParamikoSshExecutor:
             record = self._tunnels.pop(instance_id, None)
         if record is None:
             return
-        listener, stop_event, _thread = record
+        listeners, stop_event, _thread = record
         stop_event.set()
-        try:
-            listener.close()
-        except OSError:
-            pass
+        for listener in listeners:
+            try:
+                listener.close()
+            except OSError:
+                pass
 
     def _tunnel_state_sync(self, instance_id: str) -> str:
         with self._tunnels_lock:
@@ -340,17 +444,11 @@ class ParamikoSshExecutor:
     ) -> tuple[int, str, str]:
         client = self._connect_sync(host)
         try:
-            # ``exec_command`` still passes the command through the account's
-            # login shell before Bash starts. On VM24 that shell is csh/tcsh;
-            # even a quoted ``bash -lc '... $((...))'`` can be parsed by csh
-            # first and fail with "Illegal variable name". Base64 carries only
-            # alphanumeric data, so the login shell cannot interpret the
-            # deployer's POSIX/Bash syntax. Bash then receives the original
-            # command byte-for-byte.
-            payload = base64.b64encode(command.encode("utf-8")).decode("ascii")
-            bash_command = f"printf '%s' {payload} | base64 -d | bash -s"
+            # Encoded so the account's login shell cannot reinterpret the
+            # command — see :func:`_bash_payload`. stderr is kept separate
+            # here because callers receive it as its own return value.
             _, stdout_f, stderr_f = client.exec_command(
-                bash_command, timeout=timeout
+                _bash_payload(command, merge_stderr=False), timeout=timeout
             )
             stdout = stdout_f.read().decode("utf-8", errors="replace")
             stderr = stderr_f.read().decode("utf-8", errors="replace")
@@ -358,29 +456,6 @@ class ParamikoSshExecutor:
             return exit_code, stdout, stderr
         finally:
             client.close()
-
-    def _collect_lines_sync(
-        self, host: RemoteHost, command: str, timeout: int
-    ) -> list[str]:
-        client = self._connect_sync(host)
-        lines: list[str] = []
-        try:
-            # Keep streamed commands on the same encoded Bash execution path
-            # as ``run_command``; otherwise setup/build and readiness checks
-            # can be interpreted by different remote login shells. Include
-            # stderr in the stream so an SSH deployment failure carries the
-            # actual remote diagnostic instead of only "not ready".
-            payload = base64.b64encode(command.encode("utf-8")).decode("ascii")
-            bash_command = f"printf '%s' {payload} | base64 -d | bash -s 2>&1"
-            _, stdout_f, _ = client.exec_command(
-                bash_command, timeout=timeout
-            )
-            for raw in stdout_f:
-                line = raw.rstrip("\n")
-                lines.append(line)
-        finally:
-            client.close()
-        return lines
 
     def _put_file_sync(
         self, host: RemoteHost, local_path: str, remote_path: str

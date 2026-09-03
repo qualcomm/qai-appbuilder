@@ -418,16 +418,34 @@ cd /d %OUT%
 
 ### Linux (aarch64)
 
+> ⚠️ **CRITICAL — Linux direct invocation pitfalls (verified QAIRT 2.48):**
+> 1. **`--backend` and `--model` MUST be absolute paths.** Relative paths (e.g. `libQnnHtp.so`)
+>    cause a silent `Initialization failure` (exit code 9) with **no useful error message**.
+>    This is the #1 cause of direct invocation failure on Linux.
+> 2. **Do NOT pass `--soc_model` on real HTP hardware** (linux-aarch64 with HTP).
+>    The backend auto-detects the SoC; an explicit value causes a conflict.
+>    `--soc_model` is for **Windows offline compilation only** (WoS without real HTP).
+> 3. **Hexagon runtime files** (`libqnnhtpv73.cat`, `libQnnHtpV73Skel.so`) must be in CWD.
+> 4. **Prefer `qai_dev_gen_contextbin.py`** — it handles all of the above automatically.
+
 ```bash
+# Ensure hexagon v73 runtime files are in CWD
+cp ${QAIRT_SDK_ROOT}/lib/hexagon-v73/unsigned/libqnnhtpv73.cat  <output_dir>/
+cp ${QAIRT_SDK_ROOT}/lib/hexagon-v73/unsigned/libQnnHtpV73Skel.so <output_dir>/
+cd <output_dir>
+
 ${QAIRT_SDK_ROOT}/bin/aarch64-oe-linux-gcc11.2/qnn-context-binary-generator \
-  --backend libQnnHtp.so \
-  --model libQnnModelDlc.so \
+  --backend ${QAIRT_SDK_ROOT}/lib/aarch64-oe-linux-gcc11.2/libQnnHtp.so \
+  --model ${QAIRT_SDK_ROOT}/lib/aarch64-oe-linux-gcc11.2/libQnnModelDlc.so \
   --dlc_path /absolute/path/to/model.dlc \
-  --binary_file model \
-  --soc_model <soc_model_id>
+  --output_dir /absolute/path/to/output_dir \
+  --binary_file model
 ```
 
-Output is written to an `output/` folder; the binary will be `output/model.bin`.
+Output is written to `<output_dir>/model.bin`.
+
+> ℹ️ For other HTP versions, replace `v73` in the hexagon paths and filenames accordingly
+> (e.g. `hexagon-v81/unsigned/libqnnhtpv81.cat`).
 
 ### soc_model Reference (Qnn_SocModel_t)
 

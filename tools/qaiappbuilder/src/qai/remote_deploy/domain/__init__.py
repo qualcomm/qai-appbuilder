@@ -42,10 +42,17 @@ class AuthMethod(str, Enum):
 
 
 class DeploymentState(str, Enum):
-    """Lifecycle state of a remote QAI ModelBuilder instance."""
+    """Lifecycle state of a remote QAI ModelBuilder instance.
+
+    ``INSTALLED`` is a resting state: the bundle is unpacked and ``setup.sh``
+    succeeded, but nothing is listening yet. It exists so install and start can
+    be triggered separately — installing is slow and idempotent, starting is
+    quick and needs the operator to have picked a port / SSO mode.
+    """
 
     CONNECTING = "connecting"
     INSTALLING = "installing"
+    INSTALLED = "installed"
     STARTING = "starting"
     RUNNING = "running"
     STOPPED = "stopped"

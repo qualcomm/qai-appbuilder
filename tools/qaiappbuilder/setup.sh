@@ -97,6 +97,26 @@ if [[ "$ARCH" == "unsupported" ]]; then
 else
   info "  architecture: $ARCH"
 fi
+# OS_TYPE: "linux" or "darwin" (lower-case uname -s)
+OS_TYPE=$(uname -s | tr '[:upper:]' '[:lower:]')
+# ---------------------------------------------------------------------------
+# Step 04b — native build prerequisites for aarch64 Python packages
+# ---------------------------------------------------------------------------
+# onnxsim==0.4.36 has no CPython 3.12 aarch64 wheel. Step 11c consequently
+# builds it from source, and its build script requires both CMake and a C++
+# compiler. Fail here with the actionable package command instead of after
+# creating the inference virtual environment.
+if [[ "$OS_TYPE" == "linux" && "$ARCH" == "aarch64" ]]; then
+  info "Step 04b: checking native build prerequisites for aarch64..."
+  if ! command -v cmake &>/dev/null || ! command -v c++ &>/dev/null; then
+    error "cmake and a C++ compiler are required on Linux aarch64 to build onnxsim==0.4.36 for Python 3.12.
+  Install with:
+    sudo apt update
+    sudo apt install -y cmake build-essential"
+  fi
+  info "  cmake and C++ compiler found"
+fi
+
 
 # ---------------------------------------------------------------------------
 # Step 05 — create virtualenv (or verify existing one uses Python 3.12)
@@ -223,6 +243,19 @@ if [[ -d "$REPO_ROOT/data/secrets" ]]; then
   chmod 700 "$REPO_ROOT/data/secrets"
   info "  data/secrets permissions set to 700"
 fi
+# ---------------------------------------------------------------------------
+# Step 10b — install QAIRT SDK
+# ---------------------------------------------------------------------------
+# The model-builder tools below require real SDK binaries.  Generating
+# qairt_env.json alone only records their location; it does not install them.
+info "Step 10b: installing QAIRT SDK..."
+QAIRT_INSTALLER="$REPO_ROOT/scripts/init/install_qairt.py"
+if [[ ! -f "$QAIRT_INSTALLER" ]]; then
+  error "QAIRT installer not found at $QAIRT_INSTALLER"
+fi
+PYTHONPATH="$REPO_ROOT/src:$REPO_ROOT" \
+  python "$QAIRT_INSTALLER" --repo-root "$REPO_ROOT" --skip-x64-venv --skip-config \
+  || error "QAIRT SDK installation failed. Set QAIRT_SDK_ROOT to a writable SDK location or provide vendor/qairt/v<version>.zip, then re-run setup.sh."
 
 # ---------------------------------------------------------------------------
 # Step 11 — generate data/config/qairt_env.json
@@ -244,10 +277,14 @@ fi
 # ---------------------------------------------------------------------------
 # Step 11b — install QAIRT converter deps (python_x64_venv, Python 3.10)
 # ---------------------------------------------------------------------------
-info "Step 11b: installing QAIRT converter deps (python_x64_venv, Python 3.10)..."
-if [[ ! -f "$SETUP_QAIRT" ]]; then
+# On Linux aarch64 the converter deps are merged into venv_aarch64_312 by
+# Step 11c (install_inference_deps), so venv_x86_64_310 is not needed.
+if [[ "$OS_TYPE" == "linux" && "$ARCH" == "aarch64" ]]; then
+  info "Step 11b: skipped on Linux aarch64 (converter deps merged into venv_aarch64_312 by Step 11c)"
+elif [[ ! -f "$SETUP_QAIRT" ]]; then
   warn "setup_qairt_env.py not found — skipping Step 11b"
 else
+  info "Step 11b: installing QAIRT converter deps (python_x64_venv, Python 3.10)..."
   PYTHONPATH="$REPO_ROOT/src:$REPO_ROOT" \
     python "$SETUP_QAIRT" --install-python-deps --root "$REPO_ROOT" \
     && info "  python_x64_venv ready" \
@@ -276,6 +313,15 @@ fi
 # ---------------------------------------------------------------------------
 # Step 11d — QAIRT SDK Python dependencies via check-python-dependency
 # ---------------------------------------------------------------------------
+# On Linux aarch64 the check-python-dependency script is designed for the
+# x86_64 converter toolchain venv (venv_x86_64_310) which does not exist on
+# this platform.  Running it against venv_aarch64_312 would upgrade numpy to
+# 2.x and break onnx==1.19.1 + ml_dtypes==0.5.1.  Skip entirely on this arch.
+if [[ "$OS_TYPE" == "linux" && "$ARCH" == "aarch64" ]]; then
+  info "Step 11d: skipped on linux/aarch64 (check-python-dependency targets x86_64 converter venv)"
+  _QAIRT_SDK_ROOT=""
+  _VENV_X64_PYTHON=""
+else
 info "Step 11d: installing QAIRT SDK Python dependencies..."
 _QAIRT_SDK_ROOT=""
 _VENV_X64_PYTHON=""
@@ -283,9 +329,17 @@ if [[ -f "$QAIRT_CONFIG" ]]; then
   _QAIRT_SDK_ROOT=$(python -c \
     "import json; d=json.load(open('$QAIRT_CONFIG')); print(d.get('qairt_sdk_root',''))" \
     2>/dev/null || true)
-  _VENV_X64_PYTHON=$(python -c \
-    "import json; d=json.load(open('$QAIRT_CONFIG')); print(d.get('python_x64_venv','') + '/bin/python')" \
-    2>/dev/null || true)
+  # On Linux aarch64: use python_arm64_venv (venv_aarch64_312) instead of
+  # python_x64_venv (venv_x86_64_310 does not exist on this platform).
+  if [[ "$OS_TYPE" == "linux" && "$ARCH" == "aarch64" ]]; then
+    _VENV_X64_PYTHON=$(python -c \
+      "import json; d=json.load(open('$QAIRT_CONFIG')); print(d.get('python_arm64_venv','') + '/bin/python')" \
+      2>/dev/null || true)
+  else
+    _VENV_X64_PYTHON=$(python -c \
+      "import json; d=json.load(open('$QAIRT_CONFIG')); print(d.get('python_x64_venv','') + '/bin/python')" \
+      2>/dev/null || true)
+  fi
 fi
 _QAIRT_CHECK_DEP="$_QAIRT_SDK_ROOT/bin/check-python-dependency"
 if [[ -n "$_QAIRT_SDK_ROOT" && -f "$_QAIRT_CHECK_DEP" && -x "$_VENV_X64_PYTHON" ]]; then
@@ -298,10 +352,14 @@ elif [[ -z "$_QAIRT_SDK_ROOT" || ! -f "$_QAIRT_CHECK_DEP" ]]; then
 else
   warn "python_x64_venv not executable ('$_VENV_X64_PYTHON') — skipping Step 11d"
 fi
+fi  # end: skip Step 11d on linux/aarch64
 
 # ---------------------------------------------------------------------------
 # Step 11e — extra Python packages (onnx / onnxruntime / onnxsim, pinned)
 # ---------------------------------------------------------------------------
+# On Linux aarch64 Step 11d is skipped, so _VENV_X64_PYTHON is empty here.
+# Step 11e is therefore also a no-op on linux/aarch64 (onnx/onnxruntime/onnxsim
+# are already pinned by install_inference_deps in Step 11c).
 info "Step 11e: installing extra Python packages (onnx / onnxruntime / onnxsim)..."
 if [[ -x "$_VENV_X64_PYTHON" ]]; then
   for _pkg in "onnx==1.19.1" "onnxruntime==1.23.2" "onnxsim==0.6.2"; do
@@ -348,6 +406,6 @@ echo "  Next steps:"
 # Purely cosmetic here (a hint URL), so if the read fails we print the placeholder
 # rather than a stale literal — no port is authored in this launcher.
 _BACKEND_PORT="$(PYTHONPATH="$(pwd)/src:$(pwd)" python -c 'from qai.platform.config.ports import backend_port as b; print(b())' 2>/dev/null || echo '<backend-port>')"
-echo "    1. Fill in API keys: open http://127.0.0.1:${_BACKEND_PORT} → Settings → Secrets"
-echo "    2. Start the server: bash start.sh"
+echo "    1. Start the server: bash start.sh"
+echo "    2. Fill in API keys: open http://127.0.0.1:${_BACKEND_PORT} → Settings → Secrets"
 echo "============================================================"
