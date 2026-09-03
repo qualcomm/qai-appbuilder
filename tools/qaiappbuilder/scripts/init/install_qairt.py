@@ -90,6 +90,7 @@ def _load_default_qairt_version() -> str:
 
 DEFAULT_QAIRT_VERSION = _load_default_qairt_version()
 DEFAULT_QAIRT_SDK_ROOT_TEMPLATE = r"C:\Qualcomm\AIStack\QAIRT\{version}"
+DEFAULT_QAIRT_SDK_ROOT_LINUX_TEMPLATE = str(Path.home() / "qairt" / "{version}")
 DEFAULT_QAIRT_DOWNLOAD_URL_TEMPLATE = (
     "https://softwarecenter.qualcomm.com/api/download/software/sdks/"
     "Qualcomm_AI_Runtime_Community/All/{version}/v{version}.zip"
@@ -233,7 +234,9 @@ def _resolve_paths(args: argparse.Namespace) -> InstallPaths:
     runtime = lad / _runtime_venv_relative()
 
     sdk_root_str = args.sdk_root or os.environ.get("QAIRT_SDK_ROOT") or (
-        DEFAULT_QAIRT_SDK_ROOT_TEMPLATE.format(version=args.qairt_version)
+        DEFAULT_QAIRT_SDK_ROOT_LINUX_TEMPLATE.format(version=args.qairt_version)
+        if sys.platform != "win32"
+        else DEFAULT_QAIRT_SDK_ROOT_TEMPLATE.format(version=args.qairt_version)
     )
     sdk_root = Path(sdk_root_str)
 
@@ -350,25 +353,24 @@ def install_qairt_sdk(
       4. Download via PowerShell ``Invoke-WebRequest``
     """
 
-    sentinel = (
-        paths.qairt_sdk_root
-        / "bin"
-        / "aarch64-windows-msvc"
-        / "qnn-context-binary-generator.exe"
-    )
-    if sentinel.is_file():
+    # Sentinel file to detect an already-installed SDK (platform-specific).
+    if sys.platform == "win32":
+        sentinel = (
+            paths.qairt_sdk_root
+            / "bin"
+            / "aarch64-windows-msvc"
+            / "qnn-context-binary-generator.exe"
+        )
+    else:
+        # Linux aarch64: runtime libs are the reliable indicator.
+        sentinel = paths.qairt_sdk_root / "lib" / "aarch64-oe-linux-gcc11.2"
+
+    if sentinel.exists():
         _info(f"QAIRT SDK already installed: {paths.qairt_sdk_root}")
         return True
 
     if dry_run:
         _info(f"[dry-run] would install QAIRT SDK to {paths.qairt_sdk_root}")
-        return True
-
-    if sys.platform != "win32":
-        _info(
-            "QAIRT SDK install is Windows-only; skipping on "
-            f"{sys.platform} (no-op)."
-        )
         return True
 
     vendor_zip = (
@@ -382,7 +384,8 @@ def install_qairt_sdk(
     if vendor_zip.is_file():
         _info(f"Found vendored QAIRT zip: {vendor_zip}")
         src_zip = vendor_zip
-    else:
+    elif sys.platform == "win32":
+        # Windows: aria2c (preferred) or PowerShell Invoke-WebRequest
         if paths.aria2c_exe and paths.aria2c_exe.is_file():
             _info(
                 f"Downloading QAIRT SDK {qairt_version} via aria2c "
@@ -432,26 +435,63 @@ def install_qairt_sdk(
             )
             return False
         src_zip = download_zip
+    else:
+        # Linux: wget (preferred) or curl fallback
+        _wget = shutil.which("wget")
+        _curl = shutil.which("curl")
+        if _wget:
+            _info(f"Downloading QAIRT SDK {qairt_version} via wget...")
+            rc = _run([_wget, "-q", "-c", "-O", str(download_zip), download_url])
+        elif _curl:
+            _info(f"Downloading QAIRT SDK {qairt_version} via curl...")
+            rc = _run([_curl, "-s", "-S", "-L", "-C", "-", "-o", str(download_zip), download_url])
+        else:
+            _err(
+                "Neither wget nor curl found. "
+                f"Manually download from {download_url} and "
+                f"place at {vendor_zip} then re-run."
+            )
+            return False
+        if rc != 0 or not download_zip.is_file():
+            _err(
+                f"QAIRT SDK download failed (rc={rc}). "
+                f"You can manually download from {download_url} and "
+                f"place at {vendor_zip} then re-run."
+            )
+            return False
+        src_zip = download_zip
 
     paths.qairt_sdk_root.parent.mkdir(parents=True, exist_ok=True)
     _info(f"Extracting QAIRT SDK to {paths.qairt_sdk_root}...")
     extract_tmp = paths.qairt_sdk_root.parent / "_extract_tmp"
     if extract_tmp.exists():
         shutil.rmtree(extract_tmp, ignore_errors=True)
+    extract_tmp.mkdir(parents=True, exist_ok=True)
 
-    rc = _run(
-        [
-            "powershell.exe",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            (
-                f"Expand-Archive -Path '{src_zip}' "
-                f"-DestinationPath '{extract_tmp}' -Force"
-            ),
-        ]
-    )
+    if sys.platform == "win32":
+        rc = _run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                (
+                    f"Expand-Archive -Path '{src_zip}' "
+                    f"-DestinationPath '{extract_tmp}' -Force"
+                ),
+            ]
+        )
+    else:
+        # Linux: unzip
+        _unzip = shutil.which("unzip")
+        if not _unzip:
+            _err(
+                "unzip not found. Install with: sudo apt install unzip"
+            )
+            return False
+        rc = _run([_unzip, "-q", str(src_zip), "-d", str(extract_tmp)])
+
     if rc != 0:
         _err(f"Failed to extract QAIRT SDK (rc={rc}).")
         return False
@@ -473,9 +513,9 @@ def install_qairt_sdk(
     if not vendor_zip.is_file() and download_zip.is_file():
         download_zip.unlink(missing_ok=True)
 
-    if not sentinel.is_file():
+    if not sentinel.exists():
         _warn(
-            f"SDK extracted but expected tool not found at {sentinel}; "
+            f"SDK extracted but expected path not found at {sentinel}; "
             f"the zip layout may have changed."
         )
         return False
@@ -691,7 +731,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--sdk-root", default=None,
         help=(
             "QAIRT SDK install root. Default reads $QAIRT_SDK_ROOT or "
-            "C:\\Qualcomm\\AIStack\\QAIRT\\<version>."
+            "$HOME/qairt/<version> on Linux (or "
+            "C:\\Qualcomm\\AIStack\\QAIRT\\<version> on Windows)."
         ),
     )
     parser.add_argument(
@@ -720,6 +761,14 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--skip-sdk", action="store_true",
         help="Skip QAIRT SDK download/extract (use existing install).",
+    )
+    parser.add_argument(
+        "--skip-config", action="store_true",
+        help=(
+            "Skip writing qairt_env.json. On Linux, config generation is "
+            "delegated to setup_qairt_env.py --gen-config (Step 11); pass "
+            "this flag so install_qairt.py is a complete no-op on non-Windows."
+        ),
     )
     parser.add_argument(
         "--allow-missing-uv", action="store_true",
@@ -752,13 +801,25 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if sys.platform != "win32":
         _info(
-            f"Non-Windows host ({sys.platform}); writing qairt_env.json "
-            "only (SDK install + venv creation are Windows-only no-ops)."
+            f"Non-Windows host ({sys.platform}); running Linux SDK install path."
         )
-        if not write_qairt_env_json(
-            paths, qairt_version=args.qairt_version, dry_run=args.dry_run
+        if not args.skip_sdk and not install_qairt_sdk(
+            paths,
+            qairt_version=args.qairt_version,
+            download_url=download_url,
+            dry_run=args.dry_run,
         ):
             return 1
+        if not args.skip_config:
+            if not write_qairt_env_json(
+                paths, qairt_version=args.qairt_version, dry_run=args.dry_run
+            ):
+                return 1
+        else:
+            _info(
+                "--skip-config passed — skipping qairt_env.json write "
+                "(delegated to setup_qairt_env.py --gen-config)."
+            )
         return 0
 
     if paths.uv_exe is None and not args.allow_missing_uv:

@@ -15,13 +15,19 @@
  *
  * Features:
  *   - Multi-server list: add / remove / collapse-expand per server card
- *   - Per-server: Test Connection + Install & Start (SSE progress + log)
+ *   - Per-server: Test Connection + Install + Start (SSE progress + log)
  *   - Running instances bar: Open + Stop chips
  *   - Auth: password or private key + passphrase
  */
-import { ref, watch, onMounted } from "vue";
+import { ref, watch, onMounted, nextTick } from "vue";
 import { useI18n } from "vue-i18n";
-import { useSshRemote } from "@/composables/useSshRemote";
+import {
+  useSshRemote,
+  DEFAULT_REMOTE_PORT,
+  OKTA_REGISTERED_PORTS,
+  type SshDeployParams,
+  type DeployHooks,
+} from "@/composables/useSshRemote";
 
 const props = defineProps<{ visible: boolean }>();
 const emit = defineEmits<{ close: [] }>();
@@ -30,10 +36,13 @@ const { t } = useI18n();
 
 const {
   testConnect,
-  deploy,
+  install,
+  start,
   instances,
   loadInstances,
   stopInstance,
+  openRemoteUrl,
+  blockedOpenUrl,
 } = useSshRemote();
 
 // ── Server draft ──────────────────────────────────────────────────────────────
@@ -47,6 +56,7 @@ interface ServerDraft {
   keyPath: string;
   sshPort: number;
   remotePort: number;
+  enableSso: boolean;
   showLog: boolean;
   expanded: boolean;
   saved: boolean;
@@ -71,6 +81,13 @@ interface DeployState {
   percent: number;
   error: string | null;
   deploying: boolean;
+  /**
+   * Which button owns the run in flight. Both buttons are disabled while any
+   * run is active (`deploying`), but only the one that started it may show its
+   * progress label — a shared boolean made Install's run read as "Starting…"
+   * on the Start button.
+   */
+  phase: "install" | "start" | null;
 }
 
 const connectResults = ref<Record<string, ConnectResult>>({});
@@ -85,7 +102,9 @@ function getConnectResult(id: string): ConnectResult {
 
 function getDeployState(id: string): DeployState {
   if (!deployStates.value[id]) {
-    deployStates.value[id] = { log: [], percent: 0, error: null, deploying: false };
+    deployStates.value[id] = {
+      log: [], percent: 0, error: null, deploying: false, phase: null,
+    };
   }
   return deployStates.value[id]!;
 }
@@ -100,7 +119,8 @@ function newDraft(): ServerDraft {
     authRef: "",
     keyPath: "",
     sshPort: 22,
-    remotePort: DEFAULT_REMOTE_APP_PORT,
+    remotePort: DEFAULT_REMOTE_PORT,
+    enableSso: true,
     showLog: false,
     expanded: true,
     saved: false,
@@ -127,7 +147,10 @@ function loadSavedServers(): void {
       ...newDraft(),
       ...p,
       sshPort: Number(p.sshPort) || 22,
-      remotePort: Number(p.remotePort) || DEFAULT_REMOTE_APP_PORT,
+      remotePort: Number(p.remotePort) || DEFAULT_REMOTE_PORT,
+      // Servers saved before the SSO switch existed have no flag; default on
+      // so an upgrade keeps the login gate rather than silently dropping it.
+      enableSso: p.enableSso ?? true,
       authRef: "",
       saved: true,
     }));
@@ -150,49 +173,63 @@ function toggleExpand(s: ServerDraft): void {
   s.expanded = !s.expanded;
 }
 
-// The local WebUI keeps its default port (8989). Each SSH server gets the next
-// local port so a remote WebUI never collides with the local WebUI or another
-// tunnel: server #1 -> 8990, #2 -> 8991, ... . The remote service port stays
-// 8989; only the local listening side changes.
-const DEFAULT_REMOTE_APP_PORT = 8989;
-function serverIndex(s: ServerDraft): number {
-  const index = servers.value.findIndex((item) => item.id === s.id);
-  return index < 0 ? 0 : index;
+// ── Tunnel helpers ────────────────────────────────────────────────────────────
+// The local tunnel port always equals the remote port. That is a hard
+// requirement of the SSO flow, not a convenience: the board derives its Okta
+// `redirect_uri` from its own bound port, so Okta sends the browser to
+// `http://localhost:<remote port>/callback`, which only reaches the board if
+// our listener owns that same number locally. The backend allocates it and
+// reports it back as `local_url`, so this component never computes a port.
+
+/** Just the URL fields these helpers read — keeps them usable with the
+ *  deep-readonly instances the composable exposes. */
+interface InstanceUrls {
+  local_url?: string;
+  remote_url: string;
 }
-function localTunnelPort(s: ServerDraft): number {
-  return DEFAULT_REMOTE_APP_PORT + serverIndex(s) + 1;
-}
+
 function tunnelCommand(s: ServerDraft): string {
   const port = s.sshPort === 22 ? "" : ` -p ${s.sshPort}`;
   const key = s.authMethod === "private_key" && s.keyPath
     ? ` -i ${s.keyPath}`
     : "";
-  return `ssh -N${port}${key} -L ${localTunnelPort(s)}:127.0.0.1:${s.remotePort} ${s.username}@${s.host}`;
+  return `ssh -N${port}${key} -L ${s.remotePort}:localhost:${s.remotePort} ${s.username}@${s.host}`;
 }
 function tunnelUrl(s: ServerDraft): string {
-  return `http://127.0.0.1:${localTunnelPort(s)}/chat`;
+  return `http://localhost:${s.remotePort}/chat`;
 }
-function openTunnelUrl(s: ServerDraft): void {
-  window.open(tunnelUrl(s), "_blank", "noopener,noreferrer");
+function openUrl(url: string): void {
+  window.open(url, "_blank", "noopener,noreferrer");
 }
-function tunnelUrlForHost(host: string): string {
-  const normalizedHost = host.trim().toLowerCase();
-  const s = servers.value.find(
-    (item) => item.host.trim().toLowerCase() === normalizedHost,
-  );
-  return s ? tunnelUrl(s) : `http://127.0.0.1:${DEFAULT_REMOTE_APP_PORT + 1}/chat`;
+function instanceLabel(inst: InstanceUrls): string {
+  const url = inst.local_url || inst.remote_url;
+  return url.replace(/^https?:\/\//, "").replace(/\/chat$/, "");
 }
-function tunnelDisplayForHost(host: string): string {
-  return tunnelUrlForHost(host).replace(/^https?:\/\//, "").replace(/\/chat$/, "");
+function openInstance(inst: InstanceUrls): void {
+  // Prefer the tunnel URL the backend actually bound; the direct remote URL is
+  // only a fallback and cannot complete an SSO login (its origin is the board's
+  // IP, which is not a registered redirect_uri).
+  const url = inst.local_url || inst.remote_url;
+  if (url) openUrl(url);
 }
-function openInstanceTunnel(host: string): void {
-  const s = servers.value.find((item) => item.host === host);
-  if (s) openTunnelUrl(s);
-  else {
-    // Fallback for an instance loaded from a previous browser session: use
-    // the first assigned tunnel port instead of opening an unreachable URL.
-    window.open(`http://127.0.0.1:${DEFAULT_REMOTE_APP_PORT + 1}/chat`, "_blank", "noopener,noreferrer");
-  }
+
+// ── Log auto-scroll ───────────────────────────────────────────────────────────
+// The log box is short and fills fast. Without pinning it to the bottom the
+// operator keeps staring at the first few lines while the real output — and any
+// error — scrolls below the fold, which makes a slow-but-working install look
+// identical to a stalled one. Plain (non-reactive) map: these are DOM nodes
+// read imperatively, and wrapping them in a ref() would proxy them for nothing.
+const logEls: Record<string, HTMLElement | null> = {};
+
+function setLogEl(id: string, el: unknown): void {
+  logEls[id] = (el as HTMLElement | null) ?? null;
+}
+
+function scrollLogToBottom(id: string): void {
+  void nextTick(() => {
+    const el = logEls[id];
+    if (el) el.scrollTop = el.scrollHeight;
+  });
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
@@ -220,7 +257,14 @@ async function onTestConnect(s: ServerDraft): Promise<void> {
   }
 }
 
-async function onDeploy(s: ServerDraft): Promise<void> {
+// Install and Start drive an identical per-card lifecycle and differ only in
+// which composable call they make, so they share one runner. `phase` records
+// which of the two is in flight so only that button shows a progress label.
+async function runPhase(
+  s: ServerDraft,
+  phase: "install" | "start",
+  run: (params: SshDeployParams, hooks: DeployHooks) => Promise<unknown>,
+): Promise<void> {
   activeDeployId.value = s.id;
   s.showLog = true;
   const ds = getDeployState(s.id);
@@ -228,22 +272,53 @@ async function onDeploy(s: ServerDraft): Promise<void> {
   ds.percent = 0;
   ds.error = null;
   ds.deploying = true;
+  ds.phase = phase;
   try {
-    await deploy({
-      host: s.host,
-      ssh_port: s.sshPort,
-      username: s.username,
-      auth_method: s.authMethod,
-      auth_ref: s.authRef,
-      key_path: s.keyPath,
-      remote_port: s.remotePort,
-    });
+    await run(
+      {
+        host: s.host,
+        ssh_port: s.sshPort,
+        username: s.username,
+        auth_method: s.authMethod,
+        auth_ref: s.authRef,
+        key_path: s.keyPath,
+        remote_port: s.remotePort,
+        enable_sso: s.enableSso,
+      },
+      {
+        // Route each SSE frame into THIS card's state. The composable's own
+        // deployLog/deployPercent refs are single-valued and would show
+        // server A's output on server B's card.
+        onLine(line, percent) {
+          ds.log.push(line);
+          ds.percent = percent;
+          scrollLogToBottom(s.id);
+        },
+        onError(message) {
+          // The SSE error frame does not throw, so without this the card's
+          // error line would stay empty on a failed run.
+          ds.error = message;
+        },
+      },
+    );
   } catch (err) {
     ds.error = err instanceof Error ? err.message : String(err);
   } finally {
     ds.deploying = false;
+    ds.phase = null;
     activeDeployId.value = null;
   }
+}
+
+/** Download the bundle and run setup.sh. Starts nothing, so nothing to open. */
+function onInstall(s: ServerDraft): Promise<void> {
+  return runPhase(s, "install", install);
+}
+
+/** Start an installed service. `start()` opens the tunnel URL itself once the
+ *  tunnel is up, so there is nothing to do here afterwards. */
+function onStart(s: ServerDraft): Promise<void> {
+  return runPhase(s, "start", start);
 }
 
 // backdrop: only dismiss if the pointerdown also started on the overlay
@@ -318,12 +393,12 @@ watch(
               :class="`ssh-chip--${inst.state}`"
             >
               <span class="ssh-chip-dot"></span>
-              <span class="ssh-chip-host">{{ inst.local_url ? inst.local_url.replace(/^https?:\/\//, '').replace(/\/chat$/, '') : tunnelDisplayForHost(inst.host) }}</span>
+              <span class="ssh-chip-host">{{ instanceLabel(inst) }}</span>
               <button
                 v-if="inst.state === 'running'"
                 type="button"
                 class="ssh-chip-action"
-                @click="openInstanceTunnel(inst.host)"
+                @click="openInstance(inst)"
               >{{ t("index.sshOpen") }}</button>
               <button
                 type="button"
@@ -332,6 +407,22 @@ watch(
               >{{ t("index.sshStop") }}</button>
             </div>
           </div>
+        </div>
+
+        <!-- ── Blocked auto-open ──────────────────────────────────────────── -->
+        <!-- Start opens its tab only after the SSE stream ends, tens of seconds
+             past the click, so the browser silently blocks it. This is the
+             recovery path: a real click, which always succeeds. -->
+        <div v-if="blockedOpenUrl" class="ssh-blocked" data-testid="ssh-open-blocked">
+          <span class="ssh-blocked-text">{{ t("index.sshOpenBlocked") }}</span>
+          <button
+            type="button"
+            class="rename-dialog-btn rename-dialog-btn--confirm"
+            data-testid="ssh-open-blocked-action"
+            @click="openRemoteUrl(blockedOpenUrl)"
+          >
+            {{ t("index.sshOpenBlockedAction") }}
+          </button>
         </div>
 
         <!-- ── Server list ────────────────────────────────────────────────── -->
@@ -389,7 +480,7 @@ watch(
                 />
               </div>
 
-              <!-- Row 1: host only (SSH port fixed at 22, remote port fixed at 8989) -->
+              <!-- Row 1: host -->
               <div class="ssh-field">
                 <label class="ssh-label" :for="`ssh-host-${s.id}`">{{ t("index.sshHost") }}</label>
                 <input
@@ -416,15 +507,30 @@ watch(
                 </div>
                 <div class="ssh-field">
                   <label class="ssh-label" :for="`ssh-remote-port-${s.id}`">{{ t("index.sshRemotePort") }}</label>
-                  <input
+                  <select
                     :id="`ssh-remote-port-${s.id}`"
                     v-model.number="s.remotePort"
-                    type="number"
-                    min="1"
-                    max="65535"
                     class="config-input"
-                  />
+                    :data-testid="`ssh-remote-port-${s.id}`"
+                  >
+                    <option v-for="p in OKTA_REGISTERED_PORTS" :key="p" :value="p">{{ p }}</option>
+                  </select>
                 </div>
+              </div>
+
+              <!-- SSO gate. Only the Okta-registered loopback ports above can
+                   carry a login, which is why the port is a fixed choice and
+                   not a free-form number. -->
+              <div class="ssh-field ssh-field--check">
+                <label class="ssh-check">
+                  <input
+                    v-model="s.enableSso"
+                    type="checkbox"
+                    :data-testid="`ssh-sso-${s.id}`"
+                  />
+                  <span>{{ t("index.sshEnableSso") }}</span>
+                </label>
+                <p class="ssh-hint">{{ t("index.sshEnableSsoHint") }}</p>
               </div>
 
               <!-- Row 2: username / auth method -->
@@ -487,15 +593,15 @@ watch(
               <div class="ssh-tunnel-box">
                 <p class="ssh-tunnel-title">{{ t("index.sshTunnelTitle") }}</p>
                 <p class="ssh-tunnel-hint">
-                  {{ t("index.sshTunnelHint", { port: localTunnelPort(s) }) }}
+                  {{ t("index.sshTunnelHint", { port: s.remotePort }) }}
                 </p>
                 <code class="ssh-tunnel-command">{{ tunnelCommand(s) }}</code>
                 <button
                   type="button"
                   class="rename-dialog-btn rename-dialog-btn--cancel ssh-tunnel-open"
-                  @click="openTunnelUrl(s)"
+                  @click="openUrl(tunnelUrl(s))"
                 >
-                  {{ t("index.sshOpenTunnel", { port: localTunnelPort(s) }) }}
+                  {{ t("index.sshOpenTunnel", { port: s.remotePort }) }}
                 </button>
               </div>
 
@@ -530,10 +636,19 @@ watch(
                   type="button"
                   class="rename-dialog-btn rename-dialog-btn--confirm"
                   :disabled="getDeployState(s.id).deploying || !s.host || !s.username"
-                  :data-testid="`ssh-deploy-${s.id}`"
-                  @click="onDeploy(s)"
+                  :data-testid="`ssh-install-${s.id}`"
+                  @click="onInstall(s)"
                 >
-                  {{ getDeployState(s.id).deploying ? t("index.sshDeploying") : t("index.sshDeploy") }}
+                  {{ getDeployState(s.id).phase === "install" ? t("index.sshInstalling") : t("index.sshInstall") }}
+                </button>
+                <button
+                  type="button"
+                  class="rename-dialog-btn rename-dialog-btn--confirm"
+                  :disabled="getDeployState(s.id).deploying || !s.host || !s.username"
+                  :data-testid="`ssh-start-${s.id}`"
+                  @click="onStart(s)"
+                >
+                  {{ getDeployState(s.id).phase === "start" ? t("index.sshStarting") : t("index.sshStart") }}
                 </button>
               </div>
 
@@ -555,7 +670,11 @@ watch(
                 <div class="ssh-log-bar">
                   <div class="ssh-log-fill" :style="{ width: getDeployState(s.id).percent + '%' }"></div>
                 </div>
-                <pre class="ssh-log-lines" :data-testid="`ssh-log-${s.id}`">{{ getDeployState(s.id).log.join("\n") }}</pre>
+                <pre
+                  :ref="(el) => setLogEl(s.id, el)"
+                  class="ssh-log-lines"
+                  :data-testid="`ssh-log-${s.id}`"
+                >{{ getDeployState(s.id).log.join("\n") }}</pre>
                 <p v-if="getDeployState(s.id).error" class="ssh-feedback ssh-feedback--err">{{ getDeployState(s.id).error }}</p>
               </div>
             </div>
@@ -691,6 +810,23 @@ watch(
 .ssh-chip-action--danger { color: var(--error); }
 .ssh-chip-action--danger:hover { opacity: 0.8; }
 
+/* ── Blocked auto-open banner ────────────────────────────────────────────── */
+.ssh-blocked {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent-muted);
+}
+.ssh-blocked-text {
+  flex: 1;
+  font-size: var(--text-xs);
+  color: var(--text-primary);
+  line-height: 1.45;
+}
+
 /* ── Server list ─────────────────────────────────────────────────────────── */
 .ssh-servers {
   display: flex;
@@ -775,6 +911,23 @@ watch(
   min-width: 0;
 }
 .ssh-field--sm { flex: 0 0 88px; }
+.ssh-field--check { margin-top: var(--space-2); }
+.ssh-check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-primary);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+.ssh-check input { cursor: pointer; }
+.ssh-hint {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
 .ssh-label {
   font-size: var(--text-xs);
   color: var(--text-secondary);
@@ -850,7 +1003,7 @@ watch(
 .ssh-log-lines {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
-  max-height: 140px;
+  max-height: 220px;
   overflow-y: auto;
   background: var(--bg-code);
   color: var(--code-text);

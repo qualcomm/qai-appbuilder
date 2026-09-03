@@ -3129,6 +3129,12 @@ class StreamChatUseCase:
             initial_tc_r0, _now_ms(self._clock),
         )
         state.tc_frames.append(initial_tc_r0)
+        await self._persist_todowrite_snapshot_if_needed(
+            conv=conv,
+            now=self._clock.now(),
+            state=state,
+            frame=initial_tc_r0,
+        )
         yield initial_tc_r0
         state.synth_seq += 1
         extra_initial_tcs: list[StreamFrame] = []
@@ -3148,6 +3154,12 @@ class StreamChatUseCase:
                         tail_tc_r0, _now_ms(self._clock),
                     )
                     state.tc_frames.append(tail_tc_r0)
+                    await self._persist_todowrite_snapshot_if_needed(
+                        conv=conv,
+                        now=self._clock.now(),
+                        state=state,
+                        frame=tail_tc_r0,
+                    )
                     extra_initial_tcs.append(tail_tc_r0)
                     await self._publish(
                         ChatStreamFrameEvent(
@@ -3243,6 +3255,12 @@ class StreamChatUseCase:
                 # Collect follow-up TOOL_CALL frames for persistence.
                 fu_frame = _stamp_emitted_at(fu_frame, _now_ms(self._clock))
                 state.tc_frames.append(fu_frame)
+                await self._persist_todowrite_snapshot_if_needed(
+                    conv=conv,
+                    now=self._clock.now(),
+                    state=state,
+                    frame=fu_frame,
+                )
             elif fu_frame.frame_type is StreamFrameType.TOOL_RESULT:
                 # Collect TOOL_RESULT frames for persistence — but ONLY the
                 # final frame per tool call. A streaming (exec) tool emits
@@ -5355,12 +5373,45 @@ class StreamChatUseCase:
                     error_msg=str(exc),
                 )
 
+    async def _persist_todowrite_snapshot_if_needed(
+        self,
+        *,
+        conv: Any,
+        now: datetime,
+        state: "_TurnBodyState",
+        frame: StreamFrame,
+    ) -> None:
+        """Durably save a task-list update as soon as its call is visible.
+
+        ``todowrite``'s full task-list payload is carried by its TOOL_CALL
+        frame, not by the later tool result. Waiting for the result left a
+        browser refresh during a long-running subsequent tool with no durable
+        task snapshot to rehydrate. Rebuild the current turn tail immediately
+        for this one control tool; ordinary tool calls retain their result-first
+        persistence rule so their history cards never claim completion early.
+        """
+        if frame.payload.get("tool_name") != "todowrite":
+            return
+        try:
+            await self._persist_completed_rounds(
+                conv=conv,
+                now=now,
+                state=state,
+                immediate=True,
+            )
+        except Exception:  # noqa: BLE001 — task persistence must not break streaming
+            _log.warning(
+                "chat.todowrite_snapshot_persist_failed",
+                conversation_id=conv.id.value,
+            )
+
     async def _persist_completed_rounds(
         self,
         *,
         conv: Any,
         now: datetime,
         state: "_TurnBodyState",
+        immediate: bool = False,
     ) -> None:
         """Incrementally persist the tool rounds completed SO FAR (idempotent).
 
@@ -5440,17 +5491,13 @@ class StreamChatUseCase:
         # baseline). Idempotent: always re-derived from ``state`` (the next
         # incremental save truncates + re-appends them again, no stacking).
         self._reinsert_injected_messages(conv=conv, state=state)
-        # Deferred submit (see :meth:`_save_parent_conv`): the truncate +
-        # rebuild above is unchanged — this is still ONE whole-tail snapshot
-        # save, which is what lets the safety net express "drop last time's
-        # tail, rebuild it" (a per-row append cannot). What changes is only
-        # WHEN it hits the disk: the write queue serialises it behind the
-        # conversation's single worker and coalesces the turn's repeated
-        # round saves of this same aggregate into one transaction, so a
-        # 3-round turn costs 1 write instead of 3 and never contends with the
-        # dispatcher's SYSTEM_NOTICE append.
+        # Ordinary round snapshots are deferred and coalesced. A todowrite
+        # snapshot passes ``immediate=True`` so its visible task list is durable
+        # before the next long-running tool can make a browser refresh lose it.
         await self._save_parent_conv(
-            conv, is_takeover=state.is_subagent_takeover, defer=True
+            conv,
+            is_takeover=state.is_subagent_takeover,
+            defer=not immediate,
         )
 
     def _reinsert_injected_messages(

@@ -25,7 +25,9 @@ from qai.remote_deploy.application.ports import (
 from qai.remote_deploy.application.use_cases import (
     ConnectRemoteUseCase,
     DeployRemoteUseCase,
+    InstallRemoteUseCase,
     ListInstancesUseCase,
+    StartRemoteUseCase,
     StopInstanceUseCase,
 )
 from qai.remote_deploy.infrastructure import ParamikoSshExecutor
@@ -55,6 +57,10 @@ class RemoteDeployServices:
     # Local Paramiko tunnel service; tail-appended to preserve the public
     # container field contract.
     tunnel_manager: SshExecutorPort
+    # Install / start split; tail-appended per the field-name lock. The
+    # composed ``deploy_use_case`` above still runs both in one call.
+    install_use_case: InstallRemoteUseCase
+    start_use_case: StartRemoteUseCase
 
 
 def build_remote_deploy_services(container: "Container") -> RemoteDeployServices:
@@ -81,4 +87,10 @@ def build_remote_deploy_services(container: "Container") -> RemoteDeployServices
             executor=executor, repository=repository
         ),
         tunnel_manager=executor,
+        install_use_case=InstallRemoteUseCase(
+            executor=executor, repository=repository
+        ),
+        start_use_case=StartRemoteUseCase(
+            executor=executor, repository=repository
+        ),
     )

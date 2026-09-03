@@ -1007,6 +1007,26 @@ def make_lifespan(
             # False on permission / FS errors.
             if _runtime_endpoint.clear_endpoint(container.data_paths.root):
                 _log.info("lifespan.runtime_endpoint_cleared")
+            # Stop managed application/background process trees before any
+            # potentially slow service teardown. Their preview servers are the
+            # most common holders of user-visible ports; doing this first gives
+            # SIGTERM/SIGKILL escalation a chance to complete within Uvicorn's
+            # 30-second graceful-shutdown budget.
+            _bg_process = getattr(container, "background_process", None)
+            if _bg_process is not None and getattr(_bg_process, "manager", None) is not None:
+                try:
+                    await asyncio.wait_for(
+                        _bg_process.manager.shutdown(),
+                        timeout=10.0,
+                    )
+                    _log.info("lifespan.background_process_shutdown")
+                except asyncio.TimeoutError:
+                    _log.warning("lifespan.background_process_shutdown_timeout")
+                except Exception:  # noqa: BLE001
+                    _log.warning(
+                        "lifespan.background_process_shutdown_failed",
+                        exc_info=True,
+                    )
             # De-sandbox refactor (2026-07-04) — the SandboxConfigChangedEvent
             # subscription was removed alongside the orphaned sandbox
             # hot-reload pipeline, so there is nothing to drain here.
@@ -1332,33 +1352,9 @@ def make_lifespan(
                 _log.info("lifespan.code_session_stopped")
             except Exception:  # noqa: BLE001
                 _log.warning("lifespan.code_session_stop_failed", exc_info=True)
-            # background_process platform module — shut down BEFORE the
-            # usage reporter (design.md §10.3 "usage reporter 之前") and
-            # BEFORE ``events.close()`` so the manager's terminal
-            # ``BackgroundProcessUpdated`` / ``Deleted`` envelopes are
-            # still delivered to any subscribed SSE client. The 10s timeout
-            # bounds the kill cascade (graceful SIGTERM + force-kill +
-            # buffer); the Win32 Job Object on the kill group is the
-            # State-Truth-First iron-rule-5 backstop if we time out (the
-            # OS reaps every spawned child once the daemon process
-            # exits regardless).
-            _bg_process = getattr(container, "background_process", None)
-            if _bg_process is not None and getattr(_bg_process, "manager", None) is not None:
-                try:
-                    await asyncio.wait_for(
-                        _bg_process.manager.shutdown(),
-                        timeout=10.0,
-                    )
-                    _log.info("lifespan.background_process_shutdown")
-                except asyncio.TimeoutError:
-                    _log.warning(
-                        "lifespan.background_process_shutdown_timeout"
-                    )
-                except Exception:  # noqa: BLE001
-                    _log.warning(
-                        "lifespan.background_process_shutdown_failed",
-                        exc_info=True,
-                    )
+            # Background-process trees were terminated first, before the
+            # slower service shutdowns, so their listener ports are released
+            # while Uvicorn still has its graceful-shutdown budget.
             # S-E — stop the usage reporter scheduler (best-effort, bounded)
             # so its 24h-interval background task is cancelled instead of
             # outliving the API process. Only present under the internal
