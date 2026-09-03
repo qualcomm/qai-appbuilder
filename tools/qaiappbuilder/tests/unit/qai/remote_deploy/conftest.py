@@ -70,6 +70,11 @@ class FakeSshExecutor:
             return 0, "PID:4242", ""
         if "curl -sf" in command:
             return 0, "READY", ""
+        if "STILL_ALIVE" in command:
+            # Stop's kill/pkill-and-verify probe — default to "the process
+            # died", i.e. the happy path. Tests exercising the "still alive
+            # after kill" path override this via a dedicated executor.
+            return 0, "DEAD", ""
         return 0, "", ""
 
     async def stream_command(
@@ -126,6 +131,23 @@ class OccupiedPortExecutor(FakeSshExecutor):
             return 0, "LISTEN 0 128 127.0.0.1:28688 users:(('other',pid=99))", ""
         if "echo HEALTHY" in command:
             return (0, "HEALTHY", "") if self.healthy else (1, "", "")
+        return 0, "", ""
+
+
+class StillAliveExecutor(FakeSshExecutor):
+    """Stop's kill/pkill-and-verify probe reports the process is still alive.
+
+    Reproduces a process that ignores both the initial signal and the -9
+    escalation (or a pkill pattern that never matched), so Stop must report
+    failure rather than assuming the fire-and-forget kill worked.
+    """
+
+    async def run_command(
+        self, host: RemoteHost, command: str, *, timeout: int = 300
+    ) -> tuple[int, str, str]:
+        self.commands.append(command)
+        if "STILL_ALIVE" in command:
+            return 0, "STILL_ALIVE", ""
         return 0, "", ""
 
 
@@ -203,6 +225,12 @@ def occupied_port_executor():
 def hanging_launch_executor():
     """The ``HangingLaunchExecutor`` class itself."""
     return HangingLaunchExecutor
+
+
+@pytest.fixture
+def still_alive_executor():
+    """The ``StillAliveExecutor`` class itself."""
+    return StillAliveExecutor
 
 
 @pytest.fixture

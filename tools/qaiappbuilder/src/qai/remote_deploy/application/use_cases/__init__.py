@@ -206,6 +206,12 @@ class InstallRemoteUseCase:
             f"    '{_RELEASE_URL}' -o /tmp/qaiappbuilder.zip && "
             f"  unzip -qo /tmp/qaiappbuilder.zip -d \"$_TMP\" && "
             f"  rm -f /tmp/qaiappbuilder.zip && "
+            # If we got here, {_REMOTE_INSTALL_DIR}/start.sh does not exist (the
+            # ``if`` above would have skipped otherwise) — but the directory
+            # itself might, as a half-finished install left by a previous
+            # interrupted run. `mv` onto an existing directory nests the source
+            # inside it rather than replacing it, so clear it first.
+            f"  rm -rf {_REMOTE_INSTALL_DIR} && "
             # Handle both flat (start.sh at root) and nested (single subdir) zip layouts
             f"  if [ -f \"$_TMP/start.sh\" ]; then "
             f"    mv \"$_TMP\" {_REMOTE_INSTALL_DIR}; "
@@ -631,22 +637,48 @@ class StopInstanceUseCase:
             DeploymentState.RUNNING,
             DeploymentState.STARTING,
         )
+        stopped = True
         if was_live and remote is not None:
             # Prefer the PID captured at start. The fallback is scoped to this
             # service's own port so it can never take down an unrelated
             # process — a bare ``pkill -f start.sh`` would.
+            #
+            # Neither branch trusts the kill/pkill exit status — both routinely
+            # exit 0 while the process lingers (slow shutdown, ignored SIGTERM).
+            # So each polls for up to 5s, escalates to -9, and only reports
+            # ``DEAD`` once a final check confirms the process is actually gone.
+            # Without this, a failed stop looked identical to a successful one.
             if instance.remote_pid > 0:
-                command = f"kill {instance.remote_pid} 2>/dev/null || true"
-            else:
+                pid = instance.remote_pid
                 command = (
-                    f"pkill -f 'start.sh --port {instance.port}' 2>/dev/null || true"
+                    f"kill {pid} 2>/dev/null; "
+                    f"for i in 1 2 3 4 5; do kill -0 {pid} 2>/dev/null || break; sleep 1; done; "
+                    f"kill -0 {pid} 2>/dev/null && kill -9 {pid} 2>/dev/null; sleep 1; "
+                    f"kill -0 {pid} 2>/dev/null && echo STILL_ALIVE || echo DEAD"
                 )
-            await self.executor.run_command(remote, command, timeout=10)
+            else:
+                port = instance.port
+                command = (
+                    f"pkill -f 'start.sh --port {port}' 2>/dev/null; sleep 1; "
+                    f"pkill -9 -f 'start.sh --port {port}' 2>/dev/null; sleep 1; "
+                    f"ps -ef | grep '[s]tart.sh --port {port}' >/dev/null 2>&1 "
+                    f"&& echo STILL_ALIVE || echo DEAD"
+                )
+            _code, stdout, _stderr = await self.executor.run_command(
+                remote, command, timeout=20
+            )
+            stopped = "DEAD" in stdout
 
-        instance.state = DeploymentState.STOPPED
-        instance.remote_pid = 0
+        if stopped:
+            instance.state = DeploymentState.STOPPED
+            instance.remote_pid = 0
+        else:
+            instance.error_message = (
+                "Could not confirm the remote process stopped; it may still "
+                "be running."
+            )
         await self.repository.save(instance)
-        return StopInstanceResult(instance_id=instance_id, stopped=True)
+        return StopInstanceResult(instance_id=instance_id, stopped=stopped)
 
 
 # ---------------------------------------------------------------------------

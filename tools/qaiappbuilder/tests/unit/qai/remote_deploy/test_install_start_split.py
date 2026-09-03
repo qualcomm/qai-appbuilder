@@ -114,6 +114,26 @@ async def test_install_failure_does_not_reach_installed(
     assert instance.state is DeploymentState.FAILED
 
 
+async def test_install_clears_a_half_installed_directory_before_moving_in(
+    fake_executor, repository
+) -> None:
+    """A previous interrupted install can leave ``~/qaiappbuilder`` without
+    ``start.sh``. ``mv`` onto an existing directory nests the source inside
+    it instead of replacing it, so the download step must clear the target
+    first.
+    """
+    executor = fake_executor()
+    install = InstallRemoteUseCase(executor=executor, repository=repository)
+
+    await _drain(install.stream(**_KWARGS))
+
+    download_cmd = executor.command_matching("curl -fsSL")
+    assert "rm -rf ~/qaiappbuilder" in download_cmd
+    assert download_cmd.index("rm -rf ~/qaiappbuilder") < download_cmd.index(
+        'mv "$_TMP"'
+    )
+
+
 # ---------------------------------------------------------------------------
 # Start
 # ---------------------------------------------------------------------------
@@ -284,3 +304,24 @@ async def test_stop_unknown_instance_raises_not_found(
 
     with pytest.raises(RemoteInstanceNotFoundError):
         await stop.execute(instance_id="nope", remote=_remote())
+
+
+async def test_stop_reports_failure_when_process_survives_kill(
+    still_alive_executor, repository
+) -> None:
+    """``kill``/``pkill`` routinely exit 0 while the process lingers (slow
+    shutdown, ignored SIGTERM) — a non-error exit must not be reported as a
+    successful stop.
+    """
+    executor = still_alive_executor()
+    await _running_instance(repository, pid=4242)
+    stop = StopInstanceUseCase(executor=executor, repository=repository)
+
+    result = await stop.execute(instance_id="i-1", remote=_remote())
+
+    assert not result.stopped
+    instance = await repository.get("i-1")
+    assert instance is not None
+    assert instance.state is DeploymentState.RUNNING
+    assert instance.remote_pid == 4242
+    assert "Could not confirm" in instance.error_message
