@@ -10,7 +10,9 @@
 #include <memory>
 #include <queue>
 #include <map>
-
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
 #include "IOTensor.hpp"
 #include "DynamicLoadUtil.hpp"
 #include "Lora.hpp"
@@ -165,8 +167,9 @@ class QnnInferenceEngine {
   std::vector<std::string> getInputName(size_t graphIdx = 0);
   std::vector<std::string> getOutputName(size_t graphIdx = 0);
   uint64_t getProfilingEvent(uint32_t eventType);
-  qnn_wrapper_api::GraphInfo_t **m_graphsInfo;
-  uint32_t m_graphsCount;
+  qnn_wrapper_api::GraphInfo_t **m_graphsInfo{nullptr};
+  uint32_t m_graphsCount{0};
+
 
   StatusCode initializeLog();
   StatusCode setLogLevel(QnnLog_Level_t logLevel);
@@ -178,7 +181,15 @@ class QnnInferenceEngine {
   StatusCode initializePerformance();
   StatusCode destroyPerformance();
 
-  virtual ~QnnInferenceEngine();
+  /// Unified, idempotent teardown.  Releases all QNN resources in the
+  /// correct dependency order (tensors → performance → graphs → context →
+  /// device → profile → backend → log → DLC).  Safe to call multiple
+  /// times — only the first call does work.  The destructor delegates to
+  /// this, so explicit callers and the destructor share ONE code path,
+  /// eliminating double-free risks.
+  StatusCode shutdown() noexcept;
+
+  virtual ~QnnInferenceEngine() noexcept;
 
  private:
   StatusCode extractBackendProfilingInfo(Qnn_ProfileHandle_t profileHandle);
@@ -228,7 +239,11 @@ class QnnInferenceEngine {
   uint32_t m_graphConfigsInfoCount;
   Qnn_LogHandle_t m_logHandle         = nullptr;
   Qnn_BackendHandle_t m_backendHandle = nullptr;
-  inline static Qnn_DeviceHandle_t m_deviceHandle   = nullptr;
+  // INTENTIONAL process-wide shared handle.  `freeDevice()` is a no-op under
+  // AISW-149462 because per-engine release can invalidate concurrent models;
+  // process termination owns final reclamation.  See freeDevice() before
+  // changing this to per-engine state.
+  inline static Qnn_DeviceHandle_t m_deviceHandle = nullptr;
   RunTimeAppKeys m_runTimeAppKeys;
   uint64_t m_numMaxEvents = std::numeric_limits<uint64_t>::max();
   std::vector<qnn_wrapper_api::GraphInfo_t*> m_graphInfoPtrList;
@@ -237,6 +252,7 @@ class QnnInferenceEngine {
 
   // zw.
   uint32_t m_powerConfigId = 1;
+  bool m_isPerformanceInitialized{false};
   QnnHtpDevice_PerfInfrastructure_t m_perfInfra = {nullptr};
   bool m_runInCpu = true;
   bool m_isGpu = false;
@@ -263,6 +279,14 @@ class QnnInferenceEngine {
   // detect inherited instances in fork()ed children and skip teardown.
   pid_t m_creatorPid{-1};
 #endif
+
+  /// Concurrent-safe shutdown guards. The first teardown result is retained
+  /// and returned by subsequent calls rather than being reported as success.
+  std::atomic<bool> m_shutdownStarted{false};
+  std::atomic<StatusCode> m_shutdownResult{StatusCode::FAILURE};
+  std::mutex m_shutdownMutex;
+  std::condition_variable m_shutdownCv;
+  bool m_shutdownComplete{false};
 };
 }  // namespace qnn_app
 }  // namespace tools

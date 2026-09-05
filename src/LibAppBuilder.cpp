@@ -12,7 +12,11 @@
 #include <chrono>
 #include <unordered_map>
 #include <mutex>
-#include <iostream>
+#include <atomic>
+#include <condition_variable>
+#include <optional>
+#include <type_traits>
+#include <utility>
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -69,14 +73,177 @@ static bool gs_isGpu = false;
 static bool gs_isCpu = false;
 static bool sg_perf_global = false;
 
-std::unordered_map<std::string, std::unique_ptr<qnn_app::QnnInferenceEngine>> sg_model_map;
-// Guards sg_model_map only. The map is mutated (erase on take, insert on
-// return) by every ModelInference/ModelInitialize call. When two pipeline
-// threads run different models concurrently (e.g. model a on HTP0 + model 1 on HTP1),
-// their erase/insert on this shared map race and corrupt its bucket list.
-// This mutex serializes ONLY the map find/erase/insert; executeGraphsBuffers
-// (the actual HTP inference) runs OUTSIDE the lock, so parallelism is kept.
-static std::mutex sg_model_map_mutex;
+// Intentionally process-lifetime allocated (never enters CRT static
+// destruction).  If atexit / ShutdownAllModels() runs, the map is drained
+// and engines are properly torn down.  If atexit does NOT run (os._exit,
+// fatal signal, etc.), the map leaks harmlessly — the OS reclaims the
+// address space on process termination, and we avoid calling QNN APIs in
+// the uncontrolled DLL/CRT teardown phase where provider state is
+// indeterminate.  This is safer than letting ~unordered_map destroy
+// engines whose QNN backend may already be gone.
+using EngineMap = std::unordered_map<std::string,
+                                     std::unique_ptr<qnn_app::QnnInferenceEngine>>;
+
+// These stores deliberately have process lifetime so their destructors cannot
+// call QNN during CRT/DLL teardown.  They may allocate; callers must therefore
+// initialize them during normal module startup, not from an atexit callback.
+static EngineMap& sg_model_map() {
+    static EngineMap* map = new EngineMap();
+    return *map;
+}
+static std::mutex& sg_model_map_mutex() {
+    static std::mutex* mtx = new std::mutex();
+    return *mtx;
+}
+
+// ---------------------------------------------------------------------------
+// Process-exit safety: runtime lifecycle + unified teardown
+// ---------------------------------------------------------------------------
+enum class RuntimeState { Running, ShuttingDown, Shutdown };
+
+struct RuntimeLifecycle {
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::atomic<RuntimeState> state{RuntimeState::Running};
+    std::size_t activeOperations{0};
+    ShutdownAllModelsStatus shutdownResult{ShutdownAllModelsStatus::Failed};
+};
+
+// Process-lifetime allocated — same rationale as the engine registry.
+static RuntimeLifecycle& sg_runtime() {
+    static RuntimeLifecycle* rt = new RuntimeLifecycle();
+    return *rt;
+}
+
+// Counts guards held by this thread.  Shutdown must not wait for an operation
+// that is blocked in that same shutdown call.
+static thread_local std::size_t sg_runtimeOperationDepth{0};
+
+void InitializeRuntimeLifecycleStores() {
+    (void)sg_model_map();
+    (void)sg_model_map_mutex();
+    (void)sg_runtime();
+}
+
+// Covers one extract-use-return operation. Acquire before extracting or
+// creating an engine; keep it alive until putQnnApp() has returned (or the
+// extracted unique_ptr has been destroyed). This lets shutdown swap the
+// registry without ever nesting lifecycle and registry mutexes.
+class RuntimeOperationGuard {
+public:
+    static std::optional<RuntimeOperationGuard> acquire() noexcept {
+        auto& rt = sg_runtime();
+        if (rt.state.load(std::memory_order_acquire) != RuntimeState::Running) {
+            return std::nullopt;
+        }
+        std::lock_guard<std::mutex> lock(rt.mutex);
+        if (rt.state.load(std::memory_order_relaxed) != RuntimeState::Running) {
+            return std::nullopt;
+        }
+        ++rt.activeOperations;
+        ++sg_runtimeOperationDepth;
+        return RuntimeOperationGuard{};
+    }
+
+    RuntimeOperationGuard(RuntimeOperationGuard&& other) noexcept
+        : m_active(std::exchange(other.m_active, false)) {}
+    RuntimeOperationGuard& operator=(RuntimeOperationGuard&&) = delete;
+    RuntimeOperationGuard(const RuntimeOperationGuard&) = delete;
+    RuntimeOperationGuard& operator=(const RuntimeOperationGuard&) = delete;
+
+    ~RuntimeOperationGuard() noexcept {
+        if (!m_active) return;
+        auto& rt = sg_runtime();
+        {
+            std::lock_guard<std::mutex> lock(rt.mutex);
+            --rt.activeOperations;
+            --sg_runtimeOperationDepth;
+        }
+        rt.cv.notify_all();
+    }
+
+private:
+    RuntimeOperationGuard() = default;
+    bool m_active{true};
+};
+
+/// Destroy one engine — delegates to the engine's own idempotent shutdown().
+static bool DestroyEngineSafely(
+    const std::string& /*model_name*/,
+    std::unique_ptr<qnn_app::QnnInferenceEngine> engine) noexcept
+{
+    if (!engine) return true;
+    const bool succeeded = engine->shutdown() == qnn_app::StatusCode::SUCCESS;
+    engine.reset();
+    return succeeded;
+}
+
+static_assert(
+    noexcept(std::declval<EngineMap&>().swap(std::declval<EngineMap&>())),
+    "EngineMap::swap must be noexcept for shutdown safety");
+
+/// Drain the engine registry and perform full teardown. Operations which have
+/// extracted an engine finish before the registry is swapped.
+static ShutdownAllModelsStatus ShutdownAllModelsImpl()
+{
+    if (sg_runtimeOperationDepth != 0) {
+        return ShutdownAllModelsStatus::InActiveOperation;
+    }
+
+    EngineMap engines;
+    auto& rt = sg_runtime();
+    {
+        std::unique_lock<std::mutex> lock(rt.mutex);
+        const auto state = rt.state.load(std::memory_order_relaxed);
+        if (state == RuntimeState::Shutdown) return rt.shutdownResult;
+        if (state == RuntimeState::ShuttingDown) {
+            rt.cv.wait(lock, [&rt] {
+                return rt.state.load(std::memory_order_acquire) == RuntimeState::Shutdown;
+            });
+            return rt.shutdownResult;
+        }
+        rt.state.store(RuntimeState::ShuttingDown, std::memory_order_release);
+        rt.cv.wait(lock, [&rt] { return rt.activeOperations == 0; });
+    }
+
+    // Lock invariant: lifecycle and registry mutexes are never held together.
+    // Guards prevent extraction/insertion after state becomes ShuttingDown.
+    {
+        std::lock_guard<std::mutex> lock(sg_model_map_mutex());
+        engines.swap(sg_model_map());
+    }
+
+    auto result = ShutdownAllModelsStatus::Completed;
+    for (auto& [name, engine] : engines) {
+        if (!DestroyEngineSafely(name, std::move(engine))) {
+            result = ShutdownAllModelsStatus::Failed;
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(rt.mutex);
+        rt.shutdownResult = result;
+        rt.state.store(RuntimeState::Shutdown, std::memory_order_release);
+    }
+    rt.cv.notify_all();
+    return result;
+}
+
+extern "C" ShutdownAllModelsStatus ShutdownAllModels() noexcept
+{
+    try {
+        return ShutdownAllModelsImpl();
+    } catch (...) {
+        auto& rt = sg_runtime();
+        {
+            std::lock_guard<std::mutex> lock(rt.mutex);
+            rt.shutdownResult = ShutdownAllModelsStatus::Failed;
+            rt.state.store(RuntimeState::Shutdown, std::memory_order_release);
+        }
+        rt.cv.notify_all();
+        return ShutdownAllModelsStatus::Failed;
+    }
+}
 static qnn_app::ProfilingLevel sg_parsedProfilingLevel = qnn_app::ProfilingLevel::OFF;
 
 namespace qnn {
@@ -186,25 +353,34 @@ std::unique_ptr<qnn_app::QnnInferenceEngine> initQnnInferenceEngine(std::string 
 
 
 std::unique_ptr<qnn_app::QnnInferenceEngine> getQnnInferenceEngine(std::string model_name) {
-  std::lock_guard<std::mutex> lk(sg_model_map_mutex);
-  auto it = sg_model_map.find(model_name);
-  if (it != sg_model_map.end()) {
+  std::lock_guard<std::mutex> lk(sg_model_map_mutex());
+  auto it = sg_model_map().find(model_name);
+  if (it != sg_model_map().end()) {
     if (it->second) {
       auto app = std::move(it->second);
-      sg_model_map.erase(it);
+      sg_model_map().erase(it);
       return app;
     }
   }
   return nullptr;
 }
 
-// Symmetric counterpart to getQnnInferenceEngine: re-insert the app under the same
-// lock. Replaces the bare `sg_model_map.insert(...)` calls scattered across
-// ModelInference/ModelInitialize so every map mutation is serialized.
-void putQnnApp(std::string model_name,
-                     std::unique_ptr<qnn_app::QnnInferenceEngine> app) {
-  std::lock_guard<std::mutex> lk(sg_model_map_mutex);
-  sg_model_map.insert(std::make_pair(std::move(model_name), std::move(app)));
+// Symmetric counterpart to getQnnInferenceEngine. The caller's
+// RuntimeOperationGuard prevents shutdown from swapping the registry until
+// this insertion completes, so this function only ever acquires registry state.
+// When insertion fails, the by-value app parameter is destroyed on return;
+// QnnInferenceEngine's destructor invokes its idempotent shutdown().
+bool putQnnApp(std::string model_name,
+               std::unique_ptr<qnn_app::QnnInferenceEngine> app) noexcept {
+  if (!app) return false;
+  try {
+    std::lock_guard<std::mutex> lock(sg_model_map_mutex());
+    auto [it, inserted] = sg_model_map().try_emplace(
+        std::move(model_name), std::move(app));
+    return inserted;
+  } catch (...) {
+    return false;
+  }
 }
 void SetProcInfo(std::string proc_name, uint64_t epoch) {
     setEpoch(epoch);
@@ -218,6 +394,8 @@ bool SetProfilingLevel(int32_t profiling_level) {
 }
 
 bool SetLogLevel(int32_t log_level, const std::string log_path) {
+  auto operation = RuntimeOperationGuard::acquire();
+  if (!operation) return false;
 #ifdef _WIN32
   if(log_path != "" && log_path != "None") {
     if (_access(log_path.c_str(), 0) == 0) {
@@ -256,6 +434,11 @@ bool SetLogLevel(int32_t log_level, const std::string log_path) {
 }
 
 bool SetPerfProfileGlobal(const std::string& perf_profile) {
+    auto operation = RuntimeOperationGuard::acquire();
+    if (!operation) {
+        QNN_ERR("SetPerfProfileGlobal: runtime is shutting down.\n");
+        return false;
+    }
 #ifdef __linux__
     if (isForkedChildWithInheritedQnnState()) {
         QNN_WARN("SetPerfProfileGlobal: skipping in fork()ed child (issue#97).\n");
@@ -299,6 +482,8 @@ bool SetPerfProfileGlobal(const std::string& perf_profile) {
 }
 
 bool RelPerfProfileGlobal() {
+    auto operation = RuntimeOperationGuard::acquire();
+    if (!operation) return false;
 #ifdef __linux__
     if (isForkedChildWithInheritedQnnState()) {
         QNN_WARN("RelPerfProfileGlobal: skipping in fork()ed child (issue#97).\n");
@@ -490,6 +675,11 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
                        const std::string& backend_lib_path, const std::string& system_lib_path, 
                        std::vector<LoraAdapter>& lora_adapters,
                        bool async, const std::string& input_data_type, const std::string& output_data_type, uint32_t deviceID=0, std::string coreIdsStr="", const std::vector<std::string>& enable_graphs={}) {
+  auto operation = RuntimeOperationGuard::acquire();
+  if (!operation) {
+      QNN_ERR("ModelInitializeEx: runtime is shutting down, cannot create new engine.\n");
+      return false;
+  }
   QNN_INFO("LibAppBuilder::ModelInitialize: %s \n", model_name.c_str());
 
 #ifdef __linux__
@@ -667,7 +857,10 @@ bool ModelInitializeEx(const std::string& model_name, const std::string& proc_na
 
     timerHelper.Print("model_initialize " + model_name);
 
-    putQnnApp(model_name, std::move(app));
+    if (!putQnnApp(model_name, std::move(app))) {
+      QNN_ERR("ModelInitializeEx: failed to register initialized model: %s\n", model_name.c_str());
+      return false;
+    }
 
     return true;
   }
@@ -679,6 +872,11 @@ bool ModelInferenceEx(std::string model_name, std::string proc_name, std::string
                       std::vector<uint8_t*>& inputBuffers, std::vector<size_t>& inputSize,
                       std::vector<uint8_t*>& outputBuffers, std::vector<size_t>& outputSize,
                       std::string& perfProfile, size_t graphIndex, size_t share_memory_size=0) {
+    auto operation = RuntimeOperationGuard::acquire();
+    if (!operation) {
+        QNN_ERR("ModelInferenceEx: runtime is shutting down.\n");
+        return false;
+    }
     bool result = true;
 
     QNN_INFO("LibAppBuilder::ModelInference: %s \n", model_name.c_str());
@@ -713,7 +911,10 @@ bool ModelInferenceEx(std::string model_name, std::string proc_name, std::string
         result = false;
     }
 
-    putQnnApp(model_name, std::move(app));
+    if (!putQnnApp(model_name, std::move(app))) {
+        QNN_ERR("ModelInferenceEx: failed to restore model after inference: %s\n", model_name.c_str());
+        return false;
+    }
 
     timerHelper.Print("model_inference " + model_name);
 
@@ -731,6 +932,11 @@ bool ModelDestroyEx(std::string model_name, std::string proc_name) {
     }
 #endif
 
+    auto operation = RuntimeOperationGuard::acquire();
+    if (!operation) {
+        QNN_ERR("ModelDestroyEx: runtime is shutting down.\n");
+        return false;
+    }
     bool result = false;
 
     if (!proc_name.empty()) {
@@ -743,45 +949,18 @@ bool ModelDestroyEx(std::string model_name, std::string proc_name) {
 
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     if (nullptr == app) {
-        // issue#109/#4: the model was never registered or has already been
-        // destroyed/taken. Do NOT dereference the null app (the original code
-        // called app->reportError here, which crashed on a repeated destroy).
         QNN_WARN("ModelDestroy: can't find the model with model_name: %s (already destroyed?)\n", model_name.c_str());
         return false;
     }
 
-    // improve performance.
-    if (qnn_app::StatusCode::SUCCESS != app->tearDownInputAndOutputTensors()) {
-        app->reportError("Input and Output Tensors destroy failure");
-        return false;
-    }
-
-    if (qnn_app::StatusCode::SUCCESS != app->destroyPerformance()) {
-        app->reportError("Performance destroy failure");
-        return false;
-    }
-
-    if (qnn_app::StatusCode::SUCCESS != app->freeGraphs()) {
-        app->reportError("Free graphs failure");
-        return false;
-    }
-
-    if (qnn_app::StatusCode::SUCCESS != app->freeContext()) {
-        app->reportError("Context Free failure");
-        return false;
-    }
-
-    auto devicePropertySupportStatus = app->isDevicePropertySupported();
-    if (qnn_app::StatusCode::FAILURE != devicePropertySupportStatus) {
-        auto freeDeviceStatus = app->freeDevice();
-        if (qnn_app::StatusCode::SUCCESS != freeDeviceStatus) {
-            app->reportError("Device Free failure");
-            return false;
-        }
-    }
+    // Unified teardown — the engine's own idempotent shutdown() handles
+    // the complete resource release sequence.  No need to call individual
+    // free functions here; that was the source of double-free risks when
+    // the destructor also released the same handles.
+    auto status = app->shutdown();
     timerHelper.Print("model_destroy " + model_name);
 
-    return true;
+    return (qnn_app::StatusCode::SUCCESS == status);
 }
 
 
@@ -856,6 +1035,11 @@ bool LibAppBuilder::ModelWaitInference(const std::string& request_id,
 }
 
 bool LibAppBuilder::ModelApplyBinaryUpdate(const std::string model_name, std::vector<LoraAdapter>& lora_adapters) {
+    auto operation = RuntimeOperationGuard::acquire();
+    if (!operation) {
+        QNN_ERR("ModelApplyBinaryUpdate: runtime is shutting down.\n");
+        return false;
+    }
     bool result = true;
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     if (nullptr == app) {
@@ -874,7 +1058,10 @@ bool LibAppBuilder::ModelApplyBinaryUpdate(const std::string model_name, std::ve
         result = false;
     }
 
-    putQnnApp(model_name, std::move(app));
+    if (!putQnnApp(model_name, std::move(app))) {
+        QNN_ERR("ModelApplyBinaryUpdate: failed to restore model: %s\n", model_name.c_str());
+        return false;
+    }
 
     return result;
 }
@@ -900,79 +1087,114 @@ bool LibAppBuilder::DeleteShareMemory(std::string share_memory_name) {
 
 // issue#24
 std::vector<std::vector<size_t>> LibAppBuilder::getOutputShapes(std::string model_name, size_t graphIdx){
+    auto operation = RuntimeOperationGuard::acquire();
+    if (!operation) return {};
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     if (nullptr == app) {  // issue#109/#4: guard against released/missing context.
         QNN_WARN("getOutputShapes: model not found or released: %s\n", model_name.c_str());
         return {};
     }
     m_outputShapes = app->getOutputShapes(graphIdx);
-    putQnnApp(model_name, std::move(app));
+    if (!putQnnApp(model_name, std::move(app))) {
+        QNN_ERR("getOutputShapes: failed to restore model: %s\n", model_name.c_str());
+        return {};
+    }
     return m_outputShapes;
 };
 
 std::vector<std::vector<size_t>> LibAppBuilder::getInputShapes(std::string model_name, size_t graphIdx){
+    auto operation = RuntimeOperationGuard::acquire();
+    if (!operation) return {};
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     if (nullptr == app) {  // issue#109/#4
         QNN_WARN("getInputShapes: model not found or released: %s\n", model_name.c_str());
         return {};
     }
     m_inputShapes = app->getInputShapes(graphIdx);
-    putQnnApp(model_name, std::move(app));
+    if (!putQnnApp(model_name, std::move(app))) {
+        QNN_ERR("getInputShapes: failed to restore model: %s\n", model_name.c_str());
+        return {};
+    }
     return m_inputShapes;
 };
 
 std::vector<std::string> LibAppBuilder::getInputDataType(std::string model_name, size_t graphIdx){
+    auto operation = RuntimeOperationGuard::acquire();
+    if (!operation) return {};
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     if (nullptr == app) {  // issue#109/#4
         QNN_WARN("getInputDataType: model not found or released: %s\n", model_name.c_str());
         return {};
     }
     m_inputDataType = app->getInputDataType(graphIdx);
-    putQnnApp(model_name, std::move(app));
+    if (!putQnnApp(model_name, std::move(app))) {
+        QNN_ERR("getInputDataType: failed to restore model: %s\n", model_name.c_str());
+        return {};
+    }
     return m_inputDataType;
 };
 
 std::vector<std::string> LibAppBuilder::getOutputDataType(std::string model_name, size_t graphIdx){
+    auto operation = RuntimeOperationGuard::acquire();
+    if (!operation) return {};
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     if (nullptr == app) {  // issue#109/#4
         QNN_WARN("getOutputDataType: model not found or released: %s\n", model_name.c_str());
         return {};
     }
     m_outputDataType = app->getOutputDataType(graphIdx);
-    putQnnApp(model_name, std::move(app));
+    if (!putQnnApp(model_name, std::move(app))) {
+        QNN_ERR("getOutputDataType: failed to restore model: %s\n", model_name.c_str());
+        return {};
+    }
     return m_outputDataType;
 };
 
 std::string LibAppBuilder::getGraphName(std::string model_name, size_t graphIdx){
+    auto operation = RuntimeOperationGuard::acquire();
+    if (!operation) return {};
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     if (nullptr == app) {  // issue#109/#4
         QNN_WARN("getGraphName: model not found or released: %s\n", model_name.c_str());
         return {};
     }
     m_graphName = app->getGraphName(graphIdx);
-    putQnnApp(model_name, std::move(app));
+    if (!putQnnApp(model_name, std::move(app))) {
+        QNN_ERR("getGraphName: failed to restore model: %s\n", model_name.c_str());
+        return {};
+    }
     return m_graphName;
 };
 
 std::vector<std::string> LibAppBuilder::getInputName(std::string model_name, size_t graphIdx){
+    auto operation = RuntimeOperationGuard::acquire();
+    if (!operation) return {};
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     if (nullptr == app) {  // issue#109/#4
         QNN_WARN("getInputName: model not found or released: %s\n", model_name.c_str());
         return {};
     }
     m_inputName = app->getInputName(graphIdx);
-    putQnnApp(model_name, std::move(app));
+    if (!putQnnApp(model_name, std::move(app))) {
+        QNN_ERR("getInputName: failed to restore model: %s\n", model_name.c_str());
+        return {};
+    }
     return m_inputName;
 };
 
 std::vector<std::string> LibAppBuilder::getOutputName(std::string model_name, size_t graphIdx){
+    auto operation = RuntimeOperationGuard::acquire();
+    if (!operation) return {};
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     if (nullptr == app) {  // issue#109/#4
         QNN_WARN("getOutputName: model not found or released: %s\n", model_name.c_str());
         return {};
     }
     m_outputName = app->getOutputName(graphIdx);
-    putQnnApp(model_name, std::move(app));
+    if (!putQnnApp(model_name, std::move(app))) {
+        QNN_ERR("getOutputName: failed to restore model: %s\n", model_name.c_str());
+        return {};
+    }
     return m_outputName;
 };
 //proc
@@ -1025,6 +1247,8 @@ ModelInfo_t LibAppBuilder::getModelInfo(std::string model_name, std::string inpu
 ModelInfo_t LibAppBuilder::getModelInfoExt(std::string model_name, std::string input) {
     ModelInfo_t info;
 
+    auto operation = RuntimeOperationGuard::acquire();
+    if (!operation) return info;
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     if (nullptr == app) {
         // issue#109/#4: model missing/released. Return empty info without
@@ -1051,15 +1275,22 @@ ModelInfo_t LibAppBuilder::getModelInfoExt(std::string model_name, std::string i
         printf("wrong input in LibAppBuilder::getModelInfoExt: %s\n", input.c_str());
         app->reportError("getModelInfoExt failure");
         // Put the app back before returning so the model is not lost.
-        putQnnApp(model_name, std::move(app));
+        if (!putQnnApp(model_name, std::move(app))) {
+            QNN_ERR("getModelInfoExt: failed to restore model: %s\n", model_name.c_str());
+        }
         return info;
     }
-    putQnnApp(model_name, std::move(app));
+    if (!putQnnApp(model_name, std::move(app))) {
+        QNN_ERR("getModelInfoExt: failed to restore model: %s\n", model_name.c_str());
+        return {};
+    }
 
     return info;
 }
 
 uint64_t LibAppBuilder::getProfilingEvent(std::string model_name, uint32_t eventType){
+    auto operation = RuntimeOperationGuard::acquire();
+    if (!operation) return 0;
     uint64_t eventValue = 0;
     std::unique_ptr<qnn_app::QnnInferenceEngine> app = getQnnInferenceEngine(model_name);
     if (nullptr == app) {  // issue#109/#4
@@ -1067,7 +1298,10 @@ uint64_t LibAppBuilder::getProfilingEvent(std::string model_name, uint32_t event
         return 0;
     }
     eventValue = app->getProfilingEvent(eventType);
-    putQnnApp(model_name, std::move(app));
+    if (!putQnnApp(model_name, std::move(app))) {
+        QNN_ERR("getProfilingEvent: failed to restore model: %s\n", model_name.c_str());
+        return 0;
+    }
     return eventValue;
 }
 
