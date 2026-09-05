@@ -34,6 +34,7 @@
    - 3.8 [Complete Example: Stable Diffusion Text-to-Image](#38-complete-example-stable-diffusion-text-to-image)
    - 3.9 [PerfProfile - Performance Mode Management](#39-perfprofile---performance-mode-management)
    - 3.10 [Native Mode Explained (High Performance)](#310-native-mode-explained-high-performance)
+   - 3.11 [Model Lifecycle & Process-Exit Cleanup](#311-model-lifecycle--process-exit-cleanup)
 
 4. [C++ API Reference](#4-c-api-reference)
    
@@ -1391,6 +1392,80 @@ outputs = model.Inference([input_data])
 # 6. Output is also in native type
 print(f"Output dtype: {outputs[0].dtype}")  # e.g., float16
 ```
+
+### 3.11 Model Lifecycle & Process-Exit Cleanup
+
+Every `QNNContext` / `QNNContextProc` owns a native QNN engine (context, backend, log, and
+device handles allocated on the Snapdragon NPU). This section documents how that native
+resource is released, and what changed starting with the process-exit-safety fix shipped in
+this version.
+
+#### Normal cleanup: `del` / going out of scope
+
+```python
+model = QNNContext(model_name, model_path)
+output = model.Inference([input_data])
+del model   # deterministically frees the native engine right away
+```
+
+`del model` (or letting `model` go out of scope so CPython collects it) is still the
+recommended way to free a model's NPU resources as soon as you are done with it. Calling
+`del`/letting the object be collected, and then having the interpreter's own garbage
+collector run again later, is safe — the native teardown is now idempotent: no matter how
+many times cleanup runs for a given model (explicit `del`, a second `del`, or a `gc.collect()`
+that revisits it), only the **first** attempt does any work; every subsequent one is a
+no-op that returns the same result.
+
+#### If you forget to `del` a model
+
+You do **not** need to explicitly `del` every model before your process exits. Starting with
+this version, `qai_appbuilder` automatically drains and destroys every model that is still
+alive when the Python interpreter shuts down (registered via `atexit`). This is what fixes a
+previous native crash that could occur on process exit when models were left un-destroyed —
+no application code change is required to get this protection; it applies to every process
+that imports `qai_appbuilder`.
+
+#### `_shutdown_all_models()` — explicit, process-wide shutdown
+
+```python
+from qai_appbuilder.appbuilder import _shutdown_all_models
+
+_shutdown_all_models()   # destroys every remaining QNN engine right now
+```
+
+`_shutdown_all_models()` is an optional, explicit API for applications/tests that want to
+force a full teardown of every model *before* process exit (for example, at the end of a
+test suite, or before unloading a plugin). Properties to know before using it:
+
+| Property | Behavior |
+| --- | --- |
+| Idempotent | Calling it again after everything is already shut down is a safe no-op. |
+| **Irreversible** | Once it completes, the native runtime is permanently in a "shut down" state for the lifetime of the process. It cannot be reset back to "running". |
+| Effect after shutdown | Every subsequent QNN-touching call — creating a new `QNNContext`, calling `.Inference()` on an existing one, `SetLogLevel()`, `SetPerfProfileGlobal()`, `RelPerfProfileGlobal()`, metadata getters (`getInputShapes()` etc.) — fails gracefully (returns `False` / an empty result) instead of raising or crashing. |
+| Reentrancy | Calling it from a thread that is itself inside an active AppBuilder call on the same thread (e.g. from inside your own code running underneath `Inference()`) raises `RuntimeError` — it cannot safely wait for an operation that is waiting on it. |
+| Failure reporting | Raises `RuntimeError` if one or more engines failed to tear down cleanly (the underlying native resources are still released best-effort; this surfaces the failure to the caller instead of hiding it). |
+
+> ⚠️ Because the shutdown is process-wide and permanent, only call `_shutdown_all_models()`
+> when your application is actually finished using QNN for the rest of the process's life
+> (e.g. immediately before `sys.exit()`, or at the very end of a test run). Do not call it
+> between unrelated pieces of work that each still need to create/use models — for that,
+> use `del` on the individual `QNNContext` objects you are done with instead.
+
+#### `_shutdown_all_models()` vs. `release_all()` — do not confuse these
+
+`qai_appbuilder` has two different, non-interchangeable cleanup helpers that sound similar:
+
+| | `qai_appbuilder.release_all()` | `qai_appbuilder.appbuilder._shutdown_all_models()` |
+| --- | --- | --- |
+| Layer | Python-side helper | Native (C++) runtime API |
+| Scope | Only Python `QNNContext`/`QNNContextProc`/Genie context objects your process currently holds a live reference to | Every native QNN engine registered in the process, regardless of whether Python still holds a reference |
+| Reversible afterwards? | Yes — you can create new `QNNContext` objects afterward | **No** — permanently ends the native runtime for the process (see above) |
+| Typical use | Best-effort cleanup before/around `fork()` in multi-process setups | One-time, final teardown right before process exit or in test teardown |
+
+If you only need to release the Python objects you already have references to (and intend to
+keep using `qai_appbuilder` afterward), use `release_all()`. If you want to guarantee every
+native engine is gone and you are finished with `qai_appbuilder` for the rest of the process,
+use `_shutdown_all_models()`.
 
 ---
 

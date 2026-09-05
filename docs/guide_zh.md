@@ -34,6 +34,7 @@
    - 3.8 [完整示例：Stable Diffusion 文生图](#38-完整示例stable-diffusion-文生图)
    - 3.9 [PerfProfile - 性能模式管理](#39-perfprofile---性能模式管理)
    - 3.10 [Native 模式详解（高性能）](#310-native-模式详解高性能)
+   - 3.11 [模型生命周期与进程退出清理](#311-模型生命周期与进程退出清理)
 
 4. [C++ API 详解](#4-c-api-详解)
    
@@ -1392,6 +1393,76 @@ outputs = model.Inference([input_data])
 # 6. 输出也是原生类型
 print(f"Output dtype: {outputs[0].dtype}")  # 例如：float16
 ```
+
+### 3.11 模型生命周期与进程退出清理
+
+每个 `QNNContext` / `QNNContextProc` 都持有一个原生 QNN engine（在骁龙 NPU 上分配的 context、
+backend、log、device 等 handle）。本节说明这个原生资源如何释放，以及本版本内附带的
+"进程退出安全"修复带来了哪些新增内容。
+
+#### 正常清理：`del` / 超出作用域
+
+```python
+model = QNNContext(model_name, model_path)
+output = model.Inference([input_data])
+del model   # 立即、确定性地释放原生 engine
+```
+
+`del model`（或让 `model` 超出作用域被 CPython 回收）仍然是"用完立即释放该模型 NPU
+资源"的推荐方式。多次触发清理（显式 `del`、再次 `del`、或之后又跑一次 `gc.collect()`
+重新访问到它）是安全的——原生 teardown 现在是幂等的：不论对同一个模型的清理跑了多少次，
+只有**第一次**真正做事，之后每一次都是返回同一结果的空操作。
+
+#### 如果忘记 `del` 某个模型
+
+并**不需要**在进程退出前手动 `del` 每一个模型。从本版本开始，`qai_appbuilder` 会在 Python
+解释器退出时（通过 `atexit` 注册）自动 drain 并销毁所有仍然存活的模型。这正是用来修复此前
+"模型未销毁就退出进程"时可能触发的原生崩溃——不需要应用代码做任何改动即可获得这个保护，
+任何 import 了 `qai_appbuilder` 的进程都会自动受益。
+
+#### `_shutdown_all_models()` —— 显式的、进程级的关闭
+
+```python
+from qai_appbuilder.appbuilder import _shutdown_all_models
+
+_shutdown_all_models()   # 立即销毁所有剩余的 QNN engine
+```
+
+`_shutdown_all_models()` 是一个可选的显式 API，供想在进程退出**之前**强制完整销毁所有模型的
+应用/测试使用（例如测试套件结束时，或卸载插件之前）。使用前需要了解以下特性：
+
+| 特性 | 行为 |
+| --- | --- |
+| 幂等 | 全部关闭后再调用一次是安全的空操作。 |
+| **不可逆** | 一旦执行完成，原生 runtime 在该进程剩余生命周期内永久处于"已关闭"状态，无法重置回"运行中"。 |
+| 关闭后的影响 | 之后任何触碰 QNN 的调用——新建 `QNNContext`、对已有对象调用 `.Inference()`、
+  `SetLogLevel()`、`SetPerfProfileGlobal()`、`RelPerfProfileGlobal()`、元数据 getter
+  （`getInputShapes()` 等）——都会优雅失败（返回 `False` / 空结果），而不是抛异常或崩溃。 |
+| 重入 | 如果在同一线程内、从一个正处于某个 AppBuilder 调用内部的代码（例如 `Inference()`
+  内部调用到的自定义代码）调用它，会抛 `RuntimeError`——它不能安全地等待一个正在等待它自己
+  的操作。 |
+| 失败上报 | 如果有一个或多个 engine 未能干净地完成 teardown，会抛 `RuntimeError`（底层
+  原生资源仍会尽力释放；这样做是为了把失败暴露给调用方，而不是隐藏它）。 |
+
+> ⚠️ 由于这个关闭是进程级、永久性的，只应在应用**确实在该进程剩余生命周期内不再使用 QNN**
+> 时才调用 `_shutdown_all_models()`（例如紧接着 `sys.exit()` 之前，或测试跑完的最后一步）。
+> 不要在两段还各自需要创建/使用模型的不相关工作之间调用它——那种场景应改用对具体
+> `QNNContext` 对象的 `del`。
+
+#### `_shutdown_all_models()` 与 `release_all()` 的区别 —— 不要混淆
+
+`qai_appbuilder` 有两个名字相似但**不可互相替代**的清理辅助函数：
+
+| | `qai_appbuilder.release_all()` | `qai_appbuilder.appbuilder._shutdown_all_models()` |
+| --- | --- | --- |
+| 层级 | Python 侧辅助函数 | 原生（C++）runtime API |
+| 作用范围 | 仅限当前进程 Python 侧仍持有存活引用的 `QNNContext`/`QNNContextProc`/Genie context 对象 | 进程内注册的**所有**原生 QNN engine，无论 Python 端是否还持有引用 |
+| 之后可逆吗？ | 可以——之后仍可创建新的 `QNNContext` | **不可以**——永久结束该进程的原生 runtime（见上） |
+| 典型用途 | 多进程场景下 `fork()` 前后的尽力清理 | 进程退出前、或测试收尾时的一次性最终 teardown |
+
+如果你只需要释放当前手上还持有引用的 Python 对象（之后还打算继续使用
+`qai_appbuilder`），用 `release_all()`。如果你要确保所有原生 engine 都被销毁、并且之后
+这个进程不再使用 `qai_appbuilder`，用 `_shutdown_all_models()`。
 
 ---
 

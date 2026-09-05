@@ -126,6 +126,22 @@ public:
     std::vector<std::string> m_outputName;
 };
 
+/////////////////////////////////////////////////////////////////////////////
+/// Process-exit safety: drain all QNN engines before DLL/CRT teardown.
+/// A shutdown requested by a thread inside a guarded operation returns
+/// InActiveOperation rather than waiting for itself.
+/////////////////////////////////////////////////////////////////////////////
+enum class ShutdownAllModelsStatus {
+    Completed,
+    InActiveOperation,
+    Failed,
+};
+
+/// Initialize process-lifetime lifecycle stores during normal startup. This
+/// must run before any atexit or shutdown callback can execute.
+LIBAPPBUILDER_API void InitializeRuntimeLifecycleStores();
+
+extern "C" LIBAPPBUILDER_API ShutdownAllModelsStatus ShutdownAllModels() noexcept;
 
 /////////////////////////////////////////////////////////////////////////////
 /// Class TimerHelper declaration.

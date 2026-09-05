@@ -239,53 +239,111 @@ qnn_app::QnnInferenceEngine::QnnInferenceEngine(QnnFunctionPointers qnnFunctionP
   return;
 }
 
-qnn_app::QnnInferenceEngine::~QnnInferenceEngine() {
+// ---------------------------------------------------------------------------
+// Unified, idempotent teardown — the SINGLE code path for releasing all QNN
+// resources.  Both explicit ModelDestroyEx() and the destructor call this.
+// ---------------------------------------------------------------------------
+qnn_app::StatusCode qnn_app::QnnInferenceEngine::shutdown() noexcept {
+  bool expected = false;
+  if (!m_shutdownStarted.compare_exchange_strong(
+          expected, true, std::memory_order_acq_rel, std::memory_order_acquire)) {
+    std::unique_lock<std::mutex> lock(m_shutdownMutex);
+    m_shutdownCv.wait(lock, [this] { return m_shutdownComplete; });
+    return m_shutdownResult.load(std::memory_order_acquire);
+  }
+
+  StatusCode result = StatusCode::SUCCESS;
+  const auto complete = [this, &result]() noexcept {
+    m_shutdownResult.store(result, std::memory_order_release);
+    {
+      std::lock_guard<std::mutex> lock(m_shutdownMutex);
+      m_shutdownComplete = true;
+    }
+    m_shutdownCv.notify_all();
+    return result;
+  };
+
 #ifdef __linux__
-  // issue#97: this instance was inherited from a fork()ed parent. Do NOT call
-  // any QNN teardown APIs (contextFree, backendFree, profileFree, logFree) —
-  // they would operate on the parent's DSP/FastRPC session via inherited fds,
-  // corrupting the parent's state. The leaked resources are reclaimed by the
-  // OS when this child process exits.
-  if (m_creatorPid > 0 && getpid() != m_creatorPid) {
-      return;
-  }
+  // Inherited from a forked parent: never call QNN teardown in the child.
+  if (m_creatorPid > 0 && getpid() != m_creatorPid) return complete();
 #endif
-  // Free DLC resources using utility function
-  dlc_utils::freeDlcResources(m_qnnFunctionPointers.qnnSystemInterfaceHandle,
-                              m_dlcHandle,
-                              m_dlcLogHandle);
-  // Free Profiling object if it was created
-  if (nullptr != m_profileBackendHandle) {
-    QNN_DEBUG("Freeing backend profile object.");
-    if (QNN_PROFILE_NO_ERROR !=
-        m_qnnFunctionPointers.qnnInterface.profileFree(m_profileBackendHandle)) {
-      QNN_ERROR("Could not free backend profile handle.");
+
+  auto step = [&result](auto&& fn) noexcept {
+    try {
+      if (fn() != StatusCode::SUCCESS) result = StatusCode::FAILURE;
+    } catch (...) {
+      result = StatusCode::FAILURE;
     }
+  };
+
+  step([this] { return tearDownInputAndOutputTensors(); });
+  step([this] { return destroyPerformance(); });
+  step([this] { return freeGraphs(); });
+
+  if (m_isContextCreated || m_context != nullptr) {
+    step([this] { return freeContext(); });
+    m_context = nullptr;
+    m_isContextCreated = false;
   }
-  // Free context if not already done
-  if (m_isContextCreated) {
-    QNN_DEBUG("Freeing context");
-    if (QNN_CONTEXT_NO_ERROR !=
-        m_qnnFunctionPointers.qnnInterface.contextFree(m_context, nullptr)) {
-      QNN_ERROR("Could not free context");
+
+  // ── 5. Device ──
+  // Preserve AISW-149462 behaviour: freeDevice() intentionally does not
+  // release the shared device handle. Device ownership/refcount policy is
+  // independent of this exit-crash fix.
+  step([this] { return freeDevice(); });
+
+  // QAIRT 2.48: contextFree(context, profile) does not consume profile.
+  // Therefore it must precede profileFree(profile).
+  if (m_profileBackendHandle != nullptr) {
+    try {
+      if (m_qnnFunctionPointers.qnnInterface.profileFree == nullptr ||
+          m_qnnFunctionPointers.qnnInterface.profileFree(m_profileBackendHandle) != QNN_PROFILE_NO_ERROR) {
+        result = StatusCode::FAILURE;
+      }
+    } catch (...) {
+      result = StatusCode::FAILURE;
     }
+    m_profileBackendHandle = nullptr;
   }
-  m_isContextCreated = false;
-  // Terminate backend
-  if (m_isBackendInitialized && nullptr != m_qnnFunctionPointers.qnnInterface.backendFree) {
-    QNN_DEBUG("Freeing backend");
-    if (QNN_BACKEND_NO_ERROR != m_qnnFunctionPointers.qnnInterface.backendFree(m_backendHandle)) {
-      QNN_ERROR("Could not free backend");
+
+  if (m_isBackendInitialized || m_backendHandle != nullptr) {
+    try {
+      if (m_qnnFunctionPointers.qnnInterface.backendFree == nullptr ||
+          m_qnnFunctionPointers.qnnInterface.backendFree(m_backendHandle) != QNN_BACKEND_NO_ERROR) {
+        result = StatusCode::FAILURE;
+      }
+    } catch (...) {
+      result = StatusCode::FAILURE;
     }
+    m_backendHandle = nullptr;
+    m_isBackendInitialized = false;
   }
-  m_isBackendInitialized = false;
-  // Terminate logging in the backend
-  if (nullptr != m_qnnFunctionPointers.qnnInterface.logFree && nullptr != m_logHandle) {
-    if (QNN_SUCCESS != m_qnnFunctionPointers.qnnInterface.logFree(m_logHandle)) {
-      QNN_WARN("Unable to terminate logging in the backend.");
+
+  if (m_logHandle != nullptr) {
+    try {
+      if (m_qnnFunctionPointers.qnnInterface.logFree == nullptr ||
+          m_qnnFunctionPointers.qnnInterface.logFree(m_logHandle) != QNN_SUCCESS) {
+        result = StatusCode::FAILURE;
+      }
+    } catch (...) {
+      result = StatusCode::FAILURE;
     }
+    m_logHandle = nullptr;
   }
-  return;
+
+  try {
+    dlc_utils::freeDlcResources(m_qnnFunctionPointers.qnnSystemInterfaceHandle,
+                                m_dlcHandle, m_dlcLogHandle);
+  } catch (...) {
+    result = StatusCode::FAILURE;
+  }
+  m_dlcHandle = nullptr;
+  m_dlcLogHandle = nullptr;
+  return complete();
+}
+
+qnn_app::QnnInferenceEngine::~QnnInferenceEngine() noexcept {
+  (void)shutdown();
 }
 
 std::string qnn_app::QnnInferenceEngine::getBackendBuildId() {
@@ -442,7 +500,12 @@ qnn_app::StatusCode qnn_app::QnnInferenceEngine::createContext() {
 
 // Free context after done.
 qnn_app::StatusCode qnn_app::QnnInferenceEngine::freeContext() {
-  // clear graph info first
+  // clear graph info first.  NOTE: shutdown() (the only current caller)
+  // always runs freeGraphs() before freeContext(), which already frees
+  // m_graphsInfo and sets it to nullptr — so this block is a no-op in that
+  // path. Kept for safety if freeContext() is ever called independently
+  // of the unified shutdown() sequence; do not remove without confirming
+  // no caller still relies on it to free un-freed graph info.
   if (m_graphsInfo) {
     for (uint32_t gIdx = 0; gIdx < m_graphsCount; gIdx++) {
       if (m_graphsInfo[gIdx]) {
@@ -760,7 +823,7 @@ qnn_app::StatusCode qnn_app::QnnInferenceEngine::initializeProfileConfigOption(
     ProfilingOption profilingOption,
     Qnn_ProfileHandle_t profileHandle) {
     QNN_FUNCTION_ENTRY_LOG;
-    qnn_app::StatusCode returnStatus;
+    qnn_app::StatusCode returnStatus = qnn_app::StatusCode::FAILURE;
     QnnProfile_Config_t optraceConfig = QNN_PROFILE_CONFIG_INIT;
     if (profilingOption == qnn_app::ProfilingOption::OPTRACE) {
         optraceConfig.option = QNN_PROFILE_CONFIG_OPTION_ENABLE_OPTRACE;
@@ -793,7 +856,9 @@ qnn_app::StatusCode qnn_app::QnnInferenceEngine::terminateProfileHandle(
     if (nullptr != profileHandle && nullptr != qnnInterfaceHandle->profileFree) {
         QNN_DEBUG("Freeing backend profile object.");
         auto result = qnnInterfaceHandle->profileFree(profileHandle);
-        QNN_ERROR("Could not free backend profile handle.");
+        if (QNN_PROFILE_NO_ERROR != result) {
+            QNN_ERROR("Could not free backend profile handle.");
+        }
         returnStatus = verifyFailReturnStatus(result);
     }
     QNN_FUNCTION_EXIT_LOG;
@@ -1425,7 +1490,6 @@ qnn_app::StatusCode qnn_app::QnnInferenceEngine::createDevice() {
         auto qnnStatus =
           m_qnnFunctionPointers.qnnInterface.deviceCreate(m_logHandle, nullptr, &m_deviceHandle);
           if (QNN_SUCCESS != qnnStatus && QNN_DEVICE_ERROR_UNSUPPORTED_FEATURE != qnnStatus) {
-              // CPU backend may not support deviceCreate at all — treat as non-fatal and continue.
               QNN_WARN("CPU backend: deviceCreate returned error (0x%x), continuing without device handle", (unsigned int)qnnStatus);
               m_deviceHandle = nullptr;
           }
@@ -1479,12 +1543,20 @@ qnn_app::StatusCode qnn_app::QnnInferenceEngine::createDevice() {
 
 qnn_app::StatusCode qnn_app::QnnInferenceEngine::freeDevice() {
   QNN_INFO("qnn_app::QnnInferenceEngine::freeDevice begin\n");
-  return StatusCode::SUCCESS; //AISW-149462
-
+  // INTENTIONAL — AISW-149462 resource-lifetime workaround.  The device
+  // handle is shared process-wide across model engines; releasing it from one
+  // engine's teardown can invalidate the handle while another engine still
+  // uses it, producing use-after-free/double-release failures.  Keep device
+  // ownership process-scoped and let process termination reclaim it.  The
+  // refcount/free implementation below is retained for diagnosis only and is
+  // deliberately unreachable.  Do not remove this early return or convert the
+  // handle to per-engine ownership without redesigning and validating the
+  // complete shared-device lifecycle across concurrent models.
+  return StatusCode::SUCCESS;
   const uint32_t deviceId = m_multiCoreDeviceConfig.deviceId;
   std::string devKey = makeDeviceKey(deviceId, m_multiCoreDeviceConfig.coreIdVec);
 
-  bool needRealFree = true; 
+  bool needRealFree = true;
   std::lock_guard<std::mutex> lk(devicesHandlesMutex);
   auto it = devicesHandles.find(devKey);
   auto rc = devicesRefCounts.find(devKey);
@@ -1494,7 +1566,7 @@ qnn_app::StatusCode qnn_app::QnnInferenceEngine::freeDevice() {
       rc->second -= 1;
       QNN_INFO("Decreased refCount for key=%s (refCount=%u)\n",
                 devKey.c_str(), rc->second);
-      needRealFree = false; 
+      needRealFree = false;
     } else {
       rc->second = 0;
       devicesHandles.erase(it);
@@ -1513,6 +1585,7 @@ qnn_app::StatusCode qnn_app::QnnInferenceEngine::freeDevice() {
     }
   }
   return StatusCode::SUCCESS;
+
 }
 
 // executeGraphs() that is currently used by qnn-sample-app's main.cpp.
@@ -1685,21 +1758,38 @@ qnn_app::StatusCode qnn_app::QnnInferenceEngine::setupInputAndOutputTensors()
 // improve performance.
 qnn_app::StatusCode qnn_app::QnnInferenceEngine::tearDownInputAndOutputTensors()
 {
-  auto returnStatus = qnn::tools::iotensor::StatusCode::SUCCESS;
+  // A partially initialized engine may have no graph metadata or fewer
+  // tensor slots than m_graphsCount. Teardown must be safe from every
+  // constructor/initialization failure point because shutdown() is also the
+  // destructor path.
+  if (m_graphsInfo == nullptr || *m_graphsInfo == nullptr) {
+    m_inputTensors.clear();
+    m_outputTensors.clear();
+    return StatusCode::SUCCESS;
+  }
 
-  for (size_t graphIdx = 0; graphIdx < m_graphsCount; graphIdx++) {
+  auto returnStatus = qnn::tools::iotensor::StatusCode::SUCCESS;
+  const size_t initializedGraphs = std::min(
+      static_cast<size_t>(m_graphsCount),
+      std::min(m_inputTensors.size(), m_outputTensors.size()));
+
+  for (size_t graphIdx = 0; graphIdx < initializedGraphs; graphIdx++) {
     auto& graphInfo = (*m_graphsInfo)[graphIdx];
     Qnn_Tensor_t* inputs  = m_inputTensors[graphIdx];
     Qnn_Tensor_t* outputs = m_outputTensors[graphIdx];
-    returnStatus = m_ioTensor.tearDownInputAndOutputTensors(inputs, outputs, graphInfo.numInputTensors, graphInfo.numOutputTensors);
-    m_inputTensors[graphIdx]  = nullptr;
-    m_outputTensors[graphIdx]  = nullptr;
+    if (inputs != nullptr || outputs != nullptr) {
+      returnStatus = m_ioTensor.tearDownInputAndOutputTensors(
+          inputs, outputs, graphInfo.numInputTensors, graphInfo.numOutputTensors);
+    }
+    m_inputTensors[graphIdx] = nullptr;
+    m_outputTensors[graphIdx] = nullptr;
     if (qnn::tools::iotensor::StatusCode::SUCCESS != returnStatus) {
       QNN_ERROR("Error in tear down Input and output Tensors for graphIdx: %d", graphIdx);
       break;
     }
   }
-
+  m_inputTensors.clear();
+  m_outputTensors.clear();
   return static_cast<qnn_app::StatusCode>(returnStatus);
 }
 
@@ -2236,10 +2326,17 @@ qnn_app::StatusCode qnn_app::QnnInferenceEngine::executeGraphsBuffers(std::vecto
 
 // zw.
 qnn_app::StatusCode qnn_app::QnnInferenceEngine::freeGraphs() {
-  qnn_wrapper_api::freeGraphsInfo(&m_graphsInfo, m_graphsCount);
+  if (m_graphsInfo == nullptr || *m_graphsInfo == nullptr) {
+    m_graphsInfo = nullptr;
+    m_graphsCount = 0;
+    return StatusCode::SUCCESS;
+  }
+  const auto status = qnn_wrapper_api::freeGraphsInfo(&m_graphsInfo, m_graphsCount);
   m_graphsInfo = nullptr;
-
-  return StatusCode::SUCCESS;
+  m_graphsCount = 0;
+  return status == qnn_wrapper_api::MODEL_NO_ERROR
+             ? StatusCode::SUCCESS
+             : StatusCode::FAILURE;
 }
 
 qnn_app::StatusCode qnn_app::QnnInferenceEngine::initializeLog() {
@@ -2276,11 +2373,7 @@ qnn_app::StatusCode qnn_app::QnnInferenceEngine::initializePerformance() {
     Qnn_ErrorHandle_t infraStatus = m_qnnFunctionPointers.qnnInterface.deviceGetInfrastructure(&deviceInfra);
     if (QNN_SUCCESS != infraStatus) {
         if (QNN_DEVICE_ERROR_UNSUPPORTED_FEATURE == infraStatus) {
-            // Non-HTP backends (CPU) do not expose device power infrastructure.
-            // Set m_runInCpu=true so that destroyPerformance(), boostPerformance()
-            // and resetPerformance() short-circuit via their existing
-            // `if (true == m_runInCpu) return StatusCode::SUCCESS` guard —
-            // preventing a crash from uninitialized m_perfInfra/m_powerConfigId.
+            // Non-HTP backends do not expose device power infrastructure.
             m_runInCpu = true;
             return StatusCode::SUCCESS;
         }
@@ -2290,25 +2383,33 @@ qnn_app::StatusCode qnn_app::QnnInferenceEngine::initializePerformance() {
 
     QnnHtpDevice_Infrastructure_t* htpInfra = static_cast<QnnHtpDevice_Infrastructure_t*>(deviceInfra);
     m_perfInfra = htpInfra->perfInfra;
-    uint32_t deviceId = m_multiCoreDeviceConfig.deviceId; //0;
-    uint32_t coreId = m_multiCoreDeviceConfig.coreIdVec.empty()? 0 : *std::min_element(m_multiCoreDeviceConfig.coreIdVec.begin(), m_multiCoreDeviceConfig.coreIdVec.end()); //0;
-    QNN_INFO("qnn_app::QnnInferenceEngine::initializePerformance,deviceId=%u, coreId=%u\n",deviceId,coreId);
+    uint32_t deviceId = m_multiCoreDeviceConfig.deviceId;
+    uint32_t coreId = m_multiCoreDeviceConfig.coreIdVec.empty()
+                          ? 0
+                          : *std::min_element(m_multiCoreDeviceConfig.coreIdVec.begin(),
+                                              m_multiCoreDeviceConfig.coreIdVec.end());
+    QNN_INFO("qnn_app::QnnInferenceEngine::initializePerformance,deviceId=%u, coreId=%u\n", deviceId, coreId);
     if (QNN_SUCCESS != m_perfInfra.createPowerConfigId(deviceId, coreId, &m_powerConfigId)) {
         QNN_ERROR("Failure in createPowerConfigId()");
         return StatusCode::FAILURE;
     }
+    m_isPerformanceInitialized = true;
     sg_powerConfigIds.insert(m_powerConfigId);
     return StatusCode::SUCCESS;
 }
 
 qnn_app::StatusCode qnn_app::QnnInferenceEngine::destroyPerformance() {
-    if (true == m_runInCpu || m_isGpu)
+    if (!m_isPerformanceInitialized)
         return StatusCode::SUCCESS;
 
-    if (QNN_SUCCESS != m_perfInfra.destroyPowerConfigId(m_powerConfigId)) {
+    const auto status = m_perfInfra.destroyPowerConfigId(m_powerConfigId);
+    // Treat the opaque id as consumed regardless of backend status; retrying
+    // an indeterminate native handle risks double release.
+    m_isPerformanceInitialized = false;
+    sg_powerConfigIds.erase(m_powerConfigId);
+    if (QNN_SUCCESS != status) {
         QNN_ERROR("Failure in destroyPowerConfigId()");
         return StatusCode::FAILURE;
     }
-    sg_powerConfigIds.erase(m_powerConfigId);
     return StatusCode::SUCCESS;
 }

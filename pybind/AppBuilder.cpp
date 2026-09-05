@@ -10,6 +10,7 @@
 #include "common.h"
 #include "Lora.hpp"
 #include <ostream>
+#include <stdexcept>
 
 ShareMemory::ShareMemory(const std::string& share_memory_name, const size_t share_memory_size) {
     m_share_memory_name = share_memory_name;
@@ -235,6 +236,9 @@ bool QNNContext::ApplyBinaryUpdate(const std::vector<LoraAdapter>& lora_adapters
 }
 
 PYBIND11_MODULE(appbuilder, m) {
+    // Initialize all process-lifetime stores now, while normal module import
+    // can report allocation failure and before Python registers atexit work.
+    InitializeRuntimeLifecycleStores();
     m.doc() = R"pbdoc(
         Pybind11 AppBuilder Extension.
         -----------------------
@@ -317,5 +321,24 @@ PYBIND11_MODULE(appbuilder, m) {
 
     py::class_<LoraAdapter>(m, "LoraAdapter")
         .def(py::init<const std::string &, const std::vector<std::string> &>());
+
+    // Explicit shutdown API for applications and tests. A shutdown attempted
+    // from an active runtime operation cannot safely wait for itself.
+    m.def("_shutdown_all_models", []() {
+        const auto result = ShutdownAllModels();
+        if (result == ShutdownAllModelsStatus::InActiveOperation) {
+            throw std::runtime_error("_shutdown_all_models cannot run inside an active AppBuilder operation");
+        }
+        if (result == ShutdownAllModelsStatus::Failed) {
+            throw std::runtime_error("_shutdown_all_models failed while destroying one or more QNN engines");
+        }
+    }, "Destroy all remaining QNN engines. Idempotent.");
+
+    // Python atexit is best-effort only: it never throws during interpreter
+    // finalization, and all lifecycle stores were initialized above.
+    auto atexit_mod = py::module_::import("atexit");
+    atexit_mod.attr("register")(py::cpp_function([]() noexcept {
+        (void)ShutdownAllModels();
+    }));
 }
 
