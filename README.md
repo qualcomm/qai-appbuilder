@@ -74,6 +74,12 @@ every model ends up running on the same on-device NPU engine (`QNNContext` via
 
 <br>
 
+> ## 🎁 Sign in and get **10 million free tokens**
+>
+> **Just sign in with your Qualcomm account to unlock a free allocation of 10 million tokens and start using QAI AppBuilder.** No separate API key is required to try the built-in cloud AI experience. 🚀
+>
+> ✨ **One account. 10M tokens. Start building.**
+
 **Just want to use it? Two steps:**
 
 > **Platform:** Windows on Snapdragon (ARM64). No admin rights needed — `Setup.bat` automatically
