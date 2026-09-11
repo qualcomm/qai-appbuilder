@@ -1,89 +1,119 @@
 #!/bin/bash
-# Start.command — macOS launcher for QAIModelBuilder
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+# =============================================================================
+# Start.command — macOS launcher for QAI AppBuilder
 #
-# Double-click this file in Finder to launch the QAIModelBuilder server.
-# It mirrors the Windows Start.bat:
-#   1. Resolves the repo + app directory
-#   2. Creates a local .venv on first run and installs the package
-#      (pip install -e .) — subsequent runs reuse it
-#   3. Sets PYTHONPATH for the src layout
-#   4. Cleans up any stale endpoint from a previous run
-#   5. Opens the browser automatically once the server is ready
-#   6. Runs the supervisor in the foreground (Ctrl+C / close window stops it)
+# STARTER SCRIPT. Checks for existing Python environment, bootstraps if missing.
+#   1. Resolves the repo root directory
+#   2. Checks for existing venv (created by Setup.command)
+#   3. If no venv found, bootstraps minimal Python environment (fallback)
+#   4. Sets PYTHONPATH for the src layout
+#   5. Cleans up any stale endpoint from a previous run
+#   6. Launches the server in foreground (Ctrl+C / close window stops it)
 #
 # Usage:
 #   Double-click Start.command
 #   Start.command --reload      # hot-reload (development)
 #
-# NOTE: macOS has no Setup.bat equivalent. The first launch creates the venv
-# and installs from PyPI (the win_arm64 wheels in vendor/whl are Windows-only).
-# Requires Python >= 3.12 (managed 3.13.12 works).
+# NOTE: For full setup (Playwright, TTS, voice models), run Setup.command first.
+# NOTE: The WebUI needs frontend/dist to exist — run Build.command once before
+#       the first launch (and again after changing frontend source).
+# =============================================================================
 
 set -e
 
 # --- 1. Resolve directories ------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-APP_DIR="$SCRIPT_DIR/tools/qaimodelbuilder"
+REPO_ROOT="$SCRIPT_DIR"
 
-if [ ! -d "$APP_DIR" ]; then
-    echo "[ERROR] Cannot find app directory: $APP_DIR"
+if [ ! -f "$REPO_ROOT/pyproject.toml" ]; then
+    echo "[ERROR] Cannot find pyproject.toml in: $REPO_ROOT"
     exit 1
 fi
 
-cd "$APP_DIR"
+cd "$REPO_ROOT"
 
-# --- 2. Resolve Python (prefer .venv; fall back to a system >=3.12 for bootstrap) ---
-VENV_DIR="$APP_DIR/.venv"
+# --- 2. Check for existing venv or bootstrap fallback ----------------------
+VENV_DIR="$REPO_ROOT/envs/venv"
 VENV_PY="$VENV_DIR/bin/python3"
 
-PYTHON=""
 if [ -x "$VENV_PY" ]; then
-    # .venv already built — use its interpreter directly (no system-python check).
-    PYTHON="$VENV_PY"
+    echo "[INFO] Using existing Python venv: $VENV_DIR"
 else
-    # No .venv yet: find a Python >= 3.12 to create it with (managed 3.13.12 preferred).
-    for cand in \
-        "/Users/zhuxiaodong/.workbuddy/binaries/python/versions/3.13.12/bin/python3" \
-        "$(command -v python3.13 || true)" \
-        "$(command -v python3.12 || true)" \
-        "$(command -v python3 || true)"; do
-        [ -z "$cand" ] && continue
-        [ -x "$cand" ] || continue
-        ver="$("$cand" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)"
-        [ -z "$ver" ] && continue
-        if [ "$(printf '%s\n%s\n' "3.12" "$ver" | sort -V | head -n1)" = "3.12" ]; then
-            PYTHON="$cand"
-            break
+    echo "[INFO] No venv found. Bootstrapping minimal Python environment..."
+    echo "[INFO] (For full setup including Playwright/TTS/voice, run Setup.command)"
+    echo ""
+
+    PYTHON=""
+
+    # Strategy A: conda
+    if command -v conda >/dev/null 2>&1; then
+        CONDA_ENV_NAME="qaiappbuilder"
+        CONDA_BASE="$(conda info --base 2>/dev/null)"
+        CONDA_PY="$CONDA_BASE/envs/$CONDA_ENV_NAME/bin/python3"
+        if [ -x "$CONDA_PY" ]; then
+            PYTHON="$CONDA_PY"
+            echo "[INFO] Using existing conda environment: $CONDA_ENV_NAME"
+        else
+            echo "[INFO] conda found — creating environment '$CONDA_ENV_NAME' with Python 3.12..."
+            conda create -n "$CONDA_ENV_NAME" python=3.12 -y
+            PYTHON="$CONDA_PY"
         fi
-    done
+    fi
+
+    # Strategy B: system Python >= 3.12
     if [ -z "$PYTHON" ]; then
-        echo "[ERROR] Python >= 3.12 required to create .venv (found $(python3 --version 2>&1 || echo unknown)). Install Python 3.12+ first."
+        for cand in \
+            "$(command -v python3.13 || true)" \
+            "$(command -v python3.12 || true)" \
+            "$(command -v python3 || true)"; do
+            [ -z "$cand" ] && continue
+            [ -x "$cand" ] || continue
+            ver="$("$cand" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)"
+            [ -z "$ver" ] && continue
+            if [ "$(printf '%s\n%s\n' "3.12" "$ver" | sort -V | head -n1)" = "3.12" ]; then
+                PYTHON="$cand"
+                break
+            fi
+        done
+    fi
+
+    if [ -z "$PYTHON" ]; then
+        echo "[ERROR] Neither conda nor Python >= 3.12 found on this machine."
+        echo "        Please install conda (https://docs.conda.io) or Python 3.12+ first."
         exit 1
     fi
-    echo "[INFO] Using $PYTHON to bootstrap the venv (first run only)..."
-fi
 
-# --- 3. venv bootstrap (first run only) ------------------------------------
-if [ ! -x "$VENV_PY" ]; then
-    echo "[INFO] No .venv found at $VENV_DIR — creating one with $PYTHON ..."
+    echo "[INFO] Creating venv with $PYTHON ..."
+    mkdir -p "$REPO_ROOT/envs"
     "$PYTHON" -m venv "$VENV_DIR"
     "$VENV_DIR/bin/pip" install --upgrade pip
-    echo "[INFO] Installing QAIModelBuilder (pip install -e .) — this may take a few minutes..."
+    echo "[INFO] Installing QAI AppBuilder (pip install -e .)..."
     "$VENV_DIR/bin/pip" install -e .
+    echo "[OK]   Minimal environment ready."
+    echo ""
 fi
 
-# Always run with the venv interpreter from here on.
 PYTHON="$VENV_PY"
 
-# --- 4. Environment ---------------------------------------------------------
-export PYTHONPATH="$APP_DIR/src:$APP_DIR"
+# --- 3. Environment ---------------------------------------------------------
+export PYTHONPATH="$REPO_ROOT/src:$REPO_ROOT"
 
-# --- 5. Stale endpoint cleanup ---------------------------------------------
+# --- 4. Stale endpoint cleanup ---------------------------------------------
 echo "[INFO] Cleaning up any stale endpoint from a previous run..."
 "$PYTHON" -m apps.cli._endpoint_helper cleanup-stale >/dev/null 2>&1 || true
 
-# --- 6. Resolve display addresses + free the requested port (macOS) --------
-PORT=4099
+# --- 5. Resolve display addresses + free the requested port (macOS) --------
+# Read backend port from factory/config/ports.json (single source of truth,
+# same as Start.bat). Falls back to 8989 if the file is missing.
+PORTS_JSON="$REPO_ROOT/factory/config/ports.json"
+if [ -f "$PORTS_JSON" ]; then
+    PORT="$("$PYTHON" -c "import json,sys; print(json.load(open(sys.argv[1]))['backend'])" "$PORTS_JSON" 2>/dev/null || true)"
+fi
+PORT="${PORT:-8989}"
 HOST="0.0.0.0"   # bind on all interfaces so the LAN IP link is actually reachable
 
 # Best-effort LAN IPv4 (en0=Wi-Fi, en1/eth0=wired); falls back to first non-loopback.
@@ -100,10 +130,7 @@ get_lan_ip() {
 }
 LAN_IP="$(get_lan_ip)"
 
-# Free a TCP port on macOS before launch. The project's Python cleanup-stale
-# only sweeps ports on Windows, so on macOS a stale listener (e.g. a previous
-# QAI server still bound to $PORT) would otherwise force the supervisor onto a
-# fallback port. Mirrors the project's "a fresh start always wins" policy.
+# Free a TCP port on macOS before launch.
 free_port_mac() {
     local p="$1" pid
     pid="$(/usr/sbin/lsof -tiTCP:"$p" -sTCP:LISTEN 2>/dev/null | head -1)"
@@ -119,20 +146,21 @@ free_port_mac() {
     fi
 }
 
-# --- 7. Launch server (background) + show clickable WebUI URL --------------
+# --- 6. Launch server (background) + show clickable WebUI URL --------------
 echo ""
 echo "  +------------------------------------------+"
-echo "  |   QAI ModelBuilder  -  Starting...       |"
+echo "  |   QAI AppBuilder  -  Starting...         |"
 echo "  +------------------------------------------+"
 echo ""
 echo "[INFO] Launching server on port $PORT (bind $HOST) ..."
 echo "[INFO] Keep this window open. Close it (or press Ctrl+C) to stop the server."
+echo "[INFO] Browser will auto-open once the server is ready..."
 
 # Graceful shutdown: kill the supervisor + its API child when the window
 # closes or Ctrl+C is pressed.
 cleanup() {
     echo ""
-    echo "[INFO] Shutting down QAI ModelBuilder..."
+    echo "[INFO] Shutting down QAI AppBuilder..."
     [ -n "${SERVER_PID:-}" ] && kill "$SERVER_PID" 2>/dev/null
     pkill -f "apps.cli.serve" 2>/dev/null
     pkill -f "apps.api" 2>/dev/null
@@ -165,6 +193,11 @@ if [ -n "$EP_URL" ]; then
     echo ""
     echo "  ↑ 以上链接可直接点击，在浏览器中打开使用"
     echo "============================================================"
+    # Auto-open browser (same as Start.bat wait-and-open)
+    OPEN_URL="http://127.0.0.1:$ACT_PORT"
+    if command -v open >/dev/null 2>&1; then
+        open "$OPEN_URL" 2>/dev/null &
+    fi
 else
     echo ""
     echo "[WARN] 服务器在 90s 内未就绪，请查看上方日志排查问题。"
