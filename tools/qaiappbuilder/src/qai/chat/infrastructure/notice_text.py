@@ -46,6 +46,13 @@ def make_truncation_notice(
     the partial ``tool_calls`` block has been discarded by the caller
     (incomplete arguments would loop the agent forever).
 
+    This is an **output** cap and is distinct from an input context
+    overflow (the latter surfaces as a provider ``prompt_too_long`` 400
+    and is handled by the context-overflow recovery path, never as
+    ``finish_reason=length``).  The recovery advice therefore points at
+    ``max_tokens`` / task size first, and only falls back to history
+    compaction (``/compact``) when the history is genuinely the problem.
+
     Parameters
     ----------
     tool_name:
@@ -66,16 +73,22 @@ def make_truncation_notice(
         end of the assistant content stream without manual spacing.
     """
     if language == "zh":
-        head = "\n\n⚠️ **生成被截断**（已达到单次最大 token 限制）。"
+        head = "\n\n⚠️ **生成被截断**（达到单次**输出**的 token 上限，并非历史上下文超限）。"
         if tool_name:
             body = f"工具调用 `{tool_name}` 的参数不完整，已取消执行。"
         else:
             body = "本轮回复尚未完整结束。"
-        tail = "\n\n请使用 `/compact` 压缩历史记录后重试，或在新会话中重新描述任务。"
+        tail = (
+            "\n\n可尝试：调高该模型的 `max_tokens`、让回复更简短，或把任务拆小后重试。"
+            "`/compact` 压缩的是输入历史，仅在历史确实过长时才有帮助。"
+        )
         return head + body + tail
 
     # English fallback.
-    head = "\n\n⚠️ **Generation truncated** (max_tokens limit reached). "
+    head = (
+        "\n\n⚠️ **Generation truncated** "
+        "(per-call output token limit reached — not an input context overflow). "
+    )
     if tool_name:
         body = (
             f"The arguments for tool call `{tool_name}` were incomplete; "
@@ -84,8 +97,9 @@ def make_truncation_notice(
     else:
         body = "The response did not finish cleanly. "
     tail = (
-        "\n\nUse `/compact` to compress conversation history and retry, "
-        "or restart the task in a new conversation."
+        "\n\nTry raising this model's `max_tokens`, asking for a shorter reply, "
+        "or splitting the task. `/compact` compresses the input history and only "
+        "helps when the history is genuinely too long."
     )
     return head + body + tail
 
