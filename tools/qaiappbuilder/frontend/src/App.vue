@@ -37,6 +37,7 @@ import { useKeymap, type KeymapBinding } from "@/composables/keymap";
 import { isDesktopShell } from "@/utils/platform";
 import { useReboot } from "@/composables/useReboot";
 import { usePermissionDialog } from "@/composables/security/usePermissionDialog";
+import { usePermissionAlert } from "@/composables/security/usePermissionAlert";
 import { connectGlobalEvents } from "@/api/globalEvents";
 import { resumeConversationIfRunning } from "@/composables/chat/useActiveChatRunAttach";
 import { apiBaseUrl } from "@/api/base";
@@ -94,6 +95,12 @@ const { beginReboot } = useReboot();
 // `/api/events` SSE connection, so it forwards `permission_request` frames
 // into the shared permission-dialog queue and re-pulls未决项 on (re)connect.
 const permissionDialog = usePermissionDialog();
+// Background-tab cue for the permission queue: while the tab is hidden, a
+// growing pending count prefixes `document.title` with a `🔔 (N)` badge so
+// the user notices the authorization request from the Chrome tab strip
+// instead of the agent hanging silently off-screen. Cleared on visibility
+// restore / queue drain. See usePermissionAlert.ts.
+const permissionAlert = usePermissionAlert(permissionDialog.queueCount);
 let disconnectGlobalEvents: (() => void) | null = null;
 /** Guards against concurrent health probes on rapid SSE error bursts. */
 let _isRebootProbing = false;
@@ -755,6 +762,7 @@ function startAppMount(): void {
 onBeforeUnmount(() => {
   disconnectGlobalEvents?.();
   disconnectGlobalEvents = null;
+  permissionAlert.stop();
   stopSessionKeepAlive();
   if (typeof document !== "undefined") {
     document.removeEventListener("visibilitychange", onVisibilityChange);
