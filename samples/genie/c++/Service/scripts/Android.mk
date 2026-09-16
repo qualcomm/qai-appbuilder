@@ -46,6 +46,7 @@ SERVICE_SRC_FILES :=            ../src/GenieAPIService/src/chat_history/chat_his
                                     ../src/GenieAPIService/src/chat_request_handler/chat_request_handler.cpp \
                                     ../src/GenieAPIService/src/chat_request_handler/prompt_optimizer.cpp \
                                     ../src/GenieAPIService/src/chat_request_handler/message_pre_filter.cpp \
+                                    ../src/GenieAPIService/src/chat_request_handler/content_condenser.cpp \
                                     ../src/GenieAPIService/src/chat_request_handler/prompt_preparation_service.cpp \
                                     ../src/GenieAPIService/src/chat_request_handler/summary_cache.cpp \
                                     ../src/GenieAPIService/src/chat_request_handler/long_text_summarizer.cpp \
