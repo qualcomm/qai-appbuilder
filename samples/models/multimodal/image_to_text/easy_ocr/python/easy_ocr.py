@@ -5,6 +5,7 @@
 import sys
 import os
 import shutil
+import platform
 sys.path.append(".")
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "..", "..", "shared", "python"))
 import install
@@ -17,6 +18,33 @@ import argparse
 
 from PIL import ImageFont, ImageDraw, Image
 from torch.utils.data import DataLoader
+
+
+def _patch_scipy_linalg_windows_arm64_lapack_hang():
+    """Work around scipy 1.15.2 cgohlke win_arm64 wheel: scipy.linalg.inv/det
+    (LAPACK-backed) hang indefinitely on Windows ARM64 / Python 3.13.
+    skimage.color.colorconv calls scipy.linalg.inv() at import time, and it's
+    pulled in transitively by `import easyocr` -> easyocr.imgproc/craft_utils
+    -> skimage.io -> skimage.color, so importing easyocr hangs forever on
+    this platform without the patch. numpy.linalg (OpenBLAS-backed) is
+    unaffected and is a drop-in replacement for these small matrices.
+    No-op on any platform other than Windows ARM64.
+    """
+    if platform.system() != "Windows" or platform.machine().lower() not in ("arm64", "aarch64"):
+        return
+    try:
+        import numpy as _np
+        import scipy.linalg as _scipy_linalg
+    except ImportError:
+        return
+    _scipy_linalg.inv = lambda a, *a_, **kw: _np.linalg.inv(a)
+    _scipy_linalg.det = lambda a, *a_, **kw: _np.linalg.det(a)
+
+
+# Must run BEFORE `import easyocr` below: skimage.color.colorconv (imported
+# transitively) calls scipy.linalg.inv(...) at *module import time*, which
+# hangs forever on ARM64 Windows without this patch. See docstring above.
+_patch_scipy_linalg_windows_arm64_lapack_hang()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # EasyOCR imports with fallback support for ARM64
@@ -37,18 +65,50 @@ try:
     from easyocr.utils import CTCLabelConverter
     EASYOCR_AVAILABLE = True
 except ImportError as e:
-    import platform as _platform
-    _sys_info = f"Python {sys.version.split()[0]}, {_platform.machine()}, {_platform.system()}"
-    print(
-        f"[WARNING] EasyOCR is not available on this platform: [{_sys_info}]\n"
-        f"          Error: {e}\n"
-        f"\n"
-        f"          This is a known limitation on ARM64 Windows due to missing precompiled wheels.\n"
-        f"          Workarounds:\n"
-        f"          1. Use x64 Python environment: py -3.12-64 Multimodal\\Image_To_Text\\easy_ocr\\easy_ocr.py\n"
-        f"          2. Build easyocr from source (requires build tools)\n"
-        f"          3. Use alternative OCR solutions\n"
+    _sys_info = f"Python {sys.version.split()[0]}, {platform.machine()}, {platform.system()}"
+    _err_text = str(e)
+    # Distinguish "not installed at all" from "installed but a native dependency
+    # failed to load". The latter is common on ARM64 (WoS) when numpy and scipy
+    # come from different builds: scipy's Fortran BLAS extension (_fblas) then
+    # cannot find the matching OpenBLAS DLL and raises
+    #   "DLL load failed while importing _fblas: The specified module ..."
+    _dll_load_failure = (
+        "DLL load failed" in _err_text
+        or "_fblas" in _err_text
+        or "_flapack" in _err_text
+        or "openblas" in _err_text.lower()
     )
+    if _dll_load_failure:
+        print(
+            f"[WARNING] EasyOCR is installed but a native dependency failed to "
+            f"load in this environment: [{_sys_info}]\n"
+            f"          Error: {e}\n"
+            f"\n"
+            f"          This is NOT a missing 'easyocr' package. It almost always\n"
+            f"          means scipy and numpy came from mismatched builds, so\n"
+            f"          scipy's BLAS extension (_fblas) cannot find its OpenBLAS\n"
+            f"          DLL. On ARM64 Windows, numpy and scipy MUST come from the\n"
+            f"          same cgohlke wheel bundle.\n"
+            f"          Fix:\n"
+            f"          1. Re-run setup_env.bat (it installs numpy from the\n"
+            f"             cgohlke bundle so numpy/scipy stay in lockstep), or\n"
+            f"          2. Manually reinstall the matching numpy:\n"
+            f"             pip install --force-reinstall --no-deps <numpy win_arm64 wheel>\n"
+        )
+    else:
+        print(
+            f"[WARNING] EasyOCR could not be imported in this environment: [{_sys_info}]\n"
+            f"          Error: {e}\n"
+            f"\n"
+            f"          The 'easyocr' package (or one of its dependencies) is not\n"
+            f"          installed. EasyOCR runs on ARM64 Windows too — installing it\n"
+            f"          usually fixes this.\n"
+            f"          Fix: run these commands in order from the samples\\ folder,\n"
+            f"          then retry:\n"
+            f"          1. python models\\multimodal\\image_to_text\\easy_ocr\\python\\_setup_arm64_wheels.py\n"
+            f"          2. python -m pip install --no-deps easyocr\n"
+            f"          3. python -m pip install -r models\\multimodal\\image_to_text\\easy_ocr\\python\\requirements.txt\n"
+        )
     EASYOCR_AVAILABLE = False
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -125,7 +185,6 @@ def display_or_save_image(
 
 from qai_appbuilder import (QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile, QNNConfig, timer)
 from pathlib import Path
-import platform
 
 DETECTOR_ARGS = {
     "canvas_size": 2560,
@@ -322,12 +381,8 @@ def Init():
 def main(Image_Path: str = None):
     if not EASYOCR_AVAILABLE:
         print(
-            "[ERROR] Cannot run EasyOCR on this platform.\n"
-            "        EasyOCR requires precompiled wheels that are not available for ARM64 Windows.\n"
-            "\n"
-            "        Please use one of the following alternatives:\n"
-            "        1. Switch to x64 Python: py -3.12-64 Multimodal\\Image_To_Text\\easy_ocr\\easy_ocr.py\n"
-            "        2. Use a different OCR solution\n"
+            "[ERROR] Cannot run EasyOCR: the 'easyocr' package is not available in this environment.\n"
+            "        See the [WARNING] above for the exact missing module and the fix.\n"
         )
         return
 
@@ -395,7 +450,7 @@ def main(Image_Path: str = None):
 
 
 def SetQNNConfig():
-    QNNConfig.Config(Runtime.HTP, LogLevel.ERROR, ProfilingLevel.BASIC)
+    QNNConfig.Config(Runtime.HTP, LogLevel.WARN, ProfilingLevel.BASIC)
 
 def Release():
     global detector_model_obj

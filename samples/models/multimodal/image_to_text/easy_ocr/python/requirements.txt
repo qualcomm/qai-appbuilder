@@ -1,0 +1,43 @@
+# ---------------------------------------------------------------------
+# EasyOCR sample runtime dependencies (Windows ARM64 and x86/AMD64).
+#
+# IMPORTANT (ARM64 only): install this file AFTER running
+# _setup_arm64_wheels.py (via setup_env.bat). PyPI has no win_arm64 wheels
+# for numpy/opencv-python/scipy/scikit-image on Python 3.13, so those come
+# from the community cgohlke/win_arm64-wheels bundle instead. numpy MUST
+# come from that SAME bundle as scipy, or scipy's Fortran BLAS extension
+# (_fblas) fails to load ("DLL load failed while importing _fblas") -- see
+# the comment above _patch_scipy_linalg_windows_arm64_lapack_hang() in
+# easy_ocr.py for the related LAPACK-hang bug on this same platform.
+#
+# torch/torchvision are NOT listed here -- installed separately by
+# setup_env.bat from the PyTorch CPU wheel index (ARM64) or default PyPI
+# (x86/AMD64).
+# ---------------------------------------------------------------------
+
+# ── Core (installed from PyPI on both arches) ──
+qai_appbuilder
+pillow
+requests
+tqdm
+py3_wget
+transformers
+
+# ── numpy / opencv / scipy / scikit-image ──
+# x86/AMD64: plain PyPI wheels.
+# ARM64: installed separately by _setup_arm64_wheels.py from the cgohlke
+# bundle (NOT listed here to avoid pip pulling mismatched PyPI wheels).
+numpy; platform_machine != "ARM64"
+opencv-python; platform_machine != "ARM64"
+
+# ── EasyOCR ──
+# x86/AMD64: plain install (pulls its own scipy/scikit-image/shapely/pyclipper).
+# ARM64: installed with --no-deps by setup_env.bat (its native deps already
+# come from the cgohlke bundle above); the pure-Python deps below are
+# installed explicitly so --no-deps doesn't leave them missing.
+easyocr; platform_machine != "ARM64"
+imageio; platform_machine == "ARM64"
+tifffile; platform_machine == "ARM64"
+pyclipper; platform_machine == "ARM64"
+python-bidi; platform_machine == "ARM64"
+PyYAML; platform_machine == "ARM64"

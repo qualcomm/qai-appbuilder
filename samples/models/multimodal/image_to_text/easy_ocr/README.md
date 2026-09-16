@@ -29,11 +29,29 @@ Character data files (in `assets/Char/`):
 
 ## Requirements
 
-```
-pip install easyocr Pillow numpy
+```bash
+cd qai-appbuilder\samples
+pip install -r models\multimodal\image_to_text\easy_ocr\python\requirements.txt
 ```
 
-> **ARM64 Windows note:** Use `pip install easyocr --no-deps` if direct install fails.
+> **ARM64 Windows (WoS) note:** PyPI has no `win_arm64` wheels for
+> `numpy` / `opencv-python` / `scipy` / `scikit-image` on Python 3.13, so a
+> plain `pip install -r requirements.txt` cannot build them from source and
+> `easyocr` fails to import. Run the helper script **once, before**
+> installing `requirements.txt`, to pull matching prebuilt wheels from the
+> community `cgohlke/win_arm64-wheels` bundle and install `easyocr` itself
+> with `--no-deps` (so pip doesn't try to pull a mismatched `numpy` from
+> PyPI):
+> ```bash
+> python models\multimodal\image_to_text\easy_ocr\python\_setup_arm64_wheels.py
+> python -m pip install --no-deps easyocr
+> python -m pip install -r models\multimodal\image_to_text\easy_ocr\python\requirements.txt
+> ```
+> If `easy_ocr.py` prints `[WARNING] EasyOCR is installed but a native
+> dependency failed to load...`, it means `numpy` and `scipy` came from
+> mismatched builds (scipy's `_fblas` extension can't find its OpenBLAS
+> DLL) — re-run `_setup_arm64_wheels.py` to reinstall the matching `numpy`
+> from the same bundle as `scipy`.
 
 ## Quick Start
 

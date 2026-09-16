@@ -57,8 +57,15 @@ import threading
 # regardless of which stream a given runtime build writes it to.
 _FILTERED_FDS = ((1, "stdout"), (2, "stderr"))
 
-# Benign teardown line to drop. Kept specific so we never hide a real error.
-_DROP_PATTERN = re.compile(rb"Error 0x200: failed to close queue")
+# Benign lines to drop. Kept specific so we never hide a real error.
+#   - "Error 0x200: failed to close queue ...": benign fastRPC queue teardown.
+#   - "[ERROR][SetBufName][NSW] status=-1": benign HTP network-shared-weights
+#     buffer registration status seen during graph prepare; inference proceeds
+#     normally afterward.
+_DROP_PATTERN = re.compile(
+    rb"Error 0x200: failed to close queue"
+    rb"|\[ERROR\]\[SetBufName\]\[NSW\] status=-1"
+)
 
 _installed = False
 _lock = threading.Lock()
