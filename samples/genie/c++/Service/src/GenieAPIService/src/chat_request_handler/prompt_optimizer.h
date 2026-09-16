@@ -36,6 +36,37 @@ enum class AgentType {
     SUBAGENT,       // 子 agent：system prompt 中不包含 "agent=main"（包括空 prompt、任务上下文等）
 };
 
+// D3：预算分区类别。ComputeRelevanceTokenBudget() 原为单一总预算，一条超长工具输出可以
+// 把技能目录整段挤没。分区**仅在真的发生竞争时生效**（skills 与 tools 同时存在候选）：
+// 此时 kSkills 至少拿到 budget_partition.skills_floor_ratio，kTools 受 tools_ratio 软上限；
+// 单方存在（如既有的“只有 tools、没有 skills”场景）时两种 kind 都拿到完整总预算。
+// budget_partition.enabled=false 时逐字节回退为原先的单一总预算语义。
+enum class BudgetPartitionKind {
+    kSkills,
+    kTools
+};
+
+// D2：技能目录的三档渐进披露档位。原实现只有「全量展开 / 整条删除」两档，
+// 预算不够时技能直接从目录里消失（模型再也无法得知它存在）；三档之后
+// 预算耗尽只降档，只有连 kNameOnly 都放不进才真正丢弃。
+enum class SkillDetailLevel {
+    kNameOnly,   // L0：单行「- name -> path (一句话摘要)」
+    kSummary,    // L1：Path + description 摘要 + 触发条件/tags 行
+    kFull        // L2：Path + 完整 description（与 D2 引入前的渲染逐字节一致）
+};
+
+// D2：带相关性分数与披露档位的技能条目。tags 不是新协议面：服务端
+// <available_skills> XML 只解析 <name>/<description>/<location>，这里的 tags 是从
+// description 正文里提取出的「tags: …」/「标签: …」行。
+struct ScoredSkill {
+    std::string name;
+    std::string description;   // 对应 SkillInfo::use_for
+    std::string location;      // 对应 SkillInfo::path
+    std::string tags;          // 从 description 提取的 tags 段（可为空）
+    size_t score = 0;
+    SkillDetailLevel level = SkillDetailLevel::kFull;
+};
+
 // 注意：MessageCompressionConfig 和 OptimizedMessages 已迁移到 message_pre_filter.h
 
 class PromptOptimizer {
@@ -60,12 +91,17 @@ public:
 
     // 处理和优化工具定义。token_budget 为工具部分（含模板包装后）允许占用的
     // 最大 token 数（通常是 contextSize 减去已被 system 部分占用的 token 数），
-    // 压缩按 已知签名 -> 剥离注释 -> 极简签名 -> 按预算截断工具列表 逐级降级，
-    // 确保返回结果的 token 数始终不超过该预算。
+    // 压缩按 相关性筛选 -> 已知签名 -> 剥离注释 -> 极简签名 -> 按预算截断工具列表
+    // 逐级降级，确保返回结果的 token 数始终不超过该预算。
+    // request_data 用于提取本轮相关性关键词（BuildRelevanceKeywords），在 Tier1
+    // 压缩之前先按相关性缩小候选工具集合；未命中的工具整条不出现，而不是被压缩得
+    // 更简。默认空 object 保持向后兼容：拿不到 request_data 的调用点等价于
+    // "无法判断相关性"，FilterToolsByRelevance 会直接跳过过滤、保留全部候选。
     std::string OptimizeToolsPrompt(
         const std::string& tool_descriptions, 
         const std::string& tool_prompt_template,
-        size_t token_budget
+        size_t token_budget,
+        const nlohmann::ordered_json& request_data = nlohmann::ordered_json::object()
     );
 
     // 转换 OpenAI 格式的工具调用到内部格式
@@ -102,8 +138,12 @@ public:
     );
     
     // 将 OpenAI JSON 格式的工具定义转换为精简的 TypeScript 格式
+    // request_data（可选）：用于按本轮相关性筛选候选工具（复用 FilterToolsByRelevance），
+    // 默认空 object；调用方若已自行筛选过 tools（如 OptimizeHarmonyDeveloperMessage
+    // 内部），不传 request_data 即可让这里的过滤天然退化为直通，避免重复过滤
     std::string ConvertToolsToOptimizedTypeScript(
-        const nlohmann::ordered_json& tools
+        const nlohmann::ordered_json& tools,
+        const nlohmann::ordered_json& request_data = nlohmann::ordered_json::object()
     );
     
     // 获取优化统计信息
@@ -113,6 +153,26 @@ public:
         float savings_percent;
         IntentType detected_intent;
         std::string matched_skill;
+
+        // ── 供 PromptLedger 可观测性回报使用（不新增第二套统计，直接复用本结构）──
+        // tools_tier：OptimizeToolsPrompt 实际落到的降级档位，0=未经过该函数优化
+        //   （无 tools 或解析失败），1~4 对应 Tier1（已知签名/基础签名）~Tier4（硬性
+        //   预算截断）。由 BuildSystemContext 写入 skills_total/kept，OptimizeToolsPrompt
+        //   写入 tools_tier/total/kept，二者互不覆盖对方字段。
+        int tools_tier = 0;
+        size_t tools_total = 0;   // 相关性过滤后进入 Tier1~4 处理的候选工具总数
+        size_t tools_kept = 0;    // 最终实际保留在提示词里的工具数
+        size_t skills_total = 0;  // ExtractSkillsFromRequest 解析出的 SKILL 候选总数（全量，未经相关性过滤）
+        size_t skills_kept = 0;   // FilterSkillsByRelevance 筛选后实际保留的 SKILL 数
+        // D3：ComputeRelevanceTokenBudget(BudgetPartitionKind::kSkills) 实际算出的
+        // skills 分区预算（token），budget_partition.enabled=false 时等于单一总预算。
+        size_t skills_budget_tokens = 0;
+        // D2：三档渐进披露的各档技能数，三项之和恒等于 skills_kept。
+        // skill_disclosure.enabled=false（或 skill_catalog_format != "structured"）时
+        // 逐字节退化为 skills_l2 == skills_kept、L1/L0 恒为 0。
+        size_t skills_l2 = 0;
+        size_t skills_l1 = 0;
+        size_t skills_l0 = 0;
     };
     
     OptimizationStats GetLastStats() const { return last_stats_; }
@@ -128,7 +188,7 @@ private:
     OptimizationStats last_stats_;
     
     // 计算 token 数量
-    size_t CountTokens(const std::string& text);
+    size_t CountTokens(const std::string& text) const;
     
     // 从客户端请求中提取 Skills 信息
     RuntimeSkillMappings ExtractSkillsFromRequest(const nlohmann::ordered_json& request_data) const;
@@ -155,12 +215,96 @@ private:
     // 若请求中无 tools 数组，则原样返回配置文件值（不过滤）。
     std::string FilterToolsIntroByRequest(const std::string& tools_intro,
                                           const nlohmann::ordered_json& request_data) const;
-    
+
+    // ========== 相关性打分与预算贪心筛选 ==========
+    // 设备侧上下文极为有限（如 Omni 模型仅 2048 token），全量携带客户端传入的
+    // 全部 SKILL/工具定义会挤占宝贵的上下文空间。以下方法用于判定"本轮问题是否
+    // 真的用得上某个 skill/tool"：命中才保留在提示词里，未命中整条删除（不是
+    // 压缩，是不出现）。全部为纯字符串/规则匹配，不引入向量/embedding 语义匹配，
+    // 保证零额外推理延迟。
+
+    // 复用 PromptOptimizationConfig::recent_window 语义（与 message_pre_filter 中
+    // "最近 N 条非 system 消息视为新消息"一致），从 request_data["messages"] 里
+    // 提取该窗口内 role=="user" 的消息文本（content 可能是字符串也可能是 OpenAI
+    // 多段数组，统一通过 SecurityUtils::ExtractMessageContentText 读取），小写化后
+    // 按非字母数字字符（含中文/全角标点、空格等）为边界切词，返回去重后的关键词列表。
+    std::vector<std::string> BuildRelevanceKeywords(const nlohmann::ordered_json& request_data) const;
+
+    // 对 name/description 与 keywords 打分：
+    // - name 按 '-'/'_' 拆分成子词，每个子词若与任一 keyword 发生子串双向匹配
+    //   （大小写不敏感）则命中，命中一次加 relevance_filter.name_token_weight；
+    // - description 做关键词命中计数（子串匹配），每命中一个 keyword 加
+    //   relevance_filter.description_keyword_weight。
+    // - D4：tags 非空时额外做一轮关键词命中计数，每命中一个加 relevance_filter.tag_weight
+    //   （tag_weight=0 或 tags 为空时逐字节等价于 D4 引入前）。
+    // 返回总分，0 表示完全不相关。
+    size_t ScoreRelevance(const std::string& name, const std::string& description,
+                          const std::vector<std::string>& keywords,
+                          const std::string& tags = std::string()) const;
+
+    // 对 all_skills 中每个 SKILL 用 ScoreRelevance() 打分，过滤掉零分项，按分数
+    // 降序排序后按 token_budget 贪心保留，超预算即停止。all_skills 为空时返回空集；
+    // keywords 为空时（通常意味着调用方未提供/本轮窗口内没有任何用户文本，视为
+    // "无法判断相关性"而非"确定无关"）直接跳过过滤、原样返回 all_skills 全量，
+    // 避免误伤——这是 Step2 接入调用链时对 Step1 空 keywords 语义的唯一微调。
+    RuntimeSkillMappings FilterSkillsByRelevance(const RuntimeSkillMappings& all_skills,
+                                                 const std::vector<std::string>& keywords,
+                                                 size_t token_budget) const;
+
+    // D2：按相关性分数 + skills 分区预算给每个技能分配披露档位。
+    // 与 FilterSkillsByRelevance 的关键区别：预算耗尽时**降档**（L2→L1→L0）而不是
+    // 整条删除，只有连 L0 单行都放不进预算时才真正丢弃。零分丢弃与
+    // zero_hit_keep_all 全零分兜底的语义与 FilterSkillsByRelevance 完全一致（不另起一套
+    // 判据）；区别只在“保留下来的那些怎么展示”。返回值按分数降序（同分按名称）。
+    std::vector<ScoredSkill> AssignSkillDetailLevels(const RuntimeSkillMappings& all_skills,
+                                                     const std::vector<std::string>& keywords,
+                                                     size_t skills_token_budget) const;
+
+    // D2：渲染单条技能在指定档位下的目录文本（含末尾换行）。
+    std::string RenderSkillEntry(const ScoredSkill& skill) const;
+
+    // D2：按档位渲染整份结构化 Skill Catalog（头部说明与
+    // BuildStructuredSkillCatalog 完全一致，只是条目体按档位变化）。
+    std::string BuildLeveledSkillCatalog(const std::vector<ScoredSkill>& skills) const;
+
+    // 对 tools_array（OpenAI tools 格式）中每个工具用 ScoreRelevance() 打分，
+    // 过滤掉零分项，按分数降序排序后按 token_budget 贪心保留 Top-K，返回筛选后的
+    // json 数组（保持原始 tool 对象结构不变，只是子集）。tools_array 为空时返回
+    // 空数组；keywords 为空时同 FilterSkillsByRelevance，直接跳过过滤、原样返回
+    // tools_array 全量。
+    nlohmann::ordered_json FilterToolsByRelevance(const nlohmann::ordered_json& tools_array,
+                                                  const std::vector<std::string>& keywords,
+                                                  size_t token_budget) const;
+
+    // 计算相关性筛选可用的 token 预算：复用现有"可用上下文空间"推导（context_size
+    // 减去按 output_reserve_ratio 预留的输出空间），与 model_input_builder.h 中
+    // 计算 OptimizeToolsPrompt 的 tools_budget 采用的是同一套已有概念，避免为
+    // 相关性筛选引入新的强耦合硬编码魔数。供 BuildSystemContext/
+    // BuildDynamicToolsIntro/FilterToolsIntroByRequest/OptimizeHarmonyDeveloperMessage/
+    // ConvertToolsToOptimizedTypeScript 共用（这些函数自身未接收显式 token_budget
+    // 参数，需要自行推导）。
+    // D3：kind 默认 kTools（历史上大多数调用点都是工具预算）；skills 路径显式传 kSkills。
+    // request_data 用于判定是否真的发生了预算竞争（skills 与 tools 同时存在候选）；
+    // 传 nullptr 或无竞争时直接返回单一总预算，绝不无故削减 D3 引入前的既有行为。
+    size_t ComputeRelevanceTokenBudget(BudgetPartitionKind kind = BudgetPartitionKind::kTools,
+                                       const nlohmann::ordered_json* request_data = nullptr) const;
+
+    // D3：预算竞争判定——仅当 system prompt 里带了 <available_skills> 目录
+    // **且** 请求带了非空 tools 数组时才算竞争。单方存在时不分区，避免把
+    // “17 工具 Schema、无技能”这类既有场景的工具预算静默削到 tools_ratio。
+    bool HasBudgetContention(const nlohmann::ordered_json& request_data) const;
+
     // ========== 共享辅助函数 ==========
     
     // 生成统一的系统上下文内容（供普通模型和 Harmony 模型复用）
     // [重构] 接受 request_data，以便从客户端请求中提取 Skill 描述
-    std::string BuildSystemContext(const nlohmann::ordered_json& request_data);
+    // out_intent/out_matched_skill（可选，默认 nullptr）：将本轮相关性筛选得到的
+    // 意图判定结果回传给调用方（OptimizeSystemPrompt/OptimizeSubagentSystemPrompt
+    // 用它们填充 OptimizationStats::detected_intent/matched_skill），调用方不关心
+    // 时传 nullptr 即可
+    std::string BuildSystemContext(const nlohmann::ordered_json& request_data,
+                                   IntentType* out_intent = nullptr,
+                                   std::string* out_matched_skill = nullptr);
     
     // ========== Harmony 格式辅助函数 ==========
     

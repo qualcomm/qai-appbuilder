@@ -358,8 +358,15 @@ if (MSVC)
         list(APPEND EXTERNAL_BIN ${CMAKE_BINARY_DIR}/adreno-opencl-kernels-src/adreno-opencl-kernels.dll)
 
         # ggml-cpu 后端在 ARM64 上不支持 MSVC(cl.exe),需要 Clang,与 MNN 保持一致的 Ninja + clang-cl 工具链
+        # Libllama.cpp 改为从 Qualcomm fork(github.com/qualcomm/llama.cpp)拉取并 pin 到固定 commit，
+        # 承载该 fork 新增的投机解码(speculative decoding)API；与 Libmbedtls 一致，把源码 clone 到
+        # 独立的 <name>-src 目录，不再复用静态 vendor 的 ${G_EXTERNAL_DIR}/llama.cpp。
+        set(LLAMACPP_SRC_DIR ${CMAKE_BINARY_DIR}/llama-cpp-src)
         ExternalProject_Add(Libllama.cpp
-                SOURCE_DIR ${G_EXTERNAL_DIR}/llama.cpp
+                GIT_REPOSITORY https://github.com/qualcomm/llama.cpp.git
+                GIT_TAG f8efe8675
+                GIT_SHALLOW ON
+                SOURCE_DIR ${LLAMACPP_SRC_DIR}
                 BINARY_DIR ${CMAKE_BINARY_DIR}/llama-cpp-build
                 DEPENDS OpenCLICDLoader
                 CMAKE_GENERATOR Ninja
@@ -378,6 +385,10 @@ if (MSVC)
                 -DGGML_OPENCL=ON
                 # 预编译 Adreno OpenCL kernel 支持，详见 playbook 3.3.5
                 -DGGML_OPENCL_USE_ADRENO_BIN_KERNELS=ON
+                # fork README 第7节要求的 Adreno OpenCL 运行时 kernel 支持(与上面预编译 bin kernel 并存)
+                -DGGML_OPENCL_USE_ADRENO_KERNELS=ON
+                -DGGML_OPENCL_EMBED_KERNELS=ON
+                -DGGML_OPENCL_TARGET_VERSION=300
                 -DLLAMA_CURL=OFF
                 -DLLAMA_HTTPLIB=OFF
                 -DLLAMA_BUILD_SERVER=OFF
@@ -390,10 +401,10 @@ if (MSVC)
                 INSTALL_COMMAND ""
         )
         list(APPEND EXTERNAL_HEADER_PATH
-                ${G_EXTERNAL_DIR}/llama.cpp/include
-                ${G_EXTERNAL_DIR}/llama.cpp/common
-                ${G_EXTERNAL_DIR}/llama.cpp/ggml/include
-                ${G_EXTERNAL_DIR}/llama.cpp/tools/mtmd
+                ${LLAMACPP_SRC_DIR}/include
+                ${LLAMACPP_SRC_DIR}/common
+                ${LLAMACPP_SRC_DIR}/ggml/include
+                ${LLAMACPP_SRC_DIR}/tools/mtmd
         )
         list(APPEND EXTERNAL_LIB_PATH
                 ${CMAKE_BINARY_DIR}/llama-cpp-build/src

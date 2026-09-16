@@ -10,6 +10,7 @@
 #include "utils.h"
 #include "def.h"
 #include "model_manager.h"
+#include "../context/llama_speculative_config.h"
 #include "../context/qnn/genie.h"
 #include "../context/mnn.h"
 #include "../context/llama_cpp.h"
@@ -578,9 +579,11 @@ struct ModelManager::ModeVerifier
 
             // 模型自身 config.json 是可选的：缺失/为空/解析失败/不含 "backend" 键都静默忽略，
             // 只有明确写 {"backend": "cpu"} 时才强制走 CPU（与 service_config.json 的 device 是"或"关系）。
+            // j 声明在 try 外部：draft_model 字段块解析（见下方）需要复用同一份已解析的 json，
+            // 避免 Step 4 的投机解码路径重复解析这份 config.json。
+            json j;
             try
             {
-                json j;
                 std::string trimmed = self_->config_file_;
                 size_t start = trimmed.find_first_not_of(" \t\n\r");
                 if (start != std::string::npos)
@@ -620,6 +623,30 @@ struct ModelManager::ModeVerifier
                 My_Log{My_Log::Level::kDebug}
                         << "[GGUFVerify] Failed to read optional backend field from model config.json, ignored and continue"
                         << std::endl;
+            }
+
+            // draft_model 字段块存在即触发投机解码路径的硬件门槛检查（Step 3）：不含该字段的
+            // 模型（现有全部 GGUF 模型）完全不触发下面这段新增逻辑，零行为变化。
+            llama_speculative::DraftModelConfig draft_config = llama_speculative::DraftModelConfig::ParseFrom(j);
+            if (draft_config.present)
+            {
+                uint64_t total_physical = llama_speculative::GetTotalPhysicalMemoryBytes();
+                if (!llama_speculative::MeetsPhysicalMemoryThreshold(total_physical, llama_speculative::kDraftModelMinPhysicalMemoryBytes))
+                {
+                    std::string detail = "insufficient total physical memory for speculative decoding "
+                            "(draft_model) model: required>=" + std::to_string(llama_speculative::kDraftModelMinPhysicalMemoryBytes) +
+                            " bytes, total_physical=" + std::to_string(total_physical) + " bytes";
+                    My_Log{My_Log::Level::kError} << "[GGUFVerify] " << detail << std::endl;
+                    self_->SetLastLoadFailureReason(ModelManager::LoadFailureReason::kInsufficientMemory, detail);
+                    return nullptr;
+                }
+
+                My_Log{} << "[GGUFVerify] draft_model declared: path=" << draft_config.path
+                          << ", spec_type=" << draft_config.spec_type
+                          << ", spec_draft_n_max=" << draft_config.spec_draft_n_max
+                          << ", spec_draft_p_min=" << draft_config.spec_draft_p_min
+                          << ", required=" << draft_config.required
+                          << ", total_physical_memory_bytes=" << total_physical << std::endl;
             }
 
             if (requested_device == "cpu")
@@ -1549,7 +1576,7 @@ bool ModelManager::InitializeConfig(bool load)
                         prompt_optimization_config_.emergency_truncation.enabled =
                                 et.value("enabled", true);
                         prompt_optimization_config_.emergency_truncation.max_truncation_ratio =
-                                et.value("max_truncation_ratio", 0.40f);
+                                et.value("max_truncation_ratio", 0.95f);
                         prompt_optimization_config_.emergency_truncation.safety_margin_tokens =
                                 et.value("safety_margin_tokens", 30);
                         My_Log{} << "[Config] emergency_truncation loaded: "
@@ -1558,6 +1585,51 @@ bool ModelManager::InitializeConfig(bool load)
                                  << prompt_optimization_config_.emergency_truncation.max_truncation_ratio
                                  << ", safety_margin_tokens="
                                  << prompt_optimization_config_.emergency_truncation.safety_margin_tokens
+                                 << std::endl;
+                    }
+
+                    // [fidelity] 保真截断配置（旧配置文件中没有该节时使用默认值，不报错）
+                    if (po.contains("fidelity") && po["fidelity"].is_object())
+                    {
+                        const auto &fid = po["fidelity"];
+                        auto &fid_cfg = prompt_optimization_config_.fidelity;
+                        fid_cfg.budget_unit = fid.value("budget_unit", std::string("tokens"));
+                        fid_cfg.preserve_tail = fid.value("preserve_tail", true);
+                        fid_cfg.tail_ratio = fid.value("tail_ratio", 0.30);
+                        fid_cfg.extract_high_signal = fid.value("extract_high_signal", true);
+                        fid_cfg.drop_placeholder = fid.value("drop_placeholder", true);
+                        fid_cfg.json_head_items = fid.value("json_head_items", (size_t) 3);
+                        fid_cfg.json_tail_items = fid.value("json_tail_items", (size_t) 1);
+                        fid_cfg.max_token_probe_per_message = fid.value("max_token_probe_per_message", (size_t) 8);
+                        // P1：CJK 感知 byte↔token 换算比例（单位 UTF-8 字节）；均改回 4.0 即逐字节回退到旧的 length()/4 估算
+                        fid_cfg.cjk_bytes_per_token = fid.value("cjk_bytes_per_token", 3.0);
+                        fid_cfg.ascii_bytes_per_token = fid.value("ascii_bytes_per_token", 4.0);
+                        My_Log{} << "[Config] fidelity loaded: "
+                                 << "budget_unit=" << fid_cfg.budget_unit
+                                 << ", preserve_tail=" << fid_cfg.preserve_tail
+                                 << ", tail_ratio=" << fid_cfg.tail_ratio
+                                 << ", extract_high_signal=" << fid_cfg.extract_high_signal
+                                 << ", drop_placeholder=" << fid_cfg.drop_placeholder
+                                 << ", json_head_items=" << fid_cfg.json_head_items
+                                 << ", json_tail_items=" << fid_cfg.json_tail_items
+                                 << ", max_token_probe_per_message=" << fid_cfg.max_token_probe_per_message
+                                 << ", cjk_bytes_per_token=" << fid_cfg.cjk_bytes_per_token
+                                 << ", ascii_bytes_per_token=" << fid_cfg.ascii_bytes_per_token
+                                 << std::endl;
+                    }
+
+                    // [budget_partition] D3：skills/tools 竞争时才生效的分区预算配置（旧配置文件中没有该节时使用默认值，不报错）
+                    if (po.contains("budget_partition") && po["budget_partition"].is_object())
+                    {
+                        const auto &bp = po["budget_partition"];
+                        auto &bp_cfg = prompt_optimization_config_.budget_partition;
+                        bp_cfg.enabled = bp.value("enabled", true);
+                        bp_cfg.skills_floor_ratio = bp.value("skills_floor_ratio", 0.15);
+                        bp_cfg.tools_ratio = bp.value("tools_ratio", 0.35);
+                        My_Log{} << "[Config] budget_partition loaded: "
+                                 << "enabled=" << bp_cfg.enabled
+                                 << ", skills_floor_ratio=" << bp_cfg.skills_floor_ratio
+                                 << ", tools_ratio=" << bp_cfg.tools_ratio
                                  << std::endl;
                     }
 
@@ -1688,6 +1760,60 @@ bool ModelManager::InitializeConfig(bool load)
                             prompt_optimization_config_.system_prompts.few_shot_no_skill_user_input = sp.value("few_shot_no_skill_user_input", "What skills do you have? / 有哪些skills?");
                         if (sp.contains("few_shot_no_skill_response"))
                             prompt_optimization_config_.system_prompts.few_shot_no_skill_response = sp.value("few_shot_no_skill_response", "I have the following skills: [list from catalog above]. No tool call needed.");
+                    }
+
+                    // [relevance_filter] 相关性过滤配置（旧配置文件中没有该节时使用默认值，不报错）
+                    if (po.contains("relevance_filter") && po["relevance_filter"].is_object())
+                    {
+                        const auto &rf = po["relevance_filter"];
+                        prompt_optimization_config_.relevance_filter.enabled =
+                                rf.value("enabled", true);
+                        prompt_optimization_config_.relevance_filter.name_token_weight =
+                                rf.value("name_token_weight", (size_t) 3);
+                        prompt_optimization_config_.relevance_filter.description_keyword_weight =
+                                rf.value("description_keyword_weight", (size_t) 1);
+                        prompt_optimization_config_.relevance_filter.zero_hit_keep_all =
+                                rf.value("zero_hit_keep_all", true);
+                        prompt_optimization_config_.relevance_filter.cjk_bigram =
+                                rf.value("cjk_bigram", true);
+                        // D4：跨语言别名表 + tags 参与打分（缺字段时按结构体默认值工作）
+                        prompt_optimization_config_.relevance_filter.intent_aliases_enabled =
+                                rf.value("intent_aliases_enabled", true);
+                        prompt_optimization_config_.relevance_filter.tag_weight =
+                                rf.value("tag_weight", (size_t) 2);
+                        My_Log{} << "[Config] relevance_filter loaded: "
+                                 << "enabled=" << prompt_optimization_config_.relevance_filter.enabled
+                                 << ", name_token_weight=" << prompt_optimization_config_.relevance_filter.name_token_weight
+                                 << ", description_keyword_weight=" << prompt_optimization_config_.relevance_filter.description_keyword_weight
+                                 << ", zero_hit_keep_all=" << prompt_optimization_config_.relevance_filter.zero_hit_keep_all
+                                 << ", cjk_bigram=" << prompt_optimization_config_.relevance_filter.cjk_bigram
+                                 << ", intent_aliases_enabled=" << prompt_optimization_config_.relevance_filter.intent_aliases_enabled
+                                 << ", tag_weight=" << prompt_optimization_config_.relevance_filter.tag_weight
+                                 << std::endl;
+                    }
+
+                    // [skill_disclosure] D2：技能目录三档渐进披露（旧配置文件中没有该节时使用默认值，不报错）
+                    if (po.contains("skill_disclosure") && po["skill_disclosure"].is_object())
+                    {
+                        const auto &sd = po["skill_disclosure"];
+                        auto &sd_cfg = prompt_optimization_config_.skill_disclosure;
+                        sd_cfg.enabled = sd.value("enabled", true);
+                        sd_cfg.l2_top_k = sd.value("l2_top_k", (size_t) 2);
+                        sd_cfg.l1_top_k = sd.value("l1_top_k", (size_t) 6);
+                        sd_cfg.l1_summary_max_chars = sd.value("l1_summary_max_chars", (size_t) 240);
+                        sd_cfg.l0_summary_max_chars = sd.value("l0_summary_max_chars", (size_t) 80);
+                        // 缺字段时一律取结构体默认值（Step 5 收口后为 false），
+                        // 不在此处硬编码 true —— 否则「旧配置文件写了 skill_disclosure
+                        // 节但没写 tie_aware_l2」会拿到与出厂默认相反的行为。
+                        sd_cfg.tie_aware_l2 = sd.value("tie_aware_l2", sd_cfg.tie_aware_l2);
+                        My_Log{} << "[Config] skill_disclosure loaded: "
+                                 << "enabled=" << sd_cfg.enabled
+                                 << ", l2_top_k=" << sd_cfg.l2_top_k
+                                 << ", l1_top_k=" << sd_cfg.l1_top_k
+                                 << ", l1_summary_max_chars=" << sd_cfg.l1_summary_max_chars
+                                 << ", l0_summary_max_chars=" << sd_cfg.l0_summary_max_chars
+                                 << ", tie_aware_l2=" << sd_cfg.tie_aware_l2
+                                 << std::endl;
                     }
 
                     // 加载 spawn_guard 配置
@@ -2198,6 +2324,34 @@ void ModelManager::UnloadModelsByDevice(const std::string &device)
             // 若 genieModelHandle 是最后一个持有者，GenieContext 在此处析构。
             Clean();
             model_name_.clear();
+        }
+        else
+        {
+            // 名字匹配不足以判定全局句柄是否指向被卸载的模型，必须再按**指针身份**兜底判定：
+            // ModeVerifier::TryCreate() 的三个 Verifier（GenieContext/MNNContext/LLAMACppBuilder）
+            // 都会无条件执行 `self_->genieModelHandle = std::make_shared<...>(...)`，把全局句柄改指
+            // 到刚创建的 context 上；而多模型动态切换路径 LoadModel() 只往 loaded_models_ 里注册，
+            // 从不更新 model_name_（model_name_ 始终是 -c 主模型/最后一次 LoadModelByName 的名字）。
+            // 于是 genieModelHandle 与 model_name_ 会指向两个不同的模型，上面的名字判定必然漏判：
+            // 被卸载模型的最后一份引用留在 genieModelHandle 上，ContextBase 析构不发生（日志里看不到
+            // "the context is being destroyed"），GPU/CPU 显存/内存不会在加载下一个模型前归还。
+            // 实测后果：同进程内 GPU GGUF 模型 A→B→A 三轮切换，第三轮 A 的 target 权重仍能上 GPU，
+            // 但紧接着 draft(DFlash2) 的 1011 MiB OpenCL 分配会因 B 残留的约 12GB 未释放而失败
+            // （err=-5），静默退化到 CPU 推理。
+            // 这里刻意**不**调用 Clean()：Clean() 会连带清空 qnn_embedding_（可能仍被驻留的 NPU
+            // 多模态模型使用）并额外 sleep，对 gpu/cpu 卸载路径是过度动作；只需释放这一份引用。
+            for (const auto &m: removed_models)
+            {
+                if (m && m->context == genieModelHandle)
+                {
+                    My_Log{My_Log::Level::kWarning}
+                            << "[UnloadModelsByDevice] global genieModelHandle pointed to the unloaded model"
+                            << " (model_name_='" << model_name_ << "', device=" << device
+                            << "), releasing it to free hardware memory" << std::endl;
+                    genieModelHandle = nullptr;
+                    break;
+                }
+            }
         }
     }
     // 在锁外、函数返回前，显式析构所有被移除的模型（释放硬件资源）。

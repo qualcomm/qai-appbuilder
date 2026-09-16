@@ -414,6 +414,89 @@ struct PromptOptimizationConfig {
     float tool_call_temperature = 0.1f;
     SystemPromptsConfig system_prompts;
 
+    // ── 相关性过滤：按本轮问题字符串/关键词匹配筛选 SKILL/工具 ──────
+    // 只有名称或描述关键词与本轮用户提问发生字符串匹配的 SKILL/工具，才会保留在
+    // 提示词里；未命中整条删除。纯字符串规则匹配，不引入向量/embedding 语义匹配，
+    // 零额外推理延迟。enabled=false 时完全回退到"全量携带"行为，便于快速回滚。
+    struct RelevanceFilterConfig {
+        bool enabled = true;                     // 总开关
+        size_t name_token_weight = 3;            // 名称子词命中权重
+        size_t description_keyword_weight = 1;   // 描述关键词命中权重
+        // 全零分兜底：中文提问与纯英文 SKILL/工具名之间中文逐字/bigram 分词永远不会
+        // 命中英文单词，导致全部候选得 0 分后被当作"全部不相关"整段清空——这与
+        // keywords.empty() 的"无法判断相关性"是同一性质的情形，理应同样回退保留。
+        // true（默认）：全部候选得 0 分时按 token 预算回退保留（skills 全量；
+        //   tools 按原始顺序 Top-K），语义上等价于"无法判断相关性≠确定无关"。
+        // false：逐字节回退到当前行为（全零分仍返回空集合，技能/工具目录整段消失）。
+        bool zero_hit_keep_all = true;
+        // CJK 相邻二字组（bigram）词元：BuildRelevanceKeywords 默认逐字符切分中文
+        // （单字词元噪声大），额外生成相邻两个非标点 CJK 字符的二字组（如"天气"
+        // "上海"），只解决"中文提问 vs 中文技能描述"场景，不产生中英翻译映射
+        // （不会让"天气"命中"weather"——中文提问命中纯英文工具名真正生效的是
+        // 上面的 zero_hit_keep_all，bigram 只是锦上添花）。false 时逐字节回退：
+        // 不生成任何 bigram 词元，只保留单字词元。
+        bool cjk_bigram = true;
+        // ── D4：跨语言意图别名表 ────────────────────────────────
+        // 内置中英意图别名组（如 天气/weather、校准/calibrate/calibration）：命中任一
+        // 组员的关键词会把同组其余组员一并加入关键词集合，使「中文提问 vs 纯英文技能名」
+        // 也能产生**有区分度的分数**，而不是全员零分后退化成 zero_hit_keep_all 全量保留
+        // （全量保留在小 context 模型上等于必然溢出）。纯静态查表，零额外推理延迟。
+        // false 时逐字节回退：不做任何别名扩展，关键词集合与 D4 引入前完全一致。
+        bool intent_aliases_enabled = true;
+        // SKILL 描述里 tags 段（形如 "tags: a, b, c" / "标签: …"）命中关键词的权重。
+        // 服务端 <available_skills> XML 只有 <name>/<description>/<location> 三个标签
+        // （ParseAvailableSkillsXml），没有 <tags>，因此 tags 只能从 description 正文里
+        // 提取——这不是新协议面，只是对既有 description 文本的结构化利用。
+        // tag_weight=0 时逐字节回退：tags 不参与打分（等价于 D4 引入前）。
+        size_t tag_weight = 2;
+    } relevance_filter;
+
+    // ── D2：技能目录三档渐进披露（L0/L1/L2）────────────────────────────────
+    // 原实现只有「全量展开」与「整条删除」两档：预算不够时技能直接从目录里消失，
+    // 模型再也看不到它的存在。改为按相关性分数与 skills 分区预算自动分档，
+    // **预算耗尽时降档而不是整条删除**：
+    //   L2 (kFull)     = Path + 完整 description（与 D2 引入前的渲染逐字节一致）
+    //   L1 (kSummary)  = Path + description 摘要 + 从 description 提取的触发条件/tags 行
+    //   L0 (kNameOnly) = 单行「- name -> path (一句话摘要)」
+    // 只有连 L0 都放不进预算时才真正丢弃该技能。
+    // enabled=false 时逐字节回退到旧两档行为（FilterSkillsByRelevance + 全 L2 渲染）。
+    // 注：仅对 skill_catalog_format=="structured"（默认）生效；"simple" 格式本身已是
+    // 单行渲染，不引入第二套档位口径。
+    struct SkillDisclosureConfig {
+        bool enabled = true;
+        size_t l2_top_k = 2;                 // 分数最高的前 K 条优先给 L2 全量
+        size_t l1_top_k = 6;                 // 紧随其后的 K 条给 L1 摘要
+        size_t l1_summary_max_chars = 240;   // L1 摘要正文的 UTF-8 安全截断上限
+        size_t l0_summary_max_chars = 80;    // L0 一句话摘要的 UTF-8 安全截断上限
+        // Step 5 阶段 C 主线 (a)：l2_top_k 边界落在同分组内部时不切开该组——
+        // 整组同分技能一起进 L2，而不是按到达顺序把组内一部分压到 L1/L0。
+        // 动机（实测，qwen3-8b-8480 N=78 锚点池）：目标技能与同分锚点在 L1 档
+        // 被截断后 description 可见部分逐字节相同，模型 100% 发起 read 但稳定
+        // 读到目录里排序更靠前的同分候选——即"同分不可区分 + 目录 tie-break
+        // 事实上变成了选择决策器"。让整组同分一起升档，消除的正是"同一组里
+        // 谁在 L2、谁在 L1"这个人为分界。预算越界防护：每条目仍逐条过
+        // AssignSkillDetailLevels() 既有的按 token_budget 降档循环（L2 放不进
+        // 就自动退到 L1/L0，连 L0 都放不进才真正丢弃），因此扩组不会让 skills
+        // 预算溢出，只会让该组更多条目参与"能不能塞进 L2"的逐条判定。
+        //
+        // ⚠ 默认值 Step 5 收口时由 true 改为 **false**，两条实测理由：
+        //  1) 该开关已被它自己预设的判据证伪——同分池 N=78 下目标 5/5 次成功
+        //     升到 L2，`picked_rate` 仍是 0.000（与关闭时逐字段一致），零实测收益；
+        //  2) 默认开启存在未被任何用例覆盖过的目录截断风险：扩组会一直扩到覆盖
+        //     整个同分组，极端情形（如 relevance_filter.zero_hit_keep_all 兜底路径下
+        //     全体候选同得 0 分 → 同分组 = 整池）会让前若干条按 L2 吃掉几乎全部
+        //     skills 预算，随后第一个连 L0 都放不进的条目触发
+        //     AssignSkillDetailLevels() 的 `dropped = candidates.size() - idx; break;`
+        //     **整段丢弃剩余后缀**（保留集永远是按分数排序的一个前缀）。
+        //     即"逐条降档"只保证不越界，并不保证 Skills-Kept 不退化。
+        // 故默认关闭以同时满足"新行为默认安全"与"不把被证伪的行为留在默认路径上"；
+        // 开关本体保留，需要度量同分 tie-break 行为时显式置 true 即可。
+        // 该最坏情形已由 test_service.py 的
+        // `SKILL_CAPACITY: optimized scenario3b tie_group_kept_no_regress`
+        // （全同分池 N=64 断言 Skills-Kept == Skills-Total）机械覆盖。
+        bool tie_aware_l2 = false;
+    } skill_disclosure;
+
     // ── 上下文窗口分配 ──────────────────────────────────────
     float output_reserve_ratio = 0.20f;    // 为输出预留的上下文比率（默认 20%）
                                             // 对应 Build() 中 context_size / 5 的硬编码
@@ -435,11 +518,65 @@ struct PromptOptimizationConfig {
     // 当最后一条 tool 消息超大导致 context overflow 时的兜底机制
     struct EmergencyTruncationConfig {
         bool enabled = true;                // 是否启用紧急截断（默认 true）
-        float max_truncation_ratio = 0.40f; // 最大截断比例（0.0-1.0）；
+        float max_truncation_ratio = 0.95f; // 最大截断比例（0.0-1.0）；
                                             // 若需要截断的 token 数超过最后一条 tool 消息的此比例，
-                                            // 则放弃截断，直接走 local_input_overflow 流程；默认 40%
+                                            // 则放弃截断，直接走 local_input_overflow 流程；默认 95%。
+                                            // 注：ContentCondenser（见 content_condenser.h）本身已具备
+                                            // 「预算过小退化为纯头部保留」的兜底，可安全处理任意高压缩比，
+                                            // 此阈值只需拦截「就算清空整条 tool 消息也不够」的极端病态场景，
+                                            // 不应再按旧的「仅保头」截断逻辑设置成 40% 这类保守值——否则
+                                            // 超大 tool 响应（如 80K 字符压进 8K 上下文）会被直接判定放弃
+                                            // 截断、转入 local_input_overflow，而不是走 Phase 4 真正截断。
         int safety_margin_tokens = 30;      // 安全余量（token 数）；截断时额外预留，防止边界情况；默认 30
     } emergency_truncation;
+
+    // ── 保真截断配置（ContentCondenser：token 口径 + 头尾双保留 + 丢弃留痕）───
+    // 所有字段均可独立关闭，关闭后逐字节回退到该特性引入之前的行为：
+    //   budget_unit="chars"     → 恢复纯字符阈值语义（不接入 tokenizer，token_len 传 nullptr）
+    //   preserve_tail=false     → 退化为仅保留头部（tail_ratio 在传参时强制视为 0）
+    //   extract_high_signal=false → 不提取高信号行
+    //   drop_placeholder=false  → 整条丢弃旧消息时不插入占位痕迹
+    struct FidelityConfig {
+        std::string budget_unit = "tokens";     // "tokens" 或 "chars"；tokens 模式下 *_compress_len
+                                                 // 按既有 4:1 估算比例换算为 token 预算，字符值继续
+                                                 // 作为快筛与硬上限，不产生新魔数
+        bool   preserve_tail = true;            // false 时逐字节回退到仅保留头部
+        double tail_ratio = 0.30;               // 尾部占保留额度的比例
+        bool   extract_high_signal = true;      // 是否提取高信号行（错误/异常/退出码等）
+        bool   drop_placeholder = true;         // 整条丢弃旧消息后是否插入占位痕迹
+        size_t json_head_items = 3;             // JSON 数组截断保留的首部项数
+        size_t json_tail_items = 1;             // JSON 数组截断保留的尾部项数
+        size_t max_token_probe_per_message = 8; // 单条消息 tokenizer 调用次数上限（性能护栏）
+
+        // ── P1：token 口径精确化（CJK 感知 byte↔token 换算）───────────────
+        // 只在拿不到真实 tokenizer 时生效（CountTokens 回退分支、
+        // ContentCondenser::Condense 把 token 预算反算为字节预算时）；
+        // 有真实 tokenizer（context_override_/model_config_ 提供的 handle）
+        // 时优先使用 tokenizer，本换算比例不参与。
+        // 单位是 **UTF-8 字节**（不是字符）——全部调用点拿到的都是
+        // std::string::length()；UTF-8 中文 1 字 = 3 字节 ≈ 1 token，故 CJK 默认 3.0。
+        // 把两者都改回 4.0 即逐字节回退到旧的统一 length()/4 估算（P1 引入前的行为），
+        // 用于验证"这是真实修复"而非新魔数。
+        double cjk_bytes_per_token = 3.0;       // CJK 字节的 bytes/token 估算比例
+        double ascii_bytes_per_token = 4.0;     // 非 CJK（ASCII 等）字节的 bytes/token 估算比例
+    } fidelity;
+
+    // ── D3：预算分区（skills / tools 分区 + 技能保底名额）──────────────────
+    // ComputeRelevanceTokenBudget() 原为单一总预算，一条超长工具输出可以把
+    // 技能目录挤没。
+    //
+    // 关键语义（曾踩坑，务必保持）：分区是**竞争时才生效**的，不是静态切蛋糕。
+    // 只有 skills 与 tools 同时存在候选（即真的会互相抢预算）时才按比例约束；
+    // 单方存在时该方可用到接近总预算，绝不无故削减 D3 引入前的既有行为。
+    // enabled=false 时逐字节回退为原先的单一总预算语义。
+    struct BudgetPartitionConfig {
+        bool enabled = true;
+        // 竞争发生时 skills 分区相对总预算的保底比例：无论 tools 占用多少，
+        // skills 分区至少能拿到 total_budget * skills_floor_ratio。
+        double skills_floor_ratio = 0.15;
+        // 竞争发生时 tools 分区相对总预算的比例上限（软上限）。
+        double tools_ratio = 0.35;
+    } budget_partition;
 
     // ── 原始系统提示词段落过滤配置 ──────────────────────────
     // 通过配置文件选定哪些原始提示词段落被追加到优化后的提示词中

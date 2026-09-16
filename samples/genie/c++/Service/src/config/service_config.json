@@ -420,8 +420,8 @@
             "_comment": "Phase 4: 紧急截断配置（最后一条 tool 消息超大导致 context overflow 时的兜底机制）",
             "_comment_enabled": "是否启用 Phase 4 紧急截断（默认 true）",
             "enabled": true,
-            "_comment_max_truncation_ratio": "最大截断比例（0.0-1.0）；若需要截断的 token 数超过最后一条 tool 消息的此比例，则放弃截断，直接走 local_input_overflow 流程；默认 0.40（40%）",
-            "max_truncation_ratio": 0.40,
+            "_comment_max_truncation_ratio": "最大截断比例（0.0-1.0）；若需要截断的 token 数超过最后一条 tool 消息的此比例，则放弃截断，直接走 local_input_overflow 流程；默认 0.95（95%）。ContentCondenser 本身已具备「预算过小退化为纯头部保留」的兜底，可安全处理任意高压缩比，此阈值只需拦截「就算清空整条 tool 消息也不够」的极端病态场景",
+            "max_truncation_ratio": 0.95,
             "_comment_safety_margin_tokens": "安全余量（token 数）；截断时额外预留的 token 数，防止边界情况；默认 30",
             "safety_margin_tokens": 30
         },

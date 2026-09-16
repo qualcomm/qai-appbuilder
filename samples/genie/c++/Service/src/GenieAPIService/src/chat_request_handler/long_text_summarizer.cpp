@@ -45,9 +45,10 @@ LongTextSummarizer::LongTextSummarizer(
 
 // ── ProcessMessages ───────────────────────────────────────────────────────────
 
-void LongTextSummarizer::ProcessMessages(json& messages)
+bool LongTextSummarizer::ProcessMessages(json& messages)
 {
-    if (!messages.is_array() || messages.empty()) return;
+    bool summarized_any = false;
+    if (!messages.is_array() || messages.empty()) return summarized_any;
 
     // ── 规则 A：处理最后一条 user 文本消息 ──────────────────────
     if (config_.summarize_user_messages)
@@ -130,6 +131,7 @@ void LongTextSummarizer::ProcessMessages(json& messages)
                     // 拼接：指令前缀 + 摘要
                     std::string final_content = instruction_prefix + summary;
                     messages[user_idx]["content"] = final_content;
+                    summarized_any = true;
                     My_Log{My_Log::Level::kInfo}
                         << "[LongTextSummarizer] User message summarized: "
                         << content_len << " -> " << final_content.size() << " chars"
@@ -179,6 +181,7 @@ void LongTextSummarizer::ProcessMessages(json& messages)
                     if (!summary.empty() && summary.size() < content.size())
                     {
                         messages[i]["content"] = summary;
+                        summarized_any = true;
                         My_Log{My_Log::Level::kInfo}
                             << "[LongTextSummarizer] Tool message [" << i
                             << "] summarized: "
@@ -188,6 +191,8 @@ void LongTextSummarizer::ProcessMessages(json& messages)
             }
         }
     }
+
+    return summarized_any;
 }
 
 // ── FindLastUserTextMessage ───────────────────────────────────────────────────

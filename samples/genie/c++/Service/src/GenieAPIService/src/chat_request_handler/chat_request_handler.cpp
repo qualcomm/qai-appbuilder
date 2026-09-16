@@ -715,6 +715,13 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
                         auto& model_input = input_builder->Build(
                             const_cast<json&>(data_copy), is_tool, is_alive_fn);
 
+                        // PromptLedger 可观测（流式路径）：流式响应头已在 chunked provider 进入时
+                        // 发出，无法再写响应头，改为在 Build() 完成后发一帧 status="prompt_optimized"，
+                        // payload 由 PromptLedger::ToJson() 生成，与非流式响应头共用同一套字段口径。
+                        ResponseTools::post_stream_data(sink, "data",
+                            ResponseTools::statusDataJson("prompt_optimized", "Prompt optimization complete",
+                                                          input_builder->GetLedger().ToJson()));
+
                         // 动态调整 temperature
                         float temperature = data_copy.value("temp", 0.3f);
                         bool has_tools = data_copy.contains("tools")
@@ -815,6 +822,11 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
         {
             bool is_tool;
             auto &model_input = input_builder->Build(data, is_tool);
+
+            // PromptLedger 可观测（非流式路径）：Build() 完成后、写响应体前写入
+            // X-Genie-Prompt-* 全部字段；与流式路径的 status="prompt_optimized" 帧共用同一套
+            // PromptLedger::ToJson()/字段口径。
+            input_builder->GetLedger().WriteHeaders(res);
 
             // 动态调整 temperature
             float temperature = get_json_value(data, "temp", 0.3);

@@ -28,7 +28,11 @@ struct ResponseTools
     // 发送任务状态反馈事件（不含结束符，仅用于流式模式）
     // status: 状态标识，如 "preparing" / "inference" / "tool_call" / "writing_code"
     // message: 展示给客户端的可读描述
-    static std::string statusDataJson(const std::string &status, const std::string &message);
+    // extra_payload: 可选，随 status/status_message 一并合并进 choices[0]（同层级）的额外
+    //                字段（如 PromptLedger::ToJson()），默认空对象即完全不改变既有帧结构，
+    //                供 status="prompt_optimized" 这类需要携带机器可读账本数据的帧复用
+    static std::string statusDataJson(const std::string &status, const std::string &message,
+                                      const json &extra_payload = json());
 
     // 调试开关：true=将 message 同时写入 delta.content（客户端可见）；false=delta.content 为空
     // 对应 service_config.json 中的 debug.status_update_content_visible，默认 true

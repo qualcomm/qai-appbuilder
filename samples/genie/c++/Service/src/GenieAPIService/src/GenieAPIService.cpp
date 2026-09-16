@@ -186,18 +186,52 @@ void GenieService::run(int argc, char *argv[])
                                    << RESET
                                    << std::endl;
     svr.listen(HOST, port_checked);
-    
-    // 服务器停止后（可能是由于 Ctrl+C 信号），执行清理
+
+    // 服务器停止后执行清理。svr.listen() 可能因两种原因返回：Ctrl+C 信号（shutdown_requested_
+    // 已置位，run() 自己在本线程同步调用 ServiceStop() 并等待其完成）；或 /servicestop 等 HTTP
+    // 接口在另一个后台线程里已经调用了 ServiceStop()（该线程内部先 svr.stop() 才使这里的
+    // listen() 提前解除阻塞，随后才真正执行 UnloadModel()）。后一种情况下如果这里直接让 run()
+    // 返回，main() 会紧接着 return，触发全局 `service`（含 modelManager 成员）在主线程被析构，
+    // 与仍在后台线程内运行的 ServiceStop()/UnloadModel() 形成数据竞争——曾实测复现为模型卸载被
+    // 中途截断（日志停在 "the context is being destroyed" 后进程即消失，从未打印
+    // "Service stopped successfully"，且远早于看门狗的 15s 超时）。
     if (shutdown_requested_.load())
     {
         My_Log{} << "\n[Shutdown] Interrupt signal received. Initiating graceful shutdown...\n";
         ServiceStop();
         My_Log{} << "[Shutdown] Graceful shutdown completed.\n";
     }
+    else if (!shutdown_completed_.load())
+    {
+        // 必须等待后台线程真正完成（shutdown_completed_ 变为 true）才能让 run()/main() 返回。
+        // 看门狗线程保证最多 kShutdownWatchdogTimeoutSeconds 秒后一定会有结果（正常完成或被
+        // 强制终止整个进程），这里额外加 5 秒余量兜底极少数 listen() 因非停止原因提前返回、且
+        // 从未有任何线程调用过 ServiceStop() 的场景，避免永久挂起。
+        const auto wait_deadline = std::chrono::steady_clock::now() +
+                std::chrono::seconds(kShutdownWatchdogTimeoutSeconds + 5);
+        while (!shutdown_completed_.load() && std::chrono::steady_clock::now() < wait_deadline)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+    }
 }
 
 inline void GenieService::ServiceStop()
 {
+    // 幂等性保护：Ctrl+C 路径下 TriggerGracefulShutdown() 同步调用一次 ServiceStop()，
+    // 随后 run() 里 svr.listen() 因 svr.stop() 提前返回、shutdown_requested_ 已置位，
+    // 会再次调用 ServiceStop()，两次调用可能在不同线程上并发执行。这里保证核心卸载
+    // 逻辑全进程只真正跑一次；后来的调用只等待第一次调用真正完成后直接返回，不重复
+    // 触发 modelManager->UnloadModel() 或看门狗线程。
+    if (stop_in_progress_.exchange(true))
+    {
+        while (!shutdown_completed_.load())
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        return;
+    }
+
     My_Log{} << "start to stop service\n";
     shutdown_completed_.store(false);
 

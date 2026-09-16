@@ -398,4 +398,96 @@ inline std::string safe_utf8_truncate(const std::string &str, size_t max_bytes, 
     return str.substr(0, safe_length) + suffix;
 }
 
+/**
+ * P1（token 口径精确化）：估算一段文本的"有效 bytes-per-token"换算比例。
+ *
+ * ⚠️ 量纲约定（踩过一次坑，务必保持）：本函数的输入与返回值**统一以 UTF-8 字节
+ * 为单位**，因为全部三个调用点（message_pre_filter.cpp 的 CountTokens 回退分支、
+ * content_condenser.cpp 的 budget 反算、prompt_optimizer.cpp 的段落截断估算）
+ * 拿到的都是 `std::string::length()`（字节数）与 `safe_utf8_truncate` 的字节预算。
+ * 早先版本按"字符"统计占比却被按字节使用，纯中文场景下 token 数被高估约 3 倍
+ * （1 字 = 3 字节），反向落进"过度压缩把有效信息压没"的故障模式。
+ *
+ * 换算口径：UTF-8 中文 1 字 = 3 字节 ≈ 1 token（故 CJK 约 3 字节/token）；ASCII
+ * 英文约 4 字节/token。估算 token 数 = cjk_bytes / cjk_bytes_per_token +
+ * other_bytes / ascii_bytes_per_token，返回值 = total_bytes / 估算 token 数，
+ * 因此它与"按字节乘除"的三个调用点自洽。两个参数都传 4.0 时返回值恒为 4.0，
+ * 即逐字节回退到 P1 引入前的统一 `length()/4` 估算。
+ *
+ * 只在拿不到真实 tokenizer 时使用（有 handle 一律优先走真实 tokenizer）。
+ *
+ * @param text                  文本内容（UTF-8）
+ * @param cjk_bytes_per_token   CJK 字节的 bytes/token 比例（配置 fidelity.cjk_bytes_per_token，默认 3.0）
+ * @param ascii_bytes_per_token 非 CJK 字节的 bytes/token 比例（配置 fidelity.ascii_bytes_per_token，默认 4.0）
+ * @return 有效 bytes/token 比例；text 为空或参数非法时返回 ascii_bytes_per_token
+ */
+inline double EstimateCjkAwareBytesPerToken(const std::string &text,
+                                            double cjk_bytes_per_token,
+                                            double ascii_bytes_per_token)
+{
+    if (text.empty() || cjk_bytes_per_token <= 0.0 || ascii_bytes_per_token <= 0.0)
+    {
+        return (ascii_bytes_per_token > 0.0) ? ascii_bytes_per_token : 4.0;
+    }
+
+    const uint8_t *data = reinterpret_cast<const uint8_t *>(text.data());
+    size_t len = text.size();
+    size_t cjk_bytes = 0;
+    size_t i = 0;
+    while (i < len)
+    {
+        uint8_t byte = data[i];
+        int char_bytes = 1;
+        uint32_t code_point = byte;
+        if ((byte & 0x80) == 0)
+        {
+            char_bytes = 1;
+            code_point = byte;
+        }
+        else if ((byte & 0xE0) == 0xC0)
+        {
+            char_bytes = 2;
+            code_point = byte & 0x1F;
+        }
+        else if ((byte & 0xF0) == 0xE0)
+        {
+            char_bytes = 3;
+            code_point = byte & 0x0F;
+        }
+        else if ((byte & 0xF8) == 0xF0)
+        {
+            char_bytes = 4;
+            code_point = byte & 0x07;
+        }
+        else
+        {
+            // 非法前导字节，跳过一个字节继续（按非 CJK 字节计入）
+            ++i;
+            continue;
+        }
+        for (int k = 1; k < char_bytes && i + k < len; ++k)
+        {
+            code_point = (code_point << 6) | (data[i + k] & 0x3F);
+        }
+        // CJK 常见区间：统一表意文字（含扩展 A）、CJK 符号与标点、全角字符
+        if ((code_point >= 0x4E00 && code_point <= 0x9FFF) ||
+            (code_point >= 0x3400 && code_point <= 0x4DBF) ||
+            (code_point >= 0x3000 && code_point <= 0x303F) ||
+            (code_point >= 0xFF00 && code_point <= 0xFFEF))
+        {
+            cjk_bytes += static_cast<size_t>(char_bytes);
+        }
+        i += static_cast<size_t>(char_bytes);
+    }
+
+    size_t other_bytes = (len > cjk_bytes) ? (len - cjk_bytes) : 0;
+    double estimated_tokens = static_cast<double>(cjk_bytes) / cjk_bytes_per_token +
+                              static_cast<double>(other_bytes) / ascii_bytes_per_token;
+    if (estimated_tokens <= 0.0)
+    {
+        return ascii_bytes_per_token;
+    }
+    return static_cast<double>(len) / estimated_tokens;
+}
+
 #endif

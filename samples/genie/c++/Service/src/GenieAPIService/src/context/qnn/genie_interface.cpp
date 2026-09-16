@@ -88,6 +88,13 @@ IEmbedding *IEmbedding::CreateInterface(GenieContext *context)
 bool IEmbedding::set_content(ModelInput &model_input)
 {
     My_Log{} << model_input.image_.empty() << " " << model_input.audio_.empty() << "\n";
+    // [修复] 上一轮若带图/带音频，img_inferred_buffers_/deepstack_buffers_/embedded_bin_ 等
+    // 视觉/音频状态只在那条分支末尾的 Clean() 里被清空；但下面的纯文字快速路径
+    // （goto ahead）从未调用过 Clean()。同一个模型实例被多轮对话复用时，一旦某轮带图请求
+    // 之后紧跟一轮纯文字请求，Qwen3VL::MergeEmbedding() 等虚函数仍会看到非空的残留视觉状态，
+    // 把陈旧的视觉嵌入错误拼接进本轮纯文字的 embedding 缓冲区，导致 embeddingQuery 必然失败。
+    // 在两条分支之前统一先清理上一轮遗留状态，防止其污染本轮（无论本轮是否带图/音频）。
+    Clean();
     auto model_type = qnn_embedding_info_.model_types_;
     if (model_input.image_.empty() && model_input.audio_.empty())
     {
