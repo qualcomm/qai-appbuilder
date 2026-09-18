@@ -11,8 +11,10 @@
 #include "utils.h"
 #include "log.h"
 #include "config_fixer.h"
+#include "watermark_provider_host.h"
 #include <cstring>
 #include <filesystem>
+#include <mutex>
 #include <system_error>
 
 void GenieLog_Callback(const GenieLog_Handle_t  /*handle*/,
@@ -386,6 +388,18 @@ GenieContext::GenieContext(const ModelInstanceConfig &model_config) :
     {
         m_stream_thread = std::make_unique<std::thread>(&GenieContext::inference_thread, this);
     }
+
+    // One-time honest log: QNN/NPU does not support token-level watermarking.
+    static std::once_flag s_qnn_wm_log_once;
+    std::call_once(s_qnn_wm_log_once, []()
+    {
+        if (WatermarkProviderHost::Instance().HasTokenHook())
+        {
+            My_Log{My_Log::Level::kWarning}
+                << "[Watermark] QNN/NPU backend does not support token-level watermarking. "
+                << "Watermark plugin is loaded but cannot operate at token level on this backend.\n";
+        }
+    });
 }
 
 GenieContext::~GenieContext()

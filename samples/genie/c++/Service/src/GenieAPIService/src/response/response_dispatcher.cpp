@@ -13,6 +13,7 @@
 #include "log.h"
 #include "../processor/general.h"
 #include "../processor/harmony.h"
+#include "watermark_provider_host.h"
 #include <regex>
 
 ResponseDispatcher::ResponseDispatcher(IModelConfig &model_mgr,
@@ -739,6 +740,16 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
         }
         else
         {
+            if (WatermarkProviderHost::Instance().HasTextHook())
+            {
+                const auto* vt = WatermarkProviderHost::Instance().GetVTable();
+                char* watermarked = vt->text_hook_apply(response_buffer.c_str());
+                if (watermarked)
+                {
+                    response_buffer = watermarked;
+                    vt->text_hook_free_string(watermarked);
+                }
+            }
             auto data = ResponseTools::responseDataJson(response_buffer, finishReason, false, toolResponse);
             res->set_content(data, MIMETYPE_JSON);
         }

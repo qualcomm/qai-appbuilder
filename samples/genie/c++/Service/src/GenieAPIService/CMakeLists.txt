@@ -11,6 +11,7 @@ include(platform.cmake)
 list(APPEND INCLUDE_PATH
         ${EXTERNAL_HEADER_PATH}
         ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/watermark
 )
 
 list(APPEND SERVICE_SOURCES
@@ -52,6 +53,7 @@ list(APPEND SERVICE_SOURCES
         src/gateway/routing/model_router.cpp
         src/gateway/cloud/cloud_model_client.cpp
         src/gateway/audit/audit_logger.cpp
+        src/watermark/watermark_provider_host.cpp
 )
 
 add_compile_options(

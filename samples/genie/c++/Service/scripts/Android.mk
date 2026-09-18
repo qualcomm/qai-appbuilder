@@ -24,6 +24,7 @@ PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../../External/../../../../src
 PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../
 PACKAGE_C_INCLUDES += -I ${QNN_SDK_ROOT}include/Genie/
 PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../src/common
+PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../src/GenieAPIService/src/watermark
 
 #========================== Define libGenie.so variables =============================================
 include $(CLEAR_VARS)
@@ -78,6 +79,7 @@ SERVICE_SRC_FILES :=            ../src/GenieAPIService/src/chat_history/chat_his
                                     ../src/GenieAPIService/src/gateway/cloud/cloud_model_client.cpp \
                                     ../src/GenieAPIService/src/gateway/audit/audit_logger.cpp \
                                     ../src/common/utils.cpp \
+                                    ../src/GenieAPIService/src/watermark/watermark_provider_host.cpp \
                                     ../src/GenieAPIService/src/GenieAPIService.cpp
 
 include $(CLEAR_VARS)

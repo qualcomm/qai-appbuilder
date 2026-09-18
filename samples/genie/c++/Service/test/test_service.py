@@ -784,7 +784,7 @@ class ServiceManager:
         # 新进程是全新生命周期,不应带着上一个进程的历史包袱,restart() 中会重置为 None。
         self.mnn_oom_event = None
 
-    def start(self, config_path, extra_args=None):
+    def start(self, config_path, extra_args=None, extra_env=None):
         if not self.exe_path.exists():
             raise FileNotFoundError(f"找不到 {self.exe_path}")
         # 关键修复:GenieAPIService.exe 用 Popen(cwd=self.exe_dir) 启动,
@@ -806,6 +806,7 @@ class ServiceManager:
         # extra_args: 可选的额外命令行参数（如 ["-n", "-1", "-d", "4"]），追加在既有参数之后；默认 None/空列表时不追加任何参数。
         if extra_args:
             cmd.extend(str(a) for a in extra_args)
+        env = {**os.environ, **(extra_env or {})}
         print(f"  [ServiceManager] 启动服务: {' '.join(cmd)}")
         # 重要：不要用 subprocess.PIPE 接 GenieAPIService 的 stdout/stderr，
         # QNN 初始化会输出大量日志，PIPE 缓冲区填满后子进程会阻塞，导致服务无法响应。
@@ -821,6 +822,7 @@ class ServiceManager:
             cwd=str(self.exe_dir),
             stdout=self._stdout_fh,
             stderr=self._stderr_fh,
+            env=env,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == 'win32' else 0
         )
         atexit.register(self._cleanup)
