@@ -182,6 +182,7 @@ add_custom_command(
         TARGET ${LIB_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory ${BUILD_PATH}/include
         COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/src/GenieAPILibrary.h ${BUILD_PATH}/include
+        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/../common/watermark_provider_abi.h ${BUILD_PATH}/include
 )
 if (BUILD_AS_DLL)
     # 保证只构建 ${LIB_NAME}（不连带构建 ${CMAKE_PROJECT_NAME}）时，EXTERNAL_BIN 里的后端

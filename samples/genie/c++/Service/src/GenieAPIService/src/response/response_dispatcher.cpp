@@ -740,17 +740,18 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
         }
         else
         {
+            std::string content = extractFinalAnswer(response_buffer);
             if (WatermarkProviderHost::Instance().HasTextHook())
             {
                 const auto* vt = WatermarkProviderHost::Instance().GetVTable();
-                char* watermarked = vt->text_hook_apply(response_buffer.c_str());
+                char* watermarked = vt->text_hook_apply(content.c_str());
                 if (watermarked)
                 {
-                    response_buffer = watermarked;
+                    content = watermarked;
                     vt->text_hook_free_string(watermarked);
                 }
             }
-            auto data = ResponseTools::responseDataJson(response_buffer, finishReason, false, toolResponse);
+            auto data = ResponseTools::responseDataJson(content, finishReason, false, toolResponse);
             res->set_content(data, MIMETYPE_JSON);
         }
         return true;

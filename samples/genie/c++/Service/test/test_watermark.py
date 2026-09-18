@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """SynthID z-test self-validation regression script
 
-Validates GenieAPIService GGUF backend watermarking:
+Validates GenieAPIService watermarking (GGUF and QNN backends):
   - GENIE_WATERMARK_ENABLE=1: generated text must pass z-test (z > Z_ALPHA ~= 2.326)
   - Watermark off: z-score should be well below threshold
   - Human text control: z-score should be well below threshold
@@ -17,8 +17,22 @@ Usage (local mode, auto start/stop service):
 Usage (remote mode, connect to already-running service):
     python test_watermark.py --remote --host 127.0.0.1 --port 8910 [--tokenizer PATH]
 
-Must use a GGUF-backend model. QNN/MNN backends do not support token-level
-watermarking (will emit honest log messages).
+Usage (no tokenizer.json available -- reconstruct it from the .gguf file itself):
+    python test_watermark.py --remote --host 127.0.0.1 --port 8910 \
+        --gguf_model PATH/TO/model.gguf --model on-disk-model-dir-name
+
+--gguf_model is a fallback used when --tokenizer is omitted or its path does
+not exist: the tokenizer is rebuilt directly from the GGUF file's own
+tokenizer.ggml.* KV metadata (see tool/extract_gguf_tokenizer.py), so no
+external tokenizer.json and no extra 'pip install gguf' dependency are
+required.
+
+Detection logic is backend-agnostic: both GGUF and QNN backends have been
+verified to support token-level watermarking. The MNN backend currently does
+not support watermarking due to architectural limitations (black-box engine with
+no per-token candidate logit interception opportunity).
+检测逻辑与后端无关，GGUF/QNN 后端目前均已验证真实生效；MNN 后端因架构限制
+（黑盒引擎，无法拿到逐 token 候选词打分机会）暂不支持。
 """
 
 import argparse
@@ -31,7 +45,11 @@ import sys
 import time
 from pathlib import Path
 
-if sys.platform == "win32":
+if sys.platform == "win32" and getattr(sys.stdout, "encoding", "").lower() != "utf-8":
+    # 幂等包装：若已是 utf-8(例如 test_service 模块已包装过一次),不要重复包装,
+    # 否则旧 TextIOWrapper 被 GC 时会关闭底层 buffer,导致共享该 buffer 的新包装对象
+    # 报 "I/O operation on closed file"(test_watermark.py 会 import test_service,两者
+    # 若各自无条件包装一次即会触发此问题)。
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
@@ -284,18 +302,53 @@ def ztest_synthid(ids, ctx_size=4):
 # Tokenizer shim (HuggingFace tokenizers library, optional)
 # ---------------------------------------------------------------------------
 
-def _try_load_tokenizer(tokenizer_path):
-    """Try to load a HuggingFace Tokenizer from file; return None on failure."""
-    if not tokenizer_path:
+def _try_load_tokenizer(tokenizer_path, gguf_model_path=None):
+    """Try to load a HuggingFace Tokenizer; return None on failure.
+
+    Resolution order:
+      1. ``tokenizer_path`` (--tokenizer), if given and the file exists.
+      2. ``gguf_model_path`` (--gguf_model), if given: the tokenizer is
+         reconstructed directly from the .gguf file's own
+         ``tokenizer.ggml.*`` KV metadata (see
+         tool/extract_gguf_tokenizer.extract_tokenizer_from_gguf), so no
+         external tokenizer.json or ``pip install gguf`` is required.
+    If neither yields a usable tokenizer, z-test steps are skipped.
+    """
+    if not tokenizer_path and not gguf_model_path:
         return None
+
     try:
         from tokenizers import Tokenizer  # type: ignore
-        tok = Tokenizer.from_file(str(tokenizer_path))
-        _log(f"[tokenizer] loaded {tokenizer_path}")
-        return tok
-    except Exception as e:
-        _log(f"[tokenizer] WARNING: could not load ({e}) -- z-test will be skipped")
+    except ImportError as e:
+        _log(f"[tokenizer] WARNING: 'tokenizers' package not installed ({e}) -- z-test will be skipped")
         return None
+
+    if tokenizer_path:
+        if os.path.isfile(tokenizer_path):
+            try:
+                tok = Tokenizer.from_file(str(tokenizer_path))
+                _log(f"[tokenizer] loaded {tokenizer_path}")
+                return tok
+            except Exception as e:
+                _log(f"[tokenizer] WARNING: could not load {tokenizer_path} ({e})")
+        else:
+            _log(f"[tokenizer] WARNING: --tokenizer path not found: {tokenizer_path}")
+
+    if gguf_model_path:
+        if not os.path.isfile(gguf_model_path):
+            _log(f"[tokenizer] WARNING: --gguf_model path not found: {gguf_model_path}")
+        else:
+            try:
+                from extract_gguf_tokenizer import extract_tokenizer_from_gguf  # noqa: E402
+                tok_json = extract_tokenizer_from_gguf(gguf_model_path, verbose=False)
+                tok = Tokenizer.from_str(json.dumps(tok_json))
+                _log(f"[tokenizer] reconstructed from GGUF metadata: {gguf_model_path}")
+                return tok
+            except Exception as e:
+                _log(f"[tokenizer] WARNING: could not reconstruct tokenizer from GGUF ({e})")
+
+    _log("[tokenizer] no usable tokenizer -- z-test will be skipped")
+    return None
 
 
 def _tokenize(tok, text):
@@ -304,7 +357,17 @@ def _tokenize(tok, text):
 
 
 def _log(msg):
-    print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+    line = f"[{time.strftime('%H:%M:%S')}] {msg}"
+    try:
+        print(line, flush=True)
+    except (ValueError, OSError):
+        # sys.stdout may be in bad state after the tokenizers Rust extension
+        # initialises its thread-pool (common on Windows under winrs pipe).
+        # Fall back to a direct fd-1 write that bypasses Python's I/O layer.
+        try:
+            os.write(1, (line + "\n").encode("utf-8", errors="replace"))
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -315,15 +378,27 @@ _TEST_DIR = Path(__file__).parent
 sys.path.insert(0, str(_TEST_DIR))
 from test_service import ServiceManager, wait_port_open  # noqa: E402
 
+# extract_gguf_tokenizer.py lives in tool/ (sibling of test/), not test/ itself --
+# it is a general-purpose GGUF-tokenizer-reconstruction utility, not test code.
+_TOOL_DIR = _TEST_DIR.parent / "tool"
+sys.path.insert(0, str(_TOOL_DIR))
+
 
 # ---------------------------------------------------------------------------
 # HTTP helpers
 # ---------------------------------------------------------------------------
 
-def _chat_completion(base_url, prompt, n_predict=512, timeout=300):
-    """POST /v1/chat/completions (OpenAI-compatible) and return reply text."""
+def _chat_completion(base_url, prompt, n_predict=512, timeout=300, model="watermark-test"):
+    """POST /v1/chat/completions (OpenAI-compatible) and return reply text.
+
+    ``model`` defaults to a placeholder name that only resolves in local mode,
+    where the service is started with a single primary model via ``-c`` and any
+    model name in the request is accepted. Remote mode (multi-model
+    service_config.json environments) requires passing the real on-disk model
+    directory name via --model, or the service returns 404.
+    """
     payload = {
-        "model":      "watermark-test",
+        "model":      model,
         "stream":     False,
         "messages":   [{"role": "user", "content": prompt}],
         "max_tokens": n_predict,
@@ -376,14 +451,14 @@ def _test_service_startup(base_url):
         return False
 
 
-def _test_watermark_detection(base_url, tok, ctx_size, n_texts, n_predict):
+def _test_watermark_detection(base_url, tok, ctx_size, n_texts, n_predict, model="watermark-test"):
     """Generate watermarked texts and assert z-score > Z_ALPHA for each."""
     results = []
     for i in range(n_texts):
         prompt = PROMPTS[i % len(PROMPTS)]
         _log(f"  generating watermarked text {i+1}/{n_texts} ...")
         try:
-            text = _chat_completion(base_url, prompt, n_predict)
+            text = _chat_completion(base_url, prompt, n_predict, model=model)
         except Exception as e:
             _result(f"watermark_gen_{i}", FAIL, str(e))
             results.append(False)
@@ -440,11 +515,11 @@ def _test_human_text_control(tok, ctx_size):
     return ok
 
 
-def _test_no_watermark_generation(base_url, tok, ctx_size, n_predict):
+def _test_no_watermark_generation(base_url, tok, ctx_size, n_predict, model="watermark-test"):
     """Without watermark, z-score should be below Z_ALPHA."""
     _log("  generating unwatermarked text ...")
     try:
-        text = _chat_completion(base_url, PROMPTS[0], n_predict)
+        text = _chat_completion(base_url, PROMPTS[0], n_predict, model=model)
     except Exception as e:
         _result("no_watermark_gen", FAIL, str(e))
         return False
@@ -485,6 +560,7 @@ def _test_env_var_boundaries(exe_dir, config, host, port):
         svc = ServiceManager(exe_dir, host, port)
         try:
             svc.start(config, extra_env={"GENIE_WATERMARK_ENABLE": val})
+            wait_port_open(host, port, timeout=180, process=svc.process)
             r = requests.get(f"http://{host}:{port}/v1/models", timeout=10)
             ok = r.status_code in (200, 404)
             _result(f"env_boundary_{label}", PASS if ok else FAIL, "service started OK")
@@ -505,6 +581,7 @@ def _test_graceful_degradation(exe_dir, config, host, port):
     ok  = False
     try:
         svc.start(config, extra_env={"GENIE_WATERMARK_ENABLE": "1"})
+        wait_port_open(host, port, timeout=180, process=svc.process)
         r  = requests.get(f"http://{host}:{port}/v1/models", timeout=10)
         ok = r.status_code in (200, 404)
         _result("graceful_degradation", PASS if ok else FAIL,
@@ -535,7 +612,18 @@ def main():
     parser.add_argument("--port", type=int, default=8910, help="Service port")
     parser.add_argument("--tokenizer", default=None,
                         help="Path to tokenizer.json (HuggingFace tokenizers format); "
-                             "if omitted, z-test steps are skipped")
+                             "if omitted, z-test steps are skipped unless --gguf_model is given")
+    parser.add_argument("--gguf_model", default=None,
+                        help="Path to the .gguf model file. Used as a fallback when "
+                             "--tokenizer is omitted or the given path does not exist: the "
+                             "tokenizer is reconstructed directly from the GGUF file's own "
+                             "tokenizer.ggml.* KV metadata (see tool/extract_gguf_tokenizer.py), "
+                             "so no external tokenizer.json or 'pip install gguf' is required.")
+    parser.add_argument("--model", default="watermark-test",
+                        help="Model name to send in the request 'model' field. Must match "
+                             "the model registered in the service (e.g. gpt-oss-20b-GGUF); "
+                             "the default 'watermark-test' placeholder will fail with 404 "
+                             "if the service only routes to its actual registered model name.")
     parser.add_argument("--ctx_size", type=int, default=4,
                         help="Watermark context window (must match generation side)")
     parser.add_argument("--n_texts", type=int, default=3,
@@ -547,7 +635,7 @@ def main():
     args = parser.parse_args()
 
     base_url = f"http://{args.host}:{args.port}"
-    tok      = _try_load_tokenizer(args.tokenizer)
+    tok      = _try_load_tokenizer(args.tokenizer, args.gguf_model)
     failures = 0
     skips    = 0
 
@@ -570,7 +658,8 @@ def main():
         _tally(_test_service_startup(base_url))
         _tally(_test_human_text_control(tok, args.ctx_size))
         for r in _test_watermark_detection(base_url, tok, args.ctx_size,
-                                            args.n_texts, args.n_predict):
+                                            args.n_texts, args.n_predict,
+                                            model=args.model):
             _tally(r)
 
     # -----------------------------------------------------------------------
@@ -589,9 +678,11 @@ def main():
         svc = ServiceManager(exe_dir, args.host, args.port)
         try:
             svc.start(config, extra_env={"GENIE_WATERMARK_ENABLE": "1"})
+            wait_port_open(args.host, args.port, timeout=180, process=svc.process)
             _tally(_test_service_startup(base_url))
             for r in _test_watermark_detection(base_url, tok, args.ctx_size,
-                                                args.n_texts, args.n_predict):
+                                                args.n_texts, args.n_predict,
+                                                model=args.model):
                 _tally(r)
         except Exception as e:
             _log(f"ERROR starting service: {e}")
@@ -605,8 +696,10 @@ def main():
         svc = ServiceManager(exe_dir, args.host, args.port)
         try:
             svc.start(config)
+            wait_port_open(args.host, args.port, timeout=180, process=svc.process)
             _tally(_test_no_watermark_generation(base_url, tok,
-                                                  args.ctx_size, args.n_predict))
+                                                  args.ctx_size, args.n_predict,
+                                                  model=args.model))
         except Exception as e:
             _log(f"ERROR starting service: {e}")
             failures += 1

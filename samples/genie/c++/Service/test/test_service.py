@@ -40,7 +40,10 @@ from pathlib import Path
 from datetime import datetime
 
 # 强制 stdout/stderr 使用 UTF-8 编码（Windows 控制台兼容）
-if sys.platform == 'win32':
+if sys.platform == 'win32' and getattr(sys.stdout, 'encoding', '').lower() != 'utf-8':
+    # 幂等包装：若已是 utf-8(例如被 test_watermark.py 之类的脚本 import 前已包装过一次),
+    # 不要重复包装,否则旧 TextIOWrapper 被 GC 时会关闭共享的底层 buffer,
+    # 导致后续 print() 报 "I/O operation on closed file"。
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
