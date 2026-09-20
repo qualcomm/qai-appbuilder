@@ -303,6 +303,7 @@ const index = {
   modelParamsBtn: "Params",
   modelParamsHint: "Some models do not support certain params (e.g. GPT-5.5 does not support temperature); the backend filters automatically.",
   modelParamsMaxTokens: "Max Tokens",
+  modelParamsReasoningEffort: "Reasoning Effort",
   modelParamsTemperature: "Temperature",
   modelParamsTitleBtn: "Model inference parameter settings",
   modelParamsTitleHeader: "Model Inference Params",

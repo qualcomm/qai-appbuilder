@@ -302,6 +302,7 @@ const index = {
   modelParamsBtn: "參數",
   modelParamsHint: "部分模型不支援某些參數（如 GPT-5.5 不支援 temperature），後端會自動過濾。",
   modelParamsMaxTokens: "最大 Token 數",
+  modelParamsReasoningEffort: "思考深度",
   modelParamsTemperature: "溫度",
   modelParamsTitleBtn: "模型推論參數設定",
   modelParamsTitleHeader: "模型推論參數",

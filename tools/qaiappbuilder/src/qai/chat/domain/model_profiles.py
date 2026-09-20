@@ -17,6 +17,8 @@ constraints (temperature, top_p, max_tokens) based on model family matching.
   7. doubao             — ByteDance Doubao / Volcano Ark
   8. gemini             — Google Gemini / VertexAI
   9. deepseek_reasoner  — DeepSeek R1 reasoner (temp/top_p locked to 1.0)
+  9b. deepseek_v3_plus  — DeepSeek V3.1+/V4/Flash/Pro (controllable
+      reasoning-effort ladder, see issue #270; excludes R1)
   10. deepseek           — DeepSeek general
   11. qwen_reasoner      — Qwen QwQ/QvQ reasoner (temp/top_p locked to 1.0)
   (+) qwen              — Qwen general
@@ -178,6 +180,43 @@ _MODEL_FAMILIES: list[dict[str, Any]] = [
         "temperature_fixed": 1.0,
         "top_p_fixed": 1.0,
     },
+    # ── 9b. DeepSeek V3.1+ / V4-Flash / V4-Pro — controllable reasoning-effort
+    #       ladder (issue #270). Must be matched BEFORE the general "deepseek"
+    #       fallback below (both start with "deepseek"); AFTER
+    #       deepseek_reasoner above so R1 keeps its unconditional-thinking,
+    #       no-knob profile.
+    #
+    #       Ladder is LIVE-VERIFIED against Alibaba Cloud's hosted DeepSeek
+    #       endpoint (2026-09), NOT DeepSeek's own docs — the two disagree.
+    #       DeepSeek's own API reference (api-docs.deepseek.com) advertises
+    #       none/low/high/max (default "high"), and separately claims
+    #       "medium"/"xhigh" are accepted for compatibility and silently
+    #       remapped to low/high. Aliyun's hosted endpoint does NOT follow
+    #       that: a real request with "none" 400s —
+    #       ``invalid_parameter_error: 'reasoning_effort' must be one of:
+    #       'low', 'medium', 'high', 'xhigh', 'max'`` — no "none" at all.
+    #       This ladder follows the live-verified Aliyun enum; per DeepSeek's
+    #       own docs this should also work talking to DeepSeek directly
+    #       (medium/xhigh get remapped there, just never to a value DeepSeek
+    #       itself rejects). "none" is dropped rather than kept as a tier
+    #       that 400s on at least one real deployment.
+    #
+    #       No ``max_tokens_default`` — DeepSeek's own server-side default
+    #       already scales with thinking mode (8K non-thinking / 64K thinking
+    #       / 128K at "max"); a fixed number here would clip a "high"/"max"
+    #       turn or overshoot a "low" one. An explicit user value still
+    #       overrides and is still clamped by max_tokens_max below. ─────────
+    {
+        "name": "deepseek_v3_plus",
+        "pattern": re.compile(r"deepseek.*v3[.\-]\d|deepseek.*v4|deepseek.*flash|deepseek.*pro", re.IGNORECASE),
+        "max_tokens_max": 65536,
+        "max_tokens_default": None,
+        "tool_result_max_chars": 25_000,
+        "supports_thinking": True,
+        "reasoning_effort_levels": ("low", "medium", "high", "xhigh", "max"),
+        "temperature_fixed": None,
+        "top_p_fixed": None,
+    },
     # ── 10. DeepSeek (general) ───────────────────────────────────────────────
     {
         "name": "deepseek",
@@ -304,6 +343,14 @@ class ModelProfile:
 
     # metadata
     supports_thinking: bool = False
+    #: User-selectable reasoning-effort tiers for this family, in ascending
+    #: order (e.g. ``("none", "low", "high", "max")``). Empty tuple means the
+    #: model has no adjustable effort knob — either it never reasons
+    #: (``supports_thinking is False``) or it reasons unconditionally with no
+    #: controllable surface (DeepSeek-R1 / QwQ). Callers must treat an empty
+    #: tuple as "hide the effort control for this model" — never guess a
+    #: fallback tier.
+    reasoning_effort_levels: tuple[str, ...] = ()
     explicit_overrides: dict[str, Any] = field(default_factory=dict)
 
     # ── Adaptive tool result truncation ──────────────────────────────────────
@@ -454,6 +501,37 @@ class ModelProfile:
 
         return None
 
+    # ── reasoning-effort resolution ──────────────────────────────────────────
+
+    def resolve_reasoning_effort(self, user_value: str | None = None) -> str | None:
+        """Compute the final reasoning-effort tier to send upstream.
+
+        Returns ``None`` when the family exposes no controllable effort
+        surface (``reasoning_effort_levels`` empty) — callers must NOT invent
+        a fallback tier; the model either doesn't reason at all or reasons
+        unconditionally with no adjustable knob (DeepSeek-R1 / QwQ).
+
+        ``user_value`` absent (``None``, "no explicit selection yet") →
+        ``None`` (let the model / provider default apply — no override sent).
+
+        ``user_value`` present but outside this family's ladder (a stale
+        selection carried over from a DIFFERENT model with a wider/narrower
+        ladder) → clamp to the ladder's lower-middle tier rather than
+        silently dropping the user's intent to "no override". Floors toward
+        the CHEAPER tier on an even-length ladder (index ``(n-1)//2``, e.g.
+        index 0 of a 2-tier ladder) rather than the more expensive one — an
+        unrecognized tier name should never accidentally escalate spend/
+        latency beyond what the user explicitly chose.
+        """
+        levels = self.reasoning_effort_levels
+        if not levels:
+            return None
+        if user_value is None:
+            return None
+        if user_value in levels:
+            return user_value
+        return levels[(len(levels) - 1) // 2]
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Public API
@@ -502,6 +580,7 @@ def get_model_profile(
         temperature_fixed=family.get("temperature_fixed"),
         top_p_fixed=family.get("top_p_fixed"),
         supports_thinking=family.get("supports_thinking", False),
+        reasoning_effort_levels=tuple(family.get("reasoning_effort_levels", ())),
         explicit_overrides=overrides,
     )
 

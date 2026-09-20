@@ -8402,6 +8402,7 @@ class StreamChatUseCase:
             "presence_penalty",
             "seed",
             "stop",
+            "reasoning_effort",
         )
         for key in _SAMPLING_KEYS:
             if key not in extra and key in nested:
@@ -8442,6 +8443,21 @@ class StreamChatUseCase:
         )
         if resolved_max_tokens is not None and resolved_max_tokens > 0:
             extra["max_tokens"] = resolved_max_tokens
+
+        # reasoning_effort: same precedence as the routing-layer choke point
+        # (``provider_routing_stream._inject_family_sampling_defaults``) —
+        # duplicated here (rather than deferred to that later stage) so the
+        # value resolved from the ModelParams panel lift above is already
+        # correct by the time ``_build_snapshot_request_options`` captures
+        # the real wire sampling for the prompt-debug dialog.
+        raw_effort = extra.get("reasoning_effort")
+        resolved_effort = profile.resolve_reasoning_effort(
+            raw_effort if isinstance(raw_effort, str) else None,
+        )
+        if resolved_effort is not None:
+            extra["reasoning_effort"] = resolved_effort
+        else:
+            extra.pop("reasoning_effort", None)
 
     def _computer_enabled(self) -> bool:
         """Live ``computer.enabled`` gate for this turn (secure default off).

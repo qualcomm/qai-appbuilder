@@ -71,6 +71,7 @@ from qai.model_catalog.application.use_cases.update_provider_config import (
 from qai.model_catalog.application.use_cases.verify_checksum import (
     VerifyChecksumCommand,
 )
+from qai.chat.domain.model_profiles import get_model_profile
 from qai.model_catalog.domain.entities import ModelEntry, ModelVersion
 from qai.model_catalog.domain.ids import (
     DownloadJobId,
@@ -260,6 +261,13 @@ class CloudModelDTO(BaseModel):
     #: dated ``claude-sonnet-4-20250514``). Absent → send ``model_id`` as-is.
     api_model_id: str | None = None
     params: dict[str, Any] | None = None
+    #: User-selectable reasoning-effort tiers for this model (e.g.
+    #: ``["none", "low", "high", "max"]``), resolved server-side from the
+    #: model's family (``qai.chat.domain.model_profiles.get_model_profile``).
+    #: ``None`` when the model has no adjustable effort knob — the chat
+    #: composer hides the control entirely rather than showing one that
+    #: would 400 on every value.
+    reasoning_effort_levels: list[str] | None = None
 
 
 class CloudModelsResponse(BaseModel):
@@ -841,11 +849,27 @@ def build_router(*, container: "Container") -> APIRouter:
         ``/providers`` contracts). The chat model dropdown reads this for
         its cloud provider groups (``cloud_llm`` / ``provider_b`` / ...).
         Credentials are never returned here; only the catalog shape.
+
+        ``reasoning_effort_levels`` is derived per model from the ``chat``
+        context's family-matching :func:`~qai.chat.domain.model_profiles.
+        get_model_profile` (same cross-context read pattern
+        ``_model_resolver_bridge.py`` already uses — the interfaces layer is
+        the composition edge, not one of the isolated bounded contexts, so
+        reading a peer context's DOMAIN layer here is the intended pattern).
         """
         rows = await container.model_catalog.list_cloud_models_use_case.execute()
-        return CloudModelsResponse(
-            models=[CloudModelDTO(**row) for row in rows]
-        )
+        dtos: list[CloudModelDTO] = []
+        for row in rows:
+            dto_kwargs = dict(row)
+            try:
+                levels = list(
+                    get_model_profile(row.get("model_id") or "").reasoning_effort_levels
+                )
+            except Exception:  # noqa: BLE001 — a profile lookup never breaks the list
+                levels = []
+            dto_kwargs["reasoning_effort_levels"] = levels or None
+            dtos.append(CloudModelDTO(**dto_kwargs))
+        return CloudModelsResponse(models=dtos)
 
     @router.get(
         "/cloud-models/permissions",

@@ -569,6 +569,10 @@ export interface ChatWsSend {
   readonly temperature?: number;
   readonly top_p?: number;
   readonly max_tokens?: number;
+  /** Reasoning-effort tier override (e.g. "none"/"low"/"high"/"max").
+   *  Only meaningful for models whose family exposes a controllable
+   *  thinking-depth ladder; the server ignores it otherwise. */
+  readonly reasoning_effort?: string;
   /** Per-session ("this conversation only") tool / SKILL override (additive —
    *  `_ws.py` / `_sse.py` accept the same names). Arrays of the tool names /
    *  skill ids the user switched OFF for this session; omitted when empty so
