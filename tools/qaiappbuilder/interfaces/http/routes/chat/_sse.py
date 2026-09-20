@@ -709,6 +709,15 @@ def build_router(*, container: "Container") -> APIRouter:
             default=None, ge=0, le=1_000_000,
             description="Sampling max-tokens override (0 = no limit).",
         ),
+        reasoning_effort: str | None = Query(
+            default=None,
+            max_length=16,
+            description=(
+                "Reasoning-effort tier override (e.g. none/low/high/max). "
+                "Only meaningful for models whose family exposes a "
+                "controllable thinking-depth ladder; ignored otherwise."
+            ),
+        ),
         tool_params: str | None = Query(
             default=None,
             max_length=8192,
@@ -915,6 +924,8 @@ def build_router(*, container: "Container") -> APIRouter:
             merged_params["top_p"] = float(top_p)
         if max_tokens is not None and max_tokens > 0:
             merged_params["max_tokens"] = int(max_tokens)
+        if reasoning_effort:
+            merged_params["reasoning_effort"] = reasoning_effort
 
         # Per-session tool / SKILL override arrives JSON-encoded; parse
         # defensively (a malformed value is simply ignored → no override).

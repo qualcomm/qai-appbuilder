@@ -135,6 +135,14 @@ export interface ModelParams {
   temperature: number;
   topP: number;
   maxTokens: number;
+  /** Reasoning-effort tier override (e.g. "none"/"low"/"high"/"max").
+   *  `null` = no override (let the model / provider default apply).
+   *  Independent of `useDefaults` — a user may want default sampling but
+   *  still pick an explicit thinking-depth tier. Only meaningful for
+   *  models whose catalog entry exposes a non-empty
+   *  `reasoning_effort_levels` (see `useCloudModelNames`); the popover
+   *  hides the control entirely for models with none. */
+  reasoningEffort: string | null;
 }
 
 export const DEFAULT_MODEL_PARAMS: ModelParams = {
@@ -144,6 +152,7 @@ export const DEFAULT_MODEL_PARAMS: ModelParams = {
   // V1 default (app.js:1201-1203): max_tokens = 0 means "no limit"; the
   // SSE route only forwards it when > 0 (_sse.py:413).
   maxTokens: 0,
+  reasoningEffort: null,
 };
 
 /** Factory default tool params — mirrors V1 mode-control defaults

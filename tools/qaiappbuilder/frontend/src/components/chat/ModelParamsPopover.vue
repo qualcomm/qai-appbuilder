@@ -20,6 +20,7 @@ import {
   useChatTabsStore,
   DEFAULT_MODEL_PARAMS,
 } from "@/stores/chatTabs";
+import { useCloudModelNames } from "@/composables/chat/useCloudModelNames";
 
 interface Props {
   open: boolean;
@@ -37,6 +38,20 @@ const store = useChatTabsStore();
 const activeTab = computed(() => store.activeTab);
 
 const params = computed(() => activeTab.value?.modelParams ?? DEFAULT_MODEL_PARAMS);
+
+// Reasoning-effort ladder for the active tab's model, if any. Empty when the
+// model has no adjustable thinking-depth knob — the row below is hidden
+// entirely rather than shown disabled with a guessed tier.
+const { cloudModelReasoningEffortMap, loadCloudModelNames } =
+  useCloudModelNames();
+onMounted(() => {
+  void loadCloudModelNames();
+});
+const reasoningEffortLevels = computed<string[]>(() => {
+  const id = activeTab.value?.modelId;
+  if (id === undefined || id === "" || id === null) return [];
+  return cloudModelReasoningEffortMap.value[id] ?? [];
+});
 
 const popoverRef = useTemplateRef<HTMLDivElement>("popover");
 
@@ -186,6 +201,31 @@ onBeforeUnmount(() => {
             @input="(ev: Event) => patch({ maxTokens: Math.max(0, Number((ev.target as HTMLInputElement).value)) })"
           />
         </div>
+      </div>
+
+      <!-- Reasoning effort (issue #270). Only rendered when the active
+           model's catalog entry exposes a non-empty
+           `reasoning_effort_levels` ladder — hidden entirely otherwise so
+           no model shows a control that would 400 on every value.
+           Independent of the "use model defaults" checkbox above: a user
+           may want default sampling but still pick an explicit
+           thinking-depth tier. -->
+      <div
+        v-if="reasoningEffortLevels.length > 0"
+        class="model-params-row"
+      >
+        <label class="model-params-label">{{ t("index.modelParamsReasoningEffort") }}</label>
+        <select
+          :value="params.reasoningEffort ?? ''"
+          class="model-params-input"
+          data-testid="model-params-reasoning-effort"
+          @change="(ev: Event) => patch({ reasoningEffort: (ev.target as HTMLSelectElement).value || null })"
+        >
+          <option value="">{{ t("index.effortDefault") }}</option>
+          <option v-for="level in reasoningEffortLevels" :key="level" :value="level">
+            {{ level }}
+          </option>
+        </select>
       </div>
 
       <!-- V1 parity (index.html:1092-1094): hint row, inline styling.

@@ -1070,6 +1070,10 @@ export function useChatTransport(
         temperature: sampling.temperature,
         topP: sampling.topP,
         maxTokens: sampling.maxTokens,
+        // Independent of `useDefaults` (unlike temperature/topP/maxTokens
+        // above) — a user may want default sampling but still pick an
+        // explicit thinking-depth tier.
+        reasoningEffort: mp?.reasoningEffort ?? null,
         disabledTools: sessionOverride.disabledTools,
         disabledSkills: sessionOverride.disabledSkills,
         // UI language so the backend localizes its feature-mode system-prompt
@@ -1404,6 +1408,13 @@ export function useChatTransport(
       if (mp.maxTokens > 0) {
         qs.push(`max_tokens=${encodeURIComponent(String(mp.maxTokens))}`);
       }
+    }
+    // Independent of `useDefaults` above — a user may want default sampling
+    // but still pick an explicit thinking-depth tier.
+    if (mp?.reasoningEffort) {
+      qs.push(
+        `reasoning_effort=${encodeURIComponent(mp.reasoningEffort)}`,
+      );
     }
     // Sub-agent takeover (V2 enhancement; additive query param — refactor-plan
     // §3.1 allows new query keys). When the active tab is a sub-agent take-over

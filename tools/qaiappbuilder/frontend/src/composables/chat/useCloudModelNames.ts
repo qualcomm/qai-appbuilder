@@ -18,6 +18,14 @@
  *                           cloud entries share the same `model_id`
  *                           (used by the composer's auto-select watch
  *                           to seed `tab.modelProvider` correctly).
+ *   • `cloudModelReasoningEffortMap` — `{ model_id: string[] }` lookup of
+ *                           the server-resolved reasoning-effort ladder
+ *                           (`CloudModelDTO.reasoning_effort_levels`) for
+ *                           models that expose one; absent/empty for
+ *                           models with no adjustable thinking-depth knob.
+ *                           Used by the model-params popover to decide
+ *                           whether to render the effort control at all,
+ *                           and which tiers to offer.
  *   • `loadCloudModelNames()` — caller-controlled fetch trigger so the
  *                               existing `onMounted(() => void load…())`
  *                               timing in ChatComposer is preserved
@@ -33,6 +41,7 @@ import { apiJson } from "@/api";
 export interface UseCloudModelNamesReturn {
   cloudModelMap: Ref<Record<string, string>>;
   cloudModelEntries: Ref<Array<{ id: string; provider: string }>>;
+  cloudModelReasoningEffortMap: Ref<Record<string, string[]>>;
   /**
    * `true` once `loadCloudModelNames()` has settled (success OR failure), so
    * callers can distinguish "cloud list confirmed empty" from "cloud list not
@@ -57,6 +66,10 @@ export function useCloudModelNames(): UseCloudModelNamesReturn {
   // `tab.modelProvider` (otherwise the dropdown ✓ would mark every entry
   // that happens to share `model_id`).
   const cloudModelEntries = ref<Array<{ id: string; provider: string }>>([]);
+  // Cloud model id → reasoning-effort ladder, same source as the two maps
+  // above. Absent entry / empty array = no adjustable effort knob for that
+  // model — consumers must hide the control rather than guess a fallback.
+  const cloudModelReasoningEffortMap = ref<Record<string, string[]>>({});
   // Whether the cloud-model fetch has settled at least once (success/failure).
   const cloudModelsLoaded = ref<boolean>(false);
 
@@ -68,6 +81,7 @@ export function useCloudModelNames(): UseCloudModelNamesReturn {
       );
       const map: Record<string, string> = {};
       const entries: Array<{ id: string; provider: string }> = [];
+      const effortMap: Record<string, string[]> = {};
       for (const m of res.models ?? []) {
         const id = (m.model_id ?? m.id) as string | undefined;
         if (id !== undefined && id !== "") {
@@ -79,13 +93,21 @@ export function useCloudModelNames(): UseCloudModelNamesReturn {
             id,
             provider: (m.provider as string | undefined) ?? "",
           });
+          const levels = m.reasoning_effort_levels;
+          if (Array.isArray(levels) && levels.length > 0) {
+            effortMap[id] = levels.filter(
+              (v): v is string => typeof v === "string" && v !== "",
+            );
+          }
         }
       }
       cloudModelMap.value = map;
       cloudModelEntries.value = entries;
+      cloudModelReasoningEffortMap.value = effortMap;
     } catch {
       cloudModelMap.value = {};
       cloudModelEntries.value = [];
+      cloudModelReasoningEffortMap.value = {};
     } finally {
       cloudModelsLoaded.value = true;
     }
@@ -94,6 +116,7 @@ export function useCloudModelNames(): UseCloudModelNamesReturn {
   return {
     cloudModelMap,
     cloudModelEntries,
+    cloudModelReasoningEffortMap,
     cloudModelsLoaded,
     loadCloudModelNames,
   };

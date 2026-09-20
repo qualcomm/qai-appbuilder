@@ -404,13 +404,14 @@ def build_router(*, container: "Container") -> APIRouter:
                     # plane to functional parity with the SSE route so the
                     # default transport can be WS without losing features —
                     # see ``_sse.py`` query params of the same names).
-                    #   * sampling overrides (temperature / top_p / max_tokens)
-                    #     merge into tool_params exactly like the SSE route
-                    #     (``_sse.py:717-732``).
+                    #   * sampling overrides (temperature / top_p / max_tokens /
+                    #     reasoning_effort) merge into tool_params exactly like
+                    #     the SSE route (``_sse.py:717-732``).
                     #   * subagent_id / allow_question drive sub-agent take-over.
                     ws_temperature = msg.get("temperature")
                     ws_top_p = msg.get("top_p")
                     ws_max_tokens = msg.get("max_tokens")
+                    ws_reasoning_effort = msg.get("reasoning_effort")
                     ws_subagent_id = msg.get("subagent_id")
                     ws_allow_question = msg.get("allow_question")
                     # Sub-agent spawn-permission switches (SSE parity
@@ -436,6 +437,8 @@ def build_router(*, container: "Container") -> APIRouter:
                         merged_params["top_p"] = float(ws_top_p)
                     if isinstance(ws_max_tokens, int) and ws_max_tokens > 0:
                         merged_params["max_tokens"] = int(ws_max_tokens)
+                    if isinstance(ws_reasoning_effort, str) and ws_reasoning_effort:
+                        merged_params["reasoning_effort"] = ws_reasoning_effort
 
                     await _run_one_turn(
                         websocket=websocket,

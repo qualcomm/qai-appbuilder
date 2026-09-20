@@ -257,6 +257,10 @@ def _inject_family_sampling_defaults(
     * **max_tokens**: ``resolve_max_tokens(user_value=extra.get("max_tokens"))``
       — caller value > family default; ``None`` / ``<=0`` (unknown / ``query::``
       route) leaves it unset (no regression).
+    * **reasoning_effort**: ``resolve_reasoning_effort(user_value=extra.get("reasoning_effort"))``
+      — family has no ladder → key dropped; no caller value → key dropped
+      (let the provider's own default apply); caller value outside the
+      ladder → clamped to the nearest tier, never forwarded unchecked.
 
     Because each ``resolve_*`` is fed the caller's existing ``extra`` value as
     its ``user_value``, an intentional caller override (compression
@@ -312,6 +316,26 @@ def _inject_family_sampling_defaults(
     )
     if resolved_max_tokens is not None and resolved_max_tokens > 0:
         extra["max_tokens"] = resolved_max_tokens
+
+    # reasoning_effort: unlike temperature/top_p (near-universally accepted,
+    # so "leave unset" is a safe no-op), a tier name the model's family does
+    # NOT expose would be forwarded verbatim to a provider that never
+    # advertised it — harmless for most OpenAI-compatible endpoints (unknown
+    # fields are typically ignored), but still worth dropping so a stale
+    # value from an earlier request on a DIFFERENT model never leaks onto
+    # this one's wire. A value that falls outside the ladder (stale
+    # selection carried over from a prior model) is CLAMPED to the nearest
+    # tier by ``ModelProfile.resolve_reasoning_effort``, never silently
+    # forwarded unchecked. When the family has no ladder at all, the key
+    # must be DROPPED (not merely left unset).
+    raw_effort = extra.get("reasoning_effort")
+    resolved_effort = profile.resolve_reasoning_effort(
+        raw_effort if isinstance(raw_effort, str) else None,
+    )
+    if resolved_effort is not None:
+        extra["reasoning_effort"] = resolved_effort
+    else:
+        extra.pop("reasoning_effort", None)
 
 
 class ProviderRoutingLLMStream:
