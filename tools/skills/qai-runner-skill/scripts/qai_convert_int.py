@@ -1,54 +1,126 @@
 # ---------------------------------------------------------------------
-# Copyright (c) 2026 Qualcomm Innovation Center, Inc. All rights reserved.
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
 
 #!/usr/bin/env python3
 """
-QNN INT8/A16W8 Quantized Conversion Script
+QNN Quantized Conversion Script
 
-Converts ONNX models to quantized QNN format (INT8 or A16W8 precision).
+Converts ONNX models to quantized QNN format.
+
+Supports QAIRT SDK 2.45+ on Windows on Snapdragon (WoS) ARM64 devices.
+
+Supported quantization modes:
+  - W8A16:  --act_bw 16 --weight_bw 8           (recommended for vision)
+  - W8A8:   --act_bw 8  --weight_bw 8           (bias defaults to FP32)
+  - W8A8B8: --act_bw 8  --weight_bw 8 --bias_bw 8  (bias explicitly INT8)
+  - W4A16:  --act_bw 16 --weight_bw 4
+  - W4A8:   --act_bw 8  --weight_bw 4
+
+QAIRT 2.45 WoS ARM64 Tool Path Rules:
+  - qnn-onnx-converter:      bin/x86_64-windows-msvc/  (Python script, x86 emulation)
+  - qnn-model-lib-generator: bin/aarch64-windows-msvc/ (NOT x86_64 — compiles ARM64 DLL)
 
 Usage:
   # Simple conversion (static input model)
-  python aipc_convert_int.py --input_network model.onnx --input_list calibration_list.txt
+  python qai_convert_int.py --input_network model.onnx --input_list calibration_list.txt
 
   # Dynamic input model (specify fixed dimensions)
-  python aipc_convert_int.py --input_network model.onnx --input_list calib.txt \\
+  python qai_convert_int.py --input_network model.onnx --input_list calib.txt \
     --input-dim input,1,3,64,64
 
-  # Custom bit widths (A16W8)
-  python aipc_convert_int.py --input_network model.onnx --input_list calib.txt \\
+  # W8A16 (default, recommended for vision models)
+  python qai_convert_int.py --input_network model.onnx --input_list calib.txt \
     --act_bw 16 --weight_bw 8
 
-  # INT8 (A8W8)
-  python aipc_convert_int.py --input_network model.onnx --input_list calib.txt \\
+  # W8A8 (bias defaults to FP32)
+  python qai_convert_int.py --input_network model.onnx --input_list calib.txt \
     --act_bw 8 --weight_bw 8
 
+  # W8A8B8 (bias explicitly quantized to INT8)
+  python qai_convert_int.py --input_network model.onnx --input_list calib.txt \
+    --act_bw 8 --weight_bw 8 --bias_bw 8
+
+  # W4A16
+  python qai_convert_int.py --input_network model.onnx --input_list calib.txt \
+    --act_bw 16 --weight_bw 4
+
+  # W4A8
+  python qai_convert_int.py --input_network model.onnx --input_list calib.txt \
+    --act_bw 8 --weight_bw 4
+
 Known Issues & Solutions:
-  - "Missing command line inputs for dynamic inputs": Use --input-dim name:1,3,H,W
+  - "Missing command line inputs for dynamic inputs": Use --input-dim name,1,3,H,W
   - "Access is denied": Use absolute output path
-  - "is not a cpp model file": Script auto-fixes this (same as aipc_convert_fp.py)
+  - "is not a cpp model file": Script auto-fixes this (same as qai_convert_fp.py)
   - "calibration_list.txt not found": Create calibration list with raw input files
+  - WoS ARM64: qnn-model-lib-generator is in aarch64-windows-msvc/, NOT x86_64
 
 Args:
   --input_network: Path to ONNX file
   --input_list: Path to calibration list file (required)
   --act_bw: Activation bitwidth (default: 16)
-  --weight_bw: Weight bitwidth (default: 8)
+  --weight_bw: Weight bitwidth (default: 8, use 4 for W4A16/W4A8)
+  --bias_bw: Bias bitwidth (optional, only for W8A8B8 mode; omit = bias stays FP32)
   --input-dim: Input dimensions for dynamic models (repeatable)
   --target-arch: Target architecture (default: auto-detected)
+  --host-arch: Host toolchain for converter (default: auto-detected)
+  --no-simplification: Pass --no_simplification to converter (recommended for WoS)
 """
 
-import os
-import sys
-import subprocess
-import glob
 import argparse
+import glob
+import json
+import os
 import platform
 import re
 import shutil
+import subprocess
+import sys
 from pathlib import Path
+
+
+# --- QAIModelBuilder env_config.json auto-discovery --------------------------
+
+def _find_qairt_env_config() -> dict:
+    """Auto-discover data/config/qairt_env.json by traversing up the directory tree."""
+    current = Path(__file__).resolve().parent
+    for _ in range(10):
+        candidate = current / "data" / "config" / "qairt_env.json"
+        if not candidate.exists():
+            candidate = current / "config" / "qairt_env.json"
+        if candidate.exists():
+            try:
+                with open(candidate, encoding="utf-8") as f:
+                    cfg = json.load(f)
+                print(f"[INFO] Loaded QAIRT env config: {candidate}")
+                return cfg
+            except Exception as e:
+                print(f"[WARN] Failed to parse {candidate}: {e}")
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return {}
+
+
+def _apply_env_config(cfg: dict) -> None:
+    """Apply settings from qairt_env.json to the current process environment."""
+    if not cfg:
+        return
+    sdk_root = cfg.get("qairt_sdk_root", "")
+    if sdk_root and not os.environ.get("QAIRT_SDK_ROOT"):
+        os.environ["QAIRT_SDK_ROOT"] = sdk_root
+        print(f"[INFO] Set QAIRT_SDK_ROOT from env_config: {sdk_root}")
+    vc_targets = cfg.get("vc_targets_path", "")
+    if vc_targets and not os.environ.get("VCTargetsPath"):
+        os.environ["VCTargetsPath"] = vc_targets
+    if sdk_root:
+        qairt_pylib = os.path.join(sdk_root, "lib", "python")
+        pythonpath = os.environ.get("PYTHONPATH", "")
+        if qairt_pylib not in pythonpath:
+            os.environ["PYTHONPATH"] = qairt_pylib + os.pathsep + pythonpath if pythonpath else qairt_pylib
 
 
 def _cleanup_tmp_folders(search_dir: str) -> None:
@@ -63,6 +135,55 @@ def _cleanup_tmp_folders(search_dir: str) -> None:
                     print(f"Warning: could not remove temp folder {entry.path}: {e}")
     except Exception:
         pass
+
+
+def _get_linux_toolchain_dir_int(sdk_root: str) -> str:
+    """Return the first SDK bin/ subdirectory containing qairt-converter (Linux)."""
+    import platform as _platform
+    machine = _platform.machine().lower()
+    if machine in ("aarch64", "arm64"):
+        candidates = [
+            "aarch64-oe-linux-gcc11.2",
+            "aarch64-ubuntu-gcc9.4",
+            "aarch64-oe-linux-gcc9.3",
+            "aarch64-oe-linux-gcc8.2",
+        ]
+    else:
+        candidates = ["x86_64-linux-clang"]
+    from pathlib import Path as _Path
+    for d in candidates:
+        if _Path(sdk_root, "bin", d, "qairt-converter").exists():
+            return d
+    return candidates[0]
+
+
+def _get_lib_generator_arch(qnn_sdk_root: str, host_arch: str):
+    """
+    Determine the correct arch directory for qnn-model-lib-generator.
+
+    QAIRT 2.45 WoS ARM64 rule:
+      - qnn-onnx-converter lives in x86_64-windows-msvc/ (Python script, x86 emulation)
+      - qnn-model-lib-generator lives in aarch64-windows-msvc/ (compiles native ARM64 DLL)
+
+    On x86 Linux, use the native host-side generator to cross-compile an ARM64
+    model library. On ARM Linux, no host-side model library generator is used.
+    """
+    if platform.system().lower() != "windows":
+        machine = platform.machine().lower()
+        if machine in ("aarch64", "arm64") or host_arch.startswith("aarch64-"):
+            print("[INFO] On ARM Linux, model library generation is not supported by this wrapper")
+            return None
+        return host_arch
+
+    # On Windows: check if aarch64-windows-msvc/qnn-model-lib-generator exists
+    aarch64_gen = os.path.join(qnn_sdk_root, "bin", "aarch64-windows-msvc", "qnn-model-lib-generator")
+    if os.path.exists(aarch64_gen):
+        print(f"[INFO] Using aarch64-windows-msvc/qnn-model-lib-generator (QAIRT 2.45 WoS mode)")
+        return "aarch64-windows-msvc"
+
+    # Fallback: use same arch as converter (older SDK behavior)
+    return host_arch
+
 
 def get_cpu_arch_from_systeminfo():
     """
@@ -101,7 +222,7 @@ def get_cpu_arch_from_systeminfo():
                     return val
 
         return None
-    
+
     except subprocess.CalledProcessError:
         return None
     except FileNotFoundError:
@@ -113,22 +234,29 @@ def get_cpu_arch_from_systeminfo():
 
 def detect_host_arch():
     """
-    Detects the host architecture and selects the appropriate toolchain from the available options.
+    Detects the host architecture and selects the appropriate toolchain for qnn-onnx-converter.
+
+    QAIRT 2.45 WoS ARM64 note:
+      On Windows (including WoS ARM64), qnn-onnx-converter is always in x86_64-windows-msvc/
+      because it runs under x86 Python emulation.
     """
     system = platform.system().lower()
     machine = platform.machine().lower()
-    print(system, machine)
+    # NOTE: On WoS ARM64, platform.machine() returns "AMD64" (x86 emulation) — this is expected.
+    # The host arch here is for qnn-onnx-converter only (always x86_64-windows-msvc on Windows).
+    # The TARGET arch (for DLL compilation) is detected separately by detect_target_arch().
+    print(f"System: {system}, Machine: {machine} (converter host arch - x86 emulation on WoS ARM64 is normal)")
     # Mapping detected system/machine to available toolchains
     if system == "windows":
         # Prefer parsing `systeminfo` for more accurate architecture detection on Windows.
 
-        # qairt Windows SDK toolchains only support x86_64 for now. using emulation for ARM64 Windows.
+        # On Windows (including WoS ARM64), qnn-onnx-converter uses x86_64-windows-msvc emulation.
         return "x86_64-windows-msvc"
     elif system == "linux":
         if machine in ["amd64", "x86_64"]:
             return "x86_64-linux-clang"
         elif machine in ["arm64", "aarch64"]:
-            return "aarch64-ubuntu-gcc9.4" 
+            return "aarch64-ubuntu-gcc9.4"
         """
         use aarch64-oe-linux-gcc11.2 if we meet issue.
         """
@@ -166,11 +294,14 @@ def find_onnx_files(search_dir="."):
     return list(search_path.glob("*.onnx"))
 
 
-def get_model_info(model_path, act_bw=16, weight_bw=8, output_root=None):
+def get_model_info(model_path, act_bw=16, weight_bw=8, bias_bw=None, output_root=None):
     """Extract model information from the ONNX file path."""
     model_path = Path(model_path)
     model_name = model_path.stem
-    model_name_quant = f"{model_name}_a{act_bw}_w{weight_bw}"
+    if bias_bw is not None:
+        model_name_quant = f"{model_name}_a{act_bw}_w{weight_bw}_b{bias_bw}"
+    else:
+        model_name_quant = f"{model_name}_a{act_bw}_w{weight_bw}"
     model_dir = model_path.parent
     abs_model_dir = os.path.abspath(str(model_dir))
 
@@ -192,21 +323,34 @@ def get_model_info(model_path, act_bw=16, weight_bw=8, output_root=None):
 
 
 def convert_model(model_info, cwd, calibration_list_path, act_bw=16, weight_bw=8,
-                  qnn_sdk_root=None, host_toolchain="",
+                  bias_bw=None, qnn_sdk_root=None, host_toolchain="",
                   device_toolchain="", cleanup_intermediate=True,
-                  input_dims=None, preserve_io_mode="datatype"):
+                  input_dims=None, preserve_io_mode="datatype", no_simplification=False):
     """
     Convert ONNX model to quantized QNN format.
-    
+
+    Supports:
+      - A8W8  (INT8):  act_bw=8,  weight_bw=8
+      - A16W8:         act_bw=16, weight_bw=8  (default, recommended for vision)
+      - A8W8B8:        act_bw=8,  weight_bw=8, bias_bw=8
+
+    QAIRT 2.45 WoS ARM64 note:
+      - qnn-onnx-converter: x86_64-windows-msvc/ (x86 emulation)
+      - qnn-model-lib-generator: aarch64-windows-msvc/ (native ARM64 compiler)
+
     Args:
         model_info: Dictionary containing model paths and information
         cwd: Current working directory (absolute path)
         calibration_list_path: Path to calibration list file
         act_bw: Activation bit width (default: 16)
         weight_bw: Weight bit width (default: 8)
+        bias_bw: Bias bit width (optional, for A8W8B8 mode)
         qnn_sdk_root: QAIRT SDK root path (default: from env or /local/mnt/workspace/project/qnn/qairt/2.41.0)
         host_toolchain: Host SDK bin/lib folder for toolchain  (default: auto-detected using detect_host_arch())
         device_toolchain: Device toolchain for compilation (default: auto-detected using detect_target_arch())
+        cleanup_intermediate: Remove intermediate files after conversion
+        input_dims: List of (input_name, dims) tuples for dynamic inputs
+        no_simplification: Pass --no_simplification to converter (WoS recommended)
     
     Prerequisites:
         - QAIRT_SDK_ROOT environment variable must be set (or provided via parameter)
@@ -217,29 +361,40 @@ def convert_model(model_info, cwd, calibration_list_path, act_bw=16, weight_bw=8
     cpp_path = model_info["cpp_path"]
     bin_path = model_info["bin_path"]
     output_dir_path = model_info["output_dir_path"]
-    
-    print(f"Converting {model_path} to a{act_bw}_w{weight_bw} quantized format for aarch64...")
-    
+
+    quant_desc = f"a{act_bw}_w{weight_bw}"
+    if bias_bw is not None:
+        quant_desc += f"_b{bias_bw}"
+    print(f"Converting {model_path} to {quant_desc} quantized format...")
+
     # Auto-detect host toolchain if not provided
     if not host_toolchain:
         host_toolchain = detect_host_arch()
         print(f"Auto-detected host toolchain: {host_toolchain}")
-    
+
     # Auto-detect device toolchain if not provided
     if not device_toolchain:
         device_toolchain = detect_target_arch()
         print(f"Auto-detected device toolchain: {device_toolchain}")
-    
+
     # Determine QAIRT SDK root
+    # Auto-discover QAIModelBuilder env_config.json
+    _apply_env_config(_find_qairt_env_config())
+
     if qnn_sdk_root is None:
-        qnn_sdk_root = os.environ.get('QAIRT_SDK_ROOT', '/local/mnt/workspace/project/qnn/qairt/2.41.0')
-    
+        qnn_sdk_root = os.environ.get('QAIRT_SDK_ROOT')
+        if not qnn_sdk_root:
+            print("Error: QAIRT_SDK_ROOT not set.", file=sys.stderr)
+            print("  Option 1: set QAIRT_SDK_ROOT=<path to QAIRT SDK>", file=sys.stderr)
+            print("  Option 2: Run Setup.bat (reads from data\\config\\qairt_env.json)", file=sys.stderr)
+            return False
+
     # Check if QAIRT_SDK_ROOT exists
     if not os.path.exists(qnn_sdk_root):
         print(f"Error: QAIRT_SDK_ROOT path does not exist: {qnn_sdk_root}", file=sys.stderr)
         print("Please set QAIRT_SDK_ROOT environment variable or ensure the default path exists", file=sys.stderr)
         return False
-    
+
     # Ensure QNN_AARCH64_UBUNTU_GCC_94 is set for ubuntu aarch64 cross-builds.
     if device_toolchain == "aarch64-ubuntu-gcc9.4" and 'QNN_AARCH64_UBUNTU_GCC_94' not in os.environ:
         print("Warning: QNN_AARCH64_UBUNTU_GCC_94 environment variable is not set", file=sys.stderr)
@@ -268,8 +423,8 @@ def convert_model(model_info, cwd, calibration_list_path, act_bw=16, weight_bw=8
         "--input_network", abs_model_path,
         "--output_path", abs_cpp_path,
         "--input_list", abs_calibration_list,
-        "--act_bw", str(act_bw),
-        "--weight_bw", str(weight_bw),
+        "--act_bitwidth", str(act_bw),
+        "--weights_bitwidth", str(weight_bw),
         "--bias_bw", "32",
         "--use_per_channel_quantization",
         "--algorithms", "cle",
@@ -281,35 +436,106 @@ def convert_model(model_info, cwd, calibration_list_path, act_bw=16, weight_bw=8
         preserve_io_args = ["--preserve_io"]
     elif preserve_io_mode == "layout":
         preserve_io_args = ["--preserve_io", "layout"]
-    converter_cmd[6:6] = preserve_io_args
+    converter_cmd.extend( preserve_io_args)
+
+    if bias_bw is not None:
+        converter_cmd.extend(["--bias_bitwidth", str(bias_bw)])
+
+    if no_simplification:
+        converter_cmd.append("--no_simplification")
 
     if input_dims:
         for input_name, dims in input_dims:
             converter_cmd.extend(["-d", input_name, dims])
-    
-    # Build the qnn-model-lib-generator command
-    lib_gen_path = os.path.join(qnn_sdk_root, "bin", host_toolchain, "qnn-model-lib-generator")
-    lib_gen_cmd = [
-        python_exe, lib_gen_path,
-        "-c", abs_cpp_path,
-        "-b", abs_bin_path,
-        "-o", abs_output_dir,
-        "-t", device_toolchain
-    ]
-    
+
+    # QAIRT 2.45 WoS: lib generator may be in aarch64-windows-msvc/.
+    # On x86 Linux it is the native host-side generator and cross-compiles .so.
+    lib_gen_arch = _get_lib_generator_arch(qnn_sdk_root, host_toolchain)
+    lib_gen_path = (
+        os.path.join(qnn_sdk_root, "bin", lib_gen_arch, "qnn-model-lib-generator")
+        if lib_gen_arch else None
+    )
+    if platform.system().lower() == "windows":
+        lib_gen_cmd = [
+            python_exe, lib_gen_path,
+            "-c", abs_cpp_path,
+            "-b", abs_bin_path,
+            "-o", abs_output_dir,
+            "-t", device_toolchain
+        ]
+    elif lib_gen_path:
+        lib_name = re.sub(r"\W+", "_", model_info["model_name"])
+        lib_gen_cmd = [
+            lib_gen_path,
+            "--cpp", abs_cpp_path,
+            "--bin", abs_bin_path,
+            "--lib_targets", device_toolchain,
+            "--lib_name", lib_name,
+            "--output_dir", abs_output_dir,
+        ]
+    else:
+        lib_gen_cmd = None
+
+    # Set up environment with PYTHONPATH
+    model_env = os.environ.copy()
+    qnn_python_path = os.path.join(qnn_sdk_root, "lib", "python")
+    if 'PYTHONPATH' in model_env:
+        model_env['PYTHONPATH'] = qnn_python_path + os.pathsep + model_env['PYTHONPATH']
+    else:
+        model_env['PYTHONPATH'] = qnn_python_path
+
     try:
-        # Execute the converter command
-        print(f"Running qnn-onnx-converter...")
+        # -- Execute the converter command with real-time progress output ----------
+        # Quantization runs full forward inference on ALL calibration samples on CPU.
+        # For large models this can take 20-60+ minutes — real-time output is critical
+        # so the caller can see progress and set appropriate timeout (>= 3600s).
+        print(f"\nRunning qnn-onnx-converter ({quant_desc})...")
         print(f"Command: {' '.join(converter_cmd)}")
-        subprocess.run(
+        print(f"[INFO] Quantization calibration in progress - this may take 20-60+ minutes for large models.")
+        print(f"[INFO] Each 'input ->' line below = one calibration sample processed.", flush=True)
+
+        # lib_gen_cwd = abs_output_dir so that qnn-model-lib-generator creates
+        # its tmp_<pid>/ scratch folders inside the model output directory rather
+        # than in the parent (which could be the project root or server CWD).
+        # _cleanup_tmp_folders() below removes them after a successful run.
+        lib_gen_cwd = abs_output_dir
+        os.makedirs(lib_gen_cwd, exist_ok=True)
+
+        # Use Popen for real-time output instead of subprocess.run()
+        # This allows progress to be visible immediately rather than buffered.
+        import time as _time
+        # Bug 8 fix: set cwd to the output root directory so qnn-onnx-converter
+        # runs in the intended location rather than inheriting the server process
+        # CWD (QAIModelBuilder/backend/), which would cause any tool that
+        # defaults to ./output/ to create stray directories there.
+        proc = subprocess.Popen(
             converter_cmd,
-            check=True,
-            env=run_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             encoding='utf-8',
-            errors='replace'
+            errors='replace',
+            env=model_env,
+            cwd=lib_gen_cwd
         )
+        sample_count = 0
+        start_time = _time.time()
+        for line in proc.stdout:
+            line = line.rstrip()
+            # Detect calibration sample progress lines (e.g., "input -> sample_0001.raw")
+            if 'input \u2192' in line or 'input ->' in line or ('input' in line.lower() and '.raw' in line):
+                sample_count += 1
+                elapsed = int(_time.time() - start_time)
+                print(f"[PROGRESS] Calibration sample {sample_count} ({elapsed}s elapsed): {line}", flush=True)
+            elif line:
+                print(line, flush=True)
+        proc.wait()
+        if proc.returncode != 0:
+            raise subprocess.CalledProcessError(proc.returncode, converter_cmd)
+
+        elapsed_total = int(_time.time() - start_time)
+        print(f"[OK] qnn-onnx-converter complete - {sample_count} calibration samples processed in {elapsed_total}s")
         print(f"Successfully converted ONNX to C++ and binary for {model_info['model_name']}")
-        
+
         # Fix: Handle case where converter creates file without .cpp extension
         # This is a known QAIRT SDK bug on Windows where qnn-onnx-converter sometimes
         # outputs the model graph file without the .cpp extension (e.g., "model" instead
@@ -327,18 +553,21 @@ def convert_model(model_info, cwd, calibration_list_path, act_bw=16, weight_bw=8
                 os.rename(cpp_no_ext, abs_cpp_path)
                 print(f"Fixed: Renamed {cpp_no_ext} to {abs_cpp_path}")
 
-        # Execute the lib generator command
-        print(f"\nRunning qnn-model-lib-generator...")
-        print(f"Command: {' '.join(lib_gen_cmd)}")
-        subprocess.run(
-            lib_gen_cmd,
-            check=True,
-            env=run_env,
-            encoding='utf-8',
-            errors='replace'
-        )
-
-        print(f"Successfully converted {model_path} to {output_dir_path}")
+        # Execute the lib generator command when the host supports it.
+        if lib_gen_cmd:
+            print(f"\nRunning qnn-model-lib-generator (arch: {lib_gen_arch})...")
+            print(f"Command: {' '.join(lib_gen_cmd)}")
+            subprocess.run(
+                lib_gen_cmd,
+                check=True,
+                encoding='utf-8',
+                errors='replace',
+                env=model_env,
+                cwd=lib_gen_cwd
+            )
+            print(f"Successfully converted {model_path} to {output_dir_path}")
+        else:
+            print("[INFO] Skipping model library generation on ARM Linux; converter outputs are retained.")
 
         # Cleanup intermediate files if requested
         if cleanup_intermediate:
@@ -351,18 +580,22 @@ def convert_model(model_info, cwd, calibration_list_path, act_bw=16, weight_bw=8
                     except OSError as e:
                         print(f"Could not remove intermediate file {file_path}: {e}")
 
+            _cleanup_tmp_folders(abs_output_dir)
             # Clean up temp folders created by qnn-model-lib-generator
             _cleanup_tmp_folders(model_info["model_dir"])
 
         return True
-        
+
     except subprocess.CalledProcessError as e:
         print(f"\n[ERROR] INT quantization failed for {model_info['model_name']}")
         print(f"\nTroubleshooting tips:")
-        print(f"  1. If error mentions 'dynamic inputs', add: --input-dim name:1,3,H,W")
+        print(f"  1. If error mentions 'dynamic inputs', add: --input-dim name,1,3,H,W")
         print(f"  2. If 'access denied', ensure output path is writable")
         print(f"  3. If 'calibration_list' not found, check --input_list path")
         print(f"  4. If 'unsupported operator', check dry-run first")
+        print(f"  5. On WoS ARM64: ensure vcvarsall.bat arm64 was called")
+        print(f"  6. On WoS ARM64: try adding --no-simplification flag")
+        print(f"  7. If timeout: increase timeout to >= 3600s (quantization is slow for large models)")
         print(f"\nFailed command: {' '.join(converter_cmd)}")
         return False
     except Exception as e:
@@ -374,93 +607,126 @@ def main():
     """Main function to process all ONNX files."""
     # Parse command-line arguments
     parser = argparse.ArgumentParser(
-        description='Convert ONNX models to quantized QNN format (INT8/A16W8)',
+        description='Convert ONNX models to quantized QNN format (W8A16/W8A8/W8A8B8/W4A16/W4A8)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
+Quantization Modes:
+  W8A16 (default, recommended for vision):
+    python qai_convert_int.py --input_network model.onnx --input_list calib.txt
+
+  W8A8 (bias defaults to FP32):
+    python qai_convert_int.py --input_network model.onnx --input_list calib.txt \\
+      --act_bw 8 --weight_bw 8
+
+  W8A8B8 (bias explicitly quantized to INT8):
+    python qai_convert_int.py --input_network model.onnx --input_list calib.txt \\
+      --act_bw 8 --weight_bw 8 --bias_bw 8
+
+  W4A16:
+    python qai_convert_int.py --input_network model.onnx --input_list calib.txt \\
+      --act_bw 16 --weight_bw 4
+
+  W4A8:
+    python qai_convert_int.py --input_network model.onnx --input_list calib.txt \\
+      --act_bw 8 --weight_bw 4
+
 Prerequisites:
   Before running this script, ensure you have:
   1. QAIRT_SDK_ROOT environment variable set
   2. Calibration data (raw float32 binary files)
   3. Calibration list file (one path per line)
-  4. Sourced QNN environment setup script
+  4. Sourced QNN environment setup script,  On WoS ARM64: vcvarsall.bat arm64 called, VCTargetsPath set to VS 2022 Community
 
 Calibration Data Format:
   - Raw float32 binary files (.raw)
   - Shape matching model input (e.g., 1x3x64x64 = 49152 floats)
   - 50-200 representative samples recommended
+  - Input format: NHWC (for HTP inference)
+
+Calibration List Format (calibration_list.txt):
+  input:=calib_data/sample_001.raw
+  input:=calib_data/sample_002.raw
+  ...
 
 Examples:
   # Convert with default settings (A16W8)
-  python aipc_convert_int.py --input_network model.onnx --input_list calib.txt
+  python qai_convert_int.py --input_network model.onnx --input_list calib.txt
 
   # INT8 quantization (A8W8)
-  python aipc_convert_int.py --input_network model.onnx --input_list calib.txt \\
+  python qai_convert_int.py --input_network model.onnx --input_list calib.txt \\
     --act_bw 8 --weight_bw 8
 
   # Dynamic input model
-  python aipc_convert_int.py --input_network model.onnx --input_list calib.txt \\
+  python qai_convert_int.py --input_network model.onnx --input_list calib.txt \\
     --input-dim input,1,3,64,64
 
   # Custom output directory
-  python aipc_convert_int.py --input_network model.onnx --input_list calib.txt \\
+  python qai_convert_int.py --input_network model.onnx --input_list calib.txt \\
     --output-root ./qnn_output
         """
     )
-    
+
     parser.add_argument(
         '--input_network',
         type=str,
         default=None,
         help='Path to input ONNX model file. If not specified, converts all .onnx files in current directory'
     )
-    
+
     parser.add_argument(
         '--output_path',
         type=str,
         default=None,
         help='Path for output .cpp file. If not specified, uses <model_name>_a{act_bw}_w{weight_bw}.cpp in same directory as input'
     )
-    
+
     parser.add_argument(
         '--input_list',
         type=str,
         default='calibration_list.txt',
         help='Path to calibration list file for quantization (default: calibration_list.txt)'
     )
-    
+
     parser.add_argument(
         '--act_bw',
         type=int,
         default=16,
-        help='Activation bit width for quantization (default: 16)'
+        help='Activation bit width for quantization (default: 16). Use 8 for W8A8/W4A8, 16 for W8A16/W4A16'
     )
-    
+
     parser.add_argument(
         '--weight_bw',
         type=int,
         default=8,
-        help='Weight bit width for quantization (default: 8)'
+        help='Weight bit width for quantization (default: 8). Use 4 for W4A16/W4A8'
     )
-    
+
+    parser.add_argument(
+        '--bias_bw',
+        type=int,
+        default=None,
+        help='Bias bit width for quantization (optional). Set to 8 for W8A8B8 only; omit = bias stays FP32'
+    )
+
     parser.add_argument(
         '--qnn_sdk_root',
         type=str,
         default=None,
-        help='QAIRT SDK root path (default: from QAIRT_SDK_ROOT env or /local/mnt/workspace/project/qnn/qairt/2.41.0)'
+        help='QAIRT SDK root path (default: from QAIRT_SDK_ROOT env)'
     )
-    
+
     parser.add_argument(
         '--host-arch',
         type=str,
         default='',
-        help='Host toolchain for QNN tools (default: auto-detected using detect_host_arch())'
+        help='Host toolchain for qnn-onnx-converter (default: auto-detected). On WoS: x86_64-windows-msvc'
     )
-    
+
     parser.add_argument(
         '--target-arch',
         type=str,
         default='',
-        help='Device toolchain for model compilation (default: auto-detected using detect_target_arch())'
+        help='Device toolchain for model compilation (default: auto-detected). On WoS: windows-aarch64'
     )
 
     parser.add_argument(
@@ -486,6 +752,7 @@ Examples:
         metavar=("INPUT_NAME,DIMS"),
         help="Explicit input dimensions for dynamic inputs. Format: input_name,1,3,224,224 (repeatable). Example: --input-dim input,1,3,64,64"
     )
+
     parser.add_argument(
         '--preserve-io-mode',
         choices=('datatype', 'layout', 'none'),
@@ -493,6 +760,13 @@ Examples:
         help="Preserve IO mode for qnn-onnx-converter. 'datatype' passes '--preserve_io' "
              "(keep layout+dtype). 'layout' passes '--preserve_io layout' (layout only). "
              "'none' passes no preserve options."
+    )
+
+    parser.add_argument(
+        '--no-simplification',
+        action='store_true',
+        dest='no_simplification',
+        help="Pass --no_simplification to qnn-onnx-converter. Recommended for WoS ARM64 (QAIRT 2.45)."
     )
 
     args = parser.parse_args()
@@ -512,7 +786,7 @@ Examples:
     
     # Get current working directory using os.getcwd() for portability
     cwd = os.getcwd()
-    
+
     # Check if calibration list exists
     calibration_list_path = args.input_list
     calib_path_full = os.path.join(cwd, calibration_list_path)
@@ -521,18 +795,19 @@ Examples:
         print(f"\nCalibration list is REQUIRED for quantization.")
         print(f"Format: One raw input file path per line.")
         print(f"Example calibration_list.txt:")
-        print(f"  calib_data/sample_001.raw")
-        print(f"  calib_data/sample_002.raw")
+        print(f"  input:=calib_data/sample_001.raw")
+        print(f"  input:=calib_data/sample_002.raw")
         print(f"  ...")
         print(f"\nEach .raw file should be:")
         print(f"  - Float32 binary data")
         print(f"  - Shape matching model input (e.g., 1x3x64x64 = 49152 floats)")
+        print(f"  - Input format: NHWC (for HTP inference)")
         print(f"  - 50-200 representative samples recommended")
         print(f"\nCreate calibration data first, then re-run this script.")
         response = input("\nContinue anyway without calibration? (y/n): ")
         if response.lower() != 'y':
             sys.exit(1)
-    
+
     # Determine which ONNX files to process
     if args.input_network:
         # Process single specified file
@@ -543,45 +818,55 @@ Examples:
     else:
         # Find all ONNX files in current directory
         onnx_files = find_onnx_files()
-        
         if not onnx_files:
             print("No ONNX files found in the current directory")
             sys.exit(1)
-    
+
+    quant_desc = f"act_bw={args.act_bw}, weight_bw={args.weight_bw}"
+    if args.bias_bw is not None:
+        quant_desc += f", bias_bw={args.bias_bw}"
     print(f"Found {len(onnx_files)} ONNX file(s) to convert")
-    print(f"Configuration: act_bw={args.act_bw}, weight_bw={args.weight_bw}")
-    
-    # Process each ONNX file
+    print(f"Quantization: {quant_desc}")
+
     success_count = 0
     fail_count = 0
-    
+
     for onnx_file in onnx_files:
-        model_info = get_model_info(onnx_file, args.act_bw, args.weight_bw, args.output_root)
-        
+        model_info = get_model_info(onnx_file, args.act_bw, args.weight_bw, args.bias_bw, args.output_root)
+
         # Override output path if specified
         if args.output_path and len(onnx_files) == 1:
             model_info['cpp_path'] = args.output_path
             # Update bin path to match
             model_info['bin_path'] = os.path.splitext(args.output_path)[0] + '.bin'
-        
-        if convert_model(model_info, cwd, calibration_list_path, args.act_bw, args.weight_bw,
-                        args.qnn_sdk_root, args.host_arch, args.target_arch, args.cleanup_intermediate,
-                        parsed_input_dims, args.preserve_io_mode):
+
+        if convert_model(
+            model_info, cwd, calibration_list_path,
+            args.act_bw, args.weight_bw, args.bias_bw,
+            args.qnn_sdk_root, args.host_arch, args.target_arch,
+            args.cleanup_intermediate, parsed_input_dims, args.preserve_io_mode,
+            args.no_simplification
+        ):
             success_count += 1
         else:
             fail_count += 1
-    
-    # Print summary
+
     print("\n" + "="*50)
     print(f"Conversion Summary:")
     print(f"  Total files: {len(onnx_files)}")
     print(f"  Successful: {success_count}")
     print(f"  Failed: {fail_count}")
     print("="*50)
-    
-    # Exit with appropriate code
+
     sys.exit(0 if fail_count == 0 else 1)
 
 
 if __name__ == "__main__":
+    # Windows ARM64 builds DLLs; Linux x86_64 cross-compiles ARM64 .so libraries.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _host_arch import detect_host_os as _detect_host_os  # noqa: E402
+    _ho = _detect_host_os()
+    if _ho not in ("windows-arm64", "linux-x64"):
+        print(f"[ERROR] qai_convert_int.py supports windows-arm64 or linux-x64; host is {_ho}.")
+        sys.exit(2)
     main()

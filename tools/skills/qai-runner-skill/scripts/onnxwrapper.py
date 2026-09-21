@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------
-# Copyright (c) 2026 Qualcomm Innovation Center, Inc. All rights reserved.
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
 # -*- coding: utf-8 -*-
@@ -96,8 +96,8 @@ import qai_appbuilder
 from qai_appbuilder import QNNConfig, QNNContext, Runtime, LogLevel, ProfilingLevel, PerfProfile
 
 # Detect QNNConfig.Config API shape once at import time.
-# Older qai_appbuilder builds ) accept (libs_dir, runtime, log_level, profiling_level).
-# Newer builds removed libs_dir: (runtime, log_level, profiling_level, log_path).
+# Older qai_appbuilder builds (pre-2.47) accept (libs_dir, runtime, log_level, profiling_level).
+# Newer builds (2.47+) removed libs_dir: (runtime, log_level, profiling_level, log_path).
 # We use keyword arguments throughout so the call is self-documenting and order-independent.
 import inspect as _inspect
 _QNN_CONFIG_HAS_LIBS_DIR = "libs_dir" in _inspect.signature(QNNConfig.Config).parameters
@@ -118,7 +118,7 @@ if platform.system().lower() == "windows":
                     _resolved_arch = f"hexagon-v{_match.group(1)}"
             except Exception:
                 pass
-        
+
         # Fall back to v73 if validator fails or is missing
         _hexagon_folder = _resolved_arch or "hexagon-v73"
         if not _resolved_arch:
@@ -628,6 +628,24 @@ class BaseRunner:
 
     def _get_actual_architecture(self):
         """Get the actual architecture, handling Windows ARM64 emulation quirks."""
+        # Allow explicit host arch override via data/config/host_arch (single-line
+        # ASCII: arm64 or x64). Used by --arch forced end-to-end validation where a
+        # x64 python runs under WoS Prism emulation and platform/env would mislead
+        # us into picking the aarch64 toolchain. Missing/invalid file = fall through.
+        try:
+            repo_root = Path(__file__).resolve().parents[4]
+            host_arch_file = repo_root / "data" / "config" / "host_arch"
+            if host_arch_file.is_file():
+                value = host_arch_file.read_text(encoding="utf-8").strip().lower()
+                if value == "arm64":
+                    return "ARM64"
+                if value in ("x64", "amd64", "x86_64"):
+                    # platform.machine() on Windows x64 returns "AMD64"; match that
+                    # so _get_toolchain picks x86_64-windows-msvc.
+                    return "AMD64"
+        except (OSError, ValueError):
+            pass
+
         if not self.is_windows:
             return platform.machine()
          
@@ -1705,7 +1723,7 @@ class QNNModelWrapper(QNNContext):
                 candidates += [lib_base + ".cpu.bin"]
             else:
                 candidates += [lib_base + ".htp.bin"]
-            
+
             candidates += [lib_base + ".dlc"]
             if system == "WINDOWS":
                 candidates += [lib_base + ".dll.bin", lib_base + ".dll"]
@@ -2005,6 +2023,13 @@ class SessionOptions:
 class InferenceSession:
     _qnn_initialized = False
     _last_config_key: Optional[tuple] = None
+    # Module-wide refcount of sessions currently holding HTP BURST. BURST is a
+    # GLOBAL profile, so we set it when the first BURST session is created and
+    # release it only when the last one goes away. Holding it resident across
+    # the session lifetime (rather than toggling per run()) avoids forcing the
+    # HTP clock to ramp down/up on every inference — critical for looped /
+    # streaming / autoregressive callers.
+    _burst_refcount = 0
 
     def __init__(self, model_path: str, sess_options: Optional[SessionOptions] = None, providers: Optional[List[str]] = None):
         if sess_options is None:
@@ -2109,6 +2134,19 @@ class InferenceSession:
                 self._model_profile = SnpeRunner()
             elif any(lower.endswith(ext) for ext in (".so", ".so.bin", ".dll", ".dll.bin", ".bin")):
                 self._model_profile = QnnRunner()
+
+        # Raise HTP to BURST ONCE, now that a model (QNNContext) is loaded, and
+        # hold it resident for the whole session lifetime (released in __del__).
+        # Do NOT toggle per run() — that would ramp the HTP clock every call.
+        self._perf_active = False
+        if self._perf_profile == "BURST":
+            try:
+                if InferenceSession._burst_refcount == 0:
+                    PerfProfile.SetPerfProfileGlobal(PerfProfile.BURST)
+                InferenceSession._burst_refcount += 1
+                self._perf_active = True
+            except Exception:
+                self._perf_active = False
 
     # ---- expected helpers ----
     def _get_expected_shape_by_name(self, name: str):
@@ -2346,7 +2384,7 @@ class InferenceSession:
             # Reorder outputs to match ONNX/YAML order
             # QNN returns in its own order, we map back to ONNX order
             out_map = {n: t for n, t in zip(self._output_names, outs)}
-            
+
             if output_names is not None:
                 outs = [out_map[n] for n in output_names]
             else:
@@ -2403,6 +2441,18 @@ class InferenceSession:
         return getattr(self, "_output_names_onnx", None) or self._output_names
 
     def __del__(self):
+        # Release the resident HTP BURST hold BEFORE the model context is torn
+        # down. Only the last outstanding BURST session actually releases the
+        # global profile (refcounted).
+        if getattr(self, "_perf_active", False):
+            try:
+                InferenceSession._burst_refcount -= 1
+                if InferenceSession._burst_refcount <= 0:
+                    InferenceSession._burst_refcount = 0
+                    PerfProfile.RelPerfProfileGlobal()
+            except Exception:
+                pass
+            self._perf_active = False
         if hasattr(self, "_model"):
             del self._model
 

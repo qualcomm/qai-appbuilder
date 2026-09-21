@@ -4,22 +4,22 @@
 # ---------------------------------------------------------------------
 #!/usr/bin/env python3
 """
-aipc_project_setup.py — Initialize an AIPC project with standard templates.
+qai_project_setup.py — Initialize an AIPC project with standard templates.
 
 Actions
 -------
-1. Attach ``assets/aipc_AGENTS.md`` to the project's ``AGENTS.md``
+1. Attach ``assets/qai_AGENTS.md`` to the project's ``AGENTS.md``
    (appends if the file already exists; creates it if it does not).
 2. Ensure Claude-compatible prompt entry points are present by linking
    ``CLAUDE.md`` to ``AGENTS.md`` when appropriate.
-3. Copy ``assets/aipc_plan.md`` to the project directory as ``aipc_plan.md``
+3. Copy ``assets/plan.md`` to the project directory as ``plan.md``
    (backs up any existing file before overwriting).
 
 Usage
 -----
 Run from the skill directory (do NOT copy this script to the project folder):
 
-    python skills/aipc-toolkit/scripts/aipc_project_setup.py  [project_dir]  [options]
+    python skills/aipc-toolkit/scripts/qai_project_setup.py  [project_dir]  [options]
 
 Arguments
 ---------
@@ -28,8 +28,8 @@ project_dir     Target project directory.  Defaults to the current working
 
 Options
 -------
---agents-only   Only attach AGENTS.md; skip aipc_plan.md.
---plan-only     Only copy aipc_plan.md; skip AGENTS.md.
+--agents-only   Only attach AGENTS.md; skip plan.md.
+--plan-only     Only copy plan.md; skip AGENTS.md.
 --force         Re-append / overwrite even when the target files already
                 contain AIPC content.
 """
@@ -44,8 +44,8 @@ from pathlib import Path
 # Paths — resolved relative to this script so it works from any cwd
 # ---------------------------------------------------------------------------
 SKILL_DIR = Path(__file__).resolve().parent.parent
-AGENTS_TEMPLATE = SKILL_DIR / "assets" / "aipc_AGENTS.md"
-PLAN_TEMPLATE = SKILL_DIR / "assets" / "aipc_plan.md"
+AGENTS_TEMPLATE = SKILL_DIR / "assets" / "qai_AGENTS.md"
+PLAN_TEMPLATE = SKILL_DIR / "assets" / "plan.md"
 
 # Sentinel written into AGENTS.md so we can detect a previous attachment
 _AIPC_AGENTS_SENTINEL = "<!-- AIPC-TOOLKIT:AGENTS -->"
@@ -55,8 +55,8 @@ _AGENTS_HEADER = f"""\n
 ---
 {_AIPC_AGENTS_SENTINEL}
 <!-- AIPC Toolkit Agent Definitions                                  -->
-<!-- Appended automatically by aipc_project_setup.py                -->
-<!-- Source: skills/aipc-toolkit/references/aipc_AGENTS.md          -->
+<!-- Appended automatically by qai_project_setup.py                  -->
+<!-- Source: skills/aipc-toolkit/assets/qai_AGENTS.md               -->
 <!-- ----------------------------------------------------------------->
 
 """
@@ -129,7 +129,7 @@ def _setup_claude_prompt_link(
 
 
 def setup_agents(project_dir: Path, force: bool = False) -> None:
-    """Attach aipc_AGENTS.md to <project_dir>/AGENTS.md and wire Claude prompts."""
+    """Attach qai_AGENTS.md to <project_dir>/AGENTS.md and wire Claude prompts."""
     if not AGENTS_TEMPLATE.is_file():
         print(f"[ERROR] Template not found: {AGENTS_TEMPLATE}", file=sys.stderr)
         sys.exit(1)
@@ -174,29 +174,29 @@ def setup_agents(project_dir: Path, force: bool = False) -> None:
                 fh.write(template_content)
                 fh.write("\n")
             agents_updated = True
-            print(f"[OK]    Appended aipc_AGENTS.md  ->  {target}")
+            print(f"[OK]    Appended qai_AGENTS.md  ->  {target}")
 
     else:
         # No existing AGENTS.md — create one directly from the template
         shutil.copy2(AGENTS_TEMPLATE, target)
         agents_updated = True
-        print(f"[OK]    Created {target} from aipc_AGENTS.md template")
+        print(f"[OK]    Created {target} from qai_AGENTS.md template")
 
     if agents_updated or force or target.exists():
         _setup_claude_prompt_link(target, claude_target, force=force)
 
 
 def setup_plan(project_dir: Path, force: bool = False) -> None:
-    """Copy aipc_plan.md to <project_dir>/aipc_plan.md and auto-fill START_TIME."""
+    """Copy plan.md to <project_dir>/plan.md and auto-fill START_TIME."""
     if not PLAN_TEMPLATE.is_file():
         print(f"[ERROR] Template not found: {PLAN_TEMPLATE}", file=sys.stderr)
         sys.exit(1)
 
-    target = project_dir / "aipc_plan.md"
+    target = project_dir / "plan.md"
 
     if target.exists():
         backup_path = _backup(target)
-        print(f"[BAK]   Backed up existing aipc_plan.md  ->  {backup_path.name}")
+        print(f"[BAK]   Backed up existing plan.md  ->  {backup_path.name}")
 
     # Copy template
     shutil.copy2(PLAN_TEMPLATE, target)
@@ -210,7 +210,7 @@ def setup_plan(project_dir: Path, force: bool = False) -> None:
     )
     _write(target, content)
     
-    print(f"[OK]    Copied aipc_plan.md  ->  {target} (START_TIME={current_time})")
+    print(f"[OK]    Copied plan.md  ->  {target} (START_TIME={current_time})")
 
 
 # ---------------------------------------------------------------------------
@@ -235,12 +235,12 @@ def main() -> None:
     parser.add_argument(
         "--agents-only",
         action="store_true",
-        help="Only attach AGENTS.md; skip aipc_plan.md",
+        help="Only attach AGENTS.md; skip plan.md",
     )
     parser.add_argument(
         "--plan-only",
         action="store_true",
-        help="Only copy aipc_plan.md; skip AGENTS.md",
+        help="Only copy plan.md; skip AGENTS.md",
     )
     parser.add_argument(
         "--force",
@@ -269,7 +269,7 @@ def main() -> None:
 
     print()
     print("Next steps:")
-    print("  1. Open aipc_plan.md and fill in the Config section variables.")
+    print("  1. Open plan.md and fill in the Config section variables.")
     print("  2. Activate the aipc-toolkit skill and follow the plan.")
     print("=" * 60)
 

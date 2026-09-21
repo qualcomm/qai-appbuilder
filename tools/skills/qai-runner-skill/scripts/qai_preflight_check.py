@@ -9,7 +9,7 @@ AIPC Preflight Check Script
 Validates environment and model before QNN/SNPE conversion.
 
 Usage:
-  python aipc_preflight_check.py --onnx model.onnx --target-arch windows-aarch64
+  python qai_preflight_check.py --onnx model.onnx --target-arch windows-aarch64
 """
 
 import argparse
@@ -181,7 +181,7 @@ def main():
     if all_passed:
         print("\n✓ All checks passed. Ready for conversion.")
         print("\nNext step:")
-        print(f"  python aipc_convert_fp.py --onnx {args.onnx} --output_dir {args.output_dir} --precision 16")
+        print(f"  python qai_convert_fp.py --onnx {args.onnx} --output_dir {args.output_dir} --precision 16")
         return 0
     else:
         print("\n❌ Some checks failed. Please fix issues before proceeding.")

@@ -1,26 +1,27 @@
 # Troubleshooting Reference
 
-## Conversion failures
-1. Run dry-run first and capture logs.
-2. Identify first blocking op/error.
-3. Patch model graph/export path.
-4. Re-export ONNX and retry conversion.
+This file is a **quick index** into the authoritative troubleshooting sub-SKILLs,
+plus the small set of unique content not covered by any of them.
 
-## Common blocker: unsupported Einsum
-- Symptom: converter error with specific `Einsum` equation.
-- Action:
-  - patch/rewrite unsupported einsum path to primitive ops
-  - validate patched ONNX
-  - rerun dry-run and conversion
-- **Full guide**: See [In-Memory Operator Patching](operator_patching.md) for detailed patching templates and validation steps.
+## Navigation: problem type → authoritative sub-SKILL
 
-## Dynamic input errors (SNPE)
+| Problem type | Authoritative sub-SKILL | One-line content |
+|------|------|------|
+| Conversion failures (dry-run, unsupported ops, Einsum blocker) | `${APP_ROOT}/factory/chat_features/model-builder/troubleshooting/conversion-troubleshooting/SKILL.md` | Converter errors, first-blocking-op triage, ONNX re-export/retry, escalation bundle |
+| Inference runtime failures / wrong results / low cosine / **multi-model same-process** | `${APP_ROOT}/factory/chat_features/model-builder/troubleshooting/inference-troubleshooting/SKILL.md` | QNNContext load crash & `QNNConfig.Config()` ordering, NCHW/NHWC, stale-artifact / low-cosine, multi-model sticky-worker rules (unique `model_name`, per-context `DataType.NATIVE` for best perf). **Full multi-model rules + copy-paste code (NATIVE setup) → `references/inference.md § Multi-model same-process (sticky worker) rules`.** |
+| Operator patching (Einsum & other unsupported ops) | `${APP_ROOT}/factory/chat_features/model-builder/troubleshooting/operator-patching/SKILL.md` | Patch/rewrite unsupported op paths to primitives, validate patched ONNX, rerun dry-run |
+| Environment / HTP transport / version mismatch | `${APP_ROOT}/factory/chat_features/model-builder/troubleshooting/env-troubleshooting/SKILL.md` | QAIRT/QNN SDK root, SoC/DSP arch, `ADSP_LIBRARY_PATH`/`LD_LIBRARY_PATH`, stub-lib/transport-1008 fixes |
+| Export / packaging | `${APP_ROOT}/factory/chat_features/model-builder/troubleshooting/export-troubleshooting/SKILL.md` | Export path, manifest/output.type, packaging validation |
+| SDK integrity / write-protection / damaged SDK file recovery | `${APP_ROOT}/factory/chat_features/model-builder/troubleshooting/sdk-integrity-recovery/SKILL.md` | B9 SDK write-protection discipline, 0-byte/`WinError 193` generator diagnosis, single-file recovery from kept SDK zip (no 2 GB reinstall) |
+
+## Unique content
+
+### Dynamic input errors (SNPE)
 - Symptom: `Missing command line inputs for dynamic inputs [...]`
 - Action: pass input dims using:
   - wrapper: `--source-model-input-shape <name> <dims>`
   - direct: `--source_model_input_shape <name> <dims>`
-
-## Bash `nounset` breaks QAIRT env setup
+### Bash `nounset` breaks QAIRT env setup
 
 **Symptoms**:
 - Bash wrapper exits while sourcing QAIRT setup scripts
@@ -72,7 +73,7 @@ Use this pattern in Bash wrappers that prepare QAIRT before running converter, c
 2. Run with:
    ```bash
    export AIPC_SAFE_EXIT=1
-   python aipc infer_xxx.py
+   python qai infer_xxx.py
    ```
 
 **Important**:
@@ -113,7 +114,7 @@ Use this pattern in Bash wrappers that prepare QAIRT before running converter, c
 4. Re-source env and rerun inference via wrapper:
    ```bash
    . /home/ubuntu/aienv.sh
-   python aipc infer_qnn.py
+   python qai infer_qnn.py
    ```
 5. If still failing, print and verify path precedence:
    - `echo $QAIRT_SDK_ROOT`
@@ -157,7 +158,7 @@ qnn-platform-validator --backend dsp --testBackend > "$OUT/validator_test.txt" 2
 
 # 3) runtime libs actually loaded (critical)
 export LD_DEBUG=libs
-timeout 15 python -u aipc onnx_inference.py > "$OUT/lddebug.log" 2>&1 || true
+timeout 15 python -u qai onnx_inference.py > "$OUT/lddebug.log" 2>&1 || true
 grep -E 'libQnnHtp\\.so|libQnnSystem\\.so' "$OUT/lddebug.log" > "$OUT/loaded_qnn_libs.txt" || true
 
 # 4) rpc daemons
@@ -217,7 +218,7 @@ echo "Triage bundle saved to: $OUT"
 5. Run inference only through wrapper:
    ```bash
    export QAI_QNN_RUNTIME=HTP
-   python aipc onnx_inference.py
+   python qai onnx_inference.py
    ```
 
 **Validation**:
@@ -259,7 +260,7 @@ is created in the working directory. This is acceptable for bring-up but not for
 **Production fix**: Split the model into two smaller sub-graphs, each producing a context
 binary below the SMMU limit (~800 MB is a safe target).
 
-**Full guide**: See `references/model_split.md` for the decision tree, split patterns,
+**Full guide**: See `references/model-architectures/model_split.md` for the decision tree, split patterns,
 export/conversion/deployment steps, and validation.
 
 ## Escalate when
@@ -274,7 +275,7 @@ Escalation bundle:
 - conversion log
 - minimal reproduce steps
 
-## PowerShell Variable Expansion (Windows)
+### PowerShell Variable Expansion (Windows)
 
 **Symptom**: Commands fail with errors like:
 - `:PATH is not recognized...`
@@ -302,11 +303,12 @@ Escalation bundle:
    ```
 
 3. **Single-quote the command** (fragile, not recommended for complex scripts):
-   ```bash
-   powershell -Command 'Get-ChildItem | ForEach-Object { $_.FullName }'
-   ```
+    ```bash
+    powershell -Command 'Get-ChildItem | ForEach-Object { $_.FullName }'
+    ```
+> Historical note: the old `run_pipeline.bat` wrapper no longer exists. `run_pipeline.py` and `qai_dev_gen_contextbin.py` now handle everything it used to — reading `QAIRT_SDK_ROOT` from `qairt_env.json`, HTP DLL search order, and the context-binary generator's false non-zero exit code (they check file existence instead).
 
-## Subprocess Encoding Errors on Windows (qnn-onnx-converter / qnn-model-lib-generator)
+### Subprocess Encoding Errors on Windows (qnn-onnx-converter / qnn-model-lib-generator)
 
 **Symptom**:
 ```
@@ -325,7 +327,7 @@ Always pass `encoding='utf-8', errors='replace'` to `subprocess.run()` when invo
 subprocess.run(cmd, check=True, encoding='utf-8', errors='replace')
 ```
 
-`errors='replace'` substitutes undecodable bytes with `\ufffd`  instead of crashing. The lost binary output is irrelevant — it's only progress animation and internal timing data.
+`errors='replace'` substitutes undecodable bytes with `�`  instead of crashing. The lost binary output is irrelevant — it's only progress animation and internal timing data.
 
 For scripts that use `subprocess.Popen` with reader threads (like `qnn-model-lib-generator` invoked via `qnn-model-lib-generator` Python wrapper), the same issue can occur in the reader thread. The workaround is to set `PYTHONIOENCODING=utf-8` and `PYTHONUTF8=1` in the environment, or ensure the subprocess stdout is opened in binary mode:
 
@@ -336,8 +338,10 @@ for line in proc.stdout:
 ```
 
 **References**:
-- `skills/aipc-toolkit/scripts/aipc_convert_fp.py` line 217 — existing workaround
-- `skills/aipc-toolkit/scripts/aipc_convert_int.py` line 300 — same workaround
+- `scripts/qai_convert_fp.py` — existing workaround: the `subprocess.run(...)` calls in
+  `convert_onnx_to_qnn()` pass `encoding='utf-8', errors='replace'` (grep `errors='replace'`)
+- `scripts/qai_convert_int.py` — same workaround in its converter / lib-generator
+  `subprocess.run(...)` calls (grep `errors='replace'`)
 
 ---
 
@@ -345,7 +349,7 @@ for line in proc.stdout:
 
 **Symptom**:
 ```
-UnicodeEncodeError: 'cp950' codec can't encode character '\u2705' in position 88: illegal multibyte sequence
+UnicodeEncodeError: 'cp950' codec can't encode character '✅' in position 88: illegal multibyte sequence
 ```
 or similar `UnicodeEncodeError` when running model export (`export_onnx.py`) or diagnostic scripts in command-line environments.
 
@@ -397,14 +401,14 @@ The model is compiled with a newer version of the QAIRT SDK (which uses a newer 
 
 **Root cause: Architecture mismatch on ARM64 Windows with x86_64 emulated Python**:
 - Python runs under x86_64 emulation: platform.machine() returns AMD64, platform.processor() returns ARMv8 (... Qualcomm).
-- snpe-net-run.exe is a **pure AMD64** binary at in/x86_64-windows-msvc/snpe-net-run.exe.
+- snpe-net-run.exe is a **pure AMD64** binary at bin/x86_64-windows-msvc/snpe-net-run.exe.
 - When --use_dsp is passed, it tries to load QnnHtp.dll / SNPE.dll to access HTP hardware.
 - The AMD64 QnnHtp.dll at lib/x86_64-windows-msvc/QnnHtp.dll **cannot access HTP hardware** — x86_64 emulation doesn't forward NPU driver ioctls.
 - The ARM64X (CHPE hybrid) QnnHtp.dll at lib/arm64x-windows-msvc/QnnHtp.dll can access HTP but **cannot be loaded by a pure AMD64 binary** — the CHPE loader is only available in the native ARM64 Windows loader, not the x86_64 emulation layer.
 - Result: access violation crash.
 
 **Detection**:
-`python
+```python
 import platform
 print(platform.machine())    # AMD64 on emulated Python
 print(platform.processor())  # ARMv8 (64-bit) ... Qualcomm
@@ -416,13 +420,13 @@ with open('snpe-net-run.exe', 'rb') as f:
     f.read(4)
     m = struct.unpack('<H', f.read(2))[0]
 # 0x8664 = AMD64, 0xAA64 = ARM64, 0x01C4 = ARM64X(CHPE)
-`
+```
 
-**Resolution**: Use the ipc wrapper (via qai_appbuilder / onnxwrapper.py) instead of snpe-net-run.exe:
-`powershell
+**Resolution**: Use the aipc wrapper (via qai_appbuilder / onnxwrapper.py) instead of snpe-net-run.exe:
+```powershell
 # The wrapper auto-discovers .dlc alongside .onnx and handles ARM64X bridging
-python aipc infer_onnx.py -- --model model.onnx --input input.jpg --output output.png
-`
+python qai infer_onnx.py -- --model model.onnx --input input.jpg --output output.png
+```
 
 The wrapper uses qai_appbuilder Python package which properly loads the ARM64X (CHPE) hybrid runtime DLLs from lib/arm64x-windows-msvc/, bridging x86_64 emulated Python to native HTP hardware.
 

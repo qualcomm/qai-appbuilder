@@ -236,7 +236,7 @@ for name, module in model.named_children():
 
 > **Two-tower models** (CLIP, dual-encoder retrieval): the towers are already independent
 > — export them as separate ONNX files rather than splitting a single graph.
-> See `references/multi_component_pipeline.md`.
+> See `references/model-architectures/multi_component_pipeline.md`.
 
 ### 4.2 Write Part A and Part B wrapper modules
 
@@ -345,7 +345,7 @@ export QAIRT_TMP_DIR=/workspace/qairt_tmp   # set if /tmp is full
 
 for PART in {MODEL_NAME}_part_a {MODEL_NAME}_part_b; do
   # Convert
-  python skills/aipc-toolkit/scripts/aipc_convert_fp.py \
+  python scripts/qai_convert_fp.py \
     --onnx        {ONNX_DIR}/${PART}.onnx \
     --output-root {OUTPUT_DIR} \
     --precision   16 \
@@ -419,7 +419,7 @@ def run_model(*inputs):
     return out_b[0]
 ```
 
-Run via `aipc` wrapper:
+Run via `qai` wrapper:
 
 ```bash
 export QAI_QNN_LIBS_DIR=$QAIRT_SDK_ROOT/lib/aarch64-oe-linux-gcc11.2
@@ -427,7 +427,7 @@ export LD_LIBRARY_PATH=$QAI_QNN_LIBS_DIR:$LD_LIBRARY_PATH
 export ADSP_LIBRARY_PATH=$QAIRT_SDK_ROOT/lib/hexagon-v{DSP_ARCH}/unsigned
 export QAI_QNN_RUNTIME=HTP
 
-python aipc infer_{MODEL_NAME}.py
+python qai infer_{MODEL_NAME}.py
 ```
 
 ---
@@ -450,7 +450,7 @@ the CPU FP32 baseline:
 out_cpu = part_b_cpu.run(None, inputs)[0]
 print(f"CPU:  std={out_cpu.std():.4f}  range=[{out_cpu.min():.3f},{out_cpu.max():.3f}]")
 
-# HTP FP16 (via aipc wrapper on target)
+# HTP FP16 (via qai wrapper on target)
 out_htp = part_b_htp.run(None, inputs)[0]
 print(f"HTP:  std={out_htp.std():.4f}  range=[{out_htp.min():.3f},{out_htp.max():.3f}]")
 ```
@@ -486,7 +486,7 @@ This is acceptable for bring-up and non-latency-critical deployments.
 INT8 quantization reduces context binary size by ~4× vs FP32 (vs ~2× for FP16), which
 may bring the binary below the SMMU limit without splitting. INT8 also uses fixed-point
 arithmetic that is less susceptible to the large-activation FP16 issue. Use
-`aipc_convert_int.py` with calibration data.
+`qai_convert_int.py` with calibration data.
 
 **Option 4 — `--custom_io` with FP32 boundary tensors** (advanced)
 
@@ -553,7 +553,7 @@ import numpy as np, onnxruntime as ort
 orig_sess = ort.InferenceSession(f"onnx_models/{MODEL_NAME}.onnx")
 out_orig = orig_sess.run(None, dict(zip(orig_input_names, dummy_inputs)))[0]
 
-# Split: chained parts via aipc (QNN HTP)
+# Split: chained parts via qai (QNN HTP)
 out_split = run_model(*dummy_inputs)
 
 cosine = float(np.dot(out_orig.flatten(), out_split.flatten()) /
@@ -582,7 +582,7 @@ print(f"Cosine similarity (orig vs split): {cosine:.4f}")
 | `err 1002` / `Failed to initialize graph memory` | Same as above | Same as above |
 | VTCM sweep does not change binary size | VTCM controls on-chip scratch, not weight mapping | Use model split — VTCM is not the constraint |
 | Part B input shapes mismatch at export | Boundary tensor shapes not traced before export | Trace Part A with `torch.no_grad()` and print all output shapes first |
-| `autogen.yaml` created but outputs wrong | JIT fallback active — YAML auto-generated without ONNX I/O info | Deploy correct `.yaml` from `aipc_inspect_onnxio.py` alongside `.onnx` |
+| `autogen.yaml` created but outputs wrong | JIT fallback active — YAML auto-generated without ONNX I/O info | Deploy correct `.yaml` from `qai_inspect_onnxio.py` alongside `.onnx` |
 | Part A holds reference to full model | Wrapper assigned full model, not sub-modules | Assign only the sub-modules each part needs in `__init__` |
 | HTP part output `std` is 20–80% smaller than CPU FP32 | FP16 accumulation error from large boundary tensors (skip connections with range > ±50) | Move split point away from large-activation boundaries; or use INT8; or test JIT `.so` fallback |
 | Denoising loop diverges (latent `std` grows unboundedly) | Accumulated FP16 error per step from wrong UNet output scale | Diagnose per-part output `std` on HTP vs CPU; fix the part with the largest deviation |
@@ -706,10 +706,14 @@ part_b_input_names = (
 ```
 
 ---
-
 ## See Also
 
 - `references/host_context_binary_gen.md` — VTCM sweep, soc_id/dsp_arch config
-- `references/multi_component_pipeline.md` — per-component export/conversion loop
+- `references/model-architectures/multi_component_pipeline.md` — per-component export/conversion loop
+- This guide is the only place covering
+  **ONNX-graph-level** splitting (`onnx.utils.extract_model()`, `onnx-graphsurgeon`) for when
+  you have an exported `.onnx` but no PyTorch source to re-partition
 - `references/troubleshooting.md` — transport errors, skel load failures
 - `references/model_export_validation.md` — `dynamo=False` for diffusers, `check_model` path API
+- `references/core_workflow.md` — per-step commands
+- `references/on_device_context_binary.md` — context-binary generation and VTCM tuning
