@@ -15,3 +15,4 @@ examples/AiHubLauncher/*
 *.md
 tools/
 QAIModelBuilder/
+alg/

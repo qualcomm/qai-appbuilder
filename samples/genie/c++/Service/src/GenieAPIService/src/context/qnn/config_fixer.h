@@ -82,7 +82,11 @@ public:
         My_Log{My_Log::Level::kInfo} << j_.dump(4) << "\n";
     }
 
-    json FixConfig();
+    // watermark_callback_name 非空时,把 /dialog/sampler 段改写为 type:"custom" +
+    // 该 callback-name,并剔除 SDK 明确禁止与 custom 共存的 temp/top-k/top-p/greedy 键
+    // (custom 与 callback-name 是互相强制的一对,详见 genie.md)。为空(默认,含
+    // GENIE_WATERMARK_ENABLE 未开启/插件未声明 token hook 能力两种情形)时该段完全不变。
+    json FixConfig(const std::string &watermark_callback_name = "");
 
     json FixSampler() const
     {
@@ -116,7 +120,7 @@ private:
 
 using ConfigFixer = GenieContext::ConfigFixer;
 
-inline json ConfigFixer::FixConfig()
+inline json ConfigFixer::FixConfig(const std::string &watermark_callback_name)
 {
     /* @formatter:off */
     std::vector<FixedInfo> global_items{
@@ -179,6 +183,24 @@ inline json ConfigFixer::FixConfig()
     }
 
     My_Log{} << "fixed the config path successfully\n";
+
+    if (!watermark_callback_name.empty())
+    {
+        // 见 FixConfig() 声明处注释：初始 config JSON 阶段直接写入 custom + callback-name，
+        // 不依赖运行期 applyConfig 切换（该路径是否真的生效尚未证实，见 genie.md）。
+        auto sampler_jp = json::json_pointer("/dialog/sampler");
+        json sampler = j_.contains(sampler_jp) ? j_.at(sampler_jp) : json::object();
+        for (const char *incompatible_key: {"temp", "top-k", "top_k", "top-p", "top_p", "greedy"})
+        {
+            sampler.erase(incompatible_key);
+        }
+        sampler["type"] = "custom";
+        sampler["callback-name"] = watermark_callback_name;
+        j_[sampler_jp] = sampler;
+        My_Log{My_Log::Level::kInfo} << "[Watermark] sampler config rewritten to custom mode, callback-name="
+                                     << watermark_callback_name << "\n";
+    }
+
     My_Log{My_Log::Level::kInfo} << j_.dump(4) << std::endl;
     return j_;
 }

@@ -21,7 +21,11 @@
 
 #include <GenieCommon.h>
 #include <GenieDialog.h>
+#include <GenieSampler.h>
 #include "../context_base.h"
+#include "log.h"
+
+struct QnnWatermarkState;
 
 class GenieContext : public ContextBase
 {
@@ -37,11 +41,29 @@ public:
 
     int SetParams(const std::string &key, const std::string &value) override
     {
+        // custom（水印）采样模式下 SDK 明确禁止 sampler JSON 同时出现 temp/top-k/top-p/greedy，
+        // 请求侧的运行期覆盖沿用既有 SetParams/ApplyParams 通路会试图违反这条约束；保守起见
+        // 直接忽略这类覆盖，避免破坏已生效的 custom 采样配置（水印关闭时此分支不生效，零改动）。
+        if (watermark_active_ &&
+            (key == "temp" || key == "top-k" || key == "top_k" ||
+             key == "top-p" || key == "top_p" || key == "greedy"))
+        {
+            My_Log{My_Log::Level::kWarning}
+                    << "[Watermark] ignoring runtime sampler override '" << key
+                    << "' while token-level watermark (custom sampler) is active\n";
+            return GENIE_STATUS_SUCCESS;
+        }
         return GenieSamplerConfig_setParam(m_SamplerConfigHandle, key.c_str(), value.c_str());
     }
 
     int ApplyParams() override
     {
+        // 见 SetParams() 注释：水印生效时不再走 GenieSampler_applyConfig，避免触碰
+        // 尚未证实是否真的能把 custom 类型改回 basic 的运行期切换路径。
+        if (watermark_active_)
+        {
+            return GENIE_STATUS_SUCCESS;
+        }
         return GenieSampler_applyConfig(m_SamplerHandle, m_SamplerConfigHandle);
     }
 
@@ -72,6 +94,11 @@ private:
     // 的句柄会被静默泄漏，另见 model_manager.md 关于 qwen3_vl_8b-8480 堆损坏崩溃根因分析）。
     void ReleaseHandles();
 
+    // 释放本模型实例持有的水印插件侧状态（`token_hook_free` + 释放 QnnWatermarkState）。
+    // 既被 ~GenieContext() 复用，也被构造函数在任意一步失败时复用；已注册的
+    // callback-name 无法从 SDK 全局表中撤销（无 unregister API），这是已知限制，不在此处理。
+    void ReleaseWatermarkState();
+
     static GenieLog_Level_t get_genie_log_level();
 
     bool GenerateTextToken(const std::string &text, const int32_t *&buf, uint32_t &len);
@@ -100,6 +127,12 @@ private:
     std::mutex m_stream_lock;
     std::condition_variable m_stream_cond;  // Condition variable for stream data
     QInterfaceImpl *inf_impl_{};
+
+    // 水印：仅当 WatermarkProviderHost::Instance().HasTokenHook() 为真且本实例的
+    // GenieSampler_registerUserDataCallback 注册成功时才为 true；为 false 时 sampler
+    // 配置/Dialog 创建流程与现状完全一致，不涉及本节任何逻辑。
+    bool watermark_active_{false};
+    QnnWatermarkState *wm_state_{nullptr};
 
     // Fix 5: track whether generation was stopped due to output token limit
     bool stopped_by_output_limit_{false};
