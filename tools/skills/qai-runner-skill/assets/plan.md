@@ -12,7 +12,7 @@
 
 Before reporting the whole project as complete:
 
-- [ ] Main configured flow is complete and accepted on the required target (`RETMOE_DEVICE_INFO` remote target if set).
+- [ ] Main configured flow is complete and accepted on the required target (`REMOTE_DEVICE_INFO` remote target if set).
 - [ ] `REPORT.md` exists and links the final validation evidence.
 - [ ] Config completion fields are filled: `END_TIME`, `WORK_TIME`, and final pass/fail status.
 - [ ] If `ACCURACY_REPORT = YES`, Phase R is complete and linked from `REPORT.md`.
@@ -44,7 +44,8 @@ TARGET_DEVICE = <!-- ARM WIN  (QCOM) / x86 Linux/ ARM Linux (QCOM) -->
 
 PRECISION     = <!-- FP32 / FP16 (default)/ BF16(experimental) / INT8 / A16W8 /INT4/ A8W4 -->
 QUANT_TOOL    = <!-- QAIRT (default) / AIMET
-                     QAIRT: uses aipc_convert_int.py / snpe-dlc-quant — simple, works on all platforms.
+                     QAIRT: uses qai_convert_int.py for QNN and qairt-quantizer for SNPE/DLC.
+                            snpe-dlc-quant is a legacy fallback for older SDKs only.
                      AIMET: uses AIMET QuantSim — runs the same PRECISION as configured, but adds
                             advanced PTQ techniques (CLE, AdaRound, SeqMSE) for higher accuracy.
                             Produces .onnx + .encodings → handed to QAIRT converter via
@@ -55,7 +56,7 @@ CONTEXT_BINARY_GEN = <!-- YES (default) / NO
                          YES: generate a hardware-specific HTP context binary on the HOST (x86) for the target SoC, then deploy to target (required on ARM WIN; recommended for fixed-SoC deployment)
                          NO:  skip context binary generation (use raw .so / .dll directly; only valid when on-device JIT compilation is acceptable) -->
 
-RETMOE_DEVICE_INFO = <!-- Optional to configure. Leave empty for local inference.
+REMOTE_DEVICE_INFO = <!-- Optional to configure. Leave empty for local inference.
                          If set, remote target inference is MANDATORY for final acceptance (host-only validation is not sufficient).
                          For remote (target-device) inference, you must provide a file (text/YAML) that records:
                            a) SSH information (host/user/port and key path if needed)
@@ -94,7 +95,7 @@ ONNX_FILE     = {MODEL_NAME}.onnx
 # COMPONENTS   = <!-- comma-separated component names, e.g. text_encoder, unet, vae_decoder -->
 # ONNX_DIR     = <!-- directory for all component ONNX files, e.g. onnx_models -->
 # When COMPONENTS is set, all Phase 1–5 tasks iterate over each component.
-# See references/multi_component_pipeline.md for the full workflow.
+# See references/model-architectures/multi_component_pipeline.md for the full workflow.
 HOST_ARCH      = <!-- can derived from HOST_DEVICE:
                      ARM WIN    → x86_64-windows-msvc  (emulation — qairt ARM WIN toolchain uses x86_64 emulation)
                      X86 LINUX  → x86_64-linux-clang
@@ -163,7 +164,7 @@ TARGET_ARCH   = <!-- derived from CONTEXT_BINARY_GEN and TARGET_DEVICE:
    │   Flow A — QNN      │                             │   Flow B — SNPE     │
    │                     │                             │                     │
    │ • AI PC / Linux ARM │                             │ • Android / DSP     │
-   │ • aipc wrapper      │                             │ • aipc wrapper      │
+   │ • qai wrapper      │                             │ • qai wrapper      │
    │ • .so / .dll lib    │                             │ • .dlc file         │
    │ • HTP / CPU / GPU   │                             │ • DSP / CPU / GPU   │
    │ • Context binary    │                             │ • .dlc / ctx binary │
@@ -173,13 +174,13 @@ TARGET_ARCH   = <!-- derived from CONTEXT_BINARY_GEN and TARGET_DEVICE:
 | Criteria | Flow A — QNN | Flow B — SNPE |
 |---|---|---|
 | Output format | `.bin` + `.cpp` + `.so`/`.dll` | `.dlc` |
-| Inference API | `aipc` wrapper (`python aipc`) | `aipc` wrapper (`python aipc`) |
+| Inference API | `qai` wrapper (`python qai`) | `qai` wrapper (`python qai`) |
 | Supported runtimes | HTP, CPU, GPU | DSP, CPU, GPU |
 | Context binary | ✅ Supported | ⚙️ Optional |
 | Quantization | FP16, FP32, BF16 (experimental export/input path only), INT8, A16W8 | FP16, FP32, BF16 (experimental source ONNX only), INT8, A16W8  |
 | Primary target | AI PC, ARM Linux | Android, Embedded Linux |
 | Converter tool | `qnn-onnx-converter` | `qairt-converter` |
-| Script | `aipc_convert_fp.py` / `aipc_convert_int.py` | `aipc_convert_snpe.py` |
+| Script | `qai_convert_fp.py` / `qai_convert_int.py` | `qai_convert_snpe.py` |
 
 ### Quantization Tool Selection
 
@@ -199,7 +200,7 @@ Is PRECISION INT8 / A16W8 / INT4 / A8W4?
 |---|---|---|
 | Platform | All (Windows, Linux) | Linux only (x86 / ARM) |
 | Precision applied | As configured (`{PRECISION}`) | Same as configured (`{PRECISION}`) |
-| Calibration | `.raw` list → `aipc_convert_int.py` | Python calibration callback → `QuantSim` |
+| Calibration | `.raw` list → `qai_convert_int.py` | Python calibration callback → `QuantSim` |
 | Advanced PTQ | ✗ | ✅ CLE, AdaRound, SeqMSE — same precision, higher accuracy |
 | Output artifacts | `.bin` / `.cpp` / `.dlc` directly | `.onnx` + `.encodings` → QAIRT converter |
 | QAIRT handoff | Direct | `--quantization_overrides <model>.encodings` |
@@ -215,10 +216,10 @@ Is PRECISION INT8 / A16W8 / INT4 / A8W4?
 - [ ] Convert `{ONNX_FILE}` using **{FLOW}** flow
 - [ ] (Optional) Quantize model to `{PRECISION}` using **{QUANT_TOOL}** with calibration data
 - [ ] (Required on ARM WIN / Optional on Linux — QNN only) Generate context binary for `{TARGET_DEVICE}`
-- [ ] Implement end-to-end inference pipeline using aipc launcher
+- [ ] Implement end-to-end inference pipeline using qai launcher
 - [ ] Validate accuracy and performance against baseline
 - [ ] Profile model on target runtime and produce bottleneck + suggestion report
-- [ ] If `RETMOE_DEVICE_INFO` is set, complete remote deployment + target inference + runtime log collection (**required for final acceptance**)
+- [ ] If `REMOTE_DEVICE_INFO` is set, complete remote deployment + target inference + runtime log collection (**required for final acceptance**)
 
 ---
 
@@ -369,7 +370,7 @@ OPSET         = <!-- e.g. 13 -->
   export LD_LIBRARY_PATH=$QAI_QNN_LIBS_DIR:$LD_LIBRARY_PATH
   export ADSP_LIBRARY_PATH={QAIRT_ROOT}/lib/hexagon-v{DSP_ARCH}/unsigned
   ```
-- [ ] Remote acceptance env snapshot (mandatory when `RETMOE_DEVICE_INFO` is set):
+- [ ] Remote acceptance env snapshot (mandatory when `REMOTE_DEVICE_INFO` is set):
   ```bash
   # Linux example (x86 Linux / ARM Linux)
   SNAPSHOT=acceptance_env_snapshot.txt
@@ -386,7 +387,7 @@ OPSET         = <!-- e.g. 13 -->
 - [ ] Runtime libs consistency check (platform-aware; Linux command below):
   ```bash
   export LD_DEBUG=libs
-  timeout 15 python -u aipc onnx_inference.py > lddebug.log 2>&1 || true
+  timeout 15 python -u qai onnx_inference.py > lddebug.log 2>&1 || true
   grep -E 'libQnnHtp\\.so|libQnnSystem\\.so' lddebug.log
   ```
 - [ ] If runtime core libs are loaded from different parent directories/toolchain families, mark ❌ Blocked.
@@ -491,7 +492,7 @@ OPSET         = <!-- e.g. 13 -->
   ```
 
 - [ ] **1.6** ONNX inference sanity check — compare output with {SRC_FRAMEWORK} baseline
-  > If `RETMOE_DEVICE_INFO` is set, skip local quick-smoke sanity inference at this step and perform target-device inference first in Phase 6.
+  > If `REMOTE_DEVICE_INFO` is set, skip local quick-smoke sanity inference at this step and perform target-device inference first in Phase 6.
 
 - [ ] **1.7** Iterative patching (if needed)
   - If dry-run shows new unsupported ops after patch → repeat Tasks 1.2–1.6
@@ -512,7 +513,7 @@ OPSET         = <!-- e.g. 13 -->
 
 - [ ] **2.1** Inspect `{ONNX_FILE}` I/O shapes and dtypes
   ```bash
-  python skills/aipc-toolkit/scripts/aipc_inspect_onnxio.py {ONNX_FILE}
+  python skills/aipc-toolkit/scripts/qai_inspect_onnxio.py {ONNX_FILE}
   ```
   > Record results in `INPUT_NAME`, `INPUT_SHAPE`, `OUTPUT_NAMES` in Variables above.
 
@@ -548,7 +549,7 @@ OPSET         = <!-- e.g. 13 -->
 ## [QNN] Phase 4A: FP16 / FP32 / BF16 Conversion
 
 **Agent**: Conversion Agent  
-**Script**: `skills/aipc-toolkit/scripts/aipc_convert_fp.py`
+**Script**: `skills/aipc-toolkit/scripts/qai_convert_fp.py`
 
 > Skip if going directly to low-bit quantization → proceed to Phase 4B.
 >
@@ -562,7 +563,7 @@ OPSET         = <!-- e.g. 13 -->
 
 - [ ] **QNN-4A.1** Run FP conversion
   ```bash
-  python skills/aipc-toolkit/scripts/aipc_convert_fp.py \
+  python skills/aipc-toolkit/scripts/qai_convert_fp.py \
     --onnx {ONNX_FILE} \
     --output-root {OUTPUT_DIR} \
     --precision <!-- 16 or 32 --> \
@@ -589,7 +590,7 @@ OPSET         = <!-- e.g. 13 -->
 ## [QNN] Phase 4B: Model Quantization (INT4/INT8/A16W8) — QAIRT path (default)
 
 **Agent**: Quantization Agent  
-**Script**: `skills/aipc-toolkit/scripts/aipc_convert_int.py`  
+**Script**: `skills/aipc-toolkit/scripts/qai_convert_int.py`  
 **Reference**: `skills/aipc-toolkit/references/model_quantization.md`
 
 > Use when `{QUANT_TOOL} = QAIRT`. Quantizes to `{PRECISION}` using the QAIRT toolchain directly.  
@@ -631,7 +632,7 @@ WEIGHT_BITWIDTH   = <!-- 8 (typical); see note above for other modes -->
 
 - [ ] **QNN-4B.3** Run INT quantization
   ```bash
-  python skills/aipc-toolkit/scripts/aipc_convert_int.py \
+  python skills/aipc-toolkit/scripts/qai_convert_int.py \
     --input_network {ONNX_FILE} \
     --input_list {CALIB_LIST} \
     --output-root {OUTPUT_DIR} \
@@ -793,7 +794,7 @@ PY
 
 ### Tasks
 
-- [ ] **QNN-5.1** Confirm `{SOC_ID}` and `{DSP_ARCH}` from target device (see `host_context_binary_gen.md` Step 1; on Windows on Snapdragon, run the `aipc_qairt_devinfo.ps1` script from the skill scripts directory to automatically detect them)
+- [ ] **QNN-5.1** Confirm `{SOC_ID}` and `{DSP_ARCH}` from target device (see `host_context_binary_gen.md` Step 1; on Windows on Snapdragon, run the `qai_qairt_devinfo.ps1` script from the skill scripts directory to automatically detect them)
 
 - [ ] **QNN-5.2** Create SoC config file (`.conf`) on the host:
 
@@ -938,7 +939,7 @@ Before `QNN-6` / `SNPE-6` and `Phase 7` can be marked ✅ Done, real inference m
 - For audio/speech models, this means waveform/feature preprocessing, model execution, and task postprocessing such as transcript, tokens, embeddings, or scores.
 - For text/LLM decoder models, this means prompt tokenization, required prefill/KV-cache handling when applicable, decode for one or more generated tokens, and detokenization to text.
 - For multimodal/custom models, this means all required modality preprocessors, model execution, and task-specific decoded outputs.
-- If `RETMOE_DEVICE_INFO` is set, run real inference on the remote target; host-only inference is not final acceptance.
+- If `REMOTE_DEVICE_INFO` is set, run real inference on the remote target; host-only inference is not final acceptance.
 - Record the selected runtime artifact, input source, model outputs, decoded/task output, and runtime environment.
 - Compare QNN/SNPE outputs against PyTorch or ONNX CPU baseline for the same input — this is mandatory, not optional. Cosine similarity on raw tensors alone is not sufficient; decoded task output must also match (label, box, transcript, generated text, score, etc.).
 
@@ -962,7 +963,7 @@ real_inference_output.txt or equivalent log must include:
 > **ARM Windows (ARM WIN)**: ⚙️ Optional — `.dll.bin` recommended for fixed-SoC deployment; `.dll` direct path is allowed.  
 ### Tasks
 
-> ⚠️ **Inference Guardrail**: All inference MUST use `python aipc infer_{MODEL_NAME}.py`.
+> ⚠️ **Inference Guardrail**: All inference MUST use `python qai infer_{MODEL_NAME}.py`.
 > Never call `qai_appbuilder.QNNContext` directly.
 > **Reason**: QAIRT reorders output tensors at context-binary compile time. The `onnxwrapper`
 > restores ONNX output order via the `.yaml` file. Direct `QNNContext` returns HTP-internal order —
@@ -997,7 +998,7 @@ real_inference_output.txt or equivalent log must include:
   - Operations: <!-- resize, normalize, channel reorder, etc. -->
   - Output: `numpy.ndarray float32`
 
-- [ ] **QNN-6.2** Run inference via `aipc` wrapper
+- [ ] **QNN-6.2** Run inference via `qai` wrapper
   ```bash
   # Ensure QAIRT_SDK_ROOT is set (source {QAIRT_ENV_SETUP} first)
   
@@ -1007,10 +1008,10 @@ real_inference_output.txt or equivalent log must include:
   cp {OUTPUT_DIR}/lib{MODEL_NAME}.so.bin ./{MODEL_NAME}.onnx.so.bin
   
   # Then run inference
-  python aipc path/to/onnx_inference.py
+  python qai path/to/onnx_inference.py
   ```
   > Ensure wrapper-selected QNN file is the intended deployed artifact (not stale from previous runs).
-  > The `aipc` wrapper passes the `.onnx` path but searches for a matching QNN binary in the same directory.  
+  > The `qai` wrapper passes the `.onnx` path but searches for a matching QNN binary in the same directory.  
   > See `references/inference.md` → Model File Resolution for full search order.  
   > If I/O names fail, regenerate the model YAML.
   > Linux `.so` (non-context) is allowed only if QNN-5.7 fallback gate is satisfied and logged.
@@ -1057,13 +1058,13 @@ real_inference_output.txt or equivalent log must include:
 ## [SNPE] Phase 4: DLC Conversion (FP16 / FP32 / BF16)
 
 **Agent**: Conversion Agent  
-**Script**: `skills/aipc-toolkit/scripts/aipc_convert_snpe.py`
+**Script**: `skills/aipc-toolkit/scripts/qai_convert_snpe.py`
 
 ### Tasks
 
 - [ ] **SNPE-4.1** Run SNPE DLC conversion
   ```bash
-  python skills/aipc-toolkit/scripts/aipc_convert_snpe.py \
+  python skills/aipc-toolkit/scripts/qai_convert_snpe.py \
     --onnx {ONNX_FILE} \
     --output {OUTPUT_DIR}/{MODEL_NAME}.dlc \
     --precision <!-- fp16 or fp32 -->
@@ -1113,27 +1114,38 @@ WEIGHT_BITWIDTH   = <!-- 8 (typical); see note above for other modes -->
 
 ### SNPE Phase 4A — QAIRT path (default, all platforms)
 
-> Use when `{QUANT_TOOL} = QAIRT`. Quantizes to `{PRECISION}` using the QAIRT toolchain directly.
+> Use when `{QUANT_TOOL} = QAIRT`. Quantizes to `{PRECISION}` using
+> `qairt-quantizer`. The input must be an FP32 DLC produced by `qairt-converter`.
+> `snpe-dlc-quant` is a legacy fallback for older SDKs that do not provide
+> `qairt-quantizer`.
 
 - [ ] **SNPE-5A.1** Prepare calibration dataset (50–200 representative samples)
   - Format: raw float32 binary `.raw` files, shape matching `{INPUT_SHAPE}`
 
 - [ ] **SNPE-5A.2** Generate `{CALIB_LIST}`
   ```
-  # One absolute file path per line
+  # Single-input: one absolute file path per line
   calibration_raw/sample_001.raw
   calibration_raw/sample_002.raw
   ...
+
+  # Multi-input: all named inputs for one sample on the same line
+  input_a:=calibration_raw/sample_001_a.raw input_b:=calibration_raw/sample_001_b.raw
   ```
 
-- [ ] **SNPE-5A.3** Run DLC quantization
+- [ ] **SNPE-5A.3** Run DLC quantization with the current QAIRT tool
   ```bash
-  {QAIRT_ROOT}/bin/x86_64-linux-clang/snpe-dlc-quant \
+  qairt-quantizer \
     --input_dlc {OUTPUT_DIR}/{MODEL_NAME}.dlc \
-    --input_list {CALIB_LIST} \
     --output_dlc {OUTPUT_DIR}/{MODEL_NAME}_quantized.dlc \
-    --enable_htp
+    --input_list {CALIB_LIST} \
+    --param_quantizer tf \
+    --act_quantizer tf \
+    --act_bitwidth {ACT_BITWIDTH} \
+    --weights_bitwidth {WEIGHT_BITWIDTH}
   ```
+  > For multi-input models, put all inputs for one sample on the same line as
+  > `name:=path` pairs. See `references/snpe_conversion.md`.
 
 - [ ] **SNPE-5A.4** Verify `{MODEL_NAME}_quantized.dlc` ✓
 
@@ -1166,7 +1178,7 @@ WEIGHT_BITWIDTH   = <!-- 8 (typical); see note above for other modes -->
     --out_node {OUTPUT_NAMES} \
     -o {OUTPUT_DIR}/{MODEL_NAME}_aimet.dlc
   ```
-  > Skip `snpe-dlc-quantize` — AIMET encodings are already embedded via `--quantization_overrides`.
+  > Skip `qairt-quantizer` and legacy `snpe-dlc-quantize` — AIMET encodings are already embedded via `--quantization_overrides`.
 
 - [ ] **SNPE-5B.3** Verify `{MODEL_NAME}_aimet.dlc` ✓
 
@@ -1194,10 +1206,10 @@ DLC_FILE      = <!-- {MODEL_NAME}.dlc  /  {MODEL_NAME}_quantized.dlc (QAIRT)  / 
   - Operations: <!-- resize, normalize, channel reorder, etc. -->
   - Output: `numpy.ndarray float32`
 
-- [ ] **SNPE-6.2** Run inference via `aipc` wrapper
+- [ ] **SNPE-6.2** Run inference via `qai` wrapper
   ```bash
   # Ensure QAIRT_SDK_ROOT is set (source {QAIRT_ENV_SETUP} first)
-  python aipc path/to/onnx_inference.py
+  python qai path/to/onnx_inference.py
   ```
   > If I/O names fail, regenerate the model YAML.
 
@@ -1252,6 +1264,11 @@ DLC_FILE      = <!-- {MODEL_NAME}.dlc  /  {MODEL_NAME}_quantized.dlc (QAIRT)  / 
   - BF16 threshold: user-confirmed tolerance after end-to-end validation
   - Low-Bit Quantization (INT4/INT8/A16W8) threshold: ≥ 0.95
   - Result: <!-- PASS / FAIL, score: value -->
+
+- [ ] **6.1a** Validate debug `.npy` input/output artifacts when generated
+  - Confirm each input/output `.npy` file exists, is non-empty, and belongs to the same test input and run
+  - Check tensor shape, dtype, finite values, and input/output correspondence against the source contract
+  - Record the artifact paths and the validation/comparison result in `REPORT.md`
 
 - [ ] **6.2** Task-specific accuracy (if applicable)
   - Metric: <!-- mAP / Top-1 Acc / WER / BLEU / etc. -->
@@ -1324,8 +1341,8 @@ DLC_FILE      = <!-- {MODEL_NAME}.dlc  /  {MODEL_NAME}_quantized.dlc (QAIRT)  / 
 
   **SNPE (`.dlc`) — detailed level (per-layer timings)**
   ```bash
-  # Via aipc wrapper (recommended)
-  QAI_SNPE_PROFILING_LEVEL=detailed python aipc path/to/infer_{MODEL_NAME}.py
+  # Via qai wrapper (recommended)
+  QAI_SNPE_PROFILING_LEVEL=detailed python qai path/to/infer_{MODEL_NAME}.py
   # output → snpe_output/SNPEDiag_0.log
   ```
 
@@ -1417,12 +1434,12 @@ DLC_FILE      = <!-- {MODEL_NAME}.dlc  /  {MODEL_NAME}_quantized.dlc (QAIRT)  / 
   - Do not use preserve-io flags (`--preserve_io` or `--preserve_io layout`) in this run.
   - If script supports it, use:
   ```bash
-  python scripts/aipc_convert_fp.py \
+  python scripts/qai_convert_fp.py \
     --onnx {ONNX_FILE} \
     --preserve-io-mode none \
     --output-dir qairt_profile_none
   ```
-  - Apply the same no-preserve-io setting for INT path (`aipc_convert_int.py`) or AIMET path (`aipc_convert_aimet.py`) when applicable, targeting `qairt_profile_none/` (or the equivalent layout-prefixed directory).
+  - Apply the same no-preserve-io setting for INT path (`qai_convert_int.py`) or AIMET path (`qai_convert_aimet.py`) when applicable, targeting `qairt_profile_none/` (or the equivalent layout-prefixed directory).
 
 - [ ] **9.3** Re-implement I/O handling as needed
   - Re-check generated model I/O metadata (`_net.json` / yaml / inspector output).
@@ -1484,7 +1501,7 @@ DLC_FILE      = <!-- {MODEL_NAME}.dlc  /  {MODEL_NAME}_quantized.dlc (QAIRT)  / 
   - pass/fail conclusion and known limitations
 
 - [ ] **R.4** Run / document QAIRT Accuracy Debugger backup as needed
-  - default acceptance remains AIPC wrapper output from Phase 6/7
+  - default acceptance remains QAI wrapper output from Phase 6/7
   - if debugger is used, record ladder status: `framework_runner` -> `inference_engine` -> `verification` -> `tensor_visualizer` -> `snooping`
   - collect debugger CSV/HTML/plot paths, worst tensor/op, and rows below threshold
   - record target debugger limitations separately from final acceptance, especially when debugger reconverts/re-prepares a model that already passed wrapper acceptance
@@ -1522,7 +1539,7 @@ DLC_FILE      = <!-- {MODEL_NAME}.dlc  /  {MODEL_NAME}_quantized.dlc (QAIRT)  / 
 
 ### Tasks
 
-- [ ] **E.1** Read work history: `aipc_plan.md` Issue Log, `REPORT.md`, `logs/`, and all referenced documents
+- [ ] **E.1** Read work history: `plan.md` Issue Log, `REPORT.md`, `logs/`, and all referenced documents
 - [ ] **E.2** Resolve `{AIPC_SKILL_DIR}` and ensure it is a git repository; if missing git metadata, initialize it and commit the initial skill state before making changes
 - [ ] **E.3** Identify candidate improvements across: environment setup, operator patching, conversion, quantization, inference/validation, profiling, agent flow
 - [ ] **E.4** For each candidate: prepare the proposed change text, target file/section, and rationale
@@ -1711,11 +1728,11 @@ New ops discovered: {list or "none"}
 | QNN-4B | Model Quantization (INT4/INT8/A16W8) — QAIRT | QNN | ⬜ Not Started |
 | QNN-4C | Model Quantization (INT4/INT8/A16W8) — AIMET, same precision + advanced PTQ (Linux only) | QNN | ⬜ Not Started |
 | QNN-5 | Context Binary Generation | QNN | ⬜ Not Started |
-| QNN-6 | Inference (aipc wrapper) | QNN | ⬜ Not Started |
+| QNN-6 | Inference (qai wrapper) | QNN | ⬜ Not Started |
 | SNPE-4 | DLC Conversion (FP16/FP32/BF16) | SNPE | ⬜ Not Started |
 | SNPE-5A | DLC Quantization (INT4/INT8/A16W8) — QAIRT | SNPE | ⬜ Not Started |
 | SNPE-5B | DLC Quantization (INT4/INT8/A16W8) — AIMET, same precision + advanced PTQ (Linux only) | SNPE | ⬜ Not Started |
-| SNPE-6 | Inference (aipc wrapper) | SNPE | ⬜ Not Started |
+| SNPE-6 | Inference (qai wrapper) | SNPE | ⬜ Not Started |
 | 7 | Validation & Testing | Common | ⬜ Not Started |
 | 8 | Profiling & Bottleneck Report | Common | ⬜ Not Started |
 | QNN-9 | Layout Optimization (remove `--preserve_io`, optional end-of-plan) | QNN | ⬜ Not Started |
@@ -1728,10 +1745,81 @@ New ops discovered: {list or "none"}
 
 ## References
 
+---
+
+## Python Environment Troubleshooting
+
+> This section covers project-level Python env issues that arise when the QAIRT venv packages
+> are incompatible with the model or inference script. It does not change the general porting workflow.
+
+### QAIRT venv `transformers` version too old for the model
+
+Some models (e.g. Qwen3, Llama-3, Gemma-2) require a newer `transformers` than the version
+shipped in the QAIRT venv. Symptoms: `ValueError: Unrecognized model` or missing model type in
+`AutoConfig.from_pretrained`.
+
+**Safe upgrade pattern** — only bump `transformers` + `tokenizers`, verify no `qai_appbuilder` pin:
+
+```bash
+# 1. Check what qai_appbuilder requires (must not pin transformers to a max version)
+python3 -c "import importlib.metadata as m; print([r for r in (m.requires(qai_appbuilder) or []) if transform in r.lower()])"
+
+# 2. Dry-run to confirm no conflicts before installing
+pip install "transformers==<target_version>" --dry-run 2>&1 | grep -E "Would install|conflict|ERROR"
+
+# 3. Install — only transformers and tokenizers change
+pip install "transformers==<target_version>" "tokenizers>=<min>,<max>"
+```
+
+Record the versions installed in the Issue Log.
+
+### `sklearn` / `scipy` NumPy ABI crash on target device
+
+On ARM Linux targets the QAIRT venv may have `scipy` / `sklearn` compiled against NumPy 1.x
+while the installed NumPy is 2.x. Importing `AutoTokenizer` triggers this chain and crashes:
+
+```
+from sklearn.metrics import roc_curve   # pulled in by transformers.generation
+AttributeError: _ARRAY_API not found    # scipy compiled against NumPy 1.x
+```
+
+**Fix — use `tokenizers` directly instead of `AutoTokenizer`:**
+
+```python
+from tokenizers import Tokenizer
+import json
+
+tok = Tokenizer.from_file("tokenizer.json")
+ids = tok.encode(prompt, add_special_tokens=False).ids
+text = tok.decode(generated_ids)
+```
+
+`tokenizers` is a Rust-backed library with no `sklearn`/`scipy` dependency. It is already
+present in the QAIRT venv and works on all platforms. Read `eos_token_id` / `pad_token_id`
+from `tokenizer_config.json` directly rather than relying on `AutoTokenizer` attributes.
+
+### `qai` launcher — correct invocation on Linux targets
+
+The `qai` launcher is a plain Python script (no shebang execute bit required). Always invoke
+it as a script argument to the QAIRT venv Python, not as a standalone executable:
+
+```bash
+# ✅ Correct — QAIRT venv python runs qai as a script
+python3 qai infer_script.py
+
+# ❌ Wrong — may pick up system python or fail if execute bit is not set
+./qai infer_script.py
+```
+
+On Linux targets `python3` must resolve to the QAIRT venv python (i.e. after sourcing
+`{QAIRT_ENV_SETUP}`). Verify with `which python3` before running inference.
+
+---
+
 | Resource | Path |
 |---|---|
 | AIPC Skill (main) | `../SKILL.md` |
-| Agent Definitions | `../assets/aipc_AGENTS.md` |
+| Agent Definitions | `../assets/qai_AGENTS.md` |
 | PyTorch Modification / Adaptation | `../references/pytorch_modification.md` |
 | Model Export Guide | `../references/model_export_validation.md` |
 | Transformer Decoder ONNX Guide | `../references/transformer_models_qairt.md` |

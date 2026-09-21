@@ -1,12 +1,13 @@
 # ---------------------------------------------------------------------
-# Copyright (c) 2026 Qualcomm Innovation Center, Inc. All rights reserved.
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
 
 #!/usr/bin/env python3
 """
-AIPC SNPE Model Converter
-Converts ONNX models to SNPE DLC format using qairt-converter.
+QAI ModelBuilder SNPE Model Converter
+Converts ONNX models to SNPE DLC format using qairt-converter
+Supports multiple platforms: Windows, Linux (x86_64), and macOS?
 
 Note:
     --bitwidth 16 selects the converter's 16-bit floating-point mode.
@@ -42,7 +43,12 @@ def detect_host_toolchain():
         if machine.lower() in ["amd64", "x86_64", "x64"]:
             return "x86_64-linux-clang"
         elif machine.lower() in ["arm64", "aarch64"]:
-            return "aarch64-linux-clang"
+            # NOT delegated to _host_arch.sdk_bin_subdir(): this function returns
+            # the dir holding the CONVERTER, which on Windows-ARM64 differs
+            # (arm64x-windows-msvc, line 35) from the runtime dir that
+            # sdk_bin_subdir() returns (aarch64-windows-msvc).
+            # Was "aarch64-linux-clang", which exists in no QAIRT SDK.
+            return "aarch64-oe-linux-gcc11.2"
 
     
     # Default fallback
