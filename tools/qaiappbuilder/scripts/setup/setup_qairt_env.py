@@ -969,7 +969,7 @@ def install_inference_deps(root):
             ("scipy<1.15",                  "scipy",            False),
             ("numpy==1.26.4",               "numpy",            False),
             # ── QAI AppBuilder (Linux aarch64 wheel on PyPI) ──────────────────────────────────
-            ("qai-appbuilder",              "qai_appbuilder",   False),
+            ("qai-appbuilder==2.48.40",     "qai_appbuilder",   False),
         ]
     elif _detect_arch() == "aarch64":
         packages = [
