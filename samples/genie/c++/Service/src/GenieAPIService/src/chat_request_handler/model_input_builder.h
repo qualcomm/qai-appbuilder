@@ -463,9 +463,27 @@ private:
             for (const auto& msg_item : all_messages) {
                 chat_history_.AddMessage(msg_item.role, msg_item.content);
             }
+            // stateful 模式（n != -1）：按 -n/--num_response 语义（"保存历史记录轮数"）裁剪，
+            // 激活 ChatHistory::Limit()，避免客户端持续重发增长的 messages 数组导致历史无界增长；
+            // 1 轮近似 user+assistant 两条消息。all_messages 已原样写入 chat_history_，
+            // 此处对它做同口径裁剪只是为了让 PromptLedger 的 kept/dropped 统计与之一致。
+            // num_response==0 时 max_size 为 0，erase(begin(), end()-0) 会连本轮刚追加的当前消息
+            // 一并清空——CLI 层（config.h）对 -n 无范围校验，0 是合法可达值，故显式跳过裁剪、
+            // 回退到"不裁剪"这一更安全的行为，而不是清空全部消息。
+            int num_response = instance_config_->getnumResponse();
+            size_t dropped = 0;
+            if (num_response > 0) {
+                size_t max_size = static_cast<size_t>(num_response) * 2;
+                chat_history_.Limit(max_size);
+                if (all_messages.size() > max_size) {
+                    dropped = all_messages.size() - max_size;
+                    all_messages.erase(all_messages.begin(), all_messages.end() - max_size);
+                }
+            }
             optimized.messages = all_messages;
             optimized.success = true;
             optimized.total_tokens = 0;
+            optimized.dropped_count = dropped;
         }
 
         return optimized;
@@ -894,9 +912,23 @@ private:
                 messages.push_back(msg_info.content);
             }
         } else {
-            // n != -1：不压缩，直接写入历史并构建提示词
+            // n != -1：不压缩，写入历史后按 -n/--num_response 语义（"保存历史记录轮数"）裁剪，
+            // 激活 ChatHistory::Limit()，避免客户端持续重发增长的 messages 数组导致历史无界增长；
+            // 1 轮近似 user+assistant 两条消息。processed_messages 同口径裁剪，保持它与 chat_history_
+            // 一致，因为下面构建提示词的 messages 向量直接源自 processed_messages。
+            // num_response==0 时同上分支：跳过裁剪而非清空当前轮消息，理由见 PrepareFilteredMessages。
             for (const auto& msg_item : processed_messages) {
                 chat_history_.AddMessage(msg_item.role, msg_item.content);
+            }
+            int num_response = instance_config_->getnumResponse();
+            size_t dropped = 0;
+            if (num_response > 0) {
+                size_t max_size = static_cast<size_t>(num_response) * 2;
+                chat_history_.Limit(max_size);
+                if (processed_messages.size() > max_size) {
+                    dropped = processed_messages.size() - max_size;
+                    processed_messages.erase(processed_messages.begin(), processed_messages.end() - max_size);
+                }
             }
             // 构建提示词（需要包装 user 消息为 Harmony 格式）
             for (const auto& msg_item : processed_messages) {
@@ -909,6 +941,7 @@ private:
             optimized.messages = processed_messages;
             optimized.success = true;
             optimized.total_tokens = 0;
+            optimized.dropped_count = dropped;
         }
 
         return optimized;
