@@ -15,7 +15,7 @@ LLaVA vision+language, etc.) that must each be exported, converted, and deployed
 
 ## 1. Config Variables for Multi-Component Projects
 
-Replace the single `MODEL_NAME` / `ONNX_FILE` pair in `aipc_plan.md` with a component list:
+Replace the single `MODEL_NAME` / `ONNX_FILE` pair in `plan.md` with a component list:
 
 ```
 MODEL_NAME    = <pipeline name, e.g. stable-diffusion-v1-5>
@@ -163,11 +163,11 @@ for name, cfg in COMPONENTS.items():
 
 ## 5. Conversion — iterate over components
 
-Run `aipc_convert_fp.py` (or `aipc_convert_int.py`) once per component:
+Run `qai_convert_fp.py` (or `qai_convert_int.py`) once per component:
 
 ```bash
 for COMP in text_encoder unet vae_decoder; do
-  python skills/aipc-toolkit/scripts/aipc_convert_fp.py \
+  python scripts/qai_convert_fp.py \
     --onnx        {ONNX_DIR}/${COMP}.onnx \
     --output-root {OUTPUT_DIR} \
     --precision   16 \
@@ -276,7 +276,7 @@ ssh ubuntu@<target> 'for f in <workdir>/onnx_models/*.yaml; do
 ### 8.1 General pattern — session loading and chaining
 
 A multi-component inference script loads each sub-model as a separate `onnxruntime.InferenceSession`
-(intercepted by the `aipc` wrapper) and chains their outputs:
+(intercepted by the `qai` wrapper) and chains their outputs:
 
 ```python
 import onnxruntime as ort
@@ -295,7 +295,7 @@ enc_out = encoder_sess.run(None, {"input": x})[0]
 dec_out = decoder_sess.run(None, {"enc_hidden": enc_out})[0]
 ```
 
-Run via the `aipc` wrapper so each session is routed through QNN HTP:
+Run via the `qai` wrapper so each session is routed through QNN HTP:
 
 ```bash
 export QAI_QNN_LIBS_DIR=$QAIRT_SDK_ROOT/lib/aarch64-oe-linux-gcc11.2
@@ -303,7 +303,7 @@ export LD_LIBRARY_PATH=$QAI_QNN_LIBS_DIR:$LD_LIBRARY_PATH
 export ADSP_LIBRARY_PATH=$QAIRT_SDK_ROOT/lib/hexagon-v{DSP_ARCH}/unsigned
 export QAI_QNN_RUNTIME=HTP
 
-python aipc infer_{MODEL_NAME}.py
+python qai infer_{MODEL_NAME}.py
 ```
 
 ### 8.2 Fixed batch shapes and multiple forward passes
@@ -395,7 +395,7 @@ def run_pipeline(...):
 Run with:
 ```bash
 export AIPC_SAFE_EXIT=1
-python aipc infer_{MODEL_NAME}.py
+python qai infer_{MODEL_NAME}.py
 ```
 
 > ⚠️ `os._exit(0)` skips all Python finalizers and `atexit` handlers. Always flush
@@ -535,7 +535,7 @@ Only the model weights and NPU execution live on the target.
 
 ---
 
-## 9. `aipc_plan.md` checklist additions for multi-component projects
+## 9. `plan.md` checklist additions for multi-component projects
 
 When `COMPONENTS` is set, replace every single-model task with a per-component loop:
 
@@ -562,3 +562,11 @@ When `COMPONENTS` is set, replace every single-model task with a per-component l
 | `fastrpc memory map failed … error: 0x1` on large context binary | Context binary exceeds DSP SMMU window | Use JIT `.so` fallback or split model into smaller components |
 | Target disk fills up during deployment | Full ONNX files (FP32 weights) are large; not needed on target | Deploy stub `.onnx` (0 bytes) + context binary + YAML only |
 | `No space left on device` during `qnn-model-lib-generator` on host | `objcopy` needs ~2× `.bin` size free in workspace | Free stale intermediates (`.cpp`, `.bin`) or point build to larger volume |
+
+---
+
+## See Also
+
+- `references/model-architectures/model_split.md` — splitting **one** large model whose context binary exceeds the
+  DSP SMMU window (different problem from an inherently multi-component pipeline)
+- `references/core_workflow.md` — per-step commands

@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------
-# Copyright (c) 2026 Qualcomm Innovation Center, Inc. All rights reserved.
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
 
@@ -29,7 +29,7 @@ def inspect_onnx(model_path, include_onnx_dims=False):
     print(f"\n{'='*60}")
     print(f"Inspecting: {model_path}")
     print(f"{'='*60}")
-    
+
     try:
         # Load with ONNX Runtime for reliable shape inference
         session = ort.InferenceSession(model_path, providers=['CPUExecutionProvider'])
@@ -56,12 +56,12 @@ def inspect_onnx(model_path, include_onnx_dims=False):
         name = input_meta.name
         shape = input_meta.shape
         type_name = input_meta.type
-        
+
         print(f"  Name: {name}")
         print(f"  Shape: {shape}")
         print(f"  Type: {type_name}")
         print("-" * 30)
-        
+
         norm_shape = _normalize_shape_for_yaml(shape)
         yaml_data['input'].append(name)
         yaml_data['inputs'].append({
@@ -77,7 +77,7 @@ def inspect_onnx(model_path, include_onnx_dims=False):
         name = output_meta.name
         shape = output_meta.shape
         type_name = output_meta.type
-        
+
         print(f"  Name: {name}")
         print(f"  Shape: {shape}")
         print(f"  Type: {type_name}")
@@ -92,11 +92,11 @@ def inspect_onnx(model_path, include_onnx_dims=False):
         })
         if include_onnx_dims:
             yaml_data['onnx_dims']['outputs'][name] = list(norm_shape)
-        
+
     # Generate YAML file
     base_name = os.path.splitext(model_path)[0]
     yaml_path = f"{base_name}.yaml"
-    
+
     try:
         with open(yaml_path, 'w', encoding='utf-8') as f:
             yaml.safe_dump(yaml_data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
@@ -126,13 +126,13 @@ def main():
     else:
         files = [f for f in os.listdir('.') if f.endswith('.onnx')]
         files.sort()
-        
+
     if not files:
         print("No ONNX files found in the current directory.")
         return
 
     print(f"Found {len(files)} ONNX file(s) to process.")
-    
+
     for f in files:
         if os.path.exists(f):
             inspect_onnx(f, include_onnx_dims=args.include_onnx_dims)

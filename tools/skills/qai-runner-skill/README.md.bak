@@ -127,7 +127,7 @@ Use the following prompts to run a complete AIPC workflow for the current projec
 - `"setup project following aipc skill using template strictly"` for Claude Code
   - Claude Code may not create project files from the template automatically. Confirm this manually.
 
-- Adjust the project configuration in `plan.md`.
+- Adjust the project configuration in `aipc_plan.md`.
   - This is a user action, not a prompt.
   - Regarding "QAIRT_ENV_SETUP": This is a critical configuration item for ensuring agent stability. It is recommended to use a script that automates the activation of a dedicated Python virtual environment containing all necessary packages, followed by the initialization of the QAIRT environment. Automated package installation via the AI agent at runtime is discouraged, as it may result in unintended side effects, such as exceeding context window limits.
 

@@ -1,17 +1,17 @@
-# AIPC / QAIRT Accuracy Checking Guide
+# QAIRT Accuracy Checking Guide
 
 This guide is used for the **Validation / Accuracy Check** step after inference is complete in
-`assets/aipc_plan.md`. By default, it reuses the artifacts that were already deployed and accepted
+`plan.md` (template: `assets/plan.md`). By default, it reuses the artifacts that were already deployed and accepted
 during the inference step (QNN `.so` / `.dll`, QNN context binary `.so.bin` / `.dll.bin`, SNPE
-`.dlc`) and runs the AIPC wrapper directly against the same inputs used for ONNX/PyTorch CPU
+`.dlc`) and runs the QAI wrapper directly against the same inputs used for ONNX/PyTorch CPU
 baseline comparison. **Do not proactively reconvert the model just for an accuracy check.** Only
 enter QAIRT Accuracy Debugger or redo conversion/prepare when artifacts are missing, outputs are
 missing, or validation raw-tensor / task metrics fail.
 
 > [!IMPORTANT]
-> Final AIPC acceptance must prioritize the real inference output produced by
-> `python aipc infer_{MODEL_NAME}.py`. A QNN context binary may change output tensor order, and the
-> AIPC wrapper relies on the `.yaml` file to restore ONNX output order. Calling `QNNContext`
+> Final acceptance must prioritize the real inference output produced by
+> `python qai infer_{MODEL_NAME}.py`. A QNN context binary may change output tensor order, and the
+> QAI wrapper relies on the `.yaml` file to restore ONNX output order. Calling `QNNContext`
 > directly, or relying only on lower-level tool output, can cause silent output mismatches.
 
 ### Default artifact priority
@@ -25,7 +25,7 @@ missing, or validation raw-tensor / task metrics fail.
 
 ---
 
-## 1. AIPC acceptance artifacts
+## 1. Acceptance artifacts
 
 After each inference step, save the following files for validation / accuracy checking:
 
@@ -33,9 +33,9 @@ After each inference step, save the following files for validation / accuracy ch
 accuracy_check/
   inputs/                         # Raw or preprocessed raw/npy inputs used for this validation
   baseline_outputs/               # ONNX/PyTorch CPU baseline, saved by output name
-  target_outputs/                 # AIPC wrapper target-backend outputs, saved by output name
+  target_outputs/                 # QAI wrapper target-backend outputs, saved by output name
   metrics.json                    # cosine / SNR / MAE / max_abs_diff / task metric
-  real_inference_output.txt       # Inference acceptance log required by the AIPC plan
+  real_inference_output.txt       # Inference acceptance log required by the project plan
 ```
 
 Recommended output naming:
@@ -63,24 +63,24 @@ files, but make sure dtype, shape, and output names are recorded.
 
 ### 2.1 Linux host / Linux target
 
-Run the AIPC wrapper locally on Linux or over SSH on a Linux target. `--save-raw-outputs` means
+Run the QAI wrapper locally on Linux or over SSH on a Linux target. `--save-raw-outputs` means
 your project inference script must provide a way to save raw/npy outputs. If it does not yet,
 extend `infer_{MODEL_NAME}.py` so every `{OUTPUT_NAMES}` tensor can be saved as `.npy` or `.raw`:
 
 ```bash
 source <QAIRT_ENV_SETUP>        # for example: source ~/qairt_2404.sh
-python aipc infer_${MODEL_NAME}.py \
+python qai infer_${MODEL_NAME}.py \
   --save-raw-outputs accuracy_check/target_outputs \
   > accuracy_check/real_inference_output.txt 2>&1
 ```
 
-If the target is a remote Linux system, prefer running the AIPC wrapper directly on the target and
+If the target is a remote Linux system, prefer running the QAI wrapper directly on the target and
 then syncing the output directory back:
 
 ```bash
 rsync -av ./inputs/ user@target:/work/accuracy_check/inputs/
 ssh user@target 'cd /work/project && source <QAIRT_ENV_SETUP> && \
-  python aipc infer_${MODEL_NAME}.py \
+  python qai infer_${MODEL_NAME}.py \
     --save-raw-outputs /work/accuracy_check/target_outputs \
     > /work/accuracy_check/real_inference_output.txt 2>&1'
 rsync -av user@target:/work/accuracy_check/ ./accuracy_check/
@@ -89,7 +89,7 @@ rsync -av user@target:/work/accuracy_check/ ./accuracy_check/
 > Linux remote is not the same as ADB. Android usually uses ADB; Linux targets more commonly use
 > SSH or direct execution on the target. If the target matches QAIRT's `linux-embedded` platform
 > flow, you may also use `qairt-accuracy-debugger --platform linux-embedded` for diagnostics, but
-> final acceptance must still be based on AIPC wrapper output.
+> final acceptance must still be based on QAI wrapper output.
 
 ### 2.2 Windows on Snapdragon / ARM Windows
 
@@ -98,7 +98,7 @@ validation can compute metrics:
 
 ```powershell
 . <QAIRT_ENV_SETUP.ps1>
-python aipc infer_${MODEL_NAME}.py `
+python qai infer_${MODEL_NAME}.py `
   --save-raw-outputs accuracy_check\target_outputs `
   *> accuracy_check\real_inference_output.txt
 ```
@@ -106,15 +106,15 @@ python aipc infer_${MODEL_NAME}.py `
 Notes:
 
 * Context binary filenames must match the ONNX name, for example `{MODEL_NAME}.onnx.dll.bin`.
-* The `.yaml` file must be deployed in the same directory as the `.onnx`; the AIPC wrapper uses it
+* The `.yaml` file must be deployed in the same directory as the `.onnx`; the QAI wrapper uses it
   to restore output order.
 * Runtime DLL selection for Windows x86_64 emulation vs native ARM64 Python must follow the
-  host/target architecture rules recorded in the AIPC plan.
+  host/target architecture rules recorded in the project plan.
 
 ### 2.3 Android target
 
 Android targets usually use ADB. If you run QAIRT debugger for target-side diagnostics, use
-`--platform aarch64-android --device_id <adb_serial>`. Final AIPC acceptance should still save the
+`--platform aarch64-android --device_id <adb_serial>`. Final acceptance should still save the
 real wrapper outputs and decoded results.
 
 ### 2.4 QAIRT Accuracy Debugger platform selection
@@ -130,7 +130,7 @@ Use QAIRT debugger only when validation metrics fail or deeper diagnosis is need
 | Android | `--platform aarch64-android --device_id <serial>` | ADB |
 | QNX | `--platform qnx --ip_address <ip> --username <user> --password <pwd>` | IP connection |
 
-For a normal remote Linux target, prefer SSH to run the AIPC wrapper or lower-level
+For a normal remote Linux target, prefer SSH to run the QAI wrapper or lower-level
 `qnn-net-run` on the target, then sync outputs back to the host for `verification`. Do not assume
 remote Linux can be controlled like Android via ADB.
 
@@ -145,7 +145,7 @@ it only for `framework_runner`, `inference_engine`, `verification`, `tensor_visu
 If target-side debugger fails with `module 'onnx' has no attribute 'version'` or a similar ONNX
 API incompatibility, first pin a validated ONNX version inside the isolated venv and retry the
 debugger. Do not replace the currently accepted inference venv. Record the venv path, installed
-packages, versions, and fail/pass logs in the `aipc_plan.md` issue log.
+packages, versions, and fail/pass logs in the `plan.md` issue log.
 
 ---
 
@@ -153,7 +153,7 @@ packages, versions, and fail/pass logs in the `aipc_plan.md` issue log.
 
 ### 3.1 Generate an ONNX CPU baseline
 
-Use exactly the same preprocessed inputs as AIPC inference and save baseline outputs:
+Use exactly the same preprocessed inputs as the target inference and save baseline outputs:
 
 ```bash
 python tools/run_onnx_baseline.py \
@@ -271,7 +271,7 @@ Recommended QAIRT Accuracy Debugger ladder:
 1. `framework_runner`: verify the framework / ONNX baseline is reproducible and save reference
    tensors.
 2. `inference_engine`: run only when you need to redump tensors or validate the debugger path
-   itself; do not use it as a replacement for AIPC wrapper acceptance by default.
+   itself; do not use it as a replacement for QAI wrapper acceptance by default.
 3. `verification`: compare reference and target tensors and generate `verification.csv`.
 4. `tensor_visualizer`: plot important tensors / diffs for manual inspection.
 5. `snooping`: run `oneshot`, `layerwise`, or `cumulative_layerwise` to locate the first layer with
@@ -279,7 +279,7 @@ Recommended QAIRT Accuracy Debugger ladder:
 
 For every step, save the command, working directory, CSV/HTML/plot paths, and pass/fail conclusion.
 At minimum, the report should record the worst cosine/SNR tensor, its op type, whether any layer
-falls below threshold, and whether this affects final AIPC wrapper acceptance.
+falls below threshold, and whether this affects final QAI wrapper acceptance.
 
 #### AIMET encoding diagnostics: `validate_encoding` / `compare_encodings`
 
@@ -406,7 +406,7 @@ qairt-accuracy-debugger verification `
 #### If `.so` / `.dll` / `.dlc` / context binary already exists, do you need reconversion?
 
 * End-to-end acceptance: **do not reconvert by default**. Use the QNN `.onnx.so.bin` /
-  `.onnx.dll.bin` context binary selected by the AIPC wrapper from the deployed inference step, or
+  `.onnx.dll.bin` context binary selected by the QAI wrapper from the deployed inference step, or
   the planned fallback `.so` / `.dll`, or SNPE `.dlc`, then save target outputs and compare them
   against the baseline.
 * Only reconvert, requantize, or regenerate a context binary when artifacts are missing, artifacts
@@ -418,8 +418,8 @@ qairt-accuracy-debugger verification `
   diagnostic path, not the default validation acceptance path.
 * `linux-embedded --offline_prepare` may reject an already generated context `.bin` in some QAIRT
   versions and require DLC / source input instead. In that case, debugger may reconvert from ONNX
-  and rerun prepare, exposing prepare failures different from the accepted AIPC context binary. If
-  AIPC wrapper acceptance already passed, do not treat such debugger re-prepare failure as final
+  and rerun prepare, exposing prepare failures different from the accepted context binary. If
+  QAI wrapper acceptance already passed, do not treat such debugger re-prepare failure as final
   acceptance failure. Record it as a debugger-path limitation or follow-up diagnostic item instead.
 * True layerwise `snooping` usually needs the source ONNX / DLC or a graph structure that can be
   prepared again. With only the final context binary, you can usually do only end-to-end or
@@ -448,7 +448,7 @@ qnn-model-lib-generator \
 
 If direct `.so` inference already saved correct outputs but the process exits with `139`, first
 check the Linux ARM HTP AppBuilder teardown segfault entry in `references/troubleshooting.md`. You
-may add `AIPC_SAFE_EXIT=1` protection to the inference script: after outputs and metrics are saved,
+may enable a safe-exit option in the inference script: after outputs and metrics are saved,
 flush stdout/stderr and call `os._exit(0)` to bypass the destructor phase. This workaround is only
 for diagnostic / acceptance scripts where output completeness is already confirmed; still record
 the normal-exit failure log.

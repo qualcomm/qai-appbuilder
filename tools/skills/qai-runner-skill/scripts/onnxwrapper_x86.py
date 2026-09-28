@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------
-# Copyright (c) 2026 Qualcomm Innovation Center, Inc. All rights reserved.
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
 from __future__ import annotations
@@ -78,9 +78,16 @@ class InferenceSession:
         self.backend_model = self._resolve_backend_model()
 
     def _detect_host_env(self) -> str:
+        # Probed in order; first existing dir under $QAIRT_SDK_ROOT/bin wins.
+        # aarch64-oe-linux-gcc11.2 is the ONLY aarch64 dir shipping host tools
+        # (qairt-dlc-info / qairt-converter); -oe-linux-gcc9.3 and
+        # -ubuntu-gcc9.4 carry device runtime only, so they are not host
+        # candidates. "aarch64-linux-gcc" used to sit here and exists in NO
+        # QAIRT SDK -- it never matched, silently falling through to the
+        # Windows entry on ARM64 Linux.
         candidates = [
             "x86_64-linux-clang",
-            "aarch64-linux-gcc",
+            "aarch64-oe-linux-gcc11.2",
             "x86_64-windows-msvc",
         ]
         for host_env in candidates:
@@ -271,7 +278,11 @@ class InferenceSession:
             ) from exc
 
     def _load_outputs(self, workdir: str) -> List[np.ndarray]:
-        raw_files = sorted(Path(workdir).glob("**/Result_*/*.raw"))
+        result_dirs = sorted(Path(workdir).glob("Result_*"))
+        if not result_dirs:
+            raise RuntimeError("No Result_* output directory produced by net-run")
+
+        raw_files = sorted(result_dirs[0].glob("*.raw"))
         if not raw_files:
             raise RuntimeError("No .raw output files produced by net-run")
 
@@ -300,7 +311,7 @@ class InferenceSession:
         input_feed: Dict[str, np.ndarray],
         run_options: Optional[Any] = None,
     ) -> List[np.ndarray]:
-        workdir = tempfile.mkdtemp(prefix="aipc_netrun_")
+        workdir = tempfile.mkdtemp(prefix="qai_netrun_")
         try:
             input_list = self._save_inputs(workdir, input_feed)
             if self.backend_model.endswith(".dlc"):

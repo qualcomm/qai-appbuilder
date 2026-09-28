@@ -2,14 +2,14 @@
 
 > **How to Use This Document**
 > This document defines **agent roles and workflows** (WHO and HOW).
-> For the project config and state tracking, see `../assets/aipc_plan.md`.
+> For the project config and state tracking, see `../assets/plan.md`.
 > For technical deep dives, see `../references/*.md`.
-> **Reading order**: `SKILL.md` → `../assets/aipc_plan.md` → this file → `../references/*.md`
+> **Reading order**: `SKILL.md` → `../assets/plan.md` → this file → `../references/*.md`
 
-> **Template**: Fill in `../assets/aipc_plan.md` Config block first. All `{VARIABLE}` references in this document resolve from those values.
+> **Template**: Fill in `../assets/plan.md` Config block first. All `{VARIABLE}` references in this document resolve from those values.
 
 
-{PROJECT_NAME},{MODEL_NAME}  are set from `../assets/aipc_plan.md` Config.
+{PROJECT_NAME},{MODEL_NAME}  are set from `../assets/plan.md` Config.
 ---
 
 ## Project: {PROJECT_NAME}
@@ -25,7 +25,7 @@
 
 ## Execution Mode: Batch vs Interactive
 
-> **Read `{MODE}` from `aipc_plan.md` Config before starting any task.**
+> **Read `{MODE}` from `plan.md` Config before starting any task.**
 
 ### `batch` mode (default)
 **Default intent**: do all work end-to-end. Agents must continue through all remaining applicable phases without waiting for extra prompts.
@@ -35,11 +35,11 @@ Agents execute the full pipeline **autonomously** without asking for confirmatio
 **In batch mode, agents MUST**:
 - Proceed through all phases without pausing for user confirmation
 - Continue beyond local artifact generation when deployment/inference/validation phases remain
-- If `RETMOE_DEVICE_INFO` is present, execute remote deploy + remote inference + log collection before final response
-- Treat host-only inference as interim validation only when `RETMOE_DEVICE_INFO` is present; final acceptance requires target execution
-- When `RETMOE_DEVICE_INFO` is present, skip local quick-smoke inference before remote target inference
+- If `REMOTE_DEVICE_INFO` is present, execute remote deploy + remote inference + log collection before final response
+- Treat host-only inference as interim validation only when `REMOTE_DEVICE_INFO` is present; final acceptance requires target execution
+- When `REMOTE_DEVICE_INFO` is present, skip local quick-smoke inference before remote target inference
 - Apply safe defaults for any unspecified optional parameters
-- Log every decision and assumption in `aipc_plan.md` Issue Log
+- Log every decision and assumption in `plan.md` Issue Log
 - Mark each phase ✅ Done in Progress Summary upon completion
 - **Only stop** when a Blocking Condition is encountered (see below)
 
@@ -49,7 +49,7 @@ Agents execute the full pipeline **autonomously** without asking for confirmatio
 - Ask "should I run onnxsim?" (always run it)
 - Ask "should I simplify the model?" (always simplify)
 - Pause for routine confirmations that can be resolved from Config values
-- Run local quick-smoke inference before required remote target inference when `RETMOE_DEVICE_INFO` is set
+- Run local quick-smoke inference before required remote target inference when `REMOTE_DEVICE_INFO` is set
 
 ### `interactive` mode
 Agents ask the user for confirmation at each phase transition and before key decisions.
@@ -76,7 +76,7 @@ Agents ask the user for confirmation at each phase transition and before key dec
 | B6 | Accuracy drops below threshold after quantization (cosine < 0.95) | Stop. Report metrics. Ask user whether to accept or retry. |
 | B7 | No known replacement pattern exists for unsupported operator | Stop. Document operator, escalate to user. |
 | **B8** | **Context binary generation fails on Windows ARM** | **Record issue and continue with non-context `.dll` path if needed. Escalate only if B3/B4/B7 met.** |
-| **B9** | **Issue Log / patch records are missing or stale for the current phase** | **Stop phase handoff. Backfill `aipc_plan.md` Issue Log and patch tracking fields before continuing.** |
+| **B9** | **Issue Log / patch records are missing or stale for the current phase** | **Stop phase handoff. Backfill `plan.md` Issue Log and patch tracking fields before continuing.** |
 
 ### ⚠️ CRITICAL: Operator Patching — Exhaustive Requirement
 
@@ -118,7 +118,7 @@ Agents ask the user for confirmation at each phase transition and before key dec
 User Request
      │
      ▼
-Orchestrator Agent  ◄─── aipc_plan.md (Config + Progress Summary)
+Orchestrator Agent  ◄─── plan.md (Config + Progress Summary)
      │  [reads {MODE}: batch → autonomous | interactive → confirm each phase]
      │
      ├──► NPU Adaptation Agent ─────────► adapted model / wrappers  [Plan Phase 1]
@@ -166,10 +166,10 @@ Orchestrator Agent  ◄─── aipc_plan.md (Config + Progress Summary)
    - Activate via `{QAIRT_ENV_SETUP}` before running any Python script.  
    - Do **not** create a project-specific venv unless the QAIRT venv cannot satisfy requirements.  
    - `pip install` always requires user permission → **Blocking Condition B2**.  
-   - Record the venv decision in `aipc_plan.md` Config (`python venv` / `python lib install`).
+   - Record the venv decision in `plan.md` Config (`python venv` / `python lib install`).
 
 5. **Log all decisions in batch mode.**  
-   When `{MODE} = batch`, every autonomous decision (e.g., default parameter chosen, optional step skipped/included) must be recorded in `aipc_plan.md` Issue Log before proceeding.
+   When `{MODE} = batch`, every autonomous decision (e.g., default parameter chosen, optional step skipped/included) must be recorded in `plan.md` Issue Log before proceeding.
 
 6. **Issue Log completion gate (MANDATORY before phase handoff).**
    - Before marking any phase as complete, agents must append/update an Issue Log row with:
@@ -184,7 +184,7 @@ Orchestrator Agent  ◄─── aipc_plan.md (Config + Progress Summary)
    - If `CALIBRATION_DATA` is missing or invalid, search web for a suitable public calibration dataset and download.
    - Generate `CALIB_LIST` via image-to-raw preprocessing when source is images.
    - Use existing `.raw` samples directly when source is raw data.
-   - Record dataset source/path and sample count in `aipc_plan.md`.
+   - Record dataset source/path and sample count in `plan.md`.
 
 8. **Windows Console Encoding Guardrail**: Local Windows shells can use non-UTF-8 encodings (such as `cp950` or `cp437`), which frequently trigger `UnicodeEncodeError` or `UnicodeDecodeError` when processing console outputs with special characters. Always enforce UTF-8 encoding/decoding where possible, and use `errors='replace'` or `errors='ignore'` in Python subprocess handling.
 
@@ -199,11 +199,11 @@ Orchestrator Agent  ◄─── aipc_plan.md (Config + Progress Summary)
 **Role**: Plans and coordinates the end-to-end AIPC workflow. Delegates tasks to specialist agents and tracks overall progress.
 
 **Responsibilities**:
-- Read `aipc_plan.md` Config block and confirm all required variables are filled in (check for Blocking Condition B1)
+- Read `plan.md` Config block and confirm all required variables are filled in (check for Blocking Condition B1)
 - Determine `{FLOW}` and `{MODE}` and sequence the correct pipeline phases
 - Delegate to specialist agents in phase order; verify exit criteria before proceeding
-- Update `aipc_plan.md` Progress Summary after each phase completes
-- Log all decisions and blockers in `aipc_plan.md` Issue Log
+- Update `plan.md` Progress Summary after each phase completes
+- Log all decisions and blockers in `plan.md` Issue Log
 - Enforce Issue Log completion gate (B9) before every phase handoff
 
 **Key Decisions**:
@@ -213,7 +213,7 @@ Orchestrator Agent  ◄─── aipc_plan.md (Config + Progress Summary)
 - Python environment: use `{QAIRT_ENV_SETUP}` venv by default
 
 **Workflow**:
-1. Read `aipc_plan.md` Config — check all required variables are set (B1 if missing)
+1. Read `plan.md` Config — check all required variables are set (B1 if missing)
 2. Read `{MODE}`: set autonomous execution if `batch`, confirmation-per-phase if `interactive`
 3. Run environment setup: `source {QAIRT_ENV_SETUP}` (bash) or `. "{QAIRT_ENV_SETUP}"` (PowerShell)
 4. Verify toolchain (see Environment Setup Checklist)
@@ -243,7 +243,7 @@ Orchestrator Agent  ◄─── aipc_plan.md (Config + Progress Summary)
 
 **Tools / Skills**:
 - `aipc-toolkit` skill (primary — activate via `use_skill`)
-- `aipc_plan.md` Config + Progress Summary + Issue Log
+- `plan.md` Config + Progress Summary + Issue Log
 
 ---
 ### 2. NPU Adaptation Agent
@@ -266,12 +266,12 @@ Orchestrator Agent  ◄─── aipc_plan.md (Config + Progress Summary)
 
 **Inputs**:
 - Source model weights and source framework code.
-- `{MODEL_NAME}`, `{SRC_FRAMEWORK}`, `{INPUT_NAME}`, `{INPUT_SHAPE}`, `{OUTPUT_NAMES}` from `aipc_plan.md`.
+- `{MODEL_NAME}`, `{SRC_FRAMEWORK}`, `{INPUT_NAME}`, `{INPUT_SHAPE}`, `{OUTPUT_NAMES}` from `plan.md`.
 - Transformer decoder requirements, if applicable, from `skills/aipc-toolkit/references/pytorch_modification.md`.
 
 **Outputs**:
 - PyTorch adaptation code, wrapper modules, or an export-ready model entry point.
-- PyTorch validation notes and shape assumptions recorded in `aipc_plan.md`.
+- PyTorch validation notes and shape assumptions recorded in `plan.md`.
 - For transformer decoder models: validated prefill/decode wrapper definitions ready for ONNX export.
 
 **Reference**:
@@ -289,12 +289,12 @@ Orchestrator Agent  ◄─── aipc_plan.md (Config + Progress Summary)
 - Verify with `onnx.checker.check_model()` and run `onnxsim`
 
 **Inputs**:
-- Source model weights; `PATCH_NEEDED`, `PATCH_OPS` from `aipc_plan.md` Prerequisites
+- Source model weights; `PATCH_NEEDED`, `PATCH_OPS` from `plan.md` Prerequisites
 
 **Outputs**:
 - `{ONNX_FILE}` — validated ONNX file
 
-**Workflow** (`aipc_plan.md` Phase 2):
+**Workflow** (`plan.md` Phase 2):
 1. Check `PATCH_NEEDED` — if Yes, identify ops from `PATCH_OPS`; if patch changes semantics → **B4**
 2. Write and run `export_onnx.py`:
    ```python
@@ -317,7 +317,7 @@ Orchestrator Agent  ◄─── aipc_plan.md (Config + Progress Summary)
    onnx.save(model_simplified, "{ONNX_FILE}")
    ```
 3. Verify numerical parity vs {SRC_FRAMEWORK} baseline
-4. Update `aipc_plan.md` Phase 2 checkboxes → hand off to Model Inspector Agent
+4. Update `plan.md` Phase 2 checkboxes → hand off to Model Inspector Agent
 
 **Batch mode**: steps 1–4 execute autonomously. Log patch decisions in Issue Log.
 
@@ -349,12 +349,12 @@ Patches may expose previously-hidden unsupported ops. After each patch:
 **Inputs**: `{ONNX_FILE}`  
 **Outputs**: `{MODEL_NAME}.yaml`, inspection report
 
-**Workflow** (`aipc_plan.md` Phase 3):
+**Workflow** (`plan.md` Phase 3):
 1. Run inspection:
    ```bash
-   python skills/aipc-toolkit/scripts/aipc_inspect_onnxio.py {ONNX_FILE}
+   python skills/aipc-toolkit/scripts/qai_inspect_onnxio.py {ONNX_FILE}
    ```
-2. Record `INPUT_NAME`, `INPUT_SHAPE`, `OUTPUT_NAMES` in `aipc_plan.md` Prerequisites
+2. Record `INPUT_NAME`, `INPUT_SHAPE`, `OUTPUT_NAMES` in `plan.md` Prerequisites
 3. Run converter dry-run:
    ```bash
    # Flow A — QNN
@@ -363,7 +363,7 @@ Patches may expose previously-hidden unsupported ops. After each patch:
    # Flow B — SNPE
    {QAIRT_ROOT}/bin/{HOST_ARCH}/qairt-converter --input_network {ONNX_FILE} --dry_run
    ```
-4. Document issues in `aipc_plan.md` Phase 3 task 2.3
+4. Document issues in `plan.md` Phase 3 task 2.3
 5. If issues found → escalate to Model Export Agent; re-inspect after patching
 6. If clean → update Phase 3 checkboxes; hand off to Conversion Agent
 
@@ -372,7 +372,7 @@ Patches may expose previously-hidden unsupported ops. After each patch:
 **Verification** (Phase 3 exit criteria):
 - [ ] `{MODEL_NAME}.yaml` generated with correct I/O names and shapes
 - [ ] No unsupported operators flagged
-- [ ] `INPUT_NAME`, `INPUT_SHAPE`, `OUTPUT_NAMES` recorded in `aipc_plan.md`
+- [ ] `INPUT_NAME`, `INPUT_SHAPE`, `OUTPUT_NAMES` recorded in `plan.md`
 
 **Reference**: `skills/aipc-toolkit/references/model_export_validation.md` §2
 
@@ -389,9 +389,9 @@ Patches may expose previously-hidden unsupported ops. After each patch:
 
 **Workflow**:
 
-**Flow A — QNN** (`aipc_plan.md` QNN-4A):
+**Flow A — QNN** (`plan.md` QNN-4A):
 ```bash
-python skills/aipc-toolkit/scripts/aipc_convert_fp.py \
+python skills/aipc-toolkit/scripts/qai_convert_fp.py \
   --onnx {ONNX_FILE} \
   --output-root {OUTPUT_DIR} \
   --precision {PRECISION} \
@@ -401,9 +401,9 @@ python skills/aipc-toolkit/scripts/aipc_convert_fp.py \
 > If target runtime shows FP16/dtype compatibility issues, retry with `--preserve-io-mode layout`.
 > Do not use `--preserve-io-mode none` in QNN-4A. Layout optimization is only allowed in QNN-9 after baseline validation passes.
 
-**Flow B — SNPE** (`aipc_plan.md` SNPE-4):
+**Flow B — SNPE** (`plan.md` SNPE-4):
 ```bash
-python skills/aipc-toolkit/scripts/aipc_convert_snpe.py \
+python skills/aipc-toolkit/scripts/qai_convert_snpe.py \
   --onnx {ONNX_FILE} \
   --output {OUTPUT_DIR}/{MODEL_NAME}.dlc \
   --precision {PRECISION}
@@ -438,17 +438,19 @@ python skills/aipc-toolkit/scripts/aipc_convert_snpe.py \
 - **Flow B (SNPE)**: `{MODEL_NAME}_quantized.dlc`
 
 **Calibration Data Requirements**:
-- Source folder (user-provided): `{CALIBRATION_DATA}` from `aipc_plan.md` Config  
+- Source folder (user-provided): `{CALIBRATION_DATA}` from `plan.md` Config  
   - Example: COCO128 images folder (for detection models) or your own representative dataset
 - Generated calibration inputs: raw float32 binary `.raw` files, shape = `{INPUT_SHAPE}`
 - Count: 50–200 representative samples
-- `{CALIB_LIST}`: one `.raw` file path per line
+- `{CALIB_LIST}`: for a single-input model, one `.raw` path per line; for
+  multi-input DLC quantization, all `name:=path` inputs for one sample on the
+  same line
 
 **Workflow**:
 
-**Flow A — QNN** (`aipc_plan.md` QNN-4B):
+**Flow A — QNN** (`plan.md` QNN-4B):
 ```bash
-python skills/aipc-toolkit/scripts/aipc_convert_int.py \
+python skills/aipc-toolkit/scripts/qai_convert_int.py \
   --input_network {ONNX_FILE} \
   --input_list {CALIB_LIST} \
   --output-root {OUTPUT_DIR} \
@@ -460,14 +462,20 @@ python skills/aipc-toolkit/scripts/aipc_convert_int.py \
 > If target runtime shows FP16/dtype compatibility issues, retry with `--preserve-io-mode layout`.
 > Do not use `--preserve-io-mode none` in QNN-4B. Layout optimization is only allowed in QNN-9 after baseline validation passes.
 
-**Flow B — SNPE** (`aipc_plan.md` SNPE-5):
+**Flow B — SNPE** (`plan.md` SNPE-5):
 ```bash
-{QAIRT_ROOT}/bin/{HOST_ARCH}/snpe-dlc-quant \
+qairt-quantizer \
   --input_dlc {OUTPUT_DIR}/{MODEL_NAME}.dlc \
-  --input_list {CALIB_LIST} \
   --output_dlc {OUTPUT_DIR}/{MODEL_NAME}_quantized.dlc \
-  --enable_htp
+  --input_list {CALIB_LIST} \
+  --param_quantizer tf \
+  --act_quantizer tf \
+  --act_bitwidth {ACT_BITWIDTH} \
+  --weights_bitwidth 8
 ```
+> `qairt-quantizer` is the current QAIRT DLC quantizer. Use
+> `snpe-dlc-quant` only as a legacy fallback with older SDKs that do not ship
+> `qairt-quantizer`.
 
 After quantization: run quick accuracy check vs FP baseline.  
 If cosine similarity < 0.95 → **Blocking Condition B6**: stop and report to user.
@@ -501,7 +509,7 @@ If cosine similarity < 0.95 → **Blocking Condition B6**: stop and report to us
 - Linux: `lib{MODEL_NAME}.so.bin` (optional — `.so` works directly on Linux)
 - Windows: `{MODEL_NAME}.dll.bin` (optional — `.dll` works directly on Windows)
 
-**Workflow** (`aipc_plan.md` QNN-5):
+**Workflow** (`plan.md` QNN-5):
 
 
 ### ⚠️ CRITICAL: Platform-Specific Requirements
@@ -554,17 +562,17 @@ If cosine similarity < 0.95 → **Blocking Condition B6**: stop and report to us
 - **Flow A (Linux)**: `lib{MODEL_NAME}.so` OR `lib{MODEL_NAME}.so.bin`; `{MODEL_NAME}.yaml`
 - **Flow A (Windows)**: `{MODEL_NAME}.dll.bin` (optional) or `{MODEL_NAME}.dll`; `{MODEL_NAME}.yaml`
 - **Flow B**: `{OUTPUT_DIR}/{DLC_FILE}`; `{MODEL_NAME}.yaml`
-- `scripts/aipc` and `scripts/onnxwrapper.py` (from skill source)
-- **Remote inference (required when provided)**: `{RETMOE_DEVICE_INFO}` file (from `aipc_plan.md`) that records:
+- `scripts/qai` and `scripts/onnxwrapper.py` (from skill source)
+- **Remote inference (required when provided)**: `{REMOTE_DEVICE_INFO}` file (from `plan.md`) that records:
   - SSH connection info (host/user/port and key path if needed)
   - Target working directory (where inference is executed)
   - QAIRT setup script path on the target (user-provided; sets env vars / activates venv / initializes QAIRT)
 
-### Remote Inference over SSH (Required When `RETMOE_DEVICE_INFO` Is Set)
+### Remote Inference over SSH (Required When `REMOTE_DEVICE_INFO` Is Set)
 
-If `{RETMOE_DEVICE_INFO}` is provided, inference must be executed on the target device via SSH before task completion.
+If `{REMOTE_DEVICE_INFO}` is provided, inference must be executed on the target device via SSH before task completion.
 
-`{RETMOE_DEVICE_INFO}` must point to a file containing:
+`{REMOTE_DEVICE_INFO}` must point to a file containing:
 - **(a) SSH information**: host/user/port and key path if needed
 - **(b) Working folder**: the target directory to `cd` into before running inference
 - **(c) Setup script path**: a user-provided QAIRT setup script on the target (sets env vars / activates venv / initializes QAIRT)
@@ -574,19 +582,19 @@ Recommended execution pattern (conceptual):
 1. `ssh` to the target
 2. `cd <working_folder>`
 3. `source <setup_script>`
-4. run `python aipc ...`
+4. run `python qai ...`
 
 > See `skills/aipc-toolkit/references/inference.md` → "Target Device Inference over SSH" for concrete command examples.
 
-**⚠️ Inference Guardrail — Always Use `aipc` Launcher**
+**⚠️ Inference Guardrail — Always Use `qai` Launcher**
 
 Never call `qai_appbuilder.QNNContext` directly for inference. Always use:
 ```bash
-python aipc infer_{MODEL_NAME}.py
+python qai infer_{MODEL_NAME}.py
 ```
 **Reason**: QAIRT may reorder output tensors at context-binary compile time. The `onnxwrapper` restores ONNX output order using the `.yaml` file. Direct `QNNContext.Inference` returns HTP-internal order — outputs will be silently mismatched without the wrapper's remapping.
-Also ensure the `.yaml` file (generated by `aipc_inspect_onnxio.py`) is deployed alongside the `.onnx` on the target — the reorder depends on it.
-See `references/inference.md` → "Always Use `aipc` Launcher" for full details.
+Also ensure the `.yaml` file (generated by `qai_inspect_onnxio.py`) is deployed alongside the `.onnx` on the target — the reorder depends on it.
+See `references/inference.md` → "Always Use `qai` Launcher" for full details.
 
 **Before starting inference:**
 
@@ -603,11 +611,11 @@ See `references/inference.md` → "Always Use `aipc` Launcher" for full details.
 
 **Outputs**: `infer_{MODEL_NAME}.py`, inference results
 
-**Workflow** (`aipc_plan.md` QNN-6 / SNPE-6):
+**Workflow** (`plan.md` QNN-6 / SNPE-6):
 
 1. **Copy wrapper scripts** into the working folder:
    ```bash
-   cp skills/aipc-toolkit/scripts/aipc ./
+   cp skills/aipc-toolkit/scripts/qai ./
    cp skills/aipc-toolkit/scripts/onnxwrapper.py ./
    ```
 
@@ -621,16 +629,16 @@ See `references/inference.md` → "Always Use `aipc` Launcher" for full details.
    Copy-Item {OUTPUT_DIR}\{MODEL_NAME}.dll.bin .\{MODEL_NAME}.onnx.dll.bin
    
    # Then run inference
-   python aipc path/to/onnx_inference.py
+   python qai path/to/onnx_inference.py
    ```
-   > The `aipc` wrapper passes the `.onnx` path but searches for a matching QNN binary in the same directory.  
+   > The `qai` wrapper passes the `.onnx` path but searches for a matching QNN binary in the same directory.  
    > See `references/inference.md` → Model File Resolution for full search order.
 
 5. **Windows only**: generate the HTP context binary first (Phase 5) and copy to match ONNX naming.
 
 6. **If I/O names fail**: regenerate `{MODEL_NAME}.yaml` via the inspector:
    ```bash
-   python skills/aipc-toolkit/scripts/aipc_inspect_onnxio.py {ONNX_FILE}
+   python skills/aipc-toolkit/scripts/qai_inspect_onnxio.py {ONNX_FILE}
    ```
 
 **Batch mode**: execute steps 1–6 autonomously; spot-check outputs vs ONNX baseline; log result in Issue Log.
@@ -662,14 +670,14 @@ See `references/inference.md` → "Always Use `aipc` Launcher" for full details.
 **Inputs**:
 - `{ONNX_FILE}` + converted model; test dataset
 - `{TARGET_DEVICE}` for on-device performance/latency validation
-- **Remote validation (optional)**: `{RETMOE_DEVICE_INFO}` file (from `aipc_plan.md`) that records:
+- **Remote validation (optional)**: `{REMOTE_DEVICE_INFO}` file (from `plan.md`) that records:
   - **(a) SSH information**: host/user/port and key path if needed
   - **(b) Working folder**: the target directory to `cd` into before running validation
   - **(c) Setup script path**: a user-provided QAIRT setup script on the target (sets env vars / activates venv / initializes QAIRT)
 
 **Outputs**: `REPORT.md`
 
-**Workflow** (`aipc_plan.md` Phase 7):
+**Workflow** (`plan.md` Phase 7):
 1. ONNX CPU inference → baseline outputs (Phase 7.1)
 2. `{FLOW}` inference on same inputs → compare cosine similarity on `{OUTPUT_NAMES}` (Phase 7.1)
 3. Task-specific metric: mAP / Top-1 / WER vs {SRC_FRAMEWORK} baseline (Phase 7.2)
@@ -677,10 +685,10 @@ See `references/inference.md` → "Always Use `aipc` Launcher" for full details.
 5. Regression tests with known-good inputs (Phase 7.4)
 6. Write `REPORT.md` (Phase 7.5):
    - Record **task completion time** (`END_TIME = <YYYY-MM-DD HH:MM>`)
-   - Compute and record **total work duration** (`WORK_TIME = END_TIME − START_TIME` from `aipc_plan.md` Config)
-   - Include both values in `REPORT.md` header and in `aipc_plan.md` Config block
+   - Compute and record **total work duration** (`WORK_TIME = END_TIME − START_TIME` from `plan.md` Config)
+   - Include both values in `REPORT.md` header and in `plan.md` Config block
    - Append all user prompts issued during this session and report the total number of user interventions.
-   - Write an issue report in `aipc_plan.md` Issue Log summarizing all problems encountered, decisions made, and their resolutions.
+   - Write an issue report in `plan.md` Issue Log summarizing all problems encountered, decisions made, and their resolutions.
    - Update Progress Summary
 
 If cosine similarity < threshold → **Blocking Condition B6**.
@@ -704,13 +712,13 @@ ls REPORT.md   # must exist — if missing, write it NOW before proceeding
 - [ ] Task metric within acceptable range
 - [ ] Latency meets performance target
 - [ ] **`REPORT.md` exists on disk** (`ls REPORT.md` confirms)
-- [ ] `END_TIME` and `WORK_TIME` recorded in `REPORT.md` and `aipc_plan.md` Config
+- [ ] `END_TIME` and `WORK_TIME` recorded in `REPORT.md` and `plan.md` Config
 
 ---
 
 ## Environment Setup Checklist
 
-> Verify before starting. All variables resolve from `aipc_plan.md` Config block.
+> Verify before starting. All variables resolve from `plan.md` Config block.
 
 | Requirement | Variable / Command | Notes |
 |---|---|---|
@@ -718,7 +726,7 @@ ls REPORT.md   # must exist — if missing, write it NOW before proceeding
 | Env setup script | `source {QAIRT_ENV_SETUP}` (bash) / `. "{QAIRT_ENV_SETUP}"` (PS) | Sets `QAIRT_SDK_ROOT`, PATH, venv |
 | Host arch | `{HOST_ARCH}` | `x86_64-linux-clang` (Linux) / `arm64x-windows-msvc` (Win) |
 | Target arch | `{TARGET_ARCH}` | `aarch64-ubuntu-gcc9.4` / `windows-aarch64` / `x86_64-linux-clang` |
-| Python env | QAIRT venv via `{QAIRT_ENV_SETUP}` | Record in `aipc_plan.md` Config (`python venv`) |
+| Python env | QAIRT venv via `{QAIRT_ENV_SETUP}` | Record in `plan.md` Config (`python venv`) |
 | Calibration data | `{CALIBRATION_DATA}` + `{CALIB_LIST}` | Required for INT quantization only |
 | Execution mode | `{MODE}` | `batch` = autonomous; `interactive` = confirm each phase |
 | Evolve mode | `{EVOLVE_MODE}` | `inherit` = use `{MODE}`; `batch` = apply verified skill updates automatically; `interactive` = ask user before applying |
@@ -737,7 +745,7 @@ ls REPORT.md   # must exist — if missing, write it NOW before proceeding
 - **Do not change the QAIRT toolchain** — use workarounds in `SKILL.md`. Changing the toolchain causes pipeline failures.
 - **Operator patching**: always patch in-memory. Never modify library source code.
 - **Absolute paths**: always use absolute paths for `{MODEL_NAME}_context.bin` and `{DLC_FILE}`.
-- **Batch mode decisions**: every autonomous decision must be logged in `aipc_plan.md` Issue Log.
+- **Batch mode decisions**: every autonomous decision must be logged in `plan.md` Issue Log.
 - **Blocking conditions**: see the Blocking Conditions table above. These always require stopping, regardless of `{MODE}`.
 
 ---
@@ -751,10 +759,10 @@ ls REPORT.md   # must exist — if missing, write it NOW before proceeding
 **Role**: Reads the completed project's work history, synthesizes candidate skill improvements, invokes a Verification Subagent to vet each change, and applies approved changes to the aipc skill documents.
 
 **Inputs**:
-- `aipc_plan.md` Issue Log and per-phase notes
+- `plan.md` Issue Log and per-phase notes
 - `REPORT.md`
 - `logs/` (stderr/stdout from each phase)
-- Current `aipc_plan.md`, `aipc_AGENTS.md`, `SKILL.md`, and all `references/*.md` files used in this project
+- Current `plan.md`, `qai_AGENTS.md`, `SKILL.md`, and all `references/*.md` files used in this project
 
 **Workflow**:
 1. Read all inputs listed above
@@ -767,7 +775,7 @@ ls REPORT.md   # must exist — if missing, write it NOW before proceeding
 8. If effective evolve mode is `interactive`, ask the user to confirm the final approved/revised diff before applying
 9. Apply `APPROVE` changes directly; apply `REVISE` with the subagent's revised text; discard `REJECT` and log reason
 10. Commit the skill repository with a concise evolve summary message
-11. Fill in the Skill Evolution Summary table in `aipc_plan.md`
+11. Fill in the Skill Evolution Summary table in `plan.md`
 12. Mark Phase E ✅ Done
 
 **Guardrails**:

@@ -5,16 +5,16 @@
 # ---------------------------------------------------------------------
 
 """
-AIPC AIMET Handoff Converter Script
+AIMET Handoff Converter Script
 
 Converts pre-calibrated AIMET ONNX models and scale encodings to quantized QNN or SNPE formats.
 
 Usage:
   # Convert to QNN format (A16W8 / default QNN flow)
-  python aipc_convert_aimet.py --input_network model_ptq.onnx --quantization_overrides model_ptq.encodings
+  python qai_convert_aimet.py --input_network model_ptq.onnx --quantization_overrides model_ptq.encodings
 
   # Convert to SNPE DLC format
-  python aipc_convert_aimet.py --input_network model_ptq.onnx --quantization_overrides model_ptq.encodings --flow SNPE
+  python qai_convert_aimet.py --input_network model_ptq.onnx --quantization_overrides model_ptq.encodings --flow SNPE
 """
 
 import os
