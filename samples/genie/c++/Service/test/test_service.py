@@ -13219,6 +13219,519 @@ def _run_skill_capacity_suite(args, models, remote_mode, out_dir):
     return all_results, all_perf_samples, all_crash_events
 
 
+# ============================================================================
+# long_task_memory suite —— Task Memo 分段式记忆机制的"记忆前沿"量化回归
+# ============================================================================
+# 方法论镜像 skill_capacity 的倍增探测 + 二分收敛 + 重复采样多数票（不直接复用其函数，
+# 因签名强耦合技能容量池语义，见 _sc_majority_probe/_sc_binary_search），被测对象换成
+# Task Memo（prompt_optimization.task_memo）而非技能目录容量。
+#
+# 关键架构事实（决定了下面两轮请求的设计，来自对 task_memo_builder.cpp 的代码审查，
+# 不是随意选择）：
+#   1. ComputeFingerprint 对"除最后一条外的全部非 system 消息"哈希；BuildTaskMemoSection()
+#      （系统提示词"## Task Memo"主通道）在 FitMessagesToContext（写库）之前调用——
+#      同一个请求内，主通道读到的永远是"上一轮"的旧数据，首次对话必定 MISS。只有
+#      FitMessagesToContext 内部丢弃发生后紧跟着的尾部占位兜底 Lookup() 才会在同一
+#      请求内命中（RenderCompact，不含 facts_constraints/open_questions 细节）。
+#   2. 因此要验证主通道（Render()，携带用户事实/约束/TODO）的真实效果，必须两轮真实
+#      请求：Round1 令历史丢弃并写库，Round2（首条 user 消息不变，靠 ComputeFirstMsgKey
+#      稳定命中）才会在系统提示词里看到完整备忘录。
+#   3. BuildRuleLayer 把 dropped 的单条 user 消息整段存入 facts_constraints（截断到
+#      160 字符预览）——若把三项事实塞进同一条长消息，后两项会被截断丢失；因此下面把
+#      goal/constraint/todo 拆成三条独立短消息，各自都在 160 字符预览之内。
+#
+# 记忆前沿定义：模型在 N 个填充轮次（用于挤占预算、诱发丢弃）之后，Round2 追问仍能
+# 正确复述任务目标/约束/TODO 三个 canary code 的最大 N。legacy（task_memo.enabled=false）
+# 与 optimized（=true，model_layer_enabled=false 保证判定确定性）分别测出前沿，用
+# 倍数/差值量化机制收益——stateful 模式下 IsStatelessMode()==false，整条压缩管线（含
+# TaskMemoBuilder）都不会跑，两档退化为完全等价，故 stateful 模式只验证 Step1 修复后
+# ChatHistory::Limit() 窗口内召回是否成立，不做双臂对照。
+
+_LTM_GOAL_CODE = "LTM-GOAL-7F3A1"
+_LTM_CONSTRAINT_CODE = "LTM-CONSTRAINT-9B2E4"
+_LTM_TODO_CODE = "LTM-TODO-4D8C6"
+
+
+def _ltm_task_brief_messages():
+    """三条各自独立、均在 160 字符预览之内的短消息（原因见模块级注释第 3 点）。"""
+    return [
+        {"role": "user", "content":
+            f"Migration goal ({_LTM_GOAL_CODE}): migrate the billing service from MySQL to PostgreSQL."},
+        {"role": "assistant", "content": "Understood, PostgreSQL migration goal noted."},
+        {"role": "user", "content":
+            f"Hard constraint ({_LTM_CONSTRAINT_CODE}): never modify the file legacy_billing.py; "
+            "it is frozen for compliance."},
+        {"role": "assistant", "content": "Understood, I will not touch legacy_billing.py."},
+        {"role": "user", "content":
+            f"TODO ({_LTM_TODO_CODE}): write the migration script for the invoices table."},
+        {"role": "assistant", "content": "Noted, invoices table migration script is pending."},
+    ]
+
+
+def _ltm_filler_round(i, lines_per_round):
+    """一轮无关闲聊 + 工具调用，用于挤占预算、诱发早期消息被丢弃。"""
+    call_id = f"ltm_call_{i}"
+    return [
+        {"role": "user", "content": f"Status check {i}: please run the next diagnostic step."},
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"id": call_id, "type": "function",
+             "function": {"name": "run_diagnostic", "arguments": json.dumps({"step": i})}}
+        ]},
+        {"role": "tool", "tool_call_id": call_id, "name": "run_diagnostic",
+         "content": _pf_filler_lines(f"ltm{i}", lines_per_round)},
+    ]
+
+
+def _ltm_build_history(n_filler, lines_per_round):
+    messages = [
+        {"role": "system", "content":
+            "You are a careful coding assistant helping with a long-running migration task. "
+            "Keep track of every fact, constraint and TODO given earlier in the conversation."},
+    ]
+    messages.extend(_ltm_task_brief_messages())
+    for i in range(n_filler):
+        messages.extend(_ltm_filler_round(i, lines_per_round))
+    messages.append({"role": "user", "content": "Please just reply 'ack' and nothing else for now."})
+    return messages
+
+
+def _ltm_recall_question():
+    return ("Recall this session's task brief. Answer with exactly three lines, quoting the literal "
+            "code shown in parentheses for each item: "
+            "line 1 = migration goal code, line 2 = constraint code, line 3 = TODO code.")
+
+
+def _ltm_header_bool(headers, name):
+    v = headers.get(name)
+    if v is None:
+        return None
+    return str(v).strip() not in ("0", "", "false", "False")
+
+
+def _ltm_header_num(headers, name, cast):
+    v = headers.get(name)
+    if v is None:
+        return None
+    try:
+        return cast(v)
+    except ValueError:
+        return None
+
+
+def _ltm_recall_hit(content, canary_code):
+    return bool(content) and canary_code.lower() in content.lower()
+
+
+def _ltm_extract_memo_headers(headers, suffix):
+    return {
+        f"dropped{suffix}": _ltm_header_num(headers, "X-Genie-Prompt-Messages-Dropped", int),
+        f"memo_active{suffix}": _ltm_header_bool(headers, "X-Genie-Prompt-Memo-Active"),
+        f"memo_confidence{suffix}": _ltm_header_num(headers, "X-Genie-Prompt-Memo-Confidence", float),
+        f"memo_refresh{suffix}": _ltm_header_num(headers, "X-Genie-Prompt-Memo-Refresh-Count", int),
+    }
+
+
+def _ltm_single_trial_direct(args, model, probe, n, lines_per_round, timeout):
+    """单次两轮试验（direct 通道）：Round1 制造丢弃并写库，Round2 用相同首条 user
+    消息追问三个 canary code，验证是否仍能复述。返回逐字段可诊断的证据字典（供
+    --long_task_memory 重跑时定位具体是哪一轮/哪个字段失败，而不仅是聚合统计）。"""
+    evidence = {"n": n, "error": None, "trivial": False,
+                "recall_goal": False, "recall_constraint": False, "recall_todo": False}
+    round1_messages = _ltm_build_history(n, lines_per_round)
+    body1 = {"model": model, "stream": False, "messages": round1_messages, "max_tokens": 24}
+    _trace_request(model, f"LTM round1 n={n}", 1, "long_task_memory")
+    if probe is not None:
+        probe.mark()
+    try:
+        r1 = _pf_post_chat(args.host, args.port, body1, timeout=timeout)
+    except Exception as e:
+        evidence["error"] = f"round1 请求异常（服务可能已崩溃）: {str(e)[:300]}"
+        return evidence
+    if r1.status_code != 200:
+        evidence["error"] = f"round1 HTTP {r1.status_code}: {r1.text[:200]}"
+        return evidence
+    evidence.update(_ltm_extract_memo_headers(r1.headers, "_r1"))
+    evidence["memo_section_in_prompt_r1"] = (
+        "## Task Memo" in probe.last_prompt_block()) if probe is not None else None
+
+    if not evidence.get("dropped_r1"):
+        # 本次填充量尚未挤出任何历史消息：没有发生压缩事件，记忆机制根本没被触发，
+        # 探针天然应当通过（原文仍在上下文里），标注 trivial 供调用方识别 N 过小。
+        evidence.update(trivial=True, recall_goal=True, recall_constraint=True, recall_todo=True)
+        return evidence
+
+    try:
+        msg1 = r1.json()["choices"][0]["message"]
+    except (KeyError, IndexError, ValueError):
+        evidence["error"] = "round1 响应结构异常（无 choices[0].message）"
+        return evidence
+
+    round2_messages = round1_messages + [
+        {"role": "assistant", "content": msg1.get("content") or "ack"},
+        {"role": "user", "content": _ltm_recall_question()},
+    ]
+    body2 = {"model": model, "stream": False, "messages": round2_messages, "max_tokens": 128}
+    _trace_request(model, f"LTM round2 n={n}", 1, "long_task_memory")
+    if probe is not None:
+        probe.mark()
+    try:
+        r2 = _pf_post_chat(args.host, args.port, body2, timeout=timeout)
+    except Exception as e:
+        evidence["error"] = f"round2 请求异常（服务可能已崩溃）: {str(e)[:300]}"
+        return evidence
+    if r2.status_code != 200:
+        evidence["error"] = f"round2 HTTP {r2.status_code}: {r2.text[:200]}"
+        return evidence
+    evidence.update(_ltm_extract_memo_headers(r2.headers, "_r2"))
+    evidence["memo_section_in_prompt_r2"] = (
+        "## Task Memo" in probe.last_prompt_block()) if probe is not None else None
+
+    try:
+        content2 = r2.json()["choices"][0]["message"].get("content") or ""
+    except (KeyError, IndexError, ValueError):
+        evidence["error"] = "round2 响应结构异常（无 choices[0].message）"
+        return evidence
+
+    evidence["recall_goal"] = _ltm_recall_hit(content2, _LTM_GOAL_CODE)
+    evidence["recall_constraint"] = _ltm_recall_hit(content2, _LTM_CONSTRAINT_CODE)
+    evidence["recall_todo"] = _ltm_recall_hit(content2, _LTM_TODO_CODE)
+    evidence["round2_answer_preview"] = content2[:300]
+    return evidence
+
+
+def _ltm_majority_probe(args, model, probe, n, repeat, lines_per_round, timeout, trial_log):
+    trials = [_ltm_single_trial_direct(args, model, probe, n, lines_per_round, timeout)
+              for _ in range(max(1, repeat))]
+    trial_log.extend(trials)
+
+    def is_pass(t):
+        return not t["error"] and t["recall_goal"] and t["recall_constraint"] and t["recall_todo"]
+
+    pass_votes = sum(1 for t in trials if is_pass(t))
+    passed = pass_votes * 2 > len(trials)
+    last = trials[-1]
+    curve_entry = {
+        "n": n, "passed": passed, "pass_votes": pass_votes, "trials": len(trials),
+        "trivial": last.get("trivial"), "dropped_r1": last.get("dropped_r1"),
+        "dropped_r2": last.get("dropped_r2"),
+        "memo_active_r1": last.get("memo_active_r1"), "memo_active_r2": last.get("memo_active_r2"),
+        "memo_confidence_r2": last.get("memo_confidence_r2"), "memo_refresh_r2": last.get("memo_refresh_r2"),
+        "memo_section_in_prompt_r2": last.get("memo_section_in_prompt_r2"),
+        "recall_goal": last.get("recall_goal"), "recall_constraint": last.get("recall_constraint"),
+        "recall_todo": last.get("recall_todo"), "error": last.get("error"),
+    }
+    return passed, curve_entry
+
+
+def _ltm_binary_search(args, model, probe, max_n, repeat, lines_per_round, timeout, trial_log):
+    """求最大可通过的 N（记忆前沿），算法与 _sc_binary_search 完全同构（倍增探测找失败
+    上界 → 区间二分收敛），如实标注是否真实收敛，避免把未收敛下界误报为真实前沿。"""
+    curve = []
+
+    def test(n):
+        passed, entry = _ltm_majority_probe(args, model, probe, n, repeat, lines_per_round, timeout, trial_log)
+        curve.append(entry)
+        return passed
+
+    if not test(1):
+        return 0, True, curve
+
+    last_pass, first_fail = 1, None
+    n = 2
+    while n <= max_n:
+        if test(n):
+            last_pass = n
+            n *= 2
+        else:
+            first_fail = n
+            break
+
+    if first_fail is None:
+        return last_pass, False, curve
+    if first_fail <= last_pass + 1:
+        return last_pass, True, curve
+
+    lo, hi, best = last_pass + 1, first_fail - 1, last_pass
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        if test(mid):
+            best = mid
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return best, True, curve
+
+
+def _ltm_arm_overrides(arm):
+    if arm == "legacy":
+        return {"enabled": False}
+    return {"enabled": True, "model_layer_enabled": False, "min_dropped_for_trigger": 1}
+
+
+class _LtmArmConfigOverride:
+    """临时改写 <exe_dir>/service_config.json 的 prompt_optimization.task_memo 子节，
+    与 _ScArmConfigOverride 同一备份-还原模式（改前备份，__exit__ 里 finally 还原）。"""
+
+    def __init__(self, exe_dir, arm):
+        self.config_path = Path(exe_dir) / "service_config.json"
+        self.overrides = _ltm_arm_overrides(arm)
+        self._original_text = None
+        self._existed = False
+
+    def __enter__(self):
+        if self.config_path.exists():
+            self._existed = True
+            self._original_text = self.config_path.read_text(encoding="utf-8")
+            try:
+                data = json.loads(self._original_text)
+            except Exception:
+                data = {}
+        else:
+            data = {}
+        po = data.setdefault("prompt_optimization", {})
+        po.setdefault("task_memo", {}).update(self.overrides)
+        self.config_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        try:
+            if self._existed:
+                self.config_path.write_text(self._original_text, encoding="utf-8")
+            elif self.config_path.exists():
+                self.config_path.unlink()
+        except Exception as e:
+            print(f"WARNING: _LtmArmConfigOverride 还原 {self.config_path} 失败: {e}")
+        return False
+
+
+def _ltm_run_via_client(client_exe, host, port, body, out_dir, timeout):
+    """通过 GenieAPIClient.exe --raw_file 发送任意构造的 messages 数组——其正常
+    --prompt/--system CLI 每次只能发单轮，--raw_file 分支绕开此限制、原样送出 JSON
+    请求体（技法来自 GenieAPIClient.cpp 源码）。返回 (ok, stdout_text)。"""
+    raw_dir = Path(out_dir) / "long_task_memory_raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    raw_path = raw_dir / f"body_{int(time.time() * 1000)}_{random.randint(0, 9999)}.json"
+    try:
+        raw_path.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
+        cmd = [str(client_exe), "--raw_file", str(raw_path), "--host", f"{host}:{port}"]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                              encoding="utf-8", errors="replace")
+        return proc.returncode == 0, (proc.stdout or "") + (proc.stderr or "")
+    except subprocess.TimeoutExpired:
+        return False, "TIMEOUT"
+    except Exception as e:
+        return False, f"EXC: {e}"
+    finally:
+        try:
+            raw_path.unlink()
+        except OSError:
+            pass
+
+
+def _ltm_client_spotcheck(args, model, out_dir, n_values, lines_per_round, timeout,
+                           all_results, all_crash_events, label, arm):
+    """GenieAPIClient.exe 端到端交叉确认通道：在 direct 通道已求出的前沿附近抽样几个 N，
+    用真实客户端可执行文件复核同一 pass/fail 方向，不重跑完整二分搜索（真实进程调用
+    开销显著高于 direct HTTP，只做交叉确认而非独立求前沿）。"""
+    client_exe = Path(args.exe_dir) / "GenieAPIClient.exe"
+    if not client_exe.exists():
+        all_results.append(_sc_result(
+            f"LONG_TASK_MEMORY: {label}/{arm} client crosscheck", model, False,
+            f"未找到 GenieAPIClient.exe: {client_exe}，跳过端到端交叉确认通道", skipped=True))
+        return
+    for n in n_values:
+        round1_messages = _ltm_build_history(n, lines_per_round)
+        body1 = {"model": model, "stream": False, "messages": round1_messages, "max_tokens": 24}
+        _trace_request(model, f"LTM client round1 n={n}", 1, "long_task_memory")
+        try:
+            ok1, out1 = _ltm_run_via_client(client_exe, args.host, args.port, body1, out_dir, timeout)
+        except Exception as e:
+            all_crash_events.append(CrashEvent(
+                timestamp=datetime.now().isoformat(), model_name=model, round_num=1,
+                endpoint=f"LTM client round1 n={n}",
+                detail=f"long_task_memory client 通道异常: {str(e)[:200]}",
+                request_history=_trace_snapshot()))
+            ok1, out1 = False, str(e)
+        round2_messages = round1_messages + [
+            {"role": "assistant", "content": "ack"},
+            {"role": "user", "content": _ltm_recall_question()},
+        ]
+        body2 = {"model": model, "stream": False, "messages": round2_messages, "max_tokens": 128}
+        _trace_request(model, f"LTM client round2 n={n}", 1, "long_task_memory")
+        ok2, out2 = _ltm_run_via_client(client_exe, args.host, args.port, body2, out_dir, timeout)
+        recall = {c: _ltm_recall_hit(out2, c) for c in (_LTM_GOAL_CODE, _LTM_CONSTRAINT_CODE, _LTM_TODO_CODE)}
+        passed = ok1 and ok2 and all(recall.values())
+        all_results.append(_sc_result(
+            f"LONG_TASK_MEMORY: {label}/{arm} client crosscheck n={n}", model, passed,
+            f"GenieAPIClient.exe --raw_file 交叉确认 n={n}: round1_ok={ok1}, round2_ok={ok2}, recall={recall}",
+            data={"n": n, "ok1": ok1, "ok2": ok2, "recall": recall}))
+
+
+def _ltm_stateful_probe(args, model, probe, n_values, lines_per_round, timeout,
+                         all_results, all_crash_events, label, arm):
+    """stateful 模式：IsStatelessMode()==false 时整条压缩管线（含 TaskMemoBuilder）都不会
+    跑（见模块级注释），task_memo.enabled 在此模式下无效——这里只验证 Step1 修复后的
+    ChatHistory::Limit() 窗口内召回是否成立（不做 legacy/optimized 对照，两者预期等价）。"""
+    for n in n_values:
+        evidence = _ltm_single_trial_direct(args, model, probe, n, lines_per_round, timeout)
+        passed = (not evidence["error"]) and evidence["recall_goal"] and evidence["recall_constraint"] \
+            and evidence["recall_todo"]
+        if evidence["error"] and "异常" in evidence["error"]:
+            all_crash_events.append(CrashEvent(
+                timestamp=datetime.now().isoformat(), model_name=model, round_num=1,
+                endpoint=f"LTM stateful n={n}", detail=evidence["error"][:200],
+                request_history=_trace_snapshot()))
+        all_results.append(_sc_result(
+            f"LONG_TASK_MEMORY: {label}/stateful/{arm} n={n}", model, passed,
+            f"stateful 模式 n={n}: {evidence}", skipped=bool(evidence.get("trivial")),
+            data=evidence))
+
+
+def _ltm_append_arm_contrast(model, service_mode, frontier_by_arm, all_results):
+    legacy_f, opt_f = frontier_by_arm.get("legacy"), frontier_by_arm.get("optimized")
+    if legacy_f is None or opt_f is None:
+        return
+    gain = opt_f - legacy_f
+    ratio = (opt_f / legacy_f) if legacy_f > 0 else None
+    detail = (f"{service_mode} 模式：legacy frontier={legacy_f}, optimized frontier={opt_f}, 差值={gain}"
+              + (f"，倍数={ratio:.2f}x" if ratio is not None else ""))
+    all_results.append(_sc_result(
+        f"LONG_TASK_MEMORY: {model}/{service_mode} arm_contrast", model, opt_f >= legacy_f, detail,
+        data={"legacy_frontier": legacy_f, "optimized_frontier": opt_f, "gain": gain, "ratio": ratio}))
+
+
+def _run_long_task_memory_suite(args, models, remote_mode, out_dir):
+    """--suite long_task_memory：Task Memo 分段式记忆机制的「记忆前沿」量化回归。
+
+    核心指标：模型在 N 次压缩/丢弃事件之后，Round2 追问仍能复述任务目标/约束/TODO
+    三个 canary code 的最大 N（倍增探测 + 二分收敛 + 重复采样多数票，方法论同构
+    skill_capacity，见模块级注释）。legacy（task_memo 关闭）vs optimized（开启）
+    双臂对照量化机制收益；direct（Python 直连读 X-Genie-Prompt-Memo-* 头）与
+    GenieAPIClient.exe（--raw_file 端到端交叉确认）双通道。stateful 模式下压缩管线
+    整体不跑，只验证 ChatHistory::Limit() 窗口内召回，不做双臂对照（见 _ltm_stateful_probe）。
+    """
+    all_results, all_perf_samples, all_crash_events = [], [], []
+    suite_model = "_long_task_memory_"
+
+    if remote_mode:
+        all_results.append(_sc_result(
+            "LONG_TASK_MEMORY: suite precondition", suite_model, False,
+            "远程模式无法自定义服务命令行（stateless 需 -n -1，stateful 需自定义 -n）也无法临时改写 "
+            "service_config.json 切换 legacy/optimized 档位，跳过记忆前沿套件", skipped=True))
+        return all_results, all_perf_samples, all_crash_events
+
+    requested = None
+    if getattr(args, "long_task_memory_models", None):
+        requested = {s.strip() for s in args.long_task_memory_models.split(",") if s.strip()}
+
+    targets = []
+    m1 = _sc_resolve_model(models, "qwen3-8b")
+    if not requested or "qwen3-8b" in requested:
+        if m1:
+            targets.append(("qwen3-8b", m1))
+        else:
+            all_results.append(_sc_result(
+                "LONG_TASK_MEMORY: suite precondition qwen3-8b", suite_model, False,
+                f"未在已发现模型中匹配到 qwen3-8b（models={models}），精确跳过", skipped=True))
+    m2 = next((m for m in models if infer_backend(m)[0] == "GGUF"), None)
+    if not requested or "gguf-20b" in requested:
+        if m2:
+            targets.append(("gguf-20b", m2))
+        else:
+            all_results.append(_sc_result(
+                "LONG_TASK_MEMORY: suite precondition gguf-20b", suite_model, False,
+                f"未在已发现模型中匹配到任何 GGUF 后端模型（models={models}），精确跳过", skipped=True))
+
+    if not targets:
+        return all_results, all_perf_samples, all_crash_events
+
+    max_n = getattr(args, "long_task_memory_max", 8)
+    repeat = getattr(args, "long_task_memory_repeat", 1)
+    lines_per_round = getattr(args, "long_task_memory_filler_lines", 6)
+    timeout = getattr(args, "long_task_memory_timeout", 180)
+    arms = ("legacy", "optimized") if getattr(args, "long_task_memory_arms", "both") == "both" \
+        else (args.long_task_memory_arms,)
+    drive_modes = ("direct", "client") if getattr(args, "long_task_memory_mode", "direct") == "both" \
+        else (getattr(args, "long_task_memory_mode", "direct"),)
+    service_modes = ("stateless", "stateful") if getattr(args, "long_task_memory_service_mode", "stateless") == "both" \
+        else (getattr(args, "long_task_memory_service_mode", "stateless"),)
+    stateful_n = getattr(args, "long_task_memory_stateful_n", 6)
+
+    for label, target in targets:
+        config_path = Path(args.models) / target / "config.json"
+        if not config_path.exists():
+            all_results.append(_sc_result(
+                f"LONG_TASK_MEMORY: {label} precondition", target, False,
+                f"缺失 config.json: {config_path}，精确跳过", skipped=True))
+            continue
+
+        for service_mode in service_modes:
+            arms_for_mode = arms if service_mode == "stateless" else ("optimized",)
+            frontier_by_arm = {}
+            for arm in arms_for_mode:
+                print(f"\n{'='*60}")
+                print(f"阶段: long_task_memory（模型={label}/{target}, service_mode={service_mode}, arm={arm}）")
+                print(f"{'='*60}")
+
+                wait_port_closed(args.host, args.port, timeout=15)
+                svc = ServiceManager(args.exe_dir, args.host, args.port)
+                svc._log_dir = out_dir
+                extra_args = ["-n", "-1", "-g", "-d", "3"] if service_mode == "stateless" \
+                    else ["-n", str(stateful_n), "-g", "-d", "3"]
+                try:
+                    with _LtmArmConfigOverride(args.exe_dir, arm):
+                        svc.start(str(config_path), extra_args=extra_args)
+                        if not wait_port_open(args.host, args.port, timeout=180, process=svc.process):
+                            all_results.append(_sc_result(
+                                f"LONG_TASK_MEMORY: {label}/{service_mode}/{arm} precondition",
+                                target, False, "端口 180s 内未可连接，精确跳过", skipped=True))
+                            continue
+                        probe = _PromptLogProbe(svc._stdout_log)
+                        trial_log = []
+                        if service_mode == "stateless":
+                            if "direct" in drive_modes:
+                                frontier, converged, curve = _ltm_binary_search(
+                                    args, target, probe, max_n, repeat, lines_per_round, timeout, trial_log)
+                                frontier_by_arm[arm] = frontier
+                                note = (f"前沿值({arm})={frontier}（已收敛）" if converged else
+                                        f"frontier ≥ {frontier}（倍增到 max_n={max_n} 仍全部通过，未收敛，"
+                                        f"需调大 --long_task_memory_max 重测）")
+                                all_results.append(_sc_result(
+                                    f"LONG_TASK_MEMORY: {label}/{service_mode}/{arm} frontier", target,
+                                    converged, note + f"；曲线点数={len(curve)}；末次曲线条目="
+                                    f"{curve[-1] if curve else None}", skipped=not converged,
+                                    data={"model": target, "arm": arm, "frontier": frontier,
+                                          "converged": converged, "probe_curve": curve,
+                                          "trials": trial_log}))
+                            if "client" in drive_modes:
+                                spot_ns = sorted(set(
+                                    n for n in (1, max(1, frontier_by_arm.get(arm, 1)), max_n) if n >= 1
+                                )) if "direct" in drive_modes else sorted({1, max_n})
+                                _ltm_client_spotcheck(args, target, out_dir, spot_ns, lines_per_round,
+                                                      timeout, all_results, all_crash_events, label, arm)
+                        else:
+                            spot_ns = sorted(set(n for n in (1, max(1, stateful_n // 2), stateful_n + 2) if n >= 1))
+                            _ltm_stateful_probe(args, target, probe, spot_ns, lines_per_round, timeout,
+                                               all_results, all_crash_events, label, arm)
+                except (RuntimeError, FileNotFoundError) as e:
+                    all_results.append(_sc_result(
+                        f"LONG_TASK_MEMORY: {label}/{service_mode}/{arm} precondition", target, False,
+                        f"服务启动失败: {str(e)[:300]}", skipped=True))
+                except Exception as e:
+                    all_crash_events.append(CrashEvent(
+                        timestamp=datetime.now().isoformat(), model_name=target, round_num=1,
+                        endpoint=f"LTM {service_mode}/{arm}", detail=f"套件执行异常: {str(e)[:200]}",
+                        request_history=_trace_snapshot()))
+                finally:
+                    svc.stop()
+                    svc._force_kill()
+
+            if service_mode == "stateless" and len(frontier_by_arm) >= 2:
+                _ltm_append_arm_contrast(target, service_mode, frontier_by_arm, all_results)
+
+    return all_results, all_perf_samples, all_crash_events
+
+
 SUITE_HANDLERS = {
     "full": _run_full_suite,
     "model": _run_model_suite,
@@ -13232,6 +13745,7 @@ SUITE_HANDLERS = {
     "graceful_shutdown": _run_graceful_shutdown_suite,
     "prompt_fidelity": _run_prompt_fidelity_suite,
     "skill_capacity": _run_skill_capacity_suite,
+    "long_task_memory": _run_long_task_memory_suite,
 }
 
 
@@ -13305,8 +13819,38 @@ def main():
                              "fidelity.{cjk,ascii}_chars_per_token=4.0 + budget_partition.enabled=false，改前备份、"
                              "finally 还原）；optimized=Step2 改造后的默认档位（不写覆盖，直接用 C++ 侧新默认值）；"
                              "both=依次跑两档并在 data 里各自记录 frontier_skills，供报告算提升倍数")
-    parser.add_argument("--suite", choices=("full", "model", "sampleapp", "multimodal", "gguf", "multi_model", "builder_local_model", "mnn", "qnn", "graceful_shutdown", "prompt_fidelity", "skill_capacity"),
+    parser.add_argument("--suite", choices=("full", "model", "sampleapp", "multimodal", "gguf", "multi_model", "builder_local_model", "mnn", "qnn", "graceful_shutdown", "prompt_fidelity", "skill_capacity", "long_task_memory"),
                         default=None, help="选择要运行的测试套件（必传参数，不再有隐式默认值；如需完整回归请显式传入 full）")
+    parser.add_argument("--long_task_memory_models", default=None,
+                        help="--suite long_task_memory 限定测试的目标模型简写，逗号分隔（qwen3-8b/gguf-20b），"
+                             "留空则两个目标模型都测（各自缺失时精确跳过，不影响另一个）")
+    parser.add_argument("--long_task_memory_max", type=int, default=8,
+                        help="--suite long_task_memory 倍增探测+二分搜索的硬上限 N（默认 8，真机 LLM 推理成本远高于 "
+                             "skill_capacity 的纯提示词判定，默认值偏小以控制真机耗时；倍增到该上限仍全部通过时 "
+                             "结果标 converged=False，需调大重测，不当真实前沿使用）")
+    parser.add_argument("--long_task_memory_repeat", type=int, default=1,
+                        help="--suite long_task_memory 每个 N 重复试探取多数票的次数（默认 1，每次试探即 2 轮真实 "
+                             "推理，真机耗时下先用 1 验证方法论，充裕时再调大）")
+    parser.add_argument("--long_task_memory_filler_lines", type=int, default=6,
+                        help="--suite long_task_memory 每个填充轮工具输出的行数（默认 6，越大越快挤占预算触发丢弃）")
+    parser.add_argument("--long_task_memory_timeout", type=int, default=180,
+                        help="--suite long_task_memory 单次 HTTP 请求超时秒数（默认 180；真机推理为秒级到十几秒级，"
+                             "不能套用纯单测的短超时，但仍需留有余量避免真正挂起拖死整个套件）")
+    parser.add_argument("--long_task_memory_arms", choices=("legacy", "optimized", "both"), default="both",
+                        help="--suite long_task_memory 档位对照：legacy=task_memo.enabled=false（当前默认纯数字 "
+                             "占位）；optimized=task_memo.enabled=true（model_layer_enabled=false 保证判定确定性）；"
+                             "both=依次跑两档并记录 frontier，供报告算提升倍数/差值（默认 both）")
+    parser.add_argument("--long_task_memory_mode", choices=("direct", "client", "both"), default="direct",
+                        help="--suite long_task_memory 驱动路径：direct=Python 直连读 X-Genie-Prompt-Memo-* 头做 "
+                             "细粒度断言与二分搜索前沿（唯一能测出前沿数字的通道）；client=GenieAPIClient.exe "
+                             "--raw_file 端到端交叉确认（只在 direct 已测出的前沿附近抽样，不独立求前沿）；"
+                             "both=两者都跑。默认 direct")
+    parser.add_argument("--long_task_memory_service_mode", choices=("stateless", "stateful", "both"), default="stateless",
+                        help="--suite long_task_memory 服务模式：stateless=-n -1（Task Memo 真正生效路径，legacy/"
+                             "optimized 双臂对照）；stateful=常规 -n（验证 ChatHistory::Limit() 窗口内召回，压缩管线 "
+                             "整体不跑，不做双臂对照）；both=两者都跑。默认 stateless")
+    parser.add_argument("--long_task_memory_stateful_n", type=int, default=6,
+                        help="--suite long_task_memory stateful 模式下传给服务的 -n 值（默认 6）")
     parser.add_argument("--model_name", default=None, help="--suite model/mnn/qnn/sampleapp 时按名称筛选模型，逗号分隔，未指定则测试该套件下全部已发现模型")
 
     args = parser.parse_args()
