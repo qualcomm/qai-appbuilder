@@ -13529,10 +13529,12 @@ def _ltm_run_via_client(client_exe, host, port, body, out_dir, timeout):
 
 
 def _ltm_client_spotcheck(args, model, out_dir, n_values, lines_per_round, timeout,
-                           all_results, all_crash_events, label, arm):
+                           all_results, all_crash_events, label, arm, frontier):
     """GenieAPIClient.exe 端到端交叉确认通道：在 direct 通道已求出的前沿附近抽样几个 N，
     用真实客户端可执行文件复核同一 pass/fail 方向，不重跑完整二分搜索（真实进程调用
-    开销显著高于 direct HTTP，只做交叉确认而非独立求前沿）。"""
+    开销显著高于 direct HTTP，只做交叉确认而非独立求前沿）。抽样点天然包含 max_n（预期
+    召回失败，用于确认前沿之外方向也一致），故按 n<=frontier 期望召回成功/n>frontier 期望
+    召回失败分别判定，而非无条件要求召回成功——否则 max_n 点必然被误判为失败。"""
     client_exe = Path(args.exe_dir) / "GenieAPIClient.exe"
     if not client_exe.exists():
         all_results.append(_sc_result(
@@ -13560,22 +13562,34 @@ def _ltm_client_spotcheck(args, model, out_dir, n_values, lines_per_round, timeo
         _trace_request(model, f"LTM client round2 n={n}", 1, "long_task_memory")
         ok2, out2 = _ltm_run_via_client(client_exe, args.host, args.port, body2, out_dir, timeout)
         recall = {c: _ltm_recall_hit(out2, c) for c in (_LTM_GOAL_CODE, _LTM_CONSTRAINT_CODE, _LTM_TODO_CODE)}
-        passed = ok1 and ok2 and all(recall.values())
+        expect_recall = n <= frontier
+        direction_matches = all(recall.values()) if expect_recall else not all(recall.values())
+        passed = ok1 and ok2 and direction_matches
         all_results.append(_sc_result(
             f"LONG_TASK_MEMORY: {label}/{arm} client crosscheck n={n}", model, passed,
-            f"GenieAPIClient.exe --raw_file 交叉确认 n={n}: round1_ok={ok1}, round2_ok={ok2}, recall={recall}",
-            data={"n": n, "ok1": ok1, "ok2": ok2, "recall": recall}))
+            f"GenieAPIClient.exe --raw_file 交叉确认 n={n}: round1_ok={ok1}, round2_ok={ok2}, "
+            f"expect_recall={expect_recall}, recall={recall}",
+            data={"n": n, "ok1": ok1, "ok2": ok2, "expect_recall": expect_recall, "recall": recall}))
 
 
 def _ltm_stateful_probe(args, model, probe, n_values, lines_per_round, timeout,
                          all_results, all_crash_events, label, arm):
     """stateful 模式：IsStatelessMode()==false 时整条压缩管线（含 TaskMemoBuilder）都不会
     跑（见模块级注释），task_memo.enabled 在此模式下无效——这里只验证 Step1 修复后的
-    ChatHistory::Limit() 窗口内召回是否成立（不做 legacy/optimized 对照，两者预期等价）。"""
+    ChatHistory::Limit() 窗口内召回是否成立（不做 legacy/optimized 对照，两者预期等价）。
+
+    方向感知判定（与 _ltm_client_spotcheck 同构）：round2 每次都重发完整历史，
+    ChatHistory::Limit() 按原始消息数截断，brief 三条 canary 消息固定排在最前，
+    一旦 dropped_r2>0 就必然先从它们开始被逐条挤出窗口——expect_recall 由
+    dropped_r2（服务端实际回报的截断量）而非猜测的 n 阈值推导，n 越大只是让
+    dropped_r2 更大，不改变这条因果关系本身。"""
     for n in n_values:
         evidence = _ltm_single_trial_direct(args, model, probe, n, lines_per_round, timeout)
-        passed = (not evidence["error"]) and evidence["recall_goal"] and evidence["recall_constraint"] \
-            and evidence["recall_todo"]
+        actual_recall = evidence["recall_goal"] and evidence["recall_constraint"] and evidence["recall_todo"]
+        dropped_r2 = evidence.get("dropped_r2")
+        expect_recall = True if dropped_r2 is None else (dropped_r2 == 0)
+        direction_matches = (actual_recall == expect_recall)
+        passed = (not evidence["error"]) and direction_matches
         if evidence["error"] and "异常" in evidence["error"]:
             all_crash_events.append(CrashEvent(
                 timestamp=datetime.now().isoformat(), model_name=model, round_num=1,
@@ -13583,7 +13597,8 @@ def _ltm_stateful_probe(args, model, probe, n_values, lines_per_round, timeout,
                 request_history=_trace_snapshot()))
         all_results.append(_sc_result(
             f"LONG_TASK_MEMORY: {label}/stateful/{arm} n={n}", model, passed,
-            f"stateful 模式 n={n}: {evidence}", skipped=bool(evidence.get("trivial")),
+            f"stateful 模式 n={n}: expect_recall={expect_recall}, actual_recall={actual_recall}, {evidence}",
+            skipped=bool(evidence.get("trivial")),
             data=evidence))
 
 
@@ -13609,6 +13624,11 @@ def _run_long_task_memory_suite(args, models, remote_mode, out_dir):
     双臂对照量化机制收益；direct（Python 直连读 X-Genie-Prompt-Memo-* 头）与
     GenieAPIClient.exe（--raw_file 端到端交叉确认）双通道。stateful 模式下压缩管线
     整体不跑，只验证 ChatHistory::Limit() 窗口内召回，不做双臂对照（见 _ltm_stateful_probe）。
+
+    仅实现 Tier 1（合成长任务 + 宽松文本记忆探针）。Tier 2（基于 tool_calls 协议的多步骤
+    编码任务端到端核验）本轮未实现：它要求服务端维护一份独立于 Task Memo 的 ground-truth
+    环境状态机（文件系统/构建产物的期望值）来核验任务是否真正完成，工作量与真机测试时间
+    预算不匹配，按计划 Testing 部分"工作量过大则明确记录跳过原因"处理，跳过。
     """
     all_results, all_perf_samples, all_crash_events = [], [], []
     suite_model = "_long_task_memory_"
@@ -13693,22 +13713,31 @@ def _run_long_task_memory_suite(args, models, remote_mode, out_dir):
                                 frontier, converged, curve = _ltm_binary_search(
                                     args, target, probe, max_n, repeat, lines_per_round, timeout, trial_log)
                                 frontier_by_arm[arm] = frontier
+                                # memory_probe_accuracy：把二分搜索过程中触达的全部 N 的
+                                # pass_votes/trials 聚合成一个具名准确率，与离散的 frontier
+                                # 数字互补（frontier 只反映边界，accuracy 反映边界附近整体稳定性）。
+                                total_votes = sum(c.get("pass_votes", 0) for c in curve)
+                                total_trials = sum(c.get("trials", 0) for c in curve)
+                                memory_probe_accuracy = (total_votes / total_trials) if total_trials else None
                                 note = (f"前沿值({arm})={frontier}（已收敛）" if converged else
                                         f"frontier ≥ {frontier}（倍增到 max_n={max_n} 仍全部通过，未收敛，"
                                         f"需调大 --long_task_memory_max 重测）")
+                                acc_str = f"{memory_probe_accuracy:.2f}" if memory_probe_accuracy is not None else "N/A"
                                 all_results.append(_sc_result(
                                     f"LONG_TASK_MEMORY: {label}/{service_mode}/{arm} frontier", target,
-                                    converged, note + f"；曲线点数={len(curve)}；末次曲线条目="
-                                    f"{curve[-1] if curve else None}", skipped=not converged,
+                                    converged, note + f"；memory_probe_accuracy={acc_str}；曲线点数={len(curve)}；"
+                                    f"末次曲线条目={curve[-1] if curve else None}", skipped=not converged,
                                     data={"model": target, "arm": arm, "frontier": frontier,
                                           "converged": converged, "probe_curve": curve,
+                                          "memory_probe_accuracy": memory_probe_accuracy,
                                           "trials": trial_log}))
                             if "client" in drive_modes:
                                 spot_ns = sorted(set(
                                     n for n in (1, max(1, frontier_by_arm.get(arm, 1)), max_n) if n >= 1
                                 )) if "direct" in drive_modes else sorted({1, max_n})
                                 _ltm_client_spotcheck(args, target, out_dir, spot_ns, lines_per_round,
-                                                      timeout, all_results, all_crash_events, label, arm)
+                                                      timeout, all_results, all_crash_events, label, arm,
+                                                      frontier_by_arm.get(arm, 1))
                         else:
                             spot_ns = sorted(set(n for n in (1, max(1, stateful_n // 2), stateful_n + 2) if n >= 1))
                             _ltm_stateful_probe(args, target, probe, spot_ns, lines_per_round, timeout,
