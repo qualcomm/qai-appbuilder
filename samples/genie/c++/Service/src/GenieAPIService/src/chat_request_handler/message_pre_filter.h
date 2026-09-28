@@ -13,6 +13,7 @@
 #include "../context/context_base.h"
 #include "../chat_history/chat_history.h"
 #include "prompt_stats_helper.h"
+#include "task_memo_builder.h"
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
@@ -38,8 +39,13 @@ struct OptimizedMessages {
     // Phase 4（FitMessagesToContext 内的紧急截断）是否被实际触发过；供 PromptLedger 回报
     // 调用方「本轮最末尾的巨型 tool 响应是否被紧急截断过」。
     bool emergency_truncated;
+    // Task Memo（TaskMemoBuilder::Update 结果）：功能关闭或未触发时保持默认值。
+    bool memo_active;
+    double memo_confidence;
+    size_t memo_refresh_count;
 
-    OptimizedMessages() : total_tokens(0), dropped_count(0), success(false), emergency_truncated(false) {}
+    OptimizedMessages() : total_tokens(0), dropped_count(0), success(false), emergency_truncated(false),
+                           memo_active(false), memo_confidence(0.0), memo_refresh_count(0) {}
 };
 
 // ========== 消息预过滤器 ==========
@@ -72,7 +78,9 @@ public:
         const std::vector<GenieChatMessage>& all_messages,
         const std::string& system_prompt,
         size_t context_size,
-        const MessageCompressionConfig& config = MessageCompressionConfig());
+        const MessageCompressionConfig& config = MessageCompressionConfig(),
+        const nlohmann::ordered_json* raw_messages_for_memo = nullptr,
+        TaskMemoBuilder* memo_builder = nullptr);
 
     // ========== 主入口：分级压缩预过滤 ==========
     // 算法设计：预算驱动 + 分级压缩，只在超出预算时才压缩/丢弃消息

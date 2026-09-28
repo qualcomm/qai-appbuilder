@@ -18,6 +18,7 @@
 #include "message_pre_filter.h"
 #include "long_text_summarizer.h"
 #include "summary_cache.h"
+#include "task_memo_builder.h"
 #include "prompt_ledger.h"
 
 
@@ -31,7 +32,11 @@ public:
           instance_config_{instance_config},
           context_{instance_config_->i_model_config_.get_genie_model_handle().lock()},
           optimizer_{instance_config_->i_model_config_, context_.get()},
-          pre_filter_{instance_config_->i_model_config_, context_.get()}
+          pre_filter_{instance_config_->i_model_config_, context_.get()},
+          task_memo_builder_{instance_config_->i_model_config_.GetPromptOptimizationConfig().task_memo,
+                              *instance_config_,
+                              &TaskMemoStore::GetInstance(),
+                              [this](const std::string& prompt) -> std::string { return this->RunSummarizationInference(prompt); }}
     {
         request_data_ = request_data;
     }
@@ -331,6 +336,7 @@ private:
             } else {
                 systemDefaultPrompt = optimizer_.OptimizeSystemPrompt(systemDefaultPrompt, request_data_);
             }
+            systemDefaultPrompt += BuildTaskMemoSection();
 
             auto stats = optimizer_.GetLastStats();
             My_Log{My_Log::Level::kInfo} << "[Optimization] System prompt savings: " << stats.savings_percent << "%" << std::endl;
@@ -641,6 +647,9 @@ private:
                 last_ledger_.skills_l1 = opt_stats.skills_l1;
                 last_ledger_.skills_l0 = opt_stats.skills_l0;
                 last_ledger_.emergency_truncated = optimized.emergency_truncated;
+                last_ledger_.memo_active = optimized.memo_active;
+                last_ledger_.memo_confidence = optimized.memo_confidence;
+                last_ledger_.memo_refresh_count = optimized.memo_refresh_count;
             }
 
             std::ostringstream log_stream;
@@ -796,6 +805,7 @@ private:
                         developer_msg += optimizer_.ConvertToolsToOptimizedTypeScript(tools, request_data_);
                         developer_msg += "\n} // namespace functions";
                     }
+                    developer_msg += BuildTaskMemoSection();
                     developer_msg += "<|end|>";
                 }
             } else {
@@ -816,6 +826,7 @@ private:
                         tools,
                         request_data_
                     );
+                    developer_msg += BuildTaskMemoSection();
                     developer_msg += "<|end|>";
                 }
             }
@@ -1668,6 +1679,9 @@ private:
             last_ledger_.skills_l1 = opt_stats.skills_l1;
             last_ledger_.skills_l0 = opt_stats.skills_l0;
             last_ledger_.emergency_truncated = optimized.emergency_truncated;
+            last_ledger_.memo_active = optimized.memo_active;
+            last_ledger_.memo_confidence = optimized.memo_confidence;
+            last_ledger_.memo_refresh_count = optimized.memo_refresh_count;
         }
 
         return result;
@@ -1693,6 +1707,37 @@ private:
         return agentType;
     }
 
+    // ========== 辅助函数：从 TaskMemoStore 查表渲染 Task Memo 段落 ==========
+    // 直接从服务端权威存储渲染，不经过 PromptSectionsConfig/AppendFilteredSections 的回收逻辑。
+    // 未命中（功能关闭/存储丢失/无历史）时返回空字符串，调用方 += 空字符串逐字节回退到接入前的行为。
+    std::string BuildTaskMemoSection() const
+    {
+        if (!request_data_.is_object() || !request_data_.contains("messages") || !request_data_["messages"].is_array()) {
+            return "";
+        }
+        auto memo_entry = task_memo_builder_.Lookup(request_data_["messages"]);
+        if (!memo_entry) {
+            return "";
+        }
+
+        std::string rendered = TaskMemoBuilder::Render(*memo_entry);
+        if (rendered.empty())
+            return "";
+
+        const auto& po_cfg = instance_config_->i_model_config_.GetPromptOptimizationConfig();
+        double ratio = po_cfg.task_memo.token_budget_ratio;
+        if (ratio > 0.0) {
+            double bytes_per_token = EstimateCjkAwareBytesPerToken(
+                rendered, po_cfg.fidelity.cjk_bytes_per_token, po_cfg.fidelity.ascii_bytes_per_token);
+            size_t budget_bytes = static_cast<size_t>(
+                instance_config_->get_context_size() * ratio * bytes_per_token);
+            if (budget_bytes > 0 && rendered.size() > budget_bytes) {
+                rendered = TaskMemoBuilder::Render(*memo_entry, budget_bytes);
+            }
+        }
+        return "\n\n" + rendered;
+    }
+
     // ========== 辅助函数：调用 FitMessagesToContext 并统一处理错误和日志 ==========
     OptimizedMessages ApplyFitMessagesToContext(
         const std::vector<GenieChatMessage>& messages,
@@ -1702,7 +1747,14 @@ private:
     {
         My_Log{My_Log::Level::kDebug} << "[" << log_prefix << "] Fitting messages to context..." << std::endl;
 
-        auto optimized = pre_filter_.FitMessagesToContext(messages, system_prompt, contextSize);
+        const json* raw_messages_for_memo = nullptr;
+        if (request_data_.is_object() && request_data_.contains("messages") && request_data_["messages"].is_array()) {
+            raw_messages_for_memo = &request_data_["messages"];
+        }
+
+        auto optimized = pre_filter_.FitMessagesToContext(messages, system_prompt, contextSize,
+                                                            MessageCompressionConfig(),
+                                                            raw_messages_for_memo, &task_memo_builder_);
 
         if (!optimized.success) {
             My_Log{My_Log::Level::kError}
@@ -1942,8 +1994,8 @@ private:
 
     // 注意：C++ 按声明顺序初始化成员变量，与初始化列表顺序无关。
     // 以下声明顺序与构造函数初始化列表顺序保持一致，消除 -Wreorder 编译器警告。
-    // 初始化顺序：chat_history_ → instance_config_ → context_ → optimizer_ → pre_filter_
-    // optimizer_ 和 pre_filter_ 依赖 instance_config_（已在前面初始化），
+    // 初始化顺序：chat_history_ → instance_config_ → context_ → optimizer_ → pre_filter_ → task_memo_builder_
+    // optimizer_、pre_filter_、task_memo_builder_ 均依赖 instance_config_（已在前面初始化），
     // SetContext() 在构造函数体中调用（此时 context_ 已初始化），无 UB 风险。
     ChatHistory &chat_history_;
     ModelInput model_input_;
@@ -1951,6 +2003,9 @@ private:
     std::shared_ptr<ContextBase> context_;
     PromptOptimizer optimizer_;
     MessagePreFilter pre_filter_;
+    // Task Memo 的 infer_fn 只捕获 this（本对象随请求全程存活，含流式路径的 shared_ptr 持有），
+    // 不捕获 Build() 局部的 is_alive_fn——is_alive_fn_ 恒为 nullptr，模型层触发条件满足时恒不跳过。
+    TaskMemoBuilder task_memo_builder_;
 
     // 工具调用 ID 到函数名的映射（用于关联 OpenAI 格式的工具调用和响应）
     std::unordered_map<std::string, std::string> tool_call_id_to_name_;

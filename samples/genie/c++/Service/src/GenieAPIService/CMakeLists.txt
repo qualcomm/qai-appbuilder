@@ -22,6 +22,8 @@ list(APPEND SERVICE_SOURCES
         src/chat_request_handler/prompt_preparation_service.cpp
         src/chat_request_handler/summary_cache.cpp
         src/chat_request_handler/long_text_summarizer.cpp
+        src/chat_request_handler/task_memo_store.cpp
+        src/chat_request_handler/task_memo_builder.cpp
         src/chat_history/chat_history.cpp
         src/model/model_manager.cpp
         src/context/llama_speculative_config.cpp

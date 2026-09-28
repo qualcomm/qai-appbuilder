@@ -640,6 +640,25 @@ struct PromptOptimizationConfig {
 
         LongTextSummaryCacheConfig cache;
     } long_text_summarization;
+
+    // ── Task Memo（分段式记忆）配置 ─────────────────────────
+    // 对应 service_config.json 中的 "prompt_optimization.task_memo" 节
+    struct TaskMemoStoreConfig {
+        size_t max_entries = 200;       // 最大缓存条目数（LRU 淘汰；指纹+首条消息双 key 注册，实际会话数约为其半）
+        size_t max_memory_mb = 20;      // 最大内存占用（MB，超出时淘汰最旧条目）
+        int ttl_minutes = 120;          // 缓存条目生存时间（分钟）
+    };
+
+    struct TaskMemoConfig {
+        bool enabled = false;                    // 总开关（默认关闭，需在 service_config.json 中显式开启）
+        bool model_layer_enabled = true;         // 模型层深度总结开关（关闭时永远只用规则层兜底，enabled=false 时无意义）
+        double token_budget_ratio = 0.15;        // Task Memo 段落允许占用 context_size 的比例上限
+        size_t min_dropped_for_trigger = 1;      // FitMessagesToContext 本次即将丢弃的消息数达到此值才更新备忘录
+        size_t long_tool_chain_threshold = 4;    // 本次丢弃的连续 tool 消息数达到此值时触发模型层深度总结
+        double low_confidence_threshold = 0.5;   // 上一份备忘录 confidence 低于此值时触发模型层深度总结
+
+        TaskMemoStoreConfig store;
+    } task_memo;
 };
 
 // ============================================================

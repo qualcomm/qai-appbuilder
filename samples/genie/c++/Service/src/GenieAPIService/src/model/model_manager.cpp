@@ -16,6 +16,7 @@
 #include "../context/llama_cpp.h"
 #include "../response/response_tools.h"
 #include "../chat_request_handler/summary_cache.h"
+#include "../chat_request_handler/task_memo_store.h"
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -1880,6 +1881,44 @@ bool ModelManager::InitializeConfig(bool load)
                                     << ", max_memory_mb=" << sum_cfg.cache.max_memory_mb
                                     << ", ttl_minutes=" << sum_cfg.cache.ttl_minutes
                                     << std::endl;
+                        }
+                    }
+
+                    // 加载 task_memo 配置
+                    if (po.contains("task_memo") && po["task_memo"].is_object())
+                    {
+                        const auto &tm = po["task_memo"];
+                        auto &memo_cfg = prompt_optimization_config_.task_memo;
+
+                        memo_cfg.enabled = tm.value("enabled", false);
+                        memo_cfg.model_layer_enabled = tm.value("model_layer_enabled", true);
+                        memo_cfg.token_budget_ratio = tm.value("token_budget_ratio", 0.15);
+                        memo_cfg.min_dropped_for_trigger = tm.value("min_dropped_for_trigger", (size_t) 1);
+                        memo_cfg.long_tool_chain_threshold = tm.value("long_tool_chain_threshold", (size_t) 4);
+                        memo_cfg.low_confidence_threshold = tm.value("low_confidence_threshold", 0.5);
+
+                        if (tm.contains("store") && tm["store"].is_object())
+                        {
+                            const auto &st = tm["store"];
+                            memo_cfg.store.max_entries = st.value("max_entries", (size_t) 200);
+                            memo_cfg.store.max_memory_mb = st.value("max_memory_mb", (size_t) 20);
+                            memo_cfg.store.ttl_minutes = st.value("ttl_minutes", 120);
+                        }
+
+                        My_Log{My_Log::Level::kInfo}
+                                << "[TaskMemo] Config loaded: enabled=" << memo_cfg.enabled
+                                << ", model_layer_enabled=" << memo_cfg.model_layer_enabled
+                                << ", token_budget_ratio=" << memo_cfg.token_budget_ratio
+                                << ", long_tool_chain_threshold=" << memo_cfg.long_tool_chain_threshold
+                                << ", low_confidence_threshold=" << memo_cfg.low_confidence_threshold
+                                << ", store.max_entries=" << memo_cfg.store.max_entries
+                                << ", store.max_memory_mb=" << memo_cfg.store.max_memory_mb
+                                << ", store.ttl_minutes=" << memo_cfg.store.ttl_minutes
+                                << std::endl;
+
+                        if (memo_cfg.enabled)
+                        {
+                            TaskMemoStore::GetInstance().Configure(memo_cfg.store);
                         }
                     }
 
