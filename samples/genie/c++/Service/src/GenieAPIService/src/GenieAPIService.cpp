@@ -19,6 +19,8 @@
 #include "model/model_manager.h"
 #include "response/response_dispatcher.h"
 #include "response/response_tools_layer1_selftest.h"
+#include "response/response_tools_sanitization_selftest.h"
+#include "chat_request_handler/tool_call_circuit_breaker_store_selftest.h"
 #if defined(_WIN32) || defined(__WIN32__) || defined(WIN32)
 #include <windows.h>
 #endif
@@ -378,6 +380,23 @@ int main(int argc, char **argv)
     if (argc > 1 && std::string(argv[1]) == "--self-test-layer1-recovery")
     {
         bool all_passed = RunLayer1RecoverySelfTest(std::cout);
+        return all_passed ? 0 : 1;
+    }
+    // 隐藏自测分支：离线回放验证 ResponseTools::remove_tool_call_content() 的最终防线（对
+    // 未闭合/跨多行截断的 <tool_call> 输入是否彻底清空,不泄漏任何标签/JSON碎片）。
+    // 用法：GenieAPIService.exe --self-test-sanitization
+    if (argc > 1 && std::string(argv[1]) == "--self-test-sanitization")
+    {
+        bool all_passed = RunToolCallSanitizationSelfTest(std::cout);
+        return all_passed ? 0 : 1;
+    }
+    // 隐藏自测分支：直接调用 ToolCallCircuitBreakerStore 公开接口验证"会话+模型维度连续
+    // 触发Layer3计数/降级/冷却重置"链路的端到端语义（单session、交错session/模型、空key、
+    // 并发、冷却过期）。用法：GenieAPIService.exe --self-test-circuit-breaker
+    // 设计取舍见 src/chat_request_handler/tool_call_circuit_breaker_store.md。
+    if (argc > 1 && std::string(argv[1]) == "--self-test-circuit-breaker")
+    {
+        bool all_passed = RunToolCallCircuitBreakerSelfTest(std::cout);
         return all_passed ? 0 : 1;
     }
     service.run(argc, argv);

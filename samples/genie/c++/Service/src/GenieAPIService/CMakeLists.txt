@@ -24,6 +24,8 @@ list(APPEND SERVICE_SOURCES
         src/chat_request_handler/long_text_summarizer.cpp
         src/chat_request_handler/task_memo_store.cpp
         src/chat_request_handler/task_memo_builder.cpp
+        src/chat_request_handler/tool_call_circuit_breaker_store.cpp
+        src/chat_request_handler/tool_call_circuit_breaker_store_selftest.cpp
         src/chat_history/chat_history.cpp
         src/model/model_manager.cpp
         src/context/llama_speculative_config.cpp
@@ -40,6 +42,7 @@ list(APPEND SERVICE_SOURCES
         src/processor/general.cpp
         src/response/response_tools.cpp
         src/response/response_tools_layer1_selftest.cpp
+        src/response/response_tools_sanitization_selftest.cpp
         src/response/response_dispatcher.cpp
         ${CMAKE_SOURCE_DIR}/src/common/utils.cpp
         src/gateway/gateway/gateway.cpp

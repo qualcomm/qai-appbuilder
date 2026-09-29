@@ -20,6 +20,7 @@
 #include "summary_cache.h"
 #include "task_memo_builder.h"
 #include "prompt_ledger.h"
+#include "tool_call_circuit_breaker_store.h"
 
 
 using json = nlohmann::ordered_json;
@@ -191,6 +192,33 @@ public:
                 );
 
                 last_ledger_.summarized = summarizer.ProcessMessages(data["messages"]);
+            }
+        }
+
+        // ── Layer3 熔断降级：会话+模型维度连续多次真正触发 Layer3 终态（Layer0/1/2 均
+        // 未能恢复出合法工具调用）后，判定该会话+模型系统性不具备工具调用能力，动态
+        // 降级本次请求的 system prompt——跳过工具声明注入，而不是继续让模型徒劳尝试。
+        // 实现方式：请求本身声明了 tools 时，若命中熔断，直接把 data["tools"] 清空为
+        // 空数组；下方 BuildHarmonyPrompt/BuildPrompt 内部都是读取 data["tools"] 决定
+        // is_tool 与是否注入工具提示词，清空后两条路径自然表现为"未声明工具"，无需
+        // 改动 PrepareOptimizedSystemAndToolPrompt 内部逻辑。仅在请求确实声明了非空
+        // tools 时才有查询熔断状态的必要，未声明 tools 的请求不受影响、零额外开销。
+        if (data.contains("tools") && data["tools"].is_array() && !data["tools"].empty())
+        {
+            const auto &repair_cfg = instance_config_->i_model_config_.GetToolCallRepairConfig();
+            if (repair_cfg.enabled)
+            {
+                const std::string session_key = TaskMemoBuilder::ComputeFirstMsgKey(data["messages"]);
+                const std::string cb_key = ToolCallCircuitBreakerStore::MakeKey(session_key, instance_config_->get_model_name());
+                if (ToolCallCircuitBreakerStore::GetInstance().ShouldDowngradeToolDeclaration(cb_key))
+                {
+                    My_Log{My_Log::Level::kWarning}
+                        << "[ToolCallRepair][CircuitBreaker] session+model '" << cb_key
+                        << "' tripped consecutive Layer3 threshold; downgrading this request by "
+                           "skipping tool declaration injection (model will not be told it can call tools)."
+                        << std::endl;
+                    data["tools"] = json::array();
+                }
             }
         }
 

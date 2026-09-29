@@ -235,6 +235,21 @@ struct ToolCallRepairConfig {
         // 重试大概率再次超预算，属于"重试无意义"的失败原因。
         std::vector<std::string> skip_reasons = {"truncated"};
     } internal_retry;
+
+    // Layer3：Layer2 重试耗尽仍失败后走分级终态协议（识别出工具名则发真实 tool_call，
+    // 否则降级为 finish_reason="length" 的纯文本）。连续多次真正走到 Layer3 终态
+    // （而非 Layer0/1/2 任一层成功）说明模型系统性不具备工具调用能力，
+    // 熔断后该会话+模型维度动态降级 system prompt（跳过工具声明注入），避免模型继续
+    // 做徒劳的工具调用尝试。计数存储见 ToolCallCircuitBreakerStore
+    // （chat_request_handler/tool_call_circuit_breaker_store.h，LRU+TTL，key=会话
+    // 指纹+模型名，模式对齐 TaskMemoStore）。
+    struct CircuitBreakerConfig {
+        // 连续触发 Layer3 达到此次数后，判定该会话+模型系统性不支持工具调用。
+        int consecutive_layer3_threshold = 3;
+        // 熔断后的冷却时间（秒）：cooldown_seconds 内该会话+模型持续降级 system prompt；
+        // 期间无新的 Layer3 触发则冷却到期后自动解除（下一次请求重新按全量计数）。
+        int cooldown_seconds = 300;
+    } circuit_breaker;
 };
 
 // ============================================================

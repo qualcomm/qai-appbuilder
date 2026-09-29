@@ -154,11 +154,16 @@ std::string ResponseTools::ToolCallFailureReasonToString(ToolCallFailureReason r
     return "unknown";
 }
 
-std::string ResponseTools::convertToolCallJson(const std::string &input, ToolCallFailureReason *out_failure_reason)
+std::string ResponseTools::convertToolCallJson(const std::string &input, ToolCallFailureReason *out_failure_reason,
+                                               json *out_partial_recovery)
 {
     if (out_failure_reason)
     {
         *out_failure_reason = ToolCallFailureReason::kNone;
+    }
+    if (out_partial_recovery)
+    {
+        *out_partial_recovery = json();
     }
 
     if (ResponseTools::log_inference_stream)
@@ -215,7 +220,7 @@ std::string ResponseTools::convertToolCallJson(const std::string &input, ToolCal
                 // unknow 兜底，并把结构化失败分类回传给调用方（供未来 Layer2/3 消费）。
                 json layer1_result;
                 ToolCallFailureReason layer1_reason = ToolCallFailureReason::kUnparseable;
-                if (TryLayer1Recovery(jsonStr, layer1_result, layer1_reason))
+                if (TryLayer1Recovery(jsonStr, layer1_result, layer1_reason, out_partial_recovery))
                 {
                     My_Log{My_Log::Level::kInfo}
                         << "[Layer1Recovery] Recovered tool call from malformed output: "
@@ -379,6 +384,22 @@ std::string ResponseTools::remove_tool_call_content(const std::string &input)
     std::string result = std::regex_replace(input, tool_call_block, "");
     result = std::regex_replace(result, name_line, "");
     result = remove_empty_lines(result);
+
+    // 最终防线：以上两条正则的设计前提是"输入已经是完整闭合的单行 <tool_call>...</tool_call>"
+    // （对已经过 convertToolCallJson() 标准化的输入恒成立），但本函数也被用于清洗原始、可能
+    // 因 token 预算耗尽而中途截断（未及输出 </tool_call> 闭合标签）或 pretty-print 跨多行的
+    // response_buffer（Layer3 情形B 场景，对应 ToolCallFailureReason::kTruncated 等分类）——
+    // 这两种真实截断样态都会让上面两条正则失配，原样泄漏裸标签/JSON碎片。因此这里兜底：清洗后
+    // 若仍能找到 "<tool_call" 子串（大小写不敏感），说明清洗未彻底，直接判定为清洗失败，强制
+    // 返回空字符串，绝不把任何原始碎片泄漏给调用方。详见 response_dispatcher.md。
+    std::string lower_result = result;
+    std::transform(lower_result.begin(), lower_result.end(), lower_result.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (lower_result.find("<tool_call") != std::string::npos)
+    {
+        return "";
+    }
+
     return result;
 }
 
@@ -1385,9 +1406,14 @@ std::vector<std::string> ComputeMissingRequiredArgs(const std::string &tool_name
 
 } // namespace
 
-bool ResponseTools::TryLayer1Recovery(const std::string &malformedText, json &out_tool_call, ToolCallFailureReason &out_reason)
+bool ResponseTools::TryLayer1Recovery(const std::string &malformedText, json &out_tool_call, ToolCallFailureReason &out_reason,
+                                      json *out_partial_recovery)
 {
     out_reason = ToolCallFailureReason::kUnparseable;
+    if (out_partial_recovery)
+    {
+        *out_partial_recovery = json();
+    }
 
     std::vector<Layer1Candidate> candidates = ExtractBalancedJsonCandidates(malformedText);
     if (candidates.empty())
@@ -1467,9 +1493,26 @@ bool ResponseTools::TryLayer1Recovery(const std::string &malformedText, json &ou
     }
     NormalizeArgumentKeys(args);
 
-    if (!ComputeMissingRequiredArgs(matched_tool, args).empty())
+    std::vector<std::string> missing_required_args = ComputeMissingRequiredArgs(matched_tool, args);
+    if (!missing_required_args.empty())
     {
         out_reason = ToolCallFailureReason::kMissingRequiredArgs;
+        // Layer3 情形A 依据：工具名本身已经确定，即使必需参数不全，也构造一个"尽力
+        // 恢复"的部分工具调用——缺失的必需参数填充空字符串占位，确保结构完整、可被
+        // 当作真实 tool_call 转发，交由客户端走它本就熟悉的"工具执行报错（参数为空/
+        // 无效）→模型重试"标准闭环，而不是原样带着 name="unknow" 转发。
+        if (out_partial_recovery)
+        {
+            json best_effort_args = args;
+            for (const auto &missing_name : missing_required_args)
+            {
+                best_effort_args[missing_name] = "";
+            }
+            json partial = json::object();
+            partial["name"] = matched_tool;
+            partial["arguments"] = best_effort_args;
+            *out_partial_recovery = partial;
+        }
         return false;
     }
 

@@ -62,10 +62,22 @@ struct ResponseTools
 
     // out_failure_reason（可选，默认 nullptr）：当外层正则修复链与 Layer1 均未能采纳
     // 出合法工具调用（即最终仍落回 name="unknow"）时，写入结构化失败分类，供调用方
-    // （未来 Layer2/3）判断是否值得重试、以及重试/终态文案怎么写。成功恢复或外层链已
+    // （Layer2/3）判断是否值得重试、以及重试/终态文案怎么写。成功恢复或外层链已
     // 成功解析时写入 kNone。调用方不关心时传 nullptr，行为与改动前逐字节一致。
-    static std::string convertToolCallJson(const std::string &input, ToolCallFailureReason *out_failure_reason = nullptr);
+    // out_partial_recovery（可选，默认 nullptr）：供 Layer3 分级终态协议使用。仅在
+    // Layer1 已经确定出合法工具名、但因必需参数缺失而最终仍判定失败
+    // （out_failure_reason==kMissingRequiredArgs）时写入一个"尽力恢复"的部分工具调用
+    // {"name":<已确定的真实工具名>, "arguments":<已知参数+缺失必需参数填充空字符串占位>}；
+    // 其它所有失败分类（工具名本身就无法确定）下保持为 null（json 默认构造），调用方需
+    // 先检查 out_partial_recovery->contains("name") 再使用。调用方不关心时传 nullptr。
+    static std::string convertToolCallJson(const std::string &input,
+                                           ToolCallFailureReason *out_failure_reason = nullptr,
+                                           json *out_partial_recovery = nullptr);
 
+    // 清洗残留的 <tool_call> 标签/JSON 碎片，供 Case A（成功调用附带的多余文本）与 Layer3
+    // 情形B（纯文本兜底，输入可能是截断/跨多行的原始 response_buffer）共用。内部含"清洗后仍含
+    // <tool_call 子串则强制清空"的最终防线，不能仅凭两条正则本身假设输入已是完整闭合单行标签，
+    // 设计取舍与截断样例见 response_tools.md。
     static std::string remove_tool_call_content(const std::string &input);
 
     static std::string remove_empty_lines(const std::string &input);
@@ -124,7 +136,11 @@ private:
     // out_reason：无论成功失败都写入分类结果（成功时为 kNone）。
     // 返回 true 表示"工具名 + 全部必需参数均已确定"，可采纳 out_tool_call 替换 unknow 兜底；
     // 返回 false 时 out_tool_call 内容未定义，调用方必须改用 out_reason 驱动后续分支。
-    static bool TryLayer1Recovery(const std::string &malformedText, json &out_tool_call, ToolCallFailureReason &out_reason);
+    // out_partial_recovery（可选，默认 nullptr）：见 convertToolCallJson 同名参数说明——
+    // 仅在 out_reason==kMissingRequiredArgs（工具名已确定，必需参数缺失）时写入
+    // {"name":..., "arguments":...}（缺失的必需参数填充空字符串占位），供 Layer3 使用。
+    static bool TryLayer1Recovery(const std::string &malformedText, json &out_tool_call, ToolCallFailureReason &out_reason,
+                                  json *out_partial_recovery = nullptr);
 };
 
 #endif //RESPONSE_TOOLS_H

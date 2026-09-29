@@ -70,7 +70,17 @@ private:
     bool isConnectionAlive() const;
 
     std::string extractFinalAnswer(const std::string &output);
-    
+
+    // Layer3 情形B（纯文本兜底）与非流式通用 content 提取的统一安全净化入口。
+    // extractFinalAnswer() 本身不知道"这段文本可能是一次被误判/未能恢复出合法工具名的
+    // 畸形 <tool_call> 输出"，因此这里再叠加一次 ResponseTools::remove_tool_call_content()
+    // 清洗，确保客户端永远不会看到残留的 <tool_call> 标签或裸 JSON 碎片。三处调用点
+    // （流式 Case B / connection_broken Case B / 非流式通用出口）统一复用本方法，
+    // 避免各自维护、后续再次漂移；设计动机与真机证据见 response_dispatcher.md。
+    // 定义放在 .cpp（而非就地 inline）：本方法体依赖 ResponseTools 的完整声明，而本头文件
+    // 不包含 response_tools.h（部分 TU，如 GenieAPILibrary.cpp，只单独包含本头文件）。
+    std::string extractSanitizedFinalText(const std::string &output);
+
     // 新增：获取完整消息用于历史存储
     std::string getCompleteMessageForHistory(const std::string &output);
 
@@ -122,16 +132,11 @@ private:
     // 状态追踪：避免在同一次推理中重复发送相同的状态事件
     bool status_tool_call_sent_{false};
     bool status_code_sent_{false};
-    // 细粒度工具调用状态追踪
-    // tool_call_name_status_sent_: 是否已根据工具名称发送了细粒度状态（避免重复解析）
-    // tool_call_accumulator_: 累积 <tool_call> 之后的 token，用于解析工具名称
-    bool tool_call_name_status_sent_{false};
-    std::string tool_call_accumulator_;
-    // 修复2+3：unknow 工具调用死循环检测
-    // 当模型连续生成无法解析的工具调用（name="unknow"）时，
-    // 记录连续次数，超过阈值后终止循环并向模型返回错误提示。
-    int consecutive_unknow_tool_calls_{0};
-    static constexpr int kMaxConsecutiveUnknowToolCalls = 3;
+    // 死循环/系统性能力熔断计数器已迁移为会话+模型维度的进程内单例存储
+    // ToolCallCircuitBreakerStore（chat_request_handler/tool_call_circuit_breaker_store.h，
+    // LRU+TTL，模式对齐 TaskMemoStore）。旧版 consecutive_unknow_tool_calls_（
+    // ResponseDispatcher 实例成员，生命周期与单次 HTTP 请求绑定，无法跨请求可靠累积）与
+    // kMaxConsecutiveUnknowToolCalls 已随 Layer3 分级终态协议一起移除，见 response_dispatcher.md。
     ChatHistory &chatHistory;
     IModelConfig &model_config_;
     // 多模型模式：per-model 配置（优先于 model_config_ 的全局状态）

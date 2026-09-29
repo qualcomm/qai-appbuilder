@@ -21,14 +21,19 @@ namespace
 {
     // 判断 convertToolCallJson() 的返回结果是否仍是 "unknow" 兜底（即 Layer0 正则修复链 +
     // Layer1 本地确定性提取均未能采纳出合法工具调用）。convertToolCallJson() 的返回值恒为
-    // 一个可直接 json::parse 的 JSON 字符串（不带 <tool_call> 标签），因此这里不需要再调用
-    // ResponseTools::extractJsonFromToolCall。解析异常视为 unknow（保守判定，与调用方现有
-    // 死循环检测逻辑的 catch(...) 保持一致）。
+    // wrapJsonInToolCall() 包裹后的 "<tool_call>\n{...}\n</tool_call>" 形式（成功/失败两种
+    // 结果都一样带标签，见 response_tools.cpp 第 377 行的唯一 return 出口），因此这里必须先
+    // 用 ResponseTools::extractJsonFromToolCall 剥掉标签再 json::parse——直接 parse 带标签的
+    // 字符串必然抛异常，会让本函数对任何输入都误判为 true（哪怕是完全合法的 tool_call），
+    // 曾在真机验证中实测复现（QNN/qwen3-8b-8480：模型第一次就生成了完全合法的
+    // {"name":"write",...}，仍被误判为 malformed，触发了不必要的 Layer2 重试，且 Layer3 因
+    // partial_recovery 为空而把这个本该成功的 tool_call 降级成了 finish_reason=length 纯文本）。
+    // 解析异常视为 unknow（保守判定，与调用方现有死循环检测逻辑的 catch(...) 保持一致）。
     bool IsUnknowToolCallJson(const std::string &converted_json_str)
     {
         try
         {
-            json obj = json::parse(converted_json_str);
+            json obj = json::parse(ResponseTools::extractJsonFromToolCall(converted_json_str));
             return obj.contains("name") && obj["name"].is_string()
                    && obj["name"].get<std::string>() == "unknow";
         }
@@ -149,17 +154,10 @@ void ResponseDispatcher::Prepare(ModelInput &model_input,
     // 每次新请求重置状态追踪标志，避免上一次推理的状态影响本次
     status_tool_call_sent_ = false;
     status_code_sent_ = false;
-    tool_call_name_status_sent_ = false;
-    tool_call_accumulator_.clear();
-    // 修复2：每次新请求重置 unknow 工具调用连续计数器
-    // 注意：此计数器跨请求累积（不在此处重置），仅在成功工具调用后归零，
-    // 以便检测跨多轮请求的死循环。
-    // 实际上，每次新的用户消息（非 tool_call turn）应重置计数器。
-    // 通过检查 is_tool_ 来区分：is_tool_=false 表示新用户消息，重置计数器。
-    if (!is_tool)
-    {
-        consecutive_unknow_tool_calls_ = 0;
-    }
+    // 注：旧版 consecutive_unknow_tool_calls_（ResponseDispatcher 实例成员，生命周期与
+    // 单次 HTTP 请求绑定，无法跨请求可靠累积）已迁移为 Layer3 分级终态协议 + 会话+模型
+    // 维度的 ToolCallCircuitBreakerStore（LRU+TTL 单例，见 chat_request_handler/
+    // tool_call_circuit_breaker_store.h），此处不再需要任何每请求重置逻辑。
 }
 
 void ResponseDispatcher::SendStatusUpdate(httplib::DataSink *sink,
@@ -285,42 +283,17 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
         response_buffer += message;  // Keep original message in buffer for history
 
         // 模式检测：根据模型输出内容发送对应的状态反馈（每种状态只发送一次）
+        // 注：tool_call 相关状态事件（通用"Calling tool..."与细粒度工具名状态）已不再在
+        // 此处（流式生成过程中、刚检测到 <tool_call> 标记时）立即发送——此时无法确定最终
+        // 是否真的会产出一个合法工具调用：Layer0/1/2 可能全部失败，Layer3 情形B 会降级为
+        // 纯文本，提前发送会让客户端先收到"正在调用工具"提示、最终却收到不一致的纯文本
+        // 结果。改为推迟到 finalize_tool_call_layer3()（生成结束后，已确认 Layer0/1/2
+        // 成功或已决定走 Layer3 情形A/B）统一发送且只发送一次，见该函数末尾。详见
+        // response_dispatcher.md「流式状态事件时序修正」一节（含心跳保活覆盖性结论）。
         if (is_stream_ && sink)
         {
-            // 检测 tool_call 开始标记，立即发送通用状态
-            if (!status_tool_call_sent_ && message.find("<tool_call>") != std::string::npos)
-            {
-                SendStatusUpdate(sink, "tool_call", "Calling tool...");
-                status_tool_call_sent_ = true;
-                tool_call_accumulator_.clear();
-                tool_call_name_status_sent_ = false;
-            }
-
-            // 若已检测到 tool_call 但尚未解析出工具名称，继续累积并尝试解析
-            // 一旦解析出工具名称，发送细粒度状态（覆盖通用 tool_call 状态）
-            if (status_tool_call_sent_ && !tool_call_name_status_sent_)
-            {
-                tool_call_accumulator_ += message;
-                // 尝试从累积内容中提取 "name": "xxx"
-                // Note: regex pattern is "name"\s*:\s*"([^"]+)"
-                std::regex name_regex("\"name\"\\s*:\\s*\"([^\"]+)\"");
-                std::smatch m;
-                if (std::regex_search(tool_call_accumulator_, m, name_regex))
-                {
-                    std::string tool_name = m[1].str();
-                    auto name_status = GetToolCallStatusByName(tool_name);
-                    if (!name_status.first.empty())
-                    {
-                        // Send fine-grained status (e.g. "Executing script...", "Executing command...", etc.)
-                        SendStatusUpdate(sink, name_status.first, name_status.second);
-                        My_Log{} << "[Status] Tool name resolved: " << tool_name
-                                 << " -> " << name_status.first << std::endl;
-                    }
-                    tool_call_name_status_sent_ = true;  // 无论是否有细粒度状态，都标记为已处理
-                }
-            }
-
-            // 检测代码块（独立判断，不受 tool_call 影响）
+            // 检测代码块（独立判断，不受 tool_call 影响，没有"最终结果可能矛盾"的风险，
+            // 维持立即发送）
             if (!status_code_sent_ && message.find("```") != std::string::npos)
             {
                 SendStatusUpdate(sink, "writing_code", "Writing code...");
@@ -506,16 +479,10 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                         isToolResponse = true;
                         toolResponse = harmony_proc->GetToolCallContent();
 
-                        // 兜底：Harmony 格式下 <tool_call> 标记可能在流式输出中被过滤，
-                        // 导致 genie_callback 中未能检测到，此处在 Query() 结束后补发状态。
-                        // 注意：此时推理已完成，状态仅作为"已完成工具调用"的通知，
-                        // 不影响后续的工具调用响应发送。
-                        if (!status_tool_call_sent_)
-                        {
-                            SendStatusUpdate(sink, "tool_call", "Calling tool...");
-                            status_tool_call_sent_ = true;
-                            My_Log{} << "[Status] tool_call status sent (Harmony FinalizeToolCall fallback)" << std::endl;
-                        }
+                        // 注：此处不再立即发送 "tool_call" 状态事件——是否真的产出了合法
+                        // 工具调用要等 Layer0/1/2/3 全部跑完才能确定，提前发送有"客户端收到
+                        // 提示、最终却是纯文本"的矛盾体验风险。统一改为 finalize_tool_call_layer3()
+                        // 在确认最终结果后发送且只发送一次，见该函数与下方 Layer2/3 代码块。
                     }
                 }
             }
@@ -554,11 +521,7 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                             << "Auto-wrapped with <tool_call>...</tool_call>. "
                             << "Preview: " << trimmed.substr(0, std::min(trimmed.size(), size_t(80))) << std::endl;
 
-                        if (!status_tool_call_sent_)
-                        {
-                            SendStatusUpdate(sink, "tool_call", "Calling tool...");
-                            status_tool_call_sent_ = true;
-                        }
+                        // 注：同上，不在此处立即发送状态事件，统一交给 finalize_tool_call_layer3()。
                     }
                 }
             }
@@ -656,12 +619,11 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                             }
                         }
 
-                        // 显式重置直接影响"本次生成结果内容判定"的状态。注意：故意不重置
-                        // status_tool_call_sent_/tool_call_name_status_sent_/
-                        // tool_call_accumulator_——这三者只影响"是否需要向客户端发送状态
-                        // 事件"，首次尝试已经发送过 tool_call 状态，重试对客户端完全隐形，
-                        // 若照常重置会在同一逻辑请求内产生第二次几乎相同的 tool_call 状态帧
-                        // （详见 response_dispatcher.md 的时序说明）。
+                        // 显式重置直接影响"本次生成结果内容判定"的状态。注：status_tool_call_sent_
+                        // 无需在此特别处理——Step3 起该状态事件已推迟到 finalize_tool_call_layer3()
+                        // （在 Layer2 重试与回滚都结束之后才调用一次），流式生成/重试期间完全不发送
+                        // 任何工具调用相关状态帧，因此这里不存在"重试期间需不需要保留已发送标记"
+                        // 的问题（详见 response_dispatcher.md 的时序说明）。
                         response_buffer.clear();
                         toolResponse.clear();
                         isToolResponse = false;
@@ -733,6 +695,147 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
             }
         }
         // ─────────────────────────────────────────────────────────────────────────
+
+        // ── Layer3：分级组合终态协议 ────────────────────────────────────────────
+        // Layer0（正则修复链）+ Layer1（本地确定性提取，内嵌于 convertToolCallJson）+
+        // Layer2（服务端内部隐形重试，上方代码块）全部未能恢复出合法工具调用后的终态
+        // 兜底，取代原有"直接原样转发 name=\"unknow\"，连续 N 次才发一条客户端未必认识
+        // 的模糊错误提示"机制（旧版 consecutive_unknow_tool_calls_ 死循环检测已删除）：
+        //   情形A（识别出工具名，即使必需参数不全）：发出一个指向该真实工具的 tool_call
+        //   （function.name=识别出的真实工具名，function.arguments=Layer1 侧已尽力恢复
+        //   的参数——缺失的必需参数已填充空字符串占位），交由客户端走它本就熟悉的"工具
+        //   执行报错→模型重试"标准闭环，而不是发明客户端不认识的协议。
+        //   情形B（完全无法识别出任何工具名，概率很低，前两层已过滤掉大部分情况）：降级
+        //   为纯文本回答，finish_reason="length"（绝不使用"stop"，避免被误判为任务已正常
+        //   完成——很多客户端已对 length 有特殊处理逻辑）。
+        // 会话+模型维度熔断：Layer0/1/2 任一层成功恢复 → RecordSuccess() 清零连续计数；
+        // 真正走到本终态 → RecordLayer3Trigger() 计数，连续达到
+        // circuit_breaker.consecutive_layer3_threshold 后，下一轮同一会话+模型的请求会在
+        // ModelInputBuilder::Build() 里被动态降级 system prompt（跳过工具声明注入），从
+        // 根源上避免模型继续做徒劳的工具调用尝试（见 model_input_builder.h）。
+        // 本终态替换逻辑本身不受 tool_call_repair.enabled 门控——与 Layer1（同样不受该
+        // 开关门控，Step1 既有先例）一致，属于不可关闭的核心正确性保证，而非可选新特性；
+        // enabled=false 只关闭 Layer2 重试与熔断降级 system prompt 这两个"主动新增行为"
+        // 的生效，不能关闭"绝不原样转发裸 name=unknow"这一硬约束。
+        auto finalize_tool_call_layer3 = [&](const char *log_suffix)
+        {
+            ToolCallFailureReason failure_reason = ToolCallFailureReason::kNone;
+            json partial_recovery;
+            toolResponse = ResponseTools::convertToolCallJson(toolResponse, &failure_reason, &partial_recovery);
+            // Skill 自动纠偏：使用运行时 SKILL 映射（从客户端 <available_skills> XML 动态解析）
+            {
+                const auto skill_mappings = model_config_.GetRuntimeSkillMappings();
+                const auto& opt_cfg = model_config_.GetPromptOptimizationConfig();
+                toolResponse = ResponseTools::AutoCorrectSkillCall(
+                    toolResponse, skill_mappings, opt_cfg.enable_skill_auto_correction);
+            }
+            My_Log{} << "ResponseDispatcher::SendResponse" << log_suffix << ": \n" << toolResponse << std::endl;
+
+            // 推迟发送的 "tool_call" 状态事件：只在确认已产出有效结果（Layer0/1/2 成功
+            // 或 Layer3 情形A）时发送一次；tool_name 传空字符串时回退为通用 "Calling tool..."。
+            // Layer3 情形B（降级为纯文本）不调用本函数，因为它本质上不是一个工具调用。
+            auto send_tool_call_status_once = [&](const std::string &tool_name)
+            {
+                if (status_tool_call_sent_)
+                {
+                    return;
+                }
+                status_tool_call_sent_ = true;
+                if (!is_stream_ || !sink)
+                {
+                    return;
+                }
+                auto name_status = GetToolCallStatusByName(tool_name);
+                if (!name_status.first.empty())
+                {
+                    SendStatusUpdate(sink, name_status.first, name_status.second);
+                }
+                else
+                {
+                    SendStatusUpdate(sink, "tool_call", "Calling tool...");
+                }
+            };
+
+            // 会话+模型维度熔断 key：session_key（首条 user 消息内容哈希，跨同一会话的多轮
+            // 请求保持稳定）+ model_name；任一信息不可用（如 DLL 模式）时 key 为空字符串，
+            // ToolCallCircuitBreakerStore 对空 key 的全部操作均安全地不做任何事。
+            std::string circuit_breaker_key;
+            if (instance_config_ && !retry_request_data_.is_null()
+                && retry_request_data_.contains("messages") && retry_request_data_["messages"].is_array())
+            {
+                const std::string session_key = TaskMemoBuilder::ComputeFirstMsgKey(retry_request_data_["messages"]);
+                circuit_breaker_key = ToolCallCircuitBreakerStore::MakeKey(session_key, instance_config_->get_model_name());
+            }
+
+            if (!IsUnknowToolCallJson(toolResponse))
+            {
+                // Layer0/1/2 某一层成功恢复出合法工具调用：打断"连续触发 Layer3"的判定序列。
+                ToolCallCircuitBreakerStore::GetInstance().RecordSuccess(circuit_breaker_key);
+                finishReason = "tool_calls";
+                std::string tool_name;
+                try
+                {
+                    json parsed = json::parse(ResponseTools::extractJsonFromToolCall(toolResponse));
+                    if (parsed.contains("name") && parsed["name"].is_string())
+                    {
+                        tool_name = parsed["name"].get<std::string>();
+                    }
+                }
+                catch (...) {}
+                send_tool_call_status_once(tool_name);
+                return;
+            }
+
+            int consecutive = ToolCallCircuitBreakerStore::GetInstance().RecordLayer3Trigger(circuit_breaker_key);
+            My_Log{My_Log::Level::kWarning}
+                << "[ToolCallRepair][Layer3] Layer0/1/2 all failed to recover a valid tool call"
+                << log_suffix << " (reason=" << ResponseTools::ToolCallFailureReasonToString(failure_reason)
+                << ", consecutive_layer3_triggers=" << consecutive << "). Selecting terminal protocol..." << std::endl;
+
+            if (partial_recovery.contains("name") && partial_recovery["name"].is_string()
+                && !partial_recovery["name"].get<std::string>().empty())
+            {
+                // 情形A：工具名已确定（即使必需参数不全），发出指向该真实工具的 tool_call。
+                json best_effort = json::object();
+                best_effort["name"] = partial_recovery["name"];
+                best_effort["arguments"] = partial_recovery.value("arguments", json::object());
+                toolResponse = ResponseTools::wrapJsonInToolCall(best_effort.dump());
+                finishReason = "tool_calls";
+                isToolResponse = true;
+                send_tool_call_status_once(partial_recovery["name"].get<std::string>());
+                My_Log{My_Log::Level::kWarning}
+                    << "[ToolCallRepair][Layer3] Case A: emitting real tool_call '"
+                    << partial_recovery["name"].get<std::string>()
+                    << "' with best-effort (possibly incomplete) arguments." << std::endl;
+            }
+            else
+            {
+                // 情形B：完全无法识别出任何工具名，降级为纯文本；finish_reason 设为协议
+                // 原生的 "length"（绝不使用 "stop"），避免被误判为任务已正常完成。
+                finishReason = "length";
+                isToolResponse = false;
+                toolResponse.clear();
+                My_Log{My_Log::Level::kWarning}
+                    << "[ToolCallRepair][Layer3] Case B: no recoverable tool name; downgrading to plain "
+                       "text with finish_reason=\"length\" (never \"stop\")." << std::endl;
+            }
+        };
+        // ─────────────────────────────────────────────────────────────────────────
+
+        // Layer3 判定必须在 ChatHistory 写入、以及 connection_broken 分支之前完成一次：
+        // had_tool_call_attempt 捕获"本次生成是否曾经产生过一次工具调用尝试"这一 Layer2/3
+        // 判定前的原始信号，用于决定后续是否进入"发真实 tool_call / 降级纯文本"专属发送
+        // 分支（普通文本已在 genie_callback 内逐 token 实时发送过，不应重复发送）；调用后
+        // isToolResponse/toolResponse/finishReason 变为 Layer3 最终裁决后的状态，供 ChatHistory
+        // 写入与后续发送逻辑统一消费，不再各自使用裁决前的 response_buffer（P0 修复：此前
+        // ChatHistory 写入发生在本调用之前，General/非 Harmony 分支会把 Layer3 情形B 降级前
+        // 的原始畸形内容写入历史，与客户端实际收到的干净文本产生分歧）。详见
+        // response_dispatcher.md「ChatHistory 一致性」一节。
+        bool had_tool_call_attempt = isToolResponse;
+        if (had_tool_call_attempt)
+        {
+            finalize_tool_call_layer3(connection_broken ? " (connection_broken)" : "");
+        }
 
         // ========== P1 修复：统一历史消息存储格式 ==========
         // 历史消息管理
@@ -819,8 +922,16 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
             }
             else
             {
-                // 非 Harmony 格式使用原有逻辑
-                std::string final_answer = extractFinalAnswer(response_buffer);
+                // 非 Harmony 格式：Layer3 情形B（曾尝试工具调用但最终判定完全无法识别工具名，
+                // 降级为纯文本）时，客户端收到的是经 extractSanitizedFinalText() 清洗过的
+                // 干净文本，此处必须使用同一份清洗后内容，否则 ChatHistory 会残留原始
+                // <tool_call> 标签/JSON 碎片，与客户端实际看到的内容产生分歧（P0 修复，详见
+                // response_dispatcher.md「ChatHistory 一致性」一节）。真实工具调用
+                // （Layer0/1/2 成功或 Layer3 情形A）与从未涉及工具调用的普通对话保持原有
+                // 逻辑不变，避免引入回归。
+                std::string final_answer = (had_tool_call_attempt && !isToolResponse)
+                                                ? extractSanitizedFinalText(response_buffer)
+                                                : extractFinalAnswer(response_buffer);
                 chatHistory.AddMessage("assistant", final_answer);
                 
                 My_Log{My_Log::Level::kDebug} << "[History] ✓ Added assistant message (standard format)" << std::endl;
@@ -852,34 +963,38 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
 
             if (is_stream_ && sink)
             {
-                // 若有工具调用，先发送工具调用响应
-                if (isToolResponse)
+                // 若有工具调用，先发送工具调用响应（finalize_tool_call_layer3() 已在历史写入
+                // 之前调用过一次，此处直接消费其裁决结果，不再重复调用）。
+                if (had_tool_call_attempt)
                 {
-                    toolResponse = ResponseTools::convertToolCallJson(toolResponse);
-                    // Skill 自动纠偏：使用运行时 SKILL 映射（从客户端 <available_skills> XML 动态解析）
-                    // GetRuntimeSkillMappings() 返回本次请求中解析到的 name->path 映射，
-                    // 用于将模型错误的 SKILL 直接调用改写为 read(SKILL.md) 调用
+                    if (isToolResponse)
                     {
-                        const auto skill_mappings = model_config_.GetRuntimeSkillMappings();
-                        const auto& opt_cfg = model_config_.GetPromptOptimizationConfig();
-                        toolResponse = ResponseTools::AutoCorrectSkillCall(
-                            toolResponse, skill_mappings, opt_cfg.enable_skill_auto_correction);
+                        // Layer0/1/2 恢复成功，或 Layer3 情形A：发出真实工具 tool_call。
+                        std::string content;
+                        if (!GetEffectiveIsOutputAllText())
+                        {
+                            content = ResponseTools::remove_tool_call_content(toolResponse);
+                        }
+                        if (!content.empty())
+                        {
+                            content += "\n\n";
+                        }
+                        std::string response_data = ResponseTools::responseDataJson(content, "", true, toolResponse);
+                        My_Log{} << "[Tool Call Response] Sending to client (connection_broken): " << response_data << std::endl;
+                        ResponseTools::post_stream_data(*sink, "data", response_data);
                     }
-                    My_Log{} << "ResponseDispatcher::sendStreamResponse (connection_broken): \n" << toolResponse << std::endl;
-
-                    finishReason = "tool_calls";
-                    std::string content;
-                    if (!GetEffectiveIsOutputAllText())
+                    else
                     {
-                        content = ResponseTools::remove_tool_call_content(toolResponse);
+                        // Layer3 情形B：降级为纯文本（连接已断开，写入大概率静默失败，
+                        // 仍尝试发送以保持与正常路径一致的行为）。extractSanitizedFinalText()
+                        // 保证发出的内容不含残留 <tool_call> 标签，见 response_dispatcher.md。
+                        std::string content = extractSanitizedFinalText(response_buffer);
+                        if (!content.empty())
+                        {
+                            ResponseTools::post_stream_data(*sink, "data",
+                                ResponseTools::responseDataJson(content, "", true));
+                        }
                     }
-                    if (!content.empty())
-                    {
-                        content += "\n\n";
-                    }
-                    std::string response_data = ResponseTools::responseDataJson(content, "", true, toolResponse);
-                    My_Log{} << "[Tool Call Response] Sending to client (connection_broken): " << response_data << std::endl;
-                    ResponseTools::post_stream_data(*sink, "data", response_data);
                 }
                 // 发送结束标记
                 if (!overflow_truncated)
@@ -899,121 +1014,46 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
             return false;
         }
 
-        // If there is a tool call, return the processed characters to the client.
-        if (isToolResponse)
+        // 若曾尝试工具调用，发送 Layer3 裁决后的结果给客户端（finalize_tool_call_layer3()
+        // 已在历史写入之前调用过一次，此处直接消费其结果，不再重复调用）。
+        if (had_tool_call_attempt)
         {
-            toolResponse = ResponseTools::convertToolCallJson(toolResponse);
-            // Skill 自动纠偏：使用运行时 SKILL 映射（从客户端 <available_skills> XML 动态解析）
+            if (isToolResponse)
             {
-                const auto skill_mappings = model_config_.GetRuntimeSkillMappings();
-                const auto& opt_cfg = model_config_.GetPromptOptimizationConfig();
-                toolResponse = ResponseTools::AutoCorrectSkillCall(
-                    toolResponse, skill_mappings, opt_cfg.enable_skill_auto_correction);
-            }
-            My_Log{} << "ResponseDispatcher::sendStreamResponse: \n" << toolResponse << std::endl;
+                // Layer0/1/2 恢复成功，或 Layer3 情形A：发出真实工具 tool_call，交由客户端
+                // 走它本就熟悉的"工具执行报错→模型重试"标准闭环。
+                std::string content;
 
-            // ── 修复2+3：unknow 工具调用死循环检测 ──────────────────────────────
-            // 当 convertToolCallJson 无法解析工具调用时，会将工具名设为 "unknow"。
-            // 这通常是因为模型生成的 JSON 中包含字面控制字符（如换行符）。
-            // 若连续出现 kMaxConsecutiveUnknowToolCalls 次，说明陷入死循环：
-            //   - 模型不断生成相同的无效工具调用
-            //   - 客户端无法执行，返回错误
-            //   - 模型再次生成相同调用
-            // 解决方案：向客户端返回一个特殊的 tool_response，明确告知模型
-            // "工具调用格式错误，请直接回答用户"，引导模型退出循环。
-            {
-                // 从 toolResponse 中提取工具名（去除 <tool_call> 标签后解析）
-                std::string tool_json_str = ResponseTools::extractJsonFromToolCall(toolResponse);
-                // 去除首尾空白
-                size_t ts = tool_json_str.find_first_not_of(" \t\r\n");
-                size_t te = tool_json_str.find_last_not_of(" \t\r\n");
-                if (ts != std::string::npos)
-                    tool_json_str = tool_json_str.substr(ts, te - ts + 1);
-
-                bool is_unknow_tool = false;
-                try
+                if (!GetEffectiveIsOutputAllText())
                 {
-                    json tool_obj = json::parse(tool_json_str);
-                    if (tool_obj.contains("name") && tool_obj["name"].is_string())
-                    {
-                        is_unknow_tool = (tool_obj["name"].get<std::string>() == "unknow");
-                    }
+                    content = ResponseTools::remove_tool_call_content(toolResponse);
                 }
-                catch (...) {}
-
-                if (is_unknow_tool)
+                if (!content.empty())
                 {
-                    ++consecutive_unknow_tool_calls_;
-                    My_Log{My_Log::Level::kWarning}
-                        << "[UnknowToolLoop] Detected unknow tool call #" << consecutive_unknow_tool_calls_
-                        << " (max=" << kMaxConsecutiveUnknowToolCalls << ")" << std::endl;
-
-                    if (consecutive_unknow_tool_calls_ >= kMaxConsecutiveUnknowToolCalls)
-                    {
-                        // 修复3：超过阈值，向客户端发送错误 tool_response，引导模型退出循环
-                        My_Log{My_Log::Level::kWarning}
-                            << "[UnknowToolLoop] Consecutive unknow tool calls exceeded limit ("
-                            << kMaxConsecutiveUnknowToolCalls << "). "
-                            << "Sending error tool_response to break the loop." << std::endl;
-
-                        // 构造错误 tool_response：告知模型工具调用格式错误，请直接回答
-                        // 使用 finish_reason="tool_calls" 但附带错误信息，
-                        // 让客户端将此错误作为 tool_response 返回给模型
-                        json error_tool_response = {
-                            {"status", "error"},
-                            {"tool", "unknow"},
-                            {"error", "Tool call format error: the tool call JSON contains unescaped control characters (e.g. literal newlines in string values). Please do NOT retry the tool call. Instead, directly answer the user's question based on what you already know."}
-                        };
-                        // 重置计数器，避免下一轮继续触发
-                        consecutive_unknow_tool_calls_ = 0;
-
-                        // 将错误信息作为 tool_response 发送给客户端
-                        // 客户端会将此作为 tool 角色消息返回给模型，引导模型退出循环
-                        std::string error_tool_call_json = "<tool_call>\n" + error_tool_response.dump() + "\n</tool_call>";
-                        finishReason = "tool_calls";
-                        if (is_stream_)
-                        {
-                            std::string response_data = ResponseTools::responseDataJson("", "", true, error_tool_call_json);
-                            My_Log{} << "[UnknowToolLoop] Sending error tool_response to client: " << response_data << std::endl;
-                            ResponseTools::post_stream_data(*sink, "data", response_data);
-                        }
-                        // 跳过正常的工具调用发送流程
-                        goto send_finish_reason;
-                    }
+                    content += "\n\n";
                 }
-                else
+
+                if (is_stream_)
                 {
-                    // 成功的工具调用：重置连续计数器
-                    if (consecutive_unknow_tool_calls_ > 0)
-                    {
-                        My_Log{} << "[UnknowToolLoop] Successful tool call, resetting consecutive_unknow counter." << std::endl;
-                        consecutive_unknow_tool_calls_ = 0;
-                    }
+                    std::string response_data = ResponseTools::responseDataJson(content, "", true, toolResponse);
+                    My_Log{} << "[Tool Call Response] Sending to client: " << response_data << std::endl;
+                    ResponseTools::post_stream_data(*sink, "data", response_data);
                 }
             }
-            // ─────────────────────────────────────────────────────────────────────
-
-            finishReason = "tool_calls";
-            std::string content;
-
-            if (!GetEffectiveIsOutputAllText())
+            else if (is_stream_ && sink)
             {
-                content = ResponseTools::remove_tool_call_content(toolResponse);
-            }
-            if (!content.empty())
-            {
-                content += "\n\n";
-            }
-
-            if (is_stream_)
-            {
-                std::string response_data = ResponseTools::responseDataJson(content, "", true, toolResponse);
-                My_Log{} << "[Tool Call Response] Sending to client: " << response_data << std::endl;
-                ResponseTools::post_stream_data(*sink, "data", response_data);
+                // Layer3 情形B：降级为纯文本；finishReason 已在 finalize_tool_call_layer3
+                // 内设为 "length"（绝不是 "stop"）。extractSanitizedFinalText() 保证发给
+                // 客户端的内容已清洗掉任何残留 <tool_call> 标签/JSON 碎片，详见
+                // response_dispatcher.md。
+                std::string content = extractSanitizedFinalText(response_buffer);
+                if (!content.empty())
+                {
+                    ResponseTools::post_stream_data(*sink, "data",
+                        ResponseTools::responseDataJson(content, "", true));
+                }
             }
         }
-
-        send_finish_reason:
 
         if (is_stream_)
         {
@@ -1031,7 +1071,10 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
         }
         else
         {
-            std::string content = extractFinalAnswer(response_buffer);
+            // 统一走 extractSanitizedFinalText()（而非裸 extractFinalAnswer()）：非流式路径
+            // 无论 Case A/B 都共用这一出口，必须保证 Layer3 情形B 降级为纯文本时不会连带
+            // 泄漏残留 <tool_call> 标签，详见 response_dispatcher.md。
+            std::string content = extractSanitizedFinalText(response_buffer);
             if (WatermarkProviderHost::Instance().HasTextHook())
             {
                 const auto* vt = WatermarkProviderHost::Instance().GetVTable();
@@ -1195,6 +1238,14 @@ std::string ResponseDispatcher::extractFinalAnswer(const std::string &output)
             return output;
         }
     }
+}
+
+std::string ResponseDispatcher::extractSanitizedFinalText(const std::string &output)
+{
+    // 见 response_dispatcher.h 处的声明注释：这是三处 Layer3 情形B/非流式通用 content
+    // 提取的唯一净化入口，任何后续调用点都应复用本方法，不要再直接调用 extractFinalAnswer()
+    // 后当作纯文本使用。
+    return ResponseTools::remove_tool_call_content(extractFinalAnswer(output));
 }
 
 std::string ResponseDispatcher::getCompleteMessageForHistory(const std::string &output)

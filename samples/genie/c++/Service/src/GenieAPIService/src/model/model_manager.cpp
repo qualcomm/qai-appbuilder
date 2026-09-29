@@ -17,6 +17,7 @@
 #include "../response/response_tools.h"
 #include "../chat_request_handler/summary_cache.h"
 #include "../chat_request_handler/task_memo_store.h"
+#include "../chat_request_handler/tool_call_circuit_breaker_store.h"
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -1584,6 +1585,19 @@ bool ModelManager::InitializeConfig()
                         }
                     }
 
+                    if (tcr.contains("circuit_breaker") && tcr["circuit_breaker"].is_object())
+                    {
+                        const auto &cb = tcr["circuit_breaker"];
+                        auto &cb_cfg = tool_call_repair_config_.circuit_breaker;
+                        cb_cfg.consecutive_layer3_threshold = cb.value("consecutive_layer3_threshold", 3);
+                        cb_cfg.cooldown_seconds = cb.value("cooldown_seconds", 300);
+                    }
+                    // 同步配置进程内单例存储（会话+模型维度 LRU+TTL，语义见
+                    // ToolCallCircuitBreakerStore 类注释）；即使 tool_call_repair.enabled=false，
+                    // 阈值仍照常同步（真正受 enabled 门控的是"是否读取熔断状态并降级 system
+                    // prompt"这一后果，见 model_input_builder.h::Build()），避免留下过期默认值。
+                    ToolCallCircuitBreakerStore::GetInstance().Configure(tool_call_repair_config_.circuit_breaker);
+
                     My_Log{} << "[Config] tool_call_repair loaded: enabled="
                              << tool_call_repair_config_.enabled
                              << ", internal_retry.max_attempts="
@@ -1598,7 +1612,11 @@ bool ModelManager::InitializeConfig()
                                     }
                                     return joined;
                                 }()
-                             << "]" << std::endl;
+                             << "], circuit_breaker.consecutive_layer3_threshold="
+                             << tool_call_repair_config_.circuit_breaker.consecutive_layer3_threshold
+                             << ", circuit_breaker.cooldown_seconds="
+                             << tool_call_repair_config_.circuit_breaker.cooldown_seconds
+                             << std::endl;
                 }
 
                 // 加载 prompt_optimization 配置
