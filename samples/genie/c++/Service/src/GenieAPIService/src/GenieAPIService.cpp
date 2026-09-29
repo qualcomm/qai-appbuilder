@@ -10,12 +10,15 @@
 #include <csignal>
 #include <thread>
 #include <chrono>
+#include <iostream>
+#include <string>
 #include <log.h>
 #include <utils.h>
 #include "config.h"
 #include "chat_request_handler/chat_request_handler.h"
 #include "model/model_manager.h"
 #include "response/response_dispatcher.h"
+#include "response/response_tools_layer1_selftest.h"
 #if defined(_WIN32) || defined(__WIN32__) || defined(WIN32)
 #include <windows.h>
 #endif
@@ -369,6 +372,14 @@ int main(int argc, char **argv)
 #if defined(_WIN32) || defined(__WIN32__) || defined(WIN32)
     SetConsoleOutputCP(CP_UTF8);
 #endif
+    // 隐藏自测分支：离线回放 Layer1 兜底提取的畸形样本集，跑完立即退出，不触碰
+    // 正常的 CLI11/service.run() 逻辑。用法：GenieAPIService.exe --self-test-layer1-recovery
+    // 设计取舍见 src/response/response_tools.md。
+    if (argc > 1 && std::string(argv[1]) == "--self-test-layer1-recovery")
+    {
+        bool all_passed = RunLayer1RecoverySelfTest(std::cout);
+        return all_passed ? 0 : 1;
+    }
     service.run(argc, argv);
     return 0;
 }

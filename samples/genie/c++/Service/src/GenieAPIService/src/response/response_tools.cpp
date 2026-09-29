@@ -9,6 +9,13 @@
 #include "response_tools.h"
 #include "log.h"
 #include "utils.h"
+#include "../chat_request_handler/prompt_optimizer.h"
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
+#include <limits>
+#include <unordered_map>
+#include <vector>
 
 std::string ResponseTools::generate_uuid4()
 {
@@ -133,8 +140,27 @@ std::string ResponseTools::responseDataJson(const std::string &content,
     return json_to_str(data);
 }
 
-std::string ResponseTools::convertToolCallJson(const std::string &input)
+std::string ResponseTools::ToolCallFailureReasonToString(ToolCallFailureReason reason)
 {
+    switch (reason)
+    {
+        case ToolCallFailureReason::kNone:                  return "none";
+        case ToolCallFailureReason::kUnknownToolName:        return "unknown_tool_name";
+        case ToolCallFailureReason::kMissingRequiredArgs:    return "missing_required_args";
+        case ToolCallFailureReason::kTruncated:              return "truncated";
+        case ToolCallFailureReason::kAmbiguousMultipleCalls: return "ambiguous_multiple_calls";
+        case ToolCallFailureReason::kUnparseable:            return "unparseable";
+    }
+    return "unknown";
+}
+
+std::string ResponseTools::convertToolCallJson(const std::string &input, ToolCallFailureReason *out_failure_reason)
+{
+    if (out_failure_reason)
+    {
+        *out_failure_reason = ToolCallFailureReason::kNone;
+    }
+
     if (ResponseTools::log_inference_stream)
     {
         My_Log{My_Log::Level::kInfo} << "[DEBUG-TOOL-CALL] Raw model output (input):\n" << input << std::endl;
@@ -182,6 +208,29 @@ std::string ResponseTools::convertToolCallJson(const std::string &input)
             catch (const std::exception &e3)
             {
                 My_Log{My_Log::Level::kError} << "parse tool calls's message as json failed:" << e3.what() << std::endl;
+
+                // Layer 1 兜底：现有正则修复链（fixBackslashes/repairJson/
+                // escapeControlCharsInJsonStrings）全部失败，尝试纯本地、零推理开销的
+                // 确定性提取重组。只有"工具名 + 全部必需参数均已确定"才采纳，否则维持
+                // unknow 兜底，并把结构化失败分类回传给调用方（供未来 Layer2/3 消费）。
+                json layer1_result;
+                ToolCallFailureReason layer1_reason = ToolCallFailureReason::kUnparseable;
+                if (TryLayer1Recovery(jsonStr, layer1_result, layer1_reason))
+                {
+                    My_Log{My_Log::Level::kInfo}
+                        << "[Layer1Recovery] Recovered tool call from malformed output: "
+                        << layer1_result.dump() << std::endl;
+                    root = layer1_result;
+                    goto done;
+                }
+
+                My_Log{My_Log::Level::kWarning}
+                    << "[Layer1Recovery] Failed to recover ("
+                    << ToolCallFailureReasonToString(layer1_reason) << "), falling back to unknow." << std::endl;
+                if (out_failure_reason)
+                {
+                    *out_failure_reason = layer1_reason;
+                }
                 root["name"] = "unknow";
                 root["arguments"] = fixedJsonStr;
                 goto done;
@@ -873,4 +922,546 @@ std::string ResponseTools::fixBackslashes(const std::string &input, bool smart_m
     }
 
     return result;
+}
+
+// ============================================================================
+// Layer 1 兜底：关键内容提取重组（response_tools.md 有完整设计记录）
+// ============================================================================
+namespace {
+
+// 花括号平衡扫描得到的单个候选子串。closed_properly=false 时该候选已吞掉
+// 从起始 '{' 到整段畸形文本末尾的全部内容（截断的典型信号）。
+struct Layer1Candidate
+{
+    std::string text;
+    bool closed_properly = false;
+};
+
+std::string ToLowerAscii(const std::string &s)
+{
+    std::string result = s;
+    std::transform(result.begin(), result.end(), result.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return result;
+}
+
+std::string TrimWhitespace(const std::string &s)
+{
+    size_t start = s.find_first_not_of(" \t\r\n");
+    if (start == std::string::npos)
+    {
+        return "";
+    }
+    size_t end = s.find_last_not_of(" \t\r\n");
+    return s.substr(start, end - start + 1);
+}
+
+// 扫描 text，找出所有"花括号平衡"的候选子串。字符串字面量内部的花括号（如代码片段类
+// 参数值）不计入平衡判断——对 "..." 内容做状态机跳过，正确处理 \" 转义，避免误判为
+// 候选对象边界。某个 '{' 一直扫描到文本末尾仍未找到匹配 '}'（或仍处于未闭合字符串内部）
+// 时，仍作为一个候选返回（closed_properly=false），这是 kTruncated 的典型特征。
+std::vector<Layer1Candidate> ExtractBalancedJsonCandidates(const std::string &text)
+{
+    std::vector<Layer1Candidate> candidates;
+    const size_t n = text.size();
+    size_t i = 0;
+
+    while (i < n)
+    {
+        if (text[i] != '{')
+        {
+            ++i;
+            continue;
+        }
+
+        size_t start = i;
+        int depth = 0;
+        bool in_string = false;
+        bool closed = false;
+        size_t j = i;
+
+        for (; j < n; ++j)
+        {
+            char c = text[j];
+            if (in_string)
+            {
+                if (c == '\\' && j + 1 < n)
+                {
+                    ++j; // 跳过转义序列的下一个字符（含 \"），避免误判为字符串结束
+                }
+                else if (c == '"')
+                {
+                    in_string = false;
+                }
+                continue;
+            }
+
+            if (c == '"')
+            {
+                in_string = true;
+            }
+            else if (c == '{')
+            {
+                ++depth;
+            }
+            else if (c == '}')
+            {
+                --depth;
+                if (depth == 0)
+                {
+                    closed = true;
+                    ++j; // 把右花括号本身纳入候选子串
+                    break;
+                }
+            }
+        }
+
+        Layer1Candidate candidate;
+        candidate.text = text.substr(start, j - start);
+        candidate.closed_properly = closed;
+        candidates.push_back(candidate);
+
+        if (!closed)
+        {
+            // 未闭合：已吞掉 start 到文本末尾的全部内容，没有更多花括号可扫描
+            break;
+        }
+        i = j;
+    }
+
+    return candidates;
+}
+
+// 尝试解析单个候选子串。先原样解析、再借助现有 repairJson 修复链解析；若候选未正常
+// 闭合（closed_properly=false），额外做一次宽松解析：统计截止候选末尾仍未闭合的字符串
+// 字面量/花括号层数，一次性补齐所缺的右引号/右花括号后再解析。out_truncated_signal
+// 仅在确实观测到"仍处于字符串内部"或"仍有未闭合花括号"这类明确截断特征时才置 true，
+// 供上层区分 kTruncated 与 kUnparseable。
+bool TryParseLayer1Candidate(const Layer1Candidate &candidate, json &out_parsed, bool &out_truncated_signal)
+{
+    out_truncated_signal = false;
+
+    auto try_parse = [](const std::string &s, json &out) -> bool {
+        try
+        {
+            out = json::parse(s);
+            return out.is_object();
+        }
+        catch (...)
+        {
+            return false;
+        }
+    };
+
+    if (try_parse(candidate.text, out_parsed))
+    {
+        return true;
+    }
+
+    std::string repaired = ResponseTools::repairJson(candidate.text);
+    if (try_parse(repaired, out_parsed))
+    {
+        return true;
+    }
+
+    if (candidate.closed_properly)
+    {
+        // 结构上已闭合但仍解析失败，不是"缺括号"类截断，交由上层判定为 unparseable
+        return false;
+    }
+
+    bool in_string = false;
+    int open_depth = 0;
+    for (size_t k = 0; k < repaired.size(); ++k)
+    {
+        char c = repaired[k];
+        if (in_string)
+        {
+            if (c == '\\' && k + 1 < repaired.size())
+            {
+                ++k;
+            }
+            else if (c == '"')
+            {
+                in_string = false;
+            }
+            continue;
+        }
+        if (c == '"') in_string = true;
+        else if (c == '{') ++open_depth;
+        else if (c == '}') --open_depth;
+    }
+
+    std::string padded = repaired;
+    if (in_string)
+    {
+        padded += "\""; // 补齐未闭合的字符串字面量（内容在字符串值中间中断的典型特征）
+        out_truncated_signal = true;
+    }
+    if (open_depth > 0)
+    {
+        padded.append(static_cast<size_t>(open_depth), '}'); // 补齐所缺的右花括号
+        out_truncated_signal = true;
+    }
+
+    if (!out_truncated_signal)
+    {
+        // 既不在字符串内部也没有未闭合的花括号，说明不是"缺括号"类截断，是别的语法错误
+        return false;
+    }
+
+    return try_parse(padded, out_parsed);
+}
+
+// 从候选对象中提取"疑似工具名"字段。除标准 "name" 外，也接受模型偶尔生成的
+// "tool"/"tool_name"/OpenAI 风格 "function.name"，这些都算 kAmbiguousMultipleCalls
+// 判定里"结构合理"的迹象来源，不代表最终一定采纳。
+bool ExtractNameField(const json &obj, std::string &out_name)
+{
+    if (!obj.is_object())
+    {
+        return false;
+    }
+    static const char *kNameKeys[] = {"name", "tool", "tool_name"};
+    for (const char *key : kNameKeys)
+    {
+        if (obj.contains(key) && obj[key].is_string() && !obj[key].get<std::string>().empty())
+        {
+            out_name = obj[key].get<std::string>();
+            return true;
+        }
+    }
+    if (obj.contains("function") && obj["function"].is_object())
+    {
+        const auto &fn = obj["function"];
+        if (fn.contains("name") && fn["name"].is_string() && !fn["name"].get<std::string>().empty())
+        {
+            out_name = fn["name"].get<std::string>();
+            return true;
+        }
+    }
+    return false;
+}
+
+json ExtractArgumentsField(const json &obj)
+{
+    static const char *kArgKeys[] = {"arguments", "params", "parameters", "args"};
+    for (const char *key : kArgKeys)
+    {
+        if (obj.contains(key))
+        {
+            return obj[key];
+        }
+    }
+    if (obj.contains("function") && obj["function"].is_object() && obj["function"].contains("arguments"))
+    {
+        return obj["function"]["arguments"];
+    }
+    return json::object();
+}
+
+// 工具名归一化 + 模糊匹配，依据 PromptOptimizer::GetKnownToolSignatures()（已知工具名 +
+// 必需参数的唯一权威表）。精确匹配（大小写不敏感）优先；否则按编辑距离模糊匹配，阈值
+// 随已知工具名长度收紧（<=4 字符要求距离==0，即只接受精确匹配、不做任何模糊容忍；更长
+// 名字允许<=2）。<=4 字符名字禁用模糊匹配的原因：这个长度下 1 个字符的编辑距离占比过高
+// （如 "exit"/"edit" 距离仅1，但语义完全不相关——前者是会话终止、后者是文件编辑），
+// 宁可判定为 kUnknownToolName 也不做语义上不可靠的匹配。
+std::string NormalizeAndMatchToolName(const std::string &raw_name)
+{
+    std::string lower = ToLowerAscii(TrimWhitespace(raw_name));
+    if (lower.empty())
+    {
+        return "";
+    }
+
+    const auto &signatures = PromptOptimizer::GetKnownToolSignatures();
+
+    for (const auto &entry : signatures)
+    {
+        if (entry.first == lower)
+        {
+            return entry.first;
+        }
+    }
+
+    auto levenshtein = [](const std::string &a, const std::string &b) -> size_t {
+        const size_t la = a.size();
+        const size_t lb = b.size();
+        if (la == 0) return lb;
+        if (lb == 0) return la;
+
+        std::vector<size_t> prev(lb + 1);
+        std::vector<size_t> curr(lb + 1);
+        for (size_t j = 0; j <= lb; ++j) prev[j] = j;
+        for (size_t i = 1; i <= la; ++i)
+        {
+            curr[0] = i;
+            for (size_t j = 1; j <= lb; ++j)
+            {
+                size_t cost = (a[i - 1] == b[j - 1]) ? 0 : 1;
+                curr[j] = std::min({prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost});
+            }
+            std::swap(prev, curr);
+        }
+        return prev[lb];
+    };
+
+    std::string best_match;
+    size_t best_distance = std::numeric_limits<size_t>::max();
+    for (const auto &entry : signatures)
+    {
+        const std::string &known = entry.first;
+        if (std::abs(static_cast<long long>(known.size()) - static_cast<long long>(lower.size())) > 2)
+        {
+            continue; // 长度差过大直接剪枝，避免不必要的距离计算
+        }
+        size_t distance = levenshtein(lower, known);
+        // <=4 字符要求精确匹配（阈值0）：精确匹配早已在上面的循环里处理并直接返回，
+        // 因此这里 distance<=0 恒等于 distance==0 且必然已被排除，等价于短名字彻底
+        // 禁用模糊匹配，不存在依赖此分支为短名字纠错的场景。
+        size_t threshold = (known.size() <= 4) ? 0 : 2;
+        if (distance <= threshold && distance < best_distance)
+        {
+            best_distance = distance;
+            best_match = known;
+        }
+    }
+    return best_match;
+}
+
+// 参数 key 归一化 + 别名映射：复用 AutoCorrectSkillCall 已有的 file_path -> path 思路，
+// 只扩展少量高置信度、无歧义的常见别名（宁缺毋滥——过于宽松的别名表会把语义不同的参数
+// 误判为"已确定"，违反 Layer1"工具名+全部必需参数均确定才采纳"的硬性约束）。
+void NormalizeArgumentKeys(json &args)
+{
+    if (!args.is_object())
+    {
+        return;
+    }
+
+    static const std::unordered_map<std::string, std::string> kArgKeyAliases = {
+        {"file_path",    "path"},
+        {"filepath",     "path"},
+        {"cmd",          "command"},
+        {"cmdline",      "command"},
+        {"command_line", "command"},
+        {"file_content", "content"},
+        {"search_query", "query"},
+        {"target_url",   "url"},
+    };
+
+    json normalized = json::object();
+    for (auto it = args.begin(); it != args.end(); ++it)
+    {
+        std::string lower_key = ToLowerAscii(it.key());
+        auto alias_it = kArgKeyAliases.find(lower_key);
+        std::string final_key = (alias_it != kArgKeyAliases.end()) ? alias_it->second : it.key();
+        // 若目标 key 已存在（如同时提供了 path 与 file_path），保留先出现的原值，不覆盖
+        if (!normalized.contains(final_key))
+        {
+            normalized[final_key] = it.value();
+        }
+    }
+    args = normalized;
+}
+
+// 深度感知的顶层逗号分割（跳过 [] {} () 内部的逗号），用于解析
+// PromptOptimizer::GetKnownToolSignatures() 里 "name(param1, param2?, ...)" 形式的签名。
+std::vector<std::string> SplitTopLevelCommas(const std::string &blob)
+{
+    std::vector<std::string> parts;
+    int depth = 0;
+    std::string current;
+    for (char c : blob)
+    {
+        if (c == '[' || c == '{' || c == '(')
+        {
+            ++depth;
+            current += c;
+        }
+        else if (c == ']' || c == '}' || c == ')')
+        {
+            --depth;
+            current += c;
+        }
+        else if (c == ',' && depth == 0)
+        {
+            parts.push_back(current);
+            current.clear();
+        }
+        else
+        {
+            current += c;
+        }
+    }
+    if (!current.empty() || !parts.empty())
+    {
+        parts.push_back(current);
+    }
+    return parts;
+}
+
+// 从签名字符串（如 "edit(path, edits:[{oldText, newText}])"）解析出必需参数名列表：
+// 不带 "?" 后缀、也不是字面量占位符 "..." 的顶层参数视为必需。
+std::vector<std::string> ParseRequiredParamsFromSignature(const std::string &signature)
+{
+    std::vector<std::string> required;
+    size_t open = signature.find('(');
+    size_t close = signature.rfind(')');
+    if (open == std::string::npos || close == std::string::npos || close <= open)
+    {
+        return required;
+    }
+
+    std::string blob = signature.substr(open + 1, close - open - 1);
+    for (const auto &raw_token : SplitTopLevelCommas(blob))
+    {
+        std::string token = TrimWhitespace(raw_token);
+        if (token.empty() || token == "...")
+        {
+            continue;
+        }
+        bool optional = (token.back() == '?');
+        size_t name_end = token.find_first_of(":?");
+        std::string name = TrimWhitespace((name_end == std::string::npos) ? token : token.substr(0, name_end));
+        if (!name.empty() && !optional)
+        {
+            required.push_back(name);
+        }
+    }
+    return required;
+}
+
+bool IsEmptyArgValue(const json &value)
+{
+    if (value.is_null())
+    {
+        return true;
+    }
+    if (value.is_string())
+    {
+        return value.get<std::string>().empty();
+    }
+    if (value.is_array() || value.is_object())
+    {
+        return value.empty();
+    }
+    return false;
+}
+
+std::vector<std::string> ComputeMissingRequiredArgs(const std::string &tool_name, const json &args)
+{
+    std::vector<std::string> missing;
+    const auto &signatures = PromptOptimizer::GetKnownToolSignatures();
+    auto it = signatures.find(tool_name);
+    if (it == signatures.end())
+    {
+        return missing;
+    }
+    for (const auto &name : ParseRequiredParamsFromSignature(it->second))
+    {
+        if (!args.is_object() || !args.contains(name) || IsEmptyArgValue(args[name]))
+        {
+            missing.push_back(name);
+        }
+    }
+    return missing;
+}
+
+} // namespace
+
+bool ResponseTools::TryLayer1Recovery(const std::string &malformedText, json &out_tool_call, ToolCallFailureReason &out_reason)
+{
+    out_reason = ToolCallFailureReason::kUnparseable;
+
+    std::vector<Layer1Candidate> candidates = ExtractBalancedJsonCandidates(malformedText);
+    if (candidates.empty())
+    {
+        return false; // kUnparseable：原始文本中找不到任何花括号平衡的候选对象
+    }
+
+    struct ParsedCandidate
+    {
+        json obj;
+        std::string raw_name;
+    };
+    std::vector<ParsedCandidate> reasonable;
+    bool saw_truncation_signal = false;
+
+    for (const auto &candidate : candidates)
+    {
+        json parsed;
+        bool truncated_signal = false;
+        if (!TryParseLayer1Candidate(candidate, parsed, truncated_signal))
+        {
+            saw_truncation_signal = saw_truncation_signal || truncated_signal || !candidate.closed_properly;
+            continue;
+        }
+
+        std::string raw_name;
+        if (ExtractNameField(parsed, raw_name))
+        {
+            reasonable.push_back({parsed, raw_name});
+        }
+        else
+        {
+            // 借助截断补齐启发式才解析成功（或候选本身未正常闭合），但结果里没有
+            // name/tool 字段——不构成"结构合理"候选，但截断信号仍要传递给上层，
+            // 否则会在 reasonable 为空时被误判为 kUnparseable 而不是 kTruncated。
+            saw_truncation_signal = saw_truncation_signal || truncated_signal || !candidate.closed_properly;
+        }
+    }
+
+    // >=2 个"结构合理"（能解析出 name/tool 字段迹象）的候选混杂在一起，不盲目取第一个
+    if (reasonable.size() >= 2)
+    {
+        out_reason = ToolCallFailureReason::kAmbiguousMultipleCalls;
+        return false;
+    }
+
+    if (reasonable.empty())
+    {
+        out_reason = saw_truncation_signal ? ToolCallFailureReason::kTruncated : ToolCallFailureReason::kUnparseable;
+        return false;
+    }
+
+    const ParsedCandidate &picked = reasonable.front();
+    std::string matched_tool = NormalizeAndMatchToolName(picked.raw_name);
+    if (matched_tool.empty())
+    {
+        out_reason = ToolCallFailureReason::kUnknownToolName;
+        return false;
+    }
+
+    json args = ExtractArgumentsField(picked.obj);
+    if (args.is_string())
+    {
+        // arguments 被错误地双重转义为字符串（与外层链 203 行附近的容错处理同类问题）
+        try
+        {
+            args = json::parse(args.get<std::string>());
+        }
+        catch (...)
+        {
+            args = json::object();
+        }
+    }
+    if (!args.is_object())
+    {
+        args = json::object();
+    }
+    NormalizeArgumentKeys(args);
+
+    if (!ComputeMissingRequiredArgs(matched_tool, args).empty())
+    {
+        out_reason = ToolCallFailureReason::kMissingRequiredArgs;
+        return false;
+    }
+
+    // 硬性约束：只有工具名与全部必需参数都确定才采纳
+    out_tool_call = json::object();
+    out_tool_call["name"] = matched_tool;
+    out_tool_call["arguments"] = args;
+    out_reason = ToolCallFailureReason::kNone;
+    return true;
 }

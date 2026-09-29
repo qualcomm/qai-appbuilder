@@ -1613,6 +1613,22 @@ std::string PromptOptimizer::OptimizeToolsPrompt(
     return result;
 }
 
+const std::unordered_map<std::string, std::string>& PromptOptimizer::GetKnownToolSignatures()
+{
+    // 预定义的工具参数签名（与 GetOptimizedToolDefinition 保持一致）
+    static const std::unordered_map<std::string, std::string> kToolSignatures = {
+        {"read",       "read(path, offset?, limit?)"},
+        {"write",      "write(path, content)"},
+        {"edit",       "edit(path, edits:[{oldText, newText}])"},
+        {"exec",       "exec(command, timeout?)"},
+        {"web_search", "web_search(query, count?, country?, freshness?)"},
+        {"web_fetch",  "web_fetch(url, extractMode?, maxChars?)"},
+        {"browser",    "browser(action, ...)"},
+        {"cron",       "cron(action, ...)"},
+    };
+    return kToolSignatures;
+}
+
 std::string PromptOptimizer::BuildDynamicToolsIntro(const nlohmann::ordered_json& request_data) const
 {
     // 从请求的顶层 "tools" 数组中提取工具名，生成与配置文件 tools_intro 格式
@@ -1660,17 +1676,7 @@ std::string PromptOptimizer::BuildDynamicToolsIntro(const nlohmann::ordered_json
         return "";
     }
 
-    // 预定义的工具参数签名（与 GetOptimizedToolDefinition 保持一致）
-    static const std::unordered_map<std::string, std::string> kToolSignatures = {
-        {"read",       "read(path, offset?, limit?)"},
-        {"write",      "write(path, content)"},
-        {"edit",       "edit(path, edits:[{oldText, newText}])"},
-        {"exec",       "exec(command, timeout?)"},
-        {"web_search", "web_search(query, count?, country?, freshness?)"},
-        {"web_fetch",  "web_fetch(url, extractMode?, maxChars?)"},
-        {"browser",    "browser(action, ...)"},
-        {"cron",       "cron(action, ...)"},
-    };
+    const auto& kToolSignatures = GetKnownToolSignatures();
 
     std::ostringstream oss;
     oss << "You can only call these tools:\n";

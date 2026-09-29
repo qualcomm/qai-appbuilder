@@ -14,9 +14,26 @@
 
 using json = nlohmann::ordered_json;
 
+// Layer 1 兜底提取失败分类（convertToolCallJson 现有正则修复链全部失败之后使用）。
+// 只在"工具名 + 全部必需参数均已确定"时才由 Layer1 采纳恢复结果；否则输出以下分类之一，
+// 供后续 Layer2（服务端内部隐形重试，未来步骤实现）/Layer3（分级终态协议，未来步骤实现）消费。
+// kNone 表示 Layer1 未被触发（外层链已成功）或已成功恢复，不代表失败。
+enum class ToolCallFailureReason
+{
+    kNone = 0,
+    kUnknownToolName,           // 提取出候选对象，但工具名归一化/模糊匹配后仍无法对应任何已知工具
+    kMissingRequiredArgs,       // 工具名已确定，但该工具的必需参数未能全部确定
+    kTruncated,                 // 候选子串存在明确截断特征（字符串值中途中断，或明显缺少右括号）
+    kAmbiguousMultipleCalls,    // 原始文本中混杂 >=2 个结构合理（含 name/tool 字段迹象）的候选对象
+    kUnparseable                // 原始文本中找不到任何花括号平衡的候选对象
+};
+
 struct ResponseTools
 {
     static inline const std::string FN_NAME = "<tool_call>";
+
+    // 将失败分类转换为可读字符串（用于日志，以及未来 Layer2 纠错文案分类）
+    static std::string ToolCallFailureReasonToString(ToolCallFailureReason reason);
 
     static bool post_stream_data(httplib::DataSink &sink, const char *event, const std::string &data, bool done = false);
 
@@ -43,7 +60,11 @@ struct ResponseTools
     // 对应 service_config.json 中的 debug.log_inference_stream，默认 false
     static bool log_inference_stream;
 
-    static std::string convertToolCallJson(const std::string &input);
+    // out_failure_reason（可选，默认 nullptr）：当外层正则修复链与 Layer1 均未能采纳
+    // 出合法工具调用（即最终仍落回 name="unknow"）时，写入结构化失败分类，供调用方
+    // （未来 Layer2/3）判断是否值得重试、以及重试/终态文案怎么写。成功恢复或外层链已
+    // 成功解析时写入 kNone。调用方不关心时传 nullptr，行为与改动前逐字节一致。
+    static std::string convertToolCallJson(const std::string &input, ToolCallFailureReason *out_failure_reason = nullptr);
 
     static std::string remove_tool_call_content(const std::string &input);
 
@@ -93,6 +114,17 @@ private:
 
     static bool IsSkillName(const std::string& tool_name, const std::unordered_map<std::string, std::string>& skill_mappings);
     static std::string RewriteToReadCall(const std::string& skill_name, const std::unordered_map<std::string, std::string>& skill_mappings);
+
+    // Layer 1 兜底：关键内容提取重组。仅在 convertToolCallJson 现有正则修复链
+    // （fixBackslashes/repairJson/escapeControlCharsInJsonStrings）全部失败之后调用，
+    // 纯本地字符串处理、零推理开销。
+    // malformedText：外层链尝试解析失败的原始候选文本（extractJsonFromToolCall 之后、
+    //                fixBackslashes 之前，即模型原始输出去除 <tool_call> 标签后的内容）。
+    // out_tool_call：成功时写入恢复出的 {"name":..., "arguments":{...}} 对象。
+    // out_reason：无论成功失败都写入分类结果（成功时为 kNone）。
+    // 返回 true 表示"工具名 + 全部必需参数均已确定"，可采纳 out_tool_call 替换 unknow 兜底；
+    // 返回 false 时 out_tool_call 内容未定义，调用方必须改用 out_reason 驱动后续分支。
+    static bool TryLayer1Recovery(const std::string &malformedText, json &out_tool_call, ToolCallFailureReason &out_reason);
 };
 
 #endif //RESPONSE_TOOLS_H
