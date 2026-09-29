@@ -203,6 +203,24 @@ std::vector<Layer1SelfTestCase> BuildTestCases()
         R"({"name": "exit", "arguments": {"path": "a.cpp", "edits": [{"oldText": "x", "newText": "y"}]})",
         false, "", {}, ToolCallFailureReason::kUnknownToolName});
 
+    // ── 类别14：外层语法合法但 name 为空字符串（Harmony 缺口2 占位符产出场景） ─
+    // 真实红队复盘案例：Harmony 处理器对"非标准 to=functions（无函数名）"分支解析失败时，
+    // 用空字符串 name 占位拼出 {"name":"","arguments":{...}}——这个整体在语法上是合法 JSON，
+    // 会在第一次 json::parse 就直接成功，完全绕开 Layer0 repair 链与 Layer1
+    // TryLayer1Recovery（两者都只在 catch 链里被调用）。必须在 name 有效性检查处单独拦截
+    // 空字符串（"".is_string()==true 无法被原有 !is_string() 检查捕获）。
+    c.push_back({"empty_name_syntactically_valid_outer_json",
+        "外层 JSON 语法合法但 name 是空字符串（模拟 Harmony 缺口2 的占位符产出）"
+        "——必须被统一防线拦截为 kUnknownToolName，不能原样带着空函数名转发给客户端",
+        R"({"name": "", "arguments": {"path": "notes.txt", "content": "hello world"}})",
+        false, "", {}, ToolCallFailureReason::kUnknownToolName});
+
+    c.push_back({"empty_name_via_repair_chain_trailing_comma",
+        "外层 JSON 需要先经 Layer0 repairJson（尾随逗号）才能解析成功，解析成功后 name 仍是"
+        "空字符串——验证统一防线同样覆盖 repair 链成功的路径，不仅是第一次 parse 直接成功的路径",
+        R"({"name": "", "arguments": {"path": "notes.txt",},})",
+        false, "", {}, ToolCallFailureReason::kUnknownToolName});
+
     return c;
 }
 

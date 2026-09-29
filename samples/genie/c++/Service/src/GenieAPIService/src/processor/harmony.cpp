@@ -531,6 +531,7 @@ void HarmonyProcessor::processChunk(const std::string &chunk)
                                 std::string fixed_msg = ResponseTools::fixBackslashes(currentMessage, true);
                                 // 再进行 JSON 修复（尾随逗号、Python 字面量等），再尝试解析
                                 std::string repaired_msg = ResponseTools::repairJson(fixed_msg);
+                                bool args_parsed_ok = true;
                                 try {
                                     json args = json::parse(repaired_msg);
                                     // 兼容模型混用格式：to=functions.exec 时消息体本应是纯参数，
@@ -551,14 +552,25 @@ void HarmonyProcessor::processChunk(const std::string &chunk)
                                     }
                                     My_Log{My_Log::Level::kDebug} << "[Message Complete] Successfully parsed arguments as JSON" << std::endl;
                                 } catch (const std::exception& e) {
-                                    // 如果解析失败，直接使用字符串（convertToolCallJson 会进一步处理）
-                                    tool_call_json["arguments"] = currentMessage;
+                                    args_parsed_ok = false;
                                     My_Log{My_Log::Level::kDebug}
                                         << "[Message Complete] Failed to parse arguments as JSON: " << e.what() << std::endl;
                                 }
 
-                                // 包装成 <tool_call> 格式
-                                m_toolCallContent = "<tool_call>" + tool_call_json.dump() + "</tool_call>";
+                                // 包装成 <tool_call> 格式。解析失败时不能用 tool_call_json["arguments"]=currentMessage
+                                // 再 .dump()——nlohmann json 会把原始畸形文本转义成字符串字段，使外层结果永远
+                                // 语法合法，导致下游 convertToolCallJson() 的 json::parse 一次成功，完全跳过
+                                // Layer1/2 修复链（只在 catch 链里触发）。改为裸拼接未转义原始文本，让结果
+                                // 重新变成"语法上真的可能非法"，交给下游走真实的 parse-failure 修复路径。
+                                if (args_parsed_ok)
+                                {
+                                    m_toolCallContent = "<tool_call>" + tool_call_json.dump() + "</tool_call>";
+                                }
+                                else
+                                {
+                                    m_toolCallContent = "<tool_call>{\"name\":" + json(funcName).dump()
+                                        + ",\"arguments\":" + currentMessage + "}</tool_call>";
+                                }
                                 m_toolCallFunctionName = funcName;
 
                                 My_Log{My_Log::Level::kDebug} << "[Tool Call] Function: " << funcName << std::endl;
@@ -590,10 +602,22 @@ void HarmonyProcessor::processChunk(const std::string &chunk)
                                         My_Log{My_Log::Level::kDebug} << "[Tool Call] Non-standard format resolved. Function: " << funcName << std::endl;
                                         My_Log{My_Log::Level::kDebug} << "[Tool Call] Formatted content: " << m_toolCallContent << std::endl;
                                     } else {
-                                        My_Log{My_Log::Level::kWarning} << "[Message Complete] Non-standard tool call: JSON body has no 'name' field, ignoring." << std::endl;
+                                        // 缺口2修复：to=functions 这个 channel 头本身已是无歧义的"模型想调用工具"
+                                        // 信号，即使 JSON body 缺 name 字段也不能直接 ignore——否则这次工具调用意图
+                                        // 会被静默丢弃降级为普通文本回复（finish_reason=stop），比转发 unknow 更隐蔽。
+                                        // 设置 m_isToolCall=true + 占位空函数名，确保流入 convertToolCallJson()/
+                                        // Layer1/2，由 Layer1 分类为 kUnknownToolName 处理。
+                                        My_Log{My_Log::Level::kWarning} << "[Message Complete] Non-standard tool call: JSON body has no 'name' field. Marking as unknown tool call for Layer1/2 recovery instead of dropping." << std::endl;
+                                        m_isToolCall = true;
+                                        m_toolCallContent = "<tool_call>{\"name\":\"\",\"arguments\":" + currentMessage + "}</tool_call>";
+                                        m_toolCallFunctionName = "";
                                     }
                                 } catch (const std::exception& e) {
-                                    My_Log{My_Log::Level::kWarning} << "[Message Complete] Non-standard tool call: failed to parse JSON body: " << e.what() << std::endl;
+                                    // 同上：解析失败也不能直接 return 丢弃，否则连 unknow tool_call 都不会产生。
+                                    My_Log{My_Log::Level::kWarning} << "[Message Complete] Non-standard tool call: failed to parse JSON body: " << e.what() << ". Marking as unknown tool call for Layer1/2 recovery instead of dropping." << std::endl;
+                                    m_isToolCall = true;
+                                    m_toolCallContent = "<tool_call>{\"name\":\"\",\"arguments\":" + currentMessage + "}</tool_call>";
+                                    m_toolCallFunctionName = "";
                                 }
                             }
                             break;
@@ -1031,10 +1055,20 @@ void HarmonyProcessor::FinalizeToolCall()
                                  << ", content='" << m_toolCallContent << "'" << std::endl;
                     }
                 } else {
-                    My_Log{My_Log::Level::kWarning} << "[FinalizeToolCall] Non-standard tool call: JSON body has no 'name' field, ignoring." << std::endl;
+                    // 缺口2修复（收尾路径，与 processChunk 同步）：to=functions channel 头本身是
+                    // 无歧义的"模型想调用工具"信号，不能因 JSON body 缺 name 字段就直接 return 丢弃，
+                    // 否则连 unknow tool_call 都不会产生，工具调用意图彻底消失（finish_reason 会变成 stop）。
+                    My_Log{My_Log::Level::kWarning} << "[FinalizeToolCall] Non-standard tool call: JSON body has no 'name' field. Marking as unknown tool call for Layer1/2 recovery instead of dropping." << std::endl;
+                    m_isToolCall = true;
+                    m_toolCallContent = "<tool_call>{\"name\":\"\",\"arguments\":" + toolContent + "}</tool_call>";
+                    m_toolCallFunctionName = "";
                 }
             } catch (const std::exception& e) {
-                My_Log{My_Log::Level::kWarning} << "[FinalizeToolCall] Non-standard tool call: failed to parse JSON body: " << e.what() << std::endl;
+                // 同上：解析失败也不能直接 return 丢弃。
+                My_Log{My_Log::Level::kWarning} << "[FinalizeToolCall] Non-standard tool call: failed to parse JSON body: " << e.what() << ". Marking as unknown tool call for Layer1/2 recovery instead of dropping." << std::endl;
+                m_isToolCall = true;
+                m_toolCallContent = "<tool_call>{\"name\":\"\",\"arguments\":" + toolContent + "}</tool_call>";
+                m_toolCallFunctionName = "";
             }
             return;
         }
@@ -1054,6 +1088,7 @@ void HarmonyProcessor::FinalizeToolCall()
         std::string fixed_content = ResponseTools::fixBackslashes(toolContent, true);
         // 再进行 JSON 修复（尾随逗号、Python 字面量等），再尝试解析
         std::string repaired_content = ResponseTools::repairJson(fixed_content);
+        bool args_parsed_ok = true;
         try {
             json args = json::parse(repaired_content);
             // 兼容模型混用格式：to=functions.xxx 时消息体本应是纯参数，
@@ -1081,17 +1116,25 @@ void HarmonyProcessor::FinalizeToolCall()
                          << " (source=" << toolContentSource << ")" << std::endl;
             }
         } catch (const std::exception& e) {
-            // 如果解析失败，直接使用字符串（convertToolCallJson 会进一步处理）
-            tool_call_json["arguments"] = toolContent;
+            args_parsed_ok = false;
             My_Log{My_Log::Level::kWarning}
                 << "[FinalizeToolCall] Failed to parse arguments as JSON: " << e.what()
                 << " (source=" << toolContentSource << ")" << std::endl;
             My_Log{My_Log::Level::kWarning}
                 << "[FinalizeToolCall] Raw content: '" << toolContent << "'" << std::endl;
         }
-        
-        // 包装成 <tool_call> 格式
-        m_toolCallContent = "<tool_call>" + tool_call_json.dump() + "</tool_call>";
+
+        // 包装成 <tool_call> 格式。解析失败时同 processChunk 的缺口1修复：不能用
+        // tool_call_json["arguments"]=toolContent 再 .dump()，改为裸拼接未转义原始文本。
+        if (args_parsed_ok)
+        {
+            m_toolCallContent = "<tool_call>" + tool_call_json.dump() + "</tool_call>";
+        }
+        else
+        {
+            m_toolCallContent = "<tool_call>{\"name\":" + json(funcName).dump()
+                + ",\"arguments\":" + toolContent + "}</tool_call>";
+        }
         m_toolCallFunctionName = funcName;
         
         if (ResponseTools::log_inference_stream)

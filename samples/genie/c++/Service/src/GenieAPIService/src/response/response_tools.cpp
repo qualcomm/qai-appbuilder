@@ -238,10 +238,25 @@ std::string ResponseTools::convertToolCallJson(const std::string &input, ToolCal
         }
     }
 
-    if (!root.contains("name") || !root["name"].is_string())
+    // 统一防线：不管走的是"第一次 parse 直接成功"路径，还是上面 Layer0 repair 链修复
+    // 成功的路径，都在此处再校验一次 name 字段的有效性。之所以必须在这里（而不能只信任
+    // 各来源自己保证 name 有效）——真实红队复盘发现的一个案例：Harmony 处理器对"非标准
+    // to=functions（无函数名）"分支的兜底占位符是空字符串 name，拼出的
+    // {"name":"","arguments":{...}} 整体语法合法，会在 183 行第一次 json::parse 就
+    // 成功，完全不会进入 185 行起的 catch 链（TryLayer1Recovery 只在 catch 链里被调用）。
+    // 空字符串能通过 is_string() 检查（"".is_string()==true），因此原有检查在这里必须
+    // 加严：只要 name 缺失、非字符串、或是空字符串，都统一视为"等价于 Layer0/1 都失败"，
+    // 改写为哨兵值 "unknow"（与 IsUnknowToolCallJson() 的精确字符串匹配保持一致，不发明
+    // 新哨兵）并设置 out_failure_reason=kUnknownToolName，确保这类结果同样能被 Layer2
+    // 重试判定 / 死循环检测正确识别，而不是原样带着空函数名转发给客户端。
+    if (!root.contains("name") || !root["name"].is_string() || root["name"].get<std::string>().empty())
     {
         My_Log{My_Log::Level::kError} << "the tool calls's name as string failed\n";
         root["name"] = "unknow";
+        if (out_failure_reason)
+        {
+            *out_failure_reason = ToolCallFailureReason::kUnknownToolName;
+        }
     }
     else if (ResponseTools::log_inference_stream)
     {
