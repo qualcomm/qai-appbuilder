@@ -215,6 +215,29 @@ struct LocalModelConfig {
 };
 
 // ============================================================
+// 工具调用兜底修复配置（对应 service_config.json 中的 "tool_call_repair" 节）
+// Layer2：现有正则修复链 + Layer1（本地确定性提取）均失败（最终会落回 name="unknow"）后，
+// 服务端在决定返回给客户端之前发起的内部隐形自纠正重试：构造 scratch ModelInput 追加一条
+// role=tool 错误消息，重新走完整 ModelInputBuilder::Build() 预算/压缩流水线再次调用
+// handle->Query()；成功结果直接替换给客户端，失败的第一次尝试绝不写入 ChatHistory，
+// 也绝不向客户端发送任何中间态。默认开启，可通过 service_config.json 关闭/调阈值。
+// ============================================================
+struct ToolCallRepairConfig {
+    bool enabled = true;
+
+    struct InternalRetryConfig {
+        // 内部隐形重试的最大次数（不含首次原始生成）。默认 1，避免本地弱模型的推理延迟被无限放大。
+        int max_attempts = 1;
+        // 命中以下失败原因时跳过重试，直接维持现有 unknow 兜底转发（Layer3 落地后将改为
+        // 分级终态协议）。取值对应 ResponseTools::ToolCallFailureReasonToString() 的输出
+        // （"unknown_tool_name"/"missing_required_args"/"truncated"/"ambiguous_multiple_calls"/
+        // "unparseable"）。默认仅跳过 "truncated"：token 预算耗尽导致的截断，结构信息已丢失，
+        // 重试大概率再次超预算，属于"重试无意义"的失败原因。
+        std::vector<std::string> skip_reasons = {"truncated"};
+    } internal_retry;
+};
+
+// ============================================================
 // 云端模型配置结构（对应 service_config.json 中的 "cloud_model" 节）
 // ============================================================
 struct CloudModelConfig {
@@ -802,6 +825,11 @@ public:
         return local_model_config_;
     }
 
+    const ToolCallRepairConfig &GetToolCallRepairConfig() const
+    {
+        return tool_call_repair_config_;
+    }
+
     const PromptOptimizationConfig& GetPromptOptimizationConfig() const
     {
         return prompt_optimization_config_;
@@ -870,6 +898,7 @@ public:
     CloudModelConfig cloud_model_config_;
     EnterpriseCloudModelConfig enterprise_cloud_model_config_;
     LocalModelConfig local_model_config_;
+    ToolCallRepairConfig tool_call_repair_config_;
     
     // Prompt 优化配置
     PromptOptimizationConfig prompt_optimization_config_;

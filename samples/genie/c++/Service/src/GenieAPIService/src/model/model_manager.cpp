@@ -1560,6 +1560,47 @@ bool ModelManager::InitializeConfig()
                              << std::endl;
                 }
 
+                // 加载 tool_call_repair 配置（Layer2 服务端内部隐形自纠正重试）
+                if (sc_json.contains("tool_call_repair") && sc_json["tool_call_repair"].is_object())
+                {
+                    const auto &tcr = sc_json["tool_call_repair"];
+                    tool_call_repair_config_.enabled = tcr.value("enabled", true);
+
+                    if (tcr.contains("internal_retry") && tcr["internal_retry"].is_object())
+                    {
+                        const auto &ir = tcr["internal_retry"];
+                        auto &ir_cfg = tool_call_repair_config_.internal_retry;
+                        ir_cfg.max_attempts = ir.value("max_attempts", 1);
+                        if (ir.contains("skip_reasons") && ir["skip_reasons"].is_array())
+                        {
+                            ir_cfg.skip_reasons.clear();
+                            for (const auto &reason : ir["skip_reasons"])
+                            {
+                                if (reason.is_string())
+                                {
+                                    ir_cfg.skip_reasons.push_back(reason.get<std::string>());
+                                }
+                            }
+                        }
+                    }
+
+                    My_Log{} << "[Config] tool_call_repair loaded: enabled="
+                             << tool_call_repair_config_.enabled
+                             << ", internal_retry.max_attempts="
+                             << tool_call_repair_config_.internal_retry.max_attempts
+                             << ", internal_retry.skip_reasons=["
+                             << [&]() {
+                                    std::string joined;
+                                    for (const auto &r : tool_call_repair_config_.internal_retry.skip_reasons)
+                                    {
+                                        if (!joined.empty()) joined += ",";
+                                        joined += r;
+                                    }
+                                    return joined;
+                                }()
+                             << "]" << std::endl;
+                }
+
                 // 加载 prompt_optimization 配置
                 if (sc_json.contains("prompt_optimization"))
                 {

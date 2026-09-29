@@ -15,6 +15,79 @@
 #include "../processor/harmony.h"
 #include "watermark_provider_host.h"
 #include <regex>
+#include <algorithm>
+
+namespace
+{
+    // 判断 convertToolCallJson() 的返回结果是否仍是 "unknow" 兜底（即 Layer0 正则修复链 +
+    // Layer1 本地确定性提取均未能采纳出合法工具调用）。convertToolCallJson() 的返回值恒为
+    // 一个可直接 json::parse 的 JSON 字符串（不带 <tool_call> 标签），因此这里不需要再调用
+    // ResponseTools::extractJsonFromToolCall。解析异常视为 unknow（保守判定，与调用方现有
+    // 死循环检测逻辑的 catch(...) 保持一致）。
+    bool IsUnknowToolCallJson(const std::string &converted_json_str)
+    {
+        try
+        {
+            json obj = json::parse(converted_json_str);
+            return obj.contains("name") && obj["name"].is_string()
+                   && obj["name"].get<std::string>() == "unknow";
+        }
+        catch (...)
+        {
+            return true;
+        }
+    }
+
+    // 判断 failure_reason 是否命中 tool_call_repair.internal_retry.skip_reasons 配置
+    // （字符串比较，取值口径见 ResponseTools::ToolCallFailureReasonToString()）。
+    bool IsFailureReasonSkipped(ToolCallFailureReason reason, const std::vector<std::string> &skip_reasons)
+    {
+        const std::string reason_str = ResponseTools::ToolCallFailureReasonToString(reason);
+        return std::find(skip_reasons.begin(), skip_reasons.end(), reason_str) != skip_reasons.end();
+    }
+
+    // 构造 Layer2 内部隐形自纠正重试用的 role=tool 错误消息文案。
+    // 复用真实工具执行出错时的消息格式（role:"tool", content:"Error: ..."），而不是发明新的
+    // meta 指令——模型本身已经在训练/系统提示词层面理解"工具报错后应该怎么重试"这一标准模式，
+    // 复用比新协议更可靠（详见 response_dispatcher.md 的架构决策记录）。
+    // 可用工具名列表动态取自 PromptOptimizer::GetKnownToolSignatures()（Step1 已提升为公共
+    // 权威表），避免与之脱节。
+    std::string BuildToolRepairErrorMessage(ToolCallFailureReason reason)
+    {
+        auto join_known_tool_names = []() -> std::string
+        {
+            std::string joined;
+            for (const auto &kv : PromptOptimizer::GetKnownToolSignatures())
+            {
+                if (!joined.empty()) joined += ", ";
+                joined += kv.first;
+            }
+            return joined;
+        };
+
+        switch (reason)
+        {
+            case ToolCallFailureReason::kUnknownToolName:
+                return "Error: unknown tool name. Available tools: " + join_known_tool_names() +
+                       ". Please retry with one of these exact tool names in a single valid JSON object.";
+            case ToolCallFailureReason::kMissingRequiredArgs:
+                return "Error: missing required argument(s) for the tool you tried to call. "
+                       "Please retry with the exact tool name and ALL of its required arguments "
+                       "included in a single valid JSON object.";
+            case ToolCallFailureReason::kAmbiguousMultipleCalls:
+                return "Error: your response contained multiple ambiguous tool call candidates. "
+                       "Please output exactly one single valid JSON tool_call object.";
+            case ToolCallFailureReason::kTruncated:
+                return "Error: your tool call output appears to have been truncated. "
+                       "Please retry with a shorter, complete, single valid JSON object.";
+            case ToolCallFailureReason::kUnparseable:
+            case ToolCallFailureReason::kNone:
+            default:
+                return "Error: invalid tool call format, could not parse as JSON. "
+                       "Please retry with a single valid JSON object, no extra text.";
+        }
+    }
+}
 
 ResponseDispatcher::ResponseDispatcher(IModelConfig &model_mgr,
                                        ChatHistory &chatHistory,
@@ -58,7 +131,8 @@ void ResponseDispatcher::Prepare(ModelInput &model_input,
                                  bool is_tool,
                                  bool is_stream,
                                  const httplib::Request &req,
-                                 bool is_dll_mode)
+                                 bool is_dll_mode,
+                                 const json *request_data_for_retry)
 {
     if (is_dll_mode)
         this->req_ = nullptr;
@@ -68,6 +142,9 @@ void ResponseDispatcher::Prepare(ModelInput &model_input,
     this->model_input_ = model_input;
     is_stream_ = is_stream;
     is_tool_ = is_tool;
+    // Layer2 内部隐形自纠正重试：保存本次请求的原始数据快照（深拷贝）。
+    // 调用方未提供时保持 null，Layer2 在 SendResponse() 中据此判断是否可用（自动跳过）。
+    this->retry_request_data_ = request_data_for_retry ? *request_data_for_retry : json();
     proc_->Clean();
     // 每次新请求重置状态追踪标志，避免上一次推理的状态影响本次
     status_tool_call_sent_ = false;
@@ -348,121 +425,273 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
         My_Log{}.original(true) << "\n";
         My_Log{} << "--- Query Context End ---\n" << std::endl;
 
-        // Fix 5: determine finish_reason based on how generation ended
-        if (handle->was_stopped_by_output_limit())
+        // Layer2 内部隐形自纠正重试（下方紧接的代码块）需要在重试的第二次 Query() 结束后，
+        // 对同一套"finish_reason 判定 + Harmony/General 兜底工具调用检测"逻辑再跑一遍，
+        // 因此提取为闭包以便原样复用，避免维护两份容易漂移的检测逻辑（首次生成结束后立即
+        // 调用一次，Layer2 重试成功完成 Query() 后再调用一次）。
+        auto finalize_generation_result = [&]()
         {
-            finishReason = "length";
-            My_Log{My_Log::Level::kWarning}
-                << "[SendResponse] Generation stopped due to output token limit. "
-                << "finish_reason = \"length\"" << std::endl;
-        }
-
-        // 查询结束后，强制完成工具调用处理
-        // 这对于没有输出结束标记的情况很重要
-        if (GetEffectivePromptType() == PromptType::Harmony && proc_)
-        {
-            auto* harmony_proc = dynamic_cast<HarmonyProcessor*>(proc_);
-            if (harmony_proc)
+            // Fix 5: determine finish_reason based on how generation ended
+            if (handle->was_stopped_by_output_limit())
             {
-                // ── 方案B：强制 flush final 通道残留内容 ──────────────────────────
-                // 背景：当 params_.special=false 时，<|return|> 以空字符串 "" 传给 callback，
-                // 走 heartbeat 分支，processChunk() 从未被调用，状态机停留在 IN_MESSAGE 状态，
-                // pendingBuffer 中积累的最后一段 final 内容无法被 flush。
-                // 即使方案A（params_.special=true）已修复根本原因，此处作为防御性兜底，
-                // 确保在任何情况下 final 通道内容都能完整输出。
-                std::string flushed_final = harmony_proc->FinalizeFinalChannel();
-                if (!flushed_final.empty())
+                finishReason = "length";
+                My_Log{My_Log::Level::kWarning}
+                    << "[SendResponse] Generation stopped due to output token limit. "
+                    << "finish_reason = \"length\"" << std::endl;
+            }
+
+            // 查询结束后，强制完成工具调用处理
+            // 这对于没有输出结束标记的情况很重要
+            if (GetEffectivePromptType() == PromptType::Harmony && proc_)
+            {
+                auto* harmony_proc = dynamic_cast<HarmonyProcessor*>(proc_);
+                if (harmony_proc)
                 {
-                    if (ResponseTools::log_inference_stream)
+                    // ── 方案B：强制 flush final 通道残留内容 ──────────────────────────
+                    // 背景：当 params_.special=false 时，<|return|> 以空字符串 "" 传给 callback，
+                    // 走 heartbeat 分支，processChunk() 从未被调用，状态机停留在 IN_MESSAGE 状态，
+                    // pendingBuffer 中积累的最后一段 final 内容无法被 flush。
+                    // 即使方案A（params_.special=true）已修复根本原因，此处作为防御性兜底，
+                    // 确保在任何情况下 final 通道内容都能完整输出。
+                    std::string flushed_final = harmony_proc->FinalizeFinalChannel();
+                    if (!flushed_final.empty())
                     {
-                        My_Log{My_Log::Level::kInfo}
-                            << "[SendResponse] FinalizeFinalChannel flushed " << flushed_final.length()
-                            << " bytes of pending final content. "
-                            << "Preview: \"" << flushed_final.substr(0, std::min(flushed_final.length(), size_t(80))) << "\""
-                            << std::endl;
-                    }
-                    if (is_stream_ && sink)
-                    {
-                        ResponseTools::post_stream_data(*sink, "data",
-                            ResponseTools::responseDataJson(flushed_final, "", true));
                         if (ResponseTools::log_inference_stream)
                         {
                             My_Log{My_Log::Level::kInfo}
-                                << "[SendResponse] Flushed final content sent to client via SSE." << std::endl;
+                                << "[SendResponse] FinalizeFinalChannel flushed " << flushed_final.length()
+                                << " bytes of pending final content. "
+                                << "Preview: \"" << flushed_final.substr(0, std::min(flushed_final.length(), size_t(80))) << "\""
+                                << std::endl;
+                        }
+                        if (is_stream_ && sink)
+                        {
+                            ResponseTools::post_stream_data(*sink, "data",
+                                ResponseTools::responseDataJson(flushed_final, "", true));
+                            if (ResponseTools::log_inference_stream)
+                            {
+                                My_Log{My_Log::Level::kInfo}
+                                    << "[SendResponse] Flushed final content sent to client via SSE." << std::endl;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        if (ResponseTools::log_inference_stream)
+                        {
+                            My_Log{My_Log::Level::kInfo}
+                                << "[SendResponse] FinalizeFinalChannel: no pending final content to flush "
+                                << "(normal case when <|return|> was properly received)." << std::endl;
+                        }
+                    }
+                    // ─────────────────────────────────────────────────────────────────
+
+                    harmony_proc->FinalizeToolCall();
+
+                    // 检查是否有工具调用
+                    if (harmony_proc->IsToolCall())
+                    {
+                        isToolResponse = true;
+                        toolResponse = harmony_proc->GetToolCallContent();
+
+                        // 兜底：Harmony 格式下 <tool_call> 标记可能在流式输出中被过滤，
+                        // 导致 genie_callback 中未能检测到，此处在 Query() 结束后补发状态。
+                        // 注意：此时推理已完成，状态仅作为"已完成工具调用"的通知，
+                        // 不影响后续的工具调用响应发送。
+                        if (!status_tool_call_sent_)
+                        {
+                            SendStatusUpdate(sink, "tool_call", "Calling tool...");
+                            status_tool_call_sent_ = true;
+                            My_Log{} << "[Status] tool_call status sent (Harmony FinalizeToolCall fallback)" << std::endl;
                         }
                     }
                 }
-                else
-                {
-                    if (ResponseTools::log_inference_stream)
-                    {
-                        My_Log{My_Log::Level::kInfo}
-                            << "[SendResponse] FinalizeFinalChannel: no pending final content to flush "
-                            << "(normal case when <|return|> was properly received)." << std::endl;
-                    }
-                }
-                // ─────────────────────────────────────────────────────────────────
+            }
+            // ── General 格式兜底：检测裸 JSON 工具调用（无 <tool_call> 标签）──────────
+            // 背景：模型有时会省略 <tool_call> 标签，直接输出裸 JSON（如 {"name":"read",...}）。
+            // 流式处理时，genie_callback 逐 token 调用，preprocessStream() 状态机无法识别
+            // 以 '{' 开头的裸 JSON 为工具调用，导致 isToolResponse 始终为 false。
+            // 此处在 Query() 结束后，对 response_buffer 做一次整体检测：
+            //   - 若 isToolResponse 仍为 false（流式处理未识别）
+            //   - 且 response_buffer 以 '{' 开头（去除首尾空白后）
+            //   - 且包含 "name" 字段（工具调用的必要字段）
+            //   - 且不含 "</tool_call>"（避免重复处理已正常识别的工具调用）
+            // 则将 response_buffer 视为裸 JSON 工具调用，补全标签后设置 isToolResponse=true。
+            else if (!isToolResponse && GetEffectivePromptType() == PromptType::General)
+            {
+                // 去除首尾空白后检查
+                std::string trimmed = response_buffer;
+                size_t trim_start = trimmed.find_first_not_of(" \t\r\n");
+                size_t trim_end   = trimmed.find_last_not_of(" \t\r\n");
+                if (trim_start != std::string::npos)
+                    trimmed = trimmed.substr(trim_start, trim_end - trim_start + 1);
 
-                harmony_proc->FinalizeToolCall();
-                
-                // 检查是否有工具调用
-                if (harmony_proc->IsToolCall())
+                if (!trimmed.empty() && trimmed[0] == '{' &&
+                    trimmed.find("\"name\"") != std::string::npos &&
+                    trimmed.find("</tool_call>") == std::string::npos)
                 {
-                    isToolResponse = true;
-                    toolResponse = harmony_proc->GetToolCallContent();
-
-                    // 兜底：Harmony 格式下 <tool_call> 标记可能在流式输出中被过滤，
-                    // 导致 genie_callback 中未能检测到，此处在 Query() 结束后补发状态。
-                    // 注意：此时推理已完成，状态仅作为"已完成工具调用"的通知，
-                    // 不影响后续的工具调用响应发送。
-                    if (!status_tool_call_sent_)
+                    // 找到最后一个 '}' 作为 JSON 结束位置，补全标签对
+                    size_t last_brace = trimmed.rfind('}');
+                    if (last_brace != std::string::npos)
                     {
-                        SendStatusUpdate(sink, "tool_call", "Calling tool...");
-                        status_tool_call_sent_ = true;
-                        My_Log{} << "[Status] tool_call status sent (Harmony FinalizeToolCall fallback)" << std::endl;
+                        std::string wrapped = "<tool_call>" + trimmed.substr(0, last_brace + 1) + "</tool_call>";
+                        isToolResponse = true;
+                        toolResponse   = wrapped;
+                        My_Log{My_Log::Level::kWarning}
+                            << "[SendResponse] General format: detected bare JSON tool call in response_buffer. "
+                            << "Auto-wrapped with <tool_call>...</tool_call>. "
+                            << "Preview: " << trimmed.substr(0, std::min(trimmed.size(), size_t(80))) << std::endl;
+
+                        if (!status_tool_call_sent_)
+                        {
+                            SendStatusUpdate(sink, "tool_call", "Calling tool...");
+                            status_tool_call_sent_ = true;
+                        }
                     }
                 }
             }
-        }
-        // ── General 格式兜底：检测裸 JSON 工具调用（无 <tool_call> 标签）──────────
-        // 背景：模型有时会省略 <tool_call> 标签，直接输出裸 JSON（如 {"name":"read",...}）。
-        // 流式处理时，genie_callback 逐 token 调用，preprocessStream() 状态机无法识别
-        // 以 '{' 开头的裸 JSON 为工具调用，导致 isToolResponse 始终为 false。
-        // 此处在 Query() 结束后，对 response_buffer 做一次整体检测：
-        //   - 若 isToolResponse 仍为 false（流式处理未识别）
-        //   - 且 response_buffer 以 '{' 开头（去除首尾空白后）
-        //   - 且包含 "name" 字段（工具调用的必要字段）
-        //   - 且不含 "</tool_call>"（避免重复处理已正常识别的工具调用）
-        // 则将 response_buffer 视为裸 JSON 工具调用，补全标签后设置 isToolResponse=true。
-        else if (!isToolResponse && GetEffectivePromptType() == PromptType::General)
+        };
+        // ─────────────────────────────────────────────────────────────────────────
+        finalize_generation_result();
+
+        // ── Layer2：服务端内部隐形自纠正重试 ────────────────────────────────────
+        // 触发条件：本次生成产生了一次工具调用尝试（isToolResponse=true），且经 Layer0
+        // （既有正则修复链）+ Layer1（本地确定性提取，已内嵌于 convertToolCallJson）预览
+        // 判定后仍会落回 name="unknow"，且失败原因未被 skip_reasons 排除（默认仅排除
+        // kTruncated：token 预算耗尽导致的截断，结构信息已丢失，重试大概率再次超预算，
+        // 属于"重试无意义"的失败原因）。此处仅做"预览判定"，不采纳其返回值——真正被客户端
+        // 采纳的转换仍发生在下方既有的 connection_broken/isToolResponse 分支里对
+        // convertToolCallJson 的调用（对那部分代码零改动，因为 convertToolCallJson 是纯
+        // 函数，对同一输入重复调用结果一致、无副作用、无推理开销）。
+        //
+        // 若判定值得重试：构造一个与共享 chatHistory 完全隔离的 scratch ChatHistory +
+        // ModelInputBuilder，用 Prepare() 时保存的原始请求消息快照（retry_request_data_，
+        // 与 ModelInputBuilder::Build() 实际消费的 data 完全一致，未经 PreFilter/压缩）追加
+        // 一条 assistant 原始畸形输出 + 一条 role=tool 错误消息，重新走完整 Build() 预算/
+        // 压缩流水线得到新的 ModelInput，绝不裸文本拼接绕过压缩流水线。scratch 对象是函数
+        // 局部变量，SendResponse() 返回后立即销毁，因此重试期间的首次畸形输出与纠错消息绝
+        // 不会写入 ChatHistory，也绝不会发送给客户端任何中间态。
+        if (isToolResponse && instance_config_ && !retry_request_data_.is_null()
+            && retry_request_data_.contains("messages") && retry_request_data_["messages"].is_array())
         {
-            // 去除首尾空白后检查
-            std::string trimmed = response_buffer;
-            size_t trim_start = trimmed.find_first_not_of(" \t\r\n");
-            size_t trim_end   = trimmed.find_last_not_of(" \t\r\n");
-            if (trim_start != std::string::npos)
-                trimmed = trimmed.substr(trim_start, trim_end - trim_start + 1);
-
-            if (!trimmed.empty() && trimmed[0] == '{' &&
-                trimmed.find("\"name\"") != std::string::npos &&
-                trimmed.find("</tool_call>") == std::string::npos)
+            const auto &repair_cfg = model_config_.GetToolCallRepairConfig();
+            if (repair_cfg.enabled && repair_cfg.internal_retry.max_attempts > 0)
             {
-                // 找到最后一个 '}' 作为 JSON 结束位置，补全标签对
-                size_t last_brace = trimmed.rfind('}');
-                if (last_brace != std::string::npos)
-                {
-                    std::string wrapped = "<tool_call>" + trimmed.substr(0, last_brace + 1) + "</tool_call>";
-                    isToolResponse = true;
-                    toolResponse   = wrapped;
-                    My_Log{My_Log::Level::kWarning}
-                        << "[SendResponse] General format: detected bare JSON tool call in response_buffer. "
-                        << "Auto-wrapped with <tool_call>...</tool_call>. "
-                        << "Preview: " << trimmed.substr(0, std::min(trimmed.size(), size_t(80))) << std::endl;
+                ToolCallFailureReason preview_reason = ToolCallFailureReason::kNone;
+                const std::string preview_converted = ResponseTools::convertToolCallJson(toolResponse, &preview_reason);
 
-                    if (!status_tool_call_sent_)
+                if (IsUnknowToolCallJson(preview_converted)
+                    && !IsFailureReasonSkipped(preview_reason, repair_cfg.internal_retry.skip_reasons))
+                {
+                    My_Log{My_Log::Level::kWarning}
+                        << "[ToolCallRepair][Layer2] Malformed tool call detected (reason="
+                        << ResponseTools::ToolCallFailureReasonToString(preview_reason)
+                        << "). Attempting 1 internal invisible retry (server-side, not visible to client)." << std::endl;
+
+                    // 回滚快照：若重试本身出错（Query 失败/异常）或重试后仍是 unknow，
+                    // "维持现状转发 unknow"——恢复到发起重试之前的首次生成结果，而不是让
+                    // 重试半途产生的（同样有问题的）中间状态泄漏进最终响应。
+                    // 注意：不快照 connection_broken——它反映的是底层连接的真实状态，
+                    // 一旦在重试期间探测为断开，无论首次尝试连接是否正常都应当保留该事实。
+                    const std::string snapshot_response_buffer = response_buffer;
+                    const std::string snapshot_tool_response = toolResponse;
+                    const std::string snapshot_finish_reason = finishReason;
+
+                    bool retry_yielded_valid_tool_call = false;
+                    try
                     {
-                        SendStatusUpdate(sink, "tool_call", "Calling tool...");
-                        status_tool_call_sent_ = true;
+                        json scratch_data = retry_request_data_;
+                        json assistant_msg;
+                        assistant_msg["role"] = "assistant";
+                        assistant_msg["content"] = response_buffer;
+                        json tool_error_msg;
+                        tool_error_msg["role"] = "tool";
+                        tool_error_msg["content"] = BuildToolRepairErrorMessage(preview_reason);
+                        scratch_data["messages"].push_back(assistant_msg);
+                        scratch_data["messages"].push_back(tool_error_msg);
+
+                        // scratch ChatHistory/ModelInputBuilder：函数局部对象，与共享的
+                        // chatHistory 完全隔离，SendResponse() 返回后自动销毁。
+                        auto *mutable_instance_config = const_cast<ModelInstanceConfig *>(instance_config_);
+                        ChatHistory scratch_chat_history(*mutable_instance_config);
+                        ModelInputBuilder scratch_builder(scratch_chat_history, mutable_instance_config);
+
+                        bool scratch_is_tool = false;
+                        std::function<bool()> scratch_is_alive_fn = nullptr;
+                        if (is_stream_ && sink)
+                        {
+                            scratch_is_alive_fn = [sink]() -> bool { return sink->is_writable(); };
+                        }
+                        ModelInput scratch_model_input =
+                            scratch_builder.Build(scratch_data, scratch_is_tool, scratch_is_alive_fn);
+
+                        // 显式重置直接影响"本次生成结果内容判定"的状态。注意：故意不重置
+                        // status_tool_call_sent_/tool_call_name_status_sent_/
+                        // tool_call_accumulator_——这三者只影响"是否需要向客户端发送状态
+                        // 事件"，首次尝试已经发送过 tool_call 状态，重试对客户端完全隐形，
+                        // 若照常重置会在同一逻辑请求内产生第二次几乎相同的 tool_call 状态帧
+                        // （详见 response_dispatcher.md 的时序说明）。
+                        response_buffer.clear();
+                        toolResponse.clear();
+                        isToolResponse = false;
+                        proc_->Clean();
+                        is_tool_ = scratch_is_tool;
+
+                        My_Log{} << "--- Query Context Start (Layer2 internal retry) ---" << std::endl;
+                        bool retry_query_ok = handle->Query(scratch_model_input, genie_callback, prefill_heartbeat);
+                        My_Log{}.original(true) << "\n";
+                        My_Log{} << "--- Query Context End (Layer2 internal retry) ---\n" << std::endl;
+
+                        if (retry_query_ok && !connection_broken)
+                        {
+                            finalize_generation_result();
+
+                            if (isToolResponse)
+                            {
+                                ToolCallFailureReason retry_reason = ToolCallFailureReason::kNone;
+                                const std::string retry_converted =
+                                    ResponseTools::convertToolCallJson(toolResponse, &retry_reason);
+                                retry_yielded_valid_tool_call = !IsUnknowToolCallJson(retry_converted);
+                                if (!retry_yielded_valid_tool_call)
+                                {
+                                    My_Log{My_Log::Level::kWarning}
+                                        << "[ToolCallRepair][Layer2] Internal retry still malformed (reason="
+                                        << ResponseTools::ToolCallFailureReasonToString(retry_reason)
+                                        << "). Model likely did not understand the correction hint." << std::endl;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            My_Log{My_Log::Level::kWarning}
+                                << "[ToolCallRepair][Layer2] Internal retry Query() failed or connection broke."
+                                << std::endl;
+                        }
+                    }
+                    catch (const std::exception &e)
+                    {
+                        My_Log{My_Log::Level::kError}
+                            << "[ToolCallRepair][Layer2] Exception during internal retry: " << e.what() << std::endl;
+                        retry_yielded_valid_tool_call = false;
+                    }
+
+                    if (retry_yielded_valid_tool_call)
+                    {
+                        My_Log{} << "[ToolCallRepair][Layer2] Internal retry succeeded, "
+                                    "replacing malformed first attempt with corrected result (invisible to client)."
+                                 << std::endl;
+                    }
+                    else
+                    {
+                        // 维持现状：回滚到重试之前的首次生成结果，继续走既有的 unknow
+                        // 转发路径（Layer3 落地后会把这个"最终失败出口"替换为分级终态协议）。
+                        response_buffer = snapshot_response_buffer;
+                        toolResponse = snapshot_tool_response;
+                        isToolResponse = true;
+                        finishReason = snapshot_finish_reason;
+                        My_Log{My_Log::Level::kWarning}
+                            << "[ToolCallRepair][Layer2] Retry did not help; falling back to existing unknow "
+                               "forwarding (unchanged behavior)." << std::endl;
                     }
                 }
             }

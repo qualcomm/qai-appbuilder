@@ -44,7 +44,8 @@ public:
                  bool is_tool,
                  bool is_stream,
                  const httplib::Request &req,
-                 bool is_dll_mode = false);
+                 bool is_dll_mode = false,
+                 const json *request_data_for_retry = nullptr);
 
     bool SendResponse(size_t, httplib::DataSink *sink, httplib::Response *res, bool suppress_end_on_overflow = false);
 
@@ -140,6 +141,12 @@ private:
     httplib::Request *req_{};
     ModelProcessor *proc_{};
     ModelInput model_input_;
+    // Layer2 内部隐形自纠正重试：Prepare() 时保存的原始请求数据快照（深拷贝，与
+    // ModelInputBuilder::Build() 实际消费的 data 完全一致，未经 PreFilter/压缩)，用于
+    // 重试时追加一条 assistant 原始输出 + 一条 role=tool 错误消息后重新走完整 Build()
+    // 预算/压缩流水线构造 scratch ModelInput。默认 null（json 默认构造），表示调用方
+    // 未提供（如 DLL 模式），此时 Layer2 自动跳过，不影响现有行为。
+    json retry_request_data_;
 };
 
 #endif //RESPONSE_DISPATCHER_H

@@ -622,7 +622,12 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
                             ApplyOutputSizeBudget(*handle, *loaded_model_ref->config, prompt_tokens, temperature);
                         }
 
-                        dispatcher->Prepare(model_input, is_tool, /*is_stream=*/true, req);
+                        // Layer2 内部隐形自纠正重试需要复用本次请求的原始消息序列（未经
+                        // PreFilter/压缩，仅经过上方的控制字符 sanitize）重新走一遍 Build()，
+                        // 因此把 data_copy 的地址传给 Prepare() 保存快照；dispatcher 内部
+                        // 会做深拷贝，data_copy 后续被其它逻辑修改不影响已保存的快照。
+                        dispatcher->Prepare(model_input, is_tool, /*is_stream=*/true, req,
+                                            /*is_dll_mode=*/false, &data_copy);
 
                         // 发送 "preparing" 状态帧（Build 完成，即将开始主推理）
                         ResponseTools::post_stream_data(sink, "data",
@@ -726,7 +731,8 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
                 ApplyOutputSizeBudget(*handle, config, prompt_tokens, temperature);
             }
 
-            dispatcher->Prepare(model_input, is_tool, /*is_stream=*/false, req);
+            dispatcher->Prepare(model_input, is_tool, /*is_stream=*/false, req,
+                                /*is_dll_mode=*/false, &data);
             dispatcher->SendResponse(0, nullptr, &res);
 
             if (handle && handle->was_stopped_by_output_limit()
