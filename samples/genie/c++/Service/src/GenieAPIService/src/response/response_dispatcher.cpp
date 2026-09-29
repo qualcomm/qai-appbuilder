@@ -216,6 +216,18 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
 
     bool connection_broken = false;  // Fix 3: track connection state across callback invocations
 
+    // Layer2 内部隐形自纠正重试的历史一致性兜底（仅 Harmony 格式 + 有状态会话相关）：
+    // 若本次请求触发了重试且最终回滚（见下方 Layer2 代码块），proc_（HarmonyProcessor）
+    // 的内部消息缓冲区（m_analysisMessages/m_finalMessages/m_commentaryMessages/
+    // m_isToolCall）已经被重试轮次的内容覆盖，不能再信任事后调用 GetMessageForHistory()
+    // 的实时结果——必须改用重试发起前抢先快照的历史文案，否则持久化到 ChatHistory 的内容
+    // 会与客户端实际收到的（回滚后的首次尝试）内容不一致。默认不启用快照（无重试/重试
+    // 成功/非 Harmony 时，历史写入逻辑与改动前完全一致）。详见 response_dispatcher.md。
+    bool layer2_retry_rolled_back = false;
+    bool has_harmony_history_snapshot = false;
+    std::string snapshot_harmony_history_msg;
+    bool snapshot_harmony_is_tool_call = false;  // 仅用于回滚后的调试日志文案，不影响持久化内容
+
     auto genie_callback = [&](std::string &message)
     {
         // Fix 3: check connection before processing any message (including heartbeat keep-alive signals)
@@ -625,6 +637,25 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                         ModelInput scratch_model_input =
                             scratch_builder.Build(scratch_data, scratch_is_tool, scratch_is_alive_fn);
 
+                        // P0 修复：proc_->Clean() 会清空 HarmonyProcessor 的内部消息缓冲区
+                        // （m_analysisMessages/m_finalMessages/m_commentaryMessages/m_isToolCall），
+                        // 第二次 Query() 会用重试轮次的内容重新填充它们。若重试最终失败触发下方
+                        // 回滚，历史写入阶段对 Harmony 格式会调用 GetMessageForHistory() 读取
+                        // "当前" proc_ 状态——那时已是被重试污染的状态，不是回滚后客户端实际收到
+                        // 的首次尝试内容。因此必须在 Clean() 之前抢先快照"如果现在要写历史，应该
+                        // 写什么"，供回滚分支使用；重试成功分支则不使用这份快照，正常调用
+                        // GetMessageForHistory() 读取新的、正确的内容。
+                        if (GetEffectivePromptType() == PromptType::Harmony)
+                        {
+                            auto *harmony_proc_before_retry = dynamic_cast<HarmonyProcessor *>(proc_);
+                            if (harmony_proc_before_retry)
+                            {
+                                snapshot_harmony_history_msg = harmony_proc_before_retry->GetMessageForHistory();
+                                snapshot_harmony_is_tool_call = harmony_proc_before_retry->IsToolCall();
+                                has_harmony_history_snapshot = true;
+                            }
+                        }
+
                         // 显式重置直接影响"本次生成结果内容判定"的状态。注意：故意不重置
                         // status_tool_call_sent_/tool_call_name_status_sent_/
                         // tool_call_accumulator_——这三者只影响"是否需要向客户端发送状态
@@ -689,6 +720,11 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                         toolResponse = snapshot_tool_response;
                         isToolResponse = true;
                         finishReason = snapshot_finish_reason;
+                        // 联动回滚：Harmony 格式下 proc_ 的内部状态已被重试污染，下方历史写入
+                        // 阶段不能再信任 GetMessageForHistory() 的实时结果，须改用上面抢先快照的
+                        // 历史文案（has_harmony_history_snapshot 为 false 时说明当时不是 Harmony
+                        // 格式或 dynamic_cast 失败，下方会安全退回原有逐次调用逻辑）。
+                        layer2_retry_rolled_back = true;
                         My_Log{My_Log::Level::kWarning}
                             << "[ToolCallRepair][Layer2] Retry did not help; falling back to existing unknow "
                                "forwarding (unchanged behavior)." << std::endl;
@@ -721,14 +757,40 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                 auto* harmony_proc = dynamic_cast<HarmonyProcessor*>(proc_);
                 if (harmony_proc)
                 {
-                    std::string history_msg = harmony_proc->GetMessageForHistory();
-                    
+                    // P0 修复：Layer2 重试失败回滚时，proc_ 的内部状态已被重试轮次污染，
+                    // 此处改用重试发起前抢先快照的历史文案，而不是重新调用
+                    // GetMessageForHistory() 读到污染后的内容（详见上方 Layer2 重试代码块
+                    // 里 snapshot_harmony_history_msg 的注释）。未触发重试/重试成功/
+                    // 快照当时未能取到时，回退到原有的实时调用逻辑，行为与改动前一致。
+                    std::string history_msg = (layer2_retry_rolled_back && has_harmony_history_snapshot)
+                                                   ? snapshot_harmony_history_msg
+                                                   : harmony_proc->GetMessageForHistory();
+
+                    // 诊断日志（仅回滚场景）：证明"若不使用快照会写入什么"与"实际写入了什么"
+                    // 是否真的存在差异——GetMessageForHistory() 是纯读取（无副作用），重复调用
+                    // 用于对照安全。用于真机验证本次修复解决的具体分歧，不影响实际写入内容。
+                    if (layer2_retry_rolled_back && has_harmony_history_snapshot)
+                    {
+                        const std::string would_be_corrupted = harmony_proc->GetMessageForHistory();
+                        My_Log{My_Log::Level::kWarning}
+                            << "[ToolCallRepair][Layer2][HistorySnapshot] rollback occurred; using pre-retry "
+                               "snapshot for ChatHistory (len=" << history_msg.length()
+                            << ") instead of live post-retry proc_ state (len=" << would_be_corrupted.length()
+                            << "). Divergence=" << (would_be_corrupted != history_msg ? "YES" : "no (identical)")
+                            << std::endl;
+                    }
+
                     if (!history_msg.empty())
                     {
                         chatHistory.AddMessage("assistant", history_msg);
                         
-                        // 详细日志
-                        if (harmony_proc->IsToolCall())
+                        // 详细日志：回滚场景下 IsToolCall() 同样读的是被污染的实时状态，
+                        // 改用快照的布尔值保持日志文案与实际持久化内容一致（仅影响日志文案，
+                        // 不影响上面已经写入 ChatHistory 的 history_msg 本身）。
+                        const bool is_tool_call_for_log = (layer2_retry_rolled_back && has_harmony_history_snapshot)
+                                                               ? snapshot_harmony_is_tool_call
+                                                               : harmony_proc->IsToolCall();
+                        if (is_tool_call_for_log)
                         {
                             My_Log{My_Log::Level::kDebug} << "[History] ✓ Added tool-related assistant message (full CoT preserved)" << std::endl;
                             My_Log{My_Log::Level::kDebug} << "[History]   - Includes: analysis + commentary + final channels" << std::endl;
