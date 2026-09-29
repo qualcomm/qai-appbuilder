@@ -883,12 +883,43 @@ class QNNContext(_QNNContextBase):
         self.model_name = model_name
         self.input_data_type = input_data_type
         self.output_data_type = output_data_type
-        self._is_onnx_model = str(model_path).lower().endswith(".onnx")
+        model_suffix = os.path.splitext(str(model_path))[1].lower()
+        self._is_onnx_model = model_suffix == ".onnx"
+        self._is_tflite_model = model_suffix == ".tflite"
 
         self._validate_model_path()
 
         if self._is_onnx_model:
             self.m_context = OnnxRuntimeContext(model_name, model_path, False)
+            _register_context(self)
+            return
+
+        if self._is_tflite_model:
+            self._validate_tflite_options(
+                is_async=is_async,
+                deviceID=deviceID,
+                coreIdsStr=coreIdsStr,
+                enable_graphs=enable_graphs,
+            )
+            if sys.platform.startswith("win"):
+                context_type = getattr(appbuilder, "TFLiteCpuContext", None)
+                if context_type is None:
+                    raise RuntimeError(
+                        "Windows CPU TFLite support is disabled in this qai_appbuilder build. "
+                        "Build with APPBUILDER_ENABLE_TFLITE_CPU=ON and TFLITE_ROOT."
+                    )
+                self.m_context = context_type(model_name, model_path)
+            else:
+                context_type = getattr(appbuilder, "TFLiteQnnContext", None)
+                if context_type is None:
+                    raise RuntimeError(
+                        "TFLite support is disabled in this qai_appbuilder build. "
+                        "Build on Linux ARM64 with APPBUILDER_ENABLE_TFLITE=ON, "
+                        "TFLITE_ROOT, and QNN_SDK_ROOT."
+                    )
+                if backend_lib_path == "None":
+                    backend_lib_path = ""
+                self.m_context = context_type(model_name, model_path, backend_lib_path)
             _register_context(self)
             return
 
@@ -898,11 +929,36 @@ class QNNContext(_QNNContextBase):
                                               is_async, input_data_type, output_data_type, deviceID, coreIdsStr, list(enable_graphs) if enable_graphs else [])
         _register_context(self)
 
+    @staticmethod
+    def _validate_tflite_options(*, is_async, deviceID, coreIdsStr, enable_graphs):
+        unsupported = []
+        if is_async:
+            unsupported.append("is_async")
+        if deviceID not in (0, None):
+            unsupported.append("deviceID")
+        if coreIdsStr not in ("", "None", None):
+            unsupported.append("coreIdsStr")
+        if enable_graphs:
+            unsupported.append("enable_graphs")
+        if unsupported:
+            raise ValueError(
+                ".tflite models do not support QNN-only options: " + ", ".join(unsupported)
+            )
+
     #@timer
     def Inference(self, input, perf_profile=PerfProfile.DEFAULT, graphIndex=0):
         if self._is_onnx_model:
             self._ensure_live("Inference")
             return self.m_context.Inference(input)
+
+        if self._is_tflite_model:
+            if perf_profile != PerfProfile.DEFAULT:
+                raise ValueError(".tflite models do not support performance profiles")
+            return self._inference_and_reshape(
+                input,
+                lambda _in: self.m_context.Inference(_in, graphIndex),
+                graph_index=graphIndex,
+            )
 
         return self._inference_and_reshape(
             input,
@@ -914,10 +970,13 @@ class QNNContext(_QNNContextBase):
         """True when the loaded model is a *.onnx file served by onnxruntime(-qnn)."""
         return self._is_onnx_model
 
+    def isTFLiteModel(self):
+        """True when the loaded model is served by the native TFLite/QNN delegate."""
+        return self._is_tflite_model
+
     def getProviderMode(self):
-        """For .onnx models return 'qnn-htp' (NPU/HTP) or 'cpu'.
-        For .bin/.dlc QNN models return 'qnn'."""
-        if self._is_onnx_model:
+        """Return the provider mode reported by the selected alternate backend."""
+        if self._is_onnx_model or self._is_tflite_model:
             return self.m_context.getProviderMode()
         return "qnn"
 
