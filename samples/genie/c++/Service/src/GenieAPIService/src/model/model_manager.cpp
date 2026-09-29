@@ -141,6 +141,13 @@ static int ParseContextSizeFromConfigJson(const std::string &config_json_path,
                                           const std::string &model_name,
                                           const std::string &log_prefix);
 
+// 前向声明：ParseBackendDeviceFromConfigJson 定义在文件后部，LoadSingleModel 调用此函数
+static void ParseBackendDeviceFromConfigJson(const std::string &config_json_path,
+                                             const std::string &model_name,
+                                             const std::string &log_prefix,
+                                             std::string &out_backend,
+                                             std::string &out_device);
+
 class ModelManager::QNNImpl
 {
     struct EmbeddingVerifier
@@ -817,32 +824,28 @@ ModelManager::ModelManager(IModelConfig &&config) : IModelConfig{std::move(confi
 
 ModelManager::~ModelManager()
 {
-    // 修复：显式析构，确保无论进程以何种方式退出（优雅关闭时 UnloadModel() 已清空 loaded_models_，
+    // 修复：显式析构，确保无论进程以何种方式退出（优雅关闭时 UnloadModel() 已清空 current_model_，
     // 这里只是空操作；但若通过测试框架/编排工具直接终止进程、或从未显式调用过 UnloadModel()，
     // 仍会残留驻留的 QNN/NPU 模型，届时只能靠这里的隐式成员析构去释放），都会在真正释放
     // 最后一份引用之前完成 QNN/HTP 驱动异步释放资源所需的等待。
     //
     // 根因（已通过 minidump 复现确认）：Clean() 里的等待只在 genieModelHandle 被置空、
-    // 且此时确实是最后一份引用时才有意义；而编译器为 loaded_models_ 生成的隐式析构完全不会
+    // 且此时确实是最后一份引用时才有意义；而编译器为 current_model_ 生成的隐式析构完全不会
     // 触发这段等待。此前该等待只存在于 UnloadModel()/UnloadModelsByDevice() 等显式调用路径，
     // atexit 析构链（`~ModelManager()` 从未显式定义、直接进入成员的隐式析构）完全没有保护，
-    // 崩溃点位于释放 loaded_models_ 内部链表节点时（std::_List_node::_Free_non_head）。
+    // 崩溃点位于释放 current_model_ 底层对象时。
     //
-    // 修复方式：先在锁内清空 loaded_models_（记录其中是否含 QNN 后端条目），再处理
+    // 修复方式：先在锁内清空 current_model_（记录其是否为 QNN 后端），再处理
     // genieModelHandle——保证无论哪一份引用恰好是最后一份，其对应的等待都在这里完成，
     // 而不是被推迟到本函数返回之后的隐式成员析构阶段（那时已无法插入等待）。
     bool had_qnn = false;
     {
         std::lock_guard<std::mutex> lock(models_mutex_);
-        for (const auto &pair: loaded_models_)
+        if (current_model_ && current_model_->backend == "qnn")
         {
-            if (pair.second && pair.second->backend == "qnn")
-            {
-                had_qnn = true;
-                break;
-            }
+            had_qnn = true;
         }
-        loaded_models_.clear();
+        current_model_.reset();
     }
     if (genieModelHandle != nullptr)
     {
@@ -938,7 +941,7 @@ static void ParsePromptSectionsConfig(const json &po, PromptSectionsConfig &sect
              << std::endl;
 }
 
-bool ModelManager::InitializeConfig(bool load)
+bool ModelManager::InitializeConfig()
 {
     fs::path config_path{config_file_};
     My_Log{} << "ModelManager::LoadModel,configFile=" + config_path.generic_string() << std::endl;
@@ -1933,29 +1936,6 @@ bool ModelManager::InitializeConfig(bool load)
                              << std::endl;
                 }
 
-                startup_backend_override_.clear();
-                startup_device_override_.clear();
-                startup_context_size_override_ = 0;
-                if (sc_json.contains("models") && sc_json["models"].is_array())
-                {
-                    for (const auto &m: sc_json["models"])
-                    {
-                        std::string name = m.value("name", "");
-                        std::string path = m.value("path", "");
-                        if (name == model_name_ || fs::path(path).filename().generic_string() == model_name_)
-                        {
-                            startup_backend_override_ = m.value("backend", std::string(""));
-                            startup_device_override_ = m.value("device", std::string(""));
-                            startup_context_size_override_ = m.value("context_size", 0);
-                            My_Log{} << "[InitializeConfig] service_config startup override for model '"
-                                     << model_name_ << "': backend=" << startup_backend_override_
-                                     << ", device=" << startup_device_override_
-                                     << ", context_size=" << startup_context_size_override_ << std::endl;
-                            break;
-                        }
-                    }
-                }
-
             }
             catch (const std::exception &e)
             {
@@ -1965,28 +1945,23 @@ bool ModelManager::InitializeConfig(bool load)
         }
     }
 
-    if (!load)
-        return true;
-
     return LoadSingleModel();
 }
 
 bool ModelManager::LoadSingleModel()
 {
-    // 修复：在多模型场景下，Clean() 会清空 genieModelHandle 和 qnn_embedding_，
-    // 但不会影响 loaded_models_ 中其他模型的 shared_ptr（它们是独立的引用计数）。
-    // 然而，Clean() 会将 genieModelHandle 置为 nullptr，这会导致 loaded_models_ 中
-    // 已注册的旧单模型条目（通过 LoadSingleModel 注册的）失去全局句柄引用，
-    // 但 loaded_models_ 中的 shared_ptr 仍然有效（引用计数不为零）。
-    // 因此，在调用 Clean() 之前，先从 loaded_models_ 中移除旧的单模型条目，
-    // 避免 loaded_models_ 中存在指向已销毁上下文的悬空条目。
+    // 修复：Clean() 会清空 genieModelHandle 和 qnn_embedding_，但不会影响 current_model_
+    // 的引用计数（它是独立的 shared_ptr）。若正在重新加载同一个模型（model_name_ 与
+    // current_model_ 记录的名称相同），先在调用 Clean() 之前释放旧的 current_model_，
+    // 避免它在 Clean() 之后仍指向一个已销毁上下文的悬空条目。
     {
         std::lock_guard<std::mutex> lock(models_mutex_);
-        if (!model_name_.empty() && loaded_models_.count(model_name_))
+        if (!model_name_.empty() && current_model_ && current_model_->config &&
+            current_model_->config->get_model_name() == model_name_)
         {
-            My_Log{} << "LoadSingleModel: removing old single-model entry '" << model_name_
-                     << "' from loaded_models_ before reload" << std::endl;
-            loaded_models_.erase(model_name_);
+            My_Log{} << "LoadSingleModel: releasing old single-model entry '" << model_name_
+                     << "' before reload" << std::endl;
+            current_model_.reset();
         }
     }
 
@@ -2013,35 +1988,19 @@ bool ModelManager::LoadSingleModel()
     config->set_prompt_type(prompt_type_);
     config->set_thinking_model(thinking_model_);
     // 单模型命令行加载路径默认保持旧版本的“自动识别模型格式”行为。
-    // 若 service_config.json 中存在与 -c config.json 对应模型匹配的条目，则使用服务级 backend/device 覆盖项。
-    if (!startup_backend_override_.empty())
+    // config.json 顶层可选声明的 backend/device 字段是唯一权威来源（本轮新增，取代已删除的
+    // service_config.json 覆盖机制）；字段缺失时回退 "auto"，走 ModeVerifier::TryCreate() 的自动探测。
+    std::string config_json_backend, config_json_device;
+    ParseBackendDeviceFromConfigJson(config_file_, model_name_, "[LoadSingleModel]",
+                                      config_json_backend, config_json_device);
+    config->set_backend(!config_json_backend.empty() ? config_json_backend : "auto");
+    if (!config_json_device.empty())
     {
-        config->set_backend(startup_backend_override_);
+        config->set_device(config_json_device);
     }
-    else
-    {
-        config->set_backend("auto");
-    }
-    if (!startup_device_override_.empty())
-    {
-        config->set_device(startup_device_override_);
-    }
-    // config.json 的 dialog.context.size（已由上面 LoadPromptTemplates 解析进 context_size_）是模型
-    // 编译时固化的真实上限，service_config.json 的覆盖值不能超过它，否则 token 预算会与实际引擎容量不一致。
-    if (startup_context_size_override_ > 0)
-    {
-        if (context_size_ > 0 && startup_context_size_override_ > context_size_)
-        {
-            My_Log{My_Log::Level::kWarning}
-                    << "[LoadSingleModel] context_size override (" << startup_context_size_override_
-                    << ") exceeds config.json max (" << context_size_
-                    << "), capping to config.json value" << std::endl;
-        }
-        else
-        {
-            config->set_context_size(startup_context_size_override_);
-        }
-    }
+    // context_size_ 已由上面 LoadPromptTemplates 从 config.json 的 dialog.context.size 解析得到，
+    // 是模型编译时固化的真实上限，本轮删除 service_config.json 覆盖机制后，它是唯一权威来源，
+    // 不再存在第二个下调/上调通道，此处无需额外处理。
     // Copy other config fields as needed
     config->set_lora_adapter(loraAdapter);
     config->set_lora_alpha(loraAlpha);
@@ -2105,7 +2064,7 @@ bool ModelManager::LoadSingleModel()
                  << ", device=" << config->get_device() << std::endl;
     }
 
-    // Also register this as the default model in the new system
+    // Also register this as the currently active single model
     {
         std::lock_guard<std::mutex> lock(models_mutex_);
         auto loaded_model = std::make_shared<LoadedModel>();
@@ -2115,9 +2074,7 @@ bool ModelManager::LoadSingleModel()
         loaded_model->device = config->get_device();
         loaded_model->is_loaded = true;
 
-        // Use the model name as key
-        loaded_models_[model_name_] = loaded_model;
-        default_model_name_ = model_name_;
+        current_model_ = loaded_model;
     }
 
     My_Log{} << GREEN << "Model load successfully: " << model_name_ << RESET << std::endl;
@@ -2139,12 +2096,9 @@ void ModelManager::UnloadModel()
     }
     {
         std::lock_guard<std::mutex> lock(models_mutex_);
-        for (const auto &pair: loaded_models_)
+        if (current_model_ && current_model_->context)
         {
-            if (pair.second && pair.second->context)
-            {
-                pair.second->context->Stop();
-            }
+            current_model_->context->Stop();
         }
     }
 
@@ -2156,19 +2110,18 @@ void ModelManager::UnloadModel()
     }
     else
     {
-        My_Log{My_Log::Level::kWarning} << "UnloadModel: genieModelHandle is null (may be multi-model mode)"
-                                        << std::endl;
+        My_Log{My_Log::Level::kWarning} << "UnloadModel: genieModelHandle is null" << std::endl;
     }
 
-    // 同时清理多模型映射表，确保多模型场景下资源完整释放
+    // 同时清空当前活跃模型指针，确保资源完整释放
     {
         std::lock_guard<std::mutex> lock(models_mutex_);
-        if (!loaded_models_.empty())
+        if (current_model_)
         {
-            My_Log{} << "UnloadModel: clearing " << loaded_models_.size()
-                     << " loaded model(s) from multi-model registry" << std::endl;
-            loaded_models_.clear();
-            default_model_name_.clear();
+            My_Log{} << "UnloadModel: releasing current model '"
+                     << (current_model_->config ? current_model_->config->get_model_name() : "")
+                     << "'" << std::endl;
+            current_model_.reset();
         }
     }
 }
@@ -2309,53 +2262,34 @@ std::vector<json> ModelManager::ScanModelDirectory() const
 
 void ModelManager::UnloadModelsByDevice(const std::string &device)
 {
-    std::vector<std::string> to_remove;
     // 用于在锁外持有被移除模型的 shared_ptr，确保析构在锁外发生，
     // 同时保证在本函数返回前析构完成（NPU/GPU/CPU 内存完全释放后再允许加载新模型）。
-    std::vector<std::shared_ptr<LoadedModel>> removed_models;
+    std::shared_ptr<LoadedModel> removed_model;
     {
         std::lock_guard<std::mutex> lock(models_mutex_);
-        for (const auto &kv: loaded_models_)
+        if (current_model_ && current_model_->device == device)
         {
-            if (kv.second && kv.second->device == device)
-                to_remove.push_back(kv.first);
-        }
-        for (const auto &name: to_remove)
-        {
-            My_Log{} << "[UnloadModelsByDevice] Unloading model '" << name
+            My_Log{} << "[UnloadModelsByDevice] Unloading model '"
+                     << (current_model_->config ? current_model_->config->get_model_name() : "")
                      << "' (device=" << device << ")" << std::endl;
-            auto it = loaded_models_.find(name);
-            if (it != loaded_models_.end())
-            {
-                // 先将 shared_ptr 移出到局部列表，再从 map 中 erase，
-                // 这样析构会在锁外、函数返回前发生，避免持锁析构死锁。
-                removed_models.push_back(std::move(it->second));
-                loaded_models_.erase(it);
-            }
-            if (default_model_name_ == name)
-                default_model_name_.clear();
+            // 先将 shared_ptr 移出到局部变量，再清空 current_model_，
+            // 这样析构会在锁外、函数返回前发生，避免持锁析构死锁。
+            removed_model = std::move(current_model_);
+            current_model_.reset();
         }
     }
     // 若被卸载的模型中包含当前全局单模型句柄所指向的模型，同步清理（向后兼容路径）
     // 不限于 npu：GGUF 模型也可能通过 LoadSingleModel 注册到全局句柄
-    if (genieModelHandle != nullptr)
+    if (removed_model && genieModelHandle != nullptr)
     {
         bool should_clean = false;
         if (device == "npu")
         {
             should_clean = true;  // NPU 模型必然是 QNN，全局句柄指向 QNN 模型
         }
-        else
+        else if (removed_model->config && removed_model->config->get_model_name() == model_name_)
         {
-            // 检查全局句柄对应的模型名称是否在被卸载列表中
-            for (const auto &name: to_remove)
-            {
-                if (name == model_name_)
-                {
-                    should_clean = true;
-                    break;
-                }
-            }
+            should_clean = true;
         }
         if (should_clean)
         {
@@ -2369,102 +2303,72 @@ void ModelManager::UnloadModelsByDevice(const std::string &device)
             // 名字匹配不足以判定全局句柄是否指向被卸载的模型，必须再按**指针身份**兜底判定：
             // ModeVerifier::TryCreate() 的三个 Verifier（GenieContext/MNNContext/LLAMACppBuilder）
             // 都会无条件执行 `self_->genieModelHandle = std::make_shared<...>(...)`，把全局句柄改指
-            // 到刚创建的 context 上；而多模型动态切换路径 LoadModel() 只往 loaded_models_ 里注册，
-            // 从不更新 model_name_（model_name_ 始终是 -c 主模型/最后一次 LoadModelByName 的名字）。
-            // 于是 genieModelHandle 与 model_name_ 会指向两个不同的模型，上面的名字判定必然漏判：
-            // 被卸载模型的最后一份引用留在 genieModelHandle 上，ContextBase 析构不发生（日志里看不到
-            // "the context is being destroyed"），GPU/CPU 显存/内存不会在加载下一个模型前归还。
-            // 实测后果：同进程内 GPU GGUF 模型 A→B→A 三轮切换，第三轮 A 的 target 权重仍能上 GPU，
-            // 但紧接着 draft(DFlash2) 的 1011 MiB OpenCL 分配会因 B 残留的约 12GB 未释放而失败
-            // （err=-5），静默退化到 CPU 推理。
+            // 到刚创建的 context 上；理论上单模型语义下 current_model_/genieModelHandle/model_name_
+            // 应始终指向同一模型，但仍保留此兜底以防御未来引入的间接赋值路径。
             // 这里刻意**不**调用 Clean()：Clean() 会连带清空 qnn_embedding_（可能仍被驻留的 NPU
             // 多模态模型使用）并额外 sleep，对 gpu/cpu 卸载路径是过度动作；只需释放这一份引用。
-            for (const auto &m: removed_models)
+            if (removed_model->context == genieModelHandle)
             {
-                if (m && m->context == genieModelHandle)
-                {
-                    My_Log{My_Log::Level::kWarning}
-                            << "[UnloadModelsByDevice] global genieModelHandle pointed to the unloaded model"
-                            << " (model_name_='" << model_name_ << "', device=" << device
-                            << "), releasing it to free hardware memory" << std::endl;
-                    genieModelHandle = nullptr;
-                    break;
-                }
+                My_Log{My_Log::Level::kWarning}
+                        << "[UnloadModelsByDevice] global genieModelHandle pointed to the unloaded model"
+                        << " (model_name_='" << model_name_ << "', device=" << device
+                        << "), releasing it to free hardware memory" << std::endl;
+                genieModelHandle = nullptr;
             }
         }
     }
-    // 在锁外、函数返回前，显式析构所有被移除的模型（释放硬件资源）。
-    // removed_models 超出作用域时，其中每个 shared_ptr 的引用计数降为零，
-    // 触发 GenieContext/MNNContext/LLAMACppBuilder 析构，完全释放 NPU/GPU/CPU 内存。
-    // 这保证了调用方在本函数返回后可以安全地加载新模型，不会出现内存不足。
+    // 在锁外、函数返回前，显式析构被移除的模型（释放硬件资源）。
+    // removed_model 超出作用域时其引用计数降为零，触发 GenieContext/MNNContext/LLAMACppBuilder
+    // 析构，完全释放 NPU/GPU/CPU 内存。这保证了调用方在本函数返回后可以安全地加载新模型，不会
+    // 出现内存不足。
     //
-    // 修复：这里才是 removed_models 中每个模型真正的最后一份引用被释放、~GenieContext()
-    // 真正执行的时刻（上面第2079~2105行 Clean() 归零的只是 genieModelHandle 这一份引用，
-    // 若该模型同时也在 removed_models 中，此时引用计数还没到 0）。QNN/HTP 驱动异步释放资源
-    // 需要显式等待才安全，此前这里完全没有等待保护——这是与 Clean() 处已确认的竞态型堆损坏
-    // （STATUS_HEAP_CORRUPTION）同一缺陷模式在多模型动态切换路径上的重复，需要同等对待。
-    bool had_qnn_backend = std::any_of(removed_models.begin(), removed_models.end(),
-                                        [](const std::shared_ptr<LoadedModel> &m)
-                                        { return m && m->backend == "qnn"; });
-    removed_models.clear();
+    // 修复：这里才是 removed_model 真正的最后一份引用被释放、~GenieContext() 真正执行的时刻
+    // （上面 Clean() 归零的只是 genieModelHandle 这一份引用，若该模型同时也是 removed_model，
+    // 此时引用计数还没到 0）。QNN/HTP 驱动异步释放资源需要显式等待才安全，此前这里完全没有
+    // 等待保护——这是与 Clean() 处已确认的竞态型堆损坏（STATUS_HEAP_CORRUPTION）同一缺陷模式
+    // 在模型切换路径上的重复，需要同等对待。
+    bool had_qnn_backend = removed_model && removed_model->backend == "qnn";
+    removed_model.reset();
     if (had_qnn_backend)
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(2000));
     }
-    My_Log{} << "[UnloadModelsByDevice] Unloaded " << to_remove.size()
-             << " model(s) on device=" << device << std::endl;
+    My_Log{} << "[UnloadModelsByDevice] Unloaded device=" << device << std::endl;
 }
 
 std::shared_ptr<LoadedModel> ModelManager::GetModel(const std::string &model_name)
 {
     std::lock_guard<std::mutex> lock(models_mutex_);
-    // 1. 精确匹配（快速路径）
-    auto it = loaded_models_.find(model_name);
-    if (it != loaded_models_.end())
-        return it->second;
+    if (!current_model_ || !current_model_->config)
+        return nullptr;
+    if (model_name.empty())
+        return current_model_;
 
-    // 2. 大小写不敏感匹配（处理 -c 参数目录名大小写与 service_config.json name 字段不一致的情况）
-    // 例如：-c "qwen3-8B-8K/config.json" 加载后 key="qwen3-8B-8K"，
+    // 大小写不敏感匹配（处理 -c 参数目录名大小写与历史 service_config.json name 字段不一致的情况）
+    // 例如：-c "qwen3-8B-8K/config.json" 加载后名称为 "qwen3-8B-8K"，
     //       客户端请求 model="Qwen3-8B-8K"，精确匹配失败，此处兜底。
     std::string name_lower = model_name;
     std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(),
                    [](unsigned char c) { return static_cast<unsigned char>(std::tolower(c)); });
-    for (const auto &kv: loaded_models_)
-    {
-        std::string key_lower = kv.first;
-        std::transform(key_lower.begin(), key_lower.end(), key_lower.begin(),
-                       [](unsigned char c) { return static_cast<unsigned char>(std::tolower(c)); });
-        if (key_lower == name_lower)
-            return kv.second;
-    }
-    return nullptr;
+    std::string current_name_lower = current_model_->config->get_model_name();
+    std::transform(current_name_lower.begin(), current_name_lower.end(), current_name_lower.begin(),
+                   [](unsigned char c) { return static_cast<unsigned char>(std::tolower(c)); });
+    return (current_name_lower == name_lower) ? current_model_ : nullptr;
 }
 
 std::shared_ptr<LoadedModel> ModelManager::GetDefaultModel()
 {
     std::lock_guard<std::mutex> lock(models_mutex_);
-    if (!default_model_name_.empty())
-    {
-        auto it = loaded_models_.find(default_model_name_);
-        if (it != loaded_models_.end())
-        {
-            return it->second;
-        }
-    }
-    if (!loaded_models_.empty())
-    {
-        return loaded_models_.begin()->second;
-    }
-    return nullptr;
+    return current_model_;
 }
 
 std::vector<std::string> ModelManager::ListLoadedModels() const
 {
     std::lock_guard<std::mutex> lock(models_mutex_);
     std::vector<std::string> names;
-    for (const auto &pair: loaded_models_)
+    if (current_model_ && current_model_->config)
     {
-        names.push_back(pair.first);
+        names.push_back(current_model_->config->get_model_name());
     }
     return names;
 }
@@ -2474,537 +2378,20 @@ uint64_t ModelManager::EstimateOtherLoadedModelsMemoryBytes() const
     std::lock_guard<std::mutex> lock(models_mutex_);
     uint64_t total = 0;
 #ifdef USE_MNN
-    for (const auto &pair: loaded_models_)
+    // 单模型语义下，current_model_ 在切换过程中仍可能短暂指向"即将被替换的旧模型"（见
+    // LoadSingleModel() 顶部的清空逻辑），故此处仍需为其预留内存估算，降低切换瞬间
+    // MnnVerifier 内存预检查失效的概率。
+    if (current_model_ && current_model_->config)
     {
-        const auto &loaded = pair.second;
-        if (!loaded || !loaded->config)
-        {
-            continue;
-        }
-        // 复用 MNNContext::EstimateMnnMemoryRequirement 对每个其它已加载模型的目录做估算：
-        // 若该目录含 .mnn 权重文件（同类 MNN 模型，理论上因"同设备单实例"限制极少并存），
-        // 会按真实文件大小计入更准确的估算；否则（QNN/GGUF 等其它后端）至少计入固定安全余量
-        // kMnnMemoryEstimateMarginBytes，作为对其驻留内存的保守预留。
-        total += MNNContext::EstimateMnnMemoryRequirement(loaded->config->get_model_path());
+        total += MNNContext::EstimateMnnMemoryRequirement(current_model_->config->get_model_path());
     }
 #endif
     return total;
 }
 
-bool ModelManager::LoadAllModelsFromConfig(const std::string &backend_filter)
-{
-    fs::path service_config_path = fs::path(RootDir) / "service_config.json";
-    if (!File::IsFileExist(service_config_path.generic_string()))
-    {
-        return false;
-    }
-
-    // 从 -c 参数所指向的配置文件路径推导 models 目录的绝对路径。
-    // 例如：config_file_ = "models\gpt-oss-20b-GGUF\config.json"
-    //   → 绝对路径：<CurrentDir>\models\gpt-oss-20b-GGUF\config.json
-    //   → 向上两级：<CurrentDir>\models（即 models 目录）
-    // 若推导失败（config_file_ 为空或层级不足），则回退到 RootDir。
-    fs::path models_base_dir;
-    {
-        std::string derived_models_dir = File::DeriveAncestorDir(config_file_, CurrentDir, 2);
-        if (!derived_models_dir.empty())
-        {
-            models_base_dir = derived_models_dir;
-            My_Log{My_Log::Level::kInfo} << "[LoadAllModelsFromConfig] Derived models base dir from -c param: "
-                                         << models_base_dir.generic_string() << "\n";
-        }
-        else
-        {
-            My_Log{My_Log::Level::kWarning}
-                    << "[LoadAllModelsFromConfig] Cannot derive models base dir from config_file_='"
-                    << config_file_ << "', falling back to RootDir='" << RootDir << "'\n";
-            models_base_dir = fs::path(RootDir);
-        }
-    }
-
-    // 修复：将 models_base_dir 赋值给 model_root_，使 ScanModelDirectory() 和
-    // 动态切换逻辑（ChatCompletions）能够正确扫描磁盘上的全部模型目录。
-    // model_root_ 原本只在 InitializeConfig（单模型路径）中赋值，
-    // 多模型模式下 LoadAllModelsFromConfig 使用局部变量 models_base_dir 但从未写入 model_root_，
-    // 导致 ScanModelDirectory() 因 model_root_ 为空而始终返回空列表。
-    model_root_ = models_base_dir.generic_string();
-    My_Log{My_Log::Level::kInfo} << "[LoadAllModelsFromConfig] model_root_ set to: " << model_root_ << "\n";
-
-    try
-    {
-        std::ifstream sc_file(service_config_path.generic_string());
-        json sc_json;
-        sc_file >> sc_json;
-
-        if (!sc_json.contains("models") || !sc_json["models"].is_array())
-        {
-            return false;
-        }
-
-        // 修复：读取 default_model 字段，确保多模型模式下默认模型正确设置
-        // 若 service_config.json 中指定了 default_model，则覆盖 LoadSingleModel 设置的默认值
-        std::string config_default_model = sc_json.value("default_model", std::string(""));
-
-        int loaded_count = 0;
-        for (const auto &m: sc_json["models"])
-        {
-            std::string name = m.value("name", "");
-            std::string path = m.value("path", "");
-            std::string backend = m.value("backend", "GGUF");
-            std::string device = m.value("device", "gpu");
-            int context_size = m.value("context_size", 0);
-            bool enabled = m.value("enabled", true);
-
-            if (enabled && !name.empty() && !path.empty())
-            {
-                if (!backend_filter.empty())
-                {
-                    std::string backend_lower = backend;
-                    std::string filter_lower = backend_filter;
-                    std::transform(backend_lower.begin(), backend_lower.end(), backend_lower.begin(), ::tolower);
-                    std::transform(filter_lower.begin(), filter_lower.end(), filter_lower.begin(), ::tolower);
-                    if (backend_lower != filter_lower)
-                    {
-                        My_Log{My_Log::Level::kInfo}
-                                << "[LoadAllModelsFromConfig] Skipping model '" << name << "' (backend='" << backend
-                                << "'): does not match backend_filter='" << backend_filter << "'" << std::endl;
-                        continue;
-                    }
-                }
-
-                My_Log{My_Log::Level::kInfo} << "[LoadAllModelsFromConfig] Processing model: " << name
-                                             << ", original path: " << path << "\n";
-
-                // 解析模型目录路径：
-                // 若 path 是相对路径，则以从 -c 参数推导出的 models_base_dir 为基准拼接，
-                // 而非以 GenieAPIService.exe 的运行目录（RootDir）为基准。
-                // 这样无论 exe 放在哪里，只要 -c 参数正确指向模型配置文件，
-                // 模型目录路径就能被正确解析。
-                fs::path model_path(path);
-                if (model_path.is_relative())
-                {
-                    model_path = models_base_dir / model_path;
-                    My_Log{My_Log::Level::kInfo}
-                            << "[LoadAllModelsFromConfig] Resolved relative path using models_base_dir: "
-                            << model_path.generic_string() << "\n";
-                }
-                // 修复：规范化路径，消除 ".." 等相对路径符号。
-                // 若路径中包含 ".."（如 "GenieService_v2.1.3/../models/xxx"），
-                // fs::directory_iterator 和 std::ifstream 在某些平台/实现下可能无法正确处理，
-                // 导致 prompt.json 文件存在但被判断为"不存在"，进而 prompt_template 保持 null。
-                // 使用 fs::weakly_canonical 规范化（不要求路径实际存在，仅做词法规范化）。
-                {
-                    std::error_code ec;
-                    fs::path canonical_path = fs::weakly_canonical(model_path, ec);
-                    if (!ec)
-                    {
-                        model_path = canonical_path;
-                        My_Log{My_Log::Level::kInfo} << "[LoadAllModelsFromConfig] Canonicalized path: "
-                                                     << model_path.generic_string() << "\n";
-                    }
-                    else
-                    {
-                        My_Log{My_Log::Level::kWarning}
-                                << "[LoadAllModelsFromConfig] Failed to canonicalize path, error: " << ec.message()
-                                << "\n";
-                    }
-                }
-                path = model_path.generic_string();
-                My_Log{My_Log::Level::kInfo} << "[LoadAllModelsFromConfig] Final model path: " << path << "\n";
-
-                // 修复：防止完全重复加载（相同路径 + 相同 backend + 相同 device）。
-                // 注意：同一路径但不同 backend/device 是合法的多模型并发场景！
-                // 例如：同一 GGUF 模型文件可以同时用 CPU 和 GPU 两个后端加载，
-                // 分别对应 qwen-cpu（backend=GGUF, device=cpu）和 qwen-gpu（backend=GGUF, device=gpu）。
-                // 因此，只有当路径、backend 和 device 三者完全相同时才跳过（真正的重复加载）。
-                //
-                // 注意：路径比较时需要规范化已加载模型的路径（可能是相对路径，来自 LoadSingleModel），
-                // 与当前的绝对路径（path，已规范化）进行比较，避免因路径格式不同导致比较失败。
-                bool skip_due_to_path_conflict = false;
-                {
-                    std::lock_guard<std::mutex> lock(models_mutex_);
-                    for (const auto &pair: loaded_models_)
-                    {
-                        if (pair.second && pair.second->config)
-                        {
-                            // 对已加载模型的路径进行规范化，确保与 path（绝对路径）可比较
-                            std::string existing_path = pair.second->config->get_model_path();
-                            {
-                                std::error_code ec2;
-                                fs::path ep(existing_path);
-                                if (ep.is_relative())
-                                    ep = fs::path(CurrentDir) / ep;
-                                fs::path canonical_ep = fs::weakly_canonical(ep, ec2);
-                                if (!ec2)
-                                    existing_path = canonical_ep.generic_string();
-                            }
-
-                            if (existing_path == path &&
-                                pair.first != name &&
-                                pair.second->backend == backend &&
-                                pair.second->device == device)
-                            {
-                                My_Log{My_Log::Level::kWarning}
-                                        << "[LoadAllModelsFromConfig] Skipping model '" << name
-                                        << "': path='" << path
-                                        << "', backend='" << backend
-                                        << "', device='" << device
-                                        << "' is already loaded as '" << pair.first
-                                        << "'. Identical path+backend+device combination." << std::endl;
-                                skip_due_to_path_conflict = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-                if (skip_due_to_path_conflict)
-                {
-                    continue;
-                }
-
-                // 修复：防止同一硬件设备（npu/gpu/cpu）上同时驻留 2 个模型。物理 QNN/HTP（或
-                // 等价的 GPU/CPU 运行时）会话在硬件层面是独占的——即使每个 LoadedModel 在 C++
-                // 层面各自持有独立的 ContextBase 对象，LoadModel() 本身并不会像 ChatCompletions()
-                // 的动态切换路径那样先调用 UnloadModelsByDevice()，第二次在同一设备上加载会静默
-                // 破坏已驻留模型的底层硬件状态（不报错，但该设备后续请求会命中错乱的输入张量描
-                // 述）。自动加载清单应是对 -c 主模型的补充，不应悄悄顶替用户显式指定的主模型，故
-                // 这里选择跳过而非卸载重来。
-                bool device_conflict = false;
-                {
-                    std::lock_guard<std::mutex> lock(models_mutex_);
-                    for (const auto &pair: loaded_models_)
-                    {
-                        if (pair.second && pair.second->device == device)
-                        {
-                            My_Log{My_Log::Level::kWarning}
-                                    << "[LoadAllModelsFromConfig] Skipping model '" << name
-                                    << "': device '" << device << "' is already occupied by '" << pair.first
-                                    << "'. Only one model per device can be resident at a time." << std::endl;
-                            device_conflict = true;
-                            break;
-                        }
-                    }
-                }
-                if (device_conflict)
-                {
-                    continue;
-                }
-
-                // 路径存在性检查：在尝试加载前验证模型目录是否存在，给出清晰的错误日志。
-                // 若目录不存在，说明 models_base_dir 推导有误或模型尚未部署，
-                // 直接跳过并输出详细错误信息，避免后续加载流程产生难以定位的错误。
-                if (!fs::exists(fs::path(path)))
-                {
-                    My_Log{My_Log::Level::kError}
-                            << "[LoadAllModelsFromConfig] Model directory does not exist, skipping model '" << name
-                            << "'.\n"
-                            << "  Expected path : " << path << "\n"
-                            << "  models_base_dir: " << models_base_dir.generic_string() << "\n"
-                            << "  Hint: Ensure the -c argument points to the correct model config file "
-                            << "(e.g. models\\<model_name>\\config.json), "
-                            << "so that the models directory can be correctly derived.\n";
-                    continue;
-                }
-
-                if (LoadModel(name, backend, device, context_size, path))
-                {
-                    loaded_count++;
-                    My_Log{} << "[LoadAllModelsFromConfig] Loaded model: " << name
-                             << " (backend=" << backend << ", device=" << device << ")" << std::endl;
-                }
-                else
-                {
-                    My_Log{My_Log::Level::kError} << "[LoadAllModelsFromConfig] Failed to load model: " << name
-                                                  << std::endl;
-                }
-            }
-        }
-
-        // 修复：在所有模型加载完成后，应用 default_model 配置
-        // 这样可以覆盖 LoadSingleModel 设置的默认值（通常是最后一次 LoadModelByName 加载的模型）
-        if (!config_default_model.empty())
-        {
-            std::lock_guard<std::mutex> lock(models_mutex_);
-            if (loaded_models_.find(config_default_model) != loaded_models_.end())
-            {
-                default_model_name_ = config_default_model;
-                My_Log{} << "[LoadAllModelsFromConfig] Default model set to: " << default_model_name_ << std::endl;
-            }
-            else
-            {
-                My_Log{My_Log::Level::kWarning} << "[LoadAllModelsFromConfig] Specified default_model '"
-                                                << config_default_model
-                                                << "' not found in loaded models, keeping current default: "
-                                                << default_model_name_ << std::endl;
-            }
-        }
-
-        My_Log{} << "[LoadAllModelsFromConfig] Total models loaded: " << loaded_count
-                 << ", default_model=" << default_model_name_ << std::endl;
-        return loaded_count > 0;
-    }
-    catch (const std::exception &e)
-    {
-        My_Log{My_Log::Level::kError} << "Failed to load models from config: " << e.what() << std::endl;
-        return false;
-    }
-}
-
-bool ModelManager::LoadModel(const std::string &model_name,
-                             const std::string &backend,
-                             const std::string &device,
-                             int context_size_in,
-                             const std::string &model_path_in)
-{
-    {
-        std::lock_guard<std::mutex> lock(models_mutex_);
-        if (loaded_models_.find(model_name) != loaded_models_.end())
-        {
-            My_Log{} << "Model " << model_name << " already loaded.\n";
-            return true;
-        }
-    }
-
-    // 重置最近一次加载失败原因，避免上一次不相关的失败（如另一个模型的内存不足）
-    // 被误读为本次加载失败的原因。
-    SetLastLoadFailureReason(LoadFailureReason::kNone, "");
-
-    // 只有本次加载的是 qnn 模型时才需要 Clean()：genieModelHandle/qnn_embedding_ 是
-    // ModelManager 级别的共享暂存状态，已加载的 QNN 模型的 GenieContext 以引用方式
-    // （IEmbedding::qnn_embedding_info_）持有它。上面 LoadAllModelsFromConfig() 的
-    // npu 设备互斥检查已保证同一时刻最多驻留一个 qnn 模型，因此加载 qnn 模型时调用
-    // Clean() 是安全的；但加载 GGUF/MNN 等跨设备共存的模型时若也无条件 Clean()，
-    // 会把仍在使用中的 QNN 模型（例如其 Vision embedding）一并销毁，导致该模型后续
-    // 请求报 "model not found or released"。
-    std::string backend_lower_for_clean = backend;
-    std::transform(backend_lower_for_clean.begin(), backend_lower_for_clean.end(),
-                   backend_lower_for_clean.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    if (backend_lower_for_clean == "qnn")
-    {
-        Clean();
-    }
-    auto config = std::make_shared<ModelInstanceConfig>();
-    config->set_model_name(model_name);
-    config->set_model_path(model_path_in.empty() ? model_root_ + "/" + model_name : model_path_in);
-    config_file_ = File::ResolveModelConfigPath(config->get_model_path());
-    config->set_backend(backend);
-    config->set_device(device);
-
-#ifdef GENIEAPI_EXPORTS
-    {
-        std::string backend_lower = backend;
-        std::transform(backend_lower.begin(), backend_lower.end(), backend_lower.begin(),
-                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        if (backend_lower != "qnn")
-        {
-            My_Log{My_Log::Level::kWarning} << "[LoadModel] library mode only allows qnn backend, skip model '"
-                                             << model_name << "' (backend=" << backend << ")" << std::endl;
-            return false;
-        }
-    }
-#endif
-
-    // Resolve prompt path and load prompt.json
-    // Logic adapted from LoadPromptTemplates but using local variables
-    std::string prompt_path = config->get_model_path() + "/prompt.json";
-    std::string known_path;
-    // config.json 回退只允许精确匹配：只有下面的精确匹配分支才会写入 known_exact_path，
-    // 前缀匹配命中时保持为空，避免 ModeVerifierImpl::CreateIfVerified() 借用仅前缀相同的
-    // 其它模型的 config.json（与 LoadPromptTemplates() 对 known_model_path_ 的既有语义一致）。
-    std::string known_exact_path;
-
-    if (!File::IsFileExist(prompt_path) || File::IsFileEmpty(prompt_path))
-    {
-        My_Log{My_Log::Level::kWarning} << "[LoadModel] Prompt file not found at primary path, trying known paths...\n";
-
-        // Try known paths logic
-        // We use ResolveKnownModelPath but need to be careful not to rely on member state
-        // ModelManager::ResolveKnownModelPath implementation uses static config_list_ready and iterates config_model_name_list_
-        // It takes model_feature as arg.
-        // We can pass model_name to it.
-        known_path = ResolveKnownModelPath(model_name, false);
-
-        if (!known_path.empty())
-        {
-            prompt_path = known_path + "/prompt.json";
-            known_exact_path = known_path;
-            My_Log{My_Log::Level::kInfo} << "[LoadModel] Trying known_path: " << prompt_path << "\n";
-        }
-        else
-        {
-            static std::array<std::string, 9> models_prefix{
-                    "allam-7b-ssd", "deepseek-r1-distill-qwen-7B", "hunyuan2B", "ibm-granite-v3.1-8b",
-                    "llama2.0-7b", "llama3.1-8b", "phi", "qwen", "gpt-oss-20b",
-            };
-            for (const auto &model_prefix: models_prefix)
-            {
-                if (ModelComparer(model_name, model_prefix, true))
-                {
-                    known_path = ResolveKnownModelPath(model_prefix, true);
-                    prompt_path = known_path + "/prompt.json";
-                    My_Log{My_Log::Level::kInfo} << "[LoadModel] Trying model_prefix '" << model_prefix << "': "
-                                                 << prompt_path << "\n";
-                    break;
-                }
-            }
-        }
-    }
-
-    known_model_path_ = known_exact_path;
-
-    // 修复：使用 json::object() 而非 json{}（后者在 ordered_json 中是 array 类型）
-    PromptType pt = {PromptType::Unknown};
-    json prompt_json = json::object();
-    int context_size = (context_size_in > 0) ? context_size_in : 4096; // Default or override
-
-    // 从 config.json 读取 dialog.context.size（QNN/SSD 格式）
-    // 优先级：service_config.json > config.json > prompt.json > 默认值
-    int config_json_ctx_size = ParseContextSizeFromConfigJson(config_file_, model_name, "[LoadModel]");
-
-    My_Log{My_Log::Level::kInfo} << "[LoadModel] Final prompt_path before ParsePromptFile: " << prompt_path << "\n";
-
-    {
-        int json_ctx_size = 0;
-        ParsePromptFile(prompt_path, model_name, prompt_json, pt, json_ctx_size);
-
-        My_Log{My_Log::Level::kInfo}
-                << "[LoadModel] ParsePromptFile returned: pt=" << pt.to_string()
-                << ", prompt_json.type='" << prompt_json.type_name()
-                << "', prompt_json.is_object=" << prompt_json.is_object()
-                << ", json_ctx_size=" << json_ctx_size
-                << " for model '" << model_name << "'\n";
-
-        // context_size 优先级：service_config.json > config.json > prompt.json > 默认值
-        // config.json 的 dialog.context.size 是模型编译时固化的真实上限，任何外部覆盖值都不能超过它，
-        // 否则会导致 token 预算与实际引擎容量不一致（预算按覆盖值算，引擎仍按 config.json 建）。
-        if (context_size_in > 0)
-        {
-            if (config_json_ctx_size > 0 && context_size_in > config_json_ctx_size)
-            {
-                My_Log{My_Log::Level::kWarning}
-                        << "[LoadModel] Model " << model_name << ": context_size in service_config ("
-                        << context_size_in << ") exceeds config.json max (" << config_json_ctx_size
-                        << "), capping to config.json value\n";
-                context_size = config_json_ctx_size;
-            }
-            else if (json_ctx_size > 0 && context_size_in != json_ctx_size)
-            {
-                My_Log{My_Log::Level::kWarning}
-                        << "[LoadModel] Model " << model_name << ": context_size in service_config ("
-                        << context_size_in << ") overrides prompt.json (" << json_ctx_size << ")\n";
-            }
-        }
-        else if (config_json_ctx_size > 0)
-        {
-            // config.json 中有 dialog.context.size，优先级次之
-            context_size = config_json_ctx_size;
-        }
-        else if (json_ctx_size > 0)
-        {
-            // prompt.json 中有 context_size，优先级再次之
-            context_size = json_ctx_size;
-        }
-        // 否则保持默认值 4096
-    }
-
-    // 修复：若 ParsePromptFile 失败（pt==Unknown），prompt_json 可能不是有效 object。
-    // 强制确保 prompt_json 始终是 object 类型，防止 ChatHistory::GetUserMessage 收到 array 类型。
-    if (!prompt_json.is_object())
-    {
-        My_Log{My_Log::Level::kError}
-                << "[LoadModel] prompt_json is NOT an object (type='" << prompt_json.type_name()
-                << "') after ParsePromptFile for model '" << model_name
-                << "'. Resetting to empty object to prevent downstream type=array crash.\n";
-        prompt_json = json::object();
-    }
-
-    config->set_prompt_template(prompt_json);
-    config->set_prompt_type(pt);
-    config->set_context_size(context_size);
-
-    // Detect thinking model
-    bool is_thinking = str_contains(model_name, "Qwen3") ||
-                       str_contains(model_name, "DeepSeek") ||
-                       str_contains(model_name, "Hunyuan");
-    config->set_thinking_model(is_thinking);
-
-    // Copy global settings (could be overridden per model in future)
-    config->set_lora_adapter(loraAdapter);
-    config->set_lora_alpha(loraAlpha);
-    config->set_output_all_text(outputAllText);
-    config->set_enable_thinking(enableThinking);
-    config->set_enable_prompt_debug(enablePromptDebug);
-    config->set_num_response(num_response_);
-    config->set_min_output_num(minOutputNum);
-
-    auto context = ModeVerifier::TryCreate(config.get(), this);
-    if (!context)
-    {
-        My_Log{My_Log::Level::kError} << RED << "Load Model Failed: " << model_name << RESET << std::endl;
-        return false;
-    }
-
-    // [Refactor] Infer backend/device from detected model format if they are defaults/mismatch
-    {
-        ModelFormat fmt = config->get_model_format();
-        if (fmt == ModelFormat::QNN)
-        {
-            // QNN 模型只能跑在 NPU 上，强制覆盖
-            config->set_backend("qnn");
-            config->set_device("npu");
-        }
-        else if (fmt == ModelFormat::MNN)
-        {
-            // MNN 模型只能跑在 CPU 上，强制覆盖
-            config->set_backend("mnn");
-            config->set_device("cpu");
-        }
-        else if (fmt == ModelFormat::GGUF)
-        {
-            // GGUF 模型通过 llama.cpp 后端运行，优先 GPU，可 fallback CPU。
-            config->set_backend("GGUF");
-
-            std::string gguf_device = config->get_device();
-            std::transform(gguf_device.begin(), gguf_device.end(), gguf_device.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            if (gguf_device == "cpu" || gguf_device == "gpu")
-            {
-                config->set_device(gguf_device);
-            }
-            else
-            {
-                config->set_device("gpu");
-            }
-
-            My_Log{} << "[LoadModel] GGUF model: backend=GGUF, device=" << config->get_device() << std::endl;
-        }
-    }
-
-    auto loaded_model = std::make_shared<LoadedModel>();
-    loaded_model->config = config;
-    loaded_model->context = context;
-    loaded_model->backend = config->get_backend();
-    loaded_model->device = config->get_device();
-    loaded_model->is_loaded = true;
-
-    {
-        std::lock_guard<std::mutex> lock(models_mutex_);
-        loaded_models_[model_name] = loaded_model;
-        if (default_model_name_.empty())
-        {
-            default_model_name_ = model_name;
-        }
-    }
-
-    My_Log{} << GREEN << "Model loaded successfully: " << model_name << RESET << std::endl;
-    return true;
-}
-
 // ============================================================
 // ParseContextSizeFromConfigJson: 从 config.json 中读取 dialog.context.size。
-// 两处调用点（LoadModel 多模型路径 和 LoadPromptTemplates 单模型路径）共用此函数，
-// 避免重复代码。
+// 由 LoadPromptTemplates()（单模型加载路径）调用。
 //
 // 参数：
 //   config_json_path - config.json 的完整路径
@@ -3048,9 +2435,56 @@ static int ParseContextSizeFromConfigJson(const std::string &config_json_path,
 }
 
 // ============================================================
+// ParseBackendDeviceFromConfigJson: 从 config.json 顶层可选字段中读取 backend/device。
+// 本轮新增：取代已删除的 service_config.json models 数组覆盖机制，成为 backend/device
+// 的唯一权威来源。由 LoadSingleModel()（单模型加载路径）调用。
+//
+// 参数：
+//   config_json_path - config.json 的完整路径
+//   model_name        - 模型名称（仅用于日志）
+//   log_prefix         - 日志前缀（如 "[LoadSingleModel]"）
+//
+// 输出参数：
+//   out_backend - config.json 中的 backend 字段（未声明则为空字符串，调用方回退 "auto"）
+//   out_device  - config.json 中的 device 字段（未声明则为空字符串，调用方保持自动探测）
+// ============================================================
+static void ParseBackendDeviceFromConfigJson(const std::string &config_json_path,
+                                             const std::string &model_name,
+                                             const std::string &log_prefix,
+                                             std::string &out_backend,
+                                             std::string &out_device)
+{
+    out_backend.clear();
+    out_device.clear();
+    if (!File::IsFileExist(config_json_path) || File::IsFileEmpty(config_json_path))
+    {
+        return;
+    }
+    try
+    {
+        std::ifstream f(config_json_path);
+        json cfg;
+        f >> cfg;
+        out_backend = cfg.value("backend", std::string(""));
+        out_device = cfg.value("device", std::string(""));
+        if (!out_backend.empty() || !out_device.empty())
+        {
+            My_Log{My_Log::Level::kInfo}
+                    << log_prefix << " Read backend/device from config.json: backend='" << out_backend
+                    << "', device='" << out_device << "' for model '" << model_name << "'\n";
+        }
+    }
+    catch (const std::exception &e)
+    {
+        My_Log{My_Log::Level::kWarning}
+                << log_prefix << " Failed to parse config.json for backend/device, model='"
+                << model_name << "': " << e.what() << "\n";
+    }
+}
+
+// ============================================================
 // ParsePromptFile: 从指定路径解析 prompt.json，提取 prompt 模板、类型和 context_size。
-// 两处调用点（LoadModel 多模型路径 和 LoadPromptTemplates 单模型路径）共用此函数，
-// 避免重复代码，并统一修复 json{} 语法可能产生 array 的问题。
+// 由 LoadPromptTemplates()（单模型加载路径）调用。
 //
 // 参数：
 //   prompt_path  - prompt.json 的完整路径（已规范化，不含 ".."）

@@ -758,29 +758,25 @@ public:
 
     std::weak_ptr<ContextBase> get_genie_model_handle() {return genieModelHandle;}
 
-    // 获取用于安全检查/复杂度评估/脱敏的模型句柄（始终使用 default 模型）
-    // 默认实现：返回全局 genieModelHandle（单模型模式，与 get_genie_model_handle() 等价）
-    // ModelManager 重写此方法以返回 default_model_name_ 对应的模型句柄（多模型模式）
-    // 语义：无论客户端指定哪个模型，安全相关操作始终使用 default 模型，
-    //       避免安全检查跟随客户端模型动态切换（例如切换到 QNN 模型后安全检查也切换到 QNN）
+    // 获取用于安全检查/复杂度评估/脱敏的模型句柄（始终使用当前活跃模型）
+    // 默认实现：返回全局 genieModelHandle（与 get_genie_model_handle() 等价）
+    // ModelManager 重写此方法以返回当前活跃模型的句柄
     virtual std::weak_ptr<ContextBase> GetDefaultModelHandle() const
     {
         return genieModelHandle;
     }
 
-    // 检查本地模型是否可用（虚方法，支持多模型场景下的重写）
-    // 默认实现：检查全局 genieModelHandle 是否有效（单模型模式）
-    // ModelManager 重写此方法以检查是否有任何已加载的模型（多模型模式）
+    // 检查本地模型是否可用（虚方法，供 ModelManager 重写）
+    // 默认实现：检查全局 genieModelHandle 是否有效
     virtual bool IsLocalModelAvailable() const
     {
         return genieModelHandle != nullptr;
     }
 
-    // 获取 default 模型的 ModelInstanceConfig（虚方法，支持多模型场景下的重写）
-    // 默认实现：返回 nullptr（单模型模式，无独立的 ModelInstanceConfig）
-    // ModelManager 重写此方法以返回 default_model_name_ 对应的 ModelInstanceConfig*（多模型模式）
+    // 获取当前活跃模型的 ModelInstanceConfig（虚方法，供 ModelManager 重写）
+    // 默认实现：返回 nullptr（无独立的 ModelInstanceConfig）
     // 用途：BuildLocalModelPrompt 等安全相关函数应优先使用此方法获取模型配置，
-    //       而非直接读取全局 IModelConfig 的成员（后者在多模型场景下可能被 -c 参数模型污染）
+    //       而非直接读取全局 IModelConfig 的成员
     virtual const class ModelInstanceConfig* GetDefaultInstanceConfig() const
     {
         return nullptr;

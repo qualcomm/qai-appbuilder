@@ -70,7 +70,10 @@ inline bool Config::Process()
     app.add_option("-c,--config_file", config_file, "Path to the config file.");
     app.add_option("--adapter", model_config_.loraAdapter, "the adapter of lora");
 
-    app.add_flag("-l,--load_model", loadModel, "Load the model and also load additional models listed in service_config.json.");
+    // 并发多模型托管设计已删除（service_config.json 的 models 数组及其加载逻辑不再存在）。
+    // 标志定义本身保留，避免 CLI11 对现有调用方（如 QAIModelBuilder 每次启动都会带上 -l）报参数错误；
+    // NeedLoadModel() 的返回值不再驱动任何实际加载行为，是一个无操作（no-op）标志。
+    app.add_flag("-l,--load_model", loadModel, "Deprecated, kept for backward CLI compatibility; no longer triggers any loading behavior.");
     app.add_flag("-a,--all_text", model_config_.outputAllText, "Output all text includes tool calls text.");
     app.add_flag("-t,--enable_thinking", model_config_.enableThinking, "Enable thinking mode.");
     app.add_flag("-g,--prompt_debug", model_config_.enablePromptDebug, "Enable prompt compression optimization debug logs. (Repeat for level 2: -g -g)");

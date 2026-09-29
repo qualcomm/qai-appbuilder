@@ -3236,23 +3236,19 @@ class ReportGenerator:
     # 新增该阶段的检查项时应同步在此补充映射，否则该行"说明"列会留空。
     _MULTI_CHECK_DESCRIPTIONS_EXACT = {
         "MULTI: GET /models (multi-model list)":
-            "调用 GET /models 接口，验证服务能正确返回当前已加载的全部模型清单",
-        "MULTI: ensure NPU/GGUF/MNN backends loaded simultaneously":
-            "依次加载 QNN(NPU)/GGUF(GPU)/MNN(CPU) 三种后端各一个模型，验证三者能否同时驻留在同一服务进程中（三后端同时在线）",
-        "MULTI: backend coexistence matrix (triple + pairwise fallback)":
-            "汇总上面\"三后端同时驻留\"与下面三种\"两两降级\"组合的验证结果，整理成一份综合共存判定矩阵（本条本身不发起新请求）",
+            "调用 GET /models 接口，验证服务能正确返回当前已加载的模型",
+        "MULTI: sequential backend switching (npu/gpu/cpu each independently loadable)":
+            "依次向 QNN(NPU)/GGUF(GPU)/MNN(CPU) 三种后端各一个模型发送请求，验证 ModelManager::LoadModelByName() 的顺序单模型切换能力在三种后端间均能正常工作（不要求同时驻留，本仓库已删除并发多模型托管设计）",
         "MULTI: invalid model route returns 404/400":
             "请求一个不存在的模型名，验证服务能快速返回 404/400 错误，而不是长时间挂起或误路由到其它模型",
         "MULTI: concurrent requests to different models":
-            "同时向多个已加载的不同模型并发发送请求，验证并发场景下各请求能被正确路由到对应模型、互不干扰、不引发崩溃（同时校验回复内容非空）",
+            "同时向多个已加载的不同模型并发发送请求，验证并发场景下各请求能被正确路由到对应模型、互不干扰、不引发崩溃（同时校验回复内容非空；单模型架构下通常因已加载模型 <2 个而被跳过）",
         "MULTI: default model route (no 'model' field) after dynamic switches":
             "发一个不带 model 字段的请求，观察在多次动态切换后默认模型是否仍能正常响应（当前实现里默认模型会随动态切换漂移，本检查只监控不崩溃/不返回 5xx，不假定具体路由到哪个模型）",
     }
     _MULTI_CHECK_DESCRIPTIONS_PREFIX = (
         ("MULTI: auto-restart after MNN OOM (",
          "MNN 模型因内存不足导致进程崩溃后，验证服务能否自动重启并恢复到可正常接受请求的状态"),
-        ("MULTI: pairwise coexistence ",
-         "三后端未能全部同时驻留时的降级验证：重启服务后只尝试这两种后端的模型，检查它们能否同时加载并各自正确路由请求（至少两两可同时驻留是设计底线）"),
         ("MULTI: chat route → ",
          "向该模型发送一次 chat 请求，验证请求能被正确路由到此模型并返回正常响应"),
     )
@@ -3277,10 +3273,9 @@ class ReportGenerator:
     # 在此归类，未归类的检查项会落入下方 _MULTI_CHECK_CATEGORY_FALLBACK 兜底类别（不报错）。
     _MULTI_CHECK_CATEGORIES = (
         ("单模型路由验证", (), ("MULTI: chat route → ",)),
-        ("后端共存与两两降级验证", (
-            "MULTI: ensure NPU/GGUF/MNN backends loaded simultaneously",
-            "MULTI: backend coexistence matrix (triple + pairwise fallback)",
-        ), ("MULTI: pairwise coexistence ",)),
+        ("多后端顺序切换验证", (
+            "MULTI: sequential backend switching (npu/gpu/cpu each independently loadable)",
+        ), ()),
         ("通用接口与异常路由", (
             "MULTI: GET /models (multi-model list)",
             "MULTI: invalid model route returns 404/400",
@@ -5600,16 +5595,19 @@ def _crash_badge_html(c):
 
 
 # ============================================================================
-# MultiModelTester - 多模型并发加载与路由测试
+# MultiModelTester - 多后端顺序切换加载与路由测试
 # ============================================================================
 class MultiModelTester:
     """
-    阶段 3：多模型并发加载与路由测试。
+    阶段 3：多后端顺序切换加载与路由测试。
 
-    在单个服务实例中验证：
-    1. GET /models 返回所有已成功加载的模型
-    2. 对每个已加载模型发送 chat 请求，验证路由正确性
-    3. 并发向不同模型发送请求，验证并发安全性
+    本仓库已删除并发多模型托管设计（原 loaded_models_ 注册表），运行时只有一个当前活跃
+    模型；本阶段验证的是 ModelManager::LoadModelByName() 的顺序单模型切换能力在
+    QNN(NPU)/GGUF(GPU)/MNN(CPU) 三种后端间都能正常工作，不要求多模型同时驻留：
+    1. GET /models 返回当前已加载的模型
+    2. 依次向 npu/gpu/cpu 三种后端的模型发送 chat 请求，验证顺序切换均成功
+    3. 并发向同一/不同模型发送请求，验证并发安全性（需要 ≥2 个已加载模型才有意义，
+       单模型架构下天然多为 skipped）
     4. 请求未加载/不存在的模型时返回 404
     5. MNN 模型加载失败（含崩溃）标记为 ignorable
 
@@ -5621,12 +5619,6 @@ class MultiModelTester:
 
     # MNN 后端标识（加载失败/崩溃时标记为 ignorable）
     MNN_BACKENDS = {"mnn"}
-
-    # 三后端两两组合（降级验证用）：当"npu+gpu+cpu 三后端同时驻留"因内存不足未能全部
-    # 达成时（例如先加载 qnn，再加载 gguf 后内存已耗尽，mnn 根本没机会被尝试），
-    # 用于兜底验证"至少两两可以同时驻留"这一底线能力，而不是让 mnn 完全没有被测试过。
-    PAIRWISE_COMBOS = (("npu", "gpu"), ("npu", "cpu"), ("gpu", "cpu"))
-    _DEVICE_LABELS = {"npu": "QNN/NPU", "gpu": "GGUF/GPU", "cpu": "MNN/CPU"}
 
     @staticmethod
     def _infer_device(model_name):
@@ -5761,22 +5753,23 @@ class MultiModelTester:
         return self._get_loaded_models()
 
     def ensure_multi_backend_loaded(self, models_by_device):
-        """依次向 npu/gpu(GGUF)/cpu(MNN) 三个不同设备的模型发送 chat 请求，
-        触发 chat_request_handler.cpp 中已有的"磁盘扫描 + 动态加载"分支，
-        使三种后端各自常驻一个模型（同设备不重复请求，避免触发
-        UnloadModelsByDevice 卸载刚加载的模型）。
+        """依次向 npu/gpu(GGUF)/cpu(MNN) 三个不同设备的模型发送 chat 请求，触发
+        chat_request_handler.cpp 中已有的"磁盘扫描 + 动态加载"分支（ModelManager::LoadModelByName()
+        顺序单模型切换），验证三种后端各自都能被成功加载/切换到。
+
+        本仓库已删除并发多模型托管设计（原 loaded_models_ 注册表），运行时只有一个当前活跃模型，
+        因此不再要求三者"同时驻留"，只要求依次切换均成功——这与 ModelManager::LoadModelByName()
+        的顺序切换语义（先卸载旧模型再加载新模型）完全一致。
 
         models_by_device: dict[str, str]，形如 {"npu": "qwen3-8b-8480", "gpu": "gpt-oss-20b-GGUF", "cpu": "gpt-oss-20b-MNN"}
-        返回一条汇总 TestResult：MNN OOM 崩溃时按现有 ignorable 机制处理并跳过继续。
+        返回一条汇总 TestResult：MNN OOM 崩溃时按现有 ignorable 机制处理并跳过继续；因更早设备
+        崩溃导致循环提前结束、从未被真正请求过的设备标记为 skipped（而不是失败）。
         """
-        name = "MULTI: ensure NPU/GGUF/MNN backends loaded simultaneously"
+        name = "MULTI: sequential backend switching (npu/gpu/cpu each independently loadable)"
         touched = []
-        cpu_attempted = False
         device_results = {}
         for device, model_name in models_by_device.items():
             is_mnn = device == "cpu"
-            if is_mnn:
-                cpu_attempted = True
             r = self.test_route_to_model(model_name)
             device_results[device] = r
             self.results.append(r)
@@ -5807,244 +5800,31 @@ class MultiModelTester:
                 # 无论是 MNN 自身崩溃还是其它真实错误,进程已不可用,不再继续尝试后续设备
                 break
 
-        loaded_entries = self._get_loaded_model_entries()
-        loaded_devices = {m.get("device") or self._infer_device(m.get("id", "")) for m in loaded_entries}
-        expected_devices = set(models_by_device.keys())
-        missing = expected_devices - loaded_devices
-        type_summary = sorted({f"{m.get('backend')}/{m.get('device')}" for m in loaded_entries})
-        detail = f"已加载设备: {sorted(loaded_devices)}, 期望: {sorted(expected_devices)}, 类型: {type_summary}, 请求顺序: {touched}"
-        if missing and "cpu" in missing:
-            if cpu_attempted:
-                cpu_result = device_results.get("cpu")
-                if cpu_result is not None and cpu_result.skipped:
-                    # cpu 设备已被请求,服务端优雅拒绝(如 insufficient_memory)：环境资源约束,
-                    # 不是代码缺陷,精确标记为 skipped=True,而不是当作真实失败。
-                    result = self._make_result(name, False, 0, detail, skipped=True,
-                                                ignore_reason=cpu_result.detail)
-                else:
-                    # cpu 设备已经真正被请求过,但未能成功同时驻留(且非上面的优雅内存拒绝)——
-                    # 这是需要关注的真实问题(不论是 MNN 自身其它失败还是崩溃,崩溃永远不可豁免)。
-                    result = self._make_result(name, False, 0, detail)
-            else:
-                # cpu 从未被真正请求过(更早的设备崩溃导致循环提前 break) —— 无法验证 cpu
-                # 能否同时驻留,应精确标记为 skipped=True,而不是套用"cpu 缺失=MNN 内存不足"
-                # 这类没有核实过的猜测性归因。
-                result = self._make_result(
-                    name, False, 0, detail, skipped=True,
-                    ignore_reason="更早的设备崩溃导致循环提前结束,cpu 后端从未被真正请求,无法验证是否可同时驻留"
-                )
+        skipped_devices = [d for d in models_by_device.keys() if d not in device_results]
+        bad_devices = [d for d, r in device_results.items()
+                       if (not r.passed) and (not r.skipped) and (not r.ignorable)]
+        detail = (f"顺序切换结果: {touched}"
+                  + (f", 因更早设备崩溃未被真正尝试: {sorted(skipped_devices)}" if skipped_devices else ""))
+        if bad_devices:
+            # 至少一个设备被真正请求过但切换/加载失败(且非崩溃/优雅跳过/已知 ignorable)——
+            # 这是需要关注的真实问题。
+            result = self._make_result(name, False, 0, detail)
+        elif skipped_devices:
+            # 有设备从未被真正尝试(更早设备崩溃导致循环提前 break)，无法验证该设备是否可
+            # 正常切换加载，精确标记为 skipped=True，而不是失败。
+            result = self._make_result(
+                name, False, 0, detail, skipped=True,
+                ignore_reason=f"更早的设备崩溃导致循环提前结束,{sorted(skipped_devices)} 后端从未被真正请求"
+            )
         else:
-            result = self._make_result(name, len(missing) == 0, 0, detail)
+            result = self._make_result(name, True, 0, detail)
         result.response_data = {
-            "loaded_models": loaded_entries,
-            "loaded_devices": sorted(loaded_devices),
-            "expected_devices": sorted(expected_devices),
-            "missing_devices": sorted(missing),
-            "type_summary": type_summary,
+            "device_results": {d: {"passed": r.passed, "skipped": r.skipped, "ignorable": r.ignorable}
+                                for d, r in device_results.items()},
+            "skipped_devices": sorted(skipped_devices),
             "request_order": touched,
         }
         return result
-
-    def ensure_pairwise_backends_loaded(self, models_by_device, models_root):
-        """当"npu+gpu+cpu 三后端同时驻留"未能全部达成时的降级验证：逐一确认
-        npu+gpu / npu+cpu / gpu+cpu 三种两两组合是否仍能同时驻留。
-
-        每个组合测试前都用该组合第一个设备对应的模型作为入口重启服务，获得一份干净的
-        内存基线（不带着此前"三后端"尝试残留的内存占用），再动态路由加载该组合的第二个
-        设备——避免"三后端"尝试失败后残留的进程状态污染两两组合本身是否可行的判定。
-
-        models_root: 模型根目录（Path 或 str），用于构造重启入口的 config.json 路径。
-        返回 (results, matrix, extra)：results 为逐组合产生的 TestResult 列表；matrix 为
-        {"npu+gpu": "pass"/"fail"/"skip", ...}——"skip" 覆盖"环境缺模型"与"服务端因内存
-        不足优雅拒绝"两种情况(均非代码缺陷,不计入失败)；extra 为 {"npu+gpu": {"crashed":
-        bool, "reason_detail": str, "skip_reason": "missing_model"/"memory"/None}, ...}，
-        仅在对应 matrix 值不是 "pass" 时才有条目——用于让 _build_coexistence_matrix_result
-        生成准确的原因(是否真的崩溃、真实失败/跳过详情)，而不是一句无差别的通用提示。
-        """
-        results = []
-        matrix = {}
-        extra = {}
-        models_root = Path(models_root)
-        for a, b in self.PAIRWISE_COMBOS:
-            pair_key = f"{a}+{b}"
-            pair_label = f"{self._DEVICE_LABELS[a]} + {self._DEVICE_LABELS[b]}"
-            name = f"MULTI: pairwise coexistence {pair_key} ({pair_label})"
-            if a not in models_by_device or b not in models_by_device:
-                missing_device = a if a not in models_by_device else b
-                reason_detail = f"环境中缺少 {self._DEVICE_LABELS[missing_device]} 对应的模型,无法验证该组合"
-                matrix[pair_key] = "skip"
-                extra[pair_key] = {"crashed": False, "reason_detail": reason_detail, "skip_reason": "missing_model"}
-                results.append(self._make_result(name, False, 0, reason_detail, skipped=True))
-                continue
-
-            entry_model = models_by_device[a]
-            entry_config = models_root / entry_model / "config.json"
-            self.svc._current_config = str(entry_config.resolve())
-            log_tail_before = _capture_log_tail(self.svc)
-            restarted = self.svc.restart()
-            if not restarted:
-                matrix[pair_key] = "fail"
-                extra[pair_key] = {"crashed": True, "reason_detail": f"重启服务失败(入口模型={entry_model})"}
-                self.crash_events.append(CrashEvent(
-                    timestamp=datetime.now().isoformat(),
-                    model_name=entry_model, round_num=self.round_num,
-                    endpoint="PAIRWISE_RESTART_FAILED",
-                    detail=f"两两降级验证 {pair_key} 重启服务失败(入口模型={entry_model})",
-                    log_tail=log_tail_before
-                ))
-                results.append(self._make_result(
-                    name, False, 0,
-                    f"重启服务失败(入口模型={entry_model}),无法验证该组合是否可同时驻留",
-                    crashed=True
-                ))
-                continue
-
-            # 显式验证入口模型(设备 a)确实已正常加载并响应——通常随 -c 启动即直接加载，
-            # 这里仍主动发一次请求核实，避免"重启看起来成功但入口模型自身未真正可用"
-            # 这类边缘情况被漏判为"该组合可同时驻留"。
-            r_entry = self.test_route_to_model(entry_model)
-            results.append(r_entry)
-            if r_entry.crashed:
-                matrix[pair_key] = "fail"
-                extra[pair_key] = {"crashed": True, "reason_detail": r_entry.detail}
-                continue
-            if r_entry.skipped:
-                # 入口模型自身因服务端优雅拒绝(如 insufficient_memory)未能加载：环境资源
-                # 约束,不是代码缺陷,该组合精确标记为 skip 而非 fail。
-                matrix[pair_key] = "skip"
-                extra[pair_key] = {"crashed": False, "reason_detail": r_entry.detail, "skip_reason": "memory"}
-                continue
-            if not r_entry.passed and not r_entry.ignorable:
-                matrix[pair_key] = "fail"
-                extra[pair_key] = {"crashed": False, "reason_detail": r_entry.detail}
-                continue
-
-            second_model = models_by_device[b]
-            r_second = self.test_route_to_model(second_model)
-            results.append(r_second)
-            if r_second.crashed:
-                matrix[pair_key] = "fail"
-                extra[pair_key] = {"crashed": True, "reason_detail": r_second.detail}
-                continue
-            if r_second.skipped:
-                matrix[pair_key] = "skip"
-                extra[pair_key] = {"crashed": False, "reason_detail": r_second.detail, "skip_reason": "memory"}
-                continue
-
-            loaded_entries = self._get_loaded_model_entries()
-            loaded_devices = {m.get("device") or self._infer_device(m.get("id", "")) for m in loaded_entries}
-            pair_ok = {a, b} <= loaded_devices
-            matrix[pair_key] = "pass" if pair_ok else "fail"
-            detail = (f"已加载设备: {sorted(loaded_devices)}, 期望: {sorted({a, b})}, "
-                      f"入口模型: {entry_model}, 追加路由: {second_model}")
-            if not pair_ok:
-                # r_second 未崩溃但组合仍不成立：最有信息量的原因通常是 r_second 自身的
-                # 失败详情；r_second 若已 passed 而组合仍不成立(边缘情况,如 /models 未及时
-                # 反映)则回退用 detail。
-                reason_detail = r_second.detail if not r_second.passed else detail
-                extra[pair_key] = {"crashed": False, "reason_detail": reason_detail}
-            results.append(self._make_result(name, pair_ok, 0, detail))
-
-        return results, matrix, extra
-
-    def _build_coexistence_matrix_result(self, triple_result, pair_matrix, pairwise_attempted, pair_extra=None):
-        """把"三后端同时驻留 + 两两降级"整理为一份统一的共存矩阵，写入一条独立的汇总
-        TestResult，供 report.html 的多后端共存矩阵区块直接读取
-        response_data["coexistence_matrix"]。
-
-        triple_result: ensure_multi_backend_loaded() 的返回值。
-        pair_matrix: ensure_pairwise_backends_loaded() 的返回值（未执行两两降级时传 {}）。
-        pairwise_attempted: 两两降级是否被真正执行过（remote 模式/未提供模型根目录时为 False）。
-        pair_extra: ensure_pairwise_backends_loaded() 返回的第三个值（未执行两两降级时传 None）,
-        用于区分"该组合确实因进程崩溃而失败"与"服务端优雅拒绝/未成功路由但进程未崩溃"这两种
-        性质完全不同的失败——只有前者才应该引用崩溃事件日志。
-        """
-        pair_extra = pair_extra or {}
-        name = "MULTI: backend coexistence matrix (triple + pairwise fallback)"
-        triple_missing = set((triple_result.response_data or {}).get("missing_devices", []))
-        triple_ok = len(triple_missing) == 0 and not triple_result.skipped
-        triple_status = "pass" if triple_ok else ("skip" if triple_result.skipped else "fail")
-        # reason: 主报告用的极短标签(不含原始错误文本)；detail: 详情页用的完整原文，两者
-        # 分离是为了让主报告保持与其它区块一致的密度，原始错误串只出现在详情页。
-        _TRIPLE_REASON = {"pass": "三后端同时驻留", "skip": "内存不足,已跳过验证", "fail": "验证失败"}
-        matrix = {
-            "triple": {"combo": "npu+gpu+cpu", "status": triple_status,
-                       "reason": _TRIPLE_REASON[triple_status], "detail": triple_result.detail},
-            "pairs": {},
-        }
-        for a, b in self.PAIRWISE_COMBOS:
-            pair_key = f"{a}+{b}"
-            if triple_ok:
-                matrix["pairs"][pair_key] = {
-                    "status": "pass", "reason": "随三后端同时驻留",
-                    "detail": "三后端已同时驻留验证通过,两两组合天然成立,无需单独验证"
-                }
-            elif not pairwise_attempted:
-                matrix["pairs"][pair_key] = {
-                    "status": "unknown", "reason": "未执行验证",
-                    "detail": "本次未执行两两降级验证(远程模式或未提供本地模型根目录)"
-                }
-            else:
-                v = pair_matrix.get(pair_key, "skip")
-                info = pair_extra.get(pair_key) or {}
-                reason_detail = info.get("reason_detail", "")
-                if v == "pass":
-                    matrix["pairs"][pair_key] = {"status": "pass", "reason": "验证通过", "detail": "两两同时驻留验证通过"}
-                elif v == "skip":
-                    if info.get("skip_reason") == "missing_model":
-                        matrix["pairs"][pair_key] = {"status": "skip", "reason": "环境缺少模型",
-                                                       "detail": reason_detail or "环境中缺少该组合所需模型,无法验证"}
-                    else:
-                        matrix["pairs"][pair_key] = {
-                            "status": "skip", "reason": "内存不足,已跳过",
-                            "detail": (f"服务端预判内存不足优雅跳过该组合验证(非失败,详见下方逐项检查记录表格)：{reason_detail}"
-                                        if reason_detail else
-                                        "服务端预判内存不足优雅跳过该组合验证(非失败,详见下方逐项检查记录表格)")
-                        }
-                elif info.get("crashed"):
-                    # 确认是进程真实崩溃(已产生对应 CrashEvent,崩溃事件日志区块必然会渲染)——
-                    # 才引用崩溃事件日志,避免在没有任何崩溃发生时误导性地指向一个根本不存在的区块。
-                    matrix["pairs"][pair_key] = {
-                        "status": "fail", "reason": "进程崩溃",
-                        "detail": (f"两两同时驻留验证未通过：进程发生崩溃,详见下方崩溃事件日志表格"
-                                    + (f"（{reason_detail}）" if reason_detail else ""))
-                    }
-                else:
-                    # 非崩溃场景(未成功路由等)：不引用崩溃事件日志(本次未发生崩溃,该区块不会
-                    # 渲染)，改为指向下方的"逐项检查记录"表格(该表格在本区块下方,不是上方)。
-                    matrix["pairs"][pair_key] = {
-                        "status": "fail", "reason": "验证失败",
-                        "detail": (f"两两同时驻留验证未通过(非崩溃,详见下方逐项检查记录表格)：{reason_detail}"
-                                    if reason_detail else
-                                    "两两同时驻留验证未通过(非崩溃,详见下方逐项检查记录表格)")
-                    }
-
-        pair_statuses = [v["status"] for v in matrix["pairs"].values()]
-        detail = (f"三后端同时驻留={triple_status}; 两两组合: " +
-                  ", ".join(f"{k}={v['status']}" for k, v in matrix["pairs"].items()))
-        if triple_ok:
-            return TestResult(
-                name=name, round_num=self.round_num, model_name="_multi_model_",
-                passed=True, status_code=0, latency_ms=0, detail=detail,
-                response_data={"coexistence_matrix": matrix}
-            )
-        if not pairwise_attempted:
-            return TestResult(
-                name=name, round_num=self.round_num, model_name="_multi_model_",
-                passed=False, status_code=0, latency_ms=0, detail=detail,
-                skipped=True,
-                ignore_reason="远程模式或未提供本地模型根目录,无法重启服务执行两两降级验证",
-                response_data={"coexistence_matrix": matrix}
-            )
-        testable = [s for s in pair_statuses if s != "skip"]
-        # "至少两两可用"的底线：三后端未能全部同时驻留时,要求全部可测试的两两组合都必须
-        # 成功;任意一个两两组合失败都是需要关注的真实问题,不代表"至少两两"这一底线达标。
-        pairwise_all_ok = len(testable) > 0 and all(s == "pass" for s in testable)
-        return TestResult(
-            name=name, round_num=self.round_num, model_name="_multi_model_",
-            passed=pairwise_all_ok, status_code=0, latency_ms=0, detail=detail,
-            response_data={"coexistence_matrix": matrix}
-        )
 
     def test_route_to_model(self, model_name):
         """向指定模型发送 chat 请求，验证路由正确性。
@@ -6343,51 +6123,31 @@ class MultiModelTester:
         """执行所有多模型测试，返回 TestResult 列表
 
         models_by_device: 可选，形如 {"npu": ..., "gpu": ..., "cpu": ...}；
-        长度 > 1 时先调用 ensure_multi_backend_loaded 主动触发多种设备的动态加载；
+        长度 > 1 时先调用 ensure_multi_backend_loaded 主动触发多种设备的顺序切换加载
+        （本仓库已删除并发多模型托管设计，运行时只有一个当前活跃模型，不再要求同时驻留）；
         长度 <=1（环境里只发现单一 backend 类型）时不再完全静默跳过、不留痕迹，而是
-        登记一条 skipped=True 的 TestResult，明确说明"环境无法验证多后端同时驻留"。
+        登记一条 skipped=True 的 TestResult，明确说明"环境无法验证多后端切换"。
 
-        models_root/remote_mode: 三后端未能全部同时驻留（例如先加载 qnn、再加载 gguf 后
-        内存已耗尽，mnn 完全没机会被尝试）时，用于驱动"两两降级"兜底验证——本地模式下
-        依次重启服务、逐一确认 npu+gpu/npu+cpu/gpu+cpu 是否仍能同时驻留；远程模式或未提供
-        models_root 时无法重启服务，精确标记为 skipped（而不是悄悄跳过不留痕迹）。
+        models_root/remote_mode: 保留参数签名以兼容既有调用点（历史上用于驱动"两两同时
+        驻留"降级验证，该验证已随并发多模型托管设计一起删除，此处不再使用）。
         """
         print(f"\n{'='*60}")
-        print("阶段 3: 多模型并发加载与路由测试")
+        print("阶段 3: 多后端顺序切换加载与路由测试")
         print(f"{'='*60}")
 
         if models_by_device and len(models_by_device) > 1:
-            print(f"  确保 NPU/GGUF/MNN 三后端同时驻留 ... ", end="", flush=True)
+            print(f"  验证 NPU/GGUF/MNN 三后端可依次切换加载 ... ", end="", flush=True)
             r = self.ensure_multi_backend_loaded(models_by_device)
             self.results.append(r)
             tag = "✓ PASS" if r.passed else ("⚠ SKIP" if r.skipped else ("⚠ IGN" if r.ignorable else "✗ FAIL"))
             print(f"{tag} ({r.detail[:100]})")
-
-            triple_missing = set((r.response_data or {}).get("missing_devices", [])) if r.response_data else set()
-            if triple_missing:
-                print(f"  三后端同时驻留未完全达成(缺: {sorted(triple_missing)})，尝试两两降级验证 ... ")
-                if remote_mode or not models_root:
-                    reason = "远程模式无法重启服务" if remote_mode else "未提供本地模型根目录"
-                    matrix_result = self._build_coexistence_matrix_result(r, {}, pairwise_attempted=False)
-                    self.results.append(matrix_result)
-                    print(f"  ⚠ SKIP（{reason}，无法执行两两降级验证）")
-                else:
-                    pairwise_results, pair_matrix, pair_extra = self.ensure_pairwise_backends_loaded(models_by_device, models_root)
-                    self.results.extend(pairwise_results)
-                    matrix_result = self._build_coexistence_matrix_result(r, pair_matrix, pairwise_attempted=True, pair_extra=pair_extra)
-                    self.results.append(matrix_result)
-                    tag2 = "✓ PASS" if matrix_result.passed else ("⚠ SKIP" if matrix_result.skipped else "✗ FAIL")
-                    print(f"  两两降级共存矩阵: {tag2} ({matrix_result.detail[:150]})")
-            else:
-                matrix_result = self._build_coexistence_matrix_result(r, {}, pairwise_attempted=False)
-                self.results.append(matrix_result)
         elif models_by_device is not None:
             devices_found = sorted(models_by_device.keys())
             self.results.append(TestResult(
-                name="MULTI: ensure NPU/GGUF/MNN backends loaded simultaneously",
+                name="MULTI: sequential backend switching (npu/gpu/cpu each independently loadable)",
                 round_num=self.round_num, model_name="_multi_model_",
                 passed=False, status_code=0, latency_ms=0,
-                detail=f"环境中只发现单一后端类型({devices_found})，无法验证多后端是否可同时驻留",
+                detail=f"环境中只发现单一后端类型({devices_found})，无法验证多后端切换",
                 skipped=True
             ))
 

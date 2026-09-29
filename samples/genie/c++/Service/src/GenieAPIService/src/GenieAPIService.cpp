@@ -150,7 +150,7 @@ void GenieService::run(int argc, char *argv[])
 
     // InitializeConfig must complete before ChatRequestHandler construction
     // because the handler reads routing/cloud config set during initialization.
-    if (!modelManager->InitializeConfig(config.NeedLoadModel()))
+    if (!modelManager->InitializeConfig())
     {
         My_Log{My_Log::Level::kError} << "load model failed." << std::endl;
     }
@@ -167,17 +167,8 @@ void GenieService::run(int argc, char *argv[])
         init_ = true;
     }
 
-    // Load additional models from service_config.json only when the user explicitly
-    // requested model loading via -l/--load_model.  Without -l the service starts
-    // with only the primary model specified by -c, and no extra models are loaded
-    // automatically.
-    if (config.NeedLoadModel())
-    {
-        std::thread model_loader([this]() {
-            modelManager->LoadAllModelsFromConfig();
-        });
-        model_loader.detach();
-    }
+    // 并发多模型托管设计已删除：-l/--load_model 不再触发任何后台加载行为（config.h 中已降级为
+    // no-op 标志，仅为兼容现有调用方保留）。服务启动后只有 -c 指定的这一个主模型处于加载状态。
 
     static const std::string HOST = "0.0.0.0";
     My_Log{My_Log::Level::kAlways} << YELLOW << "[OK] Genie API Service IS Running." << RESET << std::endl;
