@@ -9,6 +9,31 @@
 cmake_minimum_required(VERSION 3.4...3.18)
 project(appbuilder LANGUAGES CXX)
 
+option(APPBUILDER_ENABLE_TFLITE "Build direct TFLite + QNN delegate support" OFF)
+option(APPBUILDER_ENABLE_TFLITE_CPU "Build direct TFLite CPU support" OFF)
+
+if (APPBUILDER_ENABLE_TFLITE AND APPBUILDER_ENABLE_TFLITE_CPU)
+    message(FATAL_ERROR "APPBUILDER_ENABLE_TFLITE and APPBUILDER_ENABLE_TFLITE_CPU are mutually exclusive.")
+endif()
+
+if (APPBUILDER_ENABLE_TFLITE_CPU)
+    if (NOT WIN32)
+        message(FATAL_ERROR "APPBUILDER_ENABLE_TFLITE_CPU is supported only on Windows.")
+    endif()
+    if (NOT DEFINED ENV{TFLITE_ROOT} OR "$ENV{TFLITE_ROOT}" STREQUAL "")
+        message(FATAL_ERROR "APPBUILDER_ENABLE_TFLITE_CPU requires TFLITE_ROOT.")
+    endif()
+endif()
+
+if (APPBUILDER_ENABLE_TFLITE)
+    if (NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(FATAL_ERROR "APPBUILDER_ENABLE_TFLITE is supported only on Linux ARM64.")
+    endif()
+    if (NOT DEFINED ENV{TFLITE_ROOT} OR "$ENV{TFLITE_ROOT}" STREQUAL "")
+        message(FATAL_ERROR "APPBUILDER_ENABLE_TFLITE requires TFLITE_ROOT.")
+    endif()
+endif()
+
 if (WIN32)
     LINK_DIRECTORIES(../lib/Release ../lib/RelWithDebInfo)
 else()
@@ -16,6 +41,15 @@ else()
 endif()
 
 INCLUDE_DIRECTORIES(../src)
+if (APPBUILDER_ENABLE_TFLITE OR APPBUILDER_ENABLE_TFLITE_CPU)
+    INCLUDE_DIRECTORIES("$ENV{TFLITE_ROOT}/include")
+    if (APPBUILDER_ENABLE_TFLITE)
+        INCLUDE_DIRECTORIES("$ENV{QNN_SDK_ROOT}/include")
+        add_compile_definitions(APPBUILDER_ENABLE_TFLITE=1)
+    else()
+        add_compile_definitions(APPBUILDER_ENABLE_TFLITE_CPU=1)
+    endif()
+endif()
 SET(LIBRARY_OUTPUT_PATH "${PROJECT_SOURCE_DIR}/../lib")
 
 add_subdirectory(pybind11)
@@ -58,7 +92,10 @@ if(GENIE_LIBRARY)
         )
     endif()
 
-    target_include_directories(geniebuilder PUBLIC $ENV{QNN_SDK_ROOT}/include/Genie)
+    target_include_directories(geniebuilder PUBLIC
+        $ENV{QNN_SDK_ROOT}/include/Genie
+        $ENV{QNN_SDK_ROOT}/include
+    )
 else()
     message(FATAL_ERROR "Could not find Genie library")
 endif()

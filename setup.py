@@ -603,6 +603,10 @@ def _build_root_cmake_project(arch: str, source_pkg_dir: Path, build_pkg_dir: Pa
     if _cmake_toolchain:
         cmake_configure.append(f"-DCMAKE_TOOLCHAIN_FILE={_cmake_toolchain}")
         cmake_configure += _pybind11_cross_ext_args(_cmake_toolchain)
+    if os.environ.get("APPBUILDER_ENABLE_TFLITE", "").strip().lower() in {"1", "on", "true", "yes"}:
+        cmake_configure.append("-DAPPBUILDER_ENABLE_TFLITE=ON")
+    if os.environ.get("APPBUILDER_ENABLE_TFLITE_CPU", "").strip().lower() in {"1", "on", "true", "yes"}:
+        cmake_configure.append("-DAPPBUILDER_ENABLE_TFLITE_CPU=ON")
     subprocess.run(cmake_configure, cwd=str(build_dir), check=True)
 
     cmake_build = ["cmake", "--build", str(build_dir)]
@@ -648,6 +652,46 @@ def _build_root_cmake_project(arch: str, source_pkg_dir: Path, build_pkg_dir: Pa
         source_pkg_dir=source_pkg_dir,
         build_pkg_dir=build_pkg_dir,
     )
+
+    if os.environ.get("APPBUILDER_ENABLE_TFLITE", "").strip().lower() in {"1", "on", "true", "yes"}:
+        if arch != "aarch64" or _is_windows():
+            raise RuntimeError("TFLite support requires a Linux ARM64 wheel build")
+        tflite_root = os.environ.get("TFLITE_ROOT", "")
+        if not tflite_root:
+            raise RuntimeError("APPBUILDER_ENABLE_TFLITE requires TFLITE_ROOT")
+        tflite_root_path = Path(tflite_root)
+        qnn_root = _get_qnn_sdk_root()
+        tflite_lib = next((p for p in (
+            tflite_root_path / "lib" / "libtensorflowlite_c.so",
+            tflite_root_path / "lib" / "libtflite_c.so",
+            tflite_root_path / "lib" / "aarch64-linux-gnu" / "libtensorflowlite_c.so",
+            tflite_root_path / "lib" / "aarch64-linux-gnu" / "libtflite_c.so",
+        ) if p.exists()), None)
+        if tflite_lib is None:
+            raise RuntimeError("TFLITE_ROOT must provide lib/libtensorflowlite_c.so or lib/libtflite_c.so")
+        qnn_delegate = qnn_root / "lib" / (toolchain or "aarch64-oe-linux-gcc11.2") / "libQnnTFLiteDelegate.so"
+        if not qnn_delegate.exists():
+            raise RuntimeError(f"Missing QNN TFLite delegate: {qnn_delegate}")
+        for pkg_dir in (source_pkg_dir, build_pkg_dir):
+            _copy_if_exists(tflite_lib, pkg_dir / "libs" / tflite_lib.name)
+            _copy_if_exists(qnn_delegate, pkg_dir / "libs" / qnn_delegate.name)
+    if os.environ.get("APPBUILDER_ENABLE_TFLITE_CPU", "").strip().lower() in {"1", "on", "true", "yes"}:
+        if not _is_windows():
+            raise RuntimeError("APPBUILDER_ENABLE_TFLITE_CPU requires a Windows wheel build")
+        tflite_root = os.environ.get("TFLITE_ROOT", "")
+        if not tflite_root:
+            raise RuntimeError("APPBUILDER_ENABLE_TFLITE_CPU requires TFLITE_ROOT")
+        tflite_root_path = Path(tflite_root)
+        tflite_dll = next((p for p in (
+            tflite_root_path / "bin" / "tensorflowlite_c.dll",
+            tflite_root_path / "bin" / "tflite_c.dll",
+            tflite_root_path / "lib" / "tensorflowlite_c.dll",
+            tflite_root_path / "lib" / "tflite_c.dll",
+        ) if p.exists()), None)
+        if tflite_dll is None:
+            raise RuntimeError("TFLITE_ROOT must provide a Windows tensorflowlite_c.dll or tflite_c.dll")
+        for pkg_dir in (source_pkg_dir, build_pkg_dir):
+            _copy_if_exists(tflite_dll, pkg_dir / "libs" / tflite_dll.name)
 
 
 def _build_release_zip(arch: str):
@@ -843,6 +887,10 @@ class QaiCMakeBuild(build_ext):
         if _cmake_toolchain:
             cmake_configure.append(f"-DCMAKE_TOOLCHAIN_FILE={_cmake_toolchain}")
             cmake_configure += _pybind11_cross_ext_args(_cmake_toolchain)
+        if os.environ.get("APPBUILDER_ENABLE_TFLITE", "").strip().lower() in {"1", "on", "true", "yes"}:
+            cmake_configure.append("-DAPPBUILDER_ENABLE_TFLITE=ON")
+        if os.environ.get("APPBUILDER_ENABLE_TFLITE_CPU", "").strip().lower() in {"1", "on", "true", "yes"}:
+            cmake_configure.append("-DAPPBUILDER_ENABLE_TFLITE_CPU=ON")
         subprocess.run(cmake_configure, cwd=str(build_temp), check=True)
 
         cmake_build = ["cmake", "--build", "."] + build_args
@@ -944,7 +992,7 @@ setup(
     version=VERSION,
     packages=find_packages(where="script"),
     package_dir={"": "script"},
-    package_data={"": ["*.dll", "*.pdb", "*.exe", "*.so", "*.cat", "QAIAppSvc"]},
+    package_data={"": ["*.dll", "*.pdb", "*.exe", "*.so", "*.cat", "QAIAppSvc", "libs/*"]},
     ext_modules=[CMakeExtension("qai_appbuilder.appbuilder", "pybind")],
     cmdclass={
         "build_ext": QaiCMakeBuild,
