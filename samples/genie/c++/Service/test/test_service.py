@@ -8802,18 +8802,6 @@ def run_gguf_explicit_load_regressions(args, models, all_results, all_crash_even
             ))
         return
 
-    service_config_path = Path(args.exe_dir) / "service_config.json"
-    original_service_config = service_config_path.read_bytes() if service_config_path.exists() else None
-
-    def restore_service_config():
-        if original_service_config is None:
-            try:
-                service_config_path.unlink()
-            except FileNotFoundError:
-                pass
-        else:
-            service_config_path.write_bytes(original_service_config)
-
     try:
         for gguf_model in gguf_models:
             gguf_config_path = Path(args.models) / gguf_model / "config.json"
@@ -8826,24 +8814,24 @@ def run_gguf_explicit_load_regressions(args, models, all_results, all_crash_even
                     ))
                 continue
 
+            # 显式 backend/device 现在是每个模型自己 config.json 的可选字段（Step 1：并发多模型
+            # 托管与 service_config.json 的 models 数组已删除），不再通过 service_config.json 注入。
+            original_gguf_config = gguf_config_path.read_bytes()
+
+            def restore_gguf_config():
+                gguf_config_path.write_bytes(original_gguf_config)
+
             for device in devices:
                 test_name = f"test_gguf_{device}_explicit_load"
                 service_model_name = gguf_model
                 result_model_name = f"{gguf_model} ({device.upper()})"
-                service_config = {
-                    "default_model": service_model_name,
-                    "models": [
-                        {
-                            "name": service_model_name,
-                            "path": gguf_model,
-                            "backend": "GGUF",
-                            "device": device,
-                            "context_size": 4096,
-                            "enabled": True,
-                        }
-                    ]
-                }
-                service_config_path.write_text(json.dumps(service_config, ensure_ascii=False, indent=2), encoding="utf-8")
+                try:
+                    model_config = json.loads(original_gguf_config.decode("utf-8")) if original_gguf_config.strip() else {}
+                except json.JSONDecodeError:
+                    model_config = {}
+                model_config["backend"] = "GGUF"
+                model_config["device"] = device
+                gguf_config_path.write_text(json.dumps(model_config, ensure_ascii=False, indent=2), encoding="utf-8")
 
                 svc = ServiceManager(args.exe_dir, args.host, args.port)
                 svc._log_dir = args.out_dir
@@ -8957,8 +8945,9 @@ def run_gguf_explicit_load_regressions(args, models, all_results, all_crash_even
                     all_perf_samples.extend(perf_samples)
                     print(f"  停止 GGUF 显式 {device.upper()} 服务...")
                     svc.stop()
+                    restore_gguf_config()
     finally:
-        restore_service_config()
+        pass
 
 
 def run_sampleapp_only_tests(args, models, all_results):
