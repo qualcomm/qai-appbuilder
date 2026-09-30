@@ -13410,6 +13410,14 @@ def _run_long_task_memory_suite(args, models, remote_mode, out_dir):
             all_results.append(_sc_result(
                 "LONG_TASK_MEMORY: suite precondition gguf-20b", suite_model, False,
                 f"未在已发现模型中匹配到任何 GGUF 后端模型（models={models}），精确跳过", skipped=True))
+    m3 = next((m for m in models if infer_backend(m)[0] == "mnn"), None)
+    if not requested or "mnn-20b" in requested:
+        if m3:
+            targets.append(("mnn-20b", m3))
+        else:
+            all_results.append(_sc_result(
+                "LONG_TASK_MEMORY: suite precondition mnn-20b", suite_model, False,
+                f"未在已发现模型中匹配到任何 MNN 后端模型（models={models}），精确跳过", skipped=True))
 
     if not targets:
         return all_results, all_perf_samples, all_crash_events
@@ -13600,8 +13608,8 @@ def main():
     parser.add_argument("--suite", choices=("full", "model", "sampleapp", "multimodal", "gguf", "multi_model", "builder_local_model", "mnn", "qnn", "graceful_shutdown", "prompt_fidelity", "skill_capacity", "long_task_memory"),
                         default=None, help="选择要运行的测试套件（必传参数，不再有隐式默认值；如需完整回归请显式传入 full）")
     parser.add_argument("--long_task_memory_models", default=None,
-                        help="--suite long_task_memory 限定测试的目标模型简写，逗号分隔（qwen3-8b/gguf-20b），"
-                             "留空则两个目标模型都测（各自缺失时精确跳过，不影响另一个）")
+                        help="--suite long_task_memory 限定测试的目标模型简写，逗号分隔（qwen3-8b/gguf-20b/mnn-20b），"
+                             "留空则三个目标模型都测（各自缺失时精确跳过，不影响其他）")
     parser.add_argument("--long_task_memory_max", type=int, default=8,
                         help="--suite long_task_memory 倍增探测+二分搜索的硬上限 N（默认 8，真机 LLM 推理成本远高于 "
                              "skill_capacity 的纯提示词判定，默认值偏小以控制真机耗时；倍增到该上限仍全部通过时 "
