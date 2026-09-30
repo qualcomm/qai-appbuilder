@@ -574,10 +574,15 @@ _MODEL_CONVERSION_INITIAL_PROMPT_TEMPLATE = (
     "思考不超过三句话。"
 )
 
-_MODEL_CONVERSION_FOLLOWUP_PROMPT = (
+_MODEL_CONVERSION_FOLLOWUP_PROMPT_TEMPLATE = (
     "不要复述计划。立即调用一个工具执行转换流程里下一个尚未完成的具体步骤"
     "（例如用 exec 运行 model-builder 的 run_pipeline.py，或用 read 查看上一步的报错日志）。"
-    "思考不超过三句话。如果被无法自主解决的问题卡住，只用一句话说明卡在哪一步和具体报错。"
+    "思考不超过三句话。\n\n"
+    "提示：工作目录是 {workspace_root}，转换目标 ONNX 文件是 {small_model_path}。"
+    "如果你不确定 run_pipeline.py 或其它脚本/日志文件的绝对路径，不要凭记忆猜测，"
+    "更不要停下来问我确认路径——立即调用 exec 工具自己查找"
+    "（例如 dir /s /b run_pipeline.py 或 dir /s /b {workspace_root}），"
+    "找到后继续执行下一步。如果被无法自主解决的问题卡住，只用一句话说明卡在哪一步和具体报错。"
 )
 
 
@@ -612,7 +617,9 @@ def run_model_conversion_task(builder, model_name, results, round_num=1,
     多轮策略：第一轮发起转换请求；每轮结束后先检查 workspace_root 下是否已产出
     含 "Cosine Similarity Summary" 的 REPORT.md——命中即成功，不再追加轮次。
     未命中且还有真实续问轮次预算（max_turns）时，在同一个 conversation_id 上追加
-    一条通用续问（见 _MODEL_CONVERSION_FOLLOWUP_PROMPT），处理模型在 Blocking
+    一条通用续问（见 _MODEL_CONVERSION_FOLLOWUP_PROMPT_TEMPLATE，每轮都显式重申
+    workspace_root/small_model_path 绝对路径，避免模型多轮后忘记路径转而反复
+    停下来问用户确认——2026-10-01 mc_run12 真机实测复现过这个失败模式），处理模型在 Blocking
     Condition 上停下来询问确认的情形（B1/B2 等，见 SKILL.md），不新发明协议，
     只是把"继续 + 已获授权"说清楚，复用模型本就熟悉的多轮对话模式。
 
@@ -718,7 +725,8 @@ def run_model_conversion_task(builder, model_name, results, round_num=1,
             # 连 conversation 都没能建立（比如 Builder 未就绪），没有意义继续追加轮次。
             transcript.append(f"[real_turn {real_turns_used}] SSE 请求本身失败且未获得 conversation_id，终止本任务")
             break
-        prompt = _MODEL_CONVERSION_FOLLOWUP_PROMPT
+        prompt = _MODEL_CONVERSION_FOLLOWUP_PROMPT_TEMPLATE.format(
+            workspace_root=workspace_root, small_model_path=small_model_path)
 
     elapsed = time.time() - task_started
     ok = report_path is not None
