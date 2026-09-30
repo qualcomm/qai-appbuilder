@@ -479,12 +479,12 @@ public:
         buffers.reserve(input.size());
         sizes.reserve(input.size());
         for (size_t i = 0; i < input.size(); ++i) {
+            if (i >= expected_types.size()) {
+                throw std::invalid_argument("TFLite inference received more inputs than the model declares");
+            }
             py::array array = py::array::ensure(input[i], py::array::c_style);
             if (!array) {
                 throw std::invalid_argument("TFLite inference input is not a contiguous NumPy array");
-            }
-            if (i >= expected_types.size()) {
-                throw std::invalid_argument("TFLite inference received more inputs than the model declares");
             }
             const py::dtype expected_dtype = dtypeFromString(expected_types[i]);
             if (!array.dtype().equal(expected_dtype)) {
