@@ -694,6 +694,7 @@ struct PromptOptimizationConfig {
         size_t min_dropped_for_trigger = 1;      // FitMessagesToContext 本次即将丢弃的消息数达到此值才更新备忘录
         size_t long_tool_chain_threshold = 4;    // 本次丢弃的连续 tool 消息数达到此值时触发模型层深度总结
         double low_confidence_threshold = 0.5;   // 上一份备忘录 confidence 低于此值时触发模型层深度总结
+        int rule_layer_preview_chars = 160;      // 规则层 facts_constraints/completed/tool_state 预览截断长度（字符数）
 
         TaskMemoStoreConfig store;
     } task_memo;

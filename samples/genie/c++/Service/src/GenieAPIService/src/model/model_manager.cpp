@@ -1958,6 +1958,7 @@ bool ModelManager::InitializeConfig()
                         memo_cfg.min_dropped_for_trigger = tm.value("min_dropped_for_trigger", (size_t) 1);
                         memo_cfg.long_tool_chain_threshold = tm.value("long_tool_chain_threshold", (size_t) 4);
                         memo_cfg.low_confidence_threshold = tm.value("low_confidence_threshold", 0.5);
+                        memo_cfg.rule_layer_preview_chars = tm.value("rule_layer_preview_chars", 160);
 
                         if (tm.contains("store") && tm["store"].is_object())
                         {
@@ -1973,6 +1974,7 @@ bool ModelManager::InitializeConfig()
                                 << ", token_budget_ratio=" << memo_cfg.token_budget_ratio
                                 << ", long_tool_chain_threshold=" << memo_cfg.long_tool_chain_threshold
                                 << ", low_confidence_threshold=" << memo_cfg.low_confidence_threshold
+                                << ", rule_layer_preview_chars=" << memo_cfg.rule_layer_preview_chars
                                 << ", store.max_entries=" << memo_cfg.store.max_entries
                                 << ", store.max_memory_mb=" << memo_cfg.store.max_memory_mb
                                 << ", store.ttl_minutes=" << memo_cfg.store.ttl_minutes

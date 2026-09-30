@@ -152,7 +152,7 @@ json TaskMemoBuilder::BuildRuleLayer(const json& prev, const std::vector<GenieCh
 
     size_t tool_seq = entry["tool_state"].size();
     for (const auto& m : dropped_messages) {
-        std::string preview = m.content.substr(0, 160);
+        std::string preview = m.content.substr(0, config_.rule_layer_preview_chars);
         if (m.role == "user") {
             AppendCapped(entry["facts_constraints"], "用户提及: " + preview, kMaxItemsPerField);
             size_t todo_pos = m.content.find("TODO");
