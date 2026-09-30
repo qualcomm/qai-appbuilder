@@ -14,6 +14,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <limits>
+#include <regex>
 #include <unordered_map>
 #include <vector>
 
@@ -967,10 +968,13 @@ namespace {
 
 // 花括号平衡扫描得到的单个候选子串。closed_properly=false 时该候选已吞掉
 // 从起始 '{' 到整段畸形文本末尾的全部内容（截断的典型信号）。
+// start_pos：候选起始 '{' 在原始扫描文本中的偏移，供 Layer -1（DetectBareToolCall）
+// 计算候选跨度、判断是否嵌在大段说明文字中间；TryLayer1Recovery 自身不需要该字段。
 struct Layer1Candidate
 {
     std::string text;
     bool closed_properly = false;
+    size_t start_pos = 0;
 };
 
 std::string ToLowerAscii(const std::string &s)
@@ -1055,6 +1059,7 @@ std::vector<Layer1Candidate> ExtractBalancedJsonCandidates(const std::string &te
         Layer1Candidate candidate;
         candidate.text = text.substr(start, j - start);
         candidate.closed_properly = closed;
+        candidate.start_pos = start;
         candidates.push_back(candidate);
 
         if (!closed)
@@ -1404,6 +1409,74 @@ std::vector<std::string> ComputeMissingRequiredArgs(const std::string &tool_name
     return missing;
 }
 
+// ── Layer -1 兜底：无 <tool_call> 标签时的裸 JSON 工具调用检测辅助函数 ──────────
+// （response_tools.md 有完整设计记录）
+
+// 剥离紧贴文本首尾的 Markdown 代码围栏标记行（``` 或 ```json）。只处理首尾，不处理文本
+// 中间的围栏——ExtractBalancedJsonCandidates 本身按花括号扫描，不关心围栏，候选提取不受
+// 影响；这里只是为了让围栏标记本身不被计入后续的“候选之外说明文字占比”统计。
+std::string StripLeadingTrailingCodeFence(const std::string &text)
+{
+    std::string s = TrimWhitespace(text);
+    if (s.compare(0, 3, "```") == 0)
+    {
+        size_t newline = s.find('\n');
+        if (newline != std::string::npos)
+        {
+            std::string first_line = ToLowerAscii(TrimWhitespace(s.substr(3, newline - 3)));
+            if (first_line.empty() || first_line == "json")
+            {
+                s = TrimWhitespace(s.substr(newline + 1));
+            }
+        }
+    }
+    if (s.size() >= 3 && s.compare(s.size() - 3, 3, "```") == 0)
+    {
+        s = TrimWhitespace(s.substr(0, s.size() - 3));
+    }
+    return s;
+}
+
+// 判断候选对象是否“看起来像”一次工具调用尝试：必须同时满足 name 字段能提取出、归一化后
+// 能匹配到已知工具、且存在 arguments/params/parameters/args（或 function.arguments）字段。
+// 第三条是关键判别信号——没有 <tool_call> 标签包裹的裸 JSON 里，单独出现 "name" 字段
+// 远不足以判定为工具调用意图（例如普通回答 {"name":"Alice","age":3}），必须同时看到
+// “这是一次带参数调用”的结构信号，才比 tagged 路径的判定更严格。
+bool LooksLikeBareToolCallCandidate(const json &parsed, std::string &out_matched_tool)
+{
+    std::string raw_name;
+    if (!ExtractNameField(parsed, raw_name))
+    {
+        return false;
+    }
+    std::string matched = NormalizeAndMatchToolName(raw_name);
+    if (matched.empty())
+    {
+        return false;
+    }
+    static const char *kArgKeys[] = {"arguments", "params", "parameters", "args"};
+    bool has_args_field = false;
+    for (const char *key : kArgKeys)
+    {
+        if (parsed.contains(key))
+        {
+            has_args_field = true;
+            break;
+        }
+    }
+    if (!has_args_field && parsed.contains("function") && parsed["function"].is_object()
+        && parsed["function"].contains("arguments"))
+    {
+        has_args_field = true;
+    }
+    if (!has_args_field)
+    {
+        return false;
+    }
+    out_matched_tool = matched;
+    return true;
+}
+
 } // namespace
 
 bool ResponseTools::TryLayer1Recovery(const std::string &malformedText, json &out_tool_call, ToolCallFailureReason &out_reason,
@@ -1463,6 +1536,34 @@ bool ResponseTools::TryLayer1Recovery(const std::string &malformedText, json &ou
     if (reasonable.empty())
     {
         out_reason = saw_truncation_signal ? ToolCallFailureReason::kTruncated : ToolCallFailureReason::kUnparseable;
+        // 加固：全部候选均解析失败（多半是嵌套引号/转义错误导致 json::parse 无法容忍，
+        // 真机样本：{"name": "exec", "arguments": {"command": "python -c \"...\"\"\"}}}
+        // 命令参数里的转义错误导致整体解析失败，但 "name":"exec" 本身完好可读）。原状
+        // out_partial_recovery 只在下面 kMissingRequiredArgs 分支被填充，导致工具名明明
+        // 清晰可读却仍落回 Layer3 情形B（纯文本），违背"识别出工具名→情形A"的设计初衷。
+        // 此处做一次纯字符串救援：在原始文本中用宽松正则找 "name":"xxx"，命中已知工具名
+        // 才填充（参数留空，交给 Layer3 情形A 的"最佳恢复参数"逻辑处理），客户端会收到一个
+        // 参数不全的真实 tool_call，走它熟悉的"工具执行报错→模型重试"闭环，而不是完全
+        // 无法执行的纯文本。
+        if (out_partial_recovery)
+        {
+            // 注意：正则内容本身含 )" 子串（捕获组右括号紧跟 JSON 字符串右引号），
+            // 与默认原始字符串字面量的终止符 )" 冲突，必须用自定义分隔符 R"RX(...)RX"
+            // 避免提前截断（曾在此处触发 MSVC C2001/C2143 编译错误）。
+            static const std::regex kNameFieldSalvage(R"RX("name"\s*:\s*"([A-Za-z_]\w*)")RX");
+            std::smatch match;
+            if (std::regex_search(malformedText, match, kNameFieldSalvage))
+            {
+                std::string salvaged_tool = NormalizeAndMatchToolName(match[1].str());
+                if (!salvaged_tool.empty())
+                {
+                    json partial = json::object();
+                    partial["name"] = salvaged_tool;
+                    partial["arguments"] = json::object();
+                    *out_partial_recovery = partial;
+                }
+            }
+        }
         return false;
     }
 
@@ -1522,4 +1623,198 @@ bool ResponseTools::TryLayer1Recovery(const std::string &malformedText, json &ou
     out_tool_call["arguments"] = args;
     out_reason = ToolCallFailureReason::kNone;
     return true;
+}
+
+bool ResponseTools::DetectBareToolCall(const std::string &visible_text, std::string &out_wrapped)
+{
+    std::string text = StripLeadingTrailingCodeFence(visible_text);
+    if (text.empty() || text.find('{') == std::string::npos)
+    {
+        return false; // 快速失败：连一个 '{' 都没有，谈不上候选
+    }
+
+    std::vector<Layer1Candidate> candidates = ExtractBalancedJsonCandidates(text);
+    if (candidates.empty())
+    {
+        return false;
+    }
+
+    // 记录"看起来像工具调用"的候选跨度（首个候选起点到末个候选终点），而不是只取第一个
+    // 命中的候选——多个候选混杂时，wrap 整个跨度交给下游 convertToolCallJson()->
+    // TryLayer1Recovery() 处理，让其既有的 kAmbiguousMultipleCalls 判定（reasonable.size()>=2）
+    // 仍能正常生效，不会被本函数在检测阶段就"盲目取第一个"绕过。
+    size_t first_start = std::string::npos;
+    size_t last_end = 0;
+    int reasonable_count = 0;
+
+    for (const auto &candidate : candidates)
+    {
+        json parsed;
+        bool truncated_signal = false;
+        if (!TryParseLayer1Candidate(candidate, parsed, truncated_signal))
+        {
+            continue;
+        }
+        std::string matched_tool;
+        if (!LooksLikeBareToolCallCandidate(parsed, matched_tool))
+        {
+            continue;
+        }
+
+        ++reasonable_count;
+        if (first_start == std::string::npos)
+        {
+            first_start = candidate.start_pos;
+        }
+        last_end = candidate.start_pos + candidate.text.size();
+    }
+
+    if (reasonable_count == 0)
+    {
+        // 没有任何候选同时满足"已知工具名 + 参数字段"，不构成工具调用意图信号
+        // （包括普通数据 JSON、name 字段无法匹配已知工具等情形）。
+        return false;
+    }
+
+    // 候选嵌在大段说明文字中间时不转换：候选跨度之外（首候选之前的前缀 + 末候选之后的
+    // 后缀，去除首尾空白后）的长度，必须不超过候选跨度本身长度，或不超过一个较小的绝对
+    // 阈值（覆盖"我将执行:\n{...}"这类简短前置说明的情形）——两者满足其一即可继续判定为
+    // 命中；否则视为"这是一个 JSON 示例"式的普通回答，不予转换。
+    std::string prefix = TrimWhitespace(text.substr(0, first_start));
+    std::string suffix = TrimWhitespace(text.substr(last_end));
+    size_t prose_len = prefix.size() + suffix.size();
+    size_t candidate_span_len = last_end - first_start;
+    static constexpr size_t kProseAbsoluteAllowance = 80;
+    if (prose_len > candidate_span_len && prose_len > kProseAbsoluteAllowance)
+    {
+        return false;
+    }
+
+    out_wrapped = ResponseTools::wrapJsonInToolCall(text.substr(first_start, candidate_span_len));
+    return true;
+}
+
+void ResponseTools::ApplyBareJsonHoldBack(BareJsonHoldState &state,
+                                          const std::string &response_buffer_after_append,
+                                          const std::string &message,
+                                          std::string &chunk)
+{
+    if (state.bare_json_hold_released || chunk.empty())
+    {
+        return;
+    }
+
+    // 对一段"疑似 post-think"内容做一次裸 JSON 判定；调用后 post_think_judged 恒为
+    // true——即使 candidate 全是空白（尚不足以看出是否像 JSON），也算"已经判定为不像"，
+    // 与此前既有语义保持一致（先到的空白/说明性文字直接放行，不会因为后面紧跟 JSON 而
+    // 回头改判）。两个调用点（</think> 与 post-think 内容同在一个 chunk 内 / 分处两个不同
+    // chunk）共用同一份判定逻辑，避免重复实现。
+    auto judge_post_think_candidate = [&state](const std::string &candidate) -> bool
+    {
+        state.post_think_judged = true;
+        size_t ts = candidate.find_first_not_of(" \t\r\n");
+        std::string trimmed = (ts == std::string::npos) ? std::string() : candidate.substr(ts);
+        bool looks_like_bare_json_start = !trimmed.empty() &&
+            (trimmed[0] == '{' ||
+             trimmed.compare(0, std::min<size_t>(3, trimmed.size()), "```") == 0);
+        if (looks_like_bare_json_start)
+        {
+            state.bare_json_hold = true;
+            state.held_visible = candidate;
+        }
+        return looks_like_bare_json_start;
+    };
+
+    if (!state.think_closed)
+    {
+        size_t think_pos = response_buffer_after_append.rfind("</think>");
+        if (think_pos == std::string::npos)
+        {
+            // 尚未见到 </think>：think 部分照常实时流式转发，不做任何处理。
+            return;
+        }
+
+        state.think_closed = true;
+        size_t after_tag = think_pos + 8; // strlen("</think>")
+        // chunk 在本分支下（从未匹配到 <tool_call> 标签前缀）与 message 逐字节一致，用
+        // response_buffer 的整体位置反推 chunk 内的分割点，把 chunk 拆成"</think>及之前"
+        // （照常发送）与"之后"（进入 hold 判定）。
+        size_t buffer_len_before_this_message = response_buffer_after_append.length() - message.length();
+        std::string post_think_part;
+        if (after_tag > buffer_len_before_this_message
+            && (after_tag - buffer_len_before_this_message) < chunk.size())
+        {
+            size_t split_in_chunk = after_tag - buffer_len_before_this_message;
+            post_think_part = chunk.substr(split_in_chunk);
+            chunk = chunk.substr(0, split_in_chunk);
+        }
+        else if (after_tag <= buffer_len_before_this_message)
+        {
+            // </think> 已经在更早的 message 里出现过，本次 chunk 整段都是 post-think
+            // 部分（保守兜底，正常情况下不会走到这里）。
+            post_think_part = chunk;
+            chunk.clear();
+        }
+        // else（after_tag 恰好等于本次 chunk 末尾，即 "</think>" 独占本次 chunk——
+        // token-by-token 流式推理下的常见边界情形，已用真机 wire response 逐 chunk 复现
+        // 证实）：post_think_part 留空，post_think_judged 保持 false，本次不做任何判定，
+        // 交给下面 "think_closed && !post_think_judged" 分支在下一次调用（下一个到达的
+        // chunk）里补判定——不能把"这次没有 post-think 字节可判定"误当成"已经判定为不像
+        // 裸 JSON"，否则真正的裸 JSON 内容会在下一个 chunk 到达时被直接放行，hold-back
+        // 对这类场景彻底失效（此前的真实 bug）。
+
+        if (!post_think_part.empty())
+        {
+            if (!judge_post_think_candidate(post_think_part))
+            {
+                chunk += post_think_part;
+            }
+        }
+        return;
+    }
+
+    if (!state.post_think_judged)
+    {
+        // think_closed=true，但至今没有任何 post-think 字节被判定过（上一次 </think>
+        // 恰好独占了那次 chunk）——本次 chunk 就是第一段真正到达的 post-think 内容，
+        // 在这里补做判定。
+        if (!chunk.empty())
+        {
+            if (judge_post_think_candidate(chunk))
+            {
+                chunk.clear();
+            }
+            // else: 不像裸 JSON，chunk 保持原样，正常发送。
+        }
+        // else: 本次 chunk 为空（如被 preprocessStream 状态机吞掉），继续等待下一个
+        // chunk，post_think_judged 保持 false。
+        return;
+    }
+
+    if (state.bare_json_hold)
+    {
+        state.held_visible += chunk;
+        chunk.clear();
+
+        static constexpr size_t kBareJsonHoldSoftLimit = 16 * 1024;
+        static constexpr size_t kBareJsonHoldHardLimit = 64 * 1024;
+        bool give_up = state.held_visible.size() > kBareJsonHoldHardLimit ||
+            (state.held_visible.size() > kBareJsonHoldSoftLimit
+             && state.held_visible.find("\"name\"") == std::string::npos);
+        if (give_up)
+        {
+            // 超过上限仍放弃：把已攒的内容当作正常 content 一次性发出，此后本次生成
+            // 不再尝试 hold，避免真实长 JSON 答案被无限拖延。软上限（16KB）额外要求
+            // "仍未见到 \"name\" 字段"才放弃——已经见到 "name" 的候选仍有可能是真实
+            // 工具调用，值得继续 hold 到硬上限（64KB）。
+            chunk = state.held_visible;
+            state.held_visible.clear();
+            state.bare_json_hold = false;
+            state.bare_json_hold_released = true;
+        }
+        return;
+    }
+
+    // else: think_closed && post_think_judged && !bare_json_hold——已判定不是裸 JSON，
+    // 之后的内容一律正常发送，不需要每次都重新判定。
 }

@@ -16,6 +16,7 @@
 #include "watermark_provider_host.h"
 #include <regex>
 #include <algorithm>
+#include <chrono>
 
 namespace
 {
@@ -226,6 +227,20 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
     std::string snapshot_harmony_history_msg;
     bool snapshot_harmony_is_tool_call = false;  // 仅用于回滚后的调试日志文案，不影响持久化内容
 
+    // Layer -1 兜底：无 <tool_call> 标签时的裸 JSON hold-back 状态（仅 General + is_tool_
+    // 场景使用）。核心状态机（think_closed/post_think_judged/bare_json_hold/
+    // bare_json_hold_released/held_visible 字段含义见 ResponseTools::BareJsonHoldState
+    // 声明处注释）已提取到 response_tools.h/.cpp 的 ApplyBareJsonHoldBack()，便于
+    // response_tools_layer1_selftest.cpp 脱离本类模拟"逐 chunk 到达"场景做离线自测；
+    // 这里只保留状态实例本身与不属于"纯状态机"的心跳计时器。生成结束后由
+    // finalize_generation_result() 内的 ResponseTools::DetectBareToolCall() 统一对完整
+    // response_buffer 重新判定，这里的 hold-back 只负责"生成过程中不要提前把疑似裸 JSON
+    // 的内容发给客户端"，两者是分离的关注点。Layer2 内部重试会复用同一个 genie_callback
+    // 闭包，必须随其它状态一起重置（见下方 Layer2 重试代码块），否则首次尝试的残留状态会
+    // 污染重试轮次。详见 response_dispatcher.md「Layer -1 hold-back」一节。
+    ResponseTools::BareJsonHoldState bare_json_state;
+    auto last_hold_keepalive_at = std::chrono::steady_clock::now();
+
     auto genie_callback = [&](std::string &message)
     {
         // Fix 3: check connection before processing any message (including heartbeat keep-alive signals)
@@ -281,6 +296,32 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
         // else Harmony 格式：保留 chunk（已被 HarmonyProcessor 修改为 newContent）
 
         response_buffer += message;  // Keep original message in buffer for history
+
+        // ── Layer -1 兜底：无 <tool_call> 标签时的裸 JSON hold-back ──────────────
+        // 只在声明了 tools、且尚未匹配到 <tool_call> 标签、且是 General 格式时生效
+        // （Harmony 有自己的 channel 协议，不在此处理；标签路径本身不需要这层）。状态机本身
+        // 已提取到 ResponseTools::ApplyBareJsonHoldBack()（response_tools.cpp），这里只负责
+        // 调用并处理心跳保活（心跳依赖 sink，不属于"纯状态机"逻辑，留在调用方）。命中 hold
+        // 时的内容存入 bare_json_state.held_visible，由生成结束后的统一释放逻辑（见
+        // SendResponse 主体 had_tool_call_attempt 之后）决定最终发给客户端还是被 Layer3
+        // tool_calls 取代。
+        if (is_tool_ && !isToolResponse && GetEffectivePromptType() == PromptType::General)
+        {
+            ResponseTools::ApplyBareJsonHoldBack(bare_json_state, response_buffer, message, chunk);
+
+            if (bare_json_state.bare_json_hold)
+            {
+                // hold 期间定期发心跳（约每 5 秒一次），防止代理因长时间无数据超时断连——
+                // prefill_heartbeat 只覆盖 prefill 阶段，这里覆盖的是 decode 阶段的 hold 窗口。
+                auto now = std::chrono::steady_clock::now();
+                if (std::chrono::duration_cast<std::chrono::seconds>(
+                        now - last_hold_keepalive_at).count() >= 5)
+                {
+                    SendKeepAlive(sink);
+                    last_hold_keepalive_at = now;
+                }
+            }
+        }
 
         // 模式检测：根据模型输出内容发送对应的状态反馈（每种状态只发送一次）
         // 注：tool_call 相关状态事件（通用"Calling tool..."与细粒度工具名状态）已不再在
@@ -486,43 +527,30 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                     }
                 }
             }
-            // ── General 格式兜底：检测裸 JSON 工具调用（无 <tool_call> 标签）──────────
-            // 背景：模型有时会省略 <tool_call> 标签，直接输出裸 JSON（如 {"name":"read",...}）。
-            // 流式处理时，genie_callback 逐 token 调用，preprocessStream() 状态机无法识别
-            // 以 '{' 开头的裸 JSON 为工具调用，导致 isToolResponse 始终为 false。
-            // 此处在 Query() 结束后，对 response_buffer 做一次整体检测：
-            //   - 若 isToolResponse 仍为 false（流式处理未识别）
-            //   - 且 response_buffer 以 '{' 开头（去除首尾空白后）
-            //   - 且包含 "name" 字段（工具调用的必要字段）
-            //   - 且不含 "</tool_call>"（避免重复处理已正常识别的工具调用）
-            // 则将 response_buffer 视为裸 JSON 工具调用，补全标签后设置 isToolResponse=true。
-            else if (!isToolResponse && GetEffectivePromptType() == PromptType::General)
+            // ── Layer -1 兜底：无 <tool_call> 标签时的裸 JSON 工具调用检测 ────────────
+            // 背景：模型有时会省略 <tool_call> 标签，直接输出裸 JSON（如 {"name":"read",...}），
+            // 有时前面还带着 <think>...</think> 思考前缀、简短前置说明文字，或用 ```json
+            // 代码围栏包裹。原有检测（要求 response_buffer trim 后必须直接以 '{' 开头）
+            // 漏掉了这几类真实存在的输出形态——漏检时 isToolResponse 永远保持 false，
+            // Layer0/1/2/3 全部被跳过，最终 finish_reason="stop"，客户端误判任务已完成，
+            // 这正是本层要修复的缺口。收窄条件加上 is_tool_（未声明 tools 时不应触发）。
+            // 检测逻辑复用既有的 ExtractBalancedJsonCandidates/TryParseLayer1Candidate/
+            // ExtractNameField/NormalizeAndMatchToolName（见 ResponseTools::DetectBareToolCall
+            // 实现），不重复实现修复逻辑；命中后交由下方既有的 convertToolCallJson()->
+            // Layer1/2/3 链路统一处理。
+            else if (!isToolResponse && is_tool_ && GetEffectivePromptType() == PromptType::General)
             {
-                // 去除首尾空白后检查
-                std::string trimmed = response_buffer;
-                size_t trim_start = trimmed.find_first_not_of(" \t\r\n");
-                size_t trim_end   = trimmed.find_last_not_of(" \t\r\n");
-                if (trim_start != std::string::npos)
-                    trimmed = trimmed.substr(trim_start, trim_end - trim_start + 1);
-
-                if (!trimmed.empty() && trimmed[0] == '{' &&
-                    trimmed.find("\"name\"") != std::string::npos &&
-                    trimmed.find("</tool_call>") == std::string::npos)
+                std::string visible_text = extractFinalAnswer(response_buffer);
+                std::string wrapped;
+                if (ResponseTools::DetectBareToolCall(visible_text, wrapped))
                 {
-                    // 找到最后一个 '}' 作为 JSON 结束位置，补全标签对
-                    size_t last_brace = trimmed.rfind('}');
-                    if (last_brace != std::string::npos)
-                    {
-                        std::string wrapped = "<tool_call>" + trimmed.substr(0, last_brace + 1) + "</tool_call>";
-                        isToolResponse = true;
-                        toolResponse   = wrapped;
-                        My_Log{My_Log::Level::kWarning}
-                            << "[SendResponse] General format: detected bare JSON tool call in response_buffer. "
-                            << "Auto-wrapped with <tool_call>...</tool_call>. "
-                            << "Preview: " << trimmed.substr(0, std::min(trimmed.size(), size_t(80))) << std::endl;
+                    isToolResponse = true;
+                    toolResponse = wrapped;
+                    My_Log{My_Log::Level::kWarning}
+                        << "[SendResponse] General format: detected bare JSON tool call (no <tool_call> tag). "
+                        << "Preview: " << wrapped.substr(0, std::min(wrapped.size(), size_t(120))) << std::endl;
 
-                        // 注：同上，不在此处立即发送状态事件，统一交给 finalize_tool_call_layer3()。
-                    }
+                    // 注：同上，不在此处立即发送状态事件，统一交给 finalize_tool_call_layer3()。
                 }
             }
         };
@@ -629,6 +657,11 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                         isToolResponse = false;
                         proc_->Clean();
                         is_tool_ = scratch_is_tool;
+                        // Layer -1 hold-back 状态同样要随 Layer2 重试一起重置——genie_callback
+                        // 是同一个闭包被复用，首次尝试遗留的状态若不清零会污染重试轮次的判定
+                        // （见该状态声明处注释）。
+                        bare_json_state = ResponseTools::BareJsonHoldState();
+                        last_hold_keepalive_at = std::chrono::steady_clock::now();
 
                         My_Log{} << "--- Query Context Start (Layer2 internal retry) ---" << std::endl;
                         bool retry_query_ok = handle->Query(scratch_model_input, genie_callback, prefill_heartbeat);
@@ -835,6 +868,22 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
         if (had_tool_call_attempt)
         {
             finalize_tool_call_layer3(connection_broken ? " (connection_broken)" : "");
+        }
+
+        // Layer -1 hold-back 释放：若生成过程中曾因为"</think> 之后的可见文本以 '{' 或
+        // 代码围栏开头"而暂缓发送（见 genie_callback 内的 hold-back 逻辑），且最终判定
+        // 这不是一次工具调用尝试（had_tool_call_attempt==false，即从未匹配到标签、也未被
+        // 上方 DetectBareToolCall 命中），则把攒住的内容作为一次性 content 补发给客户端——
+        // 这段内容从未走过 genie_callback 里的正常发送路径，若不在此补发会永久丢失。
+        // had_tool_call_attempt==true 时不发送：这段内容本就从未作为 delta.content 发送过，
+        // 天然不会与随后 Layer3 发出的 tool_calls 帧产生"文本+工具调用"的重复问题。
+        // 发送本身不依赖 connection_broken（broken 时 write 静默失败，与其余"无论连接是否
+        // 断开都执行"的收尾步骤一致，如下方历史写入/PrintProfile）。
+        if (!had_tool_call_attempt && !bare_json_state.held_visible.empty() && is_stream_ && sink)
+        {
+            ResponseTools::post_stream_data(*sink, "data",
+                ResponseTools::responseDataJson(bare_json_state.held_visible, "", true));
+            bare_json_state.held_visible.clear();
         }
 
         // ========== P1 修复：统一历史消息存储格式 ==========

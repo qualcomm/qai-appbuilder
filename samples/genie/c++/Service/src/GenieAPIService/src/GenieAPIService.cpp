@@ -382,6 +382,24 @@ int main(int argc, char **argv)
         bool all_passed = RunLayer1RecoverySelfTest(std::cout);
         return all_passed ? 0 : 1;
     }
+    // 隐藏自测分支：离线回放验证 ResponseTools::DetectBareToolCall()（"Layer -1"：无
+    // <tool_call> 标签时的裸 JSON 工具调用检测）。用法：GenieAPIService.exe --self-test-bare-json-detect
+    // 设计取舍见 src/response/response_tools.md「Layer -1」节。
+    if (argc > 1 && std::string(argv[1]) == "--self-test-bare-json-detect")
+    {
+        bool all_passed = RunBareToolCallDetectionSelfTest(std::cout);
+        return all_passed ? 0 : 1;
+    }
+    // 隐藏自测分支：离线回放验证 ResponseTools::ApplyBareJsonHoldBack()（"Layer -1" 流式
+    // hold-back 状态机）在"逐 chunk 到达"场景下的行为，与上面的 --self-test-bare-json-detect
+    // 是两条独立代码路径——真机复现的"</think> 独占一个 chunk"边界 bug 只会在这里被捕获。
+    // 用法：GenieAPIService.exe --self-test-bare-json-holdback
+    // 设计取舍见 src/response/response_dispatcher.md「Layer -1 hold-back」一节。
+    if (argc > 1 && std::string(argv[1]) == "--self-test-bare-json-holdback")
+    {
+        bool all_passed = RunBareJsonHoldBackStreamingSelfTest(std::cout);
+        return all_passed ? 0 : 1;
+    }
     // 隐藏自测分支：离线回放验证 ResponseTools::remove_tool_call_content() 的最终防线（对
     // 未闭合/跨多行截断的 <tool_call> 输入是否彻底清空,不泄漏任何标签/JSON碎片）。
     // 用法：GenieAPIService.exe --self-test-sanitization
