@@ -53,6 +53,7 @@ done/error 终止帧即可。多轮 agent 任务里的"多轮"，指的是本脚
 
 import argparse
 import json
+import py_compile
 import re
 import subprocess
 import sys
@@ -780,6 +781,227 @@ def run_model_build_probe_task(builder, model_name, results, round_num=1, stream
     return passed
 
 
+# ============================================================================
+# 任务二：编写一个可运行的俄罗斯方块小程序（write/exec 通用工具，无需 model-builder
+# 专属技能流程；重复循环空转问题已在 model_conversion 任务上定位并通过
+# RepetitionWatchdog + "立即行动"prompt 解决，本任务直接复用同一套机制）。
+# ============================================================================
+_DEFAULT_TETRIS_PATH = _DEFAULT_WORKSPACE_ROOT + r"\tetris\tetris.py"
+
+# 措辞刻意规避带嵌套引号的 shell one-liner（如 `python -c "..."`）：上一轮
+# model_conversion 真机验证发现模型在复现这类嵌套转义时会生成缺 <tool_call> 标签、
+# 转义错误的畸形 JSON，导致工具从未被真正调用（见 test_builder_agent_tasks.py.notes.md）。
+# tetris 任务的 write/exec 指令全部只涉及普通文件路径参数，不复刻这个坑。
+_TETRIS_INITIAL_PROMPT_TEMPLATE = (
+    "任务：用 write 工具创建 {tetris_path}（只用 Python 标准库 + tkinter，不依赖任何第三方包）。"
+    "该文件必须支持命令行参数 --selftest：加了该参数时跳过 GUI 初始化，headless 运行约 200 步"
+    "游戏逻辑（方块下落、旋转、消行），全部完成后打印 SELFTEST OK 并正常退出；不加该参数时才"
+    "启动 tkinter 窗口正常游玩（方向键移动/旋转/下落，能消行，能显示分数）。写完后用 exec 工具运行"
+    "python {tetris_path} --selftest 验证，如果报错就修复后重新运行 exec 验证，直到看到 SELFTEST OK。\n\n"
+    "现在只做第一步：立即调用 write 工具创建这个文件的初始版本。\n\n"
+    "规则：每次回复必须以一个工具调用开始；不要复述任务或计划，不要写\"我需要……\"。"
+    "思考不超过三句话。"
+)
+
+_TETRIS_FOLLOWUP_PROMPT_TEMPLATE = (
+    "不要复述计划。立即调用 exec 工具运行 python {tetris_path} --selftest 验证刚才写的代码，"
+    "如果报错就立即调用 write 工具修复对应问题，然后重新调用 exec 验证，直到看到 SELFTEST OK 为止。"
+    "思考不超过三句话。如果被无法自主解决的问题卡住，只用一句话说明卡在哪一步和具体报错。"
+)
+
+_TETRIS_STATIC_CHECKS = {
+    "rotate_logic": re.compile(r"def\s+\w*rotat\w*\s*\(|\brotat\w*\s*\(", re.I),
+    "clear_lines_logic": re.compile(r"def\s+\w*clear\w*\s*\(|clear[_ ]?(line|row)s?", re.I),
+    "selftest_flag": re.compile(r"--selftest"),
+    "tkinter_import": re.compile(r"^\s*(import\s+tkinter\b|from\s+tkinter\b)", re.I | re.M),
+}
+
+
+def _check_tetris_static(content):
+    """静态检查核心游戏逻辑关键特征是否存在（旋转/消行相关代码、--selftest 开关、
+    tkinter 引用）。只做关键词/简单正则匹配，不做真正的 AST 语义分析——足以区分
+    "完全没写游戏逻辑的空壳（比如只是打印 SELFTEST OK 就退出的取巧实现）"与
+    "至少真的尝试实现了核心机制"，不追求精确匹配真实游戏规则。
+    返回 (all_ok, markers_dict)。"""
+    markers = {k: bool(pattern.search(content)) for k, pattern in _TETRIS_STATIC_CHECKS.items()}
+    return all(markers.values()), markers
+
+
+def _check_tetris_file(tetris_path):
+    """检查目标文件是否存在，并用 py_compile 校验语法有效性（只检查能否编译，不实际执行）。
+    返回 (file_exists, compiles_ok, compile_err)。"""
+    p = Path(tetris_path)
+    if not p.is_file():
+        return False, False, None
+    try:
+        py_compile.compile(str(p), doraise=True)
+        return True, True, None
+    except py_compile.PyCompileError as e:
+        return True, False, str(e)
+    except (OSError, SyntaxError, ValueError) as e:
+        return True, False, f"{type(e).__name__}: {e}"
+
+
+def _run_tetris_selftest(tetris_path, python_exe="python", timeout=60):
+    """脚本自己（不依赖模型自称"已验证通过"）执行
+    `<python_exe> <tetris_path> --selftest`（带超时），要求进程 exit code 为 0
+    且 stdout 含 "SELFTEST OK"——这是"产物真实可用"的硬判据。返回 (ok, detail)。"""
+    try:
+        proc = subprocess.run(
+            [python_exe, str(tetris_path), "--selftest"],
+            capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return False, f"selftest 执行超时(>{timeout}s)"
+    except (OSError, subprocess.SubprocessError) as e:
+        return False, f"selftest 子进程异常: {type(e).__name__}: {e}"
+    ok = proc.returncode == 0 and "SELFTEST OK" in proc.stdout
+    detail = (f"exit_code={proc.returncode}; stdout_tail={proc.stdout[-500:]!r}; "
+              f"stderr_tail={proc.stderr[-500:]!r}")
+    return ok, detail
+
+
+def run_tetris_task(builder, model_name, results, round_num=1,
+                     tetris_path=_DEFAULT_TETRIS_PATH, python_exe="python",
+                     max_turns=3, per_turn_timeout=600, total_deadline_seconds=1200,
+                     busy_poll_interval_seconds=30, transcript_path=None):
+    """任务二：驱动本地模型用 write/exec 工具写出一个可运行的俄罗斯方块小程序。
+
+    判定标准（四项，均落地为实际代码检查，不是模型自称"已经验证通过"就算数）：
+      1. 目标文件真实存在；
+      2. py_compile 通过（语法有效，只检查能否编译，不实际执行）；
+      3. 本脚本自己（不经过模型）执行 `python <path> --selftest`（带超时），
+         要求 exit code 为 0 且 stdout 含 "SELFTEST OK"；
+      4. 静态检查核心游戏逻辑关键特征存在（旋转/消行相关代码、--selftest 开关、
+         tkinter 引用），防止"文件里只打印了 SELFTEST OK 但根本没有游戏逻辑"这种
+         取巧实现被误判为成功。
+
+    多轮/busy-wait 策略与 run_model_conversion_task 完全一致（见其文档字符串），
+    复用同一套 send_agent_chat_turn + RepetitionWatchdog 机制；续问 prompt 会把上一轮
+    具体的编译/selftest 报错带上，帮模型定位问题而不是盲目重试。"""
+    name = f"AGENT-TASK: tetris model={model_name} target={tetris_path}"
+    task_started = time.time()
+    task_deadline = task_started + total_deadline_seconds
+
+    ready, ready_err = wait_local_backend_ready(builder_genie_port_of(builder), model_name)
+    if not ready:
+        results.append(TestResult(
+            name=name, round_num=round_num, model_name=model_name,
+            passed=False, status_code=0, latency_ms=0,
+            detail=f"后端未就绪，跳过任务: {ready_err}", crashed=True))
+        return False
+
+    prompt = _TETRIS_INITIAL_PROMPT_TEMPLATE.format(tetris_path=tetris_path)
+    conversation_id = None
+    transcript = []
+    real_turns_used = 0
+    attempts_used = 0
+    gave_up_while_busy = False
+    passed, detail, text, frame_types, frame_reasons, busy = (
+        False, "未发起任何请求（总时限在第一轮之前已耗尽）", "", [], [], False)
+
+    file_exists = compiles_ok = selftest_ok = static_ok = False
+    compile_err = selftest_detail = None
+    static_markers = {}
+
+    while True:
+        remaining = task_deadline - time.time()
+        if remaining <= 30:
+            transcript.append(f"[总时限] 剩余 {remaining:.0f}s，终止")
+            break
+        if real_turns_used >= max_turns:
+            transcript.append(f"[真实续问轮次] 已用完 max_turns={max_turns}，终止")
+            break
+
+        real_turns_used += 1
+        print(f"  [STAGE] tetris 真实轮次 {real_turns_used}/{max_turns} 开始: conversation_id={conversation_id}, "
+              f"prompt_excerpt={prompt[:80]!r}...", flush=True)
+
+        while True:
+            attempts_used += 1
+            remaining = task_deadline - time.time()
+            if remaining <= 30:
+                break
+            call_timeout = min(per_turn_timeout, max(30, remaining))
+            passed, detail, text, conversation_id, frame_types, frame_reasons, busy = send_agent_chat_turn(
+                builder, model_name, prompt, conversation_id=conversation_id,
+                title="Agent Task: tetris", stream_timeout=call_timeout,
+                transcript_path=transcript_path,
+                turn_label=f"tetris real_turn={real_turns_used} attempt={attempts_used}",
+                watchdog=RepetitionWatchdog())
+            if not busy:
+                break
+            remaining = task_deadline - time.time()
+            print(f"  [STAGE] tetris 探测到 existing_run（会话忙），attempts_used={attempts_used}, "
+                  f"剩余总预算 {remaining:.0f}s，等待 {busy_poll_interval_seconds}s 后重新探测", flush=True)
+            transcript.append(f"[real_turn {real_turns_used}] busy; attempts_used={attempts_used}; "
+                               f"remaining={remaining:.0f}s; detail={detail}")
+            if remaining <= busy_poll_interval_seconds + 30:
+                transcript.append(f"[real_turn {real_turns_used}] 总时限即将耗尽，放弃继续等待 busy 状态解除")
+                break
+            time.sleep(busy_poll_interval_seconds)
+
+        print(f"  [STAGE] tetris 真实轮次 {real_turns_used}/{max_turns} 结束: passed={passed}; busy={busy}; "
+              f"conversation_id={conversation_id}; frame_types={frame_types}; "
+              f"frame_reasons={frame_reasons}", flush=True)
+        transcript.append(f"[real_turn {real_turns_used}] passed={passed}; busy={busy}; detail={detail}; "
+                           f"text_excerpt={text[:500]!r}")
+
+        if busy:
+            gave_up_while_busy = True
+            transcript.append(f"[real_turn {real_turns_used}] 会话持续忙碌直至总时限耗尽，任务终止")
+            break
+
+        file_exists, compiles_ok, compile_err = _check_tetris_file(tetris_path)
+        if file_exists and compiles_ok:
+            selftest_ok, selftest_detail = _run_tetris_selftest(tetris_path, python_exe)
+            if selftest_ok:
+                try:
+                    content = Path(tetris_path).read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    content = ""
+                static_ok, static_markers = _check_tetris_static(content)
+                print(f"  [STAGE] tetris 真实轮次 {real_turns_used}/{max_turns} selftest 通过; "
+                      f"static_ok={static_ok}; markers={static_markers}", flush=True)
+                transcript.append(f"[real_turn {real_turns_used}] selftest 通过; static_ok={static_ok}; "
+                                   f"markers={static_markers}")
+                break
+            transcript.append(f"[real_turn {real_turns_used}] selftest 未通过: {selftest_detail}")
+        elif file_exists:
+            transcript.append(f"[real_turn {real_turns_used}] 文件存在但 py_compile 失败: {compile_err}")
+        else:
+            transcript.append(f"[real_turn {real_turns_used}] 目标文件尚不存在: {tetris_path}")
+
+        if not passed and conversation_id is None:
+            transcript.append(f"[real_turn {real_turns_used}] SSE 请求本身失败且未获得 conversation_id，终止本任务")
+            break
+
+        followup_extra = ""
+        if file_exists and not compiles_ok:
+            followup_extra = f"\n\n上次 py_compile 报错：{compile_err}"
+        elif file_exists and compiles_ok and not selftest_ok:
+            followup_extra = f"\n\n上次运行 --selftest 失败：{selftest_detail}"
+        prompt = _TETRIS_FOLLOWUP_PROMPT_TEMPLATE.format(tetris_path=tetris_path) + followup_extra
+
+    elapsed = time.time() - task_started
+    ok = file_exists and compiles_ok and selftest_ok and static_ok
+    detail_text = (
+        f"real_turns_used={real_turns_used}/{max_turns}; attempts_used={attempts_used}; "
+        f"gave_up_while_busy={gave_up_while_busy}; elapsed={elapsed:.0f}s; "
+        f"file_exists={file_exists}; compiles_ok={compiles_ok}; compile_err={compile_err}; "
+        f"selftest_ok={selftest_ok}; selftest_detail={selftest_detail}; "
+        f"static_ok={static_ok}; static_markers={static_markers}; "
+        f"transcript=\n" + "\n".join(transcript)
+    )
+    results.append(TestResult(
+        name=name, round_num=round_num, model_name=model_name,
+        passed=ok, status_code=0, latency_ms=elapsed * 1000,
+        detail=detail_text,
+        # 与 model_conversion 一致：首次真实驱动，未完成时按真实失败上报，不做
+        # ignorable 豁免（不是"服务端已知缺陷"，是"任务尚未验证通过"）。
+        response_data={"conversation_id": conversation_id, "tetris_path": tetris_path}))
+    return ok
+
+
 def builder_genie_port_of(builder):
     """从 QAIModelBuilderManager 实例反推它当前代理的 GenieAPIService 端口。
     Builder 侧固定通过 /api/service/status 的 port 字段暴露真实端口，这里做一次同步查询
@@ -797,11 +1019,12 @@ def build_arg_parser():
         description="QAIModelBuilder + 本地模型真实多轮 agent 任务测试",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("--task", default="model_conversion",
-                        choices=["model_conversion", "model_build_probe"],
+                        choices=["model_conversion", "model_build_probe", "tetris"],
                         help="要运行的任务场景：model_conversion 是完整的模型转换多轮任务；"
                              "model_build_probe 是极简 prompt 探测 model-build 模式基础可用性"
                              "（几十秒量级，用于判断 empty_response 是环境/代理层问题还是"
-                             "'重系统提示词+复杂任务'组合本身的问题）。俄罗斯方块任务留给后续阶段实现。")
+                             "'重系统提示词+复杂任务'组合本身的问题）；tetris 是用 write/exec 通用"
+                             "工具驱动模型编写并自验证一个可运行的俄罗斯方块小程序。")
     parser.add_argument("--exe_dir", required=True, help="GenieAPIService 安装目录（含 GenieAPIService.exe）")
     parser.add_argument("--models", required=True, help="本地模型根目录（--models/<name>/config.json）")
     parser.add_argument("--model_name", default="qwen3-8b-8480",
@@ -815,6 +1038,10 @@ def build_arg_parser():
     parser.add_argument("--genie_port", type=int, default=8901, help="GenieAPIService 监听端口")
     parser.add_argument("--small_model_path", default=_DEFAULT_SMALL_MODEL_PATH,
                         help="model_conversion 任务的转换目标 ONNX 文件（远程机器本地路径）")
+    parser.add_argument("--tetris_path", default=_DEFAULT_TETRIS_PATH,
+                        help="tetris 任务的目标输出文件路径（远程机器本地路径）")
+    parser.add_argument("--python_exe", default="python",
+                        help="tetris 任务用来执行 --selftest 自验证的 Python 解释器")
     parser.add_argument("--workspace_root", default=_DEFAULT_WORKSPACE_ROOT,
                         help="model-builder 技能的工作目录根（默认 C:\\WoS_AI）")
     parser.add_argument("--max_turns", type=int, default=4,
@@ -900,6 +1127,16 @@ def main():
                 run_model_build_probe_task(
                     builder, args.model_name, all_results,
                     stream_timeout=args.per_turn_timeout,
+                    transcript_path=transcript_path)
+            elif args.task == "tetris":
+                run_tetris_task(
+                    builder, args.model_name, all_results,
+                    tetris_path=args.tetris_path,
+                    python_exe=args.python_exe,
+                    max_turns=args.max_turns,
+                    per_turn_timeout=args.per_turn_timeout,
+                    total_deadline_seconds=args.total_deadline_seconds,
+                    busy_poll_interval_seconds=args.busy_poll_interval_seconds,
                     transcript_path=transcript_path)
     except RuntimeError as e:
         print(f"  ✗ {e}")
