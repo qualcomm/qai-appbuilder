@@ -118,6 +118,12 @@ python -m build -w
 
 The Windows SDK must provide `include/tensorflow/lite/c/c_api.h`, a `tensorflowlite_c.lib` or `tflite_c.lib` import library under `lib/`, and the matching `tensorflowlite_c.dll` or `tflite_c.dll` under `bin/` or `lib/`. The wheel contains the CPU runtime DLL under `qai_appbuilder/libs/` and does not package `libQnnTFLiteDelegate.so`. `APPBUILDER_ENABLE_TFLITE` and `APPBUILDER_ENABLE_TFLITE_CPU` are mutually exclusive. Do not enable either option unless the runtime artifacts are licensed for redistribution.
 
+#### Direct TFLite runtime limitations
+
+Direct `.tflite` contexts expose a single interpreter graph. Pass only `graphIndex=0` (or omit it) to `QNNContext.Inference()` and metadata getters such as `getInputShapes()`; non-zero graph indices raise an error and multi-graph selection is not supported for `.tflite` models.
+
+`getProfilingEvent()` returns `0` for direct `.tflite` contexts because this path does not expose QNN profiling events. Do not interpret `0` as a measured profiling result.
+
 ### Install Python Dependencies
 
 Upgrade build tooling and install required Python packages:

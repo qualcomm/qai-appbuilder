@@ -954,6 +954,8 @@ class QNNContext(_QNNContextBase):
         if self._is_tflite_model:
             if perf_profile != PerfProfile.DEFAULT:
                 raise ValueError(".tflite models do not support performance profiles")
+            if graphIndex != 0:
+                raise ValueError(".tflite models expose a single graph; graphIndex must be 0")
             return self._inference_and_reshape(
                 input,
                 lambda _in: self.m_context.Inference(_in, graphIndex),
