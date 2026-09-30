@@ -79,6 +79,33 @@ def test_windows_cpu_dispatch_uses_cpu_binding(monkeypatch, tmp_path: Path) -> N
         context.release()
 
 
+def test_tflite_rejects_nonzero_graph_index_before_native_call(tmp_path: Path, monkeypatch) -> None:
+    import qai_appbuilder.qnncontext as qnncontext
+
+    class FakeContext:
+        calls = []
+
+        def __init__(self, model_name, model_path):
+            self.model_path = model_path
+
+        def Inference(self, input_data, graph_index):
+            self.calls.append(graph_index)
+            return []
+
+        def release(self):
+            return None
+
+    monkeypatch.setattr(qnncontext.sys, "platform", "win32")
+    monkeypatch.setattr(qnncontext.appbuilder, "TFLiteCpuContext", FakeContext, raising=False)
+    context = QNNContext(model_path=_model_file(tmp_path))
+    try:
+        with pytest.raises(ValueError, match="graphIndex must be 0"):
+            context.Inference([], graphIndex=1)
+        assert FakeContext.calls == []
+    finally:
+        context.release()
+
+
 def test_onnx_detection_remains_unchanged(tmp_path: Path) -> None:
     path = tmp_path / "model.onnx"
     path.write_bytes(b"not a valid model")
