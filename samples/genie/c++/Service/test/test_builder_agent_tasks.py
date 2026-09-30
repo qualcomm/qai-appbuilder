@@ -953,19 +953,26 @@ def run_tetris_task(builder, model_name, results, round_num=1,
 
         file_exists, compiles_ok, compile_err = _check_tetris_file(tetris_path)
         if file_exists and compiles_ok:
+            # 静态检查独立于 selftest 结果无条件执行：selftest_ok 反映"模型自己写的
+            # 自验证脚本是否通过"，static_ok 反映"源码里是否真的含核心游戏逻辑关键特征"，
+            # 这是两个正交的诊断维度——此前 static_ok/static_markers 被嵌在
+            # `if selftest_ok:` 分支内，selftest 失败时永远短路为初始默认值 (False, {})，
+            # 导致"完全没写游戏逻辑"和"写了但 selftest 本身有 bug"这两种截然不同的情形
+            # 在报告里无法区分（真机验证已实测复现：模型产出的 tetris.py 核心逻辑完整
+            # 但其自撰写的 selftest() 从未调用 move/rotate 导致提前 Game Over）。
+            try:
+                content = Path(tetris_path).read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                content = ""
+            static_ok, static_markers = _check_tetris_static(content)
             selftest_ok, selftest_detail = _run_tetris_selftest(tetris_path, python_exe)
-            if selftest_ok:
-                try:
-                    content = Path(tetris_path).read_text(encoding="utf-8", errors="replace")
-                except OSError:
-                    content = ""
-                static_ok, static_markers = _check_tetris_static(content)
-                print(f"  [STAGE] tetris 真实轮次 {real_turns_used}/{max_turns} selftest 通过; "
-                      f"static_ok={static_ok}; markers={static_markers}", flush=True)
-                transcript.append(f"[real_turn {real_turns_used}] selftest 通过; static_ok={static_ok}; "
-                                   f"markers={static_markers}")
+            print(f"  [STAGE] tetris 真实轮次 {real_turns_used}/{max_turns} selftest_ok={selftest_ok}; "
+                  f"static_ok={static_ok}; markers={static_markers}", flush=True)
+            transcript.append(f"[real_turn {real_turns_used}] selftest_ok={selftest_ok}; "
+                               f"static_ok={static_ok}; markers={static_markers}; "
+                               f"selftest_detail={selftest_detail}")
+            if selftest_ok and static_ok:
                 break
-            transcript.append(f"[real_turn {real_turns_used}] selftest 未通过: {selftest_detail}")
         elif file_exists:
             transcript.append(f"[real_turn {real_turns_used}] 文件存在但 py_compile 失败: {compile_err}")
         else:
