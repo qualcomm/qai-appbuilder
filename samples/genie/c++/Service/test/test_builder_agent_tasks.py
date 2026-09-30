@@ -52,9 +52,11 @@ done/error 终止帧即可。多轮 agent 任务里的"多轮"，指的是本脚
 """
 
 import argparse
+import json
 import subprocess
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 from datetime import datetime
 
@@ -277,11 +279,86 @@ def wait_local_backend_ready(genie_service_port, model_name, timeout=300):
 
 
 # ============================================================================
+# 完整对话转录（诊断用，供人工事后阅读判断模型推理内容是否正常）
+# ============================================================================
+def _extract_turn_content(message_events):
+    """从 message 事件的 frame payload 中提取三样东西：
+      1) full_text —— 拼接全部 frame_type=="chunk" 的 payload.text（真实生成文本，
+         不是事件名/整帧 JSON），这是判断模型推理内容是否正常的核心依据；
+      2) frame_counts —— 按 frame_type 计数的摘要（替代过去 events=[名字,名字,...]
+         这种对长轮次会膨胀成几十万字符却零诊断价值的重复列表）；
+      3) notable_frames —— 除 chunk/tool_mode_changed/end 之外的完整帧（如
+         tool_call/tool_result 等），原样保留而不猜测其具体字段名，避免因猜错
+         字段名丢失诊断信息（本次真机运行范围内从未见过 tool_call 帧，具体结构
+         未知，保留原始 payload 是唯一稳妥做法）。"""
+    counts = Counter()
+    text_parts = []
+    notable_frames = []
+    for frame in message_events:
+        if not isinstance(frame, dict):
+            continue
+        ftype = frame.get("frame_type")
+        counts[ftype] += 1
+        if ftype == "chunk":
+            payload = frame.get("payload") or {}
+            t = payload.get("text")
+            if isinstance(t, str):
+                text_parts.append(t)
+        elif ftype not in ("tool_mode_changed", "end"):
+            notable_frames.append(frame)
+    return "".join(text_parts), dict(counts), notable_frames
+
+
+def _append_transcript_entry(transcript_path, turn_label, prompt_text, full_text,
+                          conversation_id, busy, passed, frame_counts, notable_frames,
+                          stream_error):
+    """把一轮真实 SSE 交互（发送的完整 prompt + 模型生成的完整文本 + 识别出的
+    非常规帧 + 关键状态）追加写入独立的转录文件（Markdown，UTF-8），供人工事后
+    完整阅读核实推理内容——不做任何截断，允许单轮内容很大。"""
+    if not transcript_path:
+        return
+    path = Path(transcript_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        f"## {turn_label} — {datetime.now().isoformat(timespec='seconds')}",
+        "",
+        f"- conversation_id: `{conversation_id}`",
+        f"- busy: {busy}",
+        f"- passed: {passed}",
+        f"- frame_counts: {frame_counts}",
+        f"- stream_error: {stream_error}",
+        "",
+        "### Prompt (完整)",
+        "```",
+        prompt_text,
+        "```",
+        "",
+        "### 模型生成文本 (完整，未截断)",
+        "```",
+        full_text if full_text else "(空，本轮未产生任何 chunk 文本)",
+        "```",
+        "",
+    ]
+    if notable_frames:
+        lines += [
+            "### 非常规帧 (tool_call/tool_result 等，原始 payload)",
+            "```json",
+            json.dumps(notable_frames, ensure_ascii=False, indent=2),
+            "```",
+            "",
+        ]
+    lines.append("---\n")
+    with open(path, "a", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+
+# ============================================================================
 # 共享 SSE 聊天驱动 helper（提炼自 test_service._builder_send_chat_message，
 # 泛化出 conversation_id 参数以支持"多轮 agent 任务"里的追加消息）
 # ============================================================================
 def send_agent_chat_turn(builder, model_name, prompt_text, conversation_id=None,
-                          title="Agent Task", stream_timeout=900):
+                          title="Agent Task", stream_timeout=900,
+                          transcript_path=None, turn_label=None):
     """发起（conversation_id=None 时新建）或继续一轮 Builder 真实 SSE 聊天代理链路
     （GET /api/chat/conversations/{id}/stream），解析 event:/data: 帧，读到
     done/error 终止帧为止。返回：
@@ -382,12 +459,19 @@ def send_agent_chat_turn(builder, model_name, prompt_text, conversation_id=None,
                       for ft, rs in zip(frame_types, frame_reasons))
     terminal_error = any(ft == "error" or rs == "failed"
                          for ft, rs in zip(frame_types, frame_reasons))
-    text = " ".join(__import__("json").dumps(p, ensure_ascii=False) for p in message_events)
+    # text 是模型真实生成的文本（拼接全部 chunk 帧的 payload.text），不是事件名列表
+    # 也不是整帧 JSON dump——后两者对判断"模型是否真的在正常推理"毫无价值，只是
+    # 纯粹的字符串膨胀（长轮次曾观测到 ~291KB 全是重复的 'message' 字符串）。
+    text, frame_counts, notable_frames = _extract_turn_content(message_events)
     passed = (not busy and stream_error is None and not error_events and not terminal_error
               and terminal_ok and bool(message_events))
-    detail = (f"conversation_id={conversation_id}; events={[e for e, _ in events]}; "
+    detail = (f"conversation_id={conversation_id}; frame_counts={frame_counts}; "
               f"frame_types={frame_types}; frame_reasons={frame_reasons}; "
               f"error_events={error_events}; stream_error={stream_error}; busy={busy}")
+    _append_transcript_entry(
+        transcript_path, turn_label or f"turn (conversation {conversation_id})",
+        prompt_text, text, conversation_id, busy, passed, frame_counts, notable_frames,
+        stream_error)
     return passed, detail, text, conversation_id, frame_types, frame_reasons, busy
 
 
@@ -445,7 +529,7 @@ def run_model_conversion_task(builder, model_name, results, round_num=1,
                                small_model_path=_DEFAULT_SMALL_MODEL_PATH,
                                workspace_root=_DEFAULT_WORKSPACE_ROOT,
                                max_turns=4, per_turn_timeout=900, total_deadline_seconds=1800,
-                               busy_poll_interval_seconds=45):
+                               busy_poll_interval_seconds=45, transcript_path=None):
     """任务一：驱动本地模型通过 model-builder 技能真实完成一次小模型转换。
 
     多轮策略：第一轮发起转换请求；每轮结束后先检查 workspace_root 下是否已产出
@@ -517,7 +601,9 @@ def run_model_conversion_task(builder, model_name, results, round_num=1,
             call_timeout = min(per_turn_timeout, max(30, remaining))
             passed, detail, text, conversation_id, frame_types, frame_reasons, busy = send_agent_chat_turn(
                 builder, model_name, prompt, conversation_id=conversation_id,
-                title="Agent Task: model conversion", stream_timeout=call_timeout)
+                title="Agent Task: model conversion", stream_timeout=call_timeout,
+                transcript_path=transcript_path,
+                turn_label=f"model_conversion real_turn={real_turns_used} attempt={attempts_used}")
             if not busy:
                 break
             remaining = task_deadline - time.time()
@@ -584,7 +670,8 @@ def run_model_conversion_task(builder, model_name, results, round_num=1,
 _PROBE_PROMPT = "请确认你现在处于 model-build 模式，简单说明你看到了哪些工具。"
 
 
-def run_model_build_probe_task(builder, model_name, results, round_num=1, stream_timeout=120):
+def run_model_build_probe_task(builder, model_name, results, round_num=1, stream_timeout=120,
+                                transcript_path=None):
     """极简 model-build 模式基础可用性探测：只发一条不涉及任何真实转换工作的
     简单 prompt，用来判断此前观察到的 empty_response 是否在最简单场景下也复现——
     复现说明是环境/代理层问题，不复现说明是"重系统提示词+复杂任务"组合本身的问题。
@@ -601,7 +688,7 @@ def run_model_build_probe_task(builder, model_name, results, round_num=1, stream
     print(f"  [STAGE] probe 开始: prompt={_PROBE_PROMPT!r}", flush=True)
     passed, detail, text, conversation_id, frame_types, frame_reasons, busy = send_agent_chat_turn(
         builder, model_name, _PROBE_PROMPT, title="Agent Task: model-build probe",
-        stream_timeout=stream_timeout)
+        stream_timeout=stream_timeout, transcript_path=transcript_path, turn_label="model_build_probe")
     elapsed = time.time() - started
     print(f"  [STAGE] probe 结束: passed={passed}; busy={busy}; frame_types={frame_types}; "
           f"frame_reasons={frame_reasons}; text_excerpt={text[:200]!r}", flush=True)
@@ -663,6 +750,8 @@ def build_arg_parser():
                         help="检测到 existing_run（会话忙）后的轮询间隔（秒），"
                              "用剩余的全部 total_deadline_seconds 耐心等待，不按 max_turns 切分")
     parser.add_argument("--out_dir", default=None, help="结果输出目录，默认 test_results_agent_tasks/<timestamp>")
+    parser.add_argument("--transcript_path", default=None,
+                        help="完整对话转录文件路径（Markdown，未截断），默认 <out_dir>/conversation_transcript_<task>_<timestamp>.md")
     return parser
 
 
@@ -677,6 +766,10 @@ def main():
         str(Path(args.builder_data_dir).resolve()) if args.builder_data_dir
         else str(out_dir / "qaimodelbuilder_data"))
     builder_python_exe = resolve_builder_python(args.builder_python)
+    transcript_path = (
+        Path(args.transcript_path) if args.transcript_path
+        else out_dir / f"conversation_transcript_{args.task}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md")
+    print(f"  [STAGE] 完整对话转录将写入: {transcript_path}", flush=True)
 
     all_results = []
     all_crash_events = []
@@ -724,11 +817,13 @@ def main():
                     max_turns=args.max_turns,
                     per_turn_timeout=args.per_turn_timeout,
                     total_deadline_seconds=args.total_deadline_seconds,
-                    busy_poll_interval_seconds=args.busy_poll_interval_seconds)
+                    busy_poll_interval_seconds=args.busy_poll_interval_seconds,
+                    transcript_path=transcript_path)
             elif args.task == "model_build_probe":
                 run_model_build_probe_task(
                     builder, args.model_name, all_results,
-                    stream_timeout=args.per_turn_timeout)
+                    stream_timeout=args.per_turn_timeout,
+                    transcript_path=transcript_path)
     except RuntimeError as e:
         print(f"  ✗ {e}")
     finally:
