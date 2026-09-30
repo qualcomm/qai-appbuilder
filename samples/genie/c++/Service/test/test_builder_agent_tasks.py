@@ -444,18 +444,27 @@ def _find_conversion_report(workspace_root, deadline_hint=None):
 def run_model_conversion_task(builder, model_name, results, round_num=1,
                                small_model_path=_DEFAULT_SMALL_MODEL_PATH,
                                workspace_root=_DEFAULT_WORKSPACE_ROOT,
-                               max_turns=4, per_turn_timeout=900, total_deadline_seconds=1800):
+                               max_turns=4, per_turn_timeout=900, total_deadline_seconds=1800,
+                               busy_poll_interval_seconds=45):
     """任务一：驱动本地模型通过 model-builder 技能真实完成一次小模型转换。
 
     多轮策略：第一轮发起转换请求；每轮结束后先检查 workspace_root 下是否已产出
     含 "Cosine Similarity Summary" 的 REPORT.md——命中即成功，不再追加轮次。
-    未命中且还有轮次预算时，在同一个 conversation_id 上追加一条通用续问
-    （见 _MODEL_CONVERSION_FOLLOWUP_PROMPT），处理模型在 Blocking Condition
-    上停下来询问确认的情形（B1/B2 等，见 SKILL.md），不新发明协议，只是把
-    "继续 + 已获授权" 说清楚，复用模型本就熟悉的多轮对话模式。
+    未命中且还有真实续问轮次预算（max_turns）时，在同一个 conversation_id 上追加
+    一条通用续问（见 _MODEL_CONVERSION_FOLLOWUP_PROMPT），处理模型在 Blocking
+    Condition 上停下来询问确认的情形（B1/B2 等，见 SKILL.md），不新发明协议，
+    只是把"继续 + 已获授权"说清楚，复用模型本就熟悉的多轮对话模式。
 
-    total_deadline_seconds 是本任务的总耗时上限（跨全部轮次），防止单个任务
-    无限期占用测试预算；到期后如实按"未完成"收尾，不假装成功。"""
+    会话忙（existing_run）等待策略：服务端上一轮真实工作（pip install / 转换
+    脚本执行等）可能持续远超单个 turn 的超时窗口；一旦探测到 busy，不把等待
+    预算按 max_turns 切分成多个"瞬间失败"的独立 turn（那样只会白白消耗 max_turns
+    预算却什么都没等到），改为在同一个探测循环里用**剩余的全部
+    total_deadline_seconds**耐心轮询（每 busy_poll_interval_seconds 秒探测一次），
+    直到会话空闲或总预算真正耗尽为止；busy 轮询本身不计入 max_turns，只有真正拿到
+    非busy响应才算一次"真实轮次"。
+
+    total_deadline_seconds 是本任务的总耗时上限（跨全部真实轮次+全部busy等待），
+    防止单个任务无限期占用测试预算；到期后如实按"未完成"收尾，不假装成功。"""
     name = f"AGENT-TASK: model_conversion model={model_name} target={small_model_path}"
     task_started = time.time()
     task_deadline = task_started + total_deadline_seconds
@@ -479,63 +488,79 @@ def run_model_conversion_task(builder, model_name, results, round_num=1,
     conversation_id = None
     transcript = []
     report_path, report_content = None, None
-    turns_used = 0
-    # busy（existing_run）重试与真实续问轮次分开计数：会话忙不应消耗 max_turns 预算，
-    # 但也要有独立上限防止无限期占用总时限（心跳间隔15s，等待窗口按此校准）。
-    busy_wait_seconds = 20
-    max_busy_retries_per_turn = 20
+    real_turns_used = 0
+    attempts_used = 0  # 含 busy 探测本身的总请求次数（诊断用途，不占预算）
+    gave_up_while_busy = False
+    passed, detail, text, frame_types, frame_reasons, busy = (
+        False, "未发起任何请求（总时限在第一轮之前已耗尽）", "", [], [], False)
 
-    for turn in range(1, max_turns + 1):
+    while True:
         remaining = task_deadline - time.time()
         if remaining <= 30:
-            transcript.append(f"[turn {turn}] 跳过：总时限已到（剩余 {remaining:.0f}s）")
+            transcript.append(f"[总时限] 剩余 {remaining:.0f}s，终止")
             break
-        turns_used = turn
-        turn_timeout = min(per_turn_timeout, max(30, remaining))
-        print(f"  [STAGE] turn {turn}/{max_turns} 开始: conversation_id={conversation_id}, "
-              f"turn_timeout={turn_timeout:.0f}s, prompt_excerpt={prompt[:80]!r}...", flush=True)
+        if real_turns_used >= max_turns:
+            transcript.append(f"[真实续问轮次] 已用完 max_turns={max_turns}，终止")
+            break
 
-        busy_retries = 0
+        real_turns_used += 1
+        print(f"  [STAGE] 真实轮次 {real_turns_used}/{max_turns} 开始: conversation_id={conversation_id}, "
+              f"prompt_excerpt={prompt[:80]!r}...", flush=True)
+
+        # 耐心 busy 等待循环：用剩余的全部 deadline 反复探测同一 conversation，
+        # 不受 max_turns 或单轮 timeout 切分影响（见函数 docstring）。
         while True:
+            attempts_used += 1
+            remaining = task_deadline - time.time()
+            if remaining <= 30:
+                break
+            call_timeout = min(per_turn_timeout, max(30, remaining))
             passed, detail, text, conversation_id, frame_types, frame_reasons, busy = send_agent_chat_turn(
                 builder, model_name, prompt, conversation_id=conversation_id,
-                title="Agent Task: model conversion", stream_timeout=turn_timeout)
+                title="Agent Task: model conversion", stream_timeout=call_timeout)
             if not busy:
                 break
-            busy_retries += 1
             remaining = task_deadline - time.time()
-            print(f"  [STAGE] turn {turn}/{max_turns} 检测到 existing_run（会话忙），"
-                  f"busy_retries={busy_retries}/{max_busy_retries_per_turn}, "
-                  f"等待 {busy_wait_seconds}s 后重新探测同一 conversation", flush=True)
-            transcript.append(f"[turn {turn}] busy_retry={busy_retries}; detail={detail}")
-            if busy_retries >= max_busy_retries_per_turn or remaining <= busy_wait_seconds + 30:
-                transcript.append(f"[turn {turn}] busy 重试预算耗尽或总时限将到，放弃本轮等待")
+            print(f"  [STAGE] 探测到 existing_run（会话忙），attempts_used={attempts_used}, "
+                  f"剩余总预算 {remaining:.0f}s，等待 {busy_poll_interval_seconds}s 后重新探测", flush=True)
+            transcript.append(f"[real_turn {real_turns_used}] busy; attempts_used={attempts_used}; "
+                               f"remaining={remaining:.0f}s; detail={detail}")
+            if remaining <= busy_poll_interval_seconds + 30:
+                transcript.append(f"[real_turn {real_turns_used}] 总时限即将耗尽，放弃继续等待 busy 状态解除")
                 break
-            time.sleep(busy_wait_seconds)
-            # 重新探测同一 conversation 是否已空闲：发一条空探测更容易被服务端立即
-            # 再次判 busy 而不会误触发新的一轮生成，这里复用原 prompt 本身即可，
-            # 因为只要仍 busy，服务端会在收到 message_events 之前就先关连接。
+            time.sleep(busy_poll_interval_seconds)
+            # 重新探测同一 conversation 是否已空闲：只要仍 busy，服务端会在收到
+            # message_events 之前就先关连接，复用原 prompt 本身即可。
 
-        print(f"  [STAGE] turn {turn}/{max_turns} 结束: passed={passed}; busy={busy}; "
+        print(f"  [STAGE] 真实轮次 {real_turns_used}/{max_turns} 结束: passed={passed}; busy={busy}; "
               f"conversation_id={conversation_id}; frame_types={frame_types}; "
               f"frame_reasons={frame_reasons}", flush=True)
-        transcript.append(f"[turn {turn}] passed={passed}; busy={busy}; detail={detail}; text_excerpt={text[:500]!r}")
+        transcript.append(f"[real_turn {real_turns_used}] passed={passed}; busy={busy}; detail={detail}; "
+                           f"text_excerpt={text[:500]!r}")
+
+        if busy:
+            # 一直忙到总预算耗尽也没能等到空闲：模型从未真正处理这条 prompt，
+            # 不算一次有意义的续问，直接结束整个任务（不再追加新 followup）。
+            gave_up_while_busy = True
+            transcript.append(f"[real_turn {real_turns_used}] 会话持续忙碌直至总时限耗尽，任务终止")
+            break
 
         report_path, report_content = _find_conversion_report(workspace_root)
         if report_path is not None:
-            print(f"  [STAGE] turn {turn}/{max_turns} 检测到有效 REPORT.md: {report_path}", flush=True)
-            transcript.append(f"[turn {turn}] 已检测到有效 REPORT.md: {report_path}")
+            print(f"  [STAGE] 真实轮次 {real_turns_used}/{max_turns} 检测到有效 REPORT.md: {report_path}", flush=True)
+            transcript.append(f"[real_turn {real_turns_used}] 已检测到有效 REPORT.md: {report_path}")
             break
         if not passed and conversation_id is None:
             # 连 conversation 都没能建立（比如 Builder 未就绪），没有意义继续追加轮次。
-            transcript.append(f"[turn {turn}] SSE 请求本身失败且未获得 conversation_id，终止本任务")
+            transcript.append(f"[real_turn {real_turns_used}] SSE 请求本身失败且未获得 conversation_id，终止本任务")
             break
         prompt = _MODEL_CONVERSION_FOLLOWUP_PROMPT
 
     elapsed = time.time() - task_started
     ok = report_path is not None
     detail_text = (
-        f"turns_used={turns_used}/{max_turns}; elapsed={elapsed:.0f}s; "
+        f"real_turns_used={real_turns_used}/{max_turns}; attempts_used={attempts_used}; "
+        f"gave_up_while_busy={gave_up_while_busy}; elapsed={elapsed:.0f}s; "
         f"report_found={ok}; report_path={report_path}; "
         f"transcript=\n" + "\n".join(transcript)
     )
@@ -628,9 +653,15 @@ def build_arg_parser():
                         help="model_conversion 任务的转换目标 ONNX 文件（远程机器本地路径）")
     parser.add_argument("--workspace_root", default=_DEFAULT_WORKSPACE_ROOT,
                         help="model-builder 技能的工作目录根（默认 C:\\WoS_AI）")
-    parser.add_argument("--max_turns", type=int, default=4, help="单个任务最多追加的 follow-up 轮次")
+    parser.add_argument("--max_turns", type=int, default=4,
+                        help="单个任务最多追加的真实 follow-up 轮次（不含 busy 等待期间的探测重试）")
     parser.add_argument("--per_turn_timeout", type=int, default=900, help="单轮 SSE 请求超时（秒）")
-    parser.add_argument("--total_deadline_seconds", type=int, default=1800, help="单个任务总耗时上限（秒）")
+    parser.add_argument("--total_deadline_seconds", type=int, default=1800,
+                        help="单个任务总耗时上限（秒，跨全部真实轮次+全部busy等待；"
+                             "model-builder 技能首次执行可能需要安装 QAIRT 工具链，建议 3600-5400）")
+    parser.add_argument("--busy_poll_interval_seconds", type=int, default=45,
+                        help="检测到 existing_run（会话忙）后的轮询间隔（秒），"
+                             "用剩余的全部 total_deadline_seconds 耐心等待，不按 max_turns 切分")
     parser.add_argument("--out_dir", default=None, help="结果输出目录，默认 test_results_agent_tasks/<timestamp>")
     return parser
 
@@ -692,7 +723,8 @@ def main():
                     workspace_root=args.workspace_root,
                     max_turns=args.max_turns,
                     per_turn_timeout=args.per_turn_timeout,
-                    total_deadline_seconds=args.total_deadline_seconds)
+                    total_deadline_seconds=args.total_deadline_seconds,
+                    busy_poll_interval_seconds=args.busy_poll_interval_seconds)
             elif args.task == "model_build_probe":
                 run_model_build_probe_task(
                     builder, args.model_name, all_results,
