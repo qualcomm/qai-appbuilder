@@ -42,6 +42,10 @@ android {
 
     sourceSets["main"].assets.srcDir("src/main/assets")
 
+    androidResources {
+        noCompress.add("tflite")
+    }
+
     // Keep the sample buildable from a clean checkout while making the
     // missing model error actionable instead of failing later at runtime.
     tasks.register("validateTfliteAsset") {

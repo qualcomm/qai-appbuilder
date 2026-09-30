@@ -157,7 +157,14 @@ public final class TFLiteHelpers {
             long length = descriptor.getDeclaredLength();
             MappedByteBuffer model = channel.map(FileChannel.MapMode.READ_ONLY, offset, length);
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            input.skip(offset);
+            long skipped = 0;
+            while (skipped < offset) {
+                long current = input.skip(offset - skipped);
+                if (current <= 0) {
+                    throw new IOException("Unable to seek to model asset offset " + offset + ": " + filename);
+                }
+                skipped += current;
+            }
             try (DigestInputStream stream = new DigestInputStream(input, digest)) {
                 byte[] buffer = new byte[8192];
                 long remaining = length;

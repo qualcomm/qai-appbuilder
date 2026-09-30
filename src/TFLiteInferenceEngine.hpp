@@ -52,6 +52,7 @@ class TFLiteInferenceEngine {
   std::string getProviderMode() const;
 
  private:
+  void releaseLocked() noexcept;
   void validateGraphIndex(size_t graph_index) const;
   void validateInitialized(const char* operation) const;
   static std::string tensorTypeName(TfLiteType type);
