@@ -285,31 +285,41 @@ def send_agent_chat_turn(builder, model_name, prompt_text, conversation_id=None,
     """发起（conversation_id=None 时新建）或继续一轮 Builder 真实 SSE 聊天代理链路
     （GET /api/chat/conversations/{id}/stream），解析 event:/data: 帧，读到
     done/error 终止帧为止。返回：
-        (passed, detail, joined_text, conversation_id, frame_types, frame_reasons)
+        (passed, detail, joined_text, conversation_id, frame_types, frame_reasons, busy)
     与 test_service._builder_send_chat_message() 同款事件解析逻辑（终止帧识别、
     frame_type/reason 逐层下钻），只是把 conversation 创建做成可选，以支持在
     同一个 conversation_id 上追加发送 follow-up 消息（复用同一个真实端点，
-    区别只在于是否携带已存在的 conversation_id）。"""
+    区别只在于是否携带已存在的 conversation_id）。
+
+    `busy=True` 表示服务端在会话锁仍被上一轮占用时发出的 `event: existing_run`
+    （payload 只有 {run_id, attach_path}，不含 frame_type/reason 键，与正常
+    message/done/error 帧结构完全不同），随即立即关闭连接——这不是失败也不是
+    成功，只是当前 conversation 仍在忙，调用方应该等待后重新探测同一
+    conversation，而不是把它当作一次真正的对话轮次消耗掉。"""
     if conversation_id is None:
         try:
             conv = builder.csrf.post("/api/chat/conversations", json={"title": title}, timeout=30)
         except requests.RequestException as e:
-            return False, f"创建 conversation 异常: {e}", "", None, [], []
+            return False, f"创建 conversation 异常: {e}", "", None, [], [], False
         if conv.status_code not in (200, 201):
-            return False, f"创建 conversation 非成功状态码: {conv.text[:300]}", "", None, [], []
+            return False, f"创建 conversation 非成功状态码: {conv.text[:300]}", "", None, [], [], False
         conversation_id = conv.json().get("id")
         if not conversation_id:
-            return False, f"创建 conversation 缺少 id: {conv.text[:300]}", "", None, [], []
+            return False, f"创建 conversation 缺少 id: {conv.text[:300]}", "", None, [], [], False
 
     tab_id = f"agent-task-tab-{conversation_id}"
     stream_path = f"/api/chat/conversations/{conversation_id}/stream"
     events = []
     stream_error = None
+    busy = False
     stream_deadline = time.time() + stream_timeout
     stream = None
     try:
+        # timeout=(connect, read)：read 侧原为 10s，比服务端 15s 心跳间隔
+        # （QAIModelBuilder _sse.py 的 _HEARTBEAT_INTERVAL_SECONDS=15.0）更短，
+        # 理论上可能在两次心跳之间提前触发 ReadTimeout；调大到 25s 留出余量。
         stream = builder.csrf.request(
-            "GET", stream_path, timeout=(10, 10), stream=True,
+            "GET", stream_path, timeout=(10, 25), stream=True,
             params={"tab_id": tab_id, "prompt": prompt_text, "model_id": f"local::{model_name}"})
         if not 200 <= stream.status_code < 300:
             stream_error = f"HTTP 非 2xx: {stream.status_code}; body={stream.text[:300]}"
@@ -328,6 +338,11 @@ def send_agent_chat_turn(builder, model_name, prompt_text, conversation_id=None,
                         except ValueError:
                             payload = {"raw": payload_raw}
                         events.append((event_name, payload))
+                        if event_name == "existing_run":
+                            # 会话锁被上一轮占用，服务端发完这一帧就会立即关闭连接，
+                            # 不会再有 done/error；不要继续等，直接跳出。
+                            busy = True
+                            break
                         if event_name in ("done", "error"):
                             break
                     event_name, data_lines = None, []
@@ -368,12 +383,12 @@ def send_agent_chat_turn(builder, model_name, prompt_text, conversation_id=None,
     terminal_error = any(ft == "error" or rs == "failed"
                          for ft, rs in zip(frame_types, frame_reasons))
     text = " ".join(__import__("json").dumps(p, ensure_ascii=False) for p in message_events)
-    passed = (stream_error is None and not error_events and not terminal_error and terminal_ok
-              and bool(message_events))
+    passed = (not busy and stream_error is None and not error_events and not terminal_error
+              and terminal_ok and bool(message_events))
     detail = (f"conversation_id={conversation_id}; events={[e for e, _ in events]}; "
               f"frame_types={frame_types}; frame_reasons={frame_reasons}; "
-              f"error_events={error_events}; stream_error={stream_error}")
-    return passed, detail, text, conversation_id, frame_types, frame_reasons
+              f"error_events={error_events}; stream_error={stream_error}; busy={busy}")
+    return passed, detail, text, conversation_id, frame_types, frame_reasons, busy
 
 
 # ============================================================================
@@ -465,6 +480,10 @@ def run_model_conversion_task(builder, model_name, results, round_num=1,
     transcript = []
     report_path, report_content = None, None
     turns_used = 0
+    # busy（existing_run）重试与真实续问轮次分开计数：会话忙不应消耗 max_turns 预算，
+    # 但也要有独立上限防止无限期占用总时限（心跳间隔15s，等待窗口按此校准）。
+    busy_wait_seconds = 20
+    max_busy_retries_per_turn = 20
 
     for turn in range(1, max_turns + 1):
         remaining = task_deadline - time.time()
@@ -475,12 +494,32 @@ def run_model_conversion_task(builder, model_name, results, round_num=1,
         turn_timeout = min(per_turn_timeout, max(30, remaining))
         print(f"  [STAGE] turn {turn}/{max_turns} 开始: conversation_id={conversation_id}, "
               f"turn_timeout={turn_timeout:.0f}s, prompt_excerpt={prompt[:80]!r}...", flush=True)
-        passed, detail, text, conversation_id, frame_types, frame_reasons = send_agent_chat_turn(
-            builder, model_name, prompt, conversation_id=conversation_id,
-            title="Agent Task: model conversion", stream_timeout=turn_timeout)
-        print(f"  [STAGE] turn {turn}/{max_turns} 结束: passed={passed}; conversation_id={conversation_id}; "
-              f"frame_types={frame_types}; frame_reasons={frame_reasons}", flush=True)
-        transcript.append(f"[turn {turn}] passed={passed}; detail={detail}; text_excerpt={text[:500]!r}")
+
+        busy_retries = 0
+        while True:
+            passed, detail, text, conversation_id, frame_types, frame_reasons, busy = send_agent_chat_turn(
+                builder, model_name, prompt, conversation_id=conversation_id,
+                title="Agent Task: model conversion", stream_timeout=turn_timeout)
+            if not busy:
+                break
+            busy_retries += 1
+            remaining = task_deadline - time.time()
+            print(f"  [STAGE] turn {turn}/{max_turns} 检测到 existing_run（会话忙），"
+                  f"busy_retries={busy_retries}/{max_busy_retries_per_turn}, "
+                  f"等待 {busy_wait_seconds}s 后重新探测同一 conversation", flush=True)
+            transcript.append(f"[turn {turn}] busy_retry={busy_retries}; detail={detail}")
+            if busy_retries >= max_busy_retries_per_turn or remaining <= busy_wait_seconds + 30:
+                transcript.append(f"[turn {turn}] busy 重试预算耗尽或总时限将到，放弃本轮等待")
+                break
+            time.sleep(busy_wait_seconds)
+            # 重新探测同一 conversation 是否已空闲：发一条空探测更容易被服务端立即
+            # 再次判 busy 而不会误触发新的一轮生成，这里复用原 prompt 本身即可，
+            # 因为只要仍 busy，服务端会在收到 message_events 之前就先关连接。
+
+        print(f"  [STAGE] turn {turn}/{max_turns} 结束: passed={passed}; busy={busy}; "
+              f"conversation_id={conversation_id}; frame_types={frame_types}; "
+              f"frame_reasons={frame_reasons}", flush=True)
+        transcript.append(f"[turn {turn}] passed={passed}; busy={busy}; detail={detail}; text_excerpt={text[:500]!r}")
 
         report_path, report_content = _find_conversion_report(workspace_root)
         if report_path is not None:
@@ -517,6 +556,41 @@ def run_model_conversion_task(builder, model_name, results, round_num=1,
     return ok
 
 
+_PROBE_PROMPT = "请确认你现在处于 model-build 模式，简单说明你看到了哪些工具。"
+
+
+def run_model_build_probe_task(builder, model_name, results, round_num=1, stream_timeout=120):
+    """极简 model-build 模式基础可用性探测：只发一条不涉及任何真实转换工作的
+    简单 prompt，用来判断此前观察到的 empty_response 是否在最简单场景下也复现——
+    复现说明是环境/代理层问题，不复现说明是"重系统提示词+复杂任务"组合本身的问题。
+    不追加任何 follow-up，一轮结束即收尾。"""
+    name = f"AGENT-TASK: model_build_probe model={model_name}"
+    ready, ready_err = wait_local_backend_ready(builder_genie_port_of(builder), model_name)
+    if not ready:
+        results.append(TestResult(
+            name=name, round_num=round_num, model_name=model_name,
+            passed=False, status_code=0, latency_ms=0,
+            detail=f"后端未就绪，跳过探测: {ready_err}", crashed=True))
+        return False
+    started = time.time()
+    print(f"  [STAGE] probe 开始: prompt={_PROBE_PROMPT!r}", flush=True)
+    passed, detail, text, conversation_id, frame_types, frame_reasons, busy = send_agent_chat_turn(
+        builder, model_name, _PROBE_PROMPT, title="Agent Task: model-build probe",
+        stream_timeout=stream_timeout)
+    elapsed = time.time() - started
+    print(f"  [STAGE] probe 结束: passed={passed}; busy={busy}; frame_types={frame_types}; "
+          f"frame_reasons={frame_reasons}; text_excerpt={text[:200]!r}", flush=True)
+    is_empty_response = any(fr == "empty_response" for fr in frame_reasons) or "empty_response" in detail
+    results.append(TestResult(
+        name=name, round_num=round_num, model_name=model_name,
+        passed=passed, status_code=0, latency_ms=elapsed * 1000,
+        detail=f"is_empty_response={is_empty_response}; {detail}",
+        # empty_response 复现与否是本探测本身要观察的现象，不代表脚本/环境缺陷，
+        # 复现时不应算作需要排查的新增失败——按 ignorable 处理，交由回复文本判读。
+        ignorable=is_empty_response))
+    return passed
+
+
 def builder_genie_port_of(builder):
     """从 QAIModelBuilderManager 实例反推它当前代理的 GenieAPIService 端口。
     Builder 侧固定通过 /api/service/status 的 port 字段暴露真实端口，这里做一次同步查询
@@ -533,9 +607,12 @@ def build_arg_parser():
     parser = argparse.ArgumentParser(
         description="QAIModelBuilder + 本地模型真实多轮 agent 任务测试",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--task", default="model_conversion", choices=["model_conversion"],
-                        help="要运行的任务场景（目前仅实现 model_conversion；"
-                             "俄罗斯方块任务留给后续阶段实现）")
+    parser.add_argument("--task", default="model_conversion",
+                        choices=["model_conversion", "model_build_probe"],
+                        help="要运行的任务场景：model_conversion 是完整的模型转换多轮任务；"
+                             "model_build_probe 是极简 prompt 探测 model-build 模式基础可用性"
+                             "（几十秒量级，用于判断 empty_response 是环境/代理层问题还是"
+                             "'重系统提示词+复杂任务'组合本身的问题）。俄罗斯方块任务留给后续阶段实现。")
     parser.add_argument("--exe_dir", required=True, help="GenieAPIService 安装目录（含 GenieAPIService.exe）")
     parser.add_argument("--models", required=True, help="本地模型根目录（--models/<name>/config.json）")
     parser.add_argument("--model_name", default="qwen3-8b-8480",
@@ -616,6 +693,10 @@ def main():
                     max_turns=args.max_turns,
                     per_turn_timeout=args.per_turn_timeout,
                     total_deadline_seconds=args.total_deadline_seconds)
+            elif args.task == "model_build_probe":
+                run_model_build_probe_task(
+                    builder, args.model_name, all_results,
+                    stream_timeout=args.per_turn_timeout)
     except RuntimeError as e:
         print(f"  ✗ {e}")
     finally:
