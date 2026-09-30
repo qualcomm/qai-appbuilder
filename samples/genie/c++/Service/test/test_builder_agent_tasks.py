@@ -53,6 +53,7 @@ done/error 终止帧即可。多轮 agent 任务里的"多轮"，指的是本脚
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import time
@@ -352,13 +353,71 @@ def _append_transcript_entry(transcript_path, turn_label, prompt_text, full_text
         f.write("\n".join(lines))
 
 
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?。！？；;])\s+|\n+")
+_CODE_FENCE_RE = re.compile(r"```.*?(```|$)", re.S)
+
+
+class RepetitionWatchdog:
+    """Sentence-level loop detector over the streamed chunk text."""
+
+    def __init__(self, min_sentence_chars=40, min_repeats=4, tail_chars=2000,
+                 tail_coverage=0.5, min_total_chars=1200, check_every_chars=256):
+        self.min_sentence_chars = min_sentence_chars
+        self.min_repeats = min_repeats
+        self.tail_chars = tail_chars
+        self.tail_coverage = tail_coverage
+        self.min_total_chars = min_total_chars
+        self.check_every_chars = check_every_chars
+        self._parts = []
+        self._length = 0
+        self._next_check = min_total_chars
+        self.verdict = None
+
+    @staticmethod
+    def _normalize(sentence):
+        return re.sub(r"\s+", " ", sentence).strip().lower()
+
+    def feed(self, text):
+        if self.verdict or not text:
+            return self.verdict
+        self._parts.append(text)
+        self._length += len(text)
+        if self._length >= self._next_check:
+            self._next_check = self._length + self.check_every_chars
+            self.verdict = self._check()
+        return self.verdict
+
+    def _check(self):
+        prose = _CODE_FENCE_RE.sub(" ", "".join(self._parts))
+        sentences = [self._normalize(s) for s in _SENTENCE_SPLIT_RE.split(prose)]
+        sentences = [s for s in sentences if len(s) >= self.min_sentence_chars]
+        if not sentences:
+            return None
+        counts = Counter(sentences)
+        looping = {s for s, c in counts.items() if c >= self.min_repeats}
+        if not looping:
+            return None
+        tail_len, looped_len = 0, 0
+        for s in reversed(sentences):
+            if tail_len >= self.tail_chars:
+                break
+            tail_len += len(s)
+            if s in looping:
+                looped_len += len(s)
+        if looped_len < self.tail_coverage * tail_len:
+            return None
+        top, top_count = counts.most_common(1)[0]
+        return {"at_char": self._length, "top_sentence": top[:200], "top_count": top_count,
+                "tail_coverage": round(looped_len / tail_len, 2)}
+
+
 # ============================================================================
 # 共享 SSE 聊天驱动 helper（提炼自 test_service._builder_send_chat_message，
 # 泛化出 conversation_id 参数以支持"多轮 agent 任务"里的追加消息）
 # ============================================================================
 def send_agent_chat_turn(builder, model_name, prompt_text, conversation_id=None,
                           title="Agent Task", stream_timeout=900,
-                          transcript_path=None, turn_label=None):
+                          transcript_path=None, turn_label=None, watchdog=None):
     """发起（conversation_id=None 时新建）或继续一轮 Builder 真实 SSE 聊天代理链路
     （GET /api/chat/conversations/{id}/stream），解析 event:/data: 帧，读到
     done/error 终止帧为止。返回：
@@ -391,6 +450,7 @@ def send_agent_chat_turn(builder, model_name, prompt_text, conversation_id=None,
     busy = False
     stream_deadline = time.time() + stream_timeout
     stream = None
+    loop_verdict = None
     try:
         # timeout=(connect, read)：read 侧原为 10s，比服务端 15s 心跳间隔
         # （QAIModelBuilder _sse.py 的 _HEARTBEAT_INTERVAL_SECONDS=15.0）更短，
@@ -415,6 +475,12 @@ def send_agent_chat_turn(builder, model_name, prompt_text, conversation_id=None,
                         except ValueError:
                             payload = {"raw": payload_raw}
                         events.append((event_name, payload))
+                        if (watchdog is not None and event_name == "message"
+                                and isinstance(payload, dict) and payload.get("frame_type") == "chunk"):
+                            loop_verdict = watchdog.feed((payload.get("payload") or {}).get("text"))
+                            if loop_verdict:
+                                stream_error = f"repetition_loop_detected: {loop_verdict}"
+                                break
                         if event_name == "existing_run":
                             # 会话锁被上一轮占用，服务端发完这一帧就会立即关闭连接，
                             # 不会再有 done/error；不要继续等，直接跳出。
@@ -436,6 +502,15 @@ def send_agent_chat_turn(builder, model_name, prompt_text, conversation_id=None,
                 stream.close()
             except requests.RequestException:
                 pass
+    if loop_verdict:
+        try:
+            stop = builder.csrf.post("/api/chat/stop", json={"tab_id": tab_id, "reason": "repetition_loop"},
+                                     timeout=30)
+            loop_verdict["server_stop"] = f"{stop.status_code} {stop.text[:200]}"
+        except requests.RequestException as e:
+            loop_verdict["server_stop"] = f"{type(e).__name__}: {e}"
+        stream_error = f"repetition_loop_detected: {loop_verdict}"
+        print(f"  [WATCHDOG] {stream_error}", flush=True)
 
     message_events = [payload for event, payload in events if event == "message"]
     error_events = [payload for event, payload in events if event == "error"]
@@ -486,21 +561,22 @@ _DEFAULT_SMALL_MODEL_PATH = r"C:\Users\HCKTest\Desktop\GenieEnv\Video_Model\Vide
 _DEFAULT_WORKSPACE_ROOT = r"C:\WoS_AI"
 
 _MODEL_CONVERSION_INITIAL_PROMPT_TEMPLATE = (
-    "请使用 model-builder 技能，把这个已有的 ONNX 模型转换为可在本机 NPU 上运行的 "
-    "QNN 格式并完成推理校验：{small_model_path}\n"
-    "这是一个很小的模型（用于快速验证转换全流程），请完整走完 Export/Inspect -> "
-    "Convert（FP16 精度即可，不需要额外量化）-> Context binary -> Inference + "
-    "validation 全部步骤，最后写出 REPORT.md（含 Cosine Similarity Summary）。"
-    "请自主完成，不需要在中途停下来确认每一步；如果发现必需的运行环境（如 "
-    "python_x64_venv / QAIRT SDK 路径配置）尚未初始化，请自行运行 Setup.bat 完成初始化 "
-    "后继续，不需要为此专门询问我。"
+    "任务：用 model-builder 技能把 ONNX 模型 {small_model_path} 转换为本机 NPU 可运行的 QNN 格式"
+    "（FP16 即可，不量化），完成推理校验并写出含 Cosine Similarity Summary 的 REPORT.md。"
+    "这是单个 MatMul 的极小模型，已是 ONNX，跳过 Export。已授权你自主运行 Setup.bat 和 pip install，"
+    "不要问我确认。\n\n"
+    "现在只做第一步：立即调用 exec 工具运行\n"
+    "python -c \"import onnx; m=onnx.load(r'{small_model_path}'); "
+    "print([(i.name, i.type) for i in m.graph.input]); print([(o.name, o.type) for o in m.graph.output])\"\n"
+    "拿到输出后再决定下一个工具调用。\n\n"
+    "规则：每次回复必须以一个工具调用开始；不要复述任务或计划，不要写\"我需要继续……\"。"
+    "思考不超过三句话。"
 )
 
 _MODEL_CONVERSION_FOLLOWUP_PROMPT = (
-    "请继续完成刚才的模型转换任务，直到写出 REPORT.md 为止。你已经获得我的授权，"
-    "可以自主运行 Setup.bat、执行必要的 pip install，并完成 Core Workflow 里剩余的全部步骤，"
-    "不需要再次询问确认。如果确实被某个无法自主解决的问题卡住，请在回复里明确说明卡在哪一步、"
-    "具体报错是什么。"
+    "不要复述计划。立即调用一个工具执行转换流程里下一个尚未完成的具体步骤"
+    "（例如用 exec 运行 model-builder 的 run_pipeline.py，或用 read 查看上一步的报错日志）。"
+    "思考不超过三句话。如果被无法自主解决的问题卡住，只用一句话说明卡在哪一步和具体报错。"
 )
 
 
@@ -603,7 +679,8 @@ def run_model_conversion_task(builder, model_name, results, round_num=1,
                 builder, model_name, prompt, conversation_id=conversation_id,
                 title="Agent Task: model conversion", stream_timeout=call_timeout,
                 transcript_path=transcript_path,
-                turn_label=f"model_conversion real_turn={real_turns_used} attempt={attempts_used}")
+                turn_label=f"model_conversion real_turn={real_turns_used} attempt={attempts_used}",
+                watchdog=RepetitionWatchdog())
             if not busy:
                 break
             remaining = task_deadline - time.time()
