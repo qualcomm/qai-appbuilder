@@ -58,6 +58,7 @@ std::string TFLiteInferenceEngine::modelError(const std::string& operation,
 }
 
 void TFLiteInferenceEngine::initialize() {
+  std::lock_guard<std::mutex> lock(m_inference_mutex);
   if (m_interpreter != nullptr) {
     return;
   }
@@ -71,7 +72,7 @@ void TFLiteInferenceEngine::initialize() {
 
   m_options = TfLiteInterpreterOptionsCreate();
   if (m_options == nullptr) {
-    release();
+    releaseLocked();
     throw std::runtime_error(modelError("interpreter setup", m_model_path,
                                         "could not allocate interpreter options"));
   }
@@ -94,7 +95,7 @@ void TFLiteInferenceEngine::initialize() {
     }
     m_delegate = TfLiteQnnDelegateCreate(&delegate_options);
     if (m_delegate == nullptr) {
-      release();
+      releaseLocked();
       throw std::runtime_error(modelError("delegate creation", m_model_path,
                                           "QNN TFLite delegate returned null"));
     }
@@ -102,7 +103,7 @@ void TFLiteInferenceEngine::initialize() {
   }
 #else
   if (m_use_qnn_delegate) {
-    release();
+    releaseLocked();
     throw std::runtime_error(modelError("delegate setup", m_model_path,
                                         "QNN delegate support is not compiled"));
   }
@@ -110,7 +111,7 @@ void TFLiteInferenceEngine::initialize() {
 
   m_interpreter = TfLiteInterpreterCreate(m_model, m_options);
   if (m_interpreter == nullptr) {
-    release();
+    releaseLocked();
     throw std::runtime_error(modelError("interpreter creation", m_model_path,
                                         "TFLite interpreter creation failed"));
   }
@@ -118,7 +119,7 @@ void TFLiteInferenceEngine::initialize() {
 
   const TfLiteStatus allocation_status = TfLiteInterpreterAllocateTensors(m_interpreter);
   if (allocation_status != kTfLiteOk) {
-    release();
+    releaseLocked();
     throw std::runtime_error(modelError("tensor allocation", m_model_path,
                                         "delegate-backed tensor allocation failed"));
   }
@@ -126,6 +127,10 @@ void TFLiteInferenceEngine::initialize() {
 
 void TFLiteInferenceEngine::release() noexcept {
   std::lock_guard<std::mutex> lock(m_inference_mutex);
+  releaseLocked();
+}
+
+void TFLiteInferenceEngine::releaseLocked() noexcept {
   if (m_interpreter != nullptr) {
     TfLiteInterpreterDelete(m_interpreter);
     m_interpreter = nullptr;
@@ -260,6 +265,7 @@ std::string TFLiteInferenceEngine::tensorTypeName(TfLiteType type) {
 }
 
 std::vector<std::vector<size_t>> TFLiteInferenceEngine::getInputShapes(size_t graph_index) const {
+  std::lock_guard<std::mutex> lock(m_inference_mutex);
   validateInitialized("input shape query");
   validateGraphIndex(graph_index);
   std::vector<std::vector<size_t>> result;
@@ -269,6 +275,7 @@ std::vector<std::vector<size_t>> TFLiteInferenceEngine::getInputShapes(size_t gr
 }
 
 std::vector<std::vector<size_t>> TFLiteInferenceEngine::getOutputShapes(size_t graph_index) const {
+  std::lock_guard<std::mutex> lock(m_inference_mutex);
   validateInitialized("output shape query");
   validateGraphIndex(graph_index);
   std::vector<std::vector<size_t>> result;
@@ -278,6 +285,7 @@ std::vector<std::vector<size_t>> TFLiteInferenceEngine::getOutputShapes(size_t g
 }
 
 std::vector<std::string> TFLiteInferenceEngine::getInputDataType(size_t graph_index) const {
+  std::lock_guard<std::mutex> lock(m_inference_mutex);
   validateInitialized("input dtype query");
   validateGraphIndex(graph_index);
   std::vector<std::string> result;
@@ -287,6 +295,7 @@ std::vector<std::string> TFLiteInferenceEngine::getInputDataType(size_t graph_in
 }
 
 std::vector<std::string> TFLiteInferenceEngine::getOutputDataType(size_t graph_index) const {
+  std::lock_guard<std::mutex> lock(m_inference_mutex);
   validateInitialized("output dtype query");
   validateGraphIndex(graph_index);
   std::vector<std::string> result;
@@ -296,6 +305,7 @@ std::vector<std::string> TFLiteInferenceEngine::getOutputDataType(size_t graph_i
 }
 
 std::vector<std::string> TFLiteInferenceEngine::getInputName(size_t graph_index) const {
+  std::lock_guard<std::mutex> lock(m_inference_mutex);
   validateInitialized("input name query");
   validateGraphIndex(graph_index);
   std::vector<std::string> result;
@@ -308,6 +318,7 @@ std::vector<std::string> TFLiteInferenceEngine::getInputName(size_t graph_index)
 }
 
 std::vector<std::string> TFLiteInferenceEngine::getOutputName(size_t graph_index) const {
+  std::lock_guard<std::mutex> lock(m_inference_mutex);
   validateInitialized("output name query");
   validateGraphIndex(graph_index);
   std::vector<std::string> result;
@@ -320,17 +331,20 @@ std::vector<std::string> TFLiteInferenceEngine::getOutputName(size_t graph_index
 }
 
 std::string TFLiteInferenceEngine::getGraphName(size_t graph_index) const {
+  std::lock_guard<std::mutex> lock(m_inference_mutex);
   validateInitialized("graph name query");
   validateGraphIndex(graph_index);
   return m_model_path;
 }
 
 uint64_t TFLiteInferenceEngine::getProfilingEvent(uint32_t) const {
+  std::lock_guard<std::mutex> lock(m_inference_mutex);
   validateInitialized("profiling query");
   return 0;
 }
 
 std::string TFLiteInferenceEngine::getProviderMode() const {
+  std::lock_guard<std::mutex> lock(m_inference_mutex);
   validateInitialized("provider query");
   return m_delegate_attached ? "qnn" : "cpu";
 }

@@ -472,15 +472,25 @@ public:
     ~TFLiteQnnContext() { release(); }
 
     std::vector<py::array> Inference(const std::vector<py::array>& input, size_t graph_index = 0) {
+        const auto expected_types = m_engine->getInputDataType(graph_index);
         std::vector<const uint8_t*> buffers;
         std::vector<size_t> sizes;
         std::vector<py::array> keep_alive;
         buffers.reserve(input.size());
         sizes.reserve(input.size());
-        for (const auto& value : input) {
-            py::array array = py::array::ensure(value, py::array::c_style);
+        for (size_t i = 0; i < input.size(); ++i) {
+            py::array array = py::array::ensure(input[i], py::array::c_style);
             if (!array) {
                 throw std::invalid_argument("TFLite inference input is not a contiguous NumPy array");
+            }
+            if (i >= expected_types.size()) {
+                throw std::invalid_argument("TFLite inference received more inputs than the model declares");
+            }
+            const py::dtype expected_dtype = dtypeFromString(expected_types[i]);
+            if (!array.dtype().equal(expected_dtype)) {
+                throw std::invalid_argument(
+                    "TFLite inference input " + std::to_string(i) + " has dtype " +
+                    py::str(array.dtype()).cast<std::string>() + "; expected " + expected_types[i]);
             }
             py::buffer_info info = array.request();
             keep_alive.push_back(array);
