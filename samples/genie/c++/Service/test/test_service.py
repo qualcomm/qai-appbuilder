@@ -2733,19 +2733,34 @@ class APITester:
             )
         # "unknow" 是服务端 ResponseTools::convertToolCallJson 对"无法解析模型输出为合法工具
         # 调用 JSON"的精确、已文档化的兜底标记(response_dispatcher.cpp 的畸形工具调用死循环
-        # 检测机制正是围绕这个标记设计的,见调查结论 Tab 第9.2节)。命中该精确信号说明模型
-        # 确实尝试了调用但输出畸形(如把工具的 JSON Schema 本身当成 arguments 回显),这是
-        # 模型自身能力/量化程度的真实局限,不是服务端缺陷,按与"未触发 tool_calls"同样的
-        # 容忍策略处理为 skipped=True,而不是判为结构性校验失败。
+        # 检测机制正是围绕这个标记设计的,见调查结论 Tab 第9.2节)。曾经(Layer 1-3 兜底修复架构
+        # 落地前)这是模型能力局限的容忍信号,但 Layer -1/0/1/2/3 架构(response_tools.cpp/
+        # response_dispatcher.cpp,见同名 .md 文档)已确保:模型一旦真的触发了 tool_calls(本测试
+        # 已在上面排除"未触发"情形),最终响应体永不应再出现 "unknow" 这个兜底占位符——
+        # Layer1 本地确定性提取 + Layer2 服务端内部隐形自纠正重试 + Layer3 分级终态协议三层
+        # 兜底会在模型输出畸形时收敛为"合法 tool_call(识别出真实工具名)"或"纯文本
+        # (finish_reason=stop/length)"之一,不会再放行 "unknow" 走到客户端。因此一旦命中,
+        # 判定为硬性失败(hard_errors),而不再是 skipped 容忍——这是本测试区别于"模型未触发
+        # tool_calls"分支的关键:那种情形是模型指令遵循问题(服务端管不了),这种情形曾是服务端
+        # 自身兜底链全部失败的信号(服务端该管、现已通过新架构管住)。
         if any(tc.get("function", {}).get("name") == "unknow" for tc in tool_calls):
-            _reason = ("模型触发了 tool_calls 但输出畸形,服务端已归类为 unknow 工具名"
-                       "(ResponseTools::convertToolCallJson 精确兜底标记),属模型能力局限,不计入 failed")
+            _reason = ("模型触发了 tool_calls 且服务端仍输出了 unknow 兜底工具名"
+                       "(ResponseTools::convertToolCallJson 精确兜底标记)——Layer -1/0/1/2/3"
+                       "兜底修复架构落地后不应再出现此标记,这是服务端契约回归,计入 failed")
             return TestResult(
                 name=name, round_num=round_num, model_name=self.model_name,
                 passed=False, status_code=r.status_code, latency_ms=latency,
                 detail=_reason,
-                skipped=True, response_data={"tool_calls": tool_calls, "finish_reason": finish_reason},
-                model_capability_issue=True, model_capability_reason=_reason
+                skipped=False, response_data={"tool_calls": tool_calls, "finish_reason": finish_reason}
+            )
+        if finish_reason not in ("tool_calls", "stop", "length"):
+            _reason = (f"finish_reason={finish_reason!r} 不属于 tool_calls/stop/length 三者之一"
+                       "——Layer -1/0/1/2/3 兜底架构下不应存在第四种半成品终态,计入 failed")
+            return TestResult(
+                name=name, round_num=round_num, model_name=self.model_name,
+                passed=False, status_code=r.status_code, latency_ms=latency,
+                detail=_reason,
+                skipped=False, response_data={"tool_calls": tool_calls, "finish_reason": finish_reason}
             )
         # hard_errors：服务端确定性保证的结构字段——id/type 由 response_tools.cpp::format_tool_calls
         # 硬编码生成（generate_uuid4()/"function"字面量），function.name 有精确的 "unknow" 兜底标记
