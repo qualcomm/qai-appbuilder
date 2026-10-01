@@ -84,15 +84,14 @@ GenieRoutingGateway::GenieRoutingGateway(IModelConfig &model_config,
           alive_(std::make_shared<std::atomic<bool>>(true)),
           prompt_prep_service_(model_config)
 {
-    // 默认本地可用性检测：检查是否有任何已加载的模型可用。
-    // 修复：在多模型场景下，model_config.get_genie_model_handle() 只返回最后加载的单模型句柄，
-    // 不能代表所有模型的可用性。改为调用虚方法 IsLocalModelAvailable()，
-    // ModelManager 重写此方法以检查 loaded_models_ 是否非空（多模型模式）。
+    // 默认本地可用性检测：检查当前是否有已加载的模型。
+    // model_config.get_genie_model_handle() 只返回全局 genieModelHandle，在模型切换场景下
+    // 可能滞后于真实状态；改为调用虚方法 IsLocalModelAvailable()，ModelManager 重写此方法
+    // 以检查 current_model_ 是否非空（本仓库已删除并发多模型托管设计，运行时只有一个当前模型）。
     // 测试时可通过 SetLocalAvailabilityChecker 注入返回 false 的函数，
     // 以验证 S2+本地不可用（HTTP 403）等场景。
     //
-    // 不能在构造时缓存这个值：单模型模式下若启动未带 -l（不预加载），或多模型模式下
-    // service_config.json 的模型仍在后台线程异步加载，GenieRoutingGateway 构造时
+    // 不能在构造时缓存这个值：服务启动时若尚未加载任何模型，GenieRoutingGateway 构造时
     // IsLocalModelAvailable() 必然是 false；之后请求触发的动态加载（见
     // ChatCompletions 里的 LoadModelByName）即使成功，缓存值也不会更新，导致路由
     // 永远误判"本地不可用"并 fallback 到云端（实测复现为 503 all_routes_unavailable）。

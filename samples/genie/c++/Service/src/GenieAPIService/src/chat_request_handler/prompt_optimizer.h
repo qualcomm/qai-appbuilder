@@ -11,6 +11,7 @@
 
 #include <string>
 #include <map>
+#include <unordered_map>
 #include <vector>
 #include <optional>
 #include "../model/model_config.h"
@@ -180,6 +181,12 @@ public:
     // 设置 per-model 的 ContextBase（多模型并发场景）
     // 设置后，CountTokens() 将使用此 context 而非全局 model_config_.get_genie_model_handle()
     void SetContext(ContextBase* context) { context_override_ = context; }
+
+    // 已知工具名 -> 参数签名字符串（如 "write(path, content)"，无 "?" 后缀的参数即必需参数）。
+    // 与 GetOptimizedToolDefinition() 的 required 字段保持一致，是全仓库唯一一份"已知工具
+    // 名 + 必需参数"权威表。公开为纯数据访问器（不含任何实例状态依赖），供
+    // response_tools.cpp 的 Layer1 兜底提取复用，避免另起一份可能与之脱节的工具清单。
+    static const std::unordered_map<std::string, std::string>& GetKnownToolSignatures();
 
 private:
     IModelConfig& model_config_;
