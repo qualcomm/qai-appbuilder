@@ -50,10 +50,19 @@ public:
         return port_;
     }
 
+    const std::string &get_host() const
+    {
+        return host_;
+    }
+
 private:
     int argc_;
     char **argv_;
     int port_ = 8910;
+    // 默认保持 0.0.0.0（监听所有网卡），与改动前行为一致；仅新增 -H/--host 让使用者
+    // 按需显式收紧到 127.0.0.1 或指定网卡 IP，不改变现有调用方（如 QAIModelBuilder）
+    // 不传该参数时的默认行为。
+    std::string host_ = "0.0.0.0";
     bool loadModel = false;
     IModelConfig model_config_;
 };
@@ -70,7 +79,10 @@ inline bool Config::Process()
     app.add_option("-c,--config_file", config_file, "Path to the config file.");
     app.add_option("--adapter", model_config_.loraAdapter, "the adapter of lora");
 
-    app.add_flag("-l,--load_model", loadModel, "Load the model and also load additional models listed in service_config.json.");
+    // 并发多模型托管设计已删除（service_config.json 的 models 数组及其加载逻辑不再存在）。
+    // 标志定义本身保留，避免 CLI11 对现有调用方（如 QAIModelBuilder 每次启动都会带上 -l）报参数错误；
+    // NeedLoadModel() 的返回值不再驱动任何实际加载行为，是一个无操作（no-op）标志。
+    app.add_flag("-l,--load_model", loadModel, "Deprecated, kept for backward CLI compatibility; no longer triggers any loading behavior.");
     app.add_flag("-a,--all_text", model_config_.outputAllText, "Output all text includes tool calls text.");
     app.add_flag("-t,--enable_thinking", model_config_.enableThinking, "Enable thinking mode.");
     app.add_flag("-g,--prompt_debug", model_config_.enablePromptDebug, "Enable prompt compression optimization debug logs. (Repeat for level 2: -g -g)");
@@ -84,6 +96,9 @@ inline bool Config::Process()
     app.add_option("-f,--logfile", log_path, "log file path, it's a option");
     app.add_option("--lora_alpha", model_config_.loraAlpha, "lora Alpha Value");
     app.add_option("-p,--port", port_, "Port used for running");
+    app.add_option("-H,--host", host_,
+                   "Host/IP address to bind the HTTP server to (default: 0.0.0.0, binds all "
+                   "network interfaces). Set to 127.0.0.1 to restrict access to the local machine only.");
 
     try
     {

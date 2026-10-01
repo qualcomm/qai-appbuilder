@@ -18,7 +18,9 @@
 #include "message_pre_filter.h"
 #include "long_text_summarizer.h"
 #include "summary_cache.h"
+#include "task_memo_builder.h"
 #include "prompt_ledger.h"
+#include "tool_call_circuit_breaker_store.h"
 
 
 using json = nlohmann::ordered_json;
@@ -31,7 +33,11 @@ public:
           instance_config_{instance_config},
           context_{instance_config_->i_model_config_.get_genie_model_handle().lock()},
           optimizer_{instance_config_->i_model_config_, context_.get()},
-          pre_filter_{instance_config_->i_model_config_, context_.get()}
+          pre_filter_{instance_config_->i_model_config_, context_.get()},
+          task_memo_builder_{instance_config_->i_model_config_.GetPromptOptimizationConfig().task_memo,
+                              *instance_config_,
+                              &TaskMemoStore::GetInstance(),
+                              [this](const std::string& prompt) -> std::string { return this->RunSummarizationInference(prompt); }}
     {
         request_data_ = request_data;
     }
@@ -189,6 +195,33 @@ public:
             }
         }
 
+        // ── Layer3 熔断降级：会话+模型维度连续多次真正触发 Layer3 终态（Layer0/1/2 均
+        // 未能恢复出合法工具调用）后，判定该会话+模型系统性不具备工具调用能力，动态
+        // 降级本次请求的 system prompt——跳过工具声明注入，而不是继续让模型徒劳尝试。
+        // 实现方式：请求本身声明了 tools 时，若命中熔断，直接把 data["tools"] 清空为
+        // 空数组；下方 BuildHarmonyPrompt/BuildPrompt 内部都是读取 data["tools"] 决定
+        // is_tool 与是否注入工具提示词，清空后两条路径自然表现为"未声明工具"，无需
+        // 改动 PrepareOptimizedSystemAndToolPrompt 内部逻辑。仅在请求确实声明了非空
+        // tools 时才有查询熔断状态的必要，未声明 tools 的请求不受影响、零额外开销。
+        if (data.contains("tools") && data["tools"].is_array() && !data["tools"].empty())
+        {
+            const auto &repair_cfg = instance_config_->i_model_config_.GetToolCallRepairConfig();
+            if (repair_cfg.enabled)
+            {
+                const std::string session_key = TaskMemoBuilder::ComputeFirstMsgKey(data["messages"]);
+                const std::string cb_key = ToolCallCircuitBreakerStore::MakeKey(session_key, instance_config_->get_model_name());
+                if (ToolCallCircuitBreakerStore::GetInstance().ShouldDowngradeToolDeclaration(cb_key))
+                {
+                    My_Log{My_Log::Level::kWarning}
+                        << "[ToolCallRepair][CircuitBreaker] session+model '" << cb_key
+                        << "' tripped consecutive Layer3 threshold; downgrading this request by "
+                           "skipping tool declaration injection (model will not be told it can call tools)."
+                        << std::endl;
+                    data["tools"] = json::array();
+                }
+            }
+        }
+
         if (is_harmony) {
             model_input_.text_ = BuildHarmonyPrompt(data, is_tool, contextSize);
         } else {
@@ -331,6 +364,7 @@ private:
             } else {
                 systemDefaultPrompt = optimizer_.OptimizeSystemPrompt(systemDefaultPrompt, request_data_);
             }
+            systemDefaultPrompt += BuildTaskMemoSection();
 
             auto stats = optimizer_.GetLastStats();
             My_Log{My_Log::Level::kInfo} << "[Optimization] System prompt savings: " << stats.savings_percent << "%" << std::endl;
@@ -463,9 +497,27 @@ private:
             for (const auto& msg_item : all_messages) {
                 chat_history_.AddMessage(msg_item.role, msg_item.content);
             }
+            // stateful 模式（n != -1）：按 -n/--num_response 语义（"保存历史记录轮数"）裁剪，
+            // 激活 ChatHistory::Limit()，避免客户端持续重发增长的 messages 数组导致历史无界增长；
+            // 1 轮近似 user+assistant 两条消息。all_messages 已原样写入 chat_history_，
+            // 此处对它做同口径裁剪只是为了让 PromptLedger 的 kept/dropped 统计与之一致。
+            // num_response==0 时 max_size 为 0，erase(begin(), end()-0) 会连本轮刚追加的当前消息
+            // 一并清空——CLI 层（config.h）对 -n 无范围校验，0 是合法可达值，故显式跳过裁剪、
+            // 回退到"不裁剪"这一更安全的行为，而不是清空全部消息。
+            int num_response = instance_config_->getnumResponse();
+            size_t dropped = 0;
+            if (num_response > 0) {
+                size_t max_size = static_cast<size_t>(num_response) * 2;
+                chat_history_.Limit(max_size);
+                if (all_messages.size() > max_size) {
+                    dropped = all_messages.size() - max_size;
+                    all_messages.erase(all_messages.begin(), all_messages.end() - max_size);
+                }
+            }
             optimized.messages = all_messages;
             optimized.success = true;
             optimized.total_tokens = 0;
+            optimized.dropped_count = dropped;
         }
 
         return optimized;
@@ -623,6 +675,9 @@ private:
                 last_ledger_.skills_l1 = opt_stats.skills_l1;
                 last_ledger_.skills_l0 = opt_stats.skills_l0;
                 last_ledger_.emergency_truncated = optimized.emergency_truncated;
+                last_ledger_.memo_active = optimized.memo_active;
+                last_ledger_.memo_confidence = optimized.memo_confidence;
+                last_ledger_.memo_refresh_count = optimized.memo_refresh_count;
             }
 
             std::ostringstream log_stream;
@@ -778,6 +833,7 @@ private:
                         developer_msg += optimizer_.ConvertToolsToOptimizedTypeScript(tools, request_data_);
                         developer_msg += "\n} // namespace functions";
                     }
+                    developer_msg += BuildTaskMemoSection();
                     developer_msg += "<|end|>";
                 }
             } else {
@@ -798,6 +854,7 @@ private:
                         tools,
                         request_data_
                     );
+                    developer_msg += BuildTaskMemoSection();
                     developer_msg += "<|end|>";
                 }
             }
@@ -894,9 +951,23 @@ private:
                 messages.push_back(msg_info.content);
             }
         } else {
-            // n != -1：不压缩，直接写入历史并构建提示词
+            // n != -1：不压缩，写入历史后按 -n/--num_response 语义（"保存历史记录轮数"）裁剪，
+            // 激活 ChatHistory::Limit()，避免客户端持续重发增长的 messages 数组导致历史无界增长；
+            // 1 轮近似 user+assistant 两条消息。processed_messages 同口径裁剪，保持它与 chat_history_
+            // 一致，因为下面构建提示词的 messages 向量直接源自 processed_messages。
+            // num_response==0 时同上分支：跳过裁剪而非清空当前轮消息，理由见 PrepareFilteredMessages。
             for (const auto& msg_item : processed_messages) {
                 chat_history_.AddMessage(msg_item.role, msg_item.content);
+            }
+            int num_response = instance_config_->getnumResponse();
+            size_t dropped = 0;
+            if (num_response > 0) {
+                size_t max_size = static_cast<size_t>(num_response) * 2;
+                chat_history_.Limit(max_size);
+                if (processed_messages.size() > max_size) {
+                    dropped = processed_messages.size() - max_size;
+                    processed_messages.erase(processed_messages.begin(), processed_messages.end() - max_size);
+                }
             }
             // 构建提示词（需要包装 user 消息为 Harmony 格式）
             for (const auto& msg_item : processed_messages) {
@@ -909,6 +980,7 @@ private:
             optimized.messages = processed_messages;
             optimized.success = true;
             optimized.total_tokens = 0;
+            optimized.dropped_count = dropped;
         }
 
         return optimized;
@@ -1635,6 +1707,9 @@ private:
             last_ledger_.skills_l1 = opt_stats.skills_l1;
             last_ledger_.skills_l0 = opt_stats.skills_l0;
             last_ledger_.emergency_truncated = optimized.emergency_truncated;
+            last_ledger_.memo_active = optimized.memo_active;
+            last_ledger_.memo_confidence = optimized.memo_confidence;
+            last_ledger_.memo_refresh_count = optimized.memo_refresh_count;
         }
 
         return result;
@@ -1660,6 +1735,37 @@ private:
         return agentType;
     }
 
+    // ========== 辅助函数：从 TaskMemoStore 查表渲染 Task Memo 段落 ==========
+    // 直接从服务端权威存储渲染，不经过 PromptSectionsConfig/AppendFilteredSections 的回收逻辑。
+    // 未命中（功能关闭/存储丢失/无历史）时返回空字符串，调用方 += 空字符串逐字节回退到接入前的行为。
+    std::string BuildTaskMemoSection() const
+    {
+        if (!request_data_.is_object() || !request_data_.contains("messages") || !request_data_["messages"].is_array()) {
+            return "";
+        }
+        auto memo_entry = task_memo_builder_.Lookup(request_data_["messages"]);
+        if (!memo_entry) {
+            return "";
+        }
+
+        std::string rendered = TaskMemoBuilder::Render(*memo_entry);
+        if (rendered.empty())
+            return "";
+
+        const auto& po_cfg = instance_config_->i_model_config_.GetPromptOptimizationConfig();
+        double ratio = po_cfg.task_memo.token_budget_ratio;
+        if (ratio > 0.0) {
+            double bytes_per_token = EstimateCjkAwareBytesPerToken(
+                rendered, po_cfg.fidelity.cjk_bytes_per_token, po_cfg.fidelity.ascii_bytes_per_token);
+            size_t budget_bytes = static_cast<size_t>(
+                instance_config_->get_context_size() * ratio * bytes_per_token);
+            if (budget_bytes > 0 && rendered.size() > budget_bytes) {
+                rendered = TaskMemoBuilder::Render(*memo_entry, budget_bytes);
+            }
+        }
+        return "\n\n" + rendered;
+    }
+
     // ========== 辅助函数：调用 FitMessagesToContext 并统一处理错误和日志 ==========
     OptimizedMessages ApplyFitMessagesToContext(
         const std::vector<GenieChatMessage>& messages,
@@ -1669,7 +1775,14 @@ private:
     {
         My_Log{My_Log::Level::kDebug} << "[" << log_prefix << "] Fitting messages to context..." << std::endl;
 
-        auto optimized = pre_filter_.FitMessagesToContext(messages, system_prompt, contextSize);
+        const json* raw_messages_for_memo = nullptr;
+        if (request_data_.is_object() && request_data_.contains("messages") && request_data_["messages"].is_array()) {
+            raw_messages_for_memo = &request_data_["messages"];
+        }
+
+        auto optimized = pre_filter_.FitMessagesToContext(messages, system_prompt, contextSize,
+                                                            MessageCompressionConfig(),
+                                                            raw_messages_for_memo, &task_memo_builder_);
 
         if (!optimized.success) {
             My_Log{My_Log::Level::kError}
@@ -1767,6 +1880,17 @@ private:
         return oss.str();
     }
 
+    // 返回 instance_config_ 自身 config.json 的 sampler.`key` 值（存在且为数值时），否则返回 null。
+    // 与 chat_request_handler.cpp 匿名命名空间里的同名自由函数语义一致（因作用域限制无法跨文件
+    // 直接复用，这里镜像同一套优先级逻辑）：省略的 key 不会被 SetParamsByConfig() 改写为任意常量，
+    // 而是保留 SDK 创建 Dialog 时的默认值——摘要推理是服务端内部调用，没有"请求显式传入"这一层，
+    // 直接取 config.json 自身配置即是完整优先级链。
+    json SamplerFallback(const std::string &key) const
+    {
+        auto &sampler = instance_config_->sampler();
+        return (sampler.contains(key) && sampler.at(key).is_number()) ? sampler.at(key) : json();
+    }
+
     // ── RunSummarizationInference ─────────────────────────────────────────────
     // 为 Phase -1 摘要化执行单次同步推理。
     // 直接构造 ModelInput 并调用 context_->Query()，不走 Build() 主流程（避免递归）。
@@ -1793,9 +1917,18 @@ private:
             // 至少保留 512 tokens 输出，最多使用整个 context_size
             available_output = std::max(available_output, 512);
             available_output = std::min(available_output, context_size);
-            context_->SetParamsByConfig(json{{"temp", 0.3},
-                                             {"top_k", 20},
-                                             {"top_p", 0.8}});
+
+            // 只把模型自身 config.json 里有合法数值的采样参数塞进去；缺省的 key 不出现在
+            // 这个 json 里，SetParamsByConfig() 自身按 model_config_.sampler() 的 key 遍历、
+            // j 不含该 key 即 continue，会自然跳过未设置的参数，不再被改写为任意硬编码常量。
+            json params;
+            json temp = SamplerFallback("temp");
+            if (temp.is_number()) params["temp"] = temp;
+            json top_k = SamplerFallback("top-k");
+            if (top_k.is_number()) params["top_k"] = top_k;
+            json top_p = SamplerFallback("top-p");
+            if (top_p.is_number()) params["top_p"] = top_p;
+            context_->SetParamsByConfig(params);
         }
 
         std::string result;
@@ -1909,8 +2042,8 @@ private:
 
     // 注意：C++ 按声明顺序初始化成员变量，与初始化列表顺序无关。
     // 以下声明顺序与构造函数初始化列表顺序保持一致，消除 -Wreorder 编译器警告。
-    // 初始化顺序：chat_history_ → instance_config_ → context_ → optimizer_ → pre_filter_
-    // optimizer_ 和 pre_filter_ 依赖 instance_config_（已在前面初始化），
+    // 初始化顺序：chat_history_ → instance_config_ → context_ → optimizer_ → pre_filter_ → task_memo_builder_
+    // optimizer_、pre_filter_、task_memo_builder_ 均依赖 instance_config_（已在前面初始化），
     // SetContext() 在构造函数体中调用（此时 context_ 已初始化），无 UB 风险。
     ChatHistory &chat_history_;
     ModelInput model_input_;
@@ -1918,6 +2051,9 @@ private:
     std::shared_ptr<ContextBase> context_;
     PromptOptimizer optimizer_;
     MessagePreFilter pre_filter_;
+    // Task Memo 的 infer_fn 只捕获 this（本对象随请求全程存活，含流式路径的 shared_ptr 持有），
+    // 不捕获 Build() 局部的 is_alive_fn——is_alive_fn_ 恒为 nullptr，模型层触发条件满足时恒不跳过。
+    TaskMemoBuilder task_memo_builder_;
 
     // 工具调用 ID 到函数名的映射（用于关联 OpenAI 格式的工具调用和响应）
     std::unordered_map<std::string, std::string> tool_call_id_to_name_;

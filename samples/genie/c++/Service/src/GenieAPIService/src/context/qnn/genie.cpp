@@ -594,8 +594,18 @@ GenieContext::GenieContext(const ModelInstanceConfig &model_config) :
     {
         if (File::IsFileExist(path + "kv-cache.primary.qnn-htp"))
         {
-            kv_path_ = path;
-            My_Log{} << "kv_path: " << kv_path_ << std::endl;
+            if (fixer.kv_restore_eligible_)
+            {
+                kv_path_ = path;
+                My_Log{} << "kv_path: " << kv_path_ << std::endl;
+            }
+            else
+            {
+                My_Log{My_Log::Level::kWarning}
+                        << "kv-cache.primary.qnn-htp found at " << path
+                        << " but dialog.context.bos-token is not -1 (Prefix Quant requires it); "
+                           "skipping kv-cache restore\n";
+            }
             break;
         }
     }

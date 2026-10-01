@@ -39,16 +39,8 @@ float PromptOptimizer::ComputeSavingsPercent(size_t original_tokens, size_t opti
 
 AgentType PromptOptimizer::DetectAgentType(const std::string& system_prompt)
 {
-    // 判断依据：OpenClaw 主 Agent 的 system prompt 中会由运行时注入
-    // "## Runtime" 块，其中包含 "agent=main" 字段。
-    // 只要匹配到 "agent=main" 就认定为主 Agent，否则一律视为子 Agent。
-    //
-    // 示例（主 Agent Runtime 块）：
-    //   ## Runtime
-    //   Runtime: agent=main | host=... | model=... | ...
-    //
-    // 子 Agent 的请求通常不携带完整 system prompt（或为空），
-    // 也不会包含 "agent=main"，因此会走 SUBAGENT 分支。
+    // 判断依据：OpenClaw 主 Agent 的 "## Runtime" 块含 "agent=main" 字段；未匹配到即视为
+    // 子 Agent（含空 system prompt）。具体示例见同名文档 prompt_optimizer.md。
     if (system_prompt.find("agent=main") != std::string::npos) {
         My_Log{My_Log::Level::kInfo} << "[AgentType] Detected: MAIN_AGENT (agent=main found in system prompt)" << std::endl;
         return AgentType::MAIN_AGENT;
@@ -1026,15 +1018,11 @@ std::vector<ScoredSkill> PromptOptimizer::AssignSkillDetailLevels(
         return a.name < b.name;
     });
 
-    // 3) 按“Top-K 期望档位 + 预算降档”分配。关键：预算不够时**降档**
+    // 3) 按"Top-K 期望档位 + 预算降档"分配。关键：预算不够时**降档**
     //    （L2→L1→L0），只有连 L0 单行都放不进时才真正丢弃。
     //
-    // Step 5 阶段 C 主线 (a)：tie_aware_l2=true 时，把 l2_top_k 边界向后扩展到
-    // 覆盖完整的同分组，不切开一组同分技能——否则组内排序更靠前（同分按名字
-    // 升序）的技能进 L2，稍靠后的同分技能被压到 L1，而 L1 摘要截断后往往与
-    // L2 同分兄弟 description 逐字节相同（无区分特征），模型会稳定选中目录里
-    // 排序最靠前的那个同分候选而不是真正想要的目标。tie_aware_l2=false 时
-    // 逐字节退化为改动前的固定边界行为。
+    // tie_aware_l2=true 时把 l2_top_k 边界向后扩展到覆盖完整同分组，避免同分技能被
+    // 切开导致目录截断风险；rationale 与 tie_aware_l2 默认 false 的实测理由见 prompt_optimizer.md。
     size_t effective_l2_top_k = disclosure_cfg.l2_top_k;
     if (disclosure_cfg.tie_aware_l2 && effective_l2_top_k > 0 &&
         effective_l2_top_k < candidates.size()) {
@@ -1303,25 +1291,14 @@ size_t PromptOptimizer::ComputeRelevanceTokenBudget(BudgetPartitionKind kind,
         return total_budget;
     }
 
-    // 关键语义：分区只在真的发生竞争时生效。没有竞争（只有 tools 没有 skills，
-    // 或反之）时两种 kind 都拿到完整总预算——D3 的目的是"不让一方把另一方挤没"，
-    // 不是"无条件按比例削减双方"。拿不到请求上下文时同样按无竞争处理（保守，
-    // 不削减既有行为）。
+    // 关键语义：分区只在真的发生竞争时生效（无竞争或拿不到请求上下文时两种 kind
+    // 都返回完整 total_budget）；竞争成立后按 tools **实际占用**（非"是否出现"）
+    // 约束，skills 拿剩余并由 skills_floor_ratio 兜底——早期实现按固定 65/35 切导致
+    // 语义翻转的事故与完整推导过程见 prompt_optimizer.md。
     if (request_data == nullptr || !HasBudgetContention(*request_data)) {
         return total_budget;
     }
 
-    // 竞争成立：按**实际占用**而不是"对象是否出现"来约束（这一条是外部独立评审
-    // 与代码复核共同得出的结论，务必保持）。早先的实现一旦 skills/tools 同时在场
-    // 就固定按 65/35 切，等于把"skills 保底 15%"实现成了"skills 限额 65%"——语义
-    // 完全翻转，且 tools 只用 200 token 时也会白占 35% 预算、把技能目录无谓截断。
-    //
-    // 现在的语义：
-    //   - 先按 tools 的**真实体量**估算它需要多少 token（纯字符串计算，零额外推理）；
-    //   - tools 需求未超过 tools_ratio 上限时，它只拿走自己真正需要的那部分，
-    //     skills 拿走全部剩余（不被无故削减）；
-    //   - tools 需求超过上限时才截到 tools_ratio，此时 skills 拿剩余，并由
-    //     skills_floor_ratio 兜住下限（真正的"保底"语义）。
     size_t skills_floor = static_cast<size_t>(static_cast<double>(total_budget) * bp_cfg.skills_floor_ratio);
     size_t tools_budget_cap = static_cast<size_t>(static_cast<double>(total_budget) * bp_cfg.tools_ratio);
 
@@ -1350,10 +1327,8 @@ size_t PromptOptimizer::ComputeRelevanceTokenBudget(BudgetPartitionKind kind,
             return skills_budget;
         case BudgetPartitionKind::kTools:
         default:
-            // 直接返回 933 行已算好的 tools_budget（= min(真实需求, 上限)）。
-            // 注意：不能再用 std::max(tools_budget, min(need, cap)) 撤销 skills_floor
-            // 咬合后的削减——那会让 skills+tools > total_budget，使
-            // skills_floor_ratio 变成空操作（已被外部评审 + 代码复核共同证伪）。
+            // 已是 skills_floor 咬合后的 tools_budget，不要再用 std::max 撤销这次削减
+            // （会让 skills+tools > total_budget，使 skills_floor_ratio 变空操作）。
             return tools_budget;
     }
 }
@@ -1638,6 +1613,22 @@ std::string PromptOptimizer::OptimizeToolsPrompt(
     return result;
 }
 
+const std::unordered_map<std::string, std::string>& PromptOptimizer::GetKnownToolSignatures()
+{
+    // 预定义的工具参数签名（与 GetOptimizedToolDefinition 保持一致）
+    static const std::unordered_map<std::string, std::string> kToolSignatures = {
+        {"read",       "read(path, offset?, limit?)"},
+        {"write",      "write(path, content)"},
+        {"edit",       "edit(path, edits:[{oldText, newText}])"},
+        {"exec",       "exec(command, timeout?)"},
+        {"web_search", "web_search(query, count?, country?, freshness?)"},
+        {"web_fetch",  "web_fetch(url, extractMode?, maxChars?)"},
+        {"browser",    "browser(action, ...)"},
+        {"cron",       "cron(action, ...)"},
+    };
+    return kToolSignatures;
+}
+
 std::string PromptOptimizer::BuildDynamicToolsIntro(const nlohmann::ordered_json& request_data) const
 {
     // 从请求的顶层 "tools" 数组中提取工具名，生成与配置文件 tools_intro 格式
@@ -1685,17 +1676,7 @@ std::string PromptOptimizer::BuildDynamicToolsIntro(const nlohmann::ordered_json
         return "";
     }
 
-    // 预定义的工具参数签名（与 GetOptimizedToolDefinition 保持一致）
-    static const std::unordered_map<std::string, std::string> kToolSignatures = {
-        {"read",       "read(path, offset?, limit?)"},
-        {"write",      "write(path, content)"},
-        {"edit",       "edit(path, edits:[{oldText, newText}])"},
-        {"exec",       "exec(command, timeout?)"},
-        {"web_search", "web_search(query, count?, country?, freshness?)"},
-        {"web_fetch",  "web_fetch(url, extractMode?, maxChars?)"},
-        {"browser",    "browser(action, ...)"},
-        {"cron",       "cron(action, ...)"},
-    };
+    const auto& kToolSignatures = GetKnownToolSignatures();
 
     std::ostringstream oss;
     oss << "You can only call these tools:\n";

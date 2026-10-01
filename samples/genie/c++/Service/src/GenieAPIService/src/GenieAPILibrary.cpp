@@ -116,25 +116,6 @@ public:
         }
     }
 
-    // primary 模型（--config 指定）加载成功后调用：若 RootDir/service_config.json 存在，
-    // 附加加载其中的 qnn/NPU 模型条目；附加加载不影响 primary 已加载成功这一结果，
-    // 且会把 default_model_name_ 复位回 primary，避免被最后加载的额外模型覆盖。
-    void TryAutoLoadAdditionalQnnModels() {
-        if (!model_manager) {
-            return;
-        }
-        std::string service_config_path = (std::filesystem::path(RootDir) / "service_config.json").generic_string();
-        if (!File::IsFileExist(service_config_path)) {
-            return;
-        }
-        bool multi_ok = model_manager->LoadAllModelsFromConfig("qnn");
-        My_Log{My_Log::Level::kInfo} << "[api_loadmodel] LoadAllModelsFromConfig(qnn): "
-                                      << (multi_ok ? "loaded additional qnn model(s)" : "no additional qnn model loaded")
-                                      << std::endl;
-        model_manager->SetDefaultModel(model_manager->model_name_);
-        response_dispatcher = std::make_unique<ResponseDispatcher>(*model_manager, *chat_history,
-                                                                     model_manager->GetDefaultInstanceConfig());
-    }
 };
 
 // Builds the OpenAI-style request JSON from a raw prompt, reused by both api_Generate overloads:
@@ -248,8 +229,6 @@ bool api_interface::api_loadmodel(const std::string& model_path, std::vector<std
             }
         }
         
-        impl_->TryAutoLoadAdditionalQnnModels();
-        
         impl_->model_loaded = true;
         status = loaded;
         impl_->current_status = loaded;
@@ -299,7 +278,6 @@ bool api_interface::api_loadmodel_async(const std::string& model_path, std::vect
                 if (first_load && impl_->response_dispatcher) {
                     impl_->response_dispatcher->ResetProcessor();
                 }
-                impl_->TryAutoLoadAdditionalQnnModels();
                 impl_->model_loaded = true;
                 this->status = ::loaded;
                 impl_->current_status = ::loaded;
