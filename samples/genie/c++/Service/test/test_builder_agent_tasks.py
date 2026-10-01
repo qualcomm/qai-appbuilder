@@ -578,10 +578,13 @@ _MODEL_CONVERSION_FOLLOWUP_PROMPT_TEMPLATE = (
     "不要复述计划。立即调用一个工具执行转换流程里下一个尚未完成的具体步骤"
     "（例如用 exec 运行 model-builder 的 run_pipeline.py，或用 read 查看上一步的报错日志）。"
     "思考不超过三句话。\n\n"
-    "提示：工作目录是 {workspace_root}，转换目标 ONNX 文件是 {small_model_path}。"
-    "如果你不确定 run_pipeline.py 或其它脚本/日志文件的绝对路径，不要凭记忆猜测，"
+    "提示：工作目录（存放转换产物/REPORT.md 的地方）是 {workspace_root}，"
+    "转换目标 ONNX 文件是 {small_model_path}。"
+    "run_pipeline.py 不在工作目录下，它是 model-builder 技能自带的固定脚本，"
+    "确切绝对路径是 {run_pipeline_path}——直接用这个路径调用，不要去 {workspace_root} 下找它。"
+    "如果你不确定其它脚本/日志文件的绝对路径，不要凭记忆猜测，"
     "更不要停下来问我确认路径——立即调用 exec 工具自己查找"
-    "（例如 dir /s /b run_pipeline.py 或 dir /s /b {workspace_root}），"
+    "（例如 dir /s /b {workspace_root} 查找产物/日志；脚本本身用上面给的 run_pipeline_path）。"
     "找到后继续执行下一步。如果被无法自主解决的问题卡住，只用一句话说明卡在哪一步和具体报错。"
 )
 
@@ -610,6 +613,7 @@ def _find_conversion_report(workspace_root, deadline_hint=None):
 def run_model_conversion_task(builder, model_name, results, round_num=1,
                                small_model_path=_DEFAULT_SMALL_MODEL_PATH,
                                workspace_root=_DEFAULT_WORKSPACE_ROOT,
+                               run_pipeline_path=None,
                                max_turns=4, per_turn_timeout=900, total_deadline_seconds=1800,
                                busy_poll_interval_seconds=45, transcript_path=None):
     """任务一：驱动本地模型通过 model-builder 技能真实完成一次小模型转换。
@@ -622,6 +626,14 @@ def run_model_conversion_task(builder, model_name, results, round_num=1,
     停下来问用户确认——2026-10-01 mc_run12 真机实测复现过这个失败模式），处理模型在 Blocking
     Condition 上停下来询问确认的情形（B1/B2 等，见 SKILL.md），不新发明协议，
     只是把"继续 + 已获授权"说清楚，复用模型本就熟悉的多轮对话模式。
+
+    run_pipeline_path（2026-10-01 mc_run15 真机实测修复）：run_pipeline.py 实际物理位于
+    model-builder 技能自身的 scripts/ 目录下（<builder_dir>/factory/chat_features/
+    model-builder/scripts/run_pipeline.py），不在 workspace_root 下——${WORKSPACE} 只是
+    model-builder 技能存放转换产物（REPORT.md 等）的会话工作目录，README.md 146-159 行已写明
+    这一点。mc_run15 的 prompt 没有区分两者，导致模型在 workspace_root 下递归搜索
+    run_pipeline.py 一直返回空、却仍不断在 workspace_root 下徒劳 dir /s /b。未显式传入时
+    回退到 workspace_root 下的猜测路径（兼容旧调用方），调用方应始终显式传入真实路径。
 
     会话忙（existing_run）等待策略：服务端上一轮真实工作（pip install / 转换
     脚本执行等）可能持续远超单个 turn 的超时窗口；一旦探测到 busy，不把等待
@@ -652,6 +664,7 @@ def run_model_conversion_task(builder, model_name, results, round_num=1,
             detail=f"后端未就绪，跳过任务: {ready_err}", crashed=True))
         return False
 
+    effective_run_pipeline_path = run_pipeline_path or str(Path(workspace_root) / "run_pipeline.py")
     prompt = _MODEL_CONVERSION_INITIAL_PROMPT_TEMPLATE.format(small_model_path=small_model_path)
     conversation_id = None
     transcript = []
@@ -726,7 +739,8 @@ def run_model_conversion_task(builder, model_name, results, round_num=1,
             transcript.append(f"[real_turn {real_turns_used}] SSE 请求本身失败且未获得 conversation_id，终止本任务")
             break
         prompt = _MODEL_CONVERSION_FOLLOWUP_PROMPT_TEMPLATE.format(
-            workspace_root=workspace_root, small_model_path=small_model_path)
+            workspace_root=workspace_root, small_model_path=small_model_path,
+            run_pipeline_path=effective_run_pipeline_path)
 
     elapsed = time.time() - task_started
     ok = report_path is not None
@@ -1133,6 +1147,8 @@ def main():
                     builder, args.model_name, all_results,
                     small_model_path=args.small_model_path,
                     workspace_root=args.workspace_root,
+                    run_pipeline_path=str(Path(args.builder_dir) / "factory" / "chat_features" /
+                                           "model-builder" / "scripts" / "run_pipeline.py"),
                     max_turns=args.max_turns,
                     per_turn_timeout=args.per_turn_timeout,
                     total_deadline_seconds=args.total_deadline_seconds,
