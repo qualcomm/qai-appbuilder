@@ -838,6 +838,19 @@ _TETRIS_STATIC_CHECKS = {
     "tkinter_import": re.compile(r"^\s*(import\s+tkinter\b|from\s+tkinter\b)", re.I | re.M),
 }
 
+# static_ok=False 时的续问反馈措辞（2026-10-01 tetris_run8 真机实测复现：模型写出一个
+# 68 行占位实现——TetrisGUI 方向键绑定全是 lambda e: None 空操作，--selftest 只是
+# run_steps(200) 空转从不触碰任何真实游戏规则——却仍打印 SELFTEST OK 全身而退；
+# 此前 followup_extra 只覆盖 compile 失败/selftest 失败两个分支，selftest_ok=True
+# 但 static_ok=False 这种“假通过”完全没有对应反馈，模型连续两轮产出一字不差的
+# 占位实现，因为它根本不知道哪里被判定不合格）。
+_TETRIS_STATIC_MARKER_HINTS = {
+    "rotate_logic": "方块旋转（需要真正实现旋转变换的函数/逻辑，不能是占位符）",
+    "clear_lines_logic": "消行（需要检测满行并真正清除的函数/逻辑）",
+    "selftest_flag": "--selftest 命令行开关",
+    "tkinter_import": "tkinter 窗口/GUI",
+}
+
 
 def _check_tetris_static(content):
     """静态检查核心游戏逻辑关键特征是否存在（旋转/消行相关代码、--selftest 开关、
@@ -1009,6 +1022,15 @@ def run_tetris_task(builder, model_name, results, round_num=1,
             followup_extra = f"\n\n上次 py_compile 报错：{compile_err}"
         elif file_exists and compiles_ok and not selftest_ok:
             followup_extra = f"\n\n上次运行 --selftest 失败：{selftest_detail}"
+        elif file_exists and compiles_ok and selftest_ok and not static_ok:
+            missing_hints = [_TETRIS_STATIC_MARKER_HINTS.get(k, k)
+                              for k, marker_ok in static_markers.items() if not marker_ok]
+            followup_extra = (
+                "\n\n上次 --selftest 打印了 SELFTEST OK，但这是假通过：静态检查发现代码里"
+                f"缺少关键游戏逻辑（缺失: {'; '.join(missing_hints)}）。不要只让 --selftest "
+                "空转几步、伪造一个 SELFTEST OK 就退出——必须真正实现方块旋转、下落、碰撞检测、"
+                "消行等核心机制，并让 --selftest 真实驱动这些逻辑跑一遍后再打印 SELFTEST OK。"
+                "立即用 write 工具重写补全缺失的游戏逻辑，不要原样重复上一次的实现。")
         prompt = _TETRIS_FOLLOWUP_PROMPT_TEMPLATE.format(tetris_path=tetris_path) + followup_extra
 
     elapsed = time.time() - task_started
