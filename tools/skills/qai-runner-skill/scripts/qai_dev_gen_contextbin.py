@@ -148,16 +148,10 @@ def _ensure_vs_arm64_env(cfg: dict) -> None:
 
     print("[INFO] Initializing VS ARM64 env from: " + vcvarsall)
 
-    # FIX Bug1: use a list-based cmd so subprocess handles quoting correctly,
-    # then capture the resulting environment via "set".
-    # We run:  cmd.exe /c "vcvarsall.bat" arm64 >nul 2>&1 && set
-    # Using shell=True with a list is not valid on Windows; instead build the
-    # full command string carefully with the path quoted by shlex.quote
-    # equivalent for Windows (double-quote the path).
     quoted = '"' + vcvarsall + '"'
-    cmd = 'cmd /c "' + quoted + ' arm64 >nul 2>&1 && set"'
+    cmd = quoted + ' arm64 >nul 2>&1 && set'
     try:
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        result = subprocess.run(["cmd", "/c", cmd], shell=False, capture_output=True, text=True)
     except Exception as exc:
         print("[ERROR] Failed to run vcvarsall.bat: " + str(exc))
         sys.exit(1)

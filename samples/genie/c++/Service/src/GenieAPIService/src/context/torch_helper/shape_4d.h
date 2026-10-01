@@ -19,7 +19,8 @@ Shape_5D<T> stack_4d_list(const std::vector<Shape_4D<T>> &inputs, int dim)
     if (dim < 0 || dim > 4)
         throw std::invalid_argument("dim must be in [0..4]");
 
-    const Shape_4D<T> &ref = inputs[0];
+    const Shape_4D<T> *ref_ptr = &inputs[0];
+    const Shape_4D<T> &ref = *ref_ptr;
     if (ref.d0 < 0 || ref.d1 < 0 || ref.d2 < 0 || ref.d3 < 0)
         throw std::invalid_argument("invalid reference dims");
 
@@ -171,7 +172,8 @@ Shape_4D<T> concat_4d_list(const std::vector<Shape_4D<T>> &inputs, int dim)
     if (dim < 0 || dim > 3)
         throw std::invalid_argument("dim must be 0, 1, 2, or 3");
 
-    const Shape_4D<T> &ref = inputs[0];
+    const Shape_4D<T> *ref_ptr = &inputs[0];
+    const Shape_4D<T> &ref = *ref_ptr;
     if (ref.d0 < 0 || ref.d1 < 0 || ref.d2 < 0 || ref.d3 < 0)
         throw std::invalid_argument("invalid reference dims");
 

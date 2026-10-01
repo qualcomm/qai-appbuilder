@@ -92,7 +92,7 @@ def _check_file(path, label):
 def _run(cmd, capture=True):
     try:
         result = subprocess.run(
-            cmd, capture_output=capture, text=True, shell=True
+            ["cmd", "/c", cmd], capture_output=capture, text=True, shell=False
         )
         stdout = (result.stdout or "").strip()
         stderr = (result.stderr or "").strip()

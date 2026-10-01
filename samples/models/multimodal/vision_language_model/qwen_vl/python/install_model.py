@@ -31,6 +31,17 @@ def download_with_wget(url, dest_path, proxy=None):
         print(f"[wget] Download failed: {e}")
         return False
 
+def _safe_extract_tar(tar_ref, destination):
+    destination = os.path.realpath(destination)
+    for member in tar_ref.getmembers():
+        if member.issym() or member.islnk():
+            raise ValueError(f"Unsupported link in archive: {member.name}")
+        member_path = os.path.realpath(os.path.join(destination, member.name))
+        if os.path.commonpath((destination, member_path)) != destination:
+            raise ValueError(f"Unsafe archive member: {member.name}")
+    tar_ref.extractall(destination)
+
+
 def check_model_files(dir: str) -> bool:
     """
     Check if all required model files exist in the directory
@@ -123,7 +134,7 @@ def download_qwen_models(model_type="qwen2", base_dir=None):
 
             print("Extracting model files...")
             with tarfile.open(tar_path, 'r:gz') as tar_ref:
-                tar_ref.extractall(model_dir)
+                _safe_extract_tar(tar_ref, model_dir)
             
             # Find the root folder in the tar and move its contents
             extracted_items = os.listdir(model_dir)

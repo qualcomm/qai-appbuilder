@@ -146,11 +146,10 @@ class SqlitePendingMessageRepository(PendingMessageStorePort):
                         return []
                     ids = [int(r[0]) for r in rows]
                     messages = [str(r[1]) for r in rows]
-                    placeholders = ",".join("?" * len(ids))
-                    delete_sql = _DELETE_BY_IDS_SQL_TMPL.format(
-                        placeholders=placeholders
+                    await conn.executemany(
+                        "DELETE FROM channel_pending_message WHERE id = ?",
+                        ((message_id,) for message_id in ids),
                     )
-                    await conn.execute(delete_sql, ids)
                     # Also drop any expired rows for the same key so
                     # the next push starts from a clean slate.
                     await self._purge_for_key(

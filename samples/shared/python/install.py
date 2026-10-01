@@ -374,9 +374,6 @@ def verify_package(url, filepath, filesize, desc=None, fail=None):
 def download_url_pywget(url, filepath, filesize=None, desc=None, fail=None):
     ret = True
 
-    # Create an unverified SSLContext - a context with disables all certificate verification.
-    import ssl
-    ssl._create_default_https_context = ssl._create_unverified_context
 
     if verify_package(url, filepath, filesize):
         return ret
@@ -410,9 +407,6 @@ def download_url_pywget(url, filepath, filesize=None, desc=None, fail=None):
 def download_url_requests(url, filepath, filesize=None, desc=None, fail=None, chunk_size=8192):
     ret = True
 
-    # Disable warning for insecure request since we set 'verify=False'.
-    from requests.packages.urllib3.exceptions import InsecureRequestWarning
-    requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
     if verify_package(url, filepath, filesize):
         return ret
@@ -421,7 +415,7 @@ def download_url_requests(url, filepath, filesize=None, desc=None, fail=None, ch
     os.makedirs(path, exist_ok=True)
 
     try:
-        response = requests.get(url, stream=True, verify=False)
+        response = requests.get(url, stream=True)
         if response.status_code != 200:
             raise ValueError(f"Unable to download file at {url}")
 
@@ -472,10 +466,10 @@ def download_url_wget(url, filepath, filesize=None, desc=None, fail=None):
                 print(f"wget.exe not found. Please download it manually from '{WGET_URL}' and unzip it to '{wget_exe_path}' or run 'python ./shared/python/setup.py'")
                 return False
 
-            command = f'"{wget_exe_path}" --no-check-certificate -q --show-progress --continue -P "{path}" -O "{filepath}" {url}'
+            command = f'"{wget_exe_path}" -q --show-progress --continue -P "{path}" -O "{filepath}" {url}'
         
         elif system_name == "Linux":
-            command = f'"wget" --no-check-certificate -q --show-progress --continue -P "{path}" -O "{filepath}" {url}'
+            command = f'"wget" -q --show-progress --continue -P "{path}" -O "{filepath}" {url}'
 
         print(command)
         result = run(command, desc=desc, errdesc=fail, live=True)
