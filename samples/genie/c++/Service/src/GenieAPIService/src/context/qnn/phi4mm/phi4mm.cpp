@@ -246,9 +246,16 @@ std::pair<Image, Shape_2D<float>> QInterface::PHI4Embedding::DynamicPreprocess()
     {
         throw std::runtime_error("decode img failed");
     }
+    if (ori_w <= 0 || ori_h <= 0)
+    {
+        stbi_image_free(f_pixels);
+        throw std::runtime_error("decoded image has invalid dimensions");
+    }
 
     My_Log{} << "comp: " << comp << "\n";
-    auto aspect_ratio = (float) ori_w / ori_h;
+    const int safe_w = ori_w;
+    const int safe_h = ori_h;
+    auto aspect_ratio = (float) safe_w / safe_h;
     auto target_ratios = GenerateTargetRatios();
     int max_num = DynamicHD;
 
@@ -268,8 +275,8 @@ std::pair<Image, Shape_2D<float>> QInterface::PHI4Embedding::DynamicPreprocess()
     int tar_w = kWidth * best_ratio.first;
     int tar_h = kHeight * best_ratio.second;
 
-    float ratio_width = float(tar_w) / (float) ori_w;
-    float ratio_height = float(tar_h) / (float) ori_h;
+    float ratio_width = float(tar_w) / (float) safe_w;
+    float ratio_height = float(tar_h) / (float) safe_h;
 
     std::pair<int, int> new_size; // <w, h>
     int padding_width, padding_height;

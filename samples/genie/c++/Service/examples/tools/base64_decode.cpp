@@ -54,23 +54,21 @@ int main(int argc, char **argv)
         return -1;
     }
 
-    auto buf = new uint8_t[dwDecodeLen]{};
+    std::vector<uint8_t> buf(dwDecodeLen);
     if (!CryptStringToBinaryA(encoded_buf.data(),
                               encoded_buf.size(),
                               dwDecodeFlag,
-                              buf,
+                              buf.data(),
                               &dwDecodeLen,
                               nullptr,
                               &dwFlag))
     {
         std::cout << "decode to binrary failed after alloc: " << GetLastError() << "\n";
-        delete[] buf;
         return -1;
     }
 
     std::cout << "decode success, decode size:" << dwDecodeLen << " decode type: " << dwFlag << "\n";
     ofstream out(argv[2], std::ios::binary);
-    out.write(reinterpret_cast<char *>(buf), dwDecodeLen);
-    delete[] buf;
+    out.write(reinterpret_cast<char *>(buf.data()), dwDecodeLen);
     return 0;
 }

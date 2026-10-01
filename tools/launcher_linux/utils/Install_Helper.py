@@ -55,9 +55,6 @@ def verify_package(url, filepath, filesize, desc=None, fail=None):
 def download_url_pywget(url, filepath, filesize=None, desc=None, fail=None):
     ret = True
 
-    # Create an unverified SSLContext - a context with disables all certificate verification.
-    import ssl
-    ssl._create_default_https_context = ssl._create_unverified_context
 
     if verify_package(url, filepath, filesize):
         return ret
@@ -141,7 +138,7 @@ def ensure_windows_tools():
 
 def download_with_aria2c(url, dest_path, proxy=None):
     try:
-        cmd = ["aria2c", "--console-log-level=error", "--check-certificate=false", "-x", "16", "-s", "16", "-o", os.path.basename(dest_path), "-d", os.path.dirname(dest_path), url]
+        cmd = ["aria2c", "--console-log-level=error", "-x", "16", "-s", "16", "-o", os.path.basename(dest_path), "-d", os.path.dirname(dest_path), url]
         if proxy:
             cmd.extend(["--all-proxy", proxy])
         cmd.append("--continue=true")

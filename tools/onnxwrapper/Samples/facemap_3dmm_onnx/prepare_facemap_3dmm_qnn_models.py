@@ -119,10 +119,6 @@ def download_url_requests(
     chunk_size: int = 8192,
 ) -> bool:
     """Download a URL to filepath using requests (fallback)."""
-    # Disable warnings for insecure request since install.py sets verify=False.
-    from requests.packages.urllib3.exceptions import InsecureRequestWarning
-
-    requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
     if _verify_package(url, filepath, filesize):
         return True
@@ -133,7 +129,7 @@ def download_url_requests(
     try:
         if desc:
             print(desc)
-        response = requests.get(url, stream=True, verify=False)
+        response = requests.get(url, stream=True)
         if response.status_code != 200:
             raise ValueError(f"Unable to download file at {url}")
         total_size = int(response.headers.get("content-length", 0))
@@ -176,7 +172,7 @@ def download_url_wget(
     try:
         # Use system wget on Linux; on Windows, the original install.py expects a bundled wget.exe.
         if _SYSTEM_NAME == "Linux":
-            command = f'"wget" --no-check-certificate -q --show-progress --continue -P "{path}" -O "{filepath}" {url}'
+            command = f'"wget" -q --show-progress --continue -P "{path}" -O "{filepath}" {url}'
             if desc:
                 print(desc)
             print(command)
@@ -191,7 +187,7 @@ def download_url_wget(
             if not os.path.exists(wget_exe):
                 # No bundled wget.exe -> let caller fall back
                 return False
-            command = f'"{wget_exe}" --no-check-certificate -q --show-progress --continue -P "{path}" -O "{filepath}" {url}'
+            command = f'"{wget_exe}" -q --show-progress --continue -P "{path}" -O "{filepath}" {url}'
             if desc:
                 print(desc)
             print(command)

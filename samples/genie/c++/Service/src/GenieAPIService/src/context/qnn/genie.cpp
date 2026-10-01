@@ -184,7 +184,7 @@ void GenieLog_Callback(const GenieLog_Handle_t  /*handle*/,
         return;
     }
 
-    auto *buf = new char[length];
+    std::vector<char> buf(length);
     My_Log::Level my_level;
     switch (level)
     {
@@ -202,13 +202,12 @@ void GenieLog_Callback(const GenieLog_Handle_t  /*handle*/,
             break;
     }
 
-    std::vsnprintf(buf, length, fmt, args);
+    std::vsnprintf(buf.data(), length, fmt, args);
     while (buf[length - 2] == '\n')
     {
         buf[length - 2] = '\0';
         length--;
     }
-    delete[] buf;
 }
 
 void GenieContext::inference_thread()
@@ -852,7 +851,7 @@ json GenieContext::HandleProfile()
 {
     const Genie_AllocCallback_t callback([](size_t size, const char **data)
                                          {
-                                             *data = (char *) malloc(size);
+                                             *data = (char *) calloc(1, size);
                                              if (*data == nullptr)
                                              {
                                                  My_Log{} << "cannot allocate memory for JSON data.\n";
