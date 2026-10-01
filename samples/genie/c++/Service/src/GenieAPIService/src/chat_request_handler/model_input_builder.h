@@ -1880,6 +1880,17 @@ private:
         return oss.str();
     }
 
+    // 返回 instance_config_ 自身 config.json 的 sampler.`key` 值（存在且为数值时），否则返回 null。
+    // 与 chat_request_handler.cpp 匿名命名空间里的同名自由函数语义一致（因作用域限制无法跨文件
+    // 直接复用，这里镜像同一套优先级逻辑）：省略的 key 不会被 SetParamsByConfig() 改写为任意常量，
+    // 而是保留 SDK 创建 Dialog 时的默认值——摘要推理是服务端内部调用，没有"请求显式传入"这一层，
+    // 直接取 config.json 自身配置即是完整优先级链。
+    json SamplerFallback(const std::string &key) const
+    {
+        auto &sampler = instance_config_->sampler();
+        return (sampler.contains(key) && sampler.at(key).is_number()) ? sampler.at(key) : json();
+    }
+
     // ── RunSummarizationInference ─────────────────────────────────────────────
     // 为 Phase -1 摘要化执行单次同步推理。
     // 直接构造 ModelInput 并调用 context_->Query()，不走 Build() 主流程（避免递归）。
@@ -1906,9 +1917,18 @@ private:
             // 至少保留 512 tokens 输出，最多使用整个 context_size
             available_output = std::max(available_output, 512);
             available_output = std::min(available_output, context_size);
-            context_->SetParamsByConfig(json{{"temp", 0.3},
-                                             {"top_k", 20},
-                                             {"top_p", 0.8}});
+
+            // 只把模型自身 config.json 里有合法数值的采样参数塞进去；缺省的 key 不出现在
+            // 这个 json 里，SetParamsByConfig() 自身按 model_config_.sampler() 的 key 遍历、
+            // j 不含该 key 即 continue，会自然跳过未设置的参数，不再被改写为任意硬编码常量。
+            json params;
+            json temp = SamplerFallback("temp");
+            if (temp.is_number()) params["temp"] = temp;
+            json top_k = SamplerFallback("top-k");
+            if (top_k.is_number()) params["top_k"] = top_k;
+            json top_p = SamplerFallback("top-p");
+            if (top_p.is_number()) params["top_p"] = top_p;
+            context_->SetParamsByConfig(params);
         }
 
         std::string result;

@@ -175,7 +175,9 @@ void GenieService::run(int argc, char *argv[])
     // 并发多模型托管设计已删除：-l/--load_model 不再触发任何后台加载行为（config.h 中已降级为
     // no-op 标志，仅为兼容现有调用方保留）。服务启动后只有 -c 指定的这一个主模型处于加载状态。
 
-    static const std::string HOST = "0.0.0.0";
+    // 默认值仍是 0.0.0.0（与改动前行为一致），仅在使用者显式传入 -H/--host 时按需收紧，
+    // 详见 config.h::Config::host_ 的注释。
+    const std::string &HOST = config.get_host();
     My_Log{My_Log::Level::kAlways} << YELLOW << "[OK] Genie API Service IS Running." << RESET << std::endl;
     My_Log{My_Log::Level::kAlways} << YELLOW << "[OK] Genie API Service -> http://"
                                    << HOST << ":" << port_checked

@@ -48,8 +48,19 @@ int CountTrailingToolCalls(const json &messages)
 // Computes the output-token budget (context window minus consumed prompt tokens, clamped between
 // the configured minimum output and the full context size) and applies it together with the
 // sampling params to the model handle. Shared by the stream and non-stream inference paths.
+//
+// Returns the model's own config.json sampler value for `key` if it is present and numeric,
+// otherwise a null json. There is no literal fallback here: a key that is neither requested
+// nor configured must be omitted from the SetParamsByConfig() call entirely (see
+// ApplyOutputSizeBudget) rather than overwritten with an arbitrary constant.
+json SamplerFallback(const ModelInstanceConfig &config, const std::string &key)
+{
+    auto &sampler = config.sampler();
+    return (sampler.contains(key) && sampler.at(key).is_number()) ? sampler.at(key) : json();
+}
+
 void ApplyOutputSizeBudget(ContextBase &handle, ModelInstanceConfig &config,
-                          size_t prompt_tokens, float temperature)
+                          size_t prompt_tokens, const json &temperature)
 {
     int context_size = config.get_context_size();
     int available_output = context_size - static_cast<int>(prompt_tokens);
@@ -60,10 +71,20 @@ void ApplyOutputSizeBudget(ContextBase &handle, ModelInstanceConfig &config,
         << "Prompt tokens: " << prompt_tokens
         << ", Context size: " << context_size
         << ", Max output tokens: " << available_output << std::endl;
-    handle.SetParamsByConfig(json{{"size", available_output},
-                                  {"temp", temperature},
-                                  {"top_k", 20},
-                                  {"top_p", 0.8}});
+
+    // 只把有合法数值的采样参数塞进去；缺省的 key 直接不出现在这个 json 里，
+    // SetParamsByConfig() 自身按 model_config_.sampler() 的 key 遍历、j 不含该 key 即 continue，
+    // 会自然跳过未设置的参数，保留 SDK 创建 Dialog 时的默认值，而不是被改写成任意常量。
+    json params{{"size", available_output}};
+    if (temperature.is_number())
+        params["temp"] = temperature;
+    json top_k = SamplerFallback(config, "top-k");
+    if (top_k.is_number())
+        params["top_k"] = top_k;
+    json top_p = SamplerFallback(config, "top-p");
+    if (top_p.is_number())
+        params["top_p"] = top_p;
+    handle.SetParamsByConfig(params);
 }
 } // namespace
 
@@ -604,14 +625,22 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
                             ResponseTools::statusDataJson("prompt_optimized", "Prompt optimization complete",
                                                           input_builder->GetLedger().ToJson()));
 
-                        // 动态调整 temperature
-                        float temperature = data_copy.value("temp", 0.3f);
+                        // 动态调整 temperature：请求显式传入优先；否则回退到 config.json 自身的
+                        // sampler.temp；两者都没有合法数值时保持为 null，ApplyOutputSizeBudget 会
+                        // 完全不设置该参数，不对未配置的模型注入与其无关的任意默认值。
+                        json temperature = data_copy.value<json>("temp", json());
+                        if (!temperature.is_number())
+                        {
+                            temperature = SamplerFallback(*loaded_model_ref->config, "temp");
+                        }
                         bool has_tools = data_copy.contains("tools")
                                       && data_copy["tools"].is_array()
                                       && !data_copy["tools"].empty();
                         if (has_tools) {
                             const auto& opt_config = model_manager.GetPromptOptimizationConfig();
-                            temperature = std::min(temperature, opt_config.tool_call_temperature);
+                            temperature = temperature.is_number()
+                                ? json(std::min(temperature.get<float>(), opt_config.tool_call_temperature))
+                                : json(opt_config.tool_call_temperature);
                             My_Log{My_Log::Level::kInfo}
                                 << "[Tool Call] Adjusting temperature to " << temperature
                                 << " for tool calling scenario" << std::endl;
@@ -715,12 +744,19 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
             // PromptLedger::ToJson()/字段口径。
             input_builder->GetLedger().WriteHeaders(res);
 
-            // 动态调整 temperature
-            float temperature = get_json_value(data, "temp", 0.3);
+            // 动态调整 temperature：同上（见流式路径注释），请求优先，否则回退到 config.json，
+            // 两者都没有合法数值时保持为 null，完全不设置该参数。
+            json temperature = data.value<json>("temp", json());
+            if (!temperature.is_number())
+            {
+                temperature = SamplerFallback(config, "temp");
+            }
             bool has_tools = data.contains("tools") && data["tools"].is_array() && !data["tools"].empty();
             if (has_tools) {
                 const auto& opt_config = model_manager.GetPromptOptimizationConfig();
-                temperature = std::min(temperature, opt_config.tool_call_temperature);
+                temperature = temperature.is_number()
+                    ? json(std::min(temperature.get<float>(), opt_config.tool_call_temperature))
+                    : json(opt_config.tool_call_temperature);
                 My_Log{My_Log::Level::kInfo}
                     << "[Tool Call] Adjusting temperature to " << temperature
                     << " for tool calling scenario" << std::endl;
