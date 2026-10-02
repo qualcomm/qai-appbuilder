@@ -973,8 +973,8 @@ bool ModelManager::InitializeConfig()
 
     // 尝试加载 service_config.json 中的路由与云端配置
     {
-        // 从程序根目录加载 service_config.json
-        fs::path service_config_path = fs::path(RootDir) / "service_config.json";
+        // 从程序根目录的 config/ 子目录加载 service_config.json（与模型配置的落点统一）
+        fs::path service_config_path = fs::path(RootDir) / "config" / "service_config.json";
         if (File::IsFileExist(service_config_path.generic_string()) &&
             !File::IsFileEmpty(service_config_path.generic_string()))
         {
@@ -983,6 +983,12 @@ bool ModelManager::InitializeConfig()
                 std::ifstream sc_file(service_config_path.generic_string());
                 json sc_json;
                 sc_file >> sc_json;
+
+                // Group A（网络模块：云端/路由，含 routing.enabled 本身及其下敏感检测/脱敏/
+                // 复杂度评估子节）只在 -n -1（stateless/端云结合模式）时解析生效；-n 非 -1 时
+                // 保持结构体默认值，routing_config_.enabled 恒为 false，云端路径不可达。
+                // Group B（prompt_optimization/tool_call_repair/debug）与云端无关，无条件生效。
+                bool is_stateless_mode = (getnumResponse() == -1);
 
                 // 优先加载 debug 配置（必须最先加载，避免后续节解析异常时 debug 配置未生效）
                 // 历史问题：debug 节原来放在 try 块末尾，若前面任何节解析抛出异常，
@@ -1002,8 +1008,8 @@ bool ModelManager::InitializeConfig()
                              << std::endl;
                 }
 
-                // 加载 routing 配置
-                if (sc_json.contains("routing"))
+                // 加载 routing 配置（Group A：仅 -n -1 时解析生效）
+                if (is_stateless_mode && sc_json.contains("routing"))
                 {
                     const auto &r = sc_json["routing"];
                     routing_config_.enabled = r.value("enabled", false);
@@ -1313,7 +1319,7 @@ bool ModelManager::InitializeConfig()
                 int shared_rl_max_inferences = 20;
                 int shared_rl_max_tokens = 0;
 
-                if (sc_json.contains("cloud_shared"))
+                if (is_stateless_mode && sc_json.contains("cloud_shared"))
                 {
                     const auto &cs = sc_json["cloud_shared"];
                     shared_timeout_seconds = cs.value("timeout_seconds", shared_timeout_seconds);
@@ -1348,7 +1354,7 @@ bool ModelManager::InitializeConfig()
 
                 // 加载 cloud_model 配置
                 // 共享字段先从 cloud_shared 继承，cloud_model 节中若存在同名字段则覆盖（向后兼容旧格式）
-                if (sc_json.contains("cloud_model"))
+                if (is_stateless_mode && sc_json.contains("cloud_model"))
                 {
                     const auto &cm = sc_json["cloud_model"];
                     cloud_model_config_.enabled = cm.value("enabled", false);
@@ -1458,7 +1464,7 @@ bool ModelManager::InitializeConfig()
 
                 // 加载 enterprise_cloud_model 配置
                 // 共享字段先从 cloud_shared 继承，enterprise_cloud_model 节中若存在同名字段则覆盖（向后兼容旧格式）
-                if (sc_json.contains("enterprise_cloud_model"))
+                if (is_stateless_mode && sc_json.contains("enterprise_cloud_model"))
                 {
                     const auto &ecm = sc_json["enterprise_cloud_model"];
                     enterprise_cloud_model_config_.enabled = ecm.value("enabled", false);
@@ -1551,8 +1557,8 @@ bool ModelManager::InitializeConfig()
                              << std::endl;
                 }
 
-                // 加载 local_model 配置
-                if (sc_json.contains("local_model"))
+                // 加载 local_model 配置（Group A：仅 -n -1 时解析生效）
+                if (is_stateless_mode && sc_json.contains("local_model"))
                 {
                     const auto &lm = sc_json["local_model"];
                     local_model_config_.enabled = lm.value("enabled", true);
@@ -2006,7 +2012,7 @@ bool ModelManager::InitializeConfig()
         }
     }
 
-    return LoadSingleModel();
+    return true;
 }
 
 bool ModelManager::LoadSingleModel()
@@ -2455,7 +2461,9 @@ uint64_t ModelManager::EstimateOtherLoadedModelsMemoryBytes() const
 }
 
 // ============================================================
-// ParseContextSizeFromConfigJson: 从 config.json 中读取 dialog.context.size。
+// ParseContextSizeFromConfigJson: 从 config.json 中读取上下文大小。
+// 优先 dialog.context.size（QNN Dialog 结构）；缺失或为 0 时回退读取顶层
+// context_size 字段（GGUF 等无 dialog 结构的场景，由离线工具写入）。
 // 由 LoadPromptTemplates()（单模型加载路径）调用。
 //
 // 参数：
@@ -2464,7 +2472,7 @@ uint64_t ModelManager::EstimateOtherLoadedModelsMemoryBytes() const
 //   log_prefix         - 日志前缀（如 "[LoadModel]" / "[LoadPromptTemplates]"）
 //
 // 返回值：
-//   config.json 中 dialog.context.size（0 表示未指定或解析失败）
+//   config.json 中 dialog.context.size 或顶层 context_size（0 表示均未指定或解析失败）
 // ============================================================
 static int ParseContextSizeFromConfigJson(const std::string &config_json_path,
                                           const std::string &model_name,
@@ -2485,6 +2493,16 @@ static int ParseContextSizeFromConfigJson(const std::string &config_json_path,
                 {
                     My_Log{My_Log::Level::kInfo}
                             << log_prefix << " Read context_size from config.json dialog.context.size="
+                            << config_json_ctx_size << " for model '" << model_name << "'\n";
+                }
+            }
+            if (config_json_ctx_size <= 0)
+            {
+                config_json_ctx_size = cfg.value("context_size", 0);
+                if (config_json_ctx_size > 0)
+                {
+                    My_Log{My_Log::Level::kInfo}
+                            << log_prefix << " Read context_size from config.json top-level context_size="
                             << config_json_ctx_size << " for model '" << model_name << "'\n";
                 }
             }

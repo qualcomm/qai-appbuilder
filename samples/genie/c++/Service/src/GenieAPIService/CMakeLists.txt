@@ -211,7 +211,7 @@ if (MSVC)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 ${CMAKE_CURRENT_SOURCE_DIR}/../config/service_config.json
                 ${CMAKE_CURRENT_SOURCE_DIR}/../config/sensitive_keywords.json
-                ${BUILD_PATH}
+                ${BUILD_PATH}/config
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 ${CMAKE_CURRENT_SOURCE_DIR}/../../test/test_service.py
                 ${BUILD_PATH}
@@ -225,7 +225,7 @@ elseif (UNIX)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 ${CMAKE_CURRENT_SOURCE_DIR}/../config/service_config.json
                 ${CMAKE_CURRENT_SOURCE_DIR}/../config/sensitive_keywords.json
-                ${BUILD_PATH}
+                ${BUILD_PATH}/config
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 ${CMAKE_CURRENT_SOURCE_DIR}/../../test/test_service.py
                 ${BUILD_PATH}
@@ -242,7 +242,7 @@ if (BUILD_AS_DLL)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 ${CMAKE_CURRENT_SOURCE_DIR}/../config/service_config.json
                 ${CMAKE_CURRENT_SOURCE_DIR}/../config/sensitive_keywords.json
-                ${BUILD_PATH}
+                ${BUILD_PATH}/config
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 ${CMAKE_CURRENT_SOURCE_DIR}/../../test/test_service.py
                 ${BUILD_PATH}

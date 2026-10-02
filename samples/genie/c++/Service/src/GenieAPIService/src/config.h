@@ -76,13 +76,15 @@ inline bool Config::Process()
     CLI::App app{"Genie API Service - Powerful Local LLM Service"};
     app.footer("\nSupport: https://github.com/quic/ai-engine-direct-helper");
 
-    app.add_option("-c,--config_file", config_file, "Path to the config file.");
+    // -c 只定位模型目录（解析 model_path_/model_root_/model_name_），不再隐式触发加载。
+    app.add_option("-c,--config_file", config_file, "Path to the config file. Only resolves the model path; "
+                   "pass -l/--load_model to actually load it.");
     app.add_option("--adapter", model_config_.loraAdapter, "the adapter of lora");
 
-    // 并发多模型托管设计已删除（service_config.json 的 models 数组及其加载逻辑不再存在）。
-    // 标志定义本身保留，避免 CLI11 对现有调用方（如 QAIModelBuilder 每次启动都会带上 -l）报参数错误；
-    // NeedLoadModel() 的返回值不再驱动任何实际加载行为，是一个无操作（no-op）标志。
-    app.add_flag("-l,--load_model", loadModel, "Deprecated, kept for backward CLI compatibility; no longer triggers any loading behavior.");
+    // -l 才真正调用 LoadSingleModel() 占用硬件资源；未传时服务启动后不持有任何已加载模型，
+    // 之后仍可通过对话/HTTP 触发的 LoadModelByName() 动态加载任意后端模型。
+    app.add_flag("-l,--load_model", loadModel, "Actually load the model specified by -c at service startup. "
+                 "Without this flag, no model is loaded until a chat/HTTP request triggers LoadModelByName().");
     app.add_flag("-a,--all_text", model_config_.outputAllText, "Output all text includes tool calls text.");
     app.add_flag("-t,--enable_thinking", model_config_.enableThinking, "Enable thinking mode.");
     app.add_flag("-g,--prompt_debug", model_config_.enablePromptDebug, "Enable prompt compression optimization debug logs. (Repeat for level 2: -g -g)");
