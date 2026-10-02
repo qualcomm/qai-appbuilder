@@ -1,7 +1,7 @@
 #=============================================================================
 #
 # Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
-# 
+#
 # SPDX-License-Identifier: BSD-3-Clause
 #
 #=============================================================================
@@ -11,6 +11,32 @@ project(appbuilder LANGUAGES CXX)
 
 option(APPBUILDER_ENABLE_TFLITE "Build direct TFLite + QNN delegate support" OFF)
 option(APPBUILDER_ENABLE_TFLITE_CPU "Build direct TFLite CPU support" OFF)
+option(APPBUILDER_ENABLE_EXECUTORCH "Build direct ExecuTorch support" OFF)
+option(APPBUILDER_ENABLE_EXECUTORCH_QNN "Enable the ExecuTorch Qualcomm QNN backend" OFF)
+
+if (APPBUILDER_ENABLE_EXECUTORCH_QNN AND NOT APPBUILDER_ENABLE_EXECUTORCH)
+    message(FATAL_ERROR "APPBUILDER_ENABLE_EXECUTORCH_QNN requires APPBUILDER_ENABLE_EXECUTORCH=ON.")
+endif()
+
+if (APPBUILDER_ENABLE_EXECUTORCH)
+    if (NOT DEFINED ENV{EXECUTORCH_ROOT} OR "$ENV{EXECUTORCH_ROOT}" STREQUAL "")
+        message(FATAL_ERROR "APPBUILDER_ENABLE_EXECUTORCH requires EXECUTORCH_ROOT.")
+    endif()
+    if (NOT EXISTS "$ENV{EXECUTORCH_ROOT}/extension/module/module.h")
+        message(FATAL_ERROR "EXECUTORCH_ROOT must contain extension/module/module.h.")
+    endif()
+    if (APPBUILDER_ENABLE_EXECUTORCH_QNN)
+        if (NOT DEFINED ENV{QNN_SDK_ROOT} OR "$ENV{QNN_SDK_ROOT}" STREQUAL "")
+            message(FATAL_ERROR "APPBUILDER_ENABLE_EXECUTORCH_QNN requires QNN_SDK_ROOT.")
+        endif()
+        if (NOT EXISTS "$ENV{EXECUTORCH_ROOT}/backends/qualcomm/runtime/QnnExecuTorch.h")
+            message(FATAL_ERROR "EXECUTORCH_ROOT must contain the Qualcomm ExecuTorch backend headers.")
+        endif()
+        if (NOT EXISTS "$ENV{QNN_SDK_ROOT}/include/QNN/QnnTypes.h")
+            message(FATAL_ERROR "QNN_SDK_ROOT must contain include/QNN/QnnTypes.h.")
+        endif()
+    endif()
+endif()
 
 if (APPBUILDER_ENABLE_TFLITE AND APPBUILDER_ENABLE_TFLITE_CPU)
     message(FATAL_ERROR "APPBUILDER_ENABLE_TFLITE and APPBUILDER_ENABLE_TFLITE_CPU are mutually exclusive.")
@@ -56,6 +82,42 @@ else()
 endif()
 
 INCLUDE_DIRECTORIES(../src)
+if (APPBUILDER_ENABLE_EXECUTORCH)
+    get_filename_component(EXECUTORCH_PARENT_INCLUDE_ROOT "$ENV{EXECUTORCH_ROOT}" DIRECTORY)
+    INCLUDE_DIRECTORIES(
+        "$ENV{EXECUTORCH_ROOT}"
+        "${EXECUTORCH_PARENT_INCLUDE_ROOT}"
+    )
+    if (DEFINED ENV{EXECUTORCH_TORCH_INCLUDE_ROOT} AND
+        NOT "$ENV{EXECUTORCH_TORCH_INCLUDE_ROOT}" STREQUAL "")
+        INCLUDE_DIRECTORIES("$ENV{EXECUTORCH_TORCH_INCLUDE_ROOT}")
+    endif()
+    add_compile_definitions(APPBUILDER_ENABLE_EXECUTORCH=1)
+    if (APPBUILDER_ENABLE_EXECUTORCH_QNN)
+        add_compile_definitions(APPBUILDER_ENABLE_EXECUTORCH_QNN=1)
+    endif()
+
+    # Keep the Python extension's SDK validation in sync with the native
+    # library build.  The native target links the portable operator
+    # registration archive with --whole-archive; fail here too when a
+    # packaging build points at an incomplete SDK.
+    find_library(EXECUTORCH_MODULE_LIBRARY NAMES extension_module_static extension_module
+                 PATHS "$ENV{EXECUTORCH_ROOT}/lib" "$ENV{EXECUTORCH_ROOT}/build/lib"
+                 NO_DEFAULT_PATH)
+    find_library(EXECUTORCH_CORE_LIBRARY NAMES executorch_core executorch executorch_shared
+                 PATHS "$ENV{EXECUTORCH_ROOT}/lib" "$ENV{EXECUTORCH_ROOT}/build/lib"
+                 NO_DEFAULT_PATH)
+    find_library(EXECUTORCH_PORTABLE_OPS_LIBRARY NAMES portable_ops_lib
+                 PATHS "$ENV{EXECUTORCH_ROOT}/lib" "$ENV{EXECUTORCH_ROOT}/build/lib"
+                 NO_DEFAULT_PATH)
+    find_library(EXECUTORCH_PORTABLE_KERNELS_LIBRARY NAMES portable_kernels
+                 PATHS "$ENV{EXECUTORCH_ROOT}/lib" "$ENV{EXECUTORCH_ROOT}/build/lib"
+                 NO_DEFAULT_PATH)
+    if (NOT EXECUTORCH_MODULE_LIBRARY OR NOT EXECUTORCH_CORE_LIBRARY OR
+        NOT EXECUTORCH_PORTABLE_OPS_LIBRARY OR NOT EXECUTORCH_PORTABLE_KERNELS_LIBRARY)
+        message(FATAL_ERROR "EXECUTORCH_ROOT must provide extension_module(_static), executorch_core, portable_ops_lib, and portable_kernels under lib or build/lib.")
+    endif()
+endif()
 if (APPBUILDER_ENABLE_TFLITE OR APPBUILDER_ENABLE_TFLITE_CPU)
     INCLUDE_DIRECTORIES("$ENV{TFLITE_ROOT}/include")
     if (APPBUILDER_ENABLE_TFLITE)

@@ -10,6 +10,7 @@
 #include <string>
 
 #include "QnnInterface.h"
+#include "QnnSystemCompat.hpp"
 #include "System/QnnSystemInterface.h"
 #include "QnnWrapperUtils.hpp"
 

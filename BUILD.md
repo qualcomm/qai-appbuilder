@@ -124,6 +124,36 @@ Direct `.tflite` contexts expose a single interpreter graph. Pass only `graphInd
 
 `getProfilingEvent()` returns `0` for direct `.tflite` contexts because this path does not expose QNN profiling events. Do not interpret `0` as a measured profiling result.
 
+### Build with direct ExecuTorch support (Linux and Android arm64)
+
+ExecuTorch support is disabled by default and consumes a prebuilt ExecuTorch C++ SDK selected with `EXECUTORCH_ROOT`. The SDK must match the target platform: use a Linux SDK for Linux builds and an Android arm64-v8a SDK for Android NDK builds. Static single-method `.pte` programs with tensor-only `forward` inputs and outputs are supported.
+
+```bash
+export EXECUTORCH_ROOT=<path-to-executorch-sdk>
+export APPBUILDER_ENABLE_EXECUTORCH=ON
+# Optional Qualcomm backend. The .pte must have been lowered for QNN.
+export QNN_SDK_ROOT=<path-to-qairt>
+export APPBUILDER_ENABLE_EXECUTORCH_QNN=ON
+python -m build -w
+```
+
+`EXECUTORCH_ROOT` must contain `extension/module/module.h`, `extension/tensor/tensor_ptr.h`, the `extension_module` and `executorch` runtime libraries. An XNNPACK backend library (`executorch_backend_xnnpack` or `xnnpack_backend`) is linked when the SDK provides one; CPU-only builds do not require it. QNN builds additionally require `backends/qualcomm/runtime/QnnExecuTorch.h`, `QNN_SDK_ROOT`, and the ExecuTorch Qualcomm backend library. Runtime shared libraries are copied under `qai_appbuilder/libs/` when present. Do not redistribute ExecuTorch, XNNPACK, QNN, or QAIRT artifacts unless their licenses permit it.
+
+For Android, pass the Android SDK root to `make/Android.mk` and keep `.pte` assets uncompressed when they are memory mapped:
+
+```bash
+ndk-build EXECUTORCH_ROOT=<android-arm64-executorch-sdk> \
+    EXECUTORCH_ENABLE_XNNPACK=1 EXECUTORCH_ENABLE_QNN=1 APP_ABI=arm64-v8a
+```
+
+```kotlin
+androidResources {
+    noCompress.add("pte")
+}
+```
+
+Both CPU/XNNPACK and Qualcomm programs report their provider mode through `QNNContext.getProviderMode()`. Performance profiles, asynchronous execution, QNN-only device options, dynamic tensor dimensions, and non-`forward` methods are rejected for `.pte` models in this initial integration.
+
 ### Install Python Dependencies
 
 Upgrade build tooling and install required Python packages:

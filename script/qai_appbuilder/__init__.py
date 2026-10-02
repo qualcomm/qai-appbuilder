@@ -1,7 +1,7 @@
 #=============================================================================
 #
 # Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
-# 
+#
 # SPDX-License-Identifier: BSD-3-Clause
 #
 #=============================================================================
@@ -42,6 +42,36 @@ if sys.platform.startswith('linux'):
         _tflite_path = os.path.join(g_base_path, "libs", _tflite_lib)
         if os.path.exists(_tflite_path):
             ctypes.CDLL(_tflite_path, ctypes.RTLD_GLOBAL)
+
+    for _executorch_lib in (
+        "libexecutorch.so",
+        "libexecutorch_core.so",
+        "libexecutorch_shared.so",
+        "libportable_ops_lib.so",
+        "libportable_kernels.so",
+        "libkernels_util_all_deps.so",
+        "libextension_module.so",
+        "libextension_tensor.so",
+        "libextension_data_loader.so",
+        "libextension_flat_tensor.so",
+        "libextension_named_data_map.so",
+        "libextension_evalue_util.so",
+        "libextension_threadpool.so",
+        "libextension_runner_util.so",
+        "libexecutorch_backend_qnn.so",
+        "libqnn_executorch_backend.so",
+        "libexecutorch_backend_xnnpack.so",
+        "libxnnpack_backend.so",
+    ):
+        _executorch_path = os.path.join(g_base_path, "libs", _executorch_lib)
+        if os.path.exists(_executorch_path):
+            try:
+                ctypes.CDLL(_executorch_path, ctypes.RTLD_GLOBAL)
+            except OSError:
+                # Optional ExecuTorch artifacts can have SDK-specific transitive
+                # dependencies. libappbuilder.so reports the definitive error if
+                # an enabled build cannot resolve them.
+                pass
 
     ctypes.CDLL(g_base_path + "/libappbuilder.so", ctypes.RTLD_GLOBAL)
     ctypes.CDLL(g_base_path + "/libGenie.so", ctypes.RTLD_GLOBAL)
