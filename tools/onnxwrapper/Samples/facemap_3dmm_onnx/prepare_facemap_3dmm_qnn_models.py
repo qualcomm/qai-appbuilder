@@ -19,10 +19,21 @@ import subprocess
 from pathlib import Path
 from typing import Dict, Optional
 
+import ssl
 import requests
 from tqdm import tqdm
 import urllib.request as request
 import qai_hub
+
+
+def _is_ssl_error(exc) -> bool:
+    # Best-effort detection of a TLS/certificate-verification failure, as
+    # opposed to a generic network error (DNS, timeout, connection refused)
+    # that an insecure retry would not help with anyway.
+    if isinstance(exc, ssl.SSLError):
+        return True
+    text = str(exc).lower()
+    return "certificate" in text or "ssl" in text or "tls" in text
 
 
 MODEL_ID = "mqyy9zd9q"
@@ -103,8 +114,11 @@ def _verify_package(url: str, filepath: os.PathLike, filesize: Optional[int] = N
         if filesize is not None:
             actual_size = filesize
         else:
-            resp = request.urlopen(url)
-            actual_size = int(resp.headers.get("Content-Length", 0))
+            try:
+                resp = request.urlopen(url)
+                actual_size = int(resp.headers.get("Content-Length", 0))
+            except Exception:
+                return False  # could not verify remote size; treat as not ready
         return actual_size == local_size
     return False
 
@@ -126,10 +140,11 @@ def download_url_requests(
     path = os.path.dirname(str(filepath))
     os.makedirs(path, exist_ok=True)
 
-    try:
-        if desc:
-            print(desc)
-        response = requests.get(url, stream=True)
+    if desc:
+        print(desc)
+
+    def _fetch(verify):
+        response = requests.get(url, stream=True, verify=verify)
         if response.status_code != 200:
             raise ValueError(f"Unable to download file at {url}")
         total_size = int(response.headers.get("content-length", 0))
@@ -138,8 +153,18 @@ def download_url_requests(
                 for data in response.iter_content(chunk_size=chunk_size):
                     f.write(data)
                     bar.update(len(data))
+
+    try:
+        _fetch(True)
         return True
-    except Exception:
+    except Exception as e:
+        if _is_ssl_error(e):
+            print(f"TLS certificate verification failed ({e}); retrying once without certificate verification...")
+            try:
+                _fetch(False)
+                return True
+            except Exception as e2:
+                e = e2
         print()
         if fail:
             print(fail)
