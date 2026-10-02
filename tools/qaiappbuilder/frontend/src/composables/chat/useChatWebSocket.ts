@@ -162,9 +162,6 @@ export interface ChatWebSocketClient {
       temperature?: number | null;
       topP?: number | null;
       maxTokens?: number | null;
-      /** Reasoning-effort tier override (forwarded as `reasoning_effort`).
-       *  `null`/omitted = no override. */
-      reasoningEffort?: string | null;
       /** Per-session ("this conversation only") tool / SKILL override —
        *  arrays of names switched OFF for this session. Omitted when empty. */
       disabledTools?: string[];
@@ -634,7 +631,6 @@ export function useChatWebSocket(
       temperature?: number | null;
       topP?: number | null;
       maxTokens?: number | null;
-      reasoningEffort?: string | null;
       disabledTools?: string[];
       disabledSkills?: string[];
       locale?: string | null;
@@ -675,12 +671,6 @@ export function useChatWebSocket(
       tool.maxTokens > 0
         ? tool.maxTokens
         : null;
-    const reasoningEffort =
-      tool !== undefined &&
-      typeof tool.reasoningEffort === "string" &&
-      tool.reasoningEffort !== ""
-        ? tool.reasoningEffort
-        : null;
     // Per-session tool / SKILL override (this conversation only; additive).
     // Only emitted when non-empty so the envelope is byte-identical to the
     // prior shape for sessions without an override.
@@ -714,7 +704,6 @@ export function useChatWebSocket(
         temperature !== null ||
         topP !== null ||
         maxTokens !== null ||
-        reasoningEffort !== null ||
         disabledTools !== null ||
         disabledSkills !== null ||
         locale !== null);
@@ -733,9 +722,6 @@ export function useChatWebSocket(
           ...(temperature !== null ? { temperature } : {}),
           ...(topP !== null ? { top_p: topP } : {}),
           ...(maxTokens !== null ? { max_tokens: maxTokens } : {}),
-          ...(reasoningEffort !== null
-            ? { reasoning_effort: reasoningEffort }
-            : {}),
           ...(disabledTools !== null ? { disabled_tools: disabledTools } : {}),
           ...(disabledSkills !== null
             ? { disabled_skills: disabledSkills }
