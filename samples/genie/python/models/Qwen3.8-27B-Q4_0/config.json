@@ -1,0 +1,10 @@
+{
+  "backend": "gpu",
+  "draft_model": {
+    "path": "Qwen3.8-27B-DFlash2-Q4_K_M.gguf",
+    "spec_type": "draft-dflash",
+    "spec_draft_n_max": 7,
+    "spec_draft_p_min": 0,
+    "required": true
+  }
+}

@@ -16,6 +16,7 @@
 #include "log.h"
 #include "utils.h"
 #include "llama_speculative_config.h"
+#include "watermark_provider_host.h"
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -35,6 +36,106 @@ static inline int64_t now_ms()
     return std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Watermark sampling-chain adapter
+// Implements llama_sampler_i and forwards to the plugin VTable token hooks.
+// Inserted at the absolute front of the chain once during Impl construction.
+// ─────────────────────────────────────────────────────────────────────────────
+namespace {
+
+struct WatermarkSamplerData {
+    const GenieWatermarkProviderVTable* vtable;
+    GenieWatermarkTokenHook*             hook;
+    uint32_t                             n_vocab; // stored for clone()
+    uint64_t                             seed;    // stored for clone()
+};
+
+static const char* wm_name(const llama_sampler * /*smpl*/)
+{
+    return "genie_watermark";
+}
+
+static void wm_accept(llama_sampler * smpl, llama_token token)
+{
+    auto* d = static_cast<WatermarkSamplerData*>(smpl->ctx);
+    d->vtable->token_hook_accept(d->hook, static_cast<int32_t>(token));
+}
+
+static void wm_apply(llama_sampler * smpl, llama_token_data_array * cur_p)
+{
+    if (cur_p->size == 0) { return; }
+    auto* d = static_cast<WatermarkSamplerData*>(smpl->ctx);
+    const size_t n = cur_p->size;
+    std::vector<int32_t> ids(n);
+    std::vector<float>   logits(n);
+    for (size_t i = 0; i < n; ++i) {
+        ids[i]    = static_cast<int32_t>(cur_p->data[i].id);
+        logits[i] = cur_p->data[i].logit;
+    }
+    d->vtable->token_hook_apply(d->hook, logits.data(), ids.data(), static_cast<int32_t>(n));
+    for (size_t i = 0; i < n; ++i) {
+        cur_p->data[i].logit = logits[i];
+    }
+    cur_p->sorted = false;
+}
+
+static llama_sampler * wm_clone(const llama_sampler * smpl);
+static void wm_reset(llama_sampler * smpl);
+static void wm_free(llama_sampler * smpl);
+
+static llama_sampler_i kWatermarkSamplerIface = {
+    wm_name,   // name
+    wm_accept, // accept
+    wm_apply,  // apply
+    wm_reset,  // reset
+    wm_clone,  // clone
+    wm_free,   // free
+    nullptr,   // backend_init
+    nullptr,   // backend_accept
+    nullptr,   // backend_apply
+    nullptr,   // backend_set_input
+};
+
+static llama_sampler * wm_clone(const llama_sampler * smpl)
+{
+    // Speculative-decoding: create a fresh hook from stored n_vocab/seed rather
+    // than copying live watermark state, so each "what-if" branch starts clean.
+    const auto* d = static_cast<const WatermarkSamplerData*>(smpl->ctx);
+    auto* new_data = new WatermarkSamplerData{
+        d->vtable,
+        d->vtable->token_hook_create(d->n_vocab, d->seed),
+        d->n_vocab,
+        d->seed
+    };
+    return llama_sampler_init(&kWatermarkSamplerIface, static_cast<llama_sampler_context_t>(new_data));
+}
+
+static void wm_reset(llama_sampler * smpl)
+{
+    auto* d = static_cast<WatermarkSamplerData*>(smpl->ctx);
+    d->vtable->token_hook_reset(d->hook);
+}
+
+static void wm_free(llama_sampler * smpl)
+{
+    auto* d = static_cast<WatermarkSamplerData*>(smpl->ctx);
+    if (d) {
+        d->vtable->token_hook_free(d->hook);
+        delete d;
+    }
+}
+
+static llama_sampler* create_watermark_sampler(const GenieWatermarkProviderVTable* vtable,
+                                               GenieWatermarkTokenHook*             hook,
+                                               uint32_t                             n_vocab,
+                                               uint64_t                             seed)
+{
+    auto* d = new WatermarkSamplerData{vtable, hook, n_vocab, seed};
+    return llama_sampler_init(&kWatermarkSamplerIface, static_cast<llama_sampler_context_t>(d));
+}
+
+} // namespace
 
 class LLAMACppBuilder::Impl
 {
@@ -75,6 +176,37 @@ public:
         if (!smpl)
         {
             throw std::runtime_error("failed to initialize sampling subsystem");
+        }
+
+        // Insert watermark adapter at the absolute front of the sampling chain (once, at construction).
+        // When GENIE_WATERMARK_ENABLE is unset / plugin absent, HasTokenHook() is false → zero overhead.
+        if (WatermarkProviderHost::Instance().HasTokenHook())
+        {
+            const GenieWatermarkProviderVTable* vt = WatermarkProviderHost::Instance().GetVTable();
+            const uint32_t n_vocab = static_cast<uint32_t>(llama_vocab_n_tokens(vocab));
+            GenieWatermarkTokenHook* hook = WatermarkProviderHost::Instance().CreateTokenHook(n_vocab, /*seed=*/0);
+            if (vt && hook)
+            {
+                llama_sampler* wm_smp = create_watermark_sampler(vt, hook, n_vocab, /*seed=*/0);
+                llama_sampler* chain  = common_sampler_get(smpl);
+                std::vector<llama_sampler*> saved;
+                while (llama_sampler_chain_n(chain) > 0)
+                {
+                    saved.push_back(llama_sampler_chain_remove(chain, 0));
+                }
+                llama_sampler_chain_add(chain, wm_smp);
+                for (llama_sampler* s : saved)
+                {
+                    llama_sampler_chain_add(chain, s);
+                }
+                My_Log{My_Log::Level::kInfo} << "[LLAMACpp] Watermark token hook inserted at front of sampling chain"
+                         << " (n_vocab=" << n_vocab << ")\n";
+            }
+            else
+            {
+                My_Log{My_Log::Level::kWarning}
+                    << "[LLAMACpp] Watermark token hook creation failed; running without watermark\n";
+            }
         }
 
         // 线程池创建与绑定，对齐 completion.cpp:163-202

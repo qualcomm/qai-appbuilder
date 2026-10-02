@@ -167,6 +167,12 @@ void ModelRun(std::string cmdBuf, ipc::IpcChannel* channel, ipc::ShmHandle posix
     std::vector<std::string> commands;
     split_string(commands, cmdBuf, ';');
 
+    if (commands.size() < 6) {
+        QNN_ERR("ModelRun: malformed command, expected at least 6 fields, got %zu\n", commands.size());
+        channel->Write(ACTION_FAILED, strlen(ACTION_FAILED) + 1);
+        return;
+    }
+
     std::string model_name        = commands[0];
     std::string share_memory_name = commands[1];
     size_t share_memory_size      = std::stoull(commands[2]);

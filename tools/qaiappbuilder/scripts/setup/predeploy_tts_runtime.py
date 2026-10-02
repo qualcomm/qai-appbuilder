@@ -81,30 +81,13 @@ def _warn(msg: str) -> None:
 
 
 def _install_ssl_workaround() -> str:
-    """Make ``urllib`` (and therefore NLTK's downloader) able to talk to
-    ``raw.githubusercontent.com`` from within a corporate-proxy environment
-    that injects its own root CA (self-signed certificate chain).
+    """Use certificate-verifying HTTPS for NLTK's urllib downloads.
 
-    NLTK uses ``urllib.request.urlopen`` which relies on Python's ssl module
-    to verify certificates.  Corporate proxies (Netskope, Zscaler, etc.)
-    inject their own root CA that is not recognized by Python's default
-    certificate store, causing CERTIFICATE_VERIFY_FAILED errors.
-
-    The ONLY approach that reliably works is to disable SSL verification for
-    these specific setup-time downloads.  This is acceptable because:
-    - We download well-known public NLTK corpora from GitHub during one-time
-      setup — the same content pip/conda would fetch.
-    - This workaround is process-scoped and only affects this short-lived
-      script.  It does NOT persist into the inference runtime.
-
-    Returns a short human-readable string describing which path was used.
+    Corporate proxy certificates must be installed in the Python trust store
+    when the environment intercepts HTTPS traffic.
     """
-    # Always use unverified context for NLTK downloads.  NLTK's downloader
-    # uses urllib (not requests), so REQUESTS_CA_BUNDLE won't help it, and
-    # corporate proxy CA certs (Netskope etc.) are never in Python's default
-    # trust store.
-    ssl._create_default_https_context = ssl._create_unverified_context  # type: ignore[attr-defined]
-    return "unverified (setup-time NLTK downloads only)"
+    ssl._create_default_https_context = ssl.create_default_context
+    return "verified (default SSL certificate validation)"
 
 
 def _download_nltk() -> None:

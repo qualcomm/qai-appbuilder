@@ -9,7 +9,7 @@
 Error initializing QNN Function Pointers: could not load model: model.onnx
 ```
 
-**Cause:** The `aipc` wrapper cannot find a matching QNN model file for the `.onnx` path.
+**Cause:** The `qai` wrapper cannot find a matching QNN model file for the `.onnx` path.
 
 **Solution:** Copy the context binary to match ONNX naming in the same directory:
 ```powershell
@@ -26,7 +26,7 @@ cp output/model.so.bin ./model.so.bin
 
 **Verification:** Run with the wrapper:
 ```bash
-python aipc inference.py
+python qai inference.py
 ```
 
 **See also:** `references/inference.md` → Model File Resolution for full search order.
@@ -43,7 +43,7 @@ Missing command line inputs for dynamic inputs ['input'] in the model.
 **Solution:**
 Specify fixed input dimensions using `--input-dims`:
 ```bash
-python aipc_convert_fp.py --onnx model.onnx --output-root output --precision 16 \
+python qai_convert_fp.py --onnx model.onnx --output-root output --precision 16 \
   --input-dims input:1,3,64,64
 ```
 
@@ -94,7 +94,7 @@ dir output\model*
 ren model model.cpp
 ```
 
-**Note:** The updated `aipc_convert_fp.py` now auto-fixes this issue.
+**Note:** The updated `qai_convert_fp.py` now auto-fixes this issue.
 
 ---
 
@@ -172,7 +172,7 @@ error: the following arguments are required: --model
 **Solution:**
 Use `--model` or `--model_lib` (both now supported):
 ```bash
-python aipc_dev_gen_contextbin.py --model model.dll --output model.dll.bin
+python qai_dev_gen_contextbin.py --model model.dll --output model.dll.bin
 ```
 
 ---
@@ -208,7 +208,7 @@ dir %QAIRT_SDK_ROOT%\bin\x86_64-windows-msvc\qnn-onnx-converter  # Windows
 
 ### Inspect ONNX Model
 ```bash
-python aipc_inspect_onnxio.py model.onnx
+python qai_inspect_onnxio.py model.onnx
 ```
 
 ### Run Converter Dry-Run

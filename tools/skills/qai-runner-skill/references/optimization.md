@@ -24,10 +24,10 @@ In observed benchmarks (e.g., on HTP targets):
 
 ### How to Apply
 
-When converting your model in **QNN flow** using AIPC toolkit scripts (`aipc_convert_fp.py`, `aipc_convert_int.py`, or `aipc_convert_aimet.py`), pass `--preserve-io-mode none` (or omit preserve-io flags entirely):
+When converting your model in **QNN flow** using AIPC toolkit scripts (`qai_convert_fp.py`, `qai_convert_int.py`, or `qai_convert_aimet.py`), pass `--preserve-io-mode none` (or omit preserve-io flags entirely):
 
 ```bash
-python scripts/aipc_convert_fp.py \
+python scripts/qai_convert_fp.py \
   --onnx model.onnx \
   --preserve-io-mode none \
   ...
@@ -51,7 +51,7 @@ When `--preserve_io` is disabled, the graph's input and output tensors may chang
 2. **Datatype Changes**: Float inputs might be expected as quantized integers, or vice-versa.
 
 **Action Required**:
-- Re-run the Model Inspector (`aipc_inspect_onnxio.py`) or check the generated `_net.json` / `.yaml` config to understand the new expected input/output shapes and types.
+- Re-run the Model Inspector (`qai_inspect_onnxio.py`) or check the generated `_net.json` / `.yaml` config to understand the new expected input/output shapes and types.
 - You must update your preprocessing and postprocessing code to match these new layouts and datatypes. If the overhead of doing this reshaping/casting on the CPU is larger than the QNN edge overhead, keeping `--preserve_io` might actually be better for end-to-end latency. 
 - Always profile end-to-end to verify that the optimization provides a net benefit for your specific application.
 

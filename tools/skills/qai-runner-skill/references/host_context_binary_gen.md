@@ -62,7 +62,7 @@ adb shell getprop ro.hardware
 
 ### Option C — Local Windows on Snapdragon (WoS Target)
 
-For Windows on Snapdragon devices, use `aipc_qairt_devinfo.ps1` to automatically detect the local QAIRT SoC ID and DSP/HTP architecture.
+For Windows on Snapdragon devices, use `qai_qairt_devinfo.ps1` to automatically detect the local QAIRT SoC ID and DSP/HTP architecture.
 
 **1. Initialize the QAIRT environment first:**
 ```powershell
@@ -76,15 +76,15 @@ For Windows on Snapdragon devices, use `aipc_qairt_devinfo.ps1` to automatically
 **2. Run the detection script from the skill scripts directory:**
 * Human-readable output:
   ```powershell
-  & "<path_to_skills>/aipc-toolkit/scripts/aipc_qairt_devinfo.ps1"
+  & "<path_to_skills>/aipc-toolkit/scripts/qai_qairt_devinfo.ps1"
   ```
 * JSON output for automation:
   ```powershell
-  & "<path_to_skills>/aipc-toolkit/scripts/aipc_qairt_devinfo.ps1" -Json
+  & "<path_to_skills>/aipc-toolkit/scripts/qai_qairt_devinfo.ps1" -Json
   ```
 * Override SDK root if needed:
   ```powershell
-  & "<path_to_skills>/aipc-toolkit/scripts/aipc_qairt_devinfo.ps1" -SdkRoot "C:\Qualcomm\AIStack\QAIRT\<version>"
+  & "<path_to_skills>/aipc-toolkit/scripts/qai_qairt_devinfo.ps1" -SdkRoot "C:\Qualcomm\AIStack\QAIRT\<version>"
   ```
 
 **Key Output Fields:**
@@ -95,6 +95,25 @@ For Windows on Snapdragon devices, use `aipc_qairt_devinfo.ps1` to automatically
 - `DriverFamily`: Windows Qualcomm NPU/FastRPC driver family (e.g., `SC8380XP`)
 - `SocConfidence`: Confidence of the inferred `SocModel` / `SocId` match
 
+**Fallback when `qai_qairt_devinfo.ps1` is unavailable** (the normal case in this repo) —
+obtain the same two values with in-SDK / in-repo means only:
+
+1. `dsp_arch` — run the SDK's own validator and parse the core-version line:
+   ```powershell
+   qnn-platform-validator --backend dsp --coreVersion --libVersion
+   # -> "Core Version of the backend DSP: V73"  =>  dsp_arch = v73
+   ```
+2. `soc_id` — look the SoC up in the in-repo table `scripts/_soc_targets.py`
+   (single source of truth) or in `references/on_device_context_binary.md`
+   § *Explicit target selection*. Cross-check against
+   `<QAIRT_SDK_ROOT>\include\QNN\QnnTypes.h` (`Qnn_SocModel_t`) and the SDK docs table
+   `<QAIRT_SDK_ROOT>/docs/QAIRT-Docs/QNN/general/overview.html`.
+3. If the SoC is not in any table, follow the no-WMI evidence-scoring probe in
+   `references/win_qairt_setup.md` § *Fallback: registry + DriverStore + `QnnTypes.h` enum
+   probe (no WMI)*.
+4. Last resort: skip explicit `soc_id` entirely and use architecture-based device config
+   (`htp_arch`), then validate on the target device (see *General soc_id source guidance*
+   below).
 
 ### Map to QAIRT soc_id / dsp_arch
 
@@ -145,9 +164,9 @@ General VTCM guidance:
 
 
 
-### Recommended: use aipc_qairt_devinfo.ps1 (Windows) or hardware identity lookup (Linux)
+### Recommended: use qai_qairt_devinfo.ps1 (Windows) or hardware identity lookup (Linux)
 
-On **Windows on Snapdragon**, `scripts/aipc_qairt_devinfo.ps1` automates detection:
+On **Windows on Snapdragon**, `scripts/qai_qairt_devinfo.ps1` automates detection:
 - Reads CPU/WMI, scans driver INF files, matches against QAIRT QnnTypes.h
 - Returns soc_id (numeric), dsp_arch (string), driver family, and confidence score
 
@@ -286,7 +305,7 @@ $json | ConvertTo-Json -Compress | Set-Content C:\tmp\soc52_v73.json
 scp /abs/output/dir/<OUTPUT_BASENAME>.bin <user>@<host>:<workdir>/
 
 # Run inference on remote — confirm generated .bin is selected
-ssh <user>@<host> "cd <workdir> && source <qairt_setup> && python3 aipc infer_yolov8n.py --onnx yolov8n.onnx ..."
+ssh <user>@<host> "cd <workdir> && source <qairt_setup> && python3 qai infer_yolov8n.py --onnx yolov8n.onnx ..."
 ```
 
 **Validation checklist:**
@@ -326,6 +345,9 @@ Add `soc_id` and `dsp_arch` from Step 1 into the `devices` block.
 
 ## See Also
 
-- `scripts/aipc_qairt_devinfo.ps1` — automated soc_id/dsp_arch discovery on Windows on Snapdragon
-- `scripts/aipc_dev_gen_contextbin.py` — wrapper script (no `--config_file` support)
-- `scripts/aipc_dev_gen_contextbin_x86.py` — x86-host-aware wrapper (no `--config_file` support)
+- `scripts/_soc_targets.py` — in-repo soc_model/dsp_arch table (single source of truth)
+- `scripts/qai_qairt_devinfo.ps1` — automated soc_id/dsp_arch discovery on Windows on Snapdragon
+- `references/win_qairt_setup.md` § *Platform SoC Identification* — no-WMI soc_id/dsp_arch probe
+
+- `scripts/qai_dev_gen_contextbin.py` — wrapper script (no `--config_file` support)
+- `scripts/qai_dev_gen_contextbin_x86.py` — x86-host-aware wrapper (no `--config_file` support)

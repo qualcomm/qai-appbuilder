@@ -4,7 +4,7 @@
 
 Quantizing ONNX models using the AIMET-ONNX calibration/scale derivation engine consists of two clean phases:
 1. **Calibration Stage (Python Prompt Example)**: Use `aimet_onnx` to fold Batch Normalization, apply CLE, run QuantSim range calibration, and export the pre-calibrated model (`.onnx` + `.encodings`).
-2. **Conversion Stage (Tool Script)**: Use the lightweight `aipc_convert_aimet.py` script to compile the pre-calibrated artifacts directly into target-compatible formats (QNN `.so` or SNPE `.dlc`).
+2. **Conversion Stage (Tool Script)**: Use the lightweight `qai_convert_aimet.py` script to compile the pre-calibrated artifacts directly into target-compatible formats (QNN `.so` or SNPE `.dlc`).
 
 ---
 
@@ -22,7 +22,7 @@ Quantizing ONNX models using the AIMET-ONNX calibration/scale derivation engine 
 [ Calibrated ONNX & scale .encodings ]
           │
           ▼
-   2. RUN CONVERSION (aipc_convert_aimet.py)
+   2. RUN CONVERSION (qai_convert_aimet.py)
       └─► Handoff via --quantization_overrides
           │
           ▼
@@ -101,21 +101,21 @@ PY
 - First-pass recommendation: **50–200** representative samples.
 - Increase sample count only when accuracy requires it (to reduce calibration time/memory pressure).
 
-**Generated Artifacts:**  
-- `runs/aimet_artifacts/model_ptq_calibrated.onnx` (Pre-calibrated ONNX model)  
+**Generated Artifacts:**
+- `runs/aimet_artifacts/model_ptq_calibrated.onnx` (Pre-calibrated ONNX model)
 - `runs/aimet_artifacts/model_ptq_calibrated.encodings` (Derived scale and offset JSON)
 
 ---
 
 ## Stage 2: Conversion Stage (Tool Script)
 
-Pass the exported, pre-calibrated ONNX model and encodings to the lightweight `aipc_convert_aimet.py` helper to compile them for target runtimes.
+Pass the exported, pre-calibrated ONNX model and encodings to the lightweight `qai_convert_aimet.py` helper to compile them for target runtimes.
 
 ### 1. QNN Flow (Convert to `.cpp`/`.bin` and compile shared library)
 
 ```bash
 # Convert to QNN model shared library (A16W8: act_bw 16, weight_bw 8)
-python skills/aipc-toolkit/scripts/aipc_convert_aimet.py \
+python scripts/qai_convert_aimet.py \
   --input_network runs/aimet_artifacts/model_ptq_calibrated.onnx \
   --quantization_overrides runs/aimet_artifacts/model_ptq_calibrated.encodings \
   --output-root ./qairt_output \
@@ -133,7 +133,7 @@ python skills/aipc-toolkit/scripts/aipc_convert_aimet.py \
 
 ```bash
 # Convert directly to SNPE DLC (INT8: act_bw 8, weight_bw 8)
-python skills/aipc-toolkit/scripts/aipc_convert_aimet.py \
+python scripts/qai_convert_aimet.py \
   --input_network runs/aimet_artifacts/model_ptq_calibrated.onnx \
   --quantization_overrides runs/aimet_artifacts/model_ptq_calibrated.encodings \
   --output-root ./qairt_output \
@@ -189,7 +189,9 @@ qnn-model-lib-generator \
 
 ### SNPE Direct CLI Fallback
 
-Convert the ONNX directly to SNPE DLC passing the overrides. **Do not** run post-conversion `snpe-dlc-quantize` since scales are already built in:
+Convert the ONNX directly to SNPE DLC passing the overrides. **Do not** run
+post-conversion `qairt-quantizer` or legacy `snpe-dlc-quantize`, since the
+scales are already built in:
 
 ```bash
 snpe-onnx-to-dlc \

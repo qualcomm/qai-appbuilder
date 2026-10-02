@@ -4,6 +4,7 @@
 # ---------------------------------------------------------------------
 
 from pathlib import Path
+import shlex
 import subprocess
 import psutil
 import time
@@ -42,9 +43,9 @@ class GenieServiceLauncher:
                 continue
 
     def launch(self, extra_args: str = "-l") -> bool:
-        command_str = f'cmd /c "cd /d {self.cwd} && {self.exe_path} -c {self.config_path} {extra_args}"'
+        command = [self.exe_path, "-c", self.config_path, *shlex.split(extra_args)]
         if self.debug_mode:
-            print(command_str)
+            print(" ".join(command))
         print(f"[Launch] Opening GenieAPIService in new window with model '{self.model_name}'...")
 
         try:
@@ -53,8 +54,8 @@ class GenieServiceLauncher:
             else:
                 FLAGS = FLAG_CREATE_NO_WINDOW
             self.service_process = subprocess.Popen(
-                command_str,
-                shell=True,
+                command,
+                cwd=self.cwd,
                 creationflags=FLAGS
             )
             time.sleep(10)

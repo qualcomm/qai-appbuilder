@@ -1,0 +1,278 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Innovation Center, Inc. All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+#!/usr/bin/env python3
+"""
+qai_project_setup.py — Initialize an AIPC project with standard templates.
+
+Actions
+-------
+1. Attach ``assets/qai_AGENTS.md`` to the project's ``AGENTS.md``
+   (appends if the file already exists; creates it if it does not).
+2. Ensure Claude-compatible prompt entry points are present by linking
+   ``CLAUDE.md`` to ``AGENTS.md`` when appropriate.
+3. Copy ``assets/plan.md`` to the project directory as ``plan.md``
+   (backs up any existing file before overwriting).
+
+Usage
+-----
+Run from the skill directory (do NOT copy this script to the project folder):
+
+    python skills/aipc-toolkit/scripts/qai_project_setup.py  [project_dir]  [options]
+
+Arguments
+---------
+project_dir     Target project directory.  Defaults to the current working
+                directory when omitted.
+
+Options
+-------
+--agents-only   Only attach AGENTS.md; skip plan.md.
+--plan-only     Only copy plan.md; skip AGENTS.md.
+--force         Re-append / overwrite even when the target files already
+                contain AIPC content.
+"""
+
+import argparse
+import shutil
+import sys
+from datetime import datetime
+from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Paths — resolved relative to this script so it works from any cwd
+# ---------------------------------------------------------------------------
+SKILL_DIR = Path(__file__).resolve().parent.parent
+AGENTS_TEMPLATE = SKILL_DIR / "assets" / "qai_AGENTS.md"
+PLAN_TEMPLATE = SKILL_DIR / "assets" / "plan.md"
+
+# Sentinel written into AGENTS.md so we can detect a previous attachment
+_AIPC_AGENTS_SENTINEL = "<!-- AIPC-TOOLKIT:AGENTS -->"
+_CLAUDE_PROMPT_FILENAMES = ("CLAUDE.md",)
+
+_AGENTS_HEADER = f"""\n
+---
+{_AIPC_AGENTS_SENTINEL}
+<!-- AIPC Toolkit Agent Definitions                                  -->
+<!-- Appended automatically by qai_project_setup.py                  -->
+<!-- Source: skills/aipc-toolkit/assets/qai_AGENTS.md               -->
+<!-- ----------------------------------------------------------------->
+
+"""
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _read(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def _write(path: Path, content: str) -> None:
+    path.write_text(content, encoding="utf-8")
+
+
+def _backup(path: Path) -> Path:
+    """Create a timestamped backup of *path* and return the backup path."""
+    stamp = datetime.now().strftime("%Y-%m-%d_%H%M")
+    backup_path = path.with_name(f"{path.name}.bak_{stamp}")
+    shutil.copy2(path, backup_path)
+    return backup_path
+
+
+# ---------------------------------------------------------------------------
+# Core operations
+# ---------------------------------------------------------------------------
+
+def _setup_claude_prompt_link(
+    agents_target: Path, claude_target: Path, force: bool = False
+) -> None:
+    """Ensure CLAUDE.md points to AGENTS.md when possible."""
+    if claude_target.is_symlink():
+        resolved = claude_target.resolve(strict=False)
+        if resolved == agents_target.resolve():
+            print(f"[SKIP]  {claude_target.name} already links to AGENTS.md")
+            return
+        if not force:
+            print(
+                f"[ERROR] {agents_target.name}, {claude_target.name} are not linked together; "
+                "don't create for project.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        claude_target.unlink()
+
+    elif claude_target.exists():
+        if not force:
+            print(
+                f"[ERROR] {agents_target.name}, {claude_target.name} are not linked together; "
+                "don't create for project.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        backup_path = _backup(claude_target)
+        print(f"[BAK]   Backed up existing {claude_target.name}  ->  {backup_path.name}")
+        claude_target.unlink()
+
+    try:
+        claude_target.symlink_to(agents_target.name)
+        print(f"[OK]    Linked {claude_target.name}  ->  AGENTS.md")
+    except OSError as exc:
+        print(
+            f"[WARN]  Could not create symlink for {claude_target.name}: {exc}\n"
+            f"        Falling back to copying AGENTS.md content."
+        )
+        shutil.copy2(agents_target, claude_target)
+        print(f"[OK]    Copied AGENTS.md  ->  {claude_target}")
+
+
+def setup_agents(project_dir: Path, force: bool = False) -> None:
+    """Attach qai_AGENTS.md to <project_dir>/AGENTS.md and wire Claude prompts."""
+    if not AGENTS_TEMPLATE.is_file():
+        print(f"[ERROR] Template not found: {AGENTS_TEMPLATE}", file=sys.stderr)
+        sys.exit(1)
+
+    target = project_dir / "AGENTS.md"
+    claude_target = project_dir / _CLAUDE_PROMPT_FILENAMES[0]
+
+    if target.exists() and claude_target.exists():
+        if not claude_target.is_symlink() or (
+            claude_target.resolve(strict=False) != target.resolve()
+        ):
+            print(
+                "[ERROR] AGENTS.md, CLAUDE.md are not linked together; "
+                "don't create for project.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        print("[INFO]  AGENTS.md and CLAUDE.md are linked; will update agent setting.")
+
+    elif claude_target.exists() and not target.exists():
+        target.symlink_to(claude_target.name)
+        print("[OK]    Linked AGENTS.md  ->  CLAUDE.md")
+
+    template_content = _read(AGENTS_TEMPLATE)
+    agents_updated = False
+
+    if target.exists():
+        existing = _read(target)
+
+        if _AIPC_AGENTS_SENTINEL in existing:
+            if force:
+                print(f"[FORCE] Re-appending AIPC agent definitions to {target.name}")
+            else:
+                print(
+                    f"[SKIP]  {target.name} already contains AIPC agent definitions.\n"
+                    f"        Use --force to re-append."
+                )
+        else:
+            # Append the template after a clear separator
+            with target.open("a", encoding="utf-8") as fh:
+                fh.write(_AGENTS_HEADER)
+                fh.write(template_content)
+                fh.write("\n")
+            agents_updated = True
+            print(f"[OK]    Appended qai_AGENTS.md  ->  {target}")
+
+    else:
+        # No existing AGENTS.md — create one directly from the template
+        shutil.copy2(AGENTS_TEMPLATE, target)
+        agents_updated = True
+        print(f"[OK]    Created {target} from qai_AGENTS.md template")
+
+    if agents_updated or force or target.exists():
+        _setup_claude_prompt_link(target, claude_target, force=force)
+
+
+def setup_plan(project_dir: Path, force: bool = False) -> None:
+    """Copy plan.md to <project_dir>/plan.md and auto-fill START_TIME."""
+    if not PLAN_TEMPLATE.is_file():
+        print(f"[ERROR] Template not found: {PLAN_TEMPLATE}", file=sys.stderr)
+        sys.exit(1)
+
+    target = project_dir / "plan.md"
+
+    if target.exists():
+        backup_path = _backup(target)
+        print(f"[BAK]   Backed up existing plan.md  ->  {backup_path.name}")
+
+    # Copy template
+    shutil.copy2(PLAN_TEMPLATE, target)
+    
+    # Auto-fill START_TIME with current system time
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+    content = _read(target)
+    content = content.replace(
+        "START_TIME    = <!-- YYYY-MM-DD HH:MM get current system time -->",
+        f"START_TIME    = {current_time}"
+    )
+    _write(target, content)
+    
+    print(f"[OK]    Copied plan.md  ->  {target} (START_TIME={current_time})")
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Initialize an AIPC project with standard agent and plan templates.\n\n"
+            "Run this script from its original location inside the skill directory;\n"
+            "do NOT copy it to the project folder."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "project_dir",
+        nargs="?",
+        default=".",
+        help="Target project directory (default: current working directory)",
+    )
+    parser.add_argument(
+        "--agents-only",
+        action="store_true",
+        help="Only attach AGENTS.md; skip plan.md",
+    )
+    parser.add_argument(
+        "--plan-only",
+        action="store_true",
+        help="Only copy plan.md; skip AGENTS.md",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force re-append / overwrite even if AIPC content already exists",
+    )
+    args = parser.parse_args()
+
+    project_dir = Path(args.project_dir).resolve()
+    if not project_dir.is_dir():
+        print(f"[ERROR] Project directory not found: {project_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    print("=" * 60)
+    print("  AIPC Project Setup")
+    print("=" * 60)
+    print(f"  Project dir : {project_dir}")
+    print(f"  Skill dir   : {SKILL_DIR}")
+    print()
+
+    if not args.plan_only:
+        setup_agents(project_dir, force=args.force)
+
+    if not args.agents_only:
+        setup_plan(project_dir, force=args.force)
+
+    print()
+    print("Next steps:")
+    print("  1. Open plan.md and fill in the Config section variables.")
+    print("  2. Activate the aipc-toolkit skill and follow the plan.")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()

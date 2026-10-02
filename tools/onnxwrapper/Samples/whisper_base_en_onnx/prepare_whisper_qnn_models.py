@@ -106,9 +106,6 @@ def verify_package(url, filepath, filesize=None, desc=None, fail=None):
 
 
 def download_url_requests(url, filepath, filesize=None, desc=None, fail=None, chunk_size=8192):
-    # Disable warning for insecure request since we set 'verify=False'.
-    from requests.packages.urllib3.exceptions import InsecureRequestWarning
-    requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
     if verify_package(url, filepath, filesize, desc, fail):
         return True
@@ -116,7 +113,7 @@ def download_url_requests(url, filepath, filesize=None, desc=None, fail=None, ch
     os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
 
     try:
-        response = requests.get(url, stream=True, verify=False)
+        response = requests.get(url, stream=True)
         if response.status_code != 200:
             raise ValueError(f"Unable to download file at {url}")
         total_size = int(response.headers.get("content-length", 0))

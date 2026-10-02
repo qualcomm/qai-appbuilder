@@ -13,10 +13,12 @@
 #include <MNN/expr/ExecutorScope.hpp>
 
 #include <iomanip>
+#include <mutex>
 #include <sstream>
 
 #include "log.h"
 #include "utils.h"
+#include "watermark_provider_host.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -120,6 +122,18 @@ MNNContext::MNNContext(const ModelInstanceConfig &config) :
     {
         throw std::runtime_error("MNNContext::MNNContext Load model failed.\n");
     }
+
+    // One-time honest log: MNN/CPU does not support token-level watermarking.
+    static std::once_flag s_mnn_wm_log_once;
+    std::call_once(s_mnn_wm_log_once, []()
+    {
+        if (WatermarkProviderHost::Instance().HasTokenHook())
+        {
+            My_Log{My_Log::Level::kWarning}
+                << "[Watermark] MNN/CPU backend does not support token-level watermarking. "
+                << "Watermark plugin is loaded but cannot operate at token level on this backend.\n";
+        }
+    });
 }
 
 MNNContext::~MNNContext()

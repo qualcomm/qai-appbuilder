@@ -445,15 +445,15 @@ IAudioEmbedding &QInterface::Qwen2_5OMINI::BuildAudioSamples()
 
     // 1) Convert to mono by averaging channels
     float *mono;
-    uint64_t mono_len{};
+    std::vector<float> mono_storage;
     if (channels == 1)
     {
         mono = pcm_float;
     }
     else
     {
-        mono = new float[pcm_len];
-        mono_len = pcm_len;
+        mono_storage.resize(pcm_len);
+        mono = mono_storage.data();
 
         for (uint64_t i = 0; i < frames; ++i)
         {
@@ -483,12 +483,8 @@ IAudioEmbedding &QInterface::Qwen2_5OMINI::BuildAudioSamples()
     src_data.end_of_input = 1;
 
     int err = src_simple(&src_data, SRC_SINC_BEST_QUALITY, 1); // 1 channel (mono)
-    auto clean{[&mono_len, &pcm_float, &mono]()
+    auto clean{[&pcm_float]()
                {
-                   if (mono_len)
-                   {
-                       delete[] mono;
-                   }
                    drwav_free(pcm_float, nullptr);
                }};
     if (err != 0)

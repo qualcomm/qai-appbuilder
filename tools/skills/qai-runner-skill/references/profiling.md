@@ -77,7 +77,7 @@ ${env:QAIRT_SDK_ROOT}\bin\x86_64-windows-msvc\qnn-profile-viewer.exe `
     --output chromeTrace.json `
     --schematic qnn-onnx-convert_gernerated_bin.bin `
     --config optrace_config.json
-    
+
 ```
 
 > ⚠️ **CAUTION**: Under detailed HTP `optrace` profiling, the Chrometrace reader library (`libQnnChrometraceProfilingReader.so` on Linux, `QnnChrometraceProfilingReader.dll` on Windows) may fail with `Error printing stats.` due to incompatibilities with microsecond cycle metrics. If this occurs, use the following robust fallback strategies:
@@ -120,7 +120,18 @@ ${env:QAIRT_SDK_ROOT}\bin\x86_64-windows-msvc\qnn-profile-viewer.exe `
 >     --input qairt_profile_output/profile_json.json \
 >     --output qairt_profile_output/chromeTrace.json
 > ```
-> This script dynamically discovers HTP execution cycles and microsecond times directly from the JSON messages, scaling and mapping cycles into microsecond-based timelines to completely bypass native reader visualization crashes.
+> It dynamically discovers HTP execution cycles and microsecond times directly from the JSON
+> messages, scaling and mapping cycles into microsecond-based timelines to completely bypass
+> native reader visualization crashes.
+>
+> 🔻 **EXTERNAL DEPENDENCY — not shipped with this skill.** `convert_qnn_to_trace.py` is
+> **not** vendored in this repository; there is no copy under `scripts/`. Do not go looking
+> for it. **If the `aipc-toolkit` skill is unavailable, skip the Chrome-trace conversion**
+> and use one of:
+> - **Fallback A** above (`libQnnHtpProfilingReader`) — richest per-layer HTP cycle stats,
+>   human-readable on stdout; this is the recommended substitute.
+> - **Fallback C** below (default reader → CSV) for a quick tabular per-op breakdown.
+> - the raw `profile_json.json` from this step, read directly.
 >
 > **Fallback C: Standard CSV (Default Reader)**
 > ```bash
@@ -173,7 +184,7 @@ This writes `SNPEDiag_0.log` (and optionally `SNPEDiag_1.log`, …) to `snpe_out
 - Use `--profiling_level detailed` when you need the human-readable per-layer timings and overall performance summary.
 - Use `--profiling_level linting` when you need Chrome Trace export via `snpe-diagview --chrometrace`.
 
-When using the `aipc` launcher + `onnxwrapper.py`, SNPE profiling level can be selected via:
+When using the `qai` launcher + `onnxwrapper.py`, SNPE profiling level can be selected via:
 - `QAI_SNPE_PROFILING_LEVEL=detailed` (default)
 - `QAI_SNPE_PROFILING_LEVEL=linting`
 
@@ -285,4 +296,4 @@ When analyzing profiling data, watch for these common bottlenecks:
 - **Data Format Conversions**: Expensive layout or precision conversions (e.g., float32 ↔ int8) between operators that add significant overhead
 - **Suboptimal Kernel Selection**: Operations using slower implementations when faster alternatives are available; compare per-op execution times against expected performance
 - **Load Imbalance**: Uneven computation distribution across accelerator resources (e.g., under-utilized HTP cores), leaving processing capability idle
-- **Input/Output Bottlenecks**: Model input preprocessing and output postprocessing times dominating overall latency; optimize I/O transfer and format conversions 
+- **Input/Output Bottlenecks**: Model input preprocessing and output postprocessing times dominating overall latency; optimize I/O transfer and format conversions

@@ -13,6 +13,7 @@
 #include "../context/context_base.h"
 #include "../chat_history/chat_history.h"
 #include "prompt_stats_helper.h"
+#include "task_memo_builder.h"
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
@@ -38,8 +39,13 @@ struct OptimizedMessages {
     // Phase 4（FitMessagesToContext 内的紧急截断）是否被实际触发过；供 PromptLedger 回报
     // 调用方「本轮最末尾的巨型 tool 响应是否被紧急截断过」。
     bool emergency_truncated;
+    // Task Memo（TaskMemoBuilder::Update 结果）：功能关闭或未触发时保持默认值。
+    bool memo_active;
+    double memo_confidence;
+    size_t memo_refresh_count;
 
-    OptimizedMessages() : total_tokens(0), dropped_count(0), success(false), emergency_truncated(false) {}
+    OptimizedMessages() : total_tokens(0), dropped_count(0), success(false), emergency_truncated(false),
+                           memo_active(false), memo_confidence(0.0), memo_refresh_count(0) {}
 };
 
 // ========== 消息预过滤器 ==========
@@ -72,7 +78,9 @@ public:
         const std::vector<GenieChatMessage>& all_messages,
         const std::string& system_prompt,
         size_t context_size,
-        const MessageCompressionConfig& config = MessageCompressionConfig());
+        const MessageCompressionConfig& config = MessageCompressionConfig(),
+        const nlohmann::ordered_json* raw_messages_for_memo = nullptr,
+        TaskMemoBuilder* memo_builder = nullptr);
 
     // ========== 主入口：分级压缩预过滤 ==========
     // 算法设计：预算驱动 + 分级压缩，只在超出预算时才压缩/丢弃消息
@@ -110,6 +118,12 @@ public:
     // 获取上次 PreFilterMessages 调用的统计信息（只读）
     const MessageCategoryStats& GetStats() const { return prefilter_stats_; }
 
+    // 获取上次 PreFilterMessages 调用中被丢弃的消息内容（只读）：FitMessagesToContext
+    // 传给 TaskMemoBuilder::Update() 前需要与自身 Step3/Phase4 丢弃的消息合并，否则
+    // Update() 只会看到 FitMessagesToContext 自己丢弃的极少数消息（Phase 0-5 丢的大头
+    // 从未被它看到过），导致 Task Memo 在真实场景下几乎永远不触发。
+    const std::vector<GenieChatMessage>& GetDroppedMessages() const { return prefilter_dropped_messages_; }
+
     // ========== 辅助函数：对任意消息 content 做统一文本清洗（块级元数据 + 时间戳）==========
     std::string CleanMessageContent(const std::string& content);
 
@@ -131,6 +145,13 @@ private:
 
     // ========== 辅助函数：级联删除工具调用链 ==========
     size_t SafeEraseToolChain(nlohmann::ordered_json& messages, size_t assistant_idx);
+
+    // ========== 辅助函数：diff original 与 kept，把差集追加进 prefilter_dropped_messages_ ==========
+    // 用内容签名（role+content）diff 而非在 Phase 0-5 每个删除点分别记录，因为删除点分散在
+    // SmartSelectMessages/DropOldMessagesBatch/CompressMessages 等多处；被压缩（内容变短但未
+    // 整条丢弃）的消息签名也会不匹配、连带计入，是可接受的偏保守行为（记忆机制多看到几条
+    // 仍在场的旧消息内容，不影响正确性）。
+    void CaptureDroppedMessages(const nlohmann::ordered_json& original, const nlohmann::ordered_json& kept);
 
     // ========== 辅助方法：检查消息是否应该保持完整（不压缩）==========
     bool ShouldKeepFull(const GenieChatMessage& msg) const;
@@ -169,6 +190,7 @@ private:
     // 多模型并发场景：per-model 的 ContextBase（优先于 model_config_.get_genie_model_handle()）
     ContextBase* context_override_{nullptr};
     MessageCategoryStats prefilter_stats_;
+    std::vector<GenieChatMessage> prefilter_dropped_messages_;
 };
 
 #endif // MESSAGE_PRE_FILTER_H

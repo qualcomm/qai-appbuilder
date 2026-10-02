@@ -24,14 +24,16 @@ description: AIPC, AI Porting Conversion. Tools and workflows for QAIRT/AIPC pro
 
 ### Diagnostics
 - "check htp" / "htp ready" / "htp check"
-- "aipc diagnose" / "environment check"
+- "qai diagnose" / "environment check"
 - "detect target soc" / "qairt devinfo" / "detect device info"
 - "fastrpc memory map" / "err 1002" / "smmu" / "context binary too large"
 - "split model" / "model split" / "split unet" / "context binary size"
 
 ### Project Setup
 - "create aipc project" / "init aipc project" / "setup aipc project"
-- "aipc init" / "aipc setup"
+- "qai init" / "qai setup"
+- "multi-component" / "pipeline export" / "stable diffusion export" / "diffusers export"
+- "export unet" / "export vae" / "export text encoder" / "sub-model export"
 
 ## When to Use
 
@@ -67,6 +69,42 @@ Use this skill for Qualcomm QAIRT/QNN/SNPE model bring-up:
   - Use idempotent skip-if-done guards: `if [ ! -f output.so ]; then ...; fi`
   - Poll progress: `systemctl --user status aipc-<task>.service --no-pager` + `tail -20 log`
   - **NEVER use `nohup ... &` or `tmux`** — both are killed when the agent session ends.
+- **HOST OOM FOR LARGE MODELS:** Check `free -h` and model size before conversion.
+  If available RAM < 2× model size, run `qnn-onnx-converter` and `qnn-model-lib-generator`
+  on the remote target device instead. For an explicitly authorized deployment-feasibility
+  test, the controller may set `AIPC_DISABLE_MEMORY_GATE=1`; in that case continue on the
+  selected host, record the measured RAM/disk limits, and stop immediately on the first
+  resource or converter failure. This override disables only the preflight routing gate; it
+  does not permit ignoring an actual OOM, disk-full, or failed-command result.
+  ```bash
+  # rsync ONNX + external data to remote
+  rsync -av onnx_models/ user@remote:work/onnx_models/
+  # run conversion remotely (x86 converter works on ARM Linux too)
+  ssh user@remote "cd work && python qai_convert_fp.py --onnx onnx_models/model.onnx \
+    --host-arch x86_64-linux-clang --target-arch aarch64-ubuntu-gcc9.4 ..."
+  # rsync .so / .bin / .cpp back
+  rsync -av user@remote:work/qairt_output/ qairt_output/
+  ```
+  Check: `df -h /tmp` and `free -h` before any conversion; if RAM < 2× model size, use remote path.
+- **PYTHON VERSION ON ARM LINUX (QAIRT 2.44+):** Ubuntu 24.04 ARM Linux requires Python 3.12.
+  The default `aienv.sh` venv may activate Python 3.10, which is **incompatible** and causes:
+  `NotImplementedError: On Linux aarch64, Python 3.12 is required. Got: 3.10`
+  Always verify before running any converter or wrapper:
+  ```bash
+  python3 --version                                    # must be 3.12+
+  $QAIRT_SDK_ROOT/bin/check-python-dependency --dry-run
+  ```
+  If Python 3.10 is active, create a 3.12 venv once. **Prefer `uv`** (faster, no pip needed):
+  ```bash
+  curl -LsSf https://astral.sh/uv/install.sh | sh   # install uv if not present
+  uv venv ~/pyqairt312 --python 3.12
+  uv pip install --python ~/pyqairt312 \
+    diffusers transformers onnxruntime onnx Pillow numpy
+  source ~/pyqairt312/bin/activate
+  $QAIRT_SDK_ROOT/bin/check-python-dependency          # installs QAIRT-specific deps
+  ```
+  Fallback (no uv): `python3.12 -m venv ~/pyqairt312 --system-site-packages`
+  Use `~/pyqairt312/bin/python3` for all subsequent converter and inference calls.
 - On Windows, do not rely on Python arch detection — use OS-native arch commands
 - On ARM64 Windows, `platform.machine()` returns `AMD64` under x86_64 emulation.
   Prefer the minimal QAIRT device probe script for SoC detection. Avoid CIM/WMI when possible.
@@ -77,7 +115,7 @@ Use this skill for Qualcomm QAIRT/QNN/SNPE model bring-up:
 - **Cross-platform shell commands:**
   - Python scripts via `subprocess.run()` — no shell quoting issues
   - **Inference execution policy (MANDATORY):**
-    - Run inference via `scripts/aipc` wrapper only.
+    - Run inference via `scripts/qai` wrapper only.
     - **MANDATORY**: You MUST use the `onnxwrapper.py` provided within the `aipc-toolkit` skill (`scripts/onnxwrapper.py`).
     - **PROHIBITED**: NEVER use or fallback to the `onnxwrapper.py` bundled with the QAIRT SDK or `qai_appbuilder` package (e.g., from `site-packages/qai_appbuilder/onnxwrapper.py`). The skill version contains critical patches for AIPC workflows.
     - Before any final inference run, perform **wrapper artifact preflight**:
@@ -85,10 +123,26 @@ Use this skill for Qualcomm QAIRT/QNN/SNPE model bring-up:
       - remove or quarantine stale matched artifacts (platform-dependent: `<model>.onnx.dll.bin` on Windows, `<model>.onnx.so.bin` on Linux) before deploying a new one
       - in context-binary mode, prefer ONNX-matching deployment filename: `<model>.onnx.dll.bin` on Windows, `<model>.onnx.so.bin` on Linux
       - the wrapper discovers context binaries by appending platform-specific suffixes to the ONNX path; see `onnxwrapper.py:_find_qnn_model_file()` for the full candidate list
-    - If remote target execution is configured (for example `RETMOE_DEVICE_INFO` is set in project config),
+    - If remote target execution is configured (for example `REMOTE_DEVICE_INFO` is set in project config),
       you MUST skip local host inference runs.
     - In this mode, acceptance and validation MUST be executed on the remote target only.
     - Local host inference is not allowed as an acceptance substitute.
+    - **`qai_appbuilder` version mismatch:** If `python qai` segfaults (exit 139) when loading
+      a context binary, the installed `qai_appbuilder` version is incompatible with the QAIRT SDK.
+      **Preferred fix — build from source against the exact QAIRT SDK version:**
+      ```bash
+      git clone https://github.com/qualcomm/qai-appbuilder.git --recursive
+      cd qai-appbuilder
+      uv pip install --python <venv> wheel setuptools pybind11 build
+      export QNN_SDK_ROOT=/path/to/qairt/<version>
+      export QAI_TOOLCHAINS=aarch64-oe-linux-gcc11.2   # Linux ARM; see BUILD.md for other platforms
+      python -m build -w
+      uv pip install --python <venv> --force-reinstall dist/qai_appbuilder-*.whl
+      ```
+      The built wheel version matches the QAIRT SDK exactly (e.g. `2.47.0`), resolving the segfault.
+      See `references/inference.md` §qai-appbuilder-build for full steps and platform notes.
+      **Fallback** (build not feasible): use `qnn-net-run` CLI directly
+      (see `references/inference.md` §qnn-net-run-fallback). Record in Issue Log.
     - Do NOT call `snpe-net-run`, `qnn-net-run`, or raw backend CLIs directly for final inference/validation.
     - **Linux ARM runtime-libs pinning (MANDATORY for remote acceptance):**
       - Do not rely on implicit wrapper auto-resolution when multiple target toolchain lib folders exist.
@@ -133,7 +187,7 @@ Use this skill for Qualcomm QAIRT/QNN/SNPE model bring-up:
 For platform table, troubleshooting flow, and usage → open `references/host_context_binary_gen.md`.
 
 **ARM64X/CHPE note**: On ARM64 Windows, QNN ships ARM64X hybrid DLLs (`arm64x-windows-msvc/`)
-that load from both x86_64-emulated and ARM64-native processes. The `aipc` wrapper +
+that load from both x86_64-emulated and ARM64-native processes. The `qai` wrapper +
 `qai_appbuilder` bundled libs use these automatically. Do not override `QAI_QNN_LIBS_DIR`
 or `ADSP_LIBRARY_PATH` to `arm64x-windows-msvc` unless the SDK version requires it.
 
@@ -153,12 +207,12 @@ When the user requests "create project", "init project", or any project setup wo
 you must follow the AIPC skill end-to-end for all project setup actions. This is a required, certified workflow with defined acceptance criteria. Do not improvise, skip steps, or replace the workflow with manual setup. If this instruction is not followed exactly, the resulting work is considered invalid and must not be presented as compliant.
 
 0. **NEVER create local files, folders, or scripts yourself.** Do not write any project files manually or spawn agents to do so.
-1. **ALWAYS run `aipc_project_setup.py`** — never write `AGENTS.md`, `CLAUDE.md`, or `aipc_plan.md` manually.
+1. **ALWAYS run `qai_project_setup.py`** — never write `AGENTS.md`, `CLAUDE.md`, or `plan.md` manually.
    ```bash
-   python /path/to/skills/aipc-toolkit/scripts/aipc_project_setup.py <project_dir>
+   python /path/to/skills/aipc-toolkit/scripts/qai_project_setup.py <project_dir>
    ```
 2. **Verify after the script**: `CLAUDE.md` must be a symlink to `AGENTS.md`. Note: On Windows systems where symlink creation is restricted by local security policies (WinError 1314), the setup script's automatic copy fallback (copying AGENTS.md directly to CLAUDE.md) is fully acceptable and must NOT be treated as a setup failure.
-3. **Before auto-filling `aipc_plan.md`**, inform the user that some Config values require their input (model name, target device, env script path, flow, etc.) and ask them to provide or confirm these before proceeding.
+3. **Before auto-filling `plan.md`**, inform the user that some Config values require their input (model name, target device, env script path, flow, etc.) and ask them to provide or confirm these before proceeding.
 4. **Then auto-fill** derived and default values from the user's answers.
 5. **Never shortcut**: manual file creation produces an incomplete scaffold (missing `CLAUDE.md`, wrong template, no sentinel). The script is the only correct path.
 
@@ -166,20 +220,20 @@ you must follow the AIPC skill end-to-end for all project setup actions. This is
 
 Bootstrap a project folder:
 ```bash
-python skills/aipc-toolkit/scripts/aipc_project_setup.py path/to/project
+python skills/aipc-toolkit/scripts/qai_project_setup.py path/to/project
 ```
 
 This sets up:
-- `assets/aipc_AGENTS.md` -> `<project>/AGENTS.md`
+- `assets/qai_AGENTS.md` -> `<project>/AGENTS.md`
 - `<project>/CLAUDE.md` linked to `<project>/AGENTS.md`
-- `assets/aipc_plan.md` -> `<project>/aipc_plan.md`
+- `assets/plan.md` -> `<project>/plan.md`
 
 Notes:
 - If both `AGENTS.md` and `CLAUDE.md` already exist but are not linked together, setup stops with an error.
 - If only `CLAUDE.md` exists, the script creates `AGENTS.md` as a symlink to `CLAUDE.md` before applying the AIPC agent content.
 
 Then edit:
-- `aipc_plan.md` Config section
+- `plan.md` Config section
 - Placeholders in `AGENTS.md` / `CLAUDE.md`
 
 
@@ -195,7 +249,7 @@ Then edit:
    - Recommended: opset_version=13 or higher
 
 3. **Inspect ONNX I/O and operator compatibility**
-   - Run: `python aipc_inspect_onnxio.py model.onnx`
+   - Run: `python qai_inspect_onnxio.py model.onnx`
    - Run converter dry-run to detect unsupported operators
    - **If unsupported operators found → Proceed to Step 4**
 
@@ -242,20 +296,22 @@ Then edit:
 
    - **Re-inspect:** Run dry-run to verify no unsupported ops remain
    - **Iterate:** If new unsupported ops found → repeat Step 4
-   - **Track:** Update `aipc_plan.md` with ALL patched operators
+   - **Track:** Update `plan.md` with ALL patched operators
    - **Stop when:** All ops resolved OR exit criteria met (see Escalation Policy)
 
 5. **Convert float model**
-   - QNN path: `python aipc_convert_fp.py --onnx model_patched.onnx ...`
-   - SNPE path: `python aipc_convert_snpe.py --onnx model_patched.onnx ...`
+   - QNN path: `python qai_convert_fp.py --onnx model_patched.onnx ...`
+   - SNPE path: `python qai_convert_snpe.py --onnx model_patched.onnx ...`
 
 6. **Optional: Quantization** (INT8/INT16/A16W8)
-   - Use `aipc_convert_int.py` (QAIRT default) or `aipc_convert_aimet.py` (AIMET path) with calibration data
+   - QNN: use `qai_convert_int.py` (QAIRT default) or `qai_convert_aimet.py` (AIMET path) with calibration data.
+   - SNPE/DLC: use `qairt-converter` to create an FP32 DLC, then `qairt-quantizer` to quantize it.
+   - Treat `snpe-dlc-quant` as a legacy fallback only for older SDKs without `qairt-quantizer`.
 
 7. **Context binary generation (host-side)**
-  - For ARM target context generation, do not run `aipc_dev_gen_contextbin_x86.py` without explicit target config.
+  - For ARM target context generation, do not run `qai_dev_gen_contextbin_x86.py` without explicit target config.
     - Preferred: use direct `qnn-context-binary-generator` flow from `references/host_context_binary_gen.md`.
-    - If using `aipc_dev_gen_contextbin_x86.py`, pass `--config_file <backend_extension.json>` (with `soc_id` / `dsp_arch` config).
+    - If using `qai_dev_gen_contextbin_x86.py`, pass `--config_file <backend_extension.json>` (with `soc_id` / `dsp_arch` config).
   - **If generation fails (Windows)**: → Return to Step 4 (operator patching) — continue until no replacement patterns exist
   - **If generation fails (Linux)**: → Continue troubleshooting using `references/host_context_binary_gen.md` first.
     - You MUST attempt and record all applicable host-context methods before fallback:
@@ -267,14 +323,14 @@ Then edit:
   - See `references/host_context_binary_gen.md` for full commands and config templates
 
 8. **Inference + validation**
-   - Use `aipc` wrapper to run inference script
+   - Use `qai` wrapper to run inference script
    - Validate accuracy against ONNX baseline.
    - Perform wrapper preflight before final run:
      - verify selected artifact path
      - clean stale matched `.bin` files in workdir (including `.onnx.dll.bin` on Windows, `.onnx.so.bin` on Linux)
      - ensure deployed context binary name matches ONNX discovery rule: `<model>.onnx.dll.bin` on Windows, `<model>.onnx.so.bin` on Linux
      - on Windows, the wrapper also matches `<model>.onnx.dll.bin`, `<model>.dll.bin`, `<model>.dll` in that order
-   - On Linux ARM targets, set `QAI_QNN_LIBS_DIR` explicitly to intended runtime libs dir before running `aipc`.
+   - On Linux ARM targets, set `QAI_QNN_LIBS_DIR` explicitly to intended runtime libs dir before running `qai`.
    - If remote target execution is configured, you MUST run inference/validation on the remote target only.
    - In this case, skip local host inference entirely.
    - Final pass/fail must come from remote target results.
@@ -289,14 +345,14 @@ Open only what you need:
 |-------|------|
 | Environment setup (Windows) | `references/win_qairt_setup.md` |
 | Export + ONNX validation | `references/model_export_validation.md` |
-| **Multi-component pipelines** | **`references/multi_component_pipeline.md`** |
+| **Multi-component pipelines** | **`references/model-architectures/multi_component_pipeline.md`** |
 | **Operator patching** | **`references/operator_patching.md`** |
 | QNN conversion | `references/qnn_conversion.md` |
 | SNPE conversion | `references/snpe_conversion.md` |
 | Quantization | `references/model_quantization.md` |
 | Context binary | `references/context_binary.md` |
 | Host context binary gen | `references/host_context_binary_gen.md` |
-| Large context binary / model split | `references/model_split.md` |
+| Large context binary / model split | `references/model-architectures/model_split.md` |
 | Inference | `references/inference.md` |
 | Troubleshooting | `references/troubleshooting.md` |
 | Optimization | `references/optimization.md` |
@@ -305,17 +361,17 @@ Open only what you need:
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/aipc` | ONNX wrapper loader |
-| `scripts/aipc_project_setup.py` | Project bootstrap |
-| `scripts/aipc_inspect_onnxio.py` | ONNX I/O inspection |
-| `scripts/aipc_convert_fp.py` | QNN float conversion |
-| `scripts/aipc_convert_int.py` | QNN quantized conversion (QAIRT path) |
-| `scripts/aipc_convert_aimet.py` | QNN/SNPE quantized conversion using AIMET (Linux only) |
-| `scripts/aipc_convert_snpe.py` | SNPE conversion wrapper |
-| `scripts/aipc_dev_gen_contextbin.py` | Context binary generation (on-device / legacy) |
-| `scripts/aipc_dev_gen_contextbin_x86.py` | Host-side context binary generation (x86 host → target SoC) |
-| `scripts/aipc_qairt_devinfo.ps1` | QAIRT SoC and DSP/HTP architecture auto-detection (Windows on Snapdragon) |
+| `scripts/qai` | ONNX wrapper loader |
+| `scripts/qai_project_setup.py` | Project bootstrap |
+| `scripts/qai_inspect_onnxio.py` | ONNX I/O inspection |
+| `scripts/qai_convert_fp.py` | QNN float conversion |
+| `scripts/qai_convert_int.py` | QNN quantized conversion (QAIRT path) |
+| `scripts/qai_convert_aimet.py` | QNN/SNPE quantized conversion using AIMET (Linux only) |
+| `scripts/qai_convert_snpe.py` | SNPE conversion wrapper |
+| `scripts/qai_dev_gen_contextbin.py` | Context binary generation (on-device / legacy) |
+| `scripts/qai_dev_gen_contextbin_x86.py` | Host-side context binary generation (x86 host → target SoC) |
+| `scripts/qai_qairt_devinfo.ps1` | QAIRT SoC and DSP/HTP architecture auto-detection (Windows on Snapdragon) |
 
 
-> ⚠️ **Inference must use `scripts/aipc` wrapper** (including remote target runs). Direct `snpe-net-run`/`qnn-net-run` is for diagnostics only, not acceptance validation.
-> ⚠️ **Always prefer the wrapper scripts** (`aipc_convert_fp.py`, `aipc_convert_int.py`, `aipc_convert_aimet.py`) over calling `qnn-onnx-converter` or `qnn-model-lib-generator` directly.
+> ⚠️ **Inference must use `scripts/qai` wrapper** (including remote target runs). Direct `snpe-net-run`/`qnn-net-run` is for diagnostics only, not acceptance validation.
+> ⚠️ **Always prefer the wrapper scripts** (`qai_convert_fp.py`, `qai_convert_int.py`, `qai_convert_aimet.py`) over calling `qnn-onnx-converter` or `qnn-model-lib-generator` directly.

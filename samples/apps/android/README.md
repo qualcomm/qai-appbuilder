@@ -6,6 +6,31 @@ GenieChat is an Android application that demonstrates how to integrate large lan
 
 ---
 
+## Build and Run TFLite Object Detection sample app
+
+The `tflite-object-detection` sample demonstrates the recommended Android application path for `.tflite` models: Java TensorFlow Lite with Qualcomm's QNN LiteRT delegate. It keeps TFLite model loading and tensor access in Java, while selecting the best available provider in this order:
+
+```text
+QNN NPU -> GPU -> CPU/XNNPack
+```
+
+The app reports the actual provider as `qnn-npu`, `gpu`, or `cpu`; it does not label CPU fallback as NPU execution. The sample is arm64-v8a only and is independent of the native `.bin`/`.dlc` SuperResolution app.
+
+### Build
+
+1. Copy a compatible, unencrypted model to:
+
+   `samples/apps/android/tflite-object-detection/app/src/main/assets/model.tflite`
+
+2. From the sample directory, run `gradlew.bat assembleDebug` on Windows or `./gradlew assembleDebug` on Linux/macOS.
+3. Install the APK with `adb install -r app/build/outputs/apk/debug/app-debug.apk`.
+
+The Qualcomm dependencies are resolved from Maven and must match the QAIRT/QNN release supported by the target device. The sample currently pins TensorFlow Lite 2.16.1 and QNN 2.40.0; do not mix runtime, delegate, and device skeleton versions from different releases.
+
+Native TFLite C API/JNI integration belongs to a separate runtime project and is not bundled into qai-appbuilder. This Java sample is the standalone Gradle-managed Android integration.
+
+---
+
 ## Build and Run SuperResolution sample app on Mobile Phone(Snapdragon® 8 Elite and Snapdragon® 8 Elite Gen 5)
 
 The SuperResolution Android app demonstrates on-device **4x image super-resolution** powered by [QAI AppBuilder](https://github.com/qualcomm/qai-appbuilder) on Snapdragon-based Android devices. It runs inference entirely on the device's Neural Processing Unit (NPU / HTP) via the Qualcomm AI Runtime SDK, with no cloud dependency.

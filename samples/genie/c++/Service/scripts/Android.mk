@@ -24,6 +24,7 @@ PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../../External/../../../../src
 PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../
 PACKAGE_C_INCLUDES += -I ${QNN_SDK_ROOT}include/Genie/
 PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../src/common
+PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../src/GenieAPIService/src/watermark
 
 #========================== Define libGenie.so variables =============================================
 include $(CLEAR_VARS)
@@ -50,6 +51,9 @@ SERVICE_SRC_FILES :=            ../src/GenieAPIService/src/chat_history/chat_his
                                     ../src/GenieAPIService/src/chat_request_handler/prompt_preparation_service.cpp \
                                     ../src/GenieAPIService/src/chat_request_handler/summary_cache.cpp \
                                     ../src/GenieAPIService/src/chat_request_handler/long_text_summarizer.cpp \
+                                    ../src/GenieAPIService/src/chat_request_handler/task_memo_store.cpp \
+                                    ../src/GenieAPIService/src/chat_request_handler/task_memo_builder.cpp \
+                                    ../src/GenieAPIService/src/chat_request_handler/tool_call_circuit_breaker_store.cpp \
 									../src/GenieAPIService/src/context/context_base.cpp \
                                     ../src/GenieAPIService/src/context/qnn/genie.cpp \
                                     ../src/GenieAPIService/src/context/qnn/genie_interface.cpp \
@@ -78,6 +82,7 @@ SERVICE_SRC_FILES :=            ../src/GenieAPIService/src/chat_history/chat_his
                                     ../src/GenieAPIService/src/gateway/cloud/cloud_model_client.cpp \
                                     ../src/GenieAPIService/src/gateway/audit/audit_logger.cpp \
                                     ../src/common/utils.cpp \
+                                    ../src/GenieAPIService/src/watermark/watermark_provider_host.cpp \
                                     ../src/GenieAPIService/src/GenieAPIService.cpp
 
 include $(CLEAR_VARS)

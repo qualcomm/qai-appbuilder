@@ -11,6 +11,7 @@ include(platform.cmake)
 list(APPEND INCLUDE_PATH
         ${EXTERNAL_HEADER_PATH}
         ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/watermark
 )
 
 list(APPEND SERVICE_SOURCES
@@ -21,6 +22,10 @@ list(APPEND SERVICE_SOURCES
         src/chat_request_handler/prompt_preparation_service.cpp
         src/chat_request_handler/summary_cache.cpp
         src/chat_request_handler/long_text_summarizer.cpp
+        src/chat_request_handler/task_memo_store.cpp
+        src/chat_request_handler/task_memo_builder.cpp
+        src/chat_request_handler/tool_call_circuit_breaker_store.cpp
+        src/chat_request_handler/tool_call_circuit_breaker_store_selftest.cpp
         src/chat_history/chat_history.cpp
         src/model/model_manager.cpp
         src/context/llama_speculative_config.cpp
@@ -36,6 +41,8 @@ list(APPEND SERVICE_SOURCES
         src/processor/harmony.cpp
         src/processor/general.cpp
         src/response/response_tools.cpp
+        src/response/response_tools_layer1_selftest.cpp
+        src/response/response_tools_sanitization_selftest.cpp
         src/response/response_dispatcher.cpp
         ${CMAKE_SOURCE_DIR}/src/common/utils.cpp
         src/gateway/gateway/gateway.cpp
@@ -52,6 +59,7 @@ list(APPEND SERVICE_SOURCES
         src/gateway/routing/model_router.cpp
         src/gateway/cloud/cloud_model_client.cpp
         src/gateway/audit/audit_logger.cpp
+        src/watermark/watermark_provider_host.cpp
 )
 
 add_compile_options(
@@ -180,6 +188,7 @@ add_custom_command(
         TARGET ${LIB_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory ${BUILD_PATH}/include
         COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/src/GenieAPILibrary.h ${BUILD_PATH}/include
+        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/../common/watermark_provider_abi.h ${BUILD_PATH}/include
 )
 if (BUILD_AS_DLL)
     # 保证只构建 ${LIB_NAME}（不连带构建 ${CMAKE_PROJECT_NAME}）时，EXTERNAL_BIN 里的后端

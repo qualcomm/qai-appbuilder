@@ -10,7 +10,7 @@
 The `evolve` phase is an **optional, opt-in** post-project improvement cycle.
 It activates only when `EVOLVE = YES` is set in the project config. By default it is **disabled**.
 
-After a project's main work phases complete, the Evolve Orchestrator reviews what was learned and proposes targeted improvements to the aipc skill itself — specifically to `aipc_plan.md`, `aipc_AGENTS.md`, and reference documents.
+After a project's main work phases complete, the Evolve Orchestrator reviews what was learned and proposes targeted improvements to the aipc skill itself — specifically to `plan.md`, `qai_AGENTS.md`, and reference documents.
 
 The goal is to make the skill better for the next project, not to document what happened in this one.
 
@@ -18,7 +18,7 @@ The goal is to make the skill better for the next project, not to document what 
 
 ## Activation
 
-Set in `aipc_plan.md` Config:
+Set in `plan.md` Config:
 
 ```
 EVOLVE = <!-- YES / NO (default NO) — run skill self-improvement phase after Phase 6/7/8 -->
@@ -46,8 +46,8 @@ commit the initial state before proposing or applying any evolve changes.
 
 ### What CAN be updated
 
-- **`aipc_plan.md`**: new config variables, guardrail notes, phase instructions, task checklists that apply to any project on any model
-- **`aipc_AGENTS.md`**: agent role clarifications, decision rules, blocking conditions, workflow steps that apply generally
+- **`plan.md`**: new config variables, guardrail notes, phase instructions, task checklists that apply to any project on any model
+- **`qai_AGENTS.md`**: agent role clarifications, decision rules, blocking conditions, workflow steps that apply generally
 - **Reference documents** (`references/*.md`): general setup, known patterns, guardrails, common pitfalls, environment knowledge
 - **`SKILL.md`**: trigger phrases, required guardrails, cross-platform notes
 
@@ -63,8 +63,8 @@ commit the initial state before proposing or applying any evolve changes.
 | Document type | What belongs here |
 |---|---|
 | `references/*.md` | General knowledge: environment setup, known tool behaviors, common error patterns, guardrails, configuration options |
-| `aipc_plan.md` | Flow, config variables, phase task lists, exit criteria, progress tracking |
-| `aipc_AGENTS.md` | Agent roles, decision rules, blocking conditions, handoff protocol |
+| `plan.md` | Flow, config variables, phase task lists, exit criteria, progress tracking |
+| `qai_AGENTS.md` | Agent roles, decision rules, blocking conditions, handoff protocol |
 
 References are **encyclopedic** — they explain *how things work* in general.
 Plan and Agents are **prescriptive** — they tell agents *what to do* in order.
@@ -86,11 +86,11 @@ Plan and Agents are **prescriptive** — they tell agents *what to do* in order.
 
 The Evolve Orchestrator reads the following to build context before proposing changes:
 
-1. `aipc_plan.md` — Issue Log, per-phase notes, any blocking conditions hit
+1. `plan.md` — Issue Log, per-phase notes, any blocking conditions hit
 2. `REPORT.md` — final accuracy/latency metrics and observations
 3. `logs/` — stderr/stdout from each phase (especially errors and warnings)
-4. All reference documents the current project used (linked from `aipc_plan.md` References table)
-5. Current `aipc_AGENTS.md` and `SKILL.md` — to understand what already exists before proposing additions
+4. All reference documents the current project used (linked from `plan.md` References table)
+5. Current `qai_AGENTS.md` and `SKILL.md` — to understand what already exists before proposing additions
 
 The orchestrator synthesizes from these inputs a list of **candidate improvements** with rationale, before invoking the Verification Subagent.
 
@@ -173,9 +173,9 @@ These are areas where past projects most often reveal gaps worth fixing in the s
 
 ---
 
-## evolve Summary (append to `aipc_plan.md` after phase completes)
+## evolve Summary (append to `plan.md` after phase completes)
 
-After the evolve phase completes, append to `aipc_plan.md`:
+After the evolve phase completes, append to `plan.md`:
 
 ```markdown
 ## Skill Evolution Summary
@@ -189,7 +189,7 @@ Rejected changes: record reason. Applied changes: record the git-style summary l
 
 ---
 
-## Progress Row (add to `aipc_plan.md` Progress Summary)
+## Progress Row (add to `plan.md` Progress Summary)
 
 ```
 | E | Skill Evolution (evolve, post-project, opt-in) | Common | ⬜ Not Started |

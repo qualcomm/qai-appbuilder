@@ -48,20 +48,18 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    auto out_buf = new uint8_t[dwByteNeeded]{};
+    std::vector<uint8_t> out_buf(dwByteNeeded);
     if (!CryptBinaryToStringA(reinterpret_cast<BYTE *>(buf.data()),
                               buf.size(),
                               CRYPT_STRING_BASE64 | CRYPT_STRING_NOCRLF,
-                              reinterpret_cast<CHAR *>(out_buf),
+                              reinterpret_cast<CHAR *>(out_buf.data()),
                               &dwByteNeeded))
     {
         std::cout << "encode to binrary failed before alloc: " << GetLastError() << "\n";
-        delete[] out_buf;
         return 1;
     }
 
     ofstream out(argv[2]);
-    out.write(reinterpret_cast<char *>(out_buf), dwByteNeeded);
-    delete[] out_buf;
+    out.write(reinterpret_cast<char *>(out_buf.data()), dwByteNeeded);
     return 0;
 }

@@ -135,6 +135,7 @@ else:
         # ── multimodal ─────────────────────────────────────────────────────────
         ("multimodal",      "easy_ocr",                      r"models/multimodal/image_to_text/easy_ocr/python/easy_ocr.py",                            None),
         ("multimodal",      "nomic_embed_text",              r"models/multimodal/text_embedding/nomic_embed_text/python/nomic_embed_text.py",           None),
+        ("multimodal",      "nomic_embed_text_dlc",           r"models/multimodal/text_embedding/nomic_embed_text/python/nomic_embed_text_dlc.py",        ["Linux"]),
         ("multimodal",      "openai_clip",                   r"models/multimodal/image_classification/openai_clip/python/openai_clip.py",               None),
         ("multimodal",      "opus_mt_zh_en",                 r"models/multimodal/translation/opus_mt_zh_en/python/opus_mt_zh_en.py",                None),
         # qwen_vl requires Linux (aarch64-oe-linux) runtime; not supported on WoS

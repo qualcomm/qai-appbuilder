@@ -120,8 +120,6 @@ print("      QNN backend ready.")
 
 # ── Step 2: Load tokenizer + image processor ───────────────────────────────
 print("[2/5] Loading tokenizer ...")
-import ssl
-ssl._create_default_https_context = ssl._create_unverified_context
 os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 from transformers import TrOCRProcessor
 

@@ -27,7 +27,7 @@ samples/
 │   └── multimodal/           # Multimodal models (OCR, translation, CLIP, VLM)
 ├── apps/                     # Complete AI applications
 │   ├── webui/                # Gradio WebUI applications (image-repair, stable-diffusion, genie-chat)
-│   ├── android/              # Android sample apps (genie-chat, super-resolution)
+│   ├── android/              # Android sample apps (genie-chat, super-resolution, tflite-object-detection)
 │   ├── genie-flet-ui/        # Flet-based desktop UI
 │   └── story-seed/           # Automated story generation app
 ├── genie/                    # Genie LLM API service

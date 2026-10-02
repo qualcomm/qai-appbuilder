@@ -71,13 +71,12 @@ inline std::string BuildLocalModelPrompt(
     // 注意：关闭 thinking 时不再预填空 think 块——真机实测确认该预填内容会导致
     // qwen3 系列模型在极短用户提问下退化，/no_think 单独即可正确抑制思考。
     auto append_think_control = [&](std::string& system_text) {
-        if (!is_thinking()) {
-            return;
-        }
-        if (enable_think()) {
-            system_text += "/think";
-        } else {
-            system_text += "/no_think";
+        if (is_thinking()) {
+            if (enable_think()) {
+                system_text += "/think";
+            } else {
+                system_text += "/no_think";
+            }
         }
     };
 

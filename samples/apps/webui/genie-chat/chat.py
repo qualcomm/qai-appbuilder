@@ -29,8 +29,7 @@ class Chat():
         ]
 
         try:
-            # shell=True 是必须的,以便支持 'start' 命令
-            subprocess.Popen(command, shell=True, cwd=os.path.dirname(__file__))  # 设置工作目录
+            subprocess.Popen(command, shell=False, cwd=os.path.dirname(__file__))  # 设置工作目录
             print(Fore.GREEN + "服务已在新窗口中启动,监听端口 8910\n")
             time.sleep(10)
         except FileNotFoundError:
