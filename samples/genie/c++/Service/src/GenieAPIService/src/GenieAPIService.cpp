@@ -155,9 +155,10 @@ void GenieService::run(int argc, char *argv[])
 
     // InitializeConfig must complete before ChatRequestHandler construction
     // because the handler reads routing/cloud config set during initialization.
+    // 本身只做模型路径解析 + service_config.json 解析，不再触发模型加载。
     if (!modelManager->InitializeConfig())
     {
-        My_Log{My_Log::Level::kError} << "load model failed." << std::endl;
+        My_Log{My_Log::Level::kError} << "resolve model config failed." << std::endl;
     }
 
     // Initialize request handler and start HTTP server BEFORE model loading.
@@ -172,8 +173,16 @@ void GenieService::run(int argc, char *argv[])
         init_ = true;
     }
 
-    // 并发多模型托管设计已删除：-l/--load_model 不再触发任何后台加载行为（config.h 中已降级为
-    // no-op 标志，仅为兼容现有调用方保留）。服务启动后只有 -c 指定的这一个主模型处于加载状态。
+    // -c 只定位模型路径（已在 InitializeConfig() 中完成），只有显式带 -l/--load_model 才
+    // 真正占用硬件资源加载模型；未带 -l 时服务启动后 current_model_ 为空，之后仍可通过
+    // 对话/HTTP 触发的 LoadModelByName() 动态加载任意后端（QNN/MNN/GGUF）模型。
+    if (config.NeedLoadModel())
+    {
+        if (!modelManager->LoadSingleModel())
+        {
+            My_Log{My_Log::Level::kError} << "load model failed." << std::endl;
+        }
+    }
 
     // 默认值仍是 0.0.0.0（与改动前行为一致），仅在使用者显式传入 -H/--host 时按需收紧，
     // 详见 config.h::Config::host_ 的注释。

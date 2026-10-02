@@ -1,5 +1,6 @@
 {
     "_comment": "GenieAPIService 服务配置文件 - 程序启动时自动加载，修改后重启服务生效",
+    "_comment_grouping": "字段分组门控：Group A（网络模块，含 local_model/cloud_shared/cloud_model/enterprise_cloud_model/routing 及 routing 下的敏感检测/脱敏/复杂度评估子节，含 routing.enabled 本身）仅在服务以 -n -1（stateless/端云结合模式）启动时解析生效，-n 为其它值时这些字段保持代码默认值（routing.enabled 恒为 false，云端路径不可达）；Group B（prompt_optimization/tool_call_repair/debug，公共组件，与云端无关）无条件生效，不受 -n 取值影响。",
     "_version": "1.0",
 
     "local_model": {
@@ -129,7 +130,7 @@
             "_comment_debug_log_matches": "调试日志开关：true=规则命中时打印匹配规则、原始文本及前后30字符上下文（包含原始敏感信息，仅用于问题排查），false=关闭（生产环境推荐）；默认 false",
             "debug_log_matches": false,
             "_comment_keywords": "关键词词典路径（相对于可执行文件目录），支持热更新；留空则不加载",
-            "keywords_dict_path": "./sensitive_keywords.json",
+            "keywords_dict_path": "./config/sensitive_keywords.json",
             "keywords_reload_interval_seconds": 60,
             "extended_rules": {
                 "_comment": "扩展检测规则开关（各类型可独立开启/关闭，不影响基础 PII/SECRET/FINANCIAL 规则）",
@@ -940,39 +941,6 @@
             "max_section_tokens": 0
         }
     },
-
-    "_comment_models": "多模型并发配置：同时加载多个模型实例，支持 CPU/GPU/NPU 并发推理。客户端通过请求中的 model 字段指定使用哪个模型。固定顺序：第1个=NPU模型，第2个=GPU模型，第3个=CPU模型。",
-    "models": [
-        {
-            "_comment": "NPU 模型（固定槽位1）：使用 QNN 后端在 NPU 上运行",
-            "name": "qwen3-8b-8380",
-            "path": "qwen3-8b-8380",
-            "backend": "qnn",
-            "device": "npu",
-            "context_size": 8192,
-            "enabled": true
-        },
-        {
-            "_comment": "GPU 模型（固定槽位2）：使用 Llama.cpp (GGUF) 后端在 GPU 上运行",
-            "name": "gpt-oss-20b-GGUF",
-            "path": "gpt-oss-20b-GGUF",
-            "backend": "GGUF",
-            "device": "gpu",
-            "context_size": 16384,
-            "enabled": false
-        },
-        {
-            "_comment": "CPU 模型（固定槽位3）：使用 MNN 后端在 CPU 上运行",
-            "name": "Qwen2-7B-Instruct-MNN",
-            "path": "Qwen2-7B-Instruct-MNN",
-            "backend": "mnn",
-            "device": "cpu",
-            "context_size": 4096,
-            "enabled": false
-        }
-    ],
-    "_comment_default_model": "默认模型名称：客户端不指定 model 字段时使用此模型。必须与 models 数组中某个 name 字段完全匹配。",
-    "default_model": "qwen3-8b-8380",
 
     "debug": {
         "_comment": "调试与诊断配置",
