@@ -1020,20 +1020,7 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
         // CPU 路径：保持 mmap/repack/no-host 的 llama.cpp 官方默认值（已实测验证比强制关闭更快）。
         arg_strings.insert(arg_strings.end(), {"-ngl", "0"});
     }
-    else if (speculative_requested)
-    {
-        // 投机解码分支严格对齐用户给定、且已用原生 llama-server.exe 在本机实测跑通的命令行：
-        // 只给 -ngl 99，既不带 --no-mmap/--no-repack/--no-host/-ub 1024，也不带 --device。
-        // 不带 --device 是关键：--device GPUOpenCL 会把可用后端设备裁剪成只剩 OpenCL GPU 一个，
-        // 而 dflash 的 target+draft 双 context 在 --fit 阶段需要 CPU 设备参与兜底（本机驱动的
-        // 大缓冲区模式实际为 OFF，超设备上限的 buffer 必须 fall back 到 host memory），裁剪掉
-        // CPU 设备后 14.6GB target 的分配无处可退，直接抛 std::bad_alloc。原生 llama-server.exe
-        // 的命令行同样没有 --device。
-        arg_strings.insert(arg_strings.end(), {
-            "-ngl", "99",
-        });
-    }
-    else
+    else if (!speculative_requested)
     {
         // 非投机（现有全部单模型 GGUF）路径：保持历史 A/B 实测出的最快组合，本轮不改动。
         arg_strings.insert(arg_strings.end(), {
@@ -1045,6 +1032,12 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
             "-ub", "1024",
         });
     }
+    // 投机解码分支（非 CPU）不显式传 -ngl：llama-completion.exe 实测确认，一旦显式给出 -ngl（含
+    // 99），fork 的 common/fit.cpp 会直接放弃显存拟合、强行按请求值全量分配，而本机 OpenCL 设备
+    // 可用显存（约15078MiB）不足以装下 Qwen3.8-27B 全部66层（需约15234MiB），导致最后几批 q6_K
+    // 张量上传阶段崩溃。不给 -ngl 时 --fit 自动决定 offload 层数（实测58-61/66），加载与推理均
+    // 成功，且 prefill 速度最快；--fit 同样会把 common_fit_extra_model（草稿模型）计入显存预算，
+    // -ngld 99 不受影响。不带 --device 的原因同上：裁剪掉 CPU 设备后超设备上限的 buffer 无处 fallback。
 
     std::vector<char *> argv;
     argv.reserve(arg_strings.size());
