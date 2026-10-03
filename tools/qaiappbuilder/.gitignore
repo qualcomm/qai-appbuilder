@@ -53,6 +53,11 @@ npm-debug.log*
 /data/
 !/data/README.md
 !/data/.gitkeep
+# Linux default QAIRT SDK install location (scripts/init/install_qairt.py /
+# scripts/setup/setup_qairt_env.py default to <repo_root>/qairt/<version>
+# instead of the user's HOME directory). Anchored to the repo root so a
+# same-named source dir deeper in the tree is never mis-ignored.
+/qairt/
 # Top-level model-weight cache from the Download Center (NPU quantized model
 # .bin files). Anchored to the repo root so it does NOT catch source dirs that
 # happen to be named "models/" deeper in the tree (e.g. the shipped skill code

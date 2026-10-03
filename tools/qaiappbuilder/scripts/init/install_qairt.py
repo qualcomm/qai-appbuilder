@@ -89,12 +89,46 @@ def _load_default_qairt_version() -> str:
 
 
 DEFAULT_QAIRT_VERSION = _load_default_qairt_version()
-DEFAULT_QAIRT_SDK_ROOT_TEMPLATE = r"C:\Qualcomm\AIStack\QAIRT\{version}"
-DEFAULT_QAIRT_SDK_ROOT_LINUX_TEMPLATE = str(Path.home() / "qairt" / "{version}")
+# Per-platform default SDK root. The Linux value is intentionally RELATIVE
+# ("qairt/{version}") -- see _resolve_paths(), which joins it against the
+# repository root so setup.sh keeps the SDK with the project rather than
+# in the invoking user's HOME directory. Windows keeps its existing
+# absolute default unchanged.
+DEFAULT_QAIRT_SDK_ROOT_TEMPLATE = (
+    r"C:\Qualcomm\AIStack\QAIRT\{version}"
+    if sys.platform == "win32"
+    else "qairt/{version}"
+)
 DEFAULT_QAIRT_DOWNLOAD_URL_TEMPLATE = (
     "https://softwarecenter.qualcomm.com/api/download/software/sdks/"
     "Qualcomm_AI_Runtime_Community/All/{version}/v{version}.zip"
 )
+
+# Sentinel binary used to decide "is the SDK already installed?" per
+# platform/arch. Parity with scripts/setup/setup_qairt_env.py's
+# QAIRT_SDK_VALID_MARKER_WIN / _LINUX_X64 / _LINUX_ARM64 -- the installers
+# must agree on what counts as "installed" or one could report success
+# while the other still sees the SDK as missing.
+_QAIRT_SENTINEL_WIN = (
+    Path("bin") / "aarch64-windows-msvc" / "qnn-context-binary-generator.exe"
+)
+_QAIRT_SENTINEL_LINUX_X64 = (
+    Path("bin") / "x86_64-linux-clang" / "qnn-onnx-converter"
+)
+_QAIRT_SENTINEL_LINUX_ARM64 = (
+    Path("bin") / "aarch64-oe-linux-gcc11.2" / "qnn-net-run"
+)
+
+
+def _qairt_sentinel(sdk_root: Path) -> Path:
+    """Return the host-specific tool whose presence marks the SDK installed."""
+    if sys.platform == "win32":
+        relative = _QAIRT_SENTINEL_WIN
+    elif _current_arch() == "arm64":
+        relative = _QAIRT_SENTINEL_LINUX_ARM64
+    else:
+        relative = _QAIRT_SENTINEL_LINUX_X64
+    return sdk_root / relative
 
 # Canonical install locations (S8 audit P0-L2):
 LOCALAPPDATA_RELATIVE = Path("QAIModelBuilder")
@@ -185,7 +219,7 @@ class InstallPaths:
     """Resolved filesystem locations used by the orchestrator."""
 
     repo_root: Path
-    localappdata: Path
+    localappdata: Path | None
     # Host-arch runtime venv (Python 3.13). On arm64 == arm64_venv; on x64
     # points at .venv_x64_313. Used by verify() + the qairt_env.json daemon
     # keys so the resolver picks a real python.exe on either host.
@@ -205,18 +239,12 @@ class InstallPaths:
 
 
 def _localappdata() -> Path:
-    """Return the user's ``%LOCALAPPDATA%`` directory.
-
-    On non-Windows hosts (where ``LOCALAPPDATA`` is undefined), fall
-    back to ``~/.local/share`` so the script remains testable on
-    Linux / macOS CI runners. The QAIRT install path itself stays
-    Windows-only; only the ``qairt_env.json`` writer can run anywhere.
-    """
+    """Return the Windows user's ``%LOCALAPPDATA%`` directory."""
 
     env = os.environ.get("LOCALAPPDATA")
-    if env:
-        return Path(env)
-    return Path.home() / ".local" / "share"
+    if not env:
+        raise RuntimeError("LOCALAPPDATA is required on Windows")
+    return Path(env)
 
 
 def _detect_repo_root() -> Path:
@@ -228,22 +256,39 @@ def _detect_repo_root() -> Path:
 
 def _resolve_paths(args: argparse.Namespace) -> InstallPaths:
     repo = Path(args.repo_root).resolve() if args.repo_root else _detect_repo_root()
-    lad = _localappdata()
-    arm64 = lad / "QAIModelBuilder" / "envs" / ".venv_arm64_313"
-    x64 = lad / "QAIModelBuilder" / "envs" / ".venv_x64_310"
-    runtime = lad / _runtime_venv_relative()
+    if sys.platform.startswith("linux"):
+        lad = None
+        arm64 = repo / "envs" / "venv_aarch64_312"
+        if _current_arch() == "arm64":
+            x64 = arm64
+            runtime = arm64
+        else:
+            x64 = repo / "envs" / "venv_x86_64_310"
+            runtime = repo / "envs" / "venv"
+        default_config_path = repo / "data" / "config" / "qairt_env.json"
+    else:
+        lad = _localappdata()
+        arm64 = lad / "QAIModelBuilder" / "envs" / ".venv_arm64_313"
+        x64 = lad / "QAIModelBuilder" / "envs" / ".venv_x64_310"
+        runtime = lad / _runtime_venv_relative()
+        default_config_path = lad / "QAIModelBuilder" / "config" / "qairt_env.json"
 
-    sdk_root_str = args.sdk_root or os.environ.get("QAIRT_SDK_ROOT") or (
-        DEFAULT_QAIRT_SDK_ROOT_LINUX_TEMPLATE.format(version=args.qairt_version)
-        if sys.platform != "win32"
-        else DEFAULT_QAIRT_SDK_ROOT_TEMPLATE.format(version=args.qairt_version)
-    )
-    sdk_root = Path(sdk_root_str)
+    sdk_root_override = args.sdk_root or os.environ.get("QAIRT_SDK_ROOT")
+    if sdk_root_override:
+        sdk_root = Path(sdk_root_override)
+    else:
+        default_sdk_root = Path(
+            DEFAULT_QAIRT_SDK_ROOT_TEMPLATE.format(version=args.qairt_version)
+        )
+        sdk_root = (
+            default_sdk_root
+            if default_sdk_root.is_absolute()
+            else repo / default_sdk_root
+        )
 
-    config_path_str = args.config_path or str(
-        lad / "QAIModelBuilder" / "config" / "qairt_env.json"
+    config_path = (
+        Path(args.config_path) if args.config_path else default_config_path
     )
-    config_path = Path(config_path_str)
 
     uv_exe = repo / "data" / "bin" / "uv" / "uv.exe"
     if not uv_exe.is_file():
@@ -353,17 +398,8 @@ def install_qairt_sdk(
       4. Download via PowerShell ``Invoke-WebRequest``
     """
 
-    # Sentinel file to detect an already-installed SDK (platform-specific).
-    if sys.platform == "win32":
-        sentinel = (
-            paths.qairt_sdk_root
-            / "bin"
-            / "aarch64-windows-msvc"
-            / "qnn-context-binary-generator.exe"
-        )
-    else:
-        # Linux aarch64: runtime libs are the reliable indicator.
-        sentinel = paths.qairt_sdk_root / "lib" / "aarch64-oe-linux-gcc11.2"
+    # Sentinel file to detect an already-installed SDK (host-specific).
+    sentinel = _qairt_sentinel(paths.qairt_sdk_root)
 
     if sentinel.exists():
         _info(f"QAIRT SDK already installed: {paths.qairt_sdk_root}")
@@ -441,10 +477,30 @@ def install_qairt_sdk(
         _curl = shutil.which("curl")
         if _wget:
             _info(f"Downloading QAIRT SDK {qairt_version} via wget...")
-            rc = _run([_wget, "-q", "-c", "-O", str(download_zip), download_url])
+            rc = _run(
+                [
+                    _wget,
+                    "--progress=bar:force:noscroll",
+                    "-c",
+                    "-O",
+                    str(download_zip),
+                    download_url,
+                ]
+            )
         elif _curl:
             _info(f"Downloading QAIRT SDK {qairt_version} via curl...")
-            rc = _run([_curl, "-s", "-S", "-L", "-C", "-", "-o", str(download_zip), download_url])
+            rc = _run(
+                [
+                    _curl,
+                    "--no-silent",
+                    "-L",
+                    "-C",
+                    "-",
+                    "-o",
+                    str(download_zip),
+                    download_url,
+                ]
+            )
         else:
             _err(
                 "Neither wget nor curl found. "
@@ -583,15 +639,9 @@ def write_qairt_env_json(
         vs_cmake_path = _detect_vs_cmake_path(vs_base)
 
     sdk_root_fwd = str(paths.qairt_sdk_root).replace("\\", "/")
-    arm64_python = str(paths.arm64_venv / "Scripts" / "python.exe").replace(
-        "\\", "/"
-    )
-    x64_python = str(paths.x64_venv / "Scripts" / "python.exe").replace(
-        "\\", "/"
-    )
-    runtime_python = str(paths.runtime_venv / "Scripts" / "python.exe").replace(
-        "\\", "/"
-    )
+    arm64_python = str(_venv_python(paths.arm64_venv)).replace("\\", "/")
+    x64_python = str(_venv_python(paths.x64_venv)).replace("\\", "/")
+    runtime_python = str(_venv_python(paths.runtime_venv)).replace("\\", "/")
     runtime_venv_fwd = str(paths.runtime_venv).replace("\\", "/")
     download_url = DEFAULT_QAIRT_DOWNLOAD_URL_TEMPLATE.format(
         version=qairt_version
@@ -651,35 +701,32 @@ def verify(paths: InstallPaths, *, qairt_version: str) -> bool:
 
     issues: list[str] = []
 
-    runtime_python = paths.runtime_venv / "Scripts" / "python.exe"
+    runtime_python = _venv_python(paths.runtime_venv)
     if not runtime_python.is_file():
         issues.append(
             f"Runtime venv missing ({_current_arch()}): {runtime_python}"
         )
     elif not _venv_is_complete(paths.runtime_venv):
         issues.append(
-            f"Runtime venv incomplete (python.exe present but activate.bat / "
-            f"pip missing): {paths.runtime_venv}"
+            f"Runtime venv incomplete (interpreter / activation / pip missing): "
+            f"{paths.runtime_venv}"
         )
 
-    x64_python = paths.x64_venv / "Scripts" / "python.exe"
+    x64_python = _venv_python(paths.x64_venv)
     if not x64_python.is_file():
         issues.append(f"x64 venv missing: {x64_python}")
     elif not _venv_is_complete(paths.x64_venv):
         issues.append(
-            f"x64 venv incomplete (python.exe present but activate.bat / "
-            f"pip missing): {paths.x64_venv}"
+            f"x64 venv incomplete (interpreter / activation / pip missing): "
+            f"{paths.x64_venv}"
         )
 
-    sentinel = (
-        paths.qairt_sdk_root
-        / "bin"
-        / "aarch64-windows-msvc"
-        / "qnn-context-binary-generator.exe"
-    )
-    # The sentinel exists only on Windows installs; off-Windows we
-    # only validate the JSON config.
-    if sys.platform == "win32" and not sentinel.is_file():
+    sentinel = _qairt_sentinel(paths.qairt_sdk_root)
+    # SDK install is automated on Windows and Linux; other platforms only
+    # get the JSON config, so the sentinel check does not apply there.
+    if (
+        sys.platform == "win32" or sys.platform.startswith("linux")
+    ) and not sentinel.is_file():
         issues.append(f"QAIRT SDK tool missing: {sentinel}")
 
     if not paths.qairt_config_path.is_file():
@@ -731,7 +778,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--sdk-root", default=None,
         help=(
             "QAIRT SDK install root. Default reads $QAIRT_SDK_ROOT or "
-            "$HOME/qairt/<version> on Linux (or "
+            "<repo-root>/qairt/<version> on Linux (or "
             "C:\\Qualcomm\\AIStack\\QAIRT\\<version> on Windows)."
         ),
     )
@@ -787,7 +834,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     _info(f"repo_root         = {paths.repo_root}")
-    _info(f"localappdata      = {paths.localappdata}")
+    if paths.localappdata is not None:
+        _info(f"localappdata      = {paths.localappdata}")
     _info(f"runtime_venv      = {paths.runtime_venv}  ({_current_arch()})")
     _info(f"arm64_venv        = {paths.arm64_venv}")
     _info(f"x64_venv          = {paths.x64_venv}")
@@ -865,19 +913,33 @@ def _run(cmd: Sequence[str]) -> int:
         return 1
 
 
+def _venv_python(venv_dir: Path) -> Path:
+    """Return the platform-native interpreter path inside a venv."""
+    if sys.platform == "win32":
+        return venv_dir / "Scripts" / "python.exe"
+    return venv_dir / "bin" / "python"
+
+
+def _venv_activate(venv_dir: Path) -> Path:
+    """Return the platform-native activation script inside a venv."""
+    if sys.platform == "win32":
+        return venv_dir / "Scripts" / "activate.bat"
+    return venv_dir / "bin" / "activate"
+
+
 def _venv_is_complete(venv_dir: Path) -> bool:
     """Return True only when ``venv_dir`` is a COMPLETE, usable venv.
 
     State-Truth-First (AGENTS.md 铁律1): a venv is only usable when it has
-    BOTH ``Scripts\\python.exe`` AND ``Scripts\\activate.bat`` AND a working
-    pip. Probing ``python.exe`` existence alone is a weak proxy -- an
-    interrupted ``uv venv --seed`` leaves python.exe behind without the
-    activation scripts / pip, and that half-built venv would be wrongly
-    treated as "ready" (the same bug class fixed in Setup.bat Step 3).
+    BOTH an interpreter AND an activation script AND a working pip. Probing
+    the interpreter's existence alone is a weak proxy -- an interrupted
+    ``uv venv --seed`` (or ``python -m venv``) leaves the interpreter behind
+    without the activation scripts / pip, and that half-built venv would be
+    wrongly treated as "ready" (the same bug class fixed in Setup.bat Step 3).
     """
 
-    python_exe = venv_dir / "Scripts" / "python.exe"
-    activate = venv_dir / "Scripts" / "activate.bat"
+    python_exe = _venv_python(venv_dir)
+    activate = _venv_activate(venv_dir)
     if not python_exe.is_file() or not activate.is_file():
         return False
     try:
