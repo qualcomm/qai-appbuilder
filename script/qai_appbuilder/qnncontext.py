@@ -796,7 +796,7 @@ class _QNNContextBase:
 
     def getOutputName(self, graph_index: int = 0):
         return self._call_ctx_getter("getOutputName", graph_index)
-    
+
     def getProfilingEvent(self, eventType):
         self._ensure_live("getProfilingEvent")
         return self.m_context.getProfilingEvent(eventType)
@@ -886,6 +886,7 @@ class QNNContext(_QNNContextBase):
         model_suffix = os.path.splitext(str(model_path))[1].lower()
         self._is_onnx_model = model_suffix == ".onnx"
         self._is_tflite_model = model_suffix == ".tflite"
+        self._is_executorch_model = model_suffix == ".pte"
 
         self._validate_model_path()
 
@@ -923,7 +924,27 @@ class QNNContext(_QNNContextBase):
             _register_context(self)
             return
 
+        if self._is_executorch_model:
+            self._validate_executorch_options(
+                is_async=is_async,
+                deviceID=deviceID,
+                coreIdsStr=coreIdsStr,
+                enable_graphs=enable_graphs,
+            )
+            context_type = getattr(appbuilder, "ExecuTorchContext", None)
+            if context_type is None:
+                raise RuntimeError(
+                    "ExecuTorch support is disabled in this qai_appbuilder build. "
+                    "Build with APPBUILDER_ENABLE_EXECUTORCH=ON and EXECUTORCH_ROOT."
+                )
+            if backend_lib_path == "None":
+                backend_lib_path = ""
+            self.m_context = context_type(model_name, model_path, backend_lib_path)
+            _register_context(self)
+            return
+
         backend_lib_path, system_lib_path = self._resolve_lib_paths(backend_lib_path, system_lib_path)
+
 
         self.m_context = appbuilder.QNNContext(model_name, model_path, backend_lib_path, system_lib_path,
                                               is_async, input_data_type, output_data_type, deviceID, coreIdsStr, list(enable_graphs) if enable_graphs else [])
@@ -945,6 +966,22 @@ class QNNContext(_QNNContextBase):
                 ".tflite models do not support QNN-only options: " + ", ".join(unsupported)
             )
 
+    @staticmethod
+    def _validate_executorch_options(*, is_async, deviceID, coreIdsStr, enable_graphs):
+        unsupported = []
+        if is_async:
+            unsupported.append("is_async")
+        if deviceID not in (0, None):
+            unsupported.append("deviceID")
+        if coreIdsStr not in ("", "None", None):
+            unsupported.append("coreIdsStr")
+        if enable_graphs:
+            unsupported.append("enable_graphs")
+        if unsupported:
+            raise ValueError(
+                ".pte models do not support QNN-only options: " + ", ".join(unsupported)
+            )
+
     #@timer
     def Inference(self, input, perf_profile=PerfProfile.DEFAULT, graphIndex=0):
         if self._is_onnx_model:
@@ -956,6 +993,15 @@ class QNNContext(_QNNContextBase):
                 raise ValueError(".tflite models do not support performance profiles")
             if graphIndex != 0:
                 raise ValueError(".tflite models expose a single graph; graphIndex must be 0")
+            return self._inference_and_reshape(
+                input,
+                lambda _in: self.m_context.Inference(_in, graphIndex),
+                graph_index=graphIndex,
+            )
+
+        if self._is_executorch_model:
+            if perf_profile != PerfProfile.DEFAULT:
+                raise ValueError(".pte models do not support performance profiles")
             return self._inference_and_reshape(
                 input,
                 lambda _in: self.m_context.Inference(_in, graphIndex),
@@ -976,9 +1022,13 @@ class QNNContext(_QNNContextBase):
         """True when the loaded model is served by the native TFLite/QNN delegate."""
         return self._is_tflite_model
 
+    def isExecuTorchModel(self):
+        """True when the loaded model is served by the native ExecuTorch runtime."""
+        return self._is_executorch_model
+
     def getProviderMode(self):
         """Return the provider mode reported by the selected alternate backend."""
-        if self._is_onnx_model or self._is_tflite_model:
+        if self._is_onnx_model or self._is_tflite_model or self._is_executorch_model:
             return self.m_context.getProviderMode()
         return "qnn"
 

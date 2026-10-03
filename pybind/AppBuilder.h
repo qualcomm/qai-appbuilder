@@ -1,7 +1,7 @@
 //==============================================================================
 //
 // Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
-// 
+//
 // SPDX-License-Identifier: BSD-3-Clause
 //
 //==============================================================================
@@ -29,6 +29,9 @@
 
 #if defined(APPBUILDER_ENABLE_TFLITE) || defined(APPBUILDER_ENABLE_TFLITE_CPU)
 #include "TFLiteInferenceEngine.hpp"
+#endif
+#if defined(APPBUILDER_ENABLE_EXECUTORCH)
+#include "ExecuTorchInferenceEngine.hpp"
 #endif
 
 using namespace std;
@@ -174,7 +177,7 @@ static inline py::dtype inferOutputNumpyDtype(size_t outputSizeBytes,
     return fallback;
 }
 
-ModelInfo_t getModelInfo_P(std::string model_name, std::string proc_name, 
+ModelInfo_t getModelInfo_P(std::string model_name, std::string proc_name,
                            std::string input, size_t graphIndex = 0) {
 
     ModelInfo_t output = g_LibAppBuilder.getModelInfo(model_name, proc_name, input);
@@ -214,14 +217,14 @@ int rel_perf_profile() {
 }
 
 int initialize(const std::string& model_name,
-               const std::string& model_path, const std::string& backend_lib_path, const std::string& system_lib_path, 
+               const std::string& model_path, const std::string& backend_lib_path, const std::string& system_lib_path,
                bool async, const std::string& input_data_type, const std::string& output_data_type) {
     py::gil_scoped_release release;
     return g_LibAppBuilder.ModelInitialize(model_name, model_path, backend_lib_path, system_lib_path, async, input_data_type, output_data_type);
 }
 
 int initialize_P(const std::string& model_name, const std::string& proc_name,
-                 const std::string& model_path, const std::string& backend_lib_path, const std::string& system_lib_path, 
+                 const std::string& model_path, const std::string& backend_lib_path, const std::string& system_lib_path,
                  bool async, const std::string& input_data_type, const std::string& output_data_type) {
     py::gil_scoped_release release;
     return g_LibAppBuilder.ModelInitialize(model_name, proc_name, model_path, backend_lib_path, system_lib_path, async, input_data_type, output_data_type);
@@ -237,8 +240,8 @@ int destroy_P(std::string model_name, std::string proc_name) {
     return g_LibAppBuilder.ModelDestroy(model_name, proc_name);
 }
 
-std::vector<py::array> inference(std::string model_name, const std::vector<py::array>& input, 
-                                 std::string perf_profile, size_t graphIndex = 0, 
+std::vector<py::array> inference(std::string model_name, const std::vector<py::array>& input,
+                                 std::string perf_profile, size_t graphIndex = 0,
                                  const std::string& input_data_type="float", const std::string& output_data_type="float") {
     std::vector<uint8_t*> inputBuffers;
     std::vector<uint8_t*> outputBuffers;
@@ -340,7 +343,7 @@ std::vector<py::array> inference(std::string model_name, const std::vector<py::a
 }
 
 std::vector<py::array> inference_P(std::string model_name, std::string proc_name, std::string share_memory_name,
-                                   const std::vector<py::array>& input, std::string perf_profile, size_t graphIndex = 0, 
+                                   const std::vector<py::array>& input, std::string perf_profile, size_t graphIndex = 0,
                                    const std::string& input_data_type="float", const std::string& output_data_type="float") {
     std::vector<uint8_t*> inputBuffers;
     std::vector<size_t> inputSize;
@@ -546,21 +549,97 @@ public:
 };
 #endif
 
+#if defined(APPBUILDER_ENABLE_EXECUTORCH)
+class ExecuTorchContext {
+public:
+    ExecuTorchContext(const std::string& model_name, const std::string& model_path,
+                      const std::string& backend_lib_path = "")
+        : m_model_name(model_name),
+          m_engine(std::make_unique<qnn::tools::qnn_app::ExecuTorchInferenceEngine>(model_path, backend_lib_path)) {
+        m_engine->initialize();
+    }
+
+    ~ExecuTorchContext() { release(); }
+
+    std::vector<py::array> Inference(const std::vector<py::array>& input, size_t graph_index = 0) {
+        const auto expected_types = m_engine->getInputDataType(graph_index);
+        if (input.size() != expected_types.size()) {
+            throw std::invalid_argument("ExecuTorch inference input count does not match the model");
+        }
+        std::vector<const uint8_t*> buffers;
+        std::vector<size_t> sizes;
+        std::vector<py::array> keep_alive;
+        for (size_t i = 0; i < input.size(); ++i) {
+            py::array array = py::array::ensure(input[i], py::array::c_style);
+            if (!array) throw std::invalid_argument("ExecuTorch inference input is not a contiguous NumPy array");
+            const py::dtype expected_dtype = dtypeFromString(expected_types[i]);
+            if (!array.dtype().equal(expected_dtype)) {
+                throw std::invalid_argument("ExecuTorch inference input " + std::to_string(i) + " has dtype " +
+                                            py::str(array.dtype()).cast<std::string>() + "; expected " + expected_types[i]);
+            }
+            py::buffer_info info = array.request();
+            keep_alive.push_back(array);
+            buffers.push_back(static_cast<const uint8_t*>(info.ptr));
+            sizes.push_back(static_cast<size_t>(info.size) * static_cast<size_t>(info.itemsize));
+        }
+        std::vector<std::vector<uint8_t>> raw_outputs;
+        {
+            py::gil_scoped_release release_gil;
+            raw_outputs = m_engine->inference(buffers, sizes, graph_index);
+        }
+        const auto shapes = m_engine->getOutputShapes(graph_index);
+        const auto types = m_engine->getOutputDataType(graph_index);
+        std::vector<py::array> outputs;
+        for (size_t i = 0; i < raw_outputs.size(); ++i) {
+            const py::dtype dtype = dtypeFromString(i < types.size() ? types[i] : "uint8");
+            std::vector<py::ssize_t> shape;
+            if (i < shapes.size()) {
+                for (const auto dim : shapes[i]) shape.push_back(static_cast<py::ssize_t>(dim));
+            } else {
+                shape.push_back(static_cast<py::ssize_t>(raw_outputs[i].size() / static_cast<size_t>(dtype.itemsize())));
+            }
+            py::array output(dtype, shape);
+            if (raw_outputs[i].size() != static_cast<size_t>(output.nbytes())) {
+                throw std::runtime_error("ExecuTorch output byte size does not match static tensor metadata");
+            }
+            std::memcpy(output.mutable_data(), raw_outputs[i].data(), raw_outputs[i].size());
+            outputs.push_back(std::move(output));
+        }
+        return outputs;
+    }
+
+    std::vector<std::vector<size_t>> getInputShapes(size_t graph_index = 0) const { return m_engine->getInputShapes(graph_index); }
+    std::vector<std::vector<size_t>> getOutputShapes(size_t graph_index = 0) const { return m_engine->getOutputShapes(graph_index); }
+    std::vector<std::string> getInputDataType(size_t graph_index = 0) const { return m_engine->getInputDataType(graph_index); }
+    std::vector<std::string> getOutputDataType(size_t graph_index = 0) const { return m_engine->getOutputDataType(graph_index); }
+    std::vector<std::string> getInputName(size_t graph_index = 0) const { return m_engine->getInputName(graph_index); }
+    std::vector<std::string> getOutputName(size_t graph_index = 0) const { return m_engine->getOutputName(graph_index); }
+    std::string getGraphName(size_t graph_index = 0) const { return m_engine->getGraphName(graph_index); }
+    uint64_t getProfilingEvent(uint32_t event_type) const { return m_engine->getProfilingEvent(event_type); }
+    std::string getProviderMode() const { return m_engine->getProviderMode(); }
+    void release() noexcept { if (m_engine) m_engine->release(); }
+
+private:
+    std::string m_model_name;
+    std::unique_ptr<qnn::tools::qnn_app::ExecuTorchInferenceEngine> m_engine;
+};
+#endif
+
 class QNNContext {
 public:
     std::string m_model_name;
     std::string m_proc_name;
-    std::vector<LoraAdapter> m_lora_adapters;  
+    std::vector<LoraAdapter> m_lora_adapters;
 
-    QNNContext(const std::string& model_name, const std::string& model_path, const std::string& backend_lib_path, const std::string& system_lib_path, 
+    QNNContext(const std::string& model_name, const std::string& model_path, const std::string& backend_lib_path, const std::string& system_lib_path,
                bool async = false, const std::string& input_data_type="float", const std::string& output_data_type="float", uint32_t deviceID=0, std::string coreIdsStr="", const std::vector<std::string>& enable_graphs={});
 
-    QNNContext(const std::string& model_name, const std::string& model_path, const std::string& backend_lib_path, const std::string& system_lib_path, const std::vector<LoraAdapter>& lora_adapters, 
+    QNNContext(const std::string& model_name, const std::string& model_path, const std::string& backend_lib_path, const std::string& system_lib_path, const std::vector<LoraAdapter>& lora_adapters,
                bool async = false, const std::string& input_data_type="float", const std::string& output_data_type="float", uint32_t deviceID=0, std::string coreIdsStr="", const std::vector<std::string>& enable_graphs={});
 
-    QNNContext(const std::string& model_name, const std::string& proc_name, const std::string& model_path, const std::string& backend_lib_path, const std::string& system_lib_path, 
+    QNNContext(const std::string& model_name, const std::string& proc_name, const std::string& model_path, const std::string& backend_lib_path, const std::string& system_lib_path,
                bool async = false, const std::string& input_data_type="float", const std::string& output_data_type="float", uint32_t deviceID=0, std::string coreIdsStr="");
-    
+
     std::vector<py::array> Inference(const std::vector<py::array>& input, const std::string& perf_profile = "default", size_t graphIndex = 0, const std::string& input_data_type="float", const std::string& output_data_type="float");
     std::vector<py::array> Inference(const ShareMemory& share_memory, const std::vector<py::array>& input, const std::string& perf_profile = "default", size_t graphIndex = 0, const std::string& input_data_type="float", const std::string& output_data_type="float");
 
