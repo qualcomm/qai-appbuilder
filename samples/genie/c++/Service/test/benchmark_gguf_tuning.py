@@ -58,10 +58,23 @@ from test_builder_agent_tasks import RepetitionWatchdog  # noqa: E402
 JudgeFn = Callable[[str], Tuple[bool, str]]
 
 
+# thinking model（如 qwen3.8-27b-q4_0）的流式输出里，<think>...</think> 推理块会和
+# 最终答案一起进入 full_text；该块天然会复述/引用 prompt 原文（含待翻译的中文、
+# 题目要求的字数等），所有面向“最终答案”的判定规则都必须先剥离它，否则会对内容
+# 检测（CJK/长度/关键词/数值）产生系统性误判——与最终答案本身是否正确无关。
+# 剥离要求闭合标签（dotall 跨行匹配）；若 </think> 还没出现（如被截断的预览文本），
+# 保留原文不剥离，因为不能确定“正文”从哪里开始，强行剥离到末尾可能把真正的正文一起吃掉。
+_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
+
+def _strip_think_block(text: str) -> str:
+    return _THINK_BLOCK_RE.sub("", text).strip()
+
+
 def _judge_length_range(lo: int, hi: int) -> JudgeFn:
     def _f(text: str):
-        n = len(text)
-        return lo <= n <= hi, f"length={n} (期望 {lo}-{hi})"
+        n = len(_strip_think_block(text))
+        return lo <= n <= hi, f"length={n} (期望 {lo}-{hi}, 已剥离think块)"
     return _f
 
 
@@ -69,7 +82,8 @@ def _judge_regex_all(patterns: List[str]) -> JudgeFn:
     compiled = [re.compile(p) for p in patterns]
 
     def _f(text: str):
-        missing = [p.pattern for p in compiled if not p.search(text)]
+        body = _strip_think_block(text)
+        missing = [p.pattern for p in compiled if not p.search(body)]
         return (not missing), (f"missing_patterns={missing}" if missing else "全部命中")
     return _f
 
@@ -79,8 +93,9 @@ _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 
 def _judge_english_translation(keywords: List[str]) -> JudgeFn:
     def _f(text: str):
-        has_cjk = bool(_CJK_RE.search(text))
-        lower = text.lower()
+        body = _strip_think_block(text)
+        has_cjk = bool(_CJK_RE.search(body))
+        lower = body.lower()
         missing = [k for k in keywords if k.lower() not in lower]
         ok = (not has_cjk) and (not missing)
         return ok, f"has_cjk={has_cjk}, missing_keywords={missing}"
@@ -89,7 +104,8 @@ def _judge_english_translation(keywords: List[str]) -> JudgeFn:
 
 def _judge_integer_equals(expected: int) -> JudgeFn:
     def _f(text: str):
-        nums = re.findall(r"-?\d+", text)
+        body = _strip_think_block(text)
+        nums = re.findall(r"-?\d+", body)
         ok = str(expected) in nums
         return ok, f"found_integers={nums}, expected={expected}"
     return _f
@@ -300,7 +316,7 @@ class ModelConfigEditor:
 
     def _load_base(self) -> dict:
         src = self.backup_path if self.backup_path.exists() else self.config_path
-        with open(src, "r", encoding="utf-8") as f:
+        with open(src, "r", encoding="utf-8-sig") as f:
             return json.load(f)
 
     def apply(self, context_size: Optional[int] = None, device: Optional[str] = None,
