@@ -24,6 +24,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _soc_targets import DEFAULT_HTP_VERSION, HTP_VERSIONS, host_stub_name  # noqa: E402
+
 
 # ---------------------------------------------------------------------------
 # Platform guard
@@ -53,11 +56,14 @@ _HTP_RUNTIME_LIBS = [
     "libQnnHtpOptraceProfilingReader.so",
 ]
 
-# Stub libs vary by SoC version; we probe all known versions and push what exists.
+# Stub libs vary by SoC version; we probe every known version and push what
+# exists. Derived from _soc_targets.HTP_VERSIONS (single source of truth) --
+# the old hardcoded list said "all known versions" but only covered v73/v79/v81,
+# silently skipping v68/v69/v75 devices.
 _HTP_STUB_VARIANTS = [
-    ("libQnnHtpV73Stub.so", "libQnnHtpV73CalculatorStub.so"),
-    ("libQnnHtpV79Stub.so", "libQnnHtpV79CalculatorStub.so"),
-    ("libQnnHtpV81Stub.so", "libQnnHtpV81CalculatorStub.so"),
+    (host_stub_name(_v, is_windows=False),
+     host_stub_name(_v, is_windows=False).replace("Stub.so", "CalculatorStub.so"))
+    for _v in HTP_VERSIONS
 ]
 
 _CPU_LIBS = ["libQnnCpu.so"]
@@ -569,7 +575,10 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Target device OS: 'android' → aarch64-android, 'linux' → aarch64-oe-linux-gcc11.2 (default: android)")
     p.add_argument("--target_arch", default=None,
                    help="Override SDK arch dir name under sdk/lib/ and sdk/bin/ (default: derived from --device_os)")
-    p.add_argument("--dsp_version", default="v73", help="DSP/hexagon version, e.g. v73, v79, v81 (default: v73)")
+    p.add_argument("--dsp_version", default=DEFAULT_HTP_VERSION,
+                   choices=list(HTP_VERSIONS),
+                   help="DSP/hexagon version (default: " + DEFAULT_HTP_VERSION
+                        + "). Legal values from _soc_targets.HTP_VERSIONS.")
     p.add_argument("--device_id", default=None, help="ADB device serial (optional if only one device)")
     p.add_argument("--adb_host", default=None, metavar="HOST", help="ADB server host for -H flag (optional)")
     p.add_argument("--qnn_net_run", default=None, dest="qnn_net_run_path", help="Override qnn-net-run path on device")

@@ -76,7 +76,11 @@ class InferenceSession:
     def _detect_host_env(self) -> str:
         candidates = [
             "x86_64-linux-clang",
-            "aarch64-linux-gcc",
+            # NOT "aarch64-linux-gcc": that directory exists in NO QAIRT SDK
+            # (it never matched, silently falling through to the Windows
+            # entry on ARM64 Linux). The real aarch64 Linux dir shipping host
+            # tools (qnn-net-run etc.) is aarch64-oe-linux-gcc11.2.
+            "aarch64-oe-linux-gcc11.2",
             "x86_64-windows-msvc",
         ]
         for host_env in candidates:
@@ -205,26 +209,82 @@ class InferenceSession:
         return input_list
 
     def _run_snpe(self, input_list: str, workdir: str):
-        cmd = [
+        cmd_base = [
             self._snpe_net_run_path(),
             "--container",
             self.backend_model,
             "--input_list",
             input_list,
-            "--output_dir",
-            workdir,
         ]
         runtime = self.sess_options.qnn_runtime.upper()
         if runtime == "CPU":
             pass
         elif runtime == "HTP":
-            cmd.append("--use_dsp")
+            cmd_base.append("--use_dsp")
+
+        # ── Pass 1 (common case): single run, --output_dir only ────────────
+        cmd = cmd_base + ["--output_dir", workdir]
         try:
             subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         except subprocess.CalledProcessError as exc:
             raise RuntimeError(
                 f"snpe-net-run failed (exit={exc.returncode}). stderr:\\n{exc.stderr}"
             ) from exc
+
+        if len(self.output_names) <= 1 or self._outputs_are_complete(workdir):
+            return
+
+        # ── Pass 2 (rescue, rare): per-output runs ──────────────────────────
+        failures: List[str] = []
+        for idx, out_name in enumerate(self.output_names):
+            out_dir = os.path.join(workdir, f"snpe_out_{idx}")
+            cmd = cmd_base + ["--output_dir", out_dir, "--set_output_tensors", out_name]
+            try:
+                subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            except subprocess.CalledProcessError as exc:
+                failures.append(out_name)
+                print(
+                    f"[WARNING] snpe-net-run --set_output_tensors '{out_name}' failed "
+                    f"(exit={exc.returncode}); continuing with the remaining outputs. "
+                    f"stderr:\n{exc.stderr}"
+                )
+
+        if self._outputs_are_complete(workdir):
+            return
+
+        found = sorted(self._collect_raw_by_stem(workdir))
+        raise RuntimeError(
+            f"snpe-net-run produced only {len(found)} output tensor(s) {found} for the "
+            f"{len(self.output_names)} expected outputs {list(self.output_names)}."
+            + (f" Per-output rescue runs failed for: {failures}." if failures else "")
+            + " Most likely cause: the expected names are ONNX graph names, while"
+            " --set_output_tensors needs the DLC-side names that the converter"
+            " sanitizes (e.g. '/model/head/Conv_output_0' ->"
+            " '_model_head_Conv_output_0'). Inspect the container with"
+            " snpe-dlc-info / qairt-dlc-info and put the real DLC output names in the"
+            " 'output:' key of the model YAML (or point QAI_IO_CONFIG at such a file)."
+        )
+
+    def _collect_raw_by_stem(self, workdir: str) -> Dict[str, Path]:
+        """Map raw-output stem -> file across every net-run result directory.
+
+        Pass 1 writes directly under ``workdir``; each Pass-2 rescue run
+        writes under its own ``workdir/snpe_out_{idx}`` subdirectory. The
+        first occurrence of a given stem wins (Pass 1's output, when
+        present, is preferred over a rescue re-run of the same tensor).
+        """
+        by_stem: Dict[str, Path] = {}
+        for root in [Path(workdir), *sorted(Path(workdir).glob("snpe_out_*"))]:
+            result_dirs = sorted(root.glob("Result_*"))
+            if not result_dirs:
+                continue
+            for path in sorted(result_dirs[0].glob("*.raw")):
+                by_stem.setdefault(path.stem, path)
+        return by_stem
+
+    def _outputs_are_complete(self, workdir: str) -> bool:
+        """True when the raw files on disk can already satisfy every output."""
+        return len(self._collect_raw_by_stem(workdir)) >= len(self.output_names)
 
     def _run_qnn(self, input_list: str, workdir: str):
         is_context = self.backend_model.endswith(".bin")
@@ -248,23 +308,21 @@ class InferenceSession:
             ) from exc
 
     def _load_outputs(self, workdir: str) -> List[np.ndarray]:
-        result_dirs = sorted(Path(workdir).glob("Result_*"))
-        if not result_dirs:
+        roots = [Path(workdir), *sorted(Path(workdir).glob("snpe_out_*"))]
+        if not any(next(root.glob("Result_*"), None) is not None for root in roots):
             raise RuntimeError("No Result_* output directory produced by net-run")
 
-        raw_files = sorted(result_dirs[0].glob("*.raw"))
-        if not raw_files:
+        by_stem = self._collect_raw_by_stem(workdir)
+        if not by_stem:
             raise RuntimeError("No .raw output files produced by net-run")
 
         outputs: List[np.ndarray] = []
-        by_stem = {path.stem: path for path in raw_files}
-
         ordered_files: List[Path] = []
         for name in self.output_names:
             if name in by_stem:
                 ordered_files.append(by_stem[name])
         if len(ordered_files) != len(self.output_names):
-            ordered_files = raw_files
+            ordered_files = list(by_stem.values())
 
         for idx, raw_path in enumerate(ordered_files):
             data = np.fromfile(raw_path, dtype=np.float32)

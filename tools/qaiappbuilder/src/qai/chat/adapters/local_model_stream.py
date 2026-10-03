@@ -502,6 +502,12 @@ class LocalModelStreamAdapter:
             # filter fired, append a user-facing notice so the user knows the
             # reply was cut off (and how to recover). A normal "stop" / empty
             # reason emits nothing extra.
+            # Auto-continuation seam (streaming.py::_on_round_end /
+            # _drain_main_stream): tag the terminal END so the
+            # orchestration layer can detect a plain-text length-truncation
+            # and reopen one more round with a continuation nudge instead
+            # of ending the turn. ``reason`` stays ``"completed"``.
+            plain_text_length_truncated = False
             if last_finish_reason == "length":
                 sequence += 1
                 yield StreamFrame.chunk(
@@ -509,6 +515,7 @@ class LocalModelStreamAdapter:
                     sequence=sequence,
                     text=make_truncation_notice(),
                 )
+                plain_text_length_truncated = True
             elif last_finish_reason == "content_filter":
                 sequence += 1
                 yield StreamFrame.chunk(
@@ -521,6 +528,9 @@ class LocalModelStreamAdapter:
             yield StreamFrame.end(
                 frame_id=self._next_frame_id("end"),
                 sequence=sequence,
+                extra=(
+                    {"truncated": True} if plain_text_length_truncated else None
+                ),
                 reason="completed",
             )
             return

@@ -58,6 +58,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from qai.platform.package_mutation import PackageMutationLock, classify_pip_error
+
 logger = logging.getLogger("qai.app_builder.dep_checker")
 
 __all__ = [
@@ -161,6 +163,7 @@ class DynamicPackDepChecker:
         "_enabled",
         "_install_lock",
         "_last_check_time",
+        "_package_mutation_lock",
         "_python_exe",
         "_status",
         "_uv_exe",
@@ -172,6 +175,7 @@ class DynamicPackDepChecker:
         python_exe: Path,
         uv_exe: Path | None = None,
         enabled: bool = True,
+        package_mutation_lock: PackageMutationLock | None = None,
     ) -> None:
         if not isinstance(python_exe, Path):
             raise TypeError(
@@ -184,6 +188,7 @@ class DynamicPackDepChecker:
         self._check_task: asyncio.Task[None] | None = None
         self._install_lock: asyncio.Lock | None = None
         self._last_check_time: float = 0.0
+        self._package_mutation_lock = package_mutation_lock
 
     # ── public API ────────────────────────────────────────────────────
 
@@ -406,85 +411,92 @@ class DynamicPackDepChecker:
     async def _auto_install(self, pack_id: str, missing: list[str]) -> None:
         lock = await self._get_install_lock()
         async with lock:
-            logger.info(
-                "dep_checker: installing deps for pack %r: %s",
-                pack_id,
-                missing,
+            if self._package_mutation_lock is not None:
+                async with self._package_mutation_lock:
+                    await self._auto_install_locked(pack_id, missing)
+            else:
+                await self._auto_install_locked(pack_id, missing)
+
+    async def _auto_install_locked(self, pack_id: str, missing: list[str]) -> None:
+        logger.info(
+            "dep_checker: installing deps for pack %r: %s",
+            pack_id,
+            missing,
+        )
+        # Partition into ``--no-deps`` packages (e.g. openai-whisper, whose
+        # transitive numba/llvmlite have no ARM64 wheel) and the rest, so
+        # each group gets the correct pip invocation. Mirrors the
+        # install-time aggregator (scripts/setup/_pack_deps).
+        no_deps_specs = [
+            s for s in missing
+            if self._normalize_name(self._extract_pkg_name(s)) in _NO_DEPS_PKGS
+        ]
+        normal_specs = [s for s in missing if s not in no_deps_specs]
+
+        try:
+            rc = 0
+            err_msg = ""
+            for specs, use_no_deps in (
+                (no_deps_specs, True),
+                (normal_specs, False),
+            ):
+                if not specs:
+                    continue
+                cmd = self._build_install_cmd(specs, no_deps=use_no_deps)
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr_bytes = await asyncio.wait_for(
+                    proc.communicate(), timeout=300
+                )
+                if proc.returncode != 0:
+                    rc = proc.returncode or 1
+                    err_msg = stderr_bytes.decode(
+                        "utf-8", errors="replace"
+                    )[-500:]
+                    # Stop at the first failing group; remaining groups are
+                    # reflected by the re-probe below.
+                    break
+
+            if rc == 0:
+                self._status[pack_id] = DepStatus(satisfied=True)
+                return
+            err_kind, err_hint = classify_pip_error(err_msg)
+            still_missing = await self._check_imports(missing)
+            self._status[pack_id] = DepStatus(
+                satisfied=len(still_missing) == 0,
+                missing=still_missing,
+                installing=False,
+                error_kind=err_kind,
+                error_hint=err_hint,
+                error_raw=err_msg.strip(),
             )
-            # Partition into ``--no-deps`` packages (e.g. openai-whisper, whose
-            # transitive numba/llvmlite have no ARM64 wheel) and the rest, so
-            # each group gets the correct pip invocation. Mirrors the
-            # install-time aggregator (scripts/setup/_pack_deps).
-            no_deps_specs = [
-                s for s in missing
-                if self._normalize_name(self._extract_pkg_name(s)) in _NO_DEPS_PKGS
-            ]
-            normal_specs = [s for s in missing if s not in no_deps_specs]
-
-            try:
-                rc = 0
-                err_msg = ""
-                for specs, use_no_deps in (
-                    (no_deps_specs, True),
-                    (normal_specs, False),
-                ):
-                    if not specs:
-                        continue
-                    cmd = self._build_install_cmd(specs, no_deps=use_no_deps)
-                    proc = await asyncio.create_subprocess_exec(
-                        *cmd,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                    )
-                    _, stderr_bytes = await asyncio.wait_for(
-                        proc.communicate(), timeout=300
-                    )
-                    if proc.returncode != 0:
-                        rc = proc.returncode or 1
-                        err_msg = stderr_bytes.decode(
-                            "utf-8", errors="replace"
-                        )[-500:]
-                        # Stop at the first failing group; remaining groups are
-                        # reflected by the re-probe below.
-                        break
-
-                if rc == 0:
-                    self._status[pack_id] = DepStatus(satisfied=True)
-                    return
-                err_kind, err_hint = self._classify_pip_error(err_msg)
-                still_missing = await self._check_imports(missing)
-                self._status[pack_id] = DepStatus(
-                    satisfied=len(still_missing) == 0,
-                    missing=still_missing,
-                    installing=False,
-                    error_kind=err_kind,
-                    error_hint=err_hint,
-                    error_raw=err_msg.strip(),
-                )
-            except TimeoutError:
-                self._status[pack_id] = DepStatus(
-                    satisfied=False,
-                    missing=missing,
-                    installing=False,
-                    error_kind="timeout",
-                    error_hint=(
-                        "Dependency install timed out after 5 minutes. "
-                        "Check your network connection and try again."
-                    ),
-                    error_raw="pip install timed out (300s)",
-                )
-            except OSError as exc:
-                self._status[pack_id] = DepStatus(
-                    satisfied=False,
-                    missing=missing,
-                    installing=False,
-                    error_kind="os_error",
-                    error_hint=(
-                        f"Failed to spawn pip process: {exc}. "
-                        "Check that the ARM64 venv is correctly configured."
-                    ),
-                    error_raw=str(exc),
-                )
+        except TimeoutError:
+            self._status[pack_id] = DepStatus(
+                satisfied=False,
+                missing=missing,
+                installing=False,
+                error_kind="timeout",
+                error_hint=(
+                    "Dependency install timed out after 5 minutes. "
+                    "Check your network connection and try again."
+                ),
+                error_raw="pip install timed out (300s)",
+            )
+        except OSError as exc:
+            self._status[pack_id] = DepStatus(
+                satisfied=False,
+                missing=missing,
+                installing=False,
+                error_kind="os_error",
+                error_hint=(
+                    f"Failed to spawn pip process: {exc}. "
+                    "Check that the ARM64 venv is correctly configured."
+                ),
+                error_raw=str(exc),
+            )
 
     def _build_install_cmd(
         self, missing: list[str], *, no_deps: bool = False
@@ -551,71 +563,3 @@ class DynamicPackDepChecker:
     def _normalize_name(name: str) -> str:
         return re.sub(r"[-_.]+", "-", name).strip().lower()
 
-    @staticmethod
-    def _classify_pip_error(stderr: str) -> tuple[str, str]:
-        s = stderr.lower() if stderr else ""
-        if (
-            "invalid peer certificate" in s
-            or "unknownissuer" in s
-            or "ssl: certificate_verify_failed" in s
-            or "self signed certificate" in s
-            or "certificate verify failed" in s
-        ):
-            return (
-                "tls_cert",
-                "TLS certificate verification failed when contacting pypi.org. "
-                "Add your corporate root CA to Python's trust store, or set "
-                "REQUESTS_CA_BUNDLE / SSL_CERT_FILE.",
-            )
-        if (
-            "failed to fetch" in s
-            or "could not fetch" in s
-            or "connection refused" in s
-            or "name or service not known" in s
-            or "temporary failure in name resolution" in s
-            or "network is unreachable" in s
-            or "no route to host" in s
-            or "failed establishing a new connection" in s
-        ):
-            return (
-                "network",
-                "Network connection failed when contacting pypi.org. "
-                "Check internet access and HTTP_PROXY / HTTPS_PROXY settings.",
-            )
-        if (
-            "no matching distribution" in s
-            or "could not find a version" in s
-            or ("no version of" in s and "satisfies" in s)
-        ):
-            return (
-                "no_match",
-                "The required package version could not be found on PyPI for "
-                "this Python interpreter (likely an ARM64 wheel availability "
-                "issue).",
-            )
-        if (
-            "permission denied" in s
-            or "operation not permitted" in s
-            or "[winerror 5]" in s
-        ):
-            return (
-                "permission",
-                "Permission denied while writing to the venv. Close any "
-                "process using the venv and retry.",
-            )
-        if "no space left" in s or "disk full" in s or "[errno 28]" in s:
-            return (
-                "disk_full",
-                "Disk is full. Free up space on the drive containing the "
-                "ARM64 venv and retry.",
-            )
-        if "read timed out" in s or "timeout" in s:
-            return (
-                "timeout",
-                "Pip request timed out. Check your network speed.",
-            )
-        return (
-            "unknown",
-            "Dependency installation failed with an unrecognized error. "
-            "See the raw stderr below for details.",
-        )

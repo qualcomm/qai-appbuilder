@@ -1346,6 +1346,9 @@ def build_chat_services(container: Container) -> ChatServices:
         _provider_lookup = ModelCatalogProviderLookupBridge(
             provider_registry=_provider_registry,
             secret_store=getattr(container, "secret_store", None),
+            local_models=getattr(
+                getattr(container, "model_runtime", None), "list_models_use_case", None
+            ),
         )
     # Local Genie service endpoint provider (V1 ``_stream_local`` parity):
     # resolves ``http://127.0.0.1:<port>/v1`` from the live model_runtime
@@ -1769,6 +1772,7 @@ def build_chat_services(container: Container) -> ChatServices:
             # ``max_rounds=5`` (profile-level override takes precedence).
             max_rounds=0,
             compressor=context_compressor,
+            context_windows=_provider_lookup,
             tool_result_truncator=tool_result_truncator,
             # Differential-checkpoint compaction (V2 enhancement): the sub-agent
             # NEWs its own ``CompactionCheckpointEngine`` internally (ephemeral,
@@ -2502,6 +2506,7 @@ def build_chat_services(container: Container) -> ChatServices:
         context_compressor=context_compressor,
         prompt_snapshot_store=prompt_snapshot_store,
         provider_cache_registry=provider_cache_registry,
+        context_windows=_provider_lookup,
         budget_tracker=enforcement_tracker,
         budget_raise_pct=int(
             getattr(chat_settings, "chat_budget_raise_pct", 20)
@@ -3119,6 +3124,7 @@ def build_chat_services(container: Container) -> ChatServices:
         force_compact_chat_use_case=ForceCompactChatUseCase(
             conversations=conversations,
             compaction_engine=stream_chat_use_case.compaction_engine,
+            context_windows=_provider_lookup,
         ),
         compaction_checkpoint_store=compaction_checkpoint_store,
         # Same reader the streaming gate uses, so the advertised tool set and

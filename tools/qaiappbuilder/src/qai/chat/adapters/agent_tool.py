@@ -58,6 +58,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from qai.chat.adapters.compaction_journal import CompactionJournal
+    from qai.chat.application.ports import ModelContextWindowPort
 from qai.chat.application.ports import (
     BudgetTrackerPort,
     ContextCompressionPort,
@@ -135,6 +136,7 @@ from qai.chat.application.use_cases.tool_advertise import (
 from qai.chat.domain.content import MessageContent, MessageRole
 from qai.chat.domain.agent_profile import AgentProfile, GENERAL, resolve_profile
 from qai.chat.domain.events import SubAgentSessionTerminated
+from qai.chat.domain.errors import MissingModelContextLengthError
 from qai.chat.domain.ids import (
     ConversationId,
     MessageId,
@@ -606,6 +608,7 @@ class AgentToolHandler:
         "_compaction_engine",
         "_compress_threshold_ratio",
         "_compressor",
+        "_context_windows",
         "_fallback_tool_output_max_chars",
         "_frame_stall_budget_s",
         "_event_bus",
@@ -706,10 +709,17 @@ class AgentToolHandler:
         # agent-finishes wakeup will not fire.  Wired at
         # ``_chat_di.py`` from ``container.events.bus``.
         event_bus: "Any | None" = None,
+        # Same resolver the main agent uses for the model's real context
+        # window (``streaming.py``'s ``_context_windows``); wired here so a
+        # sub-agent's budget resolution never diverges from the main
+        # agent's. ``None`` (legacy / unit stubs) falls back to the static
+        # family-table guess, byte-for-byte the prior behaviour.
+        context_windows: "ModelContextWindowPort | None" = None,
     ) -> None:
         self._llm = llm
         self._tool_executor = tool_executor
         self._max_rounds = max_rounds
+        self._context_windows = context_windows
         # Unified spawn-path recursion ceiling (alpha step). ``iter_events``
         # tracks a ``spawn_depth`` (1 = a first-level sub-agent spawned by the
         # main agent, 2 = grand, 3 = great-grand, …) and refuses to spawn once
@@ -873,6 +883,7 @@ class AgentToolHandler:
             compressor=compressor,
             truncator=tool_result_truncator,
             compress_threshold_ratio=self._compress_threshold_ratio,
+            context_windows=context_windows,
         )
         # Differential-checkpoint compaction engine (V2 enhancement —
         # BYTE-FOR-BYTE the SAME algorithm the MAIN agent uses). The sub-agent
@@ -2673,10 +2684,22 @@ class AgentToolHandler:
             if session is not None and session.model_id is not None
             else model_hint
         )
-        _ctx_model_id = (_budget_model_raw or "").removeprefix(
-            _LOCAL_MODEL_HINT_PREFIX
-        ) or "__unknown__"
-        _context_limit = get_context_limit(_ctx_model_id)
+        _context_limit: int | None = None
+        if _budget_model_raw and self._context_windows is not None:
+            try:
+                _context_limit = await self._context_windows.context_window(
+                    _budget_model_raw, None,
+                )
+            except MissingModelContextLengthError:
+                # Sub-agent budget resolution degrades to the static table
+                # rather than aborting a background run — unlike the main
+                # turn, there is no clean error-frame UX here yet.
+                _context_limit = None
+        if _context_limit is None:
+            _ctx_model_id = (_budget_model_raw or "").removeprefix(
+                _LOCAL_MODEL_HINT_PREFIX
+            ) or "__unknown__"
+            _context_limit = get_context_limit(_ctx_model_id)
 
         def _eff_prompt_from(usage: dict[str, Any] | None) -> int | None:
             # Provider-corrected effective wire size (实发): Claude/Anthropic

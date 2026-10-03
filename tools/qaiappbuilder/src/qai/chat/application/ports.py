@@ -2082,6 +2082,17 @@ class ModelResolverPort(Protocol):
         ...
 
 
+@runtime_checkable
+class ModelContextWindowPort(Protocol):
+    """Resolve the selected model's configured positive context window."""
+
+    async def context_window(
+        self, model_id: str, provider: str | None = None,
+    ) -> int:
+        """Return tokens or raise a chat domain error when unavailable."""
+        ...
+
+
 # ---------------------------------------------------------------------------
 # Provider endpoint lookup (cross-context boundary; block 2 routing fix)
 # ---------------------------------------------------------------------------
@@ -2893,6 +2904,7 @@ __all__ = [
     # A4 — model resolution
     "ModelResolverPort",
     "ResolvedModel",
+    "ModelContextWindowPort",
     # block 2 — provider-aware routing
     "ProviderConfigLookupPort",
     "ProviderEndpoint",

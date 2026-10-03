@@ -41,6 +41,7 @@ from qai.chat.application.use_cases._streaming_helpers import (
 from qai.platform.logging import get_logger
 
 if TYPE_CHECKING:  # pragma: no cover
+    from qai.chat.application.ports import ModelContextWindowPort
     from qai.chat.application.use_cases._compaction_engine import (
         CompactionCheckpointEngine,
     )
@@ -106,9 +107,11 @@ class ForceCompactChatUseCase:
         *,
         conversations: ConversationRepositoryPort,
         compaction_engine: "CompactionCheckpointEngine",
+        context_windows: "ModelContextWindowPort | None" = None,
     ) -> None:
         self._conversations = conversations
         self._compaction_engine = compaction_engine
+        self._context_windows = context_windows
 
     async def execute(
         self, request: ForceCompactChatInput,
@@ -119,7 +122,12 @@ class ForceCompactChatUseCase:
             )
         budget = request.budget_tokens
         if request.model_id:
-            budget = get_context_limit(request.model_id)
+            if self._context_windows is not None:
+                budget = await self._context_windows.context_window(
+                    request.model_id, None,
+                )
+            else:
+                budget = get_context_limit(request.model_id)
 
         conv = await self._conversations.get(request.conversation_id)
         raw_messages = getattr(conv, "messages", None) or ()

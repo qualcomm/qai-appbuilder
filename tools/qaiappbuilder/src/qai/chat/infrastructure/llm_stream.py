@@ -2001,6 +2001,13 @@ class HttpOpenAICompatibleLLMStream:
         * emit a single terminal END frame carrying the final usage.
         """
         emitted_notice = False
+        # Auto-continuation seam (streaming.py::_on_round_end /
+        # _drain_main_stream): tag the terminal END so the orchestration
+        # layer can detect a plain-text length-truncation and reopen one
+        # more round with a continuation nudge instead of ending the turn.
+        # ``reason`` stays ``"completed"`` — see ``StreamFrame.end``'s
+        # docstring for the tail-append convention.
+        plain_text_length_truncated = False
         if accumulated_tool_calls:
             if last_finish_reason == "length":
                 # Generation truncated mid-tool-call: arguments are
@@ -2051,6 +2058,7 @@ class HttpOpenAICompatibleLLMStream:
                 )
                 sequence += 1
                 emitted_notice = True
+                plain_text_length_truncated = True
             elif last_finish_reason == "content_filter":
                 yield StreamFrame.chunk(
                     frame_id=self._ids.new_id(),
@@ -2117,6 +2125,7 @@ class HttpOpenAICompatibleLLMStream:
             sequence=sequence,
             reason="completed",
             usage=usage,
+            extra={"truncated": True} if plain_text_length_truncated else None,
         )
 
     def _maybe_estimate_usage(

@@ -317,7 +317,16 @@ if [[ -d "$REPO_ROOT/data/secrets" ]]; then
   chmod 700 "$REPO_ROOT/data/secrets"
   info "  data/secrets permissions set to 700"
 fi
+
 # ---------------------------------------------------------------------------
+# Steps 10b/11/11b/11c/11d — QAIRT SDK install + config + deps
+# ---------------------------------------------------------------------------
+# QAIRT SDK has no macOS build (its "soc"/arch validity markers are only
+# x86_64-windows-msvc / aarch64-windows-msvc / x86_64-linux-clang /
+# aarch64-oe-linux-gcc11.2 -- never darwin), so model conversion / on-device
+# HTP inference are Windows/Linux-only. Installing it on macOS would just
+# download ~2GB of binaries nothing on this host can run.
+if [[ "$OS_TYPE" != "darwin" ]]; then
 # Step 10b — install QAIRT SDK
 # ---------------------------------------------------------------------------
 # The model-builder tools below require real SDK binaries.  Generating
@@ -427,6 +436,10 @@ else
   warn "python_x64_venv not executable ('$_VENV_X64_PYTHON') — skipping Step 11d"
 fi
 fi  # end: skip Step 11d on linux/aarch64
+else
+  info "Step 10b/11/11b/11c/11d: skipped (macOS has no QAIRT SDK build;"
+  info "  model conversion / on-device HTP inference are Windows/Linux-only)"
+fi  # end: skip Steps 10b-11d on macOS
 
 # ---------------------------------------------------------------------------
 # Step 11e — extra Python packages (onnx / onnxruntime / onnxsim, pinned)
