@@ -63,9 +63,12 @@ from typing import TYPE_CHECKING, Any
 from qai.platform.logging import get_logger
 
 from qai.chat.application.ports import (
+    ModelContextWindowPort,
     ProviderConfigLookupPort,
     ProviderEndpoint,
 )
+from qai.chat.domain.errors import MissingModelContextLengthError
+from qai.platform.errors import ValidationError
 
 if TYPE_CHECKING:  # pragma: no cover
     from qai.platform.persistence.secrets import SecretStore
@@ -124,7 +127,7 @@ def _resolve_service_jwt() -> str | None:
 
 
 
-class ModelCatalogProviderLookupBridge(ProviderConfigLookupPort):
+class ModelCatalogProviderLookupBridge(ProviderConfigLookupPort, ModelContextWindowPort):
     """Resolve a model id to its provider endpoint via model_catalog + secrets.
 
     Duck-typed inputs keep the bridge free of a hard ``qai.model_catalog``
@@ -136,18 +139,22 @@ class ModelCatalogProviderLookupBridge(ProviderConfigLookupPort):
     * ``secret_store`` — the platform :class:`SecretStore` (``get`` /
       ``exists``).  Optional: when ``None`` the bridge still routes by
       ``base_url`` but always returns ``api_key=None``.
+    * ``local_models`` — optional model-runtime list-models use case used
+      for ``local::`` metadata lookup by :meth:`context_window`.
     """
 
-    __slots__ = ("_provider_registry", "_secret_store")
+    __slots__ = ("_provider_registry", "_secret_store", "_local_models")
 
     def __init__(
         self,
         *,
         provider_registry: Any,
         secret_store: "SecretStore | None" = None,
+        local_models: Any = None,
     ) -> None:
         self._provider_registry = provider_registry
         self._secret_store = secret_store
+        self._local_models = local_models
 
     async def lookup_for_model(
         self, model_id: str
@@ -194,6 +201,65 @@ class ModelCatalogProviderLookupBridge(ProviderConfigLookupPort):
             )
         return None
 
+    async def context_window(
+        self, model_id: str, provider: str | None = None,
+    ) -> int:
+        """Return the exact configured model context length."""
+        if model_id.startswith("local::"):
+            if self._local_models is None:
+                raise MissingModelContextLengthError(model_id)
+            bare_id = model_id.removeprefix("local::")
+            try:
+                models = await self._local_models.execute()
+            except Exception as exc:
+                raise MissingModelContextLengthError(model_id) from exc
+            for model in models or ():
+                if getattr(model, "name", None) != bare_id:
+                    continue
+                value = getattr(model, "context_length", None)
+                if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                    return value
+                raise MissingModelContextLengthError(model_id)
+            raise MissingModelContextLengthError(model_id)
+        if self._provider_registry is None:
+            raise MissingModelContextLengthError(model_id)
+        try:
+            rows = await self._provider_registry.list_provider_configs()
+        except Exception as exc:
+            raise MissingModelContextLengthError(model_id) from exc
+
+        wanted_provider = (provider or "").strip()
+        matches: list[tuple[str, object]] = []
+        for row in rows or ():
+            if not isinstance(row, dict):
+                continue
+            provider_id = row.get("provider_id")
+            if not isinstance(provider_id, str):
+                continue
+            if wanted_provider and provider_id != wanted_provider:
+                continue
+            config = row.get("config")
+            if not isinstance(config, dict):
+                continue
+            for raw in config.get("models") or ():
+                if isinstance(raw, dict) and raw.get("model_id") == model_id:
+                    matches.append((provider_id, raw.get("context_length")))
+
+        if not wanted_provider and len(matches) > 1:
+            providers = ", ".join(provider_id for provider_id, _ in matches)
+            raise ValidationError(
+                "chat.model_provider_ambiguous",
+                f"Model {model_id!r} is configured by multiple providers "
+                f"({providers}); specify a provider.",
+                field_errors={"provider": ["Select one of the matching providers."]},
+            )
+        if len(matches) != 1:
+            raise MissingModelContextLengthError(model_id)
+        value = matches[0][1]
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return value
+        raise MissingModelContextLengthError(model_id)
+
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
@@ -206,6 +272,16 @@ class ModelCatalogProviderLookupBridge(ProviderConfigLookupPort):
             if isinstance(raw, dict) and raw.get("model_id") == model_id:
                 return True
         return False
+
+    @staticmethod
+    def _context_length_for(config: dict[str, Any], model_id: str) -> int | None:
+        for raw in config.get("models") or ():
+            if isinstance(raw, dict) and raw.get("model_id") == model_id:
+                value = raw.get("context_length")
+                if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                    return value
+                return None
+        return None
 
     @staticmethod
     def _api_model_id_for(config: dict[str, Any], model_id: str) -> str | None:

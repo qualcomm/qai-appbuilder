@@ -39,6 +39,7 @@ route layer never touches the host directly — it goes through the
 from __future__ import annotations
 
 from .host import BootstrapSpec, StickyWorkerHost, StickyWorkerSpawnError
+from .lifecycle import StickyWorkerLifecycle
 from .models import LoadedModelEntry, LoadModelRequest, RunRequest, WorkerEvent
 from .protocol import BootstrapProtocol, ProtocolError, ProtocolFrame
 
@@ -51,6 +52,7 @@ __all__ = [
     "ProtocolFrame",
     "RunRequest",
     "StickyWorkerHost",
+    "StickyWorkerLifecycle",
     "StickyWorkerSpawnError",
     "WorkerEvent",
 ]

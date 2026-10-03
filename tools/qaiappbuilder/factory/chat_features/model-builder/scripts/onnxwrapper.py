@@ -347,6 +347,100 @@ def _dtype_str_from_any(dt: Any) -> str:
     return "float32"
 
 
+# -------------------- ONNX <-> QNN tensor-name mapping --------------------
+def _onnx_name_to_qnn(name: str) -> str:
+    """Derive the QNN tensor name for an ONNX tensor name.
+
+    QNN sanitizes ONNX graph tensor names by replacing ``.`` with ``_``
+    (``past_key_values.0.key`` -> ``past_key_values_0_key``). The rule is
+    deterministic, which is exactly what lets us VERIFY a name mapping instead
+    of trusting the order two independent name lists happen to come back in.
+    """
+    return str(name).replace(".", "_")
+
+
+def _index_of(names: List[str], name: str, default: int) -> int:
+    """Index of ``name`` in ``names``, or ``default`` when it is absent."""
+    try:
+        return list(names).index(name)
+    except ValueError:
+        return default
+
+
+def _resolve_onnx_to_qnn_names(
+    onnx_names: List[str],
+    qnn_names: List[str],
+    io_kind: str = "input",
+) -> Dict[str, str]:
+    """Map ONNX (dot-format) tensor names onto QNN (underscore) names BY NAME.
+
+    ``QNNContext.getInputName()`` / ``getOutputName()`` are NOT guaranteed to
+    enumerate tensors in the ONNX graph order, so pairing the ONNX YAML name
+    list against them positionally (``dict(zip(onnx_names, qnn_names))``) can
+    silently bind a tensor to the wrong slot -- the caller feeds
+    ``past_key_values.0.key`` and the backend receives it as
+    ``past_key_values_1_key``. Same-length lists do not prove same order.
+
+    Instead each ONNX name is translated with the deterministic dot->underscore
+    rule and the result is looked up in ``qnn_names``, so the mapping is
+    order-independent.
+
+    Returns:
+        A verified ``{onnx_name: qnn_name}`` bijection, or an EMPTY dict when it
+        cannot be fully verified (an ONNX name has no QNN counterpart, two ONNX
+        names collide on one QNN name, or some QNN tensor is left unclaimed). An
+        empty dict means "no translation": the caller keeps the QNN-native names
+        instead of guessing a positional pairing that may be wrong.
+    """
+    if not onnx_names or not qnn_names:
+        return {}
+
+    qnn_set = set(qnn_names)
+    mapping: Dict[str, str] = {}
+    claimed: set = set()
+    unresolved: List[str] = []
+    collisions: List[str] = []
+
+    for onnx_name in onnx_names:
+        if onnx_name in qnn_set:
+            # Already a QNN-native name (no dots, or QNN kept them verbatim).
+            candidate = onnx_name
+        else:
+            candidate = _onnx_name_to_qnn(onnx_name)
+            if candidate not in qnn_set:
+                unresolved.append(onnx_name)
+                continue
+        if candidate in claimed:
+            collisions.append(onnx_name)
+            continue
+        mapping[onnx_name] = candidate
+        claimed.add(candidate)
+
+    if unresolved:
+        logger.warning(
+            "[QNN] %s name mapping rejected: %s have no QNN counterpart "
+            "(dot->underscore rule failed). QNN %s names: %s. "
+            "Falling back to QNN-native names; no ONNX name translation is applied.",
+            io_kind, unresolved, io_kind, list(qnn_names),
+        )
+        return {}
+    if collisions:
+        logger.warning(
+            "[QNN] %s name mapping rejected: %s collide with another ONNX name on "
+            "the same QNN name. Falling back to QNN-native names.",
+            io_kind, collisions,
+        )
+        return {}
+    if len(claimed) != len(qnn_set):
+        logger.warning(
+            "[QNN] %s name mapping rejected: QNN tensors %s were not claimed by any "
+            "ONNX name. Falling back to QNN-native names.",
+            io_kind, sorted(qnn_set - claimed),
+        )
+        return {}
+    return mapping
+
+
 def _tensor_brief(a: Any) -> str:
     if a is None:
         return "None"
@@ -1544,6 +1638,15 @@ class InferenceSession:
         self._input_names = self._model.getInputName()
         self._output_names = self._model.getOutputName()
 
+        # Expose ONNX dot-format IO names (e.g. past_key_values.0.key) so
+        # ORT-shaped scripts keep working against the QNN backend, which only
+        # reports the sanitized underscore form. run() translates them back.
+        self._input_names_onnx: List[str] = list(self._input_names)
+        self._output_names_onnx: List[str] = list(self._output_names)
+        self._onnx_to_qnn_input: Dict[str, str] = {}
+        self._onnx_to_qnn_output: Dict[str, str] = {}
+        self._bind_onnx_io_names(model_path)
+
         logger.info(f"Loaded model (user arg): {model_path}")
         logger.info(f"Loaded model (resolved): {getattr(self._model, 'model_file_path', '')}")
         logger.info(f"Input names: {self._input_names}")
@@ -1569,6 +1672,78 @@ class InferenceSession:
                 self._perf_active = True
             except Exception:
                 self._perf_active = False
+
+    # ---- ONNX dot-format IO names ----
+    @staticmethod
+    def _yaml_io_names(section: Any) -> List[str]:
+        """Normalize a YAML IO section to a plain name list.
+
+        Accepts both YAML shapes emitted by ``qai_inspect_onnxio.py``:
+        ``input: [a, b]`` (legacy flat list) and
+        ``inputs: [{name: a, ...}, ...]``. Returns ``[]`` for anything else so
+        an unexpected schema degrades to "no ONNX names" instead of garbage.
+        """
+        names: List[str] = []
+        for entry in section or []:
+            if isinstance(entry, dict):
+                n = entry.get("name")
+                if not n:
+                    return []
+                names.append(str(n))
+            elif isinstance(entry, str):
+                names.append(entry)
+            else:
+                return []
+        return names
+
+    def _bind_onnx_io_names(self, model_path: str) -> None:
+        """Resolve ONNX dot-format IO names and their verified QNN mapping.
+
+        Candidate order (first one that fully verifies wins):
+          1. the ONNX-inspected YAML next to the model (``qai_inspect_onnxio.py``
+             writes ``{model_wo_ext}.yaml`` with real ONNX dot names),
+          2. the IO config the wrapper loaded / auto-generated,
+          3. the QNN-native names (no translation at all).
+
+        A candidate is only accepted when every one of its names resolves to a
+        real QNN tensor name via the dot->underscore rule
+        (see ``_resolve_onnx_to_qnn_names``) -- never by list position.
+        """
+        in_candidates: List[List[str]] = []
+        out_candidates: List[List[str]] = []
+
+        onnx_yaml_path = os.path.splitext(model_path)[0] + ".yaml"
+        if os.path.exists(onnx_yaml_path):
+            onnx_yaml: Any = {}
+            try:
+                with open(onnx_yaml_path, "r", encoding="utf-8") as f:
+                    onnx_yaml = yaml.safe_load(f) or {}
+            except Exception as e:
+                logger.warning(f"[QNN] Failed to read ONNX IO names from {onnx_yaml_path}: {e}")
+            if isinstance(onnx_yaml, dict):
+                in_candidates.append(self._yaml_io_names(onnx_yaml.get("input") or onnx_yaml.get("inputs")))
+                out_candidates.append(self._yaml_io_names(onnx_yaml.get("output") or onnx_yaml.get("outputs")))
+
+        io_cfg = getattr(self._model, "io_config", {}) or {}
+        if isinstance(io_cfg, dict):
+            in_candidates.append(self._yaml_io_names(io_cfg.get("input") or io_cfg.get("inputs")))
+            out_candidates.append(self._yaml_io_names(io_cfg.get("output") or io_cfg.get("outputs")))
+
+        for names in in_candidates:
+            mapping = _resolve_onnx_to_qnn_names(names, self._input_names, io_kind="input")
+            if mapping:
+                self._input_names_onnx = list(names)
+                self._onnx_to_qnn_input = mapping
+                break
+        for names in out_candidates:
+            mapping = _resolve_onnx_to_qnn_names(names, self._output_names, io_kind="output")
+            if mapping:
+                self._output_names_onnx = list(names)
+                self._onnx_to_qnn_output = mapping
+                break
+
+        logger.info(f"[QNN] ONNX input names: {self._input_names_onnx}")
+        logger.info(f"[QNN] ONNX output names: {self._output_names_onnx}")
 
     # ---- expected helpers ----
     def _get_expected_shape_by_name(self, name: str):
@@ -1673,9 +1848,32 @@ class InferenceSession:
         return np.ascontiguousarray(a.astype(np.float32, copy=False))
 
     def run(self, output_names: Optional[List[str]], input_feed: Dict[str, np.ndarray], run_options: Optional[Any] = None) -> List[np.ndarray]:
-        # Get ONNX output order from YAML (io_config)
-        yaml_output_names = getattr(self._model, "io_config", {}).get("output", []) or self._output_names
-        
+        # Translate ONNX dot-format feed keys (past_key_values.0.key) to the QNN
+        # underscore names the backend expects. Keys we have no mapping for pass
+        # through unchanged, so a QNN-native feed keeps working either way.
+        # The feed is always copied: the KV-cache path below rewrites entries and
+        # must not mutate the caller's dict.
+        onnx_to_qnn_in = getattr(self, "_onnx_to_qnn_input", {}) or {}
+        input_feed = {onnx_to_qnn_in.get(k, k): v for k, v in input_feed.items()}
+
+        # ONNX output order: prefer the ONNX-inspected YAML (dot format, true
+        # ONNX order), then the autogen IO config, then QNN's internal order.
+        # NOTE: __init__ seeds _output_names_onnx with list(self._output_names),
+        # so the io_config / _output_names fallbacks below only ever fire in the
+        # degenerate case where the backend reports NO outputs at all. Kept as a
+        # cheap guard against that (it would otherwise be an empty result list).
+        onnx_to_qnn_out = getattr(self, "_onnx_to_qnn_output", {}) or {}
+        yaml_output_names = (
+            getattr(self, "_output_names_onnx", None)
+            or (getattr(self._model, "io_config", {}) or {}).get("output")
+            or self._output_names
+        )
+        # out_map below is keyed by QNN names, so translate the requested order.
+        yaml_output_names_qnn = [onnx_to_qnn_out.get(n, n) for n in yaml_output_names]
+        requested_names_qnn = (
+            None if output_names is None else [onnx_to_qnn_out.get(n, n) for n in output_names]
+        )
+
         cfg = getattr(self._model, "io_config", {}) or {}
         per_in = {i.get("name"): i for i in (cfg.get("inputs") or []) if isinstance(i, dict) and i.get("name")}
         
@@ -1756,10 +1954,10 @@ class InferenceSession:
                 # Reorder outputs to match ONNX/YAML order
                 # QnnRunner returns outputs in QNN's internal order, need to reorder
                 out_map = {n: t for n, t in zip(self._output_names, outs)}
-                if output_names is not None:
-                    return [out_map[n] for n in output_names]
+                if requested_names_qnn is not None:
+                    return [out_map[n] for n in requested_names_qnn]
                 else:
-                    return [out_map[n] for n in yaml_output_names]
+                    return [out_map[n] for n in yaml_output_names_qnn]
             except Exception as e:
                 print(f"Profile output saved to: {output_dir}")
                 raise e
@@ -1771,11 +1969,11 @@ class InferenceSession:
         # QNN returns in its own order, we map back to ONNX order
         out_map = {n: t for n, t in zip(self._output_names, outs)}
 
-        if output_names is not None:
-            outs = [out_map[n] for n in output_names]
+        if requested_names_qnn is not None:
+            outs = [out_map[n] for n in requested_names_qnn]
         else:
             # When no specific order requested, use ONNX order from YAML
-            outs = [out_map[n] for n in yaml_output_names]
+            outs = [out_map[n] for n in yaml_output_names_qnn]
         return outs
 
     def get_inputs(self) -> List[TensorInfo]:

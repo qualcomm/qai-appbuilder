@@ -70,6 +70,7 @@ from typing import Any
 
 from qai.chat.application.ports import (
     ContextCompressionPort,
+    ModelContextWindowPort,
     ToolResultTruncationRequest,
     ToolResultTruncatorPort,
 )
@@ -79,6 +80,7 @@ from qai.chat.application._token_estimate_helpers import (
     _tiktoken_encoding_name,
     non_text_content_bytes as _non_text_content_bytes,
 )
+from qai.chat.domain.errors import MissingModelContextLengthError
 from qai.chat.domain.model_profiles import get_context_limit
 from qai.chat.domain.reference_ledger import ReferenceLedger
 from qai.platform.logging import get_logger
@@ -1049,6 +1051,7 @@ async def maybe_compress_wire(
     target_ratio: float = COMPRESS_TARGET_RATIO,
     preserve_tail: int = COMPRESS_PRESERVE_TAIL,
     log_context: dict[str, Any] | None = None,
+    context_windows: ModelContextWindowPort | None = None,
 ) -> list[dict[str, Any]]:
     """Compress the running wire history when it nears the context budget.
 
@@ -1066,7 +1069,16 @@ async def maybe_compress_wire(
         return wire_messages
 
     model_id = (model_hint or "").removeprefix("local::") or "__unknown__"
-    budget = get_context_limit(model_id)
+    budget: int | None = None
+    if model_hint and context_windows is not None:
+        try:
+            budget = await context_windows.context_window(model_hint, None)
+        except MissingModelContextLengthError:
+            # Best-effort function (see docstring): a missing catalog entry
+            # degrades to the static table rather than aborting the turn.
+            budget = None
+    if budget is None:
+        budget = get_context_limit(model_id)
     threshold = int(budget * threshold_ratio)
 
     # Unified口径 with the main-loop trigger: a bytes-based estimate over
