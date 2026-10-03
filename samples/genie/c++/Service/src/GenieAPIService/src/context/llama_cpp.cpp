@@ -927,16 +927,12 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
     const bool speculative_requested = draft_config.present && !draft_config.path.empty();
 
     // 在初始化 llama.cpp 后端之前设置该 OpenCL Adreno 大缓冲区环境变量。该后端只看变量是否存在、
-    // 不看取值。workspace/qwen38-dflash2-x2-90-repro/README.md 105-110 行建议投机解码保持该
-    // 变量 unset——但那条建议是针对 README 自己验证过的基线命令行 `-c 8192`（该配置下最大单个
-    // 分配约 404 MiB，明显低于不设该变量时约 2GB 的地址算术上限）。我们的投机解码路径强制使用
-    // 用户给定的激进值 `-c 32768`（见下方 n_ctx 赋值），是 README 基线的 4 倍；已实测证实：
-    // unset 该变量时，target 模型（27B）在这个更大的上下文尺寸下会在 GPU 与 CPU 两条路径都
-    // 抛出 "bad allocation"（服务日志：GGUFVerify GPU/CPU load failed: bad allocation），说明
-    // 某个随 n_ctx 缩放的单一缓冲区（可能是完整 KV cache 缓冲或注意力计算缓冲）在 32768 上下文
-    // 下已超出该 2GB 上限——必须保持该变量为 "1" 才能在这个上下文尺寸下成功分配，功能正确性优先
-    // 于 README 描述的这一点性能损耗。现有单模型 GGUF 路径（gemma4/gpt-oss-20b 等）本就一直设为
-    // "1"，此处统一为无条件设置，不再区分投机解码分支。
+    // 不看取值。现有单模型 GGUF 路径（gemma4/gpt-oss-20b 等）本就一直设为 "1"，此处统一为无条件
+    // 设置，不再区分投机解码分支。用 llama-completion.exe 对 Qwen3.8-27B 主模型（不含草稿）单独
+    // 验证发现：当前驱动的 OpenCL 编译器拒绝大缓冲区扩展（日志 "large buffer mode is off"），该
+    // 变量在这台机器上实际未生效，-ngl 99 下无论是否设置该变量都稳定复现 "q6_K set_tensor: temp
+    // upload buffer alloc failed" 崩溃，且与 n_ctx 大小无关——这是驱动/ggml-opencl 后端层面的独立
+    // 问题，不属于本次改动范围，细节见同名 llama_cpp.cpp.notes.md，此处维持无条件设置不变。
 #if defined(_WIN32)
     _putenv_s("GGML_OPENCL_ADRENO_USE_LARGE_BUFFER", "1");
 #else
@@ -944,14 +940,18 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
 #endif
     My_Log{} << "[Env] GGML_OPENCL_ADRENO_USE_LARGE_BUFFER=1 set\n";
 
-    // 上下文窗口大小：未配置时使用默认值；声明了 draft_model 的模型强制使用用户给定的激进值
-    // -c 32768，与 -ngld 99（下方 C++ 直接赋值 params.speculative.draft.*）同属一组只在声明了
-    // draft_model 时才生效的硬编码值。
+    // 上下文窗口大小：非投机分支未配置时回退 8192；投机分支优先使用模型自身 config.json 配置值，
+    // 仅在未配置/为 0 时才回退 32768，与 -ngld 99（下方 C++ 直接赋值 params.speculative.draft.*）
+    // 同属一组只在声明了 draft_model 时才生效的硬编码值。
     size_t configured_context_size = model_config_.get_context_size();
-    int n_ctx = configured_context_size > 0 ? static_cast<int>(configured_context_size) : 8192;
+    int n_ctx;
     if (speculative_requested)
     {
-        n_ctx = 32768;
+        n_ctx = configured_context_size > 0 ? static_cast<int>(configured_context_size) : 32768;
+    }
+    else
+    {
+        n_ctx = configured_context_size > 0 ? static_cast<int>(configured_context_size) : 8192;
     }
 
     std::string device = model_config_.get_device();

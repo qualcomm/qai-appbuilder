@@ -639,12 +639,18 @@ struct ModelManager::ModeVerifier
             llama_speculative::DraftModelConfig draft_config = llama_speculative::DraftModelConfig::ParseFrom(j);
             if (draft_config.present)
             {
-                uint64_t total_physical = llama_speculative::GetTotalPhysicalMemoryBytes();
-                if (!llama_speculative::MeetsPhysicalMemoryThreshold(total_physical, llama_speculative::kDraftModelMinPhysicalMemoryBytes))
+                int configured_context_size = config_->get_context_size();
+                uint64_t effective_context_size = configured_context_size > 0
+                        ? static_cast<uint64_t>(configured_context_size) : 32768ULL;
+                uint64_t required = llama_speculative::EstimateSpeculativeMemoryRequirement(
+                        config_->get_model_path(), draft_config.path, effective_context_size);
+                uint64_t available = llama_speculative::GetAvailablePhysicalMemoryBytes();
+                if (available != UINT64_MAX && required > available)
                 {
-                    std::string detail = "insufficient total physical memory for speculative decoding "
-                            "(draft_model) model: required>=" + std::to_string(llama_speculative::kDraftModelMinPhysicalMemoryBytes) +
-                            " bytes, total_physical=" + std::to_string(total_physical) + " bytes";
+                    std::string detail = "insufficient available physical memory for speculative decoding "
+                            "(draft_model) model: required=" + std::to_string(required) +
+                            " bytes, available=" + std::to_string(available) +
+                            " bytes, context_size=" + std::to_string(effective_context_size);
                     My_Log{My_Log::Level::kError} << "[GGUFVerify] " << detail << std::endl;
                     self_->SetLastLoadFailureReason(ModelManager::LoadFailureReason::kInsufficientMemory, detail);
                     return nullptr;
@@ -655,7 +661,9 @@ struct ModelManager::ModeVerifier
                           << ", spec_draft_n_max=" << draft_config.spec_draft_n_max
                           << ", spec_draft_p_min=" << draft_config.spec_draft_p_min
                           << ", required=" << draft_config.required
-                          << ", total_physical_memory_bytes=" << total_physical << std::endl;
+                          << ", context_size=" << effective_context_size
+                          << ", estimated_required_bytes=" << required
+                          << ", available_physical_memory_bytes=" << available << std::endl;
             }
 
             if (requested_device == "cpu")
