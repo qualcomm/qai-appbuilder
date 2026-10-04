@@ -369,6 +369,20 @@ def _append_transcript_entry(transcript_path, turn_label, prompt_text, full_text
         f.write("\n".join(lines))
 
 
+def _append_transcript_summary(transcript_path, title, summary_lines):
+    """在转录 Markdown 文件末尾追加一个独立的小结区块（如 token 生成速度统计），
+    与 _append_transcript_entry() 写逐轮条目同一份文件、同一种追加写法（UTF-8，
+    不截断），确保人工阅读转录文件时能在末尾直接看到任务级聚合结论，不需要
+    再去对照 results.json。"""
+    if not transcript_path:
+        return
+    path = Path(transcript_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [f"## {title}", ""] + list(summary_lines) + ["", "---\n"]
+    with open(path, "a", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?。！？；;])\s+|\n+")
 _CODE_FENCE_RE = re.compile(r"```.*?(```|$)", re.S)
 
@@ -1153,8 +1167,58 @@ def _find_inception_artifacts(workspace_root, task_started_ts):
     return result
 
 
+# ============================================================================
+# Token 生成速度统计（从 _ServiceLogTail 采集到的 GenieAPIService 完整 stdout 中解析）
+# ============================================================================
+# 后端无关行：response_dispatcher.cpp::PrintProfile()（主推理路径）与
+# model_input_builder.h 的摘要推理路径，均在每次查询完成后无条件打印这一行；
+# QNN/GGUF/MNN 三后端的 HandleProfile() 都统一填充同名 token_generation_rate 字段，
+# 格式逐字相同，故一条正则即可覆盖全部后端——这是本次任务实际驱动的 qwen3-8b-8480
+# （QNN 后端）唯一会产生样本的来源。
+_TOKEN_GEN_RATE_RE_GENERIC = re.compile(r"Token Generation Rate:\s*([\d.]+)\s*toks/sec")
+# GGUF/llama.cpp 专属行：llama_cpp.cpp::Impl::Query() 完成时额外打印的内部诊断
+# （含投机解码细节）。与上面那行是两条独立日志，QNN/MNN 后端不会出现它；仅在
+# 本脚本未来被用于驱动 GGUF 模型时才会产生样本，这里一并解析是为了不让该场景
+# 下的统计悄悄留空（llama_cpp.cpp.notes.md 已记录投机模式下 llama_perf_context
+# 的 n_eval 计数口径失真，这条独立行是 GGUF 侧更可靠的真实吞吐来源）。
+_TOKEN_GEN_RATE_RE_LLAMACPP = re.compile(r"\[LLAMACpp\][^\n]*?gen_rate=([\d.]+)\s*tok/s")
+
+
+def _rate_stats(rates):
+    """聚合统计（样本数/平均/最大/最小），round 到 2 位小数。空列表时如实返回
+    sample_count=0 与全 None（不编造 0.0），供调用方判断"本次确实没有采集到速率
+    样本"与"确实采集到了 0.0 tok/s"的区别。"""
+    if not rates:
+        return {"sample_count": 0, "avg_tok_s": None, "min_tok_s": None, "max_tok_s": None}
+    return {
+        "sample_count": len(rates),
+        "avg_tok_s": round(sum(rates) / len(rates), 2),
+        "min_tok_s": round(min(rates), 2),
+        "max_tok_s": round(max(rates), 2),
+    }
+
+
+def _summarize_token_generation_rates(log_text):
+    """从一次任务期间采集到的完整 GenieAPIService stdout 文本中提取全部 token
+    生成速度样本，按来源分组返回聚合统计（见上方两条正则的注释）。两组互不合并
+    （同一条真实查询在 GGUF 投机模式下两边数值口径不同，混在一起会掩盖哪一组
+    更可信），调用方按实际驱动的后端自行判断该看哪一组。"""
+    generic_rates = [float(m.group(1)) for m in _TOKEN_GEN_RATE_RE_GENERIC.finditer(log_text or "")]
+    llamacpp_rates = [float(m.group(1)) for m in _TOKEN_GEN_RATE_RE_LLAMACPP.finditer(log_text or "")]
+    return {
+        "generic_backend_agnostic": _rate_stats(generic_rates),
+        "gguf_llamacpp_specific": _rate_stats(llamacpp_rates),
+    }
+
+
 class _ServiceLogTail:
-    """全程持续消费 Builder `GET /api/service/logs` SSE（GenieAPIService stdout），断线即按已收行数重连。"""
+    """全程持续消费 Builder `GET /api/service/logs` SSE（GenieAPIService stdout），断线即按已收行数重连。
+
+    这是任务结束时统计 token 生成速度（见 _summarize_token_generation_rates()）与
+    持久化完整后端日志（见调用方把 stop() 的返回值写入 <transcript_path>.genie_service.log）
+    的唯一数据来源，不是调试旁路——R7/R8 两轮诊断（见 docstring 顶部的
+    run_inception_precision_compare_task 任务）已经靠这份落盘的 .genie_service.log
+    还原出子代理真实的工具调用序列，证明该机制稳定可用。"""
 
     def __init__(self, csrf_session):
         self.csrf = csrf_session
@@ -1257,7 +1321,15 @@ def run_inception_precision_compare_task(builder, model_name, results, round_num
 
     CONTINUE.md 第199-206行列出的 4 项官方验证点中，②历史持久化（刷新网页）
     与④提示词面板显示是纯前端 UI 行为；本函数走后端 SSE API 驱动，无法无头
-    验证这两项——如实标注在 detail_text 里"本轮未覆盖"，不悄悄跳过不提。"""
+    验证这两项——如实标注在 detail_text 里"本轮未覆盖"，不悄悄跳过不提。
+
+    任务结束时的标准产出（均为稳定主流程，不是调试旁路）：
+      1) <transcript_path> —— 逐轮完整 prompt/生成文本/非常规帧（_append_transcript_entry），
+         文件末尾追加一个 token 生成速度小结区块（_append_transcript_summary）；
+      2) <transcript_path 同名 .genie_service.log> —— 全程持续采集的完整 GenieAPIService
+         stdout（_ServiceLogTail），R7/R8 两轮诊断已验证靠它能还原子代理真实工具调用序列；
+      3) response_data['token_generation_rate'] —— 对 (2) 做正则统计后的聚合结果
+         （见 _summarize_token_generation_rates()），同时写入 results.json 供机器读取。"""
     name = f"AGENT-TASK: inception_precision_compare model={model_name}"
     task_started = time.time()
     task_deadline = task_started + total_deadline_seconds
@@ -1272,6 +1344,7 @@ def run_inception_precision_compare_task(builder, model_name, results, round_num
 
     log_probe = _ServiceLogTail(builder.csrf)
     log_probe.start()
+    task_started_dt_label = datetime.now().isoformat(timespec="seconds")
     prompt = _INCEPTION_PRECISION_COMPARE_PROMPT
     conversation_id = None
     transcript = []
@@ -1364,6 +1437,17 @@ def run_inception_precision_compare_task(builder, model_name, results, round_num
         service_log_path = Path(transcript_path).with_suffix(".genie_service.log")
         service_log_path.write_text(service_log_text, encoding="utf-8")
         transcript.append(f"[service_log] {len(service_log_text)} chars -> {service_log_path}")
+    token_rate_stats = _summarize_token_generation_rates(service_log_text)
+    transcript.append(f"[token_generation_rate] {token_rate_stats}")
+    _append_transcript_summary(
+        transcript_path, "Token 生成速度统计 (Token Generation Rate)",
+        [f"- 任务开始时间: {task_started_dt_label}",
+         f"- generic_backend_agnostic（QNN/GGUF/MNN 通用，本次任务实际驱动的"
+         f"后端应从这组读数）: {token_rate_stats['generic_backend_agnostic']}",
+         f"- gguf_llamacpp_specific（仅 GGUF/llama.cpp 后端会产生样本，QNN 下预期"
+         f"sample_count=0，不代表异常): {token_rate_stats['gguf_llamacpp_specific']}",
+         "- 数据来源: 完整 GenieAPIService stdout（见上文 [service_log] 条目指向的"
+         ".genie_service.log），由 _summarize_token_generation_rates() 正则统计。"])
     elapsed = time.time() - task_started
     ok = bool(artifacts.get("fp16_model_dir") and artifacts.get("w8a8_model_dir")
               and artifacts.get("comparison_statement_hint"))
@@ -1376,6 +1460,7 @@ def run_inception_precision_compare_task(builder, model_name, results, round_num
         f"w8a8_model_dir={artifacts.get('w8a8_model_dir')}; "
         f"fresh_inference_evidence={artifacts.get('fresh_inference_evidence')}; "
         f"comparison_statement_hint={artifacts.get('comparison_statement_hint')}; "
+        f"token_generation_rate={token_rate_stats}; "
         "frontend_only_checks_not_covered=['历史持久化（刷新网页）', '提示词面板显示'] "
         "(CONTINUE.md 第199-206行②④，纯前端行为，本函数走后端API驱动无法无头验证); "
         "transcript=\n" + "\n".join(transcript)
@@ -1388,7 +1473,8 @@ def run_inception_precision_compare_task(builder, model_name, results, round_num
         # （不是"服务端已知缺陷"，是"任务尚未验证通过"），与 model_conversion/tetris 一致。
         response_data={"conversation_id": conversation_id,
                         "blocking_condition_hits": blocking_condition_hits,
-                        "artifacts": {k: (str(v) if v else None) for k, v in artifacts.items()}}))
+                        "artifacts": {k: (str(v) if v else None) for k, v in artifacts.items()},
+                        "token_generation_rate": token_rate_stats}))
     return ok
 
 
@@ -1449,7 +1535,9 @@ def build_arg_parser():
                              "用剩余的全部 total_deadline_seconds 耐心等待，不按 max_turns 切分")
     parser.add_argument("--out_dir", default=None, help="结果输出目录，默认 test_results_agent_tasks/<timestamp>")
     parser.add_argument("--transcript_path", default=None,
-                        help="完整对话转录文件路径（Markdown，未截断），默认 <out_dir>/conversation_transcript_<task>_<timestamp>.md")
+                        help="完整对话转录文件路径（Markdown，未截断），默认 <out_dir>/conversation_transcript_<task>_<timestamp>.md；"
+                             "inception_precision_compare 任务还会在同名 .genie_service.log 落盘完整后端 stdout，"
+                             "并统计 token 生成速度写入该 .md 文件末尾与 results.json（均为标准产出，非调试旁路）")
     return parser
 
 
