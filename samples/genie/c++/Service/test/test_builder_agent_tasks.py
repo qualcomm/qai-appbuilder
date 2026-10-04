@@ -47,6 +47,15 @@ done/error 终止帧即可。多轮 agent 任务里的"多轮"，指的是本脚
         --small_model_path C:\\Users\\HCKTest\\Desktop\\GenieEnv\\Video_Model\\Video\\remote_npu_sanity_matmul.onnx \\
         --out_dir .\\test_results_agent_tasks
 
+    用户指定的 inception_v3 FP16/W8A8 对比验收任务（见 run_inception_precision_compare_task()）：
+    python test_builder_agent_tasks.py --task inception_precision_compare \\
+        --builder_dir ..\\third\\QAIModelBuilder \\
+        --exe_dir ..\\build\\GenieService-win-arm64 \\
+        --models C:\\Users\\HCKTest\\Desktop\\GenieEnv\\models \\
+        --model_name qwen3-8b-8480 \\
+        --total_deadline_seconds 5400 \\
+        --out_dir .\\test_results_agent_tasks
+
 健康判定标准与 test_service.py 一致：failed==ignored 且 crashed==0 为健康；
 退出码严格 failed==0 && crashed==0（复用 test_service._finalize_and_exit()）。
 """
@@ -57,6 +66,7 @@ import py_compile
 import re
 import subprocess
 import sys
+import threading
 import time
 from collections import Counter
 from pathlib import Path
@@ -1053,6 +1063,293 @@ def run_tetris_task(builder, model_name, results, round_num=1,
     return ok
 
 
+_INCEPTION_PRECISION_COMPARE_PROMPT = (
+    "帮我下载原始的 inception_v3 模型，分别转成 FP16 与 W8A8 两种精度的 QNN 模型并进行推理，"
+    "对比两者的差异。测试图片使用项目自带的 samples/images/flower.jpg（相对项目根目录）。"
+    "请一次性自动跑完整个流程，无需中途确认。"
+)
+
+# 命中疑似 Blocking Condition（模型主动停下来问询，而不是正常推进/完成）时才追加的
+# 唯一一轮"最简中性"继续指令——不代替用户做决策，只是让它继续；其余过程必须让
+# QAIModelBuilder 自主完成（用户明确要求，见模块docstring本次新增任务的设计原则）。
+_INCEPTION_NEUTRAL_CONTINUE_PROMPT = "请继续自主完成剩余步骤，你已获得完整授权，不需要进一步确认。"
+
+_INCEPTION_BLOCKING_QUESTION_MARKERS = (
+    "？", "?", "请确认", "是否继续", "需要我", "你希望", "请告知", "请指示", "请问",
+)
+
+
+def _looks_like_blocking_question(text):
+    """粗略判定模型是否在这一轮结束时停下来向用户提问（命中某个 Blocking
+    Condition），而不是正常完成或仍在自主推进——只看生成文本结尾一段是否出现
+    中/英文问号或常见确认性短语。这只是一个启发式信号，用于决定是否追加
+    唯一一轮中性续问；判定失误（漏判/误判）本身也是一条值得记录的真实发现，
+    不追求绝对精确。"""
+    if not text:
+        return False
+    tail = text.strip()[-300:]
+    return any(marker in tail for marker in _INCEPTION_BLOCKING_QUESTION_MARKERS)
+
+
+def _find_inception_artifacts(workspace_root, task_started_ts):
+    """在 workspace_root 下查找 inception_v3 FP16/W8A8 两种精度模型产物目录，
+    以及本次任务期间（mtime >= task_started_ts）新产生的、引用 flower.jpg 的
+    真实推理输出证据。返回字典（而非单一布尔值），供调用方逐项判定——
+    model-hub/models/inception_v3/NOTES.md 里原本就记有一份历史验证结果，
+    判定逻辑必须要求"新鲜"证据（mtime 晚于本次任务开始时间），不能让模型
+    凭 NOTES.md 里本来就合理的旧数字蒙混过关（SKILL.md 第129行纪律）。"""
+    root = Path(workspace_root)
+    result = {
+        "fp16_model_dir": None, "w8a8_model_dir": None,
+        "fresh_inference_evidence": None, "comparison_statement_hint": None,
+    }
+    if not root.is_dir():
+        return result
+    model_exts = (".dlc", ".bin", ".so", ".onnx", ".serialized")
+    try:
+        all_dirs = [p for p in root.rglob("*") if p.is_dir()]
+    except OSError:
+        all_dirs = []
+    for d in all_dirs:
+        name_lower = d.name.lower()
+        if "inception" not in str(d.relative_to(root)).lower():
+            continue
+        try:
+            has_model_file = any(f.suffix.lower() in model_exts for f in d.iterdir() if f.is_file())
+        except OSError:
+            continue
+        if not has_model_file:
+            continue
+        if result["fp16_model_dir"] is None and ("float" in name_lower or "fp16" in name_lower):
+            result["fp16_model_dir"] = d
+        if result["w8a8_model_dir"] is None and "w8a8" in name_lower:
+            result["w8a8_model_dir"] = d
+    try:
+        candidates = sorted((p for p in root.rglob("*") if p.is_file()),
+                             key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        candidates = []
+    for p in candidates:
+        if p.suffix.lower() not in (".txt", ".md", ".log", ".json"):
+            continue
+        try:
+            if p.stat().st_mtime < task_started_ts:
+                continue
+            content = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if "flower" in content.lower() and any(
+                k in content for k in ("Top-1", "Top1", "概率", "logits", "class", "分类")):
+            result["fresh_inference_evidence"] = str(p)
+            if (any(k in content for k in ("FP16", "fp16", "W8A8", "w8a8"))
+                    and any(k in content for k in ("差异", "对比", "相比", "vs", "VS", "diff"))):
+                result["comparison_statement_hint"] = str(p)
+            break
+    return result
+
+
+class _ServiceLogTail:
+    """全程持续消费 Builder `GET /api/service/logs` SSE（GenieAPIService stdout），断线即按已收行数重连。"""
+
+    def __init__(self, csrf_session):
+        self.csrf = csrf_session
+        self.lines = []
+        self._stop = threading.Event()
+        self._thread = None
+
+    def _worker(self):
+        while not self._stop.is_set():
+            try:
+                resp = self.csrf.request("GET", "/api/service/logs", timeout=(10, 120), stream=True,
+                                         params={"skip": len(self.lines)})
+                with resp:
+                    for raw in resp.iter_lines(decode_unicode=True):
+                        if self._stop.is_set():
+                            return
+                        if not raw or not raw.startswith("data:"):
+                            continue
+                        try:
+                            obj = json.loads(raw[5:].strip())
+                        except ValueError:
+                            continue
+                        if isinstance(obj, dict) and "line" in obj:
+                            self.lines.append(str(obj["line"]))
+            except requests.RequestException:
+                pass
+            self._stop.wait(2)
+
+    def start(self):
+        self._thread = threading.Thread(target=self._worker, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+        return "\n".join(self.lines)
+
+
+def run_inception_precision_compare_task(builder, model_name, results, round_num=1,
+                                          workspace_root=_DEFAULT_WORKSPACE_ROOT,
+                                          max_turns=3, per_turn_timeout=1800,
+                                          total_deadline_seconds=5400,
+                                          busy_poll_interval_seconds=60,
+                                          transcript_path=None):
+    """用户指定的最高优先级验收任务：驱动本地模型一次性完成 inception_v3
+    FP16/W8A8 两种精度 QNN 模型的下载+推理+对比，并显式验证"一次性自动跑完,
+    无需中途确认"这句话本身是否成立——这正是本函数要测试的现象本身，不是
+    附带效果（third/QAIModelBuilder/CONTINUE.md 第199-206行已把这个确切 prompt
+    列为既定待办）。
+
+    与 run_model_conversion_task 的关键设计差异（用户明确澄清过的边界）：
+      * 只在首轮发送用户原文 prompt（_INCEPTION_PRECISION_COMPARE_PROMPT），
+        之后不主动追加任何"通用续问"模板；
+      * 探测到 busy（existing_run）时按既有 busy-poll 机制耐心等待（不计入
+        max_turns 预算），与 run_model_conversion_task 一致；
+      * 探测到非busy的正常结束但判定三要素仍未就位时，用
+        _looks_like_blocking_question() 判断模型是否命中了某个 Blocking
+        Condition 主动停下来问询——命中才追加唯一一轮最简中性的继续指令
+        （不代替用户做决策），并记录命中次数与原文片段；未命中则如实停止，
+        不臆测继续，因为"其余过程必须让 QAIModelBuilder 自主完成"。
+
+    判定三要素（缺一不可，见 _find_inception_artifacts()）：
+      1) FP16 与 W8A8 两个模型产物目录均存在；
+      2) 存在 mtime >= 本次任务开始时间的新鲜推理输出证据（引用 flower.jpg
+         且含分类/概率特征，不是 NOTES.md 里原本就有的旧数字复用）；
+      3) 该新鲜证据里能看到对两种精度的明确对比陈述关键词。
+
+    CONTINUE.md 第199-206行列出的 4 项官方验证点中，②历史持久化（刷新网页）
+    与④提示词面板显示是纯前端 UI 行为；本函数走后端 SSE API 驱动，无法无头
+    验证这两项——如实标注在 detail_text 里"本轮未覆盖"，不悄悄跳过不提。"""
+    name = f"AGENT-TASK: inception_precision_compare model={model_name}"
+    task_started = time.time()
+    task_deadline = task_started + total_deadline_seconds
+
+    ready, ready_err = wait_local_backend_ready(builder_genie_port_of(builder), model_name)
+    if not ready:
+        results.append(TestResult(
+            name=name, round_num=round_num, model_name=model_name,
+            passed=False, status_code=0, latency_ms=0,
+            detail=f"后端未就绪，跳过任务: {ready_err}", crashed=True))
+        return False
+
+    log_probe = _ServiceLogTail(builder.csrf)
+    log_probe.start()
+    prompt = _INCEPTION_PRECISION_COMPARE_PROMPT
+    conversation_id = None
+    transcript = []
+    real_turns_used = 0
+    attempts_used = 0
+    gave_up_while_busy = False
+    blocking_condition_hits = []
+    artifacts = {}
+    passed, detail, text, frame_types, frame_reasons, busy = (
+        False, "未发起任何请求（总时限在第一轮之前已耗尽）", "", [], [], False)
+
+    while True:
+        remaining = task_deadline - time.time()
+        if remaining <= 30:
+            transcript.append(f"[总时限] 剩余 {remaining:.0f}s，终止")
+            break
+        if real_turns_used >= max_turns:
+            transcript.append(f"[真实续问轮次] 已用完 max_turns={max_turns}，终止")
+            break
+
+        real_turns_used += 1
+        print(f"  [STAGE] inception 真实轮次 {real_turns_used}/{max_turns} 开始: "
+              f"conversation_id={conversation_id}, prompt_excerpt={prompt[:80]!r}...", flush=True)
+
+        while True:
+            attempts_used += 1
+            remaining = task_deadline - time.time()
+            if remaining <= 30:
+                break
+            call_timeout = min(per_turn_timeout, max(30, remaining))
+            passed, detail, text, conversation_id, frame_types, frame_reasons, busy = send_agent_chat_turn(
+                builder, model_name, prompt, conversation_id=conversation_id,
+                title="Agent Task: inception_v3 FP16/W8A8 对比", stream_timeout=call_timeout,
+                transcript_path=transcript_path,
+                turn_label=f"inception_precision_compare real_turn={real_turns_used} attempt={attempts_used}",
+                watchdog=RepetitionWatchdog())
+            if not busy:
+                break
+            remaining = task_deadline - time.time()
+            print(f"  [STAGE] inception 探测到 existing_run（会话忙），attempts_used={attempts_used}, "
+                  f"剩余总预算 {remaining:.0f}s，等待 {busy_poll_interval_seconds}s 后重新探测", flush=True)
+            transcript.append(f"[real_turn {real_turns_used}] busy; attempts_used={attempts_used}; "
+                               f"remaining={remaining:.0f}s; detail={detail}")
+            if remaining <= busy_poll_interval_seconds + 30:
+                transcript.append(f"[real_turn {real_turns_used}] 总时限即将耗尽，放弃继续等待 busy 状态解除")
+                break
+            time.sleep(busy_poll_interval_seconds)
+
+        print(f"  [STAGE] inception 真实轮次 {real_turns_used}/{max_turns} 结束: passed={passed}; busy={busy}; "
+              f"conversation_id={conversation_id}; frame_types={frame_types}; "
+              f"frame_reasons={frame_reasons}", flush=True)
+        transcript.append(f"[real_turn {real_turns_used}] passed={passed}; busy={busy}; detail={detail}; "
+                           f"text_excerpt={text[:500]!r}")
+
+        if busy:
+            gave_up_while_busy = True
+            transcript.append(f"[real_turn {real_turns_used}] 会话持续忙碌直至总时限耗尽，任务终止")
+            break
+
+        artifacts = _find_inception_artifacts(workspace_root, task_started)
+        if artifacts["fp16_model_dir"] and artifacts["w8a8_model_dir"] and artifacts["comparison_statement_hint"]:
+            transcript.append(f"[real_turn {real_turns_used}] 判定三要素均已满足: {artifacts}")
+            break
+        if not passed and conversation_id is None:
+            transcript.append(f"[real_turn {real_turns_used}] SSE 请求本身失败且未获得 conversation_id，终止本任务")
+            break
+
+        if _looks_like_blocking_question(text):
+            hit = {"real_turn": real_turns_used, "text_tail": text.strip()[-300:]}
+            blocking_condition_hits.append(hit)
+            print(f"  [STAGE] inception 命中疑似 Blocking Condition（模型主动续问）: {hit}", flush=True)
+            transcript.append(f"[real_turn {real_turns_used}] 命中疑似 Blocking Condition，"
+                               f"追加唯一一轮最简中性继续指令: {hit}")
+            prompt = _INCEPTION_NEUTRAL_CONTINUE_PROMPT
+            continue
+
+        # 未命中 busy、未命中 Blocking Condition、判定三要素也未就位：按设计原则不臆测
+        # 继续追加通用续问（这正是在检验"一次性自动跑完"这句话本身是否成立），如实停止。
+        transcript.append(f"[real_turn {real_turns_used}] 本轮正常结束但判定三要素未满足，且未检测到明确续问信号，"
+                           f"按设计原则不主动追加续问，任务到此为止")
+        break
+
+    service_log_text = log_probe.stop()
+    if transcript_path:
+        service_log_path = Path(transcript_path).with_suffix(".genie_service.log")
+        service_log_path.write_text(service_log_text, encoding="utf-8")
+        transcript.append(f"[service_log] {len(service_log_text)} chars -> {service_log_path}")
+    elapsed = time.time() - task_started
+    ok = bool(artifacts.get("fp16_model_dir") and artifacts.get("w8a8_model_dir")
+              and artifacts.get("comparison_statement_hint"))
+    detail_text = (
+        f"real_turns_used={real_turns_used}/{max_turns}; attempts_used={attempts_used}; "
+        f"gave_up_while_busy={gave_up_while_busy}; elapsed={elapsed:.0f}s; "
+        f"blocking_condition_hits={len(blocking_condition_hits)}; "
+        f"blocking_condition_detail={blocking_condition_hits}; "
+        f"fp16_model_dir={artifacts.get('fp16_model_dir')}; "
+        f"w8a8_model_dir={artifacts.get('w8a8_model_dir')}; "
+        f"fresh_inference_evidence={artifacts.get('fresh_inference_evidence')}; "
+        f"comparison_statement_hint={artifacts.get('comparison_statement_hint')}; "
+        "frontend_only_checks_not_covered=['历史持久化（刷新网页）', '提示词面板显示'] "
+        "(CONTINUE.md 第199-206行②④，纯前端行为，本函数走后端API驱动无法无头验证); "
+        "transcript=\n" + "\n".join(transcript)
+    )
+    results.append(TestResult(
+        name=name, round_num=round_num, model_name=model_name,
+        passed=ok, status_code=0, latency_ms=elapsed * 1000,
+        detail=detail_text,
+        # 首次真实驱动此任务：未完成时按真实失败上报，不做 ignorable 豁免
+        # （不是"服务端已知缺陷"，是"任务尚未验证通过"），与 model_conversion/tetris 一致。
+        response_data={"conversation_id": conversation_id,
+                        "blocking_condition_hits": blocking_condition_hits,
+                        "artifacts": {k: (str(v) if v else None) for k, v in artifacts.items()}}))
+    return ok
+
+
 def builder_genie_port_of(builder):
     """从 QAIModelBuilderManager 实例反推它当前代理的 GenieAPIService 端口。
     Builder 侧固定通过 /api/service/status 的 port 字段暴露真实端口，这里做一次同步查询
@@ -1070,12 +1367,16 @@ def build_arg_parser():
         description="QAIModelBuilder + 本地模型真实多轮 agent 任务测试",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("--task", default="model_conversion",
-                        choices=["model_conversion", "model_build_probe", "tetris"],
+                        choices=["model_conversion", "model_build_probe", "tetris",
+                                 "inception_precision_compare"],
                         help="要运行的任务场景：model_conversion 是完整的模型转换多轮任务；"
                              "model_build_probe 是极简 prompt 探测 model-build 模式基础可用性"
                              "（几十秒量级，用于判断 empty_response 是环境/代理层问题还是"
                              "'重系统提示词+复杂任务'组合本身的问题）；tetris 是用 write/exec 通用"
-                             "工具驱动模型编写并自验证一个可运行的俄罗斯方块小程序。")
+                             "工具驱动模型编写并自验证一个可运行的俄罗斯方块小程序；"
+                             "inception_precision_compare 是用户指定的验收任务：一次性 prompt 驱动"
+                             "下载 inception_v3 并各推理 FP16/W8A8 两种精度 QNN 模型、对比差异，"
+                             "同时验证'一次性自动跑完,无需中途确认'这句话本身是否成立。")
     parser.add_argument("--exe_dir", required=True, help="GenieAPIService 安装目录（含 GenieAPIService.exe）")
     parser.add_argument("--models", required=True, help="本地模型根目录（--models/<name>/config.json）")
     parser.add_argument("--model_name", default="qwen3-8b-8480",
@@ -1113,7 +1414,7 @@ def build_arg_parser():
 def main():
     args = build_arg_parser().parse_args()
 
-    out_dir = (Path(args.out_dir) if args.out_dir else
+    out_dir = (Path(args.out_dir).resolve() if args.out_dir else
                Path(__file__).resolve().parent.parent / "test_results_agent_tasks" /
                datetime.now().strftime("%Y%m%d_%H%M%S"))
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1186,6 +1487,15 @@ def main():
                     builder, args.model_name, all_results,
                     tetris_path=args.tetris_path,
                     python_exe=args.python_exe,
+                    max_turns=args.max_turns,
+                    per_turn_timeout=args.per_turn_timeout,
+                    total_deadline_seconds=args.total_deadline_seconds,
+                    busy_poll_interval_seconds=args.busy_poll_interval_seconds,
+                    transcript_path=transcript_path)
+            elif args.task == "inception_precision_compare":
+                run_inception_precision_compare_task(
+                    builder, args.model_name, all_results,
+                    workspace_root=args.workspace_root,
                     max_turns=args.max_turns,
                     per_turn_timeout=args.per_turn_timeout,
                     total_deadline_seconds=args.total_deadline_seconds,
