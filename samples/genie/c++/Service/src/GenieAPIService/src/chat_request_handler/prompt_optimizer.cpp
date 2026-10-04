@@ -982,9 +982,9 @@ std::vector<ScoredSkill> PromptOptimizer::AssignSkillDetailLevels(
     const auto& relevance_cfg = po_cfg.relevance_filter;
     const auto& disclosure_cfg = po_cfg.skill_disclosure;
 
-    // 1) 打分。零分丢弃 / keywords 为空 / 全零分兜底 三条语义与
-    //    FilterSkillsByRelevance 完全一致（不另起一套判据），区别只在“保留下来的
-    //    那些怎么展示”。
+    // 1) 打分。keywords 为空 / 全零分兜底 两条语义与 FilterSkillsByRelevance 一致；
+    //    零分候选不再物理剔除（旧行为与 D2 自己的降档承诺矛盾，见下方第 3 步），
+    //    改为固定 L0 保底，和预算循环的降档规则统一。
     std::vector<ScoredSkill> candidates;
     candidates.reserve(all_skills.size());
     bool any_positive = false;
@@ -1005,13 +1005,6 @@ std::vector<ScoredSkill> PromptOptimizer::AssignSkillDetailLevels(
                                          "returning empty set (legacy behavior)" << std::endl;
         return result;
     }
-    if (!keywords.empty() && any_positive) {
-        // 零分丢弃（与 FilterSkillsByRelevance 一致：至少有一个正分候选时才丢弃零分项）
-        candidates.erase(std::remove_if(candidates.begin(), candidates.end(),
-                                        [](const ScoredSkill& s) { return s.score == 0; }),
-                         candidates.end());
-    }
-
     // 2) 按分数降序（同分按名称）排序，避开 unordered_map 遍历顺序不确定
     std::sort(candidates.begin(), candidates.end(), [](const ScoredSkill& a, const ScoredSkill& b) {
         if (a.score != b.score) return a.score > b.score;
@@ -1035,13 +1028,18 @@ std::vector<ScoredSkill> PromptOptimizer::AssignSkillDetailLevels(
 
     size_t used_tokens = 0;
     size_t dropped = 0;
+    size_t zero_score_l0 = 0;
     for (size_t idx = 0; idx < candidates.size(); ++idx) {
         ScoredSkill entry = candidates[idx];
         SkillDetailLevel desired = SkillDetailLevel::kNameOnly;
-        if (idx < effective_l2_top_k) {
-            desired = SkillDetailLevel::kFull;
-        } else if (idx < effective_l2_top_k + disclosure_cfg.l1_top_k) {
-            desired = SkillDetailLevel::kSummary;
+        if (entry.score > 0) {
+            if (idx < effective_l2_top_k) {
+                desired = SkillDetailLevel::kFull;
+            } else if (idx < effective_l2_top_k + disclosure_cfg.l1_top_k) {
+                desired = SkillDetailLevel::kSummary;
+            }
+        } else {
+            ++zero_score_l0;
         }
 
         bool placed = false;
@@ -1078,6 +1076,7 @@ std::vector<ScoredSkill> PromptOptimizer::AssignSkillDetailLevels(
     My_Log{My_Log::Level::kInfo} << "[AssignSkillDetailLevels] " << all_skills.size()
                                   << " candidate(s) -> " << result.size()
                                   << " kept (L2=" << l2 << ", L1=" << l1 << ", L0=" << l0
+                                  << ", zero_score_l0=" << zero_score_l0
                                   << ", dropped=" << dropped
                                   << ") within skills_token_budget=" << skills_token_budget
                                   << " (used=" << used_tokens << ")" << std::endl;
