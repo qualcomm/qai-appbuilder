@@ -553,11 +553,41 @@
         "prompt_sections": {
             "_comment": "原始系统提示词段落保留配置。通过标题关键词匹配决定哪些 Markdown 段落被追加到优化后的提示词中。",
             "_comment_enabled": "false=禁用段落过滤（默认，不追加原始段落）；true=启用，按 rules 过滤后追加",
-            "enabled": false,
+            "enabled": true,
 
             "_comment_rules": "段落匹配规则列表，按顺序匹配，第一个命中的规则生效。",
             "_comment_rule_fields": "title_contains=标题子串（大小写不敏感）；heading_level=0任意/1=#/2=##/3=###；include=true保留/false丢弃",
             "rules": [
+                {
+                    "_comment": "## Available Skills (NOT tools)：子代理技能目录块（B1/B2 新增）。显式排除，避免与 GenieAPIService 自己从 <available_skills> 原文解析重建的技能目录重复渲染。必须排在 Tools 规则之前（优先级：第一个命中的规则生效）。",
+                    "title_contains": "Available Skills",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## Working principles：本地主/子代理共享的工作原则段落（含 FINAL REPLY FORMAT 等无标题正文），QAIModelBuilder 本地 wire 协议统一盖 agent=main 章后仅走此 prompt_sections，故在此显式保留。",
+                    "title_contains": "Working principles",
+                    "heading_level": 2,
+                    "include": true
+                },
+                {
+                    "_comment": "## Exec auto-background：后台进程执行与审查指引。必须排在下方 Tools 规则之前，防止被 Tools 子串误匹配排除（本标题本身不含 'tools' 字样，但保留顺序以保证优先级明确）。",
+                    "title_contains": "Exec auto-background",
+                    "heading_level": 2,
+                    "include": true
+                },
+                {
+                    "_comment": "## Working Directory (IMPORTANT)：工作目录指令（本地主代理/子代理标题含 ⚠️ 前缀变体，子串匹配不受 emoji 影响）。",
+                    "title_contains": "Working Directory",
+                    "heading_level": 2,
+                    "include": true
+                },
+                {
+                    "_comment": "## Language：本地主代理语言规则段落（B4 新增独立标题，避免被并入 Working Directory 一并处理）。",
+                    "title_contains": "Language",
+                    "heading_level": 2,
+                    "include": true
+                },
                 {
                     "_comment": "## Tooling：工具可用性列表（read/write/edit/exec/browser/subagents）",
                     "title_contains": "Tooling",

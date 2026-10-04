@@ -18,3 +18,11 @@ alg/
 third/
 tmp/
 assets/
+# 测试脚本输出目录（test_service.py/test_builder_agent_tasks.py 的 --out_dir，默认
+# test_results_* 或 test/test_results_*_review 等）：这些目录下可能包含 mklink /J
+# 联接到真实模型/GenieAPIService 安装目录；整体忽略后 git clean -fd 不会递归进去，
+# 不会顺着残留联接删除外部真实文件（见 docs/known-issues.md 7.1b 根因③）。已被
+# git 跟踪的 test/test_results_full、test/test_results_qnncleanup_full 不受影响
+# （.gitignore 不影响已跟踪文件）。
+test_results
+test_results_*

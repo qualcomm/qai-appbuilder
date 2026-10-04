@@ -85,6 +85,7 @@ from test_service import (  # noqa: E402
     discover_models,
     ReportGenerator,
     resolve_builder_python,
+    cleanup_junctions,
     _finalize_and_exit,
 )
 
@@ -95,7 +96,7 @@ import requests  # noqa: E402
 # 移植自 QAIModelBuilderLocalModelTester 的通用基础设施
 # （已验证的 mklink /J 注入 + CSRF + 就绪轮询机制，改写为独立函数）
 # ============================================================================
-def configure_genie_root(builder, genie_root_path, results, round_num=1):
+def configure_genie_root(builder, genie_root_path, results, round_num=1, junction_paths=None):
     """把 GenieAPIService 安装目录通过 mklink /J 联接到 Builder 固定扫描的
     <data_dir>/bin/<name> 下，触发 Builder 官方"自动发现已安装版本"自愈机制。
     逻辑与 test_service.QAIModelBuilderLocalModelTester.configure_genie_root() 一致
@@ -126,6 +127,8 @@ def configure_genie_root(builder, genie_root_path, results, round_num=1):
         return False
 
     dst = bin_root / src.name
+    if junction_paths is not None:
+        junction_paths.append(dst)
     if not dst.exists():
         try:
             proc = subprocess.run(
@@ -168,7 +171,7 @@ def configure_genie_root(builder, genie_root_path, results, round_num=1):
     return passed
 
 
-def inject_local_models(builder, models_root, model_dirs, results, snapshot, round_num=1):
+def inject_local_models(builder, models_root, model_dirs, results, snapshot, round_num=1, junction_paths=None):
     """用 mklink /J 把每个 models_root/<name> 联接到 <data_dir>/models/<name>，
     并对源目录关键小文件拍快照（ModelDirSnapshot，见其文档字符串）防止联接被
     Builder 安装/更新路径透明穿透误改。逻辑与
@@ -195,6 +198,8 @@ def inject_local_models(builder, models_root, model_dirs, results, snapshot, rou
         src = Path(models_root) / model_name
         dst = target_models_root / model_name
         src_dirs.append(src)
+        if junction_paths is not None:
+            junction_paths.append(dst)
         if dst.exists():
             continue
         try:
@@ -1467,6 +1472,7 @@ def main():
     all_results = []
     all_crash_events = []
     snapshot = ModelDirSnapshot()
+    junction_paths = []
 
     print(f"{'=' * 60}\n启动 QAIModelBuilder ({args.builder_dir})\n{'=' * 60}")
     builder = QAIModelBuilderManager(
@@ -1493,9 +1499,10 @@ def main():
                 passed=False, status_code=0, latency_ms=0,
                 detail=f"--model_name={args.model_name} 不在 --models 目录下已发现的模型中: {available_models}"))
         else:
-            if not configure_genie_root(builder, args.exe_dir, all_results):
+            if not configure_genie_root(builder, args.exe_dir, all_results, junction_paths=junction_paths):
                 raise RuntimeError("configure_genie_root 失败，终止本次运行")
-            if not inject_local_models(builder, args.models, [args.model_name], all_results, snapshot):
+            if not inject_local_models(builder, args.models, [args.model_name], all_results, snapshot,
+                                        junction_paths=junction_paths):
                 raise RuntimeError("inject_local_models 失败，终止本次运行")
             if not start_and_wait_ready(builder, args.model_name, args.genie_port, all_results):
                 raise RuntimeError("start_and_wait_ready 失败，终止本次运行")
@@ -1550,6 +1557,9 @@ def main():
                 name="AGENT-TASK: model_dir_snapshot_verify", round_num=1, model_name="_agent_task_",
                 passed=False, status_code=0, latency_ms=0, detail=v, crashed=True))
         builder.stop()
+        # 必须无条件执行（覆盖正常/异常两条路径），否则残留联接会被远程同步
+        # git clean -fd 顺着删除真实目录下的文件（docs/known-issues.md 7.1b 根因③）。
+        cleanup_junctions(junction_paths)
 
     _finalize_and_exit(all_results, [], all_crash_events, out_dir, remote_mode=False,
                        suite_name="builder_agent_tasks", cmdline=" ".join(sys.argv))

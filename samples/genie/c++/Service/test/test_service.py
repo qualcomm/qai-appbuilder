@@ -507,6 +507,32 @@ def resolve_builder_python(explicit_path=None):
     return sys.executable
 
 
+def cleanup_junctions(paths):
+    """移除 `mklink /J` 创建的目录联接本身（不触碰联接指向的真实目录）。
+
+    根因（见 docs/known-issues.md 7.1b 根因③）：这些联接把 `<out_dir>/qaimodelbuilder_data/
+    {models,bin}/<name>` 指向真实的 `GenieEnv\\models\\<name>`/GenieAPIService 安装目录；
+    `<out_dir>` 若未被 `.gitignore` 覆盖，远程同步的 `git clean -fd` 会顺着联接钻进去删除
+    真实目录下未被忽略的文件（典型是 config.json）。`.gitignore` 规则是第一道防线（整个
+    输出目录被跳过），这里是第二道（纵深防御）：即使某次输出目录意外未被忽略，联接本身
+    也不会残留到下一次同步。调用方必须在 `finally` 里无条件调用，覆盖正常/异常两条路径。
+
+    判存在性不能用 `Path.exists()`：Windows 目录联接一旦目标被删除（悬空联接），
+    `Path.exists()`/`os.path.exists()` 会沿联接解析到不存在的目标后返回 False，导致悬空
+    联接被静默跳过清理——与本函数的清理承诺直接矛盾（已用本地构造的悬空联接验证过这个
+    差异）。`os.path.lexists()` 不解析链接本身，联接节点存在就返回 True，无论目标是否存在，
+    因此改用它。即使路径根本不存在，下面的 `rmdir` 也只会返回非零退出码，不会抛异常。
+    """
+    for p in paths:
+        try:
+            path = Path(p)
+            if os.path.lexists(path):
+                subprocess.run(["cmd.exe", "/c", "rmdir", str(path)],
+                                capture_output=True, text=True, timeout=15)
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+
 class _CsrfSession:
     """包一层 requests.Session，实现 QAIModelBuilder 的 CSRF 双提交 Cookie 握手：
     对安全方法(GET/HEAD/OPTIONS)请求，如响应尚未带 cookie 则中间件会自动 Set-Cookie
@@ -6549,6 +6575,10 @@ class QAIModelBuilderLocalModelTester:
         # 原消费方 test_invalid_genie_root() 已随过时的 builder_local_model 套件一并删除，
         # 见 test_builder_agent_tasks.py 的真实多轮 agent 测试；此字段保留供未来同类用例复用）。
         self._bin_junction_path = None
+        # 本次创建的全部 mklink /J 联接目标（bin + models），cleanup_junctions() 消费；
+        # 见该方法文档字符串，必须在 finally 里无条件调用，否则会复现 docs/known-issues.md
+        # 7.1b 根因③（残留联接被远程同步 git clean -fd 顺着删除真实目录下的文件）。
+        self._junction_paths = []
         # 模型目录安全网：inject_local_models() 成功后拍快照，_sc_case_builder_e2e() 的
         # finally 块无论用例成败都会调用 verify()，防止 mklink /J 联接被 Builder 安装/更新/
         # 删除路径透明穿透地误改/误删真实模型目录下的配置文件。
@@ -6624,6 +6654,7 @@ class QAIModelBuilderLocalModelTester:
 
         dst = bin_root / src.name
         self._bin_junction_path = dst
+        self._junction_paths.append(dst)
         if not dst.exists():
             try:
                 proc = subprocess.run(
@@ -6705,6 +6736,7 @@ class QAIModelBuilderLocalModelTester:
                 failures.append(f"{m}(源目录不存在: {src})")
                 continue
             dst = target_models_root / m
+            self._junction_paths.append(dst)
             if dst.exists():
                 successes.append(f"{m}(目标已存在，视作幂等成功)")
                 snapshot_targets.append(src)
@@ -6740,6 +6772,11 @@ class QAIModelBuilderLocalModelTester:
             response_data={"target_models_root": str(target_models_root),
                            "successes": successes, "failures": failures}))
         return bool(successes)
+
+    def cleanup_junctions(self):
+        """收尾：移除本实例 configure_genie_root()/inject_local_models() 创建的全部
+        联接（委托模块级 cleanup_junctions()）。调用方须在 finally 里无条件调用。"""
+        cleanup_junctions(self._junction_paths)
 
     # ---- Step 3: discover_models via Builder ----
     def discover_models_via_builder(self):
@@ -11243,6 +11280,10 @@ def _sc_case_builder_e2e(args, models, all_results, all_crash_events,
         if tester is not None:
             try:
                 tester.stop_and_verify(args.port)
+            except Exception:
+                pass
+            try:
+                tester.cleanup_junctions()
             except Exception:
                 pass
         try:
