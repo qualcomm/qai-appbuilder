@@ -1189,6 +1189,38 @@ class _ServiceLogTail:
         return "\n".join(self.lines)
 
 
+def _wait_background_subagents(builder, conversation_id, deadline, poll_seconds=60):
+    import sqlite3
+    db_path = Path(builder.data_dir) / "db" / "qai.db" if builder.data_dir else None
+    history = []
+    if not db_path or not conversation_id:
+        return history
+    while time.time() < deadline - 30:
+        try:
+            con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10)
+            try:
+                rows = con.execute(
+                    "SELECT id, status, rounds, updated_at FROM chat_subagent_session "
+                    "WHERE root_conversation_id = ?", (conversation_id,)).fetchall()
+                active_runs = con.execute(
+                    "SELECT COUNT(*) FROM chat_turn_run WHERE conversation_id = ? "
+                    "AND status NOT IN ('completed', 'failed', 'interrupted', 'cancelled')",
+                    (conversation_id,)).fetchone()[0]
+            finally:
+                con.close()
+        except sqlite3.Error as exc:
+            rows, active_runs = [], 0
+            history.append(f"sqlite_error={exc}")
+        active = [r for r in rows if r[1] in ("running", "background", "pending")]
+        snapshot = f"{datetime.now():%H:%M:%S} subagents={rows} active_turn_runs={active_runs}"
+        history.append(snapshot)
+        print(f"  [STAGE] inception 等待后台子代理: {snapshot}", flush=True)
+        if not active and not active_runs:
+            break
+        time.sleep(poll_seconds)
+    return history
+
+
 def run_inception_precision_compare_task(builder, model_name, results, round_num=1,
                                           workspace_root=_DEFAULT_WORKSPACE_ROOT,
                                           max_turns=3, per_turn_timeout=1800,
@@ -1293,6 +1325,11 @@ def run_inception_precision_compare_task(builder, model_name, results, round_num
             gave_up_while_busy = True
             transcript.append(f"[real_turn {real_turns_used}] 会话持续忙碌直至总时限耗尽，任务终止")
             break
+
+        if "subagent_start" in frame_types:
+            wait_log = _wait_background_subagents(builder, conversation_id, task_deadline)
+            transcript.append(f"[real_turn {real_turns_used}] background_subagent_wait:\n  "
+                              + "\n  ".join(wait_log))
 
         artifacts = _find_inception_artifacts(workspace_root, task_started)
         if artifacts["fp16_model_dir"] and artifacts["w8a8_model_dir"] and artifacts["comparison_statement_hint"]:
