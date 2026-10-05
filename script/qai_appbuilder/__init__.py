@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 #
 #=============================================================================
+import glob
 import os
 import sys
 from importlib.metadata import version, PackageNotFoundError
@@ -43,28 +44,33 @@ if sys.platform.startswith('linux'):
         if os.path.exists(_tflite_path):
             ctypes.CDLL(_tflite_path, ctypes.RTLD_GLOBAL)
 
-    for _executorch_lib in (
-        "libexecutorch.so",
-        "libexecutorch_core.so",
-        "libexecutorch_shared.so",
-        "libportable_ops_lib.so",
-        "libportable_kernels.so",
-        "libkernels_util_all_deps.so",
-        "libextension_module.so",
-        "libextension_tensor.so",
-        "libextension_data_loader.so",
-        "libextension_flat_tensor.so",
-        "libextension_named_data_map.so",
-        "libextension_evalue_util.so",
-        "libextension_threadpool.so",
-        "libextension_runner_util.so",
-        "libexecutorch_backend_qnn.so",
-        "libqnn_executorch_backend.so",
-        "libexecutorch_backend_xnnpack.so",
-        "libxnnpack_backend.so",
+    for _executorch_pattern in (
+        "libexecutorch.so*",
+        "libexecutorch_core.so*",
+        "libexecutorch_shared.so*",
+        "libportable_ops_lib.so*",
+        "libportable_kernels.so*",
+        "libkernels_util_all_deps.so*",
+        "libpthreadpool.so*",
+        "libcpuinfo.so*",
+        "libquantized_ops_lib.so*",
+        "libquantized_kernels.so*",
+        "libextension_module.so*",
+        "libextension_tensor.so*",
+        "libextension_data_loader.so*",
+        "libextension_flat_tensor.so*",
+        "libextension_named_data_map.so*",
+        "libextension_evalue_util.so*",
+        "libextension_threadpool.so*",
+        "libextension_runner_util.so*",
+        "libexecutorch_backend_qnn.so*",
+        "libqnn_executorch_backend.so*",
+        "libexecutorch_backend_xnnpack.so*",
+        "libxnnpack_backend.so*",
     ):
-        _executorch_path = os.path.join(g_base_path, "libs", _executorch_lib)
-        if os.path.exists(_executorch_path):
+        for _executorch_path in sorted(
+            glob.glob(os.path.join(g_base_path, "libs", _executorch_pattern))
+        ):
             try:
                 ctypes.CDLL(_executorch_path, ctypes.RTLD_GLOBAL)
             except OSError:

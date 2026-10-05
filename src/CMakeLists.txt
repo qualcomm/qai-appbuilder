@@ -19,6 +19,13 @@ if (APPBUILDER_ENABLE_EXECUTORCH_QNN AND NOT APPBUILDER_ENABLE_EXECUTORCH)
 endif()
 
 if (APPBUILDER_ENABLE_EXECUTORCH)
+  if (NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+      NOT CMAKE_SYSTEM_NAME STREQUAL "Android")
+    message(FATAL_ERROR "APPBUILDER_ENABLE_EXECUTORCH is supported only on Linux and Android arm64; current platform is ${CMAKE_SYSTEM_NAME}.")
+  endif()
+  if (NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|AARCH64|ARM64)$")
+    message(FATAL_ERROR "APPBUILDER_ENABLE_EXECUTORCH is supported only on Linux and Android arm64; current processor is ${CMAKE_SYSTEM_PROCESSOR}.")
+  endif()
   if (NOT DEFINED ENV{EXECUTORCH_ROOT} OR "$ENV{EXECUTORCH_ROOT}" STREQUAL "")
     message(FATAL_ERROR "APPBUILDER_ENABLE_EXECUTORCH requires EXECUTORCH_ROOT.")
   endif()
@@ -198,15 +205,30 @@ if (APPBUILDER_ENABLE_EXECUTORCH)
   find_library(EXECUTORCH_KERNELS_UTIL_LIBRARY NAMES kernels_util_all_deps
                PATHS "$ENV{EXECUTORCH_ROOT}/lib" "$ENV{EXECUTORCH_ROOT}/build/lib"
                NO_DEFAULT_PATH)
-  if (NOT EXECUTORCH_MODULE_LIBRARY OR NOT EXECUTORCH_CORE_LIBRARY OR
-      NOT EXECUTORCH_PORTABLE_OPS_LIBRARY OR NOT EXECUTORCH_PORTABLE_KERNELS_LIBRARY)
-    message(FATAL_ERROR "EXECUTORCH_ROOT must provide extension_module(_static), executorch_core, portable_ops_lib, and portable_kernels under lib or build/lib.")
+  if (NOT EXECUTORCH_MODULE_LIBRARY OR NOT EXECUTORCH_TENSOR_LIBRARY OR
+      NOT EXECUTORCH_DATA_LOADER_LIBRARY OR NOT EXECUTORCH_FLAT_TENSOR_LIBRARY OR
+      NOT EXECUTORCH_NAMED_DATA_LIBRARY OR NOT EXECUTORCH_EVALUE_LIBRARY OR
+      NOT EXECUTORCH_THREADPOOL_LIBRARY OR NOT EXECUTORCH_RUNNER_LIBRARY OR
+      NOT EXECUTORCH_CORE_LIBRARY OR NOT EXECUTORCH_PORTABLE_OPS_LIBRARY OR
+      NOT EXECUTORCH_PORTABLE_KERNELS_LIBRARY OR NOT EXECUTORCH_KERNELS_UTIL_LIBRARY)
+    message(FATAL_ERROR "EXECUTORCH_ROOT must provide all required ExecuTorch runtime libraries under lib or build/lib.")
+  endif()
+  if (APPBUILDER_ENABLE_EXECUTORCH_QNN)
+    target_compile_definitions(${APP} PUBLIC APPBUILDER_ENABLE_EXECUTORCH_QNN=1)
+    find_library(EXECUTORCH_QNN_LIBRARY NAMES executorch_backend_qnn qnn_executorch_backend
+                 PATHS "$ENV{EXECUTORCH_ROOT}/lib" "$ENV{EXECUTORCH_ROOT}/build/lib"
+                 NO_DEFAULT_PATH)
+    if (NOT EXECUTORCH_QNN_LIBRARY)
+      message(FATAL_ERROR "EXECUTORCH_ROOT must provide the Qualcomm ExecuTorch backend library.")
+    endif()
   endif()
   set(EXECUTORCH_LIBRARIES
     -Wl,--start-group
+    -Wl,--no-as-needed
     -Wl,--whole-archive
     ${EXECUTORCH_PORTABLE_OPS_LIBRARY}
     -Wl,--no-whole-archive
+    -Wl,--as-needed
     ${EXECUTORCH_PORTABLE_KERNELS_LIBRARY}
     ${EXECUTORCH_KERNELS_UTIL_LIBRARY}
     ${EXECUTORCH_MODULE_LIBRARY}
@@ -220,22 +242,26 @@ if (APPBUILDER_ENABLE_EXECUTORCH)
     ${EXECUTORCH_CORE_LIBRARY}
   )
   if (EXECUTORCH_XNNPACK_LIBRARY)
-    list(APPEND EXECUTORCH_LIBRARIES ${EXECUTORCH_XNNPACK_LIBRARY})
+    list(APPEND EXECUTORCH_LIBRARIES
+         -Wl,--no-as-needed
+         -Wl,--whole-archive ${EXECUTORCH_XNNPACK_LIBRARY}
+         -Wl,--no-whole-archive
+         -Wl,--as-needed)
+  endif()
+  if (APPBUILDER_ENABLE_EXECUTORCH_QNN)
+    list(APPEND EXECUTORCH_LIBRARIES
+         -Wl,--no-as-needed
+         -Wl,--whole-archive ${EXECUTORCH_QNN_LIBRARY}
+         -Wl,--no-whole-archive
+         -Wl,--as-needed)
   endif()
   list(APPEND EXECUTORCH_LIBRARIES -Wl,--end-group ${CMAKE_DL_LIBS})
   target_link_libraries(${APP} PRIVATE ${EXECUTORCH_LIBRARIES})
 
-  set_target_properties(${APP} PROPERTIES BUILD_RPATH "$ENV{EXECUTORCH_ROOT}/lib")
-  if (APPBUILDER_ENABLE_EXECUTORCH_QNN)
-    target_compile_definitions(${APP} PUBLIC APPBUILDER_ENABLE_EXECUTORCH_QNN=1)
-    find_library(EXECUTORCH_QNN_LIBRARY NAMES executorch_backend_qnn qnn_executorch_backend
-                 PATHS "$ENV{EXECUTORCH_ROOT}/lib" "$ENV{EXECUTORCH_ROOT}/build/lib"
-                 NO_DEFAULT_PATH)
-    if (NOT EXECUTORCH_QNN_LIBRARY)
-      message(FATAL_ERROR "EXECUTORCH_ROOT must provide the Qualcomm ExecuTorch backend library.")
-    endif()
-    target_link_libraries(${APP} PRIVATE ${EXECUTORCH_QNN_LIBRARY})
-  endif()
+  set_target_properties(${APP} PROPERTIES
+    BUILD_RPATH "$ENV{EXECUTORCH_ROOT}/lib;$ORIGIN/libs"
+    INSTALL_RPATH "$ORIGIN/libs"
+  )
 endif()
 
 if (APPBUILDER_ENABLE_TFLITE OR APPBUILDER_ENABLE_TFLITE_CPU)

@@ -397,7 +397,7 @@ jobs:
         # Together they catch ABI mismatches, missing bundled QNN DLLs,
         # and pybind layer regressions before Stage B real-NPU testing.
         run: |
-          pytest tests/test_package_smoke.py tests/test_cpu_runtime_smoke.py tests/test_tflite_dispatch.py -v
+          pytest tests/test_package_smoke.py tests/test_cpu_runtime_smoke.py tests/test_tflite_dispatch.py tests/test_executorch_build_configuration.py -v
 
       - name: Upload CMake logs on failure
         if: failure()
@@ -487,7 +487,7 @@ jobs:
         run: pip install numpy pyyaml
 
       - name: Smoke test
-        run: pytest tests/test_package_smoke.py tests/test_cpu_runtime_smoke.py -v
+        run: pytest tests/test_package_smoke.py tests/test_cpu_runtime_smoke.py tests/test_executorch_build_configuration.py -v
 
       - name: Upload CMake logs on failure
         if: failure()
@@ -499,6 +499,80 @@ jobs:
             build/**/CMakeFiles/CMakeError.log
             build/**/CMakeCache.txt
           if-no-files-found: ignore
+
+  # -----------------------------------------------------------------
+  # Optional real ExecuTorch SDK build. Enable with the repository
+  # variable EXECUTORCH_CI_ENABLED=true and provide organization secrets:
+  #   EXECUTORCH_SDK_URL          - .tar.gz/.tgz/.zip SDK archive URL
+  #   EXECUTORCH_SMOKE_MODEL_URL  - a runnable static single-forward .pte
+  # The SDK/model are intentionally external because they are not
+  # redistributable project artifacts.
+  # -----------------------------------------------------------------
+  build-executorch-linux-arm64:
+    name: linux arm64 ExecuTorch SDK build + run
+    if: ${{ vars.EXECUTORCH_CI_ENABLED == 'true' }}
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Init pybind11 submodule
+        run: git submodule update --init --depth 1 pybind/pybind11
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build curl unzip
+          python -m pip install --upgrade pip
+          pip install wheel==0.45.1 setuptools==80.9.0 pybind11==2.13.6 build==1.4.0 "cmake>=3.21" pytest numpy pyyaml
+
+      - name: Setup QNN SDK
+        uses: ./.github/actions/setup-qnn-sdk
+        with:
+          version: '2.48.40.260702'
+
+      - name: Download ExecuTorch SDK and smoke model
+        env:
+          EXECUTORCH_SDK_URL: ${{ secrets.EXECUTORCH_SDK_URL }}
+          EXECUTORCH_SMOKE_MODEL_URL: ${{ secrets.EXECUTORCH_SMOKE_MODEL_URL }}
+        run: |
+          set -euo pipefail
+          test -n "$EXECUTORCH_SDK_URL" || { echo "EXECUTORCH_SDK_URL is required"; exit 1; }
+          test -n "$EXECUTORCH_SMOKE_MODEL_URL" || { echo "EXECUTORCH_SMOKE_MODEL_URL is required"; exit 1; }
+          sdk_archive="$RUNNER_TEMP/executorch-sdk"
+          case "$EXECUTORCH_SDK_URL" in
+            *.zip|*.zip\?*) sdk_archive="$sdk_archive.zip" ;;
+            *) sdk_archive="$sdk_archive.tar.gz" ;;
+          esac
+          curl -fL --retry 3 -o "$sdk_archive" "$EXECUTORCH_SDK_URL"
+          sdk_dir="$RUNNER_TEMP/executorch-sdk-root"
+          mkdir -p "$sdk_dir"
+          case "$sdk_archive" in
+            *.zip) unzip -q "$sdk_archive" -d "$sdk_dir" ;;
+            *) tar -xzf "$sdk_archive" -C "$sdk_dir" ;;
+          esac
+          module_header=$(find "$sdk_dir" -type f -path '*/extension/module/module.h' -print -quit)
+          test -n "$module_header" || { echo "ExecuTorch SDK is missing extension/module/module.h"; exit 1; }
+          sdk_root=$(cd "$(dirname "$module_header")/../.." && pwd)
+          echo "EXECUTORCH_ROOT=$sdk_root" >> "$GITHUB_ENV"
+          model_path="$RUNNER_TEMP/executorch-smoke.pte"
+          curl -fL --retry 3 -o "$model_path" "$EXECUTORCH_SMOKE_MODEL_URL"
+          echo "EXECUTORCH_SMOKE_MODEL=$model_path" >> "$GITHUB_ENV"
+
+      - name: Build wheel with ExecuTorch
+        env:
+          APPBUILDER_ENABLE_EXECUTORCH: 'ON'
+          QAI_TOOLCHAINS: aarch64-oe-linux-gcc11.2
+          QAI_HEXAGONARCH: '68'
+        run: python -m build -w --no-isolation
+
+      - name: Install wheel
+        run: pip install --force-reinstall dist/qai_appbuilder-*.whl
+
+      - name: Run real ExecuTorch smoke test
+        run: python -m pytest tests/test_executorch_sdk_smoke.py -v
 
   # -----------------------------------------------------------------
   # Android — produces libappbuilder.so for arm64-v8a via NDK r26d.

@@ -44,7 +44,12 @@ endif
 ifneq ($(EXECUTORCH_ROOT),)
 EXECUTORCH_LINK_LIBS := \
     -Wl,--start-group \
-    -Wl,--whole-archive -lportable_ops_lib -lquantized_ops_lib -Wl,--no-whole-archive \
+    -Wl,--no-as-needed \
+    -Wl,--whole-archive \
+    -lportable_ops_lib \
+    -Wl,--no-whole-archive \
+    -Wl,--as-needed \
+    -lquantized_ops_lib \
     -lportable_kernels \
     -lquantized_kernels \
     -lkernels_util_all_deps \
@@ -58,8 +63,14 @@ EXECUTORCH_LINK_LIBS := \
     -lpthreadpool \
     -lcpuinfo \
     -lextension_runner_util \
-    -lexecutorch_core \
-    -Wl,--end-group
+    -lexecutorch_core
+ifneq ($(EXECUTORCH_ENABLE_XNNPACK),)
+EXECUTORCH_LINK_LIBS += -Wl,--no-as-needed -Wl,--whole-archive -lexecutorch_backend_xnnpack -Wl,--no-whole-archive -Wl,--as-needed
+endif
+ifneq ($(EXECUTORCH_ENABLE_QNN),)
+EXECUTORCH_LINK_LIBS += -Wl,--no-as-needed -Wl,--whole-archive -lqnn_executorch_backend -Wl,--no-whole-archive -Wl,--as-needed
+endif
+EXECUTORCH_LINK_LIBS += -Wl,--end-group
 endif
 
 #========================== Define OpPackage Library Build Variables =============================================
@@ -86,12 +97,8 @@ LOCAL_LDLIBS                   += -lGLESv2 -lEGL -llog -landroid
 
 ifneq ($(EXECUTORCH_ROOT),)
 LOCAL_LDLIBS                   += -L$(EXECUTORCH_LIB_DIR) $(EXECUTORCH_LINK_LIBS) -ldl
-ifneq ($(EXECUTORCH_ENABLE_XNNPACK),)
-LOCAL_LDLIBS                   += -lexecutorch_backend_xnnpack
-endif
 ifneq ($(EXECUTORCH_ENABLE_QNN),)
 LOCAL_CPPFLAGS                 += -DAPPBUILDER_ENABLE_EXECUTORCH_QNN=1
-LOCAL_LDLIBS                   += -lqnn_executorch_backend
 endif
 endif
 include $(BUILD_SHARED_LIBRARY)

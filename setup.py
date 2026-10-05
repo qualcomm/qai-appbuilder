@@ -717,21 +717,29 @@ def _build_root_cmake_project(arch: str, source_pkg_dir: Path, build_pkg_dir: Pa
             "portable_ops_lib",
             "portable_kernels",
             "kernels_util_all_deps",
+            "pthreadpool",
+            "cpuinfo",
+            "quantized_ops_lib",
+            "quantized_kernels",
             "executorch_backend_xnnpack",
             "xnnpack_backend",
             "executorch_backend_qnn",
             "qnn_executorch_backend",
         ]
-        runtime_names = [
-            *(f"lib{name}.so" for name in shared_library_basenames),
-            *(f"{name}.dll" for name in shared_library_basenames),
+        runtime_patterns = [
+            *(f"lib{name}.so*" for name in shared_library_basenames),
+            *(f"{name}.dll*" for name in shared_library_basenames),
         ]
-        runtime_paths = [
-            executorch_root_path / "lib" / name for name in runtime_names
-        ] + [
-            executorch_root_path / "build" / "lib" / name for name in runtime_names
-        ]
-        found_runtime = {path.name: path for path in runtime_paths if path.exists()}
+        runtime_paths = []
+        for library_dir in (
+            executorch_root_path / "lib",
+            executorch_root_path / "build" / "lib",
+        ):
+            for pattern in runtime_patterns:
+                runtime_paths.extend(sorted(library_dir.glob(pattern)))
+        found_runtime = {
+            path.name: path for path in runtime_paths if path.is_file()
+        }
         if os.environ.get("APPBUILDER_ENABLE_EXECUTORCH_QNN", "").strip().lower() in {"1", "on", "true", "yes"} and not any("qnn" in name.lower() for name in found_runtime):
             raise RuntimeError("APPBUILDER_ENABLE_EXECUTORCH_QNN requires a packaged ExecuTorch QNN backend shared library")
         for pkg_dir in (source_pkg_dir, build_pkg_dir):
