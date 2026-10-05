@@ -37,10 +37,18 @@ struct ResponseTools
 
     static bool post_stream_data(httplib::DataSink &sink, const char *event, const std::string &data, bool done = false);
 
+    // prompt_tokens/completion_tokens（可选，默认 0）：填充 OpenAI 兼容的 usage 字段
+    // （prompt_tokens/completion_tokens/total_tokens=两者之和）。默认 0 对应中间流式
+    // content chunk（finish_reason 为空）本就不该携带真实 usage 的 OpenAI 惯例语义；
+    // 调用方只应在真正的生成结束帧（finish_reason 为 "stop"/"length"/"tool_calls" 等
+    // 真实终态值）或非流式最终响应中，传入从 handle->HandleProfile() 取到的真实计数，
+    // 其余调用点保持默认 0，不往逐 token 发送的性能敏感路径引入新的计算开销。
     static std::string responseDataJson(const std::string &content,
                                         const std::string &finish_reason,
                                         bool stream = true,
-                                        const std::string &tool_calls_str = "");
+                                        const std::string &tool_calls_str = "",
+                                        size_t prompt_tokens = 0,
+                                        size_t completion_tokens = 0);
 
     // 发送任务状态反馈事件（不含结束符，仅用于流式模式）
     // status: 状态标识，如 "preparing" / "inference" / "tool_call" / "writing_code"
