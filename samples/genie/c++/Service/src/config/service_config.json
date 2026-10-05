@@ -419,8 +419,8 @@
         "_comment_output_reserve_ratio": "为模型输出预留的上下文窗口比率（默认 0.20 即 20%）；实际可用于 Prompt 的 token 数 = context_size × (1 - output_reserve_ratio)",
         "output_reserve_ratio": 0.20,
 
-        "_comment_max_messages_limit": "消息数量上限（超出时智能丢弃最旧的消息，保留工具调用序列完整性）",
-        "max_messages_limit": 16,
+        "_comment_max_messages_limit": "消息数量上限（超出时智能丢弃最旧的消息，保留工具调用序列完整性）；16384 context 下 token 预算通常用不到一半就先撞上这个条数上限（Run9 实测 41% 使用率即被裁剪），把关键早期事实（如模型刚读到的配置文件路径）挤出历史、仅留数字占位符，无 Task Memo 兜底时会导致模型'失忆'后幻觉——调大到 48 让 token 预算成为主要约束，而不是条数",
+        "max_messages_limit": 48,
 
         "_comment_recent_window": "最近 N 条消息视为'新消息'，在分级压缩中受到更高保护（优先保留完整内容）",
         "recent_window": 6,
