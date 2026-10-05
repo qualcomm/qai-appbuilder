@@ -99,7 +99,8 @@
 
     "routing": {
         "_comment": "智能路由与内容安全配置",
-        "enabled": true,
+        "_comment_enabled": "true=启用智能路由/云端回退（默认），false=完全禁用 GenieRoutingGateway（纯本地模型场景，云端 base_url 不可达时建议关闭，避免每次工具调用都尝试一次注定失败的云端请求并消耗 cloud_shared.rate_limit.max_inferences_per_task 计数器）",
+        "enabled": false,
         "_comment_policy_id": "策略 ID，用于缓存 Key 隔离，修改后旧缓存自动失效",
         "policy_id": "default_v1",
         "_comment_prefer_local": "true=S0+C0/C1 优先走本地；false=S0+C1 在云端可用时允许上云",
