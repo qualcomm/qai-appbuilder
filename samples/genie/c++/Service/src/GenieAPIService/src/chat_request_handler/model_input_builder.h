@@ -21,6 +21,7 @@
 #include "task_memo_builder.h"
 #include "prompt_ledger.h"
 #include "tool_call_circuit_breaker_store.h"
+#include <chrono>
 
 
 using json = nlohmann::ordered_json;
@@ -1795,7 +1796,8 @@ private:
     // ── RunSummarizationInference ─────────────────────────────────────────────
     // 为 Phase -1 摘要化执行单次同步推理。
     // 直接构造 ModelInput 并调用 context_->Query()，不走 Build() 主流程（避免递归）。
-    // 推理失败或输出为空时返回空串，调用方保留原文。
+    // 推理失败、输出为空、或单次推理超过内部墙钟超时（见函数体 kSummarizationInferenceTimeout）
+    // 时均返回空串，调用方保留原文。
     //
     // prefill_heartbeat：可选的 prefill 阶段心跳回调，在 prefill 期间定期调用。
     // 用于在摘要推理的 prefill 阶段向客户端发送保活帧，防止 read 超时。
@@ -1835,17 +1837,29 @@ private:
         std::string result;
         bool success = false;
 
+        // Fix: 单 chunk 摘要子推理的墙钟超时保护，见同名 .notes.md「MapChunk 无超时保护」条目。
+        // static（而非普通 local）constexpr：具有静态存储期，lambda 内直接访问不需要出现在捕获列表里，
+        // 否则 MSVC 严格模式报 C3493（GCC/Clang 对此更宽松，但本项目目标平台是 MSVC/ARM64）。
+        static constexpr auto kSummarizationInferenceTimeout = std::chrono::seconds(300);
+        const auto infer_start_time = std::chrono::steady_clock::now();
+        bool timed_out = false;
+
         try
         {
             success = context_->Query(
                 sum_input,
-                [&result](std::string& token) -> bool {
+                [&result, &timed_out, infer_start_time](std::string& token) -> bool {
                     // [调试] 流式打印每个 token 到日志（与主推理的 genie_callback 风格一致）
                     if (!token.empty())
                     {
                         My_Log{}.original(true) << token;
                     }
                     result += token;
+                    if (std::chrono::steady_clock::now() - infer_start_time > kSummarizationInferenceTimeout)
+                    {
+                        timed_out = true;
+                        return false;
+                    }
                     return true;
                 },
                 prefill_heartbeat
@@ -1903,6 +1917,17 @@ private:
                 }
             }
             My_Log{} << "--- [Summarization] Token Summary End ---" << std::endl;
+        }
+
+        if (timed_out)
+        {
+            My_Log{My_Log::Level::kWarning}
+                << "[RunSummarizationInference] Inference exceeded "
+                << kSummarizationInferenceTimeout.count() << "s budget ("
+                << result.size() << " chars generated so far, likely stuck mid-<think> "
+                << "self-correction loop), aborting and falling back to original content"
+                << std::endl;
+            return "";
         }
 
         if (!success)
