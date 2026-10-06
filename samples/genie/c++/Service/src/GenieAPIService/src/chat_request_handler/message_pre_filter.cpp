@@ -1359,27 +1359,7 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
     prefilter_stats_.Reset();
     prefilter_dropped_messages_.clear();
 
-    // ── Step 1: 消息数量限制（cfg.max_messages_limit）──────────────────────
-    const size_t max_messages = cfg.max_messages_limit;
-    json filtered_msg = json::array();
-
-    if (msg.size() > max_messages) {
-        filtered_msg = SmartSelectMessages(msg, max_messages);
-        size_t dropped = msg.size() - filtered_msg.size();
-        prefilter_stats_.dropped_by_smart_select = dropped;
-        prefilter_stats_.total_dropped += dropped;
-        if (model_config_.getenablePromptDebug()) {
-            My_Log{My_Log::Level::kInfo} << "[PreFilter] Step 1: Smart limited to " << filtered_msg.size()
-                                           << " messages (dropped " << dropped << ")" << std::endl;
-        }
-    } else {
-        filtered_msg = msg;
-        if (model_config_.getenablePromptDebug()) {
-            My_Log{My_Log::Level::kInfo} << "[PreFilter] Step 1: All messages kept (total: " << msg.size() << ")" << std::endl;
-        }
-    }
-
-    // 获取 model handle
+    // 获取 model handle（提前到 Step 1 之前：token 预算感知裁剪判断需要用它计算 token 使用率）
     // 修复：多模型场景下优先使用 context_override_（per-model 的 ContextBase），
     // 而非 model_config_.get_genie_model_handle()（全局单模型句柄）
     std::shared_ptr<ContextBase> handle;
@@ -1389,6 +1369,95 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
     } else {
         handle = model_config_.get_genie_model_handle().lock();
     }
+
+    // 计算 system tokens 和 available_tokens（同样提前到 Step 1 之前）
+    size_t system_tokens = 0;
+    size_t available_tokens = 0;
+    if (handle) {
+        if (!system_prompt_for_token_calc.empty()) {
+            system_tokens = handle->TokenLength(system_prompt_for_token_calc);
+        }
+        available_tokens = (static_cast<size_t>(contextSize) > system_tokens)
+                            ? (static_cast<size_t>(contextSize) - system_tokens)
+                            : 0;
+    }
+
+    // 统一 token 计算口径：只计算 content 字段的 tokens（提前到 Step 1 之前定义，使 Step 1
+    // 的预算判断与后续 Phase 0-5 共用同一套包装开销逻辑，避免两处口径不一致）
+    // tool 消息需要加入格式包装开销（普通路径：OptimizeToolResponse 包装；Harmony 路径：BuildToolMessage 包装）
+    auto calc_msg_tokens = [&](const json& messages) -> size_t {
+        size_t total = 0;
+        for (const auto& element : messages) {
+            auto role = get_json_value(element, "role", BLANK_STRING);
+            if (role == "system") continue;
+            std::string content = get_json_value(element, "content", BLANK_STRING);
+            if (!is_harmony && role == "tool") {
+                // 普通路径：加入 OptimizeToolResponse 包装开销
+                content = "<tool_response>\n" + content + "\n</tool_response>\n";
+            } else if (is_harmony && role == "tool") {
+                // Harmony 路径：使用 HarmonyProcessor::BuildToolMessage() 生成估算内容
+                std::string actual_tool_name = "unknown_tool";
+                if (element.contains("name") && element["name"].is_string()) {
+                    actual_tool_name = element["name"].get<std::string>();
+                } else if (element.contains("tool_call_id") && element["tool_call_id"].is_string()) {
+                    std::string call_id = element["tool_call_id"].get<std::string>();
+                    if (tool_call_id_to_name) {
+                        auto it = tool_call_id_to_name->find(call_id);
+                        if (it != tool_call_id_to_name->end()) {
+                            actual_tool_name = it->second;
+                        }
+                    }
+                }
+                content = HarmonyProcessor::BuildToolMessage(actual_tool_name, content);
+            } else if (is_harmony && role == "user") {
+                // Harmony 路径：user 消息在传入 FitMessagesToContext 之前会被包装为 Harmony 格式
+                content = HarmonyProcessor::BuildUserMessage(content);
+            }
+            total += handle->TokenLength(content);
+        }
+        return total;
+    };
+
+    // ── Step 1: 消息数量限制（cfg.max_messages_limit）── token 预算感知 ──────
+    // 仅当"条数超限"且"token 使用率达到压力阈值 cfg.token_pressure_trigger_ratio"时才真正
+    // 触发 SmartSelectMessages 裁剪；否则哪怕条数超限，只要预算充足就不裁剪，交由后续
+    // Phase 0-5/FitMessagesToContext 的 token-aware 逻辑处理。无 model handle 时无法计算
+    // token 使用率，保持旧行为（纯按条数裁剪，视为预算始终紧张）。
+    const size_t max_messages = cfg.max_messages_limit;
+    json filtered_msg = json::array();
+    const bool count_exceeded = (msg.size() > max_messages);
+    bool budget_pressure = true;
+    size_t current_msg_tokens = 0;
+    if (count_exceeded && handle && available_tokens > 0) {
+        current_msg_tokens = calc_msg_tokens(msg);
+        double usage_ratio = static_cast<double>(current_msg_tokens) / static_cast<double>(available_tokens);
+        budget_pressure = (usage_ratio >= cfg.token_pressure_trigger_ratio);
+    }
+
+    if (count_exceeded && budget_pressure) {
+        filtered_msg = SmartSelectMessages(msg, max_messages);
+        size_t dropped = msg.size() - filtered_msg.size();
+        prefilter_stats_.dropped_by_smart_select = dropped;
+        prefilter_stats_.total_dropped += dropped;
+        if (model_config_.getenablePromptDebug()) {
+            My_Log{My_Log::Level::kInfo} << "[PreFilter] Step 1: Smart limited to " << filtered_msg.size()
+                                           << " messages (dropped " << dropped << ", token_usage="
+                                           << current_msg_tokens << "/" << available_tokens << ")" << std::endl;
+        }
+    } else {
+        filtered_msg = msg;
+        if (model_config_.getenablePromptDebug()) {
+            if (count_exceeded) {
+                My_Log{My_Log::Level::kInfo} << "[PreFilter] Step 1: Count exceeded (" << msg.size()
+                                               << " > " << max_messages << ") but token budget sufficient ("
+                                               << current_msg_tokens << "/" << available_tokens
+                                               << "), skip trimming" << std::endl;
+            } else {
+                My_Log{My_Log::Level::kInfo} << "[PreFilter] Step 1: All messages kept (total: " << msg.size() << ")" << std::endl;
+            }
+        }
+    }
+
     if (!handle) {
         if (model_config_.getenablePromptDebug()) {
             My_Log{My_Log::Level::kInfo} << "[PreFilter] Skipped (no model handle)" << std::endl;
@@ -1396,15 +1465,6 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
         CaptureDroppedMessages(msg, filtered_msg);
         return filtered_msg;
     }
-
-    // 计算 system tokens 和 available_tokens
-    size_t system_tokens = 0;
-    if (!system_prompt_for_token_calc.empty()) {
-        system_tokens = handle->TokenLength(system_prompt_for_token_calc);
-    }
-    size_t available_tokens = (static_cast<size_t>(contextSize) > system_tokens)
-                              ? (static_cast<size_t>(contextSize) - system_tokens)
-                              : 0;
 
     // ── [DIAG] 诊断打印辅助 Lambda ────────────────────────────────────────
     // 打印最终会发送给模型的所有内容（system prompt + 压缩后的 messages）
@@ -1489,41 +1549,7 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
     }
 
     // ── 辅助 Lambda ──────────────────────────────────────────────────────
-
-    // 统一 token 计算口径：只计算 content 字段的 tokens
-    // tool 消息需要加入格式包装开销（普通路径：OptimizeToolResponse 包装；Harmony 路径：BuildToolMessage 包装）
-    auto calc_msg_tokens = [&](const json& messages) -> size_t {
-        size_t total = 0;
-        for (const auto& element : messages) {
-            auto role = get_json_value(element, "role", BLANK_STRING);
-            if (role == "system") continue;
-            std::string content = get_json_value(element, "content", BLANK_STRING);
-            if (!is_harmony && role == "tool") {
-                // 普通路径：加入 OptimizeToolResponse 包装开销
-                content = "<tool_response>\n" + content + "\n</tool_response>\n";
-            } else if (is_harmony && role == "tool") {
-                // Harmony 路径：使用 HarmonyProcessor::BuildToolMessage() 生成估算内容
-                std::string actual_tool_name = "unknown_tool";
-                if (element.contains("name") && element["name"].is_string()) {
-                    actual_tool_name = element["name"].get<std::string>();
-                } else if (element.contains("tool_call_id") && element["tool_call_id"].is_string()) {
-                    std::string call_id = element["tool_call_id"].get<std::string>();
-                    if (tool_call_id_to_name) {
-                        auto it = tool_call_id_to_name->find(call_id);
-                        if (it != tool_call_id_to_name->end()) {
-                            actual_tool_name = it->second;
-                        }
-                    }
-                }
-                content = HarmonyProcessor::BuildToolMessage(actual_tool_name, content);
-            } else if (is_harmony && role == "user") {
-                // Harmony 路径：user 消息在传入 FitMessagesToContext 之前会被包装为 Harmony 格式
-                content = HarmonyProcessor::BuildUserMessage(content);
-            }
-            total += handle->TokenLength(content);
-        }
-        return total;
-    };
+    // calc_msg_tokens 已提前到 Step 1 之前定义（供 token 预算感知裁剪复用），此处不再重复定义。
 
     auto within_budget = [&](const json& messages) -> bool {
         return calc_msg_tokens(messages) <= available_tokens;

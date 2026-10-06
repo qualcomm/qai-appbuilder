@@ -1639,6 +1639,8 @@ bool ModelManager::InitializeConfig()
                     const auto &po = sc_json["prompt_optimization"];
                     prompt_optimization_config_.output_reserve_ratio = po.value("output_reserve_ratio", 0.20f);
                     prompt_optimization_config_.max_messages_limit = po.value("max_messages_limit", (size_t) 16);
+                    prompt_optimization_config_.token_pressure_trigger_ratio =
+                            po.value("token_pressure_trigger_ratio", 0.75);
                     prompt_optimization_config_.recent_window = po.value("recent_window", (size_t) 6);
                     prompt_optimization_config_.old_compress_len = po.value("old_compress_len", (size_t) 300);
                     prompt_optimization_config_.recent_compress_len = po.value("recent_compress_len", (size_t) 600);

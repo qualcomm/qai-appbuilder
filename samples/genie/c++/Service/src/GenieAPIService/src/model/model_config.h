@@ -541,6 +541,11 @@ struct PromptOptimizationConfig {
 
     // ── 消息数量控制 ────────────────────────────────────────
     size_t max_messages_limit = 16;         // 消息数量上限（PreFilter Step 1）
+    // Step 1 token 预算感知裁剪的压力阈值：仅当消息条数超过 max_messages_limit **且**
+    // 当前消息 token 使用率（相对 available_tokens）达到此比例时才真正触发裁剪；
+    // 否则哪怕条数超限，只要预算充足也不裁剪，交由后续 Phase 0-5/FitMessagesToContext
+    // 的 token-aware 逻辑处理。无 model handle 时无法计算使用率，保持旧行为（纯按条数裁剪）。
+    double token_pressure_trigger_ratio = 0.75;
     size_t recent_window = 6;               // 最近 N 条消息视为"新消息"（受保护）
 
     // ── 分级压缩阈值（字符数）──────────────────────────────
