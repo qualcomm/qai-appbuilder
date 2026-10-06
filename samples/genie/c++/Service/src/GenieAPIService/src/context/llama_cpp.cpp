@@ -626,6 +626,17 @@ public:
 
             while (n_remain != 0)
             {
+                if (n_past + 1 + n_draft_max >= n_ctx)
+                {
+                    My_Log{My_Log::Level::kWarning}
+                        << "[LLAMACpp] " << query_type
+                        << " Context limit reached (n_past=" << n_past << ", n_ctx=" << n_ctx
+                        << "). Stopping generation." << std::endl;
+                    stopped_by_output_limit_ = true;
+                    should_stop = true;
+                    break;
+                }
+
                 if (draft.empty())
                 {
                     common_speculative_get_draft_params(spec_.get(), kSpecSeqId) = {
