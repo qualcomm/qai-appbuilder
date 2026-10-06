@@ -17,6 +17,7 @@ tools/
 alg/
 third/
 tmp/
+assert/
 assets/
 # 测试脚本输出目录（test_service.py/test_builder_agent_tasks.py 的 --out_dir，默认
 # test_results_* 或 test/test_results_*_review 等）：这些目录下可能包含 mklink /J
