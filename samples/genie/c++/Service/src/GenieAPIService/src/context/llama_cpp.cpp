@@ -489,6 +489,17 @@ public:
                     return false;
                 }
 
+                if (is_speculative_)
+                {
+                    llama_batch batch_chunk = llama_batch_init((int) embd.size(), 0, 1);
+                    for (size_t i = 0; i < embd.size(); ++i)
+                    {
+                        common_batch_add(batch_chunk, embd[i], (llama_pos) (n_past + (int) i), {0}, false);
+                    }
+                    common_speculative_process(spec_.get(), batch_chunk);
+                    llama_batch_free(batch_chunk);
+                }
+
                 n_past += (int) embd.size();
                 total_decode_batches++;
 
@@ -607,22 +618,6 @@ public:
             llama_tokens spec_prompt(embd_inp.begin(), embd_inp.end() - 1);
             llama_tokens draft;
             const int n_draft_max = std::max(1, params_.speculative.draft.n_max);
-
-            // drafter（如 dflash2）自身的解码/缓存状态只能通过 common_speculative_process() 驱动；
-            // prompt 部分虽然已经在上面共享的 prefill 循环里 decode 进了 target ctx，但从未喂给过
-            // spec_，drafter 对 prompt 一无所知。这里用一个只含 prompt token 的 batch 补喂一次，
-            // 对齐官方参考实现 examples/speculative-simple/speculative-simple.cpp 的顺序（prompt
-            // process 必须先于 common_speculative_begin），否则首轮草稿会在对 prompt 一无所知的
-            // 情况下生成，质量无法保证。
-            {
-                llama_batch batch_prompt = llama_batch_init((int) spec_prompt.size(), 0, 1);
-                for (size_t i = 0; i < spec_prompt.size(); ++i)
-                {
-                    common_batch_add(batch_prompt, spec_prompt[i], (llama_pos) i, {kSpecSeqId}, false);
-                }
-                common_speculative_process(spec_.get(), batch_prompt);
-                llama_batch_free(batch_prompt);
-            }
 
             common_speculative_begin(spec_.get(), kSpecSeqId, spec_prompt);
 
