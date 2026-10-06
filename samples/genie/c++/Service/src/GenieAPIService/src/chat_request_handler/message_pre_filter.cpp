@@ -512,6 +512,7 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
         result.memo_active = memo_result.active;
         result.memo_confidence = memo_result.confidence;
         result.memo_refresh_count = memo_result.refresh_count;
+        result.memo_pages_total = memo_result.pages_total;
     }
 
     // 步骤 4: 最终检查

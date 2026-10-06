@@ -18,6 +18,7 @@
 #include <vector>
 #include <functional>
 #include <optional>
+#include <utility>
 
 using json = nlohmann::ordered_json;
 
@@ -43,6 +44,7 @@ public:
         bool active = false;
         double confidence = 0.0;
         size_t refresh_count = 0;
+        size_t pages_total = 0;  // 轻量分页目录当前条目数（供 PromptLedger/X-Genie-Prompt-Memo-Pages 响应头透传）
         std::string compact_render;
     };
 
@@ -74,6 +76,13 @@ private:
                                   bool has_prev, double prev_confidence) const;
     std::string BuildModelPrompt(const json& prev, const json& rule_layer_result) const;
     bool TryParseModelOutput(const std::string& raw, json& out) const;
+
+    // 原始目标锚点鲁棒抓取：在前 config_.goal_scan_window 条 role=="user" 的消息里，
+    // 取第一条长度 ≥ config_.min_goal_signal_chars 的作为锚点（高置信度）；全部不达标
+    // 时回退取第一条并标记低置信度。返回 {截断后的锚点文本, 是否高置信度}。
+    // 只在 Update() 中"entry 尚未捕获过锚点"时调用一次，捕获后通过 entry 字段透传，
+    // 永不重新调用覆盖。
+    std::pair<std::string, bool> ExtractGoalAnchor(const json& raw_messages) const;
 
     const PromptOptimizationConfig::TaskMemoConfig& config_;
     const ModelInstanceConfig& instance_config_;

@@ -701,6 +701,21 @@ struct PromptOptimizationConfig {
         double low_confidence_threshold = 0.5;   // 上一份备忘录 confidence 低于此值时触发模型层深度总结
         int rule_layer_preview_chars = 160;      // 规则层 facts_constraints/completed/tool_state 预览截断长度（字符数）
 
+        // ── 原始目标锚点（original_goal_raw）鲁棒抓取 ──────────
+        size_t goal_scan_window = 3;             // 在前几条非 system 用户消息里扫描锚点候选
+        size_t min_goal_signal_chars = 20;       // 候选消息长度达到此值才视为"足够实质"；全部不达标时回退取第一条并标记 low 置信度
+        size_t goal_anchor_preview_chars = 300;  // 渲染 original_goal_raw/original_goal_refined 时的预览截断长度（字符数）
+
+        // ── 连续失败不轻易放弃（与 ToolCallCircuitBreakerStore 打通，只读） ──
+        // 建议小于 ToolCallRepairConfig::CircuitBreakerConfig::consecutive_layer3_threshold（默认 3），
+        // 确保"坚持提示"先于熔断器自身的工具声明降级出现，避免同一轮提示词自相矛盾。
+        int failure_streak_warn_threshold = 2;
+
+        // ── 轻量分页目录（不留原文，只存 page_id+source_range+一行类别统计 gist） ──
+        struct PageDirectoryConfig {
+            size_t max_entries = 20;             // 环形缓冲上限，超出按 FIFO 淘汰最旧条目
+        } page_directory;
+
         TaskMemoStoreConfig store;
     } task_memo;
 };

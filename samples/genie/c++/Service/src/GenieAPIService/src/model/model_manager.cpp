@@ -1975,6 +1975,16 @@ bool ModelManager::InitializeConfig()
                         memo_cfg.long_tool_chain_threshold = tm.value("long_tool_chain_threshold", (size_t) 4);
                         memo_cfg.low_confidence_threshold = tm.value("low_confidence_threshold", 0.5);
                         memo_cfg.rule_layer_preview_chars = tm.value("rule_layer_preview_chars", 160);
+                        memo_cfg.goal_scan_window = tm.value("goal_scan_window", (size_t) 3);
+                        memo_cfg.min_goal_signal_chars = tm.value("min_goal_signal_chars", (size_t) 20);
+                        memo_cfg.goal_anchor_preview_chars = tm.value("goal_anchor_preview_chars", (size_t) 300);
+                        memo_cfg.failure_streak_warn_threshold = tm.value("failure_streak_warn_threshold", 2);
+
+                        if (tm.contains("page_directory") && tm["page_directory"].is_object())
+                        {
+                            const auto &pd = tm["page_directory"];
+                            memo_cfg.page_directory.max_entries = pd.value("max_entries", (size_t) 20);
+                        }
 
                         if (tm.contains("store") && tm["store"].is_object())
                         {
@@ -1991,6 +2001,11 @@ bool ModelManager::InitializeConfig()
                                 << ", long_tool_chain_threshold=" << memo_cfg.long_tool_chain_threshold
                                 << ", low_confidence_threshold=" << memo_cfg.low_confidence_threshold
                                 << ", rule_layer_preview_chars=" << memo_cfg.rule_layer_preview_chars
+                                << ", goal_scan_window=" << memo_cfg.goal_scan_window
+                                << ", min_goal_signal_chars=" << memo_cfg.min_goal_signal_chars
+                                << ", goal_anchor_preview_chars=" << memo_cfg.goal_anchor_preview_chars
+                                << ", failure_streak_warn_threshold=" << memo_cfg.failure_streak_warn_threshold
+                                << ", page_directory.max_entries=" << memo_cfg.page_directory.max_entries
                                 << ", store.max_entries=" << memo_cfg.store.max_entries
                                 << ", store.max_memory_mb=" << memo_cfg.store.max_memory_mb
                                 << ", store.ttl_minutes=" << memo_cfg.store.ttl_minutes

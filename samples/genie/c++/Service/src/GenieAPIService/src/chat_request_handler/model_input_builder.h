@@ -637,6 +637,7 @@ private:
                 last_ledger_.memo_active = optimized.memo_active;
                 last_ledger_.memo_confidence = optimized.memo_confidence;
                 last_ledger_.memo_refresh_count = optimized.memo_refresh_count;
+                last_ledger_.memo_pages_total = optimized.memo_pages_total;
             }
 
             std::ostringstream log_stream;
@@ -1612,6 +1613,7 @@ private:
             last_ledger_.memo_active = optimized.memo_active;
             last_ledger_.memo_confidence = optimized.memo_confidence;
             last_ledger_.memo_refresh_count = optimized.memo_refresh_count;
+            last_ledger_.memo_pages_total = optimized.memo_pages_total;
         }
 
         return result;

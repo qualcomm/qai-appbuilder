@@ -7,6 +7,7 @@
 //==============================================================================
 
 #include "task_memo_builder.h"
+#include "tool_call_circuit_breaker_store.h"
 #include <utils.h>
 #include <sstream>
 #include <iomanip>
@@ -174,9 +175,39 @@ json TaskMemoBuilder::BuildRuleLayer(const json& prev, const std::vector<GenieCh
         }
     }
 
-    size_t folded = entry.value("_folded_count", (size_t)0) + dropped_messages.size();
+    size_t folded_before = entry.value("_folded_count", (size_t)0);
+    size_t folded = folded_before + dropped_messages.size();
     entry["_folded_count"] = folded;
     entry["source_range"] = "messages[0:" + std::to_string(folded) + ")";
+
+    // 轻量分页目录：每次 Update() 调用（即一次驱逐批次）分配一个递增 page_id，只记
+    // {page_id, source_range, 一行确定性类别统计 gist}，不含任何原始消息文本——与
+    // 现有安全脱敏边界保持一致。环形缓冲超过 page_directory.max_entries 时 FIFO
+    // 淘汰最旧条目（不是按 page_id 淘汰，是按数组顺序，天然等价于最旧）。
+    {
+        size_t tool_failed = 0;
+        for (const auto& m : dropped_messages) {
+            if (m.role == "tool" && LooksLikeFailure(m.content))
+                ++tool_failed;
+        }
+        size_t page_id = entry.value("_next_page_id", (size_t) 1);
+        entry["_next_page_id"] = page_id + 1;
+
+        json page = json::object();
+        page["page_id"] = page_id;
+        page["source_range"] = "messages[" + std::to_string(folded_before) + ":" + std::to_string(folded) + ")";
+        std::ostringstream gist;
+        gist << dropped_messages.size() << " 条消息";
+        if (tool_failed > 0)
+            gist << "，含 " << tool_failed << " 条工具失败";
+        page["gist"] = gist.str();
+
+        if (!entry.contains("pages") || !entry["pages"].is_array())
+            entry["pages"] = json::array();
+        entry["pages"].push_back(page);
+        while (entry["pages"].size() > config_.page_directory.max_entries)
+            entry["pages"].erase(entry["pages"].begin());
+    }
 
     std::string concat;
     for (const auto& m : dropped_messages)
@@ -184,6 +215,35 @@ json TaskMemoBuilder::BuildRuleLayer(const json& prev, const std::vector<GenieCh
     entry["content_hash"] = std::to_string(std::hash<std::string>{}(concat));
     entry["confidence"] = 0.6;
     return entry;
+}
+
+// ── ExtractGoalAnchor（原始目标锚点鲁棒抓取）───────────────────────────────────
+
+std::pair<std::string, bool> TaskMemoBuilder::ExtractGoalAnchor(const json& raw_messages) const
+{
+    if (!raw_messages.is_array() || raw_messages.empty())
+        return {"", false};
+
+    std::vector<std::string> candidates;
+    for (const auto& msg : raw_messages) {
+        if (msg.value("role", "") != "user")
+            continue;
+        // 用 get_json_value<std::string>() 而非裸 dump()：content 既可能是纯字符串，
+        // 也可能是 OpenAI 多段 content-parts 数组，该函数对两种格式都能安全提取纯文本。
+        candidates.push_back(get_json_value<std::string>(msg, "content", ""));
+        if (candidates.size() >= config_.goal_scan_window)
+            break;
+    }
+    if (candidates.empty())
+        return {"", false};
+
+    for (const auto& c : candidates) {
+        if (c.size() >= config_.min_goal_signal_chars)
+            return {safe_utf8_truncate(c, config_.goal_anchor_preview_chars, ""), true};
+    }
+    // 全部不达标（如首几条均为"你好"一类寒暄）：仍需确定性兜底，取第一条并标记低置信度，
+    // 不能返回空锚点——这是"不遗忘目标"硬保证的前提，哪怕信号很弱也要有锚点可渲染。
+    return {safe_utf8_truncate(candidates[0], config_.goal_anchor_preview_chars, ""), false};
 }
 
 // ── ShouldTriggerModelLayer ───────────────────────────────────────────────────
@@ -218,7 +278,10 @@ std::string TaskMemoBuilder::BuildModelPrompt(const json& prev, const json& rule
          << "rule-extracted facts below. Output ONLY one JSON object with exactly these fields: "
          << "completed (string array), current_plan (string), next_actions (string array), "
          << "facts_constraints (string array), open_questions (string array), tool_state (object), "
-         << "confidence (number 0.0-1.0). No prose, no markdown fences, JSON only.\n\n"
+         << "confidence (number 0.0-1.0), goal_restatement (string, OPTIONAL: a one-sentence "
+         << "restatement of the user's original goal, only if it can be confidently inferred from "
+         << "the context; omit this field entirely if unclear, do not guess). "
+         << "No prose, no markdown fences, JSON only.\n\n"
          << "Previous memo: " << (prev.is_object() ? prev.dump() : std::string("{}")) << "\n\n"
          << "Rule-extracted facts: " << rule_layer_result.dump();
 
@@ -282,6 +345,18 @@ TaskMemoBuilder::UpdateResult TaskMemoBuilder::Update(const json& raw_messages,
 
     json entry = BuildRuleLayer(has_prev ? *prev : json::object(), dropped_messages);
 
+    // 原始目标锚点：只在尚未捕获过时抓取一次；一旦捕获，后续轮次通过 entry/prev 透传，
+    // 永不被规则层或模型层的后续更新覆盖（BuildRuleLayer 已经把 prev 的既有字段原样
+    // 带入 entry，这里只需补齐"从未捕获过"的情形）。
+    bool goal_already_captured = entry.contains("original_goal_raw")
+        && entry["original_goal_raw"].is_string()
+        && !entry["original_goal_raw"].get<std::string>().empty();
+    if (!goal_already_captured) {
+        auto anchor = ExtractGoalAnchor(raw_messages);
+        entry["original_goal_raw"] = anchor.first;
+        entry["original_goal_confidence"] = anchor.second ? std::string("high") : std::string("low");
+    }
+
     if (ShouldTriggerModelLayer(dropped_messages, has_prev, prev_confidence)
             && (!is_alive_fn_ || is_alive_fn_())) {
         std::string prompt = BuildModelPrompt(has_prev ? *prev : json::object(), entry);
@@ -291,10 +366,39 @@ TaskMemoBuilder::UpdateResult TaskMemoBuilder::Update(const json& raw_messages,
             model_entry["source_range"] = entry["source_range"];
             model_entry["content_hash"] = entry["content_hash"];
             model_entry["_folded_count"] = entry["_folded_count"];
+            // pages/_next_page_id 是规则层维护的轻量分页目录，模型层不感知、不生成，
+            // 必须显式透传，否则模型层触发时这批 Update() 新增的分页记录会被整体丢失。
+            model_entry["pages"] = entry["pages"];
+            model_entry["_next_page_id"] = entry["_next_page_id"];
+            // original_goal_raw/confidence 权威兜底，从 entry 显式透传，不允许模型层输出覆盖。
+            model_entry["original_goal_raw"] = entry["original_goal_raw"];
+            model_entry["original_goal_confidence"] = entry["original_goal_confidence"];
+            // goal_restatement 是模型层旁路产出的辅助字段，写入 original_goal_refined 并标注
+            // "可能不准确"；模型本轮未给出时，沿用 entry（即 prev）里已有的上一次旁路结果。
+            if (model_entry.contains("goal_restatement") && model_entry["goal_restatement"].is_string()
+                    && !model_entry["goal_restatement"].get<std::string>().empty()) {
+                model_entry["original_goal_refined"] =
+                    safe_utf8_truncate(model_entry["goal_restatement"].get<std::string>(),
+                                        config_.goal_anchor_preview_chars, "");
+            } else if (entry.contains("original_goal_refined")) {
+                model_entry["original_goal_refined"] = entry["original_goal_refined"];
+            }
+            model_entry.erase("goal_restatement");
             model_entry["confidence"] = std::min(1.0, std::max(0.0, model_entry.value("confidence", 0.75)));
             entry = model_entry;
         }
     }
+
+    // 连续失败不轻易放弃：与 ToolCallCircuitBreakerStore 打通，只读查询（不调用
+    // RecordLayer3Trigger/RecordSuccess，保持该 store 计数语义的唯一写入方仍是
+    // response_dispatcher.cpp）。key 计算方式与该 store 自身注释里记录的约定一致：
+    // session_key 用 ComputeFirstMsgKey（已算好的 first_msg_key），model_name 用
+    // instance_config_.get_model_name()，与 response_dispatcher.cpp 查到的是同一条记录。
+    std::string cb_key = ToolCallCircuitBreakerStore::MakeKey(first_msg_key, instance_config_.get_model_name());
+    entry["failure_streak"] = ToolCallCircuitBreakerStore::GetInstance().GetConsecutiveCount(cb_key);
+    // Render() 是 static 方法读不到 config_，阈值随 entry 一起落盘，保持 Render() 签名
+    // 不变（纯函数于 entry），也让每条已存储的备忘录自描述当时生效的阈值是多少。
+    entry["failure_streak_warn_threshold"] = config_.failure_streak_warn_threshold;
 
     entry["refresh_count"] = prev_refresh + 1;
     store_->Put(fingerprint, first_msg_key, entry);
@@ -302,6 +406,7 @@ TaskMemoBuilder::UpdateResult TaskMemoBuilder::Update(const json& raw_messages,
     res.active = true;
     res.confidence = entry.value("confidence", 0.0);
     res.refresh_count = entry.value("refresh_count", (size_t)0);
+    res.pages_total = (entry.contains("pages") && entry["pages"].is_array()) ? entry["pages"].size() : 0;
     res.compact_render = RenderCompact(entry);
     return res;
 }
@@ -326,6 +431,35 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
     };
 
     std::string header = "## Task Memo\n";
+
+    // 目标锚点块：最高优先级，不参与下面的"整块丢弃"循环；预算不足时只截断该块文本
+    // 本身（复用 safe_utf8_truncate），绝不整块跳过——这是"不遗忘目标"的硬保证。
+    // 连续失败持久化提示行同属这一不可整块丢弃的段落，与目标锚点块拼在一起。
+    std::string goal_block;
+    std::string goal_raw = entry.value("original_goal_raw", std::string(""));
+    if (!goal_raw.empty()) {
+        std::ostringstream oss;
+        oss << "Original goal: " << goal_raw;
+        if (entry.value("original_goal_confidence", std::string("high")) == "low")
+            oss << " (low confidence: no strong signal detected in the opening messages)";
+        oss << "\n";
+        std::string goal_refined = entry.value("original_goal_refined", std::string(""));
+        if (!goal_refined.empty()) {
+            oss << "Model-restated goal (may be inaccurate; the raw goal above is authoritative): "
+                << goal_refined << "\n";
+        }
+        goal_block = oss.str();
+    }
+
+    int failure_streak = entry.value("failure_streak", 0);
+    int failure_streak_warn_threshold = entry.value("failure_streak_warn_threshold", 0);
+    if (failure_streak_warn_threshold > 0 && failure_streak >= failure_streak_warn_threshold) {
+        std::ostringstream oss;
+        oss << "Note: " << failure_streak << " consecutive tool-call failures detected. "
+            << "Try an alternative approach instead of giving up on the original goal above.\n";
+        goal_block += oss.str();
+    }
+
     std::string plan = entry.value("current_plan", std::string(""));
     if (!plan.empty())
         header += "Current plan: " + plan + "\n";
@@ -341,6 +475,22 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
         tool_state_block = oss.str();
     }
 
+    // 轻量分页目录：最低优先级，预算不足时第一个被整块丢弃。只渲染 page_id/source_range/
+    // gist 三个字段，不含任何原始消息文本——与 BuildRuleLayer() 落盘时的安全边界一致。
+    std::string page_directory_block;
+    if (entry.contains("pages") && entry["pages"].is_array() && !entry["pages"].empty()) {
+        std::ostringstream oss;
+        oss << "Evicted message pages (oldest first, no original text retained):\n";
+        for (const auto& page : entry["pages"]) {
+            if (!page.is_object())
+                continue;
+            oss << "- page " << page.value("page_id", (size_t) 0) << " ("
+                << page.value("source_range", std::string("")) << "): "
+                << page.value("gist", std::string("")) << "\n";
+        }
+        page_directory_block = oss.str();
+    }
+
     // 由高到低优先级排列；预算不足时从末尾（最低优先级）整块丢弃，不做块内截断。
     const std::string blocks[] = {
         render_list("Completed", "completed"),
@@ -348,9 +498,19 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
         render_list("Facts / constraints", "facts_constraints"),
         render_list("Open questions", "open_questions"),
         tool_state_block,
+        page_directory_block,
     };
 
     std::string out = header;
+    if (!goal_block.empty()) {
+        if (max_chars > 0 && out.size() + goal_block.size() > max_chars) {
+            // 预算不足：只截断目标锚点块文本本身，绝不整块丢弃。
+            size_t remaining = (max_chars > out.size()) ? (max_chars - out.size()) : 0;
+            out += safe_utf8_truncate(goal_block, remaining, "");
+        } else {
+            out += goal_block;
+        }
+    }
     for (const auto& block : blocks) {
         if (block.empty())
             continue;
@@ -379,6 +539,9 @@ std::string TaskMemoBuilder::RenderCompact(const json& entry)
 
     std::ostringstream oss;
     oss << "[Task memo: " << completed_n << " step(s) completed";
+    std::string goal_raw = entry.value("original_goal_raw", std::string(""));
+    if (!goal_raw.empty())
+        oss << "; goal: " << safe_utf8_truncate(goal_raw, 80, "...");
     if (!plan.empty())
         oss << "; plan: " << plan;
     if (!next.empty())

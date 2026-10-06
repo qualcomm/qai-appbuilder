@@ -6986,12 +6986,17 @@ def _stateless_chat_request(host, port, model_name, user_content, tools=None, ti
 
 
 def run_numresponse_stateless_mode_regressions(args, models, all_results, all_crash_events, all_perf_samples):
-    """新增的、不经 QAIModelBuilder 的差异化自验证矩阵：对同一批探针请求分别用
+    """不经 QAIModelBuilder 的 `-n -1` vs `-n 30` 自验证矩阵：对同一批探针请求分别用
     `-n -1 -d 4` 与 `-n 30 -d 4`（默认对照组）各启动一次裸 GenieAPIService.exe（两次完全
     独立的服务生命周期,先完整停止第一组再启动第二组,不做进程内热切换——numResponse 是
-    进程级全局配置,无法运行时切换),对 4 项行为差异（历史管理/系统提示词优化/工具定义
-    优化/长文本摘要）做双向日志断言,是全方案里唯一能通过读日志真正坐实这些差异确实
-    按预期互斥发生的地方（Builder 路径固定 loglevel=3 且结构性无法同步读子进程日志）。
+    进程级全局配置,无法运行时切换）。架构事实（已读 model_input_builder.h 源码核实）：
+    压缩管线（系统提示词优化/工具定义优化/长文本摘要）对两种模式完全统一调用、无任何
+    `-n` 分支，三者按"一致性断言"（两侧必须同时出现日志）核验；只有历史管理
+    （`[History] Skipped` vs `✓ Added`）是真实存在的差异——`IsStatelessMode()` 唯一的
+    用途是在 response_dispatcher.cpp 决定客户端断开后是否把历史持久化在服务端，与压缩
+    管线无关——该探针按"双向断言"（互斥出现）核验。全方案里唯一能通过读日志真正坐实
+    这些差异/一致性确实按预期发生的地方（Builder 路径固定 loglevel=3 且结构性无法同步
+    读子进程日志）。
     """
     print(f"\n{'='*60}")
     print("阶段: -n -1 vs -n 30 差异化自验证矩阵（历史管理/系统提示词优化/工具定义优化/长文本摘要）")
@@ -7168,80 +7173,87 @@ def run_numresponse_stateless_mode_regressions(args, models, all_results, all_cr
             passed=False, status_code=0, latency_ms=0, detail=f"用例异常: {type(e).__name__}: {e}", crashed=True
         ))
 
-    # ── 探针2：系统提示词优化（双向断言） ────────────────────────────────────
+    # ── 探针2：系统提示词优化（一致性断言：压缩管线不分 -n 分支，两侧必须同时出现日志） ──
+    # 架构事实（已读 model_input_builder.h 源码核实，`BuildTaskMemoSection`/`ApplyFitMessagesToContext`
+    # 等调用点在 General/Harmony 两路径均对称存在，无任何 `numResponse()==-1`/`IsStatelessMode()` 判断）：
+    # PreFilterMessages/FitMessagesToContext/系统提示词优化等压缩管线对 `-n -1`（无状态）与 `-n` 正整数
+    # （有状态）两种模式完全统一调用，没有分支；`IsStatelessMode()`/`GetEffectiveStatelessMode()`
+    # 唯一的真实用途在 response_dispatcher.cpp，只决定是否在客户端断开后把历史持久化在服务端（即
+    # 上面探针1验证的 `[History] Skipped` vs `✓ Added` 差异），与本探针验证的压缩管线完全无关。
+    # 曾错误断言 `30` 侧不应出现该日志（旧假设：压缩管线按 -n 分支），已被真机回归证伪并纠正于此。
     try:
-        name = f"{name_prefix} 系统提示词优化 ([Optimization] System prompt savings，双向断言)"
+        name = f"{name_prefix} 系统提示词优化 ([Optimization] System prompt savings，一致性断言)"
         if data_neg1 is None or data_30 is None:
             all_results.append(TestResult(
                 name=name, round_num=1, model_name=model_name, passed=False, status_code=0, latency_ms=0,
-                detail="其中一侧服务未能成功启动/完成探针请求，无法完成双向比对", skipped=True
+                detail="其中一侧服务未能成功启动/完成探针请求，无法完成一致性比对", skipped=True
             ))
         else:
             log_neg1 = data_neg1["hist_sysprompt_log"]
             log_30 = data_30["hist_sysprompt_log"]
             neg1_has_savings = "[Optimization] System prompt savings:" in log_neg1
             mode30_has_savings = "[Optimization] System prompt savings:" in log_30
-            passed = neg1_has_savings and not mode30_has_savings
-            detail = f"-1侧出现savings日志={neg1_has_savings}; 30侧出现savings日志={mode30_has_savings}"
+            passed = neg1_has_savings and mode30_has_savings
+            detail = f"-1侧出现savings日志={neg1_has_savings}; 30侧出现savings日志={mode30_has_savings}（两侧应一致）"
             all_results.append(TestResult(
                 name=name, round_num=1, model_name=model_name, passed=passed, status_code=200 if passed else 0,
                 latency_ms=0, detail=detail
             ))
     except Exception as e:
         all_results.append(TestResult(
-            name=f"{name_prefix} 系统提示词优化双向断言", round_num=1, model_name=model_name,
+            name=f"{name_prefix} 系统提示词优化一致性断言", round_num=1, model_name=model_name,
             passed=False, status_code=0, latency_ms=0, detail=f"用例异常: {type(e).__name__}: {e}", crashed=True
         ))
 
-    # ── 探针3：工具定义优化（双向断言，须用预定义工具名 "read"） ───────────────
+    # ── 探针3：工具定义优化（一致性断言，须用预定义工具名 "read"；原理同探针2，压缩管线不分 -n 分支）──
     try:
-        name = f"{name_prefix} 工具定义优化 ([Optimizer] Tools - Original...Savings...，双向断言)"
+        name = f"{name_prefix} 工具定义优化 ([Optimizer] Tools - Original...Savings...，一致性断言)"
         if data_neg1 is None or data_30 is None:
             all_results.append(TestResult(
                 name=name, round_num=1, model_name=model_name, passed=False, status_code=0, latency_ms=0,
-                detail="其中一侧服务未能成功启动/完成探针请求，无法完成双向比对", skipped=True
+                detail="其中一侧服务未能成功启动/完成探针请求，无法完成一致性比对", skipped=True
             ))
         else:
             log_neg1 = data_neg1["tool_log"]
             log_30 = data_30["tool_log"]
             neg1_has_tool_opt = ("[Optimizer] Tools - Original:" in log_neg1) and ("Savings:" in log_neg1)
             mode30_has_tool_opt = ("[Optimizer] Tools - Original:" in log_30) and ("Savings:" in log_30)
-            passed = neg1_has_tool_opt and not mode30_has_tool_opt
-            detail = f"-1侧出现工具优化日志={neg1_has_tool_opt}; 30侧出现工具优化日志={mode30_has_tool_opt}"
+            passed = neg1_has_tool_opt and mode30_has_tool_opt
+            detail = f"-1侧出现工具优化日志={neg1_has_tool_opt}; 30侧出现工具优化日志={mode30_has_tool_opt}（两侧应一致）"
             all_results.append(TestResult(
                 name=name, round_num=1, model_name=model_name, passed=passed, status_code=200 if passed else 0,
                 latency_ms=0, detail=detail
             ))
     except Exception as e:
         all_results.append(TestResult(
-            name=f"{name_prefix} 工具定义优化双向断言", round_num=1, model_name=model_name,
+            name=f"{name_prefix} 工具定义优化一致性断言", round_num=1, model_name=model_name,
             passed=False, status_code=0, latency_ms=0, detail=f"用例异常: {type(e).__name__}: {e}", crashed=True
         ))
 
-    # ── 探针4：长文本摘要（双向断言） ────────────────────────────────────────
+    # ── 探针4：长文本摘要（一致性断言；原理同探针2/3，压缩管线不分 -n 分支） ──────────
     try:
-        name = f"{name_prefix} 长文本摘要 ([LongTextSummarizer] User message summarized，双向断言)"
+        name = f"{name_prefix} 长文本摘要 ([LongTextSummarizer] User message summarized，一致性断言)"
         if data_neg1 is None or data_30 is None:
             all_results.append(TestResult(
                 name=name, round_num=1, model_name=model_name, passed=False, status_code=0, latency_ms=0,
-                detail="其中一侧服务未能成功启动/完成探针请求，无法完成双向比对", skipped=True
+                detail="其中一侧服务未能成功启动/完成探针请求，无法完成一致性比对", skipped=True
             ))
         else:
             log_neg1 = data_neg1["longtext_log"]
             log_30 = data_30["longtext_log"]
             neg1_has_summarized = "[LongTextSummarizer] User message summarized:" in log_neg1
             mode30_has_summarized = "[LongTextSummarizer] User message summarized:" in log_30
-            passed = neg1_has_summarized and not mode30_has_summarized
+            passed = neg1_has_summarized and mode30_has_summarized
             detail = (f"context_size(-1侧)={data_neg1.get('context_size')}, "
                       f"context_size(30侧)={data_30.get('context_size')}, trigger_ratio={trigger_ratio}; "
-                      f"-1侧出现摘要日志={neg1_has_summarized}; 30侧出现摘要日志={mode30_has_summarized}")
+                      f"-1侧出现摘要日志={neg1_has_summarized}; 30侧出现摘要日志={mode30_has_summarized}（两侧应一致）")
             all_results.append(TestResult(
                 name=name, round_num=1, model_name=model_name, passed=passed, status_code=200 if passed else 0,
                 latency_ms=0, detail=detail
             ))
     except Exception as e:
         all_results.append(TestResult(
-            name=f"{name_prefix} 长文本摘要双向断言", round_num=1, model_name=model_name,
+            name=f"{name_prefix} 长文本摘要一致性断言", round_num=1, model_name=model_name,
             passed=False, status_code=0, latency_ms=0, detail=f"用例异常: {type(e).__name__}: {e}", crashed=True
         ))
 
@@ -11517,9 +11529,16 @@ def _run_skill_capacity_suite(args, models, remote_mode, out_dir):
 # 记忆前沿定义：模型在 N 个填充轮次（用于挤占预算、诱发丢弃）之后，Round2 追问仍能
 # 正确复述任务目标/约束/TODO 三个 canary code 的最大 N。legacy（task_memo.enabled=false）
 # 与 optimized（=true，model_layer_enabled=false 保证判定确定性）分别测出前沿，用
-# 倍数/差值量化机制收益——stateful 模式下 IsStatelessMode()==false，整条压缩管线（含
-# TaskMemoBuilder）都不会跑，两档退化为完全等价，故 stateful 模式只验证 Step1 修复后
-# ChatHistory::Limit() 窗口内召回是否成立，不做双臂对照。
+# 倍数/差值量化机制收益。
+#
+# 已更正的架构事实（曾错误记载为"stateful 模式下整条压缩管线不会跑"，这与当前代码不符，
+# 不要再假设它成立）：`ChatHistory::Limit()` 全仓库零调用方，是死代码；`model_input_builder.h`
+# 驱动的 `PreFilterMessages`/`FitMessagesToContext`/`BuildTaskMemoSection`/`TaskMemoBuilder`
+# 整条压缩管线（含 Task Memo）对 `-n` 取 -1 还是正整数完全无分支、无条件执行，两种模式走的
+# 是同一条代码路径。`IsStatelessMode()`/`GetEffectiveStatelessMode()` 在全源码中唯一的消费点
+# 在 `response_dispatcher.cpp`，只决定客户端断开后服务端是否额外持久化聊天历史——与压缩/
+# Task Memo 管线完全无关，本套件的断言不涉及这个分支。stateful 模式因此与 stateless 共享
+# 同一套 legacy/optimized 双臂语义，不是"退化为完全等价"的特例。
 
 _LTM_GOAL_CODE = "LTM-GOAL-7F3A1"
 _LTM_CONSTRAINT_CODE = "LTM-CONSTRAINT-9B2E4"
@@ -11602,7 +11621,18 @@ def _ltm_extract_memo_headers(headers, suffix):
         f"memo_active{suffix}": _ltm_header_bool(headers, "X-Genie-Prompt-Memo-Active"),
         f"memo_confidence{suffix}": _ltm_header_num(headers, "X-Genie-Prompt-Memo-Confidence", float),
         f"memo_refresh{suffix}": _ltm_header_num(headers, "X-Genie-Prompt-Memo-Refresh-Count", int),
+        f"memo_pages{suffix}": _ltm_header_num(headers, "X-Genie-Prompt-Memo-Pages", int),
     }
+
+
+def _ltm_extract_goal_line(prompt_block):
+    """从 `## Task Memo` 渲染文本里取出 `Original goal: ...` 整行（含低置信度后缀），
+    抓不到返回 None。"""
+    for line in (prompt_block or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("Original goal:"):
+            return stripped
+    return None
 
 
 def _ltm_single_trial_direct(args, model, probe, n, lines_per_round, timeout):
@@ -11848,20 +11878,31 @@ def _ltm_client_spotcheck(args, model, out_dir, n_values, lines_per_round, timeo
 
 def _ltm_stateful_probe(args, model, probe, n_values, lines_per_round, timeout,
                          all_results, all_crash_events, label, arm):
-    """stateful 模式：IsStatelessMode()==false 时整条压缩管线（含 TaskMemoBuilder）都不会
-    跑（见模块级注释），task_memo.enabled 在此模式下无效——这里只验证 Step1 修复后的
-    ChatHistory::Limit() 窗口内召回是否成立（不做 legacy/optimized 对照，两者预期等价）。
+    """stateful 模式：整条压缩管线（含 TaskMemoBuilder）与 stateless 模式完全同样跑
+    （已更正的架构事实见模块级注释：`-n` 只影响客户端断开后是否额外持久化历史，不分支
+    压缩/Task Memo 管线），故此函数本质上是——在 `-n` 为正整数的服务实例上重跑一遍
+    _ltm_single_trial_direct，验证是否和 stateless 模式走向一致。
 
-    方向感知判定（与 _ltm_client_spotcheck 同构）：round2 每次都重发完整历史，
-    ChatHistory::Limit() 按原始消息数截断，brief 三条 canary 消息固定排在最前，
-    一旦 dropped_r2>0 就必然先从它们开始被逐条挤出窗口——expect_recall 由
-    dropped_r2（服务端实际回报的截断量）而非猜测的 n 阈值推导，n 越大只是让
-    dropped_r2 更大，不改变这条因果关系本身。"""
+    方向感知判定（与 _ltm_client_spotcheck 同构）：round2 每次都重发完整历史，expect_recall 由
+    dropped_r2（服务端实际回报的截断量）而非猜测的 n 阈值推导，n 越大只是让 dropped_r2 更大，
+    不改变这条因果关系本身。"""
     for n in n_values:
         evidence = _ltm_single_trial_direct(args, model, probe, n, lines_per_round, timeout)
         actual_recall = evidence["recall_goal"] and evidence["recall_constraint"] and evidence["recall_todo"]
         dropped_r2 = evidence.get("dropped_r2")
-        expect_recall = True if dropped_r2 is None else (dropped_r2 == 0)
+        if arm == "legacy":
+            # legacy 臂（Task Memo 关闭）：丢弃就该召回失败，这是基线对照，预期不变。
+            expect_recall = True if dropped_r2 is None else (dropped_r2 == 0)
+        else:
+            # optimized 臂（Task Memo 开启）：机制的设计目的恰恰是丢弃发生后依然能召回，
+            # 不能照搬 legacy 臂"丢弃就该召回失败"的预期。只有在确实发生了丢弃但 Task
+            # Memo 根本没激活（memo_active_r2 为假，等同退化为未开启）时，才回退到
+            # legacy 同款预期；否则（未丢弃，或丢弃且已激活）预期都是召回成功。
+            memo_active_r2 = evidence.get("memo_active_r2")
+            if dropped_r2 and not memo_active_r2:
+                expect_recall = (dropped_r2 == 0)
+            else:
+                expect_recall = True
         direction_matches = (actual_recall == expect_recall)
         passed = (not evidence["error"]) and direction_matches
         if evidence["error"] and "异常" in evidence["error"]:
@@ -11889,6 +11930,361 @@ def _ltm_append_arm_contrast(model, service_mode, frontier_by_arm, all_results):
         data={"legacy_frontier": legacy_f, "optimized_frontier": opt_f, "gain": gain, "ratio": ratio}))
 
 
+# ============================================================================
+# Task Memo 新增字段（goal anchor / failure_streak / 分页目录）轻量回归：场景 A-D
+# ============================================================================
+# 范围决策（务必保持，不要尝试扩大）：
+#   - failure_streak 只做"默认未触发时不出现持久化提示行"的消极回归（见 _ltm_scenario_a_*
+#     附带的旁路检查思路——本套件未对它单独建场景，因为该计数器只由
+#     response_dispatcher.cpp 的 Layer3 修复路径在真实检测到模型输出畸形 tool_call 时
+#     递增，HTTP 请求无法可靠构造触发；强行构造是非确定性且模型相关的，不值得做）。
+#   - 分页目录只验证"计数器连通性"（存在/非负/不下降），不追打 max_entries=20 的 FIFO
+#     淘汰：每次 Update() 都绑定一整轮真实推理，20+ 轮在真机上成本过高。
+#   - 流式 SSE 帧里的 memo_pages_total 不做断言：现有套件没有现成的流式帧解析脚手架，
+#     为这一个字段新搭一套的成本不划算，非流式响应头已经能验证管线连通。
+
+
+def _ltm_new_fields_models(args):
+    """返回 Task Memo 新增字段回归（场景 A-D）要跑的模型简写集合，默认仅 qwen3-8b
+    （控制真机推理成本——这组场景不求前沿数字，但每个场景仍需 1-4 轮额外真实推理）。"""
+    raw = getattr(args, "long_task_memory_new_fields_models", None)
+    if not raw:
+        return {"qwen3-8b"}
+    return {s.strip() for s in raw.split(",") if s.strip()}
+
+
+def _ltm_scenario_a_goal_anchor_persist(args, model, probe, lines_per_round, timeout,
+                                        all_results, all_crash_events, label):
+    """场景 A：开场夹杂低于 20 字符门槛的闲聊时，goal anchor 必须锚定在真正的任务目标
+    消息（而非闲聊）；二次丢弃事件后锚文本必须逐字节不变（"一次捕获，永不覆盖"）。"""
+    name = f"LONG_TASK_MEMORY: {label}/goal_anchor_persist"
+    system_msg = {"role": "system", "content":
+                  "You are a careful coding assistant helping with a long-running migration task. "
+                  "Keep track of every fact, constraint and TODO given earlier in the conversation."}
+    smalltalk = [
+        {"role": "user", "content": "你好"},
+        {"role": "assistant", "content": "你好，有什么可以帮你？"},
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "hi there"},
+    ]
+    base_messages = [system_msg] + smalltalk + _ltm_task_brief_messages()
+    max_probe = getattr(args, "long_task_memory_max", 8)
+
+    def _round(n_filler):
+        msgs = list(base_messages)
+        for i in range(n_filler):
+            msgs.extend(_ltm_filler_round(i, lines_per_round))
+        msgs.append({"role": "user", "content": "Please just reply 'ack' and nothing else for now."})
+        body = {"model": model, "stream": False, "messages": msgs, "max_tokens": 24}
+        _trace_request(model, f"LTM scenario_a n={n_filler}", 1, "long_task_memory")
+        probe.mark()
+        try:
+            r = _pf_post_chat(args.host, args.port, body, timeout=timeout)
+        except Exception as e:
+            return None, None, f"请求异常: {str(e)[:300]}"
+        if r.status_code != 200:
+            return None, None, f"HTTP {r.status_code}: {r.text[:200]}"
+        return r, probe.last_prompt_block(), None
+
+    r1 = prompt1 = err = None
+    n_used = None
+    for n in range(1, max_probe + 1):
+        r1, prompt1, err = _round(n)
+        if err:
+            break
+        if r1.headers.get("X-Genie-Prompt-Messages-Dropped") not in (None, "0"):
+            n_used = n
+            break
+    if err:
+        all_results.append(_sc_result(name, model, False, err, skipped=True))
+        return
+    if n_used is None:
+        all_results.append(_sc_result(
+            name, model, False,
+            f"倍增到 --long_task_memory_max={max_probe} 仍未触发任何丢弃事件，无法验证 goal anchor，精确跳过",
+            skipped=True))
+        return
+
+    # BuildTaskMemoSection() 渲染正文发生在 FitMessagesToContext 写库之前：刚触发丢弃
+    # 的那一轮（n_used）自己读到的仍是写库前的旧正文，必须再追加一轮才能读到刚写入的
+    # goal anchor。响应头没有这个延迟，但本场景只关心正文渲染，所以统一改用追加轮。
+    r_a, prompt_a, err_a = _round(n_used + 1)
+    if err_a:
+        all_results.append(_sc_result(f"{name}/round1", model, False, err_a, skipped=True))
+        return
+    goal_line1 = _ltm_extract_goal_line(prompt_a)
+    ok1 = bool(goal_line1) and _LTM_GOAL_CODE in goal_line1 and "(low confidence:" not in goal_line1
+    all_results.append(_sc_result(
+        f"{name}/round1", model, ok1,
+        f"n_filler={n_used} 触发首次丢弃，追加一轮（n_filler={n_used + 1}）读正文后 goal anchor: {goal_line1!r}",
+        data={"goal_line": goal_line1, "n_filler": n_used}))
+    if not ok1:
+        return
+
+    r2, prompt2, err2 = _round(n_used + 2)
+    if err2:
+        all_results.append(_sc_result(f"{name}/round2_unchanged", model, False, err2, skipped=True))
+        return
+    goal_line2 = _ltm_extract_goal_line(prompt2)
+    ok2 = goal_line2 == goal_line1
+    all_results.append(_sc_result(
+        f"{name}/round2_unchanged", model, ok2,
+        f"再追加一轮（n_filler={n_used + 2}）后 goal anchor 是否逐字节不变: round1={goal_line1!r}, round2={goal_line2!r}",
+        data={"goal_line1": goal_line1, "goal_line2": goal_line2}))
+
+
+def _ltm_scenario_b_goal_anchor_low_confidence(args, model, probe, lines_per_round, timeout,
+                                               all_results, all_crash_events, label):
+    """场景 B：开场 goal_scan_window（默认 3）条 user 消息全部低于 20 字符门槛时，
+    goal anchor 必须回退到第一条 user 消息并带低置信度后缀——纯规则性回归，不涉及
+    模型判断本身。"""
+    name = f"LONG_TASK_MEMORY: {label}/goal_anchor_low_confidence"
+    system_msg = {"role": "system", "content":
+                  "You are a careful coding assistant helping with a long-running migration task."}
+    shorts = [
+        {"role": "user", "content": "ok"},
+        {"role": "assistant", "content": "ok"},
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "hi"},
+        {"role": "user", "content": "go"},
+        {"role": "assistant", "content": "go"},
+    ]
+    base_messages = [system_msg] + shorts
+    max_probe = getattr(args, "long_task_memory_max", 8)
+
+    def _round(n_filler):
+        msgs = list(base_messages)
+        for i in range(n_filler):
+            msgs.extend(_ltm_filler_round(i, lines_per_round))
+        msgs.append({"role": "user", "content": "Please just reply 'ack' and nothing else for now."})
+        body = {"model": model, "stream": False, "messages": msgs, "max_tokens": 24}
+        _trace_request(model, f"LTM scenario_b n={n_filler}", 1, "long_task_memory")
+        probe.mark()
+        try:
+            r = _pf_post_chat(args.host, args.port, body, timeout=timeout)
+        except Exception as e:
+            return None, None, f"请求异常: {str(e)[:300]}"
+        if r.status_code != 200:
+            return None, None, f"HTTP {r.status_code}: {r.text[:200]}"
+        return r, probe.last_prompt_block(), None
+
+    n_used = None
+    for n in range(1, max_probe + 1):
+        r, prompt, err = _round(n)
+        if err:
+            all_results.append(_sc_result(name, model, False, err, skipped=True))
+            return
+        if r.headers.get("X-Genie-Prompt-Messages-Dropped") not in (None, "0"):
+            n_used = n
+            break
+    if n_used is None:
+        all_results.append(_sc_result(
+            name, model, False,
+            f"倍增到 --long_task_memory_max={max_probe} 仍未触发任何丢弃事件，无法验证低置信度回退，精确跳过",
+            skipped=True))
+        return
+
+    # 同场景 A 的根因：正文渲染发生在写库之前，刚触发丢弃的那一轮自己读不到刚写入的
+    # 内容，必须再追加一轮才能读到低置信度回退后的 goal anchor。
+    r_after, prompt_after, err_after = _round(n_used + 1)
+    if err_after:
+        all_results.append(_sc_result(name, model, False, err_after, skipped=True))
+        return
+    goal_line = _ltm_extract_goal_line(prompt_after)
+    ok = bool(goal_line) and "ok" in goal_line.lower() and "(low confidence:" in goal_line
+    all_results.append(_sc_result(
+        name, model, ok,
+        f"n_filler={n_used} 触发丢弃，追加一轮（n_filler={n_used + 1}）读正文后低置信度回退 goal anchor: {goal_line!r}",
+        data={"goal_line": goal_line, "n_filler": n_used}))
+
+
+def _ltm_scenario_c_page_directory(args, model, probe, lines_per_round, timeout,
+                                   all_results, all_crash_events, label):
+    """场景 C：分页目录（`pages`/`memo_pages_total`）管线连通性——只验证响应头存在/
+    非负/不下降，以及渲染区不泄漏原始填充文本，不追打 max_entries=20 的 FIFO 淘汰
+    （见模块级范围决策注释）。"""
+    name = f"LONG_TASK_MEMORY: {label}/page_directory"
+    system_msg = {"role": "system", "content":
+                  "You are a careful coding assistant helping with a long-running migration task. "
+                  "Keep track of every fact, constraint and TODO given earlier in the conversation."}
+    messages = [system_msg] + _ltm_task_brief_messages()
+    distinctive_filler_substr = "routine progress record"
+    max_probe = getattr(args, "long_task_memory_max", 8)
+    pages_seen = []
+    i = 0
+    rounds_done = 0
+    while rounds_done < 3 and i < max_probe * 2:
+        messages = messages + _ltm_filler_round(i, lines_per_round)
+        i += 1
+        probe_msgs = messages + [{"role": "user", "content": "Please just reply 'ack' and nothing else for now."}]
+        body = {"model": model, "stream": False, "messages": probe_msgs, "max_tokens": 24}
+        _trace_request(model, f"LTM scenario_c round={rounds_done}", 1, "long_task_memory")
+        probe.mark()
+        try:
+            r = _pf_post_chat(args.host, args.port, body, timeout=timeout)
+        except Exception as e:
+            all_results.append(_sc_result(name, model, False, f"请求异常: {str(e)[:300]}", skipped=True))
+            return
+        if r.status_code != 200:
+            all_results.append(_sc_result(name, model, False, f"HTTP {r.status_code}: {r.text[:200]}", skipped=True))
+            return
+        if r.headers.get("X-Genie-Prompt-Messages-Dropped") in (None, "0"):
+            continue
+        # 响应头是本轮 Update() 调用的即时返回值，不受正文渲染延迟影响，可以在循环内
+        # 直接读取；正文（section_ok）必须延后到循环结束后再追加一轮读取，见下方。
+        pages_total = _ltm_header_num(r.headers, "X-Genie-Prompt-Memo-Pages", int)
+        pages_seen.append(pages_total)
+        rounds_done += 1
+    if not pages_seen or any(p is None for p in pages_seen):
+        all_results.append(_sc_result(
+            name, model, False,
+            f"X-Genie-Prompt-Memo-Pages 头缺失，或在 --long_task_memory_max={max_probe} 的 2 倍探测窗口内"
+            f"未能触发 3 轮丢弃事件: pages_seen={pages_seen}", skipped=True))
+        return
+
+    # 正文渲染（## Task Memo 的 Evicted message pages 小节）比写库晚一轮：上面 3 轮
+    # 丢弃事件各自读到的都是写库前的旧正文，必须再追加一轮才能读到最新一次写入的内容。
+    messages = messages + _ltm_filler_round(i, lines_per_round)
+    probe_msgs = messages + [{"role": "user", "content": "Please just reply 'ack' and nothing else for now."}]
+    body = {"model": model, "stream": False, "messages": probe_msgs, "max_tokens": 24}
+    _trace_request(model, "LTM scenario_c read_section", 1, "long_task_memory")
+    probe.mark()
+    try:
+        r = _pf_post_chat(args.host, args.port, body, timeout=timeout)
+    except Exception as e:
+        all_results.append(_sc_result(name, model, False, f"请求异常: {str(e)[:300]}", skipped=True))
+        return
+    if r.status_code != 200:
+        all_results.append(_sc_result(name, model, False, f"HTTP {r.status_code}: {r.text[:200]}", skipped=True))
+        return
+    prompt_block = probe.last_prompt_block()
+    has_section = "Evicted message pages" in prompt_block
+    # 分页目录块按设计是 Render() 里最低优先级、预算紧张时可被整块丢弃的小节（见
+    # task_memo_builder.md「分页目录」条目）——真机实测过（2026-10-07，filler_lines=20
+    # 的激进探测参数）该块确实会被整体省略，这是设计内行为，不是泄漏/缺陷。因此"未泄漏
+    # 原文"只在该块确实渲染出来时才有意义去检查；块本身整体缺失时无从泄漏，视为空洞为真。
+    tail = prompt_block.split("Evicted message pages", 1)[-1] if has_section else ""
+    no_leak = (distinctive_filler_substr not in tail) if has_section else True
+
+    non_negative = all(p >= 0 for p in pages_seen)
+    non_decreasing = all(pages_seen[j] <= pages_seen[j + 1] for j in range(len(pages_seen) - 1))
+    strictly_increasing_by_one = all(pages_seen[j + 1] - pages_seen[j] == 1 for j in range(len(pages_seen) - 1))
+    passed = non_negative and non_decreasing and no_leak
+    detail = (f"pages_seen={pages_seen}（non_negative={non_negative}, non_decreasing={non_decreasing}, "
+              f"strictly_increasing_by_1_per_drop={strictly_increasing_by_one}——仅观测记录，未强制断言此项）；"
+              f"has_section={has_section}（False 时视为预算过紧导致该最低优先级块被整体丢弃，设计内行为，"
+              f"不计入失败）；no_leak={no_leak}")
+    all_results.append(_sc_result(name, model, passed, detail,
+                                  data={"pages_seen": pages_seen, "has_section": has_section, "no_leak": no_leak}))
+
+
+def _ltm_run_new_field_scenarios(args, model, probe, lines_per_round, timeout,
+                                 all_results, all_crash_events, label):
+    """新增字段场景 A/B/C 的统一入口，复用调用方已启动的 optimized/stateless 服务实例，
+    单个场景异常不中断另外两个（各自独立 try/except 记 CrashEvent）。"""
+    for fn, tag in (
+        (_ltm_scenario_a_goal_anchor_persist, "scenario_a"),
+        (_ltm_scenario_b_goal_anchor_low_confidence, "scenario_b"),
+        (_ltm_scenario_c_page_directory, "scenario_c"),
+    ):
+        try:
+            fn(args, model, probe, lines_per_round, timeout, all_results, all_crash_events, label)
+        except Exception as e:
+            all_crash_events.append(CrashEvent(
+                timestamp=datetime.now().isoformat(), model_name=model, round_num=1,
+                endpoint=f"LTM {tag}/{label}", detail=f"{tag} 执行异常: {str(e)[:200]}",
+                request_history=_trace_snapshot()))
+
+
+def _ltm_scenario_d_mode_consistency(args, label, target, config_path, lines_per_round, timeout,
+                                     out_dir, all_results, all_crash_events, stateful_n):
+    """场景 D：用户明确要求的回归点——`-n` 取 -1（stateless）或正整数（stateful）时，
+    压缩管线（含 Task Memo 新增字段）必须走完全相同的路径。依次（非并发）起两个服务
+    实例喂同一份历史，比较 goal anchor 文本与 memo_pages_total 的出现情况是否一致。"""
+    name_prefix = f"LONG_TASK_MEMORY: {label}/mode_consistency"
+    max_probe = getattr(args, "long_task_memory_max", 8)
+
+    def _run_one(service_mode):
+        wait_port_closed(args.host, args.port, timeout=15)
+        svc = ServiceManager(args.exe_dir, args.host, args.port)
+        svc._log_dir = out_dir
+        extra_args = ["-n", "-1", "-g", "-d", "3"] if service_mode == "stateless" \
+            else ["-n", str(stateful_n), "-g", "-d", "3"]
+        try:
+            with _LtmArmConfigOverride(args.exe_dir, "optimized"):
+                svc.start(str(config_path), extra_args=extra_args)
+                if not wait_port_open(args.host, args.port, timeout=180, process=svc.process):
+                    return None, f"{service_mode} 服务 180s 内未可连接"
+                probe = _PromptLogProbe(svc._stdout_log)
+
+                def _send(n_filler):
+                    history = _ltm_build_history(n_filler, lines_per_round)
+                    body = {"model": target, "stream": False, "messages": history, "max_tokens": 24}
+                    probe.mark()
+                    _trace_request(target, f"LTM mode_consistency {service_mode} n={n_filler}", 1,
+                                    "long_task_memory")
+                    try:
+                        r = _pf_post_chat(args.host, args.port, body, timeout=timeout)
+                    except Exception as e:
+                        return None, None, f"{service_mode} 请求异常: {str(e)[:300]}"
+                    if r.status_code != 200:
+                        return None, None, f"{service_mode} HTTP {r.status_code}: {r.text[:200]}"
+                    return r, probe.last_prompt_block(), None
+
+                # 硬编码固定 n_filler 不保证真的触发丢弃（是否挤占预算全看实际 token 占用）：
+                # 改为像场景 A/B 一样循环探测，直到观测到丢弃事件为止。
+                n_used = None
+                r = prompt = err = None
+                for n in range(1, max_probe + 1):
+                    r, prompt, err = _send(n)
+                    if err:
+                        return None, err
+                    if r.headers.get("X-Genie-Prompt-Messages-Dropped") not in (None, "0"):
+                        n_used = n
+                        break
+                if n_used is None:
+                    return None, (f"{service_mode} 倍增到 --long_task_memory_max={max_probe} "
+                                   f"仍未触发任何丢弃事件")
+
+                # 正文渲染晚一轮、响应头本轮即时准确：两边统一改用追加轮的数值，保持口径
+                # 一致，便于跨模式比较（而不是一个用本轮头、一个用追加轮正文）。
+                r_after, prompt_after, err_after = _send(n_used + 1)
+                if err_after:
+                    return None, err_after
+                evidence = {
+                    "n_filler_used": n_used,
+                    "dropped": _ltm_header_num(r_after.headers, "X-Genie-Prompt-Messages-Dropped", int),
+                    "memo_pages_total": _ltm_header_num(r_after.headers, "X-Genie-Prompt-Memo-Pages", int),
+                    "goal_line": _ltm_extract_goal_line(prompt_after),
+                }
+                return evidence, None
+        except (RuntimeError, FileNotFoundError) as e:
+            return None, f"{service_mode} 服务启动失败: {str(e)[:300]}"
+        finally:
+            svc.stop()
+            svc._force_kill()
+
+    evidence_stateless, err_stateless = _run_one("stateless")
+    if err_stateless:
+        all_results.append(_sc_result(f"{name_prefix} precondition", target, False, err_stateless, skipped=True))
+        return
+    evidence_stateful, err_stateful = _run_one("stateful")
+    if err_stateful:
+        all_results.append(_sc_result(f"{name_prefix} precondition", target, False, err_stateful, skipped=True))
+        return
+
+    goal_consistent = (bool(evidence_stateless["goal_line"]) and bool(evidence_stateful["goal_line"])
+                       and evidence_stateless["goal_line"] == evidence_stateful["goal_line"])
+    pages_consistent = (evidence_stateless["memo_pages_total"] is not None
+                        and evidence_stateful["memo_pages_total"] is not None)
+    passed = goal_consistent and pages_consistent
+    all_results.append(_sc_result(
+        name_prefix, target, passed,
+        f"stateless={evidence_stateless}, stateful={evidence_stateful}；"
+        f"goal_consistent={goal_consistent}, pages_consistent={pages_consistent}",
+        data={"stateless": evidence_stateless, "stateful": evidence_stateful}))
+
+
 def _run_long_task_memory_suite(args, models, remote_mode, out_dir):
     """--suite long_task_memory：Task Memo 分段式记忆机制的「记忆前沿」量化回归。
 
@@ -11896,13 +12292,20 @@ def _run_long_task_memory_suite(args, models, remote_mode, out_dir):
     三个 canary code 的最大 N（倍增探测 + 二分收敛 + 重复采样多数票，方法论同构
     skill_capacity，见模块级注释）。legacy（task_memo 关闭）vs optimized（开启）
     双臂对照量化机制收益；direct（Python 直连读 X-Genie-Prompt-Memo-* 头）与
-    GenieAPIClient.exe（--raw_file 端到端交叉确认）双通道。stateful 模式下压缩管线
-    整体不跑，只验证 ChatHistory::Limit() 窗口内召回，不做双臂对照（见 _ltm_stateful_probe）。
+    GenieAPIClient.exe（--raw_file 端到端交叉确认）双通道。stateful 模式下压缩管线与
+    stateless 完全同样跑，同样做 legacy/optimized 双臂对照（已更正的架构事实见模块级
+    注释，见 _ltm_stateful_probe）。
 
     仅实现 Tier 1（合成长任务 + 宽松文本记忆探针）。Tier 2（基于 tool_calls 协议的多步骤
     编码任务端到端核验）本轮未实现：它要求服务端维护一份独立于 Task Memo 的 ground-truth
     环境状态机（文件系统/构建产物的期望值）来核验任务是否真正完成，工作量与真机测试时间
     预算不匹配，按计划 Testing 部分"工作量过大则明确记录跳过原因"处理，跳过。
+
+    本套件中还挂着 Task Memo 新增字段（goal anchor/分页目录/跨模式一致性）的两组
+    轻量回归：场景 A/B/C（_ltm_run_new_field_scenarios）复用本循环已启动的
+    optimized/stateless 实例，场景 D（_ltm_scenario_d_mode_consistency）自己管理一对
+    stateless/stateful 实例生命周期。默认只对 --long_task_memory_new_fields_models
+    命中的模型（默认仅 qwen3-8b）跑，控制真机推理成本。
     """
     all_results, all_perf_samples, all_crash_events = [], [], []
     suite_model = "_long_task_memory_"
@@ -11958,6 +12361,7 @@ def _run_long_task_memory_suite(args, models, remote_mode, out_dir):
     service_modes = ("stateless", "stateful") if getattr(args, "long_task_memory_service_mode", "stateless") == "both" \
         else (getattr(args, "long_task_memory_service_mode", "stateless"),)
     stateful_n = getattr(args, "long_task_memory_stateful_n", 6)
+    new_fields_targets = _ltm_new_fields_models(args)
 
     for label, target in targets:
         config_path = Path(args.models) / target / "config.json"
@@ -11989,6 +12393,11 @@ def _run_long_task_memory_suite(args, models, remote_mode, out_dir):
                                 target, False, "端口 180s 内未可连接，精确跳过", skipped=True))
                             continue
                         probe = _PromptLogProbe(svc._stdout_log)
+                        if service_mode == "stateless" and arm == "optimized" and label in new_fields_targets:
+                            # Task Memo 新增字段（goal anchor/分页目录）的轻量回归，复用本次
+                            # 已启动的 optimized/stateless 实例，不额外起停服务（见 _ltm_run_new_field_scenarios）。
+                            _ltm_run_new_field_scenarios(args, target, probe, lines_per_round, timeout,
+                                                         all_results, all_crash_events, label)
                         trial_log = []
                         if service_mode == "stateless":
                             if "direct" in drive_modes:
@@ -12039,6 +12448,12 @@ def _run_long_task_memory_suite(args, models, remote_mode, out_dir):
 
             if service_mode == "stateless" and len(frontier_by_arm) >= 2:
                 _ltm_append_arm_contrast(target, service_mode, frontier_by_arm, all_results)
+
+        if label in new_fields_targets:
+            # 场景 D：`-n` -1 与正整数两模式的新字段一致性回归，自己管理服务实例生命周期，
+            # 不复用上述循环的服务实例（它需要同时对比两种 service_mode）。
+            _ltm_scenario_d_mode_consistency(args, label, target, config_path, lines_per_round, timeout,
+                                             out_dir, all_results, all_crash_events, stateful_n)
 
     return all_results, all_perf_samples, all_crash_events
 
@@ -12153,11 +12568,16 @@ def main():
                              "--raw_file 端到端交叉确认（只在 direct 已测出的前沿附近抽样，不独立求前沿）；"
                              "both=两者都跑。默认 direct")
     parser.add_argument("--long_task_memory_service_mode", choices=("stateless", "stateful", "both"), default="stateless",
-                        help="--suite long_task_memory 服务模式：stateless=-n -1（Task Memo 真正生效路径，legacy/"
-                             "optimized 双臂对照）；stateful=常规 -n（验证 ChatHistory::Limit() 窗口内召回，压缩管线 "
-                             "整体不跑，不做双臂对照）；both=两者都跑。默认 stateless")
+                        help="--suite long_task_memory 服务模式：stateless=-n -1；stateful=常规 -n。"
+                             "已更正的架构事实：压缩管线（含 TaskMemoBuilder）对这两种模式完全无分支、等价运行，"
+                             "`-n` 只决定客户端断开后服务端是否额外持久化历史（和本套件断言无关），因此 stateful 也同样做 "
+                             "legacy/optimized 双臂对照；both=两者都跑。默认 stateless")
     parser.add_argument("--long_task_memory_stateful_n", type=int, default=6,
                         help="--suite long_task_memory stateful 模式下传给服务的 -n 值（默认 6）")
+    parser.add_argument("--long_task_memory_new_fields_models", default="qwen3-8b",
+                        help="--suite long_task_memory 中 Task Memo 新增字段（goal anchor/分页目录/跨模式一致性，"
+                             "场景 A-D）这组轻量确定性回归限定测试的目标模型简写，逗号分隔，默认仅 qwen3-8b（控制"
+                             "真机推理成本；这组场景不求前沿数字，每个场景只需额外 1-4 轮真实推理）")
     parser.add_argument("--model_name", default=None, help="--suite model/mnn/qnn/sampleapp 时按名称筛选模型，逗号分隔，未指定则测试该套件下全部已发现模型")
 
     args = parser.parse_args()
