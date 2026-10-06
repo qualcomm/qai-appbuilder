@@ -320,7 +320,9 @@ class ModelConfigEditor:
             return json.load(f)
 
     def apply(self, context_size: Optional[int] = None, device: Optional[str] = None,
-              draft_model_enabled: Optional[bool] = None) -> dict:
+              draft_model_enabled: Optional[bool] = None,
+              spec_draft_n_max: Optional[int] = None,
+              spec_draft_p_min: Optional[float] = None) -> dict:
         base = self._load_base()
         if context_size is not None:
             base.setdefault("dialog", {}).setdefault("context", {})["size"] = int(context_size)
@@ -333,6 +335,10 @@ class ModelConfigEditor:
             else:
                 if "draft_model" in base:
                     base["_draft_model_disabled"] = base.pop("draft_model")
+        if spec_draft_n_max is not None:
+            base.setdefault("draft_model", {})["spec_draft_n_max"] = int(spec_draft_n_max)
+        if spec_draft_p_min is not None:
+            base.setdefault("draft_model", {})["spec_draft_p_min"] = float(spec_draft_p_min)
         with open(self.config_path, "w", encoding="utf-8") as f:
             json.dump(base, f, indent=4, ensure_ascii=False)
         return base
@@ -349,6 +355,8 @@ class BenchmarkConfig:
     device: Optional[str] = None
     draft_model_enabled: Optional[bool] = None
     enable_thinking: bool = False
+    spec_draft_n_max: Optional[int] = None
+    spec_draft_p_min: Optional[float] = None
     note: str = ""
 
 
@@ -548,7 +556,9 @@ class BenchmarkRunner:
         if patch_config:
             self.editor.backup()
             self.editor.apply(context_size=bconfig.context_size, device=bconfig.device,
-                               draft_model_enabled=bconfig.draft_model_enabled)
+                               draft_model_enabled=bconfig.draft_model_enabled,
+                               spec_draft_n_max=bconfig.spec_draft_n_max,
+                               spec_draft_p_min=bconfig.spec_draft_p_min)
 
         svc = None
         try:
@@ -579,6 +589,7 @@ class BenchmarkRunner:
 
     def restore_config(self):
         self.editor.restore()
+        self.editor.discard_backup()
 
 
 # ============================================================================
@@ -622,7 +633,9 @@ def write_report(results: List[ConfigResult], out_dir: Path, cmdline: str):
         lines.append(f"## 配置: {r.config.name}")
         lines.append(f"- context_size={r.config.context_size} device={r.config.device} "
                       f"draft_model_enabled={r.config.draft_model_enabled} "
-                      f"enable_thinking={r.config.enable_thinking}")
+                      f"enable_thinking={r.config.enable_thinking} "
+                      f"spec_draft_n_max={r.config.spec_draft_n_max} "
+                      f"spec_draft_p_min={r.config.spec_draft_p_min}")
         if r.config.note:
             lines.append(f"- 备注: {r.config.note}")
         if not r.started:
@@ -689,6 +702,13 @@ def build_arg_parser():
     parser.add_argument("--draft_model", default=None, choices=["on", "off"],
                          help="是否启用 draft_model 块（投机解码）")
     parser.add_argument("--enable_thinking", action="store_true")
+    parser.add_argument("--spec_draft_n_max", type=int, default=None,
+                         help="draft_model.spec_draft_n_max（每轮投机验证最多产出的 draft token 数）")
+    parser.add_argument("--spec_draft_p_min", type=float, default=None,
+                         help="draft_model.spec_draft_p_min（投机接受概率下限）")
+    parser.add_argument("--repeat", type=int, default=1,
+                         help="--single 模式下重复跑题目的次数（同一服务进程内重复问同一批题目，"
+                              "不重启服务），用于取均值降低单次噪声")
 
     parser.add_argument("--categories", default=None,
                          help="只跑指定题目类别（逗号分隔：speed,quality），默认全跑")
@@ -719,6 +739,7 @@ def main():
         editor = ModelConfigEditor(model_dir)
         if editor.backup_path.exists():
             editor.restore()
+            editor.discard_backup()
             print(f"[RESTORE_ONLY] 已从 {editor.backup_path} 还原 {editor.config_path}")
         else:
             print(f"[RESTORE_ONLY] 未找到备份文件 {editor.backup_path}，无需还原")
@@ -742,9 +763,11 @@ def main():
             draft_enabled = {"on": True, "off": False, None: None}[args.draft_model]
             bconfig = BenchmarkConfig(name=args.name, context_size=args.context_size,
                                        device=args.device, draft_model_enabled=draft_enabled,
-                                       enable_thinking=args.enable_thinking)
+                                       enable_thinking=args.enable_thinking,
+                                       spec_draft_n_max=args.spec_draft_n_max,
+                                       spec_draft_p_min=args.spec_draft_p_min)
             categories = args.categories.split(",") if args.categories else None
-            questions = get_questions(categories=categories)
+            questions = get_questions(categories=categories) * max(1, args.repeat)
             print(f"{'='*60}\n自定义配置: {bconfig}\n{'='*60}")
             results.append(runner.run_config(bconfig, questions, deadline))
         else:
