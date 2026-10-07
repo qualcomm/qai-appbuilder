@@ -215,12 +215,13 @@ struct LocalModelConfig {
 };
 
 // ============================================================
-// 工具调用兜底修复配置（硬编码默认值，不再从 service_config.json 解析）
+// 工具调用兜底修复配置（对应 prompt_engineering.json 中的 "tool_call_repair" 节；
+// 与端云结合完全无关的本地能力，不在 service_config.json 中）
 // Layer2：现有正则修复链 + Layer1（本地确定性提取）均失败（最终会落回 name="unknow"）后，
 // 服务端在决定返回给客户端之前发起的内部隐形自纠正重试：构造 scratch ModelInput 追加一条
 // role=tool 错误消息，重新走完整 ModelInputBuilder::Build() 预算/压缩流水线再次调用
 // handle->Query()；成功结果直接替换给客户端，失败的第一次尝试绝不写入 ChatHistory，
-// 也绝不向客户端发送任何中间态。默认开启，取值即本结构体的硬编码默认成员。
+// 也绝不向客户端发送任何中间态。默认开启，可通过 prompt_engineering.json 关闭/调阈值。
 // ============================================================
 struct ToolCallRepairConfig {
     bool enabled = true;
@@ -651,7 +652,7 @@ struct PromptOptimizationConfig {
     } spawn_guard;
 
     // ── 长文本摘要化配置（Phase -1，在 prompt 构建前执行）──────
-    // 对应 service_config.json 中的 "prompt_optimization.long_text_summarization" 节
+    // 对应 prompt_engineering.json 中的 "prompt_optimization.long_text_summarization" 节
 
     // 摘要缓存配置
     struct LongTextSummaryCacheConfig {
@@ -663,7 +664,7 @@ struct PromptOptimizationConfig {
 
     // 长文本摘要化主配置
     struct LongTextSummarizationConfig {
-        bool enabled = false;           // 总开关（默认关闭，需在 service_config.json 中显式开启）
+        bool enabled = false;           // 总开关（默认关闭，需在 prompt_engineering.json 中显式开启）
         double trigger_ratio = 0.5;     // 触发阈值：content token 数 > context_size * trigger_ratio 时触发摘要
         double chunk_ratio = 0.45;      // 分块大小：chunk_token_limit = context_size * chunk_ratio
         bool summarize_user_messages = true;    // 是否对最后一条 user 文本消息执行摘要
@@ -685,7 +686,7 @@ struct PromptOptimizationConfig {
     } long_text_summarization;
 
     // ── Task Memo（分段式记忆）配置 ─────────────────────────
-    // 对应 service_config.json 中的 "prompt_optimization.task_memo" 节
+    // 对应 prompt_engineering.json 中的 "prompt_optimization.task_memo" 节
     struct TaskMemoStoreConfig {
         size_t max_entries = 200;       // 最大缓存条目数（LRU 淘汰；指纹+首条消息双 key 注册，实际会话数约为其半）
         size_t max_memory_mb = 20;      // 最大内存占用（MB，超出时淘汰最旧条目）
@@ -693,7 +694,7 @@ struct PromptOptimizationConfig {
     };
 
     struct TaskMemoConfig {
-        bool enabled = false;                    // 总开关（默认关闭，需在 service_config.json 中显式开启）
+        bool enabled = false;                    // 总开关（默认关闭，需在 prompt_engineering.json 中显式开启）
         bool model_layer_enabled = true;         // 模型层深度总结开关（关闭时永远只用规则层兜底，enabled=false 时无意义）
         double token_budget_ratio = 0.15;        // Task Memo 段落允许占用 context_size 的比例上限
         size_t min_dropped_for_trigger = 1;      // FitMessagesToContext 本次即将丢弃的消息数达到此值才更新备忘录

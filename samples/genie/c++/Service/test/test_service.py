@@ -6938,12 +6938,12 @@ _STATELESS_MODE_READ_TOOL_DEF = {
 
 
 def _read_long_text_trigger_ratio(exe_dir):
-    """从构建产物目录下实际生效的 service_config.json 读取
+    """从构建产物目录下实际生效的 prompt_engineering.json 读取
     prompt_optimization.long_text_summarization.trigger_ratio；读取不到时按 0.5 兜底
-    （与代码默认值一致，见 service_config.json 中的同名字段注释）。"""
+    （与代码默认值一致，见 prompt_engineering.json 中的同名字段注释）。"""
     default_ratio = 0.5
     try:
-        cfg_path = Path(exe_dir) / "service_config.json"
+        cfg_path = Path(exe_dir) / "prompt_engineering.json"
         with open(cfg_path, "r", encoding="utf-8") as f:
             cfg = json.load(f)
         ratio = ((cfg.get("prompt_optimization") or {}).get("long_text_summarization") or {}).get("trigger_ratio")
@@ -10883,7 +10883,7 @@ def _sc_append_arm_contrast_results(model, results):
 
 
 def _sc_arm_overrides(arm):
-    """按档位（legacy/optimized）生成要写入 service_config.json 的
+    """按档位（legacy/optimized）生成要写入 prompt_engineering.json 的
     prompt_optimization 子节覆盖字典。legacy = 全部 P1/D3/D2/D4 新开关关闭/退回旧值；
     optimized = 空字典（不覆盖，使用 model_config.h 里的新默认值）。
     P2/D6/D5 留给 Step4 落地后再扩展本函数。"""
@@ -10915,13 +10915,13 @@ def _sc_arm_overrides(arm):
 
 
 class _ScArmConfigOverride:
-    """临时改写 <exe_dir>/service_config.json 的 prompt_optimization 子节以切换
+    """临时改写 <exe_dir>/prompt_engineering.json 的 prompt_optimization 子节以切换
     legacy/optimized 档位；改前备份、__exit__ 里 finally 还原，与 ModelDirSnapshot
     同一备份-还原模式。overrides={} 时（optimized 档且原文件已是新默认值）仍会
     读写一次文件（幂等，不产生副作用），便于统一代码路径。"""
 
     def __init__(self, exe_dir, arm):
-        self.config_path = Path(exe_dir) / "service_config.json"
+        self.config_path = Path(exe_dir) / "prompt_engineering.json"
         self.arm = arm
         self.overrides = _sc_arm_overrides(arm)
         self._original_text = None
@@ -11773,11 +11773,11 @@ def _ltm_arm_overrides(arm):
 
 
 class _LtmArmConfigOverride:
-    """临时改写 <exe_dir>/service_config.json 的 prompt_optimization.task_memo 子节，
+    """临时改写 <exe_dir>/prompt_engineering.json 的 prompt_optimization.task_memo 子节，
     与 _ScArmConfigOverride 同一备份-还原模式（改前备份，__exit__ 里 finally 还原）。"""
 
     def __init__(self, exe_dir, arm):
-        self.config_path = Path(exe_dir) / "service_config.json"
+        self.config_path = Path(exe_dir) / "prompt_engineering.json"
         self.overrides = _ltm_arm_overrides(arm)
         self._original_text = None
         self._existed = False
@@ -12314,7 +12314,7 @@ def _run_long_task_memory_suite(args, models, remote_mode, out_dir):
         all_results.append(_sc_result(
             "LONG_TASK_MEMORY: suite precondition", suite_model, False,
             "远程模式无法自定义服务命令行（stateless 需 -n -1，stateful 需自定义 -n）也无法临时改写 "
-            "service_config.json 切换 legacy/optimized 档位，跳过记忆前沿套件", skipped=True))
+            "prompt_engineering.json 切换 legacy/optimized 档位，跳过记忆前沿套件", skipped=True))
         return all_results, all_perf_samples, all_crash_events
 
     requested = None
@@ -12537,7 +12537,7 @@ def main():
                              "需要 --builder_dir/--genie_root_path 具备，环境不具备时精确跳过）；"
                              "both=两者都跑（Builder 分支先跑并自管 Builder/服务生命周期）。默认 direct")
     parser.add_argument("--skill_capacity_arms", choices=("legacy", "optimized", "both"), default="legacy",
-                        help="--suite skill_capacity 档位对照：legacy=改造前基线（临时改写 service_config.json 的 "
+                        help="--suite skill_capacity 档位对照：legacy=改造前基线（临时改写 prompt_engineering.json 的 "
                              "fidelity.{cjk,ascii}_chars_per_token=4.0 + budget_partition.enabled=false，改前备份、"
                              "finally 还原）；optimized=Step2 改造后的默认档位（不写覆盖，直接用 C++ 侧新默认值）；"
                              "both=依次跑两档并在 data 里各自记录 frontier_skills，供报告算提升倍数")

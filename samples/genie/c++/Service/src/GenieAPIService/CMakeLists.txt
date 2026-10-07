@@ -210,6 +210,7 @@ if (MSVC)
             COMMAND ${CMAKE_COMMAND} -E copy_directory ${CONFIG_PATH} ${BUILD_PATH}/config
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 ${CMAKE_CURRENT_SOURCE_DIR}/../config/service_config.json
+                ${CMAKE_CURRENT_SOURCE_DIR}/../config/prompt_engineering.json
                 ${CMAKE_CURRENT_SOURCE_DIR}/../config/sensitive_keywords.json
                 ${BUILD_PATH}/config
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -224,6 +225,7 @@ elseif (UNIX)
             COMMAND ${CMAKE_COMMAND} -E copy_directory ${CONFIG_PATH} ${BUILD_PATH}/config
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 ${CMAKE_CURRENT_SOURCE_DIR}/../config/service_config.json
+                ${CMAKE_CURRENT_SOURCE_DIR}/../config/prompt_engineering.json
                 ${CMAKE_CURRENT_SOURCE_DIR}/../config/sensitive_keywords.json
                 ${BUILD_PATH}/config
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -241,6 +243,7 @@ if (BUILD_AS_DLL)
             COMMAND ${CMAKE_COMMAND} -E copy_directory ${CONFIG_PATH} ${BUILD_PATH}/config
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 ${CMAKE_CURRENT_SOURCE_DIR}/../config/service_config.json
+                ${CMAKE_CURRENT_SOURCE_DIR}/../config/prompt_engineering.json
                 ${CMAKE_CURRENT_SOURCE_DIR}/../config/sensitive_keywords.json
                 ${BUILD_PATH}/config
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
