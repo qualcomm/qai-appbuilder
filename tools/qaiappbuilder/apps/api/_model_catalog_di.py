@@ -100,6 +100,7 @@ from qai.model_catalog.application.use_cases import (
     RemoveVersionUseCase,
     StartDownloadUseCase,
     StreamDownloadProgressUseCase,
+    SyncQaiServiceModelsUseCase,
     UpdateProviderConfigUseCase,
     VerifyChecksumUseCase,
 )
@@ -185,6 +186,11 @@ class ModelCatalogServices:
     # not yet run / has failed keeps every model visible.
     permission_snapshot_store: PermissionSnapshotStore
     probe_cloud_model_permissions_use_case: ProbeCloudModelPermissionsUseCase
+    # Live qai-service model-roster sync (additive tail field — fired once
+    # from lifespan at boot; probes qai-service's real GET /v1/models and
+    # folds any real models it finds into the stored provider config
+    # alongside the route-1 pseudo-model, which always stays first/default).
+    sync_qai_service_models_use_case: SyncQaiServiceModelsUseCase
     # QGenie dual-bucket quota reader (additive tail field). Separate from the
     # qai-service token pool: that balance arrives on the stream, this one must
     # be pulled from QGenie's own REST endpoints.
@@ -341,6 +347,29 @@ def build_model_catalog_services(
         secret_store=getattr(container, "secret_store", None),
     )
 
+    # ── Live qai-service model-roster sync ────────────────────────────
+    # qai-service authenticates via the signed-in user's broker JWT, not a
+    # SecretStore api_key (see apps/api/_model_resolver_bridge.py's
+    # _resolve_service_jwt) — ProbeCloudModelPermissionsUseCase above skips
+    # it for exactly that reason, so this gets its own tiny JWT-aware use
+    # case rather than growing a JWT branch into the generic one.
+    def _get_qai_service_jwt() -> str | None:
+        try:
+            from interfaces.http.auth.qai_service_token import (  # noqa: PLC0415
+                get_service_jwt,
+            )
+        except ImportError:  # pragma: no cover — HTTP auth surface not mounted
+            return None
+        return get_service_jwt()
+
+    sync_qai_service_models = SyncQaiServiceModelsUseCase(
+        registry=provider_registry,
+        probe=HttpProviderProbe(
+            ssl_verify_provider=build_ssl_verify_provider(container)
+        ),
+        get_jwt=_get_qai_service_jwt,
+    )
+
     # ── QGenie dual-bucket quota ─────────────────────────────────────
     # One adapter instance for the process so its last-good-snapshot cache and
     # refresh cooldown are shared by every reader; a per-request instance would
@@ -382,6 +411,7 @@ def build_model_catalog_services(
         probe_provider_use_case=probe_provider,
         permission_snapshot_store=permission_store,
         probe_cloud_model_permissions_use_case=probe_permissions,
+        sync_qai_service_models_use_case=sync_qai_service_models,
         get_qgenie_quota_use_case=get_qgenie_quota,
     )
 
