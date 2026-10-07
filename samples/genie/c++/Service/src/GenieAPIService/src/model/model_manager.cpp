@@ -17,7 +17,6 @@
 #include "../response/response_tools.h"
 #include "../chat_request_handler/summary_cache.h"
 #include "../chat_request_handler/task_memo_store.h"
-#include "../chat_request_handler/tool_call_circuit_breaker_store.h"
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -995,7 +994,7 @@ bool ModelManager::InitializeConfig()
                 // Group A（网络模块：云端/路由，含 routing.enabled 本身及其下敏感检测/脱敏/
                 // 复杂度评估子节）只在 -n -1（stateless/端云结合模式）时解析生效；-n 非 -1 时
                 // 保持结构体默认值，routing_config_.enabled 恒为 false，云端路径不可达。
-                // Group B（prompt_optimization/tool_call_repair/debug）与云端无关，无条件生效。
+                // Group B（prompt_optimization/debug）与云端无关，无条件生效。
                 bool is_stateless_mode = (getnumResponse() == -1);
 
                 // 优先加载 debug 配置（必须最先加载，避免后续节解析异常时 debug 配置未生效）
@@ -1572,64 +1571,6 @@ bool ModelManager::InitializeConfig()
                     local_model_config_.enabled = lm.value("enabled", true);
 
                     My_Log{} << "Local model config loaded: enabled=" << local_model_config_.enabled
-                             << std::endl;
-                }
-
-                // 加载 tool_call_repair 配置（Layer2 服务端内部隐形自纠正重试）
-                if (sc_json.contains("tool_call_repair") && sc_json["tool_call_repair"].is_object())
-                {
-                    const auto &tcr = sc_json["tool_call_repair"];
-                    tool_call_repair_config_.enabled = tcr.value("enabled", true);
-
-                    if (tcr.contains("internal_retry") && tcr["internal_retry"].is_object())
-                    {
-                        const auto &ir = tcr["internal_retry"];
-                        auto &ir_cfg = tool_call_repair_config_.internal_retry;
-                        ir_cfg.max_attempts = ir.value("max_attempts", 1);
-                        if (ir.contains("skip_reasons") && ir["skip_reasons"].is_array())
-                        {
-                            ir_cfg.skip_reasons.clear();
-                            for (const auto &reason : ir["skip_reasons"])
-                            {
-                                if (reason.is_string())
-                                {
-                                    ir_cfg.skip_reasons.push_back(reason.get<std::string>());
-                                }
-                            }
-                        }
-                    }
-
-                    if (tcr.contains("circuit_breaker") && tcr["circuit_breaker"].is_object())
-                    {
-                        const auto &cb = tcr["circuit_breaker"];
-                        auto &cb_cfg = tool_call_repair_config_.circuit_breaker;
-                        cb_cfg.consecutive_layer3_threshold = cb.value("consecutive_layer3_threshold", 3);
-                        cb_cfg.cooldown_seconds = cb.value("cooldown_seconds", 300);
-                    }
-                    // 同步配置进程内单例存储（会话+模型维度 LRU+TTL，语义见
-                    // ToolCallCircuitBreakerStore 类注释）；即使 tool_call_repair.enabled=false，
-                    // 阈值仍照常同步（真正受 enabled 门控的是"是否读取熔断状态并降级 system
-                    // prompt"这一后果，见 model_input_builder.h::Build()），避免留下过期默认值。
-                    ToolCallCircuitBreakerStore::GetInstance().Configure(tool_call_repair_config_.circuit_breaker);
-
-                    My_Log{} << "[Config] tool_call_repair loaded: enabled="
-                             << tool_call_repair_config_.enabled
-                             << ", internal_retry.max_attempts="
-                             << tool_call_repair_config_.internal_retry.max_attempts
-                             << ", internal_retry.skip_reasons=["
-                             << [&]() {
-                                    std::string joined;
-                                    for (const auto &r : tool_call_repair_config_.internal_retry.skip_reasons)
-                                    {
-                                        if (!joined.empty()) joined += ",";
-                                        joined += r;
-                                    }
-                                    return joined;
-                                }()
-                             << "], circuit_breaker.consecutive_layer3_threshold="
-                             << tool_call_repair_config_.circuit_breaker.consecutive_layer3_threshold
-                             << ", circuit_breaker.cooldown_seconds="
-                             << tool_call_repair_config_.circuit_breaker.cooldown_seconds
                              << std::endl;
                 }
 

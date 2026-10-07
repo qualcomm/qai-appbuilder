@@ -1,33 +1,12 @@
 {
     "_comment": "GenieAPIService 服务配置文件 - 程序启动时自动加载，修改后重启服务生效",
-    "_comment_grouping": "字段分组门控：Group A（网络模块，含 local_model/cloud_shared/cloud_model/enterprise_cloud_model/routing 及 routing 下的敏感检测/脱敏/复杂度评估子节，含 routing.enabled 本身）仅在服务以 -n -1（stateless/端云结合模式）启动时解析生效，-n 为其它值时这些字段保持代码默认值（routing.enabled 恒为 false，云端路径不可达）；Group B（prompt_optimization/tool_call_repair/debug，公共组件，与云端无关）无条件生效，不受 -n 取值影响。",
+    "_comment_grouping": "字段分组门控：Group A（网络模块，含 local_model/cloud_shared/cloud_model/enterprise_cloud_model/routing 及 routing 下的敏感检测/脱敏/复杂度评估子节，含 routing.enabled 本身）仅在服务以 -n -1（stateless/端云结合模式）启动时解析生效，-n 为其它值时这些字段保持代码默认值（routing.enabled 恒为 false，云端路径不可达）；Group B（prompt_optimization/debug，公共组件，与云端无关）无条件生效，不受 -n 取值影响。",
     "_version": "1.0",
 
     "local_model": {
         "_comment": "本地模型配置",
         "_comment_enabled": "true=启用本地模型（默认），false=禁用本地模型（仅使用云端模型）",
         "enabled": true
-    },
-
-    "tool_call_repair": {
-        "_comment": "工具调用兜底修复配置：现有正则修复链+Layer1本地确定性提取均失败后（最终会落回 name=unknow），Layer2 在返回给客户端之前发起服务端内部隐形自纠正重试",
-        "_comment_enabled": "true=启用本节全部新增行为（默认），false=完全跳过，行为与改动前逐字节一致",
-        "enabled": true,
-
-        "internal_retry": {
-            "_comment_max_attempts": "内部隐形重试的最大次数（不含首次原始生成），默认 1，避免本地弱模型的推理延迟被无限放大",
-            "max_attempts": 1,
-            "_comment_skip_reasons": "命中以下失败分类时跳过重试，直接维持现有 unknow 兜底转发；取值对应 unknown_tool_name/missing_required_args/truncated/ambiguous_multiple_calls/unparseable。默认仅跳过 truncated：token 预算耗尽导致的截断，结构信息已丢失，重试大概率再次超预算",
-            "skip_reasons": ["truncated"]
-        },
-
-        "circuit_breaker": {
-            "_comment": "Layer3 分级终态协议熔断器：连续多次真正走到 Layer3 终态（Layer0/1/2 均未成功恢复），说明该会话+模型系统性不具备工具调用能力，熔断后动态降级 system prompt（跳过工具声明注入），避免模型继续做徒劳的工具调用尝试",
-            "_comment_threshold": "连续触发 Layer3 达到此次数后判定熔断，默认 3",
-            "consecutive_layer3_threshold": 3,
-            "_comment_cooldown": "熔断后的冷却时间（秒），期间该会话+模型持续降级 system prompt；冷却到期后自动解除，默认 300（5 分钟）",
-            "cooldown_seconds": 300
-        }
     },
 
     "cloud_shared": {

@@ -215,12 +215,12 @@ struct LocalModelConfig {
 };
 
 // ============================================================
-// 工具调用兜底修复配置（对应 service_config.json 中的 "tool_call_repair" 节）
+// 工具调用兜底修复配置（硬编码默认值，不再从 service_config.json 解析）
 // Layer2：现有正则修复链 + Layer1（本地确定性提取）均失败（最终会落回 name="unknow"）后，
 // 服务端在决定返回给客户端之前发起的内部隐形自纠正重试：构造 scratch ModelInput 追加一条
 // role=tool 错误消息，重新走完整 ModelInputBuilder::Build() 预算/压缩流水线再次调用
 // handle->Query()；成功结果直接替换给客户端，失败的第一次尝试绝不写入 ChatHistory，
-// 也绝不向客户端发送任何中间态。默认开启，可通过 service_config.json 关闭/调阈值。
+// 也绝不向客户端发送任何中间态。默认开启，取值即本结构体的硬编码默认成员。
 // ============================================================
 struct ToolCallRepairConfig {
     bool enabled = true;
