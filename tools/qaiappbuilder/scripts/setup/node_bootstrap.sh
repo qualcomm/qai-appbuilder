@@ -65,8 +65,31 @@ _npm_config_prefix="$NPM_CONFIG_PREFIX"
 unset NPM_CONFIG_PREFIX
 if [[ ! -s "$NVM_DIR/nvm.sh" ]]; then
   echo "[node-bootstrap] Installing nvm into $NVM_DIR..."
-  curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh \
-    | PROFILE="$_nvm_profile" bash
+  # Download to a file and verify its SHA256 before executing anything —
+  # never pipe curl straight into bash (a compromised/MITM'd server, or a
+  # retagged release, could inject arbitrary code with no verification step
+  # in between). The checksum below is pinned to nvm v0.39.7's install.sh
+  # specifically; bumping _nvm_install_version requires recomputing it (e.g.
+  # `curl -fsSL <url> | sha256sum`) and reviewing the diff before trusting
+  # the new value.
+  _nvm_install_version="v0.39.7"
+  _nvm_installer_sha256="8e45fa547f428e9196a5613efad3bfa4d4608b74ca870f930090598f5af5f643"
+  _nvm_installer="$NVM_DIR/install.sh"
+  curl -fsSL \
+    "https://raw.githubusercontent.com/nvm-sh/nvm/${_nvm_install_version}/install.sh" \
+    -o "$_nvm_installer"
+  _nvm_installer_actual_sha256="$(sha256sum "$_nvm_installer" | awk '{print $1}')"
+  if [[ "$_nvm_installer_actual_sha256" != "$_nvm_installer_sha256" ]]; then
+    echo "[node-bootstrap] ERROR: nvm install.sh checksum mismatch for ${_nvm_install_version}." >&2
+    echo "  expected: $_nvm_installer_sha256" >&2
+    echo "  got:      $_nvm_installer_actual_sha256" >&2
+    echo "  Refusing to execute an unverified script." >&2
+    rm -f "$_nvm_installer"
+    return 1 2>/dev/null || exit 1
+  fi
+  PROFILE="$_nvm_profile" bash "$_nvm_installer"
+  rm -f "$_nvm_installer"
+  unset _nvm_install_version _nvm_installer_sha256 _nvm_installer _nvm_installer_actual_sha256
 fi
 
 # shellcheck source=/dev/null
