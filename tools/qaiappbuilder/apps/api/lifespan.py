@@ -850,6 +850,44 @@ def make_lifespan(
                 exc_info=True,
             )
 
+        # qai-service model-roster sync — one GET /v1/models against the
+        # live broker, folding any real models it returns into the stored
+        # provider config alongside the route-1 pseudo-model (which always
+        # stays first / the default). Best-effort + non-blocking, same
+        # shape as the permission scan above: no JWT yet (fresh install /
+        # never logged in) degrades to a clean no-op, never raises, never
+        # delays "ready to serve".
+        try:
+            _sync_qai_models_uc = (
+                container.model_catalog.sync_qai_service_models_use_case
+            )
+
+            async def _run_qai_service_model_sync() -> None:
+                try:
+                    result = await _sync_qai_models_uc.execute()
+                    if result.added or result.removed:
+                        _log.info(
+                            "lifespan.qai_service_models_synced",
+                            added=result.added,
+                            removed=result.removed,
+                        )
+                except Exception:  # noqa: BLE001 — sync must never surface
+                    _log.warning(
+                        "lifespan.qai_service_models_sync_failed",
+                        exc_info=True,
+                    )
+
+            asyncio.create_task(
+                _run_qai_service_model_sync(),
+                name="qai-service-model-sync",
+            )
+            _log.info("lifespan.qai_service_models_sync_spawned")
+        except Exception:  # noqa: BLE001 — spawn must never abort startup
+            _log.warning(
+                "lifespan.qai_service_models_sync_spawn_failed",
+                exc_info=True,
+            )
+
         try:
             # Write the runtime endpoint file (single source of truth for
             # "where is the API now") just before yielding control to

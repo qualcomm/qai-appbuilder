@@ -44,6 +44,10 @@ from .remove_model_entry import RemoveModelEntryUseCase
 from .remove_version import RemoveVersionCommand, RemoveVersionUseCase
 from .start_download import StartDownloadUseCase
 from .stream_download_progress import StreamDownloadProgressUseCase
+from .sync_qai_service_models import (
+    SyncQaiServiceModelsResult,
+    SyncQaiServiceModelsUseCase,
+)
 from .update_provider_config import UpdateProviderConfigUseCase
 from .verify_checksum import VerifyChecksumUseCase
 
@@ -80,4 +84,7 @@ __all__ = [
     "AUTH_MODE_API_KEY",
     "AUTH_MODE_SSO",
     "QAI_SERVICE_PROVIDER_ID",
+    # Live qai-service model-roster sync (startup, /v1/models probe)
+    "SyncQaiServiceModelsUseCase",
+    "SyncQaiServiceModelsResult",
 ]
