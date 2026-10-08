@@ -25,7 +25,7 @@ This directory contains three Gradio-based WebUI applications that run AI models
 ### Screenshots
 ![ImageRepairApp](image-repair/screenshot/ImageRepairApp.jpg)
 ![StableDiffusionApp](stable-diffusion/screenshot/StableDiffusionApp.jpg)
-![GenieWebUI](genie-chat/screenshot/GenieWebUI.png)
+![GenieWebUI](genie-chat/screenshot/GenieWebUI1.png)
 
 ---
 
