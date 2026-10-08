@@ -95,17 +95,6 @@ def find_entrypoint(extract_dir: str) -> str | None:
     return None
 
 
-def _safe_tar_members(tar: "tarfile.TarFile", dest_dir: str) -> list:
-    """Return only tar members whose resolved path stays inside dest_dir."""
-    dest_root = os.path.realpath(dest_dir)
-    safe_members = []
-    for member in tar.getmembers():
-        resolved = os.path.realpath(os.path.join(dest_root, member.name))
-        if resolved == dest_root or resolved.startswith(dest_root + os.sep):
-            safe_members.append(member)
-    return safe_members
-
-
 def fetch_and_summarize(arxiv_id: str) -> None:
     os.makedirs(CACHE_DIR, exist_ok=True)
 
@@ -129,7 +118,7 @@ def fetch_and_summarize(arxiv_id: str) -> None:
         os.makedirs(extract_dir, exist_ok=True)
         print(f"[fetch_arxiv] Extracting to {extract_dir} ...", flush=True)
         with tarfile.open(tar_path, "r:gz") as tar:
-            tar.extractall(extract_dir, members=_safe_tar_members(tar, extract_dir), filter="data")
+            tar.extractall(extract_dir)
     else:
         print(f"[fetch_arxiv] Already extracted: {extract_dir}", flush=True)
 

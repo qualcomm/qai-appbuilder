@@ -200,7 +200,7 @@ CondenseResult ContentCondenser::Condense(const std::string& content,
         result.text = high_signal_block + HeadTailKeep(content, head_chars, tail_chars);
     }
 
-    // 步骤 6：token 收敛（仅当提供 token_len 时生效；budget_unit=="chars" 时调用方传 nullptr 跳过）
+    // 步骤 6：token 收敛（仅当提供 token_len 时生效；本步骤接入点恒定传 nullptr，跳过）
     if (token_len != nullptr && budget.max_tokens > 0) {
         size_t probes = 0;
         size_t cur_tokens = (*token_len)(result.text);

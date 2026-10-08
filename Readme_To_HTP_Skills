@@ -1,0 +1,129 @@
+# 本地模型格式转换为 HTP 并推理
+
+## AppBuilder 中的 skill 位置
+
+这三个 skill 在 AppBuilder 中位于：
+
+```text
+qai-appbuilder-main\tools\qaiappbuilder\skills
+```
+
+对应目录为：
+
+- `qai-appbuilder-main\tools\qaiappbuilder\skills\mmengine-ckpt-to-htp`
+- `qai-appbuilder-main\tools\qaiappbuilder\skills\safetensors-to-htp`
+- `qai-appbuilder-main\tools\qaiappbuilder\skills\onnx-to-htp`
+
+如需在其他工作目录使用，可以将上述三个 skill 目录连同其中的 `SKILL.md` 和 `scripts/` 一起复制过去。
+
+本目录提供一条面向 **Windows on Snapdragon（WoS）/Qualcomm HTP** 的本地模型转换与推理流程，适合本地 decoding 速率较低、希望将模型转换到 HTP/NPU 并在本机执行推理的场景。
+
+## 目的与适用场景
+
+本流程用于：
+
+- 将 OpenMMLab/mmengine 的 `.pth` checkpoint 转换为 FP32 ONNX，再转换为 QNN/HTP 模型；
+- 将 `.safetensors` 权重探测并导出为 FP32 ONNX，再转换为 QNN/HTP 模型；
+- 将已有的 `.onnx` 模型通过 QAIRT/QNN 原生工具链部署到 HTP，并在本机运行推理；
+- 在转换后用 ONNX Runtime 参考结果与 HTP 输出进行精度校验，生成可追溯的报告。
+
+> 这里的“本地推理”指模型最终通过 HTP backend 在当前 Windows on Snapdragon 设备上运行，而不是仅生成转换产物或上传到远端设备。
+
+## 重要：调用时必须明确指定 skill
+
+使用本流程时，请在请求中**明确写出要调用的 skill 名称**：
+
+- `mmengine-ckpt-to-htp`
+- `safetensors-to-htp`
+- `onnx-to-htp`
+
+例如：
+
+> 请明确使用 `safetensors-to-htp` 和 `onnx-to-htp`，将这个模型转换到 HTP，并在本机完成推理验证。
+
+如果不明确指定这些 skill，任务可能进入 AppBuilder 原有逻辑，导致没有按本目录的“探测 → FP32 ONNX → QAIRT/QNN → HTP 本地推理”流程执行。
+
+这三个 skill 目录可以直接复制到任意工作目录使用；复制后请保持各自的目录结构（尤其是 `scripts/` 和 `SKILL.md`），并在请求中继续明确指定 skill 名称。
+
+## 三个 skill 的分工
+
+| 输入/场景 | 使用 skill | 作用 |
+|---|---|---|
+| mmengine/OpenMMLab `.pth` | `mmengine-ckpt-to-htp` | 探测 checkpoint 是否含 `meta` + `state_dict`，识别模型结构，生成并执行导出脚本，产出经过校验的 FP32 ONNX |
+| `.safetensors` 权重 | `safetensors-to-htp` | 探测 metadata、张量名、shape、dtype 和模型家族，重建/加载模型并导出经过校验的 FP32 ONNX |
+| 已有 `.onnx`，或前两个 skill 已导出的 ONNX | `onnx-to-htp` | 使用 QAIRT/QNN 工具链转换、编译 model library、生成输入、在 HTP 上推理，并与 ONNX Runtime 结果校验 |
+
+## 标准流程
+
+```text
+.pth（mmengine） ─┐
+                  ├─ 探测与导出 ─→ FP32 ONNX ─→ QAIRT/QNN ─→ HTP 本地推理 ─→ 精度报告
+.safetensors ────┘
+
+已有 ONNX ───────────────────────────────→ QAIRT/QNN ─→ HTP 本地推理 ─→ 精度报告
+```
+
+### 1. `.pth` 或 `.safetensors`：先探测，再导出 FP32 ONNX
+
+`mmengine-ckpt-to-htp` 和 `safetensors-to-htp` 都是前端 skill，边界是：
+
+1. 探测输入文件结构、键名/张量信息和可能的模型家族；
+2. 根据探测结果补充模型定义或导出脚本；
+3. 用 FP32、ONNX opset 18、关闭 constant folding 的规则导出 ONNX；
+4. 通过 ONNX Runtime CPUExecutionProvider 与 PyTorch 输出做 cosine 校验。
+
+导出不是“只要生成文件即可”：默认要求 cosine 至少达到 **0.9999**。模型结构、权重加载、stride/padding/激活函数或布局不一致时应停止排查，不应跳过校验继续转换。
+
+`.safetensors` 只保存“张量名 → 张量”，不包含计算图和 Python 模型类；如果没有对应的模型定义、配置或来源仓库，无法凭权重可靠推断完整网络。类似地，非标准或自定义 `.pth` 也可能需要用户提供训练仓库/config。
+
+### 2. FP32 ONNX：由 `onnx-to-htp` 完成 QAIRT/QNN 到 HTP
+
+前端 skill 产出的标准 FP32 ONNX 必须交给 `onnx-to-htp`（或在已安装 QAIModelBuilder 时交给其 `model-builder` 流程）继续处理。后续包括：
+
+1. `qnn-onnx-converter`：ONNX → QNN 中间表示（`.cpp`/`.bin`）；
+2. `qnn-model-lib-generator`：生成 model library；
+3. 按转换后的真实输入 shape 生成 `.raw` 输入；
+4. 使用 `qnn-net-run` + HTP backend 在本机推理；
+5. 可选生成 context binary；
+6. 与 ONNX Runtime 参考输出进行 cosine、最大绝对误差或逐位一致性校验，并写入 `REPORT.md`。
+
+`onnx-to-htp` 默认先尝试 FP32。若 HTP prepare 阶段出现 `flat_from_vtcm`、VTCM 不足或 error 1002 等问题，会尝试 FP16；这不是无条件地降低精度，而是针对 HTP 资源限制的明确降级路径。
+
+## 环境与运行前检查
+
+- 目标宿主是 Windows on Snapdragon ARM64；实际 HTP 版本、SDK 版本和目录布局必须以当前机器为准，不要直接照搬示例路径。
+- 先检查 QAIRT SDK 根目录，以及 `qairt_env.json`。若存在 QAIModelBuilder 安装目录下的 `data\\config\\qairt_env.json`，优先使用更完整的 `model-builder` skill；该流程适合有 QAIModelBuilder 的机器。
+- 若只有裸 QAIRT SDK、没有 QAIModelBuilder，则使用 `onnx-to-htp` 的原生 CLI 流程。
+- 运行 `onnx-to-htp/scripts/env_check.ps1`，确认 Python、QAIRT SDK、架构子目录、CMake 和 MSVC/clang-cl 等工具链。
+- 转换器通常需要 x64 Python 和正确的 `PYTHONPATH`；`qnn-net-run`/HTP 调试通常使用 SDK 的 x64 工具目录。不要假设 ARM64 与 x64 工具可以互换。
+- 动态 batch 或动态维度必须在运行时落实为具体值；QNN 输入/输出可能被转换器按布局转置，生成 raw 输入和解析输出时以转换后的实际 shape 为准。
+- 每个模型使用独立 `WorkDir`，避免旧的 `.cpp`、`.bin`、model library、输入输出或 context binary 混入本次结果。
+
+## 精度与验收标准
+
+- **FP32 导出阶段**：PyTorch 与 ONNX Runtime cosine ≥ `0.9999`；未达到时先修正模型定义或权重加载，不得静默跳过。
+- **FP32 HTP 阶段**：目标是与 ONNX Runtime 逐位一致，或仅有机器精度级别的微小差异。
+- **FP16 HTP 阶段**：由于精度表示变化，通常要求 cosine ≥ `0.99`，并在报告中明确记录使用了 FP16 及其原因。
+- **INT8/A16W8 等量化阶段**：通常要求 cosine ≥ `0.95`；校准数据应真实、多样并覆盖目标场景，不能简单重复一张输入图。
+- 任何阈值不达标都应使流程失败并保留日志；“能运行”不等于“结果正确”。
+
+排错时可先用 QNN CPU backend 做 sanity check：CPU 也不匹配通常说明转换、shape 或布局有问题；只有 HTP 不匹配时，再重点检查 HTP 精度、VTCM 或算子实现。
+
+## 边界与专项 skill 优先级
+
+这三个 skill 不是所有模型的万能逆向工具：
+
+- `mmengine-ckpt-to-htp` 只负责 mmengine `.pth` 的探测和 ONNX 导出；从 ONNX Inspect、算子 patch、QNN 转换、量化、context binary、HTP 推理到报告，应移交 `onnx-to-htp`/`model-builder`。
+- `safetensors-to-htp` 只负责 safetensors 的探测和 ONNX 导出；同样不在前端重复实现 QNN/HTP 后处理。
+- 如果探测出 **YOLO-World V2.1**（例如 `backbone.text_model.*` 与 `bbox_head.*`），优先使用仓库中的 `mmyolo-ckpt-to-htp` 专项 skill，而不是通用 mmengine 前端。
+- 如果探测出 **Real-ESRGAN x4plus/RRDBNet**（例如 `body.*.rdb1/rdb2/rdb3`、`conv_first`、`conv_up1/conv_up2` 等），优先使用 `realesrgan-safetensors-to-htp` 专项 skill。
+- 已有 QAIModelBuilder 时，优先使用 `model-builder`，因为它包含更完整的 pipeline、量化和排错子 skill；裸 SDK 场景才使用 `onnx-to-htp`。
+- 算子不支持、导出导入报错、动态 shape、VTCM 超限等问题，应按对应专项/排错 skill 处理，不要在通用流程中临时绕过。
+
+## 推荐给用户的提示词
+
+下面是一段推荐提示词，可直接复制后按实际路径修改：
+
+> 请在本机完成模型到 Qualcomm HTP 的转换和推理验证。**必须明确使用本目录的专项 skill**：输入是 `.pth` 时使用 `mmengine-ckpt-to-htp`，输入是 `.safetensors` 时使用 `safetensors-to-htp`，已有 `.onnx` 或前端导出完成后使用 `onnx-to-htp`；不要进入 AppBuilder 原有逻辑。请先探测模型和当前 QAIRT/QNN 环境，再按流程执行：`.pth`/`.safetensors` 先导出并校验 FP32 ONNX，然后由 `onnx-to-htp` 完成 QAIRT/QNN 转换、HTP 本地推理和精度对比。请在工作区持续维护 `status.md`，逐步记录已完成的步骤、命令、环境、产物路径、日志、精度结果、失败原因和下一步；如果中途失败或会话中断，必须先读取 `status.md`，从最后一个成功步骤断点续作，不要重复执行已完成且可能覆盖产物的步骤。请严格遵守各 skill 的边界、专项 skill 优先级和精度阈值，最终给出 HTP 推理结果、校验数据和报告路径。
+
+建议将 `status.md` 与模型工作目录、`REPORT.md`、原始日志和最终产物放在一起，便于后续复现和断点续作。

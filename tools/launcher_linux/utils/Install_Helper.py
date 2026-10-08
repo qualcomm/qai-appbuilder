@@ -5,7 +5,6 @@
 
 import os
 import sys
-import ssl
 import shutil
 import subprocess
 import requests
@@ -17,15 +16,6 @@ from py3_wget import download_file
 WGET_URL = "https://eternallybored.org/misc/wget/releases/wget-1.21.4-winarm64.zip"
 ARIA2C_URL = "https://github.com/aria2/aria2/releases/download/release-1.36.0/aria2-1.36.0-win-64bit-build1.zip"
 TEXT_RUN_SCRIPT_AGAIN = "Then run this Python script again."
-
-def _is_ssl_error(exc) -> bool:
-    # Best-effort detection of a TLS/certificate-verification failure, as
-    # opposed to a generic network error (DNS, timeout, connection refused)
-    # that an insecure retry would not help with anyway.
-    if isinstance(exc, ssl.SSLError):
-        return True
-    text = str(exc).lower()
-    return "certificate" in text or "ssl" in text or "tls" in text
 
 def verify_package(url, filepath, filesize, desc=None, fail=None):
      # verify if package is ready.
@@ -41,11 +31,8 @@ def verify_package(url, filepath, filesize, desc=None, fail=None):
         if filesize is not None:
             actual_size = filesize
         else:
-            try:
-                response = request.urlopen(url)
-                actual_size = int(response.headers["Content-Length"])
-            except Exception:
-                actual_size = -1  # could not verify remote size; treat as not ready
+            response = request.urlopen(url)
+            actual_size = int(response.headers["Content-Length"])
 
         if actual_size == local_size:   # file is ready for using.
             # print(f"{filepath} is ready for using.")
@@ -68,6 +55,9 @@ def verify_package(url, filepath, filesize, desc=None, fail=None):
 def download_url_pywget(url, filepath, filesize=None, desc=None, fail=None):
     ret = True
 
+    # Create an unverified SSLContext - a context with disables all certificate verification.
+    import ssl
+    ssl._create_default_https_context = ssl._create_unverified_context
 
     if verify_package(url, filepath, filesize):
         return ret
@@ -151,7 +141,7 @@ def ensure_windows_tools():
 
 def download_with_aria2c(url, dest_path, proxy=None):
     try:
-        cmd = ["aria2c", "--console-log-level=error", "-x", "16", "-s", "16", "-o", os.path.basename(dest_path), "-d", os.path.dirname(dest_path), url]
+        cmd = ["aria2c", "--console-log-level=error", "--check-certificate=false", "-x", "16", "-s", "16", "-o", os.path.basename(dest_path), "-d", os.path.dirname(dest_path), url]
         if proxy:
             cmd.extend(["--all-proxy", proxy])
         cmd.append("--continue=true")
@@ -172,10 +162,10 @@ def download_with_wget(url, dest_path, proxy=None):
         print(f"[wget] Download failed: {e}")
         return False
 
-def download_with_requests(url, dest_path, proxy=None, verify=True):
+def download_with_requests(url, dest_path, proxy=None):
     try:
         proxies = {"http": proxy, "https": proxy} if proxy else None
-        with requests.get(url, stream=True, timeout=60, proxies=proxies, verify=verify) as response:
+        with requests.get(url, stream=True, timeout=60, proxies=proxies) as response:
             response.raise_for_status()
             total = int(response.headers.get('Content-Length', 0))
             with open(dest_path, 'wb') as out_file, tqdm(
@@ -187,9 +177,6 @@ def download_with_requests(url, dest_path, proxy=None, verify=True):
                         pbar.update(len(chunk))
         return True
     except Exception as e:
-        if verify and _is_ssl_error(e):
-            print(f"[requests] TLS certificate verification failed ({e}); retrying once without certificate verification...")
-            return download_with_requests(url, dest_path, proxy=proxy, verify=False)
         print(f"[requests] Download failed: {e}")
         return False
 

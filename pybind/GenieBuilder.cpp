@@ -489,7 +489,7 @@ bool GenieContext::SetParams(const std::string max_length, const std::string tem
 
 std::string GenieContext::GetProfile() {
     const Genie_AllocCallback_t callback([](size_t size, const char** data) {
-        *data = (char*)calloc(1, size);
+        *data = (char*)malloc(size);
         if (*data == nullptr) {
           std::cerr << "Cannot allocate memory for JSON data.\n";
         }

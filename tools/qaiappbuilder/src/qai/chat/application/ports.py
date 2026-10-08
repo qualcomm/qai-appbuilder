@@ -1481,6 +1481,20 @@ class ToolResultTruncationRequest:
     #: advancing. Defaults to 1 (slice starts at the beginning), which is both
     #: the common case and the prior behaviour.
     slice_start_line: int = 1
+    #: The model's REAL context window in tokens, when the caller knows it.
+    #:
+    #: Tail-appended (§3.1). ``0`` (default) means "unknown" and keeps the
+    #: family-table budgets exactly as before, so every existing caller is
+    #: byte-for-byte unchanged.
+    #:
+    #: Why it exists: the per-family char budgets are absolute constants, so on a
+    #: small window a SINGLE tool result can legitimately occupy most of it. With
+    #: a 32768-token window the ``read`` backstop alone allowed ~20027 tokens =
+    #: 61% of the window in one result — which means no inter-round compaction
+    #: threshold placed at 0.50-0.65 of the window can survive one tool round.
+    #: Supplying the real window lets the truncator scale its caps to a fraction
+    #: of it (see ``AdaptiveToolResultTruncator.window_result_ratio``).
+    context_length: int = 0
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -2079,17 +2093,6 @@ class ModelResolverPort(Protocol):
 
         If hint is None, use the default/selected model.
         """
-        ...
-
-
-@runtime_checkable
-class ModelContextWindowPort(Protocol):
-    """Resolve the selected model's configured positive context window."""
-
-    async def context_window(
-        self, model_id: str, provider: str | None = None,
-    ) -> int:
-        """Return tokens or raise a chat domain error when unavailable."""
         ...
 
 
@@ -2904,7 +2907,6 @@ __all__ = [
     # A4 — model resolution
     "ModelResolverPort",
     "ResolvedModel",
-    "ModelContextWindowPort",
     # block 2 — provider-aware routing
     "ProviderConfigLookupPort",
     "ProviderEndpoint",

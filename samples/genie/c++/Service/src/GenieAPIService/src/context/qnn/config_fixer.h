@@ -79,11 +79,6 @@ public:
         }
 
         has_ssd_prefix_ = j_.contains(json::json_pointer("/dialog/ssd-q1/forecast-prefix-name"));
-
-        auto bos_token_jp = json::json_pointer("/dialog/context/bos-token");
-        kv_restore_eligible_ = j_.contains(bos_token_jp) && j_.at(bos_token_jp).is_number()
-                               && j_.at(bos_token_jp).get<int64_t>() == -1;
-
         My_Log{My_Log::Level::kInfo} << j_.dump(4) << "\n";
     }
 
@@ -114,7 +109,6 @@ public:
     }
 
     bool has_ssd_prefix_;
-    bool kv_restore_eligible_;
 
 private:
     bool FixedPath(json &j, FixedInfo &info);

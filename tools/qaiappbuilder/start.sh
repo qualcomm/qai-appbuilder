@@ -62,9 +62,7 @@ export PYTHONPATH="$REPO_ROOT/src:$REPO_ROOT"
 # while leaving unrelated processes alone.
 python -m apps.cli._endpoint_helper cleanup-stale || true
 
-echo "[start] Open the UI at http://localhost:$PORT"
-echo "[start] Remote host: ssh -L $PORT:127.0.0.1:$PORT <user>@<server>"
-echo "[start] Then open http://localhost:$PORT in your local browser."
+echo "[start] QAIModelBuilder starting at http://127.0.0.1:$PORT"
 echo "[start] Press Ctrl+C to stop."
 echo ""
 

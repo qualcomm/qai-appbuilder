@@ -52,16 +52,14 @@ public:
         messages.push_back(prompt_start);
 
         size_t count = history.size();
-        My_Log{} << "History size: " << count << ", returning all messages in history" << std::endl;
+        My_Log{} << "History size: " << count << ", returning all messages (no compression)" << std::endl;
 
         if (count == 0)
         {
             return std::accumulate(messages.begin(), messages.end(), std::string{});
         }
 
-        // 原样拼接 history 中的全部消息；history 本身是否经过压缩/裁剪由调用方
-        // （model_input_builder.h 的 PrepareFilteredMessages/PrepareHarmonyMessages）
-        // 在写入 chat_history_ 之前统一决定，这里不重复做任何压缩或丢弃判断。
+        // 直接处理所有消息，不进行压缩或丢弃
         for (size_t i = 0; i < count; i++)
         {
             auto &msg = history[i];

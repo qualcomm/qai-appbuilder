@@ -282,40 +282,6 @@ PYBIND11_MODULE(appbuilder, m) {
     py::class_<ShareMemory>(m, "ShareMemory")
         .def(py::init<const std::string&, const size_t>());
 
-#if defined(APPBUILDER_ENABLE_TFLITE) || defined(APPBUILDER_ENABLE_TFLITE_CPU)
-    py::class_<TFLiteQnnContext>(m, "TFLiteQnnContext")
-        .def(py::init<const std::string&, const std::string&, const std::string&>(),
-             py::arg("model_name"), py::arg("model_path"), py::arg("backend_lib_path") = "")
-        .def("Inference", &TFLiteQnnContext::Inference, py::arg("input"), py::arg("graphIndex") = 0)
-        .def("getInputShapes", &TFLiteQnnContext::getInputShapes, py::arg("graphIdx") = 0)
-        .def("getOutputShapes", &TFLiteQnnContext::getOutputShapes, py::arg("graphIdx") = 0)
-        .def("getInputDataType", &TFLiteQnnContext::getInputDataType, py::arg("graphIdx") = 0)
-        .def("getOutputDataType", &TFLiteQnnContext::getOutputDataType, py::arg("graphIdx") = 0)
-        .def("getInputName", &TFLiteQnnContext::getInputName, py::arg("graphIdx") = 0)
-        .def("getOutputName", &TFLiteQnnContext::getOutputName, py::arg("graphIdx") = 0)
-        .def("getGraphName", &TFLiteQnnContext::getGraphName, py::arg("graphIdx") = 0)
-        .def("getProfilingEvent", &TFLiteQnnContext::getProfilingEvent)
-        .def("getProviderMode", &TFLiteQnnContext::getProviderMode)
-        .def("release", &TFLiteQnnContext::release);
-#endif
-
-#ifdef APPBUILDER_ENABLE_TFLITE_CPU
-    py::class_<TFLiteCpuContext, TFLiteQnnContext>(m, "TFLiteCpuContext")
-        .def(py::init<const std::string&, const std::string&, int>(),
-             py::arg("model_name"), py::arg("model_path"), py::arg("num_threads") = 1)
-        .def("Inference", &TFLiteCpuContext::Inference, py::arg("input"), py::arg("graphIndex") = 0)
-        .def("getInputShapes", &TFLiteCpuContext::getInputShapes, py::arg("graphIdx") = 0)
-        .def("getOutputShapes", &TFLiteCpuContext::getOutputShapes, py::arg("graphIdx") = 0)
-        .def("getInputDataType", &TFLiteCpuContext::getInputDataType, py::arg("graphIdx") = 0)
-        .def("getOutputDataType", &TFLiteCpuContext::getOutputDataType, py::arg("graphIdx") = 0)
-        .def("getInputName", &TFLiteCpuContext::getInputName, py::arg("graphIdx") = 0)
-        .def("getOutputName", &TFLiteCpuContext::getOutputName, py::arg("graphIdx") = 0)
-        .def("getGraphName", &TFLiteCpuContext::getGraphName, py::arg("graphIdx") = 0)
-        .def("getProfilingEvent", &TFLiteCpuContext::getProfilingEvent)
-        .def("getProviderMode", &TFLiteCpuContext::getProviderMode)
-        .def("release", &TFLiteCpuContext::release);
-#endif
-
     py::class_<QNNContext>(m, "QNNContext")
         .def(py::init<const std::string&, const std::string&, const std::string&, const std::string&, bool, const std::string&, const std::string&, uint32_t, std::string, const std::vector<std::string>&>())
         .def(py::init<const std::string&, const std::string&, const std::string&, const std::string&, const std::vector<LoraAdapter>&, bool, const std::string&, const std::string&, uint32_t, std::string, const std::vector<std::string>&>())

@@ -140,8 +140,6 @@ if TYPE_CHECKING:  # pragma: no cover
     from collections.abc import Callable
 
     from qai.app_builder.infrastructure import StickyWorkerHost
-    from qai.platform.package_mutation import PackageMutationLock
-    from qai.platform.qairt_switch.service import QairtSwitchService
 
 
 @dataclass(slots=True)
@@ -252,26 +250,6 @@ class Container:
     # chat tool registry via ``wire_computer_tool_into_chat`` in phase 2
     # right after ``background_process``; OFF unless ``computer.enabled``).
     computer: ComputerServices = field(init=False)
-    # Tail-appended (QAIRT SDK hot-switch): the ONE DI-owned lock shared by
-    # every writer that spawns a pip/uv child process against the shared
-    # runtime venv (the App Builder dependency checker AND the QAIRT
-    # extension installer), so their subprocesses never run concurrently
-    # against the same ``site-packages``. Constructed in ``_build_core``
-    # (Phase 1) — BEFORE ``app_builder`` is built — so
-    # ``build_app_builder_services`` can inject the SAME instance into
-    # both ``DynamicPackDepChecker`` and (via ``qairt_switch_service``,
-    # Phase 3) ``CompatibleExtensionInstaller``.
-    package_mutation_lock: "PackageMutationLock" = field(init=False)
-    # Tail-appended (QAIRT SDK hot-switch): the transactional switch
-    # service (``qai.platform.qairt_switch.service.QairtSwitchService``).
-    # ``None`` when the App Builder context has no sticky-worker lifecycle
-    # wired (stripped-down test containers) — the switch HTTP route then
-    # surfaces a clear "feature unavailable" response rather than crashing.
-    # Built in ``_wire_cross_context`` (Phase 3), after ``app_builder`` so
-    # it can read ``self.app_builder.sticky_worker_lifecycle``.
-    qairt_switch_service: "QairtSwitchService | None" = field(
-        init=False, default=None
-    )
 
     @classmethod
     def build(cls, *, settings: Settings, repo_root: Path) -> Container:
@@ -336,14 +314,6 @@ class Container:
         # interpreter falls back to ``sys.executable`` and the spawn
         # env carries no QAIRT extras (parity with PR-303 default).
         self.qairt_env_file = _resolve_qairt_env_file(data_paths, repo_root)
-        # Tail-appended (QAIRT SDK hot-switch): construct the ONE shared
-        # pip/uv mutation lock here, in Phase 1, BEFORE app_builder is built
-        # in Phase 2 — so build_app_builder_services can inject this SAME
-        # instance into DynamicPackDepChecker, and _wire_cross_context
-        # (Phase 3) can inject it into CompatibleExtensionInstaller.
-        from qai.platform.package_mutation import PackageMutationLock as _PML
-
-        self.package_mutation_lock = _PML()
         # Single reboot scheduler shared across system + security
         # adapters so concurrent reboot requests coalesce into one
         # exit task. Exit code is taken from settings (PR-040).
@@ -525,125 +495,6 @@ class Container:
         self.gomaster_external_optimize = build_gomaster_external_optimize_controller(
             container=self
         )
-        # QAIRT SDK hot-switch — the transactional switch service. Built
-        # LAST in this phase (after ``app_builder`` in Phase 2) so it can
-        # read the ``sticky_worker_lifecycle`` adapter app_builder wired.
-        # ``None`` when there is no existing ``qairt_env.json`` (fresh
-        # checkout, never installed QAIRT) OR the App Builder context has
-        # no sticky-worker lifecycle (stripped-down test containers) — the
-        # switch HTTP route then surfaces a clear "feature unavailable"
-        # response rather than crashing.
-        self.qairt_switch_service = _build_qairt_switch_service(self)
-
-
-def _build_qairt_switch_service(
-    container: "Container",
-) -> "QairtSwitchService | None":
-    """Build the QAIRT SDK hot-switch service, or ``None`` when infeasible.
-
-    Requires an EXISTING ``qairt_env.json`` (``container.qairt_env_file``)
-    -- a fresh checkout with no QAIRT SDK ever installed has no config to
-    switch between and no discoverable install root, so the feature is
-    simply unavailable rather than half-wired. Also requires the App
-    Builder sticky-worker lifecycle adapter, which is only present when
-    ``container.app_builder`` itself wired successfully.
-    """
-    if container.qairt_env_file is None:
-        return None
-    sticky_worker = getattr(container.app_builder, "sticky_worker_lifecycle", None)
-    if sticky_worker is None:
-        return None
-
-    import asyncio
-    import os
-    import sys
-
-    from qai.platform.process import current_arch, terminate_process_tree
-    from qai.platform.qairt_switch.config_repository import QairtConfigRepository
-    from qai.platform.qairt_switch.installer import CompatibleExtensionInstaller
-    from qai.platform.qairt_switch.service import (
-        QairtSwitchService,
-        RuntimeProbeVerificationError,
-    )
-    from qai.platform.qairt_versions import resolve_qairt_installation
-    install_root, _active_version = resolve_qairt_installation(
-        container.qairt_env_file,
-        fallback_root=Path("C:/Qualcomm/AIStack/QAIRT"),
-    )
-
-    config_repository = QairtConfigRepository(
-        existing_config_path=container.qairt_env_file,
-        canonical_config_path=container.data_paths.root / "config" / "qairt_env.json",
-        factory_defaults_path=container.qairt_env_file,
-    )
-
-    installer = CompatibleExtensionInstaller(
-        python_exe=Path(sys.executable),
-        uv_exe=None,
-        downloads_dir=container.data_paths.root / "downloads",
-        package_mutation_lock=container.package_mutation_lock,
-        vendor_wheel_dir=container.repo_root / "vendor" / "whl",
-    )
-
-    async def _runtime_probe(*, expected_root: Path) -> None:
-        from qai.app_builder.infrastructure.app_manifest import (
-            select_runner_interpreter,
-        )
-
-        interpreter = select_runner_interpreter(
-            qairt_env_file=container.qairt_env_file,
-            repo_root=container.repo_root,
-        )
-        python_exe = interpreter.resolve()
-        env = dict(os.environ)
-        extra_env_fn = getattr(interpreter, "extra_env", None)
-        if callable(extra_env_fn):
-            for k, v in extra_env_fn().items():
-                env[str(k)] = str(v)
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                str(python_exe),
-                "-c",
-                "import os,sys; sys.stdout.write(os.environ.get('QAIRT_ROOT',''))",
-                env=env,
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-        except OSError as exc:
-            raise RuntimeProbeVerificationError(
-                "post-activation runtime probe could not start"
-            ) from exc
-        try:
-            stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=30.0)
-        except asyncio.CancelledError:
-            await asyncio.shield(terminate_process_tree(proc))
-            raise
-        except TimeoutError as exc:
-            await asyncio.shield(terminate_process_tree(proc))
-            raise RuntimeProbeVerificationError(
-                "post-activation runtime probe timed out"
-            ) from exc
-        except OSError as exc:
-            await asyncio.shield(terminate_process_tree(proc))
-            raise RuntimeProbeVerificationError(
-                "post-activation runtime probe communication failed"
-            ) from exc
-        observed = stdout_bytes.decode("utf-8", errors="replace").strip()
-        if not observed or Path(observed).resolve() != expected_root.resolve():
-            raise RuntimeProbeVerificationError(
-                f"post-activation runtime probe observed QAIRT_ROOT={observed!r}, "
-                f"expected {expected_root}"
-            )
-
-    return QairtSwitchService(
-        config_repository=config_repository,
-        installer=installer,
-        sticky_worker=sticky_worker,
-        runtime_probe=_runtime_probe,
-        install_root=install_root,
-        architecture=current_arch(),
-    )
 
 
 # ---------------------------------------------------------------------------

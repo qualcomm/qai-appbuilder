@@ -157,7 +157,6 @@ from qai.app_builder.infrastructure import (
     RunnerCommandRegistryPort,
     StickyBackedAppRunner,
     StickyWorkerHost,
-    StickyWorkerLifecycle,
     build_command_resolver,
     build_sticky_load_resolver,
     populate_runner_registry_from_manifests,
@@ -307,40 +306,6 @@ class _LazyStickyHost:
                 broadcaster.cancel_drain(run_id)
             except Exception:  # noqa: BLE001 — never block the DB cancel
                 pass
-
-
-def _build_sticky_worker_lifecycle(
-    container: "Container",
-) -> StickyWorkerLifecycle:
-    """Build the QAIRT-switch stop/restart adapter for the sticky worker.
-
-    The spawn closure lazily imports ``apps.api.lifespan`` at CALL time
-    (not at module import time) to avoid a circular import: ``di.py``
-    imports this module (``_app_builder_di``) BEFORE its ``Container``
-    class is defined, and ``lifespan.py`` unconditionally imports
-    ``Container`` from ``di.py`` at its own module top — importing
-    ``lifespan`` here at module level would deadlock that partial
-    import. By the time this closure is actually *called* (the boot-time
-    sticky-worker spawn, or a later QAIRT switch), every module involved
-    is already fully loaded, so the lazy import is a plain cache hit.
-    """
-
-    async def _spawn_host() -> StickyWorkerHost:
-        from .lifespan import _build_sticky_worker_host
-
-        return await _build_sticky_worker_host(container)
-
-    def _get_host() -> StickyWorkerHost | None:
-        return getattr(container, "sticky_worker_host", None)
-
-    def _set_host(host: StickyWorkerHost | None) -> None:
-        container.sticky_worker_host = host  # type: ignore[attr-defined]
-
-    return StickyWorkerLifecycle(
-        host_getter=_get_host,
-        host_setter=_set_host,
-        spawn_host=_spawn_host,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -541,12 +506,6 @@ class AppBuilderServices:
     # transports to share the same source iterator. Tail-appended optional
     # field; ``None`` on stripped-down test containers.
     progress_broadcaster: "ProgressBroadcaster | None" = None
-    # NEW (QAIRT SDK hot-switch) — the stop/restart adapter the switch
-    # service (``qai.platform.qairt_switch.service.QairtSwitchService``)
-    # uses to recycle the sticky worker around a switch. ``None`` on
-    # stripped-down test containers; the switch service is itself ``None``
-    # in that case (see ``Container._wire_cross_context``).
-    sticky_worker_lifecycle: "StickyWorkerLifecycle | None" = None
 
 
 # ---------------------------------------------------------------------------
@@ -604,7 +563,6 @@ def build_app_builder_services(container: "Container") -> AppBuilderServices:
             python_exe=_Path(_sys.executable),
             uv_exe=None,
             enabled=True,
-            package_mutation_lock=container.package_mutation_lock,
         )
 
     # Repositories
@@ -1465,8 +1423,6 @@ def build_app_builder_services(container: "Container") -> AppBuilderServices:
         package_app_project_use_case=package_app_project_uc,
         # WS dual-transport — single process-wide progress broadcaster.
         progress_broadcaster=ProgressBroadcaster(),
-        # QAIRT SDK hot-switch — stop/restart adapter for the sticky worker.
-        sticky_worker_lifecycle=_build_sticky_worker_lifecycle(container),
     )
 
 

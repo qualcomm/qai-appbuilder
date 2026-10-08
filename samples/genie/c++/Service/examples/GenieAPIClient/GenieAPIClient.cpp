@@ -280,15 +280,18 @@ std::string EncodeBinary(const std::string &path)
         return "";
     }
 
-    std::vector<char> out_buf(BASE64_ENCODE_OUT_SIZE(buf.size()));
-    int size = Base64Encode(buf.data(), buf.size(), out_buf.data());
+    char *out_buf = new char[BASE64_ENCODE_OUT_SIZE(buf.size())];
+    int size = Base64Encode(buf.data(), buf.size(), out_buf);
     if (size == 0)
     {
         My_Log{My_Log::Level::kError} << "encode to binrary failed\n";
+        delete[] out_buf;
         return "";
     }
 
-    return std::string(out_buf.data(), size);
+    std::string out(const_cast<const char *>(out_buf), size);
+    delete[] out_buf;
+    return out;
 }
 
 json BuildUserContentV1(const std::string &question, const std::string &img_path, const std::string &audio_path)

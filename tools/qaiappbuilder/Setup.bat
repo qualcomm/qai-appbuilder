@@ -29,12 +29,7 @@ cd /d "%ROOT_DIR%"
 REM --- Argument parsing -------------------------------------------------------
 REM   --no-builder : skip the QAIRT model-builder environment (Step 8, ~2GB SDK
 REM                  download + x64 venv + VS build tools). The base runtime
-REM                  (pre-built models) does NOT need it. Default on x64 hosts
-REM                  (no Snapdragon NPU); explicit on arm64 (WoS) hosts, which
-REM                  default to installing it.
-REM   --builder    : force Step 8 ON on an x64 host (where it is skipped by
-REM                  default). No effect on arm64 (WoS), which already
-REM                  installs it by default.
+REM                  (pre-built models) does NOT need it.
 REM   --no-pause   : do not pause at the end (for non-interactive / scripted runs).
 REM This script merges the former V1 Setup_Builder_Env.bat in full (Step 8);
 REM everything runs in-process via scripts\setup\setup_qairt_env.py and
@@ -46,13 +41,7 @@ REM                  end-user install does NOT need them. Default OFF. NOTE:
 REM                  Playwright + the ~150MB Chromium browser are now installed
 REM                  by DEFAULT (the ``search`` runtime extra + Step 4d), because
 REM                  the web-search browser engine needs them at runtime.
-REM NO_BUILDER default is ARCH-DEPENDENT (set after host-arch detection
-REM below): WoS (arm64) installs the QAIRT model-builder env by default,
-REM same as before; a plain x64 PC has no Snapdragon NPU, so it defaults to
-REM SKIPPING the ~2GB SDK download unless the user opts in. Left unset here
-REM (not 0/1) so the two explicit flags below can be told apart from "no
-REM flag passed" when the arch-based default is applied.
-set "NO_BUILDER="
+set "NO_BUILDER=0"
 set "NO_PAUSE=0"
 set "DEV_EXTRAS=0"
 set "DESKTOP_EXTRAS=0"
@@ -63,7 +52,6 @@ if /i "%~1"=="--help" goto :print_help
 if /i "%~1"=="-h" goto :print_help
 if /i "%~1"=="/?" goto :print_help
 if /i "%~1"=="--no-builder" ( set "NO_BUILDER=1" & shift & goto :parse_setup_args )
-if /i "%~1"=="--builder" ( set "NO_BUILDER=0" & shift & goto :parse_setup_args )
 if /i "%~1"=="--no-pause" ( set "NO_PAUSE=1" & shift & goto :parse_setup_args )
 if /i "%~1"=="--dev" ( set "DEV_EXTRAS=1" & shift & goto :parse_setup_args )
 if /i "%~1"=="--desktop" ( set "DESKTOP_EXTRAS=1" & shift & goto :parse_setup_args )
@@ -143,19 +131,6 @@ if /i "%PROCESSOR_ARCHITECTURE%"=="AMD64" set "HOST_ARCH=x64"
 if /i "%PROCESSOR_ARCHITEW6432%"=="AMD64" set "HOST_ARCH=x64"
 set "_ARCH_SOURCE=auto-detected"
 :arch_resolved
-
-REM Apply the arch-based NO_BUILDER default now that HOST_ARCH is known.
-REM Only when neither --no-builder nor --builder was explicitly passed
-REM (NO_BUILDER still unset) -- an explicit flag always wins over the
-REM arch-based default. arm64 (WoS) keeps installing by default (unchanged
-REM behaviour); x64 defaults to skipping (see the NO_BUILDER comment above).
-if not defined NO_BUILDER (
-    if /i "%HOST_ARCH%"=="x64" (
-        set "NO_BUILDER=1"
-    ) else (
-        set "NO_BUILDER=0"
-    )
-)
 
 REM Per-arch variable group. arm64 branch reproduces the previous hardcoded values.
 if /i "%HOST_ARCH%"=="x64" (
@@ -1883,13 +1858,6 @@ echo      --no-builder   Skip Step 8 ^(QAIRT model-builder environment:
 echo                     ~2GB SDK download + x64 converter venv + VS build
 echo                     tools^). The base runtime with pre-built models does
 echo                     NOT need it. Re-run without this flag later to add it.
-echo                     Default on an x64 host ^(no Snapdragon NPU^); pass
-echo                     --builder to force it on anyway.
-echo.
-echo      --builder      Force Step 8 ^(QAIRT model-builder environment^) ON.
-echo                     Only needed on an x64 host, where it is skipped by
-echo                     default; a WoS ^(arm64^) host already installs it by
-echo                     default and does not need this flag.
 echo.
 echo      --desktop      Also install the desktop-shell BUILD toolchain
 echo                     ^(Step 9: Rust toolchain + tauri-cli^) needed to

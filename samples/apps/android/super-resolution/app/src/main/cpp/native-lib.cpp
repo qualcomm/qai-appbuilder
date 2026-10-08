@@ -122,10 +122,10 @@ int super_resolution(std::string libs_path, std::string model_path, std::string 
     int srHeight = scale * modelHeight;
 
     uint32_t size = RGB_IMAGE_SIZE_F32(modelWidth, modelHeight);
-    std::vector<uint8_t> nchwBufLeft(size);
-    cv::Mat inputMat(modelHeight, modelWidth, CV_32FC3, nchwBufLeft.data());
+    uint8_t *nchwBufLeft = new uint8_t[size];
+    cv::Mat inputMat(modelHeight, modelWidth, CV_32FC3, nchwBufLeft);
 
-    std::vector<float> dest(size);
+    float *dest = new float[size]; // siez???
     cv::cvtColor(image, rgb_image, cv::COLOR_BGR2RGB); // 可选：BGR→RGB转换
     rgb_image.convertTo(inputMat, CV_32FC3, 1.0 / 255.0);
 
@@ -133,7 +133,7 @@ int super_resolution(std::string libs_path, std::string model_path, std::string 
     //cv::waitKey(0);
 
     xt::xarray<float> input_tensor = ConvertTensor(inputMat, 1);
-    std::copy(input_tensor.begin(), input_tensor.end(), dest.data());
+    std::copy(input_tensor.begin(), input_tensor.end(), dest);
 
     SetPerfProfileGlobal("burst");
 
@@ -147,7 +147,7 @@ int super_resolution(std::string libs_path, std::string model_path, std::string 
     outputBuffers.clear();
     outputSize.clear();
 
-    inputBuffers.push_back(reinterpret_cast<uint8_t *>(dest.data()));
+    inputBuffers.push_back((uint8_t *)dest);
 
     My_Log("ModelInference");
     ret = libAppBuilder.ModelInference(MODEL_NAME, inputBuffers, outputBuffers, outputSize, perfProfile);
@@ -165,6 +165,8 @@ int super_resolution(std::string libs_path, std::string model_path, std::string 
 
     My_Log("outputBuffers" + std::to_string(outputBuffers.size()));
 
+    delete[] nchwBufLeft;
+    delete[] dest;
 
     float *predOutput = (float *)outputBuffers.at(0);
 

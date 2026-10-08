@@ -154,13 +154,6 @@ class WdacStatusResponse(BaseModel):
     sac: int
 
 
-class QairtVersionsResponse(BaseModel):
-    """``GET /api/system/qairt-versions`` payload."""
-
-    active_version: str | None = None
-    versions: list[str]
-
-
 # ---- Router factory -------------------------------------------------------
 
 
@@ -313,36 +306,6 @@ def build_router(*, container: "Container") -> APIRouter:
 
         st = get_wdac_status()
         return WdacStatusResponse(enabled=st.enabled, umci=st.umci, sac=st.sac)
-
-    @router.get("/qairt-versions", response_model=QairtVersionsResponse)
-    async def qairt_versions() -> QairtVersionsResponse:
-        """List installed QAIRT SDK versions from the configured SDK parent.
-
-        The canonical ``qairt_env.json`` path is resolved once by DI. Its
-        ``qairt_root`` (current installer schema) or ``qairt_sdk_root``
-        (legacy/setup schema) identifies the active version directory; sibling
-        directories are scanned with the strict numeric-version rule shared by
-        setup tooling. Missing or malformed config degrades to the platform
-        default install root and an empty version list rather than breaking the
-        chat UI.
-        """
-        from qai.platform.qairt_versions import (
-            discover_qairt_versions,
-            resolve_qairt_installation,
-        )
-
-        install_root, configured_version = resolve_qairt_installation(
-            container.qairt_env_file,
-            fallback_root=Path("C:/Qualcomm/AIStack/QAIRT"),
-        )
-        versions = discover_qairt_versions(install_root)
-        active_version = (
-            configured_version if configured_version in versions else None
-        )
-        return QairtVersionsResponse(
-            active_version=active_version,
-            versions=versions,
-        )
 
     return router
 

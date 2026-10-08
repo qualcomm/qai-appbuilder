@@ -11,7 +11,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from qai.model_runtime.domain.context_source_chain import resolve_context_length
+from qai.model_runtime.domain.context_source_chain import (
+    DEFAULT_CONTEXT_SIZE,
+    resolve_context_length,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,17 +35,17 @@ class ModelInfo:
             route layer); the attribute is spelled ``model_format`` to
             avoid shadowing the builtin while keeping the entity framework
             free.
-        context_length: Context-window size discovered from model metadata
-            (``dialog.context.size`` -> prompt ``context_size`` -> top-level
-            config fields). ``None`` means no authoritative value was
-            found — callers must not fabricate a context window. The
-            ``/api/service/models`` payload appends it under the wire key
-            ``context_length`` so the chat model dropdown can show a
-            "8K"/"32K" badge for local models (hidden when ``None``).
-        supports_audio: Whether this local model family accepts audio
-            input. Currently ``True`` only for the ``qwen2.5_omni``
-            family (matched by the ``"omni"`` substring in the model
-            directory name).
+        context_length: Context-window size (tokens) resolved from the
+            model's metadata via the V1 4-source cascade (config.json
+            ``dialog.context.size`` -> prompt.json ``context_size`` ->
+            config.json top-level ``context_size`` / ``context_length`` /
+            ``max_position_embeddings`` -> default ``8192``). V1 surfaces
+            this as the dropdown ctx badge (``index.html:1025`` +
+            ``useModels.js:156-161``); the V2 ``/api/service/models``
+            payload appends it under the wire key ``context_length`` so
+            the chat model dropdown can show the same "8K"/"32K" badge
+            for local models. Never ``0`` for a successfully scanned
+            model (V1 parity — defaults to 8192).
     """
 
     name: str
@@ -50,8 +53,7 @@ class ModelInfo:
     size_mb: float
     config_path: str = ""
     model_format: str = "unknown"
-    context_length: int | None = None
-    supports_audio: bool = False
+    context_length: int = 0
 
 
 def detect_model_format(
@@ -102,15 +104,25 @@ def has_unsafe_path(path: str) -> bool:
 def extract_context_length(
     config: dict | None,
     prompt: dict | None = None,
-) -> int | None:
-    """Return context length discovered from local model metadata.
+) -> int:
+    """Return the context-window size from parsed model metadata.
 
     Pure helper (no I/O) living in the domain layer; delegates to
-    :func:`qai.model_runtime.domain.context_source_chain.resolve_context_length`.
+    :func:`qai.model_runtime.domain.context_source_chain.resolve_context_length`
+    which mirrors V1's ``backend/models_registry.py:_read_context_size_from_model_dir``
+    (lines 233-279) 4-source priority cascade:
 
-    Resolution checks ``dialog.context.size``, then prompt metadata, then
-    top-level config fields. Missing or invalid metadata remains ``None``;
-    callers must not fabricate a model context window.
+    1. ``config.json`` ``dialog.context.size`` (QNN/SSD authoritative)
+    2. ``prompt.json`` ``context_size`` (GenieAPIService ParsePromptFile)
+    3. ``config.json`` top-level ``context_size`` / ``context_length`` /
+       ``max_position_embeddings`` (GGUF/MNN)
+    4. default ``8192`` (:data:`DEFAULT_CONTEXT_SIZE`)
+
+    Unlike the pre-U-007b implementation (which only read source 1 and
+    returned ``0`` on a miss), this now restores V1's full cascade and
+    the ``8192`` fallback, so GGUF/MNN models whose ctx lives at the
+    config top level — or models with no readable size at all — surface
+    a non-zero badge exactly as V1 did.
 
     Args:
         config: Parsed ``config.json`` mapping (``None`` when absent /
@@ -119,7 +131,7 @@ def extract_context_length(
             has no ``prompt.json``).
 
     Returns:
-        A positive context-window size, or ``None`` when nothing resolves.
+        A positive context-window size; ``8192`` when nothing resolves.
     """
     config_map: Mapping[str, Any] | None = (
         config if isinstance(config, Mapping) else None
@@ -131,6 +143,7 @@ def extract_context_length(
 
 
 __all__ = [
+    "DEFAULT_CONTEXT_SIZE",
     "ModelInfo",
     "detect_model_format",
     "extract_context_length",

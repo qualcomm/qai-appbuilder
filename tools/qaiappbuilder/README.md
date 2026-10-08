@@ -379,12 +379,11 @@ bash start.sh
 
 | Windows | Linux | Purpose |
 |---------|-------|---------|
-| `Setup.bat` | `setup.sh` | **The single install entry point.** Windows: downloads `uv`, installs Python 3.13 (ARM64 by default; `--arch x64` installs the x64 build), creates the venv at `%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_arm64_313` (or `.venv_x64_313`), installs runtime deps, initializes `data/`, and installs PortableGit / Node+pnpm / QAIRT SDK / VS 2022 / TTS data / WebView2 (flags: `--arch arm64|x64`, `--no-builder`, `--dev`, `--desktop`, `--no-pause`). Linux: creates `envs/venv` (Python 3.12), installs the QAIRT SDK and dependencies, initializes `data/`; frontend install/build is skipped by default — pass `--frontend` to bootstrap project-local Node/pnpm (`scripts/setup/node_bootstrap.sh`) and build it too. |
+| `Setup.bat` | `setup.sh` | **The single install entry point.** Windows: downloads `uv`, installs Python 3.13 (ARM64 by default; `--arch x64` installs the x64 build), creates the venv at `%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_arm64_313` (or `.venv_x64_313`), installs runtime deps, initializes `data/`, and installs PortableGit / Node+pnpm / QAIRT SDK / VS 2022 / TTS data / WebView2 (flags: `--arch arm64|x64`, `--no-builder`, `--dev`, `--desktop`, `--no-pause`). Linux: reuses the system Python 3.12 / Node.js / pnpm, creates `envs/venv`, installs the QAIRT SDK and dependencies, initializes `data/` (only flag: `--no-frontend`). |
 | `Start.bat` | `start.sh` | Starts the server (supervised). The port is **not hard-coded** — the supervisor probes a fallback list and writes the real URL to `data/runtime/server.endpoint.json`. Windows opens the browser automatically and supports `--reload` hot-reload; on Linux use `--port N` to override the port, `Ctrl+C` to stop. |
-| `Build.bat` | `build.sh` | Builds the Vue 3 SPA into `frontend/dist/` (pnpm). Both support `--full` (typecheck+lint+test), `--install`, `--clean`; `build.sh` bootstraps its own project-local Node.js/pnpm (`scripts/setup/node_bootstrap.sh`) and ignores `--desktop` (Tauri is Windows-only). |
+| `Build.bat` | *(no standalone script — see manual command above)* | Builds the Vue 3 SPA into `frontend/dist/` (pnpm). Windows supports `--full` (typecheck+lint+test), `--install`, `--clean`, `--desktop`; on Linux the frontend build is already embedded in `setup.sh` — to rebuild manually run `pnpm -C frontend build`. |
 | `Console.bat` | *(no standalone script — use `source envs/venv/bin/activate`)* | Opens an interactive shell with the host-arch venv activated. |
 | `Uninstall.bat` | *(no standalone script — remove `envs/` manually)* | Uninstaller — rolls back what `Setup.bat` installed outside the project dir; **does not delete `data/`**. |
-
 
 
 ---
@@ -393,7 +392,7 @@ bash start.sh
 
 After installation, double-click **`Start.bat`** (or launch the desktop app; on Linux run `bash start.sh`). The server binds the backend port defined in `factory/config/ports.json` (the single source of truth for all ports; falls back to other candidates from that file if the port is occupied) and opens your browser automatically. The actual URL is written to `data/runtime/server.endpoint.json`.
 
-> Changed the **backend**? Just restart `Start.bat` / `bash start.sh` (Python is interpreted — no build step). Changed the **frontend**? Run `Build.bat` / `bash build.sh`, then (re)launch `Start.bat` / `bash start.sh`.
+> Changed the **backend**? Just restart `Start.bat` / `bash start.sh` (Python is interpreted — no build step). Changed the **frontend**? On Windows run `Build.bat`, then `Start.bat`; on Linux re-run `bash setup.sh`, then `bash start.sh`.
 
 ---
 
@@ -554,7 +553,7 @@ Describe how the AI should use this skill...
 | **OS** | Ubuntu 22.04 / 24.04 (x86_64 or aarch64, e.g. QCS8300 and other Snapdragon IoT boards) |
 | **CPU** (HTP/NPU inference) | Qualcomm HTP on aarch64, requires the `qcom-fastrpc1` package for `libcdsprpc.so` (`setup.sh` detects this and prints install guidance; if already installed but missing the unversioned symlink, `setup.sh` creates it automatically) |
 | **Python** | System must have 3.12 pre-installed (`sudo apt install python3.12 python3.12-venv`); aarch64 additionally needs `python3.12-dev` (for compiling onnxsim) |
-| **Node.js / pnpm** | Not required on Linux — `setup.sh --frontend` / `build.sh` bootstrap a project-local Node 22 + pnpm 11.9.0 automatically (`scripts/setup/node_bootstrap.sh`, lives entirely under `envs/`) |
+| **Node.js / pnpm** | Node.js ≥ 22, pnpm ≥ 9 (needed to build the frontend; skip with `--no-frontend`) |
 | **Build tools** (aarch64 only) | `cmake` + `build-essential` (C++ compiler), for building onnxsim==0.4.36 from source (no aarch64 pre-built wheel exists for this version) |
 | **QAIRT SDK** | Automatically downloaded and installed by `setup.sh` to `~/qairt/<version>` (or `$QAIRT_SDK_ROOT`) |
 

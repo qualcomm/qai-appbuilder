@@ -1420,7 +1420,7 @@ qnn_app::StatusCode qnn_app::QnnInferenceEngine::setupDeviceConfig(
                           (devNumCores * sizeof(QnnDevice_CoreInfo_t));
       // mem alloc for custom:platform info
       QnnDevice_PlatformInfo_t* const custPlatformInfoPtr =
-          static_cast<QnnDevice_PlatformInfo_t*>(calloc(1, totalPtmInfoSize));
+          static_cast<QnnDevice_PlatformInfo_t*>(malloc(totalPtmInfoSize));
       // init custom:platform info mem
       if (custPlatformInfoPtr) {
         // mem-copy 'platformInfo' to custom:platform info
@@ -2037,8 +2037,7 @@ qnn_app::StatusCode qnn_app::QnnInferenceEngine::executeGraphsBuffers(std::vecto
 
   // We push '12345' to 'outputSize' in function 'ModelRun@main.cpp@SvcQNNHelpper.exe'. In this case, share memory will not be freed, we can use the share memory as output buffer directly.
   bool shareMemory = false;
-  uint8_t* const* pShareBuffer_slot = &inputBuffers[0];
-  uint8_t* pShareBuffer = *pShareBuffer_slot;
+  uint8_t* pShareBuffer = inputBuffers[0];
   if (outputSize.size() == 1 && outputSize[0] == 12345) {
       shareMemory = true;
       outputSize.clear();

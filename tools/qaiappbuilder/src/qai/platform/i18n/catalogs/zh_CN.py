@@ -674,4 +674,6 @@ MESSAGES: dict[str, str] = {
     "chat.context_recovery.succeeded": "上下文已压缩（{before_tokens} \u2192 {after_tokens} tokens），你的消息已完整重新发送。较早的历史已被摘要，因此本次回复稍慢。",
     "chat.context_recovery.failed_no_room": "上下文已满且无法进一步压缩。请发送 /compact 手动压缩历史，或发送 /new 开启新会话继续 \u2014 你的消息没有丢失。",
     "chat.context_recovery.unavailable_mid_tool": "上下文在工具执行过程中被占满，这种情况无法自动压缩。等本轮结束后，请发送 /compact 压缩历史，或发送 /new 开启新会话继续。",
+    "chat.context_recovery.failed_still_too_large": "已将历史压缩到极限，上下文仍然过大。你的消息没有丢失。",
+    "chat.context_recovery.migrate_hint": " 你也可以发送 /compact migrate，把本次对话的摘要带入一个新会话并在那里继续。",
 }

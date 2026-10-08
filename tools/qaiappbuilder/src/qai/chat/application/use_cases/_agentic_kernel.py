@@ -70,7 +70,6 @@ from typing import Any
 
 from qai.chat.application.ports import (
     ContextCompressionPort,
-    ModelContextWindowPort,
     ToolResultTruncationRequest,
     ToolResultTruncatorPort,
 )
@@ -80,7 +79,6 @@ from qai.chat.application._token_estimate_helpers import (
     _tiktoken_encoding_name,
     non_text_content_bytes as _non_text_content_bytes,
 )
-from qai.chat.domain.errors import MissingModelContextLengthError
 from qai.chat.domain.model_profiles import get_context_limit
 from qai.chat.domain.reference_ledger import ReferenceLedger
 from qai.platform.logging import get_logger
@@ -98,6 +96,8 @@ __all__ = [
     "OVERFLOW_RECOVERY_MIN_TARGET_RATIO",
     "OVERFLOW_RECOVERY_TARGET_SCALE",
     "PROTECT_WINDOW_RATIO",
+    "SMALL_CONTEXT_COMPRESS_THRESHOLD_RATIO",
+    "SMALL_CONTEXT_WINDOW_THRESHOLD",
     "SUBAGENT_SUMMARY_CONTENT_SENTINEL",
     "TOOL_CALLS_CONTENT_SENTINEL",
     "CompactionCheckpoint",
@@ -109,6 +109,7 @@ __all__ = [
     "is_self_contained_agent_hint",
     "maybe_compress_wire",
     "overflow_recovery_target_ratio",
+    "resolve_inter_round_threshold_ratio",
     "tool_result_already_truncated",
     "tool_result_slice_start",
     "truncate_tool_result",
@@ -520,6 +521,61 @@ def overflow_recovery_target_ratio(normal_target_ratio: float) -> float:
     # Configured target is at/below the floor: honouring the floor would aim
     # at or above the target that already failed. Keep the scaled value.
     return scaled
+
+
+# ---------------------------------------------------------------------------
+# P2b — small-context-window compaction trigger
+# ---------------------------------------------------------------------------
+
+#: Windows at or below this size count as "small" for compaction purposes.
+#: Aligned with the digest's own small-window notion (32K-64K class models):
+#: at 64K a 0.80 trigger only fires at ~52K used, which on a tool-heavy turn
+#: is one big tool result away from the wall.
+SMALL_CONTEXT_WINDOW_THRESHOLD: int = 65_536
+
+#: Trigger ratio applied to small windows instead of the configured default.
+#: 0.65 of 32768 ≈ 21.3K — early enough that a single 18-20K tool result
+#: landing right after the check still lands inside the window, which 0.80
+#: (≈26K used, ~6K of headroom) does not survive.
+SMALL_CONTEXT_COMPRESS_THRESHOLD_RATIO: float = 0.65
+
+
+def resolve_inter_round_threshold_ratio(
+    configured_ratio: float,
+    context_window: int | None,
+) -> float:
+    """Return the compaction trigger ratio to use for *context_window*.
+
+    Small windows (``<= SMALL_CONTEXT_WINDOW_THRESHOLD``) compact EARLIER than
+    the configured default. Rationale: the trigger ratio is applied to the
+    window, so the absolute headroom it leaves shrinks with the window while
+    the thing that consumes that headroom — one round's tool output — does
+    not. At 200K, ``0.80`` leaves 40K of slack, comfortably more than any
+    single tool result; at 32768 it leaves ~6.5K, and this workload routinely
+    produces 18-20K-token tool results. The wire therefore jumped from "under
+    threshold" straight past the window with no intervening check.
+
+    ONE-WAY CLAMP — the result is never ABOVE ``configured_ratio``:
+    ``min(configured, 0.65)``. An operator who already tuned the trigger down
+    to e.g. 0.5 (more conservative than this rule) keeps 0.5; this function
+    only ever makes compaction fire sooner, never later. That property is what
+    makes it safe to apply unconditionally at every call site.
+
+    Pure arithmetic; never raises. An unknown / non-positive / non-finite
+    window returns ``configured_ratio`` untouched (no window, no basis to
+    tighten — degrade to the caller's existing behaviour).
+    """
+    try:
+        configured = float(configured_ratio)
+    except (TypeError, ValueError):
+        return SMALL_CONTEXT_COMPRESS_THRESHOLD_RATIO
+    if not math.isfinite(configured) or configured <= 0.0:
+        return SMALL_CONTEXT_COMPRESS_THRESHOLD_RATIO
+    if not isinstance(context_window, int) or context_window <= 0:
+        return configured
+    if context_window > SMALL_CONTEXT_WINDOW_THRESHOLD:
+        return configured
+    return min(configured, SMALL_CONTEXT_COMPRESS_THRESHOLD_RATIO)
 
 
 def estimate_wire_tokens(
@@ -1051,7 +1107,6 @@ async def maybe_compress_wire(
     target_ratio: float = COMPRESS_TARGET_RATIO,
     preserve_tail: int = COMPRESS_PRESERVE_TAIL,
     log_context: dict[str, Any] | None = None,
-    context_windows: ModelContextWindowPort | None = None,
 ) -> list[dict[str, Any]]:
     """Compress the running wire history when it nears the context budget.
 
@@ -1069,17 +1124,23 @@ async def maybe_compress_wire(
         return wire_messages
 
     model_id = (model_hint or "").removeprefix("local::") or "__unknown__"
-    budget: int | None = None
-    if model_hint and context_windows is not None:
-        try:
-            budget = await context_windows.context_window(model_hint, None)
-        except MissingModelContextLengthError:
-            # Best-effort function (see docstring): a missing catalog entry
-            # degrades to the static table rather than aborting the turn.
-            budget = None
-    if budget is None:
-        budget = get_context_limit(model_id)
-    threshold = int(budget * threshold_ratio)
+    budget = get_context_limit(model_id)
+    # P2b: small windows compact earlier than the configured default (one-way
+    # clamp — never later; see ``resolve_inter_round_threshold_ratio``). The
+    # sub-agent loop shares the main loop's function so the two can never drift.
+    #
+    # KNOWN LIMITATION (follow-up): ``budget`` here still comes from the
+    # name-keyed family table, NOT from the P2c context-window resolver the
+    # main loop uses — reaching the resolver from here means threading it
+    # through ``AgentToolHandler`` → ``_single_agent_turn``. So for a
+    # custom-registered model whose name misses the family table (the exact
+    # Glymur case) this gate still sizes against the guessed window, and the
+    # small-window branch below may not even engage. The main loop is fixed;
+    # sub-agents are not yet.
+    effective_threshold_ratio = resolve_inter_round_threshold_ratio(
+        threshold_ratio, budget,
+    )
+    threshold = int(budget * effective_threshold_ratio)
 
     # Unified口径 with the main-loop trigger: a bytes-based estimate over
     # content + tool_calls args (see :func:`estimate_wire_tokens`), upgraded
@@ -1097,6 +1158,8 @@ async def maybe_compress_wire(
         used_tokens=used,
         budget=budget,
         threshold=threshold,
+        threshold_ratio=effective_threshold_ratio,
+        threshold_ratio_configured=threshold_ratio,
         messages_before=len(wire_messages),
         **_ctx,
     )

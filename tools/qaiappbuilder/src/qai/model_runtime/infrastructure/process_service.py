@@ -672,7 +672,6 @@ class ProcessBackedInferenceService:
                             config_path=str(config_json),
                             model_format=fmt,
                             context_length=ctx_len,
-                            supports_audio="omni" in model_dir.name.lower(),
                         )
                     )
             except OSError as exc:
@@ -738,15 +737,6 @@ class ProcessBackedInferenceService:
         suffixes = [f.suffix.lower() for f in entries]
         return detect_model_format(names, suffixes)
 
-    # Maps ``detect_model_format()`` results to the (backend, device) pair
-    # GenieAPIService expects in service_config.json. ``unknown`` maps to
-    # ("", "") so callers can skip the sync rather than write an unsure value.
-    _FORMAT_TO_BACKEND_DEVICE: dict[str, tuple[str, str]] = {
-        "qnn": ("qnn", "npu"),
-        "gguf": ("GGUF", "gpu"),
-        "mnn": ("mnn", "cpu"),
-    }
-
     def _append_log(self, line: str) -> None:
         """Append a synthetic log line and notify streamers."""
         self._log_buffer.append(line)
@@ -762,11 +752,9 @@ class ProcessBackedInferenceService:
         ``[E] Model directory does not exist`` errors when its ``models[*]``
         names drift away from the on-disk directory. This method updates
         the first enabled NPU slot (``backend in {"qnn", ""}``) plus
-        ``default_model``, mirroring V1 exactly. It also syncs ``backend``
-        (and ``device`` for GGUF/MNN) to the target model's real on-disk
-        format, so a GGUF/MNN selection is no longer loaded under a stale
-        ``qnn`` backend. The file is written only when something changed,
-        with ``ensure_ascii=False`` + 4-space indent (V1 wire format).
+        ``default_model``, mirroring V1 exactly. The file is written only
+        when something changed, with ``ensure_ascii=False`` + 4-space
+        indent (V1 wire format).
 
         All filesystem failures are caught and logged at WARNING per V1's
         non-fatal contract: the daemon may still start with a stale config
@@ -786,9 +774,6 @@ class ProcessBackedInferenceService:
             logger.warning("_sync_service_config_model read failed (non-fatal): %s", exc)
             return
 
-        fmt = self._detect_format(self._resolve_models_root() / model_name)
-        backend, device = self._FORMAT_TO_BACKEND_DEVICE.get(fmt, ("", ""))
-
         models = cfg.get("models", []) if isinstance(cfg, dict) else []
         changed = False
         if isinstance(models, list):
@@ -800,12 +785,7 @@ class ProcessBackedInferenceService:
                         m["name"] = model_name
                         m["path"] = model_name
                         changed = True
-                    if backend and (m.get("backend") != backend or m.get("device") != device):
-                        m["backend"] = backend
-                        m["device"] = device
-                        changed = True
                     break
-
         if isinstance(cfg, dict) and cfg.get("default_model") != model_name:
             cfg["default_model"] = model_name
             changed = True

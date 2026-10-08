@@ -175,9 +175,8 @@ class SqliteExperienceRepository:
         not exist. Touches ``updated_at`` only when something actually changed.
         The FTS ``AFTER UPDATE`` trigger re-syncs the index when content moves.
         """
-        if content is None and importance is None:
-            return False
-        trimmed = None
+        sets: list[str] = []
+        params: list[Any] = []
         if content is not None:
             trimmed = content.strip()[:_MAX_CONTENT_LEN]
             if not trimmed:
@@ -186,22 +185,20 @@ class SqliteExperienceRepository:
                     "cannot update an experience to empty content",
                     operation="experience.update",
                 )
-        updated_at = _now_iso()
-        if content is not None and importance is not None:
-            sql = (
-                "UPDATE chat_experience SET content = ?, importance = ?, "
-                "updated_at = ? WHERE id = ?"
-            )
-            params = (trimmed, _clamp_importance(importance), updated_at, experience_id)
-        elif content is not None:
-            sql = "UPDATE chat_experience SET content = ?, updated_at = ? WHERE id = ?"
-            params = (trimmed, updated_at, experience_id)
-        else:
-            sql = "UPDATE chat_experience SET importance = ?, updated_at = ? WHERE id = ?"
-            params = (_clamp_importance(importance), updated_at, experience_id)
+            sets.append("content = ?")
+            params.append(trimmed)
+        if importance is not None:
+            sets.append("importance = ?")
+            params.append(_clamp_importance(importance))
+        if not sets:
+            return False
+        sets.append("updated_at = ?")
+        params.append(_now_iso())
+        params.append(experience_id)
+        sql = f"UPDATE chat_experience SET {', '.join(sets)} WHERE id = ?"  # noqa: S608 — set fragments are literal
         try:
             async with self._db.connection() as conn:
-                cur = await conn.execute(sql, params)
+                cur = await conn.execute(sql, tuple(params))
                 changed = cur.rowcount
                 await cur.close()
                 await conn.commit()

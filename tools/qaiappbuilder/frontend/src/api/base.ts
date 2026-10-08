@@ -36,9 +36,9 @@ export function apiBaseUrl(): string {
 /**
  * Resolve the WebSocket base URL.
  *
- * Returns a WebSocket URL relative to the page origin (secure when the
- * page itself is served over HTTPS) when `VITE_WS_BASE_URL` is unset,
- * so the Vite dev proxy can transparently forward `/api/chat/ws`.
+ * Returns an `ws://` / `wss://` URL relative to the page origin when
+ * `VITE_WS_BASE_URL` is unset, so the Vite dev proxy can transparently
+ * forward `/api/chat/ws`.
  */
 export function wsBaseUrl(): string {
   const fromEnv = import.meta.env.VITE_WS_BASE_URL;

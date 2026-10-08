@@ -167,24 +167,12 @@ void ModelRun(std::string cmdBuf, ipc::IpcChannel* channel, ipc::ShmHandle posix
     std::vector<std::string> commands;
     split_string(commands, cmdBuf, ';');
 
-    if (commands.size() < 6) {
-        QNN_ERR("ModelRun: malformed command, expected at least 6 fields, got %zu\n", commands.size());
-        channel->Write(ACTION_FAILED, strlen(ACTION_FAILED) + 1);
-        return;
-    }
-
-    const std::string* p0 = &commands[0];
-    const std::string* p1 = &commands[1];
-    const std::string* p2 = &commands[2];
-    const std::string* p3 = &commands[3];
-    const std::string* p4 = &commands[4];
-    const std::string* p5 = &commands[5];
-    std::string model_name        = *p0;
-    std::string share_memory_name = *p1;
-    size_t share_memory_size      = std::stoull(*p2);
-    std::string strBufferArray    = *p3;
-    std::string perfProfile       = *p4;
-    size_t graphIndex             = std::stoull(*p5);
+    std::string model_name        = commands[0];
+    std::string share_memory_name = commands[1];
+    size_t share_memory_size      = std::stoull(commands[2]);
+    std::string strBufferArray    = commands[3];
+    std::string perfProfile       = commands[4];
+    size_t graphIndex             = std::stoull(commands[5]);
     // commands[6]: "async" or "sync" (optional, default sync)
     bool async_infer = (commands.size() > 6 && commands[6] == "async");
 

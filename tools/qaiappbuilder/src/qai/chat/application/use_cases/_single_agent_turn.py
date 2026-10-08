@@ -70,7 +70,6 @@ from typing import Any, Protocol, runtime_checkable
 
 from qai.chat.application.ports import (
     ContextCompressionPort,
-    ModelContextWindowPort,
     ToolResultTruncatorPort,
 )
 from qai.chat.application.use_cases._agentic_kernel import (
@@ -639,7 +638,6 @@ class SingleAgentTurnKernel:
     __slots__ = (
         "_compress_threshold_ratio",
         "_compressor",
-        "_context_windows",
         "_truncator",
     )
 
@@ -651,14 +649,12 @@ class SingleAgentTurnKernel:
         compress_threshold_ratio: float = (
             INTER_ROUND_COMPRESS_THRESHOLD_RATIO
         ),
-        context_windows: ModelContextWindowPort | None = None,
     ) -> None:
         self._compressor = compressor
         self._truncator = truncator
         self._compress_threshold_ratio = min(
             max(compress_threshold_ratio, 0.1), 1.0
         )
-        self._context_windows = context_windows
 
     @property
     def truncator(self) -> ToolResultTruncatorPort | None:
@@ -761,7 +757,6 @@ class SingleAgentTurnKernel:
                     threshold_ratio=self._compress_threshold_ratio,
                     preserve_tail=COMPRESS_PRESERVE_TAIL,
                     log_context=compress_log_context,
-                    context_windows=self._context_windows,
                 )
 
             # ②-bis mid-turn user injection seam (V2 enhancement). Fires in the

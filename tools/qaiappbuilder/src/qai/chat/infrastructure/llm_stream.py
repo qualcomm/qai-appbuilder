@@ -65,6 +65,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import errno
+import ipaddress
 import json
 import re
 import socket
@@ -74,6 +75,7 @@ from collections.abc import AsyncIterator, Callable, Iterator
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, Final
+from urllib.parse import urlparse
 
 import httpx
 
@@ -166,6 +168,32 @@ _OFFLINE_NOTICE: str = "[no LLM endpoint configured]"
 _CONTENT_STALL_TIMEOUT_SECONDS: float = 600.0
 _CONTENT_STALL_TEXT_TURN_SECONDS: float = 60.0
 
+
+def _is_loopback_url(base_url: str | None) -> bool:
+    """True when ``base_url``'s host is a loopback address / ``localhost``.
+
+    Used to decide that a "plain text" turn against this endpoint must NOT be
+    held to the tight text-turn stall budget: on a slow on-device engine the
+    silence before the first token is prefill, which scales with prompt size and
+    routinely exceeds 60s. Same rule as
+    ``chat.adapters.model_resolver._is_loopback_host`` (restated: infrastructure
+    must not import adapters).
+    """
+    if not base_url:
+        return False
+    try:
+        host = (urlparse(base_url).hostname or "").strip("[]")
+    except (ValueError, AttributeError):
+        return False
+    if not host:
+        return False
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
 # tool-call "generating arguments" progress throttle (V2 UX enhancement).
 # Emit a progress frame only when BOTH enough time has passed since the last
 # one AND the accumulated argument has grown by at least this many chars — so a
@@ -231,6 +259,17 @@ _CHAT_CONTROL_KEYS: frozenset[str] = frozenset(
         # stability. Consumed by ``_build_payload`` and injected as a
         # synthetic user-role message; never a valid OpenAI body field.
         "_skill_instructions",
+        # P4 — "this turn's endpoint is a loopback address", stashed by
+        # ``StreamChatUseCase._build_llm_request`` and read by the system-prompt
+        # and tool-schema decisions. Purely an internal routing hint.
+        #
+        # MUST be listed here: a leading underscore does NOT keep a key off the
+        # wire. The generic "forward remaining extra keys" pass below copies
+        # every key it does not recognise into the request body, so an
+        # unregistered internal key is sent to the provider verbatim (visible in
+        # ``chat.diag.llm_request_dump``'s ``top_level_keys``). Harmless with a
+        # lenient upstream, rejected by a strict gateway, and noise either way.
+        "_is_loopback_endpoint",
     }
 )
 
@@ -703,6 +742,16 @@ _PTL_KEYWORDS: tuple[str, ...] = (
     "tokens > ", "input is too long", "context window", "token limit",
     "too many tokens", "request too large", "reduce the length",
     "maximum allowed", "exceed max message tokens", "exceed max input tokens",
+    # P7 — GenieAPIService / llama.cpp server phrasing ("request (38061
+    # tokens) exceeds the available context size (36864 tokens)" /
+    # ``"type":"exceed_context_size_error"``). Kept in lockstep with
+    # ``adapters/error_classifier._PROMPT_TOO_LONG_INCLUSIONS``: the two
+    # tables are deliberately INDEPENDENT copies (layering — infrastructure
+    # must not import adapters), which means a phrase missing from one is a
+    # real gap even when the other has it. This one was missing from BOTH, so
+    # neither the cloud-routed nor the ``local::``-routed path (which shares
+    # the adapters table) could classify it.
+    "exceeds the available context size", "exceed_context_size_error",
 )
 _PTL_EXCLUSIONS: tuple[str, ...] = ("above maximum value",)
 
@@ -1007,6 +1056,8 @@ class HttpOpenAICompatibleLLMStream:
         "_ssl_verify_provider",
         "_expects_api_key",
         "_credential_is_sso",
+        "_is_loopback_endpoint",
+        "_content_stall_budget_seconds",
     )
 
     def __init__(
@@ -1023,12 +1074,41 @@ class HttpOpenAICompatibleLLMStream:
         ssl_verify_provider: Callable[[], bool] | None = None,
         expects_api_key: bool = True,
         credential_is_sso: bool = False,
+        # ---- Content-stall budget for on-device (loopback) endpoints --------
+        # Ceiling, in seconds, on the gap before the FIRST meaningful content
+        # frame for a request sent to a loopback endpoint. ``None`` keeps
+        # :data:`_CONTENT_STALL_TIMEOUT_SECONDS`.
+        #
+        # Why loopback needs its own budget: the two-tier rule below gives a
+        # no-tools ("plain text") turn a tight 60s, on the measured assumption
+        # that plain-text turns stream smoothly. That assumption holds for a
+        # cloud gateway and is false for a slow on-device engine, where the
+        # wait before the first token is PREFILL, which scales with prompt
+        # size. Measured on a Glymur-class box: a ~26K-token compaction-summary
+        # prompt prefills at ~82 tok/s = ~320s before token one. The digest and
+        # turn-prefix summaries are exactly such prompts, and they are sent with
+        # no tools — so all 4 digest attempts in the captured run were killed at
+        # 60s with ``meaningful_chunks=0``, the digest never once completed, and
+        # everything gated on having a digest (the /compact migrate handoff)
+        # could never engage either.
+        content_stall_budget_seconds: float | None = None,
     ) -> None:
         self._base_url = (base_url or "").rstrip("/") or None
         self._api_key = api_key or None
         self._model = model
         self._ids = ids
         self._ssl_verify = ssl_verify
+        # Whether this endpoint is physically on this machine. Computed once
+        # here (not per request) because the routing layer memoises one adapter
+        # instance per ``(base_url, api_key, model_id)``, so it is constant for
+        # the instance's lifetime.
+        self._is_loopback_endpoint = _is_loopback_url(self._base_url)
+        self._content_stall_budget_seconds = (
+            float(content_stall_budget_seconds)
+            if content_stall_budget_seconds is not None
+            and float(content_stall_budget_seconds) > 0
+            else None
+        )
         # Live Settings.ssl_verify provider (apps/api._global_proxy
         # .build_ssl_verify_provider). When present it is read at client-build
         # time so the global SSL toggle hot-applies to every new stream client;
@@ -1084,9 +1164,75 @@ class HttpOpenAICompatibleLLMStream:
         return self._iter(request)
 
     # ------------------------------------------------------------------
+    # REVERTED (2026-09-30): per-endpoint request serialisation
+    # ------------------------------------------------------------------
+    # A previous revision wrapped this in ``async with Semaphore(1)`` for
+    # loopback endpoints, so the main turn and background compaction summaries
+    # could not hit the single on-device engine concurrently (the engine log
+    # showed two llama.cpp slots launched 0.4s apart, KV cache exhaustion and a
+    # purged slot).
+    #
+    # It DEADLOCKED the agentic loop and had to come out. The mechanism:
+    #
+    #   1. a round that emits a tool_call makes the main drain ``break`` out of
+    #      its ``async for`` (streaming.py, "the follow-up loop swallows the
+    #      trailing END frame") and hand ``stream_frames`` to the follow-up loop;
+    #   2. the transport generator is therefore left SUSPENDED inside the
+    #      ``async with``, and — because the follow-up loop still holds a
+    #      reference to it — it is not garbage-collected, so its ``finally``
+    #      never runs and the permit is never released;
+    #   3. the follow-up loop then opens the NEXT round on the same memoised
+    #      transport and blocks on that permit forever.
+    #
+    # Field symptom: the turn died on its FIRST tool-calling round. Round 0
+    # reached the engine (``task 5123 | n_tokens = 4599``), its tools ran, round
+    # 1's request was assembled — and never left the process (no new engine
+    # task, no ``max_tokens_outgoing``). 30 minutes later the frame watchdog
+    # reported ``frame_stream_stalled stall_seconds=1800``.
+    #
+    # The lesson is general: **do not hold a lock across the lifetime of an
+    # async generator here.** This codebase legitimately abandons stream
+    # generators mid-iteration (the tool-call handoff above, and the abort
+    # ``break``), and nothing guarantees they are ``aclose()``d, so any
+    # generator-scoped resource can leak.
+    #
+    # If the KV-contention problem is worth solving again, invert the direction:
+    # have the BACKGROUND summary coroutine wait for "no main turn is currently
+    # streaming" before issuing its own request. A background task owns its
+    # whole lifetime (it is a coroutine, not a generator handed to someone
+    # else), so it can wait and release safely — and P6 already makes "skip this
+    # refresh" a safe outcome if it gives up waiting.
+
+    def _resolve_stall_budget(self, has_tools: bool) -> float:
+        """Seconds of silence tolerated before abandoning this stream.
+
+        Three cases:
+
+        * **tool-capable turn** — generous: the model may go silent for a long
+          "structuring pause" while assembling a big tool-call argument, and the
+          longest measured silence PRECEDES any tool_call signal, so we cannot
+          detect-then-relax;
+        * **loopback endpoint** — generous even with no tools: the wait before
+          the first token is PREFILL on a local engine and scales with prompt
+          size (~320s measured for a 26K-token summary prompt);
+        * **cloud plain-text turn** — tight 60s, so a wedged gateway is caught
+          fast. This is the only case that keeps the historical value.
+
+        The generous value is the injected
+        ``content_stall_budget_seconds`` when configured, else
+        :data:`_CONTENT_STALL_TIMEOUT_SECONDS`.
+        """
+        if has_tools or self._is_loopback_endpoint:
+            return (
+                self._content_stall_budget_seconds
+                if self._content_stall_budget_seconds is not None
+                else _CONTENT_STALL_TIMEOUT_SECONDS
+            )
+        return _CONTENT_STALL_TEXT_TURN_SECONDS
+
+    # ------------------------------------------------------------------
     # H-3 — runtime max_tokens learning
     # ------------------------------------------------------------------
-
     def _record_learned_max_tokens(self, model_id: str, observed_max: int) -> None:
         """Record ``observed_max`` as the latest known ceiling for *model_id*.
 
@@ -1661,11 +1807,16 @@ class HttpOpenAICompatibleLLMStream:
         # the model builds a large tool-call argument, so it gets the generous
         # ceiling; a plain-text turn streams smoothly and gets the tight one so
         # a genuinely wedged upstream is caught fast.
-        stall_budget = (
-            _CONTENT_STALL_TIMEOUT_SECONDS
-            if has_tools
-            else _CONTENT_STALL_TEXT_TURN_SECONDS
-        )
+        #
+        # THIRD CASE (2026-09-30): an on-device (loopback) endpoint gets the
+        # generous ceiling even with no tools. The tight budget's premise —
+        # "plain-text turns stream smoothly" — describes a cloud gateway. On a
+        # local engine the pre-first-token silence is PREFILL and scales with
+        # the prompt: a ~26K-token compaction-summary prompt measured ~320s
+        # before its first token. Holding that to 60s killed every digest and
+        # turn-prefix summary (``meaningful_chunks=0``), which also starved the
+        # /compact-migrate handoff that needs a digest to exist.
+        stall_budget = self._resolve_stall_budget(has_tools)
         loop = asyncio.get_event_loop()
         last_meaningful_ts = loop.time()
         _line_iter = response.aiter_lines().__aiter__()
@@ -2001,13 +2152,6 @@ class HttpOpenAICompatibleLLMStream:
         * emit a single terminal END frame carrying the final usage.
         """
         emitted_notice = False
-        # Auto-continuation seam (streaming.py::_on_round_end /
-        # _drain_main_stream): tag the terminal END so the orchestration
-        # layer can detect a plain-text length-truncation and reopen one
-        # more round with a continuation nudge instead of ending the turn.
-        # ``reason`` stays ``"completed"`` — see ``StreamFrame.end``'s
-        # docstring for the tail-append convention.
-        plain_text_length_truncated = False
         if accumulated_tool_calls:
             if last_finish_reason == "length":
                 # Generation truncated mid-tool-call: arguments are
@@ -2058,7 +2202,6 @@ class HttpOpenAICompatibleLLMStream:
                 )
                 sequence += 1
                 emitted_notice = True
-                plain_text_length_truncated = True
             elif last_finish_reason == "content_filter":
                 yield StreamFrame.chunk(
                     frame_id=self._ids.new_id(),
@@ -2125,7 +2268,6 @@ class HttpOpenAICompatibleLLMStream:
             sequence=sequence,
             reason="completed",
             usage=usage,
-            extra={"truncated": True} if plain_text_length_truncated else None,
         )
 
     def _maybe_estimate_usage(

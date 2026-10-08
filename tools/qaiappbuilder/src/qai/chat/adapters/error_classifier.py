@@ -150,6 +150,23 @@ _PROMPT_TOO_LONG_INCLUSIONS: tuple[str, ...] = (
     "maximum allowed",
     "exceed max message tokens",
     "exceed max input tokens",
+    # P7 — GenieAPIService / llama.cpp server phrasing. The real body is
+    #   {"error":{"code":400,"message":"request (38061 tokens) exceeds the
+    #    available context size (36864 tokens), try increasing it",
+    #    "type":"exceed_context_size_error","n_prompt_tokens":38061,
+    #    "n_ctx":36864}}
+    # which matched NONE of the phrases above: "context size" is not "context
+    # window", and there is no "tokens > " (the numbers are in prose +
+    # parentheses). Without these two the 400 degraded to a generic
+    # ``chat.llm.http_error``, whose retry disposition falls back to "never" —
+    # so the context-overflow recovery path never ran and the task was killed
+    # outright on an error that is entirely recoverable by compacting.
+    #
+    # Both the prose form and the machine-readable ``type`` are listed: the
+    # prose can be reworded by an upstream version bump, the ``type`` is the
+    # stable contract.
+    "exceeds the available context size",
+    "exceed_context_size_error",
 )
 
 # Exclusion keyword: a message that hits the inclusion set is still

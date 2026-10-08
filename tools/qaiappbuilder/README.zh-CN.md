@@ -374,9 +374,9 @@ bash start.sh
 
 | Windows | Linux  | 作用 |
 |------|------|------|
-| `Setup.bat` | `setup.sh` | **唯一安装入口。** Windows：下载 `uv`、安装 Python 3.13（默认 ARM64；`--arch x64` 可装 x64 版）、在 `%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_arm64_313`（或 `.venv_x64_313`）建 venv、安装运行时依赖、初始化 `data/`，并安装 PortableGit / Node+pnpm / QAIRT SDK / VS 2022 / TTS 数据 / WebView2；可选参数 `--arch arm64|x64`、`--no-builder`、`--dev`、`--desktop`、`--no-pause`。Linux：建 `envs/venv`（Python 3.12），安装 QAIRT SDK 与依赖，初始化 `data/`；默认跳过前端安装/构建，传 `--frontend` 可自动搭建项目本地 Node/pnpm（`scripts/setup/node_bootstrap.sh`）并一并构建。 |
+| `Setup.bat` | `setup.sh` | **唯一安装入口。** Windows：下载 `uv`、安装 Python 3.13（默认 ARM64；`--arch x64` 可装 x64 版）、在 `%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_arm64_313`（或 `.venv_x64_313`）建 venv、安装运行时依赖、初始化 `data/`，并安装 PortableGit / Node+pnpm / QAIRT SDK / VS 2022 / TTS 数据 / WebView2；可选参数 `--arch arm64|x64`、`--no-builder`、`--dev`、`--desktop`、`--no-pause`。Linux：复用系统 Python 3.12 / Node.js / pnpm，建 `envs/venv`，安装 QAIRT SDK 与依赖，初始化 `data/`；可选参数仅 `--no-frontend`。 |
 | `Start.bat` | `start.sh` | 启动服务（受监管）。端口**不硬编码**——探测回退列表，把真实 URL 写入 `data/runtime/server.endpoint.json`。Windows 自动开浏览器并支持 `--reload` 热重载；Linux 下用 `--port N` 覆盖端口，`Ctrl+C` 停止。 |
-| `Build.bat` | `build.sh` | 把 Vue 3 SPA 构建到 `frontend/dist/`（pnpm）。两边都支持 `--full`（typecheck+lint+test）、`--install`、`--clean`；`build.sh` 会自己搭建项目本地 Node.js/pnpm（`scripts/setup/node_bootstrap.sh`），`--desktop` 会被忽略（Tauri 仅 Windows 支持）。 |
+| `Build.bat` | *(无独立脚本，见上方手动命令)* | 把 Vue 3 SPA 构建到 `frontend/dist/`（pnpm）。Windows 支持 `--full`（typecheck+lint+test）、`--install`、`--clean`、`--desktop`；Linux 下前端构建已内嵌在 `setup.sh` 中，单独重新构建需手动跑 `pnpm -C frontend build`。 |
 | `Console.bat` | *(无独立脚本，用 `source envs/venv/bin/activate`)* | 打开已激活宿主架构 venv 的交互式 shell。 |
 | `Uninstall.bat` | *(无独立脚本，手动删除 `envs/`)* | 卸载器——回滚 `Setup.bat` 装在项目目录外的内容；**不删除 `data/`**。 |
 
@@ -387,7 +387,7 @@ bash start.sh
 
 安装完成后，双击 **`Start.bat`**（或启动桌面 App；Linux 下运行 `bash start.sh`）。服务会绑定 `factory/config/ports.json` 中定义的后端端口（所有端口的单一真源；被占用时从该文件回退到其它候选端口）并自动打开浏览器。真实 URL 写入 `data/runtime/server.endpoint.json`。
 
-> 改了**后端**？重启 `Start.bat` / `bash start.sh` 即可（Python 解释执行，无构建步骤）。改了**前端**？跑 `Build.bat` / `bash build.sh`，然后(重新)启动 `Start.bat` / `bash start.sh`。
+> 改了**后端**？重启 `Start.bat` / `bash start.sh` 即可（Python 解释执行，无构建步骤）。改了**前端**？Windows 先跑 `Build.bat` 再 `Start.bat`；Linux 重新执行 `bash setup.sh` 后 `bash start.sh`。
 
 ---
 
@@ -549,7 +549,7 @@ use_for: 适用场景描述
 | **操作系统** | Ubuntu 22.04 / 24.04（x86_64 或 aarch64，如 QCS8300 等骁龙 IoT 板卡） |
 | **处理器**（HTP/NPU 推理） | aarch64 上的 Qualcomm HTP，需 `qcom-fastrpc1` 包提供 `libcdsprpc.so`（`setup.sh` 会检测并给出安装指引；若已安装但缺 unversioned symlink，`setup.sh` 会自动创建） |
 | **Python** | 系统需预先安装 3.12（`sudo apt install python3.12 python3.12-venv`）；aarch64 额外需 `python3.12-dev`（编译 onnxsim 用） |
-| **Node.js / pnpm** | Linux 下不需要——`setup.sh --frontend` / `build.sh` 会自动搭建项目本地 Node 22 + pnpm 11.9.0（`scripts/setup/node_bootstrap.sh`，完全落在 `envs/` 下） |
+| **Node.js / pnpm** | Node.js ≥ 22、pnpm ≥ 9（构建前端所需；`--no-frontend` 可跳过） |
 | **编译工具**（仅 aarch64） | `cmake` + `build-essential`（C++ 编译器），用于源码编译 onnxsim==0.4.36（该版本无 aarch64 预编译 wheel） |
 | **QAIRT SDK** | 由 `setup.sh` 自动下载安装到 `~/qairt/<version>`（或 `$QAIRT_SDK_ROOT`） |
 

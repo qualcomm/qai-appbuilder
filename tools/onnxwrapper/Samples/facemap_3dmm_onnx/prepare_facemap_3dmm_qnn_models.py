@@ -19,21 +19,10 @@ import subprocess
 from pathlib import Path
 from typing import Dict, Optional
 
-import ssl
 import requests
 from tqdm import tqdm
 import urllib.request as request
 import qai_hub
-
-
-def _is_ssl_error(exc) -> bool:
-    # Best-effort detection of a TLS/certificate-verification failure, as
-    # opposed to a generic network error (DNS, timeout, connection refused)
-    # that an insecure retry would not help with anyway.
-    if isinstance(exc, ssl.SSLError):
-        return True
-    text = str(exc).lower()
-    return "certificate" in text or "ssl" in text or "tls" in text
 
 
 MODEL_ID = "mqyy9zd9q"
@@ -114,11 +103,8 @@ def _verify_package(url: str, filepath: os.PathLike, filesize: Optional[int] = N
         if filesize is not None:
             actual_size = filesize
         else:
-            try:
-                resp = request.urlopen(url)
-                actual_size = int(resp.headers.get("Content-Length", 0))
-            except Exception:
-                return False  # could not verify remote size; treat as not ready
+            resp = request.urlopen(url)
+            actual_size = int(resp.headers.get("Content-Length", 0))
         return actual_size == local_size
     return False
 
@@ -133,6 +119,10 @@ def download_url_requests(
     chunk_size: int = 8192,
 ) -> bool:
     """Download a URL to filepath using requests (fallback)."""
+    # Disable warnings for insecure request since install.py sets verify=False.
+    from requests.packages.urllib3.exceptions import InsecureRequestWarning
+
+    requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
     if _verify_package(url, filepath, filesize):
         return True
@@ -140,11 +130,10 @@ def download_url_requests(
     path = os.path.dirname(str(filepath))
     os.makedirs(path, exist_ok=True)
 
-    if desc:
-        print(desc)
-
-    def _fetch(verify):
-        response = requests.get(url, stream=True, verify=verify)
+    try:
+        if desc:
+            print(desc)
+        response = requests.get(url, stream=True, verify=False)
         if response.status_code != 200:
             raise ValueError(f"Unable to download file at {url}")
         total_size = int(response.headers.get("content-length", 0))
@@ -153,18 +142,8 @@ def download_url_requests(
                 for data in response.iter_content(chunk_size=chunk_size):
                     f.write(data)
                     bar.update(len(data))
-
-    try:
-        _fetch(True)
         return True
-    except Exception as e:
-        if _is_ssl_error(e):
-            print(f"TLS certificate verification failed ({e}); retrying once without certificate verification...")
-            try:
-                _fetch(False)
-                return True
-            except Exception as e2:
-                e = e2
+    except Exception:
         print()
         if fail:
             print(fail)
@@ -197,7 +176,7 @@ def download_url_wget(
     try:
         # Use system wget on Linux; on Windows, the original install.py expects a bundled wget.exe.
         if _SYSTEM_NAME == "Linux":
-            command = f'"wget" -q --show-progress --continue -P "{path}" -O "{filepath}" {url}'
+            command = f'"wget" --no-check-certificate -q --show-progress --continue -P "{path}" -O "{filepath}" {url}'
             if desc:
                 print(desc)
             print(command)
@@ -212,7 +191,7 @@ def download_url_wget(
             if not os.path.exists(wget_exe):
                 # No bundled wget.exe -> let caller fall back
                 return False
-            command = f'"{wget_exe}" -q --show-progress --continue -P "{path}" -O "{filepath}" {url}'
+            command = f'"{wget_exe}" --no-check-certificate -q --show-progress --continue -P "{path}" -O "{filepath}" {url}'
             if desc:
                 print(desc)
             print(command)

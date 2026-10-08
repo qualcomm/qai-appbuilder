@@ -42,11 +42,6 @@ struct PromptLedger {
     size_t skills_l2 = 0, skills_l1 = 0, skills_l0 = 0;
     bool   emergency_truncated = false;
     bool   summarized = false;
-    // Task Memo（分段式记忆，默认关闭）：本轮是否命中/更新了备忘录、其置信度与累计刷新次数。
-    // 数据源为 OptimizedMessages::memo_active/memo_confidence/memo_refresh_count，同样不新建统计口径。
-    bool   memo_active = false;
-    double memo_confidence = 0.0;
-    size_t memo_refresh_count = 0;
 
     // 真实 JSON 类型（bool 用真实 bool，数字用真实数字），供流式 status 帧
     // （status="prompt_optimized"）payload 复用，与响应头字段口径完全一致。
@@ -71,9 +66,6 @@ struct PromptLedger {
         j["skills_l0"] = skills_l0;
         j["emergency_truncated"] = emergency_truncated;
         j["summarized"] = summarized;
-        j["memo_active"] = memo_active;
-        j["memo_confidence"] = memo_confidence;
-        j["memo_refresh_count"] = memo_refresh_count;
         return j;
     }
 
@@ -99,9 +91,6 @@ struct PromptLedger {
         res.set_header("X-Genie-Prompt-Skills-L0", std::to_string(skills_l0));
         res.set_header("X-Genie-Prompt-Emergency-Truncated", emergency_truncated ? "1" : "0");
         res.set_header("X-Genie-Prompt-Summarized", summarized ? "1" : "0");
-        res.set_header("X-Genie-Prompt-Memo-Active", memo_active ? "1" : "0");
-        res.set_header("X-Genie-Prompt-Memo-Confidence", std::to_string(memo_confidence));
-        res.set_header("X-Genie-Prompt-Memo-Refresh-Count", std::to_string(memo_refresh_count));
     }
 };
 

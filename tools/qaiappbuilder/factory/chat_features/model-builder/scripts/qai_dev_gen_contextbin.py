@@ -97,7 +97,6 @@ from pathlib import Path
 # callers alike.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _host_arch import has_local_htp  # noqa: E402
-from _soc_targets import htp_version_to_target_soc_model, soc_target  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -911,22 +910,9 @@ def run_generator(model_path, output_path=None, output_dir=None, binary_file=Non
     is_dlc_input = model_path.lower().endswith(".dlc")
 
     # Map htp_version -> soc_model for DLC->bin (used instead of a config_file).
-    # Table-driven via _soc_targets: the representative SoC for that Hexagon
-    # version (e.g. v73 -> SC8380XP = 60, v81 -> SC8480XP = 88). The old inline
-    # "88 if v81 else 60" silently gave every other version (v68/v69/v75/v79)
-    # v73's soc_model -- the build still succeeds (rc=0) but the resulting
-    # .bin only fails once it reaches that device, as a bare err:14 with
-    # nothing pointing at the mismatch. See references/context_binary.md
-    # § soc_model Reference.
-    _rep_name = htp_version_to_target_soc_model(htp_version)
-    _rep_entry = soc_target(_rep_name) if _rep_name else None
-    if _rep_entry is None:
-        print(
-            f"[ERROR] no default soc_model for htp_version={htp_version!r}; "
-            "pass a --htp_version listed in _soc_targets.HTP_VERSIONS."
-        )
-        sys.exit(2)
-    soc_model = str(_rep_entry[0])
+    # v73 = Snapdragon X Elite (SC8380XP) = 60; v81 = Snapdragon X2 Elite
+    # (SC8480XP) = 88. See references/context_binary.md § soc_model Reference.
+    soc_model = "88" if htp_version == "v81" else "60"
 
     # Auto-generate backend config if requested.
     # NOTE: DLC->bin does NOT use a config_file. With a config_file the HTP

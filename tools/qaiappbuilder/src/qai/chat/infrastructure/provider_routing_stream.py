@@ -362,6 +362,7 @@ class ProviderRoutingLLMStream:
         "_local_stream_factory",
         "_local_cache",
         "_query_stream_factory",
+        "_content_stall_budget_seconds",
     )
 
     def __init__(
@@ -379,12 +380,20 @@ class ProviderRoutingLLMStream:
         | None = None,
         query_stream_factory: Callable[[str], LLMStreamPort | None]
         | None = None,
+        # Stall ceiling for a LOOPBACK endpoint's first meaningful content
+        # frame. Forwarded to each per-provider transport; ``None`` keeps the
+        # transport's own generous default. Exists because on a slow on-device
+        # engine the pre-first-token silence is prefill (it scales with prompt
+        # size), so the tight "plain text turn" budget kills long summary
+        # prompts outright. See ``llm_stream._is_loopback_url``.
+        content_stall_budget_seconds: float | None = None,
     ) -> None:
         self._default = default_stream
         self._resolver = model_resolver
         self._ids = ids
         self._client_factory = client_factory
         self._timeout = timeout_seconds
+        self._content_stall_budget_seconds = content_stall_budget_seconds
         # Unified SSL switch (Settings.ssl_verify): forwarded to every
         # per-provider transport built by ``_transport_for`` so cloud turns
         # routed to a selected provider honour the SAME verify setting as the
@@ -629,6 +638,10 @@ class ProviderRoutingLLMStream:
             kwargs["timeout_seconds"] = self._timeout
         if self._runtime_limit_store is not None:
             kwargs["runtime_limit_store"] = self._runtime_limit_store
+        if self._content_stall_budget_seconds is not None:
+            kwargs["content_stall_budget_seconds"] = (
+                self._content_stall_budget_seconds
+            )
         transport = HttpOpenAICompatibleLLMStream(**kwargs)
         self._cache[key] = transport
         return transport

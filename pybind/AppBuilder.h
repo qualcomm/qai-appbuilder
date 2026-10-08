@@ -20,16 +20,9 @@
 #include <mutex>
 #include <algorithm>
 #include <cctype>
-#include <memory>
-#include <cstring>
-#include <stdexcept>
 
 #include "LibAppBuilder.hpp"
 #include "Lora.hpp"
-
-#if defined(APPBUILDER_ENABLE_TFLITE) || defined(APPBUILDER_ENABLE_TFLITE_CPU)
-#include "TFLiteInferenceEngine.hpp"
-#endif
 
 using namespace std;
 namespace py = pybind11;
@@ -457,94 +450,6 @@ public:
     ~ShareMemory();
 
 };
-
-#if defined(APPBUILDER_ENABLE_TFLITE) || defined(APPBUILDER_ENABLE_TFLITE_CPU)
-class TFLiteQnnContext {
-public:
-    TFLiteQnnContext(const std::string& model_name, const std::string& model_path,
-                     const std::string& backend_lib_path = "",
-                     bool use_qnn_delegate = true, int num_threads = 1)
-        : m_model_name(model_name),
-          m_engine(std::make_unique<qnn::tools::qnn_app::TFLiteInferenceEngine>(model_path, backend_lib_path, use_qnn_delegate, num_threads)) {
-        m_engine->initialize();
-    }
-
-    ~TFLiteQnnContext() { release(); }
-
-    std::vector<py::array> Inference(const std::vector<py::array>& input, size_t graph_index = 0) {
-        const auto expected_types = m_engine->getInputDataType(graph_index);
-        std::vector<const uint8_t*> buffers;
-        std::vector<size_t> sizes;
-        std::vector<py::array> keep_alive;
-        buffers.reserve(input.size());
-        sizes.reserve(input.size());
-        for (size_t i = 0; i < input.size(); ++i) {
-            if (i >= expected_types.size()) {
-                throw std::invalid_argument("TFLite inference received more inputs than the model declares");
-            }
-            py::array array = py::array::ensure(input[i], py::array::c_style);
-            if (!array) {
-                throw std::invalid_argument("TFLite inference input is not a contiguous NumPy array");
-            }
-            const py::dtype expected_dtype = dtypeFromString(expected_types[i]);
-            if (!array.dtype().equal(expected_dtype)) {
-                throw std::invalid_argument(
-                    "TFLite inference input " + std::to_string(i) + " has dtype " +
-                    py::str(array.dtype()).cast<std::string>() + "; expected " + expected_types[i]);
-            }
-            py::buffer_info info = array.request();
-            keep_alive.push_back(array);
-            buffers.push_back(static_cast<const uint8_t*>(info.ptr));
-            sizes.push_back(static_cast<size_t>(info.size) * static_cast<size_t>(info.itemsize));
-        }
-        std::vector<std::vector<uint8_t>> raw_outputs;
-        {
-            py::gil_scoped_release release_gil;
-            raw_outputs = m_engine->inference(buffers, sizes, graph_index);
-        }
-        std::vector<py::array> outputs;
-        const auto shapes = m_engine->getOutputShapes(graph_index);
-        const auto types = m_engine->getOutputDataType(graph_index);
-        for (size_t i = 0; i < raw_outputs.size(); ++i) {
-            const py::dtype dtype = dtypeFromString(i < types.size() ? types[i] : "uint8");
-            std::vector<py::ssize_t> shape;
-            if (i < shapes.size() && !shapes[i].empty()) {
-                for (const auto dim : shapes[i]) shape.push_back(static_cast<py::ssize_t>(dim));
-            } else {
-                shape.push_back(static_cast<py::ssize_t>(raw_outputs[i].size() / static_cast<size_t>(dtype.itemsize())));
-            }
-            py::array output(dtype, shape);
-            std::memcpy(output.mutable_data(), raw_outputs[i].data(), raw_outputs[i].size());
-            outputs.push_back(std::move(output));
-        }
-        return outputs;
-    }
-
-    std::vector<std::vector<size_t>> getInputShapes(size_t graph_index = 0) const { return m_engine->getInputShapes(graph_index); }
-    std::vector<std::vector<size_t>> getOutputShapes(size_t graph_index = 0) const { return m_engine->getOutputShapes(graph_index); }
-    std::vector<std::string> getInputDataType(size_t graph_index = 0) const { return m_engine->getInputDataType(graph_index); }
-    std::vector<std::string> getOutputDataType(size_t graph_index = 0) const { return m_engine->getOutputDataType(graph_index); }
-    std::vector<std::string> getInputName(size_t graph_index = 0) const { return m_engine->getInputName(graph_index); }
-    std::vector<std::string> getOutputName(size_t graph_index = 0) const { return m_engine->getOutputName(graph_index); }
-    std::string getGraphName(size_t graph_index = 0) const { return m_engine->getGraphName(graph_index); }
-    uint64_t getProfilingEvent(uint32_t event_type) const { return m_engine->getProfilingEvent(event_type); }
-    std::string getProviderMode() const { return m_engine->getProviderMode(); }
-    void release() noexcept { if (m_engine) m_engine->release(); }
-
-private:
-    std::string m_model_name;
-    std::unique_ptr<qnn::tools::qnn_app::TFLiteInferenceEngine> m_engine;
-};
-#endif
-
-#ifdef APPBUILDER_ENABLE_TFLITE_CPU
-class TFLiteCpuContext : public TFLiteQnnContext {
-public:
-    TFLiteCpuContext(const std::string& model_name, const std::string& model_path,
-                    int num_threads = 1)
-        : TFLiteQnnContext(model_name, model_path, "", false, num_threads) {}
-};
-#endif
 
 class QNNContext {
 public:

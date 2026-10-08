@@ -335,59 +335,6 @@ const filteredCloudByProvider = computed<Map<string, CloudEntry[]>>(() => {
   return groups;
 });
 
-/**
- * qai-service ships a growing roster of real models behind one pseudo-model
- * entry point, "Route 1" (server-side smart routing). Showing all of them by
- * default would clutter the dropdown for the vast majority of users who just
- * want Route 1 — so this group starts collapsed to that single entry.
- * Double-clicking the "QAI-SERVICE" group label reveals the rest. No visual
- * affordance is shown on purpose — this is meant to stay an unadvertised
- * gesture, not a discoverable toggle (same convention as the internal
- * qai-mb3 build's route-1/route-2 reveal). Persisted across sessions once
- * revealed.
- */
-const QAI_SERVICE_PROVIDER_KEY = "qai-service";
-const QAI_SERVICE_DEFAULT_MODEL_ID = "qai-service::route-1";
-const QAI_SERVICE_REVEAL_STORAGE_KEY = "qai.chat.qaiServiceModelsRevealed";
-
-function readQaiServiceRevealed(): boolean {
-  try {
-    return localStorage.getItem(QAI_SERVICE_REVEAL_STORAGE_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-const qaiServiceRevealed = ref(readQaiServiceRevealed());
-
-function toggleQaiServiceReveal(): void {
-  qaiServiceRevealed.value = !qaiServiceRevealed.value;
-  try {
-    localStorage.setItem(
-      QAI_SERVICE_REVEAL_STORAGE_KEY,
-      qaiServiceRevealed.value ? "1" : "0",
-    );
-  } catch {
-    // localStorage unavailable (privacy mode / SSR) — falls back to
-    // in-memory-only state for this session; does not block the feature.
-  }
-}
-
-/** Entries actually rendered for one provider group: the qai-service group
- *  is clamped to just Route 1 unless revealed (see above); every other
- *  provider's entries pass through unchanged. */
-function visibleEntriesFor(
-  providerKey: string,
-  entries: CloudEntry[],
-): CloudEntry[] {
-  if (providerKey !== QAI_SERVICE_PROVIDER_KEY || qaiServiceRevealed.value) {
-    return entries;
-  }
-  return entries.filter(
-    (entry) => entry.model_id === QAI_SERVICE_DEFAULT_MODEL_ID,
-  );
-}
-
 // ─── ctx_length formatter (matches V1 `formatCtx`) ───────────────────────────
 
 function formatCtx(n: number | undefined): string {
@@ -694,10 +641,7 @@ onBeforeUnmount(() => {
           class="divider"
           aria-hidden="true"
         ></div>
-        <div
-          class="model-group-label"
-          @dblclick="providerKey === QAI_SERVICE_PROVIDER_KEY && toggleQaiServiceReveal()"
-        >
+        <div class="model-group-label">
           <!-- V1 parity (index.html:991) — pinned providers get a 📌
                prefix. `cloudProviders` comes from
                /api/model-catalog/providers; absence of metadata or a
@@ -709,7 +653,7 @@ onBeforeUnmount(() => {
           >📌</span>{{ providerKey.toUpperCase() }}
         </div>
         <div
-          v-for="entry in visibleEntriesFor(providerKey, entries)"
+          v-for="entry in entries"
           :key="`${entry.provider ?? ''}::${entry.model_id}`"
           class="model-item"
           :class="{ selected: isSelected(entry.model_id, entry.provider) }"

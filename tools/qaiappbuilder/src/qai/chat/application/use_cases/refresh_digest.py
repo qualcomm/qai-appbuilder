@@ -79,9 +79,6 @@ __all__ = [
     "PROMPT_KEY_COMPACTION_TURN_PREFIX",
     "SMALL_WINDOW_THRESHOLD",
     "DIGEST_TOOL_RESULT_MAX_CHARS",
-    "SUMMARY_HARD_CHAR_CAP",
-    "summary_read_char_ceiling",
-    "clamp_summary_to_budget",
 ]
 
 
@@ -102,75 +99,6 @@ _RESERVE_TOKENS_FRACTION: float = 0.15
 # ~20% headroom for the wrapper text (<conversation>...</conversation> +
 # optional <previous-summary> and <additional-context>).
 _MAX_TOKENS_FRACTION: float = 0.8
-
-# Floor on the re-injection character ceiling (see
-# :func:`summary_read_char_ceiling`) — ``max(SUMMARY_HARD_CHAR_CAP, max_tokens
-# * 8)``, roughly twice the write-side budget so a legitimately dense summary
-# at the limit is never gutted on read-back.
-SUMMARY_HARD_CHAR_CAP: int = 24_000
-
-
-def summary_read_char_ceiling(context_window: int) -> int:
-    """Char ceiling for re-injecting an ALREADY-PERSISTED summary.
-
-    Mirrors the write-path derivation (:data:`_RESERVE_TOKENS_FRACTION` /
-    :data:`_RESERVE_TOKENS_FLOOR` / :data:`_MAX_TOKENS_FRACTION`) so any row
-    the write clamp accepted for this window passes through untouched, while a
-    pathological row (written before the write clamp existed, or under a much
-    larger window) is still bounded.
-    """
-    reserve_tokens = max(
-        int(_RESERVE_TOKENS_FRACTION * max(0, int(context_window))),
-        _RESERVE_TOKENS_FLOOR,
-    )
-    max_tokens = int(_MAX_TOKENS_FRACTION * reserve_tokens)
-    return max(SUMMARY_HARD_CHAR_CAP, max_tokens * 8)
-
-
-def clamp_summary_to_budget(
-    text: str,
-    *,
-    max_tokens: int,
-    hard_char_cap: int = SUMMARY_HARD_CHAR_CAP,
-) -> str:
-    """Bound a model-produced summary before it is persisted + injected.
-
-    Both summarisers already re-summarise ONCE when the reply exceeds ``2 ×
-    max_tokens``, but that retry is best-effort: a model that ignores the
-    budget twice (or an ``extra["max_tokens"]`` an adapter silently drops)
-    previously wrote its full reply into the checkpoint, and EVERY subsequent
-    turn injected the whole thing into the wire — a summariser that grows the
-    context it exists to shrink.
-
-    The clamp is a last-resort ceiling, not the primary budget mechanism: it
-    only fires when the retry already failed to bring the text under
-    ``2 × max_tokens``, and never below ``hard_char_cap`` characters so a
-    legitimately dense summary is never gutted.
-
-    Cuts on a PARAGRAPH boundary (then a line boundary) so injected Markdown
-    keeps its block structure — slicing mid-list or mid-fenced-block would
-    hand the model a syntactically broken block. A trailing marker records
-    that a cut happened, so a reader (human or model) never mistakes the
-    truncated tail for the model's real conclusion.
-    """
-    budget_chars = max(0, int(max_tokens)) * 8
-    limit = max(int(hard_char_cap), budget_chars)
-    if len(text) <= limit:
-        return text
-    marker = "\n\n[summary truncated: exceeded the reserved summary budget]"
-    body_limit = max(0, limit - len(marker))
-    head = text[:body_limit]
-    # Prefer the last paragraph break, then the last line break, so the kept
-    # text ends on a complete Markdown block. Only accept a boundary that
-    # retains most of the budget — otherwise a document with one giant
-    # paragraph would collapse to almost nothing.
-    floor = int(body_limit * 0.6)
-    cut = head.rfind("\n\n")
-    if cut < floor:
-        cut = head.rfind("\n")
-    if cut >= floor:
-        head = head[:cut]
-    return head.rstrip() + marker
 
 # Per-tool-result character cap applied to the DIGEST LLM's INPUT ONLY.
 #

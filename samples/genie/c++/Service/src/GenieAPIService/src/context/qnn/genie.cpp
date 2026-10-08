@@ -184,7 +184,7 @@ void GenieLog_Callback(const GenieLog_Handle_t  /*handle*/,
         return;
     }
 
-    std::vector<char> buf(length);
+    auto *buf = new char[length];
     My_Log::Level my_level;
     switch (level)
     {
@@ -202,12 +202,13 @@ void GenieLog_Callback(const GenieLog_Handle_t  /*handle*/,
             break;
     }
 
-    std::vsnprintf(buf.data(), length, fmt, args);
+    std::vsnprintf(buf, length, fmt, args);
     while (buf[length - 2] == '\n')
     {
         buf[length - 2] = '\0';
         length--;
     }
+    delete[] buf;
 }
 
 void GenieContext::inference_thread()
@@ -593,18 +594,8 @@ GenieContext::GenieContext(const ModelInstanceConfig &model_config) :
     {
         if (File::IsFileExist(path + "kv-cache.primary.qnn-htp"))
         {
-            if (fixer.kv_restore_eligible_)
-            {
-                kv_path_ = path;
-                My_Log{} << "kv_path: " << kv_path_ << std::endl;
-            }
-            else
-            {
-                My_Log{My_Log::Level::kWarning}
-                        << "kv-cache.primary.qnn-htp found at " << path
-                        << " but dialog.context.bos-token is not -1 (Prefix Quant requires it); "
-                           "skipping kv-cache restore\n";
-            }
+            kv_path_ = path;
+            My_Log{} << "kv_path: " << kv_path_ << std::endl;
             break;
         }
     }
@@ -851,7 +842,7 @@ json GenieContext::HandleProfile()
 {
     const Genie_AllocCallback_t callback([](size_t size, const char **data)
                                          {
-                                             *data = (char *) calloc(1, size);
+                                             *data = (char *) malloc(size);
                                              if (*data == nullptr)
                                              {
                                                  My_Log{} << "cannot allocate memory for JSON data.\n";

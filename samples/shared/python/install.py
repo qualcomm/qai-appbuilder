@@ -4,7 +4,6 @@
 # ---------------------------------------------------------------------
 import os
 import sys
-import ssl
 import platform
 import subprocess
 import zipfile
@@ -60,16 +59,6 @@ QAI_HUB_CONFIG_BACKUP = os.path.join(Path.home(), ".qai_hub", "client.ini.bk")
 
 WGET_URL = "https://eternallybored.org/misc/wget/releases/wget-1.21.4-winarm64.zip"
 ARIA2C_URL = "https://github.com/aria2/aria2/releases/download/release-1.36.0/aria2-1.36.0-win-64bit-build1.zip"
-
-def _is_ssl_error(exc) -> bool:
-    # Best-effort detection of a TLS/certificate-verification failure, as
-    # opposed to a generic network error (DNS, timeout, connection refused)
-    # that an insecure retry would not help with anyway.
-    if isinstance(exc, ssl.SSLError):
-        return True
-    text = str(exc).lower()
-    return "certificate" in text or "ssl" in text or "tls" in text
-
 
 def setup_qai_hub(hub_id):
     if os.path.isfile(QAI_HUB_CONFIG):
@@ -350,11 +339,8 @@ def verify_package(url, filepath, filesize, desc=None, fail=None):
         if filesize is not None:
             actual_size = filesize
         else:
-            try:
-                response = request.urlopen(url)
-                actual_size = int(response.headers["Content-Length"])
-            except Exception:
-                actual_size = -1  # could not verify remote size; treat as not ready
+            response = request.urlopen(url)
+            actual_size = int(response.headers["Content-Length"])
 
         if actual_size == local_size:   # file is ready for using.
             # print(f"{filepath} is ready for using.")
@@ -388,6 +374,9 @@ def verify_package(url, filepath, filesize, desc=None, fail=None):
 def download_url_pywget(url, filepath, filesize=None, desc=None, fail=None):
     ret = True
 
+    # Create an unverified SSLContext - a context with disables all certificate verification.
+    import ssl
+    ssl._create_default_https_context = ssl._create_unverified_context
 
     if verify_package(url, filepath, filesize):
         return ret
@@ -421,6 +410,9 @@ def download_url_pywget(url, filepath, filesize=None, desc=None, fail=None):
 def download_url_requests(url, filepath, filesize=None, desc=None, fail=None, chunk_size=8192):
     ret = True
 
+    # Disable warning for insecure request since we set 'verify=False'.
+    from requests.packages.urllib3.exceptions import InsecureRequestWarning
+    requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
     if verify_package(url, filepath, filesize):
         return ret
@@ -428,8 +420,8 @@ def download_url_requests(url, filepath, filesize=None, desc=None, fail=None, ch
     path = os.path.dirname(filepath)
     os.makedirs(path, exist_ok=True)
 
-    def _fetch(verify):
-        response = requests.get(url, stream=True, verify=verify)
+    try:
+        response = requests.get(url, stream=True, verify=False)
         if response.status_code != 200:
             raise ValueError(f"Unable to download file at {url}")
 
@@ -441,17 +433,7 @@ def download_url_requests(url, filepath, filesize=None, desc=None, fail=None, ch
                     file.write(data)
                     bar.update(len(data))
 
-    try:
-        _fetch(True)
-
     except Exception as e:
-        if _is_ssl_error(e):
-            print(f"TLS certificate verification failed ({e}); retrying once without certificate verification...")
-            try:
-                _fetch(False)
-                return ret
-            except Exception as e2:
-                e = e2
         #print(str(e))
         print()
         ret = False
@@ -490,10 +472,10 @@ def download_url_wget(url, filepath, filesize=None, desc=None, fail=None):
                 print(f"wget.exe not found. Please download it manually from '{WGET_URL}' and unzip it to '{wget_exe_path}' or run 'python ./shared/python/setup.py'")
                 return False
 
-            command = f'"{wget_exe_path}" -q --show-progress --continue -P "{path}" -O "{filepath}" {url}'
+            command = f'"{wget_exe_path}" --no-check-certificate -q --show-progress --continue -P "{path}" -O "{filepath}" {url}'
         
         elif system_name == "Linux":
-            command = f'"wget" -q --show-progress --continue -P "{path}" -O "{filepath}" {url}'
+            command = f'"wget" --no-check-certificate -q --show-progress --continue -P "{path}" -O "{filepath}" {url}'
 
         print(command)
         result = run(command, desc=desc, errdesc=fail, live=True)

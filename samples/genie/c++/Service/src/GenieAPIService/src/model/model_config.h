@@ -215,44 +215,6 @@ struct LocalModelConfig {
 };
 
 // ============================================================
-// 工具调用兜底修复配置（对应 service_config.json 中的 "tool_call_repair" 节）
-// Layer2：现有正则修复链 + Layer1（本地确定性提取）均失败（最终会落回 name="unknow"）后，
-// 服务端在决定返回给客户端之前发起的内部隐形自纠正重试：构造 scratch ModelInput 追加一条
-// role=tool 错误消息，重新走完整 ModelInputBuilder::Build() 预算/压缩流水线再次调用
-// handle->Query()；成功结果直接替换给客户端，失败的第一次尝试绝不写入 ChatHistory，
-// 也绝不向客户端发送任何中间态。默认开启，可通过 service_config.json 关闭/调阈值。
-// ============================================================
-struct ToolCallRepairConfig {
-    bool enabled = true;
-
-    struct InternalRetryConfig {
-        // 内部隐形重试的最大次数（不含首次原始生成）。默认 1，避免本地弱模型的推理延迟被无限放大。
-        int max_attempts = 1;
-        // 命中以下失败原因时跳过重试，直接维持现有 unknow 兜底转发（Layer3 落地后将改为
-        // 分级终态协议）。取值对应 ResponseTools::ToolCallFailureReasonToString() 的输出
-        // （"unknown_tool_name"/"missing_required_args"/"truncated"/"ambiguous_multiple_calls"/
-        // "unparseable"）。默认仅跳过 "truncated"：token 预算耗尽导致的截断，结构信息已丢失，
-        // 重试大概率再次超预算，属于"重试无意义"的失败原因。
-        std::vector<std::string> skip_reasons = {"truncated"};
-    } internal_retry;
-
-    // Layer3：Layer2 重试耗尽仍失败后走分级终态协议（识别出工具名则发真实 tool_call，
-    // 否则降级为 finish_reason="length" 的纯文本）。连续多次真正走到 Layer3 终态
-    // （而非 Layer0/1/2 任一层成功）说明模型系统性不具备工具调用能力，
-    // 熔断后该会话+模型维度动态降级 system prompt（跳过工具声明注入），避免模型继续
-    // 做徒劳的工具调用尝试。计数存储见 ToolCallCircuitBreakerStore
-    // （chat_request_handler/tool_call_circuit_breaker_store.h，LRU+TTL，key=会话
-    // 指纹+模型名，模式对齐 TaskMemoStore）。
-    struct CircuitBreakerConfig {
-        // 连续触发 Layer3 达到此次数后，判定该会话+模型系统性不支持工具调用。
-        int consecutive_layer3_threshold = 3;
-        // 熔断后的冷却时间（秒）：cooldown_seconds 内该会话+模型持续降级 system prompt；
-        // 期间无新的 Layer3 触发则冷却到期后自动解除（下一次请求重新按全量计数）。
-        int cooldown_seconds = 300;
-    } circuit_breaker;
-};
-
-// ============================================================
 // 云端模型配置结构（对应 service_config.json 中的 "cloud_model" 节）
 // ============================================================
 struct CloudModelConfig {
@@ -678,26 +640,6 @@ struct PromptOptimizationConfig {
 
         LongTextSummaryCacheConfig cache;
     } long_text_summarization;
-
-    // ── Task Memo（分段式记忆）配置 ─────────────────────────
-    // 对应 service_config.json 中的 "prompt_optimization.task_memo" 节
-    struct TaskMemoStoreConfig {
-        size_t max_entries = 200;       // 最大缓存条目数（LRU 淘汰；指纹+首条消息双 key 注册，实际会话数约为其半）
-        size_t max_memory_mb = 20;      // 最大内存占用（MB，超出时淘汰最旧条目）
-        int ttl_minutes = 120;          // 缓存条目生存时间（分钟）
-    };
-
-    struct TaskMemoConfig {
-        bool enabled = false;                    // 总开关（默认关闭，需在 service_config.json 中显式开启）
-        bool model_layer_enabled = true;         // 模型层深度总结开关（关闭时永远只用规则层兜底，enabled=false 时无意义）
-        double token_budget_ratio = 0.15;        // Task Memo 段落允许占用 context_size 的比例上限
-        size_t min_dropped_for_trigger = 1;      // FitMessagesToContext 本次即将丢弃的消息数达到此值才更新备忘录
-        size_t long_tool_chain_threshold = 4;    // 本次丢弃的连续 tool 消息数达到此值时触发模型层深度总结
-        double low_confidence_threshold = 0.5;   // 上一份备忘录 confidence 低于此值时触发模型层深度总结
-        int rule_layer_preview_chars = 160;      // 规则层 facts_constraints/completed/tool_state 预览截断长度（字符数）
-
-        TaskMemoStoreConfig store;
-    } task_memo;
 };
 
 // ============================================================
@@ -797,25 +739,29 @@ public:
 
     std::weak_ptr<ContextBase> get_genie_model_handle() {return genieModelHandle;}
 
-    // 获取用于安全检查/复杂度评估/脱敏的模型句柄（始终使用当前活跃模型）
-    // 默认实现：返回全局 genieModelHandle（与 get_genie_model_handle() 等价）
-    // ModelManager 重写此方法以返回当前活跃模型的句柄
+    // 获取用于安全检查/复杂度评估/脱敏的模型句柄（始终使用 default 模型）
+    // 默认实现：返回全局 genieModelHandle（单模型模式，与 get_genie_model_handle() 等价）
+    // ModelManager 重写此方法以返回 default_model_name_ 对应的模型句柄（多模型模式）
+    // 语义：无论客户端指定哪个模型，安全相关操作始终使用 default 模型，
+    //       避免安全检查跟随客户端模型动态切换（例如切换到 QNN 模型后安全检查也切换到 QNN）
     virtual std::weak_ptr<ContextBase> GetDefaultModelHandle() const
     {
         return genieModelHandle;
     }
 
-    // 检查本地模型是否可用（虚方法，供 ModelManager 重写）
-    // 默认实现：检查全局 genieModelHandle 是否有效
+    // 检查本地模型是否可用（虚方法，支持多模型场景下的重写）
+    // 默认实现：检查全局 genieModelHandle 是否有效（单模型模式）
+    // ModelManager 重写此方法以检查是否有任何已加载的模型（多模型模式）
     virtual bool IsLocalModelAvailable() const
     {
         return genieModelHandle != nullptr;
     }
 
-    // 获取当前活跃模型的 ModelInstanceConfig（虚方法，供 ModelManager 重写）
-    // 默认实现：返回 nullptr（无独立的 ModelInstanceConfig）
+    // 获取 default 模型的 ModelInstanceConfig（虚方法，支持多模型场景下的重写）
+    // 默认实现：返回 nullptr（单模型模式，无独立的 ModelInstanceConfig）
+    // ModelManager 重写此方法以返回 default_model_name_ 对应的 ModelInstanceConfig*（多模型模式）
     // 用途：BuildLocalModelPrompt 等安全相关函数应优先使用此方法获取模型配置，
-    //       而非直接读取全局 IModelConfig 的成员
+    //       而非直接读取全局 IModelConfig 的成员（后者在多模型场景下可能被 -c 参数模型污染）
     virtual const class ModelInstanceConfig* GetDefaultInstanceConfig() const
     {
         return nullptr;
@@ -839,11 +785,6 @@ public:
     const LocalModelConfig &GetLocalModelConfig() const
     {
         return local_model_config_;
-    }
-
-    const ToolCallRepairConfig &GetToolCallRepairConfig() const
-    {
-        return tool_call_repair_config_;
     }
 
     const PromptOptimizationConfig& GetPromptOptimizationConfig() const
@@ -914,7 +855,6 @@ public:
     CloudModelConfig cloud_model_config_;
     EnterpriseCloudModelConfig enterprise_cloud_model_config_;
     LocalModelConfig local_model_config_;
-    ToolCallRepairConfig tool_call_repair_config_;
     
     // Prompt 优化配置
     PromptOptimizationConfig prompt_optimization_config_;

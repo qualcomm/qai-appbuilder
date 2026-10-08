@@ -18,9 +18,7 @@
 #include "message_pre_filter.h"
 #include "long_text_summarizer.h"
 #include "summary_cache.h"
-#include "task_memo_builder.h"
 #include "prompt_ledger.h"
-#include "tool_call_circuit_breaker_store.h"
 
 
 using json = nlohmann::ordered_json;
@@ -33,11 +31,7 @@ public:
           instance_config_{instance_config},
           context_{instance_config_->i_model_config_.get_genie_model_handle().lock()},
           optimizer_{instance_config_->i_model_config_, context_.get()},
-          pre_filter_{instance_config_->i_model_config_, context_.get()},
-          task_memo_builder_{instance_config_->i_model_config_.GetPromptOptimizationConfig().task_memo,
-                              *instance_config_,
-                              &TaskMemoStore::GetInstance(),
-                              [this](const std::string& prompt) -> std::string { return this->RunSummarizationInference(prompt); }}
+          pre_filter_{instance_config_->i_model_config_, context_.get()}
     {
         request_data_ = request_data;
     }
@@ -164,7 +158,8 @@ public:
         // 以减少本地输入溢出概率。摘要失败时静默降级，保留原文继续走现有流程。
         {
             const auto& sum_cfg = po_cfg.long_text_summarization;
-            if (sum_cfg.enabled
+            if (instance_config_->IsStatelessMode()
+                    && sum_cfg.enabled
                     && data.contains("messages")
                     && data["messages"].is_array())
             {
@@ -191,33 +186,6 @@ public:
                 );
 
                 last_ledger_.summarized = summarizer.ProcessMessages(data["messages"]);
-            }
-        }
-
-        // ── Layer3 熔断降级：会话+模型维度连续多次真正触发 Layer3 终态（Layer0/1/2 均
-        // 未能恢复出合法工具调用）后，判定该会话+模型系统性不具备工具调用能力，动态
-        // 降级本次请求的 system prompt——跳过工具声明注入，而不是继续让模型徒劳尝试。
-        // 实现方式：请求本身声明了 tools 时，若命中熔断，直接把 data["tools"] 清空为
-        // 空数组；下方 BuildHarmonyPrompt/BuildPrompt 内部都是读取 data["tools"] 决定
-        // is_tool 与是否注入工具提示词，清空后两条路径自然表现为"未声明工具"，无需
-        // 改动 PrepareOptimizedSystemAndToolPrompt 内部逻辑。仅在请求确实声明了非空
-        // tools 时才有查询熔断状态的必要，未声明 tools 的请求不受影响、零额外开销。
-        if (data.contains("tools") && data["tools"].is_array() && !data["tools"].empty())
-        {
-            const auto &repair_cfg = instance_config_->i_model_config_.GetToolCallRepairConfig();
-            if (repair_cfg.enabled)
-            {
-                const std::string session_key = TaskMemoBuilder::ComputeFirstMsgKey(data["messages"]);
-                const std::string cb_key = ToolCallCircuitBreakerStore::MakeKey(session_key, instance_config_->get_model_name());
-                if (ToolCallCircuitBreakerStore::GetInstance().ShouldDowngradeToolDeclaration(cb_key))
-                {
-                    My_Log{My_Log::Level::kWarning}
-                        << "[ToolCallRepair][CircuitBreaker] session+model '" << cb_key
-                        << "' tripped consecutive Layer3 threshold; downgrading this request by "
-                           "skipping tool declaration injection (model will not be told it can call tools)."
-                        << std::endl;
-                    data["tools"] = json::array();
-                }
             }
         }
 
@@ -344,14 +312,15 @@ private:
         model_input_.audio_ = get_value(user_content, "audio");
     }
 
-    // 系统提示词与工具定义压缩优化：stateless/stateful 两种模式统一生效，不再受 -n 门控。
+    // 根据 is_stateless_mode 分岔：无状态模式下对系统提示词与工具定义做压缩优化，否则原样使用。
     // raw_tools_str 输出未经优化的原始 tools JSON 字符串，供调用方后续调试统计使用。
-    void PrepareOptimizedSystemAndToolPrompt(const json &tools, int contextSize, bool &is_tool,
+    void PrepareOptimizedSystemAndToolPrompt(bool is_stateless_mode, const json &tools, int contextSize, bool &is_tool,
                                               std::string &systemDefaultPrompt, std::string &raw_tools_str)
     {
-        // 优化系统提示词（在 PreFilterMessages 之前）
+        // 优化系统提示词（在 PreFilterMessages 之前，只在 is_stateless_mode 时执行）
+        if (is_stateless_mode)
         {
-            My_Log{My_Log::Level::kDebug} << "[Optimization] Enabled" << std::endl;
+            My_Log{My_Log::Level::kDebug} << "[Optimization] Enabled (n=-1)" << std::endl;
 
             AgentType agentType = DetectAgentTypeAndLog(systemDefaultPrompt, "Optimization");
             // 将 agent 类型写入 ModelInput，供底层推理日志标记使用
@@ -362,7 +331,6 @@ private:
             } else {
                 systemDefaultPrompt = optimizer_.OptimizeSystemPrompt(systemDefaultPrompt, request_data_);
             }
-            systemDefaultPrompt += BuildTaskMemoSection();
 
             auto stats = optimizer_.GetLastStats();
             My_Log{My_Log::Level::kInfo} << "[Optimization] System prompt savings: " << stats.savings_percent << "%" << std::endl;
@@ -383,23 +351,30 @@ private:
             // [Refactor] 从 instance_config 获取工具提示词模板
             std::string tool_tmpl = instance_config_->get_tool_prompt_template();
 
-            // 用剩余预算（contextSize 减去 identity/system 部分已占用的 token 数）
-            // 作为工具部分压缩的硬上限，确保 systemDefaultPrompt 组合后始终 < contextSize
-            size_t identity_tokens = context_->TokenLength(systemDefaultPrompt);
-            size_t tools_budget = (static_cast<size_t>(std::max(contextSize, 0)) > identity_tokens)
-                                 ? static_cast<size_t>(contextSize) - identity_tokens : 0;
-            userToolsPrompt = optimizer_.OptimizeToolsPrompt(userToolsPrompt, tool_tmpl, tools_budget, request_data_);
+            if (is_stateless_mode) {
+                // 用剩余预算（contextSize 减去 identity/system 部分已占用的 token 数）
+                // 作为工具部分压缩的硬上限，确保 systemDefaultPrompt 组合后始终 < contextSize
+                size_t identity_tokens = context_->TokenLength(systemDefaultPrompt);
+                size_t tools_budget = (static_cast<size_t>(std::max(contextSize, 0)) > identity_tokens)
+                                     ? static_cast<size_t>(contextSize) - identity_tokens : 0;
+                userToolsPrompt = optimizer_.OptimizeToolsPrompt(userToolsPrompt, tool_tmpl, tools_budget, request_data_);
+            } else {
+                userToolsPrompt = str_replace(tool_tmpl, "{tool_descs}", userToolsPrompt);
+            }
             userToolsPrompt += "\n\n";
             systemDefaultPrompt += userToolsPrompt;
         }
     }
 
-    // 消息预过滤 + FitMessagesToContext 适配：stateless/stateful 两种模式统一生效，不再受 -n 门控。
-    // msg 会被就地更新为过滤后的消息列表。
-    OptimizedMessages PrepareFilteredMessages(json &msg, const std::string &systemDefaultPrompt, int contextSize)
+    // 根据 is_stateless_mode 分岔：无状态模式下先做 PreFilterMessages 压缩过滤再 FitMessagesToContext 适配，
+    // 否则原样收集消息、直接写入 chat_history_。msg 会被就地更新为过滤后的消息列表。
+    OptimizedMessages PrepareFilteredMessages(bool is_stateless_mode, json &msg, const std::string &systemDefaultPrompt, int contextSize)
     {
         // ========== 消息预过滤 ==========
-        msg = pre_filter_.PreFilterMessages(msg, contextSize, systemDefaultPrompt, /*is_harmony=*/false, &tool_call_id_to_name_);
+        // 只在 is_stateless_mode（n==-1）时执行压缩过滤
+        if (is_stateless_mode) {
+            msg = pre_filter_.PreFilterMessages(msg, contextSize, systemDefaultPrompt, /*is_harmony=*/false, &tool_call_id_to_name_);
+        }
 
         std::vector<GenieChatMessage> all_messages;
 
@@ -473,14 +448,24 @@ private:
         }
 
         chat_history_.Clear();
-        OptimizedMessages optimized = ApplyFitMessagesToContext(
-            all_messages,
-            systemDefaultPrompt,
-            contextSize,
-            "Optimization"
-        );
-        for (const auto& opt_msg : optimized.messages) {
-            chat_history_.AddMessage(opt_msg.role, opt_msg.content);
+        OptimizedMessages optimized;
+        if (is_stateless_mode) {
+            optimized = ApplyFitMessagesToContext(
+                all_messages,
+                systemDefaultPrompt,
+                contextSize,
+                "Optimization"
+            );
+            for (const auto& opt_msg : optimized.messages) {
+                chat_history_.AddMessage(opt_msg.role, opt_msg.content);
+            }
+        } else {
+            for (const auto& msg_item : all_messages) {
+                chat_history_.AddMessage(msg_item.role, msg_item.content);
+            }
+            optimized.messages = all_messages;
+            optimized.success = true;
+            optimized.total_tokens = 0;
         }
 
         return optimized;
@@ -509,6 +494,11 @@ private:
                 ledger_raw_content_concat += "\n";
             }
         }
+
+        // is_stateless_mode: 当 numResponse == -1（参数 n==-1）时，启用所有压缩优化逻辑
+        // 包括系统提示词优化、工具定义优化、消息预过滤（PreFilterMessages）和消息适配（FitMessagesToContext）
+        // 修复：使用 instance_config_（per-model）而非 model_config_（全局 IModelConfig）
+        bool is_stateless_mode = instance_config_->IsStatelessMode();
 
         std::string systemDefaultPrompt = "You are a helpful assistant.";
 
@@ -549,9 +539,9 @@ private:
             }
         }
 
-        // 优化系统提示词与工具定义（在 PreFilterMessages 之前，stateless/stateful 两种模式统一压缩优化）
+        // 优化系统提示词与工具定义（在 PreFilterMessages 之前，只在 is_stateless_mode 时压缩优化，否则原样使用）
         std::string raw_tools_str;  // 原始 tools JSON 字符串（未经 OptimizeToolsPrompt 处理）
-        PrepareOptimizedSystemAndToolPrompt(tools, contextSize, is_tool, systemDefaultPrompt, raw_tools_str);
+        PrepareOptimizedSystemAndToolPrompt(is_stateless_mode, tools, contextSize, is_tool, systemDefaultPrompt, raw_tools_str);
 
         // PromptLedger 快照：此时 raw_tools_str 已由 PrepareOptimizedSystemAndToolPrompt 内部在优化工具
         // 定义之前赋值（不依赖 debug 开关），可直接复用。一次 TokenLength 调用估算优化前
@@ -577,8 +567,8 @@ private:
             }
         }
 
-        // 消息预过滤 + FitMessagesToContext 适配（stateless/stateful 两种模式统一执行压缩）
-        OptimizedMessages optimized = PrepareFilteredMessages(msg, systemDefaultPrompt, contextSize);
+        // 消息预过滤 + FitMessagesToContext 适配（只在 is_stateless_mode 时执行压缩，否则原样收集消息）
+        OptimizedMessages optimized = PrepareFilteredMessages(is_stateless_mode, msg, systemDefaultPrompt, contextSize);
 
         // build model input
         // 修复：使用 instance_config_（per-model）的 prompt template，而非 model_config_（全局 IModelConfig）
@@ -633,9 +623,6 @@ private:
                 last_ledger_.skills_l1 = opt_stats.skills_l1;
                 last_ledger_.skills_l0 = opt_stats.skills_l0;
                 last_ledger_.emergency_truncated = optimized.emergency_truncated;
-                last_ledger_.memo_active = optimized.memo_active;
-                last_ledger_.memo_confidence = optimized.memo_confidence;
-                last_ledger_.memo_refresh_count = optimized.memo_refresh_count;
             }
 
             std::ostringstream log_stream;
@@ -652,7 +639,7 @@ private:
             log_stream << ", Length: " << modelInputContent.length() << " chars";
             My_Log{My_Log::Level::kInfo} << log_stream.str() << std::endl;
 
-            if (instance_config_->getenablePromptDebug()) {
+            if (is_stateless_mode && instance_config_->getenablePromptDebug()) {
                 // 打印详细的消息列表（PreFilter 后的原始 JSON 消息，与 Harmony 路径对齐）
                 My_Log{My_Log::Level::kInfo} << "\n========== 详细过程日志 ==========" << std::endl;
                 My_Log{My_Log::Level::kInfo} << "[PreFilter] Output message details (raw JSON, before prompt conversion, oldest to newest):" << std::endl;
@@ -737,91 +724,107 @@ private:
 
     // ========== Harmony 格式构建方法 ==========
 
-    // Harmony system/developer 消息压缩优化（含 agent 类型检测）：stateless/stateful 两种模式统一生效。
-    void PrepareOptimizedHarmonySystemMessages(const std::string &instructions, bool has_tools,
+    // 根据 is_stateless_mode 分岔：无状态模式下对 Harmony system/developer 消息做压缩优化（含 agent 类型检测），
+    // 否则使用标准的 HarmonyProcessor 构建未优化消息。
+    void PrepareOptimizedHarmonySystemMessages(bool is_stateless_mode, const std::string &instructions, bool has_tools,
                                                 const json &tools, const std::string &knowledge_cutoff, const std::string &current_date,
                                                 const std::string &reasoning_level, const IModelConfig &model_config,
                                                 std::string &system_msg, std::string &developer_msg)
     {
-        My_Log{My_Log::Level::kDebug} << "[Harmony] System prompt optimization enabled" << std::endl;
+        if (is_stateless_mode) {
+            My_Log{My_Log::Level::kDebug} << "[Harmony] System prompt optimization enabled (n=-1)" << std::endl;
 
-        AgentType agentType = DetectAgentTypeAndLog(instructions, "Harmony");
-        // 将 agent 类型写入 ModelInput，供底层推理日志标记使用
-        model_input_.agent_type_ = (agentType == AgentType::MAIN_AGENT) ? "main" : "sub";
+            AgentType agentType = DetectAgentTypeAndLog(instructions, "Harmony");
+            // 将 agent 类型写入 ModelInput，供底层推理日志标记使用
+            model_input_.agent_type_ = (agentType == AgentType::MAIN_AGENT) ? "main" : "sub";
 
-        if (agentType == AgentType::SUBAGENT) {
-            // 子 agent：与 General 格式的 SubAgent 处理逻辑保持一致：
-            //   Step 1: OptimizeSubagentSystemPrompt 重建 Skill Catalog + Few-shot，
-            //           并通过 subagent_prompt_sections 保留原始 system prompt 中的
-            //           SubAgent 特有段落（## Workspace / ## Subagent Context / ## Runtime 等）
-            //   Step 2: 追加 Tools（TypeScript namespace 格式，与 MainAgent 相同）
-            // 注意：OptimizeHarmonyDeveloperMessage 使用 prompt_sections（MainAgent 配置），
-            //       而 OptimizeSubagentSystemPrompt 使用 subagent_prompt_sections（SubAgent 专用配置），
-            //       两者的段落过滤规则不同，不能混用。
-            system_msg = "<|start|>system<|message|>";
-            system_msg += optimizer_.OptimizeHarmonySystemMessage(
-                knowledge_cutoff,
-                current_date,
-                reasoning_level,
-                has_tools
-            );
-            system_msg += "<|end|>";
-
-            if (has_tools || !instructions.empty()) {
-                developer_msg = "<|start|>developer<|message|>";
-                developer_msg += "# System Context\n\n";
-                developer_msg += optimizer_.OptimizeSubagentSystemPrompt(instructions, request_data_);
-                if (has_tools) {
-                    // Tool Usage Guidelines（与 OptimizeHarmonyDeveloperMessage 保持一致）
-                    const SystemContextConfig& ctx_cfg = model_config.GetSystemContextConfig();
-                    for (const auto& sec : ctx_cfg.sections) {
-                        if (!sec.enabled) continue;
-                        if (sec.title.find("Tool Usage Guidelines") != std::string::npos) {
-                            developer_msg += "\n\n" + sec.title + "\n\n";
-                            for (const auto& line : sec.lines) {
-                                developer_msg += line + "\n";
-                            }
-                            break;
-                        }
-                    }
-                    developer_msg += "\n# Tools\n\n## functions\n\n";
-                    developer_msg += "namespace functions {\n\n";
-                    developer_msg += optimizer_.ConvertToolsToOptimizedTypeScript(tools, request_data_);
-                    developer_msg += "\n} // namespace functions";
-                }
-                developer_msg += BuildTaskMemoSection();
-                developer_msg += "<|end|>";
-            }
-        } else {
-            // 主 agent 或未知类型：使用完整优化逻辑
-            system_msg = "<|start|>system<|message|>";
-            system_msg += optimizer_.OptimizeHarmonySystemMessage(
-                knowledge_cutoff,
-                current_date,
-                reasoning_level,
-                has_tools
-            );
-            system_msg += "<|end|>";
-
-            if (has_tools || !instructions.empty()) {
-                developer_msg = "<|start|>developer<|message|>";
-                developer_msg += optimizer_.OptimizeHarmonyDeveloperMessage(
-                    instructions,
-                    tools,
-                    request_data_
+            if (agentType == AgentType::SUBAGENT) {
+                // 子 agent：与 General 格式的 SubAgent 处理逻辑保持一致：
+                //   Step 1: OptimizeSubagentSystemPrompt 重建 Skill Catalog + Few-shot，
+                //           并通过 subagent_prompt_sections 保留原始 system prompt 中的
+                //           SubAgent 特有段落（## Workspace / ## Subagent Context / ## Runtime 等）
+                //   Step 2: 追加 Tools（TypeScript namespace 格式，与 MainAgent 相同）
+                // 注意：OptimizeHarmonyDeveloperMessage 使用 prompt_sections（MainAgent 配置），
+                //       而 OptimizeSubagentSystemPrompt 使用 subagent_prompt_sections（SubAgent 专用配置），
+                //       两者的段落过滤规则不同，不能混用。
+                system_msg = "<|start|>system<|message|>";
+                system_msg += optimizer_.OptimizeHarmonySystemMessage(
+                    knowledge_cutoff,
+                    current_date,
+                    reasoning_level,
+                    has_tools
                 );
-                developer_msg += BuildTaskMemoSection();
-                developer_msg += "<|end|>";
+                system_msg += "<|end|>";
+
+                if (has_tools || !instructions.empty()) {
+                    developer_msg = "<|start|>developer<|message|>";
+                    developer_msg += "# System Context\n\n";
+                    developer_msg += optimizer_.OptimizeSubagentSystemPrompt(instructions, request_data_);
+                    if (has_tools) {
+                        // Tool Usage Guidelines（与 OptimizeHarmonyDeveloperMessage 保持一致）
+                        const SystemContextConfig& ctx_cfg = model_config.GetSystemContextConfig();
+                        for (const auto& sec : ctx_cfg.sections) {
+                            if (!sec.enabled) continue;
+                            if (sec.title.find("Tool Usage Guidelines") != std::string::npos) {
+                                developer_msg += "\n\n" + sec.title + "\n\n";
+                                for (const auto& line : sec.lines) {
+                                    developer_msg += line + "\n";
+                                }
+                                break;
+                            }
+                        }
+                        developer_msg += "\n# Tools\n\n## functions\n\n";
+                        developer_msg += "namespace functions {\n\n";
+                        developer_msg += optimizer_.ConvertToolsToOptimizedTypeScript(tools, request_data_);
+                        developer_msg += "\n} // namespace functions";
+                    }
+                    developer_msg += "<|end|>";
+                }
+            } else {
+                // 主 agent 或未知类型：使用完整优化逻辑
+                system_msg = "<|start|>system<|message|>";
+                system_msg += optimizer_.OptimizeHarmonySystemMessage(
+                    knowledge_cutoff,
+                    current_date,
+                    reasoning_level,
+                    has_tools
+                );
+                system_msg += "<|end|>";
+
+                if (has_tools || !instructions.empty()) {
+                    developer_msg = "<|start|>developer<|message|>";
+                    developer_msg += optimizer_.OptimizeHarmonyDeveloperMessage(
+                        instructions,
+                        tools,
+                        request_data_
+                    );
+                    developer_msg += "<|end|>";
+                }
+            }
+
+            My_Log{My_Log::Level::kDebug} << "[Harmony] Optimization completed" << std::endl;
+        } else {
+            // 使用标准的 Harmony 格式（未优化）
+            system_msg = HarmonyProcessor::BuildSystemMessage(
+                knowledge_cutoff,
+                current_date,
+                reasoning_level,
+                has_tools
+            );
+
+            if (has_tools || !instructions.empty()) {
+                developer_msg = HarmonyProcessor::BuildDeveloperMessage(
+                    instructions,
+                    tools
+                );
             }
         }
-
-        My_Log{My_Log::Level::kDebug} << "[Harmony] Optimization completed" << std::endl;
     }
 
-    // FitMessagesToContext 压缩：stateless/stateful 两种模式统一生效，不再受 -n 门控。
-    // 包装 user 消息为 Harmony 格式再压缩，并把还原后的原始文本写入 chat_history_。
-    // processed_messages 会被就地修改，messages 会被追加最终提示词片段。
-    OptimizedMessages PrepareHarmonyMessages(std::vector<GenieChatMessage> &processed_messages,
+    // 根据 is_stateless_mode 分岔：无状态模式下先包装 user 消息为 Harmony 格式再 FitMessagesToContext 压缩，
+    // 并把还原后的原始文本写入 chat_history_；否则原样写入历史。processed_messages 会被就地修改，
+    // messages 会被追加最终提示词片段。
+    OptimizedMessages PrepareHarmonyMessages(bool is_stateless_mode, std::vector<GenieChatMessage> &processed_messages,
                                               const std::string &system_msg, const std::string &developer_msg,
                                               int contextSize, std::vector<std::string> &messages)
     {
@@ -830,64 +833,82 @@ private:
 
         OptimizedMessages optimized;
         chat_history_.Clear();
-        // 包装 user 消息为 Harmony 格式（用于 FitMessagesToContext 的 token 计算）
-        // 保存原始内容，避免写入 chat_history_ 时依赖字符串解包
-        std::unordered_map<size_t, std::string> user_original_content;
-        for (size_t pm_idx = 0; pm_idx < processed_messages.size(); pm_idx++) {
-            if (processed_messages[pm_idx].role == "user") {
-                user_original_content[pm_idx] = processed_messages[pm_idx].content;
-                processed_messages[pm_idx].content = HarmonyProcessor::BuildUserMessage(processed_messages[pm_idx].content);
+        if (is_stateless_mode) {
+            // 包装 user 消息为 Harmony 格式（用于 FitMessagesToContext 的 token 计算）
+            // 保存原始内容，避免写入 chat_history_ 时依赖字符串解包
+            std::unordered_map<size_t, std::string> user_original_content;
+            for (size_t pm_idx = 0; pm_idx < processed_messages.size(); pm_idx++) {
+                if (processed_messages[pm_idx].role == "user") {
+                    user_original_content[pm_idx] = processed_messages[pm_idx].content;
+                    processed_messages[pm_idx].content = HarmonyProcessor::BuildUserMessage(processed_messages[pm_idx].content);
+                }
             }
-        }
 
-        optimized = ApplyFitMessagesToContext(
-            processed_messages,
-            full_system_prompt,
-            contextSize,
-            "Harmony"
-        );
+            optimized = ApplyFitMessagesToContext(
+                processed_messages,
+                full_system_prompt,
+                contextSize,
+                "Harmony"
+            );
 
-        // 写入 chat_history_ 时使用原始文本（非 Harmony 格式），
-        // 避免 export_to_json 等外部接口读取到 Harmony 格式内容
-        // 使用索引顺序匹配，不依赖内容相等性
-        std::vector<std::string> user_original_ordered;
-        {
-            std::vector<size_t> sorted_indices;
-            for (const auto& kv : user_original_content) {
-                sorted_indices.push_back(kv.first);
+            // 写入 chat_history_ 时使用原始文本（非 Harmony 格式），
+            // 避免 export_to_json 等外部接口读取到 Harmony 格式内容
+            // 使用索引顺序匹配，不依赖内容相等性
+            std::vector<std::string> user_original_ordered;
+            {
+                std::vector<size_t> sorted_indices;
+                for (const auto& kv : user_original_content) {
+                    sorted_indices.push_back(kv.first);
+                }
+                std::sort(sorted_indices.begin(), sorted_indices.end());
+                for (size_t idx : sorted_indices) {
+                    user_original_ordered.push_back(user_original_content[idx]);
+                }
             }
-            std::sort(sorted_indices.begin(), sorted_indices.end());
-            for (size_t idx : sorted_indices) {
-                user_original_ordered.push_back(user_original_content[idx]);
+            size_t total_user_in_optimized = 0;
+            for (const auto& m : optimized.messages) {
+                if (m.role == "user") total_user_in_optimized++;
             }
-        }
-        size_t total_user_in_optimized = 0;
-        for (const auto& m : optimized.messages) {
-            if (m.role == "user") total_user_in_optimized++;
-        }
-        size_t dropped_user_count = (user_original_ordered.size() >= total_user_in_optimized)
-                                    ? (user_original_ordered.size() - total_user_in_optimized)
-                                    : 0;
-        size_t user_original_cursor = dropped_user_count;
-        for (const auto& opt_msg : optimized.messages) {
-            if (opt_msg.role == "user") {
-                if (user_original_cursor < user_original_ordered.size()) {
-                    chat_history_.AddMessage(opt_msg.role, user_original_ordered[user_original_cursor]);
-                    user_original_cursor++;
+            size_t dropped_user_count = (user_original_ordered.size() >= total_user_in_optimized)
+                                        ? (user_original_ordered.size() - total_user_in_optimized)
+                                        : 0;
+            size_t user_original_cursor = dropped_user_count;
+            for (const auto& opt_msg : optimized.messages) {
+                if (opt_msg.role == "user") {
+                    if (user_original_cursor < user_original_ordered.size()) {
+                        chat_history_.AddMessage(opt_msg.role, user_original_ordered[user_original_cursor]);
+                        user_original_cursor++;
+                    } else {
+                        My_Log{My_Log::Level::kWarning}
+                            << "[Harmony] user_original_ordered exhausted, storing opt_msg.content directly" << std::endl;
+                        chat_history_.AddMessage(opt_msg.role, opt_msg.content);
+                    }
                 } else {
-                    My_Log{My_Log::Level::kWarning}
-                        << "[Harmony] user_original_ordered exhausted, storing opt_msg.content directly" << std::endl;
                     chat_history_.AddMessage(opt_msg.role, opt_msg.content);
                 }
-            } else {
-                chat_history_.AddMessage(opt_msg.role, opt_msg.content);
             }
-        }
 
-        // 5. 构建当前请求的提示词（使用优化后的消息）
-        for (const auto &msg_info : optimized.messages)
-        {
-            messages.push_back(msg_info.content);
+            // 5. 构建当前请求的提示词（使用优化后的消息）
+            for (const auto &msg_info : optimized.messages)
+            {
+                messages.push_back(msg_info.content);
+            }
+        } else {
+            // n != -1：不压缩，直接写入历史并构建提示词
+            for (const auto& msg_item : processed_messages) {
+                chat_history_.AddMessage(msg_item.role, msg_item.content);
+            }
+            // 构建提示词（需要包装 user 消息为 Harmony 格式）
+            for (const auto& msg_item : processed_messages) {
+                if (msg_item.role == "user") {
+                    messages.push_back(HarmonyProcessor::BuildUserMessage(msg_item.content));
+                } else {
+                    messages.push_back(msg_item.content);
+                }
+            }
+            optimized.messages = processed_messages;
+            optimized.success = true;
+            optimized.total_tokens = 0;
         }
 
         return optimized;
@@ -943,6 +964,9 @@ private:
             }
         }
 
+        // is_stateless_mode: 当 numResponse == -1（参数 n==-1）时，启用所有压缩优化逻辑
+        bool is_stateless_mode = instance_config_->IsStatelessMode();
+
         // PromptLedger 快照（Harmony 路径）：instructions 是优化前的原始 system 指令
         // （传给 PrepareOptimizedHarmonySystemMessages 的是 const 引用，函数内部不会修改它），
         // 一次 TokenLength 调用估算优化前 instructions + 原始消息内容 + 原始 tools 的总 token 数。
@@ -953,8 +977,8 @@ private:
         std::string system_msg;
         std::string developer_msg;
 
-        // 优化 Harmony system/developer 消息（stateless/stateful 两种模式统一压缩优化）
-        PrepareOptimizedHarmonySystemMessages(instructions, has_tools, tools,
+        // 优化 Harmony system/developer 消息（is_stateless_mode 时压缩优化，否则使用标准 HarmonyProcessor 构建）
+        PrepareOptimizedHarmonySystemMessages(is_stateless_mode, instructions, has_tools, tools,
                                                knowledge_cutoff, current_date, reasoning_level, model_config,
                                                system_msg, developer_msg);
 
@@ -1000,7 +1024,10 @@ private:
         // 保存优化前统计所需的数据快照（msg 在 PreFilterMessages 后会被修改）
         json before_opt_msg_snapshot = msg;
         // ========== 消息预过滤 ==========
-        msg = pre_filter_.PreFilterMessages(msg, contextSize, system_msg + developer_msg, /*is_harmony=*/true, &tool_call_id_to_name_);
+        // 只在 is_stateless_mode（n==-1）时执行压缩过滤
+        if (is_stateless_mode) {
+            msg = pre_filter_.PreFilterMessages(msg, contextSize, system_msg + developer_msg, /*is_harmony=*/true, &tool_call_id_to_name_);
+        }
 
         std::vector<std::string> messages;
         messages.push_back(system_msg);
@@ -1484,8 +1511,8 @@ private:
             }
         }
 
-        // 应用 FitMessagesToContext 进行 Token 控制（stateless/stateful 两种模式统一压缩）
-        OptimizedMessages optimized = PrepareHarmonyMessages(processed_messages,
+        // 应用 FitMessagesToContext 进行 Token 控制（is_stateless_mode 时压缩，否则原样写入历史）
+        OptimizedMessages optimized = PrepareHarmonyMessages(is_stateless_mode, processed_messages,
                                                               system_msg, developer_msg, contextSize, messages);
 
         // 6. 添加 assistant 起始标记
@@ -1504,7 +1531,7 @@ private:
         // PromptLedger 只需要一次 tokenize：不依赖 getenablePromptDebug()，无论调试块是否执行
         // 都要素化计算，debug 块内直接复用这个结果，避免重复调用 TokenLength(result)。
         size_t ledger_final_tokens = context_->TokenLength(result);
-        if (instance_config_->getenablePromptDebug()) {
+        if (is_stateless_mode && instance_config_->getenablePromptDebug()) {
             // 包装 context_ 为非拥有 shared_ptr，传给需要 shared_ptr 参数的统计辅助函数
 
             // 打印详细的消息列表（PreFilter 后的原始 JSON 消息）
@@ -1608,9 +1635,6 @@ private:
             last_ledger_.skills_l1 = opt_stats.skills_l1;
             last_ledger_.skills_l0 = opt_stats.skills_l0;
             last_ledger_.emergency_truncated = optimized.emergency_truncated;
-            last_ledger_.memo_active = optimized.memo_active;
-            last_ledger_.memo_confidence = optimized.memo_confidence;
-            last_ledger_.memo_refresh_count = optimized.memo_refresh_count;
         }
 
         return result;
@@ -1636,37 +1660,6 @@ private:
         return agentType;
     }
 
-    // ========== 辅助函数：从 TaskMemoStore 查表渲染 Task Memo 段落 ==========
-    // 直接从服务端权威存储渲染，不经过 PromptSectionsConfig/AppendFilteredSections 的回收逻辑。
-    // 未命中（功能关闭/存储丢失/无历史）时返回空字符串，调用方 += 空字符串逐字节回退到接入前的行为。
-    std::string BuildTaskMemoSection() const
-    {
-        if (!request_data_.is_object() || !request_data_.contains("messages") || !request_data_["messages"].is_array()) {
-            return "";
-        }
-        auto memo_entry = task_memo_builder_.Lookup(request_data_["messages"]);
-        if (!memo_entry) {
-            return "";
-        }
-
-        std::string rendered = TaskMemoBuilder::Render(*memo_entry);
-        if (rendered.empty())
-            return "";
-
-        const auto& po_cfg = instance_config_->i_model_config_.GetPromptOptimizationConfig();
-        double ratio = po_cfg.task_memo.token_budget_ratio;
-        if (ratio > 0.0) {
-            double bytes_per_token = EstimateCjkAwareBytesPerToken(
-                rendered, po_cfg.fidelity.cjk_bytes_per_token, po_cfg.fidelity.ascii_bytes_per_token);
-            size_t budget_bytes = static_cast<size_t>(
-                instance_config_->get_context_size() * ratio * bytes_per_token);
-            if (budget_bytes > 0 && rendered.size() > budget_bytes) {
-                rendered = TaskMemoBuilder::Render(*memo_entry, budget_bytes);
-            }
-        }
-        return "\n\n" + rendered;
-    }
-
     // ========== 辅助函数：调用 FitMessagesToContext 并统一处理错误和日志 ==========
     OptimizedMessages ApplyFitMessagesToContext(
         const std::vector<GenieChatMessage>& messages,
@@ -1676,14 +1669,7 @@ private:
     {
         My_Log{My_Log::Level::kDebug} << "[" << log_prefix << "] Fitting messages to context..." << std::endl;
 
-        const json* raw_messages_for_memo = nullptr;
-        if (request_data_.is_object() && request_data_.contains("messages") && request_data_["messages"].is_array()) {
-            raw_messages_for_memo = &request_data_["messages"];
-        }
-
-        auto optimized = pre_filter_.FitMessagesToContext(messages, system_prompt, contextSize,
-                                                            MessageCompressionConfig(),
-                                                            raw_messages_for_memo, &task_memo_builder_);
+        auto optimized = pre_filter_.FitMessagesToContext(messages, system_prompt, contextSize);
 
         if (!optimized.success) {
             My_Log{My_Log::Level::kError}
@@ -1781,17 +1767,6 @@ private:
         return oss.str();
     }
 
-    // 返回 instance_config_ 自身 config.json 的 sampler.`key` 值（存在且为数值时），否则返回 null。
-    // 与 chat_request_handler.cpp 匿名命名空间里的同名自由函数语义一致（因作用域限制无法跨文件
-    // 直接复用，这里镜像同一套优先级逻辑）：省略的 key 不会被 SetParamsByConfig() 改写为任意常量，
-    // 而是保留 SDK 创建 Dialog 时的默认值——摘要推理是服务端内部调用，没有"请求显式传入"这一层，
-    // 直接取 config.json 自身配置即是完整优先级链。
-    json SamplerFallback(const std::string &key) const
-    {
-        auto &sampler = instance_config_->sampler();
-        return (sampler.contains(key) && sampler.at(key).is_number()) ? sampler.at(key) : json();
-    }
-
     // ── RunSummarizationInference ─────────────────────────────────────────────
     // 为 Phase -1 摘要化执行单次同步推理。
     // 直接构造 ModelInput 并调用 context_->Query()，不走 Build() 主流程（避免递归）。
@@ -1818,18 +1793,9 @@ private:
             // 至少保留 512 tokens 输出，最多使用整个 context_size
             available_output = std::max(available_output, 512);
             available_output = std::min(available_output, context_size);
-
-            // 只把模型自身 config.json 里有合法数值的采样参数塞进去；缺省的 key 不出现在
-            // 这个 json 里，SetParamsByConfig() 自身按 model_config_.sampler() 的 key 遍历、
-            // j 不含该 key 即 continue，会自然跳过未设置的参数，不再被改写为任意硬编码常量。
-            json params;
-            json temp = SamplerFallback("temp");
-            if (temp.is_number()) params["temp"] = temp;
-            json top_k = SamplerFallback("top-k");
-            if (top_k.is_number()) params["top_k"] = top_k;
-            json top_p = SamplerFallback("top-p");
-            if (top_p.is_number()) params["top_p"] = top_p;
-            context_->SetParamsByConfig(params);
+            context_->SetParamsByConfig(json{{"temp", 0.3},
+                                             {"top_k", 20},
+                                             {"top_p", 0.8}});
         }
 
         std::string result;
@@ -1943,8 +1909,8 @@ private:
 
     // 注意：C++ 按声明顺序初始化成员变量，与初始化列表顺序无关。
     // 以下声明顺序与构造函数初始化列表顺序保持一致，消除 -Wreorder 编译器警告。
-    // 初始化顺序：chat_history_ → instance_config_ → context_ → optimizer_ → pre_filter_ → task_memo_builder_
-    // optimizer_、pre_filter_、task_memo_builder_ 均依赖 instance_config_（已在前面初始化），
+    // 初始化顺序：chat_history_ → instance_config_ → context_ → optimizer_ → pre_filter_
+    // optimizer_ 和 pre_filter_ 依赖 instance_config_（已在前面初始化），
     // SetContext() 在构造函数体中调用（此时 context_ 已初始化），无 UB 风险。
     ChatHistory &chat_history_;
     ModelInput model_input_;
@@ -1952,9 +1918,6 @@ private:
     std::shared_ptr<ContextBase> context_;
     PromptOptimizer optimizer_;
     MessagePreFilter pre_filter_;
-    // Task Memo 的 infer_fn 只捕获 this（本对象随请求全程存活，含流式路径的 shared_ptr 持有），
-    // 不捕获 Build() 局部的 is_alive_fn——is_alive_fn_ 恒为 nullptr，模型层触发条件满足时恒不跳过。
-    TaskMemoBuilder task_memo_builder_;
 
     // 工具调用 ID 到函数名的映射（用于关联 OpenAI 格式的工具调用和响应）
     std::unordered_map<std::string, std::string> tool_call_id_to_name_;
