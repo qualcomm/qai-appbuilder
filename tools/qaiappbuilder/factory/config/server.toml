@@ -19,3 +19,27 @@
 # enabled = true
 [auth]
 enabled = true
+
+# ---------------------------------------------------------------------------
+# Chat tunables
+# ---------------------------------------------------------------------------
+# P1 (slow on-device decoding): inter-frame stall budget, in seconds. This is
+# the max wall-clock gap between two MEANINGFUL LLM stream frames before a turn
+# is treated as a wedged upstream and stopped. It is an IDLE-GAP limit, not a
+# whole-turn cap — a healthy stream resets it on every frame that carries real
+# progress, so raising it only extends how long a genuinely silent upstream is
+# tolerated.
+#
+# The code default is 1800.0, chosen for slow on-device endpoints (a 27B model
+# decoding at 6-7 tok/s can legitimately spend >600s on one complex round).
+# Uncomment and adjust only to deviate from that:
+#   * faster device / cloud-only deployment -> lower it (e.g. 600.0, the
+#     historical value) to detect a wedged upstream sooner;
+#   * even slower device -> raise it further;
+#   * 0.0 disables the watchdog entirely (a wedged turn then pins the tab
+#     "generating" until the user presses Stop — not recommended).
+#
+# Env-var equivalent: QAI_CHAT__FRAME_STALL_BUDGET_SECONDS=1800
+#
+# [chat]
+# frame_stall_budget_seconds = 1800.0

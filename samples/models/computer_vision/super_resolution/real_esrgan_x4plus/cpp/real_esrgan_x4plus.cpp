@@ -89,15 +89,15 @@ int main() {
     int srHeight = scale * modelHeight;
 
     uint32_t size = RGB_IMAGE_SIZE_F32(modelWidth, modelHeight);
-    std::vector<uint8_t> nchwBufLeft(size);
-    cv::Mat inputMat(modelHeight, modelWidth, CV_32FC3, nchwBufLeft.data());
+    uint8_t *nchwBufLeft = new uint8_t[size];
+    cv::Mat inputMat(modelHeight, modelWidth, CV_32FC3, nchwBufLeft);
 
-    std::vector<float> dest(size);
+    float *dest = new float[size]; // siez???
 	cv::cvtColor(orig_image, rgb_image, cv::COLOR_BGR2RGB);
 	rgb_image.convertTo(inputMat, CV_32FC3, 1.0 / 255.0);
 
     xt::xarray<float> input_tensor = ConvertTensor(inputMat, 1);
-    std::copy(input_tensor.begin(), input_tensor.end(), dest.data());
+    std::copy(input_tensor.begin(), input_tensor.end(), dest);
 
     SetPerfProfileGlobal("burst");
 
@@ -113,7 +113,7 @@ int main() {
     outputSize.clear();
 	
 	
-    inputBuffers.push_back(reinterpret_cast<uint8_t *>(dest.data()));
+	inputBuffers.push_back((uint8_t *)dest);
 	
     
 	
@@ -128,6 +128,8 @@ int main() {
     // Use the data in outputBuffers.
     RelPerfProfileGlobal();
 	
+	delete[] nchwBufLeft;
+    delete[] dest;
 	
 	
     float *predOutput = (float *)outputBuffers.at(0);

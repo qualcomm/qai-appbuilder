@@ -23,9 +23,9 @@ This directory contains three Gradio-based WebUI applications that run AI models
 | [GenieWebUI.py](#3-geniewebui) | 50000 | LLM (via GenieAPIService) | Multi-function LLM chat app |
 
 ### Screenshots
-![ImageRepairApp](image-repair/screenshot/ImageRepairApp.jpg)
-![StableDiffusionApp](stable-diffusion/screenshot/StableDiffusionApp.jpg)
-![GenieWebUI](genie-chat/screenshot/GenieWebUI1.png)
+![ImageRepairApp](screenshot/ImageRepairApp.jpg)
+![StableDiffusionApp](screenshot/StableDiffusionApp.jpg)
+![GenieWebUI](screenshot/GenieWebUI.png)
 
 ---
 

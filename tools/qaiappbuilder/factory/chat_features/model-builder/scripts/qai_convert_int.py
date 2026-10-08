@@ -165,23 +165,10 @@ def _get_lib_generator_arch(qnn_sdk_root: str, host_arch: str):
       - qnn-onnx-converter lives in x86_64-windows-msvc/ (Python script, x86 emulation)
       - qnn-model-lib-generator lives in aarch64-windows-msvc/ (compiles native ARM64 DLL)
 
-    Scope: today this is only ever reached on the WINDOWS path -- Linux returns
-    early in convert_model() (qairt-converter/qairt-quantizer emit a DLC and no
-    model library is built). The non-Windows branch below is kept for a future
-    Linux DLL/`.so` flow: x86 Linux would use the native host-side generator to
-    cross-compile, and ARM Linux has no host-side generator, hence ``None``.
-
-    Returns:
-        str | None: the arch dir to use, or ``None`` when no model-lib
-        generator is available for this host. Callers MUST reject ``None``
-        explicitly -- joining it into a path raises TypeError.
+    On Linux, there is no model-lib-generator step; returns None.
     """
     if platform.system().lower() != "windows":
-        machine = platform.machine().lower()
-        if machine in ("aarch64", "arm64") or host_arch.startswith("aarch64-"):
-            print("[INFO] On ARM Linux, model library generation is not supported by this wrapper")
-            return None
-        return host_arch
+        return None   # Linux: no model-lib-generator step
 
     # On Windows: check if aarch64-windows-msvc/qnn-model-lib-generator exists
     aarch64_gen = os.path.join(qnn_sdk_root, "bin", "aarch64-windows-msvc", "qnn-model-lib-generator")
@@ -194,52 +181,6 @@ def _get_lib_generator_arch(qnn_sdk_root: str, host_arch: str):
 
 
 def get_cpu_arch_from_systeminfo():
-    """
-    Return this host's NATIVE cpu architecture as one of
-    'arm64' / 'amd64' / 'x86' / 'arm', or None when it cannot be determined.
-
-    Deliberately NOT ``os.environ["PROCESSOR_ARCHITECTURE"]``: conversion runs
-    under the x64 venv, and inside that x86-emulated process both
-    ``PROCESSOR_ARCHITECTURE`` and ``platform.machine()`` report AMD64 on a WoS
-    ARM64 box (``PROCESSOR_ARCHITEW6432`` is not set there either). Reporting
-    amd64 makes ``detect_target_arch()`` choose windows-x86_64, and
-    ``qnn-model-lib-generator`` then builds an x86_64 DLL that cannot load on
-    HTP/ARM64 -- a silently wrong artifact rather than a clean failure.
-
-    Sources, in order:
-      1. The machine-wide NATIVE ``PROCESSOR_ARCHITECTURE`` under
-         ``HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment``.
-         Immune to WOW64 emulation and to the console language.
-      2. ``systeminfo`` parsing -- kept as a fallback; note that it only matches
-         the English "System Type:" / "OS Name:" labels.
-    """
-    def _normalize(text):
-        m = re.search(r'(arm64|aarch64|amd64|x86_64|x86|arm)', text, re.IGNORECASE)
-        if not m:
-            return None
-        val = m.group(1).lower()
-        if val == 'x86_64':
-            return 'amd64'
-        if val == 'aarch64':
-            return 'arm64'
-        return val
-
-    # 1. Native architecture from the registry (locale-independent, emulation-proof).
-    if platform.system().lower() == "windows":
-        try:
-            import winreg
-            with winreg.OpenKey(
-                winreg.HKEY_LOCAL_MACHINE,
-                r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
-            ) as key:
-                native = str(winreg.QueryValueEx(key, "PROCESSOR_ARCHITECTURE")[0])
-            arch = _normalize(native)
-            if arch:
-                return arch
-        except Exception:
-            pass  # fall through to systeminfo
-
-    # 2. systeminfo parsing (English labels only).
     try:
         result = subprocess.run(['systeminfo'], capture_output=True, text=True, check=True, encoding='utf-8')
         output = result.stdout
@@ -248,20 +189,27 @@ def get_cpu_arch_from_systeminfo():
         os_name_match = re.search(r"OS Name:\s*(.*?)\r?\n", output, re.IGNORECASE)
 
         if system_type_match:
-            arch = _normalize(system_type_match.group(1).strip())
-            if arch:
-                return arch
+            system_type = system_type_match.group(1).strip()
+            arch_match = re.search(r'(x86|amd64|arm64|arm)', system_type, re.IGNORECASE)
+            if arch_match:
+                return arch_match.group(1).lower()
 
         if os_name_match:
-            arch = _normalize(os_name_match.group(1).strip())
-            if arch:
-                return arch
+            os_name = os_name_match.group(1).strip()
+            arch_match = re.search(r'(x86|amd64|arm64|arm)', os_name, re.IGNORECASE)
+            if arch_match:
+                return arch_match.group(1).lower()
 
         for line in output.splitlines():
             if any(tok in line for tok in ('ARM', 'ARM64', 'Intel', 'AMD', 'Qualcomm')):
-                arch = _normalize(line)
-                if arch:
-                    return arch
+                arch_match = re.search(r'(arm64|aarch64|arm|amd64|x86_64|x86)', line, re.IGNORECASE)
+                if arch_match:
+                    val = arch_match.group(1).lower()
+                    if val in ('x86_64',):
+                        return 'amd64'
+                    if val == 'aarch64':
+                        return 'arm64'
+                    return val
 
         return None
 
@@ -293,14 +241,7 @@ def detect_host_arch():
         if machine in ["amd64", "x86_64"]:
             return "x86_64-linux-clang"
         elif machine in ["arm64", "aarch64"]:
-            # aarch64-oe-linux-gcc11.2 is the only aarch64 Linux dir that ships
-            # host converter/quantizer tools; aarch64-ubuntu-gcc9.4 has device
-            # runtime tools only. Matches _host_arch.py / onnxwrapper_x86.py.
-            # NOTE: the real Linux code path re-derives this dynamically via
-            # _get_linux_toolchain_dir_int() and does not rely on this return
-            # value; this branch only affects informational logging/
-            # args.host_arch.
-            return "aarch64-oe-linux-gcc11.2"
+            return "aarch64-ubuntu-gcc9.4"
 
     # Default fallback
     return "x86_64-windows-msvc"
@@ -513,15 +454,6 @@ def convert_model(model_info, cwd, calibration_list_path, act_bw=16, weight_bw=8
 
     # QAIRT 2.45 WoS: lib generator may be in aarch64-windows-msvc/
     lib_gen_arch = _get_lib_generator_arch(qnn_sdk_root, host_toolchain)
-    if lib_gen_arch is None:
-        print(
-            "Error: no qnn-model-lib-generator toolchain is available for this host "
-            f"(host_toolchain={host_toolchain}, platform={platform.system()}/{platform.machine()}). "
-            "Model-library generation requires a Windows host; use run_pipeline.py "
-            "(ONNX -> DLC -> context .bin) instead.",
-            file=sys.stderr,
-        )
-        return False
     lib_gen_path = os.path.join(qnn_sdk_root, "bin", lib_gen_arch, "qnn-model-lib-generator")
     lib_gen_cmd = [
         python_exe, lib_gen_path,

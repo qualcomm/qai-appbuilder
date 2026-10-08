@@ -250,6 +250,33 @@ DEFAULT_LOW_BUDGET: int = 30_000
 #: fixed constant cannot track a configurable producer.
 DEFAULT_ORDERED_SLICE_CAP: int = 80_000
 
+#: Fraction of the model's REAL context window that ONE tool result may occupy.
+#:
+#: The per-family budgets above are absolute character counts, which is fine on a
+#: 200K window and structurally broken on a small one. Measured on the Glymur box
+#: (32768-token window, and that window is a hard laptop ceiling): the ``read``
+#: backstop allowed 80000 chars ≈ 20027 tokens = **61% of the whole window** in a
+#: single result, and the generic HIGH budget allowed 38%. One tool round could
+#: therefore consume most of the window, which is why compaction "could not keep
+#: up" no matter how its thresholds were tuned — a trigger at 0.65 of the window
+#: cannot survive a single round that adds 0.61 of it.
+#:
+#: 0.15 keeps a round's worst-case contribution to ~1/7 of the window, which the
+#: inter-round trigger can absorb, while still returning ~500 lines of typical
+#: code per ``read``. Chosen over a more aggressive value because on a slow
+#: on-device engine every extra paginated re-read costs a full prefill, so
+#: over-truncating trades one failure mode for a slower one.
+DEFAULT_WINDOW_RESULT_RATIO: float = 0.15
+
+#: Characters per token used to convert the window (tokens) into a char budget.
+#: Matches the bytes/4 estimator the compaction path uses, so the two agree.
+_CHARS_PER_TOKEN: int = 4
+
+#: Never scale a budget below this many characters. A tiny or mis-read window
+#: must not make ``read`` useless (which would push the model into an endless
+#: paginate-and-retry loop); below this floor we keep the family budget instead.
+MIN_SCALED_BUDGET_CHARS: int = 8_000
+
 
 def ordered_slice_cap_for(
     *,
@@ -323,6 +350,12 @@ class AdaptiveToolResultTruncator(ToolResultTruncatorPort):
     ``skill``). MUST stay above the largest in-spec slice those tools can
     return, else the backstop routinely destroys their own truncation notice —
     derive it with :func:`ordered_slice_cap_for` from the live ``read`` caps."""
+    window_result_ratio: float = DEFAULT_WINDOW_RESULT_RATIO
+    """Fraction of the model's REAL window one tool result may occupy.
+
+    Applied only when the caller supplies ``request.context_length``; see
+    :data:`DEFAULT_WINDOW_RESULT_RATIO` for why an absolute char budget is not
+    sufficient on a small window."""
     family_resolver: Callable[[str], str] = field(default=_default_family_resolver)
     """Maps model_id -> ``"high"`` / ``"mid"`` / ``"low"``."""
     overflow_store: ToolResultOverflowStore | None = None
@@ -397,7 +430,16 @@ class AdaptiveToolResultTruncator(ToolResultTruncatorPort):
         # ``registry._STORABLE_RESULT_FIELDS`` upstream; persisting them from
         # here would reintroduce the loop through the back door.
         if request.tool_name in ("read", "list", "skill"):
+            # Scale the backstop to the real window when we know it: on a 32768
+            # window the static 80000-char cap is ~61% of the whole context, so
+            # one slice could defeat any compaction threshold. Safe to tighten
+            # here because this branch REPLACES the producing tool's footer with
+            # its own correctly-rebased ``offset=`` continuation notice below,
+            # so pagination still advances.
             cap = self.ordered_slice_cap
+            _scaled_cap = self._window_cap_chars(request.context_length)
+            if _scaled_cap is not None:
+                cap = min(cap, _scaled_cap)
             if len(text) <= cap:
                 return ToolResultTruncationResult(
                     text=text,
@@ -468,7 +510,9 @@ class AdaptiveToolResultTruncator(ToolResultTruncatorPort):
                 omitted_chars=0,
             )
 
-        budget = self._resolve_budget(model_id=request.model_id)
+        budget = self._resolve_budget(
+            model_id=request.model_id, context_length=request.context_length,
+        )
 
         if original_length <= budget:
             return ToolResultTruncationResult(
@@ -598,13 +642,38 @@ class AdaptiveToolResultTruncator(ToolResultTruncatorPort):
             return None, OVERFLOW_DECLINED
         return stored_path, OVERFLOW_STORED
 
-    def _resolve_budget(self, *, model_id: str) -> int:
+    def _window_cap_chars(self, context_length: int) -> int | None:
+        """Char ceiling derived from the model's REAL window, or ``None``.
+
+        ``None`` means "do not scale" — either the caller did not supply a window
+        (``context_length <= 0``, the default, so existing behaviour is
+        untouched) or the derived value is below
+        :data:`MIN_SCALED_BUDGET_CHARS`, where scaling would make ``read`` so
+        small that the model would thrash on pagination instead of reading.
+        """
+        if not isinstance(context_length, int) or context_length <= 0:
+            return None
+        if not (0.0 < self.window_result_ratio <= 1.0):
+            return None
+        cap = int(context_length * self.window_result_ratio * _CHARS_PER_TOKEN)
+        if cap < MIN_SCALED_BUDGET_CHARS:
+            return None
+        return cap
+
+    def _resolve_budget(self, *, model_id: str, context_length: int = 0) -> int:
         family = self.family_resolver(model_id)
         if family == "high":
-            return self.high_budget
-        if family == "mid":
-            return self.mid_budget
-        return self.low_budget
+            budget = self.high_budget
+        elif family == "mid":
+            budget = self.mid_budget
+        else:
+            budget = self.low_budget
+        # A family budget is an absolute constant; on a small window it can be a
+        # large fraction of the whole context. Take the tighter of the two so one
+        # tool result can never dominate the window (see
+        # :data:`DEFAULT_WINDOW_RESULT_RATIO`).
+        scaled = self._window_cap_chars(context_length)
+        return budget if scaled is None else min(budget, scaled)
 
 
 __all__ = [
@@ -612,6 +681,8 @@ __all__ = [
     "DEFAULT_HIGH_BUDGET",
     "DEFAULT_MID_BUDGET",
     "DEFAULT_LOW_BUDGET",
+    "DEFAULT_WINDOW_RESULT_RATIO",
+    "MIN_SCALED_BUDGET_CHARS",
     "TRUNCATION_OVERFLOW_ADVICE",
     "OVERFLOW_STORED",
     "OVERFLOW_NOT_INJECTED",

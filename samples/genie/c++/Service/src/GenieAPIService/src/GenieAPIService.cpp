@@ -10,17 +10,12 @@
 #include <csignal>
 #include <thread>
 #include <chrono>
-#include <iostream>
-#include <string>
 #include <log.h>
 #include <utils.h>
 #include "config.h"
 #include "chat_request_handler/chat_request_handler.h"
 #include "model/model_manager.h"
 #include "response/response_dispatcher.h"
-#include "response/response_tools_layer1_selftest.h"
-#include "response/response_tools_sanitization_selftest.h"
-#include "chat_request_handler/tool_call_circuit_breaker_store_selftest.h"
 #if defined(_WIN32) || defined(__WIN32__) || defined(WIN32)
 #include <windows.h>
 #endif
@@ -155,10 +150,9 @@ void GenieService::run(int argc, char *argv[])
 
     // InitializeConfig must complete before ChatRequestHandler construction
     // because the handler reads routing/cloud config set during initialization.
-    // 本身只做模型路径解析 + service_config.json 解析，不再触发模型加载。
-    if (!modelManager->InitializeConfig())
+    if (!modelManager->InitializeConfig(config.NeedLoadModel()))
     {
-        My_Log{My_Log::Level::kError} << "resolve model config failed." << std::endl;
+        My_Log{My_Log::Level::kError} << "load model failed." << std::endl;
     }
 
     // Initialize request handler and start HTTP server BEFORE model loading.
@@ -173,20 +167,19 @@ void GenieService::run(int argc, char *argv[])
         init_ = true;
     }
 
-    // -c 只定位模型路径（已在 InitializeConfig() 中完成），只有显式带 -l/--load_model 才
-    // 真正占用硬件资源加载模型；未带 -l 时服务启动后 current_model_ 为空，之后仍可通过
-    // 对话/HTTP 触发的 LoadModelByName() 动态加载任意后端（QNN/MNN/GGUF）模型。
+    // Load additional models from service_config.json only when the user explicitly
+    // requested model loading via -l/--load_model.  Without -l the service starts
+    // with only the primary model specified by -c, and no extra models are loaded
+    // automatically.
     if (config.NeedLoadModel())
     {
-        if (!modelManager->LoadSingleModel())
-        {
-            My_Log{My_Log::Level::kError} << "load model failed." << std::endl;
-        }
+        std::thread model_loader([this]() {
+            modelManager->LoadAllModelsFromConfig();
+        });
+        model_loader.detach();
     }
 
-    // 默认值仍是 0.0.0.0（与改动前行为一致），仅在使用者显式传入 -H/--host 时按需收紧，
-    // 详见 config.h::Config::host_ 的注释。
-    const std::string &HOST = config.get_host();
+    static const std::string HOST = "0.0.0.0";
     My_Log{My_Log::Level::kAlways} << YELLOW << "[OK] Genie API Service IS Running." << RESET << std::endl;
     My_Log{My_Log::Level::kAlways} << YELLOW << "[OK] Genie API Service -> http://"
                                    << HOST << ":" << port_checked
@@ -385,49 +378,6 @@ int main(int argc, char **argv)
 #if defined(_WIN32) || defined(__WIN32__) || defined(WIN32)
     SetConsoleOutputCP(CP_UTF8);
 #endif
-    // 隐藏自测分支：离线回放 Layer1 兜底提取的畸形样本集，跑完立即退出，不触碰
-    // 正常的 CLI11/service.run() 逻辑。用法：GenieAPIService.exe --self-test-layer1-recovery
-    // 设计取舍见 src/response/response_tools.md。
-    if (argc > 1 && std::string(argv[1]) == "--self-test-layer1-recovery")
-    {
-        bool all_passed = RunLayer1RecoverySelfTest(std::cout);
-        return all_passed ? 0 : 1;
-    }
-    // 隐藏自测分支：离线回放验证 ResponseTools::DetectBareToolCall()（"Layer -1"：无
-    // <tool_call> 标签时的裸 JSON 工具调用检测）。用法：GenieAPIService.exe --self-test-bare-json-detect
-    // 设计取舍见 src/response/response_tools.md「Layer -1」节。
-    if (argc > 1 && std::string(argv[1]) == "--self-test-bare-json-detect")
-    {
-        bool all_passed = RunBareToolCallDetectionSelfTest(std::cout);
-        return all_passed ? 0 : 1;
-    }
-    // 隐藏自测分支：离线回放验证 ResponseTools::ApplyBareJsonHoldBack()（"Layer -1" 流式
-    // hold-back 状态机）在"逐 chunk 到达"场景下的行为，与上面的 --self-test-bare-json-detect
-    // 是两条独立代码路径——真机复现的"</think> 独占一个 chunk"边界 bug 只会在这里被捕获。
-    // 用法：GenieAPIService.exe --self-test-bare-json-holdback
-    // 设计取舍见 src/response/response_dispatcher.md「Layer -1 hold-back」一节。
-    if (argc > 1 && std::string(argv[1]) == "--self-test-bare-json-holdback")
-    {
-        bool all_passed = RunBareJsonHoldBackStreamingSelfTest(std::cout);
-        return all_passed ? 0 : 1;
-    }
-    // 隐藏自测分支：离线回放验证 ResponseTools::remove_tool_call_content() 的最终防线（对
-    // 未闭合/跨多行截断的 <tool_call> 输入是否彻底清空,不泄漏任何标签/JSON碎片）。
-    // 用法：GenieAPIService.exe --self-test-sanitization
-    if (argc > 1 && std::string(argv[1]) == "--self-test-sanitization")
-    {
-        bool all_passed = RunToolCallSanitizationSelfTest(std::cout);
-        return all_passed ? 0 : 1;
-    }
-    // 隐藏自测分支：直接调用 ToolCallCircuitBreakerStore 公开接口验证"会话+模型维度连续
-    // 触发Layer3计数/降级/冷却重置"链路的端到端语义（单session、交错session/模型、空key、
-    // 并发、冷却过期）。用法：GenieAPIService.exe --self-test-circuit-breaker
-    // 设计取舍见 src/chat_request_handler/tool_call_circuit_breaker_store.md。
-    if (argc > 1 && std::string(argv[1]) == "--self-test-circuit-breaker")
-    {
-        bool all_passed = RunToolCallCircuitBreakerSelfTest(std::cout);
-        return all_passed ? 0 : 1;
-    }
     service.run(argc, argv);
     return 0;
 }

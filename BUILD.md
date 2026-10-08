@@ -90,40 +90,6 @@ export QNN_SDK_ROOT=<path_to_v2.40.0.251030>
 export QAI_TOOLCHAINS=aarch64-oe-linux-gcc11.2
 ```
 
-### Build with direct TFLite support (Linux ARM64 QNN or Windows CPU)
-
-TFLite support is disabled by default. Linux ARM64 uses the matching QAIRT QNN delegate; Windows uses the TFLite CPU interpreter without QNN dependencies. Both paths require a redistributable TFLite C API SDK.
-
-```bash
-export QNN_SDK_ROOT=<path-to-qairt>
-export TFLITE_ROOT=<path-to-tflite-sdk>
-export QAI_TOOLCHAINS=aarch64-oe-linux-gcc11.2
-export APPBUILDER_ENABLE_TFLITE=ON
-python -m build -w
-```
-
-`TFLITE_ROOT` must contain `include/tensorflow/lite/c/c_api.h` and a C API library under `lib/` named `libtensorflowlite_c.so` or `libtflite_c.so`. The QNN SDK must contain `include/QNN/TFLiteDelegate/QnnTFLiteDelegate.h` and `lib/aarch64-oe-linux-gcc11.2/libQnnTFLiteDelegate.so`. The resulting wheel places these direct runtime libraries under `qai_appbuilder/libs/`; inspect them with:
-
-```bash
-unzip -l dist/qai_appbuilder-*.whl | grep -E 'tensorflowlite|tflite|QnnTFLiteDelegate'
-```
-
-The Windows CPU build uses a separate feature gate:
-
-```powershell
-$env:TFLITE_ROOT = "C:/path/to/tflite-sdk"
-$env:APPBUILDER_ENABLE_TFLITE_CPU = "ON"
-python -m build -w
-```
-
-The Windows SDK must provide `include/tensorflow/lite/c/c_api.h`, a `tensorflowlite_c.lib` or `tflite_c.lib` import library under `lib/`, and the matching `tensorflowlite_c.dll` or `tflite_c.dll` under `bin/` or `lib/`. The wheel contains the CPU runtime DLL under `qai_appbuilder/libs/` and does not package `libQnnTFLiteDelegate.so`. `APPBUILDER_ENABLE_TFLITE` and `APPBUILDER_ENABLE_TFLITE_CPU` are mutually exclusive. Do not enable either option unless the runtime artifacts are licensed for redistribution.
-
-#### Direct TFLite runtime limitations
-
-Direct `.tflite` contexts expose a single interpreter graph. Pass only `graphIndex=0` (or omit it) to `QNNContext.Inference()` and metadata getters such as `getInputShapes()`; non-zero graph indices raise an error and multi-graph selection is not supported for `.tflite` models.
-
-`getProfilingEvent()` returns `0` for direct `.tflite` contexts because this path does not expose QNN profiling events. Do not interpret `0` as a measured profiling result.
-
 ### Install Python Dependencies
 
 Upgrade build tooling and install required Python packages:

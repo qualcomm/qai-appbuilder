@@ -132,15 +132,10 @@ datautil::ReadBatchDataRetType_t datautil::readBatchData(const std::vector<std::
   size_t fileIndex       = filePathsIndexOffset;
   while (true) {
     if (fileIndex >= filePaths.size()) {
-      if (loopBackToStart && !filePaths.empty()) {
+      if (loopBackToStart) {
         fileIndex = fileIndex % filePaths.size();
       } else {
-        if (numBatchSize == 0) {
-          numBatchSize = 1;
-        } else {
-          const size_t safe_batch_size = numBatchSize;
-          numBatchSize += (tensorLength - totalLength) / (totalLength / safe_batch_size);
-        }
+        numBatchSize += (tensorLength - totalLength) / (totalLength / numBatchSize);
         // pad the vector with zeros
         memset(buffer + totalLength, 0, (tensorLength - totalLength) * sizeof(char));
         break;

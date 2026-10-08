@@ -785,6 +785,53 @@ class ChatSettings(BaseModel):
         ),
     )
 
+    frame_stall_budget_seconds: float = Field(
+        default=1800.0,
+        ge=0.0,
+        description=(
+            "Inter-frame stall ceiling (seconds) for a chat turn: the max "
+            "wall-clock gap between two *meaningful* LLM stream frames before "
+            "the turn is treated as a wedged upstream and stopped. Applies to "
+            "the main turn (``StreamChatUseCase``) and the sub-agent turn "
+            "(``AgentToolHandler``). ``0`` disables the watchdog entirely.\n\n"
+            "Raised from the legacy hardcoded ``600`` to ``1800`` for slow "
+            "on-device decoding: a Glymur-class PC running a 27B model at "
+            "6-7 tok/s can legitimately spend >600s on a single complex "
+            "round (long tool-call arguments, a big prefill), and the old "
+            "budget cancelled those turns as 'stalled' while they were in "
+            "fact still making progress. Note this is an IDLE-GAP limit, not "
+            "a whole-turn cap — a healthy stream resets it on every "
+            "meaningful frame, so raising it only extends how long a "
+            "genuinely silent upstream is tolerated.\n\n"
+            "Blank / keep-alive frames deliberately do NOT reset the timer "
+            "(see ``_stream_guards.is_meaningful_stream_frame``): a half-open "
+            "connection emitting only whitespace must still time out."
+        ),
+    )
+
+    llm_content_stall_budget_seconds: float = Field(
+        default=900.0,
+        ge=0.0,
+        description=(
+            "Ceiling (seconds) on the wait for the FIRST meaningful content "
+            "frame from an ON-DEVICE (loopback) LLM endpoint, and on any "
+            "subsequent silent gap. Applies to loopback endpoints and to "
+            "tool-capable turns; genuine cloud plain-text turns keep their "
+            "tight 60s budget so a wedged gateway is still caught fast.\n\n"
+            "Why loopback needs its own value: the pre-first-token silence on "
+            "a local engine is PREFILL, and it scales with prompt size. "
+            "Measured on a Glymur-class box, a ~26K-token compaction-summary "
+            "prompt prefills at ~82 tok/s = ~320s before token one. Summaries "
+            "(session digest / turn-prefix) are sent WITHOUT tools, so under "
+            "the 60s plain-text budget every one of them was killed before "
+            "producing anything — which also starved the '/compact migrate' "
+            "handoff, since that requires a digest to exist.\n\n"
+            "900s covers roughly a 70K-token prefill at that rate. Raise it if "
+            "your prompts or device are slower; lower it to detect a wedged "
+            "local engine sooner."
+        ),
+    )
+
     question_timeout_seconds: float = Field(
         default=0.0,
         ge=0.0,

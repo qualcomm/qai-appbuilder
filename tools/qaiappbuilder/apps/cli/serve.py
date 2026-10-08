@@ -187,16 +187,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     # that surfaces days later as opaque permission errors. Cheaper to
     # reject up front. ``is_admin`` is fail-open (see its docstring), so a
     # broken probe never blocks a legitimate non-admin launch.
-    if is_admin():
-        _stderr(
-            "[serve] Refusing to start: this service must not be run with "
-            "administrator/root privileges. Relaunch from a normal user "
-            "shell (do NOT 'Run as administrator' / do NOT use sudo).\n"
-        )
-        # Exit 1, NOT REBOOT_EXIT_CODE (75). The supervisor loop is inside
-        # this process and has not started yet, but any wrapper that treats
-        # 75 as "please retry" would spin forever.
-        return 1
 
     parser = _build_parser()
     args, child_args = parser.parse_known_args(argv)

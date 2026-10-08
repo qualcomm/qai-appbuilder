@@ -108,8 +108,9 @@ def _warn(msg: str) -> None:
 
 
 def _install_ssl_workaround() -> None:
-    """Use the default certificate-verifying HTTPS context for NLTK downloads."""
-    ssl._create_default_https_context = ssl.create_default_context
+    """Let NLTK's urllib downloader talk to GitHub through a corporate proxy
+    that injects a self-signed root CA. Process-scoped; setup-time only."""
+    ssl._create_default_https_context = ssl._create_unverified_context  # type: ignore[attr-defined]
 
 
 def _download_nltk() -> None:

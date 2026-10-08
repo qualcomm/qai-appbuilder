@@ -46,15 +46,18 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ipaddress
 import json
 import math
 import re
+import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Mapping
 from pathlib import Path
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 from qai.chat.application.ports import (
     BudgetTrackerPort,
@@ -71,7 +74,7 @@ from qai.chat.application.ports import (
     InjectionRegistryPort,
     LLMStreamPort,
     LLMStreamRequest,
-    ModelContextWindowPort,
+    ModelResolverPort,
     PromptSnapshot,
     PromptSnapshotStorePort,
     PromoteReadyScanPort,
@@ -98,7 +101,6 @@ from qai.chat.domain.hook import HookDecision, HookEvent
 from qai.chat.domain.errors import (
     ChatStreamAbortedError,
     ConversationLockedError,
-    MissingModelContextLengthError,
     SubAgentSessionConflictError,
 )
 from qai.chat.domain.events import (
@@ -133,6 +135,7 @@ from qai.chat.application.use_cases._agentic_kernel import (
     COMPRESS_TARGET_RATIO as _COMPRESS_TARGET_RATIO,
     INTER_ROUND_COMPRESS_THRESHOLD_RATIO as _INTER_ROUND_COMPRESS_THRESHOLD_RATIO,
     LONG_TURN_PREFIX_RATIO as _LONG_TURN_PREFIX_RATIO,
+    OVERFLOW_RECOVERY_TARGET_SCALE as _OVERFLOW_RECOVERY_TARGET_SCALE,
     PROTECT_WINDOW_RATIO as _PROTECT_WINDOW_RATIO,
     CompactionCheckpoint as _CompactionCheckpoint,
     age_old_tool_outputs,
@@ -225,6 +228,7 @@ from qai.chat.application.use_cases._long_term_memory import (
 )
 from qai.chat.application.use_cases.tool_advertise import (
     CONDITIONAL_TOOL_NAMES as _CONDITIONAL_TOOL_NAMES,
+    LOCAL_EXCLUDED_TOOLS as _LOCAL_EXCLUDED_TOOLS,
     SUB_AGENT_EXCLUDED_TOOLS as _SUB_AGENT_EXCLUDED_TOOLS,
     compose_advertised_tools as _compose_advertised_tools,
     schema_tool_name as _shared_schema_tool_name,
@@ -263,18 +267,6 @@ LEGACY_MAX_FOLLOWUP_ROUNDS: int = 25
 # spinning up to ``max_followup_rounds``. ``3`` tolerates a single legitimate
 # retry while catching a true loop quickly.
 _NO_PROGRESS_LIMIT: int = 3
-
-# Auto-continuation-on-truncation retry cap: if a round ends with
-# ``finish_reason == "length"`` (the model's per-response output token
-# ceiling, tagged onto the END frame as ``truncated`` by the adapter —
-# see ``llm_stream.py``/``local_model_stream.py``) this many CONSECUTIVE
-# times in a row, stop auto-retrying and fall back to a user-visible
-# notice instead of burning tokens on a model that keeps re-hitting the
-# ceiling. Mirrors ``_NO_PROGRESS_LIMIT``'s magnitude/justification; kept
-# as a separate counter because a truncation retry is not a repeated-
-# identical-call signature, it is the model consistently running out of
-# output budget — a structurally different runaway mode.
-_MAX_CONSECUTIVE_TRUNCATION_RETRIES: int = 3
 
 # Turn-internal pending-integration ceiling (§A3 pending awareness). When the
 # assistant has finished its text but a background producer has meanwhile
@@ -339,6 +331,112 @@ def _is_meaningful_stream_frame(frame: StreamFrame) -> bool:
     truth (P4: shared LLM-stream guards across main agent + sub-agent).
     """
     return _shared_is_meaningful_stream_frame(frame)
+
+
+#: P2a — how many escalating compaction passes a context-overflow recovery may
+#: run before giving up. Each pass aims at a strictly lower target than the one
+#: before it (see ``_OVERFLOW_RECOVERY_ESCALATION_FLOOR``); the loop stops early
+#: the moment the reassembled wire fits, a pass changes nothing, or the target
+#: can no longer be lowered.
+#:
+#: Note this bounds COMPACTION passes, not LLM requests: the caller still
+#: retries the provider at most once after a successful recovery. Compaction is
+#: local CPU work, so the passes cost no round-trips.
+#:
+#: Raised 3 -> 5 (and the floor 0.08 -> 0.05) after the field log showed the
+#: client sending 36640- and 53737-token wires into a 32768-token window. Be
+#: honest about the expected benefit: the binding constraint in those cases is
+#: the PROTECTED current turn, not the number of passes, so extra attempts are
+#: cheap insurance rather than the actual fix — capping a single tool result to
+#: a fraction of the window (``DEFAULT_WINDOW_RESULT_RATIO``) is what stops the
+#: wire reaching that size in the first place.
+_MAX_OVERFLOW_RECOVERY_ATTEMPTS: int = 5
+
+#: Floor for attempts 2..N of a recovery escalation. Deliberately LOWER than
+#: the single-shot ``OVERFLOW_RECOVERY_MIN_TARGET_RATIO`` (0.15): that floor
+#: exists so a one-shot recovery never aims at a size which cannot hold the
+#: protected current turn, but by attempt 2 we have direct evidence that 0.15
+#: was not enough, and the alternative to trying harder is killing the task.
+#: The compressor always protects the current turn regardless of target, so the
+#: practical worst case is "system prompt + current turn only" — which is
+#: exactly the right last resort before failing.
+_OVERFLOW_RECOVERY_ESCALATION_FLOOR: float = 0.05
+
+#: P8 — emergency inter-round compaction threshold, as a fraction of the REAL
+#: context window.
+#:
+#: Inter-round compaction is throttled to every 4th round, which leaves rounds
+#: 1-3, 5-7, ... with no size check at all. That throttle is fine when the wire
+#: grows smoothly, and wrong when one round jumps: a single tool result of
+#: 18-20K tokens on a 32768-token window can take the wire from comfortably
+#: under the threshold to over the WINDOW inside one unchecked round, and the
+#: next thing that happens is a hard rejection (or a silently truncated tool
+#: call).
+#:
+#: So on every round we additionally compare the provider's MEASURED ``实发``
+#: size for the round that just finished against ``0.92 x window``; crossing it
+#: skips the throttle and compacts immediately. 0.92 leaves ~8% of headroom —
+#: enough to absorb the next round's fixed overhead, tight enough that it only
+#: fires when the wire genuinely is about to overflow (so a normally-growing
+#: conversation still compacts on its regular 4-round cadence, not here).
+#:
+#: This is deliberately keyed on the MEASURED size, not an estimate: a valve
+#: that exists to catch "the estimate missed it" must not itself depend on the
+#: estimate.
+_EMERGENCY_COMPRESS_RATIO: float = 0.92
+
+#: Tokens of OUTPUT room the emergency valve insists on preserving, on top of the
+#: model's own ``max_tokens``.
+#:
+#: Why the ratio alone is not enough: ``0.92 x window`` is a fraction of the
+#: WHOLE window, but a request needs room for the reply too. On the 32768-token
+#: Glymur window the ratio put the valve at 30146 tokens while the usable prompt
+#: ceiling is only ``32768 - 4096 (max_tokens) = 28672`` — i.e. the valve could
+#: only ever fire AFTER the request was already guaranteed to have its reply
+#: truncated (``finish_reason=length``, "工具调用 write 的参数不完整"). It was
+#: unreachable in any useful sense on exactly the windows it exists to protect.
+#:
+#: So the valve fires at the TIGHTER of the ratio and
+#: ``window - max_tokens - this margin``. The margin covers the wire overhead
+#: compaction cannot see (system prompt + tool schemas) plus estimator error.
+_EMERGENCY_OUTPUT_RESERVE_TOKENS: int = 2048
+
+#: Fallback reply budget when neither the request nor the model profile names
+#: one. Matches what the Glymur box was observed sending
+#: (``chat.llm_stream.max_tokens_outgoing max_tokens=4096``).
+_DEFAULT_MAX_OUTPUT_TOKENS: int = 4096
+
+#: How long a "a main turn is streaming" mark stays trusted without any further
+#: observed frame activity, before background work is allowed to proceed anyway.
+#:
+#: This is a SELF-HEALING guard, not a tuning knob. The active-turn counter is
+#: incremented/decremented around the turn body, but this codebase legitimately
+#: abandons stream generators mid-iteration (the tool-call handoff, the abort
+#: ``break``) and does not ``aclose()`` them — so a ``finally`` may never run and
+#: the counter can leak upward. If that happened with no staleness bound, every
+#: background summary would be blocked for the life of the process.
+#:
+#: MUST BE >= the app's own bound on how long a LIVE request may legitimately be
+#: silent (``ChatSettings.llm_content_stall_budget_seconds``, default 900s). That
+#: is not a coincidence of tuning — the two express the same fact, and a smaller
+#: value here means declaring a healthy turn dead.
+#:
+#: The first value tried (120s) was wrong and shipped a real regression, worth
+#: recording because the reasoning error is easy to repeat: it was sized against
+#: a healthy *inter-frame* gap, forgetting that a turn emits NO frames at all
+#: while it PREFILLS. Measured on the Glymur box — main turn launched at
+#: ``18.00.558``, still prefilling at ``20.03.389``
+#: (``progress = 0.93, t = 122.46 s``, i.e. zero output tokens so far) — the mark
+#: went stale at 120s, released two waiting summaries, and all three requests
+#: collided on the shared 32768-token KV pool
+#: (12911 + 3655 + 16991 = 33557) and died with "Context size has been
+#: exceeded". Prefill silence scales with prompt size, so the bound has to be
+#: sized against the slowest legitimate prefill, not against token cadence.
+#:
+#: Erring long is deliberate: too long degrades to "background summaries run
+#: concurrently again" (the old, merely-slow behaviour) only in the rare leak
+#: case, whereas too short actively kills healthy turns.
+_TURN_ACTIVE_STALE_SECONDS: float = 900.0
 
 
 def _tool_calls_signature(frames: "list[StreamFrame]") -> str:
@@ -664,10 +762,85 @@ def _is_local_model_hint(model_hint: str | None) -> bool:
     """Return True when ``model_hint`` targets a local (on-device) model.
 
     V1 parity ``backend/chat_handler.py:400`` (``startswith("local::")``).
+
+    NOTE (P4): this answers "is this the ``local::`` ROUTE?", which is the
+    right question for transport-level concerns (inline XML tool-call parsing,
+    desktop-control gating, image handling) and the WRONG question for
+    "is the model physically on this machine?". A model registered as a
+    provider endpoint whose ``base_url`` is a loopback address is physically
+    local but does NOT carry the prefix. Decisions that care about the latter
+    must OR this with ``extra["_is_loopback_endpoint"]`` — see
+    :data:`_LOOPBACK_ENDPOINT_EXTRA_KEY`.
     """
     return isinstance(model_hint, str) and model_hint.startswith(
         _LOCAL_MODEL_HINT_PREFIX
     )
+
+
+#: ``extra`` key carrying "this turn's endpoint is a loopback address".
+#:
+#: P4 — why a separate signal instead of widening ``_is_local_model_hint``:
+#: that predicate is called from ~17 places, and most of them genuinely want
+#: "the ``local::`` route" (XML tool-call parsing awareness, desktop-control
+#: gating, image-format handling). Widening it would silently change all of
+#: them. This key is consulted at exactly TWO decision points — the system
+#: prompt and the advertised tool set — which are the two that care about
+#: prefill cost rather than routing.
+#:
+#: Set by :meth:`StreamChatUseCase._build_llm_request` from a pre-resolve
+#: through the SAME ``ModelResolverPort`` the transport uses, and registered in
+#: ``llm_stream._CHAT_CONTROL_KEYS`` so it is stripped before the wire payload
+#: is assembled (an underscore prefix alone does NOT keep a key off the wire —
+#: only the filter list does).
+_LOOPBACK_ENDPOINT_EXTRA_KEY: str = "_is_loopback_endpoint"
+
+
+def _is_loopback_base_url(base_url: str | None) -> bool:
+    """True when ``base_url``'s host is a loopback address / ``localhost``.
+
+    Same rule as ``model_resolver._is_loopback_host`` and
+    ``llm_title_generator._is_loopback_endpoint`` (the application layer cannot
+    import either adapter, so the predicate is restated here rather than
+    shared): resolve the host, accept ``localhost``, else accept any address
+    whose :mod:`ipaddress` form is loopback (covers ``127.0.0.0/8`` and
+    ``::1``).
+
+    A hostname that merely *resolves* to a loopback address (a custom hosts-file
+    alias) is NOT detected. That is the conservative direction: a false negative
+    just means the turn keeps the full cloud prompt, while a false positive
+    would silently strip tools from a genuinely remote model.
+    """
+    if not base_url:
+        return False
+    try:
+        host = (urlparse(base_url).hostname or "").strip("[]")
+    except (ValueError, AttributeError):
+        return False
+    if not host:
+        return False
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _prefers_lean_prompt(
+    model_hint: str | None, extra: dict[str, Any] | None
+) -> bool:
+    """True when this turn should use the on-device LEAN prompt + tool set.
+
+    Either the model is routed as ``local::``, or its resolved endpoint is a
+    loopback address (P4). Both mean the tokens are decoded by this machine,
+    where a 12KB system prompt plus ~19 full tool JSON schemas costs real
+    seconds of prefill before the first token appears.
+    """
+    if _is_local_model_hint(model_hint):
+        return True
+    if not isinstance(extra, dict):
+        return False
+    return bool(extra.get(_LOOPBACK_ENDPOINT_EXTRA_KEY))
 
 
 class _NoopBudgetTracker:
@@ -1451,17 +1624,6 @@ class _TurnBodyState:
     #: ``_finalize_turn`` from emitting a redundant ``empty_response``
     #: that overwrites the real diagnostic on the frontend.
     had_llm_error: bool = False
-    #: Set by ``_drain_main_stream`` when round 0 (no tool call yet) ends
-    #: with ``finish_reason == "length"`` (output-token-ceiling truncation):
-    #: holds the continuation wire (history + partial answer + nudge) that
-    #: ``_run`` should re-open round 0 with. ``None`` means no retry pending.
-    round0_truncated_retry_wire: list[dict[str, Any]] | None = None
-    #: Completion tokens spent on round-0 attempts SUPPRESSED by the
-    #: auto-continuation retry above; folded into the real completion's
-    #: usage exactly once (see the two ``round0_truncated_completion_tokens``
-    #: fold sites in ``_drain_main_stream``) so suppressed-retry spend is
-    #: never silently dropped from billing/counters.
-    round0_truncated_completion_tokens: int = 0
     #: Mid-turn user injections (V2 enhancement) folded into THIS turn via the
     #: inject button, in arrival order. Each entry is the minted ``role:user``
     #: :class:`Message` plus the 0-based agentic ``round_no`` it landed before.
@@ -1657,13 +1819,6 @@ class StreamChatUseCase:
         system_prompt_builder: SystemPromptBuilderPort | None = None,
         context_compressor: ContextCompressionPort | None = None,
         prompt_snapshot_store: PromptSnapshotStorePort | None = None,
-        # ---- Authoritative model context-window resolver ----
-        # Replaces the static family-table guess (``get_context_limit``)
-        # with the model's REAL configured context length (cloud catalog /
-        # local model metadata) when wired. ``None`` (legacy / unit stubs)
-        # falls back to the static table everywhere, byte-for-byte the
-        # prior behaviour.
-        context_windows: ModelContextWindowPort | None = None,
         # ---- Sub-agent event stream port (sub-agent-side execution) ----
         # The adapter that actually RUNS a sub-agent (``AgentToolHandler``).
         # The parent turn no longer drains it: an ``agent`` tool_call spawns
@@ -1943,6 +2098,74 @@ class StreamChatUseCase:
         # provides it.  ``None`` (unit stubs) keeps the direct repository
         # call, byte-for-byte the pre-queue behaviour.
         conversation_write_queue: "Any | None" = None,
+        # ---- P1 (slow on-device decoding): inter-frame stall budget ----
+        # Max wall-clock gap between two MEANINGFUL LLM stream frames before
+        # the turn is treated as a wedged upstream and stopped. Was a
+        # hardcoded ``600.0``; now injected so an operator can match it to the
+        # device's real decode rate (``[chat] frame_stall_budget_seconds`` /
+        # ``QAI_CHAT__FRAME_STALL_BUDGET_SECONDS``). Production DI passes
+        # ``ChatSettings.frame_stall_budget_seconds`` (default 1800.0); the
+        # constructor default stays at the historical ``600.0`` so any direct
+        # construction (unit stubs / legacy callers) is byte-for-byte
+        # unchanged. ``0`` disables the watchdog.
+        #
+        # Deliberately NOT auto-derived from a measured decode rate: telling
+        # "slow but alive" apart from "wedged" needs to model prefill vs
+        # steady-state decode vs first-token latency separately, and a wrong
+        # estimate either cancels healthy turns or never fires at all. A
+        # value an operator sets per device is both simpler and predictable.
+        frame_stall_budget_seconds: float = 600.0,
+        # ---- P2c: real per-model context window resolver -------------------
+        # Async ``model_hint -> context window (tokens) | None``. When wired,
+        # :meth:`_resolve_context_limit` prefers it over the name-keyed family
+        # table ``get_context_limit``, so a model whose REAL window the user
+        # configured (in the models directory or the cloud-models catalog) is
+        # sized correctly instead of being guessed from its name.
+        #
+        # Why this matters (and why it is not cosmetic): the compaction trigger
+        # is ``0.80 x window``. Guessing 131072 for a model whose real window
+        # is 32768 puts the trigger at 104857 tokens — unreachable — so the
+        # prompt grows until the REAL window is full and the last tool call is
+        # truncated by ``finish_reason=length``. That is a 200 response with
+        # broken content, so no error-recovery path is involved; the only fix
+        # is to know the true window.
+        #
+        # ``None`` (unit stubs / legacy callers) keeps the pure family-table
+        # behaviour, byte-for-byte. Wired in production by
+        # ``apps/api/_context_window_bridge.make_context_window_resolver``
+        # (which also reads the on-device GGUF/MNN artefact window, so an
+        # unregistered local model is covered too).
+        context_window_resolver: (
+            Callable[[str | None], Awaitable[int | None]] | None
+        ) = None,
+        # ---- P4: loopback-endpoint detection (lean prompt + lean tool set) --
+        # The SAME ``ModelResolverPort`` instance the transport uses. When
+        # wired, :meth:`_build_llm_request` resolves the turn's model once up
+        # front purely to learn whether its ``base_url`` is a loopback address,
+        # and records the answer on ``extra["_is_loopback_endpoint"]``.
+        #
+        # Why it is needed: the lean on-device prompt / tool set is currently
+        # gated on the ``local::`` ROUTE prefix, but a model registered as a
+        # provider endpoint pointing at 127.0.0.1 is physically on-device
+        # WITHOUT that prefix. Such a turn was getting the full cloud treatment
+        # (~12KB system prompt, ~19 tool schemas, ~73KB payload), and prefilling
+        # that on a slow local engine is pure first-token latency.
+        #
+        # ``ResolvedModel.is_local`` cannot be reused for this: it is forced
+        # ``False`` for provider-routed models because it ALSO decides whether
+        # the transport parses inline XML tool calls, and it is computed in the
+        # routing layer — after the prompt and tool set have been assembled.
+        #
+        # ``None`` (unit stubs / legacy callers) degrades to the plain prefix
+        # check, byte-for-byte the prior behaviour.
+        model_resolver: "ModelResolverPort | None" = None,
+        # ---- P0c: how long a silent-but-live turn still counts as active ----
+        # Must be >= the transport's content-stall budget (the app's own bound on
+        # legitimate silence), because a turn emits NO frames while it prefills.
+        # DI passes ``ChatSettings.llm_content_stall_budget_seconds`` so the two
+        # cannot drift apart; see :data:`_TURN_ACTIVE_STALE_SECONDS` for the
+        # regression that a too-small value caused.
+        turn_active_stale_seconds: float = _TURN_ACTIVE_STALE_SECONDS,
     ) -> None:
         self._conversations = conversations
         self._tabs = tabs
@@ -1978,7 +2201,6 @@ class StreamChatUseCase:
         self._tool_result_truncator = tool_result_truncator
         self._system_prompt_builder = system_prompt_builder
         self._context_compressor = context_compressor
-        self._context_windows = context_windows
         # Session-level compaction checkpoints — now owned by a dedicated,
         # conversation-agnostic ``CompactionCheckpointEngine`` (extracted from
         # the former inline ``_compress_via_checkpoint`` so the SAME algorithm
@@ -1997,6 +2219,18 @@ class StreamChatUseCase:
         # CCD-5: when ``compaction_checkpoint_store`` is wired the engine's dict
         # is a WRITE-THROUGH fast path over durable sqlite (survives restart);
         # ``None`` keeps it pure-memory (prior behaviour, lost on restart).
+        # ---- Background-work coordination (see is_main_turn_active) --------
+        # Declared BEFORE the compaction engine below, which is handed
+        # ``self.is_main_turn_active`` as a probe. The bound method is only
+        # invoked later (from a background task), but initialising the state it
+        # reads up-front keeps that independent of construction order.
+        self._active_main_turns = 0
+        self._last_turn_activity_ts = 0.0
+        # Never below the module default: a caller passing something small would
+        # re-introduce the "healthy prefill declared dead" regression.
+        self._turn_active_stale_s = max(
+            _TURN_ACTIVE_STALE_SECONDS, float(turn_active_stale_seconds)
+        )
         self._compaction_engine = CompactionCheckpointEngine(
             compressor=context_compressor,
             ratio_provider=compaction_ratio_provider,
@@ -2007,6 +2241,10 @@ class StreamChatUseCase:
             journal=journal,
             refresh_digest_uc=refresh_digest_uc,
             summarize_turn_prefix_uc=summarize_turn_prefix_uc,
+            # Background summaries yield to a live main turn instead of racing
+            # it for the on-device engine's KV cache (see
+            # :meth:`is_main_turn_active` for the measured failure).
+            main_turn_active_probe=self.is_main_turn_active,
         )
         # W1-F: optional prompt snapshot store for recording the full
         # messages list sent to the LLM (debug capture path).
@@ -2037,7 +2275,33 @@ class StreamChatUseCase:
         # instead of pinned "generating" forever when the user does not Stop).
         # Mirrors the sub-agent fan-out merge budget. A healthy stream delivers
         # frames far more often; this is only a failsafe ceiling.
-        self._frame_stall_budget_s = 600.0
+        #
+        # P1: injected (was a hardcoded ``600.0``) so slow on-device endpoints
+        # can be given a budget matching their real decode rate. Negative
+        # values are clamped to ``0`` (= watchdog disabled), which is how
+        # ``_abortable_frames`` already reads "no ceiling".
+        self._frame_stall_budget_s = max(0.0, float(frame_stall_budget_seconds))
+        # ---- P2c: real per-model context window ----------------------------
+        # The resolver (``None`` ⇒ family-table-only, prior behaviour) plus a
+        # tiny sync-readable cache of what it last returned per model_hint.
+        #
+        # The cache exists because some readers cannot await: the per-round
+        # context-usage BADGE is built inside a sync closure. Rather than make
+        # that path async (and change several call chains), it reads whatever
+        # the async resolver most recently learned for this model and falls
+        # back to the family table on a cold cache. Worst case the badge shows
+        # the guessed window for the first round of a fresh process — the
+        # compaction maths, which is what actually matters, always awaits the
+        # resolver directly.
+        self._context_window_resolver = context_window_resolver
+        self._resolved_context_limits: dict[str, int] = {}
+        # ---- P4: loopback-endpoint detection -------------------------------
+        # Resolver used ONLY to classify the endpoint as loopback-or-not (see
+        # the constructor param). Results are cached per model_hint because
+        # ``resolve()`` may read provider config / secrets and this runs on
+        # every round of every turn.
+        self._model_resolver = model_resolver
+        self._loopback_endpoint_cache: dict[str, bool] = {}
         # Operator hooks (migrated from ai_coding agent harness); ``None``
         # disables — fire() helper short-circuits so zero cost.
         self._hook_engine = hook_engine
@@ -2154,7 +2418,6 @@ class StreamChatUseCase:
         self._kernel = SingleAgentTurnKernel(
             compressor=self._context_compressor,
             truncator=self._tool_result_truncator,
-            context_windows=self._context_windows,
         )
 
     @property
@@ -2861,7 +3124,6 @@ class StreamChatUseCase:
         request: "StreamChatInput",
         turn_started_ms: int,
         state: "_TurnBodyState",
-        allow_round0_truncation_retry: bool = True,
     ) -> AsyncIterator[StreamFrame]:
         """Drain the initial LLM stream; yield frames; mutate ``state``.
 
@@ -2940,67 +3202,6 @@ class StreamChatUseCase:
             # ``_extract_usage`` set (zeroed on a cache-hit turn). The DISPLAY
             # fields live ONLY in the published/persisted frame payload. §3.1.
             if frame.frame_type is StreamFrameType.END:
-                # Auto-continuation on round-0 plain-text output-length
-                # truncation. The adapter (llm_stream.py /
-                # local_model_stream.py) tags this END's payload with
-                # ``truncated: True`` when ``finish_reason == "length"``
-                # fired on a plain-text round (no tool call). When that
-                # fires and round 0 has issued NO tool call yet, SUPPRESS
-                # this END entirely (never re-stamped, never published,
-                # never yielded) and stash a continuation wire on
-                # ``state.round0_truncated_retry_wire`` instead — the
-                # caller (``_run``) re-opens round 0 with it, invisible to
-                # the user beyond the per-attempt notice chunk the adapter
-                # already emitted. ``allow_round0_truncation_retry`` is
-                # False once the caller's own retry budget is exhausted,
-                # so the final attempt always completes normally (this
-                # branch is skipped) instead of being suppressed with
-                # nothing to replace it.
-                if (
-                    allow_round0_truncation_retry
-                    and not _self_contained
-                    and not state.tc_frames
-                    and bool(frame.payload.get("truncated"))
-                ):
-                    _usage = frame.payload.get("usage") or {}
-                    _completion_tokens = (
-                        _usage.get("completion_tokens", 0)
-                        if isinstance(_usage, dict)
-                        else 0
-                    )
-                    if isinstance(_completion_tokens, int):
-                        # Sum this SUPPRESSED attempt's real completion spend
-                        # so the turn's final usage does not silently
-                        # under-bill the tokens burned on truncated attempts.
-                        state.round0_truncated_completion_tokens += (
-                            _completion_tokens
-                        )
-                    _limit_str = (
-                        f"{_completion_tokens}" if _completion_tokens else "max_tokens"
-                    )
-                    nudge = (
-                        f"[SYSTEM] Your previous response was truncated at "
-                        f"{_limit_str} tokens (the per-response output limit). "
-                        f"Please continue from where you left off. Keep each "
-                        f"response under {_limit_str} tokens — if you need more "
-                        f"space, split across multiple tool calls or responses."
-                    )
-                    retry_wire = self._build_base_wire_messages(
-                        conv=conv, request=request, compressed_history=None,
-                    )
-                    _partial_text = "".join(state.assistant_text_parts)
-                    if _partial_text.strip():
-                        retry_wire.append(
-                            {"role": "assistant", "content": _partial_text}
-                        )
-                    retry_wire.append({"role": "user", "content": nudge})
-                    state.round0_truncated_retry_wire = retry_wire
-                    _log.warning(
-                        "chat.round0_finish_reason_length_auto_retry",
-                        conversation_id=conv.id.value,
-                        text_len=len(_partial_text),
-                    )
-                    break
                 _pub_u = frame.payload.get("usage")
                 if isinstance(_pub_u, dict):
                     _pub_end_usage = self._append_display_usage_fields(
@@ -3068,20 +3269,6 @@ class StreamChatUseCase:
                         if not k.startswith("last_round_")
                         and not k.startswith("first_round_")
                     }
-                    if state.round0_truncated_completion_tokens:
-                        # Fold in the completion tokens spent on the
-                        # SUPPRESSED round-0 truncated attempt(s) this turn,
-                        # exactly once, so the real completion is never
-                        # under-billed.
-                        _u["completion_tokens"] = (
-                            _u.get("completion_tokens", 0)
-                            + state.round0_truncated_completion_tokens
-                        )
-                        _u["total_tokens"] = (
-                            _u.get("total_tokens", 0)
-                            + state.round0_truncated_completion_tokens
-                        )
-                        state.round0_truncated_completion_tokens = 0
                     state.turn_usage = _u
                     # Single-round (non-agentic) turn: the only round IS the
                     # last round, so last_round_usage == turn_usage. The
@@ -3291,20 +3478,6 @@ class StreamChatUseCase:
                     # V1 useChat.js:2351-2356 accumulation parity).
                     _init_u = tail_frame.payload.get("usage")
                     if isinstance(_init_u, dict):
-                        if state.round0_truncated_completion_tokens:
-                            # Fold in tokens spent on SUPPRESSED round-0
-                            # truncated attempt(s), exactly once — mirrors
-                            # the single-round fold above; this is the
-                            # tool-call-on-round-0 sibling path.
-                            _init_u["completion_tokens"] = (
-                                _init_u.get("completion_tokens", 0)
-                                + state.round0_truncated_completion_tokens
-                            )
-                            _init_u["total_tokens"] = (
-                                _init_u.get("total_tokens", 0)
-                                + state.round0_truncated_completion_tokens
-                            )
-                            state.round0_truncated_completion_tokens = 0
                         state.turn_usage = _init_u
                         # Round 0's own usage — its prompt_tokens is the
                         # round-0 wire prompt that matches ``ttft_ms`` (round-0
@@ -3827,48 +4000,99 @@ class StreamChatUseCase:
             requested_tool_mode=requested_tool_mode,
         )
 
+    # ------------------------------------------------------------------
+    # Background-work coordination
+    # ------------------------------------------------------------------
+    def is_main_turn_active(self) -> bool:
+        """Whether a main turn is currently streaming (for background work).
+
+        The background compaction summaries (session digest / turn-prefix) issue
+        their OWN LLM request. On a loopback on-device engine that request does
+        not merely compete for throughput — it competes for the KV cache, and
+        losing that race is fatal rather than slow. Measured on the Glymur box,
+        whose llama.cpp runs ``-c 32768`` with ``kv_unified=true`` and 4 slots,
+        so all slots share ONE 32768-token pool::
+
+            task 9009  12683 tokens   (main turn, round 12)
+            task 9010  14088 tokens   (session digest)
+            task 9011   6232 tokens   (turn-prefix summary)
+            ---------  -----
+            sum        33003  >  32768   -> over by 235
+
+        and the engine's first failure was, exactly, ``failed to find a memory
+        slot for batch of size 235``. All three requests then died with
+        ``Context size has been exceeded``, which reaches the client as an HTTP
+        200 with an empty body — surfaced to the user as ``empty_response``.
+
+        So the summaries must YIELD to the main turn. This direction is the safe
+        one: a background summary is a coroutine that owns its whole lifetime, so
+        it can wait and give up on its own terms. (The inverse — making the main
+        turn hold a lock — was tried and deadlocked, because the main turn's
+        stream is an async generator that gets abandoned mid-iteration; see the
+        REVERTED notes in ``local_model_stream`` / ``llm_stream``.)
+
+        Returns ``False`` once the mark goes stale (see
+        :data:`_TURN_ACTIVE_STALE_SECONDS`) so a leaked counter can only ever
+        degrade to the old concurrent behaviour, never starve background work
+        forever.
+        """
+        if self._active_main_turns <= 0:
+            return False
+        elapsed = time.monotonic() - self._last_turn_activity_ts
+        if elapsed >= self._turn_active_stale_s:
+            _log.debug(
+                "chat.turn_active_mark_stale",
+                active_turns=self._active_main_turns,
+                seconds_since_activity=round(elapsed, 1),
+            )
+            return False
+        return True
+
+    def _enter_main_turn(self) -> None:
+        self._active_main_turns += 1
+        self._last_turn_activity_ts = time.monotonic()
+
+    def _exit_main_turn(self) -> None:
+        # Floor at 0: a leaked increment must not make this go negative and
+        # permanently report "idle" for a real turn.
+        self._active_main_turns = max(0, self._active_main_turns - 1)
+
+    def _note_turn_activity(self) -> None:
+        self._last_turn_activity_ts = time.monotonic()
+
     async def _run(
         self,
         request: StreamChatInput,
     ) -> AsyncIterator[StreamFrame]:
-        # Resolve the model's real context window ONCE per turn and thread
-        # it through ``request.extra["_context_limit"]`` so every nested
-        # helper (``_build_base_wire_messages``, ``_build_llm_request``,
-        # ``_compress_via_checkpoint``, ``_recover_from_context_overflow``,
-        # ``_run_followup_loop``) reads the SAME number the compaction-
-        # trigger gate and the status badge agree on, instead of each
-        # calling the static family-table guess independently.
-        #
-        # Only engaged when a concrete ``model_hint`` is present: an empty
-        # hint is a pre-existing "no model selected" shape this turn always
-        # tolerated (falls back to the static table's ``__unknown__``
-        # bucket), and demanding catalog metadata for it would be a new,
-        # unrelated hard failure mode.
-        model_hint = request.model_hint or ""
-        if model_hint:
-            provider = None
-            tool_params = (request.extra or {}).get("tool_params")
-            if isinstance(tool_params, dict):
-                raw_provider = tool_params.get("selected_model_provider")
-                provider = raw_provider if isinstance(raw_provider, str) else None
-            if self._context_windows is None:
-                context_limit = get_context_limit(model_hint)
-            else:
-                try:
-                    context_limit = await self._context_windows.context_window(
-                        model_hint, provider,
-                    )
-                except MissingModelContextLengthError as exc:
-                    yield StreamFrame.error(
-                        frame_id="context-window-error",
-                        sequence=0,
-                        code=exc.code,
-                        message=str(exc),
-                    )
-                    return
-            if request.extra is None:
-                object.__setattr__(request, "extra", {})
-            request.extra["_context_limit"] = context_limit
+        """Turn body, wrapped so background work knows a turn is in flight.
+
+        The ``finally`` is best-effort by design — if this generator is
+        abandoned it may never run, which is exactly why
+        :meth:`is_main_turn_active` also applies a staleness bound.
+        """
+        self._enter_main_turn()
+        try:
+            # The main turn takes PRIORITY over background summaries. The engine's
+            # own yielding covers "a summary is kicked while a turn runs"; this
+            # covers the reverse — a summary already streaming when this turn
+            # starts. Left alone they collide on the shared KV pool and BOTH die.
+            # Bounded, and best-effort: never fail a turn over this.
+            try:
+                await self._compaction_engine.stop_background_summaries(
+                    reason="main_turn_started",
+                )
+            except Exception as exc:  # noqa: BLE001
+                _log.debug("chat.background_stop_failed", error=str(exc))
+            async for frame in self._run_turn(request):
+                self._note_turn_activity()
+                yield frame
+        finally:
+            self._exit_main_turn()
+
+    async def _run_turn(
+        self,
+        request: StreamChatInput,
+    ) -> AsyncIterator[StreamFrame]:
         conv, tab, user_msg, handle = await self._prepare_turn(request)
 
         # M8: stash the request (model_hint + user_message + extra) on this
@@ -4149,59 +4373,31 @@ class StreamChatUseCase:
                 state.aborted = True
                 state.abort_reason = handle.reason or "user_requested"
             else:
-                # Auto-continuation on round-0 output-length truncation
-                # (see ``_TurnBodyState.round0_truncated_retry_wire``):
-                # round 0 may need to be re-opened with a continuation
-                # wire when the model hits its per-response output
-                # ceiling before issuing a tool call. Bounded by
-                # ``_MAX_CONSECUTIVE_TRUNCATION_RETRIES`` via
-                # ``allow_round0_truncation_retry`` — once the budget is
-                # exhausted, ``_drain_main_stream`` stops suppressing the
-                # truncated END and this loop exits normally on its next
-                # (and final) pass.
-                _round0_retry_count = 0
-                while True:
-                    _allow_round0_retry = (
-                        _round0_retry_count < _MAX_CONSECUTIVE_TRUNCATION_RETRIES
-                    )
-                    stream_frames = self._open_initial_stream(
-                        conv=conv, tab=tab, request=request,
-                        round_request_ids=state.round_request_ids,
-                        handle=handle,
-                    )
-                    # ``stream_frames`` is an AsyncIterator already drained one
-                    # frame ahead by ``_open_initial_stream`` when retry policy is
-                    # wired; otherwise it is the raw LLM iterator.  The whole
-                    # body-drain (CHUNK accumulation / END usage / sub-agent fold /
-                    # TOOL_CALL inline execution + follow-up loop) lives in
-                    # :meth:`_drain_main_stream`, which mutates ``state`` in place.
-                    # ``_drain_main_stream`` itself now also races the FIRST-frame
-                    # wait against the abort handle so a Stop that lands WHILE we
-                    # are blocked awaiting the first token is honoured promptly
-                    # (not only after a frame finally arrives).
-                    async for frame in self._drain_main_stream(
-                        stream_frames=stream_frames,
-                        conv=conv,
-                        tab=tab,
-                        handle=handle,
-                        request=request,
-                        turn_started_ms=_turn_started_ms,
-                        state=state,
-                        allow_round0_truncation_retry=_allow_round0_retry,
-                    ):
-                        yield frame
-                    if state.round0_truncated_retry_wire is None:
-                        break
-                    _round0_retry_count += 1
-                    if handle.is_set():
-                        state.aborted = True
-                        state.abort_reason = handle.reason or "user_requested"
-                        state.round0_truncated_retry_wire = None
-                        break
-                    if not isinstance(request.extra, dict):
-                        request.extra = {}
-                    request.extra["messages"] = state.round0_truncated_retry_wire
-                    state.round0_truncated_retry_wire = None
+                stream_frames = self._open_initial_stream(
+                    conv=conv, tab=tab, request=request,
+                    round_request_ids=state.round_request_ids,
+                    handle=handle,
+                )
+                # ``stream_frames`` is an AsyncIterator already drained one
+                # frame ahead by ``_open_initial_stream`` when retry policy is
+                # wired; otherwise it is the raw LLM iterator.  The whole
+                # body-drain (CHUNK accumulation / END usage / sub-agent fold /
+                # TOOL_CALL inline execution + follow-up loop) lives in
+                # :meth:`_drain_main_stream`, which mutates ``state`` in place.
+                # ``_drain_main_stream`` itself now also races the FIRST-frame
+                # wait against the abort handle so a Stop that lands WHILE we
+                # are blocked awaiting the first token is honoured promptly
+                # (not only after a frame finally arrives).
+                async for frame in self._drain_main_stream(
+                    stream_frames=stream_frames,
+                    conv=conv,
+                    tab=tab,
+                    handle=handle,
+                    request=request,
+                    turn_started_ms=_turn_started_ms,
+                    state=state,
+                ):
+                    yield frame
                 # ── The turn's prompt-cache capability verdict ─────────────
                 # U1 gate completeness: ``_on_round_end`` (the only other
                 # observation site) fires for FOLLOW-UP rounds only, and the
@@ -7913,12 +8109,9 @@ class StreamChatUseCase:
         if compressed_history is not None:
             # Explicit override (synthetic-retry path) — used as-is, bypassing
             # the session compaction checkpoint (the synthetic nudge already
-            # carries the history it wants the next round to send). No
-            # compacted head on THIS wire, so the injector falls back to the
-            # front of the wire (see ``_inject_compaction_prefix_blocks``).
+            # carries the history it wants the next round to send).
             history = compressed_history
             messages = _rebuild_history_wire_messages(history)
-            _ckpt_head_len: int | None = None
         else:
             # No explicit override: consult the session compaction checkpoint
             # (dual-track history). When present, the base wire is the
@@ -7929,12 +8122,6 @@ class StreamChatUseCase:
             ckpt = self._compaction_checkpoints.get(self._conv_key(conv))
             if ckpt is not None:
                 messages = self._assemble_history_wire(conv=conv, request=request)
-                _head = ckpt.compacted_wire
-                _ckpt_head_len = (
-                    len(_head)
-                    if _head and messages[: len(_head)] == list(_head)
-                    else 0
-                )
             else:
                 history = _drop_trailing_current_user(
                     tuple(conv.messages), current=request.user_message
@@ -7948,7 +8135,6 @@ class StreamChatUseCase:
                 # wire shape; the adapter's sanitiser drops any orphaned
                 # pairing.
                 messages = _rebuild_history_wire_messages(history)
-                _ckpt_head_len = None
 
         # Current user prompt (mirrors ``_build_llm_request``'s single-list
         # semantics: ``history`` excludes the trailing current-user turn,
@@ -7968,19 +8154,14 @@ class StreamChatUseCase:
         # re-deciding (the reported infinite loop). Folding the orphan into
         # adjacent assistant text keeps the wire valid so nothing is dropped
         # round after round. Clean histories are byte-for-byte unaffected.
-        # P1.d/P2/P3 (§6/§7.1): inject the checkpoint's ``[Session Digest]``,
-        # ``[References Ledger]`` and ``[Turn Prefix Summary]`` blocks right
-        # after the compacted head (``_ckpt_head_len``). No-op when there is
-        # no checkpoint / the fields are empty.
-        self._inject_compaction_prefix_blocks(
-            messages,
-            conv=conv,
-            head_len=_ckpt_head_len,
-            context_limit=int(
-                (request.extra or {}).get("_context_limit")
-                or get_context_limit(request.model_hint or ""),
-            ),
-        )
+        # P1.d/P2 (§6): inject the checkpoint's ``[Session Digest]`` (P2) and
+        # ``[References Ledger]`` (P1.d) blocks as ``role: user`` messages
+        # immediately BEFORE the trailing current-user turn. Digest first
+        # (higher-level context), ledger second (concrete references) — the
+        # order matters because both are prepended one at a time via
+        # ``insert(-1, ...)`` so the LAST inserted lands NEAREST the user.
+        # No-op when there is no checkpoint / the fields are empty.
+        self._inject_compaction_prefix_blocks(messages, conv=conv)
         return _repair_orphan_tool_messages(messages)
 
     def _inject_compaction_prefix_blocks(
@@ -7988,142 +8169,63 @@ class StreamChatUseCase:
         messages: list[dict[str, Any]],
         *,
         conv: Any,
-        head_len: int | None = None,
-        context_limit: int,
     ) -> None:
         """Insert the checkpoint's digest + reference-ledger prefix blocks.
 
-        Three ``role: user`` messages are inserted immediately AFTER the
-        ``compacted_wire`` tail — that is, at index ``len(ckpt.compacted_wire)``
-        — so they sit between the compacted head and the increment history:
+        Two ``role: user`` messages inserted immediately BEFORE the trailing
+        current-user turn (``messages.insert(-1, ...)``):
 
-        ``[compacted_wire …][Session Digest][References Ledger]``
-        ``[Turn Prefix Summary …][increment …][user_turn]``
-
-        Placing the blocks here rather than at ``insert(-1, …)`` (just before
-        the user turn) fixes two problems:
-
-        * **Semantic correctness** — the digest describes the *compacted*
-          head, so it belongs immediately after that head, not after N new
-          increment turns that arrived while the background LLM summary was
-          running.
-        * **Cache stability** — the insertion index is now
-          ``len(ckpt.compacted_wire)``, which is constant for the lifetime of
-          a checkpoint. An index tied to ``len(messages) - 1`` instead grows
-          with every new increment message and misses the provider cache on
-          every turn after a delayed digest write.
-
-        Block order (oldest → newest, left → right in the final wire):
-
-        1. ``[Session Digest]`` (P2, §6) — structured Markdown summary of the
-           compacted head, written asynchronously by
-           :class:`RefreshDigestUseCase`. Populated ONLY when
+        1. ``[Session Digest]`` (P2, §6) — a structured Markdown summary of
+           the compacted head, written asynchronously after each compaction
+           by :class:`RefreshDigestUseCase`. Populated ONLY when
            ``ckpt.digest_text`` is non-empty (the FIRST compaction on a fresh
            conversation always lands ``digest_text=None`` because the refresh
            is fire-and-forget; the digest appears on the NEXT turn).
 
         2. ``[References Ledger]`` (P1.d) — the checkpoint's rendered
            reference-ledger block (files / urls / execs the model touched
-           inside the compacted head). Populated when
-           ``ckpt.reference_ledger`` carries at least one entry.
+           inside the compacted head). Populated when ``ckpt.reference_ledger``
+           carries at least one entry.
 
-        3. ``[Turn Prefix Summary]`` (P3, §7.1) — one block per retained
-           turn-prefix summary, oldest first (matching the FIFO storage order
-           in :func:`append_turn_prefix_summary`).
+        Insert order matters: both are inserted with ``insert(-1, ...)`` so
+        the LAST inserted lands NEAREST the user turn. We insert the digest
+        FIRST and the ledger SECOND so the FINAL wire has ``[Session Digest]``
+        BEFORE ``[References Ledger]`` — higher-level context first, concrete
+        references closer to the user prompt.
 
-        Byte-for-byte compatibility (§8): a conv without a checkpoint OR with
-        all three fields empty produces an identical wire — the method
-        returns without touching ``messages`` in both no-op branches — so
-        pre-P1.d / pre-P2 / pre-P3 rows are unaffected.
-
-        Edge cases:
-
-        * ``ckpt is None`` → early return (no-op).
-        * ``head_len`` is ``0`` / ``None`` (no compacted head on THIS wire —
-          an empty ``compacted_wire``, a stale-anchor full rebuild, or the
-          ``compressed_history`` override path) → ``insert_pos = 0``; all
-          blocks land at the front of the wire, which is correct and, unlike a
-          ``len(compacted_wire)`` guess, can never land in the middle of live
-          history or AFTER the trailing user turn.
-        * the resolved position would split an ``assistant{tool_calls}`` from
-          its ``role:tool`` replies → the position is walked BACK to the head
-          of that atomic group. Splicing a ``role: user`` row between an
-          opener and its replies makes
-          :func:`_repair_orphan_tool_messages` reset its open-id set at that
-          row, re-classify every following reply as an orphan, and FOLD those
-          replies into the injected block — silently deleting the
-          ``role: tool`` rows the model needs.
-
-        ``context_limit`` selects the context window used to bound each
-        persisted summary before it is re-injected (see ``_bounded`` below) —
-        the READ-SIDE ceiling must derive from the SAME model window the
-        write side budgeted against.
+        Byte-for-byte compatibility (§8): a conv without a checkpoint OR
+        with an empty digest AND empty ledger produces an identical wire —
+        the method returns without touching ``messages`` in both no-op
+        branches — so pre-P1.d / pre-P2 rows are unaffected.
         """
         if not messages:
             return
         ckpt = self._compaction_engine.get_checkpoint(self._conv_key(conv))
         if ckpt is None:
             return
-        # Insertion point: right after the compacted head, when this wire
-        # actually HAS one. ``head_len`` is supplied by the caller that built
-        # ``messages`` and knows which branch produced it; ``None`` (unknown /
-        # head-free wire) degrades to the front of the wire rather than
-        # trusting ``len(ckpt.compacted_wire)`` against an unrelated list.
-        insert_pos = int(head_len or 0)
-        # Clamp defensively: a caller-supplied length can never exceed the list
-        # it describes (a stale head_len would otherwise splice past the
-        # trailing user turn, putting system blocks AFTER the user's question).
-        insert_pos = max(0, min(insert_pos, len(messages)))
-        # Never split an atomic tool group (see the docstring's third edge
-        # case). Walk back over ``role: tool`` rows to the opener that owns
-        # them; the resulting position is still stable for the lifetime of the
-        # checkpoint because ``compacted_wire`` itself is frozen.
-        while (
-            insert_pos > 0
-            and insert_pos < len(messages)
-            and messages[insert_pos].get("role") == "tool"
-        ):
-            insert_pos -= 1
-        # Collect all blocks in final wire order (digest → ledger →
-        # turn-prefix summaries oldest→newest), then splice them in one shot
-        # so we never have to reason about reversed insertion order.
-        blocks: list[dict[str, Any]] = []
-        # Bound legacy rows using the same authoritative model window used by
-        # the writer.
-        from qai.chat.application.use_cases.refresh_digest import (
-            clamp_summary_to_budget as _clamp_summary,
-            summary_read_char_ceiling as _read_ceiling,
-        )
-
-        _ceiling = _read_ceiling(context_limit)
-
-        def _bounded(text: str) -> str:
-            # ``max_tokens=0`` collapses the budget term so ``_ceiling`` is the
-            # only limit: this bounds ALREADY-PERSISTED text, and the exact
-            # per-row ``max_tokens`` is not recoverable from the checkpoint.
-            return _clamp_summary(
-                text, max_tokens=0, hard_char_cap=_ceiling,
-            )
-
+        # Insert order (using ``insert(-1, ...)`` twice): the LAST inserted
+        # sits closest to the trailing user turn. Insert DIGEST first, then
+        # LEDGER, so the final wire reads: ... digest ... ledger ... user.
         digest_text = ckpt.digest_text
         if digest_text and digest_text.strip():
-            blocks.append(
+            messages.insert(
+                -1,
                 {
                     "role": "user",
-                    "content": (
-                        f"[Session Digest]\n{_bounded(digest_text.strip())}"
-                    ),
-                }
+                    "content": f"[Session Digest]\n{digest_text.strip()}",
+                },
             )
         if ckpt.reference_ledger is not None:
             block = ckpt.reference_ledger.render_wire_block()
             if block:
-                blocks.append({"role": "user", "content": block})
-        # P3 (§7.1): append each retained turn-prefix summary in FIFO order
-        # (oldest first — matching the tail-append storage convention so the
-        # newest summary sits closest to the increment history). Malformed /
-        # non-list payloads collapse to a silent no-op — the caller never
-        # fails a turn on a bad summary.
+                messages.insert(-1, {"role": "user", "content": block})
+        # P3 (§7.1): after the ledger, inject each retained turn-prefix
+        # summary as its own ``role: user`` message via ``insert(-1, ...)``.
+        # Insertion order (oldest to newest across the list means the NEWEST
+        # summary sits closest to the trailing user turn — matching the FIFO
+        # storage口径 in :func:`append_turn_prefix_summary`, which keeps the
+        # newest at the tail). Malformed / non-list payloads collapse to a
+        # silent no-op — the caller never fails a turn on a bad summary.
         raw_prefix = ckpt.turn_prefix_summaries_json
         if raw_prefix and raw_prefix.strip():
             try:
@@ -8136,17 +8238,16 @@ class StreamChatUseCase:
                         continue
                     summary_text = entry.get("summary_text")
                     if isinstance(summary_text, str) and summary_text.strip():
-                        blocks.append(
+                        messages.insert(
+                            -1,
                             {
                                 "role": "user",
                                 "content": (
                                     "[Turn Prefix Summary]\n"
-                                    + _bounded(summary_text.strip())
+                                    + summary_text.strip()
                                 ),
-                            }
+                            },
                         )
-        if blocks:
-            messages[insert_pos:insert_pos] = blocks
 
     @staticmethod
     def _compute_turn_prefix_at_boundary(
@@ -8308,6 +8409,54 @@ class StreamChatUseCase:
                     {"role": "user", "content": blocks}
                 )
 
+    # ------------------------------------------------------------------
+    # P4 — loopback endpoint detection
+    # ------------------------------------------------------------------
+    async def _detect_loopback_endpoint(self, model_hint: str | None) -> bool:
+        """Whether this model's resolved ``base_url`` is a loopback address.
+
+        Used only to decide the lean-prompt / lean-tool-set path (see
+        :data:`_LOOPBACK_ENDPOINT_EXTRA_KEY`). ``local::``-routed models are
+        already handled by the prefix check and short-circuit here without a
+        resolve.
+
+        Never raises: an unwired resolver, a resolve failure or an unparseable
+        URL all report ``False``, which degrades this turn to the existing
+        cloud path.
+        """
+        if self._model_resolver is None:
+            return False
+        if _is_local_model_hint(model_hint):
+            # Already covered by the prefix; do not spend a resolve.
+            return False
+        key = model_hint or ""
+        cached = self._loopback_endpoint_cache.get(key)
+        if cached is not None:
+            return cached
+        result = False
+        try:
+            resolved = await self._model_resolver.resolve(model_hint)
+            base_url = getattr(resolved, "base_url", None)
+            result = _is_loopback_base_url(base_url)
+        except Exception as exc:  # noqa: BLE001 — classification is advisory
+            _log.debug(
+                "chat.loopback_detect_failed",
+                model_hint=model_hint,
+                error=str(exc),
+            )
+            result = False
+        self._loopback_endpoint_cache[key] = result
+        if result:
+            _log.info(
+                "chat.loopback_endpoint_detected",
+                model_hint=model_hint,
+                note=(
+                    "cloud-routed but physically local — using lean system "
+                    "prompt + lean tool set to cut prefill / TTFT"
+                ),
+            )
+        return result
+
     async def _build_llm_request(
         self,
         *,
@@ -8320,6 +8469,12 @@ class StreamChatUseCase:
         extra = dict(request.extra) if request.extra else {}
         if extra_overrides:
             extra.update(extra_overrides)
+
+        # P0c: re-arm the "turn is alive" mark at every round boundary. Frames
+        # alone are not enough — a round emits none while it prefills — so
+        # without this a multi-round turn could look idle purely because its
+        # newest round has not produced a token yet.
+        self._note_turn_activity()
 
         # R12 dealign: resolve a selected code persona (id → prompt +
         # display name + groups) into ``extra`` BEFORE tool schemas are
@@ -8335,6 +8490,16 @@ class StreamChatUseCase:
         # (not the local copy built here for _build_llm_request).
         if "persona_groups" in extra and request.extra is not None:
             request.extra["persona_groups"] = extra["persona_groups"]
+
+        # P4: classify the endpoint BEFORE the two consumers below run —
+        # ``_collect_tool_schemas`` (next line) and ``_apply_system_prompt``
+        # (further down) both read this flag to choose the lean on-device path.
+        # Recorded on ``extra`` (not a local) so follow-up rounds, which reuse
+        # the same dict, keep the same classification without re-resolving.
+        if _LOOPBACK_ENDPOINT_EXTRA_KEY not in extra:
+            extra[_LOOPBACK_ENDPOINT_EXTRA_KEY] = (
+                await self._detect_loopback_endpoint(request.model_hint)
+            )
 
         self._collect_tool_schemas(extra, request=request)
 
@@ -8542,15 +8707,8 @@ class StreamChatUseCase:
         if "messages" not in extra and (
             _has_checkpoint or any(getattr(m, "tool_calls", None) for m in history)
         ):
-            _r0_head_len: int | None = None
             if _has_checkpoint:
                 rebuilt = self._assemble_history_wire(conv=conv, request=request)
-                _r0_ckpt = self._compaction_checkpoints.get(self._conv_key(conv))
-                _r0_head = _r0_ckpt.compacted_wire if _r0_ckpt is not None else None
-                if _r0_head and rebuilt[: len(_r0_head)] == list(_r0_head):
-                    _r0_head_len = len(_r0_head)
-                else:
-                    _r0_head_len = 0
             else:
                 rebuilt = _rebuild_history_wire_messages(history)
             rebuilt.append(
@@ -8559,14 +8717,6 @@ class StreamChatUseCase:
                     "content": getattr(request.user_message, "text", "") or "",
                 }
             )
-            if _has_checkpoint:
-                self._inject_compaction_prefix_blocks(
-                    rebuilt, conv=conv, head_len=_r0_head_len,
-                    context_limit=int(
-                        (request.extra or {}).get("_context_limit")
-                        or get_context_limit(request.model_hint or ""),
-                    ),
-                )
             extra["messages"] = rebuilt
 
         # Single choke point: if ANY branch above assembled an
@@ -8823,6 +8973,12 @@ class StreamChatUseCase:
 
         model_hint = getattr(request, "model_hint", None) if request else None
         is_local = _is_local_model_hint(model_hint)
+        # P4: a loopback-routed model is physically on-device even without the
+        # ``local::`` prefix, so it gets the same lean tool set. ``lean`` is a
+        # superset of ``is_local`` by construction (``_prefers_lean_prompt``
+        # returns True for the prefix too), which is why it — not ``is_local`` —
+        # is what the composition below keys on.
+        lean = _prefers_lean_prompt(model_hint, extra)
         tool_mode = extra.get("tool_mode") or extra.get("_effective_tool_mode")
 
         # Translate the main-agent / take-over composition into the SHARED
@@ -8870,16 +9026,37 @@ class StreamChatUseCase:
         if "computer" not in _disabled and not self._computer_enabled():
             _disabled = _disabled | {"computer"}
 
+        # P4: on an on-device turn, drop the heavyweight tools whose JSON
+        # schemas dominate ``payload["tools"]`` (~19 tools / ~73KB measured on a
+        # loopback turn) and keep only the 8 an agent cannot work without. See
+        # ``LOCAL_EXCLUDED_TOOLS`` for the full list and its consequences.
+        # Applied as a UNION so it composes with the take-over exclusions above
+        # rather than overwriting them.
+        if lean:
+            excluded = excluded | _LOCAL_EXCLUDED_TOOLS
+
         base = _compose_advertised_tools(
             advertised,
             tool_mode=tool_mode,
-            is_local=is_local,
+            # ``lean``, not ``is_local``: a loopback turn must also skip the
+            # CLOUD-only conditional app-builder re-add, exactly as a
+            # ``local::`` turn already did.
+            is_local=lean,
             excluded=excluded,
             inject_agent=inject_agent,
             agent_schema_factory=_agent_tool_schema,
             profile=None,
             disabled_tools=_disabled,
         )
+
+        if lean:
+            _log.info(
+                "chat.tool_schemas.lean_on_device_set",
+                model_hint=model_hint,
+                is_local_route=is_local,
+                n_tools=len(base),
+                tools=[_schema_tool_name(s) for s in base],
+            )
 
         # Tools-JSON体积压缩 (A1): edit / apply_patch are mutually exclusive on
         # the CLOUD wire. For a
@@ -8889,7 +9066,10 @@ class StreamChatUseCase:
         # LOCAL turns are untouched (the on-device path is out of scope here and
         # small models keep their stable set); ``edit`` is ALWAYS retained so a
         # detection miss can only remove apply_patch, never the primary editor.
-        if base and not is_local and not _model_hint_prefers_apply_patch(
+        # P4: keyed on ``lean`` so a loopback turn counts as on-device here too
+        # (``apply_patch`` is already gone via ``LOCAL_EXCLUDED_TOOLS``, so this
+        # is only about not treating such a turn as "cloud").
+        if base and not lean and not _model_hint_prefers_apply_patch(
             model_hint
         ):
             base = [
@@ -8898,7 +9078,11 @@ class StreamChatUseCase:
                 if _schema_tool_name(s) != "apply_patch"
             ]
 
-        if base and not is_local:
+        # P4: cloud description overrides make tool descriptions LONGER (they
+        # exist to give big cloud models more guidance). On a slow on-device
+        # endpoint that is prefill we are explicitly trying to avoid, so a lean
+        # turn keeps the terse registry descriptions.
+        if base and not lean:
             _overrides_fn = getattr(
                 self._tools, "cloud_description_overrides", None
             )
@@ -9137,7 +9321,13 @@ class StreamChatUseCase:
             return
 
         # ── V1 parity: local vs cloud dispatch (chat_handler.py:400) ──
-        if _is_local_model_hint(request.model_hint):
+        # P4: also taken when the endpoint is a loopback address (a
+        # "cloud"-routed but physically on-device model). The full
+        # RichSystemPromptBuilder prompt measured ~12KB on such a turn, and
+        # prefilling that on a slow local engine is pure first-token latency —
+        # the lean prompt lists each skill's PATH and lets the model ``read``
+        # the ones it actually needs.
+        if _prefers_lean_prompt(request.model_hint, extra):
             local_prompt = self._build_local_system_prompt(
                 extra=extra, request=request,
             )
@@ -10113,12 +10303,13 @@ class StreamChatUseCase:
             return False
 
         model_id = request.model_hint or ""
-        context_limit = int(
-            (request.extra or {}).get("_context_limit")
-            or get_context_limit(
-                (model_id or "").removeprefix("local::") or "__unknown__"
-            ),
-        )
+        # P2c: the REAL configured window, not the family-table name guess.
+        # This value sets the compaction trigger (``threshold_ratio x window``),
+        # so an over-estimate makes the trigger unreachable and the wire keeps
+        # growing until the model truncates the round
+        # (``finish_reason=length``). It is also what P2b tests to decide
+        # whether this is a "small window" that should compact earlier.
+        context_limit = await self._resolve_context_limit(model_id)
 
         # ── Conv-side inputs for the conversation-agnostic engine ──
         # Anchor for the differential attribution = the EXISTING checkpoint's
@@ -10389,6 +10580,201 @@ class StreamChatUseCase:
             message=message,
         )
 
+    # ------------------------------------------------------------------
+    # P2c — real per-model context window
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _family_context_limit(model_hint: str | None) -> int:
+        """The name-keyed family-table guess (the pre-P2c behaviour).
+
+        Kept as a single helper so the fallback used by every P2c call site is
+        provably identical to the expression it replaced.
+        """
+        return get_context_limit(
+            (model_hint or "").removeprefix("local::") or "__unknown__"
+        )
+
+    def _resolve_max_output_tokens(
+        self,
+        *,
+        extra: dict[str, Any] | None,
+        model_hint: str | None = None,
+    ) -> int:
+        """Best-effort reply budget (``max_tokens``) for the current model.
+
+        Used by the emergency-compaction valve to reserve room for the REPLY, so
+        it fires while a reply can still fit rather than after the request is
+        already doomed to ``finish_reason=length``.
+
+        Order: an explicit user-set ``max_tokens`` on ``extra`` (the ModelParams
+        panel), then the domain profile's ``max_tokens_default``, then
+        :data:`_DEFAULT_MAX_OUTPUT_TOKENS`. Never raises and always returns a
+        positive int — an over-estimate here only makes the valve fire slightly
+        earlier, which is the safe direction.
+        """
+        if isinstance(extra, dict):
+            raw = extra.get("max_tokens")
+            if isinstance(raw, int) and not isinstance(raw, bool) and raw > 0:
+                return raw
+        try:
+            from qai.chat.domain.model_profiles import get_model_profile
+
+            profile = get_model_profile(
+                (model_hint or "").removeprefix("local::") or "__unknown__"
+            )
+            default = getattr(profile, "max_tokens_default", None)
+            if isinstance(default, int) and default > 0:
+                return default
+        except Exception as exc:  # noqa: BLE001 — sizing must never fail a turn
+            _log.debug("chat.max_output_tokens.profile_failed", error=str(exc))
+        return _DEFAULT_MAX_OUTPUT_TOKENS
+
+    async def _resolve_context_limit(self, model_hint: str | None) -> int:
+        """Return the model's context window, preferring the REAL configured one.
+
+        Order: the injected :data:`_context_window_resolver` (the user's
+        configured window — the models directory's ``context_length`` / the
+        cloud-models catalog entry / the on-device artefact metadata), then the
+        name-keyed family table.
+
+        This is the single window口径 for every compaction decision, so the
+        trigger, the emergency valve and the overflow-recovery gates cannot
+        disagree with each other — or with the composer's context badge, which
+        reads the same configured value.
+
+        Never raises and never returns a non-positive value: a resolver that
+        errors, returns ``None``, or returns something implausible degrades to
+        the family table, which is exactly the pre-P2c behaviour.
+        """
+        fallback = self._family_context_limit(model_hint)
+        if self._context_window_resolver is None:
+            return fallback
+        try:
+            resolved = await self._context_window_resolver(model_hint)
+        except Exception as exc:  # noqa: BLE001 — sizing must never fail a turn
+            _log.debug(
+                "chat.context_limit.resolve_failed",
+                model_hint=model_hint,
+                error=str(exc),
+            )
+            return fallback
+        if not isinstance(resolved, int) or isinstance(resolved, bool):
+            return fallback
+        if resolved <= 0:
+            return fallback
+        # Cache for the sync readers (see ``_resolved_context_limits``).
+        self._resolved_context_limits[(model_hint or "")] = resolved
+        if resolved != fallback:
+            _log.debug(
+                "chat.context_limit.resolved_differs_from_family_table",
+                model_hint=model_hint,
+                resolved=resolved,
+                family_table_guess=fallback,
+            )
+        return resolved
+
+    def _resolve_context_limit_cached(self, model_hint: str | None) -> int:
+        """Sync counterpart of :meth:`_resolve_context_limit` (display only).
+
+        Returns the last value the async resolver produced for *model_hint*, or
+        the family-table guess when nothing has been resolved yet. Used only by
+        the per-round context-usage badge, which is built in a sync closure;
+        never used for a compaction decision.
+        """
+        cached = self._resolved_context_limits.get(model_hint or "")
+        if isinstance(cached, int) and cached > 0:
+            return cached
+        return self._family_context_limit(model_hint)
+
+    async def _run_overflow_compression_attempt(
+        self,
+        *,
+        conv: Any,
+        request: "StreamChatInput",
+        model_id: str,
+        recovery_target_ratio: float,
+    ) -> tuple[bool, int]:
+        """Run ONE recovery compaction pass; return ``(changed, tokens_after)``.
+
+        Extracted so :meth:`_recover_from_context_overflow` can escalate over a
+        bounded loop instead of repeating this block per attempt. Best-effort:
+        a raising compressor is reported as ``changed=False`` (the caller then
+        abandons rather than retrying an unchanged wire).
+
+        ``force=True`` bypasses the estimate-based trigger gate on purpose —
+        that gate is exactly what failed to fire (or fired too late) on the way
+        here, so consulting it again would no-op every attempt. The force
+        path's own no-op detection is stricter and is what protects the
+        caller's retry budget.
+        """
+        try:
+            changed = await self._compress_via_checkpoint(
+                conv=conv,
+                request=request,
+                target_ratio=_COMPRESS_TARGET_RATIO,
+                force=True,
+                target_window_ratio_override=recovery_target_ratio,
+            )
+        except Exception as exc:  # noqa: BLE001 — recovery must never raise
+            _log.warning(
+                "chat.overflow_recovery.attempt_failed",
+                reason="compression_failed",
+                error=str(exc),
+                error_type=type(exc).__name__,
+                compress_target_ratio=recovery_target_ratio,
+            )
+            changed = False
+        wire_after = self._assemble_history_wire(conv=conv, request=request)
+        tokens_after = _estimate_wire_tokens(wire_after, model_hint=model_id)
+        return changed, tokens_after
+
+    @staticmethod
+    def _next_overflow_recovery_ratio(previous_ratio: float) -> float | None:
+        """Next (strictly lower) recovery target, or ``None`` when exhausted.
+
+        The compressor is a deterministic drop-only pass, so re-running it at a
+        target that is not strictly lower reproduces the wire that was just
+        rejected. When scaling can no longer produce a strictly lower value
+        above :data:`_OVERFLOW_RECOVERY_ESCALATION_FLOOR` we return ``None`` so
+        the caller stops instead of burning an attempt on a provable no-op.
+        """
+        scaled = previous_ratio * _OVERFLOW_RECOVERY_TARGET_SCALE
+        candidate = max(_OVERFLOW_RECOVERY_ESCALATION_FLOOR, scaled)
+        if candidate >= previous_ratio:
+            return None
+        return candidate
+
+    def _maybe_append_migrate_hint(self, *, conv: Any, text: str) -> str:
+        """Append the "/compact migrate" hint when a handoff is now worthwhile.
+
+        P10 — a hard context overflow that survived every compaction attempt is
+        the strongest possible evidence that this conversation no longer fits.
+        The machinery to continue elsewhere already exists end-to-end
+        (``MigrateConversationUseCase`` builds a handoff document from the
+        session digest + reference ledger; ``/compact migrate``, the REST route
+        and the frontend CTA are all wired), but the recovery path never told the
+        user about it — the failure notices just said "context is full".
+
+        So we raise the mid-turn counter to the handoff gate's threshold and ask
+        the ENGINE whether a handoff makes sense. It still enforces the digest
+        gate, which is the part that matters: with no digest there is nothing to
+        carry over, and suggesting migration would send the user to a fresh
+        conversation with no context at all. In that case *text* is returned
+        UNCHANGED, byte-for-byte.
+
+        Never raises — a hint is cosmetic and must not turn a handled failure
+        into an unhandled one.
+        """
+        try:
+            key = self._conv_key(conv)
+            self._compaction_engine.force_consecutive_mid_turn_at_least(key, 3)
+            if not self._compaction_engine.should_suggest_handoff(key):
+                return text
+        except Exception as exc:  # noqa: BLE001 — hint is best-effort
+            _log.debug("chat.migrate_hint_probe_failed", error=str(exc))
+            return text
+        return text + _t("chat.context_recovery.migrate_hint")
+
     async def _recover_from_context_overflow(
         self,
         *,
@@ -10399,12 +10785,17 @@ class StreamChatUseCase:
     ) -> "AsyncIterator[StreamFrame]":
         """Compress harder after a provider context-window rejection.
 
-        Runs ONE recovery pass: compress the history to a strictly lower target
-        than the one that just failed, verify the reassembled wire now fits the
-        window, and report ``outcome["recovered"] = True`` when the caller may
-        retry. Yields the user-visible frames (progress banner + a system-note
-        explaining what happened) as it goes; the verdict travels via
-        ``outcome`` because an async generator cannot also return a value.
+        Runs up to :data:`_MAX_OVERFLOW_RECOVERY_ATTEMPTS` escalating recovery
+        passes: each compresses the history to a strictly lower target than the
+        one before it, and the loop stops as soon as the reassembled wire fits
+        the window (``outcome["recovered"] = True``, caller may retry). Yields
+        the user-visible frames (progress banner + a system-note explaining
+        what happened) as it goes; the verdict travels via ``outcome`` because
+        an async generator cannot also return a value.
+
+        The escalation costs no extra provider round-trips — every pass is local
+        compaction work, and the caller still issues at most ONE retry request
+        after a successful recovery.
 
         Never raises — every failure mode degrades to
         ``outcome["recovered"] = False``, which makes the caller forward the
@@ -10420,12 +10811,12 @@ class StreamChatUseCase:
         outcome["recovered"] = False
         conversation_id = getattr(getattr(conv, "id", None), "value", None)
         model_id = request.model_hint or ""
-        context_limit = int(
-            (request.extra or {}).get("_context_limit")
-            or get_context_limit(
-                (model_id or "").removeprefix("local::") or "__unknown__"
-            ),
-        )
+        # P2c: the REAL configured window. Both recovery gates below compare
+        # against it ("did compaction get us under the window?"), so a guessed
+        # window that is 4x too large would declare a still-oversized wire
+        # "within the context window" and burn the retry on a request the
+        # provider is certain to reject again.
+        context_limit = await self._resolve_context_limit(model_id)
         # Size of the wire the provider just rejected (bytes/4口径 — the same
         # estimator the compaction trigger and the badge use).
         wire_before = self._assemble_history_wire(conv=conv, request=request)
@@ -10451,7 +10842,10 @@ class StreamChatUseCase:
                 context_limit=context_limit,
             )
             yield self._recovery_notice_frame(
-                text=_t("chat.context_recovery.failed_no_room"),
+                text=self._maybe_append_migrate_hint(
+                    conv=conv,
+                    text=_t("chat.context_recovery.failed_no_room"),
+                ),
                 kind="context_recovery_failed",
             )
             return
@@ -10462,102 +10856,122 @@ class StreamChatUseCase:
         recovery_target_ratio = _overflow_recovery_target_ratio(
             normal_target_ratio
         )
-        _log.info(
-            "chat.overflow_recovery.decided",
-            conversation_id=conversation_id,
-            compress_target_ratio=recovery_target_ratio,
-            normal_target_ratio=normal_target_ratio,
-            target_tokens=int(context_limit * recovery_target_ratio),
-            attempt_number=1,
-            # Explicit, and deliberately constant: a prompt_too_long is a
-            # first-frame rejection, so the failed turn produced NO assistant
-            # text and NO tool round-trip to discard, and the user's own message
-            # is never an input to compaction. Nothing is dropped.
-            dropped_content="none",
-        )
         yield self._recovery_progress_frame(
             state="compressing",
             message=_t("chat.context_recovery.compressing"),
         )
-        try:
-            checkpoint_created = await self._compress_via_checkpoint(
-                conv=conv,
-                request=request,
-                target_ratio=_COMPRESS_TARGET_RATIO,
-                # Bypass the threshold gate: the estimate-based trigger is
-                # exactly what failed to fire (or fired too late) on the way
-                # here, so gating the recovery on it again would no-op. The
-                # force path's own no-op detection is STRICTER than the
-                # threshold path's and is what protects the retry budget below.
-                force=True,
-                target_window_ratio_override=recovery_target_ratio,
-            )
-        except Exception as exc:  # noqa: BLE001 — recovery must never raise
-            _log.warning(
-                "chat.overflow_recovery.abandoned",
+        # ── P2a: up to ``_MAX_OVERFLOW_RECOVERY_ATTEMPTS`` escalating passes ──
+        # One pass was not enough in practice: on a small window the first
+        # recovery target can still leave the wire above the window (the
+        # protected current turn plus the fixed runtime overhead dominate), and
+        # abandoning there fails a task that a harder pass would have saved.
+        # Each iteration aims strictly lower than the last.
+        #
+        # The two original give-up conditions are preserved EXACTLY, just moved
+        # into the loop:
+        #   * a pass that changes NOTHING abandons immediately (retrying would
+        #     re-send a byte-identical wire) — on attempt 1 this is the
+        #     "no room at all" case, on later attempts it means the compressor
+        #     has hit bottom;
+        #   * a wire still at/over the window after the last pass abandons.
+        # This costs no extra LLM requests: every iteration is local compaction
+        # work, and the caller still retries the provider at most once.
+        tokens_after = tokens_before
+        attempt = 0
+        recovered = False
+        exhausted_reason = "still_over_window"
+        while attempt < _MAX_OVERFLOW_RECOVERY_ATTEMPTS:
+            attempt += 1
+            _log.info(
+                "chat.overflow_recovery.decided",
                 conversation_id=conversation_id,
-                reason="compression_failed",
-                error=str(exc),
-                error_type=type(exc).__name__,
-                wire_estimate_tokens=tokens_before,
-                context_limit=context_limit,
+                compress_target_ratio=recovery_target_ratio,
+                normal_target_ratio=normal_target_ratio,
+                target_tokens=int(context_limit * recovery_target_ratio),
+                attempt_number=attempt,
+                max_attempts=_MAX_OVERFLOW_RECOVERY_ATTEMPTS,
+                # Explicit, and deliberately constant: a prompt_too_long is a
+                # first-frame rejection, so the failed turn produced NO
+                # assistant text and NO tool round-trip to discard, and the
+                # user's own message is never an input to compaction. Nothing
+                # is dropped.
+                dropped_content="none",
             )
-            checkpoint_created = False
-        wire_after = self._assemble_history_wire(conv=conv, request=request)
-        tokens_after = _estimate_wire_tokens(wire_after, model_hint=model_id)
-        _log.info(
-            "chat.overflow_recovery.compressed",
-            conversation_id=conversation_id,
-            wire_tokens_before=tokens_before,
-            wire_tokens_after=tokens_after,
-            tokens_reclaimed=tokens_before - tokens_after,
-            checkpoint_created=checkpoint_created,
-            messages_before=len(wire_before),
-            messages_after=len(wire_after),
-        )
+            changed, tokens_after = (
+                await self._run_overflow_compression_attempt(
+                    conv=conv,
+                    request=request,
+                    model_id=model_id,
+                    recovery_target_ratio=recovery_target_ratio,
+                )
+            )
+            _log.info(
+                "chat.overflow_recovery.compressed",
+                conversation_id=conversation_id,
+                attempt_number=attempt,
+                wire_tokens_before=tokens_before,
+                wire_tokens_after=tokens_after,
+                tokens_reclaimed=tokens_before - tokens_after,
+                checkpoint_created=changed,
+            )
+            if not changed:
+                # Gate 1: nothing moved. Retrying the provider would re-send an
+                # identical wire and be rejected identically, so abandon
+                # WITHOUT spending the request.
+                exhausted_reason = (
+                    "compression_no_op" if attempt == 1
+                    else "compression_no_op_after_escalation"
+                )
+                break
+            # Gate 2: confirm the reassembled wire actually fits. The history is
+            # only part of the request — the fixed runtime overhead (system
+            # prompt + tool schemas) rides on top and compaction cannot touch
+            # it — so a successful compaction does NOT by itself prove the retry
+            # will pass. ``<`` (not ``<=``) is deliberate: a wire estimated at
+            # EXACTLY the window leaves zero room for that overhead.
+            if tokens_after < context_limit:
+                recovered = True
+                break
+            next_ratio = self._next_overflow_recovery_ratio(
+                recovery_target_ratio
+            )
+            if next_ratio is None:
+                # Cannot aim any lower — a further pass is a provable no-op.
+                exhausted_reason = "escalation_floor_reached"
+                break
+            _log.info(
+                "chat.overflow_recovery.escalating",
+                conversation_id=conversation_id,
+                attempt_number=attempt,
+                wire_estimate_tokens=tokens_after,
+                context_limit=context_limit,
+                previous_target_ratio=recovery_target_ratio,
+                next_target_ratio=next_ratio,
+            )
+            recovery_target_ratio = next_ratio
+
         yield self._recovery_progress_frame(state="done", message=None)
-        # ── Gate 1: the pass changed nothing → retrying would re-send the
-        # identical wire and be rejected identically. Abandon WITHOUT spending
-        # the request (this is the defence the earlier removed implementation
-        # lacked).
-        if not checkpoint_created:
+
+        if not recovered:
             _log.info(
                 "chat.overflow_recovery.abandoned",
                 conversation_id=conversation_id,
-                reason="compression_no_op",
+                reason=exhausted_reason,
+                attempts=attempt,
                 wire_estimate_tokens=tokens_after,
                 context_limit=context_limit,
             )
+            # P10: distinguish the two real outcomes for the user. "No room"
+            # means compaction could not move anything; "still too large" means
+            # it compressed as far as it goes and the result STILL does not fit
+            # (so /compact by hand will not help either — only carrying a
+            # summary into a fresh conversation will).
+            if exhausted_reason == "compression_no_op":
+                _text = _t("chat.context_recovery.failed_no_room")
+            else:
+                _text = _t("chat.context_recovery.failed_still_too_large")
             yield self._recovery_notice_frame(
-                text=_t("chat.context_recovery.failed_no_room"),
-                kind="context_recovery_failed",
-            )
-            return
-        # ── Gate 2: confirm the reassembled wire actually fits. The history is
-        # only part of the request — the fixed runtime overhead (system prompt +
-        # tool schemas) rides on top and compaction cannot touch it — so a
-        # successful compaction does NOT by itself prove the retry will pass.
-        # ``>=`` (not ``>``) is deliberate: a wire estimated at EXACTLY the
-        # window leaves zero room for that overhead, so it cannot fit.
-        within_context_window = tokens_after < context_limit
-        _log.info(
-            "chat.overflow_recovery.retrying",
-            conversation_id=conversation_id,
-            attempt_number=1,
-            wire_estimate_tokens=tokens_after,
-            context_limit=context_limit,
-            within_context_window=within_context_window,
-        )
-        if not within_context_window:
-            _log.info(
-                "chat.overflow_recovery.abandoned",
-                conversation_id=conversation_id,
-                reason="still_over_window",
-                wire_estimate_tokens=tokens_after,
-                context_limit=context_limit,
-            )
-            yield self._recovery_notice_frame(
-                text=_t("chat.context_recovery.failed_no_room"),
+                text=self._maybe_append_migrate_hint(conv=conv, text=_text),
                 kind="context_recovery_failed",
             )
             return
@@ -10565,7 +10979,7 @@ class StreamChatUseCase:
         _log.info(
             "chat.overflow_recovery.succeeded",
             conversation_id=conversation_id,
-            attempt_number=1,
+            attempt_number=attempt,
             final_wire_estimate_tokens=tokens_after,
         )
         yield self._recovery_notice_frame(
@@ -10994,6 +11408,14 @@ class StreamChatUseCase:
                 model_id=request.model_hint or "",
                 tool_name=tool_name,
                 result_text=result_text,
+                # P9: the REAL window, so one tool result cannot occupy a large
+                # fraction of a small context. Sync reader (this path is not
+                # async) — the round's own compaction/request build has already
+                # resolved and cached the window by the time a tool runs, and a
+                # cold cache degrades to the family-table guess.
+                context_length=self._resolve_context_limit_cached(
+                    request.model_hint
+                ),
                 # Skip the head+tail split when the tool already bounded its
                 # own output (self-reported ``truncated`` / persisted
                 # ``stored_path``) so its recovery footer is never corrupted.
@@ -11272,6 +11694,14 @@ class StreamChatUseCase:
                 model_id=request.model_hint or "",
                 tool_name=tool_name,
                 result_text=result_text,
+                # P9: the REAL window, so one tool result cannot occupy a large
+                # fraction of a small context. Sync reader (this path is not
+                # async) — the round's own compaction/request build has already
+                # resolved and cached the window by the time a tool runs, and a
+                # cold cache degrades to the family-table guess.
+                context_length=self._resolve_context_limit_cached(
+                    request.model_hint
+                ),
                 # Skip the head+tail split when the tool already bounded its
                 # own output (self-reported ``truncated`` / persisted
                 # ``stored_path``) so its recovery footer is never corrupted.
@@ -11517,9 +11947,6 @@ class StreamChatUseCase:
         # No-progress circuit breaker state (Fix B).
         _last_call_sig: str | None = None
         _repeat_count = 0
-        # Auto-continuation-on-truncation retry state — see
-        # ``_MAX_CONSECUTIVE_TRUNCATION_RETRIES``.
-        _consecutive_length_retries = 0
 
         # Shared-prefix snapshot turn segment (O(N) not O(N²)).
         _snapshot_turn_ref: str = str(uuid.uuid4())
@@ -11577,13 +12004,12 @@ class StreamChatUseCase:
             )
             if not isinstance(_used, int) or _used <= 0:
                 return None
-            _limit = int(
-                (request.extra or {}).get("_context_limit")
-                or get_context_limit(
-                    (request.model_hint or "").removeprefix("local::")
-                    or "__unknown__"
-                ),
-            )
+            # P2c (display side): show the REAL configured window in the badge
+            # so the user's "N / limit" reading matches the window compaction
+            # actually targets. Sync closure ⇒ reads the resolver's cache and
+            # degrades to the family-table guess on a cold cache (see
+            # ``_resolve_context_limit_cached``).
+            _limit = self._resolve_context_limit_cached(request.model_hint)
             if not isinstance(_limit, int) or _limit <= 0:
                 return None
             return StreamFrame.context_usage(
@@ -12038,53 +12464,12 @@ class StreamChatUseCase:
             nonlocal _snapshot_turn_ref
             if _did_compact:
                 ckpt = self._compaction_checkpoints.get(self._conv_key(conv))
-                if ckpt is not None:
-                    base_wire = [dict(m) for m in ckpt.compacted_wire]
-                    # The production compressor's protection plan always
-                    # preserves the CURRENT turn (the last ``role:user`` +
-                    # everything after it) verbatim, so the last ``role:user``
-                    # row in ``base_wire`` is that turn's anchor. Point
-                    # ``head_len`` AFTER it so the injector splices system
-                    # blocks right before it — the wire's tail then naturally
-                    # ends on ``role:user``/``role:tool`` instead of being
-                    # pushed to the very end (Anthropic 400: a wire that does
-                    # not end on user/tool).
-                    _mid_head_len: int | None = len(base_wire)
-                    for _i in range(len(base_wire) - 1, -1, -1):
-                        if base_wire[_i].get("role") == "user":
-                            _mid_head_len = _i
-                            break
-                else:
-                    base_wire = self._assemble_history_wire(
-                        conv=conv, request=request,
-                    )
-                    _mid_head_len = None
-                rebuilt = base_wire
-                # 三口径归一 (mid-turn parity): this rebuilt wire is what the
-                # kernel sends THIS round (step ② replaces ``wire_messages``
-                # in place, step ④ streams it), so it must carry the same
-                # ``[Session Digest]`` / ``[References Ledger]`` /
-                # ``[Turn Prefix Summary]`` blocks every OTHER round of the
-                # turn carries — round 0 via ``_build_llm_request`` and
-                # rounds 1+ via ``_build_base_wire_messages``. This branch
-                # bypasses both builders (its base is the raw
-                # ``compacted_wire``), so without an explicit call here the
-                # blocks would vanish from the compaction round AND from
-                # every round after it (the kernel keeps GROWING this list).
-                self._inject_compaction_prefix_blocks(
-                    rebuilt, conv=conv, head_len=_mid_head_len,
-                    context_limit=int(
-                        (request.extra or {}).get("_context_limit")
-                        or get_context_limit(request.model_hint or ""),
-                    ),
+                base_wire = (
+                    [dict(m) for m in ckpt.compacted_wire]
+                    if ckpt is not None
+                    else self._assemble_history_wire(conv=conv, request=request)
                 )
-                # Fallback trailing-role guard: the head_len computation above
-                # already guarantees a user/tool tail in the common case; this
-                # only catches an edge case (e.g. a compressor that drops the
-                # trailing user, or a synthetic placeholder user message) by
-                # appending the current turn's own user prompt.
-                if rebuilt and rebuilt[-1].get("role") not in ("user", "tool"):
-                    rebuilt.append(self._resolved_user_turn(request))
+                rebuilt = base_wire
             else:
                 rebuilt = self._build_base_wire_messages(
                     conv=conv,
@@ -12417,7 +12802,6 @@ class StreamChatUseCase:
         ) -> RoundEndDecision:
             nonlocal empty_completion_retry_used, compressed_history_override
             nonlocal last_tool_round, _last_call_sig, _repeat_count
-            nonlocal _consecutive_length_retries
             nonlocal _no_progress_text
             nonlocal last_round_usage
             nonlocal _budget_exceeded
@@ -12592,54 +12976,6 @@ class StreamChatUseCase:
             text_clean = round_text.strip()
             reason = end_payload.get("reason")
             is_stop = reason in (None, "completed", "stop")
-            # Auto-continuation on plain-text output-length truncation.
-            # The adapter (llm_stream.py / local_model_stream.py) tags the
-            # END frame with ``truncated: True`` when ``finish_reason ==
-            # "length"`` fired on a round that issued NO tool call — the
-            # model simply ran out of per-response output budget mid-
-            # answer. Instead of ending the turn, reopen one more round
-            # with the partial answer + a continuation nudge, bounded by
-            # ``_MAX_CONSECUTIVE_TRUNCATION_RETRIES`` so a model that keeps
-            # re-hitting the ceiling cannot loop forever.
-            if end_payload.get("truncated") and not has_pending:
-                _consecutive_length_retries += 1
-                if _consecutive_length_retries > _MAX_CONSECUTIVE_TRUNCATION_RETRIES:
-                    _log.warning(
-                        "chat.length_truncation_retry_budget_exhausted",
-                        round_no=round_no,
-                        consecutive_retries=_consecutive_length_retries,
-                    )
-                    _no_progress_text = (
-                        f"\n\n_(检测到连续 {_MAX_CONSECUTIVE_TRUNCATION_RETRIES} "
-                        "次输出被截断，已自动结束本轮的自动续写。发送\"继续\"可"
-                        "手动接续，或在新会话中重新描述任务。)_"
-                    )
-                    return RoundEndDecision(stop=True, final_text="")
-                _log.warning(
-                    "chat.finish_reason_length_auto_retry",
-                    round_no=round_no,
-                    had_tool_calls=bool(tool_calls),
-                    text_len=len(round_text),
-                    consecutive_retries=_consecutive_length_retries,
-                )
-                _usage = end_payload.get("usage") or {}
-                _completion_tokens = _usage.get("completion_tokens", 0)
-                _limit_str = f"{_completion_tokens}" if _completion_tokens else "max_tokens"
-                nudge = (
-                    f"[SYSTEM] Your previous response was truncated at "
-                    f"{_limit_str} tokens (the per-response output limit). "
-                    f"Please continue from where you left off. Keep each "
-                    f"response under {_limit_str} tokens — if you need more "
-                    f"space, split across multiple tool calls or responses."
-                )
-                retry_wire = list(wire_messages)
-                if round_text.strip():
-                    retry_wire.append({"role": "assistant", "content": round_text})
-                retry_wire.append({"role": "user", "content": nudge})
-                return RoundEndDecision(retry=True, retry_wire=retry_wire)
-            # A round that did NOT hit the length ceiling ends any
-            # in-progress truncation-retry streak.
-            _consecutive_length_retries = 0
             # Empty-completion retry (PR-091 H-9 / V1 chat_handler.py:757).
             if (
                 is_stop
@@ -13418,12 +13754,62 @@ class StreamChatUseCase:
         ``measured_eff_prompt``: this turn's most-recent completed round's
         provider-measured ``实发`` size, threaded through to the trigger gate
         (this turn's usage is not yet on ``conv.messages`` mid-turn).
+
+        P8 — EMERGENCY BYPASS of the every-4-rounds throttle: when the round
+        that just finished measured at or above
+        ``_EMERGENCY_COMPRESS_RATIO x real window``, compaction runs on THIS
+        round regardless of ``round_no % 4``. Without it, a single round that
+        jumps by 18-20K tokens (one big tool result) on a small window can cross
+        the window entirely inside an unchecked round, and the next request is
+        rejected outright — or worse, returns 200 with a truncated tool call.
+        The window comes from :meth:`_resolve_context_limit` (P2c), NOT the
+        name-keyed family table: sizing this valve off a guessed 200000-token
+        window would put its threshold at ~184000 tokens, which a model with a
+        real 32768-token window can never reach — i.e. the one defence designed
+        for this exact failure would never fire on the models that need it most.
         """
-        if not (
-            round_no > 1
-            and round_no % 4 == 0
-            and self._context_compressor is not None
-        ):
+        if self._context_compressor is None:
+            return compression_token
+        scheduled = round_no > 1 and round_no % 4 == 0
+        emergency = False
+        if not scheduled and isinstance(measured_eff_prompt, int):
+            if measured_eff_prompt > 0:
+                _emergency_limit = await self._resolve_context_limit(
+                    request.model_hint
+                )
+                # Output-aware: the valve must fire while there is still room for
+                # the reply, not merely before the window is full. Take the
+                # TIGHTER of the ratio and "window minus the reply budget".
+                _max_out = self._resolve_max_output_tokens(
+                    extra=request.extra, model_hint=request.model_hint,
+                )
+                _reserve_floor = (
+                    _emergency_limit - _max_out - _EMERGENCY_OUTPUT_RESERVE_TOKENS
+                )
+                _emergency_threshold = min(
+                    int(_emergency_limit * _EMERGENCY_COMPRESS_RATIO),
+                    _reserve_floor,
+                )
+                # Never let the arithmetic invert on a pathologically small
+                # window (where the reply budget alone exceeds the context):
+                # fall back to the ratio rather than a non-positive threshold
+                # that would fire on every round.
+                if _emergency_threshold <= 0:
+                    _emergency_threshold = int(
+                        _emergency_limit * _EMERGENCY_COMPRESS_RATIO
+                    )
+                if measured_eff_prompt >= _emergency_threshold:
+                    emergency = True
+                    _log.warning(
+                        "chat.followup_compression_emergency",
+                        round_no=round_no,
+                        measured_eff_prompt=measured_eff_prompt,
+                        context_limit=_emergency_limit,
+                        emergency_threshold=_emergency_threshold,
+                        max_output_tokens=_max_out,
+                        reason="single_round_jump_near_window",
+                    )
+        if not (scheduled or emergency):
             return compression_token
         try:
             changed = await self._compress_via_checkpoint(

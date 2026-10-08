@@ -250,6 +250,106 @@ def _parse_tool_call(call: Any) -> tuple[str, dict[str, Any]] | None:
     return name, raw_args if isinstance(raw_args, dict) else {}
 
 
+#: Filename (case-insensitive) whose ``read`` result is protected from
+#: compaction. See :func:`_is_skill_file_read`.
+_SKILL_FILE_NAME: str = "skill.md"
+
+
+def _is_skill_file_read(call: Any) -> bool:
+    """True when *call* is a ``read`` of a ``SKILL.md`` file.
+
+    P5 — WHY THIS CONTENT IS SPECIAL
+    --------------------------------
+    On-device turns get a LEAN system prompt that lists each skill's PATH
+    instead of inlining its body (a single SKILL.md runs to ~20KB, which is
+    exactly the prefill cost the lean prompt exists to avoid). The model
+    therefore ``read``s the skill it needs, and the instructions it is now
+    following live in an ordinary ``role:tool`` message in the history.
+
+    That makes the skill body uniquely fragile under compaction. Everything
+    else compaction drops is a RECORD of work already done — dropping it costs
+    context, not correctness. The skill body is the model's live INSTRUCTIONS:
+    drop it and the system prompt still advertises the skill while its content
+    is gone, so the only sensible thing the model can do is ``read`` it again
+    and restart the procedure from step 1. Observed as the model "forgetting the
+    skill, re-reading it, and starting over" in a loop, losing all its progress
+    each time.
+
+    It also is not protected by the recent-turns window: on a 32768-token window
+    that budget is ~11.5K tokens, while a single tool result in this workload
+    routinely runs 18-20K — one round can push the skill read straight out of
+    the protected region.
+
+    Matching is deliberately NARROW: the ``read`` tool specifically, and a path
+    whose FILENAME is exactly ``SKILL.md`` (case-insensitively — Windows paths
+    and hand-typed names vary). A file merely *containing* "skill" is not
+    matched, so this cannot become a blanket "never compact anything" hole.
+    """
+    parsed = _parse_tool_call(call)
+    if parsed is None:
+        return False
+    tool_name, arguments = parsed
+    if tool_name != "read":
+        return False
+    # ``_normalize_target`` strips any ``:line`` read selector, normalises
+    # separators to ``/`` and casefolds — the same canonicalisation the
+    # supersede logic uses, so both agree on what a path "is".
+    target = _normalize_target(arguments.get("path"))
+    if not target:
+        return False
+    return target == _SKILL_FILE_NAME or target.endswith("/" + _SKILL_FILE_NAME)
+
+
+def _msg_reads_skill_file(msg: Any) -> bool:
+    """True when this ONE message issues a ``read`` of a ``SKILL.md``."""
+    if not isinstance(msg, dict):
+        return False
+    for call in msg.get("tool_calls") or ():
+        if _is_skill_file_read(call):
+            return True
+    return False
+
+
+def _skill_read_call_ids(turn: list[dict[str, Any]]) -> set[str]:
+    """``tool_call_id``s whose ``role:tool`` reply must be kept with the call.
+
+    Returns the ids of EVERY tool call on any assistant message that reads a
+    ``SKILL.md`` — not just the skill read itself. A single assistant message can
+    batch several calls, and the OpenAI wire requires each ``tool_calls`` entry
+    to have a matching ``role:tool`` reply. Keeping the assistant row while
+    dropping one of its replies produces a malformed request, so the unit of
+    protection is "this assistant message and all of its replies".
+    """
+    ids: set[str] = set()
+    for msg in turn:
+        if not _msg_reads_skill_file(msg):
+            continue
+        for call in msg.get("tool_calls") or ():
+            if isinstance(call, dict):
+                call_id = call.get("id")
+                if isinstance(call_id, str) and call_id:
+                    ids.add(call_id)
+    return ids
+
+
+def _turn_has_skill_file_read(turn: list[dict[str, Any]]) -> bool:
+    """True when any message in *turn* issued a ``read`` of a ``SKILL.md``.
+
+    Checked at TURN granularity because that is the unit both lossy phases
+    operate on, and because the read's ``role:tool`` reply (the body we actually
+    need to keep) lives in the same turn as the assistant message that issued
+    the call — protecting one without the other would leave a dangling
+    tool_call and break the wire's call/reply pairing.
+    """
+    for msg in turn:
+        if not isinstance(msg, dict):
+            continue
+        for call in msg.get("tool_calls") or ():
+            if _is_skill_file_read(call):
+                return True
+    return False
+
+
 def _index_replies_by_call_id(
     tail: list[dict[str, Any]], *, expected: int
 ) -> dict[str, dict[str, Any]] | None:
@@ -1036,9 +1136,31 @@ class ThreeLevelContextCompressor(ContextCompressionPort):
         * DROP every ``role=tool`` message.
 
         Empty turns after filtering are removed from the returned list.
+
+        P5 EXCEPTION (MESSAGE-level, not turn-level): an assistant message whose
+        ``tool_calls`` include a ``SKILL.md`` read is kept, together with the
+        ``role:tool`` replies belonging to THAT message — the skill body is the
+        model's live instructions, and dropping it makes the model re-read the
+        skill and restart its work (see :func:`_is_skill_file_read`). Everything
+        else in the same turn is still stripped normally.
+
+        WHY MESSAGE-LEVEL AND NOT TURN-LEVEL (regression fix, 2026-09-30):
+        protecting the whole TURN looks equivalent and is catastrophically not.
+        :func:`_parse_turns` splits on ``role=user``, so a long agentic run —
+        one user instruction followed by dozens of tool rounds — is ONE turn.
+        Protecting that turn protects the entire conversation, which turns
+        Phase 3 (and then Phase 4) into a no-op and leaves compaction unable to
+        reclaim anything at all. Observed on a real 55-message / 18682-token
+        wire against an 11468-token target: every phase reported
+        ``retain_ratio=1.000`` and ``/compact`` answered "已完全压缩，暂无可回收
+        空间", so the prompt stayed at ~30K of a 32768-token window and the
+        model's reply was truncated for lack of room. Keeping the skill messages
+        but stripping the rest of the turn reclaims the tool scaffolding (the
+        actual bulk) while still preserving the instructions.
         """
         result: list[list[dict[str, Any]]] = []
         for turn in turns:
+            protected_ids = _skill_read_call_ids(turn)
             last_summary_idx = -1
             for i in range(len(turn) - 1, -1, -1):
                 msg = turn[i]
@@ -1048,16 +1170,38 @@ class ThreeLevelContextCompressor(ContextCompressionPort):
                     last_summary_idx = i
                     break
             kept: list[dict[str, Any]] = []
+            kept_skill_msgs = 0
             for i, msg in enumerate(turn):
                 role = msg.get("role")
                 if role == "user":
                     kept.append(msg)
+                elif role == "assistant" and _msg_reads_skill_file(msg):
+                    # Keep the call itself; its replies are kept below. Dropping
+                    # the assistant row while keeping its ``role:tool`` replies
+                    # (or vice versa) would break the wire's call/reply pairing.
+                    kept.append(msg)
+                    kept_skill_msgs += 1
+                elif (
+                    role == "tool"
+                    and protected_ids
+                    and msg.get("tool_call_id") in protected_ids
+                ):
+                    kept.append(msg)
+                    kept_skill_msgs += 1
                 elif (
                     role == "assistant"
                     and not msg.get("tool_calls")
                     and i == last_summary_idx
                 ):
                     kept.append(msg)
+            if kept_skill_msgs:
+                logger.info(
+                    "context_compressor: kept %d message(s) carrying a SKILL.md "
+                    "read while stripping the rest of the turn (skill "
+                    "instructions must survive compaction; dropping them makes "
+                    "the model re-read the skill and restart)",
+                    kept_skill_msgs,
+                )
             if kept:
                 result.append(kept)
         return result
@@ -1078,6 +1222,20 @@ class ThreeLevelContextCompressor(ContextCompressionPort):
         reused across phases; passing ``None`` (or omitting it) falls back
         to the uncached static path — keeps external unit tests that
         exercise this helper standalone byte-for-byte compatible.
+
+        P5 EXCEPTION: turns that read a ``SKILL.md`` are SKIPPED rather than
+        dropped — the scan moves past them and drops the next droppable turn
+        instead (see :func:`_is_skill_file_read`). Consequences, stated plainly:
+
+        * when no turn holds a skill read the scan index never advances past 0,
+          so this is byte-for-byte the original "pop from the front" loop;
+        * the loop always terminates — each iteration either pops a turn or
+          advances the index, and both are bounded by ``len(kept)``;
+        * if EVERY remaining turn holds a skill read the result can still exceed
+          ``target``. That is intended: the caller's later phases (and ultimately
+          the provider's own rejection + the recovery path) handle an
+          over-target wire, whereas silently dropping the instructions the model
+          is following produces a confidently wrong turn instead of a slow one.
         """
         cache = bytes_cache if bytes_cache is not None else {}
 
@@ -1088,9 +1246,23 @@ class ThreeLevelContextCompressor(ContextCompressionPort):
 
         kept = list(turns)
         kept_tokens = sum(_turn_tok(t) for t in kept)
-        while kept and fixed_tokens + kept_tokens > target_tokens:
-            kept_tokens -= _turn_tok(kept[0])
-            kept.pop(0)
+        idx = 0
+        protected_skill_turns = 0
+        while idx < len(kept) and fixed_tokens + kept_tokens > target_tokens:
+            if _turn_has_skill_file_read(kept[idx]):
+                protected_skill_turns += 1
+                idx += 1
+                continue
+            kept_tokens -= _turn_tok(kept[idx])
+            kept.pop(idx)
+        if protected_skill_turns:
+            logger.info(
+                "context_compressor: kept %d turn(s) carrying a SKILL.md read "
+                "that the drop scan would otherwise have discarded "
+                "(over_target=%s)",
+                protected_skill_turns,
+                fixed_tokens + kept_tokens > target_tokens,
+            )
         return kept
 
     # ------------------------------------------------------------------

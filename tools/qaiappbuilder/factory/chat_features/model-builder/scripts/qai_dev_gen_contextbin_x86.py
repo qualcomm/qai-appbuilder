@@ -10,20 +10,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _host_arch import sdk_bin_subdir  # noqa: E402
-
 
 def _arch_dir_for_host() -> str:
-    """SDK bin/lib subdirectory for the CURRENT host.
-
-    Delegates to _host_arch.sdk_bin_subdir() -- the single source of truth.
-    Do NOT re-implement the mapping here: the copy that used to live in this
-    function drifted and returned "aarch64-linux-gcc" (unquoted here on
-    purpose -- a regression test greps for the quoted literal), a directory
-    that exists in NO QAIRT SDK.
-    """
-    return sdk_bin_subdir()
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+    if system == "windows":
+        return "aarch64-windows-msvc" if "arm" in machine else "x86_64-windows-msvc"
+    if system == "linux":
+        return "aarch64-linux-gcc" if "aarch64" in machine or "arm" in machine else "x86_64-linux-clang"
+    return "x86_64-linux-clang"
 
 
 def _backend_library_name(backend: str, is_windows: bool) -> str:

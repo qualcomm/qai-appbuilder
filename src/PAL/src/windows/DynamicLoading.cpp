@@ -56,9 +56,7 @@ void *pal::dynamicloading::dlOpen(const char *filename, int flags) {
     // If the library is loaded, it would be a handle to this library
     // If the library is not loaded, it would be a NULL
     mod = GetModuleHandleA(filename);
-    void *mod_result;
-    std::memcpy(&mod_result, &mod, sizeof(mod_result));
-    return mod_result;
+    return static_cast<void *>(mod);
   }
   cur_proc = GetCurrentProcess();
 
@@ -101,9 +99,7 @@ void *pal::dynamicloading::dlOpen(const char *filename, int flags) {
     mod_handles.erase(mod);
   }
 
-  void *mod_result;
-  std::memcpy(&mod_result, &mod, sizeof(mod_result));
-  return mod_result;
+  return static_cast<void *>(mod);
 }
 
 void *pal::dynamicloading::dlSym(void *handle, const char *symbol) {
@@ -124,7 +120,7 @@ void *pal::dynamicloading::dlSym(void *handle, const char *symbol) {
     return NULL;
   }
 
-  mod_list = static_cast<HMODULE *>(calloc(1, size));
+  mod_list = static_cast<HMODULE *>(malloc(size));
   if (!mod_list) {
     sg_lastErrMsg = "malloc failed";
     return NULL;
@@ -148,9 +144,7 @@ void *pal::dynamicloading::dlSym(void *handle, const char *symbol) {
       sym_addr = GetProcAddress(mod_list[i], symbol);
       if (sym_addr) {
         free(mod_list);
-        void *result;
-        std::memcpy(&result, &sym_addr, sizeof(result));
-        return result;
+        return *(void **)(&sym_addr);
       }
     }
   } else {
@@ -164,11 +158,7 @@ void *pal::dynamicloading::dlSym(void *handle, const char *symbol) {
     return NULL;
   }
 
-  {
-    void *result;
-    std::memcpy(&result, &sym_addr, sizeof(result));
-    return result;
-  }
+  return *(void **)(&sym_addr);
 }
 
 int pal::dynamicloading::dlAddrToLibName(void *addr, std::string &name) {

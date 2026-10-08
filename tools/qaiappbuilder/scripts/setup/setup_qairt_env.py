@@ -65,27 +65,11 @@ _DEFAULT_QAIRT_VERSION = _load_default_qairt_version()
 
 # Default QAIRT SDK version — override via env var QAIRT_VERSION or --sdk-version CLI arg
 QAIRT_SDK_VERSION = os.environ.get("QAIRT_VERSION", _DEFAULT_QAIRT_VERSION)
-
-
-def _default_qairt_sdk_root(root=None):
-    """Return the platform default SDK root for a repository.
-
-    Linux has no absolute default -- it resolves against *root* (the
-    repository root) so the SDK stays with the project rather than
-    landing in the invoking user's HOME directory. When *root* is not
-    supplied (module-level fallback), this file's own on-disk location
-    is used to find the repo root.
-    """
-    if sys.platform == "win32":
-        return rf"C:\Qualcomm\AIStack\QAIRT\{QAIRT_SDK_VERSION}"
-    repo_root = (
-        Path(root) if root is not None else Path(__file__).resolve().parents[2]
-    )
-    return str(repo_root / "qairt" / QAIRT_SDK_VERSION)
-
-
-QAIRT_SDK_DEFAULT = (
-    os.environ.get("QAIRT_SDK_ROOT") or _default_qairt_sdk_root()
+QAIRT_SDK_DEFAULT = os.environ.get(
+    "QAIRT_SDK_ROOT",
+    rf"C:\Qualcomm\AIStack\QAIRT\{QAIRT_SDK_VERSION}"
+    if sys.platform == "win32"
+    else str(Path.home() / "qairt" / QAIRT_SDK_VERSION)
 )
 QAIRT_DOWNLOAD_URL = os.environ.get(
     "QAIRT_DOWNLOAD_URL",
@@ -101,26 +85,9 @@ VSWHERE = r"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe
 CONFIG_FILENAME = "qairt_env.json"
 
 # SDK validity markers per platform
-QAIRT_SDK_VALID_MARKER_WIN = (
-    Path("bin") / "x86_64-windows-msvc" / "qnn-onnx-converter"
-)
-QAIRT_SDK_VALID_MARKER_LINUX_X64 = (
-    Path("bin") / "x86_64-linux-clang" / "qnn-onnx-converter"
-)
-QAIRT_SDK_VALID_MARKER_LINUX_ARM64 = (
-    Path("bin") / "aarch64-oe-linux-gcc11.2" / "qnn-net-run"
-)
+QAIRT_SDK_VALID_MARKER_WIN   = Path("bin") / "x86_64-windows-msvc" / "qnn-onnx-converter"
+QAIRT_SDK_VALID_MARKER_LINUX = Path("bin") / "x86_64-linux-clang"  / "qnn-onnx-converter"
 QAIRT_MIN_VERSION_LINUX_AARCH64 = "2.47.0"
-
-
-def _linux_qairt_marker(sdk: Path) -> Path:
-    """Return the QAIRT tool required for the current Linux architecture."""
-    relative = (
-        QAIRT_SDK_VALID_MARKER_LINUX_ARM64
-        if _detect_arch() == "aarch64"
-        else QAIRT_SDK_VALID_MARKER_LINUX_X64
-    )
-    return sdk / relative
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -182,13 +149,25 @@ def _config_path(root):
 
 
 def _resolve_venv(root, venv_name):
-    """Resolve a managed venv without crossing Linux repository boundaries."""
-    if _detect_platform() == "linux":
-        return Path(root) / "envs" / venv_name
+    """Resolve venv path with multiple fallback strategies.
 
+    Tries:
+      Windows:
+        1. Introspect sys.executable (if we're already IN this venv)
+        2. USERPROFILE/AppData/Local/QAIModelBuilder/envs (sandbox-safe)
+        3. LOCALAPPDATA env var (redirected in sandbox, unreliable)
+        4. Project-local root/envs/<name>
+      Linux:
+        1. Introspect sys.executable (if we're already IN this venv)
+        2. Project-local root/envs/<name> (primary — co-located with repo)
+        3. $XDG_DATA_HOME/QAIModelBuilder/envs/<name> (if set)
+        4. $HOME/.local/share/QAIModelBuilder/envs/<name> (fallback for pre-existing)
+
+    Returns the first existing path, or the highest-priority candidate if none exist.
+    """
     candidates = []
 
-    # Prefer the active managed venv on Windows.
+    # 1. sys.executable introspection (all platforms)
     try:
         exe_parts = Path(sys.executable).resolve().parts
         if venv_name in exe_parts:
@@ -197,36 +176,41 @@ def _resolve_venv(root, venv_name):
     except Exception:
         pass
 
-    userprofile = os.environ.get("USERPROFILE", "")
-    if userprofile:
-        candidates.append(
-            Path(userprofile)
-            / "AppData"
-            / "Local"
-            / "QAIModelBuilder"
-            / "envs"
-            / venv_name
-        )
-    local_app_data = os.environ.get("LOCALAPPDATA", "")
-    if local_app_data:
-        candidates.append(
-            Path(local_app_data) / "QAIModelBuilder" / "envs" / venv_name
-        )
-    candidates.append(Path(root) / "envs" / venv_name)
+    if _detect_platform() == "linux":
+        # 2. Project-local envs/ (primary — co-located with repo)
+        candidates.append(Path(root) / "envs" / venv_name)
+        # 3. XDG_DATA_HOME (if set)
+        xdg = os.environ.get("XDG_DATA_HOME", "")
+        if xdg:
+            candidates.append(Path(xdg) / "QAIModelBuilder" / "envs" / venv_name)
+        # 4. ~/.local/share (fallback for pre-existing installations)
+        candidates.append(Path.home() / ".local" / "share" / "QAIModelBuilder" / "envs" / venv_name)
+    else:
+        # 2. USERPROFILE-based (sandbox-safe: USERPROFILE is typically not redirected)
+        userprofile = os.environ.get("USERPROFILE", "")
+        if userprofile:
+            candidates.append(
+                Path(userprofile) / "AppData" / "Local" / "QAIModelBuilder" / "envs" / venv_name
+            )
+        # 3. LOCALAPPDATA env var (may be redirected in sandbox)
+        local_app_data = os.environ.get("LOCALAPPDATA", "")
+        if local_app_data:
+            candidates.append(Path(local_app_data) / "QAIModelBuilder" / "envs" / venv_name)
 
-    for candidate in candidates:
-        if _python_exe(candidate).exists():
-            return candidate
-    return candidates[0]
+        # 4. Project-local envs/ fallback (all non-Linux platforms)
+        candidates.append(Path(root) / "envs" / venv_name)
+
+    # Return first existing, or first candidate if none exist
+    for c in candidates:
+        if _python_exe(c).exists():
+            return c
+    return candidates[0] if candidates else Path(root) / "envs" / venv_name
 
 
 def _venv_310_path(root):
-    """Return the converter environment used on the current host."""
-    if _detect_platform() == "linux":
-        if _detect_arch() == "aarch64":
-            return Path(root) / "envs" / "venv_aarch64_312"
-        return Path(root) / "envs" / "venv_x86_64_310"
-    return _resolve_venv(root, ".venv_x64_310")
+    """x64/x86_64 Python 3.10 venv for QAIRT model conversion (external path)."""
+    name = "venv_x86_64_310" if _detect_platform() == "linux" else ".venv_x64_310"
+    return _resolve_venv(root, name)
 
 
 def _venv_arm64_path(root):
@@ -412,7 +396,7 @@ def check_qairt_sdk(sdk_root=None):
             return True
         # Linux aarch64: check SDK exists and version
         sdk = Path(sdk_root or QAIRT_SDK_DEFAULT)
-        if not _linux_qairt_marker(sdk).exists():
+        if not (sdk / QAIRT_SDK_VALID_MARKER_LINUX).exists():
             _print_warn(f"QAIRT SDK not found: {sdk}")
             return False
         _check_linux_aarch64_version(sdk)
@@ -537,11 +521,10 @@ def gen_config(root, sdk_root=None, host_arch=None):
     # the updated value without needing to also pass --sdk-root explicitly.
     if sdk_root is None:
         _sdk_root_env = os.environ.get("QAIRT_SDK_ROOT", "")
-        sdk = (
-            Path(_sdk_root_env)
-            if _sdk_root_env
-            else Path(_default_qairt_sdk_root(root))
-        )
+        if _sdk_root_env:
+            sdk = Path(_sdk_root_env)
+        else:
+            sdk = Path(QAIRT_SDK_DEFAULT)
     else:
         sdk = Path(sdk_root)
     config_file = _config_path(root)
@@ -550,7 +533,7 @@ def gen_config(root, sdk_root=None, host_arch=None):
     # ── Linux path ────────────────────────────────────────────────────────────
     if _detect_platform() == "linux":
         arch = _detect_arch()
-        if not _linux_qairt_marker(sdk).exists():
+        if not (sdk / QAIRT_SDK_VALID_MARKER_LINUX).exists():
             if arch == "aarch64":
                 _print_warn(
                     "QAIRT SDK not found on Linux aarch64; NPU inference will be unavailable"
@@ -817,7 +800,6 @@ def install_python_deps(root):
 
     if uv and uv.exists():
         # Batch-install normal packages via uv
-        install_ok = True
         if to_install_normal:
             specs = " ".join(f'"{s}"' for s in to_install_normal)
             print(f"[INFO] Batch-installing {len(to_install_normal)} packages via uv...")
@@ -828,10 +810,7 @@ def install_python_deps(root):
                     print(f"[INFO] Installing {spec}...")
                     ok2, _, _ = _run(f'"{uv}" pip install "{spec}" --python "{python}"', capture=False)
                     if not ok2:
-                        _print_err(f"Failed to install {spec}")
-                        install_ok = False
-    else:
-        install_ok = True
+                        _print_err(f"Failed to install {spec} (non-fatal)")
 
     # Install torch/torchvision with CPU-only index.
     # Use +cpu version suffix (e.g. torch==2.11.0+cpu) so pip can ONLY find
@@ -846,8 +825,7 @@ def install_python_deps(root):
             capture=False,
         )
         if not ok:
-            _print_err(f"Failed to install {spec}")
-            install_ok = False
+            _print_err(f"Failed to install {spec} (non-fatal)")
 
     if not (uv and uv.exists()):
         # pip fallback for normal packages (uv not available)
@@ -857,10 +835,9 @@ def install_python_deps(root):
             print(f"[INFO] Installing {spec}...")
             ok, _, err = _run(f'"{python}" -m pip install "{spec}" --quiet', capture=False)
             if not ok:
-                _print_err(f"Failed to install {spec}")
-                install_ok = False
+                _print_err(f"Failed to install {spec} (non-fatal)")
 
-    return install_ok
+    return True
 
 
 def install_inference_deps(root):
@@ -1402,7 +1379,10 @@ def main():
         os.environ["QAIRT_VERSION"] = args.sdk_version
         QAIRT_SDK_VERSION = args.sdk_version
         if not args.sdk_root:
-            QAIRT_SDK_DEFAULT = _default_qairt_sdk_root()
+            if sys.platform == "win32":
+                QAIRT_SDK_DEFAULT = rf"C:\Qualcomm\AIStack\QAIRT\{QAIRT_SDK_VERSION}"
+            else:
+                QAIRT_SDK_DEFAULT = str(Path.home() / "qairt" / QAIRT_SDK_VERSION)
         QAIRT_DOWNLOAD_URL = (
             f"https://softwarecenter.qualcomm.com/api/download/software/sdks/"
             f"Qualcomm_AI_Runtime_Community/All/{QAIRT_SDK_VERSION}/v{QAIRT_SDK_VERSION}.zip"

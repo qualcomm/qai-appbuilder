@@ -16,7 +16,6 @@
 #include <sstream>
 #include <algorithm>
 #include <regex>
-#include <unordered_set>
 
 using json = nlohmann::ordered_json;
 
@@ -83,32 +82,6 @@ bool MessagePreFilter::ShouldKeepFull(const GenieChatMessage& msg) const
 }
 
 // ============================================================
-// CaptureDroppedMessages
-// ============================================================
-
-void MessagePreFilter::CaptureDroppedMessages(const json& original, const json& kept)
-{
-    std::unordered_multiset<std::string> kept_signatures;
-    for (const auto& m : kept) {
-        std::string role = get_json_value(m, "role", BLANK_STRING);
-        std::string content = get_json_value(m, "content", BLANK_STRING);
-        kept_signatures.insert(role + "\x01" + content);
-    }
-    for (const auto& m : original) {
-        std::string role = get_json_value(m, "role", BLANK_STRING);
-        if (role == "system" || role == "developer")
-            continue;
-        std::string content = get_json_value(m, "content", BLANK_STRING);
-        auto it = kept_signatures.find(role + "\x01" + content);
-        if (it != kept_signatures.end()) {
-            kept_signatures.erase(it);
-            continue;
-        }
-        prefilter_dropped_messages_.push_back({role, content});
-    }
-}
-
-// ============================================================
 // FitMessagesToContext
 // ============================================================
 
@@ -116,9 +89,7 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
     const std::vector<GenieChatMessage>& all_messages,
     const std::string& system_prompt,
     size_t context_size,
-    const MessageCompressionConfig& config,
-    const nlohmann::ordered_json* raw_messages_for_memo,
-    TaskMemoBuilder* memo_builder)
+    const MessageCompressionConfig& config)
 {
     OptimizedMessages result;
     result.success = false;
@@ -183,7 +154,6 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
     //   第一阶段：优先丢弃 recent_boundary 之前的旧消息
     //   第二阶段：若第一阶段仍不满足，再丢弃 recent_boundary 之后（但 last_user_index 之前）的消息
     std::vector<GenieChatMessage> final_messages = all_messages;
-    std::vector<GenieChatMessage> dropped_for_memo;
 
     if (total_tokens > context_size) {
         My_Log{My_Log::Level::kDebug} << "[FitMessagesToContext] Step 3: Dropping old messages to fit context..." << std::endl;
@@ -254,8 +224,6 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
                 for (size_t k = 0; k < drop_count; k++)
                     dropped_tokens += CountTokens(final_messages[k].content);
 
-                for (size_t k = 0; k < drop_count; k++)
-                    dropped_for_memo.push_back(final_messages[k]);
                 final_messages.erase(final_messages.begin(), final_messages.begin() + drop_count);
                 total_tokens -= dropped_tokens;
                 result.dropped_count += drop_count;
@@ -281,7 +249,6 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
 
             // 其他消息：直接丢弃
             size_t dropped_tokens = CountTokens(final_messages[0].content);
-            dropped_for_memo.push_back(final_messages[0]);
             final_messages.erase(final_messages.begin());
             total_tokens -= dropped_tokens;
             result.dropped_count++;
@@ -499,21 +466,6 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
         My_Log{My_Log::Level::kDebug} << "[FitMessagesToContext] Step 3: Total tokens within context size" << std::endl;
     }
 
-    // Task Memo：在计算占位符之前用本次实际丢弃的消息更新备忘录，供占位符渲染使用最新状态。
-    // 必须把 PreFilterMessages()（同一个 pre_filter_ 实例、同一次请求）Phase 0-5 丢弃的消息
-    // 也并入——它们通常是丢弃大头，本函数自身的 dropped_for_memo 往往为空或极少，只传后者会
-    // 导致 Update() 几乎永远达不到 min_dropped_for_trigger（真实 bug，已实测复现）。
-    // memo_builder/raw_messages_for_memo 为 nullptr（Task Memo 未接入或功能关闭）时 Update()
-    // 内部直接返回默认值，不产生任何副作用。
-    if (memo_builder && raw_messages_for_memo) {
-        std::vector<GenieChatMessage> all_dropped_for_memo = prefilter_dropped_messages_;
-        all_dropped_for_memo.insert(all_dropped_for_memo.end(), dropped_for_memo.begin(), dropped_for_memo.end());
-        auto memo_result = memo_builder->Update(*raw_messages_for_memo, all_dropped_for_memo);
-        result.memo_active = memo_result.active;
-        result.memo_confidence = memo_result.confidence;
-        result.memo_refresh_count = memo_result.refresh_count;
-    }
-
     // 步骤 4: 最终检查
     const auto& fidelity_cfg_drop = model_config_.GetPromptOptimizationConfig().fidelity;
     // 占位符触发条件必须统计「本次请求全部丢弃来源」，不能只看 result.dropped_count（本函数自身的
@@ -548,17 +500,6 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
     if (total_dropped_all_phases > 0 && fidelity_cfg_drop.drop_placeholder && !final_messages.empty()) {
         std::string placeholder = "[" + std::to_string(total_dropped_all_phases) +
             " earlier message(s) omitted]\n";
-
-        // Task Memo 尾部保护槽位兜底：无论本次是否刚刚触发过 Update()，重新查一次表（覆盖本次
-        // 未触发但历史已存在的情况），命中则在数字占位后追加紧凑摘要；未命中（未开启/存储丢失）
-        // 时逐字节回退到现有纯数字行为。
-        if (memo_builder && raw_messages_for_memo) {
-            auto memo_entry = memo_builder->Lookup(*raw_messages_for_memo);
-            if (memo_entry) {
-                placeholder += TaskMemoBuilder::RenderCompact(*memo_entry);
-            }
-        }
-
         total_tokens += CountTokens(placeholder);
         final_messages[0].content = placeholder + final_messages[0].content;
         My_Log{My_Log::Level::kDebug} << "[FitMessagesToContext] Inserted drop placeholder for "
@@ -1357,7 +1298,6 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
 
     // 重置统计信息
     prefilter_stats_.Reset();
-    prefilter_dropped_messages_.clear();
 
     // ── Step 1: 消息数量限制（cfg.max_messages_limit）──────────────────────
     const size_t max_messages = cfg.max_messages_limit;
@@ -1393,7 +1333,6 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
         if (model_config_.getenablePromptDebug()) {
             My_Log{My_Log::Level::kInfo} << "[PreFilter] Skipped (no model handle)" << std::endl;
         }
-        CaptureDroppedMessages(msg, filtered_msg);
         return filtered_msg;
     }
 
@@ -1484,7 +1423,6 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
             << " tok), skipping all phases, FitMessagesToContext will handle" << std::endl;
         // 打印诊断信息（system prompt 超出时，messages 尚未压缩，但仍有参考价值）
         print_diag_dump(filtered_msg);
-        CaptureDroppedMessages(msg, filtered_msg);
         return filtered_msg;
     }
 
@@ -1978,6 +1916,5 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
         print_diag_dump(validated_msg);
     }
 
-    CaptureDroppedMessages(msg, validated_msg);
     return validated_msg;
 }

@@ -645,4 +645,6 @@ MESSAGES: dict[str, str] = {
     "chat.context_recovery.succeeded": "Context was compressed ({before_tokens} \u2192 {after_tokens} tokens) and your message was resent in full. Earlier history is now summarised, so this reply took a little longer.",
     "chat.context_recovery.failed_no_room": "Context is full and cannot be compressed any further. Send /compact to compress the history manually, or /new to continue in a fresh session \u2014 your message was not lost.",
     "chat.context_recovery.unavailable_mid_tool": "Context filled up in the middle of a tool run, which cannot be compressed automatically. Once this turn stops, send /compact to compress the history, or /new to continue in a fresh session.",
+    "chat.context_recovery.failed_still_too_large": "Context is still too large after compressing the history as far as it will go. Your message was not lost.",
+    "chat.context_recovery.migrate_hint": " You can also send /compact migrate to carry a summary of this conversation into a fresh one and continue there.",
 }

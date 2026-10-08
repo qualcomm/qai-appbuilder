@@ -3,30 +3,40 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
 
-"""Resolve context-window size from discovered local model metadata.
+"""Context-window-size resolution chain (V1 parity).
 
-Pure-domain helper (no I/O, no framework imports). The infrastructure
-scanner (:mod:`qai.model_runtime.infrastructure.process_service`) reads
-``config.json`` and ``prompt.json`` and hands the parsed mappings to this
-pure-domain priority chain:
+Pure-domain helper (no I/O, no framework imports) that mirrors V1's
+``backend/models_registry.py:_read_context_size_from_model_dir``
+(lines 233-279) priority cascade for resolving a model's context-window
+size. V1 reads two on-disk files (``config.json`` + ``prompt.json``);
+the file-system access stays in the infrastructure layer
+(:mod:`qai.model_runtime.infrastructure.process_service`), which parses
+both JSON documents and hands the resulting ``dict`` objects to this
+chain.
+
+V1 priority order (``models_registry.py:235-239``)::
 
     1. config.json  dialog.context.size            (QNN/SSD authoritative)
     2. prompt.json  context_size                   (GenieAPIService ParsePromptFile)
     3. config.json  context_size / context_length / max_position_embeddings (GGUF/MNN)
+    4. default 8192
 
 The first source that yields a positive integer wins; a missing /
 malformed / non-positive value falls through to the next source. When
-every source abstains the chain returns ``None`` — this module never
-invents a context window; callers must preserve that unknown state
-rather than fabricating a default, since guessing would make downstream
-chat budgeting unsafe.
+every source abstains the chain returns the V1 default of ``8192`` so
+the GGUF/MNN ctx badge is never spuriously ``0`` (V1 parity — see
+``models_registry.py:279``).
 
 Design note — why a chain of pure functions
 --------------------------------------------
-Splits the *resolution policy* (this pure chain, unit-testable without
-touching disk) from the *I/O* (the infra scanner). Each source is a
-small named function so the priority order is declarative (``_CHAIN``
-tuple) and a new source can be slotted in without touching the others.
+V1 inlined the 4-step cascade in one ~46-line function with three
+nested ``try/except`` blocks reopening files. The V2 shape splits the
+*resolution policy* (this pure chain, unit-testable without touching
+disk) from the *I/O* (the infra scanner). Each source is a small named
+function so the priority order is declarative (``_CHAIN`` tuple) and a
+new source can be slotted in without touching the others — this is
+strictly easier to maintain / extend than the V1 monolith while
+producing byte-for-byte the same numbers.
 """
 
 from __future__ import annotations
@@ -35,8 +45,12 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 __all__ = [
+    "DEFAULT_CONTEXT_SIZE",
     "resolve_context_length",
 ]
+
+# V1 ``models_registry.py:279`` — final fallback when no source resolves.
+DEFAULT_CONTEXT_SIZE = 8192
 
 
 def _coerce_positive_int(value: Any) -> int | None:
@@ -119,10 +133,12 @@ _CHAIN: tuple[
 def resolve_context_length(
     config: Mapping[str, Any] | None,
     prompt: Mapping[str, Any] | None = None,
-) -> int | None:
-    """Return the first positive context window present in model metadata.
+) -> int:
+    """Resolve the context-window size from parsed model metadata.
 
-    Walks the priority chain; returns the first source's positive integer.
+    Walks the V1 priority chain; returns the first source's positive
+    integer, or :data:`DEFAULT_CONTEXT_SIZE` (8192) when every source
+    abstains (V1 parity).
 
     Args:
         config: Parsed ``config.json`` mapping (or ``None`` when absent /
@@ -131,13 +147,11 @@ def resolve_context_length(
             model has no ``prompt.json``).
 
     Returns:
-        A positive context-window size, or ``None`` when the metadata does
-        not declare a usable context length. Callers must preserve that
-        unknown state; guessing a default would make downstream chat
-        budgeting unsafe.
+        A positive context-window size; never ``0`` (V1 returns 8192
+        when nothing resolves).
     """
     for source in _CHAIN:
         resolved = source(config, prompt)
         if resolved is not None:
             return resolved
-    return None
+    return DEFAULT_CONTEXT_SIZE

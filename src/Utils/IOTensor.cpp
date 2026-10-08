@@ -677,7 +677,7 @@ iotensor::StatusCode iotensor::IOTensor::allocateBuffer(T** buffer, size_t& elem
             elementCount,
             sizeof(T),
             elementCount * sizeof(T));
-  *buffer = (T*)calloc(elementCount, sizeof(T));
+  *buffer = (T*)malloc(elementCount * sizeof(T));
   if (nullptr == *buffer) {
     QNN_ERROR("mem alloc failed for *buffer");
     return StatusCode::FAILURE;

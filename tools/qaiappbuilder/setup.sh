@@ -4,33 +4,20 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
 # setup.sh — Ubuntu 一键初始化（x86_64 & aarch64）
-# Usage: bash setup.sh [--frontend]
+# Usage: bash setup.sh [--no-frontend]
 #
 # Idempotent: safe to run multiple times; only fills in what is missing.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FRONTEND=0
+NO_FRONTEND=0
 
 # ---------------------------------------------------------------------------
 # Parse arguments
 # ---------------------------------------------------------------------------
 for arg in "$@"; do
   case "$arg" in
-    --frontend) FRONTEND=1 ;;
-    -h|--help)
-      cat <<'EOF'
-Usage: bash setup.sh [--frontend]
-
-Set up QAI ModelBuilder on Linux. Frontend installation and build are skipped
-by default; pass --frontend to bootstrap project-local Node/pnpm and build it.
-
-Options:
-  --frontend  Install frontend dependencies and build frontend/dist
-  -h, --help  Show this help and exit
-EOF
-      exit 0
-      ;;
+    --no-frontend) NO_FRONTEND=1 ;;
     *) echo "Unknown argument: $arg" >&2; exit 1 ;;
   esac
 done
@@ -50,6 +37,9 @@ detect_arch() {
   esac
 }
 
+# Version number from "X.Y.Z ..." style output
+version_major() { echo "$1" | grep -oE '[0-9]+' | head -1; }
+
 # ---------------------------------------------------------------------------
 # Step 01 — Python 3.12
 # ---------------------------------------------------------------------------
@@ -64,21 +54,37 @@ PYTHON=$(command -v python3.12)
 info "  found: $($PYTHON --version)"
 
 # ---------------------------------------------------------------------------
-# Steps 02/03 — project-local Node.js >= 22 and pnpm >= 9
+# Step 02 — Node.js >= 22
 # ---------------------------------------------------------------------------
-if [[ "$FRONTEND" -eq 1 ]]; then
-  info "Steps 02/03: bootstrapping project-local Node.js >= 22 and pnpm >= 9..."
-  NODE_BOOTSTRAP="$REPO_ROOT/scripts/setup/node_bootstrap.sh"
-  if [[ ! -f "$NODE_BOOTSTRAP" ]]; then
-    error "Node bootstrap helper not found: $NODE_BOOTSTRAP"
+if [[ "$NO_FRONTEND" -eq 0 ]]; then
+  info "Step 02: checking Node.js >= 22..."
+  if ! command -v node &>/dev/null; then
+    error "node not found.
+  Install with (replace 'amd64' with 'arm64' for aarch64):
+    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+    sudo apt install -y nodejs
+  Or use nvm: curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+             nvm install 22"
   fi
-  export REPO_ROOT
-  # shellcheck source=scripts/setup/node_bootstrap.sh
-  source "$NODE_BOOTSTRAP"
-  info "  found: Node.js $(node --version)"
+  NODE_MAJOR=$(version_major "$(node --version)")
+  if [[ "$NODE_MAJOR" -lt 22 ]]; then
+    error "Node.js >= 22 required (found $(node --version)). Please upgrade."
+  fi
+  info "  found: $(node --version)"
+
+  # Step 03 — pnpm >= 9
+  info "Step 03: checking pnpm >= 9..."
+  if ! command -v pnpm &>/dev/null; then
+    error "pnpm not found.
+  Install with: npm install -g pnpm"
+  fi
+  PNPM_MAJOR=$(version_major "$(pnpm --version)")
+  if [[ "$PNPM_MAJOR" -lt 9 ]]; then
+    error "pnpm >= 9 required (found $(pnpm --version)). Run: npm install -g pnpm"
+  fi
   info "  found: pnpm $(pnpm --version)"
 else
-  info "Steps 02/03: frontend skipped by default (pass --frontend to enable)"
+  info "Step 02/03: skipped (--no-frontend)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -257,23 +263,23 @@ fi
 # ---------------------------------------------------------------------------
 # Step 08 — frontend: install dependencies
 # ---------------------------------------------------------------------------
-if [[ "$FRONTEND" -eq 1 ]]; then
+if [[ "$NO_FRONTEND" -eq 0 ]]; then
   info "Step 08: installing frontend dependencies (pnpm install)..."
   pnpm -C "$REPO_ROOT/frontend" install
   info "  frontend dependencies installed"
 else
-  info "Step 08: frontend skipped by default (pass --frontend to enable)"
+  info "Step 08: skipped (--no-frontend)"
 fi
 
 # ---------------------------------------------------------------------------
 # Step 09 — frontend: build
 # ---------------------------------------------------------------------------
-if [[ "$FRONTEND" -eq 1 ]]; then
+if [[ "$NO_FRONTEND" -eq 0 ]]; then
   info "Step 09: building frontend (pnpm build)..."
   pnpm -C "$REPO_ROOT/frontend" build
   info "  frontend built → frontend/dist/"
 else
-  info "Step 09: frontend skipped by default (pass --frontend to enable)"
+  info "Step 09: skipped (--no-frontend)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -311,16 +317,7 @@ if [[ -d "$REPO_ROOT/data/secrets" ]]; then
   chmod 700 "$REPO_ROOT/data/secrets"
   info "  data/secrets permissions set to 700"
 fi
-
 # ---------------------------------------------------------------------------
-# Steps 10b/11/11b/11c/11d — QAIRT SDK install + config + deps
-# ---------------------------------------------------------------------------
-# QAIRT SDK has no macOS build (its "soc"/arch validity markers are only
-# x86_64-windows-msvc / aarch64-windows-msvc / x86_64-linux-clang /
-# aarch64-oe-linux-gcc11.2 -- never darwin), so model conversion / on-device
-# HTP inference are Windows/Linux-only. Installing it on macOS would just
-# download ~2GB of binaries nothing on this host can run.
-if [[ "$OS_TYPE" != "darwin" ]]; then
 # Step 10b — install QAIRT SDK
 # ---------------------------------------------------------------------------
 # The model-builder tools below require real SDK binaries.  Generating
@@ -430,10 +427,6 @@ else
   warn "python_x64_venv not executable ('$_VENV_X64_PYTHON') — skipping Step 11d"
 fi
 fi  # end: skip Step 11d on linux/aarch64
-else
-  info "Step 10b/11/11b/11c/11d: skipped (macOS has no QAIRT SDK build;"
-  info "  model conversion / on-device HTP inference are Windows/Linux-only)"
-fi  # end: skip Steps 10b-11d on macOS
 
 # ---------------------------------------------------------------------------
 # Step 11e — extra Python packages (onnx / onnxruntime / onnxsim, pinned)
@@ -476,10 +469,10 @@ if [[ "$ARCH" == "aarch64" ]]; then
 else
   echo "  Infer venv   : skipped (aarch64-only)"
 fi
-if [[ "$FRONTEND" -eq 1 ]]; then
+if [[ "$NO_FRONTEND" -eq 0 ]]; then
   echo "  Frontend     : frontend/dist/ (built)"
 else
-  echo "  Frontend     : skipped by default (pass --frontend to enable, or run build.sh)"
+  echo "  Frontend     : skipped (--no-frontend)"
 fi
 echo ""
 echo "  Next steps:"

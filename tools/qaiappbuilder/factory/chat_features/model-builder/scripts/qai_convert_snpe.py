@@ -37,12 +37,7 @@ def detect_host_toolchain():
         if machine.lower() in ["amd64", "x86_64", "x64"]:
             return "x86_64-linux-clang"
         elif machine.lower() in ["arm64", "aarch64"]:
-            # NOT delegated to _host_arch.sdk_bin_subdir(): this function
-            # returns the dir holding the CONVERTER, which on Windows-ARM64
-            # differs (arm64x-windows-msvc, above) from the runtime dir that
-            # sdk_bin_subdir() returns (aarch64-windows-msvc).
-            # Was "aarch64-linux-clang", which exists in no QAIRT SDK.
-            return "aarch64-oe-linux-gcc11.2"
+            return "aarch64-linux-clang"
 
     
     # Default fallback

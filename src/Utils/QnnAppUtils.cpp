@@ -200,8 +200,8 @@ bool qnn_app::deepCopyQnnTensorInfo(Qnn_Tensor_t *dst, const Qnn_Tensor_t *src) 
     qParams.axisScaleOffsetEncoding.numScaleOffsets =
         QNN_TENSOR_GET_QUANT_PARAMS(src).axisScaleOffsetEncoding.numScaleOffsets;
     if (QNN_TENSOR_GET_QUANT_PARAMS(src).axisScaleOffsetEncoding.numScaleOffsets > 0) {
-      qParams.axisScaleOffsetEncoding.scaleOffset = (Qnn_ScaleOffset_t *)calloc(
-          QNN_TENSOR_GET_QUANT_PARAMS(src).axisScaleOffsetEncoding.numScaleOffsets,
+      qParams.axisScaleOffsetEncoding.scaleOffset = (Qnn_ScaleOffset_t *)malloc(
+          QNN_TENSOR_GET_QUANT_PARAMS(src).axisScaleOffsetEncoding.numScaleOffsets *
           sizeof(Qnn_ScaleOffset_t));
       if (qParams.axisScaleOffsetEncoding.scaleOffset) {
         for (size_t idx = 0;

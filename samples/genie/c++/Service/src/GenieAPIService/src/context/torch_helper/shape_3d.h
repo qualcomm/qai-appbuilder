@@ -22,8 +22,7 @@ Shape_3D<T> concat_3d_list(const std::vector<Shape_3D<T>> &inputs, int dim)
         throw std::invalid_argument("dim must be 0, 1, or 2");
 
     // Use first tensor as reference for non-concat dims
-    const Shape_3D<T> *ref_ptr = &inputs[0];
-    const Shape_3D<T> &ref = *ref_ptr;
+    const Shape_3D<T> &ref = inputs[0];
     if (ref.d0 < 0 || ref.d1 < 0 || ref.d2 < 0)
         throw std::invalid_argument("invalid reference dims");
 

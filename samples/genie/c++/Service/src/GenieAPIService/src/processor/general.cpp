@@ -67,12 +67,24 @@ std::tuple<bool, std::string> GeneralProcessor::preprocessStream(std::string &ch
                 chunkText = fixed_chunk;
             }
         }
-        // 注：原"情况2"（per-chunk 裸 JSON 检测：要求单个 chunk 同时以 '{' 开头且含 "name"）
-        // 已删除——token 逐个到达时 '{' 与 "name" 几乎不会落在同一个 chunk 里，实际上是
-        // 死代码，且一旦误触发会在半条消息上做不完整的标签包装。裸 JSON（无 <tool_call>
-        // 标签）检测已改为生成结束后对完整可见文本做一次 ResponseTools::DetectBareToolCall()
-        // （response_dispatcher.cpp finalize_generation_result，即"Layer -1"），配合流式
-        // hold-back 机制防止畸形内容提前泄漏给客户端，见 response_tools.md。
+        // ── 情况2：裸 JSON 工具调用（无 <tool_call> 标签，直接以 '{' 开头）──
+        // 模型有时会省略 <tool_call> 标签，直接输出 JSON 对象。
+        // 判断条件：以 '{' 开头，且包含 "name" 字段（工具调用的必要字段）。
+        // 为避免误判普通 JSON 输出，同时要求不包含 "</tool_call>"（避免重复包装）。
+        else if (!chunkText.empty() && chunkText[0] == '{' &&
+                 chunkText.find("\"name\"") != std::string::npos &&
+                 chunkText.find(Utils::END_TAG) == std::string::npos)
+        {
+            // 找到最后一个 '}' 作为 JSON 结束位置，补全标签对
+            size_t last_brace = chunkText.rfind('}');
+            if (last_brace != std::string::npos) {
+                std::string fixed_chunk = Utils::START_TAG + chunkText.substr(0, last_brace + 1) + Utils::END_TAG;
+                My_Log{My_Log::Level::kWarning}
+                    << "[Format Parser] Detected bare JSON tool call (no <tool_call> tag). "
+                    << "Auto-wrapping with <tool_call>...</tool_call>." << std::endl;
+                chunkText = fixed_chunk;
+            }
+        }
     }
 
     for (ptrdiff_t i = 0; i < static_cast<ptrdiff_t>(chunkText.size()); ++i)

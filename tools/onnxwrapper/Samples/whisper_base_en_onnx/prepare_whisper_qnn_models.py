@@ -11,22 +11,11 @@ import shutil
 import platform
 from pathlib import Path
 
-import ssl
 import requests
 from tqdm import tqdm
 import urllib.request as request
 import qai_hub
 
-
-
-def _is_ssl_error(exc) -> bool:
-    # Best-effort detection of a TLS/certificate-verification failure, as
-    # opposed to a generic network error (DNS, timeout, connection refused)
-    # that an insecure retry would not help with anyway.
-    if isinstance(exc, ssl.SSLError):
-        return True
-    text = str(exc).lower()
-    return "certificate" in text or "ssl" in text or "tls" in text
 
 
 HUB_ID_Q = "a916bc04400e033f60fdd73c615e5780e2ba206a"  # default hub token used by download_qai_hubmodel
@@ -101,11 +90,8 @@ def verify_package(url, filepath, filesize=None, desc=None, fail=None):
         if filesize is not None:
             actual_size = filesize
         else:
-            try:
-                response = request.urlopen(url)
-                actual_size = int(response.headers["Content-Length"])
-            except Exception:
-                actual_size = -1  # could not verify remote size; treat as not ready
+            response = request.urlopen(url)
+            actual_size = int(response.headers["Content-Length"])
         if actual_size == local_size:
             return True
         else:
@@ -120,20 +106,23 @@ def verify_package(url, filepath, filesize=None, desc=None, fail=None):
 
 
 def download_url_requests(url, filepath, filesize=None, desc=None, fail=None, chunk_size=8192):
+    # Disable warning for insecure request since we set 'verify=False'.
+    from requests.packages.urllib3.exceptions import InsecureRequestWarning
+    requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
     if verify_package(url, filepath, filesize, desc, fail):
         return True
 
     os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
 
-    if desc is not None:
-        print(desc)
-
-    def _fetch(verify):
-        response = requests.get(url, stream=True, verify=verify)
+    try:
+        response = requests.get(url, stream=True, verify=False)
         if response.status_code != 200:
             raise ValueError(f"Unable to download file at {url}")
         total_size = int(response.headers.get("content-length", 0))
+
+        if desc is not None:
+            print(desc)
 
         with tqdm(total=total_size, unit="B", unit_scale=True, desc=os.path.basename(filepath)) as bar:
             with open(filepath, "wb") as f:
@@ -142,18 +131,8 @@ def download_url_requests(url, filepath, filesize=None, desc=None, fail=None, ch
                         continue
                     f.write(data)
                     bar.update(len(data))
-
-    try:
-        _fetch(True)
         return True
-    except Exception as e:
-        if _is_ssl_error(e):
-            print(f"TLS certificate verification failed ({e}); retrying once without certificate verification...")
-            try:
-                _fetch(False)
-                return True
-            except Exception as e2:
-                e = e2
+    except Exception:
         print()
         if fail is not None:
             print(fail)

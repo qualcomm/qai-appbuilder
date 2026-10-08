@@ -19,7 +19,6 @@ Example:
 from __future__ import annotations
 
 import argparse
-import io
 import os
 import runpy
 import sys
@@ -77,38 +76,10 @@ def main() -> int:
                     "  cp factory/chat_features/model-builder/scripts/onnxwrapper_x86.py ./onnxwrapper.py"
                 )
 
-    # Save stdout/stderr before QNN runtime may redirect them.
-    # qai_appbuilder / QNN DLLs may redirect stdout/stderr at the C level
-    # during initialization. Save the original file descriptors so we can
-    # restore them before the user script runs.
-    # AttributeError matters: under pythonw / a detached process sys.stdout is
-    # None, so `sys.stdout.fileno()` raises AttributeError, not OSError.
-    _saved_stdout_fd = -1
-    _saved_stderr_fd = -1
-    try:
-        _saved_stdout_fd = os.dup(sys.stdout.fileno())
-        _saved_stderr_fd = os.dup(sys.stderr.fileno())
-    except (AttributeError, OSError, io.UnsupportedOperation):
-        pass
-
     import onnxwrapper as _ort
 
     # Hot-patch: make `import onnxruntime as ort` resolve to the QNN wrapper.
     sys.modules["onnxruntime"] = _ort
-
-    # Restore stdout/stderr so user script output is visible.
-    if _saved_stdout_fd >= 0:
-        try:
-            os.dup2(_saved_stdout_fd, sys.stdout.fileno())
-            os.close(_saved_stdout_fd)
-        except (AttributeError, OSError, io.UnsupportedOperation):
-            pass
-    if _saved_stderr_fd >= 0:
-        try:
-            os.dup2(_saved_stderr_fd, sys.stderr.fileno())
-            os.close(_saved_stderr_fd)
-        except (AttributeError, OSError, io.UnsupportedOperation):
-            pass
 
     sys.argv = [args.script, *args.script_args]
     runpy.run_path(args.script, run_name="__main__")

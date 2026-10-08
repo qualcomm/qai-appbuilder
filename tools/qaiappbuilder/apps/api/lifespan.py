@@ -40,7 +40,6 @@ from .di import Container
 if TYPE_CHECKING:  # pragma: no cover
     from fastapi import FastAPI
 
-    from qai.app_builder.infrastructure import StickyWorkerHost
     from qai.platform.scheduling import BackgroundTaskManager
 
 _log = get_logger(__name__)
@@ -847,44 +846,6 @@ def make_lifespan(
         except Exception:  # noqa: BLE001 — spawn must never abort startup
             _log.warning(
                 "lifespan.cloud_model_permissions_scan_spawn_failed",
-                exc_info=True,
-            )
-
-        # qai-service model-roster sync — one GET /v1/models against the
-        # live broker, folding any real models it returns into the stored
-        # provider config alongside the route-1 pseudo-model (which always
-        # stays first / the default). Best-effort + non-blocking, same
-        # shape as the permission scan above: no JWT yet (fresh install /
-        # never logged in) degrades to a clean no-op, never raises, never
-        # delays "ready to serve".
-        try:
-            _sync_qai_models_uc = (
-                container.model_catalog.sync_qai_service_models_use_case
-            )
-
-            async def _run_qai_service_model_sync() -> None:
-                try:
-                    result = await _sync_qai_models_uc.execute()
-                    if result.added or result.removed:
-                        _log.info(
-                            "lifespan.qai_service_models_synced",
-                            added=result.added,
-                            removed=result.removed,
-                        )
-                except Exception:  # noqa: BLE001 — sync must never surface
-                    _log.warning(
-                        "lifespan.qai_service_models_sync_failed",
-                        exc_info=True,
-                    )
-
-            asyncio.create_task(
-                _run_qai_service_model_sync(),
-                name="qai-service-model-sync",
-            )
-            _log.info("lifespan.qai_service_models_sync_spawned")
-        except Exception:  # noqa: BLE001 — spawn must never abort startup
-            _log.warning(
-                "lifespan.qai_service_models_sync_spawn_failed",
                 exc_info=True,
             )
 
@@ -2142,113 +2103,6 @@ def _resolve_native_guard_trust_token(container: Container) -> str | None:
         return None
 
 
-async def _build_sticky_worker_host(container: Container) -> "StickyWorkerHost":
-    """Build the persistent sticky-worker spec and spawn a fresh host.
-
-    Raises on any failure (missing app_builder context, missing
-    repo_root, interpreter resolution, or the spawn/handshake itself) —
-    this is the shared "do the real work" body for two different
-    failure policies:
-
-    * :func:`_spawn_sticky_worker` (boot-time) wraps this in a
-      try/except for graceful degradation (a bad SDK must never abort
-      application startup).
-    * ``_build_sticky_worker_lifecycle``'s ``spawn_host`` closure (QAIRT
-      SDK hot-switch) calls this UNWRAPPED, so a spawn failure after a
-      switch propagates as the transaction's rollback trigger instead of
-      silently leaving no worker running.
-    """
-    from qai.app_builder.infrastructure import (
-        StickyWorkerHost,
-        build_persistent_bootstrap_spec,
-    )
-    from qai.app_builder.infrastructure.app_manifest import (
-        select_runner_interpreter,
-    )
-
-    if not hasattr(container, "app_builder"):
-        raise RuntimeError("app_builder context is not built")
-    repo_root = getattr(container, "repo_root", None)
-    if repo_root is None:
-        raise RuntimeError("container.repo_root is not set")
-
-    # Resolve the same ARM64 venv interpreter + QAIRT SDK extras the
-    # one-shot Pack runner uses (so the resident worker loads the QNN
-    # runtime DLLs identically). ``select_runner_interpreter`` returns
-    # a ``SysExecutableResolver`` when no ``qairt_env.json`` is present
-    # (dev / non-NPU) — the spawn still works against sys.executable,
-    # and a non-NPU runner simply fails to load the model later
-    # (surfaced as a normal error, fallback handles it).
-    interpreter = select_runner_interpreter(
-        qairt_env_file=getattr(container, "qairt_env_file", None),
-        repo_root=repo_root,
-    )
-    python_exe = interpreter.resolve()
-
-    # Merge the QAIRT SDK env + PATH extras the same way the one-shot
-    # resolver's ``_materialise_env`` does, so the worker subprocess
-    # finds ``QAIRT_ROOT`` / the QNN DLLs on ``PATH``.
-    import os as _os
-
-    base_env = dict(_os.environ)
-    extra_env_fn = getattr(interpreter, "extra_env", None)
-    if callable(extra_env_fn):
-        for _k, _v in extra_env_fn().items():
-            base_env[str(_k)] = str(_v)
-    path_segments_fn = getattr(interpreter, "path_segments", None)
-    if callable(path_segments_fn):
-        segments = path_segments_fn()
-        if segments:
-            prefix = _os.pathsep.join(str(s) for s in segments)
-            existing = base_env.get("PATH", "")
-            base_env["PATH"] = (
-                prefix + (_os.pathsep + existing if existing else "")
-            )
-
-    # 缺口 10: inject the live global proxy at spawn time so the resident
-    # sticky-worker's first model download (``load_model`` ->
-    # ``_ensure_weights_downloaded``) routes through the proxy. The sticky
-    # worker is long-lived; a proxy change applied at runtime takes effect
-    # on next restart (V1 parity — service-level proxy). One-shot spawns
-    # read the live proxy at each spawn via the command_resolver.
-    try:
-        from ._global_proxy import build_global_proxy_provider as _bgp
-
-        _proxy_url = _bgp(container)()
-        if _proxy_url:
-            for _pkey in (
-                "HTTPS_PROXY", "https_proxy",
-                "HTTP_PROXY", "http_proxy",
-                "ALL_PROXY", "all_proxy",
-            ):
-                base_env[_pkey] = _proxy_url
-    except Exception:  # noqa: BLE001 — proxy must never block spawn
-        _log.debug(
-            "lifespan.sticky_worker_proxy_injection_failed", exc_info=True
-        )
-
-    shared_dir = getattr(container, "app_builder_shared_dir", None)
-    if shared_dir is None:
-        candidate = Path(repo_root).joinpath(
-            "factory", "chat_features", "app-builder", "shared"
-        )
-        if candidate.is_dir():
-            shared_dir = candidate
-
-    spec = build_persistent_bootstrap_spec(
-        python_exe=Path(python_exe),
-        shared_dir=shared_dir,
-        base_env=base_env,
-        trust_token=_resolve_native_guard_trust_token(container),
-    )
-    host = StickyWorkerHost(
-        bootstrap=spec,
-        event_bus=getattr(container, "events", None),
-    )
-    await host.spawn()
-    return host
-
-
 async def _spawn_sticky_worker(container: Container) -> None:
     """Spawn the persistent App Builder sticky worker (PR-302 wiring).
 
@@ -2272,8 +2126,99 @@ async def _spawn_sticky_worker(container: Container) -> None:
     "will spawn lazily on first use" semantics, realised here as
     "fall back to one-shot per run".
     """
+    if not hasattr(container, "app_builder"):
+        return
     try:
-        host = await _build_sticky_worker_host(container)
+        from qai.app_builder.infrastructure import (
+            StickyWorkerHost,
+            build_persistent_bootstrap_spec,
+        )
+        from qai.app_builder.infrastructure.app_manifest import (
+            select_runner_interpreter,
+        )
+    except Exception:  # noqa: BLE001 — import guard for non-app_builder builds
+        _log.warning("lifespan.sticky_worker_import_failed", exc_info=True)
+        return
+
+    try:
+        repo_root = getattr(container, "repo_root", None)
+        if repo_root is None:
+            return
+
+        # Resolve the same ARM64 venv interpreter + QAIRT SDK extras the
+        # one-shot Pack runner uses (so the resident worker loads the QNN
+        # runtime DLLs identically). ``select_runner_interpreter`` returns
+        # a ``SysExecutableResolver`` when no ``qairt_env.json`` is present
+        # (dev / non-NPU) — the spawn still works against sys.executable,
+        # and a non-NPU runner simply fails to load the model later
+        # (surfaced as a normal error, fallback handles it).
+        interpreter = select_runner_interpreter(
+            qairt_env_file=getattr(container, "qairt_env_file", None),
+            repo_root=repo_root,
+        )
+        python_exe = interpreter.resolve()
+
+        # Merge the QAIRT SDK env + PATH extras the same way the one-shot
+        # resolver's ``_materialise_env`` does, so the worker subprocess
+        # finds ``QAIRT_ROOT`` / the QNN DLLs on ``PATH``.
+        import os as _os
+
+        base_env = dict(_os.environ)
+        extra_env_fn = getattr(interpreter, "extra_env", None)
+        if callable(extra_env_fn):
+            for _k, _v in extra_env_fn().items():
+                base_env[str(_k)] = str(_v)
+        path_segments_fn = getattr(interpreter, "path_segments", None)
+        if callable(path_segments_fn):
+            segments = path_segments_fn()
+            if segments:
+                prefix = _os.pathsep.join(str(s) for s in segments)
+                existing = base_env.get("PATH", "")
+                base_env["PATH"] = (
+                    prefix + (_os.pathsep + existing if existing else "")
+                )
+
+        # 缺口 10: inject the live global proxy at spawn time so the resident
+        # sticky-worker's first model download (``load_model`` ->
+        # ``_ensure_weights_downloaded``) routes through the proxy. The sticky
+        # worker is long-lived; a proxy change applied at runtime takes effect
+        # on next restart (V1 parity — service-level proxy). One-shot spawns
+        # read the live proxy at each spawn via the command_resolver.
+        try:
+            from ._global_proxy import build_global_proxy_provider as _bgp
+
+            _proxy_url = _bgp(container)()
+            if _proxy_url:
+                for _pkey in (
+                    "HTTPS_PROXY", "https_proxy",
+                    "HTTP_PROXY", "http_proxy",
+                    "ALL_PROXY", "all_proxy",
+                ):
+                    base_env[_pkey] = _proxy_url
+        except Exception:  # noqa: BLE001 — proxy must never block spawn
+            _log.debug(
+                "lifespan.sticky_worker_proxy_injection_failed", exc_info=True
+            )
+
+        shared_dir = getattr(container, "app_builder_shared_dir", None)
+        if shared_dir is None:
+            candidate = Path(repo_root).joinpath(
+                "factory", "chat_features", "app-builder", "shared"
+            )
+            if candidate.is_dir():
+                shared_dir = candidate
+
+        spec = build_persistent_bootstrap_spec(
+            python_exe=Path(python_exe),
+            shared_dir=shared_dir,
+            base_env=base_env,
+            trust_token=_resolve_native_guard_trust_token(container),
+        )
+        host = StickyWorkerHost(
+            bootstrap=spec,
+            event_bus=getattr(container, "events", None),
+        )
+        await host.spawn()
         container.sticky_worker_host = host  # type: ignore[attr-defined]
         _log.info("lifespan.sticky_worker_spawned", state=host.state)
     except Exception:  # noqa: BLE001 — spawn failure must never abort startup
@@ -2282,7 +2227,6 @@ async def _spawn_sticky_worker(container: Container) -> None:
             "(runs fall back to one-shot)",
             exc_info=True,
         )
-
 
 
 #: H-1 — strong refs to fire-and-forget channel auto-start tasks so the

@@ -50,6 +50,7 @@ from qai.chat.application.use_cases._agentic_kernel import (
     PROTECT_WINDOW_RATIO as _DEFAULT_PROTECT_WINDOW_RATIO,
     CompactionCheckpoint,
     estimate_wire_tokens as _estimate_wire_tokens,
+    resolve_inter_round_threshold_ratio,
 )
 from qai.chat.domain.reference_ledger import ReferenceLedger
 
@@ -137,6 +138,26 @@ class CompactionCheckpointEngine:
         refresh_digest_uc: "RefreshDigestUseCase | None" = None,
         summarize_turn_prefix_uc: "SummarizeTurnPrefixUseCase | None" = None,
         prune_redundant: bool = True,
+        # ---- Background-work coordination (P0-safe serialisation) ----------
+        # Zero-arg predicate answering "is a main turn currently streaming?".
+        # When supplied, a background summary WAITS for it to go False before
+        # issuing its own LLM request, and gives up (skips) if it waits too
+        # long.
+        #
+        # Why: on a loopback on-device engine the summary's request competes for
+        # the KV cache, not just for throughput, and losing that race kills BOTH
+        # requests with "Context size has been exceeded" (surfacing as an empty
+        # HTTP 200). See ``StreamChatUseCase.is_main_turn_active`` for the
+        # measured numbers.
+        #
+        # ``None`` (default) keeps the prior fire-immediately behaviour, so every
+        # existing construction / unit stub is unchanged.
+        main_turn_active_probe: "Callable[[], bool] | None" = None,
+        # Patience before a waiting summary gives up and skips. Skipping is a
+        # safe outcome for the digest (its inputs are cumulative — see
+        # ``kick_digest_refresh``), which is why waiting is bounded rather than
+        # indefinite.
+        background_wait_budget_seconds: float = 300.0,
     ) -> None:
         # In-memory write-through cache: checkpoint_key (already prefixed) →
         # ``CompactionCheckpoint``. Process-lifetime (the owning use case is a
@@ -185,6 +206,11 @@ class CompactionCheckpointEngine:
         # handler passes ``False`` explicitly to stay byte-equivalent. Do NOT
         # "harmonise" these two defaults.
         self._prune_redundant = prune_redundant
+        # Background-work coordination (see the constructor params).
+        self._main_turn_active_probe = main_turn_active_probe
+        self._background_wait_budget_s = max(
+            0.0, float(background_wait_budget_seconds)
+        )
         # P2 (CONTEXT-COMPRESSION-NEXT §6): optional refresh-digest use case
         # + per-conversation task registry the ON_TRUNCATE caller fires
         # asynchronously. ``None`` disables the digest entirely — the wire-
@@ -293,6 +319,38 @@ class CompactionCheckpointEngine:
         self._consecutive_mid_turn_compacts.pop(
             self._full_key(checkpoint_key), None,
         )
+
+    def force_consecutive_mid_turn_at_least(
+        self, checkpoint_key: str, minimum: int
+    ) -> int:
+        """Raise the mid-turn counter to at least *minimum*; return the value.
+
+        P10 — used by the HARD context-overflow recovery path when it has
+        exhausted every compaction attempt and is about to fail the turn.
+
+        ``should_suggest_handoff`` gates the "migrate to a fresh conversation"
+        affordance on "3 mid-turn compactions without converging", but that
+        counter is only advanced by the PROACTIVE path. A turn that instead died
+        on a provider rejection which compaction could not repair is a STRONGER
+        signal of the same condition, yet arrived with the counter at whatever
+        the proactive path happened to leave — often 0 — so the user was told
+        "context is full" and offered no way forward.
+
+        Raising the existing counter (rather than introducing a parallel
+        "handoff needed" flag) keeps ONE definition of the condition, so the
+        REST response, the frontend CTA and the ``/compact migrate`` command all
+        light up through the path they already use.
+
+        Monotonic: never lowers a counter that is already higher. The digest
+        gate in ``should_suggest_handoff`` still applies — with no digest to
+        hand over there is nothing to migrate, and the suggestion stays hidden.
+        """
+        full = self._full_key(checkpoint_key)
+        current = self._consecutive_mid_turn_compacts.get(full, 0)
+        if current >= minimum:
+            return current
+        self._consecutive_mid_turn_compacts[full] = minimum
+        return minimum
 
     def should_suggest_handoff(self, checkpoint_key: str) -> bool:
         """True iff mid-turn count ≥ 3 AND the checkpoint has a digest.
@@ -565,25 +623,210 @@ class CompactionCheckpointEngine:
             return False
         return context_window >= SMALL_WINDOW_THRESHOLD
 
+    def cancel_background_summaries(self, *, reason: str) -> int:
+        """Cancel in-flight digest / turn-prefix tasks; return how many.
+
+        The main turn has PRIORITY over background summaries. Yielding (see
+        :meth:`_await_main_turn_idle`) only covers "a summary is kicked while a
+        turn runs"; this covers the reverse — a summary is already streaming
+        when a new turn starts. Without it the two still collide on a shared KV
+        pool and BOTH die with "Context size has been exceeded".
+
+        Cancelling is safe and cheap: these are coroutines (so cancellation
+        unwinds them properly, unlike an abandoned generator), a skipped digest
+        is an accepted outcome whose inputs are cumulative, and the user's turn
+        is worth far more than a summary refresh.
+
+        Non-blocking: requests cancellation and returns immediately.
+        """
+        cancelled = 0
+        for registry in (self._digest_refresh_tasks, self._turn_prefix_tasks):
+            for key, task in list(registry.items()):
+                if task is not None and not task.done():
+                    task.cancel()
+                    cancelled += 1
+                    _log.info(
+                        "chat.compaction.background_cancelled_for_main_turn",
+                        checkpoint_key=key,
+                        task_name=task.get_name(),
+                        reason=reason,
+                    )
+        return cancelled
+
+    async def stop_background_summaries(
+        self, *, reason: str, timeout_seconds: float = 5.0
+    ) -> int:
+        """Cancel in-flight summaries AND wait for them to actually unwind.
+
+        :meth:`cancel_background_summaries` only *requests* cancellation; the
+        tasks keep their HTTP connections open until the event loop resumes them.
+        That gap is enough to lose the race we are trying to win: the main turn's
+        request reaches the engine while the summaries' slots are still held, and
+        the shared KV pool overflows exactly as before.
+
+        So the turn waits — briefly and boundedly — for the cancellations to
+        land. This wait is safe, unlike the reverted per-stream lock: the awaited
+        objects are coroutine tasks that have already been cancelled, so they
+        unwind promptly; and the timeout means a stuck task degrades to the old
+        concurrent behaviour instead of blocking the turn.
+
+        Returns the number of tasks that were cancelled.
+        """
+        cancelled = self.cancel_background_summaries(reason=reason)
+        if not cancelled:
+            return 0
+        pending = [
+            t
+            for reg in (self._digest_refresh_tasks, self._turn_prefix_tasks)
+            for t in reg.values()
+            if t is not None and not t.done()
+        ]
+        if pending:
+            try:
+                await asyncio.wait(pending, timeout=max(0.0, timeout_seconds))
+            except Exception as exc:  # noqa: BLE001 — never block the turn
+                _log.debug(
+                    "chat.compaction.background_stop_wait_failed", error=str(exc)
+                )
+        still_running = sum(
+            1
+            for reg in (self._digest_refresh_tasks, self._turn_prefix_tasks)
+            for t in reg.values()
+            if t is not None and not t.done()
+        )
+        if still_running:
+            _log.warning(
+                "chat.compaction.background_stop_timed_out",
+                still_running=still_running,
+                timeout_seconds=timeout_seconds,
+                note="proceeding anyway; may contend for the engine this turn",
+            )
+        return cancelled
+
+    async def _await_main_turn_idle(self, *, what: str, key: str) -> bool:
+        """Wait until no main turn is streaming. ``False`` => give up, skip.
+
+        Runs INSIDE the background task's own coroutine, which is what makes this
+        safe: a coroutine owns its whole lifetime, so it can poll, give up and
+        return without leaving anything locked. (Holding a lock on the main
+        turn's side was tried and deadlocked — the main stream is an async
+        generator that this codebase abandons mid-iteration.)
+
+        Returns ``True`` when the engine is free to use (immediately, or after
+        waiting). Returns ``False`` when the wait budget elapsed — the caller
+        then skips this refresh, which is a safe outcome (see
+        :meth:`kick_digest_refresh`) and strictly better than firing a request
+        that would kill both itself and the main turn on KV exhaustion.
+        """
+        probe = self._main_turn_active_probe
+        if probe is None:
+            return True
+        try:
+            if not probe():
+                return True
+        except Exception as exc:  # noqa: BLE001 — a bad probe must not block work
+            _log.debug("chat.compaction.turn_probe_failed", error=str(exc))
+            return True
+
+        waited = 0.0
+        step = 0.5
+        while waited < self._background_wait_budget_s:
+            await asyncio.sleep(step)
+            waited += step
+            try:
+                if not probe():
+                    _log.info(
+                        "chat.compaction.background_resumed_after_wait",
+                        what=what,
+                        checkpoint_key=key,
+                        waited_seconds=round(waited, 1),
+                    )
+                    return True
+            except Exception:  # noqa: BLE001
+                return True
+        _log.info(
+            "chat.compaction.background_skipped_main_turn_busy",
+            what=what,
+            checkpoint_key=key,
+            waited_seconds=round(waited, 1),
+            note=(
+                "a main turn held the engine for the whole wait budget; skipping "
+                "rather than racing it for the KV cache"
+            ),
+        )
+        return False
+
+    async def _digest_after_main_turn(
+        self, input: "RefreshDigestInput", full_key: str
+    ) -> None:
+        """Wait for the main turn to finish, then refresh the digest (or skip)."""
+        if not await self._await_main_turn_idle(what="digest", key=full_key):
+            return
+        assert self._refresh_digest_uc is not None  # guarded by the caller
+        await self._refresh_digest_uc.execute(input)
+
+    async def _turn_prefix_after_main_turn(
+        self, input: "SummarizeTurnPrefixInput", full_key: str
+    ) -> None:
+        """Wait for the main turn to finish, then summarise the prefix (or skip).
+
+        Skipping costs more here than for the digest: this summarises ONE
+        specific long turn's prefix rather than cumulative history, so a skipped
+        kick may permanently lose that turn's summary. It still yields, because
+        the alternative measured outcome is worse — racing the main turn for the
+        KV cache killed the main turn's request too.
+        """
+        if not await self._await_main_turn_idle(what="turn_prefix", key=full_key):
+            return
+        assert self._summarize_turn_prefix_uc is not None  # guarded by caller
+        await self._summarize_turn_prefix_uc.execute(input)
+
     def kick_digest_refresh(
         self,
         *,
         checkpoint_key: str,
         input: "RefreshDigestInput",
     ) -> None:
-        """Start a fire-and-forget digest refresh; cancel any prior task.
+        """Start a fire-and-forget digest refresh; SKIP if one is still running.
 
-        D8: two rapid compactions on the same conversation MUST NOT interleave
-        their digest writes — the newer inputs cover a strictly wider dropped
-        history, so we cancel the older task and start a fresh one. The
-        cancelled task's use case lets :class:`asyncio.CancelledError`
-        propagate on purpose so it does not persist stale text (see
-        :class:`RefreshDigestUseCase._execute_inner`).
+        P6 — "skip" replaces the former "cancel the old task and restart with
+        fresher inputs". That policy is correct when a summary completes faster
+        than the interval between compactions, and self-defeating when it does
+        not:
+
+        * a digest is one full LLM request, which on a slow on-device endpoint
+          takes tens of seconds to minutes (and now also queues behind the main
+          reply stream on the adapter's inflight lock — P0);
+        * with the small-window trigger (P2b) compaction fires roughly every
+          1-2 rounds.
+
+        So the summary was reliably cancelled before it could finish, every
+        time. The digest the model saw was whatever old snapshot happened to
+        complete once, and no work done after that point was EVER recorded —
+        which is what made the model repeat steps it had already completed
+        successfully.
+
+        Skipping is safe because the inputs are CUMULATIVE, not incremental:
+        ``dropped_wire`` comes from the assembled history (compacted head + the
+        increment past it), so whichever refresh does run sees the fullest
+        history available at that moment. A skipped kick delays the digest's
+        freshness; it cannot lose content. The persistence layer's own CAS
+        check independently rejects a stale write.
+
+        Cost of the trade: on a fast endpoint the digest can now be up to one
+        summary-duration staler than before. In practice a cloud summary
+        finishes in seconds and the skip branch is almost never taken, so
+        behaviour there is effectively unchanged.
+
+        NOT applied to ``kick_turn_prefix_summary``: that summarises one
+        SPECIFIC long turn's prefix rather than cumulative history, so skipping
+        a kick there can permanently lose that turn's summary. Different risk
+        profile, deliberately left on the old policy.
 
         No hard timeout: the LLM stream's own abort registry / provider
-        timeouts govern; here we only support cancellation via a NEXT kick.
-        A missing running event loop (sync test harness) is degraded to a
-        debug log — never raise into the caller's compaction hot path.
+        timeouts govern.  A missing running event loop (sync test harness) is
+        degraded to a debug log — never raise into the caller's compaction hot
+        path.
 
         ``checkpoint_key`` is un-prefixed (the SAME string the caller passes
         to :meth:`maybe_compress` / :meth:`get`); this method applies the
@@ -595,10 +838,19 @@ class CompactionCheckpointEngine:
         full_key = self._full_key(checkpoint_key)
         prev = self._digest_refresh_tasks.get(full_key)
         if prev is not None and not prev.done():
-            prev.cancel()
+            _log.info(
+                "chat.compaction.digest_kick_skipped_already_running",
+                checkpoint_key=full_key,
+                running_task_name=prev.get_name(),
+                note=(
+                    "letting the in-flight digest finish; its inputs are "
+                    "cumulative so no content is lost by skipping this kick"
+                ),
+            )
+            return
         try:
             task = asyncio.create_task(
-                self._refresh_digest_uc.execute(input),
+                self._digest_after_main_turn(input, full_key),
                 name=f"digest-refresh-{full_key[:16]}",
             )
         except RuntimeError:
@@ -674,7 +926,7 @@ class CompactionCheckpointEngine:
             prev.cancel()
         try:
             task = asyncio.create_task(
-                self._summarize_turn_prefix_uc.execute(input),
+                self._turn_prefix_after_main_turn(input, full_key),
                 name=f"turn-prefix-{full_key[:16]}",
             )
         except RuntimeError:
@@ -1018,7 +1270,17 @@ class CompactionCheckpointEngine:
             # actually gates the trigger.
             used = max(eff_send, bytes_estimate)
             measured_wire_tokens = used if used > 0 else None
-            threshold = int(context_limit * self._threshold_ratio)
+            # P2b: small windows compact EARLIER than the configured ratio.
+            # One-way clamp (``min(configured, 0.65)``) so an operator who
+            # already tuned the trigger lower keeps their value — this can only
+            # ever make compaction fire sooner. ``context_limit`` here is the
+            # P2c-resolved REAL window (the caller threads it in), so a
+            # 32768-window model genuinely takes the small-window branch
+            # instead of being judged against a guessed 131072.
+            effective_threshold_ratio = resolve_inter_round_threshold_ratio(
+                self._threshold_ratio, context_limit,
+            )
+            threshold = int(context_limit * effective_threshold_ratio)
             if used_with_overhead < threshold:
                 return None
             _log.info(
@@ -1032,6 +1294,8 @@ class CompactionCheckpointEngine:
                 used_with_overhead=used_with_overhead,
                 context_limit=context_limit,
                 threshold=threshold,
+                threshold_ratio=effective_threshold_ratio,
+                threshold_ratio_configured=self._threshold_ratio,
                 messages_before=len(assembled),
                 anchor=anchor_index,
             )

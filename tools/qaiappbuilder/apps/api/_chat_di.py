@@ -1330,6 +1330,17 @@ def build_chat_services(container: Container) -> ChatServices:
     _resolver_base_url = getattr(chat_settings, "llm_base_url", None) or None
     _resolver_api_key = getattr(chat_settings, "llm_api_key", None) or None
     _resolver_model = getattr(chat_settings, "llm_default_model", None) or "qai-default"
+
+    # ---- P1 (slow on-device decoding): inter-frame stall budget -------------
+    # ONE resolved value shared by the main turn (``StreamChatUseCase``) and
+    # the sub-agent turn (``AgentToolHandler``) so the two loops can never
+    # drift. Operator knob: ``[chat] frame_stall_budget_seconds`` in
+    # ``factory/config/server.toml`` or ``QAI_CHAT__FRAME_STALL_BUDGET_SECONDS``.
+    # The ``getattr`` fallback keeps minimal-container test compositions (whose
+    # settings object predates the field) on the historical 600s.
+    _frame_stall_budget_s = float(
+        getattr(chat_settings, "frame_stall_budget_seconds", 600.0) or 0.0
+    )
     # Provider-aware lookup: route a selected cloud model id to its owning
     # provider's base_url + api_key.  The cross-context read of the
     # model_catalog provider registry + the platform SecretStore lives in
@@ -1346,9 +1357,6 @@ def build_chat_services(container: Container) -> ChatServices:
         _provider_lookup = ModelCatalogProviderLookupBridge(
             provider_registry=_provider_registry,
             secret_store=getattr(container, "secret_store", None),
-            local_models=getattr(
-                getattr(container, "model_runtime", None), "list_models_use_case", None
-            ),
         )
     # Local Genie service endpoint provider (V1 ``_stream_local`` parity):
     # resolves ``http://127.0.0.1:<port>/v1`` from the live model_runtime
@@ -1358,6 +1366,12 @@ def build_chat_services(container: Container) -> ChatServices:
     from ._local_service_endpoint_bridge import (
         make_local_service_endpoint_provider,
     )
+    # P2c — real per-model context window (models directory / on-device
+    # artefact / cloud catalog). Imported here, at the composition root, for
+    # the same layering reason as the endpoint bridge above: ``qai.chat`` may
+    # not import ``qai.model_runtime`` / ``qai.model_catalog``, so the resolver
+    # is composed here and injected as a plain async callable.
+    from ._context_window_bridge import make_context_window_resolver
 
     _local_endpoint_provider = make_local_service_endpoint_provider(container)
     model_resolver: ModelResolverPort = ProviderAwareModelResolver(
@@ -1440,6 +1454,17 @@ def build_chat_services(container: Container) -> ChatServices:
         timeout_seconds=_resolve_cloud_stream_timeout(
             getattr(container.settings, "chat", None)
         ),
+        # Content-stall ceiling for LOOPBACK endpoints (a model registered as a
+        # provider endpoint but physically served on this machine). Without
+        # this, such a turn falls under the tight 60s "plain text turn" budget,
+        # which is shorter than the PREFILL of a large prompt on a slow local
+        # engine — so every compaction summary (digest / turn-prefix) was killed
+        # before emitting a single token.
+        content_stall_budget_seconds=float(
+            getattr(chat_settings, "llm_content_stall_budget_seconds", 900.0)
+            or 0.0
+        )
+        or None,
         # Unified SSL switch: per-provider cloud transports built by the
         # routing wrapper must honour ``Settings.ssl_verify`` exactly like the
         # ``default_stream`` (see ``_build_llm_stream`` below). Omitting this
@@ -1772,7 +1797,6 @@ def build_chat_services(container: Container) -> ChatServices:
             # ``max_rounds=5`` (profile-level override takes precedence).
             max_rounds=0,
             compressor=context_compressor,
-            context_windows=_provider_lookup,
             tool_result_truncator=tool_result_truncator,
             # Differential-checkpoint compaction (V2 enhancement): the sub-agent
             # NEWs its own ``CompactionCheckpointEngine`` internally (ephemeral,
@@ -1789,9 +1813,13 @@ def build_chat_services(container: Container) -> ChatServices:
             tool_concurrency=tool_concurrency,
             # P4 — share the SAME retry policy + abort-aware sleeper the main
             # use case uses, so the sub-agent's per-round LLM stream gets the
-            # SAME indefinite NETWORK auto-retry + abortable backoff. Default
-            # ``frame_stall_budget_s`` (600s) matches the main agent's value.
+            # SAME indefinite NETWORK auto-retry + abortable backoff.
             retry_policy=retry_policy,
+            # P1 — the SAME operator-configured stall budget the main use case
+            # gets (``[chat] frame_stall_budget_seconds``), so a slow on-device
+            # endpoint does not cancel sub-agent turns that the main turn would
+            # have tolerated.
+            frame_stall_budget_s=_frame_stall_budget_s,
             # P9 — share the SAME per-turn ``GuardrailPort`` factory the
             # main use case uses. Each sub-agent run instantiates its own
             # controller (per-turn accumulators do not leak across runs).
@@ -2506,7 +2534,6 @@ def build_chat_services(container: Container) -> ChatServices:
         context_compressor=context_compressor,
         prompt_snapshot_store=prompt_snapshot_store,
         provider_cache_registry=provider_cache_registry,
-        context_windows=_provider_lookup,
         budget_tracker=enforcement_tracker,
         budget_raise_pct=int(
             getattr(chat_settings, "chat_budget_raise_pct", 20)
@@ -2552,6 +2579,34 @@ def build_chat_services(container: Container) -> ChatServices:
         refresh_digest_uc=refresh_digest_uc,
         summarize_turn_prefix_uc=summarize_turn_prefix_uc,
         conversation_write_queue=conversation_write_queue,
+        # P1 — operator-configured inter-frame stall budget (see the shared
+        # ``_frame_stall_budget_s`` above; also handed to the sub-agent handler).
+        frame_stall_budget_seconds=_frame_stall_budget_s,
+        # P2c — resolve each model's REAL configured context window (models
+        # directory / on-device artefact metadata / cloud-models catalog)
+        # instead of guessing it from the model NAME. Without this, a locally
+        # registered model whose name happens to contain a known family string
+        # (e.g. ``Glymur_QWEN3.8`` → matched as "qwen3" → 131072) is sized 4x
+        # too large, which puts the compaction trigger beyond the real window
+        # and lets the prompt grow until the model truncates the round.
+        context_window_resolver=make_context_window_resolver(container),
+        # P4 — the SAME resolver instance the routing transport uses, so the use
+        # case can learn (before assembling the prompt / tool set) whether this
+        # turn's endpoint is a loopback address, i.e. "cloud-routed but
+        # physically on-device". Such a turn then gets the lean on-device system
+        # prompt + the 8-tool lean set instead of a ~12KB prompt with ~19 tool
+        # schemas, which on a slow local engine is seconds of prefill before the
+        # first token.
+        model_resolver=model_resolver,
+        # P0c — a turn counts as "still alive" for at least as long as the
+        # transport would tolerate silence from it. Same value as the loopback
+        # content-stall budget on purpose: a turn emits no frames while it
+        # prefills, so anything shorter declares a healthy turn dead and lets
+        # background summaries collide with it on the shared KV pool.
+        turn_active_stale_seconds=float(
+            getattr(chat_settings, "llm_content_stall_budget_seconds", 900.0)
+            or 900.0
+        ),
     )
 
     # ================================================================
@@ -3124,7 +3179,6 @@ def build_chat_services(container: Container) -> ChatServices:
         force_compact_chat_use_case=ForceCompactChatUseCase(
             conversations=conversations,
             compaction_engine=stream_chat_use_case.compaction_engine,
-            context_windows=_provider_lookup,
         ),
         compaction_checkpoint_store=compaction_checkpoint_store,
         # Same reader the streaming gate uses, so the advertised tool set and

@@ -51,9 +51,6 @@ SERVICE_SRC_FILES :=            ../src/GenieAPIService/src/chat_history/chat_his
                                     ../src/GenieAPIService/src/chat_request_handler/prompt_preparation_service.cpp \
                                     ../src/GenieAPIService/src/chat_request_handler/summary_cache.cpp \
                                     ../src/GenieAPIService/src/chat_request_handler/long_text_summarizer.cpp \
-                                    ../src/GenieAPIService/src/chat_request_handler/task_memo_store.cpp \
-                                    ../src/GenieAPIService/src/chat_request_handler/task_memo_builder.cpp \
-                                    ../src/GenieAPIService/src/chat_request_handler/tool_call_circuit_breaker_store.cpp \
 									../src/GenieAPIService/src/context/context_base.cpp \
                                     ../src/GenieAPIService/src/context/qnn/genie.cpp \
                                     ../src/GenieAPIService/src/context/qnn/genie_interface.cpp \

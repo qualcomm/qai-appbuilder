@@ -68,7 +68,6 @@ from .sticky_worker import (
     ProtocolFrame,
     RunRequest,
     StickyWorkerHost,
-    StickyWorkerLifecycle,
     StickyWorkerSpawnError,
     WorkerEvent,
 )
@@ -112,7 +111,6 @@ __all__ = [
     "ProtocolFrame",
     "RunRequest",
     "StickyWorkerHost",
-    "StickyWorkerLifecycle",
     "StickyWorkerSpawnError",
     "WorkerEvent",
     # PR-302 wiring — sticky runner + load resolver + bootstrap spec

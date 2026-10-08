@@ -70,8 +70,25 @@ bool LongTextSummarizer::ProcessMessages(json& messages)
                         << ", triggering summarization" << std::endl;
                 }
 
-                // 指令前缀提取：在前 kPrefixSearchWindow 字符内找最后一个换行符做分割，
-                // 前缀保留、正文送去摘要；设计依据与边界情形见同名文档 long_text_summarizer.md。
+                // ── 提取指令前缀 ──────────────────────────────────────────
+                // 用户消息通常结构为：
+                //   <指令><分隔符><长文档内容>
+                // 例如：
+                //   "帮我总结如下内容：\n\n# 文档标题\n..."
+                //   "分析这段代码：\nfunction foo() {...}"
+                //   "总结：# 标题\n内容"
+                //
+                // 策略：在前 kPrefixSearchWindow 个字符内寻找换行符，
+                // 以最后一个换行符为分割点提取指令前缀。
+                //
+                // 设计原则：
+                //   1. 用户指令通常很短（< 200 chars），文档内容通常很长
+                //   2. 不依赖特定分隔符（\n\n 或 \n），只依赖长度比例
+                //   3. 若前缀搜索窗口内没有换行符，则取整个窗口作为前缀
+                //   4. 若 content 长度 <= kPrefixSearchWindow，说明没有长文档，
+                //      不做前缀提取（整个 content 都是指令，不应触发摘要）
+                //
+                // 注意：tool 消息（role=tool）不走此分支，直接摘要整个 content。
                 static constexpr size_t kPrefixSearchWindow = 200;
 
                 std::string instruction_prefix;

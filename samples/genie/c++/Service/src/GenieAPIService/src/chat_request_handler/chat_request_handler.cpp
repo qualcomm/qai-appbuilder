@@ -48,19 +48,8 @@ int CountTrailingToolCalls(const json &messages)
 // Computes the output-token budget (context window minus consumed prompt tokens, clamped between
 // the configured minimum output and the full context size) and applies it together with the
 // sampling params to the model handle. Shared by the stream and non-stream inference paths.
-//
-// Returns the model's own config.json sampler value for `key` if it is present and numeric,
-// otherwise a null json. There is no literal fallback here: a key that is neither requested
-// nor configured must be omitted from the SetParamsByConfig() call entirely (see
-// ApplyOutputSizeBudget) rather than overwritten with an arbitrary constant.
-json SamplerFallback(const ModelInstanceConfig &config, const std::string &key)
-{
-    auto &sampler = config.sampler();
-    return (sampler.contains(key) && sampler.at(key).is_number()) ? sampler.at(key) : json();
-}
-
 void ApplyOutputSizeBudget(ContextBase &handle, ModelInstanceConfig &config,
-                          size_t prompt_tokens, const json &temperature)
+                          size_t prompt_tokens, float temperature)
 {
     int context_size = config.get_context_size();
     int available_output = context_size - static_cast<int>(prompt_tokens);
@@ -71,20 +60,10 @@ void ApplyOutputSizeBudget(ContextBase &handle, ModelInstanceConfig &config,
         << "Prompt tokens: " << prompt_tokens
         << ", Context size: " << context_size
         << ", Max output tokens: " << available_output << std::endl;
-
-    // 只把有合法数值的采样参数塞进去；缺省的 key 直接不出现在这个 json 里，
-    // SetParamsByConfig() 自身按 model_config_.sampler() 的 key 遍历、j 不含该 key 即 continue，
-    // 会自然跳过未设置的参数，保留 SDK 创建 Dialog 时的默认值，而不是被改写成任意常量。
-    json params{{"size", available_output}};
-    if (temperature.is_number())
-        params["temp"] = temperature;
-    json top_k = SamplerFallback(config, "top-k");
-    if (top_k.is_number())
-        params["top_k"] = top_k;
-    json top_p = SamplerFallback(config, "top-p");
-    if (top_p.is_number())
-        params["top_p"] = top_p;
-    handle.SetParamsByConfig(params);
+    handle.SetParamsByConfig(json{{"size", available_output},
+                                  {"temp", temperature},
+                                  {"top_k", 20},
+                                  {"top_p", 0.8}});
 }
 } // namespace
 
@@ -130,17 +109,27 @@ void ChatRequestHandler::FetchModelList(const httplib::Request &req, httplib::Re
         return r;
     };
 
-    // 单模型语义：本仓库已删除并发多模型托管设计（原 loaded_models_ 注册表），此接口只应
-    // 报告当前 -c 指定并成功加载的这一个模型。大小写不敏感匹配用于处理 -c 参数目录名大小写
-    // 与模型 name 字段不一致的情况（例如 -c "qwen3-8B-8K/config.json" 加载后名称为
-    // "qwen3-8B-8K"，但目录名可能是 "Qwen3-8B-8K"）。
-    auto current = model_manager.GetDefaultModel();
-    std::string current_name_lower, current_dir_lower;
-    if (current && current->config)
+    // 已加载的模型集合：建立小写 name-set 和小写 dir-set 两种索引，
+    // 同时保留原始 name → LoadedModel 的映射，用于后续 context_size 查找。
+    // 使用小写匹配解决 "-c qwen3-8B-8K/config.json"（小写目录名）与
+    // service_config.json name="Qwen3-8B-8K"（大写）不一致的问题。
+    std::vector<std::string> loaded_names = model_manager.ListLoadedModels();
+    std::set<std::string> loaded_name_lower_set;
+    for (const auto &n : loaded_names)
+        loaded_name_lower_set.insert(to_lower(n));
+
+    // 构建已加载模型的路径目录名集合（小写），用于与磁盘扫描结果匹配
+    std::set<std::string> loaded_dir_lower_set;
+    for (const auto &name : loaded_names)
     {
-        current_name_lower = to_lower(current->config->get_model_name());
-        fs::path p(current->config->get_model_path());
-        current_dir_lower = to_lower(p.filename().generic_string());
+        auto lm = model_manager.GetModel(name);
+        if (lm && lm->config)
+        {
+            fs::path p(lm->config->get_model_path());
+            std::string dir_name = p.filename().generic_string();
+            if (!dir_name.empty())
+                loaded_dir_lower_set.insert(to_lower(dir_name));
+        }
     }
 
     // 优先扫描磁盘，返回 model_root_ 下所有含 config.json 的子目录
@@ -148,57 +137,113 @@ void ChatRequestHandler::FetchModelList(const httplib::Request &req, httplib::Re
 
     if (!disk_models.empty())
     {
-        // 有磁盘扫描结果：返回全部磁盘模型，只把当前模型标注为已加载
-        bool current_found_on_disk = false;
+        // 有磁盘扫描结果：返回全部磁盘模型，标注加载状态
+        std::set<std::string> returned_id_lower_set;
         for (auto &m : disk_models)
         {
             m["object"]   = "model";
             m["created"]  = now_ts;
             m["owned_by"] = "owner";
-            const std::string disk_id_lower = to_lower(m["id"].get<std::string>());
-            bool is_current = current && (
-                (!current_name_lower.empty() && disk_id_lower == current_name_lower) ||
-                (!current_dir_lower.empty() && disk_id_lower == current_dir_lower));
-            m["is_loaded"] = is_current;
-            if (is_current)
+            const std::string &disk_id = m["id"].get<std::string>();
+            const std::string  disk_id_lower = to_lower(disk_id);
+            returned_id_lower_set.insert(disk_id_lower);
+            // 大小写不敏感双重匹配：
+            //   1. 按 loaded_models_ key（service_config name 字段）小写匹配
+            //   2. 按 model_path 末段（-c 参数推导的目录名）小写匹配
+            bool is_loaded = loaded_name_lower_set.count(disk_id_lower) > 0
+                          || loaded_dir_lower_set.count(disk_id_lower) > 0;
+            m["is_loaded"] = is_loaded;
+            // 已加载的模型用运行时真实 context_size 覆盖（比磁盘扫描更准确）
+            if (is_loaded)
             {
-                current_found_on_disk = true;
-                m["context_length"] = current->config->get_context_size();
-                m["backend"] = current->backend;
-                m["device"] = current->device;
+                std::shared_ptr<LoadedModel> loaded;
+                // 先按精确 name 查找
+                loaded = model_manager.GetModel(disk_id);
+                if (!loaded)
+                {
+                    // 精确匹配失败，遍历已加载模型做大小写不敏感匹配
+                    for (const auto &lname : loaded_names)
+                    {
+                        // 按 name 小写匹配
+                        if (to_lower(lname) == disk_id_lower)
+                        {
+                            loaded = model_manager.GetModel(lname);
+                            break;
+                        }
+                        // 按 model_path 末段小写匹配
+                        auto lm = model_manager.GetModel(lname);
+                        if (lm && lm->config)
+                        {
+                            fs::path p(lm->config->get_model_path());
+                            if (to_lower(p.filename().generic_string()) == disk_id_lower)
+                            {
+                                loaded = lm;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (loaded && loaded->config)
+                {
+                    m["context_length"] = loaded->config->get_context_size();
+                    m["backend"] = loaded->backend;
+                    m["device"] = loaded->device;
+                }
             }
             model_list.push_back(m);
         }
 
-        // 当前模型的 name 可能是 config.json 里声明的运行时 ID，与磁盘目录名不一致；
-        // 磁盘扫描存在时也要把这种情况下的当前模型补充到 /models。
-        if (current && current->config && !current_found_on_disk)
+        // service_config.json 可以用不同于磁盘目录名的运行时模型 ID；
+        // 磁盘扫描存在时也要把这些已加载的 runtime-only 模型补充到 /models。
+        for (const auto &name : loaded_names)
         {
+            const std::string name_lower = to_lower(name);
+            if (returned_id_lower_set.count(name_lower) > 0)
+                continue;
+
+            auto loaded = model_manager.GetModel(name);
+            if (!loaded)
+                continue;
+
             json m;
-            m["id"]             = current->config->get_model_name();
-            m["object"]         = "model";
-            m["created"]        = now_ts;
-            m["owned_by"]       = "owner";
-            m["is_loaded"]      = true;
-            m["context_length"] = current->config->get_context_size();
-            m["backend"]        = current->backend;
-            m["device"]         = current->device;
+            m["id"]        = name;
+            m["object"]    = "model";
+            m["created"]   = now_ts;
+            m["owned_by"]  = "owner";
+            m["is_loaded"] = true;
+            int ctx = 0;
+            if (loaded->config)
+            {
+                ctx = loaded->config->get_context_size();
+                m["backend"] = loaded->backend;
+                m["device"] = loaded->device;
+            }
+            m["context_length"] = ctx;
             model_list.push_back(m);
         }
     }
-    else if (current && current->config)
+    else
     {
-        // model_root_ 未配置或为空：回退到只返回当前已加载模型
-        json m;
-        m["id"]             = current->config->get_model_name();
-        m["object"]         = "model";
-        m["created"]        = now_ts;
-        m["owned_by"]       = "owner";
-        m["is_loaded"]      = true;
-        m["context_length"] = current->config->get_context_size();
-        m["backend"]        = current->backend;
-        m["device"]         = current->device;
-        model_list.push_back(m);
+        // model_root_ 未配置或为空：回退到只返回已加载模型
+        for (const auto &name : loaded_names)
+        {
+            json m;
+            m["id"]        = name;
+            m["object"]    = "model";
+            m["created"]   = now_ts;
+            m["owned_by"]  = "owner";
+            m["is_loaded"] = true;
+            int ctx = 0;
+            auto loaded = model_manager.GetModel(name);
+            if (loaded && loaded->config)
+            {
+                ctx = loaded->config->get_context_size();
+                m["backend"] = loaded->backend;
+                m["device"] = loaded->device;
+            }
+            m["context_length"] = ctx;
+            model_list.push_back(m);
+        }
     }
 
     models["data"]   = model_list;
@@ -408,35 +453,86 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
         modelName = modelName.substr(kLocalPrefix.size());
     }
     
-    // 单模型语义：本仓库已删除并发多模型托管设计（原 loaded_models_ 注册表）。服务只维护
-    // 当前 -c 指定并成功加载的这一个模型；请求未指定模型名，或指定名称与当前模型匹配时直接
-    // 使用它，否则通过 LoadModelByName() 顺序切换（先卸载旧模型再加载新模型，不重启进程，
-    // 不是并发托管）。
+    // 1. 优先从多模型注册表中按名称精确查找
     auto loaded_model = model_manager.GetModel(modelName);
+    // 仅当请求未指定模型名称时，才 fallback 到默认模型；
+    // 若指定了模型名称但未找到，需走动态切换路径，不能直接用默认模型替代。
     if (!loaded_model && modelName.empty()) {
         loaded_model = model_manager.GetDefaultModel();
     }
-
+    
+    // 2. 向后兼容 + 动态切换：若多模型注册表中未找到目标模型，尝试加载。
     bool model_confirmed_missing = false;   // 本次请求内已通过磁盘扫描确定性地证明该模型名不存在
-    if (!loaded_model && !modelName.empty())
+    if (!loaded_model)
     {
-        bool new_model = false;
-        if (model_manager.LoadModelByName(modelName, new_model))
+        // 注意：is_multi_model_mode 的判断只需要知道是否有默认模型存在，
+        // 不需要持有 default_model 的 shared_ptr 引用。
+        // 在多模型动态切换路径中，必须在调用 UnloadModelsByDevice 之前
+        // 释放对旧模型的所有 shared_ptr 引用，否则旧模型的 GenieContext
+        // 不会被立即析构，NPU/GPU/CPU 内存不会立即释放，导致加载新模型时内存不足。
+        bool is_multi_model_mode = (model_manager.GetDefaultModel() != nullptr);
+        if (!is_multi_model_mode)
         {
-            loaded_model = model_manager.GetModel(modelName);
-            if (!loaded_model)
+            // 纯单模型模式（loaded_models_ 为空）：允许动态加载（向后兼容）
+            bool new_model = false;
+            if (model_manager.LoadModelByName(modelName, new_model))
             {
-                // LoadModelByName 成功但 GetModel 精确/大小写不敏感匹配失败，回退取当前模型
-                loaded_model = model_manager.GetDefaultModel();
+                loaded_model = model_manager.GetModel(modelName);
+                if (!loaded_model)
+                {
+                    // LoadModelByName 成功但 GetModel 失败，尝试获取默认模型
+                    loaded_model = model_manager.GetDefaultModel();
+                }
             }
         }
         else
         {
-            // 区分"模型名在磁盘上确实不存在"（404）与"存在但加载失败"（500）
+            // 多模型模式：从磁盘扫描找到目标模型后动态切换。
+            // 切换步骤：
+            //   1. 扫描磁盘确认目标模型存在并获取其设备类型
+            //   2. 卸载同设备上已加载的旧模型（释放硬件资源，等待析构完成）
+            //   3. 加载目标模型
+            My_Log{} << "[ChatCompletions] Model '" << modelName
+                     << "' not in registry, attempting dynamic switch from disk..." << std::endl;
+
+            std::string target_backend, target_device;
+            bool found_on_disk = false;
             auto disk_models = model_manager.ScanModelDirectory();
-            bool found_on_disk = std::any_of(disk_models.begin(), disk_models.end(),
-                [&modelName](const json &dm) { return dm.value("id", std::string("")) == modelName; });
-            if (!found_on_disk)
+            for (const auto &dm : disk_models)
+            {
+                if (dm["id"].get<std::string>() == modelName)
+                {
+                    target_backend = dm["backend"].get<std::string>();
+                    target_device  = dm["device"].get<std::string>();
+                    found_on_disk = true;
+                    break;
+                }
+            }
+
+            if (found_on_disk)
+            {
+                // 卸载同设备的旧模型，释放硬件资源。
+                // UnloadModelsByDevice 内部会将被移除模型的 shared_ptr 保存到局部变量，
+                // 在函数返回前显式析构，确保 NPU/GPU/CPU 内存完全释放后再加载新模型。
+                model_manager.UnloadModelsByDevice(target_device);
+                // 加载新模型
+                if (model_manager.LoadModel(modelName, target_backend, target_device))
+                {
+                    loaded_model = model_manager.GetModel(modelName);
+                    if (loaded_model)
+                    {
+                        model_manager.SetDefaultModel(modelName);
+                        My_Log{} << "[ChatCompletions] Dynamic switch to '" << modelName
+                                 << "' succeeded (device=" << target_device << ")" << std::endl;
+                    }
+                }
+                else
+                {
+                    My_Log{My_Log::Level::kError}
+                        << "[ChatCompletions] Dynamic switch to '" << modelName << "' failed." << std::endl;
+                }
+            }
+            else
             {
                 My_Log{My_Log::Level::kWarning}
                     << "[ChatCompletions] Model '" << modelName << "' not found on disk" << std::endl;
@@ -445,8 +541,9 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
         }
     }
 
-    // LoadModelByName 为同步调用，上面的分支已给出确定性结论（找到即 loaded_model 非空，
-    // 找不到即仍为空），不存在"稍后可能出现"的中间态可等待，因此不再引入轮询等待。
+    // LoadModel/LoadModelByName 均为同步调用，且仅在 is_loaded=true 之后才原子写入注册表；
+    // 上面的同步分支已给出确定性结论（找到即 is_loaded=true，找不到即仍为空），不存在
+    // "稍后可能出现"的中间态可等待，因此不再引入轮询等待。
 
     if (!loaded_model || !loaded_model->is_loaded)
     {
@@ -625,22 +722,14 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
                             ResponseTools::statusDataJson("prompt_optimized", "Prompt optimization complete",
                                                           input_builder->GetLedger().ToJson()));
 
-                        // 动态调整 temperature：请求显式传入优先；否则回退到 config.json 自身的
-                        // sampler.temp；两者都没有合法数值时保持为 null，ApplyOutputSizeBudget 会
-                        // 完全不设置该参数，不对未配置的模型注入与其无关的任意默认值。
-                        json temperature = data_copy.value<json>("temp", json());
-                        if (!temperature.is_number())
-                        {
-                            temperature = SamplerFallback(*loaded_model_ref->config, "temp");
-                        }
+                        // 动态调整 temperature
+                        float temperature = data_copy.value("temp", 0.3f);
                         bool has_tools = data_copy.contains("tools")
                                       && data_copy["tools"].is_array()
                                       && !data_copy["tools"].empty();
                         if (has_tools) {
                             const auto& opt_config = model_manager.GetPromptOptimizationConfig();
-                            temperature = temperature.is_number()
-                                ? json(std::min(temperature.get<float>(), opt_config.tool_call_temperature))
-                                : json(opt_config.tool_call_temperature);
+                            temperature = std::min(temperature, opt_config.tool_call_temperature);
                             My_Log{My_Log::Level::kInfo}
                                 << "[Tool Call] Adjusting temperature to " << temperature
                                 << " for tool calling scenario" << std::endl;
@@ -651,12 +740,7 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
                             ApplyOutputSizeBudget(*handle, *loaded_model_ref->config, prompt_tokens, temperature);
                         }
 
-                        // Layer2 内部隐形自纠正重试需要复用本次请求的原始消息序列（未经
-                        // PreFilter/压缩，仅经过上方的控制字符 sanitize）重新走一遍 Build()，
-                        // 因此把 data_copy 的地址传给 Prepare() 保存快照；dispatcher 内部
-                        // 会做深拷贝，data_copy 后续被其它逻辑修改不影响已保存的快照。
-                        dispatcher->Prepare(model_input, is_tool, /*is_stream=*/true, req,
-                                            /*is_dll_mode=*/false, &data_copy);
+                        dispatcher->Prepare(model_input, is_tool, /*is_stream=*/true, req);
 
                         // 发送 "preparing" 状态帧（Build 完成，即将开始主推理）
                         ResponseTools::post_stream_data(sink, "data",
@@ -744,19 +828,12 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
             // PromptLedger::ToJson()/字段口径。
             input_builder->GetLedger().WriteHeaders(res);
 
-            // 动态调整 temperature：同上（见流式路径注释），请求优先，否则回退到 config.json，
-            // 两者都没有合法数值时保持为 null，完全不设置该参数。
-            json temperature = data.value<json>("temp", json());
-            if (!temperature.is_number())
-            {
-                temperature = SamplerFallback(config, "temp");
-            }
+            // 动态调整 temperature
+            float temperature = get_json_value(data, "temp", 0.3);
             bool has_tools = data.contains("tools") && data["tools"].is_array() && !data["tools"].empty();
             if (has_tools) {
                 const auto& opt_config = model_manager.GetPromptOptimizationConfig();
-                temperature = temperature.is_number()
-                    ? json(std::min(temperature.get<float>(), opt_config.tool_call_temperature))
-                    : json(opt_config.tool_call_temperature);
+                temperature = std::min(temperature, opt_config.tool_call_temperature);
                 My_Log{My_Log::Level::kInfo}
                     << "[Tool Call] Adjusting temperature to " << temperature
                     << " for tool calling scenario" << std::endl;
@@ -767,8 +844,7 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
                 ApplyOutputSizeBudget(*handle, config, prompt_tokens, temperature);
             }
 
-            dispatcher->Prepare(model_input, is_tool, /*is_stream=*/false, req,
-                                /*is_dll_mode=*/false, &data);
+            dispatcher->Prepare(model_input, is_tool, /*is_stream=*/false, req);
             dispatcher->SendResponse(0, nullptr, &res);
 
             if (handle && handle->was_stopped_by_output_limit()

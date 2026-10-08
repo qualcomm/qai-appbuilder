@@ -175,6 +175,80 @@ SUB_AGENT_EXCLUDED_TOOLS: frozenset[str] = frozenset(
     {"agent", "question", "scheduled_task", "sub_agent"}
 )
 
+#: Tools dropped from the advertised set on an ON-DEVICE turn (P4).
+#:
+#: WHY
+#: ---
+#: A tool costs prefill whether or not it is used: its full JSON schema
+#: (name + description + parameter schema) is serialised into
+#: ``payload["tools"]`` on EVERY request. A measured loopback turn carried
+#: ``n_tools=19`` inside a ``payload_bytes=73031`` request — and on a machine
+#: decoding at 6-7 tok/s, prefilling that is seconds of first-token latency
+#: before the model has produced anything.
+#:
+#: So an on-device turn advertises only the 8 tools an agent genuinely cannot
+#: work without::
+#:
+#:     read  write  edit  exec  glob  grep  list  agent
+#:
+#: Everything else is excluded here. This is the complement of that set among
+#: the currently-registered tools, written out EXPLICITLY rather than computed
+#: as "TOOL_ORDER minus the keepers" on purpose: a newly registered tool then
+#: defaults to being ADVERTISED (visible, costing prefill) rather than silently
+#: hidden from on-device models forever. A reviewer adding a tool sees the
+#: ordinary behaviour and can opt it out deliberately.
+#:
+#: CONSEQUENCES — READ BEFORE TUNING
+#: ---------------------------------
+#: On an on-device turn the model cannot browse the web
+#: (``web_fetch`` / ``web_search`` / ``browser``), drive the desktop
+#: (``computer``), start background work (``background_process``), manage other
+#: sub-agents (``sub_agent``), ask the user a blocking question (``question``),
+#: keep a todo list (``todowrite``), or invoke the ``skill`` tool.
+#:
+#: ``skill`` in particular is intentional and paired with the lean system
+#: prompt: that prompt lists each skill's PATH in ``<available_skills>`` and the
+#: model ``read``s the SKILL.md it needs. (Those reads are then protected from
+#: compaction — see ``context_compressor._is_skill_file_read`` — because losing
+#: one makes the model re-read the skill and restart its work.)
+#:
+#: ``appbuilder_run`` / ``appbuilder_batch_run`` are absent from this set only
+#: because :data:`CONDITIONAL_TOOL_NAMES` already drops them for on-device turns
+#: (:func:`compose_advertised_tools` re-adds them for CLOUD app-builder turns
+#: only) — the pre-existing behaviour for ``local::`` models, unchanged here.
+#:
+#: If a workload genuinely needs one of these on-device, remove that ONE name
+#: from this set — the cost is its schema's bytes on every request, which is a
+#: deliberate trade, not a bug.
+LOCAL_EXCLUDED_TOOLS: frozenset[str] = frozenset(
+    {
+        # Editing variants beyond the primary ``edit``.
+        "apply_patch",
+        "ast_edit",
+        # Execution variants beyond the primary ``exec``.
+        "background_process",
+        "run_code",
+        "scheduled_task",
+        # Search variants beyond the primary ``glob`` / ``grep``.
+        "ast_grep",
+        "scan_secrets",
+        # Network / desktop reach.
+        "web_fetch",
+        "web_search",
+        "browser",
+        "computer",
+        # Harness control surface.
+        "sub_agent",
+        "skill",
+        "todowrite",
+        "question",
+        # Cross-session recall.
+        "search_conversations",
+        "remember_experience",
+        "recall_experience",
+    }
+)
+
 
 def schema_tool_name(schema: Any) -> str | None:
     """Extract the tool name from an OpenAI function schema (best-effort).

@@ -67,22 +67,19 @@ json GenieRoutingGateway::CleanLocalHistoryForCloudFallback(const json &request,
     //        索引 >= fallback_boundary：云端历史，全部保留
     for (int i = last_user_idx + 1; i < (int)messages.size(); ++i)
     {
-        if (i < (int)messages.size())
+        const auto &msg = messages[i];
+
+        // sticky session 场景：索引 >= fallback_boundary 的消息是云端历史，直接保留
+        if (fallback_boundary > 0 && i >= fallback_boundary)
         {
-            const auto &msg = messages[i];
-
-            // sticky session 场景：索引 >= fallback_boundary 的消息是云端历史，直接保留
-            if (fallback_boundary > 0 && i >= fallback_boundary)
-            {
-                new_messages.push_back(msg);
-                continue;
-            }
-
-            std::string role = msg.value("role", "");
-            if (role == "tool") continue;                                    // 剔除本地 tool 结果
-            if (role == "assistant" && msg.contains("tool_calls")) continue; // 剔除本地含 tool_calls 的 assistant
-            new_messages.push_back(msg);                                     // 保留正常 assistant 文本回复
+            new_messages.push_back(msg);
+            continue;
         }
+
+        std::string role = msg.value("role", "");
+        if (role == "tool") continue;                                    // 剔除本地 tool 结果
+        if (role == "assistant" && msg.contains("tool_calls")) continue; // 剔除本地含 tool_calls 的 assistant
+        new_messages.push_back(msg);                                     // 保留正常 assistant 文本回复
     }
 
     cleaned["messages"] = new_messages;

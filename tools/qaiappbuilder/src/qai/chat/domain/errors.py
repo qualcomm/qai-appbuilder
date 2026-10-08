@@ -256,22 +256,6 @@ class InvalidContextSizeError(ValidationError):
         super().__init__(self.default_code, message)
 
 
-class MissingModelContextLengthError(ValidationError):
-    """Raised when the selected model has no authoritative positive window."""
-
-    default_code = "chat.model_context_length_missing"
-
-    def __init__(self, model_id: str) -> None:
-        display = model_id or "<none>"
-        super().__init__(
-            self.default_code,
-            f"Selected model {display!r} has no valid context length configured. "
-            "Set Context Length in Settings → Cloud Models, or configure the "
-            "local model metadata.",
-        )
-        self.model_id = model_id
-
-
 class InvalidMessageContentError(ValidationError):
     """Raised when message content fails domain-level validation."""
 
@@ -303,7 +287,6 @@ __all__ = [
     "TabStateError",
     "ChatStreamAbortedError",
     "InvalidContextSizeError",
-    "MissingModelContextLengthError",
     "InvalidMessageContentError",
     "InvalidConversationTitleError",
 ]

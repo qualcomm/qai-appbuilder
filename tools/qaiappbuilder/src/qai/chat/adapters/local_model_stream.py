@@ -128,6 +128,34 @@ class LocalModelStreamAdapter:
     ) -> AsyncIterator[StreamFrame]:
         return self._run(request)
 
+    # ------------------------------------------------------------------
+    # REVERTED (2026-09-30): P0 per-endpoint request serialisation
+    # ------------------------------------------------------------------
+    # This used to wrap ``_run`` in ``async with Semaphore(1)`` so the main
+    # reply stream and the background compaction summaries could not compete for
+    # the single on-device engine.
+    #
+    # It DEADLOCKS the agentic loop, so it is out. A round that emits a
+    # tool_call makes the main drain ``break`` out of its ``async for`` and hand
+    # the stream generator to the follow-up loop; the generator is then left
+    # suspended inside the ``async with`` and — still referenced, so never
+    # garbage-collected — its ``finally`` never runs and the permit is never
+    # released. The next round blocks on that permit forever, and ~30 minutes
+    # later the frame-stall watchdog kills the turn.
+    #
+    # NOTE FOR THE INTERNAL BUILD: this flaw is in the ORIGINAL P0 design, not
+    # something introduced by the external port. It was reproduced directly
+    # against this adapter. It only stays hidden while the model is reached
+    # through the "cloud" transport instead of the ``local::`` route — any
+    # ``local::`` model that calls tools will hit it.
+    #
+    # Do not re-add a lock scoped to this generator's lifetime: the codebase
+    # legitimately abandons stream generators mid-iteration and does not
+    # ``aclose()`` them. Invert the direction instead — have the BACKGROUND
+    # summary coroutine wait until no main turn is streaming. A coroutine owns
+    # its own lifetime, so it can wait and release safely, and P6 already makes
+    # "skip this refresh" a safe outcome.
+
     async def _run(
         self,
         request: LLMStreamRequest,
@@ -502,12 +530,6 @@ class LocalModelStreamAdapter:
             # filter fired, append a user-facing notice so the user knows the
             # reply was cut off (and how to recover). A normal "stop" / empty
             # reason emits nothing extra.
-            # Auto-continuation seam (streaming.py::_on_round_end /
-            # _drain_main_stream): tag the terminal END so the
-            # orchestration layer can detect a plain-text length-truncation
-            # and reopen one more round with a continuation nudge instead
-            # of ending the turn. ``reason`` stays ``"completed"``.
-            plain_text_length_truncated = False
             if last_finish_reason == "length":
                 sequence += 1
                 yield StreamFrame.chunk(
@@ -515,7 +537,6 @@ class LocalModelStreamAdapter:
                     sequence=sequence,
                     text=make_truncation_notice(),
                 )
-                plain_text_length_truncated = True
             elif last_finish_reason == "content_filter":
                 sequence += 1
                 yield StreamFrame.chunk(
@@ -528,9 +549,6 @@ class LocalModelStreamAdapter:
             yield StreamFrame.end(
                 frame_id=self._next_frame_id("end"),
                 sequence=sequence,
-                extra=(
-                    {"truncated": True} if plain_text_length_truncated else None
-                ),
                 reason="completed",
             )
             return
