@@ -18,6 +18,7 @@
 #include "../chat_request_handler/summary_cache.h"
 #include "../chat_request_handler/task_memo_store.h"
 #include "../chat_request_handler/tool_call_circuit_breaker_store.h"
+#include "../chat_request_handler/tool_call_repetition_store.h"
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -637,6 +638,7 @@ struct ModelManager::ModeVerifier
             // draft_model 字段块存在即触发投机解码路径的硬件门槛检查（Step 3）：不含该字段的
             // 模型（现有全部 GGUF 模型）完全不触发下面这段新增逻辑，零行为变化。
             llama_speculative::DraftModelConfig draft_config = llama_speculative::DraftModelConfig::ParseFrom(j);
+            config_->set_speculative_draft_configured(draft_config.present);
             if (draft_config.present)
             {
                 int configured_context_size = config_->get_context_size();
@@ -1003,6 +1005,28 @@ bool ModelManager::InitializeConfig()
                              << std::endl;
                 }
 
+                if (pe_json.contains("windows_shell_hint") && pe_json["windows_shell_hint"].is_object())
+                {
+                    const auto &wsh = pe_json["windows_shell_hint"];
+                    windows_shell_hint_config_.enabled = wsh.value("enabled", true);
+                    windows_shell_hint_config_.hint_text = wsh.value("hint_text", windows_shell_hint_config_.hint_text);
+                    if (wsh.contains("tool_keywords") && wsh["tool_keywords"].is_array())
+                    {
+                        windows_shell_hint_config_.tool_keywords.clear();
+                        for (const auto &kw : wsh["tool_keywords"])
+                        {
+                            if (kw.is_string())
+                            {
+                                windows_shell_hint_config_.tool_keywords.push_back(kw.get<std::string>());
+                            }
+                        }
+                    }
+                    My_Log{} << "[Config] windows_shell_hint loaded: enabled="
+                             << windows_shell_hint_config_.enabled
+                             << ", tool_keywords_count=" << windows_shell_hint_config_.tool_keywords.size()
+                             << std::endl;
+                }
+
                 if (pe_json.contains("tool_call_repair") && pe_json["tool_call_repair"].is_object())
                 {
                     const auto &tcr = pe_json["tool_call_repair"];
@@ -1038,6 +1062,16 @@ bool ModelManager::InitializeConfig()
                     // 阈值仍照常同步（真正受 enabled 门控的是"是否读取熔断状态并降级 system
                     // prompt"这一后果，见 model_input_builder.h::Build()），避免留下过期默认值。
                     ToolCallCircuitBreakerStore::GetInstance().Configure(tool_call_repair_config_.circuit_breaker);
+
+                    if (tcr.contains("redundant_call_guard") && tcr["redundant_call_guard"].is_object())
+                    {
+                        const auto &rg = tcr["redundant_call_guard"];
+                        auto &rg_cfg = tool_call_repair_config_.redundant_call_guard;
+                        rg_cfg.enabled = rg.value("enabled", true);
+                        rg_cfg.repeat_threshold = rg.value("repeat_threshold", 2);
+                        rg_cfg.ttl_seconds = rg.value("ttl_seconds", 300);
+                    }
+                    ToolCallRepetitionStore::GetInstance().Configure(tool_call_repair_config_.redundant_call_guard);
 
                     My_Log{} << "[Config] tool_call_repair loaded: enabled="
                              << tool_call_repair_config_.enabled

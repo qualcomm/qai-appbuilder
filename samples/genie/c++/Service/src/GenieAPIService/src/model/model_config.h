@@ -251,6 +251,30 @@ struct ToolCallRepairConfig {
         // 期间无新的 Layer3 触发则冷却到期后自动解除（下一次请求重新按全量计数）。
         int cooldown_seconds = 300;
     } circuit_breaker;
+
+    struct RedundantToolCallConfig {
+        bool enabled = true;
+        int repeat_threshold = 2;
+        int ttl_seconds = 300;
+    } redundant_call_guard;
+};
+
+// ============================================================
+// Windows shell 使用提示配置（对应 prompt_engineering.json 中的 "windows_shell_hint" 节；
+// 与端云结合完全无关的本地能力，不在 service_config.json 中）
+// 通用、与具体技能无关的基础设施：Windows 平台编译时，若请求的 tools 声明里存在
+// shell/命令执行类工具（按 name/description 关键词匹配），提示模型该命令可能被
+// 路由到 cmd.exe 或 PowerShell 之一，两者链式执行/变量/引号语法不同，命中语法错误
+// 时可尝试换另一种 shell 的写法。挂载点见 model_input_builder.h::BuildPrompt()。
+// ============================================================
+struct WindowsShellHintConfig {
+    bool enabled = true;
+    std::vector<std::string> tool_keywords = {"cmd", "powershell", "shell", "exec", "bash", "terminal", "command"};
+    std::string hint_text =
+        "You are running on Windows. Shell/command-execution tools may route your command to either "
+        "cmd.exe or PowerShell. cmd.exe: chain with && or ||, read variables as %VAR%, escape quotes as \\\"\\\". "
+        "PowerShell: chain with ;, read variables as $env:VAR, nested quotes need escaping or single-quoting. "
+        "If a command fails with a shell syntax error, retry using the other shell's syntax.";
 };
 
 // ============================================================
@@ -867,6 +891,11 @@ public:
         return tool_call_repair_config_;
     }
 
+    const WindowsShellHintConfig &GetWindowsShellHintConfig() const
+    {
+        return windows_shell_hint_config_;
+    }
+
     const PromptOptimizationConfig& GetPromptOptimizationConfig() const
     {
         return prompt_optimization_config_;
@@ -936,6 +965,7 @@ public:
     EnterpriseCloudModelConfig enterprise_cloud_model_config_;
     LocalModelConfig local_model_config_;
     ToolCallRepairConfig tool_call_repair_config_;
+    WindowsShellHintConfig windows_shell_hint_config_;
     
     // Prompt 优化配置
     PromptOptimizationConfig prompt_optimization_config_;

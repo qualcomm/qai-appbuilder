@@ -400,6 +400,16 @@ TaskMemoBuilder::UpdateResult TaskMemoBuilder::Update(const json& raw_messages,
     // 不变（纯函数于 entry），也让每条已存储的备忘录自描述当时生效的阈值是多少。
     entry["failure_streak_warn_threshold"] = config_.failure_streak_warn_threshold;
 
+    const auto &redundant_cfg = instance_config_.i_model_config_.GetToolCallRepairConfig().redundant_call_guard;
+    if (redundant_cfg.enabled) {
+        std::string rc_key = ToolCallRepetitionStore::MakeKey(first_msg_key, instance_config_.get_model_name());
+        entry["redundant_tool_call_count"] = ToolCallRepetitionStore::GetInstance().GetRepeatCount(rc_key);
+        entry["redundant_tool_call_threshold"] = redundant_cfg.repeat_threshold;
+    } else {
+        entry["redundant_tool_call_count"] = 0;
+        entry["redundant_tool_call_threshold"] = 0;
+    }
+
     entry["refresh_count"] = prev_refresh + 1;
     store_->Put(fingerprint, first_msg_key, entry);
 
@@ -458,6 +468,12 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
         oss << "Note: " << failure_streak << " consecutive tool-call failures detected. "
             << "Try an alternative approach instead of giving up on the original goal above.\n";
         goal_block += oss.str();
+    }
+
+    int redundant_tool_call_count = entry.value("redundant_tool_call_count", 0);
+    int redundant_tool_call_threshold = entry.value("redundant_tool_call_threshold", 0);
+    if (redundant_tool_call_threshold > 0 && redundant_tool_call_count >= redundant_tool_call_threshold) {
+        goal_block += TaskMemoBuilder::RenderRedundantToolCallNote(redundant_tool_call_count);
     }
 
     std::string plan = entry.value("current_plan", std::string(""));
@@ -521,6 +537,15 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
     if (max_chars > 0 && out.size() > max_chars)
         out = safe_utf8_truncate(out, max_chars, "");
     return out;
+}
+
+std::string TaskMemoBuilder::RenderRedundantToolCallNote(int repeat_count)
+{
+    std::ostringstream oss;
+    oss << "Note: you have called the same tool with the same arguments " << repeat_count
+        << " time(s) in a row and already received the same result. Do not repeat this call; "
+           "use the information you already have to make a decision and take the next concrete action.\n";
+    return oss.str();
 }
 
 std::string TaskMemoBuilder::RenderCompact(const json& entry)

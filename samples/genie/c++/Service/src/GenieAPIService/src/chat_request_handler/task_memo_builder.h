@@ -13,6 +13,7 @@
 #include "../model/model_instance_config.h"
 #include "../chat_history/chat_history.h"
 #include "task_memo_store.h"
+#include "tool_call_repetition_store.h"
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
@@ -69,6 +70,7 @@ public:
     // 优先级从高到低整块保留，预算不足时从最低优先级开始整块丢弃（不做块内截断）。
     static std::string Render(const json& entry, size_t max_chars = 0);
     static std::string RenderCompact(const json& entry);
+    static std::string RenderRedundantToolCallNote(int repeat_count);
 
 private:
     json BuildRuleLayer(const json& prev, const std::vector<GenieChatMessage>& dropped_messages) const;

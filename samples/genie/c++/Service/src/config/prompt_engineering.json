@@ -21,7 +21,27 @@
             "consecutive_layer3_threshold": 3,
             "_comment_cooldown": "熔断后的冷却时间（秒），期间该会话+模型持续降级 system prompt；冷却到期后自动解除，默认 300（5 分钟）",
             "cooldown_seconds": 300
+        },
+
+        "redundant_call_guard": {
+            "_comment": "重复工具调用兜底：检测同一会话内模型是否用完全相同的(工具名,参数)原地打转（已成功获得过同样结果仍重复调用），命中后通过 Task Memo 同款规则层注入机制追加一次性纠偏提示，提示模型停止重复、基于已有信息执行下一步",
+            "_comment_enabled": "true=启用（默认），false=完全跳过本节行为",
+            "enabled": true,
+            "_comment_repeat_threshold": "同一(工具名,参数)签名连续成功调用达到此次数后触发纠偏提示，默认 2（即发现重复的第一时间）",
+            "repeat_threshold": 2,
+            "_comment_ttl_seconds": "距上一次调用超过此秒数视为新的序列，重新从 1 计数，默认 300（5 分钟）",
+            "ttl_seconds": 300
         }
+    },
+
+    "windows_shell_hint": {
+        "_comment": "通用、与具体技能无关的基础设施：Windows 平台编译时，若本轮请求的 tools 声明里存在 shell/命令执行类工具（按 name/description 关键词匹配），向系统提示词追加一段简短提示，说明命令可能被路由到 cmd.exe 或 PowerShell 之一、两者链式执行/变量/引号语法不同，命中语法错误时可尝试换另一种 shell 的写法；非 Windows 编译目标上整段逻辑不存在（编译期 #ifdef 裁剪，不是运行时判断）",
+        "_comment_enabled": "true=启用（默认），false=完全跳过本节行为",
+        "enabled": true,
+        "_comment_tool_keywords": "命中以下任一关键词（大小写不敏感，匹配 tool 的 function.name/function.description）即判定为 shell/命令执行类工具",
+        "tool_keywords": ["cmd", "powershell", "shell", "exec", "bash", "terminal", "command"],
+        "_comment_hint_text": "追加到系统提示词末尾的提示文案",
+        "hint_text": "You are running on Windows. Shell/command-execution tools may route your command to either cmd.exe or PowerShell. cmd.exe: chain with && or ||, read variables as %VAR%, escape quotes as \"\". PowerShell: chain with ;, read variables as $env:VAR, nested quotes need escaping or single-quoting. If a command fails with a shell syntax error, retry using the other shell's syntax."
     },
 
     "debug": {

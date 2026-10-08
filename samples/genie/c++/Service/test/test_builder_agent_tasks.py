@@ -482,11 +482,14 @@ def send_agent_chat_turn(builder, model_name, prompt_text, conversation_id=None,
     stream = None
     loop_verdict = None
     try:
-        # timeout=(connect, read)：read 侧原为 10s，比服务端 15s 心跳间隔
-        # （QAIModelBuilder _sse.py 的 _HEARTBEAT_INTERVAL_SECONDS=15.0）更短，
-        # 理论上可能在两次心跳之间提前触发 ReadTimeout；调大到 25s 留出余量。
+        # timeout=(connect, read)：read 侧原为 25s，与服务端 15s 心跳间隔
+        # （QAIModelBuilder _sse.py 的 _HEARTBEAT_INTERVAL_SECONDS=15.0）只留 10s
+        # 缓冲，长耗时真实任务（如 27B 模型下载/QNN 量化转换，期间后端忙于本地
+        # 计算，心跳帧本身也可能被延迟）下该余量明显不够、会把真正瓶颈误报成
+        # ReadTimeout；调大到 60s 留出远大于心跳间隔的安全余量。connect 侧维持
+        # 较小值，网络层连不上应该快速失败，不需要同样放宽。
         stream = builder.csrf.request(
-            "GET", stream_path, timeout=(10, 25), stream=True,
+            "GET", stream_path, timeout=(15, 60), stream=True,
             params={"tab_id": tab_id, "prompt": prompt_text, "model_id": f"local::{model_name}"})
         if not 200 <= stream.status_code < 300:
             stream_error = f"HTTP 非 2xx: {stream.status_code}; body={stream.text[:300]}"
@@ -1292,8 +1295,8 @@ def _wait_background_subagents(builder, conversation_id, deadline, poll_seconds=
 
 def run_inception_precision_compare_task(builder, model_name, results, round_num=1,
                                           workspace_root=_DEFAULT_WORKSPACE_ROOT,
-                                          max_turns=3, per_turn_timeout=1800,
-                                          total_deadline_seconds=5400,
+                                          max_turns=3, per_turn_timeout=7200,
+                                          total_deadline_seconds=14400,
                                           busy_poll_interval_seconds=60,
                                           transcript_path=None):
     """用户指定的最高优先级验收任务：驱动本地模型一次性完成 inception_v3
@@ -1352,6 +1355,7 @@ def run_inception_precision_compare_task(builder, model_name, results, round_num
     attempts_used = 0
     gave_up_while_busy = False
     blocking_condition_hits = []
+    stream_timeout_continuation_hits = []
     artifacts = {}
     passed, detail, text, frame_types, frame_reasons, busy = (
         False, "未发起任何请求（总时限在第一轮之前已耗尽）", "", [], [], False)
@@ -1426,8 +1430,24 @@ def run_inception_precision_compare_task(builder, model_name, results, round_num
             prompt = _INCEPTION_NEUTRAL_CONTINUE_PROMPT
             continue
 
-        # 未命中 busy、未命中 Blocking Condition、判定三要素也未就位：按设计原则不臆测
-        # 继续追加通用续问（这正是在检验"一次性自动跑完"这句话本身是否成立），如实停止。
+        # "SSE 总时限已到"是测试脚本自己的单轮墙钟预算到期，不是模型/协议本身的失败
+        # （busy=False、未命中 Blocking Condition），只要本轮确实产出过活跃帧
+        # （text 非空或识别出过 frame_type/reason，排除真正卡死无进展的情形）且
+        # total_deadline_seconds/max_turns 仍有余量，就应继续同一个未完成的任务，
+        # 而不是白白放弃剩余预算——这不是人工决策介入，纯粹是技术性续杯。
+        if "stream_error=SSE 总时限" in detail and (text.strip() or frame_types):
+            hit = {"real_turn": real_turns_used, "detail_excerpt": detail[-300:]}
+            stream_timeout_continuation_hits.append(hit)
+            print(f"  [STAGE] inception 命中单轮 stream_timeout 切断（本轮仍健康活跃），"
+                  f"追加续问继续同一任务: {hit}", flush=True)
+            transcript.append(f"[real_turn {real_turns_used}] 命中单轮 stream_timeout 切断且本轮仍健康活跃，"
+                               f"追加中性继续指令: {hit}")
+            prompt = _INCEPTION_NEUTRAL_CONTINUE_PROMPT
+            continue
+
+        # 未命中 busy、未命中 Blocking Condition、未命中健康的 stream_timeout 切断、
+        # 判定三要素也未就位：按设计原则不臆测继续追加通用续问（这正是在检验
+        # "一次性自动跑完"这句话本身是否成立），如实停止。
         transcript.append(f"[real_turn {real_turns_used}] 本轮正常结束但判定三要素未满足，且未检测到明确续问信号，"
                            f"按设计原则不主动追加续问，任务到此为止")
         break
@@ -1456,6 +1476,8 @@ def run_inception_precision_compare_task(builder, model_name, results, round_num
         f"gave_up_while_busy={gave_up_while_busy}; elapsed={elapsed:.0f}s; "
         f"blocking_condition_hits={len(blocking_condition_hits)}; "
         f"blocking_condition_detail={blocking_condition_hits}; "
+        f"stream_timeout_continuation_hits={len(stream_timeout_continuation_hits)}; "
+        f"stream_timeout_continuation_detail={stream_timeout_continuation_hits}; "
         f"fp16_model_dir={artifacts.get('fp16_model_dir')}; "
         f"w8a8_model_dir={artifacts.get('w8a8_model_dir')}; "
         f"fresh_inference_evidence={artifacts.get('fresh_inference_evidence')}; "
@@ -1473,6 +1495,7 @@ def run_inception_precision_compare_task(builder, model_name, results, round_num
         # （不是"服务端已知缺陷"，是"任务尚未验证通过"），与 model_conversion/tetris 一致。
         response_data={"conversation_id": conversation_id,
                         "blocking_condition_hits": blocking_condition_hits,
+                        "stream_timeout_continuation_hits": stream_timeout_continuation_hits,
                         "artifacts": {k: (str(v) if v else None) for k, v in artifacts.items()},
                         "token_generation_rate": token_rate_stats}))
     return ok
@@ -1524,15 +1547,28 @@ def build_arg_parser():
                         help="tetris 任务用来执行 --selftest 自验证的 Python 解释器")
     parser.add_argument("--workspace_root", default=_DEFAULT_WORKSPACE_ROOT,
                         help="model-builder 技能的工作目录根（默认 C:\\WoS_AI）")
-    parser.add_argument("--max_turns", type=int, default=4,
-                        help="单个任务最多追加的真实 follow-up 轮次（不含 busy 等待期间的探测重试）")
-    parser.add_argument("--per_turn_timeout", type=int, default=900, help="单轮 SSE 请求超时（秒）")
-    parser.add_argument("--total_deadline_seconds", type=int, default=1800,
-                        help="单个任务总耗时上限（秒，跨全部真实轮次+全部busy等待；"
-                             "model-builder 技能首次执行可能需要安装 QAIRT 工具链，建议 3600-5400）")
-    parser.add_argument("--busy_poll_interval_seconds", type=int, default=45,
+    # 以下四个预算参数默认均为 None：不同任务场景（model_conversion/tetris/
+    # inception_precision_compare）各自函数签名的默认值天差地别（如 tetris
+    # 的 per_turn_timeout=600 对 inception 任务严重不足，inception 的
+    # per_turn_timeout=3600 对 tetris 又明显过大），若 argparse 另设一套统一的
+    # 全局默认值，main() 会无条件传参、静默覆盖掉函数自身更贴合该场景的默认值
+    # （曾实际发生：函数默认值已针对 inception 场景放大，但命令行不显式传参时
+    # 仍被这里的全局默认值砍回去）。保持 None，未显式传参时让各任务函数自己的
+    # 默认值生效，只有用户真正需要覆盖时才传。
+    parser.add_argument("--max_turns", type=int, default=None,
+                        help="单个任务最多追加的真实 follow-up 轮次（不含 busy 等待期间的探测重试）；"
+                             "省略时使用各任务函数自身默认值")
+    parser.add_argument("--per_turn_timeout", type=int, default=None,
+                        help="单轮 SSE 请求超时（秒）；省略时使用各任务函数自身默认值"
+                             "（inception_precision_compare 默认 3600，覆盖 27B 模型 QNN 量化转换的真实耗时）")
+    parser.add_argument("--total_deadline_seconds", type=int, default=None,
+                        help="单个任务总耗时上限（秒，跨全部真实轮次+全部busy等待）；"
+                             "省略时使用各任务函数自身默认值（inception_precision_compare 默认 7200，"
+                             "覆盖 27B 模型下载+两次 QNN 转换+两次推理+对比的小时级真实耗时）")
+    parser.add_argument("--busy_poll_interval_seconds", type=int, default=None,
                         help="检测到 existing_run（会话忙）后的轮询间隔（秒），"
-                             "用剩余的全部 total_deadline_seconds 耐心等待，不按 max_turns 切分")
+                             "用剩余的全部 total_deadline_seconds 耐心等待，不按 max_turns 切分；"
+                             "省略时使用各任务函数自身默认值")
     parser.add_argument("--out_dir", default=None, help="结果输出目录，默认 test_results_agent_tasks/<timestamp>")
     parser.add_argument("--transcript_path", default=None,
                         help="完整对话转录文件路径（Markdown，未截断），默认 <out_dir>/conversation_transcript_<task>_<timestamp>.md；"
@@ -1597,6 +1633,17 @@ def main():
             print(f"  [STAGE] 本地模型后端已就绪: model={args.model_name}, genie_port={args.genie_port}", flush=True)
 
             print(f"{'=' * 60}\n运行任务: {args.task}\n{'=' * 60}", flush=True)
+            # 四个预算参数在 argparse 侧默认为 None，这里只在用户显式传参时才
+            # 加入 kwargs，省略时让各任务函数自己的签名默认值生效（不同任务场景
+            # 耗时量级差异巨大，不能用一套全局默认值覆盖）。
+            budget_kwargs = {
+                k: v for k, v in (
+                    ("max_turns", args.max_turns),
+                    ("per_turn_timeout", args.per_turn_timeout),
+                    ("total_deadline_seconds", args.total_deadline_seconds),
+                    ("busy_poll_interval_seconds", args.busy_poll_interval_seconds),
+                ) if v is not None
+            }
             if args.task == "model_conversion":
                 run_model_conversion_task(
                     builder, args.model_name, all_results,
@@ -1604,35 +1651,24 @@ def main():
                     workspace_root=args.workspace_root,
                     run_pipeline_path=str(Path(args.builder_dir) / "factory" / "chat_features" /
                                            "model-builder" / "scripts" / "run_pipeline.py"),
-                    max_turns=args.max_turns,
-                    per_turn_timeout=args.per_turn_timeout,
-                    total_deadline_seconds=args.total_deadline_seconds,
-                    busy_poll_interval_seconds=args.busy_poll_interval_seconds,
-                    transcript_path=transcript_path)
+                    transcript_path=transcript_path, **budget_kwargs)
             elif args.task == "model_build_probe":
+                probe_kwargs = ({"stream_timeout": args.per_turn_timeout}
+                                if args.per_turn_timeout is not None else {})
                 run_model_build_probe_task(
                     builder, args.model_name, all_results,
-                    stream_timeout=args.per_turn_timeout,
-                    transcript_path=transcript_path)
+                    transcript_path=transcript_path, **probe_kwargs)
             elif args.task == "tetris":
                 run_tetris_task(
                     builder, args.model_name, all_results,
                     tetris_path=args.tetris_path,
                     python_exe=args.python_exe,
-                    max_turns=args.max_turns,
-                    per_turn_timeout=args.per_turn_timeout,
-                    total_deadline_seconds=args.total_deadline_seconds,
-                    busy_poll_interval_seconds=args.busy_poll_interval_seconds,
-                    transcript_path=transcript_path)
+                    transcript_path=transcript_path, **budget_kwargs)
             elif args.task == "inception_precision_compare":
                 run_inception_precision_compare_task(
                     builder, args.model_name, all_results,
                     workspace_root=args.workspace_root,
-                    max_turns=args.max_turns,
-                    per_turn_timeout=args.per_turn_timeout,
-                    total_deadline_seconds=args.total_deadline_seconds,
-                    busy_poll_interval_seconds=args.busy_poll_interval_seconds,
-                    transcript_path=transcript_path)
+                    transcript_path=transcript_path, **budget_kwargs)
     except RuntimeError as e:
         print(f"  ✗ {e}")
     finally:

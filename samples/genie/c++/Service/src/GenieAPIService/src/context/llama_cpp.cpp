@@ -409,6 +409,12 @@ public:
         bool switch_to_speculative = false;
         bool eog_hit = false;
 
+        bool think_in_progress = false;
+        int think_token_start = -1;
+        bool think_force_closing = false;
+        std::vector<llama_token> think_force_tokens;
+        const int32_t think_budget_tokens = params_.sampling.reasoning_budget_tokens;
+
         // 共享的逐 token 输出管线：回调/停止序列检测/输出长度限制，单模型解码与投机
         // 解码验证轮次产出的 token 共用同一套逻辑（D5）。返回 false 表示应停止生成
         // （should_stop/eog_hit/输出长度限制均已通过外层捕获的引用置位）。
@@ -434,6 +440,38 @@ public:
                 return false;
             }
             n_generated++;
+            if (think_budget_tokens >= 0)
+            {
+                if (!think_in_progress)
+                {
+                    if (generated_text_buf.find("<think>") != std::string::npos)
+                    {
+                        think_in_progress = true;
+                        think_token_start = n_generated;
+                    }
+                }
+                else if (generated_text_buf.find("</think>") != std::string::npos)
+                {
+                    think_in_progress = false;
+                }
+                else if (!think_force_closing && n_generated - think_token_start >= think_budget_tokens)
+                {
+                    std::string force_text = params_.sampling.reasoning_budget_message;
+                    if (force_text.empty())
+                    {
+                        force_text = "\n\nConsidering the time constraints, I will give the final answer directly based on the analysis above.\n";
+                    }
+                    force_text += "</think>\n\n";
+                    think_force_tokens = common_tokenize(ctx, force_text, false, true);
+                    think_force_closing = !think_force_tokens.empty();
+                    think_in_progress = false;
+                    My_Log{My_Log::Level::kWarning}
+                        << "[LLAMACpp] " << query_type
+                        << " Reasoning budget (" << think_budget_tokens
+                        << " tokens) exceeded after " << n_generated
+                        << " total generated tokens. Forcing </think> close." << std::endl;
+                }
+            }
             if (max_length_ > 0 && n_generated >= max_length_)
             {
                 My_Log{My_Log::Level::kWarning}
@@ -561,7 +599,20 @@ public:
                     break;
                 }
 
-                const llama_token id = common_sampler_sample(smpl, ctx, -1);
+                llama_token id;
+                if (think_force_closing && !think_force_tokens.empty())
+                {
+                    id = think_force_tokens.front();
+                    think_force_tokens.erase(think_force_tokens.begin());
+                    if (think_force_tokens.empty())
+                    {
+                        think_force_closing = false;
+                    }
+                }
+                else
+                {
+                    id = common_sampler_sample(smpl, ctx, -1);
+                }
                 common_sampler_accept(smpl, id, true);
                 embd.push_back(id);
                 is_generated_token = true;
@@ -635,6 +686,36 @@ public:
                     stopped_by_output_limit_ = true;
                     should_stop = true;
                     break;
+                }
+
+                if (think_force_closing && !think_force_tokens.empty())
+                {
+                    llama_token forced_id = think_force_tokens.front();
+                    think_force_tokens.erase(think_force_tokens.begin());
+                    if (think_force_tokens.empty())
+                    {
+                        think_force_closing = false;
+                    }
+
+                    common_batch_clear(batch_tgt);
+                    common_batch_add(batch_tgt, id_last, n_past++, {kSpecSeqId}, true);
+                    if (llama_decode(ctx, batch_tgt))
+                    {
+                        My_Log{My_Log::Level::kError}
+                            << "[LLAMACpp] " << query_type << " forced-close llama_decode FAILED\n";
+                        decode_failed = true;
+                        break;
+                    }
+                    common_speculative_process(spec_.get(), batch_tgt);
+                    common_sampler_accept(smpl, forced_id, true);
+                    spec_prompt.push_back(id_last);
+                    id_last = forced_id;
+                    --n_remain;
+                    if (!emit_generated_token(id_last))
+                    {
+                        break;
+                    }
+                    continue;
                 }
 
                 if (draft.empty())
@@ -1001,7 +1082,10 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
         // LLAMA_EXAMPLE_SERVER、不包含 LLAMA_EXAMPLE_COMPLETION，因此本分支下面把
         // common_params_parse 的 example 切到 LLAMA_EXAMPLE_SERVER，让它们走原生 argv 解析，
         // 不再需要 parse 后手动二次赋值 params.speculative.*。
-        arg_strings.insert(arg_strings.end(), {"--reasoning-budget", "3072"});
+        if (model_config_.is_thinking_model())
+        {
+            arg_strings.insert(arg_strings.end(), {"--reasoning-budget", "3072"});
+        }
 
         fs::path draft_path = fs::path(model_config_.get_model_path()) / draft_config.path;
         arg_strings.insert(arg_strings.end(), {"-md", draft_path.string()});
