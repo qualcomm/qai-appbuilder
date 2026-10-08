@@ -47,9 +47,9 @@ EXECUTORCH_LINK_LIBS := \
     -Wl,--no-as-needed \
     -Wl,--whole-archive \
     -lportable_ops_lib \
+    -lquantized_ops_lib \
     -Wl,--no-whole-archive \
     -Wl,--as-needed \
-    -lquantized_ops_lib \
     -lportable_kernels \
     -lquantized_kernels \
     -lkernels_util_all_deps \

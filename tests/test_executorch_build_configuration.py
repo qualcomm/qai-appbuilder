@@ -72,6 +72,8 @@ def test_backend_archives_are_whole_archived_in_cmake() -> None:
     assert link_block.count("-Wl,--no-as-needed") == 3
     assert link_block.count("-Wl,--as-needed") == 3
     assert link_block.index("${EXECUTORCH_PORTABLE_OPS_LIBRARY}") < link_block.index("${EXECUTORCH_PORTABLE_KERNELS_LIBRARY}")
+    assert link_block.index("-Wl,--whole-archive") < link_block.index("${EXECUTORCH_QUANTIZED_OPS_LIBRARY}") < link_block.index("-Wl,--no-whole-archive")
+    assert link_block.index("${EXECUTORCH_QUANTIZED_OPS_LIBRARY}") < link_block.index("${EXECUTORCH_QUANTIZED_KERNELS_LIBRARY}")
     assert link_block.index("${EXECUTORCH_XNNPACK_LIBRARY}") > link_block.index("-Wl,--no-as-needed")
     assert link_block.index("${EXECUTORCH_QNN_LIBRARY}") > link_block.rindex("-Wl,--no-as-needed")
 
@@ -84,6 +86,8 @@ def test_backend_archives_are_whole_archived_in_android() -> None:
     assert link_block.count("-Wl,--no-as-needed") == 3
     assert link_block.count("-Wl,--as-needed") == 3
     assert link_block.index("-lportable_ops_lib") < link_block.index("-lportable_kernels")
+    assert link_block.index("-Wl,--whole-archive") < link_block.index("-lquantized_ops_lib") < link_block.index("-Wl,--no-whole-archive")
+    assert link_block.index("-lquantized_ops_lib") < link_block.index("-lquantized_kernels")
     assert link_block.index("-lexecutorch_backend_xnnpack") > link_block.index("-Wl,--no-as-needed")
     assert link_block.index("-lqnn_executorch_backend") > link_block.rindex("-Wl,--no-as-needed")
 
