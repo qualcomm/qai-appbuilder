@@ -1,7 +1,7 @@
 #=============================================================================
 #
 # Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
-# 
+#
 # SPDX-License-Identifier: BSD-3-Clause
 #
 #=============================================================================
@@ -11,6 +11,39 @@ project(appbuilder LANGUAGES CXX)
 
 option(APPBUILDER_ENABLE_TFLITE "Build direct TFLite + QNN delegate support" OFF)
 option(APPBUILDER_ENABLE_TFLITE_CPU "Build direct TFLite CPU support" OFF)
+option(APPBUILDER_ENABLE_EXECUTORCH "Build direct ExecuTorch support" OFF)
+option(APPBUILDER_ENABLE_EXECUTORCH_QNN "Enable the ExecuTorch Qualcomm QNN backend" OFF)
+
+if (APPBUILDER_ENABLE_EXECUTORCH_QNN AND NOT APPBUILDER_ENABLE_EXECUTORCH)
+    message(FATAL_ERROR "APPBUILDER_ENABLE_EXECUTORCH_QNN requires APPBUILDER_ENABLE_EXECUTORCH=ON.")
+endif()
+
+if (APPBUILDER_ENABLE_EXECUTORCH)
+    if (NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+        NOT CMAKE_SYSTEM_NAME STREQUAL "Android")
+        message(FATAL_ERROR "APPBUILDER_ENABLE_EXECUTORCH is supported only on Linux and Android arm64; current platform is ${CMAKE_SYSTEM_NAME}.")
+    endif()
+    if (NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|AARCH64|ARM64)$")
+        message(FATAL_ERROR "APPBUILDER_ENABLE_EXECUTORCH is supported only on Linux and Android arm64; current processor is ${CMAKE_SYSTEM_PROCESSOR}.")
+    endif()
+    if (NOT DEFINED ENV{EXECUTORCH_ROOT} OR "$ENV{EXECUTORCH_ROOT}" STREQUAL "")
+        message(FATAL_ERROR "APPBUILDER_ENABLE_EXECUTORCH requires EXECUTORCH_ROOT.")
+    endif()
+    if (NOT EXISTS "$ENV{EXECUTORCH_ROOT}/extension/module/module.h")
+        message(FATAL_ERROR "EXECUTORCH_ROOT must contain extension/module/module.h.")
+    endif()
+    if (APPBUILDER_ENABLE_EXECUTORCH_QNN)
+        if (NOT DEFINED ENV{QNN_SDK_ROOT} OR "$ENV{QNN_SDK_ROOT}" STREQUAL "")
+            message(FATAL_ERROR "APPBUILDER_ENABLE_EXECUTORCH_QNN requires QNN_SDK_ROOT.")
+        endif()
+        if (NOT EXISTS "$ENV{EXECUTORCH_ROOT}/backends/qualcomm/runtime/QnnExecuTorch.h")
+            message(FATAL_ERROR "EXECUTORCH_ROOT must contain the Qualcomm ExecuTorch backend headers.")
+        endif()
+        if (NOT EXISTS "$ENV{QNN_SDK_ROOT}/include/QNN/QnnTypes.h")
+            message(FATAL_ERROR "QNN_SDK_ROOT must contain include/QNN/QnnTypes.h.")
+        endif()
+    endif()
+endif()
 
 if (APPBUILDER_ENABLE_TFLITE AND APPBUILDER_ENABLE_TFLITE_CPU)
     message(FATAL_ERROR "APPBUILDER_ENABLE_TFLITE and APPBUILDER_ENABLE_TFLITE_CPU are mutually exclusive.")
@@ -56,6 +89,70 @@ else()
 endif()
 
 INCLUDE_DIRECTORIES(../src)
+if (APPBUILDER_ENABLE_EXECUTORCH)
+    get_filename_component(EXECUTORCH_PARENT_INCLUDE_ROOT "$ENV{EXECUTORCH_ROOT}" DIRECTORY)
+    INCLUDE_DIRECTORIES(
+        "$ENV{EXECUTORCH_ROOT}"
+        "${EXECUTORCH_PARENT_INCLUDE_ROOT}"
+    )
+    if (DEFINED ENV{EXECUTORCH_TORCH_INCLUDE_ROOT} AND
+        NOT "$ENV{EXECUTORCH_TORCH_INCLUDE_ROOT}" STREQUAL "")
+        INCLUDE_DIRECTORIES("$ENV{EXECUTORCH_TORCH_INCLUDE_ROOT}")
+    endif()
+    add_compile_definitions(APPBUILDER_ENABLE_EXECUTORCH=1)
+    if (APPBUILDER_ENABLE_EXECUTORCH_QNN)
+        add_compile_definitions(APPBUILDER_ENABLE_EXECUTORCH_QNN=1)
+    endif()
+
+    # Keep the Python extension's SDK validation in sync with the native
+    # library build.  The native target links the portable operator
+    # registration archive with --whole-archive; fail here too when a
+    # packaging build points at an incomplete SDK.
+    find_library(EXECUTORCH_MODULE_LIBRARY NAMES extension_module_static extension_module
+                 PATHS "$ENV{EXECUTORCH_ROOT}/lib" "$ENV{EXECUTORCH_ROOT}/build/lib"
+                 NO_DEFAULT_PATH)
+    find_library(EXECUTORCH_TENSOR_LIBRARY NAMES extension_tensor_static extension_tensor
+                 PATHS "$ENV{EXECUTORCH_ROOT}/lib" "$ENV{EXECUTORCH_ROOT}/build/lib"
+                 NO_DEFAULT_PATH)
+    find_library(EXECUTORCH_DATA_LOADER_LIBRARY NAMES extension_data_loader_static extension_data_loader
+                 PATHS "$ENV{EXECUTORCH_ROOT}/lib" "$ENV{EXECUTORCH_ROOT}/build/lib"
+                 NO_DEFAULT_PATH)
+    find_library(EXECUTORCH_FLAT_TENSOR_LIBRARY NAMES extension_flat_tensor_static extension_flat_tensor
+                 PATHS "$ENV{EXECUTORCH_ROOT}/lib" "$ENV{EXECUTORCH_ROOT}/build/lib"
+                 NO_DEFAULT_PATH)
+    find_library(EXECUTORCH_NAMED_DATA_LIBRARY NAMES extension_named_data_map_static extension_named_data_map
+                 PATHS "$ENV{EXECUTORCH_ROOT}/lib" "$ENV{EXECUTORCH_ROOT}/build/lib"
+                 NO_DEFAULT_PATH)
+    find_library(EXECUTORCH_EVALUE_LIBRARY NAMES extension_evalue_util_static extension_evalue_util
+                 PATHS "$ENV{EXECUTORCH_ROOT}/lib" "$ENV{EXECUTORCH_ROOT}/build/lib"
+                 NO_DEFAULT_PATH)
+    find_library(EXECUTORCH_THREADPOOL_LIBRARY NAMES extension_threadpool_static extension_threadpool
+                 PATHS "$ENV{EXECUTORCH_ROOT}/lib" "$ENV{EXECUTORCH_ROOT}/build/lib"
+                 NO_DEFAULT_PATH)
+    find_library(EXECUTORCH_RUNNER_LIBRARY NAMES extension_runner_util_static extension_runner_util
+                 PATHS "$ENV{EXECUTORCH_ROOT}/lib" "$ENV{EXECUTORCH_ROOT}/build/lib"
+                 NO_DEFAULT_PATH)
+    find_library(EXECUTORCH_CORE_LIBRARY NAMES executorch_core executorch executorch_shared
+                 PATHS "$ENV{EXECUTORCH_ROOT}/lib" "$ENV{EXECUTORCH_ROOT}/build/lib"
+                 NO_DEFAULT_PATH)
+    find_library(EXECUTORCH_PORTABLE_OPS_LIBRARY NAMES portable_ops_lib
+                 PATHS "$ENV{EXECUTORCH_ROOT}/lib" "$ENV{EXECUTORCH_ROOT}/build/lib"
+                 NO_DEFAULT_PATH)
+    find_library(EXECUTORCH_PORTABLE_KERNELS_LIBRARY NAMES portable_kernels
+                 PATHS "$ENV{EXECUTORCH_ROOT}/lib" "$ENV{EXECUTORCH_ROOT}/build/lib"
+                 NO_DEFAULT_PATH)
+    find_library(EXECUTORCH_KERNELS_UTIL_LIBRARY NAMES kernels_util_all_deps
+                 PATHS "$ENV{EXECUTORCH_ROOT}/lib" "$ENV{EXECUTORCH_ROOT}/build/lib"
+                 NO_DEFAULT_PATH)
+    if (NOT EXECUTORCH_MODULE_LIBRARY OR NOT EXECUTORCH_TENSOR_LIBRARY OR
+        NOT EXECUTORCH_DATA_LOADER_LIBRARY OR NOT EXECUTORCH_FLAT_TENSOR_LIBRARY OR
+        NOT EXECUTORCH_NAMED_DATA_LIBRARY OR NOT EXECUTORCH_EVALUE_LIBRARY OR
+        NOT EXECUTORCH_THREADPOOL_LIBRARY OR NOT EXECUTORCH_RUNNER_LIBRARY OR
+        NOT EXECUTORCH_CORE_LIBRARY OR NOT EXECUTORCH_PORTABLE_OPS_LIBRARY OR
+        NOT EXECUTORCH_PORTABLE_KERNELS_LIBRARY OR NOT EXECUTORCH_KERNELS_UTIL_LIBRARY)
+        message(FATAL_ERROR "EXECUTORCH_ROOT must provide all required ExecuTorch runtime libraries under lib or build/lib.")
+    endif()
+endif()
 if (APPBUILDER_ENABLE_TFLITE OR APPBUILDER_ENABLE_TFLITE_CPU)
     INCLUDE_DIRECTORIES("$ENV{TFLITE_ROOT}/include")
     if (APPBUILDER_ENABLE_TFLITE)

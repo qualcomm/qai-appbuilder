@@ -9,6 +9,7 @@
 #pragma once
 
 #include "QnnInterface.h"
+#include "QnnSystemCompat.hpp"
 #include "QnnWrapperUtils.hpp"
 #include "System/QnnSystemInterface.h"
 

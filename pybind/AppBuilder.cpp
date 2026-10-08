@@ -1,7 +1,7 @@
 //==============================================================================
 //
 // Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
-// 
+//
 // SPDX-License-Identifier: BSD-3-Clause
 //
 //==============================================================================
@@ -23,7 +23,7 @@ ShareMemory::~ShareMemory() {
 }
 
 QNNContext::QNNContext(const std::string& model_name,
-                       const std::string& model_path, const std::string& backend_lib_path, const std::string& system_lib_path, 
+                       const std::string& model_path, const std::string& backend_lib_path, const std::string& system_lib_path,
                        bool async, const std::string& input_data_type, const std::string& output_data_type, uint32_t deviceID, std::string coreIdsStr, const std::vector<std::string>& enable_graphs) {
     m_model_name = model_name;
 
@@ -31,7 +31,7 @@ QNNContext::QNNContext(const std::string& model_name,
 }
 
 QNNContext::QNNContext(const std::string& model_name, const std::string& proc_name,
-                       const std::string& model_path, const std::string& backend_lib_path, const std::string& system_lib_path, 
+                       const std::string& model_path, const std::string& backend_lib_path, const std::string& system_lib_path,
                        bool async, const std::string& input_data_type, const std::string& output_data_type, uint32_t deviceID, std::string coreIdsStr) {
     m_model_name = model_name;
     m_proc_name = proc_name;
@@ -40,8 +40,8 @@ QNNContext::QNNContext(const std::string& model_name, const std::string& proc_na
 }
 
 QNNContext::QNNContext(const std::string& model_name,
-                       const std::string& model_path, const std::string& backend_lib_path, 
-                       const std::string& system_lib_path, const std::vector<LoraAdapter>& lora_adapters, 
+                       const std::string& model_path, const std::string& backend_lib_path,
+                       const std::string& system_lib_path, const std::vector<LoraAdapter>& lora_adapters,
                        bool async, const std::string& input_data_type, const std::string& output_data_type, uint32_t deviceID, std::string coreIdsStr, const std::vector<std::string>& enable_graphs) {
 
     m_model_name = model_name;
@@ -126,7 +126,7 @@ QNNContext::~QNNContext() {
 }
 
 
-std::vector<py::array> 
+std::vector<py::array>
 QNNContext::Inference(const std::vector<py::array>& input, const std::string& perf_profile, size_t graphIndex, const std::string& input_data_type, const std::string& output_data_type) {
     return inference(m_model_name, input, perf_profile, graphIndex, input_data_type, output_data_type);
 }
@@ -314,6 +314,23 @@ PYBIND11_MODULE(appbuilder, m) {
         .def("getProfilingEvent", &TFLiteCpuContext::getProfilingEvent)
         .def("getProviderMode", &TFLiteCpuContext::getProviderMode)
         .def("release", &TFLiteCpuContext::release);
+#endif
+
+#if defined(APPBUILDER_ENABLE_EXECUTORCH)
+    py::class_<ExecuTorchContext>(m, "ExecuTorchContext")
+        .def(py::init<const std::string&, const std::string&, const std::string&>(),
+             py::arg("model_name"), py::arg("model_path"), py::arg("backend_lib_path") = "")
+        .def("Inference", &ExecuTorchContext::Inference, py::arg("input"), py::arg("graphIndex") = 0)
+        .def("getInputShapes", &ExecuTorchContext::getInputShapes, py::arg("graphIdx") = 0)
+        .def("getOutputShapes", &ExecuTorchContext::getOutputShapes, py::arg("graphIdx") = 0)
+        .def("getInputDataType", &ExecuTorchContext::getInputDataType, py::arg("graphIdx") = 0)
+        .def("getOutputDataType", &ExecuTorchContext::getOutputDataType, py::arg("graphIdx") = 0)
+        .def("getInputName", &ExecuTorchContext::getInputName, py::arg("graphIdx") = 0)
+        .def("getOutputName", &ExecuTorchContext::getOutputName, py::arg("graphIdx") = 0)
+        .def("getGraphName", &ExecuTorchContext::getGraphName, py::arg("graphIdx") = 0)
+        .def("getProfilingEvent", &ExecuTorchContext::getProfilingEvent)
+        .def("getProviderMode", &ExecuTorchContext::getProviderMode)
+        .def("release", &ExecuTorchContext::release);
 #endif
 
     py::class_<QNNContext>(m, "QNNContext")

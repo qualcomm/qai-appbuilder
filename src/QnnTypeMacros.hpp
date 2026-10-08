@@ -471,6 +471,10 @@ inline void setQnnTensorMemHandle(Qnn_Tensor_t* tensor, Qnn_MemHandle_t handle) 
   setQnnTensorMemHandle(*tensor, handle);
 }
 
+// QNN 2.22 added the raw-tensor retrieval callback.  Older QAIRT SDKs do not
+// declare the type or the corresponding Qnn_TensorV2_t member, so do not expose
+// these compatibility helpers when building against those SDKs.
+#if QNN_API_VERSION_MINOR >= 22
 inline void setQnnTensorClientBufRetrieve(Qnn_Tensor_t& tensor,
                                           Qnn_TensorRetrieveRaw_t* const retrieve) {
   if (tensor.version == QNN_TENSOR_VERSION_2) {
@@ -498,6 +502,7 @@ inline Qnn_TensorRetrieveRaw_t* getQnnTensorClientBufRetrieve(const Qnn_Tensor_t
 inline Qnn_TensorRetrieveRaw_t* getQnnTensorClientBufRetrieve(const Qnn_Tensor_t* const tensor) {
   return getQnnTensorClientBufRetrieve(*tensor);
 }
+#endif
 
 inline Qnn_TensorSet_t createQnnTensorSet(const Qnn_TensorSetVersion_t version) {
   Qnn_TensorSet_t tensorSet = QNN_TENSOR_SET_INIT;

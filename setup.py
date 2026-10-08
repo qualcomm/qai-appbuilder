@@ -20,7 +20,7 @@
 #
 #   [windows - x86 PC (non-WOS)]
 #     set QNN_SDK_ROOT=C:/Qualcomm/AIStack/QAIRT/2.42.0.251225/
-#     set QAI_TOOLCHAINS=x86_64-windows-msvc 
+#     set QAI_TOOLCHAINS=x86_64-windows-msvc
 #     python -m build -w
 #
 #   [linux]
@@ -607,6 +607,10 @@ def _build_root_cmake_project(arch: str, source_pkg_dir: Path, build_pkg_dir: Pa
         cmake_configure.append("-DAPPBUILDER_ENABLE_TFLITE=ON")
     if os.environ.get("APPBUILDER_ENABLE_TFLITE_CPU", "").strip().lower() in {"1", "on", "true", "yes"}:
         cmake_configure.append("-DAPPBUILDER_ENABLE_TFLITE_CPU=ON")
+    if os.environ.get("APPBUILDER_ENABLE_EXECUTORCH", "").strip().lower() in {"1", "on", "true", "yes"}:
+        cmake_configure.append("-DAPPBUILDER_ENABLE_EXECUTORCH=ON")
+    if os.environ.get("APPBUILDER_ENABLE_EXECUTORCH_QNN", "").strip().lower() in {"1", "on", "true", "yes"}:
+        cmake_configure.append("-DAPPBUILDER_ENABLE_EXECUTORCH_QNN=ON")
     subprocess.run(cmake_configure, cwd=str(build_dir), check=True)
 
     cmake_build = ["cmake", "--build", str(build_dir)]
@@ -692,6 +696,55 @@ def _build_root_cmake_project(arch: str, source_pkg_dir: Path, build_pkg_dir: Pa
             raise RuntimeError("TFLITE_ROOT must provide a Windows tensorflowlite_c.dll or tflite_c.dll")
         for pkg_dir in (source_pkg_dir, build_pkg_dir):
             _copy_if_exists(tflite_dll, pkg_dir / "libs" / tflite_dll.name)
+
+    if os.environ.get("APPBUILDER_ENABLE_EXECUTORCH", "").strip().lower() in {"1", "on", "true", "yes"}:
+        executorch_root = os.environ.get("EXECUTORCH_ROOT", "")
+        if not executorch_root:
+            raise RuntimeError("APPBUILDER_ENABLE_EXECUTORCH requires EXECUTORCH_ROOT")
+        executorch_root_path = Path(executorch_root)
+        shared_library_basenames = [
+            "extension_module",
+            "extension_tensor",
+            "extension_data_loader",
+            "extension_flat_tensor",
+            "extension_named_data_map",
+            "extension_evalue_util",
+            "extension_threadpool",
+            "extension_runner_util",
+            "executorch_core",
+            "executorch",
+            "executorch_shared",
+            "portable_ops_lib",
+            "portable_kernels",
+            "kernels_util_all_deps",
+            "pthreadpool",
+            "cpuinfo",
+            "quantized_ops_lib",
+            "quantized_kernels",
+            "executorch_backend_xnnpack",
+            "xnnpack_backend",
+            "executorch_backend_qnn",
+            "qnn_executorch_backend",
+        ]
+        runtime_patterns = [
+            *(f"lib{name}.so*" for name in shared_library_basenames),
+            *(f"{name}.dll*" for name in shared_library_basenames),
+        ]
+        runtime_paths = []
+        for library_dir in (
+            executorch_root_path / "lib",
+            executorch_root_path / "build" / "lib",
+        ):
+            for pattern in runtime_patterns:
+                runtime_paths.extend(sorted(library_dir.glob(pattern)))
+        found_runtime = {
+            path.name: path for path in runtime_paths if path.is_file()
+        }
+        if os.environ.get("APPBUILDER_ENABLE_EXECUTORCH_QNN", "").strip().lower() in {"1", "on", "true", "yes"} and not any("qnn" in name.lower() for name in found_runtime):
+            raise RuntimeError("APPBUILDER_ENABLE_EXECUTORCH_QNN requires a packaged ExecuTorch QNN backend shared library")
+        for pkg_dir in (source_pkg_dir, build_pkg_dir):
+            for runtime_path in found_runtime.values():
+                _copy_if_exists(runtime_path, pkg_dir / "libs" / runtime_path.name)
 
 
 def _build_release_zip(arch: str):
@@ -891,6 +944,10 @@ class QaiCMakeBuild(build_ext):
             cmake_configure.append("-DAPPBUILDER_ENABLE_TFLITE=ON")
         if os.environ.get("APPBUILDER_ENABLE_TFLITE_CPU", "").strip().lower() in {"1", "on", "true", "yes"}:
             cmake_configure.append("-DAPPBUILDER_ENABLE_TFLITE_CPU=ON")
+        if os.environ.get("APPBUILDER_ENABLE_EXECUTORCH", "").strip().lower() in {"1", "on", "true", "yes"}:
+            cmake_configure.append("-DAPPBUILDER_ENABLE_EXECUTORCH=ON")
+        if os.environ.get("APPBUILDER_ENABLE_EXECUTORCH_QNN", "").strip().lower() in {"1", "on", "true", "yes"}:
+            cmake_configure.append("-DAPPBUILDER_ENABLE_EXECUTORCH_QNN=ON")
         subprocess.run(cmake_configure, cwd=str(build_temp), check=True)
 
         cmake_build = ["cmake", "--build", "."] + build_args
@@ -951,16 +1008,16 @@ class QaiBdistWheel(bdist_wheel):
                 self.toolchains = "x86_64-windows-msvc"
             elif arch == "ARM64EC":
                 os.environ["QAI_TOOLCHAINS"] = "arm64x-windows-msvc"
-                self.toolchains = "arm64x-windows-msvc"			
+                self.toolchains = "arm64x-windows-msvc"
             elif arch == "aarch64":
                 os.environ["QAI_TOOLCHAINS"] = "aarch64-oe-linux-gcc11.2"
-                self.toolchains = "aarch64-oe-linux-gcc11.2"	
+                self.toolchains = "aarch64-oe-linux-gcc11.2"
             elif arch == "ARM64":
                 os.environ["QAI_TOOLCHAINS"] = "aarch64-windows-msvc"
                 self.toolchains = "aarch64-windows-msvc"
             elif arch == "x86_64-linux":
                 os.environ["QAI_TOOLCHAINS"] = "x86_64-linux-clang"
-                self.toolchains = "x86_64-linux-clang"			
+                self.toolchains = "x86_64-linux-clang"
             else:
                 print(f"please set environment QAI_TOOLCHAINS for this arch:{arch}!!!")
 
