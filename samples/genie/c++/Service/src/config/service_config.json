@@ -275,8 +275,8 @@
             "sub_agent_prefer_local": true,
             "_comment_sub_cloud": "true=子 Agent 在 S0/S1+C2 且云端可用时允许上云",
             "sub_agent_allow_cloud_on_c2": true,
-            "_comment_retries": "单次请求最大工具调用重试次数，超出后触发事后路由回退（原值10对长链路agentic任务偏保守，2026-10-05实测20-40+步属正常范围，调大到40；云端fallback在无真实云端endpoint的测试环境必然失败，调大此值是避免误杀合法长任务的直接手段）",
-            "max_tool_call_retries": 40
+            "_comment_retries": "单次请求最大工具调用重试次数，超出后触发事后路由回退（原值10对长链路agentic任务偏保守，2026-10-05实测20-40+步属正常范围，调大到40；云端fallback在无真实云端endpoint的测试环境必然失败，调大此值是避免误杀合法长任务的直接手段；2026-10-09真机复测：第41次工具调用触发40上限，blocking_condition_hits=0且Builder侧_NO_PROGRESS_LIMIT全程未触发证明非runaway，当时FP16转换刚完成，W8A8转换+推理对比仍在后面，预估长链路任务需55-70次，调大到80）",
+            "max_tool_call_retries": 80
         },
 
         "sticky_routing": {

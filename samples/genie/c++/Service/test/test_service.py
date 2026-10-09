@@ -6943,7 +6943,7 @@ def _read_long_text_trigger_ratio(exe_dir):
     （与代码默认值一致，见 prompt_engineering.json 中的同名字段注释）。"""
     default_ratio = 0.5
     try:
-        cfg_path = Path(exe_dir) / "prompt_engineering.json"
+        cfg_path = Path(exe_dir) / "config" / "prompt_engineering.json"
         with open(cfg_path, "r", encoding="utf-8") as f:
             cfg = json.load(f)
         ratio = ((cfg.get("prompt_optimization") or {}).get("long_text_summarization") or {}).get("trigger_ratio")
@@ -10921,7 +10921,7 @@ class _ScArmConfigOverride:
     读写一次文件（幂等，不产生副作用），便于统一代码路径。"""
 
     def __init__(self, exe_dir, arm):
-        self.config_path = Path(exe_dir) / "prompt_engineering.json"
+        self.config_path = Path(exe_dir) / "config" / "prompt_engineering.json"
         self.arm = arm
         self.overrides = _sc_arm_overrides(arm)
         self._original_text = None

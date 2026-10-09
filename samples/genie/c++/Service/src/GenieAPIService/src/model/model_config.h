@@ -272,9 +272,14 @@ struct WindowsShellHintConfig {
     std::vector<std::string> tool_keywords = {"cmd", "powershell", "shell", "exec", "bash", "terminal", "command"};
     std::string hint_text =
         "You are running on Windows. Shell/command-execution tools may route your command to either "
-        "cmd.exe or PowerShell. cmd.exe: chain with && or ||, read variables as %VAR%, escape quotes as \\\"\\\". "
+        "cmd.exe or PowerShell. cmd.exe: chain with && or ||, read variables as %VAR%, escape quotes as \"\". "
         "PowerShell: chain with ;, read variables as $env:VAR, nested quotes need escaping or single-quoting. "
-        "If a command fails with a shell syntax error, retry using the other shell's syntax.";
+        "If a command fails with a shell syntax error, retry using the other shell's syntax. "
+        "Your command already runs inside a shell: write it directly in PowerShell, never wrapping it in "
+        "another shell nor mixing cmd syntax in: Write-Output (\"os=\"+$env:OS). Nested quotes must differ from "
+        "the outer: python -c \"import platform;print('m='+platform.machine())\". Needing two levels means write "
+        "the script to a file and run it. List files with Get-ChildItem -Name or -Recurse -Filter *.py, not "
+        "dir /b or /s /b. wmic is gone; use cmdlets.";
 };
 
 // ============================================================
@@ -512,6 +517,12 @@ struct PromptOptimizationConfig {
         // 提取——这不是新协议面，只是对既有 description 文本的结构化利用。
         // tag_weight=0 时逐字节回退：tags 不参与打分（等价于 D4 引入前）。
         size_t tag_weight = 2;
+        bool anchor_first_user_message = true;
+        bool protect_core_capability_tools = true;
+        std::vector<std::string> core_capability_keywords = {
+            "read", "write", "edit", "create", "save", "patch", "append", "delete",
+            "list", "glob", "grep", "find", "search", "dir", "tree",
+            "exec", "run", "shell", "command", "terminal", "bash", "powershell", "cmd"};
     } relevance_filter;
 
     // ── D2：技能目录三档渐进披露（L0/L1/L2）────────────────────────────────
@@ -596,6 +607,9 @@ struct PromptOptimizationConfig {
                                             // 超大 tool 响应（如 80K 字符压进 8K 上下文）会被直接判定放弃
                                             // 截断、转入 local_input_overflow，而不是走 Phase 4 真正截断。
         int safety_margin_tokens = 30;      // 安全余量（token 数）；截断时额外预留，防止边界情况；默认 30
+        // 为 true 时，Phase 4 在受保护区间内按 token 数降序选取多条 tool 消息逐条截断，
+        // 直到累计释放量达到 tokens_to_free；为 false 时逐字节回退到旧行为（只看最后一条）。
+        bool target_largest_tool_messages = true;
     } emergency_truncation;
 
     // ── 保真截断配置（ContentCondenser：token 口径 + 头尾双保留 + 丢弃留痕）───

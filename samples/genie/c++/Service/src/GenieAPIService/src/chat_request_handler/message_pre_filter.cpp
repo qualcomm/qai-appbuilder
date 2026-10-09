@@ -20,6 +20,74 @@
 
 using json = nlohmann::ordered_json;
 
+namespace {
+
+const char kToolCallOpenTag[] = "<tool_call>";
+const char kToolCallCloseTag[] = "</tool_call>";
+
+bool HasToolCallEnvelope(const std::string& content)
+{
+    return content.find(kToolCallOpenTag) != std::string::npos &&
+           content.find(kToolCallCloseTag) != std::string::npos;
+}
+
+bool ShrinkToolCallEnvelope(const std::string& content,
+                            size_t target_chars,
+                            const CondenseBudget& base_budget,
+                            std::string& out)
+{
+    const size_t open_pos = content.find(kToolCallOpenTag);
+    const size_t close_pos = content.rfind(kToolCallCloseTag);
+    if (open_pos == std::string::npos || close_pos == std::string::npos) return false;
+    const size_t body_begin = open_pos + (sizeof(kToolCallOpenTag) - 1);
+    if (close_pos <= body_begin) return false;
+
+    json parsed = json::parse(content.substr(body_begin, close_pos - body_begin), nullptr, false);
+    if (parsed.is_discarded() || !parsed.is_object()) return false;
+    if (!parsed.contains("name") || !parsed.contains("arguments")) return false;
+    if (!parsed["arguments"].is_object()) return false;
+
+    std::string largest_key;
+    size_t largest_len = 0;
+    for (auto it = parsed["arguments"].begin(); it != parsed["arguments"].end(); ++it) {
+        if (!it.value().is_string()) continue;
+        const size_t len = it.value().get<std::string>().length();
+        if (len > largest_len) {
+            largest_len = len;
+            largest_key = it.key();
+        }
+    }
+    if (largest_key.empty() || largest_len == 0) return false;
+
+    const std::string original_value = parsed["arguments"][largest_key].get<std::string>();
+    size_t value_budget = largest_len;
+    std::string candidate;
+    for (int attempt = 0; attempt < 8; ++attempt) {
+        const size_t current_len = candidate.empty() ? content.length() : candidate.length();
+        if (current_len <= target_chars) break;
+        const size_t excess = current_len - target_chars;
+        value_budget = (excess >= value_budget) ? (value_budget / 2) : (value_budget - excess);
+        if (value_budget == 0) break;
+
+        CondenseBudget value_cfg = base_budget;
+        value_cfg.max_chars = value_budget;
+        value_cfg.max_tokens = 0;
+        CondenseResult condensed = ContentCondenser::Condense(
+            original_value, ContentKind::kGenericText, value_cfg, nullptr);
+        if (condensed.text.length() >= largest_len) break;
+
+        json shrunk = parsed;
+        shrunk["arguments"][largest_key] = condensed.text;
+        candidate = std::string(kToolCallOpenTag) + "\n" + shrunk.dump() + "\n" + kToolCallCloseTag;
+    }
+
+    if (candidate.empty() || candidate.length() >= content.length()) return false;
+    out = candidate;
+    return true;
+}
+
+}  // namespace
+
 // ============================================================
 // Constructor
 // ============================================================
@@ -338,7 +406,132 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
             const auto& fid_cfg = model_config_.GetPromptOptimizationConfig().fidelity;
             bool phase4_applied = false;
 
-            if (et_cfg.enabled) {
+            if (et_cfg.enabled && et_cfg.target_largest_tool_messages) {
+                // 多目标策略：在受保护区间内收集全部 tool 消息与带 tool_call 信封的 assistant
+                // 消息，按 token 数降序依次截断，直到累计释放量达到 tokens_to_free；每条自身
+                // 截断比例仍受 max_truncation_ratio 约束。
+                std::vector<int> cand_indices;
+                for (int i = 0; i < (int)final_messages.size(); i++) {
+                    if (final_messages[i].role == "tool" ||
+                        (final_messages[i].role == "assistant" &&
+                         HasToolCallEnvelope(final_messages[i].content))) {
+                        cand_indices.push_back(i);
+                    }
+                }
+
+                if (!cand_indices.empty()) {
+                    std::sort(cand_indices.begin(), cand_indices.end(), [&](int a, int b) {
+                        return CountTokens(final_messages[a].content) > CountTokens(final_messages[b].content);
+                    });
+
+                    size_t overflow_tokens = total_tokens - context_size;
+                    size_t tokens_to_free = overflow_tokens + static_cast<size_t>(et_cfg.safety_margin_tokens);
+                    size_t needed = tokens_to_free;
+                    size_t freed_total = 0;
+                    size_t largest_tokens = CountTokens(final_messages[cand_indices[0]].content);
+                    int targets_used = 0;
+                    int tool_targets = 0;
+                    int asst_targets = 0;
+                    size_t old_total = total_tokens;
+                    std::vector<std::pair<int, std::string>> backups;
+
+                    My_Log{My_Log::Level::kWarning}
+                        << "[FitMessagesToContext] Phase 4: Emergency truncation check: "
+                        << "overflow=" << overflow_tokens << " tok"
+                        << ", safety_margin=" << et_cfg.safety_margin_tokens << " tok"
+                        << ", tokens_to_free=" << tokens_to_free << " tok"
+                        << ", candidates=" << cand_indices.size()
+                        << ", largest=" << largest_tokens << " tok"
+                        << " (max_ratio=" << et_cfg.max_truncation_ratio << ")" << std::endl;
+
+                    for (int idx : cand_indices) {
+                        if (needed == 0) break;
+                        size_t msg_tokens = CountTokens(final_messages[idx].content);
+                        if (msg_tokens == 0) continue;
+                        size_t max_cut_allowed = static_cast<size_t>(
+                            static_cast<float>(msg_tokens) * et_cfg.max_truncation_ratio);
+                        size_t cut_amount = std::min(needed, max_cut_allowed);
+                        if (cut_amount == 0) continue;
+
+                        const std::string original_content = final_messages[idx].content;
+                        const bool is_envelope = (final_messages[idx].role == "assistant");
+                        size_t target_tokens = (msg_tokens > cut_amount) ? (msg_tokens - cut_amount) : 0;
+                        size_t target_chars = (original_content.length() > 0 && msg_tokens > 0)
+                            ? static_cast<size_t>(
+                                static_cast<float>(original_content.length()) *
+                                static_cast<float>(target_tokens) /
+                                static_cast<float>(msg_tokens) * 0.9f)
+                            : 0;
+                        if (target_chars == 0 || target_chars >= original_content.length()) continue;
+
+                        CondenseBudget emergency_budget;
+                        emergency_budget.max_chars = target_chars;
+                        emergency_budget.max_tokens = target_tokens;
+                        emergency_budget.tail_ratio = fid_cfg.preserve_tail ? fid_cfg.tail_ratio : 0.0;
+                        emergency_budget.extract_high_signal = fid_cfg.extract_high_signal;
+                        emergency_budget.json_head_items = fid_cfg.json_head_items;
+                        emergency_budget.json_tail_items = fid_cfg.json_tail_items;
+                        emergency_budget.max_token_probe = fid_cfg.max_token_probe_per_message;
+                        emergency_budget.cjk_bytes_per_token = fid_cfg.cjk_bytes_per_token;
+                        emergency_budget.ascii_bytes_per_token = fid_cfg.ascii_bytes_per_token;
+
+                        std::string truncated;
+                        if (is_envelope) {
+                            if (!ShrinkToolCallEnvelope(original_content, target_chars,
+                                                        emergency_budget, truncated)) {
+                                continue;
+                            }
+                        } else {
+                            std::function<size_t(const std::string&)> emergency_token_len =
+                                [this](const std::string& text) { return CountTokens(text); };
+                            CondenseResult condensed = ContentCondenser::Condense(
+                                original_content, ContentKind::kToolResponse, emergency_budget, &emergency_token_len);
+                            truncated = condensed.text;
+                        }
+
+                        backups.emplace_back(idx, original_content);
+                        final_messages[idx].content = truncated;
+
+                        size_t new_tokens = CountTokens(truncated);
+                        size_t actually_freed = (msg_tokens > new_tokens) ? (msg_tokens - new_tokens) : 0;
+                        total_tokens = total_tokens - msg_tokens + new_tokens;
+                        freed_total += actually_freed;
+                        needed = (needed > actually_freed) ? (needed - actually_freed) : 0;
+                        targets_used++;
+                        if (is_envelope) asst_targets++; else tool_targets++;
+
+                        My_Log{My_Log::Level::kWarning}
+                            << "[FitMessagesToContext] Phase 4: truncated "
+                            << final_messages[idx].role << " msg[" << idx << "] "
+                            << original_content.length() << " chars/" << msg_tokens << " tok"
+                            << " -> " << truncated.length() << " chars/" << new_tokens << " tok" << std::endl;
+                    }
+
+                    if (total_tokens <= context_size) {
+                        phase4_applied = true;
+                        My_Log{My_Log::Level::kWarning}
+                            << "[FitMessagesToContext] Phase 4: Emergency truncation succeeded "
+                            << "(targets=" << targets_used
+                            << "(tool=" << tool_targets << ", asst=" << asst_targets << ")"
+                            << ", freed=" << freed_total
+                            << " tok, largest=" << largest_tokens
+                            << " tok), context overflow resolved" << std::endl;
+                    } else {
+                        for (auto& b : backups) {
+                            final_messages[b.first].content = b.second;
+                        }
+                        total_tokens = old_total;
+                        My_Log{My_Log::Level::kWarning}
+                            << "[FitMessagesToContext] Phase 4: Emergency truncation insufficient across "
+                            << targets_used << " target(s) (still " << total_tokens << " > " << context_size
+                            << "), reverting and triggering local_input_overflow" << std::endl;
+                    }
+                } else {
+                    My_Log{My_Log::Level::kWarning}
+                        << "[FitMessagesToContext] Phase 4: No truncatable message found in protected set, "
+                        << "skipping emergency truncation" << std::endl;
+                }
+            } else if (et_cfg.enabled) {
                 // 找到最后一条 tool 消息
                 int last_tool_idx = -1;
                 for (int i = (int)final_messages.size() - 1; i >= 0; i--) {
@@ -575,7 +768,8 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
 
     My_Log{My_Log::Level::kInfo} << "[FitMessagesToContext] Success - Messages: " << final_messages.size()
                                   << ", Tokens: " << total_tokens
-                                  << ", Available: " << (context_size - total_tokens)
+                                  << ", Available: " << (static_cast<long long>(context_size) -
+                                                         static_cast<long long>(total_tokens))
                                   << ", Dropped: " << result.dropped_count << std::endl;
 
     return result;

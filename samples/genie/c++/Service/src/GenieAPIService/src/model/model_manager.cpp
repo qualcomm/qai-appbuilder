@@ -1132,12 +1132,16 @@ bool ModelManager::InitializeConfig()
                                 et.value("max_truncation_ratio", 0.95f);
                         prompt_optimization_config_.emergency_truncation.safety_margin_tokens =
                                 et.value("safety_margin_tokens", 30);
+                        prompt_optimization_config_.emergency_truncation.target_largest_tool_messages =
+                                et.value("target_largest_tool_messages", true);
                         My_Log{} << "[Config] emergency_truncation loaded: "
                                  << "enabled=" << prompt_optimization_config_.emergency_truncation.enabled
                                  << ", max_truncation_ratio="
                                  << prompt_optimization_config_.emergency_truncation.max_truncation_ratio
                                  << ", safety_margin_tokens="
                                  << prompt_optimization_config_.emergency_truncation.safety_margin_tokens
+                                 << ", target_largest_tool_messages="
+                                 << prompt_optimization_config_.emergency_truncation.target_largest_tool_messages
                                  << std::endl;
                     }
 
@@ -1205,6 +1209,22 @@ bool ModelManager::InitializeConfig()
                                 rf.value("intent_aliases_enabled", true);
                         prompt_optimization_config_.relevance_filter.tag_weight =
                                 rf.value("tag_weight", (size_t) 2);
+                        prompt_optimization_config_.relevance_filter.anchor_first_user_message =
+                                rf.value("anchor_first_user_message", true);
+                        prompt_optimization_config_.relevance_filter.protect_core_capability_tools =
+                                rf.value("protect_core_capability_tools", true);
+                        if (rf.contains("core_capability_keywords") && rf["core_capability_keywords"].is_array())
+                        {
+                            prompt_optimization_config_.relevance_filter.core_capability_keywords.clear();
+                            for (const auto &kw : rf["core_capability_keywords"])
+                            {
+                                if (kw.is_string())
+                                {
+                                    prompt_optimization_config_.relevance_filter.core_capability_keywords
+                                            .push_back(kw.get<std::string>());
+                                }
+                            }
+                        }
                         My_Log{} << "[Config] relevance_filter loaded: "
                                  << "enabled=" << prompt_optimization_config_.relevance_filter.enabled
                                  << ", name_token_weight=" << prompt_optimization_config_.relevance_filter.name_token_weight
@@ -1213,6 +1233,9 @@ bool ModelManager::InitializeConfig()
                                  << ", cjk_bigram=" << prompt_optimization_config_.relevance_filter.cjk_bigram
                                  << ", intent_aliases_enabled=" << prompt_optimization_config_.relevance_filter.intent_aliases_enabled
                                  << ", tag_weight=" << prompt_optimization_config_.relevance_filter.tag_weight
+                                 << ", anchor_first_user_message=" << prompt_optimization_config_.relevance_filter.anchor_first_user_message
+                                 << ", protect_core_capability_tools=" << prompt_optimization_config_.relevance_filter.protect_core_capability_tools
+                                 << ", core_capability_keywords_count=" << prompt_optimization_config_.relevance_filter.core_capability_keywords.size()
                                  << std::endl;
                     }
 

@@ -40,8 +40,8 @@
         "enabled": true,
         "_comment_tool_keywords": "命中以下任一关键词（大小写不敏感，匹配 tool 的 function.name/function.description）即判定为 shell/命令执行类工具",
         "tool_keywords": ["cmd", "powershell", "shell", "exec", "bash", "terminal", "command"],
-        "_comment_hint_text": "追加到系统提示词末尾的提示文案",
-        "hint_text": "You are running on Windows. Shell/command-execution tools may route your command to either cmd.exe or PowerShell. cmd.exe: chain with && or ||, read variables as %VAR%, escape quotes as \"\". PowerShell: chain with ;, read variables as $env:VAR, nested quotes need escaping or single-quoting. If a command fails with a shell syntax error, retry using the other shell's syntax."
+        "_comment_hint_text": "追加到系统提示词末尾的提示文案。它是不可压缩的 system prompt、每轮都要 prefill，扩充时把增量控制在几十 token 量级（当前全文 816 字符/204 token，其中后半段 441 字符/110 token）；里面每条正例必须在真实 PowerShell 上跑过再写进来，别写抽象告诫；与 src/GenieAPIService/src/model/model_config.h 里的 C++ fallback 字面量是两份独立副本，必须同步修改",
+        "hint_text": "You are running on Windows. Shell/command-execution tools may route your command to either cmd.exe or PowerShell. cmd.exe: chain with && or ||, read variables as %VAR%, escape quotes as \"\". PowerShell: chain with ;, read variables as $env:VAR, nested quotes need escaping or single-quoting. If a command fails with a shell syntax error, retry using the other shell's syntax. Your command already runs inside a shell: write it directly in PowerShell, never wrapping it in another shell nor mixing cmd syntax in: Write-Output (\"os=\"+$env:OS). Nested quotes must differ from the outer: python -c \"import platform;print('m='+platform.machine())\". Needing two levels means write the script to a file and run it. List files with Get-ChildItem -Name or -Recurse -Filter *.py, not dir /b or /s /b. wmic is gone; use cmdlets."
     },
 
     "debug": {
@@ -94,7 +94,23 @@
             "_comment_max_truncation_ratio": "最大截断比例（0.0-1.0）；若需要截断的 token 数超过最后一条 tool 消息的此比例，则放弃截断，直接走 local_input_overflow 流程；默认 0.95（95%）。ContentCondenser 本身已具备「预算过小退化为纯头部保留」的兜底，可安全处理任意高压缩比，此阈值只需拦截「就算清空整条 tool 消息也不够」的极端病态场景",
             "max_truncation_ratio": 0.95,
             "_comment_safety_margin_tokens": "安全余量（token 数）；截断时额外预留的 token 数，防止边界情况；默认 30",
-            "safety_margin_tokens": 30
+            "safety_margin_tokens": 30,
+            "_comment_target_largest_tool_messages": "true=在受保护区间内按 token 数降序选取多条 role=tool 消息逐条截断，直到累计释放量达到 tokens_to_free（默认）；旧行为固定只看最后一条 tool 消息，当该消息较小而更早的受保护消息体量更大时会误判「截断比例超限」直接放弃并触发 local_input_overflow。false=逐字节回退到旧行为",
+            "target_largest_tool_messages": true
+        },
+
+        "relevance_filter": {
+            "_comment": "相关性过滤：按本轮请求的用户文本抽取关键词，为技能/工具目录打分排序与分档。本节只列出需要显式声明的开关，未列出的字段（enabled/name_token_weight/description_keyword_weight/zero_hit_keep_all/cjk_bigram/intent_aliases_enabled/tag_weight）缺省时按代码内默认值工作",
+            "_comment_anchor_first_user_message": "true=把 messages 里第一条 role=user 的消息（任务锚点）无条件纳入关键词语料，不受 recent_window 窗口限制（默认）；多轮工具循环中滚动窗口推移后窗口内只剩 assistant/tool，关键词会变空、相关性机制整体失效并把技能目录拍扁到最低档。false=逐字节回退到只取窗口内 user 文本的旧行为。锚点本身就落在窗口内时不重复计入",
+            "anchor_first_user_message": true,
+            "_comment_protect_core_capability_tools": "true=工具相关性过滤时，function.name 命中 core_capability_keywords 的工具即使相关性得分为零也不被删除（默认）；它们仍排在高分工具之后、仍无条件受 tools_token_budget 约束，豁免只对抗「零分删除」不对抗预算。删一个领域业务工具模型最多少一条信息来源，删一个核心能力工具（文件读写/路径检索/命令执行）是直接剥夺模型观察与改变世界的手段，且模型无从察觉该工具曾存在。false=逐字节回退到零分整条删除的旧行为",
+            "protect_core_capability_tools": true,
+            "_comment_core_capability_keywords": "核心能力关键词表，可整表替换。只匹配 function.name（不匹配 description：工具名是标识符、复合名如 write_file/list_dir/run_command 正需要子串匹配，而 description 是自由散文，\"listed\"/\"find the best\" 这类会误命中），大小写不敏感子串匹配，与 windows_shell_hint.tool_keywords 同款口径",
+            "core_capability_keywords": [
+                "read", "write", "edit", "create", "save", "patch", "append", "delete",
+                "list", "glob", "grep", "find", "search", "dir", "tree",
+                "exec", "run", "shell", "command", "terminal", "bash", "powershell", "cmd"
+            ]
         },
 
         "_comment_long_text_summarization": "长文本摘要化配置（Phase -1）：在 prompt 构建前对超长 user 消息和 tool 响应执行 Map-Reduce 摘要，减少本地上下文溢出概率",
@@ -125,8 +141,8 @@
                 "max_entries": 500,
                 "_comment_max_memory_mb": "缓存最大内存占用（MB）；超出时淘汰最旧条目；默认 50",
                 "max_memory_mb": 50,
-                "_comment_ttl_minutes": "缓存条目 TTL（分钟）；超时后自动失效；默认 60",
-                "ttl_minutes": 60
+                "_comment_ttl_minutes": "缓存条目 TTL（分钟）；超时后自动失效；代码内默认 60，此处显式调高到 180 以覆盖长任务全程（同一份超长内容在一轮任务内相隔 90 分钟以上被重复摘要时，60 分钟 TTL 会在第二次查询前把条目清掉，白白重跑一次 map/reduce）",
+                "ttl_minutes": 180
             }
         },
 
