@@ -47,6 +47,7 @@ struct PromptLedger {
     bool   memo_active = false;
     double memo_confidence = 0.0;
     size_t memo_refresh_count = 0;
+    size_t memo_pages_total = 0;
 
     // 真实 JSON 类型（bool 用真实 bool，数字用真实数字），供流式 status 帧
     // （status="prompt_optimized"）payload 复用，与响应头字段口径完全一致。
@@ -74,6 +75,7 @@ struct PromptLedger {
         j["memo_active"] = memo_active;
         j["memo_confidence"] = memo_confidence;
         j["memo_refresh_count"] = memo_refresh_count;
+        j["memo_pages_total"] = memo_pages_total;
         return j;
     }
 
@@ -102,6 +104,7 @@ struct PromptLedger {
         res.set_header("X-Genie-Prompt-Memo-Active", memo_active ? "1" : "0");
         res.set_header("X-Genie-Prompt-Memo-Confidence", std::to_string(memo_confidence));
         res.set_header("X-Genie-Prompt-Memo-Refresh-Count", std::to_string(memo_refresh_count));
+        res.set_header("X-Genie-Prompt-Memo-Pages", std::to_string(memo_pages_total));
     }
 };
 

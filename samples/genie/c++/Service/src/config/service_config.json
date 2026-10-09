@@ -1,33 +1,12 @@
 {
     "_comment": "GenieAPIService 服务配置文件 - 程序启动时自动加载，修改后重启服务生效",
-    "_comment_grouping": "字段分组门控：Group A（网络模块，含 local_model/cloud_shared/cloud_model/enterprise_cloud_model/routing 及 routing 下的敏感检测/脱敏/复杂度评估子节，含 routing.enabled 本身）仅在服务以 -n -1（stateless/端云结合模式）启动时解析生效，-n 为其它值时这些字段保持代码默认值（routing.enabled 恒为 false，云端路径不可达）；Group B（prompt_optimization/tool_call_repair/debug，公共组件，与云端无关）无条件生效，不受 -n 取值影响。",
+    "_comment_grouping": "本文件只保留端云结合相关的最小配置：Group A（网络模块，含 local_model/cloud_shared/cloud_model/enterprise_cloud_model/routing 及 routing 下的敏感检测/脱敏/复杂度评估子节，含 routing.enabled 本身）仅在服务以 -n -1（stateless/端云结合模式）启动时解析生效，-n 为其它值时这些字段保持代码默认值（routing.enabled 恒为 false，云端路径不可达）；Group B（prompt_optimization，仅保留下游客户端自己的提示词文案：system_prompts/prompt_sections/subagent_prompt_sections/system_context/spawn_guard，与云端无关但无条件生效，不受 -n 取值影响）。通用本地提示词工程算法参数（相关性过滤/技能披露分档/消息裁剪/紧急截断/长文本摘要/Task Memo 等）与本地调试开关（status_update_content_visible/log_inference_stream）已整体迁出至独立的 prompt_engineering.json，与本文件完全分离加载，不受 -n 取值影响。",
     "_version": "1.0",
 
     "local_model": {
         "_comment": "本地模型配置",
         "_comment_enabled": "true=启用本地模型（默认），false=禁用本地模型（仅使用云端模型）",
         "enabled": true
-    },
-
-    "tool_call_repair": {
-        "_comment": "工具调用兜底修复配置：现有正则修复链+Layer1本地确定性提取均失败后（最终会落回 name=unknow），Layer2 在返回给客户端之前发起服务端内部隐形自纠正重试",
-        "_comment_enabled": "true=启用本节全部新增行为（默认），false=完全跳过，行为与改动前逐字节一致",
-        "enabled": true,
-
-        "internal_retry": {
-            "_comment_max_attempts": "内部隐形重试的最大次数（不含首次原始生成），默认 1，避免本地弱模型的推理延迟被无限放大",
-            "max_attempts": 1,
-            "_comment_skip_reasons": "命中以下失败分类时跳过重试，直接维持现有 unknow 兜底转发；取值对应 unknown_tool_name/missing_required_args/truncated/ambiguous_multiple_calls/unparseable。默认仅跳过 truncated：token 预算耗尽导致的截断，结构信息已丢失，重试大概率再次超预算",
-            "skip_reasons": ["truncated"]
-        },
-
-        "circuit_breaker": {
-            "_comment": "Layer3 分级终态协议熔断器：连续多次真正走到 Layer3 终态（Layer0/1/2 均未成功恢复），说明该会话+模型系统性不具备工具调用能力，熔断后动态降级 system prompt（跳过工具声明注入），避免模型继续做徒劳的工具调用尝试",
-            "_comment_threshold": "连续触发 Layer3 达到此次数后判定熔断，默认 3",
-            "consecutive_layer3_threshold": 3,
-            "_comment_cooldown": "熔断后的冷却时间（秒），期间该会话+模型持续降级 system prompt；冷却到期后自动解除，默认 300（5 分钟）",
-            "cooldown_seconds": 300
-        }
     },
 
     "cloud_shared": {
@@ -99,7 +78,8 @@
 
     "routing": {
         "_comment": "智能路由与内容安全配置",
-        "enabled": true,
+        "_comment_enabled": "true=启用智能路由/云端回退（默认），false=完全禁用 GenieRoutingGateway（纯本地模型场景，云端 base_url 不可达时建议关闭，避免每次工具调用都尝试一次注定失败的云端请求并消耗 cloud_shared.rate_limit.max_inferences_per_task 计数器）",
+        "enabled": false,
         "_comment_policy_id": "策略 ID，用于缓存 Key 隔离，修改后旧缓存自动失效",
         "policy_id": "default_v1",
         "_comment_prefer_local": "true=S0+C0/C1 优先走本地；false=S0+C1 在云端可用时允许上云",
@@ -294,9 +274,7 @@
             "_comment_sub_prefer": "true=子 Agent 默认优先走本地",
             "sub_agent_prefer_local": true,
             "_comment_sub_cloud": "true=子 Agent 在 S0/S1+C2 且云端可用时允许上云",
-            "sub_agent_allow_cloud_on_c2": true,
-            "_comment_retries": "单次请求最大工具调用重试次数，超出后触发事后路由回退",
-            "max_tool_call_retries": 10
+            "sub_agent_allow_cloud_on_c2": true
         },
 
         "sticky_routing": {
@@ -345,13 +323,7 @@
     },
 
     "prompt_optimization": {
-        "_comment": "Prompt 优化与分级压缩配置，控制历史消息的保留与压缩策略",
-
-        "skill_catalog_format": "structured",
-        "enable_tool_whitelist": true,
-        "allowed_tools": ["read", "edit", "write", "exec", "web_search", "web_fetch"],
-        "enable_skill_auto_correction": true,
-        "tool_call_temperature": 0.1,
+        "_comment": "下游客户端自己的提示词文案（身份声明/段落过滤规则/系统上下文/SpawnGuard），与端云结合完全无关；通用本地提示词工程算法参数（相关性过滤/技能披露分档/消息裁剪/长文本摘要/Task Memo 等）已迁至 prompt_engineering.json",
 
         "_comment_spawn_guard": "SpawnGuard：sessions_spawn 重复调用防护。当 sessions_spawn 的 tool_response 包含 childSessionKey 时，在 tool_response 末尾注入强制等待指令，阻止小模型重复 spawn 导致创建多个重复 subagent。",
         "spawn_guard": {
@@ -413,72 +385,6 @@
             "few_shot_no_skill_user_input": "What skills do you have? / 有哪些skills?",
             "_comment_few_shot_no_skill_response": "无需技能示例中的模型响应文本（直接从 Catalog 回答，不调用任何工具）",
             "few_shot_no_skill_response": "I have the following skills: [list from catalog above]. No tool call needed."
-        },
-
-        "_comment_output_reserve_ratio": "为模型输出预留的上下文窗口比率（默认 0.20 即 20%）；实际可用于 Prompt 的 token 数 = context_size × (1 - output_reserve_ratio)",
-        "output_reserve_ratio": 0.20,
-
-        "_comment_max_messages_limit": "消息数量上限（超出时智能丢弃最旧的消息，保留工具调用序列完整性）",
-        "max_messages_limit": 16,
-
-        "_comment_recent_window": "最近 N 条消息视为'新消息'，在分级压缩中受到更高保护（优先保留完整内容）",
-        "recent_window": 6,
-
-        "_comment_compress_len": "各类消息的内容压缩阈值（字符数）；超出阈值时截断并追加 '...'",
-        "_comment_old_compress_len": "Phase 2：旧消息（recent_window 之外）的压缩阈值",
-        "old_compress_len": 100,
-        "_comment_recent_compress_len": "Phase 3：新消息（recent_window 之内，非保护消息）的压缩阈值",
-        "recent_compress_len": 300,
-        "_comment_tool_compress_len": "Phase 4：工具响应消息的压缩阈值",
-        "tool_compress_len": 300,
-
-        "_comment_min_compress_threshold": "最小压缩收益阈值（字符数）；节省字符数低于此值时跳过压缩，避免无效操作",
-        "min_compress_threshold": 60,
-
-        "_comment_tool_min_length": "工具消息压缩后的最小有效长度（字符数）；压缩后低于此值时跳过压缩，防止工具响应被过度截断；应小于 tool_compress_len",
-        "tool_min_length": 100,
-
-        "emergency_truncation": {
-            "_comment": "Phase 4: 紧急截断配置（最后一条 tool 消息超大导致 context overflow 时的兜底机制）",
-            "_comment_enabled": "是否启用 Phase 4 紧急截断（默认 true）",
-            "enabled": true,
-            "_comment_max_truncation_ratio": "最大截断比例（0.0-1.0）；若需要截断的 token 数超过最后一条 tool 消息的此比例，则放弃截断，直接走 local_input_overflow 流程；默认 0.95（95%）。ContentCondenser 本身已具备「预算过小退化为纯头部保留」的兜底，可安全处理任意高压缩比，此阈值只需拦截「就算清空整条 tool 消息也不够」的极端病态场景",
-            "max_truncation_ratio": 0.95,
-            "_comment_safety_margin_tokens": "安全余量（token 数）；截断时额外预留的 token 数，防止边界情况；默认 30",
-            "safety_margin_tokens": 30
-        },
-
-        "_comment_long_text_summarization": "长文本摘要化配置（Phase -1）：在 prompt 构建前对超长 user 消息和 tool 响应执行 Map-Reduce 摘要，减少本地上下文溢出概率",
-        "long_text_summarization": {
-            "_comment_enabled": "总开关：false=禁用（默认），true=启用长文本摘要化前置优化",
-            "enabled": true,
-            "_comment_trigger_ratio": "触发阈值比率：单条消息 token 数超过 context_size × trigger_ratio 时触发摘要；默认 0.5",
-            "trigger_ratio": 0.5,
-            "_comment_chunk_ratio": "分块大小比率：每个 chunk 的 token 上限 = context_size × chunk_ratio；默认 0.45",
-            "chunk_ratio": 0.45,
-            "_comment_max_chunks": "最大分块数：超出时截断尾部块并输出 warning；默认 12",
-            "max_chunks": 12,
-            "_comment_summarize_user_messages": "true=对最后一条超长 user 文本消息执行摘要（默认 true）",
-            "summarize_user_messages": true,
-            "_comment_summarize_tool_responses": "true=对末尾连续 tool 消息链中的超长消息执行摘要（默认 true）",
-            "summarize_tool_responses": true,
-            "_comment_verbose_logging": "true=输出摘要化过程详细日志（含原文长度、摘要长度、缓存命中等），仅用于调试；默认 false",
-            "verbose_logging": false,
-            "_comment_map_instruction": "Map 阶段摘要指令文本（对每个分块的摘要任务说明）",
-            "map_instruction": "Extract and compress the key information from the following content into a compact summary of at most 30% of the original length. Output plain text only — do NOT add section headers, bullet formatting, or markdown. Preserve: facts, file paths, code snippets, error messages, numbers, URLs, and critical technical details. Omit: introductions, repeated explanations, decorative text, and table-of-contents entries.",
-            "_comment_reduce_instruction": "Reduce 阶段合并指令文本（对各分块摘要的合并任务说明）",
-            "reduce_instruction": "Merge the following partial summaries into one compact summary. Remove all duplication. Output plain text only — do NOT add section headers or bullet formatting. Preserve all unique facts, file paths, code snippets, numbers, URLs, and technical details.",
-            "cache": {
-                "_comment": "摘要结果进程内 LRU 缓存配置（服务重启后失效，不持久化）",
-                "_comment_enabled": "true=启用缓存（默认），false=禁用缓存（每次请求均重新摘要）",
-                "enabled": true,
-                "_comment_max_entries": "最大缓存条目数；达到上限时淘汰最旧条目；默认 500",
-                "max_entries": 500,
-                "_comment_max_memory_mb": "缓存最大内存占用（MB）；超出时淘汰最旧条目；默认 50",
-                "max_memory_mb": 50,
-                "_comment_ttl_minutes": "缓存条目 TTL（分钟）；超时后自动失效；默认 60",
-                "ttl_minutes": 60
-            }
         },
 
         "_comment_system_context": "系统上下文配置，所有系统提示词内容均从此处读取。",
@@ -553,11 +459,41 @@
         "prompt_sections": {
             "_comment": "原始系统提示词段落保留配置。通过标题关键词匹配决定哪些 Markdown 段落被追加到优化后的提示词中。",
             "_comment_enabled": "false=禁用段落过滤（默认，不追加原始段落）；true=启用，按 rules 过滤后追加",
-            "enabled": false,
+            "enabled": true,
 
             "_comment_rules": "段落匹配规则列表，按顺序匹配，第一个命中的规则生效。",
             "_comment_rule_fields": "title_contains=标题子串（大小写不敏感）；heading_level=0任意/1=#/2=##/3=###；include=true保留/false丢弃",
             "rules": [
+                {
+                    "_comment": "## Available Skills (NOT tools)：子代理技能目录块（B1/B2 新增）。显式排除，避免与 GenieAPIService 自己从 <available_skills> 原文解析重建的技能目录重复渲染。必须排在 Tools 规则之前（优先级：第一个命中的规则生效）。",
+                    "title_contains": "Available Skills",
+                    "heading_level": 2,
+                    "include": false
+                },
+                {
+                    "_comment": "## Working principles：本地主/子代理共享的工作原则段落（含 FINAL REPLY FORMAT 等无标题正文），QAIModelBuilder 本地 wire 协议统一盖 agent=main 章后仅走此 prompt_sections，故在此显式保留。",
+                    "title_contains": "Working principles",
+                    "heading_level": 2,
+                    "include": true
+                },
+                {
+                    "_comment": "## Exec auto-background：后台进程执行与审查指引。必须排在下方 Tools 规则之前，防止被 Tools 子串误匹配排除（本标题本身不含 'tools' 字样，但保留顺序以保证优先级明确）。",
+                    "title_contains": "Exec auto-background",
+                    "heading_level": 2,
+                    "include": true
+                },
+                {
+                    "_comment": "## Working Directory (IMPORTANT)：工作目录指令（本地主代理/子代理标题含 ⚠️ 前缀变体，子串匹配不受 emoji 影响）。",
+                    "title_contains": "Working Directory",
+                    "heading_level": 2,
+                    "include": true
+                },
+                {
+                    "_comment": "## Language：本地主代理语言规则段落（B4 新增独立标题，避免被并入 Working Directory 一并处理）。",
+                    "title_contains": "Language",
+                    "heading_level": 2,
+                    "include": true
+                },
                 {
                     "_comment": "## Tooling：工具可用性列表（read/write/edit/exec/browser/subagents）",
                     "title_contains": "Tooling",
@@ -940,15 +876,5 @@
             "_comment_max_section_tokens": "单个段落的最大 token 数，超出时截断（0=不限制）",
             "max_section_tokens": 0
         }
-    },
-
-    "debug": {
-        "_comment": "调试与诊断配置",
-        "_comment_status_update_content_visible": "true=状态更新消息（preparing/inference/tool_call 等）同时将描述文字写入 delta.content，客户端可在对话界面看到状态提示；false=delta.content 为空，客户端不显示状态文字（仅用于保活连接）",
-        "status_update_content_visible": false,
-        "_comment_log_rule_matches": "true=规则引擎命中时打印匹配规则ID和原始文本（含前后各30字符上下文），默认false，仅用于问题排查，生产环境请保持关闭",
-        "log_rule_matches": false,
-        "_comment_log_inference_stream": "true=启用推理输出流程调试日志（kInfo 级别），包括：FinalizeFinalChannel 的调用状态、flush 内容字节数与预览、末尾标签前缀裁剪情况等；用于排查模型输出末尾内容丢失问题；默认 false，生产环境建议关闭以减少日志量",
-        "log_inference_stream": false
     }
 }

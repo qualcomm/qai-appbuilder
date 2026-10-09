@@ -8,7 +8,7 @@
 // genie_routing_gateway_overflow.cpp
 //
 // 职责：
-//   - HandleLocalOutputOverflow：事后路由回退（本地输出溢出 / 工具调用超限）
+//   - HandleLocalOutputOverflow：事后路由回退（本地输出溢出）
 //   - HandleLocalInputOverflow：预路由回退（本地输入溢出）
 //
 //==============================================================================
@@ -21,17 +21,15 @@
 
 // ============================================================
 // HandleLocalOutputOverflow：事后路由回退（本地能力不足）
-// 当本地推理完成后（或在处理前预判到工具调用超限），检测到输出溢出或工具调用超限时调用。
+// 当本地推理完成后检测到输出溢出时调用。
 // ============================================================
 bool GenieRoutingGateway::HandleLocalOutputOverflow(const json &request,
                                                     const httplib::Request &http_req,
                                                     httplib::Response &http_res,
-                                                    bool is_tool_call_retries_exceeded,
                                                     httplib::DataSink *sink)
 {
-    My_Log{My_Log::Level::kInfo} << "[GenieRoutingGateway] HandleLocalOutputOverflow triggered, is_tool_call_retries_exceeded="
-                                 << is_tool_call_retries_exceeded
-                                 << ", sink=" << (sink ? "provided(stream_fallback)" : "null") << std::endl;
+    My_Log{My_Log::Level::kInfo} << "[GenieRoutingGateway] HandleLocalOutputOverflow triggered, sink="
+                                 << (sink ? "provided(stream_fallback)" : "null") << std::endl;
 
     auto start_time = std::chrono::high_resolution_clock::now();
 
@@ -74,12 +72,12 @@ bool GenieRoutingGateway::HandleLocalOutputOverflow(const json &request,
 
     if (inspection.sensitivity_level == SensitivityLevel::S2)
     {
-        My_Log{My_Log::Level::kWarning} << "[GenieRoutingGateway] Overflow/retry limit on S2 content. Prohibiting cloud fallback." << std::endl;
+        My_Log{My_Log::Level::kWarning} << "[GenieRoutingGateway] Overflow on S2 content. Prohibiting cloud fallback." << std::endl;
         fallback_to_cloud = false;
     }
     else if (!any_cloud_available)
     {
-        My_Log{My_Log::Level::kWarning} << "[GenieRoutingGateway] Overflow/retry limit but all clouds are unavailable. Cannot fallback." << std::endl;
+        My_Log{My_Log::Level::kWarning} << "[GenieRoutingGateway] Overflow but all clouds are unavailable. Cannot fallback." << std::endl;
         fallback_to_cloud = false;
     }
     else
@@ -122,12 +120,9 @@ bool GenieRoutingGateway::HandleLocalOutputOverflow(const json &request,
     // 流式场景下，响应已开始发送，无法覆盖，仅记录审计日志，不触发云端重试
     // 对应计划文档 §七-A："流式场景（stream=true）：仅记录审计日志，不触发云端重试"
     //
-    // 例外1：is_tool_call_retries_exceeded=true 时，检查发生在 HandleChatCompletion
-    // 之后、本地推理开始之前，响应尚未启动，可以安全地进行云端重试。
-    //
-    // 例外2：sink!=nullptr 时，调用方已在 set_chunked_content_provider 回调中，
+    // 例外：sink!=nullptr 时，调用方已在 set_chunked_content_provider 回调中，
     // 可以直接向现有 sink 写入云端 SSE 数据，实现无缝流式回退，无需跳过。
-    if (is_stream && fallback_to_cloud && !is_tool_call_retries_exceeded && sink == nullptr)
+    if (is_stream && fallback_to_cloud && sink == nullptr)
     {
         My_Log{My_Log::Level::kWarning}
             << "[GenieRoutingGateway] HandleLocalOutputOverflow: stream=true, sink=null, "
@@ -168,10 +163,8 @@ bool GenieRoutingGateway::HandleLocalOutputOverflow(const json &request,
         }
 
         // clean_local_history_on_fallback 仅适用于本地模型产生的 tool_calls/tool 消息。
-        // is_tool_call_retries_exceeded=true 时，工具调用由云端模型发起，历史记录格式正确，
-        // 不应清理，否则会导致云端模型丢失所有分析上下文，无法生成最终总结。
         // 注意：S2 清理已在上方完成，此处的本地历史清理不影响 S2 清洗的正确性。
-        if (routing_config_.fallback.clean_local_history_on_fallback && !is_tool_call_retries_exceeded)
+        if (routing_config_.fallback.clean_local_history_on_fallback)
         {
             cloud_request = CleanLocalHistoryForCloudFallback(cloud_request);
         }
@@ -180,18 +173,9 @@ bool GenieRoutingGateway::HandleLocalOutputOverflow(const json &request,
         int original_status = http_res.status;
         std::string original_body = http_res.body;
 
-        // 根据触发原因选择不同的初始状态消息：
-        //   is_tool_call_retries_exceeded=true：工具调用次数超限，切换到云端
-        //   普通本地输出溢出：本地输出截断，切换到云端
-        const std::string fallback_status  = is_tool_call_retries_exceeded
-                                             ? "tool_call_limit"
-                                             : "cloud_fallback";
-        const std::string fallback_message = is_tool_call_retries_exceeded
-                                             ? "Tool call retries exceeded, switching to cloud model..."
-                                             : "Switching to cloud model...";
         // 传入 fallback_cloud_tier（优先企业云，企业云不可用时用公有云）
         bool success = ExecuteCloudRequest(cloud_request, is_stream, http_res, handled_by_cloud,
-                                           ctx.session_id, sink, fallback_status, fallback_message,
+                                           ctx.session_id, sink, "cloud_fallback", "Switching to cloud model...",
                                            fallback_cloud_tier);
 
         // 若 ExecuteCloudRequest 由于 fallback to local 返回 true 但 handled_by_cloud=false，
@@ -326,11 +310,7 @@ bool GenieRoutingGateway::HandleLocalOutputOverflow(const json &request,
     record.keywords_dict_rules_count = inspector_.GetKeywordsRulesCount();
 
     // 【关键】填充事后路由回退标志
-    if (is_tool_call_retries_exceeded) {
-        record.tool_call_retries_exceeded = true;
-    } else {
-        record.local_output_overflow = true;
-    }
+    record.local_output_overflow = true;
 
     audit_logger_.Log(record);
 

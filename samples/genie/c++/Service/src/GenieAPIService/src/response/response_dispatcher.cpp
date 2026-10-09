@@ -791,12 +791,15 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
             // 请求保持稳定）+ model_name；任一信息不可用（如 DLL 模式）时 key 为空字符串，
             // ToolCallCircuitBreakerStore 对空 key 的全部操作均安全地不做任何事。
             std::string circuit_breaker_key;
+            std::string repetition_key;
             if (instance_config_ && !retry_request_data_.is_null()
                 && retry_request_data_.contains("messages") && retry_request_data_["messages"].is_array())
             {
                 const std::string session_key = TaskMemoBuilder::ComputeFirstMsgKey(retry_request_data_["messages"]);
                 circuit_breaker_key = ToolCallCircuitBreakerStore::MakeKey(session_key, instance_config_->get_model_name());
+                repetition_key = ToolCallRepetitionStore::MakeKey(session_key, instance_config_->get_model_name());
             }
+            const bool redundant_guard_enabled = model_config_.GetToolCallRepairConfig().redundant_call_guard.enabled;
 
             if (!IsUnknowToolCallJson(toolResponse))
             {
@@ -810,6 +813,11 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                     if (parsed.contains("name") && parsed["name"].is_string())
                     {
                         tool_name = parsed["name"].get<std::string>();
+                    }
+                    if (redundant_guard_enabled && !tool_name.empty())
+                    {
+                        const std::string signature = tool_name + "|" + parsed.value("arguments", json::object()).dump();
+                        ToolCallRepetitionStore::GetInstance().RecordCall(repetition_key, signature);
                     }
                 }
                 catch (...) {}
@@ -834,6 +842,12 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                     finishReason = "tool_calls";
                     isToolResponse = true;
                     send_tool_call_status_once(partial_recovery["name"].get<std::string>());
+                    if (redundant_guard_enabled)
+                    {
+                        const std::string signature = partial_recovery["name"].get<std::string>() + "|"
+                            + best_effort["arguments"].dump();
+                        ToolCallRepetitionStore::GetInstance().RecordCall(repetition_key, signature);
+                    }
                     My_Log{My_Log::Level::kWarning}
                         << "[ToolCallRepair][Layer3] Case A: emitting real tool_call '"
                         << partial_recovery["name"].get<std::string>()
@@ -994,6 +1008,23 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
         // 性能统计是服务端内部监控，不依赖客户端连接，应始终执行。
         PrintProfile();
 
+        // 真实 token 计数：修复 responseDataJson() 的 usage 字段此前硬编码为全零的缺陷
+        // （导致下游 QAIModelBuilder 把本地模型响应误判为"空 usage 块"，回退到不可靠的
+        // tokenizer 估算）。复用三后端（GGUF/MNN/QNN）都已实现的 handle->HandleProfile()
+        // （PrintProfile() 内部已调用过一次用于日志，这里是请求结束时的第二次独立调用，
+        // 不在逐 token 发送的性能敏感路径上，开销可忽略）。字段缺失/解析失败时安全回退为 0，
+        // 与修复前的全零行为一致，不引入新的异常路径。只在本次请求结束时计算一次，下方按
+        // finish_reason 分支选用，中间流式 content chunk 不受影响（仍使用默认的 0）。
+        json profile_for_usage = handle->HandleProfile();
+        size_t real_prompt_tokens = (profile_for_usage.is_object()
+                                      && profile_for_usage.contains("num_prompt_tokens")
+                                      && profile_for_usage["num_prompt_tokens"].is_number())
+            ? profile_for_usage["num_prompt_tokens"].get<size_t>() : 0;
+        size_t real_completion_tokens = (profile_for_usage.is_object()
+                                          && profile_for_usage.contains("num_generated_tokens")
+                                          && profile_for_usage["num_generated_tokens"].is_number())
+            ? profile_for_usage["num_generated_tokens"].get<size_t>() : 0;
+
         // Fix: connection_broken 检查移到历史存储和性能统计之后。
         // 历史存储和性能统计是服务端内部状态，不依赖客户端连接，应在连接断开时仍然执行。
         // 即使连接断开，也尝试发送工具调用响应和 [DONE]，让客户端知道当前流已结束，
@@ -1047,7 +1078,8 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                 // 发送结束标记
                 if (!overflow_truncated)
                 {
-                    ResponseTools::post_stream_data(*sink, "data", ResponseTools::responseDataJson("", finishReason, true));
+                    ResponseTools::post_stream_data(*sink, "data",
+                        ResponseTools::responseDataJson("", finishReason, true, "", real_prompt_tokens, real_completion_tokens));
                     ResponseTools::post_stream_data(*sink, "data", "[DONE]", true);
                     My_Log{My_Log::Level::kWarning}
                         << "[SendResponse] End-of-stream markers sent (connection_broken path)." << std::endl;
@@ -1107,7 +1139,8 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
         {
             if (!overflow_truncated)
             {
-                ResponseTools::post_stream_data(*sink, "data", ResponseTools::responseDataJson("", finishReason, true));
+                ResponseTools::post_stream_data(*sink, "data",
+                    ResponseTools::responseDataJson("", finishReason, true, "", real_prompt_tokens, real_completion_tokens));
                 ResponseTools::post_stream_data(*sink, "data", "[DONE]", true);
             }
             else
@@ -1133,7 +1166,8 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                     vt->text_hook_free_string(watermarked);
                 }
             }
-            auto data = ResponseTools::responseDataJson(content, finishReason, false, toolResponse);
+            auto data = ResponseTools::responseDataJson(content, finishReason, false, toolResponse,
+                                                         real_prompt_tokens, real_completion_tokens);
             res->set_content(data, MIMETYPE_JSON);
         }
         return true;

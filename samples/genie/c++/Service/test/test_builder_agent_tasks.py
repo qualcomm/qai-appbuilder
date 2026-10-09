@@ -47,6 +47,15 @@ done/error 终止帧即可。多轮 agent 任务里的"多轮"，指的是本脚
         --small_model_path C:\\Users\\HCKTest\\Desktop\\GenieEnv\\Video_Model\\Video\\remote_npu_sanity_matmul.onnx \\
         --out_dir .\\test_results_agent_tasks
 
+    用户指定的 inception_v3 FP16/W8A8 对比验收任务（见 run_inception_precision_compare_task()）：
+    python test_builder_agent_tasks.py --task inception_precision_compare \\
+        --builder_dir ..\\third\\QAIModelBuilder \\
+        --exe_dir ..\\build\\GenieService-win-arm64 \\
+        --models C:\\Users\\HCKTest\\Desktop\\GenieEnv\\models \\
+        --model_name qwen3-8b-8480 \\
+        --total_deadline_seconds 5400 \\
+        --out_dir .\\test_results_agent_tasks
+
 健康判定标准与 test_service.py 一致：failed==ignored 且 crashed==0 为健康；
 退出码严格 failed==0 && crashed==0（复用 test_service._finalize_and_exit()）。
 """
@@ -57,6 +66,7 @@ import py_compile
 import re
 import subprocess
 import sys
+import threading
 import time
 from collections import Counter
 from pathlib import Path
@@ -75,6 +85,7 @@ from test_service import (  # noqa: E402
     discover_models,
     ReportGenerator,
     resolve_builder_python,
+    cleanup_junctions,
     _finalize_and_exit,
 )
 
@@ -85,7 +96,7 @@ import requests  # noqa: E402
 # 移植自 QAIModelBuilderLocalModelTester 的通用基础设施
 # （已验证的 mklink /J 注入 + CSRF + 就绪轮询机制，改写为独立函数）
 # ============================================================================
-def configure_genie_root(builder, genie_root_path, results, round_num=1):
+def configure_genie_root(builder, genie_root_path, results, round_num=1, junction_paths=None):
     """把 GenieAPIService 安装目录通过 mklink /J 联接到 Builder 固定扫描的
     <data_dir>/bin/<name> 下，触发 Builder 官方"自动发现已安装版本"自愈机制。
     逻辑与 test_service.QAIModelBuilderLocalModelTester.configure_genie_root() 一致
@@ -116,6 +127,8 @@ def configure_genie_root(builder, genie_root_path, results, round_num=1):
         return False
 
     dst = bin_root / src.name
+    if junction_paths is not None:
+        junction_paths.append(dst)
     if not dst.exists():
         try:
             proc = subprocess.run(
@@ -158,7 +171,7 @@ def configure_genie_root(builder, genie_root_path, results, round_num=1):
     return passed
 
 
-def inject_local_models(builder, models_root, model_dirs, results, snapshot, round_num=1):
+def inject_local_models(builder, models_root, model_dirs, results, snapshot, round_num=1, junction_paths=None):
     """用 mklink /J 把每个 models_root/<name> 联接到 <data_dir>/models/<name>，
     并对源目录关键小文件拍快照（ModelDirSnapshot，见其文档字符串）防止联接被
     Builder 安装/更新路径透明穿透误改。逻辑与
@@ -185,6 +198,8 @@ def inject_local_models(builder, models_root, model_dirs, results, snapshot, rou
         src = Path(models_root) / model_name
         dst = target_models_root / model_name
         src_dirs.append(src)
+        if junction_paths is not None:
+            junction_paths.append(dst)
         if dst.exists():
             continue
         try:
@@ -354,6 +369,20 @@ def _append_transcript_entry(transcript_path, turn_label, prompt_text, full_text
         f.write("\n".join(lines))
 
 
+def _append_transcript_summary(transcript_path, title, summary_lines):
+    """在转录 Markdown 文件末尾追加一个独立的小结区块（如 token 生成速度统计），
+    与 _append_transcript_entry() 写逐轮条目同一份文件、同一种追加写法（UTF-8，
+    不截断），确保人工阅读转录文件时能在末尾直接看到任务级聚合结论，不需要
+    再去对照 results.json。"""
+    if not transcript_path:
+        return
+    path = Path(transcript_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [f"## {title}", ""] + list(summary_lines) + ["", "---\n"]
+    with open(path, "a", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?。！？；;])\s+|\n+")
 _CODE_FENCE_RE = re.compile(r"```.*?(```|$)", re.S)
 
@@ -453,11 +482,14 @@ def send_agent_chat_turn(builder, model_name, prompt_text, conversation_id=None,
     stream = None
     loop_verdict = None
     try:
-        # timeout=(connect, read)：read 侧原为 10s，比服务端 15s 心跳间隔
-        # （QAIModelBuilder _sse.py 的 _HEARTBEAT_INTERVAL_SECONDS=15.0）更短，
-        # 理论上可能在两次心跳之间提前触发 ReadTimeout；调大到 25s 留出余量。
+        # timeout=(connect, read)：read 侧原为 25s，与服务端 15s 心跳间隔
+        # （QAIModelBuilder _sse.py 的 _HEARTBEAT_INTERVAL_SECONDS=15.0）只留 10s
+        # 缓冲，长耗时真实任务（如 27B 模型下载/QNN 量化转换，期间后端忙于本地
+        # 计算，心跳帧本身也可能被延迟）下该余量明显不够、会把真正瓶颈误报成
+        # ReadTimeout；调大到 60s 留出远大于心跳间隔的安全余量。connect 侧维持
+        # 较小值，网络层连不上应该快速失败，不需要同样放宽。
         stream = builder.csrf.request(
-            "GET", stream_path, timeout=(10, 25), stream=True,
+            "GET", stream_path, timeout=(15, 60), stream=True,
             params={"tab_id": tab_id, "prompt": prompt_text, "model_id": f"local::{model_name}"})
         if not 200 <= stream.status_code < 300:
             stream_error = f"HTTP 非 2xx: {stream.status_code}; body={stream.text[:300]}"
@@ -1053,6 +1085,422 @@ def run_tetris_task(builder, model_name, results, round_num=1,
     return ok
 
 
+_INCEPTION_PRECISION_COMPARE_PROMPT = (
+    "帮我下载原始的 inception_v3 模型，分别转成 FP16 与 W8A8 两种精度的 QNN 模型并进行推理，"
+    "对比两者的差异。测试图片使用项目自带的 samples/images/flower.jpg（相对项目根目录）。"
+    "请一次性自动跑完整个流程，无需中途确认。"
+)
+
+# 命中疑似 Blocking Condition（模型主动停下来问询，而不是正常推进/完成）时才追加的
+# 唯一一轮"最简中性"继续指令——不代替用户做决策，只是让它继续；其余过程必须让
+# QAIModelBuilder 自主完成（用户明确要求，见模块docstring本次新增任务的设计原则）。
+_INCEPTION_NEUTRAL_CONTINUE_PROMPT = "请继续自主完成剩余步骤，你已获得完整授权，不需要进一步确认。"
+
+_INCEPTION_BLOCKING_QUESTION_MARKERS = (
+    "？", "?", "请确认", "是否继续", "需要我", "你希望", "请告知", "请指示", "请问",
+)
+
+
+def _looks_like_blocking_question(text):
+    """粗略判定模型是否在这一轮结束时停下来向用户提问（命中某个 Blocking
+    Condition），而不是正常完成或仍在自主推进——只看生成文本结尾一段是否出现
+    中/英文问号或常见确认性短语。这只是一个启发式信号，用于决定是否追加
+    唯一一轮中性续问；判定失误（漏判/误判）本身也是一条值得记录的真实发现，
+    不追求绝对精确。"""
+    if not text:
+        return False
+    tail = text.strip()[-300:]
+    return any(marker in tail for marker in _INCEPTION_BLOCKING_QUESTION_MARKERS)
+
+
+def _find_inception_artifacts(workspace_root, task_started_ts):
+    """在 workspace_root 下查找 inception_v3 FP16/W8A8 两种精度模型产物目录，
+    以及本次任务期间（mtime >= task_started_ts）新产生的、引用 flower.jpg 的
+    真实推理输出证据。返回字典（而非单一布尔值），供调用方逐项判定——
+    model-hub/models/inception_v3/NOTES.md 里原本就记有一份历史验证结果，
+    判定逻辑必须要求"新鲜"证据（mtime 晚于本次任务开始时间），不能让模型
+    凭 NOTES.md 里本来就合理的旧数字蒙混过关（SKILL.md 第129行纪律）。"""
+    root = Path(workspace_root)
+    result = {
+        "fp16_model_dir": None, "w8a8_model_dir": None,
+        "fresh_inference_evidence": None, "comparison_statement_hint": None,
+    }
+    if not root.is_dir():
+        return result
+    model_exts = (".dlc", ".bin", ".so", ".onnx", ".serialized")
+    try:
+        all_dirs = [p for p in root.rglob("*") if p.is_dir()]
+    except OSError:
+        all_dirs = []
+    for d in all_dirs:
+        name_lower = d.name.lower()
+        if "inception" not in str(d.relative_to(root)).lower():
+            continue
+        try:
+            has_model_file = any(f.suffix.lower() in model_exts for f in d.iterdir() if f.is_file())
+        except OSError:
+            continue
+        if not has_model_file:
+            continue
+        if result["fp16_model_dir"] is None and ("float" in name_lower or "fp16" in name_lower):
+            result["fp16_model_dir"] = d
+        if result["w8a8_model_dir"] is None and "w8a8" in name_lower:
+            result["w8a8_model_dir"] = d
+    try:
+        candidates = sorted((p for p in root.rglob("*") if p.is_file()),
+                             key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        candidates = []
+    for p in candidates:
+        if p.suffix.lower() not in (".txt", ".md", ".log", ".json"):
+            continue
+        try:
+            if p.stat().st_mtime < task_started_ts:
+                continue
+            content = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if "flower" in content.lower() and any(
+                k in content for k in ("Top-1", "Top1", "概率", "logits", "class", "分类")):
+            result["fresh_inference_evidence"] = str(p)
+            if (any(k in content for k in ("FP16", "fp16", "W8A8", "w8a8"))
+                    and any(k in content for k in ("差异", "对比", "相比", "vs", "VS", "diff"))):
+                result["comparison_statement_hint"] = str(p)
+            break
+    return result
+
+
+# ============================================================================
+# Token 生成速度统计（从 _ServiceLogTail 采集到的 GenieAPIService 完整 stdout 中解析）
+# ============================================================================
+# 后端无关行：response_dispatcher.cpp::PrintProfile()（主推理路径）与
+# model_input_builder.h 的摘要推理路径，均在每次查询完成后无条件打印这一行；
+# QNN/GGUF/MNN 三后端的 HandleProfile() 都统一填充同名 token_generation_rate 字段，
+# 格式逐字相同，故一条正则即可覆盖全部后端——这是本次任务实际驱动的 qwen3-8b-8480
+# （QNN 后端）唯一会产生样本的来源。
+_TOKEN_GEN_RATE_RE_GENERIC = re.compile(r"Token Generation Rate:\s*([\d.]+)\s*toks/sec")
+# GGUF/llama.cpp 专属行：llama_cpp.cpp::Impl::Query() 完成时额外打印的内部诊断
+# （含投机解码细节）。与上面那行是两条独立日志，QNN/MNN 后端不会出现它；仅在
+# 本脚本未来被用于驱动 GGUF 模型时才会产生样本，这里一并解析是为了不让该场景
+# 下的统计悄悄留空（llama_cpp.cpp.notes.md 已记录投机模式下 llama_perf_context
+# 的 n_eval 计数口径失真，这条独立行是 GGUF 侧更可靠的真实吞吐来源）。
+_TOKEN_GEN_RATE_RE_LLAMACPP = re.compile(r"\[LLAMACpp\][^\n]*?gen_rate=([\d.]+)\s*tok/s")
+
+
+def _rate_stats(rates):
+    """聚合统计（样本数/平均/最大/最小），round 到 2 位小数。空列表时如实返回
+    sample_count=0 与全 None（不编造 0.0），供调用方判断"本次确实没有采集到速率
+    样本"与"确实采集到了 0.0 tok/s"的区别。"""
+    if not rates:
+        return {"sample_count": 0, "avg_tok_s": None, "min_tok_s": None, "max_tok_s": None}
+    return {
+        "sample_count": len(rates),
+        "avg_tok_s": round(sum(rates) / len(rates), 2),
+        "min_tok_s": round(min(rates), 2),
+        "max_tok_s": round(max(rates), 2),
+    }
+
+
+def _summarize_token_generation_rates(log_text):
+    """从一次任务期间采集到的完整 GenieAPIService stdout 文本中提取全部 token
+    生成速度样本，按来源分组返回聚合统计（见上方两条正则的注释）。两组互不合并
+    （同一条真实查询在 GGUF 投机模式下两边数值口径不同，混在一起会掩盖哪一组
+    更可信），调用方按实际驱动的后端自行判断该看哪一组。"""
+    generic_rates = [float(m.group(1)) for m in _TOKEN_GEN_RATE_RE_GENERIC.finditer(log_text or "")]
+    llamacpp_rates = [float(m.group(1)) for m in _TOKEN_GEN_RATE_RE_LLAMACPP.finditer(log_text or "")]
+    return {
+        "generic_backend_agnostic": _rate_stats(generic_rates),
+        "gguf_llamacpp_specific": _rate_stats(llamacpp_rates),
+    }
+
+
+class _ServiceLogTail:
+    """全程持续消费 Builder `GET /api/service/logs` SSE（GenieAPIService stdout），断线即按已收行数重连。
+
+    这是任务结束时统计 token 生成速度（见 _summarize_token_generation_rates()）与
+    持久化完整后端日志（见调用方把 stop() 的返回值写入 <transcript_path>.genie_service.log）
+    的唯一数据来源，不是调试旁路——R7/R8 两轮诊断（见 docstring 顶部的
+    run_inception_precision_compare_task 任务）已经靠这份落盘的 .genie_service.log
+    还原出子代理真实的工具调用序列，证明该机制稳定可用。"""
+
+    def __init__(self, csrf_session):
+        self.csrf = csrf_session
+        self.lines = []
+        self._stop = threading.Event()
+        self._thread = None
+
+    def _worker(self):
+        while not self._stop.is_set():
+            try:
+                resp = self.csrf.request("GET", "/api/service/logs", timeout=(10, 120), stream=True,
+                                         params={"skip": len(self.lines)})
+                with resp:
+                    for raw in resp.iter_lines(decode_unicode=True):
+                        if self._stop.is_set():
+                            return
+                        if not raw or not raw.startswith("data:"):
+                            continue
+                        try:
+                            obj = json.loads(raw[5:].strip())
+                        except ValueError:
+                            continue
+                        if isinstance(obj, dict) and "line" in obj:
+                            self.lines.append(str(obj["line"]))
+            except requests.RequestException:
+                pass
+            self._stop.wait(2)
+
+    def start(self):
+        self._thread = threading.Thread(target=self._worker, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+        return "\n".join(self.lines)
+
+
+def _wait_background_subagents(builder, conversation_id, deadline, poll_seconds=60):
+    import sqlite3
+    db_path = Path(builder.data_dir) / "db" / "qai.db" if builder.data_dir else None
+    history = []
+    if not db_path or not conversation_id:
+        return history
+    while time.time() < deadline - 30:
+        try:
+            con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10)
+            try:
+                rows = con.execute(
+                    "SELECT id, status, rounds, updated_at FROM chat_subagent_session "
+                    "WHERE root_conversation_id = ?", (conversation_id,)).fetchall()
+                active_runs = con.execute(
+                    "SELECT COUNT(*) FROM chat_turn_run WHERE conversation_id = ? "
+                    "AND status NOT IN ('completed', 'failed', 'interrupted', 'cancelled')",
+                    (conversation_id,)).fetchone()[0]
+            finally:
+                con.close()
+        except sqlite3.Error as exc:
+            rows, active_runs = [], 0
+            history.append(f"sqlite_error={exc}")
+        active = [r for r in rows if r[1] in ("running", "background", "pending")]
+        snapshot = f"{datetime.now():%H:%M:%S} subagents={rows} active_turn_runs={active_runs}"
+        history.append(snapshot)
+        print(f"  [STAGE] inception 等待后台子代理: {snapshot}", flush=True)
+        if not active and not active_runs:
+            break
+        time.sleep(poll_seconds)
+    return history
+
+
+def run_inception_precision_compare_task(builder, model_name, results, round_num=1,
+                                          workspace_root=_DEFAULT_WORKSPACE_ROOT,
+                                          max_turns=3, per_turn_timeout=7200,
+                                          total_deadline_seconds=14400,
+                                          busy_poll_interval_seconds=60,
+                                          transcript_path=None):
+    """用户指定的最高优先级验收任务：驱动本地模型一次性完成 inception_v3
+    FP16/W8A8 两种精度 QNN 模型的下载+推理+对比，并显式验证"一次性自动跑完,
+    无需中途确认"这句话本身是否成立——这正是本函数要测试的现象本身，不是
+    附带效果（third/QAIModelBuilder/CONTINUE.md 第199-206行已把这个确切 prompt
+    列为既定待办）。
+
+    与 run_model_conversion_task 的关键设计差异（用户明确澄清过的边界）：
+      * 只在首轮发送用户原文 prompt（_INCEPTION_PRECISION_COMPARE_PROMPT），
+        之后不主动追加任何"通用续问"模板；
+      * 探测到 busy（existing_run）时按既有 busy-poll 机制耐心等待（不计入
+        max_turns 预算），与 run_model_conversion_task 一致；
+      * 探测到非busy的正常结束但判定三要素仍未就位时，用
+        _looks_like_blocking_question() 判断模型是否命中了某个 Blocking
+        Condition 主动停下来问询——命中才追加唯一一轮最简中性的继续指令
+        （不代替用户做决策），并记录命中次数与原文片段；未命中则如实停止，
+        不臆测继续，因为"其余过程必须让 QAIModelBuilder 自主完成"。
+
+    判定三要素（缺一不可，见 _find_inception_artifacts()）：
+      1) FP16 与 W8A8 两个模型产物目录均存在；
+      2) 存在 mtime >= 本次任务开始时间的新鲜推理输出证据（引用 flower.jpg
+         且含分类/概率特征，不是 NOTES.md 里原本就有的旧数字复用）；
+      3) 该新鲜证据里能看到对两种精度的明确对比陈述关键词。
+
+    CONTINUE.md 第199-206行列出的 4 项官方验证点中，②历史持久化（刷新网页）
+    与④提示词面板显示是纯前端 UI 行为；本函数走后端 SSE API 驱动，无法无头
+    验证这两项——如实标注在 detail_text 里"本轮未覆盖"，不悄悄跳过不提。
+
+    任务结束时的标准产出（均为稳定主流程，不是调试旁路）：
+      1) <transcript_path> —— 逐轮完整 prompt/生成文本/非常规帧（_append_transcript_entry），
+         文件末尾追加一个 token 生成速度小结区块（_append_transcript_summary）；
+      2) <transcript_path 同名 .genie_service.log> —— 全程持续采集的完整 GenieAPIService
+         stdout（_ServiceLogTail），R7/R8 两轮诊断已验证靠它能还原子代理真实工具调用序列；
+      3) response_data['token_generation_rate'] —— 对 (2) 做正则统计后的聚合结果
+         （见 _summarize_token_generation_rates()），同时写入 results.json 供机器读取。"""
+    name = f"AGENT-TASK: inception_precision_compare model={model_name}"
+    task_started = time.time()
+    task_deadline = task_started + total_deadline_seconds
+
+    ready, ready_err = wait_local_backend_ready(builder_genie_port_of(builder), model_name)
+    if not ready:
+        results.append(TestResult(
+            name=name, round_num=round_num, model_name=model_name,
+            passed=False, status_code=0, latency_ms=0,
+            detail=f"后端未就绪，跳过任务: {ready_err}", crashed=True))
+        return False
+
+    log_probe = _ServiceLogTail(builder.csrf)
+    log_probe.start()
+    task_started_dt_label = datetime.now().isoformat(timespec="seconds")
+    prompt = _INCEPTION_PRECISION_COMPARE_PROMPT
+    conversation_id = None
+    transcript = []
+    real_turns_used = 0
+    attempts_used = 0
+    gave_up_while_busy = False
+    blocking_condition_hits = []
+    stream_timeout_continuation_hits = []
+    artifacts = {}
+    passed, detail, text, frame_types, frame_reasons, busy = (
+        False, "未发起任何请求（总时限在第一轮之前已耗尽）", "", [], [], False)
+
+    while True:
+        remaining = task_deadline - time.time()
+        if remaining <= 30:
+            transcript.append(f"[总时限] 剩余 {remaining:.0f}s，终止")
+            break
+        if real_turns_used >= max_turns:
+            transcript.append(f"[真实续问轮次] 已用完 max_turns={max_turns}，终止")
+            break
+
+        real_turns_used += 1
+        print(f"  [STAGE] inception 真实轮次 {real_turns_used}/{max_turns} 开始: "
+              f"conversation_id={conversation_id}, prompt_excerpt={prompt[:80]!r}...", flush=True)
+
+        while True:
+            attempts_used += 1
+            remaining = task_deadline - time.time()
+            if remaining <= 30:
+                break
+            call_timeout = min(per_turn_timeout, max(30, remaining))
+            passed, detail, text, conversation_id, frame_types, frame_reasons, busy = send_agent_chat_turn(
+                builder, model_name, prompt, conversation_id=conversation_id,
+                title="Agent Task: inception_v3 FP16/W8A8 对比", stream_timeout=call_timeout,
+                transcript_path=transcript_path,
+                turn_label=f"inception_precision_compare real_turn={real_turns_used} attempt={attempts_used}",
+                watchdog=RepetitionWatchdog())
+            if not busy:
+                break
+            remaining = task_deadline - time.time()
+            print(f"  [STAGE] inception 探测到 existing_run（会话忙），attempts_used={attempts_used}, "
+                  f"剩余总预算 {remaining:.0f}s，等待 {busy_poll_interval_seconds}s 后重新探测", flush=True)
+            transcript.append(f"[real_turn {real_turns_used}] busy; attempts_used={attempts_used}; "
+                               f"remaining={remaining:.0f}s; detail={detail}")
+            if remaining <= busy_poll_interval_seconds + 30:
+                transcript.append(f"[real_turn {real_turns_used}] 总时限即将耗尽，放弃继续等待 busy 状态解除")
+                break
+            time.sleep(busy_poll_interval_seconds)
+
+        print(f"  [STAGE] inception 真实轮次 {real_turns_used}/{max_turns} 结束: passed={passed}; busy={busy}; "
+              f"conversation_id={conversation_id}; frame_types={frame_types}; "
+              f"frame_reasons={frame_reasons}", flush=True)
+        transcript.append(f"[real_turn {real_turns_used}] passed={passed}; busy={busy}; detail={detail}; "
+                           f"text_excerpt={text[:500]!r}")
+
+        if busy:
+            gave_up_while_busy = True
+            transcript.append(f"[real_turn {real_turns_used}] 会话持续忙碌直至总时限耗尽，任务终止")
+            break
+
+        if "subagent_start" in frame_types:
+            wait_log = _wait_background_subagents(builder, conversation_id, task_deadline)
+            transcript.append(f"[real_turn {real_turns_used}] background_subagent_wait:\n  "
+                              + "\n  ".join(wait_log))
+
+        artifacts = _find_inception_artifacts(workspace_root, task_started)
+        if artifacts["fp16_model_dir"] and artifacts["w8a8_model_dir"] and artifacts["comparison_statement_hint"]:
+            transcript.append(f"[real_turn {real_turns_used}] 判定三要素均已满足: {artifacts}")
+            break
+        if not passed and conversation_id is None:
+            transcript.append(f"[real_turn {real_turns_used}] SSE 请求本身失败且未获得 conversation_id，终止本任务")
+            break
+
+        if _looks_like_blocking_question(text):
+            hit = {"real_turn": real_turns_used, "text_tail": text.strip()[-300:]}
+            blocking_condition_hits.append(hit)
+            print(f"  [STAGE] inception 命中疑似 Blocking Condition（模型主动续问）: {hit}", flush=True)
+            transcript.append(f"[real_turn {real_turns_used}] 命中疑似 Blocking Condition，"
+                               f"追加唯一一轮最简中性继续指令: {hit}")
+            prompt = _INCEPTION_NEUTRAL_CONTINUE_PROMPT
+            continue
+
+        # "SSE 总时限已到"是测试脚本自己的单轮墙钟预算到期，不是模型/协议本身的失败
+        # （busy=False、未命中 Blocking Condition），只要本轮确实产出过活跃帧
+        # （text 非空或识别出过 frame_type/reason，排除真正卡死无进展的情形）且
+        # total_deadline_seconds/max_turns 仍有余量，就应继续同一个未完成的任务，
+        # 而不是白白放弃剩余预算——这不是人工决策介入，纯粹是技术性续杯。
+        if "stream_error=SSE 总时限" in detail and (text.strip() or frame_types):
+            hit = {"real_turn": real_turns_used, "detail_excerpt": detail[-300:]}
+            stream_timeout_continuation_hits.append(hit)
+            print(f"  [STAGE] inception 命中单轮 stream_timeout 切断（本轮仍健康活跃），"
+                  f"追加续问继续同一任务: {hit}", flush=True)
+            transcript.append(f"[real_turn {real_turns_used}] 命中单轮 stream_timeout 切断且本轮仍健康活跃，"
+                               f"追加中性继续指令: {hit}")
+            prompt = _INCEPTION_NEUTRAL_CONTINUE_PROMPT
+            continue
+
+        # 未命中 busy、未命中 Blocking Condition、未命中健康的 stream_timeout 切断、
+        # 判定三要素也未就位：按设计原则不臆测继续追加通用续问（这正是在检验
+        # "一次性自动跑完"这句话本身是否成立），如实停止。
+        transcript.append(f"[real_turn {real_turns_used}] 本轮正常结束但判定三要素未满足，且未检测到明确续问信号，"
+                           f"按设计原则不主动追加续问，任务到此为止")
+        break
+
+    service_log_text = log_probe.stop()
+    if transcript_path:
+        service_log_path = Path(transcript_path).with_suffix(".genie_service.log")
+        service_log_path.write_text(service_log_text, encoding="utf-8")
+        transcript.append(f"[service_log] {len(service_log_text)} chars -> {service_log_path}")
+    token_rate_stats = _summarize_token_generation_rates(service_log_text)
+    transcript.append(f"[token_generation_rate] {token_rate_stats}")
+    _append_transcript_summary(
+        transcript_path, "Token 生成速度统计 (Token Generation Rate)",
+        [f"- 任务开始时间: {task_started_dt_label}",
+         f"- generic_backend_agnostic（QNN/GGUF/MNN 通用，本次任务实际驱动的"
+         f"后端应从这组读数）: {token_rate_stats['generic_backend_agnostic']}",
+         f"- gguf_llamacpp_specific（仅 GGUF/llama.cpp 后端会产生样本，QNN 下预期"
+         f"sample_count=0，不代表异常): {token_rate_stats['gguf_llamacpp_specific']}",
+         "- 数据来源: 完整 GenieAPIService stdout（见上文 [service_log] 条目指向的"
+         ".genie_service.log），由 _summarize_token_generation_rates() 正则统计。"])
+    elapsed = time.time() - task_started
+    ok = bool(artifacts.get("fp16_model_dir") and artifacts.get("w8a8_model_dir")
+              and artifacts.get("comparison_statement_hint"))
+    detail_text = (
+        f"real_turns_used={real_turns_used}/{max_turns}; attempts_used={attempts_used}; "
+        f"gave_up_while_busy={gave_up_while_busy}; elapsed={elapsed:.0f}s; "
+        f"blocking_condition_hits={len(blocking_condition_hits)}; "
+        f"blocking_condition_detail={blocking_condition_hits}; "
+        f"stream_timeout_continuation_hits={len(stream_timeout_continuation_hits)}; "
+        f"stream_timeout_continuation_detail={stream_timeout_continuation_hits}; "
+        f"fp16_model_dir={artifacts.get('fp16_model_dir')}; "
+        f"w8a8_model_dir={artifacts.get('w8a8_model_dir')}; "
+        f"fresh_inference_evidence={artifacts.get('fresh_inference_evidence')}; "
+        f"comparison_statement_hint={artifacts.get('comparison_statement_hint')}; "
+        f"token_generation_rate={token_rate_stats}; "
+        "frontend_only_checks_not_covered=['历史持久化（刷新网页）', '提示词面板显示'] "
+        "(CONTINUE.md 第199-206行②④，纯前端行为，本函数走后端API驱动无法无头验证); "
+        "transcript=\n" + "\n".join(transcript)
+    )
+    results.append(TestResult(
+        name=name, round_num=round_num, model_name=model_name,
+        passed=ok, status_code=0, latency_ms=elapsed * 1000,
+        detail=detail_text,
+        # 首次真实驱动此任务：未完成时按真实失败上报，不做 ignorable 豁免
+        # （不是"服务端已知缺陷"，是"任务尚未验证通过"），与 model_conversion/tetris 一致。
+        response_data={"conversation_id": conversation_id,
+                        "blocking_condition_hits": blocking_condition_hits,
+                        "stream_timeout_continuation_hits": stream_timeout_continuation_hits,
+                        "artifacts": {k: (str(v) if v else None) for k, v in artifacts.items()},
+                        "token_generation_rate": token_rate_stats}))
+    return ok
+
+
 def builder_genie_port_of(builder):
     """从 QAIModelBuilderManager 实例反推它当前代理的 GenieAPIService 端口。
     Builder 侧固定通过 /api/service/status 的 port 字段暴露真实端口，这里做一次同步查询
@@ -1070,12 +1518,16 @@ def build_arg_parser():
         description="QAIModelBuilder + 本地模型真实多轮 agent 任务测试",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("--task", default="model_conversion",
-                        choices=["model_conversion", "model_build_probe", "tetris"],
+                        choices=["model_conversion", "model_build_probe", "tetris",
+                                 "inception_precision_compare"],
                         help="要运行的任务场景：model_conversion 是完整的模型转换多轮任务；"
                              "model_build_probe 是极简 prompt 探测 model-build 模式基础可用性"
                              "（几十秒量级，用于判断 empty_response 是环境/代理层问题还是"
                              "'重系统提示词+复杂任务'组合本身的问题）；tetris 是用 write/exec 通用"
-                             "工具驱动模型编写并自验证一个可运行的俄罗斯方块小程序。")
+                             "工具驱动模型编写并自验证一个可运行的俄罗斯方块小程序；"
+                             "inception_precision_compare 是用户指定的验收任务：一次性 prompt 驱动"
+                             "下载 inception_v3 并各推理 FP16/W8A8 两种精度 QNN 模型、对比差异，"
+                             "同时验证'一次性自动跑完,无需中途确认'这句话本身是否成立。")
     parser.add_argument("--exe_dir", required=True, help="GenieAPIService 安装目录（含 GenieAPIService.exe）")
     parser.add_argument("--models", required=True, help="本地模型根目录（--models/<name>/config.json）")
     parser.add_argument("--model_name", default="qwen3-8b-8480",
@@ -1095,25 +1547,40 @@ def build_arg_parser():
                         help="tetris 任务用来执行 --selftest 自验证的 Python 解释器")
     parser.add_argument("--workspace_root", default=_DEFAULT_WORKSPACE_ROOT,
                         help="model-builder 技能的工作目录根（默认 C:\\WoS_AI）")
-    parser.add_argument("--max_turns", type=int, default=4,
-                        help="单个任务最多追加的真实 follow-up 轮次（不含 busy 等待期间的探测重试）")
-    parser.add_argument("--per_turn_timeout", type=int, default=900, help="单轮 SSE 请求超时（秒）")
-    parser.add_argument("--total_deadline_seconds", type=int, default=1800,
-                        help="单个任务总耗时上限（秒，跨全部真实轮次+全部busy等待；"
-                             "model-builder 技能首次执行可能需要安装 QAIRT 工具链，建议 3600-5400）")
-    parser.add_argument("--busy_poll_interval_seconds", type=int, default=45,
+    # 以下四个预算参数默认均为 None：不同任务场景（model_conversion/tetris/
+    # inception_precision_compare）各自函数签名的默认值天差地别（如 tetris
+    # 的 per_turn_timeout=600 对 inception 任务严重不足，inception 的
+    # per_turn_timeout=3600 对 tetris 又明显过大），若 argparse 另设一套统一的
+    # 全局默认值，main() 会无条件传参、静默覆盖掉函数自身更贴合该场景的默认值
+    # （曾实际发生：函数默认值已针对 inception 场景放大，但命令行不显式传参时
+    # 仍被这里的全局默认值砍回去）。保持 None，未显式传参时让各任务函数自己的
+    # 默认值生效，只有用户真正需要覆盖时才传。
+    parser.add_argument("--max_turns", type=int, default=None,
+                        help="单个任务最多追加的真实 follow-up 轮次（不含 busy 等待期间的探测重试）；"
+                             "省略时使用各任务函数自身默认值")
+    parser.add_argument("--per_turn_timeout", type=int, default=None,
+                        help="单轮 SSE 请求超时（秒）；省略时使用各任务函数自身默认值"
+                             "（inception_precision_compare 默认 3600，覆盖 27B 模型 QNN 量化转换的真实耗时）")
+    parser.add_argument("--total_deadline_seconds", type=int, default=None,
+                        help="单个任务总耗时上限（秒，跨全部真实轮次+全部busy等待）；"
+                             "省略时使用各任务函数自身默认值（inception_precision_compare 默认 7200，"
+                             "覆盖 27B 模型下载+两次 QNN 转换+两次推理+对比的小时级真实耗时）")
+    parser.add_argument("--busy_poll_interval_seconds", type=int, default=None,
                         help="检测到 existing_run（会话忙）后的轮询间隔（秒），"
-                             "用剩余的全部 total_deadline_seconds 耐心等待，不按 max_turns 切分")
+                             "用剩余的全部 total_deadline_seconds 耐心等待，不按 max_turns 切分；"
+                             "省略时使用各任务函数自身默认值")
     parser.add_argument("--out_dir", default=None, help="结果输出目录，默认 test_results_agent_tasks/<timestamp>")
     parser.add_argument("--transcript_path", default=None,
-                        help="完整对话转录文件路径（Markdown，未截断），默认 <out_dir>/conversation_transcript_<task>_<timestamp>.md")
+                        help="完整对话转录文件路径（Markdown，未截断），默认 <out_dir>/conversation_transcript_<task>_<timestamp>.md；"
+                             "inception_precision_compare 任务还会在同名 .genie_service.log 落盘完整后端 stdout，"
+                             "并统计 token 生成速度写入该 .md 文件末尾与 results.json（均为标准产出，非调试旁路）")
     return parser
 
 
 def main():
     args = build_arg_parser().parse_args()
 
-    out_dir = (Path(args.out_dir) if args.out_dir else
+    out_dir = (Path(args.out_dir).resolve() if args.out_dir else
                Path(__file__).resolve().parent.parent / "test_results_agent_tasks" /
                datetime.now().strftime("%Y%m%d_%H%M%S"))
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1129,6 +1596,7 @@ def main():
     all_results = []
     all_crash_events = []
     snapshot = ModelDirSnapshot()
+    junction_paths = []
 
     print(f"{'=' * 60}\n启动 QAIModelBuilder ({args.builder_dir})\n{'=' * 60}")
     builder = QAIModelBuilderManager(
@@ -1155,15 +1623,27 @@ def main():
                 passed=False, status_code=0, latency_ms=0,
                 detail=f"--model_name={args.model_name} 不在 --models 目录下已发现的模型中: {available_models}"))
         else:
-            if not configure_genie_root(builder, args.exe_dir, all_results):
+            if not configure_genie_root(builder, args.exe_dir, all_results, junction_paths=junction_paths):
                 raise RuntimeError("configure_genie_root 失败，终止本次运行")
-            if not inject_local_models(builder, args.models, [args.model_name], all_results, snapshot):
+            if not inject_local_models(builder, args.models, [args.model_name], all_results, snapshot,
+                                        junction_paths=junction_paths):
                 raise RuntimeError("inject_local_models 失败，终止本次运行")
             if not start_and_wait_ready(builder, args.model_name, args.genie_port, all_results):
                 raise RuntimeError("start_and_wait_ready 失败，终止本次运行")
             print(f"  [STAGE] 本地模型后端已就绪: model={args.model_name}, genie_port={args.genie_port}", flush=True)
 
             print(f"{'=' * 60}\n运行任务: {args.task}\n{'=' * 60}", flush=True)
+            # 四个预算参数在 argparse 侧默认为 None，这里只在用户显式传参时才
+            # 加入 kwargs，省略时让各任务函数自己的签名默认值生效（不同任务场景
+            # 耗时量级差异巨大，不能用一套全局默认值覆盖）。
+            budget_kwargs = {
+                k: v for k, v in (
+                    ("max_turns", args.max_turns),
+                    ("per_turn_timeout", args.per_turn_timeout),
+                    ("total_deadline_seconds", args.total_deadline_seconds),
+                    ("busy_poll_interval_seconds", args.busy_poll_interval_seconds),
+                ) if v is not None
+            }
             if args.task == "model_conversion":
                 run_model_conversion_task(
                     builder, args.model_name, all_results,
@@ -1171,26 +1651,24 @@ def main():
                     workspace_root=args.workspace_root,
                     run_pipeline_path=str(Path(args.builder_dir) / "factory" / "chat_features" /
                                            "model-builder" / "scripts" / "run_pipeline.py"),
-                    max_turns=args.max_turns,
-                    per_turn_timeout=args.per_turn_timeout,
-                    total_deadline_seconds=args.total_deadline_seconds,
-                    busy_poll_interval_seconds=args.busy_poll_interval_seconds,
-                    transcript_path=transcript_path)
+                    transcript_path=transcript_path, **budget_kwargs)
             elif args.task == "model_build_probe":
+                probe_kwargs = ({"stream_timeout": args.per_turn_timeout}
+                                if args.per_turn_timeout is not None else {})
                 run_model_build_probe_task(
                     builder, args.model_name, all_results,
-                    stream_timeout=args.per_turn_timeout,
-                    transcript_path=transcript_path)
+                    transcript_path=transcript_path, **probe_kwargs)
             elif args.task == "tetris":
                 run_tetris_task(
                     builder, args.model_name, all_results,
                     tetris_path=args.tetris_path,
                     python_exe=args.python_exe,
-                    max_turns=args.max_turns,
-                    per_turn_timeout=args.per_turn_timeout,
-                    total_deadline_seconds=args.total_deadline_seconds,
-                    busy_poll_interval_seconds=args.busy_poll_interval_seconds,
-                    transcript_path=transcript_path)
+                    transcript_path=transcript_path, **budget_kwargs)
+            elif args.task == "inception_precision_compare":
+                run_inception_precision_compare_task(
+                    builder, args.model_name, all_results,
+                    workspace_root=args.workspace_root,
+                    transcript_path=transcript_path, **budget_kwargs)
     except RuntimeError as e:
         print(f"  ✗ {e}")
     finally:
@@ -1203,6 +1681,9 @@ def main():
                 name="AGENT-TASK: model_dir_snapshot_verify", round_num=1, model_name="_agent_task_",
                 passed=False, status_code=0, latency_ms=0, detail=v, crashed=True))
         builder.stop()
+        # 必须无条件执行（覆盖正常/异常两条路径），否则残留联接会被远程同步
+        # git clean -fd 顺着删除真实目录下的文件（docs/known-issues.md 7.1b 根因③）。
+        cleanup_junctions(junction_paths)
 
     _finalize_and_exit(all_results, [], all_crash_events, out_dir, remote_mode=False,
                        suite_name="builder_agent_tasks", cmdline=" ".join(sys.argv))

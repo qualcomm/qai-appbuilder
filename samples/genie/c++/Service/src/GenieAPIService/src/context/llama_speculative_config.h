@@ -44,25 +44,21 @@ struct DraftModelConfig
     static DraftModelConfig ParseFrom(const json &model_config_json);
 };
 
-// 投机解码模型（Qwen3.8-27B + DFlash2）加载所需的最低系统总物理内存门槛。
-// 阈值定为 60GB 而不是标称的 64GB：远程实测的 64GB 标称硬件在 Windows 上只上报约 63.43GB
-// （固件/GPU 预留导致 GlobalMemoryStatusEx 的 ullTotalPhys 略低于标称值），60GB 留出约 4GB
-// 容差，同时足以排除 32GB/48GB 机器。
-constexpr uint64_t kDraftModelMinPhysicalMemoryBytes = 60ULL * 1024 * 1024 * 1024;
+// 投机解码模型（Qwen3.8-27B + DFlash2）加载所需内存的动态估算：主模型/草稿模型权重文件字节数之和
+// + 按配置的 context_size 估算的合并 KV cache（主模型/草稿模型各自的 GGUF block_count 直接当
+// n_layer，不识别混合架构的 full_attention_interval，更简单也更保守）+ 固定安全余量。
+// model_dir 为模型所在目录（内部通过 File::MatchFileInDir 查找其下的 .gguf 主模型文件，与
+// LLAMACppBuilder 构造函数里的 directory_iterator 扫描等效），draft_relative_path 为
+// draft_model.path 字段原值（相对 model_dir）。比较对象为可用物理内存
+// （GetAvailablePhysicalMemoryBytes()）而非总物理内存，见 GGUFVerify::CreateIfVerifiedImpl()
+// （model_manager.cpp）。
+uint64_t EstimateSpeculativeMemoryRequirement(const std::string &model_dir,
+                                               const std::string &draft_relative_path,
+                                               uint64_t context_size);
 
-// 纯函数：判断总物理内存字节数是否达到给定阈值。刻意与"调用 GlobalMemoryStatusEx 拿到真实
-// 硬件值"这一步（GetTotalPhysicalMemoryBytes()）分离，使得"内存不足应拒绝加载"这条路径可以
-// 通过注入任意测试值独立验证，不依赖能自然复现内存不足场景的真实硬件。
-inline bool MeetsPhysicalMemoryThreshold(uint64_t total_physical_bytes, uint64_t threshold_bytes)
-{
-    return total_physical_bytes >= threshold_bytes;
-}
-
-// 系统总物理内存字节数（与 MNNContext::GetAvailablePhysicalMemoryBytes 同一 GlobalMemoryStatusEx
-// 模式，取 ullTotalPhys 而非 ullAvailPhys）。用于投机解码（draft_model）模型加载前的硬件门槛
-// 检查，见 GGUFVerify::CreateIfVerifiedImpl()（model_manager.cpp）。原定义于 MNNContext，迁出
-// 是因为该方法只被本文件的投机解码硬件门槛检查使用，继续放在 MNN 后端类里属反向依赖。
-uint64_t GetTotalPhysicalMemoryBytes();
+// 可用物理内存字节数（ullAvailPhys，与 MNNContext::GetAvailablePhysicalMemoryBytes 同一
+// GlobalMemoryStatusEx 模式）。用于投机解码（draft_model）模型加载前的动态内存门槛检查。
+uint64_t GetAvailablePhysicalMemoryBytes();
 
 } // namespace llama_speculative
 

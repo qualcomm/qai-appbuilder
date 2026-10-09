@@ -183,7 +183,7 @@ public:
                                bool &handled_by_cloud);
 
     // 事后路由回退（本地能力不足）
-    // 当本地推理完成后（或在处理前预判到工具调用超限），检测到输出溢出或工具调用超限时调用。
+    // 当本地推理完成后检测到输出溢出时调用。
     // 返回 true 表示成功回退到云端，http_res 已被重写；
     // 返回 false 表示因策略（S2）或云端不可用等原因未能回退，调用方应保留本地结果。
     // sink != nullptr 表示调用方已在流式响应中（set_chunked_content_provider 回调内），
@@ -191,7 +191,6 @@ public:
     bool HandleLocalOutputOverflow(const json &request,
                                    const httplib::Request &http_req,
                                    httplib::Response &http_res,
-                                   bool is_tool_call_retries_exceeded,
                                    httplib::DataSink *sink = nullptr);
 
     // 预路由回退（本地输入溢出）
@@ -206,7 +205,6 @@ public:
                                   ResponseDispatcher &dispatcher);
 
     // 检查指定 session 是否已锁定到云端路由（sticky CLOUD session）
-    // 用于在 tool_call_retries 检查时跳过对云端路由请求的限制：
     //   - 若路由功能未启用或 session_id 为空，返回 false
     //   - 若 sticky session 存在且未过期且目标为 CLOUD，返回 true
     //   - 否则返回 false

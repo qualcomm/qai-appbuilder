@@ -103,7 +103,9 @@ std::string ResponseTools::statusDataJson(const std::string &status, const std::
 std::string ResponseTools::responseDataJson(const std::string &content,
                                             const std::string &finish_reason,
                                             bool stream,
-                                            const std::string &tool_calls_str)
+                                            const std::string &tool_calls_str,
+                                            size_t prompt_tokens,
+                                            size_t completion_tokens)
 {
     std::string id = generate_uuid4();
     std::string object = stream ? "chat.completion.chunk" : "chat.completion";
@@ -132,9 +134,9 @@ std::string ResponseTools::responseDataJson(const std::string &content,
                                                 }
                                  }}}},
             {"usage", {
-                         {"prompt_tokens", 0},
-                         {"completion_tokens", 0},
-                         {"total_tokens", 0}
+                         {"prompt_tokens", prompt_tokens},
+                         {"completion_tokens", completion_tokens},
+                         {"total_tokens", prompt_tokens + completion_tokens}
             }}
     };
     /* @formatter:on */

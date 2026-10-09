@@ -409,6 +409,12 @@ public:
         bool switch_to_speculative = false;
         bool eog_hit = false;
 
+        bool think_in_progress = false;
+        int think_token_start = -1;
+        bool think_force_closing = false;
+        std::vector<llama_token> think_force_tokens;
+        const int32_t think_budget_tokens = params_.sampling.reasoning_budget_tokens;
+
         // 共享的逐 token 输出管线：回调/停止序列检测/输出长度限制，单模型解码与投机
         // 解码验证轮次产出的 token 共用同一套逻辑（D5）。返回 false 表示应停止生成
         // （should_stop/eog_hit/输出长度限制均已通过外层捕获的引用置位）。
@@ -434,6 +440,38 @@ public:
                 return false;
             }
             n_generated++;
+            if (think_budget_tokens >= 0)
+            {
+                if (!think_in_progress)
+                {
+                    if (generated_text_buf.find("<think>") != std::string::npos)
+                    {
+                        think_in_progress = true;
+                        think_token_start = n_generated;
+                    }
+                }
+                else if (generated_text_buf.find("</think>") != std::string::npos)
+                {
+                    think_in_progress = false;
+                }
+                else if (!think_force_closing && n_generated - think_token_start >= think_budget_tokens)
+                {
+                    std::string force_text = params_.sampling.reasoning_budget_message;
+                    if (force_text.empty())
+                    {
+                        force_text = "\n\nConsidering the time constraints, I will give the final answer directly based on the analysis above.\n";
+                    }
+                    force_text += "</think>\n\n";
+                    think_force_tokens = common_tokenize(ctx, force_text, false, true);
+                    think_force_closing = !think_force_tokens.empty();
+                    think_in_progress = false;
+                    My_Log{My_Log::Level::kWarning}
+                        << "[LLAMACpp] " << query_type
+                        << " Reasoning budget (" << think_budget_tokens
+                        << " tokens) exceeded after " << n_generated
+                        << " total generated tokens. Forcing </think> close." << std::endl;
+                }
+            }
             if (max_length_ > 0 && n_generated >= max_length_)
             {
                 My_Log{My_Log::Level::kWarning}
@@ -487,6 +525,17 @@ public:
                 {
                     My_Log{My_Log::Level::kError} << "[LLAMACpp] " << query_type << " llama_decode FAILED\n";
                     return false;
+                }
+
+                if (is_speculative_)
+                {
+                    llama_batch batch_chunk = llama_batch_init((int) embd.size(), 0, 1);
+                    for (size_t i = 0; i < embd.size(); ++i)
+                    {
+                        common_batch_add(batch_chunk, embd[i], (llama_pos) (n_past + (int) i), {0}, false);
+                    }
+                    common_speculative_process(spec_.get(), batch_chunk);
+                    llama_batch_free(batch_chunk);
                 }
 
                 n_past += (int) embd.size();
@@ -550,7 +599,20 @@ public:
                     break;
                 }
 
-                const llama_token id = common_sampler_sample(smpl, ctx, -1);
+                llama_token id;
+                if (think_force_closing && !think_force_tokens.empty())
+                {
+                    id = think_force_tokens.front();
+                    think_force_tokens.erase(think_force_tokens.begin());
+                    if (think_force_tokens.empty())
+                    {
+                        think_force_closing = false;
+                    }
+                }
+                else
+                {
+                    id = common_sampler_sample(smpl, ctx, -1);
+                }
                 common_sampler_accept(smpl, id, true);
                 embd.push_back(id);
                 is_generated_token = true;
@@ -608,22 +670,6 @@ public:
             llama_tokens draft;
             const int n_draft_max = std::max(1, params_.speculative.draft.n_max);
 
-            // drafter（如 dflash2）自身的解码/缓存状态只能通过 common_speculative_process() 驱动；
-            // prompt 部分虽然已经在上面共享的 prefill 循环里 decode 进了 target ctx，但从未喂给过
-            // spec_，drafter 对 prompt 一无所知。这里用一个只含 prompt token 的 batch 补喂一次，
-            // 对齐官方参考实现 examples/speculative-simple/speculative-simple.cpp 的顺序（prompt
-            // process 必须先于 common_speculative_begin），否则首轮草稿会在对 prompt 一无所知的
-            // 情况下生成，质量无法保证。
-            {
-                llama_batch batch_prompt = llama_batch_init((int) spec_prompt.size(), 0, 1);
-                for (size_t i = 0; i < spec_prompt.size(); ++i)
-                {
-                    common_batch_add(batch_prompt, spec_prompt[i], (llama_pos) i, {kSpecSeqId}, false);
-                }
-                common_speculative_process(spec_.get(), batch_prompt);
-                llama_batch_free(batch_prompt);
-            }
-
             common_speculative_begin(spec_.get(), kSpecSeqId, spec_prompt);
 
             llama_batch batch_tgt = llama_batch_init(params_.n_batch, 0, 1);
@@ -631,6 +677,47 @@ public:
 
             while (n_remain != 0)
             {
+                if (n_past + 1 + n_draft_max >= n_ctx)
+                {
+                    My_Log{My_Log::Level::kWarning}
+                        << "[LLAMACpp] " << query_type
+                        << " Context limit reached (n_past=" << n_past << ", n_ctx=" << n_ctx
+                        << "). Stopping generation." << std::endl;
+                    stopped_by_output_limit_ = true;
+                    should_stop = true;
+                    break;
+                }
+
+                if (think_force_closing && !think_force_tokens.empty())
+                {
+                    llama_token forced_id = think_force_tokens.front();
+                    think_force_tokens.erase(think_force_tokens.begin());
+                    if (think_force_tokens.empty())
+                    {
+                        think_force_closing = false;
+                    }
+
+                    common_batch_clear(batch_tgt);
+                    common_batch_add(batch_tgt, id_last, n_past++, {kSpecSeqId}, true);
+                    if (llama_decode(ctx, batch_tgt))
+                    {
+                        My_Log{My_Log::Level::kError}
+                            << "[LLAMACpp] " << query_type << " forced-close llama_decode FAILED\n";
+                        decode_failed = true;
+                        break;
+                    }
+                    common_speculative_process(spec_.get(), batch_tgt);
+                    common_sampler_accept(smpl, forced_id, true);
+                    spec_prompt.push_back(id_last);
+                    id_last = forced_id;
+                    --n_remain;
+                    if (!emit_generated_token(id_last))
+                    {
+                        break;
+                    }
+                    continue;
+                }
+
                 if (draft.empty())
                 {
                     common_speculative_get_draft_params(spec_.get(), kSpecSeqId) = {
@@ -927,16 +1014,12 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
     const bool speculative_requested = draft_config.present && !draft_config.path.empty();
 
     // 在初始化 llama.cpp 后端之前设置该 OpenCL Adreno 大缓冲区环境变量。该后端只看变量是否存在、
-    // 不看取值。workspace/qwen38-dflash2-x2-90-repro/README.md 105-110 行建议投机解码保持该
-    // 变量 unset——但那条建议是针对 README 自己验证过的基线命令行 `-c 8192`（该配置下最大单个
-    // 分配约 404 MiB，明显低于不设该变量时约 2GB 的地址算术上限）。我们的投机解码路径强制使用
-    // 用户给定的激进值 `-c 32768`（见下方 n_ctx 赋值），是 README 基线的 4 倍；已实测证实：
-    // unset 该变量时，target 模型（27B）在这个更大的上下文尺寸下会在 GPU 与 CPU 两条路径都
-    // 抛出 "bad allocation"（服务日志：GGUFVerify GPU/CPU load failed: bad allocation），说明
-    // 某个随 n_ctx 缩放的单一缓冲区（可能是完整 KV cache 缓冲或注意力计算缓冲）在 32768 上下文
-    // 下已超出该 2GB 上限——必须保持该变量为 "1" 才能在这个上下文尺寸下成功分配，功能正确性优先
-    // 于 README 描述的这一点性能损耗。现有单模型 GGUF 路径（gemma4/gpt-oss-20b 等）本就一直设为
-    // "1"，此处统一为无条件设置，不再区分投机解码分支。
+    // 不看取值。现有单模型 GGUF 路径（gemma4/gpt-oss-20b 等）本就一直设为 "1"，此处统一为无条件
+    // 设置，不再区分投机解码分支。用 llama-completion.exe 对 Qwen3.8-27B 主模型（不含草稿）单独
+    // 验证发现：当前驱动的 OpenCL 编译器拒绝大缓冲区扩展（日志 "large buffer mode is off"），该
+    // 变量在这台机器上实际未生效，-ngl 99 下无论是否设置该变量都稳定复现 "q6_K set_tensor: temp
+    // upload buffer alloc failed" 崩溃，且与 n_ctx 大小无关——这是驱动/ggml-opencl 后端层面的独立
+    // 问题，不属于本次改动范围，细节见同名 llama_cpp.cpp.notes.md，此处维持无条件设置不变。
 #if defined(_WIN32)
     _putenv_s("GGML_OPENCL_ADRENO_USE_LARGE_BUFFER", "1");
 #else
@@ -944,14 +1027,18 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
 #endif
     My_Log{} << "[Env] GGML_OPENCL_ADRENO_USE_LARGE_BUFFER=1 set\n";
 
-    // 上下文窗口大小：未配置时使用默认值；声明了 draft_model 的模型强制使用用户给定的激进值
-    // -c 32768，与 -ngld 99（下方 C++ 直接赋值 params.speculative.draft.*）同属一组只在声明了
-    // draft_model 时才生效的硬编码值。
+    // 上下文窗口大小：非投机分支未配置时回退 8192；投机分支优先使用模型自身 config.json 配置值，
+    // 仅在未配置/为 0 时才回退 32768，与 -ngld 99（下方 C++ 直接赋值 params.speculative.draft.*）
+    // 同属一组只在声明了 draft_model 时才生效的硬编码值。
     size_t configured_context_size = model_config_.get_context_size();
-    int n_ctx = configured_context_size > 0 ? static_cast<int>(configured_context_size) : 8192;
+    int n_ctx;
     if (speculative_requested)
     {
-        n_ctx = 32768;
+        n_ctx = configured_context_size > 0 ? static_cast<int>(configured_context_size) : 32768;
+    }
+    else
+    {
+        n_ctx = configured_context_size > 0 ? static_cast<int>(configured_context_size) : 8192;
     }
 
     std::string device = model_config_.get_device();
@@ -995,7 +1082,10 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
         // LLAMA_EXAMPLE_SERVER、不包含 LLAMA_EXAMPLE_COMPLETION，因此本分支下面把
         // common_params_parse 的 example 切到 LLAMA_EXAMPLE_SERVER，让它们走原生 argv 解析，
         // 不再需要 parse 后手动二次赋值 params.speculative.*。
-        arg_strings.insert(arg_strings.end(), {"--reasoning-budget", "3072"});
+        if (model_config_.is_thinking_model())
+        {
+            arg_strings.insert(arg_strings.end(), {"--reasoning-budget", "3072"});
+        }
 
         fs::path draft_path = fs::path(model_config_.get_model_path()) / draft_config.path;
         arg_strings.insert(arg_strings.end(), {"-md", draft_path.string()});
@@ -1020,20 +1110,7 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
         // CPU 路径：保持 mmap/repack/no-host 的 llama.cpp 官方默认值（已实测验证比强制关闭更快）。
         arg_strings.insert(arg_strings.end(), {"-ngl", "0"});
     }
-    else if (speculative_requested)
-    {
-        // 投机解码分支严格对齐用户给定、且已用原生 llama-server.exe 在本机实测跑通的命令行：
-        // 只给 -ngl 99，既不带 --no-mmap/--no-repack/--no-host/-ub 1024，也不带 --device。
-        // 不带 --device 是关键：--device GPUOpenCL 会把可用后端设备裁剪成只剩 OpenCL GPU 一个，
-        // 而 dflash 的 target+draft 双 context 在 --fit 阶段需要 CPU 设备参与兜底（本机驱动的
-        // 大缓冲区模式实际为 OFF，超设备上限的 buffer 必须 fall back 到 host memory），裁剪掉
-        // CPU 设备后 14.6GB target 的分配无处可退，直接抛 std::bad_alloc。原生 llama-server.exe
-        // 的命令行同样没有 --device。
-        arg_strings.insert(arg_strings.end(), {
-            "-ngl", "99",
-        });
-    }
-    else
+    else if (!speculative_requested)
     {
         // 非投机（现有全部单模型 GGUF）路径：保持历史 A/B 实测出的最快组合，本轮不改动。
         arg_strings.insert(arg_strings.end(), {
@@ -1045,6 +1122,12 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
             "-ub", "1024",
         });
     }
+    // 投机解码分支（非 CPU）不显式传 -ngl：llama-completion.exe 实测确认，一旦显式给出 -ngl（含
+    // 99），fork 的 common/fit.cpp 会直接放弃显存拟合、强行按请求值全量分配，而本机 OpenCL 设备
+    // 可用显存（约15078MiB）不足以装下 Qwen3.8-27B 全部66层（需约15234MiB），导致最后几批 q6_K
+    // 张量上传阶段崩溃。不给 -ngl 时 --fit 自动决定 offload 层数（实测58-61/66），加载与推理均
+    // 成功，且 prefill 速度最快；--fit 同样会把 common_fit_extra_model（草稿模型）计入显存预算，
+    // -ngld 99 不受影响。不带 --device 的原因同上：裁剪掉 CPU 设备后超设备上限的 buffer 无处 fallback。
 
     std::vector<char *> argv;
     argv.reserve(arg_strings.size());

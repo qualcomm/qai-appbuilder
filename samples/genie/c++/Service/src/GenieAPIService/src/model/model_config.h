@@ -166,7 +166,6 @@ struct RoutingConfig {
     struct AgentRoutingConfig {
         bool sub_agent_prefer_local = true;      // 子 agent 默认优先本地
         bool sub_agent_allow_cloud_on_c2 = true; // 子 agent 在 C2 时允许上云
-        int max_tool_call_retries = 10;           // 当次请求最大连续工具调用重试次数
     } agent_routing;
 
     // 会话级路由锁定配置
@@ -215,12 +214,13 @@ struct LocalModelConfig {
 };
 
 // ============================================================
-// 工具调用兜底修复配置（对应 service_config.json 中的 "tool_call_repair" 节）
+// 工具调用兜底修复配置（对应 prompt_engineering.json 中的 "tool_call_repair" 节；
+// 与端云结合完全无关的本地能力，不在 service_config.json 中）
 // Layer2：现有正则修复链 + Layer1（本地确定性提取）均失败（最终会落回 name="unknow"）后，
 // 服务端在决定返回给客户端之前发起的内部隐形自纠正重试：构造 scratch ModelInput 追加一条
 // role=tool 错误消息，重新走完整 ModelInputBuilder::Build() 预算/压缩流水线再次调用
 // handle->Query()；成功结果直接替换给客户端，失败的第一次尝试绝不写入 ChatHistory，
-// 也绝不向客户端发送任何中间态。默认开启，可通过 service_config.json 关闭/调阈值。
+// 也绝不向客户端发送任何中间态。默认开启，可通过 prompt_engineering.json 关闭/调阈值。
 // ============================================================
 struct ToolCallRepairConfig {
     bool enabled = true;
@@ -250,6 +250,35 @@ struct ToolCallRepairConfig {
         // 期间无新的 Layer3 触发则冷却到期后自动解除（下一次请求重新按全量计数）。
         int cooldown_seconds = 300;
     } circuit_breaker;
+
+    struct RedundantToolCallConfig {
+        bool enabled = true;
+        int repeat_threshold = 2;
+        int ttl_seconds = 300;
+    } redundant_call_guard;
+};
+
+// ============================================================
+// Windows shell 使用提示配置（对应 prompt_engineering.json 中的 "windows_shell_hint" 节；
+// 与端云结合完全无关的本地能力，不在 service_config.json 中）
+// 通用、与具体技能无关的基础设施：Windows 平台编译时，若请求的 tools 声明里存在
+// shell/命令执行类工具（按 name/description 关键词匹配），提示模型该命令可能被
+// 路由到 cmd.exe 或 PowerShell 之一，两者链式执行/变量/引号语法不同，命中语法错误
+// 时可尝试换另一种 shell 的写法。挂载点见 model_input_builder.h::BuildPrompt()。
+// ============================================================
+struct WindowsShellHintConfig {
+    bool enabled = true;
+    std::vector<std::string> tool_keywords = {"cmd", "powershell", "shell", "exec", "bash", "terminal", "command"};
+    std::string hint_text =
+        "You are running on Windows. Shell/command-execution tools may route your command to either "
+        "cmd.exe or PowerShell. cmd.exe: chain with && or ||, read variables as %VAR%, escape quotes as \"\". "
+        "PowerShell: chain with ;, read variables as $env:VAR, nested quotes need escaping or single-quoting. "
+        "If a command fails with a shell syntax error, retry using the other shell's syntax. "
+        "Your command already runs inside a shell: write it directly in PowerShell, never wrapping it in "
+        "another shell nor mixing cmd syntax in: Write-Output (\"os=\"+$env:OS). Nested quotes must differ from "
+        "the outer: python -c \"import platform;print('m='+platform.machine())\". Needing two levels means write "
+        "the script to a file and run it. List files with Get-ChildItem -Name or -Recurse -Filter *.py, not "
+        "dir /b or /s /b. wmic is gone; use cmdlets.";
 };
 
 // ============================================================
@@ -487,6 +516,12 @@ struct PromptOptimizationConfig {
         // 提取——这不是新协议面，只是对既有 description 文本的结构化利用。
         // tag_weight=0 时逐字节回退：tags 不参与打分（等价于 D4 引入前）。
         size_t tag_weight = 2;
+        bool anchor_first_user_message = true;
+        bool protect_core_capability_tools = true;
+        std::vector<std::string> core_capability_keywords = {
+            "read", "write", "edit", "create", "save", "patch", "append", "delete",
+            "list", "glob", "grep", "find", "search", "dir", "tree",
+            "exec", "run", "shell", "command", "terminal", "bash", "powershell", "cmd"};
     } relevance_filter;
 
     // ── D2：技能目录三档渐进披露（L0/L1/L2）────────────────────────────────
@@ -541,6 +576,11 @@ struct PromptOptimizationConfig {
 
     // ── 消息数量控制 ────────────────────────────────────────
     size_t max_messages_limit = 16;         // 消息数量上限（PreFilter Step 1）
+    // Step 1 token 预算感知裁剪的压力阈值：仅当消息条数超过 max_messages_limit **且**
+    // 当前消息 token 使用率（相对 available_tokens）达到此比例时才真正触发裁剪；
+    // 否则哪怕条数超限，只要预算充足也不裁剪，交由后续 Phase 0-5/FitMessagesToContext
+    // 的 token-aware 逻辑处理。无 model handle 时无法计算使用率，保持旧行为（纯按条数裁剪）。
+    double token_pressure_trigger_ratio = 0.75;
     size_t recent_window = 6;               // 最近 N 条消息视为"新消息"（受保护）
 
     // ── 分级压缩阈值（字符数）──────────────────────────────
@@ -566,6 +606,9 @@ struct PromptOptimizationConfig {
                                             // 超大 tool 响应（如 80K 字符压进 8K 上下文）会被直接判定放弃
                                             // 截断、转入 local_input_overflow，而不是走 Phase 4 真正截断。
         int safety_margin_tokens = 30;      // 安全余量（token 数）；截断时额外预留，防止边界情况；默认 30
+        // 为 true 时，Phase 4 在受保护区间内按 token 数降序选取多条 tool 消息逐条截断，
+        // 直到累计释放量达到 tokens_to_free；为 false 时逐字节回退到旧行为（只看最后一条）。
+        bool target_largest_tool_messages = true;
     } emergency_truncation;
 
     // ── 保真截断配置（ContentCondenser：token 口径 + 头尾双保留 + 丢弃留痕）───
@@ -646,7 +689,7 @@ struct PromptOptimizationConfig {
     } spawn_guard;
 
     // ── 长文本摘要化配置（Phase -1，在 prompt 构建前执行）──────
-    // 对应 service_config.json 中的 "prompt_optimization.long_text_summarization" 节
+    // 对应 prompt_engineering.json 中的 "prompt_optimization.long_text_summarization" 节
 
     // 摘要缓存配置
     struct LongTextSummaryCacheConfig {
@@ -658,7 +701,7 @@ struct PromptOptimizationConfig {
 
     // 长文本摘要化主配置
     struct LongTextSummarizationConfig {
-        bool enabled = false;           // 总开关（默认关闭，需在 service_config.json 中显式开启）
+        bool enabled = false;           // 总开关（默认关闭，需在 prompt_engineering.json 中显式开启）
         double trigger_ratio = 0.5;     // 触发阈值：content token 数 > context_size * trigger_ratio 时触发摘要
         double chunk_ratio = 0.45;      // 分块大小：chunk_token_limit = context_size * chunk_ratio
         bool summarize_user_messages = true;    // 是否对最后一条 user 文本消息执行摘要
@@ -680,7 +723,7 @@ struct PromptOptimizationConfig {
     } long_text_summarization;
 
     // ── Task Memo（分段式记忆）配置 ─────────────────────────
-    // 对应 service_config.json 中的 "prompt_optimization.task_memo" 节
+    // 对应 prompt_engineering.json 中的 "prompt_optimization.task_memo" 节
     struct TaskMemoStoreConfig {
         size_t max_entries = 200;       // 最大缓存条目数（LRU 淘汰；指纹+首条消息双 key 注册，实际会话数约为其半）
         size_t max_memory_mb = 20;      // 最大内存占用（MB，超出时淘汰最旧条目）
@@ -688,13 +731,28 @@ struct PromptOptimizationConfig {
     };
 
     struct TaskMemoConfig {
-        bool enabled = false;                    // 总开关（默认关闭，需在 service_config.json 中显式开启）
+        bool enabled = false;                    // 总开关（默认关闭，需在 prompt_engineering.json 中显式开启）
         bool model_layer_enabled = true;         // 模型层深度总结开关（关闭时永远只用规则层兜底，enabled=false 时无意义）
         double token_budget_ratio = 0.15;        // Task Memo 段落允许占用 context_size 的比例上限
         size_t min_dropped_for_trigger = 1;      // FitMessagesToContext 本次即将丢弃的消息数达到此值才更新备忘录
         size_t long_tool_chain_threshold = 4;    // 本次丢弃的连续 tool 消息数达到此值时触发模型层深度总结
         double low_confidence_threshold = 0.5;   // 上一份备忘录 confidence 低于此值时触发模型层深度总结
         int rule_layer_preview_chars = 160;      // 规则层 facts_constraints/completed/tool_state 预览截断长度（字符数）
+
+        // ── 原始目标锚点（original_goal_raw）鲁棒抓取 ──────────
+        size_t goal_scan_window = 3;             // 在前几条非 system 用户消息里扫描锚点候选
+        size_t min_goal_signal_chars = 20;       // 候选消息长度达到此值才视为"足够实质"；全部不达标时回退取第一条并标记 low 置信度
+        size_t goal_anchor_preview_chars = 300;  // 渲染 original_goal_raw/original_goal_refined 时的预览截断长度（字符数）
+
+        // ── 连续失败不轻易放弃（与 ToolCallCircuitBreakerStore 打通，只读） ──
+        // 建议小于 ToolCallRepairConfig::CircuitBreakerConfig::consecutive_layer3_threshold（默认 3），
+        // 确保"坚持提示"先于熔断器自身的工具声明降级出现，避免同一轮提示词自相矛盾。
+        int failure_streak_warn_threshold = 2;
+
+        // ── 轻量分页目录（不留原文，只存 page_id+source_range+一行类别统计 gist） ──
+        struct PageDirectoryConfig {
+            size_t max_entries = 20;             // 环形缓冲上限，超出按 FIFO 淘汰最旧条目
+        } page_directory;
 
         TaskMemoStoreConfig store;
     } task_memo;
@@ -846,6 +904,11 @@ public:
         return tool_call_repair_config_;
     }
 
+    const WindowsShellHintConfig &GetWindowsShellHintConfig() const
+    {
+        return windows_shell_hint_config_;
+    }
+
     const PromptOptimizationConfig& GetPromptOptimizationConfig() const
     {
         return prompt_optimization_config_;
@@ -915,6 +978,7 @@ public:
     EnterpriseCloudModelConfig enterprise_cloud_model_config_;
     LocalModelConfig local_model_config_;
     ToolCallRepairConfig tool_call_repair_config_;
+    WindowsShellHintConfig windows_shell_hint_config_;
     
     // Prompt 优化配置
     PromptOptimizationConfig prompt_optimization_config_;

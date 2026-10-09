@@ -436,9 +436,9 @@ std::string LongTextSummarizer::BuildMapPrompt(const std::string& chunk,
         // 字面量 "string" 作为内容槽位（见 chat_history.cpp / model_input_builder.h）
         //
         // 最小推理 prompt 结构（无历史消息）：
-        //   str_replace(system, "string", instruction + "/no_think")  ← 禁止思考
+        //   str_replace(system, "string", instruction + "/no_think")  ← 禁止思考（软开关）
         //   + str_replace(user,   "string", task_str)
-        //   + start  （不预填空 think 块：真机实测该预填内容会导致 qwen3 在极短文本下退化）
+        //   + start （+ 空 <think></think> 硬开关，门控条件与 BuildPrompt() 完全一致）
         const auto& j = instance_config_.get_prompt_template();
 
         if (j.is_object()
@@ -446,16 +446,24 @@ std::string LongTextSummarizer::BuildMapPrompt(const std::string& chunk,
                 && j.contains("user")   && j["user"].is_string()
                 && j.contains("start")  && j["start"].is_string())
         {
-            // 若为 thinking 模型，追加 /no_think 避免模型进入思考模式
-            // 思考模式会大幅增加摘要推理耗时，且摘要任务不需要深度推理；
-            // 注意：不在 start 里预填空 think 块（真机实测确认该预填内容会导致 qwen3 在极短文本下退化）
+            // 若为 thinking 模型，追加 /no_think 软开关；是否需要同时预填空 think 块（硬开关）
+            // 复用 model_input_builder.h::BuildPrompt() 的同一门控条件：仅当该模型同时配置了
+            // 投机解码（is_speculative_draft_configured()）时才预填，避免对未验证过的其它
+            // thinking 模型重新触发极短文本退化问题。
             std::string system_instruction =
                 "You are a compression assistant. Your task is to summarize content accurately.";
             std::string start_str = j["start"].get<std::string>();
+            bool force_empty_think_prefill = false;
 
             if (instance_config_.is_thinking_model())
             {
                 system_instruction += "/no_think";
+                force_empty_think_prefill = instance_config_.is_speculative_draft_configured();
+            }
+
+            if (force_empty_think_prefill)
+            {
+                start_str += "<think>\n\n</think>\n\n";
             }
 
             return str_replace(j["system"].get<std::string>(), "string", system_instruction)
@@ -509,10 +517,17 @@ std::string LongTextSummarizer::BuildReducePrompt(const std::string& combined_su
             std::string system_instruction =
                 "You are a compression assistant. Your task is to merge partial summaries into one coherent summary.";
             std::string start_str = j["start"].get<std::string>();
+            bool force_empty_think_prefill = false;
 
             if (instance_config_.is_thinking_model())
             {
                 system_instruction += "/no_think";
+                force_empty_think_prefill = instance_config_.is_speculative_draft_configured();
+            }
+
+            if (force_empty_think_prefill)
+            {
+                start_str += "<think>\n\n</think>\n\n";
             }
 
             return str_replace(j["system"].get<std::string>(), "string", system_instruction)
