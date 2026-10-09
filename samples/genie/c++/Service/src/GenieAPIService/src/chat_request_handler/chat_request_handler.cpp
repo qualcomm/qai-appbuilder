@@ -27,24 +27,6 @@ namespace fs = std::filesystem;
 
 namespace
 {
-// Counts the trailing "tool" role messages since the most recent "user" message; used to detect
-// a tool-call loop that has exceeded the configured retry limit. Shared by the routed and
-// non-routed request paths, which both need to guard against the same runaway-loop scenario.
-int CountTrailingToolCalls(const json &messages)
-{
-    int tool_call_count = 0;
-    for (auto it = messages.rbegin(); it != messages.rend(); ++it)
-    {
-        const auto &msg = *it;
-        std::string role = msg.value("role", "");
-        if (role == "tool")
-            tool_call_count++;
-        else if (role == "user")
-            break;
-    }
-    return tool_call_count;
-}
-
 // Computes the output-token budget (context window minus consumed prompt tokens, clamped between
 // the configured minimum output and the full context size) and applies it together with the
 // sampling params to the model handle. Shared by the stream and non-stream inference paths.
@@ -518,51 +500,6 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
 
         if (!ok) return;
         if (handled_by_cloud) return;
-
-        if (data.contains("messages") && data["messages"].is_array())
-        {
-            int tool_call_count = CountTrailingToolCalls(data["messages"]);
-
-            int max_retries = model_manager.GetRoutingConfig().agent_routing.max_tool_call_retries;
-            if (tool_call_count > max_retries)
-            {
-                My_Log{My_Log::Level::kWarning} << "Tool call retries exceeded maximum (" << max_retries << "). Stopping generation." << std::endl;
-
-                bool fallback = genieRoutingGateway_->HandleLocalOutputOverflow(data, req, res, true);
-                if (fallback) return;
-
-                json err_resp = {
-                    {"error", {
-                        {"message", "Model exceeded maximum allowed tool call retries."},
-                        {"type", "invalid_request_error"},
-                        {"code", 400}
-                    }}
-                };
-                res.status = 400;
-                res.set_content(err_resp.dump(), ResponseDispatcher::MIMETYPE_JSON);
-                return;
-            }
-        }
-    }
-    else if (data.contains("messages") && data["messages"].is_array())
-    {
-        int tool_call_count = CountTrailingToolCalls(data["messages"]);
-
-        int max_retries = model_manager.GetRoutingConfig().agent_routing.max_tool_call_retries;
-        if (tool_call_count > max_retries)
-        {
-            My_Log{My_Log::Level::kWarning} << "Tool call retries exceeded maximum (" << max_retries << "). Stopping generation." << std::endl;
-            json err_resp = {
-                {"error", {
-                    {"message", "Model exceeded maximum allowed tool call retries."},
-                    {"type", "invalid_request_error"},
-                    {"code", 400}
-                }}
-            };
-            res.status = 400;
-            res.set_content(err_resp.dump(), ResponseDispatcher::MIMETYPE_JSON);
-            return;
-        }
     }
 
     bool is_stream = get_json_value(data, "stream", false);
@@ -712,7 +649,6 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
                             ResponseTools::statusDataJson("cloud_fallback", "Switching to cloud model..."));
                         bool fallback = gateway->HandleLocalOutputOverflow(
                             const_cast<json&>(data_copy), req, res,
-                            false,
                             &sink);
                         if (!fallback)
                         {
@@ -777,7 +713,7 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
                 My_Log{My_Log::Level::kWarning}
                     << "[ChatRequestHandler] Local output overflow detected. "
                     << "Triggering post-execution fallback to cloud." << std::endl;
-                bool fallback = genieRoutingGateway_->HandleLocalOutputOverflow(data, req, res, false);
+                bool fallback = genieRoutingGateway_->HandleLocalOutputOverflow(data, req, res);
                 if (fallback) return;
             }
         }

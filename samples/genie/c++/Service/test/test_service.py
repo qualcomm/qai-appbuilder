@@ -1253,23 +1253,7 @@ def _classify_process_down(svc, model_name):
 # 定义）是同一个预定义工具，这里复用同一个常量，不重复定义第二份。
 
 
-def _read_max_tool_call_retries(exe_dir):
-    """从构建产物目录下实际生效的 service_config.json 读取
-    routing.agent_routing.max_tool_call_retries；读取不到（或未传 exe_dir，如远程模式）时按
-    代码默认值 10 兜底（AgentRoutingConfig::max_tool_call_retries，见 model_config.h:169）。"""
-    default_retries = 10
-    if not exe_dir:
-        return default_retries
-    try:
-        cfg_path = Path(exe_dir) / "service_config.json"
-        with open(cfg_path, "r", encoding="utf-8") as f:
-            cfg = json.load(f)
-        retries = ((cfg.get("routing") or {}).get("agent_routing") or {}).get("max_tool_call_retries")
-        if isinstance(retries, int) and retries > 0:
-            return retries
-    except Exception:
-        pass
-    return default_retries
+LONG_TOOL_HISTORY_COUNT = 81
 
 
 # ============================================================================
@@ -1291,8 +1275,6 @@ class APITester:
         # （未显式传入时跟随 total_rounds，保持默认行为不变）。
         self._all_models = all_models or []
         self.multimodal_rounds = multimodal_rounds if multimodal_rounds is not None else total_rounds
-        # 构建产物目录（可选）：仅用于 test_tool_call_retry_limit_enforcement 动态读取实际生效的
-        # service_config.json 里的 max_tool_call_retries；未传入时该用例回退到代码默认值 10。
         self.exe_dir = exe_dir
 
     def _capture_log_offset(self):
@@ -1531,8 +1513,8 @@ class APITester:
         # tool_calls / function calling 协议测试（与 -n 取值无关，覆盖 model/qnn/full 等主套件）：
         # 前两个是纯请求结构触发的确定性契约测试（不依赖模型真实决策），后两个是机会性观察，
         # 触发失败时优雅降级为 skipped=True，不计入 failed（见调查结论 Tab 第 9/10 节）。
-        tests.append(("POST /v1/chat/completions (tool_call retry limit enforcement)",
-                      lambda rn=round_num: self.test_tool_call_retry_limit_enforcement(rn)))
+        tests.append(("POST /v1/chat/completions (tool_call long history accepted)",
+                      lambda rn=round_num: self.test_tool_call_long_history_accepted(rn)))
         tests.append(("POST /v1/chat/completions (tool_call round-trip with result)",
                       lambda rn=round_num: self.test_tool_call_round_trip_with_result(rn)))
         tests.append(("POST /v1/chat/completions (tool_call model invocation probe)",
@@ -2571,21 +2553,16 @@ class APITester:
             ignorable=ignorable, ignore_reason=ignore_reason
         )
 
-    def test_tool_call_retry_limit_enforcement(self, round_num):
-        """确定性契约测试(Step 4)：构造 messages 数组,最后一条 user 消息之后紧跟
-        max_tool_call_retries+1 条 role:"tool" 占位消息(超过 agent_routing.max_tool_call_retries,
-        默认10,model_config.h:169),断言返回 400 且响应体 error.message 包含
-        "maximum allowed tool call retries"。这是纯请求结构触发的确定性行为
-        (chat_request_handler.cpp:610-663 的 CountTrailingToolCalls,无论 routing.enabled
-        是 true/false 都各自实现同一段检查),不依赖模型是否真实决定调用工具。阈值优先从
-        exe_dir 下实际生效的 service_config.json 动态读取,读取不到才回退代码默认值 10,
-        不硬编码。"""
-        name = "POST /v1/chat/completions (tool_call retry limit enforcement)"
-        max_retries = _read_max_tool_call_retries(self.exe_dir)
+    def test_tool_call_long_history_accepted(self, round_num):
+        """确定性契约测试：最后一条 user 消息之后紧跟 LONG_TOOL_HISTORY_COUNT 条 role:"tool"
+        占位消息,断言服务端不按工具调用次数拒绝请求(返回 200,且响应体不含 tool_call_limit /
+        "maximum allowed tool call retries")。服务端已不设工具调用次数上限,防死循环由客户端
+        (Builder 无进展熔断)负责。"""
+        name = "POST /v1/chat/completions (tool_call long history accepted)"
         tool_messages = [
             {"role": "tool", "tool_call_id": f"call_{i}", "name": "read",
-             "content": "placeholder tool result for retry-limit probe"}
-            for i in range(max_retries + 1)
+             "content": "placeholder tool result for long-history probe"}
+            for i in range(LONG_TOOL_HISTORY_COUNT)
         ]
         body = {
             "model": self.model_name,
@@ -2602,14 +2579,12 @@ class APITester:
         passed = False
         skipped = False
         detail = f"status={r.status_code}"
-        if r.status_code == 400:
-            try:
-                data = r.json()
-                err_msg = (data.get("error") or {}).get("message", "")
-                passed = "maximum allowed tool call retries" in err_msg
-                detail = f"status=400, max_retries={max_retries}, error.message={err_msg!r}"
-            except Exception as e:
-                detail = f"status=400 但 JSON 解析失败: {e}"
+        body_text = r.text or ""
+        if r.status_code == 200:
+            limit_hit = ("tool_call_limit" in body_text
+                         or "maximum allowed tool call retries" in body_text)
+            passed = not limit_hit
+            detail = f"status=200, tool_messages={LONG_TOOL_HISTORY_COUNT}, limit_hit={limit_hit}"
         else:
             failure_reason, failure_detail = (None, None)
             if r.status_code == 500:
@@ -2620,7 +2595,7 @@ class APITester:
                 detail = f"服务端预判内存不足拒绝加载(failure_reason=insufficient_memory): {failure_detail}"
             else:
                 try:
-                    detail += f", max_retries={max_retries}, body={r.text[:200]}"
+                    detail += f", tool_messages={LONG_TOOL_HISTORY_COUNT}, body={body_text[:200]}"
                 except Exception:
                     pass
         return TestResult(

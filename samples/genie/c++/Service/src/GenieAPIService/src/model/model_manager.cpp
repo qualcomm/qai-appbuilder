@@ -1651,7 +1651,6 @@ bool ModelManager::InitializeConfig()
                         const auto &ar = r["agent_routing"];
                         routing_config_.agent_routing.sub_agent_prefer_local = ar.value("sub_agent_prefer_local", true);
                         routing_config_.agent_routing.sub_agent_allow_cloud_on_c2 = ar.value("sub_agent_allow_cloud_on_c2", true);
-                        routing_config_.agent_routing.max_tool_call_retries = ar.value("max_tool_call_retries", 10);
                     }
 
                     // 会话级路由锁定配置

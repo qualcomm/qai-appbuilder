@@ -166,7 +166,6 @@ struct RoutingConfig {
     struct AgentRoutingConfig {
         bool sub_agent_prefer_local = true;      // 子 agent 默认优先本地
         bool sub_agent_allow_cloud_on_c2 = true; // 子 agent 在 C2 时允许上云
-        int max_tool_call_retries = 10;           // 当次请求最大连续工具调用重试次数
     } agent_routing;
 
     // 会话级路由锁定配置
