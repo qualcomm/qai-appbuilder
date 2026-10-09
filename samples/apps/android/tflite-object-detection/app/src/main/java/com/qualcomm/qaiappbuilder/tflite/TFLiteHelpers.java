@@ -36,10 +36,15 @@ import java.util.stream.Collectors;
 /** Delegate creation and fallback policy for the Java TFLite Android path. */
 public final class TFLiteHelpers {
     private static final String TAG = "QaiAppBuilderTFLite";
+    private static volatile String qnnDiagnostic = "QNN NPU was not attempted";
 
     public enum DelegateType { QNN_NPU, GPUv2 }
 
     private TFLiteHelpers() {}
+
+    public static String qnnDiagnostic() {
+        return qnnDiagnostic;
+    }
 
     public static Pair<Interpreter, Map<DelegateType, Delegate>> createInterpreter(
             MappedByteBuffer model,
@@ -95,6 +100,11 @@ public final class TFLiteHelpers {
             interpreter.allocateTensors();
             return interpreter;
         } catch (RuntimeException e) {
+            if (Arrays.asList(requested).contains(DelegateType.QNN_NPU)) {
+                String detail = e.getMessage() == null
+                        ? e.getClass().getSimpleName() : e.getMessage();
+                qnnDiagnostic = "QNN NPU delegate failed while applying: " + detail;
+            }
             Log.e(TAG, "Interpreter creation failed for "
                     + Arrays.stream(requested).map(Enum::name).collect(Collectors.joining(",")), e);
             return null;
@@ -124,7 +134,11 @@ public final class TFLiteHelpers {
                 } else {
                     boolean fp16 = QnnDelegate.checkCapability(QnnDelegate.Capability.HTP_RUNTIME_FP16);
                     boolean quant = QnnDelegate.checkCapability(QnnDelegate.Capability.HTP_RUNTIME_QUANTIZED);
-                    if (!fp16 && !quant) return null;
+                    if (!fp16 && !quant) {
+                        qnnDiagnostic = "QNN NPU unavailable: HTP FP16 and quantized capabilities are absent";
+                        Log.w(TAG, qnnDiagnostic);
+                        return null;
+                    }
                     options.setBackendType(QnnDelegate.Options.BackendType.HTP_BACKEND);
                     options.setHtpPerformanceMode(
                             QnnDelegate.Options.HtpPerformanceMode.HTP_PERFORMANCE_BURST);
@@ -134,6 +148,7 @@ public final class TFLiteHelpers {
                         options.setHtpPrecision(QnnDelegate.Options.HtpPrecision.HTP_PRECISION_FP16);
                     }
                 }
+                qnnDiagnostic = "QNN NPU delegate initialized; HTP transport will be verified by interpreter creation";
                 return new QnnDelegate(options);
             }
             GpuDelegateFactory.Options options = new GpuDelegateFactory.Options();
@@ -143,6 +158,11 @@ public final class TFLiteHelpers {
             options.setSerializationParams(cacheDir, modelToken);
             return new GpuDelegate(options);
         } catch (Exception e) {
+            if (type == DelegateType.QNN_NPU) {
+                String detail = e.getMessage() == null
+                        ? e.getClass().getSimpleName() : e.getMessage();
+                qnnDiagnostic = "QNN NPU delegate unavailable: " + detail;
+            }
             Log.w(TAG, type + " delegate unavailable; trying fallback", e);
             return null;
         }

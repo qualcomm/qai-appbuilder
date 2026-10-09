@@ -25,6 +25,7 @@ public final class TFLiteModelRunner implements AutoCloseable {
     private final Interpreter interpreter;
     private final Map<TFLiteHelpers.DelegateType, Delegate> delegates;
     private final String providerMode;
+    private final String qnnDiagnostic;
     private boolean closed;
 
     public TFLiteModelRunner(Context context, String modelAsset) throws Exception {
@@ -40,10 +41,15 @@ public final class TFLiteModelRunner implements AutoCloseable {
         interpreter = created.first;
         delegates = created.second;
         providerMode = TFLiteHelpers.providerMode(delegates);
+        qnnDiagnostic = TFLiteHelpers.qnnDiagnostic();
     }
 
     public String getProviderMode() {
         return providerMode;
+    }
+
+    public String getQnnDiagnostic() {
+        return qnnDiagnostic;
     }
 
     public int getInputCount() {

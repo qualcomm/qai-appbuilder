@@ -40,10 +40,12 @@ android {
         }
     }
 
-    sourceSets["main"].assets.srcDir("src/main/assets")
-
     androidResources {
         noCompress.add("tflite")
+    }
+
+    packaging {
+        jniLibs.useLegacyPackaging = true
     }
 
     // Keep the sample buildable from a clean checkout while making the
