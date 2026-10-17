@@ -425,6 +425,8 @@ public:
         int64_t spec_post_ms = 0;
         int64_t spec_readback_ms = 0;
         int64_t spec_rounds = 0;
+        int64_t spec_local_rounds = 0;
+        int64_t spec_local_accepted = 0;
 
         // Prefill 阶段心跳计时：记录上次发送心跳的时间点
         // 每隔 kPrefillHeartbeatIntervalMs 毫秒向客户端发送一次保活消息，
@@ -799,6 +801,71 @@ public:
             llama_batch batch_tgt = llama_batch_init(params_.n_batch, 0, 1);
             bool decode_failed = false;
 
+            auto skeleton_draft = [&](llama_tokens &out)
+            {
+                static const std::string kOpen = "<tool_call>";
+                static const std::string kHead = "\n{\"name\": \"";
+                const size_t open = generated_text_buf.rfind(kOpen);
+                const size_t close = generated_text_buf.rfind("</tool_call>");
+                if (open == std::string::npos || (close != std::string::npos && close > open))
+                {
+                    return;
+                }
+                const std::string seg = generated_text_buf.substr(open + kOpen.size());
+                std::string cont;
+                if (seg.empty())
+                {
+                    cont = kHead;
+                }
+                else if (seg.size() > kHead.size() + 1 && seg.compare(0, kHead.size(), kHead) == 0 &&
+                         seg.back() == '"' && seg.find('"', kHead.size()) == seg.size() - 1)
+                {
+                    cont = ", \"arguments\": {";
+                }
+                else if (seg.size() > 2 && seg.compare(seg.size() - 2, 2, "}}") == 0)
+                {
+                    cont = "\n</tool_call>";
+                }
+                if (!cont.empty())
+                {
+                    out = common_tokenize(ctx, cont, false, true);
+                }
+            };
+
+            auto suffix_draft = [&](llama_tokens &out)
+            {
+                constexpr int kMinMatch = 10;
+                constexpr int kMaxMatch = 64;
+                const int n = (int) spec_prompt.size();
+                int best_len = 0;
+                int best_j = -1;
+                for (int j = n - 2; j >= 0; --j)
+                {
+                    if (spec_prompt[j] != id_last)
+                    {
+                        continue;
+                    }
+                    int len = 1;
+                    while (len < kMaxMatch && j - len >= 0 && spec_prompt[j - len] == spec_prompt[n - len])
+                    {
+                        ++len;
+                    }
+                    if (len > best_len)
+                    {
+                        best_len = len;
+                        best_j = j;
+                        if (len >= kMaxMatch)
+                        {
+                            break;
+                        }
+                    }
+                }
+                if (best_len >= kMinMatch)
+                {
+                    out.assign(spec_prompt.begin() + best_j + 1, spec_prompt.end());
+                }
+            };
+
             while (n_remain != 0)
             {
                 if (n_past + 1 + n_draft_max >= n_ctx)
@@ -842,6 +909,25 @@ public:
                     continue;
                 }
 
+                bool local_draft = false;
+                if (draft.empty())
+                {
+                    skeleton_draft(draft);
+                    if (draft.empty())
+                    {
+                        suffix_draft(draft);
+                    }
+                    if (!draft.empty())
+                    {
+                        if ((int) draft.size() > n_draft_max)
+                        {
+                            draft.resize(n_draft_max);
+                        }
+                        local_draft = true;
+                        ++spec_local_rounds;
+                        n_draft_proposed_total += (int64_t) draft.size();
+                    }
+                }
                 if (draft.empty())
                 {
                     common_speculative_get_draft_params(spec_.get(), kSpecSeqId) = {
@@ -898,7 +984,14 @@ public:
 
                 auto ids = common_sampler_sample_and_accept_n(smpl, ctx, draft);
                 spec_post_ms += now_ms() - t_readback1;
-                common_speculative_accept(spec_.get(), kSpecSeqId, (uint16_t) (ids.size() - 1));
+                if (local_draft)
+                {
+                    spec_local_accepted += (int64_t) ids.size() - 1;
+                }
+                else
+                {
+                    common_speculative_accept(spec_.get(), kSpecSeqId, (uint16_t) (ids.size() - 1));
+                }
                 n_draft_accepted_total += (int64_t) ids.size() - 1;
                 if (draft_accept_hist.size() < ids.size())
                 {
@@ -998,6 +1091,8 @@ public:
                  << (spec_ ? (" | draft_proposed=" + std::to_string(n_draft_proposed_total) +
                               " | draft_accepted=" + std::to_string(n_draft_accepted_total) +
                               " | spec_rounds=" + std::to_string(spec_rounds) +
+                              " | local_rounds=" + std::to_string(spec_local_rounds) +
+                              " | local_accepted=" + std::to_string(spec_local_accepted) +
                               " | draft_ms=" + std::to_string(spec_draft_ms) +
                               " | verify_ms=" + std::to_string(spec_verify_ms) +
                               " | readback_ms=" + std::to_string(spec_readback_ms) +
@@ -1046,6 +1141,8 @@ public:
                     ((double) n_draft_accepted_total / (double) n_draft_proposed_total) : 0.0;
                 metrics["draft_accept_hist"] = draft_accept_hist;
                 metrics["spec_rounds"] = spec_rounds;
+                metrics["spec_local_rounds"] = spec_local_rounds;
+                metrics["spec_local_accepted"] = spec_local_accepted;
                 metrics["spec_draft_ms"] = spec_draft_ms;
                 metrics["spec_verify_ms"] = spec_verify_ms;
                 metrics["spec_post_ms"] = spec_post_ms;
