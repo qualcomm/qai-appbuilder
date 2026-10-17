@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <functional>
 #include <optional>
 #include <memory>
@@ -43,9 +44,10 @@ struct OptimizedMessages {
     bool memo_active;
     double memo_confidence;
     size_t memo_refresh_count;
+    size_t memo_pages_total;  // 轻量分页目录当前条目数（TaskMemoBuilder::UpdateResult::pages_total 透传）
 
     OptimizedMessages() : total_tokens(0), dropped_count(0), success(false), emergency_truncated(false),
-                           memo_active(false), memo_confidence(0.0), memo_refresh_count(0) {}
+                           memo_active(false), memo_confidence(0.0), memo_refresh_count(0), memo_pages_total(0) {}
 };
 
 // ========== 消息预过滤器 ==========
@@ -159,6 +161,8 @@ private:
     // ========== 辅助方法：计算 token 数量 ==========
     size_t CountTokens(const std::string& text);
 
+    bool PrefixCacheActive();
+
     // ========== 辅助函数：批量删除旧消息直到满足预算（Phase 1 专用）==========
     void DropOldMessagesBatch(
         nlohmann::ordered_json& filtered_msg,
@@ -191,6 +195,9 @@ private:
     ContextBase* context_override_{nullptr};
     MessageCategoryStats prefilter_stats_;
     std::vector<GenieChatMessage> prefilter_dropped_messages_;
+    std::unordered_set<size_t> repeat_protected_raw_;
+    std::unordered_set<size_t> repeat_must_keep_raw_;
+    size_t repeat_retain_budget_{0};
 };
 
 #endif // MESSAGE_PRE_FILTER_H

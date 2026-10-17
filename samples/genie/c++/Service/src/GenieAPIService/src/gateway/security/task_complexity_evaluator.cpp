@@ -203,8 +203,7 @@ ComplexityResult TaskComplexityEvaluator::HeuristicEvaluate(
     // 会抛出"Cannot compress further"异常，由 HandleLocalInputOverflow 触发预路由回退到云端。
 
     // 1. 检查 最新用户提问之后的 tool_calls 数量
-    // 使用 complexity.thresholds.tool_calls（复杂度评估软阈值），
-    // 而非 agent_routing.max_tool_call_retries（防无限循环硬限制，语义不同）
+    // 使用 complexity.thresholds.tool_calls（复杂度评估软阈值）
     int tool_call_count = CountToolCallsAfterLastUser(messages);
     int tool_calls_threshold = config_.thresholds.tool_calls;  // 默认值 5，来自 service_config.json
 

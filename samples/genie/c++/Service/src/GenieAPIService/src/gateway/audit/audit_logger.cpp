@@ -62,7 +62,6 @@ void AuditLogger::Log(const AuditRecord &record)
     j["keywords_dict_reloaded"]     = record.keywords_dict_reloaded;
     j["keywords_dict_rules_count"]  = record.keywords_dict_rules_count;
     j["local_output_overflow"]      = record.local_output_overflow;
-    j["tool_call_retries_exceeded"] = record.tool_call_retries_exceeded;
     j["local_input_overflow"]       = record.local_input_overflow;
     j["sticky_route_hit"]           = record.sticky_route_hit;
     j["cloud_tier"]                 = record.cloud_tier;

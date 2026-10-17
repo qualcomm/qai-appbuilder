@@ -100,6 +100,25 @@ bool ToolCallCircuitBreakerStore::ShouldDowngradeToolDeclaration(const std::stri
     return entry.consecutive_layer3_count >= threshold_;
 }
 
+int ToolCallCircuitBreakerStore::GetConsecutiveCount(const std::string& key) const
+{
+    if (key.empty())
+        return 0;
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = cache_.find(key);
+    if (it == cache_.end())
+        return 0;
+
+    const Entry& entry = it->second.first;
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - entry.last_trigger_time).count();
+    if (elapsed >= cooldown_seconds_)
+        return 0; // 冷却期已过，视为这段系统性失败已经过去
+
+    return entry.consecutive_layer3_count;
+}
+
 void ToolCallCircuitBreakerStore::Clear()
 {
     std::lock_guard<std::mutex> lock(mutex_);

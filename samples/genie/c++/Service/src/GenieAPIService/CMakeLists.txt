@@ -26,6 +26,8 @@ list(APPEND SERVICE_SOURCES
         src/chat_request_handler/task_memo_builder.cpp
         src/chat_request_handler/tool_call_circuit_breaker_store.cpp
         src/chat_request_handler/tool_call_circuit_breaker_store_selftest.cpp
+        src/chat_request_handler/tool_call_repetition_store.cpp
+        src/chat_request_handler/tool_call_repetition_store_selftest.cpp
         src/chat_history/chat_history.cpp
         src/model/model_manager.cpp
         src/context/llama_speculative_config.cpp
@@ -210,6 +212,7 @@ if (MSVC)
             COMMAND ${CMAKE_COMMAND} -E copy_directory ${CONFIG_PATH} ${BUILD_PATH}/config
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 ${CMAKE_CURRENT_SOURCE_DIR}/../config/service_config.json
+                ${CMAKE_CURRENT_SOURCE_DIR}/../config/prompt_engineering.json
                 ${CMAKE_CURRENT_SOURCE_DIR}/../config/sensitive_keywords.json
                 ${BUILD_PATH}/config
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -224,6 +227,7 @@ elseif (UNIX)
             COMMAND ${CMAKE_COMMAND} -E copy_directory ${CONFIG_PATH} ${BUILD_PATH}/config
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 ${CMAKE_CURRENT_SOURCE_DIR}/../config/service_config.json
+                ${CMAKE_CURRENT_SOURCE_DIR}/../config/prompt_engineering.json
                 ${CMAKE_CURRENT_SOURCE_DIR}/../config/sensitive_keywords.json
                 ${BUILD_PATH}/config
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -241,6 +245,7 @@ if (BUILD_AS_DLL)
             COMMAND ${CMAKE_COMMAND} -E copy_directory ${CONFIG_PATH} ${BUILD_PATH}/config
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 ${CMAKE_CURRENT_SOURCE_DIR}/../config/service_config.json
+                ${CMAKE_CURRENT_SOURCE_DIR}/../config/prompt_engineering.json
                 ${CMAKE_CURRENT_SOURCE_DIR}/../config/sensitive_keywords.json
                 ${BUILD_PATH}/config
             COMMAND ${CMAKE_COMMAND} -E copy_if_different

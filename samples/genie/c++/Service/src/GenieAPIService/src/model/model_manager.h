@@ -116,7 +116,7 @@ public:
     enum class LoadFailureReason
     {
         kNone,               // 未记录到特定失败原因（默认值/最近一次加载成功）
-        kInsufficientMemory, // 预检查判定内存不足而拒绝加载（目前仅 MnnVerifier 会设置）
+        kInsufficientMemory, // 预检查判定内存不足而拒绝加载（MnnVerifier/GGUFVerify 均会设置）
         kOther               // 其它已知失败原因（预留，当前未细分）
     };
 

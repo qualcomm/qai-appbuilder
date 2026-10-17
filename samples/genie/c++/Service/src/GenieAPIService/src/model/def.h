@@ -26,6 +26,10 @@ struct ModelInput
     // "main" = 主 Agent（system prompt 含 "agent=main"）
     // "sub"  = 子 Agent（默认值）
     std::string agent_type_ = "sub";
+    int think_time_budget_s_ = 0;
+    int think_min_tokens_ = 0;
+    int think_max_tokens_ = 0;
+    int think_ctx_reserve_ = 0;
 };
 
 struct PromptType : public BaseEnum

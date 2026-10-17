@@ -22,29 +22,12 @@
 #include "../response/response_dispatcher.h"
 #include "../response/response_tools.h"
 #include "../gateway/gateway/gateway.h"
+#include "request_trace_writer.h"
 
 namespace fs = std::filesystem;
 
 namespace
 {
-// Counts the trailing "tool" role messages since the most recent "user" message; used to detect
-// a tool-call loop that has exceeded the configured retry limit. Shared by the routed and
-// non-routed request paths, which both need to guard against the same runaway-loop scenario.
-int CountTrailingToolCalls(const json &messages)
-{
-    int tool_call_count = 0;
-    for (auto it = messages.rbegin(); it != messages.rend(); ++it)
-    {
-        const auto &msg = *it;
-        std::string role = msg.value("role", "");
-        if (role == "tool")
-            tool_call_count++;
-        else if (role == "user")
-            break;
-    }
-    return tool_call_count;
-}
-
 // Computes the output-token budget (context window minus consumed prompt tokens, clamped between
 // the configured minimum output and the full context size) and applies it together with the
 // sampling params to the model handle. Shared by the stream and non-stream inference paths.
@@ -85,6 +68,38 @@ void ApplyOutputSizeBudget(ContextBase &handle, ModelInstanceConfig &config,
     if (top_p.is_number())
         params["top_p"] = top_p;
     handle.SetParamsByConfig(params);
+}
+void WriteRequestTrace(const std::string &request_id, const std::string &model_name, bool is_stream,
+                       const ResponseDispatcher &dispatcher, const std::shared_ptr<ContextBase> &handle,
+                       const PromptLedger &ledger, const std::string &request_body)
+{
+    auto &writer = RequestTraceWriter::GetInstance();
+    if (!writer.IsEnabled())
+    {
+        return;
+    }
+    RequestTraceWriter::Record rec;
+    rec.request_id = request_id;
+    rec.model_name = model_name;
+    rec.is_stream = is_stream;
+    rec.final_prompt = dispatcher.GetPromptText();
+    rec.raw_output = dispatcher.GetRawOutput();
+    rec.finish_reason = dispatcher.GetFinishReason();
+    if (!dispatcher.GetToolResponse().empty())
+    {
+        try
+        {
+            rec.tool_calls = ResponseTools::format_tool_calls(dispatcher.GetToolResponse());
+        }
+        catch (const std::exception &)
+        {
+            rec.tool_calls = dispatcher.GetToolResponse();
+        }
+    }
+    rec.backend_metrics = handle ? handle->GetLastQueryTraceMetrics() : json(nullptr);
+    rec.prompt_ledger = ledger.ToJson();
+    rec.request_body = request_body;
+    writer.WriteRecord(rec);
 }
 } // namespace
 
@@ -518,54 +533,12 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
 
         if (!ok) return;
         if (handled_by_cloud) return;
-
-        if (data.contains("messages") && data["messages"].is_array())
-        {
-            int tool_call_count = CountTrailingToolCalls(data["messages"]);
-
-            int max_retries = model_manager.GetRoutingConfig().agent_routing.max_tool_call_retries;
-            if (tool_call_count > max_retries)
-            {
-                My_Log{My_Log::Level::kWarning} << "Tool call retries exceeded maximum (" << max_retries << "). Stopping generation." << std::endl;
-
-                bool fallback = genieRoutingGateway_->HandleLocalOutputOverflow(data, req, res, true);
-                if (fallback) return;
-
-                json err_resp = {
-                    {"error", {
-                        {"message", "Model exceeded maximum allowed tool call retries."},
-                        {"type", "invalid_request_error"},
-                        {"code", 400}
-                    }}
-                };
-                res.status = 400;
-                res.set_content(err_resp.dump(), ResponseDispatcher::MIMETYPE_JSON);
-                return;
-            }
-        }
-    }
-    else if (data.contains("messages") && data["messages"].is_array())
-    {
-        int tool_call_count = CountTrailingToolCalls(data["messages"]);
-
-        int max_retries = model_manager.GetRoutingConfig().agent_routing.max_tool_call_retries;
-        if (tool_call_count > max_retries)
-        {
-            My_Log{My_Log::Level::kWarning} << "Tool call retries exceeded maximum (" << max_retries << "). Stopping generation." << std::endl;
-            json err_resp = {
-                {"error", {
-                    {"message", "Model exceeded maximum allowed tool call retries."},
-                    {"type", "invalid_request_error"},
-                    {"code", 400}
-                }}
-            };
-            res.status = 400;
-            res.set_content(err_resp.dump(), ResponseDispatcher::MIMETYPE_JSON);
-            return;
-        }
     }
 
     bool is_stream = get_json_value(data, "stream", false);
+    const std::string request_id = ResponseTools::generate_uuid4();
+    res.set_header("X-Genie-Request-Id", request_id);
+    const std::string trace_model_name = config.get_model_name();
 
     if (is_stream)
     {
@@ -588,7 +561,8 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
         res.set_chunked_content_provider(
             "text/event-stream",
             [this, gateway, data_copy = std::move(data_copy), &req, &res, routing_enabled,
-             dispatcher, chatHistory, handle, input_builder, loaded_model_ref]
+             dispatcher, chatHistory, handle, input_builder, loaded_model_ref, request_id, trace_model_name,
+             trace_written = false]
             (size_t offset, httplib::DataSink &sink) mutable -> bool {
 
                 // offset==0：执行 Build() + Prepare()，并发送保活状态帧
@@ -700,6 +674,12 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
                 }
 
                 bool ret = dispatcher->SendResponse(offset, &sink, nullptr, routing_enabled);
+                if (!trace_written)
+                {
+                    trace_written = true;
+                    WriteRequestTrace(request_id, trace_model_name, true, *dispatcher, handle,
+                                      input_builder->GetLedger(), req.body);
+                }
 
                 if (routing_enabled && gateway)
                 {
@@ -712,7 +692,6 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
                             ResponseTools::statusDataJson("cloud_fallback", "Switching to cloud model..."));
                         bool fallback = gateway->HandleLocalOutputOverflow(
                             const_cast<json&>(data_copy), req, res,
-                            false,
                             &sink);
                         if (!fallback)
                         {
@@ -770,6 +749,8 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
             dispatcher->Prepare(model_input, is_tool, /*is_stream=*/false, req,
                                 /*is_dll_mode=*/false, &data);
             dispatcher->SendResponse(0, nullptr, &res);
+            WriteRequestTrace(request_id, trace_model_name, false, *dispatcher, handle,
+                          input_builder->GetLedger(), req.body);
 
             if (handle && handle->was_stopped_by_output_limit()
                     && genieRoutingGateway_ && model_manager.GetRoutingConfig().enabled)
@@ -777,7 +758,7 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
                 My_Log{My_Log::Level::kWarning}
                     << "[ChatRequestHandler] Local output overflow detected. "
                     << "Triggering post-execution fallback to cloud." << std::endl;
-                bool fallback = genieRoutingGateway_->HandleLocalOutputOverflow(data, req, res, false);
+                bool fallback = genieRoutingGateway_->HandleLocalOutputOverflow(data, req, res);
                 if (fallback) return;
             }
         }

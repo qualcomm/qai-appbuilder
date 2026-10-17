@@ -103,7 +103,9 @@ std::string ResponseTools::statusDataJson(const std::string &status, const std::
 std::string ResponseTools::responseDataJson(const std::string &content,
                                             const std::string &finish_reason,
                                             bool stream,
-                                            const std::string &tool_calls_str)
+                                            const std::string &tool_calls_str,
+                                            size_t prompt_tokens,
+                                            size_t completion_tokens)
 {
     std::string id = generate_uuid4();
     std::string object = stream ? "chat.completion.chunk" : "chat.completion";
@@ -132,9 +134,9 @@ std::string ResponseTools::responseDataJson(const std::string &content,
                                                 }
                                  }}}},
             {"usage", {
-                         {"prompt_tokens", 0},
-                         {"completion_tokens", 0},
-                         {"total_tokens", 0}
+                         {"prompt_tokens", prompt_tokens},
+                         {"completion_tokens", completion_tokens},
+                         {"total_tokens", prompt_tokens + completion_tokens}
             }}
     };
     /* @formatter:on */
@@ -521,13 +523,25 @@ static std::string repairJsonOutsideStrings(const std::string &input)
         return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
     };
 
+    auto lastSignificant = [&result]() -> char {
+        for (size_t k = result.size(); k > 0; --k)
+        {
+            char ch = result[k - 1];
+            if (ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r') return ch;
+        }
+        return '\0';
+    };
+
     size_t i = 0;
     while (i < input.size())
     {
-        if (input[i] == '"')
+        bool missingOpenQuote = input[i] == '\\' && i + 1 < input.size() && input[i + 1] == '"'
+                                && (lastSignificant() == ':' || lastSignificant() == '[' || lastSignificant() == ',');
+        if (input[i] == '"' || missingOpenQuote)
         {
             // ── 进入 JSON 字符串：原样复制直到遇到未转义的闭合引号 ──
-            result += input[i++];
+            if (missingOpenQuote) result += '"';
+            else result += input[i++];
             while (i < input.size())
             {
                 if (input[i] == '\\' && i + 1 < input.size())
@@ -1559,7 +1573,9 @@ bool ResponseTools::TryLayer1Recovery(const std::string &malformedText, json &ou
                 {
                     json partial = json::object();
                     partial["name"] = salvaged_tool;
-                    partial["arguments"] = json::object();
+                    partial["arguments"] = json{{"_parse_error",
+                        "arguments were not valid JSON; re-emit the call with every string value quoted and "
+                        "\\\" \\\\ newlines escaped inside strings"}};
                     *out_partial_recovery = partial;
                 }
             }

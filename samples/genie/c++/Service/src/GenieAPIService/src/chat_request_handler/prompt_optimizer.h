@@ -260,9 +260,9 @@ private:
 
     // D2：按相关性分数 + skills 分区预算给每个技能分配披露档位。
     // 与 FilterSkillsByRelevance 的关键区别：预算耗尽时**降档**（L2→L1→L0）而不是
-    // 整条删除，只有连 L0 单行都放不进预算时才真正丢弃。零分丢弃与
-    // zero_hit_keep_all 全零分兜底的语义与 FilterSkillsByRelevance 完全一致（不另起一套
-    // 判据）；区别只在“保留下来的那些怎么展示”。返回值按分数降序（同分按名称）。
+    // 整条删除，只有连 L0 单行都放不进预算时才真正丢弃。零分候选不再物理剔除，
+    // 改为固定 L0 保底，与预算降档循环统一处理（keywords 为空 / 全零分兜底语义
+    // 仍与 FilterSkillsByRelevance 保持一致）；返回值按分数降序（同分按名称）。
     std::vector<ScoredSkill> AssignSkillDetailLevels(const RuntimeSkillMappings& all_skills,
                                                      const std::vector<std::string>& keywords,
                                                      size_t skills_token_budget) const;

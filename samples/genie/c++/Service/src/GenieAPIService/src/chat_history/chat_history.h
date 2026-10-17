@@ -37,6 +37,10 @@ public:
 
     void AddMessage(const std::string &role, const std::string &content);
 
+    void PrependToLastMessage(const std::string &prefix);
+
+    bool IsEmpty() const;
+
     void Print() const;
 
     void Limit(size_t max_size);

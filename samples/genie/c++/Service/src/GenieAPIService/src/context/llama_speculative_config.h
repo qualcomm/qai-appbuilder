@@ -37,6 +37,18 @@ struct DraftModelConfig
     int spec_draft_n_max = 0;          // 每轮投机验证最多产出的 draft token 数（对应 --spec-draft-n-max）
     double spec_draft_p_min = 0.0;     // 投机接受概率下限（对应 --spec-draft-p-min）
     bool required = true;              // drafter 加载失败时是否导致整体模型加载失败（默认 true，不静默降级）
+    std::string flash_attn;            // "on"/"off"；空 = 未配置，保持现状（投机 off）
+    std::string samplers;              // 对应 --samplers；空 = 未配置，不拼进 argv
+    float temp = 0.0f;                 // 对应 --temp；默认 0（greedy）；<0 = 不拼进 argv
+    int top_k = 1;                     // 对应 --top-k；默认 1（greedy）；<0 = 不拼进 argv
+    float top_p = -1.0f;               // 对应 --top-p；<0 = 未配置，不拼进 argv
+    int ngram_mod_n_min = -1;          // 对应 --spec-ngram-mod-n-min；<0 = 未配置，不拼进 argv
+    int ngram_mod_n_match = 16;        // 对应 --spec-ngram-mod-n-match；<0 = 不拼进 argv
+    bool ngram_mod = true;             // true = 自动给 spec_type 追加 ",ngram-mod"（已含时不重复追加）
+    int n_gpu_layers = 99;             // 对应 -ngld；0 = drafter 权重全部留在 CPU；<0 = 不拼进 argv
+    int fit_target_mib = -1;           // 对应 -fitt（每设备显存预留）；<0 = 未配置，不拼进 argv
+    int n_threads = -1;                // 对应 -t（decode 线程数）；<=0 = 未配置，保持 hardware_concurrency()
+    int n_threads_batch = -1;          // 对应 -tb（prefill 线程数）；<=0 = 未配置，跟随 n_threads 的最终值
 
     // 从模型 config.json 解析出的 json 对象中提取 draft_model 字段块。
     // 不含该字段块、字段类型不匹配、或传入的 json 本身为空/非 object 时，均返回 present=false
@@ -44,25 +56,27 @@ struct DraftModelConfig
     static DraftModelConfig ParseFrom(const json &model_config_json);
 };
 
-// 投机解码模型（Qwen3.8-27B + DFlash2）加载所需的最低系统总物理内存门槛。
-// 阈值定为 60GB 而不是标称的 64GB：远程实测的 64GB 标称硬件在 Windows 上只上报约 63.43GB
-// （固件/GPU 预留导致 GlobalMemoryStatusEx 的 ullTotalPhys 略低于标称值），60GB 留出约 4GB
-// 容差，同时足以排除 32GB/48GB 机器。
-constexpr uint64_t kDraftModelMinPhysicalMemoryBytes = 60ULL * 1024 * 1024 * 1024;
+// 投机解码模型（Qwen3.8-27B + DFlash2）加载所需内存的动态估算：主模型/草稿模型权重文件字节数之和
+// + 按配置的 context_size 估算的合并 KV cache（主模型/草稿模型各自的 GGUF block_count 直接当
+// n_layer，不识别混合架构的 full_attention_interval，更简单也更保守）+ 固定安全余量。
+// model_dir 为模型所在目录（内部通过 File::MatchFileInDir 查找其下的 .gguf 主模型文件，与
+// LLAMACppBuilder 构造函数里的 directory_iterator 扫描等效），draft_relative_path 为
+// draft_model.path 字段原值（相对 model_dir）。比较对象为可用物理内存
+// （GetAvailablePhysicalMemoryBytes()）而非总物理内存，见 GGUFVerify::CreateIfVerifiedImpl()
+// （model_manager.cpp）。
+uint64_t EstimateSpeculativeMemoryRequirement(const std::string &model_dir,
+                                               const std::string &draft_relative_path,
+                                               uint64_t context_size);
 
-// 纯函数：判断总物理内存字节数是否达到给定阈值。刻意与"调用 GlobalMemoryStatusEx 拿到真实
-// 硬件值"这一步（GetTotalPhysicalMemoryBytes()）分离，使得"内存不足应拒绝加载"这条路径可以
-// 通过注入任意测试值独立验证，不依赖能自然复现内存不足场景的真实硬件。
-inline bool MeetsPhysicalMemoryThreshold(uint64_t total_physical_bytes, uint64_t threshold_bytes)
-{
-    return total_physical_bytes >= threshold_bytes;
-}
+// 可用物理内存字节数（ullAvailPhys，与 MNNContext::GetAvailablePhysicalMemoryBytes 同一
+// GlobalMemoryStatusEx 模式）。用于投机解码（draft_model）模型加载前的动态内存门槛检查。
+uint64_t GetAvailablePhysicalMemoryBytes();
 
-// 系统总物理内存字节数（与 MNNContext::GetAvailablePhysicalMemoryBytes 同一 GlobalMemoryStatusEx
-// 模式，取 ullTotalPhys 而非 ullAvailPhys）。用于投机解码（draft_model）模型加载前的硬件门槛
-// 检查，见 GGUFVerify::CreateIfVerifiedImpl()（model_manager.cpp）。原定义于 MNNContext，迁出
-// 是因为该方法只被本文件的投机解码硬件门槛检查使用，继续放在 MNN 后端类里属反向依赖。
-uint64_t GetTotalPhysicalMemoryBytes();
+// 主模型 GGUF 的 block_count；读不到返回 0。
+uint32_t ReadGgufBlockCount(const std::string &gguf_path);
+
+// DFlash 投机模型内置的 -ot 规则：后段 FFN 权重留 CPU，attention 上 GPU。block_count 为 0 时返回空串。
+std::string BuildDflashFfnCpuOverride(uint32_t block_count);
 
 } // namespace llama_speculative
 

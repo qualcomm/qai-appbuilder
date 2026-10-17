@@ -11,6 +11,12 @@
 
 #include "context_base.h"
 
+class TargetWeightsLoadError : public std::runtime_error
+{
+public:
+    using std::runtime_error::runtime_error;
+};
+
 class LLAMACppBuilder : public ContextBase
 {
 public:
@@ -27,11 +33,18 @@ public:
 
     json HandleProfile() override;
 
-    // Fix: 实现 SetParams，使 Fix 1 的 available_output 计算对 GGUF 后端生效
     int SetParams(const std::string &key, const std::string &value) override;
 
     // Fix: 报告是否因输出 token 限制而停止生成
     bool was_stopped_by_output_limit() const override { return stopped_by_output_limit_; }
+
+    json GetLastQueryTraceMetrics() const override;
+
+    static void SetPrefixCacheEnabled(bool enabled);
+
+    static void SetPrefixHeadCheckpoints(int n);
+
+    bool UsesCrossRequestPrefixCache() const override;
 
 private:
     class Impl;

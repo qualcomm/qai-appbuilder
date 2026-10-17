@@ -68,6 +68,10 @@ public:
     // GenieContext overrides this with the actual flag.
     virtual bool was_stopped_by_output_limit() const { return false; }
 
+    virtual json GetLastQueryTraceMetrics() const { return nullptr; }
+
+    virtual bool UsesCrossRequestPrefixCache() const { return false; }
+
 protected:
     virtual int ApplyParams();
 

@@ -121,6 +121,15 @@ ChatHistory::~ChatHistory() = default;
 void ChatHistory::AddMessage(const std::string &role, const std::string &content)
 { impl_->add_message(role, content); }
 
+void ChatHistory::PrependToLastMessage(const std::string &prefix)
+{
+    if (impl_->history.empty()) return;
+    impl_->history.back().content = prefix + impl_->history.back().content;
+}
+
+bool ChatHistory::IsEmpty() const
+{ return impl_->history.empty(); }
+
 bool ChatHistory::import_from_json(const json &j)
 {
     try

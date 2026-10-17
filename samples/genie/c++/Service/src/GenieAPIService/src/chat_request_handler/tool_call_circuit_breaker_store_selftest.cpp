@@ -203,6 +203,36 @@ bool RunToolCallCircuitBreakerSelfTest(std::ostream &out)
                      !store.ShouldDowngradeToolDeclaration(key));
     }
 
+    // ── 场景7：GetConsecutiveCount() 只读旁路接口（供 TaskMemoBuilder 查询） ─────
+    {
+        ConfigureStore(/*threshold=*/3, /*cooldown_seconds=*/1);
+        store.Clear();
+
+        runner.Check("scenario7_empty_key_returns_zero", "空key应返回0", store.GetConsecutiveCount("") == 0);
+
+        const std::string unknown_key = ToolCallCircuitBreakerStore::MakeKey("scenario7_unknown_session", "modelX");
+        runner.Check("scenario7_unseen_key_returns_zero", "查无记录的key应返回0",
+                     store.GetConsecutiveCount(unknown_key) == 0);
+
+        const std::string key = ToolCallCircuitBreakerStore::MakeKey("scenario7_session", "modelX");
+        store.RecordLayer3Trigger(key);
+        store.RecordLayer3Trigger(key);
+        int c = store.RecordLayer3Trigger(key);
+        runner.Check("scenario7_count_matches_trigger_return", "GetConsecutiveCount应与RecordLayer3Trigger的返回值一致",
+                     store.GetConsecutiveCount(key) == c);
+
+        int first_read = store.GetConsecutiveCount(key);
+        int second_read = store.GetConsecutiveCount(key);
+        runner.Check("scenario7_readonly_does_not_mutate", "重复查询不应改变计数（只读，不mutate任何状态）",
+                     first_read == second_read && second_read == c);
+        runner.Check("scenario7_readonly_does_not_affect_downgrade", "只读查询不应影响ShouldDowngradeToolDeclaration的判定",
+                     store.ShouldDowngradeToolDeclaration(key));
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+        runner.Check("scenario7_post_cooldown_returns_zero", "超过cooldown_seconds后应返回0（与ShouldDowngradeToolDeclaration的自动解除熔断语义一致）",
+                     store.GetConsecutiveCount(key) == 0);
+    }
+
     // 自测结束后清空，避免残留状态影响宿主进程后续行为（若该 CLI 分支之后未直接退出）
     store.Clear();
 

@@ -55,7 +55,7 @@ void TaskMemoStore::Put(const std::string& fingerprint, const std::string& first
         return;
 
     std::lock_guard<std::mutex> lock(mutex_);
-    size_t memory_bytes = memo.dump().size() + sizeof(Entry) + 64;
+    size_t memory_bytes = memo.dump(-1, ' ', false, json::error_handler_t::replace).size() + sizeof(Entry) + 64;
 
     for (const auto& key : {fingerprint, first_msg_key})
     {

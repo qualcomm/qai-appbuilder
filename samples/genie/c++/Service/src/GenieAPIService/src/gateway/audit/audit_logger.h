@@ -66,7 +66,6 @@ public:
         int keywords_dict_rules_count = 0;
         // 事后路由回退标志
         bool local_output_overflow = false;
-        bool tool_call_retries_exceeded = false;
         // 预路由回退标志
         // true 表示本次请求因本地输入溢出（压缩后仍超出上下文窗口）触发预路由回退
         bool local_input_overflow = false;

@@ -64,6 +64,14 @@ public:
 
     static inline std::string MIMETYPE_JSON = "application/json; charset=utf-8";
 
+    const std::string &GetFinishReason() const { return last_finish_reason_; }
+
+    const std::string &GetToolResponse() const { return last_tool_response_; }
+
+    const std::string &GetRawOutput() const { return response_buffer; }
+
+    const std::string &GetPromptText() const { return model_input_.text_; }
+
 private:
     void PrintProfile();
 
@@ -152,6 +160,8 @@ private:
     // 预算/压缩流水线构造 scratch ModelInput。默认 null（json 默认构造），表示调用方
     // 未提供（如 DLL 模式），此时 Layer2 自动跳过，不影响现有行为。
     json retry_request_data_;
+    std::string last_finish_reason_;
+    std::string last_tool_response_;
 };
 
 #endif //RESPONSE_DISPATCHER_H

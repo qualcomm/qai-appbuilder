@@ -62,6 +62,12 @@ public:
     // key 为空、或查无记录时返回 false（不熔断，与改动前行为一致）。
     bool ShouldDowngradeToolDeclaration(const std::string& key) const;
 
+    // 只读旁路接口：查询该 key 当前的连续 Layer3 触发计数，供 TaskMemoBuilder 等
+    // 外部只读消费方使用。不 mutate 任何状态（不触碰 LRU 顺序、不修改条目）。
+    // 语义与 ShouldDowngradeToolDeclaration() 保持一致：key 为空、查无记录、或已超过
+    // cooldown_seconds（视为"这段系统性失败已经过去"）时统一返回 0。
+    int GetConsecutiveCount(const std::string& key) const;
+
     void Clear();
 
     size_t Size() const;

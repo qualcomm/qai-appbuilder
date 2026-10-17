@@ -106,6 +106,17 @@ bool ContextBase::SetParamsByConfig(const json &j)
                  << "value: " << value << "\n";
     }
 
+    for (const char *name : {"temperature", "temp", "top_k", "top-k", "top_p", "top-p", "min_p", "min-p", "seed"})
+    {
+        std::string alt_name = name;
+        std::replace(alt_name.begin(), alt_name.end(), '-', '_');
+        if (j.contains(name) && !sample_config.contains(name) && !sample_config.contains(alt_name))
+        {
+            My_Log{My_Log::Level::kWarning} << "request sampling param ignored (not in model sampler config): "
+                                            << name << "=" << j[name].dump() << "\n";
+        }
+    }
+
     if (!is_configured)
     {
         return true;

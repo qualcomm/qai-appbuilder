@@ -28,10 +28,23 @@ set(VS_VC_SEARCH_PATHS ${VS_VC_PATH} ${VS_VC_BUILD_TOOL_PATH})
 if (MSVC)
     set(MSVC_CLANG_COMPILER "")
     set(MSVC_CLANG_LINKER "")
+    set(MSVC_CLANG_LIBOMP_LIBRARY "")
     foreach (_vs_vc_candidate ${VS_VC_SEARCH_PATHS})
         if (NOT MSVC_CLANG_COMPILER AND EXISTS "${_vs_vc_candidate}/Tools/Llvm/ARM64/bin/clang.exe")
             set(MSVC_CLANG_COMPILER ${_vs_vc_candidate}/Tools/Llvm/ARM64/bin/clang.exe)
             set(MSVC_CLANG_LINKER ${_vs_vc_candidate}/Tools/Llvm/ARM64/bin/lld.exe)
+        endif ()
+        if (NOT MSVC_CLANG_LIBOMP_LIBRARY)
+            file(GLOB _msvc_libomp_libs "${_vs_vc_candidate}/Tools/MSVC/*/lib/arm64/libomp.lib")
+            if (_msvc_libomp_libs)
+                list(SORT _msvc_libomp_libs COMPARE NATURAL)
+                list(POP_BACK _msvc_libomp_libs MSVC_CLANG_LIBOMP_LIBRARY)
+            endif ()
+        endif ()
+    endforeach ()
+    foreach (_vs_vc_candidate ${VS_VC_SEARCH_PATHS})
+        if (NOT MSVC_CLANG_LIBOMP_LIBRARY AND EXISTS "${_vs_vc_candidate}/Tools/Llvm/ARM64/lib/libomp.lib")
+            set(MSVC_CLANG_LIBOMP_LIBRARY ${_vs_vc_candidate}/Tools/Llvm/ARM64/lib/libomp.lib)
         endif ()
     endforeach ()
     if (NOT MSVC_CLANG_COMPILER)
@@ -39,6 +52,9 @@ if (MSVC)
         # 构建阶段针对该路径给出的报错更直观、可定位。
         set(MSVC_CLANG_COMPILER ${VS_VC_PATH}/Tools/Llvm/ARM64/bin/clang.exe)
         set(MSVC_CLANG_LINKER ${VS_VC_PATH}/Tools/Llvm/ARM64/bin/lld.exe)
+    endif ()
+    if (NOT MSVC_CLANG_LIBOMP_LIBRARY)
+        set(MSVC_CLANG_LIBOMP_LIBRARY ${VS_VC_PATH}/Tools/Llvm/ARM64/lib/libomp.lib)
     endif ()
 endif ()
 
@@ -361,14 +377,27 @@ if (MSVC)
         # Libllama.cpp 改为从 Qualcomm fork(github.com/qualcomm/llama.cpp)拉取并 pin 到固定 commit，
         # 承载该 fork 新增的投机解码(speculative decoding)API；与 Libmbedtls 一致，把源码 clone 到
         # 独立的 <name>-src 目录，不再复用静态 vendor 的 ${G_EXTERNAL_DIR}/llama.cpp。
+        set(KLEIDIAI_SRC_DIR ${CMAKE_BINARY_DIR}/kleidiai-src)
+        ExternalProject_Add(KleidiAISrc
+                GIT_REPOSITORY https://github.com/ARM-software/kleidiai.git
+                GIT_TAG 77bf24e290d30988a5d5792041442af99f60ebf0
+                GIT_SHALLOW OFF
+                SOURCE_DIR ${KLEIDIAI_SRC_DIR}
+                PATCH_COMMAND ${CMAKE_COMMAND} -DKLEIDIAI_SRC_DIR=<SOURCE_DIR> -P ${CMAKE_CURRENT_LIST_DIR}/kleidiai_windows_clang.cmake
+                CONFIGURE_COMMAND ""
+                BUILD_COMMAND ""
+                INSTALL_COMMAND ""
+        )
+
         set(LLAMACPP_SRC_DIR ${CMAKE_BINARY_DIR}/llama-cpp-src)
         ExternalProject_Add(Libllama.cpp
                 GIT_REPOSITORY https://github.com/qualcomm/llama.cpp.git
-                GIT_TAG f8efe8675
-                GIT_SHALLOW ON
+                GIT_TAG 7c371551f00b766f1262d716f72c18b4f3a9ecf4
+                GIT_SHALLOW OFF
                 SOURCE_DIR ${LLAMACPP_SRC_DIR}
+                PATCH_COMMAND ${CMAKE_COMMAND} -DLLAMACPP_SRC_DIR=<SOURCE_DIR> -P ${CMAKE_CURRENT_LIST_DIR}/llama_fit_user_overrides.cmake
                 BINARY_DIR ${CMAKE_BINARY_DIR}/llama-cpp-build
-                DEPENDS OpenCLICDLoader
+                DEPENDS OpenCLICDLoader KleidiAISrc
                 CMAKE_GENERATOR Ninja
                 CMAKE_ARGS
                 -DCMAKE_SYSTEM_NAME=Windows
@@ -380,8 +409,11 @@ if (MSVC)
                 -DCMAKE_POSITION_INDEPENDENT_CODE=ON
                 -DCMAKE_PREFIX_PATH=${OPENCL_INSTALL_PREFIX}
                 # ARM64 向量化/快速数学编译选项，用于加速 ggml CPU 侧计算(Ninja + Clang 工具链)
-                "-DCMAKE_C_FLAGS=-march=armv8.7-a -fvectorize -ffp-model=fast -fno-finite-math-only"
-                "-DCMAKE_CXX_FLAGS=-march=armv8.7-a -fvectorize -ffp-model=fast -fno-finite-math-only"
+                "-DCMAKE_C_FLAGS=-march=armv8.7-a -fvectorize -ffp-model=fast -fno-finite-math-only -DNOMINMAX"
+                "-DCMAKE_CXX_FLAGS=-march=armv8.7-a -fvectorize -ffp-model=fast -fno-finite-math-only -DNOMINMAX"
+                -DOpenMP_libomp_LIBRARY=${MSVC_CLANG_LIBOMP_LIBRARY}
+                -DGGML_CPU_KLEIDIAI=ON
+                -DFETCHCONTENT_SOURCE_DIR_KLEIDIAI=${KLEIDIAI_SRC_DIR}
                 -DGGML_OPENCL=ON
                 # 预编译 Adreno OpenCL kernel 支持，详见 playbook 3.3.5
                 -DGGML_OPENCL_USE_ADRENO_BIN_KERNELS=ON

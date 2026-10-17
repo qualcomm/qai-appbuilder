@@ -44,7 +44,15 @@ struct MessageCategoryStats {
     size_t dropped_by_smart_select = 0;  // SmartSelect 阶段删除的消息数
     size_t dropped_by_token_limit = 0;   // Token 限制阶段删除的消息数
     size_t total_dropped = 0;            // 总删除消息数
-    
+
+    // 单调驱逐边界可观测性：本轮 sticky 丢弃集合（上一轮边界原样复用）的消息数，
+    // 即本轮驱逐边界下标（messages_dropped_prefix_len）；reset_reason 记录本轮
+    // 边界为何没有沿用上一轮（none=沿用成功；forced_budget=沿用后仍超预算，被迫
+    // 突破单调性继续丢；fingerprint_change=会话指纹变化/首次请求，无历史边界；
+    // message_shrink=上一轮边界超出本轮消息数，安全退回全量重算）。
+    size_t messages_dropped_prefix_len = 0;
+    std::string prefix_reset_reason = "none";
+
     void Reset() {
         system_tokens = 0;
         user_count = 0;
@@ -61,6 +69,8 @@ struct MessageCategoryStats {
         dropped_by_smart_select = 0;
         dropped_by_token_limit = 0;
         total_dropped = 0;
+        messages_dropped_prefix_len = 0;
+        prefix_reset_reason = "none";
     }
 };
 

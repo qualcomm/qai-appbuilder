@@ -105,6 +105,13 @@ std::vector<Layer1SelfTestCase> BuildTestCases()
         R"({"name": "write", "arguments": {"path": "out.md", "file_content": "# Title\n"})",
         true, "write", {{"path", json("out.md")}, {"content", json("# Title\n")}}, ToolCallFailureReason::kNone});
 
+    c.push_back({"string_value_missing_open_quote_triple_quoted_content",
+        "content 值缺开头引号、直接以 \\\" 开头（Python 三引号 docstring），且含 \\\\ 路径与 \\n 换行——应补齐开头引号后解析成功",
+        R"({"name": "write", "arguments": {"path": "C:\\WoS_AI\\run.py", "content": \"\"\"Run.\"\"\"\nQNN = r\"C:\\Q\\bin\"\nprint(f\"{'='*6}\")\n"}})",
+        true, "write", {{"path", json("C:\\WoS_AI\\run.py")},
+                        {"content", json("\"\"\"Run.\"\"\"\nQNN = r\"C:\\Q\\bin\"\nprint(f\"{'='*6}\")\n")}},
+        ToolCallFailureReason::kNone});
+
     // ── 类别5：必需参数整体缺失 ────────────────────────────────────────────
     c.push_back({"missing_required_args_edit",
         "必需参数整体缺失：edit 缺少 edits 数组",

@@ -711,7 +711,7 @@ std::vector<std::string> PromptOptimizer::BuildRelevanceKeywords(
     const size_t recent_window = model_config_.GetPromptOptimizationConfig().recent_window;
 
     // 复用 message_pre_filter 中 "最近 N 条非 system 消息视为新消息" 的窗口语义，
-    // 只取窗口内 role=="user" 的消息文本作为匹配语料
+    // 取窗口内 role=="user" 的消息文本，外加首条 user 消息（任务锚点）作为匹配语料
     size_t non_system_count = 0;
     for (const auto& msg : messages) {
         if (!msg.is_object()) continue;
@@ -721,7 +721,14 @@ std::vector<std::string> PromptOptimizer::BuildRelevanceKeywords(
     }
     size_t old_cutoff = (non_system_count > recent_window) ? (non_system_count - recent_window) : 0;
 
+    const bool anchor_enabled =
+        model_config_.GetPromptOptimizationConfig().relevance_filter.anchor_first_user_message;
+
     std::string corpus;
+    std::string anchor_text;
+    bool anchor_seen = false;
+    bool anchor_in_window = false;
+    size_t window_users = 0;
     size_t non_system_idx = 0;
     for (const auto& msg : messages) {
         if (!msg.is_object()) continue;
@@ -730,14 +737,28 @@ std::vector<std::string> PromptOptimizer::BuildRelevanceKeywords(
 
         bool is_recent = (non_system_idx >= old_cutoff);
         ++non_system_idx;
-        if (!is_recent || role != "user") continue;
+        if (role != "user") continue;
 
         // content 可能是字符串也可能是 OpenAI 多段数组，统一走双格式兼容读取
         std::string text = SecurityUtils::ExtractMessageContentText(msg);
+        if (!anchor_seen) {
+            anchor_seen = true;
+            anchor_text = text;
+            anchor_in_window = is_recent;
+        }
+        if (!is_recent) continue;
         if (!text.empty()) {
             corpus += text;
             corpus += " ";
+            ++window_users;
         }
+    }
+
+    const bool anchor_used =
+        anchor_enabled && anchor_seen && !anchor_in_window && !anchor_text.empty();
+    if (anchor_used) {
+        corpus += anchor_text;
+        corpus += " ";
     }
 
     if (corpus.empty()) {
@@ -813,7 +834,8 @@ std::vector<std::string> PromptOptimizer::BuildRelevanceKeywords(
 
     My_Log{My_Log::Level::kInfo} << "[BuildRelevanceKeywords] Extracted " << keywords.size()
                                   << " keyword(s) from recent_window=" << recent_window
-                                  << " user message(s)" << std::endl;
+                                  << " user message(s) (window_users=" << window_users
+                                  << ", anchor=" << (anchor_used ? 1 : 0) << ")" << std::endl;
     return keywords;
 }
 
@@ -982,9 +1004,9 @@ std::vector<ScoredSkill> PromptOptimizer::AssignSkillDetailLevels(
     const auto& relevance_cfg = po_cfg.relevance_filter;
     const auto& disclosure_cfg = po_cfg.skill_disclosure;
 
-    // 1) 打分。零分丢弃 / keywords 为空 / 全零分兜底 三条语义与
-    //    FilterSkillsByRelevance 完全一致（不另起一套判据），区别只在“保留下来的
-    //    那些怎么展示”。
+    // 1) 打分。keywords 为空 / 全零分兜底 两条语义与 FilterSkillsByRelevance 一致；
+    //    零分候选不再物理剔除（旧行为与 D2 自己的降档承诺矛盾，见下方第 3 步），
+    //    改为固定 L0 保底，和预算循环的降档规则统一。
     std::vector<ScoredSkill> candidates;
     candidates.reserve(all_skills.size());
     bool any_positive = false;
@@ -1005,13 +1027,6 @@ std::vector<ScoredSkill> PromptOptimizer::AssignSkillDetailLevels(
                                          "returning empty set (legacy behavior)" << std::endl;
         return result;
     }
-    if (!keywords.empty() && any_positive) {
-        // 零分丢弃（与 FilterSkillsByRelevance 一致：至少有一个正分候选时才丢弃零分项）
-        candidates.erase(std::remove_if(candidates.begin(), candidates.end(),
-                                        [](const ScoredSkill& s) { return s.score == 0; }),
-                         candidates.end());
-    }
-
     // 2) 按分数降序（同分按名称）排序，避开 unordered_map 遍历顺序不确定
     std::sort(candidates.begin(), candidates.end(), [](const ScoredSkill& a, const ScoredSkill& b) {
         if (a.score != b.score) return a.score > b.score;
@@ -1024,7 +1039,7 @@ std::vector<ScoredSkill> PromptOptimizer::AssignSkillDetailLevels(
     // tie_aware_l2=true 时把 l2_top_k 边界向后扩展到覆盖完整同分组，避免同分技能被
     // 切开导致目录截断风险；rationale 与 tie_aware_l2 默认 false 的实测理由见 prompt_optimizer.md。
     size_t effective_l2_top_k = disclosure_cfg.l2_top_k;
-    if (disclosure_cfg.tie_aware_l2 && effective_l2_top_k > 0 &&
+    if (disclosure_cfg.tie_aware_l2 && !keywords.empty() && effective_l2_top_k > 0 &&
         effective_l2_top_k < candidates.size()) {
         size_t boundary_score = candidates[effective_l2_top_k - 1].score;
         while (effective_l2_top_k < candidates.size() &&
@@ -1035,13 +1050,18 @@ std::vector<ScoredSkill> PromptOptimizer::AssignSkillDetailLevels(
 
     size_t used_tokens = 0;
     size_t dropped = 0;
+    size_t zero_score_l0 = 0;
     for (size_t idx = 0; idx < candidates.size(); ++idx) {
         ScoredSkill entry = candidates[idx];
         SkillDetailLevel desired = SkillDetailLevel::kNameOnly;
-        if (idx < effective_l2_top_k) {
-            desired = SkillDetailLevel::kFull;
-        } else if (idx < effective_l2_top_k + disclosure_cfg.l1_top_k) {
-            desired = SkillDetailLevel::kSummary;
+        if (entry.score > 0 || keywords.empty()) {
+            if (idx < effective_l2_top_k) {
+                desired = SkillDetailLevel::kFull;
+            } else if (idx < effective_l2_top_k + disclosure_cfg.l1_top_k) {
+                desired = SkillDetailLevel::kSummary;
+            }
+        } else {
+            ++zero_score_l0;
         }
 
         bool placed = false;
@@ -1078,6 +1098,8 @@ std::vector<ScoredSkill> PromptOptimizer::AssignSkillDetailLevels(
     My_Log{My_Log::Level::kInfo} << "[AssignSkillDetailLevels] " << all_skills.size()
                                   << " candidate(s) -> " << result.size()
                                   << " kept (L2=" << l2 << ", L1=" << l1 << ", L0=" << l0
+                                  << ", zero_score_l0=" << zero_score_l0
+                                  << ", empty_keywords=" << (keywords.empty() ? 1 : 0)
                                   << ", dropped=" << dropped
                                   << ") within skills_token_budget=" << skills_token_budget
                                   << " (used=" << used_tokens << ")" << std::endl;
@@ -1167,9 +1189,11 @@ nlohmann::ordered_json PromptOptimizer::FilterToolsByRelevance(
     }
 
     nlohmann::ordered_json filtered = nlohmann::ordered_json::array();
+    const auto& relevance_cfg = model_config_.GetPromptOptimizationConfig().relevance_filter;
 
     // 打分并过滤掉零分项
     std::vector<std::pair<size_t, size_t>> scored; // (tools_array 中的下标, score)
+    std::vector<size_t> protected_zero;
     scored.reserve(tools_array.size());
     for (size_t idx = 0; idx < tools_array.size(); ++idx) {
         const auto& tool = tools_array[idx];
@@ -1187,6 +1211,13 @@ nlohmann::ordered_json PromptOptimizer::FilterToolsByRelevance(
         size_t score = ScoreRelevance(name, description, keywords);
         if (score > 0) {
             scored.emplace_back(idx, score);
+        } else if (relevance_cfg.protect_core_capability_tools) {
+            for (const auto& kw : relevance_cfg.core_capability_keywords) {
+                if (str_contains(name, kw)) {
+                    protected_zero.push_back(idx);
+                    break;
+                }
+            }
         }
     }
 
@@ -1195,7 +1226,6 @@ nlohmann::ordered_json PromptOptimizer::FilterToolsByRelevance(
     // 直接把预算打爆，因此不做"全量保留"，而是按 token 预算、原始顺序（无分数可排序，
     // 保留客户端原始意图顺序）贪心 Top-K——复用与下方完全相同的预算累加方式，不发明
     // 新的截断方式。zero_hit_keep_all=false 时逐字节回退当前行为（全零分仍返回空数组）。
-    const auto& relevance_cfg = model_config_.GetPromptOptimizationConfig().relevance_filter;
     if (scored.empty()) {
         if (!relevance_cfg.zero_hit_keep_all) {
             My_Log{My_Log::Level::kInfo} << "[FilterToolsByRelevance] All " << tools_array.size()
@@ -1225,10 +1255,18 @@ nlohmann::ordered_json PromptOptimizer::FilterToolsByRelevance(
         return a.second > b.second;
     });
 
+    std::vector<size_t> ordered;
+    ordered.reserve(scored.size() + protected_zero.size());
+    for (const auto& entry : scored) {
+        ordered.push_back(entry.first);
+    }
+    for (size_t idx : protected_zero) {
+        ordered.push_back(idx);
+    }
+
     // 按 token 预算贪心保留 Top-K
     size_t used_tokens = 0;
-    for (const auto& entry : scored) {
-        size_t idx = entry.first;
+    for (size_t idx : ordered) {
         const auto& tool = tools_array[idx];
         size_t item_tokens = CountTokens(tool.dump());
         if (used_tokens + item_tokens > token_budget) {
@@ -1238,9 +1276,14 @@ nlohmann::ordered_json PromptOptimizer::FilterToolsByRelevance(
         filtered.push_back(tool);
     }
 
+    const size_t protected_kept =
+        filtered.size() > scored.size() ? filtered.size() - scored.size() : 0;
     My_Log{My_Log::Level::kInfo} << "[FilterToolsByRelevance] " << tools_array.size()
                                   << " candidate(s) -> " << filtered.size()
-                                  << " kept within token_budget=" << token_budget << std::endl;
+                                  << " kept within token_budget=" << token_budget
+                                  << " (scored=" << scored.size()
+                                  << ", protected=" << protected_kept
+                                  << "/" << protected_zero.size() << ")" << std::endl;
     return filtered;
 }
 

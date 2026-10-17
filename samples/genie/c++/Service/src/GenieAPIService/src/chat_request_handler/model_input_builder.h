@@ -21,6 +21,10 @@
 #include "task_memo_builder.h"
 #include "prompt_ledger.h"
 #include "tool_call_circuit_breaker_store.h"
+#include "tool_call_repetition_store.h"
+#include <chrono>
+#include <regex>
+#include <unordered_set>
 
 
 using json = nlohmann::ordered_json;
@@ -163,8 +167,13 @@ public:
         // 在 prompt 构建前，对超长 user 消息和末尾 tool 消息链执行 Map-Reduce 摘要，
         // 以减少本地输入溢出概率。摘要失败时静默降级，保留原文继续走现有流程。
         {
-            const auto& sum_cfg = po_cfg.long_text_summarization;
+            auto sum_cfg = po_cfg.long_text_summarization;
+            if (context_ && context_->UsesCrossRequestPrefixCache())
+            {
+                sum_cfg.summarize_tool_responses = false;
+            }
             if (sum_cfg.enabled
+                    && (sum_cfg.summarize_user_messages || sum_cfg.summarize_tool_responses)
                     && data.contains("messages")
                     && data["messages"].is_array())
             {
@@ -362,10 +371,12 @@ private:
             } else {
                 systemDefaultPrompt = optimizer_.OptimizeSystemPrompt(systemDefaultPrompt, request_data_);
             }
-            systemDefaultPrompt += BuildTaskMemoSection();
 
             auto stats = optimizer_.GetLastStats();
-            My_Log{My_Log::Level::kInfo} << "[Optimization] System prompt savings: " << stats.savings_percent << "%" << std::endl;
+            My_Log{My_Log::Level::kInfo} << "[Optimization] System prompt rebuilt: original="
+                                         << stats.original_tokens << " tok, rebuilt="
+                                         << stats.optimized_tokens << " tok, delta="
+                                         << -stats.savings_percent << "%" << std::endl;
         }
 
         // 必须在 PreFilterMessages 之前处理工具定义，确保 token 预算计算包含工具定义的 tokens
@@ -479,8 +490,24 @@ private:
             contextSize,
             "Optimization"
         );
+        if (!optimized.messages.empty()) {
+            std::string memo_body = BuildTaskMemoBody();
+            if (!memo_body.empty()) {
+                size_t memo_idx = 0;
+                while (memo_idx + 1 < optimized.messages.size() && optimized.messages[memo_idx].role == "system")
+                    ++memo_idx;
+                optimized.messages[memo_idx].content = memo_body.substr(2) + "\n\n" + optimized.messages[memo_idx].content;
+            }
+        }
         for (const auto& opt_msg : optimized.messages) {
             chat_history_.AddMessage(opt_msg.role, opt_msg.content);
+        }
+
+        if (!chat_history_.IsEmpty()) {
+            std::string memo_notes = BuildTaskMemoNotes();
+            if (!memo_notes.empty()) {
+                chat_history_.PrependToLastMessage(memo_notes);
+            }
         }
 
         return optimized;
@@ -565,17 +592,71 @@ private:
         // 都必须统一追加 /think 或 /no_think。
         // 注意：关闭 thinking 时不再注入 FILL_THINK 预填空 think 块——真机实测确认该预填内容会导致
         // qwen3 系列模型在极短用户提问下退化（原样复述上一轮对话后立即结束），/no_think 单独即可正确抑制思考。
+        bool force_empty_think_prefill = false;
+        bool force_open_think_prefill = false;
+        model_input_.think_time_budget_s_ = 0;
         if (instance_config_->is_thinking_model())
         {
             if (instance_config_->getenableThinking())
             {
                 systemDefaultPrompt += "/think";
             }
+            else if (ShouldThinkThisTurn())
+            {
+                const auto &at_cfg = instance_config_->i_model_config_.GetAdaptiveThinkingConfig();
+                systemDefaultPrompt += "/no_think";
+                force_open_think_prefill = true;
+                model_input_.think_time_budget_s_ = at_cfg.time_budget_s;
+                model_input_.think_min_tokens_ = at_cfg.min_tokens;
+                model_input_.think_max_tokens_ = at_cfg.max_tokens;
+                model_input_.think_ctx_reserve_ = at_cfg.ctx_reserve_tokens;
+            }
             else
             {
                 systemDefaultPrompt += "/no_think";
+                force_empty_think_prefill = instance_config_->is_speculative_draft_configured();
             }
         }
+
+        // Windows shell 使用提示（通用、与具体技能无关的基础设施，与 /think、/no_think 一样
+        // 必须在 PreFilterMessages 之前追加，确保两阶段使用相同的 system prompt 计算 token）：
+        // 若本次请求 tools 声明里存在 shell/命令执行类工具（按 name/description 关键词匹配），
+        // 提示模型该命令可能被路由到 cmd.exe 或 PowerShell 之一，两者链式执行/变量/引号语法不同。
+#if defined(_WIN32) || defined(__WIN32__) || defined(WIN32)
+        {
+            const auto &shell_hint_cfg = instance_config_->i_model_config_.GetWindowsShellHintConfig();
+            if (shell_hint_cfg.enabled && tools.is_array()
+                && model_input_.system_.find("## Host Environment") == std::string::npos
+                && systemDefaultPrompt.find("## Host Environment") == std::string::npos)
+            {
+                bool has_shell_tool = false;
+                for (const auto &tool : tools)
+                {
+                    if (!tool.contains("function") || !tool["function"].is_object())
+                        continue;
+                    const auto &func = tool["function"];
+                    std::string name;
+                    if (func.contains("name") && func["name"].is_string())
+                        name = func["name"].get<std::string>();
+                    std::string desc;
+                    if (func.contains("description") && func["description"].is_string())
+                        desc = func["description"].get<std::string>();
+                    for (const auto &kw : shell_hint_cfg.tool_keywords)
+                    {
+                        if (str_contains(name, kw) || str_contains(desc, kw))
+                        {
+                            has_shell_tool = true;
+                            break;
+                        }
+                    }
+                    if (has_shell_tool)
+                        break;
+                }
+                if (has_shell_tool)
+                    systemDefaultPrompt += "\n" + shell_hint_cfg.hint_text;
+            }
+        }
+#endif
 
         // 消息预过滤 + FitMessagesToContext 适配（stateless/stateful 两种模式统一执行压缩）
         OptimizedMessages optimized = PrepareFilteredMessages(msg, systemDefaultPrompt, contextSize);
@@ -600,9 +681,18 @@ private:
                               + "Ensure the model directory contains a valid prompt.json file."};
         }
 
+        std::string start_prompt_str = j["start"].get<std::string>();
+        if (force_empty_think_prefill)
+        {
+            start_prompt_str += "<think>\n\n</think>\n\n";
+        }
+        else if (force_open_think_prefill)
+        {
+            start_prompt_str += "<think>\n";
+        }
         std::string modelInputContent = chat_history_.GetUserMessage(
                                                           str_replace(j["system"], "string", systemDefaultPrompt),
-                                                          j["start"].get<std::string>());
+                                                          start_prompt_str);
 
         // 计算最终提示词的真实 token 数
         // 修复：使用注入的 context_（多模型并发安全），而非 model_config_.get_genie_model_handle()
@@ -636,6 +726,9 @@ private:
                 last_ledger_.memo_active = optimized.memo_active;
                 last_ledger_.memo_confidence = optimized.memo_confidence;
                 last_ledger_.memo_refresh_count = optimized.memo_refresh_count;
+                last_ledger_.memo_pages_total = optimized.memo_pages_total;
+                last_ledger_.messages_dropped_prefix_len = pf_stats.messages_dropped_prefix_len;
+                last_ledger_.prefix_reset_reason = pf_stats.prefix_reset_reason;
             }
 
             std::ostringstream log_stream;
@@ -789,7 +882,6 @@ private:
                     developer_msg += optimizer_.ConvertToolsToOptimizedTypeScript(tools, request_data_);
                     developer_msg += "\n} // namespace functions";
                 }
-                developer_msg += BuildTaskMemoSection();
                 developer_msg += "<|end|>";
             }
         } else {
@@ -810,7 +902,6 @@ private:
                     tools,
                     request_data_
                 );
-                developer_msg += BuildTaskMemoSection();
                 developer_msg += "<|end|>";
             }
         }
@@ -881,6 +972,21 @@ private:
                 }
             } else {
                 chat_history_.AddMessage(opt_msg.role, opt_msg.content);
+            }
+        }
+
+        if (!chat_history_.IsEmpty() && !optimized.messages.empty()) {
+            std::string memo_section = BuildTaskMemoSection();
+            if (!memo_section.empty()) {
+                chat_history_.PrependToLastMessage(memo_section);
+                std::string &last_content = optimized.messages.back().content;
+                const std::string message_tag = "<|message|>";
+                size_t tag_pos = last_content.find(message_tag);
+                if (tag_pos != std::string::npos) {
+                    last_content.insert(tag_pos + message_tag.size(), memo_section);
+                } else {
+                    last_content = memo_section + last_content;
+                }
             }
         }
 
@@ -1611,6 +1717,9 @@ private:
             last_ledger_.memo_active = optimized.memo_active;
             last_ledger_.memo_confidence = optimized.memo_confidence;
             last_ledger_.memo_refresh_count = optimized.memo_refresh_count;
+            last_ledger_.memo_pages_total = optimized.memo_pages_total;
+            last_ledger_.messages_dropped_prefix_len = pf_stats.messages_dropped_prefix_len;
+            last_ledger_.prefix_reset_reason = pf_stats.prefix_reset_reason;
         }
 
         return result;
@@ -1636,22 +1745,119 @@ private:
         return agentType;
     }
 
-    // ========== 辅助函数：从 TaskMemoStore 查表渲染 Task Memo 段落 ==========
-    // 直接从服务端权威存储渲染，不经过 PromptSectionsConfig/AppendFilteredSections 的回收逻辑。
-    // 未命中（功能关闭/存储丢失/无历史）时返回空字符串，调用方 += 空字符串逐字节回退到接入前的行为。
+    std::string BuildStandaloneRedundantToolCallNote() const
+    {
+        if (!request_data_.is_object() || !request_data_.contains("messages") || !request_data_["messages"].is_array())
+            return "";
+        const auto &cfg = instance_config_->i_model_config_.GetToolCallRepairConfig().redundant_call_guard;
+        if (!cfg.enabled)
+            return "";
+        const std::string session_key = TaskMemoBuilder::ComputeFirstMsgKey(request_data_["messages"]);
+        const std::string key = ToolCallRepetitionStore::MakeKey(session_key, instance_config_->get_model_name());
+        int count = ToolCallRepetitionStore::GetInstance().GetRepeatCount(key);
+        if (count < cfg.repeat_threshold)
+            return "";
+        return "\n\n## Task Memo\n" + TaskMemoBuilder::RenderRedundantToolCallNote(count);
+    }
+
+    std::string BuildConsecutiveToolFailureNote() const
+    {
+        if (!request_data_.is_object() || !request_data_.contains("messages") || !request_data_["messages"].is_array())
+            return "";
+        const auto &cfg = instance_config_->i_model_config_.GetToolCallRepairConfig().redundant_call_guard;
+        if (!cfg.enabled || cfg.consecutive_failure_threshold <= 0)
+            return "";
+        static const char* kFailureSignals[] = {
+            "Error:", "ERROR:", "Exception:", "Traceback (most recent call last)",
+            "No such file or directory", "Permission denied",
+            "command not found", "is not recognized as", "Failed to", "failed to", "Failed:",
+        };
+        const auto& messages = request_data_["messages"];
+        int streak = 0;
+        std::string tool_name;
+        for (auto it = messages.rbegin(); it != messages.rend(); ++it) {
+            const json& msg = *it;
+            if (!msg.is_object())
+                break;
+            std::string role = msg.value("role", "");
+            if (role == "assistant")
+                continue;
+            if (role != "tool")
+                break;
+            std::string content = get_json_value<std::string>(msg, "content", "");
+            bool bad = content.find_first_not_of(" \t\r\n") == std::string::npos;
+            if (!bad) {
+                for (const char* sig : kFailureSignals) {
+                    if (content.find(sig) != std::string::npos) { bad = true; break; }
+                }
+            }
+            if (!bad)
+                break;
+            ++streak;
+            if (tool_name.empty())
+                tool_name = msg.value("name", "");
+        }
+        if (streak < cfg.consecutive_failure_threshold)
+            return "";
+        std::ostringstream oss;
+        oss << "Note: the last " << streak << " tool result(s)"
+            << (tool_name.empty() ? "" : (" (e.g. `" + tool_name + "`)"))
+            << " came back empty or failed. Stop retrying the same approach with minor variations; "
+               "use a different tool or a path/fact you already confirmed, or report the blocker instead.\n";
+        return "\n\n## Task Memo\n" + oss.str();
+    }
+
+    bool ShouldThinkThisTurn() const
+    {
+        const auto &at_cfg = instance_config_->i_model_config_.GetAdaptiveThinkingConfig();
+        if (!at_cfg.enabled || at_cfg.time_budget_s <= 0)
+            return false;
+        if (!request_data_.is_object() || !request_data_.contains("messages") || !request_data_["messages"].is_array())
+            return false;
+        const auto &messages = request_data_["messages"];
+        if (messages.empty() || !messages.back().is_object() || messages.back().value("role", "") != "tool")
+            return false;
+        std::string reason;
+        const std::string content = get_json_value<std::string>(messages.back(), "content", "");
+        static const std::regex kExitCode(R"(exit code:\s*(-?\d+))", std::regex::icase);
+        std::smatch m;
+        if (std::regex_search(content, m, kExitCode) && m[1].str() != "0")
+            reason = "exit_code=" + m[1].str();
+        const auto &rg_cfg = instance_config_->i_model_config_.GetToolCallRepairConfig().redundant_call_guard;
+        if (reason.empty() && rg_cfg.enabled)
+        {
+            const std::string key = ToolCallRepetitionStore::MakeKey(
+                TaskMemoBuilder::ComputeFirstMsgKey(messages), instance_config_->get_model_name());
+            const int count = ToolCallRepetitionStore::GetInstance().GetRepeatCount(key);
+            if (count >= rg_cfg.repeat_threshold)
+                reason = "repeat_count=" + std::to_string(count);
+        }
+        if (reason.empty())
+            return false;
+        My_Log{} << "[AdaptiveThinking] enabling /think for this turn: " << reason << std::endl;
+        return true;
+    }
+
     std::string BuildTaskMemoSection() const
     {
         if (!request_data_.is_object() || !request_data_.contains("messages") || !request_data_["messages"].is_array()) {
             return "";
         }
+        std::string consecutive_failure_note = BuildConsecutiveToolFailureNote();
+
         auto memo_entry = task_memo_builder_.Lookup(request_data_["messages"]);
         if (!memo_entry) {
-            return "";
+            std::string standalone = BuildStandaloneRedundantToolCallNote();
+            return !standalone.empty() ? standalone + consecutive_failure_note
+                                        : (consecutive_failure_note.empty() ? "" : consecutive_failure_note);
         }
 
         std::string rendered = TaskMemoBuilder::Render(*memo_entry);
-        if (rendered.empty())
-            return "";
+        if (rendered.empty()) {
+            std::string standalone = BuildStandaloneRedundantToolCallNote();
+            return !standalone.empty() ? standalone + consecutive_failure_note
+                                        : (consecutive_failure_note.empty() ? "" : consecutive_failure_note);
+        }
 
         const auto& po_cfg = instance_config_->i_model_config_.GetPromptOptimizationConfig();
         double ratio = po_cfg.task_memo.token_budget_ratio;
@@ -1664,7 +1870,36 @@ private:
                 rendered = TaskMemoBuilder::Render(*memo_entry, budget_bytes);
             }
         }
+        return "\n\n" + rendered + consecutive_failure_note;
+    }
+
+    std::string BuildTaskMemoBody() const
+    {
+        if (!request_data_.is_object() || !request_data_.contains("messages") || !request_data_["messages"].is_array())
+            return "";
+        auto memo_entry = task_memo_builder_.Lookup(request_data_["messages"]);
+        if (!memo_entry)
+            return "";
+        std::string rendered = TaskMemoBuilder::Render(*memo_entry);
+        if (rendered.empty())
+            return "";
+        const auto& po_cfg = instance_config_->i_model_config_.GetPromptOptimizationConfig();
+        double ratio = po_cfg.task_memo.token_budget_ratio;
+        if (ratio > 0.0) {
+            double bytes_per_token = EstimateCjkAwareBytesPerToken(
+                rendered, po_cfg.fidelity.cjk_bytes_per_token, po_cfg.fidelity.ascii_bytes_per_token);
+            size_t budget_bytes = static_cast<size_t>(
+                instance_config_->get_context_size() * ratio * bytes_per_token);
+            if (budget_bytes > 0 && rendered.size() > budget_bytes) {
+                rendered = TaskMemoBuilder::Render(*memo_entry, budget_bytes);
+            }
+        }
         return "\n\n" + rendered;
+    }
+
+    std::string BuildTaskMemoNotes() const
+    {
+        return BuildStandaloneRedundantToolCallNote() + BuildConsecutiveToolFailureNote();
     }
 
     // ========== 辅助函数：调用 FitMessagesToContext 并统一处理错误和日志 ==========
@@ -1694,7 +1929,56 @@ private:
         My_Log{My_Log::Level::kInfo} << "[" << log_prefix << "] Success - Messages: "
                                       << optimized.messages.size()
                                       << ", Tokens: " << optimized.total_tokens << std::endl;
+        AnnotateRepeatedReads(optimized, messages);
         return optimized;
+    }
+
+    // 通用"重复读取"提示：只对幸存在当前上下文窗口内（未被驱逐）的 read 类工具结果生效——
+    // 已被驱逐的那次读取由 TaskMemoBuilder 的 read_files 索引承接，不在这里重复提示，
+    // 两者判定依据天然互斥（这里只看 FitMessagesToContext 之后仍存活的消息）。
+    //
+    // 重复判定必须基于本次请求的完整原始消息列表（驱逐之前），不能基于幸存消息重新计算：
+    // 否则当某个 path 的"第一次读取"消息在后续某轮被驱逐、而它的重复读取消息幸存下来时，
+    // 该幸存消息会从"已标注"变为"未标注"（反之亦然），导致同一条消息在前缀复用区的文本
+    // 跨轮不一致，使前缀命中率归零。做法：先在完整原始列表上一次性判定每条 tool 消息是否
+    // 为重复，再用双指针按内容匹配回幸存列表，只对"本来就是重复"的幸存消息追加提示。
+    void AnnotateRepeatedReads(OptimizedMessages& optimized, const std::vector<GenieChatMessage>& full_messages) const
+    {
+        std::unordered_set<std::string> seen_paths;
+        std::unordered_set<const GenieChatMessage*> duplicate_messages;
+        std::string last_assistant_content;
+        for (const auto& m : full_messages) {
+            if (m.role == "assistant") {
+                last_assistant_content = m.content;
+            } else if (m.role == "tool") {
+                std::string path = TaskMemoBuilder::ExtractReadToolPath(last_assistant_content);
+                if (path.empty())
+                    continue;
+                if (seen_paths.count(path)) {
+                    duplicate_messages.insert(&m);
+                } else {
+                    seen_paths.insert(path);
+                }
+            }
+        }
+
+        size_t full_idx = 0;
+        for (auto& m : optimized.messages) {
+            if (m.role != "tool")
+                continue;
+            while (full_idx < full_messages.size() &&
+                   !(full_messages[full_idx].role == m.role && full_messages[full_idx].content == m.content)) {
+                ++full_idx;
+            }
+            if (full_idx >= full_messages.size())
+                break;
+            if (duplicate_messages.count(&full_messages[full_idx])) {
+                m.content += "\n\n[Note: this file was already read at an earlier turn and its "
+                             "result is still present earlier in this context; re-reading it was "
+                             "not necessary unless the file may have changed since then.]";
+            }
+            ++full_idx;
+        }
     }
 
     // ========== 辅助方法：计算并打印 FitMessagesToContext 统计信息 ==========
@@ -1795,7 +2079,8 @@ private:
     // ── RunSummarizationInference ─────────────────────────────────────────────
     // 为 Phase -1 摘要化执行单次同步推理。
     // 直接构造 ModelInput 并调用 context_->Query()，不走 Build() 主流程（避免递归）。
-    // 推理失败或输出为空时返回空串，调用方保留原文。
+    // 推理失败、输出为空、或单次推理超过内部墙钟超时（见函数体 kSummarizationInferenceTimeout）
+    // 时均返回空串，调用方保留原文。
     //
     // prefill_heartbeat：可选的 prefill 阶段心跳回调，在 prefill 期间定期调用。
     // 用于在摘要推理的 prefill 阶段向客户端发送保活帧，防止 read 超时。
@@ -1835,17 +2120,29 @@ private:
         std::string result;
         bool success = false;
 
+        // Fix: 单 chunk 摘要子推理的墙钟超时保护，见同名 .notes.md「MapChunk 无超时保护」条目。
+        // static（而非普通 local）constexpr：具有静态存储期，lambda 内直接访问不需要出现在捕获列表里，
+        // 否则 MSVC 严格模式报 C3493（GCC/Clang 对此更宽松，但本项目目标平台是 MSVC/ARM64）。
+        static constexpr auto kSummarizationInferenceTimeout = std::chrono::seconds(300);
+        const auto infer_start_time = std::chrono::steady_clock::now();
+        bool timed_out = false;
+
         try
         {
             success = context_->Query(
                 sum_input,
-                [&result](std::string& token) -> bool {
+                [&result, &timed_out, infer_start_time](std::string& token) -> bool {
                     // [调试] 流式打印每个 token 到日志（与主推理的 genie_callback 风格一致）
                     if (!token.empty())
                     {
                         My_Log{}.original(true) << token;
                     }
                     result += token;
+                    if (std::chrono::steady_clock::now() - infer_start_time > kSummarizationInferenceTimeout)
+                    {
+                        timed_out = true;
+                        return false;
+                    }
                     return true;
                 },
                 prefill_heartbeat
@@ -1903,6 +2200,17 @@ private:
                 }
             }
             My_Log{} << "--- [Summarization] Token Summary End ---" << std::endl;
+        }
+
+        if (timed_out)
+        {
+            My_Log{My_Log::Level::kWarning}
+                << "[RunSummarizationInference] Inference exceeded "
+                << kSummarizationInferenceTimeout.count() << "s budget ("
+                << result.size() << " chars generated so far, likely stuck mid-<think> "
+                << "self-correction loop), aborting and falling back to original content"
+                << std::endl;
+            return "";
         }
 
         if (!success)
