@@ -67,6 +67,15 @@ echo [ERROR] --mirror needs auto, official or cn
 exit /b 2
 :parsed
 
+REM ---- timing: :tick <label> prints time since the previous checkpoint ---------
+set "TIMING_FILE=data\downloads\_timing.txt"
+set "_TOTAL_CS=0"
+set "_MAXD=-1"
+set "_MAXL="
+if not exist "data\downloads" mkdir "data\downloads"
+if exist "%TIMING_FILE%" del /f /q "%TIMING_FILE%"
+call :tick_init
+
 REM ---- architecture (same priority as Setup.bat: flag > host_arch file > detect) --
 set "HOST_ARCH="
 if defined FORCED_ARCH set "HOST_ARCH=%FORCED_ARCH%"
@@ -129,6 +138,7 @@ if exist "%DL_DIR%\_net_env.bat" (
 ) else (
     echo [WARN] net_config.ps1 produced no settings; continuing with defaults.
 )
+call :tick "1  network preflight"
 
 REM uv: trust the corporate certificate store, generous timeouts for slow links.
 set "UV_SYSTEM_CERTS=1"
@@ -160,6 +170,7 @@ del /f /q "%DL_DIR%\_uv_tmp.zip" 2>nul
 set "PATH=%ROOT_DIR%data\bin\uv;%PATH%"
 "%UV_EXE%" --version
 if errorlevel 1 goto :fail_uv
+call :tick "2  uv (download+unpack, or reuse)"
 
 REM ===========================================================================
 REM  Step 3: Python 3.13 + venv
@@ -174,6 +185,7 @@ if errorlevel 1 (
 ) else (
     echo [SKIP] %PY_SPEC% already installed.
 )
+call :tick "3a Python 3.13 interpreter"
 set "_VENV_OK=0"
 if exist "%VPY%" if exist "%VENV_DIR%\Scripts\activate.bat" (
     "%VPY%" -m pip --version >nul 2>&1
@@ -189,6 +201,7 @@ if "%_VENV_OK%"=="1" (
 call "%VENV_DIR%\Scripts\activate.bat"
 set "PYTHONPATH=%ROOT_DIR%src;%ROOT_DIR%"
 "%VPY%" "%ROOT_DIR%scripts\setup\install_pycache_pth.py" --venv "%VENV_DIR%" --repo-root "%ROOT_DIR%." >nul 2>&1
+call :tick "3b venv create/check"
 
 REM ===========================================================================
 REM  Step 4: vendor bundle (ARM64 only) + guard DLLs
@@ -198,12 +211,15 @@ echo -- Step 4/7: vendor wheels / native helpers -------------------------------
 set "USE_VENDOR=0"
 if /i "%HOST_ARCH%"=="arm64" (
     if not exist "vendor\whl\qai_appbuilder-%QAI_APPBUILDER_VERSION%-cp313-cp313-win_arm64.whl" call :fetch_vendor
+    call :tick "4a vendor-deps bundle (arm64)"
     if exist "vendor\whl\qai_appbuilder-%QAI_APPBUILDER_VERSION%-cp313-cp313-win_arm64.whl" set "USE_VENDOR=1"
 ) else (
     echo [SKIP] x64: ARM64 vendor wheels / openblas are not needed ^(saves ~190MB^).
 )
 call :fetch_guard
+call :tick "4b guard.zip"
 if "%WITH_ASTGREP%"=="1" call :fetch_astgrep
+if "%WITH_ASTGREP%"=="1" call :tick "4c ast-grep"
 
 REM ===========================================================================
 REM  Step 5: Python dependencies
@@ -218,6 +234,7 @@ if "%USE_VENDOR%"=="1" (
     echo [INFO] installing vendored ARM64 wheels ^(--no-deps^)...
     call :install_vendor_whls
     if errorlevel 1 goto :fail_install
+    call :tick "5a vendored arm64 wheels"
     set "_FL=--find-links vendor\whl"
     if exist "data\downloads\_constraints.txt" set "_FL=--find-links vendor\whl -c data\downloads\_constraints.txt"
 )
@@ -230,20 +247,24 @@ echo [INFO] uv pip install -r pyproject.toml %_EXTRAS% ^(index=%UV_DEFAULT_INDEX
 "%UV_EXE%" pip install -r pyproject.toml %_EXTRAS% %_FL%
 if errorlevel 1 goto :fail_install
 :deps_done
+call :tick "5b pyproject deps (uv pip install)"
 
 if "%WITH_BROWSER%"=="1" (
     echo [INFO] installing Playwright Chromium ^(non-fatal^)...
     "%VPY%" -m playwright install chromium
     if errorlevel 1 echo [WARN] Chromium download failed; browser tools stay disabled. Retry later with --with-browser.
+    call :tick "5c Playwright Chromium"
 )
 
-REM qai_appbuilder (inference binding). ARM64: vendored wheel. x64: GitHub release, then PyPI.
+REM qai_appbuilder (inference binding). ARM64: vendored wheel. x64: PyPI, then GitHub release.
 call :install_qai_appbuilder
+call :tick "5d qai_appbuilder wheel"
 
 if "%WITH_APPS%"=="1" (
     echo [INFO] installing App Builder pack deps ^(non-fatal^)...
     "%VPY%" -m scripts.setup.install_app_builder_deps
     if errorlevel 1 echo [WARN] some App Builder pack deps failed; re-run with --with-apps later.
+    call :tick "5e App Builder pack deps"
 )
 
 REM ===========================================================================
@@ -258,6 +279,7 @@ if errorlevel 1 (
     echo [OK]   data\ initialised.
 )
 if exist "data\config\qairt_env.json" "%VPY%" "scripts\setup\patch_qairt_env_arch.py" "data\config\qairt_env.json" "%HOST_ARCH%" >nul 2>&1
+call :tick "6  data init (install pipeline)"
 
 REM ===========================================================================
 REM  Step 7: verify
@@ -270,6 +292,7 @@ set "_BAD=0"
 "%VPY%" -c "import fastapi, uvicorn, structlog, sqlalchemy, paramiko; print('[OK]   server deps import')" || set "_BAD=1"
 "%VPY%" -c "import apps.cli.serve; print('[OK]   apps.cli.serve import')" || set "_BAD=1"
 "%VPY%" -c "import qai_appbuilder; print('[OK]   qai_appbuilder', getattr(qai_appbuilder,'__version__','?'))" 2>nul || echo [WARN] qai_appbuilder not importable ^(NPU inference unavailable; Model Builder UI still starts^).
+call :tick "7  verify (imports)"
 if "%_BAD%"=="1" goto :fail_verify
 
 if not exist "data\config" mkdir "data\config"
@@ -280,8 +303,10 @@ if "%WITH_BUILDER%"=="1" (
     echo.
     echo -- Builder: delegating QAIRT SDK / x64 converter venv / VS tools to Setup.bat --builder ...
     call "%ROOT_DIR%Setup.bat" --builder --arch %HOST_ARCH% --no-pause
+    call :tick "8  builder (Setup.bat --builder)"
 )
 
+call :timing_summary "OK"
 echo.
 echo  ================================================================
 echo      setup_env finished ^(arch=%HOST_ARCH%, profile=%QAI_NET_PROFILE%^)
@@ -314,6 +339,8 @@ goto :fail
 echo [ERROR] verification failed - see the lines above.
 goto :fail
 :fail
+call :tick "(failed step, time until error)"
+call :timing_summary "FAILED"
 if "%NO_PAUSE%"=="0" pause
 endlocal & exit /b 1
 
@@ -338,6 +365,60 @@ exit /b 0
 REM ===========================================================================
 REM  Subroutines
 REM ===========================================================================
+
+REM ---------------------------------------------------------------------------
+REM Timing helpers. Centisecond clock from %TIME% (locale-safe: ':' '.' ',' delimiters,
+REM leading blank -> 0, 1xx-100 trick avoids octal parsing of 08/09). Midnight wrap handled.
+REM ---------------------------------------------------------------------------
+:clock
+set "_CT=%TIME: =0%"
+for /f "tokens=1-4 delims=:.," %%a in ("%_CT%") do set /a "_NOW=((1%%a-100)*3600+(1%%b-100)*60+(1%%c-100))*100+(1%%d-100)"
+exit /b 0
+
+:tick_init
+call :clock
+set "_LAST=%_NOW%"
+set "_FIRST=%_NOW%"
+exit /b 0
+
+REM :tick <label>  - time since previous checkpoint, attributed to <label>
+:tick
+call :clock
+set /a "_D=_NOW-_LAST"
+if %_D% LSS 0 set /a "_D+=8640000"
+set "_LAST=%_NOW%"
+set /a "_TOTAL_CS+=_D"
+if %_D% GTR %_MAXD% ( set "_MAXD=%_D%" & set "_MAXL=%~1" )
+call :fmt %_D%
+>>"%TIMING_FILE%" echo %_FMT%  %~1
+echo [TIME] %_FMT%  %~1
+exit /b 0
+
+REM :fmt <centiseconds> -> _FMT like "  1m 23.4s" or "    12.3s"
+:fmt
+set /a "_FS=%~1/100, _FT=(%~1%%100)/10, _FM=_FS/60, _FSS=_FS%%60"
+if %_FM% GTR 0 ( set "_FMT=%_FM%m %_FSS%.%_FT%s" ) else ( set "_FMT=%_FSS%.%_FT%s" )
+set "_FMT=        %_FMT%"
+set "_FMT=%_FMT:~-9%"
+exit /b 0
+
+REM :timing_summary <OK|FAILED> - ranked table + append to data\logs\setup_env_timing.log
+:timing_summary
+if not exist "%TIMING_FILE%" exit /b 0
+call :fmt %_TOTAL_CS%
+echo.
+echo  -------------------- time per step (%~1) --------------------
+type "%TIMING_FILE%"
+echo  ------------------------------------------------------------
+echo  %_FMT%  TOTAL
+if not defined _MAXL goto :ts_nomax
+call :fmt %_MAXD%
+echo  slowest: %_FMT%  %_MAXL%
+:ts_nomax
+if not exist "data\logs" mkdir "data\logs"
+>>"data\logs\setup_env_timing.log" echo === %DATE% %TIME%  arch=%HOST_ARCH%  profile=%QAI_NET_PROFILE%  result=%~1  total_cs=%_TOTAL_CS%
+>>"data\logs\setup_env_timing.log" type "%TIMING_FILE%"
+exit /b 0
 
 REM :dl <url> <outfile> <minsize> <attempt-timeout-sec>
 REM   Honors QAI_GITHUB_MIRROR, HTTPS_PROXY, DL_ZIPTEST=1, and uses aria2c if present.
