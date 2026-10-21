@@ -308,7 +308,7 @@ set "_BAD=0"
 "%VPY%" -c "import qai; print('[OK]   qai from', qai.__file__)" || set "_BAD=1"
 "%VPY%" -c "import fastapi, uvicorn, structlog, sqlalchemy, paramiko; print('[OK]   server deps import')" || set "_BAD=1"
 "%VPY%" -c "import apps.cli.serve; print('[OK]   apps.cli.serve import')" || set "_BAD=1"
-"%VPY%" -c "import qai_appbuilder; print('[OK]   qai_appbuilder', getattr(qai_appbuilder,'__version__','?'))" 2>nul || echo [WARN] qai_appbuilder not importable ^(NPU inference unavailable; Model Builder UI still starts^).
+call :check_qab
 call :tick "7  verify (imports)"
 if "%_BAD%"=="1" goto :fail_verify
 
@@ -607,6 +607,28 @@ call :dl "https://github.com/ast-grep/ast-grep/releases/download/0.45.1/%ASTGREP
 if errorlevel 1 ( echo [WARN] ast-grep unavailable; ast_grep / ast_edit tools disabled. & exit /b 0 )
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; Expand-Archive -Path '%DL_DIR%\ast-grep.zip' -DestinationPath '%DL_DIR%\_ag_tmp' -Force; foreach ($n in 'ast-grep.exe','sg.exe') { $s=Join-Path '%DL_DIR%\_ag_tmp' $n; if (Test-Path $s) { Copy-Item $s 'vendor\bin\%HOST_ARCH%' -Force } }; Remove-Item '%DL_DIR%\_ag_tmp' -Recurse -Force"
 del /f /q "%DL_DIR%\ast-grep.zip" 2>nul
+exit /b 0
+
+REM :check_qab - import qai_appbuilder and, when that fails, SHOW the real error (it used to be hidden by 2^>nul).
+REM   Not fatal: the Model Builder UI starts without it, only NPU inference is unavailable.
+:check_qab
+set "_QF=%DL_DIR%\_qab_check.txt"
+"%VPY%" -c "import qai_appbuilder as q; print('[OK]   qai_appbuilder', getattr(q,'__version__','?'))" >"%_QF%" 2>&1
+if not errorlevel 1 ( type "%_QF%" & del /f /q "%_QF%" 2>nul & exit /b 0 )
+echo [WARN] qai_appbuilder not importable ^(NPU inference unavailable; Model Builder UI still starts^). Python said:
+type "%_QF%"
+findstr /i /c:"DLL load failed" "%_QF%" >nul 2>&1 && (
+    echo [WARN] A native DLL of qai_appbuilder did not load. Usual causes:
+    echo [WARN]   * missing / old Microsoft Visual C++ runtime: install https://aka.ms/vs/17/release/vc_redist.%HOST_ARCH%.exe
+    echo [WARN]   * an Application Control / AppLocker / antivirus policy blocked the unsigned .pyd/.dll under
+    echo [WARN]     %VENV_DIR%\Lib\site-packages\qai_appbuilder ^(Event Viewer: Microsoft-Windows-CodeIntegrity^)
+    echo [WARN]   * wrong architecture: this venv is %HOST_ARCH%; the wheel must match ^(win_%HOST_ARCH:x64=amd64%^)
+)
+findstr /i /c:"No module named" "%_QF%" >nul 2>&1 && (
+    echo [WARN] A Python dependency of qai_appbuilder is missing: install it with
+    echo [WARN]     "%UV_EXE%" pip install --python "%VPY%" pyyaml "numpy<=2.4.4"
+)
+echo [WARN] Full output saved in %_QF% ^(also re-check with: Console.bat  then  import qai_appbuilder^)
 exit /b 0
 
 REM :install_vendor_whls - ARM64 only; same 14 wheels / pins as Setup.bat Step 4a.
