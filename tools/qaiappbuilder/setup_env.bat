@@ -309,10 +309,17 @@ if "%WITH_BUILDER%"=="1" (
 )
 
 call :timing_summary "OK"
+if not exist "frontend\dist\index.html" (
+    echo.
+    echo [WARN] frontend\dist is missing ^(it is git-ignored, so a fresh clone has no WebUI^).
+    echo [WARN] Start.bat will serve the API only and GET / returns 404. Build it once with:
+    echo [WARN]     build_frontend.bat     ^(installs Node.js + pnpm if needed, ~1-2 min^)
+)
 echo.
 echo  ================================================================
 echo      setup_env finished ^(arch=%HOST_ARCH%, profile=%QAI_NET_PROFILE%^)
 echo  ================================================================
+echo   Build the WebUI:  build_frontend.bat   ^(only if frontend\dist is missing^)
 echo   Run the server :  Start.bat
 echo   CLI            :  qai.bat --help
 echo   Python shell   :  Console.bat

@@ -17,19 +17,22 @@
       UV_PYTHON_INSTALL_MIRROR               python-build-standalone mirror
       PLAYWRIGHT_DOWNLOAD_HOST               Chromium mirror
       QAI_GITHUB_MIRROR                      URL prefix for github.com release assets
+      NPM_CONFIG_REGISTRY / COREPACK_NPM_REGISTRY   npm registry mirror (pnpm, corepack)
+      QAI_NODE_MIRROR                        Node.js dist mirror (build_frontend.bat)
       QAI_NET_PROFILE                        official | cn
 
 .PARAMETER Proxy
     Explicit proxy URL. Default: HTTPS_PROXY/HTTP_PROXY env, else the system proxy.
 .PARAMETER Mirror
-    auto (default) | official | cn.  auto = use cn mirrors only when pypi.org
-    is unreachable but the cn PyPI mirror is reachable.
+    auto (default) | official | cn.  auto = use cn mirrors only when the official
+    source of the probed groups (pypi.org, or nodejs.org/npmjs for the frontend
+    group) is unreachable but the matching cn mirror is reachable.
 .PARAMETER Emit
     Path of the .bat fragment to write.
 .PARAMETER NoProbe
     Skip the connectivity probe (auto then behaves like official).
 .PARAMETER Need
-    Comma list of probe groups: core,browser,builder. Default core.
+    Comma list of probe groups: core,browser,builder,frontend. Default core.
 #>
 param(
     [string]$Proxy = '',
@@ -48,6 +51,8 @@ $CN = @{
     PyStandalone = 'https://registry.npmmirror.com/-/binary/python-build-standalone/'
     Playwright = 'https://cdn.npmmirror.com/binaries/playwright'
     GitHub     = 'https://ghfast.top/'
+    Npm        = 'https://registry.npmmirror.com'
+    Node       = 'https://registry.npmmirror.com/-/binary/node'
 }
 
 # ---- proxy resolution ------------------------------------------------------
@@ -90,6 +95,10 @@ $groups = @{
         @('softwarecenter.qualcomm.com (QAIRT)', 'https://softwarecenter.qualcomm.com/'),
         @('python.org (signed Python)',          'https://www.python.org/')
     )
+    frontend = @(
+        @('nodejs.org (Node.js zip)',   'https://nodejs.org/dist/index.json'),
+        @('registry.npmjs.org (npm)',   'https://registry.npmjs.org/pnpm')
+    )
 }
 $cnProbe = @(
     @('tuna PyPI mirror',     'https://pypi.tuna.tsinghua.edu.cn/simple/pip/'),
@@ -112,7 +121,9 @@ if (-not $NoProbe) {
     foreach ($g in ($Need -split ',')) {
         if ($groups.ContainsKey($g.Trim())) { foreach ($e in $groups[$g.Trim()]) { [void](Run-Probe $e[0] $e[1]) } }
     }
-    $pypiOk = $results['pypi.org (PyPI)'].Ok -and $results['files.pythonhosted.org'].Ok
+    # Only judge a group that was actually probed (build_frontend probes frontend only).
+    if ($results.ContainsKey('pypi.org (PyPI)')) { $pypiOk = $results['pypi.org (PyPI)'].Ok -and $results['files.pythonhosted.org'].Ok }
+    if ($results.ContainsKey('registry.npmjs.org (npm)')) { $pypiOk = $pypiOk -and $results['registry.npmjs.org (npm)'].Ok -and $results['nodejs.org (Node.js zip)'].Ok }
 }
 
 # ---- profile decision ------------------------------------------------------
@@ -120,9 +131,10 @@ $profile = $Mirror
 if ($Mirror -eq 'auto') {
     $profile = 'official'
     if (-not $NoProbe -and -not $pypiOk) {
-        $t = Run-Probe $cnProbe[0][0] $cnProbe[0][1]
-        if ($t.Ok) { $profile = 'cn'; Write-Host '[NET] pypi.org unreachable but cn mirror reachable -> using cn mirrors' }
-        else { Write-Host '[NET] WARN: neither pypi.org nor the cn mirror is reachable. Set a proxy: setup_env.bat --proxy http://host:port' }
+        $probe = if ($results.ContainsKey('pypi.org (PyPI)')) { $cnProbe[0] } else { $cnProbe[1] }
+        $t = Run-Probe $probe[0] $probe[1]
+        if ($t.Ok) { $profile = 'cn'; Write-Host '[NET] official source unreachable but cn mirror reachable -> using cn mirrors' }
+        else { Write-Host '[NET] WARN: neither the official source nor the cn mirror is reachable. Set a proxy: --proxy http://host:port' }
     }
 }
 Write-Host "[NET] profile: $profile"
@@ -141,6 +153,10 @@ if ($profile -eq 'cn') {
     $lines.Add("set `"UV_PYTHON_INSTALL_MIRROR=$($CN.PyStandalone)`"")
     $lines.Add("set `"PLAYWRIGHT_DOWNLOAD_HOST=$($CN.Playwright)`"")
     $lines.Add("set `"QAI_GITHUB_MIRROR=$($CN.GitHub)`"")
+    # npm / pnpm / corepack read these; QAI_NODE_MIRROR is used by build_frontend.bat
+    $lines.Add("set `"NPM_CONFIG_REGISTRY=$($CN.Npm)`"")
+    $lines.Add("set `"COREPACK_NPM_REGISTRY=$($CN.Npm)`"")
+    $lines.Add("set `"QAI_NODE_MIRROR=$($CN.Node)`"")
 }
 # % must be doubled inside a .bat file
 $text = ($lines -join "`r`n") -replace '%', '%%'

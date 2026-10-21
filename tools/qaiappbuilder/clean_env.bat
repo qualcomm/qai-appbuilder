@@ -18,6 +18,11 @@ REM   --purge-python     also remove uv-managed cpython-3.13 for this arch
 REM                      (with --all-envs: 3.13 arm64+x64 and the 3.10 x64 converter)
 REM                      ^(shared by other QAI installs on this machine^)
 REM   --all-envs         remove every venv under %LOCALAPPDATA%\QAIModelBuilder\envs
+REM   --purge-frontend   also remove what build_frontend.bat installed: portable Node
+REM                      (%LOCALAPPDATA%\QAIModelBuilder\node), corepack cache, pnpm shim,
+REM                      frontend\node_modules and data\pnpm-virtual-store.
+REM                      frontend\dist (the built UI) is KEPT; add --purge-dist for it.
+REM   --purge-dist       also remove frontend\dist (Start.bat then serves no UI)
 REM   --dry-run          only print what would be removed
 REM   -y, --yes          do not ask for confirmation
 REM   --no-pause
@@ -30,6 +35,8 @@ set "FORCED_ARCH="
 set "PURGE_DATA=0"
 set "PURGE_PY=0"
 set "ALL_ENVS=0"
+set "PURGE_FE=0"
+set "PURGE_DIST=0"
 set "DRY=0"
 set "YES=0"
 set "NO_PAUSE=0"
@@ -42,6 +49,8 @@ if /i "%~1"=="/?"             goto :help
 if /i "%~1"=="--purge-data"   ( set "PURGE_DATA=1" & shift & goto :parse )
 if /i "%~1"=="--purge-python" ( set "PURGE_PY=1"   & shift & goto :parse )
 if /i "%~1"=="--all-envs"     ( set "ALL_ENVS=1"   & shift & goto :parse )
+if /i "%~1"=="--purge-frontend" ( set "PURGE_FE=1" & shift & goto :parse )
+if /i "%~1"=="--purge-dist"   ( set "PURGE_DIST=1" & shift & goto :parse )
 if /i "%~1"=="--dry-run"      ( set "DRY=1"        & shift & goto :parse )
 if /i "%~1"=="--yes"          ( set "YES=1"        & shift & goto :parse )
 if /i "%~1"=="-y"             ( set "YES=1"        & shift & goto :parse )
@@ -71,6 +80,7 @@ set "PY_SPEC=cpython-3.13-windows-aarch64"
 if /i "%HOST_ARCH%"=="x64" ( set "VENV_DIR_NAME=.venv_x64_313" & set "PY_SPEC=cpython-3.13-windows-x86_64" )
 set "ENVS_DIR=%LOCALAPPDATA%\QAIModelBuilder\envs"
 set "VENV_DIR=%ENVS_DIR%\%VENV_DIR_NAME%"
+set "QAI_LAD=%LOCALAPPDATA%\QAIModelBuilder"
 
 echo.
 echo  QAI ModelBuilder - clean_env   ^(arch=%HOST_ARCH%^)
@@ -82,6 +92,8 @@ echo    - vendor\whl  vendor\bin  vendor\tiktoken  vendor\nltk_data  vendor\g2p_
 if "%PURGE_PY%"=="1" if "%ALL_ENVS%"=="0" echo    - uv-managed %PY_SPEC%
 if "%PURGE_PY%"=="1" if "%ALL_ENVS%"=="1" echo    - uv-managed cpython-3.13 ^(arm64 + x64^) and cpython-3.10 x64
 if "%PURGE_DATA%"=="1" echo    - data\   ^(ALL user data: qai.db, logs, weights, config^)
+if "%PURGE_FE%"=="1" echo    - %QAI_LAD%\node  \corepack  \pnpm-shim  frontend\node_modules  data\pnpm-virtual-store
+if "%PURGE_DIST%"=="1" echo    - frontend\dist   ^(built WebUI^)
 if "%DRY%"=="1" echo  ^(dry run - nothing is deleted^)
 echo.
 
@@ -94,7 +106,7 @@ if /i not "%_ANS%"=="y" ( echo Aborted. & endlocal & exit /b 1 )
 
 REM ---- stop processes that run from the venv (they lock files) --------------
 if "%DRY%"=="0" (
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$p = if ('%ALL_ENVS%' -eq '1') { '%ENVS_DIR%' } else { '%VENV_DIR%' }; Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($p, 'OrdinalIgnoreCase') } | ForEach-Object { Write-Host ('[INFO] stopping pid ' + $_.ProcessId + ' ' + $_.Name); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$p = @(if ('%ALL_ENVS%' -eq '1') { '%ENVS_DIR%' } else { '%VENV_DIR%' }); if ('%PURGE_FE%' -eq '1') { $p += '%QAI_LAD%\node' }; Get-CimInstance Win32_Process | Where-Object { $e = $_.ExecutablePath; $e -and ($p | Where-Object { $e.StartsWith($_, 'OrdinalIgnoreCase') }) } | ForEach-Object { Write-Host ('[INFO] stopping pid ' + $_.ProcessId + ' ' + $_.Name); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
 )
 
 set "_FAIL=0"
@@ -113,6 +125,17 @@ call :rm_dir "vendor\tiktoken"
 call :rm_dir "vendor\nltk_data"
 call :rm_dir "vendor\g2p_data"
 call :rm_dir "vendor\openblas"
+
+if "%PURGE_FE%"=="1" (
+    REM node_modules first: it is a tree of junctions into data\pnpm-virtual-store,
+    REM rmdir /s removes the junctions without following them.
+    call :rm_dir "frontend\node_modules"
+    call :rm_dir "data\pnpm-virtual-store"
+    call :rm_dir "%QAI_LAD%\node"
+    call :rm_dir "%QAI_LAD%\corepack"
+    call :rm_dir "%QAI_LAD%\pnpm-shim"
+)
+if "%PURGE_DIST%"=="1" call :rm_dir "frontend\dist"
 
 if "%PURGE_DATA%"=="1" call :rm_dir "data"
 
@@ -181,6 +204,6 @@ if exist "%~1" ( echo [FAIL] could not remove %~1 & set "_FAIL=1" ) else ( echo 
 exit /b 0
 
 :help
-echo Usage: clean_env.bat [--arch arm64^|x64] [--purge-data] [--purge-python] [--all-envs] [--dry-run] [-y] [--no-pause]
+echo Usage: clean_env.bat [--arch arm64^|x64] [--purge-data] [--purge-python] [--all-envs] [--purge-frontend] [--purge-dist] [--dry-run] [-y] [--no-pause]
 echo See the header of this file for details.
 exit /b 0
