@@ -150,7 +150,10 @@ REM ===========================================================================
 REM  Step 2: uv  (PATH copy first, else download)
 REM ===========================================================================
 echo.
-echo -- Step 2/7: uv -------------------------------------------------------------
+echo -- Step 2/7: aria2c + uv ----------------------------------------------------
+REM aria2c first (all archs): every later GitHub/large download goes multi-connection.
+call :ensure_aria2c
+call :tick "2a aria2c (download, or reuse)"
 set "UV_EXE=data\bin\uv\uv.exe"
 if exist "%UV_EXE%" goto :uv_ready
 where uv >nul 2>&1
@@ -170,7 +173,7 @@ del /f /q "%DL_DIR%\_uv_tmp.zip" 2>nul
 set "PATH=%ROOT_DIR%data\bin\uv;%PATH%"
 "%UV_EXE%" --version
 if errorlevel 1 goto :fail_uv
-call :tick "2  uv (download+unpack, or reuse)"
+call :tick "2b uv (download+unpack, or reuse)"
 
 REM ===========================================================================
 REM  Step 3: Python 3.13 + venv
@@ -444,15 +447,23 @@ echo [INFO] GET %_U%
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup\download_with_aria2c.ps1" -Url "%_U%" -OutFile "%~2" %_ARIA% -MinSize %~3 -MaxRetries 5 -StallTimeoutSec 60 -AttemptTimeoutSec %~4 %_DLX%
 exit /b %errorlevel%
 
-REM :ensure_aria2c - optional multi-connection downloader for the big archive; non-fatal.
+REM :ensure_aria2c - optional multi-connection downloader (~2.5MB); non-fatal. Reuses PATH copy.
 :ensure_aria2c
-if exist "data\bin\aria2c\aria2c.exe" exit /b 0
+if exist "data\bin\aria2c\aria2c.exe" ( echo [SKIP] aria2c already present. & exit /b 0 )
 if not exist "data\bin\aria2c" mkdir "data\bin\aria2c"
+set "_ARIA_PATH="
+for /f "delims=" %%A in ('where aria2c.exe 2^>nul') do if not defined _ARIA_PATH set "_ARIA_PATH=%%A"
+if defined _ARIA_PATH (
+    copy /y "%_ARIA_PATH%" "data\bin\aria2c\aria2c.exe" >nul
+    if exist "data\bin\aria2c\aria2c.exe" ( echo [SKIP] using aria2c from PATH. & exit /b 0 )
+)
+echo [INFO] downloading aria2c ^(multi-connection downloader, ~2.5MB^)...
 set "DL_ZIPTEST=1"
 call :dl "https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip" "%DL_DIR%\_aria2c_tmp.zip" 1000000 180
 if errorlevel 1 ( echo [WARN] aria2c unavailable; using single-thread download. & exit /b 0 )
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path '%DL_DIR%\_aria2c_tmp.zip' -DestinationPath '%DL_DIR%\_aria2c_tmp' -Force; Get-ChildItem '%DL_DIR%\_aria2c_tmp' -Recurse -Filter aria2c.exe | Copy-Item -Destination 'data\bin\aria2c\aria2c.exe' -Force; Remove-Item '%DL_DIR%\_aria2c_tmp' -Recurse -Force"
 del /f /q "%DL_DIR%\_aria2c_tmp.zip" 2>nul
+if exist "data\bin\aria2c\aria2c.exe" ( echo [OK] aria2c ready. ) else ( echo [WARN] aria2c unpack failed; using single-thread download. )
 exit /b 0
 
 REM :fetch_vendor - ARM64 only. Downloads vendor-deps.7z (~210MB, ~420MB unpacked) and keeps only what
@@ -460,7 +471,6 @@ REM   ARM64 needs: whl, bin\arm64, tiktoken, nltk_data, g2p_data (drops openblas
 REM   are kept small).
 :fetch_vendor
 echo [INFO] ARM64 vendor wheels missing; fetching vendor-deps.7z ^(~210MB download, ~420MB unpacked^)...
-call :ensure_aria2c
 if not exist "data\bin\7zr" mkdir "data\bin\7zr"
 if not exist "data\bin\7zr\7zr.exe" (
     call :dl "https://www.7-zip.org/a/7zr.exe" "data\bin\7zr\7zr.exe" 100000 60

@@ -258,6 +258,7 @@ set "_NODE_BASE=https://nodejs.org/dist"
 if defined QAI_NODE_MIRROR set "_NODE_BASE=%QAI_NODE_MIRROR%"
 set "_NODE_NAME=node-v%NODE_VERSION%-win-%NODE_ARCH%"
 set "_NODE_ZIP=%DL_DIR%\%_NODE_NAME%.zip"
+call :ensure_aria2c
 set "_ARIA="
 if exist "data\bin\aria2c\aria2c.exe" set "_ARIA=-Aria2cExe "data\bin\aria2c\aria2c.exe""
 set "_PX="
@@ -273,6 +274,30 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference=
 if not exist "%NODE_DIR%\node.exe" exit /b 1
 del /f /q "%_NODE_ZIP%" 2>nul
 for /f "delims=" %%V in ('"%NODE_DIR%\node.exe" --version') do echo [OK]   Node.js %%V installed: %NODE_DIR%
+exit /b 0
+
+REM :ensure_aria2c - same as setup_env.bat: optional multi-connection downloader (~2.5MB),
+REM   shared at data\bin\aria2c; non-fatal (falls back to single-thread download).
+:ensure_aria2c
+if exist "data\bin\aria2c\aria2c.exe" exit /b 0
+if not exist "data\bin\aria2c" mkdir "data\bin\aria2c"
+set "_ARIA_PATH="
+for /f "delims=" %%A in ('where aria2c.exe 2^>nul') do if not defined _ARIA_PATH set "_ARIA_PATH=%%A"
+if defined _ARIA_PATH (
+    copy /y "%_ARIA_PATH%" "data\bin\aria2c\aria2c.exe" >nul
+    if exist "data\bin\aria2c\aria2c.exe" ( echo [SKIP] using aria2c from PATH. & exit /b 0 )
+)
+set "_AU=https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip"
+if defined QAI_GITHUB_MIRROR set "_AU=%QAI_GITHUB_MIRROR%%_AU%"
+set "_PX="
+if defined HTTPS_PROXY set "_PX=-ProxyUrl "%HTTPS_PROXY%""
+echo [INFO] downloading aria2c ^(multi-connection downloader, ~2.5MB^)...
+echo [INFO] GET %_AU%
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup\download_with_aria2c.ps1" -Url "%_AU%" -OutFile "%DL_DIR%\_aria2c_tmp.zip" -MinSize 1000000 -ZipTest -MaxRetries 5 -StallTimeoutSec 60 -AttemptTimeoutSec 180 %_PX%
+if errorlevel 1 ( echo [WARN] aria2c unavailable; using single-thread download. & exit /b 0 )
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path '%DL_DIR%\_aria2c_tmp.zip' -DestinationPath '%DL_DIR%\_aria2c_tmp' -Force; Get-ChildItem '%DL_DIR%\_aria2c_tmp' -Recurse -Filter aria2c.exe | Copy-Item -Destination 'data\bin\aria2c\aria2c.exe' -Force; Remove-Item '%DL_DIR%\_aria2c_tmp' -Recurse -Force"
+del /f /q "%DL_DIR%\_aria2c_tmp.zip" 2>nul
+if exist "data\bin\aria2c\aria2c.exe" ( echo [OK] aria2c ready. ) else ( echo [WARN] aria2c unpack failed; using single-thread download. )
 exit /b 0
 
 REM :node_major <node.exe> -> _NODE_VER (e.g. 22.20.0), _NODE_MAJOR (e.g. 22)
