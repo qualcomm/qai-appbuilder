@@ -623,12 +623,19 @@ findstr /i /c:"DLL load failed" "%_QF%" >nul 2>&1 && (
     echo [WARN]   * an Application Control / AppLocker / antivirus policy blocked the unsigned .pyd/.dll under
     echo [WARN]     %VENV_DIR%\Lib\site-packages\qai_appbuilder ^(Event Viewer: Microsoft-Windows-CodeIntegrity^)
     echo [WARN]   * wrong architecture: this venv is %HOST_ARCH%; the wheel must match ^(win_%HOST_ARCH:x64=amd64%^)
+    echo [WARN]   * "initialization routine failed" ^(WinError 1114^): the DLL was found but its start-up code failed - a
+    echo [WARN]     runtime-version clash or a CPU/OS feature it needs; the diagnostic report below shows which
 )
 findstr /i /c:"No module named" "%_QF%" >nul 2>&1 && (
     echo [WARN] A Python dependency of qai_appbuilder is missing: install it with
     echo [WARN]     "%UV_EXE%" pip install --python "%VPY%" pyyaml "numpy<=2.4.4"
 )
 echo [WARN] Full output saved in %_QF% ^(also re-check with: Console.bat  then  import qai_appbuilder^)
+REM Collect the facts needed to explain it (exact Windows error per DLL, runtime DLLs really loaded,
+REM signatures, Code Integrity / AppLocker / Defender events). Read-only, a few seconds.
+echo [INFO] collecting a diagnostic report ^(scripts\setup\diag_qab.ps1^) ...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup\diag_qab.ps1" -Python "%VPY%" -OutFile "data\logs\qab_diag.txt" >nul 2>&1
+if exist "data\logs\qab_diag.txt" echo [WARN] Diagnostic report: %ROOT_DIR%data\logs\qab_diag.txt  ^(send this file when asking for help^)
 exit /b 0
 
 REM :install_vendor_whls - ARM64 only; same 14 wheels / pins as Setup.bat Step 4a.
