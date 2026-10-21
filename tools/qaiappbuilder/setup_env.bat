@@ -145,6 +145,9 @@ set "UV_SYSTEM_CERTS=1"
 set "UV_NATIVE_TLS="
 if not defined UV_HTTP_TIMEOUT set "UV_HTTP_TIMEOUT=300"
 if not defined UV_HTTP_RETRIES set "UV_HTTP_RETRIES=5"
+REM cryptography (vendored arm64 build) warns "OpenSSL 3's legacy provider failed to load" on
+REM import; nothing here needs legacy ciphers, so skip loading it (silences the warning).
+if not defined CRYPTOGRAPHY_OPENSSL_NO_LEGACY set "CRYPTOGRAPHY_OPENSSL_NO_LEGACY=1"
 
 REM ===========================================================================
 REM  Step 2: uv  (PATH copy first, else download)

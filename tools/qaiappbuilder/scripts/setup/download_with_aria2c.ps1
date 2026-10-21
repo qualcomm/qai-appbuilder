@@ -390,6 +390,13 @@ function Invoke-Aria2cAttempt {
         # right signal. aria2c's --timeout=30 already handles individual
         # connections that stop receiving data entirely.
         '--console-log-level=warn',
+        # Real progress: aria2c prints "[#gid done/total(pct) CN:n DL:speed ...]"
+        # every second to stdout (redirected to aria2c.stdout.log). With
+        # human-readable=false the numbers are exact bytes, which we parse --
+        # the target file's Length is useless with 16 connections (sparse
+        # writes: a late segment landing first makes the file jump to ~full).
+        '--summary-interval=1',
+        '--human-readable=false',
         '-d', $OutDir,
         '-o', $OutName
     )
@@ -416,14 +423,19 @@ function Invoke-Aria2cAttempt {
     $ctrlPath = $targetPath + '.aria2'
 
     $attemptStartUtc = [DateTime]::UtcNow
-    $lastSize = -1
-    $lastSizeChangeUtc = [DateTime]::UtcNow
-    $lastTotalBytes = 0
+    $lastProgress = -1
+    $lastProgressUtc = [DateTime]::UtcNow
+    $lastPrintUtc = [DateTime]::MinValue
+    $logPos = 0
+    $done = 0L; $total = 0L; $speed = 0L; $conns = 0
     $verdict = $null
 
     try {
         while ($true) {
-            Start-Sleep -Seconds 2
+            # 0.5 s poll: aria2c exits right after removing the .aria2 control
+            # file, so a short poll ends the attempt promptly (the old 2 s poll
+            # added up to ~2 s of dead time per file).
+            Start-Sleep -Milliseconds 500
 
             # 1) Has aria2c exited on its own?
             if ($proc.HasExited) {
@@ -451,37 +463,51 @@ function Invoke-Aria2cAttempt {
                 break
             }
 
-            # 3) Stall watchdog: poll target file size (NOT the .aria2 file --
-            #    aria2c writes the body chunks into the target; the .aria2
-            #    file just tracks chunk metadata).
-            $currentSize = 0
-            if (Test-Path -LiteralPath $targetPath) {
+            # 3) Read new aria2c summary lines (incremental, shared-read so we
+            #    never block aria2c's writer). Last "[#gid a/b(p%) CN:n DL:s" wins.
+            try {
+                $fs = [System.IO.File]::Open($stdOutLog, 'Open', 'Read', 'ReadWrite,Delete')
                 try {
-                    $currentSize = (Get-Item -LiteralPath $targetPath).Length
-                } catch { $currentSize = 0 }
+                    if ($fs.Length -gt $logPos) {
+                        [void]$fs.Seek($logPos, 'Begin')
+                        $sr = New-Object System.IO.StreamReader($fs)
+                        $chunk = $sr.ReadToEnd()
+                        $logPos = $fs.Length
+                        $ms = [regex]::Matches($chunk, '\[#\w+ (\d+)B?/(\d+)B?(?:\(\d+%\))? CN:(\d+)(?: DL:(\d+)B?)?')
+                        if ($ms.Count -gt 0) {
+                            $g = $ms[$ms.Count - 1].Groups
+                            $done = [long]$g[1].Value; $total = [long]$g[2].Value
+                            $conns = [int]$g[3].Value
+                            $speed = if ($g[4].Success) { [long]$g[4].Value } else { 0L }
+                        }
+                    }
+                } finally { $fs.Dispose() }
+            } catch { }
+
+            # 4) Stall watchdog on REAL downloaded bytes (aria2c's counter);
+            #    before the first summary arrives fall back to file size.
+            $progress = $done
+            if ($progress -le 0 -and (Test-Path -LiteralPath $targetPath)) {
+                try { $progress = (Get-Item -LiteralPath $targetPath).Length } catch { }
+            }
+            if ($progress -ne $lastProgress) {
+                $lastProgress = $progress
+                $lastProgressUtc = [DateTime]::UtcNow
+            } elseif (([DateTime]::UtcNow - $lastProgressUtc).TotalSeconds -ge $StallTimeoutSec) {
+                $verdict = 'STALL'
+                break
             }
 
-            if ($currentSize -ne $lastSize) {
-                $lastSize = $currentSize
-                $lastSizeChangeUtc = [DateTime]::UtcNow
-            } else {
-                $stallSec = ([DateTime]::UtcNow - $lastSizeChangeUtc).TotalSeconds
-                if ($stallSec -ge $StallTimeoutSec) {
-                    $verdict = 'STALL'
-                    break
+            # 5) Progress display, throttled to one line per 2 s.
+            if (-not $Quiet -and ([DateTime]::UtcNow - $lastPrintUtc).TotalSeconds -ge 2) {
+                $lastPrintUtc = [DateTime]::UtcNow
+                $es = [math]::Round($elapsed, 0)
+                $sp = if ($speed -ge 1MB) { '{0:F1} MB/s' -f ($speed / 1MB) } else { '{0:N0} KB/s' -f ($speed / 1KB) }
+                if ($total -gt 0) {
+                    $line = '[DL] {0,5:F1}%  {1:F1}/{2:F1} MB  {3}  CN:{4}  elapsed {5}s' -f ($done * 100.0 / $total), ($done / 1MB), ($total / 1MB), $sp, $conns, $es
+                } else {
+                    $line = '[DL] connecting...  elapsed {0}s' -f $es
                 }
-            }
-
-            # 4) Progress display. We don't bother with aria2c RPC (the old
-            #    Setup.bat impl did, but it's the same RPC that froze when
-            #    aria2c stalled). Show whatever we know from the file system.
-            if (-not $Quiet) {
-                $sizeMB = [math]::Round($currentSize / 1MB, 1)
-                # Speed: bytes-since-last-tick / 2s (poll interval).
-                $deltaBytes = $currentSize - $lastTotalBytes
-                $lastTotalBytes = $currentSize
-                $speedKB = [math]::Max(0, [math]::Round($deltaBytes / 1KB / 2, 0))
-                $line = "[DL] $sizeMB MB  $speedKB KB/s  elapsed $([math]::Round($elapsed,0))s"
                 Write-ProgressLine $line
             }
         }
