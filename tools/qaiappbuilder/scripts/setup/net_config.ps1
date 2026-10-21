@@ -93,6 +93,7 @@ $GhTestAsset  = 'https://github.com/aria2/aria2/releases/download/release-1.37.0
 
 # ---- log file ------------------------------------------------------------------
 $Root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
+$script:T0 = [Diagnostics.Stopwatch]::StartNew()
 $LogMode = if ($ProbeAll) { 'probe' } else { 'config' }
 if (-not $LogFile) { $LogFile = Join-Path $Root ('data\logs\net_{0}_{1}.log' -f $LogMode, (Get-Date -Format 'yyyyMMdd_HHmmss')) }
 $script:LogOk = $true
@@ -262,6 +263,23 @@ $probeScript = {
             } catch {
                 $log.Add("  diag: DNS $($uri.Host) FAILED after $($sw.ElapsedMilliseconds) ms: $(Get-ExDesc $_.Exception)")
                 $diag += "local DNS lookup of $($uri.Host) failed"
+                # Ask every DNS server of every connected adapter on its own: shows WHICH server fails
+                # (e.g. a VPN adapter's DNS answering badly while the Wi-Fi DNS is fine).
+                try {
+                    $servers = @()
+                    foreach ($ni in [Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()) {
+                        if ($ni.OperationalStatus -eq 'Up' -and $ni.NetworkInterfaceType -ne 'Loopback') {
+                            foreach ($d in $ni.GetIPProperties().DnsAddresses) { if ($d.AddressFamily -eq 'InterNetwork' -and $servers -notcontains $d.IPAddressToString) { $servers += $d.IPAddressToString } }
+                        }
+                    }
+                    foreach ($srv in $servers) {
+                        $s2 = [Diagnostics.Stopwatch]::StartNew()
+                        try {
+                            $rr = @(Resolve-DnsName -Name $uri.Host -Server $srv -Type A -DnsOnly -QuickTimeout -ErrorAction Stop | Where-Object { $_.IPAddress } | ForEach-Object { $_.IPAddress })
+                            $log.Add("  diag: DNS server $srv answers $($uri.Host) -> $($rr -join ', ') ($($s2.ElapsedMilliseconds) ms)")
+                        } catch { $log.Add("  diag: DNS server $srv FAILED for $($uri.Host) after $($s2.ElapsedMilliseconds) ms: $($_.Exception.Message)") }
+                    }
+                } catch { $log.Add("  diag: per-server DNS check error: $($_.Exception.Message)") }
             }
             if ($ProxyUrl) {
                 try {
@@ -306,7 +324,7 @@ function Invoke-Probes($jobs, [int]$Throttle = 6) {
     $res
 }
 
-# First GitHub proxy (in candidate order) that really serves a file. $null when none.
+# Fastest GitHub proxy that really serves a file. $null when none.
 function Select-GitHubMirror {
     if ($env:QAI_GITHUB_MIRROR) {
         Write-Host "[NET] GitHub mirror (from QAI_GITHUB_MIRROR): $env:QAI_GITHUB_MIRROR"
@@ -319,8 +337,9 @@ function Select-GitHubMirror {
         $x = $r["gh$k"]
         Write-Host ('  {0} GitHub proxy {1,-30} {2}' -f $(if ($x.ok) { '[ OK ]' } else { '[FAIL]' }), $GhCandidates[$k], $(if ($x.ok) { "$($x.ms) ms" } else { $x.note }))
     }
-    for ($k = 0; $k -lt $GhCandidates.Count; $k++) { if ($r["gh$k"].ok) { return [ordered]@{ prefix = $GhCandidates[$k]; result = $r["gh$k"] } } }
-    return $null
+    $best = $null
+    for ($k = 0; $k -lt $GhCandidates.Count; $k++) { if ($r["gh$k"].ok -and (-not $best -or $r["gh$k"].ms -lt $best.result.ms)) { $best = [ordered]@{ prefix = $GhCandidates[$k]; result = $r["gh$k"] } } }
+    return $best
 }
 
 # ---- -ProbeAll: every source, official + cn, in parallel (GUI step 1) ----------
@@ -355,15 +374,15 @@ if ($ProbeAll) {
     Write-Host "[NET] probing $($jobs.Count) URLs (max 6 at a time, DNS/timeout errors retried) ..."
     $res = Invoke-Probes $jobs
 
-    # GitHub proxy: first candidate (in list order) that really served bytes.
+    # GitHub proxy: the FASTEST candidate that really served bytes.
     $ghPick = $null
     if ($res.Keys | Where-Object { $_ -like 'github|cn|*' }) {
         $cands = if ($env:QAI_GITHUB_MIRROR) { @($env:QAI_GITHUB_MIRROR) } else { @($GhCandidates) }
         $fails = @()
         for ($k = 0; $k -lt $cands.Count; $k++) {
             $x = $res["github|cn|$k"]
-            if ($x -and $x.ok -and -not $ghPick) { $ghPick = [ordered]@{ prefix = $cands[$k]; result = $x } }
-            elseif ($x -and -not $x.ok) { $fails += ('{0}: {1}' -f $cands[$k], $x.detail) }
+            if ($x -and $x.ok -and (-not $ghPick -or $x.ms -lt $ghPick.result.ms)) { $ghPick = [ordered]@{ prefix = $cands[$k]; result = $x } }
+            if ($x -and -not $x.ok) { $fails += ('{0}: {1}' -f $cands[$k], $x.detail) }
         }
         if ($ghPick) { $r = $ghPick.result; $res['github|cn'] = [ordered]@{ url = $r.url; ok = $true; ms = $r.ms; note = 'ok'; tries = $r.tries; detail = ''; mirror = $ghPick.prefix } }
         else { $res['github|cn'] = [ordered]@{ url = ''; ok = $false; ms = 0; note = 'no working GitHub proxy'; tries = 0; detail = ('tried ' + $cands.Count + ' proxies - ' + ($fails -join ' || ')); mirror = '' } }
@@ -392,6 +411,7 @@ if ($ProbeAll) {
     else { $rec = 'blocked'; $why = 'neither official sources nor cn mirrors fully reachable - set a proxy' }
     Write-Host "[NET] recommend: $rec ($why)"
     Write-Log "RECOMMEND: $rec ($why)"
+    Write-Log ("TOTAL TIME: {0:N1} s" -f $script:T0.Elapsed.TotalSeconds)
 
     $doc = [ordered]@{ proxy = [string](Hide-Secret $proxyUrl); proxySource = $(if ($proxyUrl) { $proxySrc } else { '' }); recommend = $rec; reason = $why; log = $LogFile; items = $outItems }
     $dir = Split-Path -Parent $Json
@@ -492,6 +512,7 @@ if ($profile -eq 'cn') {
     $lines.Add("set `"COREPACK_NPM_REGISTRY=$($CN.Npm)`"")
     $lines.Add("set `"QAI_NODE_MIRROR=$($CN.Node)`"")
 }
+Write-Log ("TOTAL TIME: {0:N1} s" -f $script:T0.Elapsed.TotalSeconds)
 # % must be doubled inside a .bat file
 $text = ($lines -join "`r`n") -replace '%', '%%'
 [IO.File]::WriteAllText($Emit, $text + "`r`n", (New-Object Text.UTF8Encoding($false)))
