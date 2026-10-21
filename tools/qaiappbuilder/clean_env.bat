@@ -15,6 +15,7 @@ REM Options:
 REM   --arch arm64^|x64   which venv to remove (default: host_arch file, else detect)
 REM   --purge-data       also delete the WHOLE data\ directory (user data!)
 REM   --purge-python     also remove uv-managed cpython-3.13 for this arch
+REM                      (with --all-envs: 3.13 arm64+x64 and the 3.10 x64 converter)
 REM                      ^(shared by other QAI installs on this machine^)
 REM   --all-envs         remove every venv under %LOCALAPPDATA%\QAIModelBuilder\envs
 REM   --dry-run          only print what would be removed
@@ -78,7 +79,8 @@ echo  will remove:
 if "%ALL_ENVS%"=="1" ( echo    - %ENVS_DIR%  ^(all venvs^) ) else ( echo    - %VENV_DIR% )
 echo    - data\downloads  data\bin\uv  data\bin\aria2c  data\bin\7zr  data\config\host_arch
 echo    - vendor\whl  vendor\bin  vendor\tiktoken  vendor\nltk_data  vendor\g2p_data  vendor\openblas
-if "%PURGE_PY%"=="1"   echo    - uv-managed %PY_SPEC%
+if "%PURGE_PY%"=="1" if "%ALL_ENVS%"=="0" echo    - uv-managed %PY_SPEC%
+if "%PURGE_PY%"=="1" if "%ALL_ENVS%"=="1" echo    - uv-managed cpython-3.13 ^(arm64 + x64^) and cpython-3.10 x64
 if "%PURGE_DATA%"=="1" echo    - data\   ^(ALL user data: qai.db, logs, weights, config^)
 if "%DRY%"=="1" echo  ^(dry run - nothing is deleted^)
 echo.
@@ -97,6 +99,9 @@ if "%DRY%"=="0" (
 
 set "_FAIL=0"
 if "%ALL_ENVS%"=="1" ( call :rm_dir "%ENVS_DIR%" ) else ( call :rm_dir "%VENV_DIR%" )
+
+REM --purge-python must run BEFORE data\bin\uv is removed (it needs uv.exe).
+if "%PURGE_PY%"=="1" call :purge_python
 call :rm_dir "data\downloads"
 call :rm_dir "data\bin\uv"
 call :rm_dir "data\bin\aria2c"
@@ -109,13 +114,6 @@ call :rm_dir "vendor\nltk_data"
 call :rm_dir "vendor\g2p_data"
 call :rm_dir "vendor\openblas"
 
-if "%PURGE_PY%"=="1" (
-    if "%DRY%"=="1" (
-        echo [DRY ] uv python uninstall %PY_SPEC%
-    ) else (
-        where uv >nul 2>&1 && ( uv python uninstall %PY_SPEC% ) || echo [INFO] uv not on PATH ^(its bundled copy was removed above^); skipping python uninstall.
-    )
-)
 if "%PURGE_DATA%"=="1" call :rm_dir "data"
 
 echo.
@@ -126,6 +124,37 @@ if "%_FAIL%"=="1" (
 )
 if "%NO_PAUSE%"=="0" if "%YES%"=="0" pause
 endlocal & exit /b %_FAIL%
+
+REM :purge_python - remove uv-managed interpreters. Default: this arch's 3.13.
+REM With --all-envs also every interpreter setup scripts install (3.13 both
+REM archs + the x64 3.10 converter). Uses uv when available, else deletes the
+REM matching directories under %APPDATA%\uv\python directly.
+:purge_python
+set "_SPECS=%PY_SPEC%"
+set "_GLOBS=cpython-3.13*-windows-aarch64-none"
+if /i "%HOST_ARCH%"=="x64" set "_GLOBS=cpython-3.13*-windows-x86_64-none"
+if "%ALL_ENVS%"=="1" (
+    set "_SPECS=cpython-3.13-windows-aarch64 cpython-3.13-windows-x86_64 cpython-3.10-windows-x86_64"
+    set "_GLOBS=cpython-3.13*-windows-aarch64-none cpython-3.13*-windows-x86_64-none cpython-3.10*-windows-x86_64-none"
+)
+set "_UV="
+if exist "data\bin\uv\uv.exe" set "_UV=data\bin\uv\uv.exe"
+if not defined _UV for /f "delims=" %%U in ('where uv 2^>nul') do if not defined _UV set "_UV=%%U"
+if "%DRY%"=="1" (
+    echo [DRY ] uv python uninstall %_SPECS%
+    exit /b 0
+)
+if defined _UV (
+    echo [INFO] %_UV% python uninstall %_SPECS%
+    "%_UV%" python uninstall %_SPECS%
+)
+set "_PYROOT=%APPDATA%\uv\python"
+if defined UV_PYTHON_INSTALL_DIR set "_PYROOT=%UV_PYTHON_INSTALL_DIR%"
+REM Fallback / leftovers (minor-version links, no uv available): delete dirs directly.
+for %%G in (%_GLOBS%) do (
+    for /d %%D in ("%_PYROOT%\%%G") do call :rm_dir "%%~fD"
+)
+exit /b 0
 
 :rm_dir
 if not exist "%~1" exit /b 0
