@@ -353,8 +353,7 @@ if ($ProbeAll) {
         @('vendor',   'ARM64 vendor bundle',              'arm64',    'https://www.aidevhome.com/data/adh2/attr/vendor-deps.7z', ''),
         @('chromium', 'Chromium (browser tools)',         'browser',  'https://cdn.playwright.dev/',                        ($CN.Playwright + '/')),
         @('node',     'Node.js (WebUI build)',            'frontend', 'https://nodejs.org/dist/index.json',                 ($CN.Node + '/')),
-        @('npm',      'npm registry (pnpm packages)',     'frontend', 'https://registry.npmjs.org/pnpm',                    ($CN.Npm + '/pnpm')),
-        @('qairt',    'Qualcomm software center (QAIRT)', 'builder',  'https://softwarecenter.qualcomm.com/',               '')
+        @('npm',      'npm registry (pnpm packages)',     'frontend', 'https://registry.npmjs.org/pnpm',                    ($CN.Npm + '/pnpm'))
     )
     if ($Only) { $want = @($Only -split ',' | ForEach-Object { $_.Trim() }); $items = @($items | Where-Object { $want -contains $_[0] }) }
     $jobs = @()
@@ -428,8 +427,10 @@ $groups = @{
         @('github.com (uv/releases)',   'https://github.com/astral-sh/uv/releases/latest')
     )
     browser = @(@('cdn.playwright.dev (Chromium)', 'https://cdn.playwright.dev/'))
+    # softwarecenter.qualcomm.com (QAIRT) is deliberately NOT probed: it is reachable where the
+    # installer runs, but its TLS handshake sometimes takes 12-14 s, so a short probe timeout
+    # reported false failures.
     builder = @(
-        @('softwarecenter.qualcomm.com (QAIRT)', 'https://softwarecenter.qualcomm.com/'),
         @('python.org (signed Python)',          'https://www.python.org/')
     )
     frontend = @(
