@@ -68,9 +68,11 @@ $S_en = @{
     Proxy = 'Proxy'
     ProxyTip = 'Leave empty to use the HTTPS_PROXY environment variable, then the Windows system proxy. Format: http://host:port'
     ProxyDetected = 'detected: {0}'
-    TestNet = 'Test network'; Retest = 'Retest failed'
+    TestNet = 'Test network'; Retest = 'Retest failed'; OpenNetLog = 'Open network log'
+    DetailHint = 'Select a failed row to see the exact error. Send the network log if you need help.'
+    DetailOff = 'official'; DetailCn = 'China mirror'; NetLogAt = 'Network log: {0}'
     ColSource = 'Source'; ColNeed = 'Needed for'; ColOfficial = 'Official'; ColCn = 'China mirror'
-    NeedCore = 'core'; NeedArm64 = 'ARM64 only'; NeedBrowser = 'browser tools'; NeedFrontend = 'WebUI build'; NeedBuilder = 'model builder'
+    NeedCore = 'core'; NeedOptional = 'optional'; NeedArm64 = 'ARM64 only'; NeedBrowser = 'browser tools'; NeedFrontend = 'WebUI build'; NeedBuilder = 'model builder'
     CellOk = 'OK  {0} ms'; CellFail = 'FAIL ({0})'
     Mirror = 'Use source'
     MirrorTip = 'auto: the installer probes again and switches to China mirrors only when the official source is unreachable; official: official sources only; cn: China mirrors'
@@ -120,9 +122,11 @@ $S_zh = @{
     Proxy = '代理'
     ProxyTip = '留空则依次使用 HTTPS_PROXY 环境变量、Windows 系统代理。格式:http://host:port'
     ProxyDetected = '检测到:{0}'
-    TestNet = '检测网络'; Retest = '重测失败项'
+    TestNet = '检测网络'; Retest = '重测失败项'; OpenNetLog = '打开网络日志'
+    DetailHint = '选中失败的行可查看具体错误。需要帮助时请把网络日志发给我们。'
+    DetailOff = '官方源'; DetailCn = '国内镜像'; NetLogAt = '网络日志:{0}'
     ColSource = '下载源'; ColNeed = '用途'; ColOfficial = '官方源'; ColCn = '国内镜像'
-    NeedCore = '核心'; NeedArm64 = '仅 ARM64'; NeedBrowser = '浏览器工具'; NeedFrontend = 'WebUI 构建'; NeedBuilder = '模型转换'
+    NeedCore = '核心'; NeedOptional = '可选'; NeedArm64 = '仅 ARM64'; NeedBrowser = '浏览器工具'; NeedFrontend = 'WebUI 构建'; NeedBuilder = '模型转换'
     CellOk = 'OK  {0} ms'; CellFail = '失败({0})'
     Mirror = '使用源'
     MirrorTip = 'auto:安装时再检测一次，官方源不通才切换国内镜像;official:只用官方源;cn:使用国内镜像'
@@ -265,8 +269,8 @@ function Format-MB([int]$mb) { if ($mb -ge 1024) { '{0:F1} GB' -f ($mb / 1024) }
 function Get-NetRecommend($items) {
     $m = @{}; foreach ($i in $items) { $m[$i.id] = $i }
     function Ok($id, $side) { $x = $m[$id]; if (-not $x) { return $false }; $y = $x.$side; return ($null -ne $y -and [bool]$y.ok) }
-    $offOk = (Ok 'pypi' 'official') -and (Ok 'pyfiles' 'official') -and (Ok 'github' 'official') -and (Ok 'python' 'official')
-    $cnOk  = (Ok 'pypi' 'cn') -and (Ok 'github' 'cn') -and (Ok 'python' 'cn')
+    $offOk = (Ok 'pypi' 'official') -and (Ok 'pyfiles' 'official') -and (Ok 'python' 'official')
+    $cnOk  = (Ok 'pypi' 'cn') -and (Ok 'python' 'cn')
     if ($offOk) {
         $po = [long]$m['pypi'].official.ms
         if ($cnOk -and $po -gt 1500 -and $po -gt 3 * [long]$m['pypi'].cn.ms) { return 'cnslow' }
@@ -408,8 +412,15 @@ $chkSkip = New-Ctl 'CheckBox' 12 420 700 22 $S.Skip
 $chkSkip.Anchor = $AnchorBL
 $pg1.Controls.Add($chkSkip)
 
-$lblNet = New-Ctl 'Label' 12 450 776 40 ''
-$lblNet.AutoSize = $false; $lblNet.Anchor = $AnchorBLR; $lblNet.ForeColor = $cDim
+$btnNetLog = New-Ctl 'Button' 640 416 148 26 $S.OpenNetLog
+$btnNetLog.Anchor = [System.Windows.Forms.AnchorStyles]'Bottom, Right'
+$pg1.Controls.Add($btnNetLog)
+
+# Detail box: path of the network log, or the exact error of the selected row.
+$lblNet = New-Ctl 'TextBox' 12 448 776 56 $S.DetailHint
+$lblNet.Multiline = $true; $lblNet.ReadOnly = $true; $lblNet.ScrollBars = 'Vertical'; $lblNet.WordWrap = $true
+$lblNet.BorderStyle = 'None'; $lblNet.BackColor = $form.BackColor
+$lblNet.Anchor = $AnchorBLR; $lblNet.ForeColor = $cDim; $lblNet.Font = $logFont
 $pg1.Controls.Add($lblNet)
 
 # --- page 2: options -------------------------------------------------------
@@ -497,6 +508,7 @@ foreach ($b in $btnBack, $btnNext, $btnClose) { $form.Controls.Add($b) }
 # ---------------------------------------------------------------------------
 $script:Page = 1
 $script:NetItems = @()       # probe items (PSCustomObject from JSON)
+$script:NetLog = ''
 $script:NetTested = $false
 $script:NetRec = ''
 $script:NetProxy = ''        # proxy text the last test ran with
@@ -606,7 +618,7 @@ function Set-Page([int]$n) {
 # ---------------------------------------------------------------------------
 function Get-NeedText([string]$need) {
     switch ($need) {
-        'core' { $S.NeedCore } 'arm64' { $S.NeedArm64 } 'browser' { $S.NeedBrowser }
+        'core' { $S.NeedCore } 'optional' { $S.NeedOptional } 'arm64' { $S.NeedArm64 } 'browser' { $S.NeedBrowser }
         'frontend' { $S.NeedFrontend } 'builder' { $S.NeedBuilder } default { $need }
     }
 }
@@ -649,6 +661,7 @@ function Import-NetResult([bool]$merge) {
         $script:NetItems = $new
     }
     $script:NetTested = $true
+    $script:NetLog = [string]$doc.log
     $script:NetProxy = $txtProxy.Text.Trim()
     Show-NetItems
     $rec = Get-NetRecommend $script:NetItems
@@ -659,8 +672,39 @@ function Import-NetResult([bool]$merge) {
         'cn'       { $lblRec.Text = $S.RecCn;       $lblRec.ForeColor = $cOk;  $cbMirror.SelectedIndex = 2 }
         default    { $lblRec.Text = $S.RecBlocked;  $lblRec.ForeColor = $cFail; $txtProxy.Focus() | Out-Null }
     }
-    $lblNet.Text = $S.LogAt -f $script:LogPath
+    $lblNet.Text = Get-NetFooter
     return $true
+}
+
+# Path of the newest network log (JSON 'log' field, else newest net_probe_*.log).
+function Get-NetLogPath {
+    if ($script:NetLog -and (Test-Path -LiteralPath $script:NetLog)) { return $script:NetLog }
+    $d = Join-Path $Root 'data\logs'
+    if (Test-Path -LiteralPath $d) {
+        $f = Get-ChildItem -LiteralPath $d -Filter 'net_probe_*.log' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if ($f) { return $f.FullName }
+    }
+    return ''
+}
+function Get-NetFooter {
+    $p = Get-NetLogPath
+    $t = $S.DetailHint
+    if ($p) { $t = ($S.NetLogAt -f $p) + "`r`n" + $t }
+    $t
+}
+
+# Exact errors of one result row (shown when the row is selected).
+function Get-ItemDetail($item) {
+    $t = @()
+    foreach ($pair in @(@('official', $S.DetailOff), @('cn', $S.DetailCn))) {
+        $x = $item.($pair[0])
+        if ($null -ne $x -and -not $x.ok) {
+            $d = [string]$x.detail; if (-not $d) { $d = [string]$x.note }
+            $t += ('[{0}] {1}' -f $pair[1], $d)
+        }
+    }
+    if ($t.Count -eq 0) { return (Get-NetFooter) }
+    return ($t -join "`r`n")
 }
 
 # ---------------------------------------------------------------------------
@@ -777,7 +821,7 @@ function Complete-Run([int]$code) {
     $script:ExitCode = $code
     if ($script:Kind -eq 'net') {
         if ($code -ne 0 -or -not (Import-NetResult $script:NetMerge)) {
-            $lblNet.Text = $S.NetFailed -f $code, $script:LogPath
+            $lblNet.Text = ($S.NetFailed -f $code, $script:LogPath) + "`r`n" + (Get-NetFooter)
             if ($code -eq 0) { $script:ExitCode = 1 }
         }
         Update-Nav
@@ -823,7 +867,7 @@ $timer.Add_Tick({
             return
         }
         if ($script:Kind -eq 'net') {
-            $lblNet.Text = ($S.Testing -f 15) + '  ' + (Format-Elapsed)
+            $lblNet.Text = ($S.Testing -f 20) + '  ' + (Format-Elapsed)
         } else {
             $t = $S.Running + '  ' + (Format-Elapsed)
             if ($script:StepText) { $t += '  |  ' + $script:StepText }
@@ -852,12 +896,27 @@ function Start-NetTest([bool]$failedOnly) {
     if ($failedOnly) { $only = (Get-FailedIds) -join ',' ; if (-not $only) { return } }
     $script:NetMerge = $failedOnly
     if (-not $failedOnly) { $lv.Items.Clear(); $lblRec.Text = ''; }
-    $lblNet.Text = $S.Testing -f 15
+    $lblNet.Text = $S.Testing -f 20
     Start-Run (Get-NetCommand $txtProxy.Text.Trim() $only) 'net' 1
 }
 
 $btnTest.Add_Click({ Start-NetTest $false })
 $btnRetest.Add_Click({ Start-NetTest $true })
+$btnNetLog.Add_Click({
+    $p = Get-NetLogPath
+    if ($p) { Start-Process notepad.exe -ArgumentList ('"' + $p + '"') }
+    else {
+        $d = Join-Path $Root 'data\logs'
+        New-Item -ItemType Directory -Force -Path $d | Out-Null
+        Start-Process explorer.exe -ArgumentList ('"' + $d + '"')
+    }
+})
+$lv.Add_SelectedIndexChanged({
+    if ($lv.SelectedIndices.Count -gt 0 -and -not (Test-Running)) {
+        $idx = $lv.SelectedIndices[0]
+        if ($idx -lt $script:NetItems.Count) { $lblNet.Text = Get-ItemDetail $script:NetItems[$idx] }
+    }
+})
 $chkSkip.Add_CheckedChanged({ Update-Nav })
 $txtProxy.Add_TextChanged({
     if ($script:Applying) { return }
@@ -987,7 +1046,15 @@ if ($SelfTest) {
     $txtProxy.Text = 'bad proxy'
     Invoke-Next
     Check 'invalid proxy blocks next' ($script:Page -eq 1)
-    if ($null -ne $bak) { [IO.File]::WriteAllText($jp, $bak) } else { Remove-Item -LiteralPath $jp -Force -ErrorAction SilentlyContinue }
+    # detail box: failing row shows the exact error + diag; ok row shows footer
+    $fi = [pscustomobject]@{ id='vendor'; name='x'; need='arm64'; official=[pscustomobject]@{ ok=$false; note='NameResolutionFailure'; detail='WebException: The remote name could not be resolved | local DNS lookup failed'; ms=1 }; cn=$null }
+    Check 'detail shows exact error' ((Get-ItemDetail $fi) -match 'remote name could not be resolved')
+    Check 'footer mentions hint' ((Get-NetFooter) -match [regex]::Escape($S.DetailHint))
+    Check 'github not required for recommendation' ((Get-NetRecommend @(
+        [pscustomobject]@{ id='pypi'; official=[pscustomobject]@{ok=$true;ms=300}; cn=$null },
+        [pscustomobject]@{ id='pyfiles'; official=[pscustomobject]@{ok=$true;ms=300}; cn=$null },
+        [pscustomobject]@{ id='python'; official=[pscustomobject]@{ok=$true;ms=300}; cn=$null },
+        [pscustomobject]@{ id='github'; official=[pscustomobject]@{ok=$false;ms=0}; cn=[pscustomobject]@{ok=$false;ms=0} })) -eq 'official')    if ($null -ne $bak) { [IO.File]::WriteAllText($jp, $bak) } else { Remove-Item -LiteralPath $jp -Force -ErrorAction SilentlyContinue }
     $form.Dispose()
     Write-Output "selftest failures=$fails"
     exit $fails
