@@ -359,3 +359,18 @@ executable under `<name>-<ver>.data/scripts/`. `setup_env.bat` now takes them fr
 * Never fatal: when every index fails the caller falls back to the old GitHub download.
 * `QAI_NO_PYPI_EXE=1` skips the PyPI path (forces GitHub).
 * Log lines are prefixed `[PYPI-EXE]`.
+
+## Unpacking vendor-deps.7z (ARM64)
+
+`setup_env.bat` unpacks the bundle with the Windows built-in `%SystemRoot%\System32\tar.exe` (bsdtar, present since
+Windows 10 1803), so the 0.6 MB `7zr.exe` is no longer downloaded in the normal case (it came from www.7-zip.org at
+12-67 KB/s and cost ~22 s on a slow link). Measured on the 211 MB archive: 48 files, SHA-256 identical to the `7zr.exe`
+result, 3.8 s vs 3.6 s.
+
+* Full path on purpose: a GNU tar earlier on `PATH` (Git for Windows, MSYS) cannot read 7z.
+* The result is verified (`whl\` must exist). On any failure `7zr.exe` is downloaded and used instead.
+* If neither can unpack it, the archive is deleted so the next run downloads a fresh copy instead of looping on a bad file.
+* `QAI_UNPACK=7zr` forces `7zr.exe`.
+* aria2c stays: it is fetched in Step 2 for every architecture because the QNN SDK (~2 GB, `--builder`) and other large
+  downloads use it. For the 211 MB bundle alone it gave no reliable speed-up (two runs: 44 s vs 40 s, 36 s vs 47 s),
+  its value there is resume and stall handling.

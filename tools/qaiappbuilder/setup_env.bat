@@ -382,6 +382,7 @@ echo   --no-pause             do not pause at the end
 echo.
 echo Environment variables:
 echo   QAI_NO_PYPI_EXE=1      do not take uv / ast-grep from their PyPI wheels; use the GitHub releases
+echo   QAI_UNPACK=7zr         unpack vendor-deps.7z with 7zr.exe instead of the built-in tar.exe
 echo   QAI_GITHUB_MIRROR=URL  prefix for github.com downloads ^(set automatically for --mirror cn^)
 echo.
 echo uv and ast-grep come from PyPI wheels ^(pypi.org, or the tuna mirror first for cn^), so a blocked
@@ -487,11 +488,6 @@ REM   ARM64 needs: whl, bin\arm64, tiktoken, nltk_data, g2p_data (drops openblas
 REM   are kept small).
 :fetch_vendor
 echo [INFO] ARM64 vendor wheels missing; fetching vendor-deps.7z ^(~210MB download, ~420MB unpacked^)...
-if not exist "data\bin\7zr" mkdir "data\bin\7zr"
-if not exist "data\bin\7zr\7zr.exe" (
-    call :dl "https://www.7-zip.org/a/7zr.exe" "data\bin\7zr\7zr.exe" 100000 60
-)
-if not exist "data\bin\7zr\7zr.exe" ( echo [WARN] no 7zr.exe; cannot unpack vendor bundle. & exit /b 0 )
 if not exist "%DL_DIR%\vendor-deps.7z" (
     call :dl "%VDEPS_URL%" "%DL_DIR%\vendor-deps.7z" 20000000 1800
 )
@@ -501,12 +497,50 @@ if not exist "%DL_DIR%\vendor-deps.7z" (
     echo [WARN] to %DL_DIR%\vendor-deps.7z and re-run.
     exit /b 0
 )
-if exist "%DL_DIR%\_vd_tmp" rmdir /s /q "%DL_DIR%\_vd_tmp"
-"data\bin\7zr\7zr.exe" x -y "-o%DL_DIR%\_vd_tmp" "%DL_DIR%\vendor-deps.7z" -bso0 -bsp0
+REM Unpack: the Windows built-in tar.exe ^(bsdtar^) reads .7z, so no extra download. The archive uses an
+REM ARM64 BCJ filter that older bsdtar builds may not know, so the result is verified and 7zr.exe
+REM ^(downloaded only then^) is the fallback. Full path on purpose: a GNU tar earlier on PATH cannot read 7z.
+REM QAI_UNPACK=7zr forces 7zr.exe.
+set "_VD=%DL_DIR%\_vd_tmp"
+set "_UNPACKED="
+if exist "%_VD%" rmdir /s /q "%_VD%"
+if /i not "%QAI_UNPACK%"=="7zr" if exist "%SystemRoot%\System32\tar.exe" (
+    echo [INFO] unpacking with built-in tar.exe ...
+    mkdir "%_VD%"
+    "%SystemRoot%\System32\tar.exe" -xf "%DL_DIR%\vendor-deps.7z" -C "%_VD%"
+    if not errorlevel 1 if exist "%_VD%\whl" set "_UNPACKED=tar"
+    if not errorlevel 1 if exist "%_VD%\vendor\whl" set "_UNPACKED=tar"
+    if not defined _UNPACKED (
+        echo [WARN] tar.exe could not unpack the bundle; trying 7zr.exe instead.
+        rmdir /s /q "%_VD%" 2>nul
+    )
+)
+if not defined _UNPACKED call :unpack_7zr
+if not defined _UNPACKED (
+    echo [WARN] could not unpack vendor-deps.7z; deleting it so the next run downloads a fresh copy.
+    del /f /q "%DL_DIR%\vendor-deps.7z" 2>nul
+    rmdir /s /q "%_VD%" 2>nul
+    exit /b 0
+)
 if not exist "vendor" mkdir "vendor"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$t='%DL_DIR%\_vd_tmp'; $s= if (Test-Path (Join-Path $t 'vendor')) { Join-Path $t 'vendor' } else { $t }; foreach ($n in 'whl','tiktoken','nltk_data','g2p_data') { $p=Join-Path $s $n; if (Test-Path $p) { Copy-Item -LiteralPath $p -Destination 'vendor' -Recurse -Force } }; New-Item -ItemType Directory -Force 'vendor\bin\arm64' | Out-Null; $b=Join-Path $s 'bin\arm64'; if (Test-Path $b) { Copy-Item -Path (Join-Path $b '*') -Destination 'vendor\bin\arm64' -Recurse -Force }"
-rmdir /s /q "%DL_DIR%\_vd_tmp" 2>nul
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$t='%_VD%'; $s= if (Test-Path (Join-Path $t 'vendor')) { Join-Path $t 'vendor' } else { $t }; foreach ($n in 'whl','tiktoken','nltk_data','g2p_data') { $p=Join-Path $s $n; if (Test-Path $p) { Copy-Item -LiteralPath $p -Destination 'vendor' -Recurse -Force } }; New-Item -ItemType Directory -Force 'vendor\bin\arm64' | Out-Null; $b=Join-Path $s 'bin\arm64'; if (Test-Path $b) { Copy-Item -Path (Join-Path $b '*') -Destination 'vendor\bin\arm64' -Recurse -Force }"
+rmdir /s /q "%_VD%" 2>nul
 if exist "vendor\whl" ( del /f /q "%DL_DIR%\vendor-deps.7z" 2>nul & echo [OK]   vendor bundle merged. )
+exit /b 0
+
+REM :unpack_7zr - fallback unpacker: fetch 7zr.exe ^(~0.6MB^) if needed, unpack into %_VD%. Sets _UNPACKED=7zr on success.
+:unpack_7zr
+if not exist "data\bin\7zr" mkdir "data\bin\7zr"
+if not exist "data\bin\7zr\7zr.exe" (
+    call :dl "https://www.7-zip.org/a/7zr.exe" "data\bin\7zr\7zr.exe" 100000 60
+)
+if not exist "data\bin\7zr\7zr.exe" ( echo [WARN] no 7zr.exe available. & exit /b 0 )
+echo [INFO] unpacking with 7zr.exe ...
+if exist "%_VD%" rmdir /s /q "%_VD%"
+"data\bin\7zr\7zr.exe" x -y "-o%_VD%" "%DL_DIR%\vendor-deps.7z" -bso0 -bsp0
+if errorlevel 1 exit /b 0
+if exist "%_VD%\whl" set "_UNPACKED=7zr"
+if exist "%_VD%\vendor\whl" set "_UNPACKED=7zr"
 exit /b 0
 
 REM :fetch_guard - guard64.dll (+ ARM64 injector); small, non-fatal. Skipped when present.
