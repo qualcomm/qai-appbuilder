@@ -243,7 +243,9 @@ if not errorlevel 1 if "%WITH_BROWSER%"=="0" if "%WITH_BUILDER%"=="0" (
     echo [SKIP] dependency closure already importable.
     goto :deps_done
 )
-echo [INFO] uv pip install -r pyproject.toml %_EXTRAS% ^(index=%UV_DEFAULT_INDEX%^)
+set "_IDX=%UV_DEFAULT_INDEX%"
+if not defined _IDX set "_IDX=pypi.org"
+echo [INFO] uv pip install -r pyproject.toml %_EXTRAS% ^(index=%_IDX%^)
 "%UV_EXE%" pip install -r pyproject.toml %_EXTRAS% %_FL%
 if errorlevel 1 goto :fail_install
 :deps_done
@@ -446,11 +448,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path
 del /f /q "%DL_DIR%\_aria2c_tmp.zip" 2>nul
 exit /b 0
 
-REM :fetch_vendor - ARM64 only. Downloads vendor-deps.7z (~420MB) and keeps only what
+REM :fetch_vendor - ARM64 only. Downloads vendor-deps.7z (~210MB, ~420MB unpacked) and keeps only what
 REM   ARM64 needs: whl, bin\arm64, tiktoken, nltk_data, g2p_data (drops openblas + bin\x64 dups
 REM   are kept small).
 :fetch_vendor
-echo [INFO] ARM64 vendor wheels missing; fetching vendor-deps.7z ^(~420MB^)...
+echo [INFO] ARM64 vendor wheels missing; fetching vendor-deps.7z ^(~210MB download, ~420MB unpacked^)...
 call :ensure_aria2c
 if not exist "data\bin\7zr" mkdir "data\bin\7zr"
 if not exist "data\bin\7zr\7zr.exe" (
