@@ -339,3 +339,23 @@
 - `scripts/qairt_release.json`
 - `vendor/whl/README.md`
 - `pyproject.toml`
+
+## uv / ast-grep from PyPI wheels (no GitHub needed)
+
+`uv` and `ast-grep-cli` publish `win_arm64` / `win_amd64` wheels on PyPI whose only payload is the
+executable under `<name>-<ver>.data/scripts/`. `setup_env.bat` now takes them from there first:
+
+| Item | Source (first) | Fallback | Notes |
+|---|---|---|---|
+| uv | PyPI wheel `uv` (newest on the index) | GitHub release zip | tuna mirror only carries up to 0.9.9; PyPI has 0.13.x |
+| ast-grep 0.45.1 | PyPI wheel `ast-grep-cli==0.45.1` | GitHub release zip | pinned; present on pypi.org and tuna |
+| aria2c | GitHub release (via GitHub proxy when `cn`) | single-thread downloader | optional; no trustworthy PyPI build |
+| guard.zip | GitHub release of this repo | skipped (FileGuard inactive) | the only item that still needs GitHub |
+
+* Helper: `scripts/setup/fetch_pypi_exe.ps1`. Reads the PEP 503 simple index, picks the wheel, downloads it with
+  `download_with_aria2c.ps1`, **verifies the SHA-256 published in the index** and only then extracts the exe.
+  Index order follows `QAI_NET_PROFILE`: `official` = pypi.org then tuna, `cn` = tuna then pypi.org.
+  A failing index (network, no matching wheel, SHA mismatch, exe missing) moves on to the next one.
+* Never fatal: when every index fails the caller falls back to the old GitHub download.
+* `QAI_NO_PYPI_EXE=1` skips the PyPI path (forces GitHub).
+* Log lines are prefixed `[PYPI-EXE]`.

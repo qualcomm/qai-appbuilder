@@ -90,12 +90,14 @@ if /i not "%HOST_ARCH%"=="arm64" if /i not "%HOST_ARCH%"=="x64" (
 if /i "%HOST_ARCH%"=="x64" (
     set "HOST_ARCH=x64"
     set "UV_ARCH=x86_64"
+    set "WHL_PLAT=win_amd64"
     set "PY_SPEC=cpython-3.13-windows-x86_64"
     set "VENV_DIR_NAME=.venv_x64_313"
     set "ASTGREP_ASSET=app-x86_64-pc-windows-msvc.zip"
 ) else (
     set "HOST_ARCH=arm64"
     set "UV_ARCH=aarch64"
+    set "WHL_PLAT=win_arm64"
     set "PY_SPEC=cpython-3.13-windows-aarch64"
     set "VENV_DIR_NAME=.venv_arm64_313"
     set "ASTGREP_ASSET=app-aarch64-pc-windows-msvc.zip"
@@ -165,7 +167,11 @@ if not errorlevel 1 (
     set "UV_EXE=uv"
     goto :uv_ready
 )
-echo [INFO] downloading uv ^(%UV_ARCH%^)...
+REM uv ships win_arm64 / win_amd64 wheels on PyPI (uv.exe inside): no GitHub needed, and the
+REM tuna mirror serves them in China. GitHub release zip is the fallback.
+call :pypi_exe uv %WHL_PLAT% "uv.exe,uvx.exe" "%UV_BIN_DIR%" ""
+if exist "%UV_EXE%" goto :uv_ready
+echo [INFO] downloading uv from GitHub ^(%UV_ARCH%^)...
 set "DL_ZIPTEST=1"
 call :dl "https://github.com/astral-sh/uv/releases/latest/download/uv-%UV_ARCH%-pc-windows-msvc.zip" "%DL_DIR%\_uv_tmp.zip" 5000000 300
 if errorlevel 1 goto :fail_uv
@@ -374,6 +380,13 @@ echo   --with-apps            App Builder pack deps ^(whisper / melotts / ocr^)
 echo   --builder              also run Setup.bat --builder ^(QAIRT SDK ~2GB, converter venv, VS tools^)
 echo   --no-pause             do not pause at the end
 echo.
+echo Environment variables:
+echo   QAI_NO_PYPI_EXE=1      do not take uv / ast-grep from their PyPI wheels; use the GitHub releases
+echo   QAI_GITHUB_MIRROR=URL  prefix for github.com downloads ^(set automatically for --mirror cn^)
+echo.
+echo uv and ast-grep come from PyPI wheels ^(pypi.org, or the tuna mirror first for cn^), so a blocked
+echo github.com does not stop the core install. Only guard.zip ^(optional FileGuard^) needs GitHub.
+echo.
 echo Installs to the same places as Setup.bat, so Start.bat / qai.bat / Console.bat just work.
 exit /b 0
 
@@ -511,6 +524,24 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference=
 del /f /q "%DL_DIR%\guard.zip" 2>nul
 exit /b 0
 
+REM :pypi_exe <package> <platform> <exe,exe> <outdir> <version|""> - take native exes out of a PyPI wheel
+REM   (scripts\setup\fetch_pypi_exe.ps1). Never fatal: the caller checks the exe and falls back to GitHub.
+REM   Index order follows QAI_NET_PROFILE (cn = tuna first). QAI_NO_PYPI_EXE=1 skips this path.
+:pypi_exe
+if "%QAI_NO_PYPI_EXE%"=="1" ( echo [SKIP] QAI_NO_PYPI_EXE=1: not using PyPI wheels for %~1. & exit /b 0 )
+set "_PF=-Profile official"
+if /i "%QAI_NET_PROFILE%"=="cn" set "_PF=-Profile cn"
+set "_PA="
+if exist "data\bin\aria2c\aria2c.exe" set "_PA=-Aria2cExe "data\bin\aria2c\aria2c.exe""
+set "_PP="
+if defined HTTPS_PROXY set "_PP=-ProxyUrl "%HTTPS_PROXY%""
+set "_PV="
+if not "%~5"=="" set "_PV=-Version %~5"
+echo [INFO] %~1 from PyPI wheel ^(%~2^)...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup\fetch_pypi_exe.ps1" -Package "%~1" -Platform "%~2" -Exe "%~3" -OutDir "%~4" -WorkDir "%DL_DIR%" %_PV% %_PF% %_PA% %_PP%
+if errorlevel 1 echo [WARN] PyPI wheel path failed for %~1; falling back to the GitHub release.
+exit /b 0
+
 REM :fetch_astgrep - opt-in (--with-astgrep).
 :fetch_astgrep
 if exist "vendor\bin\%HOST_ARCH%\ast-grep.exe" (
@@ -518,6 +549,10 @@ if exist "vendor\bin\%HOST_ARCH%\ast-grep.exe" (
     exit /b 0
 )
 if not exist "vendor\bin\%HOST_ARCH%" mkdir "vendor\bin\%HOST_ARCH%"
+REM Pinned 0.45.1 (same as the GitHub fallback); PyPI wheel first, no GitHub needed.
+call :pypi_exe ast-grep-cli %WHL_PLAT% "ast-grep.exe,sg.exe" "vendor\bin\%HOST_ARCH%" 0.45.1
+if exist "vendor\bin\%HOST_ARCH%\ast-grep.exe" exit /b 0
+echo [INFO] ast-grep: PyPI wheel unavailable, trying the GitHub release...
 set "DL_ZIPTEST=1"
 call :dl "https://github.com/ast-grep/ast-grep/releases/download/0.45.1/%ASTGREP_ASSET%" "%DL_DIR%\ast-grep.zip" 5000000 300
 if errorlevel 1 ( echo [WARN] ast-grep unavailable; ast_grep / ast_edit tools disabled. & exit /b 0 )
