@@ -426,13 +426,12 @@ $groups = @{
         @('files.pythonhosted.org',     'https://files.pythonhosted.org/'),
         @('github.com (uv/releases)',   'https://github.com/astral-sh/uv/releases/latest')
     )
-    browser = @(@('cdn.playwright.dev (Chromium)', 'https://cdn.playwright.dev/'))
+    browser = @(,@('cdn.playwright.dev (Chromium)', 'https://cdn.playwright.dev/'))
     # softwarecenter.qualcomm.com (QAIRT) is deliberately NOT probed: it is reachable where the
     # installer runs, but its TLS handshake sometimes takes 12-14 s, so a short probe timeout
     # reported false failures.
-    builder = @(
-        @('python.org (signed Python)',          'https://www.python.org/')
-    )
+    # single-entry groups need the unary comma, else PowerShell flattens @(@(a,b)) to (a,b)
+    builder = @(,@('python.org (signed Python)', 'https://www.python.org/'))
     frontend = @(
         @('nodejs.org (Node.js zip)',   'https://nodejs.org/dist/index.json'),
         @('registry.npmjs.org (npm)',   'https://registry.npmjs.org/pnpm')
