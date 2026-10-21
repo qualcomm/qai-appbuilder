@@ -222,7 +222,10 @@ echo.
 echo -- Step 4/7: vendor wheels / native helpers ---------------------------------
 set "USE_VENDOR=0"
 if /i "%HOST_ARCH%"=="arm64" (
-    if not exist "vendor\whl\qai_appbuilder-%QAI_APPBUILDER_VERSION%-cp313-cp313-win_arm64.whl" call :fetch_vendor
+    if not exist "vendor\whl\qai_appbuilder-%QAI_APPBUILDER_VERSION%-cp313-cp313-win_arm64.whl" (
+        call :fetch_vendor
+        if errorlevel 1 goto :fail_vendor
+    )
     call :tick "4a vendor-deps bundle (arm64)"
     if exist "vendor\whl\qai_appbuilder-%QAI_APPBUILDER_VERSION%-cp313-cp313-win_arm64.whl" set "USE_VENDOR=1"
 ) else (
@@ -352,6 +355,14 @@ goto :fail
 :fail_venv
 echo [ERROR] venv creation failed. On a clean Windows box install the VC++ Redistributable
 echo [ERROR] ^(https://aka.ms/vs/17/release/vc_redist.%HOST_ARCH%.exe^); on a WDAC-locked box use Setup.bat instead.
+goto :fail
+:fail_vendor
+echo [ERROR] The ARM64 vendor bundle ^(vendor-deps.7z^) could not be downloaded or unpacked, so the install is stopped:
+echo [ERROR] ARM64 needs its wheels ^(aiohttp, cryptography, numpy, qai_appbuilder ...^) and they are not on PyPI.
+echo [ERROR]   * Just run setup_env.bat again ^(a damaged archive is deleted automatically^).
+echo [ERROR]   * Slow or blocked link: use --proxy http://host:port
+echo [ERROR]   * Manual download: %VDEPS_URL%
+echo [ERROR]     save it as  %ROOT_DIR%%DL_DIR%\vendor-deps.7z  and run setup_env.bat again.
 goto :fail
 :fail_install
 echo [ERROR] dependency install failed. Re-run is safe ^(resumes^). Try --mirror cn or --proxy http://host:port
@@ -492,10 +503,8 @@ if not exist "%DL_DIR%\vendor-deps.7z" (
     call :dl "%VDEPS_URL%" "%DL_DIR%\vendor-deps.7z" 20000000 1800
 )
 if not exist "%DL_DIR%\vendor-deps.7z" (
-    echo [WARN] vendor-deps.7z download failed. Download it manually from:
-    echo [WARN]     %VDEPS_URL%
-    echo [WARN] to %DL_DIR%\vendor-deps.7z and re-run.
-    exit /b 0
+    echo [ERROR] vendor-deps.7z download failed.
+    exit /b 1
 )
 REM Unpack: the Windows built-in tar.exe ^(bsdtar^) reads .7z, so no extra download. The archive uses an
 REM ARM64 BCJ filter that older bsdtar builds may not know, so the result is verified and 7zr.exe
@@ -517,15 +526,21 @@ if /i not "%QAI_UNPACK%"=="7zr" if exist "%SystemRoot%\System32\tar.exe" (
 )
 if not defined _UNPACKED call :unpack_7zr
 if not defined _UNPACKED (
-    echo [WARN] could not unpack vendor-deps.7z; deleting it so the next run downloads a fresh copy.
+    echo [ERROR] vendor-deps.7z could not be unpacked ^(damaged download?^). The file was deleted so the next run fetches a fresh copy.
     del /f /q "%DL_DIR%\vendor-deps.7z" 2>nul
     rmdir /s /q "%_VD%" 2>nul
-    exit /b 0
+    exit /b 1
 )
 if not exist "vendor" mkdir "vendor"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$t='%_VD%'; $s= if (Test-Path (Join-Path $t 'vendor')) { Join-Path $t 'vendor' } else { $t }; foreach ($n in 'whl','tiktoken','nltk_data','g2p_data') { $p=Join-Path $s $n; if (Test-Path $p) { Copy-Item -LiteralPath $p -Destination 'vendor' -Recurse -Force } }; New-Item -ItemType Directory -Force 'vendor\bin\arm64' | Out-Null; $b=Join-Path $s 'bin\arm64'; if (Test-Path $b) { Copy-Item -Path (Join-Path $b '*') -Destination 'vendor\bin\arm64' -Recurse -Force }"
 rmdir /s /q "%_VD%" 2>nul
-if exist "vendor\whl" ( del /f /q "%DL_DIR%\vendor-deps.7z" 2>nul & echo [OK]   vendor bundle merged. )
+if not exist "vendor\whl\qai_appbuilder-%QAI_APPBUILDER_VERSION%-cp313-cp313-win_arm64.whl" (
+    echo [ERROR] the unpacked bundle has no vendor\whl\qai_appbuilder-%QAI_APPBUILDER_VERSION%-cp313-cp313-win_arm64.whl ^(wrong or incomplete archive^).
+    del /f /q "%DL_DIR%\vendor-deps.7z" 2>nul
+    exit /b 1
+)
+del /f /q "%DL_DIR%\vendor-deps.7z" 2>nul
+echo [OK]   vendor bundle merged.
 exit /b 0
 
 REM :unpack_7zr - fallback unpacker: fetch 7zr.exe ^(~0.6MB^) if needed, unpack into %_VD%. Sets _UNPACKED=7zr on success.
