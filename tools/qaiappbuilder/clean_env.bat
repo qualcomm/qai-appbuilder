@@ -151,10 +151,20 @@ if defined _UV (
 set "_PYROOT=%APPDATA%\uv\python"
 if defined UV_PYTHON_INSTALL_DIR set "_PYROOT=%UV_PYTHON_INSTALL_DIR%"
 REM Fallback / leftovers (minor-version links, no uv available): delete dirs directly.
-for %%G in (%_GLOBS%) do (
-    for /d %%D in ("%_PYROOT%\%%G") do call :rm_dir "%%~fD"
-)
+REM NOTE: plain `for %%G in (a*b)` expands wildcards against the CURRENT dir, so the
+REM patterns must be matched with `for /d` on the full path, one pattern at a time.
+call :purge_glob "%_PYROOT%" %_GLOBS%
 exit /b 0
+
+REM :purge_glob <root> <pattern> [<pattern> ...]
+:purge_glob
+set "_PR=%~1"
+shift
+:purge_glob_next
+if "%~1"=="" exit /b 0
+for /d %%D in ("%_PR%\%~1") do call :rm_dir "%%~fD"
+shift
+goto :purge_glob_next
 
 :rm_dir
 if not exist "%~1" exit /b 0
