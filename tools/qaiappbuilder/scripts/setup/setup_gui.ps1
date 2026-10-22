@@ -408,13 +408,15 @@ $tip.SetToolTip($cbMirror, $S.MirrorTip)
 $pg1.Controls.Add($cbMirror)
 $MirrorKeys = @('auto', 'official', 'cn')
 
-$chkSkip = New-Ctl 'CheckBox' 12 420 700 22 $S.Skip
+# Width stops left of the network-log button (x=640): a wider box sits on top of it and hides its left part.
+$chkSkip = New-Ctl 'CheckBox' 12 420 620 22 $S.Skip
 $chkSkip.Anchor = $AnchorBL
 $pg1.Controls.Add($chkSkip)
 
 $btnNetLog = New-Ctl 'Button' 640 416 148 26 $S.OpenNetLog
 $btnNetLog.Anchor = [System.Windows.Forms.AnchorStyles]'Bottom, Right'
 $pg1.Controls.Add($btnNetLog)
+$btnNetLog.BringToFront()
 
 # Detail box: path of the network log, or the exact error of the selected row.
 $lblNet = New-Ctl 'TextBox' 12 448 776 56 $S.DetailHint
@@ -1006,6 +1008,25 @@ if ($SelfTest) {
     #  page state and the pages' intended visibility flags instead.)
     function PageIs([int]$n) { ($script:Page -eq $n) -and ($pg1.Tag -eq ($n -eq 1)) -and ($pg2.Tag -eq ($n -eq 2)) -and ($pg3.Tag -eq ($n -eq 3)) }
     Check 'page1 visible at start' (PageIs 1)
+    # Layout: no sibling control may overlap a button on page 1 (a wide CheckBox once hid the left of the log button).
+    $overlap = @()
+    foreach ($b in $pg1.Controls | Where-Object { $_ -is [System.Windows.Forms.Button] }) {
+        foreach ($o in $pg1.Controls) {
+            if ($o -ne $b -and $o.Bounds.IntersectsWith($b.Bounds)) { $overlap += "$($b.Text) <> $($o.GetType().Name) '$($o.Text)'" }
+        }
+    }
+    if ($overlap) { Write-Output ('  overlap: ' + ($overlap -join '; ')) }
+    Check 'page1 buttons do not overlap other controls' ($overlap.Count -eq 0)
+    # Every control must stay inside the page, and the button caption must fit the button width.
+    $tooWide = @($pg1.Controls | Where-Object { $_.Right -gt $pg1.Width -or $_.Bottom -gt $pg1.Height })
+    Check 'page1 controls inside the page' ($tooWide.Count -eq 0)
+    $clipped = @()
+    foreach ($b in $pg1.Controls | Where-Object { $_ -is [System.Windows.Forms.Button] }) {
+        $w = [System.Windows.Forms.TextRenderer]::MeasureText($b.Text, $b.Font).Width + 16
+        if ($w -gt $b.Width) { $clipped += "$($b.Text) needs $w > $($b.Width)" }
+    }
+    if ($clipped) { Write-Output ('  clipped: ' + ($clipped -join '; ')) }
+    Check 'page1 button captions fit' ($clipped.Count -eq 0)
     Check 'next disabled before test/skip' (-not $btnNext.Enabled)
     $chkSkip.Checked = $true
     Check 'next enabled after skip' $btnNext.Enabled
