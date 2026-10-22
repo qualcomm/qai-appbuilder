@@ -107,12 +107,22 @@ set "VENV_DIR=%ENVS_DIR%\%VENV_DIR_NAME%"
 set "VPY=%VENV_DIR%\Scripts\python.exe"
 set "DL_DIR=data\downloads"
 set "UV_BIN_DIR=data\bin\uv"
-set "QAI_APPBUILDER_VERSION=2.48.40"
-REM x64 wheel = the pure x86_64 build published on the GitHub release as <version>.1. The PyPI
-REM qai_appbuilder==2.48.40 win_amd64 wheel is an ARM64EC build (libappbuilder.dll etc. are ARM64EC
-REM binaries with ARM64 entry code), which cannot load on an Intel/AMD machine, so x64 never uses PyPI.
-set "QAI_APPBUILDER_X64_VERSION=%QAI_APPBUILDER_VERSION%.1"
-set "RELEASE_BASE=https://github.com/qualcomm/qai-appbuilder/releases/download/v%QAI_APPBUILDER_VERSION%"
+REM qai_appbuilder wheel selection.
+REM   QAI_AB_RELEASE_TAG  GitHub release tag (v<tag>) - the same for every architecture.
+REM   QAI_AB_WHL_VERSION  version of the wheel to install - depends on the architecture:
+REM                         x64   <tag>.1  pure x86_64 build, published on the GitHub release.
+REM                                        (The PyPI win_amd64 wheel <tag> is an ARM64EC build: its
+REM                                         libappbuilder.dll etc. carry ARM64 entry code and cannot load
+REM                                         on an Intel/AMD CPU, so x64 never installs from PyPI.)
+REM                         arm64 <tag>    vendored wheel in vendor\whl.
+set "QAI_AB_RELEASE_TAG=2.48.40"
+if /i "%HOST_ARCH%"=="x64" (
+    set "QAI_AB_WHL_VERSION=%QAI_AB_RELEASE_TAG%.1"
+) else (
+    set "QAI_AB_WHL_VERSION=%QAI_AB_RELEASE_TAG%"
+)
+set "QAI_AB_WHL_FILE=qai_appbuilder-%QAI_AB_WHL_VERSION%-cp313-cp313-%WHL_PLAT%.whl"
+set "RELEASE_BASE=https://github.com/qualcomm/qai-appbuilder/releases/download/v%QAI_AB_RELEASE_TAG%"
 set "VDEPS_URL=https://www.aidevhome.com/data/adh2/attr/vendor-deps.7z"
 
 echo.
@@ -226,12 +236,12 @@ echo.
 echo -- Step 4/7: vendor wheels / native helpers ---------------------------------
 set "USE_VENDOR=0"
 if /i "%HOST_ARCH%"=="arm64" (
-    if not exist "vendor\whl\qai_appbuilder-%QAI_APPBUILDER_VERSION%-cp313-cp313-win_arm64.whl" (
+    if not exist "vendor\whl\%QAI_AB_WHL_FILE%" (
         call :fetch_vendor
         if errorlevel 1 goto :fail_vendor
     )
     call :tick "4a vendor-deps bundle (arm64)"
-    if exist "vendor\whl\qai_appbuilder-%QAI_APPBUILDER_VERSION%-cp313-cp313-win_arm64.whl" set "USE_VENDOR=1"
+    if exist "vendor\whl\%QAI_AB_WHL_FILE%" set "USE_VENDOR=1"
 ) else (
     echo [SKIP] x64: ARM64 vendor wheels / openblas are not needed ^(saves ~190MB^).
 )
@@ -538,8 +548,8 @@ if not defined _UNPACKED (
 if not exist "vendor" mkdir "vendor"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$t='%_VD%'; $s= if (Test-Path (Join-Path $t 'vendor')) { Join-Path $t 'vendor' } else { $t }; foreach ($n in 'whl','tiktoken','nltk_data','g2p_data') { $p=Join-Path $s $n; if (Test-Path $p) { Copy-Item -LiteralPath $p -Destination 'vendor' -Recurse -Force } }; New-Item -ItemType Directory -Force 'vendor\bin\arm64' | Out-Null; $b=Join-Path $s 'bin\arm64'; if (Test-Path $b) { Copy-Item -Path (Join-Path $b '*') -Destination 'vendor\bin\arm64' -Recurse -Force }"
 rmdir /s /q "%_VD%" 2>nul
-if not exist "vendor\whl\qai_appbuilder-%QAI_APPBUILDER_VERSION%-cp313-cp313-win_arm64.whl" (
-    echo [ERROR] the unpacked bundle has no vendor\whl\qai_appbuilder-%QAI_APPBUILDER_VERSION%-cp313-cp313-win_arm64.whl ^(wrong or incomplete archive^).
+if not exist "vendor\whl\%QAI_AB_WHL_FILE%" (
+    echo [ERROR] the unpacked bundle has no vendor\whl\%QAI_AB_WHL_FILE% ^(wrong or incomplete archive^).
     del /f /q "%DL_DIR%\vendor-deps.7z" 2>nul
     exit /b 1
 )
@@ -669,37 +679,37 @@ REM :install_qai_appbuilder
 :install_qai_appbuilder
 if /i "%HOST_ARCH%"=="arm64" goto :qab_arm64
 
-REM ---- x64: GitHub release wheel %QAI_APPBUILDER_X64_VERSION% only (never PyPI, see the note at the top) ----
+REM ---- x64: GitHub release wheel %QAI_AB_WHL_VERSION% only (never PyPI, see the note at the top) ----
 REM Skip only when exactly this version is installed. A bare prefix test on 2.48.40 would also accept
 REM the PyPI ARM64EC wheel (2.48.40) and leave a broken package in place. Read the version from the
 REM package metadata, not from import, so a wheel that cannot be imported is still recognised.
-"%VPY%" -c "import importlib.metadata as m, sys; sys.exit(0 if m.version('qai_appbuilder')=='%QAI_APPBUILDER_X64_VERSION%' else 1)" >nul 2>&1
+"%VPY%" -c "import importlib.metadata as m, sys; sys.exit(0 if m.version('qai_appbuilder')=='%QAI_AB_WHL_VERSION%' else 1)" >nul 2>&1
 if not errorlevel 1 (
-    echo [SKIP] qai_appbuilder %QAI_APPBUILDER_X64_VERSION% already installed.
+    echo [SKIP] qai_appbuilder %QAI_AB_WHL_VERSION% already installed.
     exit /b 0
 )
-set "_WN=qai_appbuilder-%QAI_APPBUILDER_X64_VERSION%-cp313-cp313-win_amd64.whl"
+set "_WN=%QAI_AB_WHL_FILE%"
 REM A cached file below MinSize is a partial download from an earlier run: drop it and fetch again.
 if exist "%DL_DIR%\%_WN%" for %%F in ("%DL_DIR%\%_WN%") do if %%~zF LSS 500000 del /f /q "%DL_DIR%\%_WN%"
 if not exist "%DL_DIR%\%_WN%" (
-    echo [INFO] downloading qai_appbuilder %QAI_APPBUILDER_X64_VERSION% ^(x64^) from the GitHub release...
+    echo [INFO] downloading qai_appbuilder %QAI_AB_WHL_VERSION% ^(x64^) from the GitHub release...
     call :dl "%RELEASE_BASE%/%_WN%" "%DL_DIR%\%_WN%" 500000 300
 )
 if not exist "%DL_DIR%\%_WN%" goto :qab_fail
 "%UV_EXE%" pip install --reinstall --no-deps "%DL_DIR%\%_WN%"
 if errorlevel 1 goto :qab_fail
-echo [OK]   qai_appbuilder %QAI_APPBUILDER_X64_VERSION% installed ^(x64, GitHub release^).
+echo [OK]   qai_appbuilder %QAI_AB_WHL_VERSION% installed ^(x64, GitHub release^).
 exit /b 0
 
 :qab_arm64
-REM ---- ARM64: vendored wheel (offline-safe), version %QAI_APPBUILDER_VERSION% ----
-"%VPY%" -c "import importlib.metadata as m, sys; sys.exit(0 if m.version('qai_appbuilder')=='%QAI_APPBUILDER_VERSION%' else 1)" >nul 2>&1
+REM ---- ARM64: vendored wheel (offline-safe), version %QAI_AB_WHL_VERSION% ----
+"%VPY%" -c "import importlib.metadata as m, sys; sys.exit(0 if m.version('qai_appbuilder')=='%QAI_AB_WHL_VERSION%' else 1)" >nul 2>&1
 if not errorlevel 1 (
-    echo [SKIP] qai_appbuilder %QAI_APPBUILDER_VERSION% already installed.
+    echo [SKIP] qai_appbuilder %QAI_AB_WHL_VERSION% already installed.
     exit /b 0
 )
-if exist "vendor\whl\qai_appbuilder-%QAI_APPBUILDER_VERSION%-cp313-cp313-win_arm64.whl" (
-    "%UV_EXE%" pip install --reinstall --no-deps "vendor\whl\qai_appbuilder-%QAI_APPBUILDER_VERSION%-cp313-cp313-win_arm64.whl"
+if exist "vendor\whl\%QAI_AB_WHL_FILE%" (
+    "%UV_EXE%" pip install --reinstall --no-deps "vendor\whl\%QAI_AB_WHL_FILE%"
     if not errorlevel 1 exit /b 0
 )
 :qab_fail
