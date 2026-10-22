@@ -466,8 +466,8 @@ if ($ProbeAll) {
     if ($Only) { $rec = 'partial'; $why = 'subset probed (-Only); caller decides' }
     elseif ($offOk) {
         $rec = 'official'; $why = 'official sources reachable'
-        # Much slower than the mirror (e.g. 3x and > 1.5 s) -> suggest cn.
-        if ($cnOk -and $res['pypi|official'].ms -gt 1500 -and $res['pypi|official'].ms -gt 3 * $res['pypi|cn'].ms) { $rec = 'cn'; $why = 'official sources reachable but much slower than the cn mirrors' }
+        # Much slower than the mirror (> 2x and > 500 ms) -> suggest cn.
+        if ($cnOk -and $res['pypi|official'].ms -gt 500 -and $res['pypi|official'].ms -gt 2 * $res['pypi|cn'].ms) { $rec = 'cn'; $why = 'official sources reachable but much slower than the cn mirrors' }
     } elseif ($cnOk) { $rec = 'cn'; $why = 'official sources unreachable, cn mirrors reachable' }
     else { $rec = 'blocked'; $why = 'neither official sources nor cn mirrors fully reachable - set a proxy' }
     Write-Host "[NET] recommend: $rec ($why)"
@@ -540,12 +540,12 @@ if (-not $NoProbe) {
 
 # ---- profile decision ------------------------------------------------------
 # Official sources reachable -> still compare with the cn mirror and switch only when the official
-# PyPI is clearly slower: > 1500 ms AND more than 3x the mirror's latency. Same rule as the GUI's
+# PyPI is clearly slower: > 500 ms AND more than 2x the mirror's latency. Same rule as the GUI's
 # Get-NetRecommend (setup_gui.ps1), so the command line and the window pick the same profile.
 # Latency here is the HEAD round trip, not download bandwidth.
 function Select-AutoProfile([bool]$OfficialOk, $OfficialMs, $CnOk, $CnMs) {
     if ($OfficialOk) {
-        if ($CnOk -and $OfficialMs -gt 1500 -and $OfficialMs -gt 3 * $CnMs) { return @{ profile = 'cn'; why = "official PyPI is slow ($OfficialMs ms) vs the cn mirror ($CnMs ms)" } }
+        if ($CnOk -and $OfficialMs -gt 500 -and $OfficialMs -gt 2 * $CnMs) { return @{ profile = 'cn'; why = "official PyPI is slow ($OfficialMs ms) vs the cn mirror ($CnMs ms)" } }
         return @{ profile = 'official'; why = 'official sources reachable' }
     }
     if ($CnOk) { return @{ profile = 'cn'; why = 'official source unreachable but cn mirror reachable' } }
@@ -568,7 +568,7 @@ if ($Mirror -eq 'auto') {
         # Always record the numbers behind the decision, so the log shows why the other profile was not picked.
         $offTxt = if (-not $results.ContainsKey('pypi.org (PyPI)')) { 'not probed' } elseif ($pypiOk) { "$offMs ms" } else { 'unreachable' }
         $cnTxt  = if (-not $cnR) { 'not probed' } elseif ($cnR.ok) { "$cnMs ms" } else { 'unreachable' }
-        $detail = "official: $offTxt, cn mirror: $cnTxt; cn is chosen only when official is unreachable, or > 1500 ms and > 3x slower"
+        $detail = "official: $offTxt, cn mirror: $cnTxt; cn is chosen only when official is unreachable, or > 500 ms and > 2x slower"
         Write-Host "[NET] auto: $($pick.why) -> $profile"
         Write-Host "[NET]   ($detail)"
         Write-Log "AUTO: $profile - $($pick.why) [$detail]"

@@ -271,7 +271,7 @@ function Get-NetRecommend($items) {
     $cnOk  = (Ok 'pypi' 'cn') -and (Ok 'python' 'cn')
     if ($offOk) {
         $po = [long]$m['pypi'].official.ms
-        if ($cnOk -and $po -gt 1500 -and $po -gt 3 * [long]$m['pypi'].cn.ms) { return 'cnslow' }
+        if ($cnOk -and $po -gt 500 -and $po -gt 2 * [long]$m['pypi'].cn.ms) { return 'cnslow' }
         return 'official'
     }
     if ($cnOk) { return 'cn' }
