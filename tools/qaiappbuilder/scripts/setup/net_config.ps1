@@ -459,7 +459,9 @@ $pypiOk = $true
 if (-not $NoProbe) {
     Write-Host '[NET] connectivity probe (HEAD, retried on DNS/timeout errors):'
     $list = @()
-    foreach ($g in ($Need -split ',')) { if ($groups.ContainsKey($g.Trim())) { $list += $groups[$g.Trim()] } }
+    # -Need may list a group twice (setup_env.bat builds "core,browser,browser,builder" for --builder with --with-browser): probe each group once.
+    $seenGroups = @{}
+    foreach ($g in ($Need -split ',')) { $g = $g.Trim(); if ($groups.ContainsKey($g) -and -not $seenGroups.ContainsKey($g)) { $seenGroups[$g] = $true; $list += $groups[$g] } }
     Write-EnvDiag @($list | ForEach-Object { $_[1] } | Where-Object { $_ }) 
     Show-Probes $list
     # Only judge a group that was actually probed (build_frontend probes frontend only).
