@@ -5,19 +5,23 @@ REM SPDX-License-Identifier: BSD-3-Clause
 REM ---------------------------------------------------------------------
 REM clean_env.bat - remove what setup_env.bat installed.
 REM
-REM Default (safe): the venv for the selected arch, install-time downloads
+REM Default (safe): the runtime venv for the selected arch AND the x64 Python 3.10 converter venv
+REM   (.venv_x64_310, created by --builder), install-time downloads
 REM   (data\downloads), the downloaded helper tools (data\bin\uv|aria2c|7zr),
 REM   data\config\host_arch and the fetched vendor bundle (vendor\whl|bin|...).
 REM NOT touched by default: data\ user data (qai.db, logs, weights, config),
-REM   uv-managed Python builds, the x64 converter venv, QAIRT SDK, PortableGit.
+REM   uv-managed Python builds, QAIRT SDK, Node/pnpm, frontend\dist, PortableGit.
 REM
 REM Options:
-REM   --arch arm64^|x64   which venv to remove (default: host_arch file, else detect)
+REM   --arch arm64^|x64   which runtime venv to remove (default: host_arch file, else detect)
 REM   --purge-data       also delete the WHOLE data\ directory (user data!)
 REM   --purge-python     also remove uv-managed cpython-3.13 for this arch
 REM                      (with --all-envs: 3.13 arm64+x64 and the 3.10 x64 converter)
 REM                      ^(shared by other QAI installs on this machine^)
 REM   --all-envs         remove every venv under %LOCALAPPDATA%\QAIModelBuilder\envs
+REM   --purge-qairt      also remove the QAIRT SDK installed by --builder: C:\Qualcomm\AIStack\QAIRT\<ver>
+REM                      (only the version pinned in scripts\qairt_release.json), the kept SDK zip
+REM                      data\sdk\qairt, the script backup data\sdk\qairt-scripts, data\config\qairt_env.json
 REM   --purge-frontend   also remove what build_frontend.bat installed: portable Node
 REM                      (%LOCALAPPDATA%\QAIModelBuilder\node), corepack cache, pnpm shim,
 REM                      frontend\node_modules and data\pnpm-virtual-store.
@@ -37,6 +41,7 @@ set "PURGE_PY=0"
 set "ALL_ENVS=0"
 set "PURGE_FE=0"
 set "PURGE_DIST=0"
+set "PURGE_QAIRT=0"
 set "DRY=0"
 set "YES=0"
 set "NO_PAUSE=0"
@@ -51,6 +56,7 @@ if /i "%~1"=="--purge-python" ( set "PURGE_PY=1"   & shift & goto :parse )
 if /i "%~1"=="--all-envs"     ( set "ALL_ENVS=1"   & shift & goto :parse )
 if /i "%~1"=="--purge-frontend" ( set "PURGE_FE=1" & shift & goto :parse )
 if /i "%~1"=="--purge-dist"   ( set "PURGE_DIST=1" & shift & goto :parse )
+if /i "%~1"=="--purge-qairt"  ( set "PURGE_QAIRT=1" & shift & goto :parse )
 if /i "%~1"=="--dry-run"      ( set "DRY=1"        & shift & goto :parse )
 if /i "%~1"=="--yes"          ( set "YES=1"        & shift & goto :parse )
 if /i "%~1"=="-y"             ( set "YES=1"        & shift & goto :parse )
@@ -80,13 +86,21 @@ set "PY_SPEC=cpython-3.13-windows-aarch64"
 if /i "%HOST_ARCH%"=="x64" ( set "VENV_DIR_NAME=.venv_x64_313" & set "PY_SPEC=cpython-3.13-windows-x86_64" )
 set "ENVS_DIR=%LOCALAPPDATA%\QAIModelBuilder\envs"
 set "VENV_DIR=%ENVS_DIR%\%VENV_DIR_NAME%"
+set "VENV_310_DIR=%ENVS_DIR%\.venv_x64_310"
 set "QAI_LAD=%LOCALAPPDATA%\QAIModelBuilder"
+set "QAIRT_DIR="
+if "%PURGE_QAIRT%"=="0" goto :qairt_resolved
+set "QAIRT_VERSION="
+if exist "scripts\qairt_release.json" for /f "usebackq delims=" %%V in (`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "try { (Get-Content -Raw -LiteralPath 'scripts\qairt_release.json' | ConvertFrom-Json).qairt_version } catch { exit 1 }" 2^>nul`) do set "QAIRT_VERSION=%%V"
+if not defined QAIRT_VERSION ( echo [ERROR] --purge-qairt: could not read qairt_version from scripts\qairt_release.json. & endlocal & exit /b 2 )
+set "QAIRT_DIR=C:\Qualcomm\AIStack\QAIRT\%QAIRT_VERSION%"
+:qairt_resolved
 
 echo.
 echo  QAI ModelBuilder - clean_env   ^(arch=%HOST_ARCH%^)
 echo  ------------------------------------------------------------
 echo  will remove:
-if "%ALL_ENVS%"=="1" ( echo    - %ENVS_DIR%  ^(all venvs^) ) else ( echo    - %VENV_DIR% )
+if "%ALL_ENVS%"=="1" ( echo    - %ENVS_DIR%  ^(all venvs^) ) else ( echo    - %VENV_DIR%  and  %VENV_310_DIR% )
 echo    - data\downloads  data\bin\uv  data\bin\aria2c  data\bin\7zr  data\config\host_arch
 echo    - vendor\whl  vendor\bin  vendor\tiktoken  vendor\nltk_data  vendor\g2p_data  vendor\openblas
 if "%PURGE_PY%"=="1" if "%ALL_ENVS%"=="0" echo    - uv-managed %PY_SPEC%
@@ -94,6 +108,7 @@ if "%PURGE_PY%"=="1" if "%ALL_ENVS%"=="1" echo    - uv-managed cpython-3.13 ^(ar
 if "%PURGE_DATA%"=="1" echo    - data\   ^(ALL user data: qai.db, logs, weights, config^)
 if "%PURGE_FE%"=="1" echo    - %QAI_LAD%\node  \corepack  \pnpm-shim  frontend\node_modules  data\pnpm-virtual-store
 if "%PURGE_DIST%"=="1" echo    - frontend\dist   ^(built WebUI^)
+if "%PURGE_QAIRT%"=="1" echo    - %QAIRT_DIR%  data\sdk\qairt  data\sdk\qairt-scripts  data\config\qairt_env.json
 if "%DRY%"=="1" echo  ^(dry run - nothing is deleted^)
 echo.
 
@@ -106,11 +121,11 @@ if /i not "%_ANS%"=="y" ( echo Aborted. & endlocal & exit /b 1 )
 
 REM ---- stop processes that run from the venv (they lock files) --------------
 if "%DRY%"=="0" (
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$p = @(if ('%ALL_ENVS%' -eq '1') { '%ENVS_DIR%' } else { '%VENV_DIR%' }); if ('%PURGE_FE%' -eq '1') { $p += '%QAI_LAD%\node' }; Get-CimInstance Win32_Process | Where-Object { $e = $_.ExecutablePath; $e -and ($p | Where-Object { $e.StartsWith($_, 'OrdinalIgnoreCase') }) } | ForEach-Object { Write-Host ('[INFO] stopping pid ' + $_.ProcessId + ' ' + $_.Name); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$p = @(if ('%ALL_ENVS%' -eq '1') { '%ENVS_DIR%' } else { '%VENV_DIR%', '%VENV_310_DIR%' }); if ('%PURGE_FE%' -eq '1') { $p += '%QAI_LAD%\node' }; Get-CimInstance Win32_Process | Where-Object { $e = $_.ExecutablePath; $e -and ($p | Where-Object { $e.StartsWith($_, 'OrdinalIgnoreCase') }) } | ForEach-Object { Write-Host ('[INFO] stopping pid ' + $_.ProcessId + ' ' + $_.Name); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
 )
 
 set "_FAIL=0"
-if "%ALL_ENVS%"=="1" ( call :rm_dir "%ENVS_DIR%" ) else ( call :rm_dir "%VENV_DIR%" )
+if "%ALL_ENVS%"=="1" ( call :rm_dir "%ENVS_DIR%" ) else ( call :rm_dir "%VENV_DIR%" & call :rm_dir "%VENV_310_DIR%" )
 
 REM --purge-python must run BEFORE data\bin\uv is removed (it needs uv.exe).
 if "%PURGE_PY%"=="1" call :purge_python
@@ -136,6 +151,14 @@ if "%PURGE_FE%"=="1" (
     call :rm_dir "%QAI_LAD%\pnpm-shim"
 )
 if "%PURGE_DIST%"=="1" call :rm_dir "frontend\dist"
+
+if "%PURGE_QAIRT%"=="1" (
+    call :rm_dir "%QAIRT_DIR%"
+    call :rm_dir "C:\Qualcomm\AIStack\QAIRT\_extract_tmp"
+    call :rm_dir "data\sdk\qairt"
+    call :rm_dir "data\sdk\qairt-scripts"
+    call :rm_file "data\config\qairt_env.json"
+)
 
 if "%PURGE_DATA%"=="1" call :rm_dir "data"
 
@@ -204,6 +227,22 @@ if exist "%~1" ( echo [FAIL] could not remove %~1 & set "_FAIL=1" ) else ( echo 
 exit /b 0
 
 :help
-echo Usage: clean_env.bat [--arch arm64^|x64] [--purge-data] [--purge-python] [--all-envs] [--purge-frontend] [--purge-dist] [--dry-run] [-y] [--no-pause]
-echo See the header of this file for details.
+echo Usage: clean_env.bat [options]
+echo.
+echo   Default: runtime venv ^(.venv_^<arch^>_313^) + x64 converter venv ^(.venv_x64_310^),
+echo            data\downloads, data\bin\uv^|aria2c^|7zr, data\config\host_arch, vendor bundle.
+echo.
+echo   --arch arm64^|x64     which runtime venv ^(default: data\config\host_arch, else detect^)
+echo   --all-envs           every venv under %%LOCALAPPDATA%%\QAIModelBuilder\envs
+echo   --purge-python       uv-managed Python builds ^(shared with other installs^)
+echo   --purge-qairt        QAIRT SDK C:\Qualcomm\AIStack\QAIRT\^<pinned ver^> + data\sdk\qairt* + qairt_env.json
+echo   --purge-frontend     portable Node, corepack, pnpm shim, frontend\node_modules, data\pnpm-virtual-store
+echo   --purge-dist         frontend\dist ^(built WebUI^)
+echo   --purge-data         the WHOLE data\ directory ^(user data!^)
+echo   --dry-run            only print what would be removed
+echo   -y, --yes            no confirmation prompt
+echo   --no-pause
+echo.
+echo   Example - remove everything setup installed except user data:
+echo     clean_env.bat --purge-qairt --purge-frontend --purge-dist
 exit /b 0

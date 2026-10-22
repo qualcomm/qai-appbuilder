@@ -21,6 +21,8 @@ setlocal EnableExtensions
 set "ROOT_DIR=%~dp0"
 cd /d "%ROOT_DIR%"
 set "PYTHONPYCACHEPREFIX=%ROOT_DIR%data\caches\pycache"
+REM Python output goes to a log file in the GUI; unbuffered keeps it in order with the uv output.
+set "PYTHONUNBUFFERED=1"
 
 REM ---- defaults -------------------------------------------------------------
 set "FORCED_ARCH="

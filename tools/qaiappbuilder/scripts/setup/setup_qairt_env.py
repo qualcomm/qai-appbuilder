@@ -1126,8 +1126,7 @@ def install_inference_deps(root):
                 install_cmd = (
                     f'"{uv}" pip install {pip_spec} '
                     f'--python "{python}" '
-                    f'--index-url {_torch_index} '
-                    f'-v'
+                    f'--index-url {_torch_index}'
                 )
             else:
                 install_cmd = f'"{uv}" pip install {pip_spec} --python "{python}"'
