@@ -498,8 +498,13 @@ if ($Mirror -eq 'auto') {
         if ($cnR) { $cnMs = [long]$cnR.ms }
         $pick = Select-AutoProfile $pypiOk $offMs ([bool]($cnR -and $cnR.ok)) $cnMs
         $profile = $pick.profile
+        # Always record the numbers behind the decision, so the log shows why the other profile was not picked.
+        $offTxt = if (-not $results.ContainsKey('pypi.org (PyPI)')) { 'not probed' } elseif ($pypiOk) { "$offMs ms" } else { 'unreachable' }
+        $cnTxt  = if (-not $cnR) { 'not probed' } elseif ($cnR.ok) { "$cnMs ms" } else { 'unreachable' }
+        $detail = "official: $offTxt, cn mirror: $cnTxt; cn is chosen only when official is unreachable, or > 1500 ms and > 3x slower"
         Write-Host "[NET] auto: $($pick.why) -> $profile"
-        Write-Log "AUTO: $($pick.why)"
+        Write-Host "[NET]   ($detail)"
+        Write-Log "AUTO: $profile - $($pick.why) [$detail]"
         if (-not $pypiOk -and $profile -ne 'cn') { Write-Host '[NET] WARN: neither the official source nor the cn mirror is reachable. Set a proxy: --proxy http://host:port' }
     }
 }
