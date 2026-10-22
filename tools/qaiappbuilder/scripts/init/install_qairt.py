@@ -359,6 +359,10 @@ def install_x64_venv(paths: InstallPaths, *, dry_run: bool = False) -> bool:
             "cpython-3.10-windows-x86_64",
             "--seed",
             "--allow-existing",
+            # The converter venv is not the project env: without this uv reads
+            # pyproject.toml (requires-python >=3.12) and warns that 3.10 is
+            # "incompatible".
+            "--no-project",
         ]
     )
     if rc != 0:

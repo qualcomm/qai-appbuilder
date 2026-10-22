@@ -1060,12 +1060,32 @@ def install_inference_deps(root):
     import_names = [imp for _, imp, _ in packages]
     available = _batch_check_imports(python, import_names)
 
+    # Build the install jobs. Every package that comes from the PyTorch index
+    # (torch + torchvision) is merged into ONE job at the position of the first
+    # one: installed one by one, `torch` resolves to the newest release and
+    # `torchvision` then pins an older torch, so uv installs and then replaces
+    # torch (a wasted ~70 MB download + install). A single resolve picks a
+    # matching pair at once. Order is kept (torch still precedes ultralytics).
+    jobs = []
+    torch_job = None
     for pip_spec, import_name, use_torch_index in packages:
         if import_name in available:
             _print_ok(f"{pip_spec} already installed")
             continue
+        if use_torch_index:
+            if torch_job is None:
+                torch_job = {"specs": [], "torch": True}
+                jobs.append(torch_job)
+            torch_job["specs"].append(pip_spec)
+        else:
+            jobs.append({"specs": [pip_spec], "torch": False})
 
-        print(f"[INFO] Installing {pip_spec}...")
+    for job in jobs:
+        use_torch_index = job["torch"]
+        label = " + ".join(job["specs"])
+        pip_spec = " ".join(f'"{s}"' for s in job["specs"])  # ready to splice into a command line
+
+        print(f"[INFO] Installing {label}...")
         # Build index URL for torch/torchvision
         if use_torch_index:
             if _detect_platform() == "linux":
@@ -1081,7 +1101,7 @@ def install_inference_deps(root):
             # cuda-toolkit etc.) that PyPI's aarch64 torch may include.
             # If the CPU index has no aarch64 wheel, fall back to PyPI and warn.
             install_cmd = (
-                f'"{python}" -m pip install "{pip_spec}" '
+                f'"{python}" -m pip install {pip_spec} '
                 f'--index-url {_torch_index}'
             )
             print(f"[DEBUG] cmd (pip, CPU index): {install_cmd}")
@@ -1089,57 +1109,57 @@ def install_inference_deps(root):
             print(f"[DEBUG] returncode ok={ok}")
             if not ok:
                 _print_warn(
-                    f"CPU index has no wheel for {pip_spec}; "
+                    f"CPU index has no wheel for {label}; "
                     "falling back to PyPI (may install CUDA version on aarch64)"
                 )
-                fallback_cmd = f'"{python}" -m pip install "{pip_spec}"'
+                fallback_cmd = f'"{python}" -m pip install {pip_spec}'
                 print(f"[DEBUG] fallback cmd: {fallback_cmd}")
                 ok, out, err = _run(fallback_cmd, capture=False)
                 print(f"[DEBUG] returncode ok={ok}")
                 if not ok:
-                    _print_err(f"Failed to install {pip_spec} (non-fatal)")
-                    print(f"[WARN] Skipping {pip_spec} (non-fatal)")
+                    _print_err(f"Failed to install {label} (non-fatal)")
+                    print(f"[WARN] Skipping {label} (non-fatal)")
                     continue
         elif uv:
             # Prefer uv (faster) for non-Linux or non-torch packages
             if _torch_index:
                 install_cmd = (
-                    f'"{uv}" pip install "{pip_spec}" '
+                    f'"{uv}" pip install {pip_spec} '
                     f'--python "{python}" '
                     f'--index-url {_torch_index} '
                     f'-v'
                 )
             else:
-                install_cmd = f'"{uv}" pip install "{pip_spec}" --python "{python}"'
+                install_cmd = f'"{uv}" pip install {pip_spec} --python "{python}"'
             print(f"[DEBUG] cmd: {install_cmd}")
             ok, out, err = _run(install_cmd, capture=False)
             print(f"[DEBUG] returncode ok={ok}")
             if not ok:
-                _print_warn(f"uv failed for {pip_spec}, retrying with pip...")
+                _print_warn(f"uv failed for {label}, retrying with pip...")
                 if _torch_index:
-                    _pip_cmd = f'"{python}" -m pip install "{pip_spec}" --index-url {_torch_index}'
+                    _pip_cmd = f'"{python}" -m pip install {pip_spec} --index-url {_torch_index}'
                 else:
-                    _pip_cmd = f'"{python}" -m pip install "{pip_spec}"'
+                    _pip_cmd = f'"{python}" -m pip install {pip_spec}'
                 print(f"[DEBUG] pip retry cmd: {_pip_cmd}")
                 ok, _, _ = _run(_pip_cmd, capture=False)
                 if not ok:
-                    _print_err(f"Failed to install {pip_spec} (uv + pip both failed)")
-                    print(f"[WARN] Skipping {pip_spec} (non-fatal)")
+                    _print_err(f"Failed to install {label} (uv + pip both failed)")
+                    print(f"[WARN] Skipping {label} (non-fatal)")
                     continue
         else:
             # pip fallback (uv not available)
             if _torch_index:
-                install_cmd = f'"{python}" -m pip install "{pip_spec}" --index-url {_torch_index}'
+                install_cmd = f'"{python}" -m pip install {pip_spec} --index-url {_torch_index}'
             else:
-                install_cmd = f'"{python}" -m pip install "{pip_spec}"'
+                install_cmd = f'"{python}" -m pip install {pip_spec}'
             print(f"[DEBUG] pip cmd: {install_cmd}")
             ok, out, err = _run(install_cmd, capture=False)
             print(f"[DEBUG] returncode ok={ok}")
             if not ok:
-                _print_err(f"Failed to install {pip_spec}")
-                print(f"[WARN] Skipping {pip_spec} (non-fatal)")
+                _print_err(f"Failed to install {label}")
+                print(f"[WARN] Skipping {label} (non-fatal)")
                 continue
-        _print_ok(f"{pip_spec} installed")
+        _print_ok(f"{label} installed")
 
     # Auto-chain App Builder Pack dependency aggregation. Done here (rather
     # than from a separate .bat step) so the install flow — Setup.bat Step 8,
