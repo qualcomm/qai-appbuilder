@@ -351,6 +351,18 @@ if not exist "frontend\dist\index.html" (
     echo [WARN]     build_frontend.bat     ^(installs Node.js + pnpm if needed, ~1-2 min^)
 )
 :dist_warn_done
+REM A failed qai_appbuilder install is easy to miss in a long log: repeat it where the user is looking.
+if defined QAB_MISSING (
+    echo.
+    echo  ################################################################
+    echo   [ATTENTION] qai_appbuilder is NOT installed - NPU inference will not work.
+    echo   Everything else is set up and the Model Builder UI starts normally.
+    echo   Cause : its download/install failed ^(see the [WARN] lines above; for x64 the wheel
+    echo           comes from github.com^).
+    echo   Fix   : check the proxy / GitHub access, then run setup_env.bat again - it only
+    echo           fetches what is missing.
+    echo  ################################################################
+)
 echo.
 echo  ================================================================
 echo      setup_env finished ^(arch=%HOST_ARCH%, profile=%QAI_NET_PROFILE%^)
@@ -488,9 +500,19 @@ exit /b 0
 
 REM :dl <url> <outfile> <minsize> <attempt-timeout-sec>
 REM   Honors QAI_GITHUB_MIRROR, HTTPS_PROXY, DL_ZIPTEST=1, and uses aria2c if present.
+REM   GH_DEAD: once a github.com download has failed after all its retries, github.com is treated as
+REM   unreachable for the rest of this run and later github.com downloads get ONE attempt instead of five
+REM   (otherwise each of them wastes 2-3 more minutes). A success clears it again.
 :dl
 set "_U=%~1"
-if defined QAI_GITHUB_MIRROR if "%_U:~0,19%"=="https://github.com/" set "_U=%QAI_GITHUB_MIRROR%%_U%"
+set "_ISGH=0"
+if "%_U:~0,19%"=="https://github.com/" set "_ISGH=1"
+if defined QAI_GITHUB_MIRROR if "%_ISGH%"=="1" set "_U=%QAI_GITHUB_MIRROR%%_U%"
+set "_RETRY=5"
+if "%_ISGH%"=="1" if defined GH_DEAD (
+    set "_RETRY=1"
+    echo [INFO] github.com already failed earlier in this run: single attempt for this download.
+)
 set "_DLX="
 if defined HTTPS_PROXY set "_DLX=-ProxyUrl "%HTTPS_PROXY%""
 if "%DL_ZIPTEST%"=="1" set "_DLX=%_DLX% -ZipTest"
@@ -498,8 +520,12 @@ set "DL_ZIPTEST="
 set "_ARIA="
 if exist "data\bin\aria2c\aria2c.exe" set "_ARIA=-Aria2cExe "data\bin\aria2c\aria2c.exe""
 echo [INFO] GET %_U%
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup\download_with_aria2c.ps1" -Url "%_U%" -OutFile "%~2" %_ARIA% -MinSize %~3 -MaxRetries 5 -StallTimeoutSec 60 -AttemptTimeoutSec %~4 %_DLX%
-exit /b %errorlevel%
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup\download_with_aria2c.ps1" -Url "%_U%" -OutFile "%~2" %_ARIA% -MinSize %~3 -MaxRetries %_RETRY% -StallTimeoutSec 60 -AttemptTimeoutSec %~4 %_DLX%
+set "_DLRC=%errorlevel%"
+if "%_ISGH%"=="1" (
+    if "%_DLRC%"=="0" ( set "GH_DEAD=" ) else if not exist "%~2" ( set "GH_DEAD=1" )
+)
+exit /b %_DLRC%
 
 REM :ensure_aria2c - optional multi-connection downloader (~2.5MB); non-fatal. Reuses PATH copy.
 :ensure_aria2c
@@ -833,10 +859,25 @@ exit /b 0
 
 REM :check_qab - import qai_appbuilder and, when that fails, SHOW the real error (it used to be hidden by 2^>nul).
 REM   Not fatal: the Model Builder UI starts without it, only NPU inference is unavailable.
+REM   Sets QAB_MISSING=1 when qai_appbuilder is not installed at all (the final summary then says so).
 :check_qab
 set "_QF=%DL_DIR%\_qab_check.txt"
 "%VPY%" -c "import qai_appbuilder as q; print('[OK]   qai_appbuilder', getattr(q,'__version__','?'))" >"%_QF%" 2>&1
 if not errorlevel 1 ( type "%_QF%" & del /f /q "%_QF%" 2>nul & exit /b 0 )
+REM Which module is missing? qai_appbuilder itself (never installed) is a different problem from one of its
+REM dependencies (pyyaml, numpy ...) - the old text blamed the dependencies in both cases.
+set "_QMOD="
+for /f "tokens=2 delims='" %%M in ('findstr /i /c:"No module named" "%_QF%"') do if not defined _QMOD set "_QMOD=%%M"
+if /i "%_QMOD%"=="qai_appbuilder" (
+    set "QAB_MISSING=1"
+    echo [WARN] qai_appbuilder is NOT INSTALLED in %VENV_DIR% ^(NPU inference unavailable; Model Builder UI still starts^).
+    echo [WARN] Its install step failed earlier - see the lines above ^(for x64 the wheel comes from the GitHub release^).
+    echo [WARN] Fix the network ^(proxy / GitHub access^) and run setup_env.bat again: it only fetches what is missing.
+    echo [WARN] Or install the wheel by hand: download %RELEASE_BASE%/%QAI_AB_WHL_FILE%
+    echo [WARN]     then  "%UV_EXE%" pip install --python "%VPY%" --no-deps ^<that file^>
+    del /f /q "%_QF%" 2>nul
+    exit /b 0
+)
 echo [WARN] qai_appbuilder not importable ^(NPU inference unavailable; Model Builder UI still starts^). Python said:
 type "%_QF%"
 findstr /i /c:"DLL load failed" "%_QF%" >nul 2>&1 && (
@@ -848,8 +889,8 @@ findstr /i /c:"DLL load failed" "%_QF%" >nul 2>&1 && (
     echo [WARN]   * "initialization routine failed" ^(WinError 1114^): the DLL was found but its start-up code failed - a
     echo [WARN]     runtime-version clash or a CPU/OS feature it needs; the diagnostic report below shows which
 )
-findstr /i /c:"No module named" "%_QF%" >nul 2>&1 && (
-    echo [WARN] A Python dependency of qai_appbuilder is missing: install it with
+if defined _QMOD (
+    echo [WARN] A Python dependency of qai_appbuilder is missing: the module '%_QMOD%'. Install it with
     echo [WARN]     "%UV_EXE%" pip install --python "%VPY%" pyyaml "numpy<=2.4.4"
 )
 echo [WARN] Full output saved in %_QF% ^(also re-check with: Console.bat  then  import qai_appbuilder^)
@@ -921,5 +962,6 @@ if exist "vendor\whl\%QAI_AB_WHL_FILE%" (
     if not errorlevel 1 exit /b 0
 )
 :qab_fail
+set "QAB_MISSING=1"
 echo [WARN] qai_appbuilder not installed; NPU inference unavailable until it is.
 exit /b 0

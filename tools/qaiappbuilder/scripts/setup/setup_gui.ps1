@@ -14,9 +14,10 @@
       2. Options  - architecture + optional components + command preview.
       3. Install  - runs the command, progress bar, live log, Stop / Open log /
                     Start server; on failure "Back to network".
-    All real work is still done by the .bat scripts; the network decision of
-    page 1 is passed down as --mirror / --proxy (+ --no-probe), so the scripts do
-    not probe again.
+    All real work is still done by the .bat scripts. The source (official / China
+    mirrors / GitHub proxy) is always decided by the scripts themselves (--mirror auto):
+    they probe the network at install time, so a source the user picked here could never
+    be wrong. Page 1 only shows the probe result and takes the optional proxy.
 
     Uses Windows PowerShell 5.1 + WinForms (present on every Windows 10/11,
     x64 and ARM64) because no Python exists yet when setup runs.
@@ -26,8 +27,7 @@
 
 .PARAMETER Preset
     Test hook / pre-selection. Comma list of: browser, astgrep, apps, frontend,
-    nofrontend, builder, noprobe, mirror=<auto|official|cn>, arch=<arm64|x64>,
-    proxy=<url>.
+    nofrontend, builder, arch=<arm64|x64>, proxy=<url>.
 .PARAMETER AutoRun
     Test hook: jump to page 3 and start the install as soon as the window shows.
 .PARAMETER AutoNet
@@ -75,9 +75,8 @@ $S_en = @{
     NeedCore = 'core'; NeedOptional = 'optional'; NeedArm64 = 'ARM64 only'; NeedBrowser = 'browser tools'; NeedFrontend = 'WebUI build'; NeedBuilder = 'model builder'
     CellOk = 'OK  {0} ms'; CellFail = 'FAIL ({0})'
     Mirror = 'Use source'
-    MirrorTip = 'auto: the installer probes again and switches to China mirrors only when the official source is unreachable; official: official sources only; cn: China mirrors'
-    MirrorAuto = 'auto (decide during install)'; MirrorOfficial = 'official sources'; MirrorCn = 'China mirrors (cn)'
-    Skip = 'Skip the network test (use the source selected above)'
+    MirrorAuto = 'auto (decided during install)'
+    Skip = 'Skip the network test (the installer probes the network itself)'
     NotTested = 'Not tested yet. Click "Test network" (about 10 s), or tick "Skip".'
     Testing = 'Testing {0} sources in parallel ...'
     RecOfficial = 'Recommended: official sources (reachable).'
@@ -129,9 +128,8 @@ $S_zh = @{
     NeedCore = '核心'; NeedOptional = '可选'; NeedArm64 = '仅 ARM64'; NeedBrowser = '浏览器工具'; NeedFrontend = 'WebUI 构建'; NeedBuilder = '模型转换'
     CellOk = 'OK  {0} ms'; CellFail = '失败({0})'
     Mirror = '使用源'
-    MirrorTip = 'auto:安装时再检测一次，官方源不通才切换国内镜像;official:只用官方源;cn:使用国内镜像'
-    MirrorAuto = 'auto(安装时自动判断)'; MirrorOfficial = '官方源(official)'; MirrorCn = '国内镜像(cn)'
-    Skip = '跳过网络检测(直接使用上面选择的源)'
+    MirrorAuto = 'auto(安装时自动判断)'
+    Skip = '跳过网络检测(安装程序会自行检测网络)'
     NotTested = '尚未检测。点击“检测网络”(约 10 秒),或勾选“跳过”。'
     Testing = '正在并行检测 {0} 个下载源...'
     RecOfficial = '推荐：官方源(可正常访问)。'
@@ -400,13 +398,11 @@ $lblRec.AutoSize = $false; $lblRec.Anchor = $AnchorBLR; $lblRec.Font = $boldFont
 $pg1.Controls.Add($lblRec)
 
 $l = New-Ctl 'Label' 12 390 0 0 $S.Mirror; $l.Anchor = $AnchorBL; $pg1.Controls.Add($l)
-$cbMirror = New-Ctl 'ComboBox' 90 386 260 24 ''
-$cbMirror.DropDownStyle = 'DropDownList'; $cbMirror.Anchor = $AnchorBL
-[void]$cbMirror.Items.Add($S.MirrorAuto); [void]$cbMirror.Items.Add($S.MirrorOfficial); [void]$cbMirror.Items.Add($S.MirrorCn)
-$cbMirror.SelectedIndex = 0
-$tip.SetToolTip($cbMirror, $S.MirrorTip)
-$pg1.Controls.Add($cbMirror)
-$MirrorKeys = @('auto', 'official', 'cn')
+$lblMirror = New-Ctl 'Label' 90 390 400 20 $S.MirrorAuto
+$lblMirror.AutoSize = $false; $lblMirror.Anchor = $AnchorBL
+$pg1.Controls.Add($lblMirror)
+# The source is never chosen by the user: the install scripts always run with --mirror auto.
+$MirrorKeys = @('auto')
 
 # Width stops left of the network-log button (x=640): a wider box sits on top of it and hides its left part.
 $chkSkip = New-Ctl 'CheckBox' 12 420 620 22 $S.Skip
@@ -516,15 +512,16 @@ $script:NetRec = ''
 $script:NetProxy = ''        # proxy text the last test ran with
 $script:Applying = $false
 
-function Get-MirrorKey { $MirrorKeys[[Math]::Max(0, $cbMirror.SelectedIndex)] }
+function Get-MirrorKey { 'auto' }
 
 function Get-UiOptions {
     $o = New-Options
     $o.Arch     = if ($cbArch.SelectedIndex -gt 0) { [string]$cbArch.SelectedItem } else { '' }
-    $o.Mirror   = Get-MirrorKey
+    $o.Mirror   = 'auto'
     $o.Proxy    = $txtProxy.Text.Trim()
-    # An explicit source was decided on page 1 -> the scripts need not probe again.
-    $o.NoProbe  = ($o.Mirror -ne 'auto') -or [bool]$script:PresetNoProbe
+    # --mirror auto, no --no-probe: the scripts probe the network themselves, so a blocked
+    # github.com (or PyPI) switches to a proxy / mirror automatically instead of retrying forever.
+    $o.NoProbe  = $false
     $o.Browser  = $chkBrowser.Checked
     $o.AstGrep  = $chkAstGrep.Checked
     $o.Apps     = $chkApps.Checked
@@ -536,7 +533,6 @@ function Get-UiOptions {
 function Set-UiOptions($o) {
     $script:Applying = $true
     if ($o.Arch -eq 'arm64') { $cbArch.SelectedIndex = 1 } elseif ($o.Arch -eq 'x64') { $cbArch.SelectedIndex = 2 } else { $cbArch.SelectedIndex = 0 }
-    $i = [Array]::IndexOf($MirrorKeys, [string]$o.Mirror); if ($i -ge 0) { $cbMirror.SelectedIndex = $i }
     $txtProxy.Text       = [string]$o.Proxy
     $script:PresetNoProbe = [bool]$o.NoProbe
     $chkBrowser.Checked  = [bool]$o.Browser
@@ -551,7 +547,7 @@ function Update-Preview {
     $o = Get-UiOptions
     $txtCmd.Text = (Get-RunCommand $o)[1]
     $lblEst.Text = $S.Estimate -f (Format-MB (Get-EstimateMB $o))
-    $mirrorText = [string]$cbMirror.SelectedItem
+    $mirrorText = $S.MirrorAuto
     $px = if ($o.Proxy) { $o.Proxy } else { $S.ProxyAuto }
     $lblNetSum.Text = $S.NetSummary -f $mirrorText, $px
 }
@@ -595,7 +591,7 @@ function Update-Nav {
             $btnNext.Visible = $false
         }
     }
-    foreach ($c in $txtProxy, $btnTest, $cbMirror, $chkSkip) { $c.Enabled = -not $busy }
+    foreach ($c in $txtProxy, $btnTest, $chkSkip) { $c.Enabled = -not $busy }
     $btnRetest.Enabled = (-not $busy) -and $script:NetTested -and (@(Get-FailedIds).Count -gt 0)
     $btnStop.Enabled = $busy -and $script:Kind -eq 'setup'
     $btnStart.Enabled = (-not $busy) -and (Test-Path -LiteralPath (Get-VenvPython))
@@ -669,9 +665,9 @@ function Import-NetResult([bool]$merge) {
     $rec = Get-NetRecommend $script:NetItems
     $script:NetRec = $rec
     switch ($rec) {
-        'official' { $lblRec.Text = $S.RecOfficial; $lblRec.ForeColor = $cOk;  $cbMirror.SelectedIndex = 1 }
-        'cnslow'   { $lblRec.Text = $S.RecCnSlow;   $lblRec.ForeColor = $cOk;  $cbMirror.SelectedIndex = 2 }
-        'cn'       { $lblRec.Text = $S.RecCn;       $lblRec.ForeColor = $cOk;  $cbMirror.SelectedIndex = 2 }
+        'official' { $lblRec.Text = $S.RecOfficial; $lblRec.ForeColor = $cOk }
+        'cnslow'   { $lblRec.Text = $S.RecCnSlow;   $lblRec.ForeColor = $cOk }
+        'cn'       { $lblRec.Text = $S.RecCn;       $lblRec.ForeColor = $cOk }
         default    { $lblRec.Text = $S.RecBlocked;  $lblRec.ForeColor = $cFail; $txtProxy.Focus() | Out-Null }
     }
     $lblNet.Text = Get-NetFooter
@@ -934,7 +930,7 @@ $txtProxy.Add_TextChanged({
 
 $onChange = { if (-not $script:Applying) { Update-Preview } }
 foreach ($c in $chkBrowser, $chkAstGrep, $chkApps, $chkFrontend) { $c.Add_CheckedChanged($onChange) }
-$cbMirror.Add_SelectedIndexChanged($onChange)
+
 $cbArch.Add_SelectedIndexChanged({ if (-not $script:Applying) { Update-Preview; Update-Nav } })
 $chkBuilder.Add_CheckedChanged({
     if (-not $script:Applying -and $chkBuilder.Checked -and -not $AutoRun -and -not $SelfTest) {
@@ -1048,7 +1044,7 @@ if ($SelfTest) {
     $ok = Import-NetResult $false
     Update-Nav
     Check 'probe json imported' $ok
-    Check 'recommend cn when official blocked' ($script:NetRec -eq 'cn' -and (Get-MirrorKey) -eq 'cn')
+    Check 'recommend cn when official blocked' ($script:NetRec -eq 'cn')
     Check 'table filled (4 rows)' ($lv.Items.Count -eq 4)
     Check 'retest enabled with failures' $btnRetest.Enabled
     Check 'next enabled after test' $btnNext.Enabled
@@ -1059,12 +1055,11 @@ if ($SelfTest) {
     Check 'page2 after next' (PageIs 2)
     $o = Get-UiOptions
     $cmd = (Get-RunCommand $o)[1]
-    Check 'command has --mirror cn --proxy --no-probe' ($cmd -match '--mirror cn' -and $cmd -match '--proxy http://127\.0\.0\.1:7890' -and $cmd -match '--no-probe')
+    Check 'command has --proxy, never --mirror / --no-probe' ($cmd -match '--proxy http://127\.0\.0\.1:7890' -and $cmd -notmatch '--mirror' -and $cmd -notmatch '--no-probe')
     Check 'preview shows command' ($txtCmd.Text -eq $cmd)
     Check 'estimate label set' ($lblEst.Text.Length -gt 0)
-    $cbMirror.SelectedIndex = 0
     $cmd2 = (Get-RunCommand (Get-UiOptions))[1]
-    Check 'auto mirror -> scripts probe themselves' ($cmd2 -notmatch '--no-probe' -and $cmd2 -notmatch '--mirror')
+    Check 'source is always auto -> scripts probe themselves' ($cmd2 -notmatch '--no-probe' -and $cmd2 -notmatch '--mirror')
     Invoke-Back
     Check 'back to page1' (PageIs 1)
     $txtProxy.Text = 'bad proxy'

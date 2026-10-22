@@ -300,26 +300,64 @@ $probeScript = {
 
 # Run probe jobs ({Key,Url,Mode}) with a concurrency limit; returns @{ Key -> result }.
 # Every attempt of every job is appended to the log file (in job order).
-function Invoke-Probes($jobs, [int]$Throttle = 6) {
+# -FirstOk: stop waiting once one job has succeeded and -GraceMs have passed since (a few more
+# candidates may finish meanwhile, so the fastest of those is still picked). Jobs still running
+# then are abandoned and reported as 'skipped'. With 4 dead GitHub proxies, each spending
+# 3 x 7 s on timeouts, waiting for all of them cost ~22 s although the first working proxy
+# answered in under a second.
+function Invoke-Probes($jobs, [int]$Throttle = 6, [switch]$FirstOk, [int]$GraceMs = 2000) {
     $pool = [RunspaceFactory]::CreateRunspacePool(1, $Throttle); $pool.Open()
     $running = @()
     foreach ($j in $jobs) {
         $ps = [PowerShell]::Create(); $ps.RunspacePool = $pool
         [void]$ps.AddScript($probeScript).AddArgument($j.Url).AddArgument($proxyUrl).AddArgument($j.Mode)
-        $running += [pscustomobject]@{ Job = $j; PS = $ps; H = $ps.BeginInvoke() }
+        $running += [pscustomobject]@{ Job = $j; PS = $ps; H = $ps.BeginInvoke(); Out = $null; Got = $false }
+    }
+    # EndInvoke may be called once per job: fetch the result of a finished job exactly once, here.
+    function Get-Finished($x) {
+        if (-not $x.Got) {
+            $x.Got = $true
+            try { $o = $x.PS.EndInvoke($x.H); if ($o.Count -gt 0) { $x.Out = $o[$o.Count - 1] } } catch { Write-Log ('  runspace error: ' + $_.Exception.Message) }
+        }
+        $x.Out
+    }
+    $abandon = @{}
+    if ($FirstOk) {
+        $okSince = $null
+        while ($true) {
+            $pending = @($running | Where-Object { -not $_.H.IsCompleted })
+            if ($pending.Count -eq 0) { break }
+            if ($null -eq $okSince) {
+                foreach ($x in @($running | Where-Object { $_.H.IsCompleted })) {
+                    $o = Get-Finished $x
+                    if ($o -and $o.ok) { $okSince = [Diagnostics.Stopwatch]::StartNew(); break }
+                }
+            } elseif ($okSince.ElapsedMilliseconds -ge $GraceMs) {
+                foreach ($p in $pending) { $abandon[$p.Job.Key] = $true }
+                break
+            }
+            Start-Sleep -Milliseconds 100
+        }
     }
     $res = @{}
     foreach ($x in $running) {
-        $r = $null
-        try { $out = $x.PS.EndInvoke($x.H); if ($out.Count -gt 0) { $r = $out[$out.Count - 1] } } catch { Write-Log ('  runspace error: ' + $_.Exception.Message) }
+        Write-Log ('[{0}] {1} {2}' -f $x.Job.Key, $x.Job.Mode.ToUpper(), $x.Job.Url)
+        if ($abandon.ContainsKey($x.Job.Key)) {
+            # Not waited for: stop it, report it as skipped (never as a usable candidate).
+            try { [void]$x.PS.BeginStop($null, $null) } catch { }
+            Write-Log '  => SKIPPED (another candidate already worked; not waited for)'
+            $res[$x.Job.Key] = [ordered]@{ url = $x.Job.Url; ok = $false; ms = 0; note = 'skipped'; tries = 0; detail = 'not waited for: a faster candidate already worked' }
+            continue
+        }
+        $r = Get-Finished $x
         if (-not $r) { $r = @{ ok = $false; ms = 0; note = 'error'; tries = 0; detail = 'probe returned nothing'; log = @() } }
         $x.PS.Dispose()
-        Write-Log ('[{0}] {1} {2}' -f $x.Job.Key, $x.Job.Mode.ToUpper(), $x.Job.Url)
         foreach ($l in @($r.log)) { Write-Log $l }
         Write-Log ('  => {0}{1}' -f $(if ($r.ok) { 'OK' } else { 'FAIL' }), $(if ($r.ok) { '' } else { " ($($r.note))" }))
         $res[$x.Job.Key] = [ordered]@{ url = $x.Job.Url; ok = [bool]$r.ok; ms = [long]$r.ms; note = [string]$r.note; tries = [int]$r.tries; detail = [string]$r.detail }
     }
-    $pool.Close()
+    # Abandoned runspaces are still sitting in their timeouts: do not wait for the pool to drain.
+    if ($abandon.Count -eq 0) { $pool.Close() } else { try { [void]$pool.BeginClose($null, $null) } catch { } }
     Write-Log ''
     $res
 }
@@ -332,9 +370,10 @@ function Select-GitHubMirror {
     }
     $jobs = @(); $i = 0
     foreach ($c in $GhCandidates) { $jobs += [pscustomobject]@{ Key = "gh$i"; Url = ($c + $GhTestAsset); Mode = 'range' }; $i++ }
-    $r = Invoke-Probes $jobs
+    $r = Invoke-Probes $jobs -FirstOk
     for ($k = 0; $k -lt $GhCandidates.Count; $k++) {
         $x = $r["gh$k"]
+        if ($x.note -eq 'skipped') { Write-Host ('  [ -- ] GitHub proxy {0,-30} not waited for (a working one was already found)' -f $GhCandidates[$k]); continue }
         Write-Host ('  {0} GitHub proxy {1,-30} {2}' -f $(if ($x.ok) { '[ OK ]' } else { '[FAIL]' }), $GhCandidates[$k], $(if ($x.ok) { "$($x.ms) ms" } else { $x.note }))
     }
     $best = $null
