@@ -59,6 +59,10 @@
     With -ProbeAll: comma list of item ids to (re)probe, e.g. pypi,github.
 .PARAMETER LogFile
     Detailed log path. Default data\logs\net_<mode>_<timestamp>.log
+.PARAMETER PickGitHubProxy
+    Only select a GitHub download proxy (Range-probe the candidates, no other probes) and write
+    `set "QAI_GITHUB_MIRROR=<prefix>"` to -Emit. setup_env.bat uses it when a direct github.com
+    download failed although the preflight said github.com was reachable.
 #>
 param(
     [string]$Proxy = '',
@@ -69,7 +73,8 @@ param(
     [switch]$ProbeAll,
     [string]$Json = '',
     [string]$Only = '',
-    [string]$LogFile = ''
+    [string]$LogFile = '',
+    [switch]$PickGitHubProxy
 )
 if (-not $ProbeAll -and -not $Emit) { [Console]::Error.WriteLine('[NET] -Emit is required (or use -ProbeAll -Json <file>)'); exit 2 }
 if ($ProbeAll -and -not $Json) { [Console]::Error.WriteLine('[NET] -ProbeAll needs -Json <file>'); exit 2 }
@@ -381,6 +386,24 @@ function Select-GitHubMirror {
     return $best
 }
 
+# ---- -PickGitHubProxy: only choose a GitHub download proxy, write QAI_GITHUB_MIRROR to -Emit -------
+# Called by setup_env.bat when a direct github.com download failed although the preflight said github.com
+# was reachable. Exit 0 = a proxy was written; exit 3 = none works (the caller then keeps the direct URL).
+if ($PickGitHubProxy) {
+    Write-EnvDiag @($GhTestAsset)
+    Write-Host '[NET] selecting a GitHub download proxy ...'
+    $pickOnly = Select-GitHubMirror
+    if (-not $pickOnly) {
+        Write-Host '[NET] no GitHub proxy works here.'
+        Write-Log 'GITHUB PROXY: none working'
+        exit 3
+    }
+    Write-Host "[NET] GitHub proxy: $($pickOnly.prefix)"
+    Write-Log "GITHUB PROXY: $($pickOnly.prefix)"
+    [IO.File]::WriteAllText($Emit, ('@echo off' + "`r`n" + ('set "QAI_GITHUB_MIRROR=' + $pickOnly.prefix + '"')) + "`r`n", (New-Object Text.UTF8Encoding($false)))
+    exit 0
+}
+
 # ---- -ProbeAll: every source, official + cn, in parallel (GUI step 1) ----------
 if ($ProbeAll) {
     # id, display name, which option needs it, official url, cn url ('' = no mirror, '@github' = proxy candidates)
@@ -463,7 +486,9 @@ $groups = @{
     core    = @(
         @('pypi.org (PyPI)',            'https://pypi.org/simple/pip/'),
         @('files.pythonhosted.org',     'https://files.pythonhosted.org/'),
-        @('github.com (uv/releases)',   'https://github.com/astral-sh/uv/releases/latest')
+        # Probed with a ranged GET on a real release asset (needs 206), not a HEAD: github.com often answers
+        # a HEAD / TLS handshake yet stalls on the actual file download (seen on a corporate network).
+        @('github.com (uv/releases)',   $GhTestAsset, 'range')
     )
     browser = @(,@('cdn.playwright.dev (Chromium)', 'https://cdn.playwright.dev/'))
     # softwarecenter.qualcomm.com (QAIRT) is deliberately NOT probed: it is reachable where the
@@ -483,7 +508,8 @@ $cnProbe = @(
 
 $results = @{}
 function Show-Probes($list) {
-    $jobs = @(); foreach ($e in $list) { $jobs += [pscustomobject]@{ Key = $e[0]; Url = $e[1]; Mode = 'head' } }
+    # An entry may carry a third element: the probe mode ('range'); default 'head'.
+    $jobs = @(); foreach ($e in $list) { $jobs += [pscustomobject]@{ Key = $e[0]; Url = $e[1]; Mode = $(if ($e.Count -gt 2 -and $e[2]) { $e[2] } else { 'head' }) } }
     $r = Invoke-Probes $jobs
     foreach ($e in $list) {
         $x = $r[$e[0]]; $results[$e[0]] = $x
@@ -496,7 +522,7 @@ Write-Host "[NET] proxy : $(if ($proxyUrl) { "$(Hide-Secret $proxyUrl) ($proxySr
 Write-Host "[NET] log   : $LogFile"
 $pypiOk = $true
 if (-not $NoProbe) {
-    Write-Host '[NET] connectivity probe (HEAD, retried on DNS/timeout errors):'
+    Write-Host '[NET] connectivity probe (HEAD; github.com = ranged file GET; retried on DNS/timeout errors):'
     $list = @()
     # -Need may list a group twice (setup_env.bat builds "core,browser,browser,builder" for --builder with --with-browser): probe each group once.
     $seenGroups = @{}

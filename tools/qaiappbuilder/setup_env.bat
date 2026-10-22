@@ -500,15 +500,22 @@ exit /b 0
 
 REM :dl <url> <outfile> <minsize> <attempt-timeout-sec>
 REM   Honors QAI_GITHUB_MIRROR, HTTPS_PROXY, DL_ZIPTEST=1, and uses aria2c if present.
-REM   GH_DEAD: once a github.com download has failed after all its retries, github.com is treated as
-REM   unreachable for the rest of this run and later github.com downloads get ONE attempt instead of five
-REM   (otherwise each of them wastes 2-3 more minutes). A success clears it again.
+REM   github.com downloads (the preflight only proves github.com ANSWERS, not that large files come through):
+REM     1. a direct try with 2 attempts (5 would burn ~5 min on a link that connects but never delivers bytes);
+REM     2. on failure, ONCE per run, :pick_gh_proxy chooses a GitHub proxy (QAI_GITHUB_MIRROR) and the download
+REM        is repeated through it with the full 5 attempts;
+REM     3. GH_DEAD: a github.com download that failed completely marks github.com dead for the rest of the run,
+REM        so later github.com downloads get ONE attempt instead of five. A success clears it again.
 :dl
 set "_U=%~1"
 set "_ISGH=0"
 if "%_U:~0,19%"=="https://github.com/" set "_ISGH=1"
-if defined QAI_GITHUB_MIRROR if "%_ISGH%"=="1" set "_U=%QAI_GITHUB_MIRROR%%_U%"
+set "_DLTRY=0"
+:dl_go
+set "_UU=%_U%"
+if defined QAI_GITHUB_MIRROR if "%_ISGH%"=="1" set "_UU=%QAI_GITHUB_MIRROR%%_U%"
 set "_RETRY=5"
+if "%_ISGH%"=="1" if not defined QAI_GITHUB_MIRROR if not defined GH_PROXY_TRIED set "_RETRY=2"
 if "%_ISGH%"=="1" if defined GH_DEAD (
     set "_RETRY=1"
     echo [INFO] github.com already failed earlier in this run: single attempt for this download.
@@ -516,16 +523,39 @@ if "%_ISGH%"=="1" if defined GH_DEAD (
 set "_DLX="
 if defined HTTPS_PROXY set "_DLX=-ProxyUrl "%HTTPS_PROXY%""
 if "%DL_ZIPTEST%"=="1" set "_DLX=%_DLX% -ZipTest"
-set "DL_ZIPTEST="
 set "_ARIA="
 if exist "data\bin\aria2c\aria2c.exe" set "_ARIA=-Aria2cExe "data\bin\aria2c\aria2c.exe""
-echo [INFO] GET %_U%
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup\download_with_aria2c.ps1" -Url "%_U%" -OutFile "%~2" %_ARIA% -MinSize %~3 -MaxRetries %_RETRY% -StallTimeoutSec 60 -AttemptTimeoutSec %~4 %_DLX%
+echo [INFO] GET %_UU%
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup\download_with_aria2c.ps1" -Url "%_UU%" -OutFile "%~2" %_ARIA% -MinSize %~3 -MaxRetries %_RETRY% -StallTimeoutSec 60 -AttemptTimeoutSec %~4 %_DLX%
 set "_DLRC=%errorlevel%"
+if "%_ISGH%"=="1" if not "%_DLRC%"=="0" if not exist "%~2" if not defined QAI_GITHUB_MIRROR if not defined GH_PROXY_TRIED if "%_DLTRY%"=="0" (
+    REM Direct github.com failed and no proxy is configured yet: pick one (once per run) and retry through it.
+    set "_DLTRY=1"
+    call :pick_gh_proxy
+    if defined QAI_GITHUB_MIRROR (
+        echo [INFO] github.com direct download failed - retrying through the GitHub proxy.
+        set "GH_DEAD="
+        goto :dl_go
+    )
+)
+set "DL_ZIPTEST="
 if "%_ISGH%"=="1" (
     if "%_DLRC%"=="0" ( set "GH_DEAD=" ) else if not exist "%~2" ( set "GH_DEAD=1" )
 )
 exit /b %_DLRC%
+
+REM :pick_gh_proxy - choose a GitHub download proxy with net_config.ps1 -PickGitHubProxy and export it as
+REM   QAI_GITHUB_MIRROR. Runs at most once per setup run (GH_PROXY_TRIED); never fatal.
+:pick_gh_proxy
+set "GH_PROXY_TRIED=1"
+if "%NO_PROBE%"=="1" exit /b 0
+if /i "%OPT_MIRROR%"=="official" exit /b 0
+if exist "%DL_DIR%\_gh_proxy.bat" del /f /q "%DL_DIR%\_gh_proxy.bat"
+set "_PGA=-PickGitHubProxy -Emit "%DL_DIR%\_gh_proxy.bat""
+if defined OPT_PROXY set "_PGA=%_PGA% -Proxy "%OPT_PROXY%""
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup\net_config.ps1" %_PGA%
+if exist "%DL_DIR%\_gh_proxy.bat" call "%DL_DIR%\_gh_proxy.bat"
+exit /b 0
 
 REM :ensure_aria2c - optional multi-connection downloader (~2.5MB); non-fatal. Reuses PATH copy.
 :ensure_aria2c
