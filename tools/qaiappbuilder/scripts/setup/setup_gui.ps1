@@ -254,7 +254,7 @@ function Get-EstimateMB($o) {
     $arch = if ($o.Arch) { $o.Arch } else { Get-HostArch }
     $mb = 120                                   # uv + Python + PyPI deps + aria2c
     if ($arch -eq 'arm64' -and -not (Get-ChildItem -Path (Join-Path $Root 'vendor\whl') -Filter 'qai_appbuilder-*win_arm64.whl' -ErrorAction SilentlyContinue)) { $mb += 211 }
-    if ($arch -eq 'x64') { $mb += 92 }          # qai_appbuilder wheel
+    if ($arch -eq 'x64') { $mb += 51 }          # qai_appbuilder x64 wheel (GitHub release, ~51 MB)
     if ($o.Browser)  { $mb += 150 }
     if ($o.AstGrep)  { $mb += 50 }
     if ($o.Apps)     { $mb += 300 }

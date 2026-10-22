@@ -885,8 +885,9 @@ REM --- x64 path: download from GitHub releases if not installed at correct vers
 set "QAI_AB_X64_WHL_NAME=qai_appbuilder-%QAI_APPBUILDER_VERSION%.1-cp313-cp313-win_amd64.whl"
 set "QAI_AB_X64_WHL_CACHED=%DL_DIR%\%QAI_AB_X64_WHL_NAME%"
 set "QAI_AB_X64_URL=https://github.com/qualcomm/qai-appbuilder/releases/download/v%QAI_APPBUILDER_VERSION%/%QAI_AB_X64_WHL_NAME%"
-REM Check if qai_appbuilder is already installed at the correct version.
-"%VENV_DIR%\Scripts\python.exe" -c "import qai_appbuilder; v=getattr(qai_appbuilder,'__version__',''); exit(0 if v.startswith('%QAI_APPBUILDER_VERSION%') else 1)" >nul 2>&1
+REM Check if qai_appbuilder is already installed at EXACTLY the x64 build (<version>.1). A prefix test on
+REM <version> would also accept the PyPI ARM64EC wheel (<version>), which cannot load on an x64 CPU.
+"%VENV_DIR%\Scripts\python.exe" -c "import importlib.metadata as m, sys; sys.exit(0 if m.version('qai_appbuilder')=='%QAI_APPBUILDER_VERSION%.1' else 1)" >nul 2>&1
 if not errorlevel 1 (
     echo [SKIP] qai_appbuilder %QAI_APPBUILDER_VERSION% already installed ^(x64^).
     goto :qai_appbuilder_done

@@ -349,7 +349,7 @@ if ($ProbeAll) {
         @('pypi',     'PyPI (Python packages)',           'core',     'https://pypi.org/simple/pip/',                       'https://pypi.tuna.tsinghua.edu.cn/simple/pip/'),
         @('pyfiles',  'files.pythonhosted.org',           'core',     'https://files.pythonhosted.org/',                    ''),
         @('python',   'Python 3.13 interpreter',          'core',     'https://github.com/astral-sh/python-build-standalone/releases/latest', 'https://registry.npmmirror.com/-/binary/python-build-standalone/'),
-        @('github',   'GitHub releases (aria2c, guard...)', 'optional', 'https://github.com/astral-sh/uv/releases/latest',  '@github'),
+        @('github',   'GitHub releases (qai_appbuilder x64, aria2c, guard...)', 'optional', 'https://github.com/astral-sh/uv/releases/latest',  '@github'),
         @('vendor',   'ARM64 vendor bundle',              'arm64',    'https://www.aidevhome.com/data/adh2/attr/vendor-deps.7z', ''),
         @('chromium', 'Chromium (browser tools)',         'browser',  'https://cdn.playwright.dev/',                        ($CN.Playwright + '/')),
         @('node',     'Node.js (WebUI build)',            'frontend', 'https://nodejs.org/dist/index.json',                 ($CN.Node + '/')),
@@ -463,7 +463,8 @@ if (-not $NoProbe) {
     Write-EnvDiag @($list | ForEach-Object { $_[1] } | Where-Object { $_ }) 
     Show-Probes $list
     # Only judge a group that was actually probed (build_frontend probes frontend only).
-    # github.com is NOT required: uv comes from a PyPI wheel, and aria2c/guard are optional.
+    # github.com is not needed to pick the profile: uv comes from a PyPI wheel. It IS needed later (x64 qai_appbuilder
+    # wheel, aria2c, guard); the cn profile then selects a GitHub proxy below, so a failing probe here is not fatal.
     if ($results.ContainsKey('pypi.org (PyPI)')) { $pypiOk = $results['pypi.org (PyPI)'].ok -and $results['files.pythonhosted.org'].ok }
     if ($results.ContainsKey('registry.npmjs.org (npm)')) { $pypiOk = $pypiOk -and $results['registry.npmjs.org (npm)'].ok -and $results['nodejs.org (Node.js zip)'].ok }
 } else {
