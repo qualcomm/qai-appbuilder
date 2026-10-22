@@ -547,7 +547,7 @@ if not defined _UNPACKED (
     exit /b 1
 )
 if not exist "vendor" mkdir "vendor"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$t='%_VD%'; $s= if (Test-Path (Join-Path $t 'vendor')) { Join-Path $t 'vendor' } else { $t }; foreach ($n in 'whl','tiktoken','nltk_data','g2p_data') { $p=Join-Path $s $n; if (Test-Path $p) { Copy-Item -LiteralPath $p -Destination 'vendor' -Recurse -Force } }; New-Item -ItemType Directory -Force 'vendor\bin\arm64' | Out-Null; $b=Join-Path $s 'bin\arm64'; if (Test-Path $b) { Copy-Item -Path (Join-Path $b '*') -Destination 'vendor\bin\arm64' -Recurse -Force }"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$t='%_VD%'; $s= if (Test-Path (Join-Path $t 'vendor')) { Join-Path $t 'vendor' } else { $t }; foreach ($n in 'whl','tiktoken','nltk_data','g2p_data') { $p=Join-Path $s $n; if (Test-Path $p) { Copy-Item -LiteralPath $p -Destination 'vendor' -Recurse -Force } }; New-Item -ItemType Directory -Force 'vendor\bin\arm64' | Out-Null; $b=Join-Path $s 'bin\arm64'; if (Test-Path $b) { Copy-Item -Path (Join-Path $b '*') -Destination 'vendor\bin\arm64' -Recurse -Force -Exclude 'guard64.dll','guard-injector.exe' }"
 rmdir /s /q "%_VD%" 2>nul
 if not exist "vendor\whl\%QAI_AB_WHL_FILE%" (
     echo [ERROR] the unpacked bundle has no vendor\whl\%QAI_AB_WHL_FILE% ^(wrong or incomplete archive^).
@@ -573,19 +573,29 @@ if exist "%_VD%\whl" set "_UNPACKED=7zr"
 if exist "%_VD%\vendor\whl" set "_UNPACKED=7zr"
 exit /b 0
 
-REM :fetch_guard - guard64.dll (+ ARM64 injector); small, non-fatal. Skipped when present.
+REM :fetch_guard - guard64.dll (+ ARM64 injector); small, non-fatal.
+REM guard.zip from the GitHub release is the ONLY accepted source: the vendor-deps bundle carries an older
+REM build of the same files and :fetch_vendor drops them. Existence of the file proves nothing about its
+REM origin, so vendor\bin\guard.source records the URL it was extracted from; skip only when that equals
+REM the current URL (Setup.bat uses the same marker, so the two scripts never re-download each other's result).
 :fetch_guard
-if exist "vendor\bin\%HOST_ARCH%\guard64.dll" (
-    echo [SKIP] guard64.dll present.
+set "_GURL=%RELEASE_BASE%/guard.zip"
+set "_GMARK=vendor\bin\guard.source"
+set "_GSRC="
+if exist "%_GMARK%" set /p _GSRC=<"%_GMARK%"
+if /i "%_GSRC%"=="%_GURL%" if exist "vendor\bin\%HOST_ARCH%\guard64.dll" (
+    echo [SKIP] guard64.dll already installed from guard.zip.
     exit /b 0
 )
+if exist "vendor\bin\%HOST_ARCH%\guard64.dll" echo [INFO] guard64.dll present but not from the GitHub guard.zip ^(bundle copy / unknown^); replacing it.
 if not exist "vendor\bin\arm64" mkdir "vendor\bin\arm64"
 if not exist "vendor\bin\x64"   mkdir "vendor\bin\x64"
 set "DL_ZIPTEST=1"
-call :dl "%RELEASE_BASE%/guard.zip" "%DL_DIR%\guard.zip" 300000 300
+call :dl "%_GURL%" "%DL_DIR%\guard.zip" 300000 300
 if errorlevel 1 ( echo [WARN] guard.zip unavailable; native FileGuard inactive. & exit /b 0 )
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; Expand-Archive -Path '%DL_DIR%\guard.zip' -DestinationPath '%DL_DIR%\_guard_tmp' -Force; foreach ($f in 'arm64\guard64.dll','x64\guard64.dll','arm64\guard-injector.exe') { $s=Join-Path '%DL_DIR%\_guard_tmp' $f; if (Test-Path $s) { Copy-Item $s (Join-Path 'vendor\bin' $f) -Force } }; Remove-Item '%DL_DIR%\_guard_tmp' -Recurse -Force"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; Expand-Archive -Path '%DL_DIR%\guard.zip' -DestinationPath '%DL_DIR%\_guard_tmp' -Force; foreach ($f in 'arm64\guard64.dll','x64\guard64.dll','arm64\guard-injector.exe') { $s=Join-Path '%DL_DIR%\_guard_tmp' $f; $d=Join-Path 'vendor\bin' $f; if (Test-Path $s) { Copy-Item $s $d -Force } elseif (Test-Path $d) { Remove-Item $d -Force } }; Remove-Item '%DL_DIR%\_guard_tmp' -Recurse -Force"
 del /f /q "%DL_DIR%\guard.zip" 2>nul
+if exist "vendor\bin\%HOST_ARCH%\guard64.dll" >"%_GMARK%" echo %_GURL%
 exit /b 0
 
 REM :pypi_exe <package> <platform> <exe,exe> <outdir> <version|""> - take native exes out of a PyPI wheel
