@@ -295,6 +295,9 @@ if "%WITH_APPS%"=="1" (
     echo [INFO] installing App Builder pack deps ^(non-fatal^)...
     "%VPY%" -m scripts.setup.install_app_builder_deps
     if errorlevel 1 echo [WARN] some App Builder pack deps failed; re-run with --with-apps later.
+    REM TTS runtime data (NLTK corpora / jieba / g2p_en caches) so the first melotts run works offline.
+    "%VPY%" -W ignore::SyntaxWarning "scripts\setup\predeploy_tts_runtime.py"
+    if errorlevel 1 echo [WARN] TTS runtime pre-deploy reported issues ^(non-fatal; first TTS run may be slow^).
     call :tick "5e App Builder pack deps"
 )
 
@@ -330,20 +333,22 @@ if not exist "data\config" mkdir "data\config"
 <nul set /p "=%HOST_ARCH%" >"data\config\host_arch"
 echo.>>"data\config\host_arch"
 
-if "%WITH_BUILDER%"=="1" (
-    echo.
-    echo -- Builder: delegating QAIRT SDK / x64 converter venv / VS tools to Setup.bat --builder ...
-    call "%ROOT_DIR%Setup.bat" --builder --arch %HOST_ARCH% --no-pause
-    call :tick "8  builder (Setup.bat --builder)"
-)
+if not "%WITH_BUILDER%"=="1" goto :builder_done
+call :builder
+if errorlevel 1 goto :fail_builder
+:builder_done
 
 call :timing_summary "OK"
+REM The setup GUI chains build_frontend.bat right after this script and sets QAI_DIST_WARN_OFF=1,
+REM so the "dist is missing" hint would be stale (dist gets built a few seconds later).
+if "%QAI_DIST_WARN_OFF%"=="1" goto :dist_warn_done
 if not exist "frontend\dist\index.html" (
     echo.
     echo [WARN] frontend\dist is missing ^(it is git-ignored, so a fresh clone has no WebUI^).
     echo [WARN] Start.bat will serve the API only and GET / returns 404. Build it once with:
     echo [WARN]     build_frontend.bat     ^(installs Node.js + pnpm if needed, ~1-2 min^)
 )
+:dist_warn_done
 echo.
 echo  ================================================================
 echo      setup_env finished ^(arch=%HOST_ARCH%, profile=%QAI_NET_PROFILE%^)
@@ -384,6 +389,9 @@ goto :fail
 :fail_verify
 echo [ERROR] verification failed - see the lines above.
 goto :fail
+:fail_builder
+echo [ERROR] model-builder environment ^(--builder^) failed - see the lines above. Re-run is safe ^(downloads resume^).
+goto :fail
 :fail
 call :tick "(failed step, time until error)"
 call :timing_summary "FAILED"
@@ -402,7 +410,8 @@ echo   --no-probe             skip the connectivity probe
 echo   --with-browser         Playwright + Chromium ^(~150MB; browser search / browser tool^)
 echo   --with-astgrep         ast-grep CLI ^(ast_grep / ast_edit tools^)
 echo   --with-apps            App Builder pack deps ^(whisper / melotts / ocr^)
-echo   --builder              also run Setup.bat --builder ^(QAIRT SDK ~2GB, converter venv, VS tools^)
+echo   --builder              model-conversion environment ^(ONNX -^> NPU .bin^): QAIRT SDK ~2GB,
+echo                          x86_64 Python 3.10 converter venv, VS 2022 C++ tools, qairt_env.json
 echo   --no-pause             do not pause at the end
 echo.
 echo Environment variables:
@@ -596,6 +605,192 @@ if errorlevel 1 ( echo [WARN] guard.zip unavailable; native FileGuard inactive. 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; Expand-Archive -Path '%DL_DIR%\guard.zip' -DestinationPath '%DL_DIR%\_guard_tmp' -Force; foreach ($f in 'arm64\guard64.dll','x64\guard64.dll','arm64\guard-injector.exe') { $s=Join-Path '%DL_DIR%\_guard_tmp' $f; $d=Join-Path 'vendor\bin' $f; if (Test-Path $s) { Copy-Item $s $d -Force } elseif (Test-Path $d) { Remove-Item $d -Force } }; Remove-Item '%DL_DIR%\_guard_tmp' -Recurse -Force"
 del /f /q "%DL_DIR%\guard.zip" 2>nul
 if exist "vendor\bin\%HOST_ARCH%\guard64.dll" >"%_GMARK%" echo %_GURL%
+exit /b 0
+
+REM ===========================================================================
+REM  :builder (--builder) - model-conversion environment, self-contained (never calls Setup.bat):
+REM    8a x86_64 Python 3.10 venv (.venv_x64_310)   8b QAIRT SDK (version pinned in scripts\qairt_release.json)
+REM    8c VS 2022 C++ build tools                    8d converter deps into .venv_x64_310
+REM    8e inference deps into the runtime venv       8f data\config\qairt_env.json + verify
+REM  The Python-side work is done by scripts\setup\setup_qairt_env.py and install_vs.ps1.
+REM ===========================================================================
+:builder
+set "QB_HELPER=scripts\setup\setup_qairt_env.py"
+set "VENV_310_DIR=%ENVS_DIR%\.venv_x64_310"
+set "PY310_SPEC=cpython-3.10-windows-x86_64"
+set "QAIRT_VERSION="
+if not exist "scripts\qairt_release.json" ( echo [ERROR] scripts\qairt_release.json not found ^(it pins the QAIRT SDK version^). & exit /b 1 )
+for /f "usebackq delims=" %%V in (`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "try { (Get-Content -Raw -LiteralPath 'scripts\qairt_release.json' | ConvertFrom-Json).qairt_version } catch { exit 1 }" 2^>nul`) do set "QAIRT_VERSION=%%V"
+if not defined QAIRT_VERSION ( echo [ERROR] could not read qairt_version from scripts\qairt_release.json. & exit /b 1 )
+set "QAIRT_SDK_ROOT=C:\Qualcomm\AIStack\QAIRT\%QAIRT_VERSION%"
+set "QAIRT_MARK=%QAIRT_SDK_ROOT%\bin\aarch64-windows-msvc\qnn-context-binary-generator.exe"
+REM setup_qairt_env.py only looks for uv at data\bin\uv\uv.exe on Windows.
+call :ensure_local_uv
+if not exist "%UV_BIN_DIR%\uv.exe" ( echo [ERROR] data\bin\uv\uv.exe is required by the builder steps. & exit /b 1 )
+
+echo.
+echo -- Step 8a: x86_64 Python 3.10 venv ^(model conversion^) ------------------------
+call :b_venv310
+if errorlevel 1 exit /b 1
+call :tick "8a x64 Python 3.10 venv"
+
+echo.
+echo -- Step 8b: QAIRT SDK %QAIRT_VERSION% ------------------------------------------
+call :b_qairt
+if errorlevel 1 exit /b 1
+call :tick "8b QAIRT SDK"
+
+echo.
+echo -- Step 8c: VS 2022 C++ build tools ^(silent^) -----------------------------------
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup\install_vs.ps1" -LogDir "%DL_DIR%"
+if errorlevel 1 echo [WARN] VS build tools step reported a problem ^(non-fatal; see %DL_DIR%\vs_install.log^).
+call :tick "8c VS build tools"
+
+echo.
+echo -- Step 8d: converter deps ^(.venv_x64_310^) --------------------------------------
+"%VENV_310_DIR%\Scripts\python.exe" "%QB_HELPER%" --install-python-deps
+if errorlevel 1 echo [WARN] some x64 converter deps failed ^(non-fatal^).
+call :tick "8d converter deps (x64 venv)"
+
+echo.
+echo -- Step 8e: inference deps ^(%VENV_DIR_NAME%^) -------------------------------------
+REM App Builder Pack deps (whisper / melotts / ...) belong to --with-apps (Step 5e), not to the builder.
+set "QAI_SKIP_PACK_DEPS=1"
+"%VPY%" "%QB_HELPER%" --install-inference-deps --host-arch %HOST_ARCH%
+if errorlevel 1 echo [WARN] some inference deps failed ^(non-fatal^).
+set "QAI_SKIP_PACK_DEPS="
+call :tick "8e inference deps (runtime venv)"
+
+echo.
+echo -- Step 8f: data\config\qairt_env.json + verify --------------------------------
+"%VPY%" "%QB_HELPER%" --gen-config --sdk-root "%QAIRT_SDK_ROOT%" --host-arch %HOST_ARCH%
+if errorlevel 1 ( echo [ERROR] data\config\qairt_env.json could not be generated. & exit /b 1 )
+if not exist "data\config\qairt_env.json" ( echo [ERROR] data\config\qairt_env.json could not be generated. & exit /b 1 )
+echo [OK]   data\config\qairt_env.json generated.
+"%VPY%" "%QB_HELPER%" --verify --sdk-root "%QAIRT_SDK_ROOT%" --host-arch %HOST_ARCH%
+if errorlevel 1 echo [WARN] the verifier reported missing pieces ^(see above^).
+call :tick "8f qairt_env.json + verify"
+echo [OK]   model-builder environment ready: %QAIRT_SDK_ROOT%
+exit /b 0
+
+REM :b_venv310 - x86_64 Python 3.10 venv for the QNN converters (complete = python + activate.bat + pip).
+:b_venv310
+set "_P310=%VENV_310_DIR%\Scripts\python.exe"
+if not exist "%_P310%" goto :b_venv310_make
+if not exist "%VENV_310_DIR%\Scripts\activate.bat" goto :b_venv310_make
+"%_P310%" -m pip --version >nul 2>&1
+if errorlevel 1 goto :b_venv310_make
+echo [SKIP] .venv_x64_310 already complete: %VENV_310_DIR%
+exit /b 0
+:b_venv310_make
+"%UV_EXE%" python find %PY310_SPEC% >nul 2>&1
+if not errorlevel 1 goto :b_venv310_py
+echo [INFO] installing %PY310_SPEC% ...
+"%UV_EXE%" python install --no-bin --no-registry %PY310_SPEC%
+if errorlevel 1 ( echo [ERROR] uv could not install %PY310_SPEC%. Try --mirror cn or --proxy. & exit /b 1 )
+:b_venv310_py
+echo [INFO] creating .venv_x64_310 ...
+REM --no-project: the repo's pyproject.toml requires Python 3.13; this venv is deliberately 3.10.
+"%UV_EXE%" venv "%VENV_310_DIR%" --python %PY310_SPEC% --seed --allow-existing --no-project
+if errorlevel 1 ( echo [ERROR] could not create .venv_x64_310. & exit /b 1 )
+if not exist "%VENV_310_DIR%\Scripts\activate.bat" ( echo [ERROR] .venv_x64_310 is incomplete after creation. & exit /b 1 )
+"%_P310%" "scripts\setup\install_pycache_pth.py" --venv "%VENV_310_DIR%" --repo-root "%ROOT_DIR%." >nul 2>&1
+echo [OK]   .venv_x64_310 created: %VENV_310_DIR%
+exit /b 0
+
+REM :b_qairt - QAIRT SDK into C:\Qualcomm\AIStack\QAIRT\<version>. Zip source, in order:
+REM   vendor\qairt\v<ver>.zip (pre-placed) > data\sdk\qairt\v<ver>.zip (kept from an earlier run) > download.
+REM   Our own download is kept as data\sdk\qairt\v<ver>.zip so single SDK files can be repaired later.
+:b_qairt
+if exist "%QAIRT_MARK%" ( echo [SKIP] QAIRT SDK already installed: %QAIRT_SDK_ROOT% & goto :b_qairt_backup )
+set "_QKEPT=data\sdk\qairt\v%QAIRT_VERSION%.zip"
+set "_QTMP=%DL_DIR%\_qairt_tmp.zip"
+set "_QOWN=0"
+set "_QZIP=vendor\qairt\v%QAIRT_VERSION%.zip"
+if exist "%_QZIP%" goto :b_qairt_have
+set "_QOWN=2"
+set "_QZIP=%_QKEPT%"
+if exist "%_QZIP%" goto :b_qairt_have
+set "_QOWN=1"
+set "_QZIP=%_QTMP%"
+echo [INFO] downloading QAIRT SDK %QAIRT_VERSION% ^(~2GB; resumable - re-running continues where it stopped^)...
+set "DL_ZIPTEST=1"
+call :dl "https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/%QAIRT_VERSION%/v%QAIRT_VERSION%.zip" "%_QTMP%" 1500000000 3600
+if errorlevel 1 goto :b_qairt_dlfail
+if not exist "%_QTMP%" goto :b_qairt_dlfail
+:b_qairt_have
+echo [INFO] SDK zip: %_QZIP%
+call :ensure_7za
+set "_QX=C:\Qualcomm\AIStack\QAIRT\_extract_tmp"
+if not exist "C:\Qualcomm\AIStack\QAIRT" mkdir "C:\Qualcomm\AIStack\QAIRT"
+if exist "%_QX%" rmdir /s /q "%_QX%"
+if not exist "data\bin\7zr\7za.exe" goto :b_qairt_psx
+echo [INFO] extracting with 7za.exe ...
+"data\bin\7zr\7za.exe" x -y "-o%_QX%" "%_QZIP%" -bso0 -bsp1 -bse2
+if not errorlevel 1 goto :b_qairt_move
+echo [WARN] 7za.exe extraction failed; trying Expand-Archive ^(slow, 15-40 min^)...
+if exist "%_QX%" rmdir /s /q "%_QX%"
+:b_qairt_psx
+echo [INFO] extracting with Expand-Archive ^(slow, 15-40 min^)...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; Expand-Archive -LiteralPath '%_QZIP%' -DestinationPath '%_QX%' -Force"
+if errorlevel 1 goto :b_qairt_xfail
+:b_qairt_move
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$s = Get-ChildItem -LiteralPath '%_QX%' -Recurse -Directory | Where-Object { $_.Name -eq '%QAIRT_VERSION%' } | Select-Object -First 1; if (-not $s) { exit 1 }; if (Test-Path -LiteralPath '%QAIRT_SDK_ROOT%') { Remove-Item -LiteralPath '%QAIRT_SDK_ROOT%' -Recurse -Force }; Move-Item -LiteralPath $s.FullName -Destination '%QAIRT_SDK_ROOT%' -Force"
+set "_MV=%errorlevel%"
+if exist "%_QX%" rmdir /s /q "%_QX%"
+if not "%_MV%"=="0" goto :b_qairt_xfail
+if not exist "%QAIRT_MARK%" goto :b_qairt_xfail
+echo [OK]   QAIRT SDK installed: %QAIRT_SDK_ROOT%
+if not "%_QOWN%"=="1" goto :b_qairt_backup
+if not exist "data\sdk\qairt" mkdir "data\sdk\qairt"
+if exist "%_QKEPT%" ( del /f /q "%_QTMP%" ) else ( move /y "%_QTMP%" "%_QKEPT%" >nul )
+if exist "%_QKEPT%" echo [OK]   kept SDK zip for repairs: %_QKEPT%
+goto :b_qairt_backup
+:b_qairt_dlfail
+echo [ERROR] QAIRT SDK download failed. Re-run to resume, or download it manually and save it as
+echo [ERROR]     %ROOT_DIR%vendor\qairt\v%QAIRT_VERSION%.zip
+exit /b 1
+:b_qairt_xfail
+echo [ERROR] QAIRT SDK extraction failed ^(expected %QAIRT_MARK%^).
+if "%_QOWN%"=="0" ( echo [ERROR] check or replace the pre-placed %_QZIP%. & exit /b 1 )
+echo [ERROR] deleting %_QZIP% so the next run fetches a clean copy.
+del /f /q "%_QZIP%" 2>nul
+exit /b 1
+:b_qairt_backup
+REM Back up the SDK launcher scripts (extension-less Python entry points) and qnn-context-binary-generator.exe:
+REM they are the files most often damaged (edited / truncated by a misdirected redirect). Best-effort.
+set "_QBK=%ROOT_DIR%data\sdk\qairt-scripts"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='SilentlyContinue'; $n=0; foreach ($a in 'aarch64-windows-msvc','x86_64-windows-msvc') { $b = Join-Path '%QAIRT_SDK_ROOT%\bin' $a; if (-not (Test-Path -LiteralPath $b)) { continue }; $o = Join-Path '%_QBK%' $a; New-Item -ItemType Directory -Force -Path $o | Out-Null; Get-ChildItem -LiteralPath $b -File | Where-Object { ($_.Extension -eq '' -or $_.Name -eq 'qnn-context-binary-generator.exe') -and $_.Length -gt 0 } | ForEach-Object { $t = Join-Path $o $_.Name; if (-not (Test-Path -LiteralPath $t)) { Copy-Item -LiteralPath $_.FullName -Destination $t; $n++ } } }; Write-Host ('[OK]   SDK launcher scripts backed up (' + $n + ' new) at %_QBK%')"
+exit /b 0
+
+REM :ensure_7za - full 7-Zip console (7za.exe, from 7-Zip Extra) for the QAIRT .zip; 7zr.exe reads .7z only.
+REM   Non-fatal: without it the SDK is extracted with Expand-Archive (slower).
+:ensure_7za
+if exist "data\bin\7zr\7za.exe" exit /b 0
+if not exist "data\bin\7zr" mkdir "data\bin\7zr"
+if not exist "data\bin\7zr\7zr.exe" call :dl "https://www.7-zip.org/a/7zr.exe" "data\bin\7zr\7zr.exe" 100000 60
+if not exist "data\bin\7zr\7zr.exe" ( echo [WARN] no 7zr.exe; QAIRT extraction falls back to Expand-Archive. & exit /b 0 )
+call :dl "https://www.7-zip.org/a/7z2301-extra.7z" "%DL_DIR%\_7za_extra.7z" 300000 120
+if errorlevel 1 ( echo [WARN] 7-Zip Extra unavailable; QAIRT extraction falls back to Expand-Archive. & exit /b 0 )
+set "_X7=%DL_DIR%\_7za_extra_tmp"
+if exist "%_X7%" rmdir /s /q "%_X7%"
+"data\bin\7zr\7zr.exe" x -y "-o%_X7%" "%DL_DIR%\_7za_extra.7z" -bso0 -bsp0 >nul
+if exist "%_X7%\7za.exe" copy /y "%_X7%\7za.exe" "data\bin\7zr\7za.exe" >nul
+rmdir /s /q "%_X7%" 2>nul
+del /f /q "%DL_DIR%\_7za_extra.7z" 2>nul
+if exist "data\bin\7zr\7za.exe" ( echo [OK]   7za.exe ready. ) else ( echo [WARN] 7za.exe bootstrap failed; QAIRT extraction falls back to Expand-Archive. )
+exit /b 0
+
+REM :ensure_local_uv - make sure data\bin\uv\uv.exe exists (step 2 may have reused a uv from PATH):
+REM   copy the PATH one, else take it from the PyPI wheel.
+:ensure_local_uv
+if exist "%UV_BIN_DIR%\uv.exe" exit /b 0
+if not exist "%UV_BIN_DIR%" mkdir "%UV_BIN_DIR%"
+set "_UVSRC="
+for /f "delims=" %%U in ('where uv.exe 2^>nul') do if not defined _UVSRC set "_UVSRC=%%U"
+if defined _UVSRC copy /y "%_UVSRC%" "%UV_BIN_DIR%\uv.exe" >nul 2>&1
+if exist "%UV_BIN_DIR%\uv.exe" exit /b 0
+call :pypi_exe uv %WHL_PLAT% "uv.exe,uvx.exe" "%UV_BIN_DIR%" ""
 exit /b 0
 
 REM :pypi_exe <package> <platform> <exe,exe> <outdir> <version|""> - take native exes out of a PyPI wheel

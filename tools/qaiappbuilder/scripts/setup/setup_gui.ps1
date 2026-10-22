@@ -754,6 +754,9 @@ function Start-Run([string]$cmdline, [string]$kind, [int]$total) {
     $psi.Arguments = '/d /s /c "(' + $cmdline + ') > "' + $script:LogPath + '" 2>&1 < nul"'
     $psi.WorkingDirectory = $Root
     $psi.UseShellExecute = $false
+    # build_frontend.bat runs right after setup_env.bat: tell setup_env not to print a stale
+    # "frontend\dist is missing" warning (the dist is built a moment later in the same run).
+    if ($cmdline -match 'build_frontend\.bat') { $psi.EnvironmentVariables['QAI_DIST_WARN_OFF'] = '1' }
     $psi.CreateNoWindow = $true
     $script:Watch.Reset(); $script:Watch.Start()
     $script:Proc = [System.Diagnostics.Process]::Start($psi)
