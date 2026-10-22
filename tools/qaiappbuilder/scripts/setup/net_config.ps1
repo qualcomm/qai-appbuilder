@@ -472,14 +472,35 @@ if (-not $NoProbe) {
 }
 
 # ---- profile decision ------------------------------------------------------
+# Official sources reachable -> still compare with the cn mirror and switch only when the official
+# PyPI is clearly slower: > 1500 ms AND more than 3x the mirror's latency. Same rule as the GUI's
+# Get-NetRecommend (setup_gui.ps1), so the command line and the window pick the same profile.
+# Latency here is the HEAD round trip, not download bandwidth.
+function Select-AutoProfile([bool]$OfficialOk, $OfficialMs, $CnOk, $CnMs) {
+    if ($OfficialOk) {
+        if ($CnOk -and $OfficialMs -gt 1500 -and $OfficialMs -gt 3 * $CnMs) { return @{ profile = 'cn'; why = "official PyPI is slow ($OfficialMs ms) vs the cn mirror ($CnMs ms)" } }
+        return @{ profile = 'official'; why = 'official sources reachable' }
+    }
+    if ($CnOk) { return @{ profile = 'cn'; why = 'official source unreachable but cn mirror reachable' } }
+    return @{ profile = 'official'; why = 'neither the official source nor the cn mirror is reachable' }
+}
+
 $profile = $Mirror
 if ($Mirror -eq 'auto') {
     $profile = 'official'
-    if (-not $NoProbe -and -not $pypiOk) {
+    if (-not $NoProbe) {
+        # Probe the mirror whether or not the official source answered (needed for the latency comparison).
         $probe = if ($results.ContainsKey('pypi.org (PyPI)')) { $cnProbe[0] } else { $cnProbe[1] }
         Show-Probes @(, $probe)
-        if ($results[$probe[0]].ok) { $profile = 'cn'; Write-Host '[NET] official source unreachable but cn mirror reachable -> using cn mirrors' }
-        else { Write-Host '[NET] WARN: neither the official source nor the cn mirror is reachable. Set a proxy: --proxy http://host:port' }
+        $cnR = $results[$probe[0]]
+        $offMs = 0; $cnMs = 0
+        if ($results.ContainsKey('pypi.org (PyPI)')) { $offMs = [long]$results['pypi.org (PyPI)'].ms }
+        if ($cnR) { $cnMs = [long]$cnR.ms }
+        $pick = Select-AutoProfile $pypiOk $offMs ([bool]($cnR -and $cnR.ok)) $cnMs
+        $profile = $pick.profile
+        Write-Host "[NET] auto: $($pick.why) -> $profile"
+        Write-Log "AUTO: $($pick.why)"
+        if (-not $pypiOk -and $profile -ne 'cn') { Write-Host '[NET] WARN: neither the official source nor the cn mirror is reachable. Set a proxy: --proxy http://host:port' }
     }
 }
 Write-Host "[NET] profile: $profile"
