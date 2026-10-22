@@ -362,26 +362,6 @@ REM retries and no size verification -- a corrupt 0-byte download would
 REM pass straight through to extraction and crash there).
 if exist "%UV_EXE%" goto :uv_ready
 
-REM Reuse a uv.exe that is already on PATH (setup_env.bat does the same) instead of downloading
-REM another ~15MB copy. COPY it to data\bin\uv\ rather than only pointing at it: Step 8
-REM (setup_qairt_env.py / install_qairt.py) looks for the file at exactly that path and aborts
-REM when it is missing. The copy is verified with --version; a launcher/shim that does not
-REM survive being moved is discarded and the normal download below runs.
-set "_UVP="
-for /f "delims=" %%U in ('where uv.exe 2^>nul') do if not defined _UVP set "_UVP=%%U"
-if not defined _UVP goto :uv_download
-if not exist "%UV_BIN_DIR%" mkdir "%UV_BIN_DIR%"
-copy /y "%_UVP%" "%UV_EXE%" >nul
-for %%V in ("%_UVP%") do if exist "%%~dpVuvx.exe" copy /y "%%~dpVuvx.exe" "%UV_BIN_DIR%\uvx.exe" >nul
-"%UV_EXE%" --version >nul 2>&1
-if errorlevel 1 goto :uv_path_unusable
-echo [SKIP] using uv from PATH: %_UVP% ^(copied to %UV_EXE%^)
-goto :uv_ready
-:uv_path_unusable
-del /f /q "%UV_EXE%" 2>nul
-echo [WARN] uv found on PATH could not be reused ^(%_UVP%^); downloading it instead.
-:uv_download
-
 echo [INFO] Downloading uv ^(%HOST_ARCH%^)...
 echo [INFO] URL: %UV_URL%
 
@@ -1538,26 +1518,16 @@ set "GUARD_URL=https://github.com/qualcomm/qai-appbuilder/releases/download/v2.4
 set "GUARD_ZIP=%DL_DIR%\guard.zip"
 set "GUARD_TMP=%DL_DIR%\_guard_tmp"
 
-REM Idempotency: release/dev checkout may already contain the DLLs. Only what THIS host
-REM runs is required, the same rule setup_env.bat's :fetch_guard uses: vendor\bin\%HOST_ARCH%\guard64.dll.
-REM (The old rule demanded all of arm64\guard64.dll + x64\guard64.dll + arm64\guard-injector.exe, so an
-REM ARM64 host re-downloaded the 31MB guard.zip on every run just to fetch an x64 DLL it never loads:
-REM the guard DLL is loaded into the Python PROCESS, whose arch is HOST_ARCH.)
-REM The ARM64 broker (guard-injector.exe) is the one extra piece an x64 host needs: the x64
-REM guard64.dll delegates ARM64-child injection to it (cross-arch 0xC000007B fix). So an x64 host
-REM additionally requires the broker; an ARM64 host runs it natively and does not.
-if /i "%HOST_ARCH%"=="x64" goto :guard_check_x64
-if exist "vendor\bin\%HOST_ARCH%\guard64.dll" (
-    echo [SKIP] guard64.dll already present: vendor\bin\%HOST_ARCH%
+REM Idempotency: release/dev checkout may already contain the DLLs AND the
+REM ARM64 broker helper (guard-injector.exe). The broker is REQUIRED on x64
+REM hosts: the x64 guard64.dll delegates ARM64-child injection to the native
+REM ARM64 guard-injector.exe (cross-arch 0xC000007B fix). Treat the install as
+REM complete only when all three are present, so an older checkout that has the
+REM two DLLs but not the broker still re-extracts to pick the broker up.
+if exist "vendor\bin\arm64\guard64.dll" if exist "vendor\bin\x64\guard64.dll" if exist "vendor\bin\arm64\guard-injector.exe" (
+    echo [SKIP] guard64.dll + guard-injector.exe already present: vendor\bin\arm64 + vendor\bin\x64
     exit /b 0
 )
-goto :guard_need_fetch
-:guard_check_x64
-if exist "vendor\bin\x64\guard64.dll" if exist "vendor\bin\arm64\guard-injector.exe" (
-    echo [SKIP] guard64.dll + guard-injector.exe already present: vendor\bin\x64 + vendor\bin\arm64
-    exit /b 0
-)
-:guard_need_fetch
 
 if not exist "vendor\bin\arm64" mkdir "vendor\bin\arm64"
 if not exist "vendor\bin\x64" mkdir "vendor\bin\x64"
@@ -1610,10 +1580,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ^
 
 if exist "%GUARD_TMP%" rmdir /s /q "%GUARD_TMP%" 2>nul
 
-REM Success = the DLL this host actually loads is in place (HOST_ARCH). The other arch's DLL is
-REM copied when the archive has it, but its absence is not a failure.
-if exist "vendor\bin\%HOST_ARCH%\guard64.dll" (
-    echo [OK]   guard64.dll installed to vendor\bin\%HOST_ARCH%.
+if exist "vendor\bin\arm64\guard64.dll" if exist "vendor\bin\x64\guard64.dll" (
+    echo [OK]   guard64.dll installed to vendor\bin\arm64 and vendor\bin\x64.
     if exist "vendor\bin\arm64\guard-injector.exe" (
         echo [OK]   guard-injector.exe installed to vendor\bin\arm64 ^(x64 cross-arch broker ready^).
     ) else (
@@ -1623,7 +1591,7 @@ if exist "vendor\bin\%HOST_ARCH%\guard64.dll" (
     exit /b 0
 )
 
-echo [WARN] guard.zip extracted but guard64.dll for %HOST_ARCH% was not found.
+echo [WARN] guard.zip extracted but both guard DLLs were not found.
 echo [WARN] Check archive layout at %GUARD_ZIP%.
 exit /b 0
 
@@ -2780,14 +2748,11 @@ if defined PY_INTERP (
     set "PY310_ARG=--python %PY310_UV_SPEC%"
 )
 echo [INFO] Creating .venv_x64_310 ^(x86_64 Python 3.10^)...
-REM --no-project: this venv is the QAIRT converter env (Python 3.10) and is NOT the
-REM project environment. Without it uv reads pyproject.toml, sees requires-python
-REM ">=3.12" and prints a misleading "interpreter is incompatible" warning.
-uv venv "%VENV_310_DIR%" %PY310_ARG% --seed --allow-existing --no-project
+uv venv "%VENV_310_DIR%" %PY310_ARG% --seed --allow-existing
 if errorlevel 1 (
     REM Retry without --allow-existing for older uv, then last-resort accept
     REM only a USABLE venv (python.exe AND activate.bat both present).
-    uv venv "%VENV_310_DIR%" %PY310_ARG% --seed --no-project 2>nul
+    uv venv "%VENV_310_DIR%" %PY310_ARG% --seed 2>nul
     if errorlevel 1 (
         if exist "%VENV_310_DIR%\Scripts\python.exe" if exist "%VENV_310_DIR%\Scripts\activate.bat" (
             echo [WARN] uv venv reported an error, but a usable .venv_x64_310 exists. Continuing...
