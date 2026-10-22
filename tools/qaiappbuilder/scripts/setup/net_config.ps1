@@ -506,9 +506,24 @@ if ($Mirror -eq 'auto') {
 Write-Host "[NET] profile: $profile"
 Write-Log "PROFILE: $profile"
 
-# ---- GitHub proxy (cn profile only; works even with -NoProbe) ---------------------
+# ---- GitHub proxy -----------------------------------------------------------------
+# The cn profile always gets one (works even with -NoProbe). With --mirror auto the official profile
+# gets one too when github.com is unreachable: PyPI can be fine while GitHub is blocked, and several
+# downloads (x64 qai_appbuilder wheel, aria2c, guard.zip, ast-grep) come from GitHub releases. Only the
+# GitHub downloads are redirected then; PyPI / Python / npm stay on the official sources.
 $ghPrefix = ''
-if ($profile -eq 'cn') {
+# Does this run need a GitHub download proxy? cn: always. auto + official: only when github.com is unreachable.
+function Test-NeedGitHubProxy([string]$Profile, [string]$MirrorOpt, [bool]$NoProbeOpt, $GitHubProbe) {
+    if ($Profile -eq 'cn') { return $true }
+    return ($MirrorOpt -eq 'auto' -and -not $NoProbeOpt -and $null -ne $GitHubProbe -and -not $GitHubProbe.ok)
+}
+$ghProbe = if ($results.ContainsKey('github.com (uv/releases)')) { $results['github.com (uv/releases)'] } else { $null }
+$needGhProxy = Test-NeedGitHubProxy $profile $Mirror ([bool]$NoProbe) $ghProbe
+if ($needGhProxy -and $profile -ne 'cn') {
+    Write-Host '[NET] github.com is unreachable although the official profile is used -> GitHub downloads will go through a proxy'
+    Write-Log 'GITHUB: unreachable with the official profile; selecting a proxy'
+}
+if ($needGhProxy) {
     Write-Host '[NET] selecting a GitHub download proxy ...'
     $pick = Select-GitHubMirror
     if ($pick) { $ghPrefix = $pick.prefix; Write-Host "[NET] GitHub proxy: $ghPrefix"; Write-Log "GITHUB PROXY: $ghPrefix" }
@@ -523,12 +538,13 @@ if ($proxyUrl) {
     foreach ($n in 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY') { $lines.Add("set `"$n=$proxyUrl`"") }
     $lines.Add('set "NO_PROXY=localhost,127.0.0.1,::1"')
 }
+# QAI_GITHUB_MIRROR is read on its own by :dl (setup_env.bat) and build_frontend.bat, independent of the profile.
+if ($ghPrefix) { $lines.Add("set `"QAI_GITHUB_MIRROR=$ghPrefix`"") }
 if ($profile -eq 'cn') {
     $lines.Add("set `"UV_DEFAULT_INDEX=$($CN.PyPI)`"")
     $lines.Add("set `"PIP_INDEX_URL=$($CN.PyPI)`"")
     $lines.Add("set `"UV_PYTHON_INSTALL_MIRROR=$($CN.PyStandalone)`"")
     $lines.Add("set `"PLAYWRIGHT_DOWNLOAD_HOST=$($CN.Playwright)`"")
-    if ($ghPrefix) { $lines.Add("set `"QAI_GITHUB_MIRROR=$ghPrefix`"") }
     # npm / pnpm / corepack read these; QAI_NODE_MIRROR is used by build_frontend.bat
     $lines.Add("set `"NPM_CONFIG_REGISTRY=$($CN.Npm)`"")
     $lines.Add("set `"COREPACK_NPM_REGISTRY=$($CN.Npm)`"")

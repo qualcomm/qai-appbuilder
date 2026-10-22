@@ -408,10 +408,11 @@ echo.
 echo Environment variables:
 echo   QAI_NO_PYPI_EXE=1      do not take uv / ast-grep from their PyPI wheels; use the GitHub releases
 echo   QAI_UNPACK=7zr         unpack vendor-deps.7z with 7zr.exe instead of the built-in tar.exe
-echo   QAI_GITHUB_MIRROR=URL  prefix for github.com downloads ^(set automatically for --mirror cn^)
+echo   QAI_GITHUB_MIRROR=URL  prefix for github.com downloads ^(set automatically for --mirror cn, and for auto when github.com is unreachable^)
 echo.
 echo uv and ast-grep come from PyPI wheels ^(pypi.org, or the tuna mirror first for cn^), so a blocked
-echo github.com does not stop the core install. Only guard.zip ^(optional FileGuard^) needs GitHub.
+echo github.com does not stop the core install. GitHub is still needed for the x64 qai_appbuilder wheel and
+echo guard.zip ^(optional FileGuard^); without it on x64 only NPU inference is unavailable.
 echo.
 echo Installs to the same places as Setup.bat, so Start.bat / qai.bat / Console.bat just work.
 exit /b 0
