@@ -96,8 +96,8 @@ $S_en = @{
     Frontend = 'Build the WebUI frontend\dist (installs Node.js + pnpm, ~1-2 min)'
     FrontendHave = '  [already built - optional]'
     FrontendMissing = '  [missing - without it the page returns 404]'
-    Builder = 'Model conversion env: QAIRT SDK (~2 GB) + x64 converter venv + VS Build Tools'
-    BuilderWarn = "The model conversion environment downloads the ~2 GB QAIRT SDK and may install Visual Studio Build Tools; it takes a long time.`r`nIt is NOT needed to run pre-built models. Install it anyway?"
+    Builder = 'Model conversion env: QAIRT SDK (~2 GB) + x64 converter venv'
+    BuilderWarn = "The model conversion environment downloads the ~2 GB QAIRT SDK; it takes a long time.`r`nIt is NOT needed to run pre-built models. Install it anyway?"
     Estimate = 'Estimated download: up to ~{0} (parts already present are skipped)'
     Cmd = 'Command to run'
     Back = '< Back'; Next = 'Next >'; Install = 'Install'
@@ -149,8 +149,8 @@ $S_zh = @{
     Frontend = '构建 Web 界面 frontend\dist(自动安装 Node.js + pnpm,约 1~2 分钟)'
     FrontendHave = '  [已构建，可不选]'
     FrontendMissing = '  [缺失，不构建则页面返回 404]'
-    Builder = '模型转换环境:QAIRT SDK(约 2 GB)+ x64 转换 venv + VS 构建工具'
-    BuilderWarn = "模型转换环境需要下载约 2 GB 的 QAIRT SDK,并可能安装 Visual Studio 构建工具，耗时较长。`r`n只运行预构建模型不需要它。确定要安装吗?"
+    Builder = '模型转换环境:QAIRT SDK(约 2 GB)+ x64 转换 venv'
+    BuilderWarn = "模型转换环境需要下载约 2 GB 的 QAIRT SDK，耗时较长。`r`n只运行预构建模型不需要它。确定要安装吗?"
     Estimate = '预计下载：最多约 {0}(已存在的部分会跳过)'
     Cmd = '将执行的命令'
     Back = '< 上一步'; Next = '下一步 >'; Install = '开始安装'

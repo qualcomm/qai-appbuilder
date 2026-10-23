@@ -5,7 +5,14 @@
 """
 run_pipeline_legacy.py - LEGACY End-to-End QNN Pipeline (ONNX -> C++/BIN -> DLL -> .bin)
 
->>> LEGACY / SECONDARY PATH <<<
+>>> NO LONGER SUPPORTED <<<
+
+This legacy DLL pipeline (ONNX -> C++/BIN -> DLL -> .bin) needed Visual Studio to compile a
+model .dll. Setup no longer installs Visual Studio, so running this script now exits with an
+error. Use ``run_pipeline.py`` (ONNX -> DLC -> .bin), which needs no compiler. The rest of this
+file is kept only as a reference for the old behaviour.
+
+>>> LEGACY / SECONDARY PATH (historical description) <<<
 
 This is the OLD DLL-based pipeline. The default entry point is now
 ``run_pipeline.py`` which runs the newer DLC-based path
@@ -64,20 +71,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Legacy Flow C compiles an aarch64-windows-msvc .dll and generates its
-# context binary in-process — requires a real ARM64 build+runtime. Reject
-# on any other host BEFORE parsing args so misuse fails loud, early.
+# Legacy Flow C (compile an aarch64-windows-msvc .dll with Visual Studio) is NO LONGER
+# SUPPORTED: setup no longer installs Visual Studio, and the DLC flow (run_pipeline.py)
+# replaces it. Fail loud and early, before parsing args.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _host_arch import detect_host_os  # noqa: E402
-
-_HOST_OS = detect_host_os()
-if _HOST_OS != "windows-arm64":
-    print(f"[ERROR] run_pipeline_legacy.py (Flow C, DLL path) requires "
-          f"windows-arm64; current host is {_HOST_OS}.")
-    print("[ERROR] Flow C builds an aarch64 .dll via qnn-model-lib-generator + "
-          "VS ARM64 and loads it in-process; neither works on x64/Linux hosts.")
-    print("[ERROR] Use the default run_pipeline.py (Flow A: ONNX -> DLC -> .bin) instead.")
-    sys.exit(2)
+print("[ERROR] run_pipeline_legacy.py (Flow C, DLL path) is no longer supported.")
+print("[ERROR] Use run_pipeline.py (Flow A: ONNX -> DLC -> .bin) instead; it needs no Visual Studio.")
+sys.exit(2)
 
 
 # ---------------------------------------------------------------------------

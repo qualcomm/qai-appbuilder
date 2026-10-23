@@ -101,84 +101,16 @@ from _soc_targets import htp_version_to_target_soc_model, soc_target  # noqa: E4
 
 
 # ---------------------------------------------------------------------------
-# Preflight gate 1: VS ARM64 environment
+# No Visual Studio / VS ARM64 environment is required
 #
-# qnn-context-binary-generator.exe is a native ARM64 binary.  Without the VS
-# ARM64 runtime environment it fails with:
-#   "Wrong number of Parameters 5" / "Conv2d failed 3110"
-# which looks like an operator error but is actually a missing-env error.
-#
-# This function is a HARD GATE: it either ensures the env is active or
-# calls sys.exit(1).  It never silently continues with a broken env.
+# Only the DLC flow (ONNX -> DLC -> .bin) is supported. The generator
+# (qnn-context-binary-generator.exe) and the QNN DLLs it loads are prebuilt ARM64
+# binaries that import only the Windows system / UCRT DLLs (no MSVC runtime, no
+# compiler), so neither vcvarsall.bat nor VCTargetsPath is needed. Verified by
+# running the DLC -> .bin flow with and without a VS environment: same exit
+# code, same output size. The legacy DLL flow (compiling a model .dll with
+# qnn-model-lib-generator) needed VS and is no longer supported.
 # ---------------------------------------------------------------------------
-
-def _ensure_vs_arm64_env(cfg: dict) -> None:
-    """
-    Guarantee that the current process has a VS ARM64 build environment
-    before any ARM64 native binary is launched.
-
-    Steps:
-      1. Check VSCMD_ARG_TGT_ARCH: if already "arm64" -> done.
-      2. Run vcvarsall.bat arm64, merge env vars into os.environ.
-      3. Re-check VSCMD_ARG_TGT_ARCH: if still not "arm64" -> sys.exit(1).
-
-    This is called unconditionally on Windows before the generator runs.
-    Failure here is always fatal -- there is no point continuing.
-    """
-    if os.environ.get("VSCMD_ARG_TGT_ARCH", "").lower() == "arm64":
-        print("[INFO] VS ARM64 env already active (VSCMD_ARG_TGT_ARCH=arm64)")
-        return
-
-    vcvarsall = cfg.get("vs_vcvarsall", "")
-    vc_targets = cfg.get("vc_targets_path", "")
-
-    if not vcvarsall or not Path(vcvarsall).exists():
-        print("[ERROR] VS ARM64 env is NOT active and vcvarsall.bat was not found.")
-        print("  vs_vcvarsall in qairt_env.json = " + repr(vcvarsall))
-        print("  Fix: install Visual Studio 2022 Community (not BuildTools) and")
-        print("  re-run Setup.bat --builder to update data/config/qairt_env.json.")
-        sys.exit(1)
-
-    print("[INFO] Initializing VS ARM64 env from: " + vcvarsall)
-
-    # FIX Bug1: use a list-based cmd so subprocess handles quoting correctly,
-    # then capture the resulting environment via "set".
-    # We run:  cmd.exe /c "vcvarsall.bat" arm64 >nul 2>&1 && set
-    # Using shell=True with a list is not valid on Windows; instead build the
-    # full command string carefully with the path quoted by shlex.quote
-    # equivalent for Windows (double-quote the path).
-    quoted = '"' + vcvarsall + '"'
-    cmd = 'cmd /c "' + quoted + ' arm64 >nul 2>&1 && set"'
-    try:
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-    except Exception as exc:
-        print("[ERROR] Failed to run vcvarsall.bat: " + str(exc))
-        sys.exit(1)
-
-    if result.returncode != 0:
-        print("[WARN] vcvarsall.bat returned exit code " + str(result.returncode) + " (may still be OK)")
-
-    count = 0
-    for line in result.stdout.splitlines():
-        if "=" in line:
-            k, _, v = line.partition("=")
-            os.environ[k] = v
-            count += 1
-
-    # Force VCTargetsPath to Community path so MSBuild uses the right toolset
-    if vc_targets:
-        os.environ["VCTargetsPath"] = vc_targets
-
-    # --- Hard preflight gate: verify the env actually took effect ---
-    arch = os.environ.get("VSCMD_ARG_TGT_ARCH", "")
-    if arch.lower() != "arm64":
-        print("[ERROR] VS ARM64 env init FAILED -- VSCMD_ARG_TGT_ARCH=" + repr(arch) + " (expected 'arm64')")
-        print("  vcvarsall.bat merged " + str(count) + " vars but did not set target arch to arm64.")
-        print("  Ensure vs_vcvarsall in qairt_env.json points to VS 2022 Community")
-        print("  (not BuildTools) and that the ARM64 workload is installed.")
-        sys.exit(1)
-
-    print("[INFO] VS ARM64 env ready (" + str(count) + " vars merged, arch=arm64)")
 
 
 # ---------------------------------------------------------------------------
@@ -532,9 +464,7 @@ def _apply_env_config(cfg: dict) -> None:
     if sdk_root and not os.environ.get("QAIRT_SDK_ROOT"):
         os.environ["QAIRT_SDK_ROOT"] = sdk_root
         print("[INFO] Set QAIRT_SDK_ROOT from env_config: " + sdk_root)
-    vc_targets = cfg.get("vc_targets_path", "")
-    if vc_targets and not os.environ.get("VCTargetsPath"):
-        os.environ["VCTargetsPath"] = vc_targets
+    # No need to apply vc_targets_path / VCTargetsPath: Visual Studio is not used.
     if sdk_root:
         qairt_pylib = os.path.join(sdk_root, "lib", "python")
         pythonpath = os.environ.get("PYTHONPATH", "")
@@ -817,12 +747,15 @@ def run_generator(model_path, output_path=None, output_dir=None, binary_file=Non
     system = platform.system().lower()
 
     # -----------------------------------------------------------------------
-    # PREFLIGHT GATE 1: VS ARM64 environment (Windows only)
-    # Must run BEFORE any ARM64 native binary is launched.
-    # Hard exit if environment cannot be established.
+    # Windows: only .dlc input is supported (the DLC -> .bin flow). The legacy .dll
+    # input needed a Visual Studio-compiled model library and is no longer
+    # supported. (Linux is unchanged: it still accepts its model library.)
     # -----------------------------------------------------------------------
-    if system == "windows":
-        _ensure_vs_arm64_env(cfg)
+    if system == "windows" and not model_path.lower().endswith(".dlc"):
+        print("[ERROR] Only .dlc input is supported on Windows (ONNX -> DLC -> .bin). Got: " + model_path)
+        print("  The legacy .dll flow (compiling a model library with Visual Studio) is no longer supported.")
+        print("  Convert the model with run_pipeline.py, which produces a .dlc.")
+        sys.exit(2)
 
     # FIX Bug4: replace silent else-fallback with explicit error for unknown platforms.
     if system == "linux":

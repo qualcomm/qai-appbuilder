@@ -425,7 +425,7 @@ echo   --with-browser         Playwright + Chromium ^(~150MB; browser search / b
 echo   --with-astgrep         ast-grep CLI ^(ast_grep / ast_edit tools^)
 echo   --with-apps            App Builder pack deps ^(whisper / melotts / ocr^)
 echo   --builder              model-conversion environment ^(ONNX -^> NPU .bin^): QAIRT SDK ~2GB,
-echo                          x86_64 Python 3.10 converter venv, VS 2022 C++ tools, qairt_env.json
+echo                          x86_64 Python 3.10 converter venv, qairt_env.json ^(no Visual Studio needed^)
 echo   --no-pause             do not pause at the end
 echo.
 echo Environment variables:
@@ -668,9 +668,11 @@ exit /b 0
 REM ===========================================================================
 REM  :builder (--builder) - model-conversion environment, self-contained (never calls Setup.bat):
 REM    8a x86_64 Python 3.10 venv (.venv_x64_310)   8b QAIRT SDK (version pinned in scripts\qairt_release.json)
-REM    8c VS 2022 C++ build tools                    8d converter deps into .venv_x64_310
-REM    8e inference deps into the runtime venv       8f data\config\qairt_env.json + verify
-REM  The Python-side work is done by scripts\setup\setup_qairt_env.py and install_vs.ps1.
+REM    8c converter deps into .venv_x64_310         8d inference deps into the runtime venv
+REM    8e data\config\qairt_env.json + verify
+REM  Only the DLC flow (ONNX -> DLC -> .bin, run_pipeline.py) is supported; it needs no compiler, so Visual Studio
+REM  is not installed. The legacy DLL flow (run_pipeline_legacy.py) is not supported.
+REM  The Python-side work is done by scripts\setup\setup_qairt_env.py.
 REM ===========================================================================
 :builder
 set "QB_HELPER=scripts\setup\setup_qairt_env.py"
@@ -699,35 +701,29 @@ if errorlevel 1 exit /b 1
 call :tick "8b QAIRT SDK"
 
 echo.
-echo -- Step 8c: VS 2022 C++ build tools ^(silent^) -----------------------------------
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup\install_vs.ps1" -LogDir "%DL_DIR%"
-if errorlevel 1 echo [WARN] VS build tools step reported a problem ^(non-fatal; see %DL_DIR%\vs_install.log^).
-call :tick "8c VS build tools"
-
-echo.
-echo -- Step 8d: converter deps ^(.venv_x64_310^) --------------------------------------
+echo -- Step 8c: converter deps ^(.venv_x64_310^) --------------------------------------
 "%VENV_310_DIR%\Scripts\python.exe" "%QB_HELPER%" --install-python-deps
 if errorlevel 1 echo [WARN] some x64 converter deps failed ^(non-fatal^).
-call :tick "8d converter deps (x64 venv)"
+call :tick "8c converter deps (x64 venv)"
 
 echo.
-echo -- Step 8e: inference deps ^(%VENV_DIR_NAME%^) -------------------------------------
+echo -- Step 8d: inference deps ^(%VENV_DIR_NAME%^) -------------------------------------
 REM App Builder Pack deps (whisper / melotts / ...) belong to --with-apps (Step 5e), not to the builder.
 set "QAI_SKIP_PACK_DEPS=1"
 "%VPY%" "%QB_HELPER%" --install-inference-deps --host-arch %HOST_ARCH%
 if errorlevel 1 echo [WARN] some inference deps failed ^(non-fatal^).
 set "QAI_SKIP_PACK_DEPS="
-call :tick "8e inference deps (runtime venv)"
+call :tick "8d inference deps (runtime venv)"
 
 echo.
-echo -- Step 8f: data\config\qairt_env.json + verify --------------------------------
+echo -- Step 8e: data\config\qairt_env.json + verify --------------------------------
 "%VPY%" "%QB_HELPER%" --gen-config --sdk-root "%QAIRT_SDK_ROOT%" --host-arch %HOST_ARCH%
 if errorlevel 1 ( echo [ERROR] data\config\qairt_env.json could not be generated. & exit /b 1 )
 if not exist "data\config\qairt_env.json" ( echo [ERROR] data\config\qairt_env.json could not be generated. & exit /b 1 )
 echo [OK]   data\config\qairt_env.json generated.
 "%VPY%" "%QB_HELPER%" --verify --sdk-root "%QAIRT_SDK_ROOT%" --host-arch %HOST_ARCH%
 if errorlevel 1 echo [WARN] the verifier reported missing pieces ^(see above^).
-call :tick "8f qairt_env.json + verify"
+call :tick "8e qairt_env.json + verify"
 echo [OK]   model-builder environment ready: %QAIRT_SDK_ROOT%
 exit /b 0
 

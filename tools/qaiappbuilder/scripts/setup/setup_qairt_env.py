@@ -442,7 +442,11 @@ def check_qairt_sdk(sdk_root=None):
 
 
 def check_vs2022(verbose=True):
-    """Check VS 2022 Community with ARM64 support."""
+    """Check VS 2022 Community with ARM64 support.
+
+    NOT called by verify_all()/check_all_json() any more: Visual Studio is not required (only the
+    DLC flow is supported). Kept only for manual use / the legacy DLL flow.
+    """
     if _detect_platform() != "windows":
         _print_info("[SKIP] Visual Studio not applicable on Linux")
         return True
@@ -613,24 +617,12 @@ def gen_config(root, sdk_root=None, host_arch=None):
         # rather than proceed with a bogus config.
         sys.exit(1)
 
-    # Detect actual VS vcvarsall path
-    vcvarsall = VS_VCVARSALL
-    vc_targets = VS_VC_TARGETS + "\\"
+    # Visual Studio is NOT used (only the DLC flow is supported, which needs no compiler), so
+    # these keys are written empty. They are kept in the JSON for backward compatibility with
+    # readers that do cfg.get("vs_vcvarsall", "") etc.
+    vcvarsall = ""
+    vc_targets = ""
     vs_cmake_path = ""
-
-    # Check if VS is installed at a different path via vswhere
-    if Path(VSWHERE).exists():
-        ok, out, _ = _run(f'"{VSWHERE}" -latest -property installationPath')
-        if ok and out:
-            vs_path = out.strip()
-            candidate_vcvarsall = os.path.join(vs_path, "VC", "Auxiliary", "Build", "vcvarsall.bat")
-            # Auto-detect VC targets version (v170, v180, etc.) instead of hardcoding
-            candidate_vc_targets = _detect_vc_targets_path(vs_path)
-            if os.path.exists(candidate_vcvarsall):
-                vcvarsall = candidate_vcvarsall
-                vc_targets = candidate_vc_targets
-            # Detect VS-bundled cmake (needed when system cmake is too old for this VS version)
-            vs_cmake_path = _detect_vs_cmake_path(vs_path)
 
     # By here the pinned SDK exists on disk (else we exited above), so its
     # directory name is the authoritative installed version.
@@ -1235,15 +1227,12 @@ def verify_all(root, sdk_root=None):
     print(f"\n[2] QAIRT SDK {QAIRT_SDK_VERSION}:")
     results["qairt_sdk"] = check_qairt_sdk(sdk_root)
 
-    _vs_arch_label = "ARM64" if _detect_arch() == "aarch64" else "x64"
-    print(f"\n[3] VS 2022 Community ({_vs_arch_label} compilation):")
-    results["vs2022"] = check_vs2022()
-
+    # Visual Studio is NOT checked: the supported DLC flow (ONNX -> DLC -> .bin) needs no compiler.
     _venv_arch_label = "ARM64" if _detect_arch() == "aarch64" else "x64"
-    print(f"\n[4] qai_appbuilder in {_venv_arch_label} .venv (for inference):")
+    print(f"\n[3] qai_appbuilder in {_venv_arch_label} .venv (for inference):")
     results["qai_appbuilder"] = check_qai_appbuilder(root)
 
-    print("\n[5] Inference dependencies (Pillow, numpy):")
+    print("\n[4] Inference dependencies (Pillow, numpy):")
     results["inference_deps"] = check_inference_deps(root)
 
     print("\n" + "=" * 60)
@@ -1365,16 +1354,10 @@ def check_all_json(root, sdk_root=None):
             "exists": _exists(_python_exe(venv_arm64)),
         },
         "qairt_sdk": _inspect_qairt_sdk(sdk),
-        "vs2022": (
-            {
-                "vcvarsall": VS_VCVARSALL,
-                "vcvarsall_exists": _exists(VS_VCVARSALL),
-                "arm64_platform": VS_ARM64_PLATFORM,
-                "arm64_platform_exists": _exists(VS_ARM64_PLATFORM),
-            }
-            if _detect_platform() == "windows"
-            else {"applicable": False, "reason": "Visual Studio is Windows-only"}
-        ),
+        "vs2022": {
+            "applicable": False,
+            "reason": "not required: only the DLC flow is supported (no compiler needed)",
+        },
         "config": {
             "path": str(_config_path(root)),
             "exists": _exists(_config_path(root)),

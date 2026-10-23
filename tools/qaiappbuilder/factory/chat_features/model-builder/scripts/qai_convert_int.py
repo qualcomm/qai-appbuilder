@@ -872,8 +872,11 @@ Calibration List Format (calibration_list.txt):
 
 
 if __name__ == "__main__":
-    # Flow C requires a real ARM64 host (aarch64-windows-msvc lib generator +
-    # VS ARM64). Reject early on any other host; use run_pipeline.py (Flow A).
+    # Flow C (legacy DLL flow) is no longer supported: it needs a Visual Studio-compiled
+    # model library, and Visual Studio is no longer installed by setup. Use run_pipeline.py.
+    print("[ERROR] qai_convert_int.py (Flow C, DLL) is no longer supported.")
+    print("[ERROR] Use run_pipeline.py (Flow A: ONNX -> DLC -> .bin) instead; it needs no Visual Studio.")
+    sys.exit(2)
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from _host_arch import detect_host_os as _detect_host_os  # noqa: E402
     _ho = _detect_host_os()
