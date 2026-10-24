@@ -1260,6 +1260,15 @@ def make_lifespan(
                     _log.warning(
                         "lifespan.browser_manager_close_failed", exc_info=True
                     )
+            # Model-conversion environment installer: kill its child process tree
+            # (a multi-GB download must not outlive the server). Best-effort.
+            _builder_env = getattr(container, "builder_env_service", None)
+            if _builder_env is not None and hasattr(_builder_env, "aclose"):
+                try:
+                    await _builder_env.aclose()
+                    _log.info("lifespan.builder_env_closed")
+                except Exception:  # noqa: BLE001
+                    _log.warning("lifespan.builder_env_close_failed", exc_info=True)
             # 9-L4 — cancel App Builder background tasks (the voice-input
             # warm-up spawned at startup + any in-flight benchmark drives)
             # so fire-and-forget coroutines are not orphaned on shutdown.

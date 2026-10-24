@@ -87,6 +87,7 @@ from interfaces.http.routes.gallery_submit import build_router as build_gallery_
 from interfaces.http.routes.search_engines import build_router as build_search_engines_router
 from interfaces.http.routes.remote_deploy import build_router as build_remote_deploy_router
 from interfaces.http.routes.qairt_switch import build_router as build_qairt_switch_router
+from interfaces.http.routes.builder_env import build_router as build_builder_env_router
 from qai.platform.config import Settings, load_settings
 from qai.platform.logging import get_logger
 
@@ -300,6 +301,7 @@ def create_app(
     _set_qai_service_secret_store(container.secret_store)
     app.include_router(build_system_router(container=container))
     app.include_router(build_qairt_switch_router(container=container))
+    app.include_router(build_builder_env_router(container=container))
     app.include_router(build_security_router(container=container))
     app.include_router(build_model_catalog_router(container=container))
     app.include_router(build_search_engines_router(container=container))

@@ -21,6 +21,7 @@ import app from "./en/app";
 import appBuilder from "./en/appBuilder";
 import appConfig from "./en/appConfig";
 import auth from "./en/auth";
+import builderEnv from "./en/builderEnv";
 import channels from "./en/channels";
 import chat from "./en/chat";
 import chatErrors from "./en/chatErrors";
@@ -90,6 +91,7 @@ const en = {
   appBuilder,
   appConfig,
   auth,
+  builderEnv,
   channels,
   chat,
   chatErrors,

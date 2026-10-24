@@ -379,8 +379,9 @@ export interface DownloadStateEntry {
  *
  * V1 nav key for the Download Center is `updates`, but the two top-level
  * tabs *within* the panel (V1 `dcActiveTab`) are `service` and `models`.
+ * `converter` (model-conversion environment) is new in V2.
  */
-export type DownloadCenterTab = "service" | "models";
+export type DownloadCenterTab = "service" | "models" | "converter";
 
 /** aria2c banner state derived from `Aria2cStatus` (V1 5-state UI). */
 export type Aria2cBannerState =

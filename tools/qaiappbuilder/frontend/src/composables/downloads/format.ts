@@ -64,14 +64,19 @@ export function formatSpeed(bps: number | null | undefined): string {
  *   < 60m   → `"{m}m {ceil(s%60)}s"`
  *   ≥ 60m   → `"{h}h {m%60}m"`
  *
- * Returns `""` for non-positive / null / NaN values.
+ * Returns `""` for non-positive / null / NaN values, and for anything over
+ * 24 h: that is a stalled transfer's near-zero speed talking, not an estimate
+ * (it once rendered as "2947935474527h 58m").
  */
+export const MAX_ETA_SECONDS = 24 * 3600;
+
 export function formatEta(seconds: number | null | undefined): string {
   if (
     seconds === null ||
     seconds === undefined ||
     !Number.isFinite(seconds) ||
-    seconds <= 0
+    seconds <= 0 ||
+    seconds > MAX_ETA_SECONDS
   ) {
     return "";
   }

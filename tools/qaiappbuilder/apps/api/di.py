@@ -143,6 +143,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from qai.app_builder.infrastructure import StickyWorkerHost
     from qai.platform.package_mutation import PackageMutationLock
     from qai.platform.qairt_switch.service import QairtSwitchService
+    from qai.platform.builder_env import BuilderEnvService
 
 
 @dataclass(slots=True)
@@ -274,6 +275,12 @@ class Container:
     qairt_switch_service: "QairtSwitchService | None" = field(
         init=False, default=None
     )
+    # Tail-appended (model-conversion environment): the user-triggered background
+    # installer for the x64 py3.10 converter venv + QAIRT SDK
+    # (``qai.platform.builder_env.BuilderEnvService``). Deliberately NOT gated on
+    # ``qairt_env.json`` (that file is what the install creates). ``None`` only in
+    # stripped-down test containers; the routes then answer 404 ``builder_env.unavailable``.
+    builder_env_service: "BuilderEnvService | None" = field(init=False, default=None)
 
     @classmethod
     def build(cls, *, settings: Settings, repo_root: Path) -> Container:
@@ -537,6 +544,38 @@ class Container:
         # switch HTTP route then surfaces a clear "feature unavailable"
         # response rather than crashing.
         self.qairt_switch_service = _build_qairt_switch_service(self)
+        self.builder_env_service = _build_builder_env_service(self)
+
+
+def _build_builder_env_service(container: "Container") -> "BuilderEnvService | None":
+    """Build the model-conversion environment installer service.
+
+    Runs ``scripts/setup/install_builder_env.py`` (stdlib only) with the server's own
+    interpreter. No ``qairt_env.json`` precondition: the install creates it.
+    """
+    import sys
+
+    from qai.platform.builder_env import BuilderEnvService
+    from qai.platform.process import current_arch
+
+    try:
+        arch = "arm64" if current_arch() == "arm64" else "x64"
+    except Exception:  # noqa: BLE001 -- unknown arch must not break startup
+        arch = "x64"
+    # The user may have forced the arch at setup time (x64 build on an ARM64 PC).
+    host_arch_file = container.data_paths.root / "config" / "host_arch"
+    try:
+        forced = host_arch_file.read_text(encoding="utf-8").strip().lower()
+        if forced in ("x64", "arm64"):
+            arch = forced
+    except OSError:
+        pass
+    return BuilderEnvService(
+        script_path=container.repo_root / "scripts" / "setup" / "install_builder_env.py",
+        python_exe=Path(sys.executable),
+        app_root=container.repo_root,
+        arch=arch,
+    )
 
 
 def _build_qairt_switch_service(

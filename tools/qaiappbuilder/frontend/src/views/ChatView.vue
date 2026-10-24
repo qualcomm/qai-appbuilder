@@ -58,6 +58,7 @@ import type { IntroMode } from "@/composables/useModeIntroCardVisibility";
 import PromoteReadyNotice from "@/components/chat/PromoteReadyNotice.vue";
 import MessageQueuePanel from "@/components/chat/MessageQueuePanel.vue";
 import TaskListBar from "@/components/chat/TaskListBar.vue";
+import BuilderEnvBanner from "@/components/chat/BuilderEnvBanner.vue";
 // SubAgentRail — second-level navigator rendered directly below the parent
 // main-agent tab (whose ChatTabStrip lives in AppHeader.vue). Restores the
 // two-level tab bar UX after β incorrectly flattened everything into a single
@@ -1447,6 +1448,10 @@ useHeaderActions((): HeaderAction[] => [
            Absolutely positioned against `.chat-view`, so its template order
            does not affect layout. -->
       <TaskListBar />
+
+      <!-- Model-conversion environment not installed / installing / failed: a thin strip that
+           links to /downloads. Never blocks the chat. -->
+      <BuilderEnvBanner />
 
       <!-- Lineage banner (V2 fork enhancement 2026-07-25) — shown above the
            message list when the active conversation has `meta.forked_from`

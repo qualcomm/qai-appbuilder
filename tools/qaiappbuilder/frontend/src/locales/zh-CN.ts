@@ -22,6 +22,7 @@ import app from "./zh-CN/app";
 import appBuilder from "./zh-CN/appBuilder";
 import appConfig from "./zh-CN/appConfig";
 import auth from "./zh-CN/auth";
+import builderEnv from "./zh-CN/builderEnv";
 import channels from "./zh-CN/channels";
 import chat from "./zh-CN/chat";
 import chatErrors from "./zh-CN/chatErrors";
@@ -91,6 +92,7 @@ const zh_CN: MessageSchema = {
   appBuilder,
   appConfig,
   auth,
+  builderEnv,
   channels,
   chat,
   chatErrors,

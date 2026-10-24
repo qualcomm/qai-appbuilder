@@ -22,6 +22,7 @@ import app from "./zh-TW/app";
 import appBuilder from "./zh-TW/appBuilder";
 import appConfig from "./zh-TW/appConfig";
 import auth from "./zh-TW/auth";
+import builderEnv from "./zh-TW/builderEnv";
 import channels from "./zh-TW/channels";
 import chat from "./zh-TW/chat";
 import chatErrors from "./zh-TW/chatErrors";
@@ -91,6 +92,7 @@ const zh_TW: MessageSchema = {
   appBuilder,
   appConfig,
   auth,
+  builderEnv,
   channels,
   chat,
   chatErrors,

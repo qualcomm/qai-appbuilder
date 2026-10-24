@@ -8,12 +8,15 @@
 
   V1-parity layout (`DownloadCenterPanel.js:81-1210`):
     1. panel header: title + subtitle (V1 nav.downloads + service/models hint)
-    2. ui-tabs: "GenieAPIService" / "Local Models"
+    2. ui-tabs: "GenieAPIService" / "Local Models" / "Model Converter"
     3. Aria2cBanner (5-state)
     4. DownloadSettingsPanel (collapsed by default; auto-expanded by the
        save_dir-unsafe warning link)
     5. ActiveDownloadsBar (only when ≥1 task is in flight)
     6. Tab content via `v-show` (preserves DOM/state on tab switch)
+       The Model Converter tab hosts only BuilderEnvCard: it has nothing to do
+       with the aria2c banner / download settings / active-downloads bar, so
+       those are hidden on that tab.
 
   Provides `useDownloadCenter` orchestrator via `provideDownloadCenter` so
   every nested card / banner / dialog can `injectDownloadCtx` without
@@ -30,12 +33,14 @@ import { useRoute } from "vue-router";
 
 import { useDownloadsStore } from "@/stores/downloads";
 import { provideDownloadCenter } from "@/composables/useDownloadCenter";
+import { useBuilderEnv } from "@/composables/useBuilderEnv";
 import { useHeaderActions } from "@/composables/useHeaderActions";
 import { ICON_REFRESH, ICON_TRASH } from "@/components/icons/topbarIcons";
 import type { DownloadCenterTab } from "@/types/downloads";
 
 import Aria2cBanner from "./../downloads/Aria2cBanner.vue";
 import ActiveDownloadsBar from "./../downloads/ActiveDownloadsBar.vue";
+import BuilderEnvCard from "./../downloads/BuilderEnvCard.vue";
 import DownloadSettingsPanel from "./../downloads/DownloadSettingsPanel.vue";
 import ModelCatalogTab from "./../downloads/ModelCatalogTab.vue";
 import ServiceVersionsTab from "./../downloads/ServiceVersionsTab.vue";
@@ -43,6 +48,7 @@ import UiTabs from "./UiTabs.vue";
 
 const ctx = useDownloadsStore();
 provideDownloadCenter(ctx);
+const builderEnv = useBuilderEnv();
 
 const { t } = useI18n();
 const route = useRoute();
@@ -77,6 +83,19 @@ const tabs = computed<UiTabItem[]>(() => [
       : ctx.modelCatalog.modelCount.value,
     badgeVariant: ctx.isAnyModelDownloading.value ? "downloading" : "default",
   },
+  {
+    id: "converter",
+    label: "\u{1F6E0}\uFE0F " + t("downloads.tabConverter"),
+    // Same pulsing "●" as the other tabs while the install runs, so progress is
+    // visible from any tab; a plain "!" when it is not installed yet.
+    badge:
+      builderEnv.phase.value === "installing"
+        ? "●"
+        : builderEnv.phase.value === "failed" || builderEnv.phase.value === "cancelled"
+          ? "!"
+          : undefined,
+    badgeVariant: builderEnv.phase.value === "installing" ? "downloading" : "default",
+  },
 ]);
 
 const tabModel = computed<string>({
@@ -84,10 +103,14 @@ const tabModel = computed<string>({
   set: (v) => ctx.setActiveTab(v as DownloadCenterTab),
 });
 
+const isConverter = computed<boolean>(() => ctx.activeTab.value === "converter");
+
 const subtitleKey = computed<string>(() =>
   ctx.activeTab.value === "models"
     ? "downloads.subtitleModels"
-    : "downloads.subtitleService",
+    : isConverter.value
+      ? "downloads.subtitleConverter"
+      : "downloads.subtitleService",
 );
 
 // ─── Header refresh (V1 panel header "🔄 Refresh" button — re-fetches the
@@ -96,13 +119,17 @@ const subtitleKey = computed<string>(() =>
 
 /** Whether the active tab's catalog/version fetch is in flight. */
 const refreshing = computed<boolean>(() =>
-  ctx.activeTab.value === "models"
-    ? ctx.modelCatalog.loading.value
-    : ctx.serviceVersions.loading.value,
+  isConverter.value
+    ? builderEnv.busy.value
+    : ctx.activeTab.value === "models"
+      ? ctx.modelCatalog.loading.value
+      : ctx.serviceVersions.loading.value,
 );
 
 function refreshActiveTab(): void {
-  if (ctx.activeTab.value === "models") {
+  if (isConverter.value) {
+    void builderEnv.refresh();
+  } else if (ctx.activeTab.value === "models") {
     void ctx.modelCatalog.fetchCatalog();
   } else {
     void ctx.serviceVersions.fetchVersions();
@@ -184,16 +211,20 @@ useHeaderActions(() => {
 onMounted(() => {
   // V1 parity: `navigateTo('updates', null, 'service'|'models')` deep-links
   // straight to a sub-tab (app.js:1964-1968 sets `dcActiveTab`). Mirror it by
-  // honoring `?tab=service|models` so jumps from the Service page (and any
-  // future deep links) land on the right sub-tab, not just the panel root.
+  // honoring `?tab=service|models|converter` so jumps from the Service page, the
+  // chat-page banner (`/downloads?tab=converter`) and any future deep links land
+  // on the right sub-tab, not just the panel root.
   const q = route.query.tab;
-  if (q === "service" || q === "models") {
+  if (q === "service" || q === "models" || q === "converter") {
     ctx.setActiveTab(q);
   }
+  // The converter badge on the tab strip needs the install state from any tab.
+  builderEnv.acquire();
   void ctx.init();
 });
 
 onBeforeUnmount(() => {
+  builderEnv.release();
   // Disposal is the responsibility of the singleton store (it persists
   // across route swaps between /downloads and /updates). We deliberately
   // do NOT dispose here so an in-flight SSE download survives navigation.
@@ -249,26 +280,42 @@ onBeforeUnmount(() => {
       class="downloads-view__tabs"
     />
 
-    <!-- aria2c 5-state banner -->
+    <!-- aria2c 5-state banner (download tabs only) -->
     <Aria2cBanner
+      v-if="!isConverter"
       :status="ctx.aria2c.status.value"
       :banner="ctx.aria2c.banner.value"
     />
 
-    <!-- Download Settings (collapsible) -->
+    <!-- Download Settings (collapsible; download tabs only) -->
     <DownloadSettingsPanel
+      v-if="!isConverter"
       :settings="ctx.settings.settings.value"
       :saving="ctx.settings.saving.value"
       @update:settings="(s) => ctx.settings.patch(s)"
       @save="ctx.saveDownloadSettings()"
     />
 
-    <!-- Active downloads summary (only when ≥1 task is in flight) -->
-    <ActiveDownloadsBar :active="ctx.activeDownloads.value" />
+    <!-- Active downloads summary (only when ≥1 task is in flight; download tabs only) -->
+    <ActiveDownloadsBar
+      v-if="!isConverter"
+      :active="ctx.activeDownloads.value"
+    />
 
     <!-- Tabs preserved with v-show to keep per-tab state on switch -->
     <ServiceVersionsTab v-show="ctx.activeTab.value === 'service'" />
     <ModelCatalogTab v-show="ctx.activeTab.value === 'models'" />
+    <!-- Model-conversion environment (x64 py3.10 venv + QAIRT SDK): user-triggered install -->
+    <BuilderEnvCard v-show="isConverter" />
+    <!-- The card hides itself while the state is unknown (still loading, or this server has no such
+         feature); on its own tab that would be a blank page, so say what is going on. -->
+    <p
+      v-if="isConverter && builderEnv.phase.value === 'unknown'"
+      class="downloads-view__converter-empty"
+      data-testid="converter-tab-empty"
+    >
+      {{ t("downloads.converterUnknown") }}
+    </p>
   </div>
 </template>
 
@@ -286,6 +333,12 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: var(--space-3);
   width: 100%;
+}
+
+.downloads-view__converter-empty {
+  margin: var(--space-4) 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm, 0.875rem);
 }
 
 .downloads-view__header {

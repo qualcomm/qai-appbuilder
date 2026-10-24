@@ -60,7 +60,7 @@ export const DOWNLOAD_CTX_KEY: InjectionKey<UseDownloadCenterReturn> =
 const TAB_STORAGE_KEY = "qai-downloads-tab";
 
 function isValidTab(v: unknown): v is DownloadCenterTab {
-  return v === "service" || v === "models";
+  return v === "service" || v === "models" || v === "converter";
 }
 
 function initialTab(): DownloadCenterTab {
