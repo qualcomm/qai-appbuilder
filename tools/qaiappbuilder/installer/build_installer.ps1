@@ -1,4 +1,4 @@
-# ---------------------------------------------------------------------
+﻿# ---------------------------------------------------------------------
 # Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
@@ -22,6 +22,7 @@
 .PARAMETER Version       override the version (default: build_info.json "version")
 .PARAMETER KeepStage     keep .build\installer\stage_<arch> after compiling
 .PARAMETER IsccPath      path to ISCC.exe (auto-detected by default)
+.PARAMETER GuardZip      a local guard.zip to take guard64.dll from (default: Downloads\guard.zip, else the release URL)
 #>
 [CmdletBinding()]
 param(
@@ -29,7 +30,8 @@ param(
     [switch]$SkipFrontend,
     [string]$Version = '',
     [switch]$KeepStage,
-    [string]$IsccPath = ''
+    [string]$IsccPath = '',
+    [string]$GuardZip = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -130,6 +132,38 @@ function Stage-Arch([string]$a) {
         $global:LASTEXITCODE = 0
     }
 
+    # guard64.dll (+ the ARM64 injector) from the release's guard.zip, ONLY this arch's files: ~0.7 MB per package
+    # (the whole zip is 30 MB because it also carries both ast-grep builds). setup_env.bat skips its own download when
+    # vendor\bin\guard.source holds exactly the URL it would fetch, so write that URL (tag read from setup_env.bat).
+    $tag = (Select-String -Path (Join-Path $Root 'setup_env.bat') -Pattern 'set "QAI_AB_RELEASE_TAG=([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+    $guardUrl = "https://github.com/qualcomm/qai-appbuilder/releases/download/v$tag/guard.zip"
+    $guardZip = Join-Path $Root '.build\installer\_dl\guard.zip'
+    if (-not (Test-Path $guardZip)) {
+        $local = @($GuardZip, (Join-Path $env:USERPROFILE 'Downloads\guard.zip')) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+        if ($local) { Copy-Item $local $guardZip -Force; Info "guard.zip: using $local" }
+        else {
+            try { Invoke-WebRequest -Uri $guardUrl -OutFile $guardZip -UseBasicParsing -TimeoutSec 300; Info "guard.zip: downloaded $guardUrl" }
+            catch { Remove-Item $guardZip -Force -ErrorAction SilentlyContinue }
+        }
+    }
+    $guardOk = $false
+    if (Test-Path $guardZip) {
+        $gt = Join-Path $Root ".build\installer\_guard_$a"
+        Remove-Item $gt -Recurse -Force -ErrorAction SilentlyContinue
+        Expand-Archive -Path $guardZip -DestinationPath $gt -Force
+        $gOut = Join-Path $stage "vendor\bin\$a"
+        New-Item -ItemType Directory -Force $gOut | Out-Null
+        foreach ($n in 'guard64.dll', 'guard-injector.exe') {
+            $src = Join-Path $gt "$a\$n"
+            if (Test-Path $src) { Copy-Item $src (Join-Path $gOut $n) -Force }
+        }
+        Remove-Item $gt -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path (Join-Path $gOut 'guard64.dll')) {
+            [IO.File]::WriteAllText((Join-Path $stage 'vendor\bin\guard.source'), "$guardUrl$nl".Replace("`n", "`r`n").Replace("`r`r`n", "`r`n"), (New-Object Text.ASCIIEncoding))
+            $guardOk = $true
+        }
+    }
+    if (-not $guardOk) { Info 'guard.zip not bundled - setup_env.bat will download it at install time.' }
     $files = Get-ChildItem $stage -Recurse -File
     $mb = ($files | Measure-Object Length -Sum).Sum / 1MB
     Info ("staged {0} files, {1:N1} MB uncompressed" -f $files.Count, $mb)

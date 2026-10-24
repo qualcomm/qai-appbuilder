@@ -25,9 +25,11 @@
 
 `src` `apps` `factory` `scripts` `interfaces` `skills` `frontend\dist` `pyproject.toml` `build_info.json`
 `setup_env.bat` `Start.bat` `qai.bat` `Console.bat` `Uninstall.bat` `clean_env.bat` 及 README,
-外加 `data\bin\uv\uv.exe`(**按目标架构**从 PyPI 取)和 `data\bin\aria2c\aria2c.exe`。
+外加 `data\bin\uv\uv.exe`(**按目标架构**从 PyPI 取)、`data\bin\aria2c\aria2c.exe`,以及 **FileGuard 的 `vendor\bin\<arch>\guard64.dll`**(ARM64 另有 `guard-injector.exe`)和标记文件 `vendor\bin\guard.source`。
 
-排除:`tests`、`__pycache__`、`*.pyc`、`node_modules`、`docs`、`samples`、`models`、`.qai`、`desktop`、`vendor`、`data`(用户数据)。
+guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 约 0.7 MB、ARM64 约 0.7 MB;整个 zip 有 30 MB,因为里面还带两个架构的 ast-grep)。`guard.source` 写的是 `setup_env.bat` 自己会下载的那个 URL,脚本看到标记与 URL 一致且 dll 在,就跳过下载,所以**安装时不再联网下载 guard.zip**。来源顺序:`-GuardZip` 参数、`Downloads\guard.zip`、发布页 URL;都拿不到时只打印一行提示,安装时仍由 `setup_env.bat` 下载。发布标签变了(`setup_env.bat` 里的 `QAI_AB_RELEASE_TAG`),重新打包即可;旧包里的标记和新标签不一致时,安装会重新下载并替换。
+
+排除:`tests`、`__pycache__`、`*.pyc`、`node_modules`、`docs`、`samples`、`models`、`.qai`、`desktop`、`vendor`(除上面的 guard 文件)、`data`(用户数据)。
 新增运行时依赖的目录时,要把它加进 `build_installer.ps1` 的 `$Dirs`。
 
 ## 安装时发生什么
