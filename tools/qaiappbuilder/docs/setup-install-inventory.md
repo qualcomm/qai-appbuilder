@@ -18,8 +18,8 @@
 | qai_appbuilder 版本 | `2.48.40.1`(纯 x86_64 构建) | `2.48.40` |
 | 架构来源优先级 | `--arch` > `data\config\host_arch` > `PROCESSOR_ARCHITECTURE` | 同左 |
 
-安装包(`installer\`)调用方式:`setup_env.bat --arch <arch> --no-pause [--mirror ...] [--proxy ...]`,
-**不带任何可选开关、不带 `--builder`**。可选项只能手动或经 `setup_gui` 勾选。
+安装包(`installer\`)调用方式:`setup_env.bat --arch <arch> --no-pause --with-browser --with-astgrep [--mirror ...] [--proxy ...]`,
+**固定带 `--with-browser --with-astgrep`(`.iss` 的 `#define SetupComponents`,安装和"修复"快捷方式共用),不带 `--with-apps`、不带 `--builder`**。其余可选项只能手动或经 `setup_gui` 勾选。
 
 ## 1. 默认安装(不带任何开关)
 
@@ -230,13 +230,14 @@
 | WebView2 Fixed Version | 默认(仅系统注册表缺失时) | 从系统 `C:\Program Files (x86)\Microsoft\EdgeWebView\Application\<ver>` **复制**,不下载 | 约 811 MB |
 ## 9. 成品安装包 vs `Setup.bat`(默认运行,不考虑开关)
 
-口径:安装包 = Inno 向导把文件放到 `{app}\app`,然后固定执行 `setup_env.bat --arch <arch> --no-pause`(向导只会加 `--mirror` / `--proxy`,**从不带任何 `--with-*` / `--builder`**)。
+口径:安装包 = Inno 向导把文件放到 `{app}\app`,然后固定执行 `setup_env.bat --arch <arch> --no-pause --with-browser --with-astgrep`(向导另外只会加 `--mirror` / `--proxy`,**不带 `--with-apps` / `--builder`**)。
 对照对象 = 在源码目录里直接运行 `Setup.bat`(不加任何参数)。两边都以同一架构比较。
 
 ### 9.1 两边一致
 
 venv(`.venv_<arch>_313`)、Python 3.13、`uv`、`aria2c`、`pyproject.toml` 核心依赖 + `cc-sdk`、`qai_appbuilder`(x64 `2.48.40.1` 来自 GitHub release;ARM64 `2.48.40` 来自 vendored wheel)、
 ARM64 的 14 个 vendored wheel、`data\` 初始化、`host_arch`、`guard64.dll`、`tiktoken` 词表。
+**`search` extra + Chromium**(安装包经 `--with-browser`)和 **ast-grep**(安装包经 `--with-astgrep`,来自 PyPI `ast-grep-cli`;`Setup.bat` 来自 GitHub release)。
 
 ### 9.2 安装包**多出来**或更好的地方
 
@@ -248,19 +249,18 @@ ARM64 的 14 个 vendored wheel、`data\` 初始化、`host_arch`、`guard64.dll
 | x64 的 `vendor-deps.7z`(201 MB) | ➖ 不下 | ✅ 会下 |
 | 网络容错 | ✅ 向导选源/代理;PyPI wheel 取 uv;cn/official 自动切换;GitHub 代理回退 | ➖ 无 |
 | 安装体验 | ✅ 向导、进度条、开始菜单/桌面快捷方式、修复入口、卸载 | ➖ 命令行 |
+| 卸载时可选删除 Chromium(`%LOCALAPPDATA%\ms-playwright`,实测 688 MB) | ✅ 卸载窗口里单独一项 | `Uninstall.bat` 直接删 |
 
 ### 9.3 安装包**缺少**(`Setup.bat` 默认会装)—— 功能差异
 
 | 项目 | `Setup.bat` 默认 | 安装包 | 缺少后的表现 |
 |---|---|---|---|
-| **`search` extra**:`playwright==1.61.0`、`selectolax`、`lxml`、`browserforge` + **Chromium(约 150 MB)** | ✅ | ➖ | 已用 `uv pip compile` 确认这 4 个包不在默认依赖闭包(103 个包)里。`html_parser.py` 在 `selectolax` 和 `lxml` 都没有时抛 `no HTML parser available`,依赖它们的免密钥 HTML 搜索引擎(baidu / bing / mojeek)不可用;浏览器搜索引擎和 `browser` 工具也不可用(按 `Setup.bat` 注释,后者只是不被列出) |
 | **App Builder 包依赖**(`melotts-zh`、`whisper-base`、`zipformer-zh` 的 `requirements.txt`:`jieba`、`pypinyin`、`cn2an`、`g2p_en`、`openai-whisper`、`scipy` 等) | ✅ | ➖ | `melotts-zh` 的 `runner.py` / `predeploy.py` 直接 `import nltk / jieba / g2p_en`,没装会 ImportError,语音/TTS 模型跑不起来 |
 | **TTS 运行数据**(NLTK `cmudict`、`averaged_perceptron_tagger*`、`g2p_cache.pkl`) | ✅(`predeploy_tts_runtime.py`) | x64 ➖;ARM64 ✅(7z 内带) | x64 首次 TTS 推理需联网下载,离线则失败 |
-| **ast-grep** | ✅(两架构) | x64 ➖;ARM64 ✅(7z 内带) | x64 上 `ast_grep` / `ast_edit` 工具报"binary not installed"(明确报错,不会静默返回空结果) |
 | **VC++ 运行库** 探测与安装 | ✅ | ➖ | 全新的 x64 机器上建 venv 可能报 `0xc0e90002` |
 | **WDAC 受限机器**的签名 Python | ✅ | ➖ | 企业受限机器可能报 os error 448,安装失败 |
 | `pip` 升级 | ✅ | ➖ | 无功能影响 |
-| 自愈探测 `playwright / selectolax / lxml / browserforge / croniter` | ✅ | ➖ | 升级后新增运行时依赖可能被 `[SKIP] dependency closure` 漏掉 |
+| 自愈探测 `playwright / selectolax / lxml / browserforge / croniter` | ✅ | 安装包带 `--with-browser`,所以每次都会跑 `uv pip install`(不走 `[SKIP] dependency closure`),不会漏装 | 无 |
 | `qai_appbuilder` 每次强制重装 | ✅(ARM64) | 版本相符就跳过 | 安装包更快,无功能影响 |
 
 ### 9.4 两边都不装(都需要手动加开关/另行安装)
@@ -277,14 +277,12 @@ ARM64 的 14 个 vendored wheel、`data\` 初始化、`host_arch`、`guard64.dll
 
 `Setup.bat`、`Build.bat`、`build_frontend.bat`、`setup_gui.bat` 不在白名单里。装完后无法在安装目录里重新构建前端,也没有 `Setup.bat` 的 `--git` / `--voice-models` 等入口;"修复"快捷方式只会重跑 `setup_env.bat`。
 
-### 9.7 结论:要让安装包追平 `Setup.bat` 默认体验,缺的是
+### 9.7 结论:要让安装包追平 `Setup.bat` 默认体验,还缺的是
 
-1. `search` extra 和 Chromium(浏览器搜索 / `browser` 工具 / HTML 搜索);
-2. App Builder 包依赖 + TTS 数据(语音、TTS 模型);
-3. x64 上的 ast-grep;
-4. VC++ 运行库与 WDAC 回退(受限/全新机器的稳健性)。
+1. App Builder 包依赖 + TTS 数据(语音、TTS 模型);对应 `setup_env.bat --with-apps`,安装包目前没带;
+2. VC++ 运行库与 WDAC 回退(受限/全新机器的稳健性);`setup_env.bat` 没有实现。
 
-前三项各对应 `setup_env.bat` 里一个现成的开关(`--with-browser` / `--with-apps` / `--with-astgrep`),可由向导勾选后追加;第四项 `setup_env.bat` 没有实现。
+浏览器(`search` extra + Chromium)和 ast-grep 已由安装包固定追加 `--with-browser --with-astgrep` 补齐。
 
 ## 10. 一致性校验
 
@@ -334,11 +332,14 @@ if (Test-Path Setup.bat) {
   Check "Setup.bat Step 0b has no arch gate (x64 downloads vendor-deps.7z)" `
     (-not ((Get-Content Setup.bat)[2416..2535] | Select-String -Pattern 'HOST_ARCH' -Quiet))
 }
-# 7) 安装包口径(§9):向导只加 --mirror/--proxy,从不带 --with-*/--builder;内置 guard 与 tiktoken
+# 7) 安装包口径(§9):固定追加 --with-browser --with-astgrep,不带 --with-apps/--builder;修复快捷方式用同一份;内置 guard 与 tiktoken
 if (Test-Path installer\qaimodelbuilder.iss) {
   $iss = Get-Content installer\qaimodelbuilder.iss -Raw
+  $comp = [regex]::Match($iss, '#define SetupComponents "([^"]*)"').Groups[1].Value
+  Check "installer components = --with-browser --with-astgrep ($comp)" ($comp -eq '--with-browser --with-astgrep')
   $sa = [regex]::Match($iss, '(?s)function SetupArgs.*?\bend;').Value
-  Check "installer SetupArgs passes no --with-*/--builder" ($sa -and ($sa -notmatch '--with-|--builder'))
+  Check "installer SetupArgs uses SetupComponents, no --with-apps/--builder" ($sa -match '\{#SetupComponents\}' -and ($sa -notmatch '--with-apps|--builder'))
+  Check "repair shortcut uses SetupComponents" ($iss -match 'RepairName\}.*\{#SetupComponents\}')
   $bi = Get-Content installer\build_installer.ps1 -Raw
   Check "installer bundles guard + tiktoken" (($bi -match 'guard\.source') -and ($bi -match 'vendor\\tiktoken'))
   Check "installer does not ship Setup.bat" ($bi -notmatch "'Setup\.bat'")

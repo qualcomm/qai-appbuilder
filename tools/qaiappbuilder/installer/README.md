@@ -42,10 +42,14 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
    - 所选目录是旧版本的安装目录(旧版直接装在 `...\QAIModelBuilder\app` 里,没有再嵌套一层):拒绝安装,提示先卸载旧版。新旧目录结构不兼容。
    - `app\` 里只剩上次卸载保留的 `data\`:允许覆盖安装,数据原样保留。
 2. 向导里可选:镜像(自动 / 官方 / 国内)、HTTP 代理。
-3. 执行 `setup_env.bat --arch <arch> --no-pause [--mirror ..] [--proxy ..]`(**不带 `--builder`**):
+3. 执行 `setup_env.bat --arch <arch> --no-pause --with-browser --with-astgrep [--mirror ..] [--proxy ..]`(**不带 `--builder`**;两个 `--with-*` 写在 `.iss` 的 `#define SetupComponents` 里,安装和"修复"快捷方式共用):
    建 Python 3.13 运行时 venv(`%LOCALAPPDATA%\QAIModelBuilder\envs\`)、装依赖、初始化 `data\`。
    实测 venv 约 0.75 GB,约下载 1 GB,10–20 分钟。
    ARM64 另外会在线下载 `vendor-deps.7z`(约 210 MB,来自 aidevhome.com)。
+   - `--with-browser`:`search` extra(`playwright==1.61.0`、`selectolax`、`lxml`、`cssselect`、`browserforge`,来自 PyPI)+ `python -m playwright install chromium`。
+     Chromium 来自 `cdn.playwright.dev`(国内档由 `net_config.ps1` 设 `PLAYWRIGHT_DOWNLOAD_HOST` 指向 npmmirror),装到 `%LOCALAPPDATA%\ms-playwright\`。
+     实测下载 Chromium + headless shell + ffmpeg + winldd,占盘 **688 MB**,约 50 秒。失败不中断安装,只是浏览器工具不可用。
+   - `--with-astgrep`:从 PyPI 的 `ast-grep-cli` 0.45.1 wheel 取出 `ast-grep.exe`、`sg.exe`(各约 49 MB)到 `vendor\bin\<arch>\`;PyPI 不通时回退 GitHub release。ARM64 上 `vendor-deps.7z` 已带这两个文件,会直接 `[SKIP]`。
    **不装**模型转换环境(`.venv_x64_310`,实测约 2.4 GB)和 QAIRT SDK。
 4. 环境配置失败时,文件仍已安装;开始菜单有"修复 / 完成环境配置",重跑 `setup_env.bat`,可断点续。
 5. 成功后可勾选"立即启动",即运行 `Start.bat`(自动开浏览器)。
@@ -62,6 +66,7 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
 
 - **Python 环境**(`envs\`):目录存在才列出。
 - **你的数据**(`app\data`:聊天记录、设置、密钥):目录存在才列出。
+- **浏览器工具用的 Chromium**(`%LOCALAPPDATA%\ms-playwright`,实测约 0.7 GB):目录存在才列出。这是 Playwright 的按用户共享缓存,其他用 Playwright 的程序也可能在用,所以和其它项一样可以取消勾选。
 - **QAIRT SDK `<版本>`**:`data\config\qairt_env.json` 的 `qairt_sdk_root` 指向的目录存在就列出(不再检查标记文件;默认位置 `C:\Qualcomm\AIStack\QAIRT\<版本>`,在 `app\` 之外)。路径必须是绝对本地路径且至少 3 层深,避免误删盘根或 `C:\Qualcomm`。勾选项旁边显示完整路径。
 - 程序文件一定会删。
 - 没勾"你的数据"时:删除 `app\` 里除 `data\` 以外的全部内容(包括运行时下载的 `models\` 等)。勾了:删除整个 `app\`;所选的上层目录空了也一起删除。`data\downloads\_qairt_tmp.zip` 这类下载临时文件无论如何都会删。
@@ -70,8 +75,12 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
 
 ## 已知限制 / 未验证
 
-- **已实测(x64 包,在 Windows-on-ARM 上模拟运行,隔离环境)**:静默安装 → `setup_env.bat` 7 步 2m38s 无错误 → `Start.bat` 9s 就绪,`/api/system/health` 200,前端 200 → 静默卸载。
-- **未测**:arm64 包(原生)、有界面的向导、真正干净的机器(没有系统 Python / VC++ 运行库)、中文界面实际显示、「修复」快捷方式、代理/国内镜像页。
+- **已实测(x64 包,在 Windows-on-ARM 上模拟运行,隔离环境)**:静默安装 → `setup_env.bat` 7 步 2m38s 无错误 → `Start.bat` 9s 就绪,`/api/system/health` 200,前端 200 → 静默卸载。(这是加入 `--with-browser --with-astgrep` **之前**的结果。)
+- **已实测(加入两个组件后,用打包 stage 目录、隔离的 `LOCALAPPDATA` 直接跑 `setup_env.bat`,未经 Inno 向导)**:
+  - ARM64:7 步全部成功,1m31s;Chromium 一步 51s。删掉 `ast-grep.exe` 后重跑,从 PyPI wheel 取回(10.5s),`ast-grep --version` 为 0.45.1。
+    `import playwright, selectolax, lxml, browserforge` 通过,HTML 解析后端为 `selectolax`;无头 Chromium 149 能启动并执行页面 JS。
+  - x64:前 5 步成功(ast-grep 12.5s,`uv pip` 22.6s,Chromium 52.8s);之后从 GitHub 下 `qai_appbuilder` wheel 时本机到 github.com 的速度只有每秒几 KB,25 分钟后被我中止,所以 x64 的 Step 6–7 本轮没有跑到(和新组件无关)。
+- **未测**:arm64 包(原生)、有界面的向导(含新的进度条权重)、卸载窗口里新增的 Chromium 勾选项、真正干净的机器(没有系统 Python / VC++ 运行库)、中文界面实际显示、「修复」快捷方式、代理/国内镜像页(含 Chromium 走 npmmirror)。
 - **踩过的坑**:Inno 6.7 默认开 RedirectionGuard,子进程继承后 `uv python install` 建 junction 报 `os error 448`;已在 `.iss` 设 `RedirectionGuard=no`。打包白名单也曾漏掉 `tools/`(`scripts.init.install` 需要它)。
 - 安装时 `setup_env.bat` 的完整输出在 `<安装目录>\data\logs\install_setup_env.log`,排错先看它。
 - 安装路径含空格或非 ASCII 会给警告(部分脚本拼路径,未全面验证)。

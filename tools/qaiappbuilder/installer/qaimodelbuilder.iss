@@ -7,7 +7,9 @@
 ;   /DAppVersion=3.1.0  /DArch=x64|arm64  /DStageDir=<staged tree>  /DOutDir=<output dir>
 ;
 ; What it does: copies the staged tree (pre-built frontend, backend source, uv, aria2c),
-; then runs  setup_env.bat --arch <arch> --no-pause  (no --builder: QAIRT is NOT installed here).
+; then runs  setup_env.bat --arch <arch> --no-pause --with-browser --with-astgrep  (no --builder: QAIRT is NOT
+; installed here). --with-browser = the search extra (playwright/selectolax/lxml/browserforge) + Chromium;
+; --with-astgrep = ast-grep.exe/sg.exe from the ast-grep-cli PyPI wheel. Both are non-fatal in setup_env.bat.
 
 #ifndef AppVersion
   #error Pass /DAppVersion=x.y.z
@@ -23,6 +25,10 @@
 #endif
 
 #define AppName "QAI ModelBuilder"
+; Optional components the installer ALWAYS asks setup_env.bat for (setup and the Start-menu repair shortcut use the
+; same list, so a repair completes them too). Both come from PyPI (uv pip / the ast-grep-cli wheel); Chromium from
+; `python -m playwright install chromium` (cdn.playwright.dev, or npmmirror with the cn profile). Non-fatal.
+#define SetupComponents "--with-browser --with-astgrep"
 
 [Setup]
 ; Inno 6.7 turns RedirectionGuard on by default and child processes inherit it. That blocks traversal of NTFS junctions
@@ -54,7 +60,8 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
 ; setup_env.bat (without --builder) creates the runtime venv (~0.75 GB, measured) plus download caches
-; (+ ~0.2 GB vendor wheels on ARM64). The converter venv (.venv_x64_310) and the QAIRT SDK are NOT installed here.
+; (+ ~0.2 GB vendor wheels on ARM64), + Chromium (~0.4 GB unpacked, in %LOCALAPPDATA%\ms-playwright) and
+; ast-grep (~0.1 GB). The converter venv (.venv_x64_310) and the QAIRT SDK are NOT installed here.
 ExtraDiskSpaceRequired=3000000000
 UninstallDisplayName={#AppName} ({#Arch})
 #if Arch == "arm64"
@@ -75,7 +82,7 @@ Source: "{#StageDir}\*"; DestDir: "{app}\app"; Flags: recursesubdirs createallsu
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\app\Start.bat"; WorkingDir: "{app}\app"; Comment: "Start the QAI ModelBuilder server and open the browser"
 ; Repair goes through cmd.exe for the same reason as Uninstall below: a shortcut straight to the .bat with arguments is not listed.
-Name: "{group}\{cm:RepairName}"; Filename: "{sys}\cmd.exe"; Parameters: "/c """"{app}\app\setup_env.bat"" --arch {#Arch}"""; WorkingDir: "{app}\app"
+Name: "{group}\{cm:RepairName}"; Filename: "{sys}\cmd.exe"; Parameters: "/c """"{app}\app\setup_env.bat"" --arch {#Arch} {#SetupComponents}"""; WorkingDir: "{app}\app"
 ; Not a direct {uninstallexe} link: the shell hides a Start-menu shortcut that points straight at the registered uninstaller
 ; from the apps list. Going through cmd.exe keeps it listed (verified in an isolated install).
 Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{sys}\cmd.exe"; Parameters: "/c start """" ""{uninstallexe}"""; Flags: runminimized
@@ -107,15 +114,15 @@ english.ProxyBad=The proxy must start with http:// or https://
 english.PathWarn=The install path contains spaces or non-ASCII characters, which can break some setup scripts.%n%nContinue anyway?
 english.OldLayout=An older version of QAI ModelBuilder is installed in:%n%1%n%nThis version uses a different folder layout and cannot upgrade it. Uninstall the old version first (Settings > Apps, or its Start-menu uninstall shortcut), then run this installer again.
 english.AppDirTaken=The folder%n%1%nalready contains files that were not installed by QAI ModelBuilder.%n%nQAI ModelBuilder installs into an "app" subfolder of the folder you choose and deletes that subfolder when uninstalled. Choose a different folder.
-english.SettingUp=Setting up the Python environment (downloads about 1 GB, this can take 10-20 minutes)...
+english.SettingUp=Setting up the Python environment and the browser (downloads about 1.2 GB, this can take 10-20 minutes)...
 english.StepFmt=Step %1 of 7: %2
 english.ElapsedFmt=Elapsed %1
 english.LogHint=Detailed log: %1
 english.Step1=Checking the network
 english.Step2=Preparing download tools (aria2c, uv)
 english.Step3=Installing Python 3.13 and creating the environment
-english.Step4=Downloading platform components
-english.Step5=Installing Python dependencies (the longest step)
+english.Step4=Downloading platform components (incl. ast-grep)
+english.Step5=Installing Python dependencies and the Chromium browser (the longest step)
 english.Step6=Initializing application data
 english.Step7=Verifying the installation
 english.StepDone=Finishing
@@ -127,6 +134,7 @@ english.UninstIntro=Untick what you want to keep for a later reinstall.
 english.UninstEnvs=Python environments
 english.UninstData=Your data (chat history, settings, secrets)
 english.UninstSdk=QAIRT SDK %1 (model conversion, several GB; other tools may use it too)
+english.UninstBrowser=Chromium browser for the browser tools (~0.4 GB; other Playwright programs may use it too)
 english.UninstOk=Uninstall
 english.UninstKeepAll=Keep all
 english.SdkRemoveFailed=Could not fully delete the QAIRT SDK folder:%n%1%n%nA file in it may be in use. Close programs that use it and delete the folder by hand.
@@ -144,15 +152,15 @@ chinesesimp.ProxyBad=代理地址必须以 http:// 或 https:// 开头
 chinesesimp.PathWarn=安装路径包含空格或非 ASCII 字符,可能导致部分安装脚本出错。%n%n仍要继续吗?
 chinesesimp.OldLayout=以下位置已安装旧版本的 QAI ModelBuilder:%n%1%n%n新版本使用不同的目录结构,无法直接升级。请先卸载旧版本(“设置 > 应用”,或开始菜单中的卸载快捷方式),然后重新运行本安装程序。
 chinesesimp.AppDirTaken=文件夹%n%1%n中已有不是 QAI ModelBuilder 安装的文件。%n%nQAI ModelBuilder 会安装到你所选文件夹下的 "app" 子文件夹,卸载时会删除该子文件夹。请选择其他文件夹。
-chinesesimp.SettingUp=正在配置 Python 环境(需下载约 1 GB,可能需要 10-20 分钟)...
+chinesesimp.SettingUp=正在配置 Python 环境和浏览器(需下载约 1.2 GB,可能需要 10-20 分钟)...
 chinesesimp.StepFmt=第 %1 步，共 7 步：%2
 chinesesimp.ElapsedFmt=已用时 %1
 chinesesimp.LogHint=详细日志：%1
 chinesesimp.Step1=检测网络
 chinesesimp.Step2=准备下载工具(aria2c、uv)
 chinesesimp.Step3=安装 Python 3.13 并创建环境
-chinesesimp.Step4=下载平台组件
-chinesesimp.Step5=安装 Python 依赖(耗时最长的一步)
+chinesesimp.Step4=下载平台组件(含 ast-grep)
+chinesesimp.Step5=安装 Python 依赖和 Chromium 浏览器(耗时最长的一步)
 chinesesimp.Step6=初始化应用数据
 chinesesimp.Step7=验证安装
 chinesesimp.StepDone=正在收尾
@@ -164,6 +172,7 @@ chinesesimp.UninstIntro=取消勾选即可保留,供以后重新安装使用。
 chinesesimp.UninstEnvs=Python 环境
 chinesesimp.UninstData=你的数据(聊天记录、设置、密钥)
 chinesesimp.UninstSdk=QAIRT SDK %1(模型转换用,占用数 GB;其他工具也可能在使用)
+chinesesimp.UninstBrowser=浏览器工具用的 Chromium(约 0.4 GB;其他 Playwright 程序也可能在使用)
 chinesesimp.UninstOk=卸载
 chinesesimp.UninstKeepAll=全部保留
 chinesesimp.SdkRemoveFailed=未能完全删除 QAIRT SDK 文件夹:%n%1%n%n其中可能有文件正被占用。请关闭使用它的程序后手动删除该文件夹。
@@ -285,7 +294,7 @@ function SetupArgs: String;
 var
   P: String;
 begin
-  Result := '--arch {#Arch} --no-pause';
+  Result := '--arch {#Arch} --no-pause {#SetupComponents}';
   case NetPage.SelectedValueIndex of
     1: Result := Result + ' --mirror official';
     2: Result := Result + ' --mirror cn';
@@ -301,15 +310,16 @@ begin
 end;
 
 // Weight (share of the bar, sum 100) and expected seconds per step, from measured runs:
-// step 5 (dependencies) dominates; step 4 downloads the ~210 MB vendor bundle on ARM64 only.
+// step 5 (dependencies + the ~150 MB Chromium download) dominates; step 4 downloads the ~210 MB vendor bundle on
+// ARM64 only, plus the ~15 MB ast-grep wheel.
 function StepWeight(N: Integer): Integer;
 begin
   case N of
     1: Result := 2;
     2: Result := 3;
     3: Result := 10;
-    4: Result := 25;
-    5: Result := 45;
+    4: Result := 20;
+    5: Result := 50;
     6: Result := 5;
     7: Result := 10;
   else
@@ -323,8 +333,8 @@ begin
     1: Result := 5;
     2: Result := 10;
     3: Result := 30;
-    4: Result := 90;
-    5: Result := 120;
+    4: Result := 100;
+    5: Result := 240;
     6: Result := 10;
     7: Result := 15;
   else
@@ -645,6 +655,7 @@ var
   RemoveAllData: Boolean;   // user ticked "your data"
   DelEnvs: Boolean;         // user ticked "Python environments"
   DelSdk: Boolean;          // user ticked the QAIRT SDK
+  DelBrowser: Boolean;      // user ticked the Playwright Chromium cache
   SdkPath: String;
 
 // A window of its own, shown when the uninstall starts. It is NOT put inside "Uninstall Status": Inno disables that
@@ -657,16 +668,19 @@ var
   Form: TSetupForm;
   List: TNewCheckListBox;
   OkBtn, KeepBtn: TNewButton;
-  IxEnv, IxData, IxSdk, W, H, Pct: Integer;
-  EnvDir, DataDir: String;
+  IxEnv, IxData, IxSdk, IxBrowser, W, H, Pct: Integer;
+  EnvDir, DataDir, BrowserDir: String;
 begin
   RemoveAllData := False;
   DelEnvs := False;
   DelSdk := False;
+  DelBrowser := False;
   EnvDir := ExpandConstant('{localappdata}\QAIModelBuilder\envs');
   DataDir := ExpandConstant('{app}\app\data');
+  // setup_env.bat --with-browser: `playwright install chromium` puts the browser in this per-user cache
+  BrowserDir := ExpandConstant('{localappdata}\ms-playwright');
   SdkPath := SdkToOffer;
-  if not (DirExists(EnvDir) or DirExists(DataDir) or (SdkPath <> '')) then Exit;
+  if not (DirExists(EnvDir) or DirExists(DataDir) or DirExists(BrowserDir) or (SdkPath <> '')) then Exit;
 
   // CreateCustomForm scales its size arguments to the screen DPI itself, so give it 96-dpi numbers: take the
   // Uninstall Status window's pixel size and divide the DPI factor back out (ScaleX(100) px = 100 units).
@@ -709,6 +723,7 @@ begin
     IxEnv := -1;
     IxData := -1;
     IxSdk := -1;
+    IxBrowser := -1;
     // The intro text is the first row, then each item with its folder on an indented line below it.
     List.AddGroup(CustomMessage('UninstIntro'), '', 0, nil);
     if DirExists(EnvDir) then
@@ -720,6 +735,11 @@ begin
     begin
       IxData := List.AddCheckBox(CustomMessage('UninstData'), '', 0, True, True, False, False, nil);
       List.AddGroup(DataDir, '', 1, nil);
+    end;
+    if DirExists(BrowserDir) then
+    begin
+      IxBrowser := List.AddCheckBox(CustomMessage('UninstBrowser'), '', 0, True, True, False, False, nil);
+      List.AddGroup(BrowserDir, '', 1, nil);
     end;
     if SdkPath <> '' then
     begin
@@ -737,6 +757,7 @@ begin
       DelEnvs := (IxEnv >= 0) and List.Checked[IxEnv];
       RemoveAllData := (IxData >= 0) and List.Checked[IxData];
       DelSdk := (IxSdk >= 0) and List.Checked[IxSdk];
+      DelBrowser := (IxBrowser >= 0) and List.Checked[IxBrowser];
     end;
   finally
     Form.Free;
@@ -758,6 +779,7 @@ begin
     AskUninstallChoices;
     if DelEnvs then DelTree(ExpandConstant('{localappdata}\QAIModelBuilder\envs'), True, True, True);
     if RemoveAllData then DelTree(ExpandConstant('{app}\app\data'), True, True, True);
+    if DelBrowser then DelTree(ExpandConstant('{localappdata}\ms-playwright'), True, True, True);
     if DelSdk and (SdkPath <> '') then
     begin
       if not DelTree(SdkPath, True, True, True) then
