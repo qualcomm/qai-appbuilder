@@ -5,7 +5,8 @@
 > 再运行文末的「一致性校验」,确认表里的 URL / 文件名 / 版本和代码一致。
 >
 > 图例:✅ 默认安装 ⚙️ 仅在对应开关下安装 ➖ 该架构不装 ⚠️ 有前提/回退
-> 与 Setup.bat 的逐项对比见 **§9**;表中带 **【S】** 的行表示该处与 Setup.bat 有差异。
+> 与 Setup.bat 的逐项对比见 **§8**;表中带 **【S】** 的行表示该处与 Setup.bat 有差异。
+> **只看成品安装包(不考虑开关)与 `Setup.bat` 默认运行的差异,直接看 §9。**
 
 ## 0. 总览
 
@@ -148,13 +149,13 @@
 - [ ] 改 `Setup.bat`:它和 `setup_env.bat` 共用 `vendor\bin\guard.source` 标记,别让两者互相重复下载。
 - [ ] 新增外部下载:补 §1/§2 的「来源」,并确认 `net_config.ps1` 的预检/镜像是否需要覆盖该域名。
 
-## 9. 与 `Setup.bat` 的对比
+## 8. 与 `Setup.bat` 的对比
 
 `Setup.bat`(3251 行)是原有的完整安装入口;`setup_env.bat`(1055 行)是精简、容忍网络问题的版本。
 二者**写入同一布局**(venv、`data\`、`host_arch`),所以 `Start.bat` / `qai.bat` / `Console.bat` 对两者的结果都能用。
 已核对:**14 个 vendored wheel 的清单和 `_constraints` 的 14 条版本完全一致**;`aria2c` 1.37.0、`qai_appbuilder` 2.48.40 也一致。
 
-### 9.1 默认行为的差异(不带任何开关)
+### 8.1 默认行为的差异(不带任何开关)
 
 | 项目 | `Setup.bat` | `setup_env.bat` | 影响 |
 |---|---|---|---|
@@ -169,10 +170,10 @@
 | WDAC / 代码完整性策略下的签名 Python | ✅ `ensure_signed_python.ps1`:受限机器上改装 python.org 签名版(3.13.14;`--builder` 的 3.10.11) | ➖ 没有 | 企业受限机器上 `setup_env.bat` 可能直接失败(os error 448) |
 | git pre-commit 钩子 | ✅ 在 git 工作区里设置 `core.hooksPath=.githooks` | ➖ 没有 | 仅开发者相关 |
 | `pip` 升级 | ✅ `ensurepip --upgrade` + `pip install --upgrade pip` | ➖ 不做(只用 `--seed`) | |
-| 额外探测的 import(自愈) | ✅ 探测 `playwright, selectolax, lxml, browserforge, croniter` 等 | 只探测 `fastapi, uvicorn, structlog, paramiko, claude_agent_sdk` | 见 §9.4 第 3 条 |
+| 额外探测的 import(自愈) | ✅ 探测 `playwright, selectolax, lxml, browserforge, croniter` 等 | 只探测 `fastapi, uvicorn, structlog, paramiko, claude_agent_sdk` | 见 §8.4 第 3 条 |
 | 重新安装 `qai_appbuilder` | ✅ **每次都强制重装**(ARM64);x64 版本不符才装 | 版本恰好相符就跳过(两架构) | `setup_env.bat` 更快 |
 
-### 9.2 开关对照
+### 8.2 开关对照
 
 | 作用 | `Setup.bat` | `setup_env.bat` |
 |---|---|---|
@@ -190,7 +191,7 @@
 | App Builder 依赖 | (默认装) | `--with-apps` |
 | 网络配置 | 只读环境变量 `HTTPS_PROXY` / `ALL_PROXY` / `HTTP_PROXY` | `--proxy URL`、`--mirror auto\|official\|cn`、`--no-probe` + 预检 |
 
-### 9.3 下载来源的差异
+### 8.3 下载来源的差异
 
 | 内容 | `Setup.bat` | `setup_env.bat` |
 |---|---|---|
@@ -204,7 +205,7 @@
 | 7z 里 `guard64.dll` | 解包后整体合并进 `vendor\`,随后被 `guard.zip` 的新版覆盖 | **合并时排除** guard 文件 |
 | 7z 里其余内容 | **整体合并**(含 `openblas`、`bin\x64`、`bin\arm64`) | 只拷 `whl`、`tiktoken`、`nltk_data`、`g2p_data`、`bin\arm64`(**不拷** `openblas`、`bin\x64`) |
 
-### 9.4 值得注意的差异(改动前先看)
+### 8.4 值得注意的差异(改动前先看)
 
 1. **x64 + `Setup.bat` 会下载 201 MB 的 ARM64 依赖包**。这包里 x64 用得上的只有 `tiktoken` 词表和 NLTK/g2p 数据(约 40 MB)。若以后要精简 `Setup.bat`,可给 `:fetch_vendor_deps` 加架构判断。
 2. **默认装的东西不同**(Setup.bat 的 Chromium 与 Pack 依赖在「依赖已完整」时会被整体跳过,所以重复运行不会重装;首次安装才会装):`Setup.bat` 默认装 Playwright + Chromium、ast-grep、App Builder 依赖、TTS 数据;`setup_env.bat` 全部改为可选。二者产出的环境**功能并不等价**——用 `setup_env.bat` 装完,浏览器搜索、`ast_grep` 工具(x64)、语音/OCR 模型可能不可用,需要补开关。
@@ -213,7 +214,7 @@
 5. **ARM64 的 `vendor-deps.7z` 失败的处理相反**:`Setup.bat` 只警告然后让 `uv` 回退 PyPI(ARM64 上多半装不上被撤回的 wheel);`setup_env.bat` 直接中止并提示手动下载。
 6. **`--builder` 的 VS 工具**:`Setup.bat` 的 Step 8.3 会静默安装 Visual Studio 2022 Community(`aka.ms/vs/17/release/vs_community.exe`,含 MSVC x64/ARM64、CMake、clang-cl、Windows 11 SDK 22621),体积很大;`setup_env.bat --builder` 明确**不装**(只支持 DLC 流程,不需要编译器)。
 
-### 9.5 `Setup.bat` 独有的下载项(`setup_env.bat` 不会下)
+### 8.5 `Setup.bat` 独有的下载项(`setup_env.bat` 不会下)
 
 | 内容 | 触发 | 来源 | 大小 |
 |---|---|---|---|
@@ -227,7 +228,65 @@
 | Rust + tauri-cli | `--desktop` | `https://win.rustup.rs/<x86_64\|aarch64>`;`cargo install tauri-cli` | 约 600 MB + 300 MB |
 | Visual Studio 2022 Community | `--builder` | `https://aka.ms/vs/17/release/vs_community.exe` | 很大 |
 | WebView2 Fixed Version | 默认(仅系统注册表缺失时) | 从系统 `C:\Program Files (x86)\Microsoft\EdgeWebView\Application\<ver>` **复制**,不下载 | 约 811 MB |
-## 8. 一致性校验
+## 9. 成品安装包 vs `Setup.bat`(默认运行,不考虑开关)
+
+口径:安装包 = Inno 向导把文件放到 `{app}\app`,然后固定执行 `setup_env.bat --arch <arch> --no-pause`(向导只会加 `--mirror` / `--proxy`,**从不带任何 `--with-*` / `--builder`**)。
+对照对象 = 在源码目录里直接运行 `Setup.bat`(不加任何参数)。两边都以同一架构比较。
+
+### 9.1 两边一致
+
+venv(`.venv_<arch>_313`)、Python 3.13、`uv`、`aria2c`、`pyproject.toml` 核心依赖 + `cc-sdk`、`qai_appbuilder`(x64 `2.48.40.1` 来自 GitHub release;ARM64 `2.48.40` 来自 vendored wheel)、
+ARM64 的 14 个 vendored wheel、`data\` 初始化、`host_arch`、`guard64.dll`、`tiktoken` 词表。
+
+### 9.2 安装包**多出来**或更好的地方
+
+| 项目 | 安装包 | `Setup.bat` 默认 |
+|---|---|---|
+| 前端 `frontend\dist` | ✅ 打包时已编译好 | ➖ **不构建**,要另跑 `Build.bat`(`Setup.bat` 本身不装 Node) |
+| `guard64.dll` | ✅ 内置本架构的(安装时不下载) | 每次都下载 `guard.zip`(约 30 MB) |
+| `tiktoken` 词表 | ✅ 内置(x64 也有) | x64 靠下载 201 MB 的 `vendor-deps.7z` 才有 |
+| x64 的 `vendor-deps.7z`(201 MB) | ➖ 不下 | ✅ 会下 |
+| 网络容错 | ✅ 向导选源/代理;PyPI wheel 取 uv;cn/official 自动切换;GitHub 代理回退 | ➖ 无 |
+| 安装体验 | ✅ 向导、进度条、开始菜单/桌面快捷方式、修复入口、卸载 | ➖ 命令行 |
+
+### 9.3 安装包**缺少**(`Setup.bat` 默认会装)—— 功能差异
+
+| 项目 | `Setup.bat` 默认 | 安装包 | 缺少后的表现 |
+|---|---|---|---|
+| **`search` extra**:`playwright==1.61.0`、`selectolax`、`lxml`、`browserforge` + **Chromium(约 150 MB)** | ✅ | ➖ | 已用 `uv pip compile` 确认这 4 个包不在默认依赖闭包(103 个包)里。`html_parser.py` 在 `selectolax` 和 `lxml` 都没有时抛 `no HTML parser available`,依赖它们的免密钥 HTML 搜索引擎(baidu / bing / mojeek)不可用;浏览器搜索引擎和 `browser` 工具也不可用(按 `Setup.bat` 注释,后者只是不被列出) |
+| **App Builder 包依赖**(`melotts-zh`、`whisper-base`、`zipformer-zh` 的 `requirements.txt`:`jieba`、`pypinyin`、`cn2an`、`g2p_en`、`openai-whisper`、`scipy` 等) | ✅ | ➖ | `melotts-zh` 的 `runner.py` / `predeploy.py` 直接 `import nltk / jieba / g2p_en`,没装会 ImportError,语音/TTS 模型跑不起来 |
+| **TTS 运行数据**(NLTK `cmudict`、`averaged_perceptron_tagger*`、`g2p_cache.pkl`) | ✅(`predeploy_tts_runtime.py`) | x64 ➖;ARM64 ✅(7z 内带) | x64 首次 TTS 推理需联网下载,离线则失败 |
+| **ast-grep** | ✅(两架构) | x64 ➖;ARM64 ✅(7z 内带) | x64 上 `ast_grep` / `ast_edit` 工具报"binary not installed"(明确报错,不会静默返回空结果) |
+| **VC++ 运行库** 探测与安装 | ✅ | ➖ | 全新的 x64 机器上建 venv 可能报 `0xc0e90002` |
+| **WDAC 受限机器**的签名 Python | ✅ | ➖ | 企业受限机器可能报 os error 448,安装失败 |
+| `pip` 升级 | ✅ | ➖ | 无功能影响 |
+| 自愈探测 `playwright / selectolax / lxml / browserforge / croniter` | ✅ | ➖ | 升级后新增运行时依赖可能被 `[SKIP] dependency closure` 漏掉 |
+| `qai_appbuilder` 每次强制重装 | ✅(ARM64) | 版本相符就跳过 | 安装包更快,无功能影响 |
+
+### 9.4 两边都不装(都需要手动加开关/另行安装)
+
+模型转换环境(QAIRT SDK、x64 Python 3.10、VS 2022)、PortableGit、Node.js + pnpm、Rust + tauri-cli、语音模型权重(运行时首次使用才下)、`--dev` 测试依赖。
+
+其中 **PortableGit**:`exec` 工具的 `shell='sh'` 需要它;没有时代码返回明确的"未找到 PortableGit,请运行 `Setup.bat --git`"提示,`cmd` / `powershell` 不受影响。
+
+### 9.5 与桌面壳相关、安装包不需要的项
+
+`Setup.bat` 的 **WebView2 Fixed Version**(最多复制约 811 MB)和 git pre-commit 钩子(`.githooks` 未随包发布)只服务桌面壳/开发者。安装包的快捷方式指向 `Start.bat`(浏览器版),不使用 WebView2。
+
+### 9.6 安装包未随包提供的脚本
+
+`Setup.bat`、`Build.bat`、`build_frontend.bat`、`setup_gui.bat` 不在白名单里。装完后无法在安装目录里重新构建前端,也没有 `Setup.bat` 的 `--git` / `--voice-models` 等入口;"修复"快捷方式只会重跑 `setup_env.bat`。
+
+### 9.7 结论:要让安装包追平 `Setup.bat` 默认体验,缺的是
+
+1. `search` extra 和 Chromium(浏览器搜索 / `browser` 工具 / HTML 搜索);
+2. App Builder 包依赖 + TTS 数据(语音、TTS 模型);
+3. x64 上的 ast-grep;
+4. VC++ 运行库与 WDAC 回退(受限/全新机器的稳健性)。
+
+前三项各对应 `setup_env.bat` 里一个现成的开关(`--with-browser` / `--with-apps` / `--with-astgrep`),可由向导勾选后追加;第四项 `setup_env.bat` 没有实现。
+
+## 10. 一致性校验
 
 在 `tools\qaiappbuilder` 下运行。每项都应输出 `OK`;出现 `MISSING` 说明文档和代码已脱节。
 
@@ -262,7 +321,7 @@ $cons = ([regex]::Matches($bat, 'echo ([A-Za-z_\-]+)==') | Measure-Object).Count
 $whls = ([regex]::Matches($bat, '%W%\\[^"]+\.whl') | Select-Object -Unique | Measure-Object).Count
 Check "constraints ($cons) == vendored wheels ($whls)" ($cons -eq $whls)
 
-# 6) 与 Setup.bat 的对照(§9):14 个 wheel 清单与约束必须一致
+# 6) 与 Setup.bat 的对照(§8):14 个 wheel 清单与约束必须一致
 if (Test-Path Setup.bat) {
   $sb = Get-Content Setup.bat -Raw
   $wa = [regex]::Matches($sb, 'vendor\\whl\\([^"]+\.whl)') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
@@ -275,5 +334,15 @@ if (Test-Path Setup.bat) {
   Check "Setup.bat Step 0b has no arch gate (x64 downloads vendor-deps.7z)" `
     (-not ((Get-Content Setup.bat)[2416..2535] | Select-String -Pattern 'HOST_ARCH' -Quiet))
 }
+# 7) 安装包口径(§9):向导只加 --mirror/--proxy,从不带 --with-*/--builder;内置 guard 与 tiktoken
+if (Test-Path installer\qaimodelbuilder.iss) {
+  $iss = Get-Content installer\qaimodelbuilder.iss -Raw
+  $sa = [regex]::Match($iss, '(?s)function SetupArgs.*?\bend;').Value
+  Check "installer SetupArgs passes no --with-*/--builder" ($sa -and ($sa -notmatch '--with-|--builder'))
+  $bi = Get-Content installer\build_installer.ps1 -Raw
+  Check "installer bundles guard + tiktoken" (($bi -match 'guard\.source') -and ($bi -match 'vendor\\tiktoken'))
+  Check "installer does not ship Setup.bat" ($bi -notmatch "'Setup\.bat'")
+}
+
 if (-not $ok) { exit 1 }
 ```
