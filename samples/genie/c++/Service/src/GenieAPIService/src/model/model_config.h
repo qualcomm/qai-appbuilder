@@ -235,8 +235,9 @@ struct ToolCallRepairConfig {
         int repeat_threshold = 2;
         int ttl_seconds = 300;
         int consecutive_failure_threshold = 3;
-        int non_contiguous_repeat_threshold = 4;
+        int non_contiguous_repeat_threshold = 3;
         int non_contiguous_ttl_seconds = 3600;
+        int hard_block_threshold = 4;
     } redundant_call_guard;
 };
 

@@ -129,4 +129,6 @@ private:
 
 void ClearPreFilterSessionStates();
 
+std::string CanonicalToolCallKey(const nlohmann::ordered_json& tool_call);
+
 #endif // MESSAGE_PRE_FILTER_H

@@ -8,6 +8,7 @@
 
 #include "response_dispatcher.h"
 #include "../chat_request_handler/model_input_builder.h"
+#include "../chat_request_handler/message_pre_filter.h"
 #include "response_tools.h"
 
 #include "log.h"
@@ -18,6 +19,8 @@
 #include <algorithm>
 #include <chrono>
 #include <mutex>
+#include <unordered_map>
+#include <vector>
 
 namespace
 {
@@ -108,6 +111,89 @@ namespace
                 return "Error: invalid tool call format, could not parse as JSON. "
                        "Please retry with a single valid JSON object, no extra text.";
         }
+    }
+
+    int CountIdenticalToolResults(const json &messages, const std::string &target_key)
+    {
+        if (!messages.is_array() || target_key.empty())
+            return 0;
+
+        std::unordered_map<std::string, std::string> call_keys;
+        std::string last_call_key;
+        std::vector<std::pair<std::string, size_t>> tool_entries;
+
+        for (const auto &m : messages)
+        {
+            if (!m.is_object()) continue;
+            const std::string role = m.value("role", std::string());
+            if (role == "assistant")
+            {
+                last_call_key.clear();
+                if (m.contains("tool_calls") && m["tool_calls"].is_array())
+                {
+                    for (const auto &tc : m["tool_calls"])
+                    {
+                        const std::string ck = CanonicalToolCallKey(tc);
+                        if (ck.empty()) continue;
+                        if (tc.contains("id") && tc["id"].is_string())
+                            call_keys[tc["id"].get<std::string>()] = ck;
+                        if (last_call_key.empty())
+                            last_call_key = ck;
+                    }
+                }
+                continue;
+            }
+            if (role != "tool" || !m.contains("content") || !m["content"].is_string()) continue;
+
+            std::string ck = last_call_key;
+            if (m.contains("tool_call_id") && m["tool_call_id"].is_string())
+            {
+                auto it = call_keys.find(m["tool_call_id"].get<std::string>());
+                if (it != call_keys.end()) ck = it->second;
+            }
+            if (ck.empty()) continue;
+
+            const std::string content = m["content"].get<std::string>();
+            tool_entries.emplace_back(ck, std::hash<std::string>()(content));
+        }
+
+        int count = 0;
+        bool has_target_hash = false;
+        size_t target_hash = 0;
+        for (auto it = tool_entries.rbegin(); it != tool_entries.rend(); ++it)
+        {
+            if (it->first != target_key) continue;
+            if (!has_target_hash)
+            {
+                target_hash = it->second;
+                has_target_hash = true;
+            }
+            if (it->second == target_hash) ++count;
+        }
+        return count;
+    }
+
+    int EvaluateHardBlock(const ToolCallRepairConfig::RedundantToolCallConfig &guard_cfg, const json &messages,
+                          const std::string &tool_name, const json &arguments)
+    {
+        if (guard_cfg.hard_block_threshold <= 0 || tool_name.empty())
+            return -1;
+        json tc_like = json::object();
+        tc_like["function"] = json::object();
+        tc_like["function"]["name"] = tool_name;
+        tc_like["function"]["arguments"] = arguments;
+        const std::string canonical_key = CanonicalToolCallKey(tc_like);
+        if (canonical_key.empty())
+            return -1;
+        const int identical = CountIdenticalToolResults(messages, canonical_key);
+        return identical >= guard_cfg.hard_block_threshold - 1 ? identical : -1;
+    }
+
+    std::string BuildHardBlockMessage(const std::string &tool_name, int identical)
+    {
+        return "The same tool call (`" + tool_name + "`, identical arguments) has already produced " +
+               std::to_string(identical) + " identical result(s) in this task and will not be executed "
+               "again. Use a different tool/arguments, or report this as a blocked task.";
     }
 }
 
@@ -819,6 +905,10 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
             }
             const bool redundant_guard_enabled = model_config_.GetToolCallRepairConfig().redundant_call_guard.enabled;
             const bool output_truncated = handle->was_stopped_by_output_limit();
+            const json history_messages_for_block =
+                (!retry_request_data_.is_null() && retry_request_data_.contains("messages")
+                 && retry_request_data_["messages"].is_array())
+                    ? retry_request_data_["messages"] : json::array();
 
             if (!IsUnknowToolCallJson(toolResponse))
             {
@@ -826,6 +916,7 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                 ToolCallCircuitBreakerStore::GetInstance().RecordSuccess(circuit_breaker_key);
                 finishReason = output_truncated ? "length" : "tool_calls";
                 std::string tool_name;
+                bool hard_blocked = false;
                 try
                 {
                     json parsed = json::parse(ResponseTools::extractJsonFromToolCall(toolResponse));
@@ -835,19 +926,39 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                     }
                     if (!tool_name.empty())
                     {
-                        const std::string signature = tool_name + "|" + parsed.value("arguments", json::object()).dump();
+                        const json call_arguments = parsed.value("arguments", json::object());
+                        const std::string signature = tool_name + "|" + call_arguments.dump();
                         if (redundant_guard_enabled)
                             ToolCallRepetitionStore::GetInstance().RecordCall(repetition_key, signature);
-                        std::string conclusion = TaskMemoBuilder::ExtractThinkConclusion(response_buffer);
-                        if (output_truncated)
-                            conclusion += (conclusion.empty() ? "" : " ") + std::string("this call was cut off by the output token limit after ")
-                                + std::to_string(response_buffer.size()) + " characters, so its arguments are incomplete; split the content into several smaller calls";
-                        if (!conclusion.empty())
-                            TaskMemoBuilder::PinThinkConclusion(think_session_key, signature, conclusion);
+
+                        const int identical = EvaluateHardBlock(
+                            model_config_.GetToolCallRepairConfig().redundant_call_guard,
+                            history_messages_for_block, tool_name, call_arguments);
+                        if (identical >= 0)
+                        {
+                            hard_blocked = true;
+                            finishReason = "tool_call_blocked";
+                            isToolResponse = false;
+                            toolResponse.clear();
+                            response_buffer = BuildHardBlockMessage(tool_name, identical);
+                            My_Log{My_Log::Level::kWarning}
+                                << "[ToolCallRepair][HardBlock] tool='" << tool_name << "' blocked after "
+                                << identical << " identical result(s)" << log_suffix << std::endl;
+                        }
+                        else
+                        {
+                            std::string conclusion = TaskMemoBuilder::ExtractThinkConclusion(response_buffer);
+                            if (output_truncated)
+                                conclusion += (conclusion.empty() ? "" : " ") + std::string("this call was cut off by the output token limit after ")
+                                    + std::to_string(response_buffer.size()) + " characters, so its arguments are incomplete; split the content into several smaller calls";
+                            if (!conclusion.empty())
+                                TaskMemoBuilder::PinThinkConclusion(think_session_key, signature, conclusion);
+                        }
                     }
                 }
                 catch (...) {}
-                send_tool_call_status_once(tool_name);
+                if (!hard_blocked)
+                    send_tool_call_status_once(tool_name);
             }
             else
             {
@@ -861,23 +972,40 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                     && !partial_recovery["name"].get<std::string>().empty())
                 {
                     // 情形A：工具名已确定（即使必需参数不全），发出指向该真实工具的 tool_call。
-                    json best_effort = json::object();
-                    best_effort["name"] = partial_recovery["name"];
-                    best_effort["arguments"] = partial_recovery.value("arguments", json::object());
-                    toolResponse = ResponseTools::wrapJsonInToolCall(best_effort.dump());
-                    finishReason = output_truncated ? "length" : "tool_calls";
-                    isToolResponse = true;
-                    send_tool_call_status_once(partial_recovery["name"].get<std::string>());
+                    const std::string recovered_name = partial_recovery["name"].get<std::string>();
+                    const json call_arguments = partial_recovery.value("arguments", json::object());
                     if (redundant_guard_enabled)
                     {
-                        const std::string signature = partial_recovery["name"].get<std::string>() + "|"
-                            + best_effort["arguments"].dump();
+                        const std::string signature = recovered_name + "|" + call_arguments.dump();
                         ToolCallRepetitionStore::GetInstance().RecordCall(repetition_key, signature);
                     }
-                    My_Log{My_Log::Level::kWarning}
-                        << "[ToolCallRepair][Layer3] Case A: emitting real tool_call '"
-                        << partial_recovery["name"].get<std::string>()
-                        << "' with best-effort (possibly incomplete) arguments." << std::endl;
+
+                    const int identical = EvaluateHardBlock(
+                        model_config_.GetToolCallRepairConfig().redundant_call_guard,
+                        history_messages_for_block, recovered_name, call_arguments);
+                    if (identical >= 0)
+                    {
+                        finishReason = "tool_call_blocked";
+                        isToolResponse = false;
+                        toolResponse.clear();
+                        response_buffer = BuildHardBlockMessage(recovered_name, identical);
+                        My_Log{My_Log::Level::kWarning}
+                            << "[ToolCallRepair][HardBlock] tool='" << recovered_name << "' blocked after "
+                            << identical << " identical result(s)" << log_suffix << std::endl;
+                    }
+                    else
+                    {
+                        json best_effort = json::object();
+                        best_effort["name"] = recovered_name;
+                        best_effort["arguments"] = call_arguments;
+                        toolResponse = ResponseTools::wrapJsonInToolCall(best_effort.dump());
+                        finishReason = output_truncated ? "length" : "tool_calls";
+                        isToolResponse = true;
+                        send_tool_call_status_once(recovered_name);
+                        My_Log{My_Log::Level::kWarning}
+                            << "[ToolCallRepair][Layer3] Case A: emitting real tool_call '"
+                            << recovered_name << "' with best-effort (possibly incomplete) arguments." << std::endl;
+                    }
                 }
                 else
                 {

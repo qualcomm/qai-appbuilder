@@ -32,7 +32,9 @@
             "_comment_ttl_seconds": "距上一次调用超过此秒数视为新的序列，重新从 1 计数，默认 300（5 分钟）",
             "ttl_seconds": 300,
             "_comment_consecutive_failure_threshold": "请求尾部连续为空或失败的 tool 结果达到此次数时追加纠偏提示，默认 3；0 或负数关闭",
-            "consecutive_failure_threshold": 3
+            "consecutive_failure_threshold": 3,
+            "_comment_hard_block_threshold": "硬熔断阈值：按(工具名,规范化参数)相同签名在当前可见历史消息里统计，若该签名已累计出现 N-1 次与最近一次逐字节相同的结果（N=本字段值，允许中间穿插其它调用，不要求连续——实测模型的重复读取几乎总是穿插发生，要求连续等于永久关闭本机制），即将转发的第 N 次同签名调用会被服务端直接拦截改写为纯文本阻断提示（finish_reason=\"tool_call_blocked\"），不再转发给客户端执行；判据与软提示（repeat_threshold）独立，因为本判据同时要求结果内容逐字节相同，比软提示仅看参数签名更严格，可安全兼容合法轮询场景。默认 4；设为 0 或负数完全关闭本机制、行为回退到改动前。拦截不影响 KV：改写发生在模型本轮生成结束、下一轮重新 prefill 之前，不改变任何已保存的前缀缓存 checkpoint",
+            "hard_block_threshold": 4
         }
     },
 

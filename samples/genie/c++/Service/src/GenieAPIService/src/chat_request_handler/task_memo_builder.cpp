@@ -323,16 +323,37 @@ namespace {
         return false;
     }
 
-    bool LooksLikeFailure(const std::string& content) {
+    bool LineHasFailureSignal(const std::string& line) {
         static const char* kSignals[] = {
             "Error:", "ERROR:", "Exception:", "Traceback (most recent call last)",
             "No such file or directory",
             "Permission denied", "command not found", "is not recognized as",
             "Failed to", "failed to", "Failed:",
         };
+        const size_t begin = line.find_first_not_of(" \t\r");
+        if (begin == std::string::npos)
+            return false;
         for (const char* sig : kSignals) {
-            if (content.find(sig) != std::string::npos)
+            size_t pos = line.find(sig, begin);
+            while (pos != std::string::npos) {
+                if (pos == begin || (pos >= 2 && line.compare(pos - 2, 2, ": ") == 0))
+                    return true;
+                pos = line.find(sig, pos + 1);
+            }
+        }
+        return false;
+    }
+
+    bool LooksLikeFailure(const std::string& content) {
+        size_t pos = 0;
+        while (pos <= content.size()) {
+            const size_t nl = content.find('\n', pos);
+            const size_t end = (nl == std::string::npos) ? content.size() : nl;
+            if (LineHasFailureSignal(content.substr(pos, end - pos)))
                 return true;
+            if (nl == std::string::npos)
+                break;
+            pos = nl + 1;
         }
         if (HasNonEmptyErrorField(content, "\"error\"") || HasNonEmptyErrorField(content, "\"is_error\""))
             return true;
@@ -764,7 +785,7 @@ json TaskMemoBuilder::BuildRuleLayer(
 
             // 已读文件索引：被驱逐的 read 类工具结果不再丢弃全部痕迹，而是在 Task Memo 里
             // 留一条「路径 + 关键事实摘要」，供模型在原始内容已不在上下文时判断是否要重读。
-            if (!failed) {
+            {
                 std::string read_path = ExtractReadToolPathImpl(call_content);
                 if (!read_path.empty()) {
                     entry["read_files"][read_path] = preview;
@@ -1172,7 +1193,7 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
     if (entry.contains("read_files") && entry["read_files"].is_object() && !entry["read_files"].empty()) {
         std::ostringstream oss;
         oss << "Files already read whose content has left the context (summary only; re-read a "
-               "file only if you need details not in its summary, preferably a specific line range):\n";
+               "file only if the summary is missing a detail you actually need now):\n";
         for (auto it = entry["read_files"].begin(); it != entry["read_files"].end(); ++it) {
             oss << "- " << it.key() << ": "
                 << (it.value().is_string() ? it.value().get<std::string>() : it.value().dump()) << "\n";

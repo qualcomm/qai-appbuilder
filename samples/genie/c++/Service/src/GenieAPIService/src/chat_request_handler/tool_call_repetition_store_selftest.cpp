@@ -213,6 +213,19 @@ bool RunToolCallRepetitionSelfTest(std::ostream &out)
 
     store.Clear();
 
+    {
+        ConfigureStore(300, 3600);
+        const std::string key = ToolCallRepetitionStore::MakeKey("scenario10_session", "modelX");
+        for (int i = 0; i < 10; ++i)
+            store.RecordCall(key, "read|{\"path\":\"hot.txt\"}");
+        store.RecordCall(key, "read|{\"path\":\"other.txt\"}");
+        runner.Check("scenario10_hot_signature_survives_interleaving",
+                     "热点签名之后插入一次性签名仍应返回热点签名的最大非连续总次数10",
+                     store.GetNonContiguousRepeatCount(key) == 10);
+    }
+
+    store.Clear();
+
     out << "=================================================================================\n";
     out << "Total cases: " << runner.total() << ", passed: " << runner.passed()
         << " (" << (runner.total() > 0 ? (100.0 * runner.passed() / runner.total()) : 100.0) << "%)\n";

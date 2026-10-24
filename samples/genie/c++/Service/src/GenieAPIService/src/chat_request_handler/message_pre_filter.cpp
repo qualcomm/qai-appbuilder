@@ -23,6 +23,47 @@
 
 using json = nlohmann::ordered_json;
 
+std::string CanonicalToolCallKey(const json& tool_call)
+{
+    if (!tool_call.is_object() || !tool_call.contains("function") || !tool_call["function"].is_object())
+        return "";
+    const json& fn = tool_call["function"];
+    const std::string name = fn.value("name", std::string());
+    if (name.empty()) return "";
+    std::string args;
+    if (fn.contains("arguments")) {
+        nlohmann::json parsed;
+        if (fn["arguments"].is_string()) {
+            const std::string raw = fn["arguments"].get<std::string>();
+            parsed = nlohmann::json::parse(raw, nullptr, false);
+            if (parsed.is_discarded()) return name + "\x01" + raw;
+        } else {
+            parsed = nlohmann::json(fn["arguments"]);
+        }
+        if (parsed.is_object()) {
+            nlohmann::json norm = nlohmann::json::object();
+            for (auto it = parsed.begin(); it != parsed.end(); ++it) {
+                if (it.value().is_null()) continue;
+                const bool path_like = it.value().is_string() && [&]() {
+                    const std::string& s = it.value().get_ref<const std::string&>();
+                    return !s.empty() && s.find_first_of(" \t\r\n") == std::string::npos &&
+                           s.find_first_of("/\\") != std::string::npos;
+                }();
+                if (path_like) {
+                    std::string p = it.value().get<std::string>();
+                    std::replace(p.begin(), p.end(), '/', '\\');
+                    norm[it.key()] = p;
+                } else {
+                    norm[it.key()] = it.value();
+                }
+            }
+            parsed = std::move(norm);
+        }
+        args = parsed.dump();
+    }
+    return name + "\x01" + args;
+}
+
 namespace {
 
 constexpr float kEvictionLowWaterRatio = 0.5f;
@@ -40,7 +81,8 @@ std::string OmittedMarker(const std::string& content, size_t head_end, size_t ta
     const size_t last = static_cast<size_t>(std::count(content.begin(), content.begin() + tail_begin, '\n'));
     const size_t total = static_cast<size_t>(std::count(content.begin(), content.end(), '\n')) + 1;
     return "\n[... output truncated: lines " + std::to_string(first) + "-" + std::to_string(std::max(first, last)) +
-           " of " + std::to_string(total) + " omitted; re-read that line range if you need it ...]\n";
+           " of " + std::to_string(total) + " dropped by context compression; repeating this same read returns a "
+           "result that gets compressed the same way, so continue with the content shown here ...]\n";
 }
 
 bool IsErrorLine(const std::string& line)
@@ -170,8 +212,6 @@ const char kRepeatStubPrefix[] = "[Note: this ";
 const char kRepeatStubSuffix[] =
     " call returned exactly the same result as the earlier identical call, which is still shown above; "
     "calling it again will not return anything new. Use that result or change approach.";
-const char kRepeatStubTruncatedHint[] =
-    " That earlier result was truncated; to see an omitted part, read that line range instead of repeating the call.";
 const char kRepeatStubTailHeader[] = "\nIts last lines:\n";
 constexpr size_t kRepeatStubTailLines = 3;
 constexpr size_t kRepeatStubTailMaxBytes = 300;
@@ -207,47 +247,6 @@ struct RepeatState {
 
 std::mutex g_repeat_mutex;
 std::unordered_map<std::string, RepeatState> g_repeat_states;
-
-std::string CanonicalToolCallKey(const json& tool_call)
-{
-    if (!tool_call.is_object() || !tool_call.contains("function") || !tool_call["function"].is_object())
-        return "";
-    const json& fn = tool_call["function"];
-    const std::string name = fn.value("name", std::string());
-    if (name.empty()) return "";
-    std::string args;
-    if (fn.contains("arguments")) {
-        nlohmann::json parsed;
-        if (fn["arguments"].is_string()) {
-            const std::string raw = fn["arguments"].get<std::string>();
-            parsed = nlohmann::json::parse(raw, nullptr, false);
-            if (parsed.is_discarded()) return name + "\x01" + raw;
-        } else {
-            parsed = nlohmann::json(fn["arguments"]);
-        }
-        if (parsed.is_object()) {
-            nlohmann::json norm = nlohmann::json::object();
-            for (auto it = parsed.begin(); it != parsed.end(); ++it) {
-                if (it.value().is_null()) continue;
-                const bool path_like = it.value().is_string() && [&]() {
-                    const std::string& s = it.value().get_ref<const std::string&>();
-                    return !s.empty() && s.find_first_of(" \t\r\n") == std::string::npos &&
-                           s.find_first_of("/\\") != std::string::npos;
-                }();
-                if (path_like) {
-                    std::string p = it.value().get<std::string>();
-                    std::replace(p.begin(), p.end(), '/', '\\');
-                    norm[it.key()] = p;
-                } else {
-                    norm[it.key()] = it.value();
-                }
-            }
-            parsed = std::move(norm);
-        }
-        args = parsed.dump();
-    }
-    return name + "\x01" + args;
-}
 
 void ApplyRepeatResultStubs(json& msg, const std::string& key, const void* model,
                              const std::unordered_set<size_t>& evicted_raw_idx,
@@ -358,7 +357,6 @@ void ApplyRepeatResultStubs(json& msg, const std::string& key, const void* model
         if (stub) {
             const std::string original = msg[kh.full_idx].value("content", std::string());
             std::string note = std::string(kRepeatStubPrefix) + nm + kRepeatStubSuffix;
-            if (cap_tokens > 0 && count_tokens_fn(original) > cap_tokens) note += kRepeatStubTruncatedHint;
             const std::string tail = LastLines(original, kRepeatStubTailLines, kRepeatStubTailMaxBytes);
             if (!tail.empty()) note += kRepeatStubTailHeader + tail;
             m["content"] = note + "]";
