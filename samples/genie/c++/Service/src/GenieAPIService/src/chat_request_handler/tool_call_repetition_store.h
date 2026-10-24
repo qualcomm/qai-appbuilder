@@ -49,7 +49,6 @@ private:
         std::chrono::steady_clock::time_point non_contiguous_last_active_time;
         std::unordered_map<std::string, int> signature_totals;
         std::list<std::string> signature_order;
-        int last_signature_total = 0;
     };
 
     static constexpr size_t kMaxSignaturesPerEntry = 64;

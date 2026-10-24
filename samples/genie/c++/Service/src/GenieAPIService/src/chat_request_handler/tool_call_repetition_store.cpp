@@ -40,12 +40,10 @@ void ToolCallRepetitionStore::RecordSignatureTotal(Entry& entry, const std::stri
         }
         entry.signature_totals[signature] = 1;
         entry.signature_order.push_back(signature);
-        entry.last_signature_total = 1;
     }
     else
     {
         sit->second += 1;
-        entry.last_signature_total = sit->second;
     }
 }
 
@@ -142,7 +140,13 @@ int ToolCallRepetitionStore::GetNonContiguousRepeatCount(const std::string& key)
     if (elapsed >= non_contiguous_ttl_seconds_)
         return 0;
 
-    return entry.last_signature_total;
+    int max_total = 0;
+    for (const auto& item : entry.signature_totals)
+    {
+        if (item.second > max_total)
+            max_total = item.second;
+    }
+    return max_total;
 }
 
 void ToolCallRepetitionStore::Clear()
