@@ -208,7 +208,8 @@ echo -- Step 3/7: Python 3.13 + venv -------------------------------------------
 "%UV_EXE%" python find %PY_SPEC% >nul 2>&1
 if errorlevel 1 (
     echo [INFO] installing %PY_SPEC% ...
-    "%UV_EXE%" python install --no-bin --no-registry %PY_SPEC%
+    set UR_CMD="%UV_EXE%" python install --no-bin --no-registry %PY_SPEC%
+    call :uv_retry python-install
     if errorlevel 1 goto :fail_python
 ) else (
     echo [SKIP] %PY_SPEC% already installed.
@@ -223,7 +224,8 @@ if "%_VENV_OK%"=="1" (
     echo [SKIP] venv already complete: %VENV_DIR%
 ) else (
     echo [INFO] creating venv ...
-    "%UV_EXE%" venv "%VENV_DIR%" --python %PY_SPEC% --seed --allow-existing
+    set UR_CMD="%UV_EXE%" venv "%VENV_DIR%" --python %PY_SPEC% --seed --allow-existing
+    call :uv_retry venv
     if errorlevel 1 goto :fail_venv
 )
 call "%VENV_DIR%\Scripts\activate.bat"
@@ -277,7 +279,8 @@ if not errorlevel 1 if "%WITH_BROWSER%"=="0" if "%WITH_BUILDER%"=="0" (
 set "_IDX=%UV_DEFAULT_INDEX%"
 if not defined _IDX set "_IDX=pypi.org"
 echo [INFO] uv pip install -r pyproject.toml %_EXTRAS% ^(index=%_IDX%^)
-"%UV_EXE%" pip install -r pyproject.toml %_EXTRAS% %_FL%
+set UR_CMD="%UV_EXE%" pip install -r pyproject.toml %_EXTRAS% %_FL%
+call :uv_retry deps
 if errorlevel 1 goto :fail_install
 :deps_done
 call :tick "5b pyproject deps (uv pip install)"
@@ -383,11 +386,13 @@ REM ===========================================================================
 echo [ERROR] Could not obtain uv. If github.com is blocked try:  setup_env.bat --mirror cn   or   --proxy http://host:port
 goto :fail
 :fail_python
-echo [ERROR] uv could not install %PY_SPEC%. Try --mirror cn or --proxy.
+echo [ERROR] uv could not install %PY_SPEC% ^(see the uv message above^).
+echo [ERROR] If it is a download error: check the network, then try --mirror cn / --mirror official, or --proxy http://host:port
 goto :fail
 :fail_venv
-echo [ERROR] venv creation failed. On a clean Windows box install the VC++ Redistributable
-echo [ERROR] ^(https://aka.ms/vs/17/release/vc_redist.%HOST_ARCH%.exe^); on a WDAC-locked box use Setup.bat instead.
+echo [ERROR] Could not create the Python virtual environment ^(see the uv message above^).
+echo [ERROR] If it is a download error ^(HTTP 403 / 404 / timeout^): check the network, then try --mirror cn / --mirror official, or --proxy http://host:port
+echo [ERROR] Re-running setup_env.bat is safe: it only fetches what is missing.
 goto :fail
 :fail_vendor
 echo [ERROR] The ARM64 vendor bundle ^(vendor-deps.7z^) could not be downloaded or unpacked, so the install is stopped:
@@ -556,6 +561,64 @@ if defined OPT_PROXY set "_PGA=%_PGA% -Proxy "%OPT_PROXY%""
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup\net_config.ps1" %_PGA%
 if exist "%DL_DIR%\_gh_proxy.bat" call "%DL_DIR%\_gh_proxy.bat"
 exit /b 0
+
+REM :uv_retry <label> - run the uv command held in UR_CMD (the caller sets it, quoting exactly as written on a
+REM   command line); on a NETWORK failure retry, then switch source. Returns the command's last exit code.
+REM   1) exit 0 -> done.
+REM   2) the error is not a network one (resolver conflict, disk full, bad arguments ...) -> fail at once: another
+REM      attempt cannot help and would only hide the real message.
+REM   3) network error (HTTP 403 / 404 / 5xx, timeout, connection refused ...) -> retry the SAME source once. A single
+REM      403 from a CDN edge or a rate limit is usually gone a few seconds later (seen once with the tuna mirror).
+REM   4) still failing -> switch to the OTHER source (cn <-> official) and try once more. The source that worked is
+REM      kept for the later steps, so one bad mirror does not slow every step.
+REM   A source forced with --mirror cn / --mirror official is never switched: the user asked for it.
+REM   uv writes its error text to stderr; it is captured to a file, then shown, so nothing is hidden from the user.
+:uv_retry
+set "_UR_LABEL=%~1"
+set "_UR_ERR=%DL_DIR%\_uv_retry_%~1.err"
+set "_UR_TRY=0"
+:uv_retry_run
+set /a "_UR_TRY+=1"
+call %UR_CMD% 2> "%_UR_ERR%"
+set "_UR_RC=%errorlevel%"
+if exist "%_UR_ERR%" type "%_UR_ERR%" 1>&2
+if "%_UR_RC%"=="0" goto :uv_retry_ok
+findstr /i /c:"403 Forbidden" /c:"404 Not Found" /c:"status client error" /c:"status server error" /c:"timed out" /c:"tcp connect error" /c:"error sending request" /c:"dns error" /c:"connection reset" /c:"connection closed" /c:"Failed to fetch" /c:"Failed to download" /c:"certificate" "%_UR_ERR%" >nul 2>&1
+if errorlevel 1 goto :uv_retry_nonnet
+if "%_UR_TRY%"=="1" goto :uv_retry_same
+if "%_UR_TRY%"=="2" goto :uv_retry_switch
+echo [ERROR] %_UR_LABEL%: failed on both sources.
+exit /b %_UR_RC%
+:uv_retry_ok
+del /f /q "%_UR_ERR%" 2>nul
+exit /b 0
+:uv_retry_nonnet
+echo [INFO] %_UR_LABEL%: not a network error - not retrying.
+exit /b %_UR_RC%
+:uv_retry_same
+echo [WARN] %_UR_LABEL%: network error ^(%QAI_NET_PROFILE%^) - retrying the same source once in 3 s ...
+ping -n 4 127.0.0.1 >nul
+goto :uv_retry_run
+:uv_retry_switch
+if /i "%OPT_MIRROR%"=="cn" goto :uv_retry_forced
+if /i "%OPT_MIRROR%"=="official" goto :uv_retry_forced
+if "%QAI_NO_SOURCE_SWITCH%"=="1" goto :uv_retry_forced
+echo [WARN] %_UR_LABEL%: still failing on the %QAI_NET_PROFILE% source - switching to the other one.
+if /i "%QAI_NET_PROFILE%"=="cn" goto :uv_to_official
+set "QAI_NET_PROFILE=cn"
+set "UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple"
+set "PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple"
+set "UV_PYTHON_INSTALL_MIRROR=https://registry.npmmirror.com/-/binary/python-build-standalone/"
+goto :uv_retry_run
+:uv_to_official
+set "QAI_NET_PROFILE=official"
+set "UV_DEFAULT_INDEX="
+set "PIP_INDEX_URL="
+set "UV_PYTHON_INSTALL_MIRROR="
+goto :uv_retry_run
+:uv_retry_forced
+echo [WARN] %_UR_LABEL%: not switching source ^(forced with --mirror, or QAI_NO_SOURCE_SWITCH=1^).
+exit /b %_UR_RC%
 
 REM :ensure_aria2c - optional multi-connection downloader (~2.5MB); non-fatal. Reuses PATH copy.
 :ensure_aria2c
@@ -908,7 +971,6 @@ echo [WARN] qai_appbuilder not importable ^(NPU inference unavailable; Model Bui
 type "%_QF%"
 findstr /i /c:"DLL load failed" "%_QF%" >nul 2>&1 && (
     echo [WARN] A native DLL of qai_appbuilder did not load. Usual causes:
-    echo [WARN]   * missing / old Microsoft Visual C++ runtime: install https://aka.ms/vs/17/release/vc_redist.%HOST_ARCH%.exe
     echo [WARN]   * an Application Control / AppLocker / antivirus policy blocked the unsigned .pyd/.dll under
     echo [WARN]     %VENV_DIR%\Lib\site-packages\qai_appbuilder ^(Event Viewer: Microsoft-Windows-CodeIntegrity^)
     echo [WARN]   * wrong architecture: this venv is %HOST_ARCH%; the wheel must match ^(win_%HOST_ARCH:x64=amd64%^)
