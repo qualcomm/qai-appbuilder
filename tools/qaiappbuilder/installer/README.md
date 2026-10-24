@@ -1,7 +1,7 @@
 # QAI ModelBuilder 安装包(浏览器版)
 
 用 Inno Setup 为每个架构各打一个 `.exe`:预编译的前端 + 后端源码 + `uv` + `aria2c`。
-安装时再联网建 Python 环境。**不含 QAIRT SDK、不含桌面壳(Tauri)、不含测试/文档/模型。**
+安装时再联网建 Python 环境。**不含 QAIRT SDK、不含测试/文档/模型。**
 
 | 产物 | 大小(实测 x64) | 说明 |
 |---|---|---|
@@ -24,7 +24,7 @@
 ## 包里有什么(白名单)
 
 `src` `apps` `factory` `scripts` `interfaces` `skills` `frontend\dist` `pyproject.toml` `build_info.json`
-`setup_env.bat` `Start.bat` `qai.bat` `Console.bat` `Uninstall.bat` `clean_env.bat` 及 README,
+`desktop\QAIModelBuilder.exe`(桌面版窗口,见下)、`setup_env.bat` `Start.bat` `qai.bat` `Console.bat` `Uninstall.bat` `clean_env.bat` 及 README,
 外加 `data\bin\uv\uv.exe`(**按目标架构**从 PyPI 取)、`data\bin\aria2c\aria2c.exe`,以及 **FileGuard 的 `vendor\bin\<arch>\guard64.dll`**(ARM64 另有 `guard-injector.exe`)和标记文件 `vendor\bin\guard.source`。
 
 guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 约 0.7 MB、ARM64 约 0.7 MB;整个 zip 有 30 MB,因为里面还带两个架构的 ast-grep)。`guard.source` 写的是 `setup_env.bat` 自己会下载的那个 URL,脚本看到标记与 URL 一致且 dll 在,就跳过下载,所以**安装时不再联网下载 guard.zip**。来源顺序:`-GuardZip` 参数、`Downloads\guard.zip`、发布页 URL;都拿不到时只打印一行提示,安装时仍由 `setup_env.bat` 下载。发布标签变了(`setup_env.bat` 里的 `QAI_AB_RELEASE_TAG`),重新打包即可;旧包里的标记和新标签不一致时,安装会重新下载并替换。
@@ -52,7 +52,7 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
    - `--with-astgrep`:从 PyPI 的 `ast-grep-cli` 0.45.1 wheel 取出 `ast-grep.exe`、`sg.exe`(各约 49 MB)到 `vendor\bin\<arch>\`;PyPI 不通时回退 GitHub release。ARM64 上 `vendor-deps.7z` 已带这两个文件,会直接 `[SKIP]`。
    **不装**模型转换环境(`.venv_x64_310`,实测约 2.4 GB)和 QAIRT SDK。
 4. 环境配置失败时,文件仍已安装;开始菜单有"修复 / 完成环境配置",重跑 `setup_env.bat`,可断点续。
-5. 成功后可勾选"立即启动",即运行 `Start.bat`(自动开浏览器)。
+5. 成功后可勾选"立即启动",打开**桌面版**窗口(`desktop\QAIModelBuilder.exe`)。开始菜单和桌面快捷方式也指向它;浏览器版仍然是安装目录里的 `Start.bat`(不再有快捷方式)。
 
 ## QAIRT(模型转换)
 
@@ -86,3 +86,20 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
 - 安装路径含空格或非 ASCII 会给警告(部分脚本拼路径,未全面验证)。
 - x64 的 `qai_appbuilder` wheel 只在 GitHub release 上,无法访问 GitHub 时会装不上(`setup_env.bat` 会给 `[ATTENTION]`)。
 - `ChineseSimplified.isl` 是社区翻译(kira-96/Inno-Setup-Chinese-Simplified-Translation),Inno 官方不再自带。
+
+## 桌面版窗口(`desktop\QAIModelBuilder.exe`)
+
+一个 Tauri 2 + WebView2 的小壳(ARM64 约 2.9 MB,x64 约 3.1 MB;各架构分别编译、分别打入对应安装包)。**前端和后端都没改**:窗口加载的就是后端提供的同一份 `http://localhost:8989/`。
+
+- 启动:先显示启动页,后台用安装时建的 venv 运行 `python -m apps.cli.serve --port 8989`(隐藏控制台窗口),`/api/system/health` 返回 200 后再打开应用页。端口从 `factory/config/ports.json` 读,固定为 8989(SSO 回调地址写死了端口)。端口被占用(例如正在跑 `Start.bat`)时不启动后端,直接在窗口里提示。
+- 关窗口:弹出"退出 / 最小化到托盘 / 取消",可勾选"记住我的选择"。记住的结果存在 `data\config\desktop-settings.json` 的 `close_action`(`ask` / `quit` / `tray`),删掉这个文件就会重新询问。后端还没起来或已出错时关窗直接退出。
+- 托盘:左键恢复窗口,右键菜单"显示窗口 / 退出"。单实例:再次双击快捷方式只会把已有窗口调到前台。
+- 退出:先 `POST /api/system/exit`(带 CSRF 令牌)让后端正常关闭,超时才强杀进程树。后端放在 Job Object 里,壳被任务管理器强杀时,后端也会被系统回收。后端中途崩溃或被杀时,窗口回到错误页并显示日志路径(`data\logs\desktop-backend.log`)。
+- 链接:应用自己的地址在窗口里打开(SSO 登录弹窗也一样);其他 http(s) 链接交给系统浏览器;其他协议一律拒绝。
+- 语言:按 Windows 显示语言选中文或英文。
+- 构建:`desktop\build.ps1 -Arch both`(需要 Rust + VS 2022 C++ 工具 + Windows SDK);产物在 `dist\desktop\<arch>\`,`installer\build_installer.ps1` 会打进安装包，缺少时直接报错。
+
+### 实测情况(隔离环境,ARM64 原生)
+
+- 通过:静默安装 → 开始菜单/桌面快捷方式都指向 exe → 14 s 后端就绪、窗口加载真实前端;关窗对话框、勾选"记住"后下次直接退出 / 直接最小化、再次启动把隐藏的窗口拉回、退出后后端进程为 0、端口被占用、强杀壳后后端被回收、后端被杀→错误页、`window.open` 外链走系统浏览器、`<a download>` 下载、剪贴板 / 麦克风 API 可用、托盘图标存在。
+- **未测**:x64 成品在 x64 机器上运行(只编译并校验了 PE 架构);真实 SSO 登录流程;真实麦克风权限弹窗;卡在 Setup 进度中关窗;卸载窗口(测试安装目录被我手动删除,卸载器没跑);开机自启没有实现。

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "QAI ModelBuilder",
+  "version": "0.1.0",
+  "identifier": "com.qaimodelbuilder.desktop",
+  "build": { "frontendDist": "../splash" },
+  "app": { "windows": [], "security": { "csp": null } },
+  "bundle": { "active": false, "icon": ["icons/icon.ico", "icons/icon.png"] }
+}
+
