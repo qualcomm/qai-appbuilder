@@ -1,4 +1,4 @@
-﻿; ---------------------------------------------------------------------
+; ---------------------------------------------------------------------
 ; Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 ; SPDX-License-Identifier: BSD-3-Clause
 ; ---------------------------------------------------------------------
@@ -80,16 +80,17 @@ Name: "chinesesimp"; MessagesFile: "ChineseSimplified.isl"
 Source: "{#StageDir}\*"; DestDir: "{app}\app"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{app}\app\Start.bat"; WorkingDir: "{app}\app"; Comment: "Start the QAI ModelBuilder server and open the browser"
+Name: "{group}\{#AppName}"; Filename: "{app}\app\desktop\QAIModelBuilder.exe"; WorkingDir: "{app}\app"; Comment: "Open QAI ModelBuilder (desktop window)"
+; The browser edition stays available through Start.bat in the install folder; it is no longer a shortcut.
 ; Repair goes through cmd.exe for the same reason as Uninstall below: a shortcut straight to the .bat with arguments is not listed.
 Name: "{group}\{cm:RepairName}"; Filename: "{sys}\cmd.exe"; Parameters: "/c """"{app}\app\setup_env.bat"" --arch {#Arch} {#SetupComponents}"""; WorkingDir: "{app}\app"
 ; Not a direct {uninstallexe} link: the shell hides a Start-menu shortcut that points straight at the registered uninstaller
 ; from the apps list. Going through cmd.exe keeps it listed (verified in an isolated install).
 Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{sys}\cmd.exe"; Parameters: "/c start """" ""{uninstallexe}"""; Flags: runminimized
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\app\Start.bat"; WorkingDir: "{app}\app"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\app\desktop\QAIModelBuilder.exe"; WorkingDir: "{app}\app"
 
 [Run]
-Filename: "{app}\app\Start.bat"; Description: "{cm:LaunchNow}"; WorkingDir: "{app}\app"; Flags: postinstall nowait skipifsilent shellexec; Check: EnvOk
+Filename: "{app}\app\desktop\QAIModelBuilder.exe"; Description: "{cm:LaunchNow}"; WorkingDir: "{app}\app"; Flags: postinstall nowait skipifsilent; Check: EnvOk
 
 [UninstallDelete]
 ; Everything under {app}\app except data\ is removed by the [Code] uninstall step (it deletes the folder as a
@@ -804,3 +805,4 @@ begin
     RemoveDir(ExpandConstant('{app}'));
   end;
 end;
+

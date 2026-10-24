@@ -1,0 +1,26 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>QAI ModelBuilder</title>
+<style>
+  :root{color-scheme:light dark;--bg:#f8f9fc;--fg:#1c2030;--mut:#6b7285;--acc:#7c6cff}
+  @media (prefers-color-scheme:dark){:root{--bg:#0c0e14;--fg:#e6e8f0;--mut:#8b92a8}}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 "Segoe UI",system-ui,sans-serif}
+  body{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;text-align:center;padding:24px;box-sizing:border-box}
+  .mark{width:64px;height:64px}
+  h1{font-size:18px;font-weight:600;margin:0}
+  #msg{color:var(--mut);max-width:520px;white-space:pre-wrap;word-break:break-word}
+  .bar{width:220px;height:3px;background:rgba(124,108,255,.18);border-radius:2px;overflow:hidden}
+  .bar i{display:block;width:40%;height:100%;background:var(--acc);border-radius:2px;animation:s 1.2s ease-in-out infinite}
+  @keyframes s{0%{margin-left:-40%}100%{margin-left:100%}}
+  .err .bar{display:none} .err h1{color:#e5484d}
+  @media (prefers-reduced-motion:reduce){.bar i{animation:none;margin-left:30%}}
+</style></head>
+<body>
+<svg class="mark" viewBox="0 0 40 40" fill="none"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7c6cff"/><stop offset="1" stop-color="#60a5fa"/></linearGradient></defs>
+<rect x="2" y="2" width="36" height="36" rx="9" fill="#0f1218" stroke="#7c6cff" stroke-opacity=".25"/>
+<g stroke="#7c6cff" stroke-opacity=".4" stroke-width=".8"><line x1="12" y1="12" x2="20" y2="20"/><line x1="28" y1="12" x2="20" y2="20"/><line x1="12" y1="28" x2="20" y2="20"/><line x1="28" y1="28" x2="20" y2="20"/></g>
+<rect x="16" y="16" width="8" height="8" rx="1.5" fill="url(#g)"/>
+<g fill="url(#g)" opacity=".8"><circle cx="12" cy="12" r="2.5"/><circle cx="28" cy="12" r="2.5"/><circle cx="12" cy="28" r="2.5"/><circle cx="28" cy="28" r="2.5"/></g></svg>
+<h1 id="title">QAI ModelBuilder</h1>
+<div class="bar"><i></i></div>
+<div id="msg"></div>
+</body></html>

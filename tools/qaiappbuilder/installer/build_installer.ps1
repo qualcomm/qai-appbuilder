@@ -1,4 +1,4 @@
-﻿# ---------------------------------------------------------------------
+# ---------------------------------------------------------------------
 # Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
@@ -12,7 +12,7 @@
          - src, apps, factory, scripts, interfaces, skills, tools, frontend\dist
          - pyproject.toml, build_info.json, launcher .bat files, READMEs
          - data\bin\uv\uv.exe (fetched from PyPI for the TARGET arch), data\bin\aria2c\aria2c.exe
-       Tests, docs, samples, models, .qai, desktop, vendor, node_modules are NOT staged.
+       Tests, docs, samples, models, .qai, desktop sources, vendor, node_modules are NOT staged (the built desktop shell exe is).
     3. run ISCC.exe  ->  dist\installer\QAIModelBuilder-<version>-<arch>-setup.exe
 
     The installer copies the files, then runs setup_env.bat (no --builder: QAIRT is NOT installed).
@@ -110,6 +110,12 @@ function Stage-Arch([string]$a) {
         if (Test-Path $p) { Copy-Item $p (Join-Path $stage $f) -Force }
         elseif ($f -in @('pyproject.toml', 'setup_env.bat', 'Start.bat')) { Fail "required file missing: $f" }
     }
+
+    # The desktop shell (Tauri/WebView2 window around the local backend), built per architecture by desktop\build.ps1.
+    $shellExe = Join-Path $Root "dist\desktop\$a\QAIModelBuilder.exe"
+    if (-not (Test-Path $shellExe)) { Fail "desktop shell missing: $shellExe - run desktop\build.ps1 -Arch $a first" }
+    New-Item -ItemType Directory -Force (Join-Path $stage 'desktop') | Out-Null
+    Copy-Item $shellExe (Join-Path $stage 'desktop\QAIModelBuilder.exe') -Force
 
     # aria2c is x64; it also runs on Windows-on-ARM, so the same copy serves both packages.
     $aria = Join-Path $Root 'data\bin\aria2c\aria2c.exe'
@@ -226,3 +232,4 @@ foreach ($a in $arches) {
 Info 'done:'
 Get-ChildItem $OutDir -Filter 'QAIModelBuilder-*-setup.exe' |
     ForEach-Object { '  {0}  {1:N1} MB' -f $_.FullName, ($_.Length / 1MB) }
+
