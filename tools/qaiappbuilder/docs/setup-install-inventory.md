@@ -5,6 +5,7 @@
 > 再运行文末的「一致性校验」,确认表里的 URL / 文件名 / 版本和代码一致。
 >
 > 图例:✅ 默认安装 ⚙️ 仅在对应开关下安装 ➖ 该架构不装 ⚠️ 有前提/回退
+> 与 Setup.bat 的逐项对比见 **§9**;表中带 **【S】** 的行表示该处与 Setup.bat 有差异。
 
 ## 0. 总览
 
@@ -25,15 +26,15 @@
 
 | Step | 内容 | 用途 | x64 | ARM64 | 来源(主 → 回退) |
 |---|---|---|---|---|---|
-| 1 | 网络预检 `scripts\setup\net_config.ps1` | 判断 pypi / github 是否可达,选镜像、代理 | ✅ | ✅ | 本地脚本;探测 pypi.org、files.pythonhosted.org、github.com、清华镜像 等 |
+| 1 【S】 | 网络预检 `scripts\setup\net_config.ps1` | 判断 pypi / github 是否可达,选镜像、代理 | ✅ | ✅ | 本地脚本;探测 pypi.org、files.pythonhosted.org、github.com、清华镜像 等 |
 | 2a | `aria2c.exe` 1.37.0 → `data\bin\aria2c\` | 多连接下载,加速后续大文件 | ✅ 非致命 | ✅ 非致命 | PATH 里的 → `github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip` |
-| 2b | `uv.exe`、`uvx.exe` → `data\bin\uv\` | 装 Python、建 venv、装依赖 | ✅ | ✅ | `data\bin\uv` → PATH → PyPI `uv` wheel(`win_amd64` / `win_arm64`)→ `github.com/astral-sh/uv/releases/latest/download/uv-<arch>-pc-windows-msvc.zip` |
-| 3a | Python 3.13 解释器 | 运行环境 | ✅ | ✅ | `uv python install`(python-build-standalone;cn 镜像 `registry.npmmirror.com/-/binary/python-build-standalone/`) |
+| 2b 【S】 | `uv.exe`、`uvx.exe` → `data\bin\uv\` | 装 Python、建 venv、装依赖 | ✅ | ✅ | `data\bin\uv` → PATH → PyPI `uv` wheel(`win_amd64` / `win_arm64`)→ `github.com/astral-sh/uv/releases/latest/download/uv-<arch>-pc-windows-msvc.zip` |
+| 3a 【S】 | Python 3.13 解释器 | 运行环境 | ✅ | ✅ | `uv python install`(python-build-standalone;cn 镜像 `registry.npmmirror.com/-/binary/python-build-standalone/`) |
 | 3b | venv + `pip`(`--seed`)+ `pycache` 的 `.pth` | 隔离环境 | ✅ | ✅ | `uv venv`;`install_pycache_pth.py` |
-| 4a | **vendor-deps.7z**(约 201 MB,解后约 420 MB) | ARM64 专用 wheel 与数据 | ➖ | ✅ 缺 `vendor\whl\qai_appbuilder-2.48.40-...whl` 时才下;失败则**中止安装** | `https://www.aidevhome.com/data/adh2/attr/vendor-deps.7z`;解包先 `tar.exe`,失败再 `7zr.exe`(`www.7-zip.org/a/7zr.exe`) |
-| 4b | `guard64.dll`(+ ARM64 的 `guard-injector.exe`)+ `vendor\bin\guard.source` | FileGuard 原生文件保护 | ✅ 非致命 | ✅ 非致命 | `github.com/qualcomm/qai-appbuilder/releases/download/v2.48.40/guard.zip`;`guard.source` 与该 URL 一致且 dll 在则跳过 |
+| 4a 【S】 | **vendor-deps.7z**(约 201 MB,解后约 420 MB) | ARM64 专用 wheel 与数据 | ➖ | ✅ 缺 `vendor\whl\qai_appbuilder-2.48.40-...whl` 时才下;失败则**中止安装** | `https://www.aidevhome.com/data/adh2/attr/vendor-deps.7z`;解包先 `tar.exe`,失败再 `7zr.exe`(`www.7-zip.org/a/7zr.exe`) |
+| 4b 【S】 | `guard64.dll`(+ ARM64 的 `guard-injector.exe`)+ `vendor\bin\guard.source` | FileGuard 原生文件保护 | ✅ 非致命 | ✅ 非致命 | `github.com/qualcomm/qai-appbuilder/releases/download/v2.48.40/guard.zip`;`guard.source` 与该 URL 一致且 dll 在则跳过 |
 | 5a | 14 个 vendored wheel(`--no-deps`)+ `_constraints.txt` | PyPI 没有 / 已撤回的 ARM64 包 | ➖ | ✅ | `vendor\whl\`(见 §3) |
-| 5b | `pyproject.toml` 核心依赖 + `--extra cc-sdk` | 服务端运行依赖 | ✅ | ✅(`--find-links vendor\whl -c _constraints.txt`) | PyPI(cn 档改用清华镜像 `https://pypi.tuna.tsinghua.edu.cn/simple`) |
+| 5b 【S】 | `pyproject.toml` 核心依赖 + `--extra cc-sdk` | 服务端运行依赖 | ✅ | ✅(`--find-links vendor\whl -c _constraints.txt`) | PyPI(cn 档改用清华镜像 `https://pypi.tuna.tsinghua.edu.cn/simple`) |
 | 5d | `qai_appbuilder` | NPU 推理绑定 | ✅ 版本须恰为 `2.48.40.1`;失败只警告 | ✅ 版本 `2.48.40`,来自 `vendor\whl` | x64:`.../releases/download/v2.48.40/qai_appbuilder-2.48.40.1-cp313-cp313-win_amd64.whl`(**不从 PyPI**,PyPI 的 win_amd64 是 ARM64EC 构建) |
 | 6 | `scripts.init.install --apply` 初始化 `data\`(DB 迁移、配置、密钥) | 首次运行数据 | ✅ | ✅ | 本地;随后 `patch_qairt_env_arch.py`(若有 `qairt_env.json`) |
 | 7 | 验证 import + 写 `data\config\host_arch` | 自检 | ✅ | ✅ | 本地 |
@@ -44,9 +45,9 @@
 
 | 开关 | 内容 | x64 | ARM64 | 来源 / 说明 |
 |---|---|---|---|---|
-| `--with-browser` | `--extra search`:`playwright==1.61.0`、selectolax、lxml、cssselect、browserforge;再 `playwright install chromium`(约 150 MB,非致命) | ⚙️ | ⚙️ | PyPI;Chromium 来自 `cdn.playwright.dev` / `cdn.npmmirror.com/binaries/playwright` |
-| `--with-astgrep` | `ast-grep.exe`、`sg.exe` 0.45.1 → `vendor\bin\<arch>\`(约 50 MB × 2) | ⚙️ | ⚠️ 见 §6 | PyPI `ast-grep-cli`(`win_amd64` / `win_arm64`)→ `github.com/ast-grep/ast-grep/releases/download/0.45.1/app-<x86_64\|aarch64>-pc-windows-msvc.zip` |
-| `--with-apps` | 4 个 App Builder 包的 `requirements.txt` 聚合安装;`predeploy_tts_runtime.py`(NLTK、jieba、g2p_en 缓存) | ⚙️ | ⚙️ | PyPI(ARM64 加 `--find-links vendor\whl`);NLTK 数据来自 nltk 官方源;**聚合时跳过 `qai-appbuilder`,`openai-whisper` 用 `--no-deps`** |
+| `--with-browser` 【S】 | `--extra search`:`playwright==1.61.0`、selectolax、lxml、cssselect、browserforge;再 `playwright install chromium`(约 150 MB,非致命) | ⚙️ | ⚙️ | PyPI;Chromium 来自 `cdn.playwright.dev` / `cdn.npmmirror.com/binaries/playwright` |
+| `--with-astgrep` 【S】 | `ast-grep.exe`、`sg.exe` 0.45.1 → `vendor\bin\<arch>\`(约 50 MB × 2) | ⚙️ | ⚠️ 见 §6 | PyPI `ast-grep-cli`(`win_amd64` / `win_arm64`)→ `github.com/ast-grep/ast-grep/releases/download/0.45.1/app-<x86_64\|aarch64>-pc-windows-msvc.zip` |
+| `--with-apps` 【S】 | 4 个 App Builder 包的 `requirements.txt` 聚合安装;`predeploy_tts_runtime.py`(NLTK、jieba、g2p_en 缓存) | ⚙️ | ⚙️ | PyPI(ARM64 加 `--find-links vendor\whl`);NLTK 数据来自 nltk 官方源;**聚合时跳过 `qai-appbuilder`,`openai-whisper` 用 `--no-deps`** |
 | `--builder` | 模型转换环境(§4) | ⚙️ | ⚙️ | 约 2 GB QAIRT SDK + x64 Python 3.10 venv;**安装包不会触发** |
 | (附加) `--extra search` + `--extra cc-sdk` | 同 `--with-browser` / 默认 | | | `--builder` 会同时启用 `search` extra |
 
@@ -147,6 +148,85 @@
 - [ ] 改 `Setup.bat`:它和 `setup_env.bat` 共用 `vendor\bin\guard.source` 标记,别让两者互相重复下载。
 - [ ] 新增外部下载:补 §1/§2 的「来源」,并确认 `net_config.ps1` 的预检/镜像是否需要覆盖该域名。
 
+## 9. 与 `Setup.bat` 的对比
+
+`Setup.bat`(3251 行)是原有的完整安装入口;`setup_env.bat`(1055 行)是精简、容忍网络问题的版本。
+二者**写入同一布局**(venv、`data\`、`host_arch`),所以 `Start.bat` / `qai.bat` / `Console.bat` 对两者的结果都能用。
+已核对:**14 个 vendored wheel 的清单和 `_constraints` 的 14 条版本完全一致**;`aria2c` 1.37.0、`qai_appbuilder` 2.48.40 也一致。
+
+### 9.1 默认行为的差异(不带任何开关)
+
+| 项目 | `Setup.bat` | `setup_env.bat` | 影响 |
+|---|---|---|---|
+| **x64 下载 `vendor-deps.7z`(约 201 MB)** | ✅ **会下**(Step 0b 没有架构判断,x64 也下) | ➖ 不下 | x64 上 `Setup.bat` 白白多下约 200 MB,是 x64 安装慢的主要原因之一 |
+| ARM64 下载 `vendor-deps.7z` | ✅,**失败只警告**,继续 | ✅,**失败则中止安装** | `setup_env.bat` 更严格;ARM64 没有它就装不了 |
+| Playwright 浏览器 | ✅ **默认装**:`--extra search` + `playwright install chromium`(约 150 MB) | ⚙️ 仅 `--with-browser` | `Setup.bat` 默认多装约 150 MB |
+| ast-grep | ✅ **默认装**(Step 0d,两架构各自的 HOST_ARCH 版本) | ⚙️ 仅 `--with-astgrep`(但 ARM64 因 7z 内含而默认有,见 §6) | `Setup.bat` 的 x64 默认多装约 50 MB |
+| App Builder 包依赖(whisper/melotts/zipformer) | ✅ **默认装**(Step 4e) | ⚙️ 仅 `--with-apps` | |
+| TTS 运行数据(NLTK / jieba / g2p_en) | ✅ **默认跑**(Step 6) | ⚙️ 仅 `--with-apps` | |
+| WebView2 Fixed Version(约 811 MB 复制) | ✅ **默认**(Step 10),仅当系统 Evergreen 注册表缺失才复制 | ➖ 没有 | 桌面壳(Tauri)专用;浏览器版不需要 |
+| VC++ 运行库 | ✅ 探测失败才下载 `https://aka.ms/vs/17/release/vc_redist.<arch>.exe` 并静默安装 | ➖ 没有 | 干净的 x64 机器上,`setup_env.bat` 可能在建 venv 时失败(`0xc0e90002`) |
+| WDAC / 代码完整性策略下的签名 Python | ✅ `ensure_signed_python.ps1`:受限机器上改装 python.org 签名版(3.13.14;`--builder` 的 3.10.11) | ➖ 没有 | 企业受限机器上 `setup_env.bat` 可能直接失败(os error 448) |
+| git pre-commit 钩子 | ✅ 在 git 工作区里设置 `core.hooksPath=.githooks` | ➖ 没有 | 仅开发者相关 |
+| `pip` 升级 | ✅ `ensurepip --upgrade` + `pip install --upgrade pip` | ➖ 不做(只用 `--seed`) | |
+| 额外探测的 import(自愈) | ✅ 探测 `playwright, selectolax, lxml, browserforge, croniter` 等 | 只探测 `fastapi, uvicorn, structlog, paramiko, claude_agent_sdk` | 见 §9.4 第 3 条 |
+| 重新安装 `qai_appbuilder` | ✅ **每次都强制重装**(ARM64);x64 版本不符才装 | 版本恰好相符就跳过(两架构) | `setup_env.bat` 更快 |
+
+### 9.2 开关对照
+
+| 作用 | `Setup.bat` | `setup_env.bat` |
+|---|---|---|
+| 不暂停 | `--no-pause` | `--no-pause` |
+| 指定架构 | `--arch arm64\|x64` | `--arch arm64\|x64` |
+| 模型转换环境 | `--builder`(默认关);`--no-builder` | `--builder`(默认关) |
+| 开发/测试依赖 | `--dev`(`dev` + `e2e` extras) | **没有** |
+| 预下载语音模型权重 | `--voice-models`(whisper_medium / zipformer / melotts_zh,v0.55.0,来自 `qaihub-public-assets.s3.us-west-2.amazonaws.com`,按 SoC 选 X Elite / X2 Elite) | **没有**(运行时首次使用才下) |
+| PortableGit 2.54.0 | `--git`(`github.com/git-for-windows/...`;只给 exec 的 `shell='sh'` 用) | **没有** |
+| Node.js 22.20.0 + pnpm 11.9.0 | `--frontend`(`nodejs.org`;给 `Build.bat` 用) | **没有**(前端由单独的 `build_frontend.bat` 装) |
+| 桌面构建工具链(Rust + tauri-cli) | `--desktop`(隐含 `--builder`;`win.rustup.rs`) | **没有** |
+| 以上全部 | `--full` | **没有** |
+| 浏览器工具 | (默认装) | `--with-browser` |
+| ast-grep | (默认装) | `--with-astgrep` |
+| App Builder 依赖 | (默认装) | `--with-apps` |
+| 网络配置 | 只读环境变量 `HTTPS_PROXY` / `ALL_PROXY` / `HTTP_PROXY` | `--proxy URL`、`--mirror auto\|official\|cn`、`--no-probe` + 预检 |
+
+### 9.3 下载来源的差异
+
+| 内容 | `Setup.bat` | `setup_env.bat` |
+|---|---|---|
+| `uv` | **只从 GitHub**:`github.com/astral-sh/uv/releases/latest/download/uv-<arch>-pc-windows-msvc.zip` | PyPI wheel(`pypi.org` / 清华镜像)→ 回退 GitHub |
+| `ast-grep` | 只从 GitHub release 0.45.1 | PyPI `ast-grep-cli` 0.45.1 → 回退 GitHub |
+| PyPI 依赖 | 默认源;**无重试、无镜像切换** | cn 档用清华镜像;网络错误会重试并**在 cn/official 之间切换**(`:uv_retry`) |
+| Python 解释器 | 默认源 | cn 档用 `registry.npmmirror.com` 的 python-build-standalone 镜像 |
+| GitHub 大文件 | 直连 | 直连失败后自动选一个 GitHub 代理(`ghfast.top` 等)重试 |
+| `guard.zip` | **每次都要下**:两个 DLL + ARM64 注入器**三个都在**才跳过 | 只要本架构的 DLL 在且 `guard.source` 标记一致就跳过(安装包已内置,**安装时不下载**) |
+| `vendor-deps.7z` 解包 | 只用 `7zr.exe`(需先下载) | 先用系统自带 `tar.exe`,失败才用 `7zr.exe` |
+| 7z 里 `guard64.dll` | 解包后整体合并进 `vendor\`,随后被 `guard.zip` 的新版覆盖 | **合并时排除** guard 文件 |
+| 7z 里其余内容 | **整体合并**(含 `openblas`、`bin\x64`、`bin\arm64`) | 只拷 `whl`、`tiktoken`、`nltk_data`、`g2p_data`、`bin\arm64`(**不拷** `openblas`、`bin\x64`) |
+
+### 9.4 值得注意的差异(改动前先看)
+
+1. **x64 + `Setup.bat` 会下载 201 MB 的 ARM64 依赖包**。这包里 x64 用得上的只有 `tiktoken` 词表和 NLTK/g2p 数据(约 40 MB)。若以后要精简 `Setup.bat`,可给 `:fetch_vendor_deps` 加架构判断。
+2. **默认装的东西不同**(Setup.bat 的 Chromium 与 Pack 依赖在「依赖已完整」时会被整体跳过,所以重复运行不会重装;首次安装才会装):`Setup.bat` 默认装 Playwright + Chromium、ast-grep、App Builder 依赖、TTS 数据;`setup_env.bat` 全部改为可选。二者产出的环境**功能并不等价**——用 `setup_env.bat` 装完,浏览器搜索、`ast_grep` 工具(x64)、语音/OCR 模型可能不可用,需要补开关。
+3. **自愈探测不同**:`Setup.bat` 看到 `playwright` / `selectolax` / `lxml` / `browserforge` / `croniter` 缺失时会重装;`setup_env.bat` 的探测更少。若升级 `pyproject.toml` 新增了运行时依赖,`setup_env.bat` 的 `[SKIP] dependency closure already importable` 可能**漏掉**它——新增依赖时要同步改这条探测。
+4. **`setup_env.bat` 没有的保护**:VC++ 运行库、WDAC 签名 Python、`pip` 升级。受限或全新的 x64 机器上,`setup_env.bat` 失败的概率更高,而 `Setup.bat` 会自己修复。
+5. **ARM64 的 `vendor-deps.7z` 失败的处理相反**:`Setup.bat` 只警告然后让 `uv` 回退 PyPI(ARM64 上多半装不上被撤回的 wheel);`setup_env.bat` 直接中止并提示手动下载。
+6. **`--builder` 的 VS 工具**:`Setup.bat` 的 Step 8.3 会静默安装 Visual Studio 2022 Community(`aka.ms/vs/17/release/vs_community.exe`,含 MSVC x64/ARM64、CMake、clang-cl、Windows 11 SDK 22621),体积很大;`setup_env.bat --builder` 明确**不装**(只支持 DLC 流程,不需要编译器)。
+
+### 9.5 `Setup.bat` 独有的下载项(`setup_env.bat` 不会下)
+
+| 内容 | 触发 | 来源 | 大小 |
+|---|---|---|---|
+| VC++ Redistributable | 建 venv 探测失败时 | `https://aka.ms/vs/17/release/vc_redist.<arch>.exe` | 约 5 MB+ |
+| python.org 签名版 Python | 检测到 WDAC 强制策略时 | `https://www.python.org/ftp/python/<ver>/python-<ver>-<arch>.exe` | |
+| Playwright Chromium | 默认 | Playwright CDN | 约 150 MB |
+| ast-grep | 默认 | GitHub release 0.45.1 | 约 50 MB |
+| PortableGit 2.54.0 | `--git` / `--full` | `github.com/git-for-windows/git/releases/download/v2.54.0.windows.1/PortableGit-2.54.0-<64-bit\|arm64>.7z.exe`;7zr 解包 | 约 57 MB |
+| Node.js 22.20.0 | `--frontend` / `--full` | `https://nodejs.org/dist/v22.20.0/node-v22.20.0-win-<x64\|arm64>.zip` + corepack 取 pnpm 11.9.0 | |
+| 语音模型(3 个 zip) | `--voice-models` / `--full` | `qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/<name>/releases/v0.55.0/...` | 较大 |
+| Rust + tauri-cli | `--desktop` | `https://win.rustup.rs/<x86_64\|aarch64>`;`cargo install tauri-cli` | 约 600 MB + 300 MB |
+| Visual Studio 2022 Community | `--builder` | `https://aka.ms/vs/17/release/vs_community.exe` | 很大 |
+| WebView2 Fixed Version | 默认(仅系统注册表缺失时) | 从系统 `C:\Program Files (x86)\Microsoft\EdgeWebView\Application\<ver>` **复制**,不下载 | 约 811 MB |
 ## 8. 一致性校验
 
 在 `tools\qaiappbuilder` 下运行。每项都应输出 `OK`;出现 `MISSING` 说明文档和代码已脱节。
@@ -182,5 +262,18 @@ $cons = ([regex]::Matches($bat, 'echo ([A-Za-z_\-]+)==') | Measure-Object).Count
 $whls = ([regex]::Matches($bat, '%W%\\[^"]+\.whl') | Select-Object -Unique | Measure-Object).Count
 Check "constraints ($cons) == vendored wheels ($whls)" ($cons -eq $whls)
 
+# 6) 与 Setup.bat 的对照(§9):14 个 wheel 清单与约束必须一致
+if (Test-Path Setup.bat) {
+  $sb = Get-Content Setup.bat -Raw
+  $wa = [regex]::Matches($sb, 'vendor\\whl\\([^"]+\.whl)') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
+  $wb = [regex]::Matches($bat, '%W%\\([^"]+\.whl)') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
+  Check "Setup.bat and setup_env.bat vendor the same wheels" (-not (Compare-Object $wa $wb))
+  foreach ($k in 'GIT_VERSION', 'NODE_VERSION', 'PNPM_VERSION', 'ASTGREP_VERSION', 'SIGNED_PY_VERSION', 'SIGNED_PY310_VERSION') {
+    $v = [regex]::Match($sb, "set `"$k=([^`"]+)`"").Groups[1].Value
+    Check "Setup.bat $k=$v documented" ($v -and $doc.Contains($v))
+  }
+  Check "Setup.bat Step 0b has no arch gate (x64 downloads vendor-deps.7z)" `
+    (-not ((Get-Content Setup.bat)[2416..2535] | Select-String -Pattern 'HOST_ARCH' -Quiet))
+}
 if (-not $ok) { exit 1 }
 ```
