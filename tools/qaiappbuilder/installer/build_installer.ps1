@@ -164,6 +164,46 @@ function Stage-Arch([string]$a) {
         }
     }
     if (-not $guardOk) { Info 'guard.zip not bundled - setup_env.bat will download it at install time.' }
+    # vendor\tiktoken: the two BPE vocab files the token estimator reads offline (~5.3 MB). They are NOT in the
+    # tiktoken wheel. Source order: cache -> official URL -> Downloads\vendor-deps.7z (tar.exe). tiktoken names the cache
+    # file sha1(url); download_bpe_files.py documents sha256(url), so both names are written (same bytes).
+    $tkCache = Join-Path $Root '.build\installer\_dl\tiktoken'
+    New-Item -ItemType Directory -Force $tkCache | Out-Null
+    $tkOut = Join-Path $stage 'vendor\tiktoken'
+    New-Item -ItemType Directory -Force $tkOut | Out-Null
+    $tkOk = 0
+    foreach ($enc in 'cl100k_base', 'o200k_base') {
+        $u = "https://openaipublic.blob.core.windows.net/encodings/$enc.tiktoken"
+        $ub = [Text.Encoding]::UTF8.GetBytes($u)
+        $n1 = [BitConverter]::ToString([Security.Cryptography.SHA1]::Create().ComputeHash($ub)).Replace('-', '').ToLower()
+        $n2 = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($ub)).Replace('-', '').ToLower()
+        $c = Join-Path $tkCache "$enc.tiktoken"
+        if (-not (Test-Path $c)) {
+            try { Invoke-WebRequest -Uri $u -OutFile $c -UseBasicParsing -TimeoutSec 120 }
+            catch { Remove-Item $c -Force -ErrorAction SilentlyContinue }
+        }
+        if (-not (Test-Path $c)) {
+            $vd = Join-Path $env:USERPROFILE 'Downloads\vendor-deps.7z'
+            $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
+            if ((Test-Path $vd) -and (Test-Path $tar)) {
+                $tmp = Join-Path $Root '.build\installer\_vd_tk'
+                Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+                New-Item -ItemType Directory -Force $tmp | Out-Null
+                & $tar -xf $vd -C $tmp "tiktoken/$n1" 2>$null
+                $hit = Join-Path $tmp "tiktoken\$n1"
+                if (Test-Path $hit) { Copy-Item $hit $c -Force; Info "tiktoken ${enc}: taken from vendor-deps.7z" }
+                Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+        # a truncated/error page must not ship: BPE files are "<base64 token> <rank>" lines
+        if ((Test-Path $c) -and (Get-Item $c).Length -gt 1000000 -and ((Get-Content $c -TotalCount 1) -match '^\S+ \d+$')) {
+            Copy-Item $c (Join-Path $tkOut $n1) -Force
+            Copy-Item $c (Join-Path $tkOut $n2) -Force
+            $tkOk++
+        } else { Remove-Item $c -Force -ErrorAction SilentlyContinue }
+    }
+    if ($tkOk -eq 2) { Info "tiktoken vocab bundled ($tkOk/2)" }
+    else { Remove-Item $tkOut -Recurse -Force -ErrorAction SilentlyContinue; Info "tiktoken vocab not bundled ($tkOk/2) - token counting falls back to a download at first use, or to the length//2 estimate." }
     $files = Get-ChildItem $stage -Recurse -File
     $mb = ($files | Measure-Object Length -Sum).Sum / 1MB
     Info ("staged {0} files, {1:N1} MB uncompressed" -f $files.Count, $mb)

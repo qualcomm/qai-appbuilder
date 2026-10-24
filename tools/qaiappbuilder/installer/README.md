@@ -29,7 +29,9 @@
 
 guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 约 0.7 MB、ARM64 约 0.7 MB;整个 zip 有 30 MB,因为里面还带两个架构的 ast-grep)。`guard.source` 写的是 `setup_env.bat` 自己会下载的那个 URL,脚本看到标记与 URL 一致且 dll 在,就跳过下载,所以**安装时不再联网下载 guard.zip**。来源顺序:`-GuardZip` 参数、`Downloads\guard.zip`、发布页 URL;都拿不到时只打印一行提示,安装时仍由 `setup_env.bat` 下载。发布标签变了(`setup_env.bat` 里的 `QAI_AB_RELEASE_TAG`),重新打包即可;旧包里的标记和新标签不一致时,安装会重新下载并替换。
 
-排除:`tests`、`__pycache__`、`*.pyc`、`node_modules`、`docs`、`samples`、`models`、`.qai`、`desktop`、`vendor`(除上面的 guard 文件)、`data`(用户数据)。
+还有 **`vendor\tiktoken\`**(约 5.3 MB,压缩后约 1.5 MB):`cl100k_base` 和 `o200k_base` 两个 BPE 词表,程序用它离线估算 token 数。词表不在 PyPI 的 tiktoken wheel 里,不打进包的话运行时会去 `openaipublic.blob.core.windows.net` 下载,下不到就退回按长度粗估。打包时的来源顺序:`.build\installer\_dl\tiktoken` 缓存、官方 URL、`Downloads\vendor-deps.7z`(用 `tar.exe` 只解出这两个文件);下载内容会校验大小和首行格式。每个词表写两份文件名(URL 的 SHA1 是 tiktoken 实际读取的名字,SHA256 是 `download_bpe_files.py` 文档里的名字,内容相同)。两个词表任一拿不到就整体不放,安装后行为同没有这个目录。
+
+排除:`tests`、`__pycache__`、`*.pyc`、`node_modules`、`docs`、`samples`、`models`、`.qai`、`desktop`、`vendor`(除上面的 guard 文件和 tiktoken 词表)、`data`(用户数据)。
 新增运行时依赖的目录时,要把它加进 `build_installer.ps1` 的 `$Dirs`。
 
 ## 安装时发生什么
