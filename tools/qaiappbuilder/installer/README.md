@@ -26,6 +26,7 @@
 .\installer\build_installer.ps1 -SkipDesktop             # 不编译桌面版,直接用 dist\desktop\<arch>\ 里现有的 exe
 .\installer\build_installer.ps1 -KeepStage               # 保留 .build\installer\stage_<arch>\ 便于检查
 .\installer\build_installer.ps1 -Version 3.1.1           # 覆盖版本号(默认取 build_info.json 的 version)
+.\installer\build_installer.ps1 -Help                      # 显示用法后退出(-h 也可以)
 ```
 
 `-SkipDesktop` 用在**没有 Rust / VS C++ 工具的机器**上:把别处编好的 `dist\desktop\<arch>\QAIModelBuilder.exe` 拷过来,再加这个参数。对应的 exe 不存在时,在开始整理文件之前就报错。也可以单独编译桌面版:`.\desktop\build.ps1 -Arch both`(细节见 [`desktop/README.md`](../desktop/README.md))。
