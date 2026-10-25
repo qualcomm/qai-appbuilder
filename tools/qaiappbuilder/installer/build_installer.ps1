@@ -26,6 +26,13 @@
 .PARAMETER KeepStage     keep .build\installer\stage_<arch> after compiling
 .PARAMETER IsccPath      path to ISCC.exe (auto-detected by default)
 .PARAMETER GuardZip      a local guard.zip to take guard64.dll from (default: Downloads\guard.zip, else the release URL)
+.PARAMETER Help          print the usage and exit
+.EXAMPLE
+    .\installer\build_installer.ps1
+    Build the desktop window and both installers (x64 + arm64).
+.EXAMPLE
+    .\installer\build_installer.ps1 -Arch x64 -SkipFrontend
+    Only x64, reuse the existing frontend\dist.
 #>
 [CmdletBinding()]
 param(
@@ -35,8 +42,43 @@ param(
     [string]$Version = '',
     [switch]$KeepStage,
     [string]$IsccPath = '',
-    [string]$GuardZip = ''
+    [string]$GuardZip = '',
+    [switch]$Help
 )
+
+function Show-Usage {
+    @'
+QAI ModelBuilder installer build
+
+Usage:
+  .\installer\build_installer.ps1 [options]
+
+Builds, in order: the frontend (Build.bat), the desktop window exe (desktop\build.ps1), then the Inno Setup installer(s).
+Output: dist\installer\QAIModelBuilder-<version>-<arch>-setup.exe
+
+Options:
+  -Arch <x64|arm64|both>  architecture(s) to build                       (default: both)
+  -SkipFrontend           do not run Build.bat; use the existing frontend\dist
+  -SkipDesktop            do not run desktop\build.ps1; use the existing dist\desktop\<arch>\QAIModelBuilder.exe
+                          (for machines without Rust / the VS C++ tools)
+  -Version <x.y.z>        override the version                           (default: build_info.json "version")
+  -KeepStage              keep .build\installer\stage_<arch> after compiling
+  -IsccPath <path>        path to ISCC.exe                               (default: auto-detected)
+  -GuardZip <path>        local guard.zip to take guard64.dll from       (default: Downloads\guard.zip, else the release URL)
+  -Help                   show this text and exit
+
+Examples:
+  .\installer\build_installer.ps1                          # everything, both architectures
+  .\installer\build_installer.ps1 -Arch x64 -SkipFrontend  # x64 only, reuse frontend\dist
+  .\installer\build_installer.ps1 -SkipDesktop             # package the exes already in dist\desktop
+
+Needs: Inno Setup 6, Rust + VS 2022 C++ tools + Windows SDK (unless -SkipDesktop), Node + pnpm (unless -SkipFrontend),
+and network access to pypi.org. Details: installer\README.md, desktop\README.md
+'@ | Write-Host
+}
+
+# Help first: before any other work (and before the checks below that need tools to be installed).
+if ($Help) { Show-Usage; exit 0 }
 
 $ErrorActionPreference = 'Stop'
 $Root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
