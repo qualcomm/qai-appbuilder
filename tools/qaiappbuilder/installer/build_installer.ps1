@@ -8,17 +8,20 @@
 
 .DESCRIPTION
     1. (optional) refresh frontend\dist via Build.bat
-    2. stage a WHITELIST of files per arch under .build\installer\stage_<arch>\
+    2. (optional) build the desktop window exe for the requested architecture(s) via desktop\build.ps1
+    3. stage a WHITELIST of files per arch under .build\installer\stage_<arch>\
          - src, apps, factory, scripts, interfaces, skills, tools, frontend\dist
          - pyproject.toml, build_info.json, launcher .bat files, READMEs
          - data\bin\uv\uv.exe (fetched from PyPI for the TARGET arch), data\bin\aria2c\aria2c.exe
        Tests, docs, samples, models, .qai, desktop sources, vendor, node_modules are NOT staged (the built desktop shell exe is).
-    3. run ISCC.exe  ->  dist\installer\QAIModelBuilder-<version>-<arch>-setup.exe
+    4. run ISCC.exe  ->  dist\installer\QAIModelBuilder-<version>-<arch>-setup.exe
 
     The installer copies the files, then runs setup_env.bat (no --builder: QAIRT is NOT installed).
 
 .PARAMETER Arch          x64 | arm64 | both (default both)
 .PARAMETER SkipFrontend  do not run Build.bat; use the existing frontend\dist
+.PARAMETER SkipDesktop   do not run desktop\build.ps1; use the existing dist\desktop\<arch>\QAIModelBuilder.exe
+                         (needed on a machine without Rust / the VS C++ tools)
 .PARAMETER Version       override the version (default: build_info.json "version")
 .PARAMETER KeepStage     keep .build\installer\stage_<arch> after compiling
 .PARAMETER IsccPath      path to ISCC.exe (auto-detected by default)
@@ -28,6 +31,7 @@
 param(
     [ValidateSet('x64', 'arm64', 'both')][string]$Arch = 'both',
     [switch]$SkipFrontend,
+    [switch]$SkipDesktop,
     [string]$Version = '',
     [switch]$KeepStage,
     [string]$IsccPath = '',
@@ -75,6 +79,22 @@ if (-not $SkipFrontend) {
 }
 if (-not (Test-Path (Join-Path $Root 'frontend\dist\index.html'))) {
     Fail 'frontend\dist\index.html missing - run Build.bat first (or drop -SkipFrontend).'
+}
+
+# ---- desktop shell --------------------------------------------------------
+# Built for exactly the architecture(s) being packaged. desktop\build.ps1 also runs the Rust unit tests and checks
+# each exe's PE machine type. Use -SkipDesktop to package the exes already in dist\desktop (no Rust needed).
+$desktopArches = if ($Arch -eq 'both') { @('x64', 'arm64') } else { @($Arch) }
+if (-not $SkipDesktop) {
+    Info "building the desktop window via desktop\build.ps1 -Arch $Arch ..."
+    # run in a child PowerShell: build.ps1 calls `exit` on failure, which would otherwise end this script silently
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root 'desktop\build.ps1') -Arch $Arch
+    if ($LASTEXITCODE -ne 0) { Fail "desktop\build.ps1 failed (exit $LASTEXITCODE). Fix it, or pass -SkipDesktop to package the exes already in dist\desktop." }
+}
+foreach ($da in $desktopArches) {
+    if (-not (Test-Path (Join-Path $Root "dist\desktop\$da\QAIModelBuilder.exe"))) {
+        Fail "dist\desktop\$da\QAIModelBuilder.exe is missing - run without -SkipDesktop (needs Rust + VS C++ tools), or run desktop\build.ps1 -Arch $da first."
+    }
 }
 
 # ---- whitelist ------------------------------------------------------------

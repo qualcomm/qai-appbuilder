@@ -10,32 +10,35 @@
 
 ## 打包
 
-**一共两步,顺序不能颠倒**:先编译桌面版 exe,再打安装包(安装包会把对应架构的 exe 打进去,缺少时直接报错)。
+**一条命令完成**(在 `tools\qaiappbuilder` 目录下):
 
 ```powershell
-# 在 tools\qaiappbuilder 目录下执行
-.\desktop\build.ps1 -Arch both                  # 1. 编译桌面版:dist\desktop\arm64\ 和 dist\desktop\x64\
-.\installer\build_installer.ps1                  # 2. 先跑 Build.bat 刷新前端,再出 x64 + arm64 两个安装包
+.\installer\build_installer.ps1
 ```
 
-常用变体:
+它依次做:① 跑 `Build.bat` 刷新前端 → ② 调 `desktop\build.ps1` 编译桌面版 exe(带 Rust 单元测试和架构校验) → ③ 按白名单整理每个架构的文件 → ④ 调 Inno Setup 出 x64 + arm64 两个安装包。任何一步失败都会立刻停下并报错,不会继续打出一个缺 exe 的安装包。
+
+常用参数:
 
 ```powershell
+.\installer\build_installer.ps1 -Arch x64                # 只出 x64(桌面版也只编译 x64)
 .\installer\build_installer.ps1 -SkipFrontend            # 沿用现有 frontend\dist,不跑 Build.bat
-.\installer\build_installer.ps1 -Arch x64 -SkipFrontend  # 只出 x64(对应只需 .\desktop\build.ps1 -Arch x64)
+.\installer\build_installer.ps1 -SkipDesktop             # 不编译桌面版,直接用 dist\desktop\<arch>\ 里现有的 exe
 .\installer\build_installer.ps1 -KeepStage               # 保留 .build\installer\stage_<arch>\ 便于检查
 .\installer\build_installer.ps1 -Version 3.1.1           # 覆盖版本号(默认取 build_info.json 的 version)
 ```
+
+`-SkipDesktop` 用在**没有 Rust / VS C++ 工具的机器**上:把别处编好的 `dist\desktop\<arch>\QAIModelBuilder.exe` 拷过来,再加这个参数。对应的 exe 不存在时,在开始整理文件之前就报错。也可以单独编译桌面版:`.\desktop\build.ps1 -Arch both`(细节见 [`desktop/README.md`](../desktop/README.md))。
 
 前置条件:
 
 | 步骤 | 需要 |
 |---|---|
-| 编译桌面版 | Rust、VS 2022 的 C++ 工具(ARM64 + x64)、Windows SDK。安装和细节见 [`desktop/README.md`](../desktop/README.md) |
+| 编译桌面版(默认会做) | Rust、VS 2022 的 C++ 工具(ARM64 + x64)、Windows SDK。安装和细节见 [`desktop/README.md`](../desktop/README.md) |
 | 打安装包 | Inno Setup 6(`winget install JRSoftware.InnoSetup --scope user`),本机能访问 pypi.org(取目标架构的 `uv.exe`) |
 | 刷新前端(可用 `-SkipFrontend` 跳过) | Node + pnpm(`Build.bat` 用) |
 
-输出在 `dist\installer\`(已被 `.gitignore`):`QAIModelBuilder-<ver>-x64-setup.exe`、`QAIModelBuilder-<ver>-arm64-setup.exe`。
+输出在 `dist\installer\`(已被 `.gitignore`):`QAIModelBuilder-<ver>-x64-setup.exe`、`QAIModelBuilder-<ver>-arm64-setup.exe`。首次完整跑(含编译两个架构的 Rust 依赖)约 4 分钟;之后增量编译和 `-SkipFrontend` 会快很多。
 
 ## 包里有什么(白名单)
 
@@ -113,7 +116,7 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
 - 退出:先 `POST /api/system/exit`(带 CSRF 令牌)让后端正常关闭,超时才强杀进程树。后端放在 Job Object 里,壳被任务管理器强杀时,后端也会被系统回收。后端中途崩溃或被杀时,窗口回到错误页并显示日志路径(`data\logs\desktop-backend.log`)。
 - 链接:应用自己的地址在窗口里打开(SSO 登录弹窗也一样);其他 http(s) 链接交给系统浏览器;其他协议一律拒绝。
 - 语言:按 Windows 显示语言选中文或英文。
-- 构建、源码结构、调试方法:见 [`desktop/README.md`](../desktop/README.md)。打包顺序见上面的"打包"一节。
+- 构建、源码结构、调试方法:见 [`desktop/README.md`](../desktop/README.md)。打包命令见上面的"打包"一节(一条命令会自动编译桌面版)。
 
 ### 实测情况(隔离环境,ARM64 原生)
 

@@ -42,14 +42,14 @@
 
 ### 打进安装包
 
-安装包会带上对应架构的 exe,**所以必须先编译、再打包**:
+`installer\build_installer.ps1` 默认**会自己调用本脚本**编译对应架构的 exe,所以打安装包只需一条命令:
 
 ```powershell
-.\desktop\build.ps1 -Arch both      # 1. 编译桌面版
-.\installer\build_installer.ps1     # 2. 打安装包(详见 installer\README.md)
+.\installer\build_installer.ps1                 # 编译桌面版 + 打 x64 / arm64 两个安装包(详见 installer\README.md)
+.\installer\build_installer.ps1 -SkipDesktop    # 不重编,直接用 dist\desktop\<arch>\ 里已有的 exe
 ```
 
-`build_installer.ps1` 发现 `dist\desktop\<arch>\QAIModelBuilder.exe` 不存在会直接报错并提示先运行 `build.ps1`。
+只想编译桌面版、不打安装包时才需要单独运行 `.\desktop\build.ps1`。exe 缺失时 `build_installer.ps1` 会直接报错。
 
 ## 运行行为
 
