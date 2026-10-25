@@ -1,6 +1,6 @@
-# QAI ModelBuilder 安装包(浏览器版)
+# QAI ModelBuilder 安装包
 
-用 Inno Setup 为每个架构各打一个 `.exe`:预编译的前端 + 后端源码 + `uv` + `aria2c`。
+用 Inno Setup 为每个架构各打一个 `.exe`:预编译的前端 + 桌面版窗口(`QAIModelBuilder.exe`)+ 后端源码 + `uv` + `aria2c`。
 安装时再联网建 Python 环境。**不含 QAIRT SDK、不含测试/文档/模型。**
 
 | 产物 | 大小(实测 x64) | 说明 |
@@ -10,16 +10,32 @@
 
 ## 打包
 
-前置:Inno Setup 6(`winget install JRSoftware.InnoSetup --scope user`),本机能访问 pypi.org(取目标架构的 `uv.exe`)。
+**一共两步,顺序不能颠倒**:先编译桌面版 exe,再打安装包(安装包会把对应架构的 exe 打进去,缺少时直接报错)。
 
 ```powershell
-# 在仓库根执行
-.\installer\build_installer.ps1                  # 先跑 Build.bat 刷新前端,再出 x64 + arm64
-.\installer\build_installer.ps1 -Arch x64 -SkipFrontend   # 只出 x64,沿用现有 frontend\dist
+# 在 tools\qaiappbuilder 目录下执行
+.\desktop\build.ps1 -Arch both                  # 1. 编译桌面版:dist\desktop\arm64\ 和 dist\desktop\x64\
+.\installer\build_installer.ps1                  # 2. 先跑 Build.bat 刷新前端,再出 x64 + arm64 两个安装包
 ```
 
-输出在 `dist\installer\`(已被 `.gitignore`)。`-KeepStage` 保留 `.build\installer\stage_<arch>\` 便于检查。
-版本号取自 `build_info.json` 的 `version`,可用 `-Version` 覆盖。
+常用变体:
+
+```powershell
+.\installer\build_installer.ps1 -SkipFrontend            # 沿用现有 frontend\dist,不跑 Build.bat
+.\installer\build_installer.ps1 -Arch x64 -SkipFrontend  # 只出 x64(对应只需 .\desktop\build.ps1 -Arch x64)
+.\installer\build_installer.ps1 -KeepStage               # 保留 .build\installer\stage_<arch>\ 便于检查
+.\installer\build_installer.ps1 -Version 3.1.1           # 覆盖版本号(默认取 build_info.json 的 version)
+```
+
+前置条件:
+
+| 步骤 | 需要 |
+|---|---|
+| 编译桌面版 | Rust、VS 2022 的 C++ 工具(ARM64 + x64)、Windows SDK。安装和细节见 [`desktop/README.md`](../desktop/README.md) |
+| 打安装包 | Inno Setup 6(`winget install JRSoftware.InnoSetup --scope user`),本机能访问 pypi.org(取目标架构的 `uv.exe`) |
+| 刷新前端(可用 `-SkipFrontend` 跳过) | Node + pnpm(`Build.bat` 用) |
+
+输出在 `dist\installer\`(已被 `.gitignore`):`QAIModelBuilder-<ver>-x64-setup.exe`、`QAIModelBuilder-<ver>-arm64-setup.exe`。
 
 ## 包里有什么(白名单)
 
@@ -31,7 +47,7 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
 
 还有 **`vendor\tiktoken\`**(约 5.3 MB,压缩后约 1.5 MB):`cl100k_base` 和 `o200k_base` 两个 BPE 词表,程序用它离线估算 token 数。词表不在 PyPI 的 tiktoken wheel 里,不打进包的话运行时会去 `openaipublic.blob.core.windows.net` 下载,下不到就退回按长度粗估。打包时的来源顺序:`.build\installer\_dl\tiktoken` 缓存、官方 URL、`Downloads\vendor-deps.7z`(用 `tar.exe` 只解出这两个文件);下载内容会校验大小和首行格式。每个词表写两份文件名(URL 的 SHA1 是 tiktoken 实际读取的名字,SHA256 是 `download_bpe_files.py` 文档里的名字,内容相同)。两个词表任一拿不到就整体不放,安装后行为同没有这个目录。
 
-排除:`tests`、`__pycache__`、`*.pyc`、`node_modules`、`docs`、`samples`、`models`、`.qai`、`desktop`、`vendor`(除上面的 guard 文件和 tiktoken 词表)、`data`(用户数据)。
+排除:`tests`、`__pycache__`、`*.pyc`、`node_modules`、`docs`、`samples`、`models`、`.qai`、`desktop`(源码;编译好的 exe 已单独打入)、`vendor`(除上面的 guard 文件和 tiktoken 词表)、`data`(用户数据)。
 新增运行时依赖的目录时,要把它加进 `build_installer.ps1` 的 `$Dirs`。
 
 ## 安装时发生什么
@@ -89,7 +105,7 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
 
 ## 桌面版窗口(`desktop\QAIModelBuilder.exe`)
 
-一个 Tauri 2 + WebView2 的小壳(ARM64 约 2.9 MB,x64 约 3.1 MB;各架构分别编译、分别打入对应安装包)。**前端和后端都没改**:窗口加载的就是后端提供的同一份 `http://localhost:8989/`。
+一个 Tauri 2 + WebView2 的小壳(ARM64 约 2.9 MB,x64 约 3.1 MB;各架构分别编译、分别打入对应安装包),开始菜单和桌面快捷方式都指向它;浏览器版仍是安装目录里的 `Start.bat`(不再有快捷方式)。**前端和后端都没改**:窗口加载的就是后端提供的同一份 `http://localhost:8989/`。
 
 - 启动:先显示启动页,后台用安装时建的 venv 运行 `python -m apps.cli.serve --port 8989`(隐藏控制台窗口),`/api/system/health` 返回 200 后再打开应用页。端口从 `factory/config/ports.json` 读,固定为 8989(SSO 回调地址写死了端口)。端口被占用(例如正在跑 `Start.bat`)时不启动后端,直接在窗口里提示。
 - 关窗口:弹出"退出 / 最小化到托盘 / 取消",可勾选"记住我的选择"。记住的结果存在 `data\config\desktop-settings.json` 的 `close_action`(`ask` / `quit` / `tray`),删掉这个文件就会重新询问。后端还没起来或已出错时关窗直接退出。
@@ -97,7 +113,7 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
 - 退出:先 `POST /api/system/exit`(带 CSRF 令牌)让后端正常关闭,超时才强杀进程树。后端放在 Job Object 里,壳被任务管理器强杀时,后端也会被系统回收。后端中途崩溃或被杀时,窗口回到错误页并显示日志路径(`data\logs\desktop-backend.log`)。
 - 链接:应用自己的地址在窗口里打开(SSO 登录弹窗也一样);其他 http(s) 链接交给系统浏览器;其他协议一律拒绝。
 - 语言:按 Windows 显示语言选中文或英文。
-- 构建:`desktop\build.ps1 -Arch both`(需要 Rust + VS 2022 C++ 工具 + Windows SDK);产物在 `dist\desktop\<arch>\`,`installer\build_installer.ps1` 会打进安装包，缺少时直接报错。
+- 构建、源码结构、调试方法:见 [`desktop/README.md`](../desktop/README.md)。打包顺序见上面的"打包"一节。
 
 ### 实测情况(隔离环境,ARM64 原生)
 

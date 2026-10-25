@@ -1,175 +1,120 @@
-# QAIModelBuilder Desktop 壳（Tauri 2.x）
+# QAI ModelBuilder 桌面版(Tauri 2 + WebView2)
 
-> **状态**：D4（可跑骨架，已超出最初 PoC）
-> **设计依据**：`docs/90-refactor/desktop-app-plan.md` §3
-> **架构定位**：桌面 UI 壳（Rust），与项目 Python 环境完全解耦
-> **平台**：Windows ARM64（首要） / Windows x64（已支持） / macOS / Linux（未验证）
+一个很小的桌面壳(ARM64 约 2.9 MB,x64 约 3.1 MB),**只负责开一个应用窗口**,前端和后端都没有改:窗口加载的就是后端提供的同一份 `http://localhost:8989/`,和浏览器里看到的一样。安装包的开始菜单和桌面快捷方式指向它;浏览器版仍是安装目录里的 `Start.bat`。
 
-## 这是什么
+## 它做什么
 
-一个 **Tauri 2.x** 写成的桌面 UI 壳，作用只有两件：
+1. 找到应用根目录(向上查找同时含 `src/`、`apps/`、`factory/config/ports.json` 的目录)。
+2. 用 `%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_<arch>_313\Scripts\python.exe`(`<arch>` 取自 `data\config\host_arch`,没有就按系统架构)运行 `python -m apps.cli.serve --port 8989`:隐藏控制台窗口,输出写到 `data\logs\desktop-backend.log`。
+3. 先显示启动页,轮询 `GET /api/system/health`,返回 200 后把窗口导航到 `http://localhost:8989/chat`。
+4. 关窗口时询问"退出 / 最小化到托盘 / 取消";退出时先让后端正常关闭。
 
-1. 启动时 **spawn** 一个 `qai-serve` 后端子进程（用工程预装的 venv，按
-   `data/config/host_arch` 选择 `.venv_arm64_313` 或 `.venv_x64_313`），让
-   FastAPI 跑在自动选的空闲端口上；
-2. 打开一个 WebView 窗口指向 `http://127.0.0.1:<port>/`，加载 `frontend/dist/`
-   的 SPA。
+端口固定为 `factory/config/ports.json` 的 `backend`(8989):SSO 的回调地址写死了端口,壳不会换端口。该端口已被占用(例如正在运行 `Start.bat`)时**不启动后端**,在窗口里提示原因。
 
-**它不与后端共进程**——后端始终是独立的 Python 进程，跑在对应架构的 venv
-（`.venv_arm64_313` 或 `.venv_x64_313`，取决于 `data/config/host_arch`）
-里。壳本身是 Rust 编译产物（`.exe`/`.msi`），**不进 Python venv**，因此完全
-规避了 wheel 兼容性风险（详见 `desktop-app-plan.md` §3.3）。
+## 前置条件(只有编译的人需要)
 
-退出时（关窗口）壳先走 HTTP 优雅停止，再兜底强杀（见下「关闭流程」）。
+| 组件 | 说明 |
+|---|---|
+| Rust(rustup) | `winget install Rustlang.Rustup`,装完重开终端。`build.ps1` 会自动补装 `aarch64-pc-windows-msvc` 和 `x86_64-pc-windows-msvc` 两个目标 |
+| Visual Studio 2022 的 C++ 工具 | 需要 MSVC 的 ARM64 和 x64 两套工具(Build Tools 的"使用 C++ 的桌面开发"工作负载) |
+| Windows SDK | 例如 10.0.22621 |
+| WebView2 运行时 | 运行时才需要,Windows 10/11 默认自带 |
 
-## 前置条件
+**不需要** Tauri CLI(`cargo tauri`)、Node 或 pnpm;直接用 `cargo build`。最终用户的机器上不需要任何编译工具。
 
-- Rust 工具链（rustc 1.96+ ARM64）
-- Tauri CLI 2.11+：`npm install -g @tauri-apps/cli@^2`
-- WebView2 Runtime（Windows 10 1803+ 已默认装配）
-- Visual Studio Build Tools 2022（含 MSVC + Windows SDK）
-- 工程预装环境：`Setup.bat` 已跑过（生成 `.venv_arm64_313` 或 `--arch x64` 时 `.venv_x64_313`）
-- 前端产物：`pnpm -C frontend build` 已跑过（`frontend/dist/` 存在）
-
-## 构建（推荐：一条命令，自动拷到 dist/）
+## 构建
 
 ```powershell
-# 在仓库根执行；自动加 cargo 到 PATH、编译、把产物拷到 dist/desktop/
-.\desktop\build.ps1
-# 产物：dist\desktop\QAIModelBuilder.exe (+ .dll)
+# 在 tools\qaiappbuilder 目录下
+.\desktop\build.ps1                 # 默认 -Arch both:arm64 和 x64
+.\desktop\build.ps1 -Arch arm64     # 只编译一个架构
+.\desktop\build.ps1 -SkipTests      # 跳过单元测试
 ```
+
+产物:`dist\desktop\<arch>\QAIModelBuilder.exe`(`dist\` 已被 `.gitignore`)。脚本会:
+
+- 检查 `cargo`,缺少的 Rust 目标自动 `rustup target add`;
+- 在本机架构上运行 `cargo test`(单元测试只在本机架构运行,另一个架构只编译);
+- 对每个架构 `cargo build --release`,并校验 exe 的 PE 机器类型(ARM64 = `0xAA64`,x64 = `0x8664`),不符就报错;
+- 把 exe 复制到 `dist\desktop\<arch>\`。
+
+编译缓存在 `.build\desktop-target\`(由 `src-tauri\.cargo\config.toml` 指定),所以 `desktop\` 目录只含源码。首次编译需要下载并编译约 450 个 crate:ARM64 约 3–4 分钟,x64 约 1–2 分钟;之后增量编译约 40 秒。公司代理常拦截证书吊销检查,`build.ps1` 默认设置了 `CARGO_HTTP_CHECK_REVOKE=false`。
+
+### 打进安装包
+
+安装包会带上对应架构的 exe,**所以必须先编译、再打包**:
 
 ```powershell
-# 含 .msi / NSIS 安装包（正式发布形态）
-.\desktop\build.ps1 -Bundle
-# 额外产物：dist\desktop\bundle\*.msi、*-setup.exe
+.\desktop\build.ps1 -Arch both      # 1. 编译桌面版
+.\installer\build_installer.ps1     # 2. 打安装包(详见 installer\README.md)
 ```
 
-`build.ps1` 是唯一推荐的构建入口——它封装了"编译 + 自动拷贝产物到稳定目录"，
-**不需要手动拷贝**。
+`build_installer.ps1` 发现 `dist\desktop\<arch>\QAIModelBuilder.exe` 不存在会直接报错并提示先运行 `build.ps1`。
 
-## 构建产物目录布局
+## 运行行为
 
-- **编译缓存**：`.build/desktop-target/`（仓库根，~1.4 GB，含中间产物）。
-  由 `desktop/src-tauri/.cargo/config.toml` 把 Cargo 的 `target-dir` 重定向到
-  这里，使 `desktop/` 源码树保持 ~0.5 MB、便于压缩备份。`cargo clean` 会清它。
-- **可运行产物**：`dist/desktop/`（仓库根，仅 .exe + .dll）。由 `build.ps1` 从
-  编译缓存拷贝过来——干净、稳定、不被 `cargo clean` 删。与 `frontend/dist/` 同
-  语义。
-- 两者都在 `.gitignore` 里（`/​.build/` + `/dist/`），不入仓。
+### 关窗口
 
-> 直接 `cargo build` 也能编译，但产物会留在 `.build/desktop-target/release/`，
-> 需手动拷；用 `build.ps1` 省去这一步。
->
-> ⚠️ 首次 `cargo build` 会下载/编译 ~500 个 crate，预计 10–30 分钟（ARM64 release）；
-> 后续增量编译约 10–20 秒。
+弹出系统对话框(`TaskDialogIndirect`,文字按 Windows 显示语言选中文或英文):
 
-## 开发热重启
+- **退出程序**:停止后台服务并关闭窗口。
+- **最小化到托盘**:隐藏窗口,服务继续运行,从托盘恢复。
+- **取消**(Esc 或标题栏的 X):什么都不做。
+- 勾选"记住我的选择"后,结果保存在 `data\config\desktop-settings.json` 的 `close_action`(`ask` / `quit` / `tray`)。**删掉该文件(或把值改回 `ask`)就会重新询问**。
+- 后端还没就绪或已出错(窗口显示的是启动页/错误页)时,关窗口直接退出,不询问。
 
-```powershell
-$env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
-cd desktop\src-tauri
-cargo tauri dev
-```
+### 托盘与单实例
 
-## 运行
+托盘图标:左键恢复窗口,右键菜单"显示窗口 / 退出"。单实例:再次双击快捷方式不会再启动一份后端,只会把已有窗口调到前台(包括从托盘隐藏的状态)。托盘图标可能在任务栏的"隐藏图标"区里。
 
-```powershell
-.\dist\desktop\QAIModelBuilder.exe
-```
+### 退出与异常
 
-启动顺序：
+- 正常退出:先 `POST /api/system/exit`(后端要求 CSRF 双提交:先 `GET /api/system/health` 取 `qai_csrf` cookie,再带同值的 `X-QAI-CSRF` 头),等后端的 supervisor 自行退出(最多 15 秒);超时才 `taskkill /T /F` 整个进程树。
+- 壳被任务管理器强杀:后端放在带 `KILL_ON_JOB_CLOSE` 的 Job Object 里,系统会一起回收,不会残留 Python 进程。
+- 后端中途崩溃或被外部杀掉:窗口回到错误页,显示退出码和日志路径,并把窗口调到前台。
+- 找不到安装目录或 venv:窗口里直接提示怎么修复(重新安装,或运行 `setup_env.bat` / "修复"快捷方式)。
 
-```
-1) shell 进程启动
-2) 选一个空闲端口（如 51626）
-3) 用 find_repo_root() 从 exe 向上查找含 src/ + apps/ 的目录作为 repo root
-   （鲁棒：不依赖固定层数，target 重定向到 .build/ 后仍正确）
-4) spawn:  %LOCALAPPDATA%\QAIModelBuilder\envs\<venv>\Scripts\python.exe
-           -m apps.cli.serve --port 51626   （CWD = repo root）
-   <venv> = .venv_arm64_313 或 .venv_x64_313（由 data/config/host_arch 决定）
-   flags: CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
-          （后者抑制后端 python 的黑色 console 窗口）
-5) 探活：connect 127.0.0.1:51626 直到成功（超时 15s）
-6) 打开 WebView 指向 http://127.0.0.1:51626/
-7) 用户点叉 → CloseRequested → kill_backend()（见下）
-```
+### 链接与弹窗
 
-## 关闭流程（优雅，~1–2s）
+- 应用自己的地址(`localhost` / `127.0.0.1` + 后端端口)留在窗口里,SSO 登录弹窗也一样。
+- 其他 `http(s)` 链接交给系统默认浏览器(`ShellExecuteW`)。
+- 其他协议(`file:`、`javascript:` 等)一律拒绝。
+- `<a download>` 下载、剪贴板、麦克风接口在 WebView2 里可用(已实测)。
 
-GUI 进程没有 console，`GenerateConsoleCtrlEvent`（CTRL_BREAK）送不到后端，所以
-**主通道改为 HTTP**：
+## 与 `Start.bat` 的关系
 
-```
-关窗 → kill_backend(port):
-  1) GET  /api/system/health   取 qai_csrf cookie（双 submit token）
-  2) POST /api/system/exit     带 Cookie + X-QAI-CSRF header
-       → 后端调度 exit code 0（supervisor 不重启）
-       → 跑完 FastAPI lifespan shutdown（close DB / stop daemons）
-       → supervisor 干净退出
-  3) 等 child 退出（HTTP 已 ack 时通常 1–2s）
-  4) 兜底：HTTP 失败时才尝试 CTRL_BREAK，再不行 taskkill /T /F /PID
-```
+互相独立,共用同一个后端入口(`apps.cli.serve`)和同一个 venv。两者**不能同时运行**,因为都要用 8989 端口:先开的占着,后开的会提示端口被占用。浏览器版现在只有安装目录里的 `Start.bat`,没有开始菜单/桌面快捷方式。
 
-> 历史：早期用 CTRL_BREAK 作主通道，GUI 无 console 导致每次都白等 10s graceful
-> timeout 才 taskkill（关窗 ~11s）。改 HTTP /exit 后降到 ~1.3s 且真正优雅。
+## 源码结构
 
-## 与现有启动器（`Start.bat`）的关系
+| 路径 | 作用 |
+|---|---|
+| `build.ps1` | 构建入口(上面的流程) |
+| `splash/index.html` | 启动页/错误页,自带样式,跟随系统深浅色 |
+| `src-tauri/Cargo.toml`、`Cargo.lock` | 依赖;`Cargo.lock` 提交以保证可重复构建 |
+| `src-tauri/tauri.conf.json` | 应用配置(`frontendDist` 指向 `splash/`,不预置窗口) |
+| `src-tauri/src/main.rs` | 入口,Windows 子系统(无控制台) |
+| `src-tauri/src/lib.rs` | 启动流程、窗口、托盘、关窗询问、链接拦截、退出、后端监视 |
+| `src-tauri/src/backend.rs` | 启动后端(Job Object)、健康检查、优雅停止、强杀进程树 |
+| `src-tauri/src/layout.rs` | 定位应用根目录、venv python、端口、`host_arch` |
+| `src-tauri/src/close_dialog.rs` | 关窗口三选一对话框 |
+| `src-tauri/src/settings.rs` | 读写 `desktop-settings.json` |
+| `src-tauri/src/i18n.rs` | 中英文文案 |
+| `src-tauri/icons/` | 图标;`render_icon.py` 按前端 `index.html` 里的 favicon 几何重绘(需要 Pillow) |
+| `src-tauri/gen/` | `tauri-build` 生成的文件,被 `desktop\.gitignore` 忽略 |
 
-完全平行。`Start.bat` 启动浏览器版（系统浏览器开 `127.0.0.1:<后端端口>`，端口以 `factory/config/ports.json` 的 `backend` 为准），桌面壳启动
-WebView 版（端口随机、避免占用冲突）。两者都通过 `apps.cli.serve` 监管同一份后端，
-复用 `_Supervisor` 的 reboot-75 与优雅停止链路（详见 `apps/cli/serve.py`）。
+更新图标:改 `src-tauri/icons/render_icon.py`,运行 `python desktop\src-tauri\icons\render_icon.py`,会重写 `icon.ico` 和 `icon.png`。
 
-§3.1 已锁契约（路由 / SSE / WS frame / `REBOOT_EXIT_CODE` / CSRF /
-OpenAI Compat 三路由）**完全不变**。`/api/system/exit` 是**新增**路由（§3.1 允许新增）。
+## 调试
 
-## 应用图标
-
-图标源自前端 `index.html` 的内联品牌 favicon（紫→蓝渐变 `#7c6cff`→`#60a5fa` 的
-NPU 芯片 + 四角节点 + 深色圆角底，与应用内 `.sidebar-logo-glyph` 同一标记），
-桌面 exe / 任务栏 / 窗口图标与浏览器标签页图标 1:1 一致。
-
-- `icons/source-icon.svg`：矢量源（与 favicon 一致）
-- `icons/source-icon.png`：1024×1024 光栅源（`icons/_render_icon.py` 用 Pillow 按
-  SVG 几何 + 渐变重绘生成）
-- 其余 `icon.ico` / `icon.icns` / `*.png` / `Square*Logo.png`：同样由
-  `icons/_render_icon.py` 一并生成全套（无需 Rust / `cargo tauri` 工具链），
-  `tauri.conf.json` 的 `bundle.icon` 引用它们。
-
-更新图标：改 `source-icon.svg` 与 `_render_icon.py` 的几何/配色 → 重跑
-`_render_icon.py`（会覆盖 `source-icon.png` 及全套 PNG/ICO/ICNS）。
+- 后端输出:`data\logs\desktop-backend.log`。
+- 打开 WebView2 调试端口:启动前设置 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9333`,然后访问 `http://127.0.0.1:9333/json`。
+- 单元测试:`cd desktop\src-tauri; cargo test --release --lib`(3 项:`host_arch` 解析、端口缺省、设置读写)。
 
 ## 已知限制
 
-1. **venv 必须存在**：壳依次尝试 host_arch 指定的 venv、`.venv_arm64_313`、
-   `.venv_x64_313`；全部不存在时回退到 PATH 上的 `python.exe`，多半跑不通；
-   后续可加 first-run 引导跳到 Setup。
-2. **MSI 安装版的资源定位**：`find_repo_root` 靠源码树标记（`src/`+`apps/`）定位，
-   dev-checkout 与 `.build/` 重定向下都正确；但**真实最终用户机（无源码树）** 上会
-   找不到，需 D5 用 PyInstaller 把后端冻结成 sidecar（PENDING-WORK ARCH-DESK-2）。
-3. **强杀残留**：壳被任务管理器/断电强杀（不走 CloseRequested）时后端进程树成
-   orphan，需 Job Object 兜底（PENDING-WORK ARCH-DESK-1）。
-4. **未实现 reboot 转发**：后端 exit-code 75 重启时 WebView 不自动 reload。
-5. **未实现单实例锁**：双击两次启两份（端口随机不冲突，但浪费资源）。
-
-## 跨平台说明
-
-按 `AGENTS.md` 跨平台前瞻原则，所有 Windows 专用代码（`creation_flags`、
-`%LOCALAPPDATA%\...\<venv>` 路径选择、`GenerateConsoleCtrlEvent`）都在
-`#[cfg(target_os = "windows")]` 守护下。非 Windows 编译可通过，运行时回退到
-`python3`，未做实测——当前不支持。
-
-## 文件清单
-
-| 路径 | 用途 |
-|---|---|
-| `build.ps1` | **构建入口**：编译 + 自动拷产物到 `dist/desktop/` |
-| `src-tauri/.cargo/config.toml` | 把 Cargo target-dir 重定向到 `.build/desktop-target/` |
-| `src-tauri/Cargo.toml` | Rust crate 配置 |
-| `src-tauri/tauri.conf.json` | Tauri 应用配置（productName / bundle / frontendDist / icon） |
-| `src-tauri/build.rs` | `tauri_build::build()` 编译脚本 |
-| `src-tauri/src/main.rs` | 入口（Windows 子系统标记 + 调 `lib::run`） |
-| `src-tauri/src/lib.rs` | 选端口 / find_repo_root / spawn 后端 / 探活 / 开窗 / HTTP 优雅退出 |
-| `src-tauri/icons/source-icon.svg` | 图标矢量源（同前端 favicon） |
-| `src-tauri/icons/_render_icon.py` | SVG→1024 PNG 渲染脚本（Pillow） |
-| `src-tauri/icons/*` | `tauri icon` 生成的全套图标 |
+- 没有"开机自启"。
+- 没有自定义标题栏,也没有托盘里的"新建会话 / 切换模型"这类与前端联动的功能(需要改前端)。
+- 壳依赖后端的 `/api/system/health` 和 `/api/system/exit`。
+- 只支持 Windows(`#[cfg(windows)]` 之外的路径没有实现)。
+- 实测范围见 `installer\README.md` 的"桌面版窗口 → 实测情况"。
