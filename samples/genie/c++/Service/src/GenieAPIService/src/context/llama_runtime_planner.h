@@ -88,7 +88,7 @@ struct MemoryLedger
     uint64_t runtime_peak = 0;    // 检查点读回瞬时峰值 ≈ 一份 recurrent 状态
     uint64_t safety = 0;
 
-    uint64_t host_checkpoints = 0; // host 侧常驻：(N + 2) × ckpt_bytes，不计入 GPU
+    uint64_t host_checkpoints = 0; // host 侧常驻：(N + 3) × ckpt_bytes，不计入 GPU
     uint64_t ckpt_bytes = 0;       // 单个检查点字节数（target + draft 两侧之和）
 
     // 保守判据：用于「要不要走全 GPU」。多算了 compute_kq / runtime_peak / safety，

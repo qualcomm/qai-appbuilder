@@ -15,6 +15,8 @@
 #include <algorithm>
 #include <functional>
 #include <cstring>
+#include <cstdio>
+#include <cstdlib>
 #include <cctype>
 #include <chrono>
 #include <mutex>
@@ -495,6 +497,107 @@ namespace {
         return path.empty() ? path : path + ExtractRangeSuffixFrom(visible, search_from);
     }
 
+    using LineRange = std::pair<size_t, size_t>;
+    constexpr size_t kMaxReadRangesPerFile = 12;
+
+    std::string StripRangeSuffix(const std::string& read_path) {
+        return read_path.substr(0, read_path.find("#range:"));
+    }
+
+    bool ComputeReadRange(const std::string& read_path, const std::string& result,
+                          size_t& first, size_t& last, size_t& total) {
+        const size_t marker = result.rfind("showed lines ");
+        if (marker != std::string::npos &&
+            std::sscanf(result.c_str() + marker, "showed lines %zu-%zu of total %zu", &first, &last, &total) == 3)
+            return true;
+        first = 1;
+        total = 0;
+        const size_t offset_pos = read_path.find("offset=");
+        if (offset_pos != std::string::npos)
+            first = std::max<size_t>(1, static_cast<size_t>(std::strtoull(read_path.c_str() + offset_pos + 7, nullptr, 10)));
+        size_t lines = 0;
+        size_t pos = 0;
+        while (pos < result.size()) {
+            if (result.compare(pos, 10, "[snapshot:") != 0)
+                ++lines;
+            const size_t nl = result.find('\n', pos);
+            if (nl == std::string::npos)
+                break;
+            pos = nl + 1;
+        }
+        if (lines == 0)
+            return false;
+        last = first + lines - 1;
+        return true;
+    }
+
+    std::vector<LineRange> LoadLineRanges(const json& arr) {
+        std::vector<LineRange> out;
+        if (!arr.is_array())
+            return out;
+        for (const auto& r : arr)
+            if (r.is_array() && r.size() == 2 && r[0].is_number_integer() && r[1].is_number_integer())
+                out.emplace_back(r[0].get<size_t>(), r[1].get<size_t>());
+        return out;
+    }
+
+    std::string JoinLineRanges(const std::vector<LineRange>& ranges) {
+        std::string joined;
+        for (const auto& r : ranges) {
+            if (!joined.empty())
+                joined += ",";
+            joined += std::to_string(r.first) + "-" + std::to_string(r.second);
+        }
+        return joined;
+    }
+
+    void AddReadRange(json& file_entry, size_t first, size_t last, size_t total) {
+        if (!file_entry.is_object())
+            file_entry = json::object();
+        std::vector<LineRange> ranges = LoadLineRanges(file_entry.value("seen", json::array()));
+        ranges.emplace_back(first, last);
+        std::sort(ranges.begin(), ranges.end());
+        std::vector<LineRange> merged;
+        for (const auto& r : ranges) {
+            if (!merged.empty() && r.first <= merged.back().second + 1)
+                merged.back().second = std::max(merged.back().second, r.second);
+            else
+                merged.push_back(r);
+        }
+        while (merged.size() > kMaxReadRangesPerFile)
+            merged.erase(merged.begin());
+        json seen = json::array();
+        for (const auto& r : merged)
+            seen.push_back(json::array({r.first, r.second}));
+        file_entry["seen"] = seen;
+        if (total > 0)
+            file_entry["total"] = total;
+    }
+
+    std::string RenderReadFileLine(const std::string& path, const json& value) {
+        if (!value.is_object())
+            return "- " + path + ": " + (value.is_string() ? value.get<std::string>() : value.dump()) + "\n";
+        const std::vector<LineRange> seen = LoadLineRanges(value.value("seen", json::array()));
+        const size_t total = value.value("total", static_cast<size_t>(0));
+        std::string line = "- " + path;
+        if (total > 0)
+            line += " (" + std::to_string(total) + " lines)";
+        line += ": read " + JoinLineRanges(seen);
+        if (total > 0) {
+            std::vector<LineRange> gaps;
+            size_t next = 1;
+            for (const auto& r : seen) {
+                if (r.first > next && next <= total)
+                    gaps.emplace_back(next, std::min(r.first - 1, total));
+                next = std::max(next, r.second + 1);
+            }
+            if (next <= total)
+                gaps.emplace_back(next, total);
+            line += gaps.empty() ? "; fully read" : "; not yet read " + JoinLineRanges(gaps);
+        }
+        return line + "\n";
+    }
+
     // 已尝试查询索引专用：与 ExtractReadToolPathImpl 唯一区别是不做 IsReadLikeToolName
     // 过滤——任意工具（典型如 grep 这类按 pattern 检索的工具）只要带路径类参数就提取,
     // 不需要在这里硬编码具体工具名。
@@ -732,17 +835,25 @@ json TaskMemoBuilder::BuildRuleLayer(
             last_assistant_content = m.content;
         } else if (m.role == "tool") {
             bool failed = LooksLikeFailure(m.content);
-            entry["tool_state"]["tool_result_" + std::to_string(tool_seq++)] =
-                (failed ? "失败: " : "成功: ") + preview;
-            CapObjectSize(entry["tool_state"], kMaxItemsPerField);
             std::string call_content;
             if (i < dropped_tool_call_content.size())
                 call_content = dropped_tool_call_content[i];
             if (call_content.empty())
                 call_content = last_assistant_content;
+            const std::string read_path = ExtractReadToolPathImpl(call_content);
+            size_t shown_first = 0, shown_last = 0, shown_total = 0;
+            const bool indexed_read = !read_path.empty() &&
+                ComputeReadRange(read_path, m.content, shown_first, shown_last, shown_total) &&
+                (!failed || m.content.find("showed lines ") != std::string::npos);
+            if (!indexed_read) {
+                entry["tool_state"]["tool_result_" + std::to_string(tool_seq++)] =
+                    (failed ? "失败: " : "成功: ") + preview;
+                CapObjectSize(entry["tool_state"], kMaxItemsPerField);
+            }
             const std::string call = ExtractToolCallSummary(call_content);
-            AppendCapped(entry["completed"], (failed ? "失败: " : "成功: ") +
-                (call.empty() ? std::string() : ReplaceInvalidUtf8(safe_utf8_truncate(call, 200, "...")) + " -> ") + preview, kMaxItemsPerField);
+            if (!indexed_read)
+                AppendCapped(entry["completed"], (failed ? "失败: " : "成功: ") +
+                    (call.empty() ? std::string() : ReplaceInvalidUtf8(safe_utf8_truncate(call, 200, "...")) + " -> ") + preview, kMaxItemsPerField);
             if (!failed && !call.empty()) {
                 const std::string tool = call.substr(0, call.find(' '));
                 if (!entry.contains("last_success") || !entry["last_success"].is_object())
@@ -783,13 +894,12 @@ json TaskMemoBuilder::BuildRuleLayer(
                 }
             }
 
-            // 已读文件索引：被驱逐的 read 类工具结果不再丢弃全部痕迹，而是在 Task Memo 里
-            // 留一条「路径 + 关键事实摘要」，供模型在原始内容已不在上下文时判断是否要重读。
             {
-                std::string read_path = ExtractReadToolPathImpl(call_content);
                 if (!read_path.empty()) {
-                    entry["read_files"][read_path] = preview;
-                    CapObjectSize(entry["read_files"], kMaxItemsPerField);
+                    if (indexed_read) {
+                        AddReadRange(entry["read_files"][StripRangeSuffix(read_path)], shown_first, shown_last, shown_total);
+                        CapObjectSize(entry["read_files"], kMaxItemsPerField);
+                    }
                     if (!entry.contains("hard_rules") || !entry["hard_rules"].is_array())
                         entry["hard_rules"] = json::array();
                     if (!entry.contains("_hard_rule_files") || !entry["_hard_rule_files"].is_object())
@@ -1188,17 +1298,13 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
         tool_state_block = oss.str();
     }
 
-    // 已读文件索引：被驱逐的 read 类工具结果不再丢弃全部痕迹，模型重复 read 同一路径前
-    // 可以先看这里判断是否真的需要重读；仅记路径与关键事实摘要，不含原始文件内容。
     std::string read_files_block;
     if (entry.contains("read_files") && entry["read_files"].is_object() && !entry["read_files"].empty()) {
         std::ostringstream oss;
-        oss << "Files already read whose content has left the context (summary only; re-read a "
-               "file only if the summary is missing a detail you actually need now):\n";
-        for (auto it = entry["read_files"].begin(); it != entry["read_files"].end(); ++it) {
-            oss << "- " << it.key() << ": "
-                << (it.value().is_string() ? it.value().get<std::string>() : it.value().dump()) << "\n";
-        }
+        oss << "Files already read, as line ranges whose text has left the context. Continue with the "
+               "'not yet read' ranges; re-read a range already read only if you need a specific detail from it:\n";
+        for (auto it = entry["read_files"].begin(); it != entry["read_files"].end(); ++it)
+            oss << RenderReadFileLine(it.key(), it.value());
         read_files_block = oss.str();
     }
 
@@ -1329,8 +1435,9 @@ std::string TaskMemoBuilder::RenderRedundantToolCallNote(int repeat_count)
 {
     std::ostringstream oss;
     oss << "Note: you have called the same tool with the same arguments " << repeat_count
-        << " time(s) in a row. Its result is already in the conversation (or summarized in this memo); "
-           "repeating it again is unlikely to give new information. Use that result or try a different approach.\n";
+        << " time(s) in a row. Its earlier result may have left the context; check the memo above before "
+           "repeating it. Repeating it is unlikely to give new information: act on what you already know or try "
+           "a different approach.\n";
     return oss.str();
 }
 
@@ -1338,9 +1445,9 @@ std::string TaskMemoBuilder::RenderNonContiguousRepeatNote(int repeat_count)
 {
     std::ostringstream oss;
     oss << "Note: you have called the same tool with the same arguments " << repeat_count
-        << " time(s) so far in this task (not necessarily in a row). Its result is already in the "
-           "conversation (or summarized in this memo); repeating it again is unlikely to give new "
-           "information. Use that result or try a different approach.\n";
+        << " time(s) so far in this task (not necessarily in a row). Its earlier result may have left the "
+           "context; check the memo above before repeating it. Repeating it is unlikely to give new "
+           "information: act on what you already know or try a different approach.\n";
     return oss.str();
 }
 

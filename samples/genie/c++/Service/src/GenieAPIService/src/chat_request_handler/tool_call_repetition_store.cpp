@@ -140,13 +140,8 @@ int ToolCallRepetitionStore::GetNonContiguousRepeatCount(const std::string& key)
     if (elapsed >= non_contiguous_ttl_seconds_)
         return 0;
 
-    int max_total = 0;
-    for (const auto& item : entry.signature_totals)
-    {
-        if (item.second > max_total)
-            max_total = item.second;
-    }
-    return max_total;
+    auto total_it = entry.signature_totals.find(entry.last_signature);
+    return total_it == entry.signature_totals.end() ? 0 : total_it->second;
 }
 
 void ToolCallRepetitionStore::Clear()

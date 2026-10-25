@@ -15,6 +15,7 @@
 #include <map>
 #include <sstream>
 #include <algorithm>
+#include <cstdio>
 #include <regex>
 #include <unordered_set>
 #include <mutex>
@@ -22,6 +23,8 @@
 #include <limits>
 
 using json = nlohmann::ordered_json;
+
+namespace {
 
 std::string CanonicalToolCallKey(const json& tool_call)
 {
@@ -64,8 +67,6 @@ std::string CanonicalToolCallKey(const json& tool_call)
     return name + "\x01" + args;
 }
 
-namespace {
-
 constexpr float kEvictionLowWaterRatio = 0.5f;
 constexpr float kEvictionHighWaterRatio = 0.95f;
 constexpr size_t kMaxEvictionStates = 64;
@@ -102,11 +103,38 @@ size_t Utf8Floor(const std::string& s, size_t pos)
     return pos;
 }
 
+bool CapPagedReadHead(const std::string& content, size_t keep_bytes, std::string& out)
+{
+    constexpr size_t kFooterReserve = 200;
+    const size_t marker = content.rfind("showed lines ");
+    if (marker == std::string::npos || keep_bytes <= kFooterReserve) return false;
+    size_t first = 0, last = 0, total = 0;
+    if (std::sscanf(content.c_str() + marker, "showed lines %zu-%zu of total %zu", &first, &last, &total) != 3)
+        return false;
+    const size_t footer_nl = content.rfind('\n', marker);
+    if (footer_nl == std::string::npos) return false;
+    const size_t body_budget = keep_bytes - kFooterReserve;
+    if (footer_nl + 1 <= body_budget) return false;
+    const size_t cut_nl = content.rfind('\n', Utf8Floor(content, body_budget));
+    if (cut_nl == std::string::npos) return false;
+    const size_t kept_lines = static_cast<size_t>(std::count(content.begin(), content.begin() + cut_nl + 1, '\n'));
+    const size_t shown_last = first + kept_lines - 1;
+    if (kept_lines == 0 || shown_last >= last) return false;
+    const size_t footer_end = content.find('\n', marker);
+    out = content.substr(0, cut_nl + 1) + "...[read truncated: context budget; showed lines " + std::to_string(first) +
+          "-" + std::to_string(shown_last) + " of total " + std::to_string(total) +
+          "; call read again with offset=" + std::to_string(shown_last + 1) + " to continue]" +
+          (footer_end == std::string::npos ? std::string() : content.substr(footer_end));
+    return true;
+}
+
 std::string CapToolResultHeadTail(const std::string& content, size_t content_tokens, size_t cap_tokens)
 {
     if (cap_tokens == 0 || content_tokens <= cap_tokens || content.empty()) return content;
     const double keep_ratio = 0.95 * static_cast<double>(cap_tokens) / static_cast<double>(content_tokens);
     const size_t keep_bytes = static_cast<size_t>(static_cast<double>(content.size()) * keep_ratio);
+    std::string paged_head;
+    if (CapPagedReadHead(content, keep_bytes, paged_head)) return paged_head;
     const size_t head_target = static_cast<size_t>(static_cast<double>(keep_bytes) * kToolEntryHeadShare);
     const size_t tail_target = keep_bytes - head_target;
     size_t head_end = Utf8Floor(content, head_target);

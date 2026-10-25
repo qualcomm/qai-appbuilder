@@ -219,9 +219,13 @@ bool RunToolCallRepetitionSelfTest(std::ostream &out)
         for (int i = 0; i < 10; ++i)
             store.RecordCall(key, "read|{\"path\":\"hot.txt\"}");
         store.RecordCall(key, "read|{\"path\":\"other.txt\"}");
-        runner.Check("scenario10_hot_signature_survives_interleaving",
-                     "热点签名之后插入一次性签名仍应返回热点签名的最大非连续总次数10",
-                     store.GetNonContiguousRepeatCount(key) == 10);
+        runner.Check("scenario10_total_follows_latest_signature",
+                     "热点签名之后插入一次性签名，非连续总次数应跟随最近一次调用的签名（1），而不是历史最大值",
+                     store.GetNonContiguousRepeatCount(key) == 1);
+        store.RecordCall(key, "read|{\"path\":\"hot.txt\"}");
+        runner.Check("scenario10_hot_signature_revisit_total",
+                     "绕回热点签名后应返回其累计总次数11",
+                     store.GetNonContiguousRepeatCount(key) == 11);
     }
 
     store.Clear();

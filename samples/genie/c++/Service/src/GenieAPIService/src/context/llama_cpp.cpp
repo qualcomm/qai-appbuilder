@@ -1282,7 +1282,7 @@ public:
                  << " | tgt_bytes=" << ck.tgt.size() << " | dft_bytes=" << ck.dft.size() << "\n";
         prefix_ckpts_.push_back(std::move(ck));
         const size_t n_keep_head = (size_t) std::max(0, g_llama_prefix_head_checkpoints.load());
-        if (prefix_ckpts_.size() > n_keep_head + 2)
+        if (prefix_ckpts_.size() > n_keep_head + 3)
         {
             prefix_ckpts_.erase(prefix_ckpts_.begin() + (long long) n_keep_head);
         }
@@ -1921,7 +1921,7 @@ void LLAMACppBuilder::SetPrefixHeadCheckpoints(int n, bool from_config)
 bool LLAMACppBuilder::ApplyPlannedHeadCheckpoints(int n)
 {
     // 显式配置永远胜出。检查点常驻在 host 侧（prefix_ckpts_ 是 std::vector<uint8_t>，常驻上限
-    // head_checkpoints + 2 份），所以它的份数由主机可用内存推导、而不是显存；r23 实测
+    // head_checkpoints + 3 份），所以它的份数由主机可用内存推导、而不是显存；r23 实测
     // head_checkpoints=2 的 prefill 收益测不出（1310 vs 1311 s），即 host 紧张时降档是零代价的。
     if (g_llama_prefix_head_checkpoints_explicit.load())
     {

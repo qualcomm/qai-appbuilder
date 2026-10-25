@@ -644,7 +644,7 @@ RuntimePlan PlanRuntime(const PlanInputs &in)
 
     // ---- head_checkpoints 由 host 内存推导，不由显存推导 ----
     // 检查点常驻在 host（llama_cpp.cpp 的 std::vector<uint8_t>），常驻上限是
-    // head_checkpoints + 2 份（llama_cpp.cpp 里 prefix_ckpts_ 超过 n_keep_head + 2 就淘汰）。
+    // head_checkpoints + 3 份（llama_cpp.cpp 里 prefix_ckpts_ 超过 n_keep_head + 3 就淘汰）。
     if (in.explicit_head_checkpoints < 0)
     {
         const uint64_t budget = in.host_avail == 0 || in.host_avail == UINT64_MAX
@@ -655,7 +655,7 @@ RuntimePlan PlanRuntime(const PlanInputs &in)
         for (int n = kHeadCheckpointsMax; n >= 0; --n)
         {
             if (plan.ledger.ckpt_bytes == 0 ||
-                (uint64_t) (n + 2) * plan.ledger.ckpt_bytes <= budget)
+                (uint64_t) (n + 3) * plan.ledger.ckpt_bytes <= budget)
             {
                 chosen = n;
                 break;
@@ -664,7 +664,7 @@ RuntimePlan PlanRuntime(const PlanInputs &in)
         plan.head_checkpoints = chosen;
     }
     plan.ledger.host_checkpoints =
-        (uint64_t) (plan.head_checkpoints + 2) * plan.ledger.ckpt_bytes;
+        (uint64_t) (plan.head_checkpoints + 3) * plan.ledger.ckpt_bytes;
 
     std::ostringstream os;
     os << "ctx=" << plan.ctx_effective << " (requested " << in.ctx_requested << ")"

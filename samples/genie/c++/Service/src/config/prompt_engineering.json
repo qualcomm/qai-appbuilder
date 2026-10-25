@@ -32,9 +32,7 @@
             "_comment_ttl_seconds": "距上一次调用超过此秒数视为新的序列，重新从 1 计数，默认 300（5 分钟）",
             "ttl_seconds": 300,
             "_comment_consecutive_failure_threshold": "请求尾部连续为空或失败的 tool 结果达到此次数时追加纠偏提示，默认 3；0 或负数关闭",
-            "consecutive_failure_threshold": 3,
-            "_comment_hard_block_threshold": "硬熔断阈值，默认 0（关闭）。开启后按(工具名,规范化参数)相同签名在当前可见历史消息里统计，若该签名已累计出现 N-1 次与最近一次逐字节相同的结果（N=本字段值），即将转发的第 N 次同签名调用会被改写为纯文本阻断提示（finish_reason=\"tool_call_blocked\"）。默认关闭的原因：在 agent 循环里把 tool_call 改写成纯文本等价于告知客户端“模型已给出最终答复”，客户端会结束整个任务而不是换路重试——实测一次拦截（幂等的 exec 环境探测，结果天然相同）直接终止了长链路任务，之后只剩 /status 轮询。只在客户端确认能把 tool_call_blocked 当作“继续下一轮”处理时才设为正数",
-            "hard_block_threshold": 0
+            "consecutive_failure_threshold": 3
         }
     },
 
