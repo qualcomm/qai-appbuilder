@@ -8,6 +8,81 @@
 | `QAIModelBuilder-<ver>-x64-setup.exe` | 约 20 MB | x64 / Windows-on-ARM 上跑 x64 都可用 |
 | `QAIModelBuilder-<ver>-arm64-setup.exe` | 见 build 输出 | 仅 ARM64 |
 
+## 准备构建环境
+
+只有**打包的人**需要这些;安装包的最终用户不需要任何一项。下面的命令都在 PowerShell 里执行,装完每一项后**重新打开终端**(让 PATH 生效),最后用"自检"一节确认。
+
+| 组件 | 用途 | 什么时候可以不装 |
+|---|---|---|
+| Node.js + pnpm | `Build.bat` 构建前端 | 已有 `frontend\dist`,打包时加 `-SkipFrontend` |
+| Rust + VS 2022 C++ 工具 + Windows SDK | 编译桌面版窗口 | 已有 `dist\desktop\<arch>\QAIModelBuilder.exe`,打包时加 `-SkipDesktop` |
+| Inno Setup 6 | 生成安装包 | **必装** |
+| 能访问 pypi.org 的网络 | 取目标架构的 `uv.exe` | **必需** |
+
+### 1. Node.js 和 pnpm
+
+要求(来自 `frontend\package.json`):Node ≥ 22,pnpm ≥ 9,仓库固定用 `pnpm@11.9.0`。
+
+```powershell
+winget install OpenJS.NodeJS          # 装 Node.js(自带 npm)
+# 重新打开终端后:
+npm install -g pnpm@11.9.0            # 装与仓库一致的 pnpm 版本
+```
+
+`Build.bat` 找 Node/pnpm 的顺序:先看 `%LOCALAPPDATA%\QAIModelBuilder\node\`(`Setup.bat --frontend` 装的便携版),找不到就用 PATH 上的。**所以上面两条命令装的系统版本就够用**,不需要跑 `Setup.bat --frontend`。已实测:只有系统 Node 26 加 `npm install -g pnpm@11.9.0` 时,`Build.bat` 能成功构建(约 25 秒)。`winget install OpenJS.NodeJS` 这条命令本身没有在干净机器上执行过(本机的 Node 是之前装好的),winget 目前给的是 26.x,满足 ≥ 22 的要求。
+
+> 这里用 `npm install -g pnpm` 而不是 `corepack enable`:本机的 Node 26 不带 corepack,命令不存在;`Setup.bat` 固定用的 Node 22 带 corepack,但上面这种方式在两种 Node 上都能用。
+
+### 2. Rust
+
+```powershell
+winget install Rustlang.Rustup
+# 重新打开终端后,可提前把两个架构的目标都装上(不装也行,编译时会自动补装):
+rustup target add aarch64-pc-windows-msvc x86_64-pc-windows-msvc    # 可选,提前装好
+```
+
+`desktop\build.ps1` 会自己检查 `cargo` 和两个目标,缺目标时自动 `rustup target add`;缺 `cargo` 时直接报错并提示上面的 winget 命令。
+
+### 3. Visual Studio 2022 的 C++ 工具和 Windows SDK
+
+Rust 的 MSVC 目标需要链接器。**需要同时有 ARM64 和 x64 两套工具**,因为要给两个架构各编译一个 exe。已经装了完整的 Visual Studio 2022 的话,用 Visual Studio Installer 勾上下面三项即可;没有的话装 Build Tools:
+
+```powershell
+winget install Microsoft.VisualStudio.2022.BuildTools --override "--passive --wait --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --add Microsoft.VisualStudio.Component.Windows11SDK.22621"
+```
+
+三个组件的 ID:
+
+| 组件 ID | 说明 |
+|---|---|
+| `Microsoft.VisualStudio.Component.VC.Tools.x86.x64` | MSVC x64 |
+| `Microsoft.VisualStudio.Component.VC.Tools.ARM64` | MSVC ARM64 |
+| `Microsoft.VisualStudio.Component.Windows11SDK.22621` | Windows SDK |
+
+> 这套 ID 和 `scripts\setup\install_vs.ps1` 用的一致,且已在本机用 `vswhere` 确认这三项都存在。安装体积较大(几个 GB),需要管理员权限和较长时间。
+>
+> ⚠️ 上面这条 `winget ... --override` 命令**没有在干净机器上实际执行过**(打包机已经装了 Visual Studio Community 2022,这三项都在)。如果它报错,改用 Visual Studio Installer 图形界面,在“使用 C++ 的桌面开发”里勾选上面三项。
+
+### 4. Inno Setup 6
+
+```powershell
+winget install JRSoftware.InnoSetup --scope user
+```
+
+`build_installer.ps1` 会在 `%LOCALAPPDATA%\Programs\Inno Setup 6\`、`Program Files (x86)\Inno Setup 6\`、`Program Files\Inno Setup 6\` 和 PATH 里找 `ISCC.exe`;装在别处时用 `-IsccPath <路径>` 指定。
+
+### 自检
+
+```powershell
+node --version          # 应 >= v22
+pnpm --version          # 应为 11.9.0(>= 9 也可构建)
+cargo --version
+rustup target list --installed          # 应含 aarch64-pc-windows-msvc 和 x86_64-pc-windows-msvc
+Test-Path "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"    # True
+```
+
+都通过后,运行下面"打包"一节的命令。
+
 ## 打包
 
 **一条命令完成**(在 `tools\qaiappbuilder` 目录下):
@@ -31,13 +106,7 @@
 
 `-SkipDesktop` 用在**没有 Rust / VS C++ 工具的机器**上:把别处编好的 `dist\desktop\<arch>\QAIModelBuilder.exe` 拷过来,再加这个参数。对应的 exe 不存在时,在开始整理文件之前就报错。也可以单独编译桌面版:`.\desktop\build.ps1 -Arch both`(细节见 [`desktop/README.md`](../desktop/README.md))。
 
-前置条件:
-
-| 步骤 | 需要 |
-|---|---|
-| 编译桌面版(默认会做) | Rust、VS 2022 的 C++ 工具(ARM64 + x64)、Windows SDK。安装和细节见 [`desktop/README.md`](../desktop/README.md) |
-| 打安装包 | Inno Setup 6(`winget install JRSoftware.InnoSetup --scope user`),本机能访问 pypi.org(取目标架构的 `uv.exe`) |
-| 刷新前端(可用 `-SkipFrontend` 跳过) | Node + pnpm(`Build.bat` 用) |
+前置条件见上面的“准备构建环境”。
 
 输出在 `dist\installer\`(已被 `.gitignore`):`QAIModelBuilder-<ver>-x64-setup.exe`、`QAIModelBuilder-<ver>-arm64-setup.exe`。首次完整跑(含编译两个架构的 Rust 依赖)约 4 分钟;之后增量编译和 `-SkipFrontend` 会快很多。
 
