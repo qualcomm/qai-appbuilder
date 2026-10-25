@@ -71,6 +71,7 @@ public:
     // 避免 model_input_builder.h 另写一份同样的解析逻辑。
     static std::string ExtractReadToolPath(const std::string& assistant_content);
     static bool LooksLikeToolFailure(const std::string& content);
+    static std::string FirstFailureLine(const std::string& content);
 
     // 查表（不触发任何更新），供 BuildSystemContext 直接渲染
     std::optional<json> Lookup(const json& raw_messages) const;

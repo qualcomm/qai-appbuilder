@@ -8,6 +8,7 @@
 
 #include "task_memo_builder.h"
 #include "tool_call_circuit_breaker_store.h"
+#include "task_memo_doc_scan.h"
 #include <utils.h>
 #include "log.h"
 #include <sstream>
@@ -131,6 +132,7 @@ namespace {
     constexpr size_t kMaxTriedQueryResources = 10;
     constexpr size_t kMaxTriedQueriesPerResource = 6;
     constexpr size_t kMaxCommandResourceKeyChars = 120;
+    constexpr size_t kMaxPendingRefs = 8;
 
     std::unordered_map<size_t, std::string> BuildToolCallContentByRawIndex(const json& raw_messages)
     {
@@ -262,32 +264,6 @@ namespace {
         return out;
     }
 
-    bool IsHardRuleLine(const std::string& line) {
-        static const char* kMarkers[] = {"NEVER", "MUST", "MANDATORY", "Do NOT", "DO NOT",
-                                         "必须", "禁止", "不得", "严禁"};
-        for (const char* k : kMarkers)
-            if (line.find(k) != std::string::npos) return true;
-        return false;
-    }
-
-    std::vector<std::string> ExtractHardRules(const std::string& content) {
-        std::vector<std::string> out;
-        size_t pos = 0;
-        while (pos < content.size() && out.size() < kMaxHardRulesPerFile) {
-            size_t nl = content.find('\n', pos);
-            if (nl == std::string::npos) nl = content.size();
-            std::string line = content.substr(pos, nl - pos);
-            pos = nl + 1;
-            const size_t b = line.find_first_not_of(" \t\r>-*#|");
-            if (b == std::string::npos) continue;
-            line = line.substr(b);
-            while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
-            if (line.size() < 8 || !IsHardRuleLine(line)) continue;
-            out.push_back(safe_utf8_truncate(line, kMaxHardRuleChars, "..."));
-        }
-        return out;
-    }
-
     void AppendCapped(json& field, const std::string& item, size_t cap) {
         if (!field.is_array())
             field = json::array();
@@ -330,7 +306,8 @@ namespace {
             "Error:", "ERROR:", "Exception:", "Traceback (most recent call last)",
             "No such file or directory",
             "Permission denied", "command not found", "is not recognized as",
-            "Failed to", "failed to", "Failed:",
+            "Failed to", "failed to", "Failed:", "error:", "FAILED", "failed with",
+            "Cannot find", "cannot find",
         };
         const size_t begin = line.find_first_not_of(" \t\r");
         if (begin == std::string::npos)
@@ -346,7 +323,16 @@ namespace {
         return false;
     }
 
+    bool HasNonZeroExitMarker(const std::string& content) {
+        const size_t pos = content.rfind("[exit code:");
+        return pos != std::string::npos && std::strtol(content.c_str() + pos + 11, nullptr, 10) != 0;
+    }
+
     bool LooksLikeFailure(const std::string& content) {
+        if (task_memo_scan::HasPagedReadFooter(content))
+            return false;
+        if (HasNonZeroExitMarker(content))
+            return true;
         size_t pos = 0;
         while (pos <= content.size()) {
             const size_t nl = content.find('\n', pos);
@@ -360,6 +346,30 @@ namespace {
         if (HasNonEmptyErrorField(content, "\"error\"") || HasNonEmptyErrorField(content, "\"is_error\""))
             return true;
         return false;
+    }
+
+    std::string FirstFailureLineImpl(const std::string& content) {
+        if (!LooksLikeFailure(content))
+            return "";
+        std::string fallback;
+        size_t pos = 0;
+        while (pos <= content.size()) {
+            const size_t nl = content.find('\n', pos);
+            const size_t end = (nl == std::string::npos) ? content.size() : nl;
+            const std::string line = content.substr(pos, end - pos);
+            if (LineHasFailureSignal(line)) {
+                if (line.find("Traceback (most recent call last)") == std::string::npos)
+                    return task_memo_scan::Trim(line);
+                if (fallback.empty())
+                    fallback = "Traceback";
+            }
+            if (nl == std::string::npos)
+                break;
+            pos = nl + 1;
+        }
+        if (!fallback.empty())
+            return fallback;
+        return HasNonZeroExitMarker(content) ? "nonzero_exit" : "structured_error";
     }
 
     void CapObjectSize(json& obj, size_t cap) {
@@ -595,6 +605,7 @@ namespace {
                 gaps.emplace_back(next, total);
             line += gaps.empty() ? "; fully read" : "; not yet read " + JoinLineRanges(gaps);
         }
+        line += task_memo_scan::RenderSectionsSuffix(value) + task_memo_scan::RenderCursorSuffix(value);
         return line + "\n";
     }
 
@@ -799,6 +810,11 @@ bool TaskMemoBuilder::LooksLikeToolFailure(const std::string& content)
     return LooksLikeFailure(content);
 }
 
+std::string TaskMemoBuilder::FirstFailureLine(const std::string& content)
+{
+    return FirstFailureLineImpl(content);
+}
+
 json TaskMemoBuilder::BuildRuleLayer(
     const json& prev, const std::vector<GenieChatMessage>& dropped_messages,
     const std::vector<std::string>& dropped_tool_call_content) const
@@ -815,6 +831,8 @@ json TaskMemoBuilder::BuildRuleLayer(
 
     if (!entry.contains("read_files") || !entry["read_files"].is_object())
         entry["read_files"] = json::object();
+    if (!entry.contains("pending_refs") || !entry["pending_refs"].is_object())
+        entry["pending_refs"] = json::object();
 
     size_t tool_seq = entry["tool_state"].size();
     std::string last_assistant_content;
@@ -843,17 +861,31 @@ json TaskMemoBuilder::BuildRuleLayer(
             const std::string read_path = ExtractReadToolPathImpl(call_content);
             size_t shown_first = 0, shown_last = 0, shown_total = 0;
             const bool indexed_read = !read_path.empty() &&
-                ComputeReadRange(read_path, m.content, shown_first, shown_last, shown_total) &&
-                (!failed || m.content.find("showed lines ") != std::string::npos);
+                ComputeReadRange(read_path, m.content, shown_first, shown_last, shown_total) && !failed;
             if (!indexed_read) {
                 entry["tool_state"]["tool_result_" + std::to_string(tool_seq++)] =
                     (failed ? "失败: " : "成功: ") + preview;
                 CapObjectSize(entry["tool_state"], kMaxItemsPerField);
             }
             const std::string call = ExtractToolCallSummary(call_content);
+            const std::string tool_name = call.substr(0, call.find(' '));
+            const bool reads_content = IsReadLikeToolName(tool_name) || tool_name.find("fetch") != std::string::npos;
+            std::string action_source;
+            if (!indexed_read && !reads_content && !call.empty()) {
+                const std::vector<std::string> call_tokens = task_memo_scan::SplitNameTokens(FullToolCall(call_content));
+                for (auto it = entry["read_files"].begin(); it != entry["read_files"].end() && action_source.empty(); ++it) {
+                    if (!it.value().is_object() || !it.value().contains("idents"))
+                        continue;
+                    const int source_line = task_memo_scan::FindIdentLine(it.value()["idents"], call_tokens);
+                    if (source_line > 0) {
+                        it.value()["used_line"] = source_line;
+                        action_source = " | likely from " + task_memo_scan::LastNameOf(it.key()) + " L" + std::to_string(source_line);
+                    }
+                }
+            }
             if (!indexed_read)
-                AppendCapped(entry["completed"], (failed ? "失败: " : "成功: ") +
-                    (call.empty() ? std::string() : ReplaceInvalidUtf8(safe_utf8_truncate(call, 200, "...")) + " -> ") + preview, kMaxItemsPerField);
+                task_memo_scan::AppendCompletedRow(entry["completed"], (failed ? "失败: " : "成功: ") +
+                    (call.empty() ? std::string() : ReplaceInvalidUtf8(safe_utf8_truncate(call, 200, "...")) + " -> ") + preview + action_source, kMaxItemsPerField);
             if (!failed && !call.empty()) {
                 const std::string tool = call.substr(0, call.find(' '));
                 if (!entry.contains("last_success") || !entry["last_success"].is_object())
@@ -861,8 +893,6 @@ json TaskMemoBuilder::BuildRuleLayer(
                 entry["last_success"][tool] = ReplaceInvalidUtf8(safe_utf8_truncate(FullToolCall(call_content), kMaxLastSuccessChars, "..."));
                 CapObjectSize(entry["last_success"], 6);
             }
-            const std::string tool_name = call.substr(0, call.find(' '));
-            const bool reads_content = IsReadLikeToolName(tool_name) || tool_name.find("fetch") != std::string::npos;
             if (!failed && !call.empty() && !reads_content)
                 for (const auto& a : ExtractArtifactLines(m.content))
                     AppendCapped(entry["artifacts"], ReplaceInvalidUtf8(a), kMaxArtifacts);
@@ -897,7 +927,13 @@ json TaskMemoBuilder::BuildRuleLayer(
             {
                 if (!read_path.empty()) {
                     if (indexed_read) {
-                        AddReadRange(entry["read_files"][StripRangeSuffix(read_path)], shown_first, shown_last, shown_total);
+                        const std::string read_key = StripRangeSuffix(read_path);
+                        const task_memo_scan::PageText page = task_memo_scan::ExtractPageText(m.content, shown_first);
+                        AddReadRange(entry["read_files"][read_key], shown_first, shown_last, shown_total);
+                        task_memo_scan::FoldPage(entry["read_files"][read_key], page.text, page.first);
+                        task_memo_scan::ClearReadRef(entry["pending_refs"], read_key);
+                        task_memo_scan::FoldRefs(entry["pending_refs"], task_memo_scan::ExtractDocRefs(page.text, 4, 160),
+                                                 entry["read_files"], read_key, kMaxPendingRefs);
                         CapObjectSize(entry["read_files"], kMaxItemsPerField);
                     }
                     if (!entry.contains("hard_rules") || !entry["hard_rules"].is_array())
@@ -906,7 +942,7 @@ json TaskMemoBuilder::BuildRuleLayer(
                         entry["_hard_rule_files"] = json::object();
                     if (!entry["_hard_rule_files"].contains(read_path)) {
                         entry["_hard_rule_files"][read_path] = true;
-                        for (const auto& rule : ExtractHardRules(m.content)) {
+                        for (const auto& rule : task_memo_scan::ExtractHardRules(m.content, kMaxHardRulesPerFile, kMaxHardRuleChars)) {
                             if (entry["hard_rules"].size() >= kMaxHardRules) break;
                             const std::string item = ReplaceInvalidUtf8(rule);
                             bool dup = false;
@@ -1168,7 +1204,7 @@ TaskMemoBuilder::UpdateResult TaskMemoBuilder::Update(const json& raw_messages,
             model_entry["_next_page_id"] = entry["_next_page_id"];
             // read_files（已读文件索引）同理：模型层不感知、不生成，必须显式透传。
             model_entry["read_files"] = entry["read_files"];
-            for (const char* k : {"hard_rules", "_hard_rule_files", "artifacts", "last_success", "tried_queries", "tried_queries_count"})
+            for (const char* k : {"hard_rules", "_hard_rule_files", "pending_refs", "artifacts", "last_success", "tried_queries", "tried_queries_count"})
                 if (entry.contains(k))
                     model_entry[k] = entry[k];
             // original_goal_raw/confidence 权威兜底，从 entry 显式透传，不允许模型层输出覆盖。
@@ -1241,6 +1277,35 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
         return oss.str();
     };
 
+    auto render_list_fit = [&](const char* label, const char* key, size_t budget) -> std::string {
+        if (!entry.contains(key) || !entry[key].is_array() || entry[key].empty())
+            return "";
+        const std::string head = std::string(label) + " (some rows omitted to fit):\n";
+        if (head.size() >= budget)
+            return "";
+        const size_t n = entry[key].size();
+        std::vector<char> keep(n, 0);
+        size_t used = head.size();
+        for (int pass = 0; pass < 2; ++pass) {
+            for (size_t i = n; i-- > 0;) {
+                if (keep[i] || !entry[key][i].is_string())
+                    continue;
+                const std::string row = "- " + entry[key][i].get<std::string>() + "\n";
+                if ((pass == 0) != task_memo_scan::IsWriteLikeRow(row.substr(2)))
+                    continue;
+                if (used + row.size() > budget)
+                    continue;
+                keep[i] = 1;
+                used += row.size();
+            }
+        }
+        std::string result;
+        for (size_t i = 0; i < n; ++i)
+            if (keep[i])
+                result += "- " + entry[key][i].get<std::string>() + "\n";
+        return result.empty() ? result : head + result;
+    };
+
     std::string header = "## Task Memo\n";
 
     // 目标锚点块：最高优先级，不参与下面的"整块跳过"循环；预算不足时只截断该块文本
@@ -1301,12 +1366,14 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
     std::string read_files_block;
     if (entry.contains("read_files") && entry["read_files"].is_object() && !entry["read_files"].empty()) {
         std::ostringstream oss;
-        oss << "Files already read, as line ranges whose text has left the context. Continue with the "
-               "'not yet read' ranges; re-read a range already read only if you need a specific detail from it:\n";
+        oss << "Files already read, as line ranges whose text has left the context (state as of the last compaction):\n";
         for (auto it = entry["read_files"].begin(); it != entry["read_files"].end(); ++it)
             oss << RenderReadFileLine(it.key(), it.value());
         read_files_block = oss.str();
     }
+
+    const std::string pending_refs_block =
+        entry.contains("pending_refs") ? task_memo_scan::RenderPendingRefs(entry["pending_refs"]) : std::string();
 
     // 已尝试查询索引：对同一资源（如同一文件路径）用不同参数反复调用非 read 类工具时
     // （如 grep 的 pattern 每次不同），现有去重机制因参数不同不会判重；这里只如实呈现
@@ -1367,6 +1434,7 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
     // 由高到低优先级排列；预算放不下时整块跳过。
     const std::string blocks[] = {
         render_list("Rules from documents you read (still in force)", "hard_rules"),
+        pending_refs_block,
         render_list("Artifacts already produced, confirmed by tool output from earlier context that has "
                     "since left the window (not an exhaustive list of everything done so far; check the "
                     "most recent messages below for newer results before redoing any of these steps)", "artifacts"),
@@ -1381,7 +1449,7 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
         page_directory_block,
     };
     static const char* kBlockNames[] = {
-        "hard_rules", "artifacts", "last_success", "completed", "next_actions",
+        "hard_rules", "pending_refs", "artifacts", "last_success", "completed", "next_actions",
         "facts_constraints", "open_questions", "read_files", "tried_queries", "tool_state", "page_directory",
     };
 
@@ -1415,16 +1483,24 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
                                          || std::strcmp(block_name, "tried_queries") == 0
                                          || std::strcmp(block_name, "tool_state") == 0);
         const size_t slot_budget = is_reserved_block ? max_chars : budget_for_high_priority;
-        if (max_chars > 0 && out.size() + block.size() > slot_budget) {
+        std::string fitted;
+        const std::string* chosen = &block;
+        if (max_chars > 0 && out.size() + block.size() > slot_budget && std::strcmp(block_name, "completed") == 0) {
+            fitted = render_list_fit("Completed", "completed", slot_budget > out.size() ? slot_budget - out.size() : 0);
+            chosen = &fitted;
+        }
+        if (chosen->empty())
+            continue;
+        if (max_chars > 0 && out.size() + chosen->size() > slot_budget) {
             My_Log{My_Log::Level::kWarning}
                 << "[TaskMemo] Render block skipped: name=" << block_name
-                << ", block_chars=" << block.size()
+                << ", block_chars=" << chosen->size()
                 << ", used_chars=" << out.size()
                 << ", max_chars=" << max_chars
                 << ", slot_budget=" << slot_budget << std::endl;
             continue;
         }
-        out += block;
+        out += *chosen;
     }
     if (max_chars > 0 && out.size() > max_chars)
         out = safe_utf8_truncate(out, max_chars, "");

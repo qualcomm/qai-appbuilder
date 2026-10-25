@@ -1780,11 +1780,6 @@ private:
         const auto &cfg = instance_config_->i_model_config_.GetToolCallRepairConfig().redundant_call_guard;
         if (!cfg.enabled || cfg.consecutive_failure_threshold <= 0)
             return "";
-        static const char* kFailureSignals[] = {
-            "Error:", "ERROR:", "Exception:", "Traceback (most recent call last)",
-            "No such file or directory", "Permission denied",
-            "command not found", "is not recognized as", "Failed to", "failed to", "Failed:",
-        };
         const auto& messages = request_data_["messages"];
         int streak = 0;
         std::string tool_name;
@@ -1798,12 +1793,8 @@ private:
             if (role != "tool")
                 break;
             std::string content = get_json_value<std::string>(msg, "content", "");
-            bool bad = content.find_first_not_of(" \t\r\n") == std::string::npos;
-            if (!bad) {
-                for (const char* sig : kFailureSignals) {
-                    if (content.find(sig) != std::string::npos) { bad = true; break; }
-                }
-            }
+            const bool bad = content.find_first_not_of(" \t\r\n") == std::string::npos ||
+                             TaskMemoBuilder::LooksLikeToolFailure(content);
             if (!bad)
                 break;
             ++streak;
@@ -1967,34 +1958,25 @@ private:
 
     static std::string FirstFailureLine(const std::string &content)
     {
-        static const char* kSignals[] = {
-            "Traceback (most recent call last)", "Error:", "ERROR:", "error:", "Exception:",
-            "No such file or directory", "Permission denied", "not recognized as", "command not found",
-            "FAILED", "failed with", "Cannot find", "cannot find"};
-        static const std::regex kNonZeroExit(R"((exit|return)\s*(code|status)\s*[:=]?\s*-?[1-9]\d*)", std::regex::icase);
-        size_t pos = 0;
-        std::string fallback;
-        while (pos < content.size())
+        const std::string line = TaskMemoBuilder::FirstFailureLine(content);
+        std::string normalized;
+        normalized.reserve(line.size());
+        bool in_digits = false;
+        for (char c : line)
         {
-            size_t nl = content.find('\n', pos);
-            if (nl == std::string::npos)
-                nl = content.size();
-            const std::string line = content.substr(pos, nl - pos);
-            for (const char* s : kSignals)
+            if (std::isdigit(static_cast<unsigned char>(c)))
             {
-                if (line.find(s) != std::string::npos)
-                {
-                    if (std::string(s) != "Traceback (most recent call last)")
-                        return std::regex_replace(line, std::regex(R"(\d+)"), "#").substr(0, 160);
-                    if (fallback.empty())
-                        fallback = "Traceback";
-                }
+                if (!in_digits)
+                    normalized += '#';
+                in_digits = true;
             }
-            if (fallback.empty() && std::regex_search(line, kNonZeroExit))
-                fallback = "nonzero_exit";
-            pos = nl + 1;
+            else
+            {
+                normalized += c;
+                in_digits = false;
+            }
         }
-        return fallback;
+        return normalized.substr(0, 160);
     }
 
     std::string BuildTaskMemoSection() const

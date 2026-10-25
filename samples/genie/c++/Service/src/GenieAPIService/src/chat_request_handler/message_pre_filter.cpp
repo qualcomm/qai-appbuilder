@@ -123,7 +123,7 @@ bool CapPagedReadHead(const std::string& content, size_t keep_bytes, std::string
     const size_t footer_end = content.find('\n', marker);
     out = content.substr(0, cut_nl + 1) + "...[read truncated: context budget; showed lines " + std::to_string(first) +
           "-" + std::to_string(shown_last) + " of total " + std::to_string(total) +
-          "; call read again with offset=" + std::to_string(shown_last + 1) + " to continue]" +
+          "; next offset=" + std::to_string(shown_last + 1) + "]" +
           (footer_end == std::string::npos ? std::string() : content.substr(footer_end));
     return true;
 }
