@@ -106,7 +106,7 @@ bool RunTaskMemoDocScanSelfTest(std::ostream &out)
     {
         const std::string content =
             "## Boundary Decision (MANDATORY GATE)\n"
-            "| Routing | MUST read this |\n"
+            "| Routing | read this |\n"
             "- You MUST run the init step first -> `references/operations_reference.md " + std::string(kSection) +
             " Working Directory`\n"
             "> **NEVER** delete the plan file\n";
@@ -252,6 +252,91 @@ bool RunTaskMemoDocScanSelfTest(std::ostream &out)
         runner.Check("render_completed_keeps_write", "write rows survive the degrade", Contains(rendered, "plan.md"));
         runner.Check("render_completed_keeps_newest", "newest rows survive the degrade", Contains(rendered, "step 12"));
         runner.Check("render_completed_drops_old", "oldest non-write rows are the ones dropped", !Contains(rendered, "step 1\""));
+    }
+
+    {
+        const std::string text =
+            "# Title with MUST in heading\n"
+            "```python\n"
+            "# --- QNN config (MUST be before QNNContext) ---\n"
+            "x = 1\n"
+            "```\n"
+            "| QNNConfig.Config | MUST be called once |\n"
+            "Every inference -> read htp.md first. Non-negotiable: do it.\n";
+        const auto rules = task_memo_scan::ExtractHardRules(text, 6, 220);
+        runner.Check("rules_fence_comment", "a marker comment inside a code fence is a rule and a heading outside is not",
+                     rules.size() == 3 && Contains(rules[0], "QNN config (MUST be before QNNContext)"));
+        runner.Check("rules_table_with_marker", "a table row that carries a marker is a rule",
+                     rules.size() == 3 && Contains(rules[1], "QNNConfig.Config"));
+        runner.Check("rules_nonnegotiable_marker", "Non-negotiable is a marker",
+                     rules.size() == 3 && Contains(rules[2], "Non-negotiable"));
+    }
+
+    {
+        json rules = json::array();
+        json sources = json::array();
+        for (const char *r : {"r1", "r2", "r3"})
+            task_memo_scan::AdmitHardRule(rules, sources, r, "a.md", 3);
+        task_memo_scan::AdmitHardRule(rules, sources, "b1", "b.md", 3);
+        runner.Check("rules_admit_new_doc", "a new document evicts the newest rule of the dominant document",
+                     rules.size() == 3 && rules[0] == "r1" && rules[1] == "r2" && rules[2] == "b1");
+        task_memo_scan::AdmitHardRule(rules, sources, "b2", "b.md", 3);
+        runner.Check("rules_admit_balanced", "a document is not admitted past an even share",
+                     rules.size() == 3 && rules[2] == "b1");
+        task_memo_scan::AdmitHardRule(rules, sources, "c1", "c.md", 3);
+        runner.Check("rules_admit_keeps_floor", "every document keeps at least one rule",
+                     rules.size() == 3 && rules[0] == "r1" && rules[1] == "b1" && rules[2] == "c1");
+        task_memo_scan::AdmitHardRule(rules, sources, "c1", "d.md", 3);
+        runner.Check("rules_admit_dedup", "an identical rule is not admitted twice", rules.size() == 3 && sources.size() == 3);
+    }
+
+    {
+        const std::string text = "Read `references/x.md` for details\nEvery run MUST read `references/x.md` first\n";
+        const auto refs = task_memo_scan::ExtractDocRefs(text, 4, 160);
+        runner.Check("refs_marked_cite_wins", "a later mention that carries a marker replaces the plain citation",
+                     refs.size() == 1 && refs[0].marked && Contains(refs[0].cite, "MUST"));
+        json pending = json::object();
+        std::vector<task_memo_scan::DocRef> plain = {{"d/a.md", "", "plain", false}};
+        std::vector<task_memo_scan::DocRef> marked = {{"d/a.md", "", "MUST do", true}};
+        task_memo_scan::FoldRefs(pending, plain, json::object(), "", 8);
+        task_memo_scan::FoldRefs(pending, marked, json::object(), "", 8);
+        runner.Check("refs_fold_marked_replaces", "folding a marked mention replaces the pending citation",
+                     pending.size() == 1 && pending["d/a.md"]["cite"] == "MUST do");
+    }
+
+    {
+        const std::string script =
+            "\"\"\"QNN NPU inference.\nProcess B.\n\"\"\"\nimport sys, os\n"
+            "from qai_appbuilder import QNNContext, QNNConfig\n"
+            "# --- QNN config (MUST be before QNNContext) ---\nQNNConfig.Config(\n    Runtime.HTP\n)\n"
+            "# plain comment\nclass A:\n    pass\n";
+        const std::string excerpt = task_memo_scan::ExtractCodeExcerpt(script, 300);
+        runner.Check("excerpt_skips_docstring", "the module docstring is not part of the excerpt", !Contains(excerpt, "Process B"));
+        runner.Check("excerpt_keeps_imports_and_call", "imports and the configuration call are kept",
+                     Contains(excerpt, "import sys, os") && Contains(excerpt, "QNNConfig.Config("));
+        runner.Check("excerpt_keeps_marker_comment", "a marker comment is kept and a plain comment is not",
+                     Contains(excerpt, "notes: QNN config (MUST be before QNNContext)") && !Contains(excerpt, "plain comment"));
+        json rows = json::array();
+        task_memo_scan::AppendCompletedRow(rows, "ok: write p.py :: v1 -> saved", 5, "write p.py :: ");
+        task_memo_scan::AppendCompletedRow(rows, "ok: write q.py :: v1 -> saved", 5, "write q.py :: ");
+        task_memo_scan::AppendCompletedRow(rows, "ok: write p.py :: v2 -> saved", 5, "write p.py :: ");
+        runner.Check("completed_supersede", "a newer write of the same file replaces the older row only",
+                     rows.size() == 2 && rows[0] == "ok: write q.py :: v1 -> saved" && rows[1] == "ok: write p.py :: v2 -> saved");
+    }
+
+    {
+        runner.Check("failure_signature_python_exception", "the exception line is the signature, not an earlier noise line",
+                     TaskMemoBuilder::FirstFailureLine(
+                         "Loading x\nWarmup run...\n<E> Error 0x200: failed to close queue\nTraceback (most recent call last):\n"
+                         "  File \"a.py\", line 1\nTypeError: Inference(): incompatible function arguments.\n[exit code: 1]") ==
+                         "TypeError: Inference(): incompatible function arguments.");
+        runner.Check("failure_signature_exit_tail", "an exit-only failure is keyed by its last output line",
+                     TaskMemoBuilder::FirstFailureLine("dir listing\nFile Not Found\n---\n[exit code: 1]") ==
+                         "exit: File Not Found");
+        const std::string call =
+            "<tool_call>{\"name\":\"read\",\"arguments\":{\"path\":\"C:\\\\a\\\\b.md\",\"offset\":5}}</tool_call>";
+        runner.Check("read_path_json_decoded", "a JSON-escaped path is decoded exactly once",
+                     TaskMemoBuilder::ExtractReadToolPath(call) == "C:\\a\\b.md#range:offset=5");
     }
 
     out << "=================================================================================\n";

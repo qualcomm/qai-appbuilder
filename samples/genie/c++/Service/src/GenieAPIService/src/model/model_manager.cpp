@@ -1089,6 +1089,7 @@ bool ModelManager::InitializeConfig()
                     at_cfg.near_repeat_window = at.value("near_repeat_window", at_cfg.near_repeat_window);
                     at_cfg.max_tokens = at.value("max_tokens", at_cfg.max_tokens);
                     at_cfg.ctx_reserve_tokens = at.value("ctx_reserve_tokens", at_cfg.ctx_reserve_tokens);
+                    at_cfg.goal_reminder_chars = at.value("goal_reminder_chars", at_cfg.goal_reminder_chars);
                     My_Log{} << "[Config] adaptive_thinking loaded: enabled=" << at_cfg.enabled
                              << ", time_budget_s=" << at_cfg.time_budget_s
                              << ", max_tokens=" << at_cfg.max_tokens << std::endl;

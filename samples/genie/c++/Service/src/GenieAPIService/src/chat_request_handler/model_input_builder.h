@@ -604,18 +604,22 @@ private:
         // qwen3 系列模型在极短用户提问下退化（原样复述上一轮对话后立即结束），/no_think 单独即可正确抑制思考。
         bool force_empty_think_prefill = false;
         bool force_open_think_prefill = false;
+        std::string think_goal_reminder;
         model_input_.think_time_budget_s_ = 0;
         if (instance_config_->is_thinking_model())
         {
+            bool failure_trigger = false;
             if (instance_config_->getenableThinking())
             {
                 systemDefaultPrompt += "/think";
             }
-            else if (ShouldThinkThisTurn())
+            else if (ShouldThinkThisTurn(&failure_trigger))
             {
                 const auto &at_cfg = instance_config_->i_model_config_.GetAdaptiveThinkingConfig();
                 systemDefaultPrompt += "/no_think";
                 force_open_think_prefill = true;
+                if (failure_trigger && at_cfg.goal_reminder_chars > 0)
+                    think_goal_reminder = BuildGoalReminder(at_cfg.goal_reminder_chars);
                 model_input_.think_time_budget_s_ = at_cfg.time_budget_s;
                 model_input_.think_min_tokens_ = at_cfg.min_tokens;
                 model_input_.think_max_tokens_ = at_cfg.max_tokens;
@@ -699,7 +703,7 @@ private:
         }
         else if (force_open_think_prefill)
         {
-            start_prompt_str += "<think>\n";
+            start_prompt_str += "<think>\n" + think_goal_reminder;
         }
         const bool stable_empty_think_history = force_empty_think_prefill
             || (force_open_think_prefill && instance_config_->is_speculative_draft_configured());
@@ -1811,7 +1815,24 @@ private:
         return "\n\n## Task Memo\n" + oss.str();
     }
 
-    bool ShouldThinkThisTurn() const
+    std::string BuildGoalReminder(int max_chars) const
+    {
+        if (!request_data_.is_object() || !request_data_.contains("messages") || !request_data_["messages"].is_array())
+            return "";
+        const auto entry = task_memo_builder_.Lookup(request_data_["messages"]);
+        if (!entry || !entry->contains("original_goal_raw") || !(*entry)["original_goal_raw"].is_string())
+            return "";
+        std::string goal = safe_utf8_truncate((*entry)["original_goal_raw"].get<std::string>(), (size_t) max_chars, "...");
+        for (char &c : goal)
+            if (c == '\n' || c == '\r')
+                c = ' ';
+        if (goal.empty())
+            return "";
+        return "Original request: " + goal +
+               "\nKeep satisfying it, or say why it can no longer be met and ask the user before changing it.\n";
+    }
+
+    bool ShouldThinkThisTurn(bool *failure_trigger = nullptr) const
     {
         const auto &at_cfg = instance_config_->i_model_config_.GetAdaptiveThinkingConfig();
         if (!at_cfg.enabled || at_cfg.time_budget_s <= 0)
@@ -1850,6 +1871,8 @@ private:
                         break;
                     }
                 }
+                if (reason.empty() && recent_errors[1] != recent_errors[0])
+                    reason = "changed_failure";
             }
         }
         if (reason.empty() && at_cfg.near_repeat_window > 1)
@@ -1905,13 +1928,14 @@ private:
             return false;
 
         const bool new_signature = st.per_signature.find(signature) == st.per_signature.end();
+        const bool paced = !new_signature || reason == "changed_failure";
         int &sig_count = st.per_signature[signature];
         std::string blocked;
         if (at_cfg.max_per_signature > 0 && sig_count >= at_cfg.max_per_signature)
             blocked = "signature_limit";
-        else if (!new_signature && st.last_think_msg_count > 0 && messages.size() <= st.last_think_msg_count + 2)
+        else if (paced && st.last_think_msg_count > 0 && messages.size() <= st.last_think_msg_count + 2)
             blocked = "cooldown";
-        else if (!new_signature && at_cfg.max_think_turn_share > 0.0 &&
+        else if (paced && at_cfg.max_think_turn_share > 0.0 &&
                  st.think_turns >= static_cast<int>(at_cfg.max_think_turn_share * st.tool_turns))
             blocked = "turn_share";
         if (!blocked.empty())
@@ -1923,6 +1947,8 @@ private:
         ++sig_count;
         ++st.think_turns;
         st.last_think_msg_count = messages.size();
+        if (failure_trigger)
+            *failure_trigger = reason == "new_failure" || reason == "error_repeated" || reason == "changed_failure";
         My_Log{} << "[AdaptiveThinking] enabling /think for this turn: " << reason
                  << " (sig_count=" << sig_count << ", think_turns=" << st.think_turns
                  << "/" << st.tool_turns << ")" << std::endl;

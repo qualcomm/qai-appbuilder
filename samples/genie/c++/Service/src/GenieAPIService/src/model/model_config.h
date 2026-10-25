@@ -265,6 +265,7 @@ struct AdaptiveThinkingConfig {
     int near_repeat_window = 5;
     int max_tokens = 0;
     int ctx_reserve_tokens = 2048;
+    int goal_reminder_chars = 0;
 };
 
 struct CloudModelConfig {

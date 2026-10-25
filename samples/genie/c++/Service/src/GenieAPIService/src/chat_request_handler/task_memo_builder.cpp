@@ -238,6 +238,54 @@ namespace {
         }
     }
 
+    struct WriteCall {
+        std::string key;
+        std::string summary;
+    };
+
+    WriteCall SummarizeWriteCall(const std::string& assistant_content) {
+        WriteCall out;
+        const std::string visible = TaskMemoBuilder::StripThinkBlock(assistant_content);
+        const size_t tc = visible.find("<tool_call>");
+        if (tc == std::string::npos)
+            return out;
+        const size_t end = visible.find("</tool_call>", tc);
+        const json call = json::parse(visible.substr(tc + 11, end == std::string::npos ? std::string::npos : end - tc - 11),
+                                      nullptr, false);
+        if (!call.is_object())
+            return out;
+        const std::string name = call.value("name", std::string());
+        std::string lower = name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return (char) tolower(c); });
+        if (lower.find("write") == std::string::npos && lower.find("edit") == std::string::npos)
+            return out;
+        json args = call.value("arguments", json::object());
+        if (args.is_string())
+            args = json::parse(args.get<std::string>(), nullptr, false);
+        if (!args.is_object())
+            return out;
+        std::string path;
+        for (const char* k : { "path", "file_path", "file", "filename" }) {
+            if (args.contains(k) && args[k].is_string()) {
+                path = args[k].get<std::string>();
+                break;
+            }
+        }
+        std::string text;
+        if (args.contains("content") && args["content"].is_string()) {
+            text = args["content"].get<std::string>();
+        } else if (args.contains("edits") && args["edits"].is_array()) {
+            for (const auto& e : args["edits"])
+                if (e.is_object() && e.contains("newText") && e["newText"].is_string())
+                    text += e["newText"].get<std::string>() + "\n";
+        }
+        if (path.empty() || text.empty())
+            return out;
+        out.key = name + " " + path + " :: ";
+        out.summary = out.key + task_memo_scan::ExtractCodeExcerpt(text, 300);
+        return out;
+    }
+
     std::vector<std::string> ExtractArtifactLines(const std::string& content) {
         static const char* kVerbs[] = {"saved", "written", "created", "generated", "exported", "wrote", "已保存", "已生成"};
         std::vector<std::string> out;
@@ -348,9 +396,72 @@ namespace {
         return false;
     }
 
+    bool IsWrapperLine(const std::string& trimmed) {
+        static const char* kPrefixes[] = {
+            "[exit code", "---", "[full_output_saved", "[truncation_advice", "[stderr]", "DSP_INFO",
+            "<tool_response>", "</tool_response>",
+        };
+        for (const char* p : kPrefixes)
+            if (trimmed.rfind(p, 0) == 0)
+                return true;
+        return false;
+    }
+
+    bool IsPythonExceptionLine(const std::string& line) {
+        if (line.empty() || std::isspace(static_cast<unsigned char>(line[0])))
+            return false;
+        size_t end = 0;
+        while (end < line.size() && (std::isalnum(static_cast<unsigned char>(line[end])) || line[end] == '_' || line[end] == '.'))
+            ++end;
+        if (end == 0 || (end < line.size() && line[end] != ':' && line[end] != '\r'))
+            return false;
+        const std::string ident = line.substr(0, end);
+        for (const char* suffix : { "Error", "Exception" }) {
+            const size_t n = strlen(suffix);
+            if (ident.size() > n && ident.compare(ident.size() - n, n, suffix) == 0)
+                return true;
+        }
+        return ident == "KeyboardInterrupt" || ident == "SystemExit";
+    }
+
+    std::string LastPythonExceptionLine(const std::string& content) {
+        std::string found;
+        size_t pos = 0;
+        while (pos <= content.size()) {
+            const size_t nl = content.find('\n', pos);
+            const size_t end = (nl == std::string::npos) ? content.size() : nl;
+            const std::string line = content.substr(pos, end - pos);
+            if (IsPythonExceptionLine(line))
+                found = task_memo_scan::Trim(line);
+            if (nl == std::string::npos)
+                break;
+            pos = nl + 1;
+        }
+        return found;
+    }
+
+    std::string LastOutputLine(const std::string& content) {
+        std::string last;
+        size_t pos = 0;
+        while (pos <= content.size()) {
+            const size_t nl = content.find('\n', pos);
+            const size_t end = (nl == std::string::npos) ? content.size() : nl;
+            const std::string trimmed = task_memo_scan::Trim(content.substr(pos, end - pos));
+            if (!trimmed.empty() && !IsWrapperLine(trimmed))
+                last = trimmed;
+            if (nl == std::string::npos)
+                break;
+            pos = nl + 1;
+        }
+        return last;
+    }
+
     std::string FirstFailureLineImpl(const std::string& content) {
         if (!LooksLikeFailure(content))
             return "";
+        const std::string exception = LastPythonExceptionLine(content);
+        if (!exception.empty())
+            return safe_utf8_truncate(exception, 110, "");
         std::string fallback;
         size_t pos = 0;
         while (pos <= content.size()) {
@@ -369,7 +480,76 @@ namespace {
         }
         if (!fallback.empty())
             return fallback;
-        return HasNonZeroExitMarker(content) ? "nonzero_exit" : "structured_error";
+        if (!HasNonZeroExitMarker(content))
+            return "structured_error";
+        const std::string tail = LastOutputLine(content);
+        return tail.empty() ? std::string("nonzero_exit") : "exit: " + safe_utf8_truncate(tail, 110, "");
+    }
+
+    bool IsStatusLine(const std::string& trimmed) {
+        if (trimmed.size() < 3 || trimmed.size() > 48 || !std::isalpha(static_cast<unsigned char>(trimmed[0])))
+            return false;
+        size_t plain = 0;
+        for (char c : trimmed)
+            if (std::isalpha(static_cast<unsigned char>(c)) || c == ' ' || c == '.' || c == '-' || c == '_')
+                ++plain;
+        return plain * 10 >= trimmed.size() * 7 && !LineHasFailureSignal(trimmed);
+    }
+
+    std::string ExtractFailureFacts(const std::string& content, size_t max_len) {
+        const std::vector<std::string> lines = task_memo_scan::SplitLines(content);
+        const std::string exception = LastPythonExceptionLine(content);
+        const size_t signal_limit = exception.empty() ? 2 : 1;
+        const size_t signal_chars = exception.empty() ? 80 : 60;
+        size_t head = std::string::npos;
+        size_t first_signal = std::string::npos;
+        size_t exception_line = std::string::npos;
+        std::vector<std::string> signals;
+        for (size_t i = 0; i < lines.size(); ++i) {
+            const std::string trimmed = task_memo_scan::Trim(lines[i]);
+            if (trimmed.empty() || IsWrapperLine(trimmed))
+                continue;
+            if (head == std::string::npos)
+                head = i;
+            if (IsPythonExceptionLine(lines[i]))
+                exception_line = i;
+            if (LineHasFailureSignal(lines[i]) && trimmed.find("Traceback (most recent call last)") == std::string::npos) {
+                if (first_signal == std::string::npos)
+                    first_signal = i;
+                if (signals.size() < signal_limit)
+                    signals.push_back(safe_utf8_truncate(trimmed, signal_chars, "..."));
+            }
+        }
+        std::vector<std::string> parts;
+        auto add = [&parts](const std::string& s) {
+            if (!s.empty() && std::find(parts.begin(), parts.end(), s) == parts.end())
+                parts.push_back(s);
+        };
+        if (head != std::string::npos)
+            add(safe_utf8_truncate(task_memo_scan::Trim(lines[head]), 50, "..."));
+        const size_t anchor = std::min(first_signal, exception_line);
+        if (anchor != std::string::npos && head != std::string::npos) {
+            for (size_t i = anchor; i-- > head + 1;) {
+                const std::string trimmed = task_memo_scan::Trim(lines[i]);
+                if (IsStatusLine(trimmed)) {
+                    add(trimmed);
+                    break;
+                }
+            }
+        }
+        for (const auto& s : signals)
+            add(s);
+        add(safe_utf8_truncate(exception, 90, "..."));
+        if (HasNonZeroExitMarker(content)) {
+            const size_t pos = content.rfind("[exit code:");
+            const size_t close = content.find(']', pos);
+            if (close != std::string::npos && close - pos < 24)
+                add(content.substr(pos, close - pos + 1));
+        }
+        std::string out;
+        for (const auto& p : parts)
+            out += (out.empty() ? "" : " | ") + p;
+        return safe_utf8_truncate(out, max_len, "...");
     }
 
     void CapObjectSize(json& obj, size_t cap) {
@@ -418,6 +598,13 @@ namespace {
         return false;
     }
 
+    std::string DecodeJsonStringBody(const std::string& raw) {
+        if (raw.find('\\') == std::string::npos)
+            return raw;
+        const json decoded = json::parse("\"" + raw + "\"", nullptr, false);
+        return decoded.is_string() ? decoded.get<std::string>() : raw;
+    }
+
     std::string ExtractPathArgFrom(const std::string& assistant_content, size_t search_from) {
         static const char* kPathKeys[] = { "\"path\"", "\"file\"", "\"file_path\"", "\"filename\"" };
         for (const char* key : kPathKeys) {
@@ -428,7 +615,7 @@ namespace {
             size_t q1 = (colon == std::string::npos) ? std::string::npos : assistant_content.find('"', colon + 1);
             size_t q2 = (q1 == std::string::npos) ? std::string::npos : assistant_content.find('"', q1 + 1);
             if (q1 != std::string::npos && q2 != std::string::npos)
-                return assistant_content.substr(q1 + 1, q2 - q1 - 1);
+                return DecodeJsonStringBody(assistant_content.substr(q1 + 1, q2 - q1 - 1));
         }
         return "";
     }
@@ -650,11 +837,8 @@ namespace {
     }
 
     std::string ExtractKeyFacts(const std::string& content, size_t max_len) {
-        if (LooksLikeFailure(content)) {
-            size_t nl = content.find('\n');
-            std::string first_line = (nl == std::string::npos) ? content : content.substr(0, nl);
-            return safe_utf8_truncate(first_line, max_len, "...");
-        }
+        if (LooksLikeFailure(content))
+            return ExtractFailureFacts(content, max_len);
 
         std::vector<std::string> facts;
         try {
@@ -838,7 +1022,9 @@ json TaskMemoBuilder::BuildRuleLayer(
     std::string last_assistant_content;
     for (size_t i = 0; i < dropped_messages.size(); ++i) {
         const auto& m = dropped_messages[i];
-        std::string preview = ReplaceInvalidUtf8(ExtractKeyFacts(m.content, config_.rule_layer_preview_chars));
+        const bool tool_failed = m.role == "tool" && LooksLikeFailure(m.content);
+        std::string preview = ReplaceInvalidUtf8(ExtractKeyFacts(
+            m.content, tool_failed ? config_.rule_layer_preview_chars * 2 : config_.rule_layer_preview_chars));
         if (m.role == "user") {
             AppendCapped(entry["facts_constraints"], "用户提及: " + preview, kMaxItemsPerField);
             size_t todo_pos = m.content.find("TODO");
@@ -852,7 +1038,7 @@ json TaskMemoBuilder::BuildRuleLayer(
                 AppendCapped(entry["facts_constraints"], "思考结论: " + ReplaceInvalidUtf8(conclusion), kMaxItemsPerField);
             last_assistant_content = m.content;
         } else if (m.role == "tool") {
-            bool failed = LooksLikeFailure(m.content);
+            const bool failed = tool_failed;
             std::string call_content;
             if (i < dropped_tool_call_content.size())
                 call_content = dropped_tool_call_content[i];
@@ -868,6 +1054,9 @@ json TaskMemoBuilder::BuildRuleLayer(
                 CapObjectSize(entry["tool_state"], kMaxItemsPerField);
             }
             const std::string call = ExtractToolCallSummary(call_content);
+            const WriteCall write_call = failed ? WriteCall{} : SummarizeWriteCall(call_content);
+            const std::string call_text = ReplaceInvalidUtf8(
+                write_call.summary.empty() ? safe_utf8_truncate(call, 200, "...") : write_call.summary);
             const std::string tool_name = call.substr(0, call.find(' '));
             const bool reads_content = IsReadLikeToolName(tool_name) || tool_name.find("fetch") != std::string::npos;
             std::string action_source;
@@ -885,7 +1074,7 @@ json TaskMemoBuilder::BuildRuleLayer(
             }
             if (!indexed_read)
                 task_memo_scan::AppendCompletedRow(entry["completed"], (failed ? "失败: " : "成功: ") +
-                    (call.empty() ? std::string() : ReplaceInvalidUtf8(safe_utf8_truncate(call, 200, "...")) + " -> ") + preview + action_source, kMaxItemsPerField);
+                    (call.empty() ? std::string() : call_text + " -> ") + preview + action_source, kMaxItemsPerField, write_call.key);
             if (!failed && !call.empty()) {
                 const std::string tool = call.substr(0, call.find(' '));
                 if (!entry.contains("last_success") || !entry["last_success"].is_object())
@@ -943,12 +1132,9 @@ json TaskMemoBuilder::BuildRuleLayer(
                     if (!entry["_hard_rule_files"].contains(read_path)) {
                         entry["_hard_rule_files"][read_path] = true;
                         for (const auto& rule : task_memo_scan::ExtractHardRules(m.content, kMaxHardRulesPerFile, kMaxHardRuleChars)) {
-                            if (entry["hard_rules"].size() >= kMaxHardRules) break;
-                            const std::string item = ReplaceInvalidUtf8(rule);
-                            bool dup = false;
-                            for (const auto& r : entry["hard_rules"])
-                                if (r.is_string() && r.get<std::string>() == item) { dup = true; break; }
-                            if (!dup) entry["hard_rules"].push_back(item);
+                            task_memo_scan::AdmitHardRule(entry["hard_rules"], entry["_hard_rule_src"],
+                                                          ReplaceInvalidUtf8(rule),
+                                                          task_memo_scan::NormalizePath(StripRangeSuffix(read_path)), kMaxHardRules);
                         }
                     }
                 }
@@ -1204,7 +1390,7 @@ TaskMemoBuilder::UpdateResult TaskMemoBuilder::Update(const json& raw_messages,
             model_entry["_next_page_id"] = entry["_next_page_id"];
             // read_files（已读文件索引）同理：模型层不感知、不生成，必须显式透传。
             model_entry["read_files"] = entry["read_files"];
-            for (const char* k : {"hard_rules", "_hard_rule_files", "pending_refs", "artifacts", "last_success", "tried_queries", "tried_queries_count"})
+            for (const char* k : {"hard_rules", "_hard_rule_src", "_hard_rule_files", "pending_refs", "artifacts", "last_success", "tried_queries", "tried_queries_count"})
                 if (entry.contains(k))
                     model_entry[k] = entry[k];
             // original_goal_raw/confidence 权威兜底，从 entry 显式透传，不允许模型层输出覆盖。

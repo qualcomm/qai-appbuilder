@@ -38,6 +38,7 @@ struct DocRef
     std::string path;
     std::string section;
     std::string cite;
+    bool marked = false;
 };
 
 struct PageText
@@ -160,7 +161,9 @@ inline PageText ExtractPageText(const std::string &content, size_t first_line_hi
 
 inline bool IsHardRuleLine(const std::string &line)
 {
-    static const char *kMarkers[] = {"NEVER", "MUST", "MANDATORY", "Do NOT", "DO NOT", "必须", "禁止", "不得", "严禁"};
+    static const char *kMarkers[] = {"NEVER",         "MUST",           "MANDATORY", "REQUIRED", "Do NOT",
+                                     "DO NOT",        "Non-negotiable", "NON-NEGOTIABLE", "必须", "禁止",
+                                     "不得",          "严禁"};
     for (const char *k : kMarkers)
         if (line.find(k) != std::string::npos)
             return true;
@@ -170,14 +173,20 @@ inline bool IsHardRuleLine(const std::string &line)
 inline std::vector<std::string> ExtractHardRules(const std::string &content, size_t max_rules, size_t cap)
 {
     std::vector<std::string> out;
+    bool in_fence = false;
     for (const std::string &raw : SplitLines(content))
     {
         if (out.size() >= max_rules)
             break;
-        const size_t first = raw.find_first_not_of(" \t\r>");
-        if (first == std::string::npos || raw[first] == '#' || raw[first] == '|')
+        if (IsFenceLine(raw))
+        {
+            in_fence = !in_fence;
             continue;
-        const size_t body = raw.find_first_not_of(" \t\r>-*", first);
+        }
+        const size_t first = raw.find_first_not_of(" \t\r>");
+        if (first == std::string::npos || (raw[first] == '#' && !in_fence))
+            continue;
+        const size_t body = raw.find_first_not_of(" \t\r>-*|#", first);
         if (body == std::string::npos)
             continue;
         const std::string line = Trim(raw.substr(body));
@@ -186,6 +195,60 @@ inline std::vector<std::string> ExtractHardRules(const std::string &content, siz
         out.push_back(ClipKeepTail(line, cap));
     }
     return out;
+}
+
+inline void AdmitHardRule(json &rules, json &sources, const std::string &rule, const std::string &doc, size_t cap)
+{
+    if (!rules.is_array())
+        rules = json::array();
+    if (!sources.is_array())
+        sources = json::array();
+    while (sources.size() < rules.size())
+        sources.push_back("");
+    while (sources.size() > rules.size())
+        sources.erase(sources.size() - 1);
+    for (const auto &r : rules)
+        if (r.is_string() && r.get<std::string>() == rule)
+            return;
+    if (rules.size() >= cap)
+    {
+        std::vector<std::pair<std::string, size_t>> holders;
+        for (const auto &s : sources)
+        {
+            const std::string name = s.is_string() ? s.get<std::string>() : std::string();
+            bool found = false;
+            for (auto &h : holders)
+                if (h.first == name)
+                {
+                    ++h.second;
+                    found = true;
+                }
+            if (!found)
+                holders.emplace_back(name, 1);
+        }
+        size_t mine = 0;
+        const std::pair<std::string, size_t> *victim = nullptr;
+        for (const auto &h : holders)
+        {
+            if (h.first == doc)
+                mine = h.second;
+            if (!victim || h.second > victim->second)
+                victim = &h;
+        }
+        if (!victim || victim->first == doc || victim->second < 2 || victim->second <= mine + 1)
+            return;
+        for (size_t i = rules.size(); i-- > 0;)
+        {
+            if (sources[i].is_string() && sources[i].get<std::string>() == victim->first)
+            {
+                rules.erase(i);
+                sources.erase(i);
+                break;
+            }
+        }
+    }
+    rules.push_back(rule);
+    sources.push_back(doc);
 }
 
 inline std::vector<Heading> ExtractHeadings(const std::string &text, size_t first_line)
@@ -311,13 +374,23 @@ inline std::vector<DocRef> ExtractDocRefs(const std::string &text, size_t max_re
                     ++stop;
                 section = ClipHead(Trim(line.substr(rest, stop - rest)), kHeadTitleChars);
             }
-            bool dup = false;
-            for (const DocRef &r : out)
-                dup = dup || (r.path == path && r.section == section);
-            if (dup)
-                continue;
+            const bool marked = IsHardRuleLine(trimmed);
             const size_t body = trimmed.find_first_not_of(">-* \t");
-            out.push_back({path, section, ClipKeepTail(trimmed.substr(body == std::string::npos ? 0 : body), cite_cap)});
+            const std::string cite = ClipKeepTail(trimmed.substr(body == std::string::npos ? 0 : body), cite_cap);
+            DocRef *same = nullptr;
+            for (DocRef &r : out)
+                if (r.path == path && r.section == section)
+                    same = &r;
+            if (same)
+            {
+                if (marked && !same->marked)
+                {
+                    same->cite = cite;
+                    same->marked = true;
+                }
+                continue;
+            }
+            out.push_back({path, section, cite, marked});
         }
     }
     return out;
@@ -467,8 +540,15 @@ inline void FoldRefs(json &pending, const std::vector<DocRef> &refs, const json 
         pending = json::object();
     for (const DocRef &ref : refs)
     {
-        if (PathMatches(ref.path, own_path) || pending.contains(ref.path))
+        if (PathMatches(ref.path, own_path))
             continue;
+        auto existing = pending.find(ref.path);
+        if (existing != pending.end())
+        {
+            if (ref.marked && existing->is_object() && !existing->value("marked", false))
+                *existing = json{{"section", ref.section}, {"cite", ref.cite}, {"marked", true}};
+            continue;
+        }
         bool already_read = false;
         if (read_files.is_object())
             for (auto it = read_files.begin(); it != read_files.end() && !already_read; ++it)
@@ -477,7 +557,8 @@ inline void FoldRefs(json &pending, const std::vector<DocRef> &refs, const json 
             continue;
         while (pending.size() >= cap)
             pending.erase(pending.begin());
-        pending[ref.path] = json{{"section", ref.section}, {"cite", ref.cite}};
+        pending[ref.path] = ref.marked ? json{{"section", ref.section}, {"cite", ref.cite}, {"marked", true}}
+                                       : json{{"section", ref.section}, {"cite", ref.cite}};
     }
 }
 
@@ -590,13 +671,76 @@ inline bool IsWriteLikeRow(const std::string &row)
     return tool.find("write") != std::string::npos || tool.find("edit") != std::string::npos;
 }
 
-inline void AppendCompletedRow(json &field, const std::string &row, size_t cap)
+inline size_t CountOccurrences(const std::string &s, const char *needle)
+{
+    size_t n = 0;
+    for (size_t pos = s.find(needle); pos != std::string::npos; pos = s.find(needle, pos + 3))
+        ++n;
+    return n;
+}
+
+inline std::string ExtractCodeExcerpt(const std::string &text, size_t cap)
+{
+    constexpr size_t kMaxCodeLines = 10;
+    constexpr size_t kMaxNotes = 2;
+    std::vector<std::string> code;
+    std::vector<std::string> notes;
+    bool in_doc = false;
+    for (const std::string &raw : SplitLines(text))
+    {
+        const std::string t = Trim(raw);
+        if (t.empty())
+            continue;
+        const size_t quotes = CountOccurrences(t, "\"\"\"") + CountOccurrences(t, "'''");
+        if (in_doc)
+        {
+            if (quotes % 2 == 1)
+                in_doc = false;
+            continue;
+        }
+        if (t.rfind("\"\"\"", 0) == 0 || t.rfind("'''", 0) == 0)
+        {
+            in_doc = quotes % 2 == 1;
+            continue;
+        }
+        const bool directive = t.rfind("#include", 0) == 0 || t.rfind("#define", 0) == 0 || t.rfind("#!", 0) == 0;
+        const bool comment = !directive && (t[0] == '#' || t.rfind("//", 0) == 0 || t.rfind("REM ", 0) == 0 ||
+                                            t.rfind("::", 0) == 0);
+        if (comment)
+        {
+            if (notes.size() < kMaxNotes && IsHardRuleLine(t))
+            {
+                const size_t body = t.find_first_not_of("#/: -");
+                notes.push_back(ClipHead(body == std::string::npos ? t : t.substr(body), 100));
+            }
+            continue;
+        }
+        if (code.size() < kMaxCodeLines)
+            code.push_back(ClipHead(t, 110));
+    }
+    std::string out;
+    for (const std::string &c : code)
+        out += (out.empty() ? "" : " ; ") + c;
+    for (size_t i = 0; i < notes.size(); ++i)
+        out += (i == 0 ? " [notes: " : " | ") + notes[i];
+    if (!notes.empty())
+        out += "]";
+    return ClipHead(out, cap);
+}
+
+inline void AppendCompletedRow(json &field, const std::string &row, size_t cap, const std::string &supersede_key = "")
 {
     if (!field.is_array())
         field = json::array();
     for (const auto &existing : field)
         if (existing.is_string() && existing.get<std::string>() == row)
             return;
+    if (!supersede_key.empty())
+    {
+        for (size_t i = field.size(); i-- > 0;)
+            if (field[i].is_string() && field[i].get<std::string>().find(supersede_key) != std::string::npos)
+                field.erase(field.begin() + static_cast<long long>(i));
+    }
     field.push_back(row);
     while (field.size() > cap)
     {
