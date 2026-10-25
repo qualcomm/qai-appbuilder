@@ -1862,14 +1862,18 @@ private:
             }
         }
         const auto &rg_cfg = instance_config_->i_model_config_.GetToolCallRepairConfig().redundant_call_guard;
-        if (reason.empty() && rg_cfg.enabled)
+        std::string repeat_key;
+        int repeat_count = 0;
+        bool repeat_count_checked = false;
+        if (rg_cfg.enabled)
         {
-            const std::string key = ToolCallRepetitionStore::MakeKey(session_key, instance_config_->get_model_name());
-            const int count = ToolCallRepetitionStore::GetInstance().GetRepeatCount(key);
-            if (count >= 2)
+            repeat_key = ToolCallRepetitionStore::MakeKey(session_key, instance_config_->get_model_name());
+            repeat_count = ToolCallRepetitionStore::GetInstance().GetRepeatCount(repeat_key);
+            repeat_count_checked = true;
+            if (reason.empty() && repeat_count >= 2)
             {
-                reason = "repeat_count=" + std::to_string(count);
-                signature = "repeat:" + key;
+                reason = "repeat_count=" + std::to_string(repeat_count);
+                signature = "repeat:" + repeat_key;
             }
         }
 
@@ -1891,6 +1895,12 @@ private:
             st = SessionThinkState{};
         st.touched = now;
         ++st.tool_turns;
+        if (repeat_count_checked && repeat_count < 2)
+        {
+            const auto it = st.per_signature.find("repeat:" + repeat_key);
+            if (it != st.per_signature.end())
+                it->second = 0;
+        }
         if (reason.empty())
             return false;
 
