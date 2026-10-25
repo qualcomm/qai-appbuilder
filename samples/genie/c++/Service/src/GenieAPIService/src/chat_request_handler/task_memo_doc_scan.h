@@ -113,6 +113,89 @@ inline std::vector<std::string> SplitLines(const std::string &text)
     return lines;
 }
 
+inline bool IsRuntimeLogLine(const std::string &line)
+{
+    const std::string trimmed = Trim(line);
+    if (trimmed.size() < 3 || trimmed[0] != '<' || trimmed[2] != '>')
+        return false;
+    switch (trimmed[1])
+    {
+        case 'E':
+        case 'W':
+        case 'I':
+        case 'D':
+        case 'V':
+            return true;
+        default:
+            return false;
+    }
+}
+
+inline bool IsBinaryContent(const std::string &content)
+{
+    if (content.size() < 256)
+        return false;
+    const size_t sample_size = std::min<size_t>(content.size(), 4096);
+    size_t suspicious = 0;
+    for (size_t i = 0; i < sample_size; ++i)
+    {
+        const unsigned char c = static_cast<unsigned char>(content[i]);
+        if (c == 0xEF && i + 2 < sample_size && static_cast<unsigned char>(content[i + 1]) == 0xBF &&
+            static_cast<unsigned char>(content[i + 2]) == 0xBD)
+        {
+            ++suspicious;
+            i += 2;
+        }
+        else if ((c < 0x20 && c != '\n' && c != '\r' && c != '\t') || c == 0x7F)
+        {
+            ++suspicious;
+        }
+    }
+    return suspicious >= 8 && suspicious * 100 >= sample_size * 2;
+}
+
+inline std::string BinaryResultStub(size_t size)
+{
+    return "[binary content, " + std::to_string(size) + " bytes, not displayed]";
+}
+
+inline bool IsToolNoiseLine(const std::string &trimmed)
+{
+    if (trimmed.empty() || IsRuntimeLogLine(trimmed))
+        return true;
+    static const char *kPrefixes[] = {"[WARNING]", "[warning]", "[snapshot:", "[full_output_saved",
+                                      "[truncation_advice", "<tool_response>", "</tool_response>"};
+    for (const char *prefix : kPrefixes)
+        if (trimmed.rfind(prefix, 0) == 0)
+            return true;
+    if (trimmed.rfind("[exit code:", 0) == 0 || trimmed == "---" || trimmed.find("showed lines ") != std::string::npos)
+        return true;
+    const size_t timing = trimmed.find("ms [");
+    if (timing > 0 && std::all_of(trimmed.begin(), trimmed.begin() + timing,
+                                  [](char c) { return std::isdigit(static_cast<unsigned char>(c)); }))
+        return true;
+    return false;
+}
+
+inline std::string TailFacts(const std::string &content, size_t cap)
+{
+    std::vector<std::string> facts;
+    for (const std::string &raw : SplitLines(content))
+    {
+        const std::string trimmed = Trim(raw);
+        if (IsToolNoiseLine(trimmed))
+            continue;
+        facts.push_back(ClipHead(trimmed, 100));
+    }
+    if (facts.empty())
+        return "";
+    const size_t first = facts.size() > 4 ? facts.size() - 4 : 0;
+    std::string out;
+    for (size_t i = first; i < facts.size(); ++i)
+        out += (out.empty() ? "" : "\n") + facts[i];
+    return ClipKeepTail(out, cap);
+}
+
 inline bool IsFenceLine(const std::string &line)
 {
     const std::string t = Trim(line);
@@ -910,7 +993,14 @@ inline bool IsWriteLikeRow(const std::string &row)
     const size_t begin = colon + 2;
     const size_t end = row.find(' ', begin);
     const std::string tool = Lower(row.substr(begin, end == std::string::npos ? std::string::npos : end - begin));
-    return tool.find("write") != std::string::npos || tool.find("edit") != std::string::npos;
+    if (tool.find("write") != std::string::npos || tool.find("edit") != std::string::npos)
+        return true;
+    if (tool != "exec" || row.rfind("成功: exec ", 0) != 0)
+        return false;
+    for (const std::string &token : SplitNameTokens(row))
+        if (HasScriptExtension(token))
+            return true;
+    return false;
 }
 
 inline size_t CountOccurrences(const std::string &s, const char *needle)

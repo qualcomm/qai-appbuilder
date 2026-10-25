@@ -255,6 +255,33 @@ bool RunTaskMemoDocScanSelfTest(std::ostream &out)
     }
 
     {
+        const std::string success =
+            "Loading model\n<E> Error 0x200: failed to close queue\n[Results] Detected 3 objects\n"
+            "[DONE] Annotated image saved: tabletop_det.jpg\n";
+        runner.Check("failure_runtime_log_ignored", "runtime shutdown diagnostics do not turn a successful result into a failure",
+                     !TaskMemoBuilder::LooksLikeToolFailure(success));
+        runner.Check("failure_runtime_error_retained", "a runtime log with a real failure signal remains visible to failure extraction",
+                     Contains(TaskMemoBuilder::FirstFailureLine("<E> Failed to load skel\n[exit code: 1]"), "Failed to load skel"));
+        runner.Check("tail_facts_drop_noise", "success facts keep result lines and drop runtime, warning and timing noise",
+                     task_memo_scan::TailFacts("Loading\n<E> Error 0x200: failed to close queue\n[WARNING] noisy\n12ms [done]\n"
+                                                "[Results] Detected 3 objects\n[DONE] Saved tabletop_det.jpg\n", 500) ==
+                         "Loading\n[Results] Detected 3 objects\n[DONE] Saved tabletop_det.jpg");
+    }
+
+    {
+        const std::string binary = std::string(300, 'A') + std::string("\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD", 30);
+        const std::string markdown = std::string(300, 'a') + "\ntext\n";
+        runner.Check("binary_content_detected", "binary-like replacement content is detected",
+                     task_memo_scan::IsBinaryContent(binary));
+        runner.Check("binary_content_stub", "binary content is represented by a compact deterministic stub",
+                     task_memo_scan::BinaryResultStub(binary.size()).find("not displayed") != std::string::npos);
+        runner.Check("binary_markdown_not_detected", "plain text is not classified as binary",
+                     !task_memo_scan::IsBinaryContent(markdown));
+        runner.Check("binary_short_not_detected", "short binary-like content is left alone",
+                     !task_memo_scan::IsBinaryContent(std::string(200, '\0')));
+    }
+
+    {
         const std::string text =
             "# Title with MUST in heading\n"
             "```python\n"
@@ -440,6 +467,20 @@ bool RunTaskMemoDocScanSelfTest(std::ostream &out)
         runner.Check("refs_upgrade_respects_cap", "promoting a plain reference also respects the protection cap",
                      upgrade.contains("d/u.md") && upgrade["d/u.md"]["cite"] == "MUST now" &&
                          !upgrade.contains("d/n0.md") && task_memo_scan::CountMarkedRefs(upgrade) == 4);
+    }
+
+    {
+        json rows = json::array();
+        task_memo_scan::AppendCompletedRow(rows, "成功: exec python.exe infer.py --model x.bin -> done", 3,
+                                           "exec python.exe infer.py");
+        for (int i = 0; i < 20; ++i)
+            task_memo_scan::AppendCompletedRow(rows, "成功: exec dir /b item" + std::to_string(i), 3);
+        runner.Check("completed_protects_script_exec", "script exec rows survive observation-only exec rows",
+                     rows.size() == 3 && Contains(rows[0].get<std::string>(), "infer.py"));
+        task_memo_scan::AppendCompletedRow(rows, "成功: exec python.exe infer.py --model y.bin -> done", 3,
+                                           "exec python.exe infer.py");
+        runner.Check("completed_supersedes_script_exec", "a newer compact script exec replaces the older row",
+                     rows.size() == 3 && Contains(rows[2].get<std::string>(), "--model y.bin"));
     }
 
     {

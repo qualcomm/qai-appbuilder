@@ -7,6 +7,7 @@
 //==============================================================================
 
 #include "tool_call_repetition_store.h"
+#include <unordered_set>
 
 ToolCallRepetitionStore& ToolCallRepetitionStore::GetInstance()
 {
@@ -26,6 +27,21 @@ std::string ToolCallRepetitionStore::MakeKey(const std::string& session_key, con
     if (session_key.empty() || model_name.empty())
         return "";
     return session_key + "::" + model_name;
+}
+
+size_t ToolCallRepetitionStore::CountRepeatsInWindow(const std::vector<std::string>& keys, size_t window)
+{
+    if (window == 0 || keys.empty())
+        return 0;
+    const size_t begin = keys.size() > window ? keys.size() - window : 0;
+    std::unordered_set<std::string> seen;
+    size_t repeats = 0;
+    for (size_t i = begin; i < keys.size(); ++i)
+    {
+        if (!keys[i].empty() && !seen.insert(keys[i]).second)
+            ++repeats;
+    }
+    return repeats;
 }
 
 void ToolCallRepetitionStore::RecordSignatureTotal(Entry& entry, const std::string& signature)

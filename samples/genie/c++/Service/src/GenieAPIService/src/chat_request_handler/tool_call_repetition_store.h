@@ -16,6 +16,7 @@
 #include <mutex>
 #include <chrono>
 #include <cstddef>
+#include <vector>
 
 class ToolCallRepetitionStore
 {
@@ -25,6 +26,8 @@ public:
     void Configure(const ToolCallRepairConfig::RedundantToolCallConfig& cfg);
 
     static std::string MakeKey(const std::string& session_key, const std::string& model_name);
+
+    static size_t CountRepeatsInWindow(const std::vector<std::string>& keys, size_t window);
 
     int RecordCall(const std::string& key, const std::string& signature);
 

@@ -1832,6 +1832,47 @@ private:
                "\nKeep satisfying it, or say why it can no longer be met and ask the user before changing it.\n";
     }
 
+    static std::string CycleToolCallKey(const json &tool_call)
+    {
+        if (!tool_call.is_object() || !tool_call.contains("function") || !tool_call["function"].is_object())
+            return "";
+        const auto &fn = tool_call["function"];
+        const std::string name = fn.value("name", std::string());
+        if (name.empty())
+            return "";
+        std::string raw_args;
+        if (fn.contains("arguments"))
+        {
+            if (fn["arguments"].is_string())
+                raw_args = fn["arguments"].get<std::string>();
+            else
+                raw_args = fn["arguments"].dump();
+        }
+        nlohmann::json parsed = nlohmann::json::parse(raw_args, nullptr, false);
+        const std::string args = parsed.is_discarded() ? raw_args : parsed.dump();
+        return name + "\x1f" + args;
+    }
+
+    static std::vector<std::string> CollectCycleToolCallKeys(const json &messages)
+    {
+        std::vector<std::string> keys;
+        if (!messages.is_array())
+            return keys;
+        for (const auto &message : messages)
+        {
+            if (!message.is_object() || message.value("role", "") != "assistant" ||
+                !message.contains("tool_calls") || !message["tool_calls"].is_array())
+                continue;
+            for (const auto &tool_call : message["tool_calls"])
+            {
+                const std::string key = CycleToolCallKey(tool_call);
+                if (!key.empty())
+                    keys.push_back(key);
+            }
+        }
+        return keys;
+    }
+
     bool ShouldThinkThisTurn(bool *failure_trigger = nullptr) const
     {
         const auto &at_cfg = instance_config_->i_model_config_.GetAdaptiveThinkingConfig();
@@ -1884,6 +1925,26 @@ private:
                 signature = "near:" + near_tpl;
             }
         }
+        constexpr size_t kCycleWindow = 6;
+        constexpr size_t kCycleRepeatThreshold = 4;
+        bool cycle_checked = false;
+        size_t cycle_repeats = 0;
+        std::string cycle_signature;
+        if (reason.empty())
+        {
+            const std::vector<std::string> cycle_keys = CollectCycleToolCallKeys(messages);
+            if (!cycle_keys.empty())
+            {
+                cycle_repeats = ToolCallRepetitionStore::CountRepeatsInWindow(cycle_keys, kCycleWindow);
+                cycle_signature = "cycle:" + cycle_keys.back();
+                cycle_checked = true;
+                if (cycle_repeats >= kCycleRepeatThreshold)
+                {
+                    reason = "cycle_repeat";
+                    signature = cycle_signature;
+                }
+            }
+        }
         const auto &rg_cfg = instance_config_->i_model_config_.GetToolCallRepairConfig().redundant_call_guard;
         std::string repeat_key;
         int repeat_count = 0;
@@ -1921,6 +1982,12 @@ private:
         if (repeat_count_checked && repeat_count < 2)
         {
             const auto it = st.per_signature.find("repeat:" + repeat_key);
+            if (it != st.per_signature.end())
+                it->second = 0;
+        }
+        if (cycle_checked && cycle_repeats < kCycleRepeatThreshold)
+        {
+            const auto it = st.per_signature.find(cycle_signature);
             if (it != st.per_signature.end())
                 it->second = 0;
         }

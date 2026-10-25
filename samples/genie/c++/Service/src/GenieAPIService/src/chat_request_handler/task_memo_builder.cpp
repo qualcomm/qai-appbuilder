@@ -418,7 +418,8 @@ namespace {
         while (pos <= content.size()) {
             const size_t nl = content.find('\n', pos);
             const size_t end = (nl == std::string::npos) ? content.size() : nl;
-            if (LineHasFailureSignal(content.substr(pos, end - pos)))
+            const std::string line = content.substr(pos, end - pos);
+            if (!task_memo_scan::IsRuntimeLogLine(line) && LineHasFailureSignal(line))
                 return true;
             if (nl == std::string::npos)
                 break;
@@ -1102,9 +1103,22 @@ json TaskMemoBuilder::BuildRuleLayer(
     std::string last_assistant_content;
     for (size_t i = 0; i < dropped_messages.size(); ++i) {
         const auto& m = dropped_messages[i];
+        const bool binary = m.role == "tool" &&
+            (task_memo_scan::IsBinaryContent(m.content) || m.content.rfind("[binary content, ", 0) == 0);
         const bool tool_failed = m.role == "tool" && LooksLikeFailure(m.content);
-        std::string preview = ReplaceInvalidUtf8(ExtractKeyFacts(
-            m.content, tool_failed ? config_.rule_layer_preview_chars * 2 : config_.rule_layer_preview_chars));
+        std::string preview;
+        if (binary)
+            preview = task_memo_scan::BinaryResultStub(m.content.size());
+        else if (m.role == "tool" && !tool_failed)
+        {
+            json parsed = json::parse(m.content, nullptr, false);
+            preview = ReplaceInvalidUtf8(parsed.is_discarded()
+                ? task_memo_scan::TailFacts(m.content, config_.rule_layer_preview_chars)
+                : ExtractKeyFacts(m.content, config_.rule_layer_preview_chars));
+        }
+        else
+            preview = ReplaceInvalidUtf8(ExtractKeyFacts(
+                m.content, tool_failed ? config_.rule_layer_preview_chars * 2 : config_.rule_layer_preview_chars));
         if (m.role == "user") {
             AppendCapped(entry["facts_constraints"], "用户提及: " + preview, kMaxItemsPerField);
             size_t todo_pos = m.content.find("TODO");
@@ -1127,8 +1141,9 @@ json TaskMemoBuilder::BuildRuleLayer(
             const std::string read_path = ExtractReadToolPathImpl(call_content);
             size_t shown_first = 0, shown_last = 0, shown_total = 0;
             const bool indexed_read = !read_path.empty() &&
-                ComputeReadRange(read_path, m.content, shown_first, shown_last, shown_total) && !failed;
-            if (!indexed_read) {
+                ComputeReadRange(read_path, m.content, shown_first, shown_last, shown_total) && !failed && !binary;
+            const bool suppress_binary_read = binary && !read_path.empty();
+            if (!indexed_read && !suppress_binary_read) {
                 entry["tool_state"]["tool_result_" + std::to_string(tool_seq++)] =
                     (failed ? "失败: " : "成功: ") + preview;
                 CapObjectSize(entry["tool_state"], kMaxItemsPerField);
@@ -1155,10 +1170,11 @@ json TaskMemoBuilder::BuildRuleLayer(
                     }
                 }
             }
-            if (!indexed_read)
+            if (!indexed_read && !suppress_binary_read)
                 task_memo_scan::AppendCompletedRow(entry["completed"], (failed ? "失败: " : "成功: ") +
-                    (call.empty() ? std::string() : call_text + " -> ") + preview + action_source, kMaxItemsPerField, write_call.key);
-            if (!failed && !call.empty()) {
+                    (call.empty() ? std::string() : call_text + " -> ") + preview + action_source, kMaxItemsPerField,
+                    !write_call.key.empty() ? write_call.key : compact_call);
+            if (!failed && !binary && !call.empty()) {
                 const std::string tool = call.substr(0, call.find(' '));
                 if (!entry.contains("last_success") || !entry["last_success"].is_object())
                     entry["last_success"] = json::object();

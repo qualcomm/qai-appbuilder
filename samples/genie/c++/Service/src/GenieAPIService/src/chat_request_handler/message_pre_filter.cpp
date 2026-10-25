@@ -7,6 +7,7 @@
 //==============================================================================
 
 #include "message_pre_filter.h"
+#include "task_memo_doc_scan.h"
 #include "content_condenser.h"
 #include "../processor/harmony.h"
 #include "../gateway/security/security_utils.h"
@@ -2659,6 +2660,11 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
         for (size_t i = 0; i < filtered_msg.size(); i++) {
             if (get_json_value(filtered_msg[i], "role", BLANK_STRING) != "tool") continue;
             std::string content = get_json_value(filtered_msg[i], "content", BLANK_STRING);
+            if (task_memo_scan::IsBinaryContent(content)) {
+                filtered_msg[i]["content"] = task_memo_scan::BinaryResultStub(content.size());
+                capped_count++;
+                continue;
+            }
             if (content.size() <= cap_tokens) continue;
             std::string capped = CapToolResultHeadTail(content, CountTokens(content), cap_tokens);
             if (capped.size() < content.size()) {

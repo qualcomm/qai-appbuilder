@@ -8,6 +8,7 @@
 
 #include "tool_call_repetition_store_selftest.h"
 #include "tool_call_repetition_store.h"
+#include <vector>
 #include "../model/model_config.h"
 
 #include <chrono>
@@ -226,6 +227,17 @@ bool RunToolCallRepetitionSelfTest(std::ostream &out)
         runner.Check("scenario10_hot_signature_revisit_total",
                      "绕回热点签名后应返回其累计总次数11",
                      store.GetNonContiguousRepeatCount(key) == 11);
+    }
+
+    {
+        const std::vector<std::string> loop = {"a", "b", "c", "a", "b", "a", "b", "a", "b"};
+        const std::vector<std::string> healthy = {"a", "b", "c", "d", "e", "f"};
+        runner.Check("scenario11_cycle_window_counts_repeats", "the recent window counts previously seen calls",
+                     ToolCallRepetitionStore::CountRepeatsInWindow(loop, 6) == 4);
+        runner.Check("scenario11_cycle_window_ignores_old_calls", "calls outside the recent window do not affect the count",
+                     ToolCallRepetitionStore::CountRepeatsInWindow(loop, 3) == 1);
+        runner.Check("scenario11_cycle_window_healthy_zero", "a non-repeating recent window does not trigger",
+                     ToolCallRepetitionStore::CountRepeatsInWindow(healthy, 6) == 0);
     }
 
     store.Clear();
