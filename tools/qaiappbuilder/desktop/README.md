@@ -1,6 +1,6 @@
 # QAI ModelBuilder 桌面版(Tauri 2 + WebView2)
 
-一个很小的桌面壳(ARM64 约 2.9 MB,x64 约 3.1 MB),**只负责开一个应用窗口**,前端和后端都没有改:窗口加载的就是后端提供的同一份 `http://localhost:8989/`,和浏览器里看到的一样。安装包的开始菜单和桌面快捷方式指向它;浏览器版仍是安装目录里的 `Start.bat`。
+一个很小的桌面壳,**只负责开一个应用窗口**,前端和后端都没有改:窗口加载的就是后端提供的同一份 `http://localhost:8989/`,和浏览器里看到的一样。安装包的开始菜单和桌面快捷方式指向它;浏览器版仍是安装目录里的 `Start.bat`。
 
 ## 它做什么
 
@@ -38,7 +38,7 @@
 - 对每个架构 `cargo build --release`,并校验 exe 的 PE 机器类型(ARM64 = `0xAA64`,x64 = `0x8664`),不符就报错;
 - 把 exe 复制到 `dist\desktop\<arch>\`。
 
-编译缓存在 `.build\desktop-target\`(由 `src-tauri\.cargo\config.toml` 指定),所以 `desktop\` 目录只含源码。首次编译需要下载并编译约 450 个 crate:ARM64 约 3–4 分钟,x64 约 1–2 分钟;之后增量编译约 40 秒。公司代理常拦截证书吊销检查,`build.ps1` 默认设置了 `CARGO_HTTP_CHECK_REVOKE=false`。
+编译缓存在 `.build\desktop-target\`(由 `src-tauri\.cargo\config.toml` 指定),所以 `desktop\` 目录只含源码。首次编译要下载并编译约 450 个 crate,之后是增量编译。公司代理常拦截证书吊销检查,`build.ps1` 默认设置了 `CARGO_HTTP_CHECK_REVOKE=false`。
 
 ### 打进安装包
 
@@ -79,7 +79,7 @@
 - 应用自己的地址(`localhost` / `127.0.0.1` + 后端端口)留在窗口里,SSO 登录弹窗也一样。
 - 其他 `http(s)` 链接交给系统默认浏览器(`ShellExecuteW`)。
 - 其他协议(`file:`、`javascript:` 等)一律拒绝。
-- `<a download>` 下载、剪贴板、麦克风接口在 WebView2 里可用(已实测)。
+- `<a download>` 下载、剪贴板、麦克风接口在 WebView2 里可用。
 
 ## 与 `Start.bat` 的关系
 
@@ -117,4 +117,3 @@
 - 没有自定义标题栏,也没有托盘里的"新建会话 / 切换模型"这类与前端联动的功能(需要改前端)。
 - 壳依赖后端的 `/api/system/health` 和 `/api/system/exit`。
 - 只支持 Windows(`#[cfg(windows)]` 之外的路径没有实现)。
-- 实测范围见 `installer\README.md` 的"桌面版窗口 → 实测情况"。

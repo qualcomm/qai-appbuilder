@@ -3,10 +3,10 @@
 用 Inno Setup 为每个架构各打一个 `.exe`:预编译的前端 + 桌面版窗口(`QAIModelBuilder.exe`)+ 后端源码 + `uv` + `aria2c`。
 安装时再联网建 Python 环境。**不含 QAIRT SDK、不含测试/文档/模型。**
 
-| 产物 | 大小(实测 x64) | 说明 |
-|---|---|---|
-| `QAIModelBuilder-<ver>-x64-setup.exe` | 约 20 MB | x64 / Windows-on-ARM 上跑 x64 都可用 |
-| `QAIModelBuilder-<ver>-arm64-setup.exe` | 见 build 输出 | 仅 ARM64 |
+| 产物 | 说明 |
+|---|---|
+| `QAIModelBuilder-<ver>-x64-setup.exe` | x64 / Windows-on-ARM 上跑 x64 都可用 |
+| `QAIModelBuilder-<ver>-arm64-setup.exe` | 仅 ARM64 |
 
 ## 准备构建环境
 
@@ -29,9 +29,9 @@ winget install OpenJS.NodeJS          # 装 Node.js(自带 npm)
 npm install -g pnpm@11.9.0            # 装与仓库一致的 pnpm 版本
 ```
 
-`Build.bat` 找 Node/pnpm 的顺序:先看 `%LOCALAPPDATA%\QAIModelBuilder\node\`(`Setup.bat --frontend` 装的便携版),找不到就用 PATH 上的。**所以上面两条命令装的系统版本就够用**,不需要跑 `Setup.bat --frontend`。已实测:只有系统 Node 26 加 `npm install -g pnpm@11.9.0` 时,`Build.bat` 能成功构建(约 25 秒)。`winget install OpenJS.NodeJS` 这条命令本身没有在干净机器上执行过(本机的 Node 是之前装好的),winget 目前给的是 26.x,满足 ≥ 22 的要求。
+`Build.bat` 找 Node/pnpm 的顺序:先看 `%LOCALAPPDATA%\QAIModelBuilder\node\`(`Setup.bat --frontend` 装的便携版),找不到就用 PATH 上的。**所以上面两条命令装的系统版本就够用**,不需要跑 `Setup.bat --frontend`。
 
-> 这里用 `npm install -g pnpm` 而不是 `corepack enable`:本机的 Node 26 不带 corepack,命令不存在;`Setup.bat` 固定用的 Node 22 带 corepack,但上面这种方式在两种 Node 上都能用。
+> 用 `npm install -g pnpm`,不要用 `corepack enable`:较新的 Node 不再自带 corepack。
 
 ### 2. Rust
 
@@ -59,9 +59,7 @@ winget install Microsoft.VisualStudio.2022.BuildTools --override "--passive --wa
 | `Microsoft.VisualStudio.Component.VC.Tools.ARM64` | MSVC ARM64 |
 | `Microsoft.VisualStudio.Component.Windows11SDK.22621` | Windows SDK |
 
-> 这套 ID 和 `scripts\setup\install_vs.ps1` 用的一致,且已在本机用 `vswhere` 确认这三项都存在。安装体积较大(几个 GB),需要管理员权限和较长时间。
->
-> ⚠️ 上面这条 `winget ... --override` 命令**没有在干净机器上实际执行过**(打包机已经装了 Visual Studio Community 2022,这三项都在)。如果它报错,改用 Visual Studio Installer 图形界面,在“使用 C++ 的桌面开发”里勾选上面三项。
+> 这套 ID 和 `scripts\setup\install_vs.ps1` 用的一致。安装体积较大(几个 GB),需要管理员权限。也可以用 Visual Studio Installer 的图形界面,在“使用 C++ 的桌面开发”里勾选上面三项。
 
 ### 4. Inno Setup 6
 
@@ -108,7 +106,7 @@ Test-Path "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"    # True
 
 前置条件见上面的“准备构建环境”。
 
-输出在 `dist\installer\`(已被 `.gitignore`):`QAIModelBuilder-<ver>-x64-setup.exe`、`QAIModelBuilder-<ver>-arm64-setup.exe`。首次完整跑(含编译两个架构的 Rust 依赖)约 4 分钟;之后增量编译和 `-SkipFrontend` 会快很多。
+输出在 `dist\installer\`(已被 `.gitignore`):`QAIModelBuilder-<ver>-x64-setup.exe`、`QAIModelBuilder-<ver>-arm64-setup.exe`。
 
 ## 包里有什么(白名单)
 
@@ -133,19 +131,17 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
 2. 向导里可选:镜像(自动 / 官方 / 国内)、HTTP 代理。
 3. 执行 `setup_env.bat --arch <arch> --no-pause --with-browser --with-astgrep [--mirror ..] [--proxy ..]`(**不带 `--builder`**;两个 `--with-*` 写在 `.iss` 的 `#define SetupComponents` 里,安装和"修复"快捷方式共用):
    建 Python 3.13 运行时 venv(`%LOCALAPPDATA%\QAIModelBuilder\envs\`)、装依赖、初始化 `data\`。
-   实测 venv 约 0.75 GB,约下载 1 GB,10–20 分钟。
    ARM64 另外会在线下载 `vendor-deps.7z`(约 210 MB,来自 aidevhome.com)。
    - `--with-browser`:`search` extra(`playwright==1.61.0`、`selectolax`、`lxml`、`cssselect`、`browserforge`,来自 PyPI)+ `python -m playwright install chromium`。
-     Chromium 来自 `cdn.playwright.dev`(国内档由 `net_config.ps1` 设 `PLAYWRIGHT_DOWNLOAD_HOST` 指向 npmmirror),装到 `%LOCALAPPDATA%\ms-playwright\`。
-     实测下载 Chromium + headless shell + ffmpeg + winldd,占盘 **688 MB**,约 50 秒。失败不中断安装,只是浏览器工具不可用。
+     Chromium 来自 `cdn.playwright.dev`(国内档由 `net_config.ps1` 设 `PLAYWRIGHT_DOWNLOAD_HOST` 指向 npmmirror),装到 `%LOCALAPPDATA%\ms-playwright\`。失败不中断安装,只是浏览器工具不可用。
    - `--with-astgrep`:从 PyPI 的 `ast-grep-cli` 0.45.1 wheel 取出 `ast-grep.exe`、`sg.exe`(各约 49 MB)到 `vendor\bin\<arch>\`;PyPI 不通时回退 GitHub release。ARM64 上 `vendor-deps.7z` 已带这两个文件,会直接 `[SKIP]`。
-   **不装**模型转换环境(`.venv_x64_310`,实测约 2.4 GB)和 QAIRT SDK。
+   **不装**模型转换环境(`.venv_x64_310`)和 QAIRT SDK。
 4. 环境配置失败时,文件仍已安装;开始菜单有"修复 / 完成环境配置",重跑 `setup_env.bat`,可断点续。
 5. 成功后可勾选"立即启动",打开**桌面版**窗口(`desktop\QAIModelBuilder.exe`)。开始菜单和桌面快捷方式也指向它;浏览器版仍然是安装目录里的 `Start.bat`(不再有快捷方式)。
 
 ## QAIRT(模型转换)
 
-安装包**不装**模型转换环境:不含 QAIRT SDK(约 1.7–2 GB),也不含 `.venv_x64_310`(约 2.4 GB)。
+安装包**不装**模型转换环境:不含 QAIRT SDK,也不含 `.venv_x64_310`。
 需要时在应用目录手动运行 `setup_env.bat --arch <arch> --builder`,它会依次建 310 venv、装转换器依赖、下载 SDK、生成 `data\config\qairt_env.json`。
 **后台自动安装(310 venv + SDK 一起)尚未实现,是下一步**:需要在后端新增安装任务、进度接口和前端入口。
 
@@ -155,30 +151,25 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
 
 - **Python 环境**(`envs\`):目录存在才列出。
 - **你的数据**(`app\data`:聊天记录、设置、密钥):目录存在才列出。
-- **浏览器工具用的 Chromium**(`%LOCALAPPDATA%\ms-playwright`,实测约 0.7 GB):目录存在才列出。这是 Playwright 的按用户共享缓存,其他用 Playwright 的程序也可能在用,所以和其它项一样可以取消勾选。
+- **浏览器工具用的 Chromium**(`%LOCALAPPDATA%\ms-playwright`):目录存在才列出。这是 Playwright 的按用户共享缓存,其他用 Playwright 的程序也可能在用,所以和其它项一样可以取消勾选。
 - **QAIRT SDK `<版本>`**:`data\config\qairt_env.json` 的 `qairt_sdk_root` 指向的目录存在就列出(不再检查标记文件;默认位置 `C:\Qualcomm\AIStack\QAIRT\<版本>`,在 `app\` 之外)。路径必须是绝对本地路径且至少 3 层深,避免误删盘根或 `C:\Qualcomm`。勾选项旁边显示完整路径。
 - 程序文件一定会删。
 - 没勾"你的数据"时:删除 `app\` 里除 `data\` 以外的全部内容(包括运行时下载的 `models\` 等)。勾了:删除整个 `app\`;所选的上层目录空了也一起删除。`data\downloads\_qairt_tmp.zip` 这类下载临时文件无论如何都会删。
 - 静默卸载(`/SILENT`、`/VERYSILENT`)不弹窗,什么可选内容都不删(与"全部保留"相同)。
 - uv / pip 的全局缓存(`%LOCALAPPDATA%\uv\cache` 等)是机器上共享的,不删。
 
-## 已知限制 / 未验证
+## 已知限制
 
-- **已实测(x64 包,在 Windows-on-ARM 上模拟运行,隔离环境)**:静默安装 → `setup_env.bat` 7 步 2m38s 无错误 → `Start.bat` 9s 就绪,`/api/system/health` 200,前端 200 → 静默卸载。(这是加入 `--with-browser --with-astgrep` **之前**的结果。)
-- **已实测(加入两个组件后,用打包 stage 目录、隔离的 `LOCALAPPDATA` 直接跑 `setup_env.bat`,未经 Inno 向导)**:
-  - ARM64:7 步全部成功,1m31s;Chromium 一步 51s。删掉 `ast-grep.exe` 后重跑,从 PyPI wheel 取回(10.5s),`ast-grep --version` 为 0.45.1。
-    `import playwright, selectolax, lxml, browserforge` 通过,HTML 解析后端为 `selectolax`;无头 Chromium 149 能启动并执行页面 JS。
-  - x64:前 5 步成功(ast-grep 12.5s,`uv pip` 22.6s,Chromium 52.8s);之后从 GitHub 下 `qai_appbuilder` wheel 时本机到 github.com 的速度只有每秒几 KB,25 分钟后被我中止,所以 x64 的 Step 6–7 本轮没有跑到(和新组件无关)。
-- **未测**:arm64 包(原生)、有界面的向导(含新的进度条权重)、卸载窗口里新增的 Chromium 勾选项、真正干净的机器(没有系统 Python / VC++ 运行库)、中文界面实际显示、「修复」快捷方式、代理/国内镜像页(含 Chromium 走 npmmirror)。
-- **踩过的坑**:Inno 6.7 默认开 RedirectionGuard,子进程继承后 `uv python install` 建 junction 报 `os error 448`;已在 `.iss` 设 `RedirectionGuard=no`。打包白名单也曾漏掉 `tools/`(`scripts.init.install` 需要它)。
 - 安装时 `setup_env.bat` 的完整输出在 `<安装目录>\data\logs\install_setup_env.log`,排错先看它。
 - 安装路径含空格或非 ASCII 会给警告(部分脚本拼路径,未全面验证)。
+- Inno Setup 6.7 默认开启 RedirectionGuard,子进程继承后 `uv python install` 建 junction 会报 `os error 448`,所以 `.iss` 里设了 `RedirectionGuard=no`。
+- 打包白名单要包含 `tools/`(`scripts.init.install` 需要它)。
 - x64 的 `qai_appbuilder` wheel 只在 GitHub release 上,无法访问 GitHub 时会装不上(`setup_env.bat` 会给 `[ATTENTION]`)。
 - `ChineseSimplified.isl` 是社区翻译(kira-96/Inno-Setup-Chinese-Simplified-Translation),Inno 官方不再自带。
 
 ## 桌面版窗口(`desktop\QAIModelBuilder.exe`)
 
-一个 Tauri 2 + WebView2 的小壳(ARM64 约 2.9 MB,x64 约 3.1 MB;各架构分别编译、分别打入对应安装包),开始菜单和桌面快捷方式都指向它;浏览器版仍是安装目录里的 `Start.bat`(不再有快捷方式)。**前端和后端都没改**:窗口加载的就是后端提供的同一份 `http://localhost:8989/`。
+一个 Tauri 2 + WebView2 的小壳(各架构分别编译、分别打入对应安装包),开始菜单和桌面快捷方式都指向它;浏览器版仍是安装目录里的 `Start.bat`(不再有快捷方式)。**前端和后端都没改**:窗口加载的就是后端提供的同一份 `http://localhost:8989/`。
 
 - 启动:先显示启动页,后台用安装时建的 venv 运行 `python -m apps.cli.serve --port 8989`(隐藏控制台窗口),`/api/system/health` 返回 200 后再打开应用页。端口从 `factory/config/ports.json` 读,固定为 8989(SSO 回调地址写死了端口)。端口被占用(例如正在跑 `Start.bat`)时不启动后端,直接在窗口里提示。
 - 关窗口:弹出"退出 / 最小化到托盘 / 取消",可勾选"记住我的选择"。记住的结果存在 `data\config\desktop-settings.json` 的 `close_action`(`ask` / `quit` / `tray`),删掉这个文件就会重新询问。后端还没起来或已出错时关窗直接退出。
@@ -187,8 +178,3 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
 - 链接:应用自己的地址在窗口里打开(SSO 登录弹窗也一样);其他 http(s) 链接交给系统浏览器;其他协议一律拒绝。
 - 语言:按 Windows 显示语言选中文或英文。
 - 构建、源码结构、调试方法:见 [`desktop/README.md`](../desktop/README.md)。打包命令见上面的"打包"一节(一条命令会自动编译桌面版)。
-
-### 实测情况(隔离环境,ARM64 原生)
-
-- 通过:静默安装 → 开始菜单/桌面快捷方式都指向 exe → 14 s 后端就绪、窗口加载真实前端;关窗对话框、勾选"记住"后下次直接退出 / 直接最小化、再次启动把隐藏的窗口拉回、退出后后端进程为 0、端口被占用、强杀壳后后端被回收、后端被杀→错误页、`window.open` 外链走系统浏览器、`<a download>` 下载、剪贴板 / 麦克风 API 可用、托盘图标存在。
-- **未测**:x64 成品在 x64 机器上运行(只编译并校验了 PE 架构);真实 SSO 登录流程;真实麦克风权限弹窗;卡在 Setup 进度中关窗;卸载窗口(测试安装目录被我手动删除,卸载器没跑);开机自启没有实现。
