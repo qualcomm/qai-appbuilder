@@ -25,7 +25,10 @@ using json = nlohmann::ordered_json;
 constexpr size_t kMaxHeadsPerFile = 32;
 constexpr size_t kMaxIdentsPerFile = 64;
 constexpr size_t kHeadTitleChars = 60;
-constexpr size_t kSectionsRenderChars = 480;
+constexpr size_t kSectionTitleChars = 24;
+constexpr size_t kReadFileSuffixChars = 480;
+constexpr size_t kMaxProtectedRefs = 4;
+constexpr size_t kShortenPathMinChars = 64;
 
 struct Heading
 {
@@ -159,40 +162,156 @@ inline PageText ExtractPageText(const std::string &content, size_t first_line_hi
     return page;
 }
 
+inline bool IsPathChar(char c)
+{
+    const unsigned char u = static_cast<unsigned char>(c);
+    return std::isalnum(u) || c == '_' || c == '.' || c == '/' || c == '\\' || c == ':' || c == '~' || c == '-';
+}
+
+inline bool IsPathSep(char c)
+{
+    return c == '/' || c == '\\';
+}
+
+inline std::string ShortenPathToken(const std::string &tok)
+{
+    if (tok.size() <= kShortenPathMinChars)
+        return tok;
+    size_t core_end = tok.size();
+    while (core_end > 0 && (tok[core_end - 1] == '.' || tok[core_end - 1] == ':' || tok[core_end - 1] == '-' ||
+                            IsPathSep(tok[core_end - 1])))
+        --core_end;
+    const std::string core = tok.substr(0, core_end);
+    size_t seps = 0;
+    for (char c : core)
+        seps += IsPathSep(c) ? 1 : 0;
+    const size_t last = core.find_last_of("/\\");
+    if (seps < 3 || last == std::string::npos || last == 0)
+        return tok;
+    const size_t prev = core.find_last_of("/\\", last - 1);
+    if (prev == std::string::npos)
+        return tok;
+    return "..." + core.substr(prev) + tok.substr(core_end);
+}
+
+inline std::string ShortenLongPaths(const std::string &text)
+{
+    std::string out;
+    size_t i = 0;
+    while (i < text.size())
+    {
+        if (!IsPathChar(text[i]))
+        {
+            out += text[i++];
+            continue;
+        }
+        size_t j = i;
+        while (j < text.size() && IsPathChar(text[j]))
+            ++j;
+        out += ShortenPathToken(text.substr(i, j - i));
+        i = j;
+    }
+    return out;
+}
+
+inline const std::vector<std::string> &HardRuleMarkers()
+{
+    static const std::vector<std::string> kMarkers = {"NEVER",  "MUST",           "MANDATORY",      "REQUIRED", "Do NOT", "DO NOT",
+                                                      "必须",   "Non-negotiable", "NON-NEGOTIABLE", "禁止",     "不得",   "严禁"};
+    return kMarkers;
+}
+
 inline bool IsHardRuleLine(const std::string &line)
 {
-    static const char *kMarkers[] = {"NEVER",         "MUST",           "MANDATORY", "REQUIRED", "Do NOT",
-                                     "DO NOT",        "Non-negotiable", "NON-NEGOTIABLE", "必须", "禁止",
-                                     "不得",          "严禁"};
-    for (const char *k : kMarkers)
+    for (const std::string &k : HardRuleMarkers())
         if (line.find(k) != std::string::npos)
+            return true;
+    return false;
+}
+
+inline bool EndsWithLabelColon(const std::string &text)
+{
+    size_t end = text.size();
+    while (end > 0 && (text[end - 1] == '*' || text[end - 1] == '_' || text[end - 1] == ' '))
+        --end;
+    if (end >= 1 && text[end - 1] == ':')
+        return true;
+    return end >= 3 && text.compare(end - 3, 3, "\xEF\xBC\x9A") == 0;
+}
+
+inline bool HasRuleSubstance(const std::string &text)
+{
+    std::string rest = text;
+    for (const std::string &k : HardRuleMarkers())
+    {
+        size_t pos = 0;
+        while ((pos = rest.find(k, pos)) != std::string::npos)
+            rest.replace(pos, k.size(), k.size(), ' ');
+    }
+    for (char c : rest)
+        if (std::isalnum(static_cast<unsigned char>(c)) || static_cast<unsigned char>(c) >= 0x80)
             return true;
     return false;
 }
 
 inline std::vector<std::string> ExtractHardRules(const std::string &content, size_t max_rules, size_t cap)
 {
-    std::vector<std::string> out;
-    bool in_fence = false;
-    for (const std::string &raw : SplitLines(content))
+    enum Kind
     {
-        if (out.size() >= max_rules)
-            break;
+        kBlank,
+        kText,
+        kBarrier
+    };
+    const std::vector<std::string> lines = SplitLines(content);
+    std::vector<Kind> kinds(lines.size(), kBlank);
+    std::vector<std::string> texts(lines.size());
+    bool in_fence = false;
+    for (size_t i = 0; i < lines.size(); ++i)
+    {
+        const std::string &raw = lines[i];
         if (IsFenceLine(raw))
         {
             in_fence = !in_fence;
+            kinds[i] = kBarrier;
             continue;
         }
         const size_t first = raw.find_first_not_of(" \t\r>");
-        if (first == std::string::npos || (raw[first] == '#' && !in_fence))
+        if (first == std::string::npos)
             continue;
+        if (raw[first] == '#' && !in_fence)
+        {
+            kinds[i] = kBarrier;
+            continue;
+        }
         const size_t body = raw.find_first_not_of(" \t\r>-*|#", first);
         if (body == std::string::npos)
             continue;
-        const std::string line = Trim(raw.substr(body));
-        if (line.size() < 8 || !IsHardRuleLine(line))
+        texts[i] = Trim(raw.substr(body));
+        kinds[i] = kText;
+    }
+    std::vector<std::string> out;
+    std::vector<char> consumed(lines.size(), 0);
+    for (size_t i = 0; i < lines.size() && out.size() < max_rules; ++i)
+    {
+        if (kinds[i] != kText || consumed[i] || !IsHardRuleLine(texts[i]))
             continue;
-        out.push_back(ClipKeepTail(line, cap));
+        std::string rule = texts[i];
+        if (EndsWithLabelColon(rule))
+        {
+            size_t j = i + 1;
+            while (j < lines.size() && kinds[j] == kBlank)
+                ++j;
+            if (j < lines.size() && kinds[j] == kText && !consumed[j])
+            {
+                rule += " " + texts[j];
+                consumed[j] = 1;
+            }
+            else if (!HasRuleSubstance(rule))
+                continue;
+        }
+        if (rule.size() < 8)
+            continue;
+        out.push_back(ClipKeepTail(ShortenLongPaths(rule), cap));
     }
     return out;
 }
@@ -282,12 +401,6 @@ inline std::vector<Heading> ExtractHeadings(const std::string &text, size_t firs
         out.push_back({line_no, ClipHead(title, kHeadTitleChars)});
     }
     return out;
-}
-
-inline bool IsPathChar(char c)
-{
-    const unsigned char u = static_cast<unsigned char>(c);
-    return std::isalnum(u) || c == '_' || c == '.' || c == '/' || c == '\\' || c == ':' || c == '~' || c == '-';
 }
 
 inline std::string NormalizePath(const std::string &path)
@@ -533,6 +646,39 @@ inline void FoldPage(json &file_entry, const std::string &text, size_t first_lin
     }
 }
 
+inline bool IsMarkedRef(const json &value)
+{
+    return value.is_object() && value.value("marked", false);
+}
+
+inline size_t CountMarkedRefs(const json &pending)
+{
+    size_t n = 0;
+    for (auto it = pending.begin(); it != pending.end(); ++it)
+        n += IsMarkedRef(it.value()) ? 1 : 0;
+    return n;
+}
+
+inline bool EraseOldestRef(json &pending, bool marked, const std::string &keep = "")
+{
+    for (auto it = pending.begin(); it != pending.end(); ++it)
+    {
+        if (it.key() == keep || IsMarkedRef(it.value()) != marked)
+            continue;
+        const std::string victim = it.key();
+        pending.erase(victim);
+        return true;
+    }
+    return false;
+}
+
+inline void MakeRoomForMarkedRef(json &pending, const std::string &keep)
+{
+    while (CountMarkedRefs(pending) >= kMaxProtectedRefs && EraseOldestRef(pending, true, keep))
+    {
+    }
+}
+
 inline void FoldRefs(json &pending, const std::vector<DocRef> &refs, const json &read_files,
                      const std::string &own_path, size_t cap)
 {
@@ -545,8 +691,11 @@ inline void FoldRefs(json &pending, const std::vector<DocRef> &refs, const json 
         auto existing = pending.find(ref.path);
         if (existing != pending.end())
         {
-            if (ref.marked && existing->is_object() && !existing->value("marked", false))
-                *existing = json{{"section", ref.section}, {"cite", ref.cite}, {"marked", true}};
+            if (ref.marked && !IsMarkedRef(*existing))
+            {
+                MakeRoomForMarkedRef(pending, ref.path);
+                pending[ref.path] = json{{"section", ref.section}, {"cite", ref.cite}, {"marked", true}};
+            }
             continue;
         }
         bool already_read = false;
@@ -555,8 +704,11 @@ inline void FoldRefs(json &pending, const std::vector<DocRef> &refs, const json 
                 already_read = PathMatches(ref.path, it.key());
         if (already_read)
             continue;
-        while (pending.size() >= cap)
-            pending.erase(pending.begin());
+        if (ref.marked)
+            MakeRoomForMarkedRef(pending, "");
+        while (pending.size() >= cap && (EraseOldestRef(pending, false) || EraseOldestRef(pending, true)))
+        {
+        }
         pending[ref.path] = ref.marked ? json{{"section", ref.section}, {"cite", ref.cite}, {"marked", true}}
                                        : json{{"section", ref.section}, {"cite", ref.cite}};
     }
@@ -591,28 +743,30 @@ inline std::vector<Heading> LoadHeadings(const json &file_entry)
     return out;
 }
 
-inline std::string RenderSectionsSuffix(const json &file_entry)
+inline std::string RenderSectionsSuffix(const json &file_entry, size_t budget)
 {
     const std::vector<Heading> heads = LoadHeadings(file_entry);
     if (heads.empty())
         return "";
-    std::string out = "; sections seen: ";
-    size_t used = 0;
-    bool first = true;
+    const std::string prefix = "; sections seen: ";
+    const std::string omitted = "... ";
+    std::vector<std::string> items;
     for (const Heading &h : heads)
-    {
-        const std::string item = "L" + std::to_string(h.line) + " " + h.title;
-        if (used + item.size() > kSectionsRenderChars)
-        {
-            out += " ...";
-            break;
-        }
-        if (!first)
-            out += "; ";
-        out += item;
-        used += item.size() + 2;
-        first = false;
-    }
+        items.push_back("L" + std::to_string(h.line) + " " + ClipHead(h.title, kSectionTitleChars));
+    size_t first = 0;
+    auto total_from = [&](size_t from) {
+        size_t n = prefix.size() + (from > 0 ? omitted.size() : 0);
+        for (size_t i = from; i < items.size(); ++i)
+            n += items[i].size() + (i > from ? 2 : 0);
+        return n;
+    };
+    while (first < items.size() && total_from(first) > budget)
+        ++first;
+    if (first >= items.size())
+        return "";
+    std::string out = prefix + (first > 0 ? omitted : std::string());
+    for (size_t i = first; i < items.size(); ++i)
+        out += (i > first ? "; " : "") + items[i];
     return out;
 }
 
@@ -622,7 +776,7 @@ inline std::string RenderCursorSuffix(const json &file_entry)
         return "";
     const size_t used = file_entry["used_line"].get<size_t>();
     const std::vector<Heading> heads = LoadHeadings(file_entry);
-    std::string out = "; an action was last matched to line " + std::to_string(used);
+    std::string out = "; last action matched L" + std::to_string(used);
     const Heading *under = nullptr;
     const Heading *next = nullptr;
     for (const Heading &h : heads)
@@ -633,9 +787,97 @@ inline std::string RenderCursorSuffix(const json &file_entry)
             next = &h;
     }
     if (under)
-        out += " (under \"" + under->title + "\")";
+        out += " (under \"" + ClipHead(under->title, kSectionTitleChars) + "\")";
     if (next)
-        out += ", next heading L" + std::to_string(next->line) + " " + next->title;
+        out += "; next L" + std::to_string(next->line) + " \"" + ClipHead(next->title, kSectionTitleChars) + "\"";
+    return out;
+}
+
+inline std::string RenderReadFileSuffix(const json &file_entry, size_t budget)
+{
+    std::string cursor = RenderCursorSuffix(file_entry);
+    size_t sections_budget = budget;
+    if (cursor.size() >= budget)
+        cursor.clear();
+    else
+        sections_budget = budget - cursor.size();
+    return RenderSectionsSuffix(file_entry, sections_budget) + cursor;
+}
+
+inline std::string DisplayPathName(const std::string &path, bool with_parent)
+{
+    std::string p = path;
+    std::replace(p.begin(), p.end(), '\\', '/');
+    while (p.size() > 1 && p.back() == '/')
+        p.pop_back();
+    const size_t last = p.rfind('/');
+    if (last == std::string::npos)
+        return p;
+    if (!with_parent || last == 0)
+        return p.substr(last + 1);
+    const size_t prev = p.rfind('/', last - 1);
+    return p.substr(prev == std::string::npos ? 0 : prev + 1);
+}
+
+inline std::vector<std::string> SplitCommandWords(const std::string &command)
+{
+    std::vector<std::string> words;
+    std::string cur;
+    char quote = 0;
+    for (char c : command)
+    {
+        if (quote)
+        {
+            if (c == quote)
+                quote = 0;
+            else
+                cur += c;
+            continue;
+        }
+        if (c == '"' || c == '\'')
+        {
+            quote = c;
+            continue;
+        }
+        if (std::isspace(static_cast<unsigned char>(c)))
+        {
+            if (!cur.empty())
+            {
+                words.push_back(cur);
+                cur.clear();
+            }
+            continue;
+        }
+        cur += c;
+    }
+    if (!cur.empty())
+        words.push_back(cur);
+    return words;
+}
+
+inline std::string CompactCommand(const std::string &command)
+{
+    const std::vector<std::string> words = SplitCommandWords(command);
+    size_t script = words.size();
+    for (size_t i = 0; i < words.size() && script == words.size(); ++i)
+    {
+        const std::string base = Lower(DisplayPathName(words[i], false));
+        const bool is_exe = base.size() > 4 && base.compare(base.size() - 4, 4, ".exe") == 0;
+        if (!is_exe && HasScriptExtension(base))
+            script = i;
+    }
+    if (script == words.size())
+        return "";
+    std::string exe;
+    for (size_t i = script; i-- > 0 && exe.empty();)
+        if (!words[i].empty() && words[i][0] != '-' && words[i][0] != '/')
+            exe = DisplayPathName(words[i], false);
+    std::string rest;
+    for (size_t i = script + 1; i < words.size(); ++i)
+        rest += (rest.empty() ? "" : " ") + words[i];
+    std::string out = (exe.empty() ? std::string() : exe + " ") + DisplayPathName(words[script], false);
+    if (!rest.empty())
+        out += " " + ClipHead(rest, 60);
     return out;
 }
 

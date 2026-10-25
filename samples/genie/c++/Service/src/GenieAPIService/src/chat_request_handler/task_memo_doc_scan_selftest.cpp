@@ -230,7 +230,7 @@ bool RunTaskMemoDocScanSelfTest(std::ostream &out)
         runner.Check("render_sections", "read line lists the headings seen",
                      Contains(rendered, "sections seen: L5 How to use; L25 Boundary"));
         runner.Check("render_cursor", "read line names the heading the last action was matched under",
-                     Contains(rendered, "an action was last matched to line 30 (under \"Boundary\")"));
+                     Contains(rendered, "last action matched L30 (under \"Boundary\")"));
         runner.Check("render_pending_refs", "pending references block carries path, section and cite",
                      Contains(rendered, "references/operations_reference.md " + std::string(kSection) + " Working Directory") &&
                          Contains(rendered, "Bootstrap with qai_workspace_init.py"));
@@ -337,6 +337,147 @@ bool RunTaskMemoDocScanSelfTest(std::ostream &out)
             "<tool_call>{\"name\":\"read\",\"arguments\":{\"path\":\"C:\\\\a\\\\b.md\",\"offset\":5}}</tool_call>";
         runner.Check("read_path_json_decoded", "a JSON-escaped path is decoded exactly once",
                      TaskMemoBuilder::ExtractReadToolPath(call) == "C:\\a\\b.md#range:offset=5");
+    }
+
+    {
+        json many_heads = json::object();
+        many_heads["heads"] = json::array();
+        for (int i = 0; i < 14; ++i)
+            many_heads["heads"].push_back(json::array({10 + i * 20, "Section number " + std::to_string(i) + " with a very long trailing title"}));
+        const std::string full = task_memo_scan::RenderSectionsSuffix(many_heads, 2000);
+        runner.Check("sections_titles_clipped", "long titles are clipped so every heading fits",
+                     Contains(full, "L10 ") && Contains(full, "L270 ") && !Contains(full, "trailing title"));
+        const std::string tight = task_memo_scan::RenderSectionsSuffix(many_heads, 200);
+        runner.Check("sections_drop_earliest", "a tight budget drops the earliest headings and keeps the latest",
+                     tight.size() <= 200 && Contains(tight, "sections seen: ... ") && Contains(tight, "L270 ") &&
+                         !Contains(tight, "L10 "));
+        runner.Check("sections_too_small", "a budget below one heading renders nothing",
+                     task_memo_scan::RenderSectionsSuffix(many_heads, 20).empty());
+    }
+
+    {
+        json entry = json::object();
+        entry["original_goal_raw"] = "goal text";
+        entry["memo_reserve_ratio"] = 0.3;
+        json rules = json::array();
+        for (int i = 0; i < 12; ++i)
+            rules.push_back("rule " + std::to_string(i) + " " + std::string(210, 'r'));
+        entry["hard_rules"] = rules;
+        json done = json::array();
+        for (int i = 0; i < 20; ++i)
+            done.push_back("ok: exec step " + std::to_string(i) + " " + std::string(180, 'c'));
+        entry["completed"] = done;
+        for (int f = 0; f < 3; ++f)
+        {
+            const std::string key = "C:/m/doc" + std::to_string(f) + ".md";
+            entry["read_files"][key]["seen"] = json::array({json::array({1, 120}), json::array({200, 300})});
+            entry["read_files"][key]["total"] = 355;
+            json heads = json::array();
+            for (int i = 0; i < 14; ++i)
+                heads.push_back(json::array({10 + i * 25, "Step " + std::to_string(i) + " heading"}));
+            entry["read_files"][key]["heads"] = heads;
+            entry["read_files"][key]["used_line"] = 130;
+        }
+        const std::string rendered = TaskMemoBuilder::Render(entry, 9778);
+        runner.Check("read_block_survives_full_memo", "the read index is rendered even when other blocks fill the budget",
+                     Contains(rendered, "Files already read") && rendered.size() <= 9778);
+        runner.Check("read_block_keeps_late_headings", "the latest headings of every file stay visible",
+                     Contains(rendered, "L335 Step 13 heading"));
+        const size_t block_begin = rendered.find("Files already read");
+        runner.Check("read_block_capped", "the read block stays within its own share of the budget",
+                     block_begin != std::string::npos && rendered.size() - block_begin <= 9778 * 9 / 40 + 8);
+    }
+
+    {
+        json entry = json::object();
+        entry["original_goal_raw"] = "goal";
+        for (int f = 0; f < 40; ++f)
+        {
+            const std::string key = "C:/d/f" + std::string(f < 10 ? "0" : "") + std::to_string(f) + ".md";
+            entry["read_files"][key]["seen"] =
+                json::array({json::array({1, 5}), json::array({10, 15}), json::array({20, 25})});
+            entry["read_files"][key]["total"] = 100;
+        }
+        const std::string rendered = TaskMemoBuilder::Render(entry, 0);
+        runner.Check("read_block_drops_oldest_files", "too many files drop the oldest first and say so",
+                     Contains(rendered, "earlier file(s) omitted to fit") && Contains(rendered, "- f39.md") &&
+                         !Contains(rendered, "- f00.md"));
+        json same = json::object();
+        same["original_goal_raw"] = "goal";
+        same["read_files"]["C:/a/SKILL.md"]["seen"] = json::array({json::array({1, 10})});
+        same["read_files"]["C:/b/SKILL.md"]["seen"] = json::array({json::array({1, 10})});
+        const std::string named = TaskMemoBuilder::Render(same, 0);
+        runner.Check("read_block_name_collision", "files with the same basename are told apart by their parent directory",
+                     Contains(named, "- a/SKILL.md") && Contains(named, "- b/SKILL.md"));
+    }
+
+    {
+        json pending = json::object();
+        std::vector<task_memo_scan::DocRef> first = {{"d/must.md", "", "MUST read", true}};
+        task_memo_scan::FoldRefs(pending, first, json::object(), "", 8);
+        std::vector<task_memo_scan::DocRef> plain;
+        for (int i = 0; i < 10; ++i)
+            plain.push_back({"d/p" + std::to_string(i) + ".md", "", "c", false});
+        task_memo_scan::FoldRefs(pending, plain, json::object(), "", 8);
+        runner.Check("refs_marked_survives_plain", "plain references never push a marked one out",
+                     pending.size() == 8 && pending.contains("d/must.md") && !pending.contains("d/p0.md") &&
+                         pending.contains("d/p9.md"));
+        json many_marked = json::object();
+        std::vector<task_memo_scan::DocRef> marked;
+        for (int i = 0; i < 5; ++i)
+            marked.push_back({"d/m" + std::to_string(i) + ".md", "", "MUST", true});
+        task_memo_scan::FoldRefs(many_marked, marked, json::object(), "", 8);
+        runner.Check("refs_marked_protection_cap", "protection is capped: the oldest marked reference leaves first",
+                     many_marked.size() == 4 && !many_marked.contains("d/m0.md") && many_marked.contains("d/m4.md"));
+        json upgrade = json::object();
+        std::vector<task_memo_scan::DocRef> base;
+        for (int i = 0; i < 4; ++i)
+            base.push_back({"d/n" + std::to_string(i) + ".md", "", "MUST", true});
+        base.push_back({"d/u.md", "", "plain", false});
+        task_memo_scan::FoldRefs(upgrade, base, json::object(), "", 8);
+        std::vector<task_memo_scan::DocRef> promote = {{"d/u.md", "", "MUST now", true}};
+        task_memo_scan::FoldRefs(upgrade, promote, json::object(), "", 8);
+        runner.Check("refs_upgrade_respects_cap", "promoting a plain reference also respects the protection cap",
+                     upgrade.contains("d/u.md") && upgrade["d/u.md"]["cite"] == "MUST now" &&
+                         !upgrade.contains("d/n0.md") && task_memo_scan::CountMarkedRefs(upgrade) == 4);
+    }
+
+    {
+        const std::string text =
+            "Every inference MUST read `C:\\Users\\HCKTest\\Desktop\\ok\\QAIModelBuilder-main\\QAIModelBuilder-main\\"
+            "factory\\chat_features\\_shared\\htp-inference-performance.md` first\n";
+        const auto rules = task_memo_scan::ExtractHardRules(text, 6, 200);
+        runner.Check("rules_long_path_keeps_filename", "a long absolute path shrinks to its last two components",
+                     rules.size() == 1 && Contains(rules[0], "...\\_shared\\htp-inference-performance.md") &&
+                         !Contains(rules[0], "HCKTest"));
+        const auto rel = task_memo_scan::ExtractHardRules(
+            "You MUST open `references/model-architectures/multi_component_pipeline.md` first\n", 6, 200);
+        runner.Check("rules_short_relative_path_kept", "a normal relative pointer is left untouched",
+                     rel.size() == 1 && Contains(rel[0], "references/model-architectures/multi_component_pipeline.md"));
+        const auto merged = task_memo_scan::ExtractHardRules(
+            "**Pre-quantization checklist (MANDATORY):**\n- run the calibration list check first\n", 6, 220);
+        runner.Check("rules_label_merges_body", "a label line takes the first body line after it",
+                     merged.size() == 1 && Contains(merged[0], "Pre-quantization checklist") &&
+                         Contains(merged[0], "calibration list"));
+        const auto empty_label = task_memo_scan::ExtractHardRules("\xE7\xA6\x81\xE6\xAD\xA2:\n\n## Next\n", 6, 220);
+        runner.Check("rules_empty_label_dropped", "a bare marker label with no body is dropped", empty_label.empty());
+        const auto named_label = task_memo_scan::ExtractHardRules("NEVER qnn-net-run:\n\n## Next\n", 6, 220);
+        runner.Check("rules_named_label_kept", "a label that still names something is kept",
+                     named_label.size() == 1 && Contains(named_label[0], "qnn-net-run"));
+    }
+
+    {
+        runner.Check("command_compact_venv", "interpreter and script keep their basenames, arguments are kept",
+                     task_memo_scan::CompactCommand(
+                         "C:\\venv\\Scripts\\python.exe C:\\long\\path\\infer_generic.py --model x.bin --precision w8a8") ==
+                         "python.exe infer_generic.py --model x.bin --precision w8a8");
+        runner.Check("command_compact_cmd_wrapper", "the interpreter is the last non-option word before the script",
+                     task_memo_scan::CompactCommand("cmd /c python run.py -a") == "python run.py -a");
+        runner.Check("command_compact_no_script", "a command without a script is left alone",
+                     task_memo_scan::CompactCommand("qairt-converter --input_network m.onnx").empty() &&
+                         task_memo_scan::CompactCommand("dir /s /b *labels*").empty());
+        const std::string long_args = task_memo_scan::CompactCommand("python s.py " + std::string(200, 'a'));
+        runner.Check("command_compact_args_clipped", "trailing arguments are clipped", long_args.size() < 90);
     }
 
     out << "=================================================================================\n";

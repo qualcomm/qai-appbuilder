@@ -1355,6 +1355,25 @@ public:
         if (n < n_cached)
         {
             My_Log{} << "[LLAMACpp] Prefix cache fallback hit: pos=" << n << " (latest=" << n_cached << ")\n";
+            const int n_cmp = std::min(n_cached, limit);
+            int common = 0;
+            while (common < n_cmp && prefix_cache_tokens_[common] == embd_inp[common])
+            {
+                ++common;
+            }
+            std::string detail;
+            for (const auto &ck : prefix_ckpts_)
+            {
+                const char *state = ck.pos > limit      ? "over_limit"
+                                    : ck.pos > n_cached ? "over_cached"
+                                    : std::equal(prefix_cache_tokens_.begin(), prefix_cache_tokens_.begin() + ck.pos,
+                                                 embd_inp.begin())
+                                        ? "match"
+                                        : "mismatch";
+                detail += std::to_string(ck.pos) + ":" + state + " ";
+            }
+            My_Log{} << "[LLAMACpp] Prefix cache fallback detail: limit=" << limit << ", common_prefix=" << common
+                     << ", checkpoints=" << detail << "\n";
         }
         prefix_ckpts_.erase(std::remove_if(prefix_ckpts_.begin(), prefix_ckpts_.end(),
                                            [n](const PrefixCheckpoint &ck) { return ck.pos > n; }),

@@ -243,26 +243,32 @@ namespace {
         std::string summary;
     };
 
-    WriteCall SummarizeWriteCall(const std::string& assistant_content) {
-        WriteCall out;
+    bool ParseToolCallArgs(const std::string& assistant_content, std::string& name, json& args) {
         const std::string visible = TaskMemoBuilder::StripThinkBlock(assistant_content);
         const size_t tc = visible.find("<tool_call>");
         if (tc == std::string::npos)
-            return out;
+            return false;
         const size_t end = visible.find("</tool_call>", tc);
         const json call = json::parse(visible.substr(tc + 11, end == std::string::npos ? std::string::npos : end - tc - 11),
                                       nullptr, false);
         if (!call.is_object())
+            return false;
+        name = call.value("name", std::string());
+        args = call.value("arguments", json::object());
+        if (args.is_string())
+            args = json::parse(args.get<std::string>(), nullptr, false);
+        return args.is_object();
+    }
+
+    WriteCall SummarizeWriteCall(const std::string& assistant_content) {
+        WriteCall out;
+        std::string name;
+        json args;
+        if (!ParseToolCallArgs(assistant_content, name, args))
             return out;
-        const std::string name = call.value("name", std::string());
         std::string lower = name;
         std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return (char) tolower(c); });
         if (lower.find("write") == std::string::npos && lower.find("edit") == std::string::npos)
-            return out;
-        json args = call.value("arguments", json::object());
-        if (args.is_string())
-            args = json::parse(args.get<std::string>(), nullptr, false);
-        if (!args.is_object())
             return out;
         std::string path;
         for (const char* k : { "path", "file_path", "file", "filename" }) {
@@ -283,6 +289,33 @@ namespace {
             return out;
         out.key = name + " " + path + " :: ";
         out.summary = out.key + task_memo_scan::ExtractCodeExcerpt(text, 300);
+        return out;
+    }
+
+    std::string CompactExecCall(const std::string& assistant_content) {
+        std::string name;
+        json args;
+        if (!ParseToolCallArgs(assistant_content, name, args))
+            return "";
+        for (const char* k : { "command", "cmd", "script" }) {
+            if (args.contains(k) && args[k].is_string()) {
+                const std::string compact = task_memo_scan::CompactCommand(args[k].get<std::string>());
+                return compact.empty() ? compact : name + " " + compact;
+            }
+        }
+        return "";
+    }
+
+    std::string StripToolWrapper(const std::string& content) {
+        std::string out;
+        for (const std::string& line : task_memo_scan::SplitLines(content)) {
+            const std::string t = task_memo_scan::Trim(line);
+            if (t == "<tool_response>" || t == "</tool_response>" || t.rfind("[snapshot:", 0) == 0)
+                continue;
+            if (!out.empty())
+                out += '\n';
+            out += line;
+        }
         return out;
     }
 
@@ -307,7 +340,7 @@ namespace {
             const size_t b = line.find_first_not_of(" \t\r");
             line = line.substr(b == std::string::npos ? 0 : b);
             while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
-            out.push_back(safe_utf8_truncate(line, kMaxHardRuleChars, "..."));
+            out.push_back(task_memo_scan::ClipKeepTail(line, kMaxHardRuleChars));
         }
         return out;
     }
@@ -771,12 +804,12 @@ namespace {
             file_entry["total"] = total;
     }
 
-    std::string RenderReadFileLine(const std::string& path, const json& value) {
+    std::string RenderReadFileBase(const std::string& name, const json& value) {
         if (!value.is_object())
-            return "- " + path + ": " + (value.is_string() ? value.get<std::string>() : value.dump()) + "\n";
+            return "- " + name + ": " + (value.is_string() ? value.get<std::string>() : value.dump());
         const std::vector<LineRange> seen = LoadLineRanges(value.value("seen", json::array()));
         const size_t total = value.value("total", static_cast<size_t>(0));
-        std::string line = "- " + path;
+        std::string line = "- " + name;
         if (total > 0)
             line += " (" + std::to_string(total) + " lines)";
         line += ": read " + JoinLineRanges(seen);
@@ -792,8 +825,52 @@ namespace {
                 gaps.emplace_back(next, total);
             line += gaps.empty() ? "; fully read" : "; not yet read " + JoinLineRanges(gaps);
         }
-        line += task_memo_scan::RenderSectionsSuffix(value) + task_memo_scan::RenderCursorSuffix(value);
-        return line + "\n";
+        return line;
+    }
+
+    std::string RenderReadFilesBlock(const json& read_files, size_t cap) {
+        const std::string header =
+            "Files already read, as line ranges whose text has left the context (state as of the last compaction):\n";
+        std::vector<std::string> keys;
+        std::vector<const json*> values;
+        for (auto it = read_files.begin(); it != read_files.end(); ++it) {
+            keys.push_back(it.key());
+            values.push_back(&it.value());
+        }
+        const size_t n = keys.size();
+        std::vector<std::string> bases(n);
+        for (size_t i = 0; i < n; ++i) {
+            std::string name = task_memo_scan::DisplayPathName(keys[i], false);
+            for (size_t j = 0; j < n; ++j) {
+                if (j != i && task_memo_scan::DisplayPathName(keys[j], false) == name) {
+                    name = task_memo_scan::DisplayPathName(keys[i], true);
+                    break;
+                }
+            }
+            bases[i] = RenderReadFileBase(name, *values[i]);
+        }
+        auto omitted_note = [](size_t dropped) {
+            return dropped == 0 ? std::string()
+                                : "- (" + std::to_string(dropped) + " earlier file(s) omitted to fit)\n";
+        };
+        std::vector<size_t> tail(n + 1, 0);
+        for (size_t i = n; i-- > 0;)
+            tail[i] = tail[i + 1] + bases[i].size() + 1;
+        size_t first = 0;
+        while (first + 1 < n && header.size() + omitted_note(first).size() + tail[first] > cap)
+            ++first;
+        const size_t fixed = header.size() + omitted_note(first).size() + tail[first];
+        size_t remaining = cap > fixed ? cap - fixed : 0;
+        std::vector<std::string> suffixes(n);
+        for (size_t i = n; i-- > first;) {
+            const size_t share = std::min(task_memo_scan::kReadFileSuffixChars, remaining / (i - first + 1));
+            suffixes[i] = task_memo_scan::RenderReadFileSuffix(*values[i], share);
+            remaining -= suffixes[i].size();
+        }
+        std::string out = header + omitted_note(first);
+        for (size_t i = first; i < n; ++i)
+            out += bases[i] + suffixes[i] + "\n";
+        return out;
     }
 
     // 已尝试查询索引专用：与 ExtractReadToolPathImpl 唯一区别是不做 IsReadLikeToolName
@@ -853,25 +930,28 @@ namespace {
         } catch (...) {}
 
         if (facts.empty()) {
+            const std::string cleaned = StripToolWrapper(content);
+            if (cleaned.size() <= std::min<size_t>(120, max_len))
+                return cleaned;
             static const char* kPathHints[] = { "path\":", "file\":", "C:\\", "/home/", "/root/", "/mnt/", "/usr/" };
             for (const char* hint : kPathHints) {
-                size_t pos = content.find(hint);
-                if (pos != std::string::npos) {
-                    size_t start = utf8_align_start(content, (pos > 20) ? pos - 20 : 0);
-                    facts.push_back(safe_utf8_truncate(content.substr(start), 80, ""));
-                    break;
-                }
+                const size_t pos = cleaned.find(hint);
+                if (pos == std::string::npos)
+                    continue;
+                const size_t line_begin = cleaned.rfind('\n', pos);
+                const size_t line_end = cleaned.find('\n', pos);
+                const size_t begin = line_begin == std::string::npos ? 0 : line_begin + 1;
+                const std::string line = task_memo_scan::Trim(
+                    cleaned.substr(begin, line_end == std::string::npos ? std::string::npos : line_end - begin));
+                return task_memo_scan::ClipKeepTail(line, max_len);
             }
+            return safe_utf8_truncate(cleaned, max_len, "...");
         }
 
         std::string out;
-        if (!facts.empty()) {
-            for (const auto& f : facts) {
-                if (!out.empty()) out += "; ";
-                out += f;
-            }
-        } else {
-            out = content;
+        for (const auto& f : facts) {
+            if (!out.empty()) out += "; ";
+            out += f;
         }
         return safe_utf8_truncate(out, max_len, "...");
     }
@@ -1055,8 +1135,11 @@ json TaskMemoBuilder::BuildRuleLayer(
             }
             const std::string call = ExtractToolCallSummary(call_content);
             const WriteCall write_call = failed ? WriteCall{} : SummarizeWriteCall(call_content);
+            const std::string compact_call = write_call.summary.empty() ? CompactExecCall(call_content) : std::string();
             const std::string call_text = ReplaceInvalidUtf8(
-                write_call.summary.empty() ? safe_utf8_truncate(call, 200, "...") : write_call.summary);
+                !write_call.summary.empty() ? write_call.summary
+                : !compact_call.empty()     ? compact_call
+                                            : safe_utf8_truncate(call, 200, "..."));
             const std::string tool_name = call.substr(0, call.find(' '));
             const bool reads_content = IsReadLikeToolName(tool_name) || tool_name.find("fetch") != std::string::npos;
             std::string action_source;
@@ -1434,6 +1517,20 @@ TaskMemoBuilder::UpdateResult TaskMemoBuilder::Update(const json& raw_messages,
 
     entry["warning_latched"] = warning_active;
     entry["refresh_count"] = prev_refresh + 1;
+    if (has_prev) {
+        const std::string before = Render(*prev, 0);
+        const std::string after = Render(entry, 0);
+        size_t first_diff = 0;
+        const size_t common = std::min(before.size(), after.size());
+        while (first_diff < common && before[first_diff] == after[first_diff])
+            ++first_diff;
+        My_Log{My_Log::Level::kInfo}
+            << "[TaskMemo] Rebuilt: refresh_count=" << prev_refresh + 1
+            << ", new_dropped=" << new_dropped.size()
+            << ", old_chars=" << before.size()
+            << ", new_chars=" << after.size()
+            << ", first_diff_byte=" << first_diff << " (unbudgeted render)" << std::endl;
+    }
     store_->Put(fingerprint, first_msg_key, entry);
 
     res.active = true;
@@ -1550,13 +1647,8 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
     }
 
     std::string read_files_block;
-    if (entry.contains("read_files") && entry["read_files"].is_object() && !entry["read_files"].empty()) {
-        std::ostringstream oss;
-        oss << "Files already read, as line ranges whose text has left the context (state as of the last compaction):\n";
-        for (auto it = entry["read_files"].begin(); it != entry["read_files"].end(); ++it)
-            oss << RenderReadFileLine(it.key(), it.value());
-        read_files_block = oss.str();
-    }
+    if (entry.contains("read_files") && entry["read_files"].is_object() && !entry["read_files"].empty())
+        read_files_block = RenderReadFilesBlock(entry["read_files"], max_chars > 0 ? max_chars * 9 / 40 : 2200);
 
     const std::string pending_refs_block =
         entry.contains("pending_refs") ? task_memo_scan::RenderPendingRefs(entry["pending_refs"]) : std::string();
@@ -1659,6 +1751,7 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
         budget_for_high_priority = (max_chars > reserved_for_memory) ? (max_chars - reserved_for_memory) : 0;
     }
 
+    std::string layout;
     size_t block_index = 0;
     for (const auto& block : blocks) {
         const size_t slot = block_index++;
@@ -1675,8 +1768,10 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
             fitted = render_list_fit("Completed", "completed", slot_budget > out.size() ? slot_budget - out.size() : 0);
             chosen = &fitted;
         }
-        if (chosen->empty())
+        if (chosen->empty()) {
+            layout += std::string(block_name) + ":0x ";
             continue;
+        }
         if (max_chars > 0 && out.size() + chosen->size() > slot_budget) {
             My_Log{My_Log::Level::kWarning}
                 << "[TaskMemo] Render block skipped: name=" << block_name
@@ -1684,10 +1779,17 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
                 << ", used_chars=" << out.size()
                 << ", max_chars=" << max_chars
                 << ", slot_budget=" << slot_budget << std::endl;
+            layout += std::string(block_name) + ":" + std::to_string(chosen->size()) + "x ";
             continue;
         }
         out += *chosen;
+        layout += std::string(block_name) + ":" + std::to_string(chosen->size()) + " ";
     }
+    if (max_chars > 0)
+        My_Log{My_Log::Level::kInfo}
+            << "[TaskMemo] Render layout: max_chars=" << max_chars
+            << ", goal_chars=" << goal_block.size()
+            << ", blocks=" << layout << "(x = skipped)" << std::endl;
     if (max_chars > 0 && out.size() > max_chars)
         out = safe_utf8_truncate(out, max_chars, "");
     return out;
