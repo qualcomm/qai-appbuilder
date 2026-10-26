@@ -2196,10 +2196,8 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
     };
 
     // ── Step 1: 消息数量限制（cfg.max_messages_limit）── token 预算感知 ──────
-    // 仅当"条数超限"且"token 使用率达到压力阈值 cfg.token_pressure_trigger_ratio"时才真正
-    // 触发 SmartSelectMessages 裁剪；否则哪怕条数超限，只要预算充足就不裁剪，交由后续
-    // Phase 0-5/FitMessagesToContext 的 token-aware 逻辑处理。无 model handle 时无法计算
-    // token 使用率，保持旧行为（纯按条数裁剪，视为预算始终紧张）。
+    // 无跨请求前缀缓存时保留原有的条数+token压力门控；前缀缓存路径只由后续
+    // token 高低水位滞回驱逐，避免条数上限把一次驱逐拆成多个小步回退。
     const bool prefix_cache_active = PrefixCacheActive();
     const std::string evict_key = (handle && prefix_cache_active) ? TaskMemoBuilder::ComputeFirstMsgKey(msg) : std::string();
     EvictionState prior_state;
@@ -2213,34 +2211,8 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
         ? static_cast<size_t>(static_cast<float>(contextSize) * kToolEntryCapRatio) : 0;
     const size_t must_keep_budget_total = static_cast<size_t>(
         static_cast<double>(available_tokens) * kRepeatRetainExceptionRatio);
-    bool smart_select_possible = false;
-    double smart_select_pressure = 0.0;
-    size_t smart_select_msgs = 0;
-    if (!evict_key.empty()) {
-        json pre_select = json::array();
-        for (size_t i = 0; i < msg.size(); ++i) {
-            if (!prior_dropped_set.count(i)) pre_select.push_back(msg[i]);
-        }
-        smart_select_msgs = pre_select.size();
-        if (pre_select.size() > cfg.max_messages_limit) {
-            smart_select_possible = true;
-            if (available_tokens > 0) {
-                smart_select_pressure = static_cast<double>(calc_msg_tokens(pre_select)) /
-                    static_cast<double>(available_tokens);
-                smart_select_possible = smart_select_pressure >= cfg.token_pressure_trigger_ratio;
-            }
-        }
-    }
-    const size_t must_keep_budget = smart_select_possible ? 0 : must_keep_budget_total;
-    if (!evict_key.empty()) {
-        My_Log{My_Log::Level::kInfo} << "[PreFilter] Smart select: possible=" << (smart_select_possible ? 1 : 0)
-                                      << " msgs=" << smart_select_msgs << "/" << cfg.max_messages_limit
-                                      << " pressure=" << smart_select_pressure
-                                      << " must_keep_budget=" << must_keep_budget << "/" << must_keep_budget_total
-                                      << std::endl;
-    }
     ApplyRepeatResultStubs(msg, evict_key, handle.get(), prior_dropped_set, eviction_state_unknown,
-                           tool_entry_cap_tokens, must_keep_budget,
+                           tool_entry_cap_tokens, must_keep_budget_total,
                            [this](const std::string& t) { return CountTokens(t); },
                            repeat_protected_raw_, repeat_must_keep_raw_);
     repeat_retain_budget_ = available_tokens;
@@ -2265,7 +2237,7 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
 
     const size_t max_messages = cfg.max_messages_limit;
     json filtered_msg = json::array();
-    const bool count_exceeded = (source.size() > max_messages);
+    const bool count_exceeded = evict_key.empty() && (source.size() > max_messages);
     bool budget_pressure = true;
     size_t current_msg_tokens = 0;
     if (count_exceeded && handle && available_tokens > 0) {

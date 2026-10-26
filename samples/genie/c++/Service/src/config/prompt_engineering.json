@@ -66,10 +66,10 @@
         "_comment_output_reserve_ratio": "为模型输出预留的上下文窗口比率（默认 0.20 即 20%）；实际可用于 Prompt 的 token 数 = context_size × (1 - output_reserve_ratio)",
         "output_reserve_ratio": 0.20,
 
-        "_comment_max_messages_limit": "消息数量上限（超出时智能丢弃最旧的消息，保留工具调用序列完整性）；配合下方 token_pressure_trigger_ratio 做 token 预算感知裁剪：仅当条数超限且 token 使用率也达到压力阈值时才真正裁剪，纯条数超限、预算仍充足时不裁剪",
+        "_comment_max_messages_limit": "消息数量上限（超出时智能丢弃最旧的消息，保留工具调用序列完整性）；配合下方 token_pressure_trigger_ratio 做 token 预算感知裁剪：仅当条数超限且 token 使用率也达到压力阈值时才真正裁剪，纯条数超限、预算仍充足时不裁剪；跨请求前缀缓存生效时不作为独立驱逐条件",
         "max_messages_limit": 48,
 
-        "_comment_token_pressure_trigger_ratio": "Step 1 token 预算感知裁剪的压力阈值（0.0-1.0）：仅当消息条数超过 max_messages_limit 且当前消息 token 使用率（相对 available_tokens）达到此比例时才真正触发裁剪；16384 context 下 token 预算通常用不到一半就先撞上条数上限（Run9 实测 41% 使用率即被裁剪），把关键早期事实（如模型刚读到的配置文件路径）挤出历史、仅留数字占位符，无 Task Memo 兜底时会导致模型'失忆'后幻觉——此前的临时规避是把 max_messages_limit 调大到 48，本次改为真正的 token 预算感知判断，使条数上限成为纯粹的安全兜底，不再是主要触发因素",
+        "_comment_token_pressure_trigger_ratio": "Step 1 token 预算感知裁剪的压力阈值（0.0-1.0）：仅当消息条数超过 max_messages_limit 且当前消息 token 使用率（相对 available_tokens）达到此比例时才真正触发裁剪；16384 context 下 token 预算通常用不到一半就先撞上条数上限（Run9 实测 41% 使用率即被裁剪），把关键早期事实（如模型刚读到的配置文件路径）挤出历史、仅留数字占位符，无 Task Memo 兜底时会导致模型'失忆'后幻觉——此前的临时规避是把 max_messages_limit 调大到 48，本次改为真正的 token 预算感知判断，使条数上限成为纯粹的安全兜底，不再是主要触发因素；跨请求前缀缓存生效时跳过 Step 1 的条数门控",
         "token_pressure_trigger_ratio": 0.75,
 
         "_comment_recent_window": "最近 N 条消息视为'新消息'，在分级压缩中受到更高保护（优先保留完整内容）",
