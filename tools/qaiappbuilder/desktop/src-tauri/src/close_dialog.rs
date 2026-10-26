@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 //! The close question: Quit / Minimize to tray / (Cancel = Esc or the title-bar X), with a "remember" tick box.
 //! A native TaskDialog with command links (needs the comctl32 v6 manifest, see ../build.rs + app.manifest).
 use crate::i18n::T;

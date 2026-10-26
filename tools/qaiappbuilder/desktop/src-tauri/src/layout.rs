@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 //! Where things are: the app root (the tree with `src/`, `apps/` and `factory/`), the data root, the venv
 //! python and the backend port. Mirrors what `Start.bat` does so both launchers use the same environment.
 use std::path::{Path, PathBuf};

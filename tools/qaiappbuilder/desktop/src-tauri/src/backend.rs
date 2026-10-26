@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 //! The backend process: spawn `python -m apps.cli.serve --port <p>` hidden, inside a kill-on-close Job Object
 //! (so it cannot outlive the shell even if the shell is killed), and stop it gracefully through
 //! `POST /api/system/exit` (CSRF double-submit: GET the cookie, send it back as `X-QAI-CSRF`).

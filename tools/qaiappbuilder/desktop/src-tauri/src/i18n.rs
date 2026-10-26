@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+// ---------------------------------------------------------------------
+
 //! Shell texts. Chosen from the Windows UI language once at start (zh -> Simplified Chinese, else English).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Lang {
