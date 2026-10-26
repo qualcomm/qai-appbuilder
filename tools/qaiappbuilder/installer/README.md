@@ -99,6 +99,7 @@ Test-Path "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"    # True
 .\installer\build_installer.ps1 -SkipDesktop             # 不编译桌面版,直接用 dist\desktop\<arch>\ 里现有的 exe
 .\installer\build_installer.ps1 -KeepStage               # 保留 .build\installer\stage_<arch>\ 便于检查
 .\installer\build_installer.ps1 -Version 3.1.1           # 覆盖版本号(默认取 build_info.json 的 version)
+.\installer\build_installer.ps1 -QairtVersion 2.51.40.260930   # 按指定的 QAIRT SDK 版本打包(默认取 scripts\qairt_release.json)
 .\installer\build_installer.ps1 -Help                      # 显示用法后退出(-h 也可以)
 ```
 
@@ -114,7 +115,17 @@ Test-Path "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"    # True
 `desktop\QAIModelBuilder.exe`(桌面版窗口,见下)、`setup_env.bat` `Start.bat` `qai.bat` `Console.bat` `Uninstall.bat` `clean_env.bat` 及 README,
 外加 `data\bin\uv\uv.exe`(**按目标架构**从 PyPI 取)、`data\bin\aria2c\aria2c.exe`,以及 **FileGuard 的 `vendor\bin\<arch>\guard64.dll`**(ARM64 另有 `guard-injector.exe`)和标记文件 `vendor\bin\guard.source`。
 
-guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 约 0.7 MB、ARM64 约 0.7 MB;整个 zip 有 30 MB,因为里面还带两个架构的 ast-grep)。`guard.source` 写的是 `setup_env.bat` 自己会下载的那个 URL,脚本看到标记与 URL 一致且 dll 在,就跳过下载,所以**安装时不再联网下载 guard.zip**。来源顺序:`-GuardZip` 参数、`Downloads\guard.zip`、发布页 URL;都拿不到时只打印一行提示,安装时仍由 `setup_env.bat` 下载。发布标签变了(`setup_env.bat` 里的 `QAI_AB_RELEASE_TAG`),重新打包即可;旧包里的标记和新标签不一致时,安装会重新下载并替换。
+guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 约 0.7 MB、ARM64 约 0.7 MB;整个 zip 有 30 MB,因为里面还带两个架构的 ast-grep)。`guard.source` 写的是 `setup_env.bat` 自己会下载的那个 URL,脚本看到标记与 URL 一致且 dll 在,就跳过下载,所以**安装时不再联网下载 guard.zip**。来源顺序:`-GuardZip` 参数、`Downloads\guard.zip`、发布页 URL;都拿不到时只打印一行提示,安装时仍由 `setup_env.bat` 下载。发布标签变了,改 `scripts\qairt_release.json` 的 `qairt_version` 后重新打包即可(guard.zip 的标签单独固定,见下);旧包里的标记和新标签不一致时,安装会重新下载并替换。
+
+**`guard.zip` 的发布标签单独固定**为 `v2.48.40`(`setup_env.bat` 的 `QAI_GUARD_RELEASE_TAG`):它不是每个发布都带,`v2.51.40` 的发布页就没有。要换成别的标签,先确认那个发布页上确有 `guard.zip`。
+
+### QAIRT / qai_appbuilder 版本
+
+版本只在一处定:`scripts\qairt_release.json` 的 `qairt_version`(现为 `2.51.40.260930`)。`qai_appbuilder` 跟着它走:取前三段作为发布标签(`2.51.40.260930` → `v2.51.40`),x64 装 `qai_appbuilder-2.51.40.1-…-win_amd64.whl`,ARM64 装 `qai_appbuilder-2.51.40-…-win_arm64.whl`,都从该发布页下载(ARM64 不再用 `vendor-deps.7z` 里的那份,它只带打包时的旧版本)。
+
+不想改文件、只为这一次打包换版本时用 `-QairtVersion`:它会先在线确认该版本的 wheel 都存在(写错版本在打包开始前就报错),再只改**暂存目录里**的 `qairt_release.json`,工作区的文件不动。格式是 `A.B.C` 或 `A.B.C.build`。
+
+> 安装包本身不装 QAIRT SDK;这个版本决定的是 `qai_appbuilder` 的版本,以及之后手动运行 `setup_env.bat --builder` 时下载的 SDK 版本。
 
 还有 **`vendor\tiktoken\`**(约 5.3 MB,压缩后约 1.5 MB):`cl100k_base` 和 `o200k_base` 两个 BPE 词表,程序用它离线估算 token 数。词表不在 PyPI 的 tiktoken wheel 里,不打进包的话运行时会去 `openaipublic.blob.core.windows.net` 下载,下不到就退回按长度粗估。打包时的来源顺序:`.build\installer\_dl\tiktoken` 缓存、官方 URL、`Downloads\vendor-deps.7z`(用 `tar.exe` 只解出这两个文件);下载内容会校验大小和首行格式。每个词表写两份文件名(URL 的 SHA1 是 tiktoken 实际读取的名字,SHA256 是 `download_bpe_files.py` 文档里的名字,内容相同)。两个词表任一拿不到就整体不放,安装后行为同没有这个目录。
 
@@ -131,7 +142,7 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
 2. 向导里可选:镜像(自动 / 官方 / 国内)、HTTP 代理。
 3. 执行 `setup_env.bat --arch <arch> --no-pause --with-browser --with-astgrep [--mirror ..] [--proxy ..]`(**不带 `--builder`**;两个 `--with-*` 写在 `.iss` 的 `#define SetupComponents` 里,安装和"修复"快捷方式共用):
    建 Python 3.13 运行时 venv(`%LOCALAPPDATA%\QAIModelBuilder\envs\`)、装依赖、初始化 `data\`。
-   ARM64 另外会在线下载 `vendor-deps.7z`(约 210 MB,来自 aidevhome.com)。
+   ARM64 另外会在线下载 `vendor-deps.7z`(约 210 MB,来自 aidevhome.com),取其中除 `qai_appbuilder` 以外的 ARM64 wheel。
    - `--with-browser`:`search` extra(`playwright==1.61.0`、`selectolax`、`lxml`、`cssselect`、`browserforge`,来自 PyPI)+ `python -m playwright install chromium`。
      Chromium 来自 `cdn.playwright.dev`(国内档由 `net_config.ps1` 设 `PLAYWRIGHT_DOWNLOAD_HOST` 指向 npmmirror),装到 `%LOCALAPPDATA%\ms-playwright\`。失败不中断安装,只是浏览器工具不可用。
    - `--with-astgrep`:从 PyPI 的 `ast-grep-cli` 0.45.1 wheel 取出 `ast-grep.exe`、`sg.exe`(各约 49 MB)到 `vendor\bin\<arch>\`;PyPI 不通时回退 GitHub release。ARM64 上 `vendor-deps.7z` 已带这两个文件,会直接 `[SKIP]`。

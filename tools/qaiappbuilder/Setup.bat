@@ -247,7 +247,8 @@ REM IMPORTANT: do NOT delete files from vendor\whl\.  Three wheels
 REM (aiohttp 3.13.5 / cryptography 45.0.5 / MarkupSafe 2.1.5) have been
 REM revoked from PyPI for cp313 ARM64 and the local copies are the only
 REM source.  See vendor\whl\README.md.
-set "WHL_QAI_APPBUILDER=vendor\whl\qai_appbuilder-2.48.40-cp313-cp313-win_arm64.whl"
+REM qai_appbuilder is NOT vendored any more: its version follows scripts\qairt_release.json and it is downloaded from
+REM the GitHub release (see Step 4e), so the bundled vendor\whl copy (an older version) is ignored.
 set "WHL_CLAUDE_AGENT_SDK=vendor\whl\claude_agent_sdk-0.1.72-py3-none-win_arm64.whl"
 set "WHL_RIPGREP=vendor\whl\ripgrep-15.0.0-py3-none-win_arm64.whl"
 set "WHL_KALDI=vendor\whl\kaldi_native_fbank-1.22.3-cp313-cp313-win_arm64.whl"
@@ -667,7 +668,6 @@ if /i "%HOST_ARCH%"=="x64" goto :skip_vendor_whls
 if not exist "%WHL_DIR%" goto :skip_vendor_whls
 echo [INFO] Installing pre-built ARM64 wheels from %WHL_DIR%...
 uv pip install --no-deps ^
-    "%WHL_QAI_APPBUILDER%" ^
     "%WHL_CLAUDE_AGENT_SDK%" ^
     "%WHL_RIPGREP%" ^
     "%WHL_KALDI%" ^
@@ -692,7 +692,6 @@ REM upgrade them and rebuild from sdist.
     echo MarkupSafe==2.1.5
     echo numpy==2.3.1
     echo opencv-python-headless==4.10.0.84
-    echo qai_appbuilder==2.48.40
     echo soundfile==0.13.1
     echo tiktoken==0.12.0
     echo grimp==3.14
@@ -864,19 +863,51 @@ REM ARM64: vendored wheel lives in vendor\whl\ (pre-downloaded, offline-safe).
 REM x64: NOT vendored (x64 hosts are typically online); download from GitHub
 REM      release on first install, cache in data\downloads\, install from cache.
 REM      Skip download if already cached AND the correct version is installed.
-set "QAI_APPBUILDER_VERSION=2.48.40"
+REM Both architectures download the wheel from the GitHub release whose tag is the first three numeric parts of
+REM qairt_version in scripts\qairt_release.json (2.51.40.260930 -> v2.51.40); x64 takes the pure-x86_64 build
+REM (<tag>.1), ARM64 takes <tag>. Cached in data\downloads\, skipped when exactly that version is installed.
+set "QAIRT_VERSION_AB="
+for /f "usebackq delims=" %%V in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "try { (Get-Content -Raw -LiteralPath '%ROOT_DIR%scripts\qairt_release.json' | ConvertFrom-Json).qairt_version } catch { exit 1 }" 2^>nul`) do set "QAIRT_VERSION_AB=%%V"
+set "QAI_APPBUILDER_VERSION="
+if defined QAIRT_VERSION_AB for /f "usebackq delims=" %%T in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "if ('%QAIRT_VERSION_AB%' -match '^(\d+\.\d+\.\d+)') { $Matches[1] } else { exit 1 }" 2^>nul`) do set "QAI_APPBUILDER_VERSION=%%T"
+if not defined QAI_APPBUILDER_VERSION (
+    echo [WARN] Could not derive the qai_appbuilder version from scripts\qairt_release.json; qai_appbuilder not installed.
+    goto :qai_appbuilder_done
+)
 if /i "%HOST_ARCH%"=="x64" goto :qai_appbuilder_x64
-REM --- ARM64 path: install from vendored wheel ---
-if exist "%WHL_QAI_APPBUILDER%" (
-    echo [INFO] Force-installing %WHL_QAI_APPBUILDER% ...
-    uv pip install --reinstall --no-deps "%WHL_QAI_APPBUILDER%"
-    if errorlevel 1 (
-        echo [WARN] Failed to force-install qai_appbuilder wheel.
-    ) else (
-        echo [OK]   qai_appbuilder wheel installed.
-    )
+set "QAI_AB_ARM64_WHL_NAME=qai_appbuilder-%QAI_APPBUILDER_VERSION%-cp313-cp313-win_arm64.whl"
+set "QAI_AB_ARM64_WHL_CACHED=%DL_DIR%\%QAI_AB_ARM64_WHL_NAME%"
+set "QAI_AB_ARM64_URL=https://github.com/qualcomm/qai-appbuilder/releases/download/v%QAI_APPBUILDER_VERSION%/%QAI_AB_ARM64_WHL_NAME%"
+"%VENV_DIR%\Scripts\python.exe" -c "import importlib.metadata as m, sys; sys.exit(0 if m.version('qai_appbuilder')=='%QAI_APPBUILDER_VERSION%' else 1)" >nul 2>&1
+if not errorlevel 1 (
+    echo [SKIP] qai_appbuilder %QAI_APPBUILDER_VERSION% already installed ^(ARM64^).
+    goto :qai_appbuilder_done
+)
+if exist "vendor\whl\%QAI_AB_ARM64_WHL_NAME%" set "QAI_AB_ARM64_WHL_CACHED=vendor\whl\%QAI_AB_ARM64_WHL_NAME%"
+if exist "%QAI_AB_ARM64_WHL_CACHED%" goto :qai_appbuilder_arm64_install
+echo [INFO] Downloading qai_appbuilder ARM64 wheel from GitHub...
+echo [INFO] URL: %QAI_AB_ARM64_URL%
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup\download_with_aria2c.ps1" ^
+    -Url "%QAI_AB_ARM64_URL%" ^
+    -OutFile "%QAI_AB_ARM64_WHL_CACHED%" ^
+    -Aria2cExe "data\bin\aria2c\aria2c.exe" ^
+    -MinSize 500000 ^
+    -MaxRetries 3 ^
+    -StallTimeoutSec 60 ^
+    -AttemptTimeoutSec 300
+if not exist "%QAI_AB_ARM64_WHL_CACHED%" (
+    echo [WARN] Failed to download qai_appbuilder ARM64 wheel. App Builder inference
+    echo [WARN] will not work until it is installed. Re-run Setup.bat or install manually:
+    echo [WARN]     uv pip install "%QAI_AB_ARM64_URL%"
+    goto :qai_appbuilder_done
+)
+:qai_appbuilder_arm64_install
+echo [INFO] Installing qai_appbuilder %QAI_APPBUILDER_VERSION% ^(ARM64^)...
+uv pip install --reinstall --no-deps "%QAI_AB_ARM64_WHL_CACHED%"
+if errorlevel 1 (
+    echo [WARN] Failed to install qai_appbuilder ARM64 wheel.
 ) else (
-    echo [WARN] qai_appbuilder wheel not found: %WHL_QAI_APPBUILDER%
+    echo [OK]   qai_appbuilder %QAI_APPBUILDER_VERSION% installed ^(ARM64, from GitHub^).
 )
 goto :qai_appbuilder_done
 
@@ -1514,6 +1545,8 @@ exit /b 0
 echo.
 echo -- Step 0c: Native FileGuard DLLs ^(guard.zip^) ------------------------------
 
+REM The guard.zip release is pinned independently of the qai_appbuilder version: it is not republished on every
+REM release (v2.51.40 has none). Keep in sync with QAI_GUARD_RELEASE_TAG in setup_env.bat.
 set "GUARD_URL=https://github.com/qualcomm/qai-appbuilder/releases/download/v2.48.40/guard.zip"
 set "GUARD_ZIP=%DL_DIR%\guard.zip"
 set "GUARD_TMP=%DL_DIR%\_guard_tmp"

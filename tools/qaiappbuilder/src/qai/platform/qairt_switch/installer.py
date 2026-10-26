@@ -89,8 +89,8 @@ _ARCH_TO_PLATFORM_TAG: dict[str, str] = {"arm64": "win_arm64", "x64": "win_amd64
 
 #: Fixed Qualcomm GitHub Releases template shared by every candidate
 #: (Locked Contract 10) -- confirmed against the pinned fixture
-#: ``https://github.com/qualcomm/qai-appbuilder/releases/download/v2.48.40/
-#: qai_appbuilder-2.48.40-cp313-cp313-win_{arm64|amd64}.whl``.
+#: ``https://github.com/qualcomm/qai-appbuilder/releases/download/v2.51.40/
+#: qai_appbuilder-2.51.40-cp313-cp313-win_{arm64|amd64}.whl``.
 _RELEASE_URL_TEMPLATE = (
     "https://github.com/qualcomm/qai-appbuilder/releases/download/"
     "v{version}/{asset_name}"

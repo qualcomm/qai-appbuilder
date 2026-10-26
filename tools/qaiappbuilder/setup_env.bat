@@ -110,14 +110,24 @@ set "VPY=%VENV_DIR%\Scripts\python.exe"
 set "DL_DIR=data\downloads"
 set "UV_BIN_DIR=data\bin\uv"
 REM qai_appbuilder wheel selection.
-REM   QAI_AB_RELEASE_TAG  GitHub release tag (v<tag>) - the same for every architecture.
+REM   QAI_AB_RELEASE_TAG  GitHub release tag (v<tag>) of the qai_appbuilder wheel. NOT set here: it is the first three
+REM                       numeric parts of qairt_version in scripts\qairt_release.json (2.51.40.260930 -> 2.51.40), so the
+REM                       wheel always matches the QAIRT SDK. Same for every architecture.
 REM   QAI_AB_WHL_VERSION  version of the wheel to install - depends on the architecture:
 REM                         x64   <tag>.1  pure x86_64 build, published on the GitHub release.
 REM                                        (The PyPI win_amd64 wheel <tag> is an ARM64EC build: its
 REM                                         libappbuilder.dll etc. carry ARM64 entry code and cannot load
 REM                                         on an Intel/AMD CPU, so x64 never installs from PyPI.)
-REM                         arm64 <tag>    vendored wheel in vendor\whl.
-set "QAI_AB_RELEASE_TAG=2.48.40"
+REM                         arm64 <tag>    published on the same GitHub release (win_arm64 wheel).
+REM   QAI_GUARD_RELEASE_TAG  release that hosts guard.zip. Pinned on purpose: guard.zip is not republished on every
+REM                       release (v2.51.40 has none), so it does NOT follow QAI_AB_RELEASE_TAG.
+set "QAIRT_VERSION="
+if exist "scripts\qairt_release.json" for /f "usebackq delims=" %%V in (`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "try { (Get-Content -Raw -LiteralPath 'scripts\qairt_release.json' | ConvertFrom-Json).qairt_version } catch { exit 1 }" 2^>nul`) do set "QAIRT_VERSION=%%V"
+if not defined QAIRT_VERSION ( echo [ERROR] could not read qairt_version from scripts\qairt_release.json. & exit /b 1 )
+set "QAI_AB_RELEASE_TAG="
+for /f "usebackq delims=" %%T in (`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "if ('%QAIRT_VERSION%' -match '^(\d+\.\d+\.\d+)') { $Matches[1] } else { exit 1 }" 2^>nul`) do set "QAI_AB_RELEASE_TAG=%%T"
+if not defined QAI_AB_RELEASE_TAG ( echo [ERROR] qairt_version '%QAIRT_VERSION%' in scripts\qairt_release.json is not A.B.C[.build]. & exit /b 1 )
+set "QAI_GUARD_RELEASE_TAG=2.48.40"
 if /i "%HOST_ARCH%"=="x64" (
     set "QAI_AB_WHL_VERSION=%QAI_AB_RELEASE_TAG%.1"
 ) else (
@@ -125,6 +135,11 @@ if /i "%HOST_ARCH%"=="x64" (
 )
 set "QAI_AB_WHL_FILE=qai_appbuilder-%QAI_AB_WHL_VERSION%-cp313-cp313-%WHL_PLAT%.whl"
 set "RELEASE_BASE=https://github.com/qualcomm/qai-appbuilder/releases/download/v%QAI_AB_RELEASE_TAG%"
+set "GUARD_RELEASE_BASE=https://github.com/qualcomm/qai-appbuilder/releases/download/v%QAI_GUARD_RELEASE_TAG%"
+REM Any wheel that vendor-deps.7z carries for ARM64 and that this script does not bump: its presence in vendor\whl
+REM means the bundle is already unpacked. (qai_appbuilder is NOT used for this any more: the bundle only has the
+REM version it was built with, not the one qairt_release.json asks for.)
+set "VENDOR_MARKER_WHL=numpy-2.3.1-cp313-cp313-win_arm64.whl"
 set "VDEPS_URL=https://www.aidevhome.com/data/adh2/attr/vendor-deps.7z"
 
 echo.
@@ -240,12 +255,12 @@ echo.
 echo -- Step 4/7: vendor wheels / native helpers ---------------------------------
 set "USE_VENDOR=0"
 if /i "%HOST_ARCH%"=="arm64" (
-    if not exist "vendor\whl\%QAI_AB_WHL_FILE%" (
+    if not exist "vendor\whl\%VENDOR_MARKER_WHL%" (
         call :fetch_vendor
         if errorlevel 1 goto :fail_vendor
     )
     call :tick "4a vendor-deps bundle (arm64)"
-    if exist "vendor\whl\%QAI_AB_WHL_FILE%" set "USE_VENDOR=1"
+    if exist "vendor\whl\%VENDOR_MARKER_WHL%" set "USE_VENDOR=1"
 ) else (
     echo [SKIP] x64: ARM64 vendor wheels / openblas are not needed ^(saves ~190MB^).
 )
@@ -292,7 +307,7 @@ if "%WITH_BROWSER%"=="1" (
     call :tick "5c Playwright Chromium"
 )
 
-REM qai_appbuilder (inference binding). ARM64: vendored wheel. x64: GitHub release wheel (version .1).
+REM qai_appbuilder (inference binding): the GitHub release wheel for both architectures (x64 = version .1).
 call :install_qai_appbuilder
 call :tick "5d qai_appbuilder wheel"
 
@@ -679,8 +694,8 @@ if not defined _UNPACKED (
 if not exist "vendor" mkdir "vendor"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$t='%_VD%'; $s= if (Test-Path (Join-Path $t 'vendor')) { Join-Path $t 'vendor' } else { $t }; foreach ($n in 'whl','tiktoken','nltk_data','g2p_data') { $p=Join-Path $s $n; if (Test-Path $p) { Copy-Item -LiteralPath $p -Destination 'vendor' -Recurse -Force } }; New-Item -ItemType Directory -Force 'vendor\bin\arm64' | Out-Null; $b=Join-Path $s 'bin\arm64'; if (Test-Path $b) { Copy-Item -Path (Join-Path $b '*') -Destination 'vendor\bin\arm64' -Recurse -Force -Exclude 'guard64.dll','guard-injector.exe' }"
 rmdir /s /q "%_VD%" 2>nul
-if not exist "vendor\whl\%QAI_AB_WHL_FILE%" (
-    echo [ERROR] the unpacked bundle has no vendor\whl\%QAI_AB_WHL_FILE% ^(wrong or incomplete archive^).
+if not exist "vendor\whl\%VENDOR_MARKER_WHL%" (
+    echo [ERROR] the unpacked bundle has no vendor\whl\%VENDOR_MARKER_WHL% ^(wrong or incomplete archive^).
     del /f /q "%DL_DIR%\vendor-deps.7z" 2>nul
     exit /b 1
 )
@@ -709,7 +724,7 @@ REM build of the same files and :fetch_vendor drops them. Existence of the file 
 REM origin, so vendor\bin\guard.source records the URL it was extracted from; skip only when that equals
 REM the current URL (Setup.bat uses the same marker, so the two scripts never re-download each other's result).
 :fetch_guard
-set "_GURL=%RELEASE_BASE%/guard.zip"
+set "_GURL=%GUARD_RELEASE_BASE%/guard.zip"
 set "_GMARK=vendor\bin\guard.source"
 set "_GSRC="
 if exist "%_GMARK%" set /p _GSRC=<"%_GMARK%"
@@ -960,7 +975,7 @@ for /f "tokens=2 delims='" %%M in ('findstr /i /c:"No module named" "%_QF%"') do
 if /i "%_QMOD%"=="qai_appbuilder" (
     set "QAB_MISSING=1"
     echo [WARN] qai_appbuilder is NOT INSTALLED in %VENV_DIR% ^(NPU inference unavailable; Model Builder UI still starts^).
-    echo [WARN] Its install step failed earlier - see the lines above ^(for x64 the wheel comes from the GitHub release^).
+    echo [WARN] Its install step failed earlier - see the lines above ^(the wheel comes from the GitHub release^).
     echo [WARN] Fix the network ^(proxy / GitHub access^) and run setup_env.bat again: it only fetches what is missing.
     echo [WARN] Or install the wheel by hand: download %RELEASE_BASE%/%QAI_AB_WHL_FILE%
     echo [WARN]     then  "%UV_EXE%" pip install --python "%VPY%" --no-deps ^<that file^>
@@ -989,10 +1004,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup\diag_qab.
 if exist "data\logs\qab_diag.txt" echo [WARN] Diagnostic report: %ROOT_DIR%data\logs\qab_diag.txt  ^(send this file when asking for help^)
 exit /b 0
 
-REM :install_vendor_whls - ARM64 only; same 14 wheels / pins as Setup.bat Step 4a.
+REM :install_vendor_whls - ARM64 only; the vendor-deps.7z wheels except qai_appbuilder (that one comes from the
+REM   GitHub release, see :install_qai_appbuilder: the bundle only carries the version it was built with).
 :install_vendor_whls
 set "W=vendor\whl"
-"%UV_EXE%" pip install --no-deps "%W%\qai_appbuilder-2.48.40-cp313-cp313-win_arm64.whl" "%W%\claude_agent_sdk-0.1.72-py3-none-win_arm64.whl" "%W%\ripgrep-15.0.0-py3-none-win_arm64.whl" "%W%\kaldi_native_fbank-1.22.3-cp313-cp313-win_arm64.whl" "%W%\pyclipper-1.4.0-cp313-cp313-win_arm64.whl" "%W%\tiktoken-0.12.0-cp313-cp313-win_arm64.whl" "%W%\opencv_python_headless-4.10.0.84-cp313-cp313-win_arm64.whl" "%W%\httptools-0.7.1-cp313-cp313-win_arm64.whl" "%W%\numpy-2.3.1-cp313-cp313-win_arm64.whl" "%W%\aiohttp-3.13.5-cp313-cp313-win_arm64.whl" "%W%\cryptography-45.0.5-cp313-abi3-win_arm64.whl" "%W%\MarkupSafe-2.1.5-cp313-cp313-win_arm64.whl" "%W%\soundfile-0.13.1-cp313-cp313-win_arm64.whl" "%W%\grimp-3.14-cp313-cp313-win_arm64.whl"
+"%UV_EXE%" pip install --no-deps "%W%\claude_agent_sdk-0.1.72-py3-none-win_arm64.whl" "%W%\ripgrep-15.0.0-py3-none-win_arm64.whl" "%W%\kaldi_native_fbank-1.22.3-cp313-cp313-win_arm64.whl" "%W%\pyclipper-1.4.0-cp313-cp313-win_arm64.whl" "%W%\tiktoken-0.12.0-cp313-cp313-win_arm64.whl" "%W%\opencv_python_headless-4.10.0.84-cp313-cp313-win_arm64.whl" "%W%\httptools-0.7.1-cp313-cp313-win_arm64.whl" "%W%\numpy-2.3.1-cp313-cp313-win_arm64.whl" "%W%\aiohttp-3.13.5-cp313-cp313-win_arm64.whl" "%W%\cryptography-45.0.5-cp313-abi3-win_arm64.whl" "%W%\MarkupSafe-2.1.5-cp313-cp313-win_arm64.whl" "%W%\soundfile-0.13.1-cp313-cp313-win_arm64.whl" "%W%\grimp-3.14-cp313-cp313-win_arm64.whl"
 if errorlevel 1 exit /b 1
 (
     echo aiohttp==3.13.5
@@ -1001,7 +1017,6 @@ if errorlevel 1 exit /b 1
     echo MarkupSafe==2.1.5
     echo numpy==2.3.1
     echo opencv-python-headless==4.10.0.84
-    echo qai_appbuilder==2.48.40
     echo soundfile==0.13.1
     echo tiktoken==0.12.0
     echo grimp==3.14
@@ -1014,41 +1029,33 @@ exit /b 0
 
 REM :install_qai_appbuilder
 :install_qai_appbuilder
-if /i "%HOST_ARCH%"=="arm64" goto :qab_arm64
-
-REM ---- x64: GitHub release wheel %QAI_AB_WHL_VERSION% only (never PyPI, see the note at the top) ----
-REM Skip only when exactly this version is installed. A bare prefix test on 2.48.40 would also accept
-REM the PyPI ARM64EC wheel (2.48.40) and leave a broken package in place. Read the version from the
+REM ---- GitHub release wheel %QAI_AB_WHL_VERSION% (x64 and ARM64; never PyPI on x64, see the note at the top) ----
+REM Skip only when exactly this version is installed. A bare prefix test on the tag would also accept
+REM the PyPI ARM64EC wheel (x64 only) and leave a broken package in place. Read the version from the
 REM package metadata, not from import, so a wheel that cannot be imported is still recognised.
 "%VPY%" -c "import importlib.metadata as m, sys; sys.exit(0 if m.version('qai_appbuilder')=='%QAI_AB_WHL_VERSION%' else 1)" >nul 2>&1
 if not errorlevel 1 (
     echo [SKIP] qai_appbuilder %QAI_AB_WHL_VERSION% already installed.
     exit /b 0
 )
+REM A wheel already sitting in vendor\whl (hand-copied, offline machine) wins over a download.
+if exist "vendor\whl\%QAI_AB_WHL_FILE%" (
+    "%UV_EXE%" pip install --reinstall --no-deps "vendor\whl\%QAI_AB_WHL_FILE%"
+    if not errorlevel 1 exit /b 0
+)
 set "_WN=%QAI_AB_WHL_FILE%"
 REM A cached file below MinSize is a partial download from an earlier run: drop it and fetch again.
 if exist "%DL_DIR%\%_WN%" for %%F in ("%DL_DIR%\%_WN%") do if %%~zF LSS 500000 del /f /q "%DL_DIR%\%_WN%"
 if not exist "%DL_DIR%\%_WN%" (
-    echo [INFO] downloading qai_appbuilder %QAI_AB_WHL_VERSION% ^(x64^) from the GitHub release...
+    echo [INFO] downloading qai_appbuilder %QAI_AB_WHL_VERSION% ^(%HOST_ARCH%^) from the GitHub release...
     call :dl "%RELEASE_BASE%/%_WN%" "%DL_DIR%\%_WN%" 500000 300
 )
 if not exist "%DL_DIR%\%_WN%" goto :qab_fail
 "%UV_EXE%" pip install --reinstall --no-deps "%DL_DIR%\%_WN%"
 if errorlevel 1 goto :qab_fail
-echo [OK]   qai_appbuilder %QAI_AB_WHL_VERSION% installed ^(x64, GitHub release^).
+echo [OK]   qai_appbuilder %QAI_AB_WHL_VERSION% installed ^(%HOST_ARCH%, GitHub release^).
 exit /b 0
 
-:qab_arm64
-REM ---- ARM64: vendored wheel (offline-safe), version %QAI_AB_WHL_VERSION% ----
-"%VPY%" -c "import importlib.metadata as m, sys; sys.exit(0 if m.version('qai_appbuilder')=='%QAI_AB_WHL_VERSION%' else 1)" >nul 2>&1
-if not errorlevel 1 (
-    echo [SKIP] qai_appbuilder %QAI_AB_WHL_VERSION% already installed.
-    exit /b 0
-)
-if exist "vendor\whl\%QAI_AB_WHL_FILE%" (
-    "%UV_EXE%" pip install --reinstall --no-deps "vendor\whl\%QAI_AB_WHL_FILE%"
-    if not errorlevel 1 exit /b 0
-)
 :qab_fail
 set "QAB_MISSING=1"
 echo [WARN] qai_appbuilder not installed; NPU inference unavailable until it is.

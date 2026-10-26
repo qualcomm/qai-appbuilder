@@ -26,6 +26,9 @@
 .PARAMETER KeepStage     keep .build\installer\stage_<arch> after compiling
 .PARAMETER IsccPath      path to ISCC.exe (auto-detected by default)
 .PARAMETER GuardZip      a local guard.zip to take guard64.dll from (default: Downloads\guard.zip, else the release URL)
+.PARAMETER QairtVersion  QAIRT SDK version to build the installer for, e.g. 2.51.40.260930 (default: scripts\qairt_release.json).
+                         qai_appbuilder follows it (first three parts -> release tag). Only the STAGED copy of
+                         qairt_release.json is changed; the file in the working tree is left alone.
 .PARAMETER Help          print the usage and exit
 .EXAMPLE
     .\installer\build_installer.ps1
@@ -43,6 +46,7 @@ param(
     [switch]$KeepStage,
     [string]$IsccPath = '',
     [string]$GuardZip = '',
+    [string]$QairtVersion = '',
     [switch]$Help
 )
 
@@ -65,12 +69,17 @@ Options:
   -KeepStage              keep .build\installer\stage_<arch> after compiling
   -IsccPath <path>        path to ISCC.exe                               (default: auto-detected)
   -GuardZip <path>        local guard.zip to take guard64.dll from       (default: Downloads\guard.zip, else the release URL)
+  -QairtVersion <A.B.C[.build]>
+                          QAIRT SDK version for this installer, e.g. 2.51.40.260930. qai_appbuilder follows it
+                          (2.51.40 -> release v2.51.40). Checked online before building; only the staged copy of
+                          scripts\qairt_release.json changes.   (default: the value in scripts\qairt_release.json)
   -Help                   show this text and exit
 
 Examples:
   .\installer\build_installer.ps1                          # everything, both architectures
   .\installer\build_installer.ps1 -Arch x64 -SkipFrontend  # x64 only, reuse frontend\dist
   .\installer\build_installer.ps1 -SkipDesktop             # package the exes already in dist\desktop
+  .\installer\build_installer.ps1 -QairtVersion 2.51.40.260930   # build for a specific QAIRT SDK version
 
 Needs: Inno Setup 6, Rust + VS 2022 C++ tools + Windows SDK (unless -SkipDesktop), Node + pnpm (unless -SkipFrontend),
 and network access to pypi.org. Details: installer\README.md, desktop\README.md
@@ -112,6 +121,29 @@ if (-not $Version) {
 }
 if ($Version -notmatch '^\d+(\.\d+){1,3}') { Fail "bad version '$Version'" }
 Info "version: $Version"
+
+# ---- QAIRT version --------------------------------------------------------
+# qairt_release.json is the single source of truth; qai_appbuilder is released with the SDK, so its tag is the first three
+# numeric parts of the QAIRT version (2.51.40.260930 -> v2.51.40). -QairtVersion overrides it for THIS build only: the
+# staged copy is patched, never the working tree.
+$ReleaseJson = Join-Path $Root 'scripts\qairt_release.json'
+$QairtDefault = [string](Get-Content $ReleaseJson -Raw | ConvertFrom-Json).qairt_version
+if ($QairtVersion) {
+    if ($QairtVersion -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') { Fail "bad -QairtVersion '$QairtVersion' (expected A.B.C or A.B.C.build, e.g. 2.51.40.260930)" }
+} else { $QairtVersion = $QairtDefault }
+if ($QairtVersion -notmatch '^(\d+\.\d+\.\d+)') { Fail "bad qairt_version '$QairtVersion' in scripts\qairt_release.json" }
+$AbTag = $Matches[1]
+Info "QAIRT SDK: $QairtVersion   qai_appbuilder release: v$AbTag$(if ($QairtVersion -ne $QairtDefault) { "   (overrides $QairtDefault from qairt_release.json)" })"
+
+# Fail now, not on the user's machine at install time: both wheels of that release must exist.
+$AbBase = "https://github.com/qualcomm/qai-appbuilder/releases/download/v$AbTag"
+foreach ($w in "qai_appbuilder-$AbTag.1-cp313-cp313-win_amd64.whl", "qai_appbuilder-$AbTag-cp313-cp313-win_arm64.whl") {
+    if ($Arch -eq 'x64' -and $w -like '*arm64*') { continue }
+    if ($Arch -eq 'arm64' -and $w -like '*amd64*') { continue }
+    try { $null = Invoke-WebRequest -Uri "$AbBase/$w" -Method Head -UseBasicParsing -TimeoutSec 60 -MaximumRedirection 5 }
+    catch { Fail "qai_appbuilder wheel not found online: $AbBase/$w  ($($_.Exception.Message.Split("`n")[0]))  - wrong -QairtVersion, or no access to github.com." }
+    Info "wheel ok: $w"
+}
 
 # ---- frontend -------------------------------------------------------------
 if (-not $SkipFrontend) {
@@ -202,9 +234,11 @@ function Stage-Arch([string]$a) {
 
     # guard64.dll (+ the ARM64 injector) from the release's guard.zip, ONLY this arch's files: ~0.7 MB per package
     # (the whole zip is 30 MB because it also carries both ast-grep builds). setup_env.bat skips its own download when
-    # vendor\bin\guard.source holds exactly the URL it would fetch, so write that URL (tag read from setup_env.bat).
-    $tag = (Select-String -Path (Join-Path $Root 'setup_env.bat') -Pattern 'set "QAI_AB_RELEASE_TAG=([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
-    $guardUrl = "https://github.com/qualcomm/qai-appbuilder/releases/download/v$tag/guard.zip"
+    # vendor\bin\guard.source holds exactly the URL it would fetch, so write that URL. guard.zip is pinned to its own
+    # release (QAI_GUARD_RELEASE_TAG in setup_env.bat), NOT to the qai_appbuilder tag: newer releases do not carry it.
+    $guardTag = (Select-String -Path (Join-Path $Root 'setup_env.bat') -Pattern 'set "QAI_GUARD_RELEASE_TAG=([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+    if (-not $guardTag) { Fail 'QAI_GUARD_RELEASE_TAG not found in setup_env.bat' }
+    $guardUrl = "https://github.com/qualcomm/qai-appbuilder/releases/download/v$guardTag/guard.zip"
     $guardZip = Join-Path $Root '.build\installer\_dl\guard.zip'
     if (-not (Test-Path $guardZip)) {
         $local = @($GuardZip, (Join-Path $env:USERPROFILE 'Downloads\guard.zip')) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
@@ -272,6 +306,17 @@ function Stage-Arch([string]$a) {
     }
     if ($tkOk -eq 2) { Info "tiktoken vocab bundled ($tkOk/2)" }
     else { Remove-Item $tkOut -Recurse -Force -ErrorAction SilentlyContinue; Info "tiktoken vocab not bundled ($tkOk/2) - token counting falls back to a download at first use, or to the length//2 estimate." }
+    # Pin the QAIRT version for THIS package: patch only the staged copy of qairt_release.json (text replace keeps the
+    # file's formatting and the other fields), then read it back so a silent no-op cannot ship the wrong version.
+    $stRel = Join-Path $stage 'scripts\qairt_release.json'
+    if ($QairtVersion -ne $QairtDefault) {
+        $txt = [IO.File]::ReadAllText($stRel)
+        $new = [regex]::Replace($txt, '("qairt_version"\s*:\s*")[^"]*(")', "`${1}$QairtVersion`${2}")
+        [IO.File]::WriteAllText($stRel, $new, (New-Object Text.UTF8Encoding($false)))
+    }
+    $stGot = [string](Get-Content $stRel -Raw | ConvertFrom-Json).qairt_version
+    if ($stGot -ne $QairtVersion) { Fail "staged qairt_release.json says '$stGot', expected '$QairtVersion'" }
+    Info "staged qairt_version: $stGot"
     $files = Get-ChildItem $stage -Recurse -File
     $mb = ($files | Measure-Object Length -Sum).Sum / 1MB
     Info ("staged {0} files, {1:N1} MB uncompressed" -f $files.Count, $mb)

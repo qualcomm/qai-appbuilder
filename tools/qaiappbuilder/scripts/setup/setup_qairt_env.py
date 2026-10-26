@@ -61,6 +61,19 @@ def _load_default_qairt_version() -> str:
         return json.load(fh)["qairt_version"]
 
 
+def _appbuilder_version(qairt_version: str) -> str:
+    """``qai_appbuilder`` release matching a QAIRT version: its first three numeric parts.
+
+    ``2.51.40.260930`` -> ``2.51.40``. The wheel is versioned and released with the
+    SDK (https://github.com/qualcomm/qai-appbuilder/releases), so it must follow
+    ``qairt_release.json`` instead of being pinned separately.
+    """
+    m = re.match(r"^(\d+\.\d+\.\d+)", qairt_version)
+    if not m:
+        raise ValueError(f"qairt_version {qairt_version!r} is not A.B.C[.build]")
+    return m.group(1)
+
+
 _DEFAULT_QAIRT_VERSION = _load_default_qairt_version()
 
 # Default QAIRT SDK version — override via env var QAIRT_VERSION or --sdk-version CLI arg
@@ -984,7 +997,7 @@ def install_inference_deps(root):
             ("scipy<1.15",                  "scipy",            False),
             ("numpy==1.26.4",               "numpy",            False),
             # ── QAI AppBuilder (Linux aarch64 wheel on PyPI) ──────────────────────────────────
-            ("qai-appbuilder==2.48.40",     "qai_appbuilder",   False),
+            (f"qai-appbuilder=={_appbuilder_version(_DEFAULT_QAIRT_VERSION)}", "qai_appbuilder", False),
         ]
     elif _detect_arch() == "aarch64":
         packages = [
