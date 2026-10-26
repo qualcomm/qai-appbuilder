@@ -170,6 +170,101 @@ std::string CapToolResultHeadTail(const std::string& content, size_t content_tok
     return content.substr(0, head_end) + OmittedMarker(content, head_end, tail_begin) + content.substr(tail_begin);
 }
 
+bool IsGrepToolName(const std::string& name)
+{
+    std::string lower = name;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return (char)tolower(c); });
+    return lower == "grep";
+}
+
+bool IsGrepMatchLine(const std::string& line)
+{
+    return line.size() >= 2 && line[0] == '>' && line[1] == ' ';
+}
+
+bool IsGrepFooterLine(const std::string& line)
+{
+    return line.find("match(es) in ") != std::string::npos ||
+           line.find("no matches found for pattern") != std::string::npos ||
+           (line.size() >= 2 && line.front() == '[' && line.back() == ']');
+}
+
+std::string CapGrepResultByMatches(const std::string& content, size_t content_tokens, size_t cap_tokens)
+{
+    if (cap_tokens == 0 || content_tokens <= cap_tokens || content.empty()) return content;
+    const double keep_ratio = 0.95 * static_cast<double>(cap_tokens) / static_cast<double>(content_tokens);
+    const size_t keep_bytes = static_cast<size_t>(static_cast<double>(content.size()) * keep_ratio);
+    if (keep_bytes >= content.size()) return content;
+
+    std::vector<std::string> lines;
+    size_t pos = 0;
+    while (pos <= content.size()) {
+        const size_t nl = content.find('\n', pos);
+        if (nl == std::string::npos) { lines.push_back(content.substr(pos)); break; }
+        lines.push_back(content.substr(pos, nl - pos));
+        pos = nl + 1;
+    }
+
+    size_t body_end = lines.size();
+    while (body_end > 0 && (lines[body_end - 1].empty() || IsGrepFooterLine(lines[body_end - 1]))) --body_end;
+
+    std::string footer;
+    for (size_t i = body_end; i < lines.size(); ++i) footer += lines[i] + "\n";
+
+    size_t match_bytes = 0;
+    size_t match_count = 0;
+    for (size_t i = 0; i < body_end; ++i) {
+        if (IsGrepMatchLine(lines[i])) { match_bytes += lines[i].size() + 1; ++match_count; }
+    }
+
+    const size_t footer_reserve = std::min(keep_bytes, footer.size() + 80);
+    const size_t body_budget = keep_bytes - footer_reserve;
+
+    std::string body;
+    size_t dropped_context = 0;
+    bool shortened_matches = false;
+    if (match_count == 0 || match_bytes <= body_budget) {
+        const size_t context_budget = body_budget > match_bytes ? body_budget - match_bytes : 0;
+        size_t used = 0;
+        bool pending_gap = false;
+        for (size_t i = 0; i < body_end; ++i) {
+            if (IsGrepMatchLine(lines[i])) {
+                if (pending_gap) { body += "  ...\n"; pending_gap = false; }
+                body += lines[i] + "\n";
+                continue;
+            }
+            const std::string line_with_nl = lines[i] + "\n";
+            if (used + line_with_nl.size() <= context_budget) {
+                if (pending_gap) { body += "  ...\n"; pending_gap = false; }
+                body += line_with_nl;
+                used += line_with_nl.size();
+            } else if (!lines[i].empty()) {
+                ++dropped_context;
+                pending_gap = true;
+            }
+        }
+    } else {
+        shortened_matches = true;
+        const size_t per_match_budget = match_count > 0 ? body_budget / match_count : 0;
+        for (size_t i = 0; i < body_end; ++i) {
+            if (!IsGrepMatchLine(lines[i])) {
+                if (!lines[i].empty()) ++dropped_context;
+                continue;
+            }
+            std::string line = lines[i];
+            if (per_match_budget > 0 && line.size() > per_match_budget)
+                line = line.substr(0, Utf8Floor(line, per_match_budget)) + "...";
+            body += line + "\n";
+        }
+    }
+
+    std::string note = "[... " + std::to_string(dropped_context) + " context line(s) omitted by context compression";
+    if (shortened_matches) note += ", match line content shortened to fit budget";
+    note += "; all " + std::to_string(match_count) +
+            " match line(s) above are kept, re-reading this same query returns the same result ...]\n";
+    return body + note + footer;
+}
+
 constexpr size_t kMinSurvivorFloor = 4;
 constexpr size_t kSurvivorCondenseMinShare = 48;
 const char kRawIdxKey[] = "__genie_raw_idx";
@@ -2638,7 +2733,15 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
                 continue;
             }
             if (content.size() <= cap_tokens) continue;
-            std::string capped = CapToolResultHeadTail(content, CountTokens(content), cap_tokens);
+            std::string tool_name = get_json_value(filtered_msg[i], "name", BLANK_STRING);
+            if (tool_name.empty() && filtered_msg[i].contains("tool_call_id") &&
+                filtered_msg[i]["tool_call_id"].is_string() && tool_call_id_to_name) {
+                auto name_it = tool_call_id_to_name->find(filtered_msg[i]["tool_call_id"].get<std::string>());
+                if (name_it != tool_call_id_to_name->end()) tool_name = name_it->second;
+            }
+            std::string capped = IsGrepToolName(tool_name)
+                ? CapGrepResultByMatches(content, CountTokens(content), cap_tokens)
+                : CapToolResultHeadTail(content, CountTokens(content), cap_tokens);
             if (capped.size() < content.size()) {
                 filtered_msg[i]["content"] = capped;
                 capped_count++;
