@@ -1424,10 +1424,16 @@ TaskMemoBuilder::UpdateResult TaskMemoBuilder::Update(const json& raw_messages,
     const std::vector<GenieChatMessage> new_dropped(dropped_messages.begin() + (long long) already_folded,
                                                     dropped_messages.end());
 
-    // 连续失败/重复调用三个活体信号提前查询：它们各自独立维护在 ToolCallCircuitBreakerStore/
-    // ToolCallRepetitionStore 里，不依赖 dropped_messages 是否有新增，必须在节流判断之前就取到
-    // 最新值——否则节流一旦命中，这三个信号会一直复用 *prev 里的陈旧值，在驱逐边界冻结（sticky）
-    // 期间永远传不到模型那里，而这恰恰是最需要这些警告生效的时间窗口。
+    size_t render_throttle = std::max<size_t>(1, config_.render_throttle_min_new_dropped);
+    if (has_prev && new_dropped.size() < render_throttle) {
+        res.active = true;
+        res.confidence = prev_confidence;
+        res.refresh_count = prev_refresh;
+        res.pages_total = (prev->contains("pages") && (*prev)["pages"].is_array()) ? (*prev)["pages"].size() : 0;
+        res.compact_render = RenderCompact(*prev);
+        return res;
+    }
+
     std::string cb_key = ToolCallCircuitBreakerStore::MakeKey(first_msg_key, instance_config_.get_model_name());
     int failure_streak_live = ToolCallCircuitBreakerStore::GetInstance().GetConsecutiveCount(cb_key);
     const auto &redundant_cfg = instance_config_.i_model_config_.GetToolCallRepairConfig().redundant_call_guard;
@@ -1437,30 +1443,6 @@ TaskMemoBuilder::UpdateResult TaskMemoBuilder::Update(const json& raw_messages,
         std::string rc_key = ToolCallRepetitionStore::MakeKey(first_msg_key, instance_config_.get_model_name());
         redundant_tool_call_count_live = ToolCallRepetitionStore::GetInstance().GetRepeatCount(rc_key);
         non_contiguous_repeat_count_live = ToolCallRepetitionStore::GetInstance().GetNonContiguousRepeatCount(rc_key);
-    }
-    bool warning_active =
-        (config_.failure_streak_warn_threshold > 0 && failure_streak_live >= config_.failure_streak_warn_threshold) ||
-        (redundant_cfg.enabled && redundant_cfg.repeat_threshold > 0
-            && redundant_tool_call_count_live >= redundant_cfg.repeat_threshold) ||
-        (redundant_cfg.enabled && redundant_cfg.non_contiguous_repeat_threshold > 0
-            && non_contiguous_repeat_count_live >= redundant_cfg.non_contiguous_repeat_threshold);
-
-    // 节流：驱逐仍按需每轮发生，但只有自上一次真正重渲染以来新增的丢弃量达到
-    // config_.render_throttle_min_new_dropped 才真正重渲染；未达到（含恰好 0 的
-    // "无新增"情形）直接复用上一份渲染结果——新增内容仍留在 dropped_messages 里，
-    // 不写回 store（_folded_count 不前移），下一次真正触发时通过差分一次性合并，不会丢失。
-    // 示警只在"刚变为活跃"这一轮绕开节流（上升沿），活跃期间不再逐轮绕开：持续绕开会让 memo
-    // 每轮在原位改写，把前缀复用钉死在 memo 之前（实测复用率 0.81→0.40）。
-    const bool prev_warning_latched = has_prev && prev->value("warning_latched", false);
-    const bool warning_rising = warning_active && !prev_warning_latched;
-    size_t render_throttle = std::max<size_t>(1, config_.render_throttle_min_new_dropped);
-    if (has_prev && new_dropped.size() < render_throttle && !warning_rising) {
-        res.active = true;
-        res.confidence = prev_confidence;
-        res.refresh_count = prev_refresh;
-        res.pages_total = (prev->contains("pages") && (*prev)["pages"].is_array()) ? (*prev)["pages"].size() : 0;
-        res.compact_render = RenderCompact(*prev);
-        return res;
     }
 
     const std::vector<std::string> all_dropped_tool_call_content =
@@ -1520,8 +1502,6 @@ TaskMemoBuilder::UpdateResult TaskMemoBuilder::Update(const json& raw_messages,
         }
     }
 
-    // 连续失败/重复调用三个活体信号已在节流判断之前查询过（见上方 warning_active），这里
-    // 直接复用同一份值落盘，不重复查询 store——保持"查一次、决策和落盘用同一份数据"。
     entry["failure_streak"] = failure_streak_live;
     // Render() 是 static 方法读不到 config_，阈值随 entry 一起落盘，保持 Render() 签名
     // 不变（纯函数于 entry），也让每条已存储的备忘录自描述当时生效的阈值是多少。
@@ -1540,7 +1520,6 @@ TaskMemoBuilder::UpdateResult TaskMemoBuilder::Update(const json& raw_messages,
         entry["non_contiguous_repeat_threshold"] = 0;
     }
 
-    entry["warning_latched"] = warning_active;
     entry["refresh_count"] = prev_refresh + 1;
     if (has_prev) {
         const std::string before = Render(*prev, 0);

@@ -1895,55 +1895,52 @@ private:
             if (role == "tool")
                 recent_errors.push_back(FirstFailureLine(get_json_value<std::string>(messages[i], "content", "")));
         }
-        std::string reason;
-        std::string signature;
+        struct ThinkCandidate {
+            std::string reason;
+            std::string signature;
+            bool failure;
+        };
+        std::vector<ThinkCandidate> candidates;
         if (!recent_errors.empty() && !recent_errors[0].empty())
         {
-            signature = recent_errors[0];
+            std::string failure_reason;
             if (recent_errors.size() < 2 || recent_errors[1].empty())
-                reason = "new_failure";
+                failure_reason = "new_failure";
             else
             {
                 for (size_t i = 2; i < recent_errors.size(); ++i)
                 {
                     if (recent_errors[i] == recent_errors[0])
                     {
-                        reason = "error_repeated";
+                        failure_reason = "error_repeated";
                         break;
                     }
                 }
-                if (reason.empty() && recent_errors[1] != recent_errors[0])
-                    reason = "changed_failure";
+                if (failure_reason.empty() && recent_errors[1] != recent_errors[0])
+                    failure_reason = "changed_failure";
             }
+            if (!failure_reason.empty())
+                candidates.push_back({failure_reason, recent_errors[0], true});
         }
-        if (reason.empty() && at_cfg.near_repeat_window > 1)
+        if (at_cfg.near_repeat_window > 1)
         {
             const std::string near_tpl = NearRepeatTemplate(messages, at_cfg.near_repeat_window);
             if (!near_tpl.empty())
-            {
-                reason = "near_repeat";
-                signature = "near:" + near_tpl;
-            }
+                candidates.push_back({"near_repeat", "near:" + near_tpl, false});
         }
         constexpr size_t kCycleWindow = 6;
         constexpr size_t kCycleRepeatThreshold = 4;
         bool cycle_checked = false;
         size_t cycle_repeats = 0;
         std::string cycle_signature;
-        if (reason.empty())
+        const std::vector<std::string> cycle_keys = CollectCycleToolCallKeys(messages);
+        if (!cycle_keys.empty())
         {
-            const std::vector<std::string> cycle_keys = CollectCycleToolCallKeys(messages);
-            if (!cycle_keys.empty())
-            {
-                cycle_repeats = ToolCallRepetitionStore::CountRepeatsInWindow(cycle_keys, kCycleWindow);
-                cycle_signature = "cycle:" + cycle_keys.back();
-                cycle_checked = true;
-                if (cycle_repeats >= kCycleRepeatThreshold)
-                {
-                    reason = "cycle_repeat";
-                    signature = cycle_signature;
-                }
-            }
+            cycle_repeats = ToolCallRepetitionStore::CountRepeatsInWindow(cycle_keys, kCycleWindow);
+            cycle_signature = "cycle:" + cycle_keys.back();
+            cycle_checked = true;
+            if (cycle_repeats >= kCycleRepeatThreshold)
+                candidates.push_back({"cycle_repeat", cycle_signature, false});
         }
         const auto &rg_cfg = instance_config_->i_model_config_.GetToolCallRepairConfig().redundant_call_guard;
         std::string repeat_key;
@@ -1954,11 +1951,8 @@ private:
             repeat_key = ToolCallRepetitionStore::MakeKey(session_key, instance_config_->get_model_name());
             repeat_count = ToolCallRepetitionStore::GetInstance().GetRepeatCount(repeat_key);
             repeat_count_checked = true;
-            if (reason.empty() && repeat_count >= 2)
-            {
-                reason = "repeat_count=" + std::to_string(repeat_count);
-                signature = "repeat:" + repeat_key;
-            }
+            if (repeat_count >= 2)
+                candidates.push_back({"repeat_count=" + std::to_string(repeat_count), "repeat:" + repeat_key, false});
         }
 
         struct SessionThinkState {
@@ -1991,35 +1985,38 @@ private:
             if (it != st.per_signature.end())
                 it->second = 0;
         }
-        if (reason.empty())
-            return false;
-
-        const bool new_signature = st.per_signature.find(signature) == st.per_signature.end();
-        const bool paced = !new_signature || reason == "changed_failure";
-        int &sig_count = st.per_signature[signature];
-        std::string blocked;
-        if (at_cfg.max_per_signature > 0 && sig_count >= at_cfg.max_per_signature)
-            blocked = "signature_limit";
-        else if (paced && st.last_think_msg_count > 0 && messages.size() <= st.last_think_msg_count + 2)
-            blocked = "cooldown";
-        else if (paced && at_cfg.max_think_turn_share > 0.0 &&
-                 st.think_turns >= static_cast<int>(at_cfg.max_think_turn_share * st.tool_turns))
-            blocked = "turn_share";
-        if (!blocked.empty())
+        bool fallback_paced = false;
+        for (const auto &candidate : candidates)
         {
-            My_Log{} << "[AdaptiveThinking] skip: " << reason << " blocked_by=" << blocked
-                     << " (sig_count=" << sig_count << ")" << std::endl;
-            return false;
+            const bool new_signature = st.per_signature.find(candidate.signature) == st.per_signature.end();
+            const bool paced = fallback_paced || !new_signature || candidate.reason == "changed_failure";
+            int &sig_count = st.per_signature[candidate.signature];
+            std::string blocked;
+            if (at_cfg.max_per_signature > 0 && sig_count >= at_cfg.max_per_signature)
+                blocked = "signature_limit";
+            else if (paced && st.last_think_msg_count > 0 && messages.size() <= st.last_think_msg_count + 2)
+                blocked = "cooldown";
+            else if (paced && at_cfg.max_think_turn_share > 0.0 &&
+                     st.think_turns >= static_cast<int>(at_cfg.max_think_turn_share * st.tool_turns))
+                blocked = "turn_share";
+            if (!blocked.empty())
+            {
+                My_Log{} << "[AdaptiveThinking] skip: " << candidate.reason << " blocked_by=" << blocked
+                         << " (sig_count=" << sig_count << ")" << std::endl;
+                fallback_paced = true;
+                continue;
+            }
+            ++sig_count;
+            ++st.think_turns;
+            st.last_think_msg_count = messages.size();
+            if (failure_trigger)
+                *failure_trigger = candidate.failure;
+            My_Log{} << "[AdaptiveThinking] enabling /think for this turn: " << candidate.reason
+                     << " (sig_count=" << sig_count << ", think_turns=" << st.think_turns
+                     << "/" << st.tool_turns << ")" << std::endl;
+            return true;
         }
-        ++sig_count;
-        ++st.think_turns;
-        st.last_think_msg_count = messages.size();
-        if (failure_trigger)
-            *failure_trigger = reason == "new_failure" || reason == "error_repeated" || reason == "changed_failure";
-        My_Log{} << "[AdaptiveThinking] enabling /think for this turn: " << reason
-                 << " (sig_count=" << sig_count << ", think_turns=" << st.think_turns
-                 << "/" << st.tool_turns << ")" << std::endl;
-        return true;
+        return false;
     }
 
     static std::string NearRepeatTemplate(const json &messages, int window)
