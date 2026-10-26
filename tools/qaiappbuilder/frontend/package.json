@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@qaimodelbuilder/frontend",
   "private": true,
-  "version": "3.1.0",
+  "version": "3.1.1",
   "description": "QAIModelBuilder frontend — Vite + Vue 3 SFC (Clean Cutover rewrite)",
   "type": "module",
   "engines": {
