@@ -34,7 +34,7 @@ size_t ToolCallRepetitionStore::CountRepeatsInWindow(const std::vector<std::stri
     if (window == 0 || keys.empty())
         return 0;
     const size_t begin = keys.size() > window ? keys.size() - window : 0;
-    std::unordered_set<std::string> seen;
+    std::unordered_set<std::string> seen(keys.begin(), keys.begin() + begin);
     size_t repeats = 0;
     for (size_t i = begin; i < keys.size(); ++i)
     {

@@ -2712,7 +2712,10 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
                              [&]() { current_prot_idx = compute_protection_indices(working); });
         My_Log{My_Log::Level::kInfo} << "[PreFilter] Eviction low-water: target=" << evict_low_water
                                       << ", recent_growth=" << recent_growth
-                                      << ", available=" << available_tokens << std::endl;
+                                      << ", available=" << available_tokens
+                                      << ", trigger_tokens=" << tokens_before_evict
+                                      << ", high_water=" << evict_high_water
+                                      << ", after_drop=" << evict_tokens << std::endl;
         evict_tokens = calc_msg_tokens(working);
         if (evict_tokens <= available_tokens) {
             filtered_msg = std::move(working);

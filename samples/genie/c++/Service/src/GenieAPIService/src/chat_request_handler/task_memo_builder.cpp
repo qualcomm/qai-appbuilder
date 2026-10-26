@@ -1220,8 +1220,17 @@ json TaskMemoBuilder::BuildRuleLayer(
                         AddReadRange(entry["read_files"][read_key], shown_first, shown_last, shown_total);
                         task_memo_scan::FoldPage(entry["read_files"][read_key], page.text, page.first);
                         task_memo_scan::ClearReadRef(entry["pending_refs"], read_key);
+                        const json pending_before = entry["pending_refs"];
                         task_memo_scan::FoldRefs(entry["pending_refs"], task_memo_scan::ExtractDocRefs(page.text, 4, 160),
                                                  entry["read_files"], read_key, kMaxPendingRefs);
+                        for (auto pit = pending_before.begin(); pit != pending_before.end(); ++pit) {
+                            if (!entry["pending_refs"].contains(pit.key()))
+                                My_Log{My_Log::Level::kInfo} << "[TaskMemo] Pending ref evicted: path=" << pit.key()
+                                                             << ", marked=" << task_memo_scan::IsMarkedRef(pit.value())
+                                                             << ", while_folding=" << read_key
+                                                             << ", pending=" << entry["pending_refs"].size() << "/"
+                                                             << kMaxPendingRefs << std::endl;
+                        }
                         CapObjectSize(entry["read_files"], kMaxItemsPerField);
                     }
                     if (!entry.contains("hard_rules") || !entry["hard_rules"].is_array())

@@ -232,12 +232,26 @@ bool RunToolCallRepetitionSelfTest(std::ostream &out)
     {
         const std::vector<std::string> loop = {"a", "b", "c", "a", "b", "a", "b", "a", "b"};
         const std::vector<std::string> healthy = {"a", "b", "c", "d", "e", "f"};
-        runner.Check("scenario11_cycle_window_counts_repeats", "the recent window counts previously seen calls",
-                     ToolCallRepetitionStore::CountRepeatsInWindow(loop, 6) == 4);
-        runner.Check("scenario11_cycle_window_ignores_old_calls", "calls outside the recent window do not affect the count",
-                     ToolCallRepetitionStore::CountRepeatsInWindow(loop, 3) == 1);
+        runner.Check("scenario11_cycle_window_counts_repeats", "the recent window counts calls seen anywhere earlier",
+                     ToolCallRepetitionStore::CountRepeatsInWindow(loop, 6) == 6);
+        runner.Check("scenario11_cycle_window_ignores_old_calls", "calls outside the recent window are not counted",
+                     ToolCallRepetitionStore::CountRepeatsInWindow(loop, 3) == 3);
         runner.Check("scenario11_cycle_window_healthy_zero", "a non-repeating recent window does not trigger",
                      ToolCallRepetitionStore::CountRepeatsInWindow(healthy, 6) == 0);
+
+        std::vector<std::string> lap;
+        for (int i = 0; i < 22; ++i)
+            lap.push_back("call" + std::to_string(i));
+        runner.Check("scenario11_cycle_first_lap_zero", "the first pass through a long sequence is not a repeat",
+                     ToolCallRepetitionStore::CountRepeatsInWindow(lap, 6) == 0);
+        std::vector<std::string> replay = lap;
+        for (int i = 0; i < 3; ++i)
+            replay.push_back(lap[i]);
+        runner.Check("scenario11_cycle_long_period_below_threshold", "three replayed calls stay below the threshold of four",
+                     ToolCallRepetitionStore::CountRepeatsInWindow(replay, 6) == 3);
+        replay.push_back(lap[3]);
+        runner.Check("scenario11_cycle_long_period_detected", "a period-22 replay reaches the threshold on the fourth replayed call",
+                     ToolCallRepetitionStore::CountRepeatsInWindow(replay, 6) == 4);
     }
 
     store.Clear();
