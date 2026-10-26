@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """factory/config/file_guard_paths.json - the Windows signature-catalog stores are write-denied silently.
 
 Converting a model loads the QAIRT SDK's signed DLLs / .pyd modules; Windows' signature lookup may then open

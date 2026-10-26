@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
 """Render the brand icon (same mark as frontend/index.html's inline favicon) to icon.ico/png.
 
 Run:  python desktop/src-tauri/icons/render_icon.py     (needs Pillow)
