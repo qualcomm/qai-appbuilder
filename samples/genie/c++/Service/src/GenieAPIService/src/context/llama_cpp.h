@@ -41,6 +41,10 @@ public:
 
     static void SetPrefixCacheEnabled(bool enabled);
 
+    static void SetDegenerateRepeatGuardEnabled(bool enabled);
+
+    static void SetDegenerateRepeatGuardMaxPeriod(int max_period);
+
     // n = prompt_engineering.json 的 llama_prefix_cache.head_checkpoints；
     // from_config = 该键是否**显式**出现（而不是取了默认值）。显式给出后，规划器推导的值不再覆盖它。
     static void SetPrefixHeadCheckpoints(int n, bool from_config);

@@ -268,6 +268,11 @@ struct AdaptiveThinkingConfig {
     int goal_reminder_chars = 0;
 };
 
+struct GenerationRepeatGuardConfig {
+    bool enabled = true;
+    int max_period_tokens = 48;
+};
+
 struct CloudModelConfig {
     bool enabled = false;
     std::string base_url;
@@ -893,6 +898,11 @@ public:
         return adaptive_thinking_config_;
     }
 
+    const GenerationRepeatGuardConfig &GetGenerationRepeatGuardConfig() const
+    {
+        return generation_repeat_guard_config_;
+    }
+
     const PromptOptimizationConfig& GetPromptOptimizationConfig() const
     {
         return prompt_optimization_config_;
@@ -969,7 +979,8 @@ public:
     ToolCallRepairConfig tool_call_repair_config_;
     WindowsShellHintConfig windows_shell_hint_config_;
     AdaptiveThinkingConfig adaptive_thinking_config_;
-    
+    GenerationRepeatGuardConfig generation_repeat_guard_config_;
+
     // Prompt 优化配置
     PromptOptimizationConfig prompt_optimization_config_;
 

@@ -33,6 +33,8 @@ list(APPEND SERVICE_SOURCES
         src/model/model_manager.cpp
         src/context/llama_speculative_config.cpp
         src/context/llama_runtime_planner.cpp
+        src/context/degenerate_repeat_guard.cpp
+        src/context/degenerate_repeat_guard_selftest.cpp
         src/context/qnn/genie.cpp
         src/context/qnn/genie_interface.cpp
         src/context/qnn/phi4mm/phi4mm.cpp

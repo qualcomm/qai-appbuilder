@@ -404,6 +404,7 @@ if (MSVC)
                 -DCMAKE_CXX_COMPILER=${MSVC_CLANG_COMPILER}
                 -DCMAKE_LINKER=${MSVC_CLANG_LINKER}
                 -DCMAKE_BUILD_TYPE=Release
+                -DCMAKE_UNITY_BUILD=OFF
                 -DCMAKE_POSITION_INDEPENDENT_CODE=ON
                 -DCMAKE_PREFIX_PATH=${OPENCL_INSTALL_PREFIX}
                 # ARM64 向量化/快速数学编译选项，用于加速 ggml CPU 侧计算(Ninja + Clang 工具链)

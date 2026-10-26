@@ -3,6 +3,14 @@
     "_comment_scope": "本文件只承载与端云结合完全无关的通用本地能力：工具调用兜底修复/消息裁剪/紧急截断/长文本摘要/Task Memo 等算法参数，以及本地调试开关；与 -n 取值无关，无条件生效。下游客户端自己的提示词文案（身份声明/段落过滤规则/SpawnGuard 等）不在此文件，仍在 service_config.json 的 prompt_optimization 节下。",
     "_version": "1.0",
 
+    "generation_repeat_guard": {
+        "_comment": "单次生成内的退化 token 循环防护：检测到重复周期后暂存后续 token，确认重复时提前结束并回滚 KV；不影响正常生成",
+        "_comment_enabled": "true=启用（默认），false=关闭本次生成内退化循环防护",
+        "enabled": true,
+        "_comment_max_period_tokens": "检测的最大重复周期长度，默认48；只检测尾部两个完全相同的 token 块",
+        "max_period_tokens": 48
+    },
+
     "tool_call_repair": {
         "_comment": "工具调用兜底修复配置：现有正则修复链+Layer1本地确定性提取均失败后（最终会落回 name=unknow），Layer2 在返回给客户端之前发起服务端内部隐形自纠正重试",
         "_comment_enabled": "true=启用本节全部新增行为（默认），false=完全跳过，行为与改动前逐字节一致",

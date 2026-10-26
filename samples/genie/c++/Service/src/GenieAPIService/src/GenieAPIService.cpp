@@ -23,6 +23,7 @@
 #include "chat_request_handler/tool_call_circuit_breaker_store_selftest.h"
 #include "chat_request_handler/tool_call_repetition_store_selftest.h"
 #include "chat_request_handler/task_memo_doc_scan_selftest.h"
+#include "context/degenerate_repeat_guard_selftest.h"
 #if defined(_WIN32) || defined(__WIN32__) || defined(WIN32)
 #include <windows.h>
 #endif
@@ -366,6 +367,11 @@ int main(int argc, char **argv)
     if (argc > 1 && std::string(argv[1]) == "--self-test-task-memo-scan")
     {
         bool all_passed = RunTaskMemoDocScanSelfTest(std::cout);
+        return all_passed ? 0 : 1;
+    }
+    if (argc > 1 && std::string(argv[1]) == "--self-test-degenerate-repeat-guard")
+    {
+        bool all_passed = RunDegenerateRepeatGuardSelfTest(std::cout);
         return all_passed ? 0 : 1;
     }
     service.run(argc, argv);

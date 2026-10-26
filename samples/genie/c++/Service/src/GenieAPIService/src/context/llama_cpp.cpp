@@ -16,6 +16,7 @@
 #include "log.h"
 #include "utils.h"
 #include "llama_speculative_config.h"
+#include "degenerate_repeat_guard.h"
 #include "watermark_provider_host.h"
 #include <filesystem>
 #include <fstream>
@@ -26,6 +27,8 @@
 #include <thread>
 #include <chrono>
 #include <atomic>
+#include <cstddef>
+#include <utility>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -33,6 +36,8 @@ namespace fs = std::filesystem;
 static std::atomic<bool> g_llama_prefix_cache_enabled{true};
 static std::atomic<int> g_llama_prefix_head_checkpoints{2};
 static std::atomic<bool> g_llama_prefix_head_checkpoints_explicit{false};
+static std::atomic<bool> g_degenerate_repeat_guard_enabled{true};
+static std::atomic<int> g_degenerate_repeat_guard_max_period{48};
 
 static inline int64_t now_ms()
 {
@@ -596,6 +601,93 @@ public:
             return true;
         };
 
+        const bool repeat_guard_enabled = g_degenerate_repeat_guard_enabled.load();
+        const int repeat_guard_max_period = std::max(0, g_degenerate_repeat_guard_max_period.load());
+        std::vector<int32_t> guard_ids;
+        std::vector<std::pair<llama_token, int>> guard_pending;
+        bool guard_holding = false;
+        int guard_period = 0;
+        bool degenerate_loop_hit = false;
+
+        auto flush_guard_pending = [&]() -> bool
+        {
+            guard_holding = false;
+            guard_period = 0;
+            for (const auto &pending : guard_pending)
+            {
+                if (!emit_generated_token(pending.first))
+                {
+                    guard_pending.clear();
+                    return false;
+                }
+            }
+            guard_pending.clear();
+            return true;
+        };
+
+        auto guarded_emit = [&](llama_token id, int kv_pos) -> bool
+        {
+            if (!repeat_guard_enabled || repeat_guard_max_period <= 0)
+            {
+                return emit_generated_token(id);
+            }
+
+            guard_ids.push_back(static_cast<int32_t>(id));
+            if (guard_holding)
+            {
+                guard_pending.emplace_back(id, kv_pos);
+                if (n_remain <= 0 || llama_vocab_is_eog(vocab, id))
+                {
+                    return flush_guard_pending();
+                }
+                if (static_cast<int>(guard_pending.size()) == guard_period)
+                {
+                    const size_t pending_start = guard_ids.size() - guard_period;
+                    const size_t previous_start = pending_start - guard_period;
+                    const bool repeated = std::equal(
+                            guard_ids.begin() + static_cast<std::ptrdiff_t>(previous_start),
+                            guard_ids.begin() + static_cast<std::ptrdiff_t>(pending_start),
+                            guard_ids.begin() + static_cast<std::ptrdiff_t>(pending_start),
+                            guard_ids.end());
+                    if (repeated)
+                    {
+                        const int rollback_pos = guard_pending.front().second;
+                        const int detected_period = guard_period;
+                        guard_pending.clear();
+                        guard_holding = false;
+                        guard_period = 0;
+                        n_past = rollback_pos;
+                        if (!is_speculative_)
+                        {
+                            llama_memory_seq_rm(mem, 0, rollback_pos, -1);
+                        }
+                        degenerate_loop_hit = true;
+                        should_stop = true;
+                        My_Log{My_Log::Level::kWarning}
+                            << "[LLAMACpp] " << query_type
+                            << " Degenerate repeat guard stopped period=" << detected_period
+                            << " rollback_pos=" << rollback_pos << "\n";
+                        return false;
+                    }
+                    return flush_guard_pending();
+                }
+                return true;
+            }
+
+            if (!emit_generated_token(id))
+            {
+                return false;
+            }
+            const int period = degenerate_repeat_guard::FindRepeatedPeriod(guard_ids, repeat_guard_max_period);
+            if (period > 0)
+            {
+                guard_holding = true;
+                guard_period = period;
+                guard_pending.clear();
+            }
+            return true;
+        };
+
         // 线性推理主循环，对齐 completion.cpp 非交互（-no-cnv）分支：溢出平移 → 分批 decode → 采样 → 回显 → EOG/n_predict 退出
         while (n_remain != 0)
         {
@@ -638,13 +730,12 @@ public:
 
                 if (is_speculative_)
                 {
-                    llama_batch batch_chunk = llama_batch_init((int) embd.size(), 0, 1);
+                    common_batch batch_chunk(ctx);
                     for (size_t i = 0; i < embd.size(); ++i)
                     {
-                        common_batch_add(batch_chunk, embd[i], (llama_pos) (n_past + (int) i), {0}, false);
+                        batch_chunk.add(embd[i], (llama_pos) (n_past + (int) i), {0}, false);
                     }
                     common_speculative_process(spec_.get(), batch_chunk);
-                    llama_batch_free(batch_chunk);
                 }
 
                 n_past += (int) embd.size();
@@ -751,7 +842,7 @@ public:
             {
                 for (auto id: embd)
                 {
-                    if (!emit_generated_token(id))
+                    if (!guarded_emit(id, n_past))
                     {
                         break;
                     }
@@ -787,6 +878,16 @@ public:
             common_speculative_begin(spec_.get(), kSpecSeqId, spec_prompt);
 
             llama_batch batch_tgt = llama_batch_init(params_.n_batch, 0, 1);
+            common_batch spec_batch_tgt(ctx);
+            auto add_batch_token = [](llama_batch &batch, llama_token id, llama_pos pos, llama_seq_id seq_id, bool logits)
+            {
+                const int32_t index = batch.n_tokens++;
+                batch.token[index] = id;
+                batch.pos[index] = pos;
+                batch.n_seq_id[index] = 1;
+                batch.seq_id[index][0] = seq_id;
+                batch.logits[index] = logits;
+            };
             bool decode_failed = false;
 
             while (n_remain != 0)
@@ -811,8 +912,10 @@ public:
                         think_force_closing = false;
                     }
 
-                    common_batch_clear(batch_tgt);
-                    common_batch_add(batch_tgt, id_last, n_past++, {kSpecSeqId}, true);
+                    batch_tgt.n_tokens = 0;
+                    spec_batch_tgt.clear();
+                    add_batch_token(batch_tgt, id_last, n_past++, kSpecSeqId, true);
+                    spec_batch_tgt.add(id_last, n_past - 1, kSpecSeqId, true);
                     if (llama_decode(ctx, batch_tgt))
                     {
                         My_Log{My_Log::Level::kError}
@@ -820,7 +923,7 @@ public:
                         decode_failed = true;
                         break;
                     }
-                    common_speculative_process(spec_.get(), batch_tgt);
+                    common_speculative_process(spec_.get(), spec_batch_tgt);
                     common_sampler_accept(smpl, forced_id, true);
                     spec_prompt.push_back(id_last);
                     id_last = forced_id;
@@ -854,11 +957,14 @@ public:
                     }
                 }
 
-                common_batch_clear(batch_tgt);
-                common_batch_add(batch_tgt, id_last, n_past++, {kSpecSeqId}, true);
+                batch_tgt.n_tokens = 0;
+                spec_batch_tgt.clear();
+                add_batch_token(batch_tgt, id_last, n_past++, kSpecSeqId, true);
+                spec_batch_tgt.add(id_last, n_past - 1, kSpecSeqId, true);
                 for (size_t i = 0; i < draft.size(); ++i)
                 {
-                    common_batch_add(batch_tgt, draft[i], n_past + (int) i, {kSpecSeqId}, true);
+                    add_batch_token(batch_tgt, draft[i], n_past + (int) i, kSpecSeqId, true);
+                    spec_batch_tgt.add(draft[i], n_past + (int) i, kSpecSeqId, true);
                 }
 
                 const int64_t t_verify0 = now_ms();
@@ -873,7 +979,7 @@ public:
                 spec_verify_ms += t_verify1 - t_verify0;
                 ++spec_rounds;
 
-                common_speculative_process(spec_.get(), batch_tgt);
+                common_speculative_process(spec_.get(), spec_batch_tgt);
                 const int64_t t_readback1 = now_ms();
                 spec_readback_ms += t_readback1 - t_verify1;
 
@@ -886,15 +992,17 @@ public:
                     draft_accept_hist.resize(ids.size(), 0);
                 }
                 draft_accept_hist[ids.size() - 1]++;
+                const int round_base = n_past;
                 n_past += (int) ids.size() - 1;
 
                 bool stop_now = false;
-                for (auto next_id: ids)
+                for (size_t j = 0; j < ids.size(); ++j)
                 {
+                    const llama_token next_id = ids[j];
                     spec_prompt.push_back(id_last);
                     id_last = next_id;
                     --n_remain;
-                    if (!emit_generated_token(id_last))
+                    if (!guarded_emit(id_last, round_base + static_cast<int>(j)))
                     {
                         stop_now = true;
                         break;
@@ -982,6 +1090,7 @@ public:
                               " | verify_ms=" + std::to_string(spec_verify_ms) +
                               " | readback_ms=" + std::to_string(spec_readback_ms) +
                               " | post_ms=" + std::to_string(spec_post_ms)) : std::string())
+                 << (degenerate_loop_hit ? " | degenerate_repeat_guard=1" : "")
                  << "\n";
 
         if (is_aux_inference && !generated_text_buf.empty()) {
@@ -1732,8 +1841,8 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
                 arg_strings.insert(arg_strings.end(), {"-ot", ot});
             }
         }
-        arg_strings.insert(arg_strings.end(), configured_extra_args.begin(), configured_extra_args.end());
     }
+    arg_strings.insert(arg_strings.end(), configured_extra_args.begin(), configured_extra_args.end());
     // 投机解码分支（非 CPU）不显式传 -ngl：llama-completion.exe 实测确认，一旦显式给出 -ngl（含
     // 99），fork 的 common/fit.cpp 会直接放弃显存拟合、强行按请求值全量分配，而本机 OpenCL 设备
     // 可用显存（约15078MiB）不足以装下 Qwen3.8-27B 全部66层（需约15234MiB），导致最后几批 q6_K
@@ -1926,6 +2035,16 @@ LLAMACppBuilder::~LLAMACppBuilder()
 void LLAMACppBuilder::SetPrefixCacheEnabled(bool enabled)
 {
     g_llama_prefix_cache_enabled.store(enabled);
+}
+
+void LLAMACppBuilder::SetDegenerateRepeatGuardEnabled(bool enabled)
+{
+    g_degenerate_repeat_guard_enabled.store(enabled);
+}
+
+void LLAMACppBuilder::SetDegenerateRepeatGuardMaxPeriod(int max_period)
+{
+    g_degenerate_repeat_guard_max_period.store(max_period);
 }
 
 void LLAMACppBuilder::SetPrefixHeadCheckpoints(int n, bool from_config)

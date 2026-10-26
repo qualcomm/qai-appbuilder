@@ -1178,6 +1178,17 @@ bool ModelManager::InitializeConfig()
                 RequestTraceWriter::GetInstance().Configure(request_trace_config_);
 
 #ifdef USE_GGUF
+                auto &grg_cfg = generation_repeat_guard_config_;
+                if (pe_json.contains("generation_repeat_guard") && pe_json["generation_repeat_guard"].is_object())
+                {
+                    const auto &grg = pe_json["generation_repeat_guard"];
+                    grg_cfg.enabled = grg.value("enabled", grg_cfg.enabled);
+                    grg_cfg.max_period_tokens = grg.value("max_period_tokens", grg_cfg.max_period_tokens);
+                }
+                LLAMACppBuilder::SetDegenerateRepeatGuardEnabled(grg_cfg.enabled);
+                LLAMACppBuilder::SetDegenerateRepeatGuardMaxPeriod(grg_cfg.max_period_tokens);
+                My_Log{} << "[Config] generation_repeat_guard loaded: enabled=" << grg_cfg.enabled
+                         << ", max_period_tokens=" << grg_cfg.max_period_tokens << std::endl;
                 {
                     bool prefix_cache_enabled = true;
                     int head_checkpoints = 2;
