@@ -5,8 +5,10 @@
 
 | 产物 | 说明 |
 |---|---|
-| `QAIModelBuilder-<ver>-x64-setup.exe` | x64 / Windows-on-ARM 上跑 x64 都可用 |
-| `QAIModelBuilder-<ver>-arm64-setup.exe` | 仅 ARM64 |
+| `QAIModelBuilder-<ver>-qairt<A.B.C>-x64-setup.exe` | x64 / Windows-on-ARM 上跑 x64 都可用 |
+| `QAIModelBuilder-<ver>-qairt<A.B.C>-arm64-setup.exe` | 仅 ARM64 |
+
+`<A.B.C>` 是该包对应的 QAIRT SDK 版本的前三段(例如 `2.48.40.260702` -> `qairt2.48.40`),与 qai_appbuilder 的 release 号一致。
 
 ## 准备构建环境
 
@@ -107,7 +109,7 @@ Test-Path "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"    # True
 
 前置条件见上面的“准备构建环境”。
 
-输出在 `dist\installer\`(已被 `.gitignore`):`QAIModelBuilder-<ver>-x64-setup.exe`、`QAIModelBuilder-<ver>-arm64-setup.exe`。
+输出在 `dist\installer\`(已被 `.gitignore`):`QAIModelBuilder-<ver>-qairt<A.B.C>-x64-setup.exe`、`QAIModelBuilder-<ver>-qairt<A.B.C>-arm64-setup.exe`,例如 `QAIModelBuilder-3.1.1-qairt2.48.40-x64-setup.exe`。
 
 ## 包里有什么(白名单)
 

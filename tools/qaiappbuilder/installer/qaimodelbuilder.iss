@@ -4,7 +4,7 @@
 ; ---------------------------------------------------------------------
 ; QAI ModelBuilder installer (browser edition), one per architecture.
 ; Build with installer\build_installer.ps1, which passes:
-;   /DAppVersion=3.1.0  /DArch=x64|arm64  /DStageDir=<staged tree>  /DOutDir=<output dir>
+;   /DAppVersion=3.1.0  /DArch=x64|arm64  /DQairtTag=2.48.40  /DStageDir=<staged tree>  /DOutDir=<output dir>
 ;
 ; What it does: copies the staged tree (pre-built frontend, backend source, uv, aria2c),
 ; then runs  setup_env.bat --arch <arch> --no-pause --with-browser --with-astgrep  (no --builder: QAIRT is NOT
@@ -16,6 +16,9 @@
 #endif
 #ifndef Arch
   #error Pass /DArch=x64 or /DArch=arm64
+#endif
+#ifndef QairtTag
+  #error Pass /DQairtTag=A.B.C (first three parts of the QAIRT SDK version; it goes into the file name)
 #endif
 #ifndef StageDir
   #error Pass /DStageDir=<staged tree>
@@ -55,7 +58,7 @@ DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir={#OutDir}
-OutputBaseFilename=QAIModelBuilder-{#AppVersion}-{#Arch}-setup
+OutputBaseFilename=QAIModelBuilder-{#AppVersion}-qairt{#QairtTag}-{#Arch}-setup
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern

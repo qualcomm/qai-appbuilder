@@ -14,7 +14,8 @@
          - pyproject.toml, build_info.json, launcher .bat files, READMEs
          - data\bin\uv\uv.exe (fetched from PyPI for the TARGET arch), data\bin\aria2c\aria2c.exe
        Tests, docs, samples, models, .qai, desktop sources, vendor, node_modules are NOT staged (the built desktop shell exe is).
-    4. run ISCC.exe  ->  dist\installer\QAIModelBuilder-<version>-<arch>-setup.exe
+    4. run ISCC.exe  ->  dist\installer\QAIModelBuilder-<version>-qairt<A.B.C>-<arch>-setup.exe
+       (A.B.C = first three parts of the QAIRT SDK version, e.g. qairt2.48.40)
 
     The installer copies the files, then runs setup_env.bat (no --builder: QAIRT is NOT installed).
 
@@ -58,7 +59,7 @@ Usage:
   .\installer\build_installer.ps1 [options]
 
 Builds, in order: the frontend (Build.bat), the desktop window exe (desktop\build.ps1), then the Inno Setup installer(s).
-Output: dist\installer\QAIModelBuilder-<version>-<arch>-setup.exe
+Output: dist\installer\QAIModelBuilder-<version>-qairt<A.B.C>-<arch>-setup.exe   (A.B.C from the QAIRT version)
 
 Options:
   -Arch <x64|arm64|both>  architecture(s) to build                       (default: both)
@@ -331,12 +332,12 @@ $iss = Join-Path $PSScriptRoot 'qaimodelbuilder.iss'
 foreach ($a in $arches) {
     $stage = Stage-Arch $a | Select-Object -Last 1
     Info "compiling installer ($a) ..."
-    & $IsccPath /Q "/DAppVersion=$Version" "/DArch=$a" "/DStageDir=$stage" "/DOutDir=$OutDir" $iss
+    & $IsccPath /Q "/DAppVersion=$Version" "/DArch=$a" "/DQairtTag=$AbTag" "/DStageDir=$stage" "/DOutDir=$OutDir" $iss
     if ($LASTEXITCODE -ne 0) { Fail "ISCC failed for $a (exit $LASTEXITCODE)" }
     if (-not $KeepStage) { Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
 Info 'done:'
-Get-ChildItem $OutDir -Filter 'QAIModelBuilder-*-setup.exe' |
+Get-ChildItem $OutDir -Filter "QAIModelBuilder-$Version-qairt$AbTag-*-setup.exe" |
     ForEach-Object { '  {0}  {1:N1} MB' -f $_.FullName, ($_.Length / 1MB) }
 
