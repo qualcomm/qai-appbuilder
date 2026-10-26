@@ -108,6 +108,7 @@
 ## 调试
 
 - 后端输出:`data\logs\desktop-backend.log`。
+- 以管理员身份运行时后端会拒绝启动(退出码 78),启动页直接显示原因和两种办法(换普通账号,或设置环境变量 `QAI_ALLOW_ELEVATED=1` 后重开),不用去看日志。其他意外退出仍显示退出码和日志路径。
 - 打开 WebView2 调试端口:启动前设置 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9333`,然后访问 `http://127.0.0.1:9333/json`。
 - 单元测试:`cd desktop\src-tauri; cargo test --release --lib`(3 项:`host_arch` 解析、端口缺省、设置读写)。
 

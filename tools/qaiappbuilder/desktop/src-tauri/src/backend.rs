@@ -12,6 +12,10 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+/// Exit code of `apps.cli.serve` when it refuses to run because the process is elevated
+/// (`apps/cli/serve.py::ELEVATED_REFUSED_EXIT_CODE`). Lets the splash page name the cause and the fix.
+pub const EXIT_ELEVATED_REFUSED: i32 = 78;
+
 pub struct Backend {
     pub child: Child,
     pub port: u16,

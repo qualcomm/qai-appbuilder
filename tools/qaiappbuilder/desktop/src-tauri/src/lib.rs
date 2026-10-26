@@ -55,6 +55,21 @@ fn base_url(port: u16) -> String {
 // start-up
 // ---------------------------------------------------------------------------------------------------------------
 
+/// The splash text for a backend that has exited. A known cause (currently: refused to run elevated) gets its own
+/// message with the fix spelled out, so the user does not have to open the log; anything else keeps the generic text
+/// plus the exit code and the log path.
+fn exited_message(tx: &i18n::T, code: Option<i32>, root: &std::path::Path) -> String {
+    if code == Some(backend::EXIT_ELEVATED_REFUSED) {
+        return tx.err_elevated.to_string();
+    }
+    format!(
+        "{}\n(exit code {})\n{}",
+        tx.err_exited,
+        code.map_or("?".into(), |c| c.to_string()),
+        layout::log_dir(root).join("desktop-backend.log").display()
+    )
+}
+
 fn set_splash(win: &WebviewWindow, title: &str, msg: &str, error: bool) {
     let js = format!(
         "document.getElementById('title').textContent={};document.getElementById('msg').textContent={};document.body.classList.toggle('err',{});",
@@ -98,7 +113,7 @@ fn boot(app: AppHandle, sh: Sh) {
             g.as_mut().and_then(backend::exited)
         };
         if let Some(code) = exited {
-            let hint = format!("{}\n(exit code {})\n{}", tx.err_exited, code.map_or("?".into(), |c| c.to_string()), layout::log_dir(&sh.root).join("desktop-backend.log").display());
+            let hint = exited_message(tx, code, &sh.root);
             set_splash(&win, tx.splash_failed, &hint, true);
             return;
         }
@@ -141,12 +156,7 @@ fn watch(app: AppHandle, sh: Sh) {
                 if let Ok(u) = Url::parse("http://tauri.localhost/index.html") {
                     let _ = win.navigate(u);
                 }
-                let hint = format!(
-                    "{}\n(exit code {})\n{}",
-                    tx.err_exited,
-                    code.map_or("?".into(), |c| c.to_string()),
-                    layout::log_dir(&sh.root).join("desktop-backend.log").display()
-                );
+                let hint = exited_message(tx, code, &sh.root);
                 // the splash page needs a moment to load before it can be written to
                 std::thread::sleep(Duration::from_millis(800));
                 set_splash(&win, tx.splash_failed, &hint, true);

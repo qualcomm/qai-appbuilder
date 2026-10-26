@@ -43,6 +43,7 @@ pub struct T {
     pub err_port_busy: &'static str,
     pub err_spawn: &'static str,
     pub err_exited: &'static str,
+    pub err_elevated: &'static str,
     pub err_timeout: &'static str,
 }
 
@@ -73,6 +74,7 @@ static ZH: T = T {
     err_port_busy: "端口 {port} 已被占用。请关闭浏览器版(Start.bat)或其他占用该端口的程序后重试。",
     err_spawn: "无法启动后台服务",
     err_exited: "后台服务意外退出",
+    err_elevated: "当前是以管理员身份运行的,服务拒绝启动。\n以管理员身份运行产生的文件会归管理员所有,之后用普通账号运行会出现权限错误。\n\n请任选一种办法:\n1. 用普通(非管理员)账号登录 Windows,再启动本程序;不要使用「以管理员身份运行」。\n2. 如果你接受上述风险,把环境变量 QAI_ALLOW_ELEVATED 设为 1(系统属性 → 环境变量,或在命令行执行 setx QAI_ALLOW_ELEVATED 1),然后重新打开本程序。",
     err_timeout: "后台服务启动超时",
 };
 
@@ -96,6 +98,7 @@ static EN: T = T {
     err_port_busy: "Port {port} is already in use. Close the browser edition (Start.bat) or whatever uses the port, then try again.",
     err_spawn: "Could not start the background service",
     err_exited: "The background service exited unexpectedly",
+    err_elevated: "The service refused to start because this program is running as administrator.\nFiles created by an elevated run become owned by Administrators, and later runs from a normal account then fail with permission errors.\n\nDo one of the following:\n1. Sign in to Windows with a standard (non-administrator) account and start this program again. Do not use 'Run as administrator'.\n2. If you accept that risk, set the environment variable QAI_ALLOW_ELEVATED to 1 (System Properties > Environment Variables, or run: setx QAI_ALLOW_ELEVATED 1), then reopen this program.",
     err_timeout: "The background service did not become ready in time",
 };
 

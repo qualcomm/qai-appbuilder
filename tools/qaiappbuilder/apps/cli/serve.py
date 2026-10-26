@@ -74,6 +74,36 @@ from qai.platform.net.port_allocator import (
 )
 from qai.platform.process import is_admin
 
+# Environment variable that lets an operator knowingly bypass the
+# "refuse to run elevated" guard in :func:`main`.
+ALLOW_ELEVATED_ENV = "QAI_ALLOW_ELEVATED"
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+# Dedicated exit code for "refused because the process is elevated". A caller
+# that hides this process's stderr (the desktop shell sends it to a log file)
+# keys off this code to show the specific reason and the fix, instead of a
+# generic "exited unexpectedly". Keep in sync with
+# ``desktop/src-tauri/src/backend.rs::EXIT_ELEVATED_REFUSED``. Distinct from 1
+# (generic failure) and 75 (reboot request, which a wrapper would retry).
+ELEVATED_REFUSED_EXIT_CODE = 78
+
+_ELEVATED_REFUSAL_MESSAGE = (
+    "[serve] Refusing to start: this service must not run with "
+    "administrator/root privileges.\n"
+    "        Files created by an elevated run become owned by "
+    "Administrators/root, and later non-elevated runs then fail with "
+    "permission errors.\n"
+    "        To fix, do ONE of the following:\n"
+    "          1. Sign in to Windows with a standard (non-administrator) "
+    "account and start the app again. Do not use 'Run as administrator' "
+    "or sudo.\n"
+    f"          2. If you accept the risk, set {ALLOW_ELEVATED_ENV}=1 and "
+    "start again:\n"
+    f"               cmd         : set {ALLOW_ELEVATED_ENV}=1\n"
+    f"               PowerShell  : $env:{ALLOW_ELEVATED_ENV} = '1'\n"
+    f"               Linux/macOS : export {ALLOW_ELEVATED_ENV}=1\n"
+)
+
 # v2.7 §3.1 invariant — must equal the child-side
 # ``apps.api._reboot_scheduler._RebootScheduler.exit_code`` default and
 # the ``settings.server.reboot_exit_code`` default. Tests guard against
@@ -187,16 +217,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     # that surfaces days later as opaque permission errors. Cheaper to
     # reject up front. ``is_admin`` is fail-open (see its docstring), so a
     # broken probe never blocks a legitimate non-admin launch.
+    #
+    # An operator who knowingly accepts the permission trade-off (e.g. a
+    # machine whose only usable account is an administrator) can opt out by
+    # setting ``QAI_ALLOW_ELEVATED=1``; the default stays "refuse".
     if is_admin():
-        _stderr(
-            "[serve] Refusing to start: this service must not be run with "
-            "administrator/root privileges. Relaunch from a normal user "
-            "shell (do NOT 'Run as administrator' / do NOT use sudo).\n"
-        )
-        # Exit 1, NOT REBOOT_EXIT_CODE (75). The supervisor loop is inside
-        # this process and has not started yet, but any wrapper that treats
-        # 75 as "please retry" would spin forever.
-        return 1
+        if _elevated_allowed():
+            _stderr(
+                f"[serve] WARNING: running with administrator/root privileges "
+                f"because {ALLOW_ELEVATED_ENV} is set. Files created now "
+                "will be owned by Administrators/root and a later "
+                "non-elevated run may fail to update them.\n"
+            )
+        else:
+            _stderr(_ELEVATED_REFUSAL_MESSAGE)
+            # NOT REBOOT_EXIT_CODE (75). The supervisor loop is inside this
+            # process and has not started yet, but any wrapper that treats
+            # 75 as "please retry" would spin forever.
+            return ELEVATED_REFUSED_EXIT_CODE
 
     parser = _build_parser()
     args, child_args = parser.parse_known_args(argv)
@@ -1010,6 +1048,17 @@ def _resolve_bindable_port(
         ) from exc
 
 
+def _elevated_allowed() -> bool:
+    """True when the operator opted out of the elevated-launch refusal.
+
+    Reads :data:`ALLOW_ELEVATED_ENV`; only an explicit truthy value
+    (``1`` / ``true`` / ``yes`` / ``on``, case-insensitive) counts, so an
+    empty string or ``0`` keeps the guard on.
+    """
+
+    return os.environ.get(ALLOW_ELEVATED_ENV, "").strip().lower() in _TRUTHY
+
+
 def _stderr(msg: str) -> None:
     """Write ``msg`` to stderr without buffering, swallowing IO errors."""
 
@@ -1021,6 +1070,8 @@ def _stderr(msg: str) -> None:
 
 
 __all__ = [
+    "ALLOW_ELEVATED_ENV",
+    "ELEVATED_REFUSED_EXIT_CODE",
     "CRASH_WINDOW_SECONDS",
     "DEFAULT_PROBE_HOST",
     "FALLBACK_PORTS",
