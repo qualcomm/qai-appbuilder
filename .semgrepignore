@@ -73,13 +73,7 @@ tools/qaiappbuilder/tests/e2e/test_scheduled_tasks.py
 # self-generated-and-immediately-read-back file is not proportionate.
 tools/qaiappbuilder/tests/e2e/run_e2e.py
 
-# javascript.lang.security.detect-insecure-websocket -- every connection
-# attempt here targets the e2e suite's own loopback backend (`conftest.
-# E2E_HOST = "127.0.0.1"`, fixed port 8989), never a real network endpoint;
-# several of these tests exist specifically to pin a documented, known
-# WebSocket auth/origin gap (see test_events_auth_gate.py's module
-# docstring), so the plaintext scheme is the test subject, not an
-# accidental insecure default.
+# Loopback-only e2e tests: they connect to the suite's own local backend, never a real network endpoint.
 tools/qaiappbuilder/tests/e2e/test_chat_stream.py
 tools/qaiappbuilder/tests/e2e/test_downloads.py
 tools/qaiappbuilder/tests/e2e/test_events.py
