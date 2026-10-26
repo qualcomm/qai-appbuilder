@@ -1027,6 +1027,9 @@ set "QAIRT_ENV_JSON=data\config\qairt_env.json"
 if not exist "%QAIRT_ENV_JSON%" goto :qairt_env_patch_done
 echo.
 echo -- Step 4g: Verify qairt_env.json runtime venv matches %HOST_ARCH% -----------
+REM First align its QAIRT version with scripts\qairt_release.json (a file left over from an
+REM older release would otherwise keep the old SDK in use). Non-fatal, idempotent.
+"%VENV_DIR%\Scripts\python.exe" "scripts\setup\sync_qairt_env_version.py" "%QAIRT_ENV_JSON%" "scripts\qairt_release.json"
 "%VENV_DIR%\Scripts\python.exe" "scripts\setup\patch_qairt_env_arch.py" "%QAIRT_ENV_JSON%" "%HOST_ARCH%"
 if errorlevel 1 (
     echo [WARN] Failed to patch qairt_env.json; model runner may use wrong interpreter.

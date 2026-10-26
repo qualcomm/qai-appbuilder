@@ -332,6 +332,9 @@ if errorlevel 1 (
 ) else (
     echo [OK]   data\ initialised.
 )
+REM qairt_env.json survives an upgrade install; if it still names another QAIRT version than
+REM scripts\qairt_release.json, point its SDK fields at the release version (non-fatal, idempotent).
+if exist "data\config\qairt_env.json" "%VPY%" "scripts\setup\sync_qairt_env_version.py" "data\config\qairt_env.json" "scripts\qairt_release.json"
 if exist "data\config\qairt_env.json" "%VPY%" "scripts\setup\patch_qairt_env_arch.py" "data\config\qairt_env.json" "%HOST_ARCH%" >nul 2>&1
 call :tick "6  data init (install pipeline)"
 
