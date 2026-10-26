@@ -68,6 +68,49 @@ std::string CanonicalToolCallKey(const json& tool_call)
     return name + "\x01" + args;
 }
 
+std::string NormalizeDumpPath(const std::string& p)
+{
+    std::string out = p;
+    std::replace(out.begin(), out.end(), '/', '\\');
+    return out;
+}
+
+std::string ExtractJsonPathArgFromToolCall(const json& tool_call)
+{
+    if (!tool_call.is_object() || !tool_call.contains("function") || !tool_call["function"].is_object())
+        return "";
+    const json& fn = tool_call["function"];
+    if (!fn.contains("arguments")) return "";
+    nlohmann::json parsed;
+    if (fn["arguments"].is_string()) {
+        parsed = nlohmann::json::parse(fn["arguments"].get<std::string>(), nullptr, false);
+        if (parsed.is_discarded()) return "";
+    } else {
+        parsed = nlohmann::json(fn["arguments"]);
+    }
+    if (!parsed.is_object()) return "";
+    static const char* kPathKeys[] = {"path", "file", "file_path", "filename"};
+    for (const char* key : kPathKeys) {
+        if (parsed.contains(key) && parsed[key].is_string())
+            return NormalizeDumpPath(parsed[key].get<std::string>());
+    }
+    return "";
+}
+
+std::string ExtractFullOutputSavedPath(const std::string& content)
+{
+    static const char kMarker[] = "[full_output_saved] path=";
+    const size_t pos = content.find(kMarker);
+    if (pos == std::string::npos) return "";
+    size_t start = pos + sizeof(kMarker) - 1;
+    size_t end = content.find_first_of("\r\n", start);
+    if (end == std::string::npos) end = content.size();
+    while (end > start && (content[end - 1] == ']' || std::isspace(static_cast<unsigned char>(content[end - 1]))))
+        --end;
+    if (end <= start) return "";
+    return NormalizeDumpPath(content.substr(start, end - start));
+}
+
 constexpr float kEvictionLowWaterRatio = 0.5f;
 constexpr float kEvictionHighWaterRatio = 0.95f;
 constexpr size_t kMaxEvictionStates = 64;
@@ -2723,6 +2766,22 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
     if (prefix_cache_active && contextSize > 0) {
         const size_t cap_tokens = std::min(tool_entry_cap_tokens,
             static_cast<size_t>(static_cast<float>(contextSize) * kToolEntryHardCapRatio));
+        std::unordered_map<std::string, std::string> call_id_to_path;
+        std::unordered_set<std::string> full_dump_paths;
+        for (size_t i = 0; i < filtered_msg.size(); i++) {
+            const std::string role_i = get_json_value(filtered_msg[i], "role", BLANK_STRING);
+            if (role_i == "assistant" && filtered_msg[i].contains("tool_calls") && filtered_msg[i]["tool_calls"].is_array()) {
+                for (const auto& tc : filtered_msg[i]["tool_calls"]) {
+                    if (!tc.is_object() || !tc.contains("id") || !tc["id"].is_string()) continue;
+                    const std::string path_arg = ExtractJsonPathArgFromToolCall(tc);
+                    if (!path_arg.empty()) call_id_to_path[tc["id"].get<std::string>()] = path_arg;
+                }
+            } else if (role_i == "tool") {
+                const std::string saved_path = ExtractFullOutputSavedPath(
+                    get_json_value(filtered_msg[i], "content", BLANK_STRING));
+                if (!saved_path.empty()) full_dump_paths.insert(saved_path);
+            }
+        }
         size_t capped_count = 0;
         for (size_t i = 0; i < filtered_msg.size(); i++) {
             if (get_json_value(filtered_msg[i], "role", BLANK_STRING) != "tool") continue;
@@ -2732,7 +2791,13 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
                 capped_count++;
                 continue;
             }
-            if (content.size() <= cap_tokens) continue;
+            size_t entry_cap_tokens = cap_tokens;
+            if (filtered_msg[i].contains("tool_call_id") && filtered_msg[i]["tool_call_id"].is_string()) {
+                auto path_it = call_id_to_path.find(filtered_msg[i]["tool_call_id"].get<std::string>());
+                if (path_it != call_id_to_path.end() && full_dump_paths.count(path_it->second))
+                    entry_cap_tokens = tool_entry_cap_tokens;
+            }
+            if (content.size() <= entry_cap_tokens) continue;
             std::string tool_name = get_json_value(filtered_msg[i], "name", BLANK_STRING);
             if (tool_name.empty() && filtered_msg[i].contains("tool_call_id") &&
                 filtered_msg[i]["tool_call_id"].is_string() && tool_call_id_to_name) {
@@ -2740,8 +2805,8 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
                 if (name_it != tool_call_id_to_name->end()) tool_name = name_it->second;
             }
             std::string capped = IsGrepToolName(tool_name)
-                ? CapGrepResultByMatches(content, CountTokens(content), cap_tokens)
-                : CapToolResultHeadTail(content, CountTokens(content), cap_tokens);
+                ? CapGrepResultByMatches(content, CountTokens(content), entry_cap_tokens)
+                : CapToolResultHeadTail(content, CountTokens(content), entry_cap_tokens);
             if (capped.size() < content.size()) {
                 filtered_msg[i]["content"] = capped;
                 capped_count++;
