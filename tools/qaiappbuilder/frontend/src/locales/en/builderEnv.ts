@@ -16,6 +16,7 @@ const builderEnv = {
   missing:
     "The model conversion environment (Python 3.10 + QAIRT SDK) is not installed. It is only needed to convert models; everything else works without it.",
   missingParts: "Missing",
+  versionMismatch: "The current configuration points to QAIRT SDK {installed}; this version needs {expected}.",
   sizeHint:
     "About 4–5 GB will be downloaded (QAIRT SDK ≈ 2 GB, Python packages ≈ 2.5 GB). It is resumable — you can cancel and continue later.",
   unavailable: "This build cannot install it automatically.",

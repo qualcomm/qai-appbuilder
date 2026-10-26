@@ -157,6 +157,11 @@ class BuilderEnvService:
         """The installer script is present in this build."""
         return self._script.is_file()
 
+    @property
+    def release_file(self) -> Path:
+        """``scripts/qairt_release.json`` of this app: the QAIRT version an install fetches."""
+        return self._root / "scripts" / "qairt_release.json"
+
     # ── commands ───────────────────────────────────────────────────────────
 
     def _argv(self, mirror: str, proxy: str) -> list[str]:

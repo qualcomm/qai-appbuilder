@@ -34,6 +34,7 @@ from qai.platform.builder_env import (
     InstallJob,
     ScriptMissingError,
     detect_builder_env,
+    read_release_version,
 )
 from qai.platform.errors import ConflictError, NotFoundError, ValidationError
 
@@ -81,6 +82,10 @@ class BuilderEnvResponse(BaseModel):
     sdk_root: str
     venv: str
     config_file: str
+    # QAIRT version this app installs (scripts/qairt_release.json); "" when unknown.
+    sdk_version: str = ""
+    # QAIRT version the current qairt_env.json names; "" when none / no config.
+    installed_sdk_version: str = ""
     job: JobDto | None
     # False when the installer script is not in this build (the UI hides the button).
     installable: bool
@@ -154,6 +159,8 @@ def build_router(*, container: Container) -> APIRouter:
             sdk_root=status.sdk_root,
             venv=status.venv,
             config_file=status.config_file,
+            sdk_version=read_release_version(service.release_file),
+            installed_sdk_version=status.sdk_version,
             job=_job_dto(job) if job is not None else None,
             installable=service.installable,
         )

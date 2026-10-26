@@ -58,6 +58,10 @@ export interface BuilderEnvStatus {
   sdk_root: string;
   venv: string;
   config_file: string;
+  /** QAIRT version this app installs (scripts/qairt_release.json); "" when unknown. */
+  sdk_version?: string;
+  /** QAIRT version the current qairt_env.json names; "" when none. */
+  installed_sdk_version?: string;
   job: BuilderEnvJob | null;
   /** False when the installer script is not part of this build. */
   installable: boolean;

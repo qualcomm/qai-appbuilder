@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -35,7 +36,10 @@ __all__ = [
     "BuilderEnvProblem",
     "BuilderEnvStatus",
     "detect_builder_env",
+    "read_release_version",
 ]
+
+_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(\.\d+)?$")
 
 #: A valid SDK has this file (same marker the installer verifies).
 SDK_MARKER_REL = Path("bin") / "aarch64-windows-msvc" / "qnn-context-binary-generator.exe"
@@ -58,6 +62,9 @@ class BuilderEnvStatus:
     config_file: str = ""
     sdk_root: str = ""
     venv: str = ""
+    #: QAIRT version the config names (``qairt_version`` / ``_version`` / a version-named SDK
+    #: folder), "" when it names none. Informational only: it does not affect ``ready``.
+    sdk_version: str = ""
 
     @property
     def missing(self) -> tuple[str, ...]:
@@ -115,4 +122,24 @@ def detect_builder_env(config_file: Path) -> BuilderEnvStatus:
         config_file=cfg_str,
         sdk_root=sdk_root,
         venv=venv,
+        sdk_version=_config_version(cfg, sdk_root),
     )
+
+
+def _config_version(cfg: dict, sdk_root: str) -> str:
+    for key in ("qairt_version", "_version"):
+        val = cfg.get(key)
+        if isinstance(val, str) and _VERSION_RE.match(val.strip()):
+            return val.strip()
+    name = Path(sdk_root.replace("\\", "/").rstrip("/")).name if sdk_root else ""
+    return name if _VERSION_RE.match(name) else ""
+
+
+def read_release_version(release_file: Path) -> str:
+    """``qairt_version`` from ``scripts/qairt_release.json`` (what an install would fetch), or ""."""
+    try:
+        data = json.loads(Path(release_file).read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return ""
+    val = data.get("qairt_version") if isinstance(data, dict) else None
+    return val.strip() if isinstance(val, str) and _VERSION_RE.match(val.strip()) else ""

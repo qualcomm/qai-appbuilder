@@ -92,6 +92,19 @@ def test_get_reflects_the_disk_with_no_restart(tmp_path):
         done = client.get("/api/system/builder-env").json()
     assert done["ready"] is True and done["problems"] == [] and done["sdk_root"] == str(sdk)
 
+def test_get_reports_target_and_installed_sdk_versions(tmp_path):
+    client, _, _ = build(tmp_path, OK)
+    with client:
+        before = client.get("/api/system/builder-env").json()
+        assert before["sdk_version"] == "" and before["installed_sdk_version"] == ""  # no release, no config
+        (tmp_path / "scripts" / "qairt_release.json").write_text(
+            json.dumps({"qairt_version": "2.51.40.260930"}), encoding="utf-8"
+        )
+        write_cfg(tmp_path, {"_version": "2.48.40.260702", "qairt_sdk_root": str(tmp_path / "2.48.40.260702")})
+        body = client.get("/api/system/builder-env").json()
+    assert body["sdk_version"] == "2.51.40.260930"
+    assert body["installed_sdk_version"] == "2.48.40.260702"
+
 
 def test_install_starts_a_job_and_progress_is_visible(tmp_path):
     client, _, _ = build(tmp_path, OK)

@@ -218,6 +218,32 @@ describe("BuilderEnvCard", () => {
     expect(w.get(tid("builder-env-action-error")).text()).toBe("server said no");
   });
 
+  it("missing: the title shows the QAIRT SDK version this app installs", async () => {
+    const w = await mountCard(status({ sdk_version: "2.48.40.260702", installed_sdk_version: "" }));
+    expect(w.get(tid("builder-env-version")).text()).toBe("QAIRT SDK 2.48.40.260702");
+    expect(w.find(tid("builder-env-version-mismatch")).exists()).toBe(false);
+  });
+
+  it("ready: the title shows the installed version", async () => {
+    const w = await mountCard(
+      status({ ready: true, missing: [], problems: [], sdk_version: "2.51.40.260930", installed_sdk_version: "2.48.40.260702" }),
+    );
+    expect(w.get(tid("builder-env-version")).text()).toBe("QAIRT SDK 2.48.40.260702");
+  });
+
+  it("missing with a stale config: target version in the title and a mismatch hint", async () => {
+    const w = await mountCard(status({ sdk_version: "2.51.40.260930", installed_sdk_version: "2.48.40.260702" }));
+    expect(w.get(tid("builder-env-version")).text()).toBe("QAIRT SDK 2.51.40.260930");
+    const hint = w.get(tid("builder-env-version-mismatch")).text();
+    expect(hint).toContain("2.48.40.260702");
+    expect(hint).toContain("2.51.40.260930");
+  });
+
+  it("no version known (older backend): no badge", async () => {
+    const w = await mountCard(status());
+    expect(w.find(tid("builder-env-version")).exists()).toBe(false);
+  });
+
   it("renders in Chinese", async () => {
     const w = await mountCard(status({ job: job({ state: "failed", error_code: "disk_space", failed_step: "deps" }) }), "zh-CN");
     expect(w.text()).toContain("模型转换环境");

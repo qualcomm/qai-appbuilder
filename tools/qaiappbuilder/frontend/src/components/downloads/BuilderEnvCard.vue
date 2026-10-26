@@ -112,7 +112,18 @@ async function onInstall(): Promise<void> {
   await env.install({ mirror: mirror.value, proxy: proxy.value.trim() });
 }
 
-const visible = computed(() => !["unknown"].includes(env.phase.value));
+const visible = computed(() => env.phase.value !== "unknown");
+
+/**
+ * QAIRT version shown next to the title: the installed one once ready, otherwise the one an
+ * install would fetch (they differ only while the config is stale).
+ */
+const sdkVersion = computed(() => {
+  const s = status.value;
+  if (!s) return "";
+  if (env.phase.value === "ready") return s.installed_sdk_version || s.sdk_version || "";
+  return s.sdk_version || "";
+});
 </script>
 
 <template>
@@ -128,6 +139,11 @@ const visible = computed(() => !["unknown"].includes(env.phase.value));
     <div class="builder-env-card__body">
       <h2 class="builder-env-card__title">
         {{ t("builderEnv.title") }}
+        <span
+          v-if="sdkVersion"
+          class="builder-env-card__version"
+          data-testid="builder-env-version"
+        >QAIRT SDK {{ sdkVersion }}</span>
       </h2>
 
       <!-- ready -->
@@ -147,6 +163,13 @@ const visible = computed(() => !["unknown"].includes(env.phase.value));
       <template v-else-if="env.phase.value === 'missing' || env.phase.value === 'unavailable'">
         <p class="builder-env-card__text">
           {{ t("builderEnv.missing") }}
+        </p>
+        <p
+          v-if="status?.sdk_version && status?.installed_sdk_version && status.installed_sdk_version !== status.sdk_version"
+          class="builder-env-card__hint"
+          data-testid="builder-env-version-mismatch"
+        >
+          {{ t("builderEnv.versionMismatch", { installed: status.installed_sdk_version, expected: status.sdk_version }) }}
         </p>
         <p
           v-if="missingText"
@@ -335,6 +358,20 @@ const visible = computed(() => !["unknown"].includes(env.phase.value));
   font-size: var(--text-md);
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.builder-env-card__version {
+  display: inline-block;
+  margin-left: var(--space-2);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  vertical-align: middle;
+  white-space: nowrap;
 }
 
 .builder-env-card__text {

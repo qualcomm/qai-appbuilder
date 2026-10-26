@@ -15,6 +15,7 @@ const builderEnv = {
   missing:
     "模型转换环境（Python 3.10 + QAIRT SDK）尚未安装。只有转换模型时才需要它，其他功能不受影响。",
   missingParts: "缺少",
+  versionMismatch: "当前配置指向 QAIRT SDK {installed}，此版本需要 {expected}。",
   sizeHint:
     "需要下载约 4–5 GB（QAIRT SDK 约 2 GB，Python 依赖约 2.5 GB），支持断点续传，可随时取消，之后接着下载。",
   unavailable: "当前版本无法自动安装。",

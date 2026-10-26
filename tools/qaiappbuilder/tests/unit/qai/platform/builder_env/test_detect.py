@@ -189,3 +189,51 @@ def test_script_check_matches_backend(ibe, tmp_path, scenario):
     assert script["ready"] == backend.ready
     assert [p["code"] for p in script["problems"]] == [p.code for p in backend.problems]
     assert script["missing"] == list(backend.missing)
+
+
+# ── reported QAIRT version (informational; never changes `ready`) ──────────────
+
+
+@pytest.mark.parametrize(
+    ("payload", "want"),
+    [
+        ({"qairt_version": "2.51.40.260930", "_version": "2.48.40.260702"}, "2.51.40.260930"),
+        ({"_version": "2.48.40.260702"}, "2.48.40.260702"),
+        ({"qairt_sdk_root": "C:/Qualcomm/AIStack/QAIRT/2.48.40.260702"}, "2.48.40.260702"),
+        ({"qairt_sdk_root": "D:/sdk/qairt"}, ""),
+        ({"_version": "not-a-version", "qairt_sdk_root": "D:/sdk/qairt"}, ""),
+        ({}, ""),
+    ],
+)
+def test_sdk_version_from_config(tmp_path, payload, want):
+    assert detect_builder_env(_cfg(tmp_path, payload)).sdk_version == want
+
+
+def test_sdk_version_does_not_affect_ready(tmp_path):
+    sdk, venv = _make_sdk(tmp_path / "1.2.3.4"), _make_venv(tmp_path / "venv")
+    st = detect_builder_env(_cfg(tmp_path, {"qairt_sdk_root": str(sdk), "python_x64_venv": str(venv)}))
+    assert st.ready and st.sdk_version == "1.2.3.4"
+
+
+def test_sdk_version_empty_without_config(tmp_path):
+    assert detect_builder_env(tmp_path / "config" / "qairt_env.json").sdk_version == ""
+
+
+@pytest.mark.parametrize(
+    ("content", "want"),
+    [
+        ('{"qairt_version": "2.48.40.260702"}', "2.48.40.260702"),
+        ('\ufeff{"qairt_version": "2.51.40"}', "2.51.40"),
+        ('{"qairt_version": "x"}', ""),
+        ("{ nope", ""),
+        ("[1]", ""),
+        (None, ""),
+    ],
+)
+def test_read_release_version(tmp_path, content, want):
+    from qai.platform.builder_env import read_release_version
+
+    f = tmp_path / "qairt_release.json"
+    if content is not None:
+        f.write_text(content, encoding="utf-8")
+    assert read_release_version(f) == want

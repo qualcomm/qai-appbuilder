@@ -12,6 +12,7 @@ from qai.platform.builder_env.detect import (
     BuilderEnvProblem,
     BuilderEnvStatus,
     detect_builder_env,
+    read_release_version,
 )
 from qai.platform.builder_env.service import (
     AlreadyRunningError,
@@ -31,4 +32,5 @@ __all__ = [
     "InstallState",
     "ScriptMissingError",
     "detect_builder_env",
+    "read_release_version",
 ]
