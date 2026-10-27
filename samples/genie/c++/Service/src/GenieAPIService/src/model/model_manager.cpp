@@ -908,27 +908,7 @@ ModelManager::ModelManager(IModelConfig &&config) : IModelConfig{std::move(confi
 
 ModelManager::~ModelManager()
 {
-    bool had_qnn = false;
-    {
-        std::lock_guard<std::mutex> lock(models_mutex_);
-        for (const auto &entry: loaded_models_)
-        {
-            if (entry.second && entry.second->backend == "qnn")
-            {
-                had_qnn = true;
-            }
-        }
-        loaded_models_.clear();
-        default_model_name_.clear();
-    }
-    if (genieModelHandle != nullptr)
-    {
-        Clean();
-    }
-    else if (had_qnn)
-    {
-        std::this_thread::sleep_for(std::chrono::milliseconds(2000));
-    }
+    Clean();
 }
 
 bool ModelManager::LoadModelByName(const std::string &new_model, bool &first_load)
@@ -2357,6 +2337,9 @@ void ModelManager::UnloadModel()
         std::lock_guard<std::mutex> lock(models_mutex_);
         for (auto &entry: loaded_models_)
         {
+            My_Log{} << "UnloadModel: releasing model '"
+                     << (entry.second && entry.second->config ? entry.second->config->get_model_name() : entry.first)
+                     << "'" << std::endl;
             models_to_stop.push_back(entry.second);
         }
     }
@@ -2372,28 +2355,9 @@ void ModelManager::UnloadModel()
             model->context->Stop();
         }
     }
+    models_to_stop.clear();
 
-    if (genieModelHandle != nullptr)
-    {
-        Clean();
-        model_name_.clear();
-    }
-    else
-    {
-        My_Log{My_Log::Level::kWarning} << "UnloadModel: genieModelHandle is null" << std::endl;
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(models_mutex_);
-        for (auto &entry: loaded_models_)
-        {
-            My_Log{} << "UnloadModel: releasing model '"
-                     << (entry.second && entry.second->config ? entry.second->config->get_model_name() : entry.first)
-                     << "'" << std::endl;
-        }
-        loaded_models_.clear();
-        default_model_name_.clear();
-    }
+    Clean();
 }
 
 std::vector<json> ModelManager::ScanModelDirectory() const
@@ -3171,27 +3135,38 @@ void IModelConfig::UpdateModeList() const
 
 void ModelManager::Clean()
 {
-    // 记录本次清理前是否持有 QNN/NPU 句柄：genieModelHandle 置空触发 shared_ptr 归零、
-    // 同步执行 ~GenieContext()（NPU/HTP 驱动异步释放资源，需要显式等待才安全）。
-    // 多模态模型的 qnn_embedding_（视觉/音频编码器）走的是另一套独立的 LibAppBuilder QNN/HTP
-    // 会话，Clean() 内部会调用 ModelDestroy() 触发它自己的驱动侧异步释放，必须同样纳入等待判断，
-    // 否则像 qwen3_vl_8b-8480 这种同时持有两个会话的模型会在等待窗口不足时把进程退出前留下未
-    // 释放干净的 HTP 资源，导致下一个进程加载时驱动内部状态错乱而崩溃。
-    // 这是全局卸载路径（UnloadModel()/~ModelManager()）唯一真正触发该释放的位置；
-    // UnloadModelsByDevice()（按族冲突踢除）走的是另一套更轻量的指针身份判定 + 条件 qnn_embedding_.Clean()，
-    // 不经过这里，避免对未持有 QNN 槛位的卸载场景强加额外等待。
+    // NPU/HTP 驱动异步释放资源，须等所有 QNN 条目真正同步析构完毕才能安全 sleep；
+    // loaded_models_ 的清空必须在这里做（不能交给调用方提前做），否则调用方持有的
+    // models_to_stop 之类的额外 shared_ptr 拷贝会让这里的 genieModelHandle = nullptr
+    // 不足以触发真正析构，sleep 会在析构之前发生而失去意义（实测复现为 0xC0000005）。
+    std::vector<std::shared_ptr<LoadedModel>> remaining;
+    bool had_other_qnn = false;
+    {
+        std::lock_guard<std::mutex> lock(models_mutex_);
+        for (auto &entry: loaded_models_)
+        {
+            if (entry.second && entry.second->backend == "qnn")
+            {
+                had_other_qnn = true;
+            }
+            remaining.push_back(entry.second);
+        }
+        loaded_models_.clear();
+        default_model_name_.clear();
+    }
     bool had_qnn_handle = (genieModelHandle != nullptr);
     bool had_embedding_handle = std::any_of(
             qnn_embedding_.infer_resources_.begin(), qnn_embedding_.infer_resources_.end(),
             [](const auto &entry) { return entry.second.app_builder_ != nullptr; });
     known_model_path_.clear();
     genieModelHandle = nullptr;
+    model_name_.clear();
     qnn_embedding_.Clean();
-    if (had_qnn_handle || had_embedding_handle)
+    remaining.clear();
+    if (had_qnn_handle || had_other_qnn || had_embedding_handle)
     {
-        // Extra delay to ensure NPU resources are fully released before the next load/restart.
-        // 文本与视觉/音频两套会话同时存在时，驱动侧要分别完成两份异步释放，适当延长等待窗口。
-        std::this_thread::sleep_for(std::chrono::milliseconds(had_qnn_handle && had_embedding_handle ? 4000 : 2000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(
+                (had_qnn_handle || had_other_qnn) && had_embedding_handle ? 4000 : 2000));
     }
 }
 

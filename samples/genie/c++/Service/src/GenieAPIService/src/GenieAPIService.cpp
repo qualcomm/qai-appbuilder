@@ -234,8 +234,14 @@ inline void GenieService::ServiceStop()
         modelManager->UnloadModel();
     }
     
-    My_Log{} << "Service stopped successfully.\n";
+    My_Log{} << "Service stopped successfully." << std::endl;
     shutdown_completed_.store(true);
+#if (defined(_WIN32) || defined(__WIN32__) || defined(WIN32)) && !defined(GENIEAPI_EXPORTS)
+    std::cout.flush();
+    std::cerr.flush();
+    fflush(nullptr);
+    TerminateProcess(GetCurrentProcess(), 0);
+#endif
 }
 
 void GenieService::TriggerGracefulShutdown(int exit_code)
