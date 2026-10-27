@@ -911,11 +911,15 @@ ModelManager::~ModelManager()
     bool had_qnn = false;
     {
         std::lock_guard<std::mutex> lock(models_mutex_);
-        if (current_model_ && current_model_->backend == "qnn")
+        for (const auto &entry: loaded_models_)
         {
-            had_qnn = true;
+            if (entry.second && entry.second->backend == "qnn")
+            {
+                had_qnn = true;
+            }
         }
-        current_model_.reset();
+        loaded_models_.clear();
+        default_model_name_.clear();
     }
     if (genieModelHandle != nullptr)
     {
@@ -936,7 +940,7 @@ bool ModelManager::LoadModelByName(const std::string &new_model, bool &first_loa
         return false;
     }
 
-    if (model_name_ == new_model && genieModelHandle)
+    if (GetModel(new_model) != nullptr)
     {
         My_Log{} << "model: " + new_model << " has already been loaded" << std::endl;
         first_load = false;
@@ -2240,26 +2244,9 @@ bool ModelManager::InitializeConfig()
 
 bool ModelManager::LoadSingleModel()
 {
-    // 修复：Clean() 只清空 genieModelHandle 这一份引用；current_model_ 是独立的 shared_ptr，
-    // 若它仍持有旧模型（不限于"同名重载"，任何切换到不同模型都是如此），genieModelHandle
-    // 归零时引用计数不会降到 0，ContextBase 不会真正析构，Clean() 判断是否需要等待驱动释放
-    // NPU 资源的逃生舱也因此落空——旧模型的 QNN/HTP 上下文仍然存活，紧接着在同一设备上创建
-    // 新模型会与之争用硬件资源（真实复现：llama 正常运行后切到 qwen3-8b，报
-    // "err 5005"/"Could not create context from binary List Async"）。因此这里必须无条件释放
-    // current_model_，不再局限于新旧模型同名这一种场景，确保 Clean() 清空 genieModelHandle 时
-    // 那正是最后一份引用，真正触发析构与等待。
-    {
-        std::lock_guard<std::mutex> lock(models_mutex_);
-        if (current_model_)
-        {
-            My_Log{} << "LoadSingleModel: releasing previous single-model entry '"
-                     << (current_model_->config ? current_model_->config->get_model_name() : "")
-                     << "' before loading '" << model_name_ << "'" << std::endl;
-            current_model_.reset();
-        }
-    }
+    UnloadModelsByDevice(ResolveTentativeFamilies(model_path_, config_file_));
 
-    Clean();
+    known_model_path_.clear();
     prompt_type_ = LoadPromptTemplates(model_path_ + "/prompt.json");
     if (prompt_type_ == PromptType::Unknown)
         return false;
@@ -2351,8 +2338,10 @@ bool ModelManager::LoadSingleModel()
         loaded_model->backend = config->get_backend();
         loaded_model->device = config->get_device();
         loaded_model->is_loaded = true;
+        loaded_model->occupied_families = ComputeOccupiedFamilies(*loaded_model);
 
-        current_model_ = loaded_model;
+        loaded_models_[model_name_] = loaded_model;
+        default_model_name_ = model_name_;
     }
 
     My_Log{} << GREEN << "Model load successfully: " << model_name_ << RESET << std::endl;
@@ -2363,15 +2352,24 @@ bool ModelManager::LoadSingleModel()
 
 void ModelManager::UnloadModel()
 {
+    std::vector<std::shared_ptr<LoadedModel>> models_to_stop;
+    {
+        std::lock_guard<std::mutex> lock(models_mutex_);
+        for (auto &entry: loaded_models_)
+        {
+            models_to_stop.push_back(entry.second);
+        }
+    }
+
     if (genieModelHandle != nullptr)
     {
         genieModelHandle->Stop();
     }
+    for (auto &model: models_to_stop)
     {
-        std::lock_guard<std::mutex> lock(models_mutex_);
-        if (current_model_ && current_model_->context)
+        if (model && model->context)
         {
-            current_model_->context->Stop();
+            model->context->Stop();
         }
     }
 
@@ -2387,13 +2385,14 @@ void ModelManager::UnloadModel()
 
     {
         std::lock_guard<std::mutex> lock(models_mutex_);
-        if (current_model_)
+        for (auto &entry: loaded_models_)
         {
-            My_Log{} << "UnloadModel: releasing current model '"
-                     << (current_model_->config ? current_model_->config->get_model_name() : "")
+            My_Log{} << "UnloadModel: releasing model '"
+                     << (entry.second && entry.second->config ? entry.second->config->get_model_name() : entry.first)
                      << "'" << std::endl;
-            current_model_.reset();
         }
+        loaded_models_.clear();
+        default_model_name_.clear();
     }
 }
 
@@ -2521,64 +2520,159 @@ std::vector<json> ModelManager::ScanModelDirectory() const
     return result;
 }
 
-void ModelManager::UnloadModelsByDevice(const std::string &device)
+std::vector<std::string> ModelManager::ComputeOccupiedFamilies(const LoadedModel &model)
 {
-    std::shared_ptr<LoadedModel> removed_model;
+    if (model.backend == "qnn")
     {
-        std::lock_guard<std::mutex> lock(models_mutex_);
-        if (current_model_ && current_model_->device == device)
+        return {"npu"};
+    }
+    if (model.backend == "mnn")
+    {
+        return {"cpu"};
+    }
+    if (model.backend == "GGUF")
+    {
+        if (model.device == "cpu")
         {
-            My_Log{} << "[UnloadModelsByDevice] Unloading model '"
-                     << (current_model_->config ? current_model_->config->get_model_name() : "")
-                     << "' (device=" << device << ")" << std::endl;
-            removed_model = std::move(current_model_);
-            current_model_.reset();
+            return {"cpu"};
+        }
+        if (model.config && model.config->is_speculative_draft_forced_cpu())
+        {
+            return {"gpu", "cpu"};
+        }
+        return {"gpu"};
+    }
+    if (!model.device.empty())
+    {
+        return {model.device};
+    }
+    return {};
+}
+
+std::vector<std::string> ModelManager::ResolveTentativeFamilies(const std::string &model_path,
+                                                                 const std::string &config_file)
+{
+    bool has_gguf_file = false;
+    std::error_code ec;
+    for (const auto &entry: fs::directory_iterator(model_path, ec))
+    {
+        if (!ec && entry.is_regular_file() && entry.path().extension() == ".gguf")
+        {
+            has_gguf_file = true;
+            break;
         }
     }
-    if (removed_model && genieModelHandle != nullptr)
+
+    json cfg;
+    bool cfg_parsed = false;
+    if (File::IsFileExist(config_file) && !File::IsFileEmpty(config_file))
     {
-        bool should_clean = false;
-        if (device == "npu")
+        try
         {
-            should_clean = true;
+            std::ifstream f(config_file);
+            f >> cfg;
+            cfg_parsed = true;
         }
-        else if (removed_model->config && removed_model->config->get_model_name() == model_name_)
+        catch (...)
         {
-            should_clean = true;
         }
-        if (should_clean)
+    }
+
+    if (!has_gguf_file && cfg_parsed)
+    {
+        if (cfg.contains("dialog") && cfg["dialog"].contains("context"))
         {
-            Clean();
-            model_name_.clear();
+            return {"npu"};
         }
-        else
+        if (cfg.contains("llm_model"))
         {
-            if (removed_model->context == genieModelHandle)
+            return {"cpu"};
+        }
+    }
+
+    std::string backend_field, device_field;
+    ParseBackendDeviceFromConfigJson(config_file, "", "[ResolveTentativeFamilies]", backend_field, device_field);
+    std::transform(backend_field.begin(), backend_field.end(), backend_field.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    std::transform(device_field.begin(), device_field.end(), device_field.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+    if (device_field == "cpu" || backend_field == "cpu")
+    {
+        return {"cpu"};
+    }
+
+    if (cfg_parsed)
+    {
+        llama_speculative::DraftModelConfig draft_config = llama_speculative::DraftModelConfig::ParseFrom(cfg);
+        if (draft_config.present &&
+            llama_speculative::GetTotalPhysicalMemoryBytes() <= (32ULL * 1024 * 1024 * 1024))
+        {
+            return {"gpu", "cpu"};
+        }
+    }
+
+    return {"gpu"};
+}
+
+void ModelManager::UnloadModelsByDevice(const std::vector<std::string> &families)
+{
+    std::vector<std::shared_ptr<LoadedModel>> evicted_models;
+    {
+        std::lock_guard<std::mutex> lock(models_mutex_);
+        for (auto it = loaded_models_.begin(); it != loaded_models_.end();)
+        {
+            bool conflicts = std::any_of(
+                    it->second->occupied_families.begin(), it->second->occupied_families.end(),
+                    [&families](const std::string &family)
+                    {
+                        return std::find(families.begin(), families.end(), family) != families.end();
+                    });
+            if (conflicts)
             {
-                My_Log{My_Log::Level::kWarning}
-                        << "[UnloadModelsByDevice] global genieModelHandle pointed to the unloaded model"
-                        << " (model_name_='" << model_name_ << "', device=" << device
-                        << "), releasing it to free hardware memory" << std::endl;
-                genieModelHandle = nullptr;
+                My_Log{} << "[UnloadModelsByDevice] evicting '" << it->first << "'" << std::endl;
+                evicted_models.push_back(it->second);
+                it = loaded_models_.erase(it);
+            }
+            else
+            {
+                ++it;
             }
         }
     }
-    bool had_qnn_backend = removed_model && removed_model->backend == "qnn";
-    removed_model.reset();
-    if (had_qnn_backend)
+
+    bool had_qnn_eviction = false;
+    for (auto &evicted: evicted_models)
+    {
+        if (!evicted)
+            continue;
+        if (evicted->context && evicted->context == genieModelHandle)
+        {
+            genieModelHandle = nullptr;
+        }
+        if (evicted->backend == "qnn")
+        {
+            had_qnn_eviction = true;
+        }
+    }
+    if (had_qnn_eviction)
+    {
+        qnn_embedding_.Clean();
+    }
+    evicted_models.clear();
+    if (had_qnn_eviction)
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(2000));
     }
-    My_Log{} << "[UnloadModelsByDevice] Unloaded device=" << device << std::endl;
 }
 
 std::shared_ptr<LoadedModel> ModelManager::GetModel(const std::string &model_name)
 {
     std::lock_guard<std::mutex> lock(models_mutex_);
-    if (!current_model_ || !current_model_->config)
-        return nullptr;
     if (model_name.empty())
-        return current_model_;
+    {
+        return GetDefaultModelLocked();
+    }
 
     // 大小写不敏感匹配（处理 -c 参数目录名大小写与历史 service_config.json name 字段不一致的情况）
     // 例如：-c "qwen3-8B-8K/config.json" 加载后名称为 "qwen3-8B-8K"，
@@ -2586,25 +2680,52 @@ std::shared_ptr<LoadedModel> ModelManager::GetModel(const std::string &model_nam
     std::string name_lower = model_name;
     std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(),
                    [](unsigned char c) { return static_cast<unsigned char>(std::tolower(c)); });
-    std::string current_name_lower = current_model_->config->get_model_name();
-    std::transform(current_name_lower.begin(), current_name_lower.end(), current_name_lower.begin(),
-                   [](unsigned char c) { return static_cast<unsigned char>(std::tolower(c)); });
-    return (current_name_lower == name_lower) ? current_model_ : nullptr;
+    for (const auto &entry: loaded_models_)
+    {
+        if (!entry.second || !entry.second->config)
+            continue;
+        std::string entry_name_lower = entry.second->config->get_model_name();
+        std::transform(entry_name_lower.begin(), entry_name_lower.end(), entry_name_lower.begin(),
+                       [](unsigned char c) { return static_cast<unsigned char>(std::tolower(c)); });
+        if (entry_name_lower == name_lower)
+        {
+            return entry.second;
+        }
+    }
+    return nullptr;
 }
 
 std::shared_ptr<LoadedModel> ModelManager::GetDefaultModel()
 {
     std::lock_guard<std::mutex> lock(models_mutex_);
-    return current_model_;
+    return GetDefaultModelLocked();
+}
+
+std::shared_ptr<LoadedModel> ModelManager::GetDefaultModelLocked() const
+{
+    auto it = loaded_models_.find(default_model_name_);
+    if (it != loaded_models_.end())
+    {
+        return it->second;
+    }
+    if (!loaded_models_.empty())
+    {
+        return loaded_models_.begin()->second;
+    }
+    return nullptr;
 }
 
 std::vector<std::string> ModelManager::ListLoadedModels() const
 {
     std::lock_guard<std::mutex> lock(models_mutex_);
     std::vector<std::string> names;
-    if (current_model_ && current_model_->config)
+    names.reserve(loaded_models_.size());
+    for (const auto &entry: loaded_models_)
     {
-        names.push_back(current_model_->config->get_model_name());
+        if (entry.second && entry.second->config)
+        {
+            names.push_back(entry.second->config->get_model_name());
+        }
     }
     return names;
 }
@@ -2614,12 +2735,13 @@ uint64_t ModelManager::EstimateOtherLoadedModelsMemoryBytes() const
     std::lock_guard<std::mutex> lock(models_mutex_);
     uint64_t total = 0;
 #ifdef USE_MNN
-    // 单模型语义下，current_model_ 在切换过程中仍可能短暂指向"即将被替换的旧模型"（见
-    // LoadSingleModel() 顶部的清空逻辑），故此处仍需为其预留内存估算，降低切换瞬间
-    // MnnVerifier 内存预检查失效的概率。
-    if (current_model_ && current_model_->config)
+    for (const auto &entry: loaded_models_)
     {
-        total += MNNContext::EstimateMnnMemoryRequirement(current_model_->config->get_model_path());
+        if (!entry.second || !entry.second->config)
+            continue;
+        if (entry.second->config->get_model_name() == model_name_)
+            continue;
+        total += MNNContext::EstimateMnnMemoryRequirement(entry.second->config->get_model_path());
     }
 #endif
     return total;
@@ -3040,8 +3162,9 @@ void ModelManager::Clean()
     // 会话，Clean() 内部会调用 ModelDestroy() 触发它自己的驱动侧异步释放，必须同样纳入等待判断，
     // 否则像 qwen3_vl_8b-8480 这种同时持有两个会话的模型会在等待窗口不足时把进程退出前留下未
     // 释放干净的 HTP 资源，导致下一个进程加载时驱动内部状态错乱而崩溃。
-    // 这是全项目里唯一真正触发该释放的位置，UnloadModel()/UnloadModelsByDevice() 均经过此处，
-    // 因此把等待下沉到这里可以让两条路径同时获得同等保护，且不拖慢 MNN/GGUF（不持有该句柄）的卸载耗时。
+    // 这是全局卸载路径（UnloadModel()/~ModelManager()）唯一真正触发该释放的位置；
+    // UnloadModelsByDevice()（按族冲突踢除）走的是另一套更轻量的指针身份判定 + 条件 qnn_embedding_.Clean()，
+    // 不经过这里，避免对未持有 QNN 槛位的卸载场景强加额外等待。
     bool had_qnn_handle = (genieModelHandle != nullptr);
     bool had_embedding_handle = std::any_of(
             qnn_embedding_.infer_resources_.begin(), qnn_embedding_.infer_resources_.end(),

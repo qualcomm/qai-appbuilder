@@ -14,6 +14,9 @@
 #include <memory>
 #include <mutex>
 #include <atomic>
+#include <unordered_map>
+#include <vector>
+#include <string>
 
 class ContextBase;
 
@@ -23,6 +26,7 @@ struct LoadedModel
     std::shared_ptr<ContextBase> context;
     std::string backend;
     std::string device;
+    std::vector<std::string> occupied_families;
     bool is_loaded{false};
 };
 
@@ -45,14 +49,15 @@ public:
     bool IsLocalModelAvailable() const override
     {
         std::lock_guard<std::mutex> lock(models_mutex_);
-        return current_model_ != nullptr;
+        return !loaded_models_.empty();
     }
 
     std::weak_ptr<ContextBase> GetDefaultModelHandle() const override
     {
         std::lock_guard<std::mutex> lock(models_mutex_);
-        if (current_model_ && current_model_->context) {
-            return current_model_->context;
+        auto model = GetDefaultModelLocked();
+        if (model && model->context) {
+            return model->context;
         }
         return genieModelHandle;
     }
@@ -60,8 +65,9 @@ public:
     ModelInstanceConfig* GetDefaultInstanceConfig() const override
     {
         std::lock_guard<std::mutex> lock(models_mutex_);
-        if (current_model_ && current_model_->config) {
-            return current_model_->config.get();
+        auto model = GetDefaultModelLocked();
+        if (model && model->config) {
+            return model->config.get();
         }
         return nullptr;
     }
@@ -73,8 +79,6 @@ public:
     std::vector<std::string> ListLoadedModels() const;
 
     std::vector<json> ScanModelDirectory() const;
-
-    void UnloadModelsByDevice(const std::string &device);
 
     bool LoadSingleModel();
 
@@ -120,7 +124,14 @@ private:
 
     uint64_t EstimateOtherLoadedModelsMemoryBytes() const;
 
-    std::shared_ptr<LoadedModel> current_model_;
+    std::shared_ptr<LoadedModel> GetDefaultModelLocked() const;
+    void UnloadModelsByDevice(const std::vector<std::string> &families);
+    static std::vector<std::string> ComputeOccupiedFamilies(const LoadedModel &model);
+    static std::vector<std::string> ResolveTentativeFamilies(const std::string &model_path,
+                                                              const std::string &config_file);
+
+    std::unordered_map<std::string, std::shared_ptr<LoadedModel>> loaded_models_;
+    std::string default_model_name_;
     mutable std::mutex models_mutex_;
 
     std::atomic<bool> loaded_{false};
