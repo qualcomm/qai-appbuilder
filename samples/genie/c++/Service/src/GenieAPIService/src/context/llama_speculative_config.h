@@ -80,6 +80,17 @@ uint64_t EstimateSpeculativeMemoryRequirement(const std::string &model_dir,
 // GlobalMemoryStatusEx 模式）。用于投机解码（draft_model）模型加载前的动态内存门槛检查。
 uint64_t GetAvailablePhysicalMemoryBytes();
 
+// 总物理内存字节数（ullTotalPhys），与上面的 GetAvailablePhysicalMemoryBytes 同一
+// GlobalMemoryStatusEx 调用模式。仅用于 ResolveContextSizeByPhysicalMemory()。
+uint64_t GetTotalPhysicalMemoryBytes();
+
+// Qwen3.8-27B + DFlash2 专属：上下文长度暂不支持通过 config.json/service_config.json 配置，
+// 固定按整机物理内存总量在两档之间选择——标称 32G 档用 16K（这是当前唯一有完整长任务实测
+// 背书的档位），标称 32G 以上（如 48G 机）用 32K。必须被 GGUFVerify（model_manager.cpp）与
+// LLAMACppBuilder（llama_cpp.cpp）同时复用同一个值，否则门槛检查依据的 ctx 会与真实加载时
+// 的 n_ctx 不一致。
+uint64_t ResolveContextSizeByPhysicalMemory();
+
 // 主模型 + 草稿权重 + attention 层 KV + 计算余量是否装得进 GPU 设备报告的可用显存。
 // ⚠️ 同上：这是 `draft_model.planner: "off"` 的回退路径，默认路径走 PlanSpeculativeRuntime()。
 bool SpeculativeFitsFullGpu(const std::string &model_dir, const std::string &draft_relative_path,

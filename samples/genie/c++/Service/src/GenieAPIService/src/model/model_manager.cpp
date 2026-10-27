@@ -606,9 +606,12 @@ struct ModelManager::ModeVerifier
             bool full_gpu_fits = false;
             if (draft_config.present)
             {
-                int configured_context_size = config_->get_context_size();
-                uint64_t effective_context_size = configured_context_size > 0
-                        ? static_cast<uint64_t>(configured_context_size) : 32768ULL;
+                // Qwen3.8-27B + DFlash2 专属：context_size 暂不支持通过 config.json 配置，固定
+                // 按整机物理内存总量动态决定（标称 32G 用 16K，32G 以上用 32K），见
+                // ResolveContextSizeByPhysicalMemory() 的设计说明；同步写回 config_
+                // 以便 /v1/models 等下游消费者上报的上下文长度与实际加载值一致。
+                uint64_t effective_context_size = llama_speculative::ResolveContextSizeByPhysicalMemory();
+                config_->set_context_size(static_cast<int>(effective_context_size));
                 uint64_t required = 0;
                 uint64_t available = llama_speculative::GetAvailablePhysicalMemoryBytes();
 

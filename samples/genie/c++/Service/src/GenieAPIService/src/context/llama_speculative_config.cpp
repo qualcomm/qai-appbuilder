@@ -311,6 +311,37 @@ uint64_t GetAvailablePhysicalMemoryBytes()
     return UINT64_MAX;
 }
 
+uint64_t GetTotalPhysicalMemoryBytes()
+{
+#ifdef _WIN32
+    MEMORYSTATUSEX statex;
+    statex.dwLength = sizeof(statex);
+    if (GlobalMemoryStatusEx(&statex))
+    {
+        return statex.ullTotalPhys;
+    }
+#else
+    struct sysinfo info{};
+    if (sysinfo(&info) == 0)
+    {
+        return static_cast<uint64_t>(info.totalram) * info.mem_unit;
+    }
+#endif
+    return UINT64_MAX;
+}
+
+uint64_t ResolveContextSizeByPhysicalMemory()
+{
+    // 32GiB 门槛：OEM 标称 32G 的机器，系统/固件保留后 GlobalMemoryStatusEx 报告的
+    // ullTotalPhys 通常略低于 32×1024^3，故用“> 32GiB”而非“>= 32GiB”判定，确保标称 32G
+    // 的机器稳定落入 16K 档、标称 48G 等更大内存的机器落入 32K 档。
+    constexpr uint64_t kTierThresholdBytes = 32ULL * 1024 * 1024 * 1024;
+    constexpr uint64_t kContextSize16K = 16384ULL;
+    constexpr uint64_t kContextSize32K = 32768ULL;
+    const uint64_t total = GetTotalPhysicalMemoryBytes();
+    return total > kTierThresholdBytes ? kContextSize32K : kContextSize16K;
+}
+
 bool SpeculativeFitsFullGpu(const std::string &model_dir, const std::string &draft_relative_path,
                             uint64_t context_size, uint64_t *required_out, uint64_t *available_out)
 {

@@ -1594,7 +1594,11 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
     int n_ctx;
     if (speculative_requested)
     {
-        n_ctx = configured_context_size > 0 ? static_cast<int>(configured_context_size) : 32768;
+        // Qwen3.8-27B + DFlash2 专属：context_size 暂不支持通过 config.json 配置，固定按整机
+        // 物理内存动态决定，见 llama_speculative::ResolveContextSizeByPhysicalMemory() 的设计
+        // 说明。model_manager.cpp 的 GGUFVerify 已把同一个值写回 model_config_，这里直接复用
+        // 同一函数而不是读 configured_context_size，避免两处各自计算出现不一致的风险。
+        n_ctx = static_cast<int>(llama_speculative::ResolveContextSizeByPhysicalMemory());
     }
     else
     {
