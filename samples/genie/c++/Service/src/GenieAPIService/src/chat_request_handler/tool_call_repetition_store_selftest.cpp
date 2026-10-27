@@ -256,6 +256,42 @@ bool RunToolCallRepetitionSelfTest(std::ostream &out)
 
     store.Clear();
 
+    // ── 场景12：PeekRepeatCount 只读预判，不写入计数状态 ─────────────────────
+    {
+        ConfigureStore(300, 3600);
+        const std::string key = ToolCallRepetitionStore::MakeKey("scenario12_session", "modelX");
+
+        runner.Check("scenario12_peek_unseen_key_is_one", "从未出现过的 key 预判应为1（等同首次调用）",
+                     store.PeekRepeatCount(key, "read|{\"path\":\"a.txt\"}") == 1);
+
+        store.RecordCall(key, "read|{\"path\":\"a.txt\"}");
+        runner.Check("scenario12_peek_matches_next_record", "预判同一签名下一次应为2，且与RecordCall真实返回值一致",
+                     store.PeekRepeatCount(key, "read|{\"path\":\"a.txt\"}") == 2);
+        runner.Check("scenario12_peek_does_not_mutate", "多次预判不应改变已记录的连续计数",
+                     store.GetRepeatCount(key) == 1);
+
+        int c = store.RecordCall(key, "read|{\"path\":\"a.txt\"}");
+        runner.Check("scenario12_peek_was_accurate", "预判值应与真正记录后的返回值一致", c == 2);
+
+        runner.Check("scenario12_peek_different_signature_resets", "预判不同签名应为1（视作全新连续序列）",
+                     store.PeekRepeatCount(key, "read|{\"path\":\"b.txt\"}") == 1);
+    }
+
+    // ── 场景13：PeekRepeatCount 不受连续性 TTL 影响（本地慢速模型单轮生成可能耗时
+    // 数分钟甚至超过 ttl_seconds，仍应正确识别出这是真实重复，而不是被旧的按秒数
+    // 过期的逻辑误判成"已经是全新的一轮"） ─────────────────────────────────
+    {
+        ConfigureStore(/*ttl_seconds=*/1, /*non_contiguous_ttl_seconds=*/3600);
+        const std::string key = ToolCallRepetitionStore::MakeKey("scenario13_session", "modelX");
+        store.RecordCall(key, "exec|{\"command\":\"slow_cmd\"}");
+        std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+        runner.Check("scenario13_peek_survives_slow_round",
+                     "即使耗时已超过 ttl_seconds（模拟慢速本地模型单轮生成），预判仍应视为真实连续重复",
+                     store.PeekRepeatCount(key, "exec|{\"command\":\"slow_cmd\"}") == 2);
+    }
+
+    store.Clear();
+
     out << "=================================================================================\n";
     out << "Total cases: " << runner.total() << ", passed: " << runner.passed()
         << " (" << (runner.total() > 0 ? (100.0 * runner.passed() / runner.total()) : 100.0) << "%)\n";

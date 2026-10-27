@@ -25,8 +25,6 @@
 
 using json = nlohmann::ordered_json;
 
-namespace {
-
 std::string CanonicalToolCallKey(const json& tool_call)
 {
     if (!tool_call.is_object() || !tool_call.contains("function") || !tool_call["function"].is_object())
@@ -67,6 +65,8 @@ std::string CanonicalToolCallKey(const json& tool_call)
     }
     return name + "\x01" + args;
 }
+
+namespace {
 
 std::string NormalizeDumpPath(const std::string& p)
 {
@@ -380,8 +380,10 @@ const char kRepeatStubSuffix[] =
     " call returned exactly the same result as the earlier identical call, which is still shown above; "
     "calling it again will not return anything new. Use that result or change approach.";
 const char kRepeatStubTailHeader[] = "\nIts last lines:\n";
+const char kRepeatStubFullHeader[] = "\nIts full result:\n";
 constexpr size_t kRepeatStubTailLines = 3;
 constexpr size_t kRepeatStubTailMaxBytes = 300;
+constexpr size_t kRepeatStubFullInlineMaxBytes = 500;
 
 std::string LastLines(const std::string& content, size_t n, size_t max_bytes)
 {
@@ -524,8 +526,13 @@ void ApplyRepeatResultStubs(json& msg, const std::string& key, const void* model
         if (stub) {
             const std::string original = msg[kh.full_idx].value("content", std::string());
             std::string note = std::string(kRepeatStubPrefix) + nm + kRepeatStubSuffix;
-            const std::string tail = LastLines(original, kRepeatStubTailLines, kRepeatStubTailMaxBytes);
-            if (!tail.empty()) note += kRepeatStubTailHeader + tail;
+            const size_t trimmed_end = original.find_last_not_of(" \t\r\n");
+            if (trimmed_end != std::string::npos && trimmed_end + 1 <= kRepeatStubFullInlineMaxBytes) {
+                note += kRepeatStubFullHeader + original.substr(0, trimmed_end + 1);
+            } else {
+                const std::string tail = LastLines(original, kRepeatStubTailLines, kRepeatStubTailMaxBytes);
+                if (!tail.empty()) note += kRepeatStubTailHeader + tail;
+            }
             m["content"] = note + "]";
         } else {
             if (kh.full_hash != h) kh.repeat_count = 0;

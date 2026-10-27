@@ -95,6 +95,25 @@ inline std::string Lower(std::string s)
     return s;
 }
 
+inline bool IsIdempotentExecCommand(const std::string &command)
+{
+    if (command.empty())
+        return false;
+    static const char *kSideEffectMarkers[] = {
+        "install", "write(", "writelines", "os.remove", "os.rename", "os.replace",
+        "os.mkdir", "os.makedirs", "shutil.", "subprocess.", "del ", "rmdir",
+        "mkdir ", " > ", " >> ", "move ", "copy ", "rename ", "unlink(", "truncate",
+        "chmod", "chown", "rm ", "kill ", "taskkill", "set-content", "out-file",
+        "new-item", "remove-item"};
+    const std::string lower = Lower(command);
+    for (const char *marker : kSideEffectMarkers)
+        if (lower.find(marker) != std::string::npos)
+            return false;
+    if (lower.find("print(") == std::string::npos && lower.find("print ") == std::string::npos)
+        return false;
+    return true;
+}
+
 inline std::vector<std::string> SplitLines(const std::string &text)
 {
     std::vector<std::string> lines;

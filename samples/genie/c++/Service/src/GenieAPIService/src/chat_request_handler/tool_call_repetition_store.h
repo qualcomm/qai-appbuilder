@@ -31,6 +31,8 @@ public:
 
     int RecordCall(const std::string& key, const std::string& signature);
 
+    int PeekRepeatCount(const std::string& key, const std::string& signature) const;
+
     int GetRepeatCount(const std::string& key) const;
 
     int GetNonContiguousRepeatCount(const std::string& key) const;

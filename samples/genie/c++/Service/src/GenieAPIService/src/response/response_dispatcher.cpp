@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <chrono>
 #include <mutex>
+#include <unordered_set>
 
 namespace
 {
@@ -108,6 +109,59 @@ namespace
                 return "Error: invalid tool call format, could not parse as JSON. "
                        "Please retry with a single valid JSON object, no extra text.";
         }
+    }
+
+    std::string FindCachedAnswerForSignature(const json &messages, const std::string &target_key)
+    {
+        if (target_key.empty()) return "";
+        std::unordered_set<std::string> matching_ids;
+        std::string found;
+        for (const auto &m : messages)
+        {
+            if (!m.is_object()) continue;
+            const std::string role = m.value("role", std::string());
+            if (role == "assistant" && m.contains("tool_calls") && m["tool_calls"].is_array())
+            {
+                for (const auto &tc : m["tool_calls"])
+                {
+                    const std::string id = tc.value("id", std::string());
+                    if (!id.empty() && CanonicalToolCallKey(tc) == target_key)
+                        matching_ids.insert(id);
+                }
+            }
+            else if (role == "tool")
+            {
+                const std::string tc_id = m.value("tool_call_id", std::string());
+                if (!tc_id.empty() && matching_ids.count(tc_id))
+                    found = m.value("content", std::string());
+            }
+        }
+        return found;
+    }
+
+    std::string TailBytes(const std::string &s, size_t max_bytes)
+    {
+        if (s.size() <= max_bytes) return s;
+        size_t start = s.size() - max_bytes;
+        while (start < s.size() && (static_cast<unsigned char>(s[start]) & 0xC0) == 0x80) ++start;
+        return s.substr(start);
+    }
+
+    std::string BuildRepetitionRetryMessage(const std::string &cached_answer)
+    {
+        std::string msg =
+            "Note: this exact tool call (same tool name and arguments) was already made earlier in this task. "
+            "Calling it again will not return anything new.";
+        const size_t trimmed_end = cached_answer.find_last_not_of(" \t\r\n");
+        if (trimmed_end != std::string::npos)
+        {
+            const std::string trimmed = cached_answer.substr(0, trimmed_end + 1);
+            const bool is_tail = trimmed.size() > 800;
+            msg += std::string("\nIts earlier result") + (is_tail ? " (last part)" : "") + ":\n"
+                   + TailBytes(trimmed, 800);
+        }
+        msg += " Use that result, or call a different tool/arguments to make progress.";
+        return msg;
     }
 }
 
@@ -739,6 +793,133 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                         My_Log{My_Log::Level::kWarning}
                             << "[ToolCallRepair][Layer2] Retry did not help; falling back to existing unknow "
                                "forwarding (unchanged behavior)." << std::endl;
+                    }
+                }
+                else
+                {
+                    const auto &rg_cfg = repair_cfg.redundant_call_guard;
+                    std::string store_signature;
+                    std::string canonical_key;
+                    if (rg_cfg.enabled && rg_cfg.internal_retry_threshold > 0)
+                    {
+                        try
+                        {
+                            json parsed = json::parse(ResponseTools::extractJsonFromToolCall(preview_converted));
+                            const std::string tn = parsed.value("name", std::string());
+                            if (!tn.empty())
+                            {
+                                store_signature = tn + "|" + parsed.value("arguments", json::object()).dump();
+                                json wrapped = json::object();
+                                wrapped["function"]["name"] = tn;
+                                wrapped["function"]["arguments"] = parsed.value("arguments", json::object());
+                                canonical_key = CanonicalToolCallKey(wrapped);
+                            }
+                        }
+                        catch (...) {}
+                    }
+
+                    if (!store_signature.empty())
+                    {
+                        const std::string session_key = TaskMemoBuilder::ComputeFirstMsgKey(retry_request_data_["messages"]);
+                        const std::string repetition_key =
+                            ToolCallRepetitionStore::MakeKey(session_key, instance_config_->get_model_name());
+                        const int peeked = ToolCallRepetitionStore::GetInstance().PeekRepeatCount(repetition_key, store_signature);
+
+                        if (peeked >= rg_cfg.internal_retry_threshold)
+                        {
+                            const std::string cached_answer =
+                                FindCachedAnswerForSignature(retry_request_data_["messages"], canonical_key);
+                            if (!cached_answer.empty())
+                            {
+                                My_Log{My_Log::Level::kWarning}
+                                    << "[ToolCallRepair][Layer2b] Repeated tool call detected (repeat_count="
+                                    << peeked << "). Attempting 1 internal invisible retry with cached answer "
+                                       "(server-side, not visible to client)." << std::endl;
+
+                                const std::string snapshot_response_buffer = response_buffer;
+                                const std::string snapshot_tool_response = toolResponse;
+                                const std::string snapshot_finish_reason = finishReason;
+
+                                try
+                                {
+                                    json scratch_data = retry_request_data_;
+                                    json assistant_msg;
+                                    assistant_msg["role"] = "assistant";
+                                    assistant_msg["content"] = response_buffer;
+                                    json tool_note_msg;
+                                    tool_note_msg["role"] = "tool";
+                                    tool_note_msg["content"] = BuildRepetitionRetryMessage(cached_answer);
+                                    scratch_data["messages"].push_back(assistant_msg);
+                                    scratch_data["messages"].push_back(tool_note_msg);
+
+                                    auto *mutable_instance_config = const_cast<ModelInstanceConfig *>(instance_config_);
+                                    ChatHistory scratch_chat_history(*mutable_instance_config);
+                                    ModelInputBuilder scratch_builder(scratch_chat_history, mutable_instance_config, scratch_data);
+
+                                    bool scratch_is_tool = false;
+                                    std::function<bool()> scratch_is_alive_fn = nullptr;
+                                    if (is_stream_ && sink)
+                                        scratch_is_alive_fn = [sink]() -> bool { return sink->is_writable(); };
+                                    ModelInput scratch_model_input =
+                                        scratch_builder.Build(scratch_data, scratch_is_tool, scratch_is_alive_fn);
+
+                                    if (GetEffectivePromptType() == PromptType::Harmony)
+                                    {
+                                        auto *harmony_proc_before_retry = dynamic_cast<HarmonyProcessor *>(proc_);
+                                        if (harmony_proc_before_retry)
+                                        {
+                                            snapshot_harmony_history_msg = harmony_proc_before_retry->GetMessageForHistory();
+                                            snapshot_harmony_is_tool_call = harmony_proc_before_retry->IsToolCall();
+                                            has_harmony_history_snapshot = true;
+                                        }
+                                    }
+
+                                    response_buffer.clear();
+                                    toolResponse.clear();
+                                    isToolResponse = false;
+                                    proc_->Clean();
+                                    is_tool_ = scratch_is_tool;
+                                    bare_json_state = ResponseTools::BareJsonHoldState();
+                                    last_hold_keepalive_at = std::chrono::steady_clock::now();
+
+                                    My_Log{} << "--- Query Context Start (Layer2b repetition retry) ---" << std::endl;
+                                    bool retry_query_ok = handle->Query(scratch_model_input, genie_callback, prefill_heartbeat);
+                                    My_Log{}.original(true) << "\n";
+                                    My_Log{} << "--- Query Context End (Layer2b repetition retry) ---\n" << std::endl;
+
+                                    if (retry_query_ok && !connection_broken)
+                                    {
+                                        finalize_generation_result();
+                                        My_Log{} << "[ToolCallRepair][Layer2b] Repetition retry completed; "
+                                                     "replacing repeated call with model's reconsidered response "
+                                                     "(invisible to client)." << std::endl;
+                                    }
+                                    else
+                                    {
+                                        response_buffer = snapshot_response_buffer;
+                                        toolResponse = snapshot_tool_response;
+                                        isToolResponse = true;
+                                        finishReason = snapshot_finish_reason;
+                                        layer2_retry_rolled_back = true;
+                                        My_Log{My_Log::Level::kWarning}
+                                            << "[ToolCallRepair][Layer2b] Repetition retry Query() failed or "
+                                               "connection broke; falling back to original repeated call."
+                                            << std::endl;
+                                    }
+                                }
+                                catch (const std::exception &e)
+                                {
+                                    response_buffer = snapshot_response_buffer;
+                                    toolResponse = snapshot_tool_response;
+                                    isToolResponse = true;
+                                    finishReason = snapshot_finish_reason;
+                                    layer2_retry_rolled_back = true;
+                                    My_Log{My_Log::Level::kError}
+                                        << "[ToolCallRepair][Layer2b] Exception during repetition retry: "
+                                        << e.what() << std::endl;
+                                }
+                            }
+                        }
                     }
                 }
             }

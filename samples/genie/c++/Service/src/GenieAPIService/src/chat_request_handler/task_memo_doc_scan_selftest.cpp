@@ -553,6 +553,22 @@ bool RunTaskMemoDocScanSelfTest(std::ostream &out)
                      ledger.size() == before);
     }
 
+    {
+        runner.Check("exec_idempotent_print_only", "a bare print() with no side effects is idempotent",
+                     task_memo_scan::IsIdempotentExecCommand(
+                         "python -c \"print(h.resolve_x64_venv(h.load_qairt_env()))\""));
+        runner.Check("exec_idempotent_rejects_install", "a command containing install is never idempotent",
+                     !task_memo_scan::IsIdempotentExecCommand("pip install numpy && print(1)"));
+        runner.Check("exec_idempotent_rejects_write", "a command with a write side effect is never idempotent",
+                     !task_memo_scan::IsIdempotentExecCommand("python -c \"open('x','w').write('1'); print(1)\""));
+        runner.Check("exec_idempotent_rejects_redirect", "shell output redirection is never idempotent",
+                     !task_memo_scan::IsIdempotentExecCommand("dir > out.txt"));
+        runner.Check("exec_idempotent_requires_print", "a command without any print is not treated as idempotent",
+                     !task_memo_scan::IsIdempotentExecCommand("import os; os.getcwd()"));
+        runner.Check("exec_idempotent_empty", "an empty command is never idempotent",
+                     !task_memo_scan::IsIdempotentExecCommand(""));
+    }
+
     out << "=================================================================================\n";
     out << "Total cases: " << runner.total() << ", passed: " << runner.passed()
         << " (" << (runner.total() > 0 ? (100.0 * runner.passed() / runner.total()) : 100.0) << "%)\n";

@@ -121,6 +121,23 @@ int ToolCallRepetitionStore::RecordCall(const std::string& key, const std::strin
     return entry.repeat_count;
 }
 
+int ToolCallRepetitionStore::PeekRepeatCount(const std::string& key, const std::string& signature) const
+{
+    if (key.empty())
+        return 0;
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = cache_.find(key);
+    if (it == cache_.end())
+        return 1;
+
+    const Entry& entry = it->second.first;
+    if (entry.last_signature != signature)
+        return 1;
+
+    return entry.repeat_count + 1;
+}
+
 int ToolCallRepetitionStore::GetRepeatCount(const std::string& key) const
 {
     if (key.empty())

@@ -40,7 +40,9 @@
             "_comment_ttl_seconds": "距上一次调用超过此秒数视为新的序列，重新从 1 计数，默认 300（5 分钟）",
             "ttl_seconds": 300,
             "_comment_consecutive_failure_threshold": "请求尾部连续为空或失败的 tool 结果达到此次数时追加纠偏提示，默认 3；0 或负数关闭",
-            "consecutive_failure_threshold": 3
+            "consecutive_failure_threshold": 3,
+            "_comment_internal_retry_threshold": "命中同一(工具名,参数)签名连续重复达到该阈值时，在发给客户端之前先做一次服务端内部隐形重试（复用 Layer2 的 scratch 重试通道），把该签名上一次的真实结果喂给模型后让它自己决定下一步，只在能从历史消息里找到真实缓存结果时才触发；默认 0 表示关闭，该路径尚未经真机 token 级 KV 回归验证",
+            "internal_retry_threshold": 0
         }
     },
 

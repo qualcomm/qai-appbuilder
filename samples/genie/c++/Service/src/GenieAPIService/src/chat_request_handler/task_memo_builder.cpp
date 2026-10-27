@@ -134,6 +134,7 @@ namespace {
     constexpr size_t kMaxCommandResourceKeyChars = 120;
     constexpr size_t kMaxPendingRefs = 8;
     constexpr size_t kMaxRecoveryEpisodes = 8;
+    constexpr size_t kMaxExecCacheEntries = 10;
     constexpr size_t kMaxRecoveryAttempts = 6;
 
     std::unordered_map<size_t, std::string> BuildToolCallContentByRawIndex(const json& raw_messages)
@@ -730,6 +731,23 @@ namespace {
         return path.empty() ? path : path + ExtractRangeSuffixFrom(visible, search_from);
     }
 
+    std::string ExtractIdempotentExecCommandImpl(const std::string& assistant_content) {
+        const std::string visible = TaskMemoBuilder::StripThinkBlock(assistant_content);
+        std::string name;
+        size_t search_from = 0;
+        if (!ExtractToolNameAndSearchFrom(visible, name, search_from))
+            return "";
+        std::string lower_name = name;
+        std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(),
+                       [](unsigned char c) { return (char) tolower(c); });
+        if (lower_name != "exec")
+            return "";
+        const std::string command = DecodeJsonStringBody(ExtractCommandArgFrom(visible, search_from));
+        if (!task_memo_scan::IsIdempotentExecCommand(command))
+            return "";
+        return command;
+    }
+
     using LineRange = std::pair<size_t, size_t>;
     constexpr size_t kMaxReadRangesPerFile = 12;
 
@@ -1242,6 +1260,16 @@ json TaskMemoBuilder::BuildRuleLayer(
                 entry["last_success"][tool] = ReplaceInvalidUtf8(safe_utf8_truncate(FullToolCall(call_content), kMaxLastSuccessChars, "..."));
                 CapObjectSize(entry["last_success"], 6);
             }
+            if (!failed && !binary) {
+                const std::string idempotent_cmd = ExtractIdempotentExecCommandImpl(call_content);
+                if (!idempotent_cmd.empty()) {
+                    const std::string cache_key = safe_utf8_truncate(idempotent_cmd, kMaxCommandResourceKeyChars, "...");
+                    if (!entry.contains("exec_cache") || !entry["exec_cache"].is_object())
+                        entry["exec_cache"] = json::object();
+                    entry["exec_cache"][cache_key] = ReplaceInvalidUtf8(preview);
+                    CapObjectSize(entry["exec_cache"], kMaxExecCacheEntries);
+                }
+            }
             if (!failed && !call.empty() && !reads_content)
                 for (const auto& a : ExtractArtifactLines(m.content))
                     AppendCapped(entry["artifacts"], ReplaceInvalidUtf8(a), kMaxArtifacts);
@@ -1556,7 +1584,7 @@ TaskMemoBuilder::UpdateResult TaskMemoBuilder::Update(const json& raw_messages,
             model_entry["_next_page_id"] = entry["_next_page_id"];
             // read_files（已读文件索引）同理：模型层不感知、不生成，必须显式透传。
             model_entry["read_files"] = entry["read_files"];
-            for (const char* k : {"hard_rules", "_hard_rule_src", "_hard_rule_files", "pending_refs", "stage_status", "artifacts", "last_success", "tried_queries", "tried_queries_count", "recovery_ledger", "_episode_active", "_episode_attempt_count", "_episode_attempts"})
+            for (const char* k : {"hard_rules", "_hard_rule_src", "_hard_rule_files", "pending_refs", "stage_status", "artifacts", "last_success", "exec_cache", "tried_queries", "tried_queries_count", "recovery_ledger", "_episode_active", "_episode_attempt_count", "_episode_attempts"})
                 if (entry.contains(k))
                     model_entry[k] = entry[k];
             // original_goal_raw/confidence 权威兜底，从 entry 显式透传，不允许模型层输出覆盖。
@@ -1788,6 +1816,17 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
         last_success_block = oss.str();
     }
 
+    std::string exec_cache_block;
+    if (entry.contains("exec_cache") && entry["exec_cache"].is_object()
+            && !entry["exec_cache"].empty()) {
+        std::ostringstream oss;
+        oss << "Idempotent read-only commands already known (reuse the result instead of re-running):\n";
+        for (auto it = entry["exec_cache"].begin(); it != entry["exec_cache"].end(); ++it)
+            if (it.value().is_string())
+                oss << "- " << it.key() << " -> " << it.value().get<std::string>() << "\n";
+        exec_cache_block = oss.str();
+    }
+
     // 轻量分页目录：最低优先级，预算放不下时整块跳过。只渲染 page_id/source_range/
     // gist 三个字段，不含任何原始消息文本——与 BuildRuleLayer() 落盘时的安全边界一致。
     std::string page_directory_block;
@@ -1814,6 +1853,7 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
                     "since left the window (not an exhaustive list of everything done so far; check the "
                     "most recent messages below for newer results before redoing any of these steps)", "artifacts"),
         last_success_block,
+        exec_cache_block,
         render_list("Completed", "completed"),
         render_list("Next actions", "next_actions"),
         render_list("Facts / constraints", "facts_constraints"),
@@ -1824,7 +1864,7 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
         page_directory_block,
     };
     static const char* kBlockNames[] = {
-        "hard_rules", "stage_status", "pending_refs", "recovery_ledger", "artifacts", "last_success", "completed", "next_actions",
+        "hard_rules", "stage_status", "pending_refs", "recovery_ledger", "artifacts", "last_success", "exec_cache", "completed", "next_actions",
         "facts_constraints", "open_questions", "read_files", "tried_queries", "tool_state", "page_directory",
     };
 
