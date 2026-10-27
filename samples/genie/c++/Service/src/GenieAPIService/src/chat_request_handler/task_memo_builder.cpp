@@ -133,6 +133,8 @@ namespace {
     constexpr size_t kMaxTriedQueriesPerResource = 6;
     constexpr size_t kMaxCommandResourceKeyChars = 120;
     constexpr size_t kMaxPendingRefs = 8;
+    constexpr size_t kMaxRecoveryEpisodes = 8;
+    constexpr size_t kMaxRecoveryAttempts = 6;
 
     std::unordered_map<size_t, std::string> BuildToolCallContentByRawIndex(const json& raw_messages)
     {
@@ -1098,9 +1100,33 @@ json TaskMemoBuilder::BuildRuleLayer(
         entry["read_files"] = json::object();
     if (!entry.contains("pending_refs") || !entry["pending_refs"].is_object())
         entry["pending_refs"] = json::object();
+    if (!entry.contains("_episode_attempts") || !entry["_episode_attempts"].is_array())
+        entry["_episode_attempts"] = json::array();
 
     size_t tool_seq = entry["tool_state"].size();
+    bool episode_active = entry.value("_episode_active", false);
+    size_t episode_attempt_count = entry.value("_episode_attempt_count", (size_t) 0);
     std::string last_assistant_content;
+    auto close_episode = [&](bool resolved, const std::string& detail) {
+        if (!episode_active)
+            return;
+        std::ostringstream row;
+        if (resolved) {
+            row << "已解决 (第 " << episode_attempt_count << " 次尝试): " << detail;
+        } else {
+            row << "未解决：同类尝试 " << episode_attempt_count << " 次，全部失败";
+            bool first = true;
+            for (const auto& attempt : entry["_episode_attempts"])
+                if (attempt.is_string()) {
+                    row << (first ? "：" : " | ") << attempt.get<std::string>();
+                    first = false;
+                }
+        }
+        task_memo_scan::AppendRecoveryEpisode(entry["recovery_ledger"], row.str(), kMaxRecoveryEpisodes);
+        episode_active = false;
+        episode_attempt_count = 0;
+        entry["_episode_attempts"] = json::array();
+    };
     for (size_t i = 0; i < dropped_messages.size(); ++i) {
         const auto& m = dropped_messages[i];
         const bool binary = m.role == "tool" &&
@@ -1120,6 +1146,7 @@ json TaskMemoBuilder::BuildRuleLayer(
             preview = ReplaceInvalidUtf8(ExtractKeyFacts(
                 m.content, tool_failed ? config_.rule_layer_preview_chars * 2 : config_.rule_layer_preview_chars));
         if (m.role == "user") {
+            close_episode(false, "");
             AppendCapped(entry["facts_constraints"], "用户提及: " + preview, kMaxItemsPerField);
             size_t todo_pos = m.content.find("TODO");
             if (todo_pos == std::string::npos)
@@ -1155,6 +1182,15 @@ json TaskMemoBuilder::BuildRuleLayer(
                 !write_call.summary.empty() ? write_call.summary
                 : !compact_call.empty()     ? compact_call
                                             : safe_utf8_truncate(call, 200, "..."));
+            if (failed) {
+                episode_active = true;
+                ++episode_attempt_count;
+                const std::string failure_line = FirstFailureLineImpl(m.content);
+                AppendCapped(entry["_episode_attempts"], call_text + " -> " +
+                    (failure_line.empty() ? preview : failure_line), kMaxRecoveryAttempts);
+            } else if (episode_active) {
+                close_episode(true, call_text + " -> " + preview);
+            }
             const std::string tool_name = call.substr(0, call.find(' '));
             const bool reads_content = IsReadLikeToolName(tool_name) || tool_name.find("fetch") != std::string::npos;
             std::string action_source;
@@ -1249,6 +1285,9 @@ json TaskMemoBuilder::BuildRuleLayer(
             }
         }
     }
+
+    entry["_episode_active"] = episode_active;
+    entry["_episode_attempt_count"] = episode_attempt_count;
 
     size_t folded_before = entry.value("_folded_count", (size_t)0);
     size_t folded = folded_before + dropped_messages.size();
@@ -1480,7 +1519,7 @@ TaskMemoBuilder::UpdateResult TaskMemoBuilder::Update(const json& raw_messages,
             model_entry["_next_page_id"] = entry["_next_page_id"];
             // read_files（已读文件索引）同理：模型层不感知、不生成，必须显式透传。
             model_entry["read_files"] = entry["read_files"];
-            for (const char* k : {"hard_rules", "_hard_rule_src", "_hard_rule_files", "pending_refs", "artifacts", "last_success", "tried_queries", "tried_queries_count"})
+            for (const char* k : {"hard_rules", "_hard_rule_src", "_hard_rule_files", "pending_refs", "artifacts", "last_success", "tried_queries", "tried_queries_count", "recovery_ledger", "_episode_active", "_episode_attempt_count", "_episode_attempts"})
                 if (entry.contains(k))
                     model_entry[k] = entry[k];
             // original_goal_raw/confidence 权威兜底，从 entry 显式透传，不允许模型层输出覆盖。
@@ -1717,6 +1756,7 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
     const std::string blocks[] = {
         render_list("Rules from documents you read (still in force)", "hard_rules"),
         pending_refs_block,
+        render_list("Recovery episodes recorded from earlier context", "recovery_ledger"),
         render_list("Artifacts already produced, confirmed by tool output from earlier context that has "
                     "since left the window (not an exhaustive list of everything done so far; check the "
                     "most recent messages below for newer results before redoing any of these steps)", "artifacts"),
@@ -1731,7 +1771,7 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
         page_directory_block,
     };
     static const char* kBlockNames[] = {
-        "hard_rules", "pending_refs", "artifacts", "last_success", "completed", "next_actions",
+        "hard_rules", "pending_refs", "recovery_ledger", "artifacts", "last_success", "completed", "next_actions",
         "facts_constraints", "open_questions", "read_files", "tried_queries", "tool_state", "page_directory",
     };
 

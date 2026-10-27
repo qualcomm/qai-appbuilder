@@ -521,6 +521,21 @@ bool RunTaskMemoDocScanSelfTest(std::ostream &out)
         runner.Check("command_compact_args_clipped", "trailing arguments are clipped", long_args.size() < 90);
     }
 
+    {
+        json ledger = json::array();
+        task_memo_scan::AppendRecoveryEpisode(ledger, "未解决：同类尝试 2 次，全部失败：a", 3);
+        task_memo_scan::AppendRecoveryEpisode(ledger, "已解决 (第 3 次尝试): b", 3);
+        task_memo_scan::AppendRecoveryEpisode(ledger, "未解决：同类尝试 1 次，全部失败：c", 3);
+        task_memo_scan::AppendRecoveryEpisode(ledger, "未解决：同类尝试 4 次，全部失败：d", 3);
+        runner.Check("recovery_ledger_protects_resolved", "resolved episodes survive unresolved rows at capacity",
+                     ledger.size() == 3 && Contains(ledger[0].get<std::string>(), "已解决") &&
+                         !Contains(ledger[0].get<std::string>(), "a"));
+        const size_t before = ledger.size();
+        task_memo_scan::AppendRecoveryEpisode(ledger, "已解决 (第 3 次尝试): b", 3);
+        runner.Check("recovery_ledger_deduplicates", "identical recovery rows do not grow the ledger",
+                     ledger.size() == before);
+    }
+
     out << "=================================================================================\n";
     out << "Total cases: " << runner.total() << ", passed: " << runner.passed()
         << " (" << (runner.total() > 0 ? (100.0 * runner.passed() / runner.total()) : 100.0) << "%)\n";

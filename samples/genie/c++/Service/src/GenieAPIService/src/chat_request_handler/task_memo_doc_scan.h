@@ -1089,6 +1089,33 @@ inline void AppendCompletedRow(json &field, const std::string &row, size_t cap, 
     }
 }
 
+inline void AppendRecoveryEpisode(json &ledger, const std::string &row, size_t cap)
+{
+    if (!ledger.is_array())
+        ledger = json::array();
+    for (const auto &existing : ledger)
+        if (existing.is_string() && existing.get<std::string>() == row)
+            return;
+    ledger.push_back(row);
+    while (ledger.size() > cap)
+    {
+        size_t victim = 0;
+        bool found_unresolved = false;
+        for (size_t i = 0; i < ledger.size(); ++i)
+        {
+            if (!ledger[i].is_string() || ledger[i].get<std::string>().rfind("已解决", 0) != 0)
+            {
+                victim = i;
+                found_unresolved = true;
+                break;
+            }
+        }
+        if (!found_unresolved)
+            victim = 0;
+        ledger.erase(ledger.begin() + static_cast<long long>(victim));
+    }
+}
+
 }
 
 #endif
