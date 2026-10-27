@@ -61,6 +61,8 @@ public:
     static std::string ComputeFirstMsgKey(const json& messages);
     static std::string StripThinkBlock(const std::string& content);
     static std::string ExtractThinkConclusion(const std::string& content);
+    static bool IsReasoningNoteMimicry(const std::string& content);
+    static std::string DetectWorkflowStage(const std::string& content);
     static std::string ExtractToolCallSummary(const std::string& content);
     static void PinThinkConclusion(const std::string& session_key, const std::string& call_signature,
                                    const std::string& conclusion);

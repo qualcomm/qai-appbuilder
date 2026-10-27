@@ -427,6 +427,29 @@ private:
             }
         }
 
+        auto compute_tool_call_signature = [](const json& element) {
+            if (!element.contains("tool_calls") || !element["tool_calls"].is_array()
+                || element["tool_calls"].empty() || !element["tool_calls"][0].contains("function"))
+                return std::string();
+            const auto& fn = element["tool_calls"][0]["function"];
+            std::string args = "{}";
+            try {
+                if (fn.contains("arguments") && fn["arguments"].is_string())
+                    args = json::parse(fn["arguments"].get<std::string>()).dump();
+                else if (fn.contains("arguments") && fn["arguments"].is_object())
+                    args = fn["arguments"].dump();
+            } catch (...) {}
+            return fn.value("name", "") + "|" + args;
+        };
+        std::unordered_map<std::string, int> last_pin_element;
+        for (size_t i = 0; i < msg.size(); ++i) {
+            if (get_json_value(msg[i], "role", BLANK_STRING) == "assistant") {
+                const std::string signature = compute_tool_call_signature(msg[i]);
+                if (!signature.empty())
+                    last_pin_element[signature] = static_cast<int>(i);
+            }
+        }
+
         // 第一遍：收集所有消息
         int element_index = -1;
         for (auto &element: msg)
@@ -459,18 +482,11 @@ private:
                 {
                     auto converted_calls = optimizer_.ConvertOpenAIToolCalls(element["tool_calls"]);
                     std::string pin;
-                    if (!element["tool_calls"].empty() && element["tool_calls"][0].contains("function")) {
-                        const auto &fn = element["tool_calls"][0]["function"];
-                        std::string args = "{}";
-                        try {
-                            if (fn.contains("arguments") && fn["arguments"].is_string())
-                                args = json::parse(fn["arguments"].get<std::string>()).dump();
-                            else if (fn.contains("arguments") && fn["arguments"].is_object())
-                                args = fn["arguments"].dump();
-                        } catch (...) {}
+                    const std::string signature = compute_tool_call_signature(element);
+                    auto last_pin = last_pin_element.find(signature);
+                    if (last_pin != last_pin_element.end() && last_pin->second == element_index)
                         pin = TaskMemoBuilder::LookupPinnedConclusion(
-                            TaskMemoBuilder::ComputeFirstMsgKey(msg), fn.value("name", "") + "|" + args);
-                    }
+                            TaskMemoBuilder::ComputeFirstMsgKey(msg), signature);
                     for (const auto& converted_content : converted_calls)
                     {
                         all_messages.push_back({role, pin + converted_content});

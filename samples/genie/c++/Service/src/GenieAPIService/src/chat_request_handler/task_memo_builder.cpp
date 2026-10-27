@@ -1000,9 +1000,32 @@ std::string TaskMemoBuilder::LookupPinnedConclusion(const std::string& session_k
     return it == g_pins.end() ? "" : std::string(kPinPrefix) + it->second.first + "]\n";
 }
 
+bool TaskMemoBuilder::IsReasoningNoteMimicry(const std::string& content)
+{
+    return content.rfind(kPinPrefix, 0) == 0;
+}
+
+std::string TaskMemoBuilder::DetectWorkflowStage(const std::string& content)
+{
+    std::string lower;
+    lower.reserve(content.size());
+    for (unsigned char c : content)
+        lower.push_back(static_cast<char>(std::tolower(c)));
+    const auto has = [&](const char* token) { return lower.find(token) != std::string::npos; };
+    if (has("qairt-converter") || has("convert") || has(" to dlc"))
+        return "convert";
+    if (has("quantiz") || has("w8a8") || has("w8") || has("int8"))
+        return "quantize";
+    if (has("export") && (has("onnx") || has("torch")))
+        return "export";
+    if (has("qairt-net-run") || has("infer") || has("npu") || has("htp"))
+        return "infer";
+    return "";
+}
+
 std::string TaskMemoBuilder::ExtractThinkConclusion(const std::string& content)
 {
-    if (content.rfind(kPinPrefix, 0) == 0) {
+    if (IsReasoningNoteMimicry(content)) {
         const size_t end = content.find("]\n");
         return end == std::string::npos ? "" : content.substr(sizeof(kPinPrefix) - 1, end - (sizeof(kPinPrefix) - 1));
     }
@@ -1100,6 +1123,8 @@ json TaskMemoBuilder::BuildRuleLayer(
         entry["read_files"] = json::object();
     if (!entry.contains("pending_refs") || !entry["pending_refs"].is_object())
         entry["pending_refs"] = json::object();
+    if (!entry.contains("stage_status") || !entry["stage_status"].is_object())
+        entry["stage_status"] = json::object();
     if (!entry.contains("_episode_attempts") || !entry["_episode_attempts"].is_array())
         entry["_episode_attempts"] = json::array();
 
@@ -1220,6 +1245,18 @@ json TaskMemoBuilder::BuildRuleLayer(
             if (!failed && !call.empty() && !reads_content)
                 for (const auto& a : ExtractArtifactLines(m.content))
                     AppendCapped(entry["artifacts"], ReplaceInvalidUtf8(a), kMaxArtifacts);
+
+            if (!failed && !call.empty() && !reads_content) {
+                const std::string stage = TaskMemoBuilder::DetectWorkflowStage(call_text + "\n" + m.content);
+                if (!stage.empty() && (!entry["stage_status"].contains(stage)
+                    || !entry["stage_status"][stage].is_string()
+                    || entry["stage_status"][stage].get<std::string>().empty())) {
+                    std::string detail = call_text;
+                    if (!preview.empty())
+                        detail += " -> " + preview;
+                    entry["stage_status"][stage] = ReplaceInvalidUtf8(safe_utf8_truncate(detail, 360, "..."));
+                }
+            }
 
             // 已尝试查询索引：对同一资源（如同一文件路径）用不同参数反复调用非 read 类工具
             // 时（如 grep 的 pattern 每次不同），现有去重机制（CanonicalToolCallKey，
@@ -1519,7 +1556,7 @@ TaskMemoBuilder::UpdateResult TaskMemoBuilder::Update(const json& raw_messages,
             model_entry["_next_page_id"] = entry["_next_page_id"];
             // read_files（已读文件索引）同理：模型层不感知、不生成，必须显式透传。
             model_entry["read_files"] = entry["read_files"];
-            for (const char* k : {"hard_rules", "_hard_rule_src", "_hard_rule_files", "pending_refs", "artifacts", "last_success", "tried_queries", "tried_queries_count", "recovery_ledger", "_episode_active", "_episode_attempt_count", "_episode_attempts"})
+            for (const char* k : {"hard_rules", "_hard_rule_src", "_hard_rule_files", "pending_refs", "stage_status", "artifacts", "last_success", "tried_queries", "tried_queries_count", "recovery_ledger", "_episode_active", "_episode_attempt_count", "_episode_attempts"})
                 if (entry.contains(k))
                     model_entry[k] = entry[k];
             // original_goal_raw/confidence 权威兜底，从 entry 显式透传，不允许模型层输出覆盖。
@@ -1696,6 +1733,21 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
     const std::string pending_refs_block =
         entry.contains("pending_refs") ? task_memo_scan::RenderPendingRefs(entry["pending_refs"]) : std::string();
 
+    std::string stage_status_block;
+    if (entry.contains("stage_status") && entry["stage_status"].is_object()) {
+        static const std::pair<const char*, const char*> stages[] = {
+            {"export", "Export"}, {"convert", "Convert"}, {"quantize", "Quantize"}, {"infer", "Infer"}
+        };
+        std::ostringstream oss;
+        oss << "Workflow stage status (confirmed from successful tool results):\n";
+        for (const auto& stage : stages) {
+            const std::string status = entry["stage_status"].value(stage.first, std::string());
+            oss << "- " << stage.second << ": "
+                << (status.empty() ? "not confirmed" : "confirmed complete: " + status) << "\n";
+        }
+        stage_status_block = oss.str();
+    }
+
     // 已尝试查询索引：对同一资源（如同一文件路径）用不同参数反复调用非 read 类工具时
     // （如 grep 的 pattern 每次不同），现有去重机制因参数不同不会判重；这里只如实呈现
     // 模型自己发出过的调用，不做任何"内容是否已被覆盖"的推断，交给模型自己判断是否
@@ -1755,6 +1807,7 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
     // 由高到低优先级排列；预算放不下时整块跳过。
     const std::string blocks[] = {
         render_list("Rules from documents you read (still in force)", "hard_rules"),
+        stage_status_block,
         pending_refs_block,
         render_list("Recovery episodes recorded from earlier context", "recovery_ledger"),
         render_list("Artifacts already produced, confirmed by tool output from earlier context that has "
@@ -1771,7 +1824,7 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
         page_directory_block,
     };
     static const char* kBlockNames[] = {
-        "hard_rules", "pending_refs", "recovery_ledger", "artifacts", "last_success", "completed", "next_actions",
+        "hard_rules", "stage_status", "pending_refs", "recovery_ledger", "artifacts", "last_success", "completed", "next_actions",
         "facts_constraints", "open_questions", "read_files", "tried_queries", "tool_state", "page_directory",
     };
 

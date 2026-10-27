@@ -838,8 +838,11 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                         const std::string signature = tool_name + "|" + parsed.value("arguments", json::object()).dump();
                         if (redundant_guard_enabled)
                             ToolCallRepetitionStore::GetInstance().RecordCall(repetition_key, signature);
-                        std::string conclusion = TaskMemoBuilder::ExtractThinkConclusion(response_buffer);
-                        if (output_truncated)
+                        const bool reasoning_note_mimicry = TaskMemoBuilder::IsReasoningNoteMimicry(response_buffer);
+                        std::string conclusion = reasoning_note_mimicry
+                            ? std::string()
+                            : TaskMemoBuilder::ExtractThinkConclusion(response_buffer);
+                        if (output_truncated && !reasoning_note_mimicry)
                             conclusion += (conclusion.empty() ? "" : " ") + std::string("this call was cut off by the output token limit after ")
                                 + std::to_string(response_buffer.size()) + " characters, so its arguments are incomplete; split the content into several smaller calls";
                         if (!conclusion.empty())

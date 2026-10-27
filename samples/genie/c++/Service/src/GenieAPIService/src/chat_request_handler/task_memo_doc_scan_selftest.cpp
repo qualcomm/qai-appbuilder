@@ -81,6 +81,23 @@ bool RunTaskMemoDocScanSelfTest(std::ostream &out)
     }
 
     {
+        runner.Check("reasoning_note_mimicry", "pin-shaped visible text is not treated as a new conclusion",
+                     TaskMemoBuilder::IsReasoningNoteMimicry("[reasoning note: The]\n<tool_call>"));
+        runner.Check("reasoning_note_real_text", "ordinary visible text is not treated as a pin",
+                     !TaskMemoBuilder::IsReasoningNoteMimicry("The next step is to run the tool"));
+        runner.Check("stage_export", "export and ONNX markers identify the export stage",
+                     TaskMemoBuilder::DetectWorkflowStage("python export_model.py --format onnx") == "export");
+        runner.Check("stage_convert", "converter marker identifies the convert stage",
+                     TaskMemoBuilder::DetectWorkflowStage("qairt-converter --input_network model.onnx") == "convert");
+        runner.Check("stage_quantize", "quantization marker identifies the quantize stage",
+                     TaskMemoBuilder::DetectWorkflowStage("qairt-quantizer --quantization_overrides w8a8") == "quantize");
+        runner.Check("stage_infer", "NPU inference marker identifies the infer stage",
+                     TaskMemoBuilder::DetectWorkflowStage("run inference on NPU with HTP") == "infer");
+        runner.Check("stage_unknown", "unrelated successful output has no workflow stage",
+                     TaskMemoBuilder::DetectWorkflowStage("dir output\\logs").empty());
+    }
+
+    {
         const std::string content =
             "<tool_response>\nline-a\nline-b\n"
             "...[read truncated: context budget; showed lines 23-24 of total 198; next offset=25]\n"
