@@ -20,7 +20,7 @@ NOT covered (deliberately):
 * **The share link in a browser** (the SPA page ``/share/<token>``).
 
 Isolation (verified): one throw-away backend; inputs are strings or a path under ``C:\\e2e-nope`` that does not exist; nothing is read or
-written outside the data dir. ``whisper-base`` and ``zipformer-zh`` are used because they fail on a missing ``audio`` input BEFORE loading
+written outside the data dir. ``zipformer-zh`` and ``zipformer-zh`` are used because they fail on a missing ``audio`` input BEFORE loading
 any model, in well under a second.
 
 Observed behaviour worth pinning:
@@ -78,7 +78,7 @@ def _wait(cl: httpx.Client, rid: str, seconds: float = 60.0) -> dict:
 def failed_run(runs: tuple) -> Callable[..., dict]:
     _ob, cl = runs
 
-    def _make(model: str = "whisper-base", inputs: dict | None = None) -> dict:
+    def _make(model: str = "zipformer-zh", inputs: dict | None = None) -> dict:
         r = cl.post(f"{AB}/runs", json={"model_id": model, "inputs": inputs if inputs is not None else {}})
         assert r.status_code == 201, r.text
         return _wait(cl, r.json()["id"])
@@ -93,7 +93,7 @@ def failed_run(runs: tuple) -> Callable[..., dict]:
 
 def test_a_run_is_created_pending_and_ends_failed_with_a_reason(runs: tuple) -> None:
     _ob, cl = runs
-    r = cl.post(f"{AB}/runs", json={"model_id": "whisper-base", "inputs": {}})
+    r = cl.post(f"{AB}/runs", json={"model_id": "zipformer-zh", "inputs": {}})
     assert r.status_code == 201
     created = r.json()
     assert set(created) == RUN_KEYS and ULID.match(created["id"])
@@ -107,10 +107,9 @@ def test_a_run_is_created_pending_and_ends_failed_with_a_reason(runs: tuple) -> 
 @pytest.mark.parametrize(
     ("model", "inputs", "code", "needle"),
     [
-        ("whisper-base", {}, "INVALID_INPUT", "inputs.audio is required"),
         ("zipformer-zh", {}, "INVALID_INPUT", "inputs.audio is required"),
         ("real-esrgan-x4plus", {"image": "C:\\e2e-nope\\x.png"}, "INVALID_INPUT", "image file not found: C:\\e2e-nope\\x.png"),
-        ("whisper-base", {"audio": "C:\\e2e-nope\\a.wav"}, "INVALID_INPUT", "e2e-nope"),
+        ("zipformer-zh", {"audio": "C:\\e2e-nope\\a.wav"}, "INVALID_INPUT", "e2e-nope"),
     ],
 )
 def test_missing_or_unreadable_inputs_fail_with_invalid_input(failed_run: Callable, model: str, inputs: dict, code: str, needle: str) -> None:
@@ -165,14 +164,14 @@ def test_a_failed_run_does_not_break_the_next_one(runs: tuple, failed_run: Calla
 
 def test_several_runs_at_once_all_finish(runs: tuple) -> None:
     _ob, cl = runs
-    ids = [cl.post(f"{AB}/runs", json={"model_id": m, "inputs": {}}).json()["id"] for m in ("whisper-base", "zipformer-zh", "whisper-base", "zipformer-zh")]
+    ids = [cl.post(f"{AB}/runs", json={"model_id": m, "inputs": {}}).json()["id"] for m in ("zipformer-zh",) * 4]
     assert len(set(ids)) == 4
     assert [_wait(cl, i)["status"] for i in ids] == ["failed"] * 4
 
 
 def test_the_list_shows_runs_newest_first_and_filters(runs: tuple, failed_run: Callable) -> None:
     _ob, cl = runs
-    failed_run("whisper-base")
+    failed_run("zipformer-zh")
     last = failed_run("zipformer-zh")
     rows = cl.get(f"{AB}/runs").json()["runs"]
     assert list(cl.get(f"{AB}/runs").json()) == ["runs", "limit", "offset"] and rows[0]["id"] == last["id"]
@@ -200,7 +199,7 @@ def test_list_limits_are_validated(runs: tuple, params: dict, field: str) -> Non
 @pytest.mark.parametrize(
     ("body", "field"),
     [({"inputs": {}}, "body.model_id"), ({"model_id": "", "inputs": {}}, "body.model_id"), ({"model_id": "m" * 129, "inputs": {}}, "body.model_id"),
-     ({"model_id": "whisper-base", "inputs": []}, "body.inputs"), ({"model_id": "whisper-base", "inputs": "x"}, "body.inputs")],
+     ({"model_id": "zipformer-zh", "inputs": []}, "body.inputs"), ({"model_id": "zipformer-zh", "inputs": "x"}, "body.inputs")],
 )
 def test_create_validates_its_body(runs: tuple, body: dict, field: str) -> None:
     _ob, cl = runs
@@ -210,7 +209,7 @@ def test_create_validates_its_body(runs: tuple, body: dict, field: str) -> None:
 
 def test_inputs_default_to_empty_when_omitted(runs: tuple) -> None:
     _ob, cl = runs
-    r = cl.post(f"{AB}/runs", json={"model_id": "whisper-base"})
+    r = cl.post(f"{AB}/runs", json={"model_id": "zipformer-zh"})
     assert r.status_code == 201 and r.json()["inputs"] == {}
     _wait(cl, r.json()["id"])
 
@@ -226,7 +225,7 @@ def test_an_unknown_model_is_a_422_and_creates_no_run(runs: tuple) -> None:
 
 def test_an_unknown_variant_is_not_checked_up_front(runs: tuple) -> None:
     _ob, cl = runs
-    r = cl.post(f"{AB}/runs", json={"model_id": "whisper-base", "inputs": {}, "variant": "no-such-variant"})
+    r = cl.post(f"{AB}/runs", json={"model_id": "zipformer-zh", "inputs": {}, "variant": "no-such-variant"})
     assert r.status_code == 201
     _wait(cl, r.json()["id"])
 

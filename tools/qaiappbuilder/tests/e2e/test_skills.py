@@ -54,11 +54,19 @@ from tests.e2e.test_chat_stream import Turn, _set_env, run_turn
 
 pytestmark = pytest.mark.e2e
 
-BUILTIN = ["app-builder", "browser-automation", "code-assist", "computer-automation", "email-163-com", "model-builder", "model-hub",
-           "ppt-gen", "read-arxiv-paper", "weather"]
 DEFAULT_OFF = {"code-assist", "ppt-gen"}
+# Skills that must always ship; guards against a skill being deleted by mistake (the full list is discovered from disk below).
+CORE_SKILLS = {"app-builder", "model-builder", "model-hub", "weather"}
 SKILL_KEYS = {"skill_id", "name", "description", "icon", "tags", "use_for", "skill_path", "npu_optimized", "mode", "enabled", "pinned", "display_name"}
 SKILL_DIRS = (REPO_ROOT / "skills", REPO_ROOT / "factory" / "chat_features")
+
+
+def _discover_builtin() -> list[str]:
+    """Every ``<dir>/<name>/SKILL.md`` one level under the two skill folders, sorted by id (so new skills need no test change)."""
+    return sorted(p.name for d in SKILL_DIRS if d.exists() for p in d.iterdir() if p.is_dir() and (p / "SKILL.md").exists())
+
+
+BUILTIN = _discover_builtin()
 
 
 def _listing() -> dict[str, list[str]]:
@@ -129,6 +137,7 @@ def test_the_builtin_skills_are_discovered_sorted_by_id(sk: tuple) -> None:
     _ob, cl = sk
     ids = [s["skill_id"] for s in cl.get("/api/skills").json()["skills"]]
     assert ids == BUILTIN == sorted(ids)
+    assert CORE_SKILLS <= set(ids), f"missing core skills: {CORE_SKILLS - set(ids)}"
 
 
 def test_each_skill_has_the_documented_fields(sk: tuple) -> None:

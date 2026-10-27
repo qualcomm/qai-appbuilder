@@ -23,7 +23,7 @@ def test_runs_survive_a_restart() -> None:
     with owned_backend() as ob:
         cl = ob.start()
         cl.timeout = httpx.Timeout(60.0)
-        rid = cl.post(f"{AB}/runs", json={"model_id": "whisper-base", "inputs": {}}).json()["id"]
+        rid = cl.post(f"{AB}/runs", json={"model_id": "zipformer-zh", "inputs": {}}).json()["id"]
         before = _wait(cl, rid)
         ob.stop()
         cl2 = ob.start()
@@ -34,7 +34,7 @@ def test_share_tokens_survive_a_restart() -> None:
     with owned_backend() as ob:
         cl = ob.start()
         cl.timeout = httpx.Timeout(60.0)
-        rid = cl.post(f"{AB}/runs", json={"model_id": "whisper-base", "inputs": {}}).json()["id"]
+        rid = cl.post(f"{AB}/runs", json={"model_id": "zipformer-zh", "inputs": {}}).json()["id"]
         run = _wait(cl, rid)
         token = cl.post(f"{AB}/share", json={"run_id": rid}).json()["token"]
         ob.stop()

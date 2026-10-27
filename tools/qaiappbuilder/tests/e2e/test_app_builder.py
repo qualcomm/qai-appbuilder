@@ -171,7 +171,7 @@ def test_include_disabled_rejects_non_boolean(api: httpx.Client) -> None:
     ("path", "status"),
     [
         ("e2e-no-such-model", 404),
-        ("WHISPER-BASE", 404),  # ids are case-sensitive
+        ("ZIPFORMER-ZH", 404),  # ids are case-sensitive
         ("BAD%20ID!", 400),  # violates [A-Za-z0-9._-]{1,128}
         ("..%2f", 404),
     ],
@@ -292,17 +292,17 @@ def test_voice_preference_default_is_zipformer(api: httpx.Client) -> None:
 
 @pytest.mark.usefixtures("restore_voice_pref")
 def test_voice_preference_round_trip_and_persists(api: httpx.Client, backend: Backend) -> None:
-    want = {"enabled": False, "preferred_model_id": "whisper-base", "preferred_variant_id": "fp16"}
+    want = {"enabled": False, "preferred_model_id": "zipformer-zh", "preferred_variant_id": "int8"}
     r = api.put(VP, json=want)
     assert r.status_code == 200 and r.json() == want
     assert api.get(VP).json() == want
     # It really hit the database, not just memory.
-    assert _db_voice_row(backend) == (0, "whisper-base", "fp16")
+    assert _db_voice_row(backend) == (0, "zipformer-zh", "int8")
 
 
 @pytest.mark.usefixtures("restore_voice_pref")
 def test_voice_preference_put_replaces_the_whole_record(api: httpx.Client) -> None:
-    api.put(VP, json={"enabled": True, "preferred_model_id": "whisper-base", "preferred_variant_id": "fp16"})
+    api.put(VP, json={"enabled": True, "preferred_model_id": "zipformer-zh", "preferred_variant_id": "int8"})
     # Omitted optional fields become null (PUT, not PATCH): variant must not survive.
     r = api.put(VP, json={"enabled": True, "preferred_model_id": "melotts-zh"})
     assert r.json() == {"enabled": True, "preferred_model_id": "melotts-zh", "preferred_variant_id": None}
@@ -318,8 +318,8 @@ def test_voice_preference_put_replaces_the_whole_record(api: httpx.Client) -> No
         ({"enabled": True, "preferred_model_id": "BAD ID!"}, 422, "app_builder.voice_preference_invalid"),
         ({"enabled": True, "preferred_model_id": ""}, 422, "app_builder.voice_preference_invalid"),
         ({"enabled": True, "preferred_model_id": "a" * 129}, 422, "app_builder.voice_preference_invalid"),
-        ({"enabled": True, "preferred_variant_id": "fp16"}, 422, "app_builder.voice_preference_invalid"),
-        ({"preferred_model_id": "whisper-base"}, 400, "request.validation"),
+        ({"enabled": True, "preferred_variant_id": "int8"}, 422, "app_builder.voice_preference_invalid"),
+        ({"preferred_model_id": "zipformer-zh"}, 400, "request.validation"),
     ],
 )
 def test_voice_preference_rejects_invalid_and_keeps_old_value(
@@ -352,7 +352,7 @@ def test_voice_preference_does_not_check_model_exists(api: httpx.Client) -> None
     """
     r = api.put(VP, json={"enabled": True, "preferred_model_id": "e2e-no-such-model"})
     assert r.status_code == 200 and r.json()["preferred_model_id"] == "e2e-no-such-model"
-    r = api.put(VP, json={"enabled": True, "preferred_model_id": "whisper-base", "preferred_variant_id": "zzz"})
+    r = api.put(VP, json={"enabled": True, "preferred_model_id": "zipformer-zh", "preferred_variant_id": "zzz"})
     assert r.status_code == 200 and r.json()["preferred_variant_id"] == "zzz"
 
 
@@ -365,13 +365,13 @@ def test_voice_preference_wrong_method(api: httpx.Client, method: str) -> None:
 def test_voice_preload_is_skipped_when_voice_input_disabled(api: httpx.Client) -> None:
     """Disabled voice input must NOT load anything onto the NPU worker."""
     api.put(VP, json={"enabled": False})
-    for body in (None, {"model_id": "whisper-base"}):
+    for body in (None, {"model_id": "melotts-zh"}):
         r = api.post(f"{A}/voice-input/preload", json=body) if body else api.post(f"{A}/voice-input/preload")
         assert r.status_code == 200, r.text
         assert r.json()["status"] == "skipped"
         assert "disabled" in r.json()["detail"]
     loaded = {m["model_id"] for m in api.get(f"{A}/worker/status").json()["loaded_models"]}
-    assert "whisper-base" not in loaded, "preload was skipped, so the model must not become resident"
+    assert "melotts-zh" not in loaded, "preload was skipped, so the model must not become resident"
 
 
 # --------------------------------------------------------------------------

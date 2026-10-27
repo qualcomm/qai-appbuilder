@@ -194,21 +194,20 @@ const TARGET_SAMPLE_RATE = 16000;
  */
 const PRELOAD_POLL_BUDGET_MS = 125_000;
 
-// Engine catalog. Mirrors V1's two-engine setup; `whisper-base` is the
-// English-only variant from the QAI app-builder pack manifests, and
-// `zipformer-zh` is the Chinese engine. The display labels are intentionally
-// honest (English vs Chinese) so users don't pick the wrong one and get
-// empty transcripts.
+// Engine catalog. Only `zipformer-zh` (Chinese) is exposed for now.
+//
+// The `whisper-base` engine is intentionally hidden: its pack downloads
+// Whisper-Medium weights (24 layers / 16 heads, 48 encoder outputs) but
+// `runner.py` run_inference still reshapes the encoder output as a single
+// combined array, so every transcription fails with
+// `INFER_ERROR: cannot reshape array of size 1536000 into shape (24,16,64,1500)`.
+// Re-add the entry below once the runner handles per-layer cache outputs:
+//   { id: "whisper-base", modelId: "whisper-base", variantId: "fp16",
+//     label: "Whisper (English)", labelKey: "voiceInput.engine.whisper",
+//     lang: "en", params: { vad: true } },
+// A stale DB preference pointing at whisper-base is ignored by
+// `refreshPreference` (no matching engine -> keeps the zipformer default).
 export const VOICE_ENGINES: readonly VoiceEngine[] = [
-  {
-    id: "whisper-base",
-    modelId: "whisper-base",
-    variantId: "fp16",
-    label: "Whisper (English)",
-    labelKey: "voiceInput.engine.whisper",
-    lang: "en",
-    params: { vad: true },
-  },
   {
     id: "zipformer-zh",
     modelId: "zipformer-zh",
@@ -406,8 +405,8 @@ export function useVoiceInput(opts: UseVoiceInputOptions = {}) {
       _backendEnabledSingleton.value = Boolean(pref.enabled);
       // 2026-06-21: DB is the single source of truth for engine selection.
       // Reverse-look-up the engine from ``preferred_model_id`` (and tie-break
-      // on ``preferred_variant_id`` when the same model has multiple variants
-      // — e.g. whisper-base's fp16 vs int8) and assign it back to the
+      // on ``preferred_variant_id`` when the same model has multiple variants)
+      // and assign it back to the
       // singleton so the toolbar pill, the popover and the mic button all
       // agree from first paint. Falls through silently when the DB value
       // doesn't map to a known engine (e.g. a stale row from an older catalog

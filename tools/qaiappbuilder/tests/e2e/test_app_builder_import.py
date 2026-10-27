@@ -261,7 +261,7 @@ def test_an_id_that_is_already_installed_becomes_a_replace_with_a_bumped_version
 
 def test_a_built_in_id_is_planned_as_a_replace(imp: tuple) -> None:
     _ob, cl, c = imp
-    (item,) = _plan(cl, make_pack(c, "bi", "whisper-base"))["items"]
+    (item,) = _plan(cl, make_pack(c, "bi", "zipformer-zh"))["items"]
     assert item["action"] == "replace" and item["conflicts"], "the plan itself does not forbid replacing a built-in model"
 
 
@@ -330,13 +330,13 @@ def test_commit_answers_201_for_things_that_installed_nothing(imp: tuple) -> Non
     before = (sorted(_ids(cl)), _files(ob))
     skip = {"model_id": "e2e-s", "action": "skip", "source": "x"}
     ghost = {"model_id": "e2e-ghost", "action": "add", "source": "C:\\e2e-nope\\m.json"}
-    builtin_add = {"model_id": "whisper-base", "action": "add", "source": "C:\\e2e-nope\\m.json"}
-    builtin_rep = {"model_id": "whisper-base", "action": "replace", "source": "C:\\e2e-nope\\m.json"}
+    builtin_add = {"model_id": "zipformer-zh", "action": "add", "source": "C:\\e2e-nope\\m.json"}
+    builtin_rep = {"model_id": "zipformer-zh", "action": "replace", "source": "C:\\e2e-nope\\m.json"}
     for items in ([], [skip], [ghost], [builtin_add], [builtin_rep]):
         r = cl.post(f"{AB}/import/commit", json={"items": items})
         assert r.status_code == 201 and list(r.json()) == ["commit_id"], items
     assert (sorted(_ids(cl)), _files(ob)) == before
-    assert cl.get(f"{AB}/models/whisper-base").json()["user_imported"] is False
+    assert cl.get(f"{AB}/models/zipformer-zh").json()["user_imported"] is False
 
 
 def test_each_commit_gets_its_own_id_and_a_row(imp: tuple) -> None:
