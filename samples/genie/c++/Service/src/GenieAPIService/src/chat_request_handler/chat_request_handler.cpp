@@ -137,65 +137,57 @@ void ChatRequestHandler::FetchModelList(const httplib::Request &req, httplib::Re
         return r;
     };
 
-    auto current = model_manager.GetDefaultModel();
-    std::string current_name_lower, current_dir_lower;
-    if (current && current->config)
-    {
-        current_name_lower = to_lower(current->config->get_model_name());
-        fs::path p(current->config->get_model_path());
-        current_dir_lower = to_lower(p.filename().generic_string());
-    }
+    auto loaded_models = model_manager.GetAllLoadedModels();
+    std::vector<bool> loaded_matched(loaded_models.size(), false);
 
     std::vector<json> disk_models = model_manager.ScanModelDirectory();
 
-    if (!disk_models.empty())
+    for (auto &m : disk_models)
     {
-        bool current_found_on_disk = false;
-        for (auto &m : disk_models)
+        m["object"]   = "model";
+        m["created"]  = now_ts;
+        m["owned_by"] = "owner";
+        const std::string disk_id_lower = to_lower(m["id"].get<std::string>());
+        m["is_loaded"] = false;
+        for (size_t i = 0; i < loaded_models.size(); ++i)
         {
-            m["object"]   = "model";
-            m["created"]  = now_ts;
-            m["owned_by"] = "owner";
-            const std::string disk_id_lower = to_lower(m["id"].get<std::string>());
-            bool is_current = current && (
-                (!current_name_lower.empty() && disk_id_lower == current_name_lower) ||
-                (!current_dir_lower.empty() && disk_id_lower == current_dir_lower));
-            m["is_loaded"] = is_current;
-            if (is_current)
+            const auto &loaded = loaded_models[i];
+            if (!loaded || !loaded->config)
+                continue;
+            std::string name_lower = to_lower(loaded->config->get_model_name());
+            fs::path p(loaded->config->get_model_path());
+            std::string dir_lower = to_lower(p.filename().generic_string());
+            bool is_match = (!name_lower.empty() && disk_id_lower == name_lower) ||
+                            (!dir_lower.empty() && disk_id_lower == dir_lower);
+            if (is_match)
             {
-                current_found_on_disk = true;
-                m["context_length"] = current->config->get_context_size();
-                m["backend"] = current->backend;
-                m["device"] = current->device;
+                loaded_matched[i] = true;
+                m["is_loaded"]      = true;
+                m["context_length"] = loaded->config->get_context_size();
+                m["backend"]        = loaded->backend;
+                m["device"]         = loaded->device;
+                break;
             }
-            model_list.push_back(m);
         }
-
-        if (current && current->config && !current_found_on_disk)
-        {
-            json m;
-            m["id"]             = current->config->get_model_name();
-            m["object"]         = "model";
-            m["created"]        = now_ts;
-            m["owned_by"]       = "owner";
-            m["is_loaded"]      = true;
-            m["context_length"] = current->config->get_context_size();
-            m["backend"]        = current->backend;
-            m["device"]         = current->device;
-            model_list.push_back(m);
-        }
+        model_list.push_back(m);
     }
-    else if (current && current->config)
+
+    for (size_t i = 0; i < loaded_models.size(); ++i)
     {
+        if (loaded_matched[i])
+            continue;
+        const auto &loaded = loaded_models[i];
+        if (!loaded || !loaded->config)
+            continue;
         json m;
-        m["id"]             = current->config->get_model_name();
+        m["id"]             = loaded->config->get_model_name();
         m["object"]         = "model";
         m["created"]        = now_ts;
         m["owned_by"]       = "owner";
         m["is_loaded"]      = true;
-        m["context_length"] = current->config->get_context_size();
-        m["backend"]        = current->backend;
-        m["device"]         = current->device;
+        m["context_length"] = loaded->config->get_context_size();
+        m["backend"]        = loaded->backend;
+        m["device"]         = loaded->device;
         model_list.push_back(m);
     }
 

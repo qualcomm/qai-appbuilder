@@ -78,6 +78,8 @@ public:
 
     std::vector<std::string> ListLoadedModels() const;
 
+    std::vector<std::shared_ptr<LoadedModel>> GetAllLoadedModels() const;
+
     std::vector<json> ScanModelDirectory() const;
 
     bool LoadSingleModel();

@@ -3254,11 +3254,11 @@ class ReportGenerator:
         "MULTI: GET /models (multi-model list)":
             "调用 GET /models 接口，验证服务能正确返回当前已加载的模型",
         "MULTI: sequential backend switching (npu/gpu/cpu each independently loadable)":
-            "依次向 QNN(NPU)/GGUF(GPU)/MNN(CPU) 三种后端各一个模型发送请求，验证 ModelManager::LoadModelByName() 的顺序单模型切换能力在三种后端间均能正常工作（不要求同时驻留，本仓库已删除并发多模型托管设计）",
+            "依次向 QNN(NPU)/GGUF(GPU)/MNN(CPU) 三种后端各一个模型发送请求，验证 ModelManager 按设备族（npu/gpu/cpu）各自维护一个驻留槛位、互不踢除——三者加载完成后应同时驻留，而不仅是依次切换成功",
         "MULTI: invalid model route returns 404/400":
             "请求一个不存在的模型名，验证服务能快速返回 404/400 错误，而不是长时间挂起或误路由到其它模型",
         "MULTI: concurrent requests to different models":
-            "同时向多个已加载的不同模型并发发送请求，验证并发场景下各请求能被正确路由到对应模型、互不干扰、不引发崩溃（同时校验回复内容非空；单模型架构下通常因已加载模型 <2 个而被跳过）",
+            "同时向多个已加载的不同模型并发发送请求，验证并发场景下各请求能被正确路由到对应模型、互不干扰、不引发崩溃（同时校验回复内容非空；已加载模型 <2 个时无法验证并发安全性，标记为 skipped）",
         "MULTI: default model route (no 'model' field) after dynamic switches":
             "发一个不带 model 字段的请求，观察在多次动态切换后默认模型是否仍能正常响应（当前实现里默认模型会随动态切换漂移，本检查只监控不崩溃/不返回 5xx，不假定具体路由到哪个模型）",
     }
@@ -5610,19 +5610,18 @@ def _crash_badge_html(c):
 
 
 # ============================================================================
-# MultiModelTester - 多后端顺序切换加载与路由测试
+# MultiModelTester - 多后端并发驻留与路由测试
 # ============================================================================
 class MultiModelTester:
     """
-    阶段 3：多后端顺序切换加载与路由测试。
+    阶段 3：多后端并发驻留与路由测试。
 
-    本仓库已删除并发多模型托管设计（原 loaded_models_ 注册表），运行时只有一个当前活跃
-    模型；本阶段验证的是 ModelManager::LoadModelByName() 的顺序单模型切换能力在
-    QNN(NPU)/GGUF(GPU)/MNN(CPU) 三种后端间都能正常工作，不要求多模型同时驻留：
-    1. GET /models 返回当前已加载的模型
-    2. 依次向 npu/gpu/cpu 三种后端的模型发送 chat 请求，验证顺序切换均成功
-    3. 并发向同一/不同模型发送请求，验证并发安全性（需要 ≥2 个已加载模型才有意义，
-       单模型架构下天然多为 skipped）
+    ModelManager 按设备族（npu/gpu/cpu）各自维护一个驻留槛位，互不踢除：加载某族新模型
+    只踢除 loaded_models_ 中与之同族的旧模型，不影响其它族已驻留的模型。本阶段验证：
+    1. GET /models 同时上报全部驻留模型的 is_loaded=true
+    2. 依次向 npu/gpu/cpu 三种后端的模型发送 chat 请求，验证三者能按设备族同时驻留
+       （后加载的设备不会把先加载的不同族模型踢下线），而非仅验证"顺序切换成功"
+    3. 并发向不同模型发送请求，验证并发安全性（需要 ≥2 个已加载模型才有意义）
     4. 请求未加载/不存在的模型时返回 404
     5. MNN 模型加载失败（含崩溃）标记为 ignorable
 
@@ -5770,15 +5769,18 @@ class MultiModelTester:
     def ensure_multi_backend_loaded(self, models_by_device):
         """依次向 npu/gpu(GGUF)/cpu(MNN) 三个不同设备的模型发送 chat 请求，触发
         chat_request_handler.cpp 中已有的"磁盘扫描 + 动态加载"分支（ModelManager::LoadModelByName()
-        顺序单模型切换），验证三种后端各自都能被成功加载/切换到。
+        按设备族冲突踢除），验证三种后端各自都能被成功加载。
 
-        本仓库已删除并发多模型托管设计（原 loaded_models_ 注册表），运行时只有一个当前活跃模型，
-        因此不再要求三者"同时驻留"，只要求依次切换均成功——这与 ModelManager::LoadModelByName()
-        的顺序切换语义（先卸载旧模型再加载新模型）完全一致。
+        ModelManager 按设备族（npu/gpu/cpu）各自维护一个驻留槛位：加载某族新模型只踢除
+        loaded_models_ 中与之同族的旧模型，不影响其它族已驻留的模型——因此三者加载完成后
+        应当同时驻留，而不仅仅是"依次切换成功"。三个设备依次加载完成后，本函数额外调用
+        _get_loaded_model_entries() 校验先前已成功加载的设备族条目此时仍为 is_loaded=true，
+        这是对"后加载的模型不会把不同族的旧模型踢下线"这一回归场景的直接断言。
 
         models_by_device: dict[str, str]，形如 {"npu": "qwen3-8b-8480", "gpu": "gpt-oss-20b-GGUF", "cpu": "gpt-oss-20b-MNN"}
         返回一条汇总 TestResult：MNN OOM 崩溃时按现有 ignorable 机制处理并跳过继续；因更早设备
-        崩溃导致循环提前结束、从未被真正请求过的设备标记为 skipped（而不是失败）。
+        崩溃导致循环提前结束、从未被真正请求过的设备标记为 skipped（而不是失败）；已成功加载的
+        设备在全部切换完成后被意外踢下线（跨族驻留校验失败）记为 failed。
         """
         name = "MULTI: sequential backend switching (npu/gpu/cpu each independently loadable)"
         touched = []
@@ -5818,11 +5820,22 @@ class MultiModelTester:
         skipped_devices = [d for d in models_by_device.keys() if d not in device_results]
         bad_devices = [d for d, r in device_results.items()
                        if (not r.passed) and (not r.skipped) and (not r.ignorable)]
+
+        passed_devices = [d for d, r in device_results.items() if r.passed]
+        final_entries = self._get_loaded_model_entries()
+        final_loaded_ids_lower = {str(e.get("id", "")).lower() for e in final_entries if e.get("id")}
+        evicted_after_load = [f"{d}:{models_by_device[d]}" for d in passed_devices
+                               if models_by_device[d].lower() not in final_loaded_ids_lower]
+
         detail = (f"顺序切换结果: {touched}"
-                  + (f", 因更早设备崩溃未被真正尝试: {sorted(skipped_devices)}" if skipped_devices else ""))
-        if bad_devices:
-            # 至少一个设备被真正请求过但切换/加载失败(且非崩溃/优雅跳过/已知 ignorable)——
-            # 这是需要关注的真实问题。
+                  + (f", 因更早设备崩溃未被真正尝试: {sorted(skipped_devices)}" if skipped_devices else "")
+                  + (f", 跨族驻留校验: 已成功加载的 {len(passed_devices)} 个设备在全部切换完成后" +
+                     ("仍全部 is_loaded=true" if not evicted_after_load
+                      else f"有 {len(evicted_after_load)} 个被意外踢下线: {evicted_after_load}")
+                     if passed_devices else ""))
+        if bad_devices or evicted_after_load:
+            # 至少一个设备被真正请求过但切换/加载失败(且非崩溃/优雅跳过/已知 ignorable)，
+            # 或已成功加载的设备被不同族的后续加载意外踢下线——这是需要关注的真实问题。
             result = self._make_result(name, False, 0, detail)
         elif skipped_devices:
             # 有设备从未被真正尝试(更早设备崩溃导致循环提前 break)，无法验证该设备是否可
@@ -5838,6 +5851,7 @@ class MultiModelTester:
                                 for d, r in device_results.items()},
             "skipped_devices": sorted(skipped_devices),
             "request_order": touched,
+            "cross_family_residency_evicted": evicted_after_load,
         }
         return result
 
@@ -6138,16 +6152,17 @@ class MultiModelTester:
         """执行所有多模型测试，返回 TestResult 列表
 
         models_by_device: 可选，形如 {"npu": ..., "gpu": ..., "cpu": ...}；
-        长度 > 1 时先调用 ensure_multi_backend_loaded 主动触发多种设备的顺序切换加载
-        （本仓库已删除并发多模型托管设计，运行时只有一个当前活跃模型，不再要求同时驻留）；
+        长度 > 1 时先调用 ensure_multi_backend_loaded 主动触发多种设备的顺序加载，验证三者
+        能按设备族同时驻留（ModelManager 按 npu/gpu/cpu 各自一个槛位，互不踢除）；
         长度 <=1（环境里只发现单一 backend 类型）时不再完全静默跳过、不留痕迹，而是
         登记一条 skipped=True 的 TestResult，明确说明"环境无法验证多后端切换"。
 
         models_root/remote_mode: 保留参数签名以兼容既有调用点（历史上用于驱动"两两同时
-        驻留"降级验证，该验证已随并发多模型托管设计一起删除，此处不再使用）。
+        驻留"降级验证，该验证现由 ensure_multi_backend_loaded 内置的跨族驻留断言覆盖，
+        此处仍不使用这两个参数）。
         """
         print(f"\n{'='*60}")
-        print("阶段 3: 多后端顺序切换加载与路由测试")
+        print("阶段 3: 多后端并发驻留与路由测试")
         print(f"{'='*60}")
 
         if models_by_device and len(models_by_device) > 1:

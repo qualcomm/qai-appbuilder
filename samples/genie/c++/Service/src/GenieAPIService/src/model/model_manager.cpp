@@ -2730,6 +2730,21 @@ std::vector<std::string> ModelManager::ListLoadedModels() const
     return names;
 }
 
+std::vector<std::shared_ptr<LoadedModel>> ModelManager::GetAllLoadedModels() const
+{
+    std::lock_guard<std::mutex> lock(models_mutex_);
+    std::vector<std::shared_ptr<LoadedModel>> models;
+    models.reserve(loaded_models_.size());
+    for (const auto &entry: loaded_models_)
+    {
+        if (entry.second)
+        {
+            models.push_back(entry.second);
+        }
+    }
+    return models;
+}
+
 uint64_t ModelManager::EstimateOtherLoadedModelsMemoryBytes() const
 {
     std::lock_guard<std::mutex> lock(models_mutex_);
