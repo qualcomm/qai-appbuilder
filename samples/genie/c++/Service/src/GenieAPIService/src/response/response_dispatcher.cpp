@@ -22,6 +22,10 @@
 
 namespace
 {
+    constexpr size_t kMimicryRunawayTokenLimit = 900;
+    constexpr char kMimicryAbortErrMsg[] =
+        R"({"error": {"message": "Generation aborted after runaway reasoning-note mimicry without producing a tool call.", "type": "server_error", "code": 500}})";
+
     struct ProfileTotals
     {
         std::mutex mtx;
@@ -284,6 +288,8 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
 
 
     bool connection_broken = false;  // Fix 3: track connection state across callback invocations
+    bool degenerate_mimicry_stop = false;
+    size_t mimicry_tail_tokens = 0;
 
     // Layer2 内部隐形自纠正重试的历史一致性兜底（仅 Harmony 格式 + 有状态会话相关）：
     // 若本次请求触发了重试且最终回滚（见下方 Layer2 代码块），proc_（HarmonyProcessor）
@@ -366,6 +372,20 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
         // else Harmony 格式：保留 chunk（已被 HarmonyProcessor 修改为 newContent）
 
         response_buffer += message;  // Keep original message in buffer for history
+
+        if (is_tool_ && TaskMemoBuilder::IsReasoningNoteMimicry(response_buffer))
+        {
+            ++mimicry_tail_tokens;
+            if (mimicry_tail_tokens > kMimicryRunawayTokenLimit
+                && response_buffer.find("<tool_call>") == std::string::npos)
+            {
+                degenerate_mimicry_stop = true;
+                My_Log{My_Log::Level::kWarning}
+                    << "[SendResponse] Aborting runaway reasoning-note mimicry without a tool call after "
+                    << mimicry_tail_tokens << " callback chunks." << std::endl;
+                return false;
+            }
+        }
 
         // ── Layer -1 兜底：无 <tool_call> 标签时的裸 JSON hold-back ──────────────
         // 只在声明了 tools、且尚未匹配到 <tool_call> 标签、且是 General 格式时生效
@@ -501,7 +521,9 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
         if (!handle->Query(model_input_, genie_callback, prefill_heartbeat))
         {
             // [任务4]: 返回详细的错误并且发送终止标记 [DONE]，防止客户端无限等待
-            constexpr char *err = R"({"error": {"message": "Model query unavailable or generation failed internally.", "type": "server_error", "code": 500}})";
+            const char *err = degenerate_mimicry_stop
+                ? kMimicryAbortErrMsg
+                : R"({"error": {"message": "Model query unavailable or generation failed internally.", "type": "server_error", "code": 500}})";
             if (is_stream_)
             {
                 if (!connection_broken && isConnectionAlive()) 
@@ -725,6 +747,8 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                         response_buffer.clear();
                         toolResponse.clear();
                         isToolResponse = false;
+                        degenerate_mimicry_stop = false;
+                        mimicry_tail_tokens = 0;
                         proc_->Clean();
                         is_tool_ = scratch_is_tool;
                         // Layer -1 hold-back 状态同样要随 Layer2 重试一起重置——genie_callback
