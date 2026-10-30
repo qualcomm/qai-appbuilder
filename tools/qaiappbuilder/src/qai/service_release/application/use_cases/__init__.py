@@ -34,6 +34,7 @@ from qai.service_release.domain.value_objects import (
     CatalogModel,
     DownloadProgress,
     DownloadSettings,
+    ExtraFileInstallSpec,
     ModelInstallResult,
     ModelsLocalStatus,
     ServiceInstallResult,
@@ -100,6 +101,12 @@ class InstallModelCommand:
     # Selected platform variant (for the install marker → Installed pill
     # platform label). Optional; degrades to no platform label when absent.
     variant_id: str = ""
+    # Additional already-downloaded raw files (e.g. a speculative-decoding
+    # drafter GGUF) to move into the install dir alongside the main file.
+    # Empty for every existing single-file model — additive, opt-in.
+    extra_files: tuple[ExtraFileInstallSpec, ...] = ()
+    # Optional config.json content to write once every file is in place.
+    install_config: dict[str, object] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +198,8 @@ class InstallModelUseCase:
             model_id=command.model_id,
             install_dir=command.install_dir,
             variant_id=command.variant_id,
+            extra_files=command.extra_files,
+            install_config=command.install_config,
         )
 
 

@@ -1341,14 +1341,18 @@ def build_chat_services(container: Container) -> ChatServices:
     _model_catalog = getattr(container, "model_catalog", None)
     _provider_registry = getattr(_model_catalog, "provider_registry", None)
     if _provider_registry is not None:
+        from ._local_service_endpoint_bridge import make_local_models_lookup
         from ._model_resolver_bridge import ModelCatalogProviderLookupBridge
 
+        # DI-order fix: ``model_runtime`` is assigned AFTER chat services are
+        # built, so an eager ``list_models_use_case`` read here is always
+        # ``None`` and ``context_window()`` then raises
+        # ``MissingModelContextLengthError`` for every ``local::`` turn; the
+        # lookup bridge resolves ``model_runtime`` lazily on each call.
         _provider_lookup = ModelCatalogProviderLookupBridge(
             provider_registry=_provider_registry,
             secret_store=getattr(container, "secret_store", None),
-            local_models=getattr(
-                getattr(container, "model_runtime", None), "list_models_use_case", None
-            ),
+            local_models=make_local_models_lookup(container),
         )
     # Local Genie service endpoint provider (V1 ``_stream_local`` parity):
     # resolves ``http://127.0.0.1:<port>/v1`` from the live model_runtime
@@ -1402,6 +1406,12 @@ def build_chat_services(container: Container) -> ChatServices:
             api_key=resolved.api_key,
             model_name=resolved.model_id or "local",
             timeout_seconds=_local_stream_timeout,
+            # The local adapter's stream-status handling needs to know whether
+            # the on-device GenieAPIService is actually running so it can
+            # distinguish a genuinely offline endpoint from a slow
+            # "warming up" one. Cross-context read stays in the apps bridge
+            # (qai.chat never imports qai.model_runtime).
+            service_running_provider=_local_endpoint_provider.is_running,
         )
 
     # Query-service routing (internal-only): a ``query::<id>`` model hint is
@@ -1844,6 +1854,20 @@ def build_chat_services(container: Container) -> ChatServices:
             # agent's handler, so the sub-agents it spawns sit at depth 1.
             bridge=sub_agent_bridge,
             parent_depth=0,
+            # Unified local/cloud sub-agent skill catalog: the lambda is
+            # deliberately NOT hoisted -- ``_skill_catalog_provider`` /
+            # ``_local_skill_catalog_provider`` are constructed FURTHER DOWN
+            # in this same function, and a lambda resolves its free variables
+            # by name at CALL time (a general sub-agent dispatch, long after
+            # ``build_chat_services`` returned), so the closure is safe while
+            # moving the definitions up here would not be.
+            skill_catalog_rows_provider=lambda is_local: (
+                tuple(_local_skill_catalog_provider())
+                if is_local
+                else tuple(
+                    (Path(p).parent.name, u, p) for p, u in _skill_catalog_provider()
+                )
+            ),
         )
         # Close the late-bound cycle: the bridge's factory resolves this
         # handler at spawn time.

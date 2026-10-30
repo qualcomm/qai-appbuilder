@@ -102,7 +102,7 @@ from qai.platform.qgenie_user_agent import (
     is_qgenie_host,
 )
 from qai.chat.domain.model_profiles import get_model_profile
-from qai.chat.domain.stream_frame import StreamFrame
+from qai.chat.domain.stream_frame import StreamFrame, StreamFrameType
 from qai.chat.infrastructure.llm_stream import HttpOpenAICompatibleLLMStream
 from qai.platform.ids import IdGenerator
 from qai.platform.logging import get_logger
@@ -423,8 +423,35 @@ class ProviderRoutingLLMStream:
         self, request: LLMStreamRequest
     ) -> AsyncIterator[StreamFrame]:
         target, effective_request = await self._select_target(request)
-        async for frame in target.stream(effective_request):
-            yield frame
+        # Cloud / query-service / default-stream turns: forward frames
+        # untouched (unchanged pass-through). Only on-device turns need the
+        # terminal-frame ordering below.
+        _extra = getattr(effective_request, "extra", None)
+        if not (isinstance(_extra, dict) and _extra.get("__is_local_model__") is True):
+            async for frame in target.stream(effective_request):
+                yield frame
+            return
+        # Terminal-frame ordering (local-daemon correctness): the END frame is
+        # held back and forwarded only AFTER the inner stream has been closed.
+        # A local daemon serves ONE request at a time and the caller treats
+        # END as permission to start the next round -- letting END out while
+        # our HTTP response is still open had the next round open a second
+        # connection to a daemon that was not finished with the first.
+        terminal_frame: StreamFrame | None = None
+        _inner = target.stream(effective_request)
+        try:
+            async for frame in _inner:
+                if frame.frame_type is StreamFrameType.END:
+                    terminal_frame = frame
+                    break
+                yield frame
+        finally:
+            # ``await`` is legal here even while unwinding a GeneratorExit.
+            _aclose = getattr(_inner, "aclose", None)
+            if _aclose is not None:
+                await _aclose()
+        if terminal_frame is not None:
+            yield terminal_frame
 
     async def _select_target(
         self, request: LLMStreamRequest

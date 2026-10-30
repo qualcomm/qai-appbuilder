@@ -23,6 +23,7 @@ from typing import Any
 from qai.model_runtime.application.ports import InferenceServicePort
 from qai.model_runtime.domain.entities import ModelInfo
 from qai.model_runtime.domain.enums import ServiceState
+from qai.platform.errors import PreconditionFailedError
 
 
 class StubInferenceService:
@@ -111,6 +112,14 @@ class StubInferenceService:
     async def load_model(self, model_name: str) -> None:
         self._loaded_model = model_name
         self._append(f"Model loaded: {model_name}")
+
+    async def clear_context(self) -> None:
+        if self._state != ServiceState.RUNNING:
+            raise PreconditionFailedError(
+                "model_runtime.service_not_running",
+                "The inference service is not running; nothing to clear.",
+            )
+        self._append("Service context cleared")
 
     async def get_logs(self) -> list[str]:
         return list(self._logs)

@@ -21,15 +21,20 @@
  * This composable owns NO state — it just wires the existing store + transport
  * + commands singletons. Safe to call from multiple component setups.
  */
+import { useI18n } from "vue-i18n";
+import { useToast } from "@/composables/useToast";
 import { useChatTabsStore } from "@/stores/chatTabs";
 import { useChatTransports } from "@/composables/chat/useChatTransports";
 import { useChatCommands } from "@/composables/chat/useChatCommands";
 import { decideExternalSubmitAction } from "@/composables/chat/usePendingChatSubmit";
+import { ensureLocalModelReady } from "@/composables/chat/ensureLocalModelReady";
 import { useCloudModelStatus } from "@/composables/useCloudModelStatus";
 
 export function useChatTurnSubmit(): {
   submitToTab: (id: string, prompt: string) => Promise<void>;
 } {
+  const { t } = useI18n();
+  const toast = useToast();
   const store = useChatTabsStore();
   const { getTransport } = useChatTransports();
   const chatCommands = useChatCommands();
@@ -102,6 +107,56 @@ export function useChatTurnSubmit(): {
     if (messageId === null) {
       // tab not in idle → no-op (callers guard against this; defensive).
       return;
+    }
+    // Selecting a local model never starts GenieAPIService; it is started here,
+    // when the turn is actually sent. The tab is already `streaming`, so the
+    // user sees the turn in progress while the service comes up.
+    if (modelId.startsWith("local::")) {
+      const localName = modelId.slice("local::".length);
+      // Popup only when the service really has to be started / the model
+      // loaded; an already-ready model sends silently.
+      let startingToast = "";
+      let started = false;
+      let ready: Awaited<ReturnType<typeof ensureLocalModelReady>>;
+      try {
+        ready = await ensureLocalModelReady(localName, {
+          onStarting: () => {
+            started = true;
+            startingToast = toast.push({
+              kind: "info",
+              message: t("models.startingModel", { name: localName }),
+              timeoutMs: 0,
+            });
+          },
+        });
+      } finally {
+        if (startingToast !== "") toast.dismiss(startingToast);
+      }
+      if (started) {
+        if (ready.ok) {
+          toast.success(t("models.modelReady", { name: localName }));
+        } else {
+          toast.error(
+            `${t("models.startFailed")}${ready.message ? `: ${ready.message}` : ""}`,
+          );
+        }
+      }
+      const statusNow = store.tabs.find((tab) => tab.id === id)?.status;
+      if (statusNow === "aborting") {
+        store.confirmAbort(id);
+        return;
+      }
+      if (statusNow !== "streaming") {
+        return;
+      }
+      if (!ready.ok) {
+        store.recordError(id, {
+          type: "service",
+          code: "local_model_start_failed",
+          message: ready.message ?? "GenieAPIService failed to start",
+        });
+        return;
+      }
     }
     const transport = getTransport(id);
     try {

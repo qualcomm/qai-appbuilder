@@ -23,7 +23,7 @@
  * file focused and within the cohesion budget.
  *
  * Tabs:
- *   Local Model   — local_model / models[] (service_config)
+ *   Local Model   — local_model (service_config)
  *   Cloud         — cloud_model / enterprise_cloud_model / cloud_shared (service_config)
  *   Routing       — routing.* (service_config)
  *   Security      — sensitivity_detection / desensitization (service_config)
@@ -39,7 +39,7 @@ import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { apiJson } from "@/api";
 import { useToastStore } from "@/stores/toast";
-import type { ForgeConfigResponse, LocalModelsByFormat, ServiceConfig, ServiceConfigResponse } from "./service-config/types";
+import type { ForgeConfigResponse, ServiceConfig, ServiceConfigResponse } from "./service-config/types";
 import ServiceConfigLocalModelTab from "./service-config/ServiceConfigLocalModelTab.vue";
 import ServiceConfigCloudTab from "./service-config/ServiceConfigCloudTab.vue";
 import ServiceConfigRoutingTab from "./service-config/ServiceConfigRoutingTab.vue";
@@ -135,23 +135,6 @@ const svcCfg = ref<ServiceConfig>({});
 const svcCfgMeta = ref<{ using_default_config: boolean; config_file_path: string } | null>(null);
 const svcCfgSaving = ref(false);
 
-// Available model names from /api/service/models. The backend already tags
-// each entry with its on-disk `format` field (qnn / gguf / mnn — see
-// interfaces/http/routes/model_runtime.py:283-301), so we issue a single
-// request and bucket by format here, rather than racing three concurrent
-// `?format=...` calls (the route does not accept a format query and would
-// return the full set three times). The plain `availableModels` (string
-// list, all formats) is preserved as a backwards-compatible feed for
-// existing tab consumers; `availableModelsByFormat` is the new
-// per-format slice for the LocalModelTab realignment to consume once
-// that tab is updated by the next agent.
-const availableModels = ref<string[]>([]);
-const availableModelsByFormat = ref<LocalModelsByFormat>({
-  qnn: [],
-  gguf: [],
-  mnn: [],
-});
-
 async function loadServiceConfig(): Promise<void> {
   try {
     const data = await apiJson<ServiceConfigResponse>("GET", "/api/config");
@@ -162,62 +145,10 @@ async function loadServiceConfig(): Promise<void> {
   }
 }
 
-async function loadAvailableModels(): Promise<void> {
-  try {
-    const res = await fetch("/api/service/models");
-    if (!res.ok) return;
-    const data = (await res.json()) as {
-      models?: Array<{ name: string; format?: string }> | string[];
-    };
-    if (!Array.isArray(data.models)) return;
-    const buckets: { qnn: string[]; gguf: string[]; mnn: string[] } = { qnn: [], gguf: [], mnn: [] };
-    const flat: string[] = [];
-    for (const m of data.models) {
-      if (typeof m === "string") {
-        flat.push(m);
-        continue;
-      }
-      const name = m.name;
-      if (!name) continue;
-      flat.push(name);
-      const fmt = (m.format ?? "").toLowerCase();
-      if (fmt === "qnn") buckets.qnn.push(name);
-      else if (fmt === "gguf") buckets.gguf.push(name);
-      else if (fmt === "mnn") buckets.mnn.push(name);
-    }
-    availableModels.value = flat;
-    availableModelsByFormat.value = buckets;
-  } catch {
-    // ignore
-  }
-}
-
 // POST service_config.json. Throws on failure so callers can combine it with
 // other saves; does NOT flash status itself.
 async function postServiceConfig(): Promise<void> {
-  // V1 parity (useConfig.js:159-165): before POST, force the 3 fixed model
-  // slots' backend / device / path so the backend resolves each slot to the
-  // correct accelerator (NPU=QNN, GPU=GGUF, CPU=MNN) and on-disk dir
-  // (path === name). Without this the Local Model tab leaves backend/device
-  // as the empty-string defaults (helpers.ts:33) and the service can't load
-  // the selected model.
-  const payload = JSON.parse(JSON.stringify(svcCfg.value)) as ServiceConfig;
-  const SLOT_DEFAULTS: ReadonlyArray<{ backend: string; device: string }> = [
-    { backend: "qnn", device: "npu" },
-    { backend: "GGUF", device: "gpu" },
-    { backend: "mnn", device: "cpu" },
-  ];
-  if (Array.isArray(payload.models)) {
-    payload.models.forEach((slot, i) => {
-      const d = SLOT_DEFAULTS[i];
-      if (d !== undefined) {
-        slot.backend = d.backend;
-        slot.device = d.device;
-      }
-      slot.path = slot.name;
-    });
-  }
-  await apiJson<unknown, { config: typeof payload }>("POST", "/api/config", { config: payload });
+  await apiJson<unknown, { config: ServiceConfig }>("POST", "/api/config", { config: svcCfg.value });
 }
 
 async function saveServiceConfig(): Promise<void> {
@@ -294,7 +225,6 @@ function onHeaderReset(): void {
     void loadServiceConfig();
   } else {
     void loadServiceConfig();
-    void loadAvailableModels();
   }
 }
 
@@ -315,7 +245,6 @@ defineExpose({
 onMounted(() => {
   void loadForgeConfig();
   void loadServiceConfig();
-  void loadAvailableModels();
 });
 
 // V1-parity (`ServiceConfigPanel.js:34-45`) default-config banner click
@@ -373,8 +302,6 @@ function gotoDownloads(): void {
       v-show="activeConfigTab === 'local'"
       :hide-save="true"
       :cfg="svcCfg"
-      :available-models="availableModels"
-      :available-models-by-format="availableModelsByFormat"
       :saving="svcCfgSaving"
       @save="saveServiceConfig"
     />

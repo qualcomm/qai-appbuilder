@@ -174,6 +174,17 @@ export function useModelCatalog(deps: ModelCatalogDeps) {
   const selectedVariant = ref<Record<string, string>>({});
 
   /**
+   * Resolved on-disk paths for a task's already-downloaded `extra_files`
+   * (e.g. a speculative-decoding drafter GGUF), keyed by the same taskId
+   * `startDownload`/`install` use. Populated once every extra file for a
+   * task has finished downloading; consumed by `install()`. Empty for every
+   * model whose variant declares no `extra_files`.
+   */
+  const extraFileSavePaths = ref<
+    Record<string, { filename: string; subdir: string; save_path: string }[]>
+  >({});
+
+  /**
    * Per-task model install lifecycle state (V1 `installModelStatuses`,
    * useDownloadCenter.js: `getInstallModelStatus`). `installing` while the
    * unzip-to-models POST is in flight (the card's done-state row shows a
@@ -284,6 +295,13 @@ export function useModelCatalog(deps: ModelCatalogDeps) {
     const taskId = taskIdFor(m);
     const downloadUrl = variant !== null ? variant.download_url : m.download_url;
     const checksum = variant !== null ? variant.checksum_sha256 : m.checksum_sha256;
+    // Additional raw files (e.g. a speculative-decoding drafter GGUF)
+    // declared by the selected variant. Downloaded sequentially AFTER the
+    // main weight below, reusing this same taskId's progress row / abort
+    // controller — every caller (ModelCard/ModelCardActions) still sees
+    // exactly ONE download per model; the multi-file sequencing is fully
+    // contained in this function.
+    const extraFiles = variant?.extra_files ?? [];
 
     if (deps.aborts.has(taskId)) return;
 
@@ -295,6 +313,12 @@ export function useModelCatalog(deps: ModelCatalogDeps) {
       [taskId]: { ...emptyEntry(taskId), status: "preparing" },
     };
     deps.speedStates.set(taskId, initialSpeedState());
+
+    let mainSavePath = "";
+    // `as` stops TS narrowing this to the literal "preparing": it is only
+    // reassigned inside the `onChunk` closure, which control-flow analysis
+    // does not track.
+    let mainStatus = "preparing" as DownloadStatus;
 
     try {
       await streamModelDownload(
@@ -309,10 +333,68 @@ export function useModelCatalog(deps: ModelCatalogDeps) {
           checksum_sha256: checksum,
         },
         {
-          onChunk: (frame) => mergeFrame(taskId, frame),
+          onChunk: (frame) => {
+            mainStatus = frame.status;
+            if (frame.status === "done") mainSavePath = frame.save_path;
+            // A model with pending extra_files isn't actually finished when
+            // the main weight's own "done" frame arrives — suppress the
+            // local-status refresh / onTerminal toast until the real last
+            // file completes below. A main-file error/cancel still ends the
+            // task right here, so its terminal handling must fire as usual.
+            mergeFrame(taskId, frame, {
+              suppressTerminal: extraFiles.length > 0 && frame.status === "done",
+            });
+          },
         },
         { signal: ctrl.signal },
       );
+
+      if (extraFiles.length > 0 && mainStatus === "done" && !ctrl.signal.aborted) {
+        const resolvedExtras: { filename: string; subdir: string; save_path: string }[] = [];
+        for (const extra of extraFiles) {
+          let extraSavePath = "";
+          let extraStatus = "preparing" as DownloadStatus; // see mainStatus
+          let extraError = "";
+          await streamModelDownload(
+            {
+              model_id: m.model_id,
+              task_id: taskId,
+              download_url: extra.download_url,
+              checksum_sha256: extra.checksum_sha256,
+            },
+            {
+              onChunk: (frame) => {
+                extraStatus = frame.status;
+                if (frame.error) extraError = frame.error;
+                if (frame.status === "done") extraSavePath = frame.save_path;
+                // Keep the ONE visible entry's `save_path` pointing at the
+                // already-resolved main weight throughout — `install()` only
+                // reads the main file's path via the caller-supplied
+                // savePath; extra files' own paths are tracked separately in
+                // `extraFileSavePaths` below.
+                mergeFrame(taskId, { ...frame, save_path: mainSavePath }, { suppressTerminal: true });
+              },
+            },
+            { signal: ctrl.signal },
+          );
+          if (ctrl.signal.aborted || extraStatus !== "done") {
+            const failStatus = ctrl.signal.aborted ? "cancelled" : "error";
+            finaliseTask(
+              taskId,
+              failStatus,
+              ctrl.signal.aborted
+                ? ""
+                : `failed to download ${extra.filename || "extra file"}${extraError ? `: ${extraError}` : ""}`,
+            );
+            deps.onTerminal?.(taskId, failStatus);
+            return;
+          }
+          resolvedExtras.push({ filename: extra.filename, subdir: extra.subdir, save_path: extraSavePath });
+        }
+        extraFileSavePaths.value = { ...extraFileSavePaths.value, [taskId]: resolvedExtras };
+        finaliseTask(taskId, "done", "");
+        deps.onTerminal?.(taskId, "done");
+      }
       void fetchLocalStatus();
     } catch (e) {
       const aborted = ctrl.signal.aborted;
@@ -324,7 +406,11 @@ export function useModelCatalog(deps: ModelCatalogDeps) {
     }
   }
 
-  function mergeFrame(taskId: string, frame: DownloadProgress): void {
+  function mergeFrame(
+    taskId: string,
+    frame: DownloadProgress,
+    opts?: { suppressTerminal?: boolean },
+  ): void {
     const prev = deps.downloads.value[taskId] ?? emptyEntry(taskId);
     let speed_bps = prev.speed_bps;
     let eta_seconds = prev.eta_seconds;
@@ -362,9 +448,10 @@ export function useModelCatalog(deps: ModelCatalogDeps) {
     };
 
     if (
-      frame.status === "done" ||
-      frame.status === "error" ||
-      frame.status === "cancelled"
+      !opts?.suppressTerminal &&
+      (frame.status === "done" ||
+        frame.status === "error" ||
+        frame.status === "cancelled")
     ) {
       void fetchLocalStatus();
       deps.onTerminal?.(taskId, frame.status);
@@ -430,6 +517,12 @@ export function useModelCatalog(deps: ModelCatalogDeps) {
       // matches the key `localStatusFor` looks up by, so both tabs recognise
       // the install. `savePath` points at the specific platform zip the user
       // downloaded; the backend extracts it into `models/<model_id>/`.
+      const taskId = taskIdFor(m);
+      const variant = findVariant(m, selectedVariant.value[m.model_id]);
+      // Already-downloaded extra files (e.g. a speculative-decoding drafter
+      // GGUF) resolved by `startDownload` above; empty for every model whose
+      // variant declares no `extra_files`.
+      const resolvedExtras = extraFileSavePaths.value[taskId] ?? [];
       const res = await apiInstallModel({
         save_path: savePath,
         model_id: m.model_id,
@@ -437,7 +530,9 @@ export function useModelCatalog(deps: ModelCatalogDeps) {
         // The selected platform variant (taskIdFor → variant_id for a
         // multi-platform model). Persisted as a marker so the Installed pill
         // shows the platform label, even though the install dir is shared.
-        variant_id: taskIdFor(m),
+        variant_id: taskId,
+        extra_files: resolvedExtras.length > 0 ? resolvedExtras : undefined,
+        install_config: variant?.install_config ?? undefined,
       });
       {
         const next = { ...installState.value };

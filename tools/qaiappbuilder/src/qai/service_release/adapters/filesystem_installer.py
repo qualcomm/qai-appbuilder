@@ -50,6 +50,7 @@ from qai.service_release.infrastructure.download_paths import DownloadPaths
 from qai.service_release.domain.value_objects import (
     Aria2cInstallStatus,
     Aria2cStatus,
+    ExtraFileInstallSpec,
     LocalItemStatus,
     ModelInstallResult,
     ModelsLocalStatus,
@@ -463,17 +464,19 @@ class FileSystemArtifactInstaller(ArtifactInstallerPort):
     async def install_model(
         self, *, save_path: str, model_id: str, install_dir: str = "",
         variant_id: str = "",
+        extra_files: tuple[ExtraFileInstallSpec, ...] = (),
+        install_config: dict[str, object] | None = None,
     ) -> ModelInstallResult:
-        zip_path = Path(save_path)
+        src_path = Path(save_path)
         models_root = self._paths.models_dir
-        if not zip_path.exists() or zip_path.suffix.lower() != ".zip":
-            # A successful install DELETES the source zip (see
-            # ``_delete_zip_after_install`` below), so a missing zip is
-            # ambiguous: either the caller passed a bad path, or the model is
-            # ALREADY installed and this is a repeat request. Distinguish the
-            # two by looking at the target dir before failing — reporting
-            # "invalid save_path" for an already-installed model told the user
-            # the install had failed when it had in fact succeeded.
+        # A successful install MOVES/DELETES the source file (zip or raw —
+        # see below), so a missing source is ambiguous: either the caller
+        # passed a bad path, or the model is ALREADY installed and this is a
+        # repeat request. Distinguish the two by looking at the target dir
+        # before failing. NB: unlike V1, a missing ``.zip`` suffix alone is
+        # no longer treated as invalid — GGUF models install a raw file
+        # (e.g. ``.gguf``), never a zip.
+        if not src_path.exists():
             existing = self._installed_model_dir(models_root, model_id, install_dir)
             if existing is not None:
                 _LOGGER.info(
@@ -492,21 +495,22 @@ class FileSystemArtifactInstaller(ArtifactInstallerPort):
                 "model_install.invalid_save_path",
                 model_id=model_id,
                 save_path=save_path,
-                zip_exists=zip_path.exists(),
-                suffix=zip_path.suffix.lower(),
+                zip_exists=src_path.exists(),
+                suffix=src_path.suffix.lower(),
                 models_root=str(models_root),
                 install_dir=install_dir,
             )
             raise InstallFailedError(f"invalid save_path: {save_path}")
+        is_zip = src_path.suffix.lower() == ".zip"
         models_root.mkdir(parents=True, exist_ok=True)
         # Defence in depth: the install dir name must be a single, filesystem-
         # safe segment that matches the catalog id the UI looks up by. We
         # sanitise whatever hint the caller gave (the frontend now passes the
         # canonical task id, but a stray display name like "Qwen3 8B" must
         # never again create a space-containing dir that the 3-level local-
-        # status lookup can't match). Falls back to the zip stem.
+        # status lookup can't match). Falls back to the source file's stem.
         dest_name = _safe_dir_segment(install_dir) or _safe_dir_segment(
-            zip_path.stem
+            src_path.stem
         )
         dest_dir = models_root / dest_name
         bak_dir = dest_dir.with_suffix(".bak")
@@ -515,44 +519,93 @@ class FileSystemArtifactInstaller(ArtifactInstallerPort):
                 shutil.rmtree(bak_dir, ignore_errors=True)
             dest_dir.rename(bak_dir)
         try:
-            _extract_zip_to_dir(zip_path, dest_dir, tmp_base=models_root)
+            if is_zip:
+                _extract_zip_to_dir(src_path, dest_dir, tmp_base=models_root)
+            else:
+                # Raw single-file model (e.g. a GGUF weight downloaded
+                # directly, not packaged as a zip). Move it in as-is —
+                # GenieAPIService discovers the main weight via a
+                # non-recursive top-level dir scan, so it must sit directly
+                # under ``dest_dir``, never inside a sub-directory.
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(src_path), str(dest_dir / src_path.name))
+            # Additional raw files (e.g. a speculative-decoding drafter GGUF)
+            # declared by the catalog variant. Placed into their own
+            # sub-directory so they never interfere with the non-recursive
+            # main-weight discovery above; additive — never touches what was
+            # just placed for the main file.
+            for extra in extra_files:
+                extra_src = Path(extra.save_path)
+                if not extra_src.exists():
+                    raise InstallFailedError(
+                        f"invalid extra file save_path: {extra.save_path}"
+                    )
+                target_dir = (
+                    dest_dir / _safe_dir_segment(extra.subdir)
+                    if extra.subdir
+                    else dest_dir
+                )
+                target_dir.mkdir(parents=True, exist_ok=True)
+                target_name = extra.filename or extra_src.name
+                shutil.move(str(extra_src), str(target_dir / target_name))
+            # Optional generated config.json (e.g. wiring up the
+            # speculative-decoding ``draft_model`` block for the file just
+            # placed above). Written last, once every file is in place.
+            if install_config is not None:
+                (dest_dir / "config.json").write_text(
+                    json.dumps(install_config, indent=4, ensure_ascii=False),
+                    encoding="utf-8",
+                )
         except InstallFailedError:
             if bak_dir.exists() and not dest_dir.exists():
                 bak_dir.rename(dest_dir)
             raise
         if bak_dir.exists():
             shutil.rmtree(bak_dir, ignore_errors=True)
-        # Persist which platform variant was installed. A model installs ONE
-        # shared copy under ``models/<model_id>/`` (no platform in the dir
-        # name, so both tabs show a consistent path), but the UI still wants
-        # to label the Installed pill with the platform ("Installed ·
-        # Snapdragon X2 Elite", mirroring ServiceVersionCard). We can't
-        # recover the platform from the flattened dir or the (now-deleted)
-        # zip name, so we drop a tiny marker the scanner reads back. Only
-        # written when the caller actually supplies a ``variant_id`` — empty
-        # ⇒ single-platform / legacy caller, the bare "✓ Installed" pill is
-        # the right degradation. Best-effort: a write failure must not fail
+        # Persist which platform variant AND which catalog model_id this dir
+        # was installed under. The UI still wants to label the Installed pill
+        # with the platform ("Installed - Snapdragon X2 Elite", mirroring
+        # ServiceVersionCard) -- variant_id alone drives that, unchanged.
+        # model_id is new: it lets delete_model's stricter identity check
+        # (require_confirmed_variant, see _model_dirs_matching) prove a
+        # PREFIX-matched dir genuinely belongs to the model_id being
+        # deleted, instead of trusting any dir whose name happens to start
+        # with that model_id as plain text (closes the incident where
+        # deleting catalog id qwen3-8b also rmtree'd an unrelated,
+        # independently-installed qwen3-8b-8480). Always written (best
+        # effort) even without a variant_id -- the scanner only reads back
+        # "variant_id" (.get("variant_id", "")), so adding "model_id" here
+        # does not change the Installed-pill label behaviour for
+        # single-platform / legacy callers; a write failure must not fail
         # the install (the model is already extracted at this point).
         marker_variant = _safe_dir_segment(variant_id)
+        marker_payload: dict[str, str] = {}
+        if model_id:
+            marker_payload["model_id"] = model_id
         if marker_variant:
+            marker_payload["variant_id"] = marker_variant
+        if marker_payload:
             try:
                 (dest_dir / _INSTALL_MARKER).write_text(
-                    json.dumps({"variant_id": marker_variant}),
+                    json.dumps(marker_payload),
                     encoding="utf-8",
                 )
             except OSError:
                 pass
-        zip_deleted = _delete_zip_after_install(zip_path)
-        # Logged because the zip is now GONE: a later repeat request can only be
-        # told apart from a genuinely bad path by the disk state, and without
-        # this line the sequence "installed → zip deleted → repeat POST" left no
-        # server-side trace at all.
+        zip_deleted = _delete_zip_after_install(src_path)
+        for extra in extra_files:
+            _delete_zip_after_install(Path(extra.save_path))
+        # Logged because the source file is now GONE: a later repeat request
+        # can only be told apart from a genuinely bad path by the disk state,
+        # and without this line the sequence "installed → source deleted →
+        # repeat POST" left no server-side trace at all.
         _LOGGER.info(
             "model_install.ok",
             model_id=model_id or dest_name,
             install_path=str(dest_dir),
             variant_id=marker_variant,
             zip_deleted=zip_deleted,
+            extra_files_count=len(extra_files),
         )
         return ModelInstallResult(
             ok=True,
@@ -598,6 +651,56 @@ class FileSystemArtifactInstaller(ArtifactInstallerPort):
                 if sep in ("-", "_", "."):
                     out.append(child)
         return out
+
+    @staticmethod
+    def _is_confirmed_model_dir(child: Path, model_id: str) -> bool:
+        """Is ``child`` provably safe to treat as ``model_id`` for a DELETE?
+
+        Called by :meth:`delete_model` for EVERY prefix-matched dir (any
+        ``child.name != model_id``), regardless of whether an exact-name
+        ``model_id`` sibling also exists on disk -- an exact name match
+        (``child.name == model_id``) is always safe on its own and short-
+        circuits to True immediately below.
+
+        A *prefix* match (the "legacy per-variant layout" case handled by
+        :meth:`_model_dirs_matching`, e.g. ``qwen3-8b-8480`` for a
+        ``qwen3-8b`` request) is NOT safe to accept on its own -- a shorter
+        catalog ``model_id`` can be a plain-text prefix of a completely
+        unrelated, independently-installed directory that merely happens to
+        share it, with or without an exact-name sibling present. Real
+        incident this guards against: deleting catalog id ``qwen3-8b`` also
+        ``rmtree``'d an unrelated, separately-installed ``qwen3-8b-8480``
+        whose real weights were never meant to be touched by that request
+        (small ``config.json``/``genie_config.json`` files vanished first;
+        large locked weight files survived via the retry loop in
+        ``_rmtree_unlocking``, producing the "only config missing" symptom
+        -- this has recurred in practice with NO exact-name sibling present
+        on disk, which is exactly why the old exemption for that case was
+        removed below).
+        We only trust the prefix interpretation when the on-disk
+        ``.qai-install.json`` marker (written by :meth:`install_model`, see
+        ``_INSTALL_MARKER``) proves this dir was installed under this exact
+        ``model_id``. A marker predating the ``model_id`` field (pre-fix
+        installs that only recorded ``variant_id``) has no way to prove or
+        disprove this, so it is trusted best-effort (preserves legacy-variant
+        cleanup for those older installs); a dir with NO marker at all, or
+        one recording a DIFFERENT ``model_id``, is rejected.
+        """
+        if child.name == model_id:
+            return True
+        marker_path = child / _INSTALL_MARKER
+        if not marker_path.is_file():
+            return False
+        try:
+            data = json.loads(marker_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        if not isinstance(data, dict):
+            return False
+        recorded_model_id = data.get("model_id")
+        if recorded_model_id is None:
+            return True  # legacy marker predating this field; best-effort trust
+        return recorded_model_id == model_id
 
     @classmethod
     def _installed_model_dir(
@@ -707,7 +810,39 @@ class FileSystemArtifactInstaller(ArtifactInstallerPort):
         # mirroring the 3-level lookup the scanner/UI use to recognise them.
         # Matching the UI's view (State-Truth-First) avoids the "shows
         # Installed but Delete 404s" desync.
-        install_targets = self._model_dirs_matching(self._paths.models_dir, model_id)
+        #
+        # EVERY prefix match (candidate.name != model_id) must pass
+        # _is_confirmed_model_dir before it is trusted, regardless of whether
+        # an exact-name model_id dir also exists as a sibling. A shorter
+        # catalog model_id can be a plain-text prefix of a completely
+        # unrelated, independently-installed directory that merely happens to
+        # share it -- e.g. deleting catalog id "qwen3-8b" must not also
+        # rmtree a separately-installed "qwen3-8b-8480" sitting right next to
+        # it, EVEN WHEN no exact-name "qwen3-8b" dir is present on disk.
+        # Real incident this guards against: exactly that unconfirmed-prefix,
+        # no-exact-sibling case rmtree'd an unrelated model's install, with
+        # small config.json/genie_config.json files vanishing first and large
+        # locked weight files surviving the retry loop in
+        # _rmtree_unlocking (producing the "only config missing" symptom).
+        # An older revision of this method exempted the no-exact-sibling case
+        # from the marker check entirely (trusted unconditionally); that
+        # exemption is exactly what let the incident above happen and has
+        # been removed -- a prefix match with no marker is now rejected no
+        # matter what else is (or isn't) on disk. Skipped (unconfirmed)
+        # candidates are logged, not silently dropped.
+        matched_targets = self._model_dirs_matching(self._paths.models_dir, model_id)
+        install_targets: list[Path] = []
+        for candidate in matched_targets:
+            if candidate.name != model_id and not self._is_confirmed_model_dir(
+                candidate, model_id
+            ):
+                _LOGGER.warning(
+                    "model_delete.skipped_unconfirmed_prefix_match",
+                    model_id=model_id,
+                    dir=str(candidate),
+                )
+                continue
+            install_targets.append(candidate)
         for install_dir in install_targets:
             try:
                 await asyncio.to_thread(_rmtree_unlocking, install_dir)

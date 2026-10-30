@@ -57,6 +57,13 @@ _MIME_MAP = {
     "webp": "image/webp",
 }
 
+# GenieAPIService's local decode path (stb_image) supports JPEG/PNG/GIF but
+# NOT WebP (see resolve_image_refs_to_vision_blocks docstring). This is
+# _MIME_MAP minus "webp" — the attachment picker (ChatComposer.vue) already
+# restricts local-model uploads to this same set; this is the backend
+# fallback for refs that bypass the picker (drag-drop, paste, direct API).
+_LOCAL_SUPPORTED_IMAGE_EXTS = {"jpg", "jpeg", "png", "gif"}
+
 # ── Cloud-copy image encoding ─────────────────────────────────────────────────
 # The ON-DISK original is ALWAYS kept as-is (full resolution, original format)
 # — the user-facing display (WebUI + WeChat/Feishu) shows THAT. Only the copy
@@ -218,6 +225,7 @@ def resolve_image_refs_to_vision_blocks(
     placeholder_text: str = "请描述这张图片",
     cloud_format: str = _DEFAULT_CLOUD_FORMAT,
     cloud_quality: int = _DEFAULT_CLOUD_QUALITY,
+    is_local_model: bool = False,
 ) -> list[dict[str, Any]]:
     """Resolve image URLs to an OpenAI-Vision content-block list.
 
@@ -226,6 +234,20 @@ def resolve_image_refs_to_vision_blocks(
     references are stripped from ``source_text`` to form a leading text block;
     when nothing remains, ``placeholder_text`` is used so the model still gets
     a textual cue alongside the image(s).
+
+    ``is_local_model=True`` (an on-device ``local::`` turn) skips
+    :func:`_encode_for_cloud` entirely and sends the on-disk bytes/mime
+    UNCHANGED: the local decode path (GenieAPIService's ``stb_image``) does
+    not support WebP, so the ``_encode_for_cloud`` recompression — meant only
+    to shrink the payload for a CLOUD provider — silently produced an
+    undecodable image for every local-model image turn (``stb_image: failed
+    to load image``). Cloud turns are byte-for-byte unaffected.
+
+    ``is_local_model=True`` also skips any ref whose extension is outside
+    :data:`_LOCAL_SUPPORTED_IMAGE_EXTS`, so a WebP that slipped past the
+    frontend's ``accept`` filter (drag-drop, paste, direct API call) is
+    dropped instead of forwarded to a decoder that cannot read it — mirrors
+    ``_audio_refs.py``'s ``_SUPPORTED_EXTS`` skip-and-continue pattern.
 
     Returns ``[]`` when ``store`` is ``None``, no refs resolve to an existing
     file, or any error occurs (best-effort: this never raises so a streaming
@@ -245,17 +267,25 @@ def resolve_image_refs_to_vision_blocks(
             if disk_path is None or not disk_path.exists():
                 continue
             ext = disk_path.suffix.lstrip(".").lower()
+            if is_local_model and ext not in _LOCAL_SUPPORTED_IMAGE_EXTS:
+                continue
             mime = _MIME_MAP.get(ext, "image/jpeg")
             raw_bytes = disk_path.read_bytes()
-            # Recompress the CLOUD copy only (on-disk original is untouched) to
-            # the configured format/quality so it fits the provider's per-image
-            # cap and stays light in context. Applies uniformly to user uploads
-            # AND computer screenshots (both reach the cloud through this path).
-            cloud_bytes, cloud_mime = _encode_for_cloud(
-                raw_bytes, mime, fmt=cloud_format, quality=cloud_quality
-            )
-            b64_str = base64.b64encode(cloud_bytes).decode("ascii")
-            data_url = f"data:{cloud_mime};base64,{b64_str}"
+            if is_local_model:
+                # On-device turn: the local decoder only understands the
+                # original on-disk format (see docstring) — never recompress.
+                out_bytes, out_mime = raw_bytes, mime
+            else:
+                # Recompress the CLOUD copy only (on-disk original is
+                # untouched) to the configured format/quality so it fits the
+                # provider's per-image cap and stays light in context.
+                # Applies uniformly to user uploads AND computer screenshots
+                # (both reach the cloud through this path).
+                out_bytes, out_mime = _encode_for_cloud(
+                    raw_bytes, mime, fmt=cloud_format, quality=cloud_quality
+                )
+            b64_str = base64.b64encode(out_bytes).decode("ascii")
+            data_url = f"data:{out_mime};base64,{b64_str}"
             blocks.append(
                 {"type": "image_url", "image_url": {"url": data_url}}
             )

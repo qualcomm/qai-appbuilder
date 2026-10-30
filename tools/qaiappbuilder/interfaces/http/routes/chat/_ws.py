@@ -710,6 +710,7 @@ async def _run_one_turn(
                 container=container,
                 image_refs=image_refs,
                 prompt_text=prompt,
+                model_id=model_id,
             )
             if vision_blocks:
                 extra["image_content_blocks"] = vision_blocks

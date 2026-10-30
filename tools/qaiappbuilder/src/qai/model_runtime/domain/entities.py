@@ -32,10 +32,12 @@ class ModelInfo:
             route layer); the attribute is spelled ``model_format`` to
             avoid shadowing the builtin while keeping the entity framework
             free.
-        context_length: Context-window size discovered from model metadata
-            (``dialog.context.size`` -> prompt ``context_size`` -> top-level
-            config fields). ``None`` means no authoritative value was
-            found — callers must not fabricate a context window. The
+        context_length: Context-window size read from the GenieAPIService
+            release ``config/<model name>/`` directory (QNN ``config.json``
+            ``dialog.context.size``, GGUF ``prompt.json`` ``context_size``;
+            name matched case-insensitively). ``None`` when that directory
+            has no entry for the model or no authoritative value — callers
+            must not fabricate a context window. The
             ``/api/service/models`` payload appends it under the wire key
             ``context_length`` so the chat model dropdown can show a
             "8K"/"32K" badge for local models (hidden when ``None``).

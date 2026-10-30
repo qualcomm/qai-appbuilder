@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,6 +47,7 @@ from qai.model_runtime.application.ports import (
     ServiceConfigRepositoryPort,
 )
 from qai.model_runtime.application.use_cases import (
+    ClearContextUseCase,
     ClearLogsUseCase,
     GetLogsUseCase,
     GetServiceConfigUseCase,
@@ -105,6 +107,33 @@ class ModelRuntimeServices:
     # only mount the daemon-control routes).
     get_service_config_use_case: GetServiceConfigUseCase | None
     save_service_config_use_case: SaveServiceConfigUseCase | None
+    # Effective models-scan root for ``GET /api/service/models``:
+    # ``models_root_provider()`` when non-empty, else ``default_models_root``.
+    models_root_provider: Callable[[], Awaitable[str]] | None = None
+    default_models_root: str = ""
+    # ``genie_service.root_path`` in the on-disk forge_config.json
+    # (``GET/POST /api/service/install-dir``). ``None`` without data_paths.
+    read_install_dir: Callable[[], str] | None = None
+    write_install_dir: Callable[[str], None] | None = None
+    # Whether the custom GenieAPIService-dir / model-config-file entry is on
+    # (``QAI_LOCAL_MODEL_DEBUG``); the routes refuse the install-dir write and
+    # report the state to the Service page so it can hide the section.
+    local_model_debug: Callable[[], bool] = lambda: False
+    # ``POST /api/service/clear`` — forwards to the daemon's ``/clear``.
+    clear_context_use_case: ClearContextUseCase | None = None
+
+
+def local_model_debug_enabled() -> bool:
+    """True when ``QAI_LOCAL_MODEL_DEBUG`` is set to a truthy value.
+
+    Read on every call (not cached at import) so exporting the variable and
+    restarting the API is the only step needed. Gates the user-pointed
+    GenieAPIService directory and ``service_launch.models_root_path``: both
+    are developer overrides, so a stale value saved earlier must not keep
+    steering normal launches once the variable is gone.
+    """
+    raw = os.environ.get("QAI_LOCAL_MODEL_DEBUG", "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
 
 
 def _read_forge_config(container: "Container") -> dict:
@@ -131,6 +160,37 @@ def _read_forge_config(container: "Container") -> dict:
         return data if isinstance(data, dict) else {}
     except (OSError, json.JSONDecodeError, ValueError):
         return {}
+
+
+def _read_genie_root_path(container: "Container") -> str:
+    """Return the raw ``genie_service.root_path`` from forge_config.json."""
+    gs = _read_forge_config(container).get("genie_service", {})
+    if isinstance(gs, dict):
+        return str(gs.get("root_path", "") or "").strip()
+    return ""
+
+
+def _write_genie_root_path(container: "Container", root_path: str) -> None:
+    """Persist ``genie_service.root_path`` into forge_config.json.
+
+    Same file :func:`_read_forge_config` reads; shallow merge preserving
+    unrelated sections (``JsonForgeDownloadSettings.write_genie_root_path``
+    wire format: ``ensure_ascii=False`` + 2-space indent).
+    """
+    root = getattr(getattr(container, "data_paths", None), "root", None)
+    if root is None:
+        raise RuntimeError("data_paths.root is not configured")
+    cfg_path = Path(root) / "config" / "forge_config.json"
+    data = _read_forge_config(container)
+    gs = data.get("genie_service")
+    if not isinstance(gs, dict):
+        gs = {}
+    gs["root_path"] = root_path
+    data["genie_service"] = gs
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg_path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
 def _resolve_install_dir(container: "Container", configured: str) -> str:
@@ -277,25 +337,33 @@ def _make_models_root_provider(
 ) -> Callable[[], Awaitable[str]]:
     """Build an async callable returning the active models-scan root.
 
-    Design simplification (user mandate 2026-06-07): the models install/scan
-    root is **fixed** to the default ``<data>/models`` and is no longer a
-    user-settable path. The Service Config "models directory" input has been
-    removed from the UI, so there is no longer a way to populate
-    ``service_launch.models_root_path``; this provider therefore always yields
-    ``""`` so the adapter / :class:`GetStatusUseCase` fall back to the static
-    default (``_resolve_default_models_root`` → ``<data>/models``).
-
-    Returning ``""`` (rather than reading the persisted value) makes the fixed
-    default authoritative even if a *stale* ``models_root_path`` lingers in an
-    existing ``forge_config.json`` from before this simplification — the daemon
-    is always launched with the default models root. Injected into the adapter
-    (``-c`` flag selection) and :class:`GetStatusUseCase` (unsafe-path warning)
-    without importing ``qai.user_prefs`` directly.
+    Reads ``service_launch.models_root_path`` on each call. A non-blank value
+    is returned as an absolute path (relative values resolve against the
+    project root ``<data>/..``, same rule as :func:`_make_install_dir_provider`);
+    otherwise ``""`` so the adapter / :class:`GetStatusUseCase` fall back to
+    the static default (``_resolve_default_models_root`` → ``<data>/models``).
+    Injected into the adapter (``-c`` flag selection),
+    :class:`GetStatusUseCase` (unsafe-path warning) and the
+    ``GET /api/service/models`` route without importing ``qai.user_prefs``
+    directly.
     """
+    data_paths = getattr(container, "data_paths", None)
+    data_root = getattr(data_paths, "root", None)
+    project_root = Path(data_root).parent if data_root is not None else None
+
+    def _resolve_abs(raw: str) -> str:
+        p = Path(raw)
+        if p.is_absolute():
+            return str(p)
+        base = project_root if project_root is not None else Path.cwd()
+        return str((base / p).resolve())
 
     async def _provider() -> str:
-        # Fixed default: never honour a persisted ``models_root_path`` override.
-        return ""
+        if not local_model_debug_enabled():
+            return ""
+        service_launch = await _load_service_launch(container)
+        raw = str(service_launch.get("models_root_path") or "").strip()
+        return _resolve_abs(raw) if raw else ""
 
     return _provider
 
@@ -553,6 +621,7 @@ def build_model_runtime_services(
             secret_store=secret_store if service_config_repository is not None else None,
         ),
         stop_service_use_case=StopServiceUseCase(service=service),
+        clear_context_use_case=ClearContextUseCase(service=service),
         probe_service_use_case=ProbeServiceUseCase(service=service),
         get_status_use_case=GetStatusUseCase(
             service=service, models_root_provider=models_root_provider
@@ -566,4 +635,17 @@ def build_model_runtime_services(
         open_service_dir_use_case=OpenServiceDirUseCase(service=service),
         get_service_config_use_case=get_service_config_use_case,
         save_service_config_use_case=save_service_config_use_case,
+        models_root_provider=models_root_provider,
+        default_models_root=default_models_root,
+        read_install_dir=(
+            (lambda: _read_genie_root_path(container))
+            if data_paths is not None
+            else None
+        ),
+        write_install_dir=(
+            (lambda path: _write_genie_root_path(container, path))
+            if data_paths is not None
+            else None
+        ),
+        local_model_debug=local_model_debug_enabled,
     )

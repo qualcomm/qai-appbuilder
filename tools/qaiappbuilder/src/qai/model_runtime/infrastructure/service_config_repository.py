@@ -8,8 +8,8 @@
 Persists the GenieAPIService ``service_config.json`` document and resolves
 its active on-disk location. The **single source of truth** for the runtime
 service config is the copy that ships next to ``GenieAPIService.exe`` inside
-the configured install root — the daemon reads it and
-``ProcessBackedInferenceService._sync_service_config_model`` writes it.
+the configured install root — the daemon reads it and this repository
+is the only writer.
 
 Policy:
 
@@ -29,12 +29,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
 from qai.model_runtime.domain.service_config import (
     default_service_config,
     deep_merge_defaults,
+    strip_legacy_model_slot_keys,
 )
 from qai.platform.config import DataPaths
 from qai.platform.errors import PreconditionFailedError
@@ -43,6 +45,18 @@ logger = logging.getLogger("qai.model_runtime.infrastructure.service_config_repo
 
 # Filename of the runtime service-config document next to GenieAPIService.exe.
 _SERVICE_CONFIG_FILENAME = "service_config.json"
+
+# Suffix of the backup taken before the legacy model-slot keys are stripped
+# (``service_config.json.bak-legacy-models``). Never overwritten, so the very
+# first pre-migration copy survives.
+_LEGACY_BACKUP_SUFFIX = ".bak-legacy-models"
+
+# Suffix of the marker recording that the one-time legacy model-slot migration
+# has completed for this install (``service_config.json.legacy-models-migrated``).
+# While it exists the migration neither reads nor writes service_config.json,
+# so a ``models[]`` the user hand-writes later (a real daemon capability) is
+# never stripped again.
+_LEGACY_MIGRATED_MARKER_SUFFIX = ".legacy-models-migrated"
 
 # Error code surfaced when a save is attempted while GenieAPIService is not
 # installed (no exe-dir config to write). Mapped to HTTP 412 by the unified
@@ -153,6 +167,131 @@ class FileServiceConfigRepository:
             encoding="utf-8",
         )
 
+    @staticmethod
+    def strip_legacy_model_slots(*, path: str | Path | None) -> list[str]:
+        """One-time migration: strip the retired ``models`` / ``default_model`` keys.
+
+        See :data:`~qai.model_runtime.domain.service_config.LEGACY_MODEL_SLOT_KEYS`
+        for why stale slots must not reach the daemon. Meant to run right
+        before a daemon spawn on the exact file the daemon reads
+        (``<install_dir>/service_config.json``) — never from a read-only GET.
+        Static (no repository state) so the spawn path can call it without
+        a ``DataPaths``-bound instance.
+
+        Runs at most once per install, tracked by the marker
+        ``service_config.json.legacy-models-migrated`` next to the file:
+
+        - Marker present: no-op without reading or writing the config;
+          returns ``[]``. Multi-model slots are a real daemon capability, so
+          a ``models[]`` the user writes after the migration is preserved.
+        - Not installed, file missing/unreadable/unparsable/not an object:
+          no write and **no marker** (retried on the next spawn); ``[]``.
+        - Already clean: no write, mtime untouched, marker written; ``[]``.
+        - Otherwise the original bytes are first copied to
+          ``service_config.json.bak-legacy-models`` (only if that backup does
+          not exist yet), then the document is rewritten without the keys:
+          UTF-8 without BOM, the file's own indent width and newline style,
+          via a temp file + ``os.replace`` so the daemon never reads a
+          half-written file; the marker is written afterwards. Returns the
+          removed keys. A failed rewrite writes no marker (retried next spawn).
+
+        Failures are logged and swallowed: a stale config must never block the
+        daemon from starting. A marker-write failure is logged only; the next
+        spawn re-runs the strip. For the common case (nothing changed on disk
+        in between) that rerun finds the keys already gone and is a true
+        no-op (lands in the "already clean" branch above). The one exception:
+        if the USER deliberately writes ``models[]`` back during the window
+        before the marker exists, the rerun does not know that and strips it
+        again — a real, if rare, cost of the marker write having failed. The
+        same gap applies to the "no marker" branch above (missing /
+        unreadable / unparsable file): a ``models[]`` the user writes into a
+        freshly (re)created file before the next spawn is likewise stripped
+        once, retroactively, the first time this method can actually parse it.
+        """
+        if not path:
+            return []
+        effective = Path(path)
+        marker = effective.with_name(effective.name + _LEGACY_MIGRATED_MARKER_SUFFIX)
+        if marker.exists():
+            logger.debug(
+                "service_config.legacy_model_slots_skipped path=%s reason=already_migrated "
+                "marker=%s",
+                effective,
+                marker,
+            )
+            return []
+        try:
+            raw_bytes = effective.read_bytes()
+        except FileNotFoundError:
+            return []
+        except OSError as exc:
+            logger.warning(
+                "service_config.legacy_model_slots_skipped path=%s reason=read_failed error=%s",
+                effective,
+                exc,
+            )
+            return []
+        try:
+            text = raw_bytes.decode("utf-8-sig")
+            doc = json.loads(text)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            logger.warning(
+                "service_config.legacy_model_slots_skipped path=%s reason=parse_failed error=%s",
+                effective,
+                exc,
+            )
+            return []
+        if not isinstance(doc, dict):
+            logger.warning(
+                "service_config.legacy_model_slots_skipped path=%s reason=not_an_object",
+                effective,
+            )
+            return []
+        removed = strip_legacy_model_slot_keys(doc)
+        if not removed:
+            _write_migrated_marker(marker, config_path=effective, removed=[])
+            return []
+
+        backup = effective.with_name(effective.name + _LEGACY_BACKUP_SUFFIX)
+        tmp = effective.with_name(effective.name + ".tmp-legacy-models")
+        try:
+            backup_created = False
+            if not backup.exists():
+                backup.write_bytes(raw_bytes)
+                backup_created = True
+            newline = "\r\n" if "\r\n" in text else "\n"
+            body = json.dumps(doc, indent=_detect_indent(text), ensure_ascii=False)
+            if newline != "\n":
+                body = body.replace("\n", newline)
+            if text.endswith(("\n", "\r\n")):
+                body += newline
+            tmp.write_bytes(body.encode("utf-8"))
+            os.replace(tmp, effective)
+        except OSError as exc:
+            logger.warning(
+                "service_config.legacy_model_slots_skipped path=%s reason=write_failed "
+                "removed=%s error=%s",
+                effective,
+                removed,
+                exc,
+            )
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return []
+        logger.info(
+            "service_config.legacy_model_slots_stripped path=%s removed=%s "
+            "backup=%s backup_created=%s marker=%s",
+            effective,
+            removed,
+            backup,
+            backup_created,
+            marker,
+        )
+        _write_migrated_marker(marker, config_path=effective, removed=removed)
+        return removed
+
     # ------------------------------------------------------------------
     # Internal helpers (V1 parity)
     # ------------------------------------------------------------------
@@ -200,6 +339,42 @@ class FileServiceConfigRepository:
             return None
 
         return _search(root, max_depth)
+
+
+def _write_migrated_marker(marker: Path, *, config_path: Path, removed: list[str]) -> None:
+    """Record that the one-time legacy-slot migration completed (best effort)."""
+    try:
+        marker.write_text(
+            json.dumps({"migration": "legacy_model_slots", "removed": removed}) + "\n",
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        logger.warning(
+            "service_config.legacy_model_slots_marker_write_failed path=%s marker=%s "
+            "error=%s",
+            config_path,
+            marker,
+            exc,
+        )
+        return
+    logger.info(
+        "service_config.legacy_model_slots_migrated path=%s marker=%s removed=%s",
+        config_path,
+        marker,
+        removed,
+    )
+
+
+def _detect_indent(text: str) -> int:
+    """Indent width of the first indented line in *text* (default 4, V1 format)."""
+    for line in text.splitlines()[1:]:
+        stripped = line.lstrip(" ")
+        if stripped and len(stripped) != len(line):
+            return len(line) - len(stripped)
+    return 4
+
+
+__all__ = ["FileServiceConfigRepository"]
 
 
 __all__ = ["FileServiceConfigRepository"]

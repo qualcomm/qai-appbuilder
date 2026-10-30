@@ -102,7 +102,6 @@ const chat = {
     stopFailed: "停止請求未送達",
   },
   activeMarker: "▶=當前會話",
-  autoStartFailed: "\n\n⚠️ 自動啟動失敗：{msg}",
   backendCompactFailed: "❌ 後端歷史裁剪失敗：{msg}",
   cancel: "取消",
   clearBtn: "清除",

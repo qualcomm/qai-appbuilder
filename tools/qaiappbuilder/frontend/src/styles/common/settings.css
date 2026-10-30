@@ -360,7 +360,7 @@
   -webkit-tap-highlight-color: transparent;
   position: relative;
 }
-.mode-btn:not(.active):not(.mode-btn-disabled):hover {
+.mode-btn:not(.active):hover {
   background: var(--bg-hover);
   border-color: var(--border-light);
   transform: scale(1.1);
@@ -397,12 +397,6 @@
 }
 .mode-btn.active.mode-both .mode-btn-icon { color: #9c94ff; }
 
-/* Disabled state (NPU modes for non-NPU skills) */
-.mode-btn.mode-btn-disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
-  pointer-events: none;
-}
 
 /* ── Skill Footer ────────────────────────────────────────────────────────── */
 .skill-footer {

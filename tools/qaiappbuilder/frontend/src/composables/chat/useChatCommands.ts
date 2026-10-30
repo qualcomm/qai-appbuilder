@@ -29,8 +29,9 @@
  *     fans out to /api/service/models (local) +
  *     /api/model-catalog/cloud-models (cloud) + /api/service/status
  *     (running flag) — see useChatModelList.ts for V1 parity rationale.
- *   POST   /api/service/load-model body { model_name } — auto-load a
- *     local model on `/model <id>` (V1 `useChat.js:1697-1716`).
+ *   Local models are no longer auto-loaded on `/model <id>`: loading now
+ *     happens lazily when the user actually sends a message (see
+ *     `ensureLocalModelReady` in `useChatTurnSubmit.ts`).
  *   POST   /api/system/reboot
  *
  * Command messages are display-only: `store.appendCommandMessage` pushes
@@ -40,10 +41,8 @@
  */
 import { useI18n } from "vue-i18n";
 import { apiJson } from "@/api";
-import { loadServiceModel } from "@/api/serviceControl";
 import { saveChatModelPreference } from "@/composables/chat/useChatModelPreference";
 import { resumeConversationIfRunning } from "@/composables/chat/useActiveChatRunAttach";
-import { useForgeConfig } from "@/composables/useForgeConfig";
 import { useReboot } from "@/composables/useReboot";
 import { IS_INTERNAL } from "@/edition";
 import { fmtTokenCount } from "@/utils/contextBadge";
@@ -101,10 +100,6 @@ export function useChatCommands() {
   const conversations = useConversationsStore();
   const toast = useToastStore();
   const modelList = useChatModelList();
-  // V1 parity (useChat.js:1698): the `/model` auto-load is LOCAL-host-mode
-  // only — in REMOTE mode the daemon switches models server-side, so the
-  // client must not issue a local load-model. Read host_mode from forge.config.
-  const { config: forgeConfig } = useForgeConfig();
   const { requestRebootDirect } = useReboot();
 
   // ── helpers ────────────────────────────────────────────────────────────────
@@ -701,36 +696,10 @@ export function useChatCommands() {
     // V1 parity (useChat.js:1687-1694): persist the global selection so a
     // refresh / new session restores it.
     saveChatModelPreference(found.model_id, found.provider);
-    let replyText = t("chat.modelSwitched", { modelId: found.model_id });
-    // V1 auto-load (useChat.js:1697-1716): if a local model is selected
-    // and isn't currently running, kick off `load-model` on the daemon
-    // and append the resulting message to the reply. Cloud picks never
-    // touch the local daemon. V1 parity (#7): only in LOCAL host mode — in
-    // REMOTE mode the daemon lives on another machine and switches models
-    // server-side on the next request, so the client must not load-model.
-    const hostMode =
-      ((forgeConfig.value?.service_launch as
-        | Record<string, unknown>
-        | undefined)?.host_mode as string | undefined) ?? "local";
-    if (found.is_local && !found.is_running && hostMode === "remote") {
-      replyText += "\n\n" + t("models.remoteModelSelected", { name: found.name });
-    } else if (found.is_local && !found.is_running) {
-      try {
-        // V1 stripped a "<format>::" prefix from `model_id` before
-        // sending; V2 locals don't carry such a prefix (model_id ===
-        // name), but we keep the V1 split-on-"::" defensive logic so
-        // callers passing a fully-qualified id still work.
-        const modelName = found.model_id.includes("::")
-          ? found.model_id.split("::").slice(1).join("::")
-          : found.name;
-        await loadServiceModel({ model_name: modelName });
-        replyText += "\n\n" + t("chat.modelRunning");
-      } catch (le) {
-        const lmsg = le instanceof Error ? le.message : String(le);
-        replyText += t("chat.autoStartFailed", { msg: lmsg });
-      }
-    }
-    reply(tab.id, replyText);
+    // Local models are no longer auto-loaded here: loading now happens
+    // lazily when the user actually sends a message (see
+    // `ensureLocalModelReady` in `useChatTurnSubmit.ts`), not at `/use` time.
+    reply(tab.id, t("chat.modelSwitched", { modelId: found.model_id }));
   }
 
   function cmdHelp(tab: ChatTab): void {

@@ -124,9 +124,22 @@ const isRecommended = computed<boolean>(() =>
 
 const isStable = computed<boolean>(() => props.model.tags.includes("stable"));
 
-/** Tags shown as generic pills (excluding recommended / stable). */
+/**
+ * Catalogued but not yet downloadable: the entry stays visible (so users can
+ * read what is coming) while the download action is greyed out and relabelled
+ * "coming soon". Driven by the catalog `tags` array so flipping a model on/off
+ * is a data-only change in `model_catalog.json` — no code/schema edit.
+ */
+const isComingSoon = computed<boolean>(() =>
+  props.model.tags.includes("coming_soon"),
+);
+
+/** Tags shown as generic pills (excluding recommended / stable / coming_soon). */
 const extraTags = computed<string[]>(() =>
-  props.model.tags.filter((tag) => tag !== "recommended" && tag !== "stable"),
+  props.model.tags.filter(
+    (tag) =>
+      tag !== "recommended" && tag !== "stable" && tag !== "coming_soon",
+  ),
 );
 
 /**
@@ -564,6 +577,7 @@ function onToggleDetail(): void {
       :install-path-unsafe="installPathUnsafe"
       :is-any-downloading="isAnyDownloading"
       :start-label="startLabel"
+      :coming-soon="isComingSoon"
       :downloaded="isDownloaded"
       :downloaded-save-path="downloadedSavePath"
       :install-state="installState ?? null"

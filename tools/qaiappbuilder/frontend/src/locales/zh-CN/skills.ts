@@ -47,7 +47,6 @@ const skills = {
   modeResultOff: "已禁用",
   noSkills: "未找到技能",
   noSkillsHint: "创建 skills/ 目录并添加 SKILL.md 文件即可开始使用。",
-  npuDisabledHint: "需要在 SKILL.md 的 tags 行末尾加「.」才能启用本地模型",
   npuOptimized: "NPU 优化",
   reloadFailed: "重新加载失败: ",
   reloaded: "Skills 已重新加载",

@@ -234,6 +234,18 @@ class StreamFrameType(str, Enum):
     # enum growth — existing values unchanged; SSE/WS adapters blind-forward
     # it (no enum whitelist), so no transport edit is needed.
     INJECT_AS_NEW_TURN = "inject_as_new_turn"
+    # -- Upstream liveness pulse (internal, never reaches a transport) -------
+    # Emitted ONLY by on-device adapters (``LocalModelStreamAdapter._run()``)
+    # when the daemon sends a status/keep-alive SSE frame (``status``
+    # non-null, ``delta.content`` empty -- e.g. a prefill heartbeat during a
+    # long pure-prefill phase with zero generated tokens). It proves the
+    # upstream is alive but carries no user-visible content and is NOT one of
+    # the "meaningful" frame types in ``_stream_guards.is_meaningful_stream_
+    # frame()``. ``_stream_guards.abortable_frames()`` special-cases it: it
+    # resets the inter-frame stall watchdog and DROPS the frame, so no other
+    # consumer (``_drain_main_stream``, ``agent_tool.py``, SSE/WS
+    # serialisers) ever sees it. AGENTS.md 3.1: tail-only enum growth.
+    LIVENESS_PULSE = "liveness_pulse"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1824,6 +1836,36 @@ class StreamFrame:
             frame_type=StreamFrameType.INJECT_AS_NEW_TURN,
             sequence=sequence,
             payload={"texts": list(texts)},
+        )
+
+    @classmethod
+    def liveness_pulse(
+        cls,
+        *,
+        frame_id: str,
+        sequence: int,
+        status: str | None = None,
+    ) -> StreamFrame:
+        """Factory for an internal-only ``liveness_pulse`` frame.
+
+        See :attr:`StreamFrameType.LIVENESS_PULSE`: this frame NEVER reaches a
+        transport or a use-case consumer -- ``_stream_guards.abortable_frames()``
+        consumes it to reset the stall watchdog and drops it. ``status``
+        (optional) is the upstream's own lifecycle marker, carried through
+        purely for diagnostics.
+        """
+        payload: dict[str, Any] = {}
+        if status is not None:
+            if not isinstance(status, str):
+                raise TypeError(
+                    f"status must be str, got {type(status).__name__}"
+                )
+            payload["status"] = status
+        return cls(
+            frame_id=frame_id,
+            frame_type=StreamFrameType.LIVENESS_PULSE,
+            sequence=sequence,
+            payload=payload,
         )
 
 

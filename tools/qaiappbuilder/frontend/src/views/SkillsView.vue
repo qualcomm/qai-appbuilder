@@ -133,14 +133,8 @@ function hasIconUrl(skill: Skill): boolean {
   return !!skill.icon && /^\/?api\/|^https?:|^\//.test(skill.icon);
 }
 
-/** local / both modes require NPU optimization (V1 SkillManager rule). */
-function modeDisabled(
-  skill: Skill,
-  mode: "off" | "cloud" | "local" | "both",
-): boolean {
-  if (mode === "local" || mode === "both") return !skill.npu_optimized;
-  return false;
-}
+// `npu_optimized` remains an NPU badge/filter signal; runtime context sizing
+// now decides whether local-capable modes can run instead of an author marker.
 
 function handleSetMode(
   skillId: string,
@@ -365,7 +359,7 @@ onMounted(() => {
         <!-- Separator -->
         <hr class="skill-card-divider" />
 
-        <!-- Mode selector: 4 pill buttons (V1: off / cloud / local-NPU / both) -->
+        <!-- Mode selector: 4 pill buttons (off / cloud / local / both) -->
         <div class="skill-mode-selector">
           <button
             type="button"
@@ -390,8 +384,8 @@ onMounted(() => {
           <button
             type="button"
             class="mode-btn mode-local"
-            :class="{ active: effectiveMode(skill) === 'local', 'mode-btn-disabled': modeDisabled(skill, 'local') }"
-            :title="modeDisabled(skill, 'local') ? t('skills.npuDisabledHint') : t('skills.btnLocalTitle')"
+            :class="{ active: effectiveMode(skill) === 'local' }"
+            :title="t('skills.btnLocalTitle')"
             @click="handleSetMode(skill.id, 'local')"
           >
             <span class="mode-btn-icon">⬡</span>
@@ -400,8 +394,8 @@ onMounted(() => {
           <button
             type="button"
             class="mode-btn mode-both"
-            :class="{ active: effectiveMode(skill) === 'both', 'mode-btn-disabled': modeDisabled(skill, 'both') }"
-            :title="modeDisabled(skill, 'both') ? t('skills.npuDisabledHint') : t('skills.btnBothTitle')"
+            :class="{ active: effectiveMode(skill) === 'both' }"
+            :title="t('skills.btnBothTitle')"
             @click="handleSetMode(skill.id, 'both')"
           >
             <span class="mode-btn-icon">⚡</span>

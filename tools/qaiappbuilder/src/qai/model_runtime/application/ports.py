@@ -75,6 +75,15 @@ class InferenceServicePort(Protocol):
         """Load or switch to *model_name* in the running daemon."""
         ...
 
+    async def clear_context(self) -> None:
+        """Ask the running daemon to clear its conversation/context state.
+
+        Calls the daemon's ``POST /clear``. Must be re-entrancy safe: a second
+        call while one is in flight raises ``ServiceClearBusyError``; calling
+        while the daemon is not running raises ``PreconditionFailedError``.
+        """
+        ...
+
     async def get_logs(self) -> list[str]:
         """Return recent log lines from the daemon."""
         ...

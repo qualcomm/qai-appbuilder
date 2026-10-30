@@ -161,6 +161,15 @@ async def abortable_frames(
                 frame = task.result()
             except StopAsyncIteration:
                 return
+            if frame.frame_type is StreamFrameType.LIVENESS_PULSE:
+                # Internal keep-alive from an on-device adapter (e.g. the
+                # daemon's prefill heartbeat during a long pure-prefill
+                # phase with zero generated tokens). Proves the upstream is
+                # alive, so it resets the stall watchdog like a meaningful
+                # frame would -- but it carries no content and no consumer
+                # needs it, so it is swallowed here, never yielded.
+                _since_last_frame = 0.0
+                continue
             if is_meaningful_stream_frame(frame):
                 _since_last_frame = 0.0
             yield frame

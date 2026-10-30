@@ -112,6 +112,7 @@ _CODE_TO_DISPOSITION: dict[str, str] = {
     "chat.llm.connect_error": DISPOSITION_NETWORK_WAIT,
     "chat.llm.timeout": DISPOSITION_NETWORK_WAIT,
     "chat.llm.read_error": DISPOSITION_NETWORK_WAIT,
+    "chat.local.service_loading": DISPOSITION_NETWORK_WAIT,
     # ── bounded_server (upstream 5xx) ──
     "chat.llm.server_error": DISPOSITION_BOUNDED_SERVER,
     # ── server_time (throttling / rate-limit) ──

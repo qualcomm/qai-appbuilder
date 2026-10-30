@@ -24,8 +24,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import re
+import threading
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 
@@ -44,6 +47,8 @@ from qai.service_release.domain.value_objects import (
 logger = logging.getLogger("qai.service_release.download_engine")
 
 _CHUNK_SIZE = 65536
+_HASH_READ_SIZE = 4 * 1024 * 1024
+_VERIFY_REPORT_INTERVAL_S = 1.0
 
 # Outer stall watchdog (2026-06-19): if ``downloaded`` does not advance for
 # this many seconds AND the file size on disk also does not change, treat the
@@ -55,6 +60,9 @@ _CHUNK_SIZE = 65536
 # "tolerate a slow connection blip" and "don't make users wait minutes on a
 # truly dead download".
 _STALL_TIMEOUT = 180.0
+# A stalled task is removed and re-queued (aria2 resumes from the .aria2
+# control file) this many times before the download is reported as failed.
+_STALL_MAX_RESUMES = 2
 
 
 def _filename_from_url(url: str) -> str:
@@ -62,12 +70,110 @@ def _filename_from_url(url: str) -> str:
     return name or "download"
 
 
-def _sha256_file(path: Path) -> str:
+def _sha256_file(
+    path: Path,
+    progress: list[int] | None = None,
+    stop: threading.Event | None = None,
+) -> str:
     h = hashlib.sha256()
-    with path.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(_CHUNK_SIZE), b""):
-            h.update(chunk)
+    buf = bytearray(_HASH_READ_SIZE)
+    view = memoryview(buf)
+    done = 0
+    with path.open("rb", buffering=0) as fh:
+        while True:
+            n = fh.readinto(view)
+            if not n:
+                break
+            h.update(view[:n])
+            done += n
+            if progress is not None:
+                progress[0] = done
+            if stop is not None and stop.is_set():
+                raise InterruptedError("checksum verification aborted")
     return h.hexdigest()
+
+
+async def _sha256_with_progress(path: Path) -> AsyncIterator[float | str]:
+    """Hash ``path`` off-loop, yielding the done fraction (``float``) about
+    once a second and finally the hex digest (``str``)."""
+    try:
+        total = path.stat().st_size
+    except OSError:
+        total = 0
+    progress = [0]
+    stop = threading.Event()
+    task = asyncio.ensure_future(
+        asyncio.to_thread(_sha256_file, path, progress, stop)
+    )
+    try:
+        yield 0.0
+        while True:
+            finished, _ = await asyncio.wait(
+                {task}, timeout=_VERIFY_REPORT_INTERVAL_S
+            )
+            if finished:
+                break
+            yield progress[0] / total if total > 0 else 0.0
+        yield task.result()
+    finally:
+        stop.set()
+        if not task.done():
+            task.add_done_callback(lambda t: t.cancelled() or t.exception())
+
+
+def _verify_hint(fraction: float) -> str:
+    return f"Verifying file integrity... {int(fraction * 100)}%"
+
+
+_HF_HOSTS = ("huggingface.co", "hf-mirror.com")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+async def _resolve_live_checksum(
+    client_factory: type[httpx.AsyncClient],
+    download_url: str,
+    fallback: str,
+    proxy: str = "",
+) -> str:
+    """Ask Hugging Face for the file's CURRENT LFS sha256.
+
+    The ``/resolve/`` endpoint answers a HEAD with ``X-Linked-Etag`` (the LFS
+    sha256) without following the redirect. A catalog value pinned at release
+    time goes stale the moment the upstream file is re-uploaded; the live value
+    cannot. Any failure (network, non-LFS file, other host) returns
+    ``fallback`` so the catalog value still applies.
+    """
+    try:
+        parsed = urlparse(download_url)
+    except ValueError:
+        return fallback
+    host = (parsed.hostname or "").lower()
+    if host not in _HF_HOSTS or "/resolve/" not in parsed.path:
+        return fallback
+    try:
+        async with client_factory(
+            timeout=httpx.Timeout(15, connect=10),
+            follow_redirects=False,
+            **({"proxy": proxy} if proxy else {}),
+        ) as client:
+            resp = await client.head(download_url)
+        etag = (resp.headers.get("x-linked-etag") or "").strip().strip('"')
+        if etag.lower().startswith("w/"):
+            etag = etag[2:].strip('"')
+        etag = etag.lower()
+    except Exception as exc:  # noqa: BLE001 - never break a download on lookup
+        logger.warning("live checksum lookup failed (%s); using catalog value", exc)
+        return fallback
+    if not _SHA256_RE.match(etag):
+        return fallback
+    if fallback.strip() and etag != fallback.strip().lower():
+        logger.warning(
+            "catalog checksum is stale for %s: catalog=%s live=%s; using live",
+            parsed.path.rsplit("/", 1)[-1],
+            fallback.strip(),
+            etag,
+        )
+    return etag
 
 
 class HttpxDownloadEngine(DownloadEnginePort):
@@ -156,6 +262,9 @@ class HttpxDownloadEngine(DownloadEnginePort):
         save_dir.mkdir(parents=True, exist_ok=True)
         filename = _filename_from_url(download_url)
         save_path = save_dir / filename
+        checksum_sha256 = await _resolve_live_checksum(
+            self._client_factory, download_url, checksum_sha256, self._proxy_url()
+        )
 
         cancel = asyncio.Event()
         self._cancels[task_id] = cancel
@@ -306,6 +415,7 @@ class HttpxDownloadEngine(DownloadEnginePort):
                 loop = asyncio.get_running_loop()
                 last_progress_bytes = 0
                 last_progress_at = loop.time()
+                stall_resumes = 0
 
                 while True:
                     await asyncio.sleep(POLL_INTERVAL)
@@ -353,6 +463,30 @@ class HttpxDownloadEngine(DownloadEnginePort):
 
                         if aria2_status == "error":
                             err = task_status.get("errorMessage", "Unknown aria2c error")
+                            if downloaded > 0 and stall_resumes < _STALL_MAX_RESUMES:
+                                # Mid-download failures (e.g. the signed CDN redirect
+                                # expired -> 403/429) are fixed by re-queuing the ORIGINAL
+                                # url: it redirects again with a fresh signature, and the
+                                # .aria2 control file keeps the bytes already fetched.
+                                stall_resumes += 1
+                                logger.warning(
+                                    "aria2c error at %d/%d bytes (%s); re-queuing "
+                                    "original url (attempt %d/%d)",
+                                    downloaded,
+                                    total,
+                                    err,
+                                    stall_resumes,
+                                    _STALL_MAX_RESUMES,
+                                )
+                                await asyncio.sleep(5.0)
+                                readd = await daemon.rpc(
+                                    client, "aria2.addUri", [[download_url], options]
+                                )
+                                new_gid = readd.get("result", "") if isinstance(readd, dict) else ""
+                                if new_gid:
+                                    gid = new_gid
+                                    last_progress_at = loop.time()
+                                    continue
                             yield frame(
                                 DownloadStatus.ERROR,
                                 downloaded=downloaded,
@@ -380,16 +514,39 @@ class HttpxDownloadEngine(DownloadEnginePort):
                             last_progress_bytes = progress_marker
                             last_progress_at = loop.time()
                         elif loop.time() - last_progress_at >= _STALL_TIMEOUT:
+                            snapshot = await self._aria2_snapshot(daemon, client, gid)
                             logger.warning(
                                 "aria2c download stalled %.0fs without progress; "
-                                "removing task gid=%s",
+                                "removing task gid=%s at %d/%d bytes; aria2 state: %s",
                                 _STALL_TIMEOUT,
                                 gid,
+                                downloaded,
+                                total,
+                                snapshot,
                             )
                             try:
                                 await daemon.rpc(client, "aria2.remove", [gid])
                             except Exception:  # noqa: BLE001
                                 pass
+                            if stall_resumes < _STALL_MAX_RESUMES:
+                                # The .aria2 control file survives the remove, so
+                                # re-adding the same URI resumes from the break
+                                # point instead of failing the whole download.
+                                stall_resumes += 1
+                                logger.warning(
+                                    "resuming stalled download (attempt %d/%d)",
+                                    stall_resumes,
+                                    _STALL_MAX_RESUMES,
+                                )
+                                await asyncio.sleep(2.0)
+                                readd = await daemon.rpc(
+                                    client, "aria2.addUri", [[download_url], options]
+                                )
+                                new_gid = readd.get("result", "") if isinstance(readd, dict) else ""
+                                if new_gid:
+                                    gid = new_gid
+                                    last_progress_at = loop.time()
+                                    continue
                             yield frame(
                                 DownloadStatus.ERROR,
                                 downloaded=downloaded,
@@ -420,7 +577,17 @@ class HttpxDownloadEngine(DownloadEnginePort):
 
         # Checksum verification (V1 :598-618).
         if checksum_sha256.strip() and save_path.exists():
-            actual = await asyncio.to_thread(_sha256_file, save_path)
+            actual = ""
+            async for item in _sha256_with_progress(save_path):
+                if isinstance(item, str):
+                    actual = item
+                else:
+                    yield frame(
+                        DownloadStatus.PREPARING,
+                        downloaded=downloaded,
+                        total=total,
+                        error=_verify_hint(item),
+                    )
             if actual.lower() != checksum_sha256.strip().lower():
                 save_path.unlink(missing_ok=True)
                 yield frame(
@@ -438,6 +605,33 @@ class HttpxDownloadEngine(DownloadEnginePort):
             downloaded=downloaded,
             total=total if total > 0 else downloaded,
         )
+
+    @staticmethod
+    async def _aria2_snapshot(daemon, client, gid: str) -> str:
+        """Best-effort one-line description of a task's live state for the
+        stall log (speed / connections / per-server rates). Never raises."""
+        parts: list[str] = []
+        try:
+            st = await daemon.rpc(
+                client,
+                "aria2.tellStatus",
+                [gid, ["status", "downloadSpeed", "connections", "numSeeders", "errorCode"]],
+            )
+            parts.append(f"status={st.get('result')}")
+        except Exception as exc:  # noqa: BLE001
+            parts.append(f"status_rpc_failed={exc!r}")
+        try:
+            sv = await daemon.rpc(client, "aria2.getServers", [gid])
+            servers = []
+            for f in sv.get("result") or []:
+                for s in f.get("servers") or []:
+                    servers.append(
+                        f"{s.get('currentUri', '')[:60]}@{s.get('downloadSpeed', '?')}B/s"
+                    )
+            parts.append(f"servers={servers[:8]} (n={len(servers)})")
+        except Exception as exc:  # noqa: BLE001
+            parts.append(f"servers_rpc_failed={exc!r}")
+        return "; ".join(parts)
 
     # ── httpx path (single-connection fallback) ───────────────────────────
 
@@ -519,7 +713,21 @@ class HttpxDownloadEngine(DownloadEnginePort):
 
         # Checksum verification (V1: delete + error on mismatch).
         if checksum_sha256.strip():
-            actual = await asyncio.to_thread(_sha256_file, save_path)
+            actual = ""
+            async for item in _sha256_with_progress(save_path):
+                if isinstance(item, str):
+                    actual = item
+                else:
+                    yield DownloadProgress(
+                        task_id=task_id,
+                        filename=filename,
+                        downloaded_bytes=downloaded,
+                        total_bytes=total,
+                        status=DownloadStatus.PREPARING,
+                        error=_verify_hint(item),
+                        save_path=str(save_path),
+                        engine=DownloadEngineKind.HTTPX,
+                    )
             if actual.lower() != checksum_sha256.strip().lower():
                 try:
                     save_path.unlink(missing_ok=True)

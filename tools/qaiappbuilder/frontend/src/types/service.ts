@@ -18,6 +18,8 @@
 export interface ServiceStatusResponse {
   /** V1-compat boolean (derived from `state === "running"`). */
   running?: boolean;
+  /** Daemon finished loading its model; `false` while loading, `null` when not running. */
+  ready?: boolean | null;
   /** V2 canonical lifecycle state: "running" | "stopped" | ... */
   state?: string;
   pid?: number | null;
@@ -107,8 +109,16 @@ export interface StartServiceRequest {
   model_name?: string;
   port?: number;
   loglevel?: number;
-  host_mode?: "local" | "remote";
   load_model?: boolean;
   [key: string]: unknown;
+}
+
+/** Wire form of `GET/POST /api/service/install-dir`. */
+export interface ServiceInstallDirResponse {
+  /** User-chosen GenieAPIService directory; "" = auto-scan data/bin. */
+  path: string;
+  exe_present: boolean;
+  /** Backend runs with `QAI_LOCAL_MODEL_DEBUG`; the path section is shown only then. */
+  enabled?: boolean;
 }
 

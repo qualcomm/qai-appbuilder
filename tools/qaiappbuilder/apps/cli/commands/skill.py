@@ -226,11 +226,10 @@ def cmd_skill_toggle(args: argparse.Namespace) -> int:
 def cmd_skill_mode(args: argparse.Namespace) -> int:
     """``qai skill mode <name> <off|cloud|local|both>``.
 
-    Surface NPU-mismatch errors as exit 1 with a clear stderr message
-    instead of leaking the SkillModeNotAllowedError traceback. The
-    dispatcher's default handler would still produce a usable error,
-    but matching V1's 400 semantics with a one-line message is friendlier
-    for shell pipelines.
+    Surface invalid-mode errors as exit 1 with a clear stderr message
+    instead of leaking the raw ValueError traceback. The dispatcher's default
+    handler would still produce a usable error, but a one-line message is
+    friendlier for shell pipelines.
     """
 
     name: str = args.name
@@ -239,7 +238,6 @@ def cmd_skill_mode(args: argparse.Namespace) -> int:
     # Lazy-import the domain exceptions so ``qai --help`` doesn't pay the
     # cost of importing the user_prefs application layer.
     from qai.user_prefs.application.use_cases.skills import (  # noqa: PLC0415
-        SkillModeNotAllowedError,
         SkillNotFoundError,
     )
 
@@ -251,11 +249,8 @@ def cmd_skill_mode(args: argparse.Namespace) -> int:
     except SkillNotFoundError as exc:
         sys.stderr.write(f"unknown skill: {exc.skill_id}\n")
         return 1
-    except SkillModeNotAllowedError as exc:
-        sys.stderr.write(
-            f"skill {exc.skill_id!r}: mode {exc.mode!r} requires NPU "
-            f"optimisation but this skill is not NPU-optimised\n"
-        )
+    except ValueError as exc:
+        sys.stderr.write(f"invalid skill mode: {exc}\n")
         return 1
 
     _emit_json(result)

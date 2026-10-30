@@ -58,8 +58,10 @@ fall back to the settings default endpoint.
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
+from qai.platform.config.settings import LOOPBACK_HOST
 from qai.platform.logging import get_logger
 
 from qai.chat.application.ports import (
@@ -81,6 +83,14 @@ __all__ = ["ModelCatalogProviderLookupBridge"]
 #: SecretStore service namespace for per-provider cloud-inference api keys.
 #: Key is the free-form ``provider_id`` (``cloud_llm`` / ``provider_b`` / ...).
 _PROVIDER_SECRET_SERVICE = "qai.model_catalog.provider"
+
+#: Timeout for the GenieAPIService ``POST /contextsize`` runtime lookup.
+_CONTEXTSIZE_TIMEOUT_S = 2.0
+
+#: Upper bound / poll period while a freshly started GenieAPIService is still
+#: loading its model (``GET /status`` -> ``loading``).
+_MODEL_READY_TIMEOUT_S = 180.0
+_MODEL_READY_POLL_S = 1.0
 
 #: Legacy SecretStore records seeded by the v1→v2 migrator
 #: (``service_config.py:_SECRET_LOCATIONS``).  Tried as a fallback so installs
@@ -209,6 +219,9 @@ class ModelCatalogProviderLookupBridge(ProviderConfigLookupPort, ModelContextWin
             if self._local_models is None:
                 raise MissingModelContextLengthError(model_id)
             bare_id = model_id.removeprefix("local::")
+            runtime_value = await self._running_context_size(bare_id)
+            if runtime_value is not None:
+                return runtime_value
             try:
                 models = await self._local_models.execute()
             except Exception as exc:
@@ -263,6 +276,61 @@ class ModelCatalogProviderLookupBridge(ProviderConfigLookupPort, ModelContextWin
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+    async def _running_context_size(self, model_name: str) -> int | None:
+        """Ask the running GenieAPIService ``POST /contextsize`` for ``model_name``.
+
+        Only trusted when the daemon's loaded model is ``model_name``: the
+        endpoint silently answers with the default model's value otherwise.
+        ``load-model`` returns as soon as the process is spawned, and the
+        daemon answers ``contextsize: 0`` until its model is loaded, so this
+        waits (bounded) for ``GET /status`` ``loading == false`` first.
+        Returns ``None`` on any miss / failure / non-positive value.
+        """
+        running_model = getattr(self._local_models, "running_model", None)
+        if not model_name or running_model is None:
+            return None
+        import httpx
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _MODEL_READY_TIMEOUT_S
+        while True:
+            try:
+                running = await running_model()
+            except Exception:  # noqa: BLE001
+                return None
+            if not running or running[0].lower() != model_name.lower():
+                return None
+            base = f"http://{LOOPBACK_HOST}:{running[1]}"
+            status_supported = True
+            try:
+                async with httpx.AsyncClient(timeout=_CONTEXTSIZE_TIMEOUT_S) as client:
+                    ready = True
+                    status_resp = await client.get(f"{base}/status")
+                    if status_resp.status_code == 200:
+                        loading = status_resp.json().get("loading")
+                        ready = str(loading).lower() != "true"
+                    else:
+                        status_supported = False
+                    value = None
+                    if ready:
+                        resp = await client.post(
+                            f"{base}/contextsize", json={"model": running[0]}
+                        )
+                        if resp.status_code == 200:
+                            value = resp.json().get("contextsize")
+            except Exception as exc:  # noqa: BLE001 — daemon HTTP not up yet
+                logger.warning(
+                    "chat.model_resolver_bridge.contextsize_failed", error=str(exc)
+                )
+                ready, value = False, None
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                return value
+            if ready and not status_supported:
+                return None
+            if loop.time() >= deadline:
+                return None
+            await asyncio.sleep(_MODEL_READY_POLL_S)
+
     @staticmethod
     def _config_serves_model(config: dict[str, Any], model_id: str) -> bool:
         raw_models = config.get("models")

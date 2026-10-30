@@ -33,6 +33,7 @@ from qai.service_release.application.use_cases import (
     InstallModelCommand,
     StartModelDownloadCommand,
 )
+from qai.service_release.domain.value_objects import ExtraFileInstallSpec
 
 if TYPE_CHECKING:  # pragma: no cover
     from apps.api.di import Container
@@ -54,6 +55,20 @@ class ModelDownloadRequest(BaseModel):
     task_id: str = ""
 
 
+class ExtraFileInstallRequestBody(BaseModel):
+    """One already-downloaded extra file, mirrors ``ModelVariant.extra_files``.
+
+    The frontend downloads each ``extra_files[]`` entry via its own
+    ``/download`` SSE stream (same as the main file) and echoes back the
+    resulting ``save_path`` plus the catalog's ``filename``/``subdir`` for
+    that entry — the installer never re-fetches the catalog itself.
+    """
+
+    save_path: str
+    filename: str = ""
+    subdir: str = ""
+
+
 class ModelInstallRequestBody(BaseModel):
     model_config = {"protected_namespaces": ()}
 
@@ -64,6 +79,13 @@ class ModelInstallRequestBody(BaseModel):
     #: as an install marker so the Installed pill can show the platform label
     #: ("Installed · Snapdragon X2 Elite"), mirroring ServiceVersionCard.
     variant_id: str = ""
+    #: Already-downloaded additional files (e.g. a speculative-decoding
+    #: drafter GGUF) declared by the variant's ``extra_files``. Empty for
+    #: every existing single-file model — additive, opt-in.
+    extra_files: list[ExtraFileInstallRequestBody] = []
+    #: Optional ``config.json`` content (the variant's ``install_config``) to
+    #: write into the install dir once every file is in place.
+    install_config: dict | None = None
 
 
 def build_router(*, container: "Container") -> APIRouter:
@@ -107,6 +129,13 @@ def build_router(*, container: "Container") -> APIRouter:
                 model_id=body.model_id,
                 install_dir=body.install_dir,
                 variant_id=body.variant_id,
+                extra_files=tuple(
+                    ExtraFileInstallSpec(
+                        save_path=f.save_path, filename=f.filename, subdir=f.subdir
+                    )
+                    for f in body.extra_files
+                ),
+                install_config=body.install_config,
             )
         )
         return result.to_wire()

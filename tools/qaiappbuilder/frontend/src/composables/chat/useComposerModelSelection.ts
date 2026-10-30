@@ -15,16 +15,16 @@
  *   - the cloud-model auto-select / provider-backfill watcher
  *     (useModels.js:182-195) and the mount-time preference restore
  *   - the model-list auto-switch on mount (useModels.js:197) and the
- *     streaming→idle `noteInferred` side-effect (useModels.js:21+227-235)
+ *     streaming→idle ctx-badge refresh
  *
  * The composer wires in the shared composables (model selector, cloud
- * names, auto-switch, forge config, CC/OC) and its own
+ * names, auto-switch, CC/OC) and its own
  * `modelDropdownOpen` ref so the dropdown still closes on pick. The mount
  * + streaming watchers are registered here so the composer's `onMounted`
  * stays thin; `useContextUsage.refresh` is threaded in for the
- * streaming→idle ctx refresh that pairs with `noteInferred`.
+ * streaming→idle ctx refresh.
  */
-import { computed, onMounted, ref, watch, type Ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useChatTabsStore } from "@/stores/chatTabs";
 import { useServiceStore } from "@/stores/service";
@@ -35,12 +35,11 @@ import {
   loadChatModelPreference,
   saveChatModelPreference,
 } from "@/composables/chat/useChatModelPreference";
-import { loadServiceModel } from "@/api/serviceControl";
+import { useServiceRuntimeStore } from "@/stores/serviceRuntime";
 import {
   useChatModelAutoSwitch,
   type AutoSwitchModel,
 } from "@/composables/chat/useChatModelAutoSwitch";
-import type { useForgeConfig } from "@/composables/useForgeConfig";
 import type { useClaudeCode } from "@/composables/useClaudeCode";
 import type { useOpenCode } from "@/composables/useOpenCode";
 
@@ -51,13 +50,10 @@ export function useComposerModelSelection(opts: {
   modelDropdownOpen: Ref<boolean>;
   claudeCode: ClaudeCode;
   openCode: OpenCode;
-  /** forge-config singleton (shared with the composer's toolbar gates). */
-  forgeConfig: ReturnType<typeof useForgeConfig>["config"];
   /** ctx-badge refresh, run on each streaming→idle transition (V1 parity). */
   refreshCtx: () => void;
 }) {
-  const { modelDropdownOpen, claudeCode, openCode, forgeConfig, refreshCtx } =
-    opts;
+  const { modelDropdownOpen, claudeCode, openCode, refreshCtx } = opts;
   const { t } = useI18n();
   const store = useChatTabsStore();
   const toast = useToast();
@@ -85,13 +81,9 @@ export function useComposerModelSelection(opts: {
   // V1 `useModels.js:219-329` parity — auto-switch the chat model when the
   // selected LOCAL model stops running, with a loading guard so a just-picked
   // model isn't yanked away mid-load. Getters are lazy so they read the live
-  // host_mode / active-tab selection at call time (post-mount).
-  const { loadingLocalModelId, autoSwitchStoppedModel, noteInferred } =
+  // active-tab selection at call time (post-mount).
+  const { loadingLocalModelId, autoSwitchStoppedModel } =
     useChatModelAutoSwitch({
-      hostMode: () =>
-        ((forgeConfig.value?.service_launch as
-          | Record<string, unknown>
-          | undefined)?.host_mode as string | undefined) ?? "local",
       selection: () => ({
         id: store.activeTab?.modelId ?? "",
         provider: store.activeTab?.modelProvider ?? "",
@@ -127,6 +119,54 @@ export function useComposerModelSelection(opts: {
     return mid === null || mid === "" || mid === "qai-default";
   });
 
+  const selectedModelIsLocal = computed<boolean>(() =>
+    (store.activeTab?.modelId ?? "").startsWith("local::"),
+  );
+
+  // Shared with the Service page: the dot is derived from the one lifecycle
+  // store, so start / stop / chat-triggered auto-start show up here at once.
+  const runtimeStore = useServiceRuntimeStore();
+  const localServiceState = computed<"unknown" | "stopped" | "loading" | "ready">(() => {
+    if (!selectedModelIsLocal.value) return "unknown";
+    const selectedId = store.activeTab?.modelId ?? "";
+    const wanted = selectedId.slice("local::".length).toLowerCase();
+    const loaded = runtimeStore.activeModel.toLowerCase();
+    // Same rule as the dropdown: the daemon reports a bare name that may match
+    // the entry's id / model_id / name rather than the selected id verbatim.
+    const entry = models.value.find((m) => getModelId(m) === selectedId);
+    const aliases = [wanted];
+    if (entry) {
+      for (const v of [entry.id, entry.model_id, entry.name]) {
+        if (typeof v !== "string") continue;
+        const lower = v.toLowerCase();
+        aliases.push(lower.includes("::") ? lower.slice(lower.indexOf("::") + 2) : lower);
+      }
+    }
+    const matches = loaded !== "" && aliases.includes(loaded);
+    switch (runtimeStore.lifecycle) {
+      case "starting":
+        return loaded === "" || matches ? "loading" : "stopped";
+      case "loading":
+        return matches ? "loading" : "stopped";
+      case "running":
+        // The daemon reports no model name when it was started without one;
+        // it is up and ready, so do not paint it as stopped.
+        return loaded === "" || matches ? "ready" : "stopped";
+      default:
+        return "stopped";
+    }
+  });
+
+  onMounted(() => runtimeStore.acquire());
+  onBeforeUnmount(() => runtimeStore.release());
+  // The per-model `is_running` dots in the dropdown come from a snapshot of the
+  // model list; refetch it whenever the daemon lifecycle changes (from any
+  // surface).
+  watch(
+    () => runtimeStore.lifecycle,
+    () => void loadModels(),
+  );
+
   // `modelDotStyle` returns an inline `background:` declaration so we can
   // pre-compute the colour without adding 5 new CSS classes for the same
   // visual effect (V1 itself uses inline `:style` on the dot).
@@ -135,10 +175,18 @@ export function useComposerModelSelection(opts: {
   //   - loading: muted (grey)
   //   - service offline (no models): muted (grey)
   //   - no model selected but service online: amber (warning)
+  //   - LOCAL model: live daemon lifecycle (stopped/unknown grey, loading amber)
   //   - model selected & online: green (success)
   const modelDotStyle = computed<string>(() => {
     if (claudeCode.isCCMode.value) return "background:#7eb8f7";
     if (openCode.isOCMode.value) return "background:#63b3ed";
+    // A selected LOCAL model is judged purely by the daemon lifecycle: the
+    // cloud-oriented health probe and the model-list fetch must not gray it.
+    if (selectedModelIsLocal.value) {
+      if (localServiceState.value === "loading") return "background:var(--warning)";
+      if (localServiceState.value === "ready") return "background:var(--success)";
+      return "background:var(--text-muted)";
+    }
     if (modelsLoading.value) return "background:var(--text-muted)";
     if (!serviceOnline.value) return "background:var(--text-muted)";
     if (selectedModelIsPlaceholder.value) return "background:var(--warning)";
@@ -229,53 +277,11 @@ export function useComposerModelSelection(opts: {
     saveChatModelPreference(modelId, provider);
     modelDropdownOpen.value = false;
 
-    // V1 parity (useModels.js:117-145): if the picked model is a LOCAL model
-    // that isn't currently running, auto-load it — but only in LOCAL host mode.
-    maybeAutoLoadLocalModel(modelId);
-  }
-
-  /**
-   * V1 ``useModels.js:117-145`` parity: auto-start an unrunning local model on
-   * selection (LOCAL host mode only). No-op for cloud models, the running
-   * model, or REMOTE mode (where the server switches models on demand).
-   */
-  function maybeAutoLoadLocalModel(modelId: string): void {
-    if (!modelId.startsWith("local::")) return; // cloud → never auto-load
-    const bareName = modelId.slice("local::".length);
-    // Resolve the local entry to read its running state (backend-authoritative
-    // ``is_running``; falls back to "unknown" → treat as not running).
-    const entry = models.value.find((m) => getModelId(m) === modelId);
-    const isRunning = entry?.is_running === true;
-    if (isRunning) return; // already running → nothing to do
-
-    const hostMode =
-      ((forgeConfig.value?.service_launch as Record<string, unknown> | undefined)
-        ?.host_mode as string | undefined) ?? "local";
-
-    if (hostMode === "remote") {
-      // Remote daemon switches models server-side on the next request.
-      toast.info(t("models.remoteModelSelected", { name: bareName }));
-      return;
-    }
-    // Local mode: kick off load-model so the daemon starts serving it (V1
-    // ``/api/service/load-model``). Fire-and-forget with toast feedback.
-    loadingLocalModelId.value = modelId;
-    void loadServiceModel({ model_name: bareName })
-      .then((res) => {
-        const ok = (res as { ok?: boolean }).ok !== false;
-        const msg = (res as { message?: string }).message;
-        if (ok) {
-          toast.info(msg || t("models.loadingModel", { name: bareName }));
-        } else {
-          toast.error(msg || t("models.startFailed"));
-          loadingLocalModelId.value = "";
-        }
-      })
-      .catch((e: unknown) => {
-        const m = e instanceof Error ? e.message : String(e);
-        toast.error(`${t("models.startFailed")}: ${m}`);
-        loadingLocalModelId.value = "";
-      });
+    // Selecting a LOCAL model only records the choice. GenieAPIService is
+    // started / the model loaded when a message is actually sent
+    // (`useChatTurnSubmit` → `ensureLocalModelReady`). Keep the guard so the
+    // auto-switch does not yank a just-picked, not-yet-loaded model back.
+    if (modelId.startsWith("local::")) loadingLocalModelId.value = modelId;
   }
 
   onMounted(() => {
@@ -295,6 +301,17 @@ export function useComposerModelSelection(opts: {
         provider: pref.selected_model_provider,
       };
     });
+  });
+
+  // Bug fix: `models.value` was previously only fetched once on mount, so
+  // its per-entry `is_running` snapshot goes stale the moment the running
+  // model changes (e.g. after switching to another local model). Re-fetching
+  // whenever the dropdown opens (right before the user can pick anything)
+  // keeps `is_running` accurate for the status dots and the auto-switch.
+  watch(modelDropdownOpen, (isOpen) => {
+    if (isOpen) {
+      void loadModels();
+    }
   });
 
   // V1 parity (`useModels.js:loadModels` auto-selects models[0]): once
@@ -421,13 +438,6 @@ export function useComposerModelSelection(opts: {
     (next, prev) => {
       if (prev === "streaming" && next === "idle") {
         refreshCtx();
-        // V1 parity (useModels.js:21 + 227-235): record the local model that
-        // just completed an inference so remote-mode refreshes restore its
-        // Running state.
-        const id = store.activeTab?.modelId ?? "";
-        if (id.startsWith("local::")) {
-          noteInferred(id);
-        }
       }
     },
   );

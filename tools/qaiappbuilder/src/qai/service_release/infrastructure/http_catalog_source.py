@@ -18,8 +18,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -32,6 +34,7 @@ from qai.service_release.application.ports import (
 from qai.service_release.domain.errors import CatalogUnavailableError
 from qai.service_release.domain.value_objects import (
     CatalogModel,
+    ModelExtraFile,
     ModelFormat,
     ModelHardware,
     ModelVariant,
@@ -52,10 +55,36 @@ _VALID_HARDWARE = {"npu", "gpu", "cpu"}
 _CONNECT_TIMEOUT_SECONDS = 5.0
 
 
+_log = logging.getLogger("qai.service_release.http_catalog_source")
+
+
+def _merge_catalog_models(
+    remote: list[CatalogModel], local: list[CatalogModel]
+) -> list[CatalogModel]:
+    """Overlay ``local`` onto ``remote``: same ``model_id`` -> local wins in place
+    (remote ordering is preserved); local-only entries are appended."""
+    if not local:
+        return remote
+    by_id = {m.model_id: m for m in local}
+    merged: list[CatalogModel] = []
+    seen: set[str] = set()
+    for m in remote:
+        merged.append(by_id.get(m.model_id, m))
+        seen.add(m.model_id)
+    merged.extend(m for m in local if m.model_id not in seen)
+    return merged
+
+
 class HttpCatalogSource(ServiceCatalogSourcePort):
     """Fetches manifests over HTTP using a settings-driven URL/timeout."""
 
-    __slots__ = ("_settings", "_client_factory", "_proxy_provider")
+    __slots__ = (
+        "_settings",
+        "_client_factory",
+        "_proxy_provider",
+        "_local_catalog_path",
+        "_local_catalog_enabled",
+    )
 
     def __init__(
         self,
@@ -63,8 +92,17 @@ class HttpCatalogSource(ServiceCatalogSourcePort):
         settings: DownloadSettingsPort,
         client_factory: Callable[..., httpx.AsyncClient] | None = None,
         proxy_provider: Callable[[], str | None] | None = None,
+        local_catalog_path: Path | None = None,
+        local_catalog_enabled: Callable[[], bool] | None = None,
     ) -> None:
         self._settings = settings
+        # Optional LOCAL supplement to the remote model catalog (a JSON file
+        # shipped with the source tree). Entries are merged into the remote
+        # list (same ``model_id`` -> local wins) and still shown when the
+        # remote fetch fails. ``local_catalog_enabled`` is read per call so a
+        # runtime config change takes effect without a restart.
+        self._local_catalog_path = local_catalog_path
+        self._local_catalog_enabled = local_catalog_enabled
         # NOTE: ``client_factory`` is retained for construction-compat but is no
         # longer used by ``_fetch_text`` — fetching now runs a SYNCHRONOUS
         # ``httpx.Client`` inside ``asyncio.to_thread`` to keep DNS/connect off
@@ -186,6 +224,22 @@ class HttpCatalogSource(ServiceCatalogSourcePort):
     # ── Model catalog ──────────────────────────────────────────────────
 
     async def fetch_catalog_models(self) -> list[CatalogModel]:
+        local = self._load_local_catalog()
+        try:
+            remote = await self._fetch_remote_catalog_models()
+        except CatalogUnavailableError:
+            # Remote unreachable / invalid: keep the locally shipped entries
+            # visible. With no local entries either, surface the original error.
+            if local:
+                _log.warning(
+                    "remote model catalog unavailable; serving %d local entries",
+                    len(local),
+                )
+                return local
+            raise
+        return _merge_catalog_models(remote, local)
+
+    async def _fetch_remote_catalog_models(self) -> list[CatalogModel]:
         cfg = await self._settings.read()
         url = (cfg.catalog_url or "").strip()
         if not url:
@@ -198,6 +252,25 @@ class HttpCatalogSource(ServiceCatalogSourcePort):
         except json.JSONDecodeError as exc:
             raise CatalogUnavailableError(f"Invalid JSON catalog: {exc}") from exc
         return _parse_model_catalog(data)
+
+    def _load_local_catalog(self) -> list[CatalogModel]:
+        """Entries from the locally shipped supplement; ``[]`` on any problem."""
+        path = self._local_catalog_path
+        if path is None:
+            return []
+        try:
+            if self._local_catalog_enabled is not None and not self._local_catalog_enabled():
+                return []
+        except Exception:  # noqa: BLE001 - a config read must never break the catalog
+            return []
+        try:
+            if not path.is_file():
+                _log.warning("local model catalog not found: %s", path)
+                return []
+            return _parse_model_catalog(json.loads(path.read_text(encoding="utf-8")))
+        except Exception as exc:  # noqa: BLE001 - missing/corrupt file: warn, never raise
+            _log.warning("local model catalog unreadable (%s): %s", path, exc)
+            return []
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +384,41 @@ def _parse_version_list_text(text: str) -> list[ServiceVersion]:
     return out
 
 
+# Known-broken remote model_catalog.json download URLs, corrected here. The
+# catalog is maintained externally (GitHub Release assets); we can't edit its
+# content, so we patch it precisely at parse time.
+_DOWNLOAD_URL_CORRECTIONS: dict[str, str] = {
+    "https://www.aidevhome.com/data/adh2/models/suggested/qwen2.5vl3b-8480-2.42.zip":
+        "https://www.aidevhome.com/data/adh2/models/suggested/qwen2.5vl3b-8480.zip",
+}
+
+
+def _correct_download_url(url: str) -> str:
+    return _DOWNLOAD_URL_CORRECTIONS.get(url, url)
+
+
+def _parse_extra_files(raw_extra_files: Any) -> tuple[ModelExtraFile, ...]:
+    if not isinstance(raw_extra_files, list):
+        return ()
+    out: list[ModelExtraFile] = []
+    for raw in raw_extra_files:
+        if not isinstance(raw, Mapping):
+            continue
+        url = _correct_download_url(str(raw.get("download_url", "")).strip())
+        if not url.lower().startswith("http"):
+            continue
+        out.append(
+            ModelExtraFile(
+                filename=str(raw.get("filename", "")),
+                subdir=str(raw.get("subdir", "")),
+                download_url=url,
+                size_bytes=int(raw.get("size_bytes", 0) or 0),
+                checksum_sha256=str(raw.get("checksum_sha256", "")),
+            )
+        )
+    return tuple(out)
+
+
 def _parse_variants(raw_variants: Any) -> tuple[ModelVariant, ...]:
     if not isinstance(raw_variants, list):
         return ()
@@ -318,9 +426,10 @@ def _parse_variants(raw_variants: Any) -> tuple[ModelVariant, ...]:
     for raw in raw_variants:
         if not isinstance(raw, Mapping):
             continue
-        url = str(raw.get("download_url", "")).strip()
+        url = _correct_download_url(str(raw.get("download_url", "")).strip())
         if not url.lower().startswith("http"):
             continue
+        raw_install_config = raw.get("install_config")
         out.append(
             ModelVariant(
                 variant_id=str(raw.get("variant_id", "")),
@@ -331,6 +440,10 @@ def _parse_variants(raw_variants: Any) -> tuple[ModelVariant, ...]:
                 download_url=url,
                 size_bytes=int(raw.get("size_bytes", 0) or 0),
                 checksum_sha256=str(raw.get("checksum_sha256", "")),
+                extra_files=_parse_extra_files(raw.get("extra_files")),
+                install_config=dict(raw_install_config)
+                if isinstance(raw_install_config, Mapping)
+                else None,
             )
         )
     return tuple(out)
@@ -359,7 +472,7 @@ def _parse_model_catalog(data: Any) -> list[CatalogModel]:
             continue
         seen.add(model_id)
         variants = _parse_variants(raw.get("variants"))
-        download_url = str(raw.get("download_url", "")).strip()
+        download_url = _correct_download_url(str(raw.get("download_url", "")).strip())
         # V1: top-level url may be backfilled from variants[0] for the
         # legacy download API.
         if not download_url and variants:

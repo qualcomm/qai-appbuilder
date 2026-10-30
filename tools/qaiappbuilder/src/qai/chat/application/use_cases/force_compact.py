@@ -38,6 +38,7 @@ from qai.chat.application.use_cases._streaming_helpers import (
     compute_turn_prefix_at_boundary as _compute_turn_prefix_at_boundary,
     rebuild_history_wire_messages,
 )
+from qai.platform.errors import PreconditionFailedError
 from qai.platform.logging import get_logger
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -116,6 +117,16 @@ class ForceCompactChatUseCase:
     async def execute(
         self, request: ForceCompactChatInput,
     ) -> ForceCompactChatResult:
+        # Client-side compaction is OFF for on-device models
+        # (``CompactionCheckpointEngine.maybe_compress`` short-circuits on a
+        # ``local::`` hint). An explicit ``/compact`` must therefore FAIL
+        # loudly rather than run a pass that cannot compact anything and
+        # report "0 saved" as success.
+        if (request.model_id or "").startswith("local::"):
+            raise PreconditionFailedError(
+                "chat.compact_local_model_disabled",
+                "Context compaction is disabled for local models.",
+            )
         if request.budget_tokens <= 0:
             raise InvalidContextSizeError(
                 f"budget_tokens must be > 0, got {request.budget_tokens}",

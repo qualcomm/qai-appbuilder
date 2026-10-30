@@ -17,9 +17,9 @@
 // =============================================================================
 
 const models = {
-  loadingModel: "正在載入：{name}，約需 30～60 秒",
+  startingModel: "正在啟動 GenieAPIService 並載入模型：{name}…",
+  modelReady: "模型已就緒：{name}",
   loadingPlaceholder: "載入中…",
-  remoteModelSelected: "已選定模型 {name}，傳送訊息時遠端伺服器將自動切換，首次回應可能需要 5～10 秒",
   startFailed: "啟動失敗",
 };
 

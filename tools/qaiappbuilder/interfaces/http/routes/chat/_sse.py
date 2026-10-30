@@ -132,6 +132,7 @@ def _resolve_image_refs_to_vision_blocks(
     container: "Container",
     image_refs: tuple[str, ...],
     prompt_text: str,
+    model_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Resolve image URLs to OpenAI-Vision content blocks (route layer).
 
@@ -140,6 +141,10 @@ def _resolve_image_refs_to_vision_blocks(
     interfaces layer keeps adapter access; the decode logic itself lives in
     the application layer so the agentic loop can reuse it without importing
     ``interfaces``.
+
+    ``model_id`` (the raw, possibly ``local::``-prefixed selector the caller
+    already has in scope) gates the shared helper's ``is_local_model``
+    recompression bypass — see :func:`_is_local_model_hint`.
     """
     store = getattr(container.chat, "image_upload_store", None)
     fmt, quality = _read_cloud_image_config(container)
@@ -149,6 +154,23 @@ def _resolve_image_refs_to_vision_blocks(
         source_text=prompt_text,
         cloud_format=fmt,
         cloud_quality=quality,
+        is_local_model=_is_local_model_hint(model_id),
+    )
+
+
+_LOCAL_MODEL_HINT_PREFIX = "local::"
+
+
+def _is_local_model_hint(model_hint: str | None) -> bool:
+    """Return True when ``model_hint``/``model_id`` targets a local model.
+
+    Module-private copy of the same one-line check the application layer
+    keeps at ``streaming.py`` (each layer owns its own trivial copy rather
+    than importing across the interfaces/application boundary — V1 parity
+    ``backend/chat_handler.py:400``, ``startswith("local::")``).
+    """
+    return isinstance(model_hint, str) and model_hint.startswith(
+        _LOCAL_MODEL_HINT_PREFIX
     )
 
 
@@ -356,6 +378,7 @@ async def _stream_chat_sse(
                 container=container,
                 image_refs=image_refs,
                 prompt_text=prompt_text,
+                model_id=model_id,
             )
             if vision_blocks:
                 extra["image_content_blocks"] = vision_blocks

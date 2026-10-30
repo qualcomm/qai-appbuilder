@@ -13,7 +13,7 @@
  *   - model list grouped by accelerator (NPU/GPU/CPU) from
  *     `GET /api/service/models` + selected-model persistence via
  *     `/api/preferences.selected_service_model`;
- *   - connection panel (local/remote, "Test" probe);
+ *   - connection panel (local port, "Test" probe);
  *   - start / stop with status polling;
  *   - SSE log streaming with RAF-batched flush + smart auto-scroll;
  *   - command preview, path-safety warning, collapse states.
@@ -24,33 +24,29 @@
  * template that binds to this surface.
  */
 import { computed, ref, watch, type Ref } from "vue";
+import { storeToRefs } from "pinia";
 import { useI18n } from "vue-i18n";
 
 import { apiJson } from "@/api";
 import {
+  clearServiceContext,
   clearServiceLogs as apiClearLogs,
   fetchServiceModels,
-  fetchServiceStatus,
   probeService,
   startService,
   stopService,
   streamServiceLogs,
 } from "@/api/serviceControl";
 import { useToastStore } from "@/stores/toast";
+import { useServiceRuntimeStore } from "@/stores/serviceRuntime";
 import { useConfirm } from "@/composables/useConfirm";
-import type {
-  ServiceModelEntry,
-  ServiceStatusResponse,
-} from "@/types/service";
+import type { ServiceModelEntry } from "@/types/service";
 
 /** Launch parameters mirrored to forge-config `service_launch`. */
 export interface SvcParams {
   models_root_path: string;
   load_model: boolean;
-  host_mode: "local" | "remote";
-  remote_host: string;
   local_port: number;
-  remote_port: number;
   loglevel: number;
   all_text: boolean;
   enable_thinking: boolean;
@@ -62,16 +58,12 @@ export interface SvcParams {
 
 const DEFAULT_PORT = 8910;
 const LOG_SCROLL_BOTTOM_THRESHOLD = 80;
-const STATUS_POLL_MS = 5000;
 
 function defaultSvcParams(): SvcParams {
   return {
     models_root_path: "",
     load_model: true,
-    host_mode: "local",
-    remote_host: "",
     local_port: DEFAULT_PORT,
-    remote_port: DEFAULT_PORT,
     loglevel: 3,
     all_text: false,
     enable_thinking: false,
@@ -94,16 +86,18 @@ export function useServiceControl(
   }
 
   // ── Core reactive state ────────────────────────────────────────────────
-  const serviceStatus = ref<ServiceStatusResponse>({
-    running: false,
-    pid: null,
-    uptime_seconds: null,
-    exe_path: "",
-    command: "",
-    path_warning: "",
-  });
-  const serviceStarting = ref(false);
-  const serviceStopping = ref(false);
+  // Shared with the chat model picker: a daemon started from chat shows up
+  // here too, and the lifecycle is derived from the backend status instead of
+  // optimistic local flags.
+  const runtime = useServiceRuntimeStore();
+  const { status: serviceStatus, lifecycle } = storeToRefs(runtime);
+  const serviceStarting = computed(
+    () => lifecycle.value === "starting" || lifecycle.value === "loading",
+  );
+  const serviceStopping = computed(() => lifecycle.value === "stopping");
+  // Re-entry guard for the "Clear" action: true while a /clear call is in
+  // flight, so repeated clicks (or a stop/start racing it) are ignored.
+  const serviceClearing = ref(false);
 
   const serviceLogs = ref<string[]>([]);
   const serviceLogsStreaming = ref(false);
@@ -134,7 +128,7 @@ export function useServiceControl(
 
   // Streaming / scrolling internals
   let logAbort: AbortController | null = null;
-  let statusTimer: ReturnType<typeof setInterval> | null = null;
+  let pollingAcquired = false;
   let logSkipFrom = 0;
   let paramsAutoCollapsed = false;
   // Set once `dispose()` runs (component unmounted). Guards the deferred
@@ -156,13 +150,9 @@ export function useServiceControl(
   const logUserScrolledUp = ref(false);
 
   // ── Derived state ──────────────────────────────────────────────────────
-  const isRunning = computed(() => {
-    const s = serviceStatus.value;
-    if (typeof s.state === "string") return s.state === "running";
-    return s.running === true;
-  });
-
-  const isRemoteMode = computed(() => svcParams.value.host_mode === "remote");
+  const isRunning = computed(
+    () => lifecycle.value === "running" || lifecycle.value === "loading",
+  );
 
   const serviceModelsByAccel = computed(() => ({
     npu: serviceModels.value.filter((m) => m.format === "qnn"),
@@ -170,15 +160,9 @@ export function useServiceControl(
     cpu: serviceModels.value.filter((m) => m.format === "mnn"),
   }));
 
-  const localUrl = computed(() => {
-    const h = isRemoteMode.value
-      ? (svcParams.value.remote_host || "").trim() || "?"
-      : "127.0.0.1";
-    const p = isRemoteMode.value
-      ? svcParams.value.remote_port || DEFAULT_PORT
-      : svcParams.value.local_port || DEFAULT_PORT;
-    return `http://${h}:${p}`;
-  });
+  const localUrl = computed(
+    () => `http://127.0.0.1:${svcParams.value.local_port || DEFAULT_PORT}`,
+  );
 
   const serviceCommandPreview = computed(() => {
     const p = svcParams.value;
@@ -200,7 +184,6 @@ export function useServiceControl(
 
   const canStartService = computed(
     () =>
-      !isRemoteMode.value &&
       serviceModels.value.length > 0 &&
       !!selectedServiceModelName.value,
   );
@@ -244,7 +227,7 @@ export function useServiceControl(
         config: { service_launch: { ...svcParams.value } },
       });
       notify("success", t("service.paramsSaved"));
-      // host_mode may have toggled — refresh the model list.
+      // models_root_path may have changed — refresh the model list.
       await loadServiceModels();
     } catch (e) {
       notify("error", `${t("service.saveFailed")}: ${(e as Error).message}`);
@@ -255,14 +238,10 @@ export function useServiceControl(
 
   // ── Status ─────────────────────────────────────────────────────────────
   async function loadServiceStatus(): Promise<void> {
-    try {
-      serviceStatus.value = await fetchServiceStatus();
-      if (isRunning.value && !paramsAutoCollapsed) {
-        paramsCollapsed.value = true;
-        paramsAutoCollapsed = true;
-      }
-    } catch {
-      // graceful
+    await runtime.refresh();
+    if (isRunning.value && !paramsAutoCollapsed) {
+      paramsCollapsed.value = true;
+      paramsAutoCollapsed = true;
     }
   }
 
@@ -321,13 +300,10 @@ export function useServiceControl(
     connectionTesting.value = true;
     connectionTestResult.value = null;
     try {
-      const host = isRemoteMode.value
-        ? (svcParams.value.remote_host || "").trim()
-        : "127.0.0.1";
-      const port = isRemoteMode.value
-        ? svcParams.value.remote_port || DEFAULT_PORT
-        : svcParams.value.local_port || DEFAULT_PORT;
-      const data = await probeService({ host, port });
+      const data = await probeService({
+        host: "127.0.0.1",
+        port: svcParams.value.local_port || DEFAULT_PORT,
+      });
       connectionTestResult.value = data.reachable ? "ok" : "fail";
     } catch {
       connectionTestResult.value = "fail";
@@ -346,19 +322,16 @@ export function useServiceControl(
       notify("error", t("service.noModelsAvailable"));
       return;
     }
-    serviceStarting.value = true;
+    if (lifecycle.value !== "stopped" && lifecycle.value !== "error") return;
+    runtime.begin("starting", selectedServiceModelName.value);
     try {
       const result = await startService({
         model_name: selectedServiceModelName.value,
         port: svcParams.value.local_port,
         loglevel: svcParams.value.loglevel,
-        host_mode: svcParams.value.host_mode,
         load_model: svcParams.value.load_model,
       });
-      serviceStatus.value = {
-        ...serviceStatus.value,
-        running: true,
-      };
+      await runtime.end();
       notify("success", t("service.startSuccess"));
       if (result.warnings?.length && onCloudNotConfigured) {
         const go = await confirm({
@@ -372,11 +345,8 @@ export function useServiceControl(
       }
       paramsCollapsed.value = true;
       paramsAutoCollapsed = true;
-      void streamLogs();
-      startStatusPolling();
-      // V1 parity (useServiceControl.js:311): refresh service model list after start
-      void loadServiceModels();
     } catch (e) {
+      await runtime.end();
       // Single-instance guard: the backend returns 409
       // code="model_runtime.service_port_in_use" when the target port is
       // already occupied (a daemon is already running, or a leftover process
@@ -389,49 +359,62 @@ export function useServiceControl(
       } else {
         notify("error", `${t("service.startFailed")}: ${(e as Error).message}`);
       }
-    } finally {
-      serviceStarting.value = false;
     }
   }
 
   async function stopServiceAction(): Promise<void> {
-    serviceStopping.value = true;
+    if (lifecycle.value !== "running" && lifecycle.value !== "loading") return;
+    runtime.begin("stopping");
     try {
       await stopService();
-      serviceStatus.value = {
-        ...serviceStatus.value,
-        running: false,
-        state: "stopped",
-        pid: null,
-        uptime_seconds: null,
-      };
-      notify("info", t("service.stopSuccess"));
-      paramsAutoCollapsed = false;
-      stopStatusPolling();
-      // V1 parity (useServiceControl.js:332): refresh service model list after stop
-      void loadServiceModels();
+      // Real detection: the stop request only means "signal delivered"; keep
+      // the UI in the stopping state until the backend reports the process
+      // is actually gone.
+      const stopped = await runtime.waitForStopped();
+      if (stopped) {
+        notify("info", t("service.stopSuccess"));
+      } else {
+        notify("error", t("service.stopNotConfirmed"));
+      }
     } catch (e) {
       notify("error", `${t("service.stopFailed")}: ${(e as Error).message}`);
     } finally {
-      serviceStopping.value = false;
+      await runtime.end();
     }
   }
 
-  // ── Status polling ─────────────────────────────────────────────────────
+  // ── Status polling (shared store, ref-counted) ─────────────────────────
   function startStatusPolling(): void {
-    stopStatusPolling();
-    statusTimer = setInterval(() => {
-      void (async () => {
-        await loadServiceStatus();
-        if (!isRunning.value) stopStatusPolling();
-      })();
-    }, STATUS_POLL_MS);
+    if (pollingAcquired) return;
+    pollingAcquired = true;
+    runtime.acquire();
   }
 
   function stopStatusPolling(): void {
-    if (statusTimer) {
-      clearInterval(statusTimer);
-      statusTimer = null;
+    if (!pollingAcquired) return;
+    pollingAcquired = false;
+    runtime.release();
+  }
+
+  async function clearServiceAction(): Promise<void> {
+    if (serviceClearing.value) return;
+    if (lifecycle.value !== "running") return;
+    serviceClearing.value = true;
+    try {
+      await clearServiceContext();
+      notify("success", t("service.clearSuccess"));
+    } catch (e) {
+      const code = (e as { code?: string }).code;
+      if (code === "model_runtime.service_clear_busy") {
+        notify("warning", t("service.clearBusy"));
+      } else if (code === "model_runtime.service_not_running") {
+        notify("warning", t("service.clearNotRunning"));
+        await runtime.refresh();
+      } else {
+        notify("error", `${t("service.clearFailed")}: ${(e as Error).message}`);
+      }
+    } finally {
+      serviceClearing.value = false;
     }
   }
 
@@ -571,6 +554,20 @@ export function useServiceControl(
     el.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  // The daemon can change state outside this page (chat auto-start, external
+  // stop, crash). React to the real transition: re-open the log tail when a
+  // process appears, reset the auto-collapse latch and refresh the model list
+  // (per-model running flags) whenever the process exists / disappears.
+  watch(isRunning, (running) => {
+    if (disposed) return;
+    if (running) {
+      void streamLogs();
+    } else {
+      paramsAutoCollapsed = false;
+    }
+    void loadServiceModels();
+  });
+
   // Keep model-format derived selection valid when models change.
   watch(serviceModels, (list) => {
     if (
@@ -624,7 +621,7 @@ export function useServiceControl(
     // but `initEpoch` has moved past `myEpoch`, so we still bail.
     if (disposed || myEpoch !== initEpoch) return;
     void streamLogs();
-    if (isRunning.value) startStatusPolling();
+    startStatusPolling();
   }
 
   function dispose(): void {
@@ -638,6 +635,7 @@ export function useServiceControl(
     serviceStatus,
     serviceStarting,
     serviceStopping,
+    serviceClearing,
     serviceLogs,
     serviceLogsStreaming,
     serviceModels,
@@ -653,7 +651,6 @@ export function useServiceControl(
     logUserScrolledUp,
     // derived
     isRunning,
-    isRemoteMode,
     serviceModelsByAccel,
     localUrl,
     serviceCommandPreview,
@@ -670,6 +667,7 @@ export function useServiceControl(
     testConnection,
     startServiceAction,
     stopServiceAction,
+    clearServiceAction,
     clearLogs,
     copyLogs,
     onLogScroll,

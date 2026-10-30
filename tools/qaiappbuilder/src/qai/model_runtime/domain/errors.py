@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from qai.platform.errors import ConflictError
 
-__all__ = ["ServicePortInUseError"]
+__all__ = ["ServicePortInUseError", "ServiceClearBusyError"]
 
 
 class ServicePortInUseError(ConflictError):
@@ -48,4 +48,22 @@ class ServicePortInUseError(ConflictError):
                 f"service or choose a different port before starting."
             ),
             details={"port": port},
+        )
+
+
+class ServiceClearBusyError(ConflictError):
+    """Raised when a ``/clear`` call is already in flight (re-entry guard).
+
+    Maps to HTTP 409 so the UI can show "clearing in progress" instead of
+    stacking a second request on the daemon.
+    """
+
+    default_code = "model_runtime.service_clear_busy"
+
+    def __init__(self, message: str | None = None) -> None:
+        super().__init__(
+            self.default_code,
+            message
+            if message is not None
+            else "A clear request is already in progress for the inference service.",
         )

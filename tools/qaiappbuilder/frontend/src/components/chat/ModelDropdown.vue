@@ -29,6 +29,7 @@ import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { apiJson } from "@/api";
 import { useCloudModelPermissionsStore } from "@/stores/cloudModelPermissions";
+import { useServiceRuntimeStore } from "@/stores/serviceRuntime";
 import { useModelSelector, type ModelInfo } from "@/composables/useModelSelector";
 
 interface Props {
@@ -200,39 +201,42 @@ async function fetchQueryServices(): Promise<void> {
 // status endpoint already exposes the loaded model, and deriving the badge in
 // a small computed keeps this component the single owner of the LOCAL-group
 // presentation (vs. V1's app.js global ref soup).
-interface ServiceStatus {
-  running?: boolean;
-  model?: string | null;
-  [key: string]: unknown;
-}
-
-const serviceRunning = ref(false);
-const loadedModel = ref<string>("");
-
-async function fetchServiceStatus(): Promise<void> {
-  try {
-    const res = await apiJson<ServiceStatus>("GET", "/api/service/status");
-    serviceRunning.value = res.running === true;
-    loadedModel.value = (res.model ?? "") || "";
-  } catch {
-    serviceRunning.value = false;
-    loadedModel.value = "";
-  }
-}
+// The run state is read from the shared lifecycle store (same source as the
+// Service page and the composer status dot), so every surface agrees.
+const runtimeStore = useServiceRuntimeStore();
+const serviceLoading = computed(
+  () =>
+    runtimeStore.lifecycle === "loading" ||
+    runtimeStore.lifecycle === "starting",
+);
+const loadedModel = computed(() => runtimeStore.activeModel);
 
 /**
  * Whether a given local model is the one currently loaded/running in the
  * daemon (V1 `m.is_running`). Matches against both the model's id and its
  * display label since the daemon reports the loaded model by name.
  */
+function matchesLoadedModel(model: ModelInfo): boolean {
+  const loaded = loadedModel.value.toLowerCase();
+  if (loaded === "") return false;
+  // ``getModelId`` is ``local::<name>`` while the daemon reports the bare name.
+  const id = getModelId(model);
+  const bare = id.includes("::") ? id.slice(id.indexOf("::") + 2) : id;
+  return [id, bare, model.id, model.model_id, model.name].some(
+    (v) => typeof v === "string" && v.toLowerCase() === loaded,
+  );
+}
+
 function isLocalRunning(model: ModelInfo): boolean {
-  // Prefer the backend-authoritative ``is_running`` (V1 ``/api/models`` per
-  // entry, now tail-appended to ``/api/service/models``) when present.
-  if (typeof model.is_running === "boolean") return model.is_running;
-  // Fallback for older payloads: derive from the live service status.
-  if (!serviceRunning.value || loadedModel.value === "") return false;
-  const loaded = loadedModel.value;
-  return loaded === getModelId(model) || loaded === getModelLabel(model);
+  // Derived from the live shared status; the per-entry ``is_running`` in the
+  // cached model list can lag behind a start/stop done elsewhere.
+  const lc = runtimeStore.lifecycle;
+  if (lc !== "running" && lc !== "loading" && lc !== "starting") return false;
+  return matchesLoadedModel(model);
+}
+
+function isLocalLoading(model: ModelInfo): boolean {
+  return serviceLoading.value && isLocalRunning(model);
 }
 
 // ─── Search / filter ─────────────────────────────────────────────────────────
@@ -497,11 +501,12 @@ onMounted(() => {
   void fetchCloudModels();
   void fetchCloudProviders();
   void fetchQueryServices();
-  void fetchServiceStatus();
+  runtimeStore.acquire();
 });
 
 onBeforeUnmount(() => {
   document.removeEventListener("keydown", onKeydown);
+  runtimeStore.release();
 });
 </script>
 
@@ -598,8 +603,8 @@ onBeforeUnmount(() => {
                  in the daemon; muted "Stopped" otherwise. -->
             <span
               class="model-item-status"
-              :class="{ 'model-item-status--running': isLocalRunning(m) }"
-            >{{ isLocalRunning(m) ? '● Running' : '○ Stopped' }}</span>
+              :class="{ 'model-item-status--running': isLocalRunning(m) && !isLocalLoading(m) }"
+            >{{ isLocalLoading(m) ? '◐ Loading…' : isLocalRunning(m) ? '● Running' : '○ Stopped' }}</span>
             <!-- V1 parity (index.html:1025) — `formatCtx(m.context_length)`
                  returns '' when the field is missing, so the v-if guard
                  keeps the badge hidden until the backend `/api/service/

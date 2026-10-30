@@ -31,6 +31,7 @@ from qai.service_release.domain.value_objects import (
     CatalogModel,
     DownloadProgress,
     DownloadSettings,
+    ExtraFileInstallSpec,
     ModelInstallResult,
     ModelsLocalStatus,
     ServiceInstallResult,
@@ -91,12 +92,21 @@ class ArtifactInstallerPort(Protocol):
     async def install_model(
         self, *, save_path: str, model_id: str, install_dir: str = "",
         variant_id: str = "",
+        extra_files: tuple[ExtraFileInstallSpec, ...] = (),
+        install_config: dict[str, object] | None = None,
     ) -> ModelInstallResult:
-        """Unzip a model archive into the models root.
+        """Unzip/place a model archive or raw file into the models root.
 
         ``variant_id`` records the user-selected platform so the installer
         can persist a marker for the scanner (drives the Installed pill's
         platform label). Optional — empty degrades to no platform label.
+
+        ``extra_files``: additional already-downloaded raw files (e.g. a
+        speculative-decoding drafter GGUF) to move into the install dir
+        alongside the main file — additive, never replaces what is already
+        there. ``install_config``: optional ``config.json`` content to write
+        into the install dir once every file is in place. Both default to
+        empty/None so every existing single-file caller is unaffected.
         """
         ...
 

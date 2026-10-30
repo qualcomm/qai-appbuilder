@@ -408,10 +408,9 @@ export function useSkillCapabilities() {
    * Set a skill's 4-state run mode.
    *
    * Optimistic local update, then a discovery re-fetch so the card
-   * reflects the SERVER's resolved mode (State-Truth-First: `local` /
-   * `both` are rejected for a non-NPU skill, so the optimistic value is
-   * not necessarily what got persisted). On failure the previous mode is
-   * restored and the error surfaced.
+   * reflects the SERVER's resolved mode. Context-size validation remains a
+   * runtime concern rather than an author-maintained skill marker. On failure
+   * the previous mode is restored and the error surfaced.
    */
   async function setMode(skillName: string, mode: SkillMode): Promise<void> {
     const entry = discoveredSkills.value[skillName];

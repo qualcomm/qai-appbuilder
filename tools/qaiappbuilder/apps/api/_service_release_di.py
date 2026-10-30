@@ -20,6 +20,7 @@ migrations.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -177,8 +178,28 @@ def build_service_release_services(
         tools = getattr(settings, "tools", None) if settings else None
         return getattr(tools, "global_proxy", None)
 
+    # Locally shipped supplement to the (remote) model catalog -- extra entries
+    # (e.g. newly added models) that the remote release asset does not carry yet.
+    # Merged by ``HttpCatalogSource`` (same model_id -> local wins) and still
+    # shown if the remote fetch fails. Toggle: forge_config.json
+    # ``model_catalog.local_catalog_enabled`` (default on).
+    _forge_cfg_path = _resolve_forge_config_path(container)
+
+    def _local_catalog_enabled() -> bool:
+        try:
+            raw = json.loads(_forge_cfg_path.read_text(encoding="utf-8"))
+            flag = ((raw or {}).get("model_catalog") or {}).get("local_catalog_enabled")
+        except (OSError, ValueError):
+            return True
+        return True if flag is None else bool(flag)
+
     catalog_source = HttpCatalogSource(
-        settings=settings_port, proxy_provider=_global_proxy_provider
+        settings=settings_port,
+        proxy_provider=_global_proxy_provider,
+        local_catalog_path=(
+            container.repo_root / "factory" / "config" / "model_catalog_local.json"
+        ),
+        local_catalog_enabled=_local_catalog_enabled,
     )
     # 缺口 9 — the aria2c binary auto-install download routes through the
     # mechanism-B global proxy (with embedded user:pass@ auth) — a "file
