@@ -17,20 +17,27 @@ Routes
 - ``GET  /api/service/status``      — detailed daemon status (+ path_warning)
 - ``POST /api/service/start``       — start the inference daemon
 - ``POST /api/service/stop``        — stop the inference daemon
+- ``POST /api/service/clear``       — call the daemon's ``/clear`` (single in-flight)
 - ``GET  /api/service/logs``        — SSE stream of daemon log lines
 - ``POST /api/service/logs/clear``  — clear the log buffer (returns skip_from)
 - ``GET  /api/service/models``      — list available models on disk
+- ``GET  /api/service/install-dir`` — read ``genie_service.root_path``
+- ``POST /api/service/install-dir`` — set/clear ``genie_service.root_path``
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+
+from qai.platform.errors import PreconditionFailedError, ValidationError
 
 if TYPE_CHECKING:  # pragma: no cover
     from apps.api.di import Container
@@ -64,7 +71,6 @@ class StartServiceRequest(BaseModel):
     model_name: str | None = Field(default=None, max_length=255)
     port: int | None = Field(default=None, ge=1, le=65535)
     loglevel: int | None = Field(default=None, ge=1, le=5)
-    host_mode: str | None = Field(default=None, max_length=16)
     load_model: bool | None = None
 
 
@@ -120,6 +126,22 @@ class ModelsResponse(BaseModel):
 
     models: list[dict[str, Any]]
     models_root_path: str = ""
+
+
+class InstallDirRequest(BaseModel):
+    """Body for ``POST /api/service/install-dir`` (``""`` clears)."""
+
+    path: str = Field(default="", max_length=4096)
+
+
+class InstallDirResponse(BaseModel):
+    """Wire form of ``GET/POST /api/service/install-dir``."""
+
+    path: str
+    exe_present: bool
+    # ``QAI_LOCAL_MODEL_DEBUG`` is set; the Service page hides the custom
+    # path section when this is false.
+    enabled: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -281,25 +303,96 @@ def build_router(*, container: "Container") -> APIRouter:
         return value
 
     async def _forge_config_models_root() -> str:
-        """Return the active models-scan root for ``GET /api/service/models``.
+        """Return the effective models-scan root for ``GET /api/service/models``.
 
-        Design simplification (user mandate 2026-06-07): the models root is
-        **fixed** to the default ``<data>/models`` and is no longer a
-        user-settable path (the Service Config "models directory" input has
-        been removed from the UI). This helper therefore always returns ``""``
-        so :class:`ListModelsUseCase` falls back to the adapter's static
-        default models root, ignoring any stale persisted
-        ``service_launch.models_root_path`` from before the simplification.
-
-        ``ModelsResponse.models_root_path`` (the wire field, §3.1) is still
-        emitted — it now reflects the resolved default rather than a
-        user-configured override, so the response shape is unchanged.
+        ``service_launch.models_root_path`` (via the DI ``models_root_provider``)
+        when set, else the adapter's default ``<data>/models``.
         """
-        return ""
+        model_runtime = container.model_runtime
+        provider = getattr(model_runtime, "models_root_provider", None)
+        configured = ""
+        if provider is not None:
+            try:
+                configured = str(await provider() or "")
+            except Exception:  # noqa: BLE001 — fall back to the default root
+                configured = ""
+        return configured or str(getattr(model_runtime, "default_models_root", "") or "")
+
+    def _abs_install_dir(raw: str) -> Path:
+        p = Path(raw)
+        if p.is_absolute():
+            return p
+        data_root = getattr(getattr(container, "data_paths", None), "root", None)
+        base = Path(data_root).parent if data_root is not None else Path.cwd()
+        return (base / p).resolve()
+
+    def _local_model_debug() -> bool:
+        return bool(container.model_runtime.local_model_debug())
+
+    def _exe_present(raw: str) -> bool:
+        if not raw:
+            return False
+        return (_abs_install_dir(raw) / "GenieAPIService.exe").is_file()
+
+    @router.get("/install-dir", response_model=InstallDirResponse)
+    async def get_install_dir() -> InstallDirResponse:
+        if not _local_model_debug():
+            return InstallDirResponse(path="", exe_present=False, enabled=False)
+        reader = getattr(container.model_runtime, "read_install_dir", None)
+        path = await asyncio.to_thread(reader) if reader is not None else ""
+        return InstallDirResponse(
+            path=path, exe_present=_exe_present(path), enabled=True
+        )
+
+    @router.post("/install-dir", response_model=InstallDirResponse)
+    async def set_install_dir(body: InstallDirRequest) -> InstallDirResponse:
+        if not _local_model_debug():
+            raise PreconditionFailedError(
+                "model_runtime.local_model_debug_disabled",
+                "Custom GenieAPIService directory requires QAI_LOCAL_MODEL_DEBUG",
+            )
+        writer = getattr(container.model_runtime, "write_install_dir", None)
+        if writer is None:
+            raise PreconditionFailedError(
+                "model_runtime.install_dir_unavailable",
+                "forge_config.json is not available in this deployment",
+            )
+        path = body.path.strip()
+        if path:
+            target = _abs_install_dir(path)
+            if not target.is_dir():
+                msg = f"Directory does not exist: {path}"
+                raise ValidationError(
+                    "model_runtime.install_dir_invalid",
+                    msg,
+                    field_errors={"path": [msg]},
+                )
+            if not (target / "GenieAPIService.exe").is_file():
+                msg = f"GenieAPIService.exe not found in: {path}"
+                raise ValidationError(
+                    "model_runtime.install_dir_invalid",
+                    msg,
+                    field_errors={"path": [msg]},
+                )
+        await asyncio.to_thread(writer, path)
+        return InstallDirResponse(
+            path=path, exe_present=_exe_present(path), enabled=True
+        )
 
     @router.post("/stop", response_model=StatusResponse)
     async def stop_service(body: StopServiceRequest | None = None) -> StatusResponse:
         result = await container.model_runtime.stop_service_use_case.execute()
+        return StatusResponse(status=result["status"])
+
+    @router.post("/clear", response_model=StatusResponse)
+    async def clear_service() -> StatusResponse:
+        use_case = container.model_runtime.clear_context_use_case
+        if use_case is None:
+            raise PreconditionFailedError(
+                "model_runtime.service_clear_unavailable",
+                "Clear is not available in this deployment.",
+            )
+        result = await use_case.execute()
         return StatusResponse(status=result["status"])
 
     @router.get("/logs")

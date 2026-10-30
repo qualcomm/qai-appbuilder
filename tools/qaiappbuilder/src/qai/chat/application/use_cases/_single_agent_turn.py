@@ -1036,6 +1036,12 @@ class SingleAgentTurnKernel:
             if abort_check is not None and abort_check():
                 drain.aborted = True
                 return
+            if frame.frame_type is StreamFrameType.LIVENESS_PULSE:
+                # On-device keep-alive pulse: internal to the transport (the
+                # main loop's ``abortable_frames`` already swallows it; the
+                # discussion-speaker stream is not wrapped). Never a
+                # passthrough / content frame. Cloud streams never emit it.
+                continue
             if frame.frame_type is StreamFrameType.CHUNK:
                 text = frame.payload.get("text", "")
                 if isinstance(text, str) and text:

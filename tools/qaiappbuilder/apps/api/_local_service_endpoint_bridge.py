@@ -15,21 +15,16 @@ so a user who selects a ``local::`` model has their chat turn routed to the
 live GenieAPIService instead of the empty default endpoint baked into the chat
 settings (which degrades to ``"[no LLM endpoint configured]"``).
 
-V1 parity (``host_mode``-aware)
--------------------------------
+V1 parity
+---------
 
 V1 ``_stream_local`` built
 ``local_url = "http://{host}:{port}"`` from
 ``forge_config_manager.service_launch_host`` / ``.service_launch_port``
-(``forge_config_manager.py:258-272``), which are **connection-mode aware**:
-
-* ``service_launch.host_mode == "remote"`` → ``(remote_host, remote_port)``
-  (the "Remote machine" radio in the Connection panel);
-* otherwise (``"local"``)                  → ``("127.0.0.1", local_port)``.
-
-Both ports default to ``8910`` (V1). This bridge reproduces that exact
-behaviour for V2, where the inference daemon lives in the ``model_runtime``
-bounded context.
+(``forge_config_manager.py:258-272``). V2 only launches GenieAPIService on
+this machine, so the host is always ``127.0.0.1`` and the port defaults to
+``8910`` (V1). This bridge reproduces that behaviour for V2, where the
+inference daemon lives in the ``model_runtime`` bounded context.
 
 Per the import-linter ``context-isolation`` contract, ``qai.chat.*`` may NEVER
 import ``qai.model_runtime.*`` directly.  This module — at the ``apps/api``
@@ -41,12 +36,8 @@ together with the ``model_runtime`` inference service and the
 Resolution strategy
 -------------------
 
-1. Read ``forge.config service_launch`` once: ``host_mode`` /
-   ``remote_host`` / ``remote_port`` / ``local_port``.
-2. **Remote mode** → ``http://{remote_host}:{remote_port}/v1`` (V1
-   ``service_launch_host``/``service_launch_port`` remote branch).  When
-   ``remote_host`` is blank V1 falls back to the loopback host.
-3. **Local mode** → host is always loopback; the port is the **live running
+1. Read ``forge.config service_launch`` once (``local_port``).
+2. Host is always loopback; the port is the **live running
    daemon port** (``model_runtime.inference_service.status()["port"]`` — the
    real port the daemon was started on, e.g. ``9999``) when running, else the
    configured ``local_port``, else the typed Settings default
@@ -72,13 +63,14 @@ logger = get_logger(__name__)
 __all__ = [
     "ModelRuntimeLocalEndpointBridge",
     "make_local_service_endpoint_provider",
+    "ModelRuntimeLocalModelsLookupBridge",
+    "make_local_models_lookup",
 ]
 
-#: Loopback host used for local-mode chat traffic, matching V1
-#: ``forge_config_manager.service_launch_host`` (returns ``"127.0.0.1"`` in
-#: local mode / when ``remote_host`` is blank).  Sourced from the single
-#: allow-listed Settings definition (no hard-coded literal in new code;
-#: §3.6 ``check_no_magic_host_port`` compliant).
+#: Loopback host used for chat traffic, matching V1
+#: ``forge_config_manager.service_launch_host`` (``"127.0.0.1"``).  Sourced
+#: from the single allow-listed Settings definition (no hard-coded literal in
+#: new code; §3.6 ``check_no_magic_host_port`` compliant).
 _LOCAL_HOST = LOOPBACK_HOST
 
 
@@ -88,8 +80,7 @@ class ModelRuntimeLocalEndpointBridge:
     A zero-arg async callable satisfying the chat
     :data:`~qai.chat.application.ports.LocalEndpointProviderPort` contract:
     calling the instance returns the service base URL (e.g.
-    ``"http://127.0.0.1:9999/v1"`` in local mode, or
-    ``"http://<remote_host>:<remote_port>/v1"`` in remote mode) or ``None``.
+    ``"http://127.0.0.1:9999/v1"``) or ``None``.
     Duck-typed container access keeps the bridge tolerant of minimal test
     containers that do not wire every namespace.
     """
@@ -101,34 +92,13 @@ class ModelRuntimeLocalEndpointBridge:
 
     async def __call__(self) -> str | None:
         service_launch = await self._forge_config_service_launch()
-
-        mode = str(service_launch.get("host_mode") or "local").strip().lower()
-        if mode == "remote":
-            host, port = self._resolve_remote(service_launch)
-        else:
-            host = _LOCAL_HOST
-            port = await self._resolve_local_port(service_launch)
-
-        if not host or port is None:
-            return None
-        return f"http://{host}:{port}/v1"
-
-    # ------------------------------------------------------------------
-    # Remote mode (V1 service_launch_host/port remote branch)
-    # ------------------------------------------------------------------
-    def _resolve_remote(
-        self, service_launch: dict[str, Any]
-    ) -> tuple[str, int | None]:
-        # V1: remote_host default "" → falls back to loopback; remote_port
-        # default 8910.
-        host = str(service_launch.get("remote_host") or "").strip() or _LOCAL_HOST
-        port = self._coerce_port(service_launch.get("remote_port"))
+        port = await self._resolve_local_port(service_launch)
         if port is None:
-            port = self._settings_default_port()
-        return host, port
+            return None
+        return f"http://{_LOCAL_HOST}:{port}/v1"
 
     # ------------------------------------------------------------------
-    # Local mode (V1 service_launch_port local branch + live running port)
+    # Port resolution (V1 service_launch_port + live running port)
     # ------------------------------------------------------------------
     async def _resolve_local_port(
         self, service_launch: dict[str, Any]
@@ -145,7 +115,17 @@ class ModelRuntimeLocalEndpointBridge:
         # 3) Typed Settings default (V1 default 8910, see ModelRuntimeSettings).
         return self._settings_default_port()
 
+    async def is_running(self) -> bool:
+        status = await self._service_status()
+        return bool(status and status.get("running"))
+
     async def _running_port(self) -> int | None:
+        status = await self._service_status()
+        if not status or not status.get("running"):
+            return None
+        return self._coerce_port(status.get("port"))
+
+    async def _service_status(self) -> dict[str, Any] | None:
         model_runtime = getattr(self._container, "model_runtime", None)
         service = getattr(model_runtime, "inference_service", None)
         if service is None:
@@ -157,11 +137,7 @@ class ModelRuntimeLocalEndpointBridge:
                 "chat.local_endpoint_bridge.status_failed", error=str(exc)
             )
             return None
-        if not isinstance(status, dict):
-            return None
-        if not status.get("running"):
-            return None
-        return self._coerce_port(status.get("port"))
+        return status if isinstance(status, dict) else None
 
     # ------------------------------------------------------------------
     # Shared helpers
@@ -213,3 +189,68 @@ def make_local_service_endpoint_provider(
     still build (the bridge degrades to ``None`` at call time).
     """
     return ModelRuntimeLocalEndpointBridge(container=container)
+
+
+class ModelRuntimeLocalModelsLookupBridge:
+    """Lazily resolve ``model_runtime.list_models_use_case`` per call.
+
+    Duck-typed stand-in for ``qai.model_runtime.application.use_cases.
+    ListModelsUseCase`` (``async execute(**kwargs) -> list[ModelInfo]``),
+    satisfying :class:`~apps.api._model_resolver_bridge.
+    ModelCatalogProviderLookupBridge`'s ``local_models`` slot.
+
+    DI-order fix: ``build_chat_services`` runs BEFORE
+    ``build_model_runtime_services`` (``di.py::_build_contexts``), so
+    grabbing ``container.model_runtime.list_models_use_case`` directly at
+    DI-build time always captured ``None`` (``model_runtime`` is a
+    ``field(init=False)`` with no default — not yet assigned), making
+    ``context_window()`` unconditionally raise
+    ``MissingModelContextLengthError`` for every ``local::`` model turn,
+    independent of the model's own configured context
+    length. Mirrors :class:`ModelRuntimeLocalEndpointBridge` above: hold
+    ``container`` and resolve ``model_runtime`` lazily on each call. See
+    ``docs/QAIModelBuilder/chat-application-notes.md``.
+    """
+
+    __slots__ = ("_container",)
+
+    def __init__(self, *, container: "Container") -> None:
+        self._container = container
+
+    async def execute(self, **kwargs: Any) -> list[Any]:
+        model_runtime = getattr(self._container, "model_runtime", None)
+        use_case = getattr(model_runtime, "list_models_use_case", None)
+        if use_case is None:
+            return []
+        return await use_case.execute(**kwargs)
+
+    async def running_model(self) -> tuple[str, int] | None:
+        """Return ``(loaded model name, port)`` of the running daemon, else ``None``."""
+        model_runtime = getattr(self._container, "model_runtime", None)
+        service = getattr(model_runtime, "inference_service", None)
+        if service is None:
+            return None
+        try:
+            status = await service.status()
+        except Exception:  # noqa: BLE001 — convenience read; never fatal
+            return None
+        if not isinstance(status, dict) or not status.get("running"):
+            return None
+        model = status.get("model")
+        port = ModelRuntimeLocalEndpointBridge._coerce_port(status.get("port"))
+        if not isinstance(model, str) or not model or port is None:
+            return None
+        return model, port
+
+
+def make_local_models_lookup(
+    container: "Container",
+) -> ModelRuntimeLocalModelsLookupBridge:
+    """Build the chat local-models lookup bound to ``container``.
+
+    Factory used by ``apps/api/_chat_di.py`` to wire
+    :class:`~apps.api._model_resolver_bridge.ModelCatalogProviderLookupBridge`'s
+    ``local_models`` slot with a lazily-resolving proxy instead of an
+    eagerly-captured (and, at DI-build time, always-``None``) reference.
+    """
+    return ModelRuntimeLocalModelsLookupBridge(container=container)

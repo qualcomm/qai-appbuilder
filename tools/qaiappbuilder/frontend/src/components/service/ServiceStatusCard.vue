@@ -12,7 +12,7 @@
  * Presentational: renders the running dot / PID / uptime / exe path, the
  * ⚙️ config gear, Start / Stop buttons, the inline guidance lines, and the
  * separate "GenieAPIService not installed" notice card (Region 4 — same
- * !remote && !running && !installed condition, so it lives here for cohesion).
+ * !running && !installed condition, so it lives here for cohesion).
  * All state stays in the page-level `useServiceControl`; this panel only emits
  * intents (open-config / start / stop) and navigation requests back up.
  */
@@ -22,9 +22,9 @@ import type { ServiceStatusResponse } from "@/types/service";
 defineProps<{
   serviceStatus: ServiceStatusResponse;
   isRunning: boolean;
-  isRemoteMode: boolean;
   serviceStarting: boolean;
   serviceStopping: boolean;
+  serviceClearing: boolean;
   serviceModelsLoading: boolean;
   serviceModelsCount: number;
   canStartService: boolean;
@@ -37,6 +37,7 @@ const emit = defineEmits<{
   (e: "open-config"): void;
   (e: "start"): void;
   (e: "stop"): void;
+  (e: "clear"): void;
   (e: "download-service"): void;
   (e: "download-models"): void;
 }>();
@@ -58,8 +59,16 @@ const { t } = useI18n();
       <div class="service-status-main">
         <div class="service-status-title">
           GenieAPIService&nbsp;
-          <span :class="isRunning ? 'status-on' : 'status-off'">
-            {{ isRunning ? t("service.running") : t("service.stopped") }}
+          <span :class="isRunning && !serviceStarting && !serviceStopping ? 'status-on' : 'status-off'">
+            {{
+              serviceStopping
+                ? t("service.stopping")
+                : serviceStarting
+                  ? t("service.starting")
+                  : isRunning
+                    ? t("service.running")
+                    : t("service.stopped")
+            }}
           </span>
         </div>
         <div
@@ -68,12 +77,6 @@ const { t } = useI18n();
         >
           {{ t("service.pid") }}: {{ serviceStatus.pid }} ·
           {{ t("service.uptime") }}: {{ uptimeText }}
-        </div>
-        <div
-          v-if="isRemoteMode && !isRunning"
-          class="service-status-remote-hint"
-        >
-          {{ t("service.remoteModeStartHint") }}
         </div>
         <div
           v-if="serviceStatus.exe_path"
@@ -101,7 +104,7 @@ const { t } = useI18n();
           <button
             type="button"
             class="btn btn-success"
-            :disabled="isRunning || serviceStarting || !canStartService"
+            :disabled="isRunning || serviceStarting || serviceStopping || !canStartService"
             @click="emit('start')"
           >
             <span
@@ -115,7 +118,7 @@ const { t } = useI18n();
           <button
             type="button"
             class="btn btn-danger"
-            :disabled="!isRunning || serviceStopping || isRemoteMode"
+            :disabled="!isRunning || serviceStopping"
             @click="emit('stop')"
           >
             <span
@@ -126,9 +129,23 @@ const { t } = useI18n();
             <span v-else>■</span>
             {{ serviceStopping ? t("service.stopping") : t("service.stop") }}
           </button>
+          <button
+            type="button"
+            class="btn btn-ghost"
+            :disabled="!isRunning || serviceStarting || serviceStopping || serviceClearing"
+            @click="emit('clear')"
+          >
+            <span
+              v-if="serviceClearing"
+              class="spinner svc-btn-spinner"
+              aria-hidden="true"
+            ></span>
+            <span v-else>✕</span>
+            {{ serviceClearing ? t("service.clearing") : t("service.clear") }}
+          </button>
         </div>
         <div
-          v-if="!isRemoteMode && !isRunning && !serviceStatus.exe_path && !serviceModelsLoading"
+          v-if="!isRunning && !serviceStatus.exe_path && !serviceModelsLoading"
           class="service-status-guidance"
         >
           {{ t("service.serviceNotFound") }}<br />
@@ -138,7 +155,7 @@ const { t } = useI18n();
           >{{ t("service.downloadArrow") }}</a>
         </div>
         <div
-          v-else-if="!isRemoteMode && !isRunning && serviceModelsCount === 0 && !serviceModelsLoading"
+          v-else-if="!isRunning && serviceModelsCount === 0 && !serviceModelsLoading"
           class="service-status-guidance error"
         >
           <!-- V1 parity (index.html:2829-2832): static prefix text, only the
@@ -155,7 +172,7 @@ const { t } = useI18n();
 
     <!-- ── Region 4. GenieAPIService-not-installed guidance card ───────── -->
     <div
-      v-if="!isRemoteMode && !isRunning && !serviceStatus.exe_path && !serviceModelsLoading"
+      v-if="!isRunning && !serviceStatus.exe_path && !serviceModelsLoading"
       class="svc-notice warn"
     >
       <div class="svc-notice-title">
@@ -239,11 +256,6 @@ const { t } = useI18n();
   font-size: var(--text-sm);
   color: var(--text-secondary);
   margin-top: 2px;
-}
-.service-status-remote-hint {
-  font-size: var(--text-xs);
-  color: var(--banner-warn-text);
-  margin-top: 3px;
 }
 .service-status-exe {
   font-size: var(--text-xs);

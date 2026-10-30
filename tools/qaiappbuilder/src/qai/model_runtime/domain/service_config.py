@@ -28,12 +28,6 @@ from typing import Any
 # always receive an independent deep copy (never a shared mutable instance).
 _SERVICE_CONFIG_DEFAULTS: dict[str, Any] = {
     "local_model": {"enabled": True},
-    "default_model": "",
-    "models": [
-        {"name": "", "context_size": 4096, "enabled": True, "backend": "qnn", "device": "npu"},
-        {"name": "", "context_size": 4096, "enabled": False, "backend": "GGUF", "device": "gpu"},
-        {"name": "", "context_size": 4096, "enabled": False, "backend": "mnn", "device": "cpu"},
-    ],
     "cloud_shared": {
         "timeout_seconds": 120,
         "stream_timeout_seconds": 1800,
@@ -85,6 +79,37 @@ _SERVICE_CONFIG_DEFAULTS: dict[str, Any] = {
 }
 
 
+# Top-level keys of the daemon's retired multi-model slot table. QAI used to
+# rewrite ``models[*]`` / ``default_model`` before every spawn; it no longer
+# manages them and no UI edits them, yet GenieAPIService still honours them
+# (``ModelManager::LoadAllModelsFromConfig`` loads every enabled ``models``
+# entry next to the ``-c`` model and lets ``default_model`` override the
+# default handle). A stale slot left over from the old sync therefore loads an
+# extra model or reroutes requests that omit ``model``, so these keys are
+# stripped ONCE per install (one-time migration). Multi-model slots are still a
+# real daemon capability: a ``models[]`` the user hand-writes afterwards must
+# survive, which is why the migration never re-runs once it has completed.
+# Only these exact top-level keys: nothing else in the document is touched.
+LEGACY_MODEL_SLOT_KEYS: tuple[str, ...] = (
+    "_comment_models",
+    "models",
+    "_comment_default_model",
+    "default_model",
+)
+
+
+def strip_legacy_model_slot_keys(doc: dict[str, Any]) -> list[str]:
+    """Remove :data:`LEGACY_MODEL_SLOT_KEYS` from *doc* in place.
+
+    Returns the removed keys in document order; an empty list means *doc*
+    was already clean (callers use that to skip the write).
+    """
+    removed = [k for k in doc if k in LEGACY_MODEL_SLOT_KEYS]
+    for k in removed:
+        del doc[k]
+    return removed
+
+
 def default_service_config() -> dict[str, Any]:
     """Return a fresh deep copy of the built-in service_config defaults."""
     return copy.deepcopy(_SERVICE_CONFIG_DEFAULTS)
@@ -104,4 +129,9 @@ def deep_merge_defaults(base: dict[str, Any], override: dict[str, Any]) -> dict[
     return base
 
 
-__all__ = ["default_service_config", "deep_merge_defaults"]
+__all__ = [
+    "LEGACY_MODEL_SLOT_KEYS",
+    "default_service_config",
+    "deep_merge_defaults",
+    "strip_legacy_model_slot_keys",
+]

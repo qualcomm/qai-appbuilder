@@ -16,8 +16,7 @@ Tests stub out the actual ``Popen`` call (``_do_start``) and capture the
 - argv shape matches V1 byte-for-byte (positional order, short flags only)
 - ``loglevel`` resolution honours arg > provider > V1 default 3
 - ``models_root`` resolution honours provider > static field > install_dir/models
-- ``_sync_service_config_model`` writes the V1 wire format
-  (first enabled NPU slot + ``default_model``; ensure_ascii=False; indent=4)
+- ``start()`` leaves ``service_config.json`` untouched
 """
 
 from __future__ import annotations
@@ -73,11 +72,8 @@ def _make_adapter(
         loglevel_provider=loglevel_provider,
     )
     capture = _ArgvCapture()
-    # Replace the blocking spawn step with a recorder. Also disable the
-    # service_config.json sync side-effect so tests don't need a real file
-    # — sync is exercised separately below.
+    # Replace the blocking spawn step with a recorder.
     svc._do_start = capture  # type: ignore[assignment]
-    svc._sync_service_config_model = lambda model_name: None  # type: ignore[assignment]
     return svc, capture
 
 
@@ -212,6 +208,46 @@ class TestListModelsGenieConfigScan:
         assert [m.name for m in models] == ["qwen3-8b"]
         assert models[0].config_path == str(model_dir / "config.json")
 
+    @pytest.mark.asyncio
+    async def test_context_length_comes_from_release_config_dir(
+        self, tmp_path: Path
+    ) -> None:
+        models_root = tmp_path / "models"
+        for name, files in (
+            ("Hunyuan2B", ["weights.bin", "tokenizer.json"]),
+            ("qwen3.8-27b-q4_0", ["model.gguf"]),
+            ("orphan", ["model.gguf"]),
+        ):
+            model_dir = models_root / name
+            model_dir.mkdir(parents=True)
+            (model_dir / "config.json").write_text(
+                '{"dialog": {"context": {"size": 99}}}', encoding="utf-8"
+            )
+            for file_name in files:
+                (model_dir / file_name).write_bytes(b"\x00")
+        install_dir = tmp_path / "svc"
+        release_cfg = install_dir / "config"
+        (release_cfg / "Hunyuan2B").mkdir(parents=True)
+        (release_cfg / "Hunyuan2B" / "config.json").write_text(
+            '{"dialog": {"context": {"size": 1024}}}', encoding="utf-8"
+        )
+        (release_cfg / "Qwen3.8-27B-Q4_0").mkdir()
+        (release_cfg / "Qwen3.8-27B-Q4_0" / "config.json").write_text(
+            '{"backend": "gpu"}', encoding="utf-8"
+        )
+        (release_cfg / "Qwen3.8-27B-Q4_0" / "prompt.json").write_text(
+            '{"context_size": 32768}', encoding="utf-8"
+        )
+        (release_cfg / "service_config.json").write_text("{}", encoding="utf-8")
+        svc = ProcessBackedInferenceService(install_dir=str(install_dir))
+        models = await svc.list_models(models_root=str(models_root))
+        by_name = {m.name: m.context_length for m in models}
+        assert by_name == {
+            "Hunyuan2B": 1024,
+            "qwen3.8-27b-q4_0": 32768,
+            "orphan": None,
+        }
+
 
 # ---------------------------------------------------------------------------
 # loglevel precedence: arg > provider > V1 default 3
@@ -343,164 +379,19 @@ class TestModelsRootResolution:
 
 
 # ---------------------------------------------------------------------------
-# _sync_service_config_model — V1 main.py:5214-5248 parity
+# start() must not rewrite service_config.json
 # ---------------------------------------------------------------------------
 
 
-class TestSyncServiceConfigModel:
-    def test_writes_first_enabled_npu_slot_and_default_model(
+class TestStartLeavesServiceConfigUntouched:
+    @pytest.mark.asyncio
+    async def test_start_with_model_does_not_rewrite_service_config(
         self, tmp_path: Path
     ) -> None:
         cfg_path = tmp_path / "service_config.json"
-        cfg_path.write_text(
-            json.dumps(
-                {
-                    "default_model": "old-model",
-                    "models": [
-                        {
-                            "enabled": True,
-                            "backend": "qnn",
-                            "name": "old-model",
-                            "path": "old-model",
-                        },
-                        {
-                            "enabled": True,
-                            "backend": "cpu",
-                            "name": "ignore-me",
-                            "path": "ignore-me",
-                        },
-                    ],
-                }
-            ),
-            encoding="utf-8",
-        )
-
-        svc = ProcessBackedInferenceService(install_dir=str(tmp_path))
-        svc._sync_service_config_model("new-model")
-
-        data = json.loads(cfg_path.read_text(encoding="utf-8"))
-        assert data["default_model"] == "new-model"
-        assert data["models"][0]["name"] == "new-model"
-        assert data["models"][0]["path"] == "new-model"  # V1: path == name
-        # Non-NPU slot must be untouched.
-        assert data["models"][1]["name"] == "ignore-me"
-
-    def test_picks_first_enabled_with_empty_backend(
-        self, tmp_path: Path
-    ) -> None:
-        # V1: backend in {"qnn", ""} both qualify as the NPU slot.
-        cfg_path = tmp_path / "service_config.json"
-        cfg_path.write_text(
-            json.dumps(
-                {
-                    "default_model": "old",
-                    "models": [
-                        {
-                            "enabled": False,
-                            "backend": "qnn",
-                            "name": "disabled",
-                            "path": "disabled",
-                        },
-                        {
-                            "enabled": True,
-                            "backend": "",
-                            "name": "old",
-                            "path": "old",
-                        },
-                    ],
-                }
-            ),
-            encoding="utf-8",
-        )
-
-        svc = ProcessBackedInferenceService(install_dir=str(tmp_path))
-        svc._sync_service_config_model("fresh")
-
-        data = json.loads(cfg_path.read_text(encoding="utf-8"))
-        assert data["models"][0]["name"] == "disabled"  # untouched
-        assert data["models"][1]["name"] == "fresh"
-        assert data["default_model"] == "fresh"
-
-    def test_handles_missing_file_silently(self, tmp_path: Path) -> None:
-        # No service_config.json on disk → no-op, no exception.
-        svc = ProcessBackedInferenceService(install_dir=str(tmp_path))
-        svc._sync_service_config_model("any-model")  # must not raise
-        assert not (tmp_path / "service_config.json").exists()
-
-    def test_handles_missing_install_dir_silently(self) -> None:
-        svc = ProcessBackedInferenceService(install_dir="")
-        svc._sync_service_config_model("any-model")  # must not raise
-
-    def test_handles_empty_model_name_silently(self, tmp_path: Path) -> None:
-        cfg_path = tmp_path / "service_config.json"
-        original = json.dumps({"default_model": "keep"})
-        cfg_path.write_text(original, encoding="utf-8")
-
-        svc = ProcessBackedInferenceService(install_dir=str(tmp_path))
-        svc._sync_service_config_model("")  # must not modify anything
-
-        assert cfg_path.read_text(encoding="utf-8") == original
-
-    def test_skips_write_when_already_in_sync(self, tmp_path: Path) -> None:
-        cfg_path = tmp_path / "service_config.json"
-        original = json.dumps(
-            {
-                "default_model": "current",
-                "models": [
-                    {
-                        "enabled": True,
-                        "backend": "qnn",
-                        "name": "current",
-                        "path": "current",
-                    }
-                ],
-            }
-        )
+        original = json.dumps({"port": 8910})
         cfg_path.write_text(original, encoding="utf-8")
         mtime_before = cfg_path.stat().st_mtime_ns
-
-        svc = ProcessBackedInferenceService(install_dir=str(tmp_path))
-        svc._sync_service_config_model("current")
-
-        # Already in sync → no rewrite (V1 ``changed`` flag short-circuits).
-        assert cfg_path.stat().st_mtime_ns == mtime_before
-
-    def test_handles_corrupt_json_non_fatally(self, tmp_path: Path) -> None:
-        cfg_path = tmp_path / "service_config.json"
-        cfg_path.write_text("{ this is not json", encoding="utf-8")
-
-        svc = ProcessBackedInferenceService(install_dir=str(tmp_path))
-        svc._sync_service_config_model("anything")  # must not raise
-
-        # Corrupt input must not be rewritten — V1 reads-only on parse error.
-        assert cfg_path.read_text(encoding="utf-8") == "{ this is not json"
-
-
-# ---------------------------------------------------------------------------
-# Sync integration: start() invokes _sync_service_config_model
-# ---------------------------------------------------------------------------
-
-
-class TestStartTriggersSync:
-    @pytest.mark.asyncio
-    async def test_start_with_model_calls_sync(self, tmp_path: Path) -> None:
-        cfg_path = tmp_path / "service_config.json"
-        cfg_path.write_text(
-            json.dumps(
-                {
-                    "default_model": "old",
-                    "models": [
-                        {
-                            "enabled": True,
-                            "backend": "qnn",
-                            "name": "old",
-                            "path": "old",
-                        }
-                    ],
-                }
-            ),
-            encoding="utf-8",
-        )
 
         svc = ProcessBackedInferenceService(install_dir=str(tmp_path))
         capture = _ArgvCapture()
@@ -508,35 +399,8 @@ class TestStartTriggersSync:
 
         await svc.start(model_name="brand-new", port=8000, loglevel=3)
 
-        data = json.loads(cfg_path.read_text(encoding="utf-8"))
-        assert data["default_model"] == "brand-new"
-        assert data["models"][0]["name"] == "brand-new"
-
-    @pytest.mark.asyncio
-    async def test_start_without_model_skips_sync(self, tmp_path: Path) -> None:
-        cfg_path = tmp_path / "service_config.json"
-        original = json.dumps(
-            {
-                "default_model": "untouched",
-                "models": [
-                    {
-                        "enabled": True,
-                        "backend": "qnn",
-                        "name": "untouched",
-                        "path": "untouched",
-                    }
-                ],
-            }
-        )
-        cfg_path.write_text(original, encoding="utf-8")
-
-        svc = ProcessBackedInferenceService(install_dir=str(tmp_path))
-        capture = _ArgvCapture()
-        svc._do_start = capture  # type: ignore[assignment]
-
-        await svc.start(port=8000, loglevel=3)  # no model_name
-
         assert cfg_path.read_text(encoding="utf-8") == original
+        assert cfg_path.stat().st_mtime_ns == mtime_before
 
 
 # ---------------------------------------------------------------------------

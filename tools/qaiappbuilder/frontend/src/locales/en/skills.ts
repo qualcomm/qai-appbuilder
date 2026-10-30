@@ -47,7 +47,6 @@ const skills = {
   modeResultOff: "Disabled",
   noSkills: "No Skills Found",
   noSkillsHint: "Create a skills/ directory and add SKILL.md files to get started.",
-  npuDisabledHint: "Add a \".\" at the end of the tags line in SKILL.md to enable local model",
   npuOptimized: "NPU Optimized",
   reloadFailed: "Reload failed: ",
   reloaded: "Skills reloaded",

@@ -16,17 +16,17 @@ Two families of skill endpoints live in ``user_prefs``:
    {skill_id}/set_mode`` — live-scan the on-disk ``skills/`` directory
    (via the :class:`SkillDiscovery` platform port), merge each skill's
    persisted per-skill 4-state mode from ``skills.overrides``, and
-   enforce the NPU requirement for ``local``/``both`` modes.
+   validate the requested mode.
 
-The directory scan + ``_resolve_mode`` override merge + NPU validation
+The directory scan + ``_resolve_mode`` override merge + mode validation
 are application policy; they previously lived inline in the route layer.
 Moving them here keeps ``interfaces/`` declarative.
 
 Result shapes are returned to the route 1:1 with the legacy handlers;
-NPU-violation / unknown-skill error conditions are surfaced as
-domain-level exceptions (:class:`SkillNotFoundError` /
-:class:`SkillModeNotAllowedError`) so the route maps them to the same
-404 / 400 responses without embedding the validation logic.
+unknown-skill / invalid-mode error conditions are surfaced as
+exceptions (:class:`SkillNotFoundError` / ``ValueError``) so the route
+maps them to the same 404 / 400 responses without embedding the
+validation logic.
 """
 from __future__ import annotations
 
@@ -36,7 +36,6 @@ from typing import Any
 
 from qai.platform.skills import (
     DEFAULT_SKILL_MODES,
-    NPU_MODES as NPU_SKILL_MODES,
     VALID_MODES as VALID_SKILL_MODES,
     SkillDiscovery,
     resolve_skill_mode,
@@ -54,7 +53,6 @@ __all__ = [
     "ReloadSkillsUseCase",
     "SetSkillModeUseCase",
     "SetSkillPolicyModeUseCase",
-    "SkillModeNotAllowedError",
     "SkillNotFoundError",
     "ToggleSkillUseCase",
 ]
@@ -70,28 +68,13 @@ class SkillNotFoundError(LookupError):
         super().__init__(f"Unknown skill: {skill_id}")
 
 
-class SkillModeNotAllowedError(ValueError):
-    """Raised when a mode requires NPU optimisation but the skill lacks it.
-
-    (→ 400, v1 ``set_mode`` ValueError parity.)
-    """
-
-    def __init__(self, skill_id: str, mode: str) -> None:
-        self.skill_id = skill_id
-        self.mode = mode
-        super().__init__(
-            f"Skill '{skill_id}' is not NPU-optimized; "
-            f"mode '{mode}' requires NPU optimization."
-        )
-
-
 def _coerce_section(raw: Any) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
 #: Per-skill DEFAULT run mode and the mode-resolution ladder now live in the
 #: shared kernel (``qai.platform.skills``), which is also where ``VALID_MODES``
-#: / ``NPU_MODES`` already lived.
+#: lives.
 #:
 #: They used to be defined HERE and duplicated in
 #: ``apps/api/_chat_skill_catalog_provider.py`` (the chat prompt gate), whose
@@ -242,8 +225,7 @@ class SetSkillModeUseCase:
 
     Raises:
         SkillNotFoundError: ``skill_id`` is not discovered (→ 404).
-        SkillModeNotAllowedError: ``mode`` is ``local``/``both`` but the
-            skill is not NPU-optimised (→ 400).
+        ValueError: ``mode`` is not one of the shared four valid modes.
 
     Persists to ``forge.config skills.overrides[skill_id].mode``,
     tail-appending the ``mode`` sub-key alongside any existing
@@ -259,6 +241,11 @@ class SetSkillModeUseCase:
         skill = self.skill_discovery.find(skill_id)
         if skill is None:
             raise SkillNotFoundError(skill_id)
+        if mode not in VALID_SKILL_MODES:
+            raise ValueError(
+                f"Invalid skill mode {mode!r}; "
+                f"expected one of {sorted(VALID_SKILL_MODES)}."
+            )
         if skill.pinned:
             # Pinned skills are always-on; mode changes are silently ignored
             # so the UI can call this without error but the skill stays active.
@@ -268,8 +255,6 @@ class SetSkillModeUseCase:
                 "npu_optimized": skill.npu_optimized,
                 "pinned": True,
             }
-        if mode in NPU_SKILL_MODES and not skill.npu_optimized:
-            raise SkillModeNotAllowedError(skill_id, mode)
         doc = await self.load_document_use_case.execute(self.forge_config_key)
         skills = _coerce_section(doc.get(_SKILLS_SUBKEY, {}))
         overrides = skills.get("overrides", {})

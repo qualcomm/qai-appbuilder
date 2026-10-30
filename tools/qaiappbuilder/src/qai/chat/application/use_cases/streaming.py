@@ -48,7 +48,9 @@ import asyncio
 import contextlib
 import json
 import math
+import platform
 import re
+import sys
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Mapping
 from pathlib import Path
@@ -225,6 +227,7 @@ from qai.chat.application.use_cases._long_term_memory import (
 )
 from qai.chat.application.use_cases.tool_advertise import (
     CONDITIONAL_TOOL_NAMES as _CONDITIONAL_TOOL_NAMES,
+    LOCAL_EXCLUDED_TOOLS as _LOCAL_EXCLUDED_TOOLS,
     SUB_AGENT_EXCLUDED_TOOLS as _SUB_AGENT_EXCLUDED_TOOLS,
     compose_advertised_tools as _compose_advertised_tools,
     schema_tool_name as _shared_schema_tool_name,
@@ -657,6 +660,120 @@ def _build_local_workspace_directive(workspace_root: str) -> str:
         f"files under `{root}` — you may freely recurse inside it (e.g. "
         "`glob` with `**/*`). Only avoid recursive scans rooted at unbounded "
         "drive roots (e.g. `C:\\`) when looking for a place to work."
+    )
+
+
+#: Sub-directory of the workspace root that holds the per-session working
+#: directories derived by :meth:`StreamChatUseCase._derive_session_workspace`.
+#: A layout name only -- the root itself is always the runtime-resolved value.
+_SESSION_WORKSPACE_SUBDIR = "sessions"
+
+#: Repository root of the running application (``<root>/src/qai/chat/
+#: application/use_cases/streaming.py`` -> five parents up). Named in the
+#: on-device prompt so a local model stops looking for the app it is
+#: running inside -- the failure mode this fixes is a model that tries to
+#: ``git clone`` / ``pip install`` "QAIModelBuilder" to find a file that is
+#: already on this disk.
+_LOCAL_APP_ROOT: str = str(Path(__file__).resolve().parents[5])
+
+#: Tools whose presence means the turn can run commands on this host, so the
+#: host facts below are worth their prompt bytes. Any other tool set keeps
+#: the prompt as short as before.
+_LOCAL_EXECUTION_TOOL_NAMES: frozenset[str] = frozenset(
+    {"exec", "background_process"}
+)
+
+
+def _conversation_has_agent_history(conv: Any) -> bool:
+    """True when ``conv`` already holds a turn the agent itself produced.
+
+    Any message whose role is neither ``user`` nor ``system`` means a previous
+    turn already ran and may have written artefacts under the workspace root
+    this conversation was using. Such a conversation must keep that root.
+    """
+    for msg in getattr(conv, "messages", None) or ():
+        role = getattr(msg, "role", "")
+        role_text = str(getattr(role, "value", role)).strip().lower()
+        if role_text not in ("user", "system", ""):
+            return True
+    return False
+
+
+def _local_advertised_tool_names(extra: dict[str, Any]) -> frozenset[str]:
+    """Tool names actually advertised on THIS turn's wire.
+
+    Reads the list ``_collect_tool_schemas`` already composed (it runs before
+    the system prompt is built, see ``_build_llm_request``), so the prompt can
+    describe the tools the model really has instead of a static guess. Returns
+    an empty set when nothing was advertised or the value is malformed -- every
+    caller then renders its shorter, assumption-free variant.
+    """
+    schemas = extra.get("tools_schemas")
+    if not isinstance(schemas, (list, tuple)):
+        return frozenset()
+    names: set[str] = set()
+    for s in schemas:
+        if not isinstance(s, dict):
+            continue
+        fn = s.get("function")
+        if isinstance(fn, dict):
+            name = fn.get("name")
+            if isinstance(name, str):
+                names.add(name)
+    return frozenset(names)
+
+
+def _local_has_execution_tools(extra: dict[str, Any]) -> bool:
+    """True when this turn's tool schemas include an execution tool."""
+    return bool(_local_advertised_tool_names(extra) & _LOCAL_EXECUTION_TOOL_NAMES)
+
+
+def _local_has_skill_tool(extra: dict[str, Any]) -> bool:
+    """True when this turn advertises the ``skill`` tool.
+
+    On-device turns keep it at every window size, but it can still be absent
+    -- the per-session quick-toggle can disable the tool, and a sub-agent
+    without a skill whitelist is composed with ``enable_skill=False``. So the
+    skills section must ask THIS turn rather than assume: telling a model to
+    call a tool it was not given is the same class of failure as the
+    ``git clone`` hunt the warning in the skills section exists to stop.
+    """
+    return "skill" in _local_advertised_tool_names(extra)
+
+
+def _build_local_env_facts() -> str:
+    """Render the host facts an on-device model cannot infer by itself.
+
+    A cloud model routinely probes its environment with a throwaway command;
+    a small local model instead guesses -- searching the filesystem for an
+    interpreter, or mixing cmd and PowerShell syntax in one ``exec`` call
+    until it gives up. Stating the facts it actually needs (OS, the
+    interpreter path, the app root, which shell ``exec`` lands in) is far
+    cheaper than the retries. Only injected when the turn HAS an execution
+    tool (see :func:`_local_has_execution_tools`).
+
+    The shell sentence mirrors THIS tree's ``exec`` handler
+    (``_detect_shell_type``): POSIX markers -> sh, PowerShell markers -> PS,
+    everything else -> cmd.exe.
+    """
+    python_path = sys.executable or "<unknown>"
+    os_name = platform.system() or "Unknown"
+    return (
+        "## Host Environment\n"
+        f"- OS: {os_name}\n"
+        f"- Python interpreter for this process: `{python_path}`. Use this "
+        "exact path (or whatever interpreter path a tool/skill explicitly "
+        "hands you) when invoking `python`/`pip` via `exec`; do not search "
+        "PATH or the filesystem for another interpreter.\n"
+        f"- QAIModelBuilder application root: `{_LOCAL_APP_ROOT}` (distinct "
+        "from your working directory below \u2014 this is where the application "
+        "itself, not your task output, lives).\n"
+        "- `exec` picks its shell per command. It switches to PowerShell for "
+        "a leading `& `, a Verb-Noun cmdlet (e.g. `Get-ChildItem`), a "
+        "`$variable` or PowerShell operators/pipelines; to POSIX sh (when "
+        "PortableGit is installed) for heredocs, `&&`/`||` chains, `$(...)` "
+        "or `/c/...` paths; otherwise it runs cmd.exe. Never mix syntax from "
+        "different shells in one command."
     )
 
 
@@ -4161,8 +4278,13 @@ class StreamChatUseCase:
                 # (and final) pass.
                 _round0_retry_count = 0
                 while True:
+                    # On-device models skip the exhaustion cap: a local
+                    # model's per-response ceiling is routinely hit, and the
+                    # cloud-oriented "give up after N retries" notice would
+                    # only strand the user mid-answer.
                     _allow_round0_retry = (
                         _round0_retry_count < _MAX_CONSECUTIVE_TRUNCATION_RETRIES
+                        or _is_local_model_hint(request.model_hint)
                     )
                     stream_frames = self._open_initial_stream(
                         conv=conv, tab=tab, request=request,
@@ -6448,9 +6570,17 @@ class StreamChatUseCase:
             fallback_parent_id=final_parent_id,
             stable_ids_by_round=stable_subagent_summary_ids,
         )
+        # A turn that produced no text at all still gets a persisted
+        # assistant row (the rounds / tool cards hang off it), but an EMPTY
+        # body is indistinguishable from "nothing happened" on reload and
+        # leaves the next turn's wire with a contentless assistant slot that
+        # some providers reject. A visible marker keeps the turn auditable.
+        _output_text = joined
+        if not _output_text.strip():
+            _output_text = "[empty]"
         assistant_msg = self._build_message(
             role=MessageRole.ASSISTANT,
-            content=MessageContent(text=joined),
+            content=MessageContent(text=_output_text),
             now=now,
             parent_id=final_parent_id,
             usage=turn_usage,
@@ -8249,6 +8379,7 @@ class StreamChatUseCase:
         self,
         wire_messages: list[dict[str, Any]],
         round_results: list[dict[str, Any]],
+        model_hint: str | None = None,
     ) -> None:
         """Inject a follow-up multimodal ``role:user`` message for question
         images (V2 enhancement).
@@ -8302,6 +8433,7 @@ class StreamChatUseCase:
                 source_text=result_text,
                 cloud_format=_img_fmt,
                 cloud_quality=_img_q,
+                is_local_model=_is_local_model_hint(model_hint),
             )
             if blocks:
                 wire_messages.append(
@@ -8831,8 +8963,11 @@ class StreamChatUseCase:
         # the SAME helper, so the two loops can never drift).
         #
         # Main agent (not a take-over): nothing excluded, ``agent`` injected on
-        # every depth-0 turn (V1 chat_handler.py:392-395; the live on-device
-        # payload audit confirmed the 9th tool is ``agent``).
+        # every CLOUD depth-0 turn (V1 chat_handler.py:392-395). LOCAL turns no
+        # longer get it: ``inject_agent`` stays ``True`` here, and the shared
+        # helper's own ``not is_local`` drops it -- see the ``agent`` entry in
+        # ``tool_advertise.LOCAL_EXCLUDED_TOOLS`` for why an on-device window
+        # cannot carry a spawn's result.
         #
         # Take-over of a sub-agent (``extra["_subagent_takeover"]``): the user
         # is conversing AS/WITH that sub-agent, so the set matches the
@@ -8989,6 +9124,57 @@ class StreamChatUseCase:
         ws = meta.get("workspace")
         if isinstance(ws, str) and ws.strip():
             extra["_session_workspace_root"] = ws.strip()
+            return
+        if not _is_local_model_hint(getattr(request, "model_hint", None)):
+            return
+        derived = self._derive_session_workspace(conv)
+        if derived is None:
+            return
+        try:
+            conv.set_workspace(derived, now=self._clock.now())
+            await self._conversations.save(conv)
+        except Exception:  # noqa: BLE001 -- never break prompt assembly
+            return
+        _log.info(
+            "chat.session_workspace_derived",
+            conversation_id=conv_id.value,
+            workspace=derived,
+        )
+        extra["_session_workspace_root"] = derived
+
+    def _derive_session_workspace(self, conv: Any) -> str | None:
+        """Derive a per-conversation working directory, or ``None`` to skip.
+
+        Returns ``None`` -- leaving the conversation on the global workspace --
+        when the conversation already ran a turn (its artefacts live under the
+        root it used), when its id yields no usable directory name, or when the
+        directory cannot be created. Otherwise the directory is created and its
+        absolute path returned, so the first turn of a NEW conversation starts
+        in a directory no other conversation has written to.
+
+        Only called for local (``local::``) turns: the isolation stops a small
+        on-device model from adopting another session's leftovers, while cloud
+        turns keep the global root so its ``AGENTS.md`` / ``CLAUDE.md`` stay
+        readable.
+        """
+        if _conversation_has_agent_history(conv):
+            return None
+        conv_id = getattr(getattr(conv, "id", None), "value", None)
+        if not isinstance(conv_id, str):
+            return None
+        slug = re.sub(r"[^A-Za-z0-9_-]", "", conv_id)[:64]
+        if not slug:
+            return None
+        try:
+            target = (
+                Path(self._effective_workspace_root_str(None))
+                / _SESSION_WORKSPACE_SUBDIR
+                / slug
+            )
+            target.mkdir(parents=True, exist_ok=True)
+        except (OSError, ValueError):
+            return None
+        return str(target)
 
     async def _resolve_workspace_context_files(
         self,
@@ -9230,11 +9416,50 @@ class StreamChatUseCase:
         workspace_directive = _build_local_workspace_directive(workspace_root)
 
         parts: list[str] = [_LOCAL_AGENT_MAIN_MARKER, workspace_directive]
+        if _local_has_execution_tools(extra):
+            parts.append(_build_local_env_facts())
         if skills_xml:
-            parts.append(skills_xml)
+            # Heading + anti-fetch preamble (on-device only): the cloud path's
+            # richer prompt already frames the catalog, but a small local
+            # model reads a bare ``<location>`` path as "a project I must
+            # obtain" and spends whole turns on `git clone` / `pip install`
+            # for a SKILL.md that is already on this disk. State the facts
+            # that stop it: local file, never fetch, and how to actually open
+            # one.
+            #
+            # How to OPEN a skill depends on this turn's tool set: ``skill``
+            # is advertised on-device at every window size, but a session
+            # toggle (or a sub-agent composed with ``enable_skill=False``) can
+            # still remove it, so name it only when it is really there and
+            # fall back to ``read`` otherwise.
+            if _local_has_skill_tool(extra):
+                open_instruction = (
+                    "To use one, call the `skill` tool with its <name> \u2014 it "
+                    "loads that SKILL.md for you. Calling `read` on the "
+                    "<location> path works too.\n"
+                )
+            else:
+                open_instruction = (
+                    "The ONLY correct action is to call `read` directly on "
+                    "the given <location> path.\n"
+                )
+            parts.append(
+                "## Available Skills\n"
+                "\u26a0\ufe0f CRITICAL: Every <location> path below is an "
+                "EXISTING LOCAL FILE on this machine's disk \u2014 NOT a "
+                "remote repository.\n"
+                "NEVER run `git clone`, `pip install`, `pip download`, or "
+                "any package-manager/network command to fetch "
+                "\"model-hub\", \"model-builder\", \"QAI-Model-Builder\", "
+                "or any similarly-named project.\n"
+                "Any such attempt WILL FAIL and waste significant time. "
+                f"{open_instruction}"
+                f"{skills_xml}"
+            )
         # Language-follow rule (on-device counterpart of the cloud
-        # LANGUAGE_RULE_GUIDANCE; see _LOCAL_LANGUAGE_RULE).
-        parts.append(_LOCAL_LANGUAGE_RULE)
+        # LANGUAGE_RULE_GUIDANCE; see _LOCAL_LANGUAGE_RULE). Headed like the
+        # sections above so the sections stay separable to a small model.
+        parts.append(f"## Language\n{_LOCAL_LANGUAGE_RULE}")
         injection = "\n\n".join(parts)
 
         if base_text:
@@ -10418,6 +10643,15 @@ class StreamChatUseCase:
         from ``request``.
         """
         outcome["recovered"] = False
+        # Client-side compaction is OFF for on-device models (see
+        # ``CompactionCheckpointEngine.maybe_compress``), so there is nothing
+        # this pass could reclaim: it would show a compression-progress
+        # banner, compress nothing, and close with a ``failed_no_room``
+        # notice that blames the user for a limit they cannot act on. Leave
+        # with ``recovered`` False and no frames at all -- the caller then
+        # forwards the provider's original error untouched.
+        if _is_local_model_hint(request.model_hint):
+            return
         conversation_id = getattr(getattr(conv, "id", None), "value", None)
         model_id = request.model_hint or ""
         context_limit = int(
@@ -10839,6 +11073,19 @@ class StreamChatUseCase:
             raw_result = (
                 f"[tool_disabled] tool {tool_name!r} is turned off for this "
                 f"conversation (per-session setting or persona restriction)"
+            )
+            success = False
+        elif (
+            tool_name in _LOCAL_EXCLUDED_TOOLS
+            and _is_local_model_hint(request.model_hint)
+        ):
+            # LOCAL turns never run a ``LOCAL_EXCLUDED_TOOLS`` tool (today:
+            # ``agent``). The advertise filter already hides it; this is the
+            # execution-side backstop for a call recalled from history / habit
+            # that would otherwise reach the registered handler and spawn.
+            raw_result = (
+                f"[tool_disabled] tool {tool_name!r} is not available on "
+                f"local (on-device) models"
             )
             success = False
         elif verdict.decision is GuardrailDecision.BLOCK:
@@ -11449,19 +11696,15 @@ class StreamChatUseCase:
         # starting another round (DECISION: allow the round that would overshoot
         # to FINISH — we can't un-send it — but do NOT open the next; honest,
         # predictable UX). ``_budget_local_hinted`` throttles the "budget not
-        # enforceable on local turns" advisory to once per turn;
-        # ``_budget_local_hint_pending`` is set by ``_on_round_end`` and drained
-        # (emitted as a marked chunk) by the emitter — kept OUT of
-        # ``_on_round_end`` because that hook returns a value (not an async
-        # generator; it must not ``yield``). Declared HERE (before the round-0
-        # fold below) so the round-0 short-circuit can set ``_budget_exceeded``.
+        # enforceable on local turns" log to once per turn. Declared HERE
+        # (before the round-0 fold below) so the round-0 short-circuit can set
+        # ``_budget_exceeded``.
         _budget_exceeded: bool = False
         # Captured when the cap is hit so the terminal END can carry the
         # decision metadata (used / cap / next-cap) for the frontend dialog.
         _budget_used_at_stop: int = 0
         _budget_max_at_stop: int = 0
         _budget_local_hinted: bool = False
-        _budget_local_hint_pending: bool = False
 
         # ── Per-conversation budget: fold ROUND 0's usage once (max_budget) ──
         # Round 0's LLM stream is drained in the outer ``_run`` (before this
@@ -11663,7 +11906,9 @@ class StreamChatUseCase:
                 round_tool_calls=current_round_calls,
                 round_results=round0_results,
             )
-            self._maybe_inject_question_images(wire_messages, round0_results)
+            self._maybe_inject_question_images(
+                wire_messages, round0_results, model_hint=request.model_hint,
+            )
             # Turn-internal live ctx refresh: round 0 just completed with a
             # provider-measured wire size — push it so the main badge updates
             # immediately (before the first follow-up round streams). Skipped
@@ -11986,6 +12231,7 @@ class StreamChatUseCase:
                         source_text=text,
                         cloud_format=_inj_fmt,
                         cloud_quality=_inj_q,
+                        is_local_model=_is_local_model_hint(request.model_hint),
                     )
                 contents.append(vision_blocks if vision_blocks else text)
             return contents
@@ -12407,7 +12653,9 @@ class StreamChatUseCase:
                 round_tool_calls=list(_round_pending["frames"]),
                 round_results=round_results,
             )
-            self._maybe_inject_question_images(wire_messages, round_results)
+            self._maybe_inject_question_images(
+                wire_messages, round_results, model_hint=request.model_hint,
+            )
 
         async def _on_round_end(
             round_no: int,
@@ -12422,7 +12670,7 @@ class StreamChatUseCase:
             nonlocal last_round_usage
             nonlocal _budget_exceeded
             nonlocal _budget_used_at_stop, _budget_max_at_stop
-            nonlocal _budget_local_hinted, _budget_local_hint_pending
+            nonlocal _budget_local_hinted
             nonlocal _pending_integration_count
             # DIAG (Problem B — turn_usage prompt_tokens explodes to ~10M):
             # ``_accumulate_usage`` SUMs every integer usage key — including
@@ -12519,14 +12767,13 @@ class StreamChatUseCase:
             # per-round measurement (``last_round_*`` — single round, NEVER the
             # cumulative ``turn_usage`` SUM which is Anthropic-corrupt), never an
             # estimate. Local (on-device) turns emit no usage → skip enforcement
-            # entirely (NPU produces no authoritative count; emit a one-per-turn
-            # advisory hint instead). Gemini partial-reliability: a round whose
+            # entirely (NPU produces no authoritative count; log once per turn).
+            # Gemini partial-reliability: a round whose
             # usage reports prompt_tokens=0 AND completion_tokens=0 is not
             # enforced (log a warning) — no truth to enforce against.
             if _is_local_model_hint(request.model_hint):
                 if not _budget_local_hinted:
                     _budget_local_hinted = True
-                    _budget_local_hint_pending = True
                     _log.debug(
                         "chat.budget_local_skip",
                         conversation_id=getattr(
@@ -12603,7 +12850,10 @@ class StreamChatUseCase:
             # re-hitting the ceiling cannot loop forever.
             if end_payload.get("truncated") and not has_pending:
                 _consecutive_length_retries += 1
-                if _consecutive_length_retries > _MAX_CONSECUTIVE_TRUNCATION_RETRIES:
+                if (
+                    _consecutive_length_retries > _MAX_CONSECUTIVE_TRUNCATION_RETRIES
+                    and not _is_local_model_hint(request.model_hint)
+                ):
                     _log.warning(
                         "chat.length_truncation_retry_budget_exhausted",
                         round_no=round_no,
@@ -12896,24 +13146,6 @@ class StreamChatUseCase:
                 # re-emits its lead-in every round does not concatenate
                 # "<lead-in><lead-in>" into the final persisted message.
                 assistant_text_parts.clear()
-                # Per-conversation budget (max_budget_tokens): if the PREVIOUS
-                # round was a local (NPU) turn, the budget is not enforceable
-                # there (no authoritative usage) — surface a once-per-turn
-                # advisory as a marked chunk so the user knows local turns are
-                # neither counted nor capped. Drained here (not inside
-                # ``_on_round_end``, which returns a value and cannot yield).
-                if _budget_local_hint_pending:
-                    _budget_local_hint_pending = False
-                    seq += 1
-                    yield StreamFrame.chunk(
-                        frame_id=f"fu-budget-local-{seq}",
-                        sequence=seq,
-                        text=(
-                            "\n\n_(本地模型无法统计 token 用量，"
-                            "本轮不计入也不受 token 预算限制。)_"
-                        ),
-                        round_index=kev.round_no,
-                    )
                 # ran just before this ``KernelRoundStarted`` (the inter-round
                 # seam), draining + persisting any pending injection(s) and
                 # stashing them in ``_injected_pending``. Forward one
@@ -13025,6 +13257,7 @@ class StreamChatUseCase:
                 if (
                     kev.frame is not None
                     and kev.frame.payload.get("code") == "prompt_too_long"
+                    and not _is_local_model_hint(request.model_hint)
                 ):
                     _log.info(
                         "chat.overflow_recovery.skipped",
@@ -13061,20 +13294,6 @@ class StreamChatUseCase:
                 if last_round_usage_out is not None and last_round_usage:
                     last_round_usage_out.clear()
                     last_round_usage_out.update(last_round_usage)
-                # Drain a pending local-turn budget advisory (a local FINAL round
-                # ends the turn here without a following KernelRoundStarted).
-                if _budget_local_hint_pending:
-                    _budget_local_hint_pending = False
-                    seq += 1
-                    yield StreamFrame.chunk(
-                        frame_id=f"fu-budget-local-{seq}",
-                        sequence=seq,
-                        text=(
-                            "\n\n_(本地模型无法统计 token 用量，"
-                            "本轮不计入也不受 token 预算限制。)_"
-                        ),
-                        round_index=kev.round_no,
-                    )
                 # Turn-internal notice-integration budget exhausted (§A3):
                 # more SYSTEM_NOTICE rows are still pending than this turn is
                 # willing to fold in. Tell the user why the turn closes with
@@ -13497,9 +13716,19 @@ class StreamChatUseCase:
         # an ordinary tool and goes through ``ToolInvocationPort`` like any
         # other (unchanged legacy behaviour for deployments that never wired
         # the sub-agent stack).
+        # LOCAL turns never spawn. This gate is the authoritative half: the
+        # schema-layer drop (``tool_advertise.LOCAL_EXCLUDED_TOOLS``) only stops
+        # the tool being ADVERTISED, while the split below keys off the call's
+        # NAME alone -- so a small on-device model recalling ``agent`` from its
+        # own transcript (or from a cloud turn earlier in the same
+        # conversation) would still spawn for real. Falling through to
+        # ``other_tc_frames`` hands the call to the ordinary tool path, whose
+        # unknown-tool error is the signal the model needs to correct itself.
         agent_tc_frames: list[StreamFrame] = []
         other_tc_frames: list[StreamFrame] = []
-        if self._sub_agent_bridge is not None:
+        if self._sub_agent_bridge is not None and not _is_local_model_hint(
+            getattr(request, "model_hint", None)
+        ):
             for tc_frame in pending_tool_calls:
                 name = tc_frame.payload.get("tool_name")
                 if isinstance(name, str) and name == "agent":

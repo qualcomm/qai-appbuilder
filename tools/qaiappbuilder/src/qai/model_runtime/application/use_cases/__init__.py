@@ -12,6 +12,7 @@ from qai.model_runtime.application.use_cases.get_status import GetStatusUseCase
 from qai.model_runtime.application.use_cases.load_model import LoadModelUseCase
 from qai.model_runtime.application.use_cases.get_logs import GetLogsUseCase
 from qai.model_runtime.application.use_cases.clear_logs import ClearLogsUseCase
+from qai.model_runtime.application.use_cases.clear_context import ClearContextUseCase
 from qai.model_runtime.application.use_cases.stream_logs import StreamLogsUseCase
 from qai.model_runtime.application.use_cases.stream_log_frames import (
     LogFrame,
@@ -34,6 +35,7 @@ __all__ = [
     "LoadModelUseCase",
     "GetLogsUseCase",
     "ClearLogsUseCase",
+    "ClearContextUseCase",
     "StreamLogsUseCase",
     "LogFrame",
     "StreamLogFramesUseCase",

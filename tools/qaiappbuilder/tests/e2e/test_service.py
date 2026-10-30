@@ -214,7 +214,7 @@ def test_status_when_not_installed(api: httpx.Client) -> None:
     require_not_installed(api)
     st = _status(api)
     assert st == {
-        "state": "stopped", "running": False, "pid": None, "uptime_seconds": None, "model": None,
+        "state": "stopped", "running": False, "ready": None, "pid": None, "uptime_seconds": None, "model": None,
         "port": None, "exe_path": "", "command": "", "memory_mb": 0.0, "path_warning": "",
     }
 
@@ -231,7 +231,8 @@ def test_config_defaults_when_not_installed(api: httpx.Client, backend: Backend)
     body = _cfg(api)
     assert body["meta"] == {"using_default_config": True, "config_file_path": "", "genie_root_configured": False}
     cfg = body["config"]
-    assert {"cloud_model", "enterprise_cloud_model", "default_model", "models", "routing", "local_model"} <= set(cfg)
+    assert {"cloud_model", "enterprise_cloud_model", "routing", "local_model"} <= set(cfg)
+    assert "models" not in cfg and "default_model" not in cfg, "dead model-slot keys are not defaults"
     assert cfg["cloud_model"]["api_key"] == "" and cfg["enterprise_cloud_model"]["api_key"] == ""
     assert _cfg(api) == body  # reading has no side effect
     assert not list(backend.data_dir.rglob("service_config.json")), "a read must not create a config file"
@@ -547,7 +548,7 @@ def test_config_reads_the_installed_file(api: httpx.Client, install: Callable[..
     body = _cfg(api)
     assert body["config"]["default_model"] == "from-file"
     assert body["config"]["custom_top"] == {"a": 1}, "unknown keys survive the read"
-    assert "models" in body["config"], "defaults are merged under the file"
+    assert "routing" in body["config"], "defaults are merged under the file"
     assert body["meta"]["config_file_path"] == str(d / "service_config.json")
     assert body["meta"]["using_default_config"] is False
 
@@ -585,7 +586,7 @@ def test_config_malformed_file_falls_back_to_defaults(api: httpx.Client, install
     require_not_installed(api)
     d = install("e2e-v1", "{not json")
     body = _cfg(api)
-    assert body["config"]["default_model"] == ""
+    assert "default_model" not in body["config"]
     assert body["meta"]["config_file_path"] == str(d / "service_config.json")
 
 
@@ -620,7 +621,7 @@ def test_config_save_merges_into_the_file_and_keeps_unknown_keys(
     assert disk["custom_top"] == {"a": 1}
     assert disk["cloud_model"]["extra_user_key"] == 7
     assert disk["cloud_model"]["base_url"] == "https://keep.invalid"
-    assert {"local_model", "models", "routing", "cloud_model"} <= set(disk), "defaults are materialised on first save"
+    assert {"local_model", "routing", "cloud_model"} <= set(disk), "defaults are materialised on first save"
     assert _cfg(api)["config"]["default_model"] == "新模型"
 
 
@@ -671,7 +672,7 @@ def test_config_save_on_a_malformed_file_replaces_it_with_defaults_plus_the_chan
     d = install("e2e-v1", "{not json")
     assert api.post(CFG, json={"config": {"default_model": "after-corrupt"}}).status_code == 200
     disk = _disk(d / "service_config.json")
-    assert disk["default_model"] == "after-corrupt" and "models" in disk
+    assert disk["default_model"] == "after-corrupt" and "routing" in disk
     assert not list(d.glob("service_config.json.*")) and not list(d.glob("*.bak")), "no backup is kept"
 
 
@@ -758,7 +759,7 @@ def test_unusable_forge_root_masks_the_real_install(
     try:
         _set_root(api, root)
         body = _cfg(api)
-        assert body["config"]["default_model"] == "", "defaults are shown, not the real install's file"
+        assert "default_model" not in body["config"], "defaults are shown, not the real install's file"
         assert body["meta"]["config_file_path"] == ""
         assert body["meta"]["using_default_config"] is False
         assert _status(api)["exe_path"] == str(real / "GenieAPIService.exe")
@@ -786,6 +787,6 @@ def test_forge_root_can_be_reset(api: httpx.Client, install: Callable[..., Path]
     require_not_installed(api)
     a = install("e2e-a", {"default_model": "A"})
     _set_root(api, str(a.parent / "e2e-gone"))
-    assert _cfg(api)["config"]["default_model"] == ""
+    assert "default_model" not in _cfg(api)["config"]
     _set_root(api, "")
     assert _cfg(api)["config"]["default_model"] == "A"

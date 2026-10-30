@@ -40,8 +40,12 @@ from qai.model_runtime.domain.entities import (
     extract_context_length,
 )
 from qai.model_runtime.domain.enums import ServiceState
-from qai.model_runtime.domain.errors import ServicePortInUseError
+from qai.model_runtime.domain.errors import ServiceClearBusyError, ServicePortInUseError
 from qai.model_runtime.infrastructure.process_group import ProcessKillGroup
+from qai.model_runtime.infrastructure.service_config_repository import (
+    FileServiceConfigRepository,
+)
+from qai.platform.errors import PreconditionFailedError
 from qai.platform.genie_model_config import resolve_model_config_path
 
 # Provider type accepted by the adapter: callable returning either a value
@@ -61,6 +65,8 @@ _LOG_BUFFER_SIZE = 6000
 _GRACEFUL_TIMEOUT_S = 8
 _KILL_TIMEOUT_S = 3
 _PROBE_TIMEOUT_S = 5.0
+_READY_PROBE_TIMEOUT_S = 1.0
+_CLEAR_TIMEOUT_S = 15.0
 # Windows system PIDs (0 = System Idle, 4 = System) must never be killed when
 # reclaiming an orphan-held port (V1 ``start_server.py:_kill_port`` parity).
 _MIN_KILLABLE_PID = 4
@@ -153,6 +159,8 @@ class ProcessBackedInferenceService:
         self._total_written: int = 0
         # Cross-thread "new log line" notification (V1 ``_new_line_event``).
         self._new_line_event = threading.Event()
+        # Re-entry guard for ``clear_context`` (single in-flight ``/clear``).
+        self._clear_in_flight = False
 
         # OS-level "parent dies -> daemon dies" safeguard (AGENTS.md 铁律 5).
         # Created lazily on first spawn so a process that never starts the
@@ -195,11 +203,6 @@ class ProcessBackedInferenceService:
         (``forge.config.service_launch.loglevel``) > V1 default ``3``.
         ``models_root`` resolves: injected provider > static field >
         ``install_dir/models`` (matching :meth:`_resolve_models_root`).
-
-        Before spawning, ``service_config.json`` is synced to the chosen
-        model (V1 ``_sync_service_config_model``, ``main.py:5214-5248``) so
-        GenieAPIService's internal model table matches the directory on disk.
-        Sync failures are warned but never fatal — V1 parity.
         """
         effective_port = port if port is not None else self._default_port
 
@@ -253,19 +256,37 @@ class ProcessBackedInferenceService:
         args += ["-p", str(effective_port)]
         args += ["-d", str(effective_loglevel)]
 
-        # Pre-spawn: sync service_config.json (V1 _sync_service_config_model)
-        if model_name:
-            try:
-                await asyncio.to_thread(self._sync_service_config_model, model_name)
-            except Exception as exc:  # noqa: BLE001 — best-effort, V1 parity
-                logger.warning("service_config.json sync failed (non-fatal): %r", exc)
-
         # Pre-spawn: warn when cloud_model.base_url is still the factory placeholder.
         # The daemon starts regardless — the warning is advisory so operators can
         # configure the cloud endpoint without blocking the local inference path.
         await asyncio.to_thread(self._warn_if_cloud_model_unconfigured)
 
+        # Pre-spawn: one-time migration stripping the stale ``models`` /
+        # ``default_model`` slots QAI used to sync into the file the daemon
+        # loads (``LoadAllModelsFromConfig`` still honours them, so a stale
+        # slot would load an extra model or redirect the default one). Every
+        # spawn (``/start`` and the ``load_model`` path) passes here; after the
+        # first completed run a marker makes it a no-op, so a ``models[]`` the
+        # user hand-writes later (real multi-model capability) is preserved.
+        await self._strip_legacy_model_slots_before_spawn()
+
         await asyncio.to_thread(self._do_start, args, effective_port, model_name)
+
+    async def _strip_legacy_model_slots_before_spawn(self) -> None:
+        """Run the one-time (marker-guarded) legacy-slot migration; never blocks spawn."""
+        if not self._install_dir:
+            return
+        cfg_path = Path(self._install_dir) / "service_config.json"
+        try:
+            await asyncio.to_thread(
+                FileServiceConfigRepository.strip_legacy_model_slots, path=cfg_path
+            )
+        except Exception as exc:  # noqa: BLE001 — advisory migration; spawn proceeds
+            logger.warning(
+                "service_config.legacy_model_slots_skipped path=%s reason=unexpected_error error=%r",
+                cfg_path,
+                exc,
+            )
 
     async def _guard_port_for_spawn(self, port: int) -> None:
         """Ensure ``port`` is free for our spawn, else raise (real-state-first).
@@ -452,6 +473,26 @@ class ProcessBackedInferenceService:
         except Exception:  # noqa: BLE001
             return {"reachable": False, "alive": False, "model": None}
 
+    async def _model_ready(self) -> bool | None:
+        """Whether the daemon finished loading its model (``GET /status``).
+
+        ``None`` when no daemon is running. Reported as a SEPARATE ``ready``
+        field: ``running`` stays Popen-derived and never flips on this probe.
+        An older daemon without ``/status`` (non-200) counts as ready.
+        """
+        if self._state != ServiceState.RUNNING or self._port is None:
+            return None
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=_READY_PROBE_TIMEOUT_S) as client:
+                resp = await client.get(f"http://127.0.0.1:{self._port}/status")
+            if resp.status_code != 200:
+                return True
+            return str(resp.json().get("loading")).lower() != "true"
+        except Exception:  # noqa: BLE001 — HTTP server not up yet
+            return False
+
     async def status(self) -> dict[str, Any]:
         """Return detailed status dict — V1 parity (``service_manager.status``).
 
@@ -484,6 +525,7 @@ class ProcessBackedInferenceService:
         return {
             "state": self._state.value,
             "running": running,
+            "ready": await self._model_ready(),
             "pid": pid,
             "uptime_seconds": uptime,
             "model": self._loaded_model,
@@ -552,6 +594,38 @@ class ProcessBackedInferenceService:
         # Service down (or just stopped above) → start with the new model.
         await self.start(model_name=model_name)
         self._loaded_model = model_name
+
+    async def clear_context(self) -> None:
+        """POST the daemon's ``/clear``; reject re-entry while one is in flight."""
+        self._refresh_state()
+        if self._state != ServiceState.RUNNING or self._port is None:
+            raise PreconditionFailedError(
+                "model_runtime.service_not_running",
+                "The inference service is not running; nothing to clear.",
+            )
+        # No await between check and set -> atomic on the event loop.
+        if self._clear_in_flight:
+            raise ServiceClearBusyError()
+        import httpx
+
+        self._clear_in_flight = True
+        try:
+            self._append_log("Clearing service context (POST /clear)")
+            async with httpx.AsyncClient(timeout=_CLEAR_TIMEOUT_S) as client:
+                resp = await client.post(f"http://127.0.0.1:{self._port}/clear")
+            if resp.status_code >= 400:
+                raise PreconditionFailedError(
+                    "model_runtime.service_clear_failed",
+                    f"The inference service rejected /clear (HTTP {resp.status_code}).",
+                )
+            self._append_log("Service context cleared")
+        except httpx.HTTPError as exc:
+            raise PreconditionFailedError(
+                "model_runtime.service_clear_failed",
+                f"Could not reach the inference service /clear: {exc!r}",
+            ) from exc
+        finally:
+            self._clear_in_flight = False
 
     async def get_logs(self) -> list[str]:
         """Return snapshot of the log buffer."""
@@ -623,9 +697,11 @@ class ProcessBackedInferenceService:
         root = self._resolve_models_root(models_root)
         if not root.is_dir():
             return []
+        install_dir = await self._resolve_install_dir_live()
 
         def _scan() -> list[ModelInfo]:
             results: list[ModelInfo] = []
+            release_ctx = self._read_release_context_lengths(install_dir)
             try:
                 model_dirs = sorted(
                     {p.parent for p in root.rglob("genie_config.json")}
@@ -641,29 +717,6 @@ class ProcessBackedInferenceService:
                     size_mb = sum(f.stat().st_size for f in model_dir.rglob("*") if f.is_file()) / (
                         1024 * 1024
                     )
-                    # Context-window size for the dropdown ctx badge (V1
-                    # parity). Resolved via the V1 4-source cascade
-                    # (``models_registry.py:_read_context_size_from_model_dir``):
-                    # config.json dialog.context.size -> prompt.json
-                    # context_size -> config.json top-level fields ->
-                    # default 8192. Best-effort file reads — a missing /
-                    # malformed file simply hands ``None`` to that source,
-                    # never fatal.
-                    config_data: dict | None = None
-                    try:
-                        with config_json.open("r", encoding="utf-8") as cf:
-                            config_data = json.load(cf)
-                    except (OSError, json.JSONDecodeError):
-                        config_data = None
-                    prompt_data: dict | None = None
-                    prompt_json = model_dir / "prompt.json"
-                    if prompt_json.exists():
-                        try:
-                            with prompt_json.open("r", encoding="utf-8") as pf:
-                                prompt_data = json.load(pf)
-                        except (OSError, json.JSONDecodeError):
-                            prompt_data = None
-                    ctx_len = extract_context_length(config_data, prompt_data)
                     results.append(
                         ModelInfo(
                             name=model_dir.name,
@@ -671,7 +724,7 @@ class ProcessBackedInferenceService:
                             size_mb=round(size_mb, 1),
                             config_path=str(config_json),
                             model_format=fmt,
-                            context_length=ctx_len,
+                            context_length=release_ctx.get(model_dir.name.lower()),
                             supports_audio="omni" in model_dir.name.lower(),
                         )
                     )
@@ -719,6 +772,36 @@ class ProcessBackedInferenceService:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _read_release_context_lengths(install_dir: str) -> dict[str, int]:
+        """Map lower-cased model name -> context length from ``<install_dir>/config/``.
+
+        Every sub-directory of the GenieAPIService release ``config/`` dir is a
+        model; QNN declares ``config.json`` ``dialog.context.size``, GGUF
+        declares ``prompt.json`` ``context_size``. Models without a readable
+        positive value are omitted.
+        """
+        result: dict[str, int] = {}
+        if not install_dir:
+            return result
+        config_root = Path(install_dir) / "config"
+        try:
+            entries = [p for p in config_root.iterdir() if p.is_dir()]
+        except OSError:
+            return result
+        for model_cfg_dir in entries:
+            loaded: list[dict | None] = []
+            for file_name in ("config.json", "prompt.json"):
+                try:
+                    with (model_cfg_dir / file_name).open("r", encoding="utf-8") as f:
+                        loaded.append(json.load(f))
+                except (OSError, json.JSONDecodeError):
+                    loaded.append(None)
+            ctx_len = extract_context_length(loaded[0], loaded[1])
+            if ctx_len is not None:
+                result[model_cfg_dir.name.lower()] = ctx_len
+        return result
+
     def _resolve_models_root(self, override: str | None = None) -> Path:
         """Resolve the directory scanned by :meth:`list_models`."""
         if override:
@@ -738,90 +821,11 @@ class ProcessBackedInferenceService:
         suffixes = [f.suffix.lower() for f in entries]
         return detect_model_format(names, suffixes)
 
-    # Maps ``detect_model_format()`` results to the (backend, device) pair
-    # GenieAPIService expects in service_config.json. ``unknown`` maps to
-    # ("", "") so callers can skip the sync rather than write an unsure value.
-    _FORMAT_TO_BACKEND_DEVICE: dict[str, tuple[str, str]] = {
-        "qnn": ("qnn", "npu"),
-        "gguf": ("GGUF", "gpu"),
-        "mnn": ("mnn", "cpu"),
-    }
-
     def _append_log(self, line: str) -> None:
         """Append a synthetic log line and notify streamers."""
         self._log_buffer.append(line)
         self._total_written += 1
         self._new_line_event.set()
-
-    def _sync_service_config_model(self, model_name: str) -> None:
-        """Sync ``service_config.json`` to *model_name* before spawn.
-
-        V1 parity (``backend/main.py:5214-5248``
-        ``_sync_service_config_model``): GenieAPIService reads
-        ``service_config.json`` at start-up and emits
-        ``[E] Model directory does not exist`` errors when its ``models[*]``
-        names drift away from the on-disk directory. This method updates
-        the first enabled NPU slot (``backend in {"qnn", ""}``) plus
-        ``default_model``, mirroring V1 exactly. It also syncs ``backend``
-        (and ``device`` for GGUF/MNN) to the target model's real on-disk
-        format, so a GGUF/MNN selection is no longer loaded under a stale
-        ``qnn`` backend. The file is written only when something changed,
-        with ``ensure_ascii=False`` + 4-space indent (V1 wire format).
-
-        All filesystem failures are caught and logged at WARNING per V1's
-        non-fatal contract: the daemon may still start with a stale config
-        and surface its own error.
-        """
-        if not model_name:
-            return
-        if not self._install_dir:
-            return
-        cfg_path = Path(self._install_dir) / "service_config.json"
-        if not cfg_path.is_file():
-            return
-        try:
-            with cfg_path.open("r", encoding="utf-8") as f:
-                cfg = json.load(f)
-        except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("_sync_service_config_model read failed (non-fatal): %s", exc)
-            return
-
-        fmt = self._detect_format(self._resolve_models_root() / model_name)
-        backend, device = self._FORMAT_TO_BACKEND_DEVICE.get(fmt, ("", ""))
-
-        models = cfg.get("models", []) if isinstance(cfg, dict) else []
-        changed = False
-        if isinstance(models, list):
-            for m in models:
-                if not isinstance(m, dict):
-                    continue
-                if m.get("enabled", False) and str(m.get("backend", "")).lower() in ("qnn", ""):
-                    if m.get("name") != model_name or m.get("path") != model_name:
-                        m["name"] = model_name
-                        m["path"] = model_name
-                        changed = True
-                    if backend and (m.get("backend") != backend or m.get("device") != device):
-                        m["backend"] = backend
-                        m["device"] = device
-                        changed = True
-                    break
-
-        if isinstance(cfg, dict) and cfg.get("default_model") != model_name:
-            cfg["default_model"] = model_name
-            changed = True
-
-        if not changed:
-            return
-
-        try:
-            with cfg_path.open("w", encoding="utf-8") as f:
-                json.dump(cfg, f, ensure_ascii=False, indent=4)
-            logger.info(
-                "service_config.json: synced models[*] and default_model to %r",
-                model_name,
-            )
-        except OSError as exc:
-            logger.warning("_sync_service_config_model write failed (non-fatal): %s", exc)
 
     # Markers that identify an unconfigured cloud_model.base_url
     # (empty string, or still the factory placeholder shipped in the template).

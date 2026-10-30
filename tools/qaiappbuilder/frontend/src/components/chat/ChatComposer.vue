@@ -143,7 +143,6 @@ const emit = defineEmits<{
 const {
   visibleToolbarModules,
   load: loadForgeConfig,
-  config: forgeConfig,
   ccEnabled,
   ocEnabled,
   workspaceModelRoot,
@@ -572,7 +571,7 @@ function fmtTokens(n: number): string {
 // ─── Model selection — useComposerModelSelection (ARCH-1 split) ──────────────
 // Owns the status-dot colour, selected-model label, cloud auto-select,
 // persisted-preference restore, local-model auto-load, and the
-// streaming→idle `noteInferred` + ctx refresh. See the composable for the
+// streaming→idle ctx refresh. See the composable for the
 // V1 parity notes (useModels.js).
 const {
   hasModels,
@@ -586,7 +585,6 @@ const {
   modelDropdownOpen,
   claudeCode,
   openCode,
-  forgeConfig,
   refreshCtx,
 });
 
@@ -701,6 +699,13 @@ function onJumpToMessage(messageId: string): void {
   emit("jump-to-message", messageId);
 }
 
+// ─── Local-model detection (gates unsupported image formats) ────────────────
+// Reuses `useComposerModelSelection`'s `currentModelIsCloud` (V1 parity
+// `app.js:531-538`), which already resolves the active tab's `modelId`
+// against the fetched local-model catalogue — no need for a separate
+// `local::`-prefix check.
+const isLocalModelActive = computed<boolean>(() => !currentModelIsCloud.value);
+
 // ─── Image attachments (H3) — usePendingImages (F1① cohesion split) ──────────
 // The pending-image queue + its file-picker / paste / external-intake /
 // upload lifecycle live in `composables/chat/usePendingImages.ts`. The
@@ -714,7 +719,7 @@ const {
   removePendingImage,
   handlePaste,
   uploadPendingImages,
-} = usePendingImages(text, fileInputRef);
+} = usePendingImages(text, fileInputRef, isLocalModelActive);
 
 // Image lightbox for the pending-image thumbnails (V1 index.html:1446
 // `@click="lightboxSrc = img.dataUrl"`). Shared logic with `ChatMessageList`

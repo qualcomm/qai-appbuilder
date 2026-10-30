@@ -11,24 +11,16 @@
  * longer running) and keep a `loadingLocalModelId` guard so a model the user
  * just picked + triggered auto-load is NOT yanked out from under them.
  *
- * Behaviour (mirrors V1 exactly):
+ * Behaviour (the service is always launched on this machine):
  *
- * - **Remote host mode** (`service_launch.host_mode === "remote"`): never
- *   force-switch — the remote GenieAPIService swaps models server-side on the
- *   next request, so a model showing "Stopped" stays selected. If a model has
- *   completed an inference this session (`lastInferredLocalModelId`), restore
- *   its Running state locally (override the stale backend status).
- * - **Local host mode**:
- *   - Clear `loadingLocalModelId` once that model reports running, or once no
- *     local model is running at all (load failed).
- *   - If the current selection is a LOCAL model with `is_running === false`,
- *     is NOT the model currently loading, and there is a running local model
- *     to fall back to, switch the selection to that running model and persist
- *     it (V1 `/api/preferences`).
+ * - Clear `loadingLocalModelId` once that model reports running, or once no
+ *   local model is running at all (load failed).
+ * - If the current selection is a LOCAL model with `is_running === false`,
+ *   is NOT the model currently loading, and there is a running local model
+ *   to fall back to, switch the selection to that running model and persist
+ *   it (V1 `/api/preferences`).
  *
- * `markModelAsRunning` marks one local model running and the rest stopped in
- * the in-memory list (V1 frontend-only feedback for remote inference). The
- * WeChat-channel coupling in V1 is intentionally NOT reproduced here: V2
+ * The WeChat-channel coupling in V1 is intentionally NOT reproduced here: V2
  * channels are single-instance with their own model selector (AGENTS.md
  * §3.9.1), so chat-model auto-switch is a chat-only concern.
  */
@@ -46,8 +38,6 @@ export interface AutoSwitchModel {
 }
 
 export interface UseChatModelAutoSwitchOptions {
-  /** Current host mode getter (V1 `service_launch.host_mode`). */
-  hostMode: () => string;
   /** Current selection getter (the active tab's model id + provider). */
   selection: () => { id: string; provider: string };
   /**
@@ -60,8 +50,6 @@ export interface UseChatModelAutoSwitchOptions {
 export function useChatModelAutoSwitch(options: UseChatModelAutoSwitchOptions) {
   /** Id of a local model the user just picked + triggered auto-load for. */
   const loadingLocalModelId = ref<string>("");
-  /** Last local model that completed an inference this session (remote mode). */
-  const lastInferredLocalModelId = ref<string>("");
 
   /**
    * V1 `autoSwitchStoppedModel`: run after every model-list refresh.
@@ -69,22 +57,6 @@ export function useChatModelAutoSwitch(options: UseChatModelAutoSwitchOptions) {
    */
   function autoSwitchStoppedModel(models: AutoSwitchModel[]): void {
     if (!models.length) return;
-
-    // Remote mode: never force-switch; optionally restore inferred Running.
-    if (options.hostMode() === "remote") {
-      if (lastInferredLocalModelId.value) {
-        const inferred = models.find(
-          (m) =>
-            m.model_id === lastInferredLocalModelId.value &&
-            m.is_local &&
-            !m.is_placeholder,
-        );
-        if (inferred && !inferred.is_running) {
-          markModelAsRunning(models, lastInferredLocalModelId.value);
-        }
-      }
-      return;
-    }
 
     const firstRunning = models.find(
       (m) => m.is_local && m.is_running && !m.is_placeholder,
@@ -122,32 +94,9 @@ export function useChatModelAutoSwitch(options: UseChatModelAutoSwitchOptions) {
     }
   }
 
-  /**
-   * V1 `markModelAsRunning`: mark one local model running and the rest
-   * stopped, in place on the supplied list (frontend-only state for remote
-   * inference feedback). Returns the mutated list reference for chaining.
-   */
-  function markModelAsRunning(
-    models: AutoSwitchModel[],
-    modelId: string,
-  ): void {
-    for (const m of models) {
-      if (!m.is_local || m.is_placeholder) continue;
-      m.is_running = m.model_id === modelId;
-    }
-  }
-
-  /** Record that a local model just completed an inference (remote mode). */
-  function noteInferred(modelId: string): void {
-    lastInferredLocalModelId.value = modelId;
-  }
-
   return {
     loadingLocalModelId,
-    lastInferredLocalModelId,
     autoSwitchStoppedModel,
-    markModelAsRunning,
-    noteInferred,
   };
 }
 

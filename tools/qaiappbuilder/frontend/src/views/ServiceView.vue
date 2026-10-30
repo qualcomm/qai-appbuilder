@@ -12,7 +12,7 @@
  * `useServiceControl` composable, which is the validated behaviour source.
  *
  * Regions (matching V1):
- *   1. Connection bar (collapsible local/remote + Test probe)
+ *   1. Connection bar (collapsible local port + Test probe) + local paths
  *   2. Path-safety warning banner
  *   3. Status card (running dot, PID/uptime, exe path, Start/Stop/Config)
  *   4. GenieAPIService-not-installed guidance card
@@ -32,10 +32,12 @@ import { useServiceControl } from "@/composables/useServiceControl";
 import { useEscClose } from "@/composables/useClickOutside";
 import { useDownloadsStore } from "@/stores/downloads";
 import { useServiceStore } from "@/stores/service";
+import { useToastStore } from "@/stores/toast";
 import { useUiStore } from "@/stores/ui";
 import { useHeaderActions } from "@/composables/useHeaderActions";
 import ServiceLogPanel from "@/components/service/ServiceLogPanel.vue";
 import ServiceConnectionBar from "@/components/service/ServiceConnectionBar.vue";
+import ServicePathsSection from "@/components/service/ServicePathsSection.vue";
 import ServicePathWarning from "@/components/service/ServicePathWarning.vue";
 import ServiceStatusCard from "@/components/service/ServiceStatusCard.vue";
 import ServiceLaunchParams from "@/components/service/ServiceLaunchParams.vue";
@@ -66,6 +68,7 @@ const {
   serviceStatus,
   serviceStarting,
   serviceStopping,
+  serviceClearing,
   serviceLogs,
   serviceLogsStreaming,
   serviceModels,
@@ -80,7 +83,6 @@ const {
   connectionTestResult,
   logUserScrolledUp,
   isRunning,
-  isRemoteMode,
   serviceModelsByAccel,
   localUrl,
   serviceCommandPreview,
@@ -123,9 +125,8 @@ function openConfigModal(): void {
   // status-card gear) are disabled when the service is not installed, and
   // never open the config modal in that case (the runtime
   // `service_config.json` lives next to the installed binary, so it cannot be
-  // edited before install). With the install-path / models-root inputs removed
-  // (paths are now fixed defaults), there is no longer a "set path" recovery
-  // flow that needs to force the modal open while not installed.
+  // edited before install). The install / models paths are set in the page's
+  // paths section, not in this modal.
   if (!canConfigure.value) return;
   configModalOpen.value = true;
 }
@@ -136,14 +137,28 @@ async function closeConfigModal(): Promise<void> {
   await svc.loadServiceModels();
 }
 
-/**
- * V1 parity (index.html:280-290): the connection radios switch host_mode on
- * the shared reactive svcParams (single source of truth in useServiceControl).
- * Lifted into the parent so the extracted ServiceConnectionBar stays a thin,
- * single-data-flow child that emits its intent instead of mutating svcParams.
- */
-function setHostMode(mode: "local" | "remote"): void {
-  svcParams.value.host_mode = mode;
+async function onInstallDirSaved(): Promise<void> {
+  await svc.loadServiceStatus();
+  await svc.loadServiceModels();
+}
+
+const toast = useToastStore();
+
+async function onSaveModelConfig(value: { modelRoot: string; modelName: string }): Promise<void> {
+  svcParams.value.models_root_path = value.modelRoot;
+  await svc.saveServiceParams();
+  if (!value.modelName) return;
+  if (!serviceModels.value.some((m) => m.name === value.modelName)) {
+    toast.push({
+      id: crypto.randomUUID(),
+      kind: "error",
+      message: t("service.modelNotInList", { name: value.modelName }),
+      timeoutMs: 5000,
+    });
+    return;
+  }
+  selectedServiceModelName.value = value.modelName;
+  svc.saveServiceModelPreference(value.modelName);
 }
 
 // ESC closes the Service Config modal (V2 per-overlay self-managed ESC,
@@ -165,14 +180,10 @@ function goToDownloadService(): void {
 function goToDownloadModels(): void {
   void router.push({ name: "downloads", query: { tab: "models" } });
 }
-// V1 goToGenieServiceSetting / goToModelsRootSetting opened the Service
-// Config modal General tab to let the user set the GenieAPIService install
-// path / models root. Design simplification (user mandate 2026-06-07): both
-// paths are now FIXED to their defaults (`data/bin/` for GenieAPIService,
-// `data/models/` for models) and are no longer user-settable, so those
-// "set path" entrypoints have been removed. The remaining guidance links
-// route the user to the Download Center, where installing a version / model
-// auto-places it under the fixed default location.
+// The GenieAPIService directory and model config file are set in
+// ServicePathsSection (empty = defaults `data/bin/` / `data/models/`). The
+// guidance links route the user to the Download Center, which installs
+// under those defaults.
 
 // V1 (index.html:3003) anchors the fullscreen log overlay's left edge to the
 // sidebar width, switching between collapsed (60px) and expanded (260px) so
@@ -269,17 +280,21 @@ useHeaderActions(() => [
     <!-- ── 1. Connection bar (collapsible) ─────────────────────────────── -->
     <ServiceConnectionBar
       v-model:collapsed="connectionCollapsed"
-      v-model:remote-host="svcParams.remote_host"
       v-model:local-port="svcParams.local_port"
-      v-model:remote-port="svcParams.remote_port"
-      :is-remote-mode="isRemoteMode"
       :local-url="localUrl"
       :connection-testing="connectionTesting"
       :connection-test-result="connectionTestResult"
       :svc-params-saving="svcParamsSaving"
-      @set-host-mode="setHostMode"
       @test="svc.testConnection"
       @save="svc.saveServiceParams"
+    />
+
+    <ServicePathsSection
+      :models-root-path="svcParams.models_root_path"
+      :selected-model-config-path="serviceModels.find((m) => m.name === selectedServiceModelName)?.config_path ?? ''"
+      :exe-path="serviceStatus.exe_path ?? ''"
+      @install-dir-saved="onInstallDirSaved"
+      @save-model-config="onSaveModelConfig"
     />
 
     <!-- ── 2. Path-safety warning banner ───────────────────────────────── -->
@@ -293,9 +308,9 @@ useHeaderActions(() => [
     <ServiceStatusCard
       :service-status="serviceStatus"
       :is-running="isRunning"
-      :is-remote-mode="isRemoteMode"
       :service-starting="serviceStarting"
       :service-stopping="serviceStopping"
+      :service-clearing="serviceClearing"
       :service-models-loading="serviceModelsLoading"
       :service-models-count="serviceModels.length"
       :can-start-service="canStartService"
@@ -304,6 +319,7 @@ useHeaderActions(() => [
       @open-config="openConfigModal"
       @start="svc.startServiceAction"
       @stop="svc.stopServiceAction"
+      @clear="svc.clearServiceAction"
       @download-service="goToDownloadService"
       @download-models="goToDownloadModels"
     />

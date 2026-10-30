@@ -175,6 +175,25 @@ SUB_AGENT_EXCLUDED_TOOLS: frozenset[str] = frozenset(
     {"agent", "question", "scheduled_task", "sub_agent"}
 )
 
+#: Tools never advertised on an ON-DEVICE (local) turn -- main agent,
+#: sub-agent and take-over alike. Consulted ONLY when ``is_local`` is true
+#: (cloud turns are unaffected).
+#:
+#:   * ``agent`` -- sub-agent spawning. A local turn has no ``sub_agent``
+#:     (wait) route to collect the child's result inline, while the result
+#:     is folded back VERBATIM (head + tail output budget, NOT bounded by the
+#:     model's context limit) into a context that no longer compacts on a
+#:     local turn. On a 1K-32K on-device window that single message can evict
+#:     the user's own request, and the delegation saving only pays off when
+#:     the reply compresses to a short summary, which the budget does not
+#:     guarantee.
+#:
+#: NOTE: ``skill`` is deliberately NOT here -- it is advertised on every
+#: local turn at any window size (the ``<available_skills>`` catalogue is
+#: injected into the local prompt regardless, and withholding ``skill`` would
+#: only push the model onto ``read``, whose page cap is much larger).
+LOCAL_EXCLUDED_TOOLS: frozenset[str] = frozenset({"agent"})
+
 
 def schema_tool_name(schema: Any) -> str | None:
     """Extract the tool name from an OpenAI function schema (best-effort).
@@ -229,7 +248,9 @@ def compose_advertised_tools(
         When ``True`` and no ``agent`` tool is already present in the surviving
         set, append ``agent_schema_factory()`` (so the model can request a
         spawn). The main agent always injects; the sub-agent / take-over path
-        injects only when spawning is permitted.
+        injects only when spawning is permitted. NEVER honoured on a LOCAL
+        turn: ``agent`` is in :data:`LOCAL_EXCLUDED_TOOLS`, and re-adding the
+        schema here would reinstate exactly what that entry drops.
     agent_schema_factory:
         Zero-arg factory returning the canonical ``agent`` schema. Supplied by
         the caller (both pass ``streaming._agent_tool_schema``) so this helper
@@ -263,7 +284,9 @@ def compose_advertised_tools(
             continue
         name = schema_tool_name(s)
         if isinstance(name, str) and (
-            name in excluded or name in CONDITIONAL_TOOL_NAMES
+            name in excluded
+            or name in CONDITIONAL_TOOL_NAMES
+            or (is_local and name in LOCAL_EXCLUDED_TOOLS)
         ):
             continue
         if not enable_skill and name == "skill":
@@ -271,7 +294,11 @@ def compose_advertised_tools(
         out.append(dict(s))
 
     # Step 2: inject the ``agent`` schema when permitted and not already there.
-    if inject_agent and not any(
+    # ``not is_local`` is what makes the ``agent`` entry in
+    # :data:`LOCAL_EXCLUDED_TOOLS` effective: Step 1 drops the executor's own
+    # copy, but this step re-appends an injected one, so without the guard a
+    # local turn would still be advertised the spawn tool.
+    if inject_agent and not is_local and not any(
         schema_tool_name(s) == "agent" for s in out
     ):
         if agent_schema_factory is None:

@@ -7,8 +7,12 @@
   ModelCatalogTab — V1 "models" tab container (milestone-2: full parity).
 
   Renders the hardware-grouped model catalog as three collapsible-free
-  group sections (NPU → GPU → CPU, V1 order). Each section shows a group
-  header (icon + i18n title + count badge) and a stack of `ModelCard`s.
+  group sections. Each section shows a group header (icon + i18n title +
+  count badge) and a stack of `ModelCard`s. Group render order is
+  `HARDWARE_ORDER` (GPU → NPU → CPU) — deliberately NOT V1's NPU → GPU →
+  CPU order, so the GPU-format Qwen3.8-27B-Q4_0 speculative-decoding entry
+  surfaces as the very first section on the page rather than trailing
+  after every NPU model.
 
   Owns the wiring between cards and `useModelCatalog` (variant select /
   download / cancel / install / delete / retry / clear-status). The shared
@@ -45,8 +49,14 @@ const { t } = useI18n();
 const toast = useToastStore();
 const mc = ctx.modelCatalog;
 
-/** V1 render order: NPU → GPU → CPU. */
-const HARDWARE_ORDER: readonly ModelHardware[] = ["npu", "gpu", "cpu"];
+/**
+ * Render order for the hardware group sections. Intentionally GPU first —
+ * a deviation from V1's NPU → GPU → CPU order — so that Qwen3.8-27B-Q4_0
+ * (currently the catalog's only `hardware: "gpu"` entry) renders as the
+ * top-most section on the page instead of after the NPU group. Any future
+ * GPU-format model joins the same section and inherits this placement.
+ */
+const HARDWARE_ORDER: readonly ModelHardware[] = ["gpu", "npu", "cpu"];
 
 /** Per-group header icon (V1 panel:525 / 757 / 985). */
 const GROUP_ICON: Record<ModelHardware, string> = {

@@ -19,7 +19,6 @@ import type {
   CloudShared,
   ComplexityAssessment,
   Desensitization,
-  ModelSlot,
   PromptOptimization,
   Routing,
   SensitivityDetection,
@@ -30,14 +29,6 @@ import type {
 export function localModel(cfg: ServiceConfig): { enabled: boolean } {
   if (!cfg.local_model) cfg.local_model = { enabled: true };
   return cfg.local_model;
-}
-
-export function modelSlot(cfg: ServiceConfig, idx: number): ModelSlot {
-  if (!Array.isArray(cfg.models)) cfg.models = [];
-  while (cfg.models.length <= idx) {
-    cfg.models.push({ name: "", context_size: 4096, enabled: false, backend: "", device: "" });
-  }
-  return cfg.models[idx]!;
 }
 
 export function cloudModel(cfg: ServiceConfig): CloudModel {

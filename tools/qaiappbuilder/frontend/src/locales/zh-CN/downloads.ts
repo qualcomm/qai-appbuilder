@@ -43,6 +43,8 @@ const downloads = {
   checkUpdate: "检查更新",
   closeBtn: "✕ 关闭",
   collapseDetail: "收起详情",
+  comingSoon: "即将开放",
+  comingSoonHint: "该模型已提前列出，暂未开放下载。",
   completeToast: "下载完成",
   completed: "已完成",
   configCatalogUrlHint: "请在 设置 → 应用配置 中配置模型目录 URL。",

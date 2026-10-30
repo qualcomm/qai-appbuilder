@@ -35,8 +35,6 @@ logger = logging.getLogger("qai.platform.skills")
 
 # 4-state run modes (v1 parity).
 VALID_MODES: Final[frozenset[str]] = frozenset({"off", "cloud", "local", "both"})
-# Modes that require ``npu_optimized``.
-NPU_MODES: Final[frozenset[str]] = frozenset({"local", "both"})
 
 #: Modes that make a skill visible to CLOUD-model turns (v1 parity).
 CLOUD_VISIBLE_MODES: Final[frozenset[str]] = frozenset({"cloud", "both"})
@@ -60,6 +58,13 @@ DEFAULT_SKILL_MODES: Final[dict[str, str]] = {
     "code-assist": "off",
     "meeting-minutes": "off",
     "gh-public": "off",
+    # The two first-party product skills: ON for BOTH cloud and local turns.
+    # Absent from this map they fell through to the ``"cloud"`` default, so an
+    # on-device turn never saw them even though they describe THIS app's own
+    # model-hub / model-builder workflows - the one place a local model is
+    # most likely to be driving.
+    "model-hub": "both",
+    "model-builder": "both",
 }
 
 
@@ -69,11 +74,15 @@ def resolve_skill_mode(
     """Resolve a skill's effective run mode (``off``/``cloud``/``local``/``both``).
 
     Precedence:
-      1. an explicit, valid ``mode`` key on the persisted override — except that
-         a stored ``local``/``both`` for a skill that is no longer
-         ``npu_optimized`` degrades to ``cloud`` (v1 reset behaviour);
+      1. an explicit, valid ``mode`` key on the persisted override;
       2. else the legacy ``enabled`` bool (``False`` → ``off``, ``True`` → ``cloud``);
       3. else :data:`DEFAULT_SKILL_MODES`, defaulting to ``cloud``.
+
+    ``npu_optimized`` is retained for callers and for the UI's optimization
+    marker, but it no longer changes the resolved mode. The former gate used a
+    hand-maintained skill tag as a proxy for a fixed context limit; runtime
+    context-size checks now own that constraint, so silently rewriting a saved
+    ``local``/``both`` choice would discard user intent.
 
     Every surface that needs a skill's mode MUST call this rather than
     re-implement the ladder, so the Skills panel, the Security > Skill panel and
@@ -82,8 +91,6 @@ def resolve_skill_mode(
     if isinstance(override, dict):
         mode = override.get("mode")
         if isinstance(mode, str) and mode in VALID_MODES:
-            if mode in NPU_MODES and not npu_optimized:
-                return "cloud"
             return mode
         enabled = override.get("enabled")
         if isinstance(enabled, bool):

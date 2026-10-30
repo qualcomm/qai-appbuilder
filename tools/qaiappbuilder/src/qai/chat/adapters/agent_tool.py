@@ -127,6 +127,7 @@ from qai.chat.adapters.system_prompt_builder import (
     RichSystemPromptBuilder as _RichSystemPromptBuilder,
     SUB_AGENT_SYSTEM_PROMPT as _SUB_AGENT_SYSTEM_PROMPT,
     _has_execution_tools as _has_execution_tools,
+    build_sub_agent_skills_block as _build_sub_agent_skills_block,
 )
 from qai.chat.application.use_cases.tool_advertise import (
     CONDITIONAL_TOOL_NAMES as _CONDITIONAL_TOOL_NAMES,
@@ -626,6 +627,7 @@ class AgentToolHandler:
         "_stream_broadcaster",
         "_bridge",
         "_parent_depth",
+        "_skill_catalog_rows_provider",
         "_sub_agent_sessions",
         "_tool_concurrency",
         "_tool_executor",
@@ -697,7 +699,19 @@ class AgentToolHandler:
         # ``bridge.spawn(parent_depth=...)`` so the preflight ceiling is
         # measured from the real position in the spawn tree.
         parent_depth: int = 0,
-        # BackgroundJobDispatcher wiring (§6.4 refactor): when a sub-agent
+        # Unified local/cloud sub-agent skill catalog provider. A callable
+        # ``(is_local: bool) -> tuple[(name, use_for, path), ...]`` consulted
+        # ONLY for a GENERAL sub-agent's concise prompt (see
+        # ``_build_system_text``), so a profile with its own ``system_prompt``
+        # (e.g. explore) stays noise-free. The bool argument is what makes ONE
+        # provider enough: the local and cloud catalogs are different sets
+        # (``mode="local"``/``"both"`` vs ``"cloud"``/``"both"``) and the
+        # caller knows which one applies only at run time, from the resolved
+        # model hint. ``None`` (default, legacy/unit stubs) -> no skills block,
+        # byte-for-byte the prior behaviour.
+        skill_catalog_rows_provider: (
+            "Callable[[bool], tuple[tuple[str, str, str], ...]] | None"
+        ) = None,        # BackgroundJobDispatcher wiring (§6.4 refactor): when a sub-agent
         # run reaches a terminal state (DONE / ERROR / INTERRUPTED), the
         # handler publishes :class:`SubAgentSessionTerminated` on this
         # bus so the process-scoped
@@ -932,6 +946,7 @@ class AgentToolHandler:
             self._budget_tracker = NullBudgetTracker()
         self._bridge = bridge
         self._parent_depth = max(0, int(parent_depth))
+        self._skill_catalog_rows_provider = skill_catalog_rows_provider
         self._event_bus = event_bus
 
     async def execute(self, request: ToolInvocationRequest) -> str:
@@ -1542,12 +1557,30 @@ class AgentToolHandler:
                 ctx_files = list(_resolve_workspace_context_files(Path(ws)))
             except (ValueError, OSError):
                 ctx_files = []
+        # Skill catalog injection: only for the GENERAL sub-agent (no profile
+        # prompt override) -- a profile with its own system_prompt (e.g.
+        # explore) is a read-only specialist and gets no skills block. The
+        # local / cloud catalogs are different sets, so the resolved model
+        # hint picks which one the provider returns.
+        skills_block = ""
+        if (
+            base_prompt_override is None
+            and self._skill_catalog_rows_provider is not None
+        ):
+            try:
+                rows = self._skill_catalog_rows_provider(
+                    _is_local_model_hint(model_hint)
+                )
+            except Exception:  # noqa: BLE001 -- best-effort, never block a run
+                rows = ()
+            skills_block = _build_sub_agent_skills_block(rows)
         return _RichSystemPromptBuilder.build_sub_agent_concise(
             base_prompt_override=base_prompt_override,
             has_exec_tools=has_exec_tools,
             workspace_root=workspace_root,
             is_local_model=_is_local_model_hint(model_hint),
             workspace_context_files=ctx_files,
+            skills_block=skills_block,
         )
 
     async def _forward_passthrough_frame(
@@ -3255,7 +3288,14 @@ class AgentToolHandler:
                 else:
                     _repeat_count_holder["count"] = 1
                     _last_call_sig_holder["sig"] = _sig
-                if _repeat_count_holder["count"] >= _SUB_NO_PROGRESS_LIMIT:
+                # On-device (local) sub-agents are exempt from the repeat-call
+                # abort: a small local model often needs several attempts, and
+                # cutting it off mid-task strands the user. Cloud sub-agents
+                # keep the cap unchanged.
+                if (
+                    _repeat_count_holder["count"] >= _SUB_NO_PROGRESS_LIMIT
+                    and not _is_local_model_hint(model_hint)
+                ):
                     _log.warning(
                         "chat.subagent.no_progress_break",
                         round_no=round_no,

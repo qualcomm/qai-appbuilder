@@ -102,7 +102,6 @@ const chat = {
     stopFailed: "Stop request was not delivered",
   },
   activeMarker: "▶=current session",
-  autoStartFailed: "\n\nAuto-start failed: {msg}",
   backendCompactFailed: "Backend history trim failed: {msg}",
   cancel: "Cancel",
   clearBtn: "Clear",

@@ -87,16 +87,16 @@ save_dir = ""
 
 [forge.model_catalog]
 catalog_url = "https://github.com/qualcomm/qai-appbuilder/releases/download/v2.34.0/model_catalog.json"
+# Merge the locally shipped factory/config/model_catalog_local.json entries into the
+# remote catalog (same model_id -> local wins; still shown if the remote fetch fails).
+local_catalog_enabled = true
 
 [forge.service_launch]
 models_root_path = ""
 load_model = true
 auto_start = false
 num_response = -1
-host_mode = "local"
-remote_host = ""
 local_port = 8910
-remote_port = 8910
 loglevel = 3
 all_text = false
 enable_thinking = false

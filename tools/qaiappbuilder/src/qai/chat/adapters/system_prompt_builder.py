@@ -1247,6 +1247,55 @@ def _log_prompt_sections(parts: list[str]) -> None:
         section_digests=[_short_digest(p, width=8) for p in kept],
     )
 
+
+def build_sub_agent_skills_block(
+    rows: "list[tuple[str, str, str]] | tuple[tuple[str, str, str], ...]",
+) -> str:
+    """Render a concise skill catalog block for a GENERAL sub-agent.
+
+    ``rows`` is ``(name, use_for, path)`` triples. Sub-agents have no
+    ``skill`` tool (``agent_tool.py`` builds a reduced schema list), so the
+    instruction tells them to ``read`` the SKILL.md directly instead of
+    reusing the main-agent ``skill_rule`` wording, which names the ``skill``
+    tool. Empty ``rows`` -> ``""`` so callers never append a hollow heading.
+
+    The heading contains the word "Skills" so GenieAPIService's existing
+    section-filter rules can target/exclude it without introducing a new
+    keyword to track.
+    """
+    if not rows:
+        return ""
+    import html as _html
+
+    lines = [
+        "## Available Skills (NOT tools)",
+        "\u26a0\ufe0f CRITICAL: Every <location> path below is an EXISTING "
+        "LOCAL FILE on this machine's disk \u2014 NOT a remote repository.",
+        "NEVER run `git clone`, `pip install`, `pip download`, or any "
+        "package-manager/network command to fetch \"model-hub\", "
+        "\"model-builder\", \"QAI-Model-Builder\", or any similarly-named "
+        "project.",
+        "Any such attempt WILL FAIL and waste significant time. The ONLY "
+        "correct action is to call `read` directly on the given <location> "
+        "path.",
+        "To use a skill: call `read` on its SKILL.md <location> first, then "
+        "follow it strictly. Never call a skill name as a tool.",
+        "<available_skills>",
+    ]
+    for row in rows:
+        if not isinstance(row, (list, tuple)) or len(row) != 3:
+            continue
+        name, use_for, path = row
+        lines.append("  <skill>")
+        lines.append(f"    <name>{_html.escape(str(name))}</name>")
+        lines.append(
+            f"    <description>{_html.escape(str(use_for))}</description>"
+        )
+        lines.append(f"    <location>{_html.escape(str(path))}</location>")
+        lines.append("  </skill>")
+    lines.append("</available_skills>")
+    return "\n".join(lines)
+
 # ---------------------------------------------------------------------------
 # StaticSystemPromptBuilder — offline / test fallback
 # ---------------------------------------------------------------------------
@@ -2123,6 +2172,7 @@ class RichSystemPromptBuilder(SystemPromptBuilderPort):
         workspace_context_files: (
             "list[tuple[str, str]] | tuple[tuple[str, str], ...] | None"
         ) = None,
+        skills_block: str | None = None,
     ) -> str:
         """Assemble the sub-agent's CONCISE (default) system prompt.
 
@@ -2149,6 +2199,12 @@ class RichSystemPromptBuilder(SystemPromptBuilderPort):
         3. ``+ _build_python_env_context()`` ONLY when ``has_exec_tools`` (the
            run advertises exec / background_process);
         4. ``+ MERMAID_GUIDANCE`` (always);
+        4b. ``+ skills_block`` when the caller rendered one
+            (:func:`build_sub_agent_skills_block`) -- a sub-agent never told
+            which SKILLs exist re-derives from scratch what a SKILL.md already
+            specifies. Appended AFTER the always-on guidance and BEFORE the
+            workspace blocks so an empty / absent block leaves the prior
+            output byte-for-byte unchanged;
         5. ``+ _build_workspace_context(ws)`` when a workspace root resolved;
         6. ``+`` each pre-resolved workspace project-context block
            (``AGENTS.md`` / ``CLAUDE.md``) — CLOUD-only, so the caller passes
@@ -2175,6 +2231,8 @@ class RichSystemPromptBuilder(SystemPromptBuilderPort):
             system_text = f"{system_text}\n\n{_build_python_env_context()}"
         system_text = f"{system_text}\n\n{MERMAID_GUIDANCE}"
         system_text = f"{system_text}\n\n{_build_datetime_context()}"
+        if skills_block:
+            system_text = f"{system_text}\n\n{skills_block}"
         ws = (workspace_root or "").strip()
         if not ws:
             return system_text

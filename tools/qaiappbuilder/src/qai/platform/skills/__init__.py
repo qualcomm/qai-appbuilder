@@ -17,7 +17,7 @@ and is layered on top of the discovered metadata by the HTTP route layer.
 Public API:
     - :class:`SkillInfo` — immutable discovered skill record.
     - :class:`SkillDiscovery` — scans a directory and returns ``SkillInfo``.
-    - :data:`VALID_MODES` / :data:`NPU_MODES` — the 4-state mode sets.
+    - :data:`VALID_MODES` — the 4-state mode sets.
 """
 
 from __future__ import annotations
@@ -26,7 +26,6 @@ from qai.platform.skills.discovery import (
     CLOUD_VISIBLE_MODES,
     DEFAULT_SKILL_MODES,
     LOCAL_VISIBLE_MODES,
-    NPU_MODES,
     VALID_MODES,
     SkillDiscovery,
     SkillInfo,
@@ -44,7 +43,6 @@ __all__ = [
     "CLOUD_VISIBLE_MODES",
     "DEFAULT_SKILL_MODES",
     "LOCAL_VISIBLE_MODES",
-    "NPU_MODES",
     "VALID_MODES",
     "SkillDiscovery",
     "SkillInfo",

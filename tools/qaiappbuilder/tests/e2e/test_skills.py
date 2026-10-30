@@ -305,12 +305,12 @@ def test_set_a_per_skill_mode(sk: tuple, mode: str) -> None:
 
 
 @pytest.mark.parametrize("mode", ["local", "both"])
-def test_npu_only_modes_are_refused_for_a_skill_that_is_not_npu_optimised(sk: tuple, mode: str) -> None:
+def test_local_modes_are_accepted_for_a_skill_that_is_not_npu_optimised(sk: tuple, mode: str) -> None:
+    """``npu_optimized`` is only a display badge now: local/both are persisted and read back as chosen."""
     _ob, cl = sk
     r = cl.post("/api/skills/weather/set_mode", json={"mode": mode})
-    assert r.status_code == 400 and r.json() == {"type": "ValidationError", "code": "user_prefs.skills.mode_not_allowed",
-                                                  "message": f"Skill 'weather' is not NPU-optimized; mode '{mode}' requires NPU optimization."}
-    assert cl.get("/api/skills/policy").json()["overrides"] == {}, "and nothing was stored"
+    assert r.status_code == 200 and r.json() == {"skill_id": "weather", "mode": mode, "npu_optimized": False}
+    assert _skills(cl)["weather"]["mode"] == mode and cl.get("/api/skills/policy").json()["overrides"]["weather"] == {"mode": mode}
 
 
 @pytest.mark.parametrize("mode", ["bogus", "OFF", "", "auto", None])
@@ -350,9 +350,8 @@ def test_set_mode_and_toggle_write_different_keys_into_one_entry(sk: tuple) -> N
     assert cl.get("/api/skills/policy").json()["overrides"]["weather"] == {"enabled": False, "mode": "cloud"}
 
 
-def test_a_stored_npu_mode_for_a_skill_that_is_not_npu_optimised_reads_back_as_cloud(sk: tuple) -> None:
-    """``set_mode`` refuses ``local``/``both`` for such a skill, but the stored document can still hold one (hand-edited, or written before the
-    skill lost its NPU flag). The reader must not honour it - it falls back to ``cloud`` - or the chat would advertise a skill it cannot run."""
+def test_a_stored_local_mode_for_a_skill_that_is_not_npu_optimised_is_preserved(sk: tuple) -> None:
+    """A stored ``local`` is user intent; the resolver no longer rewrites it to ``cloud`` for a non-NPU skill."""
     import sqlite3
 
     ob, cl = sk
@@ -365,8 +364,8 @@ def test_a_stored_npu_mode_for_a_skill_that_is_not_npu_optimised_reads_back_as_c
         con.commit()
     finally:
         con.close()
-    assert _skills(cl)["weather"]["mode"] == "cloud"
-    assert cl.get("/api/skills/policy").json()["overrides"]["weather"] == {"mode": "local"}, "stored as written, read as cloud"
+    assert _skills(cl)["weather"]["mode"] == "local"
+    assert cl.get("/api/skills/policy").json()["overrides"]["weather"] == {"mode": "local"}
 
 # --------------------------------------------------------------------------
 # icons

@@ -19,37 +19,6 @@ export interface ServiceConfigResponse {
   meta: { using_default_config: boolean; config_file_path: string };
 }
 
-export interface ModelSlot {
-  name: string;
-  context_size: number;
-  enabled: boolean;
-  backend: string;
-  device: string;
-  /**
-   * On-disk model directory. V1 (useConfig.js:161-164) forces `path === name`
-   * for the 3 fixed slots on save so the backend resolves the model dir.
-   */
-  path?: string;
-}
-
-/**
- * Per-format buckets of available local model names. Backed by
- * ``/api/service/models`` (each entry tagged with its ``format``
- * field — see ``interfaces/http/routes/model_runtime.py:283-301``)
- * and bucketed client-side in ``ServiceConfigPanel.vue``.
- *
- * V1 (``ServiceConfigPanel.js:205/229/253``) renders the per-slot
- * select option list from the same per-format buckets
- * (``localModelsByFmt.qnn`` / ``.gguf`` / ``.mnn``) so the slots
- * only show models whose on-disk format matches the slot's
- * runtime backend (NPU=QNN, GPU=GGUF, CPU=MNN).
- */
-export interface LocalModelsByFormat {
-  qnn: string[];
-  gguf: string[];
-  mnn: string[];
-}
-
 export interface CloudModel {
   enabled: boolean;
   base_url: string;
@@ -274,8 +243,6 @@ export interface ServiceDebug {
 
 export interface ServiceConfig {
   local_model?: { enabled: boolean };
-  default_model?: string;
-  models?: ModelSlot[];
   cloud_shared?: CloudShared;
   cloud_model?: CloudModel;
   enterprise_cloud_model?: CloudModel;

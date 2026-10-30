@@ -12,6 +12,7 @@
  *   POST /api/service/stop   — stop the inference daemon
  *   GET  /api/service/logs   — retrieve buffered service logs
  *   POST /api/service/logs/clear — clear log buffer and return skip marker
+ *   GET/POST /api/service/install-dir — GenieAPIService directory override
  *
  * The inference service is GenieAPIService (or equivalent) managed by
  * the model_runtime bounded context.
@@ -27,6 +28,7 @@ import type {
   ProbeServiceResponse,
   LoadServiceModelRequest,
   LoadServiceModelResponse,
+  ServiceInstallDirResponse,
 } from "@/types/service";
 
 /**
@@ -90,6 +92,16 @@ export async function stopService(
 }
 
 /**
+ * Ask the running daemon to clear its context (`POST /api/service/clear`).
+ * 409 `model_runtime.service_clear_busy` when a clear is already in flight.
+ */
+export async function clearServiceContext(
+  opts?: ApiRequestOptions,
+): Promise<ServiceStatusResponse> {
+  return apiJson<ServiceStatusResponse>("POST", "/api/service/clear", undefined, opts);
+}
+
+/**
  * Build the absolute URL of the SSE log stream (`GET /api/service/logs`).
  *
  * The log endpoint is an `text/event-stream` (V1 parity); callers drive it
@@ -141,6 +153,31 @@ export async function fetchServiceModels(
   opts?: ApiRequestOptions,
 ): Promise<ServiceModelsResponse> {
   return apiJson<ServiceModelsResponse>("GET", "/api/service/models", undefined, opts);
+}
+
+/**
+ * Read the user-chosen GenieAPIService directory ("" = auto-scan data/bin).
+ */
+export async function fetchInstallDir(
+  opts?: ApiRequestOptions,
+): Promise<ServiceInstallDirResponse> {
+  return apiJson<ServiceInstallDirResponse>("GET", "/api/service/install-dir", undefined, opts);
+}
+
+/**
+ * Set the GenieAPIService directory ("" clears it). Rejects with 422
+ * `model_runtime.install_dir_invalid` when the directory lacks the exe.
+ */
+export async function saveInstallDir(
+  path: string,
+  opts?: ApiRequestOptions,
+): Promise<ServiceInstallDirResponse> {
+  return apiJson<ServiceInstallDirResponse, { path: string }>(
+    "POST",
+    "/api/service/install-dir",
+    { path },
+    opts,
+  );
 }
 
 /**

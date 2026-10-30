@@ -33,6 +33,7 @@ does NOT carry:
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from typing import Any
@@ -81,6 +82,92 @@ _SERVICE_UNAVAILABLE_MESSAGE = (
     "4. 回到此处重新发送您的问题\n\n"
     "> 如果想直接使用云端模型，请在顶部模型选择器中切换到云端模型。"
 )
+_SERVICE_LOADING_MESSAGE = "**[本地模型正在加载]**\n\n本地模型正在加载，请稍候重试。"
+_SERVICE_READY_RETRY_SECONDS = 120.0
+_SERVICE_READY_RETRY_INTERVAL_SECONDS = 4.0
+_MODEL_LOADING_WAIT_SECONDS = 300.0
+_MODEL_LOADING_POLL_SECONDS = 2.0
+_STATUS_PROBE_TIMEOUT_SECONDS = 2.0
+
+
+_THINK_OPEN = "<think>"
+_THINK_CLOSE = "</think>"
+
+
+def _partial_tag_len(buf: str, tags: tuple[str, ...]) -> int:
+    for n in range(min(len(buf), max(map(len, tags)) - 1), 0, -1):
+        tail = buf[-n:]
+        if any(tag.startswith(tail) for tag in tags):
+            return n
+    return 0
+
+
+class _ThinkSplitter:
+    """Split inline ``<think>...</think>`` out of the streamed content.
+
+    GenieAPIService has no ``reasoning_content`` field: the model's thinking
+    arrives inline in ``delta.content``. ``feed`` returns ``(is_reasoning,
+    text)`` segments so the adapter can emit thinking as REASONING frames.
+    A tag split across deltas is held back until it can be classified.
+    """
+
+    __slots__ = ("_in_think", "_hold", "_lstrip")
+
+    def __init__(self) -> None:
+        self._in_think = False
+        self._hold = ""
+        self._lstrip = False
+
+    def _emit(
+        self, out: list[tuple[bool, str]], is_reasoning: bool, text: str
+    ) -> None:
+        if self._lstrip:
+            text = text.lstrip()
+        if text:
+            self._lstrip = False
+            out.append((is_reasoning, text))
+
+    def feed(self, text: str) -> list[tuple[bool, str]]:
+        buf = self._hold + text
+        self._hold = ""
+        out: list[tuple[bool, str]] = []
+        while buf:
+            if self._in_think:
+                idx = buf.find(_THINK_CLOSE)
+                if idx >= 0:
+                    self._emit(out, True, buf[:idx])
+                    buf = buf[idx + len(_THINK_CLOSE):]
+                    self._in_think = False
+                    self._lstrip = True
+                    continue
+                keep = _partial_tag_len(buf, (_THINK_CLOSE,))
+                self._emit(out, True, buf[: len(buf) - keep])
+                self._hold = buf[len(buf) - keep:]
+                break
+            open_idx = buf.find(_THINK_OPEN)
+            close_idx = buf.find(_THINK_CLOSE)
+            if close_idx >= 0 and (open_idx < 0 or close_idx < open_idx):
+                self._emit(out, False, buf[:close_idx])
+                buf = buf[close_idx + len(_THINK_CLOSE):]
+                self._lstrip = True
+                continue
+            if open_idx >= 0:
+                self._emit(out, False, buf[:open_idx])
+                buf = buf[open_idx + len(_THINK_OPEN):]
+                self._in_think = True
+                self._lstrip = True
+                continue
+            keep = _partial_tag_len(buf, (_THINK_OPEN, _THINK_CLOSE))
+            self._emit(out, False, buf[: len(buf) - keep])
+            self._hold = buf[len(buf) - keep:]
+            break
+        return out
+
+    def flush(self) -> list[tuple[bool, str]]:
+        rest, self._hold = self._hold, ""
+        out: list[tuple[bool, str]] = []
+        self._emit(out, self._in_think, rest)
+        return out
 
 
 class LocalModelStreamAdapter:
@@ -99,6 +186,7 @@ class LocalModelStreamAdapter:
         "_client_factory",
         "_ids",
         "_model_name",
+        "_service_running_provider",
         "_timeout_seconds",
     )
 
@@ -111,6 +199,7 @@ class LocalModelStreamAdapter:
         model_name: str = "local",
         timeout_seconds: float = 1800.0,
         client_factory: Any | None = None,
+        service_running_provider: Any | None = None,
     ) -> None:
         self._base_url = (base_url or "").rstrip("/")
         self._api_key = api_key or ""
@@ -118,6 +207,7 @@ class LocalModelStreamAdapter:
         self._model_name = model_name
         self._timeout_seconds = timeout_seconds
         self._client_factory = client_factory
+        self._service_running_provider = service_running_provider
 
     # ------------------------------------------------------------------
     # LLMStreamPort
@@ -131,6 +221,7 @@ class LocalModelStreamAdapter:
     async def _run(
         self,
         request: LLMStreamRequest,
+        service_ready_deadline: float | None = None,
     ) -> AsyncIterator[StreamFrame]:
         if not self._base_url:
             # No endpoint configured — yield friendly fallback.
@@ -155,10 +246,12 @@ class LocalModelStreamAdapter:
 
         sequence = 0
         content_buffer = ""
+        think_splitter = _ThinkSplitter()
         # Track the terminal finish_reason so we can emit a V1-parity
         # truncation / content-filter notice before END (audit #5). The cloud
         # adapter already does this; the local path regressed it.
         last_finish_reason: str | None = None
+        last_usage: dict[str, Any] | None = None
         # ── OpenAI-native tool_calls accumulator (root-cause fix) ──
         # GenieAPIService converts the on-device model's tool call into the
         # OpenAI-native ``delta.tool_calls[]`` field (NOT a ``<tool_call>``
@@ -170,6 +263,26 @@ class LocalModelStreamAdapter:
         # shape) AND fragmented (cloud-routed) deliveries work.  ``int index``
         # → ``{"id", "type", "function": {"name", "arguments"}, ...}``.
         accumulated_tool_calls: dict[int, dict[str, Any]] = {}
+
+        if self._service_running_provider is not None:
+            loading_deadline = (
+                asyncio.get_running_loop().time() + _MODEL_LOADING_WAIT_SECONDS
+            )
+            while await self._daemon_model_loading():
+                if asyncio.get_running_loop().time() >= loading_deadline:
+                    async for frame in self._yield_service_unavailable_fallback(
+                        start_sequence=sequence,
+                        loading=True,
+                    ):
+                        yield frame
+                    return
+                sequence += 1
+                yield StreamFrame.liveness_pulse(
+                    frame_id=self._next_frame_id("pulse"),
+                    sequence=sequence,
+                    status="model_loading",
+                )
+                await asyncio.sleep(_MODEL_LOADING_POLL_SECONDS)
 
         try:
             async with self._make_client() as client:
@@ -247,6 +360,10 @@ class LocalModelStreamAdapter:
                             )
                             continue
 
+                        usage_event = self._extract_usage(event)
+                        if usage_event is not None:
+                            last_usage = usage_event
+
                         # ── GenieAPIService status / keep-alive frames ──
                         # On-device runtimes emit periodic *status* frames whose
                         # ``delta.content`` is empty and whose ``status`` field
@@ -281,6 +398,21 @@ class LocalModelStreamAdapter:
                                 "local_model_stream.status_frame",
                                 status=status,
                                 message=self._extract_status_message(event),
+                            )
+                            # Surface an internal-only ``liveness_pulse`` frame
+                            # (see ``StreamFrameType.LIVENESS_PULSE``) so
+                            # ``_stream_guards.abortable_frames()`` can see the
+                            # upstream is still alive and reset its stall
+                            # watchdog. It is swallowed there and never reaches
+                            # the use case / sub-agent loop. Without it a long
+                            # pure-prefill phase (zero generated tokens, only
+                            # heartbeat frames) looked like a wedged upstream
+                            # and the watchdog aborted a healthy connection.
+                            sequence += 1
+                            yield StreamFrame.liveness_pulse(
+                                frame_id=self._next_frame_id("pulse"),
+                                sequence=sequence,
+                                status=status,
                             )
                             continue
 
@@ -367,7 +499,20 @@ class LocalModelStreamAdapter:
                         if not delta_text:
                             continue
 
-                        content_buffer += delta_text
+                        visible_delta = ""
+                        for is_reasoning, seg in think_splitter.feed(delta_text):
+                            if is_reasoning:
+                                sequence += 1
+                                yield StreamFrame.reasoning(
+                                    frame_id=self._next_frame_id("rs"),
+                                    sequence=sequence,
+                                    text=seg,
+                                )
+                            else:
+                                visible_delta += seg
+                        if not visible_delta:
+                            continue
+                        content_buffer += visible_delta
 
                         # ── XML tool_call extraction loop ──
                         # Repeatedly try to extract complete
@@ -427,6 +572,17 @@ class LocalModelStreamAdapter:
                                 sequence=sequence,
                                 text=safe,
                             )
+
+            for is_reasoning, seg in think_splitter.flush():
+                if is_reasoning:
+                    sequence += 1
+                    yield StreamFrame.reasoning(
+                        frame_id=self._next_frame_id("rs"),
+                        sequence=sequence,
+                        text=seg,
+                    )
+                else:
+                    content_buffer += seg
 
             # ── Stream ended with un-emitted tool_calls (no terminal
             # ``finish_reason == "tool_calls"`` frame) ──
@@ -532,10 +688,44 @@ class LocalModelStreamAdapter:
                     {"truncated": True} if plain_text_length_truncated else None
                 ),
                 reason="completed",
+                usage=last_usage,
             )
             return
 
         except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+            if self._service_running_provider is not None:
+                service_running = await self._service_running_provider()
+                if service_running:
+                    if service_ready_deadline is None:
+                        service_ready_deadline = (
+                            asyncio.get_running_loop().time()
+                            + _SERVICE_READY_RETRY_SECONDS
+                        )
+                    remaining = (
+                        service_ready_deadline
+                        - asyncio.get_running_loop().time()
+                    )
+                    if remaining > 0:
+                        await asyncio.sleep(
+                            min(_SERVICE_READY_RETRY_INTERVAL_SECONDS, remaining)
+                        )
+                        async for frame in self._run(
+                            request,
+                            service_ready_deadline=service_ready_deadline,
+                        ):
+                            yield frame
+                        return
+                    _log.warning(
+                        "local_model_stream.service_loading_timeout",
+                        base_url=self._base_url,
+                        error=str(exc),
+                    )
+                    async for frame in self._yield_service_unavailable_fallback(
+                        start_sequence=sequence,
+                        loading=True,
+                    ):
+                        yield frame
+                    return
             # H-8: Local service down — yield friendly fallback.
             _log.warning(
                 "local_model_stream.service_unavailable",
@@ -609,6 +799,7 @@ class LocalModelStreamAdapter:
         self,
         *,
         start_sequence: int = 0,
+        loading: bool = False,
     ) -> AsyncIterator[StreamFrame]:
         """Emit a single chunk + END frame describing the down service.
 
@@ -616,18 +807,25 @@ class LocalModelStreamAdapter:
         prefixed inside the chunk so frontends that wish to surface a
         button (e.g. "Open Service Panel") can detect the condition.
         """
+        message = (
+            _SERVICE_LOADING_MESSAGE if loading else _SERVICE_UNAVAILABLE_MESSAGE
+        )
         seq = start_sequence + 1
         yield StreamFrame.error(
             frame_id=self._next_frame_id("err"),
             sequence=seq,
-            code="chat.local.service_unavailable",
-            message=_SERVICE_UNAVAILABLE_MESSAGE,
+            code=(
+                "chat.local.service_loading"
+                if loading
+                else "chat.local.service_unavailable"
+            ),
+            message=message,
         )
         seq += 1
         yield StreamFrame.chunk(
             frame_id=self._next_frame_id("ck"),
             sequence=seq,
-            text=_SERVICE_UNAVAILABLE_MESSAGE,
+            text=message,
         )
         seq += 1
         yield StreamFrame.end(
@@ -653,6 +851,29 @@ class LocalModelStreamAdapter:
         if isinstance(content, str):
             return content
         return ""
+
+    @staticmethod
+    def _extract_usage(event: dict[str, Any]) -> dict[str, Any] | None:
+        """Return GenieAPIService's real token usage from an SSE chunk.
+
+        Only the terminal chunk carries non-zero figures (earlier chunks send
+        zeros); a chunk without a positive ``prompt_tokens`` yields ``None``.
+        """
+        usage = event.get("usage") if isinstance(event, dict) else None
+        if not isinstance(usage, dict):
+            return None
+        try:
+            prompt = int(usage.get("prompt_tokens") or 0)
+            completion = int(usage.get("completion_tokens") or 0)
+        except (TypeError, ValueError):
+            return None
+        if prompt <= 0:
+            return None
+        return {
+            "prompt_tokens": prompt,
+            "completion_tokens": max(0, completion),
+            "total_tokens": prompt + max(0, completion),
+        }
 
     @staticmethod
     def _extract_tool_calls(event: dict[str, Any]) -> list[Any]:
@@ -1083,6 +1304,28 @@ class LocalModelStreamAdapter:
 
     def _next_frame_id(self, prefix: str) -> str:
         return f"local-{prefix}-{self._ids.new_id()}"
+
+    async def _daemon_model_loading(self) -> bool:
+        """True iff the daemon answers ``GET /status`` with ``loading == "true"``.
+
+        The daemon's HTTP server listens before its model finishes loading and a
+        chat request that arrives meanwhile triggers a second model load; hold the
+        request back instead. Any failure (old daemon, not listening) is "not
+        loading" so the normal connect-retry path stays in charge.
+        """
+        root = self._base_url
+        if root.endswith("/v1"):
+            root = root[: -len("/v1")]
+        try:
+            async with self._make_client() as client:
+                resp = await client.get(
+                    f"{root}/status", timeout=_STATUS_PROBE_TIMEOUT_SECONDS
+                )
+            if resp.status_code != 200:
+                return False
+            return str(resp.json().get("loading", "")).lower() == "true"
+        except Exception:  # noqa: BLE001 — probe is best-effort
+            return False
 
     def _make_client(self) -> httpx.AsyncClient:
         """Build the HTTP client (test seam via ``client_factory``).

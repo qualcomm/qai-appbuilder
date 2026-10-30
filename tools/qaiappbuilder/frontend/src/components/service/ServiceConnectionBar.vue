@@ -9,16 +9,14 @@
  * page, extracted from ServiceView.vue to keep that view within the cohesion
  * budget.
  *
- * Presentational: renders the local/remote radio, IP + port inputs, the
- * "Test" probe + reachable/unreachable result, the remote-mode start/stop
- * warning, and the Save button. All state stays in the page-level
- * `useServiceControl`; two-way scalars are exposed as v-model bindings, and
- * host-mode changes / test / save are emitted back up.
+ * Presentational: renders the local port input, the "Test" probe
+ * + reachable/unreachable result, and the Save button. All state stays in the
+ * page-level `useServiceControl`; the port is a v-model binding, and
+ * test / save are emitted back up.
  */
 import { useI18n } from "vue-i18n";
 
 defineProps<{
-  isRemoteMode: boolean;
   localUrl: string;
   connectionTesting: boolean;
   connectionTestResult: "ok" | "fail" | null;
@@ -26,7 +24,6 @@ defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: "set-host-mode", mode: "local" | "remote"): void;
   (e: "test"): void;
   (e: "save"): void;
 }>();
@@ -34,24 +31,9 @@ const emit = defineEmits<{
 // Two-way scalar bindings (each backed by the page-level useServiceControl's
 // reactive svcParams).
 const collapsed = defineModel<boolean>("collapsed", { required: true });
-const remoteHost = defineModel<string>("remoteHost", { required: true });
 const localPort = defineModel<number>("localPort", { required: true });
-const remotePort = defineModel<number>("remotePort", { required: true });
 
 const { t } = useI18n();
-
-/**
- * V1 parity (index.html:318): the single port input writes to remote_port in
- * remote mode and local_port otherwise. We keep that exact dispatch here so
- * the connection bar's port edit mirrors the previous inline handler.
- */
-function onPortInput(value: number, remote: boolean): void {
-  if (remote) {
-    remotePort.value = value;
-  } else {
-    localPort.value = value;
-  }
-}
 </script>
 
 <template>
@@ -66,7 +48,7 @@ function onPortInput(value: number, remote: boolean): void {
       >▼</span>
       <span class="conn-label">🖥️ {{ t("service.connection") }}</span>
       <span class="conn-value">
-        {{ isRemoteMode ? t("service.remotePrefix") : t("service.localPrefix") }}{{ localUrl }}
+        {{ t("service.localPrefix") }}{{ localUrl }}
       </span>
       <span class="conn-toggle">{{ collapsed ? t("service.editArrow") : t("service.closeArrow") }}</span>
     </div>
@@ -75,45 +57,7 @@ function onPortInput(value: number, remote: boolean): void {
       v-show="!collapsed"
       class="service-connection-body"
     >
-      <div class="conn-question">
-        {{ t("service.connectionQuestion") }}
-      </div>
-
-      <div class="conn-radios">
-        <label class="conn-radio">
-          <input
-            type="radio"
-            :checked="!isRemoteMode"
-            @change="emit('set-host-mode', 'local')"
-          />
-          {{ t("service.thisMachine") }}
-        </label>
-        <label class="conn-radio">
-          <input
-            type="radio"
-            :checked="isRemoteMode"
-            @change="emit('set-host-mode', 'remote')"
-          />
-          {{ t("service.remoteMachine") }}
-        </label>
-      </div>
-
       <div class="conn-inputs">
-        <div class="conn-field">
-          <label class="conn-field-label">{{ t("service.ipAddress") }}</label>
-          <input
-            v-if="isRemoteMode"
-            v-model="remoteHost"
-            class="param-input conn-ip"
-            placeholder="192.168.1.100"
-          />
-          <input
-            v-else
-            class="param-input conn-ip conn-ip-disabled"
-            value="127.0.0.1"
-            disabled
-          />
-        </div>
         <div class="conn-field">
           <label class="conn-field-label">{{ t("service.port") }}</label>
           <input
@@ -121,8 +65,8 @@ function onPortInput(value: number, remote: boolean): void {
             type="number"
             min="1"
             max="65535"
-            :value="isRemoteMode ? remotePort : localPort"
-            @input="(e) => onPortInput(+(e.target as HTMLInputElement).value, isRemoteMode)"
+            :value="localPort"
+            @input="(e) => (localPort = +(e.target as HTMLInputElement).value)"
           />
         </div>
         <button
@@ -147,13 +91,6 @@ function onPortInput(value: number, remote: boolean): void {
           v-if="connectionTestResult === 'fail'"
           class="conn-result conn-result-fail"
         >✗ {{ t("service.unreachable") }}</span>
-      </div>
-
-      <div
-        v-if="isRemoteMode"
-        class="conn-remote-warn"
-      >
-        {{ t("service.remoteModeStartStopWarn") }}
       </div>
 
       <div>
@@ -232,20 +169,6 @@ function onPortInput(value: number, remote: boolean): void {
   flex-direction: column;
   gap: var(--space-3);
 }
-.conn-question {
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-}
-.conn-radios {
-  display: flex;
-  gap: var(--space-5);
-}
-.conn-radio {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-}
 .conn-inputs {
   display: flex;
   align-items: center;
@@ -262,12 +185,6 @@ function onPortInput(value: number, remote: boolean): void {
   color: var(--text-secondary);
   white-space: nowrap;
 }
-.conn-ip {
-  width: 160px;
-}
-.conn-ip-disabled {
-  opacity: 0.45;
-}
 .conn-port {
   width: 80px;
 }
@@ -279,14 +196,6 @@ function onPortInput(value: number, remote: boolean): void {
 }
 .conn-result-fail {
   color: var(--error);
-}
-.conn-remote-warn {
-  font-size: var(--text-sm);
-  color: var(--banner-warn-text);
-  background: var(--banner-warn-bg);
-  border: 1px solid var(--banner-warn-border);
-  padding: 8px 10px;
-  border-radius: 6px;
 }
 .param-input {
   padding: var(--space-2) var(--space-3);

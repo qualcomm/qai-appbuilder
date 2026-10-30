@@ -200,6 +200,53 @@ class ModelFormat(str, Enum):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class ModelExtraFile:
+    """An additional raw file a :class:`ModelVariant` needs besides its main
+    ``download_url`` (e.g. a speculative-decoding drafter GGUF weight).
+
+    Downloaded exactly like a variant's main file (own SSE task, own
+    ``save_path``), then moved into ``<install_dir>/<subdir>/<filename>`` at
+    install time — additive, never replaces the main file already placed by
+    :class:`ModelVariant`. ``subdir`` keeps it out of the model's top-level
+    directory listing so on-disk single-file discovery (``*.gguf`` glob,
+    GenieAPIService's non-recursive dir scan) still finds exactly one main
+    weight. Empty ``subdir`` places it alongside the main file.
+    """
+
+    filename: str = ""
+    subdir: str = ""
+    download_url: str = ""
+    size_bytes: int = 0
+    checksum_sha256: str = ""
+
+    def to_wire(self) -> dict[str, object]:
+        return {
+            "filename": self.filename,
+            "subdir": self.subdir,
+            "download_url": self.download_url,
+            "size_bytes": self.size_bytes,
+            "checksum_sha256": self.checksum_sha256,
+        }
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ExtraFileInstallSpec:
+    """Install-time pointer to an already-downloaded :class:`ModelExtraFile`.
+
+    Carries the caller's (frontend's) resolved ``save_path`` for one extra
+    file plus where it belongs inside the model's install dir. Passed
+    through ``InstallModelCommand`` → ``ArtifactInstallerPort.install_model``
+    unchanged; the installer never re-fetches the catalog, so ``filename`` /
+    ``subdir`` must be supplied by the caller (it already has the full
+    :class:`ModelVariant.extra_files` entry from the catalog fetch).
+    """
+
+    save_path: str
+    filename: str = ""
+    subdir: str = ""
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ModelVariant:
     """A per-platform model build (V1 schema_version 2 ``variants[]``)."""
 
@@ -211,6 +258,15 @@ class ModelVariant:
     download_url: str = ""
     size_bytes: int = 0
     checksum_sha256: str = ""
+    #: Additional raw files this variant needs besides ``download_url``
+    #: (e.g. a speculative-decoding drafter GGUF). Empty for every existing
+    #: (single-file) variant — additive, opt-in field.
+    extra_files: tuple[ModelExtraFile, ...] = ()
+    #: Optional ``config.json`` content to write into the install dir once
+    #: the main file (and any ``extra_files``) are in place. ``compare=False``
+    #: keeps the dataclass hashable (a ``dict`` value is not) without
+    #: affecting equality semantics anywhere this VO is actually compared.
+    install_config: dict[str, object] | None = field(default=None, compare=False)
 
     def to_wire(self) -> dict[str, object]:
         return {
@@ -222,6 +278,8 @@ class ModelVariant:
             "download_url": self.download_url,
             "size_bytes": self.size_bytes,
             "checksum_sha256": self.checksum_sha256,
+            "extra_files": [f.to_wire() for f in self.extra_files],
+            "install_config": self.install_config,
         }
 
 

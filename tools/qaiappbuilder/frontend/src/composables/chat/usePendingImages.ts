@@ -64,6 +64,23 @@ export interface UsePendingImages {
   uploadPendingImages: () => Promise<string>;
 }
 
+const LOCAL_SUPPORTED_IMAGE_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+]);
+
+/**
+ * GenieAPIService's local decode path (`stb_image`) supports JPEG/PNG/GIF
+ * but not WebP — mirrors `_image_refs.py`'s `_LOCAL_SUPPORTED_IMAGE_EXTS`.
+ * Accepts by MIME type OR filename extension (case-insensitive), same shape
+ * as `usePendingAudio.ts`'s `isWavFile`.
+ */
+export function isLocallySupportedImageFile(file: File): boolean {
+  if (LOCAL_SUPPORTED_IMAGE_MIME_TYPES.has(file.type.toLowerCase())) return true;
+  return /\.(jpe?g|png|gif)$/i.test(file.name);
+}
+
 function genLocalId(): string {
   return `img-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -92,10 +109,17 @@ function readAsDataUrl(file: File): Promise<string> {
  * @param fileInputRef   Ref to the hidden `<input type=file>` element so
  *                       `openFilePicker` can trigger the native picker and
  *                       reset its value after selection.
+ * @param isLocalModelRef Whether the active tab's model is a local
+ *                       on-device model (`ChatComposer.vue`'s
+ *                       `isLocalModelActive`). When true, `ingestImageFile`
+ *                       silently skips files outside
+ *                       `isLocallySupportedImageFile` (e.g. WebP) since the
+ *                       local decode path cannot read them.
  */
 export function usePendingImages(
   textRef: Ref<string>,
   fileInputRef: Ref<HTMLInputElement | null>,
+  isLocalModelRef: Ref<boolean>,
 ): UsePendingImages {
   const store = useChatTabsStore();
   const { t } = useI18n();
@@ -115,6 +139,7 @@ export function usePendingImages(
    */
   async function ingestImageFile(file: File): Promise<void> {
     if (!file.type.startsWith("image/")) return;
+    if (isLocalModelRef.value && !isLocallySupportedImageFile(file)) return;
     try {
       const dataUrl = await readAsDataUrl(file);
       const commaIdx = dataUrl.indexOf(",");

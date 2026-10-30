@@ -78,7 +78,6 @@ from qai.platform.errors import (
     ValidationError,
 )
 from qai.user_prefs.application.use_cases import (
-    SkillModeNotAllowedError,
     SkillNotFoundError,
 )
 from qai.user_prefs.domain.code_personas import (
@@ -198,8 +197,8 @@ class PerSkillModeRequest(BaseModel):
 
     Distinct from :class:`SkillModeRequest` (the global ``auto/manual/
     disabled`` policy preference). This is the v1 per-skill run mode:
-    ``off`` / ``cloud`` / ``local`` / ``both`` where ``local`` and
-    ``both`` require the skill to be NPU-optimised.
+    ``off`` / ``cloud`` / ``local`` / ``both``; runtime context-size checks
+    decide whether a local model can use the advertised skill catalogue.
     """
 
     mode: Literal["off", "cloud", "local", "both"]
@@ -719,7 +718,7 @@ def build_router(*, container: Container) -> APIRouter:
     # ===========================================================================
     # Skills business registry (v1 SkillManager port): directory discovery +
     # per-skill 4-state mode + icon serving. The directory scan + override
-    # mode-resolve + NPU validation live in ListSkillsUseCase /
+    # mode-resolve + mode validation live in ListSkillsUseCase /
     # SetSkillModeUseCase (Clean Architecture: interfaces stays thin); the
     # route maps the domain errors to the same 404 / 400 responses.
     # ===========================================================================
@@ -741,8 +740,7 @@ def build_router(*, container: Container) -> APIRouter:
         """Set the per-skill 4-state run mode and persist it.
 
         * 404 if ``skill_id`` is not a discovered skill.
-        * 400 if ``mode`` is ``local``/``both`` but the skill is not
-          NPU-optimised (v1 ``set_mode`` ValueError parity).
+        * 400 if ``mode`` is not one of the four supported per-skill modes.
         Persists to ``forge.config skills.overrides[skill_id].mode`` —
         tail-appending the ``mode`` sub-key alongside any existing
         ``enabled`` flag written by ``/api/skills/toggle``.
@@ -758,9 +756,9 @@ def build_router(*, container: Container) -> APIRouter:
                 skill_id,
                 message=str(exc),
             ) from exc
-        except SkillModeNotAllowedError as exc:
+        except ValueError as exc:
             raise ValidationError(
-                "user_prefs.skills.mode_not_allowed", str(exc)
+                "user_prefs.skills.invalid_mode", str(exc)
             ) from exc
 
     @router.get("/api/skills/{skill_id}/icon")

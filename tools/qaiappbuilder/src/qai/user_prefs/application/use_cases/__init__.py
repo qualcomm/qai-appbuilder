@@ -23,7 +23,6 @@ from qai.user_prefs.application.use_cases.skills import (
     ReloadSkillsUseCase,
     SetSkillModeUseCase,
     SetSkillPolicyModeUseCase,
-    SkillModeNotAllowedError,
     SkillNotFoundError,
     ToggleSkillUseCase,
 )
@@ -39,7 +38,6 @@ __all__ = [
     "SaveProxyUseCase",
     "SetSkillModeUseCase",
     "SetSkillPolicyModeUseCase",
-    "SkillModeNotAllowedError",
     "SkillNotFoundError",
     "ToggleSkillUseCase",
 ]

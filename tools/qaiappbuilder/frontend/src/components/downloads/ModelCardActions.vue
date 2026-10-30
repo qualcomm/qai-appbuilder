@@ -68,6 +68,12 @@ interface Props {
   installState?: "installing" | "error" | null;
   /** Install failure message (shown when `installState==='error'`). */
   installError?: string;
+  /**
+   * Catalogued but not yet downloadable (`coming_soon` tag in the catalog):
+   * the idle row keeps the entry readable but greys the action out and
+   * relabels it "coming soon" instead of offering a download.
+   */
+  comingSoon?: boolean;
 }
 
 const props = defineProps<Props>();
@@ -268,7 +274,9 @@ async function onDeleteDownloaded(): Promise<void> {
     </div>
   </template>
 
-  <!-- 2) idle (no download yet, not installed) → start download -->
+  <!-- 2) idle (no download yet, not installed) → start download
+       ``comingSoon`` keeps this branch (card stays readable) but greys the
+       action out: the model is catalogued ahead of its release. -->
   <div
     v-else-if="!downloadEntry && !isInstalled"
     class="dc-card__row"
@@ -276,10 +284,16 @@ async function onDeleteDownloaded(): Promise<void> {
     <button
       type="button"
       class="btn btn-primary btn-sm"
-      :disabled="isAnyDownloading"
+      :disabled="isAnyDownloading || props.comingSoon === true"
+      :title="props.comingSoon ? t('downloads.comingSoonHint') : ''"
       @click="emit('startDownload')"
     >
-      ⬇ {{ startLabel }}
+      <template v-if="props.comingSoon">
+        🔒 {{ t("downloads.comingSoon") }}
+      </template>
+      <template v-else>
+        ⬇ {{ startLabel }}
+      </template>
     </button>
   </div>
 

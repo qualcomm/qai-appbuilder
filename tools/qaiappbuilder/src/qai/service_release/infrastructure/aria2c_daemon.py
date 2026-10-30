@@ -675,10 +675,11 @@ class Aria2cDaemon:
         * ``connect-timeout=15`` — TCP connect must complete within 15 s, else
           retry (default 60 s is too tolerant for a Setup loop).
         * ``timeout=30`` — per-segment read timeout 30 s.
-        * ``lowest-speed-limit=50K`` — if the average download speed drops
-          below 50 KB/s for ``timeout`` seconds, aria2c treats the connection
-          as dead. Critical for the "stalled at 99%" scenario where the TCP
-          stream is alive but stops sending bytes.
+        * ``lowest-speed-limit=0`` — disabled. It is judged per connection,
+          so on the last few pieces of a 16-way split it keeps dropping and
+          re-handshaking healthy-but-slow tail connections. Dead streams are
+          covered by ``timeout`` and, at file level, by the engine's stall
+          watchdog (which now re-queues and resumes).
         """
         return {
             # ABSOLUTE dir (resolve()): the aria2c daemon is spawned WITHOUT an
@@ -706,7 +707,7 @@ class Aria2cDaemon:
             "retry-wait": "5",
             "connect-timeout": "20",
             "timeout": "60",
-            "lowest-speed-limit": "10K",
+            "lowest-speed-limit": "0",
         }
 
 

@@ -1021,11 +1021,10 @@ def build_security_services(container: Container) -> SecurityServices:
             # leave never-configured skills with no mode and the two surfaces
             # would disagree.
             #
-            # ``npu_optimized=True``: report the PERSISTED operator intent.
-            # The NPU gate is enforced at WRITE time by
-            # ``SetSkillModeUseCase`` (a non-NPU skill can never have
-            # ``local``/``both`` persisted), so passing ``False`` here would
-            # silently rewrite a stored mode into ``cloud`` for display only.
+            # ``npu_optimized=True``: preserve the PERSISTED operator intent.
+            # The resolver retains this parameter for caller compatibility and
+            # the UI optimization marker, but runtime context-size checks—not
+            # this display path—decide whether a local skill fits the model.
             try:
                 resolved = _resolve_mode(
                     overrides.get(skill_id), True, skill_id

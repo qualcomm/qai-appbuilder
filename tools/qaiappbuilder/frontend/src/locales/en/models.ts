@@ -17,9 +17,9 @@
 // =============================================================================
 
 const models = {
-  loadingModel: "Loading model: {name}, please wait 30-60 seconds",
+  startingModel: "Starting GenieAPIService and loading model: {name}...",
+  modelReady: "Model ready: {name}",
   loadingPlaceholder: "Loading...",
-  remoteModelSelected: "Model {name} selected. Remote server will auto-switch on next message (first response may take 5-10s)",
   startFailed: "Start failed",
 };
 

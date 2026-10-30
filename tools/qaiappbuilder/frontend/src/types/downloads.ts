@@ -102,6 +102,23 @@ export interface ServiceVersion {
   packages: ServicePackage[];
 }
 
+/**
+ * An additional raw file a `ModelVariant` needs besides its main
+ * `download_url` (e.g. a speculative-decoding drafter GGUF weight).
+ *
+ * Downloaded exactly like a variant's main file (its own `/download` SSE
+ * stream), then placed under `<install_dir>/<subdir>/<filename>` at install
+ * time — additive, never replaces the main file. Empty `subdir` places it
+ * alongside the main file.
+ */
+export interface ModelExtraFile {
+  filename: string;
+  subdir: string;
+  download_url: string;
+  size_bytes: number;
+  checksum_sha256: string;
+}
+
 /** A platform/chip variant within a `CatalogModel`. */
 export interface ModelVariant {
   variant_id: string;
@@ -112,6 +129,18 @@ export interface ModelVariant {
   download_url: string;
   size_bytes: number;
   checksum_sha256: string;
+  /**
+   * Additional raw files this variant needs besides `download_url` (e.g. a
+   * speculative-decoding drafter GGUF weight). Empty for every existing
+   * (single-file) variant — additive, opt-in field.
+   */
+  extra_files: ModelExtraFile[];
+  /**
+   * Optional `config.json` content the backend writes into the install dir
+   * once the main file (and any `extra_files`) are in place. `null` when
+   * the variant needs no generated config.
+   */
+  install_config: Record<string, unknown> | null;
 }
 
 /** Hardware-grouped model entry. `GET /api/service-catalog` → `{models: CatalogModel[]}`. */
@@ -345,6 +374,17 @@ export interface ModelInstallRequestBody {
    * ServiceVersionCard. Optional — empty degrades to no label.
    */
   variant_id?: string;
+  /**
+   * Already-downloaded additional files (e.g. a speculative-decoding
+   * drafter GGUF) declared by the selected variant's `extra_files`. Empty
+   * for every existing single-file model — additive, opt-in.
+   */
+  extra_files?: { save_path: string; filename?: string; subdir?: string }[];
+  /**
+   * Optional `config.json` content (the variant's `install_config`) to
+   * write into the install dir once every file is in place.
+   */
+  install_config?: Record<string, unknown> | null;
 }
 
 // ─── Frontend-only auxiliary types (NOT on the wire) ───────────────────────

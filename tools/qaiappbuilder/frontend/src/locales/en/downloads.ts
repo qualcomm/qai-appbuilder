@@ -43,6 +43,8 @@ const downloads = {
   checkUpdate: "Check for Updates",
   closeBtn: "Close",
   collapseDetail: "Collapse details",
+  comingSoon: "Coming soon",
+  comingSoonHint: "This model is listed ahead of its release and is not downloadable yet.",
   completeToast: "Download completed",
   completed: "Completed",
   configCatalogUrlHint: "Please configure Model Catalog URL in Settings > App Config.",

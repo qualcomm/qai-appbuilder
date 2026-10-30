@@ -1,0 +1,160 @@
+{
+  "_comment": "本地补充模型目录（随源码发布）。加载时与远程 model_catalog.json 合并：同 model_id 以本条目为准；远程拉取失败时本文件条目仍可见。schema 与远程目录一致。可用 forge_config.json 的 model_catalog.local_catalog_enabled=false 关闭。",
+  "_comment_en": "Locally shipped supplementary model catalog merged over the remote model_catalog.json (same model_id => local wins; still visible when the remote fetch fails). Same schema as the remote catalog.",
+  "schema_version": 2,
+  "models": [
+    {
+      "model_id": "qwen3.8-27b-q4_0",
+      "name": "Qwen3.8 27B Q4_0",
+      "family": "Qwen3.8",
+      "parameter_size": "27B",
+      "type": "llm",
+      "format": "gguf",
+      "hardware": "gpu",
+      "context_length": 0,
+      "quantization": "Q4_0",
+      "short_description": {
+        "zh-CN": "270 亿参数的大模型，推理、长文档和多步骤任务能力强，搭配小型草稿模型加速生成，在骁龙 Adreno GPU 上本地离线运行。",
+        "en": "A 27-billion-parameter model that is strong at reasoning, long documents and multi-step tasks, paired with a small draft model for faster generation. Runs locally and offline on the Snapdragon Adreno GPU.",
+        "zh-TW": "270 億參數的大模型，推理、長文件與多步驟任務能力強，搭配小型草稿模型加速生成，在驍龍 Adreno GPU 上本機離線執行。"
+      },
+      "description": {
+        "zh-CN": "Qwen3.8-27B 是 270 亿参数的通用大模型，擅长复杂推理、长文档理解和多步骤任务，回答更深入、更有条理。本版本为 Q4_0 量化，在体积与效果之间取得平衡，并搭配 DFlash2 小型草稿模型：草稿模型先猜出接下来的内容，大模型一次性核对，回答质量不打折，生成却更快。全程在你的骁龙 Adreno GPU 上本机运行，不依赖网络，对话内容不会离开你的电脑，适合处理私密文档和离线办公。主模型约 15.7 GB，草稿模型约 1.1 GB。",
+        "en": "Qwen3.8-27B is a 27-billion-parameter general-purpose model that excels at complex reasoning, long-document understanding and multi-step tasks, giving deeper and better-organized answers. This Q4_0 build balances size and quality, and is paired with a small DFlash2 draft model: the draft model guesses what comes next and the large model checks it in one pass, so answer quality stays the same while generation gets faster. It runs entirely on your Snapdragon Adreno GPU, works offline, and your conversations never leave the computer — a good fit for private documents and offline work. Main model about 15.7 GB, draft model about 1.1 GB.",
+        "zh-TW": "Qwen3.8-27B 是 270 億參數的通用大模型，擅長複雜推理、長文件理解與多步驟任務，回答更深入、更有條理。本版本為 Q4_0 量化，在體積與效果之間取得平衡，並搭配 DFlash2 小型草稿模型：草稿模型先猜出接下來的內容，大模型一次性核對，回答品質不打折，生成卻更快。全程在你的驍龍 Adreno GPU 上本機執行，不依賴網路，對話內容不會離開你的電腦，適合處理私密文件與離線辦公。主模型約 15.7 GB，草稿模型約 1.1 GB。"
+      },
+      "features": [
+        {
+          "zh-CN": "生成更快：小型草稿模型先预测，大模型批量核对，不降低回答质量",
+          "en": "Faster generation: a small draft model predicts ahead and the large model checks it in batches, with no loss in answer quality",
+          "zh-TW": "生成更快：小型草稿模型先預測，大模型批次核對，不降低回答品質"
+        },
+        {
+          "zh-CN": "270 亿参数：复杂推理、长文档理解和多步骤任务都更得心应手",
+          "en": "27 billion parameters: handles complex reasoning, long-document understanding and multi-step tasks with ease",
+          "zh-TW": "270 億參數：複雜推理、長文件理解與多步驟任務都更得心應手"
+        },
+        {
+          "zh-CN": "本地离线：全程在本机运行，不依赖网络，对话内容不会离开你的电脑",
+          "en": "Local and offline: runs entirely on your machine without a network connection, and your conversations never leave the computer",
+          "zh-TW": "本機離線：全程在本機執行，不依賴網路，對話內容不會離開你的電腦"
+        },
+        {
+          "zh-CN": "GPU 加速：运行在骁龙 Adreno GPU 上，充分利用本机算力",
+          "en": "GPU acceleration: runs on the Snapdragon Adreno GPU and makes full use of your machine's compute",
+          "zh-TW": "GPU 加速：執行在驍龍 Adreno GPU 上，充分利用本機算力"
+        },
+        {
+          "zh-CN": "Q4_0 量化：在体积与回答效果之间取得平衡，一键下载主模型与草稿模型（合计约 16.9 GB）",
+          "en": "Q4_0 quantization: a balance of size and answer quality, with the main and draft models downloaded in one go (about 16.9 GB in total)",
+          "zh-TW": "Q4_0 量化：在體積與回答效果之間取得平衡，一鍵下載主模型與草稿模型（合計約 16.9 GB）"
+        }
+      ],
+      "tags": [
+        "beta"
+      ],
+      "variants": [
+        {
+          "variant_id": "qwen3.8-27b-q4_0-gpu",
+          "platform": "Snapdragon Adreno GPU",
+          "chip": "",
+          "description": {
+            "zh-CN": "Windows on ARM · Snapdragon Adreno GPU（OpenCL 加速）",
+            "en": "Windows on ARM · Snapdragon Adreno GPU (OpenCL acceleration)",
+            "zh-TW": "Windows on ARM · Snapdragon Adreno GPU（OpenCL 加速）"
+          },
+          "min_driver_version": "",
+          "download_url": "https://huggingface.co/VantCdx/Qwen3.8-27B-Q4_0-GGUF/resolve/main/qwen3.8-27b-q4_0.gguf",
+          "size_bytes": 15715853632,
+          "checksum_sha256": "b3c60dc56e875f13dd9ed4b3a644ba1cb07d7cd8ab34be73797be7835a81ba3c",
+          "extra_files": [
+            {
+              "filename": "Qwen3.8-27B-DFlash2-Q4_K_M.gguf",
+              "subdir": "draft",
+              "download_url": "https://huggingface.co/incoai/Qwen3.8-27B-DFlash2-GGUF/resolve/main/Qwen3.8-27B-DFlash2-Q4_K_M.gguf",
+              "size_bytes": 1143006816,
+              "checksum_sha256": "d169ad335929adc0d77e10e2523f968f3e75f547637ad739b0a137ccde111b5f"
+            }
+          ],
+          "install_config": {
+            "dialog": {
+              "context": {
+                "size": 32768
+              }
+            },
+            "draft_model": {
+              "path": "draft/Qwen3.8-27B-DFlash2-Q4_K_M.gguf",
+              "spec_type": "draft-dflash",
+              "spec_draft_n_max": 7,
+              "spec_draft_p_min": 0,
+              "required": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "model_id": "gpt-oss-20b-GGUF",
+      "name": "GPT-OSS 20B",
+      "family": "GPT-OSS",
+      "parameter_size": "20B",
+      "type": "llm",
+      "format": "gguf",
+      "hardware": "gpu",
+      "context_length": 16384,
+      "quantization": "MXFP4",
+      "short_description": {
+        "zh-CN": "OpenAI 开源权重推理模型，原生 MXFP4 量化 GGUF 格式，基于 llama.cpp 在骁龙 Adreno GPU 上运行，擅长链式思考与工具调用。",
+        "en": "OpenAI's open-weight reasoning model, natively MXFP4-quantized GGUF, running on the Snapdragon Adreno GPU via llama.cpp — strong at chain-of-thought reasoning and tool calling.",
+        "zh-TW": "OpenAI 開源權重推理模型，原生 MXFP4 量化 GGUF 格式，基於 llama.cpp 在驍龍 Adreno GPU 上執行，擅長鏈式思考與工具呼叫。"
+      },
+      "description": {
+        "zh-CN": "GPT-OSS-20B 是 OpenAI 发布的开源权重（open-weight）推理模型，采用混合专家（MoE）架构与原生 MXFP4 量化，本条目提供社区转换的 GGUF 格式版本。基于 llama.cpp GGUF 后端，默认走骁龙 Adreno GPU 加速，失败时自动回退 CPU；擅长链式思考（chain-of-thought）、多步推理与工具调用，Harmony 对话格式内置于模型自身的提示词模板中，安装后无需额外配置即可运行。",
+        "en": "GPT-OSS-20B is OpenAI's open-weight reasoning model, using a mixture-of-experts (MoE) architecture with native MXFP4 quantization; this entry ships a community-converted GGUF build. It runs on the llama.cpp GGUF backend, defaulting to Snapdragon Adreno GPU acceleration with automatic CPU fallback. It excels at chain-of-thought reasoning, multi-step problem solving and tool calling, with the Harmony conversation format built into the model's own prompt template — it runs as-is after install, with no extra configuration required.",
+        "zh-TW": "GPT-OSS-20B 是 OpenAI 發布的開源權重（open-weight）推理模型，採用混合專家（MoE）架構與原生 MXFP4 量化，本條目提供社群轉換的 GGUF 格式版本。基於 llama.cpp GGUF 後端，預設走驍龍 Adreno GPU 加速，失敗時自動回退 CPU；擅長鏈式思考（chain-of-thought）、多步推理與工具呼叫，Harmony 對話格式內建於模型自身的提示詞模板中，安裝後無需額外配置即可執行。"
+      },
+      "features": [
+        {
+          "zh-CN": "开源权重推理模型：OpenAI 发布，混合专家（MoE）架构，擅长链式思考与多步推理",
+          "en": "Open-weight reasoning model: released by OpenAI, mixture-of-experts (MoE) architecture, excels at chain-of-thought and multi-step reasoning",
+          "zh-TW": "開源權重推理模型：OpenAI 發布，混合專家（MoE）架構，擅長鏈式思考與多步推理"
+        },
+        {
+          "zh-CN": "原生 MXFP4 量化：模型自身即为 MXFP4 精度，无需额外量化转换损失",
+          "en": "Native MXFP4 quantization: the model is natively MXFP4-precision, with no extra quantization-conversion loss",
+          "zh-TW": "原生 MXFP4 量化：模型自身即為 MXFP4 精度，無需額外量化轉換損失"
+        },
+        {
+          "zh-CN": "工具调用能力：内置 Harmony 对话格式，支持结构化工具调用（tool_calls）",
+          "en": "Tool-calling capable: built-in Harmony conversation format with structured tool_calls support",
+          "zh-TW": "工具呼叫能力：內建 Harmony 對話格式，支援結構化工具呼叫（tool_calls）"
+        },
+        {
+          "zh-CN": "骁龙 Adreno GPU 加速：基于 llama.cpp GGUF 后端，GPU 加速失败时自动回退 CPU",
+          "en": "Snapdragon Adreno GPU acceleration: llama.cpp GGUF backend, automatic CPU fallback if GPU acceleration fails",
+          "zh-TW": "驍龍 Adreno GPU 加速：基於 llama.cpp GGUF 後端，GPU 加速失敗時自動回退 CPU"
+        }
+      ],
+      "tags": [
+        "beta"
+      ],
+      "variants": [
+        {
+          "variant_id": "gpt-oss-20b-GGUF-gpu",
+          "platform": "Snapdragon Adreno GPU",
+          "chip": "",
+          "description": {
+            "zh-CN": "Windows on ARM · Snapdragon Adreno GPU（OpenCL，失败自动回退 CPU）",
+            "en": "Windows on ARM · Snapdragon Adreno GPU (OpenCL, auto CPU fallback)",
+            "zh-TW": "Windows on ARM · Snapdragon Adreno GPU（OpenCL，失敗自動回退 CPU）"
+          },
+          "min_driver_version": "",
+          "download_url": "https://huggingface.co/ggml-org/gpt-oss-20b-GGUF/resolve/main/gpt-oss-20b-MXFP4.gguf",
+          "size_bytes": 12109566624,
+          "checksum_sha256": "27cd6c432c7672cb812a92f611cf3ba7bbc35928262bb1e1253ff4ee6ae35901",
+          "install_config": {}
+        }
+      ]
+    }
+  ]
+}

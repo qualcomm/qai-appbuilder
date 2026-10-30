@@ -893,8 +893,14 @@ class CompactionCheckpointEngine:
         never exceed the compression target, or no pass could shrink the
         wire). ``None`` (the default) keeps every existing caller on the
         resolved user preference, byte-for-byte.
+
+        A ``local::`` ``model_hint`` short-circuits to ``None`` here: an
+        on-device turn must never pay the summariser round-trip, so
+        client-side compaction is OFF for local models and unchanged for
+        cloud ones. This is the ONE public entry every caller funnels
+        through, so the gate lives here rather than at each call site.
         """
-        if self._compressor is None:
+        if self._compressor is None or (model_hint or "").startswith("local::"):
             return None
         assembled = assembled_wire
         if len(assembled) <= self._preserve_tail:
