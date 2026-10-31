@@ -29,9 +29,7 @@ IEmbedding &QInterface::Qwen3VL::CustomBuild(ModelInput &model_input)
             .BuildImgPixel()
             .PaddingVisionPrompt()
             .BuildVisionInferredInput();
-    // BuildInferredBuffer() 是 IEmbedding 的 protected 成员，IEmbedding 又是
-    // IVisionEmbedding 的虚基类；不能通过上面链式调用返回的 IVisionEmbedding&
-    // 访问它（C++ 虚基类保护成员访问规则），必须通过 this（Qwen3VL*）单独调用。
+
     BuildInferredBuffer(infer_resource_, input_buffers_, img_inferred_buffers_, deepstack_buffers_);
     return *this;
 }
@@ -65,9 +63,6 @@ IVisionEmbedding &QInterface::Qwen3VL::MergeEmbedding()
     torch_helper::MaskedScatterMergeEmbedding(prompt_token_, token_count, image_token_id,
                                               embedded_raw_fbuf, img_embedding_fbuf, embedded_bin_, &image_rows);
 
-    // GenieDialog/GenieNode 均不支持向已编译好的解码器中间层注入具名张量（见
-    // qwen3_vl.md），embeddingQuery 唯一可控的通道是这段扁平输入 embedding；
-    // 因此把 3 层 deepstack 残差近似折算进 image_rows 对应的行再一次性传入。
     if (!deepstack_buffers_.empty())
     {
         std::vector<BufferView<float>> deepstack_fbufs;

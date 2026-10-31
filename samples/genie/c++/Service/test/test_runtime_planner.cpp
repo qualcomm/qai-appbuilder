@@ -214,6 +214,7 @@ llama_runtime::PlanInputs MakeInputs(uint32_t ctx, uint64_t gpu_free, uint64_t m
     in.dft = DraftShape();
     in.gpu_free = gpu_free;
     in.host_avail = 8ULL * kGiB;
+    in.enable_qwen38_dflash_policy = true;
     in.max_alloc_device = max_alloc_device;
     in.ctx_requested = ctx;
     return in;
@@ -292,10 +293,64 @@ void TestMeasuredTiers()
         CheckTrue(label, llama_runtime::FlashAttnEnabled(plan.fa_target) == t.expect_fa);
         std::snprintf(label, sizeof(label), "%s => ub/b/n_max 保持默认", t.name);
         CheckTrue(label, plan.n_ubatch == 512 && plan.n_batch == 2048 && plan.spec_draft_n_max == 7);
-        std::snprintf(label, sizeof(label), "%s => ffn_cpu_layers 恒 30（禁止按显存反算，r26）",
-                      t.name);
-        CheckTrue(label, plan.ffn_cpu_layers == 30);
+        const uint32_t expected_cpu_layers = t.expect_full_gpu ? 0 : 32;
+        std::snprintf(label, sizeof(label), "%s => ffn_cpu_layers=%u", t.name, expected_cpu_layers);
+        CheckEq(label, plan.ffn_cpu_layers, expected_cpu_layers);
+        std::snprintf(label, sizeof(label), "%s => 升档标记与拆分状态一致", t.name);
+        CheckTrue(label, plan.ffn_cpu_escalated == !t.expect_full_gpu);
     }
+}
+
+void TestLazyScratchAndEscalation()
+{
+    std::printf("\n== Qwen3.8-27B+DFlash2 懒分配 scratch 与 FFN 逐层溢出 ==\n");
+    const llama_runtime::RuntimePlan split =
+        llama_runtime::PlanRuntime(MakeInputs(16384, kGpuFree32G, kMaxAlloc));
+    CheckEq("Qwen3.8-27B ub512 GDN scratch = 72 MiB", split.ledger.lazy_scratch, 72 * kMiB);
+    const llama_runtime::MemoryLedger without_scratch = [&]() {
+        llama_runtime::MemoryLedger ledger = split.ledger;
+        ledger.lazy_scratch = 0;
+        return ledger;
+    }();
+    CheckEq("gpu_required 纳入 lazy_scratch",
+            split.ledger.gpu_required() - without_scratch.gpu_required(), split.ledger.lazy_scratch);
+    CheckEq("gpu_required_min 纳入 lazy_scratch",
+            split.ledger.gpu_required_min() - without_scratch.gpu_required_min(), split.ledger.lazy_scratch);
+    CheckTrue("32G 从默认 30 层升到满足 headroom 的层数",
+              split.ffn_cpu_layers > llama_runtime::kFfnCpuLayersDefault && split.ffn_cpu_escalated);
+    CheckTrue("32G 升档后 required_min + split headroom <= gpu_free",
+              split.ledger.gpu_required_min() + llama_runtime::kSplitHeadroomBytes <= kGpuFree32G);
+    CheckTrue("rationale 记录 scratch 与升档来源",
+              split.rationale.find("lazy_scratch=72MiB") != std::string::npos &&
+                  split.rationale.find("escalated from 30") != std::string::npos);
+
+    llama_runtime::PlanInputs explicit_layers = MakeInputs(16384, kGpuFree32G, kMaxAlloc);
+    explicit_layers.explicit_ffn_cpu_layers = 30;
+    const llama_runtime::RuntimePlan explicit_plan = llama_runtime::PlanRuntime(explicit_layers);
+    CheckEq("显式 ffn_cpu_layers 不升档", explicit_plan.ffn_cpu_layers, 30);
+    CheckTrue("显式 ffn_cpu_layers 不标记 escalated", !explicit_plan.ffn_cpu_escalated);
+
+    llama_runtime::ModelShape no_recurrent = TargetShape();
+    no_recurrent.n_layer_recr = 0;
+    const llama_runtime::MemoryLedger no_recurrent_ledger = llama_runtime::BuildLedger(
+        no_recurrent, DraftShape(), 16384, 512, 1, 7, false, kMaxAlloc, 30, true);
+    CheckEq("无 recurrent/GDN 形状的 lazy_scratch = 0", no_recurrent_ledger.lazy_scratch, 0);
+
+    // 真机 GGUF 的 `dflash.block_count` 实测是 5（不是 6）：门控不能写死 draft 层数。
+    llama_runtime::PlanInputs real_draft = MakeInputs(16384, kGpuFree32G, kMaxAlloc);
+    real_draft.dft.n_layer_all = 5;
+    llama_runtime::DeriveLayerSplit(real_draft.dft);
+    const llama_runtime::RuntimePlan real_draft_plan = llama_runtime::PlanRuntime(real_draft);
+    CheckEq("5 层 draft（真机实测形状）同样计入 lazy_scratch", real_draft_plan.ledger.lazy_scratch,
+            72 * kMiB);
+    CheckTrue("5 层 draft 同样触发升档", real_draft_plan.ffn_cpu_escalated);
+
+    llama_runtime::PlanInputs other_speculative = MakeInputs(16384, kGpuFree32G, kMaxAlloc);
+    other_speculative.enable_qwen38_dflash_policy = false;
+    const llama_runtime::RuntimePlan other_plan = llama_runtime::PlanRuntime(other_speculative);
+    CheckEq("非 DFlash speculative 形状不计入 lazy_scratch", other_plan.ledger.lazy_scratch, 0);
+    CheckEq("非 DFlash speculative 不自动增加 CPU FFN 层数", other_plan.ffn_cpu_layers, 30);
+    CheckTrue("非 DFlash speculative 不标记升档", !other_plan.ffn_cpu_escalated);
 }
 
 void TestExplicitWins()
@@ -384,7 +439,7 @@ void TestHostCheckpoints()
     roomy.host_avail = 20ULL * kGiB;
     const llama_runtime::RuntimePlan p_roomy = llama_runtime::PlanRuntime(roomy);
     CheckEq("48G / host 宽裕 => head_checkpoints=2", (uint64_t) p_roomy.head_checkpoints, 2);
-    CheckEq("host 常驻 = (N + 2) × ckpt_bytes", p_roomy.ledger.host_checkpoints, 4 * ckpt);
+    CheckEq("host 常驻 = (N + 3) × ckpt_bytes", p_roomy.ledger.host_checkpoints, 5 * ckpt);
     // 检查点是 host 常驻 + GPU 瞬时峰值，不是「每个检查点占 199 MiB GPU 显存」（修正 r26 的记载）。
     CheckEq("GPU 侧只承担一份读回峰值", p_roomy.ledger.runtime_peak, ckpt);
 
@@ -434,13 +489,14 @@ void TestContextClamp()
     CheckTrue("钳制不等于 full_gpu（32G 仍走拆分）", !over.full_gpu);
 
     // 显存极端不足：钳到下限仍不行时才动 n_max，且必须写明原因。
-    llama_runtime::PlanInputs starved = MakeInputs(16384, 13ULL * kGiB, kMaxAlloc);
+    llama_runtime::PlanInputs starved = MakeInputs(16384, 1, kMaxAlloc);
     const llama_runtime::RuntimePlan p_starved = llama_runtime::PlanRuntime(starved);
-    std::printf("  -- free=13 GiB => ctx=%u n_max=%u clamped=%d n_max_reduced=%d\n",
+    std::printf("  -- free=1 byte => ctx=%u n_max=%u clamped=%d n_max_reduced=%d\n",
                 p_starved.ctx_effective, p_starved.spec_draft_n_max, p_starved.ctx_clamped ? 1 : 0,
                 p_starved.n_max_reduced ? 1 : 0);
-    CheckTrue("显存极端不足时先降 ctx、再降 n_max",
-              p_starved.ctx_effective == 8192 && p_starved.n_max_reduced &&
+    CheckTrue("显存极端不足时先升档到上限，再降 ctx、再降 n_max",
+              p_starved.ffn_cpu_layers == llama_runtime::kFfnCpuLayersEscalationMax &&
+                  p_starved.ctx_effective == 8192 && p_starved.n_max_reduced &&
                   p_starved.spec_draft_n_max >= 3);
     CheckTrue("n_max 下调有日志依据",
               p_starved.rationale.find("spec_draft_n_max reduced") != std::string::npos);
@@ -465,12 +521,16 @@ void TestSplitPlacementLedger()
     CheckTrue("48G 走全 GPU", full.full_gpu);
     // 全 GPU 档也要扣 token embedding：它始终在 CPU（日志里那 682 MiB 的 CPU model buffer）。
     CheckEq("全 GPU 档 weights_host = embedding", full.ledger.weights_host, tgt.embedding_bytes);
-    CheckTrue("拆分档 weights_host = embedding + 30 层 FFN",
-              split.ledger.weights_host > tgt.embedding_bytes);
-    std::printf("  -- 拆分档 weights_host=%.2f MiB（实测 682.03 + 4159.69 = %.2f MiB）\n",
-                (double) split.ledger.weights_host / (double) kMiB, 682.03 + 4159.69);
-    CheckNear("拆分档 weights_host 与实测对账", split.ledger.weights_host,
-              (uint64_t) ((682.03 + 4159.69) * (double) kMiB), 0.05);
+    uint64_t escalated_ffn_bytes = 0;
+    const size_t first_cpu_layer = tgt.ffn_bytes_per_layer.size() - split.ffn_cpu_layers;
+    for (size_t i = first_cpu_layer; i < tgt.ffn_bytes_per_layer.size(); ++i)
+    {
+        escalated_ffn_bytes += tgt.ffn_bytes_per_layer[i];
+    }
+    CheckEq("拆分档 weights_host = embedding + 升档后的 FFN",
+            split.ledger.weights_host, tgt.embedding_bytes + escalated_ffn_bytes);
+    CheckTrue("升档后 weights_host 高于 30 层基线",
+              split.ledger.weights_host > tgt.embedding_bytes + 30 * tgt.ffn_bytes_per_layer.back());
 }
 
 } // namespace
@@ -484,6 +544,7 @@ int main()
     TestComputeKq();
     TestFlashAttnCriterion();
     TestMeasuredTiers();
+    TestLazyScratchAndEscalation();
     TestExplicitWins();
     TestMaxAllocFallback();
     TestHostCheckpoints();

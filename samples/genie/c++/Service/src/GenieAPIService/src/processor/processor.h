@@ -21,7 +21,11 @@ public:
                                                            bool isToolResponse,
                                                            std::string &toolResponse) = 0;
 
+    virtual std::string TakeReasoningDelta() { return {}; }
+
+    virtual std::string GetReasoningContent() const { return {}; }
+
     std::string start_tag_;
 };
 
-#endif //MODEL_PROCESSING_H
+#endif

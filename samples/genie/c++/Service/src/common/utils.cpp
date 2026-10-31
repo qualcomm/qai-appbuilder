@@ -126,13 +126,7 @@ std::string File::DeriveAncestorDir(const std::string &file_path, const std::str
 
 bool File::MatchFileInDir(const std::string &dir_path, const std::string &part, std::vector<std::string> *files)
 {
-    // 修复：当调用方传入 files 指针（希望收集全部匹配文件）时，原代码在找到第一个匹配项后就
-    // 立即 return true，导致后续匹配文件被完全忽略——例如 MNN 模型目录下 "llm.mnn"（几MB的
-    // 图结构描述文件）会先于 "llm.mnn.weight"（真正的权重文件，可能达数GB到数十GB）被枚举到，
-    // 导致 EstimateMnnMemoryRequirement 只统计到 "llm.mnn" 的大小，严重低估真实内存需求。
-    // 现在：仅当 files 为 nullptr（纯粹的"目录下是否存在匹配文件"布尔判断，不关心具体文件）时
-    // 才在找到第一个匹配项后提前返回，保持原有性能优化；一旦传入 files，则遍历完整个目录，
-    // 收集所有匹配项。
+
     bool found = false;
     for (const auto &entry: fs::directory_iterator(dir_path))
     {
@@ -192,30 +186,28 @@ T get_json_value(const json &jsonData, const std::string &key, const T &defaultV
             return defaultValue;
         }
 
-        // 针对 string 类型的特殊处理：优先检查类型，避免异常
         if constexpr (std::is_same<T, std::string>::value)
         {
-            // 如果是字符串类型，直接返回
+
             if (jsonData[key].is_string())
             {
                 return jsonData[key].get<T>();
             }
-            // 如果是数组类型，提取文本内容
+
             else if (jsonData[key].is_array())
             {
                 std::string texts = "";
-                
+
                 for (const auto &item: jsonData[key])
                 {
                     if (item.is_string())
                     {
-                        // Format 1: content is a simple string
+
                         texts += item.get<std::string>();
                     }
                     else if (item.is_object())
                     {
-                        // Format 2: content is an array of objects with "type" and "text" fields
-                        // Example: [{"type":"text","text":"hello\n[message_id: xxx]"}]
+
                         if (item.contains("type") && item.contains("text"))
                         {
                             std::string type = item["type"].get<std::string>();
@@ -230,7 +222,7 @@ T get_json_value(const json &jsonData, const std::string &key, const T &defaultV
                         }
                         else
                         {
-                            // Fallback: iterate through all string values in the object
+
                             for (auto it = item.begin(); it != item.end(); ++it)
                             {
                                 if (it.value().is_string())
@@ -245,15 +237,15 @@ T get_json_value(const json &jsonData, const std::string &key, const T &defaultV
                         }
                     }
                 }
-                
+
                 return texts;
             }
-            // null 类型，静默返回默认值（常见于 assistant 消息中有 tool_calls 时 content 为 null）
+
             else if (jsonData[key].is_null())
             {
                 return defaultValue;
             }
-            // 其他类型，返回默认值并打印警告
+
             else
             {
                 My_Log{My_Log::Level::kWarning} << "[get_json_value] Unexpected type for key: " << key << std::endl;
@@ -262,7 +254,7 @@ T get_json_value(const json &jsonData, const std::string &key, const T &defaultV
         }
         else
         {
-            // 非 string 类型，直接尝试转换
+
             return jsonData[key].get<T>();
         }
     }

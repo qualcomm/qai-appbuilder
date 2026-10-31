@@ -60,20 +60,11 @@ GenieRoutingGateway::GenieRoutingGateway(IModelConfig &model_config,
           alive_(std::make_shared<std::atomic<bool>>(true)),
           prompt_prep_service_(model_config)
 {
-    local_availability_checker_ = [this]() -> bool {
-        return model_config_.IsLocalModelAvailable();
-    };
-
     My_Log{} << "[GenieRoutingGateway] Initialized, routing.enabled=" << routing_config.enabled
              << ", local_model.enabled=" << local_model_config_.enabled
              << ", cloud_model.enabled=" << cloud_config.enabled
              << ", use_local_model_fallback(sensitivity)="
              << routing_config.sensitivity_detection.use_local_model_fallback << std::endl;
-}
-
-void GenieRoutingGateway::SetLocalAvailabilityChecker(std::function<bool()> checker)
-{
-    local_availability_checker_ = std::move(checker);
 }
 
 GenieRoutingGateway::~GenieRoutingGateway()

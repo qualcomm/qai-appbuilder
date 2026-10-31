@@ -20,7 +20,7 @@ public:
         kPromptTemplate = "<|im_start|>system\n"
                           "%s.<|im_end|>\n"
                           "<|im_start|>user\n%s"
-                          "%s"  //<|vision_start|><|image_pad|><|vision_end|>
+                          "%s"
                           "<|im_end|>\n"
                           "<|im_start|>assistant\n";
 
@@ -59,4 +59,4 @@ public:
     std::vector<float> embedded_bin_;
 };
 
-#endif //QWEN_2_5_H
+#endif

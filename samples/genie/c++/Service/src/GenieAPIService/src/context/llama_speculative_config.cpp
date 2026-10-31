@@ -28,12 +28,6 @@ namespace llama_speculative
 namespace
 {
 
-// 固定安全余量：llama-completion.exe 实测（CPU 路径，-ngl 0，ctx=8192）单独加载本模型主模型时，
-// PeakPagedMemorySize64 为 17856913408 字节（约 16.627GiB），比"权重文件字节数(14.636GiB) +
-// 本文件 KV 估算(2.031GiB) = 16.666GiB"仅低约 38MiB——不含安全余量的公式本身已与实测几乎重合，
-// 2GiB 用于覆盖未直接实测到的部分：GPU/OpenCL 路径下额外的 host 侧暂存/计算缓冲区开销（该机器
-// 当前驱动的 OpenCL 编译器拒绝大缓冲区扩展，-ngl 99 全量 GPU offload 本身会在加载阶段崩溃，
-// 与 ctx/内存门槛无关，见 llama_cpp.cpp.notes.md，故无法在该机器上直接实测 GPU 路径峰值）。
 constexpr uint64_t kSpeculativeMemoryEstimateMarginBytes = 2ULL * 1024 * 1024 * 1024;
 
 #ifdef USE_GGUF
@@ -46,8 +40,6 @@ struct GgufModelShape
     uint32_t full_attention_interval = 0;
 };
 
-// 只读 GGUF 文件头的 KV 元数据（no_alloc=true，不创建 ggml_context、不加载任何张量数据），
-// 代价仅为一次文件头解析。字段缺失/类型不匹配/文件无法解析时返回 ok=false。
 GgufModelShape ReadGgufModelShape(const std::string &gguf_path)
 {
     GgufModelShape shape;
@@ -87,7 +79,6 @@ GgufModelShape ReadGgufModelShape(const std::string &gguf_path)
     return shape;
 }
 
-// K+V 两份、f16（2 字节/元素）：2 * n_layer * ctx * n_head_kv * key_length * 2。
 uint64_t EstimateKvCacheBytes(const GgufModelShape &shape, uint64_t context_size)
 {
     if (!shape.ok)
@@ -102,11 +93,11 @@ uint64_t EstimateAttentionKvCacheBytes(const GgufModelShape &shape, uint64_t con
     const uint64_t full = EstimateKvCacheBytes(shape, context_size);
     return shape.full_attention_interval > 1 ? full / shape.full_attention_interval : full;
 }
-#endif // USE_GGUF
+#endif
 
 constexpr uint64_t kFullGpuComputeReserveBytes = 1024ULL * 1024 * 1024;
 
-} // namespace
+}
 
 DraftModelConfig DraftModelConfig::ParseFrom(const json &model_config_json)
 {
@@ -235,7 +226,6 @@ DraftModelConfig DraftModelConfig::ParseFrom(const json &model_config_json)
         result.planner = block["planner"].get<std::string>();
     }
 
-    // required 默认 true：drafter 加载失败则整个模型加载失败，不静默降级为纯 target 解码。
     if (block.contains("required") && block["required"].is_boolean())
     {
         result.required = block["required"].get<bool>();
@@ -311,6 +301,35 @@ uint64_t GetAvailablePhysicalMemoryBytes()
     return UINT64_MAX;
 }
 
+uint64_t GetTotalPhysicalMemoryBytes()
+{
+#ifdef _WIN32
+    MEMORYSTATUSEX statex;
+    statex.dwLength = sizeof(statex);
+    if (GlobalMemoryStatusEx(&statex))
+    {
+        return statex.ullTotalPhys;
+    }
+#else
+    struct sysinfo info{};
+    if (sysinfo(&info) == 0)
+    {
+        return static_cast<uint64_t>(info.totalram) * info.mem_unit;
+    }
+#endif
+    return UINT64_MAX;
+}
+
+uint64_t ResolveContextSizeByPhysicalMemory()
+{
+
+    constexpr uint64_t kTierThresholdBytes = 32ULL * 1024 * 1024 * 1024;
+    constexpr uint64_t kContextSize16K = 16384ULL;
+    constexpr uint64_t kContextSize32K = 32768ULL;
+    const uint64_t total = GetTotalPhysicalMemoryBytes();
+    return total > kTierThresholdBytes ? kContextSize32K : kContextSize16K;
+}
+
 bool SpeculativeFitsFullGpu(const std::string &model_dir, const std::string &draft_relative_path,
                             uint64_t context_size, uint64_t *required_out, uint64_t *available_out)
 {
@@ -384,9 +403,9 @@ llama_runtime::RuntimePlan PlanSpeculativeRuntime(const std::string &model_dir,
 {
     llama_runtime::PlanInputs in;
     in.ctx_requested = static_cast<uint32_t>(context_size);
-    in.n_seq_max = 1;   // 投机路径恒 1（llama_cpp.cpp 显式 params.n_parallel = 1、kv_unified = true）
+    in.n_seq_max = 1;
 
-    // 显式配置永远胜出，规划器只填未显式给出的项。
+    in.enable_qwen38_dflash_policy = cfg.spec_type.find("dflash") != std::string::npos;
     if (cfg.flash_attn == "on") in.explicit_fa_target = 1;
     else if (cfg.flash_attn == "off") in.explicit_fa_target = 0;
     if (cfg.draft_flash_attn == "on") in.explicit_fa_draft = 1;
@@ -424,11 +443,11 @@ llama_runtime::RuntimePlan PlanSpeculativeRuntime(const std::string &model_dir,
         ggml_backend_dev_memory(gpu, &free, &total);
         in.gpu_free = free;
     }
-    // 必须在 ggml_backend_load_all() 之后查：OpenCL 运行时此时已被加载进本进程。
+
     in.max_alloc_device = llama_runtime::QueryDeviceMaxAllocBytes();
 #endif
 
     return llama_runtime::PlanRuntime(in);
 }
 
-} // namespace llama_speculative
+}

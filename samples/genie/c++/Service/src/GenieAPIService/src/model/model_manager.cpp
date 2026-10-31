@@ -335,8 +335,7 @@ struct ModelManager::ModeVerifier
                 return CreateIfVerifiedImpl();
             }
 
-            // Check if config_file_ is a JSON string (starts with '{')
-            std::string trimmed_cfg = self_->config_file_;
+            std::string trimmed_cfg = config_->get_config_file();
             size_t cfg_start = trimmed_cfg.find_first_not_of(" \t\n\r");
             if (cfg_start != std::string::npos)
             {
@@ -347,28 +346,26 @@ struct ModelManager::ModeVerifier
 
             if (is_json_string)
             {
-                // config_file_ is a JSON string, not a file path
                 return CreateIfVerifiedImpl();
             }
 
-            // config_file_ is a file path, check if it exists
-            if (File::IsFileExist(self_->config_file_) && !File::IsFileEmpty(self_->config_file_))
+            if (File::IsFileExist(config_->get_config_file()) && !File::IsFileEmpty(config_->get_config_file()))
             {
                 return CreateIfVerifiedImpl();
             }
 
-            if (self_->known_model_path_.empty())
+            if (config_->get_known_model_path().empty())
             {
-                std::string err_str{"config file is not found: " + self_->config_file_};
+                std::string err_str{"config file is not found: " + config_->get_config_file()};
                 My_Log{My_Log::Level::kWarning} << err_str << std::endl;
                 return nullptr;
             }
 
-            std::string new_config_path{File::ResolveModelConfigPath(self_->known_model_path_)};
-            My_Log{My_Log::Level::kError} << "config file: " << self_->config_file_ << " "
+            std::string new_config_path{File::ResolveModelConfigPath(config_->get_known_model_path())};
+            My_Log{My_Log::Level::kError} << "config file: " << config_->get_config_file() << " "
                                           << "is not exist, will use default ver: " << new_config_path
                                           << std::endl;
-            self_->config_file_ = new_config_path;
+            config_->set_config_file(new_config_path);
 
             return CreateIfVerifiedImpl();
         }
@@ -378,6 +375,86 @@ struct ModelManager::ModeVerifier
         ModelManager *self_;
         bool config_strict_{true};
         const char *ext_{};
+
+        void PublishSnapshot(const QNNEmbedding *embedding = nullptr)
+        {
+            config_->i_model_config_ = *self_;
+            auto &snapshot = config_->i_model_config_;
+            snapshot.genieModelHandle.reset();
+            snapshot.model_path_ = config_->get_model_path();
+            snapshot.config_file_ = config_->get_config_file();
+            snapshot.known_model_path_ = config_->get_known_model_path();
+            snapshot.model_name_ = config_->get_model_name();
+            snapshot.prompt_ = config_->get_prompt_template();
+            snapshot.prompt_type_ = config_->get_prompt_type();
+            snapshot.thinking_model_ = config_->is_thinking_model();
+            snapshot.qnn_embedding_ = embedding ? *embedding : QNNEmbedding{};
+        }
+
+        template<typename Ctx>
+        std::shared_ptr<ContextBase> PublishContext()
+        {
+            PublishSnapshot();
+            auto context = std::make_shared<Ctx>(*config_);
+            config_->i_model_config_.genieModelHandle = context;
+            return context;
+        }
+
+        enum class ConfigReadMode
+        {
+            kQnn,
+            kGguf,
+        };
+
+        bool ReadConfigJson(json &j, ConfigReadMode mode) const
+        {
+            const std::string &src = config_->get_config_file();
+            std::string trimmed = src;
+            size_t start = trimmed.find_first_not_of(" \t\n\r");
+            if (start != std::string::npos)
+            {
+                trimmed = trimmed.substr(start);
+            }
+
+            if (!trimmed.empty() && trimmed[0] == '{')
+            {
+                if (mode == ConfigReadMode::kQnn)
+                {
+                    try
+                    {
+                        j = json::parse(src);
+                    } catch (const std::exception &)
+                    {
+                        return false;
+                    }
+                }
+                else
+                {
+                    j = json::parse(src);
+                }
+                return true;
+            }
+
+            if (mode == ConfigReadMode::kQnn)
+            {
+                std::ifstream file(src);
+                if (!file.good())
+                {
+                    return false;
+                }
+                file >> j;
+            }
+            else if (File::IsFileExist(src) && !File::IsFileEmpty(src))
+            {
+                std::ifstream file(src);
+                file >> j;
+            }
+            else if (!File::IsFileExist(src))
+            {
+                std::ofstream(src).close();
+            }
+            return true;
+        }
 
     private:
         virtual std::shared_ptr<ContextBase> CreateIfVerifiedImpl() = 0;
@@ -391,32 +468,9 @@ struct ModelManager::ModeVerifier
         std::shared_ptr<ContextBase> CreateIfVerifiedImpl() override
         {
             json j;
-            std::string trimmed = self_->config_file_;
-            size_t start = trimmed.find_first_not_of(" \t\n\r");
-            if (start != std::string::npos)
+            if (!ReadConfigJson(j, ConfigReadMode::kQnn))
             {
-                trimmed = trimmed.substr(start);
-            }
-
-            if (!trimmed.empty() && trimmed[0] == '{')
-            {
-                // Parse JSON string directly
-                try
-                {
-                    j = json::parse(self_->config_file_);
-                } catch (const std::exception &e)
-                {
-                    return nullptr;
-                }
-            }
-            else
-            {
-                std::ifstream file(self_->config_file_);
-                if (!file.good())
-                {
-                    return nullptr;
-                }
-                file >> j;
+                return nullptr;
             }
 
             if (!j.contains("dialog"))
@@ -432,14 +486,25 @@ struct ModelManager::ModeVerifier
             }
             else
             {
-                self_->context_size_ = context_size;
-                My_Log{} << "fixed qnn context size: " << self_->context_size_ << "\n";
+                config_->set_context_size(context_size);
+                My_Log{} << "fixed qnn context size: " << config_->get_context_size() << "\n";
             }
 
             std::vector<std::string> files;
             std::string dtype_str;
+            QNNEmbedding embedding;
+            struct EmbeddingCleanup
+            {
+                QNNEmbedding &embedding;
+                bool active{true};
 
-            // TODO: use Regex embedding_weights_xxx.raw
+                ~EmbeddingCleanup()
+                {
+                    if (active)
+                        embedding.Clean();
+                }
+            } embedding_cleanup{embedding};
+
             if (!File::MatchFileInDir(config_->get_model_path(), "embedding_weights", &files))
             {
                 goto ahead;
@@ -451,45 +516,41 @@ struct ModelManager::ModeVerifier
                 throw std::runtime_error("embedded file: " + files[0] + " is invalid");
             }
 
-            static std::unordered_map<const char *, EmbeddingDataType> embedding_dtype_map{
-                    {"float32", {EmbeddingDataType::FLOAT32}},
-                    {"ufixed8", {EmbeddingDataType::INT8}},
-            };
-
-            self_->qnn_embedding_ = QNNImpl::TryCreate(config_->get_model_path(), files[0]);
-            if (self_->qnn_embedding_.embedding_type_ == QNNEmbeddingType::None)
+            embedding = QNNImpl::TryCreate(config_->get_model_path(), files[0]);
+            if (embedding.embedding_type_ == QNNEmbeddingType::None)
             {
                 throw std::runtime_error("qnn model does not match any embedding rules");
             }
-            My_Log{} << "check qnn embedding model type: " << self_->qnn_embedding_.model_types_.to_string() << "\n";
+            My_Log{} << "check qnn embedding model type: " << embedding.model_types_.to_string() << "\n";
 
             if (!j.contains(json::json_pointer("/dialog/embedding/datatype")))
             {
-                self_->qnn_embedding_.Clean();
                 throw std::runtime_error("qnn embedding has bad config in datatype");
             }
 
             dtype_str = j.at(json::json_pointer("/dialog/embedding/datatype")).get_ref<const std::string &>();
-            for (auto &item: embedding_dtype_map)
+            if (dtype_str == "float32")
             {
-                if (strcmp(item.first, dtype_str.c_str()) == 0)
-                {
-                    self_->qnn_embedding_.data_type = item.second;
-                    break;
-                }
+                embedding.data_type = EmbeddingDataType{EmbeddingDataType::FLOAT32};
+            }
+            else if (dtype_str == "ufixed8")
+            {
+                embedding.data_type = EmbeddingDataType{EmbeddingDataType::INT8};
             }
 
-            if (self_->qnn_embedding_.data_type == EmbeddingDataType::None)
+            if (embedding.data_type == EmbeddingDataType::None)
             {
-                self_->qnn_embedding_.Clean();
                 throw std::runtime_error("qnn embedding has bad datatype");
             }
 
-            My_Log{} << "check qnn embedding data type: " << self_->qnn_embedding_.data_type.to_string() << "\n";
+            My_Log{} << "check qnn embedding data type: " << embedding.data_type.to_string() << "\n";
             ahead:
-            config_->i_model_config_ = *self_;
-            config_->i_model_config_.genieModelHandle = self_->genieModelHandle = std::make_shared<GenieContext>(*config_);
-            return self_->genieModelHandle;
+            config_->set_context_size(context_size);
+            PublishSnapshot(&embedding);
+            embedding_cleanup.active = false;
+            auto context = std::make_shared<GenieContext>(*config_);
+            config_->i_model_config_.genieModelHandle = context;
+            return context;
         }
     };
 
@@ -503,7 +564,7 @@ struct ModelManager::ModeVerifier
         {
             uint64_t required = MNNContext::EstimateMnnMemoryRequirement(config_->get_model_path());
             uint64_t available_raw = MNNContext::GetAvailablePhysicalMemoryBytes();
-            uint64_t other_models_reserved = self_->EstimateOtherLoadedModelsMemoryBytes();
+            uint64_t other_models_reserved = self_->EstimateOtherLoadedModelsMemoryBytes(config_->get_model_name());
             bool available_unknown = (available_raw == UINT64_MAX);
             uint64_t available = available_unknown
                     ? UINT64_MAX
@@ -520,9 +581,7 @@ struct ModelManager::ModeVerifier
                 return nullptr;
             }
 
-            config_->i_model_config_ = *self_;
-            config_->i_model_config_.genieModelHandle = self_->genieModelHandle = std::make_shared<MNNContext>(*config_);
-            return self_->genieModelHandle;
+            return PublishContext<MNNContext>();
         }
     };
 #endif
@@ -550,9 +609,7 @@ struct ModelManager::ModeVerifier
                 config_->set_speculative_draft_forced_cpu(draft_on_cpu);
                 config_->set_speculative_reduced_ubatch(reduced_ubatch);
                 config_->set_speculative_full_gpu(full_gpu);
-                config_->i_model_config_ = *self_;
-                config_->i_model_config_.genieModelHandle = self_->genieModelHandle = std::make_shared<LLAMACppBuilder>(*config_);
-                return self_->genieModelHandle;
+                return PublishContext<LLAMACppBuilder>();
             };
 
             std::string requested_device = config_->get_device();
@@ -562,26 +619,7 @@ struct ModelManager::ModeVerifier
             json j;
             try
             {
-                std::string trimmed = self_->config_file_;
-                size_t start = trimmed.find_first_not_of(" \t\n\r");
-                if (start != std::string::npos)
-                {
-                    trimmed = trimmed.substr(start);
-                }
-
-                if (!trimmed.empty() && trimmed[0] == '{')
-                {
-                    j = json::parse(self_->config_file_);
-                }
-                else if (File::IsFileExist(self_->config_file_) && !File::IsFileEmpty(self_->config_file_))
-                {
-                    std::ifstream file(self_->config_file_);
-                    file >> j;
-                }
-                else if (!File::IsFileExist(self_->config_file_))
-                {
-                    std::ofstream(self_->config_file_).close();
-                }
+                ReadConfigJson(j, ConfigReadMode::kGguf);
 
                 if (j.contains("backend") && j["backend"].is_string())
                 {
@@ -606,9 +644,9 @@ struct ModelManager::ModeVerifier
             bool full_gpu_fits = false;
             if (draft_config.present)
             {
-                int configured_context_size = config_->get_context_size();
-                uint64_t effective_context_size = configured_context_size > 0
-                        ? static_cast<uint64_t>(configured_context_size) : 32768ULL;
+
+                uint64_t effective_context_size = llama_speculative::ResolveContextSizeByPhysicalMemory();
+                config_->set_context_size(static_cast<int>(effective_context_size));
                 uint64_t required = 0;
                 uint64_t available = llama_speculative::GetAvailablePhysicalMemoryBytes();
 
@@ -661,11 +699,13 @@ struct ModelManager::ModeVerifier
                               << " host_avail=" << plan.host_avail_observed << std::endl;
                 }
 
-                if (available != UINT64_MAX && required > available)
+                constexpr uint64_t kLoadPeakHeadroomBytes = 4ULL * 1024 * 1024 * 1024;
+                if (available != UINT64_MAX && required + kLoadPeakHeadroomBytes > available)
                 {
                     std::string detail = "insufficient available physical memory for speculative decoding "
                             "(draft_model) model: required=" + std::to_string(required) +
                             " bytes, available=" + std::to_string(available) +
+                            " bytes, load_peak_headroom=" + std::to_string(kLoadPeakHeadroomBytes) +
                             " bytes, context_size=" + std::to_string(effective_context_size);
                     My_Log{My_Log::Level::kError} << "[GGUFVerify] " << detail << std::endl;
                     self_->SetLastLoadFailureReason(ModelManager::LoadFailureReason::kInsufficientMemory, detail);
@@ -793,7 +833,6 @@ struct ModelManager::ModeVerifier
             std::function<std::shared_ptr<ContextBase>()> func_;
         };
 
-        /* @formatter:off */
         std::vector<Checker> all_checkers{
                 {{ModelFormat::QNN}, [config, manager](){ return QnnVerifier(config, manager).CreateIfVerified();}},
 #ifdef USE_MNN
@@ -803,7 +842,6 @@ struct ModelManager::ModeVerifier
                 {{ModelFormat::GGUF},[config, manager](){ return GGUFVerify(config, manager).CreateIfVerified();}}
 #endif
         };
-        /* @formatter:on */
 
         std::vector<Checker> checkers;
         const std::string &specified_backend = config->get_backend();
@@ -905,65 +943,58 @@ ModelManager::ModelManager(IModelConfig &&config) : IModelConfig{std::move(confi
 
 ModelManager::~ModelManager()
 {
-    bool had_qnn = false;
-    {
-        std::lock_guard<std::mutex> lock(models_mutex_);
-        if (current_model_ && current_model_->backend == "qnn")
-        {
-            had_qnn = true;
-        }
-        current_model_.reset();
-    }
-    if (genieModelHandle != nullptr)
-    {
-        Clean();
-    }
-    else if (had_qnn)
-    {
-        std::this_thread::sleep_for(std::chrono::milliseconds(2000));
-    }
+    Clean();
 }
 
 bool ModelManager::LoadModelByName(const std::string &new_model, bool &first_load)
 {
-    loaded_ = false;
     if (new_model.empty())
     {
         My_Log{My_Log::Level::kError} << "model name can not be empty" << std::endl;
         return false;
     }
 
-    if (model_name_ == new_model && genieModelHandle)
+    if (GetModel(new_model) != nullptr)
     {
         My_Log{} << "model: " + new_model << " has already been loaded" << std::endl;
         first_load = false;
-        loaded_ = true;
+        return true;
+    }
+
+    std::lock_guard<std::recursive_mutex> load_lock(load_mutex_);
+    if (GetModel(new_model) != nullptr)
+    {
+        first_load = false;
         return true;
     }
     first_load = true;
 
     My_Log{} << "model name: " + new_model << " will be loaded" << std::endl;
     UpdateModeList();
-    bool found{false};
-    for (const auto &name: model_list_)
+    std::vector<std::string> candidate_names;
+    {
+        std::lock_guard<std::mutex> list_lock(*model_list_mutex_);
+        candidate_names = model_list_;
+    }
+    ModelLoadRequest request;
+    for (const auto &name: candidate_names)
     {
         if (ModelComparer(name, new_model, false))
         {
-            found = true;
-            model_name_ = name;
-            model_path_ = model_root_ + "/" + name;
-            config_file_ = File::ResolveModelConfigPath(model_path_);
+            request.name = name;
+            request.path = model_root_ + "/" + name;
+            request.config_file = File::ResolveModelConfigPath(request.path);
             break;
         }
     }
 
-    if (!found)
+    if (request.name.empty())
     {
         My_Log{My_Log::Level::kError} << "model name: " << new_model << " is not exist" << std::endl;
         return false;
     }
 
-    return LoadSingleModel();
+    return LoadModel(request);
 }
 
 static void ParsePromptSectionsConfig(const json &po, PromptSectionsConfig &sections_cfg, const std::string &tag)
@@ -1001,6 +1032,376 @@ static void ParsePromptSectionsConfig(const json &po, PromptSectionsConfig &sect
              << ", default_action=" << sections_cfg.default_action
              << ", max_section_tokens=" << sections_cfg.max_section_tokens
              << std::endl;
+}
+
+static void ParseRoutingConfig(const json &r, RoutingConfig &routing_config)
+{
+    routing_config.enabled = r.value("enabled", false);
+    routing_config.policy_id = r.value("policy_id", std::string("default_v1"));
+    routing_config.prefer_local_for_simple = r.value("prefer_local_for_simple", true);
+
+    routing_config.enterprise_cloud_require_desensitize =
+            r.value("enterprise_cloud_require_desensitize", false);
+
+    if (r.contains("sensitivity_detection"))
+    {
+        const auto &sd = r["sensitivity_detection"];
+        routing_config.sensitivity_detection.enabled = sd.value("enabled", true);
+        routing_config.sensitivity_detection.method = sd.value("method", std::string("rule_first"));
+        routing_config.sensitivity_detection.use_local_model_fallback = sd.value("use_local_model_fallback", false);
+        routing_config.sensitivity_detection.strict_s2_union = sd.value("strict_s2_union", true);
+        routing_config.sensitivity_detection.timeout_ms = sd.value("timeout_ms", 300000);
+        routing_config.sensitivity_detection.model_input_max_chars = sd.value("model_input_max_chars", 2000);
+        if (sd.contains("rule_level_overrides") && sd["rule_level_overrides"].is_object())
+        {
+            routing_config.sensitivity_detection.rule_level_overrides.clear();
+            for (auto &[k, v]: sd["rule_level_overrides"].items())
+            {
+                if (v.is_string())
+                    routing_config.sensitivity_detection.rule_level_overrides[k] = v.get<std::string>();
+            }
+        }
+
+        {
+            std::string kw_path = sd.value("keywords_dict_path", std::string(""));
+            if (!kw_path.empty())
+            {
+                fs::path kw_fs_path(kw_path);
+                if (kw_fs_path.is_relative())
+                {
+
+                    kw_path = (fs::path(RootDir) / kw_fs_path).generic_string();
+                }
+            }
+            routing_config.sensitivity_detection.keywords_dict_path = kw_path;
+        }
+        routing_config.sensitivity_detection.keywords_reload_interval_seconds = sd.value("keywords_reload_interval_seconds", 60);
+
+        routing_config.sensitivity_detection.max_gen_tokens = sd.value("max_gen_tokens", 2048);
+
+        routing_config.sensitivity_detection.system_prompt = sd.value("system_prompt", std::string(""));
+
+        routing_config.sensitivity_detection.debug_log_matches = sd.value("debug_log_matches", false);
+
+        if (sd.contains("extended_rules") && sd["extended_rules"].is_object())
+        {
+            const auto &er = sd["extended_rules"];
+            auto &xr = routing_config.sensitivity_detection.extended_rules;
+            xr.enable_local_path = er.value("enable_local_path", true);
+            xr.enable_internal_url = er.value("enable_internal_url", true);
+            xr.enable_device_id = er.value("enable_device_id", true);
+            xr.enable_image_data = er.value("enable_image_data", true);
+            My_Log{} << "[Config] extended_rules loaded: "
+                     << "local_path=" << xr.enable_local_path
+                     << ", internal_url=" << xr.enable_internal_url
+                     << ", device_id=" << xr.enable_device_id
+                     << ", image_data=" << xr.enable_image_data
+                     << std::endl;
+        }
+
+        if (sd.contains("detection_rules") && sd["detection_rules"].is_object())
+        {
+            const auto &dr = sd["detection_rules"];
+
+            auto &rules = routing_config.sensitivity_detection.detection_rules;
+            rules.enable_phone = dr.value("enable_phone", true);
+            rules.enable_email = dr.value("enable_email", true);
+            rules.enable_id_card = dr.value("enable_id_card", true);
+            rules.enable_bank_card = dr.value("enable_bank_card", true);
+            rules.enable_api_key = dr.value("enable_api_key", true);
+            rules.enable_private_key = dr.value("enable_private_key", true);
+            rules.enable_token = dr.value("enable_token", true);
+            rules.enable_password = dr.value("enable_password", true);
+
+            rules.level_phone = dr.value("level_phone", std::string("S1"));
+            rules.level_email = dr.value("level_email", std::string("S1"));
+            rules.level_id_card = dr.value("level_id_card", std::string("S2"));
+            rules.level_bank_card = dr.value("level_bank_card", std::string("S2"));
+            rules.level_api_key = dr.value("level_api_key", std::string("S2"));
+            rules.level_private_key = dr.value("level_private_key", std::string("S2"));
+            rules.level_token = dr.value("level_token", std::string("S2"));
+            rules.level_password = dr.value("level_password", std::string("S1"));
+            My_Log{} << "[Config] detection_rules loaded: "
+                     << "phone=" << rules.enable_phone << "(level=" << rules.level_phone << ")"
+                     << ", email=" << rules.enable_email << "(level=" << rules.level_email << ")"
+                     << ", id_card=" << rules.enable_id_card << "(level=" << rules.level_id_card << ")"
+                     << ", bank_card=" << rules.enable_bank_card << "(level=" << rules.level_bank_card << ")"
+                     << ", api_key=" << rules.enable_api_key << "(level=" << rules.level_api_key << ")"
+                     << ", private_key=" << rules.enable_private_key << "(level=" << rules.level_private_key << ")"
+                     << ", token=" << rules.enable_token << "(level=" << rules.level_token << ")"
+                     << ", password=" << rules.enable_password << "(level=" << rules.level_password << ")"
+                     << std::endl;
+        }
+    }
+
+    if (r.contains("desensitization"))
+    {
+        const auto &d = r["desensitization"];
+        routing_config.desensitization.enabled = d.value("enabled", true);
+        if (d.contains("strategies") && d["strategies"].is_array())
+        {
+            routing_config.desensitization.strategies.clear();
+            for (const auto &s: d["strategies"])
+                routing_config.desensitization.strategies.push_back(s.get<std::string>());
+        }
+        routing_config.desensitization.placeholder_style = d.value("placeholder_style", std::string("<{type}_{index}>"));
+        routing_config.desensitization.iterative = d.value("iterative", false);
+        routing_config.desensitization.max_rounds = d.value("max_rounds", 3);
+        routing_config.desensitization.summarize_timeout_ms = d.value("summarize_timeout_ms", 300000);
+
+        routing_config.desensitization.system_prompt = d.value("system_prompt", std::string(""));
+        routing_config.desensitization.format_preserving_enabled = d.value("format_preserving_enabled", false);
+        routing_config.desensitization.restore_response_enabled = d.value("restore_response_enabled", true);
+        routing_config.desensitization.restore_stream_enabled = d.value("restore_stream_enabled", true);
+        routing_config.desensitization.log_desensitization_details = d.value("log_desensitization_details", false);
+
+        if (d.contains("entity_switches") && d["entity_switches"].is_object())
+        {
+            const auto &es = d["entity_switches"];
+            routing_config.desensitization.entity_switches.enable_phone = es.value("enable_phone", true);
+            routing_config.desensitization.entity_switches.enable_email = es.value("enable_email", true);
+            routing_config.desensitization.entity_switches.enable_id_card = es.value("enable_id_card", true);
+            routing_config.desensitization.entity_switches.enable_bank_card = es.value("enable_bank_card", true);
+            routing_config.desensitization.entity_switches.enable_api_key = es.value("enable_api_key", true);
+            routing_config.desensitization.entity_switches.enable_private_key = es.value("enable_private_key", true);
+            routing_config.desensitization.entity_switches.enable_token = es.value("enable_token", true);
+            routing_config.desensitization.entity_switches.enable_password = es.value("enable_password", true);
+            routing_config.desensitization.entity_switches.enable_internal_url = es.value("enable_internal_url", true);
+            routing_config.desensitization.entity_switches.enable_local_path = es.value("enable_local_path", true);
+            routing_config.desensitization.entity_switches.enable_device_id = es.value("enable_device_id", true);
+            routing_config.desensitization.entity_switches.enable_image_data = es.value("enable_image_data", true);
+        }
+    }
+
+    if (r.contains("complexity"))
+    {
+        const auto &c = r["complexity"];
+        routing_config.complexity.method = c.value("method", std::string("heuristic_first"));
+        routing_config.complexity.use_local_model_fallback = c.value("use_local_model_fallback", false);
+        routing_config.complexity.timeout_ms = c.value("timeout_ms", 300000);
+        routing_config.complexity.model_input_max_chars = c.value("model_input_max_chars", 2000);
+
+        routing_config.complexity.system_prompt = c.value("system_prompt", std::string(""));
+        if (c.contains("thresholds"))
+        {
+            const auto &t = c["thresholds"];
+            routing_config.complexity.thresholds.tool_calls = t.value("tool_calls", 3);
+        }
+
+        if (c.contains("keywords_c1") && c["keywords_c1"].is_array())
+        {
+            routing_config.complexity.keywords_c1.clear();
+            for (const auto &kw: c["keywords_c1"])
+            {
+                if (kw.is_string())
+                    routing_config.complexity.keywords_c1.push_back(kw.get<std::string>());
+            }
+        }
+        if (c.contains("keywords_c2") && c["keywords_c2"].is_array())
+        {
+            routing_config.complexity.keywords_c2.clear();
+            for (const auto &kw: c["keywords_c2"])
+            {
+                if (kw.is_string())
+                    routing_config.complexity.keywords_c2.push_back(kw.get<std::string>());
+            }
+        }
+    }
+
+    if (r.contains("fallback"))
+    {
+        const auto &f = r["fallback"];
+        routing_config.fallback.cloud_unavailable_to_local = f.value("cloud_unavailable_to_local", true);
+
+        if (f.contains("local_unavailable") && f["local_unavailable"].is_object())
+        {
+            const auto &lu = f["local_unavailable"];
+            routing_config.fallback.local_unavailable_s0 = lu.value("s0", std::string("cloud_if_allowed"));
+            routing_config.fallback.local_unavailable_s1 = lu.value("s1", std::string("cloud_if_allowed"));
+            routing_config.fallback.local_unavailable_s2 = lu.value("s2", std::string("fail"));
+        }
+        else
+        {
+            routing_config.fallback.local_unavailable_s0 = f.value("local_unavailable_s0", std::string("cloud_if_allowed"));
+            routing_config.fallback.local_unavailable_s1 = f.value("local_unavailable_s1", std::string("cloud_if_allowed"));
+            routing_config.fallback.local_unavailable_s2 = f.value("local_unavailable_s2", std::string("fail"));
+        }
+        routing_config.fallback.clean_local_history_on_fallback = f.value("clean_local_history_on_fallback", true);
+
+        routing_config.fallback.max_input_overflow_retries = f.value("max_input_overflow_retries", 3);
+
+        routing_config.fallback.enterprise_cloud_unavailable =
+                f.value("enterprise_cloud_unavailable", std::string("public_cloud_if_allowed"));
+        routing_config.fallback.public_cloud_unavailable =
+                f.value("public_cloud_unavailable", std::string("enterprise_cloud_if_allowed"));
+    }
+
+    if (r.contains("cache"))
+    {
+        const auto &ca = r["cache"];
+        routing_config.cache.ttl_seconds = ca.value("ttl_seconds", 60);
+        routing_config.cache.max_entries = ca.value("max_entries", 256);
+    }
+
+    if (r.contains("agent_routing"))
+    {
+        const auto &ar = r["agent_routing"];
+        routing_config.agent_routing.sub_agent_allow_cloud_on_c2 = ar.value("sub_agent_allow_cloud_on_c2", true);
+    }
+
+    if (r.contains("sticky_routing"))
+    {
+        const auto &sr = r["sticky_routing"];
+        routing_config.sticky_routing.enabled = sr.value("enabled", false);
+        routing_config.sticky_routing.ttl_seconds = sr.value("ttl_seconds", 1800);
+        routing_config.sticky_routing.max_sessions = sr.value("max_sessions", 1000);
+    }
+
+    if (r.contains("metrics"))
+    {
+        const auto &m = r["metrics"];
+        routing_config.metrics.summary_every_n_requests = m.value("summary_every_n_requests", 100);
+        routing_config.metrics.summary_every_seconds = m.value("summary_every_seconds", 0);
+        routing_config.metrics.latency_sample_size = m.value("latency_sample_size", 1000);
+        routing_config.metrics.fail_reason_topn = m.value("fail_reason_topn", 5);
+    }
+
+    if (r.contains("incremental_check"))
+    {
+        const auto &ic = r["incremental_check"];
+        routing_config.incremental_check.enabled = ic.value("enabled", false);
+        routing_config.incremental_check.session_ttl_seconds = ic.value("session_ttl_seconds", 3600);
+        routing_config.incremental_check.max_sessions = ic.value("max_sessions", 1000);
+        routing_config.incremental_check.s2_always_full_check = ic.value("s2_always_full_check", true);
+        routing_config.incremental_check.detect_sensitive_reference = ic.value("detect_sensitive_reference", true);
+        routing_config.incremental_check.detect_history_tampering = ic.value("detect_history_tampering", true);
+        My_Log{} << "Incremental check config loaded: enabled="
+                 << routing_config.incremental_check.enabled
+                 << ", session_ttl_seconds=" << routing_config.incremental_check.session_ttl_seconds
+                 << ", max_sessions=" << routing_config.incremental_check.max_sessions << std::endl;
+    }
+
+    if (r.contains("s2_turn_cleaning"))
+    {
+        const auto &stc = r["s2_turn_cleaning"];
+        routing_config.s2_turn_cleaning.enabled = stc.value("enabled", true);
+        routing_config.s2_turn_cleaning.log_details = stc.value("log_details", true);
+        routing_config.s2_turn_cleaning.allow_cloud_reroute_after_clean = stc.value("allow_cloud_reroute_after_clean", false);
+        My_Log{} << "S2 turn cleaning config loaded: enabled="
+                 << routing_config.s2_turn_cleaning.enabled
+                 << ", log_details=" << routing_config.s2_turn_cleaning.log_details
+                 << ", allow_cloud_reroute="
+                 << routing_config.s2_turn_cleaning.allow_cloud_reroute_after_clean << std::endl;
+    }
+
+    My_Log{} << "Routing config loaded: enabled=" << routing_config.enabled
+             << ", policy_id=" << routing_config.policy_id << std::endl;
+}
+
+namespace
+{
+struct SharedCloudSettings
+{
+    int timeout_seconds = 120;
+    int stream_timeout_seconds = 600;
+    bool log_debug = false;
+    int retry_max = 2;
+    int retry_backoff_ms = 200;
+    int retry_max_total_attempts = 0;
+    bool retry_on_429_switch_endpoint = false;
+    int cb_failure_threshold = 3;
+    int cb_cooldown_seconds = 60;
+    int rl_max_inferences = 20;
+    int rl_max_tokens = 0;
+};
+}
+
+static void ParseSharedCloudSettings(const json &cs, SharedCloudSettings &s)
+{
+    s.timeout_seconds = cs.value("timeout_seconds", s.timeout_seconds);
+    s.stream_timeout_seconds = cs.value("stream_timeout_seconds", s.stream_timeout_seconds);
+    s.log_debug = cs.value("log_debug", s.log_debug);
+    if (cs.contains("retry"))
+    {
+        const auto &ret = cs["retry"];
+        s.retry_max = ret.value("max", s.retry_max);
+        s.retry_backoff_ms = ret.value("backoff_ms", s.retry_backoff_ms);
+        s.retry_max_total_attempts = ret.value("max_total_attempts", s.retry_max_total_attempts);
+        s.retry_on_429_switch_endpoint = ret.value("retry_on_429_switch_endpoint", s.retry_on_429_switch_endpoint);
+    }
+    if (cs.contains("circuit_breaker"))
+    {
+        const auto &cb = cs["circuit_breaker"];
+        s.cb_failure_threshold = cb.value("failure_threshold", s.cb_failure_threshold);
+        s.cb_cooldown_seconds = cb.value("cooldown_seconds", s.cb_cooldown_seconds);
+    }
+    if (cs.contains("rate_limit"))
+    {
+        const auto &rl = cs["rate_limit"];
+        s.rl_max_inferences = rl.value("max_inferences_per_task", s.rl_max_inferences);
+        s.rl_max_tokens = rl.value("max_tokens_per_task", s.rl_max_tokens);
+    }
+}
+
+template <typename CloudCfg>
+static void ApplyCloudSharedFields(const json &j, CloudCfg &cfg, const SharedCloudSettings &s)
+{
+    cfg.timeout_seconds = j.value("timeout_seconds", s.timeout_seconds);
+    cfg.stream_timeout_seconds = j.value("stream_timeout_seconds", s.stream_timeout_seconds);
+    cfg.log_debug = j.value("log_debug", s.log_debug);
+
+    if (j.contains("retry"))
+    {
+        const auto &ret = j["retry"];
+        cfg.retry.max = ret.value("max", s.retry_max);
+        cfg.retry.backoff_ms = ret.value("backoff_ms", s.retry_backoff_ms);
+        cfg.retry.max_total_attempts = ret.value("max_total_attempts", s.retry_max_total_attempts);
+        cfg.retry.retry_on_429_switch_endpoint = ret.value("retry_on_429_switch_endpoint", s.retry_on_429_switch_endpoint);
+    }
+    else
+    {
+        cfg.retry.max = s.retry_max;
+        cfg.retry.backoff_ms = s.retry_backoff_ms;
+        cfg.retry.max_total_attempts = s.retry_max_total_attempts;
+        cfg.retry.retry_on_429_switch_endpoint = s.retry_on_429_switch_endpoint;
+    }
+
+    if (j.contains("circuit_breaker"))
+    {
+        const auto &cb = j["circuit_breaker"];
+        cfg.circuit_breaker.failure_threshold = cb.value("failure_threshold", s.cb_failure_threshold);
+        cfg.circuit_breaker.cooldown_seconds = cb.value("cooldown_seconds", s.cb_cooldown_seconds);
+    }
+    else
+    {
+        cfg.circuit_breaker.failure_threshold = s.cb_failure_threshold;
+        cfg.circuit_breaker.cooldown_seconds = s.cb_cooldown_seconds;
+    }
+
+    if (j.contains("endpoints") && j["endpoints"].is_array())
+    {
+        cfg.endpoints.clear();
+        for (const auto &ep: j["endpoints"])
+        {
+            typename CloudCfg::Endpoint endpoint;
+            endpoint.name = ep.value("name", std::string(""));
+            endpoint.base_url = ep.value("base_url", std::string(""));
+            endpoint.model = ep.value("model", std::string(""));
+            cfg.endpoints.push_back(endpoint);
+        }
+    }
+
+    if (j.contains("rate_limit"))
+    {
+        const auto &rl = j["rate_limit"];
+        cfg.rate_limit.max_inferences_per_task = rl.value("max_inferences_per_task", s.rl_max_inferences);
+        cfg.rate_limit.max_tokens_per_task = rl.value("max_tokens_per_task", s.rl_max_tokens);
+    }
+    else
+    {
+        cfg.rate_limit.max_inferences_per_task = s.rl_max_inferences;
+        cfg.rate_limit.max_tokens_per_task = s.rl_max_tokens;
+    }
 }
 
 bool ModelManager::InitializeConfig()
@@ -1089,6 +1490,10 @@ bool ModelManager::InitializeConfig()
                     at_cfg.near_repeat_window = at.value("near_repeat_window", at_cfg.near_repeat_window);
                     at_cfg.max_tokens = at.value("max_tokens", at_cfg.max_tokens);
                     at_cfg.ctx_reserve_tokens = at.value("ctx_reserve_tokens", at_cfg.ctx_reserve_tokens);
+                    at_cfg.goal_reminder_chars = at.value("goal_reminder_chars", at_cfg.goal_reminder_chars);
+                    at_cfg.max_consecutive_block = at.value("max_consecutive_block", at_cfg.max_consecutive_block);
+                    at_cfg.reserved_failure_think_turns =
+                            at.value("reserved_failure_think_turns", at_cfg.reserved_failure_think_turns);
                     My_Log{} << "[Config] adaptive_thinking loaded: enabled=" << at_cfg.enabled
                              << ", time_budget_s=" << at_cfg.time_budget_s
                              << ", max_tokens=" << at_cfg.max_tokens << std::endl;
@@ -1122,7 +1527,6 @@ bool ModelManager::InitializeConfig()
                         const auto &cb = tcr["circuit_breaker"];
                         auto &cb_cfg = tool_call_repair_config_.circuit_breaker;
                         cb_cfg.consecutive_layer3_threshold = cb.value("consecutive_layer3_threshold", 3);
-                        cb_cfg.cooldown_seconds = cb.value("cooldown_seconds", 300);
                     }
                     ToolCallCircuitBreakerStore::GetInstance().Configure(tool_call_repair_config_.circuit_breaker);
 
@@ -1132,10 +1536,15 @@ bool ModelManager::InitializeConfig()
                         auto &rg_cfg = tool_call_repair_config_.redundant_call_guard;
                         rg_cfg.enabled = rg.value("enabled", true);
                         rg_cfg.repeat_threshold = rg.value("repeat_threshold", 2);
-                        rg_cfg.ttl_seconds = rg.value("ttl_seconds", 300);
                         rg_cfg.consecutive_failure_threshold = rg.value("consecutive_failure_threshold", 3);
-                        rg_cfg.non_contiguous_repeat_threshold = rg.value("non_contiguous_repeat_threshold", 4);
-                        rg_cfg.non_contiguous_ttl_seconds = rg.value("non_contiguous_ttl_seconds", 3600);
+                        rg_cfg.non_contiguous_repeat_threshold = rg.value("non_contiguous_repeat_threshold", 2);
+                        rg_cfg.internal_retry_threshold = rg.value("internal_retry_threshold", 2);
+                        rg_cfg.hard_block_threshold = rg.value("hard_block_threshold", 3);
+                        rg_cfg.hard_block_stop_after = rg.value("hard_block_stop_after", 2);
+                        rg_cfg.soft_retry_enabled = rg.value("soft_retry_enabled", false);
+                        rg_cfg.max_signatures_per_entry = rg.value("max_signatures_per_entry", 256);
+                        rg_cfg.note_min_interval_turns = rg.value("note_min_interval_turns", 4);
+                        rg_cfg.overlap_reread_threshold = rg.value("overlap_reread_threshold", 2);
                     }
                     ToolCallRepetitionStore::GetInstance().Configure(tool_call_repair_config_.redundant_call_guard);
 
@@ -1155,8 +1564,12 @@ bool ModelManager::InitializeConfig()
                                 }()
                              << "], circuit_breaker.consecutive_layer3_threshold="
                              << tool_call_repair_config_.circuit_breaker.consecutive_layer3_threshold
-                             << ", circuit_breaker.cooldown_seconds="
-                             << tool_call_repair_config_.circuit_breaker.cooldown_seconds
+                             << ", redundant_call_guard.internal_retry_threshold="
+                             << tool_call_repair_config_.redundant_call_guard.internal_retry_threshold
+                             << ", redundant_call_guard.hard_block_threshold="
+                             << tool_call_repair_config_.redundant_call_guard.hard_block_threshold
+                             << ", redundant_call_guard.soft_retry_enabled="
+                             << tool_call_repair_config_.redundant_call_guard.soft_retry_enabled
                              << std::endl;
                 }
 
@@ -1177,6 +1590,17 @@ bool ModelManager::InitializeConfig()
                 RequestTraceWriter::GetInstance().Configure(request_trace_config_);
 
 #ifdef USE_GGUF
+                auto &grg_cfg = generation_repeat_guard_config_;
+                if (pe_json.contains("generation_repeat_guard") && pe_json["generation_repeat_guard"].is_object())
+                {
+                    const auto &grg = pe_json["generation_repeat_guard"];
+                    grg_cfg.enabled = grg.value("enabled", grg_cfg.enabled);
+                    grg_cfg.max_period_tokens = grg.value("max_period_tokens", grg_cfg.max_period_tokens);
+                }
+                LLAMACppBuilder::SetDegenerateRepeatGuardEnabled(grg_cfg.enabled);
+                LLAMACppBuilder::SetDegenerateRepeatGuardMaxPeriod(grg_cfg.max_period_tokens);
+                My_Log{} << "[Config] generation_repeat_guard loaded: enabled=" << grg_cfg.enabled
+                         << ", max_period_tokens=" << grg_cfg.max_period_tokens << std::endl;
                 {
                     bool prefix_cache_enabled = true;
                     int head_checkpoints = 2;
@@ -1210,18 +1634,7 @@ bool ModelManager::InitializeConfig()
                     prompt_optimization_config_.tool_min_length = po.value("tool_min_length", (size_t) 300);
 
                     prompt_optimization_config_.skill_catalog_format = po.value("skill_catalog_format", "structured");
-                    prompt_optimization_config_.enable_tool_whitelist = po.value("enable_tool_whitelist", true);
                     prompt_optimization_config_.enable_skill_auto_correction = po.value("enable_skill_auto_correction", true);
-                    prompt_optimization_config_.tool_call_temperature = po.value("tool_call_temperature", 0.1f);
-
-                    if (po.contains("allowed_tools") && po["allowed_tools"].is_array())
-                    {
-                        prompt_optimization_config_.allowed_tools.clear();
-                        for (const auto &tool: po["allowed_tools"])
-                        {
-                            prompt_optimization_config_.allowed_tools.push_back(tool.get<std::string>());
-                        }
-                    }
 
                     if (po.contains("emergency_truncation") && po["emergency_truncation"].is_object())
                     {
@@ -1336,7 +1749,6 @@ bool ModelManager::InitializeConfig()
                                  << std::endl;
                     }
 
-                    // [skill_disclosure] D2：技能目录三档渐进披露（旧配置文件中没有该节时使用默认值，不报错）
                     if (po.contains("skill_disclosure") && po["skill_disclosure"].is_object())
                     {
                         const auto &sd2 = po["skill_disclosure"];
@@ -1346,9 +1758,7 @@ bool ModelManager::InitializeConfig()
                         sd_cfg.l1_top_k = sd2.value("l1_top_k", (size_t) 6);
                         sd_cfg.l1_summary_max_chars = sd2.value("l1_summary_max_chars", (size_t) 240);
                         sd_cfg.l0_summary_max_chars = sd2.value("l0_summary_max_chars", (size_t) 80);
-                        // 缺字段时一律取结构体默认值（Step 5 收口后为 false），
-                        // 不在此处硬编码 true —— 否则「旧配置文件写了 skill_disclosure
-                        // 节但没写 tie_aware_l2」会拿到与出厂默认相反的行为。
+
                         sd_cfg.tie_aware_l2 = sd2.value("tie_aware_l2", sd_cfg.tie_aware_l2);
                         My_Log{} << "[Config] skill_disclosure loaded: "
                                  << "enabled=" << sd_cfg.enabled
@@ -1360,7 +1770,6 @@ bool ModelManager::InitializeConfig()
                                  << std::endl;
                     }
 
-                    // 加载 long_text_summarization 配置
                     if (po.contains("long_text_summarization") && po["long_text_summarization"].is_object())
                     {
                         const auto &lts = po["long_text_summarization"];
@@ -1376,7 +1785,6 @@ bool ModelManager::InitializeConfig()
                         sum_cfg.map_instruction = lts.value("map_instruction", sum_cfg.map_instruction);
                         sum_cfg.reduce_instruction = lts.value("reduce_instruction", sum_cfg.reduce_instruction);
 
-                        // 加载缓存子配置
                         if (lts.contains("cache") && lts["cache"].is_object())
                         {
                             const auto &ca = lts["cache"];
@@ -1398,7 +1806,6 @@ bool ModelManager::InitializeConfig()
                                 << ", cache.ttl_minutes=" << sum_cfg.cache.ttl_minutes
                                 << std::endl;
 
-                        // 配置加载完成后立即同步缓存配置
                         if (sum_cfg.enabled && sum_cfg.cache.enabled)
                         {
                             SummaryCache::GetInstance().Configure(sum_cfg.cache);
@@ -1411,7 +1818,6 @@ bool ModelManager::InitializeConfig()
                         }
                     }
 
-                    // 加载 task_memo 配置
                     if (po.contains("task_memo") && po["task_memo"].is_object())
                     {
                         const auto &tm = po["task_memo"];
@@ -1442,7 +1848,6 @@ bool ModelManager::InitializeConfig()
                             const auto &st = tm["store"];
                             memo_cfg.store.max_entries = st.value("max_entries", (size_t) 200);
                             memo_cfg.store.max_memory_mb = st.value("max_memory_mb", (size_t) 20);
-                            memo_cfg.store.ttl_minutes = st.value("ttl_minutes", 120);
                         }
 
                         My_Log{My_Log::Level::kInfo}
@@ -1461,7 +1866,6 @@ bool ModelManager::InitializeConfig()
                                 << ", page_directory.max_entries=" << memo_cfg.page_directory.max_entries
                                 << ", store.max_entries=" << memo_cfg.store.max_entries
                                 << ", store.max_memory_mb=" << memo_cfg.store.max_memory_mb
-                                << ", store.ttl_minutes=" << memo_cfg.store.ttl_minutes
                                 << std::endl;
 
                         if (memo_cfg.enabled)
@@ -1476,7 +1880,6 @@ bool ModelManager::InitializeConfig()
                              << ", old_compress_len=" << prompt_optimization_config_.old_compress_len
                              << ", recent_compress_len=" << prompt_optimization_config_.recent_compress_len
                              << ", format=" << prompt_optimization_config_.skill_catalog_format
-                             << ", whitelist=" << prompt_optimization_config_.enable_tool_whitelist
                              << ", auto_correction=" << prompt_optimization_config_.enable_skill_auto_correction
                              << std::endl;
                 }
@@ -1484,14 +1887,13 @@ bool ModelManager::InitializeConfig()
             catch (const std::exception &e)
             {
                 My_Log{My_Log::Level::kError} << "Failed to load prompt_engineering.json: " << e.what() << std::endl;
-                // 配置加载失败不影响主流程，使用默认值
+
             }
         }
     }
 
-    // 尝试加载 service_config.json 中的路由与云端配置
     {
-        // 从程序根目录的 config/ 子目录加载 service_config.json（与模型配置的落点统一）
+
         fs::path service_config_path = fs::path(RootDir) / "config" / "service_config.json";
         if (File::IsFileExist(service_config_path.generic_string()) &&
             !File::IsFileEmpty(service_config_path.generic_string()))
@@ -1502,431 +1904,36 @@ bool ModelManager::InitializeConfig()
                 json sc_json;
                 sc_file >> sc_json;
 
-                // Group A（网络模块：云端/路由，含 routing.enabled 本身及其下敏感检测/脱敏/
-                // 复杂度评估子节）只在 -n -1（stateless/端云结合模式）时解析生效；-n 非 -1 时
-                // 保持结构体默认值，routing_config_.enabled 恒为 false，云端路径不可达。
-                // 本节仅保留端云相关配置与下游客户端自己的提示词文案（prompt_optimization
-                // 中的 system_prompts/prompt_sections/subagent_prompt_sections/system_context/
-                // spawn_guard）；通用本地提示词工程参数与调试开关已迁出至独立的
-                // prompt_engineering.json，由上面单独的加载流程处理，与 -n 取值无关。
                 bool is_stateless_mode = (getnumResponse() == -1);
 
-                // 加载 routing 配置（Group A：仅 -n -1 时解析生效）
                 if (is_stateless_mode && sc_json.contains("routing"))
                 {
-                    const auto &r = sc_json["routing"];
-                    routing_config_.enabled = r.value("enabled", false);
-                    routing_config_.policy_id = r.value("policy_id", std::string("default_v1"));
-                    routing_config_.prefer_local_for_simple = r.value("prefer_local_for_simple", true);
-                    // 企业内网云是否要求对 S1 数据脱敏
-                    // false（默认）= 企业云视为可信边界，S1 数据无需脱敏
-                    // true         = 保守模式，S1 数据发往企业云前仍需脱敏
-                    routing_config_.enterprise_cloud_require_desensitize =
-                            r.value("enterprise_cloud_require_desensitize", false);
-
-                    if (r.contains("sensitivity_detection"))
-                    {
-                        const auto &sd = r["sensitivity_detection"];
-                        routing_config_.sensitivity_detection.enabled = sd.value("enabled", true);
-                        routing_config_.sensitivity_detection.method = sd.value("method", std::string("rule_first"));
-                        routing_config_.sensitivity_detection.use_local_model_fallback = sd.value("use_local_model_fallback", false);
-                        routing_config_.sensitivity_detection.strict_s2_union = sd.value("strict_s2_union", true);
-                        routing_config_.sensitivity_detection.timeout_ms = sd.value("timeout_ms", 300000);
-                        routing_config_.sensitivity_detection.model_input_max_chars = sd.value("model_input_max_chars", 2000);
-                        if (sd.contains("rule_level_overrides") && sd["rule_level_overrides"].is_object())
-                        {
-                            routing_config_.sensitivity_detection.rule_level_overrides.clear();
-                            for (auto &[k, v]: sd["rule_level_overrides"].items())
-                            {
-                                if (v.is_string())
-                                    routing_config_.sensitivity_detection.rule_level_overrides[k] = v.get<std::string>();
-                            }
-                        }
-                        // 关键词词典路径：相对路径解析为相对于 RootDir（可执行文件目录）
-                        {
-                            std::string kw_path = sd.value("keywords_dict_path", std::string(""));
-                            if (!kw_path.empty())
-                            {
-                                fs::path kw_fs_path(kw_path);
-                                if (kw_fs_path.is_relative())
-                                {
-                                    // 相对路径：解析为相对于 RootDir（可执行文件所在目录）
-                                    kw_path = (fs::path(RootDir) / kw_fs_path).generic_string();
-                                }
-                            }
-                            routing_config_.sensitivity_detection.keywords_dict_path = kw_path;
-                        }
-                        routing_config_.sensitivity_detection.keywords_reload_interval_seconds = sd.value("keywords_reload_interval_seconds", 60);
-                        // 安全检查最大生成 token 数（默认 2048，思考类模型需要更多 token）
-                        routing_config_.sensitivity_detection.max_gen_tokens = sd.value("max_gen_tokens", 2048);
-                        // 安全检测系统提示词（留空时使用内置默认值）
-                        routing_config_.sensitivity_detection.system_prompt = sd.value("system_prompt", std::string(""));
-                        // 调试日志开关：规则命中时是否打印匹配规则与原始文本（含上下文），默认关闭
-                        routing_config_.sensitivity_detection.debug_log_matches = sd.value("debug_log_matches", false);
-                        // [扩展规则] 各类扩展检测规则的独立开关
-                        if (sd.contains("extended_rules") && sd["extended_rules"].is_object())
-                        {
-                            const auto &er = sd["extended_rules"];
-                            routing_config_.sensitivity_detection.extended_rules.enable_local_path = er.value("enable_local_path", true);
-                            routing_config_.sensitivity_detection.extended_rules.enable_internal_url = er.value("enable_internal_url", true);
-                            routing_config_.sensitivity_detection.extended_rules.enable_device_id = er.value("enable_device_id", true);
-                            routing_config_.sensitivity_detection.extended_rules.enable_image_data = er.value("enable_image_data", true);
-                            My_Log{} << "[Config] extended_rules loaded: "
-                                     << "local_path="
-                                     << routing_config_.sensitivity_detection.extended_rules.enable_local_path
-                                     << ", internal_url="
-                                     << routing_config_.sensitivity_detection.extended_rules.enable_internal_url
-                                     << ", device_id="
-                                     << routing_config_.sensitivity_detection.extended_rules.enable_device_id
-                                     << ", image_data="
-                                     << routing_config_.sensitivity_detection.extended_rules.enable_image_data
-                                     << std::endl;
-                        }
-                        // [基础规则] 各类基础检测规则的独立开关
-                        if (sd.contains("detection_rules") && sd["detection_rules"].is_object())
-                        {
-                            const auto &dr = sd["detection_rules"];
-                            // 开关
-                            routing_config_.sensitivity_detection.detection_rules.enable_phone = dr.value("enable_phone", true);
-                            routing_config_.sensitivity_detection.detection_rules.enable_email = dr.value("enable_email", true);
-                            routing_config_.sensitivity_detection.detection_rules.enable_id_card = dr.value("enable_id_card", true);
-                            routing_config_.sensitivity_detection.detection_rules.enable_bank_card = dr.value("enable_bank_card", true);
-                            routing_config_.sensitivity_detection.detection_rules.enable_api_key = dr.value("enable_api_key", true);
-                            routing_config_.sensitivity_detection.detection_rules.enable_private_key = dr.value("enable_private_key", true);
-                            routing_config_.sensitivity_detection.detection_rules.enable_token = dr.value("enable_token", true);
-                            routing_config_.sensitivity_detection.detection_rules.enable_password = dr.value("enable_password", true);
-                            // 各类型可配置敏感等级（S0/S1/S2），未配置时保持默认值
-                            routing_config_.sensitivity_detection.detection_rules.level_phone = dr.value("level_phone", std::string("S1"));
-                            routing_config_.sensitivity_detection.detection_rules.level_email = dr.value("level_email", std::string("S1"));
-                            routing_config_.sensitivity_detection.detection_rules.level_id_card = dr.value("level_id_card", std::string("S2"));
-                            routing_config_.sensitivity_detection.detection_rules.level_bank_card = dr.value("level_bank_card", std::string("S2"));
-                            routing_config_.sensitivity_detection.detection_rules.level_api_key = dr.value("level_api_key", std::string("S2"));
-                            routing_config_.sensitivity_detection.detection_rules.level_private_key = dr.value("level_private_key", std::string("S2"));
-                            routing_config_.sensitivity_detection.detection_rules.level_token = dr.value("level_token", std::string("S2"));
-                            routing_config_.sensitivity_detection.detection_rules.level_password = dr.value("level_password", std::string("S1"));
-                            My_Log{} << "[Config] detection_rules loaded: "
-                                     << "phone=" << routing_config_.sensitivity_detection.detection_rules.enable_phone
-                                     << "(level=" << routing_config_.sensitivity_detection.detection_rules.level_phone
-                                     << ")"
-                                     << ", email=" << routing_config_.sensitivity_detection.detection_rules.enable_email
-                                     << "(level=" << routing_config_.sensitivity_detection.detection_rules.level_email
-                                     << ")"
-                                     << ", id_card="
-                                     << routing_config_.sensitivity_detection.detection_rules.enable_id_card
-                                     << "(level=" << routing_config_.sensitivity_detection.detection_rules.level_id_card
-                                     << ")"
-                                     << ", bank_card="
-                                     << routing_config_.sensitivity_detection.detection_rules.enable_bank_card
-                                     << "(level="
-                                     << routing_config_.sensitivity_detection.detection_rules.level_bank_card << ")"
-                                     << ", api_key="
-                                     << routing_config_.sensitivity_detection.detection_rules.enable_api_key
-                                     << "(level=" << routing_config_.sensitivity_detection.detection_rules.level_api_key
-                                     << ")"
-                                     << ", private_key="
-                                     << routing_config_.sensitivity_detection.detection_rules.enable_private_key
-                                     << "(level="
-                                     << routing_config_.sensitivity_detection.detection_rules.level_private_key << ")"
-                                     << ", token=" << routing_config_.sensitivity_detection.detection_rules.enable_token
-                                     << "(level=" << routing_config_.sensitivity_detection.detection_rules.level_token
-                                     << ")"
-                                     << ", password="
-                                     << routing_config_.sensitivity_detection.detection_rules.enable_password
-                                     << "(level="
-                                     << routing_config_.sensitivity_detection.detection_rules.level_password << ")"
-                                     << std::endl;
-                        }
-                    }
-
-                    if (r.contains("desensitization"))
-                    {
-                        const auto &d = r["desensitization"];
-                        routing_config_.desensitization.enabled = d.value("enabled", true);
-                        if (d.contains("strategies") && d["strategies"].is_array())
-                        {
-                            routing_config_.desensitization.strategies.clear();
-                            for (const auto &s: d["strategies"])
-                                routing_config_.desensitization.strategies.push_back(s.get<std::string>());
-                        }
-                        routing_config_.desensitization.placeholder_style = d.value("placeholder_style", std::string("<{type}_{index}>"));
-                        routing_config_.desensitization.iterative = d.value("iterative", false);
-                        routing_config_.desensitization.max_rounds = d.value("max_rounds", 3);
-                        routing_config_.desensitization.summarize_timeout_ms = d.value("summarize_timeout_ms", 300000);
-                        // 摘要化脱敏系统提示词（留空时使用内置默认值）
-                        routing_config_.desensitization.system_prompt = d.value("system_prompt", std::string(""));
-                        routing_config_.desensitization.format_preserving_enabled = d.value("format_preserving_enabled", false);
-                        routing_config_.desensitization.restore_response_enabled = d.value("restore_response_enabled", true);
-                        routing_config_.desensitization.restore_stream_enabled = d.value("restore_stream_enabled", true);
-                        routing_config_.desensitization.log_desensitization_details = d.value("log_desensitization_details", false);
-                        // 各实体类型脱敏开关
-                        if (d.contains("entity_switches") && d["entity_switches"].is_object())
-                        {
-                            const auto &es = d["entity_switches"];
-                            routing_config_.desensitization.entity_switches.enable_phone = es.value("enable_phone", true);
-                            routing_config_.desensitization.entity_switches.enable_email = es.value("enable_email", true);
-                            routing_config_.desensitization.entity_switches.enable_id_card = es.value("enable_id_card", true);
-                            routing_config_.desensitization.entity_switches.enable_bank_card = es.value("enable_bank_card", true);
-                            routing_config_.desensitization.entity_switches.enable_api_key = es.value("enable_api_key", true);
-                            routing_config_.desensitization.entity_switches.enable_private_key = es.value("enable_private_key", true);
-                            routing_config_.desensitization.entity_switches.enable_token = es.value("enable_token", true);
-                            routing_config_.desensitization.entity_switches.enable_password = es.value("enable_password", true);
-                            routing_config_.desensitization.entity_switches.enable_internal_url = es.value("enable_internal_url", true);
-                            routing_config_.desensitization.entity_switches.enable_local_path = es.value("enable_local_path", true);
-                            routing_config_.desensitization.entity_switches.enable_device_id = es.value("enable_device_id", true);
-                            routing_config_.desensitization.entity_switches.enable_image_data = es.value("enable_image_data", true);
-                        }
-                    }
-
-                    if (r.contains("complexity"))
-                    {
-                        const auto &c = r["complexity"];
-                        routing_config_.complexity.method = c.value("method", std::string("heuristic_first"));
-                        routing_config_.complexity.use_local_model_fallback = c.value("use_local_model_fallback", false);
-                        routing_config_.complexity.timeout_ms = c.value("timeout_ms", 300000);
-                        routing_config_.complexity.model_input_max_chars = c.value("model_input_max_chars", 2000);
-                        // 复杂度评估系统提示词（留空时使用内置默认值）
-                        routing_config_.complexity.system_prompt = c.value("system_prompt", std::string(""));
-                        if (c.contains("thresholds"))
-                        {
-                            const auto &t = c["thresholds"];
-                            routing_config_.complexity.thresholds.tool_calls = t.value("tool_calls", 3);
-                        }
-                        // 复杂度关键词列表（可选，空列表时 CheckComplexKeywords 使用内置默认值）
-                        if (c.contains("keywords_c1") && c["keywords_c1"].is_array())
-                        {
-                            routing_config_.complexity.keywords_c1.clear();
-                            for (const auto &kw: c["keywords_c1"])
-                            {
-                                if (kw.is_string())
-                                    routing_config_.complexity.keywords_c1.push_back(kw.get<std::string>());
-                            }
-                        }
-                        if (c.contains("keywords_c2") && c["keywords_c2"].is_array())
-                        {
-                            routing_config_.complexity.keywords_c2.clear();
-                            for (const auto &kw: c["keywords_c2"])
-                            {
-                                if (kw.is_string())
-                                    routing_config_.complexity.keywords_c2.push_back(kw.get<std::string>());
-                            }
-                        }
-                    }
-
-                    if (r.contains("fallback"))
-                    {
-                        const auto &f = r["fallback"];
-                        routing_config_.fallback.cloud_unavailable_to_local = f.value("cloud_unavailable_to_local", true);
-                        // 支持两种 JSON 格式：扁平字段 或 local_unavailable 子对象
-                        if (f.contains("local_unavailable") && f["local_unavailable"].is_object())
-                        {
-                            const auto &lu = f["local_unavailable"];
-                            routing_config_.fallback.local_unavailable_s0 = lu.value("s0", std::string("cloud_if_allowed"));
-                            routing_config_.fallback.local_unavailable_s1 = lu.value("s1", std::string("cloud_if_allowed"));
-                            routing_config_.fallback.local_unavailable_s2 = lu.value("s2", std::string("fail"));
-                        }
-                        else
-                        {
-                            routing_config_.fallback.local_unavailable_s0 = f.value("local_unavailable_s0", std::string("cloud_if_allowed"));
-                            routing_config_.fallback.local_unavailable_s1 = f.value("local_unavailable_s1", std::string("cloud_if_allowed"));
-                            routing_config_.fallback.local_unavailable_s2 = f.value("local_unavailable_s2", std::string("fail"));
-                        }
-                        routing_config_.fallback.clean_local_history_on_fallback = f.value("clean_local_history_on_fallback", true);
-                        // 本地输入溢出时云端可恢复错误的最大重试次数
-                        routing_config_.fallback.max_input_overflow_retries = f.value("max_input_overflow_retries", 3);
-                        // 企业云和公有云 fallback 策略
-                        routing_config_.fallback.enterprise_cloud_unavailable =
-                                f.value("enterprise_cloud_unavailable", std::string("public_cloud_if_allowed"));
-                        routing_config_.fallback.public_cloud_unavailable =
-                                f.value("public_cloud_unavailable", std::string("enterprise_cloud_if_allowed"));
-                    }
-
-                    if (r.contains("cache"))
-                    {
-                        const auto &ca = r["cache"];
-                        routing_config_.cache.ttl_seconds = ca.value("ttl_seconds", 60);
-                        routing_config_.cache.max_entries = ca.value("max_entries", 256);
-                    }
-
-                    if (r.contains("agent_routing"))
-                    {
-                        const auto &ar = r["agent_routing"];
-                        routing_config_.agent_routing.sub_agent_prefer_local = ar.value("sub_agent_prefer_local", true);
-                        routing_config_.agent_routing.sub_agent_allow_cloud_on_c2 = ar.value("sub_agent_allow_cloud_on_c2", true);
-                    }
-
-                    // 会话级路由锁定配置
-                    if (r.contains("sticky_routing"))
-                    {
-                        const auto &sr = r["sticky_routing"];
-                        routing_config_.sticky_routing.enabled = sr.value("enabled", false);
-                        routing_config_.sticky_routing.ttl_seconds = sr.value("ttl_seconds", 1800);
-                        routing_config_.sticky_routing.max_sessions = sr.value("max_sessions", 1000);
-                    }
-
-                    // 指标汇总输出配置
-                    if (r.contains("metrics"))
-                    {
-                        const auto &m = r["metrics"];
-                        routing_config_.metrics.summary_every_n_requests = m.value("summary_every_n_requests", 100);
-                        routing_config_.metrics.summary_every_seconds = m.value("summary_every_seconds", 0);
-                        routing_config_.metrics.latency_sample_size = m.value("latency_sample_size", 1000);
-                        routing_config_.metrics.fail_reason_topn = m.value("fail_reason_topn", 5);
-                    }
-
-                    // [增量检查优化] 安全检查增量模式配置
-                    if (r.contains("incremental_check"))
-                    {
-                        const auto &ic = r["incremental_check"];
-                        routing_config_.incremental_check.enabled = ic.value("enabled", false);
-                        routing_config_.incremental_check.session_ttl_seconds = ic.value("session_ttl_seconds", 3600);
-                        routing_config_.incremental_check.max_sessions = ic.value("max_sessions", 1000);
-                        routing_config_.incremental_check.s2_always_full_check = ic.value("s2_always_full_check", true);
-                        routing_config_.incremental_check.detect_sensitive_reference = ic.value("detect_sensitive_reference", true);
-                        routing_config_.incremental_check.detect_history_tampering = ic.value("detect_history_tampering", true);
-                        My_Log{} << "Incremental check config loaded: enabled="
-                                 << routing_config_.incremental_check.enabled
-                                 << ", session_ttl_seconds=" << routing_config_.incremental_check.session_ttl_seconds
-                                 << ", max_sessions=" << routing_config_.incremental_check.max_sessions << std::endl;
-                    }
-
-                    // [S2 轮次清理] S2 轮次清理配置
-                    if (r.contains("s2_turn_cleaning"))
-                    {
-                        const auto &stc = r["s2_turn_cleaning"];
-                        routing_config_.s2_turn_cleaning.enabled = stc.value("enabled", true);
-                        routing_config_.s2_turn_cleaning.log_details = stc.value("log_details", true);
-                        routing_config_.s2_turn_cleaning.allow_cloud_reroute_after_clean = stc.value("allow_cloud_reroute_after_clean", false);
-                        My_Log{} << "S2 turn cleaning config loaded: enabled="
-                                 << routing_config_.s2_turn_cleaning.enabled
-                                 << ", log_details=" << routing_config_.s2_turn_cleaning.log_details
-                                 << ", allow_cloud_reroute="
-                                 << routing_config_.s2_turn_cleaning.allow_cloud_reroute_after_clean << std::endl;
-                    }
-
-                    My_Log{} << "Routing config loaded: enabled=" << routing_config_.enabled
-                             << ", policy_id=" << routing_config_.policy_id << std::endl;
+                    ParseRoutingConfig(sc_json["routing"], routing_config_);
                 }
 
-                // ── [cloud_shared] 加载共享配置（timeout/stream_timeout/log_debug/retry/circuit_breaker/rate_limit）
-                // 新版 service_config.json 将这些字段提取到 cloud_shared 节，
-                // cloud_model 和 enterprise_cloud_model 只保留各自独有字段，共享字段从此处继承。
-                // 向后兼容：若 cloud_shared 不存在，各字段保持结构体默认值。
-                int shared_timeout_seconds = 120;
-                int shared_stream_timeout_seconds = 600;
-                bool shared_log_debug = false;
-                int shared_retry_max = 2;
-                int shared_retry_backoff_ms = 200;
-                int shared_retry_max_total_attempts = 0;
-                bool shared_retry_on_429_switch_endpoint = false;
-                int shared_cb_failure_threshold = 3;
-                int shared_cb_cooldown_seconds = 60;
-                int shared_rl_max_inferences = 20;
-                int shared_rl_max_tokens = 0;
+                SharedCloudSettings shared;
 
                 if (is_stateless_mode && sc_json.contains("cloud_shared"))
                 {
-                    const auto &cs = sc_json["cloud_shared"];
-                    shared_timeout_seconds = cs.value("timeout_seconds", shared_timeout_seconds);
-                    shared_stream_timeout_seconds = cs.value("stream_timeout_seconds", shared_stream_timeout_seconds);
-                    shared_log_debug = cs.value("log_debug", shared_log_debug);
-                    if (cs.contains("retry"))
-                    {
-                        const auto &ret = cs["retry"];
-                        shared_retry_max = ret.value("max", shared_retry_max);
-                        shared_retry_backoff_ms = ret.value("backoff_ms", shared_retry_backoff_ms);
-                        shared_retry_max_total_attempts = ret.value("max_total_attempts", shared_retry_max_total_attempts);
-                        shared_retry_on_429_switch_endpoint = ret.value("retry_on_429_switch_endpoint", shared_retry_on_429_switch_endpoint);
-                    }
-                    if (cs.contains("circuit_breaker"))
-                    {
-                        const auto &cb = cs["circuit_breaker"];
-                        shared_cb_failure_threshold = cb.value("failure_threshold", shared_cb_failure_threshold);
-                        shared_cb_cooldown_seconds = cb.value("cooldown_seconds", shared_cb_cooldown_seconds);
-                    }
-                    if (cs.contains("rate_limit"))
-                    {
-                        const auto &rl = cs["rate_limit"];
-                        shared_rl_max_inferences = rl.value("max_inferences_per_task", shared_rl_max_inferences);
-                        shared_rl_max_tokens = rl.value("max_tokens_per_task", shared_rl_max_tokens);
-                    }
-                    My_Log{} << "[cloud_shared] Loaded: timeout=" << shared_timeout_seconds
-                             << ", stream_timeout=" << shared_stream_timeout_seconds
-                             << ", retry.max=" << shared_retry_max
-                             << ", rate_limit.max_inferences=" << shared_rl_max_inferences
+                    ParseSharedCloudSettings(sc_json["cloud_shared"], shared);
+                    My_Log{} << "[cloud_shared] Loaded: timeout=" << shared.timeout_seconds
+                             << ", stream_timeout=" << shared.stream_timeout_seconds
+                             << ", retry.max=" << shared.retry_max
+                             << ", rate_limit.max_inferences=" << shared.rl_max_inferences
                              << std::endl;
                 }
 
-                // 加载 cloud_model 配置
-                // 共享字段先从 cloud_shared 继承，cloud_model 节中若存在同名字段则覆盖（向后兼容旧格式）
                 if (is_stateless_mode && sc_json.contains("cloud_model"))
                 {
                     const auto &cm = sc_json["cloud_model"];
                     cloud_model_config_.enabled = cm.value("enabled", false);
                     cloud_model_config_.base_url = cm.value("base_url", std::string(""));
-                    // API Key：优先从 Windows Credential Manager 读取，fallback 到 JSON 值
+
                     cloud_model_config_.api_key = ResolveApiKey(
                             cm.value("api_key", std::string("")), "global::cloud_model");
                     cloud_model_config_.model = cm.value("model", std::string(""));
-                    // 共享字段：优先使用 cloud_model 节中的值（向后兼容），否则使用 cloud_shared 的值
-                    cloud_model_config_.timeout_seconds = cm.value("timeout_seconds", shared_timeout_seconds);
-                    cloud_model_config_.stream_timeout_seconds = cm.value("stream_timeout_seconds", shared_stream_timeout_seconds);
-                    cloud_model_config_.log_debug = cm.value("log_debug", shared_log_debug);
+                    ApplyCloudSharedFields(cm, cloud_model_config_, shared);
 
-                    if (cm.contains("retry"))
-                    {
-                        const auto &ret = cm["retry"];
-                        cloud_model_config_.retry.max = ret.value("max", shared_retry_max);
-                        cloud_model_config_.retry.backoff_ms = ret.value("backoff_ms", shared_retry_backoff_ms);
-                        cloud_model_config_.retry.max_total_attempts = ret.value("max_total_attempts", shared_retry_max_total_attempts);
-                        cloud_model_config_.retry.retry_on_429_switch_endpoint = ret.value("retry_on_429_switch_endpoint", shared_retry_on_429_switch_endpoint);
-                    }
-                    else
-                    {
-                        // 无 retry 子节：使用 cloud_shared 的值
-                        cloud_model_config_.retry.max = shared_retry_max;
-                        cloud_model_config_.retry.backoff_ms = shared_retry_backoff_ms;
-                        cloud_model_config_.retry.max_total_attempts = shared_retry_max_total_attempts;
-                        cloud_model_config_.retry.retry_on_429_switch_endpoint = shared_retry_on_429_switch_endpoint;
-                    }
-
-                    if (cm.contains("circuit_breaker"))
-                    {
-                        const auto &cb = cm["circuit_breaker"];
-                        cloud_model_config_.circuit_breaker.failure_threshold = cb.value("failure_threshold", shared_cb_failure_threshold);
-                        cloud_model_config_.circuit_breaker.cooldown_seconds = cb.value("cooldown_seconds", shared_cb_cooldown_seconds);
-                    }
-                    else
-                    {
-                        cloud_model_config_.circuit_breaker.failure_threshold = shared_cb_failure_threshold;
-                        cloud_model_config_.circuit_breaker.cooldown_seconds = shared_cb_cooldown_seconds;
-                    }
-
-                    if (cm.contains("endpoints") && cm["endpoints"].is_array())
-                    {
-                        cloud_model_config_.endpoints.clear();
-                        for (const auto &ep: cm["endpoints"])
-                        {
-                            CloudModelConfig::Endpoint endpoint;
-                            endpoint.name = ep.value("name", std::string(""));
-                            endpoint.base_url = ep.value("base_url", std::string(""));
-                            endpoint.model = ep.value("model", std::string(""));
-                            cloud_model_config_.endpoints.push_back(endpoint);
-                        }
-                    }
-
-                    if (cm.contains("rate_limit"))
-                    {
-                        const auto &rl = cm["rate_limit"];
-                        cloud_model_config_.rate_limit.max_inferences_per_task = rl.value("max_inferences_per_task", shared_rl_max_inferences);
-                        cloud_model_config_.rate_limit.max_tokens_per_task = rl.value("max_tokens_per_task", shared_rl_max_tokens);
-                    }
-                    else
-                    {
-                        cloud_model_config_.rate_limit.max_inferences_per_task = shared_rl_max_inferences;
-                        cloud_model_config_.rate_limit.max_tokens_per_task = shared_rl_max_tokens;
-                    }
-
-                    // 加载数据上云策略配置（仅云端模式下生效）
                     if (cm.contains("upload_policy"))
                     {
                         const auto &up = cm["upload_policy"];
@@ -1936,7 +1943,6 @@ bool ModelManager::InitializeConfig()
                                 up.value("enable_desensitization", true);
                     }
 
-                    // 加载 context_size（用于统一提示词优化流水线的 token 预算计算）
                     cloud_model_config_.context_size = cm.value("context_size", 0);
                     if (cloud_model_config_.context_size == 0)
                     {
@@ -1966,77 +1972,17 @@ bool ModelManager::InitializeConfig()
                              << std::endl;
                 }
 
-                // 加载 enterprise_cloud_model 配置
-                // 共享字段先从 cloud_shared 继承，enterprise_cloud_model 节中若存在同名字段则覆盖（向后兼容旧格式）
                 if (is_stateless_mode && sc_json.contains("enterprise_cloud_model"))
                 {
                     const auto &ecm = sc_json["enterprise_cloud_model"];
                     enterprise_cloud_model_config_.enabled = ecm.value("enabled", false);
                     enterprise_cloud_model_config_.base_url = ecm.value("base_url", std::string(""));
-                    // API Key：优先从 Windows Credential Manager 读取，fallback 到 JSON 值
+
                     enterprise_cloud_model_config_.api_key = ResolveApiKey(
                             ecm.value("api_key", std::string("")), "global::enterprise_cloud_model");
                     enterprise_cloud_model_config_.model = ecm.value("model", std::string(""));
-                    // 共享字段：优先使用 enterprise_cloud_model 节中的值（向后兼容），否则使用 cloud_shared 的值
-                    enterprise_cloud_model_config_.timeout_seconds = ecm.value("timeout_seconds", shared_timeout_seconds);
-                    enterprise_cloud_model_config_.stream_timeout_seconds = ecm.value("stream_timeout_seconds", shared_stream_timeout_seconds);
-                    enterprise_cloud_model_config_.log_debug = ecm.value("log_debug", shared_log_debug);
+                    ApplyCloudSharedFields(ecm, enterprise_cloud_model_config_, shared);
 
-                    if (ecm.contains("retry"))
-                    {
-                        const auto &ret = ecm["retry"];
-                        enterprise_cloud_model_config_.retry.max = ret.value("max", shared_retry_max);
-                        enterprise_cloud_model_config_.retry.backoff_ms = ret.value("backoff_ms", shared_retry_backoff_ms);
-                        enterprise_cloud_model_config_.retry.max_total_attempts = ret.value("max_total_attempts", shared_retry_max_total_attempts);
-                        enterprise_cloud_model_config_.retry.retry_on_429_switch_endpoint = ret.value("retry_on_429_switch_endpoint", shared_retry_on_429_switch_endpoint);
-                    }
-                    else
-                    {
-                        // 无 retry 子节：使用 cloud_shared 的值
-                        enterprise_cloud_model_config_.retry.max = shared_retry_max;
-                        enterprise_cloud_model_config_.retry.backoff_ms = shared_retry_backoff_ms;
-                        enterprise_cloud_model_config_.retry.max_total_attempts = shared_retry_max_total_attempts;
-                        enterprise_cloud_model_config_.retry.retry_on_429_switch_endpoint = shared_retry_on_429_switch_endpoint;
-                    }
-
-                    if (ecm.contains("circuit_breaker"))
-                    {
-                        const auto &cb = ecm["circuit_breaker"];
-                        enterprise_cloud_model_config_.circuit_breaker.failure_threshold = cb.value("failure_threshold", shared_cb_failure_threshold);
-                        enterprise_cloud_model_config_.circuit_breaker.cooldown_seconds = cb.value("cooldown_seconds", shared_cb_cooldown_seconds);
-                    }
-                    else
-                    {
-                        enterprise_cloud_model_config_.circuit_breaker.failure_threshold = shared_cb_failure_threshold;
-                        enterprise_cloud_model_config_.circuit_breaker.cooldown_seconds = shared_cb_cooldown_seconds;
-                    }
-
-                    if (ecm.contains("endpoints") && ecm["endpoints"].is_array())
-                    {
-                        enterprise_cloud_model_config_.endpoints.clear();
-                        for (const auto &ep: ecm["endpoints"])
-                        {
-                            EnterpriseCloudModelConfig::Endpoint endpoint;
-                            endpoint.name = ep.value("name", std::string(""));
-                            endpoint.base_url = ep.value("base_url", std::string(""));
-                            endpoint.model = ep.value("model", std::string(""));
-                            enterprise_cloud_model_config_.endpoints.push_back(endpoint);
-                        }
-                    }
-
-                    if (ecm.contains("rate_limit"))
-                    {
-                        const auto &rl = ecm["rate_limit"];
-                        enterprise_cloud_model_config_.rate_limit.max_inferences_per_task = rl.value("max_inferences_per_task", shared_rl_max_inferences);
-                        enterprise_cloud_model_config_.rate_limit.max_tokens_per_task = rl.value("max_tokens_per_task", shared_rl_max_tokens);
-                    }
-                    else
-                    {
-                        enterprise_cloud_model_config_.rate_limit.max_inferences_per_task = shared_rl_max_inferences;
-                        enterprise_cloud_model_config_.rate_limit.max_tokens_per_task = shared_rl_max_tokens;
-                    }
-
-                    // 加载 context_size（用于统一提示词优化流水线的 token 预算计算）
                     enterprise_cloud_model_config_.context_size = ecm.value("context_size", 0);
                     if (enterprise_cloud_model_config_.context_size == 0)
                     {
@@ -2061,7 +2007,6 @@ bool ModelManager::InitializeConfig()
                              << std::endl;
                 }
 
-                // 加载 local_model 配置（Group A：仅 -n -1 时解析生效）
                 if (is_stateless_mode && sc_json.contains("local_model"))
                 {
                     const auto &lm = sc_json["local_model"];
@@ -2071,12 +2016,10 @@ bool ModelManager::InitializeConfig()
                              << std::endl;
                 }
 
-                // 加载 prompt_optimization 配置
                 if (sc_json.contains("prompt_optimization"))
                 {
                     const auto &po = sc_json["prompt_optimization"];
 
-                    // [system_context] 系统上下文配置（所有系统提示词内容均从此处读取）
                     if (po.contains("system_context") && po["system_context"].is_object())
                     {
                         const auto &sc = po["system_context"];
@@ -2112,10 +2055,8 @@ bool ModelManager::InitializeConfig()
                                  << std::endl;
                     }
 
-                    // [prompt_sections] 原始系统提示词段落过滤配置
                     ParsePromptSectionsConfig(po, prompt_optimization_config_.prompt_sections, "prompt_sections");
 
-                    // [subagent_prompt_sections] SubAgent 专用段落过滤配置
                     ParsePromptSectionsConfig(po, prompt_optimization_config_.subagent_prompt_sections, "subagent_prompt_sections");
 
                     if (po.contains("system_prompts"))
@@ -2126,7 +2067,6 @@ bool ModelManager::InitializeConfig()
                         prompt_optimization_config_.system_prompts.tools_intro = sp.value("tools_intro", "");
                         prompt_optimization_config_.system_prompts.catalog_structured_intro = sp.value("catalog_structured_intro", "");
 
-                        // ── 各静态段落的启用开关（有默认值 true，配置文件中可选覆盖）──
                         if (sp.contains("sections_enabled") && sp["sections_enabled"].is_object())
                         {
                             const auto &se = sp["sections_enabled"];
@@ -2134,6 +2074,7 @@ bool ModelManager::InitializeConfig()
                             prompt_optimization_config_.system_prompts.sections_enabled.skill_rule = se.value("skill_rule", true);
                             prompt_optimization_config_.system_prompts.sections_enabled.tools_intro = se.value("tools_intro", true);
                             prompt_optimization_config_.system_prompts.sections_enabled.catalog_structured_intro = se.value("catalog_structured_intro", true);
+                            prompt_optimization_config_.system_prompts.sections_enabled.verification_first_rule = se.value("verification_first_rule", true);
                             My_Log{} << "[Config] system_prompts.sections_enabled loaded: "
                                      << "identity_intro="
                                      << prompt_optimization_config_.system_prompts.sections_enabled.identity_intro
@@ -2146,14 +2087,13 @@ bool ModelManager::InitializeConfig()
                                      << std::endl;
                         }
 
-                        // ── Few-shot 示例各类型的启用开关 ──────────────────────────────
                         if (sp.contains("few_shot_examples_enabled") && sp["few_shot_examples_enabled"].is_object())
                         {
                             const auto &fe = sp["few_shot_examples_enabled"];
                             prompt_optimization_config_.system_prompts.few_shot_examples_enabled.enabled = fe.value("enabled", true);
                             prompt_optimization_config_.system_prompts.few_shot_examples_enabled.skill_correct_call = fe.value("skill_correct_call", true);
                             prompt_optimization_config_.system_prompts.few_shot_examples_enabled.no_skill_needed = fe.value("no_skill_needed", true);
-                            // max_skill_examples：最多生成几个 Skill 示例（0=不生成，1=只生成第1个，2=前2个，默认2）
+
                             prompt_optimization_config_.system_prompts.few_shot_examples_enabled.max_skill_examples = fe.value("max_skill_examples", 2);
                             My_Log{} << "[Config] system_prompts.few_shot_examples_enabled loaded: "
                                      << "enabled="
@@ -2167,10 +2107,9 @@ bool ModelManager::InitializeConfig()
                                      << std::endl;
                         }
 
-                        // few_shot_header：有默认值，配置文件中可选覆盖
                         if (sp.contains("few_shot_header"))
                             prompt_optimization_config_.system_prompts.few_shot_header = sp.value("few_shot_header", "## Examples\n\n");
-                        // few-shot dynamic example templates: have defaults, optionally overridden by config file
+
                         if (sp.contains("few_shot_skill_title_template"))
                             prompt_optimization_config_.system_prompts.few_shot_skill_title_template = sp.value("few_shot_skill_title_template", "**Example {idx} - Skill Match**\n");
                         if (sp.contains("few_shot_default_user_query_prefix"))
@@ -2191,7 +2130,6 @@ bool ModelManager::InitializeConfig()
                             prompt_optimization_config_.system_prompts.few_shot_no_skill_response = sp.value("few_shot_no_skill_response", "I have the following skills: [list from catalog above]. No tool call needed.");
                     }
 
-                    // 加载 spawn_guard 配置
                     if (po.contains("spawn_guard"))
                     {
                         const auto &sg = po["spawn_guard"];
@@ -2214,7 +2152,7 @@ bool ModelManager::InitializeConfig()
             catch (const std::exception &e)
             {
                 My_Log{My_Log::Level::kError} << "Failed to load service_config.json: " << e.what() << std::endl;
-                // 配置加载失败不影响主流程，使用默认值
+
             }
         }
     }
@@ -2224,49 +2162,44 @@ bool ModelManager::InitializeConfig()
 
 bool ModelManager::LoadSingleModel()
 {
-    // 修复：Clean() 只清空 genieModelHandle 这一份引用；current_model_ 是独立的 shared_ptr，
-    // 若它仍持有旧模型（不限于"同名重载"，任何切换到不同模型都是如此），genieModelHandle
-    // 归零时引用计数不会降到 0，ContextBase 不会真正析构，Clean() 判断是否需要等待驱动释放
-    // NPU 资源的逃生舱也因此落空——旧模型的 QNN/HTP 上下文仍然存活，紧接着在同一设备上创建
-    // 新模型会与之争用硬件资源（真实复现：llama 正常运行后切到 qwen3-8b，报
-    // "err 5005"/"Could not create context from binary List Async"）。因此这里必须无条件释放
-    // current_model_，不再局限于新旧模型同名这一种场景，确保 Clean() 清空 genieModelHandle 时
-    // 那正是最后一份引用，真正触发析构与等待。
+    return LoadModel({model_name_, model_path_, config_file_});
+}
+
+bool ModelManager::LoadModel(const ModelLoadRequest &request)
+{
+    std::lock_guard<std::recursive_mutex> load_lock(load_mutex_);
+    UnloadModelsByDevice(ResolveTentativeFamilies(request.path, request.config_file));
+
+    json prompt = json::object();
+    int context_size = DEFAULT_CONTEXT_SIZE;
+    std::string known_model_path;
+    PromptType prompt_type = LoadPromptTemplates(request.path + "/prompt.json", request.name,
+                                                  request.path, prompt, context_size, known_model_path);
     {
+        json prompt_copy = prompt;
         std::lock_guard<std::mutex> lock(models_mutex_);
-        if (current_model_)
-        {
-            My_Log{} << "LoadSingleModel: releasing previous single-model entry '"
-                     << (current_model_->config ? current_model_->config->get_model_name() : "")
-                     << "' before loading '" << model_name_ << "'" << std::endl;
-            current_model_.reset();
-        }
+        prompt_.swap(prompt_copy);
     }
-
-    Clean();
-    prompt_type_ = LoadPromptTemplates(model_path_ + "/prompt.json");
-    if (prompt_type_ == PromptType::Unknown)
+    if (prompt_type == PromptType::Unknown)
         return false;
-    My_Log{} << "check the prompt type: " << prompt_type_.to_string() << "\n";
+    My_Log{} << "check the prompt type: " << prompt_type.to_string() << "\n";
 
-    thinking_model_ = [this]() -> bool
-    {
-        return str_contains(model_name_, "Qwen3") ||
-               str_contains(model_name_, "DeepSeek") ||
-               str_contains(model_name_, "Hunyuan");
-    }();
-    My_Log{} << "check if is thinking model: " << thinking_model_ << "\n";
+    const bool thinking_model = str_contains(request.name, "Qwen3") ||
+                                str_contains(request.name, "DeepSeek") ||
+                                str_contains(request.name, "Hunyuan");
+    My_Log{} << "check if is thinking model: " << thinking_model << "\n";
 
-    // Create a temporary ModelInstanceConfig for backward compatibility
     auto config = std::make_shared<ModelInstanceConfig>();
-    config->set_model_name(model_name_);
-    config->set_model_path(model_path_);
-    config->set_context_size(context_size_);
-    config->set_prompt_template(prompt_);
-    config->set_prompt_type(prompt_type_);
-    config->set_thinking_model(thinking_model_);
+    config->set_model_name(request.name);
+    config->set_model_path(request.path);
+    config->set_config_file(request.config_file);
+    config->set_known_model_path(known_model_path);
+    config->set_context_size(context_size);
+    config->set_prompt_template(prompt);
+    config->set_prompt_type(prompt_type);
+    config->set_thinking_model(thinking_model);
     std::string config_json_backend, config_json_device;
-    ParseBackendDeviceFromConfigJson(config_file_, model_name_, "[LoadSingleModel]",
+    ParseBackendDeviceFromConfigJson(request.config_file, request.name, "[LoadSingleModel]",
                                       config_json_backend, config_json_device);
     config->set_backend(!config_json_backend.empty() ? config_json_backend : "auto");
     if (!config_json_device.empty())
@@ -2281,19 +2214,16 @@ bool ModelManager::LoadSingleModel()
     config->set_num_response(num_response_);
     config->set_min_output_num(minOutputNum);
 
-    genieModelHandle = ModeVerifier::TryCreate(config.get(), this);
-    if (!genieModelHandle)
+    auto model_handle = ModeVerifier::TryCreate(config.get(), this);
+    if (!model_handle)
     {
         My_Log{My_Log::Level::kError} << RED
                                       << "Load Model Failed"
-                                      << ", Model Name: " << model_name_
-                                      << ", Model Path: " << model_path_
+                                      << ", Model Name: " << request.name
+                                      << ", Model Path: " << request.path
                                       << RESET << std::endl;
-        model_name_.clear();
         return false;
     }
-
-    model_format_ = config->get_model_format();
 
     {
         ModelFormat fmt = config->get_model_format();
@@ -2327,58 +2257,99 @@ bool ModelManager::LoadSingleModel()
                  << ", device=" << config->get_device() << std::endl;
     }
 
+    std::vector<std::shared_ptr<LoadedModel>> replaced_models;
     {
         std::lock_guard<std::mutex> lock(models_mutex_);
         auto loaded_model = std::make_shared<LoadedModel>();
         loaded_model->config = config;
-        loaded_model->context = genieModelHandle;
+        loaded_model->context = model_handle;
         loaded_model->backend = config->get_backend();
         loaded_model->device = config->get_device();
         loaded_model->is_loaded = true;
+        loaded_model->occupied_families = ComputeOccupiedFamilies(*loaded_model);
 
-        current_model_ = loaded_model;
+        auto existing = loaded_models_.find(request.name);
+        if (existing != loaded_models_.end())
+        {
+            My_Log{My_Log::Level::kWarning} << "[LoadModel] replacing already registered model '"
+                                            << request.name << "'" << std::endl;
+            replaced_models.push_back(std::move(existing->second));
+        }
+        loaded_models_[request.name] = loaded_model;
+        default_model_name_ = request.name;
+        genieModelHandle = model_handle;
+    }
+    if (!replaced_models.empty())
+    {
+        StopAndDrain(replaced_models, std::chrono::seconds(30));
     }
 
-    My_Log{} << GREEN << "Model load successfully: " << model_name_ << RESET << std::endl;
-    loaded_ = true;
+    My_Log{} << GREEN << "Model load successfully: " << request.name << RESET << std::endl;
     return true;
 
 }
 
 void ModelManager::UnloadModel()
 {
-    if (genieModelHandle != nullptr)
-    {
-        genieModelHandle->Stop();
-    }
     {
         std::lock_guard<std::mutex> lock(models_mutex_);
-        if (current_model_ && current_model_->context)
+        for (auto &entry: loaded_models_)
         {
-            current_model_->context->Stop();
-        }
-    }
-
-    if (genieModelHandle != nullptr)
-    {
-        Clean();
-        model_name_.clear();
-    }
-    else
-    {
-        My_Log{My_Log::Level::kWarning} << "UnloadModel: genieModelHandle is null" << std::endl;
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(models_mutex_);
-        if (current_model_)
-        {
-            My_Log{} << "UnloadModel: releasing current model '"
-                     << (current_model_->config ? current_model_->config->get_model_name() : "")
+            My_Log{} << "UnloadModel: releasing model '"
+                     << (entry.second && entry.second->config ? entry.second->config->get_model_name() : entry.first)
                      << "'" << std::endl;
-            current_model_.reset();
         }
     }
+
+    Clean();
+}
+
+bool ModelManager::UnloadModelByName(const std::string &model_name)
+{
+    std::lock_guard<std::recursive_mutex> load_lock(load_mutex_);
+    std::vector<std::shared_ptr<LoadedModel>> removed;
+    {
+        std::lock_guard<std::mutex> lock(models_mutex_);
+        std::string name_lower = model_name;
+        std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(),
+                       [](unsigned char c) { return static_cast<unsigned char>(std::tolower(c)); });
+        for (auto it = loaded_models_.begin(); it != loaded_models_.end(); ++it)
+        {
+            if (!it->second || !it->second->config)
+                continue;
+            std::string entry_lower = it->second->config->get_model_name();
+            std::transform(entry_lower.begin(), entry_lower.end(), entry_lower.begin(),
+                           [](unsigned char c) { return static_cast<unsigned char>(std::tolower(c)); });
+            if (entry_lower != name_lower)
+                continue;
+            My_Log{} << "UnloadModel: releasing model '" << it->first << "'" << std::endl;
+            const bool was_mirror = it->second->context == genieModelHandle;
+            removed.push_back(it->second);
+            loaded_models_.erase(it);
+            if (was_mirror)
+            {
+                auto fallback = GetDefaultModelLocked();
+                genieModelHandle = fallback ? fallback->context : nullptr;
+            }
+            break;
+        }
+    }
+    if (removed.empty())
+        return false;
+
+    StopAndDrain(removed, std::chrono::seconds(30));
+
+    const bool had_qnn = removed.front() && removed.front()->backend == "qnn";
+    if (had_qnn && removed.front()->config)
+    {
+        removed.front()->config->i_model_config_.qnn_embedding_.Clean();
+    }
+    removed.clear();
+    if (had_qnn)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+    }
+    return true;
 }
 
 std::vector<json> ModelManager::ScanModelDirectory() const
@@ -2505,124 +2476,302 @@ std::vector<json> ModelManager::ScanModelDirectory() const
     return result;
 }
 
-void ModelManager::UnloadModelsByDevice(const std::string &device)
+std::vector<std::string> ModelManager::ComputeOccupiedFamilies(const LoadedModel &model)
 {
-    std::shared_ptr<LoadedModel> removed_model;
+    if (model.backend == "qnn")
     {
-        std::lock_guard<std::mutex> lock(models_mutex_);
-        if (current_model_ && current_model_->device == device)
+        return {"npu"};
+    }
+    if (model.backend == "mnn")
+    {
+        return {"cpu"};
+    }
+    if (model.backend == "GGUF")
+    {
+        if (model.device == "cpu")
         {
-            My_Log{} << "[UnloadModelsByDevice] Unloading model '"
-                     << (current_model_->config ? current_model_->config->get_model_name() : "")
-                     << "' (device=" << device << ")" << std::endl;
-            removed_model = std::move(current_model_);
-            current_model_.reset();
+            return {"cpu"};
+        }
+        if (model.config && model.config->is_speculative_draft_forced_cpu())
+        {
+            return {"gpu", "cpu"};
+        }
+        return {"gpu"};
+    }
+    if (!model.device.empty())
+    {
+        return {model.device};
+    }
+    return {};
+}
+
+std::vector<std::string> ModelManager::ResolveTentativeFamilies(const std::string &model_path,
+                                                                 const std::string &config_file)
+{
+    bool has_gguf_file = false;
+    std::error_code ec;
+    for (const auto &entry: fs::directory_iterator(model_path, ec))
+    {
+        if (!ec && entry.is_regular_file() && entry.path().extension() == ".gguf")
+        {
+            has_gguf_file = true;
+            break;
         }
     }
-    if (removed_model && genieModelHandle != nullptr)
+
+    json cfg;
+    bool cfg_parsed = false;
+    if (File::IsFileExist(config_file) && !File::IsFileEmpty(config_file))
     {
-        bool should_clean = false;
-        if (device == "npu")
+        try
         {
-            should_clean = true;
+            std::ifstream f(config_file);
+            f >> cfg;
+            cfg_parsed = true;
         }
-        else if (removed_model->config && removed_model->config->get_model_name() == model_name_)
+        catch (...)
         {
-            should_clean = true;
         }
-        if (should_clean)
+    }
+
+    if (!has_gguf_file && cfg_parsed)
+    {
+        if (cfg.contains("dialog") && cfg["dialog"].contains("context"))
         {
-            Clean();
-            model_name_.clear();
+            return {"npu"};
         }
-        else
+        if (cfg.contains("llm_model"))
         {
-            if (removed_model->context == genieModelHandle)
+            return {"cpu"};
+        }
+    }
+
+    std::string backend_field, device_field;
+    ParseBackendDeviceFromConfigJson(config_file, "", "[ResolveTentativeFamilies]", backend_field, device_field);
+    std::transform(backend_field.begin(), backend_field.end(), backend_field.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    std::transform(device_field.begin(), device_field.end(), device_field.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+    if (device_field == "cpu" || backend_field == "cpu")
+    {
+        return {"cpu"};
+    }
+
+    if (cfg_parsed)
+    {
+        llama_speculative::DraftModelConfig draft_config = llama_speculative::DraftModelConfig::ParseFrom(cfg);
+        if (draft_config.present &&
+            llama_speculative::GetTotalPhysicalMemoryBytes() <= (32ULL * 1024 * 1024 * 1024))
+        {
+            return {"gpu", "cpu"};
+        }
+    }
+
+    return {"gpu"};
+}
+
+void ModelManager::StopAndDrain(std::vector<std::shared_ptr<LoadedModel>> &models, std::chrono::seconds timeout,
+                                const std::shared_ptr<ContextBase> &extra_context)
+{
+    std::vector<std::shared_ptr<ContextBase>> contexts_to_stop;
+    if (extra_context)
+    {
+        contexts_to_stop.push_back(extra_context);
+    }
+    for (auto &model: models)
+    {
+        if (model && model->context &&
+            std::find(contexts_to_stop.begin(), contexts_to_stop.end(), model->context) == contexts_to_stop.end())
+        {
+            contexts_to_stop.push_back(model->context);
+        }
+    }
+    std::vector<std::thread> stop_threads;
+    stop_threads.reserve(contexts_to_stop.size());
+    for (auto &context: contexts_to_stop)
+    {
+        stop_threads.emplace_back([context]() { context->Stop(); });
+    }
+    for (auto &stop_thread: stop_threads)
+    {
+        stop_thread.join();
+    }
+    contexts_to_stop.clear();
+
+    const auto drain_deadline = std::chrono::steady_clock::now() + timeout;
+    auto in_flight = [&models]()
+    {
+        for (const auto &model: models)
+        {
+            if (model && model.use_count() > 1)
+                return true;
+        }
+        return false;
+    };
+    while (in_flight() && std::chrono::steady_clock::now() < drain_deadline)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    if (in_flight())
+    {
+        My_Log{My_Log::Level::kWarning}
+                << "[UnloadModelsByDevice] evicted model still referenced by in-flight requests after "
+                << timeout.count() << "s, releasing anyway"
+                << std::endl;
+    }
+}
+
+void ModelManager::UnloadModelsByDevice(const std::vector<std::string> &families)
+{
+    std::vector<std::shared_ptr<LoadedModel>> evicted_models;
+    bool default_handle_evicted = false;
+    {
+        std::lock_guard<std::mutex> lock(models_mutex_);
+        for (auto it = loaded_models_.begin(); it != loaded_models_.end();)
+        {
+            bool conflicts = std::any_of(
+                    it->second->occupied_families.begin(), it->second->occupied_families.end(),
+                    [&families](const std::string &family)
+                    {
+                        return std::find(families.begin(), families.end(), family) != families.end();
+                    });
+            if (conflicts)
             {
-                My_Log{My_Log::Level::kWarning}
-                        << "[UnloadModelsByDevice] global genieModelHandle pointed to the unloaded model"
-                        << " (model_name_='" << model_name_ << "', device=" << device
-                        << "), releasing it to free hardware memory" << std::endl;
-                genieModelHandle = nullptr;
+                My_Log{} << "[UnloadModelsByDevice] evicting '" << it->first << "'" << std::endl;
+                default_handle_evicted = default_handle_evicted ||
+                                         (it->second && it->second->context == genieModelHandle);
+                evicted_models.push_back(it->second);
+                it = loaded_models_.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+        if (default_handle_evicted)
+        {
+            auto default_model = GetDefaultModelLocked();
+            genieModelHandle = default_model ? default_model->context : nullptr;
+        }
+    }
+
+    StopAndDrain(evicted_models, std::chrono::seconds(30));
+
+    bool had_qnn_eviction = false;
+    for (auto &evicted: evicted_models)
+    {
+        if (!evicted)
+            continue;
+        if (evicted->backend == "qnn")
+        {
+            had_qnn_eviction = true;
+            if (evicted->config)
+            {
+                evicted->config->i_model_config_.qnn_embedding_.Clean();
             }
         }
     }
-    bool had_qnn_backend = removed_model && removed_model->backend == "qnn";
-    removed_model.reset();
-    if (had_qnn_backend)
+    evicted_models.clear();
+    if (had_qnn_eviction)
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(2000));
     }
-    My_Log{} << "[UnloadModelsByDevice] Unloaded device=" << device << std::endl;
 }
 
 std::shared_ptr<LoadedModel> ModelManager::GetModel(const std::string &model_name)
 {
     std::lock_guard<std::mutex> lock(models_mutex_);
-    if (!current_model_ || !current_model_->config)
-        return nullptr;
     if (model_name.empty())
-        return current_model_;
+    {
+        return nullptr;
+    }
 
-    // 大小写不敏感匹配（处理 -c 参数目录名大小写与历史 service_config.json name 字段不一致的情况）
-    // 例如：-c "qwen3-8B-8K/config.json" 加载后名称为 "qwen3-8B-8K"，
-    //       客户端请求 model="Qwen3-8B-8K"，精确匹配失败，此处兜底。
     std::string name_lower = model_name;
     std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(),
                    [](unsigned char c) { return static_cast<unsigned char>(std::tolower(c)); });
-    std::string current_name_lower = current_model_->config->get_model_name();
-    std::transform(current_name_lower.begin(), current_name_lower.end(), current_name_lower.begin(),
-                   [](unsigned char c) { return static_cast<unsigned char>(std::tolower(c)); });
-    return (current_name_lower == name_lower) ? current_model_ : nullptr;
+    for (const auto &entry: loaded_models_)
+    {
+        if (!entry.second || !entry.second->config)
+            continue;
+        std::string entry_name_lower = entry.second->config->get_model_name();
+        std::transform(entry_name_lower.begin(), entry_name_lower.end(), entry_name_lower.begin(),
+                       [](unsigned char c) { return static_cast<unsigned char>(std::tolower(c)); });
+        if (entry_name_lower == name_lower)
+        {
+            return entry.second;
+        }
+    }
+    return nullptr;
 }
 
 std::shared_ptr<LoadedModel> ModelManager::GetDefaultModel()
 {
     std::lock_guard<std::mutex> lock(models_mutex_);
-    return current_model_;
+    return GetDefaultModelLocked();
+}
+
+std::shared_ptr<LoadedModel> ModelManager::GetDefaultModelLocked() const
+{
+    auto it = loaded_models_.find(default_model_name_);
+    if (it != loaded_models_.end())
+    {
+        return it->second;
+    }
+    if (!loaded_models_.empty())
+    {
+        return loaded_models_.begin()->second;
+    }
+    return nullptr;
 }
 
 std::vector<std::string> ModelManager::ListLoadedModels() const
 {
     std::lock_guard<std::mutex> lock(models_mutex_);
     std::vector<std::string> names;
-    if (current_model_ && current_model_->config)
+    names.reserve(loaded_models_.size());
+    for (const auto &entry: loaded_models_)
     {
-        names.push_back(current_model_->config->get_model_name());
+        if (entry.second && entry.second->config)
+        {
+            names.push_back(entry.second->config->get_model_name());
+        }
     }
     return names;
 }
 
-uint64_t ModelManager::EstimateOtherLoadedModelsMemoryBytes() const
+std::vector<std::shared_ptr<LoadedModel>> ModelManager::GetAllLoadedModels() const
+{
+    std::lock_guard<std::mutex> lock(models_mutex_);
+    std::vector<std::shared_ptr<LoadedModel>> models;
+    models.reserve(loaded_models_.size());
+    for (const auto &entry: loaded_models_)
+    {
+        if (entry.second)
+        {
+            models.push_back(entry.second);
+        }
+    }
+    return models;
+}
+
+uint64_t ModelManager::EstimateOtherLoadedModelsMemoryBytes(const std::string &exclude_name) const
 {
     std::lock_guard<std::mutex> lock(models_mutex_);
     uint64_t total = 0;
 #ifdef USE_MNN
-    // 单模型语义下，current_model_ 在切换过程中仍可能短暂指向"即将被替换的旧模型"（见
-    // LoadSingleModel() 顶部的清空逻辑），故此处仍需为其预留内存估算，降低切换瞬间
-    // MnnVerifier 内存预检查失效的概率。
-    if (current_model_ && current_model_->config)
+    for (const auto &entry: loaded_models_)
     {
-        total += MNNContext::EstimateMnnMemoryRequirement(current_model_->config->get_model_path());
+        if (!entry.second || !entry.second->config)
+            continue;
+        if (entry.second->config->get_model_name() == exclude_name)
+            continue;
+        total += MNNContext::EstimateMnnMemoryRequirement(entry.second->config->get_model_path());
     }
 #endif
     return total;
 }
 
-// ============================================================
-// ParseContextSizeFromConfigJson: 从 config.json 中读取上下文大小。
-// 优先 dialog.context.size（QNN Dialog 结构）；缺失或为 0 时回退读取顶层
-// context_size 字段（GGUF 等无 dialog 结构的场景，由离线工具写入）。
-// 由 LoadPromptTemplates()（单模型加载路径）调用。
-//
-// 参数：
-//   config_json_path - config.json 的完整路径
-//   model_name        - 模型名称（仅用于日志）
-//   log_prefix         - 日志前缀（如 "[LoadModel]" / "[LoadPromptTemplates]"）
-//
-// 返回值：
-//   config.json 中 dialog.context.size 或顶层 context_size（0 表示均未指定或解析失败）
-// ============================================================
 static int ParseContextSizeFromConfigJson(const std::string &config_json_path,
                                           const std::string &model_name,
                                           const std::string &log_prefix)
@@ -2680,20 +2829,6 @@ static int ParseContextSizeFromConfigJson(const std::string &config_json_path,
     return config_json_ctx_size;
 }
 
-// ============================================================
-// ParseBackendDeviceFromConfigJson: 从 config.json 顶层可选字段中读取 backend/device。
-// 本轮新增：取代已删除的 service_config.json models 数组覆盖机制，成为 backend/device
-// 的唯一权威来源。由 LoadSingleModel()（单模型加载路径）调用。
-//
-// 参数：
-//   config_json_path - config.json 的完整路径
-//   model_name        - 模型名称（仅用于日志）
-//   log_prefix         - 日志前缀（如 "[LoadSingleModel]"）
-//
-// 输出参数：
-//   out_backend - config.json 中的 backend 字段（未声明则为空字符串，调用方回退 "auto"）
-//   out_device  - config.json 中的 device 字段（未声明则为空字符串，调用方保持自动探测）
-// ============================================================
 static void ParseBackendDeviceFromConfigJson(const std::string &config_json_path,
                                              const std::string &model_name,
                                              const std::string &log_prefix,
@@ -2728,26 +2863,13 @@ static void ParseBackendDeviceFromConfigJson(const std::string &config_json_path
     }
 }
 
-// ============================================================
-// ParsePromptFile: 从指定路径解析 prompt.json，提取 prompt 模板、类型和 context_size。
-// 由 LoadPromptTemplates()（单模型加载路径）调用。
-//
-// 参数：
-//   prompt_path  - prompt.json 的完整路径（已规范化，不含 ".."）
-//   model_name   - 模型名称（仅用于日志）
-//
-// 返回值（通过输出参数）：
-//   out_prompt   - 解析后的 prompt 模板（json::object），失败时为 null
-//   out_pt       - 检测到的 PromptType（General/Harmony），失败时为 Unknown
-//   out_ctx_size - prompt.json 中的 context_size（0 表示未指定或解析失败）
-// ============================================================
 static void ParsePromptFile(const std::string &prompt_path,
                             const std::string &model_name,
                             json &out_prompt,
                             PromptType &out_pt,
                             int &out_ctx_size)
 {
-    // 修复：使用 json::object() 而不是 json{}，避免被解析为 array 类型
+
     out_prompt = json::object();
     out_pt = PromptType::Unknown;
     out_ctx_size = 0;
@@ -2775,7 +2897,7 @@ static void ParsePromptFile(const std::string &prompt_path,
             My_Log{My_Log::Level::kError}
                     << "[ParsePromptFile] Failed to open prompt.json for model '"
                     << model_name << "': file.good()=false, path='" << prompt_path << "'.\n";
-            // 修复：保持 out_prompt 为 json::object()（已在函数开头初始化），不赋值 json{}
+
             return;
         }
 
@@ -2791,13 +2913,10 @@ static void ParsePromptFile(const std::string &prompt_path,
                     << "[ParsePromptFile] prompt.json root is not a JSON object (type=" << j.type_name()
                     << ") for model '" << model_name << "'. "
                     << "Expected an object with keys: prompt_system, prompt_user, prompt_assistant, etc.\n";
-            // 修复：保持 out_prompt 为 json::object()，不赋值 json{}
+
             return;
         }
 
-        // 使用逐字段赋值方式构建 out_prompt，确保类型为 object。
-        // 注意：json{{"key","val"},...} 语法在 nlohmann::ordered_json 中可能被解析为 array，
-        // 导致后续 ChatHistory::GetUserMessage 中 type_name()="array" 的错误。
         out_prompt = json::object();
         out_prompt["system"] = j.value("prompt_system", std::string(""));
         out_prompt["user"] = j.value("prompt_user", std::string(""));
@@ -2809,7 +2928,6 @@ static void ParsePromptFile(const std::string &prompt_path,
         if (j.contains("reasoning_level"))
             out_prompt["reasoning_level"] = j.value("reasoning_level", std::string("medium"));
 
-        // 打印各字段长度，避免 substr 在空字符串上崩溃
         {
             auto sys_str = out_prompt["system"].get<std::string>();
             auto user_str = out_prompt["user"].get<std::string>();
@@ -2830,7 +2948,6 @@ static void ParsePromptFile(const std::string &prompt_path,
                     << (asst_str.size() > 40 ? asst_str.substr(0, 40) : asst_str) << "...'\n";
         }
 
-        // 解析 context_size
         if (j.contains("context_size"))
         {
             if (j["context_size"].is_string())
@@ -2843,7 +2960,6 @@ static void ParsePromptFile(const std::string &prompt_path,
                         << model_name << "', ignored.\n";
         }
 
-        // 检测 prompt 类型
         out_pt = str_contains(out_prompt["assistant"].get<std::string>(), "<|channel|>")
                  ? PromptType{PromptType::Harmony}
                  : PromptType{PromptType::General};
@@ -2859,36 +2975,32 @@ static void ParsePromptFile(const std::string &prompt_path,
         My_Log{My_Log::Level::kError}
                 << "[ParsePromptFile] EXCEPTION loading prompt file '" << prompt_path
                 << "' for model '" << model_name << "': " << e.what() << "\n";
-        // 修复：使用 json::object() 而非 json{}。
-        // 在 nlohmann::ordered_json 中，json{} 默认构造为 array 类型（空数组），
-        // 而非 null 或 object，会导致 ChatHistory::GetUserMessage 中出现 type=array 错误。
+
         out_prompt = json::object();
         out_pt = PromptType::Unknown;
         out_ctx_size = 0;
     }
 }
 
-/* When use prompt json?
- * Determine model response processor
- * build prompt from chathistroy(TextQuery), add History
- * */
-PromptType ModelManager::LoadPromptTemplates(std::string &&prompt_path)
+PromptType ModelManager::LoadPromptTemplates(std::string &&prompt_path, const std::string &model_name,
+                                             const std::string &model_path, json &out_prompt, int &out_ctx_size,
+                                             std::string &out_known_model_path)
 {
     PromptType pt{PromptType::Unknown};
+    out_ctx_size = DEFAULT_CONTEXT_SIZE;
+    out_known_model_path.clear();
 
     if (!File::IsFileExist(prompt_path) || File::IsFileEmpty(prompt_path))
     {
         std::string org_prompt_path = prompt_path;
-        known_model_path_ = ResolveKnownModelPath(model_name_, false);
-        if (!known_model_path_.empty())
+        out_known_model_path = ResolveKnownModelPath(model_name, false);
+        if (!out_known_model_path.empty())
         {
-            prompt_path = known_model_path_ + "/prompt.json";
+            prompt_path = out_known_model_path + "/prompt.json";
             My_Log{} << "get known model path successfully\n";
             goto ahead;
         }
 
-        // Unique prompt identifier for a set of models
-        // 修复：数组大小从10改为9，与实际元素数量一致，避免末尾空字符串导致 ModelComparer 意外匹配
         static std::array<std::string, 9> models_prefix{
                 "allam-7b-ssd",
                 "deepseek-r1-distill-qwen-7B",
@@ -2904,10 +3016,10 @@ PromptType ModelManager::LoadPromptTemplates(std::string &&prompt_path)
         prompt_path.clear();
         for (const auto &model_prefix: models_prefix)
         {
-            // check if model match one of the prefix
-            if (ModelComparer(model_name_, model_prefix, true))
+
+            if (ModelComparer(model_name, model_prefix, true))
             {
-                // one of them, such as qwen match qwen2.0-7b or qwen2.0-7b-ssd or qwen3
+
                 prompt_path = ResolveKnownModelPath(model_prefix, true);
                 break;
             }
@@ -2928,140 +3040,116 @@ PromptType ModelManager::LoadPromptTemplates(std::string &&prompt_path)
                                       << std::endl;
     }
 
-    // 调用公共辅助函数解析 prompt.json
     int json_ctx_size = 0;
-    ParsePromptFile(prompt_path, model_name_, prompt_, pt, json_ctx_size);
+    ParsePromptFile(prompt_path, model_name, out_prompt, pt, json_ctx_size);
 
     if (pt == PromptType::Unknown)
     {
-        // ParsePromptFile 失败（文件不存在、格式错误等），prompt_ 保持 null
         return pt;
     }
 
-    // 从 config.json 读取 dialog.context.size（QNN/SSD 格式）
-    // 优先级：service_config.json（context_size_ 已由外部设置）> config.json > prompt.json > 默认值
-    // 优先使用 known_model_path_（已解析的模型路径），否则使用 model_path_
-    std::string base_path = !known_model_path_.empty() ? known_model_path_ : model_path_;
-    int config_json_ctx_size = ParseContextSizeFromConfigJson(File::ResolveModelConfigPath(base_path), model_name_, "[LoadPromptTemplates]");
+    std::string base_path = !out_known_model_path.empty() ? out_known_model_path : model_path;
+    int config_json_ctx_size = ParseContextSizeFromConfigJson(File::ResolveModelConfigPath(base_path), model_name, "[LoadPromptTemplates]");
 
-    // 更新 context_size_（优先级：已由外部设置的值 > config.json > prompt.json > 默认值）
-    // 注意：context_size_ 初始值为 DEFAULT_CONTEXT_SIZE（4096），若外部未显式设置则仍为默认值
-    if (context_size_ != DEFAULT_CONTEXT_SIZE)
+    if (config_json_ctx_size > 0)
     {
-        // 外部（service_config.json）已显式设置，保持不变，仅打印警告
-        if (config_json_ctx_size > 0 && context_size_ != config_json_ctx_size)
-        {
-            My_Log{My_Log::Level::kWarning}
-                    << "[LoadPromptTemplates] Model " << model_name_ << ": context_size already set ("
-                    << context_size_ << ") overrides config.json (" << config_json_ctx_size << ")\n";
-        }
-        else if (json_ctx_size > 0 && context_size_ != json_ctx_size)
-        {
-            My_Log{My_Log::Level::kWarning}
-                    << "[LoadPromptTemplates] Model " << model_name_ << ": context_size already set ("
-                    << context_size_ << ") overrides prompt.json (" << json_ctx_size << ")\n";
-        }
-        My_Log{My_Log::Level::kInfo} << "contextSize (from external config): " << context_size_ << std::endl;
-    }
-    else if (config_json_ctx_size > 0)
-    {
-        context_size_ = config_json_ctx_size;
-        My_Log{My_Log::Level::kInfo} << "contextSize (from config.json): " << context_size_ << std::endl;
+        out_ctx_size = config_json_ctx_size;
+        My_Log{My_Log::Level::kInfo} << "contextSize (from config.json): " << out_ctx_size << std::endl;
     }
     else if (json_ctx_size > 0)
     {
-        context_size_ = json_ctx_size;
-        My_Log{My_Log::Level::kInfo} << "contextSize (from prompt.json): " << context_size_ << std::endl;
+        out_ctx_size = json_ctx_size;
+        My_Log{My_Log::Level::kInfo} << "contextSize (from prompt.json): " << out_ctx_size << std::endl;
     }
     else
     {
+        out_ctx_size = DEFAULT_CONTEXT_SIZE;
         My_Log{My_Log::Level::kWarning}
                 << "context_size field missing or invalid in both config.json and prompt.json, using default: "
-                << context_size_ << std::endl;
+                << out_ctx_size << std::endl;
     }
 
     return pt;
 }
 
-json IModelConfig::get_model_list() const
-{
-    UpdateModeList();
-    json jsonData;
-    std::vector<json> models;
-    for (auto &mode_name: model_list_)
-    {
-        json model;
-        model["id"] = mode_name;
-        model["object"] = "model";
-        model["created"] = timer.GetSystemTime();
-        model["owned_by"] = "owner";
-        model["permission"] = json::array();
-        models.push_back(model);
-    }
-    jsonData["data"] = models;
-    jsonData["object"] = "list";
-    return jsonData;
-}
-
 void IModelConfig::UpdateModeList() const
 {
-    model_list_.clear();
+    std::vector<std::string> names;
     for (const auto &entry: fs::directory_iterator(model_root_))
     {
         if (!entry.is_directory())
         {
             continue;
         }
-        model_list_.push_back(entry.path().filename().generic_string());
+        names.push_back(entry.path().filename().generic_string());
     }
+    std::lock_guard<std::mutex> lock(*model_list_mutex_);
+    model_list_.swap(names);
 }
 
 void ModelManager::Clean()
 {
-    // 记录本次清理前是否持有 QNN/NPU 句柄：genieModelHandle 置空触发 shared_ptr 归零、
-    // 同步执行 ~GenieContext()（NPU/HTP 驱动异步释放资源，需要显式等待才安全）。
-    // 多模态模型的 qnn_embedding_（视觉/音频编码器）走的是另一套独立的 LibAppBuilder QNN/HTP
-    // 会话，Clean() 内部会调用 ModelDestroy() 触发它自己的驱动侧异步释放，必须同样纳入等待判断，
-    // 否则像 qwen3_vl_8b-8480 这种同时持有两个会话的模型会在等待窗口不足时把进程退出前留下未
-    // 释放干净的 HTP 资源，导致下一个进程加载时驱动内部状态错乱而崩溃。
-    // 这是全项目里唯一真正触发该释放的位置，UnloadModel()/UnloadModelsByDevice() 均经过此处，
-    // 因此把等待下沉到这里可以让两条路径同时获得同等保护，且不拖慢 MNN/GGUF（不持有该句柄）的卸载耗时。
-    bool had_qnn_handle = (genieModelHandle != nullptr);
-    bool had_embedding_handle = std::any_of(
-            qnn_embedding_.infer_resources_.begin(), qnn_embedding_.infer_resources_.end(),
-            [](const auto &entry) { return entry.second.app_builder_ != nullptr; });
-    known_model_path_.clear();
-    genieModelHandle = nullptr;
-    qnn_embedding_.Clean();
-    if (had_qnn_handle || had_embedding_handle)
+
+    std::vector<std::shared_ptr<LoadedModel>> remaining;
+    std::shared_ptr<ContextBase> default_handle;
+    bool had_other_qnn = false;
     {
-        // Extra delay to ensure NPU resources are fully released before the next load/restart.
-        // 文本与视觉/音频两套会话同时存在时，驱动侧要分别完成两份异步释放，适当延长等待窗口。
-        std::this_thread::sleep_for(std::chrono::milliseconds(had_qnn_handle && had_embedding_handle ? 4000 : 2000));
+        std::lock_guard<std::mutex> lock(models_mutex_);
+        for (auto &entry: loaded_models_)
+        {
+            if (entry.second && entry.second->backend == "qnn")
+            {
+                had_other_qnn = true;
+            }
+            remaining.push_back(entry.second);
+        }
+        loaded_models_.clear();
+        default_model_name_.clear();
+        default_handle = std::move(genieModelHandle);
+        genieModelHandle = nullptr;
+        known_model_path_.clear();
+        model_name_.clear();
+    }
+    bool had_qnn_handle = (default_handle != nullptr);
+    StopAndDrain(remaining, std::chrono::seconds(6), default_handle);
+    bool had_embedding_handle = std::any_of(
+            remaining.begin(), remaining.end(),
+            [](const auto &model)
+            {
+                if (!model || !model->config)
+                    return false;
+                const auto &resources = model->config->i_model_config_.get_qnn_embedding().infer_resources_;
+                return std::any_of(resources.begin(), resources.end(),
+                                   [](const auto &entry) { return entry.second.app_builder_ != nullptr; });
+            });
+    default_handle.reset();
+    remaining.clear();
+    if (had_qnn_handle || had_other_qnn || had_embedding_handle)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(
+                (had_qnn_handle || had_other_qnn) && had_embedding_handle ? 4000 : 2000));
     }
 }
 
 std::string ModelManager::ResolveKnownModelPath(const std::string &model_feature, bool only_prefix)
 {
-    static bool config_list_ready{
-            [this]()
-            {
-                fs::path config_path{RootDir + "/config"};
-                if (!fs::is_directory(config_path))
-                {
-                    return true;
-                }
-                for (const auto &entry: fs::directory_iterator(RootDir + "/config"))
-                {
-                    if (!entry.is_directory())
-                    {
-                        continue;
-                    }
-                    config_model_name_list_.push_back(entry.path().filename().generic_string());
-                }
-                return true;
-            }()
-    };
+    std::call_once(config_list_once_,
+                   [this]()
+                   {
+                       fs::path config_path{RootDir + "/config"};
+                       if (!fs::is_directory(config_path))
+                       {
+                           return;
+                       }
+                       for (const auto &entry: fs::directory_iterator(RootDir + "/config"))
+                       {
+                           if (!entry.is_directory())
+                           {
+                               continue;
+                           }
+                           config_model_name_list_.push_back(entry.path().filename().generic_string());
+                       }
+                   });
 
     for (const auto &config_model_name: config_model_name_list_)
     {

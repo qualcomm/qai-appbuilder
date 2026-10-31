@@ -7,23 +7,6 @@
 //==============================================================================
 
 #pragma once
-/*
- * qwen25_image_processor.hpp
- *
- * 封装：读取图片 → Alpha白底合成 → smart_resize(按28对齐) → 缩放 → patch展开并CLIP归一化 → 写出raw
- * 说明：
- *  1) 依赖 stb_image / stb_image_resize2（头文件实现库），请在“一个且仅一个”编译单元中：
- *       #define STB_IMAGE_IMPLEMENTATION
- *       #define STB_IMAGE_RESIZE_IMPLEMENTATION
- *     然后 #include 本头文件；本头文件会包含 stb 的头文件。
- *  2) 所有逻辑与原始附件保持一致（常量、顺序、归一化等）。
- *
- *  cl /O2 /std:c++20 main.cpp /EHsc
- *  main.exe input.jpg pixel_values.raw
- */
-
-//#define STB_IMAGE_IMPLEMENTATION
-//#define STB_IMAGE_RESIZE_IMPLEMENTATION
 
 #include <algorithm>
 #include <cassert>
@@ -34,61 +17,48 @@
 #include <string>
 #include <utility>
 #include <vector>
-//#include <stb_image_write.h>
-
-// stb headers（注意：需在某个.cpp里先#define STB_*_IMPLEMENTATION）
 
 namespace qwen2_5
 {
     class Qwen25ImageProcessor
     {
     public:
-        // --- 常量：与原文件一致 ---
-        static constexpr int PATCH_SIZE = 14; // 每个patch的尺寸（14x14）
-        static constexpr int TEMPORAL_PATCH_SIZE = 2; // T=2（两个时间帧，复制同一帧）
-        static constexpr int MERGE_SIZE = 2; // 外层merge尺寸=2（用于patch排序）
-        static constexpr int SPATIAL_MERGE_SIZE = 2; // 常量（qwen_vl_utils）
-        static constexpr int PATCH_FACTOR = PATCH_SIZE * SPATIAL_MERGE_SIZE; // =28，对齐因子
 
-        // CLIP 的 mean/std（与原文件一致）
-        static constexpr float MEAN[3] = {0.48145466f, 0.45782750f, 0.40821073f}; //
-        static constexpr float STD[3] = {0.26862954f, 0.26130258f, 0.27577711f}; //
+        static constexpr int PATCH_SIZE = 14;
+        static constexpr int TEMPORAL_PATCH_SIZE = 2;
+        static constexpr int MERGE_SIZE = 2;
+        static constexpr int SPATIAL_MERGE_SIZE = 2;
+        static constexpr int PATCH_FACTOR = PATCH_SIZE * SPATIAL_MERGE_SIZE;
 
-        // 用于承载RGB(A)图像
+        static constexpr float MEAN[3] = {0.48145466f, 0.45782750f, 0.40821073f};
+        static constexpr float STD[3] = {0.26862954f, 0.26130258f, 0.27577711f};
+
         struct ImageU8
         {
-            int w = 0, h = 0, c = 0; // c=3或4
-            std::vector<uint8_t> data; // 行主序，交错排列
+            int w = 0, h = 0, c = 0;
+            std::vector<uint8_t> data;
         };
 
     public:
         Qwen25ImageProcessor() = default;
 
-        // 高层API：读入图片并写出 pixel_values.raw
-        // request_h / request_w 是“期望的输入尺寸”，会通过 smart_resize 对齐到 28 的倍数。
         void ProcessToRaw(const std::string &input_image_path,
                           const std::string &output_raw_path,
                           int request_h,
                           int request_w) const
         {
-            // 1) 读取（多格式） → RGB(A)
+
             ImageU8 img = LoadImage_STB(input_image_path);
 
-            // 2) Alpha白底合成 → RGB
             ImageU8 rgb = ToRGBWhiteBackground(img);
 
-            // 3) smart_resize：将“请求的尺寸”调整到可被28整除，并满足像素上下限规则（与原实现一致）。
             auto [rh, rw] = smart_resize(request_h, request_w, PATCH_FACTOR);
 
-            // 4) 用 stb_image_resize 进行缩放（线性）到 rh x rw。
             ImageU8 rgb_resized = ResizeRGB_STB(rgb, rw, rh);
 
-            // 5) patch化+归一化+展平 → 写出 raw
             GeneratePixelValues(rgb_resized, output_raw_path);
         }
 
-        // 可选：如果你希望获得内存中的结果，而不是直接写文件
-        // 会返回 (rows, cols) 并把数据写入 out（float32，行主序）
         void ProcessToBuffer(const std::string &input_image_path,
                              int request_h,
                              int request_w,
@@ -113,18 +83,16 @@ namespace qwen2_5
             ImageU8 rgb = ToRGBWhiteBackground(img);
             auto [rh, rw] = smart_resize(request_h, request_w, PATCH_FACTOR);
             ImageU8 rgb_resized = ResizeRGB_STB(rgb, rw, rh);
-//            stbi_write_png("1.png", rgb_resized.w, rgb_resized.h, rgb_resized.c, rgb_resized.data.data(), 0);
             GeneratePixelValuesToBuffer(rgb_resized, out, rows, cols);
         }
 
-        // 仅计算 smart_resize 的结果尺寸（便于调用方预估）
         static std::pair<int, int> SmartResizeOnly(int request_h, int request_w)
         {
             return smart_resize(request_h, request_w, PATCH_FACTOR);
         }
 
     private:
-        // --- 工具函数（与原始实现一致） ---
+
         static inline int round_by_factor(int number, int factor)
         {
             return static_cast<int>(std::llround(static_cast<double>(number) / factor) * factor);
@@ -144,7 +112,7 @@ namespace qwen2_5
                 int height, int width, int factor,
                 int min_pixels, int max_pixels)
         {
-            const double max_ratio = 200.0; // 与原实现一致的长宽比限制
+            const double max_ratio = 200.0;
             if (static_cast<double>(std::max(height, width)) / std::min(height, width) > max_ratio)
             {
                 throw std::runtime_error("aspect ratio too large");
@@ -173,15 +141,14 @@ namespace qwen2_5
 
         static inline std::pair<int, int> smart_resize(int height, int width, int factor)
         {
-            const int min_pixels = 4 * factor * factor; // 与原实现一致：下限像素 = 4 * factor^2
-            const int max_pixels = 16384 * factor * factor; // 与原实现一致：上限像素 = 16384 * factor^2
+            const int min_pixels = 4 * factor * factor;
+            const int max_pixels = 16384 * factor * factor;
             return smart_resize_impl(height, width, factor, min_pixels, max_pixels);
         }
 
-        // 读取图片（多格式）：返回 RGB 或 RGBA；灰度/灰度+Alpha 也统一到这两类（与原实现一致）。
         static ImageU8 LoadImage_STB(const std::string &path)
         {
-            int w = 0, h = 0, n = 0; // n: 原始通道数（1/2/3/4）
+            int w = 0, h = 0, n = 0;
             stbi_uc *pixels = stbi_load(path.c_str(), &w, &h, &n, 0);
             if (!pixels) { throw std::runtime_error(std::string("stb_image: failed to load image: ") + path); }
 
@@ -204,7 +171,7 @@ namespace qwen2_5
                 else
                     if (n == 1)
                     {
-                        // 灰度 → RGB
+
                         out.w = w;
                         out.h = h;
                         out.c = 3;
@@ -220,7 +187,7 @@ namespace qwen2_5
                     else
                         if (n == 2)
                         {
-                            // 灰度+Alpha → RGBA
+
                             out.w = w;
                             out.h = h;
                             out.c = 4;
@@ -269,7 +236,7 @@ namespace qwen2_5
                 else
                     if (n == 1)
                     {
-                        // 灰度 → RGB
+
                         out.w = w;
                         out.h = h;
                         out.c = 3;
@@ -285,7 +252,7 @@ namespace qwen2_5
                     else
                         if (n == 2)
                         {
-                            // 灰度+Alpha → RGBA
+
                             out.w = w;
                             out.h = h;
                             out.c = 4;
@@ -309,7 +276,6 @@ namespace qwen2_5
             return out;
         }
 
-        // RGBA → RGB 的白底合成（与原实现一致）：c=3直接返回，c=4执行 alpha over 白色。
         static ImageU8 ToRGBWhiteBackground(const ImageU8 &in)
         {
             if (in.c == 3) return in;
@@ -334,7 +300,6 @@ namespace qwen2_5
             return out;
         }
 
-        // 使用 stb_image_resize 进行缩放（uint8 RGB，线性滤波）。
         static ImageU8 ResizeRGB_STB(const ImageU8 &in, int out_w, int out_h)
         {
             if (in.c != 3) throw std::runtime_error("ResizeRGB_STB expects RGB input");
@@ -347,14 +312,13 @@ namespace qwen2_5
             if (!stbir_resize_uint8_linear(
                     in.data.data(), in.w, in.h, 0,
                     out.data.data(), out_w, out_h, 0,
-                    STBIR_RGB)) // 目标色彩空间：RGB
+                    STBIR_RGB))
             {
                 throw std::runtime_error("stb_image_resize: resize failed");
             }
             return out;
         }
 
-        // 生成 pixel_values（float32），写文件；形状(rows, cols)与原实现一致。
         static void GeneratePixelValues(const ImageU8 &rgb, const std::string &out_path)
         {
             int rows = 0, cols = 0;
@@ -366,13 +330,8 @@ namespace qwen2_5
             ofs.write(reinterpret_cast<const char *>(out.data()),
                       static_cast<std::streamsize>(out.size() * sizeof(float)));
             ofs.close();
-
-            // 你也可以在这里打印，但库函数通常不做IO；留给调用方处理。
-            // std::cout << "pixel_values shape = (" << rows << "," << cols << ")\n";
-            // std::cout << "bytes = " << (out.size() * sizeof(float)) << "\n";
         }
 
-        // 生成到内存缓冲：便于自定义写出或进一步处理。
         static void GeneratePixelValuesToBuffer(const ImageU8 &rgb,
                                                 std::vector<float> &out,
                                                 int &rows, int &cols)
@@ -385,13 +344,12 @@ namespace qwen2_5
                 throw std::runtime_error("H/W not divisible by patch_size");
             }
 
-            const int grid_h = H / PATCH_SIZE; // 例如 46（当H=644）
-            const int grid_w = W / PATCH_SIZE; // 例如 46（当W=644）
-            const int grid_h_outer = grid_h / MERGE_SIZE; // 例如 23（当grid_h=46）
-            const int grid_w_outer = grid_w / MERGE_SIZE; // 例如 23（当grid_w=46）
-            const int T = TEMPORAL_PATCH_SIZE; // 2
+            const int grid_h = H / PATCH_SIZE;
+            const int grid_w = W / PATCH_SIZE;
+            const int grid_h_outer = grid_h / MERGE_SIZE;
+            const int grid_w_outer = grid_w / MERGE_SIZE;
+            const int T = TEMPORAL_PATCH_SIZE;
 
-            // 先做CLIP归一化并复制到两个时间帧（t=0与t=1相同）。
             std::vector<float> norm(static_cast<size_t>(T) * 3 * static_cast<size_t>(H) * static_cast<size_t>(W));
             auto idx4 = [&](int t, int c, int y, int x)
             {
@@ -412,9 +370,8 @@ namespace qwen2_5
                 }
             }
 
-            // 展平顺序：外层 ho, wo, mh, mw；内层 c, t, ph, pw —— 与原实现一致。
-            rows = 1 * grid_h * grid_w; // grid_t=1（与原一致）
-            cols = 3 * T * PATCH_SIZE * PATCH_SIZE; // =1176
+            rows = 1 * grid_h * grid_w;
+            cols = 3 * T * PATCH_SIZE * PATCH_SIZE;
             out.assign(static_cast<size_t>(rows) * cols, 0.0f);
 
             int r = 0;

@@ -652,7 +652,7 @@ class BenchmarkRunner:
                 # 主动截断：命中异常/watchdog/超时时都显式发 /stop，不依赖服务端自己收尾，
                 # 避免未结束的生成拖慢下一题/下一配置。
                 try:
-                    requests.post(f"{self.base_url}/stop", json={"text": "stop"}, timeout=15)
+                    requests.post(f"{self.base_url}/stop", json={"text": "stop", "model": self.model_name}, timeout=15)
                 except Exception:
                     pass
 

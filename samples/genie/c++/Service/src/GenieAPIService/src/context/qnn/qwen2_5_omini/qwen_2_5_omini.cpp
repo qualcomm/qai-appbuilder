@@ -8,10 +8,6 @@
 
 #include "qwen_2_5_omini.h"
 
-// LibrosaCpp's header uses std::sqrtf, which is a non-standard MSVC extension.
-// On the Android NDK (libc++) it is also available; only on native Linux/glibc
-// does it need a shim. Limit the shim strictly to that case so the existing
-// Windows and Android build paths are unaffected.
 #if defined(__linux__) && !defined(__ANDROID__)
 #include <cmath>
 namespace std {
@@ -37,7 +33,7 @@ std::vector<std::vector<float>>
 QInterface::Qwen2_5OMINI::ProcessingMelSpec(std::vector<std::vector<float>> &&mel_spec)
 {
     static const float min_val = 1e-10f;
-//    clamp_and_log10_mel_major
+
     size_t n_mels = mel_spec.size();
     size_t n_frames = mel_spec[0].size();
     for (size_t m = 0; m < n_mels; ++m)
@@ -52,7 +48,6 @@ QInterface::Qwen2_5OMINI::ProcessingMelSpec(std::vector<std::vector<float>> &&me
         }
     }
 
-//    clamp_by_max_mel_major
     float gmax = -std::numeric_limits<float>::infinity();
     for (const auto &row: mel_spec)
     {
@@ -73,7 +68,6 @@ QInterface::Qwen2_5OMINI::ProcessingMelSpec(std::vector<std::vector<float>> &&me
             if (!std::isfinite(v) || v < floor_val)
                 v = floor_val;
 
-//    scale_shift_mel_major
     ahead:
     for (auto &row: mel_spec)
     {
@@ -94,13 +88,11 @@ QInterface::Qwen2_5OMINI::ApplyMaskTimeMajorToMelMajor(std::vector<std::vector<f
     if (feature_attention_mask.size() != T)
         throw std::invalid_argument("mask length != T");
 
-    // count selected frames K
     size_t K = 0;
     for (size_t t = 0; t < T; ++t)
         if (feature_attention_mask[t])
             ++K;
 
-    // prepare output [M][K]
     std::vector<std::vector<float>> input_features(M, std::vector<float>(K));
     if (K == 0)
         return input_features;
@@ -110,7 +102,7 @@ QInterface::Qwen2_5OMINI::ApplyMaskTimeMajorToMelMajor(std::vector<std::vector<f
     {
         if (!feature_attention_mask[t])
             continue;
-        const auto &row = time_major_mel_spec[t]; // row is length M
+        const auto &row = time_major_mel_spec[t];
         for (size_t m = 0; m < M; ++m)
         {
             input_features[m][col] = row[m];
@@ -123,9 +115,9 @@ QInterface::Qwen2_5OMINI::ApplyMaskTimeMajorToMelMajor(std::vector<std::vector<f
 std::vector<int64_t> QInterface::Qwen2_5OMINI::CreateChunkLengths(int64_t feature_len)
 {
     constexpr int64_t CHUNK = 100 * 2;;
-    int64_t chunk_num = (feature_len + CHUNK - 1) / CHUNK; // ceil division
+    int64_t chunk_num = (feature_len + CHUNK - 1) / CHUNK;
     std::vector<int64_t> chunk_lengths(chunk_num, CHUNK);
-    // adjust the last chunk to the actual remaining length
+
     int64_t last = feature_len - CHUNK * (chunk_num - 1);
     chunk_lengths.back() = last == 0 ? CHUNK : last;
     return chunk_lengths;
@@ -138,7 +130,6 @@ QInterface::Qwen2_5OMINI::SplitMelMajorByLengths(std::vector<std::vector<float>>
     size_t M = input_features.size();
     size_t T = input_features[0].size();
 
-    // sanity: sum lengths == T
     int64_t sum = 0;
     for (auto l: chunk_lengths)
         sum += l;
@@ -154,7 +145,7 @@ QInterface::Qwen2_5OMINI::SplitMelMajorByLengths(std::vector<std::vector<float>>
         std::vector<std::vector<float>> block(M, std::vector<float>(len));
         for (size_t m = 0; m < M; ++m)
         {
-            // copy features[m][t0 .. t0+len-1] -> block[m][0..len-1]
+
             for (size_t k = 0; k < static_cast<size_t>(len); ++k)
                 block[m][k] = input_features[m][t0 + k];
         }
@@ -175,7 +166,6 @@ QInterface::Qwen2_5OMINI::MakePaddedAndMask(const std::vector<std::vector<std::v
     if (tensor_len.size() != N)
         throw std::runtime_error("tensor_len size mismatch");
 
-    // 验证每个块内部一致性
     for (size_t i = 0; i < N; ++i)
     {
         if (tensor_list[i].size() != dim)
@@ -190,15 +180,14 @@ QInterface::Qwen2_5OMINI::MakePaddedAndMask(const std::vector<std::vector<std::v
             throw std::runtime_error("len_i > max_len");
     }
 
-    // allocate and init
-    std::vector<float> padded_flat;      // 输出: size N*dim*max_len
-    std::vector<float> batch_mask_flat; // 输出: size N*max_len
+    std::vector<float> padded_flat;
+    std::vector<float> batch_mask_flat;
     padded_flat.assign(N * dim * max_len, 0.0f);
     batch_mask_flat.assign(N * max_len, 0);
 
     auto padded_offset = [&](size_t i, size_t m, size_t k) -> size_t
     {
-        // layout: (i, m, k) -> ((i * dim + m) * max_len + k)
+
         return (i * dim + m) * max_len + k;
     };
     auto mask_offset = [&](size_t i, size_t k) -> size_t
@@ -209,17 +198,16 @@ QInterface::Qwen2_5OMINI::MakePaddedAndMask(const std::vector<std::vector<std::v
     for (size_t i = 0; i < N; ++i)
     {
         size_t len_i = static_cast<size_t>(tensor_len[i]);
-        // set mask 1 for first len_i positions
+
         for (size_t k = 0; k < len_i; ++k)
             batch_mask_flat[mask_offset(i, k)] = 1;
 
-        // copy each mel row: tensor_list[i][m][0..len_i-1] -> padded_flat[(i,m,0..len_i-1)]
         for (size_t m = 0; m < dim; ++m)
         {
             const float *src = tensor_list[i][m].data();
             float *dst = padded_flat.data() + padded_offset(i, m, 0);
             std::memcpy(dst, src, len_i * sizeof(float));
-            // 剩余位置已为 padding_value
+
         }
     }
 
@@ -244,7 +232,6 @@ QInterface::Qwen2_5OMINI::PaddedInputFeatures(std::vector<float> &&padded_featur
     if (N > max_len_channels)
         throw std::runtime_error("N > max_len_channels; cannot fit");
 
-    // copy padded_feature[:feature_len, :, :] -> out_padded_tensor[:feature_len, :, :]
     for (size_t i = 0; i < N; ++i)
     {
         for (size_t c = 0; c < C; ++c)
@@ -279,10 +266,8 @@ QInterface::Qwen2_5OMINI::MakeUpdatedPaddedMaskFrom3D(const std::vector<std::vec
     size_t B = padded_mask[0].size();
     size_t T = padded_mask[0][0].size();
 
-    // allocate output (max_len * B * T), init 0.0f
     std::vector<float> out(max_len * B * T, 0.0f);
 
-    // set first min(max_len, N) slices to 1.0f
     size_t upto = std::min(max_len, N);
     for (size_t i = 0; i < upto; ++i)
     {
@@ -297,7 +282,6 @@ QInterface::Qwen2_5OMINI::MakeBatchMaskAfterCnn(const std::vector<int64_t> &tens
 {
     size_t N = tensor_len.size();
 
-    // 计算下采样后每个样本的长度： (L-1)//2 + 1
     std::vector<int64_t> lens_after;
     lens_after.reserve(N);
     for (auto L: tensor_len)
@@ -308,16 +292,13 @@ QInterface::Qwen2_5OMINI::MakeBatchMaskAfterCnn(const std::vector<int64_t> &tens
         lens_after.push_back(newL);
     }
 
-    // 找到最大长度，作为每行长度
     int64_t max_len = *std::max_element(lens_after.begin(), lens_after.end());
     if (max_len <= 0)
         throw std::runtime_error("computed max_len <= 0");
 
-    // 分配二维 mask，初始化为 0
     std::vector<std::vector<int32_t>> mask;
     mask.assign(N, std::vector<int32_t>(static_cast<size_t>(max_len), 0));
 
-    // 填充每行前 L 个为 1
     for (size_t i = 0; i < N; ++i)
     {
         int64_t L = lens_after[i];
@@ -337,7 +318,7 @@ QInterface::Qwen2_5OMINI::AttentionToPadded(std::vector<float> &&attention_mask,
                                             size_t P_H,
                                             size_t P_W)
 {
-    // zero_attention_blocks
+
     static const int batch = 1;
     if (attention_mask.size() != 1 * H * H)
         throw std::runtime_error("attention_mask size mismatch");
@@ -345,7 +326,6 @@ QInterface::Qwen2_5OMINI::AttentionToPadded(std::vector<float> &&attention_mask,
     if (cu_seqlens.size() < 2)
         throw std::runtime_error("cu_seqlens too short");
 
-    // operate on the single plane n=0
     for (size_t t = 1; t < cu_seqlens.size(); ++t)
     {
         int32_t s = cu_seqlens[t - 1];
@@ -391,13 +371,13 @@ QInterface::Qwen2_5OMINI::AttentionToPadded(std::vector<float> &&attention_mask,
 std::vector<int32_t> QInterface::Qwen2_5OMINI::ComputeCuSeqlensFromMask(const std::vector<std::vector<int32_t>> &mask)
 {
     size_t N = mask.size();
-    // compute per-row sums (use int64_t accumulator to avoid intermediate overflow)
+
     std::vector<int64_t> lens;
     lens.reserve(N);
     for (size_t i = 0; i < N; ++i)
     {
         const auto &row = mask[i];
-        // optional: allow empty row -> sum 0
+
         int64_t s = 0;
         for (int k: row)
             s += static_cast<int64_t>(k);
@@ -406,7 +386,6 @@ std::vector<int32_t> QInterface::Qwen2_5OMINI::ComputeCuSeqlensFromMask(const st
         lens.push_back(s);
     }
 
-    // compute prefix sums and build cu_seqlens (int32_t)
     std::vector<int32_t> cu;
     cu.resize(N + 1);
     cu[0] = 0;
@@ -443,7 +422,6 @@ IAudioEmbedding &QInterface::Qwen2_5OMINI::BuildAudioSamples()
 
     uint64_t pcm_len{frames * channels};
 
-    // 1) Convert to mono by averaging channels
     float *mono;
     std::vector<float> mono_storage;
     if (channels == 1)
@@ -465,7 +443,6 @@ IAudioEmbedding &QInterface::Qwen2_5OMINI::BuildAudioSamples()
         }
     }
 
-    // 2) Prepare libsamplerate SRC_DATA
     const int target_sr = 16000;
     double src_ratio = static_cast<double>(target_sr) / static_cast<double>(sampleRate);
     uint64_t out_frames_est = std::ceil(frames * src_ratio);
@@ -482,7 +459,7 @@ IAudioEmbedding &QInterface::Qwen2_5OMINI::BuildAudioSamples()
     src_data.src_ratio = src_ratio;
     src_data.end_of_input = 1;
 
-    int err = src_simple(&src_data, SRC_SINC_BEST_QUALITY, 1); // 1 channel (mono)
+    int err = src_simple(&src_data, SRC_SINC_BEST_QUALITY, 1);
     auto clean{[&pcm_float]()
                {
                    drwav_free(pcm_float, nullptr);
@@ -528,7 +505,6 @@ IAudioEmbedding &QInterface::Qwen2_5OMINI::BuildAudioInferredInput()
         i += hop;
     }
 
-    // _torch_extract_fbank_features
     std::vector<std::vector<float>> mel_spec = librosa::Feature::melspectrogram(audio_sample_buf_,
                                                                                 16000,
                                                                                 400,
@@ -615,7 +591,7 @@ void QInterface::Qwen2_5OMINI::MaskedScatter(const std::vector<uint8_t> &mask,
 
     if (rowwise && (ones_total % cols_ == 0) && (features.size_ == ones_total))
     {
-        // fast row-wise copy
+
         size_t feat_row = 0;
         for (size_t r = 0; r < seq_rows; ++r)
         {
@@ -630,7 +606,6 @@ void QInterface::Qwen2_5OMINI::MaskedScatter(const std::vector<uint8_t> &mask,
         return;
     }
 
-    // element-wise path: require audio_features.size() == number of ones
     if (features.size_ != ones_total)
     {
         My_Log{} << "audio/image features length must equal number of ones in mask "
@@ -654,9 +629,7 @@ void QInterface::Qwen2_5OMINI::MergeImpl(int token_index,
 
     inferred_buf.resize(token_index * cols_ * sizeof(float));
 
-    /* @formatter:off */
     std::vector<uint8_t> mask(prompt_token_size_ * cols_, 0);
-    /* @formatter:on */
 
     int count{};
     for (auto i = 0; i < prompt_token_size_; ++i)

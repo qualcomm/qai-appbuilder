@@ -19,7 +19,7 @@ Shape_1D<int64_t> Flatten(const Shape_2D<int64_t> &in)
 
     Shape_1D<int64_t> out;
     out.d0 = static_cast<int>(expected);
-    out.buf = in.buf; // copy entire buffer (row-major)
+    out.buf = in.buf;
     return out;
 }
 
@@ -46,7 +46,7 @@ Shape_2D<T> Unsqueeze(const Shape_1D<T> &in)
     out.d0 = in.d0;
     out.d1 = 1;
     out.buf.resize(static_cast<size_t>(out.d0) * out.d1);
-    // copy values into column 0
+
     for (int i = 0; i < in.d0; ++i)
     {
         out.buf[static_cast<size_t>(i) * out.d1 + 0] = in.buf[static_cast<size_t>(i)];
@@ -61,13 +61,12 @@ Shape_1D<T> slice_keep_one_axis_2d(
         int idx_a
 )
 {
-    // Validate input dims
+
     if (in.d0 <= 0 || in.d1 <= 0)
         throw std::invalid_argument("input dims must be > 0");
     if (keep_axis < 0 || keep_axis > 1)
         throw std::invalid_argument("keep_axis must be 0 or 1");
 
-    // Determine keep length and validate fixed index
     int keep_len = (keep_axis == 0) ? in.d0 : in.d1;
 
     auto check_index = [&](int axis, int idx)
@@ -80,27 +79,25 @@ Shape_1D<T> slice_keep_one_axis_2d(
             throw std::out_of_range("idx_a out of range for axis 1");
     };
 
-    int fixed_idx0 = 0; // will hold the fixed index for the non-kept axis
+    int fixed_idx0 = 0;
 
     if (keep_axis == 0)
     {
-        // keep axis0, so idx_a -> axis1 (fixed)
+
         check_index(1, idx_a);
-        fixed_idx0 = idx_a; // axis1 fixed
+        fixed_idx0 = idx_a;
     }
-    else // keep_axis == 1
+    else
     {
-        // keep axis1, so idx_a -> axis0 (fixed)
+
         check_index(0, idx_a);
-        fixed_idx0 = idx_a; // axis0 fixed
+        fixed_idx0 = idx_a;
     }
 
-    // Prepare output
     Shape_1D<T> out;
     out.d0 = keep_len;
     out.buf.resize(static_cast<size_t>(keep_len));
 
-    // Input linear index helper: (i0 * d1 + i1)
     auto in_index = [&](int i0, int i1) -> size_t
     {
         return static_cast<size_t>(i0 * in.d1 + i1);
@@ -111,13 +108,12 @@ Shape_1D<T> slice_keep_one_axis_2d(
         size_t src_idx;
         if (keep_axis == 0)
         {
-            // src = (k, fixed_idx0) where fixed_idx0 == axis1
+
             src_idx = in_index(k, fixed_idx0);
         }
         else
         {
-            // keep_axis == 1
-            // src = (fixed_idx0, k) where fixed_idx0 == axis0
+
             src_idx = in_index(fixed_idx0, k);
         }
         out.buf[static_cast<size_t>(k)] = in.buf[src_idx];
@@ -143,11 +139,10 @@ Shape_4D<T> reshape_2d_to_4d(
         int out_d3
 )
 {
-    // Validate input dims
+
     if (in.d0 <= 0 || in.d1 <= 0)
         throw std::invalid_argument("input dims must be > 0");
 
-    // Count how many -1s
     int neg1_count = 0;
     neg1_count += (out_d0 == -1);
     neg1_count += (out_d1 == -1);
@@ -156,7 +151,6 @@ Shape_4D<T> reshape_2d_to_4d(
     if (neg1_count > 1)
         throw std::invalid_argument("only one -1 allowed");
 
-    // Validate provided positive dims (allow -1)
     auto check_positive_or_neg1 = [](int v, const char *name)
     {
         if (v == 0 || v < -1)
@@ -167,10 +161,8 @@ Shape_4D<T> reshape_2d_to_4d(
     check_positive_or_neg1(out_d2, "out_d2");
     check_positive_or_neg1(out_d3, "out_d3");
 
-    // Compute input total
     long long in_total = static_cast<long long>(in.d0) * in.d1;
 
-    // If one dim is -1, infer it
     if (neg1_count == 1)
     {
         long long prod = 1;
@@ -203,16 +195,13 @@ Shape_4D<T> reshape_2d_to_4d(
             out_d3 = static_cast<int>(inferred);
     }
 
-    // Now all dims must be positive
     if (out_d0 <= 0 || out_d1 <= 0 || out_d2 <= 0 || out_d3 <= 0)
         throw std::invalid_argument("output dims must be > 0");
 
-    // Final total check
     long long out_total = static_cast<long long>(out_d0) * out_d1 * out_d2 * out_d3;
     if (in_total != out_total)
         throw std::invalid_argument("total number of elements must match for reshape");
 
-    // Prepare output
     Shape_4D<T> out;
     out.d0 = out_d0;
     out.d1 = out_d1;
@@ -220,7 +209,6 @@ Shape_4D<T> reshape_2d_to_4d(
     out.d3 = out_d3;
     out.buf.resize(static_cast<size_t>(out_total));
 
-    // Copy linear buffer (contiguous row-major)
     std::copy(in.buf.begin(), in.buf.end(), out.buf.begin());
 
     return out;
@@ -233,28 +221,4 @@ struct Image
     int size;
 };
 
-void save_float_image(const float *f_pixels, int width, int height, int channels,
-                      const char *filename, bool prefer_hdr = false)
-{
-    std::string fn(filename);
-    bool is_hdr = prefer_hdr || (fn.size() >= 4 && fn.substr(fn.size() - 4) == ".hdr");
-
-    if (is_hdr)
-    {
-        stbi_write_hdr(filename, width, height, channels, f_pixels);
-    }
-    else
-    {
-        size_t n = static_cast<size_t>(width) * height * channels;
-        std::vector<uint8_t> u8(n);
-        for (size_t i = 0; i < n; ++i)
-        {
-            float v = std::clamp(f_pixels[i], 0.0f, 1.0f);
-            u8[i] = static_cast<uint8_t>(v * 255.0f + 0.5f);
-        }
-        int stride = width * channels;
-        stbi_write_png(filename, width, height, channels, u8.data(), stride);
-    }
-}
-
-#endif //SHAPE_2D_H
+#endif

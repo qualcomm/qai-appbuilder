@@ -25,51 +25,47 @@ struct RoutingConfig {
     bool prefer_local_for_simple = true;
 
     struct SensitivityDetectionConfig {
-        bool enabled = true;  // 总开关：false=跳过所有敏感检测，所有数据直接上云（默认 true）
+        bool enabled = true;
         std::string method = "rule_first";
         bool use_local_model_fallback = true;
         bool strict_s2_union = true;
-        int timeout_ms = 300000;  // 本地模型辅助判断超时（毫秒），默认 5 分钟
-        int model_input_max_chars = 2000; // 辅助判断输入截断长度（字符数）
-        int max_gen_tokens = 2048; // 安全检查最大生成 token 数，默认 2048（思考类模型需要更多 token）
-        // 本地模型辅助安全检测时使用的系统提示词（从 service_config.json 加载，空字符串时使用内置默认值）
+        int timeout_ms = 300000;
+        int model_input_max_chars = 2000;
+        int max_gen_tokens = 2048;
+
         std::string system_prompt;
-        // rule_id → 默认敏感等级覆盖（可审计），对应需求文档 §6.5
-        // key: rule_id, value: "S1" or "S2"
+
         std::unordered_map<std::string, std::string> rule_level_overrides;
-        // 关键词词典配置
+
         std::string keywords_dict_path = "";
         int keywords_reload_interval_seconds = 60;
-        // [扩展规则] 各类扩展检测规则的独立开关
-        // 每类规则可通过 service_config.json 中的 sensitivity_detection.extended_rules 独立开启/关闭
+
         struct ExtendedRulesConfig {
-            bool enable_local_path   = true;  // 本地文件路径检测 (R_PATH_UNIX, R_PATH_WIN)
-            bool enable_internal_url = true;  // 内网地址检测 (R_INTERNAL_IP, R_INTERNAL_DOMAIN)
-            bool enable_device_id    = true;  // 设备标识检测 (R_MAC_ADDR, R_IMEI)
-            bool enable_image_data   = true;  // 图片数据基础保护 (R_BASE64_IMAGE)
+            bool enable_local_path   = true;
+            bool enable_internal_url = true;
+            bool enable_device_id    = true;
+            bool enable_image_data   = true;
         } extended_rules;
-        // [基础规则] 各类基础检测规则的独立开关
-        // 每类规则可通过 service_config.json 中的 sensitivity_detection.detection_rules 独立开启/关闭
-        // 注意：关闭 S2 级别规则（id_card/bank_card/api_key/private_key/token）会降低安全保护等级
+
         struct DetectionRulesConfig {
-            bool enable_phone       = true;  // 手机号检测 (R_PHONE_CN)
-            std::string level_phone       = "S1";  // 可配置敏感等级（S0/S1/S2），默认 S1
-            bool enable_email       = true;  // 邮箱检测 (R_EMAIL)
-            std::string level_email       = "S1";  // 可配置敏感等级，默认 S1
-            bool enable_id_card     = true;  // 身份证检测 (R_ID_CARD)
-            std::string level_id_card     = "S2";  // 可配置敏感等级，默认 S2
-            bool enable_bank_card   = true;  // 银行卡检测 (R_BANK_CARD_KW + R_BANK_CARD_FMT)
-            std::string level_bank_card   = "S2";  // 可配置敏感等级，默认 S2
-            bool enable_api_key     = true;  // API Key 检测 (R_API_KEY，sk- 开头)
-            std::string level_api_key     = "S2";  // 可配置敏感等级，默认 S2
-            bool enable_private_key = true;  // PEM 私钥块检测 (R_PRIVATE_KEY)
-            std::string level_private_key = "S2";  // 可配置敏感等级，默认 S2
-            bool enable_token       = true;  // Bearer Token 检测 (R_TOKEN)
-            std::string level_token       = "S2";  // 可配置敏感等级，默认 S2
-            bool enable_password    = true;  // 密码关键词检测 (R_PASSWORD_KW，password=xxx 模式)
-            std::string level_password    = "S1";  // 可配置敏感等级，默认 S1
+            bool enable_phone       = true;
+            std::string level_phone       = "S1";
+            bool enable_email       = true;
+            std::string level_email       = "S1";
+            bool enable_id_card     = true;
+            std::string level_id_card     = "S2";
+            bool enable_bank_card   = true;
+            std::string level_bank_card   = "S2";
+            bool enable_api_key     = true;
+            std::string level_api_key     = "S2";
+            bool enable_private_key = true;
+            std::string level_private_key = "S2";
+            bool enable_token       = true;
+            std::string level_token       = "S2";
+            bool enable_password    = true;
+            std::string level_password    = "S1";
         } detection_rules;
-        // [调试] 是否在规则命中时打印匹配规则和原始文本（默认关闭，仅用于问题排查）
+
         bool debug_log_matches = false;
     } sensitivity_detection;
 
@@ -77,58 +73,53 @@ struct RoutingConfig {
         bool enabled = true;
         std::vector<std::string> strategies = {"mask", "placeholder", "delete", "summarize"};
         std::string placeholder_style = "<{type}_{index}>";
-        bool iterative = true; // 是否允许迭代脱敏
-        int max_rounds = 3;     // 最大迭代轮数
-        // 摘要化脱敏超时（毫秒），对应 §13.4.2
-        int summarize_timeout_ms = 300000;  // 摘要化脱敏超时（毫秒），默认 5 分钟
-        // 本地模型摘要化脱敏时使用的系统提示词（从 service_config.json 加载，空字符串时使用内置默认值）
+        bool iterative = true;
+        int max_rounds = 3;
+
+        int summarize_timeout_ms = 300000;
+
         std::string system_prompt;
-        // 格式保留脱敏开关（工具调用场景）
-        bool format_preserving_enabled = false;  // 默认关闭,需手动开启
-        // 响应还原开关（格式保留脱敏场景）
-        bool restore_response_enabled = true;  // 默认开启，将 Mock Data 还原为原始数据
-        // 流式响应还原开关（格式保留脱敏场景）
-        bool restore_stream_enabled = true;  // 默认开启，对 SSE 流式响应执行字段级 JSON 还原
-        // 脱敏过程详细日志开关（包含原始敏感信息，仅用于开发调试）
-        bool log_desensitization_details = false;  // 默认关闭，生产环境推荐保持关闭
-        // 各实体类型脱敏开关（false=跳过该类型的脱敏处理，不影响其他类型）
-        // 可通过 service_config.json 中的 desensitization.entity_switches 独立控制
+
+        bool format_preserving_enabled = false;
+
+        bool restore_response_enabled = true;
+
+        bool restore_stream_enabled = true;
+
+        bool log_desensitization_details = false;
+
         struct EntitySwitchesConfig {
-            bool enable_phone        = true;  // 手机号脱敏
-            bool enable_email        = true;  // 邮箱脱敏
-            bool enable_id_card      = true;  // 身份证脱敏
-            bool enable_bank_card    = true;  // 银行卡脱敏
-            bool enable_api_key      = true;  // API Key 脱敏
-            bool enable_private_key  = true;  // 私钥脱敏
-            bool enable_token        = true;  // Bearer Token 脱敏
-            bool enable_password     = true;  // 密码关键词脱敏
-            bool enable_internal_url = true;  // 内网 IP/域名脱敏 (R_INTERNAL_IP, R_INTERNAL_DOMAIN)
-            bool enable_local_path   = true;  // 本地路径脱敏 (R_PATH_WIN, R_PATH_UNIX)
-            bool enable_device_id    = true;  // 设备标识脱敏 (R_MAC_ADDR, R_IMEI)
-            bool enable_image_data   = true;  // 图片数据脱敏 (R_BASE64_IMAGE)
+            bool enable_phone        = true;
+            bool enable_email        = true;
+            bool enable_id_card      = true;
+            bool enable_bank_card    = true;
+            bool enable_api_key      = true;
+            bool enable_private_key  = true;
+            bool enable_token        = true;
+            bool enable_password     = true;
+            bool enable_internal_url = true;
+            bool enable_local_path   = true;
+            bool enable_device_id    = true;
+            bool enable_image_data   = true;
         } entity_switches;
     } desensitization;
 
     struct ComplexityConfig {
         std::string method = "heuristic_first";
         bool use_local_model_fallback = true;
-        int timeout_ms = 300000;  // 本地模型辅助判断超时（毫秒），默认 5 分钟
-        // 辅助判断输入截断长度（字符数），与 SensitivityDetectionConfig 对齐
+        int timeout_ms = 300000;
+
         int model_input_max_chars = 2000;
-        // 本地模型辅助复杂度评估时使用的系统提示词（从 service_config.json 加载，空字符串时使用内置默认值）
+
         std::string system_prompt;
         struct Thresholds {
             int tool_calls = 3;
         } thresholds;
-        // 复杂度关键词列表（可通过 service_config.json 配置，空列表时使用内置默认值）
-        // 注意：关键词匹配时自动转换为小写，配置中无需区分大小写
-        std::vector<std::string> keywords_c1;  // C1 关键词：命中后升级为 C1
-        std::vector<std::string> keywords_c2;  // C2 关键词：命中后直接升级为 C2
+
+        std::vector<std::string> keywords_c1;
+        std::vector<std::string> keywords_c2;
     } complexity;
 
-    // 企业内网云是否要求对 S1 数据脱敏后再上传
-    // true  = S1 数据发往企业云前必须脱敏（保守模式，适合对数据合规有要求的企业）
-    // false = 企业云视为可信边界，S1 数据无需脱敏直接发送（默认，适合物理隔离的内网部署）
     bool enterprise_cloud_require_desensitize = false;
 
     struct FallbackConfig {
@@ -136,71 +127,52 @@ struct RoutingConfig {
         std::string local_unavailable_s0 = "cloud_if_allowed";
         std::string local_unavailable_s1 = "cloud_if_allowed";
         std::string local_unavailable_s2 = "fail";
-        // 事后路由回退时清理本地历史记录（默认开启）
-        // 触发 HandleLocalOutputOverflow 时，将 messages 中本地模型产生的
-        // 中间 tool_calls/tool 消息剔除，只保留原始对话历史再发给云端
+
         bool clean_local_history_on_fallback = true;
-        // 本地输入溢出时云端可恢复错误（503）的最大重试次数
-        // 超出后将 503 升级为 422（永久失败），阻止客户端无限重试
-        // 0 = 不限制（不推荐）；默认 3
+
         int max_input_overflow_retries = 3;
-        // 企业云不可用时的 fallback 策略
-        // "public_cloud_if_allowed" = 降级到公有云（默认）
-        // "local_if_allowed"        = 降级到本地
-        // "fail"                    = 直接返回 503
+
         std::string enterprise_cloud_unavailable = "public_cloud_if_allowed";
-        // 公有云不可用时的 fallback 策略
-        // "enterprise_cloud_if_allowed" = 降级到企业云（默认）
-        // "local_if_allowed"            = 降级到本地
-        // "fail"                        = 直接返回 503
+
         std::string public_cloud_unavailable = "enterprise_cloud_if_allowed";
     } fallback;
 
     struct CacheConfig {
-        int ttl_seconds = 60;   // 缓存生存时间（秒）
-        int max_entries = 256;  // LRU 缓存最大条目数
+        int ttl_seconds = 60;
+        int max_entries = 256;
     } cache;
 
     struct AgentRoutingConfig {
-        bool sub_agent_prefer_local = true;      // 子 agent 默认优先本地
-        bool sub_agent_allow_cloud_on_c2 = true; // 子 agent 在 C2 时允许上云
+        bool sub_agent_allow_cloud_on_c2 = true;
     } agent_routing;
 
-    // 会话级路由锁定配置
-    // 一旦某个 session 被路由到 CLOUD，该 session 后续所有请求均走 CLOUD，
-    // 直到任务完成（客户端开启新 session）或 TTL 超时
     struct StickyRoutingConfig {
-        bool enabled = false;       // 默认关闭
-        int ttl_seconds = 1800;     // session 锁定超时（默认 30 分钟）
-        int max_sessions = 1000;    // 最大锁定 session 数（防内存泄漏）
+        bool enabled = false;
+        int ttl_seconds = 1800;
+        int max_sessions = 1000;
     } sticky_routing;
 
-    // [增量检查优化] 安全检查增量模式配置
-    // 在多轮对话中只检查新增消息，而不是完整历史，以降低 CPU 和推理延迟
     struct IncrementalCheckConfig {
-        bool enabled = false;                   // 默认关闭（渐进式启用）
-        int session_ttl_seconds = 3600;         // 会话安全状态 TTL（秒，默认 1 小时）
-        int max_sessions = 1000;                // 最大缓存会话数（防内存泄漏）
-        bool s2_always_full_check = true;       // S2 历史始终全量检查（不可关闭）
-        bool detect_sensitive_reference = true; // 是否检测新消息中对历史敏感信息的引用
-        bool detect_history_tampering = true;   // 是否检测历史消息被篡改（消息数量减少）
+        bool enabled = false;
+        int session_ttl_seconds = 3600;
+        int max_sessions = 1000;
+        bool s2_always_full_check = true;
+        bool detect_sensitive_reference = true;
+        bool detect_history_tampering = true;
     } incremental_check;
 
-    // [S2 轮次清理] S2 轮次清理配置
-    // 当历史中存在 S2 轮次时，若当前轮无 S2，则清理历史中的 S2 轮数据后再上云
     struct S2TurnCleaningConfig {
-        bool enabled = true;        // 默认开启
-        bool log_details = true;    // 是否输出清理详情日志
-        // 清洗历史 S2 后，若当前轮路由决策为 LOCAL 但云端更适合，允许重新路由到 CLOUD
-        bool allow_cloud_reroute_after_clean = false; // 默认关闭
+        bool enabled = true;
+        bool log_details = true;
+
+        bool allow_cloud_reroute_after_clean = false;
     } s2_turn_cleaning;
 
-    // 指标汇总输出配置（对应 §15.1.2-A）
     struct MetricsConfig {
-        int summary_every_n_requests = 100; // 每 N 次请求输出一次汇总（0 表示禁用）
-        int summary_every_seconds = 0;      // 每 T 秒输出一次汇总（0 表示禁用）
-        int latency_sample_size = 1000;     // 延迟样本环形缓冲区大小
-        int fail_reason_topn = 5;           // 脱敏失败原因 TopN 数量
+        int summary_every_n_requests = 100;
+        int summary_every_seconds = 0;
+        int latency_sample_size = 1000;
+        int fail_reason_topn = 5;
     } metrics;
 };
 
@@ -212,31 +184,36 @@ struct ToolCallRepairConfig {
     bool enabled = true;
 
     struct InternalRetryConfig {
-        // 内部隐形重试的最大次数（不含首次原始生成）。默认 1，避免本地弱模型的推理延迟被无限放大。
+
         int max_attempts = 1;
-        // 命中以下失败原因时跳过重试，直接维持现有 unknow 兜底转发（Layer3 落地后将改为
-        // 分级终态协议）。取值对应 ResponseTools::ToolCallFailureReasonToString() 的输出
-        // （"unknown_tool_name"/"missing_required_args"/"truncated"/"ambiguous_multiple_calls"/
-        // "unparseable"）。默认仅跳过 "truncated"：token 预算耗尽导致的截断，结构信息已丢失，
-        // 重试大概率再次超预算，属于"重试无意义"的失败原因。
+
         std::vector<std::string> skip_reasons = {"truncated"};
     } internal_retry;
 
     struct CircuitBreakerConfig {
-        // 连续触发 Layer3 达到此次数后，判定该会话+模型系统性不支持工具调用。
+
         int consecutive_layer3_threshold = 3;
-        // 熔断后的冷却时间（秒）：cooldown_seconds 内该会话+模型持续降级 system prompt；
-        // 期间无新的 Layer3 触发则冷却到期后自动解除（下一次请求重新按全量计数）。
-        int cooldown_seconds = 300;
     } circuit_breaker;
 
     struct RedundantToolCallConfig {
         bool enabled = true;
         int repeat_threshold = 2;
-        int ttl_seconds = 300;
         int consecutive_failure_threshold = 3;
-        int non_contiguous_repeat_threshold = 4;
-        int non_contiguous_ttl_seconds = 3600;
+
+        int non_contiguous_repeat_threshold = 2;
+
+        int internal_retry_threshold = 2;
+        int hard_block_threshold = 3;
+
+        int hard_block_stop_after = 2;
+
+        bool soft_retry_enabled = false;
+
+        int max_signatures_per_entry = 256;
+
+        int note_min_interval_turns = 4;
+
+        int overlap_reread_threshold = 2;
     } redundant_call_guard;
 };
 
@@ -265,6 +242,16 @@ struct AdaptiveThinkingConfig {
     int near_repeat_window = 5;
     int max_tokens = 0;
     int ctx_reserve_tokens = 2048;
+    int goal_reminder_chars = 0;
+
+    int max_consecutive_block = 6;
+
+    int reserved_failure_think_turns = 3;
+};
+
+struct GenerationRepeatGuardConfig {
+    bool enabled = true;
+    int max_period_tokens = 48;
 };
 
 struct CloudModelConfig {
@@ -273,44 +260,37 @@ struct CloudModelConfig {
     std::string api_key;
     std::string model;
     int timeout_seconds = 30;
-    // SSE 流式请求的读超时（秒），0=自动（timeout_seconds×5）
-    // 多轮工具调用场景建议设置为 600s 以上，对应 service_config.json 中的 stream_timeout_seconds
+
     int stream_timeout_seconds = 0;
-    // 云端模型上下文窗口大小（tokens），用于统一提示词优化流水线的 token 预算计算
-    // 0 = 未配置，使用默认值 DEFAULT_CLOUD_CONTEXT_SIZE（32768）
-    // 建议在 service_config.json 中显式配置，以匹配实际部署的云端模型
+
     int context_size = 0;
     static constexpr int DEFAULT_CLOUD_CONTEXT_SIZE = 32768;
 
-    // 数据上云策略（仅当 local_model.enabled=false 且 cloud_model.enabled=true 时生效）
     struct UploadPolicyConfig {
-        // true=对上云数据进行敏感性检查（默认），false=跳过检查，所有数据直接上云
+
         bool enable_sensitivity_check = true;
-        // true=对 S1/S2 数据脱敏后再上云（默认），false=不脱敏直接上云
+
         bool enable_desensitization = true;
     } upload_policy;
 
     struct RetryConfig {
         int max = 2;
         int backoff_ms = 200;
-        // 多端点总尝试次数上限（对应需求文档 §11.1 修订）
-        // 0 表示使用默认值（endpoints.size() × max）
+
         int max_total_attempts = 0;
-        // HTTP 429 限流时是否切换端点（对应需求文档 §11.4）
-        // 默认 false（退避重试当前端点，不切换）
+
         bool retry_on_429_switch_endpoint = false;
     } retry;
 
     struct CircuitBreakerConfig {
-        int failure_threshold = 3;  // 连续失败次数阈值（默认 3），对应 §11.4
-        int cooldown_seconds = 60;  // 冷却时间（秒，默认 60），对应 §11.4 和 §15
+        int failure_threshold = 3;
+        int cooldown_seconds = 60;
     } circuit_breaker;
 
-    // 云端推理限流配置（每轮任务维度，防止模型进入死循环无限消耗 tokens）
     struct RateLimitConfig {
-        // 每轮任务最大推理（工具调用）次数，0=不限制，默认 20
+
         int max_inferences_per_task = 20;
-        // 每轮任务最大累计 Token 数（prompt+completion），0=不限制，默认 0
+
         int max_tokens_per_task = 0;
     } rate_limit;
 
@@ -321,8 +301,6 @@ struct CloudModelConfig {
     };
     std::vector<Endpoint> endpoints;
 
-    // 云端客户端调试日志开关（[DBG] 标签日志，包含连接细节、端点选择等）
-    // 默认关闭，仅用于开发调试；生产环境建议保持关闭
     bool log_debug = false;
 };
 
@@ -332,11 +310,9 @@ struct EnterpriseCloudModelConfig {
     std::string api_key;
     std::string model;
     int timeout_seconds = 60;
-    // SSE 流式请求的读超时（秒），0=自动（timeout_seconds×5）
+
     int stream_timeout_seconds = 0;
-    // 企业云模型上下文窗口大小（tokens），用于统一提示词优化流水线的 token 预算计算
-    // 0 = 未配置，使用默认值 DEFAULT_ENTERPRISE_CLOUD_CONTEXT_SIZE（16384）
-    // 建议在 service_config.json 中显式配置，以匹配实际部署的企业云模型
+
     int context_size = 0;
     static constexpr int DEFAULT_ENTERPRISE_CLOUD_CONTEXT_SIZE = 16384;
 
@@ -367,69 +343,57 @@ struct EnterpriseCloudModelConfig {
     bool log_debug = false;
 };
 
-// 单个系统上下文子段落
 struct SystemContextSection {
-    std::string title;                  // 段落标题（如 "## Core Behavior"），空字符串表示无标题
-    std::vector<std::string> lines;     // 段落内容行（每行一个字符串，不含换行符）
-    bool enabled = true;                // 是否启用该段落
+    std::string title;
+    std::vector<std::string> lines;
+    bool enabled = true;
 };
 
-// 系统上下文配置
 struct SystemContextConfig {
-    std::vector<SystemContextSection> sections;  // 子段落列表（按顺序拼接）
+    std::vector<SystemContextSection> sections;
 };
 
-// 单条段落匹配规则
 struct PromptSectionRule {
-    std::string title_contains;  // 标题子串匹配（大小写不敏感）
-    int heading_level = 0;       // 0=任意级别，1=#，2=##，3=###
-    bool include = true;         // true=保留该段落，false=丢弃
+    std::string title_contains;
+    int heading_level = 0;
+    bool include = true;
 };
 
-// 段落过滤配置
 struct PromptSectionsConfig {
-    std::vector<PromptSectionRule> rules;  // 匹配规则列表（按顺序匹配，第一个命中的规则生效）
-    std::string default_action = "exclude"; // 未命中任何规则时的默认处理："include" 或 "exclude"
-    int max_section_tokens = 0;            // 单段落最大 token 数（0=不限制）
-    bool enabled = false;                  // 是否启用段落过滤（false=不过滤，不追加原始段落）
+    std::vector<PromptSectionRule> rules;
+    std::string default_action = "exclude";
+    int max_section_tokens = 0;
+    bool enabled = false;
 };
 
-// 提示词模板配置
 struct SystemPromptsConfig {
-    // ── 各静态段落的启用开关 ──────────────────────────────────────────────
-    // 每个字段对应 system_prompts 中同名的文本段落，false=跳过该段落不输出
+
     struct SectionsEnabled {
-        bool identity_intro           = true;  // 身份声明（始终输出）
-        bool skill_rule               = true;  // Skill 与 Tool 区分规则（仅有 SKILL 时输出）
-        bool tools_intro              = true;  // 工具列表说明
-        bool catalog_structured_intro = true;  // Skill Catalog 头部说明
+        bool identity_intro           = true;
+        bool skill_rule               = true;
+        bool tools_intro              = true;
+        bool catalog_structured_intro = true;
+        bool verification_first_rule  = true;
     } sections_enabled;
 
-    // ── Few-shot 示例的各类型启用开关 ────────────────────────────────────
     struct FewShotExamplesEnabled {
-        bool enabled            = true;  // 总开关：false=完全禁用 few-shot 示例生成
-        bool skill_correct_call = true;  // 正确的 Skill 调用示例（使用 read 工具加载 SKILL.md）
-        bool no_skill_needed    = true;  // 无需 Skill 的普通问答示例
-        // 最多生成几个 Skill 示例（取 runtime_skills 中前 N 个）
-        // 0=不生成任何 Skill 示例；1=只生成第1个；2=生成前2个（默认）；以此类推
+        bool enabled            = true;
+        bool skill_correct_call = true;
+        bool no_skill_needed    = true;
+
         int  max_skill_examples = 2;
     } few_shot_examples_enabled;
 
-    // ── 静态段落内容 ──────────────────────────────────────────────────────
-    std::string identity_intro;  // 身份声明，始终输出
-    std::string skill_rule;      // Skill 与 Tool 区分规则，仅有 SKILL 时输出
+    std::string identity_intro;
+    std::string skill_rule;
     std::string tools_intro;
     std::string catalog_structured_intro;
 
-    // Few-shot 示例的标题（由 BuildFewShotExamples 动态生成示例，
-    // 标题从此处读取，避免硬编码中文字符串）
     std::string few_shot_header    = "## Examples\n\n";
 
-    // Few-shot dynamic example templates (used by BuildFewShotExamples)
-    // {idx} placeholder is replaced at runtime with the example index (1, 2, 3...)
     std::string few_shot_skill_title_template       = "**Example {idx} - Skill Match**\n";
-    std::string few_shot_default_user_query_prefix  = "Please use the ";  // default query prefix when use_for is empty
-    std::string few_shot_default_user_query_suffix  = " skill";           // default query suffix when use_for is empty
+    std::string few_shot_default_user_query_prefix  = "Please use the ";
+    std::string few_shot_default_user_query_suffix  = " skill";
     std::string few_shot_user_label                 = "User: ";
     std::string few_shot_response_label             = "Response: ";
     std::string few_shot_correct_call_label         = "Tool(correct skill call): ";
@@ -444,48 +408,22 @@ struct RequestTraceConfig {
 };
 
 struct PromptOptimizationConfig {
-    // ── 提示词格式与工具控制 ─────────────────────────────────
-    std::string skill_catalog_format = "structured";  // "structured" 或 "simple"
-    bool enable_tool_whitelist = true;
-    std::vector<std::string> allowed_tools = {"read", "edit", "write", "exec", "web_search", "web_fetch"};
+
+    std::string skill_catalog_format = "structured";
     bool enable_skill_auto_correction = true;
-    float tool_call_temperature = 0.1f;
     SystemPromptsConfig system_prompts;
 
-    // ── 相关性过滤：按本轮问题字符串/关键词匹配筛选 SKILL/工具 ──────
-    // 只有名称或描述关键词与本轮用户提问发生字符串匹配的 SKILL/工具，才会保留在
-    // 提示词里；未命中整条删除。纯字符串规则匹配，不引入向量/embedding 语义匹配，
-    // 零额外推理延迟。enabled=false 时完全回退到"全量携带"行为，便于快速回滚。
     struct RelevanceFilterConfig {
-        bool enabled = true;                     // 总开关
-        size_t name_token_weight = 3;            // 名称子词命中权重
-        size_t description_keyword_weight = 1;   // 描述关键词命中权重
-        // 全零分兜底：中文提问与纯英文 SKILL/工具名之间中文逐字/bigram 分词永远不会
-        // 命中英文单词，导致全部候选得 0 分后被当作"全部不相关"整段清空——这与
-        // keywords.empty() 的"无法判断相关性"是同一性质的情形，理应同样回退保留。
-        // true（默认）：全部候选得 0 分时按 token 预算回退保留（skills 全量；
-        //   tools 按原始顺序 Top-K），语义上等价于"无法判断相关性≠确定无关"。
-        // false：逐字节回退到当前行为（全零分仍返回空集合，技能/工具目录整段消失）。
+        bool enabled = true;
+        size_t name_token_weight = 3;
+        size_t description_keyword_weight = 1;
+
         bool zero_hit_keep_all = true;
-        // CJK 相邻二字组（bigram）词元：BuildRelevanceKeywords 默认逐字符切分中文
-        // （单字词元噪声大），额外生成相邻两个非标点 CJK 字符的二字组（如"天气"
-        // "上海"），只解决"中文提问 vs 中文技能描述"场景，不产生中英翻译映射
-        // （不会让"天气"命中"weather"——中文提问命中纯英文工具名真正生效的是
-        // 上面的 zero_hit_keep_all，bigram 只是锦上添花）。false 时逐字节回退：
-        // 不生成任何 bigram 词元，只保留单字词元。
+
         bool cjk_bigram = true;
-        // ── D4：跨语言意图别名表 ────────────────────────────────
-        // 内置中英意图别名组（如 天气/weather、校准/calibrate/calibration）：命中任一
-        // 组员的关键词会把同组其余组员一并加入关键词集合，使「中文提问 vs 纯英文技能名」
-        // 也能产生**有区分度的分数**，而不是全员零分后退化成 zero_hit_keep_all 全量保留
-        // （全量保留在小 context 模型上等于必然溢出）。纯静态查表，零额外推理延迟。
-        // false 时逐字节回退：不做任何别名扩展，关键词集合与 D4 引入前完全一致。
+
         bool intent_aliases_enabled = true;
-        // SKILL 描述里 tags 段（形如 "tags: a, b, c" / "标签: …"）命中关键词的权重。
-        // 服务端 <available_skills> XML 只有 <name>/<description>/<location> 三个标签
-        // （ParseAvailableSkillsXml），没有 <tags>，因此 tags 只能从 description 正文里
-        // 提取——这不是新协议面，只是对既有 description 文本的结构化利用。
-        // tag_weight=0 时逐字节回退：tags 不参与打分（等价于 D4 引入前）。
+
         size_t tag_weight = 2;
         bool anchor_first_user_message = true;
         double keep_all_tools_ratio = 0.15;
@@ -496,163 +434,73 @@ struct PromptOptimizationConfig {
             "exec", "run", "shell", "command", "terminal", "bash", "powershell", "cmd"};
     } relevance_filter;
 
-    // ── D2：技能目录三档渐进披露（L0/L1/L2）────────────────────────────────
-    // 原实现只有「全量展开」与「整条删除」两档：预算不够时技能直接从目录里消失，
-    // 模型再也看不到它的存在。改为按相关性分数与 skills 分区预算自动分档，
-    // **预算耗尽时降档而不是整条删除**：
-    //   L2 (kFull)     = Path + 完整 description（与 D2 引入前的渲染逐字节一致）
-    //   L1 (kSummary)  = Path + description 摘要 + 从 description 提取的触发条件/tags 行
-    //   L0 (kNameOnly) = 单行「- name -> path (一句话摘要)」
-    // 只有连 L0 都放不进预算时才真正丢弃该技能。
-    // enabled=false 时逐字节回退到旧两档行为（FilterSkillsByRelevance + 全 L2 渲染）。
-    // 注：仅对 skill_catalog_format=="structured"（默认）生效；"simple" 格式本身已是
-    // 单行渲染，不引入第二套档位口径。
     struct SkillDisclosureConfig {
         bool enabled = true;
-        size_t l2_top_k = 2;                 // 分数最高的前 K 条优先给 L2 全量
-        size_t l1_top_k = 6;                 // 紧随其后的 K 条给 L1 摘要
-        size_t l1_summary_max_chars = 240;   // L1 摘要正文的 UTF-8 安全截断上限
-        size_t l0_summary_max_chars = 80;    // L0 一句话摘要的 UTF-8 安全截断上限
-        // Step 5 阶段 C 主线 (a)：l2_top_k 边界落在同分组内部时不切开该组——
-        // 整组同分技能一起进 L2，而不是按到达顺序把组内一部分压到 L1/L0。
-        // 动机（实测，qwen3-8b-8480 N=78 锚点池）：目标技能与同分锚点在 L1 档
-        // 被截断后 description 可见部分逐字节相同，模型 100% 发起 read 但稳定
-        // 读到目录里排序更靠前的同分候选——即"同分不可区分 + 目录 tie-break
-        // 事实上变成了选择决策器"。让整组同分一起升档，消除的正是"同一组里
-        // 谁在 L2、谁在 L1"这个人为分界。预算越界防护：每条目仍逐条过
-        // AssignSkillDetailLevels() 既有的按 token_budget 降档循环（L2 放不进
-        // 就自动退到 L1/L0，连 L0 都放不进才真正丢弃），因此扩组不会让 skills
-        // 预算溢出，只会让该组更多条目参与"能不能塞进 L2"的逐条判定。
-        //
-        // ⚠ 默认值 Step 5 收口时由 true 改为 **false**，两条实测理由：
-        //  1) 该开关已被它自己预设的判据证伪——同分池 N=78 下目标 5/5 次成功
-        //     升到 L2，`picked_rate` 仍是 0.000（与关闭时逐字段一致），零实测收益；
-        //  2) 默认开启存在未被任何用例覆盖过的目录截断风险：扩组会一直扩到覆盖
-        //     整个同分组，极端情形（如 relevance_filter.zero_hit_keep_all 兜底路径下
-        //     全体候选同得 0 分 → 同分组 = 整池）会让前若干条按 L2 吃掉几乎全部
-        //     skills 预算，随后第一个连 L0 都放不进的条目触发
-        //     AssignSkillDetailLevels() 的 `dropped = candidates.size() - idx; break;`
-        //     **整段丢弃剩余后缀**（保留集永远是按分数排序的一个前缀）。
-        //     即"逐条降档"只保证不越界，并不保证 Skills-Kept 不退化。
-        // 故默认关闭以同时满足"新行为默认安全"与"不把被证伪的行为留在默认路径上"；
-        // 开关本体保留，需要度量同分 tie-break 行为时显式置 true 即可。
-        // 该最坏情形已由 test_service.py 的
-        // `SKILL_CAPACITY: optimized scenario3b tie_group_kept_no_regress`
-        // （全同分池 N=64 断言 Skills-Kept == Skills-Total）机械覆盖。
+        size_t l2_top_k = 2;
+        size_t l1_top_k = 6;
+        size_t l1_summary_max_chars = 240;
+        size_t l0_summary_max_chars = 80;
+
         bool tie_aware_l2 = false;
     } skill_disclosure;
 
-    // ── 上下文窗口分配 ──────────────────────────────────────
-    float output_reserve_ratio = 0.20f;    // 为输出预留的上下文比率（默认 20%）
-                                            // 对应 Build() 中 context_size / 5 的硬编码
+    float output_reserve_ratio = 0.20f;
 
-    // ── 消息数量控制 ────────────────────────────────────────
-    size_t max_messages_limit = 16;         // 消息数量上限（PreFilter Step 1）
-    // Step 1 token 预算感知裁剪的压力阈值：仅当消息条数超过 max_messages_limit **且**
-    // 当前消息 token 使用率（相对 available_tokens）达到此比例时才真正触发裁剪；
-    // 否则哪怕条数超限，只要预算充足也不裁剪，交由后续 Phase 0-5/FitMessagesToContext
-    // 的 token-aware 逻辑处理。无 model handle 时无法计算使用率，保持旧行为（纯按条数裁剪）。
+    size_t max_messages_limit = 16;
+
     double token_pressure_trigger_ratio = 0.75;
-    size_t recent_window = 6;               // 最近 N 条消息视为"新消息"（受保护）
+    size_t recent_window = 6;
 
-    // ── 分级压缩阈值（字符数）──────────────────────────────
     size_t old_compress_len = 300;
     size_t recent_compress_len = 600;
     size_t tool_compress_len = 400;
 
-    // ── 压缩行为控制 ────────────────────────────────────────
-    size_t min_compress_threshold = 10;     // 节省字符数低于此值则跳过压缩（避免无效操作）
-    size_t tool_min_length = 300;           // 工具消息压缩后最小有效长度（低于此值则报错）
+    size_t min_compress_threshold = 10;
+    size_t tool_min_length = 300;
 
-    // ── 紧急截断配置 ──────────────────────────────
-    // 当最后一条 tool 消息超大导致 context overflow 时的兜底机制
     struct EmergencyTruncationConfig {
-        bool enabled = true;                // 是否启用紧急截断（默认 true）
-        float max_truncation_ratio = 0.95f; // 最大截断比例（0.0-1.0）；
-                                            // 若需要截断的 token 数超过最后一条 tool 消息的此比例，
-                                            // 则放弃截断，直接走 local_input_overflow 流程；默认 95%。
-                                            // 注：ContentCondenser（见 content_condenser.h）本身已具备
-                                            // 「预算过小退化为纯头部保留」的兜底，可安全处理任意高压缩比，
-                                            // 此阈值只需拦截「就算清空整条 tool 消息也不够」的极端病态场景，
-                                            // 不应再按旧的「仅保头」截断逻辑设置成 40% 这类保守值——否则
-                                            // 超大 tool 响应（如 80K 字符压进 8K 上下文）会被直接判定放弃
-                                            // 截断、转入 local_input_overflow，而不是走 Phase 4 真正截断。
-        int safety_margin_tokens = 30;      // 安全余量（token 数）；截断时额外预留，防止边界情况；默认 30
-        // 为 true 时，Phase 4 在受保护区间内按 token 数降序选取多条 tool 消息逐条截断，
-        // 直到累计释放量达到 tokens_to_free；为 false 时逐字节回退到旧行为（只看最后一条）。
+        bool enabled = true;
+        float max_truncation_ratio = 0.95f;
+
+        int safety_margin_tokens = 30;
+
         bool target_largest_tool_messages = true;
     } emergency_truncation;
 
-    // ── 保真截断配置（ContentCondenser：token 口径 + 头尾双保留 + 丢弃留痕）───
-    // 所有字段均可独立关闭，关闭后逐字节回退到该特性引入之前的行为：
-    //   budget_unit="chars"     → 恢复纯字符阈值语义（不接入 tokenizer，token_len 传 nullptr）
-    //   preserve_tail=false     → 退化为仅保留头部（tail_ratio 在传参时强制视为 0）
-    //   extract_high_signal=false → 不提取高信号行
-    //   drop_placeholder=false  → 整条丢弃旧消息时不插入占位痕迹
     struct FidelityConfig {
-        std::string budget_unit = "tokens";     // "tokens" 或 "chars"；tokens 模式下 *_compress_len
-                                                 // 按既有 4:1 估算比例换算为 token 预算，字符值继续
-                                                 // 作为快筛与硬上限，不产生新魔数
-        bool   preserve_tail = true;            // false 时逐字节回退到仅保留头部
-        double tail_ratio = 0.30;               // 尾部占保留额度的比例
-        bool   extract_high_signal = true;      // 是否提取高信号行（错误/异常/退出码等）
-        bool   drop_placeholder = true;         // 整条丢弃旧消息后是否插入占位痕迹
-        size_t json_head_items = 3;             // JSON 数组截断保留的首部项数
-        size_t json_tail_items = 1;             // JSON 数组截断保留的尾部项数
-        size_t max_token_probe_per_message = 8; // 单条消息 tokenizer 调用次数上限（性能护栏）
+        std::string budget_unit = "tokens";
 
-        // ── P1：token 口径精确化（CJK 感知 byte↔token 换算）───────────────
-        // 只在拿不到真实 tokenizer 时生效（CountTokens 回退分支、
-        // ContentCondenser::Condense 把 token 预算反算为字节预算时）；
-        // 有真实 tokenizer（context_override_/model_config_ 提供的 handle）
-        // 时优先使用 tokenizer，本换算比例不参与。
-        // 单位是 **UTF-8 字节**（不是字符）——全部调用点拿到的都是
-        // std::string::length()；UTF-8 中文 1 字 = 3 字节 ≈ 1 token，故 CJK 默认 3.0。
-        // 把两者都改回 4.0 即逐字节回退到旧的统一 length()/4 估算（P1 引入前的行为），
-        // 用于验证"这是真实修复"而非新魔数。
-        double cjk_bytes_per_token = 3.0;       // CJK 字节的 bytes/token 估算比例
-        double ascii_bytes_per_token = 4.0;     // 非 CJK（ASCII 等）字节的 bytes/token 估算比例
+        bool   preserve_tail = true;
+        double tail_ratio = 0.30;
+        bool   extract_high_signal = true;
+        bool   drop_placeholder = true;
+        size_t json_head_items = 3;
+        size_t json_tail_items = 1;
+        size_t max_token_probe_per_message = 8;
+
+        double cjk_bytes_per_token = 3.0;
+        double ascii_bytes_per_token = 4.0;
     } fidelity;
 
-    // ── D3：预算分区（skills / tools 分区 + 技能保底名额）──────────────────
-    // ComputeRelevanceTokenBudget() 原为单一总预算，一条超长工具输出可以把
-    // 技能目录挤没。
-    //
-    // 关键语义（曾踩坑，务必保持）：分区是**竞争时才生效**的，不是静态切蛋糕。
-    // 只有 skills 与 tools 同时存在候选（即真的会互相抢预算）时才按比例约束；
-    // 单方存在时该方可用到接近总预算，绝不无故削减 D3 引入前的既有行为。
-    // enabled=false 时逐字节回退为原先的单一总预算语义。
     struct BudgetPartitionConfig {
         bool enabled = true;
-        // 竞争发生时 skills 分区相对总预算的保底比例：无论 tools 占用多少，
-        // skills 分区至少能拿到 total_budget * skills_floor_ratio。
+
         double skills_floor_ratio = 0.15;
-        // 竞争发生时 tools 分区相对总预算的比例上限（软上限）。
+
         double tools_ratio = 0.35;
     } budget_partition;
 
-    // ── 原始系统提示词段落过滤配置 ──────────────────────────
-    // 通过配置文件选定哪些原始提示词段落被追加到优化后的提示词中
     PromptSectionsConfig prompt_sections;
 
-    // ── SubAgent 专用段落过滤配置 ────────────────────────────
-    // 与 prompt_sections 结构相同，但仅用于 SubAgent 路径：
-    // BuildSystemContext() 重建核心骨架后，从原始提示词中过滤并附加
-    // SubAgent 特有段落（如 ## Workspace / ## Subagent Context / ## Runtime 等）
     PromptSectionsConfig subagent_prompt_sections;
 
-    // ── 系统上下文配置 ──────────────────────────────────────
-    // 所有系统提示词内容均从此处读取，由 BuildSystemContext() 使用
     SystemContextConfig system_context;
 
-    // ── SpawnGuard：sessions_spawn 重复调用防护 ─────────────
-    // 当 sessions_spawn 的 tool_response 包含 childSessionKey 时，
-    // 在 tool_response 内容末尾注入强制等待指令，阻止小模型重复 spawn。
     struct SpawnGuardConfig {
-        bool enabled = true;                    // 总开关（默认开启）
-        // 注入内容的标题行（含 childSessionKey 占位符 {child_key}）
+        bool enabled = true;
+
         std::string header = "[SPAWN_GUARD] Child session accepted: {child_key}";
-        // 注入内容的正文（各行以 \n 分隔）
+
         std::string body =
             "STOP. Do NOT call sessions_spawn again.\n"
             "The child is running asynchronously. Its result will arrive as a new user message.\n"
@@ -660,33 +508,26 @@ struct PromptOptimizationConfig {
             "Wait silently. Do not repeat the spawn.";
     } spawn_guard;
 
-    // ── 长文本摘要化配置（Phase -1，在 prompt 构建前执行）──────
-    // 对应 prompt_engineering.json 中的 "prompt_optimization.long_text_summarization" 节
-
-    // 摘要缓存配置
     struct LongTextSummaryCacheConfig {
-        bool enabled = true;            // 是否启用进程内摘要缓存
-        size_t max_entries = 500;       // 最大缓存条目数（LRU 淘汰）
-        size_t max_memory_mb = 50;      // 最大内存占用（MB，超出时淘汰最旧条目）
-        int ttl_minutes = 60;           // 缓存条目生存时间（分钟）
+        bool enabled = true;
+        size_t max_entries = 500;
+        size_t max_memory_mb = 50;
+        int ttl_minutes = 60;
     };
 
-    // 长文本摘要化主配置
     struct LongTextSummarizationConfig {
-        bool enabled = false;           // 总开关（默认关闭，需在 prompt_engineering.json 中显式开启）
+        bool enabled = false;
         double trigger_ratio = 0.9;
-        double chunk_ratio = 0.45;      // 分块大小：chunk_token_limit = context_size * chunk_ratio
-        bool summarize_user_messages = true;    // 是否对最后一条 user 文本消息执行摘要
-        bool summarize_tool_responses = true;   // 是否对末尾连续 tool 消息链执行摘要
-        int max_chunks = 4;             // 最大分块数（超出时截断尾部块并输出 warning）
-        bool verbose_logging = false;   // 是否输出详细摘要过程日志
+        double chunk_ratio = 0.45;
+        bool summarize_user_messages = true;
+        bool summarize_tool_responses = true;
+        int max_chunks = 4;
+        bool verbose_logging = false;
 
-        // Map 阶段摘要指令（可通过配置文件覆盖）
         std::string map_instruction =
             "Summarize the following content concisely but completely. Preserve facts, file paths, "
             "code snippets, errors, numbers, and technical details.";
 
-        // Reduce 阶段合并指令（可通过配置文件覆盖）
         std::string reduce_instruction =
             "Merge the following partial summaries into one coherent summary. Preserve all important "
             "technical information and remove duplication.";
@@ -694,62 +535,45 @@ struct PromptOptimizationConfig {
         LongTextSummaryCacheConfig cache;
     } long_text_summarization;
 
-    // ── Task Memo（分段式记忆）配置 ─────────────────────────
-    // 对应 prompt_engineering.json 中的 "prompt_optimization.task_memo" 节
     struct TaskMemoStoreConfig {
-        size_t max_entries = 200;       // 最大缓存条目数（LRU 淘汰；指纹+首条消息双 key 注册，实际会话数约为其半）
-        size_t max_memory_mb = 20;      // 最大内存占用（MB，超出时淘汰最旧条目）
-        int ttl_minutes = 120;          // 缓存条目生存时间（分钟）
+        size_t max_entries = 200;
+        size_t max_memory_mb = 20;
     };
 
     struct TaskMemoConfig {
-        bool enabled = false;                    // 总开关（默认关闭，需在 prompt_engineering.json 中显式开启）
-        bool model_layer_enabled = true;         // 模型层深度总结开关（关闭时永远只用规则层兜底，enabled=false 时无意义）
-        double token_budget_ratio = 0.15;        // Task Memo 段落允许占用 context_size 的比例上限
-        size_t min_dropped_for_trigger = 1;      // FitMessagesToContext 本次即将丢弃的消息数达到此值才更新备忘录
-        // Update() 重渲染节流：自上一次真正重渲染以来新增的丢弃消息数达到此值才重新渲染，
-        // 未达到时直接复用上一份渲染结果（内容仍在 dropped_messages 里累积，不会丢失，
-        // 下次真正触发时通过 _folded_count 差分一次性合并）。与 min_dropped_for_trigger
-        // 不同：后者比较的是累积丢弃总量（首轮触发后事实上失效），这里比较的是本轮新增量。
+        bool enabled = false;
+        bool model_layer_enabled = true;
+        double token_budget_ratio = 0.15;
+        size_t min_dropped_for_trigger = 1;
+
         size_t render_throttle_min_new_dropped = 4;
-        size_t long_tool_chain_threshold = 4;    // 本次丢弃的连续 tool 消息数达到此值时触发模型层深度总结
-        double low_confidence_threshold = 0.5;   // 上一份备忘录 confidence 低于此值时触发模型层深度总结
-        int rule_layer_preview_chars = 160;      // 规则层 facts_constraints/completed/tool_state 预览截断长度（字符数）
-        double memo_reserve_ratio = 0.3;         // 为 tried_queries/tool_state 预留的最低渲染预算占 max_chars 的比例上限（0 表示不预留，沿用整块跳过的旧行为）
+        size_t long_tool_chain_threshold = 4;
+        double low_confidence_threshold = 0.5;
+        int rule_layer_preview_chars = 160;
+        double memo_reserve_ratio = 0.3;
 
-        // ── 原始目标锚点（original_goal_raw）鲁棒抓取 ──────────
-        size_t goal_scan_window = 3;             // 在前几条非 system 用户消息里扫描锚点候选
-        size_t min_goal_signal_chars = 20;       // 候选消息长度达到此值才视为"足够实质"；全部不达标时回退取第一条并标记 low 置信度
-        size_t goal_anchor_preview_chars = 300;  // 渲染 original_goal_raw/original_goal_refined 时的预览截断长度（字符数）
+        size_t goal_scan_window = 3;
+        size_t min_goal_signal_chars = 20;
+        size_t goal_anchor_preview_chars = 300;
 
-        // ── 连续失败不轻易放弃（与 ToolCallCircuitBreakerStore 打通，只读） ──
-        // 建议小于 ToolCallRepairConfig::CircuitBreakerConfig::consecutive_layer3_threshold（默认 3），
-        // 确保"坚持提示"先于熔断器自身的工具声明降级出现，避免同一轮提示词自相矛盾。
         int failure_streak_warn_threshold = 2;
 
-        // ── 轻量分页目录（不留原文，只存 page_id+source_range+一行类别统计 gist） ──
         struct PageDirectoryConfig {
-            size_t max_entries = 20;             // 环形缓冲上限，超出按 FIFO 淘汰最旧条目
+            size_t max_entries = 20;
         } page_directory;
 
         TaskMemoStoreConfig store;
     } task_memo;
 };
 
-// ============================================================
-// Skill 映射配置
-// ============================================================
-// Skill 映射配置（仅包含名称到路径的映射）
 using SkillMappings = std::unordered_map<std::string, std::string>;
 
-// 单个 Skill 信息（运行时从客户端请求中构建）
 struct SkillInfo {
     std::string name;
     std::string path;
-    std::string use_for;  // 从客户端请求中获取
+    std::string use_for;
 };
 
-// 运行时 Skill 信息映射（包含描述）
 using RuntimeSkillMappings = std::unordered_map<std::string, SkillInfo>;
 
 class IModelConfig
@@ -767,21 +591,11 @@ public:
         return prompt_;
     }
 
-    int context_size() const
-    {
-        return context_size_;
-    }
-
     const std::string &get_model_path() const{return model_path_;}
 
     const std::string &get_model_name() const
     {
         return model_name_;
-    }
-
-    const std::string &getloraAdapter() const
-    {
-        return loraAdapter;
     }
 
     bool getisOutputAllText() const
@@ -804,18 +618,6 @@ public:
         return num_response_;
     }
 
-    int getminOutputNum() const
-    {
-        return minOutputNum;
-    }
-
-    float getloraAlpha() const
-    {
-        return loraAlpha;
-    }
-
-    json get_model_list() const;
-
     const QNNEmbedding &get_qnn_embedding() const
     {
         return qnn_embedding_;
@@ -833,25 +635,16 @@ public:
 
     std::weak_ptr<ContextBase> get_genie_model_handle() {return genieModelHandle;}
 
-    // 获取用于安全检查/复杂度评估/脱敏的模型句柄（始终使用当前活跃模型）
-    // 默认实现：返回全局 genieModelHandle（与 get_genie_model_handle() 等价）
-    // ModelManager 重写此方法以返回当前活跃模型的句柄
     virtual std::weak_ptr<ContextBase> GetDefaultModelHandle() const
     {
         return genieModelHandle;
     }
 
-    // 检查本地模型是否可用（虚方法，供 ModelManager 重写）
-    // 默认实现：检查全局 genieModelHandle 是否有效
     virtual bool IsLocalModelAvailable() const
     {
         return genieModelHandle != nullptr;
     }
 
-    // 获取当前活跃模型的 ModelInstanceConfig（虚方法，供 ModelManager 重写）
-    // 默认实现：返回 nullptr（无独立的 ModelInstanceConfig）
-    // 用途：BuildLocalModelPrompt 等安全相关函数应优先使用此方法获取模型配置，
-    //       而非直接读取全局 IModelConfig 的成员
     virtual const class ModelInstanceConfig* GetDefaultInstanceConfig() const
     {
         return nullptr;
@@ -892,6 +685,11 @@ public:
         return adaptive_thinking_config_;
     }
 
+    const GenerationRepeatGuardConfig &GetGenerationRepeatGuardConfig() const
+    {
+        return generation_repeat_guard_config_;
+    }
+
     const PromptOptimizationConfig& GetPromptOptimizationConfig() const
     {
         return prompt_optimization_config_;
@@ -917,10 +715,6 @@ public:
         return prompt_optimization_config_.system_context;
     }
 
-    // ── 运行时 Skill 映射（每次请求从客户端 <available_skills> XML 动态解析）──────
-    // 由 BuildSystemContext() 在构建 prompt 时写入，
-    // 供 ResponseDispatcher::AutoCorrectSkillCall() 读取以纠正错误的 SKILL 调用。
-    // 线程安全：使用 shared_ptr<mutex> 保护（shared_ptr 可拷贝，不影响 IModelConfig 拷贝构造）
     void SetRuntimeSkillMappings(const SkillMappings& mappings)
     {
         std::lock_guard<std::mutex> lock(*runtime_skill_mappings_mutex_);
@@ -940,10 +734,8 @@ public:
     std::string known_model_path_;
     std::vector<std::string> config_model_name_list_;
     mutable std::vector<std::string> model_list_;
-    mutable int context_size_{DEFAULT_CONTEXT_SIZE};
-    // 修复：使用 json::object() 而非 json{}（默认构造）。
-    // 在 nlohmann::ordered_json 中，json{} 默认构造为 array 类型（空数组），
-    // 而非 null 或 object，会导致 ChatHistory::GetUserMessage 中出现 type=array 错误。
+    std::shared_ptr<std::mutex> model_list_mutex_{std::make_shared<std::mutex>()};
+
     json prompt_{json::object()};
     bool thinking_model_{false};
     PromptType prompt_type_{};
@@ -960,7 +752,6 @@ public:
     float loraAlpha = 0.5;
     QNNEmbedding qnn_embedding_;
 
-    // 路由与云端配置（从 service_config.json 加载）
     RoutingConfig routing_config_;
     CloudModelConfig cloud_model_config_;
     EnterpriseCloudModelConfig enterprise_cloud_model_config_;
@@ -968,15 +759,12 @@ public:
     ToolCallRepairConfig tool_call_repair_config_;
     WindowsShellHintConfig windows_shell_hint_config_;
     AdaptiveThinkingConfig adaptive_thinking_config_;
-    
-    // Prompt 优化配置
+    GenerationRepeatGuardConfig generation_repeat_guard_config_;
+
     PromptOptimizationConfig prompt_optimization_config_;
 
     RequestTraceConfig request_trace_config_;
 
-    // 运行时 Skill 映射（每次请求从客户端 <available_skills> XML 动态解析写入）
-    // 供 ResponseDispatcher::AutoCorrectSkillCall() 读取，以纠正模型错误的 SKILL 直接调用
-    // 使用 shared_ptr<mutex> 而非 mutex 成员，避免 IModelConfig 拷贝构造被删除
     SkillMappings runtime_skill_mappings_;
     std::shared_ptr<std::mutex> runtime_skill_mappings_mutex_{std::make_shared<std::mutex>()};
 
@@ -985,4 +773,4 @@ public:
     friend class Config;
 };
 
-#endif //MODEL_CONFIG_H
+#endif

@@ -76,4 +76,4 @@ private:
     IModelConfig *model_config_;
 };
 
-#endif // DESENSITIZER_H
+#endif

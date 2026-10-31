@@ -8,16 +8,6 @@
 
 #ifndef MASKED_SCATTER_H
 #define MASKED_SCATTER_H
-/*
- * masked_scatter.h
- *
- * 从 Qwen2_5::MergeEmbedding() 抽取的通用逻辑：按 image_token_id 在 prompt_token 中出现的
- * 位置，把视觉 encoder 输出的 embedding 合并进文本 embedding 序列，支持两种分支
- * （与原实现完全一致，行为未做任何改写）：
- *  1) 图像 token 数量与视觉特征条目数量精确匹配：逐行直接替换。
- *  2) 仅存在 1 个占位 token：展开为 N 个连续的 image_token_id，并对 embedding 做 slice+concat。
- * 仅供 Qwen3VL 调用，qwen_2_5.cpp/h 保持原样不做任何改动。
- */
 
 #include <algorithm>
 #include <cstdint>
@@ -155,13 +145,6 @@ namespace torch_helper
         }
     }
 
-    // Qwen3-VL deepstack 近似折算：真实架构是在解码器第 0/1/2 层输出后把
-    // deepstack_visual_embeds_i 残差相加（transformers/models/qwen3_vl/modeling_qwen3_vl.py
-    // language_model() 的 deepstack_visual_embeds 参数），但当前 Genie SDK 的
-    // GenieDialog/GenieNode 接口都不支持向已编译好的解码器中间层注入具名张量
-    // （见 qwen3_vl.md），唯一可控的通道是喂给 embeddingQuery 的那一段扁平输入
-    // embedding；因此把 3 层 deepstack 特征直接累加进 image_rows 对应的行，
-    // 在进入解码器之前一次性折算进去。
     template<typename T>
     void AddDeepstackResidual(const std::vector<size_t> &image_rows,
                               size_t D,
@@ -188,4 +171,4 @@ namespace torch_helper
     }
 }
 
-#endif //MASKED_SCATTER_H
+#endif

@@ -68,7 +68,7 @@ public:
 
     const MessageCategoryStats& GetStats() const { return prefilter_stats_; }
 
-    const std::vector<GenieChatMessage>& GetDroppedMessages() const { return prefilter_dropped_messages_; }
+    const std::vector<TaskMemoBuilder::RepeatDetection>& GetRepeatDetections() const { return repeat_detections_; }
 
     std::string CleanMessageContent(const std::string& content);
 
@@ -83,11 +83,7 @@ private:
 
     nlohmann::ordered_json ValidateToolCallSequence(const nlohmann::ordered_json& msg);
 
-    size_t SafeEraseToolChain(nlohmann::ordered_json& messages, size_t assistant_idx);
-
     void CaptureDroppedMessages(const nlohmann::ordered_json& original, const nlohmann::ordered_json& kept);
-
-    bool ShouldKeepFull(const GenieChatMessage& msg) const;
 
     size_t CountTokens(const std::string& text);
 
@@ -124,9 +120,12 @@ private:
     std::vector<GenieChatMessage> prefilter_dropped_messages_;
     std::unordered_set<size_t> repeat_protected_raw_;
     std::unordered_set<size_t> repeat_must_keep_raw_;
+    std::vector<TaskMemoBuilder::RepeatDetection> repeat_detections_;
     size_t repeat_retain_budget_{0};
 };
 
 void ClearPreFilterSessionStates();
 
-#endif // MESSAGE_PRE_FILTER_H
+std::string CanonicalToolCallKey(const nlohmann::ordered_json& tool_call);
+
+#endif

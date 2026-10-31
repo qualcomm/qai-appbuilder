@@ -56,4 +56,4 @@ private:
     std::shared_ptr<GenieRoutingGateway> genieRoutingGateway_;
 };
 
-#endif //CHAT_REQUEST_HANDLER_H
+#endif

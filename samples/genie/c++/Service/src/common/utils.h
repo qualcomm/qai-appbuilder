@@ -49,12 +49,8 @@ struct File
                                const std::string &part,
                                std::vector<std::string> *files = nullptr);
 
-    // 优先返回 model_dir + "/genie_config.json"（若存在），否则回退返回 model_dir + "/config.json"。
-    // 不强制返回路径实际存在，调用点保留原有的 IsFileExist 判断逻辑。
     static std::string ResolveModelConfigPath(const std::string &model_dir);
 
-    // 把 file_path（若为相对路径则先相对 base_dir 展开）weakly_canonical 规范化后向上 levels 级，
-    // 层级不足/规范化失败时返回空字符串，由调用点决定回退策略。
     static std::string DeriveAncestorDir(const std::string &file_path,
                                          const std::string &base_dir,
                                          int levels);
@@ -128,7 +124,6 @@ inline std::string str_replace(const std::string &str, const std::string &from, 
 template<typename T>
 T get_json_value(const json &jsonData, const std::string &key, const T &defaultValue);
 
-
 inline std::string json_to_str(const json &data)
 {
     return data.dump(-1, ' ', false, json::error_handler_t::replace);
@@ -170,13 +165,6 @@ inline std::string escape_string(const std::string &input)
     return result;
 }
 
-/**
- * Sanitize invalid UTF-8 byte sequences in-place.
- * Replaces any invalid UTF-8 byte with '?' to prevent Rust tokenizer
- * (GenieTokenizer_encode / GenieDialog_query) from panicking with Utf8Error.
- *
- * Returns true if any invalid bytes were found and replaced.
- */
 inline bool sanitize_utf8_inplace(std::string& input)
 {
     bool has_invalid = false;
@@ -184,10 +172,10 @@ inline bool sanitize_utf8_inplace(std::string& input)
     {
         unsigned char byte = static_cast<unsigned char>(input[i]);
         if ((byte & 0x80) == 0) {
-            // ASCII single-byte character, valid
+
             ++i;
         } else if ((byte & 0xE0) == 0xC0) {
-            // 2-byte sequence
+
             if (i + 1 < input.size() &&
                 (static_cast<unsigned char>(input[i+1]) & 0xC0) == 0x80) {
                 i += 2;
@@ -197,7 +185,7 @@ inline bool sanitize_utf8_inplace(std::string& input)
                 ++i;
             }
         } else if ((byte & 0xF0) == 0xE0) {
-            // 3-byte sequence
+
             if (i + 2 < input.size() &&
                 (static_cast<unsigned char>(input[i+1]) & 0xC0) == 0x80 &&
                 (static_cast<unsigned char>(input[i+2]) & 0xC0) == 0x80) {
@@ -208,7 +196,7 @@ inline bool sanitize_utf8_inplace(std::string& input)
                 ++i;
             }
         } else if ((byte & 0xF8) == 0xF0) {
-            // 4-byte sequence
+
             if (i + 3 < input.size() &&
                 (static_cast<unsigned char>(input[i+1]) & 0xC0) == 0x80 &&
                 (static_cast<unsigned char>(input[i+2]) & 0xC0) == 0x80 &&
@@ -220,7 +208,7 @@ inline bool sanitize_utf8_inplace(std::string& input)
                 ++i;
             }
         } else {
-            // Invalid leading byte (continuation byte or out-of-range byte)
+
             input[i] = '?';
             has_invalid = true;
             ++i;
@@ -231,30 +219,20 @@ inline bool sanitize_utf8_inplace(std::string& input)
 
 inline void clean_control_characters_inplace(std::string& input)
 {
-    // Pass 1: Replace ASCII control characters (< 0x20) except whitespace
+
     for (char& c : input)
     {
         unsigned char uc = static_cast<unsigned char>(c);
-        // Keep printable ASCII (>= 0x20), UTF-8 bytes (>= 0x80), and specific whitespace
-        // Replace invalid control characters (like \0) with a safe placeholder
+
         if (uc < 0x20 && uc != '\n' && uc != '\r' && uc != '\t')
         {
             c = '?';
         }
     }
 
-    // Pass 2: Fix invalid UTF-8 multi-byte sequences
-    // This prevents Rust tokenizer (GenieTokenizer_encode / GenieDialog_query) from panicking
-    // with "Utf8Error" when it receives invalid UTF-8 byte sequences.
     sanitize_utf8_inplace(input);
 }
 
-// Buffers raw text fed in incrementally (e.g. one LLM token at a time) and only forwards
-// complete UTF-8 characters to the callback, holding back any trailing partial multi-byte
-// sequence until the continuation bytes arrive. This is the correct fix for streaming output
-// (as opposed to sanitize_utf8_inplace, which replaces bytes and would corrupt every
-// multi-byte character that happens to be split across a token boundary).
-// https://github.com/alibaba/MNN/blob/master/apps/Android/MnnLlmChat/app/src/main/cpp/utf8_stream_processor.hpp
 class Utf8StreamProcessor
 {
 public:
@@ -299,22 +277,11 @@ private:
     std::function<void(std::string &)> callback;
 };
 
-/**
- * Advance a byte offset within a UTF-8 string forward until it points to the start of a valid
- * UTF-8 character (or the end of the string).  Use this to fix up an offset that was computed
- * by raw byte arithmetic and may therefore land in the middle of a multi-byte sequence.
- *
- * @param str    The UTF-8 string
- * @param offset Byte offset that may be inside a multi-byte character
- * @return       The smallest offset >= the input that is either the end of the string or the
- *               first byte of a valid UTF-8 character (i.e. not a continuation byte 10xxxxxx)
- */
 inline size_t utf8_align_start(const std::string &str, size_t offset)
 {
     const uint8_t *data = reinterpret_cast<const uint8_t *>(str.data());
     size_t len = str.size();
-    // Continuation bytes have the pattern 10xxxxxx (0x80..0xBF).
-    // Skip forward past any continuation bytes so we land on a leading byte.
+
     while (offset < len && (data[offset] & 0xC0) == 0x80)
     {
         ++offset;
@@ -322,15 +289,6 @@ inline size_t utf8_align_start(const std::string &str, size_t offset)
     return offset;
 }
 
-/**
- * Safely truncate a UTF-8 string to a maximum byte length without breaking multi-byte characters.
- * If the string is longer than max_bytes, it will be truncated and suffix will be appended.
- *
- * @param str The input UTF-8 string
- * @param max_bytes Maximum number of bytes (not characters) to keep
- * @param suffix Suffix to append when truncated (default: "...")
- * @return Truncated string with valid UTF-8 encoding
- */
 inline std::string safe_utf8_truncate(const std::string &str, size_t max_bytes, const std::string &suffix = "...")
 {
     if (str.length() <= max_bytes)
@@ -338,7 +296,6 @@ inline std::string safe_utf8_truncate(const std::string &str, size_t max_bytes, 
         return str;
     }
 
-    // Reserve space for suffix
     size_t target_length = max_bytes > suffix.length() ? max_bytes - suffix.length() : 0;
     if (target_length == 0)
     {
@@ -353,36 +310,34 @@ inline std::string safe_utf8_truncate(const std::string &str, size_t max_bytes, 
     {
         uint8_t byte = data[i];
 
-        // Determine the number of bytes in this UTF-8 character
         int char_bytes = 1;
         if ((byte & 0x80) == 0)
         {
-            // Single-byte character (0xxxxxxx)
+
             char_bytes = 1;
         }
         else if ((byte & 0xE0) == 0xC0)
         {
-            // Two-byte character (110xxxxx)
+
             char_bytes = 2;
         }
         else if ((byte & 0xF0) == 0xE0)
         {
-            // Three-byte character (1110xxxx)
+
             char_bytes = 3;
         }
         else if ((byte & 0xF8) == 0xF0)
         {
-            // Four-byte character (11110xxx)
+
             char_bytes = 4;
         }
         else
         {
-            // Invalid UTF-8 start byte, skip it
+
             i++;
             continue;
         }
 
-        // Check if the complete character fits within the target length
         if (i + char_bytes <= target_length)
         {
             safe_length = i + char_bytes;
@@ -390,7 +345,7 @@ inline std::string safe_utf8_truncate(const std::string &str, size_t max_bytes, 
         }
         else
         {
-            // The character would be cut off, stop here
+
             break;
         }
     }
@@ -398,29 +353,6 @@ inline std::string safe_utf8_truncate(const std::string &str, size_t max_bytes, 
     return str.substr(0, safe_length) + suffix;
 }
 
-/**
- * P1（token 口径精确化）：估算一段文本的"有效 bytes-per-token"换算比例。
- *
- * ⚠️ 量纲约定（踩过一次坑，务必保持）：本函数的输入与返回值**统一以 UTF-8 字节
- * 为单位**，因为全部三个调用点（message_pre_filter.cpp 的 CountTokens 回退分支、
- * content_condenser.cpp 的 budget 反算、prompt_optimizer.cpp 的段落截断估算）
- * 拿到的都是 `std::string::length()`（字节数）与 `safe_utf8_truncate` 的字节预算。
- * 早先版本按"字符"统计占比却被按字节使用，纯中文场景下 token 数被高估约 3 倍
- * （1 字 = 3 字节），反向落进"过度压缩把有效信息压没"的故障模式。
- *
- * 换算口径：UTF-8 中文 1 字 = 3 字节 ≈ 1 token（故 CJK 约 3 字节/token）；ASCII
- * 英文约 4 字节/token。估算 token 数 = cjk_bytes / cjk_bytes_per_token +
- * other_bytes / ascii_bytes_per_token，返回值 = total_bytes / 估算 token 数，
- * 因此它与"按字节乘除"的三个调用点自洽。两个参数都传 4.0 时返回值恒为 4.0，
- * 即逐字节回退到 P1 引入前的统一 `length()/4` 估算。
- *
- * 只在拿不到真实 tokenizer 时使用（有 handle 一律优先走真实 tokenizer）。
- *
- * @param text                  文本内容（UTF-8）
- * @param cjk_bytes_per_token   CJK 字节的 bytes/token 比例（配置 fidelity.cjk_bytes_per_token，默认 3.0）
- * @param ascii_bytes_per_token 非 CJK 字节的 bytes/token 比例（配置 fidelity.ascii_bytes_per_token，默认 4.0）
- * @return 有效 bytes/token 比例；text 为空或参数非法时返回 ascii_bytes_per_token
- */
 inline double EstimateCjkAwareBytesPerToken(const std::string &text,
                                             double cjk_bytes_per_token,
                                             double ascii_bytes_per_token)
@@ -461,7 +393,7 @@ inline double EstimateCjkAwareBytesPerToken(const std::string &text,
         }
         else
         {
-            // 非法前导字节，跳过一个字节继续（按非 CJK 字节计入）
+
             ++i;
             continue;
         }
@@ -469,7 +401,7 @@ inline double EstimateCjkAwareBytesPerToken(const std::string &text,
         {
             code_point = (code_point << 6) | (data[i + k] & 0x3F);
         }
-        // CJK 常见区间：统一表意文字（含扩展 A）、CJK 符号与标点、全角字符
+
         if ((code_point >= 0x4E00 && code_point <= 0x9FFF) ||
             (code_point >= 0x3400 && code_point <= 0x4DBF) ||
             (code_point >= 0x3000 && code_point <= 0x303F) ||

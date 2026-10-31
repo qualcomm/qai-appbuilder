@@ -19,7 +19,7 @@ using json = nlohmann::ordered_json;
 enum class SensitiveEntityType {
     PHONE, EMAIL, IDCARD, BANKCARD, API_KEY, TOKEN, PRIVATE_KEY, PASSWORD_VALUE,
     PASSWORD_KW, INTERNAL_URL, PATH, DEVICE_ID,
-    KEYWORD,   // 关键词词典命中（通用，用于 structured_placeholder 脱敏）
+    KEYWORD,
     UNKNOWN
 };
 
@@ -131,4 +131,4 @@ inline std::string to_string(RouteTarget target)
     }
 }
 
-#endif // CONTENT_SECURITY_TYPES_H
+#endif

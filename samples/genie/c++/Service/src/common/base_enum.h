@@ -33,7 +33,6 @@ struct BaseEnum
         return v_ != other.v_;
     }
 
-
     constexpr BaseEnum &operator|=(const BaseEnum &other)
     {
         v_ |= other.v_;
@@ -54,4 +53,4 @@ protected:
     int v_{};
 };
 
-#endif //BASE_ENUM_H
+#endif

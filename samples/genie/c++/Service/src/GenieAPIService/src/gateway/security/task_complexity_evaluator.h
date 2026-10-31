@@ -66,4 +66,4 @@ private:
     std::unordered_map<std::string, std::list<std::pair<std::string, CacheEntry>>::iterator> cache_map_;
 };
 
-#endif // TASK_COMPLEXITY_EVALUATOR_H
+#endif

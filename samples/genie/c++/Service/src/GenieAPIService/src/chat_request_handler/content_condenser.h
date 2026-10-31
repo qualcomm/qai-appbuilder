@@ -56,4 +56,4 @@ private:
     static std::string CondenseJsonArray(const nlohmann::json& arr, size_t head_n, size_t tail_n, size_t max_chars);
 };
 
-#endif // CONTENT_CONDENSER_H
+#endif

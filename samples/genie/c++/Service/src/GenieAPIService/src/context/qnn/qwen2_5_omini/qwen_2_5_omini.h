@@ -23,7 +23,7 @@ public:
         kPromptTemplate = "<|im_start|>system\n"
                           "%s<|im_end|>\n"
                           "<|im_start|>user\n%s"
-                          "%s" // <|audio_bos|><|IMAGE|><|audio_eos|> and <|vision_bos|><|AUDIO|><|vision_eos|>
+                          "%s"
                           "<|im_end|>\n<|im_start|>assistant\n";
 
         cols_ = 2048;
@@ -99,7 +99,7 @@ private:
     );
 
     std::vector<float> PaddedInputFeatures(
-            std::vector<float> &&padded_feature_flat, // size == N * C * T, layout (N, C, T)
+            std::vector<float> &&padded_feature_flat,
             size_t N, size_t C, size_t T);
 
     std::vector<std::vector<std::vector<float>>> MakeMask3DFromFlat(
@@ -108,7 +108,7 @@ private:
             size_t L);
 
     std::vector<float> MakeUpdatedPaddedMaskFrom3D(
-            const std::vector<std::vector<std::vector<float>>> &padded_mask, // [N][1][T]
+            const std::vector<std::vector<std::vector<float>>> &padded_mask,
             size_t max_len);
 
     std::vector<std::vector<int32_t>> MakeBatchMaskAfterCnn(const std::vector<int64_t> &tensor_len);
@@ -116,7 +116,7 @@ private:
     std::vector<int32_t> ComputeCuSeqlensFromMask(const std::vector<std::vector<int32_t>> &mask);
 
     std::vector<float> AttentionToPadded(
-            std::vector<float> &&attention_mask, // size == 1*H*H
+            std::vector<float> &&attention_mask,
             size_t H,
             std::vector<int32_t> &cu_seqlens,
             size_t P_H = 1000,
@@ -134,4 +134,4 @@ private:
     std::vector<float> embedded_bin_;
 };
 
-#endif //QWEN_2_5_OMINI_H
+#endif

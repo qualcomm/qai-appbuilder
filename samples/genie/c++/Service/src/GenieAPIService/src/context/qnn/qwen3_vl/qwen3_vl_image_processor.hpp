@@ -7,20 +7,6 @@
 //==============================================================================
 
 #pragma once
-/*
- * qwen3_vl_image_processor.hpp
- *
- * 封装：float全流程解码图片 → Alpha白底合成(float空间) → smart_resize(按32对齐) →
- *      float缩放 → patch展开并归一化到[-1,1] → 写出buffer
- * 说明：
- *  1) 依赖 stb_image / stb_image_resize2（头文件实现库），STB_IMAGE_IMPLEMENTATION /
- *     STB_IMAGE_RESIZE2_IMPLEMENTATION 已由 phi4mm.cpp 在同一链接目标内定义一次，
- *     本文件不重复定义。
- *  2) 图像解码/缩放全程走 float 通道（同 phi4mm.cpp 的 stbi_loadf + stbir_quick_resize_helper
- *     流水线），避免"先转 uint8 再手动归一化"引入的二次量化损失。
- *  3) patchify 展平顺序（外层 ho,wo,mh,mw；内层 c,t,ph,pw）与 qwen25_image_processor.hpp
- *     一致（数学公式同源，仅 PATCH_SIZE/MEAN/STD/对齐因子不同）。
- */
 
 #include <algorithm>
 #include <cassert>
@@ -38,22 +24,20 @@ namespace qwen3_vl
     class Qwen3VLImageProcessor
     {
     public:
-        // --- 常量：与 Qwen3-VL preprocessor_config.json / vision_config 一致 ---
+
         static constexpr int PATCH_SIZE = 16;
         static constexpr int TEMPORAL_PATCH_SIZE = 2;
         static constexpr int MERGE_SIZE = 2;
         static constexpr int SPATIAL_MERGE_SIZE = 2;
-        static constexpr int PATCH_FACTOR = PATCH_SIZE * SPATIAL_MERGE_SIZE; // =32，对齐因子
+        static constexpr int PATCH_FACTOR = PATCH_SIZE * SPATIAL_MERGE_SIZE;
 
-        // 纯线性映射到[-1,1]（与 CLIP mean/std 不同）
         static constexpr float MEAN[3] = {0.5f, 0.5f, 0.5f};
         static constexpr float STD[3] = {0.5f, 0.5f, 0.5f};
 
-        // 用于承载 float [0,1] 空间的 RGB(A) 图像
         struct ImageF32
         {
-            int w = 0, h = 0, c = 0; // c=3或4
-            std::vector<float> data; // 行主序，交错排列
+            int w = 0, h = 0, c = 0;
+            std::vector<float> data;
         };
 
     public:
@@ -73,14 +57,13 @@ namespace qwen3_vl
             GeneratePixelValuesToBuffer(rgb_resized, out, rows, cols);
         }
 
-        // 仅计算 smart_resize 的结果尺寸（便于调用方预估）
         static std::pair<int, int> SmartResizeOnly(int request_h, int request_w)
         {
             return smart_resize(request_h, request_w, PATCH_FACTOR);
         }
 
     private:
-        // --- 工具函数（与 qwen25_image_processor.hpp 相同的数学公式，仅对齐因子不同） ---
+
         static inline int round_by_factor(double number, int factor)
         {
             return static_cast<int>(std::llround(number / factor) * factor);
@@ -134,8 +117,6 @@ namespace qwen3_vl
             return smart_resize_impl(height, width, factor, min_pixels, max_pixels);
         }
 
-        // 解码为 float [0,1] 像素：stbi_ldr_to_hdr_gamma(1.0f) 关闭默认 gamma 变换
-        // （与 phi4mm.cpp 的 float 解码流水线一致），仅在这一次解码期间临时切换该全局状态。
         static ImageF32 LoadImageF32_STB(uint8_t *buf, unsigned long dwLen)
         {
             stbi_ldr_to_hdr_gamma(1.0f);
@@ -163,7 +144,7 @@ namespace qwen3_vl
                 else
                     if (n == 1)
                     {
-                        // 灰度 → RGB
+
                         out.w = w;
                         out.h = h;
                         out.c = 3;
@@ -179,7 +160,7 @@ namespace qwen3_vl
                     else
                         if (n == 2)
                         {
-                            // 灰度+Alpha → RGBA
+
                             out.w = w;
                             out.h = h;
                             out.c = 4;
@@ -203,7 +184,6 @@ namespace qwen3_vl
             return out;
         }
 
-        // RGBA → RGB 的白底合成（float [0,1] 空间）：c=3直接返回，c=4执行 alpha over 白色。
         static ImageF32 ToRGBWhiteBackground(const ImageF32 &in)
         {
             if (in.c == 3) return in;
@@ -227,9 +207,6 @@ namespace qwen3_vl
             return out;
         }
 
-        // 使用 stb_image_resize2 的 medium api（stbir_resize，跨编译单元可用，不依赖实现宏）
-        // 进行缩放（float RGB）。注意：必须用 STBIR_FILTER_CATMULLROM，不能用 STBIR_FILTER_MITCHELL
-        // —— 在特定放大比例下会导致 stb 库内部越界访问，必现崩溃（Phi4-mm 已踩过的坑）。
         static ImageF32 ResizeRGB_STB(const ImageF32 &in, int out_w, int out_h)
         {
             if (in.c != 3) throw std::runtime_error("ResizeRGB_STB expects RGB input");
@@ -249,8 +226,6 @@ namespace qwen3_vl
             return out;
         }
 
-        // 生成 pixel_values（float32）：patchify 展平顺序与 qwen25_image_processor.hpp 一致
-        // （外层 ho,wo,mh,mw；内层 c,t,ph,pw），仅 patch_size 与归一化公式不同。
         static void GeneratePixelValuesToBuffer(const ImageF32 &rgb,
                                                 std::vector<float> &out,
                                                 int &rows, int &cols)
@@ -269,7 +244,6 @@ namespace qwen3_vl
             const int grid_w_outer = grid_w / MERGE_SIZE;
             const int T = TEMPORAL_PATCH_SIZE;
 
-            // 归一化并复制到两个时间帧（t=0与t=1相同），像素已是 float [0,1]，无需再除以255。
             std::vector<float> norm(static_cast<size_t>(T) * 3 * static_cast<size_t>(H) * static_cast<size_t>(W));
             auto idx4 = [&](int t, int c, int y, int x)
             {
@@ -290,8 +264,7 @@ namespace qwen3_vl
                 }
             }
 
-            // 展平顺序：外层 ho, wo, mh, mw；内层 c, t, ph, pw —— 与qwen25_image_processor.hpp一致。
-            rows = 1 * grid_h * grid_w; // grid_t=1
+            rows = 1 * grid_h * grid_w;
             cols = 3 * T * PATCH_SIZE * PATCH_SIZE;
             out.assign(static_cast<size_t>(rows) * cols, 0.0f);
 

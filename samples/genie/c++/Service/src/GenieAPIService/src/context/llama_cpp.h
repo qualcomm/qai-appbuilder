@@ -11,6 +11,8 @@
 
 #include "context_base.h"
 
+#include <atomic>
+
 class TargetWeightsLoadError : public std::runtime_error
 {
 public:
@@ -41,11 +43,12 @@ public:
 
     static void SetPrefixCacheEnabled(bool enabled);
 
-    // n = prompt_engineering.json 的 llama_prefix_cache.head_checkpoints；
-    // from_config = 该键是否**显式**出现（而不是取了默认值）。显式给出后，规划器推导的值不再覆盖它。
+    static void SetDegenerateRepeatGuardEnabled(bool enabled);
+
+    static void SetDegenerateRepeatGuardMaxPeriod(int max_period);
+
     static void SetPrefixHeadCheckpoints(int n, bool from_config);
 
-    // 应用规划器按主机可用内存推导出的检查点份数。显式配置存在时返回 false 且不改动。
     static bool ApplyPlannedHeadCheckpoints(int n);
 
     bool UsesCrossRequestPrefixCache() const override;
@@ -56,7 +59,7 @@ private:
     class Impl;
 
     Impl *impl_;
-    bool stopped_by_output_limit_ = false;
+    std::atomic<bool> stopped_by_output_limit_{false};
 };
 
-#endif //LLAMA_CPP_H
+#endif

@@ -21,6 +21,32 @@
 #include <system_error>
 #include <vector>
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
+static Genie_Status_t GenieDialogCreateGuarded(const GenieDialogConfig_Handle_t config,
+                                               GenieDialog_Handle_t *dialog, bool *faulted)
+{
+    *faulted = false;
+    __try
+    {
+        return GenieDialog_create(config, dialog);
+    }
+    __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER
+                                                                : EXCEPTION_CONTINUE_SEARCH)
+    {
+        *faulted = true;
+        return GENIE_STATUS_ERROR_GENERAL;
+    }
+}
+#endif
+
 struct QnnWatermarkState
 {
     const GenieWatermarkProviderVTable *vtable{nullptr};
@@ -72,7 +98,6 @@ void QnnWatermarkSamplerCallback(const uint32_t logitsSize, const void *logits,
         return;
     }
 
-    // n_vocab 不提前从配置里取，直接用回调收到的维度懒初始化插件侧状态
     if (!state->hook_created)
     {
         state->hook = state->vtable->token_hook_create(n_vocab, state->seed);
@@ -97,14 +122,11 @@ void QnnWatermarkSamplerCallback(const uint32_t logitsSize, const void *logits,
 
     if (!state->hook)
     {
-        // 插件侧创建失败：退化为普通 argmax（官方参考实现 samplerUserDataProcess 的选词
-        // 逻辑），保证 custom 模式下仍有确定性输出，而不是留一个未初始化的 tokens[0]。
+
         tokens[0] = static_cast<int32_t>(std::distance(src, std::max_element(src, src + n_vocab)));
         return;
     }
 
-    // logits 是 const 的：即使物理上可写，原地修改 SDK 拥有的缓冲区也是未定义行为，
-    // 因此复制一份可写副本再交给插件打分。
     std::vector<float> logits_copy(src, src + n_vocab);
     if (state->ids_cache.size() != n_vocab)
     {
@@ -132,7 +154,7 @@ void QnnWatermarkSamplerCallback(const uint32_t logitsSize, const void *logits,
     state->vtable->token_hook_accept(state->hook, best_id);
 }
 
-} // namespace
+}
 
 void GenieLog_Callback(const GenieLog_Handle_t  /*handle*/,
                        const char *fmt,
@@ -177,11 +199,32 @@ void GenieContext::inference_thread()
 {
     while (true)
     {
-        std::unique_lock<std::mutex> lock(m_request_lock);
-        m_request_cond.wait(lock,
-                            [this] { return m_request_ready.load(); });     // m_request_ready == true, wakeup thread; m_request_ready == false, sleep continually.
-        if (m_thread_exit)
+        bool exit_requested = false;
         {
+            std::unique_lock<std::mutex> lock(m_request_lock);
+            m_request_cond.wait_for(lock, std::chrono::milliseconds(500),
+                                    [this] { return m_request_ready.load() || m_thread_exit.load(); });
+            if (m_thread_exit)
+            {
+                exit_requested = true;
+            }
+            else if (!m_request_ready)
+            {
+                continue;
+            }
+            else
+            {
+                m_request_ready = false;
+            }
+        }
+
+        if (exit_requested)
+        {
+            {
+                std::lock_guard<std::mutex> stream_guard(m_stream_lock);
+                m_inference_busy = false;
+            }
+            m_stream_cond.notify_all();
             return;
         }
 
@@ -223,25 +266,24 @@ void GenieContext::inference_thread()
             My_Log{My_Log::Level::kError} << "GenieDialogQuery threw unknown exception" << std::endl;
         }
 
-        m_inference_busy = false;
-        m_request_ready = false;
-        m_stream_cond.notify_one();  // Notify that inference is complete
+        {
+            std::lock_guard<std::mutex> stream_guard(m_stream_lock);
+            m_inference_busy = false;
+        }
+        m_stream_cond.notify_all();
     }
 }
 
 bool GenieContext::Query(const ModelInput &model_input, const Callback &callback,
-                         PrefillHeartbeatCallback /*prefill_heartbeat*/)
+                         PrefillHeartbeatCallback prefill_heartbeat)
 {
-    // 注意：QNN/Genie 后端目前不支持 prefill 阶段心跳（Genie SDK 不提供批次级回调）。
-    // prefill_heartbeat 参数保留以满足接口兼容性，暂不使用。
 
-    // 序列化 Query() 调用：与 llama_cpp.cpp 保持一致，加 query_mutex_ 锁。
-    // QNN/Genie 模型上下文不是线程安全的，安全检查、复杂度评估和主推理
-    // 都通过同一个模型句柄调用 Query()，必须通过此锁保证互斥。
-    // 缺少此锁会导致：
-    //   1. 安全检查/复杂度检查完成后 KV cache 状态被污染
-    //   2. 主推理调用时出现 "KV update count exceeds" 错误
     auto t_lock_start = std::chrono::steady_clock::now();
+    QueryScope query_scope{*this};
+    if (!query_scope.admitted())
+    {
+        return false;
+    }
     std::lock_guard<std::mutex> lock(query_mutex_);
     auto t_lock_acquired = std::chrono::steady_clock::now();
     int64_t lock_wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -256,6 +298,31 @@ bool GenieContext::Query(const ModelInput &model_input, const Callback &callback
     {
         My_Log{} << "[QNN] query_mutex_ acquired immediately (wait=" << lock_wait_ms << "ms)\n";
     }
+    if (query_scope.stopped())
+    {
+        My_Log{My_Log::Level::kWarning}
+                << "[QNN] Query cancelled: Stop() was issued while it was waiting for query_mutex_\n";
+        return false;
+    }
+
+    if (busy_after_timeout_.load() || m_inference_busy.load())
+    {
+        constexpr int kBusyWaitMs = 5000;
+        std::unique_lock<std::mutex> busy_lock(m_stream_lock);
+        const bool idle = m_stream_cond.wait_for(busy_lock, std::chrono::milliseconds(kBusyWaitMs),
+                                                 [this] { return !m_inference_busy.load(); });
+        if (!idle)
+        {
+            My_Log{My_Log::Level::kError}
+                    << "[QNN] previous GenieDialogQuery is still running after " << kBusyWaitMs
+                    << "ms (busy_after_timeout); rejecting this Query instead of running concurrently\n";
+            return false;
+        }
+        busy_after_timeout_ = false;
+    }
+
+    if (prefill_heartbeat && !prefill_heartbeat())
+        return false;
 
     const char *query_type = get_query_type_label(model_input);
     My_Log{} << "[QNN Restore] Query begin: type=" << query_type
@@ -269,7 +336,13 @@ bool GenieContext::Query(const ModelInput &model_input, const Callback &callback
     }
 
     stopped_by_output_limit_ = false;
-    inf_impl_->inf_->cur_length_ = TokenLength(model_input.text_);
+    struct LimitCommit
+    {
+        GenieContext *self;
+
+        ~LimitCommit() { self->last_stopped_by_output_limit_.store(self->stopped_by_output_limit_.load()); }
+    } limit_commit{this};
+    inf_impl_->inf_->cur_length_ = TokenLengthUnlocked(model_input.text_);
     if (!inf_impl_->inf_->set_content(const_cast<ModelInput &>(model_input)))
     {
         return false;
@@ -291,48 +364,68 @@ bool GenieContext::Query(const ModelInput &model_input, const Callback &callback
         wm_state_->prompt_pending = !wm_state_->pending_prompt_ids.empty();
     }
 
-    m_request_ready = true;
-    m_inference_busy = true;
+    if (query_scope.stopped())
+    {
+        My_Log{My_Log::Level::kWarning}
+                << "[QNN] Query cancelled: Stop() was issued before inference started\n";
+        return false;
+    }
+
+    {
+        std::lock_guard<std::mutex> stream_guard(m_stream_lock);
+        m_stream_answer.clear();
+        m_inference_busy = true;
+    }
+    {
+        std::lock_guard<std::mutex> request_guard(m_request_lock);
+        m_request_ready = true;
+    }
     m_request_cond.notify_one();
 
     std::string response;
-    bool callback_rejected = false;  // track whether callback refused further data
-    auto last_output_time = std::chrono::steady_clock::now();  // Heartbeat: track last output time
+    bool callback_rejected = false;
+    bool stop_forwarded = false;
+    auto last_output_time = std::chrono::steady_clock::now();
 
     while (m_inference_busy)
     {
+        if (!stop_forwarded && query_scope.stopped())
+        {
+            stop_forwarded = true;
+            AbortInference();
+        }
         {
             std::unique_lock<std::mutex> lock(m_stream_lock);
-            // Wait for new data or inference completion (with timeout for heartbeat check)
+
             m_stream_cond.wait_for(lock, std::chrono::milliseconds(HEARTBEAT_INTERVAL_MS),
                                    [this] { return !m_stream_answer.empty() || !m_inference_busy; });
 
             if (!m_stream_answer.empty())
             {
                 response = std::move(m_stream_answer);
-                // m_stream_answer is now in a valid but unspecified (empty) state after move
-                last_output_time = std::chrono::steady_clock::now();  // Heartbeat: reset timer on output
+
+                last_output_time = std::chrono::steady_clock::now();
             }
         }
 
         if (response.empty())
         {
-            // Heartbeat: if no output for HEARTBEAT_INTERVAL_MS, send a keep-alive message
+
             auto now = std::chrono::steady_clock::now();
             auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                     now - last_output_time).count();
             if (elapsed_ms >= HEARTBEAT_INTERVAL_MS)
             {
-                std::string heartbeat = "";  // empty string signals a keep-alive tick to SendKeepAlive()
+                std::string heartbeat = "";
                 if (!callback(heartbeat))
                 {
                     My_Log{My_Log::Level::kWarning}
                             << "[Query] Heartbeat callback rejected, stopping generation." << std::endl;
                     callback_rejected = true;
-                    Stop();
+                    AbortInference();
                     break;
                 }
-                last_output_time = now;  // reset timer after heartbeat
+                last_output_time = now;
             }
             continue;
         }
@@ -340,22 +433,14 @@ bool GenieContext::Query(const ModelInput &model_input, const Callback &callback
         if (!callback(response))
         {
             callback_rejected = true;
-            // 连接断开时 genie_callback 已调用 handle->Stop()（发送 ABORT 信号）
-            // 这里再调用一次 Stop() 作为保险，确保推理线程能尽快退出
-            Stop();
+
+            AbortInference();
             break;
         }
 
         response.clear();
     }
 
-    // 竞态条件：callback 返回 false 触发 Stop()+break 后，
-    // inference_thread_ 中的 GenieDialogQuery() 可能仍在处理 ABORT 信号，
-    // m_inference_busy 尚未变为 false。
-    // 若此时立即释放 query_mutex_，下一个 Query() 调用的 GenieDialog_reset()
-    // 会与仍在运行的 GenieDialogQuery() 产生竞态，导致 SSD 模型状态混乱。
-    // 等待 inference_thread_ 真正完成（m_inference_busy 变为 false）后再继续，
-    // 超时保护最多等待 5 秒，防止 ABORT 信号未被响应时永久阻塞。
     if (callback_rejected && m_inference_busy)
     {
         My_Log{My_Log::Level::kInfo}
@@ -367,9 +452,12 @@ bool GenieContext::Query(const ModelInput &model_input, const Callback &callback
                                                [this] { return !m_inference_busy.load(); });
         if (!finished)
         {
+            busy_after_timeout_ = true;
+            m_stream_answer.clear();
             My_Log{My_Log::Level::kWarning}
                     << "[Query] inference_thread_ did not finish within " << kMaxWaitMs
-                    << "ms after Stop(). Proceeding anyway." << std::endl;
+                    << "ms after Stop(). Marking context busy_after_timeout and failing this Query." << std::endl;
+            return false;
         }
         else
         {
@@ -383,28 +471,17 @@ bool GenieContext::Query(const ModelInput &model_input, const Callback &callback
         return false;
     }
 
-    if (!callback_rejected && !m_stream_answer.empty())
+    std::string tail_answer;
     {
-        callback(m_stream_answer);
+        std::lock_guard<std::mutex> stream_guard(m_stream_lock);
+        tail_answer = std::move(m_stream_answer);
         m_stream_answer.clear();
     }
-    else if (callback_rejected)
+    if (!callback_rejected && !tail_answer.empty())
     {
-        m_stream_answer.clear();  // discard buffered data when connection is broken
+        callback(tail_answer);
     }
 
-    // SSD 模型 KV cache 污染问题：
-    // 对于非主推理类型（安全检查、复杂度评估、脱敏、Phase-1 摘要等），推理完成后额外调用一次
-    // GenieDialog_reset，确保 SSD（Speculative Decoding）的 forecast buffer 和
-    // branch 状态被彻底清除，不会污染后续的主推理。
-    // 背景：GenieDialog_reset 在每次 Query() 开始时调用，但对于 SSD 模型，
-    // 安全检查推理结束后 SSD 内部状态（forecast tokens、branch 预测等）仍然残留，
-    // 导致主推理续写安全检查的输出（如输出 "reason" 而非正确的工具调用）。
-    // genie-t2t-run 不做安全检查，因此不存在此问题。
-    //
-    // SUMMARIZATION（Phase -1 摘要推理）同样需要 post-query reset：
-    // 摘要推理使用与主推理相同的 GenieContext（同一 m_DialogHandle），
-    // 若不 reset，摘要推理的 KV cache 状态会残留，影响后续摘要推理或主推理的正确性。
     if (std::string(query_type) != "MAINAGENT_INFERENCE" &&
         std::string(query_type) != "SUBAGENT_INFERENCE")
     {
@@ -415,7 +492,7 @@ bool GenieContext::Query(const ModelInput &model_input, const Callback &callback
         {
             My_Log{My_Log::Level::kWarning}
                     << "[QNN] Post-query GenieDialog_reset failed for type=" << query_type << std::endl;
-            // 非致命错误，继续返回 true（推理本身已成功）
+
         }
     }
 
@@ -438,7 +515,7 @@ GenieContext::GenieContext(const ModelInstanceConfig &model_config) :
 
         Genie_Status_t reg_status;
         {
-            // 独占锁：与全部正在进行的生成调用（shared_lock，见 inference_thread()）互斥。
+
             std::unique_lock<std::shared_mutex> lock(QnnWatermarkRegistryMutex());
             reg_status = GenieSampler_registerUserDataCallback(
                     wm_callback_name.c_str(), QnnWatermarkSamplerCallback,
@@ -490,7 +567,21 @@ GenieContext::GenieContext(const ModelInstanceConfig &model_config) :
             throw std::runtime_error("Failed to bind the profile handle with the dialog config");
         }
 
-        if (GENIE_STATUS_SUCCESS != GenieDialog_create(m_ConfigHandle, &m_DialogHandle))
+        bool dialog_faulted = false;
+#ifdef _WIN32
+        const Genie_Status_t dialog_status = GenieDialogCreateGuarded(m_ConfigHandle, &m_DialogHandle, &dialog_faulted);
+#else
+        const Genie_Status_t dialog_status = GenieDialog_create(m_ConfigHandle, &m_DialogHandle);
+#endif
+        if (dialog_faulted)
+        {
+            m_DialogHandle = nullptr;
+            My_Log{My_Log::Level::kError}
+                    << "[QNN] GenieDialog_create raised an access violation inside the SDK; "
+                       "treating as load failure and releasing handles.\n";
+            throw std::runtime_error("create the genie dialog failed (SDK access violation)");
+        }
+        if (GENIE_STATUS_SUCCESS != dialog_status)
         {
             throw std::runtime_error("create the genie dialog failed");
         }
@@ -554,8 +645,6 @@ GenieContext::GenieContext(const ModelInstanceConfig &model_config) :
         m_stream_thread = std::make_unique<std::thread>(&GenieContext::inference_thread, this);
     }
 
-    // 诚实日志：仅反映本实例的真实状态，不复用 process-wide once（不同模型实例的注册
-    // 结果可能不同，例如后加载的模型注册失败但前一个成功——不能只报一次全局结论）。
     if (watermark_active_)
     {
         My_Log{My_Log::Level::kInfo}
@@ -572,25 +661,35 @@ GenieContext::GenieContext(const ModelInstanceConfig &model_config) :
                     << "QNN backend running without watermark.\n";
         });
     }
-    // 插件声明了能力但本实例注册失败：WARNING 已在注册失败处记录，此处不重复。
+
 }
 
 GenieContext::~GenieContext()
 {
     My_Log{} << "GenieContext::~GenieContext():\n";
 
-    // 析构顺序：必须先 join 推理线程，确保线程完全退出后再释放任何 SDK 句柄，
-    // 否则推理线程可能正在执行 GenieDialogQuery() 时访问已释放的 SDK 内部 mutex，崩溃。
+    MarkDestroying();
+    if (m_DialogHandle != nullptr && (m_inference_busy.load() || pending_queries_.load() > 0))
+    {
+        AbortInference();
+    }
+    WaitForIdle(8000);
+
     if (m_stream_thread)
     {
-        m_thread_exit = true;
-        m_request_ready = true;
-        m_request_cond.notify_one();
+        {
+            std::lock_guard<std::mutex> request_guard(m_request_lock);
+            m_thread_exit = true;
+        }
+        m_request_cond.notify_all();
 
         m_stream_thread->join();
         m_stream_thread = nullptr;
-        m_request_ready = false;
-        m_thread_exit = false;
+        {
+            std::lock_guard<std::mutex> request_guard(m_request_lock);
+            m_request_ready = false;
+            m_thread_exit = false;
+        }
     }
 
     ReleaseHandles();
@@ -603,9 +702,7 @@ GenieContext::~GenieContext()
 
 void GenieContext::ReleaseHandles()
 {
-    // 逐个检查非空再释放：既覆盖正常析构时全部句柄均已创建的情形，也覆盖构造函数在
-    // 中途某一步失败时、后续句柄仍为默认值 nullptr（见 genie.h 成员初始值）的情形，
-    // 避免对未创建的句柄调用 Free 函数。
+
     if (m_ConfigHandle != nullptr)
     {
         if (GENIE_STATUS_SUCCESS != GenieDialogConfig_free(m_ConfigHandle))
@@ -668,6 +765,17 @@ void GenieContext::ReleaseWatermarkState()
 
 bool GenieContext::Stop()
 {
+    StopScope stop_scope{*this};
+    if (!stop_scope.admitted())
+    {
+        return true;
+    }
+    stop_epoch_.fetch_add(1);
+    return AbortInference();
+}
+
+bool GenieContext::AbortInference()
+{
     if (GENIE_STATUS_SUCCESS != GenieDialog_signal(m_DialogHandle, GENIE_DIALOG_ACTION_ABORT))
     {
         My_Log{} << "Failed to stop generation.\n";
@@ -679,6 +787,7 @@ bool GenieContext::Stop()
 
 bool GenieContext::SetStopSequence(const std::string &stop_sequences)
 {
+    std::lock_guard<std::mutex> lock(query_mutex_);
     if (GENIE_STATUS_SUCCESS != GenieDialog_setStopSequence(m_DialogHandle, stop_sequences.c_str()))
     {
         My_Log{} << "Failed to set stop sequence.\n";
@@ -690,8 +799,7 @@ bool GenieContext::SetStopSequence(const std::string &stop_sequences)
 
 bool GenieContext::GenerateTextToken(const std::string &text, const int32_t *&buf, uint32_t &len)
 {
-    // Early return for empty string: GenieTokenizer_encode returns -1 for empty input,
-    // which would trigger a spurious "encode failed" error log. Return 0 tokens directly.
+
     if (strlen(text.c_str()) == 0)
     {
         buf = nullptr;
@@ -699,10 +807,6 @@ bool GenieContext::GenerateTextToken(const std::string &text, const int32_t *&bu
         return true;
     }
 
-    // [修复] UTF-8 安全防线：GenieTokenizer_encode 底层调用 Rust tokenizer，
-    // 要求输入必须是合法的 UTF-8。若收到无效 UTF-8 字节序列，会在 Rust 侧 panic 崩溃。
-    // 此处在调用 tokenizer 之前，先检测并修复无效 UTF-8 字节（替换为 '?'）。
-    // 注意：这里使用局部副本，不修改调用方的原始字符串。
     std::string safe_text = text;
     bool has_invalid = sanitize_utf8_inplace(safe_text);
     if (has_invalid)
@@ -742,6 +846,12 @@ bool GenieContext::GenerateTextToken(const std::string &text, const int32_t *&bu
 
 size_t GenieContext::TokenLength(const std::string &text)
 {
+    std::lock_guard<std::mutex> lock(query_mutex_);
+    return TokenLengthUnlocked(text);
+}
+
+size_t GenieContext::TokenLengthUnlocked(const std::string &text)
+{
     const int32_t *buf;
     uint32_t len;
     if (!GenerateTextToken(text, buf, len))
@@ -755,6 +865,7 @@ size_t GenieContext::TokenLength(const std::string &text)
 
 void GenieContext::applyLora(const std::string &engineRole, const std::string &loraAdapterName)
 {
+    std::lock_guard<std::mutex> lock(query_mutex_);
     int32_t status = GenieDialog_applyLora(m_DialogHandle, engineRole.c_str(), loraAdapterName.c_str());
     if (GENIE_STATUS_SUCCESS != status)
     {
@@ -765,6 +876,7 @@ void GenieContext::applyLora(const std::string &engineRole, const std::string &l
 void GenieContext::setLoraStrength(const std::string &engineRole,
                                    const std::unordered_map<std::string, float> &alphaValue)
 {
+    std::lock_guard<std::mutex> lock(query_mutex_);
     for (auto it = alphaValue.begin(); it != alphaValue.end(); it++)
     {
         int32_t status = GenieDialog_setLoraStrength(m_DialogHandle, engineRole.c_str(), it->first.c_str(), it->second);
@@ -775,8 +887,21 @@ void GenieContext::setLoraStrength(const std::string &engineRole,
     }
 }
 
+bool GenieContext::SupportsMultimodalInput() const
+{
+    const int model_types = static_cast<int>(model_config_.i_model_config_.get_qnn_embedding().model_types_);
+    return (model_types & ModelType::Vision) || (model_types & ModelType::Audio);
+}
+
 json GenieContext::HandleProfile()
 {
+    std::unique_lock<std::mutex> query_lock(query_mutex_, std::try_to_lock);
+    if (!query_lock.owns_lock())
+    {
+        std::lock_guard<std::mutex> cache_guard(profile_cache_mutex_);
+        return last_profile_;
+    }
+
     const Genie_AllocCallback_t callback([](size_t size, const char **data)
                                          {
                                              *data = (char *) calloc(1, size);
@@ -809,26 +934,14 @@ json GenieContext::HandleProfile()
                 const auto &last_event = events.back();
                 if (last_event.at("type") == "GenieDialog_query")
                 {
-                    std::ostringstream oss;
-
-                    oss << std::fixed << std::setprecision(2)
-                        << last_event.at("time-to-first-token")["value"].get<double>() / 1000000.0;
-                    result["time_to_first_token"] = oss.str();
-
-                    oss.str("");
-                    oss << std::fixed << std::setprecision(2)
-                        << last_event.at("token-generation-time")["value"].get<double>() / 1000000.0;
-                    result["token_generation_time"] = oss.str();
-
-                    oss.str("");
-                    oss << std::fixed << std::setprecision(2)
-                        << last_event.at("prompt-processing-rate")["value"].get<double>();
-                    result["prompt_processing_rate"] = oss.str();
-
-                    oss.str("");
-                    oss << std::fixed << std::setprecision(2)
-                        << last_event.at("token-generation-rate")["value"].get<double>();
-                    result["token_generation_rate"] = oss.str();
+                    result["time_to_first_token"] =
+                            FormatFixed2(last_event.at("time-to-first-token")["value"].get<double>() / 1000000.0);
+                    result["token_generation_time"] =
+                            FormatFixed2(last_event.at("token-generation-time")["value"].get<double>() / 1000000.0);
+                    result["prompt_processing_rate"] =
+                            FormatFixed2(last_event.at("prompt-processing-rate")["value"].get<double>());
+                    result["token_generation_rate"] =
+                            FormatFixed2(last_event.at("token-generation-rate")["value"].get<double>());
 
                     result["num_prompt_tokens"] = last_event.at("num-prompt-tokens")["value"];
                     result["num_generated_tokens"] = last_event.at("num-generated-tokens")["value"];
@@ -840,6 +953,10 @@ json GenieContext::HandleProfile()
     {
         My_Log{My_Log::Level::kError} << "parse profile failed: " << jsonStr << "\n";
         return "";
+    }
+    {
+        std::lock_guard<std::mutex> cache_guard(profile_cache_mutex_);
+        last_profile_ = result;
     }
     return result;
 }
@@ -860,14 +977,17 @@ GenieLog_Level_t GenieContext::get_genie_log_level()
 
 void GenieContext::Reset()
 {
+    std::lock_guard<std::mutex> lock(query_mutex_);
+    ResetUnlocked();
+}
+
+void GenieContext::ResetUnlocked()
+{
     if (GENIE_STATUS_SUCCESS != GenieDialog_reset(m_DialogHandle))
     {
         My_Log{} << "reset Genie Dialog failed\n";
     }
 
-    // 语义粒度对齐 GGUF 侧 common_sampler_reset(smpl) 的调用点：GenieDialog_reset()
-    // 每次 /v1/chat/completions 请求都会执行一次（"History is stateless per request"，
-    // 详见 genie.md，不是"新会话"专属语义），token_hook_reset 挂在同一调用点触发。
     if (watermark_active_ && wm_state_ && wm_state_->vtable && wm_state_->hook)
     {
         wm_state_->vtable->token_hook_reset(wm_state_->hook);
@@ -877,5 +997,5 @@ void GenieContext::Reset()
 void GenieContext::ClearConversationState()
 {
     std::lock_guard<std::mutex> lock(query_mutex_);
-    Reset();
+    ResetUnlocked();
 }

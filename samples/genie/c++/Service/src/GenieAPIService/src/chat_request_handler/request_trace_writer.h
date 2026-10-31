@@ -269,7 +269,7 @@ inline size_t CommonPrefixBytes(const std::string &a, const std::string &b)
     return i;
 }
 
-} // namespace request_trace_shape
+}
 
 class RequestTraceWriter {
 public:
@@ -376,7 +376,6 @@ public:
         j["lcp_tokens"] = lcp_tokens;
         j["recomputed_tokens"] = recomputed_tokens;
 
-
         const json &m = rec.backend_metrics;
         auto field = [&m](const char *key) -> json {
             return (m.is_object() && m.contains(key)) ? m.at(key) : json(nullptr);
@@ -415,4 +414,4 @@ private:
     std::unordered_map<std::string, std::string> prev_prompt_;
 };
 
-#endif //REQUEST_TRACE_WRITER_H
+#endif

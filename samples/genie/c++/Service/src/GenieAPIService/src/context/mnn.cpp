@@ -39,10 +39,6 @@ public:
     std::unique_ptr<Llm> m_llm;
 };
 
-// Utf8StreamProcessor now lives in common/utils.h (shared with the GGUF backend, which needs
-// the exact same per-token UTF-8 boundary buffering).
-
-// https://github.com/alibaba/MNN/blob/master/apps/Android/MnnLlmChat/app/src/main/cpp/llm_stream_buffer.hpp
 class LlmStreamBuffer : public std::streambuf
 {
 public:
@@ -117,7 +113,6 @@ MNNContext::MNNContext(const ModelInstanceConfig &config) :
         throw std::runtime_error("MNNContext::MNNContext Load model failed.\n");
     }
 
-    // One-time honest log: MNN/CPU does not support token-level watermarking.
     static std::once_flag s_mnn_wm_log_once;
     std::call_once(s_mnn_wm_log_once, []()
     {
@@ -132,16 +127,28 @@ MNNContext::MNNContext(const ModelInstanceConfig &config) :
 
 MNNContext::~MNNContext()
 {
+    MarkDestroying();
+    WaitForIdle(8000);
     impl_->m_llm = nullptr;
     delete impl_;
     My_Log{} << "MNNContext::~MNNContext() Done。\n";
 }
 
 bool MNNContext::Query(const ModelInput &model_input, const Callback& callback,
-                       PrefillHeartbeatCallback /*prefill_heartbeat*/)
+                       PrefillHeartbeatCallback prefill_heartbeat)
 {
-    // 注意：MNN 后端目前不支持 prefill 阶段心跳（MNN 推理接口不提供批次级回调）。
-    // prefill_heartbeat 参数保留以满足接口兼容性，暂不使用。
+    QueryScope query_scope{*this};
+    if (!query_scope.admitted())
+    {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(query_mutex_);
+    if (query_scope.stopped())
+    {
+        return false;
+    }
+    if (prefill_heartbeat && !prefill_heartbeat())
+        return false;
     auto &prompt = model_input.text_;
     {
         const char *mnn_label = (model_input.agent_type_ == "main") ? "MAINAGENT_INFERENCE" : "SUBAGENT_INFERENCE";
@@ -173,7 +180,7 @@ bool MNNContext::Query(const ModelInput &model_input, const Callback& callback,
     impl_->m_llm->response(input_ids, &output_stream, nullptr, 0);
 
     int n_generated = 0;
-    while (!impl_->m_llm->stoped() && !m_stop)
+    while (!impl_->m_llm->stoped() && !m_stop && !query_scope.stopped())
     {
         impl_->m_llm->generate(1);
         n_generated++;
@@ -202,17 +209,25 @@ bool MNNContext::Query(const ModelInput &model_input, const Callback& callback,
 
     output_stream.flush();
 
+    last_stopped_by_output_limit_.store(stopped_by_output_limit_.load());
+
     return true;
 }
 
 bool MNNContext::Stop()
 {
-    m_stop = true;
+    StopScope stop_scope{*this};
+    if (!stop_scope.admitted())
+    {
+        return true;
+    }
+    stop_epoch_.fetch_add(1);
     return true;
 }
 
 size_t MNNContext::TokenLength(const std::string &text)
 {
+    std::lock_guard<std::mutex> lock(query_mutex_);
     if (!impl_ || !impl_->m_llm)
     {
         return text.size();
@@ -233,12 +248,17 @@ size_t MNNContext::TokenLength(const std::string &text)
 
 json MNNContext::HandleProfile()
 {
-    // 从 LlmContext 中读取性能数据（LlmContext 由 MNN LLM 在推理过程中填充）
-    // LlmContext 字段说明（来自 llm.hpp）：
-    //   prompt_len  : prompt token 数
-    //   gen_seq_len : 生成 token 数
-    //   prefill_us  : prefill 阶段耗时（微秒）
-    //   decode_us   : decode 阶段耗时（微秒）
+    std::unique_lock<std::mutex> query_lock(query_mutex_, std::try_to_lock);
+    if (!query_lock.owns_lock())
+    {
+        std::lock_guard<std::mutex> cache_guard(profile_cache_mutex_);
+        return last_profile_;
+    }
+    if (!impl_ || !impl_->m_llm)
+    {
+        return {};
+    }
+
     const LlmContext *ctx = impl_->m_llm->getContext();
     if (!ctx)
     {
@@ -246,33 +266,30 @@ json MNNContext::HandleProfile()
     }
 
     json result;
-    std::ostringstream oss;
 
     double prefill_s = static_cast<double>(ctx->prefill_us) / 1000000.0;
-    oss << std::fixed << std::setprecision(2) << prefill_s;
-    result["time_to_first_token"] = oss.str();
+    result["time_to_first_token"] = FormatFixed2(prefill_s);
 
-    oss.str("");
     double decode_s = static_cast<double>(ctx->decode_us) / 1000000.0;
-    oss << std::fixed << std::setprecision(2) << decode_s;
-    result["token_generation_time"] = oss.str();
+    result["token_generation_time"] = FormatFixed2(decode_s);
 
-    oss.str("");
     double prefill_rate = (prefill_s > 0.0 && ctx->prompt_len > 0)
                           ? static_cast<double>(ctx->prompt_len) / prefill_s
                           : 0.0;
-    oss << std::fixed << std::setprecision(2) << prefill_rate;
-    result["prompt_processing_rate"] = oss.str();
+    result["prompt_processing_rate"] = FormatFixed2(prefill_rate);
 
-    oss.str("");
     double decode_rate = (decode_s > 0.0 && ctx->gen_seq_len > 0)
                          ? static_cast<double>(ctx->gen_seq_len) / decode_s
                          : 0.0;
-    oss << std::fixed << std::setprecision(2) << decode_rate;
-    result["token_generation_rate"] = oss.str();
+    result["token_generation_rate"] = FormatFixed2(decode_rate);
 
     result["num_prompt_tokens"] = ctx->prompt_len;
     result["num_generated_tokens"] = ctx->gen_seq_len;
+
+    {
+        std::lock_guard<std::mutex> cache_guard(profile_cache_mutex_);
+        last_profile_ = result;
+    }
 
     return result;
 }

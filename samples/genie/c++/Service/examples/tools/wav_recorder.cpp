@@ -6,7 +6,6 @@
 //
 //==============================================================================
 
-// record_wav.cpp
 #include <windows.h>
 #include <mmsystem.h>
 #include <fstream>
@@ -47,7 +46,7 @@ public:
         }
 
         IMMDevice *pDevice = nullptr;
-        hr = pEnum->GetDefaultAudioEndpoint(eCapture, eConsole, &pDevice); // capture endpoint
+        hr = pEnum->GetDefaultAudioEndpoint(eCapture, eConsole, &pDevice);
         if (FAILED(hr))
         {
             std::cerr << "get default audio endpoint failed\n";
@@ -74,7 +73,7 @@ public:
         }
 
         float level_scalar = 0.0f;
-        hr = pEndpointVol->GetMasterVolumeLevelScalar(&level_scalar); // 0.0 .. 1.0
+        hr = pEndpointVol->GetMasterVolumeLevelScalar(&level_scalar);
         if (SUCCEEDED(hr))
         {
             float percent = level_scalar * 100.0f;
@@ -90,19 +89,19 @@ public:
 
     static void apply_gain_int16_safe(int16_t *s, int n, float gain)
     {
-        const float scale = 32767.0f; // map float [-1,1] -> int16
+        const float scale = 32767.0f;
         for (int i = 0; i < n; ++i)
         {
-            // convert to float in [-1,1]
+
             float x = s[i] / scale;
-            // apply gain
+
             float y = x * gain;
-            // hard clamp to avoid overflow
+
             if (y > 0.999969f)
                 y = 0.999969f;
             if (y < -0.999969f)
                 y = -0.999969f;
-            // convert back with rounding
+
             int32_t out = (int32_t) lrintf(y * scale);
             s[i] = (int16_t) clamp_i32(out);
         }
@@ -202,7 +201,7 @@ public:
     static inline uint16_t kBitsPerSample{16};
     static inline uint16_t kChannels{2};
     static inline uint32_t kSmplePreRate{44100};
-    static inline uint16_t kBlockAlign = kChannels * kBitsPerSample / 8; // {} avoid narrow;
+    static inline uint16_t kBlockAlign = kChannels * kBitsPerSample / 8;
     static inline uint32_t kAvgByteRate = kSmplePreRate * kBlockAlign;
 
 private:
@@ -210,8 +209,6 @@ private:
     long total_size_;
     WAV_HEADER *whdr_;
 };
-
-// global or context
 
 void
 CALLBACK waveInProc(HWAVEIN hWaveIn, UINT uMsg, DWORD_PTR dwInstance, DWORD_PTR /*dwParam1*/, DWORD_PTR /*ddwParam2*/)
@@ -255,7 +252,7 @@ int main(int argc, char **argv)
             WAV::kBitsPerSample,
             0};
 
-    const DWORD dataBytes = wf.nAvgBytesPerSec; // 1s as buf
+    const DWORD dataBytes = wf.nAvgBytesPerSec;
     std::vector<BYTE> buffer(dataBytes);
 
     HWAVEIN hWaveIn{nullptr};

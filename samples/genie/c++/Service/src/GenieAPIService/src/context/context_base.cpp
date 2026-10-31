@@ -9,6 +9,32 @@
 #include "context_base.h"
 #include "log.h"
 #include <algorithm>
+#include <chrono>
+#include <thread>
+
+void ContextBase::MarkDestroying()
+{
+    destroying_.store(true);
+    stop_epoch_.fetch_add(1);
+}
+
+bool ContextBase::WaitForIdle(int timeout_ms)
+{
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    while (stop_in_flight_.load() > 0 || pending_queries_.load() > 0)
+    {
+        if (std::chrono::steady_clock::now() >= deadline)
+        {
+            My_Log{My_Log::Level::kWarning}
+                    << "[Context] WaitForIdle timed out after " << timeout_ms
+                    << "ms: stop_in_flight=" << stop_in_flight_.load()
+                    << ", pending_queries=" << pending_queries_.load() << std::endl;
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return true;
+}
 
 bool ContextBase::Stop()
 {
@@ -30,6 +56,8 @@ int ContextBase::ApplyParams()
 
 bool ContextBase::SetParamsByConfig(const json &j)
 {
+    std::lock_guard<std::mutex> params_lock(params_mutex_);
+    std::lock_guard<std::mutex> query_lock(query_mutex_);
     if (j.empty())
     {
         return true;
@@ -41,9 +69,7 @@ bool ContextBase::SetParamsByConfig(const json &j)
     for (auto it = sample_config.begin(); it != sample_config.end(); ++it)
     {
         const std::string &key = it.key();
-        // 请求侧传入的采样参数键名有 "top-k"/"top_k" 两种连字符/下划线写法混用的历史遗留
-        // （config.json 的 sampler schema 用连字符，部分调用方用下划线拼 json），
-        // 这里做双写法容错匹配，避免其中一种写法被静默丢弃、覆盖失效。
+
         std::string alt_key = key;
         std::replace(alt_key.begin(), alt_key.end(), '-', '_');
         const std::string &lookup_key = j.contains(key) ? key : alt_key;

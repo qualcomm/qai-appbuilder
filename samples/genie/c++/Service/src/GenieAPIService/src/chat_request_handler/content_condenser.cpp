@@ -19,7 +19,7 @@ constexpr size_t kMaxHighSignalLines = 10;
 
 constexpr size_t kMinViableChars = 200;
 
-}  // namespace
+}
 
 std::vector<std::string> ContentCondenser::ExtractHighSignalLines(const std::string& text, size_t max_lines)
 {

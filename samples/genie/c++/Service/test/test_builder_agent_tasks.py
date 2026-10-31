@@ -230,9 +230,37 @@ def inject_local_models(builder, models_root, model_dirs, results, snapshot, rou
     return True
 
 
+def _norm_model_name(name):
+    return re.sub(r"[^a-z0-9]", "", str(name or "").lower())
+
+
+def builder_status_model_names(status):
+    """Builder GET /api/service/status 里“服务端真实驻留的模型”，归一化后返回。
+    新结构是 loaded_models（[{name, devices, backend, is_default}]）；
+    旧结构只有单值 model，两者都认，保证本脚本对新旧 Builder 都能判定。"""
+    names = set()
+    for m in status.get("loaded_models") or []:
+        if isinstance(m, dict) and m.get("name"):
+            names.add(_norm_model_name(m["name"]))
+    if status.get("model"):
+        names.add(_norm_model_name(status["model"]))
+    return names
+
+
+def fetch_daemon_loaded_models(genie_port, timeout=10):
+    """直连 GenieAPIService GET /status，返回 (归一化的已驻留模型名集合, 原始 body)。
+    以 slots[].is_loaded 为准——这是服务端自己的视图，不依赖 Builder 的记账。"""
+    r = requests.get(f"http://127.0.0.1:{genie_port}/status", timeout=timeout)
+    r.raise_for_status()
+    body = r.json()
+    names = {_norm_model_name(s["model"]) for s in (body.get("slots") or [])
+             if isinstance(s, dict) and s.get("is_loaded") and s.get("model")}
+    return names, body
+
+
 def start_and_wait_ready(builder, model_name, port, results, round_num=1, timeout=240):
     """POST /api/service/start（fire-and-forget）后自行轮询 GET /api/service/status
-    直到 running=true 且 model 匹配。逻辑与
+    直到 running=true 且该模型已驻留（loaded_models 或旧版单值 model）。逻辑与
     test_service.QAIModelBuilderLocalModelTester.start_and_wait_ready() 一致。"""
     name = f"AGENT-TASK: start_and_wait_ready model={model_name}"
     try:
@@ -258,7 +286,8 @@ def start_and_wait_ready(builder, model_name, port, results, round_num=1, timeou
             rs = builder.csrf.get("/api/service/status", timeout=10)
             if rs.status_code == 200:
                 last_status = rs.json()
-                if last_status.get("running") and last_status.get("model") == model_name:
+                if (last_status.get("running")
+                        and _norm_model_name(model_name) in builder_status_model_names(last_status)):
                     results.append(TestResult(
                         name=name, round_num=round_num, model_name=model_name,
                         passed=True, status_code=200, latency_ms=(time.time() - started_at) * 1000,
@@ -1831,6 +1860,168 @@ def run_inception_precision_compare_task(builder, model_name, results, round_num
     return ok
 
 
+# ============================================================================
+# 任务：多模型加载 + 同时提问（multi_model_concurrent）
+# ============================================================================
+_MULTI_MODEL_DEFAULT_PROMPT = "请只用一句话回答：1+1 等于几？"
+
+
+def _check_models_resident(builder, wanted, genie_port, wait_seconds=60):
+    """轮询直到 Builder 状态与 GenieAPIService 自己的 /status 都认为 wanted 全部驻留；
+    返回 (ok, detail)。两个视图都要查：Builder 记账与服务端真实状态不同步正是要防的缺陷。"""
+    want = {_norm_model_name(m) for m in wanted}
+    deadline = time.time() + wait_seconds
+    builder_names, daemon_names, last_err = set(), set(), None
+    while True:
+        try:
+            status = builder.csrf.get("/api/service/status", timeout=10).json()
+            builder_names = builder_status_model_names(status)
+        except (requests.RequestException, ValueError) as e:
+            last_err = f"builder status: {type(e).__name__}: {e}"
+        try:
+            daemon_names, _ = fetch_daemon_loaded_models(genie_port)
+        except (requests.RequestException, ValueError) as e:
+            last_err = f"daemon /status: {type(e).__name__}: {e}"
+        if want <= builder_names and want <= daemon_names:
+            return True, f"builder={sorted(builder_names)}; daemon={sorted(daemon_names)}"
+        if time.time() >= deadline:
+            return False, (f"wanted={sorted(want)}; builder={sorted(builder_names)}; "
+                           f"daemon={sorted(daemon_names)}; last_err={last_err}")
+        time.sleep(2)
+
+
+def _load_extra_model(builder, model_name, genie_port, results, round_num=1, timeout=1000):
+    """走 Builder 的 POST /api/service/load-model（同步，服务已运行时会让守护进程真正加载），
+    之后以 Builder 状态 + 守护进程 /status 双重核对。"""
+    name = f"MULTI-MODEL: load-model {model_name}"
+    started = time.time()
+    try:
+        r = builder.csrf.post("/api/service/load-model", json={"model_name": model_name}, timeout=timeout)
+    except requests.RequestException as e:
+        results.append(TestResult(name=name, round_num=round_num, model_name=model_name, passed=False,
+                                   status_code=0, latency_ms=(time.time() - started) * 1000,
+                                   detail=f"POST /api/service/load-model 异常: {type(e).__name__}: {e}"))
+        return False
+    if r.status_code not in (200, 201, 202):
+        results.append(TestResult(name=name, round_num=round_num, model_name=model_name, passed=False,
+                                   status_code=r.status_code, latency_ms=(time.time() - started) * 1000,
+                                   detail=f"load-model 非成功状态码: body={r.text[:300]}"))
+        return False
+    ok, detail = _check_models_resident(builder, [model_name], genie_port)
+    results.append(TestResult(name=name, round_num=round_num, model_name=model_name, passed=ok,
+                               status_code=r.status_code, latency_ms=(time.time() - started) * 1000,
+                               detail=detail))
+    return ok
+
+
+def _backend_log_tail(builder, max_chars=8000):
+    """Builder 的后端日志只存内存环形缓冲（GET /api/system/backend-log），进程一退出就没了；
+    失败时趁服务还活着取走末尾，附进结果，避免只剩“internal error (AttributeError)”这种无栈摘要。"""
+    try:
+        r = builder.csrf.get("/api/system/backend-log", timeout=15)
+        text = r.text if r.status_code == 200 else f"HTTP {r.status_code}: {r.text[:300]}"
+    except requests.RequestException as e:
+        return f"backend-log 读取失败: {type(e).__name__}: {e}"
+    # 出错记录往往早于日志末尾：先挑 WARNING/ERROR 级别行，再补上末尾，避免被后续 INFO 挤掉。
+    important = [ln for ln in text.splitlines() if '"level": "ERROR"' in ln or '"level": "WARNING"' in ln
+                 or "local_model" in ln]
+    head = "\n".join(important)[-(max_chars * 2 // 3):]
+    return head + "\n----- tail -----\n" + text[-(max_chars // 3):]
+
+
+def _concurrent_ask(builder, models, round_idx, prompt, stream_timeout, transcript_path, results,
+                    genie_port, round_num=1):
+    """每个模型各开一个新会话，用屏障让全部请求同一时刻发出，等全部返回后逐个判定。"""
+    outputs = {}
+    barrier = threading.Barrier(len(models))
+
+    def worker(model):
+        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", model)
+        tpath = (Path(transcript_path).with_name(f"{Path(transcript_path).stem}_{safe}.md")
+                 if transcript_path else None)
+        try:
+            barrier.wait(timeout=60)
+        except threading.BrokenBarrierError:
+            pass
+        started = time.time()
+        try:
+            res = send_agent_chat_turn(
+                builder, model, prompt, title=f"multi-model r{round_idx} {model}",
+                stream_timeout=stream_timeout, transcript_path=tpath,
+                turn_label=f"concurrent round {round_idx} / {model}")
+        except Exception as e:  # noqa: BLE001 — 线程内异常必须转成失败结果，不能丢
+            res = (False, f"{type(e).__name__}: {e}", "", None, [], [], False)
+        outputs[model] = (res, started, time.time())
+
+    threads = [threading.Thread(target=worker, args=(m,), name=f"ask-{m}", daemon=True) for m in models]
+    batch_started = time.time()
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=stream_timeout + 120)
+
+    all_ok = True
+    for m in models:
+        if m not in outputs:
+            results.append(TestResult(
+                name=f"MULTI-MODEL: concurrent ask r{round_idx} {m}", round_num=round_num, model_name=m,
+                passed=False, status_code=0, latency_ms=(time.time() - batch_started) * 1000,
+                detail="线程在总时限内未返回"))
+            all_ok = False
+            continue
+        (passed, detail, text, _cid, _ft, _fr, busy), started, finished = outputs[m]
+        ok = passed and bool(text.strip())
+        all_ok = all_ok and ok
+        results.append(TestResult(
+            name=f"MULTI-MODEL: concurrent ask r{round_idx} {m}", round_num=round_num, model_name=m,
+            passed=ok, status_code=200 if ok else 0, latency_ms=(finished - started) * 1000,
+            detail=f"text_len={len(text.strip())}; busy={busy}; {detail}",
+            response_data={"start_offset_ms": round((started - batch_started) * 1000),
+                           "reply_head": text.strip()[:200]}))
+    if not all_ok:
+        results.append(TestResult(
+            name=f"MULTI-MODEL: backend-log tail after failed ask r{round_idx} (diagnostic)",
+            round_num=round_num, model_name=",".join(models), passed=True, status_code=0,
+            latency_ms=0, detail=_backend_log_tail(builder)))
+    ok_res, res_detail = _check_models_resident(builder, models, genie_port, wait_seconds=20)
+    results.append(TestResult(
+        name=f"MULTI-MODEL: all resident after concurrent ask r{round_idx}", round_num=round_num,
+        model_name=",".join(models), passed=ok_res, status_code=0, latency_ms=0, detail=res_detail))
+    return all_ok and ok_res
+
+
+def run_multi_model_concurrent_task(builder, models, results, genie_port, round_num=1,
+                                     on_demand=False, concurrent_rounds=2, prompt=None,
+                                     per_turn_timeout=1800, transcript_path=None):
+    """多模型加载 + 同时提问。
+
+    models[0] 由 main() 已通过 /api/service/start 拉起；其余模型：
+      * on_demand=False（默认）：先逐个走 Builder 的 load-model 显式加载，并核对 Builder 状态与
+        守护进程 /status 双方都认为已驻留，再同时提问；
+      * on_demand=True：跳过显式加载，第一轮同时提问时额外模型才被聊天请求冷加载——对应
+        “第二个页面首条消息发出时服务还在加载”的真实场景，回归首条消息偶发失败。
+    之后的轮次全部是模型已驻留下的并发提问。"""
+    if len(models) < 2:
+        results.append(TestResult(
+            name="MULTI-MODEL: precondition", round_num=round_num, model_name=",".join(models),
+            passed=False, status_code=0, latency_ms=0,
+            detail="multi_model_concurrent 至少需要 2 个模型（--model_name + --extra_models）"))
+        return False
+    ok_all = True
+    if not on_demand:
+        for extra in models[1:]:
+            ok_all = _load_extra_model(builder, extra, genie_port, results, round_num) and ok_all
+        ok_res, res_detail = _check_models_resident(builder, models, genie_port)
+        results.append(TestResult(
+            name="MULTI-MODEL: all models resident before ask", round_num=round_num,
+            model_name=",".join(models), passed=ok_res, status_code=0, latency_ms=0, detail=res_detail))
+        ok_all = ok_all and ok_res
+    for idx in range(1, concurrent_rounds + 1):
+        ok_all = _concurrent_ask(builder, models, idx, prompt or _MULTI_MODEL_DEFAULT_PROMPT,
+                                  per_turn_timeout, transcript_path, results, genie_port, round_num) and ok_all
+    return ok_all
+
+
 def builder_genie_port_of(builder):
     """从 QAIModelBuilderManager 实例反推它当前代理的 GenieAPIService 端口。
     Builder 侧固定通过 /api/service/status 的 port 字段暴露真实端口，这里做一次同步查询
@@ -1849,7 +2040,8 @@ def build_arg_parser():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("--task", default="model_conversion",
                         choices=["model_conversion", "model_build_probe", "tetris", "xp_notepad",
-                                 "inception_precision_compare", "inception_fp16_only"],
+                                 "inception_precision_compare", "inception_fp16_only",
+                                 "multi_model_concurrent"],
                         help="要运行的任务场景：model_conversion 是完整的模型转换多轮任务；"
                              "model_build_probe 是极简 prompt 探测 model-build 模式基础可用性"
                              "（几十秒量级，用于判断 empty_response 是环境/代理层问题还是"
@@ -1867,6 +2059,14 @@ def build_arg_parser():
     parser.add_argument("--models", required=True, help="本地模型根目录（--models/<name>/config.json）")
     parser.add_argument("--model_name", default="qwen3-8b-8480",
                         help="要加载并驱动完成任务的本地模型目录名")
+    parser.add_argument("--extra_models", default="",
+                        help="multi_model_concurrent 专用：逗号分隔的额外模型目录名；"
+                             "--model_name 先由 /api/service/start 拉起，这些模型随后加载并与它同时提问")
+    parser.add_argument("--multi_on_demand", action="store_true",
+                        help="multi_model_concurrent 专用：不显式加载额外模型，让第一轮同时提问触发冷加载"
+                             "（复现“第二个页面首条消息发出时服务还在加载”）")
+    parser.add_argument("--concurrent_rounds", type=int, default=2,
+                        help="multi_model_concurrent 专用：同时提问的轮数")
     parser.add_argument("--builder_dir", required=True, help="QAIModelBuilder 仓库根目录")
     parser.add_argument("--builder_python", default=None, help="QAIModelBuilder 专属 venv 的 python.exe 路径")
     parser.add_argument("--builder_data_dir", default=None,
@@ -1953,15 +2153,18 @@ def main():
 
     try:
         available_models = discover_models(args.models)
-        if args.model_name not in available_models:
+        extra_models = [m.strip() for m in args.extra_models.split(",") if m.strip()]
+        all_task_models = [args.model_name] + [m for m in extra_models if m != args.model_name]
+        missing_models = [m for m in all_task_models if m not in available_models]
+        if missing_models:
             all_results.append(TestResult(
                 name="AGENT-TASK: model availability check", round_num=1, model_name=args.model_name,
                 passed=False, status_code=0, latency_ms=0,
-                detail=f"--model_name={args.model_name} 不在 --models 目录下已发现的模型中: {available_models}"))
+                detail=f"{missing_models} 不在 --models 目录下已发现的模型中: {available_models}"))
         else:
             if not configure_genie_root(builder, args.exe_dir, all_results, junction_paths=junction_paths):
                 raise RuntimeError("configure_genie_root 失败，终止本次运行")
-            if not inject_local_models(builder, args.models, [args.model_name], all_results, snapshot,
+            if not inject_local_models(builder, args.models, all_task_models, all_results, snapshot,
                                         junction_paths=junction_paths):
                 raise RuntimeError("inject_local_models 失败，终止本次运行")
             if not start_and_wait_ready(builder, args.model_name, args.genie_port, all_results):
@@ -1980,7 +2183,14 @@ def main():
                     ("busy_poll_interval_seconds", args.busy_poll_interval_seconds),
                 ) if v is not None
             }
-            if args.task == "model_conversion":
+            if args.task == "multi_model_concurrent":
+                multi_kwargs = ({"per_turn_timeout": args.per_turn_timeout}
+                                if args.per_turn_timeout is not None else {})
+                run_multi_model_concurrent_task(
+                    builder, all_task_models, all_results, args.genie_port,
+                    on_demand=args.multi_on_demand, concurrent_rounds=args.concurrent_rounds,
+                    prompt=args.prompt, transcript_path=transcript_path, **multi_kwargs)
+            elif args.task == "model_conversion":
                 run_model_conversion_task(
                     builder, args.model_name, all_results,
                     small_model_path=args.small_model_path,

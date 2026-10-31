@@ -219,7 +219,7 @@ std::string LongTextSummarizer::Summarize(const std::string& content,
 
     RecursiveCharacterTextSplitter splitter(
         separators,
-        /*keep_separator=*/true,
+                           true,
         static_cast<int>(chunk_token_limit_),
         [](const std::string& s) { return s.size(); }
     );

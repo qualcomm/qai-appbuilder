@@ -8,6 +8,7 @@
 
 #include "GenieAPIService.h"
 #include <csignal>
+#include <cerrno>
 #include <thread>
 #include <chrono>
 #include <iostream>
@@ -18,10 +19,6 @@
 #include "chat_request_handler/chat_request_handler.h"
 #include "model/model_manager.h"
 #include "response/response_dispatcher.h"
-#include "response/response_tools_layer1_selftest.h"
-#include "response/response_tools_sanitization_selftest.h"
-#include "chat_request_handler/tool_call_circuit_breaker_store_selftest.h"
-#include "chat_request_handler/tool_call_repetition_store_selftest.h"
 #if defined(_WIN32) || defined(__WIN32__) || defined(WIN32)
 #include <windows.h>
 #endif
@@ -32,6 +29,11 @@ static GenieService service;
 
 static constexpr int kShutdownWatchdogTimeoutSeconds = 15;
 static constexpr int kShutdownWatchdogExitCode = 124;
+
+namespace
+{
+    volatile std::sig_atomic_t g_pending_signal = 0;
+}
 
 class GenieService::Route : public std::enable_shared_from_this<Route>
 {
@@ -75,7 +77,18 @@ private:
                 ErrorHandle error_handle;
                 try
                 {
-                    ((*self_->requestHandler).*func_)(req, res);
+                    std::shared_ptr<ChatRequestHandler> handler;
+                    {
+                        std::lock_guard<std::mutex> lock(self_->request_handler_mtx_);
+                        handler = self_->requestHandler;
+                    }
+                    if (!handler)
+                    {
+                        res.set_content(R"({"error": "services error"})", ResponseDispatcher::MIMETYPE_JSON);
+                        res.status = 503;
+                        return;
+                    }
+                    ((*handler).*func_)(req, res);
                     return;
                 }
                 catch (const ReportError &e)
@@ -126,23 +139,28 @@ void GenieService::Route::CreatePostRoute(const std::vector<std::string> &path,
     std::make_shared<PostRoute>(func)->Registry(path);
 }
 
-void GenieService::run(int argc, char *argv[])
+int GenieService::run(int argc, char *argv[])
 {
     self_ = this;
+    stop_epoch_.fetch_add(1);
+    stop_in_progress_.store(false);
+    shutdown_requested_.store(false);
+    shutdown_completed_.store(false);
+    exit_code_.store(0);
     Config config{argc, argv};
 
     try
     {
         if (!config.Process())
         {
-            return;
+            return 0;
         }
         modelManager = std::make_unique < ModelManager > (config.get_mode_manager_config());
     }
     catch (const std::exception &e)
     {
         My_Log{My_Log::Level::kError} << e.what() << std::endl;
-        return;
+        return 0;
     }
 
     if (!modelManager->InitializeConfig())
@@ -150,7 +168,11 @@ void GenieService::run(int argc, char *argv[])
         My_Log{My_Log::Level::kError} << "resolve model config failed." << std::endl;
     }
 
-    requestHandler = std::make_unique < ChatRequestHandler > (this);
+    {
+        auto new_handler = std::make_shared<ChatRequestHandler>(this);
+        std::lock_guard<std::mutex> lock(request_handler_mtx_);
+        requestHandler = std::move(new_handler);
+    }
     int port_checked = config.get_port();
     if (!init_)
     {
@@ -173,13 +195,45 @@ void GenieService::run(int argc, char *argv[])
                                    << HOST << ":" << port_checked
                                    << RESET
                                    << std::endl;
-    svr.listen(HOST, port_checked);
+    bool stopped_by_main = false;
+    bool listen_ok = true;
+    listening_.store(true);
+    if (g_pending_signal != 0)
+    {
+        g_pending_signal = 0;
+        stopped_by_main = true;
+        shutdown_requested_.store(true);
+    }
+    if (!shutdown_requested_.load())
+    {
+        listen_ok = svr.listen(HOST, port_checked);
+    }
+    listening_.store(false);
+
+    if (!listen_ok && !shutdown_requested_.load() && !stop_in_progress_.load())
+    {
+        My_Log{My_Log::Level::kError} << "failed to listen on " << HOST << ":" << port_checked
+                                      << ", errno: " << errno << std::endl;
+        exit_code_.store(1);
+        ServiceStop();
+        return 1;
+    }
 
     if (shutdown_requested_.load())
     {
         My_Log{} << "\n[Shutdown] Interrupt signal received. Initiating graceful shutdown...\n";
         ServiceStop();
         My_Log{} << "[Shutdown] Graceful shutdown completed.\n";
+#if !(defined(_WIN32) || defined(__WIN32__) || defined(WIN32))
+        if (!stopped_by_main)
+        {
+            const auto exit_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            while (std::chrono::steady_clock::now() < exit_deadline)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+        }
+#endif
     }
     else if (!shutdown_completed_.load())
     {
@@ -190,6 +244,7 @@ void GenieService::run(int argc, char *argv[])
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
     }
+    return 0;
 }
 
 inline void GenieService::ServiceStop()
@@ -203,12 +258,12 @@ inline void GenieService::ServiceStop()
         return;
     }
 
-    My_Log{} << "start to stop service\n";
     shutdown_completed_.store(false);
 
-    std::thread watchdog([]() {
+    const unsigned epoch = stop_epoch_.load();
+    std::thread watchdog([epoch]() {
         std::this_thread::sleep_for(std::chrono::seconds(kShutdownWatchdogTimeoutSeconds));
-        if (self_ && !self_->shutdown_completed_.load())
+        if (self_ && self_->stop_epoch_.load() == epoch && !self_->shutdown_completed_.load())
         {
             My_Log{My_Log::Level::kError}
                     << "[Shutdown Watchdog] ServiceStop() did not complete within "
@@ -224,6 +279,8 @@ inline void GenieService::ServiceStop()
     });
     watchdog.detach();
 
+    My_Log{} << "start to stop service\n";
+
     svr.stop();
 
     if (modelManager)
@@ -231,9 +288,15 @@ inline void GenieService::ServiceStop()
         My_Log{} << "Unloading model...\n";
         modelManager->UnloadModel();
     }
-    
-    My_Log{} << "Service stopped successfully.\n";
+
+    My_Log{} << "Service stopped successfully." << std::endl;
     shutdown_completed_.store(true);
+#if (defined(_WIN32) || defined(__WIN32__) || defined(WIN32)) && !defined(GENIEAPI_EXPORTS)
+    std::cout.flush();
+    std::cerr.flush();
+    fflush(nullptr);
+    TerminateProcess(GetCurrentProcess(), static_cast<UINT>(exit_code_.load()));
+#endif
 }
 
 void GenieService::TriggerGracefulShutdown(int exit_code)
@@ -242,7 +305,14 @@ void GenieService::TriggerGracefulShutdown(int exit_code)
     self_->shutdown_requested_.store(true);
     self_->ServiceStop();
     My_Log{} << "Interrupt signal (" << exit_code << ") received. Exiting..." << std::endl;
+#if defined(_WIN32) || defined(__WIN32__) || defined(WIN32)
     exit(exit_code);
+#else
+    std::cout.flush();
+    std::cerr.flush();
+    fflush(nullptr);
+    _exit(exit_code);
+#endif
 }
 
 #if defined(_WIN32) || defined(__WIN32__) || defined(WIN32)
@@ -267,9 +337,24 @@ namespace
 
 inline void GenieService::setupSignalHandlers()
 {
-    signal(SIGINT, [](int signum) { TriggerGracefulShutdown(signum); });
 #if defined(_WIN32) || defined(__WIN32__) || defined(WIN32)
+    signal(SIGINT, [](int signum) { TriggerGracefulShutdown(signum); });
     SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
+#else
+    signal(SIGINT, [](int signum) { g_pending_signal = signum; });
+    std::thread([]() {
+        for (;;)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            const int signum = g_pending_signal;
+            if (signum != 0 && self_ && self_->listening_.load())
+            {
+                g_pending_signal = 0;
+                TriggerGracefulShutdown(signum);
+                return;
+            }
+        }
+    }).detach();
 #endif
 }
 
@@ -332,38 +417,7 @@ int main(int argc, char **argv)
 #if defined(_WIN32) || defined(__WIN32__) || defined(WIN32)
     SetConsoleOutputCP(CP_UTF8);
 #endif
-    if (argc > 1 && std::string(argv[1]) == "--self-test-layer1-recovery")
-    {
-        bool all_passed = RunLayer1RecoverySelfTest(std::cout);
-        return all_passed ? 0 : 1;
-    }
-    if (argc > 1 && std::string(argv[1]) == "--self-test-bare-json-detect")
-    {
-        bool all_passed = RunBareToolCallDetectionSelfTest(std::cout);
-        return all_passed ? 0 : 1;
-    }
-    if (argc > 1 && std::string(argv[1]) == "--self-test-bare-json-holdback")
-    {
-        bool all_passed = RunBareJsonHoldBackStreamingSelfTest(std::cout);
-        return all_passed ? 0 : 1;
-    }
-    if (argc > 1 && std::string(argv[1]) == "--self-test-sanitization")
-    {
-        bool all_passed = RunToolCallSanitizationSelfTest(std::cout);
-        return all_passed ? 0 : 1;
-    }
-    if (argc > 1 && std::string(argv[1]) == "--self-test-circuit-breaker")
-    {
-        bool all_passed = RunToolCallCircuitBreakerSelfTest(std::cout);
-        return all_passed ? 0 : 1;
-    }
-    if (argc > 1 && std::string(argv[1]) == "--self-test-tool-repetition")
-    {
-        bool all_passed = RunToolCallRepetitionSelfTest(std::cout);
-        return all_passed ? 0 : 1;
-    }
-    service.run(argc, argv);
-    return 0;
+    return service.run(argc, argv);
 }
 
 #ifdef __ANDROID__

@@ -21,7 +21,6 @@ void TaskMemoStore::Configure(const PromptOptimizationConfig::TaskMemoStoreConfi
     max_memory_bytes_ = cfg.max_memory_mb > 0
                         ? static_cast<size_t>(cfg.max_memory_mb) * 1024 * 1024
                         : 20ULL * 1024 * 1024;
-    ttl_minutes_      = cfg.ttl_minutes > 0 ? cfg.ttl_minutes : 120;
 
     cache_.clear();
     lru_list_.clear();
@@ -31,7 +30,6 @@ void TaskMemoStore::Configure(const PromptOptimizationConfig::TaskMemoStoreConfi
 std::optional<json> TaskMemoStore::Lookup(const std::string& fingerprint, const std::string& first_msg_key)
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    EvictExpired();
 
     for (const auto& key : {fingerprint, first_msg_key})
     {
@@ -77,9 +75,8 @@ void TaskMemoStore::InsertOneKey(const std::string& key, const json& memo, size_
     EvictIfNeeded();
 
     Entry entry;
-    entry.memo          = memo;
-    entry.created       = std::chrono::steady_clock::now();
-    entry.memory_bytes  = memory_bytes;
+    entry.memo         = memo;
+    entry.memory_bytes = memory_bytes;
 
     lru_list_.push_front(key);
     cache_[key] = {std::move(entry), lru_list_.begin()};
@@ -98,30 +95,6 @@ size_t TaskMemoStore::Size() const
 {
     std::lock_guard<std::mutex> lock(mutex_);
     return cache_.size();
-}
-
-void TaskMemoStore::EvictExpired()
-{
-    auto now = std::chrono::steady_clock::now();
-    auto ttl = std::chrono::minutes(ttl_minutes_);
-
-    auto it = lru_list_.end();
-    while (it != lru_list_.begin())
-    {
-        --it;
-        auto cache_it = cache_.find(*it);
-        if (cache_it == cache_.end())
-        {
-            it = lru_list_.erase(it);
-            continue;
-        }
-        if (now - cache_it->second.first.created >= ttl)
-        {
-            total_memory_bytes_ -= cache_it->second.first.memory_bytes;
-            cache_.erase(cache_it);
-            it = lru_list_.erase(it);
-        }
-    }
 }
 
 void TaskMemoStore::EvictIfNeeded()

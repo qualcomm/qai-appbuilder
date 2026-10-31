@@ -25,23 +25,21 @@ public:
 private:
     struct Utils;
 
-    // State machine for detecting <tool_call> tag
     enum class MatchState {
-        NORMAL,           // Normal text output
-        MATCHING_START,   // Matching "<tool_call>"
-        IN_TOOL_CALL,     // Inside <tool_call>...</tool_call>
-        MATCHING_END,     // Matching "</tool_call>"
-        TOOL_CALL_DONE    // Tool call completed, ignore subsequent content
+        NORMAL,
+        MATCHING_START,
+        IN_TOOL_CALL,
+        MATCHING_END,
+        TOOL_CALL_DONE
     };
 
     MatchState match_state_;
-    std::string match_buffer_;  // Buffer for partial tag matching
-    size_t match_pos_;          // Current position in tag matching
+    std::string match_buffer_;
+    size_t match_pos_;
 
-    // Helper methods
     void resetMatchState();
     std::tuple<bool, std::string> processNormalState(const std::string &chunkText, std::string &toolResponse);
     std::tuple<bool, std::string> processMatchingState(const std::string &chunkText, std::string &toolResponse);
 };
 
-#endif //GENERAL_H
+#endif

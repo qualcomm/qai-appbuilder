@@ -66,4 +66,4 @@ private:
     size_t chunk_token_limit_;
 };
 
-#endif // LONG_TEXT_SUMMARIZER_H
+#endif

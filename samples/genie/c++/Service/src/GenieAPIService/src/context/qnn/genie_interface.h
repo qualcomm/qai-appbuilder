@@ -158,16 +158,12 @@ struct GenieContext::QInterfaceImpl
                                                  const std::string &repeated,
                                                  int times);
 
-
         IEmbedding &Decode(std::string &encode_buf, std::vector<uint8_t> &decoded_buf);
 
         IEmbedding &BuildInferredBuffer(const QNNEmbedding::InferResource *infer_resource,
                                         std::vector<std::vector<uint8_t *>> &input_buffers,
                                         std::vector<std::vector<uint8_t>> &inferred_buf);
 
-        // Qwen3VL 专用重载：除主输出（保存进 inferred_buf，行为与上面重载一致）外，
-        // 把其余输出缓冲区也拷贝进 extra_outputs 并统一 free 掉，避免只取
-        // outputBuffers[0] 导致额外输出（如 deepstack 特征）被丢弃且内存泄漏。
         IEmbedding &BuildInferredBuffer(const QNNEmbedding::InferResource *infer_resource,
                                         std::vector<std::vector<uint8_t *>> &input_buffers,
                                         std::vector<std::vector<uint8_t>> &inferred_buf,
@@ -326,4 +322,4 @@ using IVisionEmbedding = QInterfaceImpl::IVisionEmbedding;
 using IAudioEmbedding = QInterfaceImpl::IAudioEmbedding;
 using IMultiModal = QInterfaceImpl::IMultiModal;
 
-#endif //GENIE_IMPL_H
+#endif

@@ -5,22 +5,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 //
 //==============================================================================
-//
-// security_utils.h
-//
-// 安全检查与复杂度评估共用工具函数：
-//   - FNV-1a 哈希
-//   - OpenClaw 元数据块过滤（strip_untrusted_metadata_blocks）
-//   - OpenClaw 时间戳前缀过滤（strip_openclaw_timestamp_prefix）
-//   - 本地模型推理框架（LocalModelQuery：std::thread + std::promise 超时控制）
-//   - 前缀匹配早停（CheckPrefixEarlyStop）
-//
-// 使用方：
-//   - content_security_inspector.cpp
-//   - task_complexity_evaluator.cpp
-//   - gateway_steps.cpp / gateway_cloud.cpp / gateway_routing.cpp（ExtractMessageContentText）
-//
-//==============================================================================
 
 #pragma once
 
@@ -38,13 +22,6 @@
 
 namespace SecurityUtils {
 
-// ============================================================
-// 提取消息 content 字段的纯文本，兼容两种格式：
-//   - content 为字符串：直接返回
-//   - content 为 OpenAI 多段内容数组（[{"type":"text","text":...}, ...]）：
-//     拼接所有 type=="text" 分段的文本
-// 其它类型（如缺失 content、非法结构）返回空字符串。
-// ============================================================
 inline std::string ExtractMessageContentText(const json& msg)
 {
     if (!msg.contains("content")) return "";
@@ -62,10 +39,6 @@ inline std::string ExtractMessageContentText(const json& msg)
     return text;
 }
 
-// ============================================================
-// FNV-1a 哈希（64位）
-// 用于缓存 key 计算，避免引入额外依赖
-// ============================================================
 inline uint64_t FNV1aHash(const std::string &s)
 {
     uint64_t hash = 14695981039346656037ULL;
@@ -77,28 +50,10 @@ inline uint64_t FNV1aHash(const std::string &s)
     return hash;
 }
 
-// ============================================================
-// 过滤 OpenClaw 注入的 "Sender (untrusted metadata):" JSON 块
-//
-// 这类元数据块（如 {"label":"openclaw-control-ui","id":"openclaw-control-ui"}）
-// 不含任何真正的敏感信息，但会导致小参数量模型（如 7B QNN）产生误判。
-// 过滤后仅保留用户实际输入的文本内容。
-//
-// 格式示例：
-//   Sender (untrusted metadata):
-//   ```json
-//   {
-//     "label": "openclaw-control-ui",
-//     "id": "openclaw-control-ui"
-//   }
-//   ```
-//
-// 返回：过滤并 trim 后的文本
-// ============================================================
 inline std::string StripUntrustedMetadataBlocks(const std::string& text)
 {
     static const std::string kHeader = "Sender (untrusted metadata):";
-    if (text.find(kHeader) == std::string::npos) return text;  // 快速路径：无元数据块
+    if (text.find(kHeader) == std::string::npos) return text;
 
     std::string result;
     result.reserve(text.size());
@@ -133,22 +88,12 @@ inline std::string StripUntrustedMetadataBlocks(const std::string& text)
         }
     }
 
-    // trim 首尾空白
     size_t trim_start = result.find_first_not_of(" \t\r\n");
     if (trim_start == std::string::npos) return "";
     size_t trim_end = result.find_last_not_of(" \t\r\n");
     return result.substr(trim_start, trim_end - trim_start + 1);
 }
 
-// ============================================================
-// 过滤 OpenClaw 注入的时间戳前缀
-//
-// 格式：[Mon|Tue|Wed|Thu|Fri|Sat|Sun YYYY-MM-DD HH:MM GMT±N]
-// 示例：[Wed 2026-03-25 20:13 GMT+8] hello → hello
-//
-// QNN 小模型（7B）看到方括号 "[" 开头时，会将其当作代码/数组语法续写，
-// 导致 JSON 解析失败并触发保守升级。
-// ============================================================
 inline std::string StripOpenClawTimestampPrefix(const std::string& text)
 {
     if (text.empty() || text[0] != '[') return text;
@@ -156,7 +101,6 @@ inline std::string StripOpenClawTimestampPrefix(const std::string& text)
     size_t close_bracket = text.find(']');
     if (close_bracket == std::string::npos) return text;
 
-    // 验证方括号内是否是时间戳格式（长度合理，含4位年份）
     if (close_bracket >= 10 && close_bracket <= 40) {
         std::string bracket_content = text.substr(1, close_bracket - 1);
         bool has_year = false;
@@ -179,9 +123,6 @@ inline std::string StripOpenClawTimestampPrefix(const std::string& text)
     return text;
 }
 
-// ============================================================
-// 对字符串进行首尾 trim（去除空白字符）
-// ============================================================
 inline std::string TrimWhitespace(const std::string& text)
 {
     size_t ts = text.find_first_not_of(" \t\r\n");
@@ -190,12 +131,6 @@ inline std::string TrimWhitespace(const std::string& text)
     return text.substr(ts, te - ts + 1);
 }
 
-// ============================================================
-// 对消息文本进行完整清洗：
-//   步骤1：过滤 "Sender (untrusted metadata):" JSON 块（含 trim）
-//   步骤2：过滤 OpenClaw 时间戳前缀
-//   步骤3：再次 trim
-// ============================================================
 inline std::string CleanMessageText(const std::string& raw_text)
 {
     std::string text = StripUntrustedMetadataBlocks(raw_text);
@@ -203,22 +138,6 @@ inline std::string CleanMessageText(const std::string& raw_text)
     return TrimWhitespace(text);
 }
 
-// ============================================================
-// 前缀匹配早停检查
-//
-// 当 output_buf 中检测到 json_key_prefix（如 `{"sensitivity":"` 或 `{"complexity":"`）
-// 后紧跟 valid_values 中的某个值，且该值后面跟着非字母字符时，
-// 说明模型已输出了有效的字段值，可以提前停止生成。
-//
-// 参数：
-//   output_buf    - 当前已生成的输出缓冲区
-//   json_key_prefix - JSON 键前缀，如 `{"sensitivity":"` 或 `{"complexity":"`
-//   valid_values  - 有效值列表，如 {"S0","S1","S2"} 或 {"C0","C1","C2"}
-//   completed_json - [out] 若匹配成功，填充补全后的 JSON 字符串
-//   matched_value  - [out] 若匹配成功，填充匹配到的值
-//
-// 返回：true 表示匹配成功，应立即停止生成
-// ============================================================
 inline bool CheckPrefixEarlyStop(
         const std::string& output_buf,
         const std::string& json_key_prefix,
@@ -237,20 +156,17 @@ inline bool CheckPrefixEarlyStop(
         if (val_start + val.size() > output_buf.size()) continue;
         if (output_buf.substr(val_start, val.size()) != val) continue;
 
-        // 确认值后面有非字母字符（说明值已完整）
         size_t after_val = val_start + val.size();
-        if (after_val >= output_buf.size()) continue;  // 还没有后续字符，继续等待
+        if (after_val >= output_buf.size()) continue;
 
         char next_char = output_buf[after_val];
         if (!std::isalpha(static_cast<unsigned char>(next_char))) {
-            // 补全 JSON：{"key":"val"}
-            // 从 json_key_prefix 中提取 key 名（去掉 `{"` 前缀和 `":"` 后缀）
-            // json_key_prefix 格式：{"key":"
+
             std::string key_part = json_key_prefix;
-            // 去掉开头的 `{"`
+
             if (key_part.size() >= 2 && key_part[0] == '{' && key_part[1] == '"')
                 key_part = key_part.substr(2);
-            // 去掉结尾的 `":"`
+
             if (key_part.size() >= 3 && key_part.substr(key_part.size() - 3) == "\":\"")
                 key_part = key_part.substr(0, key_part.size() - 3);
 
@@ -262,23 +178,6 @@ inline bool CheckPrefixEarlyStop(
     return false;
 }
 
-// ============================================================
-// 本地模型推理框架（带超时控制）
-//
-// 封装 std::thread + std::promise 模式，实现真正的非阻塞超时控制。
-// 调用方提供：
-//   - handle：模型句柄
-//   - prompt：输入 prompt
-//   - json_prefill：output_buf 初始前缀（如 `{"sensitivity":"` 或 `{"complexity":"`）
-//   - timeout_ms：超时时间（毫秒）
-//   - max_gen_tokens：最大生成 token 数（硬上限）
-//   - on_token：每个 token 的回调，返回 false 时停止生成
-//     签名：bool on_token(std::string& output_buf, const std::string& token, bool& json_complete)
-//   - logger_prefix：日志前缀（如 "[ContentSecurityInspector]" 或 "[TaskComplexityEvaluator]"）
-//
-// 返回：{success, model_output}
-//   success=true 且 model_output 非空时表示推理成功
-// ============================================================
 struct LocalModelQueryResult {
     bool success = false;
     std::string output;
@@ -316,11 +215,9 @@ inline LocalModelQueryResult LocalModelQuery(
             output_buf += token;
             token_count++;
 
-            // 调用方提供的 token 回调（负责早停检测）
             bool should_continue = on_token(output_buf, token, json_complete);
             if (!should_continue) return false;
 
-            // 硬上限：超过 max_gen_tokens 时强制停止
             if (max_gen_tokens > 0 && token_count >= max_gen_tokens) {
                 My_Log{My_Log::Level::kWarning}
                     << logger_prefix << " [STREAM] Hard limit reached ("
@@ -370,4 +267,4 @@ inline LocalModelQueryResult LocalModelQuery(
     return {true, *model_output_ptr};
 }
 
-} // namespace SecurityUtils
+}
